@@ -412,6 +412,11 @@ namespace studio {
 
 		// How many editors are in, including this one.
 		//
+		// **A peer whose handshake has not finished is not in.** Under QUIC a
+		// connection exists before it can carry anything, so a host that counted
+		// it would show a person an editor who would miss whatever they typed
+		// next - `replication::Listener::Carrying` is the number this reads.
+		//
 		// @return The count.
 		size_t Editors() const;
 

@@ -256,9 +256,17 @@ namespace engine::render {
 		// @since v0.10
 		FlipbookCell CellOf(const core::Name &name, double seconds) const;
 
+		// A process-local signature of every registered animated sheet's current
+		// frame. Static textures contribute nothing.
+		uint64_t AnimationSignature(double seconds) const;
+
 		// The shared sampler.
 		SDL_GPUSampler *Sampler() const {
 			return SharedSampler;
+		}
+
+		SDL_GPUSampler *PixelSampler() const {
+			return NearestSampler;
 		}
 
 		// How many textures are registered.
@@ -337,6 +345,7 @@ namespace engine::render {
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUSampler *SharedSampler = nullptr;
+		SDL_GPUSampler *NearestSampler = nullptr;
 
 		// The default, outside `Textures` on purpose - see `Default()`. Its
 		// bytes are not counted against `MAXIMUM_BYTES`: it is sixteen kilobytes

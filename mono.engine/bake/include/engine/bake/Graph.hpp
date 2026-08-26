@@ -61,6 +61,17 @@ namespace engine::bake {
 		assets::MeshData Mesh;
 		assets::TextureData Texture;
 		//@}
+
+		// The material library a model named, for the formats that keep their
+		// materials in a second file. Empty for every other payload.
+		//
+		// **Carried rather than resolved, exactly like `ImportedModel::Textures`
+		// and for the same reason:** opening the file is a filesystem operation
+		// and this module has none. It rides the payload so the publisher at the
+		// end of the chain - which does know where the model came from - can
+		// read it. A node that does not understand it passes it through, which
+		// is what the note above says every field here does.
+		std::string MaterialLibrary;
 	};
 
 	// One export node's result.

@@ -11,7 +11,7 @@ namespace studio {
 		// The most names one path may have. A tree this deep is a tree nobody
 		// authored, and the cap is what stops a cycle in the parent chain
 		// becoming a walk that does not end.
-		constexpr size_t MAXIMUM_DEPTH = 64;
+		constexpr size_t MAXIMUM_PATH_DEPTH = 64;
 	}
 
 	InstancePath PathOf(const Store &store, Entity instance) {
@@ -22,7 +22,7 @@ namespace studio {
 		InstancePath path;
 		for (Entity walk = instance; walk != NULL_ENTITY && store.Alive(walk); walk = store.ParentOf(walk)) {
 			path.emplace_back(store.InstanceNameOf(walk).Text());
-			if (path.size() > MAXIMUM_DEPTH) {
+			if (path.size() > MAXIMUM_PATH_DEPTH) {
 				// A cycle, or a tree past anything anybody authored. Refused
 				// rather than truncated: half a path resolves somewhere, and
 				// somewhere is worse than nowhere.

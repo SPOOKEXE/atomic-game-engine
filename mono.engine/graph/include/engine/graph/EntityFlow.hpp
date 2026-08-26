@@ -30,6 +30,7 @@
 // @tier L9 · shared
 
 #include <engine/core/Name.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -58,6 +59,13 @@ namespace engine::graph {
 		// puts one into the other's list, and a pass that submits in a different
 		// order than it was handed would be doing the sorting twice.
 		std::vector<uint32_t> Indices;
+
+		// True only when `Indices` is exactly `0..draw-list size`.
+		//
+		// This provenance lets a frustum node fuse its bounds pass without
+		// pretending that a filtered or reordered subset still describes the
+		// whole world needed by the shadow fit.
+		bool WholeDrawList = false;
 	};
 
 	// Where the lists live while a view's nodes run.
@@ -81,9 +89,10 @@ namespace engine::graph {
 		// Hands over a list to be filled in place, avoiding a copy.
 		//
 		// @param name Which resource.
+		// @param wholeDrawList Whether the caller will fill exact source order.
 		// @return The list's storage, cleared. Valid until the next `Set` or
 		//         `Clear`.
-		std::vector<uint32_t> &Open(core::Name name);
+		std::vector<uint32_t> &Open(core::Name name, bool wholeDrawList = false);
 
 		// What is in a named list.
 		//
@@ -100,6 +109,18 @@ namespace engine::graph {
 		// a pass: "nothing filled this" and "the filter rejected everything" are
 		// different faults with the same picture.
 		bool Has(core::Name name) const;
+
+		// Whether a named list is the complete draw list in source order.
+		//
+		// @param name Which resource.
+		// @return Whether it retains exact source order and membership.
+		bool IsWholeDrawList(core::Name name) const;
+
+		// Updates provenance after a node fills storage returned by `Open`.
+		//
+		// @param name          Which resource.
+		// @param wholeDrawList Whether it retains exact source order and membership.
+		void MarkWholeDrawList(core::Name name, bool wholeDrawList);
 
 		// How many lists this view has written.
 		size_t Count() const {
@@ -278,6 +299,13 @@ namespace engine::graph {
 		// True only for `order-draw`, whose opaque prefix is meaningful to a
 		// geometry backend.
 		bool Ordered = false;
+
+		// Whether this node derived `Bounds` from every draw-list row while doing
+		// work it already owed.
+		bool BoundedAll = false;
+
+		// The complete scene bound when `BoundedAll` is true.
+		core::AABB Bounds;
 
 		// The entity resource written, invalid for a camera operation.
 		core::Name Output;

@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/net/Endpoint.hpp>
 
 #include <network/Beacon.hpp>
@@ -47,6 +48,15 @@ namespace network {
 		Scheduled = true;
 
 		if (!Announcing()) {
+			// **The host is invisible and nothing on it says so.** Either the
+			// advert is incomplete or a private session has no key, and the
+			// symptom in both cases is a server nobody's browser can find.
+			ENGINE_WARN_EVERY(
+				10.0,
+				"not announcing: the advert is {} and the private key is {}",
+				Saying.IsValid() ? "valid" : "incomplete",
+				Key.has_value() ? "set" : "absent"
+			);
 			Tally.Refused++;
 			return false;
 		}
@@ -59,6 +69,7 @@ namespace network {
 			// of a second away and carries newer numbers than this one, so a
 			// retry would put a stale advert on a wire that is already
 			// congested - which is why `net` keeps no outbox either.
+			ENGINE_WARN_EVERY(10.0, "the broadcast of a {} byte advert was not delivered", datagram.size());
 			Tally.Undelivered++;
 			return false;
 		}

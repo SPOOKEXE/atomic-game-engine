@@ -69,6 +69,11 @@ local SPAWN_EVERY = 0.45
 -- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
 local GROUND_LIFT = 0.01
 
+local function SetFriction(part: Part, friction: number)
+	part.CustomPhysicalProperties = true
+	part.Friction = friction
+end
+
 local floor = Instance.new("Part")
 floor.Name = "Baseplate"
 floor.Anchored = true
@@ -119,6 +124,7 @@ for index = 0, SEGMENTS - 1 do
 	-- A gradient down the slide, so which way it runs is readable in a still.
 	local shade = 0.35 + t * 0.45
 	part.Color = Color3.new(shade, shade * 0.35, shade * 0.32)
+	SetFriction(part, 0.05)
 	part.Parent = workspace
 end
 
@@ -141,6 +147,7 @@ for _, side in { -1, 1 } do
 		rail.CFrame = CFrame.new(along + Vector3.new(0, 1.4, side * (RAMP_WIDTH / 2)))
 			* CFrame.Angles(0, 0, slope)
 		rail.Color = Color3.fromRGB(150, 60, 55)
+		SetFriction(rail, 0.05)
 		rail.Parent = workspace
 	end
 end
@@ -193,6 +200,7 @@ local function spawnBlock()
 		90 + hashed(spawned, 23) * 45,
 		55 + hashed(spawned, 29) * 35
 	)
+	SetFriction(part, 0.2)
 	part.Parent = workspace
 
 	table.insert(riders, { Part = part, Age = 0 })

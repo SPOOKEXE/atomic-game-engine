@@ -22,6 +22,7 @@
 #include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
+#include <studio/Presentation.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
@@ -56,9 +57,11 @@ namespace studio {
 		// **v9 because Render Pipeline is a panel the saved layout has never
 		// heard of**, and a panel a layout does not know about opens floating in
 		// a corner - which is exactly the failure it exists to fix.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v10";
+		// **v12 because v11 was briefly built with the old side-by-side split.**
+		// Reusing that id leaves half the scene empty for anybody who launched it.
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v14";
 
-		constexpr const char *VIEWPORT = "Viewport";
+		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
@@ -77,6 +80,7 @@ namespace studio {
 		constexpr const char *STATISTICS = "Statistics";
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
 		constexpr const char *HEAP = "Heap";
+		constexpr const char *ROJO_SYNC = "Sync Rojo";
 
 		// The rest, which have no constant of their own because only this list
 		// and their own `Begin` ever name them. Spelled here rather than
@@ -96,6 +100,7 @@ namespace studio {
 			STATISTICS,
 			FRAMEGRAPH,
 			HEAP,
+			ROJO_SYNC,
 			"History",
 			"Assets",
 			"Render Pipeline",
@@ -105,7 +110,6 @@ namespace studio {
 			"Control (MCP)",
 			"Plugins",
 			"Bus",
-			"Find Instances",
 			"Script Profile",
 			"Changes",
 			"Debugger",
@@ -116,12 +120,14 @@ namespace studio {
 		// **Only when imgui has no layout of its own.** Rebuilding every run
 		// would throw away wherever somebody dragged a panel to, which is the
 		// single most annoying thing an editor can do.
-		// @param dockspace   The dockspace node to fill.
-		// @param extraTitles The extra viewport panels, in index order. Passed in
-		//                    rather than spelled here because the editor owns
-		//                    both how many there are and what they are called -
-		//                    see `Editor::ResizeViewports`.
-		void BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles) {
+		// @param dockspace     The dockspace node to fill.
+		// @param extraTitles   The extra viewport panels, in index order. Passed in
+		//                      rather than spelled here because the editor owns
+		//                      both how many there are and what they are called -
+		//                      see `Editor::ResizeViewports`.
+		// @param splitViewports Whether an extra viewport is open in this layout.
+		void
+		BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles, bool splitViewports) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
@@ -141,28 +147,31 @@ namespace studio {
 			const ImGuiID rightUpper =
 				ImGui::DockBuilderSplitNode(rightLower, ImGuiDir_Up, 0.45f, nullptr, &rightLower);
 
-			// **A split, not the same node.** Docking both viewports into
-			// `centre` makes them *tabs*, so the second is a background window
-			// - `ImGui::Begin` returns false for it, the panel drops its target
-			// and the renderer never draws it. That is not a subtle failure
-			// either: the second view is simply never there, and the first
-			// looks exactly as it always did.
-			//
-			// Two views stacked as tabs would also be one view you have to
-			// click between, which is the thing having two of them is for.
-			ImGuiID rightHalf = centre;
-			const ImGuiID leftHalf =
-				ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
+			if (splitViewports) {
+				// **A split, not the same node, when another viewport is open.**
+				// Docking both into `centre` makes them tabs, which is one picture
+				// somebody has to click between rather than two views at once.
+				ImGuiID rightHalf = centre;
+				const ImGuiID leftHalf =
+					ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
 
-			ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
+				ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
 
-			// Everything past the second shares the two halves rather than
-			// splitting further: four quarters of a centre pane are four
-			// pictures too small to judge anything by, and a panel can be
-			// dragged wherever somebody actually wants it. They alternate so an
-			// author who opens two more gets one on each side.
-			for (size_t index = 0; index < extraTitles.size(); index++) {
-				ImGui::DockBuilderDockWindow(extraTitles[index], index % 2 == 0 ? rightHalf : leftHalf);
+				// Everything past the second shares the two halves rather than
+				// splitting further: four quarters of a centre pane are four
+				// pictures too small to judge anything by. Closed reusable panels
+				// are included so reopening one inherits a dock instead of floating.
+				for (size_t index = 0; index < extraTitles.size(); index++) {
+					ImGui::DockBuilderDockWindow(extraTitles[index], index % 2 == 0 ? rightHalf : leftHalf);
+				}
+			} else {
+				// One open viewport owns the whole centre. Closed reusable panels
+				// wait in the same node, so they cost no space and still have a dock
+				// when somebody opens one from the View menu.
+				ImGui::DockBuilderDockWindow(VIEWPORT, centre);
+				for (const char *title : extraTitles) {
+					ImGui::DockBuilderDockWindow(title, centre);
+				}
 			}
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
@@ -182,6 +191,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
 			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
 			ImGui::DockBuilderDockWindow(HEAP, bottom);
+			ImGui::DockBuilderDockWindow(ROJO_SYNC, rightLower);
 			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
@@ -260,10 +270,12 @@ namespace studio {
 		for (const ViewportState &view : Extras) {
 			extraTitles.push_back(view.Title.c_str());
 		}
+		const bool splitViewports =
+			std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) { return view.Open; });
 
 		if (ResetLayout) {
 			ResetLayout = false;
-			BuildDefaultLayout(dockspace, extraTitles);
+			BuildDefaultLayout(dockspace, extraTitles, splitViewports);
 		}
 
 		static bool built = false;
@@ -271,7 +283,7 @@ namespace studio {
 			built = true;
 			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
 				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
-				BuildDefaultLayout(dockspace, extraTitles);
+				BuildDefaultLayout(dockspace, extraTitles, splitViewports);
 			}
 		}
 
@@ -387,6 +399,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
+			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
 			Skinned("World Lighting", [&] { DrawWorldLighting(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
@@ -405,7 +418,6 @@ namespace studio {
 			DrawPluginWidgets();
 
 			Skinned("Bus", [&] { DrawBus(); });
-			Skinned("Find Instances", [&] { DrawFindInstances(); });
 			Skinned("Script Profile", [&] { DrawScriptProfile(); });
 			Skinned("Changes", [&] { DrawDiff(); });
 			Skinned("Debugger", [&] { DrawDebugger(); });
@@ -832,12 +844,29 @@ namespace studio {
 	void Editor::DrawViewport(size_t index) {
 		ViewportState *extra = ExtraAt(index);
 		const bool second = extra != nullptr;
+		ViewportCameraPose cameraPose{
+			second ? extra->Frame : CameraFrame,
+			second ? extra->Yaw : CameraYaw,
+			second ? extra->Pitch : CameraPitch,
+		};
+		ViewportCameraMemory &cameraMemory = second ? extra->CameraMemory : CameraMemory;
+		cameraMemory.Use(ViewportWorld(index), cameraPose);
+		if (second) {
+			extra->Frame = cameraPose.Frame;
+			extra->Yaw = cameraPose.Yaw;
+			extra->Pitch = cameraPose.Pitch;
+		} else {
+			CameraFrame = cameraPose.Frame;
+			CameraYaw = cameraPose.Yaw;
+			CameraPitch = cameraPose.Pitch;
+		}
 
 		// imgui remembers a window by its title, so a panel's title is minted
 		// once when the panel is and then never changes - a name that moved
 		// would be a panel the saved layout has never heard of. See
 		// `ViewportState::Title`.
-		const char *title = ViewportTitle(index);
+		const std::string label = ViewportLabel(index);
+		const char *title = label.c_str();
 		bool *open = second ? &extra->Open : &ShowViewport;
 		engine::render::SceneTarget &target = second ? extra->Target : WorldTarget;
 
@@ -845,7 +874,37 @@ namespace studio {
 			// Nothing asks for a texture, so the renderer releases the one it
 			// had. A closed panel should not go on costing its pixels.
 			target = engine::render::SceneTarget{};
+
+			// **And the empty half of the split goes with it.** imgui deletes a
+			// dock node whose windows have gone, but the guard it uses is
+			// `window->DockId != node->ID` - and when a docked window stops
+			// being submitted imgui stores that same node id on the window as
+			// `save_dock_id`, so the two match and the auto-delete declines.
+			// The leaf survives with nothing in it and keeps its half of the
+			// split, which is the hole a closed side-by-side leaves.
+			//
+			// Undocking the window is what lets `DockContextRemoveNode` fold the
+			// sibling up into the parent. The node it was in is remembered in
+			// `DockInto` first, so reopening this panel lands back beside the
+			// one it used to share a split with rather than floating.
+			//
+			// Once, on the frame it closes: `DockBuilderDockWindow` every frame
+			// would fight a person trying to drag the closed panel's tab back in
+			// from the layout.
+			if (extra != nullptr && !extra->Undocked) {
+				if (const ImGuiWindow *window = ImGui::FindWindowByName(ViewportIdentity(index));
+					window != nullptr && window->DockId != 0) {
+					extra->DockInto = window->DockId;
+					ImGui::DockBuilderDockWindow(ViewportIdentity(index), 0);
+				}
+				extra->Undocked = true;
+			}
 			return;
+		}
+
+		// Reopened, so the next close undocks again.
+		if (extra != nullptr) {
+			extra->Undocked = false;
 		}
 
 		// A panel opened from another's tab strip joins that strip, once. See
@@ -973,23 +1032,18 @@ namespace studio {
 		// show the unwritten border down two edges.
 		const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
 		void *texture = Renderer.SceneTexture(index);
-		const bool textureMatchesPanel =
-			extent.DrawnWidth == target.Width && extent.DrawnHeight == target.Height;
-		if (texture != nullptr && textureMatchesPanel) {
-			ImGui::Image(
-				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
-			);
-		} else if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
+		if (ViewportResults.size() <= index) {
+			ViewportResults.resize(index + 1);
+		}
+		ViewportResults[index] = Renderer.SceneFrameResult(index);
+		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
+		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
 			// Keep the last complete frame visible while the new target is being
 			// allocated. It is fitted uniformly inside the panel, so a resize can
 			// letterbox for one frame but cannot stretch either the world or its UI.
-			const float oldWidth = static_cast<float>(extent.DrawnWidth) / density;
-			const float oldHeight = static_cast<float>(extent.DrawnHeight) / density;
-			const float scale = std::min(size.x / oldWidth, size.y / oldHeight);
-			const ImVec2 fitted{oldWidth * scale, oldHeight * scale};
-			const ImVec2 inset{(size.x - fitted.x) * 0.5f, (size.y - fitted.y) * 0.5f};
-			const ImVec2 minimum{origin.x + inset.x, origin.y + inset.y};
-			const ImVec2 maximum{minimum.x + fitted.x, minimum.y + fitted.y};
+			imageRect = FitViewportImage(glm::vec2(size.x, size.y), extent.DrawnWidth, extent.DrawnHeight);
+			const ImVec2 minimum{origin.x + imageRect.Min.x, origin.y + imageRect.Min.y};
+			const ImVec2 maximum{minimum.x + imageRect.Size.x, minimum.y + imageRect.Size.y};
 			ImGui::GetWindowDrawList()->AddImage(
 				reinterpret_cast<ImTextureID>(texture),
 				minimum,
@@ -1025,10 +1079,10 @@ namespace studio {
 		if (index < Overlays.size()) {
 			OverlaySlot &slot = Overlays[index];
 			slot.List = ImGui::GetWindowDrawList();
-			slot.X = origin.x;
-			slot.Y = origin.y;
-			slot.Width = size.x;
-			slot.Height = size.y;
+			slot.X = origin.x + imageRect.Min.x;
+			slot.Y = origin.y + imageRect.Min.y;
+			slot.Width = imageRect.Size.x;
+			slot.Height = imageRect.Size.y;
 			slot.Drawn = true;
 		}
 
@@ -1115,6 +1169,15 @@ namespace studio {
 		ImGui::BeginGroup();
 		{
 			const engine::ui::ScopedFont small(engine::ui::Typeface::Interface, engine::ui::TextSize::Small);
+			const engine::render::FrameResult frame =
+				index < ViewportResults.size() ? ViewportResults[index] : engine::render::FrameResult{};
+			if (ViewportStatistics.size() <= index) {
+				ViewportStatistics.resize(index + 1);
+			}
+			StatusBarSnapshot &statistics = ViewportStatistics[index];
+			statistics.Refresh(
+				ImGui::GetTime(), index, 0, frame.DrawCalls, frame.Triangles, frame.Culled
+			);
 
 			const engine::core::Name scene =
 				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
@@ -1124,9 +1187,9 @@ namespace studio {
 				scene.IsValid() ? Label(scene) : "(no scene)",
 				target.Width,
 				target.Height,
-				LastFrame.DrawCalls,
-				static_cast<unsigned long long>(LastFrame.Triangles),
-				LastFrame.Culled
+				statistics.DrawCalls,
+				static_cast<unsigned long long>(statistics.Triangles),
+				statistics.Culled
 			);
 			ImGui::PopStyleColor();
 
@@ -1193,6 +1256,7 @@ namespace studio {
 		// now, and two places to bind a key is one too many.
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
 
 		ImGui::Separator();
@@ -1202,6 +1266,7 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
 		ImGui::MenuItem("World Lighting", nullptr, &ShowWorldLighting);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
@@ -1211,7 +1276,6 @@ namespace studio {
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
-		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
 		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
@@ -1222,11 +1286,50 @@ namespace studio {
 		// them - but it is a thing somebody turns off and has to be able to
 		// turn back on, which is the rule this menu exists for.
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
+		ImGui::MenuItem("Particle Emitters", nullptr, &ShowParticleEmitters);
 
 		// **Beside the grid, because it is the same kind of thing**: furniture
 		// that says something about the world rather than part of it. Off by
 		// default - see `ShowColliders`.
 		ImGui::MenuItem("Collider Outlines", nullptr, &ShowColliders);
+
+		// **The three shapes a part has, as one menu rather than three
+		// toggles.** They are alternatives - a face is drawn as one of them -
+		// so a radio is what the choice actually is. Greyed with the view off,
+		// because a submenu that does nothing is a submenu somebody clicks
+		// twice.
+		ImGui::BeginDisabled(!ShowColliders);
+		if (ImGui::BeginMenu("Collider Shape")) {
+			const auto option = [this](const char *label, ColliderShapeView which, const char *hint) {
+				if (ImGui::MenuItem(label, nullptr, ColliderShapes == which)) {
+					ColliderShapes = which;
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", hint);
+				}
+			};
+
+			option(
+				"As chosen",
+				ColliderShapeView::Chosen,
+				"What Collider.CollisionShape selects, which is what actually collides."
+			);
+			option(
+				"Precise", ColliderShapeView::Precise, "The baked triangle soup, for anything that has one."
+			);
+			option("Hull", ColliderShapeView::Hull, "The baked convex hull, for anything that has one.");
+			option(
+				"Bounds",
+				ColliderShapeView::Bounds,
+				"The part's own box - what a shape falls back to when its name does not resolve."
+			);
+
+			ImGui::Separator();
+			ImGui::MenuItem("Fill faces", nullptr, &ColliderFill);
+			ImGui::MenuItem("Hide textures", nullptr, &ColliderHideTextures);
+			ImGui::EndMenu();
+		}
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 
@@ -1312,30 +1415,6 @@ namespace studio {
 				if (!chosen.empty()) {
 					OpenGame(chosen);
 				}
-			}
-
-			// **Rojo's layout, because it is the one the ecosystem already
-			// writes.** A game laid out for Rojo has its scripts in folders that
-			// mean something, its tooling assumes it, and every author who has
-			// used Roblox knows it - asking them to convert a working project in
-			// order to try this engine is the wrong side of the trade for a
-			// format that costs a parser to read.
-			if (ImGui::MenuItem("Sync Rojo Project...")) {
-				AskingRojo = true;
-				PathBuffer = GamePath.empty() ? std::string("default.project.json")
-											  : (GamePath.parent_path() / "default.project.json").string();
-			}
-
-			// **A second command rather than a mode of the first.** One project
-			// file is one world, which is what an author editing a scene wants;
-			// a universe file is a whole game laid out as a folder of them,
-			// which is what an author opening a checkout wants. Deciding which
-			// they meant by looking inside the file would be a guess, and the
-			// wrong guess builds a game into one world.
-			if (ImGui::MenuItem("Sync Rojo Universe...")) {
-				AskingRojoUniverse = true;
-				PathBuffer = GamePath.empty() ? std::string("main.universe.json")
-											  : (GamePath.parent_path() / "main.universe.json").string();
 			}
 
 			ImGui::Separator();
@@ -1560,6 +1639,32 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Sync")) {
+			if (ImGui::MenuItem("Sync Rojo Project...")) {
+				ShowRojoSync = true;
+				std::snprintf(
+					RojoProjectPath,
+					sizeof(RojoProjectPath),
+					"%s",
+					GamePath.empty()
+						? "default.project.json"
+						: (GamePath.parent_path() / "default.project.json").string().c_str()
+				);
+			}
+			if (ImGui::MenuItem("Sync Rojo Universe...")) {
+				ShowRojoSync = true;
+				std::snprintf(
+					RojoUniversePath,
+					sizeof(RojoUniversePath),
+					"%s",
+					GamePath.empty()
+						? "main.universe.json"
+						: (GamePath.parent_path() / "main.universe.json").string().c_str()
+				);
+			}
+			ImGui::EndMenu();
+		}
+
 		// The title, right-aligned. A window title bar is the platform's and
 		// says "atomic studio"; what is *open* belongs where the eye already is.
 		{
@@ -1731,7 +1836,7 @@ namespace studio {
 		}
 
 		for (size_t index = 0; index < 1 + Extras.size(); index++) {
-			const ImGuiWindow *window = ImGui::FindWindowByName(ViewportTitle(index));
+			const ImGuiWindow *window = ImGui::FindWindowByName(ViewportIdentity(index));
 			if (window == nullptr) {
 				continue;
 			}
@@ -1816,8 +1921,33 @@ namespace studio {
 		const bool running = mode != RunMode::Edit;
 		const bool paused = IsPaused(scope);
 
-		if (RunButton("Play", mode == RunMode::Play, engine::ui::AccentColour())) {
-			SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
+		ImGui::BeginDisabled(running);
+		if (RunButton("Play", false, engine::ui::AccentColour())) {
+			SetRunMode(scope, RunMode::Play);
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+
+		// **Play, starting where you are looking rather than where the pad is.**
+		// Testing something built a long way from the spawn meant playing, then
+		// walking there, every time - or moving the pad, which is an edit to the
+		// scene for a decision that is not about the scene.
+		//
+		// **A forced pad rather than a teleport after the fact.** A character is
+		// built by `LoadCharacter` from whatever `FindSpawn` answers, and moving
+		// it afterwards is a frame of it standing somewhere else plus a race
+		// with the client that is joining. `SpawnLocation::Forced` is the scene
+		// saying "here", which is exactly what this button means, and it goes
+		// through the same door every other spawn does.
+		//
+		// Disabled while running, because it starts a run.
+		ImGui::BeginDisabled(running);
+		if (ImGui::Button("Play Here")) {
+			PlayFromCamera(scope);
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Play, with the character spawned where this viewport is looking");
 		}
 		ImGui::SameLine();
 		if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
@@ -1919,10 +2049,21 @@ namespace studio {
 		// picture in front of you and silently changes a different one.
 		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
 		const Name shownName = Universe->NameOf(shown);
-		if (ImGui::BeginCombo("##scene", shownName.IsValid() ? Label(shownName) : "(no scene)")) {
+		// Runtime activity belongs on the selector's rows and preview. Putting it
+		// on the viewport tab confuses the scene being shown with the scene an
+		// edit command will target.
+		const auto selectorLabel = [&](WorldId world, const Name &name) {
+			return WorldSelectorLabel(
+				name.IsValid() ? Label(name) : std::string_view{}, world.IsValid() && IsActivelyRunning(world)
+			);
+		};
+		const std::string shownLabel =
+			shown.IsValid() ? selectorLabel(shown, shownName) : std::string("(no scene)");
+		if (ImGui::BeginCombo("##scene", shownLabel.c_str())) {
 			for (const WorldId id : Universe->Worlds()) {
 				const Name name = Universe->NameOf(id);
-				if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == shown)) {
+				const std::string itemLabel = selectorLabel(id, name);
+				if (ImGui::Selectable(itemLabel.c_str(), id == shown)) {
 					RetargetEditingViewport(reporting, id);
 				}
 			}
@@ -2400,13 +2541,24 @@ namespace studio {
 								  : live == 1 ? std::string(Describe(Runs.front().Mode)) + " (1 scene)"
 											  : std::to_string(live) + " scenes running";
 
+		const engine::render::FrameResult current = FocusedViewport < ViewportResults.size()
+														? ViewportResults[FocusedViewport]
+														: engine::render::FrameResult{};
+		StatusBar.Refresh(
+			ImGui::GetTime(),
+			FocusedViewport,
+			static_cast<uint32_t>(std::max(std::lround(ImGui::GetIO().Framerate), 0l)),
+			current.DrawCalls,
+			current.Triangles,
+			current.Culled
+		);
 		ImGui::Text(
-			"%s  |  %.0f fps  |  %u draw calls, %llu triangles, %u culled",
+			"%s  |  %u fps  |  %u draw calls, %llu triangles, %u culled",
 			state.c_str(),
-			ImGui::GetIO().Framerate,
-			LastFrame.DrawCalls,
-			static_cast<unsigned long long>(LastFrame.Triangles),
-			LastFrame.Culled
+			StatusBar.FramesPerSecond,
+			StatusBar.DrawCalls,
+			static_cast<unsigned long long>(StatusBar.Triangles),
+			StatusBar.Culled
 		);
 
 		// **What is selected, which the explorer cannot say while you are
@@ -2458,10 +2610,49 @@ namespace studio {
 		const std::vector<std::string> GAME_FILES{std::string(engine::game::GAME_EXTENSION)};
 		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
 
-		// Rojo's own name for its project file, and the only one this opens.
-		// A picker that offered every `.json` would invite somebody to point it
-		// at a `package.json` and get an error rather than a filter.
-		const std::vector<std::string> ROJO_FILES{".json"};
+	}
+
+	void Editor::DrawRojoSync() {
+		if (!ShowRojoSync) {
+			return;
+		}
+		if (!ImGui::Begin(ROJO_SYNC, &ShowRojoSync)) {
+			ImGui::End();
+			return;
+		}
+
+		ImGui::TextWrapped(
+			"Sync a Rojo project into the active world, or sync a universe containing multiple worlds."
+		);
+		ImGui::SeparatorText("Project");
+		ImGui::InputTextWithHint(
+			"##rojo-project", "path to default.project.json", RojoProjectPath, sizeof(RojoProjectPath)
+		);
+		if (ImGui::Button("Sync Project")) {
+			const std::filesystem::path path(RojoProjectPath);
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(path, error)) {
+				Say("Rojo project does not exist: " + path.string(), LogLevel::Warning);
+			} else {
+				SyncRojo(path);
+			}
+		}
+
+		ImGui::SeparatorText("Universe");
+		ImGui::InputTextWithHint(
+			"##rojo-universe", "path to main.universe.json", RojoUniversePath, sizeof(RojoUniversePath)
+		);
+		if (ImGui::Button("Sync Universe")) {
+			const std::filesystem::path path(RojoUniversePath);
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(path, error)) {
+				Say("Rojo universe does not exist: " + path.string(), LogLevel::Warning);
+			} else {
+				SyncRojoWorlds(path);
+			}
+		}
+
+		ImGui::End();
 	}
 
 	void Editor::DrawDialogs() {
@@ -2474,12 +2665,6 @@ namespace studio {
 		}
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
-		}
-		if (AskingRojoUniverse) {
-			ImGui::OpenPopup("Sync Rojo Universe");
-		}
-		if (AskingRojo) {
-			ImGui::OpenPopup("Sync Rojo Project");
 		}
 		if (AskingExport) {
 			ImGui::OpenPopup("Export World");
@@ -2512,20 +2697,6 @@ namespace studio {
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
-		}
-
-		if (engine::ui::FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
-			SyncRojo(std::filesystem::path(PathBuffer));
-			AskingRojo = false;
-		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
-			AskingRojo = false;
-		}
-
-		if (engine::ui::FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
-			SyncRojoWorlds(std::filesystem::path(PathBuffer));
-			AskingRojoUniverse = false;
-		} else if (!ImGui::IsPopupOpen("Sync Rojo Universe")) {
-			AskingRojoUniverse = false;
 		}
 
 		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {

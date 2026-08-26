@@ -1,5 +1,7 @@
 #include "Utf8.hpp"
 
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -43,18 +45,18 @@ namespace engine::gui {
 
 		// The class ids this pass tests against, looked up once per process.
 		//
-		// **Ids and not names.** `Store::IsA` is an ancestor scan over a handful
+		// **LayoutIds and not names.** `Store::IsA` is an ancestor scan over a handful
 		// of integers; building a `core::Name` per node per frame would take the
 		// process-wide registry's mutex once per element, which is the exact
 		// cost `scene`'s `NormalIdEnum` comment measures.
-		struct Ids {
+		struct LayoutIds {
 			ClassId Object;
 			ClassId Collector;
 			ClassId ScreenGui;
 			ClassId SurfaceGui;
 			ClassId BillboardGui;
 
-			Ids() {
+			LayoutIds() {
 				RegisterGuiClasses();
 				Object = GuiClass("GuiObject");
 				Collector = GuiClass("LayerCollector");
@@ -64,8 +66,8 @@ namespace engine::gui {
 			}
 		};
 
-		const Ids &Classes() {
-			static const Ids ids;
+		const LayoutIds &LayoutClasses() {
+			static const LayoutIds ids;
 			return ids;
 		}
 
@@ -83,14 +85,14 @@ namespace engine::gui {
 		// `gui/tests/Layout.cpp` pins them against it. A rename on either side
 		// fails a test rather than silently drawing nothing, which is the
 		// failure this shape is chosen to make loud.
-		struct Containers {
+		struct LayoutContainers {
 			core::Name Workspace{WORKSPACE};
 			core::Name StarterGui{STARTER_GUI};
 			core::Name PlayerGui{PLAYER_GUI};
 		};
 
-		const Containers &Roots() {
-			static const Containers names;
+		const LayoutContainers &LayoutRoots() {
+			static const LayoutContainers names;
 			return names;
 		}
 
@@ -117,7 +119,7 @@ namespace engine::gui {
 		// @param spatial   Whether `Workspace` counts, which is true for the
 		//        two collectors that hang off something in the world.
 		bool Contained(const Store &store, Entity collector, bool spatial) {
-			const Containers &roots = Roots();
+			const LayoutContainers &roots = LayoutRoots();
 
 			for (Entity above = store.ParentOf(collector); above != ecs::NULL_ENTITY;
 				 above = store.ParentOf(above)) {
@@ -1939,6 +1941,16 @@ namespace engine::gui {
 			const Scan &scan
 		) {
 			if (depth > MAXIMUM_DEPTH) {
+				// `Store::SetParent` refuses a cycle, so reaching this means
+				// something built a tree deeper than any interface is, or built
+				// one another way. Either is a subtree that stops being placed
+				// while everything above it keeps drawing.
+				ENGINE_WARN_EVERY(
+					5.0,
+					"layout stopped at depth {} under entity {}; the subtree is not placed",
+					depth,
+					instance.Id
+				);
 				return 0;
 			}
 
@@ -2031,6 +2043,24 @@ namespace engine::gui {
 			// one container is an authoring mistake with no sensible reading -
 			// there is no arrangement that is both a grid and a page strip - so
 			// the first found decides rather than the two fighting per frame.
+			// Which of the four won is invisible afterwards, and an author who
+			// added the second one sees the first one's arrangement with nothing
+			// mentioning the one that was ignored.
+			if (const int arrangements = (modifiers.List != nullptr) + (modifiers.Grid != nullptr) +
+										 (modifiers.Table != nullptr) + (modifiers.Page != nullptr);
+				arrangements > 1) {
+				ENGINE_WARN_EVERY(
+					5.0,
+					"entity {} carries {} layout modifiers; {} wins and the rest are ignored",
+					instance.Id,
+					arrangements,
+					modifiers.List != nullptr	 ? "list"
+					: modifiers.Grid != nullptr	 ? "grid"
+					: modifiers.Table != nullptr ? "table"
+												 : "page"
+				);
+			}
+
 			if (modifiers.List != nullptr) {
 				placed += RunList(store, *modifiers.List, items, area, inner, depth + 1, total);
 			} else if (modifiers.Grid != nullptr) {
@@ -2081,7 +2111,7 @@ namespace engine::gui {
 		//         today - so nothing under it is laid out rather than being laid
 		//         out against a rectangle nobody chose.
 		bool CanvasFor(const Store &store, Entity collector, const Screen &screen, Rect &out, Rect &clip) {
-			const Ids &ids = Classes();
+			const LayoutIds &ids = LayoutClasses();
 
 			const auto unclipped = [](const Rect &canvas) {
 				const Vector2 centre{
@@ -2149,7 +2179,7 @@ namespace engine::gui {
 
 		// Forces the class table up before the first `IsA` below, which is
 		// what makes a store that has never seen this module still lay out.
-		Classes();
+		LayoutClasses();
 
 		// **The only two places in this module that read the clock, and both
 		// are here rather than in the walk.** Each turns elapsed seconds into a
@@ -2194,7 +2224,7 @@ namespace engine::gui {
 
 		size_t placed = 0;
 
-		const Ids &ids = Classes();
+		const LayoutIds &ids = LayoutClasses();
 
 		for (const Entity collector : collectors) {
 			const Layer *layer = store.Get<Layer>(collector);
@@ -2267,6 +2297,17 @@ namespace engine::gui {
 			}
 		}
 
+		// Per layout pass rather than per frame: `Compiled::Rebuild` only calls
+		// this when the signature moved, so the rate reads as work done rather
+		// than as a number multiplied by the frame rate.
+		//
+		// **Nothing at all when nothing was placed**, because a client with no
+		// interface lays out zero elements on every frame and neither the
+		// counter's lock nor the line is worth paying for that.
+		if (placed != 0) {
+			core::Metrics::Count("gui.layout.placed", static_cast<double>(placed));
+			ENGINE_TRACE("laid out {} element(s)", placed);
+		}
 		return placed;
 	}
 }

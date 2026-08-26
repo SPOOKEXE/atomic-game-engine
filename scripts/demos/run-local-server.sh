@@ -90,7 +90,21 @@ for ((index = 1; index <= clients; index++)); do
 	# **`--net`, because the F4 panel is where this demo is read from.** Two
 	# characters that do not move have three explanations - never admitted, never
 	# told which player, never sent an input - and the panel separates them.
-	"$client" --connect "127.0.0.1:$port" --net --stats &
+	#
+	# **`--entities 0 --view-spacing 0`, so what you look at is the server's
+	# world and nothing else.** A client builds a demo world of its own whatever
+	# else it is doing, and composites the replica *beside* it: at the default
+	# spacing of 40 the two sit side by side, and the window opens on the local
+	# one. So the camera looked like it was not following the character when in
+	# fact it was following it in the picture next door - the client says as much
+	# in its own log, "replica: drawn through the demo world's camera".
+	#
+	# Emptying the local world and removing the offset leaves the replica as the
+	# only thing with anything in it, which is what this demo is about. The two
+	# flags belong here rather than in the client's defaults: a client that
+	# connects is still allowed a scene of its own, and `Mirrors-4-worlds.luau`
+	# is the case that wants the spacing.
+	"$client" --connect "127.0.0.1:$port" --entities 0 --view-spacing 0 --net --stats &
 	children+=($!)
 
 	# Staggered, so two clients do not hand the listener two admissions in one
@@ -101,4 +115,5 @@ done
 
 echo
 echo "WASD walks, Space jumps, right mouse turns the camera. Ctrl-C stops it all."
+echo "The camera follows your own character; the other client's is the one that walks about."
 wait

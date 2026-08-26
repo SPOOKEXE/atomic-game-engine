@@ -20,7 +20,7 @@
 // The obvious fix is a branch in the collect loop, and it is the wrong one
 // twice over.
 //
-// The first reason is mechanical. `client::CollectInstances` runs
+// The first reason is mechanical. `engine::render::CollectInstances` runs
 // `EachBatchParallel` and writes `out[first + row]` - each worker is told where
 // its slice lands so no two touch the same bytes and no atomic is needed.
 // A `continue` inside that loop leaves holes in the output and makes the
@@ -157,21 +157,18 @@ namespace engine::scene {
 	// that measured 0.037 ms, the largest single item in `PreRender`, and it
 	// was paid in full on every frame of a scene where nothing had moved.
 	//
-	// So `SyncRendered` first folds a rolling hash of everything its answer
-	// depends on and compares it against this. Two linear column scans with
-	// no random lookups and no `std::function` decide whether the walk has
-	// anything to do.
+	// So `SyncRendered` first compares the ECS's component-specific monotonic
+	// revisions and live row counts. The revisions cover writes and additions;
+	// counts cover removals. The steady path is constant in scene size.
 	//
 	// ## What the signature covers, which is the whole correctness argument
 	//
 	// | Folded in | Why it has to be |
 	// |---|---|
 	// | Which entity `WorkspaceOf` resolves to | It is the root the walk starts from |
-	// | `ecs::Hierarchy` parent, first child, next sibling, per row | The links `EachChild` descends |
-	// | The instance count | A destroyed row leaves the pass, which is also how a dangling link is caught |
-	// | Entity id in the `Visual` pass | `Set<Visual>` on an already-parented row changes the answer with no
-	// hierarchy change at all | | `Visual::Visible` | Read by the walk, and a script or the wire can toggle
-	// it without touching the tree |
+	// | `ecs::Hierarchy` component revision and count | Every link write and every added or removed tree row
+	// | | `Visual` component revision and count | Visibility writes and drawable rows appearing or
+	// disappearing |
 	//
 	// **A `Hierarchy`-only signature is unsafe** and is the mistake to refuse:
 	// it leaves a part that a script hid still drawing, and it leaves a part
@@ -199,7 +196,7 @@ namespace engine::scene {
 	// because a resource is keyed by a component id and an unregistered type
 	// gets one minted from the compiler's spelling - which `Store::Save` then
 	// refuses, taking out every snapshot of every world that has one.
-	// `client::DrawList` learned that the expensive way.
+	// `engine::render::DrawList` learned that the expensive way.
 	//
 	// @since v0.8
 	struct RenderedSignature {

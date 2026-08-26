@@ -6,9 +6,8 @@
 // costs a draw call, a wrong "hidden" is a hole in the world, and the two are
 // not the same kind of mistake.
 //
-// A survivor's instance row is copied, compacted, into the late buffer at its
-// run's own range, so the late draw binds the copy with the vertex layout the
-// early draw used and the vertex shader never learns culling happened.
+// A survivor's resident-slot index is compacted into the late draw list. The
+// packed row never moves and the vertex stage follows the new index stream.
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 // The pyramid is separate textures rather than one texture's mips, because a
@@ -29,25 +28,20 @@ layout(set = 0, binding = 9) uniform sampler2D pyramid09;
 layout(set = 0, binding = 10) uniform sampler2D pyramid10;
 layout(set = 0, binding = 11) uniform sampler2D pyramid11;
 
-// Pairs per candidate: [centre.xyz | run index], [extent.xyz | source slot].
+// Pairs per candidate: [centre.xyz | run index], [extent.xyz | resident slot].
 layout(set = 0, binding = 12) readonly buffer Candidates { vec4 data[]; } candidates;
 
-// The uploaded instance rows, six vec4 each - see `GpuInstance`.
-layout(set = 0, binding = 13) readonly buffer Instances { vec4 rows[]; } instances;
-
 // Per slot-run: the first late slot, where its survivors compact to.
-layout(set = 0, binding = 14) readonly buffer Runs { uint first[]; } runs;
+layout(set = 0, binding = 13) readonly buffer Runs { uint first[]; } runs;
 
 layout(set = 1, binding = 0) buffer Counts { uint survivors[]; } counts;
-layout(set = 1, binding = 1) writeonly buffer Late { vec4 rows[]; } late;
+layout(set = 1, binding = 1) writeonly buffer Late { uint slots[]; } late;
 
 layout(set = 2, binding = 0) uniform Cull {
 	mat4 ViewProjection;
 	uvec4 Counts; // x: candidates. y: pyramid levels built.
 	vec4 Level0;  // xy: level-zero size in texels.
 } cull;
-
-const uint INSTANCE_VECS = 6u;
 
 float FarthestAt(int lod, ivec2 texel) {
 	switch (lod) {
@@ -133,7 +127,5 @@ void main() {
 	}
 	uint offset = atomicAdd(counts.survivors[run], 1u);
 	uint destination = runs.first[run] + offset;
-	for (uint part = 0u; part < INSTANCE_VECS; part++) {
-		late.rows[destination * INSTANCE_VECS + part] = instances.rows[source * INSTANCE_VECS + part];
-	}
+	late.slots[destination] = source;
 }

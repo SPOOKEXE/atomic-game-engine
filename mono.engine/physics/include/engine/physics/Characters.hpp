@@ -117,4 +117,35 @@ namespace engine::physics {
 	//
 	// @param scheduler The world's scheduler.
 	void RegisterCharacterSystems(ecs::Scheduler &scheduler);
+
+	// Registers the components this module owns.
+	//
+	// **One, and it self-installed until v0.19.** `UpdatePoppercam` keeps a
+	// resource holding the blocker it last faded, and it created that resource
+	// on first use - which meant the component was registered mid-tick, under
+	// the compiler's spelling of a type declared in an anonymous namespace in
+	// `Characters.cpp`. Registration order fixes component ids and ids fix
+	// archetype iteration order, so a type first seen during a tick takes an id
+	// decided by whichever world happened to reach that pass first.
+	//
+	// Nothing caught it because nothing could: `Components::Seal` is what
+	// catches a late registration and it had no caller outside a test. The
+	// programs seal now, and this is the registration that lets them.
+	void RegisterCharacterComponents();
+
+	// Removes the part of a character's commanded velocity that points into
+	// something solid.
+	//
+	// **Composed into `character.control` after `scene::StepCharacters`**, which
+	// is where it has to be: that pass writes the walk as an intent rather than
+	// a force, so a wall has to be taken out of the intent before the integrator
+	// acts on it. The solver alone cannot, because its answer is position
+	// correction capped at 3 m/s and a default `WalkSpeed` is 16.
+	//
+	// Exposed for the suites rather than for a caller to sequence - the
+	// registration above already puts it in the right place.
+	//
+	// @param store The world.
+	// @return How many characters had a direction removed.
+	size_t ClipCharacterVelocity(ecs::Store &store);
 }

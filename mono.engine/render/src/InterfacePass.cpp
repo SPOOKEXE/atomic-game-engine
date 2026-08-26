@@ -1,3 +1,5 @@
+#include "GpuHeap.hpp"
+#include "Primitives.hpp"
 #include "ShaderBinary.hpp"
 
 #include <engine/core/Log.hpp>
@@ -246,7 +248,7 @@ namespace engine::render {
 			texture.layer_count_or_depth = 1;
 			texture.num_levels = 1;
 
-			AtlasTexture = SDL_CreateGPUTexture(gpu, &texture);
+			AtlasTexture = gpu::CreateTexture(gpu, &texture);
 			if (AtlasTexture == nullptr) {
 				ENGINE_ERROR("interface pass: atlas texture: {}", SDL_GetError());
 			}
@@ -266,7 +268,7 @@ namespace engine::render {
 				return false;
 			}
 			SDL_SubmitGPUCommandBuffer(upload);
-			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
 			AtlasTransferBuffer = nullptr;
 		}
 
@@ -283,19 +285,19 @@ namespace engine::render {
 		// Released in the reverse of the order they were made, which is what the
 		// device expects and what keeps a validation layer quiet.
 		if (TransferBuffer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
 		}
 		if (AtlasTransferBuffer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
 		}
 		if (IndexBuffer != nullptr) {
-			SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
 		}
 		if (VertexBuffer != nullptr) {
-			SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
 		}
 		if (AtlasTexture != nullptr) {
-			SDL_ReleaseGPUTexture(gpu, static_cast<SDL_GPUTexture *>(AtlasTexture));
+			gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(AtlasTexture));
 		}
 		if (PixelSampler != nullptr) {
 			SDL_ReleaseGPUSampler(gpu, static_cast<SDL_GPUSampler *>(PixelSampler));
@@ -334,6 +336,11 @@ namespace engine::render {
 		IndexCapacity = 0;
 		TransferCapacity = 0;
 		AtlasUploaded = false;
+		SignatureValid = false;
+		MeshDirty = true;
+		LastUploadBytes = 0;
+		Uploads = 0;
+		Reuses = 0;
 	}
 
 	void InterfacePass::Submit(
@@ -343,6 +350,29 @@ namespace engine::render {
 		ecs::Store &store
 	) {
 		Pending = list;
+		SignatureValid = false;
+		MeshDirty = true;
+		Canvas = canvas;
+		TargetPixels = targetPixels;
+		SpatialCollectors.clear();
+		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
+			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
+		});
+	}
+
+	void InterfacePass::Submit(
+		const gui::DrawList &list,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels,
+		ecs::Store &store,
+		uint64_t signature
+	) {
+		if (!SignatureValid || PendingSignature != signature) {
+			Pending = list;
+			PendingSignature = signature;
+			SignatureValid = true;
+			MeshDirty = true;
+		}
 		Canvas = canvas;
 		TargetPixels = targetPixels;
 		SpatialCollectors.clear();
@@ -386,7 +416,7 @@ namespace engine::render {
 
 		// **One sampler and no uniform buffer - `interface.frag`'s own
 		// shape**, matching exactly what `Initialise` declares for it below,
-		// and not `opaque.frag`'s nine and three. This is the contract a
+		// and not `opaque.frag`'s ten and three. This is the contract a
 		// `ShaderScript` meant for an `ImageLabel` is written against; see
 		// this method's own header. The clip rectangle `Record` pushes
 		// reaches the fragment stage through SDL's push-constant path rather
@@ -502,7 +532,7 @@ namespace engine::render {
 		info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		info.size = static_cast<uint32_t>(pixels.size());
 
-		SDL_GPUTransferBuffer *staging = SDL_CreateGPUTransferBuffer(gpu, &info);
+		SDL_GPUTransferBuffer *staging = gpu::CreateTransferBuffer(gpu, &info);
 		if (staging == nullptr) {
 			return false;
 		}
@@ -510,7 +540,7 @@ namespace engine::render {
 
 		void *mapped = SDL_MapGPUTransferBuffer(gpu, staging, false);
 		if (mapped == nullptr) {
-			SDL_ReleaseGPUTransferBuffer(gpu, staging);
+			gpu::ReleaseTransferBuffer(gpu, staging);
 			AtlasTransferBuffer = nullptr;
 			return false;
 		}
@@ -539,6 +569,7 @@ namespace engine::render {
 	}
 
 	bool InterfacePass::Prepare(void *commandBuffer) {
+		LastUploadBytes = 0;
 		if (Pipeline == nullptr || commandBuffer == nullptr) {
 			return false;
 		}
@@ -547,6 +578,7 @@ namespace engine::render {
 
 		UploadAtlas(commandBuffer);
 
+		std::vector<ResolvedImage> previousImages = std::move(ResolvedImages);
 		ResolvedImages.clear();
 		for (const gui::DrawCommand &draw : Pending.Commands) {
 			const bool image = draw.Kind == gui::DrawKind::Image && draw.Image.IsValid();
@@ -568,6 +600,24 @@ namespace engine::render {
 										  : (Images ? Images(draw.Image) : InterfaceImage{});
 				ResolvedImages.push_back(resolved);
 			}
+		}
+
+		const auto sameGeometry = [](const ResolvedImage &left, const ResolvedImage &right) {
+			return left.Name == right.Name && left.Viewport == right.Viewport &&
+				   left.Value.Cell.Scale == right.Value.Cell.Scale &&
+				   left.Value.Cell.OffsetU == right.Value.Cell.OffsetU &&
+				   left.Value.Cell.OffsetV == right.Value.Cell.OffsetV &&
+				   left.Value.UVMax == right.Value.UVMax && left.Value.Width == right.Value.Width &&
+				   left.Value.Height == right.Value.Height;
+		};
+		if (previousImages.size() != ResolvedImages.size() ||
+			!std::equal(previousImages.begin(), previousImages.end(), ResolvedImages.begin(), sameGeometry)) {
+			MeshDirty = true;
+		}
+
+		if (!MeshDirty && VertexBuffer != nullptr && IndexBuffer != nullptr) {
+			Reuses++;
+			return !Mesh.Vertices().empty() && !Mesh.Indices().empty();
 		}
 
 		const auto information = [](const InterfaceImage &image) {
@@ -608,6 +658,7 @@ namespace engine::render {
 		const auto vertices = static_cast<uint32_t>(Mesh.Vertices().size());
 		const auto indices = static_cast<uint32_t>(Mesh.Indices().size());
 		if (vertices == 0 || indices == 0) {
+			MeshDirty = false;
 			return false;
 		}
 
@@ -620,23 +671,23 @@ namespace engine::render {
 		// blamed for.
 		if (VertexBuffer == nullptr || VertexCapacity < vertexBytes) {
 			if (VertexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
+				gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
 			}
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 			info.size = vertexBytes;
-			VertexBuffer = SDL_CreateGPUBuffer(gpu, &info);
+			VertexBuffer = gpu::CreateBuffer(gpu, &info);
 			VertexCapacity = VertexBuffer != nullptr ? vertexBytes : 0;
 		}
 
 		if (IndexBuffer == nullptr || IndexCapacity < indexBytes) {
 			if (IndexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
+				gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
 			}
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
 			info.size = indexBytes;
-			IndexBuffer = SDL_CreateGPUBuffer(gpu, &info);
+			IndexBuffer = gpu::CreateBuffer(gpu, &info);
 			IndexCapacity = IndexBuffer != nullptr ? indexBytes : 0;
 		}
 
@@ -647,12 +698,12 @@ namespace engine::render {
 		const uint32_t total = vertexBytes + indexBytes;
 		if (TransferBuffer == nullptr || TransferCapacity < total) {
 			if (TransferBuffer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
+				gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
 			}
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			info.size = total;
-			TransferBuffer = SDL_CreateGPUTransferBuffer(gpu, &info);
+			TransferBuffer = gpu::CreateTransferBuffer(gpu, &info);
 			TransferCapacity = TransferBuffer != nullptr ? total : 0;
 		}
 
@@ -692,6 +743,9 @@ namespace engine::render {
 		SDL_UploadToGPUBuffer(copy, &from, &to, true);
 
 		SDL_EndGPUCopyPass(copy);
+		MeshDirty = false;
+		LastUploadBytes = total;
+		Uploads++;
 		return true;
 	}
 
@@ -882,42 +936,32 @@ namespace engine::render {
 			}
 
 			if (spatial.Kind == gui::SpatialCanvasKind::Surface) {
-				if (normal.Dot(toCamera) <= 0.0f) {
+				if (!CanvasFacesViewer(normal, toCamera)) {
 					continue;
 				}
 			} else {
-				const core::Vector3 right = camera.RightVector();
-				const core::Vector3 up = camera.UpVector();
-				const glm::vec4 projectedAnchor =
-					viewProjection * glm::vec4{spatial.Origin.X, spatial.Origin.Y, spatial.Origin.Z, 1.0f};
-				const core::Vector3 oneUp = spatial.Origin + up;
-				const glm::vec4 projectedUp = viewProjection * glm::vec4{oneUp.X, oneUp.Y, oneUp.Z, 1.0f};
-				// **Against the canvas height, not the attachment's.** The
-				// number being divided by this is `BillboardPixels`, which came
-				// from a `UDim2` offset and is therefore in canvas units - and
-				// `ResolveSpatialCanvases` sized the same billboard's canvas
-				// with `PixelsPerStud(..., screen.Height)`, also canvas units.
-				// Using the attachment made the two disagree by the display's
-				// density: the canvas was laid out at one size and the quad it
-				// lands on was built at another, so the pixel half of a
-				// billboard's `Size` came out at a fraction of the studs asked
-				// for on a high-density display and nowhere else.
+				// **The billboard's quad, worked out where a test can reach it.**
+				// The pixels-per-stud measurement, the studs-plus-pixels size and
+				// the centring on the anchor were all inline here until v0.19,
+				// which is the gap `docs/ARCH_REVIEW.md` B recorded and
+				// `src/Primitives.hpp` closes. `tests/Primitives.cpp` holds the
+				// two facts that were never asserted: the quad is centred on its
+				// anchor, and its normal is *not* the cross product of its axes.
 				const float canvasHeight = Canvas.Y > 0.0f ? Canvas.Y : static_cast<float>(height);
-				const float pixelsPerStud =
-					std::abs(
-						projectedUp.y / std::max(std::abs(projectedUp.w), 1.0e-5f) -
-						projectedAnchor.y / std::max(std::abs(projectedAnchor.w), 1.0e-5f)
-					) *
-					canvasHeight * 0.5f;
-				const float usablePixelsPerStud = std::max(pixelsPerStud, 1.0e-5f);
-				const core::Vector2 worldSize{
-					spatial.BillboardStuds.X + spatial.BillboardPixels.X / usablePixelsPerStud,
-					spatial.BillboardStuds.Y + spatial.BillboardPixels.Y / usablePixelsPerStud,
-				};
-				axisX = right * worldSize.X;
-				axisY = up * -worldSize.Y;
-				origin = spatial.Origin - axisX * 0.5f - axisY * 0.5f;
-				normal = distance > 0.0f ? toCamera / distance : camera.LookVector() * -1.0f;
+				const SpatialQuad quad = BillboardQuad(
+					spatial.Origin,
+					camera.RightVector(),
+					camera.UpVector(),
+					toCamera,
+					spatial.BillboardStuds,
+					spatial.BillboardPixels,
+					CanvasPixelsPerStud(viewProjection, spatial.Origin, camera.UpVector(), canvasHeight),
+					camera.LookVector() * -1.0f
+				);
+				origin = quad.Origin;
+				axisX = quad.AxisX;
+				axisY = quad.AxisY;
+				normal = quad.Normal;
 			}
 
 			const void *wantedPipeline = spatial.AlwaysOnTop ? SpatialTopPipeline : SpatialPipeline;

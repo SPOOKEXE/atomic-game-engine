@@ -1366,6 +1366,140 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 }
 
+TEST_CASE("an active free camera flies through the portal it crosses", "[scene][surfacecameras]") {
+	// A scripted camera has a transform but no velocity. The body-only query
+	// therefore left it in the source corridor even though the pane already
+	// showed the destination, which made a fly-through stop at the doorway.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// A controller with no subject is the presented free/scripted-camera path.
+	// A subject camera is placed later by `PlaceCamera` and must not be carried
+	// a second time here.
+	mirror.World.SetResource(engine::scene::CameraController{});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		mirror.Eye, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<Transform>(
+		mirror.Eye, Transform{CFrame::LookAt(Vector3{0.0f, 0.0f, -1.0f}, Vector3{0.0f, 0.0f, -2.0f})}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	const CFrame &arrived = mirror.World.Get<Transform>(mirror.Eye)->Frame;
+	CHECK_THAT(arrived.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(arrived.Position.Z, Catch::Matchers::WithinAbs(0.6f, TOLERANCE));
+	CHECK(arrived.LookVector().Z > 0.9f);
+
+	// Both ends of the tick landed in the destination frame, so asking again
+	// cannot bounce the eye back through the partner pane.
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+}
+
+TEST_CASE(
+	"a scriptable camera crosses while a player remains its controller subject", "[scene][surfacecameras]"
+) {
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	const Entity subject =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Subject");
+	engine::scene::CameraController controller;
+	controller.Subject = subject;
+	controller.Mode = engine::scene::CameraMode::Scriptable;
+	mirror.World.SetResource(controller);
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		mirror.Eye, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<Transform>(
+		mirror.Eye, Transform{CFrame::LookAt(Vector3{0.0f, 0.0f, -1.0f}, Vector3{0.0f, 0.0f, -2.0f})}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+	const CFrame &arrived = mirror.World.Get<Transform>(mirror.Eye)->Frame;
+	CHECK_THAT(arrived.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(arrived.Position.Z, Catch::Matchers::WithinAbs(0.6f, TOLERANCE));
+	CHECK(arrived.LookVector().Z > 0.9f);
+}
+
+TEST_CASE("a spinning body keeps its spin in the room it arrives in", "[scene][surfacecameras]") {
+	// **The second half of `Motion`, which the crossing carried for four
+	// versions without.** `Motion` is a `Linear` and an `Angular`, the solver
+	// writes both and `physics::Advanced` integrates both - so a pair of panes
+	// that turns the room turns the axis a body is spinning about, exactly as it
+	// turns the direction the body is travelling in. Mapping one and not the
+	// other is the bug that reads as physics rather than as a portal: a crate
+	// tumbling end over end through a corner comes out tumbling about an axis
+	// the far room has no reason to name.
+	//
+	// The far pane is a hole in the **floor** rather than one more door in a
+	// wall, because a wall is the one arrangement that hides this. A seam's
+	// destination is `LookAt(centre, centre + normal, UpFor(normal))` and the
+	// half-turn is about `Y`, so any two upright panes - however they are yawed
+	// or rolled - compose to a map that leaves `Y` alone, and a body spinning
+	// about `Y` comes out looking correct however the pass is written. Point the
+	// far pane's face at the sky and the near room's up is the far room's
+	// sideways, which is the case that tells the two implementations apart.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(
+		far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(1.5707963f, 0.0f, 0.0f)}
+	);
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	const engine::scene::SeamTransform through = engine::scene::SeamMapping(seams[0]);
+
+	// A top, spinning about world up at four radians a second, walking along -Z
+	// through pane A exactly as the case above does.
+	const Vector3 spin{0.0f, 4.0f, 0.0f};
+
+	const Entity top =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Top");
+	mirror.World.Set<Transform>(top, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		top, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(top, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, spin});
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	const Vector3 spinning = mirror.World.Get<engine::scene::Motion>(top)->Angular;
+	const Vector3 expected = through.Rotate(spin);
+
+	CHECK_THAT(spinning.X, Catch::Matchers::WithinAbs(expected.X, TOLERANCE));
+	CHECK_THAT(spinning.Y, Catch::Matchers::WithinAbs(expected.Y, TOLERANCE));
+	CHECK_THAT(spinning.Z, Catch::Matchers::WithinAbs(expected.Z, TOLERANCE));
+
+	// **And it is a different axis**, which is what makes the three lines above
+	// an assertion rather than a restatement. A pass that leaves `Angular` alone
+	// passes them the moment the pair stops turning anything, so the case has to
+	// say that this pair does turn something.
+	CHECK((spinning - spin).Magnitude() > 1.0f);
+
+	// **The same rate, because a spin is not a length.** `Rotate` and not
+	// `Carry`: radians per second have no distance in them, so a hole that
+	// halves a body halves the radius it spins at and halves the speed of every
+	// point on it, and the rate those two divide to is unchanged. `Carry` here
+	// would make a shrinking pair spin a body down to nothing over a few
+	// crossings, and a growing one spin it up without bound.
+	CHECK_THAT(spinning.Magnitude(), Catch::Matchers::WithinAbs(4.0f, TOLERANCE));
+}
+
 TEST_CASE("a portal swallows only what goes through the hole", "[scene][surfacecameras]") {
 	Mirror mirror;
 
@@ -2142,7 +2276,7 @@ TEST_CASE("a point is on one side of a hole or the other", "[scene][surfacecamer
 	// straddles a plane and is cut by it; a spark is wholly in one space or the
 	// other, so it is *moved* through a hole rather than copied and cut. Drawing
 	// it in both places would be two sparks where the author authored one, and
-	// `client::CollectParticleBatches` is the caller this exists for - a torch
+	// `engine::render::CollectParticleBatches` is the caller this exists for - a torch
 	// carried into a doorway whose flame dies at the seam is the artefact.
 	//
 	// The geometry is this file's: pane A at the origin with its `Front` face at
@@ -2268,6 +2402,156 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 		narrow, through, CFrame(Vector3{0.0f, -0.51f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
 	);
 	CHECK_FALSE(overhanging.Fits);
+}
+
+TEST_CASE("a one-way portal refuses the way it does not face", "[scene][surfacecameras]") {
+	// **A door you can walk into and not out of.** `Portal::Bidirectional` off
+	// leaves the pane drawing, cutting and lighting exactly as it was and
+	// refuses one thing: a crossing that starts behind the face. In front means
+	// the side the face's normal points at, which is the side the pane shows its
+	// image on and the side `SeamCarries` calls "not yet through".
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+	// The fixture's pane has its `Front` face outward along -Z, so a body
+	// walking from `z = +1` to `z = -1` is entering the *back* of it. That is
+	// the case a one-way mouth exists to refuse.
+	const auto walk = [&] {
+		const Entity walker =
+			mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+		mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+		mirror.World.Set<engine::scene::PreviousTransform>(
+			walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+		);
+		mirror.World.Set<engine::scene::Motion>(
+			walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+		);
+		return walker;
+	};
+
+	SECTION("both ways by default") {
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+		(void)walk();
+		CHECK(engine::scene::CrossPortals(mirror.World) == 1);
+	}
+
+	SECTION("one way refuses the back") {
+		engine::scene::Portal portal{far};
+		portal.Bidirectional = false;
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, portal);
+
+		const Entity walker = walk();
+		CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+
+		// Left where it was, rather than stopped at the plane. A one-way mouth
+		// is not a wall - it is a hole this body is not going through.
+		const auto *placed = mirror.World.Get<Transform>(walker);
+		REQUIRE(placed != nullptr);
+		CHECK_THAT(placed->Frame.Position.Z, Catch::Matchers::WithinAbs(-1.0f, 1e-4f));
+	}
+
+	SECTION("one way still admits the front") {
+		engine::scene::Portal portal{far};
+		portal.Bidirectional = false;
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, portal);
+
+		// The same walk, the other way round.
+		const Entity walker =
+			mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+		mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, 1.0f})});
+		mirror.World.Set<engine::scene::PreviousTransform>(
+			walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, -1.0f})}
+		);
+		mirror.World.Set<engine::scene::Motion>(
+			walker, engine::scene::Motion{Vector3{0.0f, 0.0f, 16.0f}, Vector3::Zero}
+		);
+
+		CHECK(engine::scene::CrossPortals(mirror.World) == 1);
+		const auto *placed = mirror.World.Get<Transform>(walker);
+		REQUIRE(placed != nullptr);
+		CHECK(std::abs(placed->Frame.Position.X - 100.0f) < 15.0f);
+	}
+}
+
+TEST_CASE("a rig is cut in one piece or not at all", "[scene][surfacecameras]") {
+	// **The reported "character split in half in a portal".** Whether a row may
+	// be cut is "does it fit the aperture", and a character is a dozen drawn
+	// rows: standing in an opening its torso is comfortably inside the rectangle
+	// and its feet sit on the bottom edge, where the box overhangs. Asked per
+	// row that is yes for the torso and no for the feet, and a row that answers
+	// no is drawn *whole* rather than cut - so the body is clipped at the plane
+	// from the waist up and pushed through the wall from the ankles down.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// The pane is eight by four and a half. A torso in the middle of it fits; a
+	// foot on the bottom edge reaches four-nine and does not.
+	const auto torso = [] {
+		engine::scene::DrawInstance row;
+		row.Frame = CFrame(Vector3{0.0f, 1.0f, -0.2f});
+		row.HalfExtent = Vector3{0.6f, 1.2f, 0.4f};
+		return row;
+	};
+	const auto foot = [] {
+		engine::scene::DrawInstance row;
+		row.Frame = CFrame(Vector3{0.0f, -4.5f, -0.2f});
+		row.HalfExtent = Vector3{0.3f, 0.4f, 0.5f};
+		return row;
+	};
+
+	SECTION("two loose bodies keep their own answers") {
+		std::vector<engine::scene::DrawInstance> drawn{torso(), foot()};
+
+		// One copy, one cut: exactly the split, and it is correct for two rows
+		// that are two different objects.
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+		CHECK(drawn[0].SeamNormal != Vector3{});
+		CHECK(drawn[1].SeamNormal == Vector3{});
+	}
+
+	SECTION("two limbs of one rig are cut together") {
+		std::vector<engine::scene::DrawInstance> drawn{torso(), foot()};
+		drawn[0].Rig = 7;
+		drawn[1].Rig = 7;
+
+		// Both, because one part of the body is through the opening and the
+		// body is one thing. The foot's few centimetres past the rim are worth
+		// less than the rig being in one piece.
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 2);
+		CHECK(drawn[0].SeamNormal != Vector3{});
+		CHECK(drawn[1].SeamNormal != Vector3{});
+	}
+
+	SECTION("a rig with nothing through the hole is refused whole") {
+		std::vector<engine::scene::DrawInstance> drawn{foot(), foot()};
+		drawn[0].Rig = 9;
+		drawn[1].Rig = 9;
+		drawn[1].Frame = CFrame(Vector3{0.0f, -4.6f, -0.2f});
+
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
+		CHECK(drawn[0].SeamNormal == Vector3{});
+		CHECK(drawn[1].SeamNormal == Vector3{});
+	}
+
+	SECTION("two rigs do not answer for each other") {
+		std::vector<engine::scene::DrawInstance> drawn{torso(), foot()};
+		drawn[0].Rig = 1;
+		drawn[1].Rig = 2;
+
+		// The torso's rig fits and the foot's does not, which is the loose case
+		// again - a grouping that leaked between rigs would cut both.
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+		CHECK(drawn[0].SeamNormal != Vector3{});
+		CHECK(drawn[1].SeamNormal == Vector3{});
+	}
 }
 
 TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][surfacecameras]") {
@@ -2536,7 +2820,7 @@ TEST_CASE("a character standing in a hole is drawn on both sides of it", "[scene
 	(void)engine::scene::PoseCharacters(mirror.World);
 
 	// The draw list a collector would build from this world, which is what the
-	// pass reads. Built here by hand because `client::CollectInstances` is a
+	// pass reads. Built here by hand because `engine::render::CollectInstances` is a
 	// tier away and what is under test is the seam.
 	std::vector<engine::scene::DrawInstance> drawn;
 	mirror.World.Each<const Transform, const Bounds, const Visual, const engine::scene::Rendered>(
@@ -2922,6 +3206,7 @@ TEST_CASE("what crosses a hole is what is drawn, not what can move", "[scene][su
 	mesh.Tint = engine::core::Color3{0.25f, 0.5f, 0.75f};
 	mesh.TagMask = 0b1010u;
 	mesh.Transparency = 0.25f;
+	mesh.Source = 41;
 	drawn.push_back(mesh);
 
 	std::vector<engine::scene::DrawInstance> picture;
@@ -2934,6 +3219,8 @@ TEST_CASE("what crosses a hole is what is drawn, not what can move", "[scene][su
 	CHECK(copied.Mesh == engine::core::Name("a.mesh"));
 	CHECK(copied.Texture == engine::core::Name("a.texture"));
 	CHECK(copied.TagMask == 0b1010u);
+	CHECK(copied.Source == 41);
+	CHECK(copied.Variant != 0);
 	CHECK_THAT(copied.Transparency, Catch::Matchers::WithinAbs(0.25f, TOLERANCE));
 	CHECK_THAT(copied.Tint.B, Catch::Matchers::WithinAbs(0.75f, TOLERANCE));
 }
@@ -3748,10 +4035,10 @@ TEST_CASE("a world states how many surface panes it draws", "[surfacecameras]") 
 	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
 
 	// A world that has never said anything gets the default, which is what makes
-	// every scene authored before this go on drawing - and it is fifty rather
+	// every scene authored before this go on drawing - and it is thirty-two rather
 	// than the sixteen that used to be compiled in.
 	CHECK(engine::scene::SurfaceLimitOf(store) == engine::scene::DEFAULT_SURFACE_LIMIT);
-	CHECK(engine::scene::DEFAULT_SURFACE_LIMIT == 50);
+	CHECK(engine::scene::DEFAULT_SURFACE_LIMIT == 32);
 
 	// The declared type is checked and not only the round-trip, for
 	// `SurfaceBounces`' reason: raw bytes through `SetProperty` succeed whatever

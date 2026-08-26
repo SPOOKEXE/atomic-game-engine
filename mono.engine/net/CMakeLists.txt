@@ -20,6 +20,13 @@
 # asio is VENDOR rather than VENDOR_PUBLIC: no public header here names a
 # socket, an io_context or an error_code. That is what keeps a transport
 # swappable and what stops asio's headers reaching every module that links this.
+#
+# ngtcp2 is VENDOR for the same reason and it is the harder half to keep: a QUIC
+# connection is ngtcp2 all the way through, so `quic/Connection.hpp` holds a
+# pimpl and every `ngtcp2_` type stays inside one translation unit. The crypto
+# and the TLS handshake beside it name none at all - they are ours, over
+# Crypto++ - which is what lets `docs/QUIC.md` §4's decision be revisited
+# without the transport noticing.
 mono_add_library(net
 	TIER shared
 	DEPS
@@ -27,4 +34,5 @@ mono_add_library(net
 	VENDOR
 		Vendor::asio
 		Vendor::cryptopp
+		Vendor::ngtcp2
 )

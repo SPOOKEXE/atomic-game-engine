@@ -27,6 +27,8 @@
 #include <engine/core/Name.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::ecs {
@@ -110,6 +112,23 @@ namespace engine::scene {
 		//         `nullptr`.
 		const collision::TriangleMesh *FindMesh(core::Name name) const;
 
+		// Drops both shapes registered under a name, if any are.
+		//
+		// **Because a shape can now outlive its author.** Every filler before
+		// v0.19 was content: a manifest is walked once, and a name registered
+		// from it is wanted for as long as the world is. A script that builds
+		// geometry at run time is the other case - a terrain streamer creates
+		// and destroys a mesh per chunk as somebody walks - and a table that
+		// only ever grew would hold a hull and a triangle soup per chunk ever
+		// built, none of which anything can name again.
+		//
+		// Silent when the name is not there, which is the ordinary case for a
+		// mesh that never had a collider.
+		//
+		// @param name The shape to forget.
+		// @since v0.19
+		void Forget(core::Name name);
+
 		// How many shapes of each kind are registered.
 		//@{
 		size_t HullCount() const {
@@ -121,6 +140,37 @@ namespace engine::scene {
 		}
 		//@}
 	};
+
+	// Bakes a hull and a triangle mesh from one set of points and indices.
+	//
+	// **The one place either shape is built**, which is why it is here rather
+	// than beside a caller: `game::AddCollisionShapes` bakes a delivered mesh
+	// and `RefreshEditableMeshCollision` bakes one a script built this frame,
+	// and a second copy of "quickhull the points, then soup the triangles" is
+	// two places for the two paths to drift apart on tolerance or winding.
+	//
+	// Both, rather than whichever the collider asks for. A `Collider` names its
+	// geometry and picks its `ShapeKind` separately, and the two are edited by
+	// different people at different times - so baking only the kind that
+	// happens to be selected would make switching a part from `Hull` to `Mesh`
+	// depend on whether anything else in the world had already asked for one.
+	//
+	// Nothing is registered for an empty point list: see `game::
+	// AddCollisionShapes`, which refuses the same case for the same reason - an
+	// empty hull is a collider that is a single point at the part's origin,
+	// which stops nothing and says nothing.
+	//
+	// @param into    The table to write into.
+	// @param name    What a `Collider::Geometry` will say.
+	// @param points  The vertices, in the part's own object space.
+	// @param indices Three per triangle, into `points`.
+	// @since v0.19
+	void BakeCollisionShapes(
+		CollisionShapes &into,
+		core::Name name,
+		std::span<const core::Vector3> points,
+		std::span<const uint32_t> indices
+	);
 
 	// The world's shape table, or nothing.
 	//

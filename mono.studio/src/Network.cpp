@@ -25,6 +25,7 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -42,7 +43,6 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
-#include <cdn/LocalStore.hpp>
 #include <client/ContentDemand.hpp>
 #include <filesystem>
 #include <fstream>
@@ -67,10 +67,10 @@ namespace studio {
 	namespace {
 		// A byte count somebody can read at a glance.
 		//
-		// **Powers of 1024 under decimal names**, matching `cdn::Readable` and
+		// **Powers of 1024 under decimal names**, matching `cdn::ReadableRate` and
 		// every tool an operator already has open. Being right about the prefix
 		// and alone in it helps nobody comparing this against `df`.
-		std::string Readable(uint64_t bytes) {
+		std::string ReadableRate(uint64_t bytes) {
 			static const char *UNITS[] = {"B", "KB", "MB", "GB", "TB"};
 
 			double scaled = static_cast<double>(bytes);
@@ -86,11 +86,11 @@ namespace studio {
 		}
 
 		std::string PerSecond(double bytes) {
-			return Readable(static_cast<uint64_t>(std::max(0.0, bytes))) + "/s";
+			return ReadableRate(static_cast<uint64_t>(std::max(0.0, bytes))) + "/s";
 		}
 
 		// One labelled number in the two-column table both halves use.
-		void Row(const char *label, const std::string &value, const char *note = nullptr) {
+		void NetworkRow(const char *label, const std::string &value, const char *note = nullptr) {
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 			ImGui::TextUnformatted(label);
@@ -168,6 +168,7 @@ namespace studio {
 		// dead client and would be asked about a live one. `mono.client` clears
 		// its own set for this reason when it rebuilds; the editor did not.
 		ContentAsked.clear();
+		ContentScannedAtRevision.clear();
 		ContentPending.clear();
 		ContentIssued.clear();
 		ContentRequested = false;
@@ -322,8 +323,14 @@ namespace studio {
 			// which is exactly the reading that sends somebody looking in the
 			// delivery client and finding nothing.
 			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
-			OfferPublishedNames();
-			RequestShownContent();
+			{
+				ENGINE_PROFILE_CAT("content.demand.catalogue", engine::core::ProfileCategory::Assets);
+				OfferPublishedNames();
+			}
+			{
+				ENGINE_PROFILE_CAT("content.demand.references", engine::core::ProfileCategory::Assets);
+				RequestShownContent();
+			}
 		}
 
 		// **How much decoding and uploading one frame will do**, and the same
@@ -403,6 +410,7 @@ namespace studio {
 				}
 
 				if (Renderer.AddMesh(name, mesh)) {
+					VisualResourceRevision++;
 					ContentMeshes++;
 
 					// **Every part naming it, now that its shape is known.** A
@@ -457,6 +465,7 @@ namespace studio {
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
+					VisualResourceRevision++;
 					ContentTextures++;
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
@@ -481,7 +490,7 @@ namespace studio {
 				if (!engine::assets::Material::Read(reader, material)) {
 					continue;
 				}
-				// **All five, built once and recorded together.** A material is
+				// **All seven, built once and recorded together.** A material is
 				// one thing; recording its colour and forgetting its normals
 				// would draw a part textured and flat, which reads as the normal
 				// map being broken rather than absent.
@@ -491,6 +500,7 @@ namespace studio {
 					.Roughness = engine::core::Name(material.RoughnessMap),
 					.Occlusion = engine::core::Name(material.OcclusionMap),
 					.Height = engine::core::Name(material.HeightMap),
+					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
 				};
 				EachOpenWorld([&name, &maps](engine::ecs::Store &store) {
@@ -725,25 +735,40 @@ namespace studio {
 		//
 		// Issuing a few per pump turns the same load into content appearing over
 		// a second or two, which is what an editor opening a large place should
-		// look like. The collection is idempotent, so what is not issued this
-		// pump is simply issued on the next - there is no queue to keep in step.
-		// **A member cleared rather than a local rebuilt.** This runs every pump
-		// and the list is discarded every pump, so a local was one allocation
-		// and a geometric regrowth per frame for an answer that is almost always
-		// the same one.
+		// look like. Unissued names stay in the member queue; rescanning an
+		// unchanged world to reconstruct that queue was the idle cost this gate
+		// removes.
 		std::vector<engine::core::Name> &wanted = WantedContent;
-		wanted.clear();
-		EachOpenWorld([&wanted](engine::ecs::Store &store) { client::CollectWantedContent(store, wanted); });
+		{
+			ENGINE_PROFILE_CAT("content.demand.scan", engine::core::ProfileCategory::Assets);
+			Universe->EachWorld([this, &wanted](engine::world::WorldId world) {
+				Universe->Enter(world, [this, world, &wanted](engine::ecs::Store &store) {
+					const uint64_t revision = client::WantedContentRevision(store);
+					const auto scanned = ContentScannedAtRevision.find(world.Index);
+					if (scanned != ContentScannedAtRevision.end() && scanned->second == revision) {
+						return;
+					}
+					ContentScannedAtRevision[world.Index] = revision;
+					client::CollectWantedContent(store, wanted);
+				});
+			});
+		}
 
 		size_t issued = 0;
-		for (const engine::core::Name &name : wanted) {
-			if (issued >= REQUESTS_PER_PUMP) {
-				break;
-			}
-			if (RequestContentAsset(name)) {
-				issued++;
+		size_t kept = 0;
+		{
+			ENGINE_PROFILE_CAT("content.demand.issue", engine::core::ProfileCategory::Assets);
+			for (const engine::core::Name &name : wanted) {
+				if (issued >= REQUESTS_PER_PUMP) {
+					wanted[kept++] = name;
+					continue;
+				}
+				if (RequestContentAsset(name)) {
+					issued++;
+				}
 			}
 		}
+		wanted.resize(kept);
 	}
 
 	bool Editor::RequestContentAsset(const engine::core::Name &asset) {
@@ -808,7 +833,7 @@ namespace studio {
 		// names plus a signed manifest, which would arrive as several thousand
 		// unrecognisable files. The far end publishes what it receives; sending
 		// it something already published would be publishing twice.
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 
 		std::error_code failure;
 		if (!std::filesystem::is_directory(paths.Raw, failure)) {
@@ -878,8 +903,8 @@ namespace studio {
 					// A download that landed somewhere else would be a second
 					// place content lives, and the whole reason the store is
 					// content-addressed is that there is one.
-					const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-					if (cdn::EnsureLocalStore(paths)) {
+					const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+					if (engine::assets::EnsureLocalStore(paths)) {
 						const std::filesystem::path stored =
 							paths.Raw /
 							(asset->Root.ToHex() + std::filesystem::path(asset->Name).extension().string());
@@ -888,8 +913,8 @@ namespace studio {
 							reinterpret_cast<const char *>(asset->Bytes.data()),
 							static_cast<std::streamsize>(asset->Bytes.size())
 						);
-						ContentStatus = out.good() ? pending.Name + " - " + Readable(asset->Bytes.size()) +
-														 " into the store"
+						ContentStatus = out.good() ? pending.Name + " - " +
+														 ReadableRate(asset->Bytes.size()) + " into the store"
 												   : pending.Name + " - could not be written";
 					}
 				}
@@ -926,16 +951,18 @@ namespace studio {
 			ImGui::TableSetupColumn("##what", ImGuiTableColumnFlags_WidthStretch, 0.45f);
 			ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
-			Row("Down",
+			NetworkRow(
+				"Down",
 				PerSecond(rates.DownPerSecond),
-				"compressed bytes off the wire, over the last few seconds");
-			Row("Up", PerSecond(rates.UpPerSecond), "bytes sent to write origins");
+				"compressed bytes off the wire, over the last few seconds"
+			);
+			NetworkRow("Up", PerSecond(rates.UpPerSecond), "bytes sent to write origins");
 
 			if (ContentClient) {
-				Row("In flight", std::to_string(ContentClient->Outstanding()) + " request(s)");
+				NetworkRow("In flight", std::to_string(ContentClient->Outstanding()) + " request(s)");
 			}
 			if (ContentUploads) {
-				Row("Queued", std::to_string(ContentUploads->Remaining()) + " upload(s)");
+				NetworkRow("Queued", std::to_string(ContentUploads->Remaining()) + " upload(s)");
 			}
 			ImGui::EndTable();
 		}
@@ -960,14 +987,18 @@ namespace studio {
 				ImGui::TableSetupColumn("##what", ImGuiTableColumnFlags_WidthStretch, 0.45f);
 				ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
-				Row("Manifest", ContentClient->Ready() ? "verified" : "waiting");
-				Row("Cache hits",
+				NetworkRow("Manifest", ContentClient->Ready() ? "verified" : "waiting");
+				NetworkRow(
+					"Cache hits",
 					std::to_string(counters.CacheHits),
-					"assets served without touching a source");
-				Row("Cache misses", std::to_string(counters.CacheMisses));
-				Row("Bundles", std::to_string(counters.Bundles));
-				Row("Transferred", Readable(counters.TransferredBytes), "as it travelled - compressed");
-				Row("Expanded", Readable(counters.ExpandedBytes), "what those became");
+					"assets served without touching a source"
+				);
+				NetworkRow("Cache misses", std::to_string(counters.CacheMisses));
+				NetworkRow("Bundles", std::to_string(counters.Bundles));
+				NetworkRow(
+					"Transferred", ReadableRate(counters.TransferredBytes), "as it travelled - compressed"
+				);
+				NetworkRow("Expanded", ReadableRate(counters.ExpandedBytes), "what those became");
 
 				// **The pair is what answers 'did this travel compressed'**, and
 				// it is a question about the wire - so it is measured at it
@@ -981,12 +1012,14 @@ namespace studio {
 						static_cast<double>(counters.ExpandedBytes) /
 							static_cast<double>(counters.TransferredBytes)
 					);
-					Row("Compression", ratio);
+					NetworkRow("Compression", ratio);
 				}
 
-				Row("Source failures",
+				NetworkRow(
+					"Source failures",
 					std::to_string(counters.SourceFailures),
-					"times a source was passed over");
+					"times a source was passed over"
+				);
 
 				ImGui::EndTable();
 			}
@@ -1036,16 +1069,20 @@ namespace studio {
 				ImGui::TableSetupColumn("##what", ImGuiTableColumnFlags_WidthStretch, 0.45f);
 				ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
-				Row("Destinations", std::to_string(ContentUploads->Destinations().size()));
-				Row("Stored", std::to_string(counters.Stored));
-				Row("Already there",
+				NetworkRow("Destinations", std::to_string(ContentUploads->Destinations().size()));
+				NetworkRow("Stored", std::to_string(counters.Stored));
+				NetworkRow(
+					"Already there",
 					std::to_string(counters.Skipped),
-					"the probe that makes a re-upload cheap");
-				Row("Sent", Readable(counters.SentBytes));
-				Row("Refused",
+					"the probe that makes a re-upload cheap"
+				);
+				NetworkRow("Sent", ReadableRate(counters.SentBytes));
+				NetworkRow(
+					"Refused",
 					std::to_string(counters.Refused),
-					"wrong key, or an origin that takes no writes");
-				Row("Failed", std::to_string(counters.Failed));
+					"wrong key, or an origin that takes no writes"
+				);
+				NetworkRow("Failed", std::to_string(counters.Failed));
 				ImGui::EndTable();
 			}
 

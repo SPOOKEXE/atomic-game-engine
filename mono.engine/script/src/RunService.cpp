@@ -13,8 +13,8 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <array>
 
@@ -61,7 +61,7 @@ namespace engine::script {
 		// which is the surface `HttpService`'s absent three are refused for
 		// being. `mono.studio` growing a paused mode is what would make them
 		// mean something.
-		constexpr std::array<ServiceMethod, 4> METHODS{{
+		constexpr std::array<ServiceMethod, 4> RUN_METHODS{{
 			{"IsServer", IsServer},
 			{"IsClient", IsClient},
 			{"IsStudio", IsStudio},
@@ -88,7 +88,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "RunService";
-			surface.Methods = METHODS;
+			surface.Methods = RUN_METHODS;
 			surface.Signals = SIGNALS;
 			return surface;
 		}();

@@ -41,6 +41,12 @@ mono_add_library(game
 		# need.
 		Engine::script
 
+		# L11. **Because `StartWorldScripts` opens a VM.** A document says which
+		# language it is in and this module acts on that, so it needs the factory
+		# rather than either adapter - which is what puts this module at L12 since
+		# v0.19.
+		Engine::scripthost
+
 		# L9, `shared`. The asset pipelines a world carries, as
 		# `bake::PipelineSet` and its text format.
 		#
@@ -74,9 +80,11 @@ mono_add_library(game
 		# engine's own mesh format; `bake` holds the glTF, OBJ and PMX readers.
 		# A server links this target and has no business decoding a PMX.
 		#
-		# **Nothing here opens a file or a socket.** A caller hands over bytes it
-		# already has - the client from `delivery`, a server from the store it is
-		# already serving - so the trust boundary stays where it was.
+		# **Nothing here fetches.** This module does open files - a `.agame` is
+		# read and written through a path a caller named - but nothing behind a
+		# content id is resolved here. Those bytes arrive already in hand: the
+		# client's from `delivery`, a server's from the store it is already
+		# serving, so the trust boundary stays where it was.
 		Engine::collision
 		Engine::assets
 )

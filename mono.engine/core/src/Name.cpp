@@ -10,7 +10,7 @@ namespace engine::core {
 
 	namespace {
 
-		struct Registry {
+		struct NameTable {
 			// **A shared mutex, because reading a name's text is one of the
 			// hottest things in the engine and needs nothing exclusive.**
 			//
@@ -45,13 +45,13 @@ namespace engine::core {
 			uint32_t NextId = 0;
 		};
 
-		Registry &Get() {
-			static Registry registry;
+		NameTable &Names() {
+			static NameTable registry;
 			return registry;
 		}
 
 		// Caller holds the lock.
-		void Bind(Registry &registry, uint32_t id, uint32_t slot) {
+		void Bind(NameTable &registry, uint32_t id, uint32_t slot) {
 			if (registry.Slots.size() <= id) {
 				registry.Slots.resize(static_cast<size_t>(id) + 1, Name::INVALID);
 			}
@@ -66,7 +66,7 @@ namespace engine::core {
 		// a counter at all, and any further pin below the new high-water mark
 		// gets consumed by ordinary interning. Skipping instead keeps both
 		// properties, at the cost of a walk that only ever advances.
-		uint32_t AllocateId(Registry &registry) {
+		uint32_t AllocateId(NameTable &registry) {
 			while (registry.NextId < registry.Slots.size() &&
 				   registry.Slots[registry.NextId] != Name::INVALID) {
 				registry.NextId++;
@@ -80,7 +80,7 @@ namespace engine::core {
 			return;
 		}
 
-		auto &registry = Get();
+		auto &registry = Names();
 
 		// **The hit is a read, and it is almost every call.** A process interns
 		// each distinct name once and then constructs from that text for the
@@ -133,7 +133,7 @@ namespace engine::core {
 			return {};
 		}
 
-		auto &registry = Get();
+		auto &registry = Names();
 		std::lock_guard lock(registry.Guard);
 
 		const auto existing = registry.Ids.find(text);
@@ -158,7 +158,7 @@ namespace engine::core {
 	}
 
 	Name Name::FromId(uint32_t id) {
-		auto &registry = Get();
+		auto &registry = Names();
 
 		// Shared: this reads `Slots` and writes nothing. It was exclusive, which
 		// meant a deserialiser resolving ids on two worlds' threads serialised
@@ -172,7 +172,7 @@ namespace engine::core {
 	}
 
 	bool Name::Exists(std::string_view text) {
-		auto &registry = Get();
+		auto &registry = Names();
 
 		// Shared, and the header already promises it: "Whether `text` has been
 		// interned, **without interning it**." A method that cannot write has no
@@ -182,7 +182,7 @@ namespace engine::core {
 	}
 
 	size_t Name::Count() {
-		auto &registry = Get();
+		auto &registry = Names();
 		std::shared_lock lock(registry.Guard);
 		return registry.Texts.size();
 	}
@@ -192,7 +192,7 @@ namespace engine::core {
 			return {};
 		}
 
-		auto &registry = Get();
+		auto &registry = Names();
 		std::shared_lock lock(registry.Guard);
 
 		if (Identifier >= registry.Slots.size()) {

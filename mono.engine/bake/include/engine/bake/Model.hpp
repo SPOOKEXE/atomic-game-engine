@@ -58,6 +58,21 @@ namespace engine::bake {
 		// `Submesh::Texture` holds the same spelling, so the caller rewrites
 		// both together once it knows what it published.
 		std::vector<std::string> Textures;
+
+		// The material library an OBJ named, **as the model spells it**, or
+		// empty for a format that carries its materials inside itself.
+		//
+		// **A name and not the contents, for the reason `Textures` above is a
+		// name.** An `.obj` puts its materials in a second file and says
+		// `mtllib box.mtl`; opening that file is a filesystem operation and this
+		// module deliberately has none. So the importer reports what the model
+		// asked for and the publisher - which does know where the model came
+		// from - reads it and fills in `Submesh::Texture` and
+		// `Submesh::BaseColour`.
+		//
+		// Empty for glTF and PMX: both carry their materials in the same file
+		// and set those fields themselves.
+		std::string MaterialLibrary;
 	};
 
 	// Identifies a format from the leading bytes.

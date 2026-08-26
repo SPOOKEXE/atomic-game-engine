@@ -23,11 +23,10 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-#include "Tweens.hpp"
-
 #include <engine/ecs/Classes.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
+#include <engine/script/Tweens.hpp>
 
 #include <algorithm>
 #include <array>
@@ -187,7 +186,7 @@ namespace engine::script {
 			call.ReturnTween(tween);
 		}
 
-		constexpr std::array<ServiceMethod, 2> METHODS{{
+		constexpr std::array<ServiceMethod, 2> TWEEN_METHODS{{
 			{"GetValue", GetValue},
 			{"Create", Create},
 		}};
@@ -197,7 +196,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "TweenService";
-			surface.Methods = METHODS;
+			surface.Methods = TWEEN_METHODS;
 			return surface;
 		}();
 		return SURFACE;

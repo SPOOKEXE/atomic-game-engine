@@ -80,7 +80,7 @@ namespace studio {
 		// convention and a plugin author counting from zero in Luau is a plugin
 		// author who will get it wrong once. Zero and out of range both answer
 		// `false`, which the caller turns into a named refusal.
-		bool IndexOf(const HostValue &value, size_t count, size_t &out) {
+		bool SurfaceIndexOf(const HostValue &value, size_t count, size_t &out) {
 			const double number = value.AsNumber(0.0);
 			if (number < 1.0 || number > static_cast<double>(count)) {
 				return false;
@@ -667,7 +667,7 @@ namespace studio {
 
 		bool CreateButton(HostArguments arguments, HostValue &result, std::string &failure) {
 			size_t toolbar = 0;
-			if (!IndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
 				failure = "no such toolbar - CreateToolbar answers the id to pass here";
 				return false;
 			}
@@ -697,8 +697,8 @@ namespace studio {
 		bool SetButtonActive(HostArguments arguments, std::string &failure) {
 			size_t toolbar = 0;
 			size_t button = 0;
-			if (!IndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar) ||
-				!IndexOf(At(arguments, 1), Plugin.Toolbars[toolbar].Buttons.size(), button)) {
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar) ||
+				!SurfaceIndexOf(At(arguments, 1), Plugin.Toolbars[toolbar].Buttons.size(), button)) {
 				failure = "no such button";
 				return false;
 			}
@@ -709,7 +709,7 @@ namespace studio {
 
 		bool Widget(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
 			size_t widget = 0;
-			if (!IndexOf(At(arguments, 0), Plugin.Widgets.size(), widget)) {
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Widgets.size(), widget)) {
 				failure = "no such widget - CreateWidget answers the id to pass here";
 				return false;
 			}

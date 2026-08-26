@@ -1,4 +1,6 @@
 #include <engine/bake/RobloxModel.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat3x3.hpp>
@@ -18,9 +20,9 @@ namespace engine::bake {
 		// densely packed binary format whose every array length comes off the
 		// wire, so a hand-rolled `offset +=` per field is exactly what walks off
 		// a truncated file. Every read below goes through this.
-		class Cursor {
+		class ModelCursor {
 		  public:
-			explicit Cursor(std::span<const std::byte> bytes) : Bytes(bytes) {}
+			explicit ModelCursor(std::span<const std::byte> bytes) : Bytes(bytes) {}
 
 			bool Failed() const {
 				return Broken;
@@ -304,7 +306,7 @@ namespace engine::bake {
 		// be read with a `memcpy`. Reading it as a plain array gives numbers that
 		// are wrong rather than absent, which is the failure this comment exists
 		// to prevent somebody reintroducing.
-		bool ReadWords(Cursor &cursor, size_t count, std::vector<uint32_t> &out) {
+		bool ReadWords(ModelCursor &cursor, size_t count, std::vector<uint32_t> &out) {
 			const std::span<const std::byte> raw = cursor.Take(static_cast<uint64_t>(count) * 4u);
 			if (cursor.Failed()) {
 				return false;
@@ -320,7 +322,7 @@ namespace engine::bake {
 			return true;
 		}
 
-		bool ReadLongs(Cursor &cursor, size_t count, std::vector<uint64_t> &out) {
+		bool ReadLongs(ModelCursor &cursor, size_t count, std::vector<uint64_t> &out) {
 			const std::span<const std::byte> raw = cursor.Take(static_cast<uint64_t>(count) * 8u);
 			if (cursor.Failed()) {
 				return false;
@@ -359,7 +361,7 @@ namespace engine::bake {
 		}
 
 		// The transposed float array every vector component is written as.
-		bool ReadReals(Cursor &cursor, size_t count, std::vector<float> &out) {
+		bool ReadReals(ModelCursor &cursor, size_t count, std::vector<float> &out) {
 			std::vector<uint32_t> words;
 			if (!ReadWords(cursor, count, words)) {
 				return false;
@@ -377,7 +379,7 @@ namespace engine::bake {
 		// **Cumulative is the part that is easy to miss**, and getting it wrong
 		// produces a file whose instances all resolve to referent zero - one
 		// instance and everything else silently missing.
-		bool ReadReferents(Cursor &cursor, size_t count, std::vector<int32_t> &out) {
+		bool ReadReferents(ModelCursor &cursor, size_t count, std::vector<int32_t> &out) {
 			std::vector<uint32_t> words;
 			if (!ReadWords(cursor, count, words)) {
 				return false;
@@ -469,7 +471,14 @@ namespace engine::bake {
 
 			static constexpr uint32_t NO_PARENT = 0xFFFFFFFFu;
 
+			// **Every silent drop in this reader passes through here**: a
+			// refused property type, a duplicate referent, an orphaned child, an
+			// unknown chunk. `Notes` is a vector a caller may never print, and
+			// the symptom of not printing it is a model that imported with
+			// pieces missing and no complaint.
 			void Note(std::string text) {
+				ENGINE_DEBUG("rbxm: {}", text);
+				core::Metrics::Count("bake.rbxm.notes", 1.0);
 				Notes->push_back(std::move(text));
 			}
 		};
@@ -488,7 +497,7 @@ namespace engine::bake {
 		};
 
 		PropertyResult DecodeValues(
-			Cursor &cursor, uint8_t type, size_t count, const Parse &parse, std::vector<RobloxValue> &out
+			ModelCursor &cursor, uint8_t type, size_t count, const Parse &parse, std::vector<RobloxValue> &out
 		) {
 			out.assign(count, RobloxValue{});
 
@@ -731,7 +740,7 @@ namespace engine::bake {
 		}
 
 		// The `INST` chunk: one class, and every instance of it in this file.
-		bool ReadInstances(Cursor &cursor, Parse &parse, std::string &failure) {
+		bool ReadInstances(ModelCursor &cursor, Parse &parse, std::string &failure) {
 			const int32_t classIndex = static_cast<int32_t>(cursor.Word());
 			const std::string className = cursor.Text();
 			const uint8_t isService = cursor.Byte();
@@ -790,7 +799,7 @@ namespace engine::bake {
 		}
 
 		// The `PROP` chunk: one property of one class, for every instance of it.
-		bool ReadProperties(Cursor &cursor, Parse &parse, std::string &failure) {
+		bool ReadProperties(ModelCursor &cursor, Parse &parse, std::string &failure) {
 			const int32_t classIndex = static_cast<int32_t>(cursor.Word());
 			const std::string name = cursor.Text();
 			const uint8_t type = cursor.Byte();
@@ -851,7 +860,7 @@ namespace engine::bake {
 		}
 
 		// The `PRNT` chunk: which instance is inside which.
-		bool ReadParents(Cursor &cursor, Parse &parse, std::string &failure) {
+		bool ReadParents(ModelCursor &cursor, Parse &parse, std::string &failure) {
 			const uint8_t version = cursor.Byte();
 			const int64_t declared = static_cast<int32_t>(cursor.Word());
 			if (cursor.Failed()) {
@@ -972,7 +981,7 @@ namespace engine::bake {
 			return false;
 		}
 
-		Cursor cursor(bytes);
+		ModelCursor cursor(bytes);
 		cursor.Skip(MAGIC.size());
 
 		const uint16_t version = cursor.Half();
@@ -1051,7 +1060,7 @@ namespace engine::bake {
 				payload = inflated;
 			}
 
-			Cursor inner(payload);
+			ModelCursor inner(payload);
 			const std::string_view tag(reinterpret_cast<const char *>(name.data()), name.size());
 
 			if (tag == "INST") {
@@ -1102,6 +1111,16 @@ namespace engine::bake {
 
 		if (!Assemble(parse, model, failure)) {
 			return false;
+		}
+
+		if (!model.Notes.empty()) {
+			ENGINE_WARN(
+				"rbxm: {} root(s) read with {} thing(s) this reader could not keep",
+				model.Roots.size(),
+				model.Notes.size()
+			);
+		} else {
+			ENGINE_DEBUG("rbxm: {} root(s) read whole", model.Roots.size());
 		}
 
 		out = std::move(model);

@@ -656,7 +656,7 @@ namespace engine::scene {
 		// **What the four bytes cost, stated rather than waved at.** `Visual` is
 		// on every drawable, so a scene of 4096 parts pays 16 KB - one L2 way on
 		// most machines, against a component the draw-list walk reads once per
-		// entity per frame. `client::CollectInstances` is the loop that would
+		// entity per frame. `engine::render::CollectInstances` is the loop that would
 		// feel it and it is bandwidth-bound on `Transform` long before this.
 		//
 		// **The invariant is that this stays the last member.** A field appended
@@ -716,7 +716,7 @@ namespace engine::scene {
 	// replicated, signed, and the authority's to mean something by.
 	//
 	// **On the class the same way `SurfaceAppearance` is, for the identical
-	// reason.** `client::CollectInstances` is a batched parallel walk over a
+	// reason.** `engine::render::CollectInstances` is a batched parallel walk over a
 	// fixed signature, and an optional column is exactly what that shape cannot
 	// express - see `SurfaceAppearance`'s own header. Four bytes on every part
 	// is the price already paid for the four components ahead of it in this
@@ -835,12 +835,12 @@ namespace engine::scene {
 	// That is a real cost - a name and two more fields on a column that holds
 	// four thousand cubes - and it is paid deliberately. The alternative is an
 	// optional component, which means the draw-list pass either joins it per
-	// row or walks the world twice; `client::CollectInstances` is a batched
+	// row or walks the world twice; `engine::render::CollectInstances` is a batched
 	// parallel loop over a fixed signature, and an optional column is precisely
 	// what that shape cannot express. A dense column of mostly-invalid names is
 	// sixteen bytes an entity and no branches.
 	//
-	// **The other four maps are here now, and the rule they were held back by is
+	// **The data maps are here now, and the rule they were held back by is
 	// the reason they could arrive.** They were deliberately absent rather than
 	// declared and ignored, because a field nothing reads is half a feature
 	// somebody would reasonably assume worked. v0.11's G-buffer is the pass that
@@ -873,6 +873,7 @@ namespace engine::scene {
 		core::Name RoughnessMap = {};
 		core::Name OcclusionMap = {};
 		core::Name HeightMap = {};
+		core::Name MetalnessMap = {};
 
 		// What this surface emits with no light on it. Invalid means nothing,
 		// which is what almost every surface emits.
@@ -894,20 +895,25 @@ namespace engine::scene {
 		// @since v0.15
 		core::Name Shader = {};
 
+		// A multiplier distinct from the part colour. Keeping both is what lets
+		// Overlay reveal the part below a coloured surface.
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+
+		// Emission is tinted and scaled per surface. The map remains optional.
+		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
+		float EmissiveStrength = 1.0f;
+
 		// Below this alpha a fragment is discarded rather than blended, when
 		// `Mode` is `Clip`.
 		float AlphaCutoff = 0.5f;
 
 		// How the alpha channel of `ColourMap` is treated.
 		//
-		// **Three modes and not a bool**, because the third is the one a
-		// character model needs: hair and eyelashes are authored as cut-out
-		// planes, and blending them costs a per-pane sort that a discard does
-		// not.
-		AlphaMode Mode = AlphaMode::Opaque;
+		AlphaMode Mode = AlphaMode::Overlay;
+		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// Which material an instance names.
@@ -1003,6 +1009,16 @@ namespace engine::scene {
 
 		// Far clipping distance, in metres.
 		float FarPlane = 500.0f;
+
+		// The largest image a renderer may allocate for this camera. The default
+		// keeps an editor viewport from allocating beyond a full HD frame.
+		uint32_t MaxImageWidth = 1920;
+		uint32_t MaxImageHeight = 1080;
+
+		// A non-zero pair replaces the target size. This is useful for scripts
+		// that need a stable capture size independent of the host window.
+		uint32_t ImageWidth = 0;
+		uint32_t ImageHeight = 0;
 	};
 
 	// Something that makes a noise.
@@ -1138,10 +1154,10 @@ namespace engine::scene {
 		// full scene passes at 165 hertz, and nothing a viewer can see in a
 		// pane at arm's length needs them: a reflection is already a frame
 		// behind by construction, and the eye cannot tell a reflection updated
-		// at 120 from one updated at 165 while it can very much tell the
+		// at 60 from one updated at 165 while it can very much tell the
 		// difference in frame time.
 		//
-		// **120 by default rather than uncapped**, because that is the rate
+		// **60 by default rather than uncapped**, because that is the rate
 		// above which nobody has reported seeing the difference and below which
 		// several people have reported the cost. A display slower than this
 		// never reaches the cap and pays nothing for it; a fast one draws the
@@ -1159,7 +1175,7 @@ namespace engine::scene {
 		// stated bound.
 		//
 		// @since v0.15
-		float FPS = 120.0f;
+		float FPS = 60.0f;
 
 		// Which surface index this camera writes.
 		//
@@ -1299,13 +1315,35 @@ namespace engine::scene {
 		// @since v0.16
 		bool Enabled = true;
 
+		// Whether this mouth may be entered from behind as well as from in
+		// front.
+		//
+		// **True is what a portal has always been and is what a pair wants.**
+		// The map carries this pane's front hemisphere to the far pane's back
+		// one and its back to the far pane's front, so a two-way mouth is one
+		// rigid map that is its own inverse - walk through and walk back and you
+		// are where you started.
+		//
+		// False is the one-way door: an entrance you can walk into but not out
+		// of, or an exit that drops you into a room whose own pane you must not
+		// be pulled back through. The pane still draws from both sides - what is
+		// refused is the crossing, and only the crossing, because a mouth that
+		// vanished when you walked round it would read as a rendering fault
+		// rather than as a rule.
+		//
+		// In front means on the side the face's normal points at, which is the
+		// side `SeamCarries` calls "not yet through".
+		//
+		// @since v0.19
+		bool Bidirectional = true;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
 		//
-		// An `Entity` is eight bytes, a `Name` is four and `Enabled` is one, so
-		// the type's own alignment leaves three the compiler inserted and nobody
-		// declared. `Column::Write` sends `sizeof(T)` bytes and does not know which
-		// of them a member claimed.
-		uint8_t Reserved[3] = {};
+		// An `Entity` is eight bytes, a `Name` is four and the two flags are one
+		// each, so the type's own alignment leaves two the compiler inserted and
+		// nobody declared. `Column::Write` sends `sizeof(T)` bytes and does not
+		// know which of them a member claimed.
+		uint8_t Reserved[2] = {};
 	};
 
 	// The frustum a surface camera renders through, fitted to its pane.
@@ -1435,14 +1473,19 @@ namespace engine::scene {
 	// loop over one component type, and everything else in this file is
 	// untouched.
 	//
-	// **The derived frame is a field rather than a getter, and the reason is a
-	// beam.** A beam reads both of its attachments' world frames every frame,
-	// and a getter that resolved by walking to the parent would be two hierarchy
-	// lookups and two `CFrame` products per beam per frame - for a value that is
-	// the same for every reader within one frame. `ecs/AGENTS.md`'s rule against
-	// two copies of a fact bends here for the reason `CameraMatrices` bends it:
-	// the second copy is a *cache with one writer*, and `ResolveAttachments` is
-	// that writer.
+	// **The derived frame is a field rather than a getter, and the second reason
+	// is the one that matters.** The first is ordinary: a spawn point and a lamp
+	// placement both want the same product every frame, so one pass over one
+	// component type beats a hierarchy lookup per reader. The second is that a
+	// getter cannot signal. `ResolveAttachments` writes the rows that moved
+	// through `Store::GetMutable`, which *reports* the write - and that report is
+	// the whole of why `Attachment.WorldCFrame` and `WorldPosition` can fire
+	// `.Changed` when the part underneath moves. `ecs/AGENTS.md`'s rule against
+	// two copies of a fact bends here on those terms: the second copy is a cache
+	// with exactly one writer, and every host that owns a world runs it. A caller
+	// that wants the value without waiting for the pass calls
+	// `ResolveAttachment`, which is what the property getters and `BuildRibbons`
+	// do.
 	//
 	// **An attachment on nothing keeps its local frame as its world frame.**
 	// Roblox's rule - an `Attachment` parented to a `Model` or to the tree root
@@ -1544,33 +1587,6 @@ namespace engine::scene {
 
 		// Whether it is on.
 		bool Enabled = true;
-	};
-
-	// A content hash of what a consumer last saw, for consumers that cannot
-	// observe a column version.
-	//
-	// **This is the fallback and it must stay labelled as one.** Change
-	// detection is `ecs::ChangeChannel`: a column carries a version, a write
-	// through `Set` or `GetMutable` advances it, and that covers almost
-	// everything. The gap is the batch path - a system writing through a raw
-	// column pointer advances no per-row stamp, because there is no per-row
-	// write to hang one on, and `Store::MarkAllChanged` over-reports by design.
-	//
-	// So a consumer that must know exactly which rows differ recomputes this at
-	// `PostSimulation` and compares. It costs a pass over the data it is
-	// hashing, every tick, whether anything moved or not - which is why the
-	// answer is almost always the column version instead.
-	//
-	// Add one only where the batch path is genuinely the writer. If this starts
-	// appearing next to components nothing writes in bulk, it has spread and
-	// the fix is to delete it there rather than to make it cheaper.
-	//
-	// @since v0.4
-	struct QuickHash {
-		// The hash as of the last `PostSimulation`. Zero is a real value and
-		// not "unset": what makes a comparison meaningful is that both sides
-		// were computed by the same function, not that either is non-zero.
-		uint64_t Value = 0;
 	};
 
 	// How far a world reaches from its own origin.

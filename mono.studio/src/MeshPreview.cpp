@@ -38,6 +38,7 @@
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Resample.hpp>
@@ -46,11 +47,11 @@
 #include <engine/scene/DrawInstance.hpp>
 
 #include <algorithm>
-#include <cdn/LocalStore.hpp>
 #include <cmath>
 #include <fstream>
 #include <studio/Editor.hpp>
 #include <studio/Preview.hpp>
+#include <utility>
 #include <vector>
 
 namespace studio {
@@ -173,8 +174,10 @@ namespace studio {
 		}
 	}
 
-	PreviewState Editor::BuildPreviewMaterial(const std::string &name, engine::core::Name &texture) {
-		const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+	PreviewState
+	Editor::BuildPreviewMaterial(const std::string &name, engine::scene::SurfaceAppearance &appearance) {
+		const std::filesystem::path source =
+			engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), name);
 
 		std::error_code failure;
 		if (!std::filesystem::is_regular_file(source, failure)) {
@@ -192,94 +195,82 @@ namespace studio {
 			return PreviewState::Unavailable;
 		}
 
-		// **A material that names no texture previews as a bare sphere, and that
-		// is the honest answer rather than a failure.** `assets::Material`'s own
-		// rule is that an untextured material and an unknown one read alike to a
-		// consumer - but here they are genuinely different: this one was read,
-		// and what it says is that there is nothing to sample. A sphere in the
-		// default grey is exactly what such a material puts on a part.
-		if (material.ColourMap.empty()) {
-			return PreviewState::Ready;
-		}
+		const std::pair<const std::string *, engine::core::Name *> maps[] = {
+			{&material.ColourMap, &appearance.ColourMap},
+			{&material.NormalMap, &appearance.NormalMap},
+			{&material.RoughnessMap, &appearance.RoughnessMap},
+			{&material.OcclusionMap, &appearance.OcclusionMap},
+			{&material.HeightMap, &appearance.HeightMap},
+			{&material.MetalnessMap, &appearance.MetalnessMap},
+			{&material.EmissiveMap, &appearance.EmissiveMap},
+		};
 
-		// **Past this point a missing sheet is `Unavailable`, not a bare
-		// sphere.** The material names a texture, so a grey ball would be a
-		// picture of something the material is not - the failure mode `Preview.hpp`
-		// calls a preview that lies rather than one that is absent. A store
-		// published from another machine has the `.amat` and not its pixels,
-		// which is precisely this case.
-		const std::filesystem::path sheet = cdn::FindInStore(cdn::DefaultLocalPaths(), material.ColourMap);
-		if (!std::filesystem::is_regular_file(sheet, failure)) {
-			// **Asked for rather than given up on**, which is the other half of
-			// v0.12's preview fix. A store published from another machine has
-			// the `.amat` and not its pixels, and the editor already knows how
-			// to fetch one - `DownloadAsset` - so answering `Unavailable` here
-			// was refusing to do the one thing that would have made the preview
-			// possible.
-			//
-			// **Once per sheet, not once per frame.** `ContentAsked` is the same
-			// set the content pump uses to avoid re-requesting a texture a world
-			// named, and this is the same question about the same name.
-			const engine::core::Name key(material.ColourMap);
-			if (ContentClient && ContentAsked.insert(key.Id()).second) {
-				DownloadAsset(material.ColourMap);
+		// Resolve every sheet before uploading any. A remote material may be
+		// missing several maps, and partial registration would make its preview
+		// depend on which one happened to arrive first.
+		bool pending = false;
+		for (const auto &[map, destination] : maps) {
+			(void)destination;
+			if (map->empty()) {
+				continue;
 			}
-
-			// `Pending` rather than `Unavailable`, so `LoadPreviewMesh` does not
-			// remember the answer and the preview is built when the sheet
-			// arrives. With no delivery configured there is nothing to wait for,
-			// and the honest answer is that it is not here.
+			const std::filesystem::path sheet =
+				engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), *map);
+			if (std::filesystem::is_regular_file(sheet, failure)) {
+				continue;
+			}
+			const engine::core::Name key(*map);
+			if (ContentClient && ContentAsked.insert(key.Id()).second) {
+				DownloadAsset(*map);
+			}
+			pending = true;
+		}
+		if (pending) {
 			return ContentClient ? PreviewState::Pending : PreviewState::Unavailable;
 		}
 
-		const std::optional<std::vector<std::byte>> sheetBytes = ReadWholeFile(sheet);
-		if (!sheetBytes) {
-			return PreviewState::TooLarge;
-		}
+		for (const auto &[map, destination] : maps) {
+			if (map->empty()) {
+				continue;
+			}
+			const std::filesystem::path sheet =
+				engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), *map);
+			const std::optional<std::vector<std::byte>> sheetBytes = ReadWholeFile(sheet);
+			if (!sheetBytes) {
+				return PreviewState::TooLarge;
+			}
 
-		// **`assets::Texture` and not the importer.** A `.amat`'s colour map is
-		// always a baked name - `assetc` rewrites it through `BakedName` for
-		// exactly this reason - so reaching for `bake::ReadImage` here would be
-		// covering for a material that should never have been published.
-		engine::assets::TextureData decoded;
-		engine::core::ByteReader sheetReader(*sheetBytes);
-		if (!engine::assets::Texture::Read(sheetReader, decoded)) {
-			return PreviewState::Unavailable;
-		}
-
-		// Resampled to a bound, because nothing evicts a preview - see
-		// `PREVIEW_MATERIAL_SIDE`. Aspect is kept rather than squared off: a
-		// sheet that is not square is unusual and stretching it would put the
-		// distortion on the sphere.
-		engine::assets::TextureData fitted;
-		const uint32_t longest = std::max(decoded.Width, decoded.Height);
-		if (longest > PREVIEW_MATERIAL_SIDE) {
-			const double scale = static_cast<double>(PREVIEW_MATERIAL_SIDE) / longest;
-			const auto width = static_cast<uint32_t>(std::max(1.0, decoded.Width * scale));
-			const auto height = static_cast<uint32_t>(std::max(1.0, decoded.Height * scale));
-			if (!engine::assets::ResizeImage(decoded, width, height, fitted)) {
+			engine::assets::TextureData decoded;
+			engine::core::ByteReader sheetReader(*sheetBytes);
+			if (!engine::assets::Texture::Read(sheetReader, decoded)) {
 				return PreviewState::Unavailable;
 			}
-		} else {
-			fitted = decoded;
-		}
 
-		// Prefixed for `PreviewMeshName`'s reason, and it matters more here: a
-		// colour map registered under its real name would replace the content
-		// one, so every part in the scene wearing that material would quietly
-		// drop to a 256-pixel copy of it.
-		const engine::core::Name key(PreviewMeshName(material.ColourMap));
-		if (!Renderer.AddTexture(key, fitted)) {
-			return PreviewState::Unavailable;
-		}
+			engine::assets::TextureData fitted;
+			const uint32_t longest = std::max(decoded.Width, decoded.Height);
+			if (longest > PREVIEW_MATERIAL_SIDE) {
+				const double scale = static_cast<double>(PREVIEW_MATERIAL_SIDE) / longest;
+				const auto width = static_cast<uint32_t>(std::max(1.0, decoded.Width * scale));
+				const auto height = static_cast<uint32_t>(std::max(1.0, decoded.Height * scale));
+				if (!engine::assets::ResizeImage(decoded, width, height, fitted)) {
+					return PreviewState::Unavailable;
+				}
+			} else {
+				fitted = decoded;
+			}
 
-		texture = key;
+			const engine::core::Name key(PreviewMeshName(*map));
+			if (!Renderer.AddTexture(key, fitted)) {
+				return PreviewState::Unavailable;
+			}
+			*destination = key;
+		}
 		return PreviewState::Ready;
 	}
 
 	PreviewState Editor::BuildPreviewMesh(const std::string &name) {
 		engine::assets::MeshData mesh;
-		engine::core::Name texture;
+		engine::scene::SurfaceAppearance appearance;
 
 		// **A built-in is generated, not read**, and asking the store for one
 		// would have been a file that is deliberately not there. `engine.Cube`
@@ -300,7 +291,7 @@ namespace studio {
 			// `MakeSphere` duplicates its seam column, so the map wraps without
 			// running backwards across one column of triangles - which is what
 			// makes this legible rather than merely round.
-			const PreviewState state = BuildPreviewMaterial(name, texture);
+			const PreviewState state = BuildPreviewMaterial(name, appearance);
 			if (state != PreviewState::Ready) {
 				return state;
 			}
@@ -308,12 +299,13 @@ namespace studio {
 		} else if (engine::assets::BuiltinMesh builtin; engine::assets::BuiltinFromName(name, builtin)) {
 			mesh = engine::assets::MakeBuiltin(builtin);
 		} else {
-			// **`cdn::FindInStore` and not a folder spelled here.** This read
+			// **`engine::assets::FindInStore` and not a folder spelled here.** This read
 			// `raw/<name>` and was right for as long as the publisher walked
 			// `raw/`; the day it walked `baked/`, every preview in the editor
 			// resolved to a missing file and turned into "no local pixels" with
 			// nothing said.
-			const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+			const std::filesystem::path source =
+				engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), name);
 
 			std::error_code failure;
 			if (!std::filesystem::is_regular_file(source, failure)) {
@@ -357,7 +349,7 @@ namespace studio {
 		bounds.Radius =
 			std::max(0.05f, std::sqrt(extent.X * extent.X + extent.Y * extent.Y + extent.Z * extent.Z));
 
-		bounds.Texture = texture;
+		bounds.Appearance = appearance;
 
 		const engine::core::Name key(PreviewMeshName(name));
 		if (!Renderer.AddMesh(key, mesh)) {
@@ -416,7 +408,13 @@ namespace studio {
 		// eight per cent against the part the same material draws on, which is
 		// the one thing a material preview must not do - it is being looked at to
 		// judge a colour.
-		instance.Texture = bounds->second.Texture;
+		instance.Texture = bounds->second.Appearance.ColourMap;
+		instance.NormalMap = bounds->second.Appearance.NormalMap;
+		instance.RoughnessMap = bounds->second.Appearance.RoughnessMap;
+		instance.OcclusionMap = bounds->second.Appearance.OcclusionMap;
+		instance.HeightMap = bounds->second.Appearance.HeightMap;
+		instance.MetalnessMap = bounds->second.Appearance.MetalnessMap;
+		instance.EmissiveMap = bounds->second.Appearance.EmissiveMap;
 		instance.Tint = instance.Texture.IsValid() ? engine::core::Color3{1.0f, 1.0f, 1.0f}
 												   : engine::core::Color3{0.92f, 0.92f, 0.94f};
 		instance.Mesh = engine::core::Name(PreviewMeshName(PreviewWanted));
@@ -479,6 +477,7 @@ namespace studio {
 		view.Instances = one;
 		view.Target = &target;
 		view.Slot = PreviewSlot();
+		view.WorldName = engine::core::Name("studio.mesh-preview");
 		Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, nullptr, true, &Interface);
 
 		// **What the slot now holds, so a row can draw it.** There is one slot,

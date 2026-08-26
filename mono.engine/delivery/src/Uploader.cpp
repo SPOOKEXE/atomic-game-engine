@@ -45,7 +45,7 @@ namespace engine::delivery {
 			http::FetchId Fetch;
 		};
 
-		std::optional<std::vector<std::byte>> ReadWholeFile(const std::filesystem::path &path) {
+		std::optional<std::vector<std::byte>> ReadUploadFile(const std::filesystem::path &path) {
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				return std::nullopt;
@@ -115,7 +115,7 @@ namespace engine::delivery {
 			}
 
 			bool Add(const std::filesystem::path &file) override {
-				std::optional<std::vector<std::byte>> bytes = ReadWholeFile(file);
+				std::optional<std::vector<std::byte>> bytes = ReadUploadFile(file);
 				if (!bytes) {
 					Tally.Failed++;
 					Finished.push_back(

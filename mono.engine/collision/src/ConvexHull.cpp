@@ -1,4 +1,6 @@
 #include <engine/collision/ConvexHull.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -135,12 +137,28 @@ namespace engine::collision {
 			std::vector<core::Vector3> kept;
 			const float squared = weld * weld;
 
+			// Dropped rather than refused, for the reason `AGENTS.md` gives - a
+			// collider that will not build is a part with no collision at all.
+			// It is still an importer bug, so it is counted and named.
+			size_t infinite = 0;
+			const auto report = [&] {
+				if (infinite != 0) {
+					ENGINE_WARN(
+						"{} of {} points had a non-finite coordinate and were dropped",
+						infinite,
+						points.size()
+					);
+				}
+				ENGINE_DEBUG("welded {} points to {} distinct at {}", points.size(), kept.size(), weld);
+			};
+
 			// A weld of zero has no grid - every cell would be a point - and
 			// welds only exactly-equal coordinates, so the scan is the answer.
 			// Nothing in the engine passes one; a caller's tolerance could.
 			if (!(weld > 0.0f)) {
 				for (const core::Vector3 &point : points) {
 					if (!Finite(point)) {
+						infinite++;
 						continue;
 					}
 					const bool duplicate =
@@ -151,6 +169,7 @@ namespace engine::collision {
 						kept.push_back(point);
 					}
 				}
+				report();
 				return kept;
 			}
 
@@ -160,6 +179,7 @@ namespace engine::collision {
 
 			for (const core::Vector3 &point : points) {
 				if (!Finite(point)) {
+					infinite++;
 					continue;
 				}
 
@@ -188,6 +208,7 @@ namespace engine::collision {
 					kept.push_back(point);
 				}
 			}
+			report();
 			return kept;
 		}
 
@@ -222,6 +243,9 @@ namespace engine::collision {
 		// "all collinear" and "all coplanar" cases the header promises.
 		bool SeedTetrahedron(std::span<const core::Vector3> points, float tolerance, uint32_t (&seed)[4]) {
 			if (points.size() < 4) {
+				ENGINE_TRACE(
+					"seed: {} distinct point(s), fewer than the four a tetrahedron needs", points.size()
+				);
 				return false;
 			}
 
@@ -259,6 +283,11 @@ namespace engine::collision {
 			}
 
 			if (!(widest > tolerance)) {
+				ENGINE_TRACE(
+					"seed: widest extent {} is within the tolerance {}; the cloud is one place",
+					widest,
+					tolerance
+				);
 				return false;
 			}
 
@@ -275,6 +304,7 @@ namespace engine::collision {
 				}
 			}
 			if (!(furthest > tolerance)) {
+				ENGINE_TRACE("seed: every point is within {} of one line; the cloud is collinear", furthest);
 				return false;
 			}
 
@@ -292,6 +322,7 @@ namespace engine::collision {
 				}
 			}
 			if (!(deepest > tolerance)) {
+				ENGINE_TRACE("seed: every point is within {} of one plane; the cloud is coplanar", deepest);
 				return false;
 			}
 
@@ -413,6 +444,14 @@ namespace engine::collision {
 				}
 
 				if (!closed) {
+					// The plane test grouped two genuinely different faces, so
+					// their shared boundary is not one loop. Emitting the
+					// triangles is coarser and not wrong, and the manifold this
+					// hull produces is the thing that gets worse.
+					ENGINE_DEBUG(
+						"{} coplanar facets did not chain into one loop; emitting them as triangles",
+						group.size()
+					);
 					for (uint32_t member : group) {
 						emitTriangle(facets[member]);
 					}
@@ -457,9 +496,15 @@ namespace engine::collision {
 	ConvexHull BuildConvexHull(std::span<const core::Vector3> points, float tolerance) {
 		const float epsilon = tolerance > 0.0f ? tolerance : HULL_WELD_DISTANCE;
 
+		// A histogram rather than a counter, because the number that matters is
+		// the worst build and not the mean: this runs in the frame a mesh
+		// arrives in, and the scan this replaced was 111 ms on one character.
+		const core::ScopedObservation timed("collision.hull.build");
+
 		ConvexHull hull;
 		const std::vector<core::Vector3> distinct = Distinct(points, HULL_WELD_DISTANCE);
 		if (distinct.empty()) {
+			ENGINE_WARN("no usable points out of {}; the hull is empty", points.size());
 			return hull;
 		}
 
@@ -470,9 +515,19 @@ namespace engine::collision {
 			// the contract the header states rather than an excuse.
 			hull.Points.assign(distinct.begin(), distinct.end());
 			if (hull.Points.size() > MAXIMUM_HULL_POINTS) {
+				ENGINE_WARN(
+					"degenerate cloud of {} points truncated to {}; support queries are no longer exact",
+					hull.Points.size(),
+					MAXIMUM_HULL_POINTS
+				);
 				hull.Points.resize(MAXIMUM_HULL_POINTS);
 			}
 			hull.Bounds = BoundOf(hull.Points);
+
+			// `Solid()` is false from here, so a caller drawing this gets
+			// nothing and a manifold is a point. The trace above says which
+			// stage refused; this says the consequence.
+			ENGINE_DEBUG("degenerate hull: {} point(s), no faces", hull.Points.size());
 			return hull;
 		}
 
@@ -554,6 +609,12 @@ namespace engine::collision {
 				// outside a closed hull at all - a plane test that disagreed
 				// with itself. Skipping it keeps the hull closed, which is the
 				// invariant everything below depends on.
+				ENGINE_WARN_EVERY(
+					1.0,
+					"point {} is outside all {} live facets at once; the plane test disagreed with itself",
+					index,
+					visible.size()
+				);
 				continue;
 			}
 
@@ -589,6 +650,25 @@ namespace engine::collision {
 
 		EmitFaces(facets, epsilon, hull);
 		hull.Bounds = BoundOf(hull.Points);
+
+		// **The cap is the one outcome a caller cannot detect from the result.**
+		// The hull is convex and contains every point it accepted, so a caller
+		// that wanted a *bounding* hull has one that is too small and nothing
+		// said so.
+		if (corners >= MAXIMUM_HULL_POINTS) {
+			ENGINE_WARN(
+				"hull stopped at the {}-corner cap with {} distinct points left to consider; it does not "
+				"contain them",
+				MAXIMUM_HULL_POINTS,
+				distinct.size()
+			);
+		}
+		ENGINE_DEBUG(
+			"hull: {} corner(s) and {} face(s) from {} distinct points",
+			hull.Points.size(),
+			hull.Faces.size(),
+			distinct.size()
+		);
 		return hull;
 	}
 }

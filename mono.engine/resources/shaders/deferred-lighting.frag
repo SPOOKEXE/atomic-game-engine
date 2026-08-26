@@ -202,22 +202,26 @@ void main() {
 	vec3 emissive = texture(emissiveImage, geometryUv).rgb;
 	float occlusion = material.b * texture(occlusionImage, inUv).r;
 	float roughness = clamp(material.r, 0.045, 1.0);
+	float metalness = clamp(material.g, 0.0, 1.0);
 	vec3 toLight = -normalize(pass.Direction.xyz);
 	vec3 world = WorldAt(inUv, depth);
 	vec3 viewDirection = normalize(pass.Eye.xyz - world);
 	vec3 halfway = normalize(viewDirection + toLight);
 	float lambert = max(dot(normal, toLight), 0.0);
-	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.04));
+	vec3 baseReflectance = mix(vec3(0.04), albedo.rgb, metalness);
+	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
 		GeometrySchlickGGX(lambert, roughness);
 	vec3 specular = distribution * geometry * fresnel /
 		max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
 	float sky = max(normal.y, 0.0);
-	vec3 ambient = albedo.rgb * (pass.Ambient.rgb + pass.OutdoorAmbient.rgb * sky) * occlusion;
-	vec3 direct = (albedo.rgb * (1.0 - fresnel) * lambert + specular) * pass.Direct.rgb *
+	vec3 diffuse = albedo.rgb * (1.0 - fresnel) * (1.0 - metalness);
+	vec3 ambientAlbedo = mix(albedo.rgb, baseReflectance, metalness);
+	vec3 ambient = ambientAlbedo * (pass.Ambient.rgb + pass.OutdoorAmbient.rgb * sky) * occlusion;
+	vec3 direct = (diffuse * lambert + specular) * pass.Direct.rgb *
 		ShadowFactor(world, normal, toLight);
-	vec3 lit = ambient + direct + LocalLight(world, normal, albedo.rgb) + emissive +
+	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse) + emissive +
 		SeamSpill(0, world, normal, albedo.rgb) + SeamSpill(1, world, normal, albedo.rgb);
 	float fogRange = max(pass.Fog.y - pass.Fog.x, 0.0001);
 	float fog = clamp((distance(world, pass.Eye.xyz) - pass.Fog.x) / fogRange, 0.0, 1.0);

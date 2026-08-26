@@ -17,49 +17,11 @@
 namespace engine::physics {
 
 	namespace {
-		// How many of a mesh's triangles one contact may be built from.
-		//
-		// **A bound on a stack array inside the narrow phase**, for the reason
-		// `spatial::HashGrid::MAXIMUM_CELLS_PER_PROXY` has one: a body resting on
-		// terrain touches a handful of triangles and a body that has been
-		// teleported inside a mountain touches thousands, and the second must
-		// reach a limit rather than an allocator.
-		//
-		// Past it the triangles examined are the first this many the overlap
-		// reported, which is ascending by triangle index - so the answer is a
-		// function of the mesh rather than of the order a walk happened to take.
-		constexpr size_t MAXIMUM_MESH_TRIANGLES = 64;
-
-		// One triangle of a mesh, as a hull the general search can take.
-		//
-		// **A hull of three points, filled into a buffer the caller owns.** A
-		// triangle is convex, so its support function is the same scan a hull's
-		// is - and building it per triangle rather than baking one hull per
-		// triangle is what keeps a terrain mesh from being a hundred thousand
-		// `ConvexHull` objects.
-		//
-		// **The hull is filled rather than returned, and that is not a style
-		// choice.** A `ShapeInstance` holds a *pointer* to its hull, so a
-		// function returning the two together by value hands back an instance
-		// pointing at the temporary it was built in - which reads correctly,
-		// compiles, and is a use-after-free on every call. The caller owns the
-		// hull and the pointer never leaves its frame.
-		//
-		// A three-point hull has no faces, so `FaceTowards` gives its support
-		// *point* and the manifold against it is a single contact. That is
-		// correct for a triangle: three points cannot hold a box flat on their
-		// own, and what holds it flat is the several triangles under it each
-		// contributing one.
-		void FillTriangle(const collision::TriangleMesh &mesh, size_t triangle, collision::ConvexHull &hull) {
-			const collision::Triangle corners = mesh.TriangleAt(triangle);
-
-			hull.Points.assign({corners.A, corners.B, corners.C});
-			hull.Faces.clear();
-			hull.Loops.clear();
-			hull.Bounds = core::AABB{corners.A, corners.A}
-							  .Union(core::AABB{corners.B, corners.B})
-							  .Union(core::AABB{corners.C, corners.C});
-		}
+		// **The limit, the triangle-as-a-hull and the reach all moved to
+		// `ShapeSupport.hpp` at v0.19**, because the sweep needs the same three
+		// and two copies of "how many triangles may one query look at" is two
+		// answers to the same question. See `MAXIMUM_MESH_TRIANGLES`,
+		// `FillTriangleHull` and `ShapeReach` there.
 
 		// The contact between two shapes neither of which is a mesh.
 		//
@@ -79,31 +41,6 @@ namespace engine::physics {
 			return ManifoldBetween(first, second, hit.Normal, hit.Depth);
 		}
 
-		// The world-space box of a shape, for choosing which triangles to test.
-		core::AABB ReachOf(const ShapeInstance &shape) {
-			if (shape.Hull != nullptr) {
-				return core::AABB::FromOrientedBox(
-					shape.Frame,
-					core::Vector3{
-						std::max(
-							std::abs(shape.Hull->Bounds.Minimum.X), std::abs(shape.Hull->Bounds.Maximum.X)
-						),
-						std::max(
-							std::abs(shape.Hull->Bounds.Minimum.Y), std::abs(shape.Hull->Bounds.Maximum.Y)
-						),
-						std::max(
-							std::abs(shape.Hull->Bounds.Minimum.Z), std::abs(shape.Hull->Bounds.Maximum.Z)
-						),
-					}
-				);
-			}
-
-			scene::Collider described;
-			described.Shape = shape.Shape;
-			described.Extent = shape.Extent;
-			return ShapeWorldBounds(described, shape.Frame);
-		}
-
 		// The contact between a mesh and something convex.
 		//
 		// **The deepest contacts across the triangles the shape reaches**, kept
@@ -116,7 +53,7 @@ namespace engine::physics {
 			// The convex shape's reach, in the mesh's own space, because the
 			// mesh's triangles are in that space and moving one box there is
 			// cheaper than moving every triangle out of it.
-			const core::AABB world = ReachOf(convex);
+			const core::AABB world = ShapeReach(convex);
 			const core::Vector3 corners[8] = {
 				core::Vector3{world.Minimum.X, world.Minimum.Y, world.Minimum.Z},
 				core::Vector3{world.Maximum.X, world.Minimum.Y, world.Minimum.Z},
@@ -154,7 +91,7 @@ namespace engine::physics {
 			collision::ConvexHull triangle;
 
 			for (size_t at = 0; at < count; at++) {
-				FillTriangle(*mesh.Mesh, reached[at], triangle);
+				FillTriangleHull(*mesh.Mesh, reached[at], triangle);
 				const ShapeInstance placed{
 					mesh.Frame, core::Vector3::Zero, scene::ShapeKind::Hull, &triangle, nullptr
 				};

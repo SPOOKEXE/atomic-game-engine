@@ -1,9 +1,18 @@
-// The handshake, and the table read twice.
+// The handshake, and three tables each read twice.
 //
-// **Four methods.** MCP is JSON-RPC 2.0 with a fixed opening - `initialize`,
-// then `notifications/initialized`, then `tools/list` and `tools/call` for as
-// long as the client cares to. Everything program-specific is a row in the
-// table; nothing here changes when one is added.
+// **MCP is JSON-RPC 2.0 with a fixed opening** - `initialize`, then
+// `notifications/initialized`, then whatever the client cares to ask. What it
+// may ask for is `tools/list` and `tools/call`, `resources/list` and
+// `resources/read`, `prompts/list` and `prompts/get`. Everything
+// program-specific is a row in one of the three tables; nothing here changes
+// when one is added.
+//
+// **Three kinds because a client uses them at three moments.** A tool is an
+// action a model chooses. A resource is context a client may attach on its own,
+// which is why the layer table and the component catalogue are one - a model
+// should have them before its first question rather than after its third call.
+// A prompt is a procedure this repository already has written down, offered
+// where somebody can invoke it.
 //
 // **An unknown tool is an error *result*, not a JSON-RPC error.** MCP draws that
 // line deliberately: transport errors are for malformed calls, while a tool that
@@ -60,6 +69,34 @@ namespace engine::control {
 		Tools.push_back(std::move(tool));
 	}
 
+	void Surface::Enable(std::span<const Feature> features) {
+		for (const Feature &feature : features) {
+			if (feature.Install) {
+				feature.Install(*this);
+			}
+		}
+	}
+
+	void Surface::AddResource(Resource resource) {
+		for (Resource &existing : Resources) {
+			if (existing.Uri == resource.Uri) {
+				existing = std::move(resource);
+				return;
+			}
+		}
+		Resources.push_back(std::move(resource));
+	}
+
+	void Surface::AddPrompt(Prompt prompt) {
+		for (Prompt &existing : Prompts) {
+			if (existing.Name == prompt.Name) {
+				existing = std::move(prompt);
+				return;
+			}
+		}
+		Prompts.push_back(std::move(prompt));
+	}
+
 	size_t Surface::Count() const {
 		return Tools.size();
 	}
@@ -78,6 +115,46 @@ namespace engine::control {
 		return out;
 	}
 
+	json Surface::ResourceList() const {
+		json out = json::array();
+		for (const Resource &resource : Resources) {
+			out.push_back(
+				json{
+					{"uri", resource.Uri},
+					{"name", resource.Name},
+					{"description", resource.Description},
+					{"mimeType", resource.MimeType},
+				}
+			);
+		}
+		return out;
+	}
+
+	json Surface::PromptList() const {
+		json out = json::array();
+		for (const Prompt &prompt : Prompts) {
+			json arguments = json::array();
+			for (const PromptArgument &argument : prompt.Arguments) {
+				arguments.push_back(
+					json{
+						{"name", argument.Name},
+						{"description", argument.Description},
+						{"required", argument.Required},
+					}
+				);
+			}
+
+			out.push_back(
+				json{
+					{"name", prompt.Name},
+					{"description", prompt.Description},
+					{"arguments", std::move(arguments)},
+				}
+			);
+		}
+		return out;
+	}
+
 	std::string Surface::Answer(const std::string &line) {
 		json request;
 		try {
@@ -88,7 +165,15 @@ namespace engine::control {
 			return Error(nullptr, -32700, std::string("parse error: ") + bad.what()).dump();
 		}
 
-		if (!request.is_object() || !request.contains("method") || !request["method"].is_string()) {
+		// **The object test comes first and the id is read only afterwards.**
+		// `value` on an array throws, so reading the id out of whatever arrived
+		// let a well-formed JSON array escape this function as an exception -
+		// through `Server::Pump` and into the frame loop, over a message a
+		// client could send by accident.
+		if (!request.is_object()) {
+			return Error(nullptr, -32600, "not a JSON-RPC request").dump();
+		}
+		if (!request.contains("method") || !request["method"].is_string()) {
 			return Error(request.value("id", json(nullptr)), -32600, "not a JSON-RPC request").dump();
 		}
 
@@ -102,13 +187,27 @@ namespace engine::control {
 		const bool notification = !request.contains("id") || request["id"].is_null();
 
 		if (method == "initialize") {
+			// **A capability appears only when there is something behind it**,
+			// which is the tool table's own rule applied to the handshake. A
+			// server that advertised `resources` and then listed none would have
+			// a client offering an attachment menu that is always empty; a
+			// dedicated server outside a checkout has no `AGENTS.md` to serve
+			// and says so here rather than at the first read.
+			json capabilities{{"tools", json{{"listChanged", false}}}};
+			if (!Resources.empty()) {
+				capabilities["resources"] = json{{"listChanged", false}, {"subscribe", false}};
+			}
+			if (!Prompts.empty()) {
+				capabilities["prompts"] = json{{"listChanged", false}};
+			}
+
 			return Result(
 					   id,
 					   json{
 						   {"protocolVersion", PROTOCOL_VERSION},
-						   {"capabilities", json{{"tools", json{{"listChanged", false}}}}},
+						   {"capabilities", std::move(capabilities)},
 						   {"serverInfo",
-							json{{"name", Name}, {"title", "atomic - " + Name}, {"version", "0.8"}}},
+							json{{"name", Name}, {"title", "atomic - " + Name}, {"version", "0.19"}}},
 						   {"instructions", Purpose},
 					   }
 			)
@@ -161,6 +260,112 @@ namespace engine::control {
 			}
 
 			return Result(id, Content(json{{"error", "no such tool: " + wanted}}, true)).dump();
+		}
+
+		if (method == "resources/list") {
+			return Result(id, json{{"resources", ResourceList()}}).dump();
+		}
+
+		// Declared and empty, because a client that asks is entitled to an
+		// answer rather than "no such method". Nothing here serves a templated
+		// resource: every address this module offers is a fixed one.
+		if (method == "resources/templates/list") {
+			return Result(id, json{{"resourceTemplates", json::array()}}).dump();
+		}
+
+		if (method == "resources/read") {
+			const json params = request.value("params", json::object());
+			if (!params.contains("uri") || !params["uri"].is_string()) {
+				return Error(id, -32602, "resources/read needs a uri").dump();
+			}
+
+			const std::string wanted = params["uri"].get<std::string>();
+			for (const Resource &resource : Resources) {
+				if (resource.Uri != wanted) {
+					continue;
+				}
+
+				// **A resource that cannot be read is a protocol error, and a
+				// tool that refused is not.** The difference is what the caller
+				// can do about it: a declined tool call is an answer a model
+				// reads and reacts to, while a resource is context a client
+				// attached on its own and there is nothing to react to. MCP
+				// spells the second `-32002`.
+				std::string failure;
+				std::string contents;
+				try {
+					contents = resource.Read(failure);
+				} catch (const std::exception &thrown) {
+					failure = thrown.what();
+				}
+
+				if (!failure.empty()) {
+					return Error(id, -32002, failure).dump();
+				}
+
+				return Result(
+						   id,
+						   json{
+							   {"contents",
+								json::array({json{
+									{"uri", resource.Uri},
+									{"name", resource.Name},
+									{"mimeType", resource.MimeType},
+									{"text", std::move(contents)},
+								}})},
+						   }
+				)
+					.dump();
+			}
+
+			return Error(id, -32002, "no such resource: " + wanted).dump();
+		}
+
+		if (method == "prompts/list") {
+			return Result(id, json{{"prompts", PromptList()}}).dump();
+		}
+
+		if (method == "prompts/get") {
+			const json params = request.value("params", json::object());
+			if (!params.contains("name") || !params["name"].is_string()) {
+				return Error(id, -32602, "prompts/get needs a prompt name").dump();
+			}
+
+			const std::string wanted = params["name"].get<std::string>();
+			const json arguments = params.value("arguments", json::object());
+
+			for (const Prompt &prompt : Prompts) {
+				if (prompt.Name != wanted) {
+					continue;
+				}
+
+				std::string failure;
+				std::string text;
+				try {
+					text = prompt.Render(arguments, failure);
+				} catch (const std::exception &thrown) {
+					failure = thrown.what();
+				}
+
+				if (!failure.empty()) {
+					return Error(id, -32602, failure).dump();
+				}
+
+				return Result(
+						   id,
+						   json{
+							   {"description", prompt.Description},
+							   {"messages",
+								json::array({json{
+									{"role", "user"},
+									{"content", json{{"type", "text"}, {"text", std::move(text)}}},
+								}})},
+						   }
+				)
+					.dump();
+			}
+
+			return Error(id, -32602, "no such prompt: " + wanted).dump();
 		}
 
 		return Error(id, -32601, "no such method: " + method).dump();

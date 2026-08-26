@@ -310,8 +310,9 @@ namespace engine::world {
 		// driver has to know which worlds are worth handing to a worker.
 		//
 		// @param frameSeconds Wall seconds since the previous driver tick.
+		// @param maximumTicks The host's catch-up ceiling for this driver tick.
 		// @return The number of simulation ticks owed, possibly zero.
-		int Owed(float frameSeconds);
+		int Owed(float frameSeconds, int maximumTicks);
 
 		// Runs the owed simulation ticks.
 		//

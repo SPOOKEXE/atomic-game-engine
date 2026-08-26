@@ -1,6 +1,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/PerCallSite.hpp>
@@ -171,7 +172,10 @@ namespace studio {
 
 		ImGui::Separator();
 
-		if (ImGui::MenuItem("Rename", Keybinds::Of(Action::Rename).Text().c_str(), false, haveInstance)) {
+		const bool service = haveInstance && store.Get<engine::scene::ServiceComponent>(instance) != nullptr;
+		if (ImGui::MenuItem(
+				"Rename", Keybinds::Of(Action::Rename).Text().c_str(), false, haveInstance && !service
+			)) {
 			PendingRenameStart = instance;
 		}
 		if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, haveInstance)) {
@@ -391,6 +395,17 @@ namespace studio {
 			return;
 		}
 
+		bool service = false;
+		if (SelectionWorld.IsValid()) {
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				service =
+					store.Alive(instance) && store.Get<engine::scene::ServiceComponent>(instance) != nullptr;
+			});
+		}
+		if (service) {
+			return;
+		}
+
 		Renaming = instance;
 		RenameFocus = true;
 		RenameBuffer.clear();
@@ -547,6 +562,25 @@ namespace studio {
 				// which is the good version of this mistake.
 				const bool toggled = ImGui::IsItemToggledOpen();
 				const bool hovered = ImGui::IsItemHovered();
+
+				// Keep insertion beside the object it will parent to. The context
+				// menu remains available for keyboard and right-click workflows, while
+				// this button makes the common action discoverable on hover.
+				if (hovered) {
+					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
+					if (ImGui::SmallButton("+##insert-hover")) {
+						ImGui::OpenPopup("##insert-hover-popup");
+					}
+				}
+				if (ImGui::BeginPopup("##insert-hover-popup")) {
+					if (const ClassId chosen = DrawClassPicker("insert-hover-picker"); chosen.IsValid()) {
+						PendingInsert.World = world;
+						PendingInsert.Class = chosen;
+						PendingInsert.Parent = row.Instance;
+						ImGui::CloseCurrentPopup();
+					}
+					ImGui::EndPopup();
+				}
 
 				if (toggled) {
 					const auto found = std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
@@ -720,6 +754,62 @@ namespace studio {
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##explorer-filter", ExplorerFilter, "filter by name");
 
+		const char *worldLabel = "All Worlds";
+		if (ExplorerWorld.IsValid()) {
+			const Name name = Universe->NameOf(ExplorerWorld);
+			worldLabel = name.IsValid() ? Label(name) : "?";
+		}
+		if (ImGui::BeginCombo("World", worldLabel)) {
+			if (ImGui::Selectable("All Worlds", !ExplorerWorld.IsValid())) {
+				ExplorerWorld = {};
+			}
+			for (const WorldId world : Universe->Worlds()) {
+				const Name name = Universe->NameOf(world);
+				const char *label = name.IsValid() ? Label(name) : "?";
+				if (ImGui::Selectable(label, ExplorerWorld == world)) {
+					ExplorerWorld = world;
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		if (ImGui::CollapsingHeader("Property search")) {
+			ImGui::SetNextItemWidth(-1.0f);
+			TextField("##explorer-class", Find.Class, "class - Part, BasePart, Script");
+			ImGui::SetNextItemWidth(-1.0f);
+			TextField("##explorer-property", Find.Property, "property");
+			ImGui::SetNextItemWidth(-1.0f);
+			TextField("##explorer-value", Find.Value, "value");
+			ImGui::Checkbox("exact value", &Find.Exact);
+
+			Find.Name = ExplorerFilter;
+			RunFind();
+			ImGui::TextDisabled(
+				"%zu matching instance%s", FindResults.size(), FindResults.size() == 1 ? "" : "s"
+			);
+
+			WorldId pickWorld;
+			Entity pick = NULL_ENTITY;
+			if (ImGui::BeginChild("##explorer-search-results", ImVec2(0.0f, 120.0f))) {
+				for (size_t index = 0; index < FindResults.size(); index++) {
+					const FindResult &result = FindResults[index];
+					ImGui::PushID(static_cast<int>(index));
+					const bool selected = SelectionWorld == result.World && IsSelected(result.Instance);
+					if (ImGui::Selectable("##result", selected)) {
+						pickWorld = result.World;
+						pick = result.Instance;
+					}
+					ImGui::SameLine();
+					ImGui::Text("%s (%s)", result.Name.c_str(), result.Class.c_str());
+					ImGui::PopID();
+				}
+			}
+			ImGui::EndChild();
+			if (pick != NULL_ENTITY) {
+				Select(pickWorld, pick, false);
+			}
+		}
+
 		ImGui::Separator();
 		const WorldId editingWorld = ViewportWorld(FocusedViewport);
 
@@ -778,7 +868,10 @@ namespace studio {
 
 			ImGui::Separator();
 
-			if (ImGui::MenuItem("New World...", nullptr, false, !AnyRunning())) {
+			// Enabled while a scene runs. `DrawWorlds` carries why: Stop
+			// restores one world from its own document, so a scene added during
+			// a run is in no snapshot and survives.
+			if (ImGui::MenuItem("New World...")) {
 				AskingNewWorld = true;
 				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
 			}
@@ -805,10 +898,14 @@ namespace studio {
 
 		if (universeOpen) {
 			for (const WorldId world : Universe->Worlds()) {
+				if (ExplorerWorld.IsValid() && ExplorerWorld != world) {
+					continue;
+				}
 				const Name worldName = Universe->NameOf(world);
 
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-				if (world == editingWorld && !UniverseSelected) {
+				if (world == SelectedWorldRow || (world == editingWorld && !UniverseSelected &&
+					Selection.empty() && !SelectedWorldRow.IsValid())) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
 				}
 
@@ -1196,7 +1293,8 @@ namespace studio {
 			engine::game::PropertyValue after;
 
 			Universe->Enter(rename.World, [&](Store &store) {
-				if (!store.Alive(rename.Instance)) {
+				if (!store.Alive(rename.Instance) ||
+					store.Get<engine::scene::ServiceComponent>(rename.Instance) != nullptr) {
 					return;
 				}
 
@@ -1256,6 +1354,7 @@ namespace studio {
 
 		if (PendingOpenScript.World.IsValid()) {
 			OpenScriptTab(PendingOpenScript.World, PendingOpenScript.Instance);
+			ShowScripts = true;
 			PendingOpenScript = PendingScriptAction{};
 		}
 

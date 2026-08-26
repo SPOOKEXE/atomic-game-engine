@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
 #include <algorithm>
@@ -60,7 +61,8 @@ namespace engine::scene {
 		return hash ^ (word + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2));
 	}
 
-	uint64_t SignatureOf(std::span<const DrawInstance> instances) {
+	namespace {
+		// The four independent accumulators one signature is folded through.
 		// **Four chains rather than one, because this is latency-bound and not
 		// throughput-bound.** `MixSignature` is a shift, a shift, an add and an
 		// xor, and every one of them needs the previous hash - so folding
@@ -77,18 +79,23 @@ namespace engine::scene {
 		// every field still lands in the result, still by its bit pattern, and
 		// still field-wise rather than over the object representation, which is
 		// what `tests/DrawInstance.cpp` pins and what keeps `Reserved` out of it.
-		//
-		// **The value changes, and nothing may depend on the old one.** A
-		// signature is compared against another produced by this same function
-		// within one run; `scene/Registration.cpp` deliberately serialises a
-		// `RenderedSignature` as nothing and reads it back as a default, so
-		// there is no file and no wire carrying one.
-		uint64_t a = SIGNATURE_SEED;
-		uint64_t b = SIGNATURE_SEED;
-		uint64_t c = SIGNATURE_SEED;
-		uint64_t d = SIGNATURE_SEED;
+		struct SignatureLanes {
+			uint64_t A = SIGNATURE_SEED;
+			uint64_t B = SIGNATURE_SEED;
+			uint64_t C = SIGNATURE_SEED;
+			uint64_t D = SIGNATURE_SEED;
+		};
 
-		for (const DrawInstance &instance : instances) {
+		// Folds one instance into the four lanes.
+		//
+		// Kept in one field-wise fold so padding and reserved bytes never become
+		// part of a rendered-surface signature.
+		void FoldInstance(SignatureLanes &lanes, const DrawInstance &instance) {
+			uint64_t &a = lanes.A;
+			uint64_t &b = lanes.B;
+			uint64_t &c = lanes.C;
+			uint64_t &d = lanes.D;
+
 			const core::CFrame &frame = instance.Frame;
 
 			a = MixSignature(a, Pair(BitsOf(frame.Position.X), BitsOf(frame.Position.Y)));
@@ -115,7 +122,13 @@ namespace engine::scene {
 			// the same image", and a texture swap, a tag change or an alpha mode
 			// change all produce a different one.
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
-			c = MixSignature(c, Pair(static_cast<uint32_t>(instance.Alpha), 0u));
+			c = MixSignature(
+				c,
+				Pair(
+					static_cast<uint32_t>(instance.Alpha) | (static_cast<uint32_t>(instance.Resample) << 8u),
+					BitsOf(instance.AlphaCutoff)
+				)
+			);
 
 			// Material maps and shader selection are visible state too. Omitting one
 			// lets a cached mirror keep the old material after streamed content or a
@@ -123,6 +136,21 @@ namespace engine::scene {
 			d = MixSignature(d, Pair(instance.NormalMap.Id(), instance.RoughnessMap.Id()));
 			a = MixSignature(a, Pair(instance.OcclusionMap.Id(), instance.HeightMap.Id()));
 			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
+			c = MixSignature(c, Pair(instance.MetalnessMap.Id(), BitsOf(instance.EmissiveStrength)));
+			d = MixSignature(
+				d,
+				Pair(
+					BitsOf(instance.SurfaceColour.R),
+					BitsOf(instance.SurfaceColour.G) ^ BitsOf(instance.SurfaceColour.B)
+				)
+			);
+			a = MixSignature(
+				a,
+				Pair(
+					BitsOf(instance.EmissiveTint.R),
+					BitsOf(instance.EmissiveTint.G) ^ BitsOf(instance.EmissiveTint.B)
+				)
+			);
 
 			// **And where it is cut, which is half of what a straddling body
 			// looks like.** A seam plane that moved changes which half of the
@@ -137,10 +165,26 @@ namespace engine::scene {
 			c = MixSignature(c, Pair(BitsOf(instance.SeamLight.Z), 0u));
 		}
 
-		// Combined in a fixed order, so the four lanes give one value. The
-		// combine is four mixes for the whole list rather than per instance, so
-		// its cost rounds to nothing.
-		return MixSignature(MixSignature(a, b), MixSignature(c, d));
+		// The four lanes as one value, in a fixed order.
+		//
+		// Four mixes for a whole run rather than per instance, so its cost
+		// rounds to nothing.
+		uint64_t CombineLanes(const SignatureLanes &lanes) {
+			return MixSignature(MixSignature(lanes.A, lanes.B), MixSignature(lanes.C, lanes.D));
+		}
+	}
+
+	uint64_t SignatureOf(std::span<const DrawInstance> instances) {
+		// **The value changes between engine versions, and nothing may depend on
+		// an old one.** A signature is compared against another produced by this
+		// same function within one run; `scene/Registration.cpp` deliberately
+		// serialises a `RenderedSignature` as nothing and reads it back as a
+		// default, so there is no file and no wire carrying one.
+		SignatureLanes lanes;
+		for (const DrawInstance &instance : instances) {
+			FoldInstance(lanes, instance);
+		}
+		return CombineLanes(lanes);
 	}
 
 	size_t OrderForDrawing(
@@ -186,6 +230,13 @@ namespace engine::scene {
 			// an instance that no longer exists is a mis-wired pipeline - which
 			// should be a missing object, not a read off the end.
 			if (index >= instances.size()) {
+				// Should be unreachable: this always means a filter node handed
+				// on an index the draw list no longer holds. Dropped to the
+				// transparent tail rather than read, and named rather than
+				// swallowed, because it is a pipeline bug and not bad content.
+				ENGINE_WARN_EVERY(
+					5.0, "draw index {} is past the {} instances the frame holds", index, instances.size()
+				);
 				order[--transparent] = index;
 				continue;
 			}

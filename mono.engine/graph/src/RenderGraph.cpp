@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/graph/RenderGraph.hpp>
 
 #include <algorithm>
@@ -206,6 +207,9 @@ namespace engine::graph {
 		// one silently.
 		for (const ResourceDesc &existing : Resources) {
 			if (existing.Name == desc.Name) {
+				// The caller gets an invalid id and usually reports only the
+				// name it asked for, so the reason it was refused is here.
+				ENGINE_WARN("resource '{}' is already declared; refusing the second one", desc.Name.Text());
 				return {};
 			}
 		}
@@ -216,6 +220,11 @@ namespace engine::graph {
 
 	NodeId RenderGraph::AddNode(Node node) {
 		if (!node.Name.IsValid() || Nodes.size() >= MAXIMUM_NODES) {
+			// Two causes, one invalid id. A pipeline that quietly loses its last
+			// pass at the cap looks nothing like one with a blank name in it.
+			ENGINE_WARN(
+				"node refused: {}", node.Name.IsValid() ? "the graph is at its node cap" : "the name is empty"
+			);
 			return {};
 		}
 		Nodes.push_back(std::move(node));
@@ -401,6 +410,11 @@ namespace engine::graph {
 			for (const NodeId id : out.Final) {
 				if (id.Value < lastPerView.Value) {
 					offender = Find(id)->Name;
+					ENGINE_WARN(
+						"'{}' is shared but sits between per-view nodes; the three blocks cannot express "
+						"that",
+						offender.Text()
+					);
 					out.Shared.clear();
 					out.PerView.clear();
 					out.Final.clear();
@@ -548,6 +562,12 @@ namespace engine::graph {
 		for (const NodeId id : block) {
 			const Node *node = Find(id);
 			if (node == nullptr) {
+				// A compiled block naming a node the graph no longer holds. The
+				// pass is dropped from every frame and the picture is simply
+				// missing whatever it drew.
+				ENGINE_WARN_EVERY(
+					5.0, "compiled node {} is gone from the graph; the pass is skipped", id.Value
+				);
 				continue;
 			}
 

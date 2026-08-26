@@ -1,3 +1,5 @@
+#include <engine/core/Log.hpp>
+
 #include <algorithm>
 #include <network/Directory.hpp>
 #include <utility>
@@ -49,10 +51,21 @@ namespace network {
 				continue;
 			}
 			if (decoded->Session.Protocol != Limits.Protocol) {
+				// **The single most common "I cannot see the server on my own
+				// network".** Two builds on one subnet hear each other perfectly
+				// and list nothing, and until this line the only evidence was a
+				// counter nobody printed.
+				ENGINE_DEBUG_EVERY(
+					2.0,
+					"ignoring a session on protocol {}; this build speaks {}",
+					decoded->Session.Protocol,
+					Limits.Protocol
+				);
 				Tally.WrongProtocol++;
 				continue;
 			}
 			if (decoded->Session.Use != Limits.Use) {
+				ENGINE_TRACE_EVERY(2.0, "ignoring a session announced for another purpose");
 				Tally.WrongPurpose++;
 				continue;
 			}
@@ -122,6 +135,11 @@ namespace network {
 			// evicted to make room would let a flood push out every session
 			// somebody is looking at, which is the outcome the cap exists to
 			// prevent rather than a gentler version of it.
+			// The browser stops showing anything new and looks like it stopped
+			// listening, which is exactly what the cap is not.
+			ENGINE_WARN_EVERY(
+				5.0, "the directory is full at {} listings; new sessions are not being listed", Rows.size()
+			);
 			Tally.Overflowed++;
 			return false;
 		}
@@ -132,6 +150,12 @@ namespace network {
 		row.Authenticated = authenticated;
 		row.From = from;
 		row.LastSeenSeconds = nowSeconds;
+		ENGINE_DEBUG(
+			"listed a session at {} by reach {}, {}",
+			from.Text(),
+			static_cast<int>(via),
+			authenticated ? "authenticated" : "unauthenticated"
+		);
 		Rows.push_back(std::move(row));
 		Tally.Listed++;
 		return true;

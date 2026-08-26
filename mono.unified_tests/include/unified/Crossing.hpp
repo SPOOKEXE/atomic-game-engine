@@ -38,8 +38,10 @@
 #include <engine/net/LossyTransport.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Authority.hpp>
+#include <engine/replication/QuicSession.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Session.hpp>
+#include <engine/replication/SessionPort.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 
 #include <client/ContentLink.hpp>
@@ -339,8 +341,15 @@ namespace unified {
 		// Builds the two worlds and the authority. Every arrangement has these.
 		void BuildWorlds();
 
-		// Builds the loopback ends, the two sessions and their keys.
+		// Builds the loopback ends and the two sessions, on whichever stack the
+		// arrangement names.
 		void BuildWire();
+
+		// Stands a datagram `Session` up on each end, with real keys.
+		void BuildDatagramWire();
+
+		// Stands a `QuicSession` up on each end and runs their handshake out.
+		void BuildQuicWire();
 
 		// Publishes content, and builds the relay and the link over it.
 		void BuildContent();
@@ -355,7 +364,7 @@ namespace unified {
 		void CarryOverWire(Report &report);
 
 		// Drains one transport into its session.
-		void Drain(engine::net::Transport &transport, engine::replication::Session &into);
+		void Drain(engine::net::Transport &transport, engine::replication::SessionPort &into);
 
 		// Wraps a payload in a `User` message and queues it on a session.
 		//
@@ -367,7 +376,7 @@ namespace unified {
 		// @param over    The session to queue it on.
 		// @param payload The bytes to carry.
 		// @return Whether the link took it.
-		bool SendUser(engine::replication::Session &over, std::span<const std::byte> payload);
+		bool SendUser(engine::replication::SessionPort &over, std::span<const std::byte> payload);
 
 		// Routes one arrived message to the content link or to the replica.
 		//
@@ -394,7 +403,7 @@ namespace unified {
 
 		// One entity's X as it was actually drawn, by its ordinal in the walk
 		// that filled the list.
-		float DrawnPositionOf(const client::DrawList &drawList, engine::ecs::Entity entity);
+		float DrawnPositionOf(const engine::render::DrawList &drawList, engine::ecs::Entity entity);
 
 		Settings Options;
 		Arrangement Wired;
@@ -421,8 +430,19 @@ namespace unified {
 		// `Transport::Direct`.
 		std::unique_ptr<engine::net::LossyTransport> ServerEnd;
 		std::unique_ptr<engine::net::LossyTransport> ClientEnd;
-		std::unique_ptr<engine::replication::Session> ServerSide;
-		std::unique_ptr<engine::replication::Session> ClientSide;
+		// Whichever session the arrangement's stack produced, behind the one
+		// interface both fill. **The point of running the axis at all**: every
+		// line below this pair is the same code on either stack.
+		std::unique_ptr<engine::replication::SessionPort> ServerSide;
+		std::unique_ptr<engine::replication::SessionPort> ClientSide;
+
+		// The same objects as the pair above under the datagram stack, and null
+		// under QUIC. What they are for is the two counters `SessionPort` does
+		// not carry: `Session::Stats` and `net::Link::Stats`, which `Reports`
+		// compares against each other and which have no QUIC equivalent to
+		// compare.
+		engine::replication::Session *ServerDatagram = nullptr;
+		engine::replication::Session *ClientDatagram = nullptr;
 
 		// Where the publication was written, removed by the destructor.
 		std::string StoreRoot;

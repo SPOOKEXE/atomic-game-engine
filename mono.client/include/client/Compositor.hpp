@@ -205,6 +205,9 @@ namespace client {
 		std::vector<std::byte> Scratch;
 		std::vector<engine::scene::DrawInstance> Combined;
 		engine::core::CFrame ViewFrame;
+		// arch-waiver ecs-copy: the camera one publish is being built with, beside
+		// the scratch buffers it is built into. Read from the store per view and
+		// dropped at the end of it; keeping it is what stops the allocation.
 		engine::scene::Camera ViewCamera;
 	};
 }

@@ -99,14 +99,42 @@ creates a release.
 
 ## What comes out
 
-Everything is built from the `release` preset: `RelWithDebInfo`, first-party
-targets optimised (`MONO_OPTIMISE=ON`), tests off, Tracy compiled in.
+Two flavours of the same tree, per platform.
+
+**The shipped one**, from the `release` preset: `RelWithDebInfo`, first-party
+targets at `-O3` (`MONO_OPTIMISE=ON`), no heap profiler, tests off, Tracy
+compiled in. This is what a player downloads.
+
+**The dev one**, from the `dist-dev` preset: the same code at `-O1`, frame
+pointer kept, and `MONO_HEAP_PROFILE=ON`. `-dev` on the end of the file name.
+
+The dev archive exists because the diagnostics that answer a bug report cannot
+be switched on at runtime. A block allocated with no profiler header and freed
+through the tracking `operator delete` would read four words of somebody else's
+memory, so the allocator hooks are a compile-time decision for the whole
+program - which is why the shipped build answers `--heap-report` with "this
+build has no allocator hooks" rather than with a report. Before this there was
+one answer to "it leaks": build the engine yourself. `-O1` rather than `-O0`
+because a build nobody can play is a build nobody reports from, and rather than
+`-O3` because a stack a report can name functions from is worth more here than
+the last of the speed.
 
 | Platform | Files |
 |---|---|
-| Linux x86_64 | `atomic-<version>-linux-x86_64.tar.gz`, `atomic-client-<version>-linux-x86_64.AppImage`, `atomic-studio-<version>-linux-x86_64.AppImage`, `atomic-launcher-<version>-linux-x86_64.AppImage` |
-| Windows x86_64 | `atomic-<version>-windows-x86_64.zip` |
-| macOS arm64 | `atomic-<version>-macos-arm64.tar.gz` |
+| Linux x86_64 | `atomic-<version>-linux-x86_64.tar.gz`, `atomic-<version>-linux-x86_64-dev.tar.gz`, `atomic-client-<version>-linux-x86_64.AppImage`, `atomic-studio-<version>-linux-x86_64.AppImage`, `atomic-launcher-<version>-linux-x86_64.AppImage` |
+| Windows x86_64 | `atomic-<version>-windows-x86_64.zip`, `atomic-<version>-windows-x86_64-dev.zip` |
+| macOS arm64 | `atomic-<version>-macos-arm64.tar.gz`, `atomic-<version>-macos-arm64-dev.tar.gz` |
+
+**AppImages are built for the shipped flavour only.** An AppImage is named for
+its program and its version and nothing else, so a second flavour would collide
+with the first or need a naming scheme invented for a download nobody
+double-clicks. The dev flavour ships as the archive, which is what somebody
+chasing a report unpacks anyway.
+
+**The dev flavour is built for a tag and not for a branch push.** It doubles an
+hour-long matrix, and on a branch push nothing publishes it. The `version` job
+decides that by emitting a shorter matrix, because `jobs.<id>.if` cannot read
+the `matrix` context.
 
 Each archive holds the staged directory of all five programs - `client/`,
 `studio/`, `server/`, `cdn/`, `launcher/` - beside `LICENSE`,

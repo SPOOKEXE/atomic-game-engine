@@ -268,7 +268,11 @@ TEST_CASE("a hosted session carries an edit to a guest", "[studio][teamcreate]")
 		}
 	};
 
-	for (int step = 0; step < 256 && !guest.Team.Edits()->Connected(); ++step) {
+	// **Both ends, because they do not finish on the same tick.** The guest is
+	// admitted one flight before the host can carry anything back, and an edit
+	// published in that window is one the host's session refuses.
+	const auto ready = [&] { return guest.Team.Edits()->Connected() && host.Team.Edits()->Editors() == 2; };
+	for (int step = 0; step < 256 && !ready(); ++step) {
 		pump(1);
 	}
 	REQUIRE(guest.Team.Edits()->Connected());

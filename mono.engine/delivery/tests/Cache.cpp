@@ -239,3 +239,97 @@ TEST_CASE("no cache path means no cache rather than a failure", "[delivery][cach
 	// every fetch simply costs the network.
 	CHECK_FALSE(ContentCache::Open({}, 1024).has_value());
 }
+
+TEST_CASE("the ceiling holds across many stores", "[delivery][cache]") {
+	// **The regression for the running total.** `MakeRoom` walks the directory
+	// only when the total it keeps says the ceiling is in reach, so a total that
+	// stopped being maintained would show up here and nowhere else: every store
+	// would succeed, nothing would ever be evicted and the cache would grow
+	// without bound. Sixty-four stores against a ceiling four of them fill.
+	Tree tree;
+	ContentCache cache = tree.Open(256);
+
+	for (int index = 0; index < 64; ++index) {
+		// Distinct content, so every store is a new entry rather than a rewrite
+		// of one already there - which is a different path and is pinned by the
+		// case below.
+		const Content content(
+			"a" + std::to_string(index), {std::string(60, 'x') + std::to_string(1000 + index)}
+		);
+		REQUIRE(cache.Store(content.Entry(), content.Whole));
+		CHECK(cache.Bytes() <= 256);
+	}
+}
+
+TEST_CASE("storing the same asset twice does not spend the ceiling twice", "[delivery][cache]") {
+	// A content address names one thing, so re-storing an entry writes the
+	// bytes that are already there. A total that counted them again would evict
+	// on a figure that only ever grows - and a group arriving with a member the
+	// cache already holds is ordinary rather than exotic.
+	Tree tree;
+	ContentCache cache = tree.Open(256);
+	const Content content("repeated", {std::string(64, 'r')});
+
+	for (int index = 0; index < 16; ++index) {
+		REQUIRE(cache.Store(content.Entry(), content.Whole));
+	}
+
+	CHECK(cache.Count() == 1);
+	CHECK(cache.Bytes() == 64);
+	CHECK(cache.Contains(content.Entry().Root));
+}
+
+TEST_CASE("eviction sees content this cache did not write", "[delivery][cache]") {
+	// **Why the running total is a trigger and not an answer.** A cache
+	// directory is a directory: another process, an older build or a user with a
+	// file manager can put bytes in it, and the total this cache keeps will not
+	// have counted them. What that costs is stated rather than hidden - the
+	// ceiling is crossed a little late, by whatever the other writer wrote.
+	//
+	// What it must never cost is a file that cannot be evicted. Eviction chooses
+	// from a walk of the directory, so the foreign entry is an ordinary
+	// candidate and the first store that triggers a walk takes it. A remembered
+	// listing could not have done that, which is the reason this holds a total
+	// and not one.
+	Tree tree;
+	ContentCache cache = tree.Open(256);
+
+	const fs::path foreign = tree.Root / "ff";
+	std::error_code failure;
+	fs::create_directories(foreign, failure);
+	{
+		std::ofstream file(foreign / std::string(64, 'f'), std::ios::binary | std::ios::trunc);
+		file << std::string(200 * 1024, 'x');
+	}
+	REQUIRE(cache.Bytes() > 256);
+
+	// Enough stores that the total this cache does keep reaches the ceiling and
+	// a walk happens. Four sixty-four byte assets is the ceiling exactly, so the
+	// fifth is the one that looks.
+	for (int index = 0; index < 8; ++index) {
+		const Content content(
+			"after" + std::to_string(index), {std::string(64, static_cast<char>('a' + index))}
+		);
+		REQUIRE(cache.Store(content.Entry(), content.Whole));
+	}
+
+	CHECK(cache.Bytes() <= 256);
+	// And the foreign entry is gone rather than merely uncounted.
+	CHECK_FALSE(fs::exists(foreign / std::string(64, 'f')));
+}
+
+TEST_CASE("a reopened cache knows what it already holds", "[delivery][cache]") {
+	// The total is seeded by one walk when the cache is opened. Without that a
+	// second run would believe it held nothing and would fill the directory to
+	// twice its ceiling before the first eviction - which is the failure a
+	// remembered figure has and a scan per store does not, so it is pinned here.
+	Tree tree;
+	for (int index = 0; index < 12; ++index) {
+		ContentCache cache = tree.Open(256);
+		const Content content(
+			"run" + std::to_string(index), {std::string(64, static_cast<char>('a' + index))}
+		);
+		REQUIRE(cache.Store(content.Entry(), content.Whole));
+		CHECK(cache.Bytes() <= 256);
+	}
+}

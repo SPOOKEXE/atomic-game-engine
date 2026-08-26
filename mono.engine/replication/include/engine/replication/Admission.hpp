@@ -8,6 +8,7 @@
 #include <engine/net/Cookie.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Handshake.hpp>
+#include <engine/net/Wire.hpp>
 
 #include <array>
 #include <cstddef>
@@ -18,7 +19,10 @@
 
 namespace engine::replication {
 
-	// Which of the four an admission message is.
+	// Which of the five an admission message is.
+	//
+	// **The ordinals reach a wire, so a value may be added at the end and none
+	// may be reordered or removed.**
 	//
 	// @since v0.3
 	enum class AdmissionKind : uint8_t {
@@ -29,6 +33,11 @@ namespace engine::replication {
 		Answer,
 
 		Welcome,
+
+		// A server saying it does not serve this wire at all.
+		//
+		// @since v0.19
+		Refuse,
 	};
 
 	// Returns a stable, human-readable name for an admission message kind.
@@ -79,6 +88,27 @@ namespace engine::replication {
 		std::array<std::byte, net::Cookie::COOKIE_BYTES> Cookie{};
 	};
 
+	// A server turning a client away because it is speaking the wrong stack.
+	//
+	// **The reason the fallback costs one round trip instead of a timeout.** A
+	// server serving only QUIC would otherwise drop a datagram-stack hello in
+	// silence, which from the client's side is indistinguishable from a firewall
+	// - so it waits out a deadline and then guesses. This says so instead.
+	//
+	// It costs the server nothing to send and nothing to remember: it is derived
+	// from the datagram that caused it and is smaller than that datagram, which
+	// are `net/AGENTS.md`'s two rules for answering a stranger.
+	//
+	// @since v0.19
+	struct Refusal {
+		// Which wire this server does answer.
+		//
+		// Stated rather than left as "not this one", because a client that is
+		// told will try the right stack next rather than the next stack in its
+		// list.
+		net::WireKind Wire = net::WireKind::Quic;
+	};
+
 	// A server admitting the client, and proving the keys agree.
 	//
 	// @since v0.3
@@ -122,6 +152,7 @@ namespace engine::replication {
 		replication::Challenge Challenge;
 		replication::Answer Answer;
 		replication::Welcome Welcome;
+		replication::Refusal Refusal;
 		//@}
 	};
 
@@ -152,6 +183,13 @@ namespace engine::replication {
 	// @param welcome The message to write.
 	// @since v0.3
 	void WriteAdmission(core::ByteWriter &writer, const Welcome &welcome);
+
+	// Writes a refusal.
+	//
+	// @param writer  Where the bytes go.
+	// @param refusal The message to write.
+	// @since v0.19
+	void WriteAdmission(core::ByteWriter &writer, const Refusal &refusal);
 
 	// Reads an admission message, refusing anything that is not exactly one.
 	//

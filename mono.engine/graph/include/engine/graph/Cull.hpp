@@ -27,7 +27,7 @@ namespace engine::graph {
 
 	// The world-space box a draw instance occupies.
 	//
-	// **`AABB::FromOrientedBox`, not a centre and the half-extent.** A rotated
+	// **`core::OrientedBoxBounds`, not a centre and the half-extent.** A rotated
 	// cube reaches further on every axis than its own half-extent, and a bound
 	// smaller than the shape is a part that vanishes as it turns near the screen
 	// edge - the exact bug the box test is written to be conservative against,

@@ -1,3 +1,4 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineProfile.hpp>
@@ -11,6 +12,7 @@
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
+#include <string_view>
 
 namespace studio {
 
@@ -39,6 +41,30 @@ namespace studio {
 				}
 			}
 			return nullptr;
+		}
+
+		template <typename Timings>
+		double PassTiming(const Timings &timings, const engine::graph::ProfilePass &pass) {
+			if (const auto named = timings.find(pass.Name.Id()); named != timings.end()) {
+				return named->second;
+			}
+			// The renderer records the display name, but the node kind is the
+			// stable fallback for an older installed pipeline whose names differ.
+			if (const auto kind = timings.find(pass.Kind.Id()); kind != timings.end()) {
+				return kind->second;
+			}
+			return 0.0;
+		}
+
+		double FrameGraphWallTime(const engine::graph::ProfilePass &pass) {
+			const std::string_view name = pass.Name.Text();
+			double microseconds = 0.0;
+			for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans()) {
+				if (span.Name == name || span.Name == pass.Kind.Text()) {
+					microseconds += static_cast<double>(span.Milliseconds) * 1000.0;
+				}
+			}
+			return microseconds;
 		}
 
 		template <typename Draw>
@@ -95,7 +121,7 @@ namespace studio {
 			return;
 		}
 		RenderPipelineStatus = "loaded " + std::string(selected.Text());
-		RenderPipelineCanvas.Select(engine::nodegraph::NO_NODE);
+		RenderPipelineCanvas.Select(nodegraph::NO_NODE);
 		RenderPipelineCanvas.Fit(RenderPipelineGraph);
 	}
 
@@ -136,11 +162,21 @@ namespace studio {
 			RegisterRenderPipelineNodeTypes();
 			RenderPipelineCanvas.Observe(&RenderPipelinePreviewEvaluator);
 			RenderPipelineCanvas.Images(
-				[this](uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &) {
+				[this](uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &) {
 					const auto found = RenderPipelinePreviewTextures.find(key);
 					return found == RenderPipelinePreviewTextures.end() ? nullptr : found->second;
 				}
 			);
+			// **What shape those pictures are, because they are not square.** A
+			// node's thumbnail slot is, and `PreviewImage` says so - but these
+			// are the renderer's own retained copies of graph resources, which
+			// keep the resource's shape. A full-screen target's preview is as
+			// wide as the screen, and drawn into the square slot it came out
+			// squashed by about 1.78. See `nodegraph::Editor::Aspects`.
+			RenderPipelineCanvas.Aspects([this](uint64_t key) {
+				const auto found = RenderPipelinePreviewAspects.find(key);
+				return found == RenderPipelinePreviewAspects.end() ? 0.0f : found->second;
+			});
 			RenderPipelineCanvas.Signals.Changed = [this] { RenderPipelineDirty = true; };
 			RenderPipelineCanvasReady = true;
 		}
@@ -227,6 +263,7 @@ namespace studio {
 		if (ImGui::BeginChild("##render-pipeline-canvas", ImVec2(std::max(room.x - side, side), room.y))) {
 			RenderPipelinePreviewEvaluator.Run(RenderPipelineGraph);
 			RenderPipelinePreviewTextures.clear();
+			RenderPipelinePreviewAspects.clear();
 			const double previewNow = Clock.Now();
 			const bool refreshPreviews = previewNow >= RenderPipelinePreviewNext;
 			if (refreshPreviews) {
@@ -248,9 +285,8 @@ namespace studio {
 				engine::graph::Build(previewDocument, previewGraph, previewOffender) ==
 					engine::graph::PipelineDocumentStatus::Ok) {
 				for (size_t index = 0; index < RenderPipelineGraph.Nodes().size(); index++) {
-					const engine::nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
-					const engine::nodegraph::NodeType *canvasType =
-						engine::nodegraph::NodeTypes::Find(canvasNode.Type);
+					const nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
+					const nodegraph::NodeType *canvasType = nodegraph::NodeTypes::Find(canvasNode.Type);
 					const engine::graph::Node *renderNode =
 						previewGraph.Find(engine::graph::NodeId{static_cast<uint32_t>(index + 1)});
 					if (canvasType == nullptr || canvasType->PreviewPort.empty() || renderNode == nullptr) {
@@ -293,9 +329,13 @@ namespace studio {
 											  RenderPipelineInstalledName, resource->Name, previewSlot
 										  );
 					if (texture != nullptr) {
-						RenderPipelinePreviewTextures[engine::nodegraph::PictureKey(
+						const uint64_t key = nodegraph::PictureKey(
 							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort
-						)] = texture;
+						);
+						RenderPipelinePreviewTextures[key] = texture;
+						RenderPipelinePreviewAspects[key] = Renderer.ResourcePreviewAspect(
+							RenderPipelineInstalledName, resource->Name, previewSlot
+						);
 					}
 				}
 			}
@@ -355,9 +395,9 @@ namespace studio {
 			}
 			ImGui::PushID(static_cast<int>(spec.Kind.Id()));
 			if (ImGui::Selectable(title.c_str())) {
-				const engine::nodegraph::NodeId made =
+				const nodegraph::NodeId made =
 					RenderPipelineGraph.Add("render.pass." + std::string(spec.Kind.Text()), 0.0f, 0.0f);
-				if (made != engine::nodegraph::NO_NODE) {
+				if (made != nodegraph::NO_NODE) {
 					RenderPipelineCanvas.Select(made);
 					RenderPipelineCanvas.Centre(RenderPipelineGraph, made);
 					RenderPipelineDirty = true;
@@ -371,28 +411,28 @@ namespace studio {
 	}
 
 	void Editor::DrawRenderPipelineInspector() {
-		const std::vector<engine::nodegraph::NodeId> &selection = RenderPipelineCanvas.Selection();
+		const std::vector<nodegraph::NodeId> &selection = RenderPipelineCanvas.Selection();
 		if (selection.size() != 1) {
 			ImGui::TextDisabled(selection.empty() ? "select a pass" : "multiple passes selected");
 			return;
 		}
-		const engine::nodegraph::Node *node = RenderPipelineGraph.Find(selection.front());
+		const nodegraph::Node *node = RenderPipelineGraph.Find(selection.front());
 		if (node == nullptr) {
 			return;
 		}
-		const engine::nodegraph::NodeType *type = engine::nodegraph::NodeTypes::Find(node->Type);
+		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node->Type);
 		ImGui::TextUnformatted(node->Label.empty() ? node->Type.c_str() : node->Label.c_str());
 		if (type != nullptr) {
 			ImGui::TextDisabled("%s", type->Subtitle.c_str());
 			ImGui::SeparatorText("Inputs");
-			for (const engine::nodegraph::PortSpec &port : type->Inputs) {
-				const engine::nodegraph::Link *link = RenderPipelineGraph.LinkInto(node->Id, port.Name);
+			for (const nodegraph::PortSpec &port : type->Inputs) {
+				const nodegraph::Link *link = RenderPipelineGraph.LinkInto(node->Id, port.Name);
 				ImGui::BulletText("%s  %s", port.Name.c_str(), link == nullptr ? "unwired" : "connected");
 			}
 			ImGui::SeparatorText("Outputs");
-			for (const engine::nodegraph::PortSpec &port : type->Outputs) {
+			for (const nodegraph::PortSpec &port : type->Outputs) {
 				size_t consumers = 0;
-				for (const engine::nodegraph::Link &link : RenderPipelineGraph.Links()) {
+				for (const nodegraph::Link &link : RenderPipelineGraph.Links()) {
 					consumers += link.From == node->Id && link.FromPort == port.Name ? 1 : 0;
 				}
 				ImGui::BulletText(
@@ -409,7 +449,7 @@ namespace studio {
 		const auto canvasNode = std::find_if(
 			RenderPipelineGraph.Nodes().begin(),
 			RenderPipelineGraph.Nodes().end(),
-			[node](const engine::nodegraph::Node &candidate) { return candidate.Id == node->Id; }
+			[node](const nodegraph::Node &candidate) { return candidate.Id == node->Id; }
 		);
 		if (canvasNode != RenderPipelineGraph.Nodes().end() &&
 			SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, document, error) &&
@@ -420,19 +460,27 @@ namespace studio {
 			if (renderNode != nullptr) {
 				const auto &gpuTimings = Renderer.PassTimings();
 				const auto &wallTimings = Renderer.PassWallTimes();
-				const auto gpu = gpuTimings.find(renderNode->Name.Id());
-				const auto wall = wallTimings.find(renderNode->Name.Id());
 				ImGui::SeparatorText("Profile");
-				if (gpu != gpuTimings.end() && gpu->second > 0.0) {
+				const engine::graph::ProfilePass pass{
+					engine::graph::NodeId{offset + 1},
+					renderNode->Name,
+					renderNode->Kind,
+				};
+				const double gpu = PassTiming(gpuTimings, pass);
+				double wall = PassTiming(wallTimings, pass);
+				if (wall <= 0.0) {
+					wall = FrameGraphWallTime(pass);
+				}
+				if (gpu > 0.0) {
 					ImGui::Text(
 						"GPU %.3f ms, wall %.3f ms",
-						gpu->second / 1000.0,
-						wall == wallTimings.end() ? 0.0 : wall->second / 1000.0
+						gpu / 1000.0,
+						wall / 1000.0
 					);
 				} else {
 					ImGui::TextDisabled(
 						Renderer.Timed() ? "GPU pending, wall %.3f ms" : "GPU unavailable, wall %.3f ms",
-						wall == wallTimings.end() ? 0.0 : wall->second / 1000.0
+						wall / 1000.0
 					);
 				}
 
@@ -592,21 +640,6 @@ namespace studio {
 			ShowRenderPipeline = true;
 			LoadRenderPipeline(Active, settings.RenderingProfile);
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Lighting Service Properties")) {
-			engine::ecs::Entity lighting = engine::ecs::NULL_ENTITY;
-			Universe->Enter(Active, [&](engine::ecs::Store &store) {
-				lighting = store.FindFirstRoot("Lighting");
-			});
-			if (lighting != engine::ecs::NULL_ENTITY) {
-				Selection = {lighting};
-				SelectionWorld = Active;
-				ClearRootSelection();
-				ShowProperties = true;
-				RevealSelection = true;
-			}
-		}
-
 		ImGui::TextDisabled("Lighting values remain properties of this world's Lighting service.");
 		ImGui::End();
 	}
@@ -647,11 +680,10 @@ namespace studio {
 		const auto &gpuTimings = Renderer.PassTimings();
 		const auto &wallTimings = Renderer.PassWallTimes();
 		for (engine::graph::ProfilePass &pass : profile.Passes) {
-			if (const auto found = gpuTimings.find(pass.Name.Id()); found != gpuTimings.end()) {
-				pass.Elapsed = found->second;
-			}
-			if (const auto found = wallTimings.find(pass.Name.Id()); found != wallTimings.end()) {
-				pass.Wall = found->second;
+			pass.Elapsed = PassTiming(gpuTimings, pass);
+			pass.Wall = PassTiming(wallTimings, pass);
+			if (pass.Wall <= 0.0) {
+				pass.Wall = FrameGraphWallTime(pass);
 			}
 		}
 		const auto mib = [](uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
@@ -670,8 +702,14 @@ namespace studio {
 			const std::string name(pass.Name.Text());
 			const bool open = ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
 			ImGui::SameLine();
-			if (pass.Elapsed > 0.0) {
-				ImGui::TextDisabled("GPU %.3f ms  wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0);
+			if (pass.Elapsed > 0.0 || pass.Wall > 0.0) {
+				if (pass.Elapsed > 0.0) {
+					ImGui::TextDisabled(
+						"GPU %.3f ms  wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0
+					);
+				} else {
+					ImGui::TextDisabled("GPU pending  wall %.3f ms", pass.Wall / 1000.0);
+				}
 			} else {
 				ImGui::TextDisabled(
 					Renderer.Timed() ? "GPU pending  wall %.3f ms" : "GPU unavailable  wall %.3f ms",

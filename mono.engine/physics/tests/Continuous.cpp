@@ -1,3 +1,5 @@
+#include <engine/collision/TriangleMesh.hpp>
+#include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -9,6 +11,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/testing/Suite.hpp>
@@ -25,9 +28,12 @@ TEST_DEPENDS("engine.physics.convexquery")
 TEST_DEPENDS("engine.physics.broadphase")
 // The motion it reconstructs.
 TEST_DEPENDS("engine.physics.integrate")
+// The soup a baked collider resolves to.
+TEST_DEPENDS("engine.collision.trianglemesh")
 
 using Catch::Approx;
 using engine::core::CFrame;
+using engine::core::Name;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -40,8 +46,10 @@ using engine::physics::SweepFastBodies;
 using engine::physics::SyncBroadphase;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
+using engine::scene::CollisionShapes;
 using engine::scene::Motion;
 using engine::scene::RigidBody;
+using engine::scene::ShapeKind;
 using engine::scene::Simulated;
 using engine::scene::Transform;
 
@@ -287,4 +295,73 @@ TEST_CASE("a body is clamped at the wall at every speed that reaches it", "[cont
 		CHECK(front > 3.95f);
 		CHECK(front < 3.95f + 0.01f);
 	}
+}
+
+TEST_CASE("a fast body is stopped at a mesh and not at its bound", "[continuous]") {
+	// **The bug this exists for**: this step used to build its candidates
+	// through the three-argument `ShapeInstance` constructor, which has nowhere
+	// to put a hull or a soup - so every baked collider it swept against was
+	// demoted to the part's extent, and the extent of a heightfield chunk is a
+	// box the height of its tallest point.
+	//
+	// A body falling fast enough to be swept was therefore clamped just short of
+	// that box's *roof*, in mid-air over the landscape, with nothing under it
+	// for the narrow phase to find and nothing to cancel its fall. Gravity kept
+	// adding to a velocity that no longer moved it, and the next tick clamped it
+	// against the same roof a fraction sooner: a character stuck in the sky for
+	// ever, which is what a walk across scripted terrain produced after about
+	// ninety seconds.
+	//
+	// The plate here is the same shape at a tenth the scale: a flat soup at the
+	// floor of a ten-stud bound.
+	auto owned = std::make_unique<Store>("physics.continuous");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Name geometry("plate");
+	{
+		const Vector3 points[4]{
+			Vector3{-5.0f, -5.0f, -5.0f},
+			Vector3{5.0f, -5.0f, -5.0f},
+			Vector3{5.0f, -5.0f, 5.0f},
+			Vector3{-5.0f, -5.0f, 5.0f},
+		};
+		const uint32_t indices[6]{0, 1, 2, 0, 2, 3};
+
+		CollisionShapes shapes;
+		shapes.SetMesh(geometry, engine::collision::BuildTriangleMesh(points, indices));
+		store.SetResource(std::move(shapes));
+	}
+
+	const Entity ground = store.Create();
+	store.Set<Transform>(ground, Transform{CFrame{Vector3::Zero}});
+
+	Collider plate;
+	plate.Shape = ShapeKind::Mesh;
+	plate.Geometry = geometry;
+	// **The bound is the whole ten-stud box and the geometry is its floor**,
+	// which is the shape of the failure: the roof is ten studs above anything
+	// solid.
+	plate.Extent = Vector3{5.0f, 5.0f, 5.0f};
+	store.Set<Collider>(ground, plate);
+
+	SyncBroadphase(store);
+
+	// From well above the roof, fast enough to reach the plate inside one tick -
+	// which is what admits it to this step at all.
+	const Entity falling = Bullet(store, 0.0f);
+	store.GetMutable<Transform>(falling)->Frame.Position = Vector3{0.0f, 10.0f, 0.0f};
+	store.GetMutable<Motion>(falling)->Linear = Vector3{0.0f, -900.0f, 0.0f};
+
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(falling);
+	REQUIRE(placed != nullptr);
+
+	// The cube's underside stops on the plate at y = -5, so its centre is just
+	// under -4.5 by the bite - rather than at 5.5, resting on a roof that is not
+	// there.
+	CHECK(placed->Frame.Position.Y < -4.49f);
+	CHECK(placed->Frame.Position.Y > -4.52f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
 }

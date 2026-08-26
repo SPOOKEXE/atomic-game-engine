@@ -505,7 +505,7 @@ namespace engine::replication {
 
 	// Registers this module's own resource types under explicit names.
 	//
-	// **Rule 4, and `client::DrawList` is the entry that learned it.** A
+	// **Rule 4, and `engine::render::DrawList` is the entry that learned it.** A
 	// `SnapshotBuffer` is set as a world resource, a resource is keyed by a
 	// component id, and `Store::SetResource` mints one under the compiler's
 	// spelling of the type unless a name was registered first. `Store::Save`
@@ -519,7 +519,7 @@ namespace engine::replication {
 	// would otherwise have to know to do this, and would find out the same way.
 	//
 	// The serialisation writes nothing and reads back cleared, exactly as
-	// `client::DrawList`'s does and for a stronger reason: this holds a
+	// `engine::render::DrawList`'s does and for a stronger reason: this holds a
 	// connection's ticks in flight, and a file carrying them would describe a
 	// session that ended.
 	//

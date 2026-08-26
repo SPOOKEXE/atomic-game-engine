@@ -35,6 +35,7 @@ using engine::core::Ray;
 using engine::core::Vector3;
 using engine::scene::Camera;
 using engine::scene::CameraMatrices;
+using studio::FitViewportImage;
 using studio::PanelProjection;
 
 namespace {
@@ -208,6 +209,22 @@ TEST_CASE("the aspect ratio is honoured rather than assumed square", "[studio][p
 	const float tallFraction = (onTall.x - 125.0f) / 250.0f;
 
 	CHECK(wideFraction < tallFraction);
+}
+
+TEST_CASE("a completed viewport frame keeps its aspect while the panel resizes", "[studio][projection]") {
+	const auto wide = FitViewportImage(glm::vec2(1200.0f, 400.0f), 800, 600);
+	CHECK_THAT(wide.Size.x, WithinAbs(533.3333f, TIGHT));
+	CHECK_THAT(wide.Size.y, WithinAbs(400.0f, TIGHT));
+	CHECK_THAT(wide.Min.x, WithinAbs(333.3333f, TIGHT));
+	CHECK_THAT(wide.Min.y, WithinAbs(0.0f, TIGHT));
+	CHECK_THAT(wide.Size.x / wide.Size.y, WithinAbs(4.0f / 3.0f, TIGHT));
+
+	const auto tall = FitViewportImage(glm::vec2(400.0f, 900.0f), 1600, 900);
+	CHECK_THAT(tall.Size.x, WithinAbs(400.0f, TIGHT));
+	CHECK_THAT(tall.Size.y, WithinAbs(225.0f, TIGHT));
+	CHECK_THAT(tall.Min.x, WithinAbs(0.0f, TIGHT));
+	CHECK_THAT(tall.Min.y, WithinAbs(337.5f, TIGHT));
+	CHECK_THAT(tall.Size.x / tall.Size.y, WithinAbs(16.0f / 9.0f, TIGHT));
 }
 
 TEST_CASE("a segment wholly in front projects like its endpoints", "[studio][projection]") {
@@ -454,4 +471,46 @@ TEST_CASE("aligning to a surface keeps the facing it can", "[studio][projection]
 	const CFrame onFloor(Vector3{}, studio::AlignedTo(looking, Vector3::YAxis));
 	CHECK_THAT(onFloor.UpVector().Y, WithinAbs(1.0f, 0.0005f));
 	CHECK_THAT(onFloor.LookVector().Magnitude(), WithinAbs(1.0f, 0.0005f));
+}
+
+TEST_CASE("an oriented box projects to the rectangle drag selection tests", "[studio][projection]") {
+	const PanelProjection panel = Panel();
+	glm::vec2 minimum;
+	glm::vec2 maximum;
+	REQUIRE(
+		studio::ProjectBoxBounds(
+			panel,
+			CFrame(Vector3{0.0f, 0.0f, -10.0f}, glm::angleAxis(0.5f, glm::vec3(0.0f, 1.0f, 0.0f))),
+			Vector3{1.0f, 2.0f, 1.0f},
+			minimum,
+			maximum
+		)
+	);
+
+	CHECK(minimum.x < 400.0f);
+	CHECK(maximum.x > 400.0f);
+	CHECK(minimum.y < 200.0f);
+	CHECK(maximum.y > 200.0f);
+	CHECK(
+		studio::PanelRectanglesOverlap(minimum, maximum, glm::vec2(390.0f, 190.0f), glm::vec2(410.0f, 210.0f))
+	);
+	CHECK_FALSE(
+		studio::PanelRectanglesOverlap(minimum, maximum, glm::vec2(0.0f, 0.0f), glm::vec2(10.0f, 10.0f))
+	);
+}
+
+TEST_CASE("a selection box crossing the eye plane is clipped instead of lost", "[studio][projection]") {
+	const PanelProjection panel = Panel();
+	glm::vec2 minimum;
+	glm::vec2 maximum;
+	CHECK(
+		studio::ProjectBoxBounds(
+			panel, CFrame(Vector3{0.0f, 0.0f, -0.15f}), Vector3{0.1f, 0.1f, 0.1f}, minimum, maximum
+		)
+	);
+	CHECK_FALSE(
+		studio::ProjectBoxBounds(
+			panel, CFrame(Vector3{0.0f, 0.0f, 2.0f}), Vector3{0.5f, 0.5f, 0.5f}, minimum, maximum
+		)
+	);
 }

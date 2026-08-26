@@ -1,5 +1,10 @@
+#include "StableFilter.hpp"
+
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
+#include <engine/graph/Shadow.hpp>
 
 #include <algorithm>
 
@@ -11,6 +16,7 @@ namespace engine::graph {
 		// whole of this file. A steady scene settles to zero.
 		for (EntityList &list : Lists) {
 			list.Indices.clear();
+			list.WholeDrawList = false;
 		}
 		Live = 0;
 	}
@@ -20,10 +26,11 @@ namespace engine::graph {
 		into.assign(indices.begin(), indices.end());
 	}
 
-	std::vector<uint32_t> &EntityFlow::Open(core::Name name) {
+	std::vector<uint32_t> &EntityFlow::Open(core::Name name, bool wholeDrawList) {
 		for (size_t index = 0; index < Live; index++) {
 			if (Lists[index].Name == name) {
 				Lists[index].Indices.clear();
+				Lists[index].WholeDrawList = wholeDrawList;
 				return Lists[index].Indices;
 			}
 		}
@@ -33,10 +40,11 @@ namespace engine::graph {
 			EntityList &list = Lists[Live++];
 			list.Name = name;
 			list.Indices.clear();
+			list.WholeDrawList = wholeDrawList;
 			return list.Indices;
 		}
 
-		Lists.push_back(EntityList{name, {}});
+		Lists.push_back(EntityList{name, {}, wholeDrawList});
 		Live = Lists.size();
 		return Lists.back().Indices;
 	}
@@ -57,6 +65,24 @@ namespace engine::graph {
 			}
 		}
 		return false;
+	}
+
+	bool EntityFlow::IsWholeDrawList(core::Name name) const {
+		for (size_t index = 0; index < Live; index++) {
+			if (Lists[index].Name == name) {
+				return Lists[index].WholeDrawList;
+			}
+		}
+		return false;
+	}
+
+	void EntityFlow::MarkWholeDrawList(core::Name name, bool wholeDrawList) {
+		for (size_t index = 0; index < Live; index++) {
+			if (Lists[index].Name == name) {
+				Lists[index].WholeDrawList = wholeDrawList;
+				return;
+			}
+		}
 	}
 
 	void Viewpoints::Clear() {
@@ -116,18 +142,14 @@ namespace engine::graph {
 		const Frustum &frustum,
 		std::vector<uint32_t> &into
 	) {
-		into.clear();
-		into.reserve(from.size());
-
-		for (const uint32_t index : from) {
-			if (index >= instances.size()) {
-				continue;
-			}
-			if (frustum.Intersects(BoundsOf(instances[index]))) {
-				into.push_back(index);
-			}
-		}
-		return into.size();
+		return detail::StableFilter(
+			from.size(),
+			[&](size_t at) { return from[at]; },
+			[&](uint32_t index) {
+				return index < instances.size() && frustum.Intersects(BoundsOf(instances[index]));
+			},
+			into
+		);
 	}
 
 	size_t FilterByTag(
@@ -147,16 +169,14 @@ namespace engine::graph {
 			return into.size();
 		}
 
-		into.reserve(from.size());
-		for (const uint32_t index : from) {
-			if (index >= instances.size()) {
-				continue;
-			}
-			if ((instances[index].TagMask & mask) != 0) {
-				into.push_back(index);
-			}
-		}
-		return into.size();
+		return detail::StableFilter(
+			from.size(),
+			[&](size_t at) { return from[at]; },
+			[&](uint32_t index) {
+				return index < instances.size() && (instances[index].TagMask & mask) != 0;
+			},
+			into
+		);
 	}
 
 	size_t FilterByDistance(
@@ -179,16 +199,15 @@ namespace engine::graph {
 		// instance every frame per view.
 		const float limit = radius * radius;
 
-		into.reserve(from.size());
-		for (const uint32_t index : from) {
-			if (index >= instances.size()) {
-				continue;
-			}
-			if ((instances[index].Frame.Position - eye).MagnitudeSquared() <= limit) {
-				into.push_back(index);
-			}
-		}
-		return into.size();
+		return detail::StableFilter(
+			from.size(),
+			[&](size_t at) { return from[at]; },
+			[&](uint32_t index) {
+				return index < instances.size() &&
+					   (instances[index].Frame.Position - eye).MagnitudeSquared() <= limit;
+			},
+			into
+		);
 	}
 
 	size_t OrderEntities(
@@ -237,13 +256,29 @@ namespace engine::graph {
 
 		const core::Name output = firstResource(node.Writes, ResourceKind::Entities);
 		const std::string_view kind = node.Kind.Text();
-		if (!output.IsValid() || (kind != "entities" && kind != "cull-frustum" && kind != "cull-distance" &&
-								  kind != "filter-tag" && kind != "order-draw")) {
+		if (!output.IsValid()) {
+			// The render walk offers every per-view node here before the GPU
+			// records it. A node producing no entity list belongs to that later
+			// half, so it is outside this flow rather than malformed inside it.
+			return {};
+		}
+		if (kind != "entities" && kind != "cull-frustum" && kind != "cull-distance" && kind != "filter-tag" &&
+			kind != "order-draw") {
+			// The node stays in the graph, runs every frame, and produces
+			// nothing. A pipeline missing half its objects looks exactly like
+			// one whose cull is too aggressive.
+			ENGINE_WARN_EVERY(
+				5.0,
+				"'{}' is not an entity node this build runs (kind '{}'); it produces nothing",
+				node.Name.Text(),
+				kind
+			);
 			return {};
 		}
 
 		const core::Name input = firstResource(node.Reads, ResourceKind::Entities);
 		std::span<const uint32_t> source = entities.Get(input);
+		const bool wholeSource = entities.IsWholeDrawList(input);
 		std::vector<uint32_t> aliasedSource;
 		if (input == output) {
 			aliasedSource.assign(source.begin(), source.end());
@@ -251,13 +286,26 @@ namespace engine::graph {
 		}
 		std::vector<uint32_t> &into = entities.Open(output);
 
-		EntityNodeRun result{.Handled = true, .Output = output};
+		EntityNodeRun result;
+		result.Handled = true;
+		result.Output = output;
+		bool wholeOutput = false;
 		if (kind == "entities") {
 			AllEntities(instances.size(), into);
+			wholeOutput = true;
 		} else if (kind == "cull-frustum") {
 			const std::string *mode = node.Parameter(core::Name("culling"));
 			if (mode != nullptr && *mode == "none") {
 				into.assign(source.begin(), source.end());
+				wholeOutput = wholeSource;
+			} else if (wholeSource) {
+				result.BoundedAll = true;
+				CullAndBound(
+					instances,
+					Frustum::FromViewProjection(ViewProjectionOf(viewpointFor(node.Reads), aspect)),
+					into,
+					result.Bounds
+				);
 			} else {
 				FilterByFrustum(
 					instances,
@@ -267,21 +315,26 @@ namespace engine::graph {
 				);
 			}
 		} else if (kind == "cull-distance") {
-			FilterByDistance(
-				instances,
-				source,
-				viewpointFor(node.Reads).Frame.Position,
-				node.Number(core::Name("radius"), 0.0f),
-				into
-			);
+			const float radius = node.Number(core::Name("radius"), 0.0f);
+			FilterByDistance(instances, source, viewpointFor(node.Reads).Frame.Position, radius, into);
+			wholeOutput = wholeSource && radius <= 0.0f;
 		} else if (kind == "filter-tag") {
-			FilterByTag(instances, source, node.Integer(core::Name("mask"), 0), into);
+			const uint32_t mask = node.Integer(core::Name("mask"), 0);
+			FilterByTag(instances, source, mask, into);
+			wholeOutput = wholeSource && mask == 0;
 		} else {
 			result.Ordered = true;
 			result.Opaque = OrderEntities(instances, source, viewpointFor(node.Reads).Frame.Position, into);
 		}
+		entities.MarkWholeDrawList(output, wholeOutput);
 
 		result.Count = into.size();
+
+		// **Entities in against entities out, per pass.** "Why did half the
+		// world stop drawing" is answered by which pass dropped them, and the
+		// two counts are already here.
+		core::Metrics::Count("graph.entities.out", static_cast<double>(into.size()));
+		ENGINE_TRACE("'{}' ({}): {} entities in, {} out", node.Name.Text(), kind, source.size(), into.size());
 		return result;
 	}
 }

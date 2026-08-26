@@ -58,12 +58,11 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
 #include <engine/core/Name.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <algorithm>
 #include <array>
@@ -214,7 +213,7 @@ namespace engine::script {
 			ReturnSortedNames(call, table->Names);
 		}
 
-		constexpr std::array<ServiceMethod, 6> METHODS{{
+		constexpr std::array<ServiceMethod, 6> COLLECTION_METHODS{{
 			{"AddTag", ServiceAddTag},
 			{"RemoveTag", ServiceRemoveTag},
 			{"HasTag", ServiceHasTag},
@@ -230,7 +229,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "CollectionService";
-			surface.Methods = METHODS;
+			surface.Methods = COLLECTION_METHODS;
 			return surface;
 		}();
 		return SURFACE;

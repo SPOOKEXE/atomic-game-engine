@@ -1,4 +1,4 @@
-#include "Codec.hpp"
+#include <engine/script/Codec.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -151,14 +151,14 @@ namespace engine::script {
 			}
 
 			case ValueTag::Map: {
-				// **The sort, and it is the whole determinism guarantee.** By
-				// bytes rather than by either language's own comparison, so
-				// `"é"` lands in the same place whichever VM built the table.
-				std::sort(
-					value.Entries.begin(), value.Entries.end(), [](const auto &left, const auto &right) {
-						return left.first < right.first;
-					}
-				);
+				// **The sort, and it is the whole determinism guarantee.**
+				// `SortEntries` owns it because `HttpService` sorts the same
+				// tree the same way to write JSON, and two spellings of one
+				// order is one spelling too many.
+				const CodecStatus sorted = SortEntries(value.Entries);
+				if (sorted != CodecStatus::Ok) {
+					return sorted;
+				}
 
 				PutTag(out, ValueTag::Map);
 				PutU32(out, static_cast<uint32_t>(value.Entries.size()));
@@ -338,6 +338,23 @@ namespace engine::script {
 		}
 	}
 
+	CodecStatus SortEntries(std::vector<std::pair<std::string, ScriptValue>> &entries) {
+		std::sort(entries.begin(), entries.end(), [](const auto &left, const auto &right) {
+			return left.first < right.first;
+		});
+
+		// **Adjacent, because they are sorted**, so the check costs one pass and
+		// no second container. Reported rather than deduplicated: the two
+		// entries came from two different table keys and neither of them is the
+		// one the author meant to lose.
+		for (size_t entry = 1; entry < entries.size(); entry++) {
+			if (entries[entry - 1].first == entries[entry].first) {
+				return CodecStatus::DuplicateKey;
+			}
+		}
+		return CodecStatus::Ok;
+	}
+
 	const char *Describe(CodecStatus status) {
 		switch (status) {
 		case CodecStatus::Ok:
@@ -352,6 +369,8 @@ namespace engine::script {
 			return "holds something that cannot cross a world boundary";
 		case CodecStatus::Malformed:
 			return "malformed";
+		case CodecStatus::DuplicateKey:
+			return "has two keys with the same name";
 		}
 		return "unknown";
 	}

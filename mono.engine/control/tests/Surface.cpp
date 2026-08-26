@@ -10,7 +10,9 @@
 // `AGENTS.md` says so in those words. These cases open with the storage tools
 // this version added, and cover the shared table around them.
 
+#include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -18,6 +20,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -25,6 +28,7 @@
 TEST_SUITE_ID("engine.control.surface")
 TEST_DEPENDS("engine.ecs.schema")
 
+using engine::control::Feature;
 using engine::control::Surface;
 using engine::control::Tool;
 using engine::core::Name;
@@ -157,6 +161,48 @@ TEST_CASE("a later row replaces an earlier one of the same name", "[control]") {
 	CHECK(surface.Count() == 1);
 	CHECK(surface.Registered().front().Description == "second");
 	CHECK(Called(surface, "thing", json::object()) == 2);
+}
+
+TEST_CASE("a feature list installs only the named groups and keeps order", "[control]") {
+	Surface surface("test", "a suite");
+
+	const std::array features{
+		Feature{
+			"base",
+			[](Surface &registry) {
+				registry.Add(Tool{"thing", "shared feature", nullptr, [](const json &, std::string &) {
+									  return 1;
+								  }});
+			},
+		},
+		engine::control::features::Custom("product", [](Surface &registry) {
+			registry.Add(Tool{"thing", "product feature", nullptr, [](const json &, std::string &) {
+								  return 2;
+							  }});
+		}),
+	};
+
+	surface.Enable(features);
+
+	REQUIRE(surface.Count() == 1);
+	CHECK(surface.Registered().front().Description == "product feature");
+	CHECK(Called(surface, "thing", json::object()) == 2);
+}
+
+TEST_CASE("omitted engine features publish none of their rows", "[control]") {
+	Surface surface("test", "a suite");
+	const std::array features{engine::control::features::Architecture()};
+
+	surface.Enable(features);
+
+	bool architecture = false;
+	for (const Tool &tool : surface.Registered()) {
+		architecture = architecture || tool.Name == "module_get";
+		CHECK(tool.Name != "world_list");
+		CHECK(tool.Name != "class_list");
+		CHECK(tool.Name != "test_run");
+	}
+	CHECK(architecture);
 }
 
 // --- the storage underneath ----------------------------------------------------

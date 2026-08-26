@@ -1,6 +1,7 @@
 #include <engine/core/Clock.hpp>
 
 #include <algorithm>
+#include <chrono>
 
 namespace engine::core {
 

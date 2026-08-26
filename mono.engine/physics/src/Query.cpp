@@ -40,24 +40,24 @@ namespace engine::physics {
 		};
 
 		// One collider, resolved from a candidate id.
-		struct Candidate {
+		struct QueryCandidate {
 			ecs::Entity Owner;
 			ShapeInstance Shape;
 			bool Present = false;
 		};
 
-		Candidate ResolveCandidate(const ecs::Store &store, const Index &index, uint64_t id) {
+		QueryCandidate ResolveCandidate(const ecs::Store &store, const Index &index, uint64_t id) {
 			const std::vector<ColliderRecord> &records = *index.Records;
 			const auto at = static_cast<size_t>(id);
 			if (at >= records.size()) {
-				return Candidate{};
+				return QueryCandidate{};
 			}
 
 			const ecs::Entity owner = records[at].Owner;
 			const scene::Transform *transform = store.Get<scene::Transform>(owner);
 			const scene::Collider *collider = store.Get<scene::Collider>(owner);
 			if (transform == nullptr || collider == nullptr) {
-				return Candidate{};
+				return QueryCandidate{};
 			}
 
 			// **The baked geometry, resolved here as well as in the narrow
@@ -86,7 +86,7 @@ namespace engine::physics {
 				}
 			}
 
-			return Candidate{
+			return QueryCandidate{
 				owner,
 				ShapeInstance{transform->Frame, collider->Extent, collider->Shape, hull, mesh},
 				true,
@@ -224,7 +224,7 @@ namespace engine::physics {
 				result.Overflowed = result.Overflowed || found_.Overflowed;
 
 				for (size_t at = 0; at < found_.Written; at++) {
-					const Candidate candidate = ResolveCandidate(store, index, candidates[at]);
+					const QueryCandidate candidate = ResolveCandidate(store, index, candidates[at]);
 					if (!candidate.Present) {
 						continue;
 					}
@@ -268,7 +268,7 @@ namespace engine::physics {
 					break;
 				}
 
-				const Candidate candidate = ResolveCandidate(store, index, candidates[at].Id);
+				const QueryCandidate candidate = ResolveCandidate(store, index, candidates[at].Id);
 				if (!candidate.Present) {
 					continue;
 				}
@@ -467,7 +467,7 @@ namespace engine::physics {
 			result.Overflowed = result.Overflowed || found_.Overflowed;
 
 			for (size_t at = 0; at < found_.Written; at++) {
-				const Candidate candidate = ResolveCandidate(store, index, candidates[at]);
+				const QueryCandidate candidate = ResolveCandidate(store, index, candidates[at]);
 				if (!candidate.Present) {
 					continue;
 				}

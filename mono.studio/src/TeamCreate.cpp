@@ -1,5 +1,6 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/replication/Listener.hpp>
 
 #include <imgui.h>
 #include <optional>
@@ -123,6 +124,11 @@ namespace studio {
 			advert.Use = network::Purpose::Studio;
 			advert.Admits = key ? network::Access::Private : network::Access::Public;
 			advert.Protocol = STUDIO_PROTOCOL;
+			// **The default, said rather than assumed.** A team-create host is a
+			// `replication::Listener` on its settings' default wire, which is
+			// QUIC as of v0.19, so this is that value repeated where a peer can
+			// read it before dialling.
+			advert.Transports = engine::replication::ListenerSettings{}.Wire;
 			// The wildcard with the port a peer would connect to, exactly as a
 			// game server announces: the listing at the other end resolves the
 			// address against where the datagram came from.

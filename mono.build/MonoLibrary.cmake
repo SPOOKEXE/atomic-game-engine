@@ -98,6 +98,19 @@ function(_mono_add_shaders name target defines)
 		return()
 	endif()
 
+	# **`.glsl` is a shared fragment, not a stage, and it is compiled by nobody.**
+	# `instance.glsl` holds the decode `opaque.vert` and `shadow.vert` both need;
+	# a stage `#include`s it and glslc resolves the quoted path against the
+	# including file's own directory.
+	#
+	# Every stage in the module depends on every one of them, which is coarser
+	# than tracking real include edges and is the right trade: a shader fragment
+	# is a handful of files, over-building one module's shaders costs a second,
+	# and the alternative failure is the one this build already refuses to
+	# tolerate - an edit that leaves a stale `.spv` on disk and surfaces as a
+	# pipeline that will not create.
+	file(GLOB_RECURSE shader_headers CONFIGURE_DEPENDS "${source_dir}/*.glsl")
+
 	if(NOT MONO_GLSLC)
 		message(FATAL_ERROR
 			"${name} owns shaders but no glslc was resolved.\n"
@@ -119,11 +132,12 @@ function(_mono_add_shaders name target defines)
 		set(spv "${stage}/${shader_name}.spv")
 		add_custom_command(
 			OUTPUT "${spv}"
-			COMMAND ${MONO_GLSLC} ${define_flags} "${shader}" -o "${spv}"
+			COMMAND ${MONO_GLSLC} ${define_flags} -I "${source_dir}" "${shader}" -o "${spv}"
 			# The compiler is a dependency, not just a command. Without it a
 			# shaderc bump leaves every .spv on disk stale, and the mismatch
-			# surfaces as a pipeline that fails to create.
-			DEPENDS "${shader}" ${MONO_GLSLC_DEPENDS}
+			# surfaces as a pipeline that fails to create. The `.glsl` fragments
+			# are dependencies for the same reason - see the glob above.
+			DEPENDS "${shader}" ${shader_headers} ${MONO_GLSLC_DEPENDS}
 			COMMENT "SPIR-V ${name}/${shader_name}"
 			VERBATIM
 		)
@@ -150,9 +164,12 @@ function(_mono_add_shaders name target defines)
 		list(APPEND outputs "${msl}")
 	endforeach()
 
+	# A named handle for `cmake --build --target engine_resources_shaders`. A
+	# program does not depend on it: it names the compiled files below instead,
+	# which is what lets Ninja decide the staging is already done.
 	add_custom_target(${target}_shaders DEPENDS ${outputs})
 	set_property(TARGET ${target} PROPERTY MONO_SHADER_DIR "${stage}")
-	set_property(TARGET ${target} PROPERTY MONO_SHADER_TARGET ${target}_shaders)
+	set_property(TARGET ${target} PROPERTY MONO_SHADER_OUTPUTS "${outputs}")
 
 	# **A module's staging directory is reconciled here, not merely written
 	# to.** A `.spv` is an `add_custom_command` output and CMake deletes an
@@ -269,6 +286,104 @@ function(_mono_select_platform_sources variable)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# Paying for a header once instead of once per file
+# ---------------------------------------------------------------------------
+
+# The standard headers a precompiled header is worth building out of.
+#
+# The sixteen most-included ones across the first-party tree, counted rather
+# than guessed - `<vector>` appears in 608 files, `<string>` in 441. Standard
+# headers only, and that is the rule rather than an accident: a PCH holding an
+# engine header would have to be rebuilt whenever that header changed, which is
+# the case a developer waits through, and it could only be given to targets that
+# link the module it came from. Adding `core/Log.hpp`, `core/Name.hpp` and the
+# two hot value types to this list was measured at 14.7% against 14.0% for the
+# list as it stands - a fifth of a percent for a coupling.
+set(MONO_PCH_HEADERS
+	"<algorithm>" "<array>" "<cmath>" "<cstddef>" "<cstdint>" "<cstring>"
+	"<filesystem>" "<functional>" "<memory>" "<optional>" "<span>" "<string>"
+	"<string_view>" "<unordered_map>" "<utility>" "<vector>")
+
+# Whichever of the two header-amortising strategies this preset asked for.
+#
+# **They are two answers to one question and this repository picks one.** Both
+# exist to stop the same header being parsed once per source file: a unity build
+# concatenates eight sources so the headers are read once for the batch, and a
+# precompiled header serialises the parse of the standard library so every
+# source reads it back instead of re-parsing it. Applying both means paying to
+# build a PCH per target that a unity build has already made almost redundant,
+# so unity wins where a preset asks for it.
+#
+# Measured on this machine with the real compile flags, ccache bypassed, best of
+# two runs each way, three modules of different shapes:
+#
+#   | module         | TUs | plain     | with PCH  |      |
+#   |----------------|-----|-----------|-----------|------|
+#   | `engine/net`   |  19 |  27.1 CPU |  22.7 CPU | -16% |
+#   | `engine/scene` |  31 |  28.7 CPU |  24.7 CPU | -14% |
+#   | `studio`       |  59 | 180.7 CPU | 164.6 CPU |  -9% |
+#
+# **10.4% weighted, which is why this ranks below the unity build rather than
+# above it.** That is the opposite of the usual intuition about precompiled
+# headers and it is the reason the number was taken rather than assumed;
+# `docs/ARCH_REVIEW.md` §E2 measured 11% independently, and the unity build
+# measured 59% over the whole library set.
+#
+# **`unity_allowed` is FALSE for every test and benchmark binary, and that is a
+# property of how a suite is declared rather than a shortcut.** `TEST_SUITE_ID`
+# puts two fixed-name objects at file scope - `MonoTestSuiteId` and
+# `MonoTestSuiteDeclaration` - and `TEST_DEPENDS` reads the first of them by
+# that name. One file, one suite, one pair of objects. Concatenating eight test
+# files puts eight of each in one translation unit, which is 509 redefinitions
+# across the tree and not a thing renaming can fix: the contract the runner
+# reads is that a suite *is* a file. Those binaries take the precompiled header
+# instead. `release` builds no tests at all, so the preset this matters to is
+# `ci`.
+#
+# One place for all three kinds, so that libraries, test binaries and benchmark
+# binaries cannot end up on settings that disagree.
+function(_mono_batch_headers target sources unity_allowed)
+	if(MONO_UNITY_BUILD AND unity_allowed)
+		set_target_properties(${target} PROPERTIES
+			UNITY_BUILD ON
+			UNITY_BUILD_MODE BATCH
+			UNITY_BUILD_BATCH_SIZE ${MONO_UNITY_BATCH})
+		_mono_keep_spdlog_sources_apart("${sources}")
+	elseif(MONO_PCH)
+		target_precompile_headers(${target} PRIVATE ${MONO_PCH_HEADERS})
+	endif()
+endfunction()
+
+# A source that includes spdlog directly is left out of the concatenation.
+#
+# **Two files in this repository complete `spdlog::logger` themselves**, because
+# `core/Log.hpp` only forward-declares it - `mono.studio/src/Editor.cpp`, which
+# installs a sink, and `core/tests/Log.cpp`. Doing that pulls in fmt's full
+# `format.h`, which *partially specialises* `formatter<std::basic_string<...>>`.
+# Any neighbour compiled before it in the same batch that formatted a
+# `std::string` has already instantiated that template, and the specialisation
+# then arrives too late:
+#
+#   spdlog/fmt/bundled/format.h:3943: error: partial specialization of
+#   'formatter<basic_string<_CharT, _Traits, _Allocator>, Char>' after
+#   instantiation of 'formatter<basic_string<char>, char, void>'
+#
+# **Detected rather than listed, because of what that message is like.** It
+# names a line in a vendored header and no file of ours, and it appears only in
+# the two presets that concatenate - so a developer who adds a third sink would
+# meet it for the first time in CI, with nothing in the text pointing at what
+# they wrote. A grep for the include costs a configure about a fifth of a second
+# and cannot go stale.
+function(_mono_keep_spdlog_sources_apart sources)
+	foreach(source IN LISTS sources)
+		file(STRINGS "${source}" hit REGEX "^#include <spdlog/" LIMIT_COUNT 1)
+		if(hit)
+			set_source_files_properties("${source}" PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+		endif()
+	endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # mono_add_library
 # ---------------------------------------------------------------------------
 #
@@ -283,7 +398,7 @@ function(mono_add_library name)
 	cmake_parse_arguments(ARG
 		""
 		"TIER;NAMESPACE"
-		"DEPS;VENDOR;VENDOR_PUBLIC;VENDOR_INCLUDES;DEFINES;SHADER_DEFINES;ALLOW_TIER_ESCAPE"
+		"DEPS;VENDOR;VENDOR_PUBLIC;VENDOR_INCLUDES;DEFINES;SHADER_DEFINES;ALLOW_TIER_ESCAPE;NO_UNITY"
 		${ARGN})
 
 	if(NOT ARG_TIER)
@@ -350,7 +465,41 @@ function(mono_add_library name)
 		if(ARG_DEFINES)
 			target_compile_definitions(${target} PUBLIC ${ARG_DEFINES})
 		endif()
+
+		# **The module's own name, so that 711 log call sites gained a category
+		# without one of them being edited to say so.** `ENGINE_LOG_CATEGORY` is
+		# what `ENGINE_INFO` and its siblings pass to the macro, and one
+		# definition here is the whole of "one category per module by
+		# convention" - a convention the build applies rather than one somebody
+		# remembers. A file logging on behalf of another area passes a category
+		# explicitly to `ENGINE_LOG`.
+		#
+		# PRIVATE, because a category is a property of the translation unit that
+		# writes the line and not of anything it links: a header of this
+		# module's, logging from inside another module's source, is that other
+		# module's line to explain.
+		target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+
 		target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+
+		# **`NO_UNITY` names a source that has to stay a translation unit of its
+		# own, and every use of it is a defect somewhere else.** A static archive
+		# is searched a member at a time, so an object nothing wants is an object
+		# whose unresolved references are never read - and concatenating eight
+		# sources into one member makes the whole batch arrive as soon as any one
+		# of them is wanted. A module that has been getting away with an
+		# undeclared dependency stops getting away with it, in `release` and `ci`
+		# only, which is the worst place to find out.
+		#
+		# So each entry here is a note that says which edge is wrong. The
+		# alternative - putting the missing library on every consumer's link line
+		# - makes the accident permanent and spreads it.
+		foreach(source IN LISTS ARG_NO_UNITY)
+			set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/${source}"
+				PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+		endforeach()
+
+		_mono_batch_headers(${target} "${sources}" TRUE)
 	else()
 		target_compile_features(${target} INTERFACE cxx_std_20)
 		target_include_directories(${target} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -389,7 +538,9 @@ function(mono_add_tests name)
 	set(target test_${name})
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::testmain Catch2::Catch2)
+	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+	_mono_batch_headers(${target} "${sources}" FALSE)
 
 	# A module's own tests may reach its src/ directory, and only its own tests
 	# may. AGENTS.md states the rule this implements: do not widen a public
@@ -458,6 +609,8 @@ function(mono_add_benchmarks name)
 	set(target bench_${name})
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::benchmain)
+	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_batch_headers(${target} "${sources}" FALSE)
 
 	# Optimised whatever the preset says, because a debug build measures the
 	# debug build. A benchmark run against unoptimised code reports a number
@@ -516,6 +669,7 @@ function(mono_add_program name)
 	add_executable(${target} "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}")
 	target_compile_features(${target} PRIVATE cxx_std_20)
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} ${ARG_VENDOR})
+	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 
 	set_property(TARGET ${target} PROPERTY MONO_TIER "${ARG_TIER}")
@@ -551,25 +705,31 @@ function(mono_add_program name)
 
 	# Shaders reach a program the same way code does: only from modules it links.
 	_mono_transitive_deps("${ARG_DEPS}" all_deps)
-	set(shader_targets "")
 	set(shader_commands "")
 	set(shader_modules "")
+	set(shader_inputs "")
+	set(shader_staged "")
 	foreach(dep IN LISTS all_deps)
 		get_target_property(dir ${dep} MONO_SHADER_DIR)
 		if(NOT dir OR dir STREQUAL "dir-NOTFOUND")
 			continue()
 		endif()
 		get_target_property(module ${dep} MONO_MODULE_NAME)
-		get_target_property(shader_target ${dep} MONO_SHADER_TARGET)
-		list(APPEND shader_targets ${shader_target})
+		get_target_property(compiled ${dep} MONO_SHADER_OUTPUTS)
 		list(APPEND shader_modules "${module}")
+		list(APPEND shader_inputs ${compiled})
+		# Every file this copy will produce, named. See the custom command
+		# below for why they are named rather than left implicit.
+		foreach(file IN LISTS compiled)
+			get_filename_component(file_name "${file}" NAME)
+			list(APPEND shader_staged "${stage}/shaders/${module}/${file_name}")
+		endforeach()
 		# `rm -rf` before the copy, so the staged directory is the module's
 		# directory rather than the union of every one it has ever been. A copy
 		# alone leaves a renamed shader staged beside its replacement, and the
 		# renderer opens files by name - so the stale one loads and nothing says
-		# which of the two it got. The whole directory is a handful of kilobytes
-		# and this target already runs every build, so it costs nothing to be
-		# exact.
+		# which of the two it got. The whole directory is a handful of kilobytes,
+		# so it costs nothing to be exact on the builds that do run it.
 		list(APPEND shader_commands
 			COMMAND ${CMAKE_COMMAND} -E rm -rf "${stage}/shaders/${module}"
 			COMMAND ${CMAKE_COMMAND} -E copy_directory "${dir}" "${stage}/shaders/${module}")
@@ -582,12 +742,32 @@ function(mono_add_program name)
 	_mono_prune_directory("${stage}/shaders" "${shader_modules}")
 
 	if(shader_commands)
+		# **Every staged file is a declared output, and that is what makes a
+		# null build null.** This was an `add_custom_target` carrying the
+		# commands directly, which Ninja has no choice but to run every time: a
+		# target with no output is a target that can never be up to date. It was
+		# most of the 0.09 s null build, so it cost nothing measurable - but a
+		# build that always has something to do hides the one that does not, and
+		# the next thing added beside it inherits the same blindness.
+		#
+		# Naming the copies rather than a stamp file is the part that matters
+		# for correctness. `just shader-check` and `just check-server-is-headless`
+		# both read the staged tree, and a stamp says only "the copy ran once":
+		# delete one `.spv` from the stage and a stamp-guarded build hands the
+		# missing file straight back. With the files themselves as outputs,
+		# Ninja restores anything removed and re-copies whenever a compiled
+		# shader is newer, which is the same guarantee the old always-run target
+		# gave for a fraction of the work.
+		#
 		# A target of its own rather than a POST_BUILD command, so that a
 		# shader-only edit still stages without the program relinking.
-		add_custom_target(${name}_stage_shaders ALL ${shader_commands}
+		add_custom_command(
+			OUTPUT ${shader_staged}
+			${shader_commands}
+			DEPENDS ${shader_inputs}
 			COMMENT "Staging shaders into ${stage}/shaders"
 			VERBATIM)
-		add_dependencies(${name}_stage_shaders ${shader_targets})
+		add_custom_target(${name}_stage_shaders ALL DEPENDS ${shader_staged})
 
 		# The program depends on the staging, not the other way round.
 		#

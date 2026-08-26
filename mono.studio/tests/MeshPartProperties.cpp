@@ -87,6 +87,12 @@ TEST_CASE("a mesh part's content rows all get a picker", "[studio][properties]")
 	for (const auto &[property, kind] : {
 			 std::pair<std::string_view, AssetKind>{"MeshId", AssetKind::Mesh},
 			 std::pair<std::string_view, AssetKind>{"TextureID", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"NormalMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"RoughnessMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"MetalnessMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"OcclusionMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"HeightMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"EmissiveMap", AssetKind::Texture},
 		 }) {
 		INFO(property);
 		const Row row = Inspect(store, part, property);
@@ -179,7 +185,7 @@ TEST_CASE("confirming a picker writes the property", "[studio][properties]") {
 	);
 
 	// And it landed where the renderer reads it, not merely somewhere.
-	// `client::CollectInstances` copies `Visual::Mesh` into the draw list, so a
+	// `engine::render::CollectInstances` copies `Visual::Mesh` into the draw list, so a
 	// write that stopped short of this component is a part that keeps drawing
 	// the fallback however good the string looked in the panel.
 	const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(part);
@@ -212,7 +218,7 @@ TEST_CASE("a picker value with no type is refused", "[studio][properties]") {
 }
 
 TEST_CASE("every content row the picker serves round-trips", "[studio][properties]") {
-	// **All five, because the failure was per-property and looked per-class.**
+	// **All seven, because the failure was per-property and looked per-class.**
 	// One test on `MeshId` would have passed the day somebody fixed meshes and
 	// left `Image` on an `ImageLabel` doing nothing - which is how the aliases
 	// this file's first case describes went wrong the first time.
@@ -227,6 +233,12 @@ TEST_CASE("every content row the picker serves round-trips", "[studio][propertie
 	for (const Row &row : {
 			 Row{"MeshPart", "MeshId"},
 			 Row{"MeshPart", "TextureID"},
+			 Row{"MeshPart", "NormalMap"},
+			 Row{"MeshPart", "RoughnessMap"},
+			 Row{"MeshPart", "MetalnessMap"},
+			 Row{"MeshPart", "OcclusionMap"},
+			 Row{"MeshPart", "HeightMap"},
+			 Row{"MeshPart", "EmissiveMap"},
 			 Row{"Material", "MaterialId"},
 			 Row{"Sound", "SoundId"},
 		 }) {

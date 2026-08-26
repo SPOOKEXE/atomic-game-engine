@@ -396,6 +396,36 @@ TEST_CASE("the batched parallel order is the batched serial order", "[parallel]"
 	REQUIRE(serial == parallel);
 }
 
+TEST_CASE("batched parallel entities share the component row order", "[parallel]") {
+	Pool pool{4};
+	Store store("test");
+	constexpr size_t COUNT = 5'000;
+	std::vector<Entity> created;
+	created.reserve(COUNT);
+	for (size_t index = 0; index < COUNT; index++) {
+		const Entity entity = store.Create();
+		store.Set<Velocity>(entity, Velocity{static_cast<float>(index)});
+		created.push_back(entity);
+	}
+
+	std::vector<Entity> entities(COUNT);
+	std::vector<float> values(COUNT, -1.0f);
+	const size_t visited = store.EachBatchEntitiesParallel<const Velocity>(
+		[&](size_t first, size_t rows, const Entity *batch, const Velocity *velocities) {
+			for (size_t row = 0; row < rows; row++) {
+				entities[first + row] = batch[row];
+				values[first + row] = velocities[row].X;
+			}
+		}
+	);
+
+	REQUIRE(visited == COUNT);
+	REQUIRE(entities == created);
+	for (size_t index = 0; index < COUNT; index++) {
+		REQUIRE(values[index] == static_cast<float>(index));
+	}
+}
+
 TEST_CASE("batched parallel spans archetypes without colliding", "[parallel]") {
 	Pool pool{4};
 	Store store("test");

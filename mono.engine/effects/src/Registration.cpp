@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -54,7 +55,16 @@ namespace engine::effects {
 				// made a mistake worth reporting, and a file holding twenty-one
 				// was written by a build whose cap was higher. Refusing would make
 				// the whole world unloadable over one gradient.
-				(void)sequence.Add(core::NumberKeypoint{time, value, envelope});
+				if (!sequence.Add(core::NumberKeypoint{time, value, envelope})) {
+					// The curve loads shorter than it was saved and the effect
+					// looks subtly wrong, with nothing to tie it to the load.
+					ENGINE_WARN(
+						"a saved curve of {} keypoints is past this build's capacity; {} were dropped",
+						count,
+						count - sequence.Count
+					);
+					break;
+				}
 			}
 		}
 
@@ -113,9 +123,17 @@ namespace engine::effects {
 				writer.WriteFloat(emitter.SpreadAngle.Y);
 
 				writer.WriteName(emitter.Texture);
+				writer.WriteInt32(emitter.MaxParticles);
 
 				writer.WriteFloat(emitter.Rate);
+				writer.WriteFloat(emitter.RateOverDistance);
 				writer.WriteFloat(emitter.Drag);
+				writer.WriteFloat(emitter.MaxSpeed);
+				writer.WriteFloat(emitter.NoiseStrength);
+				writer.WriteFloat(emitter.NoiseFrequency);
+				writer.WriteFloat(emitter.NoiseScrollSpeed);
+				writer.WriteFloat(emitter.RadialAcceleration);
+				writer.WriteFloat(emitter.TangentialAcceleration);
 				writer.WriteFloat(emitter.VelocityInheritance);
 				writer.WriteFloat(emitter.LightEmission);
 				writer.WriteFloat(emitter.LightInfluence);
@@ -162,9 +180,17 @@ namespace engine::effects {
 				emitter.SpreadAngle.Y = reader.ReadFloat();
 
 				emitter.Texture = reader.ReadName();
+				emitter.MaxParticles = reader.ReadInt32();
 
 				emitter.Rate = reader.ReadFloat();
+				emitter.RateOverDistance = reader.ReadFloat();
 				emitter.Drag = reader.ReadFloat();
+				emitter.MaxSpeed = reader.ReadFloat();
+				emitter.NoiseStrength = reader.ReadFloat();
+				emitter.NoiseFrequency = reader.ReadFloat();
+				emitter.NoiseScrollSpeed = reader.ReadFloat();
+				emitter.RadialAcceleration = reader.ReadFloat();
+				emitter.TangentialAcceleration = reader.ReadFloat();
 				emitter.VelocityInheritance = reader.ReadFloat();
 				emitter.LightEmission = reader.ReadFloat();
 				emitter.LightInfluence = reader.ReadFloat();
@@ -189,7 +215,7 @@ namespace engine::effects {
 		}
 
 		// The pool is derived state and its serialisation says so by writing
-		// nothing - `client::DrawList`'s argument, applied to something far bigger.
+		// nothing - `engine::render::DrawList`'s argument, applied to something far bigger.
 		//
 		// A world's particles are its emitters plus one frame of simulation, and
 		// writing half a million of them into every save file would be storing an
@@ -203,8 +229,11 @@ namespace engine::effects {
 			auto *systems = static_cast<ParticleSystem *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				systems[index].Blocks.clear();
+				systems[index].FrameParents.clear();
+				systems[index].TextureRevision = 0;
 				systems[index].Free.clear();
 				systems[index].Used = 0;
+				systems[index].RetryRefused = false;
 				systems[index].Statistics = {};
 			}
 		}
@@ -217,7 +246,12 @@ namespace engine::effects {
 		void ReadSlots(core::ByteReader &, void *destination, size_t count) {
 			auto *slots = static_cast<EmitterSlot *>(destination);
 			for (size_t index = 0; index < count; index++) {
+				slots[index].Requested = 0;
 				slots[index].Index = NO_SLOT;
+				slots[index].Enabled = true;
+				slots[index].Configured = false;
+				slots[index].ClearRequested = false;
+				slots[index].Refused = false;
 			}
 		}
 	}
@@ -236,7 +270,7 @@ namespace engine::effects {
 		// serialisation instead of writing bytes it cannot read back, so a world
 		// with a `RibbonBuffer` in it simply would not save - which is what
 		// `client/tests/Presentation.cpp` reported, in exactly the words
-		// `client::DrawList`'s own comment predicts for this mistake.
+		// `engine::render::DrawList`'s own comment predicts for this mistake.
 		//
 		// Nothing is written, for `DrawList`'s reason: the vertices are rebuilt by
 		// `BuildRibbons` in `PreRender` every frame before anything looks at them,

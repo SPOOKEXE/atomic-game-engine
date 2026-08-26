@@ -37,6 +37,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -321,7 +322,19 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// crosses is the destination - `CurrentPage` and `CanvasPosition` - and
 		// each end animates to it on its own clock, which is also what makes a
 		// client that dropped a packet arrive rather than stutter.
-		const bool excluded = name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
+		//
+		// **`gui.Canvas` joined at v0.19 and it should have joined with
+		// `gui.Resolved`.** `gui::Layout` writes the two on the same collector
+		// in the same block - the canvas rectangle, and then
+		// `Resolved::AbsolutePosition` and `::AbsoluteSize` taken straight off
+		// it - and `Components.hpp` says of `Canvas` in its own words that it
+		// "holds the resolved rectangle rather than any authored field". Only
+		// the exclusion was missing, so for four versions the authority's screen
+		// rectangle crossed to every client and was overwritten by that client's
+		// next layout pass. This case is what would have caught it and did not,
+		// because the list it compares against was written from the same
+		// oversight.
+		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
 							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
 							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
 							  name == "script.SourceCache";

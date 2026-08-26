@@ -1,7 +1,7 @@
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Log.hpp>
 
-#include <cdn/LocalStore.hpp>
 #include <fstream>
 #include <sstream>
 #include <string_view>
@@ -36,15 +36,15 @@ namespace studio {
 		// listed a store full of content none of which the viewport could show.
 		//
 		// The client already defaults to the same folder - `client/app/main.cpp`
-		// - and to `cdn::DevelopmentPublisher` for it, which is what makes the
+		// - and to `engine::assets::DevelopmentPublisher` for it, which is what makes the
 		// key here safe to fill in: it verifies only the store this editor
 		// publishes to, and pointing a row anywhere else means supplying the
-		// real one. `cdn::DevelopmentSigningKey` carries what that identity is
+		// real one. `engine::assets::DevelopmentSigningKey` carries what that identity is
 		// and is not for.
-		const cdn::LocalPaths local = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths local = engine::assets::DefaultLocalPaths();
 
 		ContentSources sources;
-		sources.PublisherKey = cdn::DevelopmentPublisher().ToHex();
+		sources.PublisherKey = engine::assets::DevelopmentPublisher().ToHex();
 		sources.Sources.push_back(
 			engine::delivery::Source{
 				.Name = "local store",

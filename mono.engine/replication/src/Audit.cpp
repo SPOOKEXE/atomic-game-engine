@@ -57,6 +57,18 @@ namespace engine::replication {
 	) {
 		ENGINE_PROFILE_CAT("replication.audit", core::ProfileCategory::Network);
 
+		// **Once per component, not once per (entity, component).**
+		// `Components::Describe` takes the component registry's process-wide
+		// mutex, and this is a nested loop over a group of entities - so a
+		// sweep of two groups of sixteen took that lock thirty-two times per
+		// component to read a descriptor whose address never moves. The
+		// authority calls this from inside its per-client loop.
+		std::vector<const ecs::TypeDescriptor *> descriptors;
+		descriptors.reserve(components.size());
+		for (const ecs::ComponentId component : components) {
+			descriptors.push_back(component.IsValid() ? &ecs::Components::Describe(component) : nullptr);
+		}
+
 		std::vector<assets::ContentHash> leaves;
 		leaves.reserve(entities.size());
 
@@ -81,7 +93,7 @@ namespace engine::replication {
 					continue;
 				}
 
-				const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(component);
+				const ecs::TypeDescriptor &descriptor = *descriptors[ordinal];
 				if (descriptor.Size > 0 && !descriptor.Serialisable) {
 					continue;
 				}

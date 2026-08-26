@@ -89,6 +89,7 @@ TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materia
 		.Roughness = Name("pbr-roughness"),
 		.Occlusion = Name("pbr-occlusion"),
 		.Height = Name("pbr-height"),
+		.Metalness = Name("pbr-metalness"),
 		.Emissive = Name("pbr-emissive"),
 	};
 	REQUIRE(RecordMaterial(store, asset, maps));
@@ -105,9 +106,11 @@ TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materia
 	CHECK(appearance->RoughnessMap == maps.Roughness);
 	CHECK(appearance->OcclusionMap == maps.Occlusion);
 	CHECK(appearance->HeightMap == maps.Height);
+	CHECK(appearance->MetalnessMap == maps.Metalness);
 	CHECK(appearance->EmissiveMap == maps.Emissive);
 
 	CHECK(MaterialMaps{.Emissive = maps.Emissive}.IsValid());
+	CHECK(MaterialMaps{.Metalness = maps.Metalness}.IsValid());
 }
 
 TEST_CASE("a material nobody recorded resolves to nothing", "[scene][materials]") {
@@ -137,7 +140,7 @@ TEST_CASE("resolving writes the texture onto the parent part", "[scene][material
 	CHECK(ResolveMaterials(store) == 1);
 
 	// **`SurfaceAppearance::ColourMap` and not a field of its own**, because
-	// that is what the draw-list pass already reads - `client::CollectInstances`
+	// that is what the draw-list pass already reads - `engine::render::CollectInstances`
 	// is a batched parallel loop over a fixed signature and cannot follow a
 	// child. `scene/Materials.hpp` carries the argument.
 	const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(part);

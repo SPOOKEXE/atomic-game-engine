@@ -20,6 +20,16 @@
 // reachable by name at runtime, a column serialisable without knowing its type,
 // and a world restorable into another process.
 //
+// **Two surfaces, and this header is where they meet.** Most of what follows is
+// storage - entities, components, resources, queries, change tracking,
+// snapshots. One section of it, `--- instances ---` onward, is the Roblox
+// object model: classes, the tree, and properties reached by name. They are one
+// class because they are one set of rows read two ways, and `AGENTS.md` in this
+// directory carries the argument and the measurement. What matters at the top
+// of the file is the rule that keeps them apart at compile time: **this header
+// does not include `Classes.hpp`**, so a consumer that iterates a column does
+// not compile the class tree.
+//
 // Thread affinity is checked rather than trusted. A store belongs to the
 // thread that bound it, every mutation aborts unless it is on that thread, and
 // the check is on in every build - a data race that only shows up under load on
@@ -27,7 +37,6 @@
 //
 // @tier L3 · shared
 
-#include <engine/core/Log.hpp>
 #include <engine/ecs/ChangeChannel.hpp>
 #include <engine/ecs/Column.hpp>
 #include <engine/ecs/Components.hpp>
@@ -38,12 +47,11 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -129,9 +137,9 @@ namespace engine::ecs {
 		// picked up by whichever job worker claims it, so the owner is a
 		// different thread most ticks. That is why the owner is atomic - the
 		// handoff races the affinity check of any thread still holding a stale
-		// belief about who owns this store, and a plain read of a plain
-		// `std::thread::id` there is a data race by the letter of the standard
-		// even where it happens to be benign.
+		// belief about who owns this store, and a plain read of a plain token
+		// there is a data race by the letter of the standard even where it
+		// happens to be benign.
 		//
 		// @threadsafe
 		void BindToCallingThread();
@@ -141,7 +149,7 @@ namespace engine::ecs {
 		// @return `true` when the current thread may mutate this Store.
 		// @threadsafe
 		bool IsOnOwningThread() const {
-			return std::this_thread::get_id() == Owner.load(std::memory_order_relaxed);
+			return CallingThreadToken() == Owner.load(std::memory_order_relaxed);
 		}
 
 		// --- entities ------------------------------------------------------
@@ -658,6 +666,34 @@ namespace engine::ecs {
 			return visited;
 		}
 
+		// EachBatchParallel with the entities beside each component run.
+		//
+		// This is the narrow path for a packed output that also needs stable row
+		// identity. The entity pointer spans exactly `rows`, in the same order as
+		// every component pointer and the `first` index. All mutation restrictions
+		// of EachBatchParallel still apply.
+		//
+		// @param body  Called concurrently as `body(size_t first, size_t rows,
+		//              const Entity *entities, Ts *...columns)`.
+		// @param grain The minimum run of rows worth handing to a worker.
+		// @return Rows visited in total.
+		// @tick
+		template <class... Ts, class Body>
+		size_t EachBatchEntitiesParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+			RequireOwningThread("EachBatchEntitiesParallel");
+
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
+			size_t visited = 0;
+
+			VisitTables(terms, [&](const TableSlice &slice) {
+				visited += VisitBatchEntitiesParallel<Ts...>(
+					slice, body, grain, visited, std::index_sequence_for<Ts...>{}
+				);
+			});
+
+			return visited;
+		}
+
 		// Each, spread across the job system's workers.
 		//
 		// Parallel *within* a tick, not asynchronous across ticks: this blocks
@@ -861,6 +897,25 @@ namespace engine::ecs {
 				size_t visited = 0;
 				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
 					visited += Owner->VisitBatchParallel<Ts...>(
+						slice, body, grain, visited, std::index_sequence_for<Ts...>{}
+					);
+				});
+				return visited;
+			}
+
+			// `Store::EachBatchEntitiesParallel`, over this selection.
+			//
+			// @param body Called concurrently as `body(size_t first, size_t rows,
+			//             const Entity *entities, Ts *...columns)`.
+			// @param grain The minimum run of rows worth handing to a worker.
+			// @return Rows visited in total.
+			template <class Body>
+			size_t EachBatchEntitiesParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+				Owner->RequireOwningThread("Query::EachBatchEntitiesParallel");
+
+				size_t visited = 0;
+				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
+					visited += Owner->VisitBatchEntitiesParallel<Ts...>(
 						slice, body, grain, visited, std::index_sequence_for<Ts...>{}
 					);
 				});
@@ -1586,6 +1641,18 @@ namespace engine::ecs {
 			return ObservedRaw(Components::Of<T>());
 		}
 
+		// The monotonic write epoch for one observed component.
+		//
+		// Unlike the store-wide `ChangeVersion`, this stays still when an
+		// unrelated component changes. Compare it with a retained value before
+		// walking `EachChanged<T>` when a large observed column is usually quiet.
+		// Zero means the component is not observed.
+		//
+		// @return A counter that increases on every recorded write to `T`.
+		template <class T> uint64_t ComponentChangeVersion() const {
+			return ComponentChangeVersionRaw(Components::Of<T>());
+		}
+
 		// Reports whether one entity's `T` was written since the last
 		// ClearChanges.
 		//
@@ -1721,12 +1788,9 @@ namespace engine::ecs {
 			RequireOwningThread("EachChanged");
 
 			const ComponentId id = Components::Of<T>();
-			const ComponentId terms[] = {id, Components::Of<DirtyBits>()};
 			const DeferScope defer(*this);
 
-			VisitChanged(terms, id, [&](Entity entity, void *value) {
-				body(entity, *static_cast<T *>(value));
-			});
+			VisitChanged(id, [&](Entity entity, void *value) { body(entity, *static_cast<T *>(value)); });
 		}
 
 		// Visits every *run* of adjacent changed rows, as arrays.
@@ -2025,7 +2089,7 @@ namespace engine::ecs {
 		// loads cleanly and runs the wrong programs. Same shape as 3, one type
 		// along, and refused for the same reason: a length prefix read as a
 		// four-byte id consumes the values behind it.
-		static constexpr uint32_t SNAPSHOT_VERSION = 4;
+		static constexpr uint32_t SNAPSHOT_VERSION = 6;
 
 		// The number of tables this world holds.
 		//
@@ -2200,6 +2264,33 @@ namespace engine::ecs {
 		}
 
 		template <class... Ts, class Body, size_t... Indices>
+		size_t VisitBatchEntitiesParallel(
+			const TableSlice &slice, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
+		) {
+			if (slice.Rows == 0) {
+				return 0;
+			}
+
+			parallel::Jobs::For(slice.Rows, grain, [&](size_t begin, size_t end) {
+				size_t row = begin;
+				while (row < end) {
+					const size_t chunk = Column::ChunkOf(row);
+					const size_t offset = row - Column::ChunkStart(chunk);
+					const size_t stop = ChunkEnd(row, end);
+					body(
+						base + row,
+						stop - row,
+						slice.Entities + row,
+						RunBase<Ts>(slice.Columns[Indices], chunk, offset)...
+					);
+					row = stop;
+				}
+			});
+
+			return slice.Rows;
+		}
+
+		template <class... Ts, class Body, size_t... Indices>
 		void VisitRowsParallel(
 			const TableSlice &slice, Body &body, size_t grain, std::index_sequence<Indices...>
 		) {
@@ -2253,13 +2344,10 @@ namespace engine::ecs {
 
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
+		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;
-		void VisitChanged(
-			std::span<const ComponentId> terms,
-			ComponentId subject,
-			const std::function<void(Entity, void *)> &body
-		);
+		void VisitChanged(ComponentId subject, const std::function<void(Entity, void *)> &body);
 
 		void VisitChangedRuns(
 			std::span<const ComponentId> terms,
@@ -2311,8 +2399,39 @@ namespace engine::ecs {
 
 		void RequireOwningThread(const char *what) const;
 
-		std::unique_ptr<StoreState> State;
+		// Identifies the calling thread, as a value that compares equal only to
+		// itself.
+		//
+		// **A sentinel address rather than `std::thread::id`, and the reason is
+		// build cost.** The affinity check was the one thing in this header
+		// that needed `<thread>`, which preprocesses to 55,318 lines and
+		// reaches every one of the 216 translation units that include
+		// `Store.hpp`. A thread-local object's address is unique to its thread
+		// for that thread's whole life, which is the entire property the check
+		// wants, and it compares as one integer rather than through
+		// `std::thread::id`'s operator.
+		//
+		// Private, and inline because `IsOnOwningThread` is: it is a token, not
+		// a thread *name*, and two runs give one thread different values, so
+		// nothing may log it, serialise it, or offer it as an identity.
+		static uintptr_t CallingThreadToken() {
+			static thread_local const char sentinel = 0;
+			return reinterpret_cast<uintptr_t>(&sentinel);
+		}
+
+		// Owned, and deleted by `~Store`. A raw pointer rather than a
+		// `std::unique_ptr`, to keep `<memory>` off the 216 translation units
+		// that include this header. It only pays together with `<thread>`
+		// above: the two share about 15,000 preprocessed lines of the same
+		// standard-library substrate, so dropping either alone is worth 5,500
+		// and dropping both is worth **20,120**, a quarter of the closure.
+		//
+		// The safety a `unique_ptr` would add is already here: copy and move are
+		// deleted above, and the destructor is out of line in `Store.cpp` -
+		// which is what a `unique_ptr` member over an incomplete `StoreState`
+		// would have needed anyway.
+		StoreState *State = nullptr;
 		std::string StoreName;
-		std::atomic<std::thread::id> Owner;
+		std::atomic<uintptr_t> Owner;
 	};
 }

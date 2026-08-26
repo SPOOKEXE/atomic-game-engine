@@ -8,6 +8,7 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Handshake.hpp>
+#include <engine/net/quic/Tls.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Protocol.hpp>
@@ -146,7 +147,7 @@ namespace unified {
 		// arrangement a route request leaves through the client's session; and
 		// discovery is last because it is beside everything else rather than
 		// under it.
-		if (Wired.Carrying != Transport::Direct) {
+		if (OverAWire(Wired.Carrying)) {
 			BuildWire();
 		}
 		if (Wired.Serving == Content::Relayed) {
@@ -230,7 +231,7 @@ namespace unified {
 		}
 
 		engine::net::LossSettings toClient;
-		if (Wired.Carrying == Transport::Lossy) {
+		if (Loses(Wired.Carrying)) {
 			toClient.Drop = Options.Drop;
 			if (toClient.Drop.empty()) {
 				toClient.Drop.assign(std::begin(DEFAULT_DROPS), std::end(DEFAULT_DROPS));
@@ -245,17 +246,28 @@ namespace unified {
 		ServerEnd = std::make_unique<engine::net::LossyTransport>(std::move(ends[0]));
 		ClientEnd = std::make_unique<engine::net::LossyTransport>(std::move(ends[1]), toClient);
 
+		if (OverQuic(Wired.Carrying)) {
+			BuildQuicWire();
+			return;
+		}
+		BuildDatagramWire();
+	}
+
+	void Crossing::BuildDatagramWire() {
 		const engine::replication::SessionSettings session;
-		ServerSide = std::make_unique<engine::replication::Session>(
+		auto serving = std::make_unique<engine::replication::Session>(
 			*ServerEnd, ClientEnd->Local(), engine::net::ConnectionId{1, 1}, Now, session
 		);
-		ClientSide = std::make_unique<engine::replication::Session>(
+		auto replying = std::make_unique<engine::replication::Session>(
 			*ClientEnd, ServerEnd->Local(), engine::net::ConnectionId{2, 1}, Now, session
 		);
+		ServerDatagram = serving.get();
+		ClientDatagram = replying.get();
 
 		// Both ends live before anything is sent. A link still handshaking
 		// refuses traffic, which is correct and is not what this is about.
-		if (!ServerSide->Link().CompleteHandshake(Now) || !ClientSide->Link().CompleteHandshake(Now)) {
+		if (!ServerDatagram->Link().CompleteHandshake(Now) ||
+			!ClientDatagram->Link().CompleteHandshake(Now)) {
 			throw std::runtime_error("a link refused to complete its handshake");
 		}
 
@@ -272,14 +284,80 @@ namespace unified {
 			throw std::runtime_error("the handshake would not complete");
 		}
 
-		std::optional<engine::net::Handshake::Session> serving = responder->TakeKeys();
-		std::optional<engine::net::Handshake::Session> replying = initiator->TakeKeys();
-		if (!serving.has_value() || !replying.has_value()) {
+		std::optional<engine::net::Handshake::Session> serverKeys = responder->TakeKeys();
+		std::optional<engine::net::Handshake::Session> clientKeys = initiator->TakeKeys();
+		if (!serverKeys.has_value() || !clientKeys.has_value()) {
 			throw std::runtime_error("the handshake produced no keys");
 		}
-		if (!ServerSide->AdoptKeys(std::move(*serving)) || !ClientSide->AdoptKeys(std::move(*replying))) {
+		if (!ServerDatagram->AdoptKeys(std::move(*serverKeys)) ||
+			!ClientDatagram->AdoptKeys(std::move(*clientKeys))) {
 			throw std::runtime_error("a session refused its keys");
 		}
+
+		ServerSide = std::move(serving);
+		ClientSide = std::move(replying);
+	}
+
+	void Crossing::BuildQuicWire() {
+		// **A real TLS 1.3 handshake, driven to completion here rather than
+		// faked.** There is no equivalent of `AdoptKeys` under QUIC - the keys
+		// are the handshake's own - so the only way to a carrying session is to
+		// run the flights, which is also the only way this arrangement proves
+		// anything the datagram one does not.
+		engine::replication::QuicSessionSettings serving;
+		// A seed stated rather than drawn, so a failing run reproduces from the
+		// arrangement name alone.
+		for (size_t index = 0; index < serving.Connection.Tls.Seed.size(); index++) {
+			serving.Connection.Tls.Seed[index] = static_cast<std::byte>(index * 7 + 3);
+		}
+		serving.Connection.Tls.HasSeed = true;
+
+		engine::replication::QuicSessionSettings joining;
+		joining.Connection.Tls.PinIdentity = true;
+		joining.Connection.Tls.Expected = engine::net::quic::IdentityFor(serving.Connection.Tls.Seed);
+
+		std::unique_ptr<engine::replication::QuicSession> client =
+			engine::replication::QuicSession::Connect(*ClientEnd, ServerEnd->Local(), Now, joining);
+		if (client == nullptr) {
+			throw std::runtime_error("the QUIC client would not begin");
+		}
+		client->Flush(Now);
+
+		std::vector<std::byte> first;
+		if (ServerEnd->Receive(first).Status != engine::net::TransportStatus::Ok) {
+			throw std::runtime_error("the QUIC client's first packet did not arrive");
+		}
+
+		std::unique_ptr<engine::replication::QuicSession> server =
+			engine::replication::QuicSession::Accept(*ServerEnd, ClientEnd->Local(), first, Now, serving);
+		if (server == nullptr) {
+			throw std::runtime_error("the QUIC server would not answer the first packet");
+		}
+
+		// Bounded, and the bound is stated: a handshake that has not finished in
+		// this many tick periods is a failure to report rather than a loop to
+		// keep spinning. Under `quic-lossy` the drops are what the retransmission
+		// timers are for, and they need the clock to move.
+		constexpr int MAXIMUM_FLIGHTS = 600;
+		for (int flight = 0; flight < MAXIMUM_FLIGHTS; flight++) {
+			server->Flush(Now);
+			client->Flush(Now);
+			Drain(*ClientEnd, *client);
+			Drain(*ServerEnd, *server);
+			if (server->Carrying() && client->Carrying()) {
+				break;
+			}
+			Now += 1.0 / static_cast<double>(std::max<uint32_t>(Options.TickRate, 1));
+			server->Advance(Now);
+			client->Advance(Now);
+		}
+
+		if (!server->Carrying() || !client->Carrying()) {
+			throw std::runtime_error("the QUIC handshake did not complete");
+		}
+
+		ServerSide = std::move(server);
+		ClientSide = std::move(client);
 	}
 
 	void Crossing::BuildContent() {
@@ -394,7 +472,7 @@ namespace unified {
 		return transform == nullptr ? 0.0f : transform->Frame.Position.X;
 	}
 
-	float Crossing::DrawnPositionOf(const client::DrawList &drawList, Entity entity) {
+	float Crossing::DrawnPositionOf(const engine::render::DrawList &drawList, Entity entity) {
 		size_t ordinal = 0;
 		bool found = false;
 
@@ -440,14 +518,14 @@ namespace unified {
 		return Replica_.Joined();
 	}
 
-	void Crossing::Drain(engine::net::Transport &transport, engine::replication::Session &into) {
+	void Crossing::Drain(engine::net::Transport &transport, engine::replication::SessionPort &into) {
 		std::vector<std::byte> datagram;
 		while (transport.Receive(datagram).Status == engine::net::TransportStatus::Ok) {
 			into.Receive(datagram, Now);
 		}
 	}
 
-	bool Crossing::SendUser(engine::replication::Session &over, std::span<const std::byte> payload) {
+	bool Crossing::SendUser(engine::replication::SessionPort &over, std::span<const std::byte> payload) {
 		// The two calls `Connector::SendUser` makes, and the reason they are
 		// here is that this program drives a `Session` rather than a
 		// `Connector`: a raw payload handed to `Session::Send` is refused,
@@ -582,12 +660,12 @@ namespace unified {
 		}
 		ServerSide->ClearInbound();
 
-		// Both links advance, so an idle timeout is a thing this could hit
-		// rather than a thing it is exempt from.
-		ServerSide->Link().Advance(Now);
-		ClientSide->Link().Advance(Now);
-		ServerSide->Link().ResetBudget();
-		ClientSide->Link().ResetBudget();
+		// Both sessions turn their tick over, so an idle timeout is a thing this
+		// could hit rather than a thing it is exempt from. One call rather than
+		// the `Advance`/`ResetBudget` pair a caller used to make - see
+		// `SessionPort::Advance` for why they were never usefully separate.
+		ServerSide->Advance(Now);
+		ClientSide->Advance(Now);
 
 		const uint64_t lost = ClientEnd->Stats().Dropped - droppedBefore;
 		Tally.Lost += lost;
@@ -691,7 +769,7 @@ namespace unified {
 				Client.SetFrame(static_cast<float>(1.0 / (Options.TickRate * Options.FramesPerTick)), 0.0f);
 				ClientSystems.RunPhases(Client, Phase::PreRender, Phase::PreRender);
 
-				const auto *drawList = Client.Resource<client::DrawList>();
+				const auto *drawList = Client.Resource<engine::render::DrawList>();
 				report.Drawn = drawList == nullptr ? 0 : drawList->Instances.size();
 
 				// DrawList has no entity id; resolve the probe by traversal ordinal.
@@ -734,13 +812,17 @@ namespace unified {
 			Tally.Presentation.reset();
 		}
 
-		if (ServerSide != nullptr && ClientSide != nullptr) {
-			Tally.ServerSession = ServerSide->Stats();
-			Tally.ClientSession = ClientSide->Stats();
-			Tally.ServerLink = ServerSide->Link().Stats();
-			Tally.ClientLink = ClientSide->Link().Stats();
+		// **Datagram only, because the numbers are the datagram stack's.** A
+		// `net::Link`'s counters have no QUIC equivalent to compare with, and
+		// `Reports` reads them against each other - so under QUIC they are
+		// absent rather than filled in with something that means something else.
+		if (ServerDatagram != nullptr && ClientDatagram != nullptr) {
+			Tally.ServerSession = ServerDatagram->Stats();
+			Tally.ClientSession = ClientDatagram->Stats();
+			Tally.ServerLink = ServerDatagram->Link().Stats();
+			Tally.ClientLink = ClientDatagram->Link().Stats();
 		}
-		if (Wired.Carrying == Transport::Lossy && ServerEnd != nullptr) {
+		if (Loses(Wired.Carrying) && ServerEnd != nullptr) {
 			Tally.ToClient = ClientEnd->Stats();
 			Tally.ToServer = ServerEnd->Stats();
 		}

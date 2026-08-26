@@ -178,122 +178,122 @@ namespace studio {
 	}
 
 	void PlayLink::Step(engine::world::Universe &universe) {
-		if (!IsRunning()) {
-			return;
-		}
+		PlayLink *link = this;
+		StepMany(universe, std::span<PlayLink *const>(&link, 1));
+	}
 
-		ENGINE_PROFILE("play link");
+	void PlayLink::StepMany(engine::world::Universe &universe, std::span<PlayLink *const> links) {
+		ENGINE_PROFILE("play links (batched)");
 
-		LinkReport report;
-		report.TotalMessages = Last.TotalMessages;
-		report.TotalBytes = Last.TotalBytes;
+		struct Pending {
+			PlayLink *Link = nullptr;
+			LinkReport Report;
+		};
+		static thread_local std::vector<Pending> pending;
+		static thread_local std::vector<engine::replication::Authority::PublishRequest> requests;
+		static thread_local std::vector<engine::ecs::Entity> spawned;
+		pending.clear();
+		requests.clear();
+		pending.reserve(links.size());
+		requests.reserve(links.size());
 
-		// --- what the client wants, going up ---------------------------------
-		//
-		// **Before the publish, so a move made this frame is in the tick this
-		// frame describes.** After it, every input would be one tick late and
-		// the character would answer the keyboard a tick behind - invisible at
-		// sixty ticks and exactly the kind of lag nobody can find by reading the
-		// controller.
-		//
-		// **Through the real codec, even though nothing is being sent.** There
-		// is no socket here - that is the whole point of this class - but
-		// `game::EncodeMoveInput` and `game::DecodeMoveInput` are what a real
-		// client's bytes go through, and running them costs nothing and means
-		// the editor exercises the format rather than a shortcut past it. It
-		// also puts the *validation* on the same side it is on for a real
-		// client: the direction the authority acts on is the normalised, finite
-		// one the decoder produced.
-		if (Player_ != engine::ecs::NULL_ENTITY) {
-			engine::game::MoveInput wanted;
-
-			universe.Enter(Replica_, [&wanted](Store &store) {
-				const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
-
-				// **Both halves out of one read now.** The direction is a hold
-				// and reads correctly from whatever frame this lands on; the
-				// jump is an edge and used to be smuggled past this call in
-				// `PendingJump` because a frame-shaped edge does not survive to
-				// a tick. `InputState::Pressed` holds it instead, so
-				// `ReadMoveIntent` answers for the whole keyboard.
-				wanted.Direction = intent.Direction;
-				wanted.Jump = intent.Jump;
-
-				// **Consumed here, and only here.** This is the one reader of
-				// the replica's taps per tick, so clearing them is this
-				// function's job - a tap left latched would jump again on the
-				// next tick and a tap cleared by a second reader would not jump
-				// at all.
-				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
-					input->ConsumeTaps();
+		// Inputs and respawns mutate their own worlds and stay on the universe's
+		// driver thread. Each authority entry combines both operations, reducing
+		// the scoped world crossings before the compute batch begins.
+		{
+			ENGINE_PROFILE("play links.prepare");
+			for (PlayLink *link : links) {
+				if (link == nullptr || !link->IsRunning()) {
+					continue;
 				}
-			});
 
-			engine::game::MoveInput arrived;
-			if (engine::game::DecodeMoveInput(engine::game::EncodeMoveInput(wanted), arrived)) {
-				universe.Enter(Authority_, [this, &arrived](Store &store) {
-					(void)engine::game::ApplyMoveInput(store, Player_, arrived);
+				Pending &step = pending.emplace_back();
+				step.Link = link;
+				step.Report.TotalMessages = link->Last.TotalMessages;
+				step.Report.TotalBytes = link->Last.TotalBytes;
+
+				engine::game::MoveInput arrived;
+				bool hasInput = false;
+				if (link->Player_ != engine::ecs::NULL_ENTITY) {
+					engine::game::MoveInput wanted;
+					universe.Enter(link->Replica_, [&wanted](Store &store) {
+						const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
+						wanted.Direction = intent.Direction;
+						wanted.Jump = intent.Jump;
+						if (auto *input = store.ResourceMutable<engine::scene::InputState>();
+							input != nullptr) {
+							input->ConsumeTaps();
+						}
+					});
+					hasInput = engine::game::DecodeMoveInput(engine::game::EncodeMoveInput(wanted), arrived);
+				}
+
+				universe.Enter(link->Authority_, [link, hasInput, &arrived](Store &store) {
+					if (hasInput) {
+						(void)engine::game::ApplyMoveInput(store, link->Player_, arrived);
+					}
+
+					spawned.clear();
+					if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+						return;
+					}
+					for (const engine::ecs::Entity player : spawned) {
+						(void)engine::gui::ResetPlayerGui(store, player);
+					}
 				});
 			}
 		}
 
-		// **The respawn loop, and it is here rather than in a scheduler for the
-		// one reason that decides where it can go: only the authority may run
-		// it.** The editor registers its character systems through
-		// `client::InstallPresentation`, which runs on *both* of this link's
-		// worlds - and a replica handing itself a new body would be minting an
-		// entity the server never issued. This function is the one place that
-		// knows which of the two is the authority.
-		//
-		// The interface half is the caller's, exactly as it is in `mono.server`:
-		// `scene::UpdateRespawns` hands back who it spawned and
-		// `gui::ResetPlayerGui` is what gives each of them their own copy of
-		// `StarterGui`.
-		universe.Enter(Authority_, [](Store &store) {
-			std::vector<engine::ecs::Entity> spawned;
-			if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+		// Keep every authority store scoped until the engine's one signing
+		// dispatch has joined. `Authority::PublishMany` reads the gathered column
+		// runs on workers and completes each publish before this recursion unwinds.
+		const auto publish = [&](auto &&self, size_t index) -> void {
+			if (index == pending.size()) {
+				(void)engine::replication::Authority::PublishMany(requests);
 				return;
 			}
-			for (const engine::ecs::Entity player : spawned) {
-				(void)engine::gui::ResetPlayerGui(store, player);
+
+			Pending &step = pending[index];
+			PlayLink &link = *step.Link;
+			universe.Enter(link.Authority_, [&](Store &store) {
+				step.Report.Tick = store.Time().Tick;
+				step.Report.ServerEntities = PosedEntities(store);
+				requests.push_back({link.Server, store, step.Report.Tick});
+				self(self, index + 1);
+				requests.pop_back();
+			});
+		};
+		publish(publish, 0);
+
+		{
+			ENGINE_PROFILE("play links.deliver");
+			for (Pending &step : pending) {
+				PlayLink &link = *step.Link;
+				const std::span<const std::vector<std::byte>> messages = link.Server.Outgoing(link.Handle);
+				step.Report.Messages = messages.size();
+
+				universe.Enter(link.Replica_, [&link, &step, messages](Store &store) {
+					for (const std::vector<std::byte> &message : messages) {
+						step.Report.Bytes += message.size();
+						step.Report.LargestMessage = std::max(step.Report.LargestMessage, message.size());
+						link.Client.Receive(store, message);
+					}
+
+					step.Report.Applied = link.Client.Applied();
+					step.Report.ClientEntities = PosedEntities(store);
+					client::RecordReplicatedTick(store, step.Report.Applied);
+				});
+
+				const std::vector<std::byte> acknowledgement = link.Client.Acknowledge();
+				if (!acknowledgement.empty()) {
+					link.Server.Receive(link.Handle, acknowledgement);
+				}
+
+				step.Report.TotalMessages += step.Report.Messages;
+				step.Report.TotalBytes += step.Report.Bytes;
+				link.Last = step.Report;
 			}
-		});
-
-		// Publish while the authority store is scoped; its outgoing span is borrowed.
-		universe.Enter(Authority_, [this, &report](Store &store) {
-			report.Tick = store.Time().Tick;
-			report.ServerEntities = PosedEntities(store);
-
-			Server.Publish(store, report.Tick);
-		});
-
-		const std::span<const std::vector<std::byte>> messages = Server.Outgoing(Handle);
-		report.Messages = messages.size();
-
-		// Direct handoff isolates replication from transport failures.
-		universe.Enter(Replica_, [this, &report, messages](Store &store) {
-			for (const std::vector<std::byte> &message : messages) {
-				report.Bytes += message.size();
-				report.LargestMessage = std::max(report.LargestMessage, message.size());
-
-				Client.Receive(store, message);
-			}
-
-			report.Applied = Client.Applied();
-			report.ClientEntities = PosedEntities(store);
-
-			// Record on receipt, before a render-rate pass can miss the tick.
-			client::RecordReplicatedTick(store, report.Applied);
-		});
-
-		const std::vector<std::byte> acknowledgement = Client.Acknowledge();
-		if (!acknowledgement.empty()) {
-			Server.Receive(Handle, acknowledgement);
 		}
-
-		report.TotalMessages += report.Messages;
-		report.TotalBytes += report.Bytes;
-		Last = report;
 	}
 
 	void PlayLink::Stop(engine::world::Universe &universe) {

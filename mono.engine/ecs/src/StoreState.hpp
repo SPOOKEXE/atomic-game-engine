@@ -357,6 +357,17 @@ namespace engine::ecs {
 		// at a table that does not track changes, and a write through it would
 		// go unreported. The epoch is what `ArchetypeEdges` checks.
 		std::vector<ComponentId> Watched;
+
+		// One monotonic epoch per registered component, with zero meaning that
+		// component is not observed. A consumer interested in one component can
+		// reject an unchanged frame without scanning every dirty-bit row in every
+		// matching archetype.
+		std::vector<uint64_t> ComponentChanges;
+
+		// The changed entity handles for each observed component, deduplicated by
+		// the row's dirty bit. Row-wise consumers then scale with actual writes;
+		// `DirtyBits` remains the source for consumers that need contiguous runs.
+		std::vector<std::vector<Entity>> ChangedEntities;
 		uint64_t WatchEpoch = 0;
 		uint64_t Changes = 0;
 

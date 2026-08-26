@@ -36,6 +36,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
@@ -67,6 +68,9 @@ namespace engine::scene {
 
 		// Flat multiplier over the material.
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
+		core::Color3 SurfaceColour{1.0f, 1.0f, 1.0f};
+		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
+		float EmissiveStrength = 1.0f;
 
 		// Which mesh, by name. Invalid means the consumer's default.
 		core::Name Mesh;
@@ -94,6 +98,7 @@ namespace engine::scene {
 		core::Name RoughnessMap;
 		core::Name OcclusionMap;
 		core::Name HeightMap;
+		core::Name MetalnessMap;
 		core::Name EmissiveMap;
 		//@}
 
@@ -135,6 +140,10 @@ namespace engine::scene {
 		// of it. See `SortForDrawing`.
 		float Transparency = 0.0f;
 
+		// The texture alpha threshold used by `AlphaMode::Transparency` when the
+		// part itself is opaque.
+		float AlphaCutoff = 0.5f;
+
 		// Which surface texture this instance shows, or -1 for none.
 		//
 		// **A mirror, and nothing more general than that.** A surface camera
@@ -166,9 +175,9 @@ namespace engine::scene {
 		// **From `SurfaceAppearance::Mode`, and it is here rather than derived
 		// from `Transparency` because they answer different questions.**
 		// `Transparency` is how see-through the *part* is and puts it in the
-		// sorted pass; this is what the *texture's* alpha means, and `Clip` is
-		// the mode that keeps a hair card opaque and out of that pass entirely.
+		// sorted pass; this is what the texture's alpha means.
 		AlphaMode Alpha = AlphaMode::Opaque;
+		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// **`Movable` was here and is gone.** It said whether an instance was a
 		// thing in the world rather than the world, because the pass that copies
@@ -237,12 +246,63 @@ namespace engine::scene {
 		//
 		// @since v0.15
 		core::Vector3 SeamLight{0.0f, 0.0f, 0.0f};
+
+		// Which rig this row is a limb of, or zero for a row that is one thing.
+		//
+		// **A seam has to be able to cut a body once rather than a dozen
+		// times.** Whether a row may be cut by a hole is "does it fit the
+		// aperture", and a character is a dozen drawn rows: standing in a
+		// doorway, its root and its head are comfortably inside the rectangle
+		// and its feet sit on the bottom edge, where the box overhangs. Asked
+		// per row, that answers yes for most of the rig and no for the parts on
+		// the rim - and a row that answers no is drawn *whole* rather than cut,
+		// so the body is clipped at the plane from the waist up and pushed
+		// through the wall from the ankles down. `CutAndCloneSeams` asks the
+		// question once per rig instead, of the box that holds all of it.
+		//
+		// `ecs::Entity::Id` rather than the handle, so this header keeps its
+		// present dependencies. Nothing here dereferences it: it is an identity
+		// to group by and the value is never looked up.
+		//
+		// **Explicit, because an `ecs::Entity` is eight-byte aligned and every
+		// field above this one is four.** The compiler would open a four-byte
+		// hole here on its own. Named and zeroed, it remains a flat payload with
+		// a known object representation, which the module's padding test pins.
+		// `CharacterLimb::Reserved` exists for the same reason.
+		uint32_t Reserved = 0;
+
+		// @since v0.19
+		uint64_t Rig = 0;
+
+		// The stable identity of this drawable inside its source world.
+		//
+		// **The entity and not the row position.** Culling and ordering permute a
+		// draw list every frame, while this value remains attached to the thing
+		// being drawn. The renderer uses it to keep one packed GPU row resident
+		// and makes visibility a separate index stream.
+		uint64_t Source = 0;
+
+		// Which synthetic form of `Source` this row is, or zero for the entity
+		// itself. A portal half uses the pane entity, so the original and its copy
+		// can both be resident without claiming the same slot.
+		uint64_t Variant = 0;
+
+		// The world `Source` belongs to, or invalid for the view's own world.
+		//
+		// Entity handles collide between stores. A name is the boundary identity
+		// this repository permits, and a collector may leave the common case
+		// implicit so one world name is written once on the view rather than once
+		// per row.
+		core::Name SourceWorld;
+
+		// Keeps the flat payload free of implicit tail padding.
+		uint32_t IdentityReserved = 0;
 	};
 
 	// Fills the fields a collector reads straight off the world's components.
 	//
 	// **The one place that field list is spelled out.** Two collectors publish
-	// this type - `client::CollectInstances` from a world this machine ticks and
+	// this type - `engine::render::CollectInstances` from a world this machine ticks and
 	// `client::CollectReplicated` from one it receives - and each wrote its own
 	// fourteen-member aggregate until v0.15. That is the most expensive shape a
 	// duplicate can take here, because the drift is silent: a member added to the
@@ -267,10 +327,16 @@ namespace engine::scene {
 	// @param appearance The row's appearance, or null for the defaults - a
 	//                   replicated row may arrive without one.
 	// @param tags       The row's tags, or null for none.
+	// @param source     The entity this row draws, as its complete id.
 	// @param local      This viewer's own occlusion fade, or null for none -
 	//                   see `scene::LocalTransparency`. Never present on a
 	//                   headless host's own draw list, because nothing there
 	//                   is looking at anything.
+	// @param limb       The row's limb, or null when the row is not part of a
+	//                   character. A limb names the root it hangs off and every
+	//                   limb of one character names the same root, which is the
+	//                   grouping a portal seam needs; a row without one is its
+	//                   own body. See `DrawInstance::Rig`.
 	// @return The instance to publish.
 	// @since v0.15
 	inline DrawInstance MakeDrawInstance(
@@ -279,7 +345,9 @@ namespace engine::scene {
 		const Visual &visual,
 		const SurfaceAppearance *appearance,
 		const Tags *tags,
-		const LocalTransparency *local = nullptr
+		uint64_t source,
+		const LocalTransparency *local = nullptr,
+		const CharacterLimb *limb = nullptr
 	) {
 		DrawInstance instance;
 		instance.Frame = frame;
@@ -288,14 +356,20 @@ namespace engine::scene {
 		instance.Mesh = visual.Mesh;
 
 		if (appearance != nullptr) {
+			instance.SurfaceColour = appearance->Colour;
+			instance.EmissiveTint = appearance->EmissiveTint;
+			instance.EmissiveStrength = appearance->EmissiveStrength;
 			instance.Texture = appearance->ColourMap;
 			instance.NormalMap = appearance->NormalMap;
 			instance.RoughnessMap = appearance->RoughnessMap;
 			instance.OcclusionMap = appearance->OcclusionMap;
 			instance.HeightMap = appearance->HeightMap;
+			instance.MetalnessMap = appearance->MetalnessMap;
 			instance.EmissiveMap = appearance->EmissiveMap;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
+			instance.AlphaCutoff = appearance->AlphaCutoff;
+			instance.Resample = appearance->Resample;
 		}
 
 		instance.TagMask = tags != nullptr ? tags->Mask : 0u;
@@ -313,8 +387,16 @@ namespace engine::scene {
 		if (local != nullptr && local->Value != 0.0f) {
 			instance.Transparency = local->Value;
 		}
+		// See `DrawInstance::Rig`. A limb names the root it hangs off, and every
+		// limb of one character names the same one, which is the grouping a seam
+		// needs. A row that is not a limb is its own body and needs no group.
+		if (limb != nullptr) {
+			instance.Rig = limb->Root.Id;
+		}
+
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;
+		instance.Source = source;
 
 		return instance;
 	}
@@ -324,7 +406,7 @@ namespace engine::scene {
 	// **An order rather than a sort in place**, because the consumer holds a
 	// `std::span<const DrawInstance>` - a view published by a world it does not
 	// own, which may be another process's memory. Writing an index list also
-	// costs four bytes an instance instead of moving eighty.
+	// costs four bytes an instance instead of moving a wide visual row.
 	//
 	// **Why the renderer cannot just draw them in any order.** Opaque geometry
 	// writes depth, so whatever is nearest wins whichever order it arrived in.
@@ -488,7 +570,7 @@ namespace engine::scene {
 	// **A bound on an allocation, not a statement about how many mirrors a world
 	// should have.** That second question is the world's, through
 	// `workspace.MaxSurfaces` and `scene::SurfaceLimitOf` - which defaults to
-	// fifty and is what an author actually turns. This number only says how far
+	// thirty-two and is what an author actually turns. This number only says how far
 	// the arrays sized by it reach, and it exists for the reason
 	// `spatial::HashGrid::MAXIMUM_CELLS_PER_PROXY` does: a save file is hostile
 	// input, and a world asking for a million mirrors must reach a bound rather

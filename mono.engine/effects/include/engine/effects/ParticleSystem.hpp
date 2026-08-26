@@ -83,26 +83,18 @@ namespace engine::effects {
 
 	// How many emitters one world may have live at once.
 	//
-	// **65,535, which is below `ROADMAP.md`'s hundred thousand, and that is a
-	// deliberate limit rather than an oversight.** `ParticleInstance::Slot` is
-	// sixteen bits because thirty-two would make the instance thirty-six bytes -
-	// four more across half a million particles is two megabytes a frame of extra
-	// upload to address emitters that are not on screen.
-	//
-	// What the roadmap's number actually asks for is a hundred thousand emitters
-	// *existing*, and a world may hold any number: an emitter without a block
-	// emits nothing and costs one skipped row. Blocks are handed out to the
-	// emitters that are enabled and in view, so the cap is on how many are
-	// *emitting at once* - and a scene with sixty-five thousand of those has half
-	// a million particles before it runs out, which is the other limit.
+	// The roadmap's hundred thousand simultaneous emitters, with headroom for
+	// authored scenes above the benchmark. The particle stream already had a
+	// four-byte slot word, previously split into a uint16 and padding, so this
+	// limit costs no additional per-particle storage.
 	//
 	// **Running out is logged once and then silent**, because a message per
 	// emitter per frame at this count is a log nobody can read. `Statistics::
 	// EmittersRefused` is the number to look at.
-	inline constexpr uint32_t MAX_EMITTER_SLOTS = 65535;
+	inline constexpr uint32_t MAX_EMITTER_SLOTS = 1000000;
 
 	// What no emitter's slot is.
-	inline constexpr uint16_t NO_SLOT = 0xFFFF;
+	inline constexpr uint32_t NO_SLOT = 0xFFFFFFFFu;
 
 	// One emitter's curves, sampled flat.
 	//
@@ -177,17 +169,36 @@ namespace engine::effects {
 	//
 	// @since v0.10
 	struct EmitterSlot {
+		// One-shot births requested by `ParticleEmitter:Emit`. Kept on the ECS
+		// row so a script call and the simulation do not own two queues.
+		uint32_t Requested = 0;
+
 		// Which block, or `NO_SLOT` when this emitter has none.
 		//
 		// **Not serialised as a meaningful value** - see `Registration.cpp`. A
 		// block index is a position in one process's pool, which is rule 4's
 		// hazard exactly: restoring it would point an emitter at whatever block
 		// happened to take that number.
-		uint16_t Index = NO_SLOT;
+		uint32_t Index = NO_SLOT;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
-		uint16_t Reserved = 0;
+		// The state the refresh walk needs even before this emitter owns a block,
+		// sampled from the much wider authored component when it changes.
+		//@{
+		bool Enabled = true;
+		bool Configured = false;
+		//@}
+
+		// Whether the next refresh invalidates every particle in the block.
+		bool ClearRequested = false;
+
+		// The last block claim failed and should not be retried until some block
+		// returns capacity or the authored emitter changes.
+		//
+		// This occupies the byte that was explicit padding, so remembering a
+		// refusal does not widen the row walked for every emitter every tick.
+		bool Refused = false;
 	};
+	static_assert(sizeof(EmitterSlot) == 12);
 
 	// Where an emitter emits from, in world space.
 	//
@@ -245,24 +256,27 @@ namespace engine::effects {
 		// How many slots it owns.
 		uint32_t Capacity = 0;
 
-		// How many of them are alive, contiguous from `First`.
-		uint32_t Live = 0;
-
-		// How many this emitter has ever spawned.
-		//
-		// **The seed's index, and it must not be the slot number.** A slot is
-		// reused the instant a particle dies, so seeding from it makes every
-		// replacement identical to what it replaced - a steady emitter settles
-		// into a loop of the same handful of particles within one lifetime, which
-		// reads as a stuttering effect rather than as a seeding mistake. A
-		// monotonic counter gives every particle its own draw.
-		//
-		// Wraps at four billion, which at a thousand a second is seven weeks.
-		// Wrapping is harmless: it repeats a sequence, it does not corrupt one.
-		uint32_t Spawned = 0;
-
 		// How fast speed is shed, as a fraction per second.
 		float Drag = 0.0f;
+
+		// The authored capacity ceiling that sized this block. A change releases
+		// and reclaims the run so raising the ceiling can actually add rows.
+		int32_t ParticleLimit = 0;
+
+		// Distance births read on the steady refresh path. Sampled here so that
+		// moving a parent does not pull the authored emitter row into cache.
+		float RateOverDistance = 0.0f;
+
+		// Device-stepped forces and velocity ceiling. These are one value per
+		// emitter, not fields repeated on every particle.
+		//@{
+		float MaxSpeed = 0.0f;
+		float NoiseStrength = 0.0f;
+		float NoiseFrequency = 0.5f;
+		float NoiseScrollSpeed = 0.0f;
+		float RadialAcceleration = 0.0f;
+		float TangentialAcceleration = 0.0f;
+		//@}
 
 		// Which tenancy of this run of the pool the block is on.
 		//
@@ -281,20 +295,9 @@ namespace engine::effects {
 		// claimed, which at scene load is the whole pool.
 		uint32_t Generation = 1;
 
-		// Seconds since this block last spawned anything.
-		//
-		// **What lets `Live` reach zero when the device owns the pool.** The
-		// host cannot see a particle die, so `Live` is what it has ever put in
-		// the block - which never falls, so a disabled emitter would hold its
-		// rows for as long as it existed and go on costing its capacity in
-		// quads with no extent. Past `Longest` nothing born before can still be
-		// alive, whatever the device is doing, and the block is empty by
-		// arithmetic rather than by observation.
-		float Idle = 0.0f;
-
 		// How many times the device-visible half of this block has changed.
 		//
-		// **Because a block record is three hundred and eighty-four bytes and a
+		// **Because a block record is hundreds of bytes and a
 		// scene may have a hundred thousand of them.** Staging every block every
 		// frame is thirty-nine megabytes of writes into a mapped transfer buffer -
 		// more than the sixteen the whole particle pool used to cost, which would
@@ -314,18 +317,6 @@ namespace engine::effects {
 		uint32_t Revision = 1;
 		uint32_t CurveRevision = 1;
 		//@}
-
-		// The longest a particle of this emitter can live, in seconds. Read with
-		// `Idle` and set from `ParticleEmitter::Lifetime`.
-		float Longest = 0.0f;
-
-		// What is left over from the last frame's emission, in particles.
-		//
-		// **A fractional accumulator, and it is what makes a low rate work at
-		// all.** An emitter at three particles a second over a sixtieth of a
-		// second owes 0.05 of a particle; truncating that emits nothing, forever.
-		// Roblox's emitters have the same accumulator for the same reason.
-		float Pending = 0.0f;
 
 		// The entity this block belongs to, so a dead emitter's block is freed.
 		ecs::Entity Owner;
@@ -348,18 +339,85 @@ namespace engine::effects {
 		// Whether particles are recomputed from the parent's frame each step.
 		bool Locked = false;
 
-		// Whether an emitter claimed this block on the current refresh.
+		// Which refresh last saw the emitter that owns this block.
 		//
-		// **Named `Reserved` and it is not padding**, which is worth saying
-		// because every other `Reserved` in the engine is. `RefreshEmitters`
-		// clears this over every block, lets the emitter walk set it, and frees
-		// whatever is still clear - which is how a block belonging to a destroyed
-		// emitter is reclaimed without keeping a second list of live owners.
-		uint8_t Reserved = 0;
+		// A generation stamp avoids a separate strided write over all blocks just
+		// to clear one byte before the claim walk sets it again. A block whose stamp
+		// differs from `ParticleSystem::ClaimGeneration` was not claimed and is
+		// reclaimed, which preserves the destroyed-emitter check without the pass.
+		uint32_t ClaimedAt = 0;
 
 		// How fast a flipbook runs, in cells per second, under a mode that pays
 		// attention to it.
 		float FlipbookRate = 12.0f;
+	};
+
+	// The compact mutable row consumed by host fallback or copied to device state.
+	//
+	// Kept beside `EmitterBlock`, indexed identically. The block is hundreds of
+	// bytes of curves, transforms and device parameters, while a simulation tick
+	// needs only this row until an emitter actually owes a birth. Splitting the
+	// mutable counters keeps the hundred-thousand-emitter steady walk contiguous.
+	struct EmitterRuntime {
+		// How many particles are alive. The host keeps a prefix; a device-owned
+		// block keeps the number ever placed in its ring, capped to capacity.
+		uint32_t Live = 0;
+
+		// The monotonic per-emitter seed index. A slot is reused, so using it would
+		// make replacement particles repeat the ones they replace.
+		uint32_t Spawned = 0;
+
+		// One-shot births waiting for an already resident block.
+		uint32_t Requested = 0;
+
+		// Fractional continuous-emission debt.
+		float Pending = 0.0f;
+
+		// Time since the last birth and the maximum time one can remain alive.
+		//@{
+		float Idle = 0.0f;
+		float Longest = 0.0f;
+		//@}
+
+		// Zero while disabled, otherwise authored rate times time scale.
+		float ContinuousRate = 0.0f;
+
+		// The guaranteed first birth chooses a deterministic recurring phase after
+		// it is planned, preserving immediate start without synchronising a crowd.
+		bool RatePhasePending = true;
+		bool Enabled = true;
+
+		// A disabled device emitter remains resident until its longest possible
+		// particle has expired. Only those rare blocks are revisited by the host;
+		// steady active emitters are advanced entirely by the GPU.
+		bool DeviceRetiring = false;
+	};
+
+	// The compact authored state needed only when a particle is born.
+	//
+	// Kept beside `EmitterBlock`, indexed identically, because adding these fields
+	// to the block slowed the ageing and refresh passes that stream blocks but do
+	// not spawn. Refreshing this row only when the emitter or its parent changes
+	// removes the steady 1.5 KiB `ParticleEmitter` walk from `StepParticles` while
+	// preserving the small hot block used by both host and device stepping.
+	struct EmitterSpawnState {
+		core::Vector3 Half;
+		core::Vector3 Emission;
+		core::Vector3 Inherited;
+
+		core::NumberRange Speed;
+		core::NumberRange Lifetime;
+		core::NumberRange RotationSpeed;
+		core::NumberRange Rotation;
+
+		float SpreadX = 0.0f;
+		float SpreadY = 0.0f;
+		float ShapePartial = 0.0f;
+		float VelocityInheritance = 0.0f;
+
+		ParticleShape Shape = ParticleShape::Box;
+		ParticleShapeStyle ShapeStyle = ParticleShapeStyle::Volume;
+		ParticleShapeDirection ShapeDirection = ParticleShapeDirection::Outward;
 	};
 
 	// One particle's simulation half.
@@ -445,24 +503,6 @@ namespace engine::effects {
 		uint32_t Rotation = 0;
 	};
 
-	// One particle that was born this tick, and the pool row it belongs in.
-	//
-	// **The unit that crosses to a device-resident pool.** The host decides every
-	// birth - where a particle starts reads the emitter's shape, its half-extent,
-	// its parent's motion and a draw seeded from the emitter's entity, none of
-	// which is going to the device - and this is what comes back: about seventeen
-	// hundred of these a tick in a scene of five thousand emitters, against the
-	// half million particles the device ages without being told anything.
-	//
-	// @since v0.17
-	struct ParticleBirth {
-		// Which slot of the pool this particle occupies.
-		uint32_t Row = 0;
-
-		// Its whole simulation half, as the host worked it out at spawn.
-		ParticleState State;
-	};
-
 	// What one step did, for the panel and for a test.
 	//
 	// @since v0.10
@@ -486,6 +526,13 @@ namespace engine::effects {
 		// SurfacePasses` is: at this count a line per refusal is a log nobody can
 		// read, and a count that is not zero is the whole diagnosis.
 		uint32_t EmittersRefused = 0;
+
+		// How many block allocations were actually attempted this refresh.
+		//
+		// A full pool keeps refused emitters visible in `EmittersRefused`, but it
+		// must not retry every one every frame. This counter distinguishes those
+		// two states in tests and diagnostics.
+		uint32_t EmitterClaimAttempts = 0;
 
 		// How many particles a block wanted to emit and had no room for.
 		//
@@ -515,6 +562,69 @@ namespace engine::effects {
 		// One per live emitter.
 		std::vector<EmitterBlock> Blocks;
 
+		// Spawn-only rows, indexed exactly as `Blocks`.
+		std::vector<EmitterSpawnState> SpawnStates;
+
+		// Mutable rate and ring counters, indexed exactly as `Blocks`.
+		std::vector<EmitterRuntime> RuntimeStates;
+
+		// Indices of disabled device blocks waiting for their last possible
+		// particle to expire. This keeps retirement proportional to emitters that
+		// are actually stopping instead of restoring an all-emitter CPU step.
+		std::vector<uint32_t> RetiringBlocks;
+
+		// The immediate parent used to resolve each block's cached frame.
+		//
+		// Kept beside rather than inside `EmitterBlock`: the device and particle
+		// step never read it, and growing their hot row made the earlier cached
+		// spawn-plan experiment slower. The index is the block index.
+		std::vector<ecs::Entity> FrameParents;
+
+		// The texture catalogue revision already reflected in `Blocks`.
+		uint64_t TextureRevision = 0;
+
+		// Observed ECS epochs already folded into the resident emitter rows.
+		// Keeping the six exact component epochs makes the steady refresh path
+		// independent of the number of quiet entities carrying those components.
+		uint64_t EmitterChangeVersion = 0;
+		uint64_t TransformChangeVersion = 0;
+		uint64_t AttachmentChangeVersion = 0;
+		uint64_t BoundsChangeVersion = 0;
+		uint64_t MotionChangeVersion = 0;
+		uint64_t HierarchyChangeVersion = 0;
+
+		// Caller-owned activation policy revision already applied to resident
+		// blocks. The predicate itself lives only for one refresh call and never
+		// crosses the world boundary.
+		uint64_t ActivationPolicyRevision = 0;
+
+		// Which completed simulation revision the presentation data describes.
+		//
+		// **One counter for the whole pool, because rendering needs one answer to
+		// "did any batch input change?"** `EmitterBlock` revisions remain the
+		// narrow device-table dirtiness checks. This one lets a renderer that runs
+		// faster than simulation reuse its ordered emitter list without walking
+		// every emitter again between ticks.
+		uint64_t PresentationRevision = 1;
+
+		// Which emitter membership and material layout presentation has to order.
+		//
+		// Simulation advances every tick, while this advances only when a batch is
+		// added, removed, or changes draw state. Keeping the two separate lets a
+		// resident renderer upload changed block parameters without
+		// sorting and rewriting the complete emitter draw table.
+		uint64_t LayoutRevision = 1;
+
+		// Which device parameter or curve-table content Blocks describes.
+		//
+		// Particle ages and emission do not change these tables. A static emitter can
+		// therefore advance for any number of ticks without making presentation
+		// scan every block to rediscover that all per-block revisions still match.
+		uint64_t ResidentRevision = 1;
+
+		// The current block-claim generation. Zero remains the unclaimed marker.
+		uint32_t ClaimGeneration = 0;
+
 		// Rows of `Blocks` whose emitter has gone, waiting to be handed to the
 		// next one that arrives.
 		//
@@ -525,8 +635,8 @@ namespace engine::effects {
 		// a `push_back` - so a game doing what a game does, one emitter per
 		// explosion and muzzle flash and footstep, walked a row per effect it
 		// had ever played on every tick, held three hundred-odd bytes for each,
-		// and after 65,535 of them refused to emit anything again for the rest
-		// of the process. None of that is visible in a scene that builds its
+		// and after it reached the fixed row cap refused to emit anything again
+		// for the rest of the process. None of that is visible in a scene that builds its
 		// emitters once, which is every scene in `examples/`.
 		//
 		// Indices rather than pointers, because `Blocks` moves when it grows.
@@ -535,12 +645,30 @@ namespace engine::effects {
 		// reused on the next one rather than under the walk that freed it.
 		std::vector<uint32_t> FreeSlots;
 
-		// Whether the device owns the pool and this module only spawns into it.
+		// A returned particle range or block row makes refused emitters eligible
+		// for one new claim pass. It is consumed at the start of that pass.
+		bool RetryRefused = false;
+
+		// Whether an explicit emitter operation needs the claim pass.
+		//
+		// Authored and hierarchy changes have ECS dirty channels of their own.
+		// `Emit` and `Clear` write this resource so a steady scene can skip the
+		// emitter column without losing operations queued on a row with no block.
+		bool RefreshRequested = true;
+
+		// The emitter-row count observed by the last full claim pass.
+		//
+		// `CountMatching` is an archetype count rather than a row walk. A changed
+		// count wakes reclamation for destroyed emitters while the common unchanged
+		// case remains independent of emitter count.
+		size_t EmitterRows = 0;
+
+		// Whether the device owns the pool and its complete lifecycle.
 		//
 		// **Set by whoever has a renderer, and the client always does.** When it
 		// is on, `StepParticles` skips its ageing pass entirely: the device
-		// integrates, shades and draws from `particle-step.comp` and nothing has
-		// to cross the bus but the block parameters and the frame's births. That
+		// emits, integrates, shades and draws from the resident particle buffers.
+		// Nothing crosses the bus unless an emitter parameter changes. That
 		// is worth about two milliseconds a frame at half a million particles,
 		// which is most of what a particle frame used to cost.
 		//
@@ -552,28 +680,20 @@ namespace engine::effects {
 		// both; `particle-step.comp` says so at each point where it matters.
 		bool DeviceStepped = false;
 
-		// What was spawned this tick, and which pool row each one belongs in.
-		//
-		// **The whole state and not a row into `States`, which is what lets both
-		// host arrays go.** When the device owns the pool nothing on this side
-		// ever reads a particle again: `Instances` is written by the step, and
-		// `States` is read and written by it. Carrying the newborn state here
-		// rather than pointing at an array is the difference between allocating
-		// fifty-four megabytes the host never looks at and allocating none - at
-		// the pool's default capacity, on every client.
-		//
-		// Empty unless `DeviceStepped`. The host-side pass has no need of it: it
-		// spawns into the arrays it also ages.
-		std::vector<ParticleBirth> Births;
-
 		// How many slots the pool holds in total.
 		//
-		// **Fixed at install time rather than grown on demand**, and the reason is
-		// the same one that made blocks contiguous: growing the pool reallocates
-		// under every block's indices, so it would have to happen between frames
-		// with nothing running - which is exactly when nobody knows how much is
-		// needed. A pool that is full drops spawns and says so.
+		// May grow as far as `MaximumCapacity`. Blocks carry indices rather than
+		// pointers, so reallocating the host fallback arrays does not invalidate
+		// them. A device-owned pool observes the new capacity through presentation
+		// and replaces its resident buffers once.
 		uint32_t Capacity = 0;
+
+		// The hard ceiling for capacity growth.
+		//
+		// Equal to `Capacity` for a fixed pool. A rendered client may leave room to
+		// grow so a scene pays for the rows it actually claims instead of either
+		// reserving the worst case in every loaded world or silently losing effects.
+		uint32_t MaximumCapacity = 0;
 
 		// How many particles one emitter may ever hold.
 		//
@@ -596,11 +716,34 @@ namespace engine::effects {
 		std::vector<std::pair<uint32_t, uint32_t>> Free;
 	};
 
-	// Gives a world a pool of a stated size.
+	// Gives a world a pool with an initial size and an optional growth ceiling.
 	//
-	// @param store    The world.
-	// @param capacity How many particles it may hold at once.
-	void InstallParticles(ecs::Store &store, uint32_t capacity);
+	// Omitting `maximumCapacity` makes a fixed pool, which keeps headless worlds
+	// and tests from acquiring an implicit memory policy. A larger ceiling lets
+	// the allocator grow geometrically when a block claim first crosses the
+	// current capacity.
+	//
+	// @param store           The world.
+	// @param capacity        How many particle rows to allocate initially.
+	// @param maximumCapacity The hard row ceiling, or zero to remain fixed.
+	void InstallParticles(ecs::Store &store, uint32_t capacity, uint32_t maximumCapacity = 0);
+
+	// Queues a one-shot emission on an emitter, including one that is disabled.
+	//
+	// @param store   The world.
+	// @param emitter The ParticleEmitter instance.
+	// @param count   How many particles to request.
+	// @return False when the entity is not a ParticleEmitter.
+	bool EmitParticles(ecs::Store &store, ecs::Entity emitter, uint32_t count);
+
+	// Clears every live particle owned by an emitter on the next refresh.
+	//
+	// @param store   The world.
+	// @param emitter The ParticleEmitter instance.
+	// @return False when the entity is not a ParticleEmitter.
+	bool ClearParticles(ecs::Store &store, ecs::Entity emitter);
+
+	using EmitterActivationPredicate = bool (*)(const ecs::Store &, ecs::Entity);
 
 	// Hands out and reclaims blocks, and refreshes each one from its emitter.
 	//
@@ -612,9 +755,13 @@ namespace engine::effects {
 	// Registered in `PreSimulation`, before `StepParticles`, because a block
 	// handed out after the step is a block that emits nothing for one frame.
 	//
-	// @param store The world.
+	// @param store              The world.
+	// @param activation         Optional caller policy for whether an emitter may own a block.
+	// @param activationRevision Revision of that caller policy; changing it forces reevaluation.
 	// @return How many blocks are live.
-	size_t RefreshEmitters(ecs::Store &store);
+	size_t RefreshEmitters(
+		ecs::Store &store, EmitterActivationPredicate activation = nullptr, uint64_t activationRevision = 0
+	);
 
 	// Ages every particle, spawns new ones, and writes the instance stream.
 	//

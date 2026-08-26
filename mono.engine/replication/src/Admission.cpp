@@ -9,7 +9,7 @@
 namespace engine::replication {
 
 	namespace {
-		void WriteFront(core::ByteWriter &writer, AdmissionKind kind) {
+		void WriteAdmissionFront(core::ByteWriter &writer, AdmissionKind kind) {
 			writer.WriteUInt16(PROTOCOL_VERSION);
 			writer.WriteUInt8(static_cast<uint8_t>(kind));
 		}
@@ -33,32 +33,39 @@ namespace engine::replication {
 			return "answer";
 		case AdmissionKind::Welcome:
 			return "welcome";
+		case AdmissionKind::Refuse:
+			return "refuse";
 		}
 		return "?";
 	}
 
 	void WriteAdmission(core::ByteWriter &writer, const Hello &hello) {
-		WriteFront(writer, AdmissionKind::Hello);
+		WriteAdmissionFront(writer, AdmissionKind::Hello);
 		WriteBlock(writer, hello.PublicKey);
 	}
 
 	void WriteAdmission(core::ByteWriter &writer, const Challenge &challenge) {
-		WriteFront(writer, AdmissionKind::Challenge);
+		WriteAdmissionFront(writer, AdmissionKind::Challenge);
 		WriteBlock(writer, challenge.Cookie);
 	}
 
 	void WriteAdmission(core::ByteWriter &writer, const Answer &answer) {
-		WriteFront(writer, AdmissionKind::Answer);
+		WriteAdmissionFront(writer, AdmissionKind::Answer);
 		WriteBlock(writer, answer.PublicKey);
 		WriteBlock(writer, answer.Cookie);
 	}
 
 	void WriteAdmission(core::ByteWriter &writer, const Welcome &welcome) {
-		WriteFront(writer, AdmissionKind::Welcome);
+		WriteAdmissionFront(writer, AdmissionKind::Welcome);
 		WriteBlock(writer, welcome.PublicKey);
 		writer.WriteUInt64(welcome.Counter);
 		WriteBlock(writer, welcome.Confirmation);
 		WriteBlock(writer, welcome.Identity);
+	}
+
+	void WriteAdmission(core::ByteWriter &writer, const Refusal &refusal) {
+		WriteAdmissionFront(writer, AdmissionKind::Refuse);
+		writer.WriteUInt8(static_cast<uint8_t>(refusal.Wire));
 	}
 
 	bool ReadAdmission(core::ByteReader &reader, Admission &message) {
@@ -67,7 +74,7 @@ namespace engine::replication {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(AdmissionKind::Welcome)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(AdmissionKind::Refuse)) {
 			return false;
 		}
 
@@ -105,6 +112,18 @@ namespace engine::replication {
 				return false;
 			}
 			break;
+
+		case AdmissionKind::Refuse: {
+			// Range-checked before the cast, as `Packet::Read` does it for a
+			// channel byte: a `WireKind` no switch handles is a value the type
+			// says cannot exist, reached by one byte from a stranger.
+			const uint8_t wire = reader.ReadUInt8();
+			if (reader.Failed() || wire > static_cast<uint8_t>(net::WireKind::Quic)) {
+				return false;
+			}
+			read.Refusal.Wire = static_cast<net::WireKind>(wire);
+			break;
+		}
 		}
 
 		// Fixed-size handshake messages must consume the entire datagram.

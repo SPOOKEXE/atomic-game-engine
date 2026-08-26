@@ -45,7 +45,7 @@ namespace engine::scene {
 	// What a world knows about the meshes named on its parts.
 	//
 	// **Derived rather than authored, so it is not saved.** Its registration
-	// writes nothing and reads back empty, exactly as `client::DrawList`'s
+	// writes nothing and reads back empty, exactly as `engine::render::DrawList`'s
 	// does: the contents come from whatever registered the meshes this run, and
 	// a save file carrying last run's counts would be a number that agrees with
 	// nothing on disk. A world reloaded with no content attached honestly knows

@@ -25,7 +25,7 @@
 //
 // So the split is: **this file holds what an author writes, and what a GPU
 // draws.** The pool and the step are `ParticleSystem.hpp`, and the thing that
-// connects them is a `uint16_t` slot number on each particle.
+// connects them is a 32-bit slot number on each particle.
 //
 // **The property surface is Roblox's, in full, minus what is not implemented.**
 // `ROADMAP.md` says "support everything you can", and the discipline
@@ -280,11 +280,40 @@ namespace engine::effects {
 		// texture rule.
 		core::Name Texture;
 
+		// The most particles this emitter may hold, or zero to derive its block
+		// from the emission rates and longest lifetime.
+		int32_t MaxParticles = 0;
+
 		// How many particles a second, while `Enabled`.
 		float Rate = 20.0f;
 
+		// How many particles are emitted per metre the parent travels.
+		//
+		// Kept beside the time rate because both feed the same fractional
+		// accumulator. Zero disables distance emission.
+		float RateOverDistance = 0.0f;
+
 		// How fast speed is shed, as a fraction per second.
 		float Drag = 0.0f;
+
+		// The fastest a particle may travel, in metres per second. Zero leaves
+		// velocity unlimited.
+		float MaxSpeed = 0.0f;
+
+		// Strength, spatial frequency and temporal scroll of a procedural force.
+		// Strength zero disables the module without a per-particle flag.
+		//@{
+		float NoiseStrength = 0.0f;
+		float NoiseFrequency = 0.5f;
+		float NoiseScrollSpeed = 0.0f;
+		//@}
+
+		// Acceleration away from the emitter and around its local up axis.
+		// Negative values pull inward or reverse the orbit.
+		//@{
+		float RadialAcceleration = 0.0f;
+		float TangentialAcceleration = 0.0f;
+		//@}
 
 		// How much of the parent's own velocity a new particle keeps, 0 to 1.
 		float VelocityInheritance = 0.0f;
@@ -439,20 +468,12 @@ namespace engine::effects {
 
 		// Which emitter this came from, as an index into the system's blocks.
 		//
-		// **The whole reason this type is thirty-two bytes.** Texture, blend mode,
+		// **The whole reason this type carries a slot.** Texture, blend mode,
 		// orientation rule, Z offset and light response are all per emitter, and
-		// this is how a particle names them without carrying them. Sixteen bits
-		// caps a world at 65,536 live emitters, which is under the roadmap's
-		// hundred thousand - `ParticleSystem.hpp` says what happens at the cap and
-		// why the number is what it is.
-		uint16_t Slot = 0;
-
-		// Explicit padding, so the object representation carries no uninitialised
-		// bytes into a recording. Two bytes, which is the type's alignment tail
-		// rather than an interior hole - and it is the only slack there is, so the
-		// next field anybody wants here costs four bytes across half a million
-		// particles rather than none.
-		uint16_t Reserved = 0;
+		// this is how a particle names them without carrying them. The old 16-bit
+		// value plus two padding bytes already occupied this word, so using all 32
+		// bits reaches the roadmap's 100,000 emitters without changing the stream.
+		uint32_t Slot = 0;
 	};
 
 	// **Twenty-eight and not thirty-two, which is worth pinning rather than

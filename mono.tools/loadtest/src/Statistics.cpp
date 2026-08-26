@@ -130,7 +130,14 @@ namespace loadtest {
 		Count(text, "playing at the end", summary.Playing);
 		Count(text, "still streaming", summary.Streaming);
 		Count(text, "never admitted", summary.Dialling);
-		Count(text, "refused", summary.Refused);
+		// **"gave up" and not "refused", because the connector cannot tell them
+		// apart and the wrong word sends an operator to the wrong place.**
+		// `Connector::Rejected` is true both when the server said no and when
+		// nothing answered inside `ConnectorSettings::AttemptSeconds` on either
+		// transport - and a server too busy to answer a handshake is by far the
+		// commoner of the two under load. The connector logs which it was, per
+		// session, with the transport named.
+		Count(text, "gave up dialling", summary.Refused);
 		Count(text, "timed out", summary.TimedOut);
 
 		Line(text, "run seconds", "%.2f", summary.Seconds);

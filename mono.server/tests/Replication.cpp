@@ -30,6 +30,7 @@
 #include <engine/game/Play.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -556,12 +557,17 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
 	}
 
+	// **Read through `LinkStats` rather than through `Link()`.** A QUIC
+	// connection owns no `net::Link`, and QUIC is what a server serves by
+	// default - so a diagnostic that reached for the concrete type would be a
+	// null dereference on the default transport, which is what it was.
+	const engine::net::ConnectionStats link = remote.Link->LinkStats();
 	INFO(
 		"applied=" << remote.Link->Applied() << " joinedAt=" << joinedAt << " refused="
 				   << remote.Link->Stats().Refused << " appliedMsgs=" << remote.Link->Stats().Applied
-				   << " linkState=" << static_cast<int>(remote.Link->Link().State())
-				   << " stale=" << remote.Link->Link().Stats().PacketsStale
-				   << " recv=" << remote.Link->Link().Stats().PacketsReceived
+				   << " wire=" << engine::net::Describe(remote.Link->Wire())
+				   << " attempts=" << remote.Link->Attempts() << " lost=" << link.PacketsLost
+				   << " recv=" << link.PacketsReceived
 	);
 	REQUIRE(remote.Link->Applied() > joinedAt);
 }
@@ -1252,11 +1258,14 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 	// witness and did not decide. The shooter never says what it struck.
 	//
 	// **The target is a character and not a prop, and that is not a preference.**
-	// `Server::ServeClients` records the rewind history over `Transform` *and*
-	// `Motion`, deliberately, so that static geometry does not fill the ring
-	// with rows whose answer is the same at every tick - a scripted anchored
-	// part is therefore invisible to the hit test, and an unanchored one that
-	// has come to rest is too. What moves in this engine is a character.
+	// `Server::ServeClients` records the rewind history over `Transform` and
+	// `RigidBody` **filtered by `scene::Simulated`**, deliberately, so that
+	// static geometry does not fill the ring with rows whose answer is the same
+	// at every tick - a scripted anchored part is therefore invisible to the hit
+	// test. An unanchored one that has come to rest is *not*: it keeps
+	// `Simulated` when it sleeps and only loses `Motion`, which is exactly the
+	// v0.15 bug about a standing player being unhittable, fixed. What is being
+	// aimed at here is a character because that is what a shot means.
 	if (!ServerAvailable()) {
 		SKIP("the server program is not built into this preset");
 	}
@@ -1282,14 +1291,20 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 	REQUIRE(victim.Connect(shooter.Port));
 	REQUIRE(victim.Join(400));
 
-	for (int tick = 0; tick < 200; tick++) {
-		shooter.Tick();
-		victim.Tick();
-		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-	}
+	Settle(victim);
+	Settle(shooter);
 
 	REQUIRE(shooter.Mine != engine::ecs::NULL_ENTITY);
 	REQUIRE(victim.Mine != engine::ecs::NULL_ENTITY);
+
+	// Resolve the victim once the initial snapshot is settled. The root entity
+	// is the stable target the rest of this test needs.
+	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
+	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
+	const Character *rig = shooter.World.Get<Character>(victimCharacter);
+	REQUIRE(rig != nullptr);
+	const Entity victimRoot = rig->Root;
+	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
 
 	// **The shooter walks away first**, so that its own body is nowhere near the
 	// ray. Both characters spawn at the same `SpawnLocation`, and the shooter's
@@ -1298,17 +1313,6 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 	// below would never know the difference.
 	shooter.LookAlong(0.0f);
 	shooter.Hold({engine::scene::KeyCode::W}, 120, &victim);
-
-	// The victim's body, as the shooter's replica holds it. Found through the
-	// join notice rather than by position, because a `Player` is what a client
-	// is told about and the character hangs off it.
-	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
-	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
-
-	const Character *rig = shooter.World.Get<Character>(victimCharacter);
-	REQUIRE(rig != nullptr);
-	const Entity victimRoot = rig->Root;
-	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
 
 	const engine::core::Color3 before = shooter.World.Get<Visual>(victimRoot)->Tint;
 

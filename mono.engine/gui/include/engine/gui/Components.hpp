@@ -456,11 +456,13 @@ namespace engine::gui {
 
 		// Whether a drag may pull the canvas past its end.
 		//
-		// **Declared, pinned and not yet animated.** Nothing here springs the
-		// canvas back, because a spring needs a clock and `gui` is L7 with no
-		// notion of a frame time - so the honest state is that the property is
-		// authored and replicated and the pull is clamped. `ElasticBehavior`'s
-		// own comment says why the set is registered whole regardless.
+		// **Animated since v0.18, and this comment said otherwise until v0.19.**
+		// It read "declared, pinned and not yet animated", on the argument that
+		// a spring needs a clock and `gui` is L7 with no notion of a frame time.
+		// `ScrollMotion` is that clock: `gui::Router` reads this field when a
+		// drag runs past the end, and the spring in `gui::Layout` returns the
+		// canvas after release. All three `ElasticBehavior` values have a case
+		// in `engine.gui.input`.
 		ElasticBehavior Elastic = ElasticBehavior::WhenScrollable;
 
 		// Whether each bar eats into the room the content gets.
@@ -622,12 +624,25 @@ namespace engine::gui {
 		bool IgnoreGuiInset = false;
 	};
 
-	// The screen-sized canvas a `ScreenGui` collects onto.
+	// The canvas rectangle a collector's roots lay out inside.
+	//
+	// **Every collector, not only a `ScreenGui`, which is what this said until
+	// v0.19.** `gui::Layout` writes one for a `SurfaceGui` and a `BillboardGui`
+	// too, and its one reader in `gui::Compile` exists *specifically* for a
+	// spatial collector with `ClipsDescendants` off - a case a screen gui can
+	// never be in, because a screen gui always clips.
 	//
 	// Holds the resolved rectangle rather than any authored field, because a
-	// screen gui has none - its canvas is the viewport. It exists so the draw
+	// collector authors none - a screen gui's canvas is the viewport and a
+	// spatial one's is fitted by whoever holds a camera. It exists so the draw
 	// pass and the hit test can read the canvas a node belongs to without
 	// learning which of the three kinds of collector it was.
+	//
+	// **Local to the machine looking**, therefore, and
+	// `replication::LocalToTheClient` names it. It did not until v0.19, so the
+	// authority's screen rectangle crossed to every client and was overwritten
+	// by that client's next layout pass - `gui.Resolved`, written three lines
+	// later off the same rectangle, had been excluded from the start.
 	//
 	// @since v0.8
 	struct Canvas {

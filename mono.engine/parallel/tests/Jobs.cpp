@@ -1,17 +1,24 @@
 #include "ThreadAffinity.hpp"
 
+#include <engine/core/Paths.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Process.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <mutex>
 #include <numeric>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.parallel.jobs")
@@ -460,7 +467,27 @@ TEST_CASE("a throwing batch releases the pool", "[jobs]") {
 	REQUIRE(PoolParticipates(100'000));
 }
 
+namespace {
+	// Leaves the pool empty however the case exits.
+	//
+	// The case below drives `Start` and `Stop` directly instead of through
+	// `Pool`, because those calls are the thing under test. A failing `REQUIRE`
+	// between them throws, so without this the pool would still be running when
+	// the next case began - and `Start` is idempotent, so that case's request
+	// for four workers would return the two left behind rather than resize.
+	// One failure would become a cascade whose first symptom is an unrelated
+	// case reading the wrong worker count. `ForcedSerial` below makes the same
+	// argument for the global switch.
+	struct EmptyPool {
+		~EmptyPool() {
+			Jobs::Stop();
+		}
+	};
+}
+
 TEST_CASE("Start is idempotent and Stop is safe without Start", "[jobs]") {
+	EmptyPool empty;
+
 	Jobs::Stop();
 	REQUIRE(Jobs::WorkerCount() == 0);
 
@@ -572,4 +599,68 @@ TEST_CASE("a forced dispatch still rethrows on the caller", "[parallel][jobs]") 
 	// hang rather than fail if it were wrong, which is why it is a bare call
 	// and not an assertion.
 	Jobs::For(16, 4, [](size_t, size_t) {});
+}
+
+// --- the pool outliving the program that started it --------------------------
+
+// The child. Deliberately no `Jobs::Stop`: what is being checked is the caller
+// that forgets one.
+//
+// **The leading dot in the tag is not enough to keep this out of an ordinary
+// run, and that is the trap.** `mono.tools/testrunner` runs a suite as
+// `test_parallel -# "[#Jobs]"`, and an explicit filter matches hidden cases -
+// so this case runs in-process alongside every other one in this file, in an
+// order that is not declaration order. A pool started here and never stopped
+// would be inherited by whichever case Catch2 happened to schedule next, whose
+// own `Jobs::Start` would then return the wrong-sized pool rather than build
+// the one it asked for. It failed about one run in twenty that way before this
+// guard existed.
+//
+// So the case does its work only when it really is a supervised child, which
+// `HasInheritedChannel` is the module's own answer to - the same shape
+// `tests/ProcessChannel.cpp`'s echo child uses, and `tests/ProcessChannel.cpp`
+// asserts that a binary the runner started has no such channel.
+TEST_CASE("jobs pool exit child", "[.child]") {
+	if (!engine::parallel::HasInheritedChannel()) {
+		return;
+	}
+
+	Jobs::Start(2);
+}
+
+TEST_CASE("a program that never stops the pool still exits", "[jobs]") {
+	// **The pool is never destroyed, and this is the case that says why.** Its
+	// four condition variables would be destroyed with every worker still
+	// parked on `Available`, and `pthread_cond_destroy` waits for the last
+	// waiter - so a process that started the pool and did not stop it returned
+	// zero from `main` and then hung in `exit` for ever. That reads as a hung
+	// test suite rather than as a stuck teardown, which is what made it
+	// expensive to find.
+	//
+	// Spawned rather than checked in-process, because the fault is in exit
+	// order and there is no way to observe exit order without exiting.
+	using engine::parallel::ExitReason;
+	using engine::parallel::Process;
+	using engine::parallel::ProcessStatus;
+
+	const std::filesystem::path self =
+		engine::core::Paths::Base() / engine::core::Paths::Program("test_parallel");
+
+	// The endpoint is what tells the child it was spawned rather than run by
+	// the test runner. Nothing is ever sent on it.
+	engine::parallel::ProcessChannel pair = engine::parallel::MakeProcessChannel();
+	REQUIRE(pair.Valid());
+
+	Process child;
+	REQUIRE(child.Start(self, {"jobs pool exit child"}, std::move(pair.Remote)));
+
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+	ProcessStatus status = child.Poll();
+	while (status.Alive() && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		status = child.Poll();
+	}
+
+	REQUIRE(status.Reason == ExitReason::Exited);
+	REQUIRE(status.Code == 0);
 }

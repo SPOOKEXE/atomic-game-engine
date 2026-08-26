@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Characters.hpp>
@@ -339,7 +340,6 @@ namespace engine::scene {
 
 		Humanoid steering;
 		steering.Height = CHARACTER_HEIGHT;
-		steering.Radius = 1.0f;
 
 		// **What makes the humanoid steer a part it is not on.** `Humanoid::
 		// RootPart` carries the argument; without it `StepCharacters` would look
@@ -609,6 +609,10 @@ namespace engine::scene {
 			store.Remove<PlayerRespawn>(player);
 
 			if (LoadCharacter(store, player) == ecs::NULL_ENTITY) {
+				// The deadline was already cleared, so this retries next tick
+				// and goes on doing so. A world with no `Workspace` never spawns
+				// anybody and says nothing about it.
+				ENGINE_WARN_EVERY(5.0, "cannot load a character for player entity {}; retrying", player.Id);
 				continue;
 			}
 			spawned.push_back(player);
@@ -738,9 +742,10 @@ namespace engine::scene {
 		// not replay - the same rule `UpdateRespawns` keeps about its deadline.
 		ecs::Entity own = ecs::NULL_ENTITY;
 		ecs::Entity neutral = ecs::NULL_ENTITY;
+		ecs::Entity forced = ecs::NULL_ENTITY;
 
 		store.EachDescendant(workspace, [&](ecs::Entity candidate) {
-			if (own != ecs::NULL_ENTITY || !IsSpawn(store, candidate)) {
+			if (forced != ecs::NULL_ENTITY || !IsSpawn(store, candidate)) {
 				return;
 			}
 
@@ -752,6 +757,22 @@ namespace engine::scene {
 			// this class would have had" rather than "not a spawn".
 			const SpawnLocation *pad = store.Get<SpawnLocation>(candidate);
 			if (pad != nullptr && !pad->Enabled) {
+				return;
+			}
+
+			// **Before team matching and before tree order.** A forced pad is
+			// the scene saying "here", and the rules below are the ones it is
+			// overriding - see `SpawnLocation::Forced`. Still after `Enabled`,
+			// which is checked above, so turning one off gives the ordinary
+			// rules back.
+			if (pad != nullptr && pad->Forced) {
+				forced = candidate;
+				return;
+			}
+
+			if (own != ecs::NULL_ENTITY) {
+				// A team pad is already settled; the walk continues only because
+				// a forced pad later in the tree still outranks it.
 				return;
 			}
 
@@ -769,15 +790,34 @@ namespace engine::scene {
 			}
 		});
 
-		const ecs::Entity spawn = own != ecs::NULL_ENTITY ? own : neutral;
+		const ecs::Entity spawn = forced != ecs::NULL_ENTITY ? forced
+								  : own != ecs::NULL_ENTITY	 ? own
+															 : neutral;
 		if (spawn == ecs::NULL_ENTITY) {
+			// **An identity `CFrame`, which is the world origin.** A character
+			// standing at (0,0,0) because no pad was found looks exactly like
+			// one that was deliberately spawned there.
+			// Rate-limited: a world with no pads at all spawns everybody here,
+			// and a respawn wave would otherwise be one line per player.
+			ENGINE_WARN_EVERY(5.0, "no enabled spawn found for a player; spawning at the world origin");
 			return {};
 		}
 
 		const Transform *placement = store.Get<Transform>(spawn);
 		if (placement == nullptr) {
+			ENGINE_WARN("the chosen spawn has no Transform; spawning at the world origin");
 			return {};
 		}
+
+		// Which of the three rules won is what answers "why did I spawn over
+		// there", and it is decided over the whole tree with nothing recorded.
+		ENGINE_DEBUG(
+			"spawn {} chosen by the {} rule",
+			spawn.Id,
+			forced != ecs::NULL_ENTITY ? "forced"
+			: own != ecs::NULL_ENTITY  ? "own-team"
+									   : "neutral"
+		);
 
 		// **The top face, so a character stands on the pad rather than in it.**
 		// A spawn with no `Bounds` is a bare point in space and is taken as it

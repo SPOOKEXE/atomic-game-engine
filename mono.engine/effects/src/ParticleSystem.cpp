@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <utility>
 
 namespace engine::effects {
 
@@ -92,21 +94,14 @@ namespace engine::effects {
 		// resizing a part resize its effect without touching the emitter.
 		// Everything one emitter's births need, copied off its row.
 		//
-		// **The spawn pass was serial because it read `ParticleEmitter`**, which
-		// is fifteen hundred bytes a row that a worker has no promise it may
-		// walk. That is a fact about the *column*, not about the work: what a
-		// birth actually needs is a shape, four ranges and a frame, and once
-		// those are copied out nothing in the loop touches the store at all.
+		// The spawn pass used to read `ParticleEmitter`, a fifteen-hundred-byte row,
+		// for every emitter. Refresh now samples its spawn-only values into a
+		// separate compact array, so this plan is filled without touching the ECS
+		// or widening the hot block streamed by ageing.
 		//
-		// So the pass is two now. A serial walk fills one of these per emitter
-		// that owes a particle - which is the only thing that walk does, and it
-		// costs 0.145 ms over five thousand emitters - and the births themselves
-		// dispatch over the plans.
-		//
-		// **It is also the hoist.** The emission normal, the spread in radians
-		// and the inherited velocity were resolved once per *particle* inside
-		// the helpers; they are resolved once per emitter here, because that is
-		// where they were always constant.
+		// The emission normal, spread in radians and inherited velocity are already
+		// resolved in that resident row because they change with authored or parent
+		// state, not with each birth.
 		//
 		// **Determinism is unaffected, and that is not luck.** Every draw is
 		// seeded from the emitter's own id and the block's own spawn counter -
@@ -145,14 +140,6 @@ namespace engine::effects {
 			// Per plan rather than one shared counter, which is the reason the
 			// block counters are per block.
 			uint32_t Dropped = 0;
-
-			// Where this plan's births start in `ParticleSystem::Births`.
-			//
-			// **Handed out by the serial walk that fills the plan**, so a worker
-			// writes its own disjoint run of a vector that was sized before the
-			// dispatch. The alternative is an append under a lock, once per
-			// birth, from every worker at once.
-			uint32_t BirthAt = 0;
 		};
 
 		Vector3 SpawnPoint(const SpawnPlan &plan, const Vector3 &half, uint32_t id, uint32_t index) {
@@ -337,30 +324,56 @@ namespace engine::effects {
 		// to one and not the other is a difference that only shows on the frame
 		// an emitter is first enabled.
 		// **Compared before it is written, and the comparison is the point.**
-		// Every one of these seven is a word the device reads, and this runs for
-		// every emitter every tick - so writing them unconditionally would make
-		// `EmitterBlock::Revision` advance every frame and the renderer re-upload
-		// a hundred thousand records that had not moved. Seven compares against
-		// ninety-six bytes staged is not a close call.
+		// Every one of these seven is a word the device reads. A steady emitter
+		// returns before resolving its texture; writing values unconditionally
+		// would make `EmitterBlock::Revision` advance every frame and the
+		// renderer re-upload a hundred thousand records that had not moved.
+		// Seven compares against ninety-six bytes staged is not a close call.
 		//
+		// @param authoredChanged Whether the emitter row changed since the last refresh.
+		// @param catalogueChanged Whether recorded texture facts may have changed.
 		// @return Whether anything the device reads actually changed.
-		bool ApplyPlayback(const ecs::Store &store, const ParticleEmitter &emitter, EmitterBlock &block) {
+		bool ApplyPlayback(
+			const ecs::Store &store,
+			const ParticleEmitter &emitter,
+			EmitterBlock &block,
+			bool authoredChanged = true,
+			bool catalogueChanged = true
+		) {
+			if (!authoredChanged && !catalogueChanged) {
+				return false;
+			}
 			const scene::FlipbookFacts facts = scene::FlipbookOf(store, emitter.Texture);
 			const float rate = ResolvedRate(emitter, facts);
 			const uint8_t frames = ResolvedFrames(emitter, facts);
 
-			if (block.Acceleration == emitter.Acceleration && block.Drag == emitter.Drag &&
-				block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
-				block.FlipbookPlayback == emitter.FlipbookPlayback && block.FlipbookRate == rate &&
-				block.Frames == frames) {
+			const bool authoredSame =
+				!authoredChanged ||
+				(block.Acceleration == emitter.Acceleration && block.Drag == emitter.Drag &&
+				 block.MaxSpeed == emitter.MaxSpeed && block.NoiseStrength == emitter.NoiseStrength &&
+				 block.NoiseFrequency == emitter.NoiseFrequency &&
+				 block.NoiseScrollSpeed == emitter.NoiseScrollSpeed &&
+				 block.RadialAcceleration == emitter.RadialAcceleration &&
+				 block.TangentialAcceleration == emitter.TangentialAcceleration &&
+				 block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
+				 block.FlipbookPlayback == emitter.FlipbookPlayback);
+			if (authoredSame && block.FlipbookRate == rate && block.Frames == frames) {
 				return false;
 			}
 
-			block.Acceleration = emitter.Acceleration;
-			block.Drag = emitter.Drag;
-			block.Locked = emitter.LockedToPart;
-			block.Flipbook = emitter.Flipbook;
-			block.FlipbookPlayback = emitter.FlipbookPlayback;
+			if (authoredChanged) {
+				block.Acceleration = emitter.Acceleration;
+				block.Drag = emitter.Drag;
+				block.MaxSpeed = emitter.MaxSpeed;
+				block.NoiseStrength = emitter.NoiseStrength;
+				block.NoiseFrequency = emitter.NoiseFrequency;
+				block.NoiseScrollSpeed = emitter.NoiseScrollSpeed;
+				block.RadialAcceleration = emitter.RadialAcceleration;
+				block.TangentialAcceleration = emitter.TangentialAcceleration;
+				block.Locked = emitter.LockedToPart;
+				block.Flipbook = emitter.Flipbook;
+				block.FlipbookPlayback = emitter.FlipbookPlayback;
+			}
 			block.FlipbookRate = rate;
 			block.Frames = frames;
 			return true;
@@ -505,22 +518,27 @@ namespace engine::effects {
 		}
 	}
 
-	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter) {
-		const ecs::Entity parent = store.ParentOf(emitter);
-		if (parent == ecs::NULL_ENTITY) {
+	namespace {
+		core::CFrame FrameOfParent(const ecs::Store &store, ecs::Entity parent) {
+			if (parent == ecs::NULL_ENTITY) {
+				return {};
+			}
+
+			// The attachment first, because an emitter on an attachment is the
+			// arrangement every authored effect uses - a rocket's exhaust hangs off a
+			// point on the rocket, not off the rocket's centre.
+			if (const scene::Attachment *point = store.Get<scene::Attachment>(parent)) {
+				return point->WorldFrame;
+			}
+			if (const scene::Transform *placement = store.Get<scene::Transform>(parent)) {
+				return placement->Frame;
+			}
 			return {};
 		}
+	}
 
-		// The attachment first, because an emitter on an attachment is the
-		// arrangement every authored effect uses - a rocket's exhaust hangs off a
-		// point on the rocket, not off the rocket's centre.
-		if (const scene::Attachment *point = store.Get<scene::Attachment>(parent)) {
-			return point->WorldFrame;
-		}
-		if (const scene::Transform *placement = store.Get<scene::Transform>(parent)) {
-			return placement->Frame;
-		}
-		return {};
+	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter) {
+		return FrameOfParent(store, store.ParentOf(emitter));
 	}
 
 	namespace {
@@ -560,11 +578,53 @@ namespace engine::effects {
 		return {0.0f, 0.0f, 0.0f};
 	}
 
+	namespace {
+		void RefreshSpawnParentState(const ecs::Store &store, ecs::Entity entity, EmitterSpawnState &state) {
+			state.Half = HalfExtentOf(store, entity);
+			state.Inherited = {};
+			if (state.VelocityInheritance != 0.0f) {
+				if (const scene::Motion *motion = ParentMotion(store, entity)) {
+					state.Inherited = motion->Linear * state.VelocityInheritance;
+				}
+			}
+		}
+
+		void RefreshSpawnState(
+			const ecs::Store &store,
+			ecs::Entity entity,
+			const ParticleEmitter &emitter,
+			EmitterSpawnState &state
+		) {
+			state.Emission = scene::NormalOf(emitter.EmissionDirection);
+
+			state.Speed = emitter.Speed;
+			state.Lifetime = emitter.Lifetime;
+			state.RotationSpeed = emitter.RotationSpeed;
+			state.Rotation = emitter.Rotation;
+			state.SpreadX = emitter.SpreadAngle.X * RADIANS_PER_DEGREE;
+			state.SpreadY = emitter.SpreadAngle.Y * RADIANS_PER_DEGREE;
+			state.ShapePartial = emitter.ShapePartial;
+			state.Shape = emitter.Shape;
+			state.ShapeStyle = emitter.ShapeStyle;
+			state.ShapeDirection = emitter.ShapeDirection;
+			state.VelocityInheritance = emitter.VelocityInheritance;
+			RefreshSpawnParentState(store, entity, state);
+		}
+
+		void RefreshRuntimeState(const ParticleEmitter &emitter, EmitterRuntime &runtime) {
+			runtime.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
+			runtime.Enabled = emitter.Enabled;
+			runtime.ContinuousRate =
+				emitter.Enabled ? std::max(emitter.Rate, 0.0f) * std::max(emitter.TimeScale, 0.0f) : 0.0f;
+		}
+	}
+
 	// --- installation and block management -----------------------------------
 
-	void InstallParticles(ecs::Store &store, uint32_t capacity) {
+	void InstallParticles(ecs::Store &store, uint32_t capacity, uint32_t maximumCapacity) {
 		ParticleSystem system;
 		system.Capacity = capacity;
+		system.MaximumCapacity = std::max(capacity, maximumCapacity);
 		system.Instances.resize(capacity);
 		system.States.resize(capacity);
 		store.SetResource(std::move(system));
@@ -579,9 +639,48 @@ namespace engine::effects {
 		// pass from 522 us to 74 us at a hundred thousand emitters. What it costs
 		// is a dirty-bit column on the emitter table, which is one bit a row.
 		store.Observe<ParticleEmitter>();
+		store.Observe<scene::Transform>();
+		store.Observe<scene::Attachment>();
+		store.Observe<scene::Bounds>();
+		store.Observe<scene::Motion>();
+		store.Observe<ecs::Hierarchy>();
 	}
 
 	namespace {
+		// Grows a pool at most logarithmically and never beyond its stated ceiling.
+		//
+		// Blocks retain numeric row ranges, not pointers into either host vector, so
+		// resizing preserves every existing allocation. Device-stepped worlds leave
+		// both vectors empty and publish the new capacity to the renderer instead.
+		bool GrowFor(ParticleSystem &system, uint32_t wanted) {
+			const uint64_t required = static_cast<uint64_t>(system.Used) + wanted;
+			if (required <= system.Capacity) {
+				return true;
+			}
+			if (required > system.MaximumCapacity) {
+				return false;
+			}
+
+			uint64_t grown = std::max<uint64_t>(system.Capacity, 1);
+			while (grown < required) {
+				grown = std::min<uint64_t>(grown * 2, system.MaximumCapacity);
+			}
+
+			const uint32_t previous = system.Capacity;
+			system.Capacity = static_cast<uint32_t>(grown);
+			if (!system.DeviceStepped) {
+				system.Instances.resize(system.Capacity);
+				system.States.resize(system.Capacity);
+			}
+			ENGINE_INFO(
+				"particle pool grew from {} to {} rows ({} maximum)",
+				previous,
+				system.Capacity,
+				system.MaximumCapacity
+			);
+			return true;
+		}
+
 		// Takes a range out of the pool, exact-fit from the free list or bumped.
 		//
 		// **Exact fit and not best fit, because a block is never resized.** A
@@ -599,7 +698,7 @@ namespace engine::effects {
 				}
 			}
 
-			if (system.Used + wanted > system.Capacity) {
+			if (!GrowFor(system, wanted)) {
 				return false;
 			}
 			first = system.Used;
@@ -612,14 +711,70 @@ namespace engine::effects {
 		// Rate times the longest life it can draw, rounded up, plus one - the
 		// plus one is what stops an emitter at exactly one particle a second with
 		// a one-second life from oscillating between zero and one slot.
-		uint32_t BlockSizeFor(const ParticleEmitter &emitter, uint32_t ceiling) {
-			const float wanted = std::max(emitter.Rate, 0.0f) * std::max(emitter.Lifetime.Maximum, 0.0f);
-			const auto slots = static_cast<uint32_t>(std::ceil(wanted)) + 1;
+		uint32_t BlockSizeFor(const ParticleEmitter &emitter, uint32_t requested, uint32_t ceiling) {
+			const float rate = std::max({emitter.Rate, emitter.RateOverDistance, 0.0f});
+			const float steady = rate * std::max(emitter.Lifetime.Maximum, 0.0f);
+			uint32_t slots = std::max(static_cast<uint32_t>(std::ceil(steady)) + 1, requested);
+			if (emitter.MaxParticles > 0) {
+				slots = std::min(slots, static_cast<uint32_t>(emitter.MaxParticles));
+			}
 			return std::clamp(slots, 1u, ceiling);
 		}
 	}
 
-	size_t RefreshEmitters(ecs::Store &store) {
+	bool EmitParticles(ecs::Store &store, ecs::Entity emitter, uint32_t count) {
+		if (store.Get<ParticleEmitter>(emitter) == nullptr) {
+			return false;
+		}
+		EmitterSlot *slot = store.GetMutable<EmitterSlot>(emitter);
+		if (slot == nullptr || count == 0) {
+			return slot != nullptr;
+		}
+
+		ParticleSystem *system = store.ResourceMutable<ParticleSystem>();
+		const uint32_t ceiling = system == nullptr ? 4096u : system->BlockCeiling;
+		uint32_t *pending = &slot->Requested;
+		if (system != nullptr && slot->Index < system->RuntimeStates.size()) {
+			pending = &system->RuntimeStates[slot->Index].Requested;
+		}
+		if (system != nullptr && system->DeviceStepped && slot->Index < system->Blocks.size()) {
+			// The device remembers which request total it has consumed. Keep this
+			// counter monotonic so a later Emit remains visible after the previous
+			// one was handled without reading anything back from the GPU.
+			*pending += std::min(count, ceiling);
+			system->Blocks[slot->Index].Revision++;
+			system->ResidentRevision++;
+		} else {
+			const uint64_t requested = static_cast<uint64_t>(*pending) + count;
+			*pending = static_cast<uint32_t>(std::min<uint64_t>(requested, ceiling));
+		}
+		if (system != nullptr) {
+			system->RefreshRequested = true;
+		}
+		return true;
+	}
+
+	bool ClearParticles(ecs::Store &store, ecs::Entity emitter) {
+		if (store.Get<ParticleEmitter>(emitter) == nullptr) {
+			return false;
+		}
+		EmitterSlot *slot = store.GetMutable<EmitterSlot>(emitter);
+		if (slot == nullptr) {
+			return false;
+		}
+		slot->Requested = 0;
+		if (ParticleSystem *system = store.ResourceMutable<ParticleSystem>(); system != nullptr) {
+			system->RefreshRequested = true;
+			if (slot->Index < system->RuntimeStates.size()) {
+				system->RuntimeStates[slot->Index].Requested = 0;
+			}
+		}
+		slot->ClearRequested = true;
+		return true;
+	}
+
+	size_t
+	RefreshEmitters(ecs::Store &store, EmitterActivationPredicate activation, uint64_t activationRevision) {
 		ENGINE_PROFILE_CAT("refresh emitters", core::ProfileCategory::Simulation);
 
 		auto *system = store.ResourceMutable<ParticleSystem>();
@@ -627,16 +782,210 @@ namespace engine::effects {
 			return 0;
 		}
 
+		const scene::TextureCatalogue *catalogue = store.Resource<scene::TextureCatalogue>();
+		const uint64_t textureRevision = catalogue == nullptr ? 0 : catalogue->Revision;
+		const bool catalogueChanged = system->TextureRevision != textureRevision;
+		system->TextureRevision = textureRevision;
+		const bool activationChanged = system->ActivationPolicyRevision != activationRevision;
+		system->ActivationPolicyRevision = activationRevision;
+
+		// Parent frames are stable far more often than emitters spawn. Gather the
+		// moved rows once, then leave every unchanged block's cached frame alone.
+		// A sorted id list stays cheap both for the ordinary empty case and for a
+		// world moving many parents at once.
+		static thread_local std::vector<uint64_t> movedParents;
+		movedParents.clear();
+		{
+			ENGINE_PROFILE_CAT("emitters.changed-parents", core::ProfileCategory::Simulation);
+			const uint64_t transformVersion = store.ComponentChangeVersion<scene::Transform>();
+			if (system->TransformChangeVersion != transformVersion) {
+				ENGINE_PROFILE_CAT("emitters.changed-transform", core::ProfileCategory::Simulation);
+				store.EachChanged<scene::Transform>([](ecs::Entity entity, scene::Transform &) {
+					movedParents.push_back(entity.Id);
+				});
+				system->TransformChangeVersion = transformVersion;
+			}
+
+			const uint64_t attachmentVersion = store.ComponentChangeVersion<scene::Attachment>();
+			if (system->AttachmentChangeVersion != attachmentVersion) {
+				ENGINE_PROFILE_CAT("emitters.changed-attachment", core::ProfileCategory::Simulation);
+				store.EachChanged<scene::Attachment>([](ecs::Entity entity, scene::Attachment &) {
+					movedParents.push_back(entity.Id);
+				});
+				system->AttachmentChangeVersion = attachmentVersion;
+			}
+
+			const uint64_t boundsVersion = store.ComponentChangeVersion<scene::Bounds>();
+			if (system->BoundsChangeVersion != boundsVersion) {
+				ENGINE_PROFILE_CAT("emitters.changed-bounds", core::ProfileCategory::Simulation);
+				store.EachChanged<scene::Bounds>([](ecs::Entity entity, scene::Bounds &) {
+					movedParents.push_back(entity.Id);
+				});
+				system->BoundsChangeVersion = boundsVersion;
+			}
+
+			const uint64_t motionVersion = store.ComponentChangeVersion<scene::Motion>();
+			if (system->MotionChangeVersion != motionVersion) {
+				ENGINE_PROFILE_CAT("emitters.changed-motion", core::ProfileCategory::Simulation);
+				store.EachChanged<scene::Motion>([](ecs::Entity entity, scene::Motion &) {
+					movedParents.push_back(entity.Id);
+				});
+				system->MotionChangeVersion = motionVersion;
+			}
+			std::sort(movedParents.begin(), movedParents.end());
+			movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
+		}
+
+		bool emitterHierarchyChanged = false;
+		{
+			ENGINE_PROFILE_CAT("emitters.changed-hierarchy", core::ProfileCategory::Simulation);
+			const uint64_t hierarchyVersion = store.ComponentChangeVersion<ecs::Hierarchy>();
+			if (system->HierarchyChangeVersion != hierarchyVersion) {
+				store.EachChanged<ecs::Hierarchy>([&](ecs::Entity entity, ecs::Hierarchy &) {
+					emitterHierarchyChanged =
+						emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
+				});
+				system->HierarchyChangeVersion = hierarchyVersion;
+			}
+		}
+
 		// **The block index lives on the emitter's own row**, as a component, so
 		// finding an emitter's block is a column read rather than a search. That
 		// is the same reason `ActiveCamera` names an entity rather than being
 		// searched for.
+		system->Statistics.EmitterClaimAttempts = 0;
+		bool layoutChanged = false;
+		bool residentChanged = false;
+		uint32_t newSlotRefusals = 0;
+		uint32_t newPoolRefusals = 0;
+		const bool retryRefused = std::exchange(system->RetryRefused, false);
+
+		// A generation stamp makes the claim walk itself mark survivors. Only the
+		// once-per-four-billion wrap needs to clear the retained stamps.
+		system->ClaimGeneration++;
+		if (system->ClaimGeneration == 0) {
+			for (EmitterBlock &block : system->Blocks) {
+				block.ClaimedAt = 0;
+			}
+			system->ClaimGeneration = 1;
+		}
+		const uint32_t claimGeneration = system->ClaimGeneration;
+
+		const auto releaseBlock = [&](EmitterSlot &slot) {
+			if (slot.Index == NO_SLOT || slot.Index >= system->Blocks.size()) {
+				slot.Index = NO_SLOT;
+				return;
+			}
+
+			const uint32_t index = slot.Index;
+			EmitterBlock &block = system->Blocks[index];
+			EmitterRuntime &runtime = system->RuntimeStates[index];
+			slot.Requested = system->DeviceStepped ? 0u : runtime.Requested;
+			if (block.Capacity > 0) {
+				system->Free.emplace_back(block.First, block.Capacity);
+				system->RetryRefused = true;
+				layoutChanged = true;
+				residentChanged = true;
+			}
+			block.Capacity = 0;
+			runtime.Live = 0;
+			runtime.Requested = 0;
+			runtime.DeviceRetiring = false;
+			std::erase(system->RetiringBlocks, index);
+			block.Owner = ecs::NULL_ENTITY;
+			block.ClaimedAt = 0;
+			system->FreeSlots.push_back(index);
+			slot.Index = NO_SLOT;
+			slot.ClearRequested = false;
+			slot.Refused = false;
+		};
+
+		// Pull authored data only for rows that changed. The steady claim pass
+		// below walks `EmitterSlot`, which is a small runtime row instead of the
+		// roughly 1.5 KiB authored component.
+		size_t changedEmitters = 0;
+		{
+			ENGINE_PROFILE_CAT("emitters.changed-authored", core::ProfileCategory::Simulation);
+			const uint64_t emitterVersion = store.ComponentChangeVersion<ParticleEmitter>();
+			if (system->EmitterChangeVersion != emitterVersion) {
+				store.EachChanged<ParticleEmitter>([&](ecs::Entity entity, ParticleEmitter &emitter) {
+					changedEmitters++;
+					EmitterSlot *slot = store.GetMutable<EmitterSlot>(entity);
+					if (slot == nullptr) {
+						return;
+					}
+
+					slot->Enabled = emitter.Enabled;
+					slot->Configured = true;
+					slot->Refused = false;
+					layoutChanged = true;
+
+					if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
+						return;
+					}
+
+					EmitterBlock &block = system->Blocks[slot->Index];
+					EmitterRuntime &runtime = system->RuntimeStates[slot->Index];
+					RefreshSpawnState(store, entity, emitter, system->SpawnStates[slot->Index]);
+					RefreshRuntimeState(emitter, runtime);
+					if (system->DeviceStepped && !runtime.Enabled && !runtime.DeviceRetiring) {
+						runtime.DeviceRetiring = true;
+						runtime.Idle = 0.0f;
+						runtime.Live = std::max(runtime.Live, 1u);
+						system->RetiringBlocks.push_back(slot->Index);
+					} else if (runtime.Enabled) {
+						runtime.DeviceRetiring = false;
+					}
+					// Spawn state and the rate now live in the resident parameter table.
+					// Every authored emitter write therefore invalidates that row even when
+					// its playback and force fields happened to stay equal.
+					block.Revision++;
+					residentChanged = true;
+					block.RateOverDistance = emitter.RateOverDistance;
+					if (block.ParticleLimit != emitter.MaxParticles) {
+						releaseBlock(*slot);
+						return;
+					}
+
+					SampleCurves(emitter, block.Curves);
+					block.CurveRevision++;
+					residentChanged = true;
+					if (ApplyPlayback(store, emitter, block, true, catalogueChanged)) {
+						block.Revision++;
+					}
+				});
+				system->EmitterChangeVersion = emitterVersion;
+			}
+		}
+
+		size_t emitterRows = 0;
+		{
+			ENGINE_PROFILE_CAT("emitters.count", core::ProfileCategory::Simulation);
+			emitterRows = store.CountMatching<EmitterSlot>();
+		}
+		const bool explicitlyRequested = std::exchange(system->RefreshRequested, false);
+		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() && !catalogueChanged &&
+			!activationChanged && !retryRefused && !explicitlyRequested &&
+			emitterRows == system->EmitterRows) {
+			return system->Statistics.Blocks;
+		}
 		system->Statistics.EmittersRefused = 0;
 
-		// Mark every block unclaimed, then let the walk claim them back. A block
-		// still unclaimed at the end belonged to an emitter that has died.
-		for (EmitterBlock &block : system->Blocks) {
-			block.Reserved = 0;
+		// A catalogue revision is rare and is the one steady-state event that
+		// needs the emitter's texture sequence without an authored row changing.
+		if (catalogueChanged) {
+			store.Each<const ParticleEmitter, EmitterSlot>(
+				[&](ecs::Entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
+					if (slot.Index >= system->Blocks.size()) {
+						return;
+					}
+					EmitterBlock &block = system->Blocks[slot.Index];
+					if (ApplyPlayback(store, emitter, block, false, true)) {
+						block.Revision++;
+						residentChanged = true;
+					}
+				}
+			);
 		}
 
 		// **Three spans, and the split is where the three costs actually are.**
@@ -648,136 +997,241 @@ namespace engine::effects {
 		{
 			ENGINE_PROFILE_CAT("emitters.claim", core::ProfileCategory::Simulation);
 
-			store.Each<const ParticleEmitter, EmitterSlot>(
-				[&](ecs::Entity entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
-					// An emitter that is off and has nothing left alive gives its
-					// block back. One that is off and still has particles keeps it,
-					// because disabling must not kill what is already in the air -
-					// `ParticleEmitter::Enabled` carries the argument.
-					const bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
-					if (holds) {
-						EmitterBlock &block = system->Blocks[slot.Index];
-						block.Reserved = 1;
+			store.Each<EmitterSlot>([&](ecs::Entity entity, EmitterSlot &slot) {
+				if (!slot.Configured) {
+					const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
+					if (emitter == nullptr) {
+						return;
+					}
+					slot.Enabled = emitter->Enabled;
+					slot.Configured = true;
+				}
 
-						if (!emitter.Enabled && block.Live == 0) {
-							system->Free.emplace_back(block.First, block.Capacity);
-							block.Capacity = 0;
-							block.Owner = ecs::NULL_ENTITY;
-							block.Reserved = 0;
-							slot.Index = NO_SLOT;
-							return;
-						}
+				const bool eligible = activation == nullptr || activation(store, entity);
+				const bool continuouslyEnabled = slot.Enabled && eligible;
 
-						// **Re-sampled only when the emitter was written, and this
-						// gate is the single largest thing in the module's frame
-						// cost.** Sampling four curves is sixty-four `Evaluate`
-						// calls, each a scan over a keypoint list; at a hundred
-						// thousand emitters that is 6.4 million evaluations a frame
-						// for tables that almost never change.
-						//
-						// Measured before and after, `bench` preset, 24 threads, at
-						// the roadmap's 100,000 emitters and 500,000 particles:
-						// **522 us unconditional against 192 us gated**, taking the
-						// whole frame from 738 us to 389 us. The refresh pass was 70
-						// per cent of the frame and is now half of it - the remaining
-						// 192 us is the archetype walk itself and the scalar copies,
-						// which is what a walk over a hundred thousand rows costs.
-						//
-						// `ecs::ChangeChannel` is the mechanism and `Observe` in
-						// `InstallParticles` is what turns it on. What it costs is
-						// **one frame of latency on a curve edit** - a script writing
-						// `emitter.Size` during `Simulation` is seen by the next
-						// frame's refresh, because `ClearChanges` runs at the phase
-						// boundary between them. That is invisible for an authored
-						// property and would matter for a curve driven per frame,
-						// which is a thing to drive through `Brightness` instead.
-						if (store.Changed<ParticleEmitter>(entity)) {
-							SampleCurves(emitter, block.Curves);
-							block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
-							block.CurveRevision++;
+				// An emitter that is off and has nothing left alive gives its
+				// block back. One that is off and still has particles keeps it,
+				// because disabling must not kill what is already in the air -
+				// `ParticleEmitter::Enabled` carries the argument.
+				bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
+				if (!holds && slot.ClearRequested) {
+					slot.ClearRequested = false;
+				}
+				if (holds) {
+					system->Blocks[slot.Index].ClaimedAt = claimGeneration;
+				}
+				if (holds) {
+					EmitterBlock &block = system->Blocks[slot.Index];
+					EmitterRuntime &runtime = system->RuntimeStates[slot.Index];
+					if (runtime.Enabled != continuouslyEnabled) {
+						if (continuouslyEnabled) {
+							const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
+							if (emitter != nullptr) {
+								RefreshRuntimeState(*emitter, runtime);
+							}
+						} else {
+							runtime.Enabled = false;
+							runtime.ContinuousRate = 0.0f;
 						}
-						if (ApplyPlayback(store, emitter, block)) {
-							block.Revision++;
+						block.Revision++;
+						residentChanged = true;
+						if (system->DeviceStepped && !continuouslyEnabled && !runtime.DeviceRetiring) {
+							runtime.DeviceRetiring = true;
+							runtime.Idle = 0.0f;
+							runtime.Live = std::max(runtime.Live, 1u);
+							system->RetiringBlocks.push_back(slot.Index);
+						} else if (continuouslyEnabled) {
+							runtime.DeviceRetiring = false;
+							std::erase(system->RetiringBlocks, slot.Index);
 						}
+					}
 
-						// Where the emitter is now. An emitter on an `Attachment`
-						// takes the attachment's resolved world frame; one on a part
-						// takes the part's. Neither is a walk - both are one column
-						// read on the parent, and `ResolveAttachments` has already run.
-						const core::CFrame frame = EmitterFrame(store, entity);
+					if (slot.ClearRequested) {
+						block.Generation++;
+						block.Revision++;
+						residentChanged = true;
+						runtime.Live = 0;
+						runtime.Spawned = 0;
+						runtime.Pending = 0.0f;
+						runtime.Idle = 0.0f;
+						runtime.RatePhasePending = true;
+						slot.ClearRequested = false;
+					}
+
+					if (!continuouslyEnabled && (system->DeviceStepped || runtime.Requested == 0) &&
+						runtime.Live == 0) {
+						releaseBlock(slot);
+						return;
+					}
+
+					// Resolve parent-derived state only when the relationship changed
+					// or an observed transform, attachment, bounds or motion row moved. The
+					// steady path is one retained-entity comparison and a binary
+					// search rather than two sparse-column lookups per emitter.
+					const ecs::Entity parent = store.ParentOf(entity);
+					const bool parentChanged = system->FrameParents[slot.Index] != parent;
+					const bool parentMoved =
+						std::binary_search(movedParents.begin(), movedParents.end(), parent.Id);
+					if (parentChanged || parentMoved) {
+						const core::CFrame frame = FrameOfParent(store, parent);
 						if (!SameFrame(frame, block.Frame)) {
+							if (continuouslyEnabled && block.RateOverDistance > 0.0f) {
+								const float distanceDebt =
+									(frame.Position - block.Frame.Position).Magnitude() *
+									block.RateOverDistance;
+								runtime.Pending += distanceDebt;
+								if (system->DeviceStepped) {
+									const uint32_t owed = static_cast<uint32_t>(runtime.Pending);
+									runtime.Pending -= static_cast<float>(owed);
+									runtime.Requested += owed;
+								}
+							}
 							block.Frame = frame;
 							block.Revision++;
+							residentChanged = true;
 						}
-						return;
+						RefreshSpawnParentState(store, entity, system->SpawnStates[slot.Index]);
+						block.Revision++;
+						residentChanged = true;
+						system->FrameParents[slot.Index] = parent;
 					}
-
-					if (!emitter.Enabled) {
-						return;
-					}
-
-					uint32_t first = 0;
-					const uint32_t wanted = BlockSizeFor(emitter, system->BlockCeiling);
-					// **The ceiling is on rows in use, not rows ever made** - which
-					// is what `MAX_EMITTER_SLOTS` has always claimed to be. A free
-					// row costs nothing to take, so it is only a fresh one that has
-					// to fit under the cap.
-					const bool recycling = !system->FreeSlots.empty();
-					if ((!recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS) ||
-						!Take(*system, wanted, first)) {
-						system->Statistics.EmittersRefused++;
-						return;
-					}
-
-					EmitterBlock block;
-					block.First = first;
-					block.Capacity = wanted;
-					block.Owner = entity;
-					block.Reserved = 1;
-					block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
-
-					// **A fresh block owes one particle immediately.**
-					//
-					// The accumulator adds `Rate * delta` per frame, so an emitter at
-					// a low rate produces nothing for `1 / Rate` seconds after it is
-					// enabled - a fifth of a particle a second waits five seconds, and
-					// what an author sees is an effect that does not work. They turn
-					// the rate up, get a crowd, and never find out the first one was
-					// merely late.
-					//
-					// Starting the accumulator owing one makes "enable it and it
-					// starts" true at every rate. It is not free particles: the debt
-					// is subtracted like any other, so the *steady* rate is unchanged
-					// and only the first particle moves.
-					block.Pending = 1.0f;
-					SampleCurves(emitter, block.Curves);
-					ApplyPlayback(store, emitter, block);
-					block.Frame = EmitterFrame(store, entity);
-
-					// **The generation is carried over and advanced, not reset**,
-					// which is the whole point of it: whatever the last tenant of
-					// these rows left behind is stamped with the number this one
-					// is leaving behind, so the step reads it as death. Starting
-					// again at one would make a block agree with its predecessor.
-					if (recycling) {
-						const uint32_t reused = system->FreeSlots.back();
-						system->FreeSlots.pop_back();
-						const EmitterBlock &previous = system->Blocks[reused];
-						block.Generation = previous.Generation + 1;
-
-						// Carried over for `Generation`'s reason and one more: the
-						// renderer's copy of what it uploaded is indexed by block,
-						// so a recycled row that started its count again would
-						// agree with a record describing the emitter that has gone.
-						block.Revision = previous.Revision + 1;
-						block.CurveRevision = previous.CurveRevision + 1;
-						slot.Index = static_cast<uint16_t>(reused);
-						system->Blocks[reused] = block;
-					} else {
-						slot.Index = static_cast<uint16_t>(system->Blocks.size());
-						system->Blocks.push_back(block);
-					}
+					return;
 				}
+
+				if (!eligible || (!slot.Enabled && slot.Requested == 0)) {
+					return;
+				}
+				if (slot.Refused && !retryRefused) {
+					system->Statistics.EmittersRefused++;
+					return;
+				}
+				slot.Refused = false;
+
+				const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
+				if (emitter == nullptr) {
+					return;
+				}
+
+				uint32_t first = 0;
+				const uint32_t wanted = BlockSizeFor(*emitter, slot.Requested, system->BlockCeiling);
+				// **The ceiling is on rows in use, not rows ever made** - which
+				// is what `MAX_EMITTER_SLOTS` has always claimed to be. A free
+				// row costs nothing to take, so it is only a fresh one that has
+				// to fit under the cap.
+				const bool recycling = !system->FreeSlots.empty();
+				const bool noSlot = !recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS;
+				system->Statistics.EmitterClaimAttempts++;
+				if (noSlot || !Take(*system, wanted, first)) {
+					// **Two causes on one counter, and they need different
+					// fixes.** Out of emitter rows is a scene with too many
+					// effects; out of pool is a scene whose effects each want
+					// too many particles. Either way the effect never
+					// appears and nothing else says so.
+					if (noSlot) {
+						newSlotRefusals++;
+					} else {
+						newPoolRefusals++;
+					}
+					system->Statistics.EmittersRefused++;
+					slot.Refused = true;
+					return;
+				}
+
+				EmitterBlock block;
+				block.First = first;
+				block.Capacity = wanted;
+				block.Owner = entity;
+				block.ClaimedAt = claimGeneration;
+				block.ParticleLimit = emitter->MaxParticles;
+				block.RateOverDistance = emitter->RateOverDistance;
+
+				EmitterRuntime runtime;
+				runtime.Requested = std::exchange(slot.Requested, 0u);
+				RefreshRuntimeState(*emitter, runtime);
+				runtime.Enabled = emitter->Enabled && eligible;
+				if (!runtime.Enabled) {
+					runtime.ContinuousRate = 0.0f;
+				}
+				if (system->DeviceStepped) {
+					runtime.Live = 1;
+				}
+
+				// **A fresh block owes one particle immediately.**
+				//
+				// The accumulator adds `Rate * delta` per frame, so an emitter at
+				// a low rate produces nothing for `1 / Rate` seconds after it is
+				// enabled - a fifth of a particle a second waits five seconds, and
+				// what an author sees is an effect that does not work. They turn
+				// the rate up, get a crowd, and never find out the first one was
+				// merely late.
+				//
+				// Starting the accumulator owing one makes "enable it and it
+				// starts" true at every rate. It is not free particles: the debt
+				// is subtracted like any other, so the *steady* rate is unchanged
+				// and only the first particle moves.
+				runtime.Pending = runtime.Enabled && emitter->Rate > 0.0f ? 1.0f : 0.0f;
+				SampleCurves(*emitter, block.Curves);
+				ApplyPlayback(store, *emitter, block);
+				const ecs::Entity parent = store.ParentOf(entity);
+				block.Frame = FrameOfParent(store, parent);
+				EmitterSpawnState spawnState;
+				RefreshSpawnState(store, entity, *emitter, spawnState);
+
+				// **The generation is carried over and advanced, not reset**,
+				// which is the whole point of it: whatever the last tenant of
+				// these rows left behind is stamped with the number this one
+				// is leaving behind, so the step reads it as death. Starting
+				// again at one would make a block agree with its predecessor.
+				if (recycling) {
+					const uint32_t reused = system->FreeSlots.back();
+					system->FreeSlots.pop_back();
+					const EmitterBlock &previous = system->Blocks[reused];
+					block.Generation = previous.Generation + 1;
+
+					// Carried over for `Generation`'s reason and one more: the
+					// renderer's copy of what it uploaded is indexed by block,
+					// so a recycled row that started its count again would
+					// agree with a record describing the emitter that has gone.
+					block.Revision = previous.Revision + 1;
+					block.CurveRevision = previous.CurveRevision + 1;
+					slot.Index = reused;
+					system->Blocks[reused] = block;
+					system->SpawnStates[reused] = spawnState;
+					system->RuntimeStates[reused] = runtime;
+					system->FrameParents[reused] = parent;
+				} else {
+					slot.Index = static_cast<uint32_t>(system->Blocks.size());
+					system->Blocks.push_back(block);
+					system->SpawnStates.push_back(spawnState);
+					system->RuntimeStates.push_back(runtime);
+					system->FrameParents.push_back(parent);
+				}
+				if (system->DeviceStepped && !runtime.Enabled) {
+					system->RuntimeStates[slot.Index].DeviceRetiring = true;
+					system->RetiringBlocks.push_back(slot.Index);
+				}
+				slot.Refused = false;
+				layoutChanged = true;
+				residentChanged = true;
+			});
+		}
+		if (newSlotRefusals + newPoolRefusals > 0) {
+			// One diagnostic per refresh, not one formatting and rate-limit lookup
+			// per refused row. A pathological scene can encounter the cap hundreds
+			// of thousands of times in one tick, while the useful fact is the two
+			// causes and the pool state after that claim pass.
+			ENGINE_WARN_EVERY(
+				5.0,
+				"{} emitter(s) refused: {} without an emitter slot, {} without pool room "
+				"({} of {} slots, {} of {} particle rows used)",
+				newSlotRefusals + newPoolRefusals,
+				newSlotRefusals,
+				newPoolRefusals,
+				system->Blocks.size(),
+				MAX_EMITTER_SLOTS,
+				system->Used,
+				system->Capacity
 			);
 		}
 
@@ -789,10 +1243,14 @@ namespace engine::effects {
 		size_t live = 0;
 		for (size_t index = 0; index < system->Blocks.size(); index++) {
 			EmitterBlock &block = system->Blocks[index];
-			if (block.Reserved == 0 && block.Capacity > 0) {
+			EmitterRuntime &runtime = system->RuntimeStates[index];
+			if (block.ClaimedAt != claimGeneration && block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
+				system->RetryRefused = true;
 				block.Capacity = 0;
-				block.Live = 0;
+				runtime.Live = 0;
+				runtime.DeviceRetiring = false;
+				std::erase(system->RetiringBlocks, static_cast<uint32_t>(index));
 				block.Owner = ecs::NULL_ENTITY;
 
 				// **And the row itself, which used to be abandoned.** See
@@ -800,6 +1258,8 @@ namespace engine::effects {
 				// row did not, so the walk above and the memory under it grew
 				// with every effect the game had ever played.
 				system->FreeSlots.push_back(static_cast<uint32_t>(index));
+				layoutChanged = true;
+				residentChanged = true;
 			}
 			if (block.Capacity > 0) {
 				live++;
@@ -807,6 +1267,13 @@ namespace engine::effects {
 		}
 
 		system->Statistics.Blocks = static_cast<uint32_t>(live);
+		system->EmitterRows = emitterRows;
+		if (layoutChanged) {
+			system->LayoutRevision++;
+		}
+		if (residentChanged) {
+			system->ResidentRevision++;
+		}
 		return live;
 	}
 
@@ -851,6 +1318,37 @@ namespace engine::effects {
 		// often carries none.
 		constexpr size_t SPAWN_GRAIN = 8;
 		constexpr size_t SPAWN_MINIMUM = 64;
+
+		Vector3 ProceduralForce(const EmitterBlock &block, const ParticleState &state) {
+			Vector3 force;
+			const Vector3 radial = (state.Position - block.Frame.Position).Unit();
+			if (block.RadialAcceleration != 0.0f) {
+				force = force + radial * block.RadialAcceleration;
+			}
+			if (block.TangentialAcceleration != 0.0f) {
+				const Vector3 up = block.Frame.VectorToWorldSpace(Vector3::YAxis);
+				force = force + up.Cross(radial).Unit() * block.TangentialAcceleration;
+			}
+
+			if (block.NoiseStrength != 0.0f) {
+				const Vector3 point = state.Position * block.NoiseFrequency;
+				const float phase = state.Age * block.NoiseScrollSpeed;
+				force = force + Vector3{
+									std::sin(point.Y * 1.7f + point.Z * 2.3f + phase),
+									std::sin(point.Z * 1.3f + point.X * 2.1f + phase * 1.11f),
+									std::sin(point.X * 1.9f + point.Y * 1.5f + phase * 1.23f),
+								} * block.NoiseStrength;
+			}
+			return force;
+		}
+
+		Vector3 LimitedVelocity(const Vector3 &velocity, float maximum) {
+			if (maximum <= 0.0f || velocity.MagnitudeSquared() <= maximum * maximum) {
+				return velocity;
+			}
+			return velocity.Unit() * maximum;
+		}
+
 	}
 
 	ParticleStatistics StepParticles(ecs::Store &store, float delta) {
@@ -860,6 +1358,7 @@ namespace engine::effects {
 		if (system == nullptr) {
 			return {};
 		}
+		system->PresentationRevision++;
 
 		// **Released on the first device-stepped tick.** The device owns the pool
 		// and neither array is read on this side again: at the client's default
@@ -873,6 +1372,47 @@ namespace engine::effects {
 			system->States.shrink_to_fit();
 		}
 
+		if (system->DeviceStepped) {
+			ENGINE_PROFILE_CAT("particles.device-handoff", core::ProfileCategory::Simulation);
+
+			// Simulation and emission are both resident. The host only maintains
+			// deadlines for emitters that were disabled, so the steady path is
+			// independent of emitter and particle counts.
+			for (size_t at = system->RetiringBlocks.size(); at > 0; at--) {
+				const uint32_t index = system->RetiringBlocks[at - 1];
+				if (index >= system->RuntimeStates.size()) {
+					system->RetiringBlocks.erase(
+						system->RetiringBlocks.begin() + static_cast<std::ptrdiff_t>(at - 1)
+					);
+					continue;
+				}
+				EmitterRuntime &runtime = system->RuntimeStates[index];
+				if (!runtime.DeviceRetiring || runtime.Enabled) {
+					system->RetiringBlocks.erase(
+						system->RetiringBlocks.begin() + static_cast<std::ptrdiff_t>(at - 1)
+					);
+					continue;
+				}
+				runtime.Idle += delta;
+				if (runtime.Idle <= runtime.Longest) {
+					continue;
+				}
+				runtime.Live = 0;
+				runtime.DeviceRetiring = false;
+				system->RefreshRequested = true;
+				system->RetiringBlocks.erase(
+					system->RetiringBlocks.begin() + static_cast<std::ptrdiff_t>(at - 1)
+				);
+			}
+
+			system->Statistics.Emitted = 0;
+			system->Statistics.SpawnsDropped = 0;
+			core::Metrics::SetGauge(
+				"effects.emitters.blocks", static_cast<double>(system->Statistics.Blocks)
+			);
+			return system->Statistics;
+		}
+
 		ParticleInstance *const instances = system->Instances.data();
 		ParticleState *const states = system->States.data();
 		const uint32_t capacity = system->Capacity;
@@ -882,32 +1422,31 @@ namespace engine::effects {
 		// incremented half a million times a frame is a cache line every worker
 		// fights over, and the sum is the same number either way.
 		std::vector<EmitterBlock> &blocks = system->Blocks;
+		std::vector<EmitterRuntime> &runtimes = system->RuntimeStates;
 
 		// **Two spans, because the two halves answer to different things.**
 		// Ageing is proportional to particles *alive* and is parallel over
-		// blocks; spawning is proportional to particles *born* and is serial
-		// because it reads `ParticleEmitter`. One bar over both could only say
+		// blocks; spawning is proportional to particles *born*. One bar over both could only say
 		// the tick was expensive, and the first question anybody asks of this
 		// module is which of those two grew.
 		//
-		// **The ageing half does not run at all when the device owns the pool**,
-		// which is what `ParticleSystem::DeviceStepped` is for. The spawning half
-		// always runs: a birth reads `ParticleEmitter` and the entity tree, and
-		// neither of those is going to the device.
+		// This complete host path does not run when the device owns the pool, which
+		// is what `ParticleSystem::DeviceStepped` is for.
 		if (!system->DeviceStepped) {
 			ENGINE_PROFILE_CAT("particles.age", core::ProfileCategory::Simulation);
 
 			parallel::Jobs::For(
 				blocks.size(),
 				BLOCK_GRAIN,
-				[&blocks, instances, states, capacity, delta](size_t begin, size_t end) {
+				[&blocks, &runtimes, instances, states, capacity, delta](size_t begin, size_t end) {
 					for (size_t index = begin; index < end; index++) {
 						EmitterBlock &block = blocks[index];
+						EmitterRuntime &runtime = runtimes[index];
 						if (block.Capacity == 0 || block.First + block.Capacity > capacity) {
 							continue;
 						}
 
-						const auto slot = static_cast<uint16_t>(index);
+						const auto slot = static_cast<uint32_t>(index);
 						const float scaled = delta;
 
 						// **The block's own terms, resolved once rather than per
@@ -935,7 +1474,7 @@ namespace engine::effects {
 						// has yet to visit. Forwards with a swap is the classic way to
 						// skip a particle: the one swapped in takes the index the loop
 						// has already passed.
-						uint32_t live = block.Live;
+						uint32_t live = runtime.Live;
 						for (uint32_t at = live; at-- > 0;) {
 							const uint32_t row = block.First + at;
 							ParticleState &state = states[row];
@@ -958,7 +1497,8 @@ namespace engine::effects {
 							// step happens: a frame after a stall is a tenth of a
 							// second.
 							state.Velocity = state.Velocity * damping;
-							state.Velocity = state.Velocity + push;
+							state.Velocity = state.Velocity + (push + ProceduralForce(block, state) * scaled);
+							state.Velocity = LimitedVelocity(state.Velocity, block.MaxSpeed);
 
 							ParticleInstance &instance = instances[row];
 							if (block.Locked) {
@@ -1014,157 +1554,102 @@ namespace engine::effects {
 							instance.Slot = slot;
 						}
 
-						block.Live = live;
+						runtime.Live = live;
 					}
 				},
 				BLOCK_MINIMUM
 			);
 		}
 
-		// Spawning is a second pass and a serial one.
+		// Spawning is a second pass. Rate planning is a compact serial walk and
+		// births dispatch in parallel over the plans that owe work.
 		//
-		// **Serial because it reads `ParticleEmitter`**, which is fifteen hundred
-		// bytes a row and is not in the block. Making it parallel would mean
-		// either duplicating the spawn parameters into every block - which is the
-		// kilobyte this module exists to keep out of the per-frame path - or
-		// walking the emitter column from inside a worker, which `Store::Each`
-		// does not promise is safe.
-		//
-		// **And it is the right half to leave serial**, because it is proportional
+		// It is proportional
 		// to particles *born* rather than particles alive. A steady scene at half
 		// a million particles with a five-second average life spawns a hundred
 		// thousand a second, which is under two thousand a frame.
 		ParticleStatistics counted;
 		counted.Blocks = system->Statistics.Blocks;
 		counted.EmittersRefused = system->Statistics.EmittersRefused;
+		counted.EmitterClaimAttempts = system->Statistics.EmitterClaimAttempts;
 
-		// **Two phases, because what made this serial was the column and not the
-		// work.** Reading `ParticleEmitter` from a worker is what `Store::Each`
-		// makes no promise about; the births themselves touch nothing but their
-		// own block's slice of the pool. So the walk copies what a birth needs
-		// off each row that owes one - see `SpawnPlan` - and the births
-		// dispatch.
-		//
-		// Measured with every rate at zero, the walk alone is 0.145 ms over five
-		// thousand emitters, so phase one is not what this pass costs.
+		// Two phases: the first walks compact resident spawn rows and the second
+		// dispatches births over disjoint block slices. Authored emitter data is
+		// copied into `SpawnStates` only when it changes, so a steady device tick
+		// no longer streams roughly 7.5 MiB of ECS rows merely to advance rates.
 		static thread_local std::vector<SpawnPlan> plans;
 		plans.clear();
 
 		{
 			ENGINE_PROFILE_CAT("particles.plan", core::ProfileCategory::Simulation);
 
-			// **An archetype walk, and two attempts to make it something else
-			// were both slower.** The obvious complaint about this loop is that
-			// it opens a fifteen-hundred-byte row for every emitter to decide
-			// whether that emitter owes a particle, when at a steady rate two
-			// thirds of them do not. Both ways of avoiding that cost more than
-			// it does. Measured on `StressParticles.luau` - 5,120 emitters,
-			// 512,000 particles, `dev`, milliseconds a tick:
-			//
-			//                            ecs.systems  claim   plan   age  frame
-			//   this                        6.98      4.45   0.89  1.35  11.89
-			//   blocks, row on demand       7.32      4.45   1.19  1.39  12.40
-			//   blocks, whole plan cached   9.19      6.82   0.10  2.03  15.06
-			//
-			// The second walks `Blocks` for the accumulator and opens the row
-			// only for an emitter that owes: about seventeen hundred scattered
-			// component lookups, which cost more than five thousand sequential
-			// ones.
-			//
-			// The third carries everything a birth needs on the block, so this
-			// walk touches no column at all - and it *is* nine times faster, and
-			// it is the worst of the three. `EmitterBlock` grows by about
-			// seventy-five bytes, and `particles.age` streams every block every
-			// tick, so the saving is paid twice over: once in the age pass and
-			// again in `emitters.claim`, which then resolves a half-extent and
-			// fifteen fields for every emitter rather than for the third that
-			// need them.
-			//
-			// **The block is not free storage.** It is the hot array of the pass
-			// that dominates this module, and the emitter column is walked
-			// sequentially exactly once. Leave it alone unless a measurement
-			// says otherwise; these three are the ones already taken.
-			uint32_t births = 0;
-			store.Each<const ParticleEmitter, const EmitterSlot>(
-				[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
-					if (slot.Index == NO_SLOT || slot.Index >= blocks.size()) {
-						return;
-					}
-					EmitterBlock &block = blocks[slot.Index];
-					if (block.Capacity == 0) {
-						return;
-					}
-
-					// **Advanced before the enabled test, and that is the point of
-					// it.** A disabled emitter is exactly the one whose block has
-					// to be seen emptying: nothing more is born, and once the
-					// longest lifetime has passed nothing born before can still be
-					// alive. Without this a block the device owns would hold its
-					// rows and go on drawing its capacity in quads with no extent
-					// for as long as the emitter existed.
-					block.Idle += delta;
-					if (system->DeviceStepped && block.Idle > block.Longest) {
-						block.Live = 0;
-						block.Spawned = 0;
-					}
-
-					if (!emitter.Enabled) {
-						return;
-					}
-
-					// **The accumulator stays here**, on the thread that owns the
-					// world. It is the emitter's own debt and it has to advance
-					// on every tick whether or not it comes due, so it is not
-					// part of what dispatches.
-					block.Pending += emitter.Rate * delta * std::max(emitter.TimeScale, 0.0f);
-					const auto owed = static_cast<uint32_t>(block.Pending);
-					if (owed == 0) {
-						return;
-					}
-					block.Pending -= static_cast<float>(owed);
-
-					SpawnPlan plan;
-					plan.Block = slot.Index;
-					plan.Id = entity.Id;
-					plan.Owed = owed;
-					plan.Half = HalfExtentOf(store, entity);
-
-					plan.Shape = emitter.Shape;
-					plan.ShapeStyle = emitter.ShapeStyle;
-					plan.ShapeDirection = emitter.ShapeDirection;
-					plan.ShapePartial = emitter.ShapePartial;
-
-					plan.Emission = scene::NormalOf(emitter.EmissionDirection);
-					plan.SpreadX = emitter.SpreadAngle.X * RADIANS_PER_DEGREE;
-					plan.SpreadY = emitter.SpreadAngle.Y * RADIANS_PER_DEGREE;
-
-					plan.Speed = emitter.Speed;
-					plan.Lifetime = emitter.Lifetime;
-					plan.RotationSpeed = emitter.RotationSpeed;
-					plan.Rotation = emitter.Rotation;
-
-					// The one store lookup a birth used to make, made once here
-					// - and it is the reason a worker could not do this at all.
-					if (emitter.VelocityInheritance != 0.0f) {
-						if (const scene::Motion *motion = ParentMotion(store, entity)) {
-							plan.Inherited = motion->Linear * emitter.VelocityInheritance;
-						}
-					}
-
-					block.Idle = 0.0f;
-					plan.BirthAt = births;
-					births += owed;
-
-					plans.push_back(plan);
+			const size_t spawnRows = std::min({blocks.size(), runtimes.size(), system->SpawnStates.size()});
+			for (size_t index = 0; index < spawnRows; index++) {
+				EmitterBlock &block = blocks[index];
+				EmitterRuntime &runtime = runtimes[index];
+				if (block.Capacity == 0) {
+					continue;
 				}
-			);
 
-			// Sized once, after the walk that decided how many there are. The
-			// rows themselves are written by the workers below, each into its
-			// own run.
-			system->Births.clear();
-			if (system->DeviceStepped) {
-				system->Births.resize(births);
+				// **Advanced before the enabled test, and that is the point of
+				// it.** A disabled emitter is exactly the one whose block has
+				// to be seen emptying: nothing more is born, and once the
+				// longest lifetime has passed nothing born before can still be
+				// alive. Without this a block the device owns would hold its
+				// rows and go on drawing its capacity in quads with no extent
+				// for as long as the emitter existed.
+				runtime.Idle += delta;
+				if (system->DeviceStepped && runtime.Idle > runtime.Longest) {
+					runtime.Live = 0;
+					runtime.Spawned = 0;
+				}
+				if (!runtime.Enabled && runtime.Live == 0) {
+					system->RefreshRequested = true;
+				}
+
+				// **The accumulator stays here**, on the thread that owns the
+				// world. It is the emitter's own debt and it has to advance
+				// on every tick whether or not it comes due, so it is not
+				// part of what dispatches.
+				runtime.Pending += runtime.ContinuousRate * delta;
+				const auto accumulated = static_cast<uint32_t>(runtime.Pending);
+				const uint32_t owed = accumulated + runtime.Requested;
+				if (owed == 0) {
+					continue;
+				}
+				runtime.Pending -= static_cast<float>(accumulated);
+				if (runtime.RatePhasePending && accumulated > 0) {
+					runtime.Pending = Unit(SeedOf(static_cast<uint32_t>(block.Owner.Id), 0, 14));
+					runtime.RatePhasePending = false;
+				}
+				runtime.Requested = 0;
+
+				const EmitterSpawnState &emitter = system->SpawnStates[index];
+
+				SpawnPlan plan;
+				plan.Block = static_cast<uint32_t>(index);
+				plan.Id = block.Owner.Id;
+				plan.Owed = owed;
+				plan.Half = emitter.Half;
+
+				plan.Shape = emitter.Shape;
+				plan.ShapeStyle = emitter.ShapeStyle;
+				plan.ShapeDirection = emitter.ShapeDirection;
+				plan.ShapePartial = emitter.ShapePartial;
+
+				plan.Emission = emitter.Emission;
+				plan.SpreadX = emitter.SpreadX;
+				plan.SpreadY = emitter.SpreadY;
+
+				plan.Speed = emitter.Speed;
+				plan.Lifetime = emitter.Lifetime;
+				plan.RotationSpeed = emitter.RotationSpeed;
+				plan.Rotation = emitter.Rotation;
+
+				plan.Inherited = emitter.Inherited;
+
+				runtime.Idle = 0.0f;
+				plans.push_back(plan);
 			}
 		}
 
@@ -1180,16 +1665,14 @@ namespace engine::effects {
 
 			// The same reasoning as `planned`: resolved on the thread that owns
 			// them, not named from inside a worker.
-			const bool ring = system->DeviceStepped;
-			ParticleBirth *const births = system->Births.empty() ? nullptr : system->Births.data();
-
 			parallel::Jobs::For(
 				plans.size(),
 				SPAWN_GRAIN,
-				[instances, states, &blocks, planned, ring, births](size_t begin, size_t end) {
+				[instances, states, &blocks, &runtimes, planned](size_t begin, size_t end) {
 					for (size_t at = begin; at < end; at++) {
 						SpawnPlan &plan = planned[at];
 						EmitterBlock &block = blocks[plan.Block];
+						EmitterRuntime &runtime = runtimes[plan.Block];
 
 						const uint32_t id = plan.Id;
 						const Vector3 &half = plan.Half;
@@ -1200,44 +1683,21 @@ namespace engine::effects {
 						const uint32_t bornSize =
 							PackParticleSize(block.Curves.Size[0], block.Curves.Size[0]);
 						const uint32_t bornColour = WithAlpha(block.Curves.Colour[0], block.Curves.Alpha[0]);
-						const auto bornSlot = static_cast<uint16_t>(plan.Block);
+						const uint32_t bornSlot = plan.Block;
 
 						for (uint32_t spawn = 0; spawn < plan.Owed; spawn++) {
-							// **A ring when the device owns the pool, a prefix
-							// when the host does**, and the difference is which
-							// side knows about death. The host-side pass ages
-							// the particles, so it knows the moment one dies and
-							// keeps the live ones as a prefix by swapping the
-							// last into the hole - which is what lets it draw
-							// `Live` rather than `Capacity`.
-							//
-							// The device's pass cannot tell the host anything
-							// without a readback, so there is no live count here
-							// to keep and no hole to fill. Births go round the
-							// block instead. `BlockSizeFor` is
-							// `Rate * maxLifetime + 1`, so the slot the ring
-							// comes back to is one the oldest particle has just
-							// left; when it has not - a rate that rose, a
-							// lifetime that grew - the oldest is overwritten,
-							// which is a particle cut short rather than a birth
-							// refused. That is the better of the two: an emitter
-							// that outgrows its block thins out instead of
-							// stopping.
-							if (!ring && block.Live >= block.Capacity) {
+							// The host fallback knows exactly when a particle
+							// dies and keeps live rows as a compact prefix. The
+							// resident path returned before this planner and uses
+							// its own device-side ring.
+							if (runtime.Live >= block.Capacity) {
 								plan.Dropped = plan.Owed - spawn;
 								break;
 							}
 
-							const uint32_t row = ring ? block.First + block.Spawned % block.Capacity
-													  : block.First + block.Live;
+							const uint32_t row = block.First + runtime.Live;
 
-							// **Written into whichever of the two the pool lives
-							// in.** The host-side pass ages an array, so a birth
-							// goes straight into it; the device's pass owns the
-							// pool and there is no array on this side at all, so
-							// the birth is the record that crosses.
-							ParticleState born;
-							ParticleState &state = ring ? born : states[row];
+							ParticleState &state = states[row];
 
 							// **A per-particle index that keeps advancing rather
 							// than the slot number**, because the slot is reused
@@ -1246,7 +1706,7 @@ namespace engine::effects {
 							// the one it replaced, and a steady emitter would
 							// settle into a repeating loop of the same few
 							// particles.
-							const uint32_t index = block.Spawned++;
+							const uint32_t index = runtime.Spawned++;
 
 							const Vector3 local = SpawnPoint(plan, half, id, index);
 							const Vector3 direction = SpawnDirection(plan, local, id, index);
@@ -1275,26 +1735,16 @@ namespace engine::effects {
 							);
 							state.Rotation = turns & 0xFFFFu;
 
-							if (ring) {
-								births[plan.BirthAt + spawn] = ParticleBirth{row, state};
-							} else {
-								// The instance is the step's output everywhere
-								// else; on this path the ageing pass has not seen
-								// this particle yet, so its first frame has to be
-								// written here or the slot draws whatever it held.
-								ParticleInstance &instance = instances[row];
-								instance.Position = state.Position;
-								instance.Slot = bornSlot;
-								instance.RotationAndCell = state.Rotation;
-								instance.Size = bornSize;
-								instance.Colour = bornColour;
-							}
+							// The ageing pass has not seen this particle yet, so
+							// its first frame is written here.
+							ParticleInstance &instance = instances[row];
+							instance.Position = state.Position;
+							instance.Slot = bornSlot;
+							instance.RotationAndCell = state.Rotation;
+							instance.Size = bornSize;
+							instance.Colour = bornColour;
 
-							// A statistic either way, but in the ring it is only
-							// a count of what has ever been born: the device
-							// draws the whole capacity and works out for itself
-							// which slots hold anything.
-							block.Live = ring ? std::min(block.Spawned, block.Capacity) : block.Live + 1;
+							runtime.Live++;
 						}
 					}
 				},
@@ -1311,11 +1761,27 @@ namespace engine::effects {
 			counted.SpawnsDropped += plan.Dropped;
 		}
 
-		for (const EmitterBlock &block : blocks) {
-			counted.Live += block.Live;
+		for (const EmitterRuntime &runtime : runtimes) {
+			counted.Live += runtime.Live;
 		}
 
 		system->Statistics = counted;
+
+		// **Per frame and outside every dispatch**, which is why these are read
+		// off the summed statistics rather than counted per particle: an atomic
+		// per birth is a cache line every worker fights over.
+		core::Metrics::SetGauge("effects.particles.live", static_cast<double>(counted.Live));
+		core::Metrics::SetGauge("effects.emitters.blocks", static_cast<double>(counted.Blocks));
+		core::Metrics::Count("effects.particles.emitted", static_cast<double>(counted.Emitted));
+		if (counted.SpawnsDropped != 0) {
+			core::Metrics::Count("effects.particles.dropped", static_cast<double>(counted.SpawnsDropped));
+			ENGINE_DEBUG_EVERY(
+				5.0,
+				"{} of {} births had no room this frame; the emitters are smaller than their rate",
+				counted.SpawnsDropped,
+				counted.Emitted + counted.SpawnsDropped
+			);
+		}
 		return counted;
 	}
 

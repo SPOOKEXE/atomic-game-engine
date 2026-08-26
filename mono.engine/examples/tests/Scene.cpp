@@ -7,6 +7,7 @@
 // is what can be: that each scene builds the *inputs* those passes need, in the
 // world, through the same bindings a game would use.
 
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -36,13 +37,16 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.examples.scene")
-TEST_DEPENDS("engine.script.scripting")
+TEST_DEPENDS("engine.scripthost.scripting")
 
 using Catch::Approx;
 using engine::core::Name;
+using engine::core::HeapProfile;
+using engine::core::HeapSample;
 using engine::ecs::Entity;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
@@ -151,6 +155,94 @@ namespace {
 			}
 		});
 		return found;
+	}
+
+	struct HeapDemo {
+		const char *Scene;
+		const char *Tag;
+	};
+
+	bool RunHeapDemo(const HeapDemo &demo) {
+		ENGINE_HEAP_SCOPE(demo.Tag);
+
+		Store store("examples.heap.demo");
+		Scheduler systems;
+		std::string error;
+		if (!LoadScene(store, systems, ExamplePath(demo.Scene), error)) {
+			return false;
+		}
+
+		// Loading is only half a demo lifecycle. A few deterministic ticks let
+		// scripts create their first scheduled work and exercise the same cleanup
+		// path that a scene ending after a short run uses.
+		for (int tick = 0; tick < 8; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
+		return true;
+	}
+}
+
+TEST_CASE("demo scene heaps settle after repeated lifecycles", "[examples][scene][heap]") {
+	if (!HeapProfile::IsCompiledIn()) {
+		SUCCEED("allocator hooks are not compiled in");
+		return;
+	}
+
+	const StagedAssets assets;
+	const std::array<HeapDemo, 3> demos = {{
+		{"Rings.luau", "examples.heap.rings"},
+		{"Interface.luau", "examples.heap.interface"},
+		{"Magic.luau", "examples.heap.magic"},
+	}};
+
+	// The first load pays for process-wide script and class caches. Warm each
+	// demo before sampling so those one-time costs cannot look like a leak.
+	for (const HeapDemo &demo : demos) {
+		CHECK(RunHeapDemo(demo));
+	}
+
+	for (const HeapDemo &demo : demos) {
+		HeapProfile::SetSamplingEnabled(true);
+		bool loaded = true;
+		std::vector<HeapSample> samples;
+		samples.reserve(5);
+		for (int round = 0; round < 5; round++) {
+			loaded = RunHeapDemo(demo) && loaded;
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			HeapProfile::Sample();
+			const std::vector<HeapSample> history = HeapProfile::History();
+			if (history.empty()) {
+				loaded = false;
+			} else {
+				samples.push_back(history.back());
+			}
+		}
+		HeapProfile::SetSamplingEnabled(false);
+
+		INFO(demo.Scene);
+		REQUIRE(loaded);
+		REQUIRE(samples.size() == 5);
+		const auto [lowest, highest] = std::minmax_element(
+			samples.begin(), samples.end(), [](const HeapSample &left, const HeapSample &right) {
+				return left.LiveBytes < right.LiveBytes;
+			}
+		);
+		INFO("first live bytes: " << samples.front().LiveBytes);
+		INFO("last live bytes: " << samples.back().LiveBytes);
+		INFO("lowest live bytes: " << lowest->LiveBytes);
+		INFO("highest live bytes: " << highest->LiveBytes);
+		const double seconds = samples.back().Seconds - samples.front().Seconds;
+		REQUIRE(seconds > 0.0);
+
+		// A scene may retain a small allocator cache, but a steadily growing
+		// live set is a leak. Keep the allowance below the runaway threshold and
+		// require the sampled endpoint and total window to remain bounded.
+		CHECK(samples.back().LiveBytes <= samples.front().LiveBytes + 256 * 1024);
+		CHECK(highest->LiveBytes - lowest->LiveBytes <= 512 * 1024);
+		CHECK(
+			static_cast<double>(samples.back().LiveBytes - samples.front().LiveBytes) / seconds <=
+				256 * 1024.0
+		);
 	}
 }
 
@@ -506,6 +598,33 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// indistinguishable from a painted mural.
 	CHECK(CountNamed(store, "Drifter") == 18);
 
+	// The authored camera crosses through the engine too. This used to be a
+	// hand-written jump in the scene, which left a broken camera traversal path
+	// looking correct. A Camera prototype carries the tick-start frame and a
+	// free controller marks it as an independently moving eye.
+	const Entity sceneCamera = InScene(store, "Viewer");
+	REQUIRE(sceneCamera != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::scene::PreviousTransform>(sceneCamera) != nullptr);
+	store.SetResource(engine::scene::CameraController{});
+	store.Set<engine::scene::PreviousTransform>(
+		sceneCamera,
+		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{3.0f, 6.0f, 20.0f})}
+	);
+	store.Set<engine::scene::Transform>(
+		sceneCamera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 6.0f, 20.0f})}
+	);
+	REQUIRE(engine::scene::CrossPortals(store) >= 1);
+	const engine::core::Vector3 cameraLanded =
+		store.Get<engine::scene::Transform>(sceneCamera)->Frame.Position;
+	CHECK(cameraLanded.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(cameraLanded.Y == Approx(6.0f).margin(1e-3f));
+	CHECK(cameraLanded.Z == Approx(-0.25f).margin(1e-3f));
+
+	const Entity demoCharacter = InScene(store, "PortalWalker");
+	REQUIRE(demoCharacter != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
+
 	// **And the walk closes, which is the claim the pictures cannot make.**
 	// `scene/tests/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
 	// the same matrix as the camera; what is scene-specific - and what a pair of
@@ -513,8 +632,8 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// - is *which way round* the two ends are glued. Walk west out of the garden
 	// and the hall has to arrive ahead of you, not behind or beside you.
 	//
-	// It is also what pins the rails camera in the scene file: those legs are
-	// this arithmetic, written out by hand because a script has no `Inverse`.
+	// It also pins the route the camera and demo character now cross through:
+	// neither has a hand-written jump that can conceal this arithmetic.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
 
 	// **Watched by a camera, because a player is a body and an eye.** The yaw is
@@ -535,8 +654,15 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		walker,
 		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{3.0f, 6.0f, 20.0f})}
 	);
+	// **Tumbling as well as walking, and about `X` rather than `Y`.** The pair in
+	// this building turns a corner, which is a yaw - so a body spinning about the
+	// world's up comes out spinning about it whatever the pass does, and the case
+	// proves nothing. End over end is the axis the corner actually moves.
 	store.Set<engine::scene::Motion>(
-		walker, engine::scene::Motion{engine::core::Vector3{-16.0f, 0.0f, 0.0f}, engine::core::Vector3::Zero}
+		walker,
+		engine::scene::Motion{
+			engine::core::Vector3{-16.0f, 0.0f, 0.0f}, engine::core::Vector3{3.0f, 0.0f, 0.0f}
+		}
 	);
 
 	REQUIRE(engine::scene::CrossPortals(store) == 1);
@@ -565,6 +691,18 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
 	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
 
+	// **And the tumble turned with it too, which went four versions unmapped.**
+	// The corner that sends the walk from west to north sends the spin from `X`
+	// to `Z`; a pass that maps `Linear` alone leaves this one end over end about
+	// an axis the hall has no reason to name, and what that looks like is a
+	// thrown crate that starts wobbling the moment it comes out of a doorway.
+	// **At the same rate**, because a spin is not a length and this pair is
+	// rigid anyway.
+	const engine::core::Vector3 spin = store.Get<engine::scene::Motion>(walker)->Angular;
+	CHECK(spin.X == Approx(0.0f).margin(1e-3f));
+	CHECK(spin.Y == Approx(0.0f).margin(1e-3f));
+	CHECK(std::abs(spin.Z) == Approx(3.0f).margin(1e-3f));
+
 	// **And the eye turns with it - on the machine the eye is on.** The
 	// crossing writes `scene::PortalTransit` on the body rather than reaching
 	// for a camera, because the host that moves a character and the host that
@@ -581,6 +719,49 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// the next frame would spin a quarter turn per frame for ever.
 	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
 	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+}
+
+TEST_CASE("the hallway camera and character enter its long tunnel", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("hallway");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Hallway.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const Entity camera = InScene(store, "Viewer");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::scene::PreviousTransform>(camera) != nullptr);
+	store.SetResource(engine::scene::CameraController{});
+
+	// Cross the north mouth of the long corridor. The short corridor is at
+	// x=20 and only four metres long, so landing inside it distinguishes portal
+	// traversal from merely moving through the source pane.
+	store.Set<engine::scene::PreviousTransform>(
+		camera,
+		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{-20.0f, 4.0f, 16.5f})}
+	);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{-20.0f, 4.0f, 15.5f})}
+	);
+	REQUIRE(engine::scene::CrossPortals(store) >= 1);
+
+	const engine::core::CFrame &arrived = store.Get<engine::scene::Transform>(camera)->Frame;
+	const engine::core::Vector3 landed = arrived.Position;
+	CHECK(landed.X == Approx(20.0f).margin(1e-3f));
+	CHECK(landed.Y == Approx(4.0f).margin(1e-3f));
+	CHECK(landed.Z < 2.0f);
+	CHECK(landed.Z > -2.0f);
+	CHECK(arrived.LookVector().X == Approx(0.0f).margin(1e-3f));
+	CHECK(arrived.LookVector().Z < -0.9f);
+
+	const Entity demoCharacter = InScene(store, "HallwayWalker");
+	REQUIRE(demoCharacter != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples][scene]") {
@@ -757,9 +938,19 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	REQUIRE(plainBounds != nullptr);
 	CHECK(floorTop > plainPlacement->Frame.Position.Y + plainBounds->HalfExtent.Y);
 
-	// **Nothing is set as the world's camera**, which is what makes this one
-	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in
-	// a world somebody presses Play in overrides the character's own.
+	const Entity demoCharacter = InScene(store, "TunnelWalker");
+	REQUIRE(demoCharacter != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
+
+	// Named views exist on both sides of both tunnels for independent Studio
+	// viewports and deterministic captures. None is selected by default, so a
+	// player still gets its character camera when Play starts.
+	for (const char *name : {"long-north", "long-south", "short-north", "short-south"}) {
+		const Entity camera = InScene(store, name);
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		CHECK(store.Get<engine::scene::Camera>(camera) != nullptr);
+	}
 	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
 }
 
@@ -839,7 +1030,13 @@ TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") 
 	size_t measured = 0;
 	store.Each<const engine::scene::Transform, const engine::scene::Bounds>(
 		[&](Entity part, const engine::scene::Transform &placement, const engine::scene::Bounds &bounds) {
-			if (isPane(part)) {
+			// The demo character is the thing the channel exists to carry, not
+			// authored scenery blocking it. Every rendered body row carries its rig
+			// identity, including the root that starts on the approach.
+			const Entity parent = store.ParentOf(part);
+			const bool characterBody = store.Get<engine::scene::CharacterLimb>(part) != nullptr ||
+									   store.Get<engine::scene::Character>(parent) != nullptr;
+			if (isPane(part) || characterBody) {
 				return;
 			}
 
@@ -883,6 +1080,39 @@ TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") 
 	// to make the channels clear and is not the fix.
 	CHECK(CountNamed(store, "LongDrifter") == 1);
 	CHECK(CountNamed(store, "ShortDrifter") == 1);
+}
+
+TEST_CASE("the slide gives the ramp and riders their intended friction", "[examples][scene][physics]") {
+	const StagedAssets assets;
+	Store store("slide.friction");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Slide.luau"), error));
+	systems.Tick(store, 0.5f);
+
+	const auto propertiesOf = [&store](const char *name) {
+		const Entity part = InScene(store, name);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *properties = store.Get<engine::scene::PhysicsProperties>(part);
+		REQUIRE(properties != nullptr);
+		return *properties;
+	};
+
+	const engine::scene::PhysicsProperties floor = propertiesOf("Baseplate");
+	CHECK_FALSE(floor.Custom);
+
+	const engine::scene::PhysicsProperties segment = propertiesOf("Segment_1");
+	CHECK(segment.Custom);
+	CHECK(segment.Friction == Approx(0.05f));
+
+	const engine::scene::PhysicsProperties rail = propertiesOf("Rail_L_1");
+	CHECK(rail.Custom);
+	CHECK(rail.Friction == Approx(0.05f));
+
+	const engine::scene::PhysicsProperties rider = propertiesOf("Block_1");
+	CHECK(rider.Custom);
+	CHECK(rider.Friction == Approx(0.2f));
 }
 
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
@@ -1172,10 +1402,13 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	INFO(error);
 	REQUIRE(loaded);
 
-	// 512 studs cut into 64-stud chunks is 8 by 8 of them.
-	constexpr size_t CHUNKS = 64;
+	// **The scene is endless, so this is the ring it holds rather than the map
+	// it has.** `VIEW` is three chunks each way from whoever is walking, which
+	// is a seven-by-seven block; the chunk under the spawn is built first and the
+	// rest arrive through the sliced streaming producer.
+	constexpr size_t CHUNKS = 49;
 	BuildTerrain(store, systems, CHUNKS);
-	CHECK(TerrainChunks(store) == CHUNKS);
+	CHECK(TerrainChunks(store) >= CHUNKS);
 
 	// **One `EditableMesh` per chunk and not one shared between them**, which is
 	// what makes each a `MeshPart` the frustum can reject on its own. A scene
@@ -1189,13 +1422,23 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 		indices += mesh.Indices.size();
 	});
 
-	CHECK(meshes == CHUNKS);
+	// **One `EditableMesh` per chunk part and not one shared between them**,
+	// which is what makes each a `MeshPart` the frustum can reject on its own. A
+	// scene that built one enormous mesh would pass a part count and fail here.
+	//
+	// Equal to the part count rather than to `CHUNKS`, and that equality is the
+	// leak check: a chunk that fell out of the keep radius destroys its part,
+	// and an `EditableMesh` has no parent to be destroyed with it - so a scene
+	// that forgot the mesh would hold one per chunk ever built, and this number
+	// would climb away from the parts as the camera flew.
+	const size_t parts = TerrainChunks(store);
+	CHECK(meshes == parts);
 
 	// A chunk is 65 by 65 samples - the extra column and row are the ones it
 	// shares with its neighbours, which is what makes the surface continuous -
 	// and 64 by 64 cells of two triangles each.
-	CHECK(vertices == CHUNKS * 65 * 65);
-	CHECK(indices == CHUNKS * 64 * 64 * 2 * 3);
+	CHECK(vertices == parts * 65 * 65);
+	CHECK(indices == parts * 64 * 64 * 2 * 3);
 
 	// **More than one colour, which is the whole of the "color them" ask.** The
 	// bands are cut from the field that was generated rather than from constants
@@ -1203,7 +1446,7 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	// somewhere rather than pinning which band a given corner fell in.
 	//
 	// It is also the only place this suite can see the colours at all: turning
-	// them into draw runs is `client::BuildMeshData`'s job and `client` is two
+	// them into draw runs is `engine::render::BuildMeshData`'s job and `client` is two
 	// tiers above this one.
 	size_t distinct = 0;
 	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
@@ -1218,17 +1461,57 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	});
 	CHECK(distinct > 1);
 
-	// The camera the scene placed, outside the map looking in.
+	// The camera the scene placed, flying over the field rather than orbiting
+	// an island - there is no island to orbit any more.
 	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
 
-	const Entity eye = InScene(store, "Surveyor");
+	const Entity eye = InScene(store, "Flyer");
 	REQUIRE(eye != engine::ecs::NULL_ENTITY);
-	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 100.0f);
 
-	// Measured bounds, not declared: the whole field is built, so the world
-	// reaches the half-width of the map plus whatever the relief adds.
+	// It has travelled, which is the whole of "endless": the flight is driven
+	// by a tick counter, so a camera still at the origin is a scene that built
+	// its ring and stopped.
+	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.X > 1.0f);
+
+	// **And somebody is standing on it.** The character spawns on a pad at the
+	// field's own height at the origin, which is what makes this a place rather
+	// than a picture.
+	CHECK(InScene(store, "SpawnLocation") != engine::ecs::NULL_ENTITY);
+
+	// Measured bounds, not declared: seven chunks of 64 studs each way, plus
+	// whatever the relief adds.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 200.0f);
+}
+
+TEST_CASE("the terrain stream follows the camera that is actually active", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("terrain.active_camera");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Terrain.luau"), error));
+
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "ViewportCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{672.0f, 80.0f, -608.0f})}
+	);
+	store.SetResource(ActiveCamera{camera});
+
+	// Five sliced sampling ticks plus the yielding geometry commit. The old demo
+	// kept building around its private Flyer here, which is invisible once Studio
+	// replaces CurrentCamera with a viewport camera.
+	for (int tick = 0; tick < 20; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	CHECK(InScene(store, "Terrain_10_-10") != engine::ecs::NULL_ENTITY);
+	// The one origin tile supports the spawn before streaming starts. Its old
+	// surrounding ring must not continue after Studio replaces CurrentCamera,
+	// otherwise the world visibly builds far away and then deletes that work.
+	CHECK(InScene(store, "Terrain_1_0") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Terrain_0_1") == engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
@@ -1251,9 +1534,15 @@ TEST_CASE("the terrain generator is a pure function of its seed", "[examples][sc
 		INFO(error);
 		REQUIRE(loaded);
 
-		// Four chunks each rather than all sixty-four: the generator is the
+		// Four ticks each rather than the whole ring: the generator is the
 		// thing under test and a quarter of a million vertices proves it as
 		// well as a million do, at a quarter of the cost.
+		//
+		// **The flight is counted in ticks and not read off a clock**, which is
+		// what lets this compare two runs at all: the camera decides which
+		// chunks exist, so a flight driven by wall time would build a different
+		// set each run and this would fail for a reason that has nothing to do
+		// with the noise.
 		for (int tick = 0; tick < 4; tick++) {
 			systems.Tick(store, 1.0f / 60.0f);
 		}
@@ -1515,10 +1804,9 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	INFO(error);
 	REQUIRE(loaded);
 
-	// A few ticks, because the panel is finished on the `Heartbeat` that
-	// notices a player with no panel - see the scene's last paragraph for why
-	// the signal alone is not enough.
-	for (int tick = 0; tick < 4; tick++) {
+	// Past the one-second repair clock. A stale table entry used to make that
+	// path build another ScreenGui every time it ran.
+	for (int tick = 0; tick < 70; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
 
@@ -1530,8 +1818,19 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 		const Entity container = store.FindFirstChild(player, "PlayerGui");
 		REQUIRE(container != engine::ecs::NULL_ENTITY);
 
+		size_t screens = 0;
+		store.EachChild(container, [&](Entity child) {
+			if (store.InstanceNameOf(child) == Name("PlayerList")) {
+				screens++;
+			}
+		});
+		CHECK(screens == 1);
+
 		const Entity screen = store.FindFirstChild(container, "PlayerList");
 		REQUIRE(screen != engine::ecs::NULL_ENTITY);
+		const auto *layer = store.Get<engine::gui::Layer>(screen);
+		REQUIRE(layer != nullptr);
+		CHECK(layer->Enabled);
 
 		const Entity card = store.FindFirstChild(screen, "Card");
 		REQUIRE(card != engine::ecs::NULL_ENTITY);
@@ -1563,7 +1862,7 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples][scene]") {
 	// **What a scene gets wrong about portal lighting is placement, and it is
-	// silent.** The transport itself is `client::CollectLights`' and
+	// silent.** The transport itself is `engine::render::CollectLights`' and
 	// `mono.client/tests/PortalLighting.cpp` asserts it; what belongs here is
 	// that the two shipped scenes hand that pass what it needs - a linked pair
 	// of mouths, every lamp inside its own seam's reach, and a world dark
@@ -1629,6 +1928,31 @@ TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples
 		);
 		CHECK(dark);
 	}
+}
+
+TEST_CASE("the recursive mirror demo moves through a bounded history corridor", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("recursive_mirrors");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("RecursiveMirrors.luau"), error));
+
+	const Entity cube = InScene(store, "RecursiveCube");
+	REQUIRE(cube != engine::ecs::NULL_ENTITY);
+	const engine::core::CFrame before = store.Get<engine::scene::Transform>(cube)->Frame;
+	systems.Tick(store, 0.25f);
+	const engine::core::CFrame after = store.Get<engine::scene::Transform>(cube)->Frame;
+	CHECK((after.Position - before.Position).Magnitude() > 0.1f);
+
+	static thread_local std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == 2);
+	for (const engine::scene::SurfacePane &pane : panes) {
+		REQUIRE(store.Has<engine::scene::SurfaceCamera>(pane.Camera));
+		CHECK(store.Get<engine::scene::SurfaceCamera>(pane.Camera)->FPS == Approx(60.0f));
+	}
+	CHECK(engine::scene::SurfaceBouncesOf(store) == 3);
+	CHECK(engine::scene::SurfaceLimitOf(store) == 2);
 }
 
 // The mirror ball, and the two things about it that are arithmetic rather than
@@ -1700,6 +2024,11 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	// hiding the finding.
 	static thread_local std::vector<engine::scene::SurfacePane> panes;
 	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
+	CHECK(engine::scene::SurfaceLimitOf(store) == 32);
+	for (const engine::scene::SurfacePane &pane : panes) {
+		REQUIRE(store.Get<engine::scene::SurfaceCamera>(pane.Camera) != nullptr);
+		CHECK(store.Get<engine::scene::SurfaceCamera>(pane.Camera)->FPS == Approx(60.0f));
+	}
 
 	// **And the tiles more than cover the ball, which is what closes the holes.**
 	// A rectangle circumscribing a triangle is twice the triangle's area, so a

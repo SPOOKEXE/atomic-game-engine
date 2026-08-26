@@ -1,6 +1,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 
+#include <cstddef>
 #include <utility>
 
 namespace engine::scene {
@@ -59,6 +60,44 @@ namespace engine::scene {
 			return nullptr;
 		}
 		return Look(Meshes, name);
+	}
+
+	void CollisionShapes::Forget(core::Name name) {
+		if (!name.IsValid()) {
+			return;
+		}
+
+		const auto drop = [name](auto &rows) {
+			for (size_t at = 0; at < rows.size(); at++) {
+				if (rows[at].Name == name) {
+					// Swapped with the last rather than erased in place. The
+					// tables are searched linearly and nothing depends on their
+					// order, so moving one row beats moving the tail - and a
+					// streamer forgetting a chunk a tick is the case this
+					// exists for.
+					rows[at] = std::move(rows.back());
+					rows.pop_back();
+					return;
+				}
+			}
+		};
+
+		drop(Hulls);
+		drop(Meshes);
+	}
+
+	void BakeCollisionShapes(
+		CollisionShapes &into,
+		core::Name name,
+		std::span<const core::Vector3> points,
+		std::span<const uint32_t> indices
+	) {
+		if (!name.IsValid() || points.empty()) {
+			return;
+		}
+
+		into.SetHull(name, collision::BuildConvexHull(points));
+		into.SetMesh(name, collision::BuildTriangleMesh(points, indices));
 	}
 
 	const CollisionShapes *CollisionShapesOf(const ecs::Store &store) {

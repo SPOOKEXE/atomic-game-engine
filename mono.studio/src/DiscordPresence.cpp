@@ -44,8 +44,24 @@ namespace studio {
 		constexpr const char *A_WORLD = "a world";
 		//@}
 
-		// Every token this program publishes, for the list beside each field.
-		constexpr const char *TOKENS = "{place}  {world}  {instances}  {worlds}  {selection}";
+		// Every token this program publishes, and what each one is.
+		//
+		// The names have to agree with `Editor::DiscordFacts`, which is the
+		// other half of the pair: `Fill` resolves an unknown token to nothing
+		// rather than to itself, so a token listed here and not published there
+		// would offer somebody a word that silently deletes itself.
+		struct Token {
+			const char *Name;
+			const char *Means;
+		};
+
+		constexpr Token TOKENS[] = {
+			{"place", "the open project"},
+			{"world", "the world being edited"},
+			{"instances", "instances in that world"},
+			{"worlds", "worlds open"},
+			{"selection", "instances selected right now"},
+		};
 
 		// One editable line, with its token list under it.
 		//
@@ -68,6 +84,55 @@ namespace studio {
 				text = buffer.data();
 			}
 			return ImGui::IsItemDeactivatedAfterEdit();
+		}
+
+		// The token list, with what each one says at this moment.
+		//
+		// **The current value is the point.** A name and a description leave
+		// somebody guessing whether `{instances}` counts what is in the world
+		// or what is selected, and the answer is sitting one function away.
+		// Clicking a row copies the token, because it is faster than retyping
+		// braces into a field that has focus rules.
+		//
+		// @param facts What the tokens resolve to, from `Editor::DiscordFacts`.
+		void TokenList(const discord::Facts &facts) {
+			if (!ImGui::TreeNode("Words a line can use")) {
+				return;
+			}
+
+			if (ImGui::BeginTable("##tokens", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+				for (const Token &token : TOKENS) {
+					const std::string spelled = std::string("{") + token.Name + "}";
+
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					if (ImGui::Selectable(spelled.c_str(), false, ImGuiSelectableFlags_SpanAllColumns)) {
+						ImGui::SetClipboardText(spelled.c_str());
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Click to copy");
+					}
+
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(token.Means);
+
+					// A token with no fact behind it renders as nothing, and an
+					// empty cell would read as "no value yet" rather than as
+					// the bug it is.
+					ImGui::TableNextColumn();
+					const char *value = "(not published)";
+					for (const auto &[name, resolved] : facts) {
+						if (name == token.Name) {
+							value = resolved.c_str();
+							break;
+						}
+					}
+					ImGui::TextUnformatted(value);
+				}
+				ImGui::EndTable();
+			}
+
+			ImGui::TreePop();
 		}
 
 		// A line of text in the muted colour, for a note under a field.
@@ -236,7 +301,7 @@ namespace studio {
 
 		settled |= TextRow("First line", settings.Details, DEFAULT_DETAILS, 512);
 		settled |= TextRow("Second line", settings.State, DEFAULT_STATE, 512);
-		Note(TOKENS);
+		TokenList(DiscordFacts());
 
 		settled |= ImGui::Checkbox("Show how long this session has been open", &settings.ShowElapsed);
 		settled |= ImGui::Checkbox("Hide place and world names", &settings.HideNames);

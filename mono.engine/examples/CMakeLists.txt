@@ -39,6 +39,12 @@ mono_add_library(examples
 		Engine::effects
 
 		Engine::script
+
+		# L11. **Because a scene starts its own scripts.** `LoadScene` opens a VM
+		# for the language the file's extension names, and `MakeRuntime` is the one
+		# place both adapters are named - which is why this module sits at L12 since
+		# v0.19 rather than beside `script`.
+		Engine::scripthost
 )
 
 # Staged rather than referenced in place: a program started from anywhere finds

@@ -34,5 +34,6 @@ mono_add_library(scene
 		Engine::core
 		Engine::collision
 		Engine::ecs
+		Engine::parallel
 		Engine::spatial
 )

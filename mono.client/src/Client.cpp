@@ -2,6 +2,9 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
+#include <engine/control/Features.hpp>
+#include <engine/control/features/Script.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -39,20 +42,94 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <client/Client.hpp>
 #include <client/ContentDemand.hpp>
 #include <client/Replicated.hpp>
+#include <cstddef>
 #include <fstream>
 #include <thread>
+#include <type_traits>
 
 namespace client {
 
+	using client::Action;
 	using engine::core::FrameGraph;
 	using engine::core::HeapProfile;
 	using engine::core::Metrics;
-	using engine::input::Action;
 	using engine::render::ProfilerTab;
+
+	namespace {
+		// What a `MouseBehavior` is called in a log line.
+		//
+		// Roblox's own spelling of each, so a line and the property a script
+		// wrote say the same word.
+		std::string_view MouseBehaviorName(engine::scene::MouseBehavior behaviour) {
+			switch (behaviour) {
+			case engine::scene::MouseBehavior::LockCenter:
+				return "LockCenter";
+			case engine::scene::MouseBehavior::LockCurrentPosition:
+				return "LockCurrentPosition";
+			case engine::scene::MouseBehavior::Default:
+				break;
+			}
+			return "Default";
+		}
+
+		// The SDL event kinds worth telling apart in a frame graph.
+		//
+		// **A switch and not a table, because SDL exposes no name API.** Every
+		// string here is a literal with static storage, which is what
+		// `ENGINE_PROFILE_DYNAMIC_STABLE` needs: it keeps the pointer rather
+		// than copying, so a name built per event would dangle before the frame
+		// was published.
+		//
+		// Anything unnamed falls into one bucket. The list is the kinds a person
+		// can cause, and therefore the ones a lag report is ever about; growing
+		// it is a line each.
+		std::string_view EventName(uint32_t type) {
+			switch (type) {
+			case SDL_EVENT_QUIT:
+				return "quit";
+			case SDL_EVENT_KEY_DOWN:
+				return "key down";
+			case SDL_EVENT_KEY_UP:
+				return "key up";
+			case SDL_EVENT_TEXT_INPUT:
+				return "text input";
+			case SDL_EVENT_MOUSE_MOTION:
+				return "mouse motion";
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+				return "mouse down";
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+				return "mouse up";
+			case SDL_EVENT_MOUSE_WHEEL:
+				return "mouse wheel";
+			case SDL_EVENT_WINDOW_RESIZED:
+				return "window resized";
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+				return "window pixel size";
+			case SDL_EVENT_WINDOW_MINIMIZED:
+			case SDL_EVENT_WINDOW_MAXIMIZED:
+			case SDL_EVENT_WINDOW_RESTORED:
+				return "window state";
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+			case SDL_EVENT_WINDOW_FOCUS_LOST:
+				return "window focus";
+			case SDL_EVENT_DROP_FILE:
+			case SDL_EVENT_DROP_TEXT:
+				return "drop";
+			case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+			case SDL_EVENT_GAMEPAD_BUTTON_UP:
+			case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+				return "gamepad";
+			default:
+				return "other event";
+			}
+		}
+
+	}
 
 	Client::~Client() {
 		Shutdown();
@@ -60,6 +137,7 @@ namespace client {
 
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
+		Presentations.SetRate(Settings.Uncapped ? Settings.MaximumFrameRate : 0);
 
 		// **Said at startup rather than at the first refusal**, so "my texture
 		// never arrives" and "this client was told not to fetch GIFs" are one
@@ -132,8 +210,11 @@ namespace client {
 
 		// **Only with a window**, because a present mode belongs to a swapchain
 		// and a headless run has none.
-		if (Settings.Uncapped && Window != nullptr && !Renderer.SetVerticalSync(false)) {
-			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
+		if (Window != nullptr && !Renderer.SetVerticalSync(!Settings.Uncapped)) {
+			ENGINE_WARN(
+				"client could not select {} present mode",
+				Settings.Uncapped ? "immediate" : "vsync"
+			);
 		}
 
 		// **The configured count wins, and zero means work it out.** A machine
@@ -144,7 +225,9 @@ namespace client {
 
 		ENGINE_INFO("simulation at {:.0f} Hz, rendering unlocked from it", Settings.TickRate);
 
-		Universe_ = std::make_unique<engine::world::Universe>();
+		engine::world::UniverseSettings interactiveWorlds;
+		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
+		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
 
 		if (!Settings.GameFile.empty()) {
 			if (!LoadGameFile()) {
@@ -184,7 +267,7 @@ namespace client {
 			(!Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0)) {
 			ENGINE_WARN(
 				"--heap-report was given and this build has no allocator hooks. Configure with "
-				"MONO_HEAP_PROFILE=ON, or use the dev preset."
+				"MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
 			);
 		}
 		return FinishStartup();
@@ -218,10 +301,16 @@ namespace client {
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				InstallPresentation(store, systems, Settings.Entities);
+				const engine::ecs::Entity localPlayer = EnsureLocalPlayer(store);
+				if (localPlayer == engine::ecs::NULL_ENTITY) {
+					failure = "could not establish the single-player client";
+					return;
+				}
 
 				// The scripts before the camera, so a scene that aimed one of
 				// its own keeps it - see `InstallDefaultCamera`.
 				Runtimes.emplace_back(id, engine::game::StartWorldScripts(store, systems, limits, failure));
+				(void)engine::gui::ResetPlayerGui(store, localPlayer);
 				InstallDefaultCamera(store, systems);
 			});
 
@@ -327,6 +416,25 @@ namespace client {
 
 		if (!BeginAudio()) {
 			return false;
+		}
+
+		if (Settings.ControlPort >= 0) {
+			const std::array features{
+				engine::control::features::Universe(*Universe_),
+				engine::control::features::Architecture(),
+				engine::control::features::Script(),
+				engine::control::features::Diagnostics(),
+				engine::control::features::Resources(),
+				engine::control::features::Prompts(),
+			};
+			ControlSurface.Enable(features);
+			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
+				ENGINE_INFO(
+					"control: listening on 127.0.0.1:{} - {} tools",
+					ControlServer.Port(),
+					ControlSurface.Count()
+				);
+			}
 		}
 
 		Running = true;
@@ -487,14 +595,19 @@ namespace client {
 			OfferPublishedContent();
 		}
 
-		// **Every pump, and it is a diff rather than a walk of the catalogue.**
-		// A world's content names change when a scene is authored, loaded or
-		// replicated, none of which this can observe cheaply - so the names are
-		// collected and everything already asked for is dropped. What survives is
-		// almost always nothing.
+		// **A diff rather than a walk of the catalogue, and only for a world
+		// that has moved.** A world's content names change when a scene is
+		// authored, loaded or replicated, and all three of those happen inside
+		// a tick - so a world whose tick has not advanced is one whose answer
+		// cannot have. `RequestWantedContent` carries the gate. What survives
+		// the diff is almost always nothing, which is why running it every
+		// frame was eight store walks per world to produce an empty list.
 		if (ContentRequested) {
 			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
-			RequestWantedContent();
+			{
+				ENGINE_PROFILE_CAT("content.demand.references", engine::core::ProfileCategory::Assets);
+				RequestWantedContent();
+			}
 		}
 
 		{
@@ -579,7 +692,11 @@ namespace client {
 					}
 				}
 
+				// The upload, which had no span while its texture sibling did -
+				// so a slow mesh looked like time `content` spent on nothing.
+				ENGINE_PROFILE_CAT("mesh upload", engine::core::ProfileCategory::Render);
 				if (Renderer.AddMesh(name, mesh)) {
+					VisualResourcesChanged = true;
 					ContentMeshes++;
 
 					// **The sheets its submeshes name, recorded where they are
@@ -637,6 +754,7 @@ namespace client {
 				{
 					ENGINE_PROFILE_CAT("texture upload", engine::core::ProfileCategory::Assets);
 					if (Renderer.AddTexture(name, image)) {
+						VisualResourcesChanged = true;
 						ContentTextures++;
 					}
 				}
@@ -669,6 +787,8 @@ namespace client {
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
+				// The one decode on this path with no span of its own.
+				ENGINE_PROFILE_CAT("material decode", engine::core::ProfileCategory::Engine);
 				if (!engine::assets::Material::Read(reader, material)) {
 					ENGINE_WARN("content: {} is not a material this engine reads", asset->Name);
 					continue;
@@ -680,7 +800,7 @@ namespace client {
 				// at all. `ResolveMaterials` turns one into a texture name on a
 				// part, in `shared`, so a headless server resolves the same
 				// materials the client does.
-				// **All five, built once and recorded together.** A material is
+				// **All seven, built once and recorded together.** A material is
 				// one thing; recording its colour and forgetting its normals
 				// would draw a part textured and flat, which reads as the normal
 				// map being broken rather than absent.
@@ -690,6 +810,7 @@ namespace client {
 					.Roughness = engine::core::Name(material.RoughnessMap),
 					.Occlusion = engine::core::Name(material.OcclusionMap),
 					.Height = engine::core::Name(material.HeightMap),
+					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
 				};
 
@@ -766,6 +887,13 @@ namespace client {
 	}
 
 	void Client::OfferPublishedContent() {
+		// **Named, because it lands in `content`'s self time and is not small.**
+		// It walks every entry of the delivery catalogue - nearly two thousand
+		// on a filled store - and enters every world to ask what each wants, on
+		// a path that runs whenever content has been requested. Unprofiled, that
+		// is a chunk of `content` with nothing in it to say what it was.
+		ENGINE_PROFILE_CAT("offer published content", engine::core::ProfileCategory::Engine);
+
 		const engine::assets::Manifest *catalogue = Content ? Content->Catalogue() : nullptr;
 		if (catalogue == nullptr) {
 			return;
@@ -810,20 +938,47 @@ namespace client {
 		ENGINE_INFO("content: {} published mesh(es) offered to the world", meshes.size());
 	}
 
-	void Client::RequestWantedContent() {
-		std::vector<engine::core::Name> wanted;
-		for (const engine::world::WorldId id : Simulated) {
-			Universe_->Enter(id, [&wanted](engine::ecs::Store &store) {
-				CollectWantedContent(store, wanted);
-			});
-		}
-		if (ReportedJoin) {
-			Universe_->Enter(Replicated, [&wanted](engine::ecs::Store &store) {
-				CollectWantedContent(store, wanted);
-			});
+	void Client::ScanWantedContent(engine::world::WorldId world) {
+		if (!world.IsValid()) {
+			return;
 		}
 
-		for (const engine::core::Name &name : wanted) {
+		Universe_->Enter(world, [this, world](engine::ecs::Store &store) {
+			// **The gate, and it is a small fixed set of integer compares.**
+			// `CollectWantedContent`
+			// is several walks of the store, and this used to run all of them on
+			// every world on every frame - `docs/ARCH_REVIEW.md` F1, which is
+			// explicit that this is work that should not happen rather than
+			// work to parallelise. `WantedContentRevision` watches only columns
+			// that can carry an asset name. Its monotonic component versions survive
+			// `ClearChanges`, and live row counts cover removals, so the reader
+			// cannot miss a write between pumps. Particle simulation, transforms,
+			// ticks, and additional cameras leave it unchanged.
+			const uint64_t revision = WantedContentRevision(store);
+			const auto scanned = ContentScannedAtRevision.find(world.Index);
+			if (scanned != ContentScannedAtRevision.end() && scanned->second == revision) {
+				return;
+			}
+			ContentScannedAtRevision[world.Index] = revision;
+
+			CollectWantedContent(store, ContentWanted);
+		});
+	}
+
+	void Client::RequestWantedContent() {
+		// Reused rather than made per pump: the steady-state answer is empty and
+		// an allocation per world per frame to produce nothing is the same kind
+		// of waste the gate below removes.
+		ContentWanted.clear();
+
+		for (const engine::world::WorldId id : Simulated) {
+			ScanWantedContent(id);
+		}
+		if (ReportedJoin) {
+			ScanWantedContent(Replicated);
+		}
+
+		for (const engine::core::Name &name : ContentWanted) {
 			RequestAsset(name);
 		}
 	}
@@ -1094,6 +1249,7 @@ namespace client {
 
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
+		ControlServer.Stop();
 		Sound.reset();
 		Content.reset();
 
@@ -1236,6 +1392,7 @@ namespace client {
 						continue;
 					}
 					Settings.ConnectAddress = row.Dial().Text();
+					Advertised = row.Session.Transports;
 					ENGINE_INFO(
 						"found \"{}\" ({}, {}) at {}",
 						row.Session.Name,
@@ -1364,7 +1521,13 @@ namespace client {
 			Runtimes.emplace_back(Replicated, std::move(replicaScripts));
 		}
 
+		// **No transport flag, and there is not going to be one.** The connector
+		// opens with QUIC and falls back if the server refuses; what a browse
+		// heard is passed along so a datagram-only server costs no refusal at
+		// all. `replication::ConnectorSettings::Advertised` carries the argument.
 		engine::replication::ConnectorSettings connector;
+		connector.Advertised = Advertised;
+		connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {
@@ -1464,13 +1627,18 @@ namespace client {
 		// `UserInputService.MouseBehavior` and the client applies it to the
 		// window; copying the whole translator over the resource would throw
 		// that away every frame. `scene::InputState` is the seam in both
-		// directions.
-		// **Three fields survive the overwrite, for two different reasons.** The
+		// directions - and since v0.19 it is the *only* place either field
+		// lives. This used to mirror the pointer pair onto the client as it
+		// passed, and it runs once per world per frame, so the window obeyed
+		// whichever world was entered last. `PumpEvents` reads them from
+		// `InterfaceWorld()` at the point of use instead.
+		//
+		// **Four values survive the overwrite, for two different reasons.** The
 		// pointer mode and whether the cursor is drawn travel the other way - a
-		// script writes them and the window obeys - and the tap latch is *older
-		// than this frame* by design: it is what a key pressed between two ticks
-		// is remembered in, and `Input.State()` only knows about the frame it
-		// just read.
+		// script writes them and the window obeys - and the two tap latches are
+		// *older than this frame* by design: they are what a key or a button
+		// pressed between two ticks is remembered in, and `Input.State()` only
+		// knows about the frame it just read.
 		const engine::scene::MouseBehavior wanted = state->Behaviour;
 		const bool wantedIcon = state->MouseIconEnabled;
 		const engine::scene::KeyBits taps = state->Pressed;
@@ -1487,8 +1655,6 @@ namespace client {
 		state->MouseIconEnabled = wantedIcon;
 		state->Pressed = taps;
 		state->PressedButtons = buttonTaps;
-		PointerMode = wanted;
-		PointerIconEnabled = wantedIcon;
 
 		// Latched here, where every frame is seen. This used to set a private
 		// `PendingJump` on the client, which `SubmitMove` then had to merge back
@@ -1677,6 +1843,26 @@ namespace client {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_WINDOW_EXPOSED || event.type == SDL_EVENT_WINDOW_SHOWN ||
+					event.type == SDL_EVENT_WINDOW_RESTORED || event.type == SDL_EVENT_WINDOW_RESIZED ||
+					event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+					PresentationInvalidated = true;
+				}
+				// **A span per event kind, because "poll events" being slow says
+				// nothing about why.** The report is that this lags on user
+				// input and on a window resize, and those are two different
+				// mechanisms - a resize is a synchronous round trip to the
+				// window system and a keystroke is not. One bar covering both
+				// cannot tell them apart; naming each kind makes the expensive
+				// one say its own name.
+				//
+				// `_STABLE`, so the name reaches the graph rather than the
+				// fallback: the point is to read `window resized` in the bar and
+				// not `event`.
+				ENGINE_PROFILE_DYNAMIC_STABLE(
+					"event", EventName(event.type), engine::core::ProfileCategory::Engine
+				);
+
 				Actions.HandleEvent(event);
 
 				// **Both, unconditionally, and neither consumes for the other.**
@@ -1693,9 +1879,47 @@ namespace client {
 		// `SDL_SetWindowRelativeMouseMode` is a system call and a window-manager
 		// round trip on some platforms, so setting it every frame is a per-frame
 		// cost to say what it already says. The compare is what makes it free.
-		if (Window != nullptr &&
-			(PointerMode != AppliedPointerMode || PointerIconEnabled != AppliedPointerIcon)) {
-			const bool relative = PointerMode == engine::scene::MouseBehavior::LockCenter;
+		//
+		// **Read out of the world that holds the input focus, not off a member.**
+		// There is one window and one pointer, and `scene::InputState` is a
+		// per-world resource - so the question "what does a script want the
+		// pointer to do" only has an answer once somebody says *which* script.
+		// `InterfaceWorld()` is that answer and is the same one the interface
+		// layout, the router and `gui::Type` already use. A copy on the client
+		// could not express it: `WriteInput` runs once per world per frame, so
+		// `--worlds 2` and `--connect` both ended up obeying whichever world was
+		// entered last. Root `AGENTS.md` rule 2.
+		engine::scene::MouseBehavior pointerMode = engine::scene::MouseBehavior::Default;
+		bool pointerIcon = true;
+		std::string focusName;
+		if (Window != nullptr && Universe_ != nullptr) {
+			const engine::world::WorldId focus = InterfaceWorld();
+			if (focus.IsValid()) {
+				Universe_->Enter(focus, [&pointerMode, &pointerIcon, &focusName](engine::ecs::Store &store) {
+					focusName = store.Name();
+					if (const auto *state = store.Resource<engine::scene::InputState>(); state != nullptr) {
+						pointerMode = state->Behaviour;
+						pointerIcon = state->MouseIconEnabled;
+					}
+				});
+			}
+		}
+
+		if (Window != nullptr && (pointerMode != AppliedPointerMode || pointerIcon != AppliedPointerIcon)) {
+			// **Which world asked, not only what it asked for.** There is one
+			// window and one pointer against a `scene::InputState` per world, so
+			// the interesting half of this line is the name: a client obeying a
+			// world the player is not standing in is what this used to do, and
+			// nothing said so. `--type`'s toggle line is here for the same
+			// reason - a system call nothing can observe afterwards needs a line
+			// where it was made.
+			ENGINE_INFO(
+				"pointer: {} icon {} (asked by world '{}')",
+				MouseBehaviorName(pointerMode),
+				pointerIcon ? "on" : "off",
+				focusName.empty() ? "none" : focusName
+			);
+			const bool relative = pointerMode == engine::scene::MouseBehavior::LockCenter;
 			SDL_SetWindowRelativeMouseMode(Window, relative);
 
 			// **`LockCurrentPosition` hides the pointer whatever
@@ -1706,17 +1930,16 @@ namespace client {
 			// mode would warp to the centre. `MouseIconEnabled` is what decides
 			// every other case, which is the one Roblox uses it for - a cutscene
 			// with the pointer free and invisible.
-			const bool hidden = relative ||
-								PointerMode == engine::scene::MouseBehavior::LockCurrentPosition ||
-								!PointerIconEnabled;
+			const bool hidden =
+				relative || pointerMode == engine::scene::MouseBehavior::LockCurrentPosition || !pointerIcon;
 			if (hidden) {
 				SDL_HideCursor();
 			} else {
 				SDL_ShowCursor();
 			}
 
-			AppliedPointerMode = PointerMode;
-			AppliedPointerIcon = PointerIconEnabled;
+			AppliedPointerMode = pointerMode;
+			AppliedPointerIcon = pointerIcon;
 		}
 
 		if (Actions.Fired(Action::Quit)) {
@@ -1853,6 +2076,7 @@ namespace client {
 
 	void Client::RefreshHeapReport() {
 		HeapTotals = HeapProfile::Totals();
+		GpuHeapTotals = Renderer.MemoryStatistics();
 
 		// A floor, so the tree is the subsystems worth a row rather than every
 		// tag that ever held a string. The growth report keeps its own, higher
@@ -1864,6 +2088,12 @@ namespace client {
 		HeapRows = HeapProfile::TreeRows(TREE_FLOOR);
 		HeapGrowth = HeapProfile::Growth(0.0, GROWTH_FLOOR);
 		HeapHistory = HeapProfile::History();
+		GpuHeapHistory.push_back(GpuHeapTotals.LiveBytes);
+		if (GpuHeapHistory.size() > HeapHistory.size()) {
+			GpuHeapHistory.erase(
+				GpuHeapHistory.begin(), GpuHeapHistory.begin() + (GpuHeapHistory.size() - HeapHistory.size())
+			);
+		}
 	}
 
 	void Client::WriteSnapshot() {
@@ -1892,39 +2122,14 @@ namespace client {
 	}
 
 	void Client::Step() {
-		// **The limiter sleeps here, before anything else in the frame.** Ahead
-		// of the swapchain wait because the two are alternatives rather than a
-		// sequence: with vblank on, the display paces the loop and this does
-		// nothing; with it off, this is the pacing and the wait below returns
-		// immediately.
-		//
-		// Against a deadline that advances by a fixed step, not by sleeping a
-		// computed amount each frame. The difference is drift: a sleep
-		// overshoots by whatever the scheduler felt like, and a loop that
-		// recomputed from "now" every frame would accumulate every one of those
-		// overshoots and settle below the rate it was asked for.
-		if (Settings.Uncapped && Settings.MaximumFrameRate > 0) {
-			using namespace std::chrono;
-			const auto period = nanoseconds(1'000'000'000ull / Settings.MaximumFrameRate);
-			const auto now = steady_clock::now();
+		UpdateIterations++;
+		const engine::render::PresentationSchedule::TimePoint presentationNow =
+			engine::render::PresentationSchedule::Clock::now();
+		const bool presentationDue = Presentations.Due(presentationNow);
 
-			if (NextFrameAt.time_since_epoch().count() == 0) {
-				NextFrameAt = now;
-			} else if (now < NextFrameAt) {
-				std::this_thread::sleep_until(NextFrameAt);
-			} else if (now - NextFrameAt > period * 4) {
-				// A stall - a resize, a hitch, a debugger. Catching up on four
-				// frames of deficit by running four frames flat out is worse
-				// than the stall was, so the deadline is reset rather than
-				// chased.
-				NextFrameAt = now;
-			}
-			NextFrameAt += period;
-		}
-
-		// Everything from here to EndFrame is one frame's worth of spans. The
-		// panels below draw the *previous* frame's, because this one has not
-		// finished being measured.
+		// Everything from here to EndFrame is one update's worth of spans. An
+		// update that reaches presentation includes its preparation and submit;
+		// the others show the simulation work that continued between images.
 		//
 		// **Opened before the wait rather than after it, which is what puts the
 		// wait on the graph.** `Editor::Run` has done it this way since the
@@ -1956,17 +2161,34 @@ namespace client {
 		//
 		// A failure means minimised or mid-resize. The result gates presentation
 		// below after simulation and external services have continued.
-		bool renderingActive = false;
-		{
-			ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+		bool renderingActive = true;
+		if (!Settings.Uncapped) {
+			ENGINE_PROFILE_CAT("frame deadline", engine::core::ProfileCategory::Idle);
 			renderingActive = Renderer.WaitForFrame();
 		}
 
 		const float delta = Clock.Tick();
+		AnimationSeconds += delta;
+		ParticleDeltaSeconds += delta;
+		PresentationDeltaSeconds += delta;
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
 			PumpEvents();
+		}
+
+		if (ControlServer.IsRunning()) {
+			ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
+		}
+
+		// Input belongs to the update clock. Presentation used to write it just
+		// before PreRender, which made an independently paced client leave every
+		// intervening simulation tick reading the last presented state.
+		for (const engine::world::WorldId id : Simulated) {
+			Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
+		}
+		if (ReportedJoin) {
+			Universe_->Enter(Replicated, [this](engine::ecs::Store &store) { WriteInput(store); });
 		}
 
 		// **Before the simulation and outside every pass.** Content becoming
@@ -2033,12 +2255,29 @@ namespace client {
 		// while PreRender and every GPU allocation below remain demand driven.
 		// Headless rendering still returns true so captures and bounded runs keep
 		// their existing behaviour.
-		if (!renderingActive) {
+		if (!renderingActive || !presentationDue) {
+			if (renderingActive && !presentationDue && Settings.Uncapped && Presentations.Rate() > 0) {
+				// Keep simulation and services independent from a lower presentation
+				// rate, but do not poll a future image deadline millions of times a
+				// second. The short ceiling preserves sub-frame input and network
+				// service while removing the busy spin.
+				constexpr engine::render::PresentationSchedule::Clock::duration MAXIMUM_PRESENTATION_IDLE =
+					std::chrono::milliseconds(1);
+				const auto remaining =
+					Presentations.Remaining(engine::render::PresentationSchedule::Clock::now());
+				if (remaining > engine::render::PresentationSchedule::Clock::duration{}) {
+					ENGINE_PROFILE_CAT("wait for presentation", engine::core::ProfileCategory::Idle);
+					std::this_thread::sleep_for(std::min(remaining, MAXIMUM_PRESENTATION_IDLE));
+				}
+			}
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 			Metrics::Clear();
 			return;
 		}
+		const float presentationDelta = PresentationDeltaSeconds;
+		PresentationDeltaSeconds = 0.0f;
+		PresentationOpportunities++;
 
 		// **The requested size when there is no window to ask.** A headless run
 		// still lays the panels out and still renders into an offscreen target
@@ -2093,12 +2332,10 @@ namespace client {
 			// go on rendering a camera that is no longer in the scene.
 			Surfaces.clear();
 
-			// **Cleared with the surfaces and for a sharper version of the same
-			// reason.** A stale `SurfaceView` renders a camera that has gone; a
-			// stale `ParticleBatch` points at a block that may since have been
-			// reclaimed and handed to another emitter, so its run of the pool
-			// would be stepped with somebody else's curves.
-			Particles.Clear();
+			// Collection keys the snapshot by world and simulation revision. Keep
+			// it until the rendered world either replaces it or fails to publish,
+			// so render-rate frames between ticks reuse the same device inputs.
+			bool particleFrameCollected = false;
 			Lights.clear();
 			RibbonVertices = {};
 			RibbonRuns = {};
@@ -2106,19 +2343,9 @@ namespace client {
 			std::vector<engine::world::Presentation> presentationDemand;
 			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
-				// **Written before `Present`, so this frame's `PreRender` sees
-				// this frame's input.** A camera controller reads the state and
-				// places the camera in the same pass; writing afterwards would
-				// aim every camera at where the mouse was one frame ago, which is
-				// the lag nobody can find by reading the controller.
-				//
-				// **Every simulated world, not only the drawn one.** A world the
-				// player is not looking at still ticks its scripts, and a script
-				// polling `UserInputService` there should get the same answer -
-				// the alternative is input that works in one world and silently
-				// does not in another.
-				// **And the size of what it is being drawn into, for the same
-				// reason and in the same breath.** `aim-surface-cameras` clamps
+				// **The size of what it is being drawn into has to arrive before
+				// `Present`, for the same reason and in the same breath.**
+				// `aim-surface-cameras` clamps
 				// every mirror's fit against a frustum built from it, so a world
 				// told after `Present` is a world whose mirrors were fitted to
 				// last frame's window - and a world never told at all, which is
@@ -2129,13 +2356,14 @@ namespace client {
 				// world nobody is looking at still aims its mirrors, and one
 				// that works only while it happens to be the drawn one is the
 				// kind of difference nothing reports.
-				Universe_->Enter(id, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					WriteInput(store);
+				Universe_->Enter(id, [pixelWidth, pixelHeight](engine::ecs::Store &store) {
 					(void)engine::scene::SetViewportSize(
 						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
 					);
 				});
-				presentationDemand.push_back(engine::world::Presentation{id, delta, Universe_->AlphaOf(id)});
+				presentationDemand.push_back(
+					engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)}
+				);
 			}
 
 			// All demanded worlds prepare their draw packets together. Each
@@ -2150,9 +2378,9 @@ namespace client {
 				// phase filled the draw list. The camera and the list stay
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
-				Universe_->Enter(id, [this, id, selectedProfile](engine::ecs::Store &store) {
+				Universe_->Enter(id, [&, id, selectedProfile](engine::ecs::Store &store) {
 					const auto *active = store.Resource<engine::scene::ActiveCamera>();
-					const auto *list = store.Resource<DrawList>();
+					const auto *list = store.Resource<engine::render::DrawList>();
 					if (active == nullptr || list == nullptr) {
 						return;
 					}
@@ -2200,7 +2428,7 @@ namespace client {
 						if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
 							ProfilesInstalledFor = id;
 							ProfileInstalledSelection = selectedProfile;
-							PipelineSelected = InstallRenderingProfiles(
+							PipelineSelected = engine::render::InstallWorldPipeline(
 								RenderingProfiles, Renderer, id.Index, selectedProfile
 							);
 						}
@@ -2209,7 +2437,8 @@ namespace client {
 						// that one.** A batch is a span into this world's pool;
 						// see `Client.hpp` for why a second world's cannot be
 						// appended to the same list.
-						(void)CollectParticleBatches(store, Particles);
+						(void)engine::render::CollectParticleBatches(store, Particles);
+						particleFrameCollected = true;
 
 						// **The ribbons are taken as spans rather than copied**,
 						// which is safe for the frame and only for the frame:
@@ -2223,13 +2452,16 @@ namespace client {
 						// sixteen lights and a world may hold any number; which
 						// sixteen is a scene question and distance is the answer
 						// that is right more often than it is wrong.
-						(void)CollectLights(store, placement->Frame.Position, Lights);
+						(void)engine::render::CollectLights(store, placement->Frame.Position, Lights);
 					}
 
 					Views.Publish(
 						id, placement->Frame, *lens, list->Instances, store.Time().Tick, store.Time().Alpha
 					);
 				});
+			}
+			if (!particleFrameCollected) {
+				Particles.Clear();
 			}
 
 			// The replicated world, once it has joined and been given a
@@ -2251,12 +2483,10 @@ namespace client {
 			// at where the client stood last frame.
 			if (ReportedJoin) {
 				Universe_->Enter(Replicated, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					// **The replica takes this frame's input like a simulated
-					// world does**, because since v0.14 it has a camera and a
-					// character of its own to drive. It is not in `Simulated` -
-					// it never will be, nothing here is stepped - so it is
-					// written here rather than by widening that loop to mean
-					// something other than what it says.
+					// A join may have completed after the update-clock input pass
+					// above, so the replica's first presentation still needs the
+					// current state. Later updates write it beside the simulated
+					// worlds, without pretending this replicated world is stepped.
 					WriteInput(store);
 
 					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
@@ -2270,10 +2500,10 @@ namespace client {
 					);
 				});
 
-				Universe_->Present(Replicated, delta, Universe_->AlphaOf(Replicated));
+				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
 
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
-					const auto *list = store.Resource<DrawList>();
+					const auto *list = store.Resource<engine::render::DrawList>();
 					if (list == nullptr) {
 						return;
 					}
@@ -2303,17 +2533,6 @@ namespace client {
 				});
 			}
 		}
-
-		{
-			ENGINE_HEAP_SCOPE("client.statistics");
-			Statistics.Record(Clock.Now(), delta);
-		}
-
-		// **Advanced with the frame it will be drawn against.** Accumulated from
-		// the frame delta rather than read from a wall clock, so a run that
-		// stalls does not skip an animation forward and two runs of one
-		// recording show the same frames - `Renderer::SetAnimationTime`.
-		AnimationSeconds += delta;
 
 		// Ticks actually achieved, over a one-second window. It matches the
 		// configured rate until the machine cannot keep up, and the gap is the
@@ -2407,6 +2626,17 @@ namespace client {
 				panels.HeapGrowth = HeapGrowth;
 				panels.HeapHistory = HeapHistory;
 				panels.HeapHistorySeconds = HeapProfile::HistorySeconds();
+				panels.GpuHeapLiveBytes = GpuHeapTotals.LiveBytes;
+				panels.GpuHeapPeakBytes = GpuHeapTotals.PeakBytes;
+				panels.GpuAllocatedBytes = GpuHeapTotals.AllocatedBytes;
+				panels.GpuReleasedBytes = GpuHeapTotals.ReleasedBytes;
+				panels.GpuBufferAllocations = GpuHeapTotals.BufferAllocations;
+				panels.GpuTransferBufferAllocations = GpuHeapTotals.TransferBufferAllocations;
+				panels.GpuTextureAllocations = GpuHeapTotals.TextureAllocations;
+				panels.GpuBufferBytes = GpuHeapTotals.BufferBytes;
+				panels.GpuTransferBufferBytes = GpuHeapTotals.TransferBufferBytes;
+				panels.GpuTextureBytes = GpuHeapTotals.TextureBytes;
+				panels.GpuHeapHistory = GpuHeapHistory;
 				// Asked of the world, not read back off the command line. The
 				// number that matters is what the world actually holds, and
 				// the day something spawns or destroys an entity those two
@@ -2498,6 +2728,7 @@ namespace client {
 		}
 
 		engine::render::InterfacePass *hook = nullptr;
+		bool interfaceContinuous = false;
 
 		// **Whether the window should be listening for text, decided from the
 		// world.** Read inside the `Enter` below and applied outside it, because
@@ -2534,6 +2765,7 @@ namespace client {
 
 			request.Display.Width = static_cast<float>(windowWidth);
 			request.Display.Height = static_cast<float>(windowHeight);
+			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the
 			// hover comes from the list a compile produced, so a compile
@@ -2688,6 +2920,13 @@ namespace client {
 				wantsTextInput = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
 
 				if (!InterfaceList.Commands().Commands.empty()) {
+					interfaceContinuous = std::any_of(
+						InterfaceList.Commands().Commands.begin(),
+						InterfaceList.Commands().Commands.end(),
+						[](const engine::gui::DrawCommand &command) {
+							return command.Kind == engine::gui::DrawKind::Viewport;
+						}
+					);
 					(void)ViewportImages.Render(Renderer, store, InterfaceList.Commands(), 1);
 					Interface.Submit(
 						InterfaceList.Commands(),
@@ -2695,7 +2934,8 @@ namespace client {
 						engine::core::Vector2{
 							static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
 						},
-						store
+						store,
+						InterfaceList.Signature()
 					);
 					hook = &Interface;
 				}
@@ -2822,27 +3062,38 @@ namespace client {
 		// number is somebody measuring or comparing, and a world quietly taking
 		// it back on the next frame is the shape of an afternoon lost.
 		ENGINE_HEAP_SCOPE("client.lighting");
-		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
-			Renderer.SetLighting(engine::scene::LightingOf(lit));
+		engine::scene::WorldLighting visualLighting;
+		uint32_t visualSurfaceBounces = 0;
+		uint32_t visualSurfaceLimit = 0;
+		Universe_->Enter(
+			Rendered,
+			[this, &visualLighting, &visualSurfaceBounces, &visualSurfaceLimit](
+				engine::ecs::Store &lit, engine::ecs::Scheduler &
+			) {
+				visualLighting = engine::scene::LightingOf(lit);
+				Renderer.SetLighting(visualLighting);
 
-			const int32_t bounces = Settings.SurfaceBounces > 0
-										? static_cast<int32_t>(Settings.SurfaceBounces)
-										: engine::scene::SurfaceBouncesOf(lit);
-			Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
+				const int32_t bounces = Settings.SurfaceBounces > 0
+											? static_cast<int32_t>(Settings.SurfaceBounces)
+											: engine::scene::SurfaceBouncesOf(lit);
+				visualSurfaceBounces = static_cast<uint32_t>(std::max(bounces, 0));
+				Renderer.SetSurfaceBounces(visualSurfaceBounces);
 
-			// **And how many panes it draws at once**, which is the other half of
-			// what a hall of mirrors costs: the depth above says how deep a chain
-			// resolves and this says how many chains there are. Read from the
-			// world every frame for the bounce setting's reason - a script may
-			// change it at any time, and once at startup would let the first
-			// world drawn set it for every world after.
-			//
-			// **No session override beside it, deliberately.** `--surface-bounces`
-			// exists because somebody comparing two depths needs the world to stop
-			// arguing; there is no equivalent measurement for the count, and a
-			// flag with no use is a flag that goes stale.
-			Renderer.SetSurfaceLimit(static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(lit), 0)));
-		});
+				// **And how many panes it draws at once**, which is the other half of
+				// what a hall of mirrors costs: the depth above says how deep a chain
+				// resolves and this says how many chains there are. Read from the
+				// world every frame for the bounce setting's reason - a script may
+				// change it at any time, and once at startup would let the first
+				// world drawn set it for every world after.
+				//
+				// **No session override beside it, deliberately.** `--surface-bounces`
+				// exists because somebody comparing two depths needs the world to stop
+				// arguing; there is no equivalent measurement for the count, and a
+				// flag with no use is a flag that goes stale.
+				visualSurfaceLimit = static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(lit), 0));
+				Renderer.SetSurfaceLimit(visualSurfaceLimit);
+			}
+		);
 
 		// **The shaders this world's materials name, resolved before the frame
 		// that draws with them.** Beside the sun and for the same reason: a
@@ -2860,6 +3111,7 @@ namespace client {
 			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
 
 			if (changed > 0) {
+				VisualResourcesChanged = true;
 				// **Which of the changed names an `ImageLabel` actually asked
 				// for**, and it is worth the second walk: `opaque.frag` and
 				// `interface.frag` declare different binding counts, so a
@@ -2886,12 +3138,13 @@ namespace client {
 					// was built for it is released. The instances that named
 					// it are already gone or already name something else.
 					if (module == nullptr) {
-						(void)Renderer.DropShader(name);
+						VisualResourcesChanged = Renderer.DropShader(name) || VisualResourcesChanged;
 						if (wantedByGui) {
 							(void)Interface.DropShaderVariant(name);
 						}
 						if (wantedByPostProcess) {
 							Renderer.ClearPostProcessShader();
+							VisualResourcesChanged = true;
 							LastPostProcessShader = {};
 						}
 						continue;
@@ -2906,7 +3159,8 @@ namespace client {
 						continue;
 					}
 
-					(void)Renderer.AddShader(name, module->SpirV);
+					VisualResourcesChanged =
+						Renderer.AddShader(name, module->SpirV) || VisualResourcesChanged;
 
 					// **The same words, into the interface pass too, and only
 					// when an `ImageLabel` actually named this shader.** See
@@ -2926,6 +3180,7 @@ namespace client {
 					// those moves anything `Changed` reports.
 					if (wantedByPostProcess) {
 						if (Renderer.SetPostProcessShader(name, module->SpirV)) {
+							VisualResourcesChanged = true;
 							LastPostProcessShader = name;
 						}
 					}
@@ -2941,9 +3196,12 @@ namespace client {
 			if (wantedPostProcess != LastPostProcessShader) {
 				if (!wantedPostProcess.IsValid()) {
 					Renderer.ClearPostProcessShader();
+					VisualResourcesChanged = true;
+					LastPostProcessShader = {};
 				} else if (const engine::render::ShaderModule *module = Shaders.Find(wantedPostProcess);
 						   module != nullptr && module->Error.empty()) {
 					if (Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
+						VisualResourcesChanged = true;
 						LastPostProcessShader = wantedPostProcess;
 					}
 				}
@@ -2958,8 +3216,9 @@ namespace client {
 		{
 			ENGINE_HEAP_SCOPE("client.editable");
 			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-				(void)EditableMeshes.Refresh(shaded, Renderer);
-				(void)EditableImages.Refresh(shaded, Renderer);
+				const size_t meshes = EditableMeshes.Refresh(shaded, Renderer);
+				const size_t images = EditableImages.Refresh(shaded, Renderer);
+				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
 			});
 		}
 
@@ -2970,15 +3229,17 @@ namespace client {
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
 		view.Particles = Particles.Batches;
-		view.ParticleBirths = Particles.Births;
 		view.ParticleSeams = Particles.Seams;
+		view.ParticleRevision = Particles.Revision;
+		view.ParticleLayoutRevision = Particles.LayoutRevision;
+		view.ParticleResidentRevision = Particles.ResidentRevision;
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
 
-		// **The frame's step and not the tick's**, because the device steps once
-		// per rendered frame - see `View::ParticleDelta`. Spawning is still on
-		// the tick and the two agree, both being rates per second.
-		view.ParticleDelta = delta;
+		// The time since the last device step. Presentation may be slower than the
+		// update loop, and using only this update's delta would slow resident
+		// particles by exactly that ratio.
+		view.ParticleDelta = ParticleDeltaSeconds;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
@@ -2986,10 +3247,110 @@ namespace client {
 		view.Portals = Portals;
 		view.Pipeline = PipelineSelected;
 		view.World = Rendered.IsValid() ? Rendered.Index : 0;
+		view.WorldName = Rendered.IsValid() ? Universe_->NameOf(Rendered) : engine::core::Name{};
+
+		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
+		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
+		const uint64_t viewportSignature =
+			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
+		engine::render::ScenePresentationSignatures scenePresentationSignatures;
+		{
+			ENGINE_PROFILE_CAT("presentation signature", engine::core::ProfileCategory::Render);
+			scenePresentationSignatures = engine::render::ScenePresentationSignaturesOf(
+				view,
+				engine::render::ScenePresentationState{
+					.Lighting = visualLighting,
+					.Animation = Renderer.TextureAnimationSignature(AnimationSeconds),
+					.Resources = 0,
+					.SurfaceBounces = visualSurfaceBounces,
+					.SurfaceLimit = visualSurfaceLimit,
+					.PostProcess = LastPostProcessShader,
+					.Untextured = false,
+				}
+			);
+		}
+		const bool gameInterfacePresent = hook != nullptr && !InterfaceList.Commands().Commands.empty();
+		const engine::render::PresentationSignatures presentationSignatures{
+			.Scene = scenePresentationSignatures,
+			.GameInterface = gameInterfacePresent ? InterfaceList.Signature() : 0,
+			.HostInterface = 0,
+			.Viewport = viewportSignature,
+		};
+		engine::render::PresentationDamage damage = PresentationDamage.Inspect(presentationSignatures);
+		const bool particleLayerPresent = !view.Particles.empty();
+		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
+		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
+		const bool diagnosticFrame =
+			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
+		ParticleVisibility.Refine(
+			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
+		);
+		damage.Objects = damage.Objects || VisualResourcesChanged;
+		damage.Scene = damage.Scene || damage.Objects || diagnosticFrame || PresentedImages < 2;
+		damage.GameInterface =
+			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
+		damage.Overlay = Overlay.IsDirty();
+		const engine::render::PresentationCacheApplicability cacheApplicability{
+			.Objects = !view.Instances.empty() || view.Grid.Enabled,
+			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
+			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
+			.Portals = !view.Portals.empty() || !view.Surfaces.empty(),
+			.GameInterface = gameInterfacePresent,
+			.HostInterface = false,
+			.ViewportGeometry = true,
+			.ViewportOverlay = true,
+		};
+		view.Damage = damage;
+		const bool visualChanged = damage.Any() || PresentationInvalidated;
+		const bool particleDeviceStep = particleLayerPresent && ParticleDeltaSeconds > 0.0f;
+		if (!visualChanged) {
+			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);
+			UnchangedPresentationsSkipped++;
+		}
+		if (!visualChanged && !particleDeviceStep) {
+			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
+			ParticleDeltaSeconds = 0.0f;
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			Metrics::Clear();
+			return;
+		}
+
+		// The update loop has done all work needed to decide that pixels changed.
+		// Only now claim a swapchain image. Waiting here is deliberate in immediate
+		// mode: polling used to acquire and cancel a command buffer on every miss,
+		// then redo the entire update before trying again. One frame in flight fell
+		// from the old blocking path's throughput to roughly one third of it.
+		if (!Renderer.WaitForFrame()) {
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			Metrics::Clear();
+			return;
+		}
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
 			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
 		}
+		{
+			ENGINE_HEAP_SCOPE("client.statistics");
+			Statistics.Record(Clock.Now(), ParticleDeltaSeconds);
+		}
+		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
+		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
+			PresentationDamage.CacheProfile().Record(
+				damage, false, LastFrame.PortalPasses > 0, cacheApplicability
+			);
+			PresentationDamage.Commit(presentationSignatures);
+			if (damage.Scene) {
+				ParticleVisibility.Commit(
+					particleVisibilitySignature, LastFrame.ParticlesDrawn > 0 || ribbonLayerPresent
+				);
+			}
+			PresentedImages++;
+			VisualResourcesChanged = false;
+			PresentationInvalidated = false;
+		}
+		ParticleDeltaSeconds = 0.0f;
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists - the studio's own capture states
@@ -3066,6 +3427,10 @@ namespace client {
 		// makes them useless as the one number a log can carry.
 		PeakTriangles = std::max(PeakTriangles, LastFrame.Triangles);
 		PeakDrawCalls = std::max<uint32_t>(PeakDrawCalls, LastFrame.DrawCalls);
+		TotalInstanceChunks += LastFrame.InstanceChunks;
+		DirtyInstanceChunks += LastFrame.InstanceChunksDirty;
+		TotalInstanceRows += LastFrame.InstanceRows;
+		DirtyInstanceRows += LastFrame.InstanceRowsDirty;
 	}
 
 	int Client::Run() {
@@ -3109,6 +3474,15 @@ namespace client {
 			}
 		}
 
+		if (Settings.Uncapped) {
+			ENGINE_INFO(
+				"{} update iteration(s), {} presentation opportunity(s), {} unchanged skipped",
+				UpdateIterations,
+				PresentationOpportunities,
+				UnchangedPresentationsSkipped
+			);
+		}
+
 		if (Statistics.HasSamples()) {
 			ENGINE_INFO(
 				"{} frames · {:.1f} avg · {:.1f} min · {:.1f} max FPS",
@@ -3126,6 +3500,29 @@ namespace client {
 			ENGINE_INFO(
 				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
 			);
+
+			// What the resident-row delta actually rewrote. The draw-order index
+			// stream is uploaded separately and is not counted here.
+			if (TotalInstanceChunks > 0) {
+				ENGINE_INFO(
+					"{} of {} resident instance chunk(s), {} of {} row(s) rewritten "
+					"({:.1f}% of rows changed per frame)",
+					DirtyInstanceChunks,
+					TotalInstanceChunks,
+					DirtyInstanceRows,
+					TotalInstanceRows,
+					TotalInstanceRows > 0 ? 100.0 * static_cast<double>(DirtyInstanceRows) /
+												static_cast<double>(TotalInstanceRows)
+										  : 0.0
+				);
+			}
+			if (Interface.UploadCount() + Interface.ReuseCount() > 0) {
+				ENGINE_INFO(
+					"interface geometry uploaded {} time(s), resident mesh reused {} time(s)",
+					Interface.UploadCount(),
+					Interface.ReuseCount()
+				);
+			}
 			ENGINE_INFO(
 				"{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",
 				Universe_->StatisticsOf(Rendered).Ticks,
@@ -3155,6 +3552,7 @@ namespace client {
 		// describes an empty one.
 		if (!Settings.HeapReport.empty()) {
 			const engine::core::HeapTotals heap = HeapProfile::Totals();
+			const engine::render::GpuMemoryStatistics gpu = Renderer.MemoryStatistics();
 			ENGINE_INFO(
 				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
 				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
@@ -3162,7 +3560,13 @@ namespace client {
 				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
 				heap.Nodes
 			);
-			if (HeapProfile::WriteReport(Settings.HeapReport)) {
+			ENGINE_INFO(
+				"gpu heap: {:.1f} MiB logical live, {:.1f} MiB peak",
+				static_cast<double>(gpu.LiveBytes) / (1024.0 * 1024.0),
+				static_cast<double>(gpu.PeakBytes) / (1024.0 * 1024.0)
+			);
+			if (HeapProfile::WriteReport(Settings.HeapReport) &&
+				Renderer.AppendMemoryReport(Settings.HeapReport)) {
 				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());
@@ -3184,7 +3588,7 @@ namespace client {
 		network.Joined = Connection->Joined();
 		network.AppliedTick = Connection->Applied();
 
-		const engine::net::ConnectionStats &link = Connection->Link().Stats();
+		const engine::net::ConnectionStats link = Connection->LinkStats();
 		network.ReceivedBytes = link.BytesReceived;
 		network.SentBytes = link.BytesSent;
 		network.RoundTripMilliseconds = link.RoundTripMilliseconds;
@@ -3236,7 +3640,7 @@ namespace client {
 			Universe_->Enter(Replicated, [&network](engine::ecs::Store &store) {
 				network.Entities = store.CountMatching<engine::scene::Transform>();
 
-				if (const auto *drawList = store.Resource<DrawList>()) {
+				if (const auto *drawList = store.Resource<engine::render::DrawList>()) {
 					network.Drawn = drawList->Instances.size();
 				}
 				if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>()) {
@@ -3278,7 +3682,7 @@ namespace client {
 		Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
 			store.EachEntity([&entities](engine::ecs::Entity) { entities++; });
 
-			if (const auto *drawList = store.Resource<DrawList>()) {
+			if (const auto *drawList = store.Resource<engine::render::DrawList>()) {
 				drawn = drawList->Instances.size();
 			}
 			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>()) {

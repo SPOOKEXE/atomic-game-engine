@@ -198,10 +198,16 @@ namespace {
 		}
 
 		bool Connect() {
-			for (int step = 0; step < 128 && !GuestStream->Connected(); ++step) {
+			// **Both ends, because they do not finish on the same tick.** A TLS
+			// client is done when it has verified the server's Finished and the
+			// server is done when the client's arrives, which is one flight
+			// later - so a harness that returned on the guest's answer would
+			// have the host publish into a session that cannot carry yet.
+			const auto ready = [this] { return GuestStream->Connected() && HostStream->Editors() == 2; };
+			for (int step = 0; step < 256 && !ready(); ++step) {
 				Tick();
 			}
-			return GuestStream->Connected();
+			return ready();
 		}
 	};
 

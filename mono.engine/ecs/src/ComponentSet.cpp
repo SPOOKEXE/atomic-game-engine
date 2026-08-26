@@ -9,12 +9,27 @@
 
 namespace engine::ecs {
 
-	namespace {
+	// Owns every interned set and hands out stable references to them.
+	//
+	// Named rather than anonymous because ComponentSet befriends it: the sets
+	// it builds need their private fields filled in, and a friend declaration
+	// is a smaller hole than public setters nobody else should ever call.
+	class ComponentSetTable {
+	  public:
 		// The key a set is looked up by.
 		//
 		// The sorted id list itself, because that *is* the identity: two
 		// callers naming the same components in different orders have to reach
 		// the same entry, and after sorting they have the same key.
+		//
+		// **Nested rather than in this file's anonymous namespace**, which is
+		// where both of these used to sit. A class the header befriends has
+		// external linkage, and a field of it whose type has internal linkage
+		// is `-Wsubobject-linkage` - one definition of `ComponentSetTable` per
+		// translation unit, each with a different `Key`. It went unreported
+		// while every source was its own translation unit and became an error
+		// under the `release` and `ci` unity build, where the friend
+		// declaration and this definition meet inside one unit.
 		struct Key {
 			std::vector<ComponentId> Members;
 
@@ -39,15 +54,7 @@ namespace engine::ecs {
 				return hash;
 			}
 		};
-	}
 
-	// Owns every interned set and hands out stable references to them.
-	//
-	// Named rather than anonymous because ComponentSet befriends it: the sets
-	// it builds need their private fields filled in, and a friend declaration
-	// is a smaller hole than public setters nobody else should ever call.
-	class ComponentSetTable {
-	  public:
 		static ComponentSetTable &Get() {
 			static ComponentSetTable table;
 			return table;

@@ -1351,3 +1351,1103 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] ensure we benchmark critical systems (parallel, workers, async files, network, cdn, mesh send/receive, gpu alloc, submit and management, , multiplayer, physics, particles, etc) thoroughly (stress tests). Seven new suites over the paths that had none, chosen by auditing what was already covered rather than by writing a file per module: `net`, `replication`, `physics`, `ecs`, `assets`, `effects`, `spatial`, `scene`, `core`, `audio`, `gui`, `input`, `script`, `world`, `delivery`, `game` and `studio` already had real suites and were left alone. **`engine.parallel.bench.contention`** puts the same million rows of *real* work through every arrangement, where `dispatch` measured an empty `For` and therefore only the floor: serial 2.98 ms against 260 us on twenty-three workers, the grain sweep confirming 4096 (256 is a quarter worse and 65536 a fifth), and an imbalanced body at 1.21 ms because `For` splits by index count and cannot know what an index costs. The row worth keeping is the last: **the same million rows as sixty-four dispatches of sixteen thousand lands exactly on the serial figure, because sixteen thousand is under `DEFAULT_GRAIN * MINIMUM_GRAINS` and every one of the sixty-four calls ran inline** - a system that batches per chunk instead of per tick gets no pool at all and nothing reports it. **`engine.parallel.bench.channel`** covers the framed queue including the refusal paths a host in trouble actually runs: 69 ns for a 64-byte round trip, 10 ns to be refused by a full channel, 1 ns to refuse an oversized frame, and 605 ns per 4 KiB frame across two threads against 135 ns uncontended. **`network.bench.discovery`** found the one defect in the set: a tagged advert costs 384 ns against the key that verifies and **20.1 us against a ring of sixty-four that do not - a 52x amplification an attacker gets for free by broadcasting noise at a browser**, because `Decode` must try every key it holds. Public adverts are unaffected (73 ns whatever the ring size), rubbish is refused in 3 ns and a truncated advert in 1 ns. **`cdn.bench.grouping`** and **`cdn.bench.admission`** cover a module that had nothing: grouping is n log n (1k 101 us, 10k 1.57 ms, 50k 8.64 ms), and an admission costs what its *token* costs to verify rather than what the decision costs - 869 ns at two bundles, 22.2 us at a thousand - which makes grant width a budget on the server rather than something to optimise at the origin. A forged token costs the same as an accepted one, which is the right answer: a forgery is only detectable by verifying. **`engine.render.bench.meshes`** covers the host half of mesh admission and the deferred free list, and found that **admission is superlinear in the bytes but not in the meshes**: ten times the 256-vertex meshes costs fifty-seven times as much (691 us to 39.2 ms) while ten times the 32-vertex meshes costs eleven (157 us to 1.79 ms), so the per-mesh bookkeeping is flat and eighty megabytes of host vertices grown by `resize` is what costs - a table told its size up front would not pay it. Reclaim works (456 us replacing in place with flushes against 1.46 ms with the clock stopped) and a fragmented free list costs nothing extra. **`engine.graph.bench.submission`** covers frame planning, which is the GPU submission work measurable without a device, and it is linear on all three axes - `CompileSchedule` 10.1 us at eight passes to 76.5 us at sixty-four, `PlanFrame` 3.3 us at one view to 38.0 us at sixteen. **`engine.assets.bench.store`** puts the disk back into a module whose suite had only ever measured buffers: a 64 KiB chunk costs 36.7 us to write against 9.9 us for the same bytes inside one file, so **the per-chunk file tax is 27 us and dedup is what pays for it** (re-writing a chunk already held is 7.2 us). There is no asynchronous file path anywhere in `assets`, `delivery`, `mono.client` or `mono.server` - nothing reads a file off the calling thread - and the suite says so beside the numbers that would justify one. **`unified.bench.crossing`** is the multiplayer row nothing else could produce, because a tick spans every module and no module links enough of the others to run one: 52.4 us direct at 64 entities against 68.0 us over a real `net` link, so **the wire is 15.6 us of a tick**, while content and discovery each land inside the measurement's own noise - and all three together are 81.4 us, which is 13 us more than the lossy link alone and therefore an interaction rather than a sum. It also found a latent teardown hazard on the way in: `Crossing`'s destructor stops the job pool, and a crossing held in a static constructed *before* the pool's own state is destroyed after it, so the `Stop` joins workers whose pool is gone and the process hangs at exit with every row already printed. Touching the pool before the static orders it correctly, and the same trap is open to any program holding a job-using object in a static. **A second pass covered textures, interface rendering, physics stepping and the client's own frame.** `engine.assets.bench.textures` puts numbers on the path a game's gigabytes take: a mip chain grows about with its pixels (512 898 us, 1024 5.10 ms, 2048 25.4 ms), an `R8` mask costs a quarter of an `RGBA8` image of the same dimensions so the filter tracks bytes rather than pixels, and the refusal rows confirm the header check is a comparison rather than an allocation - a wrong magic is 2 ns, a truncated file 22 ns, and a header claiming 16384 on a side with no pixels behind it 16 ns, five orders of magnitude under the read it is pretending to be. **It also found a live one: `ResizeImage` has no early-out for a target equal to its source, so resampling a 2048x2048 image to 2048x2048 costs 32.4 ms** - more than building that image's entire mip chain and six times what resizing it down costs - and `bakegraph`'s `Resize` node passes an authored target size, so a pipeline that normalises every texture pays it for every texture already at that size. Left as a row rather than patched, because a box filter at a scale of exactly one is not guaranteed to reproduce its input byte for byte and short-circuiting to a copy changes what comes out. `engine.render.bench.interface` covers `InterfaceMesh::Build`, which is the half of the UI `engine.gui.bench.interface` does not reach and the half that runs at the *display's* rate: 1000 plain rectangles 11.5 us and 10,000 of them 115 us, so it scales; a rounded rectangle is 7.6x a square one at 87 us; **a rounded outline is 211 us, well over the rounded row plus the outline row, so the two compound rather than add**; and **1000 short text runs are 218 us - eighteen times a rectangle and the most expensive thing an interface does** - with wrapping doubling it to 442 us. Two results contradicted the guesses the rows were written to test: **scissor batching is free on the CPU** (a thousand elements each clipped to themselves builds in the same time as a thousand sharing one clip, so a thousand-batch interface costs nothing extra to *build* and a CPU profile would show nothing at all), and `GlyphAtlas::Build` is glyph-count bound rather than area bound - 1.75 ms at 16 px against 2.38 ms at 32 px, a third dearer for four times the area. **That suite also taught something about benchmark hygiene that cost two other suites their figures.** Its images, mip chains and encoded forms are cached for the life of the process so no row pays to build its own input, and at 4096 that was over half a gigabyte permanently resident - which evicted its neighbours in the same binary from cache and made `Content.cpp`'s `Hasher::Of · 16 MiB` read 229 ns/KiB where it reads 131 alone. A benchmark that makes its neighbours slower is reporting its own working set in their figures, so the sizes were capped at 2048 and the ratio came back to 104 against 84. The interface suite needed a fix of its own: a benchmark binary is not a staged program and has no fonts beside it, so the atlas built empty and every text row silently measured the no-glyph path and came out *faster* than plain rectangles; it now borrows the fonts staged beside a sibling program. `engine.physics.bench.stepping` runs the whole tick `Pipeline.cpp` composes rather than one phase, over scenes that are shaped wrong on purpose. At constant density it is sublinear (1000 bodies 1.15 ms, 4000 4.89 ms, 16,000 15.1 ms); **4000 bodies in one broad-phase cell cost 57.5 ms against 4.89 ms for the same 4000 in stacks - 11.8x the cost off 7.4x the contacts**, which is the number to quote at anybody asking why the cell size is a parameter. The headline is the sleep pair: **a 16,000-body world in which every single body is asleep ticks at 16.2 ms, against 13.9 ms with the resting list emptied before every tick - sleeping saves nothing.** That is not a bug in the resting list, it is what the resting list is: `Solve.cpp` says at the line that uses it that "Asleep is immovable for this tick", so an asleep body is pinned rather than removed and its contacts are still generated and still swept by every solver iteration. The four phase rows added to prove it say where a settled tick goes - Solve 9.08 ms, BroadPhase 1.64 ms, SyncBroadphase 0.58 ms, NarrowPhase 0.53 ms - so the saving available is skipping a contact whose two bodies are both asleep, and nothing takes it. `client.bench.frame` is the first benchmark `mono.client` has ever had, over the per-frame CPU work that runs in `Phase::PreRender` at the display's rate: the draw list is linear at 1.75 ns a part (10,000 parts 19.1 us, 100,000 parts 175 us), and **`CollectParticleBatches` is 0.84 ns an emitter and stays linear at ten times the emitters**, which confirms the v0.17 redesign's whole claim - the CPU's share of particles is the emitter column and not the half million particles the device now owns. `ParticleFrame::Detach` at 26 us for 10,000 emitters is what the studio pays for rendering outside the tick and the client does not.
 - [x] release builds
 - [x] move node pipeline from vendor to engine
+
+### v0.19
+
+- [x] build out proper code architecture documents => `docs/CODE_ARCH.md`. The
+      layer stack, tiers, the dependency rule and what crosses it, what each
+      program links, where a new thing goes, and what is checked by what. It is
+      the in-tree half of `repo_layout.md`, which is cited sixty-two times by
+      section number from CMake, from public headers and from
+      `THIRD_PARTY_NOTICES.md`, and which has never been in this repository.
+- [x] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE - `docs/CODE_ARCH.md` §8 and
+      §9. A module is a bounded context; the primary port is an ECS column
+      rather than an interface; the four cases where two modules claim one noun
+      (`world`, `graph`, `ui`, `net`) are written down; the test of the hexagon
+      is the `server` preset, which configures with no client at all.
+- [x] properly make a ECS component document list - `docs/ECS_COMPONENTS.md`,
+      **generated** from `ecs::Components` by `just components`. 129
+      engine-registered components, each with its size, whether it is a tag,
+      whether a save can carry it, whether replication has a compact form, and
+      one written line saying what it is for. `just components-check` fails when
+      a registered component has no purpose line, so the list cannot drift.
+- [x] choose networking backend for each engine feature - `docs/CODE_ARCH.md`
+      §10. Ten features, what each actually needs, and what it should be on.
+      The finding: sixteen TCP connections and one shared UDP reliable window
+      are both workarounds for not having streams.
+- [x] the layer rule is enforced. `expected_graph.json` carries a `layer` on
+      thirty modules and `CheckTargetGraph.cmake` refuses an upward edge, an
+      unnamed same-layer edge and any edge into the program band. Six fixtures
+      under `mono.tools/architecture/tests/` check that the check still bites.
+      `AGENTS.md` rule 1 was the headline rule and was previously unchecked.
+- [x] the review itself - `docs/ARCH_REVIEW.md`. Findings from a full pass, each
+      marked as reproduced or as reported, so nothing here is acted on without
+      being checked first.
+- [x] the compiler cache. `MONO_CCACHE` finds `ccache` or `sccache` and sets
+      both launchers before the first `add_subdirectory`, so the vendor tree is
+      covered - that is 2373 of 4206 CPU-seconds. Measured on one machine, same
+      build directory: a clean build went from **3508 CPU-seconds to 197**, on
+      1894 of 1894 direct hits, with all 43 suites passing on a build where
+      every object came from the cache. A sixth of the calls were being skipped
+      silently because SDL and glslang carry precompiled headers and ccache
+      declines those unless sloppiness permits it, so the launcher passes
+      `CCACHE_SLOPPINESS` through `cmake -E env` rather than leaving it to each
+      developer's config. The lookup is `NO_CACHE`, so installing ccache after
+      a build directory already exists is picked up by the next configure rather
+      than needing a wipe - `find_program` caching its own "not found" would
+      have made the advice in the status message wrong for the exact person it
+      is written for. CI keeps its cache between runs on Linux and macOS.
+- [x] when a viewport in a side-by-side is closed, the open one should fill.
+      imgui deletes a dock node whose windows have gone, but its guard is
+      `window->DockId != node->ID` - and when a docked window stops being
+      submitted imgui stores that same id on the window, so the two match and
+      the auto-delete declines. The empty leaf kept its half of the split. The
+      panel undocks itself once on the frame it closes, remembering the node in
+      `DockInto` so reopening lands back beside its sibling.
+- [x] make the ground grid static. The line *positions* were already pinned by
+      `SnapDown`; what slid was which lines were drawn heavy. `major` came from
+      the loop index, and the loop runs outward from a camera-snapped origin, so
+      the heavy lines moved one cell every time the camera crossed one.
+      `IsMajorLine` now decides from the world coordinate. Measured over 20 m of
+      camera travel the old rule produced five different sets of heavy world
+      lines and the new one produces a single set.
+- [x] make the ground grid fade off in the distance. The fade existed and could
+      not work: `ImDrawList::AddLine` takes one colour, so a line had one alpha
+      along its whole length and the grid stopped at a hard rectangle whatever
+      that alpha was. Each line is now drawn in eight pieces, each faded by the
+      radial distance from the camera to its own middle rather than by how far
+      sideways the line sat. Roughly 1,300 segments a panel rather than 13,000.
+- [x] when you upload a asset in studio, it doesn't process it for the local
+      store. `ImportAssetPath` ensured the store, copied the bytes into `raw/`
+      and refreshed the list - and never baked. So a dropped file was invisible
+      in the viewport, silently absent from the next Publish, and on a fresh
+      store made `PublishLocal` refuse everything with a message reading "bake
+      before publishing - `contentimport --publish` and the studio both do",
+      which was true of one of them. It bakes each imported file now, through the
+      same one-file baker the asset picker's per-row button already used. A file
+      that will not bake is counted rather than fatal: plenty of what a person
+      drags into a content store is a licence or a `.txt`.
+- [x] check cdn processes obj files. The `.obj` path itself was wired end to
+      end; two real gaps sat either side of it. Dropping one in studio never
+      baked, which is the item above. And **a textured `.obj` baked white with no
+      error**: `bake::ReadObj` set `Submesh::Material` from `usemtl` and never
+      opened the `.mtl`, so `Texture` stayed empty and `BaseColour` stayed white
+      while the `.mtl` was copied into the store as an `unknown` asset nothing
+      referenced. `bake` has no filesystem by design, so it records the `mtllib`
+      name and `assetc` reads the library - `newmtl`, `map_Kd`, `Kd` - and fills
+      the fields in *before* the existing rewrite, so an OBJ's reference goes
+      through the same resolver and in-tree check as a glTF's. Measured: a mesh
+      that carried a zero-length texture now carries `wood.atex` and
+      `BaseColour [0.8, 0.4, 0.2, 1.0]`, exactly the `.mtl`'s `Kd`. Two tests,
+      and a stale comment in the suite corrected - it said an `.obj` could not
+      express a dangling reference, which stopped being true with this.
+- [x] ground grid should expand way further. 40 cells was 160 studs, which ends
+      well inside a baseplate. 120 cells is 480. Tripling the radius does not
+      triple the cost: past the old 40-cell band only the heavy lines continue,
+      one in five, so the far two thirds costs a fifth of what it would - 1808
+      segments against 1296 for three times the reach, and nothing within 160
+      studs looks any different.
+- [x] in "Start" with 4 clients running, tons of network activity for no
+      character movement. **Change detection was fine - zero rows detected at
+      rest.** `mono.client/src/Replicated.cpp` registered `gui` and `script`
+      classes and not `scene`'s, so every `Part` a snapshot named arrived
+      untyped. `ecs.InstanceClass` crosses as a class *name*, a replica that
+      cannot resolve it stores an empty one, and the anti-entropy audit then
+      disputes every group it looks at - which re-arms the recovery walk to
+      re-send every row of every entity every few ticks, for ever, over a
+      difference no amount of re-sending can fix. Measured on `loadtest` with
+      four clients and nothing moving: **91,507 B/s to 16,964, minus 81%**;
+      disputes 600 to 4; untyped-class warnings 553 to 0. `mono.studio` calls it
+      and the registry is process-wide, which is exactly why the editor never
+      showed it. `mono.tools/loadtest` had the same gap.
+- [x] in flamegraph, simulation needs more granularity, HUGE chunk missing. The
+      premise was not what it looked like: `ecs::Scheduler` already opens a span
+      per system and per phase, and the serial path shows all of it. What
+      vanished was the **parallel** path - `Universe::Tick` dispatches worlds to
+      pinned workers and `FrameGraph::Push` refuses an off-thread span, so with
+      more than one world the whole of `simulation` was one opaque bar. The
+      schedulers had timed themselves all along, so the fix is to report what
+      they measured after the batch joins, named by world. A four-world capture
+      that read `worlds (pinned workers) 23.935` now reads
+      `client.world.2 · step-particles 10.653`, `client.world ·
+      script-heartbeat 9.393`, and so on.
+- [x] and the bug that found: nothing called `Scheduler::ClearTimings` on the
+      world path. `World::Tick` calls `RunPhases` directly rather than
+      `Scheduler::Tick`, and `ClearTimings`' own header warns that a caller
+      splitting the frame that way has to do it itself. Nothing did, so
+      `Timings()` had accumulated since process start and the studio's systems
+      tab was showing a lifetime total labelled as a frame.
+- [x] in flamegraph, when average over 250ms is selected, the bars over-expand
+      into other bars. The average summed spans keyed on (depth, name) and
+      divided by the **frame count**, but a span can open several times in one
+      frame - a world owing two ticks, N worlds at one depth - so a span seen k
+      times published k times its width with a left edge k times too far along.
+      Duration still divides by frames, because what a span costs *per frame* is
+      the useful figure; the start divides by occurrences. Plus a clamp in the
+      layout, because an averaged span can still exceed an averaged frame and a
+      bar drawn past the right edge lands on its neighbours.
+- [x] when setting keybinds, disable input after keybind sets. Binding is a key
+      press and `IsKeyPressed(key, false)` is true for the whole frame, so the
+      press that assigned Ctrl+D was still true when the dispatcher ran later in
+      the same frame and duplicated the selection. `Fired` refuses on the frame a
+      binding changed - the whole dispatcher, because the press may also be
+      somebody else's chord, and a frame in which no shortcut fires is not one
+      anybody notices.
+- [x] keybinds do not set properly (changes other keybinds). The `Action` enum
+      and the `DEFAULTS` table are two lists of the same things in two places and
+      they disagreed: the enum puts `ShowStatistics/ShowFrameGraph/ShowHeap`
+      before the four tools, the table puts the tools first. `IndexOf` cast the
+      enum to a subscript, so seven rows were cross-wired and binding "Select
+      Tool" wrote onto the frame graph's row. The counts matched, so it compiled
+      clean, and the suite missed it because it only covers the prefix where the
+      two orders agree. `IndexOf` builds its map from what each row says it
+      binds, so the two can never disagree again. Two regression tests, proved to
+      fail against the old code.
+- [x] add a spawn location that forces character to spawn at it.
+      `SpawnLocation::Forced`, checked before team matching and before tree
+      order, and still subject to the `Enabled` flag that was already there so
+      turning one off gives the ordinary rules back. Taken from the struct's
+      explicit `Reserved` padding, so the row is the same size and every pad
+      written before this reads back with it false. Bound as a script property.
+- [x] add a "Play Here" button. Beside Play in the transport. **A forced pad
+      rather than a teleport after the fact:** a character is built by
+      `LoadCharacter` from whatever `FindSpawn` answers, so moving it afterwards
+      is a visible frame in the wrong place plus a race with the joining client.
+      The pad is one reused instance named `PlayHere` and is `NotArchivable`, so
+      pressing it twenty times leaves one pad and a saved `.agame` never carries
+      somebody's old one.
+- [x] input textbox not working. `gui::Type` was called by `mono.client` and by
+      nothing in `mono.studio`, so a `TextBox` in a studio viewport took focus
+      from a click, showed a caret and then ignored the keyboard - the editor was
+      the one place a text box could be focused and not typed into. The overlay
+      pass now builds a `gui::Typing` from `ImGuiIO` (which is already decoded
+      text, so no key-code table), gated on the panel being in front, the
+      keyboard actually being in it, and imgui not wanting the keys for a field
+      of its own.
+- [x] allow creating worlds even when scene is running in studio. The refusal
+      was correct when written and its reason had since gone: it said "the
+      snapshot Stop restores was taken before the run began", which was true of
+      `Universe::Save`. `WorldRun::Snapshot` is a *world document* now and
+      `StopWorld` destroys and rebuilds exactly the world it names, so a scene
+      created during a run is in no snapshot. Also safe against the tick -
+      `Universe::Tick` blocks and the button is pressed while the interface
+      draws. Removal keeps its own guard.
+- [x] live instances listed items get cutoff in list. The table was
+      `SizingStretchProp` and the action column took 0.22 of the panel while
+      holding `View`, `+ Player` and `Stop` side by side - a proportional width
+      cannot be right for a cell whose content has a fixed size. It is
+      `WidthFixed` now, measured from the labels rather than a pixel guess.
+- [x] when play is pressed, ensure a viewport is opened. Nothing in
+      `SetRunMode`/`BeginRun` opened one, so Play with every panel closed
+      started a server and a client and drew nothing. It now calls
+      `ShowWorldInViewport`, the same path the Live Instances "View" button
+      uses, so it reuses an open panel or reopens the main one and only makes a
+      new panel when every one is spoken for.
+- [x] NonEuclidean.luau spawn is wrong spot. The file had no spawn at all, so
+      `scene::FindSpawn` returned a default `CFrame` and started everybody at the
+      origin - which here is the middle of exhibit 1's tunnel mouth, on
+      `LongMouth`'s own plane. A pad now stands on the plate in front of the row.
+- [x] NonEuclidean.luau has multiple overlapping things. Every exhibit built
+      its hidden space at the same depth, so exhibit 3's third room stood inside
+      exhibit 4's first chamber (9 studs of x, 16 of z) and exhibit 4's second
+      stood 12 studs inside exhibit 6's first. A hole cannot show that as a
+      mistake - it shows one room with another room's wall through it, which
+      reads as the *portal* being wrong. `away(n)` gives each exhibit a depth
+      lane, so an exhibit may be as wide as its trick needs.
+- [x] selection boxes are misaligned. `ProjectionFor` read the *live* camera and
+      its comment said that was "the camera `PresentWorld` is about to render
+      with" - true of exactly one panel per frame. `Renderer::Render` owns the
+      whole frame, so the studio draws one panel and round-robins, and every
+      other panel shows a texture from an earlier frame while its overlay was
+      projected from the camera as it stands now. About 26 pixels of skew on a
+      1600-pixel panel at 90 degrees a second, which is a gizmo that shakes while
+      the camera moves and settles when it stops. `PresentWorld` records the
+      camera and lens it actually rendered each panel with; the overlay projects
+      from that. A replica still overrides it, because a replica renders through
+      its own `ActiveCamera`.
+- [x] when pressing CTRL and scaling a part, scale both sides at same time.
+      `ScaleSide::Both` already existed as a *preference*, so the only way to
+      reach it was to go and change a setting. Ctrl now inverts it at the grab.
+      `BothHalf` rather than `Both`, because that is the one whose resulting
+      *size* lands on the snap step. Read once, at the grab, so a modifier
+      cannot change what a drag means half way through it.
+- [x] add a (ACTIVE) scene_name. Viewport tabs read the scene they show, and
+      the one being edited is marked. imgui keys a window on its title, which is
+      why they were fixed strings; `###` splits the two, so the text can change
+      every frame while the window, its dock node and the saved layout stay the
+      same panel. **One-time cost:** the stored ini key changes, so existing
+      saved layouts undock these panels once. `ViewportIdentity` is what
+      `SetWindowFocus` and `FindWindowByName` must now be given.
+- [x] some studio ui stretches instead of scales with aspect. The real
+      distortion was the node-graph previews. `PreviewImage` is square by
+      contract - "Pixels a side. Square, because a node's thumbnail slot is" -
+      and the studio's render-pipeline previews go through the same sink with a
+      texture of the renderer's own, which keeps the *resource's* shape: a
+      full-screen target's preview is as wide as the screen and was squashed into
+      the square slot by about 1.78. The canvas takes an optional aspect now and
+      fits the picture inside the slot rather than stretching it across.
+      Optional, so every caller that honours `PreviewImage` is unchanged.
+- [x] physics bugs with the character (in playground steps, you phase through
+      blocks, doesn't do bounds properly). `scene::StepCharacters` hard-assigns
+      `Motion::Linear.X/Z` every `PreSimulation` - right for responsiveness, and
+      it throws away the solver's contact impulse unintegrated. The only
+      resistance left is position correction, capped at 3 m/s, and a default
+      `WalkSpeed` of 16 beats it better than five to one, so a character leans
+      through a wall over twenty ticks. The continuous sweep never catches it
+      because that asks the *tunnelling* question - a 0.267 step against a 0.5
+      half-extent never qualifies. `physics::ClipCharacterVelocity` now runs
+      immediately after the controller and takes the into-surface component out
+      of the intent before the integrator sees it. **Measured: walks to the block
+      face at z -14.400 and stays; before, it passed clean through all four.**
+      It stops rather than climbs - there is no step-up in the controller, and
+      that is a feature rather than part of this.
+- [x] add moving cubes in tunnels for lighting test too. A lit drifter pair
+      down the west side, at a third of the fixed lamps' brightness over a 16
+      stud range - a lantern at eye height on the open plain floods the ground at
+      the lamps' own output and the stripes stop reading. They add the one
+      lighting case a fixed lamp cannot make: a pane re-places the far side's
+      lights every frame, and a lamp that does not move never says whether it
+      re-placed them correctly.
+- [x] sometimes when starting playground, the baseplate is rotated 45 degrees.
+      **The scene is not nondeterministic** - captures are byte-identical, and it
+      has no rotation, no random source and no hash-derived transform. What turns
+      is the client's placeholder camera, which orbits at 0.12 rad/s and so is a
+      quarter turn round within seven seconds; "sometimes" is how much wall clock
+      had passed before anybody looked. That camera now holds a fixed angle and
+      height for any world with a spawn pad - a world meant to be stood in is not
+      one to orbit - and the height is proportional to the scene, because a fixed
+      one is a grazing look at a baseplate. Verified: identical captures at 60,
+      200 and 400 frames, where before all three differed.
+- [x] surfacecamera lighting is really dark. **Measured: a mirrored floor read
+      0.21 of the same floor seen directly.** The main view is deferred and ends
+      at the `tonemap` node; a mirror is forward - `mirror-capture` runs
+      `opaque.frag` straight into the surface texture and nothing encoded it,
+      because there is no `mirror-tonemap` node the way there is a
+      `portal-tonemap` one. The pane then read that linear value back as a
+      display colour and the frame's tonemap encoded it again, and a linear
+      value through that round trip comes out about a fifth as bright.
+      Encoding at capture makes the round trip an identity: **0.21 to 0.93**,
+      the residue being the SSAO and seam spill a surface pass genuinely does
+      not get. Flagged per draw rather than done unconditionally, because
+      `portal-capture` runs the same shader and already has its own tonemap
+      node - portal captures are byte-compared and visually identical.
+- [x] content needs more granularity. Three stages on the client's content path
+      had no span and therefore landed in `content`'s self time with nothing to
+      name them: `OfferPublishedContent`, which walks every catalogue entry -
+      nearly two thousand on a filled store - and enters every world to ask what
+      each wants; the mesh upload, which had none while its texture sibling did;
+      and the material decode, the only decode on that path without one.
+- [x] pump events lags sometimes. Made granular by event kind, in both the
+      client and the studio: a window resize is a synchronous round trip to the
+      window system and a keystroke is not, and one bar covering both cannot say
+      which one cost the frame. SDL exposes no name API, so it is a switch
+      returning literals - `ENGINE_PROFILE_DYNAMIC_STABLE` keeps the pointer
+      rather than copying, so a name built per event would dangle.
+- [x] mouse movement seems to also cause pump events to increase lots. The
+      studio read `Clock::Seconds()` **once per input event** to stamp
+      `LastInputSeconds`, and a mouse dragged across the window delivers a motion
+      event per sampled position - dozens a frame, each paying a clock read to
+      record the same instant. Nothing reads that value at a resolution finer
+      than a frame: it decides whether the editor may drop to its idle rate. The
+      loop sets a flag and the clock is read once per pump. The per-event spans
+      above are what will say whether anything else remains.
+- [x] in flamegraph, add an "Event Scheduler" that auto-pauses on a rule.
+      **The design decision is where a rule runs.** A rule tested by the panel
+      would sample four times a second at the shortest interval it offers, and
+      the frame it is written for is one frame long - which is the exact failure
+      the feature exists to fix. So a rule is evaluated in
+      `FrameGraph::EndFrame`, where the tree is still in hand, and it latches:
+      a reader that asked "is anything wrong now" would answer no on the frame
+      after every hit worth catching. One comparison per rule and no expression
+      language, because every rule anybody has asked for is "this number got too
+      big". An `under` rule waits for its span rather than firing on a frame
+      that never ran it. Rules persist in the preferences file, spelled in the
+      same words the panel shows, and are armed at start-up whether or not the
+      panel is open.
+- [x] in discord presence tab, add a list of templating replacement words. Five
+      tokens, each with what it means and **what it says right now**, because a
+      name and a description leave somebody guessing whether `{instances}`
+      counts the world or the selection and the answer is one function away. A
+      row copies itself. The names are checked against `Editor::DiscordFacts`
+      by hand for now: `Fill` resolves an unknown token to nothing rather than
+      to itself, so a listed-but-unpublished token would offer a word that
+      silently deletes itself.
+- [x] add selectable text in the control (mcp) panel saying how to attach, with
+      claude/codex/prompt tabs. Read-only inputs rather than labels, because the
+      job is dragging over them, and a config block that has to be retyped gets
+      retyped wrong. The Prompt tab is the "tell a model" half: it names the
+      port, the bridge and the tool count, and says not to start the editor.
+      **And it fixed the port.** There were three defaults and they disagreed -
+      the editor's help said 8738, its panel offered 8720, `mcpbridge` dialled
+      8730 - so following the help got a bridge talking to a closed port. One
+      `engine::control::DEFAULT_PORT` now, at 8738, which is what `.mcp.json`
+      and `RUNNING.md` already said. Paths inside the JSON and TOML blocks are
+      backslash-escaped, or a Windows path would paste as a parse error.
+- [x] change the Terrain demo to procedural infinite generation, and spawn a
+      character on top of it. **The field is a function now**: `HeightAt` takes
+      a world coordinate and has no table behind it, so chunks are built ahead
+      of whoever is walking and dropped behind them, and two chunks that meet
+      agree on the column they share because they call the same pure function
+      with the same coordinate. A chunk samples its own block with a one-stud
+      skirt for the normals, which costs six per cent of the noise twice and is
+      what removes the shared array that made the old version finite. Verified
+      over 1,300 studs of travel: 173 chunks built, 117 dropped, about sixty
+      resident throughout.
+      The character spawns on a pad at the field's own height at the origin, and
+      **it is held on the surface by the scene rather than by a collider**. A
+      `MeshPart` built at run time has no baked collision geometry - the client
+      uploads an `EditableMesh` to the renderer and registers no hull or
+      triangle soup for it - so a chunk's collider falls back to the part's own
+      bound, which is a 64-stud box the full height of the chunk: a character on
+      the surface is *inside* it and cannot move at all, which is what happened
+      the first time this scene had somebody in it. So the meshes do not
+      collide and the field is the floor, from the same function the mesh was
+      built from. Measured walking east at 16 studs a second across 320 studs of
+      hills, the root sits exactly half a body above the field the whole way.
+- [x] optimise the replication publish path, `ReplicationStress` in a release
+      build. **Measured before assumed, and the profile moved the target.**
+      761 ticks of twenty thousand moving parts: `Authority::DetectRows` is
+      0.69 ms a tick, and the two passes either side of it are bigger -
+      `Authority::Score` was 2.38 and `Publish`'s own unnamed self time was
+      1.44.
+      **Score keeps a cursor now.** It answers "which entity is this candidate
+      for" with a `lower_bound` over the twenty-thousand-entry `Bearing`, which
+      is fifteen probes at fifteen unrelated addresses, once per changed row -
+      three hundred thousand cache misses a tick to find an entry usually one
+      along from the last one. Candidates arrive ascending within a component
+      (`Signature::Changed` is a merge over sorted ids, `EachChangedRuns` visits
+      tables in id order, `OutstandingSet` holds its rows ascending), so the
+      search gallops from a cursor and a slot boundary resets it. A list that is
+      not ordered at all still gets the right answer from a gallop that
+      degenerates to the binary search it replaces. Two runs each side:
+      1858/1772 ms against 1569/1577/1491, so **2.38 to 2.02 ms a tick, -15%**.
+      **And the gap is named.** `Authority::Record`, `EmitAudit`, the packer's
+      identity permutation and the snapshot release had no spans, so `Publish`
+      arrived as 1.44 ms a tick doing nothing anybody could see. `Publish` self
+      is 0.75 now and `Authority::Record` - the acknowledgement bookkeeping - is
+      0.48 of what it was hiding.
+      What is left is not in this module. `Server::SurveyVisibility` is 3.30 ms
+      a tick and `Score`'s remainder is the host's `Priority` hook, which for
+      `mono.server` is an occlusion raycast per entity: twenty thousand of them
+      a tick, memoised to once per entity and no cheaper than that. Both are
+      `mono.server`'s to answer.
+- [x] add a `Bidirectional` bool to portals: on, a mouth may be entered from
+      either side; off, only from in front. In front is the side the face's
+      normal points at - the side the pane shows its image on, and the side
+      `SeamCarries` calls "not yet through". **Refused at the crossing and
+      nowhere else**: the pane still draws from both sides, still cuts a body
+      standing in it and still lights the room behind it, because a mouth that
+      vanished when you walked round it would read as a rendering fault rather
+      than as a rule. It fits in the two bytes `Portal::Reserved` was already
+      declaring, so the row is the same size it was. Three cases, plus a
+      two-crate probe: with it on both crates cross, with it off only the one
+      that approaches the face does.
+- [x] when character sits in middle of portal, teleporting between both sides.
+      Two defects, one each. **The crossing had no hysteresis of any kind**:
+      `CrossPortals` maps the previous frame through the seam for the renderer's
+      benefit, and `SeamMapping` carries a pane's front hemisphere to the far
+      pane's *back* one - so the mapped `was` is behind the far plane by
+      construction, the next tick's segment straddles it, and the body crosses
+      straight back, forever. The map now clamps that frame to the side it is
+      leaving from first, along the normal only, so the tick's sideways motion
+      is kept and the renderer still draws a body emerging from the pane. The
+      other half is the walk intent below. Measured on
+      `scratchpad/CharPortalPing2.luau`: a three-tick ping-pong that ran to the
+      end of every run became one crossing at t=54 and a body standing still in
+      the far room for the remaining twenty-six ticks.
+- [x] character physics bugs and movement in weird directions and stuff. The
+      clip above fixed walking into things; this fixed direction.
+- [x] check character physics with portals - normal objects are fine and the
+      character is not. **The reporter's instinct was exactly right and the
+      reason is one line.** `CrossPortals` maps a body's velocity through the
+      seam, and for a crate that carry is what walks it out of the far pane. For
+      a character it survives zero ticks: `StepCharacters` reassigns `Linear.X`
+      and `Linear.Z` from `Humanoid::MoveDirection`, which is **world-space and
+      mapped by nothing**. `PortalTransit::Turn` is written on every crossing
+      and its only consumer turns the *viewer's* camera, which on a
+      server-simulated character is a different machine. The intent now turns
+      with the body, gathered inside the walk and applied after it like every
+      other cross-entity write in that pass. `Rotate` and not `Carry`: a walk
+      direction is a unit vector, and a shrinking pair would otherwise hand the
+      controller an intent longer than one and make the character sprint.
+- [x] when character sits in portal, character split in half. Whether a row may
+      be cut by a hole is "does it fit the aperture", and **a character is a
+      dozen drawn rows**: standing in an opening its torso is comfortably inside
+      the rectangle and its feet sit on the bottom edge, where the box
+      overhangs. Asked per row that is yes for the torso and no for the feet,
+      and a row that answers no is drawn *whole* rather than cut - so the body
+      is clipped at the plane from the waist up and pushed through the wall from
+      the ankles down. A drawn row now carries the rig it belongs to and the
+      question is asked once per rig. **Any row, not every row**: the union of a
+      rig's boxes is bigger than all of them, so a rule stated against it
+      refuses the whole character the moment one toe crosses the rim, which ends
+      the split by drawing nothing at all. The rule itself is unchanged, which
+      is what keeps refusing the room-sized slab it exists for. Four cases in
+      `engine.scene.surfacecameras`, two of which fail without the fix.
+- [x] add dev and release builds to the github release. Two archives per
+      platform per version rather than two release pages: the shipped one from
+      `release` (-O3, no heap profiler) and `atomic-<version>-<platform>-dev`
+      from the new `dist-dev` preset (-O1, frame pointer kept,
+      `MONO_HEAP_PROFILE=ON`). **The diagnostics cannot be a runtime switch** -
+      a block allocated with no profiler header and freed through the tracking
+      `operator delete` reads four words of somebody else's memory - so the
+      shipped build answers `--heap-report` with "this build has no allocator
+      hooks", and until now the only answer to "it leaks" was "build the engine
+      yourself". `-O1` because a build nobody can play is a build nobody
+      reports from. `MONO_OPTIMISE` grew a level rather than a second boolean
+      beside it. The dev flavour builds for a tag only, and the matrix is
+      emitted by the `version` job because `jobs.<id>.if` cannot read the
+      `matrix` context. Verified end to end on Linux: the dev archive unpacks,
+      runs, and writes a 123-tag heap report the shipped binary refuses.
+- [x] crossworldseam demo is not setup properly. The command in the file's own
+      header omitted `--view-spacing 0`, so following it composited the two
+      worlds 40 apart: two 80-stud floors z-fighting in a coplanar band and the
+      camera aimed down the middle at neither pane. That was most of the report
+      and is fixed.
+      **The rest does not reproduce, measured rather than eyeballed.** Both panes
+      draw. Taking the deviation across each pane as well as the mean - an image
+      varies and a flat material does not - the hole reads `(84, 64, 40)` σ33
+      with one world, its own room in the fallback, and `(42, 61, 89)` σ15 with
+      two, which is the far world's blue palette seen through it. The mirror
+      beside it reads `(57, 45, 34)` σ18 at *both* counts, identical to a tenth
+      of a level. The control that makes those numbers mean something: delete the
+      mirror's `SurfaceCamera` and leave its pane, and the same region reads
+      `(142, 142, 147)` σ**0.3** - the material lit, flat, which is what "no
+      image" looks like here. The branch the note accused,
+      `SurfaceView::InstanceCount` being non-zero so the pass draws only the
+      foreign range, is what *makes* the two-world picture blue. The scene's
+      header carries the measurement in place of the diagnosis it replaced.
+- [x] ground grid "enables always on top" when moving/scaling something,
+      otherwise its not "always on top". **Both halves, and the second one is a
+      render pass.** The grid was an imgui overlay, drawn after the world with
+      no depth buffer to test against, so it drew over the geometry it should
+      have been under and no flag could change that.
+      It is a plane now, drawn by the renderer: a fullscreen triangle that
+      intersects the camera ray with `y = 0` per pixel, derives the line from
+      the world coordinate and its own screen derivatives, and writes
+      `gl_FragDepth` so the **hardware** depth test does the occluding. It is
+      one triangle at the head of the transparent pass, which already has the
+      depth attached - a node of its own would have needed the depth as a
+      sampler, and this needs no sampler at all. Line width is a screen-space
+      width from `fwidth`, so it is the same weight near and far and fades out
+      on its own when a cell is smaller than a pixel, which is a mip chain's
+      job done analytically.
+      The overlay copy survives for the length of a drag, which is the item's
+      own request: a part being dragged sits on the grid and would hide the
+      lines somebody is lining it up against, so while a handle is held the
+      grid goes back on top and at full strength.
+      Measured against a wall and a post standing on the ground: with the grid
+      on the ground deviates by 16.1 levels and the wall by **1.7 - the same
+      1.7 as with the grid off**. Nothing was drawn over the geometry in front
+      of it.
+- [x] fix viewport image size stretch. **Investigated to a negative result.**
+      Four things were measured or read, and each rules out a mechanism:
+      * a still frame at two window shapes is right. `MipProbe`, one build: the
+        marker post is 71 x 119 pixels at 720x720 and 68 x 119 at 1440x720.
+        Identical height, identical pixel scale, which is what a fixed vertical
+        field of view widened horizontally means; the three pixels of width are
+        the box turning in perspective because it sits off to one side.
+      * a *moving* camera draws the same frame as one that arrived and stopped.
+        A scene that sweeps a full turn over eight ticks against one placed at
+        the final yaw on tick one: **zero pixels differ**, worst channel delta
+        zero. So no stale frustum, no aspect written after the pass that reads
+        it, nothing that only shows while flying.
+      * on screen the view is rendered at the swapchain's own size.
+        `Renderer.cpp` takes `width`/`height` from
+        `SDL_WaitAndAcquireGPUSwapchainTexture` and `sceneWidth`/`sceneHeight`
+        are those in the window path, so the projection's aspect and the blit's
+        rectangle are the same number by construction and cannot disagree.
+      * the studio's panel samples `SceneExtent`'s UVs and letterboxes
+        uniformly on the frame a resize has not landed on, so it cannot stretch
+        either.
+      Reopen with a window size, a screenshot and what it should have looked
+      like. There is no mechanism left that any of the above admits.
+- [x] in MipProbe scene, when you fly camera around the mesh is being projected
+      incorrectly (windows). The same investigation, the same negative result,
+      above. The moving-camera case is the one this report adds and it is the
+      second bullet.
+- [x] bake collision geometry for a run-time `EditableMesh`. A script that
+      built geometry built something that could be seen and not touched:
+      `client::EditableMeshUploader` handed the mesh to the renderer and
+      registered nothing with `scene::CollisionShapes`, so a `MeshPart` naming
+      one fell back to colliding as its own bound - which for a terrain chunk
+      is a 64-stud box the full height of it, with the character standing
+      *inside* it.
+      `scene::RefreshEditableMeshCollision` bakes per world, revision-tracked,
+      and **forgets the shapes of meshes that are gone** - a streamed world
+      builds a mesh a chunk, and a table that only grew would hold a hull and a
+      soup for every chunk anybody ever walked past. The ledger is a resource
+      rather than a field on a host, because a server holds many worlds and a
+      map keyed by entity id would have two of them collide.
+      **Registered by `physics::RegisterPhysicsSystems`**, so every host that
+      solves gets it and the dedicated server - the machine that decides where
+      anybody is standing - needs nothing wired. The studio also calls it from
+      its own path, because an edited world never ticks and the collider view
+      is the thing somebody opens to ask what a mesh collides as.
+      **The soup always and the hull only when a collider asks.** Measured on a
+      4,225-point chunk: the soup is 1.3 ms and quickhull is 7.3, and a
+      heightfield's convex hull is a dome over its summit. Baking both made the
+      streaming tick 79 ms; the tick's p50 is 5.8 ms now.
+      `game::AddCollisionShapes` delegates to the same `scene::
+      BakeCollisionShapes`, so a delivered mesh and a script-built one cannot
+      drift apart on tolerance or winding.
+      Verified: a crate dropped on a script-built floor rests on it, slides down
+      its slopes and settles in a trough; a character walks 323 studs across the
+      Terrain demo's mountains with a worst penetration of 0.45 studs.
+- [x] a character can end up stuck in the air after a launch. Not sleep and
+      wake, which is what it looked like: `SweepFastBodies` built its candidates
+      through the three-argument `ShapeInstance` constructor, which has nowhere
+      to put a hull or a soup, so every baked collider it swept against was
+      demoted to the part's extent. A terrain chunk's extent is a box the height
+      of its tallest point, so its roof is the mountain top laid flat over the
+      whole chunk, and a body falling fast enough to be swept was clamped just
+      short of that roof with nothing under it. Nothing touched, so no contact
+      resolved it and no impulse cancelled the fall: gravity kept adding to a
+      velocity that no longer moved anything, and the next tick clamped it
+      against the same roof a fraction sooner - which is the 0.001 studs a tick.
+      Fixed by reading the shapes `SyncBroadphase` has already resolved,
+      `PipelineInternals::StaticShapes`, by the same subscript as the records -
+      correct and one fewer `Store::Get` pair per candidate.
+      The second half was the same walk falling *through* the landscape after
+      about ninety seconds. On a face too steep to walk, `ClipCharacterVelocity`
+      projected the drive across the face and nothing removed the overlap: a
+      character's velocity is hard-assigned every tick so the solver's impulse
+      is discarded, and position correction is capped at
+      `MAXIMUM_CORRECTION_SPEED`, which a ten-stud-a-second slide beats. The
+      overlap accumulated until the ground probe - a ray from a step above the
+      feet - started *inside* the hill, found nothing, and reported the
+      landscape as absent. Fixed by pushing the body back out along the face
+      normal by the burial measured perpendicular to the surface: away from a
+      cliff rather than up it, and only ever outward.
+      Verified: the Terrain demo walks 2 498 studs in 12 000 ticks with a worst
+      penetration of 0.45 studs, never stuck and never through.
+- [x] convex sweeps against a triangle mesh. `SweepConvex` dispatches on the
+      fixed shape: a soup gathers the triangles overlapping the swept envelope
+      through `collision::OverlapTriangles` and sweeps the mover against each
+      one as a three-point hull, keeping the earliest, which is the same shape
+      `MeshPair` gives the contact path. The gather, the triangle budget and the
+      envelope are shared between the two through `ShapeSupport.hpp` rather than
+      written twice.
+      **The normal is the triangle's own plane, not the direction between the
+      closest points.** A body already touching the mesh - which for a character
+      walking on terrain is every tick - separates by nothing, and the general
+      sweep answers that with the reverse of the motion, because between two
+      convex shapes there is nothing better to say. Against a soup there is. The
+      made-up normal cost a character walking three studs from its spawn and
+      stopping against what looked like a vertical wall, which was the ground it
+      was standing on.
+      Verified: five cases in `physics/tests/ConvexQuery.cpp`, four of which
+      fail when the mesh walk is taken out, plus the two character bugs above
+      that this uncovered.
+
+- [x] add a batch moveto/setcframe system (e.g. skygrid to move them all at
+      once). `scene::BulkMoveTo` and `scene::BulkPivotTo` take two spans, and
+      `Instance:BulkMoveTo` / `:BulkPivotTo` reach them from both VMs through one
+      new `ScriptCall::ReadPlacements`. The first is Roblox's
+      `WorldRoot:BulkMoveTo`; the second has no Roblox counterpart and exists
+      because the engine's single-instance pair is `CFrame =` *and* `PivotTo`.
+      **The cost of moving a part from a script is not the move**, which is what
+      makes this worth a method: every `part.CFrame = x` goes through the VM's
+      `__newindex`, a string compare of the member name against every property
+      the class has - `script::ScriptableProperty` is a linear scan - the value
+      unpacked out of a userdata, and `Store::SetProperty`'s own checks, before
+      anything touches a `Transform`. Measured in the `release` preset over
+      eight thousand parts: 1.349 ms a tick per-part against 0.975 ms batched,
+      and the batch pays a Luau table store per part that the per-part version
+      does not, so the boundary is worth more than the difference shows.
+      **Per row it does exactly what a single write does** - the same
+      `Transform` lookup, the same change mark - and a case in
+      `scene/tests/Part.cpp` pins that. A batch on a cheaper path would leave a
+      world a single write would not, and `physics::SyncBroadphase` reads those
+      marks to decide a static collider moved.
+      No `BulkMoveMode`, unlike Roblox: `.Changed` here is a projection of the
+      store's change tracking read at the start of the next tick rather than
+      something that fires at the assignment, so there is no signal storm to opt
+      out of and the enum would select between two identical behaviours.
+- [x] do similar for batched moveto/setcframe in other systems. Four demos moved
+      over: `SkyGrid`, `Rings` (and its JavaScript twin, which is also what
+      proves the second VM's reader end to end), `ReplicationStress` and
+      `StressMirrors`. Rings is 0.220 ms a tick against 0.198; SkyGrid is
+      unchanged at 0.041, because two hundred blocks is below where any of this
+      is measurable - it is in the roadmap as the example and it is the shape it
+      stands in for, a crowd or a conveyor, that pays.
+      **`StressPhysics` was left alone on purpose.** Its whole tick is five
+      property writes on one tray and its own comment says why: a script that
+      walked the blocks would be measuring Luau instead of the broad phase.
+      The studio's drag was left alone for a different reason - it writes
+      `Transform` through `Store::Set` rather than the property path, over a
+      selection, and records an undo entry per instance that a batch would have
+      to take apart.
+
+- [x] quic implementation. **Built, proved and wired behind `--quic`.** ngtcp2
+      v1.25.0 is vendored `lib/`-only, the packet protection is
+      `net/quic/Crypto.hpp` checked against RFC 9001 Appendix A, and the
+      handshake is a TLS 1.3 stack in tree. `docs/QUIC.md` §0 is the staging
+      table and §12 is what the survey got right and wrong; `docs/DEFERRED.md`
+      D00014 is closed.
+
+      **The TLS decision went to the fallback**, which §4 ranked second. AWS-LC's
+      whole case rests on its pre-generated build files needing no Go and no
+      Perl - a claim §11 lists as an open question and §10 says to verify on all
+      three platforms *before* building on it. Verifying it on one proves
+      nothing about the other two. So the backend is X25519, two suites, Ed25519
+      and RFC 7250 raw public keys over Crypto++, and the fresh-clone rule
+      survives unargued-with. **What it costs is interoperability and therefore
+      HTTP/3**, which is the cdn half of D00014's second-consumer argument and
+      is now the one thing that got worse.
+
+      **`docs/CODE_ARCH.md` §10.1's open question is answered and it is the
+      first of the two**: `replication::SessionPort` with two implementations,
+      not a `Session` whose four members become optional. That would be one
+      class with two modes and a branch in every method that only one
+      configuration runs, which is §8's "two overlapping reliability stacks is
+      worse than either" applied inside a type. Channels are sender-owned
+      unidirectional streams, one per `MessageKind` - §10's table read literally
+      - so a join snapshot and a door opening stop sharing an ordering.
+
+      Three things survive the swap: `BytesPerTick` as a ceiling above the
+      controller, Copa itself (deleting it is a decision to take Cubic's latency
+      and belongs in a commit that says so), and `ConnectionStats` refilled from
+      ngtcp2 with `SendsOverBudget` keeping its one meaning.
+
+      Two findings the survey could not have carried. **ngtcp2 does not copy
+      stream or CRYPTO data** - it holds pointers until the peer acknowledges,
+      so the outbound buffers are a deque that is never re-seated and a vector
+      would corrupt a retransmission rather than crash. **A server cannot encode
+      its transport parameters until it has read the client's** - RFC 9368's
+      version information is filled in when the remote parameters are decoded,
+      so parameters encoded beside `ngtcp2_conn_server_new` carry a chosen
+      version of zero and the far end calls them malformed with nothing saying
+      which end was wrong.
+
+      The one real bug was §10's prediction exactly: Crypto++'s `ChaCha` is the
+      64-bit-nonce original where RFC 9001 §5.4.4 wants the IETF variant's 96,
+      and the published vectors caught it where "the handshake does not
+      complete" would have said nothing.
+
+      Verified over the loopback, over a link losing fifteen percent, over two
+      real UDP sockets, and end to end: a headless client joins a `--quic`
+      server with 4097 entities. 362 suites green, `just determinism` and
+      `just replay-check` byte-identical.
+- [x] quic: retire the datagram stack. **Retired as the default, kept as a
+      mode, and the deletion is now off the table rather than pending.** QUIC is
+      what a server serves unless told otherwise: `mono.server --transport
+      quic|datagram|both`, defaulting to `quic`. The client has no transport
+      flag at all - `--quic` is gone from both programs, and `--transport`
+      replaces the server's boolean rather than aliasing it, because nothing in
+      the tree depended on the old spelling and a boolean beside a three-valued
+      flag has no defined answer when somebody passes both.
+
+      **One UDP port carries either, and the discriminator is one bit.** A QUIC
+      long header - which every Initial is, RFC 9000 §17.2 - sets bit 7 (Header
+      Form) and bit 6 (Fixed Bit), so an Initial's first byte is `0xC0..0xFF`;
+      a `net::Packet` opens with `Packet::MAGIC` little-endian, so its first
+      byte is `0x41` and bit 7 is clear. `net::WireOf` is that test and
+      `net/Wire.hpp` writes the bit positions down. A QUIC *short* header is not
+      separable this way - `0x40..0x7F` contains `0x41` - and does not need to
+      be: a 1-RTT packet is routed by its destination connection id before
+      anything asks.
+
+      **Both refusals are explicit, so a fallback costs one round trip and not a
+      deadline.** A datagram-only server answers a QUIC Initial with a Version
+      Negotiation packet listing one reserved `0x?a?a?a?a` version; that shape
+      was chosen over a CONNECTION_CLOSE because it is stateless, needs no keys
+      - a CONNECTION_CLOSE would make a server that does not speak QUIC derive
+      Initial secrets to say so - and is 27 bytes against a 1200-byte Initial,
+      so it cannot be amplified off. A QUIC-only server answers a datagram hello
+      with `AdmissionKind::Refuse` naming the wire it does serve, in 29 bytes
+      against the hello's 60. Both keep `net/AGENTS.md`'s rules for answering a
+      stranger: nothing remembered, reply smaller than the question.
+
+      The client tries at most two transports, logs which one it landed on and
+      why, and falls back on an explicit refusal immediately or on
+      `AttemptSeconds` of silence. That deadline applies to the last attempt
+      too, so a wrong address is a reported failure rather than a client that
+      retries for ever.
+
+      **§11's last question is answered and it had the wrong shape.** Discovery
+      keeps its own identity and hands over no connection id either: a
+      `SessionId` lives as long as a host and a QUIC connection id lives as long
+      as one connection - and an endpoint holds several and rotates them - so
+      announcing one would let a re-announcement invalidate a live session.
+      `network/AGENTS.md` already forbids the coupling, and there is nothing to
+      hand over anyway, because the handshake picks the ids and the server
+      chooses the one the client addresses it by. What the advert gained instead
+      is `Advert::Transports`, so a client that finds a datagram-only server in
+      a browser pays no refusal round trip at all.
+
+      `mono.studio` hosts and joins on QUIC by default through the same
+      `SessionPort` seam, and `mono.unified_tests` gained `quic` and
+      `quic-lossy` on its transport axis - twenty arrangements where there were
+      twelve, with `Crossing` now driving `SessionPort` rather than a bare
+      `Session`.
+
+      **`docs/QUIC.md` §8's step 6 is closed as will-not-do.** `Packet`,
+      `Reliability`, `Handshake`, `Cookie` and `ConnectionId` are what
+      `--transport datagram` runs on and where the fallback lands, so deleting
+      them would remove a mode an operator selects. `net/AGENTS.md` keeps the
+      standing rule that a change to one stack is a question about the other.
+
+- [x] check if we need to move files / classes / structures around. **All five
+      worked through, and two of the five were refused with measurements** -
+      `docs/ARCH_REVIEW.md` §C. `nodegraph` moved to `mono.studio/nodegraph`,
+      and the part worth more than the directory is that its row lost its
+      `layer` rather than keeping L11: the program band has no layer and
+      `CheckTargetGraph.cmake` refuses an edge from anything that has one to
+      anything that has not, so an engine module linking it now fails by name.
+      Proved with a probe expectation. `Renderer::RenderView` split by node
+      family; `script` became four modules; `mono.client` declares the three it
+      used through public headers. **`SurfaceCameras.cpp` does not lift**: it is
+      2,909 lines rather than 4,108, a figure it has never held across any of
+      its four commits, and the edges are a cycle - five places in `scene` call
+      in, one of them through a public header signature, while the file reads
+      back down into twelve `scene` types. **`mono.libraries/` was recounted
+      after all of it and is still two leaves against a bar of three.**
+      Separately `spatial::CollisionGroups`' `@tier L2` tag was the error rather
+      than the placement, since the header includes `spatial/LayerMask.hpp` and
+      could not sit at L2 whatever the tag said.
+- [x] clean up all ECS components. **The survey's ten clearest arguments were
+      re-verified before being acted on and four were wrong**, each the same
+      way: a component's `sizeof` read as what it costs a file.
+      `physics::PhysicsWorld` writes five bytes, not forty members;
+      `effects::Trail` writes 82, not 1068; `effects.` under a shared prefix
+      would have failed every join, because a replica registers the module
+      nowhere and `LoadSnapshot` refuses a component the build does not have;
+      and `Visual::Locked` is a public `BasePart` property in both scripting
+      languages rather than an editor flag. What was real: `scene.PortalTransitSeen`
+      replicated, so the authority's transit serial defeated every client's own
+      portal snap and a body crossing a seam interpolated between rooms instead
+      of arriving; `scene.TextContent` and `scene.ShaderSource` carried
+      hand-written serialisers and were dropped without a word by a gate that
+      tests `Trivial` rather than `Serialisable`; `gui.Canvas` was derived from
+      the local viewport three lines from `gui.Resolved` and only one of the two
+      was excluded; and **`scene::Visual::Surface` had been written and read at
+      eight bits since the field was widened to sixteen at v0.17 to lift a
+      127-mirror ceiling**, so every slot past 127 was truncated into every
+      save. `gui.Gradient` replicated 672 bytes to carry 56 and now writes 77.
+      `scene::QuickHash` and `Humanoid::Radius` are gone, both with no reader
+      anywhere in the tree; `scene.Transient` is a tag. **The padding rule §D
+      claimed was checked was not checked**, and now is. The full survey, 35
+      fields and 7 merges and 14 splits and 12 renames with a decision on every
+      one, is §D5.
+- [x] scan through all serial loops for parallel or vectorised work. **The first
+      one was not a parallelisation and the rest were measured before being
+      touched** - §F. The client ran eight full store walks per world per frame
+      and discarded them; gated on the world's tick, `content.demand` went from
+      0.028 ms mean over 20,000 parts to 0.001 ms, running on 18 frames of 400
+      instead of 399. The ECS change channel is not what gates it, and the three
+      reasons are written down: `ClearChanges` runs at the start of a tick, an
+      out-of-tick write is cleared before any listener sees it, and
+      `ChangeVersion` moves for every `Transform` in the archetype.
+      `CollectReplicated` gained the profiling span it never had and **stays
+      serial with the number written down**: 77 ns a row against a 7.74 us
+      handover puts the crossover near 400 rows, which it clears by fifty times,
+      and what actually stops it is `SnapshotBuffer::Sample`'s statistics and a
+      filtered `push_back`. The three fetch-path costs inside the tick barrier
+      are gone: the delivery cache walked its whole directory on every store, so
+      caching N assets cost N squared stats, 1.17 ms a store down to 16.4 us;
+      `Manifest::FindByRoot` was a scan that `SliceOf` called per member,
+      11.96 us down to 319 ns with an index that holds no fact the asset list
+      does not; and `ChunkStore` hashed every chunk twice, 14.76 us down to
+      9.17 us a chunk.
+- [x] update AGENTS.md in root and subdirectories. **All nine of the remaining
+      false files are true**, plus the two documents and the generated page §B
+      named. `parallel` was wrong twice and understated: `process/` and `ipc/`
+      have existed since v0.2 and **neither was ever a directory**, and the
+      join's serialisation point citation named a line the file has never
+      contained. `launcher` undercounted: nine decisions had crossed into
+      `Interface.cpp`, not six, three of them duplicating a filter loop the tab
+      beneath ran again, and they moved into `Plan.hpp` rather than the rule
+      narrowing, because unlike the `game` and `scene` precedents the launcher
+      already had a home for them. `README.md` says six rules.
+      `docgen/pages/Modules.md` is **generated** now rather than corrected, 41
+      pages against the sixteen it carried. `docs/QUIC.md`'s L2 claim did not
+      reproduce; it was already right at HEAD.
+- [x] improve build times. **The whole of §E2's ranked list, in its order.**
+      `-g1` on first-party objects in `release` and `ci` took the eight heaviest
+      translation units from 60.3 to 41.6 CPU-seconds with objects 4.7 times
+      smaller; `-g0` was measured too and rejected, because it buys 1.2
+      CPU-seconds more and costs every backtrace its file and line. The unity
+      build is worth **486 CPU-seconds down to 201** over the 45 library
+      targets, and cost 81 anonymous-namespace renames across 24 modules rather
+      than the nine estimated, all renames and none by widening linkage. **Test
+      binaries stay one file per translation unit**: `TEST_SUITE_ID` declares
+      two fixed-name objects per file and `TEST_DEPENDS` reads one by that name,
+      so a suite is a file and renaming cannot change that. Precompiled headers
+      measured at 10.4%, which ranks them below unity builds rather than above,
+      so a preset gets one or the other. Vendor includes are all SYSTEM through
+      one function that replaced six copies of the same block, **measured at no
+      compile-time effect at all** and kept for `ci`'s `-Werror`. `just build`
+      no longer reconfigures every time and the shader staging declares its
+      outputs, so a null build is 0.08 seconds against 1.15. **The glslc entry
+      attributed its cost to the wrong thing**: compiling all 28 shaders is
+      2.3 CPU-seconds, and the 600 it names is the 1104 of building glslang and
+      SPIRV-Tools, which the compiler cache already collects, so a second cache
+      layer would save 2.4 seconds a build directory and could hand back a stale
+      `.spv`. Separately `AABB` stopped being 99.8 percent `CFrame`, 73,835
+      preprocessed lines to 25,368 across 152 objects, and `client/Settings.hpp`
+      174,863 to 65,853.
+- [x] check all asynchronous and parallel points. **Audited, and §F's own count
+      was wrong**: `net`, `replication` and `mono.network` own **one**
+      concurrency primitive between them, a mutex in the loopback transport, not
+      seventeen across five files. §F3 is the full table of that one plus the
+      fifteen process-wide primitives the networking path takes without owning.
+      What §F2 called a process-wide mutex blocking `Authority::Publish` is
+      `ecs::Components`' registry guard, taken by the `Find` and `Describe` that
+      `BuildComponents` ran per declared slot per client - nine thousand
+      acquisitions on a two-hundred-client tick, and never held across the loop.
+      `Survey` resolves it once a tick, which is what made the loop spreadable
+      at all, because `EachChangedRuns` calls `Store::RequireOwningThread` and
+      aborts rather than races. Above eight steady-state clients it publishes
+      through one lane per worker: 392 microseconds a client serial against 54
+      through lanes at sixty-four clients, 486 against 79 at two hundred.
+      Ordering is structural rather than disciplined, and
+      `engine.replication.publishlanes` requires the two to send identical
+      bytes. **Two more defects came out of reproducing it**: nothing bounded
+      how many join snapshots one publish built, so a ten-thousand-entity world
+      could not admit thirty-two clients at all, and `parallel::Jobs` destroyed
+      its condition variables with workers parked on them, hanging `exit` for
+      ever in any binary that started a pool and did not stop it.
+- [x] add more MCP integrations. **The surface stopped being a window onto one
+      running program.** `layer_table`, `module_get` and `module_may_link`
+      answer out of `expected_graph.json` compiled in at configure time, so the
+      verdict on "may `render` link `script`" is the one `just test-architecture`
+      enforces rather than a second description of it, and `module_get` carries
+      the reverse index, which is in no file. `class_list`, `class_get` and
+      `script_check` cover the script side; **checking is offered and evaluating
+      is not, and the reason is the tick rather than security**, because a chunk
+      with a `while true` in it would hang the program from a thread there is
+      nothing to interrupt from. `log_tail`, `log_level` and `metrics_read` ask
+      the process what only the editor's panel could be asked. `test_run` and
+      `test_result` return a handle, because a full run is 125 seconds. The
+      protocol gained `resources/*` and `prompts/*`: 44 resources on a server
+      including every `AGENTS.md` in the checkout, and 5 prompts rendered from
+      `.claude/commands` rather than copied. `mcpbridge` had no tests and now has
+      two suites, one of which spawns the real binary and speaks JSON-RPC through
+      it; **writing them found three bugs**, including a well-formed JSON array
+      that escaped `Surface::Answer` as an exception into the frame loop, and a
+      report reader that called a run with five failed suites green.
+- [x] build out a full logging, metrics, etc so we can track what the engine is
+      doing in dev builds effectively. **A disabled log statement now evaluates
+      nothing**, and all 711 call sites were swept twice and independently for
+      arguments with side effects before the guard went in; none had one, so it
+      landed with no call site edited. Every statement carries a category
+      supplied by `mono_add_library` as the module's own name, which is how 711
+      sites gained one with zero edits. Levels are per category and settable
+      without a recompile; below a compiled floor a statement is removed by the
+      preprocessor, **verified by looking for the trace literal in the object
+      file rather than by trusting it**. Measured at `preset=bench`: under a
+      nanosecond disabled with or without an argument, 84 ns enabled into a null
+      sink, 20 ns throttled while quiet. `core::Metrics` grew the read side it
+      never had, with the rule restated as the one it always meant, read to
+      report and never to decide. **The four counter implementations resolved as
+      three keepers and one duplicate**: `FrameGraph` needs tree structure,
+      `HeapProfile` runs inside `operator new` and would recurse through
+      `Metrics`' mutex, and the scheduler's timings are drained in system order
+      by a panel that draws them in that order. `ENGINE_ASSERT` and its three
+      siblings exist, where the tree previously carried exactly **one** C++
+      `assert()`. All thirteen silent modules gained instrumentation, 178
+      statements and 30 metric writes, measured at 240 added lines across a full
+      `test-all`; `nodegraph` deliberately gained none and reports an
+      unevaluable node through `NodeStatus::Note` instead.
+- [x] think plan for future features as well listed in roadmap and plan for them
+      now. **Ten component types declared, registered and tested with nothing in
+      the engine reading them**, which is decision 16 rather than a gap, and
+      which had to happen now for a mechanical reason: `Components::Seal()` runs
+      at start-up, so a type that registers lazily aborts the first host that
+      meets a game file carrying one. **§D4 was wrong about fog**: it has
+      existed on the `Lighting` service since v0.16 and reaches a uniform, so a
+      `scene::Fog` would be the second answer rule 2 refuses. `Constraint` is one
+      generic six-degree-of-freedom joint with seven classes differing only by
+      the prototype row `Instance.new` copies, and deliberately has no `Kind`
+      field, because one would make a `HingeConstraint` whose axes are all free
+      expressible. `LevelOfDetail` stores pixels of projected area per triangle
+      rather than a distance, because decision 19 says selection targets quad
+      utilization and a distance ladder answers differently for a tower and a
+      coffee cup at one range. `Terrain` stores the recipe and never the ground.
+      `docs/FUTURE_COMPONENTS.md` is what each gets wired to and in what order.
+- [x] make the four unchecked architecture rules checked. `mono.tools/sourcecheck`
+      reads first-party C++ as text, 1,413 files and 137 registered components,
+      and decides four things the target graph cannot see. Getting rule 2 down to
+      something a build can fail on took one discriminator - **a record that
+      declares a function outlives a call and a plain aggregate is an argument
+      list** - which cut the findings from eighteen to seven, and qualified-name
+      resolution removed the twelve that were two modules sharing the noun
+      `Entry`. **Half of rule 4 turned out to belong to the compiler already**:
+      `Name`'s only conversion operator is an explicit one to `bool`, so
+      `WriteUInt32(name)` has never compiled, and what is left is the spelling
+      somebody reaches for when it does not. Three rules gate and
+      `public-header` reports, because an unwired subsystem is not dead code.
+      Thirteen fixture trees run before the repository does, and the runner
+      holds exit status to the gating table, so a rule that found something and
+      let the build pass fails the same way as a rule that found nothing.
+- [x] finish the `AGENTS.md` sweep. Folded into the AGENTS.md item above; all
+      nine files, both documents and the generated page are done.
+- [x] call `Components::Seal()` at start-up in every program. Already true in
+      the tree when this pass began - `mono.client/app/main.cpp:390` and
+      `mono.server/app/main.cpp:338` - and re-verified. The three programs that
+      deliberately do not seal each have their reason recorded in §D1.
+- [x] register `WorldTime`, `PortalProxy`, `NotArchivable` and `DirtyBits` under
+      explicit names. Already true in the tree when this pass began, along with
+      `Sun` and `PoppercamState`, and re-verified. Naming `scene.PortalProxy`
+      switched a live rule back on: `replication/src/Defaults.cpp` had tested for
+      that exact string since portals landed and never matched.
+- [x] decide where `persistence` and `ledger` go before something needs them.
+      **`persistence` at L3 beside `ecs`, `ledger` at L5 beside `collision`, and
+      nothing is renumbered**, because a layer is a ceiling and not a slot - the
+      built table already carries six modules at L12 and six at L11.
+      `persistence` is L3 for what it may see rather than what it contains, and
+      **the load-bearing half is that it must not see `ecs`**: a datastore holds
+      what a game chose to persist, and the moment those two can name each other
+      the save format and the datastore format become one migration. Being below
+      L9 is the constraint that actually binds, because `DataStoreService` is a
+      script service. **Remote backends do not live there**: a remote store needs
+      `net` at L11, so the port is low and the adapter is wherever it has to be,
+      exactly as `net::Transport` already does it. `docs/CODE_ARCH.md` §4.2.
+- [x] the three small structural fixes with no argument against them. All three
+      done: `mono.client` declares `Engine::assets`, `Engine::graph` and
+      `Engine::script`; `nodegraph` is in `mono.studio` with no `layer`; and
+      `NodeCatalogue::Find` carries the contract `All` had. The half worth
+      writing down on the last one is the **second** failure mode rather than
+      the first: because `Specs` is sorted, a later `Register` can leave an old
+      pointer naming a different kind **without dangling**, which looks entirely
+      correct at the use site.
+- [x] split `Renderer::RenderView`. It is 60 lines now and `Renderer.cpp` is
+      1,702, down from 13,680. The state the handlers closed over is
+      `ViewRecording`, whose members **are** the locals, so nothing is published
+      from a local into a member and the moved code stayed textually identical -
+      which is what let the split be verified mechanically rather than by
+      reading. **Three of the eighteen `SDL_BeginGPURenderPass` calls were error
+      strings naming the function**; of the fifteen real ones, thirteen are
+      inside a node's execution and the two that remain cannot move: the host
+      chrome pass is recorded after `output-image` so captures hold only the
+      game image, and the clear of a window no node reached has no node to live
+      in. Compiling the module at `-j24` with the cache and unity off went 11.0
+      to 6.5 seconds wall, and the slowest unit in it 10.6 to 3.8. **§E2's 22
+      second estimate rested on a stale measurement**: `Renderer.cpp` was 31.2
+      seconds under 420 percent of stolen CPU and before E1 landed, and measures
+      10.6 today. Five deterministic scenes capture byte-identically.
+- [x] the rest of the measured build wins. Folded into the build-times item
+      above; §E2 items 2, 3, 6, 7, 8 and 9 and both applicable §E3 headers are
+      done, and §E3's `client/Scene.hpp` half is measured and refused at 9.7
+      percent rather than the sixty-times it read as, because both hubs that
+      carry it already name `render/Renderer.hpp` themselves.
+- [x] the four correctness findings that are open. All four, plus two more of
+      the same kind found while reproducing them. The JavaScript microtask drain
+      is bounded by a **count** rather than a deadline, so replay stays
+      byte-identical; the reproduction is the interesting half, because a
+      reaction that queues a reaction ran **52 million jobs against 31,201
+      interrupt polls in two minutes**, QuickJS polling once per ten thousand
+      safepoints, so the step budget was never going to catch it. Both interrupt
+      handlers stopped zeroing on trip. The client's copy of `scene::InputState`
+      is gone and `InterfaceWorld()` is stated to be the input focus.
+      `CommandQueue::Post`'s return is checked at all fifteen sites against a
+      contract in three classes. `NodeCatalogue::Find` carries its lifetime.
+      Added: `parallel::Jobs`' exit hang, and an upward edge from `script` into
+      `scriptluau` that only linked because no header declared its caller.
+- [x] the eight-walks-per-world-per-frame content scan. Folded into the serial
+      loops item above.
+- [x] a component catalogue and a module graph in the MCP surface. Folded into
+      the MCP item above. **The port finding was wrong as stated and the real one
+      was worse**: `core::Arguments::Value` requires a value, so a bare
+      `--mcp-port` is a parse error and no default is reached, but
+      `studio/Config.hpp` seeded the editor's saved preferences with 8720 while
+      its help, `.mcp.json` and `RUNNING.md` all said 8738. `mcpbridge`'s
+      CMakeLists reads the default out of the header at configure time and fails
+      the configure when either disagrees.
+- [x] the closing pass, which found three more things nothing was looking for.
+      **A body's spin now goes through a portal with the rest of it.**
+      `scene::Motion` carries a `Linear` and an `Angular`, the solver writes both
+      and `physics::Advanced` integrates both, and `CrossPortals` mapped the
+      first alone for four versions. It survived because the case is invisible
+      in a wall: a seam's destination is built from the far pane's normal with a
+      canonical up and the half-turn is a yaw, so any two upright panes compose
+      to a map that leaves the world's up fixed. Put a hole in a floor, or
+      tumble a crate end over end through a corner, and it does not. `Rotate`
+      and not `Carry`, because radians per second carry no length: a hole that
+      halves a body halves the radius it spins at and halves the speed of every
+      point on it, so the rate those two divide to is unchanged, and `Carry`
+      would spin a crate down to nothing over a few crossings of a shrinking
+      pair. Reproduced twice before it was fixed, once against a pane pointed at
+      the sky and once on the real `Portals-1-world` scene. The interaction
+      beside it turned out to be a **state rather than a second bug** and now
+      has the test that says so. `scene::NearestSeamDistance` lost its last
+      caller when `ResolveActiveCamera` went and is kept as a decision-16
+      surface with the argument in the header. And **documentation coverage is
+      back to zero gaps**: fixing the malformed-comment pass unhid the coverage
+      pass behind it, which reported 23 public entities without a comment, most
+      of them surface this pass itself created.
+- [x] the em dash ban is checked. Not on the original list, and it belongs here
+      because root `AGENTS.md` bans the character in capitals and rule 6 says a
+      rule the build does not check is documentation. `mono.studio/nodegraph`
+      carried 157 inherited with the library and `DemoNodes.cpp` fifteen more;
+      all 172 were rewritten by restructuring the sentence rather than
+      substituting the character, five of them user-visible strings.
+      `just em-dash-check` greps 1,722 first-party files in 38 ms, **including
+      the seven files agents may not edit**, so the document that bans the
+      character is held to its own rule. It refuses to go green on an empty scan
+      three ways, and both failure directions were exercised.
+- [x] explore the idea of having the active scene entities resident on the gpu always and we just have a compute timer on the gpu 24/7. this way, when the scene changes, we tell the gpu what changed. also doing a 2-way sync is easy with signatures/hashes with cpu-gpu, this way we have no swapchain waiting, we just compute at a given interval. sort of like "replication" to the gpu. same for particles, ui, entites, studio, etc.
+  - **Only transform and visual state is replicated to the GPU.** A part's `CFrame`, size, tint, transparency, mesh and material are what a frame draws, and they are the whole payload. Physics movers, constraints, controllers, humanoid state, scripts and anything else that *produces* a transform stay on the CPU and stay authoritative there - the GPU is given the result, never the mechanism. Two reasons and both are load-bearing: a simulation split across two processors has to be reconciled every frame, which is more traffic than it saves; and physics is what the server replicates to clients, so a GPU copy of it would be a second authority for state that already has one. Every item below that says "feed the GPU-resident system" means the visual half of that feature only.
+  - What was explored and built at v0.19, so the rest is not re-derived:
+    - `--frames-in-flight N` already exists on the client and the studio and already defaults to 1, which is the blocking submit the "no swapchain waiting" half of this item is about. It is a flag, not a rewrite - measure with it before building anything.
+    - The instance row is quantised: `render::GpuInstance` is 36 bytes rather than 96 (float3 position, a unit quaternion as four snorm16, float3 scale, RGBA8 colour). Measured drift is 6.11e-5 metres per metre of radius, so a one-metre part moves six hundredths of a millimetre - about sixteen times inside a 0.001 tolerance. `render/src/InstancePacking.hpp` and its tests carry the arithmetic. This is what any GPU-resident row should be built on; a delta upload of a 96-byte row would have been paying three times over.
+    - A temporary signer measured draw lists in blocks of 256 rows *in upload order*, with `FrameResult::InstanceChunksDirty` reporting how many changed. That ratio decided whether a delta upload was worth writing at all. It was deleted after choosing stable slots, because keeping two instance-change paths would make the measurement scaffold production machinery.
+    - GPU pass timings now reach `FrameGraph` as `ProfileCategory::Gpu` reported spans, so a flamegraph shows device execution beside CPU command recording instead of showing only the latter.
+  - **Measured, and the answer is: do not build a delta upload on the current row layout.** `--headless --frames 300` over the staged scenes, reading the client's new "instance chunk(s) rewritten" line:
+    - Hallway 0.3%, Meshes 0.3%, Lighting 0.3%, Arena 0.7% - a still scene with a still camera dirties one chunk on the first frame and nothing after.
+    - MeshGrid 100%, the default cube scene 100%.
+    - MeshGrid's geometry is *not* moving. It grows its list on `Heartbeat` as meshes stream in, and that alone rewrites everything: a chunk is a range of row indices, so one instance appearing or leaving shifts every row behind it. The experiment signed the culled list, so a single part crossing the frustum edge did the same, and a camera in motion did it most frames.
+    - So the split is not "static scene versus moving scene", it is "fixed membership versus changing membership", and real play is the second. A delta keyed on draw-order rows would save the whole upload in a screenshot and nothing at all in a game.
+  - **What to build instead, and it is this item's own idea.** Key the resident rows by a stable per-entity slot the way `replication::Authority` keys a component, and make visibility and draw order a separate index list the GPU reads rather than a permutation the CPU bakes into the rows. Then culling and sorting stop touching the rows at all, a moving part dirties one slot, and the delta finally has something stable to be a delta against. The occlusion cull already does this in miniature when it compacts survivors into the late buffer by index. Do that before any delta protocol, not after.
+  - **Built next at v0.19.** Each logical world now owns a resident packed-row pool keyed by world name, source entity and synthetic variant. Scene order, camera order and visibility upload as one `uint` per draw; only new or changed 48-byte rows cross again. Portal halves use the pane as their variant, cross-world rows carry the source world's name, and occlusion compacts resident indices instead of copying packed rows. `FrameResult::InstanceChunksDirty` now counts the chunks this delta actually touched.
+  - **The wider visual-state path is built too.** Cameras of one world share those rows and only keep target-local index streams; `Renderer::Render` batches every world and pipeline group into one submission. Particles retain device-side state, parameter and curve tables, and generated vertices per logical world, so block indices from two worlds cannot collide and one camera advances a world's pool while its other cameras reuse it. `gui::Compiled::Signature` now reaches `InterfacePass`, which keeps unchanged vertices and indices resident while still resolving image dimensions and flipbook cells each frame. There is deliberately no second CPU/GPU authority or independent timer: the CPU remains authoritative for visual inputs, changed state is copied at the render boundary, and GPU particle simulation advances only by the caller's explicit frame delta.
+  - **Measured again after stable slots, in release over 300 captured frames.** Hallway, Meshes, Lighting and Arena rewrite 0.3% of resident rows, the first frame only. MeshGrid falls from the old 100% whole-list rewrite to 35.9% while its content streams in; Particles rewrites 11.4%; the deliberately moving default scene remains 100%. The interface scenes upload geometry twice while images resolve and reuse it for the other 298 frames. Chunk occupancy is still reported beside rows because it says how scattered the copies are, while the row ratio says how many 36-byte payloads actually crossed.
+- [x] can we review the client, server and studio code and merge what we can into the engine layer instead? I notice some functions would be better off in the engine instead of these mono repositories. Also ensure studio and clients use the same render pipelines and whatnot, create one location for all rendering, and same for similar other behavior (maybe even setup singletons, interfaces or such for these behaviors).
+- [x] properly implement MCP in engine then expose in cdn, client, server and studio as a optional cli arg to start on a given port
+- [x] optimise gpu resident behavior, editable mesh transferring and signature of mesh data and visual components and compute mesh transformation on gpu using the data
+- [x] fix resident gpu data always being updated every frame
+- [x] properly go through and fix flamegraph, properly bounding sections and visually fixing the interface which had stacking problems
+- [x] properly fix fps cap counters
+- [x] improvements to replication, some newer additions were not using sigantures properly (and added relevent tests/benchmarks).
+- [x] compare `-O0` and `-O2` builds and find shared bottlenecks, several fixed already
+- [x] more gpu optimisations - fixed lighting signatures causing resident refresh every frame
+- [x] add AtmosphereCompute and AtmosphereProcedural
+- [x] add SkyboxCompute and SkyboxTextures
+- [x] add CloudCompute and CloudProcedural
+- [x] build out proper caching and cascaded caching implementations across every pipeline - some are done incorrectly and need to be corrected.
+- [x] make particles emit in studio when property is enabled and they are within a PVInstance (BasePart/Attachment) - this will cause cache invalidation on scene
+- [x] button to disable all particle emitter rendering in studio
+- [x] remove "lighting service properties" button in "World Lighting" widget.
+- [x] remove uncapped framerate button. make "no limit" on the rates sliders to the right, not 0. clamp between 0 and 360, with 361 being unlimited.
+- [x] prevent renaming world services
+- [x] add a small label above the table of keybinds put "Use ESC to set as unbound".
+- [x] make the "Particles" demo only spawn a 32x32 grid of particles.
+- [x] add Heap dock widget under View dropdown
+- [x] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
+- [x] move selection box / collider outlines visualisations under the scene cache
+- [x] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
+- [x] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
+- [x] the "Bus" dock widget shows nothing, its useless.
+- [x] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
+- [x] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
+- [x] split "acquire swapchain" into deadline waiting, display waiting, worker waiting and event waiting, if possible. or split what you can.
+- [x] ensure dock widgets DO NOT update studio ui signature unless its open
+- [x] when i click on something within a world, do not highlight the world, same with when you click in the scene
+- [x] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
+- [x] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, etc
+- [x] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
+- [x] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
+- [x] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
+- [x] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
+- [x] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
+- [x] demo nodes freezes entire studio for like 4 seconds on first open
+- [x] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
+- [x] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
+- [x] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
+- [x] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
+- [x] heap shows "build interface" is always growing overtime with allocated
+- [x] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
+- [x] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
+- [x] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
+- [x] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.

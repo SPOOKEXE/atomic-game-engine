@@ -72,7 +72,7 @@ replicated component list below teaches from the other direction.
 `Reports` uses `std::optional` for a module an arrangement omits. **A zero is
 not the same as an absence** - a relay that served nothing and a run with no
 relay in it are different facts, and one zero for both is how a matrix reports
-twelve passes having run one arrangement eleven times.
+twenty passes having run one arrangement nineteen times.
 
 ## A contradiction names two modules, always
 

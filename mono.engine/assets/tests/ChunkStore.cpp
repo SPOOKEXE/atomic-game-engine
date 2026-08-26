@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.chunkstore")
@@ -273,4 +274,57 @@ TEST_CASE("opening a store that is not there fails rather than creating one", "[
 
 	// A publisher asks for it to be made.
 	CHECK(ChunkStore::Open(tree.Root / "made", true).has_value());
+}
+
+TEST_CASE("a chunk that is not what it is named refuses the whole asset", "[assets][chunkstore]") {
+	// **The content half of the check, and where it now happens.** `ReadAsset`
+	// used to hash every chunk on the way in and then hash the concatenation
+	// again; it hashes once now, in `Read`, so this is the case that says the
+	// remaining pass is still doing the work. A chunk file rewritten under its
+	// own name is a corrupt disk, a partial write or a tampered store.
+	Tree tree;
+	ChunkStore store = tree.Store();
+	Manifest manifest;
+
+	const ContentHash root = Publish(store, manifest, "a", AssetKind::Data, {"one", "two"});
+	const AssetEntry *const asset = manifest.FindByRoot(root);
+	REQUIRE(asset != nullptr);
+	REQUIRE(store.ReadAsset(*asset).has_value());
+
+	const std::string hex = asset->Chunks[1].Hash.ToHex();
+	{
+		std::ofstream file(tree.Root / "chunks" / hex.substr(0, 2) / hex, std::ios::binary | std::ios::trunc);
+		file << "TWO";
+	}
+
+	CHECK_FALSE(store.ReadAsset(*asset).has_value());
+}
+
+TEST_CASE("an entry whose chunks do not root to it refuses", "[assets][chunkstore]") {
+	// **The shape half.** Every chunk on the disk is exactly what it is named,
+	// so the per-chunk pass is satisfied and the asset is still not the asset -
+	// which is the case a reader that trusted its chunk reads alone would let
+	// through. It is `VerifyAssetShape` that catches it.
+	Tree tree;
+	ChunkStore store = tree.Store();
+	Manifest manifest;
+
+	const ContentHash root = Publish(store, manifest, "a", AssetKind::Data, {"one", "two"});
+	const AssetEntry *const asset = manifest.FindByRoot(root);
+	REQUIRE(asset != nullptr);
+
+	AssetEntry claimed = *asset;
+	claimed.Root = Hasher::Of(Bytes("something else"));
+	CHECK_FALSE(store.ReadAsset(claimed).has_value());
+
+	// Same chunks, same root, a total that disagrees with them.
+	AssetEntry miscounted = *asset;
+	miscounted.TotalBytes += 1;
+	CHECK_FALSE(store.ReadAsset(miscounted).has_value());
+
+	// And the chunks in the wrong order, which each verify and together are a
+	// different asset.
+	AssetEntry reordered = *asset;
+	std::swap(reordered.Chunks[0], reordered.Chunks[1]);
+	CHECK_FALSE(store.ReadAsset(reordered).has_value());
 }

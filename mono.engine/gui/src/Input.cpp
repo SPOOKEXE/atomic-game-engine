@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -159,8 +160,25 @@ namespace engine::gui {
 
 				switch (Reaches(store, command.Source)) {
 				case Reach::Hit:
+					// "Why did nothing happen when I clicked" has three answers
+					// and they look identical from outside: something took it,
+					// something in front swallowed it, or nothing was there.
+					// Each says which.
+					ENGINE_TRACE(
+						"pick ({}, {}): entity {} took it past {} command(s)",
+						point.X,
+						point.Y,
+						command.Source.Id,
+						list.Commands.size() - index
+					);
 					return command.Source;
 				case Reach::Blocked:
+					ENGINE_TRACE(
+						"pick ({}, {}): entity {} is not interactable and swallowed it",
+						point.X,
+						point.Y,
+						command.Source.Id
+					);
 					return NULL_ENTITY;
 				case Reach::Through:
 					break;
@@ -172,6 +190,18 @@ namespace engine::gui {
 				// the interface it contains.
 			}
 
+			// **Only when there was something to miss.** A client with no
+			// interface picks against an empty list several times a frame, and
+			// a line for each is the "703 lines a second" failure this facility
+			// exists to avoid.
+			if (!list.Commands.empty()) {
+				ENGINE_TRACE(
+					"pick ({}, {}): nothing under it among {} command(s)",
+					point.X,
+					point.Y,
+					list.Commands.size()
+				);
+			}
 			return NULL_ENTITY;
 		}
 	}

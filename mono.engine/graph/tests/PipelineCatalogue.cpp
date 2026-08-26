@@ -16,7 +16,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
 #include <string>
+#include <string_view>
 
 TEST_SUITE_ID("engine.graph.pipelinecatalogue")
 
@@ -271,4 +273,53 @@ TEST_CASE("the catalogue lists in a stable order", "[graph][catalogue]") {
 		CHECK(previous < name);
 		previous = name;
 	}
+}
+
+TEST_CASE("a later Register moves what an earlier Find named", "[graph][catalogue]") {
+	Kinds();
+
+	// The documented lifetime on `Find` and `All`, demonstrated by index rather
+	// than by pointer. Reading a stale pointer is the bug the contract exists to
+	// forbid, so a case that read one to prove the point would be the same
+	// mistake wearing a `CHECK`.
+	//
+	// `Specs` is sorted by `Kind`'s text, so registering a name that sorts
+	// before an existing one shifts every later entry by a slot. A pointer taken
+	// before this now names the neighbour, and nothing about it looks wrong.
+	const auto slotOf = [](std::string_view kind) -> size_t {
+		const std::span<const NodeKindSpec> specs = NodeCatalogue::All();
+		for (size_t index = 0; index < specs.size(); ++index) {
+			if (specs[index].Kind.Text() == kind) {
+				return index;
+			}
+		}
+		return specs.size();
+	};
+
+	const size_t before = slotOf("gbuffer");
+	REQUIRE(before < NodeCatalogue::All().size());
+
+	NodeKindSpec earlier;
+	earlier.Kind = Name("aaa-sorts-first");
+	earlier.Label = "Sorts first";
+	earlier.Outputs.push_back(
+		PortSpec{
+			.Name = Name("colour"),
+			.Kind = ResourceKind::Colour,
+			.Format = engine::graph::ResourceFormat::RGBA8,
+			.Required = true,
+			.Summary = {},
+		}
+	);
+	REQUIRE(NodeCatalogue::Register(earlier));
+
+	CHECK(slotOf("gbuffer") == before + 1);
+
+	// Process-wide table, so hand the next case the real one back. `Kinds()`
+	// registers and does not clear, so this is the one case that has to
+	// `Reset` - every other case here only ever replaces a built-in.
+	NodeCatalogue::Reset();
+	Kinds();
+	CHECK(NodeCatalogue::Find(Name("aaa-sorts-first")) == nullptr);
+	CHECK(NodeCatalogue::Find(Name("gbuffer")) != nullptr);
 }

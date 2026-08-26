@@ -34,7 +34,7 @@ namespace studio {
 	namespace {
 		// A byte count in the units somebody reads at a glance, which is the
 		// same rule the Bus panel's sizes follow.
-		void WriteSize(char *into, size_t capacity, uint64_t bytes) {
+		void WriteInstanceSize(char *into, size_t capacity, uint64_t bytes) {
 			if (bytes < 1024) {
 				std::snprintf(into, capacity, "%llu B", static_cast<unsigned long long>(bytes));
 			} else if (bytes < 1024 * 1024) {
@@ -68,7 +68,7 @@ namespace studio {
 			// The main panel. It follows the active scene, so there is nothing
 			// to pin - only to reopen, which is what a closed one needs.
 			ShowViewport = true;
-			ImGui::SetWindowFocus(ViewportTitle(0));
+			ImGui::SetWindowFocus(ViewportIdentity(0));
 			return 0;
 		}
 
@@ -82,25 +82,20 @@ namespace studio {
 			return NO_VIEWPORT;
 		}
 
-		// Already showing it: bring it forward and leave its camera exactly
-		// where somebody put it.
-		if (view->Open && view->World == world) {
-			ImGui::SetWindowFocus(view->Title.c_str());
+		// Already assigned to it, including a closed panel: bring it forward and
+		// leave its remembered camera exactly where somebody put it.
+		if (view->World == world) {
+			view->Open = true;
+			ImGui::SetWindowFocus(ViewportIdentity(panel));
 			return panel;
 		}
 
 		view->World = world;
 		view->Open = true;
 
-		// Where the main camera is, so a view that has not received anything yet
-		// opens looking at the same thing rather than at the origin -
-		// `Editor::Initialise` gives the argument at length.
-		view->Frame = CameraFrame;
-		view->Yaw = CameraYaw;
-		view->Pitch = CameraPitch;
 		view->Follow = engine::ecs::NULL_ENTITY;
 
-		ImGui::SetWindowFocus(view->Title.c_str());
+		ImGui::SetWindowFocus(ViewportIdentity(panel));
 		return panel;
 	}
 
@@ -140,10 +135,30 @@ namespace studio {
 			return;
 		}
 
-		ImGui::TableSetupColumn("instance", ImGuiTableColumnFlags_WidthStretch, 0.34f);
-		ImGui::TableSetupColumn("role", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-		ImGui::TableSetupColumn("state", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-		ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.22f);
+		// **The buttons get the width they need and the name gets the rest.**
+		// This column was a proportional stretch like the other three, at 0.22
+		// of the panel - and it holds `View`, `+ Player` and `Stop` side by
+		// side. Twenty-two per cent of a docked panel is not three buttons wide
+		// at any realistic size, so the row was clipped and `Stop` was cut in
+		// half or missing entirely. A proportional width cannot be right for a
+		// cell whose content has a fixed size.
+		//
+		// Measured from the labels rather than guessed at a pixel count,
+		// because the font is a setting: two frame paddings and one item
+		// spacing per button, which is what `SmallButton` and `SameLine` add.
+		// The widest row is the server's three; a client row is `View` and
+		// `Remove` and fits inside it.
+		const ImGuiStyle &style = ImGui::GetStyle();
+		const float buttonPadding = style.FramePadding.x * 2.0f;
+		const float actionsWidth = ImGui::CalcTextSize("View").x + buttonPadding +
+								   ImGui::CalcTextSize("+ Player").x + buttonPadding +
+								   ImGui::CalcTextSize("Stop").x + buttonPadding +
+								   style.ItemSpacing.x * 2.0f + style.CellPadding.x * 2.0f;
+
+		ImGui::TableSetupColumn("instance", ImGuiTableColumnFlags_WidthStretch, 0.44f);
+		ImGui::TableSetupColumn("role", ImGuiTableColumnFlags_WidthStretch, 0.20f);
+		ImGui::TableSetupColumn("state", ImGuiTableColumnFlags_WidthStretch, 0.36f);
+		ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, actionsWidth);
 		ImGui::TableHeadersRow();
 
 		// **By value, because the buttons in the loop restructure `Runs`.** Stop
@@ -250,10 +265,10 @@ namespace studio {
 
 				if (ImGui::IsItemHovered()) {
 					char total[32];
-					WriteSize(total, sizeof(total), report.TotalBytes);
+					WriteInstanceSize(total, sizeof(total), report.TotalBytes);
 
 					char largest[32];
-					WriteSize(largest, sizeof(largest), report.LargestMessage);
+					WriteInstanceSize(largest, sizeof(largest), report.LargestMessage);
 
 					ImGui::SetTooltip(
 						"a replica of '%s', served in this process\n"

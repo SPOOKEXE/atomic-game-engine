@@ -104,7 +104,13 @@ namespace engine::replication {
 	// never registered `gui.Element` refuses the whole delta as naming an
 	// unknown component, which is loud, but there is no reason to make it find
 	// that out one message at a time.
-	inline constexpr uint16_t PROTOCOL_VERSION = 9;
+	// **10 - the admission set gained a fifth message.** A version 9 server has
+	// no `AdmissionKind::Refuse`, so it drops one as a malformed admission
+	// rather than reading it as a refusal - which is the timeout the refusal
+	// exists to remove, arriving anyway. Refused at the door instead: this is
+	// also the number `network::Advert::Protocol` carries, so two builds that
+	// disagree here do not appear joinable in a browser either.
+	inline constexpr uint16_t PROTOCOL_VERSION = 11;
 
 	// Which half of a join a snapshot chunk belongs to.
 	//

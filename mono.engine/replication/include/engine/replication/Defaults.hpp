@@ -130,6 +130,31 @@ namespace engine::replication {
 	// @since v0.13
 	bool LocalToTheClient(std::string_view component);
 
+	// Whether a component is deliberately observed rather than signed.
+	//
+	// **The gate this opens is `Trivial`, and it is not `Serialisable`.** A
+	// signature hashes the object representation, so a component holding a
+	// `std::string` cannot be signed however carefully somebody wrote its
+	// `Write` and `Read` - the hash answers about the allocation and not about
+	// the text. `Authority::Resign` declines such a component outright, so a
+	// component that is not named here and is not written every tick is dropped
+	// from the table with nothing said.
+	//
+	// **Two real components sat in that silence until v0.19.**
+	// `scene.TextContent` and `scene.ShaderSource` both carry hand-written
+	// pairs written expressly so they could cross, and both were dropped by the
+	// `Trivial` test. What `Observed` costs is a dirty bit per row and nothing
+	// per tick, which is the right trade for a value an author writes once and
+	// then leaves alone.
+	//
+	// Public so the rule can be checked rather than described - root
+	// `AGENTS.md` rule 6. `engine.replication.defaults` is what checks it.
+	//
+	// @param component The component's registered name.
+	// @return `true` for a component the table observes instead of signing.
+	// @since v0.19
+	bool CannotBeSigned(std::string_view component);
+
 	// The components a world replicates.
 	//
 	// **Everything the world holds, less the list above.** This was a hand-kept

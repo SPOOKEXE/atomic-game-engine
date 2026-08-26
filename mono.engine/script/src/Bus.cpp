@@ -5,8 +5,7 @@
 //
 // @tier L9 · shared
 
-#include "Bus.hpp"
-
+#include <engine/script/Bus.hpp>
 #include <engine/script/Vocabulary.hpp>
 
 #include <cstdint>

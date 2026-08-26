@@ -28,12 +28,14 @@
 // exist; this program is the first caller with a reason to use them.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
@@ -47,17 +49,17 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
-#include <engine/nodegraph/Editor.hpp>
-#include <engine/nodegraph/Evaluate.hpp>
-#include <engine/nodegraph/Graph.hpp>
-#include <engine/nodegraph/Preview.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/EditableImages.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
@@ -67,9 +69,6 @@
 #include <engine/world/Universe.hpp>
 
 #include <array>
-#include <cdn/LocalStore.hpp>
-#include <client/EditableImages.hpp>
-#include <client/EditableMeshes.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
@@ -78,6 +77,10 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
+#include <nodegraph/Editor.hpp>
+#include <nodegraph/Evaluate.hpp>
+#include <nodegraph/Graph.hpp>
+#include <nodegraph/Preview.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -88,13 +91,16 @@
 #include <studio/Complete.hpp>
 #include <studio/Config.hpp>
 #include <studio/ContentSources.hpp>
+#include <studio/Diagnostics.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Plugins.hpp>
+#include <studio/Presentation.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/TeamCreate.hpp>
+#include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
 #include <unordered_map>
 #include <unordered_set>
@@ -430,6 +436,13 @@ namespace studio {
 		// The frame graph, which is the second of the two panels above.
 		bool ShowFrameGraph = false;
 
+		// Select the frame graph's docked tab on its first submitted frame.
+		//
+		// Kept separate from `ShowFrameGraph`: a panel restored as open from
+		// preferences must not steal focus on every launch, while an explicit
+		// `--graph` request should put the requested panel in front.
+		bool FocusFrameGraph = false;
+
 		// The assets manager, open at startup.
 		//
 		// **The same reason the two above take flags**, said in their own
@@ -512,12 +525,13 @@ namespace studio {
 		// client is paced by the display until this is passed. The editor never
 		// is - `Editor::VerticalSync` is off from the start, because the hands
 		// doing the work feel every millisecond between the mouse and the
-		// viewport - so what is left to remove here is `Editor::FrameCap`, the
-		// 120 fps ceiling that keeps a still scene off a laptop's fans.
+		// viewport - so what is left to remove here are the four presentation
+		// rates that keep a still scene off a laptop's fans.
 		//
 		// Which makes this a benchmark's flag rather than a comfort one: pass it
-		// when the number being read is the frame's cost, and the sleep that
-		// pads every frame out to 8.3 ms would be measured as that cost. See
+		// when the number being read is the maximum presentation throughput.
+		// The scheduled rates never sleep or slow the update loop, but they still
+		// deliberately leave time between images. See
 		// `render::Renderer::SetVerticalSync`.
 		bool Uncapped = false;
 
@@ -738,7 +752,7 @@ namespace studio {
 	// past it the diff degrades rather than failing, and says so.
 	inline constexpr size_t DIFF_CELL_LIMIT = 4u * 1000u * 1000u;
 
-	// Hands `Vendor::nodegraph` the four values it draws chrome with.
+	// Hands `Mono::nodegraph` the four values it draws chrome with.
 	//
 	// **The whole of what the library asks this program for.** A canvas paints
 	// its nodes from its own `Style`, but a palette popup, a section heading and
@@ -756,7 +770,7 @@ namespace studio {
 	// A node's picture, as the texture the renderer takes.
 	//
 	// **A free function because it is the seam, and a seam is the thing to
-	// test.** `engine::nodegraph::PreviewImage` promises red first and the top row first
+	// test.** `nodegraph::PreviewImage` promises red first and the top row first
 	// at four bytes a pixel, which is exactly `TextureFormat::RGBA8` - and
 	// nothing in either repository would notice the day that stopped being true,
 	// because a wrongly-ordered thumbnail is a picture that still draws.
@@ -767,7 +781,7 @@ namespace studio {
 	//         payload nobody taught the library to draw produces.
 	//
 	// @since v0.15
-	bool NodePreviewTexture(const engine::nodegraph::PreviewImage &image, engine::assets::TextureData &out);
+	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out);
 
 	// The window, the renderer, the interface and the game.
 	//
@@ -1591,6 +1605,24 @@ namespace studio {
 		// @return The mapping, invalid when that panel did not draw.
 		PanelProjection ProjectionFor(size_t viewport);
 
+		// Fills a view's ground grid from this editor's own settings.
+		//
+		// **Here rather than at the call site, because the numbers live in
+		// `Overlay.cpp`** - the spacing, the heavy interval, the reach and the
+		// idle strength are all constants beside the overlay that used to draw
+		// the grid, and a second copy in `Editor.cpp` is two places to change a
+		// grid's look.
+		//
+		// Off for a replica world, for the reason the overlay gives at length: a
+		// replica panel is the one picture in this editor that is exactly what a
+		// player sees, so editor furniture on it makes "does this look right"
+		// impossible to answer.
+		//
+		// @param view  The request being built.
+		// @param shown Which world the panel is showing.
+		// @since v0.19
+		void ConfigureGroundGrid(engine::render::View &view, WorldId shown) const;
+
 		// Selects whatever is under a panel point.
 		//
 		// **Builds a `spatial::HashGrid` per click rather than reading the
@@ -1610,6 +1642,10 @@ namespace studio {
 		// @param add      Whether to add to the selection rather than replace.
 		// @param panel    That panel's mapping for this frame.
 		void PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel);
+
+		// Starts, draws, and commits a rectangle selection begun on empty space.
+		// Returns true while the rectangle owns the left mouse gesture.
+		bool DragSelectionBox(size_t viewport, const PanelProjection &panel);
 
 		// Fills `Operators` in. Called once, from `Start`, after the universe
 		// exists - several polls read it.
@@ -1657,6 +1693,7 @@ namespace studio {
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
 		void DrawPipelineProfile();
+		void DrawRojoSync();
 		void DrawWorldLighting();
 		void DrawProfileWatch();
 		void
@@ -1765,7 +1802,7 @@ namespace studio {
 		);
 
 		// The same for the raw view.
-		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
+		void SortRaw(std::vector<const engine::assets::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
 
 		// Re-reads both halves of the store.
 		//
@@ -1871,19 +1908,19 @@ namespace studio {
 		// Decodes, uploads and measures one mesh.
 		PreviewState BuildPreviewMesh(const std::string &name);
 
-		// Reads a material and uploads its colour map for the preview sphere.
+		// Reads a material and uploads its maps for the preview sphere.
 		//
-		// **Ready with an invalid `texture` is a real outcome, not a failure**: a
-		// material that names no colour map previews as a bare sphere, which is
+		// **Ready with no valid map is a real outcome, not a failure**: a
+		// material that names no maps previews as a bare sphere, which is
 		// what that material actually puts on a part. A material that names one
 		// this machine does not have is `Unavailable` instead, because a grey
 		// ball would be a picture of something the material is not.
 		//
-		// @param name    The `.amat`'s published name.
-		// @param texture Filled with the name the sheet was registered under, and
-		//                left alone when there is nothing to sample.
+		// @param name       The `.amat`'s published name.
+		// @param appearance Filled with the names the sheets were registered under.
 		// @return Whether a preview can be drawn.
-		PreviewState BuildPreviewMaterial(const std::string &name, engine::core::Name &texture);
+		PreviewState
+		BuildPreviewMaterial(const std::string &name, engine::scene::SurfaceAppearance &appearance);
 
 		// What a preview mesh is registered under, prefixed so it can never be
 		// drawn as content.
@@ -1894,15 +1931,15 @@ namespace studio {
 			engine::core::Vector3 Centre;
 			float Radius = 1.0f;
 
-			// The texture the preview samples, or an invalid name for none.
+			// The material maps the preview samples, all invalid for a bare mesh.
 			//
 			// **Set for a material and left empty for a mesh**, which is the
 			// whole of the difference between the two previews: a material is
 			// the engine's sphere wearing its colour map, and a mesh is its own
 			// geometry wearing nothing. Both are one instance in one slot, so
-			// carrying the texture on the record rather than branching in
+			// carrying the appearance on the record rather than branching in
 			// `RenderPreviewSlot` keeps that function about the camera.
-			engine::core::Name Texture;
+			engine::scene::SurfaceAppearance Appearance;
 		};
 
 		// Which meshes have been tried, and how each went.
@@ -2056,7 +2093,7 @@ namespace studio {
 		bool FinishAssetPicker(std::string &chosen, bool confirmed);
 
 		// A raw entry's path relative to `raw/`, which is what a baker takes.
-		static std::string RawRelativePath(const cdn::RawEntry &entry);
+		static std::string RawRelativePath(const engine::assets::RawEntry &entry);
 
 		// Bakes one source out of `raw/` into `baked/`, now.
 		//
@@ -2266,12 +2303,12 @@ namespace studio {
 		// The selected node's knobs, as real widgets.
 		//
 		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
-		// is the third consumer `engine/nodegraph/Layout.hpp` promises: a knob that existed
+		// is the third consumer `nodegraph/Layout.hpp` promises: a knob that existed
 		// here and not on the node, or took a different range, would be two
 		// declarations of one thing.
 		//
 		// @return Whether anything was changed.
-		bool DrawNodeDemoWidgets(engine::nodegraph::Node &node);
+		bool DrawNodeDemoWidgets(nodegraph::Node &node);
 
 		// Writes one node's picture beside the graph file, as a PNG.
 		//
@@ -2280,7 +2317,7 @@ namespace studio {
 		// link, and a stored-block encoder needs nothing linked at all.
 		//
 		// @return What to say about it, either way.
-		std::string ExportNodeDemoImage(engine::nodegraph::NodeId node);
+		std::string ExportNodeDemoImage(nodegraph::NodeId node);
 
 		// Snapshot undo over the demo graph.
 		//
@@ -2301,7 +2338,7 @@ namespace studio {
 		// to a result rather than to a node, so two nodes computing one thing
 		// share a texture and an edit makes a new key instead of overwriting a
 		// live one.
-		void *NodeDemoImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
+		void *NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
 
 		// The 3-D view's picture, which is one texture rather than a table of
 		// them.
@@ -2313,8 +2350,7 @@ namespace studio {
 		// the one being drawn, and the one it replaced - which is released
 		// between frames, because a texture dropped while a draw list still
 		// names it is a use-after-free on the GPU.
-		void *
-		NodeDemoOrbitImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
+		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
 
 		// Releases every preview texture. Called when the cache is dropped and
 		// when the graph is replaced - a texture per result would otherwise be a
@@ -2613,6 +2649,9 @@ namespace studio {
 		// decoding an `.amesh` again and running quickhull over it again.
 		//
 		// @since v0.17
+		// arch-waiver ecs-copy: `mono.server`'s `ContentShapes` argument, in the one
+		// other program that takes content in. `PrepareWorld` merges this into every
+		// world this program makes, including the ones opened after intake.
 		engine::scene::CollisionShapes ContentShapes;
 		size_t ContentTextures = 0;
 
@@ -2643,13 +2682,16 @@ namespace studio {
 		// Which texture names have been asked for, by `core::Name::Id`.
 		std::unordered_set<uint32_t> ContentAsked;
 
-		// The names the open worlds carry, refilled once per content pump.
+		// Last content-reference revision scanned per open world. This is a
+		// reader watermark, not a second copy of the world's asset references.
+		std::unordered_map<uint32_t, uint64_t> ContentScannedAtRevision;
+
+		// Newly changed names carried by the open worlds, refilled on demand.
 		//
 		// A member rather than a local in `RequestShownContent` so the buffer's
-		// capacity survives the frame. The answer is recomputed from scratch
-		// every pump - there is nothing cheap to observe that would say when a
-		// world's content names changed - so the allocation was the one part of
-		// that which did not have to be paid again.
+		// capacity survives the frame. Component-specific revisions decide which
+		// worlds need a scan, so an unchanged or merely simulating world is O(1)
+		// in its entity count here.
 		std::vector<engine::core::Name> WantedContent;
 
 		// Queues every file in the local store's `raw/` for every write source.
@@ -2676,8 +2718,6 @@ namespace studio {
 		// **Generic over properties for the same reason the properties panel
 		// is**: `PropertyDescriptor` is data, so this names no property and
 		// gains one the day any module declares it.
-		void DrawFindInstances();
-
 		// Rebuilds `FindResults` from `Find` across every world.
 		void RunFind();
 
@@ -3056,11 +3096,21 @@ namespace studio {
 		// Answers everything the socket parked since the last frame.
 		void PumpControl();
 
+		// Enables this product's ordered engine and studio feature list once.
+		void EnableControlFeatures();
+
 		// The editor's own tools, added on top of the shared ones.
 		void RegisterControlTools();
 
 		// The `world` argument, defaulting to the active scene.
 		WorldId ControlWorld(const nlohmann::json &arguments, std::string &failure);
+
+		// Issues the front MCP screenshot request to the renderer once.
+		void PrepareControlScreenshot();
+
+		// Retires completed screenshots and releases a synthetic mouse press after
+		// ImGui has drawn one frame with it held.
+		void FinishControlAutomationFrame();
 
 		// Whether a control client has asked for the frame graph.
 		//
@@ -3069,6 +3119,26 @@ namespace studio {
 		// a window in an editor somebody is using, to answer a question asked
 		// over a socket.
 		bool ControlWantsProfile = false;
+
+		// One file in a screenshot batch. Scene requests name a renderer slot;
+		// Studio requests capture the complete host overlay.
+		struct ControlScreenshot {
+			std::filesystem::path Path;
+			size_t Slot = 0;
+			bool Studio = false;
+		};
+		std::deque<ControlScreenshot> ControlScreenshots;
+		bool ControlScreenshotIssued = false;
+
+		// A click injected through SDL. The release waits until a presented ImGui
+		// frame has observed the press, matching a physical button lifecycle.
+		struct ControlClick {
+			float X = 0.0f;
+			float Y = 0.0f;
+			uint8_t Button = 0;
+			bool DownProcessed = false;
+		};
+		std::optional<ControlClick> PendingControlClick;
 
 		// What this editor was started with.
 		Options Settings;
@@ -3166,10 +3236,10 @@ namespace studio {
 		//
 		// One per editor for `Shaders`' reason: the ledger of last-uploaded
 		// revisions is process-wide state rather than world state.
-		client::EditableMeshUploader EditableMeshes;
+		engine::render::EditableMeshUploader EditableMeshes;
 
 		// The identical ledger, for `EditableImage`.
-		client::EditableImageUploader EditableImages;
+		engine::render::EditableImageUploader EditableImages;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;
@@ -3352,14 +3422,13 @@ namespace studio {
 		// a list assembled from what is in the world is also what makes a
 		// deleted emitter stop being drawn.
 		//@{
-		client::ParticleFrame Particles;
+		// Boundary copies retained between frames. The stores own the source
+		// rows; Studio owns only these one-frame snapshots, whose capacity stays
+		// warm when a million-row scene is presented repeatedly.
+		std::vector<engine::scene::DrawInstance> DrawnInstances;
+		std::vector<engine::scene::DrawInstance> ForeignInstances;
+		engine::render::ParticleFrame Particles;
 
-		// Whether this frame has already advanced the particle simulation.
-		//
-		// **Because a frame is several `Render` calls here and one pool.** Each
-		// open viewport is drawn by its own call, and the particles belong to the
-		// world rather than to any of the cameras looking at it.
-		bool ParticleStepped = false;
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;
 		std::vector<engine::render::SceneLight> Lights;
@@ -3368,6 +3437,9 @@ namespace studio {
 		// The universe-authored rendering profiles. Worlds hold only the name
 		// they select, so one graph edit reaches every world using that profile
 		// and the game writer emits the library once.
+		// arch-waiver ecs-copy: `client::Client`'s `RenderingProfiles` argument. The
+		// library belongs to the universe and a world holds only the name it
+		// selects, which is what makes one graph edit reach every world using it.
 		engine::graph::PipelineSet RenderingProfiles;
 
 		// Each world's selected runtime pipeline, keyed by world index.
@@ -3454,6 +3526,10 @@ namespace studio {
 		// Every world currently running. Worlds absent from this are in edit.
 		std::vector<WorldRun> Runs;
 
+		// Reused by `Simulate` when every live play link is submitted as one
+		// cross-scene replication batch.
+		std::vector<PlayLink *> ActivePlayLinks;
+
 		// The run a world belongs to, whether it is the authority or a replica.
 		//
 		// **`RunOf` answers for the authority alone**, because a run is recorded
@@ -3497,6 +3573,10 @@ namespace studio {
 		// @return `true` when it has a run record.
 		bool IsRunning(WorldId world) const;
 
+		// Whether this authority or client replica is advancing right now.
+		// Paused runs remain runs but do not receive the active selector marker.
+		bool IsActivelyRunning(WorldId world) const;
+
 		// Whether a world is a `Play` run's client view rather than a scene.
 		//
 		// **Asked by everything that treats a world as authored content**: the
@@ -3512,6 +3592,14 @@ namespace studio {
 		// @param world The scene to ask about.
 		// @return `true` when some run owns it as a replica.
 		bool IsReplicaWorld(WorldId world) const;
+
+		// The world whose visual state backs a viewport.
+		//
+		// A local replica supplies its camera, input and interface, but its linked
+		// authority owns the scene and effects uploaded to the shared renderer.
+		// The authority can change while a link follows a teleport, so this is
+		// resolved from the link rather than cached on the viewport.
+		WorldId VisualWorldOf(WorldId world) const;
 
 		// Where an edit made in this world lands.
 		//
@@ -3742,6 +3830,7 @@ namespace studio {
 		float CameraYaw = 0.0f;
 		float CameraPitch = 0.0f;
 		float CameraSpeed = 24.0f;
+		ViewportCameraMemory CameraMemory;
 		//@}
 
 		// How big a texture the world is drawn into, from the main viewport
@@ -3772,6 +3861,7 @@ namespace studio {
 			float Yaw = 0.0f;
 			float Pitch = 0.0f;
 			float Speed = 24.0f;
+			ViewportCameraMemory CameraMemory;
 			//@}
 
 			// What the pointer is doing to this panel.
@@ -3796,6 +3886,14 @@ namespace studio {
 			// a tab beside it rather than as a floating window over the scene.
 			unsigned DockInto = 0;
 
+			// Whether this panel has already been undocked since it closed.
+			//
+			// **So the undock happens once and not every frame.** A closed panel
+			// is still visited by `DrawViewport`, and re-docking it to nothing on
+			// every one of those frames would fight a person dragging its tab
+			// back in from the saved layout. Cleared the moment it reopens.
+			bool Undocked = false;
+
 			// A `Camera` instance this view looks through, or null for the free
 			// camera. See `Editor::FollowCamera`.
 			Entity Follow;
@@ -3810,6 +3908,10 @@ namespace studio {
 			// changed afterwards, which is what makes both true.
 			std::string Title;
 		};
+
+		// Where `ViewportIdentity` builds its answer. One buffer because the
+		// only callers use the result immediately.
+		std::string ViewportIdentityScratch;
 
 		// What one viewport panel handed the overlay pass this frame.
 		//
@@ -3843,6 +3945,28 @@ namespace studio {
 			// Whether this panel drew at all this frame. A closed panel returns
 			// early and leaves this false.
 			bool Drawn = false;
+
+			// The camera this panel's texture was last *rendered* with.
+			//
+			// **Not the camera it is looking through now, and the difference is
+			// the misaligned selection box.** `Renderer::Render` owns the whole
+			// frame, so the studio draws one panel per frame and round-robins;
+			// a panel that did not have its turn is showing a texture from an
+			// earlier frame. The overlay is drawn on top of that texture every
+			// frame, and projecting it from the live camera aimed it at a
+			// picture that was never taken - at 90 degrees a second on a
+			// 1600-pixel panel, about 26 pixels of skew on every frame the panel
+			// did not draw.
+			//
+			// Written by `PresentWorld` for the panel it renders, read by
+			// `ProjectionFor` for every panel. `Presented` stays false until the
+			// first render, where falling back to the live camera is right
+			// because there is no texture to disagree with.
+			//@{
+			engine::core::CFrame PresentedFrame;
+			float PresentedFieldOfView = 0.0f;
+			bool Presented = false;
+			//@}
 		};
 
 		// How many extra panels a fresh editor starts with, beyond the main one.
@@ -3852,7 +3976,7 @@ namespace studio {
 		// - a closed panel drops its `SceneTarget` - so having a few ready is
 		// what makes the View menu's first three entries work with no wait.
 		// `AddViewport` makes more.
-		static constexpr size_t DEFAULT_EXTRA_VIEWPORTS = 3;
+		static constexpr size_t DEFAULT_EXTRA_VIEWPORTS = 0;
 
 		// **The slot the asset preview owns, past every viewport panel.**
 		// Sharing one with a viewport would make the preview and that panel
@@ -3931,6 +4055,17 @@ namespace studio {
 		// signature, find nothing to compare it against and rebuild every time.
 		std::vector<engine::gui::Compiled> GuiLists;
 
+		// The retained scene, game UI, host UI, and geometry signatures for each
+		// viewport. A turn in the round robin can update one image without
+		// invalidating the other layers or the other panels.
+		std::vector<engine::render::PresentationDamageTracker> ViewportPresentations;
+		std::vector<engine::render::ParticleLayerVisibility> ViewportParticleVisibility;
+
+		// Renderer-owned mesh, texture, shader, and editable content revision.
+		// Included in every viewport's scene signature so an arrival refreshes
+		// each panel on its own next round-robin turn.
+		uint64_t VisualResourceRevision = 0;
+
 		// The hover and press state behind those lists, per panel for the same
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.
@@ -3964,6 +4099,18 @@ namespace studio {
 
 		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
+
+		// A selection rectangle begun on empty viewport space. Starting on a
+		// part remains Select's direct surface move.
+		struct BoxSelectionAction {
+			bool Active = false;
+			size_t Viewport = 0;
+			glm::vec2 Start{0.0f};
+			glm::vec2 Current{0.0f};
+			bool Add = false;
+		};
+
+		BoxSelectionAction BoxSelection;
 
 		// Which manipulator the viewport is offering.
 		//
@@ -4328,37 +4475,32 @@ namespace studio {
 		// **Live rather than start-up-only, unlike `Options::Uncapped`.** The
 		// flag is what a launcher passes; these are what somebody changes while
 		// looking at the frame graph, which is the only time the question comes
-		// up. `Options::Uncapped` clears `FrameCap` and is not read again.
+		// up. `Options::Uncapped` bypasses the persisted choice for one run and is
+		// never written back.
 		//
 		// **Off by default, and the pair is one decision.** An editor is a
 		// program with hands on it, and vertical sync puts the display's refresh
 		// between the mouse and the viewport - 16.7 ms on a 60 Hz panel before
 		// the compositor takes its turn. The cost of turning it off is a
-		// viewport spinning as fast as the GPU allows, which `FrameCap` is there
-		// to answer; the two ship together because either one alone is a worse
+		// viewport spinning as fast as the GPU allows, which the rates below
+		// answer; the two ship together because either one alone is a worse
 		// default than what they are now.
 		bool VerticalSync = false;
 
-		// A ceiling on frames per second while vertical sync is off.
-		//
-		// **Zero is no ceiling**, which is what `--uncapped` means and what a
-		// benchmark wants. Anything else is a soft cap applied by sleeping out
-		// the rest of the frame - worth having because an editor that renders
-		// nine hundred frames a second to show a still scene is an editor that
-		// spins a laptop's fans for nothing.
-		//
-		// 120 by default: high enough that the cap is not what anybody feels on
-		// a 60, 75 or 120 Hz panel, and low enough that a still scene stops
-		// costing a laptop its fans. It is deliberately *not* tied to the
-		// display's refresh - being unpaced by the display is the point.
-		float FrameCap = 120.0f;
+		// Whether the adaptive presentation ceilings are bypassed. The rates stay
+		// intact so turning this off restores the previous pacing policy.
+		bool Uncapped = false;
+
+		// The image deadline, independent of the update loop. A busy swapchain
+		// does not consume its opportunity, and a late image does not cause a
+		// burst of obsolete presents.
+		engine::render::PresentationSchedule Presentations;
 
 		// The four rates the ceiling is actually made of, in hertz.
 		//
 		// **One number could not answer this, and the symptom was a laptop.**
-		// `FrameCap` is a single ceiling on the whole loop, so an editor sitting
-		// behind a browser with nobody touching it still drew a hundred and
-		// twenty identical pictures a second. What a person actually wants is
+		// A single ceiling made an editor sitting behind a browser draw a hundred
+		// and twenty identical pictures a second. What a person actually wants is
 		// four different answers to two different questions - how often the
 		// panels are rebuilt, and how often the world behind them is - and each
 		// of those has a busy case and a quiet one.
@@ -4369,11 +4511,12 @@ namespace studio {
 		// present in one call, so a frame that redraws the panels also redraws
 		// the world; there is no arrangement today where the two run at
 		// different rates. The four knobs therefore set a ceiling each and the
-		// lowest one that applies is what the loop is paced at. Splitting them
+		// lowest one that applies is what image acquisition is scheduled at.
+		// Splitting them
 		// for real means `Render` taking the world and the chrome separately,
 		// which is a change to the shared renderer.
 		//
-		// Zero on any of them means "no ceiling from this one".
+		// 361 on any of them means "no ceiling from this one".
 		//@{
 		float InterfaceActiveHz = 120.0f;
 		float InterfaceIdleHz = 20.0f;
@@ -4397,7 +4540,7 @@ namespace studio {
 		static constexpr double IDLE_AFTER_SECONDS = 3.0;
 
 		// The ceiling that applies right now, from the four above and the
-		// window's focus. Zero for no ceiling.
+		// window's focus. Zero means no scheduled presentation.
 		float PacingCeiling() const;
 
 		// The script editor's find bar: whether it is up, and what is in it.
@@ -4437,6 +4580,11 @@ namespace studio {
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
 
+		// Whether particle emitters are drawn in Studio viewports. Kept separate
+		// from each emitter's Enabled property so hiding effects is an editor view
+		// decision and cannot modify the game being authored.
+		bool ShowParticleEmitters = true;
+
 		// Whether every nearby part's collider is outlined.
 		//
 		// **Off by default, which the grid is not**, and the difference is what
@@ -4448,6 +4596,61 @@ namespace studio {
 		//
 		// @since v0.17
 		bool ShowColliders = false;
+
+		// Which shape the collider view draws.
+		//
+		// **Because a part has three of them and only one is in force.** A
+		// `MeshPart` carries a bound, and its `CollisionGeometry` resolves to
+		// both a convex hull and a triangle soup - `scene::BakeCollisionShapes`
+		// bakes the pair - while `Collider::Shape` picks which the solver uses.
+		// The question "why does this collide like that" is usually answered by
+		// seeing the *other* two: a rock whose hull swallows the gap it should
+		// have, a chunk whose bound is a box the size of the whole tile.
+		//
+		// @since v0.19
+		enum class ColliderShapeView : uint8_t {
+			// Whatever `Collider::Shape` selects, which is what actually
+			// collides. The default, because it is the honest picture.
+			Chosen,
+
+			// The triangle soup, for anything that has one baked.
+			Precise,
+
+			// The convex hull, for anything that has one baked.
+			Hull,
+
+			// The part's own bound - the box a shape falls back to when its
+			// name does not resolve.
+			Bounds,
+		};
+
+		// Which of the three the collider view is drawing.
+		//
+		// Per editor rather than per part, because the question is asked of a
+		// scene: flipping between `Chosen` and the other two while looking is
+		// what makes the comparison, and doing it per part would mean answering
+		// it before knowing which part is wrong.
+		ColliderShapeView ColliderShapes = ColliderShapeView::Chosen;
+
+		// Whether the collider view fills its faces as well as outlining them.
+		//
+		// **Filled is how a shape reads as a solid** and outlined is how two
+		// overlapping ones stay separable, so this is a switch rather than a
+		// decision. The fill is translucent and unsorted - an overlay has no
+		// depth buffer - which is legible for one shape and a soup for a
+		// hundred, and is the reason it is not simply always on.
+		//
+		// @since v0.19
+		bool ColliderFill = true;
+
+		// Whether the world is drawn without its textures while the collider
+		// view is open.
+		//
+		// A wireframe over a photograph is not readable, which is the whole of
+		// it. See `render::Renderer::SetUntextured`.
+		//
+		// @since v0.19
+		bool ColliderHideTextures = true;
 
 		// The adornment geometry for the viewport being drawn, kept between
 		// frames so a steady selection stops allocating - which is the property
@@ -4472,11 +4675,81 @@ namespace studio {
 		// The imgui title of a panel index. See `ViewportState::Title`.
 		//
 		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
-		// @return A string valid until the panels are resized, or "Viewport" for
+		// @return A string valid until the panels are resized, or "Viewport 1" for
 		//         an index that is not a panel.
 		const char *ViewportTitle(size_t index) const {
-			return index == 0 || index > Extras.size() ? "Viewport" : Extras[index - 1].Title.c_str();
+			return index == 0 || index > Extras.size() ? "Viewport 1" : Extras[index - 1].Title.c_str();
 		}
+
+		// What a panel's tab reads, which is not its identity.
+		//
+		// **The scene it is showing.** With four
+		// viewports open the tabs said "Viewport 1", "Viewport 2", "Viewport 3",
+		// "Viewport 4" and nothing said which scene any of them held - so the
+		// only way to find the one you wanted was to click each in turn.
+		//
+		// **imgui's `###` is what makes this legal.** A window's identity is its
+		// title, which is why `ViewportState::Title` is minted once and never
+		// changed; everything before `###` is drawn and everything from it is
+		// hashed, so the text can change every frame while the window, its dock
+		// node and the saved layout stay the same panel.
+		//
+		// `ViewportTitle` remains the identity and is what `SetWindowFocus` and
+		// `FindWindowByName` must be given - `ImHashStr` restarts at `###`, so a
+		// lookup by the bare identity would hash to something else. Use
+		// `ViewportIdentity` for those.
+		//
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
+		// @return A string to hand `ImGui::Begin`. Rebuilt per call.
+		std::string ViewportLabel(size_t index) {
+			const char *identity = ViewportTitle(index);
+			const engine::world::WorldId world = ViewportWorld(index);
+
+			std::string shown;
+			if (Universe != nullptr && world.IsValid()) {
+				const engine::core::Name name = Universe->NameOf(world);
+				if (name.IsValid()) {
+					shown = std::string(name.Text());
+				}
+			}
+			if (shown.empty()) {
+				// A panel with no world says what it is rather than nothing at
+				// all, which is what an empty tab would read as.
+				shown = identity;
+			}
+			return shown + "###" + identity;
+		}
+
+		// The string to give `SetWindowFocus` or `FindWindowByName` for a panel.
+		//
+		// **Not `ViewportTitle`.** `ImHashStr` restarts its hash at `###`, so
+		// the id of a window opened as `Scene###Viewport 2` is the hash of
+		// `###Viewport 2` and not of `Viewport 2`. Any prefix hashes the same,
+		// so this is the shortest one that does.
+		//
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
+		// @return A string valid until the next call for the same index.
+		const char *ViewportIdentity(size_t index) {
+			ViewportIdentityScratch = std::string("###") + ViewportTitle(index);
+			return ViewportIdentityScratch.c_str();
+		}
+
+		// Starts Play with the character spawned where the focused viewport is
+		// looking.
+		//
+		// **A forced spawn pad rather than a teleport after the fact.** A
+		// character is built by `LoadCharacter` from whatever `FindSpawn`
+		// answers; moving it afterwards is a visible frame in the wrong place
+		// plus a race with the client that is joining. This puts the answer
+		// where `FindSpawn` will read it and then starts the run normally.
+		//
+		// The pad is one instance named `PlayHere`, reused rather than made
+		// afresh, so pressing this twenty times leaves one pad and not twenty -
+		// and it is `NotArchivable`, so it is a thing the editor put in the
+		// world rather than a thing the scene now contains.
+		//
+		// @param world The scene to start.
+		void PlayFromCamera(engine::world::WorldId world);
 
 		// Makes the editor hold `extras` panels beyond the main one.
 		//
@@ -4614,6 +4887,11 @@ namespace studio {
 		// thing it said on the last one.
 		std::vector<size_t> Candidates;
 
+		// The most recent submitted result for each viewport slot. The texture is
+		// retained per slot, so its counters have to be retained beside it or a
+		// round-robin frame from another panel labels the visible image.
+		std::vector<engine::render::FrameResult> ViewportResults;
+
 		// --- dialogs -----------------------------------------------------------
 		//
 		// Modal state, held here rather than in statics inside the drawing
@@ -4625,11 +4903,15 @@ namespace studio {
 		bool AskingOpen = false;
 		//@}
 
-		// Whether the Rojo project picker is up. See `SyncRojo`.
-		bool AskingRojo = false;
+		// Whether the Rojo sync dock is open. See `DrawRojoSync`.
+		bool ShowRojoSync = false;
 
-		// Whether the Rojo universe picker is up. See `SyncRojoWorlds`.
-		bool AskingRojoUniverse = false;
+		// The two sync documents are independent inputs, so changing one does not
+		// replace the path somebody is preparing for the other.
+		//@{
+		char RojoProjectPath[4096] = {};
+		char RojoUniversePath[4096] = {};
+		//@}
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;
@@ -4825,10 +5107,15 @@ namespace studio {
 		// `PipelineSet`. It reloads when the world or selected pipeline changes,
 		// never while a gesture is in progress.
 		//@{
-		engine::nodegraph::Graph RenderPipelineGraph;
-		engine::nodegraph::Canvas RenderPipelineCanvas;
-		engine::nodegraph::Evaluator RenderPipelinePreviewEvaluator;
+		nodegraph::Graph RenderPipelineGraph;
+		nodegraph::Canvas RenderPipelineCanvas;
+		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
 		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
+
+		// The shape of each of those pictures, width over height. See
+		// `nodegraph::Editor::Aspects`: a graph resource's preview keeps the
+		// resource's shape and a node's slot is square.
+		std::unordered_map<uint64_t, float> RenderPipelinePreviewAspects;
 		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
 		WorldId RenderPipelineWorld;
@@ -4873,10 +5160,10 @@ namespace studio {
 		// Held rather than re-read, for `RefreshPickerContents`' reason. Shared
 		// by every picker and by the Assets panel, because they are looking at
 		// one store and two copies would disagree the moment one refreshed.
-		std::vector<cdn::PublishedEntry> PickerContents;
+		std::vector<engine::assets::PublishedEntry> PickerContents;
 
 		// What is sitting in `raw/`, as of the last refresh.
-		std::vector<cdn::RawEntry> PickerRaw;
+		std::vector<engine::assets::RawEntry> PickerRaw;
 
 		// Every place the assets panel can list, as of the last refresh.
 		//
@@ -4910,11 +5197,15 @@ namespace studio {
 		// Rebuilt when the tab, the filter, the sort order or the catalogue
 		// changes - which is exactly when the answer can differ.
 		//@{
-		std::vector<const CatalogueEntry *> AssetRows;
-		const void *AssetRowsTab = nullptr;
-		std::string AssetRowsFilter;
-		uint64_t AssetRowsRevision = 0;
-		//@}
+			std::vector<const CatalogueEntry *> AssetRows;
+			const void *AssetRowsTab = nullptr;
+			std::string AssetRowsFilter;
+			int AssetRowsKind = -1;
+			int AssetKindFilter = -1;
+			uint64_t AssetRowsRevision = 0;
+			int AssetPage = 0;
+			int AssetPageSize = 100;
+			//@}
 
 		// The tab bar's imgui ids, one per entry in `AssetTabs`.
 		//
@@ -4952,6 +5243,11 @@ namespace studio {
 		// every handle in this editor is a value.
 		engine::core::Name PickerProperty;
 
+		// The class that declared the chosen row. Two unrelated classes may use
+		// the same property spelling, and confirming one picker must not write the
+		// other meaning onto a mixed selection.
+		engine::ecs::ClassId PickerOwner;
+
 		// What that property's type is, carried across the frames the modal is
 		// open.
 		//
@@ -4981,7 +5277,7 @@ namespace studio {
 		// Filled from `EngineAssets`, which is also what the assets panel's
 		// engine tab draws - one enumeration, so the two cannot offer different
 		// sets.
-		std::vector<cdn::PublishedEntry> PickerBuiltins;
+		std::vector<engine::assets::PublishedEntry> PickerBuiltins;
 
 		// The name a picker is currently offering.
 		std::string PickerChoice;
@@ -5083,10 +5379,10 @@ namespace studio {
 		// containers and nothing else.
 		//@{
 		bool ShowNodeDemo = false;
-		engine::nodegraph::Graph NodeDemoGraph;
-		engine::nodegraph::Canvas NodeDemoCanvas;
-		engine::nodegraph::Evaluator NodeDemoRunner;
-		engine::nodegraph::RunReport NodeDemoReport;
+		nodegraph::Graph NodeDemoGraph;
+		nodegraph::Canvas NodeDemoCanvas;
+		nodegraph::Evaluator NodeDemoRunner;
+		nodegraph::RunReport NodeDemoReport;
 
 		// The signature the demo last evaluated at, so dragging a node does not
 		// recompute a graph that has not changed.
@@ -5156,7 +5452,7 @@ namespace studio {
 		// starts with.** A half-typed number must not be the port a restart
 		// would use, and `Settings.ControlPort` is negative for "do not listen"
 		// - a state a text field cannot express while it is being typed in.
-		int ControlPortField = 8720;
+		int ControlPortField = engine::control::DEFAULT_PORT;
 
 		// The editor's own delivery client, built from `Content`.
 		//
@@ -5200,8 +5496,8 @@ namespace studio {
 		// What crosses between worlds. See `DrawBus`.
 		bool ShowBus = false;
 
-		// Find instances by class and property. See `DrawFindInstances`.
-		bool ShowFindInstances = false;
+		// The world shown by Explorer, or every world when invalid.
+		WorldId ExplorerWorld;
 
 		// What the Find panel was asked for. Every field is optional and an
 		// empty one is "do not filter on this" rather than "match nothing".
@@ -5295,6 +5591,9 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+		// How many more frames an explicit `--graph` should select the dock tab.
+		// A few frames outlast the first-run dock rebuild, as `FocusWorlds` does.
+		int FocusFrameGraphFrames = 0;
 
 		// Where the live bytes are, and whether they are climbing.
 		//
@@ -5312,48 +5611,8 @@ namespace studio {
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
 
-		// One frame's spans, with the names copied.
-		//
-		// **`core::FrameSpan::Name` is a `std::string_view` that may point at a
-		// buffer the frame owns**, which its own header says outright - so it is
-		// safe to read during the frame that produced it and a dangling read
-		// afterwards. Every feature below holds spans across frames, so every
-		// one of them needs the string rather than the view.
-		struct HeldSpan {
-			// The span's name, owned rather than viewed. See the note above -
-			// this copy is the whole reason the type exists.
-			std::string Name;
-
-			// Where it sits in the tree: how deep, and which span opened it.
-			//@{
-			uint32_t Depth = 0;
-			uint32_t Parent = 0;
-			//@}
-
-			// When it opened and how long it was open, in milliseconds from the
-			// start of the frame.
-			//@{
-			float StartMilliseconds = 0.0f;
-			float Milliseconds = 0.0f;
-			//@}
-
-			// The same duration with its children taken out, and the part of it
-			// spent waiting. **Both are what a reader actually wants**: a span
-			// that is wide because its children are wide is not the one to look
-			// at, and one that is wide because it blocked is a different problem
-			// from one that is wide because it worked.
-			//@{
-			float SelfMilliseconds = 0.0f;
-			float IdleMilliseconds = 0.0f;
-			//@}
-
-			// Which colour band it draws in.
-			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
-
-			// Whether this span has already been counted into a summary, so a
-			// held frame is not summed twice.
-			bool Reported = false;
-		};
+		StatusBarSnapshot StatusBar;
+		std::vector<StatusBarSnapshot> ViewportStatistics;
 
 		// What the frame-graph panel is showing, and when it changes.
 		//
@@ -5387,27 +5646,71 @@ namespace studio {
 
 			// The published snapshot - what is drawn.
 			//@{
-			std::vector<HeldSpan> Spans;
+			std::vector<DiagnosticSpan> Spans;
+			// Display-only copy with synthetic `unaccounted` children. Retained so
+			// an open profiler does not allocate a second tree every repaint.
+			std::vector<DiagnosticSpan> DisplaySpans;
+			std::vector<uint32_t> Rows;
+			uint32_t DisplayRows = 0;
+			bool DisplayDirty = true;
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;
 			size_t Dropped = 0;
+			// Frames represented by the published snapshot. Kept apart from the
+			// next interval's running count so the label does not jump back to zero
+			// immediately after publishing a mean.
+			uint32_t PublishedFrames = 0;
 			//@}
 
 			// The running sum since the last publish, and how many frames are in
 			// it. Unused when `Average` is off.
 			//@{
-			std::vector<HeldSpan> Summed;
+			std::vector<DiagnosticSpan> Summed;
 			float SummedFrameMilliseconds = 0.0f;
 			float SummedIdleMilliseconds = 0.0f;
 			float SummedUnmarkedMilliseconds = 0.0f;
 			size_t SummedDropped = 0;
 			uint32_t Frames = 0;
 			//@}
+
+			// --- the scheduler ------------------------------------------------
+			//
+			// Rules that stop the graph on the frame that meets them. Edited
+			// here and pushed to `FrameGraph::SetTriggers`, which is where they
+			// are evaluated - a rule tested by this panel would sample four
+			// times a second and miss the one frame it was written for.
+
+			// The armed rules, in the order they were written.
+			std::vector<engine::core::FrameTrigger> Triggers;
+
+			// What fired, copied out of the latch when the pause was taken.
+			//
+			// Copied rather than pointed at: the panel says what fired for as
+			// long as it stays paused, and `ClearTrigger` runs the moment the
+			// pause is released.
+			engine::core::FrameTriggerHit Fired;
+
+			// Whether this pause was taken by a rule rather than by the button.
+			bool PausedByRule = false;
+
+			// Whether the rule list is open. Folded away by default, because
+			// most sessions never write one.
+			bool ShowTriggers = false;
+
+			// Show cache decisions instead of elapsed spans. Hits have no useful
+			// duration, so placing them in the timing flame graph would invent a
+			// cost and obscure the question this view answers.
+			bool ShowCascadedCaches = false;
+
+			// The viewport whose cache tree is selected. Independent of the
+			// renderer's round-robin cursor so the table does not switch subjects
+			// every frame when several panels are open.
+			size_t CacheViewport = 0;
 		};
 
 		// What the frame-graph panel is showing. Held across frames, which is
-		// what `HeldSpan` above exists for.
+		// what `DiagnosticSpan` exists for.
 		FrameGraphView FrameGraphState;
 
 		// What the heap panel is showing, refreshed when a reading is taken
@@ -5434,6 +5737,12 @@ namespace studio {
 
 			// The process totals, as of the reading `Plot` ends on.
 			engine::core::HeapTotals Totals;
+
+			// Logical GPU bytes sampled on the same one-second clock as `Plot`.
+			// Driver-private allocations are not portable through SDL, so this is
+			// the payload of the renderer's buffers and textures rather than VRAM.
+			std::vector<float> GpuPlot;
+			engine::render::GpuMemoryStatistics Gpu;
 
 			// Seconds the plot and the growth figures cover.
 			double HistorySeconds = 0.0;
@@ -5621,6 +5930,7 @@ namespace studio {
 		bool Running = false;
 		int64_t FramesDrawn = 0;
 		engine::render::FrameResult LastFrame;
+		float PresentationDeltaSeconds = 0.0f;
 		//@}
 	};
 

@@ -3,6 +3,14 @@
 # The release archive for one platform, from a built `release` preset.
 #
 #   scripts/package-release.sh .cache/build/release 0.18.0 linux-x86_64 dist
+#   scripts/package-release.sh .cache/build/dist-dev 0.18.0 linux-x86_64 dist dev
+#
+# The fifth argument labels the flavour and is empty for the shipped one. `dev`
+# is the same tree built from the `dist-dev` preset - optimised at -O1 with the
+# heap profiler left in - and it exists so that "it is slow" and "it ran out of
+# memory" have an archive somebody can answer them from without building the
+# engine. It ships as a second archive rather than as a second release, so the
+# version being reported on is the version beside it.
 #
 # Runs on Linux, macOS and Windows - git-bash on a Windows runner is a bash, and
 # the archive is written by `cmake -E tar`, which is the one archiver guaranteed
@@ -34,6 +42,7 @@ build=${1:?build directory}
 version=${2:?version}
 platform=${3:?platform label, e.g. linux-x86_64}
 outdir=${4:?output directory}
+flavour=${5:-}
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
@@ -56,7 +65,7 @@ programs="client studio server cdn launcher"
 # scenes from its own directory.
 scene_programs="client studio server"
 
-name="atomic-$version-$platform"
+name="atomic-$version-$platform${flavour:+-$flavour}"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/$name"
@@ -211,8 +220,13 @@ echo "$archive"
 # greyed out - package-appimage.sh explains the AppDir shape that makes
 # `StageRoot` find them. `server` and `cdn` get none: they are daemons, they are
 # inside the launcher image already, and they are in the tarball above.
-case $platform in
-	linux-*)
+# **The shipped flavour only.** An AppImage is named for its program and its
+# version and nothing else, so a second flavour would either collide with the
+# first or need a naming scheme invented for a download nobody asks for by
+# double-clicking. The dev flavour ships as the tarball above, which is the
+# shape somebody chasing a report unpacks anyway.
+case $platform:$flavour in
+	linux-*:)
 		"$root/scripts/package-appimage.sh" client "$work/$name/client" "$version" "$absolute"
 		"$root/scripts/package-appimage.sh" studio "$work/$name/studio" "$version" "$absolute"
 		"$root/scripts/package-appimage.sh" launcher "$work/$name/launcher" "$version" "$absolute" \

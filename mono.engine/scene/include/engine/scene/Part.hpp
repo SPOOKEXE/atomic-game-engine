@@ -30,6 +30,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
+#include <cstddef>
+#include <span>
+
 namespace engine::ecs {
 	class Store;
 }
@@ -124,6 +127,64 @@ namespace engine::scene {
 	// @return `false` for something with no placement to move.
 	// @since v0.10
 	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target);
+
+	// Places many instances in one call.
+	//
+	// **Roblox's `WorldRoot:BulkMoveTo`, and it exists for the same reason
+	// theirs does: the cost of moving a part from a script is not the move.**
+	// It is what a script has to walk through to reach it. Every
+	// `part.CFrame = x` goes through the VM's `__newindex`, a string compare of
+	// the member name against every property the instance has - see
+	// `script::ScriptableProperty`, which is a linear scan - the value unpacked
+	// out of a userdata, and `Store::SetProperty`'s own checks, before anything
+	// touches a `Transform`. Measured in the `release` preset over eight
+	// thousand parts, that boundary is 105 ns a part where the placement itself
+	// is a lookup and a struct copy.
+	//
+	// A batch pays the boundary once. What it does *per row* is exactly what a
+	// single write does and no less: the same `Transform` lookup, the same
+	// change mark. That is the point rather than a shortcoming - a batch that
+	// took a cheaper path per row would leave a world a single write would not,
+	// and the two would drift.
+	//
+	// **There is no "skip the events" mode, unlike Roblox's `BulkMoveMode`.**
+	// Theirs exists because `.Changed` fires at the moment of assignment there,
+	// so a bulk move is a bulk *signal* storm worth opting out of. Here it does
+	// not: `script/Changes.hpp` builds `.Changed` out of the store's own change
+	// tracking at the start of the next tick, so a row marked once and a row
+	// marked once as part of a batch produce the same one signal. An enum
+	// selecting between two behaviours that are the same behaviour would be
+	// surface with nothing behind it.
+	//
+	// Shorter spans win: a caller handing over lists of different lengths moves
+	// as many as the shorter names. A script binding raises instead - see
+	// `script::ScriptMethods` - because a mismatch there is a typo rather than
+	// an intent.
+	//
+	// @param store     The world.
+	// @param instances What to move.
+	// @param frames    Where each one goes, in the same order.
+	// @return How many were moved. An instance with no placement is skipped.
+	// @since v0.19
+	size_t BulkMoveTo(
+		ecs::Store &store, std::span<const ecs::Entity> instances, std::span<const core::CFrame> frames
+	);
+
+	// Pivots many instances in one call.
+	//
+	// `BulkMoveTo` for handles rather than for centres: `PivotTo` over a list,
+	// with the same one-boundary-per-call argument. Which of the two a caller
+	// wants is the same question `PivotTo` against `CFrame =` asks, and
+	// `Pivot::Offset` answers it.
+	//
+	// @param store     The world.
+	// @param instances What to move.
+	// @param targets   Where each handle should end up, in the same order.
+	// @return How many were moved. An instance with no placement is skipped.
+	// @since v0.19
+	size_t BulkPivotTo(
+		ecs::Store &store, std::span<const ecs::Entity> instances, std::span<const core::CFrame> targets
+	);
 
 	// How much of `Visual::Transparency` this viewer has locally overridden.
 	//

@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 

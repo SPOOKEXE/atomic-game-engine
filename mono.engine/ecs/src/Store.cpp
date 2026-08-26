@@ -88,7 +88,7 @@ namespace engine::ecs {
 	}
 
 	Store::Store(std::string_view name)
-		: State(std::make_unique<StoreState>()), StoreName(name), Owner(std::this_thread::get_id()) {
+		: State(new StoreState()), StoreName(name), Owner(CallingThreadToken()) {
 		// **The other door into the instance model.** A world can be made and
 		// filled from a snapshot without a single `Classes::Register` running
 		// first, and the names in that snapshot have to mean what they meant
@@ -102,10 +102,12 @@ namespace engine::ecs {
 		ENGINE_TRACE("store '{}' created", StoreName);
 	}
 
-	Store::~Store() = default;
+	Store::~Store() {
+		delete State;
+	}
 
 	void Store::BindToCallingThread() {
-		Owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+		Owner.store(CallingThreadToken(), std::memory_order_relaxed);
 	}
 
 	void Store::TooManyFilterTerms(const char *what) const {
@@ -1046,6 +1048,13 @@ namespace engine::ecs {
 		return std::find(State->Watched.begin(), State->Watched.end(), id) != State->Watched.end();
 	}
 
+	uint64_t Store::ComponentChangeVersionRaw(ComponentId id) const {
+		if (!id.IsValid() || id.Index >= State->ComponentChanges.size()) {
+			return 0;
+		}
+		return State->ComponentChanges[id.Index];
+	}
+
 	bool Store::ChangedRaw(Entity entity, ComponentId id) const {
 		const EntityId key = EntityId::Of(entity);
 		if (!State->Directory.Alive(key.Index, key.Generation) || !id.IsValid()) {
@@ -1073,45 +1082,27 @@ namespace engine::ecs {
 			->Test(static_cast<size_t>(at - ids.begin()));
 	}
 
-	void Store::VisitChanged(
-		std::span<const ComponentId> terms,
-		ComponentId subject,
-		const std::function<void(Entity, void *)> &body
-	) {
-		VisitTables(terms, [&](const TableSlice &slice) {
-			// The bits are the second term, and the subject the first, because
-			// EachChanged names them in that order.
-			void *const *bitChunks = slice.Columns[1];
-			void *const *valueChunks = slice.Columns[0];
-			const size_t stride = Components::Describe(subject).Size;
-			const size_t position = SubjectPosition(slice, subject);
+	void Store::VisitChanged(ComponentId subject, const std::function<void(Entity, void *)> &body) {
+		if (!subject.IsValid() || subject.Index >= State->ChangedEntities.size() ||
+			State->ComponentChanges[subject.Index] == 0) {
+			return;
+		}
 
-			// Chunk by chunk, because the two columns are only contiguous inside
-			// one. They share a row granularity, so their boundaries coincide
-			// and one chunk index serves both.
-			size_t row = 0;
-			while (row < slice.Rows) {
-				const size_t chunk = Column::ChunkOf(row);
-				const size_t start = Column::ChunkStart(chunk);
-				const size_t end = ChunkEnd(row, slice.Rows);
-				const auto *bits = static_cast<const DirtyBits *>(bitChunks[chunk]);
-
-				// **A tag has no column, so there is no directory to index.**
-				// `TableSlice::Columns` is null for a component with no data,
-				// and this walked it anyway - so observing a tag and writing it
-				// crashed here rather than reporting a change with no value.
-				// Nothing observed one until a property named a tag among the
-				// components it reads, which is what `scene::Anchored` does.
-				auto *values = stride == 0 ? nullptr : static_cast<std::byte *>(valueChunks[chunk]);
-
-				for (; row < end; row++) {
-					const size_t offset = row - start;
-					if (bits[offset].Test(position)) {
-						body(slice.Entities[row], values == nullptr ? nullptr : values + offset * stride);
-					}
-				}
+		// Snapshot the boundary, not the storage. A callback may write another
+		// row of the same component and grow this vector. Re-fetching by index
+		// survives that growth, while the fixed count leaves the new write for
+		// the next phase boundary.
+		const size_t count = State->ChangedEntities[subject.Index].size();
+		for (size_t index = 0; index < count; index++) {
+			if (index >= State->ChangedEntities[subject.Index].size()) {
+				break;
 			}
-		});
+			const Entity entity = State->ChangedEntities[subject.Index][index];
+			void *value = const_cast<void *>(GetRaw(entity, subject));
+			if (value != nullptr) {
+				body(entity, value);
+			}
+		}
 	}
 
 	size_t Store::SubjectPosition(const TableSlice &slice, ComponentId subject) const {
@@ -1331,11 +1322,8 @@ namespace engine::ecs {
 			// no longer holds what it thought.
 			State->Firing.clear();
 			{
-				const ComponentId terms[] = {subject, Components::Of<DirtyBits>()};
 				const DeferScope defer(*this);
-				VisitChanged(terms, subject, [this](Entity entity, void *) {
-					State->Firing.push_back(entity);
-				});
+				VisitChanged(subject, [this](Entity entity, void *) { State->Firing.push_back(entity); });
 			}
 
 			for (const Entity entity : State->Firing) {
@@ -1409,7 +1397,11 @@ namespace engine::ecs {
 				auto *rows = static_cast<DirtyBits *>(chunks[chunk]);
 				const size_t end = ChunkEnd(row, table.Rows());
 				for (; row < end; row++) {
-					rows[row - start].Mark(position);
+					DirtyBits &dirty = rows[row - start];
+					if (!dirty.Test(position) && component.Index < State->ChangedEntities.size()) {
+						State->ChangedEntities[component.Index].push_back(table.Entities()[row]);
+					}
+					dirty.Mark(position);
 				}
 			}
 
@@ -1417,6 +1409,10 @@ namespace engine::ecs {
 			// watching `ChangeVersion` sees a batch write the same way it sees
 			// that many individual ones.
 			State->Changes += table.Rows();
+			if (component.Index < State->ComponentChanges.size() &&
+				State->ComponentChanges[component.Index] != 0) {
+				State->ComponentChanges[component.Index] += table.Rows();
+			}
 		}
 	}
 
@@ -1440,6 +1436,9 @@ namespace engine::ecs {
 				std::memset(chunks[Column::ChunkOf(row)], 0, (end - row) * sizeof(DirtyBits));
 				row = end;
 			}
+		}
+		for (const ComponentId watched : State->Watched) {
+			State->ChangedEntities[watched.Index].clear();
 		}
 	}
 

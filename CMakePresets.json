@@ -40,7 +40,11 @@
         "MONO_BUILD_TESTS": "OFF",
         "MONO_TRACY": "ON",
         "MONO_OPTIMISE": "ON",
-        "MONO_HEAP_PROFILE": "OFF"
+        "MONO_HEAP_PROFILE": "OFF",
+        "MONO_LOG_LEVEL": "debug",
+        "MONO_ASSERTS": "OFF",
+        "MONO_DEBUG_INFO": "line-tables",
+        "MONO_UNITY_BUILD": "ON"
       }
     },
     {
@@ -74,7 +78,9 @@
       "inherits": "dev",
       "displayName": "ci \u2014 dev, with warnings fatal",
       "cacheVariables": {
-        "MONO_WERROR": "ON"
+        "MONO_WERROR": "ON",
+        "MONO_DEBUG_INFO": "line-tables",
+        "MONO_UNITY_BUILD": "ON"
       }
     },
     {
@@ -86,6 +92,17 @@
         "MONO_BUILD_TESTS": "OFF",
         "MONO_BUILD_CDN": "OFF",
         "MONO_HEAP_PROFILE": "ON"
+      }
+    },
+    {
+      "name": "dist-dev",
+      "inherits": "release",
+      "displayName": "dist-dev: the shipped build with the diagnostics left in, at -O1",
+      "cacheVariables": {
+        "MONO_OPTIMISE_LEVEL": "1",
+        "MONO_HEAP_PROFILE": "ON",
+        "MONO_ASSERTS": "ON",
+        "MONO_DEBUG_INFO": "full"
       }
     },
     {
@@ -124,6 +141,10 @@
     {
       "name": "bench",
       "configurePreset": "bench"
+    },
+    {
+      "name": "dist-dev",
+      "configurePreset": "dist-dev"
     },
     {
       "name": "windows-cross",

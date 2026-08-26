@@ -1,10 +1,7 @@
-#include "Signals.hpp"
-
 #include <engine/script/Vocabulary.hpp>
 
 #include <span>
 #include <string_view>
-#include <vector>
 
 namespace engine::script {
 
@@ -70,23 +67,21 @@ namespace engine::script {
 
 	}
 
-	std::span<const std::string_view> InstanceSignals(const Language language) {
-		// **Luau's alone.** JavaScript installs the same list as accessors on
-		// `__instanceMethods`, so a walk of that object already reports them;
-		// answering here as well would offer every one of them twice.
-		//
-		// Deliberately not a count, for `ServiceCatalogue.cpp`'s reason: the
-		// number in this sentence has been wrong once already, and a stale one
-		// reads as a fact somebody checked.
-		if (language != Language::Luau) {
-			return {};
-		}
-
-		// Built once from the array that sits beside the branch chain in
-		// `LuauInstances.cpp`, so this file names no signal of its own.
-		static const std::vector<std::string_view> signals = LuauInstanceSignalNames();
-		return signals;
-	}
+	// **There is no `InstanceSignals` here, and there was one until v0.19.** It
+	// answered the Luau signal names by calling `LuauInstanceSignalNames`, which
+	// `scriptluau` defines one layer *above* this module - an edge the layer rule
+	// forbids and that `just test-architecture` cannot see, because it is a
+	// symbol reference rather than a link edge. It survived only because nothing
+	// ever called it: no header declared it, so no translation unit demanded
+	// `Vocabulary.cpp.o` out of the archive and the undefined symbol was never
+	// read. Turning the unity build on packed this file in with neighbours that
+	// were wanted and both `test_script` and `tools/bindings` stopped linking.
+	//
+	// **Nothing was lost with it**, which is why deleting was the fix rather than
+	// rerouting. The signals reach an editor through `ScriptSurface::InstanceMembers`,
+	// which `LuauRuntime::Surface` fills from the registry table and then extends
+	// with the same name list - one path, inside the module that owns the branch
+	// chain, and the one `engine.scripthost.vocabulary` checks against a live VM.
 
 	std::span<const std::string_view> Keywords(const Language language) {
 		return language == Language::Luau ? std::span<const std::string_view>(LUAU_KEYWORDS)

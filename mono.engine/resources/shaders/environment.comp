@@ -1,0 +1,244 @@
+#version 450
+
+// Builds one world environment into a resident equirectangular texture.
+// Texture faces, atmosphere scattering and voxel-like cloud density are folded
+// once when their selected authored inputs change. Every camera then samples
+// this image without another upload or generation dispatch.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D frontFace;
+layout(set = 0, binding = 1) uniform sampler2D backFace;
+layout(set = 0, binding = 2) uniform sampler2D leftFace;
+layout(set = 0, binding = 3) uniform sampler2D rightFace;
+layout(set = 0, binding = 4) uniform sampler2D upFace;
+layout(set = 0, binding = 5) uniform sampler2D downFace;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D environmentImage;
+
+layout(set = 2, binding = 0) uniform Environment {
+	vec4 Zenith;
+	vec4 Horizon;
+	vec4 Ground;
+	vec4 SunDirection;
+	vec4 AtmosphereColour;
+	vec4 AtmosphereDecay;
+	vec4 Atmosphere;
+	vec4 AtmosphereCompute;
+	vec4 CloudColour;
+	vec4 Clouds;
+	vec4 CloudCompute;
+	vec4 CloudMotion;
+	uvec4 Modes;
+	uvec4 Counts;
+	uvec4 Shaders;
+} source;
+
+const float PI = 3.14159265358979323846;
+
+uint Hash(uint value) {
+	value ^= value >> 16;
+	value *= 0x7feb352du;
+	value ^= value >> 15;
+	value *= 0x846ca68bu;
+	return value ^ (value >> 16);
+}
+
+float Random(ivec3 cell, uint seed) {
+	uint word = uint(cell.x) * 0x8da6b343u ^ uint(cell.y) * 0xd8163841u ^
+		uint(cell.z) * 0xcb1ab31fu ^ seed;
+	return float(Hash(word)) / 4294967295.0;
+}
+
+float Noise(vec3 position, uint seed) {
+	ivec3 cell = ivec3(floor(position));
+	vec3 local = fract(position);
+	local = local * local * (3.0 - 2.0 * local);
+	float z0 = mix(
+		mix(Random(cell, seed), Random(cell + ivec3(1, 0, 0), seed), local.x),
+		mix(Random(cell + ivec3(0, 1, 0), seed), Random(cell + ivec3(1, 1, 0), seed), local.x),
+		local.y
+	);
+	float z1 = mix(
+		mix(Random(cell + ivec3(0, 0, 1), seed), Random(cell + ivec3(1, 0, 1), seed), local.x),
+		mix(Random(cell + ivec3(0, 1, 1), seed), Random(cell + ivec3(1, 1, 1), seed), local.x),
+		local.y
+	);
+	return mix(z0, z1, local.z);
+}
+
+float Fbm(vec3 position, uint seed, float detail) {
+	float value = 0.0;
+	float weight = 0.5;
+	for (uint octave = 0u; octave < 5u; octave++) {
+		value += Noise(position, seed + octave * 977u) * weight;
+		position *= 2.03;
+		weight *= mix(0.35, 0.58, detail);
+	}
+	return value;
+}
+
+vec4 FaceSample(vec3 direction) {
+	vec3 magnitude = abs(direction);
+	vec2 uv;
+	uint face;
+	if (magnitude.z >= magnitude.x && magnitude.z >= magnitude.y) {
+		if (direction.z >= 0.0) {
+			face = 0u;
+			uv = vec2(direction.x, -direction.y) / magnitude.z * 0.5 + 0.5;
+			return (source.Modes.w & (1u << face)) != 0u ? vec4(texture(frontFace, uv).rgb, 1.0) : vec4(0.0);
+		}
+		face = 1u;
+		uv = vec2(-direction.x, -direction.y) / magnitude.z * 0.5 + 0.5;
+		return (source.Modes.w & (1u << face)) != 0u ? vec4(texture(backFace, uv).rgb, 1.0) : vec4(0.0);
+	}
+	if (magnitude.x >= magnitude.y) {
+		if (direction.x >= 0.0) {
+			face = 2u;
+			uv = vec2(-direction.z, -direction.y) / magnitude.x * 0.5 + 0.5;
+			return (source.Modes.w & (1u << face)) != 0u ? vec4(texture(leftFace, uv).rgb, 1.0) : vec4(0.0);
+		}
+		face = 3u;
+		uv = vec2(direction.z, -direction.y) / magnitude.x * 0.5 + 0.5;
+		return (source.Modes.w & (1u << face)) != 0u ? vec4(texture(rightFace, uv).rgb, 1.0) : vec4(0.0);
+	}
+	if (direction.y >= 0.0) {
+		face = 4u;
+		uv = vec2(direction.x, direction.z) / magnitude.y * 0.5 + 0.5;
+		return (source.Modes.w & (1u << face)) != 0u ? vec4(texture(upFace, uv).rgb, 1.0) : vec4(0.0);
+	}
+	face = 5u;
+	uv = vec2(direction.x, -direction.z) / magnitude.y * 0.5 + 0.5;
+	return (source.Modes.w & (1u << face)) != 0u ? vec4(texture(downFace, uv).rgb, 1.0) : vec4(0.0);
+}
+
+vec3 ProceduralSky(vec3 direction) {
+	float above = smoothstep(-0.08, 0.45, direction.y);
+	vec3 colour = direction.y < 0.0
+		? mix(source.Ground.rgb, source.Horizon.rgb, smoothstep(-0.4, 0.0, direction.y))
+		: mix(source.Horizon.rgb, source.Zenith.rgb, above);
+
+	vec3 toSun = normalize(-source.SunDirection.xyz);
+	float sun = smoothstep(1.0 - source.Horizon.a, 1.0, dot(direction, toSun));
+	colour += vec3(6.0, 4.5, 2.7) * sun;
+
+	if (direction.y > 0.0 && source.Zenith.a > 0.0) {
+		ivec3 starCell = ivec3(floor(direction * 8192.0));
+		float star = Random(starCell, source.Counts.x);
+		star = step(1.0 - source.Zenith.a * 0.012, star) * pow(star, 24.0);
+		colour += vec3(star * 8.0);
+	}
+	if (source.Shaders.x == 1u) {
+		float horizonBand = exp(-abs(direction.y) * 8.0);
+		colour = mix(colour * vec3(0.85, 0.36, 0.22), vec3(1.4, 0.42, 0.08), horizonBand);
+	} else if (source.Shaders.x == 2u) {
+		colour *= vec3(0.012, 0.02, 0.055);
+		ivec3 starCell = ivec3(floor(direction * 12288.0));
+		float star = step(0.9985, Random(starCell, source.Counts.x));
+		colour += vec3(star * 5.0);
+	} else if (source.Shaders.x == 3u) {
+		float nebula = Fbm(direction * 7.0, source.Counts.x, 0.8);
+		colour = mix(vec3(0.015, 0.006, 0.04), vec3(0.5, 0.06, 0.75), smoothstep(0.35, 0.78, nebula));
+		colour += vec3(0.03, 0.18, 0.5) * Fbm(direction * 15.0, source.Counts.x + 41u, 0.7);
+	} else if (source.Shaders.x == 4u) {
+		vec3 voxelDirection = normalize(floor(direction * 18.0) / 18.0);
+		float voxelLight = 0.35 + 0.65 * max(voxelDirection.y, 0.0);
+		colour = floor(colour * voxelLight * 8.0) / 8.0;
+	}
+	return colour;
+}
+
+vec3 ApplyAtmosphere(vec3 colour, vec3 direction) {
+	if (source.Modes.y == 0u) {
+		return colour;
+	}
+	float horizon = exp(-abs(direction.y + source.Atmosphere.y * 0.12) * 5.0);
+	float thickness = clamp(source.Atmosphere.x * (0.28 + horizon), 0.0, 1.0);
+	float rayleigh = source.Modes.y == 2u ? source.AtmosphereCompute.z : 1.0;
+	float mie = source.Modes.y == 2u ? source.AtmosphereCompute.w : 1.0;
+	vec3 scattered = source.AtmosphereColour.rgb * (0.35 + horizon * source.Atmosphere.w * 0.12) * rayleigh;
+	if (source.Modes.y == 2u && source.Shaders.y == 1u) {
+		thickness *= 0.35;
+	} else if (source.Modes.y == 2u && source.Shaders.y == 2u) {
+		scattered *= vec3(1.6, 0.48, 0.22);
+		thickness = min(thickness * 1.35, 1.0);
+	} else if (source.Modes.y == 2u && source.Shaders.y == 3u) {
+		scattered *= vec3(0.34, 1.2, 0.72);
+	}
+	colour = mix(colour * exp(-source.AtmosphereDecay.rgb * thickness * mie), scattered, thickness);
+	vec3 toSun = normalize(-source.SunDirection.xyz);
+	float glare = pow(max(dot(direction, toSun), 0.0), 64.0 / max(source.Atmosphere.z, 0.25));
+	return colour + source.AtmosphereColour.rgb * glare * source.Atmosphere.z;
+}
+
+vec3 ApplyClouds(vec3 colour, vec3 direction) {
+	if (source.Modes.z == 0u || direction.y <= -0.03) {
+		return colour;
+	}
+	vec2 windDirection = source.Clouds.zw;
+	windDirection = dot(windDirection, windDirection) > 0.0
+		? normalize(windDirection)
+		: vec2(1.0, 0.0);
+	vec2 wind = windDirection * source.CloudMotion.x * source.CloudMotion.y * 0.001;
+	float cellSize = max(source.CloudCompute.x, 0.001);
+	float density = 0.0;
+	if (source.Modes.z == 1u) {
+		vec3 point = direction * 8.0 / cellSize + vec3(wind.x, 0.0, wind.y);
+		if (source.Shaders.z == 1u) {
+			point.y *= 0.18;
+		} else if (source.Shaders.z == 3u) {
+			point = floor(point * 1.5) / 1.5;
+		}
+		density = Fbm(point, source.Counts.y, source.CloudCompute.y);
+	} else {
+		uint steps = clamp(source.Counts.w, 1u, 64u);
+		for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
+			if (stepIndex >= steps) {
+				break;
+			}
+			float along = (float(stepIndex) + 0.5) / float(steps);
+			float shell = source.CloudCompute.z + along * source.CloudCompute.w;
+			vec3 point = direction * (10.0 + shell * 24.0) / cellSize + vec3(wind.x, 0.0, wind.y);
+			if (source.Shaders.z == 1u) {
+				point.y *= 0.18;
+			} else if (source.Shaders.z == 3u) {
+				point = floor(point * 1.5) / 1.5;
+			}
+			float sampleDensity = Fbm(point, source.Counts.y, source.CloudCompute.y);
+			density += sampleDensity / float(steps);
+		}
+	}
+	float coverage = 1.0 - source.Clouds.x;
+	float alpha = smoothstep(coverage, min(coverage + 0.24, 1.0), density) * source.Clouds.y;
+	alpha *= smoothstep(-0.03, 0.12, direction.y);
+	vec3 cloudColour = source.CloudColour.rgb;
+	if (source.Modes.z == 2u && source.Shaders.z == 2u) {
+		cloudColour *= vec3(0.32, 0.36, 0.45);
+		alpha = min(alpha * 1.45, 1.0);
+	}
+	return mix(colour, cloudColour, clamp(alpha, 0.0, 1.0));
+}
+
+void main() {
+	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(environmentImage);
+	if (any(greaterThanEqual(texel, size))) {
+		return;
+	}
+	vec2 uv = (vec2(texel) + 0.5) / vec2(size);
+	float longitude = (uv.x * 2.0 - 1.0) * PI;
+	float latitude = (0.5 - uv.y) * PI;
+	vec3 direction = vec3(
+		cos(latitude) * sin(longitude),
+		sin(latitude),
+		cos(latitude) * cos(longitude)
+	);
+
+	vec3 colour = source.Modes.x == 0u ? vec3(0.0) : ProceduralSky(direction);
+	if (source.Modes.x == 1u) {
+		vec4 face = FaceSample(direction);
+		colour = mix(colour, face.rgb, face.a);
+	}
+	colour = ApplyAtmosphere(colour, direction);
+	colour = ApplyClouds(colour, direction);
+	imageStore(environmentImage, texel, vec4(max(colour, vec3(0.0)), 1.0));
+}

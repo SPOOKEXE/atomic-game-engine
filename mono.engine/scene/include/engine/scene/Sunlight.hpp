@@ -20,6 +20,7 @@
 
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Atmosphere.hpp>
 
 namespace engine::ecs {
 	class Store;
@@ -84,6 +85,13 @@ namespace engine::scene {
 		float FogStart = 100000.0f;
 		float FogEnd = 100001.0f;
 		//@}
+
+		// The first skybox, atmosphere and cloud providers beneath `Lighting`.
+		// This is one resolved value rather than parallel renderer state, so a
+		// redraw signature and a render pass cannot select different siblings.
+		//
+		// @since v0.19
+		Environment EnvironmentState;
 	};
 
 	// Resolves the `Lighting` service into the values a renderer consumes.

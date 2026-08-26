@@ -1,3 +1,5 @@
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/net/http/Client.hpp>
 
 #include <algorithm>
@@ -138,7 +140,7 @@ namespace engine::net::http {
 						const size_t after = fetch.Sent + fetch.Inbox.size();
 						fetch.Quiet = (after == before) ? fetch.Quiet + 1 : 0;
 						if (fetch.Quiet >= Limits.IdlePolls) {
-							Fail(fetch);
+							Fail(fetch, "nothing moved for the idle poll budget");
 							++finished;
 						}
 					}
@@ -195,10 +197,16 @@ namespace engine::net::http {
 				return nullptr;
 			}
 
-			void Fail(Fetch &fetch) {
+			// **Every way a fetch dies passes through here, and each says which
+			// one it was.** A refused connect, a truncated response and a
+			// malformed one are three different problems that all surfaced as
+			// `FetchState::Failed` with nothing else recorded.
+			void Fail(Fetch &fetch, const char *why) {
 				fetch.State = FetchState::Failed;
 				std::error_code ignored;
 				fetch.Socket.close(ignored);
+				core::Metrics::Count("net.http.fetch.failed", 1.0);
+				ENGINE_WARN("fetch of {} failed: {}", fetch.Target.address().to_string(), why);
 			}
 
 			void Drive(Fetch &fetch) {
@@ -231,7 +239,7 @@ namespace engine::net::http {
 				// Refused, unreachable, or the host went away. One state for
 				// all of them: a caller retries or falls through to the next
 				// source either way.
-				Fail(fetch);
+				Fail(fetch, failure.message().c_str());
 				return false;
 			}
 
@@ -251,7 +259,7 @@ namespace engine::net::http {
 						return false;
 					}
 					if (failure) {
-						Fail(fetch);
+						Fail(fetch, "the socket refused the request bytes");
 						return false;
 					}
 				}
@@ -275,7 +283,7 @@ namespace engine::net::http {
 					const uint64_t ceiling =
 						Limits.Limits.BodyBytes + Limits.Limits.HeaderBytes + Limits.Limits.RequestLineBytes;
 					if (offset >= ceiling) {
-						Fail(fetch);
+						Fail(fetch, "the response is past the transfer ceiling");
 						return;
 					}
 
@@ -314,7 +322,13 @@ namespace engine::net::http {
 					return;
 				}
 				if (parsed != ParseResult::Incomplete || finished) {
-					Fail(fetch);
+					// `Incomplete` here means the peer hung up mid-message,
+					// which must never read as a complete short body.
+					Fail(
+						fetch,
+						parsed == ParseResult::Incomplete ? "the peer closed before the message was whole"
+														  : Describe(parsed)
+					);
 				}
 			}
 

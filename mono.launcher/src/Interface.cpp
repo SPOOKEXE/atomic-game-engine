@@ -1,12 +1,20 @@
 // The launcher's screens.
 //
 // **Deliberately the thin half.** Everything a test could get wrong - which
-// options exist, how they group, what a `+` or a multi-folder pick does to the
-// rows, what argv comes out - is in `Plan.cpp` and has a suite. What is here is
-// imgui calls over those answers, and it is kept that way on purpose: a form
-// generated from `--describe` is a form nobody can read the source of and
-// predict, so the part that decides has to be the part that can be asserted
-// about.
+// options exist, how they group, what the search leaves on screen, what a `+`
+// or a multi-folder pick does to the rows, what argv comes out - is in
+// `Plan.cpp` and has a suite. What is here is imgui calls over those answers,
+// and it is kept that way on purpose: a form generated from `--describe` is a
+// form nobody can read the source of and predict, so the part that decides has
+// to be the part that can be asserted about.
+//
+// **The line is the argument list.** A function of a `Mode`, a `Description` or
+// a `Form` belongs in `Plan.hpp`. What stays here needs a live `ImGuiStyle` or
+// a live id stack to mean anything - `NameColumnWidth` and
+// `ActionsColumnWidth` measure text in the current font, `ForceHeaderState` and
+// `TabLabel` are about imgui's own state, and `DrawBrowseDialogs` exists for
+// where on the id stack a popup is opened. Six answers had drifted across that
+// line by v0.19 and moved back; `launcher/AGENTS.md` records which.
 
 #include <engine/ui/Fields.hpp>
 #include <engine/ui/Icons.hpp>
@@ -30,22 +38,6 @@ namespace launcher {
 		constexpr const char *FILE_DIALOG = "Choose a file";
 		constexpr const char *FOLDER_DIALOG = "Choose a folder";
 		constexpr const char *FOLDERS_DIALOG = "Choose folders";
-
-		// Whether an option's value is a path somebody should be able to browse
-		// for, and which of the two shapes it wants.
-		//
-		// **Read off the declared value name rather than a table here.** Every
-		// program in the tree already spells a path option's value `PATH` or
-		// `DIR` - that is `Arguments::Value`'s second argument and it is what
-		// `--help` prints - so a browse button appears on a new path option the
-		// day it is declared, with no change to this program.
-		bool WantsFile(const DescribedOption &option) {
-			return option.ValueName == "PATH";
-		}
-
-		bool WantsFolder(const DescribedOption &option) {
-			return option.ValueName == "DIR";
-		}
 
 		// A one-line description under a heading, in the muted colour.
 		void Muted(const char *text) {
@@ -180,21 +172,6 @@ namespace launcher {
 			ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 			ImGui::TableSetupColumn("actions", ImGuiTableColumnFlags_WidthFixed, actionsWidth);
 		}
-
-		// Whether any option in this group draws a browse button, which is what
-		// decides how wide the actions column has to be for all of them.
-		bool AnyBrowses(const Description &description, const std::vector<std::string> &names) {
-			for (const std::string &name : names) {
-				const DescribedOption *option = description.Option(name);
-				if (option == nullptr) {
-					continue;
-				}
-				if (option->ValueName == "PATH" || option->ValueName == "DIR") {
-					return true;
-				}
-			}
-			return false;
-		}
 	}
 
 	void Launcher::DrawModes() {
@@ -279,10 +256,10 @@ namespace launcher {
 
 		ImGui::TableSetColumnIndex(2);
 
-		const bool file = WantsFile(option);
-		const bool folder = WantsFolder(option);
+		const BrowseShape shape = BrowseShapeOf(option);
+		const bool folder = shape == BrowseShape::Folder;
 
-		if (file || folder) {
+		if (shape != BrowseShape::None) {
 			// **A folder and a page rather than the word "Browse".** The button
 			// used to say the same thing on both, so which dialog it opened was
 			// something you found out by pressing it. `ui::Icons` draws these
@@ -355,13 +332,7 @@ namespace launcher {
 		// reads as the search being broken rather than as this tab being
 		// special. The counts on the tab labels are the other half: an empty
 		// Common now says where the matches went instead of just being empty.
-		std::vector<std::string> names;
-		for (const std::string &pinned : mode.Pinned) {
-			const DescribedOption *option = description.Option(pinned);
-			if (option != nullptr && Matches(Query, option->Name, option->Description)) {
-				names.push_back(pinned);
-			}
-		}
+		const std::vector<std::string> names = MatchingOptions(description, mode.Pinned, Query);
 
 		if (names.empty()) {
 			Muted("Nothing here matches. Try the other tabs.");
@@ -380,37 +351,6 @@ namespace launcher {
 		ImGui::EndTable();
 	}
 
-	size_t Launcher::CommonHits(const Mode &mode, const Description &description) const {
-		size_t hits = 0;
-		for (const std::string &pinned : mode.Pinned) {
-			const DescribedOption *option = description.Option(pinned);
-			if (option != nullptr && Matches(Query, option->Name, option->Description)) {
-				hits++;
-			}
-		}
-		return hits;
-	}
-
-	size_t Launcher::AllHits(const Description &description) const {
-		size_t hits = 0;
-		for (const DescribedOption &option : description.Options) {
-			if (!IsLauncherOwnedOption(option.Name) && Matches(Query, option.Name, option.Description)) {
-				hits++;
-			}
-		}
-		return hits;
-	}
-
-	size_t Launcher::SettingHits(const Description &description) const {
-		size_t hits = 0;
-		for (const DescribedSetting &setting : description.Settings) {
-			if (Matches(Query, setting.Name, setting.Description)) {
-				hits++;
-			}
-		}
-		return hits;
-	}
-
 	void Launcher::DrawAllTab(const Description &description) {
 		const bool searching = !Query.empty();
 		const bool wasSearching = WasSearching;
@@ -418,14 +358,8 @@ namespace launcher {
 		for (const OptionGroup &group : GroupOptions(description)) {
 			// A search opens the groups that have a hit, because a match hidden
 			// inside a collapsed header reads as no match at all.
-			size_t hits = 0;
-			for (const std::string &name : group.Options) {
-				const DescribedOption *option = description.Option(name);
-				if (option != nullptr && Matches(Query, option->Name, option->Description)) {
-					hits++;
-				}
-			}
-			if (hits == 0) {
+			const std::vector<std::string> hits = MatchingOptions(description, group.Options, Query);
+			if (hits.empty()) {
 				continue;
 			}
 
@@ -433,7 +367,7 @@ namespace launcher {
 			// about how much is inside it, so the choice to open one was a
 			// guess - and with a search running, the count is the answer to
 			// "where did my match go".
-			const std::string heading = group.Title + " (" + std::to_string(hits) + ")";
+			const std::string heading = group.Title + " (" + std::to_string(hits.size()) + ")";
 
 			ForceHeaderState(searching, wasSearching);
 			if (!ImGui::CollapsingHeader(heading.c_str())) {
@@ -443,16 +377,15 @@ namespace launcher {
 			if (!BeginRowTable(group.Title.c_str())) {
 				continue;
 			}
+			// **Sized for the whole group rather than for the matches**, so that
+			// the name column does not resize under the pointer with every
+			// keystroke of a search.
 			SetUpRowColumns(
 				NameColumnWidth(group.Options), ActionsColumnWidth(AnyBrowses(description, group.Options))
 			);
 
-			for (const std::string &name : group.Options) {
-				const DescribedOption *option = description.Option(name);
-				if (option == nullptr || !Matches(Query, option->Name, option->Description)) {
-					continue;
-				}
-				DrawRowsOf(*option);
+			for (const std::string &name : hits) {
+				DrawRowsOf(*description.Option(name));
 			}
 
 			ImGui::EndTable();
@@ -474,19 +407,12 @@ namespace launcher {
 		const bool wasSearching = WasSearching;
 
 		for (const OptionGroup &group : GroupSettings(description)) {
-			size_t hits = 0;
-			for (const std::string &name : group.Options) {
-				for (const DescribedSetting &setting : description.Settings) {
-					if (setting.Name == name && Matches(Query, setting.Name, setting.Description)) {
-						hits++;
-					}
-				}
-			}
-			if (hits == 0) {
+			const std::vector<std::string> hits = MatchingSettings(description, group.Options, Query);
+			if (hits.empty()) {
 				continue;
 			}
 
-			const std::string heading = group.Title + " (" + std::to_string(hits) + ")";
+			const std::string heading = group.Title + " (" + std::to_string(hits.size()) + ")";
 
 			ForceHeaderState(searching, wasSearching);
 			if (!ImGui::CollapsingHeader(heading.c_str())) {
@@ -507,24 +433,19 @@ namespace launcher {
 				ImGui::CalcTextSize("integer").x + ImGui::GetStyle().CellPadding.x * 2.0f
 			);
 
+			// **Walked in form order rather than in `hits` order**, because the
+			// row index is the imgui id and the form is what `CommandLine`
+			// reads - drawing the same rows in a second order would be a second
+			// answer to "which row is this".
 			for (size_t row = 0; row < form->second.Settings.size(); row++) {
 				SettingState &state = form->second.Settings[row];
 
-				bool inGroup = false;
-				for (const std::string &name : group.Options) {
-					inGroup = inGroup || name == state.Name;
-				}
-				if (!inGroup) {
+				if (std::find(hits.begin(), hits.end(), state.Name) == hits.end()) {
 					continue;
 				}
 
-				const DescribedSetting *declared = nullptr;
-				for (const DescribedSetting &setting : description.Settings) {
-					if (setting.Name == state.Name) {
-						declared = &setting;
-					}
-				}
-				if (declared == nullptr || !Matches(Query, declared->Name, declared->Description)) {
+				const DescribedSetting *declared = description.Setting(state.Name);
+				if (declared == nullptr) {
 					continue;
 				}
 
@@ -540,7 +461,7 @@ namespace launcher {
 
 				ImGui::TableSetColumnIndex(1);
 				ImGui::SetNextItemWidth(-FLT_MIN);
-				if (declared->Kind == "boolean") {
+				if (IsBooleanSetting(*declared)) {
 					bool on = state.Value == "true";
 					if (ImGui::Checkbox("##value", &on)) {
 						state.Value = on ? "true" : "false";
@@ -676,11 +597,17 @@ namespace launcher {
 		const float footer = Scaled(112.0f);
 		if (ImGui::BeginChild("##options", ImVec2(0.0f, -footer))) {
 			if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_None)) {
-				const std::string common =
-					TabLabel("Common", "common", searching, CommonHits(*mode, *description));
-				const std::string all = TabLabel("All options", "all", searching, AllHits(*description));
+				// **The hit count is on the tab rather than only inside it**,
+				// because a search that emptied the page you were looking at,
+				// with no sign of where its matches went, reads as a broken
+				// search rather than as a wrong tab. Each count is the same
+				// function the tab's own rows come from.
+				const size_t pinned = MatchingOptions(*description, mode->Pinned, Query).size();
+				const std::string common = TabLabel("Common", "common", searching, pinned);
+				const std::string all =
+					TabLabel("All options", "all", searching, OptionHits(*description, Query));
 				const std::string settings =
-					TabLabel("Engine settings", "settings", searching, SettingHits(*description));
+					TabLabel("Engine settings", "settings", searching, SettingHits(*description, Query));
 
 				if (ImGui::BeginTabItem(common.c_str())) {
 					DrawCommonTab(*mode, *description);

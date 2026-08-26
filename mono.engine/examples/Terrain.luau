@@ -1,6 +1,6 @@
 --!strict
--- A 512 x 512 stud landscape, one vertex a stud, built as `EditableMesh`
--- geometry by this file and nothing else.
+-- An endless landscape, one vertex a stud, built as `EditableMesh` geometry by
+-- this file and nothing else, with somebody standing on it.
 --
 -- **Pure Luau over an `EditableMesh`, which is the whole point of the
 -- rewrite.** This scene used to be a voxel streamer: a 16384-block map turned
@@ -15,23 +15,40 @@
 -- library below is unchanged from the voxel version - it was always the good
 -- half - and everything under `--- the field` is new.
 --
+-- **And it is endless again, which the heightfield rewrite gave up.** That
+-- version sampled a fixed 512 x 512 grid into one array and built all of it: a
+-- landscape you look at, with an edge. The field is a *function* now -
+-- `HeightAt` takes a world coordinate and has no table behind it - so chunks
+-- are built ahead of whoever is walking and dropped behind them, and the only
+-- bound left is `VIEW`, which is a rendering budget rather than a world.
+--
 -- ## What to look at
 --
 --   * **The bands.** Water, shore sand, grass, upland scrub, bare rock and snow
 --     each come out as their own colour. `assets::MeshVertex` has no colour
---     field, so this works by `client::BuildMeshData` giving every distinct
+--     field, so this works by `engine::render::BuildMeshData` giving every distinct
 --     *triangle* colour its own submesh run - a scene of one flat brown means
 --     that split has regressed to the average it used to take.
 --   * **The slopes.** A cliff is shaded as a cliff because the normals are
 --     computed from the field's own gradient rather than left at the default,
 --     so lighting varies across a face rather than per box.
---   * **The seams.** Chunks share their edge samples, so neighbouring meshes
---     agree at the boundary exactly. A visible crack means the shared column
---     stopped being shared.
+--   * **The seams.** Two chunks that meet compute the same height for the
+--     column they share, because they call the same pure function with the same
+--     coordinate. A visible crack means `HeightAt` stopped being pure.
+--   * **The edge that is not there.** The field is a function of a world
+--     coordinate with no table behind it and no map to fall off, so walking in
+--     any direction builds ground ahead and drops it behind. What bounds the
+--     scene is `VIEW`, which is a rendering budget rather than a world.
 --
 -- ## Run it
 --
 --     client --script Terrain.luau --stats
+--
+-- Walking it needs a host that solves - the studio's Play, or `just host
+-- --game` - because a client registers the character systems and not the
+-- physics pipeline, which is the note `StressPhysics.luau` gives at length.
+-- Through the client the camera flies the same landscape instead, and the
+-- streaming is the same streaming.
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -250,21 +267,39 @@ end
 
 local SEED = 20260820
 
--- **512 studs on a side with a sample every stud**, which is the size this
--- scene is about rather than a number that could be any other. It is small
--- enough to build whole - no streaming, no eviction, no pool - and dense enough
--- that a hillside is a surface instead of a staircase.
-local SIDE = 512
-local ORIGIN = -SIDE / 2
+-- **The field is a function and nothing else, which is what makes it
+-- endless.** `HeightAt` takes a world coordinate and returns a height, with no
+-- table behind it and no edge to fall off. Everything below is about deciding
+-- which parts of that function to turn into meshes right now.
+--
+-- The scene this replaced sampled a fixed 512 x 512 grid into one array and
+-- built all of it. That is a landscape you look at; this is one you walk into.
 
 -- How the field is cut into meshes. **A chunk is a rendering decision and not a
--- terrain one**: the samples are one continuous grid whatever this is set to,
--- and neighbouring chunks share their edge column rather than each computing
--- their own copy of it. 64 gives 64 meshes of 4,225 vertices, which keeps any
--- one `MeshPart` inside a frustum test that means something while leaving the
--- draw call count in the dozens.
+-- terrain one**: the field is continuous whatever this is set to, and two
+-- chunks that meet compute the same height for the column they share because
+-- they call the same function with the same coordinate.
 local CHUNK = 64
-local CHUNKS = SIDE // CHUNK
+
+-- How many heightfield rows the streaming producer samples per tick.
+--
+-- **Fixed work rather than a wall-clock budget**, so a recorded run resumes at
+-- the same points on every machine. Terrain graph evaluation will eventually
+-- move this work into the native node system planned in `docs/TERRAIN.md`; this
+-- example must still remain responsive until that system exists. Sixteen rows
+-- bounds the expensive noise work without yielding a coroutine more than once:
+-- `EditableMesh:SetGeometry` is the one yield used to commit the finished mesh.
+local SAMPLE_ROWS_PER_TICK = 16
+
+-- How far the built world reaches, in chunks each way from the one the subject
+-- stands in. Three gives a 7 x 7 block of chunks - 448 studs across - and a
+-- chunk is dropped once it is further than `KEEP`.
+--
+-- **`KEEP` is one further out than `VIEW` on purpose.** Walking back and forth
+-- across a chunk boundary with the two equal would build and destroy the same
+-- mesh every few steps, which is a hitch a second for standing still.
+local VIEW = 3
+local KEEP = VIEW + 1
 
 -- Vertical scale. `RELIEF` is the full swing of the base field and `RIDGE` how
 -- much the ridged octaves add on top of it, both in studs.
@@ -305,56 +340,61 @@ local function HeightAt(x: number, z: number): number
 	return base * RELIEF * 0.5 + ridge * mask * mask * RIDGE
 end
 
--- **The whole field, sampled once, before any mesh is built.** Every sample is
--- read at least five times - once as a corner and four times as a neighbour of
--- one, while a normal is computed - and the edge column of every chunk is read
--- by the chunk next door as well. Recomputing it each time would multiply four
--- octaves of noise by six for nothing.
+-- **The bands come from the field's own reach rather than from a survey of what
+-- was generated**, which is the one thing an endless field cannot have. The old
+-- scene sampled its whole map and took the highest point it found; there is no
+-- highest point here, so the ceiling is the one the constants above allow -
+-- half the base swing plus the whole ridge - and the bands are fractions of the
+-- span from the waterline to it.
 --
--- One flat array, row-major, indexed by `Index` below. 513 columns rather than
--- 512, because a grid of 512 *cells* has 513 corners and the last one is what
--- the last chunk's far edge is made of.
-local SAMPLES = SIDE + 1
-
-local heights = table.create(SAMPLES * SAMPLES, 0)
-
-local function Index(ix: number, iz: number): number
-	return iz * SAMPLES + ix + 1
-end
-
-for iz = 0, SIDE do
-	local z = ORIGIN + iz
-	for ix = 0, SIDE do
-		heights[Index(ix, iz)] = HeightAt(ORIGIN + ix, z)
-	end
-end
-
--- A sample, clamped at the edges so a normal at the boundary uses the boundary
--- itself rather than wrapping to the far side of the map.
-local function Sample(ix: number, iz: number): number
-	return heights[Index(math.clamp(ix, 0, SIDE), math.clamp(iz, 0, SIDE))]
-end
-
--- **The bands are cut from the field that was actually generated, not from
--- constants written beside it.** Every threshold below used to be an absolute
--- height, so retuning `RELIEF` or `RIDGE` by a few studs silently moved the
--- whole map into one band - a change to how tall the mountains are turned the
--- landscape entirely white, which reads as a broken colour pass rather than as
--- the thing it is.
-local lowestSample = math.huge
-local highestSample = -math.huge
-for index = 1, #heights do
-	local height = heights[index]
-	lowestSample = math.min(lowestSample, height)
-	highestSample = math.max(highestSample, height)
-end
-
--- Land runs from the waterline to the highest point; the bands are fractions of
--- that, so they hold whatever the relief constants are set to.
-local LAND_SPAN = math.max(highestSample - SEA_LEVEL, 1)
+-- It is a ceiling rather than a maximum, so the snow line sits a little above
+-- where a survey would have put it. That is the right way to be wrong: a summit
+-- that is white is a summit, and a landscape that is white to the shore is a
+-- broken colour pass.
+local CEILING = RELIEF * 0.5 + RIDGE
+local FLOOR = -(RELIEF * 0.5 + RIDGE)
+local LAND_SPAN = math.max(CEILING - SEA_LEVEL, 1)
 
 local function Band(fraction: number): number
 	return SEA_LEVEL + LAND_SPAN * fraction
+end
+
+-- --- one chunk's samples ---------------------------------------------------
+--
+-- **A chunk samples its own block, with a one-stud skirt.** A normal is a
+-- central difference and a slope is the same measurement, so the sample at a
+-- chunk's edge needs the sample one stud outside it. Sampling `CHUNK + 3`
+-- columns and offsetting by one gives every corner its neighbours without
+-- reaching into another chunk's table - and because `HeightAt` is a pure
+-- function, the skirt agrees exactly with the chunk next door.
+--
+-- The cost is the skirt: a 64-chunk samples 67 x 67 = 4,489 heights to build
+-- 65 x 65 = 4,225 vertices, so six per cent of the noise is computed twice. The
+-- alternative is a shared table across chunks, which is the thing that has to
+-- go for the world to be endless.
+local SKIRT = 1
+local SPAN = CHUNK + 1 + SKIRT * 2
+
+local function SampleRows(block: { number }, baseX: number, baseZ: number, first: number, past: number)
+	for row = first, past - 1 do
+		local z = baseZ + row - SKIRT
+		local offset = row * SPAN
+		for column = 0, SPAN - 1 do
+			block[offset + column + 1] = HeightAt(baseX + column - SKIRT, z)
+		end
+	end
+end
+
+local function SampleBlock(baseX: number, baseZ: number): { number }
+	local block = table.create(SPAN * SPAN, 0)
+	SampleRows(block, baseX, baseZ, 0, SPAN)
+	return block
+end
+
+-- A sample from a block, in chunk-local coordinates where `(0, 0)` is the
+-- chunk's own first corner and `-1` and `CHUNK + 1` are the skirt.
+local function At(block: { number }, gx: number, gz: number): number
+	return block[(gz + SKIRT) * SPAN + (gx + SKIRT) + 1]
 end
 
 -- The surface normal at a sample, from the field's own gradient.
@@ -363,18 +403,18 @@ end
 -- tangents `(2, dy/dx, 0)` and `(0, dy/dz, 2)` is `(-dy/dx, 2, -dy/dz)` once
 -- the constant is divided out, which is what this returns - normalised, because
 -- `EditableMesh` stores whatever it is given and the shader does not.
-local function NormalAt(ix: number, iz: number): Vector3
-	local dx = Sample(ix + 1, iz) - Sample(ix - 1, iz)
-	local dz = Sample(ix, iz + 1) - Sample(ix, iz - 1)
+local function NormalAt(block: { number }, gx: number, gz: number): Vector3
+	local dx = At(block, gx + 1, gz) - At(block, gx - 1, gz)
+	local dz = At(block, gx, gz + 1) - At(block, gx, gz - 1)
 	return Vector3.new(-dx, 2, -dz).Unit
 end
 
 -- How steep the surface is at a sample, as the drop across one stud. Used to
 -- put rock on a cliff face whatever height the cliff is at, which is what stops
 -- a mountainside from being grass up to the snow line.
-local function SlopeAt(ix: number, iz: number): number
-	local dx = Sample(ix + 1, iz) - Sample(ix - 1, iz)
-	local dz = Sample(ix, iz + 1) - Sample(ix, iz - 1)
+local function SlopeAt(block: { number }, gx: number, gz: number): number
+	local dx = At(block, gx + 1, gz) - At(block, gx - 1, gz)
+	local dz = At(block, gx, gz + 1) - At(block, gx, gz - 1)
 	return math.sqrt(dx * dx + dz * dz) * 0.5
 end
 
@@ -385,11 +425,11 @@ end
 -- the one thing that cuts across them: anything steeper than about forty-five
 -- degrees is bare because nothing grows on it and nothing settles on it, which
 -- is why rock appears at every altitude and snow does not appear on a cliff.
-local function ColourAt(ix: number, iz: number): Color3
-	local height = Sample(ix, iz)
-	local slope = SlopeAt(ix, iz)
+local function ColourAt(block: { number }, gx: number, gz: number): Color3
+	local height = At(block, gx, gz)
+	local slope = SlopeAt(block, gx, gz)
 
-	if height < SEA_LEVEL - (SEA_LEVEL - lowestSample) * 0.35 then
+	if height < SEA_LEVEL - (SEA_LEVEL - FLOOR) * 0.35 then
 		return DEEP
 	elseif height < SEA_LEVEL then
 		return SHALLOW
@@ -414,7 +454,52 @@ end
 -- --- the meshes ------------------------------------------------------------
 
 local built = 0
+local dropped = 0
 local triangles = 0
+
+-- What is on screen, by chunk coordinate, so eviction is a lookup and a
+-- `Destroy` rather than a walk of `Workspace`.
+--
+-- **The mesh is held beside the part and destroyed with it.** An
+-- `EditableMesh` is an instance with no parent - `MeshPart.MeshId` names it by
+-- content id rather than holding it - so destroying the part leaves the mesh
+-- behind, and an endless world would leave one behind per chunk for as long as
+-- somebody kept walking. That is a hundred and fifty kilobytes a chunk of
+-- positions, normals and colours that nothing will ever draw again.
+type Chunk = { Part: Instance, Mesh: Instance }
+
+local chunks: { [string]: Chunk } = {}
+
+-- Chunks whose mesh was built this frame and whose collision shape is baked at
+-- the start of the next tick. See `BuildChunk`.
+type Settling = { Part: Instance, Geometry: string }
+
+local settling: { Settling } = {}
+
+-- Turns on the collision of every chunk built before this frame.
+--
+-- One frame of lag and no more: the bake runs in `PreSimulation` and a chunk is
+-- built from `Heartbeat`, so by the time this is reached again the shape is
+-- there. A chunk that is destroyed in between is simply not in the list.
+local function Settle()
+	if #settling == 0 then
+		return
+	end
+
+	for _, waiting in settling do
+		local part = waiting.Part :: any
+		if part.Parent ~= nil then
+			part.CollisionShape = Enum.ShapeKind.Mesh
+			part.CollisionGeometry = waiting.Geometry
+			part.CanCollide = true
+		end
+	end
+	table.clear(settling)
+end
+
+local function KeyOf(cx: number, cz: number): string
+	return `{cx},{cz}`
+end
 
 -- One chunk: `CHUNK + 1` samples a side, so it shares its first and last
 -- columns with the chunks either side of it and the surface is continuous.
@@ -424,30 +509,53 @@ local triangles = 0
 -- `Position`. `render::Renderer`'s `ToGpu` scales a mesh so its box fills the
 -- part's, so a part sized to the box it holds is a scale of exactly one - which
 -- is the only arrangement where a heightfield is not quietly stretched.
-local function BuildChunk(cx: number, cz: number)
-	local mesh = Instance.new("EditableMesh")
-
+local function BuildSampledChunk(cx: number, cz: number, block: { number })
 	local baseX = cx * CHUNK
 	local baseZ = cz * CHUNK
 	local span = CHUNK + 1
 
+	-- **The range first, because the vertices are written around the centre.**
+	-- A mesh's own coordinates are what a collider is placed by: a baked shape
+	-- is used in the part's object space and is not scaled to it, which
+	-- `physics::ShapeInstance` states. So the mesh is built centred on the box
+	-- the part will be given, and the two coincide exactly.
+	--
+	-- The first version wrote world coordinates and relied on `ToGpu` scaling
+	-- the mesh to fill the part - which draws correctly and puts the collider a
+	-- chunk's position away from the geometry it is supposed to be.
 	local lowest = math.huge
 	local highest = -math.huge
-
-	-- `AddVertex` returns ids in the order it is called, starting at zero, so
-	-- the id of `(gx, gz)` is `gz * span + gx` and no lookup table is needed.
-	-- Checked once here rather than assumed.
 	for gz = 0, CHUNK do
-		local iz = baseZ + gz
 		for gx = 0, CHUNK do
-			local ix = baseX + gx
-			local height = Sample(ix, iz)
+			local height = At(block, gx, gz)
 			lowest = math.min(lowest, height)
 			highest = math.max(highest, height)
+		end
+	end
 
-			local id = mesh:AddVertex(Vector3.new(ORIGIN + ix, height, ORIGIN + iz))
-			mesh:SetVertexNormal(id, NormalAt(ix, iz))
-			mesh:SetVertexColor(id, ColourAt(ix, iz))
+	local centreX = baseX + CHUNK / 2
+	local centreY = (lowest + highest) / 2
+	local centreZ = baseZ + CHUNK / 2
+
+	local mesh = Instance.new("EditableMesh")
+
+	-- One transaction rather than three method calls per vertex and two more per
+	-- cell. `SetGeometry` yields until the next deterministic script barrier,
+	-- where this scene's pending chunks are prepared as one batch and committed
+	-- on its world thread. Universe runs the same batch for other scenes in its
+	-- outer world dispatch. The id of `(gx, gz)` remains `gz * span + gx`.
+	local vertices = {}
+	for gz = 0, CHUNK do
+		for gx = 0, CHUNK do
+			table.insert(vertices, {
+				Position = Vector3.new(
+					baseX + gx - centreX,
+					At(block, gx, gz) - centreY,
+					baseZ + gz - centreZ
+				),
+				Normal = NormalAt(block, gx, gz),
+				Color = ColourAt(block, gx, gz),
+			})
 		end
 	end
 
@@ -455,6 +563,7 @@ local function BuildChunk(cx: number, cz: number)
 	-- surface faces the sky. `render/AGENTS.md`'s winding rule shows up as an
 	-- invisible landscape when it is got wrong, which is a hard thing to debug
 	-- backwards from.
+	local indices = {}
 	for gz = 0, CHUNK - 1 do
 		for gx = 0, CHUNK - 1 do
 			local a = gz * span + gx
@@ -462,14 +571,17 @@ local function BuildChunk(cx: number, cz: number)
 			local c = a + span
 			local d = c + 1
 
-			mesh:AddTriangle(a, c, b)
-			mesh:AddTriangle(b, c, d)
+			table.insert(indices, a)
+			table.insert(indices, c)
+			table.insert(indices, b)
+			table.insert(indices, b)
+			table.insert(indices, c)
+			table.insert(indices, d)
 			triangles += 2
 		end
 	end
 
-	local centreX = ORIGIN + baseX + CHUNK / 2
-	local centreZ = ORIGIN + baseZ + CHUNK / 2
+	assert(mesh:SetGeometry(vertices, indices), "terrain mesh transaction was cancelled")
 
 	-- **A floor under the vertical size.** A chunk that happens to be flat has
 	-- a box with no height at all, and a `Size` of zero on an axis is the one
@@ -481,11 +593,42 @@ local function BuildChunk(cx: number, cz: number)
 	part.Name = `Terrain_{cx}_{cz}`
 	part.Anchored = true
 	part.Size = Vector3.new(CHUNK, height, CHUNK)
-	part.Position = Vector3.new(centreX, (lowest + highest) / 2, centreZ)
+	part.Position = Vector3.new(centreX, centreY, centreZ)
 	part.MeshId = mesh.ContentId
 	part.Parent = workspace
 
+	-- **And it collides as the mesh, which is the whole of walking on it.** A
+	-- collider names its geometry and picks its kind separately, and the
+	-- default kind is a box - so a chunk left alone collides as its own bound,
+	-- a 64-stud box the full height of the chunk, and a character standing on
+	-- the surface is *inside* it and cannot move in any direction. That is what
+	-- happened the first time this scene had somebody in it.
+	--
+	-- `Mesh` and not `Hull`: a hill's convex hull is a dome over its summit, so
+	-- every valley in the chunk would be solid ground well above the drawn one.
+	-- `physics::RegisterPhysicsSystems` bakes both out of the `EditableMesh` on
+	-- the tick it changes - `scene::RefreshEditableMeshCollision` - so naming
+	-- either costs nothing here.
+	--
+	-- **Not this frame, and that is the one subtlety.** The shape is baked by
+	-- `scene::RefreshEditableMeshCollision` on the tick after the mesh is
+	-- built, and a collider naming a shape that has not resolved yet collides
+	-- as the part's own bound - which for a chunk is a solid 64-stud box the
+	-- full height of it. A character standing where one appears is thrown onto
+	-- the roof of a box that vanishes a tick later. So the chunk does not
+	-- collide until its shape exists, and `Settle` below is where it starts.
+	--
+	-- After the parent, because a collider is what these properties write and
+	-- there is none until the part is in the world.
+	part.CanCollide = false
+	table.insert(settling, { Part = part, Geometry = mesh.ContentId })
+
+	chunks[KeyOf(cx, cz)] = { Part = part, Mesh = mesh }
 	built += 1
+end
+
+local function BuildChunk(cx: number, cz: number)
+	BuildSampledChunk(cx, cz, SampleBlock(cx * CHUNK, cz * CHUNK))
 end
 
 -- --- the water -------------------------------------------------------------
@@ -494,11 +637,17 @@ end
 -- flat translucent surface is what separates "the low ground is blue" from
 -- "there is water in the low ground" - which is the whole reason the two
 -- submerged bands are coloured at all.
+--
+-- **It follows the subject**, because an endless landscape cannot have a slab
+-- the size of itself. Wide enough to reach past the built chunks in every
+-- direction, and moved in whole chunks so it never appears to slide.
+local WATER_REACH = (KEEP * 2 + 3) * CHUNK
+
 local water = Instance.new("Part")
 water.Name = "Sea"
 water.Anchored = true
 water.CanCollide = false
-water.Size = Vector3.new(SIDE, 0.4, SIDE)
+water.Size = Vector3.new(WATER_REACH, 0.4, WATER_REACH)
 water.Position = Vector3.new(0, SEA_LEVEL, 0)
 water.Color = Color3.fromRGB(46, 104, 148)
 water.Transparency = 0.45
@@ -514,80 +663,344 @@ Lighting.Brightness = 0.5
 Lighting.ClockTime = 15
 Lighting.OutdoorAmbient = Color3.fromRGB(22, 26, 32)
 Lighting.Ambient = Color3.fromRGB(16, 18, 24)
--- **Fog beyond the map rather than across it.** The camera orbits at 0.78 of a
--- side and looks at the middle, so the far edge is about 1.8 sides away - a fog
--- that started at 0.9 therefore covered almost the whole landscape and bleached
--- every band toward the fog colour. It reads exactly like a washed-out palette,
--- and no amount of retuning the colours fixes it. Starting past the far corner
--- leaves the fog doing the one job it is here for: hiding where the data stops.
+
+-- **Fog where the chunks stop**, which is the one job it has here. The built
+-- world reaches `VIEW` chunks each way, so a fog that closes just inside that
+-- hides the edge of the data instead of bleaching the bands.
 Lighting.FogColor = Color3.fromRGB(178, 200, 218)
-Lighting.FogStart = SIDE * 1.9
-Lighting.FogEnd = SIDE * 2.6
+Lighting.FogStart = VIEW * CHUNK * 0.8
+Lighting.FogEnd = VIEW * CHUNK * 1.35
 
--- --- the camera ------------------------------------------------------------
+-- --- somebody to walk it ---------------------------------------------------
 --
--- A slow orbit outside the map looking in, so the whole 512 studs is in frame
--- and the bands read as bands. The old scene flew *through* its world because
--- the world was too big to see; this one is not.
-local ORBIT_RADIUS = SIDE * 0.78
-local ORBIT_PERIOD = 90
-local ORBIT_HEIGHT = 190
+-- **A spawn on the surface, not at the origin.** `LoadCharacter` puts a
+-- character at whatever `scene::FindSpawn` finds, and a spawn left at `y = 0`
+-- in a field that swings sixty studs either way is a character either buried in
+-- a hill or dropped off one. The pad sits on the field's own height at the
+-- origin, and the character stands on the pad.
+-- **Somewhere flat, found rather than assumed.** The field is 91% walkable and
+-- the origin is not guaranteed to be part of it: a character dropped onto a
+-- 58-degree face slides off it before anybody has touched a key. The search is
+-- a coarse spiral outward from the origin, taking the first place that is above
+-- the water and level enough to stand on - `MINIMUM_WALKABLE_NORMAL` in
+-- `physics::Characters` is the same 0.6 the engine uses to decide what a
+-- character may climb.
+local function LevelAt(x: number, z: number): number
+	local dx = HeightAt(x + 1, z) - HeightAt(x - 1, z)
+	local dz = HeightAt(x, z + 1) - HeightAt(x, z - 1)
+	return (Vector3.new(-dx, 2, -dz).Unit).Y
+end
 
-local eye = Instance.new("Camera")
-eye.Name = "Surveyor"
-eye.FieldOfView = 62
-eye.FarPlaneZ = SIDE * 4
-eye.CFrame = CFrame.lookAt(Vector3.new(ORBIT_RADIUS, ORBIT_HEIGHT, 0), Vector3.new(0, 0, 0))
-eye.Parent = workspace
-workspace.CurrentCamera = eye
-
--- --- building it -------------------------------------------------------------
---
--- **A chunk a frame rather than all sixty-four at once.** The field above is
--- already sampled, so this is only the mesh calls - but there are about twenty
--- thousand of them per chunk, and doing every chunk before the first present
--- would hold the window blank for as long as that takes. One a frame gets a
--- picture up immediately and finishes in about a second, and the map filling in
--- is a fair thing to watch rather than a stall.
-local pending: { { number } } = {}
-for cz = 0, CHUNKS - 1 do
-	for cx = 0, CHUNKS - 1 do
-		table.insert(pending, { cx, cz })
+local spawnX, spawnZ = 0, 0
+for radius = 0, 30 do
+	local found = false
+	for step = 0, math.max(radius * 8, 1) - 1 do
+		local angle = step * math.pi * 2 / math.max(radius * 8, 1)
+		local x = math.cos(angle) * radius * 6
+		local z = math.sin(angle) * radius * 6
+		if HeightAt(x, z) > SEA_LEVEL + 3 and LevelAt(x, z) > 0.9 then
+			spawnX, spawnZ = x, z
+			found = true
+			break
+		end
+	end
+	if found then
+		break
 	end
 end
 
--- Nearest the camera's opening position first, so what is built early is what
--- is on screen early.
-table.sort(pending, function(left: { number }, right: { number })
-	local lx = left[1] * CHUNK + CHUNK / 2 + ORIGIN - ORBIT_RADIUS
-	local rx = right[1] * CHUNK + CHUNK / 2 + ORIGIN - ORBIT_RADIUS
-	return lx * lx < rx * rx
-end)
+local SPAWN_HEIGHT = math.max(HeightAt(spawnX, spawnZ), SEA_LEVEL + 2)
 
-local next_ = 1
-local announced = false
+-- **Sitting on the surface rather than sunk into it.** `FindSpawn` puts a
+-- character's feet on the pad, so the pad's own top is where the character
+-- starts - and a pad buried in the ground starts a character inside the hill,
+-- which the solver answers by throwing it into the air.
+local pad = Instance.new("SpawnLocation")
+pad.Name = "SpawnLocation"
+pad.Anchored = true
+pad.Size = Vector3.new(8, 1, 8)
+pad.Position = Vector3.new(spawnX, SPAWN_HEIGHT + 0.5, spawnZ)
+pad.Color = Color3.fromRGB(120, 120, 130)
+pad.Parent = workspace
 
-RunService.Heartbeat:Connect(function()
-	if next_ <= #pending then
-		local chunk = pending[next_]
-		next_ += 1
-		BuildChunk(chunk[1], chunk[2])
+local Players = game:GetService("Players")
 
-		if next_ > #pending and not announced then
-			announced = true
-			print(`terrain: {built} chunk mesh(es), {triangles} triangle(s) built`)
+local walker = Instance.new("Player")
+walker.Name = "Surveyor"
+walker.Parent = Players
+walker:LoadCharacter()
+
+-- **Walking it needs a host that installs the physics pipeline**, which is the
+-- note `StressPhysics.luau` gives at more length and for the same reason: a
+-- client registers the *character* systems only, so a scripted client world
+-- integrates nothing and the body stands wherever it was put. The studio's Play
+-- and `just host --game` both solve, and there the character walks and the
+-- world streams around it.
+local function CharacterRoot(): Instance?
+	local model = workspace:FindFirstChild("Surveyor")
+	return if model ~= nil then model:FindFirstChild("HumanoidRootPart") else nil
+end
+
+-- --- the camera ------------------------------------------------------------
+--
+-- **A flight rather than an orbit, because there is nothing to orbit.** The
+-- scene this replaced circled a 512-stud island and looked in at it. An endless
+-- field has no middle, so the camera goes somewhere instead: forward at a
+-- walking pace, holding its height above whatever ground is under it, which is
+-- the view that shows chunks arriving ahead and falling away behind.
+--
+-- **It flies until the character moves, and then it is the character's.** That
+-- is one test for the question this scene cannot ask directly - `IsServer` and
+-- `IsClient` report the same thing in a standalone client as in a dedicated
+-- server, so a script cannot ask whether a host solves. A body that has moved
+-- has been solved by something; a body still on its pad has not, and a scene
+-- that stood still there would show nothing of what it is about.
+local FLIGHT_SPEED = 26
+local FLIGHT_HEIGHT = 46
+local FLIGHT_LOOK = 90
+
+local eye = Instance.new("Camera")
+eye.Name = "Flyer"
+eye.FieldOfView = 62
+eye.FarPlaneZ = VIEW * CHUNK * 4
+eye.CFrame = CFrame.lookAt(
+	Vector3.new(0, SPAWN_HEIGHT + FLIGHT_HEIGHT, 0),
+	Vector3.new(FLIGHT_LOOK, SPAWN_HEIGHT, 0)
+)
+eye.Parent = workspace
+workspace.CurrentCamera = eye
+
+local flying = true
+local spawned: Vector3? = nil
+
+-- **Ticks rather than `time()`, because two runs of this scene have to build
+-- the same world.** The flight decides which chunks exist, so a camera placed
+-- from the wall clock would put a different set of meshes in the world on every
+-- run - and `HeightAt` being a pure function of its seed would stop being
+-- something anybody could check. `examples/tests/Scene.cpp` checks it.
+local flown = 0
+
+local function FlyCamera()
+	local root = CharacterRoot()
+	if root ~= nil then
+		local at = (root :: any).Position
+		if spawned == nil then
+			spawned = at
+		elseif ((at - (spawned :: Vector3)).Magnitude) > 0.25 then
+			-- Something is solving. Stop writing the camera and let whatever
+			-- follows the character have it - two writers and the last one
+			-- wins, which reads as a camera fighting itself.
+			flying = false
+			return
 		end
 	end
 
-	local angle = time() * (math.pi * 2 / ORBIT_PERIOD)
+	flown += 1
+	local travelled = flown * FLIGHT_SPEED / 60
+	local ahead = travelled + FLIGHT_LOOK
+
+	-- Above the ground rather than at a fixed altitude, so a mountain does not
+	-- swallow the camera and a valley does not leave it in the sky.
+	local ground = math.max(HeightAt(travelled, 0), SEA_LEVEL)
+	local aim = math.max(HeightAt(ahead, 0), SEA_LEVEL)
+
 	eye.CFrame = CFrame.lookAt(
-		Vector3.new(math.cos(angle) * ORBIT_RADIUS, ORBIT_HEIGHT, math.sin(angle) * ORBIT_RADIUS),
-		Vector3.new(0, 0, 0)
+		Vector3.new(travelled, ground + FLIGHT_HEIGHT, 0),
+		Vector3.new(ahead, aim + FLIGHT_HEIGHT * 0.25, 0)
 	)
+end
+
+-- What the streaming follows: the character once something is moving it, and
+-- the camera until then.
+local function SubjectPosition(): Vector3
+	if not flying then
+		local root = CharacterRoot()
+		if root ~= nil then
+			return (root :: any).Position
+		end
+	end
+
+	-- Studio owns one transient camera per viewport and makes the camera for the
+	-- view being drawn current. Resolving it here keeps chunks around what is
+	-- actually visible instead of around `eye` after Studio has replaced it.
+	local current = workspace.CurrentCamera
+	return if current ~= nil then (current :: Camera).CFrame.Position else eye.CFrame.Position
+end
+
+-- --- streaming --------------------------------------------------------------
+--
+-- **One chunk a frame, nearest first.** The mesh calls for a 64-chunk are about
+-- twenty thousand, so building a ring of them in one frame is a stall you can
+-- see; building the nearest missing one each frame fills the world in front of
+-- whoever is walking into it and leaves the far corners for later.
+--
+-- The whole of "infinite" is here: `HeightAt` has no edge, so the only question
+-- each frame is which chunks are worth holding.
+local function ChunkOf(value: number): number
+	return math.floor(value / CHUNK)
+end
+
+-- One chunk whose expensive height samples are being filled across ticks.
+-- The finished mesh transaction is still one atomic `SetGeometry` commit.
+type SamplingChunk = {
+	Cx: number,
+	Cz: number,
+	BaseX: number,
+	BaseZ: number,
+	Block: { number },
+	NextRow: number,
+	Committing: boolean,
+}
+
+local sampling: SamplingChunk? = nil
+
+local function AdvanceSampling(cx: number, cz: number): boolean
+	local job = sampling
+	if job == nil then
+		return false
+	end
+
+	-- A viewport can replace CurrentCamera while a sliced sample is in flight.
+	-- Drop an uncommitted tile that no longer belongs to the visible ring rather
+	-- than finishing it around the old camera and deleting it a few frames later.
+	if not job.Committing and (math.abs(job.Cx - cx) > VIEW or math.abs(job.Cz - cz) > VIEW) then
+		sampling = nil
+		return false
+	end
+	if job.Committing then
+		return true
+	end
+
+	local past = math.min(job.NextRow + SAMPLE_ROWS_PER_TICK, SPAN)
+	SampleRows(job.Block, job.BaseX, job.BaseZ, job.NextRow, past)
+	job.NextRow = past
+	if past < SPAN then
+		return true
+	end
+
+	-- Keep the job visible while `SetGeometry` yields. A later Heartbeat callback
+	-- then observes `Committing` and cannot start the same tile a second time.
+	job.Committing = true
+	BuildSampledChunk(job.Cx, job.Cz, job.Block)
+	sampling = nil
+	return true
+end
+
+local function Stream()
+	local at = SubjectPosition()
+	local cx = ChunkOf(at.X)
+	local cz = ChunkOf(at.Z)
+	if AdvanceSampling(cx, cz) then
+		return
+	end
+
+	-- The nearest chunk that is wanted and not built. Squared distance in chunk
+	-- units, so the ring fills roughly outward rather than row by row.
+	local wantX: number? = nil
+	local wantZ: number? = nil
+	local nearest = math.huge
+
+	for dz = -VIEW, VIEW do
+		for dx = -VIEW, VIEW do
+			local key = KeyOf(cx + dx, cz + dz)
+			if chunks[key] == nil then
+				local distance = dx * dx + dz * dz
+				if distance < nearest then
+					nearest = distance
+					wantX = cx + dx
+					wantZ = cz + dz
+				end
+			end
+		end
+	end
+
+	if wantX ~= nil and wantZ ~= nil then
+		sampling = {
+			Cx = wantX,
+			Cz = wantZ,
+			BaseX = wantX * CHUNK,
+			BaseZ = wantZ * CHUNK,
+			Block = table.create(SPAN * SPAN, 0),
+			NextRow = 0,
+			Committing = false,
+		}
+		AdvanceSampling(cx, cz)
+		-- Sampling and eviction stay on separate ticks. A tick that both builds
+		-- and destroys is the worst of both.
+		return
+	end
+
+	-- Nothing left to build, so drop whatever has fallen out of `KEEP`.
+	for key, chunk in chunks do
+		local comma = string.find(key, ",", 1, true)
+		local kx = tonumber(string.sub(key, 1, (comma :: number) - 1)) :: number
+		local kz = tonumber(string.sub(key, (comma :: number) + 1)) :: number
+		if math.abs(kx - cx) > KEEP or math.abs(kz - cz) > KEEP then
+			chunk.Part:Destroy()
+			chunk.Mesh:Destroy()
+			chunks[key] = nil
+			dropped += 1
+		end
+	end
+
+	water.Position = Vector3.new(cx * CHUNK + CHUNK / 2, SEA_LEVEL, cz * CHUNK + CHUNK / 2)
+end
+
+-- Build only the ground under the spawn before streaming starts, so a character
+-- cannot fall through an empty world. Its neighbours use the sliced producer
+-- above instead of delaying the Heartbeat connection for nine complete chunks.
+BuildChunk(0, 0)
+
+local announced = false
+local beat = 0
+local streaming = false
+
+local function CountChunks(): number
+	local resident = 0
+	for _ in chunks do
+		resident += 1
+	end
+	return resident
+end
+
+RunService.Heartbeat:Connect(function()
+	if flying then
+		FlyCamera()
+	end
+
+	Settle()
+	if not streaming then
+		-- Signal callbacks are independent coroutines. `BuildChunk` waits for its
+		-- mesh commit, so another Heartbeat may arrive before this one returns.
+		-- One producer keeps two callbacks from generating the same missing tile.
+		streaming = true
+		Stream()
+		streaming = false
+	end
+
+	if not announced and built >= (VIEW * 2 + 1) * (VIEW * 2 + 1) then
+		announced = true
+		print(`terrain: {built} chunk mesh(es), {triangles} triangle(s), first ring complete`)
+	end
+
+	-- **Every sixty ticks while it is moving, because "endless" is a claim
+	-- about what happens after the first ring.** A scene that built its ring
+	-- and then did nothing would look identical to the fixed map this replaced,
+	-- and this line is the difference: chunks keep being built and dropped for
+	-- as long as the subject travels.
+	beat += 1
+	if beat % 60 == 0 then
+		local at = SubjectPosition()
+		print(
+			`terrain: at {string.format("%.0f", at.X)},{string.format("%.0f", at.Z)} · `
+				.. `{built} built, {dropped} dropped, {CountChunks()} resident`
+		)
+	end
 end)
 
 print(
-	`terrain: {SIDE}x{SIDE} studs at one sample a stud ({SAMPLES * SAMPLES} samples), `
-		.. `{CHUNKS}x{CHUNKS} chunks of {CHUNK}, `
-		.. `height {string.format("%.1f", lowestSample)} to {string.format("%.1f", highestSample)}`
+	`terrain: endless field, chunks of {CHUNK} studs, {VIEW} chunks each way `
+		.. `({(VIEW * 2 + 1) * CHUNK} studs across), `
+		.. `character spawned at {string.format("%.0f", spawnX)},{string.format("%.0f", spawnZ)} `
+		.. `y={string.format("%.1f", SPAWN_HEIGHT)}`
 )

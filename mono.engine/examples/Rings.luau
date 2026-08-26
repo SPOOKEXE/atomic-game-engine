@@ -54,8 +54,11 @@ end
 
 -- Orbit state lives in the script, because how a part moves is the game's
 -- business. The engine holds the part.
+--
+-- **No part on the record.** The orbiters and `parts` below are the same list
+-- in the same order, and `BulkMoveTo` wants that list as a list - a handle here
+-- as well would be a second copy to keep in step with it.
 type Orbiter = {
-	Part: Part,
 	Radius: number,
 	Height: number,
 	Speed: number,
@@ -65,6 +68,11 @@ type Orbiter = {
 }
 
 local orbiters: { Orbiter } = {}
+
+-- The two lists `BulkMoveTo` takes. The parts never change, so that half is
+-- filled below once; the placements are overwritten in place every beat.
+local parts: { Instance } = {}
+local placements: { CFrame } = {}
 
 for index = 0, COUNT - 1 do
 	local ring = math.floor(index / PER_RING)
@@ -91,8 +99,10 @@ for index = 0, COUNT - 1 do
 	part.Anchored = true
 	part.Parent = workspace
 
+	parts[index + 1] = part
+	placements[index + 1] = part.CFrame
+
 	table.insert(orbiters, {
-		Part = part,
 		Radius = INNER_RADIUS + ring * ringStep,
 		Height = range(index, 7, -5, 5),
 		-- Outer rings turn more slowly, which reads as depth without any depth
@@ -108,8 +118,13 @@ for index = 0, COUNT - 1 do
 	})
 end
 
+-- **One `BulkMoveTo` at the end rather than a write inside the loop.** The
+-- chain above is the point of this demo and is unchanged; what moved is where
+-- the result goes. A per-part `CFrame =` crosses the language boundary once per
+-- orbiter, and the boundary is most of what a move costs - `scene::BulkMoveTo`
+-- carries the measurement.
 RunService.Heartbeat:Connect(function(deltaTime: number)
-	for _, orbiter in orbiters do
+	for at, orbiter in orbiters do
 		orbiter.Angle += orbiter.Speed * deltaTime
 
 		-- The part's own turn, accumulated by composition. `*=` on a CFrame is
@@ -124,10 +139,12 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 		-- Turn about the origin, step out along the ring, then apply the spin.
 		-- Reading left to right is reading the transform: this is what a CFrame
 		-- chain is for, and it is why the orbit needs no sine and no cosine.
-		orbiter.Part.CFrame = CFrame.Angles(0, orbiter.Angle, 0)
+		placements[at] = CFrame.Angles(0, orbiter.Angle, 0)
 			* CFrame.new(orbiter.Radius, orbiter.Height, 0)
 			* orbiter.Spin
 	end
+
+	workspace:BulkMoveTo(parts, placements)
 end)
 
 print(`rings: {COUNT} parts across {rings} ring(s), animated from script`)

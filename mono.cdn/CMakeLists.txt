@@ -72,5 +72,8 @@ if(MONO_BUILD_CDN)
 		DEPS
 			Mono::cdn
 			Engine::core
+			# The dependency-light MCP transport. The origin deliberately omits
+			# universe and script features, so this does not pull ECS or world in.
+			Engine::control
 	)
 endif()

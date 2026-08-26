@@ -96,3 +96,42 @@ should be corrected in the same change.** Two of them already have been.
   `scene::Visual` names a mesh. Nothing here learns what an image is.
 - **`physics`** - nothing here collides. The day particle collision exists this
   becomes a real question; today naming it would be an edge that buys nothing.
+
+---
+
+## Nothing here crosses a replication wire, and that is the design
+
+`replication::SHARED_PREFIXES` is `scene.` and `gui.`. No `effects.` component is
+in the default replicated table, and a review that reads that as an omission has
+the observation right and the conclusion wrong. Three things stand in the way,
+and the first is fatal on its own:
+
+- **A replica never registers this module.** `client::BuildReplicatedWorld`
+  registers `scene`, `gui`, `script`, `client` and `replication`. Effects reach a
+  `--game` client because the world loader registers them, not because the client
+  does. `ecs::LoadSnapshot` refuses a snapshot naming a component the build does
+  not have, so one `ParticleEmitter` on a server would fail every join.
+- **The rows would arrive empty.** `Beam::Attachment0`, `Trail::Attachment0` and
+  `EmitterSlot::Index` are dropped by their own writers and cleared by their
+  readers, because a handle and a pool index describe one process. A replicated
+  beam has no endpoints.
+- **These are the three widest rows in the engine.** `ParticleEmitter` is 1264
+  bytes, `Trail` 1152 and `Beam` 712, all trivially copyable, so all three would
+  be hashed per row per tick on the signature path.
+
+An effect a server means every client to see is the **instance** crossing -
+`ecs.InstanceClass` already does - and each machine building its own component
+from that class. A reviewer handed a prefix change here should ask for the
+registration on the replica side first, because without it the change does not
+degrade, it fails the join.
+
+## `Trail`'s history is on the row, and it is not in the file
+
+`Trail` is 1152 bytes and 448 of them are `Top`, `Bottom` and `Age`. That reads
+like a large saved row, and it is not: `WriteTrails` walks the authored fields
+one at a time and never touches the ring, and `ReadTrails` puts it back at empty.
+`engine.effects.ribbon` measures it - a full ring and an empty one write byte for
+byte the same thing - so a proposal to split the history out to keep it out of a
+file is answering a question that is already answered. A split for a *cache*
+reason would need a pass that reads one half without the other, and both passes
+that touch a trail read both halves.

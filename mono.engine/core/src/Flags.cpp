@@ -59,7 +59,7 @@ namespace engine::core {
 		// Lowercases in place, ASCII only. Flag names and boolean spellings are
 		// both ASCII by construction - a name is declared in this repository and
 		// a boolean is one of eight words.
-		std::string Lowered(std::string_view text) {
+		std::string LoweredFlag(std::string_view text) {
 			std::string lowered(text);
 			std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](char value) {
 				return (value >= 'A' && value <= 'Z') ? static_cast<char>(value - 'A' + 'a') : value;
@@ -78,7 +78,7 @@ namespace engine::core {
 				return true;
 			}
 
-			const std::string lowered = Lowered(text);
+			const std::string lowered = LoweredFlag(text);
 			if (lowered == "true" || lowered == "on" || lowered == "yes" || lowered == "1") {
 				out = true;
 				return true;

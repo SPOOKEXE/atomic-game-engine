@@ -123,6 +123,10 @@ namespace engine::input {
 		void ReleaseAll();
 
 	  private:
+		// arch-waiver ecs-copy: this is where the frame's input is *built*, before
+		// any world has one. `Translate.hpp`'s whole job is turning SDL events into
+		// this shape; the store's copy is written from here and is the authority
+		// from then on.
 		scene::InputState Current;
 
 		// This frame's text, accumulated across however many

@@ -16,11 +16,11 @@
 -- into it, so the count is a budget rather than a free parameter - and until
 -- v0.17 it was not a parameter at all: `scene::MAX_SURFACES` was compiled in at
 -- sixteen and a scene with seventeen mirrors quietly lost one. The budget
--- defaults to fifty now, this scene states its own below, and
+-- defaults to thirty-two now, this scene states its own below, and
 -- `scene::MAX_SURFACES` is a bound on an allocation rather than a design cap.
 --
 -- **Every facet asks anyway, and that is the stress.** A mirror ball is a ball
--- whose surface is mirror, not a ball with fifty mirrors on it, so this scene
+-- whose surface is mirror, not a ball with thirty-two mirrors on it, so this scene
 -- puts a `SurfaceCamera` on all three hundred and twenty and lets the budget do
 -- the refusing. The rest are gathered, placed and reflected every frame and
 -- reach no screen: that is the cost of asking for more panes than are drawn, and
@@ -143,9 +143,8 @@ workspace.SurfaceBounces = 1
 -- rather than left at `scene::DEFAULT_SURFACE_LIMIT` because this is the scene
 -- the number exists to be read off: a pane is a whole render of the world into a
 -- texture, so the frame time is linear in this and a ball is the scene that
--- makes that visible. Thirty-two is a frame a machine draws while still showing
--- the effect; the default of fifty is fine on a desktop and the interesting
--- experiment is turning it up until it is not.
+-- makes that visible. Thirty-two is the ordinary bound now; the interesting
+-- experiment is turning it up until the close-up target cost becomes visible.
 --
 -- The budget is spent on the facets covering the most screen, so the ones that
 -- reflect are the ones facing the viewer however the ball is turned.
@@ -254,7 +253,7 @@ end
 --
 -- It is also the second half of the subdivision knob. At three levels this is a
 -- 1,280 triangle mesh built vertex by vertex in Luau and re-uploaded by
--- `client::EditableMeshUploader`, which is a real exercise of the path
+-- `engine::render::EditableMeshUploader`, which is a real exercise of the path
 -- `EditableMesh.luau` demonstrates at five vertices.
 
 local mesh = Instance.new("EditableMesh")
@@ -363,6 +362,11 @@ type Tile = { Body: Part, Local: CFrame }
 
 local tiles: { Tile } = {}
 
+-- The two lists `BulkMoveTo` takes. The bodies never change; the placements are
+-- overwritten in place every frame.
+local bodies: { Instance } = {}
+local placements: { CFrame } = {}
+
 -- Which facets get a camera, spread rather than taken from the front of the
 -- list. Subdivision emits a base triangle's four children together, so the
 -- first few faces of a subdivided ball are all children of the same few base
@@ -444,6 +448,8 @@ for index, face in faces do
 	end
 
 	table.insert(tiles, { Body = tile, Local = frame })
+	bodies[#tiles] = tile
+	placements[#tiles] = tile.CFrame
 end
 
 -- --- something to reflect ----------------------------------------------------
@@ -518,7 +524,13 @@ RunService.Heartbeat:Connect(function(delta: number)
 
 	core.CFrame = ball
 
-	for _, tile in tiles do
-		tile.Body.CFrame = ball * tile.Local
+	for at, tile in tiles do
+		placements[at] = ball * tile.Local
 	end
+
+	-- **One call for all three hundred and twenty facets.** A per-facet
+	-- `CFrame =` crosses the language boundary once per facet, and this scene
+	-- is here to measure the *mirror* path rather than the property bindings -
+	-- see `scene::BulkMoveTo`, which carries what the boundary costs.
+	workspace:BulkMoveTo(bodies, placements)
 end)

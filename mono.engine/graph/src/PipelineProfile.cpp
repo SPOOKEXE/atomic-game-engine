@@ -6,7 +6,7 @@
 namespace engine::graph {
 
 	namespace {
-		bool Touches(const std::vector<ResourceId> &list, ResourceId resource) {
+		bool TouchesResource(const std::vector<ResourceId> &list, ResourceId resource) {
 			return std::find(list.begin(), list.end(), resource) != list.end();
 		}
 
@@ -91,8 +91,8 @@ namespace engine::graph {
 					continue;
 				}
 
-				const bool reads = Touches(node->Reads, row.Id);
-				const bool writes = Touches(node->Writes, row.Id);
+				const bool reads = TouchesResource(node->Reads, row.Id);
+				const bool writes = TouchesResource(node->Writes, row.Id);
 				if (!reads && !writes) {
 					continue;
 				}

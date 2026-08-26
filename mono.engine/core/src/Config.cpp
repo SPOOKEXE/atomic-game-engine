@@ -17,6 +17,7 @@ namespace engine::core {
 		constexpr std::string_view CONFIG_OPTION = "config";
 		constexpr std::string_view FLAG_OPTION = "flag";
 		constexpr std::string_view FLAGS_OPTION = "flags";
+		constexpr std::string_view LOG_OPTION = "log";
 		constexpr const char *CONFIG_VARIABLE = "ATOMIC_CONFIG";
 
 		std::string_view Trimmed(std::string_view text) {
@@ -81,31 +82,22 @@ namespace engine::core {
 		}
 
 		constexpr std::string_view LOG_LEVEL_FLAG = "engine.log-level";
+		constexpr std::string_view SOURCE_FLAG = "engine.log-source";
 
-		constexpr std::array<FlagDescription, 1> ENGINE_FLAGS{{
-			{LOG_LEVEL_FLAG, FlagKind::Text, "info", "trace, info, warning or error"},
+		// **One setting rather than two, and a bare level still means what it
+		// always did.** The flag grew per-category terms at v0.19 and did not
+		// grow a second flag beside it: `engine.log-level` and
+		// `engine.log-categories` would be two settings that can disagree about
+		// what `net` is set to, and the loser would be whichever the reader did
+		// not think to look at.
+		constexpr std::array<FlagDescription, 2> ENGINE_FLAGS{{
+			{LOG_LEVEL_FLAG,
+			 FlagKind::Text,
+			 "info",
+			 "A level - trace, debug, info, warning, error, off - and any number of "
+			 "category=level terms, comma separated"},
+			{SOURCE_FLAG, FlagKind::Boolean, "true", "Append file:line to every line that is not info"},
 		}};
-
-		// The level a name spells, or nothing for a name that spells none.
-		//
-		// **Refused rather than defaulted**, because a misspelled level that
-		// silently means `info` is a deployment that thinks it turned tracing on
-		// and did not.
-		bool LevelFromName(std::string_view text, LogLevel &out) {
-			const std::string lowered = Lowered(text);
-			if (lowered == "trace") {
-				out = LogLevel::Trace;
-			} else if (lowered == "info") {
-				out = LogLevel::Info;
-			} else if (lowered == "warning" || lowered == "warn") {
-				out = LogLevel::Warning;
-			} else if (lowered == "error") {
-				out = LogLevel::Error;
-			} else {
-				return false;
-			}
-			return true;
-		}
 
 		// Records a `Set` outcome on a report, naming the first failure.
 		void Record(ConfigReport &report, FlagStatus status, std::string_view where, std::string_view name) {
@@ -259,6 +251,15 @@ namespace engine::core {
 		arguments.Value(CONFIG_OPTION, "PATH", "Read settings from this file, before the environment");
 		arguments.Value(FLAG_OPTION, "NAME=VALUE", "Set one setting, above everything else. May repeat");
 		arguments.Flag(FLAGS_OPTION, "Print every setting, where its value came from, and exit");
+
+		// **A spelling of one flag rather than a second way to set it.**
+		// `--log net=trace` is applied as `engine.log-level` at command-line
+		// precedence, so it beats a config file and an environment variable for
+		// the reason everything typed does, and `--flags` lists one setting
+		// with one value. It exists because the flag is the one somebody
+		// reaches for while a program is misbehaving, and
+		// `--flag engine.log-level=net=trace` has two equals signs in it.
+		arguments.Value(LOG_OPTION, "SPEC", "Set log levels: a level, or category=level terms");
 	}
 
 	ConfigReport Config::Apply(const Arguments &arguments) {
@@ -296,6 +297,18 @@ namespace engine::core {
 			report.Error = environment.Error;
 		}
 
+		// Before `ApplyArguments`, so that an explicit `--flag engine.log-level=`
+		// on the same command line still wins. Both are `CommandLine`, and
+		// `Flags::Set` compares strictly - a later value from the same source
+		// replaces an earlier one - so the order here is what decides between
+		// two spellings of one setting, and the longer, more explicit spelling
+		// is the one that should win.
+		if (const auto spelled = arguments.Get(LOG_OPTION); spelled.has_value()) {
+			Record(
+				report, Flags::Set(LOG_LEVEL_FLAG, *spelled, FlagSource::CommandLine), "--log", LOG_LEVEL_FLAG
+			);
+		}
+
 		const ConfigReport typed = ApplyArguments(arguments);
 		report.Applied += typed.Applied;
 		report.Outranked += typed.Outranked;
@@ -310,13 +323,17 @@ namespace engine::core {
 		// at the default it was about to leave behind.
 		if (Flags::Has(LOG_LEVEL_FLAG)) {
 			const Flag level(LOG_LEVEL_FLAG);
-			if (LogLevel wanted; LevelFromName(level.Text(), wanted)) {
-				Log::SetLevel(wanted);
-			} else if (report.Ok) {
+			std::string_view unknown;
+			if (!Log::Configure(level.Text(), &unknown) && report.Ok) {
 				report.Ok = false;
-				report.Error = std::string(LOG_LEVEL_FLAG) + ": '" + std::string(level.Text()) +
-							   "' is not trace, info, warning or error";
+				report.Error = std::string(LOG_LEVEL_FLAG) + ": '" + std::string(unknown) +
+							   "' names no level. A term is trace, debug, info, warning, error or "
+							   "off, optionally prefixed with 'category='";
 			}
+		}
+
+		if (Flags::Has(SOURCE_FLAG)) {
+			Log::SetSourceLocationShown(Flag(SOURCE_FLAG).Boolean());
 		}
 
 		Flags::Freeze();

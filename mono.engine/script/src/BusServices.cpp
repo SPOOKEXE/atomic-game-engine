@@ -30,15 +30,15 @@
 //
 // @tier L9 · shared
 
-#include "Codec.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
 #include "Teleport.hpp"
 
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Codec.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <array>

@@ -131,6 +131,7 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	Preferences written;
 	written.Scale = 1.25f;
 	written.ShowGrid = false;
+	written.ShowParticleEmitters = false;
 	written.SnapEnabled = true;
 	written.SnapDistance = 0.25f;
 	written.SnapDegrees = 45.0f;
@@ -138,18 +139,21 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.ControlPort = 9001;
 	written.ShowControl = true;
 	written.Sides = studio::ScaleSide::BothHalf;
+	written.Uncapped = true;
 	REQUIRE(written.Save());
 
 	Preferences read;
 	REQUIRE(read.Load());
 	CHECK(read.Scale == 1.25f);
 	CHECK_FALSE(read.ShowGrid);
+	CHECK_FALSE(read.ShowParticleEmitters);
 	CHECK(read.SnapEnabled);
 	CHECK(read.SnapDistance == 0.25f);
 	CHECK(read.SnapDegrees == 45.0f);
 	CHECK(read.PivotEditing);
 	CHECK(read.ControlPort == 9001);
 	CHECK(read.ShowControl);
+	CHECK(read.Uncapped);
 
 	// **Written as its name rather than its index**, so reordering `ScaleSide`
 	// cannot silently change how everybody's scale drag behaves. A name nobody

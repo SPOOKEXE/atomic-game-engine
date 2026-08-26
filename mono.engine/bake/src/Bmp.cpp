@@ -1,5 +1,7 @@
 #include "Decoders.hpp"
 
+#include <engine/core/Log.hpp>
+
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -138,6 +140,14 @@ namespace engine::bake {
 				}
 			}
 		}
+
+		// **The heuristic is a guess with a visible consequence**, and it is
+		// invisible after the fact: a file whose alpha was genuinely all-zero is
+		// decoded opaque, and one whose alpha was meaningful is not.
+		if (bitCount == 32) {
+			ENGINE_DEBUG("32-bit bmp: alpha channel {}", anyAlpha ? "believed" : "all zero, forced opaque");
+		}
+		ENGINE_DEBUG("bmp {}x{}, {} bit, {}", width, height, bitCount, topDown ? "top-down" : "bottom-up");
 
 		for (uint32_t row = 0; row < height; row++) {
 			const uint32_t sourceRow = topDown ? row : height - 1 - row;

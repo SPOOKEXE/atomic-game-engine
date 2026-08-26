@@ -1,13 +1,28 @@
 # QUIC
 
-**This is the *how*. `docs/DEFERRED.md` D00014 is the *whether* and the
-*when*.** That entry holds the decision open behind a named trigger; this
-document is what somebody reads on the day the trigger fires, so that the work
-starts from a survey rather than from a search engine.
+**This was the *how*, and at v0.19 it is also the *what happened*.**
+`docs/DEFERRED.md` D00014 is the *whether* and the *when*; this document was
+written so that the day the trigger fired started from a survey rather than
+from a search engine. It did, and §12 records what the survey turned out to be
+right and wrong about.
 
-Everything below was checked against the libraries as they are in August 2026,
-not as D00014 described them in v0.13. **Three of that entry's conclusions have
-moved**, and they are called out where they occur.
+Everything in §1 to §11 was checked against the libraries as they are in August
+2026, not as D00014 described them in v0.13. **Three of that entry's
+conclusions have moved**, and they are called out where they occur. §12 is
+newer than all of it and is the part to read first.
+
+---
+
+## 0. Where this stands
+
+| Stage (§8) | State |
+|---|---|
+| 1. Vendor ngtcp2 and a TLS backend | **done** - ngtcp2 v1.25.0 as a submodule, `ENABLE_LIB_ONLY`; the TLS backend is in tree |
+| 2. The crypto seam | **done** - `net/quic/Crypto.hpp`, checked against RFC 9001 Appendix A |
+| 3. A QUIC session beside the old one, proved over `LossyTransport` | **done** - `net/quic/Connection.hpp`, twenty cases plus one over real sockets |
+| 4. Rewire `Session`, `Listener`, `Connector`, then the programs | **done.** QUIC is the default and the server chooses: `mono.server --transport quic\|datagram\|both`, `mono.studio`, `mono.unified_tests` and `mono.network`'s discovery all moved. The client has no transport flag at all |
+| 5. `expected_graph.json` and the tier check | **nothing to change** - the graph records first-party links and ngtcp2 is a vendor |
+| 6. Delete | **off the table, and this is now a decision rather than a delay.** `Datagram` is a supported server mode, so `Packet`, `Reliability`, `Handshake`, `Cookie` and `ConnectionId` stay live. See §8 |
 
 ---
 
@@ -52,10 +67,14 @@ them arrive with it.
 
 ## 2. What is here now, and what QUIC replaces
 
-`engine::net` is L2 `shared` and links `Engine::core`, `Vendor::asio` and
-`Vendor::cryptopp`. Reading the table below as a delete list is premature: see
-§8, which is explicit that nothing is deleted until the replacement is proved
-beside it.
+`engine::net` is L11 `shared` and links `Engine::core`, `Vendor::asio`,
+`Vendor::cryptopp` and, since v0.19, `Vendor::ngtcp2`.
+
+**The table below is not a delete list, and as of v0.19 it never becomes one.**
+"Under QUIC" means what a *QUIC connection* uses instead; the left column is
+still what `--transport datagram` runs on, which is a mode the server can
+select. §8's step 6 records why the deletion is off the table. `Wire.hpp` is the
+seam that decides which of the two a datagram belongs to.
 
 | Header | What it does | Under QUIC |
 |---|---|---|
@@ -239,9 +258,36 @@ both of those true and should check the second one has not quietly changed.**
    `mono.unified_tests`, and `mono.network`'s discovery.
 5. Update `mono.tools/architecture/expected_graph.json` and let the tier check
    pass.
-6. Only then delete, with the suites and benchmarks that go with each deletion.
+6. ~~Only then delete, with the suites and benchmarks that go with each
+   deletion.~~ **Not happening, and the reason is the fallback.**
 
 Every commit green. Not a sweep that leaves the tree with no working link.
+
+### Step 6 is closed as "will not do", and it is worth saying why
+
+The staging above was written expecting `Datagram` to stop existing once QUIC
+worked. What v0.19 actually shipped is a *server-chosen* transport - `quic`,
+`datagram` or `both` - and a client that opens with QUIC and falls back when it
+is refused. That makes the datagram stack a supported mode rather than a legacy
+one, and every argument for deleting it goes with that:
+
+- **`Packet`, `Reliability`, `Handshake`, `Cookie` and `ConnectionId` are what
+  `--transport datagram` runs on.** Deleting them removes a mode an operator can
+  select, which is a product decision and not housekeeping.
+- **The fallback is the reason a client needs no flag.** A client that could only
+  speak QUIC would have to be told which servers are old, and the thing that
+  tells it is exactly the stack that would have been deleted.
+- **§8's own argument still holds and now points the other way.** "Two
+  overlapping reliability stacks is worse than either" is about two stacks
+  *nobody chose between*. There is a choice now, one end makes it, and
+  `net::WireOf` decides which one a datagram belongs to before either stack sees
+  it. `net/AGENTS.md` keeps the standing rule that a change to one stack is a
+  question about the other.
+
+What that costs is real and is not being hidden: two reliability implementations
+are two sets of bugs, and §9's second look at `CongestionControl` still has not
+been taken, because Copa is only on the datagram path and nothing has argued for
+taking Cubic's latency on the QUIC one.
 
 ---
 
@@ -284,13 +330,164 @@ housekeeping.** ngtcp2 does allow a custom congestion controller.
 
 ## 11. Open questions
 
+These were the questions before the work. §12 answers three of them.
+
 - Does AWS-LC's pre-generated build actually configure and link with no Go and
   no Perl, on Linux, Windows and macOS, as a submodule?
 - One stream per channel, or one stream per message? Streams are cheap but not
   free, and the answer depends on how many channels a real world uses.
 - Does the Copa controller stay (§9)?
-- Does `mono.network`'s discovery carry a QUIC connection id, or keep its own
-  identity and hand one over at connect time?
+- ~~Does `mono.network`'s discovery carry a QUIC connection id, or keep its own
+  identity and hand one over at connect time?~~ **Answered in §12: neither, and
+  the question had the wrong shape.** Discovery keeps its own identity and hands
+  over no connection id at all. What it gained instead is the one fact a client
+  can act on before dialling: which transports the host accepts.
+
+---
+
+## 12. What was built, and where the survey was wrong
+
+### The TLS decision went to the fallback, and the reason is §11's first question
+
+§4 said to try AWS-LC first and keep the in-tree TLS 1.3 as the fallback. **The
+fallback is what shipped.** AWS-LC's whole case rests on a claim - that its
+pre-generated build files configure with no Go and no Perl - which §11 lists as
+an open question and §10 says to verify on all three platforms *before*
+building anything on it. Verifying it on one platform proves nothing about the
+other two, and a transport standing on an unverified claim is a transport that
+has to be rebuilt when the claim fails.
+
+So `net/quic/Tls.hpp` is a TLS 1.3 handshake over Crypto++: X25519, one
+signature scheme, two cipher suites, RFC 7250 raw public keys, and no 0-RTT.
+**What it gives up is exactly what §4 says it gives up** - it will not talk to a
+browser or to curl, so the HTTP/3 half of D00014's second-consumer argument is
+not served. What it keeps is `mono.vendor/AGENTS.md`'s rule, unargued-with: a
+fresh clone still needs CMake, Ninja and a C++ compiler and nothing else.
+
+It is TLS on the wire rather than a private protocol wearing the name - RFC
+8446's messages and key schedule, RFC 9001's levels - so replacing it with a
+certificate-verifying backend later changes which object fills the interface
+and not one line of the transport above it.
+
+### One stream per message kind, which is narrower than §11 asked
+
+§11 asked "one stream per channel, or one stream per message". The answer is
+neither: **one stream per `MessageKind`**, which is §10's own table read
+literally. `replication::QuicRouteFor` is the mapping. A stream per message
+would be a stream per snapshot chunk; a stream per *channel* would put the join
+snapshot and a structural change back in one ordering, which is the stall the
+whole exercise is about.
+
+They are **sender-owned unidirectional** streams, and the channel number is the
+first byte the stream ever carries. Deriving it from the stream id instead
+would hold only while both ends opened their streams in the same order and
+never skipped one, which nothing would report the breaking of.
+
+### Copa stays, because nothing has argued for taking Cubic's latency
+
+§9's second look has not been taken and the controller is untouched. It is not
+on any path a QUIC session runs, so nothing was deleted; what §9 asks for is a
+deliberate decision, and the honest state is that nobody has made it.
+
+### The three mismatches were the three mismatches
+
+§5 named them and §10 predicted they would be where a subtle bug lives. Both
+were right, and the bug was the first kind §10 describes: Crypto++'s `ChaCha` is
+the original cipher with a 64-bit nonce, and RFC 9001 §5.4.4 wants the IETF
+variant's 96. The two are different functions of the same key. It was caught by
+RFC 9001 Appendix A's published vectors rather than by a handshake failing to
+complete, which is the whole reason those vectors are in the suite.
+
+### Two things the survey did not know to warn about
+
+- **ngtcp2 does not copy stream or CRYPTO data.** It keeps pointers into what
+  it was handed until the peer acknowledges. So the outbound buffers are a
+  deque of chunks that is never re-seated; a container that moved its elements
+  would leave the retransmission queue aimed at freed memory, and it would show
+  as a corrupted resend rather than as a crash.
+- **A server cannot encode its transport parameters until it has read the
+  client's.** RFC 9368's version information carries the version in force and
+  ngtcp2 fills it in when the remote parameters are decoded, so parameters
+  encoded beside `ngtcp2_conn_server_new` carry a chosen version of zero and
+  the far end rejects them as malformed with nothing saying which end was
+  wrong. The handshake therefore stops after the ServerHello and waits to be
+  told - `Tls::NeedsParameters`.
+
+### The identity binding, which §6 did not have a name for
+
+§6 says the pinning must survive and does not say what an identity *claim* is
+signed over once `AdmissionTranscript` is gone. It is a TLS exporter, RFC 8446
+§7.5, derived from the same transcript as the traffic secrets - so a signature
+captured from one connection proves nothing on another and a relay holding one
+handshake with each side cannot carry the claim across.
+`replication::SessionPort::Binding` is the seam and both wires fill it.
+
+### Discovery keeps its own identity, and the question was the wrong shape
+
+§11 asked whether `mono.network`'s discovery carries a QUIC connection id or
+keeps its own and hands one over at connect time. **It keeps its own, and it
+hands over no connection id either** - which is the second half the question did
+not offer.
+
+Three things decide it, and all three are in the code rather than in taste:
+
+- **They are different lifetimes.** A `network::SessionId` is drawn once when a
+  host starts and lives until it stops; a QUIC connection id belongs to one
+  connection, and QUIC lets an endpoint hold several at once and rotate them -
+  `quic::Connection::LocalIds` is a list for that reason. Announcing one would
+  make a re-announcement able to invalidate a live session, and a host that
+  rotated its ids would announce as somebody new.
+- **`network/AGENTS.md` already forbids the coupling in as many words**: "this
+  module ends at an endpoint", and "it must not grow a connection". A connection
+  id in an advert is the first half of growing one.
+- **A connection id would buy nothing.** A client dials an address; the QUIC
+  handshake picks the ids itself, and the *server* chooses the one the client
+  will address it by. There is no id worth knowing before the handshake, which
+  is why "hand one over at connect time" also has nothing to hand.
+
+What discovery did gain is `Advert::Transports`, and that is the fact a client
+can genuinely act on early: a row that says `datagram` means the first attempt
+opens there and the refusal round trip is never paid. It is a hint and nothing
+more - an advert arrives from an address anybody can write, so a wrong one costs
+the round trip it was meant to save and the fallback still runs.
+
+### The server decides, and the client has no flag
+
+`--quic` is gone from both programs. The server takes `--transport
+quic|datagram|both`, defaulting to `quic`; the client takes nothing, opens with
+QUIC, and falls back at most once. A flag on both ends that had to agree is a
+flag that will disagree, and what that produced was a connection that hung with
+nothing saying why.
+
+**One UDP port carries either, and the discriminator is one bit.** A QUIC long
+header - which every Initial packet is, RFC 9000 §17.2 - sets bit 7 (Header
+Form) and bit 6 (Fixed Bit) of its first byte, so an Initial starts in
+`0xC0..0xFF`. A `net::Packet` starts with `Packet::MAGIC` little-endian, whose
+first byte is `0x41`, bit 7 clear. `net::WireOf` is that test and `net/Wire.hpp`
+carries the bit positions. A QUIC *short* header is not separable this way -
+`0x40..0x7F` contains `0x41` - and does not need to be: a 1-RTT packet belongs
+to a connection and is routed by the destination connection id before anything
+asks the question.
+
+**Both refusals are explicit, so a fallback costs one round trip and not a
+deadline.** A `datagram`-only server answers a QUIC Initial with a Version
+Negotiation packet listing one reserved version - RFC 9000 §15's `0x?a?a?a?a`
+form, which every implementation must ignore. It is the right shape because it
+is stateless, needs no keys (a CONNECTION_CLOSE would have to derive Initial
+secrets and encrypt a packet, which is a server that does not speak QUIC doing
+QUIC's crypto to say so), and is under sixty bytes against a 1200-byte Initial,
+so it cannot be amplified off. A `quic`-only server answers a datagram hello
+with `AdmissionKind::Refuse`, naming the wire it does serve. Both keep
+`net/AGENTS.md`'s two rules for answering a stranger: nothing is remembered, and
+the reply is smaller than the question.
+
+### What is left
+
+- ~~The deletions (§8 step 6).~~ Closed as will-not-do; see §8.
+- §9's decision about Copa, which is now permanently a QUIC-side question: Copa
+  runs on the datagram path only.
+- HTTP/3, which the in-tree TLS gives up and which is the half of D00014's
+  second-consumer argument that is now unserved.
 
 ---
 

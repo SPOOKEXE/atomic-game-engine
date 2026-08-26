@@ -1,6 +1,7 @@
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/Shadow.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -27,6 +28,15 @@ using engine::scene::Camera;
 using engine::scene::DrawInstance;
 
 namespace {
+	struct RunningJobs {
+		RunningJobs() {
+			engine::parallel::Jobs::Start(4);
+		}
+		~RunningJobs() {
+			engine::parallel::Jobs::Stop();
+		}
+	};
+
 	// Where a world point lands in the light's clip space.
 	glm::vec3 Project(const glm::mat4 &lightViewProjection, const Vector3 &point) {
 		const glm::vec4 clip = lightViewProjection * glm::vec4{point.X, point.Y, point.Z, 1.0f};
@@ -260,4 +270,25 @@ TEST_CASE("the fused walk gives the same unit box for an empty draw list", "[gra
 	CHECK(count == 0);
 	CHECK(visible.empty());
 	CHECK(bounds == BoundsOfAll({}));
+}
+
+TEST_CASE("parallel cull and bound matches the serial contracts across chunks", "[graph][shadow]") {
+	const RunningJobs jobs;
+	std::vector<DrawInstance> instances;
+	instances.reserve(20'000);
+	for (uint32_t index = 0; index < 20'000; index++) {
+		const float x = (index % 5) == 0 ? 0.0f : 500.0f + static_cast<float>(index % 11);
+		instances.push_back(At(Vector3{x, static_cast<float>(index % 7), -10.0f}));
+	}
+
+	const Frustum frustum = Looking();
+	std::vector<uint32_t> expected;
+	const size_t expectedCount = Cull(instances, frustum, expected);
+	const AABB expectedBounds = BoundsOfAll(instances);
+	std::vector<uint32_t> visible;
+	AABB bounds;
+
+	CHECK(CullAndBound(instances, frustum, visible, bounds) == expectedCount);
+	CHECK(visible == expected);
+	CHECK(bounds == expectedBounds);
 }

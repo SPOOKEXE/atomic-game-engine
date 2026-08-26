@@ -1,6 +1,5 @@
-#include "Changes.hpp"
-
 #include <engine/ecs/Classes.hpp>
+#include <engine/script/Changes.hpp>
 
 namespace engine::script {
 

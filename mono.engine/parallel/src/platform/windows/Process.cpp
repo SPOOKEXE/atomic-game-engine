@@ -112,7 +112,7 @@ namespace engine::parallel {
 		// rather than a shared one because a test runner is a tool and this is
 		// the engine, and a dependency between them to share thirty lines would
 		// buy the tighter coupling of the two.
-		std::wstring Quote(const std::wstring &argument) {
+		std::wstring QuoteArgument(const std::wstring &argument) {
 			if (!argument.empty() && argument.find_first_of(L" \t\"") == std::wstring::npos) {
 				return argument;
 			}
@@ -269,10 +269,10 @@ namespace engine::parallel {
 
 		const std::wstring path = program.wstring();
 
-		std::wstring commandLine = Quote(path);
+		std::wstring commandLine = QuoteArgument(path);
 		for (const std::string &argument : arguments) {
 			commandLine.push_back(L' ');
-			commandLine += Quote(Widen(argument));
+			commandLine += QuoteArgument(Widen(argument));
 		}
 
 		// Which handles the child is allowed to have, and only those. Without a

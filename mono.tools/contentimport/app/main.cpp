@@ -15,6 +15,7 @@
 // @tier shared
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
@@ -23,7 +24,7 @@
 
 #include <array>
 #include <assetc/Bake.hpp>
-#include <cdn/LocalStore.hpp>
+#include <cdn/LocalPublish.hpp>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -258,10 +259,11 @@ int main(int argc, char **argv) {
 	}
 
 	const auto root = arguments.Get("root");
-	const cdn::LocalPaths paths =
-		root.has_value() ? cdn::LocalPathsUnder(std::filesystem::path(*root)) : cdn::DefaultLocalPaths();
+	const engine::assets::LocalPaths paths =
+		root.has_value() ? engine::assets::LocalPathsUnder(std::filesystem::path(*root))
+						 : engine::assets::DefaultLocalPaths();
 
-	if (!cdn::EnsureLocalStore(paths)) {
+	if (!engine::assets::EnsureLocalStore(paths)) {
 		return 1;
 	}
 	ENGINE_INFO("content store at {}", paths.Root.string());
@@ -274,7 +276,7 @@ int main(int argc, char **argv) {
 
 	for (const std::string_view given : arguments.Positional()) {
 		for (const std::filesystem::path &file : Expand(std::filesystem::path(given))) {
-			const auto report = cdn::ImportFile(paths, file, now);
+			const auto report = engine::assets::ImportFile(paths, file, now);
 			if (!report.has_value()) {
 				failures++;
 				continue;
@@ -302,7 +304,7 @@ int main(int argc, char **argv) {
 
 	// **Baked before published, which is the step that was missing.** `raw/`
 	// holds what somebody dragged in and a runtime decodes none of it -
-	// `cdn/LocalStore.hpp` carries how long that went unnoticed and what it
+	// `engine/assets/LocalStore.hpp` carries how long that went unnoticed and what it
 	// looked like. `assetc::Bake` is the one baker; this supplies it the two
 	// paths and nothing else, so a tree baked here and a tree baked by
 	// `assetc --input` are the same tree.
@@ -347,10 +349,10 @@ int main(int argc, char **argv) {
 	// **The log, because `raw/` is flat and a model's sheets are not beside it.**
 	// A `.pmx` names `tex/体.png`; import renamed both the model and the sheet to
 	// hashes in one directory, so the reference cannot be followed through the
-	// folder any more. `cdn::StoreTextureResolver` follows it through the import
+	// folder any more. `engine::assets::StoreTextureResolver` follows it through the import
 	// log instead. Without this every PMX character baked with dangling sheet
 	// names and published a model that arrives, draws, and is untextured.
-	baking.ResolveTexture = cdn::StoreTextureResolver(paths);
+	baking.ResolveTexture = engine::assets::StoreTextureResolver(paths);
 
 	// **Shaders are baked here rather than in `assetc`, and the tier is why.**
 	// `Tool::assetc` is `TIER shared` and so is `Engine::bake`; `libshaderc` is
@@ -394,7 +396,7 @@ int main(int argc, char **argv) {
 	// **The development identity when nobody says otherwise.** A store on this
 	// machine, serving this machine's editor, had a key only so that the same
 	// sixty-four characters could be mistyped in three places -
-	// `cdn::DevelopmentSigningKey` carries what that costs and where it stops.
+	// `engine::assets::DevelopmentSigningKey` carries what that costs and where it stops.
 	// `--key` still overrides it, and `cdn --publish` still requires one.
 	std::optional<engine::assets::SigningKey> signing;
 	if (const auto hex = arguments.Get("key")) {
@@ -404,7 +406,7 @@ int main(int argc, char **argv) {
 			return 2;
 		}
 	} else {
-		signing = cdn::DevelopmentSigningKey();
+		signing = engine::assets::DevelopmentSigningKey();
 		ENGINE_INFO("publishing with the development key - pass --key for an identity of your own");
 	}
 

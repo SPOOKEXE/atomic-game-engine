@@ -1,15 +1,22 @@
+#include "ConvexQuery.hpp"
+#include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/physics/Shapes.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
@@ -61,7 +68,51 @@ namespace engine::physics {
 		ecs::Entity FadedBlocker = ecs::NULL_ENTITY;
 	};
 
+	namespace {
+		// How level a face has to be for a character to walk up it, as the Y of
+		// its unit normal.
+		//
+		// **0.6 is about 53 degrees**, which is steeper than anything a person
+		// walks up and gentle enough that a scree slope in a heightfield is
+		// still ground. Above it the walk is turned along the surface and the
+		// character climbs at the speed it walks; below it the face is left to
+		// gravity, which is what makes a cliff a cliff rather than a ramp.
+		//
+		// Roblox's `MaxSlopeAngle` is the same idea as a per-humanoid figure.
+		// This is the engine's floor under it and can become one the day a
+		// scene needs to disagree.
+		constexpr float MINIMUM_WALKABLE_NORMAL = 0.6f;
+
+		// How far above its feet a character finds its own ground.
+		//
+		// **A step, and the reason it is not a tolerance.** `Humanoid::
+		// GroundTolerance` asks whether the feet are on something and is a
+		// sixth of a stud; this asks what they should be standing on, and a
+		// surface a stud higher than the feet is a kerb to step onto rather
+		// than a wall to stop at. One stud is a fifth of the default character
+		// and about a real step; two - Roblox's - lets a body walk onto things
+		// it visibly should not.
+		constexpr float CHARACTER_STEP_HEIGHT = 1.0f;
+	}
+
 	size_t GroundCharacters(ecs::Store &store) {
+		// **Silent in a world with no solver, exactly as
+		// `ClipCharacterVelocity` below is and for the same reason.** This is
+		// registered by `RegisterCharacterSystems`, which a client installs on
+		// every world it presents - including its own, which is presented and
+		// never simulated and therefore never given a `PhysicsWorld`. The
+		// grounding ray then went through `physics::Raycast`, which asks the
+		// loud accessor, and put `physics has no PhysicsWorld resource` in the
+		// log once per character per tick.
+		//
+		// A character with nothing to stand on is ungrounded, which is the
+		// honest answer for a world with no floors in it as far as this module
+		// is concerned. See `WorldResource.cpp` for why the accessor is loud
+		// where a solver step really is expected.
+		if (!PhysicsWorldRegistered() || store.Resource<PhysicsWorld>() == nullptr) {
+			return 0;
+		}
+
 		size_t tested = 0;
 
 		store.Each<scene::Humanoid>([&](ecs::Entity row, scene::Humanoid &humanoid) {
@@ -116,7 +167,15 @@ namespace engine::physics {
 				store, ray, 0.1f + humanoid.GroundTolerance, spatial::LayerMask::All(), body
 			);
 
-			humanoid.Grounded = hit.has_value();
+			// **A trigger is not a floor**, for `ClipCharacterVelocity`'s
+			// reason: `CanCollide = false` means a body falls through, and a
+			// character reported as standing on water is one that will not
+			// jump and will not fall.
+			const scene::Collider *stoodOn =
+				hit.has_value() ? store.Get<scene::Collider>(hit->Owner) : nullptr;
+
+			humanoid.Grounded = hit.has_value() && (stoodOn == nullptr || !stoodOn->Trigger);
+
 			tested++;
 		});
 
@@ -329,6 +388,541 @@ namespace engine::physics {
 		return woken;
 	}
 
+	// Removes the part of a character's commanded velocity that points into
+	// something solid, so the walk slides along a wall instead of pressing
+	// through it.
+	//
+	// **The bug this exists for.** `scene::StepCharacters` hard-assigns
+	// `Motion::Linear.X/Z` from `MoveDirection * WalkSpeed` every
+	// `PreSimulation`, and its comment defends that at length: replacing rather
+	// than adding is what makes a character controller a controller, and it is
+	// right about responsiveness. What it also does is throw away the contact
+	// impulse the solver produced last tick, unintegrated. The solver's only
+	// remaining answer is position correction, which is capped at
+	// `MAXIMUM_CORRECTION_SPEED` - 3 m/s - and a default `WalkSpeed` of 16 beats
+	// that better than five to one. So a character walked at a wall advances
+	// into it at the difference and comes out the far side, which is the
+	// "you phase through blocks" report. Measured: net advance into a step was
+	// 0.2167 studs a tick against a commanded 0.2667, and the missing 0.05 is
+	// exactly 3 m/s over a sixtieth of a second. At `WalkSpeed` 2 - under the
+	// cap - the same character stops dead at the face and stays there.
+	//
+	// **Why the continuous sweep does not already catch it.** `SweepFastBodies`
+	// admits a body only when its step is long relative to its own thinnest
+	// half-extent (`Continuous.cpp:95`), because that is the tunnelling
+	// question. A walk step is 0.267 against a half-extent of 0.5, so a
+	// character never qualifies - it is not passing *through* the block in one
+	// tick, it is leaning on it for twenty.
+	//
+	// **Here rather than in `scene`, and that is the layering.** `scene` is L7
+	// and cannot see a collider index; this module is L8 and already owns the
+	// character pass. So the intent is formed in `scene` and clipped here,
+	// immediately after, before the integrator has run.
+	//
+	// **Two passes, because a corner is two walls.** Removing the component
+	// along the first normal can leave the velocity pointing into the second;
+	// running the sweep again on the clipped vector is standard
+	// collide-and-slide and is where it stops - a third pass only matters for a
+	// wedge sharper than anything a character can stand in.
+	//
+	// @param store The world.
+	// @return How many characters were clipped.
+	size_t ClipCharacterVelocity(ecs::Store &store) {
+		// **Silent like `WakeMovingCharacters`, and guarded the same way.**
+		// `PreparedWorldMutable` complains once per call by design - a world
+		// with no solver produces no contacts at all, so `WorldResource.cpp`
+		// would rather say so every tick than let one startup line scroll away.
+		// That is right for a step that needs a solver and wrong for this one:
+		// a client's own world is presented and never simulated, and this pass
+		// runs on it through `character.control` like every other. Asking the
+		// loud accessor put `physics has no PhysicsWorld resource` in the log
+		// sixty times a second for a world that was never meant to have one.
+		//
+		// The name lookup first, for the reason that file gives: the typed
+		// lookup would *register* the resource under the compiler's spelling in
+		// the act of finding it missing.
+		if (!PhysicsWorldRegistered()) {
+			return 0;
+		}
+		PhysicsWorld *world = store.ResourceMutable<PhysicsWorld>();
+		if (world == nullptr) {
+			return 0;
+		}
+
+		const spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
+		const std::vector<ColliderRecord> &records = PipelineInternals::StaticRecords(*world);
+		if (records.empty()) {
+			return 0;
+		}
+
+		const float delta = PhysicsStepSeconds(store);
+		if (!(delta > 0.0f)) {
+			return 0;
+		}
+
+		std::vector<uint64_t> &candidates = PipelineInternals::CandidateBuffer(*world);
+		if (candidates.size() < records.size()) {
+			candidates.resize(records.size());
+		}
+
+		const ecs::Store &reader = store;
+		size_t clipped = 0;
+
+		// **The baked shapes, resolved once for the walk.** Without them a
+		// `Hull` or a `Mesh` collider is demoted to a box the size of the part
+		// - `ShapeInstance` says so where it takes a null pointer - and for a
+		// terrain chunk that box is the whole chunk, the full height of it. A
+		// character standing on such a chunk starts every sweep *inside* that
+		// box, which the zero-fraction skip below then throws away: so a
+		// script-built heightfield clipped nothing at all, and a walk into a
+		// mountainside went into the mountainside.
+		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
+
+		// Gathered before the walk, because clipping writes `Motion` on a body
+		// that is usually not the row the humanoid sits on - a rig puts the
+		// humanoid beside the parts. Writing through a second handle while an
+		// `Each` over `Humanoid` is running is the structural change the store
+		// refuses.
+		// The body, plus the three figures the slope projection below needs off
+		// the humanoid it belongs to.
+		struct Walker {
+			ecs::Entity Body;
+			float Height = 0.0f;
+			float GroundTolerance = 0.0f;
+		};
+
+		std::vector<Walker> bodies;
+		store.Each<const scene::Humanoid>([&](ecs::Entity row, const scene::Humanoid &humanoid) {
+			if (!humanoid.Enabled || scene::IsDead(humanoid)) {
+				return;
+			}
+			bodies.push_back(
+				Walker{
+					humanoid.RootPart == ecs::NULL_ENTITY ? row : humanoid.RootPart,
+					humanoid.Height,
+					humanoid.GroundTolerance,
+				}
+			);
+		});
+
+		for (const auto &[body, height, tolerance] : bodies) {
+			const scene::Transform *placement = reader.Get<scene::Transform>(body);
+			const scene::Collider *collider = reader.Get<scene::Collider>(body);
+			scene::Motion *motion = store.GetMutable<scene::Motion>(body);
+			if (placement == nullptr || collider == nullptr || motion == nullptr) {
+				continue;
+			}
+			if (collider->Trigger || !reader.Has<scene::Simulated>(body)) {
+				continue;
+			}
+
+			// **The walk is turned along the ground before it is swept against
+			// anything**, and its absence is why a character could not climb a
+			// hill. `scene::StepCharacters` writes the commanded speed into
+			// `Linear.X` and `Linear.Z` and leaves `Linear.Y` to gravity, which
+			// is right on a floor and wrong on a slope: the horizontal drive
+			// pushes the body *into* the rising ground every tick, and the only
+			// thing lifting it out is contact resolution, which is capped. On
+			// anything steeper than about a quarter the body loses a little
+			// ground each tick, and once its centre is under the surface there
+			// is no contact at all - a triangle soup is a surface and not a
+			// solid - so it falls through the world.
+			//
+			// Projecting the walk onto the plane the feet are standing on is
+			// the standard answer and it is what makes a slope a slope: the
+			// same commanded speed becomes an up-slope velocity, so a character
+			// climbs at the pace it walks and descends without leaving the
+			// ground.
+			//
+			// **Only while grounded, and only on ground worth standing on.** A
+			// face steeper than `MINIMUM_WALKABLE_NORMAL` is left to gravity,
+			// which is what makes a cliff a cliff rather than a ramp; and a
+			// body that is not grounded is falling or jumping, where the
+			// vertical is nobody's business but the integrator's.
+			// **The ground under the feet, found once and used twice: to put the
+			// body on it, and to turn the walk along it.**
+			//
+			// Its absence is why a character could not climb a hill.
+			// `scene::StepCharacters` writes the commanded speed into
+			// `Linear.X` and `Linear.Z` and leaves the vertical to gravity,
+			// which is right on a floor and wrong on a slope: the drive pushes
+			// the body *into* the rising ground every tick and the only thing
+			// lifting it out is contact resolution, which is capped. On
+			// anything steeper than about a quarter the body loses a little
+			// each tick, and once its centre is under the surface there is no
+			// contact at all - a triangle soup is a surface and not a solid -
+			// so it walks along inside the hill and then out of the world.
+			//
+			// **Not while rising.** A jump is the one case where the vertical is
+			// deliberately not the ground's, and a snap on the frame it started
+			// would put the body straight back down.
+			{
+				const core::Vector3 feet =
+					placement->Frame.Position - core::Vector3{0.0f, height * 0.5f, 0.0f};
+
+				// **From a step above the feet, which is what makes it a step
+				// rather than a ground test.** `GroundCharacters` asks whether
+				// the feet are *on* something and casts from just above them;
+				// this asks what the feet should be on, and ground half a stud
+				// higher than they are is a kerb to walk up rather than a wall.
+				//
+				// The downward reach is the step plus this tick's travel,
+				// because that is how far the surface can have moved under the
+				// body since the last one - which is what keeps a character on
+				// a descending slope instead of launching off every rise.
+				const float travelled =
+					core::Vector3{motion->Linear.X, 0.0f, motion->Linear.Z}.Magnitude() * delta;
+				const float below = tolerance + travelled;
+
+				const core::Ray under{
+					feet + core::Vector3{0.0f, CHARACTER_STEP_HEIGHT, 0.0f}, core::Vector3{0.0f, -1.0f, 0.0f}
+				};
+				const auto ground = RaycastThroughPortals(
+					store, under, CHARACTER_STEP_HEIGHT + below, spatial::LayerMask::All(), body
+				);
+
+				// **A trigger is not a floor.** `CanCollide = false` is
+				// `Collider::Trigger`, which means "report the contact and
+				// apply no impulse" - so a body falls through one, and a
+				// character that snapped onto one would stand on it while
+				// everything else fell past. The case that found it is water: a
+				// sea slab is a trigger by construction, and a walker ended up
+				// standing on the surface of it.
+				const scene::Collider *floorCollider =
+					ground.has_value() ? reader.Get<scene::Collider>(ground->Owner) : nullptr;
+				const bool solidFloor =
+					ground.has_value() && (floorCollider == nullptr || !floorCollider->Trigger);
+
+				if (solidFloor) {
+					const core::Vector3 walk{motion->Linear.X, 0.0f, motion->Linear.Z};
+					const float speed = walk.Magnitude();
+					const core::Vector3 &face = ground->Normal;
+
+					// The commanded walk with the part that points into the
+					// surface taken out of it: collide-and-slide against the
+					// ground rather than against a wall.
+					const core::Vector3 along = walk - face * walk.Dot(face);
+
+					const float surface = feet.Y + CHARACTER_STEP_HEIGHT - ground->Distance;
+					const float lift = surface - feet.Y;
+
+					// **A jump is the one case that is left alone**, and it is
+					// recognised by where the body is rather than by a flag:
+					// rising while the ground is at or below the feet is a
+					// jump, and snapping it back down would be a character that
+					// cannot jump - which is exactly what
+					// `server.replication`'s jump case caught, because
+					// `StepCharacters` writes the jump speed on the tick the
+					// feet are still touching and `lift` is zero there.
+					//
+					// Rising while the surface is *above* the feet is the
+					// solver ejecting a body from geometry it is buried in, and
+					// putting the feet on top is the answer to that rather than
+					// something to stand out of the way of.
+					const bool jumping = motion->Linear.Y > 0.0f && lift < 1e-3f;
+
+					if (face.Y > MINIMUM_WALKABLE_NORMAL && !jumping) {
+						// **The feet are put on the face.** Position and not
+						// force, which is what every character controller does
+						// and why one can climb a stair that a crate cannot:
+						// the solver's correction is capped at a speed and a
+						// slope is not a speed.
+						if (std::abs(lift) > 1e-4f) {
+							if (scene::Transform *moved = store.GetMutable<scene::Transform>(body)) {
+								moved->Frame.Position.Y += lift;
+							}
+						}
+
+						// **And the walk follows the face**, rescaled to the
+						// commanded speed rather than left as its horizontal
+						// shadow, or a character walks slower the steeper the
+						// ground - which reads as the hill being sticky.
+						const float length = along.Magnitude();
+						if (speed > 1e-4f && length > 1e-4f) {
+							const core::Vector3 slope = along * (speed / length);
+							motion->Linear.X = slope.X;
+							motion->Linear.Z = slope.Z;
+						}
+
+						// The vertical is the snap's now. Left as gravity it
+						// would accumulate a fall the snap has to undo every
+						// tick, which is the jitter this replaces.
+						motion->Linear.Y = 0.0f;
+					} else if (!jumping) {
+						// **Too steep to walk up, so it is not walked into.**
+						// The drive keeps only what runs across the face and
+						// the vertical stays gravity's, so a character pressing
+						// into a cliff slides down it rather than burrowing
+						// through. Not rescaled: pushing into a wall should
+						// cost speed.
+						if (speed > 1e-4f) {
+							motion->Linear.X = along.X;
+							motion->Linear.Z = along.Z;
+						}
+
+						// **And back out of the face, along the face.**
+						//
+						// Projecting the walk is not enough on its own, and the
+						// reason is at the top of this function: a character's
+						// velocity is hard-assigned every tick, so the solver's
+						// contact impulse is thrown away unintegrated and the
+						// only thing left resolving an overlap is position
+						// correction, capped at `MAXIMUM_CORRECTION_SPEED`. A
+						// body sliding across a hillside at ten studs a second
+						// gains depth faster than three metres a second takes
+						// it away, and the projection is onto the face under
+						// the *feet* while the face it is pressing into is the
+						// one in front - so a little is left pointing in every
+						// tick and it accumulates.
+						//
+						// What that cost was a character walking into a
+						// mountain and out of the world. The probe above is a
+						// ray from a step over the feet: once the feet are a
+						// full step under the surface, the ray starts *inside*
+						// the hill, points down, and finds nothing - so the
+						// slide stops, the ground is reported as absent, and
+						// the body falls through a solid landscape for ever.
+						// Measured, it took about ninety seconds of walking.
+						//
+						// **Along the normal and never straight up**, which is
+						// what separates this from the snap above: a push along
+						// the face of a cliff moves a body *away* from the
+						// cliff, where a vertical one would walk it up. The
+						// distance is the vertical burial scaled by the face's
+						// own tilt, which is that burial measured perpendicular
+						// to the surface - the whole overlap on flat ground,
+						// and nothing at all on a vertical wall, where a
+						// downward ray has nothing to say anyway.
+						//
+						// **Only ever outward.** A negative lift is a body
+						// above the surface, and pulling it down onto a slope
+						// it cannot stand on is the sticky cliff this is meant
+						// to prevent.
+						if (lift > 1e-4f) {
+							if (scene::Transform *moved = store.GetMutable<scene::Transform>(body)) {
+								moved->Frame.Position = moved->Frame.Position + face * (lift * face.Y);
+							}
+						}
+					}
+				}
+
+				// **And what is in front, which the probe above cannot see.**
+				// A downward ray finds the floor and says nothing about the
+				// cliff the floor runs into: walking at a vertical face, the
+				// ground under the feet is walkable right up to the moment the
+				// body is inside the hill. The sweep further down would catch
+				// it and cannot - `SweepConvex` is a convex query and a
+				// triangle soup is not convex, so a mesh collider is the one
+				// shape it has no answer for.
+				//
+				// A ray does have an answer for one, so this asks the question
+				// a ray can: is there a face across the walk within this tick's
+				// travel. It is a line and not a box, so it misses a pillar
+				// narrower than the body - but a hillside is not narrow, and
+				// this is the difference between a character stopping at a
+				// mountain and walking into it.
+				const core::Vector3 walk{motion->Linear.X, 0.0f, motion->Linear.Z};
+				const float walking = walk.Magnitude();
+				if (walking > 1e-4f) {
+					const core::Vector3 heading = walk * (1.0f / walking);
+
+					// From the knee rather than the centre, so a kerb the step
+					// above would climb is not read as a wall.
+					const core::Vector3 knee =
+						placement->Frame.Position -
+						core::Vector3{0.0f, height * 0.5f - CHARACTER_STEP_HEIGHT * 1.5f, 0.0f};
+
+					const auto ahead = RaycastThroughPortals(
+						store,
+						core::Ray{knee, heading},
+						walking * delta + collider->Extent.X,
+						spatial::LayerMask::All(),
+						body
+					);
+
+					const scene::Collider *wall =
+						ahead.has_value() ? reader.Get<scene::Collider>(ahead->Owner) : nullptr;
+
+					if (ahead.has_value() && (wall == nullptr || !wall->Trigger) &&
+						ahead->Normal.Y <= MINIMUM_WALKABLE_NORMAL) {
+						const core::Vector3 across = walk - ahead->Normal * walk.Dot(ahead->Normal);
+						motion->Linear.X = across.X;
+						motion->Linear.Z = across.Z;
+					}
+				}
+			}
+
+			const ColliderRecord self{body, collider->Layer, collider->Mask};
+			bool touched = false;
+
+			for (int pass = 0; pass < 2; pass++) {
+				// **Horizontal only, and that is not a simplification.** The
+				// vertical axis already works: gravity pulls, the solver's
+				// contact resolves, and a character lands and rests correctly
+				// without this pass existing. Sweeping the full velocity asks
+				// the question anyway, and a body resting exactly flush on a
+				// slab is the case a sweep answers worst - measured against a
+				// 240-stud floor it returned the slab's *Z face*, normal
+				// (0, 0.081, 0.997), at fraction 0.4967, for a character
+				// standing on its top and walking along it. Clipping on that
+				// stops the walk against the ground it is standing on.
+				//
+				// The reported bug is horizontal: a walk driven into a block at
+				// a speed position correction cannot answer. So this asks only
+				// the horizontal question and leaves the vertical to the parts
+				// of the pipeline that already get it right.
+				const core::Vector3 travel{motion->Linear.X * delta, 0.0f, motion->Linear.Z * delta};
+				const float distance = travel.Magnitude();
+				if (!(distance > 1e-5f)) {
+					break;
+				}
+
+				core::CFrame ahead = placement->Frame;
+				ahead.Position = placement->Frame.Position + travel;
+
+				const core::AABB envelope =
+					ShapeWorldBounds(*collider, placement->Frame).Union(ShapeWorldBounds(*collider, ahead));
+
+				const spatial::QueryResult found =
+					spatial::OverlapBox(index, envelope, collider->Mask, candidates);
+				if (found.Written == 0) {
+					break;
+				}
+
+				const ShapeInstance moving{placement->Frame, collider->Extent, collider->Shape};
+
+				// The earliest hit, tie-broken by entity id for the reason
+				// `SweepFastBodies` gives: the grid walk's order is a property
+				// of the index rather than of the scene, so a body in a corner
+				// must not be clipped against whichever wall was reached first.
+				float earliest = 1.0f;
+				bool blocked = false;
+				core::Vector3 normal;
+				ecs::Entity against;
+
+				for (size_t at = 0; at < found.Written; at++) {
+					const ColliderRecord &other = records[static_cast<size_t>(candidates[at])];
+					if (other.Owner == body || !PairAdmitted(self, other)) {
+						continue;
+					}
+
+					const scene::Transform *placed = reader.Get<scene::Transform>(other.Owner);
+					const scene::Collider *shape = reader.Get<scene::Collider>(other.Owner);
+					if (placed == nullptr || shape == nullptr || shape->Trigger) {
+						continue;
+					}
+
+					const collision::ConvexHull *hull = nullptr;
+					const collision::TriangleMesh *soup = nullptr;
+					if (baked != nullptr) {
+						if (shape->Shape == scene::ShapeKind::Hull) {
+							hull = baked->FindHull(shape->Geometry);
+						} else if (shape->Shape == scene::ShapeKind::Mesh) {
+							soup = baked->FindMesh(shape->Geometry);
+						}
+					}
+
+					const ShapeInstance fixed{placed->Frame, shape->Extent, shape->Shape, hull, soup};
+					const ConvexSweep hit = SweepConvex(moving, travel, fixed);
+					if (!hit.Hit) {
+						continue;
+					}
+
+					// **A hit at fraction zero is an overlap that already
+					// existed, and its normal cannot be trusted.** A character
+					// resting on a floor penetrates it by the solver's slop
+					// every tick, so the sweep starts inside it and reports
+					// contact immediately - with whichever face of the slab the
+					// algorithm reached, which measured as the floor's *-X side*
+					// while the character walked +X along the top of it. Clipping
+					// on that cancels the walk against the ground it is standing
+					// on, and a character that could not phase through a wall
+					// could not move at all.
+					//
+					// Resolving an existing overlap is position correction's
+					// job. What this pass is for is the other question: is the
+					// step about to *enter* something. That is a hit strictly
+					// along the travel, so a zero fraction is skipped rather
+					// than taken as the earliest.
+					if (hit.Fraction <= 1e-4f) {
+						continue;
+					}
+
+					// **Ground is not a wall, and telling them apart is what
+					// keeps a walk moving.** Since v0.19 a sweep can see a
+					// triangle mesh - before that a mesh collider was demoted to
+					// its bound and this pass never hit terrain at all - and the
+					// first thing it sees is the ground the character is walking
+					// *on*: a surface rising a few centimetres over one step is
+					// a hit at a real fraction with a floor's normal. Clipping
+					// on that stopped a character three studs from its spawn.
+					//
+					// What the ground does to a walk is handled above, by the
+					// projection onto the face and the snap onto it. This pass
+					// is for the other question: is the step about to enter
+					// something it has to go around.
+					if (hit.Normal.Y > MINIMUM_WALKABLE_NORMAL) {
+						continue;
+					}
+
+					if (!blocked || hit.Fraction < earliest ||
+						(hit.Fraction == earliest && other.Owner.Id < against.Id)) {
+						earliest = hit.Fraction;
+						normal = hit.Normal;
+						against = other.Owner;
+						blocked = true;
+					}
+				}
+
+				if (!blocked) {
+					break;
+				}
+
+				// **Flattened, so that a sloped face cannot take the fall
+				// away.** A normal with any Y in it would otherwise remove part
+				// of the downward velocity too, which is a character that stops
+				// falling because it brushed a wall.
+				const core::Vector3 flat{normal.X, 0.0f, normal.Z};
+				const float length = flat.Magnitude();
+				if (!(length > 1e-4f)) {
+					// Purely vertical: a floor or a ceiling, and neither is this
+					// pass's business.
+					break;
+				}
+				const core::Vector3 wall = flat / length;
+
+				// **Only the part pointing *into* the surface.** A normal the
+				// velocity is already moving away from is a surface being left,
+				// and removing anything there would stop a character walking out
+				// of a doorway it has just entered.
+				const core::Vector3 horizontal{motion->Linear.X, 0.0f, motion->Linear.Z};
+				const float into = horizontal.Dot(wall);
+				if (into >= 0.0f) {
+					break;
+				}
+
+				const core::Vector3 slid = horizontal - wall * into;
+				motion->Linear.X = slid.X;
+				motion->Linear.Z = slid.Z;
+				touched = true;
+			}
+
+			if (touched) {
+				clipped++;
+			}
+		}
+
+		return clipped;
+	}
+
+	void RegisterCharacterComponents() {
+		// Named `physics.` rather than left to `TypeNameOf`, for rule 4's
+		// reason: the automatic name is the compiler's spelling and this type
+		// lives in an anonymous namespace, so the spelling is neither stable
+		// across compilers nor meaningful to a reader of a snapshot.
+		ecs::Components::Register<PoppercamState>("physics.PoppercamState");
+	}
+
 	void RegisterCharacterSystems(ecs::Scheduler &scheduler) {
 		// **Before everything else in the phase, because everything else needs
 		// the link it makes.** `Player.Character = model` is the assignment a
@@ -393,6 +987,14 @@ namespace engine::physics {
 			// per tick exactly as `Simulation` does, so moving it here costs the
 			// determinism nothing and buys the ordering everything.
 			(void)scene::StepCharacters(store, static_cast<float>(store.Time().Delta));
+
+			// **Immediately after, and that ordering is the whole fix.**
+			// `StepCharacters` is the last writer of the walk before the
+			// integrator, and it writes an intent rather than a force - so
+			// anything solid in the way has to be taken out of that intent
+			// here, before the integrator acts on it. See
+			// `ClipCharacterVelocity`.
+			(void)ClipCharacterVelocity(store);
 		});
 
 		// **In `PreRender`, beside `ResolveAttachments`, and on whatever machine

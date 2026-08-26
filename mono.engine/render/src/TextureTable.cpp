@@ -1,3 +1,5 @@
+#include "GpuHeap.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/render/DefaultTexture.hpp>
@@ -49,6 +51,15 @@ namespace engine::render {
 			return false;
 		}
 
+		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+		NearestSampler = SDL_CreateGPUSampler(Device, &sampler);
+		if (NearestSampler == nullptr) {
+			ENGINE_ERROR("texture table: pixel sampler: {}", SDL_GetError());
+			return false;
+		}
+
 		// **Uploaded here rather than lazily**, so the first frame that draws an
 		// untextured part costs a lookup and not a create-and-copy - and so a
 		// device that cannot make a 64-pixel texture fails at start-up rather
@@ -90,16 +101,19 @@ namespace engine::render {
 	void TextureTable::Shutdown() {
 		if (Device != nullptr) {
 			for (const auto &[name, entry] : Textures) {
-				SDL_ReleaseGPUTexture(Device, entry.Texture);
+				gpu::ReleaseTexture(Device, entry.Texture);
 			}
 			if (DefaultHandle != nullptr) {
-				SDL_ReleaseGPUTexture(Device, DefaultHandle);
+				gpu::ReleaseTexture(Device, DefaultHandle);
 			}
 			if (MissingHandle != nullptr) {
-				SDL_ReleaseGPUTexture(Device, MissingHandle);
+				gpu::ReleaseTexture(Device, MissingHandle);
 			}
 			if (SharedSampler != nullptr) {
 				SDL_ReleaseGPUSampler(Device, SharedSampler);
+			}
+			if (NearestSampler != nullptr) {
+				SDL_ReleaseGPUSampler(Device, NearestSampler);
 			}
 		}
 
@@ -108,6 +122,7 @@ namespace engine::render {
 		DefaultHandle = nullptr;
 		MissingHandle = nullptr;
 		SharedSampler = nullptr;
+		NearestSampler = nullptr;
 		UploadedBytes = 0;
 		Device = nullptr;
 	}
@@ -158,7 +173,7 @@ namespace engine::render {
 		info.num_levels = levels;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		SDL_GPUTexture *texture = SDL_CreateGPUTexture(Device, &info);
+		SDL_GPUTexture *texture = gpu::CreateTexture(Device, &info);
 		if (texture == nullptr) {
 			ENGINE_ERROR("texture table: {}: {}", label, SDL_GetError());
 			return nullptr;
@@ -168,10 +183,10 @@ namespace engine::render {
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = static_cast<uint32_t>(uploadBytes);
 
-		SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 		if (transfer == nullptr) {
 			ENGINE_ERROR("texture table: transfer buffer: {}", SDL_GetError());
-			SDL_ReleaseGPUTexture(Device, texture);
+			gpu::ReleaseTexture(Device, texture);
 			return nullptr;
 		}
 
@@ -206,7 +221,7 @@ namespace engine::render {
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
-		SDL_ReleaseGPUTransferBuffer(Device, transfer);
+		gpu::ReleaseTransferBuffer(Device, transfer);
 
 		bytes = uploadBytes;
 		return texture;
@@ -243,6 +258,22 @@ namespace engine::render {
 		);
 	}
 
+	uint64_t TextureTable::AnimationSignature(double seconds) const {
+		uint64_t signature = 0;
+		for (const auto &[name, entry] : Textures) {
+			if (entry.FlipbookSide <= 1 || entry.FlipbookFrames <= 1) {
+				continue;
+			}
+
+			const uint64_t frame = FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds);
+			const uint64_t word = static_cast<uint64_t>(name) << 32 | frame;
+			// Commutative because the catalogue is an unordered map. The name is
+			// part of every term, so two sheets on the same frame remain distinct.
+			signature ^= word * 0x9E3779B97F4A7C15ull + 0xD6E8FEB86659FD93ull;
+		}
+		return signature;
+	}
+
 	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image) {
 		if (Device == nullptr || !name.IsValid() || !image.IsValid()) {
 			return false;
@@ -269,7 +300,7 @@ namespace engine::render {
 		// Release the old texture only after the replacement upload succeeds.
 		const auto existing = Textures.find(name.Id());
 		if (existing != Textures.end()) {
-			SDL_ReleaseGPUTexture(Device, existing->second.Texture);
+			gpu::ReleaseTexture(Device, existing->second.Texture);
 
 			// **The old size comes off before the new one goes on**, which it
 			// did not before: the total only ever grew, so a session that
@@ -340,7 +371,7 @@ namespace engine::render {
 
 		const auto existing = Textures.find(name.Id());
 		if (existing != Textures.end()) {
-			SDL_ReleaseGPUTexture(Device, existing->second.Texture);
+			gpu::ReleaseTexture(Device, existing->second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
 			existing->second = entry;
 		} else {
@@ -389,7 +420,7 @@ namespace engine::render {
 			return false;
 		}
 
-		SDL_ReleaseGPUTexture(Device, found->second.Texture);
+		gpu::ReleaseTexture(Device, found->second.Texture);
 		UploadedBytes -= std::min(UploadedBytes, found->second.Bytes);
 		Textures.erase(found);
 		return true;

@@ -46,6 +46,8 @@
 //
 // @tier client
 
+#include <engine/control/Server.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <cstddef>
@@ -221,6 +223,11 @@ namespace studio {
 		// Whether the ground grid is drawn.
 		bool ShowGrid = true;
 
+		// Whether authored and running particle emitters are submitted to Studio
+		// viewports. This changes only the editor's view, never the saved Enabled
+		// property or a running world's simulation state.
+		bool ShowParticleEmitters = true;
+
 		// Whether a dragged handle snaps at all.
 		//
 		// **These three are `Editor::SnapEnabled`, `SnapDistance` and
@@ -264,7 +271,14 @@ namespace studio {
 		// **Not whether it is listening.** A port is a preference and an open
 		// socket is a decision somebody makes while working - `SECURITY.md` is
 		// why the second is never restored from a file.
-		int ControlPort = 8720;
+		//
+		// **The engine's constant rather than a number written here**, which is
+		// the mismatch v0.19 half-fixed: `Editor::ControlPortField` was changed
+		// to read `DEFAULT_PORT` and this line, which overwrites it from a saved
+		// configuration, was left at 8720. So a fresh editor's panel offered a
+		// port `--mcp-port`'s help, `.mcp.json` and `RUNNING.md` all disagreed
+		// with, and somebody who pressed Start got a bridge talking to nothing.
+		int ControlPort = engine::control::DEFAULT_PORT;
 
 		// Which of the panels somebody keeps open.
 		//@{
@@ -274,6 +288,17 @@ namespace studio {
 		bool ShowAssets = false;
 		bool ShowControl = false;
 		//@}
+
+		// The frame graph's auto-pause rules, armed at start-up.
+		//
+		// **Kept because a rule is written for a spike that has not happened
+		// yet.** Somebody arms "pump events over 2 ms" precisely because they
+		// cannot make the spike happen on demand, and a rule that has to be
+		// retyped every session is one that is not armed when the spike
+		// arrives.
+		//
+		// @since v0.19
+		std::vector<engine::core::FrameTrigger> FrameGraphRules;
 
 		// Which of the shipped worlds a new game opens with, by key.
 		//
@@ -291,16 +316,19 @@ namespace studio {
 		// catalogue's own defaults rather than to nothing.
 		std::vector<std::string> DefaultWorlds;
 
-		// The frame ceiling and the four rates under it, in hertz. See
+		// The four frame rates, in hertz. See
 		// `Editor::InterfaceActiveHz` for what each one bounds and why they
 		// combine as a minimum rather than as separate clocks.
 		//@{
-		float FrameCap = 120.0f;
 		float InterfaceActiveHz = 120.0f;
 		float InterfaceIdleHz = 20.0f;
 		float RendererFocusedHz = 120.0f;
 		float RendererUnfocusedHz = 10.0f;
 		//@}
+
+		// Bypasses every adaptive frame-rate ceiling without discarding the four
+		// configured rates. Turning it off restores those rates immediately.
+		bool Uncapped = false;
 
 		// Whether `DefaultWorlds` came from a file rather than from nothing.
 		// See the load path for why absent and empty are different answers.

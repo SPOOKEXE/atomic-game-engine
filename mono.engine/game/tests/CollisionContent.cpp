@@ -335,7 +335,7 @@ TEST_CASE("a world gets the built-ins before any content exists", "[game][collis
 }
 
 TEST_CASE("a world holding baked shapes can still be snapshotted", "[game][collision]") {
-	// **The `client::DrawList` trap, one resource along.** `Store::Save` refuses
+	// **The `engine::render::DrawList` trap, one resource along.** `Store::Save` refuses
 	// a resource with no serialisation rather than writing bytes that cannot be
 	// read back, and the studio snapshots a universe every time Play is pressed
 	// - so the moment every world got collision shapes, every snapshot failed.

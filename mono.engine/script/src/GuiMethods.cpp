@@ -42,10 +42,9 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-
 #include <engine/ecs/Classes.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/script/ScriptCall.hpp>
 
 #include <algorithm>
 #include <array>
@@ -278,7 +277,7 @@ namespace engine::script {
 		// nothing. What closing it needs is a topbar: a non-zero `TopInset` that
 		// something paints, and then this pair is the transparency of that paint.
 
-		constexpr std::array<InstanceMethod, 4> METHODS{{
+		constexpr std::array<InstanceMethod, 4> GUI_METHODS{{
 			{"GetGuiObjectsAtPosition", GetGuiObjectsAtPosition},
 
 			{"TweenPosition", TweenPosition},
@@ -288,6 +287,6 @@ namespace engine::script {
 	}
 
 	std::span<const InstanceMethod> GuiInstanceMethods() {
-		return METHODS;
+		return GUI_METHODS;
 	}
 }

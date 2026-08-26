@@ -46,6 +46,15 @@
 
 namespace engine::world {
 
+	// The catch-up ceiling for a host that must keep presenting frames.
+	//
+	// One slow simulation tick already consumed more than its interval. Running
+	// several more before presentation multiplies the stall and feeds the next
+	// frame an even larger elapsed time. Interactive hosts therefore advance at
+	// most one owed tick per driver iteration and count the rest as dropped. A
+	// headless host keeps `UniverseSettings`' wider default for transient stalls.
+	inline constexpr int INTERACTIVE_CATCH_UP_TICKS = 1;
+
 	// How a universe spends its host's workers.
 	//
 	// @since v0.2

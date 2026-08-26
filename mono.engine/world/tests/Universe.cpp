@@ -294,6 +294,7 @@ TEST_CASE("catch-up is capped rather than unbounded", "[world]") {
 	universe.Tick(10.0f);
 
 	REQUIRE(universe.StatisticsOf(id).Ticks == 4);
+	CHECK(universe.StatisticsOf(id).DroppedTicks > 500);
 }
 
 TEST_CASE("universe tuning can change between driver ticks", "[world]") {
@@ -388,12 +389,20 @@ TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]"
 		return;
 	}
 
+	struct RecordedTree {
+		std::vector<std::string> Names;
+		std::vector<std::pair<std::string, std::string>> Edges;
+	};
+
 	const auto tickWith = [](size_t worlds) {
 		Universe universe;
 		for (size_t index = 0; index < worlds; index++) {
 			const WorldId id = universe.Create(Named(("world.branch." + std::to_string(index)).c_str()));
-			universe.Enter(id, [](Store &store, Scheduler &) {
-				store.Set<Counter>(store.Create(), Counter{});
+			universe.Enter(id, [](Store &store, Scheduler &systems) {
+				const Entity entity = store.Create();
+				store.Set<Counter>(entity, Counter{});
+				store.Set<Step>(entity, Step{});
+				systems.Add("advance", Phase::Simulation, Advance);
 			});
 		}
 
@@ -402,30 +411,47 @@ TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]"
 		universe.Tick(1.0f / 60.0f);
 		engine::core::FrameGraph::EndFrame();
 
-		std::vector<std::string> names;
-		for (const auto &span : engine::core::FrameGraph::Spans()) {
-			names.emplace_back(span.Name);
+		RecordedTree recorded;
+		const auto &spans = engine::core::FrameGraph::Spans();
+		for (size_t index = 0; index < spans.size(); index++) {
+			recorded.Names.emplace_back(spans[index].Name);
+			if (spans[index].Parent < index) {
+				recorded.Edges.emplace_back(spans[spans[index].Parent].Name, spans[index].Name);
+			}
 		}
 		engine::core::FrameGraph::SetEnabled(false);
-		return names;
+		return recorded;
 	};
 
 	const auto has = [](const std::vector<std::string> &names, std::string_view wanted) {
 		return std::find(names.begin(), names.end(), wanted) != names.end();
 	};
+	const auto hasEdge = [](const RecordedTree &tree, std::string_view parent, std::string_view child) {
+		return std::find(
+				   tree.Edges.begin(), tree.Edges.end(), std::pair<std::string, std::string>{parent, child}
+			   ) != tree.Edges.end();
+	};
 
 	// One world: on this thread, so everything it contains keeps its spans and
 	// the pool is free for whatever it dispatches.
-	const std::vector<std::string> alone = tickWith(1);
-	CHECK(has(alone, "worlds (serial)"));
-	CHECK_FALSE(has(alone, "worlds (pinned workers)"));
+	const RecordedTree alone = tickWith(1);
+	CHECK(has(alone.Names, "worlds (driver)"));
+	CHECK_FALSE(has(alone.Names, "worlds (serial)"));
+	CHECK_FALSE(has(alone.Names, "worlds (pinned workers)"));
 
 	// Two: the lanes now have something to overlap, which is the case they are
 	// for. Their spans arrive as one reported total, because a worker cannot
 	// enter the driver's frame graph.
-	const std::vector<std::string> pair = tickWith(2);
-	CHECK(has(pair, "worlds (pinned workers)"));
-	CHECK_FALSE(has(pair, "worlds (serial)"));
+	const RecordedTree pair = tickWith(2);
+	CHECK(has(pair.Names, "worlds (pinned workers)"));
+	CHECK_FALSE(has(pair.Names, "worlds (serial)"));
+	CHECK(hasEdge(pair, "worlds (pinned workers)", "world.branch.0"));
+	CHECK(hasEdge(pair, "world.branch.0", "ecs.systems"));
+	CHECK(hasEdge(pair, "ecs.systems", "pre-simulation"));
+	CHECK(hasEdge(pair, "ecs.systems", "simulation"));
+	CHECK(hasEdge(pair, "ecs.systems", "post-simulation"));
+	CHECK(hasEdge(pair, "ecs.systems", "pre-render"));
+	CHECK(hasEdge(pair, "simulation", "advance"));
 }
 
 TEST_CASE("world ticks keep stable assigned workers", "[world]") {

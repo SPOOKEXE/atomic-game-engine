@@ -261,9 +261,168 @@ TEST_CASE("a pass that changed nothing posts nothing", "[client][sounds]") {
 		stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
 	}
 
-	// One `SetListener` per pass and nothing else: the ear may have moved and
-	// the mixer is the only thing that knows it did not.
-	CHECK(mixer.Commands().Pending() == settled + 8);
+	// **Nothing at all, including the listener.** `SetListener` used to be
+	// posted unconditionally, which was one command per world per frame saying
+	// where the ear already was - the one place in this file that broke the rule
+	// the rest of it is built around.
+	CHECK(mixer.Commands().Pending() == settled);
+}
+
+// --- a full queue, and what each kind of refusal owes -----------------------
+//
+// **The failure these are about is not the drop, it is the bookkeeping.** A
+// command queue that is briefly full is an ordinary condition with a deadline on
+// the far side of it; a stage that recorded the refused command as landed turns
+// that transient into a permanently silent voice, a fader stuck at the old
+// level, or a node nothing can ever remove. `audio/Commands.hpp` names the three
+// classes.
+
+namespace {
+	// Fills the mixer's command queue, leaving `spare` slots.
+	//
+	// The commands name no node, so applying them does nothing - which is what
+	// makes this a test of the queue being full rather than of what was in it.
+	void Flood(AudioMixer &mixer, size_t spare = 0) {
+		auto &queue = mixer.Commands();
+		while (queue.Free() > spare) {
+			engine::audio::Command filler;
+			filler.Kind = engine::audio::CommandKind::SetGain;
+			REQUIRE(queue.Post(filler));
+		}
+	}
+
+	// Empties it again, the way the device thread would.
+	void Drain(AudioMixer &mixer) {
+		SampleBuffer block(mixer.Format(), 64);
+		mixer.Render(block);
+	}
+}
+
+TEST_CASE("a voice the queue had no room for is built by the next pass", "[client][sounds]") {
+	Store store("sounds_test.refused_open");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+
+	// Five commands short of what a non-positional voice needs, so the
+	// reservation refuses and - this is the half that matters - posts none of
+	// them. A stage that posted until it ran out would have left a player wired
+	// to nothing, with the id of every node in it already spent.
+	Flood(mixer, 4);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Count() == 0);
+	CHECK(stage.Find(sound) == nullptr);
+	CHECK(stage.Refused() > 0);
+
+	Drain(mixer);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Find(sound) != nullptr);
+
+	// And it is a whole voice rather than the remains of the refused one.
+	float loudest = 0.0f;
+	SampleBuffer block(mixer.Format(), 512);
+	for (int rendered = 0; rendered < 32; ++rendered) {
+		block.Silence();
+		mixer.Render(block);
+		loudest = std::max(loudest, block.Peak());
+	}
+	CHECK(loudest > 0.0f);
+}
+
+TEST_CASE("a refused gain is posted again rather than coalesced away", "[client][sounds]") {
+	Store store("sounds_test.refused_gain");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	store.GetMutable<engine::scene::Sound>(sound)->Volume = 0.75f;
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	Drain(mixer);
+	REQUIRE(stage.Find(sound) != nullptr);
+	REQUIRE(stage.Find(sound)->Level == 0.75f);
+
+	store.GetMutable<engine::scene::Sound>(sound)->Volume = 0.25f;
+
+	Flood(mixer);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+
+	// **The last-posted value has not moved**, which is the whole repair: the
+	// compare next pass still differs, so the gain is posted again. Recording
+	// `0.25` here would leave the fader at `0.75` for the life of the world
+	// with every side of the system reporting it as correct.
+	CHECK(stage.Find(sound)->Level == 0.75f);
+
+	Drain(mixer);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Find(sound)->Level == 0.25f);
+
+	mixer.ApplyPending();
+	const engine::audio::Node *fader = mixer.Graph().Find(stage.Find(sound)->Fader);
+	REQUIRE(fader != nullptr);
+	CHECK(fader->Gain == 0.25f);
+}
+
+TEST_CASE("a refused start is retried until the voice is audible", "[client][sounds]") {
+	Store store("sounds_test.refused_play");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+
+	// Exactly the opening burst and nothing more: five commands build the
+	// chain, and the `SetGain`, `SetLooping` and `Play` that follow it are
+	// refused. That is the worst of the three - a fully built, correctly wired,
+	// permanently silent voice that nothing downstream could ever notice.
+	Flood(mixer, 5);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Find(sound) != nullptr);
+	CHECK_FALSE(stage.Find(sound)->Started);
+
+	Drain(mixer);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.Find(sound)->Started);
+
+	SampleBuffer block(mixer.Format(), 512);
+	float loudest = 0.0f;
+	for (int rendered = 0; rendered < 32; ++rendered) {
+		block.Silence();
+		mixer.Render(block);
+		loudest = std::max(loudest, block.Peak());
+	}
+	CHECK(loudest > 0.0f);
+}
+
+TEST_CASE("a teardown the queue refused is held and retried", "[client][sounds]") {
+	Store store("sounds_test.refused_close");
+	AudioMixer mixer;
+	SoundStage stage;
+	const SoundCatalogue catalogue = With("audio/track.mp3");
+
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Find(sound) != nullptr);
+	const engine::audio::NodeId player = stage.Find(sound)->Player;
+	Drain(mixer);
+
+	store.Destroy(sound);
+	Flood(mixer);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+
+	// The row has gone, so nothing in the world will ever ask for this teardown
+	// again. It is remembered here or it is not remembered at all.
+	CHECK(stage.Count() == 0);
+	CHECK(stage.PendingCloses() == 1);
+
+	Drain(mixer);
+	stage.Sync(store, mixer, catalogue, EAR, mixer.Format().SampleRate);
+	CHECK(stage.PendingCloses() == 0);
+
+	mixer.ApplyPending();
+	CHECK(mixer.Graph().Find(player) == nullptr);
 }
 
 TEST_CASE("what the stage built actually mixes", "[client][sounds]") {

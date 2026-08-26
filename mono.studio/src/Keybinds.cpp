@@ -140,9 +140,59 @@ namespace studio {
 			return scope;
 		}
 
+		// Where an action's row sits in `DEFAULTS`.
+		//
+		// **Found by searching for the action rather than by casting it**, and
+		// that is a bug fix rather than a style. This used to be the enum value
+		// used as a subscript, which is only right while `DEFAULTS` is written
+		// in exactly the enum's order - and it was not. The enum lists
+		// `ShowStatistics, ShowFrameGraph, ShowHeap` before the four tools;
+		// `DEFAULTS` lists the four tools first. So the seven rows from
+		// `ShowStatistics` onward were cross-wired: binding "Select Tool" wrote
+		// onto the frame graph's row, `Of` returned the wrong text for a menu
+		// label, and `Fired` tested the wrong chord in the wrong scope.
+		//
+		// The counts matched, so it compiled and read as correct. The suite did
+		// not catch it because it exercises `Save`, `SaveAs`, `Play`,
+		// `RunServer` and `Delete`, all inside the prefix where the two orders
+		// happen to agree.
+		//
+		// Built once into a lookup, so this is a load rather than a walk and the
+		// two lists can never disagree again - a row is found by what it says it
+		// binds, which is the only thing that can be right.
+		// The frame a binding was last changed on. See `Keybinds::Set`.
+		int &LastBoundFrame() {
+			static int frame = -1;
+			return frame;
+		}
+
+		// imgui's frame counter, or -1 where there is no imgui.
+		//
+		// **Guarded, because this table is used without a context.**
+		// `tests/Keybinds.cpp` exercises `Set` and `Of` directly and
+		// `Editor::Initialise` reads the saved bindings before the context
+		// exists; `ImGui::GetFrameCount` dereferences the current context and
+		// there is not always one. Answering -1 there is the honest value: it
+		// can never equal a real frame, so the guard in `Fired` is simply off.
+		int CurrentFrame() {
+			return ImGui::GetCurrentContext() != nullptr ? ImGui::GetFrameCount() : -1;
+		}
+
 		size_t IndexOf(Action action) {
+			static const std::array<size_t, static_cast<size_t>(Action::Count)> table = [] {
+				std::array<size_t, static_cast<size_t>(Action::Count)> found{};
+				found.fill(0);
+				for (size_t at = 0; at < std::size(DEFAULTS); at++) {
+					const auto slot = static_cast<size_t>(DEFAULTS[at].Bound);
+					if (slot < found.size()) {
+						found[slot] = at;
+					}
+				}
+				return found;
+			}();
+
 			const auto index = static_cast<size_t>(action);
-			return index < static_cast<size_t>(Action::Count) ? index : 0;
+			return index < table.size() ? table[index] : 0;
 		}
 	}
 
@@ -190,6 +240,20 @@ namespace studio {
 		}
 
 		Table()[IndexOf(action)].Keys = chord;
+
+		// **The frame the binding changed, so it cannot also fire on it.**
+		// Binding is a key press, and `ImGui::IsKeyPressed(key, false)` is true
+		// for the whole frame - so the press that *set* Ctrl+D to Duplicate was
+		// still true when `DrawShortcuts` ran later in the same frame and
+		// duplicated the selection. Every rebind did its own action once,
+		// immediately, which reads as the editor obeying a key you were still
+		// teaching it.
+		//
+		// A frame number rather than a flag somebody has to clear: the guard
+		// expires by itself on the next frame, so nothing has to remember to
+		// switch it off, and a rebind while the dispatcher is disabled costs
+		// nothing.
+		LastBoundFrame() = CurrentFrame();
 	}
 
 	void Keybinds::Reset() {
@@ -218,6 +282,18 @@ namespace studio {
 	}
 
 	bool Keybinds::Fired(Action action) {
+		// **Nothing fires on the frame a binding was set.** See
+		// `Keybinds::Set`: the key press that assigns a chord is still pressed
+		// when the dispatcher runs later in the same frame, so without this
+		// every rebind performed its own action once on the way in.
+		//
+		// The whole dispatcher rather than the one action, because the press
+		// that bound Ctrl+D may also be somebody else's chord - and a frame in
+		// which the shortcuts do nothing at all is not a frame anybody notices.
+		if (const int frame = CurrentFrame(); frame >= 0 && frame == LastBoundFrame()) {
+			return false;
+		}
+
 		const Keybind &binding = Table()[IndexOf(action)];
 		const Chord chord = binding.Keys;
 		if (!chord.IsBound()) {

@@ -76,6 +76,29 @@ be the part that can be asserted about. **Do not move a decision into
 `Interface.cpp`** - the moment "which options show" depends on a widget's state
 rather than on a value, it stops being testable and starts being a screenshot.
 
+**The line is the argument list.** An answer that is a pure function of a `Mode`,
+a `Description` or a `Form` belongs in `Plan.hpp` with a case in
+`tests/Plan.cpp`. What stays in `Interface.cpp` is what needs a live
+`ImGuiStyle` or a live id stack to mean anything: `NameColumnWidth` and
+`ActionsColumnWidth` measure text in the current font, `ForceHeaderState` and
+`TabLabel` are about imgui's own state, and `DrawBrowseDialogs` exists for where
+on the id stack a popup is opened. The pair either side of the line is
+`IsBooleanSetting`, which says a declared kind is a two-state value and is in
+`Plan.hpp`, and the `ImGui::Checkbox` that follows from it, which is not.
+
+**Nothing checks this, so it is a convention** - rule 6's second option. The
+build cannot tell a decision from a draw call, and the way it goes wrong is
+drift rather than a bad commit: six answers had crossed the line by v0.19, none
+of them wrong on screen and none of them tested. `WantsFile` and `WantsFolder`
+read `PATH` and `DIR` off a declaration, `AnyBrowses` asked the same question a
+third time with its own string literals, `CommonHits`, `AllHits` and
+`SettingHits` counted what the tabs then filtered for a second time, and a
+`Kind == "boolean"` decided a widget. All six are in `Plan.hpp` now, as
+`BrowseShapeOf`, `AnyBrowses`, `MatchingOptions`, `MatchingSettings`,
+`OptionHits`, `SettingHits` and `IsBooleanSetting`. The count on a tab and the
+rows under it are one function since, which is the bug that pair could have had:
+a tab reading `(3)` over two rows.
+
 ## A Browse button records, it does not open
 
 `ImGui::OpenPopup` names a popup against the id stack **at the moment it is

@@ -1,5 +1,7 @@
 #include "Decoders.hpp"
 
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Xml.hpp>
 
 #include <algorithm>
@@ -31,7 +33,7 @@
 // `translate` and `scale`. `<title>`, `<desc>` and `<metadata>` are skipped
 // whole, because they carry no marks.
 //
-// **The bomb here is XML, not the geometry.** A `<!DOCTYPE>` with an `<!ENTITY>`
+// **The bomb here is SVG_XML, not the geometry.** A `<!DOCTYPE>` with an `<!ENTITY>`
 // in it is the billion-laughs expansion and the external-entity file read, and
 // both are refused outright rather than bounded - there is nothing an SVG icon
 // needs a document type declaration for. Everything else an uploaded file states
@@ -151,7 +153,7 @@ namespace engine::bake {
 			}
 		}
 
-		std::string_view Trimmed(std::string_view text) {
+		std::string_view TrimmedSvg(std::string_view text) {
 			while (!text.empty() && IsSpace(text.front())) {
 				text.remove_prefix(1);
 			}
@@ -253,19 +255,19 @@ namespace engine::bake {
 		// is not the one being rasterised into, and `mm` needs a physical DPI.
 		bool
 		ParseLength(std::string_view text, std::string_view property, double &out, std::string &failure) {
-			std::string_view rest = Trimmed(text);
+			std::string_view rest = TrimmedSvg(text);
 			if (!TakeNumber(rest, out)) {
-				failure =
-					"svg: " + std::string(property) + " '" + std::string(Trimmed(text)) + "' is not a number";
+				failure = "svg: " + std::string(property) + " '" + std::string(TrimmedSvg(text)) +
+						  "' is not a number";
 				return false;
 			}
 
-			rest = Trimmed(rest);
+			rest = TrimmedSvg(rest);
 			if (rest.empty() || rest == "px") {
 				return true;
 			}
 
-			failure = "svg: " + std::string(property) + " '" + std::string(Trimmed(text)) +
+			failure = "svg: " + std::string(property) + " '" + std::string(TrimmedSvg(text)) +
 					  "' - only unitless and px lengths are read, and %, em, ex, pt, pc, cm, mm and in "
 					  "are refused";
 			return false;
@@ -386,7 +388,7 @@ namespace engine::bake {
 		bool ParseColour(
 			std::string_view text, std::string_view property, bool &painted, Colour &out, std::string &failure
 		) {
-			const std::string_view value = Trimmed(text);
+			const std::string_view value = TrimmedSvg(text);
 			const auto refuse = [&](std::string_view because) {
 				failure = "svg: " + std::string(property) + " '" + std::string(value) + "' - " +
 						  std::string(because);
@@ -470,7 +472,7 @@ namespace engine::bake {
 		}
 
 		// ---------------------------------------------------------------------
-		// The XML subset
+		// The SVG_XML subset
 		// ---------------------------------------------------------------------
 		//
 		// **`core::xml` is the scanner and this is only its settings.** It was a
@@ -486,7 +488,7 @@ namespace engine::bake {
 
 		// What a failure here is called, what one element may carry, and that a
 		// prefix means nothing to a drawing - `<svg:rect>` is a `<rect>`.
-		constexpr xml::Options XML{"svg", MAXIMUM_ATTRIBUTES, true};
+		constexpr xml::Options SVG_XML{"svg", MAXIMUM_ATTRIBUTES, true};
 
 		// The scanner with this format's settings already bound, so that a call
 		// site says what it is asking for rather than repeating the settings.
@@ -496,18 +498,18 @@ namespace engine::bake {
 		// DOCTYPE than for a tag with no name, which is what `game` needs the
 		// kind for.
 		//@{
-		Scan NextTag(std::string_view &text, Tag &tag, std::string &failure) {
+		Scan NextSvgTag(std::string_view &text, Tag &tag, std::string &failure) {
 			xml::Failure refusal;
-			const Scan scan = xml::NextTag(text, XML, tag, refusal);
+			const Scan scan = xml::NextTag(text, SVG_XML, tag, refusal);
 			if (scan == Scan::Error) {
 				failure = std::move(refusal.Message);
 			}
 			return scan;
 		}
 
-		bool ReadAttributes(std::string_view text, std::vector<Attribute> &out, std::string &failure) {
+		bool ReadSvgAttributes(std::string_view text, std::vector<Attribute> &out, std::string &failure) {
 			xml::Failure refusal;
-			if (xml::ReadAttributes(text, XML, out, refusal)) {
+			if (xml::ReadAttributes(text, SVG_XML, out, refusal)) {
 				return true;
 			}
 			failure = std::move(refusal.Message);
@@ -516,7 +518,7 @@ namespace engine::bake {
 
 		bool CheckEntityReferences(std::string_view text, std::string &failure) {
 			xml::Failure refusal;
-			if (xml::CheckEntityReferences(text, XML, refusal)) {
+			if (xml::CheckEntityReferences(text, SVG_XML, refusal)) {
 				return true;
 			}
 			failure = std::move(refusal.Message);
@@ -598,7 +600,7 @@ namespace engine::bake {
 				ink.StrokeOpacity = std::clamp(ink.StrokeOpacity, 0.0, 1.0);
 			}
 			if (const Attribute *rule = Find(attributes, "fill-rule")) {
-				const std::string_view value = Trimmed(rule->Value);
+				const std::string_view value = TrimmedSvg(rule->Value);
 				if (value == "nonzero") {
 					ink.FillEvenOdd = false;
 				} else if (value == "evenodd") {
@@ -629,11 +631,12 @@ namespace engine::bake {
 
 				const size_t open = text.find('(');
 				if (open == std::string_view::npos) {
-					failure = "svg: transform '" + std::string(Trimmed(text)) + "' is not a transform list";
+					failure =
+						"svg: transform '" + std::string(TrimmedSvg(text)) + "' is not a transform list";
 					return false;
 				}
 
-				const std::string_view name = Trimmed(text.substr(0, open));
+				const std::string_view name = TrimmedSvg(text.substr(0, open));
 				text.remove_prefix(open + 1);
 
 				const size_t close = text.find(')');
@@ -1413,7 +1416,7 @@ namespace engine::bake {
 
 			while (depth > 0) {
 				Tag tag;
-				const Scan scan = NextTag(text, tag, failure);
+				const Scan scan = NextSvgTag(text, tag, failure);
 				if (scan == Scan::Error) {
 					return false;
 				}
@@ -1434,7 +1437,7 @@ namespace engine::bake {
 		}
 
 		// A canvas out of premultiplied floats, into non-premultiplied RGBA8.
-		void Resolve(const Canvas &canvas, assets::TextureData &out) {
+		void ResolveSvg(const Canvas &canvas, assets::TextureData &out) {
 			out = {};
 			out.Width = canvas.Width;
 			out.Height = canvas.Height;
@@ -1480,7 +1483,7 @@ namespace engine::bake {
 		std::string_view text = whole;
 
 		Tag root;
-		if (NextTag(text, root, failure) != Scan::Tag) {
+		if (NextSvgTag(text, root, failure) != Scan::Tag) {
 			if (failure.empty()) {
 				failure = "svg: no elements at all";
 			}
@@ -1495,7 +1498,7 @@ namespace engine::bake {
 		// billion-laughs document is both a declaration and a swarm of
 		// references to it; scanning for the references first would refuse it
 		// while naming `&lol;` - which reads like a typo - instead of naming the
-		// `<!ENTITY>` that is the actual thing to remove. XML puts any
+		// `<!ENTITY>` that is the actual thing to remove. SVG_XML puts any
 		// declaration before the root, so by here the scanner has already met it.
 		//
 		// **A sweep rather than an unescape, because this format never
@@ -1509,7 +1512,7 @@ namespace engine::bake {
 		}
 
 		std::vector<Attribute> attributes;
-		if (!ReadAttributes(root.Attributes, attributes, failure)) {
+		if (!ReadSvgAttributes(root.Attributes, attributes, failure)) {
 			return false;
 		}
 		if (!RefuseUnsupportedAttributes(attributes, "svg", failure)) {
@@ -1545,13 +1548,14 @@ namespace engine::bake {
 				SkipSeparators(numbers);
 				if (!TakeNumber(numbers, value)) {
 					failure =
-						"svg: viewBox '" + std::string(Trimmed(viewBox->Value)) + "' is not four numbers";
+						"svg: viewBox '" + std::string(TrimmedSvg(viewBox->Value)) + "' is not four numbers";
 					return false;
 				}
 			}
 			SkipSeparators(numbers);
 			if (!numbers.empty()) {
-				failure = "svg: viewBox '" + std::string(Trimmed(viewBox->Value)) + "' is not four numbers";
+				failure =
+					"svg: viewBox '" + std::string(TrimmedSvg(viewBox->Value)) + "' is not four numbers";
 				return false;
 			}
 			boxX = values[0];
@@ -1634,7 +1638,7 @@ namespace engine::bake {
 
 		while (!root.SelfClosing) {
 			Tag tag;
-			const Scan scan = NextTag(text, tag, failure);
+			const Scan scan = NextSvgTag(text, tag, failure);
 			if (scan == Scan::Error) {
 				return false;
 			}
@@ -1670,13 +1674,16 @@ namespace engine::bake {
 							   tag.Name == "line" || tag.Name == "polyline" || tag.Name == "polygon" ||
 							   tag.Name == "path";
 			if (!shape && tag.Name != "g") {
+				// The one signal that says which SVG feature is missing, rather
+				// than only that a file was refused.
+				ENGINE_DEBUG("svg refused on <{}>, which this does not rasterise", tag.Name);
 				failure = "svg: <" + std::string(tag.Name) +
 						  "> is not an element this rasterises - the whole list is svg, g, rect, circle, "
 						  "ellipse, line, polyline, polygon and path";
 				return false;
 			}
 
-			if (!ReadAttributes(tag.Attributes, attributes, failure)) {
+			if (!ReadSvgAttributes(tag.Attributes, attributes, failure)) {
 				return false;
 			}
 			if (!RefuseUnsupportedAttributes(attributes, tag.Name, failure)) {
@@ -1805,7 +1812,25 @@ namespace engine::bake {
 			}
 		}
 
-		Resolve(canvas, out);
+		ResolveSvg(canvas, out);
+
+		// **The two budgets were tuned against numbers written into a comment**,
+		// and nothing since could check them against real files. These are what
+		// a refusal is compared against.
+		core::Metrics::Observe("bake.svg.points_used", static_cast<double>(MAXIMUM_POINTS - budget.Points));
+		core::Metrics::Observe(
+			"bake.svg.fill_work_used", static_cast<double>(MAXIMUM_FILL_WORK - budget.FillWork)
+		);
+		ENGINE_DEBUG(
+			"svg: {} of {} points and {} of {} fill work used over {} element(s) for a {}x{} raster",
+			MAXIMUM_POINTS - budget.Points,
+			MAXIMUM_POINTS,
+			MAXIMUM_FILL_WORK - budget.FillWork,
+			MAXIMUM_FILL_WORK,
+			elements,
+			out.Width,
+			out.Height
+		);
 		return true;
 	}
 }

@@ -6,6 +6,7 @@
 // worth of globbed sources cannot be driven by one.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
@@ -47,7 +48,7 @@ int main(int argc, char **argv) {
 
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");
-	arguments.Flag("graph", "Open the frame graph (F8)");
+	arguments.Flag("graph", "Open and select the frame graph (F8)");
 	arguments.Flag("assets", "Open the assets manager");
 	arguments.Flag("viewport2", "Open the second viewport (same as --viewports 2)");
 
@@ -76,7 +77,19 @@ int main(int argc, char **argv) {
 	);
 
 	// The control surface. Off unless asked for - see `Options::ControlPort`.
-	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");
+	//
+	// **"conventionally" rather than "default", because there is no default.**
+	// `core::Arguments::Value` requires a value, so `--mcp-port` on its own is a
+	// parse error and no number is ever supplied for the caller. The help said
+	// "default 8738" and the comment beside it described what a bare flag would
+	// open, which was a shape this parser has never had. The number is still read
+	// from the one constant so the text cannot drift from what `.mcp.json` dials.
+	arguments.Value(
+		"mcp-port",
+		"PORT",
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
+			std::to_string(engine::control::DEFAULT_PORT) + ")"
+	);
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -152,11 +165,13 @@ int main(int argc, char **argv) {
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
 	// `GetInteger` with a fallback would open the port on every run, because a
-	// fallback is returned when the flag is absent. This way `--mcp-port` alone
-	// takes this program's number and no flag at all leaves it shut.
-	// The bare flag takes the configured port rather than a number written
-	// here, so somebody who set one in the panel gets it back from the
-	// command line too. No flag at all still leaves the socket shut.
+	// fallback is returned when the flag is absent. This way no flag at all
+	// leaves the socket shut.
+	//
+	// `--mcp-port` takes a value; the parser refuses the flag without one, so
+	// the fallback below is reached only for a value that is not an integer.
+	// It is the configured port rather than a number written here, so somebody
+	// who set one in the panel gets it back rather than a literal.
 	options.ControlPort = arguments.Has("mcp-port")
 							  ? static_cast<int>(arguments.GetInteger("mcp-port", preferences.ControlPort))
 							  : -1;
@@ -168,6 +183,7 @@ int main(int argc, char **argv) {
 	// booleans that both mean "show it".
 	options.ShowStatistics = arguments.Has("stats") || preferences.ShowStatistics;
 	options.ShowFrameGraph = arguments.Has("graph") || preferences.ShowFrameGraph;
+	options.FocusFrameGraph = arguments.Has("graph");
 	options.ShowAssetsPanel = arguments.Has("assets") || preferences.ShowAssets;
 	// **`--viewport2` is the old spelling of `--viewports 2` and still works.**
 	// Whichever asks for more wins, because both mean "open at least this many"

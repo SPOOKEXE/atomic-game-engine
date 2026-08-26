@@ -13,7 +13,7 @@
 
 TEST_SUITE_ID("engine.physics.shapes")
 // Every bound here is a core::AABB and two of the three are built by its own
-// FromOrientedBox and FromCentre.
+// OrientedBoxBounds and FromCentre.
 TEST_DEPENDS("engine.core.types.aabb")
 // A shape is placed by a CFrame, and the cylinder bound is a function of the
 // frame's up vector.
@@ -153,7 +153,7 @@ TEST_CASE("a tilted cylinder bounds larger than an upright one", "[physics][shap
 	// sqrt(1 - (a.e)^2) per axis, which is strictly tighter than the box around
 	// the cylinder - the box bound would give 5 on X and Y where the true reach
 	// is a little over 3.5. Being tighter is the whole reason this case is not
-	// routed through FromOrientedBox.
+	// routed through OrientedBoxBounds.
 	const Vector3 tilted = ReachOf(ShapeWorldBounds(cylinder, CFrame::Angles(0.0f, 0.0f, QUARTER_TURN)));
 	const float root = std::sqrt(0.5f);
 	CHECK(tilted.X == Approx(4.0f * root + 1.0f * root));

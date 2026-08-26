@@ -51,12 +51,9 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-#include "Subtree.hpp"
-#include "Tasks.hpp"
-
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/effects/ParticleSystem.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/EditableImage.hpp>
@@ -65,9 +62,13 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/Subtree.hpp>
+#include <engine/script/Tasks.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -113,6 +114,59 @@ namespace engine::script {
 			// nothing, and an instance with no placement to move is the same
 			// "did nothing" a `Folder` would be.
 			(void)scene::PivotTo(call.World(), call.Subject(), target);
+		}
+
+		// `workspace:BulkMoveTo(parts, placements)`
+		//
+		// **Roblox's `WorldRoot:BulkMoveTo`**, and it is here for the reason
+		// `scene::BulkMoveTo` gives: a per-part `CFrame` write crosses the
+		// language boundary once per part, and the boundary is most of the cost.
+		// `ScriptableProperty` alone is a string compare against every property
+		// the class has, per write.
+		//
+		// **The subject is not checked and carries nothing.** Roblox puts this
+		// on `WorldRoot` because that is where a spatial API belongs there; here
+		// every part is named in the argument, so there is no world to infer and
+		// nothing for a `Workspace` to add. Accepting any subject means a script
+		// written against Roblox works unchanged, which is the direction this
+		// surface is allowed to differ in.
+		//
+		// **A length mismatch raises rather than moving the shorter list.**
+		// `scene::BulkMoveTo` takes the shorter of the two because a C++ caller
+		// with two spans has already decided what it means; a script that built
+		// two tables of different lengths has made a mistake, and moving half
+		// the parts hides it until somebody notices the other half never left.
+		void BulkMoveTo(ScriptCall &call) {
+			std::vector<ecs::Entity> parts;
+			std::vector<core::CFrame> placements;
+
+			if (!call.ReadPlacements(0, parts, placements)) {
+				call.Raise("BulkMoveTo needs as many placements as parts");
+			}
+
+			// The count is dropped: a list naming something with no placement is
+			// the same "did nothing" `PivotTo` above allows for a `Folder`, and
+			// Roblox's returns nothing either.
+			(void)scene::BulkMoveTo(call.World(), parts, placements);
+		}
+
+		// `workspace:BulkPivotTo(parts, targets)`
+		//
+		// `BulkMoveTo` for handles. **Not a Roblox method**, which is worth
+		// saying: Roblox has `BulkMoveTo` and no bulk pivot, so a script written
+		// here that uses this will not run there. It exists because the engine's
+		// own single-instance pair is `CFrame =` *and* `PivotTo`, and offering a
+		// batch for one of them would push every author of a model - the case a
+		// pivot is for - back onto the per-instance path this exists to get off.
+		void BulkPivotTo(ScriptCall &call) {
+			std::vector<ecs::Entity> parts;
+			std::vector<core::CFrame> targets;
+
+			if (!call.ReadPlacements(0, parts, targets)) {
+				call.Raise("BulkPivotTo needs as many targets as parts");
+			}
+
+			(void)scene::BulkPivotTo(call.World(), parts, targets);
 		}
 
 		// `instance:Equals(other)`
@@ -836,9 +890,40 @@ namespace engine::script {
 			call.ReturnBoolean(scene::SetVertexColor(call.World(), call.Subject(), id, colour, alpha));
 		}
 
-		// `editableMesh:Clear()`
+		// `editableMesh:SetGeometry(vertices, indices)`
+		//
+		// One VM crossing for a complete mesh. Preparation happens in the runtime's
+		// deterministic mesh batch and the world row is changed once, on its owner
+		// thread, after the target revision is checked.
+		void EditableMeshSetGeometry(ScriptCall &call) {
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("SetGeometry needs an EditableMesh");
+			}
+
+			scene::EditableMeshGeometry geometry;
+			call.ReadEditableMeshGeometry(0, geometry);
+			call.AwaitEditableMesh(std::move(geometry));
+		}
+
+		// `editableMesh:Clear()` or `particleEmitter:Clear()`
 		void EditableMeshClear(ScriptCall &call) {
+			if (call.World().Get<effects::ParticleEmitter>(call.Subject()) != nullptr) {
+				call.ReturnBoolean(effects::ClearParticles(call.World(), call.Subject()));
+				return;
+			}
 			call.ReturnBoolean(scene::ClearEditableMesh(call.World(), call.Subject()));
+		}
+
+		// `particleEmitter:Emit(count)`
+		void ParticleEmitterEmit(ScriptCall &call) {
+			const double requested = call.AsNumber(0);
+			if (!std::isfinite(requested) || requested < 0.0 || requested > 4294967295.0 ||
+				std::floor(requested) != requested) {
+				call.Raise("Emit needs a non-negative whole particle count");
+			}
+			if (!effects::EmitParticles(call.World(), call.Subject(), static_cast<uint32_t>(requested))) {
+				call.Raise("Emit needs a ParticleEmitter");
+			}
 		}
 
 		// Raises unless the subject is an `EditableImage` - the four methods
@@ -924,9 +1009,11 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 50> METHODS{{
+		constexpr std::array<InstanceMethod, 54> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
+			{"BulkMoveTo", BulkMoveTo},
+			{"BulkPivotTo", BulkPivotTo},
 			{"SetLocalTransparency", SetLocalTransparency},
 
 			{"AddVertex", EditableMeshAddVertex},
@@ -936,7 +1023,9 @@ namespace engine::script {
 			{"SetVertexNormal", EditableMeshSetVertexNormal},
 			{"SetVertexUV", EditableMeshSetVertexUV},
 			{"SetVertexColor", EditableMeshSetVertexColor},
+			{"SetGeometry", EditableMeshSetGeometry},
 			{"Clear", EditableMeshClear},
+			{"Emit", ParticleEmitterEmit},
 
 			{"Resize", EditableImageResize},
 			{"DrawRectangle", EditableImageDrawRectangle},
@@ -1004,7 +1093,7 @@ namespace engine::script {
 		// Luau trampoline on an upvalue and the JavaScript one as magic - so the
 		// concatenation has to happen once and hand back the same span forever.
 		static const std::vector<InstanceMethod> ALL = [] {
-			std::vector<InstanceMethod> rows(METHODS.begin(), METHODS.end());
+			std::vector<InstanceMethod> rows(SCRIPT_METHODS.begin(), SCRIPT_METHODS.end());
 			const std::span<const InstanceMethod> gui = GuiInstanceMethods();
 			rows.insert(rows.end(), gui.begin(), gui.end());
 			return rows;

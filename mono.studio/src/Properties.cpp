@@ -9,6 +9,7 @@
 #include <imgui.h>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
+#include <studio/PropertySelection.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
@@ -32,32 +33,6 @@ namespace studio {
 	using engine::game::WriteProperty;
 
 	namespace {
-		// Which class in an instance's ancestry first declares a property.
-		//
-		// **This is where the grouping comes from, and it costs nothing to
-		// author.** Roblox groups properties by a hand-maintained category on
-		// each one; this engine has no such field and adding one would be a
-		// second declaration of something the class tree already knows. Walking
-		// the ancestry from the root down and asking which class first exposes a
-		// name gives "Instance / PVInstance / BasePart / Part" - which is both
-		// the right grouping and impossible to forget to update.
-		ClassId DeclaringClass(ClassId klass, Name property) {
-			const engine::ecs::ClassInfo &info = Classes::Describe(klass);
-
-			// `Ancestry` is nearest first, so walking it backwards is the class
-			// tree from the root down - and the first class that has the
-			// property is the one that introduced it.
-			for (size_t index = info.Ancestry.size(); index > 0; index--) {
-				const ClassId candidate = info.Ancestry[index - 1];
-				for (const PropertyDescriptor &descriptor : Classes::Describe(candidate).Properties) {
-					if (descriptor.Name == property) {
-						return candidate;
-					}
-				}
-			}
-			return klass;
-		}
-
 		// Drags at a rate that suits how big the number already is.
 		//
 		// A fixed step makes a part's `Transparency` unusable at 0.01 per pixel
@@ -522,19 +497,14 @@ namespace studio {
 			ImGui::Separator();
 		}
 
-		// The first selected instance is the one whose properties are listed.
-		// A multi-selection of different classes shows what the first one has,
-		// and a write to a property another one does not have simply fails -
-		// `Store::SetProperty` refuses it, and refusing per instance is more
-		// honest than showing only the intersection and hiding the rest.
-		const Entity primary = Selection.front();
-
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##property-filter", PropertyFilter, "filter properties");
 		ImGui::Separator();
 
 		struct Edit {
 			Name Property;
+			ClassId Owner;
+			PropertyType Type = PropertyType::Opaque;
 			PropertyValue Value;
 			bool Wanted = false;
 		};
@@ -542,20 +512,25 @@ namespace studio {
 
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 		Universe->Enter(SelectionWorld, [&](Store &store) {
-			if (!store.Alive(primary)) {
+			const auto primary = std::find_if(Selection.begin(), Selection.end(), [&](Entity instance) {
+				return store.Alive(instance) && store.ClassOf(instance).IsValid();
+			});
+			if (primary == Selection.end()) {
 				ImGui::TextDisabled("the selection is gone");
 				return;
 			}
 
-			const ClassId klass = store.ClassOf(primary);
-			if (!klass.IsValid()) {
-				ImGui::TextDisabled("this is not an instance");
-				return;
+			const ClassId primaryClass = store.ClassOf(*primary);
+			const engine::ecs::ClassInfo &info = Classes::Describe(primaryClass);
+			const bool oneClass = std::all_of(Selection.begin(), Selection.end(), [&](Entity instance) {
+				return !store.Alive(instance) || store.ClassOf(instance) == primaryClass;
+			});
+
+			if (oneClass) {
+				ImGui::Text("%s", Label(info.Name));
+			} else {
+				ImGui::Text("Mixed classes");
 			}
-
-			const engine::ecs::ClassInfo &info = Classes::Describe(klass);
-
-			ImGui::Text("%s", Label(info.Name));
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text("in %s", Label(Universe->NameOf(SelectionWorld)));
@@ -585,55 +560,22 @@ namespace studio {
 
 			ImGui::Separator();
 
-			// Grouped by declaring class, root first, which reads the way the
-			// class tree does: Instance's properties, then PVInstance's, then
-			// BasePart's.
-			std::vector<std::pair<ClassId, std::vector<const PropertyDescriptor *>>> groups;
-
-			for (const PropertyDescriptor &descriptor : info.Properties) {
-				if (descriptor.Name == Name("Parent")) {
-					// The tree is what says where something is. A `Parent` field
-					// beside it would be a second answer to a question the
-					// explorer already answers, and rule 2 is about exactly
-					// that.
-					continue;
-				}
-
-				if (!PropertyFilter.empty()) {
-					int score = 0;
-					if (!FuzzyMatch(PropertyFilter, Label(descriptor.Name), score)) {
-						continue;
-					}
-				}
-
-				const ClassId owner = DeclaringClass(klass, descriptor.Name);
-
-				auto found = std::find_if(groups.begin(), groups.end(), [owner](const auto &group) {
-					return group.first == owner;
-				});
-				if (found == groups.end()) {
-					groups.emplace_back(owner, std::vector<const PropertyDescriptor *>{});
-					found = groups.end() - 1;
-				}
-				found->second.push_back(&descriptor);
-			}
-
-			// Root-first. `Ancestry` is nearest first, so the group order falls
-			// out of how deep each declaring class sits.
-			std::sort(groups.begin(), groups.end(), [&](const auto &left, const auto &right) {
-				return Classes::Describe(left.first).Ancestry.size() <
-					   Classes::Describe(right.first).Ancestry.size();
-			});
+			const std::vector<SelectionPropertyGroup> groups = BuildPropertySelection(store, Selection);
 
 			for (const auto &group : groups) {
-				const engine::ecs::ClassInfo &owner = Classes::Describe(group.first);
+				const engine::ecs::ClassInfo &owner = Classes::Describe(group.Owner);
+				std::string heading(Label(owner.Name));
+				if (group.Applicable != Selection.size()) {
+					heading += " (" + std::to_string(group.Applicable) + " of " +
+							   std::to_string(Selection.size()) + ")";
+				}
 
-				if (!ImGui::CollapsingHeader(Label(owner.Name), ImGuiTreeNodeFlags_DefaultOpen)) {
+				if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
 					continue;
 				}
 
 				if (!ImGui::BeginTable(
-						Label(owner.Name), 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+						heading.c_str(), 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
 					)) {
 					continue;
 				}
@@ -641,9 +583,19 @@ namespace studio {
 				ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
 				ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
 
-				for (const PropertyDescriptor *descriptor : group.second) {
-					PropertyValue value;
-					const bool readable = ReadProperty(store, primary, *descriptor, value);
+				for (const SelectionPropertyRow &row : group.Rows) {
+					const PropertyDescriptor *descriptor = row.Descriptor;
+					if (descriptor == nullptr) {
+						continue;
+					}
+					if (!PropertyFilter.empty()) {
+						int score = 0;
+						if (!FuzzyMatch(PropertyFilter, Label(descriptor->Name), score)) {
+							continue;
+						}
+					}
+					const PropertyValue &value = row.Value;
+					const bool readable = row.Readable != 0;
 
 					ImGui::TableNextRow();
 					ImGui::TableSetColumnIndex(0);
@@ -669,6 +621,36 @@ namespace studio {
 
 					PropertyValue changed = value;
 					bool wrote = false;
+
+					if (row.Mixed && descriptor->Type != PropertyType::Reference &&
+						descriptor->Type != PropertyType::Opaque) {
+						// A mixed selection has no truthful primary value. An empty
+						// field says that directly and accepts the same textual form a
+						// scene file does; once valid, the one value is written to every
+						// selected instance that actually declares this property.
+						std::string text;
+						if (TextField("##v", text)) {
+							PropertyValue parsed;
+							std::string reason;
+							if (ParseValue(descriptor->Type, text, parsed, reason)) {
+								changed = parsed;
+								wrote = true;
+							}
+						}
+						if (ImGui::IsItemHovered()) {
+							ImGui::SetTooltip("selected instances have different values");
+						}
+						ImGui::EndDisabled();
+						if (wrote && !locked) {
+							edit.Property = descriptor->Name;
+							edit.Owner = group.Owner;
+							edit.Type = descriptor->Type;
+							edit.Value = changed;
+							edit.Wanted = true;
+						}
+						ImGui::PopID();
+						continue;
+					}
 
 					switch (descriptor->Type) {
 					case PropertyType::Bool:
@@ -902,6 +884,7 @@ namespace studio {
 							PickerWanted = true;
 							PickerKind = content;
 							PickerProperty = descriptor->Name;
+							PickerOwner = group.Owner;
 							PickerType = descriptor->Type;
 							PickerChoice = text;
 						}
@@ -996,6 +979,8 @@ namespace studio {
 						// one instance and not for a multi-selection, and doing
 						// it in two places is how the two get different rules.
 						edit.Property = descriptor->Name;
+						edit.Owner = group.Owner;
+						edit.Type = descriptor->Type;
 						edit.Value = changed;
 						edit.Wanted = true;
 					}
@@ -1020,6 +1005,8 @@ namespace studio {
 			// `edit` a widget would have - one path applies a property write
 			// and it stays one path, including undo.
 			edit.Property = PickerProperty;
+			edit.Owner = PickerOwner;
+			edit.Type = PickerType;
 
 			// **`ChosenContentValue` and not four lines here**, because those
 			// four lines left `Type` at `Opaque` for a whole version and
@@ -1029,6 +1016,7 @@ namespace studio {
 			edit.Value = ChosenContentValue(PickerType, PickerChoice);
 			edit.Wanted = true;
 			PickerProperty = Name{};
+			PickerOwner = ClassId{};
 		}
 
 		ImGui::End();
@@ -1051,8 +1039,11 @@ namespace studio {
 					continue;
 				}
 
+				if (!SelectionPropertyApplies(klass, edit.Owner, edit.Property, edit.Type)) {
+					continue;
+				}
 				for (const PropertyDescriptor &descriptor : Classes::Describe(klass).Properties) {
-					if (descriptor.Name == edit.Property) {
+					if (descriptor.Name == edit.Property && descriptor.Type == edit.Type) {
 						// **One command per instance, because the write is per
 						// instance.** A multi-selection whose members held
 						// different values before cannot be reversed by one

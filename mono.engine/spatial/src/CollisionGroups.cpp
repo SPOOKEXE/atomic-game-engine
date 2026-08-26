@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -63,11 +64,19 @@ namespace engine::spatial {
 			// Refused rather than folded onto an existing bit. Two unrelated
 			// groups sharing one layer is a physics bug in a scene neither
 			// author was looking at.
+			//
+			// The caller gets `NO_GROUP` and usually carries on with the default
+			// group, so without this line the scene collides wrongly and nothing
+			// names the group that did not fit.
+			ENGINE_WARN(
+				"collision group '{}' refused: all {} layers are taken", name, LayerMask::LAYER_COUNT
+			);
 			return NO_GROUP;
 		}
 
 		const auto index = static_cast<uint32_t>(table.Groups.size());
 		table.Groups.push_back(key);
+		ENGINE_DEBUG("collision group '{}' registered as layer {}", name, index);
 
 		// Collides with everything, matching Roblox. A group that collided with
 		// nothing until configured would look broken rather than new.
@@ -99,6 +108,14 @@ namespace engine::spatial {
 		const uint32_t left = Find(table, first);
 		const uint32_t right = Find(table, second);
 		if (left == NO_GROUP || right == NO_GROUP) {
+			// A misspelled group name is a matrix entry that was configured and
+			// did nothing, which reads as the matrix being ignored.
+			ENGINE_WARN(
+				"cannot set '{}' against '{}': {} is not a registered collision group",
+				first.Text(),
+				second.Text(),
+				left == NO_GROUP ? first.Text() : second.Text()
+			);
 			return false;
 		}
 
@@ -139,7 +156,18 @@ namespace engine::spatial {
 		// `All()` for an unregistered index, which is what an unconfigured
 		// collider already has. Returning `None()` would make a part quietly
 		// stop colliding with everything because of a lookup failure.
-		return index < table.Matrix.size() ? table.Matrix[index] : LayerMask::All();
+		if (index >= table.Matrix.size()) {
+			// Rate-limited: a narrow phase asks this per collider per tick, so a
+			// scene with one stale layer index would otherwise be the whole log.
+			ENGINE_WARN_EVERY(
+				5.0,
+				"layer index {} is past the {} registered groups; using All()",
+				index,
+				table.Matrix.size()
+			);
+			return LayerMask::All();
+		}
+		return table.Matrix[index];
 	}
 
 	std::vector<core::Name> CollisionGroups::Names() {

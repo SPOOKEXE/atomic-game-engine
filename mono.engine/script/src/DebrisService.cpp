@@ -19,10 +19,10 @@
 //
 // @tier L9 · shared
 
-#include "Debris.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-#include "Tasks.hpp"
+#include <engine/script/Debris.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
+#include <engine/script/Tasks.hpp>
 
 #include <array>
 #include <vector>
@@ -50,7 +50,7 @@ namespace engine::script {
 			}
 		}
 
-		constexpr std::array<ServiceMethod, 1> METHODS{{
+		constexpr std::array<ServiceMethod, 1> DEBRIS_METHODS{{
 			{"AddItem", AddItem},
 		}};
 	}
@@ -59,7 +59,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "Debris";
-			surface.Methods = METHODS;
+			surface.Methods = DEBRIS_METHODS;
 			return surface;
 		}();
 		return SURFACE;

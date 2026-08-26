@@ -1,3 +1,5 @@
+#include "GpuHeap.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/render/MeshTable.hpp>
@@ -44,10 +46,10 @@ namespace engine::render {
 	void MeshTable::Shutdown() {
 		if (Device != nullptr) {
 			if (VertexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, VertexBuffer);
+				gpu::ReleaseBuffer(Device, VertexBuffer);
 			}
 			if (IndexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, IndexBuffer);
+				gpu::ReleaseBuffer(Device, IndexBuffer);
 			}
 		}
 
@@ -333,21 +335,21 @@ namespace engine::render {
 			}
 
 			if (VertexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, VertexBuffer);
+				gpu::ReleaseBuffer(Device, VertexBuffer);
 			}
 			if (IndexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, IndexBuffer);
+				gpu::ReleaseBuffer(Device, IndexBuffer);
 			}
 
 			SDL_GPUBufferCreateInfo vertexInfo{};
 			vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 			vertexInfo.size = static_cast<uint32_t>(vertices * sizeof(assets::MeshVertex));
-			VertexBuffer = SDL_CreateGPUBuffer(Device, &vertexInfo);
+			VertexBuffer = gpu::CreateBuffer(Device, &vertexInfo);
 
 			SDL_GPUBufferCreateInfo indexInfo{};
 			indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
 			indexInfo.size = static_cast<uint32_t>(indices * sizeof(uint32_t));
-			IndexBuffer = SDL_CreateGPUBuffer(Device, &indexInfo);
+			IndexBuffer = gpu::CreateBuffer(Device, &indexInfo);
 
 			if (VertexBuffer == nullptr || IndexBuffer == nullptr) {
 				ENGINE_ERROR("mesh table: buffers: {}", SDL_GetError());
@@ -396,7 +398,7 @@ namespace engine::render {
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = static_cast<uint32_t>(vertexBytes + indexBytes);
 
-		SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 		if (transfer == nullptr) {
 			ENGINE_ERROR("mesh table: transfer buffer: {}", SDL_GetError());
 			return false;
@@ -460,7 +462,7 @@ namespace engine::render {
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
-		SDL_ReleaseGPUTransferBuffer(Device, transfer);
+		gpu::ReleaseTransferBuffer(Device, transfer);
 
 		DirtyVertices.clear();
 		DirtyIndices.clear();

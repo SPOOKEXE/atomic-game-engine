@@ -6,8 +6,11 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -27,17 +30,19 @@ TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.replication.snapshotbuffer")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
+TEST_DEPENDS("engine.scene.attachments")
 
 using Catch::Approx;
-using client::DrawList;
 using engine::core::CFrame;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Phase;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
+using engine::render::DrawList;
 using engine::replication::InterpolationSettings;
 using engine::replication::SnapshotBuffer;
+using engine::scene::Attachment;
 using engine::scene::Bounds;
 using engine::scene::SurfaceAppearance;
 using engine::scene::Tags;
@@ -311,7 +316,7 @@ TEST_CASE("a replica draws the surface appearance and tags it was sent", "[clien
 
 	SurfaceAppearance appearance;
 	appearance.ColourMap = engine::core::Name("replicated_test.FoxTexture");
-	appearance.Mode = engine::scene::AlphaMode::Clip;
+	appearance.Mode = engine::scene::AlphaMode::Transparency;
 	appearance.AlphaCutoff = 0.4f;
 
 	replica.SpawnSurfaced(sent, appearance, 0b101);
@@ -322,7 +327,7 @@ TEST_CASE("a replica draws the surface appearance and tags it was sent", "[clien
 
 	CHECK(drawn.Mesh == sent.Mesh);
 	CHECK(drawn.Texture == appearance.ColourMap);
-	CHECK(drawn.Alpha == engine::scene::AlphaMode::Clip);
+	CHECK(drawn.Alpha == engine::scene::AlphaMode::Transparency);
 
 	// **The mask crosses and the names do not.** A `TagTable` is a resource and
 	// resources have no wire form, so a replica cannot say what bit one is -
@@ -355,13 +360,28 @@ TEST_CASE("a replica does not draw a part it was told is invisible", "[client][r
 	CHECK(replica.Instances().size() == 1);
 }
 
+TEST_CASE("a replica does not publish fully transparent parts", "[client][replication]") {
+	Replica replica;
+	replica.Spawn();
+
+	Visual authored;
+	authored.Transparency = 1.0f;
+	replica.SpawnLooking(authored);
+
+	const Entity locallyHidden = replica.Spawn();
+	replica.World.Set(locallyHidden, engine::scene::LocalTransparency{1.0f});
+
+	replica.Draw();
+	CHECK(replica.Instances().size() == 1);
+}
+
 // **The registration this world used to skip**, and the failure it caused was a
 // long way from the cause.
 //
 // `Components::Of<T>` caches its answer per type per process and marks the name
 // it minted as automatic - so the first mention of `DrawList` anywhere decides
 // what it is called. `BuildReplicatedWorld` reached for the resource without
-// registering first, which named it `client::DrawList`, the compiler's
+// registering first, which named it `engine::render::DrawList`, the compiler's
 // spelling. Nothing failed here. It failed in whichever world was built *next*,
 // where the explicit `RegisterClientComponents` aborted the process naming a
 // type that function never mentions.
@@ -380,7 +400,7 @@ TEST_CASE("a replicated world registers its own types before it uses them", "[cl
 
 // --- what a snapshot of a replica world can carry -----------------------------
 
-// **Rule 4, and `client::DrawList` learned it the expensive way.** A resource is
+// **Rule 4, and `engine::render::DrawList` learned it the expensive way.** A resource is
 // keyed by a component id, and `Store::SetResource` mints one under whatever the
 // compiler spells the type as unless somebody registered a name. Nothing notices
 // until a world holding it is saved - which is exactly what the studio's Play
@@ -593,4 +613,36 @@ TEST_CASE("the guess is unwound rather than snapped away", "[client][replication
 
 	// And it is genuinely finished, rather than merely small.
 	CHECK(replica.World.Resource<SnapshotBuffer>()->DeadReckonSeconds() == 0.0);
+}
+
+// --- the derived halves a replica has to derive for itself -------------------
+
+TEST_CASE("a replica resolves the attachments that arrived", "[client][replication]") {
+	// **A replica ticks no simulation, so it has to resolve where a host would
+	// have.** Until v0.19 `resolve-attachments` was registered by the scripted
+	// and presented paths only, and a replica ran neither - so every
+	// `Attachment::WorldFrame` in a joined world stayed at the identity for the
+	// whole session and `engine::render::CollectLights`, which reads that field to place
+	// a lamp parented to an attachment, lit the world origin.
+	Replica replica;
+
+	// **Instances rather than bare entities**, because an attachment resolves
+	// against the part it is *parented* to and a bare entity has no place in the
+	// tree. That is also what arrives: a snapshot carries instances.
+	engine::scene::RegisterSceneClasses();
+
+	const Entity post = replica.World.CreateInstance(engine::scene::PartClass(), "Post");
+	REQUIRE(post != engine::ecs::NULL_ENTITY);
+	replica.World.GetMutable<Transform>(post)->Frame = CFrame(Vector3{7.0f, 0.0f, 0.0f});
+
+	const Entity point = replica.World.CreateInstance(engine::scene::AttachmentClass(), "Top");
+	REQUIRE(replica.World.SetParent(point, post));
+	replica.World.GetMutable<Attachment>(point)->Frame = CFrame(Vector3{0.0f, 2.0f, 0.0f});
+
+	replica.Draw();
+
+	const Attachment *resolved = replica.World.Get<Attachment>(point);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->WorldFrame.Position.X == Approx(7.0f));
+	CHECK(resolved->WorldFrame.Position.Y == Approx(2.0f));
 }

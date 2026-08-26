@@ -155,45 +155,6 @@ namespace engine::scene {
 		return matrices;
 	}
 
-	void ResolveActiveCamera(ecs::Store &store) {
-		const ActiveCamera *active = store.Resource<ActiveCamera>();
-		if (active == nullptr) {
-			return;
-		}
-
-		// Read out of the resource before anything else is touched: the
-		// resolved matrices are written back through a second lookup, and
-		// holding a pointer across the component reads would be holding a
-		// pointer into storage those reads may move.
-		const ecs::Entity entity = active->Entity;
-		const float aspectRatio = active->AspectRatio;
-
-		const Camera *camera = store.Get<Camera>(entity);
-		const Transform *transform = store.Get<Transform>(entity);
-		if (camera == nullptr || transform == nullptr) {
-			return;
-		}
-
-		// **The near plane the renderer will actually draw with, not the one the
-		// scene authored.** A hole is walked up to and then through, and for the
-		// last hand's width of that approach an authored near plane slices the
-		// pane open - you see through the wall beside the doorway on the one
-		// frame the illusion is judged on. `PortalNearPlane` gives the drawing
-		// value back without touching the component, so the authored number
-		// survives and comes back the moment the eye is clear.
-		//
-		// **Here as well as in the renderer, and both from the same function.**
-		// These matrices are what culling runs against, so a near plane larger
-		// than the one the draw uses culls away exactly the geometry that the
-		// smaller one exists to keep.
-		Camera drawn = *camera;
-		drawn.NearPlane =
-			PortalNearPlane(camera->NearPlane, NearestSeamDistance(store, transform->Frame.Position));
-
-		const CameraMatrices resolved = ResolveCamera(transform->Frame, drawn, aspectRatio);
-		store.ResourceMutable<ActiveCamera>()->Matrices = resolved;
-	}
-
 	bool SetViewportSize(ecs::Store &store, uint32_t width, uint32_t height) {
 		if (width == 0 || height == 0) {
 			return false;

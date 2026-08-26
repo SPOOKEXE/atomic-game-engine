@@ -8,6 +8,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceTable.hpp>
@@ -48,16 +49,53 @@ namespace registration_test {
 	// makes it show up as a failing test rather than as a snapshot that loads
 	// into a narrower world.
 	const std::vector<std::string_view> EXPECTED{
-		"scene.Transform",	 "scene.PreviousTransform", "scene.Bounds",
-		"scene.Motion",		 "scene.RigidBody",			"scene.Collider",
-		"scene.Surface",	 "scene.PhysicsProperties", "scene.Visual",
-		"scene.Camera",		 "scene.QuickHash",			"scene.SurfaceCamera",
-		"scene.Transient",	 "scene.Service",			"scene.LightingService",
-		"scene.Rendered",	 "scene.SurfaceTable",		"scene.ActiveCamera",
-		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
-		"scene.SurfaceLens", "scene.SurfaceBounces",	"scene.Team",
-		"scene.PlayerTeam",	 "scene.SpawnLocation",		"scene.Tool",
+		"scene.Transform",
+		"scene.PreviousTransform",
+		"scene.Bounds",
+		"scene.Motion",
+		"scene.RigidBody",
+		"scene.Collider",
+		"scene.Surface",
+		"scene.PhysicsProperties",
+		"scene.Visual",
+		"scene.Camera",
+		"scene.SurfaceCamera",
+		"scene.Transient",
+		"scene.Service",
+		"scene.LightingService",
+		"scene.Rendered",
+		"scene.SurfaceTable",
+		"scene.ActiveCamera",
+		"scene.WorldBounds",
+		"scene.RenderedSignature",
+		"scene.Portal",
+		"scene.SurfaceLens",
+		"scene.SurfaceBounces",
+		"scene.Team",
+		"scene.PlayerTeam",
+		"scene.SpawnLocation",
+		"scene.Tool",
 		"scene.Simulated",
+
+		// The ten declared at v0.19 with nothing in the engine reading them.
+		// They are in this list for the reason the list exists: a name crosses a
+		// file and a wire, so renaming one is a format change and has to show up
+		// as a failing test rather than as a snapshot that loads into a narrower
+		// world. `docs/FUTURE_COMPONENTS.md` says what wires each of them.
+		"scene.Skeleton",
+		"scene.Bone",
+		"scene.AnimationClip",
+		"scene.Animator",
+		"scene.AnimationTrack",
+		"scene.LevelOfDetail",
+		"scene.Constraint",
+		"scene.Atmosphere",
+		"scene.Clouds",
+		"scene.Terrain",
+		"scene.SkyboxTextures",
+		"scene.SkyboxCompute",
+		"scene.CloudCompute",
+		"scene.AtmosphereProcedural",
 	};
 }
 
@@ -160,6 +198,58 @@ TEST_CASE("a name-carrying component crosses as text, not as an id", "[scene][re
 	REQUIRE(back != nullptr);
 	CHECK(back->Mesh.Text() == "registration_test.Column");
 	CHECK_FALSE(back->Visible);
+}
+
+TEST_CASE("environment shader names and texture faces survive a snapshot", "[scene][registration]") {
+	RegisterSceneComponents();
+
+	Store source("registration_test.environment.source");
+	const Entity entity = source.Create();
+	engine::scene::SkyboxTextures textures;
+	textures.Front = Name("sky/front.atex");
+	textures.Up = Name("sky/up.atex");
+	source.Set(entity, textures);
+
+	engine::scene::SkyboxCompute sky;
+	sky.Shader = engine::scene::SkyboxComputeShader::Nebula;
+	source.Set(entity, sky);
+	engine::scene::CloudCompute clouds;
+	clouds.Shader = engine::scene::CloudComputeShader::Voxel;
+	source.Set(entity, clouds);
+	engine::scene::Clouds cloudLayer;
+	cloudLayer.WindDirection = {0.25f, -0.75f};
+	source.Set(entity, cloudLayer);
+	engine::scene::AtmosphereProcedural atmosphere;
+	atmosphere.Shader = engine::scene::AtmosphereProceduralShader::Mars;
+	source.Set(entity, atmosphere);
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	const Name shifter("registration_test.EnvironmentShiftsTheIdSpace");
+	CHECK(shifter.IsValid());
+
+	Store restored("registration_test.environment.restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	REQUIRE(restored.Get<engine::scene::SkyboxTextures>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::SkyboxCompute>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::CloudCompute>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::Clouds>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::AtmosphereProcedural>(entity) != nullptr);
+	CHECK(restored.Get<engine::scene::SkyboxTextures>(entity)->Front == Name("sky/front.atex"));
+	CHECK(restored.Get<engine::scene::SkyboxTextures>(entity)->Up == Name("sky/up.atex"));
+	CHECK(
+		restored.Get<engine::scene::SkyboxCompute>(entity)->Shader ==
+		engine::scene::SkyboxComputeShader::Nebula
+	);
+	CHECK(
+		restored.Get<engine::scene::CloudCompute>(entity)->Shader == engine::scene::CloudComputeShader::Voxel
+	);
+	CHECK(restored.Get<engine::scene::Clouds>(entity)->WindDirection == engine::core::Vector2{0.25f, -0.75f});
+	CHECK(
+		restored.Get<engine::scene::AtmosphereProcedural>(entity)->Shader ==
+		engine::scene::AtmosphereProceduralShader::Mars
+	);
 }
 
 TEST_CASE("the surface table crosses a snapshot in order", "[scene][registration]") {
@@ -282,9 +372,17 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 		surface.Surface = 3;
 		cases.push_back({"Surface", surface});
 
+		Visual fitted = base;
+		fitted.Fitted = Name("registration_test.Fitted");
+		cases.push_back({"Fitted", fitted});
+
 		Visual shadow = base;
 		shadow.CastShadow = !base.CastShadow;
 		cases.push_back({"CastShadow", shadow});
+
+		Visual locked = base;
+		locked.Locked = !base.Locked;
+		cases.push_back({"Locked", locked});
 	}
 
 	for (const Case &one : cases) {
@@ -317,6 +415,50 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	CHECK(restored.Visible == authored.Visible);
 	CHECK(restored.Surface == authored.Surface);
 	CHECK(restored.CastShadow == authored.CastShadow);
+	CHECK(restored.Fitted == authored.Fitted);
+	CHECK(restored.Locked == authored.Locked);
+}
+
+// **A field's *width* is as easy to forget as the field, and this is the case
+// that says so.**
+//
+// `Visual::Surface` was widened from `int8_t` to `int16_t` at v0.17 expressly to
+// lift a ceiling of a hundred and twenty-seven mirrors, and its serialiser went
+// on writing and reading eight bits until v0.19. Every slot index from 128 up
+// was truncated on the way into an `.agame` and came back as a different pane or
+// as -1, in a world that had gone to the trouble of authoring that many.
+//
+// The case above never caught it because it used slot 3. This one uses the whole
+// range: the two extremes an `int16_t` reaches, the first value an `int8_t`
+// cannot hold, and the sentinel.
+TEST_CASE("a surface slot survives the whole width of its field", "[scene][registration]") {
+	RegisterSceneComponents();
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Find(Name("scene.Visual")));
+
+	for (const int16_t slot :
+		 {int16_t(-1),
+		  int16_t(0),
+		  int16_t(127),
+		  int16_t(128),
+		  int16_t(4096),
+		  int16_t(32767),
+		  int16_t(-32768)}) {
+		INFO("slot " << slot);
+
+		Visual authored;
+		authored.Surface = slot;
+
+		ByteWriter writer;
+		descriptor.Write(writer, &authored, 1);
+		ByteReader reader(writer.Bytes());
+
+		Visual restored;
+		restored.Surface = 9;
+		descriptor.Read(reader, &restored, 1);
+
+		CHECK(restored.Surface == slot);
+	}
 }
 
 TEST_CASE("every scene component obeys the serialisation rules", "[scene][registration]") {

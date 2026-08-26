@@ -27,15 +27,15 @@
 | Read | For |
 |---|---|
 | **[RUNNING.md](RUNNING.md)** | **every way to build and run the client, the server, a single test and the tools** |
+| [AGENTS.md](AGENTS.md) | the six rules, and how AI is used here |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | building from a fresh clone, and what is expected of a pull request |
-| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist - run it before opening one |
-| [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
-| [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
-| [AGENTS.md](AGENTS.md) | the four rules, and how AI is used here |
 | [ROADMAP.md](ROADMAP.md) | what is built, what is next |
-| [docs/RELEASING.md](docs/RELEASING.md) | the version scheme, and how a tag becomes a download |
-| [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |
 | [SECURITY.md](SECURITY.md) | the threat model, and reporting |
+| [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
+| [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
+| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist - run it before opening one |
+| [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |
+| [docs/RELEASING.md](docs/RELEASING.md) | the version scheme, and how a tag becomes a download |
 
 Each `mono.X` folder also carries its own `AGENTS.md` with the invariants
 specific to it. Those are the ones that catch real mistakes, so read the one for
@@ -51,14 +51,12 @@ and publishes what it built to the GitHub releases page:
 - **Windows:** a `.zip` of all four programs
 - **macOS:** a `.tar.gz`, unsigned and untested
 
-Linux is the platform this is developed on. Windows compiles but has never
-shipped, and macOS has never been run, so neither one holds up a release.
-
-Development builds and media are still in the discord server below.
+Development builds and media are in the discord server below.
 
 ## Version
 
-Current Version: **v0.18.0**
+Current Version: **v0.19.0**
+
 Project Start Date: **1st August 2026**
 
 Versions are `v[major].[minor].[patch]`. Everything before `1.0.0` is a
@@ -83,9 +81,9 @@ Maintained by open-source contributing developers, especially those coming from 
 
 Heavy usage of AI models for fast development iteration. Refer to `AGENTS.md` and `CONTRIBUTING.md` for more information.
 
-Refer to `ROADMAP.md` for what was done and we plan to do.
+Refer to `ROADMAP.md` for what was done and we plan to do. `docs/retired/ROADMAP.md` are older completed items that have been moved.
 
-More on the discord server in the links section.
+More on the discord server in the section below.
 
 ## Links
 
@@ -94,4 +92,3 @@ More on the discord server in the links section.
 ## License
 
 [`Mozilla Public License 2.0 (MLP2.0)`](LICENSE)
-

@@ -1,4 +1,6 @@
 #include <engine/collision/TriangleMesh.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +12,7 @@ namespace engine::collision {
 		// vertex makes the normal of every triangle using it a NaN, and a
 		// contact normal of NaN is a velocity of NaN is a body that leaves the
 		// world.
-		bool Finite(const core::Vector3 &point) {
+		bool FiniteVertex(const core::Vector3 &point) {
 			return std::isfinite(point.X) && std::isfinite(point.Y) && std::isfinite(point.Z);
 		}
 
@@ -49,6 +51,24 @@ namespace engine::collision {
 		mesh.Indices.reserve(triangles * 3);
 		mesh.TriangleBounds.reserve(triangles);
 
+		// A trailing partial triangle is dropped by the division above and is
+		// always a caller that built its index buffer wrong.
+		if (indices.size() % 3 != 0) {
+			ENGINE_WARN(
+				"{} indices is not a whole number of triangles; {} ignored",
+				indices.size(),
+				indices.size() % 3
+			);
+		}
+
+		// Three reasons a triangle does not survive, kept apart because they
+		// mean different things: an index past the end is a corrupt buffer, a
+		// non-finite vertex is an importer that let a NaN through, and a sliver
+		// is ordinary baked geometry.
+		size_t outOfRange = 0;
+		size_t nonFinite = 0;
+		size_t degenerate = 0;
+
 		for (size_t triangle = 0; triangle < triangles; triangle++) {
 			const uint32_t first = indices[triangle * 3];
 			const uint32_t second = indices[triangle * 3 + 1];
@@ -57,13 +77,15 @@ namespace engine::collision {
 			// An index past the end is the one failure that is not merely a bad
 			// answer - it is a read of somebody else's memory.
 			if (first >= vertices.size() || second >= vertices.size() || third >= vertices.size()) {
+				outOfRange++;
 				continue;
 			}
 
 			const core::Vector3 &a = vertices[first];
 			const core::Vector3 &b = vertices[second];
 			const core::Vector3 &c = vertices[third];
-			if (!Finite(a) || !Finite(b) || !Finite(c)) {
+			if (!FiniteVertex(a) || !FiniteVertex(b) || !FiniteVertex(c)) {
+				nonFinite++;
 				continue;
 			}
 
@@ -71,6 +93,7 @@ namespace engine::collision {
 			// corners are distinct and collinear is degenerate in exactly the
 			// way that matters, and comparing corners misses it.
 			if ((b - a).Cross(c - a).MagnitudeSquared() <= DEGENERATE_DOUBLE_AREA) {
+				degenerate++;
 				continue;
 			}
 
@@ -91,6 +114,25 @@ namespace engine::collision {
 			}
 		}
 
+		// A corrupt index buffer is a warning because it is a bug upstream. A
+		// dropped sliver is not: baked meshes are full of them, so the count
+		// only appears at `debug` beside the shape of what was kept.
+		if (outOfRange != 0 || nonFinite != 0) {
+			ENGINE_WARN(
+				"{} triangle(s) had an index past {} vertices and {} had a non-finite corner",
+				outOfRange,
+				vertices.size(),
+				nonFinite
+			);
+		}
+		ENGINE_DEBUG(
+			"mesh: {} of {} triangles kept over {} vertices, {} degenerate",
+			mesh.TriangleBounds.size(),
+			triangles,
+			vertices.size(),
+			degenerate
+		);
+
 		return mesh;
 	}
 
@@ -107,6 +149,20 @@ namespace engine::collision {
 				continue;
 			}
 			if (written >= out.size()) {
+				// **The caller gets a partial answer and cannot tell.** Every
+				// triangle past this point is a contact that will not be
+				// generated, so a body rests on the first `out.size()` of them
+				// and passes through the rest. Rate-limited because a narrow
+				// phase asks this thousands of times a frame, and counted so a
+				// headless run reports it with no overlay open.
+				core::Metrics::Count("collision.mesh.overlap.truncated", 1.0);
+				ENGINE_WARN_EVERY(
+					1.0,
+					"overlap buffer of {} filled at triangle {} of {}; contacts past it are lost",
+					out.size(),
+					triangle,
+					mesh.TriangleBounds.size()
+				);
 				break;
 			}
 			out[written++] = static_cast<uint32_t>(triangle);

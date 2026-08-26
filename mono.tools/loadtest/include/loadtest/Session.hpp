@@ -38,8 +38,14 @@ namespace loadtest {
 		Dialling,  ///< The handshake is in flight. Nothing has been admitted.
 		Streaming, ///< Admitted. The join snapshot is arriving in chunks.
 		Playing,   ///< Joined. The whole world arrived and inputs are going up.
-		Refused,   ///< The server turned this client away. Terminal.
-		TimedOut,  ///< Nothing moved inside the deadline. Terminal.
+		// The connector gave up. Terminal.
+		//
+		// **Not necessarily a refusal**, however `Connector::Rejected` reads:
+		// it is also what a server too busy to answer a handshake inside
+		// `ConnectorSettings::AttemptSeconds` looks like, on both transports.
+		// The connector's own log line says which, and names the transport.
+		Refused,
+		TimedOut, ///< Nothing moved inside the deadline. Terminal.
 	};
 
 	// A short name for a stage, for a report line.

@@ -6,6 +6,7 @@
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -30,6 +31,7 @@ namespace client {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::render::DrawList;
 	using engine::replication::InterpolationSettings;
 	using engine::replication::SnapshotBuffer;
 	using engine::scene::AlphaMode;
@@ -103,6 +105,14 @@ namespace client {
 		}
 
 		void CollectReplicated(Store &store) {
+			// **Named, because it was the one collector with no span.**
+			// `collect-instances` has had one since v0.5 and this is its twin
+			// for a replicated world, so a `--connect` run's `pre-render` bar
+			// had a hole in it exactly the size of the loop below - which is
+			// also the number `docs/ARCH_REVIEW.md` F3 asks for and nobody
+			// could read.
+			ENGINE_PROFILE_CAT("collect-replicated", engine::core::ProfileCategory::Simulation);
+
 			auto *drawList = store.ResourceMutable<DrawList>();
 			auto *buffer = store.ResourceMutable<SnapshotBuffer>();
 			if (drawList == nullptr || buffer == nullptr) {
@@ -124,6 +134,48 @@ namespace client {
 
 			// The authority owns ancestry filtering; the replica only honors `Visible`.
 			// Optional appearance and tag components must not be query requirements.
+			//
+			// **Serial, and the reason is not the crossover.** Rule 5 asks for
+			// the number, so: measured in `release` against a server holding
+			// 20,000 replicated rows, this loop is **1.542 ms at p50, 77 ns a
+			// row** - read off the `collect-replicated` span above. A pool
+			// handover is 7.74 us for eight ranges (`parallel/Jobs.hpp`,
+			// re-measured at `-O3`), so at this row cost the handover is a
+			// quarter of the serial work at about **400 rows**. That is a very
+			// low crossover and the loop clears it by fifty times: at 20,000
+			// rows a perfect split across 23 workers would be about 75 us
+			// against 1.542 ms. `docs/ARCH_REVIEW.md` F3 is right that the
+			// blocker is not the loop shape, and it is right that the
+			// crossover is not the argument either - so the argument has to be
+			// written down rather than implied by leaving it serial.
+			//
+			// **Two things stop it, both outside this loop and neither cheap.**
+			//
+			//  * `SnapshotBuffer::Sample` is not thread-safe and its header says
+			//    why it never will be quietly: it counts `Statistics::Held`
+			//    against `Statistics::Interpolated` on every call, which is what
+			//    says whether the buffer is smoothing anything at all, and that
+			//    header refuses to hide those behind a `mutable`. Twenty-three
+			//    workers incrementing two plain counters is a race, and making
+			//    them atomic puts a contended write on the per-row path this
+			//    loop is trying to make cheaper.
+			//  * The output is a *filtered* `push_back`. `visual.Visible` is a
+			//    field test rather than a query term, so a row's position in the
+			//    walk does not decide its position in the draw list - which is
+			//    exactly what `engine::render::CollectInstances` relies on to let
+			//    workers write `out[base + first + row]` with no atomic and no
+			//    reshuffling. Making this list dense needs `scene::Rendered` in
+			//    the query, and marking it needs a visibility system running in
+			//    a world that `mono.client/AGENTS.md` says advances nothing.
+			//
+			// The four optional joins below are *not* a third reason. They rule
+			// out `EachBatchParallel`, which is handed columns and no entity, but
+			// `Store::EachParallel` hands out entities and could express them.
+			//
+			// So this is a measured decision to leave it, not an unmeasured one:
+			// the win is real and it is bought with a change to `replication`'s
+			// public contract and a new system in the replica. Neither belongs
+			// in a loop rewrite.
 			store.Each<const Transform, const Bounds, const Visual>(
 				[drawList, buffer, &store, reckonSeconds](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
@@ -157,15 +209,26 @@ namespace client {
 					const LocalTransparency *local = store.Get<LocalTransparency>(entity);
 
 					// Every replicated visual field, through the builder both
-					// collectors share - see `scene::MakeDrawInstance`. The
-					// optional components stay optional here: a replicated row
-					// may arrive without an appearance, which is the difference
-					// from the local collector that made these two drift.
-					drawList->Instances.push_back(
-						engine::scene::MakeDrawInstance(
-							interpolated.value_or(transform.Frame), bounds, visual, appearance, tags, local
-						)
+					// collectors share. Fully transparent rows stop here, before
+					// residency, sorting, shadows or portal cloning can charge for
+					// geometry that contributes no pixel.
+					const engine::scene::DrawInstance instance = engine::scene::MakeDrawInstance(
+						interpolated.value_or(transform.Frame),
+						bounds,
+						visual,
+						appearance,
+						tags,
+						entity.Id,
+						local,
+						// Which rig this row belongs to, so a portal cuts a
+						// replicated character in one piece. Optional like
+						// the two above it, and for the same reason: most
+						// rows are not a limb of anything.
+						store.Get<engine::scene::CharacterLimb>(entity)
 					);
+					if (!(instance.Transparency >= 1.0f)) {
+						drawList->Instances.push_back(instance);
+					}
 				}
 			);
 
@@ -178,7 +241,7 @@ namespace client {
 			// frames - the ones this machine actually draws - so the far half of
 			// a body lines up with the near half rather than trailing it by
 			// however far the character walked since the last tick. After the
-			// metric for the reason `client::CollectInstances` gives.
+			// metric for the reason `engine::render::CollectInstances` gives.
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 
 			engine::core::Metrics::Count("replica.behind.ticks", buffer->Behind());
@@ -207,6 +270,28 @@ namespace client {
 		// what to run by asking whether a row is a `LocalScript`.
 		//
 		// Both calls register their components first and both are idempotent.
+		//
+		// **And `scene`'s classes, which were the ones actually missing.** The
+		// paragraph above is exactly right about why an unresolved class name
+		// matters and then registers `gui` and `script` and stops - so every
+		// `Part`, `SpawnLocation` and `Model` a snapshot named arrived untyped,
+		// with `ecs: 'Workspace' is not a class registered here` in the log to
+		// say so.
+		//
+		// **It cost 81% of a replica's traffic**, and the path is worth stating
+		// because nothing about it looks like bandwidth. `ecs.InstanceClass`
+		// crosses as a class *name*; a replica that cannot resolve the name
+		// stores an empty one, so the row reads 13 bytes on the authority and 4
+		// here. The anti-entropy audit compares the two, disputes the group,
+		// and a dispute re-arms the recovery walk - which then re-sends every
+		// row of every entity every few ticks, for ever, over a difference no
+		// amount of re-sending can fix. Measured on `loadtest` with four
+		// clients and nothing moving: 91,507 B/s before, 16,964 after.
+		//
+		// `mono.studio` calls this and the registry is process-wide, which is
+		// exactly why the editor never showed it.
+		engine::scene::RegisterSceneClasses();
+
 		(void)engine::gui::RegisterGuiClasses();
 		(void)engine::script::ScriptClass();
 
@@ -217,7 +302,7 @@ namespace client {
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
 		// and one minted from the compiler's spelling is a world `Store::Save`
 		// refuses - so a replica could not be snapshotted, which is what the
-		// studio does every time Play is pressed. `client::DrawList` two lines
+		// studio does every time Play is pressed. `engine::render::DrawList` two lines
 		// down is the same fix for the same reason, one version earlier.
 		engine::replication::RegisterReplicationComponents();
 
@@ -234,6 +319,26 @@ namespace client {
 		// whose every other row is somebody else's answer.
 		store.SetResource(engine::scene::InputState{});
 		store.SetResource(engine::scene::CameraController{});
+
+		// **First in the phase, because everything below is derived from it.**
+		// A replica never ticks a simulation, so the `PreSimulation` copy every
+		// other host installs has nothing to hang off - this is the replica's
+		// only resolve, and without it `Attachment::WorldFrame` stayed at the
+		// identity for the whole session. What that looked like was a
+		// `PointLight` parented to an attachment lighting the world origin
+		// rather than the lamp it hangs from: `engine::render::CollectLights` reads the
+		// cache and there was nobody to fill it. The script surface was never
+		// affected - `Attachment.WorldCFrame` is a computed property that
+		// resolves on the spot - but its *change signal* was, for the reason
+		// `server::PrepareSimulation` gives.
+		//
+		// **Resolved again here rather than trusted from the wire.** The
+		// authority's answer arrives a tick old and against uninterpolated
+		// transforms; this world draws from interpolated ones, so a lamp placed
+		// from the wire would sit where its part was at the last snapshot.
+		scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &store) {
+			(void)engine::scene::ResolveAttachments(store);
+		});
 
 		// PreRender derives draw data and mirror aim; the replica does not simulate.
 		//

@@ -4,6 +4,10 @@ mono_add_library(render
 	TIER client
 	DEPS
 		Engine::core
+		Engine::parallel
+
+		# WorldPresentation is the shared world-to-renderer boundary.
+		Engine::ecs
 
 		# Scene data and culling decisions are shared with headless hosts.
 		Engine::graph
@@ -13,11 +17,10 @@ mono_add_library(render
 
 		Engine::scene
 
-		# `render::ParticleBatch` names an `effects::EmitterBlock` and
-		# `render::ParticleBirth` carries an `effects::ParticleState`, which is
-		# the whole point of both types: the renderer owns the particle pool and
-		# steps it, so the layouts have to be the ones simulation writes. That
-		# makes it a public dependency in the same way `assets` is - the payload
+		# `render::ParticleBatch` names the effects block, spawn state and runtime
+		# rows. The renderer owns the particle pool and steps it, so those layouts
+		# have to be the ones simulation writes. That makes it a public dependency
+		# in the same way `assets` is - the payload
 		# type has to propagate to whoever fills a batch.
 		#
 		# L8 is below L12 and `effects` is `shared`, so the edge goes downward and

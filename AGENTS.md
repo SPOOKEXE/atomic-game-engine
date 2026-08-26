@@ -74,12 +74,24 @@ passes, and is wrong.
 ### 1. The layer stack is not negotiable
 
 Every module sits at a height, and **a layer may see every layer below it and
-none above it.** The heights are in the design notes; the enforcement is in
-`mono.build/MonoLibrary.cmake`, which fails at configure time with the
-offending edge named.
+none above it.** [`docs/CODE_ARCH.md`](docs/CODE_ARCH.md) is the map: the stack,
+the tiers, the dependency rule and what is allowed to cross it.
 
-If a change needs an edge that the tier check refuses, that is the design
-telling you something. The fix is almost never `ALLOW_TIER_ESCAPE`.
+**Two checks, and they catch different things.** The tier rule is enforced by
+`mono.build/MonoLibrary.cmake` at configure time, which fails the build with the
+offending edge named - that is client, server and shared. The *layer* rule is
+enforced by `mono.tools/architecture/CheckTargetGraph.cmake` under `just
+test-architecture`, which reads the `layer` on every module in
+`expected_graph.json` and refuses an edge that does not run downward. Until v0.19
+only the first existed and this paragraph claimed both.
+
+**Sideways is allowed only where it is named.** Three edges in this repository
+run to a module at their own layer, each for a reason written beside it, and
+each listed in that module's `lateral` array. Adding a fourth is a diff a
+reviewer sees rather than a rule quietly widening.
+
+If a change needs an edge either check refuses, that is the design telling you
+something. The fix is almost never `ALLOW_TIER_ESCAPE`.
 
 ### 2. The ECS owns the storage
 
@@ -191,6 +203,10 @@ almost none of it is in the plumbing.
   search.
 - **Do not silently reduce scope.** If part of a task turns out to be blocked,
   finish everything else and say explicitly what was left out and why.
+- **Do not put engine code elsewhere.** If you are adding a core system to the engine,
+  it belongs in the mono.engine, NOT mono.server, mono.client, mono.cdn, etc.
+  The mono.server, mono.client, mono.cdn, etc, all pull code from mono.engine,
+  based on its needs, so everything is consolidated and unified under one location.
 
 ---
 
@@ -233,6 +249,85 @@ Two profilers, and they are not the same thing:
 The userland profiler, when it arrives, is a third thing and shares no code
 with either.
 
+## Profiling
+
+### Flame graphs
+
+- Put `ENGINE_PROFILE` or `ENGINE_PROFILE_CAT` around a meaningful unit of
+  work. One scope feeds Tracy, the in-game `FrameGraph` and `HeapProfile`, so
+  do not create a second set of timing-only instrumentation beside it.
+  `ENGINE_HEAP_SCOPE` is only for work that allocates but is not worth timing.
+- Bound the whole frame, including waits. A blocking display, device or worker
+  wait is `Idle`, not missing time. Keep unmarked time and dropped spans visible:
+  a partial flame graph must not look complete.
+- Read a flame graph as a time-ordered hierarchy, not as a ranked bar chart.
+  Use the retained history, an event-scheduler rule or a written snapshot for
+  intermittent spikes. An interval average is useful for steady cost and can
+  hide the single bad frame.
+- Separate inclusive duration, self time and idle time. Category totals use
+  self time, while the actionable share of a frame is busy time. Adding nested
+  inclusive spans double-counts work.
+- Profile the build whose performance is being claimed. `dev` is `-O0`; use
+  `release` for shipped-cost conclusions and name the preset, backend, scene
+  count and relevant runtime settings beside every reported number.
+
+### Asynchronous work
+
+- Tracy records every thread directly. `FrameGraph` deliberately owns one
+  thread and drops live scopes opened elsewhere. A worker measures its own work,
+  then the owner reports the completed duration with `FrameGraph::Report`,
+  `ReportNamed` or `ReportedScope` after the join. Do not put a lock in the
+  per-scope path to make worker spans appear live.
+- A reported span is producer work, not elapsed time on the frame-owning thread.
+  It may overlap other reported work and must not be subtracted from its measured
+  parent's self time. Preserve the producer's hierarchy and mark the result as
+  reported so the flame graph cannot imply serial execution.
+- GPU timings come from nonblocking device timestamp queries. Collect only
+  completed query slots, accept that results arrive frames late and out of
+  order, and report every submitted measurement exactly once. Use the `Gpu`
+  category and a `gpu ` name prefix; never fold device time into CPU `Render`
+  time or place a late result at a fabricated wall-clock position.
+- "Async eligible" is not proof of physical overlap. Report dependency waves,
+  queue transfers and the command buffers actually submitted separately. The
+  SDL backend currently uses one unified queue, so its split command buffers are
+  structural boundaries for a future multi-queue backend, not evidence that the
+  GPU ran them concurrently.
+
+### Allocation and byte counters
+
+- If a path allocates, uploads, downloads or transfers memory, report byte and
+  operation counts at the boundary that performs the work. Do not infer bytes
+  from entity counts or treat a non-zero boolean as an allocation profile.
+- CPU allocation attribution comes from the heap tag opened by every
+  `ENGINE_PROFILE` scope. Add `ENGINE_HEAP_SCOPE` only where an allocation-only
+  boundary would otherwise be untagged. Use bounded subsystem names, not names
+  generated per entity, asset or script chunk.
+- Report live bytes, live blocks, peak bytes, total allocated bytes and profiler
+  overhead as different figures. Live bytes describe residency; a large total
+  with flat live bytes describes churn. A leak is a sustained live-byte slope
+  with a credible fit, not one scene-load step or a high allocation total.
+- CPU heap sampling belongs on its one-second sampler, not in every frame.
+  `--heap-report` writes the tagged tree and growth rates, and `just heap-soak`
+  is the automatic slope-and-fit check. Heap hooks are compiled out of the
+  shipped `release` build, so use a profiling-enabled preset or the diagnostic
+  `-dev` archive and say when the hooks were unavailable.
+- GPU memory counters are logical payload, not driver heap commitments. Route
+  buffer, transfer-buffer and texture creation and release through the tracked
+  wrappers, including mip levels and sample counts. Report live and peak bytes
+  beside cumulative allocated and released bytes and resource creation counts,
+  because a flat live heap can still be rebuilding a target every frame.
+- Use `Metrics::Count` for a per-frame byte or operation total, and a gauge for
+  a current level. Counters are drained rates; gauges are not. Read metrics to
+  report them, never to steer engine behaviour.
+
+### Cascaded and Individual Caching
+
+- Use caching to prevent numerous computations when the scenario does not require it.
+  For example, the studio UI only needs to be recomputed when any state changes, not
+  every frame. This would warrant a "individual cache".
+- Cascaded caching is more for layered images, where if one image changes in a chain,
+  you need to update the layered image again.
+
 ---
 
 ## Honesty in reporting
@@ -257,4 +352,17 @@ the one that gets believed.
 - Have you formatted your code correctly?
 - Are you doing any 'negative' C++ code practices?
 - Are you doing any 'negative' general code practices?
+
+---
+
+## Taste
+
+- Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
+- If a rule here fights the task in front of you, say so loudly and get a human sign-off or response before breaking it.
+
+## Additional Tips
+
+- Do not verify with browsers or compute unless user explicitly agrees or requests it.
+- Use headless tests where possible, save live studio tests until the end when the user allows it.
+- Security is important, but not should be over-indexed on. If you think something should be audited, especially new items, add to ROADMAP.md under current work version.
 

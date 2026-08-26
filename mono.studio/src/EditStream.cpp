@@ -463,8 +463,18 @@ namespace studio {
 
 	std::unique_ptr<EditStream>
 	EditStream::Host(engine::net::Transport &transport, CommandLog &log, engine::world::Universe &universe) {
+		// **QUIC by default, which is `ListenerSettings`'s own default and not a
+		// choice made here.** The studio has one host path and one join path and
+		// both go through `SessionPort`, so what the editor gets is whatever the
+		// engine's listener serves - there is no second transport decision to
+		// keep in step. A host with no operator key draws an ephemeral identity;
+		// see `ListenerSettings::Quic`.
 		engine::replication::ListenerSettings serving;
 		serving.Session = EditSession();
+		// The ceiling is the one the edit session already stated.
+		// `docs/QUIC.md` §6: it survives above the congestion controller rather
+		// than instead of it.
+		serving.Quic.BytesPerTick = serving.Session.Link.BytesPerTick;
 
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));
 		stream->Server = std::make_unique<engine::replication::Listener>(transport, serving);
@@ -490,8 +500,13 @@ namespace studio {
 	) {
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));
 		stream->Unused = std::make_unique<Store>("teamcreate.unused");
+		// No transport choice here either: the connector opens with QUIC and
+		// falls back if the host refuses. An editor joining another editor has
+		// no advert in hand at this point - `Join` takes an address - so it pays
+		// the refusal round trip in the case where the host is on the old wire.
 		engine::replication::ConnectorSettings joining;
 		joining.Session = EditSession();
+		joining.Quic.BytesPerTick = joining.Session.Link.BytesPerTick;
 		stream->Client =
 			std::make_unique<engine::replication::Connector>(transport, host, nowSeconds, joining);
 
@@ -511,7 +526,11 @@ namespace studio {
 
 	size_t EditStream::Editors() const {
 		if (Server != nullptr) {
-			return Server->Count() + 1;
+			// **`Carrying` and not `Count`.** Under QUIC a connection exists
+			// before its handshake finishes, and a peer in that window cannot be
+			// sent an edit - so counting it would show a person an editor who
+			// would miss whatever they typed next.
+			return Server->Carrying() + 1;
 		}
 		return Client != nullptr && Client->Admitted() ? 2 : 1;
 	}

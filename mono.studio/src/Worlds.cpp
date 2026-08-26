@@ -59,10 +59,10 @@ namespace studio {
 	}
 
 	void Editor::DrawExampleSceneMenu() {
-		// **Refused while anything is running**, for the reason New World and
-		// Import are: the snapshot Stop restores was taken before the run began,
-		// so a world added during Play would vanish on Stop.
-		if (ImGui::BeginMenu("New Scene from Example", !AnyRunning())) {
+		// **Enabled while a scene runs**, for the reason `DrawWorlds` gives:
+		// Stop restores one world from its own document and cannot reach a
+		// scene created after the run began.
+		if (ImGui::BeginMenu("New Scene from Example")) {
 			DrawExampleSceneItems();
 			ImGui::EndMenu();
 		}
@@ -95,12 +95,27 @@ namespace studio {
 		// is how a script reaches them; this shows them as a list because that
 		// is how an author manages them. Same objects, not two models kept in
 		// step.
-		// **Structural changes need every scene stopped, not just one.** New and
-		// Import add worlds to a universe that a running scene's snapshot does
-		// not know about - see `WorldRun`.
-		const bool editing = !AnyRunning();
-
-		ImGui::BeginDisabled(!editing);
+		// **Adding a scene while another one runs is allowed, and the reason it
+		// was not is gone.** This was refused because "the snapshot Stop
+		// restores was taken before the run began, so a world added during Play
+		// would vanish on Stop" - which was true when the snapshot was
+		// `Universe::Save`, every world at once.
+		//
+		// It is not a universe snapshot any more. `WorldRun::Snapshot` is a
+		// *world document* written by `WriteWorldDocument`, and `StopWorld`
+		// destroys and rebuilds exactly the one world it names. A scene created
+		// during a run is in no run's snapshot, so Stop cannot reach it. The
+		// comment on `WorldRun::Snapshot` records that change and this refusal
+		// outlived it.
+		//
+		// **Safe against the tick as well as against Stop.** `Universe::Tick`
+		// blocks, `Editor::Simulate` runs from the frame loop, and this button
+		// is pressed while the interface draws - so a world is added between
+		// ticks on the thread that owns them, never during one.
+		//
+		// **Removal is a different question and is not decided here.** Deleting
+		// a running world would leave a `WorldRun` naming storage that is gone;
+		// that path carries its own guard.
 		if (ImGui::Button("New")) {
 			AskingNewWorld = true;
 			NameBuffer = "World " + std::to_string(Universe->Count() + 1);
@@ -121,26 +136,10 @@ namespace studio {
 		if (ImGui::Button("Example...")) {
 			ImGui::OpenPopup(EXAMPLE_POPUP);
 		}
-		ImGui::EndDisabled();
 
-		// **Outside the disabled block**, because a popup has to be submitted
-		// every frame to stay open and a disabled scope would swallow the clicks
-		// inside it. The button that opens it is what carries the refusal.
 		if (ImGui::BeginPopup(EXAMPLE_POPUP)) {
 			DrawExampleSceneItems();
 			ImGui::EndPopup();
-		}
-
-		if (!editing) {
-			ImGui::SameLine();
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			// **Structural changes are refused while running, and it is not
-			// timidity.** The snapshot Stop restores was taken before the run
-			// began, so a world added during Play would vanish on Stop and one
-			// removed would come back. Refusing is the honest answer; doing it
-			// and then silently undoing it is not.
-			ImGui::TextUnformatted("stop to change the scene list");
-			ImGui::PopStyleColor();
 		}
 
 		ImGui::Separator();

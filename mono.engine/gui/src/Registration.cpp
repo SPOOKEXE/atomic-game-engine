@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 namespace engine::gui {
 
@@ -76,6 +77,89 @@ namespace engine::gui {
 				label.LineHeight = reader.ReadFloat();
 				label.MaxVisible = reader.ReadInt32();
 				label.Rich = reader.ReadBool();
+			}
+		}
+
+		// **`gui.Gradient` is here for a different reason from the three above,
+		// and it is a size rather than a correctness one.**
+		//
+		// A `core::ColorSequence` is twenty keypoint slots and a count, and a
+		// `core::NumberSequence` is twenty more - 656 of the component's 672
+		// bytes. The generated writer copies the object representation, so every
+		// gradient in every world wrote all forty slots into every save and
+		// every replication delta, whatever `Count` said. **A default two-stop
+		// gradient is thirty-two meaningful bytes of ramp**, and it was costing
+		// 656.
+		//
+		// So this writes `Count` and then that many stops, exactly as
+		// `effects`'s ribbon pair does for the same two types. `Sequence::Add`
+		// on the way back in is what keeps a hostile file from claiming a count
+		// past the capacity.
+		void WriteRamp(core::ByteWriter &writer, const core::ColorSequence &sequence) {
+			writer.WriteUInt32(sequence.Count);
+			for (uint32_t stop = 0; stop < sequence.Count; stop++) {
+				writer.WriteFloat(sequence.Keypoints[stop].Time);
+				writer.WriteFloat(sequence.Keypoints[stop].Value.R);
+				writer.WriteFloat(sequence.Keypoints[stop].Value.G);
+				writer.WriteFloat(sequence.Keypoints[stop].Value.B);
+			}
+		}
+
+		void ReadRamp(core::ByteReader &reader, core::ColorSequence &sequence) {
+			sequence = core::ColorSequence{};
+			const uint32_t stops = reader.ReadUInt32();
+			for (uint32_t stop = 0; stop < stops && !reader.Failed(); stop++) {
+				const float at = reader.ReadFloat();
+				const float red = reader.ReadFloat();
+				const float green = reader.ReadFloat();
+				const float blue = reader.ReadFloat();
+				(void)sequence.Add(core::ColorKeypoint{at, core::Color3{red, green, blue}});
+			}
+		}
+
+		void WriteCurve(core::ByteWriter &writer, const core::NumberSequence &sequence) {
+			writer.WriteUInt32(sequence.Count);
+			for (uint32_t stop = 0; stop < sequence.Count; stop++) {
+				writer.WriteFloat(sequence.Keypoints[stop].Time);
+				writer.WriteFloat(sequence.Keypoints[stop].Value);
+				writer.WriteFloat(sequence.Keypoints[stop].Envelope);
+			}
+		}
+
+		void ReadCurve(core::ByteReader &reader, core::NumberSequence &sequence) {
+			sequence = core::NumberSequence{};
+			const uint32_t stops = reader.ReadUInt32();
+			for (uint32_t stop = 0; stop < stops && !reader.Failed(); stop++) {
+				const float at = reader.ReadFloat();
+				const float value = reader.ReadFloat();
+				const float envelope = reader.ReadFloat();
+				(void)sequence.Add(core::NumberKeypoint{at, value, envelope});
+			}
+		}
+
+		void WriteGradients(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *gradients = static_cast<const Gradient *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const Gradient &gradient = gradients[index];
+				WriteRamp(writer, gradient.Color);
+				WriteCurve(writer, gradient.Transparency);
+				writer.WriteFloat(gradient.Offset.X);
+				writer.WriteFloat(gradient.Offset.Y);
+				writer.WriteFloat(gradient.Rotation);
+				writer.WriteBool(gradient.Enabled);
+			}
+		}
+
+		void ReadGradients(core::ByteReader &reader, void *destination, size_t count) {
+			auto *gradients = static_cast<Gradient *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				Gradient &gradient = gradients[index];
+				ReadRamp(reader, gradient.Color);
+				ReadCurve(reader, gradient.Transparency);
+				gradient.Offset.X = reader.ReadFloat();
+				gradient.Offset.Y = reader.ReadFloat();
+				gradient.Rotation = reader.ReadFloat();
+				gradient.Enabled = reader.ReadBool();
 			}
 		}
 
@@ -257,7 +341,7 @@ namespace engine::gui {
 		// Append-only, for the reason above. Trivially copyable despite holding
 		// two sequences - `core::Sequence` is fixed-capacity precisely so that a
 		// ramp can be a component, and its own header carries the argument.
-		ecs::Components::Register<Gradient>("gui.Gradient");
+		ecs::Components::Register<Gradient>("gui.Gradient", WriteGradients, ReadGradients);
 
 		// Derived, so it belongs with `Resolved` by nature and at the end by
 		// rule. Excluded from replication for `Resolved`'s exact reason: every

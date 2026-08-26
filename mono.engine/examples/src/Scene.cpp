@@ -15,6 +15,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
 #include <array>

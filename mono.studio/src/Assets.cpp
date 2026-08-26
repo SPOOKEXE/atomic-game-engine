@@ -30,6 +30,7 @@
 // places to say the same thing.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
@@ -41,7 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <assetc/Bake.hpp>
-#include <cdn/LocalStore.hpp>
+#include <cdn/LocalPublish.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -112,7 +113,7 @@ namespace studio {
 			return;
 		}
 
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 
 		// **Read when the panel opens and after anything changes it**, not every
 		// frame: listing `raw/` stats every file and reading the manifest parses
@@ -180,7 +181,7 @@ namespace studio {
 		// in the editor's preferences file is a key that signs anything anybody
 		// drops in the folder. The *ingest* key on the Content page is saved and
 		// that is not an inconsistency - `ContentSources.hpp` carries why.
-		ImGui::TextUnformatted("Publish raw/ into processed/");
+		ImGui::TextUnformatted("Publish baked/ into processed/");
 
 		ImGui::SetNextItemWidth(-engine::ui::Scaled(130.0f));
 		ImGui::InputTextWithHint(
@@ -384,7 +385,7 @@ namespace studio {
 	}
 
 	bool Editor::BakeRawAsset(const std::string &relative, std::string &baked) {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 
 		// **One source, through the whole baker.** `assetc::Settings::Only`
 		// filters the walk rather than skipping it, so a material picked here
@@ -407,7 +408,7 @@ namespace studio {
 		// flat, so a model's `tex/skin.png` cannot be followed through the folder
 		// and only the import record still knows where the two came from. A bake
 		// without this produces a mesh whose sheets nothing can fetch.
-		settings.ResolveTexture = cdn::StoreTextureResolver(paths);
+		settings.ResolveTexture = engine::assets::StoreTextureResolver(paths);
 
 		std::string failure;
 		const assetc::Report report = assetc::Bake(settings, failure);
@@ -445,7 +446,7 @@ namespace studio {
 	bool Editor::LoadRawAsset(const std::filesystem::path &folder, const std::string &relative) {
 		// **The tree is the truth here, so no resolver is passed.** A model in a
 		// raw folder still sits beside its `tex/` directory - the flattening
-		// that made `cdn::StoreTextureResolver` necessary is what `ImportFile`
+		// that made `engine::assets::StoreTextureResolver` necessary is what `ImportFile`
 		// does, and nothing has imported this.
 		assetc::Settings settings;
 		settings.Input = folder;
@@ -460,7 +461,7 @@ namespace studio {
 		// **Empty output is the memory-only case**, which is the default and
 		// the reason this exists: looking at somebody's art folder must not
 		// write a baked copy of it anywhere.
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		if (!Content.MemoryOnly) {
 			settings.Output = paths.Baked;
 		}
@@ -520,7 +521,9 @@ namespace studio {
 		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Texture) {
 			engine::assets::TextureData image;
 			if (engine::assets::Texture::Read(reader, image)) {
-				Renderer.AddTexture(interned, image);
+				if (Renderer.AddTexture(interned, image)) {
+					VisualResourceRevision++;
+				}
 			}
 			return;
 		}
@@ -528,7 +531,9 @@ namespace studio {
 		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Mesh) {
 			engine::assets::MeshData mesh;
 			if (engine::assets::Mesh::Read(reader, mesh)) {
-				Renderer.AddMesh(interned, mesh);
+				if (Renderer.AddMesh(interned, mesh)) {
+					VisualResourceRevision++;
+				}
 			}
 		}
 	}
@@ -586,6 +591,25 @@ namespace studio {
 
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##catalogue-filter", AssetFilter, "filter");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+		const char *kindLabel = AssetKindFilter < 0
+			? "All types"
+			: KindName(static_cast<engine::assets::AssetKind>(AssetKindFilter));
+		if (ImGui::BeginCombo("##catalogue-kind", kindLabel)) {
+			if (ImGui::Selectable("All types", AssetKindFilter < 0)) {
+				AssetKindFilter = -1;
+				AssetPage = 0;
+			}
+			for (int kind = 0; kind <= static_cast<int>(engine::assets::AssetKind::Shader); kind++) {
+				const bool selected = AssetKindFilter == kind;
+				if (ImGui::Selectable(KindName(static_cast<engine::assets::AssetKind>(kind)), selected)) {
+					AssetKindFilter = kind;
+					AssetPage = 0;
+				}
+			}
+			ImGui::EndCombo();
+		}
 
 		if (!ImGui::BeginTable(
 				"catalogue",
@@ -624,12 +648,16 @@ namespace studio {
 		// signal this needs. It is read before the early-outs so a click is
 		// never swallowed by a cache hit.
 		bool stale = AssetRowsTab != static_cast<const void *>(&tab) ||
-					 AssetRowsRevision != AssetTabsRevision || AssetRowsFilter != AssetFilter;
+					 AssetRowsRevision != AssetTabsRevision || AssetRowsFilter != AssetFilter ||
+					 AssetRowsKind != AssetKindFilter;
 
 		ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs();
 		if (specs != nullptr && specs->SpecsDirty) {
 			specs->SpecsDirty = false;
 			stale = true;
+		}
+		if (stale && (AssetRowsFilter != AssetFilter || AssetRowsKind != AssetKindFilter)) {
+			AssetPage = 0;
 		}
 
 		if (stale) {
@@ -638,7 +666,8 @@ namespace studio {
 			AssetRows.reserve(tab.Entries.size());
 			for (const CatalogueEntry &entry : tab.Entries) {
 				int score = 0;
-				if (FuzzyMatch(AssetFilter, entry.Name, score)) {
+				if (FuzzyMatch(AssetFilter, entry.Name, score) &&
+					(AssetKindFilter < 0 || static_cast<int>(entry.Kind) == AssetKindFilter)) {
 					AssetRows.push_back(&entry);
 				}
 			}
@@ -654,16 +683,37 @@ namespace studio {
 			AssetRowsTab = &tab;
 			AssetRowsRevision = AssetTabsRevision;
 			AssetRowsFilter = AssetFilter;
+			AssetRowsKind = AssetKindFilter;
 		}
 
 		const std::vector<const CatalogueEntry *> &shown = AssetRows;
+		const int pageCount = std::max(1, static_cast<int>((shown.size() + AssetPageSize - 1) /
+																		 static_cast<size_t>(AssetPageSize)));
+		AssetPage = std::clamp(AssetPage, 0, pageCount - 1);
+		ImGui::Text("page %d of %d", AssetPage + 1, pageCount);
+		ImGui::SameLine();
+		ImGui::BeginDisabled(AssetPage == 0);
+		if (ImGui::SmallButton("<##asset-page")) {
+			AssetPage--;
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(AssetPage + 1 >= pageCount);
+		if (ImGui::SmallButton(">##asset-page")) {
+			AssetPage++;
+		}
+		ImGui::EndDisabled();
+
+		const size_t pageFirst = static_cast<size_t>(AssetPage) * static_cast<size_t>(AssetPageSize);
+		const size_t pageLast = std::min(pageFirst + static_cast<size_t>(AssetPageSize), shown.size());
 
 		ImGuiListClipper clipper;
-		clipper.Begin(static_cast<int>(shown.size()));
+		clipper.Begin(static_cast<int>(pageLast - pageFirst));
 
 		while (clipper.Step()) {
 			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const CatalogueEntry &entry = *shown[static_cast<size_t>(row)];
+				const int absoluteRow = row + static_cast<int>(pageFirst);
+				const CatalogueEntry &entry = *shown[static_cast<size_t>(absoluteRow)];
 
 				ImGui::TableNextRow();
 
@@ -797,7 +847,7 @@ namespace studio {
 
 	void Editor::DrawRawList() {
 		uint64_t total = 0;
-		for (const cdn::RawEntry &entry : PickerRaw) {
+		for (const engine::assets::RawEntry &entry : PickerRaw) {
 			total += entry.Bytes;
 		}
 
@@ -835,9 +885,9 @@ namespace studio {
 		//
 		// The filter is applied first so the clipper counts what is actually
 		// drawn - a clipper over the unfiltered list would leave gaps.
-		std::vector<const cdn::RawEntry *> shown;
+		std::vector<const engine::assets::RawEntry *> shown;
 		shown.reserve(PickerRaw.size());
-		for (const cdn::RawEntry &entry : PickerRaw) {
+		for (const engine::assets::RawEntry &entry : PickerRaw) {
 			int score = 0;
 			if (FuzzyMatch(AssetFilter, entry.Original, score)) {
 				shown.push_back(&entry);
@@ -857,7 +907,7 @@ namespace studio {
 
 		while (clipper.Step()) {
 			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
+				const engine::assets::RawEntry &entry = *shown[static_cast<size_t>(row)];
 
 				ImGui::TableNextRow();
 
@@ -895,7 +945,8 @@ namespace studio {
 		ImGui::EndTable();
 	}
 
-	void Editor::SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs) {
+	void
+	Editor::SortRaw(std::vector<const engine::assets::RawEntry *> &rows, const ImGuiTableSortSpecs *specs) {
 		if (specs == nullptr || specs->SpecsCount == 0) {
 			return;
 		}
@@ -906,7 +957,9 @@ namespace studio {
 			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
 
 			std::stable_sort(
-				rows.begin(), rows.end(), [&](const cdn::RawEntry *left, const cdn::RawEntry *right) {
+				rows.begin(),
+				rows.end(),
+				[&](const engine::assets::RawEntry *left, const engine::assets::RawEntry *right) {
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -931,9 +984,9 @@ namespace studio {
 	}
 
 	void Editor::RefreshStoreContents() {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-		PickerRaw = cdn::RawContents(paths);
-		PickerContents = cdn::PublishedContents(paths);
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+		PickerRaw = engine::assets::RawContents(paths);
+		PickerContents = engine::assets::PublishedContents(paths);
 
 		// **Built from the configured sources rather than from this machine's
 		// store alone.** The store is one of those sources - the default list's
@@ -952,8 +1005,8 @@ namespace studio {
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-		if (!cdn::EnsureLocalStore(paths)) {
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+		if (!engine::assets::EnsureLocalStore(paths)) {
 			AssetStatus = "could not create the content store";
 			return;
 		}
@@ -964,16 +1017,43 @@ namespace studio {
 		size_t imported = 0;
 		size_t duplicates = 0;
 		size_t failures = 0;
+		size_t baked = 0;
 		const uint64_t now = NowSeconds();
 
 		const auto take = [&](const std::filesystem::path &file) {
-			const auto report = cdn::ImportFile(paths, file, now);
+			const auto report = engine::assets::ImportFile(paths, file, now);
 			if (!report.has_value()) {
 				failures++;
-			} else if (report->Duplicate) {
+				return;
+			}
+			if (report->Duplicate) {
 				duplicates++;
-			} else {
-				imported++;
+				return;
+			}
+			imported++;
+
+			// **Baked as well as copied, because an import that stops at `raw/`
+			// puts nothing in the store anything can read.** This did three
+			// things - ensure the store, copy the bytes, refresh the list - and
+			// baking was not one of them, so a dropped file was invisible in the
+			// viewport, silently absent from the next Publish, and on a fresh
+			// store made `PublishLocal` refuse the whole thing. That refusal's
+			// own message reads "bake before publishing - `contentimport
+			// --publish` and the studio both do", which was true of one of them.
+			//
+			// `BakeRawAsset` is the same one-file bake the asset picker's per-row
+			// button uses: the same `assetc` settings, the same unit-box scale,
+			// the same `StoreTextureResolver`, and it registers the result with
+			// this editor's renderer on the way out.
+			//
+			// **Not fatal when it fails.** Plenty of what a person drags into a
+			// content store is not bakeable - a licence, a `.txt`, a source file
+			// beside the model it belongs to - and `ImportFile` accepted those
+			// deliberately. A count is the honest report; a failure here would
+			// make dragging a folder in an error.
+			std::string name;
+			if (BakeRawAsset(report->Stored.filename().generic_string(), name)) {
+				baked++;
 			}
 		};
 
@@ -1001,8 +1081,8 @@ namespace studio {
 			return;
 		}
 
-		AssetStatus = std::to_string(imported) + " imported, " + std::to_string(duplicates) +
-					  " already there, " + std::to_string(failures) + " failed";
+		AssetStatus = std::to_string(imported) + " imported, " + std::to_string(baked) + " baked, " +
+					  std::to_string(duplicates) + " already there, " + std::to_string(failures) + " failed";
 		ENGINE_INFO("assets: {}", AssetStatus);
 
 		// The list on screen is now wrong, and this is the only place that knows
@@ -1042,7 +1122,7 @@ namespace studio {
 			return;
 		}
 
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		const auto report = cdn::PublishLocal(paths, *signing, NowSeconds());
 		if (!report.has_value()) {
 			AssetStatus = "the publish failed - see the output panel";

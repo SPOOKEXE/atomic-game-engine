@@ -6,7 +6,10 @@
 // screenshot: a block whose live prefix is off by one loses a particle somewhere
 // off camera, and the frame looks fine.
 
+#include <engine/core/Bytes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -84,6 +87,10 @@ namespace {
 		engine::effects::RefreshEmitters(store);
 		return engine::effects::StepParticles(store, delta);
 	}
+
+	bool HasParent(const Store &store, Entity emitter) {
+		return store.ParentOf(emitter) != engine::ecs::NULL_ENTITY;
+	}
 }
 
 // --- the packing -------------------------------------------------------------
@@ -160,13 +167,48 @@ TEST_CASE("an emitter gets a block sized by its own rate and lifetime", "[effect
 	Frame(store, 0.0f);
 
 	const auto *system = store.Resource<ParticleSystem>();
-	const uint16_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
 	REQUIRE(slot != NO_SLOT);
 
 	// Rate times the longest life, rounded up, plus one - the plus one is what
 	// stops an emitter at exactly one particle a second with a one-second life
 	// oscillating between zero slots and one.
 	REQUIRE(system->Blocks[slot].Capacity == 21);
+}
+
+TEST_CASE("an activation policy gates blocks and restores resident emission", "[effects][activation]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+	auto *system = store.ResourceMutable<ParticleSystem>();
+	system->DeviceStepped = true;
+
+	Settings(store, emitter).Rate = 20.0f;
+	Settings(store, emitter).Lifetime = NumberRange{2.0f, 2.0f};
+	store.SetParent(emitter, engine::ecs::NULL_ENTITY);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
+	CHECK(system->Blocks.empty());
+
+	store.SetParent(emitter, part);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	CHECK(system->RuntimeStates[slot].Enabled);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == Catch::Approx(20.0f));
+
+	store.SetParent(emitter, engine::ecs::NULL_ENTITY);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	CHECK_FALSE(system->RuntimeStates[slot].Enabled);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == 0.0f);
+	CHECK(system->RuntimeStates[slot].DeviceRetiring);
+
+	store.SetParent(emitter, part);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	CHECK(system->RuntimeStates[slot].Enabled);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == Catch::Approx(20.0f));
+	CHECK_FALSE(system->RuntimeStates[slot].DeviceRetiring);
+	CHECK(system->RetiringBlocks.empty());
 }
 
 TEST_CASE("a disabled emitter keeps its block until its particles are gone", "[effects]") {
@@ -206,9 +248,11 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 	const Entity part = engine::scene::MakePart(store, desc);
 
 	// Each wants 21 slots against a pool of 64, so the fourth cannot fit.
+	std::vector<Entity> emitters;
 	for (int index = 0; index < 4; index++) {
 		const Entity emitter =
 			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+		emitters.push_back(emitter);
 		store.SetParent(emitter, part);
 		store.GetMutable<ParticleEmitter>(emitter)->Rate = 10.0f;
 		store.GetMutable<ParticleEmitter>(emitter)->Lifetime = NumberRange{2.0f, 2.0f};
@@ -218,6 +262,27 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 
 	const auto *system = store.Resource<ParticleSystem>();
 	REQUIRE(system->Statistics.EmittersRefused == 1);
+	REQUIRE(system->Statistics.EmitterClaimAttempts == 4);
+
+	// A full pool is a state, not a reason to run the same failed allocation
+	// and warning path on every tick. The refusal remains visible in statistics.
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	system = store.Resource<ParticleSystem>();
+	CHECK(system->Statistics.EmittersRefused == 1);
+	CHECK(system->Statistics.EmitterClaimAttempts == 0);
+
+	// Returning capacity wakes refused rows once. Reclaim follows claim within a
+	// refresh, so the newly free range is deliberately consumed next frame.
+	store.Destroy(emitters.front());
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	system = store.Resource<ParticleSystem>();
+	CHECK(system->Statistics.EmittersRefused == 0);
+	CHECK(system->Statistics.EmitterClaimAttempts == 1);
+	CHECK(store.Get<EmitterSlot>(emitters.back())->Index != NO_SLOT);
 
 	// **The blocks that did fit must not overlap**, which is the failure a
 	// refusal exists to prevent: two emitters sharing a range write each other's
@@ -232,6 +297,39 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 			REQUIRE(disjoint);
 		}
 	}
+}
+
+TEST_CASE("a growable pool expands once before refusing emitter blocks", "[effects]") {
+	Store store("effects_test");
+	engine::effects::RegisterEffectClasses();
+	engine::effects::InstallParticles(store, 64, 128);
+
+	engine::scene::PartDesc desc;
+	desc.Simulated = false;
+	const Entity part = engine::scene::MakePart(store, desc);
+
+	for (int index = 0; index < 7; index++) {
+		const Entity emitter =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+		store.SetParent(emitter, part);
+		store.GetMutable<ParticleEmitter>(emitter)->Rate = 10.0f;
+		store.GetMutable<ParticleEmitter>(emitter)->Lifetime = NumberRange{2.0f, 2.0f};
+	}
+
+	Frame(store, 0.0f);
+
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Capacity == 128);
+	REQUIRE(system->MaximumCapacity == 128);
+	CHECK(system->Used == 126);
+	CHECK(system->Instances.size() == 128);
+	CHECK(system->States.size() == 128);
+	CHECK(system->Statistics.EmittersRefused == 1);
+	CHECK(system->Statistics.EmitterClaimAttempts == 7);
+
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.EmitterClaimAttempts == 0);
 }
 
 // --- the step ----------------------------------------------------------------
@@ -309,6 +407,43 @@ TEST_CASE("a fractional rate still emits", "[effects]") {
 	REQUIRE(emitted == 3);
 }
 
+TEST_CASE("device emitters retain timers without a host planning walk", "[effects][device]") {
+	Store store("effects_test");
+	engine::effects::RegisterEffectClasses();
+	constexpr uint32_t emitters = 600;
+	engine::effects::InstallParticles(store, emitters * 6);
+	store.ResourceMutable<ParticleSystem>()->DeviceStepped = true;
+
+	engine::scene::PartDesc desc;
+	desc.Simulated = false;
+	const Entity part = engine::scene::MakePart(store, desc);
+	const auto emitterClass = engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter"));
+	for (uint32_t index = 0; index < emitters; index++) {
+		const Entity emitter = store.CreateInstance(emitterClass);
+		store.SetParent(emitter, part);
+		Settings(store, emitter).Rate = 5.0f;
+		Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+	}
+
+	Frame(store, 1.0f / 60.0f);
+	const ParticleSystem *system = store.Resource<ParticleSystem>();
+	REQUIRE(system != nullptr);
+	REQUIRE(system->RuntimeStates.size() == emitters);
+	for (const engine::effects::EmitterRuntime &runtime : system->RuntimeStates) {
+		CHECK(runtime.ContinuousRate == 5.0f);
+		CHECK(runtime.Spawned == 0);
+		CHECK(runtime.Pending == 1.0f);
+	}
+
+	// A second tick still does no work proportional to the emitter count. The
+	// device runtime table advances these fields when the scene is presented.
+	const uint64_t revision = system->PresentationRevision;
+	Frame(store, 1.0f / 60.0f);
+	system = store.Resource<ParticleSystem>();
+	CHECK(system->PresentationRevision == revision + 1);
+	CHECK(system->RuntimeStates.back().Spawned == 0);
+}
+
 TEST_CASE("a flipbook plays only the cells that hold a frame", "[effects]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -368,6 +503,184 @@ TEST_CASE("acceleration moves a particle and drag slows it", "[effects]") {
 	// Semi-implicit Euler, so it has fallen - the exact distance is the
 	// integrator's and is not what this pins.
 	REQUIRE(fallen.Y < born.Y);
+}
+
+TEST_CASE("distance emission follows parent travel rather than frame time", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).RateOverDistance = 2.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+
+	CHECK(Frame(store, 0.0f).Emitted == 0);
+
+	const Entity part = store.ParentOf(emitter);
+	auto *transform = store.GetMutable<engine::scene::Transform>(part);
+	REQUIRE(transform != nullptr);
+	transform->Frame.Position.X += 3.0f;
+
+	// Two particles per metre over three metres, with no elapsed time. A
+	// time-rate implementation would emit none here.
+	CHECK(Frame(store, 0.0f).Emitted == 6);
+}
+
+TEST_CASE("reparenting refreshes an emitter's cached frame", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	Frame(store, 0.0f);
+
+	engine::scene::PartDesc desc;
+	desc.Frame = CFrame{Vector3{12.0f, 3.0f, -7.0f}};
+	desc.Simulated = false;
+	const Entity destination = engine::scene::MakePart(store, desc);
+
+	store.ClearChanges();
+	REQUIRE(store.SetParent(emitter, destination));
+	engine::effects::RefreshEmitters(store);
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	const auto &frame = store.Resource<ParticleSystem>()->Blocks[slot].Frame;
+	CHECK(frame.Position == desc.Frame.Position);
+}
+
+TEST_CASE("moving an attachment refreshes its emitter's cached frame", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+	const Entity point = store.CreateInstance(engine::scene::AttachmentClass(), "EmitterPoint");
+	REQUIRE(store.SetParent(point, part));
+	store.GetMutable<engine::scene::Attachment>(point)->Frame = CFrame{Vector3{0.0f, 2.0f, 0.0f}};
+	REQUIRE(store.SetParent(emitter, point));
+	Frame(store, 0.0f);
+
+	store.ClearChanges();
+	auto *transform = store.GetMutable<engine::scene::Transform>(part);
+	REQUIRE(transform != nullptr);
+	transform->Frame.Position.X = 9.0f;
+	Frame(store, 0.0f);
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	const auto &frame = store.Resource<ParticleSystem>()->Blocks[slot].Frame;
+	CHECK(frame.Position == Vector3{9.0f, 2.0f, 0.0f});
+}
+
+TEST_CASE("a disabled emitter accepts a burst and clear invalidates its block", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 5));
+	CHECK(Frame(store, 0.0f).Emitted == 5);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.Live == 5);
+
+	REQUIRE(engine::effects::ClearParticles(store, emitter));
+	Frame(store, 0.0f);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.Live == 0);
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
+}
+
+TEST_CASE("changing MaxParticles reclaims the block at the new capacity", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).MaxParticles = 2;
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 8));
+	CHECK(Frame(store, 0.0f).Emitted == 2);
+
+	const uint32_t firstSlot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(firstSlot != NO_SLOT);
+	CHECK(store.Resource<ParticleSystem>()->Blocks[firstSlot].Capacity == 2);
+
+	Settings(store, emitter).MaxParticles = 6;
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 6));
+	CHECK(Frame(store, 0.0f).Emitted == 6);
+
+	const uint32_t grownSlot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(grownSlot != NO_SLOT);
+	CHECK(grownSlot == firstSlot);
+	CHECK(store.Resource<ParticleSystem>()->Blocks[grownSlot].Capacity == 6);
+}
+
+TEST_CASE("capacity edits reuse the emitter runtime row", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	for (int edit = 0; edit < 32; edit++) {
+		Settings(store, emitter).MaxParticles = edit % 2 == 0 ? 2 : 3;
+		REQUIRE(engine::effects::EmitParticles(store, emitter, 3));
+		Frame(store, 0.0f);
+		REQUIRE(store.Get<EmitterSlot>(emitter)->Index != NO_SLOT);
+	}
+
+	CHECK(store.Resource<ParticleSystem>()->Blocks.size() == 1);
+}
+
+TEST_CASE("resident force modules accelerate and cap a particle", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Shape = ParticleShape::Sphere;
+	Settings(store, emitter).RadialAcceleration = 20.0f;
+	Settings(store, emitter).TangentialAcceleration = 10.0f;
+	Settings(store, emitter).NoiseStrength = 5.0f;
+	Settings(store, emitter).NoiseFrequency = 0.75f;
+	Settings(store, emitter).NoiseScrollSpeed = 2.0f;
+	Settings(store, emitter).MaxSpeed = 1.0f;
+
+	Frame(store, 0.1f);
+	Frame(store, 0.1f);
+
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Statistics.Live > 0);
+	const float speed = system->States[0].Velocity.Magnitude();
+	CHECK(speed > 0.9f);
+	CHECK(speed <= 1.001f);
+}
+
+TEST_CASE("particle force controls survive component serialisation", "[effects]") {
+	engine::effects::RegisterEffectComponents();
+
+	ParticleEmitter emitter;
+	emitter.RateOverDistance = 7.0f;
+	emitter.MaxParticles = 321;
+	emitter.MaxSpeed = 12.0f;
+	emitter.NoiseStrength = 3.0f;
+	emitter.NoiseFrequency = 0.25f;
+	emitter.NoiseScrollSpeed = -2.0f;
+	emitter.RadialAcceleration = 4.0f;
+	emitter.TangentialAcceleration = -5.0f;
+
+	const auto component = engine::ecs::Components::Find(engine::core::Name("effects.ParticleEmitter"));
+	const engine::ecs::TypeDescriptor &type = engine::ecs::Components::Describe(component);
+	engine::core::ByteWriter writer;
+	type.Write(writer, &emitter, 1);
+
+	ParticleEmitter restored;
+	engine::core::ByteReader reader(writer.Bytes());
+	type.Read(reader, &restored, 1);
+
+	CHECK(restored.RateOverDistance == 7.0f);
+	CHECK(restored.MaxParticles == 321);
+	CHECK(restored.MaxSpeed == 12.0f);
+	CHECK(restored.NoiseStrength == 3.0f);
+	CHECK(restored.NoiseFrequency == 0.25f);
+	CHECK(restored.NoiseScrollSpeed == -2.0f);
+	CHECK(restored.RadialAcceleration == 4.0f);
+	CHECK(restored.TangentialAcceleration == -5.0f);
 }
 
 TEST_CASE("a spawn point lands inside the parent's own volume", "[effects]") {
@@ -474,8 +787,9 @@ TEST_CASE("the pool holds the scale the roadmap asks for", "[effects]") {
 	// capacity would be writing another emitter's particles, and the symptom is
 	// an effect that flickers between two shapes rather than a crash.
 	const auto *system = store.Resource<ParticleSystem>();
-	for (const auto &block : system->Blocks) {
-		REQUIRE(block.Live <= block.Capacity);
+	for (size_t index = 0; index < system->Blocks.size(); index++) {
+		const auto &block = system->Blocks[index];
+		REQUIRE(system->RuntimeStates[index].Live <= block.Capacity);
 		REQUIRE(block.First + block.Capacity <= system->Capacity);
 	}
 
@@ -524,6 +838,35 @@ TEST_CASE("an emitter adopts the frame count its texture states", "[effects]") {
 	// Twenty-four cells hold a frame, so the last one drawn is 23 - not 63,
 	// which is what the grid would give.
 	CHECK(highest == 23);
+}
+
+TEST_CASE("an existing emitter adopts texture facts when content arrives", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const engine::core::Name texture("effects/late.atex");
+
+	Settings(store, emitter).Texture = texture;
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid8x8;
+	Frame(store, 0.0f);
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Blocks[slot].Frames == 64);
+	REQUIRE(system->Blocks[slot].FlipbookRate == 12.0f);
+
+	// The emitter row stays untouched. The catalogue revision alone must
+	// invalidate playback values cached before the content pump knew the file.
+	store.ClearChanges();
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 24, .FrameRate = 30.0f}
+		)
+	);
+	engine::effects::RefreshEmitters(store);
+
+	CHECK(system->Blocks[slot].Frames == 24);
+	CHECK(system->Blocks[slot].FlipbookRate == 30.0f);
 }
 
 TEST_CASE("what the emitter says beats what the texture says", "[effects]") {
@@ -654,6 +997,9 @@ TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
 	// list this was twenty-one, and `MAX_EMITTER_SLOTS` was therefore a cap on
 	// emitters ever made rather than on emitters emitting at once.
 	CHECK(system->Blocks.size() == 2);
+	CHECK(system->FrameParents.size() == system->Blocks.size());
+	CHECK(system->SpawnStates.size() == system->Blocks.size());
+	CHECK(system->RuntimeStates.size() == system->Blocks.size());
 
 	// And the surviving emitter still has its own row and is still emitting.
 	CHECK(system->Statistics.Blocks == 1);
@@ -662,20 +1008,9 @@ TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
 
 // --- the device-stepped pool -------------------------------------------------
 //
-// **What the host still owes when it no longer ages anything.** With
-// `DeviceStepped` on, `particle-step.comp` integrates, shades and retires; this
-// module keeps only the three things a compute shader cannot do, and each of
-// them is a place a wrong answer is invisible on screen.
-//
-//   - Births have to *reach* the device, so every one has to appear in `Births`
-//     pointing at the row it was written to.
-//   - Slots have to be found without a live count, so the ring has to come back
-//     round instead of refusing.
-//   - Recycled rows have to start empty, and nothing clears them - the
-//     generation is the whole mechanism, so a reused block has to disagree with
-//     what it inherited.
-
-TEST_CASE("a device-stepped pool reports every birth and the row it went to", "[effects][device]") {
+// The unit boundary can pin what crosses to the GPU without pretending to
+// execute a shader. The visual suite covers emission and integration together.
+TEST_CASE("a device-stepped pool sends emitter state instead of particle births", "[effects][device]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
 	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
@@ -687,8 +1022,7 @@ TEST_CASE("a device-stepped pool reports every birth and the row it went to", "[
 	const auto stats = Frame(store, 1.0f / 60.0f);
 
 	const auto *system = store.Resource<engine::effects::ParticleSystem>();
-	REQUIRE(stats.Emitted > 0);
-	REQUIRE(system->Births.size() == stats.Emitted);
+	CHECK(stats.Emitted == 0);
 
 	// **And the host pool is gone.** Neither array is read on this side once the
 	// device owns it, so `StepParticles` releases both - fifty-four megabytes at
@@ -696,48 +1030,31 @@ TEST_CASE("a device-stepped pool reports every birth and the row it went to", "[
 	CHECK(system->States.empty());
 	CHECK(system->Instances.empty());
 
-	const engine::effects::EmitterBlock &block = system->Blocks[0];
-	for (const engine::effects::ParticleBirth &birth : system->Births) {
-		// In the block, and carrying the particle the host just worked out -
-		// which is the whole of what the renderer scatters into the device pool.
-		CHECK(birth.Row >= block.First);
-		CHECK(birth.Row < block.First + block.Capacity);
-		CHECK(birth.State.Lifetime > 0.0f);
-		CHECK(birth.State.Generation == block.Generation);
-	}
+	REQUIRE(system->RuntimeStates.size() == 1);
+	CHECK(system->RuntimeStates[0].ContinuousRate == 60.0f);
+	CHECK(system->RuntimeStates[0].Spawned == 0);
 }
 
-TEST_CASE("a device-stepped block spawns round its ring rather than refusing", "[effects][device]") {
+TEST_CASE("device burst requests are resident deltas", "[effects][device]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
 	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
 
-	// A rate and a lifetime that size the block small, then run for far longer
-	// than it holds. The host-side pass would have dropped everything past the
-	// capacity; the ring overwrites the oldest instead.
-	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Rate = 0.0f;
 	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
+	Frame(store, 1.0f / 60.0f);
+	const auto *before = store.Resource<engine::effects::ParticleSystem>();
+	const uint64_t residentRevision = before->ResidentRevision;
+	const uint32_t blockRevision = before->Blocks[0].Revision;
 
-	uint32_t dropped = 0;
-	uint32_t emitted = 0;
-	for (int frame = 0; frame < 120; frame++) {
-		const auto stats = Frame(store, 1.0f / 60.0f);
-		dropped += stats.SpawnsDropped;
-		emitted += stats.Emitted;
-	}
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 7));
+	const auto *after = store.Resource<engine::effects::ParticleSystem>();
+	CHECK(after->RuntimeStates[0].Requested == 7);
+	CHECK(after->ResidentRevision == residentRevision + 1);
+	CHECK(after->Blocks[0].Revision == blockRevision + 1);
 
-	const auto *system = store.Resource<engine::effects::ParticleSystem>();
-	const engine::effects::EmitterBlock &block = system->Blocks[0];
-
-	CHECK(dropped == 0);
-	CHECK(emitted > block.Capacity);
-
-	// **Round, not off the end.** Every row the ring ever named is inside the
-	// block, which is the property the whole design rests on: the shader is
-	// handed `First` and `Capacity` and trusts them.
-	CHECK(block.Spawned == emitted);
-	CHECK(block.First + block.Spawned % block.Capacity < block.First + block.Capacity);
-	CHECK(block.Live == std::min(block.Spawned, block.Capacity));
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 5));
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Requested == 12);
 }
 
 TEST_CASE("a recycled device block disagrees with what it inherited", "[effects][device]") {
@@ -754,12 +1071,6 @@ TEST_CASE("a recycled device block disagrees with what it inherited", "[effects]
 	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
 	const uint32_t generation = system->Blocks[0].Generation;
 	const uint32_t row = system->Blocks[0].First;
-	REQUIRE(!system->Births.empty());
-	const engine::effects::ParticleBirth born = system->Births[0];
-	REQUIRE(born.Row >= row);
-	REQUIRE(born.Row < row + system->Blocks[0].Capacity);
-	REQUIRE(born.State.Lifetime > 0.0f);
-	REQUIRE(born.State.Generation == generation);
 
 	// The emitter goes and another takes its rows. Nothing clears them: the
 	// particle written above is still in the array with four seconds left.
@@ -798,7 +1109,7 @@ TEST_CASE("a device block empties once nothing has been born for a lifetime", "[
 	for (int frame = 0; frame < 30; frame++) {
 		Frame(store, 1.0f / 60.0f);
 	}
-	REQUIRE(store.Resource<engine::effects::ParticleSystem>()->Blocks[0].Live > 0);
+	REQUIRE(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Live > 0);
 
 	// Turned off. The host cannot see a particle die, so this is the only thing
 	// that ever brings `Live` back down - and without it a disabled emitter
@@ -808,5 +1119,29 @@ TEST_CASE("a device block empties once nothing has been born for a lifetime", "[
 		Frame(store, 1.0f / 60.0f);
 	}
 
-	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks[0].Live == 0);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Live == 0);
+}
+
+TEST_CASE("a disabled device burst releases its block after its lifetime", "[effects][device]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 8));
+	Frame(store, 1.0f / 60.0f);
+
+	const auto *slot = store.Get<engine::effects::EmitterSlot>(emitter);
+	REQUIRE(slot != nullptr);
+	REQUIRE(slot->Index != engine::effects::NO_SLOT);
+	REQUIRE(store.Resource<engine::effects::ParticleSystem>()->RetiringBlocks.size() == 1);
+
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	CHECK(store.Get<engine::effects::EmitterSlot>(emitter)->Index == engine::effects::NO_SLOT);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->RetiringBlocks.empty());
 }

@@ -48,6 +48,7 @@
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -174,6 +175,11 @@ namespace engine::ui {
 		// Nothing is submitted here - the renderer does that, from inside its
 		// own command buffer, through the two hook calls below.
 		void End();
+
+		// Persistent geometry signature of the completed host frame. Texture
+		// handles are excluded: a viewport publishing a new retained scene image
+		// changes a binding, not the Studio chrome around it.
+		uint64_t Signature() const;
 
 		// Whether the interface consumed the mouse this frame.
 		//

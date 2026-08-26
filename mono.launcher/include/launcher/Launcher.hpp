@@ -102,16 +102,6 @@ namespace launcher {
 		// The pinned block - what this mode is, in five or six rows.
 		void DrawCommonTab(const Mode &mode, const Description &description);
 
-		// How many rows on each tab the current search matches.
-		//
-		// **On the tab label rather than only inside the tab**, because a
-		// search that emptied the page you were looking at, with no sign of
-		// where its matches went, reads as a broken search rather than as a
-		// wrong tab.
-		size_t CommonHits(const Mode &mode, const Description &description) const;
-		size_t AllHits(const Description &description) const;
-		size_t SettingHits(const Description &description) const;
-
 		// Every option the program declared, grouped by name prefix.
 		void DrawAllTab(const Description &description);
 

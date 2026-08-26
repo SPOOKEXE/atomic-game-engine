@@ -41,6 +41,8 @@
 -- face id applied to the destination part's rotation. Every portal here uses
 -- `Front`, so each mouth's rotation is the whole of its aim.
 
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local WORLD = workspace
 
 -- --- the shape ------------------------------------------------------------
@@ -110,7 +112,16 @@ block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5 + GROUND_LIFT, 0),
 local function corridor(name: string, x: number, half: number)
 	local span = half * 2
 
-	block(name .. "Floor", Vector3.new(WIDTH + WALL * 2, WALL, span), Vector3.new(x, -WALL / 2 + INSIDE, 0), FLOOR)
+	local floor = block(
+		name .. "Floor",
+		Vector3.new(WIDTH + WALL * 2, WALL, span),
+		Vector3.new(x, -WALL / 2 + INSIDE, 0),
+		FLOOR
+	)
+	-- The plain already supports this whole corridor. The visible floor sits a
+	-- hundredth above it to avoid a depth tie, and a box collider on that thin
+	-- lift presents its full side as a wall to a character entering the mouth.
+	floor.CanCollide = false
 	block(
 		name .. "Ceiling",
 		Vector3.new(WIDTH + WALL * 2, WALL, span),
@@ -197,12 +208,24 @@ link(shortSouth, longSouth, "ShortSouthToLong")
 -- they go past is how you feel the length rather than infer it.
 for index = 0, 7 do
 	local z = -LONG / 2 + 2 + index * ((LONG - 4) / 7)
-	block("LongStripe" .. index, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(LONG_X, 0.2, z), LONG_MARK)
+	local stripe = block(
+		"LongStripe" .. index,
+		Vector3.new(WIDTH, 0.3, 0.6),
+		Vector3.new(LONG_X, 0.2, z),
+		LONG_MARK
+	)
+	stripe.CanCollide = false
 end
 
 for index = 0, 1 do
 	local z = -SHORT / 2 + 1 + index * (SHORT - 2)
-	block("ShortStripe" .. index, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(SHORT_X, 0.2, z), SHORT_MARK)
+	local stripe = block(
+		"ShortStripe" .. index,
+		Vector3.new(WIDTH, 0.3, 0.6),
+		Vector3.new(SHORT_X, 0.2, z),
+		SHORT_MARK
+	)
+	stripe.CanCollide = false
 end
 
 -- Posts outside each mouth, so the two buildings can be told apart from the
@@ -253,23 +276,30 @@ lamp("PlainLampSouth", Vector3.new(0, 14, -20), 90)
 -- wrong side of both.
 block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 26), FLOOR)
 
--- --- a still, for when nobody is walking ----------------------------------
+-- --- the camera walk and its capture viewpoints ---------------------------
 --
--- **Off by default, because this scene is meant to be walked.** A
--- `workspace.CurrentCamera` overrides the character's, so setting one
--- unconditionally would make the demo a video. `VIEW` below names a
--- viewpoint for a headless capture - which is how a change to the portal pass
--- gets looked at without a display.
+-- `fly` is the interactive demonstration and the other names are fixed
+-- viewpoints for the capture scripts. Keeping those modes in the same scene
+-- makes the moving test and its visual controls exercise identical geometry.
 local viewpoint: CFrame? = nil
 
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
 -- script sandbox, so nothing outside a scene can set one - the capture scripts
 -- copy the file and substitute the line below, which is the only mechanism that
 -- actually works from a shell.
-local VIEW = "short"
+local VIEW = "fly"
 local WHICH = VIEW
 
-if WHICH == "long" then
+if WHICH == "fly" then
+	-- A moving eye, starting behind the character below. The camera advances
+	-- from its current frame rather than from an external path, so when the
+	-- portal pass carries it into the short corridor the next tick continues
+	-- from the destination instead of snapping back to the source coordinates.
+	viewpoint = CFrame.lookAt(
+		Vector3.new(LONG_X, 4, LONG / 2 + 12),
+		Vector3.new(LONG_X, 4, LONG / 2)
+	)
+elseif WHICH == "long" then
 	-- Outside the long corridor's north mouth, looking down it. What the hole
 	-- shows is the short corridor's inside, so the far wall is four studs away
 	-- through a doorway at the end of a thirty-two stud building.
@@ -290,6 +320,54 @@ if viewpoint ~= nil then
 	view.CFrame = viewpoint
 	view.Parent = WORLD
 	WORLD.CurrentCamera = view
+
+	if WHICH == "fly" then
+		local CAMERA_SPEED = 9
+		local cameraHeading = -1
+		RunService.Heartbeat:Connect(function(deltaTime: number)
+			local frame = view.CFrame
+			if frame.Position.Z <= -(LONG / 2 + 8) then
+				cameraHeading = 1
+			elseif frame.Position.Z >= LONG / 2 + 8 then
+				cameraHeading = -1
+			end
+			local forward = Vector3.new(0, 0, cameraHeading)
+			local eye = frame.Position + forward * CAMERA_SPEED * deltaTime
+			view.CFrame = CFrame.lookAt(eye, eye + forward)
+		end)
+	end
+end
+
+-- An actual controller-driven character takes the same route a few metres in
+-- front of the camera. `CrossPortals` carries its root and movement intent;
+-- the camera crosses independently, so this one scene exercises both paths.
+local walker = Instance.new("Player")
+walker.Name = "HallwayWalker"
+walker.Parent = Players
+
+local character = walker:LoadCharacter()
+if character ~= nil then
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
+	if root ~= nil and humanoid ~= nil then
+		local movingRoot: BasePart = root
+		local movingHumanoid: Humanoid = humanoid
+		movingRoot.CFrame = CFrame.lookAt(
+			Vector3.new(LONG_X, 3, LONG / 2 + 8),
+			Vector3.new(LONG_X, 3, LONG / 2)
+		)
+		movingHumanoid.WalkSpeed = 9
+		local heading = -1
+		movingHumanoid.MoveDirection = Vector3.new(0, 0, heading)
+		RunService.Heartbeat:Connect(function(_deltaTime: number)
+			if movingRoot.Position.Z <= -(LONG / 2 + 8) then
+				heading = 1
+			elseif movingRoot.Position.Z >= LONG / 2 + 8 then
+				heading = -1
+			end
+			movingHumanoid.MoveDirection = Vector3.new(0, 0, heading)
+		end)
+	end
 end
 
 print("hallway: long corridor at x=-20 is " .. LONG .. " studs, short at x=20 is " .. SHORT)

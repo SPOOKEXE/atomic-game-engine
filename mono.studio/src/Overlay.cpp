@@ -9,10 +9,12 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/ui/Theme.hpp>
@@ -24,6 +26,7 @@
 #include <cmath>
 #include <imgui.h>
 #include <optional>
+#include <string>
 #include <studio/Editor.hpp>
 #include <studio/Viewports.hpp>
 #include <vector>
@@ -32,6 +35,7 @@ namespace studio {
 
 	using engine::core::AABB;
 	using engine::core::CFrame;
+	using engine::core::OrientedBoxBounds;
 	using engine::core::Ray;
 	using engine::core::Vector3;
 	using engine::ecs::Entity;
@@ -46,7 +50,25 @@ namespace studio {
 		// origin.** A grid anchored at the origin disappears the moment
 		// somebody flies away from it, which is exactly when they most need to
 		// know which way is up.
-		constexpr int GRID_RADIUS = 40;
+		//
+		// **160 studs was not far enough to fly in.** At the old radius of 40
+		// the grid ended well inside a baseplate, so anything built at any scale
+		// stood on nothing. 120 cells is 480 studs, three times the reach.
+		constexpr int GRID_RADIUS = 120;
+
+		// Where the grid stops drawing every line and draws only the heavy ones.
+		//
+		// **Tripling the radius must not triple the segment count.** Every line
+		// is drawn in pieces so it can fade (see `GRID_PIECES`), so the cost is
+		// lines times pieces and a naive 120-cell grid is three times the work
+		// for a region that is mostly faded out anyway. Past this many cells
+		// only the majors continue, which is one line in five - so the far half
+		// of the grid costs a fifth of what it would, and what it draws is the
+		// part still readable at that distance.
+		//
+		// The near band keeps the old radius exactly, so nothing within 160
+		// studs looks any different from before.
+		constexpr int GRID_DENSE = 40;
 
 		// Metres per cell, and per heavy cell.
 		constexpr float GRID_STEP = 4.0f;
@@ -57,18 +79,113 @@ namespace studio {
 		constexpr float GRID_THICKNESS = 1.0f;
 		constexpr float AXIS_THICKNESS = 1.6f;
 
+		// How many pieces each grid line is drawn in.
+		//
+		// **A line has one colour, which is why this number exists.**
+		// `ImDrawList::AddLine` takes a single `ImU32`, so a line drawn whole
+		// has one alpha along its entire length - and a grid of those ends at a
+		// hard rectangle wherever the lines stop, whatever the alpha. Cutting
+		// each line into pieces and fading each piece by its own distance is
+		// what turns that rectangle into a horizon.
+		//
+		// Eight rather than one per cell: the fade is a smooth ramp, so the eye
+		// cannot see the joins, and eighty-one lines at eight pieces is about
+		// thirteen hundred segments a panel rather than thirteen thousand.
+		constexpr int GRID_PIECES = 8;
+
 		// Snaps a coordinate down to the grid, so the lines stay put in the
 		// world while the camera moves rather than sliding along with it.
 		float SnapDown(float value, float step) {
 			return std::floor(value / step) * step;
 		}
 
+		// Whether a line at this world coordinate is one of the heavy ones.
+		//
+		// **From the world coordinate and never from the loop index**, which is
+		// the bug this replaced. The loop runs outward from a camera-snapped
+		// origin, so `index % GRID_MAJOR` marked a different set of world lines
+		// every time the camera crossed a cell: the heavy lines jumped a cell
+		// sideways as you flew, which reads as the whole grid sliding even
+		// though every thin line was standing still.
+		//
+		// `std::lround` rather than a cast, because the coordinate is a
+		// multiple of `GRID_STEP` computed in floating point and truncating
+		// `-4.0f/4.0f` that arrives as `-0.9999999` gives 0 rather than -1 -
+		// which would put two heavy lines side by side at the origin.
+		//
+		// @param coordinate A world X or Z that a grid line sits on.
+		// @return `true` when the line should be drawn heavy.
+		bool IsMajorLine(float coordinate) {
+			const long cell = std::lround(coordinate / GRID_STEP);
+			return cell % GRID_MAJOR == 0;
+		}
+
+		// How much of its strength the grid keeps while nothing is being
+		// dragged.
+		//
+		// **Read by `Editor::ConfigureGroundGrid` rather than by the overlay
+		// below**, which draws only while a handle is held. The renderer's grid
+		// is the one on screen the rest of the time and it is a plane with its
+		// own depth, so it is dimmer for the reason a background should be: the
+		// scene is the subject until somebody starts placing something in it.
+		constexpr float GRID_IDLE = 0.45f;
+
 		// A colour that fades with distance from the camera, so the grid has a
 		// horizon instead of ending in a hard rectangle.
+		//
+		// Full strength, because this draws during a drag and at no other time.
+		//
+		// @param fade  The distance fade, from `GridFade`.
+		// @param major Whether this is one of the heavy lines.
 		ImU32 GridColour(float fade, bool major) {
 			const float alpha = std::clamp(fade, 0.0f, 1.0f) * (major ? 0.5f : 0.25f);
 			return ImGui::GetColorU32(ImVec4(0.6f, 0.65f, 0.75f, alpha));
 		}
+
+		// How visible a piece of grid is, from where its middle is.
+		//
+		// **Radial distance rather than distance along one axis**, which is the
+		// other half of why the grid ended in a rectangle: fading a whole line
+		// by how far sideways it sat meant the piece directly in front of the
+		// camera and the piece a hundred and sixty metres away were drawn at the
+		// same alpha.
+		//
+		// Squared distance compared against a squared reach, so this costs no
+		// square root on a path that runs a few thousand times a frame. The
+		// ramp is the square of the linear one, which falls off faster near the
+		// edge and is what makes the last cells disappear rather than stop.
+		//
+		// @param dx    Metres from the camera along X.
+		// @param dz    Metres from the camera along Z.
+		// @param reach Metres at which the grid has faded out entirely.
+		// @return A fade in [0, 1].
+		float GridFade(float dx, float dz, float reach) {
+			const float distanceSquared = dx * dx + dz * dz;
+			const float reachSquared = reach * reach;
+			if (distanceSquared >= reachSquared) {
+				return 0.0f;
+			}
+			const float linear = 1.0f - distanceSquared / reachSquared;
+			return linear * linear;
+		}
+	}
+
+	void Editor::ConfigureGroundGrid(engine::render::View &view, WorldId shown) const {
+		if (!ShowGrid || !shown.IsValid() || IsReplicaWorld(shown)) {
+			return;
+		}
+
+		view.Grid.Enabled = true;
+		view.Grid.Step = GRID_STEP;
+		view.Grid.Major = static_cast<float>(GRID_MAJOR);
+		view.Grid.Reach = static_cast<float>(GRID_RADIUS) * GRID_STEP;
+
+		// **Whole while a handle is held and faint otherwise**, which is the
+		// same rule the overlay copy below uses and the same reason: while a
+		// drag is running the grid is the thing being read, and the rest of the
+		// time it is furniture behind whatever is being looked at.
+		const bool dragged = Dragging.Axis >= 0 || SurfaceDragging.Active;
+		view.Grid.Strength = dragged ? 1.0f : GRID_IDLE;
 	}
 
 	PanelProjection Editor::ProjectionFor(size_t viewport) {
@@ -83,11 +200,26 @@ namespace studio {
 			return projection;
 		}
 
-		// The camera this panel is looking through, as it stands *now* - which
-		// is after `DriveCamera` and is therefore the camera `PresentWorld` is
-		// about to render with.
+		// **The camera this panel's picture was actually taken with**, which is
+		// not the same as the one it is looking through now.
+		//
+		// This used to read the live camera and say it was "the camera
+		// `PresentWorld` is about to render with". That is true of exactly one
+		// panel per frame: `Renderer::Render` owns the whole frame, so the
+		// studio draws one panel and round-robins, and every other panel is
+		// showing a texture from an earlier frame. Projecting an overlay from
+		// the live camera onto an older picture put the selection outline beside
+		// the part it outlines - about 26 pixels on a 1600-pixel panel at 90
+		// degrees a second, on every frame the panel did not draw, which is a
+		// gizmo that shakes while the camera moves and settles when it stops.
+		//
+		// Falls back to the live camera until the first render, where there is
+		// no texture for it to disagree with.
 		const ViewportState *extra = ExtraAt(viewport);
 		CFrame frame = extra != nullptr ? extra->Frame : CameraFrame;
+		if (slot.Presented) {
+			frame = slot.PresentedFrame;
+		}
 
 		// **The lens does not need `PresentWorld`'s far-plane adjustment.** For
 		// a perspective matrix the divide is by `w = -z_view`, which depends on
@@ -96,6 +228,13 @@ namespace studio {
 		// frame alone. Reproducing `FarPlane = max(FarPlane, reach * 40)` here
 		// would be a second copy of a number that cannot affect the answer.
 		engine::scene::Camera lens;
+		if (slot.Presented && slot.PresentedFieldOfView > 0.0f) {
+			// The lens the picture was taken with, for the same reason as the
+			// frame above: a followed camera's field of view is its own, and
+			// reading this frame's while the texture holds last frame's is the
+			// same mismatch one dimension along.
+			lens.FieldOfViewRadians = slot.PresentedFieldOfView;
+		}
 
 		const WorldId shown = ViewportWorld(viewport);
 		const Entity follow = extra != nullptr ? extra->Follow : FollowCamera;
@@ -222,20 +361,6 @@ namespace studio {
 			// **After the gizmo, and it declines while a handle is held.** Both
 			// write placements, and two of them running against one selection
 			// is two answers to where it is.
-			DragOnSurface(index, panel);
-
-			// **After both, because it is the only one that draws nothing
-			// interactive.** The gizmo has to adjudicate the pending pick and
-			// the surface drag has to see the gizmo's answer; an outline reads
-			// the world and writes lines, so it goes last and cannot be in
-			// either one's way.
-			DrawColliderOutlines(index, panel);
-
-			// Last of all, and for the same reason the outlines are late: an
-			// adornment reads the world and writes lines, so it can be in
-			// nothing's way. It is drawn *after* the collider outlines because
-			// a selection somebody made is the thing they are looking at.
-			DrawAdornments(index, panel);
 		}
 
 		if (PendingPick.Wanted) {
@@ -282,6 +407,15 @@ namespace studio {
 			list->PushClipRect(
 				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
 			);
+
+			// Scene annotations belong to the viewport image. Drawing them before
+			// this clip lets projected lines escape into docked Studio panels.
+			const bool movingSelection = DragOnSurface(index, panel);
+			if (!movingSelection) {
+				DragSelectionBox(index, panel);
+			}
+			DrawColliderOutlines(index, panel);
+			DrawAdornments(index, panel);
 
 			// **`PushClipRect` is a scissor, not a reject.** It stops the pixels
 			// reaching the explorer and does nothing about the vertices: an
@@ -339,22 +473,60 @@ namespace studio {
 			const WorldId shown = ViewportWorld(index);
 			const bool authoring = !IsReplicaWorld(shown);
 
-			if (ShowGrid && authoring) {
+			// **The overlay copy is the always-on-top one, and it is drawn only
+			// while a handle is held.** The renderer draws the grid the rest of
+			// the time - see `ConfigureGroundGrid` - where it is a plane with
+			// its own depth and the geometry in front of it hides it. That is
+			// the right way round for looking at a scene and the wrong way
+			// round for placing something in it: a part being dragged sits on
+			// the grid and would hide the very lines somebody is lining it up
+			// against.
+			//
+			// A handle held anywhere counts, not one held in this panel. A drag
+			// is watched from whichever viewport shows the axis best, and a
+			// grid that changed in one panel and not the other would be two
+			// answers to one question.
+			const bool dragged = Dragging.Axis >= 0 || SurfaceDragging.Active;
+
+			if (ShowGrid && authoring && dragged) {
 				const Vector3 eye = panel.Eye;
 				const float originX = SnapDown(eye.X, GRID_STEP);
 				const float originZ = SnapDown(eye.Z, GRID_STEP);
 				const float reach = GRID_RADIUS * GRID_STEP;
 
+				// One line, cut into pieces, each faded by where its own middle
+				// is. See `GRID_PIECES` and `GridFade` for why a whole line
+				// cannot do this.
+				//
+				// `along` is the axis the line runs down and `across` is the
+				// coordinate that picks the line, so the same lambda draws both
+				// directions and there is one copy of the fading to be wrong in.
+				const auto fadedLine = [&](float across, bool alongZ) {
+					const bool major = IsMajorLine(across);
+					const float centre = alongZ ? originZ : originX;
+					const float span = (2.0f * reach) / static_cast<float>(GRID_PIECES);
+
+					for (int piece = 0; piece < GRID_PIECES; piece++) {
+						const float start = centre - reach + span * static_cast<float>(piece);
+						const float end = start + span;
+						const float middle = (start + end) * 0.5f;
+
+						const float dx = alongZ ? across - eye.X : middle - eye.X;
+						const float dz = alongZ ? middle - eye.Z : across - eye.Z;
+						const float fade = GridFade(dx, dz, reach);
+						if (fade <= 0.0f) {
+							continue;
+						}
+
+						const Vector3 from =
+							alongZ ? Vector3{across, 0.0f, start} : Vector3{start, 0.0f, across};
+						const Vector3 to = alongZ ? Vector3{across, 0.0f, end} : Vector3{end, 0.0f, across};
+						segment(from, to, GridColour(fade, major), GRID_THICKNESS);
+					}
+				};
+
 				for (int step = -GRID_RADIUS; step <= GRID_RADIUS; step++) {
 					const float offset = static_cast<float>(step) * GRID_STEP;
-
-					// Fade with distance from the camera so the grid ends in a
-					// horizon rather than a rectangle.
-					const float fade =
-						1.0f - std::abs(static_cast<float>(step)) / static_cast<float>(GRID_RADIUS);
-					const bool major = step % GRID_MAJOR == 0;
-					const ImU32 colour = GridColour(fade, major);
-
 					const float x = originX + offset;
 					const float z = originZ + offset;
 
@@ -362,21 +534,17 @@ namespace studio {
 					// that would sit under them are skipped.** Drawing both
 					// leaves a grey line showing through a coloured one, which
 					// reads as the axis being the wrong colour.
-					if (std::abs(x) > 0.001f) {
-						segment(
-							Vector3{x, 0.0f, originZ - reach},
-							Vector3{x, 0.0f, originZ + reach},
-							colour,
-							GRID_THICKNESS
-						);
+					// Past the dense band, only the heavy lines continue. See
+					// `GRID_DENSE`.
+					if (std::abs(step) > GRID_DENSE && !IsMajorLine(x) && !IsMajorLine(z)) {
+						continue;
 					}
-					if (std::abs(z) > 0.001f) {
-						segment(
-							Vector3{originX - reach, 0.0f, z},
-							Vector3{originX + reach, 0.0f, z},
-							colour,
-							GRID_THICKNESS
-						);
+
+					if (std::abs(x) > 0.001f && (std::abs(step) <= GRID_DENSE || IsMajorLine(x))) {
+						fadedLine(x, true);
+					}
+					if (std::abs(z) > 0.001f && (std::abs(step) <= GRID_DENSE || IsMajorLine(z))) {
+						fadedLine(z, false);
 					}
 				}
 
@@ -819,7 +987,31 @@ namespace studio {
 				Dragging.GrabbedPoint = grabbedPoint;
 				Dragging.Centre = centre;
 				Dragging.Mode = mode;
-				Dragging.Sides = ScaleSides;
+
+				// **Ctrl scales from the centre, and it is a modifier rather
+				// than a second preference.** `ScaleSide` already carried
+				// `Both`, so symmetric scaling existed and the only way to reach
+				// it was to go and change a setting - which is the wrong shape
+				// for something wanted for one drag and not the next.
+				//
+				// `BothHalf` rather than `Both`, because that is the one whose
+				// *size* lands on the snap step: `Both` moves each face by the
+				// increment so the part grows by twice it, which makes a
+				// snapped drag produce sizes off the grid. `Config.hpp` states
+				// both, and this picks the one a person dragging with snap on
+				// means.
+				//
+				// **Inverts rather than sets**, so somebody who has made
+				// centre-scaling their default still has a modifier: it gives
+				// them the single face back.
+				//
+				// Read once, at the grab. A modifier sampled every frame would
+				// change what a drag means half way through it, and the
+				// increment already applied would have been applied the other
+				// way.
+				const bool centred = ScaleSides != ScaleSide::Side;
+				const bool wantsCentre = ImGui::GetIO().KeyCtrl ? !centred : centred;
+				Dragging.Sides = wantsCentre ? ScaleSide::BothHalf : ScaleSide::Side;
 				Dragging.Pivots = PivotEditing && mode != ToolMode::Scale;
 
 				Universe->Enter(world, [&](Store &store) {
@@ -1276,7 +1468,7 @@ namespace studio {
 
 					engine::spatial::Proxy proxy;
 					proxy.Id = entity.Id;
-					proxy.Bounds = AABB::FromOrientedBox(transform.Frame, bounds.HalfExtent);
+					proxy.Bounds = OrientedBoxBounds(transform.Frame, bounds.HalfExtent);
 					proxy.Layers = engine::spatial::LayerMask::All();
 					proxies.push_back(proxy);
 				}
@@ -1503,6 +1695,95 @@ namespace studio {
 		return true;
 	}
 
+	bool Editor::DragSelectionBox(size_t viewport, const PanelProjection &panel) {
+		const WorldId world = ViewportWorld(viewport);
+		if (CurrentTool != ToolMode::Select || !world.IsValid() || Universe == nullptr) {
+			return false;
+		}
+
+		const bool holding = BoxSelection.Active && BoxSelection.Viewport == viewport;
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const glm::vec2 cursor(mouse.x, mouse.y);
+
+		if (!holding) {
+			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+				return false;
+			}
+			const ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+			const glm::vec2 start(mouse.x - delta.x, mouse.y - delta.y);
+			if (!panel.ContainsPanel(start)) {
+				return false;
+			}
+
+			// A part at the gesture origin belongs to Select's direct move. Only
+			// empty space starts a rectangle, so the two interactions never race.
+			if (RaycastWorld(world, panel.PanelToRay(start), {}).has_value()) {
+				return false;
+			}
+
+			BoxSelection.Active = true;
+			BoxSelection.Viewport = viewport;
+			BoxSelection.Start = start;
+			BoxSelection.Current = cursor;
+			BoxSelection.Add = ImGui::GetIO().KeyCtrl;
+		}
+
+		const glm::vec2 panelMinimum = panel.ImageMin;
+		const glm::vec2 panelMaximum = panel.ImageMin + panel.ImageSize;
+		BoxSelection.Current = glm::clamp(cursor, panelMinimum, panelMaximum);
+
+		if (viewport < Overlays.size() && Overlays[viewport].List != nullptr) {
+			const glm::vec2 minimum = glm::min(BoxSelection.Start, BoxSelection.Current);
+			const glm::vec2 maximum = glm::max(BoxSelection.Start, BoxSelection.Current);
+			Overlays[viewport].List->AddRectFilled(
+				ImVec2(minimum.x, minimum.y), ImVec2(maximum.x, maximum.y), IM_COL32(45, 125, 230, 38)
+			);
+			Overlays[viewport].List->AddRect(
+				ImVec2(minimum.x, minimum.y), ImVec2(maximum.x, maximum.y), IM_COL32(80, 160, 255, 230)
+			);
+		}
+
+		if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			return true;
+		}
+
+		std::vector<Entity> enclosed;
+		Universe->Enter(world, [&](Store &store) {
+			store.Each<engine::scene::Transform, engine::scene::Bounds>(
+				[&](Entity entity,
+					const engine::scene::Transform &transform,
+					const engine::scene::Bounds &bounds) {
+					if (const auto *visual = store.Get<engine::scene::Visual>(entity);
+						visual != nullptr && visual->Locked) {
+						return;
+					}
+
+					glm::vec2 minimum;
+					glm::vec2 maximum;
+					if (ProjectBoxBounds(panel, transform.Frame, bounds.HalfExtent, minimum, maximum) &&
+						PanelRectanglesOverlap(BoxSelection.Start, BoxSelection.Current, minimum, maximum)) {
+						enclosed.push_back(entity);
+					}
+				}
+			);
+		});
+
+		if (!BoxSelection.Add || SelectionWorld != world) {
+			ClearSelection();
+		}
+		for (const Entity entity : enclosed) {
+			if (!IsSelected(entity)) {
+				Select(world, entity, true);
+			}
+		}
+		if (!enclosed.empty()) {
+			SelectionAnchor = enclosed.back();
+			OpenPathTo(world, enclosed.back());
+		}
+		BoxSelection = BoxSelectionAction{};
+		return false;
+	}
+
 	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {
 		const WorldId shown = ViewportWorld(viewport);
 		if (!shown.IsValid() || Universe == nullptr) {
@@ -1561,6 +1842,8 @@ namespace studio {
 		engine::gui::CompileRequest request;
 		request.Display.Width = canvas.Width;
 		request.Display.Height = canvas.Height;
+		request.ScreenGuis = IsRunning(shown) ? engine::gui::ScreenGuiSource::PlayerGui
+											  : engine::gui::ScreenGuiSource::StarterGui;
 
 		// The clock a page slide and a rubber band are measured against. See
 		// `CompileRequest::Seconds` for why it is handed in.
@@ -1618,6 +1901,10 @@ namespace studio {
 
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
+			if (const auto *local = store.Resource<engine::scene::LocalPlayer>(); local != nullptr) {
+				request.Viewer = local->Instance;
+			}
+
 			// **Per panel, because a panel is a canvas with its own camera.**
 			// A billboard is as many pixels across as the viewport it is
 			// projected into makes it, so two panels looking at one world from
@@ -1646,6 +1933,83 @@ namespace studio {
 			const std::span<const engine::gui::GuiEvent> produced =
 				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
 			events.assign(produced.begin(), produced.end());
+
+			// **Typing, which this panel routed clicks for and never delivered.**
+			// A `TextBox` in a studio viewport took focus from a click, showed a
+			// caret, and then ignored the keyboard: `gui::Type` was called by
+			// `mono.client` and by nothing here, so the editor was the one place
+			// a text box could be focused and not typed into.
+			//
+			// **From imgui rather than from `input::Translator`**, because the
+			// studio has no translator - it is an imgui application and its
+			// keyboard arrives in `ImGuiIO`. `InputQueueCharacters` is already
+			// the decoded text, which is the same thing `Typing::Text` wants and
+			// the reason this needs no key-code table.
+			//
+			// **Only when imgui does not want the keyboard itself.** A person
+			// renaming a part in the explorer is typing into an imgui field, and
+			// `WantTextInput` is how imgui says so. A focused `TextBox` in the
+			// world is invisible to imgui, so that flag is false exactly when
+			// this should run.
+			//
+			// **Only for the panel in front, and only while the keyboard is
+			// actually in it.** With two viewports open both route their own
+			// pointer, so a character typed once would otherwise arrive twice in
+			// two different scenes.
+			//
+			// `FocusedIsViewport` as well as `FocusedViewport`, and the header on
+			// the pair says why: the index keeps naming the last viewport when
+			// focus moves to the explorer or the properties panel, deliberately,
+			// so the transport readout does not blank. The bool is the one that
+			// goes false - which is exactly the difference between typing into a
+			// text box in the world and typing into a property field.
+			const ImGuiIO &io = ImGui::GetIO();
+			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
+				engine::gui::Typing typing;
+
+				// **A local the view outlives.** `Typing::Text` is a
+				// `string_view`, so the bytes have to live until `Type` has run -
+				// which is what `input::Translator` provides on the client side
+				// and what has to be provided here.
+				std::string entered;
+				for (int character : io.InputQueueCharacters) {
+					// The queue is UTF-32 and `Typing::Text` is UTF-8. Anything
+					// outside the basic plane is dropped rather than truncated,
+					// because half a code point in a `Label::Text` is a string
+					// nothing downstream can measure.
+					if (character > 0 && character < 0x80) {
+						entered.push_back(static_cast<char>(character));
+					} else if (character >= 0x80 && character < 0x800) {
+						entered.push_back(static_cast<char>(0xC0 | (character >> 6)));
+						entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+					} else if (character >= 0x800 && character < 0x10000) {
+						entered.push_back(static_cast<char>(0xE0 | (character >> 12)));
+						entered.push_back(static_cast<char>(0x80 | ((character >> 6) & 0x3F)));
+						entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+					}
+				}
+
+				typing.Text = entered;
+				typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+				typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+				typing.Extend = io.KeyShift;
+
+				// One step per press, like the client's: `Typing::Caret` is a
+				// direction and not a count.
+				if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
+					typing.Caret = -1;
+				} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
+					typing.Caret = 1;
+				}
+
+				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
+					engine::gui::GuiEvent released;
+					released.Kind = engine::gui::EventKind::FocusReleased;
+					released.Instance = typed.Instance;
+					released.Entered = true;
+					events.push_back(released);
+				}
+			}
 		});
 
 		// **Handed to the VM, which is what turns a click into a `.Activated`.**

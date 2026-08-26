@@ -530,12 +530,12 @@ namespace engine::scene {
 
 	// How many surface panes a world draws at once when it says nothing.
 	//
-	// **Fifty, and it is a budget rather than a ceiling.** A hall of mirrors is
+	// **Thirty-two, and it is a budget rather than a ceiling.** A hall of mirrors is
 	// the scene this number exists for and it does not have a natural size; what
 	// it has is a frame time, and a pane costs a whole render of the world into
-	// a texture. Fifty is what a modern device draws without the frame falling
-	// over, at the sizes `render::SurfaceScale` picks for panes that are not
-	// filling the screen.
+	// a texture. Thirty-two bounds the close-up case where retained panes grow
+	// toward the viewport size while still covering the visible face of the
+	// stress mirror ball.
 	//
 	// **It was sixteen and it was not a setting**, which is the thing that
 	// changed at v0.17: `MAX_SURFACES` was a compile-time constant and a world
@@ -544,7 +544,7 @@ namespace engine::scene {
 	// allocation.
 	//
 	// @since v0.17
-	inline constexpr int32_t DEFAULT_SURFACE_LIMIT = 50;
+	inline constexpr int32_t DEFAULT_SURFACE_LIMIT = 32;
 
 	// How many surface panes this world draws at once.
 	//
@@ -659,7 +659,7 @@ namespace engine::scene {
 	//
 	// **One description of a hole, for the three passes that need one.** A body
 	// walking through (`CrossPortals`), a body *half* through and therefore
-	// drawn on both sides (`client::CollectInstances`), and a body half through
+	// drawn on both sides (`engine::render::CollectInstances`), and a body half through
 	// and therefore standing on both floors (`physics::GhostPortalBodies`) are
 	// the same rectangle asked three questions. They disagreed the moment there
 	// were three copies of it, and what that looks like is a character that
@@ -754,6 +754,16 @@ namespace engine::scene {
 		// stand-in - in *this* world, a metre behind the pane they were walking
 		// into - instead of handing them to whoever owns the crossing.
 		bool Crosses = false;
+
+		// Whether a body may enter this mouth from behind, from
+		// `Portal::Bidirectional`.
+		//
+		// **The crossing only.** The pane draws from both sides whatever this
+		// says, because a mouth that vanished when you walked round it would
+		// read as a rendering fault rather than as a rule.
+		//
+		// @since v0.19
+		bool Bidirectional = true;
 	};
 
 	// The map from one side of a seam to the far side.
@@ -877,6 +887,33 @@ namespace engine::scene {
 	float SeamDistance(const PortalSeam &seam, const core::Vector3 &at);
 
 	// How far the nearest hole in the world is from a point.
+	//
+	// **Nothing in the engine calls this today, and it ships anyway.** Its one
+	// production caller was `ResolveActiveCamera`, deleted at v0.19 for a reason
+	// that has nothing to do with this function: one cached matrix set cannot
+	// serve three consumers that each project against a different target.
+	// `docs/CODE_ARCH.md` decision 16 is the shape - a surface may ship complete
+	// and frozen with its implementation deliberately unwired - and these are the
+	// three reasons it is that rather than a leftover.
+	//
+	// **It is the store half of a pair whose other half is live.**
+	// `PortalNearPlane` is called by `render::ViewRecording` every frame and it
+	// takes a distance; there are exactly two ways to produce one, and the
+	// renderer's is not this one *on purpose*. A renderer measures the panes the
+	// frame handed it, because that is the same set the pass draws through and it
+	// has no store to ask. A host that has a store asks this. Delete it and the
+	// pair has one half, `PortalNearPlane`'s own `@param` points at nothing, and
+	// the next caller with a world composes `GatherPortalSeams` and a min loop by
+	// hand - which is the second way to do one job this repository refuses.
+	//
+	// **The family is deliberately complete.** `RectangleDistance` asks a
+	// rectangle, `SeamDistance` asks a gathered seam, and this asks a world.
+	// Removing the third rung leaves a ladder that stops one short of the only
+	// question a caller outside this file actually has.
+	//
+	// **What wires it** is the first host that clamps a projection it builds from
+	// a world rather than from a frame's pane list. `ROADMAP.md` v0.22 is the
+	// portal work and the near plane is one of the five seams it names.
 	//
 	// @param store The world.
 	// @param at    The point, normally the eye.
@@ -1084,6 +1121,17 @@ namespace engine::scene {
 	// of the destination sideways, or backwards through the hole it just came
 	// out of, which reads as the portal spitting people back.
 	//
+	// **Both halves of `scene::Motion`, and the spin takes the rotation without
+	// the scale.** `Angular` went four versions unmapped because the case is
+	// invisible between two upright panes: the seam's destination is built from
+	// the far pane's normal with a canonical up and the half-turn is a yaw, so
+	// any two walls compose to a map that leaves `Y` alone. Put a hole in a floor
+	// and a tumbling crate comes out spinning about the wrong axis. Radians per
+	// second carry no length, so a hole that halves a body halves the radius and
+	// halves the speed of every point on it and the rate is unchanged - which
+	// makes this the one thing crossing a scaled seam that `PortalSeam::Scale`
+	// must not touch.
+	//
 	// **And the body is resized when the two panes are not the same size**,
 	// which is what makes a room bigger on the inside something the simulation
 	// agrees with rather than something the pane draws. A crosser's `Bounds`,
@@ -1118,7 +1166,11 @@ namespace engine::scene {
 	// heading. `physics::RegisterCharacterSystems` installs it.
 	//
 	// @param store The world.
-	// @return How many bodies crossed. Zero in every scene with no portal in it.
+	// The active free or scriptable camera is included. Subject cameras use
+	// `PlaceCamera`'s portal-aware arm instead, so the two paths never move one
+	// eye twice.
+	//
+	// @return How many bodies and active cameras crossed. Zero in a scene with no portal.
 	// @since v0.14
 	size_t CrossPortals(ecs::Store &store);
 

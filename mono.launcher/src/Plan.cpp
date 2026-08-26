@@ -34,6 +34,33 @@ namespace launcher {
 
 	}
 
+	BrowseShape BrowseShapeOf(const DescribedOption &option) {
+		if (!option.TakesValue) {
+			return BrowseShape::None;
+		}
+		if (option.ValueName == "PATH") {
+			return BrowseShape::File;
+		}
+		if (option.ValueName == "DIR") {
+			return BrowseShape::Folder;
+		}
+		return BrowseShape::None;
+	}
+
+	bool AnyBrowses(const Description &description, const std::vector<std::string> &names) {
+		for (const std::string &name : names) {
+			const DescribedOption *option = description.Option(name);
+			if (option != nullptr && BrowseShapeOf(*option) != BrowseShape::None) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool IsBooleanSetting(const DescribedSetting &setting) {
+		return setting.Kind == "boolean";
+	}
+
 	bool IsLauncherOwnedOption(std::string_view name) {
 		// `help`, `version` and `describe` print and exit, so a form offering
 		// them offers a button that starts nothing. `flags` is the same. `flag`
@@ -163,6 +190,52 @@ namespace launcher {
 
 	bool Matches(std::string_view query, std::string_view name, std::string_view description) {
 		return query.empty() || ContainsFolded(name, query) || ContainsFolded(description, query);
+	}
+
+	std::vector<std::string> MatchingOptions(
+		const Description &description, const std::vector<std::string> &names, std::string_view query
+	) {
+		std::vector<std::string> kept;
+		for (const std::string &name : names) {
+			const DescribedOption *option = description.Option(name);
+			if (option != nullptr && Matches(query, option->Name, option->Description)) {
+				kept.push_back(name);
+			}
+		}
+		return kept;
+	}
+
+	std::vector<std::string> MatchingSettings(
+		const Description &description, const std::vector<std::string> &names, std::string_view query
+	) {
+		std::vector<std::string> kept;
+		for (const std::string &name : names) {
+			const DescribedSetting *setting = description.Setting(name);
+			if (setting != nullptr && Matches(query, setting->Name, setting->Description)) {
+				kept.push_back(name);
+			}
+		}
+		return kept;
+	}
+
+	size_t OptionHits(const Description &description, std::string_view query) {
+		size_t hits = 0;
+		for (const DescribedOption &option : description.Options) {
+			if (!IsLauncherOwnedOption(option.Name) && Matches(query, option.Name, option.Description)) {
+				hits++;
+			}
+		}
+		return hits;
+	}
+
+	size_t SettingHits(const Description &description, std::string_view query) {
+		size_t hits = 0;
+		for (const DescribedSetting &setting : description.Settings) {
+			if (Matches(query, setting.Name, setting.Description)) {
+				hits++;
+			}
+		}
+		return hits;
 	}
 
 	size_t RowsFor(const Form &form, std::string_view option) {

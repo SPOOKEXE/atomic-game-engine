@@ -26,7 +26,7 @@
 #include <vector>
 
 TEST_SUITE_ID("studio.plugins")
-TEST_DEPENDS("engine.script.scripting")
+TEST_DEPENDS("engine.scripthost.scripting")
 
 using engine::core::Name;
 using engine::ecs::Entity;

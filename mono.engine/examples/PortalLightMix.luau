@@ -4,7 +4,7 @@
 --
 -- **The scene the roadmap's "two coloured lights either side of a portal mix"
 -- line is measured against.** Each lamp stands inside its own seam's reach, so
--- `client::CollectLights` copies it through: the red lamp gains a twin behind
+-- `engine::render::CollectLights` copies it through: the red lamp gains a twin behind
 -- the far pane and the green lamp a twin behind the near one. The floor in
 -- front of each pane is then lit twice - by its own room's lamp directly and by
 -- the other room's through the hole - and on a neutral floor with no other

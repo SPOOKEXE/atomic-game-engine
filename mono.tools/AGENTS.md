@@ -6,6 +6,7 @@ The developer-facing tools. Nothing here ships in a game binary.
 |---|---|
 | `testrunner/` | the selective test runner - a C++ library, a thin main, and its own tests |
 | `architecture/` | a CMake script, and the checked-in expectation it reads |
+| `sourcecheck/` | the four architecture rules that are visible in source text rather than in the target graph |
 | `docgen/` | the documentation filter, and the `docs` target it feeds - see its own `AGENTS.md` |
 
 ## No scripting runtime
@@ -68,6 +69,34 @@ the worst failure mode a runner has.
 Never add a way to declare files by hand. Where the derivation fails - no Ninja
 database, a different generator - the runner warns and falls back to hashing the
 source alone. It says so rather than narrowing in silence.
+
+## `sourcecheck` is the source-text half of the architecture check
+
+`CheckTargetGraph.cmake` reads CMake's output and can therefore see the module
+set, the tiers, the link sets and the layer heights. It cannot see a member's
+type, a header's includers, or an argument reaching a writer, and those are what
+root `AGENTS.md` rules 2, 3 and 4 and `docs/CODE_ARCH.md` §3 are about. So there
+are two tools rather than one, and they are C++ and CMake for the reason above:
+one's input is CMake's output and the other's is C++.
+
+**It is a scanner, not a front end, and the difference is the whole design.** A
+tool that resolved types properly would need the build's include paths, which
+means it could only run after a configure - and the point of both checks is that
+they run against a tree nobody has built. Every rule is therefore a heuristic
+over declarations, `docs/CODE_ARCH.md` §11.1 tables what each one catches and
+misses, and `Rules.hpp` repeats it at each function.
+
+**A rule is switched off with `// arch-waiver <rule>: <reason>` above the
+declaration**, and the reason is load-bearing: a waiver with nothing after the
+colon is reported rather than honoured. Do not add a suppression list anywhere -
+a list drifts away from the code it names and nobody notices, and a comment dies
+with the declaration it sits on.
+
+**Its fixtures are not optional.** Three of the four rules find nothing in this
+repository, so nothing else would notice if the scanner stopped reading. The
+fixture trees under `tests/fixtures/` are inputs that must fail with a named
+sentence, plus one that must pass, and `tests/fixtures/README.md` says why. That
+is the same argument `architecture/tests/README.md` makes, one tool along.
 
 ## The architecture check is not the tier enforcer
 

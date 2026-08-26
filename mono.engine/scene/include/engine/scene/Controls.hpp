@@ -249,10 +249,17 @@ namespace engine::scene {
 		float JumpSpeed = 7.0f;
 
 		// How tall the capsule is, in metres.
+		//
+		// **The one capsule dimension that lives here, and the width
+		// deliberately does not.** A `Radius` sat beside this from v0.10 to
+		// v0.19 with two writers and no reader anywhere in the tree - the
+		// physics sweep takes the width from `Collider::Extent`, which is the
+		// row the broad phase and the narrow phase both already read, and a
+		// second answer to how wide a character is is the duplication root
+		// `AGENTS.md` rule 2 opens by refusing. This one is different: the
+		// ground ray's origin is `Position - Height/2` and there is no collider
+		// field that says where the feet are.
 		float Height = 5.0f;
-
-		// How wide it is.
-		float Radius = 1.0f;
 
 		// How far below the feet counts as standing on something.
 		//
@@ -306,20 +313,14 @@ namespace engine::scene {
 		// @since v0.18
 		bool AutoRotate = true;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
-		//
-		// **Four bytes rather than one, and that is what the two health floats
-		// paid for.** An `ecs::Entity` aligns to eight, so this object rounds up
-		// to a multiple of eight whatever is in it - and at one byte the round-up
-		// was four *unnamed* bytes on the end, which a snapshot writes and nobody
-		// initialises. Widening the named run to reach the boundary exactly is
-		// how the rest of this module states the same rule, and `just
-		// determinism` is what checks it: two runs of one scene writing
-		// different bytes is what uninitialised padding looks like from outside.
-		//
-		// **`AutoRotate` took one of the five this used to be**, matching the
-		// shape `Visual::Reserved` already went through as fields arrived.
-		uint8_t Reserved[4] = {};
+		// **No `Reserved` here, and that is a measured statement rather than an
+		// omission.** An `ecs::Entity` aligns to eight, so this object rounds up
+		// to a multiple of eight whatever is in it, and the four bools land
+		// exactly on a boundary: 8 + 12 + 24 + 4 is 48. The named run this used
+		// to carry existed to swallow the round-up, and deleting `Radius` took
+		// the four bytes it was swallowing. `engine.scene.controls` measures the
+		// size against the sum of the members, so a field added in the middle
+		// fails there rather than writing uninitialised bytes into a snapshot.
 	};
 
 	// Whether a humanoid has run out of life.

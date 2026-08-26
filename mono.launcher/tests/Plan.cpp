@@ -54,6 +54,7 @@ namespace {
 			Value("session-key", "SECRET"),
 			Value("cdn", "HOST:PORT"),
 			Value("width", "PX"),
+			Value("content-cache", "DIR"),
 		};
 		description.Settings = {
 			DescribedSetting{
@@ -329,6 +330,108 @@ TEST_CASE("search matches a name or what it does", "[launcher]") {
 	// Half of what somebody is looking for they remember by what it does.
 	CHECK(Matches("call", "session-name", "What to call this session"));
 	CHECK_FALSE(Matches("physics", "session-name", "What to call this session"));
+}
+
+TEST_CASE("a browse button is offered off the declared value name", "[launcher]") {
+	const Description description = Client();
+
+	// `PATH` and `DIR` are what every program in the tree already spells a path
+	// option's value, so a browse button arrives with the declaration rather
+	// than with a table here.
+	REQUIRE(description.Option("game") != nullptr);
+	CHECK(BrowseShapeOf(*description.Option("game")) == BrowseShape::File);
+	REQUIRE(description.Option("content-cache") != nullptr);
+	CHECK(BrowseShapeOf(*description.Option("content-cache")) == BrowseShape::Folder);
+
+	// Everything else is typed. `HOST:PORT` is not a path and a file dialog
+	// over it would offer to fill it in with something the child refuses.
+	CHECK(BrowseShapeOf(*description.Option("connect")) == BrowseShape::None);
+
+	// A bare flag has no value to browse for, whatever its value name says.
+	CHECK(BrowseShapeOf(*description.Option("browse")) == BrowseShape::None);
+}
+
+TEST_CASE("a group knows whether any of it browses", "[launcher]") {
+	const Description description = Client();
+
+	// This is what sizes the actions column for a whole group, so it has to be
+	// the same question the row asks - one `PATH` in the group widens all of
+	// them, and a group with none keeps the narrow column.
+	CHECK(AnyBrowses(description, {"connect", "game"}));
+	CHECK(AnyBrowses(description, {"content-cache"}));
+	CHECK_FALSE(AnyBrowses(description, {"connect", "width", "browse"}));
+
+	// A name the program does not declare is skipped rather than counted, the
+	// way a stale pin is.
+	CHECK_FALSE(AnyBrowses(description, {"no-such-option"}));
+}
+
+TEST_CASE("a boolean setting is the declared kind, not the default's spelling", "[launcher]") {
+	const Description description = Client();
+
+	REQUIRE(description.Setting("content.gif") != nullptr);
+	CHECK(IsBooleanSetting(*description.Setting("content.gif")));
+
+	// A text setting whose default happens to read like a boolean is still a
+	// text setting, and a checkbox over it would throw away every other value
+	// it can hold.
+	const DescribedSetting text{
+		.Name = "session.mode", .Kind = "text", .Default = "false", .Description = "how to run"
+	};
+	CHECK_FALSE(IsBooleanSetting(text));
+}
+
+TEST_CASE("the search filters a name list to what stays on screen", "[launcher]") {
+	const Description description = Client();
+	const std::vector<std::string> pinned = Join().Pinned;
+
+	// Empty query is every declared name, in the order they were given - the
+	// pinned list is a reading order and filtering must not reorder it.
+	CHECK(MatchingOptions(description, pinned, "") == pinned);
+
+	CHECK(MatchingOptions(description, pinned, "connect") == std::vector<std::string>{"connect"});
+	CHECK(MatchingOptions(description, pinned, "physics").empty());
+
+	// A pinned name the program no longer declares is silently nothing, which
+	// is what lets this launcher work beside an older staged tree.
+	CHECK(MatchingOptions(description, {"no-such-option", "game"}, "") == std::vector<std::string>{"game"});
+}
+
+TEST_CASE("the settings search filters the same way", "[launcher]") {
+	const Description description = Client();
+	const std::vector<std::string> group = {"content.gif", "content.svg"};
+
+	CHECK(MatchingSettings(description, group, "") == group);
+	CHECK(MatchingSettings(description, group, "svg") == std::vector<std::string>{"content.svg"});
+	CHECK(MatchingSettings(description, {"no-such-setting"}, "").empty());
+}
+
+TEST_CASE("a tab's count is the number of rows that tab draws", "[launcher]") {
+	const Description description = Client();
+
+	// **One function behind both**, because a tab reading `(3)` over two rows
+	// is what two loops asking the same question drift into. Until v0.19 the
+	// counts and the rows were separate loops in `Interface.cpp`.
+	size_t declared = 0;
+	for (const DescribedOption &option : description.Options) {
+		declared += IsLauncherOwnedOption(option.Name) ? 0 : 1;
+	}
+	CHECK(OptionHits(description, "") == declared);
+
+	size_t grouped = 0;
+	for (const OptionGroup &group : GroupOptions(description)) {
+		grouped += MatchingOptions(description, group.Options, "session").size();
+	}
+	CHECK(OptionHits(description, "session") == grouped);
+	CHECK(OptionHits(description, "session") == 3);
+
+	// `--help` and friends are not on the form, so a search that matches one
+	// must not claim a hit nobody can scroll to.
+	CHECK(OptionHits(description, "help") == 0);
+
+	CHECK(SettingHits(description, "") == description.Settings.size());
+	CHECK(SettingHits(description, "content.") == 2);
+	CHECK(SettingHits(description, "physics") == 0);
 }
 
 TEST_CASE("only enabled rows reach the command line", "[launcher]") {

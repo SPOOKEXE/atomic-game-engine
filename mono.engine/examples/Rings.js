@@ -42,7 +42,16 @@ function range(index, salt, low, high) {
 
 // Orbit state lives in the script, because how a part moves is the game's
 // business. The engine holds the part.
+//
+// **No part on the record.** The orbiters and `parts` below are the same list
+// in the same order, and `BulkMoveTo` wants that list as a list - a handle here
+// as well would be a second copy to keep in step with it.
 const orbiters = [];
+
+// The two lists `BulkMoveTo` takes. The parts never change, so that half is
+// filled below once; the placements are overwritten in place every beat.
+const parts = [];
+const placements = [];
 
 for (let index = 0; index < COUNT; index++) {
 	const ring = Math.floor(index / PER_RING);
@@ -66,8 +75,10 @@ for (let index = 0; index < COUNT; index++) {
 	part.Anchored = true;
 	part.Parent = workspace;
 
+	parts.push(part);
+	placements.push(part.CFrame);
+
 	orbiters.push({
-		part,
 		radius: INNER_RADIUS + ring * ringStep,
 		height: range(index, 7, -5, 5),
 		// Outer rings turn more slowly, which reads as depth without any depth
@@ -81,8 +92,13 @@ for (let index = 0; index < COUNT; index++) {
 	});
 }
 
+// **One `BulkMoveTo` at the end rather than a write inside the loop**, matching
+// the Luau twin. A per-part `CFrame =` crosses the language boundary once per
+// orbiter, and the boundary is most of what a move costs - `scene::BulkMoveTo`
+// carries the measurement.
 RunService.Heartbeat.Connect((deltaTime) => {
-	for (const orbiter of orbiters) {
+	for (let at = 0; at < orbiters.length; at++) {
+		const orbiter = orbiters[at];
 		orbiter.angle += orbiter.speed * deltaTime;
 
 		// The part's own turn, accumulated by composition - the same thing
@@ -96,10 +112,12 @@ RunService.Heartbeat.Connect((deltaTime) => {
 		);
 
 		// Turn about the origin, step out along the ring, then apply the spin.
-		orbiter.part.CFrame = CFrame.Angles(0, orbiter.angle, 0)
+		placements[at] = CFrame.Angles(0, orbiter.angle, 0)
 			.mul(CFrame.new(orbiter.radius, orbiter.height, 0))
 			.mul(orbiter.spin);
 	}
+
+	workspace.BulkMoveTo(parts, placements);
 });
 
 print(`rings: ${COUNT} parts across ${rings} ring(s), animated from script`);

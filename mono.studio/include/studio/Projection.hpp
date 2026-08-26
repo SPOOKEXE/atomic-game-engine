@@ -54,7 +54,17 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
 
+#include <cstdint>
+
 namespace studio {
+	// A source image fitted uniformly inside a viewport panel.
+	struct ViewportImageRect {
+		glm::vec2 Min{0.0f, 0.0f};
+		glm::vec2 Size{0.0f, 0.0f};
+	};
+
+	// Preserves a completed frame's aspect ratio while its panel is resizing.
+	ViewportImageRect FitViewportImage(glm::vec2 panelSize, uint32_t imageWidth, uint32_t imageHeight);
 
 	// Where a ray meets a plane.
 	//
@@ -267,4 +277,32 @@ namespace studio {
 		// @return `true` when it is inside the image rect.
 		bool ContainsPanel(glm::vec2 panel) const;
 	};
+
+	// The panel-space rectangle covered by an oriented world box.
+	//
+	// Every edge is clipped against the camera near plane before its endpoints
+	// contribute. Projecting only the eight corners loses a box that crosses the
+	// eye plane, which is exactly the large nearby part a drag selection must not
+	// skip.
+	//
+	// @param panel The viewport mapping used to draw the scene.
+	// @param frame The box centre and orientation.
+	// @param half The box half extents in local space.
+	// @param minimum Filled with the smallest panel coordinate.
+	// @param maximum Filled with the largest panel coordinate.
+	// @return `false` when the box lies wholly behind the camera.
+	// @since v0.19
+	bool ProjectBoxBounds(
+		const PanelProjection &panel,
+		const engine::core::CFrame &frame,
+		const engine::core::Vector3 &half,
+		glm::vec2 &minimum,
+		glm::vec2 &maximum
+	);
+
+	// Whether two closed panel-space rectangles overlap. Inputs may be dragged
+	// in either direction and are normalised here.
+	//
+	// @since v0.19
+	bool PanelRectanglesOverlap(glm::vec2 firstA, glm::vec2 firstB, glm::vec2 secondA, glm::vec2 secondB);
 }

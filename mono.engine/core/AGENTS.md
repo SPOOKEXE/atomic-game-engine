@@ -32,14 +32,148 @@ it, so a mistake here is a mistake everywhere.
 - **No dependency on any other engine module.** `core` is the bottom. If
   something here needs `ecs`, it belongs in `ecs`.
 
-## The metrics sink is a seam, not a convenience
+## The log is guarded, categorised, and has a size budget
+
+`Log.hpp` is included by about two hundred and fifty translation units, so what
+goes in it is a decision about the whole engine's compile time rather than about
+this file. **The budget is the preprocessed line count and it is measured, not
+asserted**: 22,842 before v0.19 and 23,016 after, with the flags
+`compile_commands.json` gives for `Log.cpp`, and all 174 of those lines are
+declarations in that file rather than a header that arrived with them.
+`Clock.hpp` is 422 and is the bar.
+
+Three things follow, and each of them is why something in that header looks
+odd:
+
+- **No `<atomic>`** - 7,452 lines on its own. A category's level is read with
+  the compiler's atomic builtin on a plain `unsigned char`, and `Log.cpp` writes
+  it with the matching store. Both halves are spelled the same way on purpose.
+- **No `Name.hpp`** - 51,820 lines. A category *is* a `core::Name`, and
+  `LogCategory` holds the interned id as a bare integer and asks `Log.cpp` for
+  the text.
+- **No `fmt::format`** - `<spdlog/fmt/bundled/base.h>` is what declares the
+  argument erasure, and that is all this header needs. `Assert.hpp` inherits the
+  same constraint, which is why `ENGINE_ASSERT_MSG` hands its arguments to
+  `Assert::FailWith` rather than formatting them at the call site.
+
+**A disabled statement evaluates nothing, and that took a sweep to switch on.**
+The macros used to run their arguments whether the level was on or not, because
+guarding them would silently stop running any argument with a side effect. All
+711 call sites were swept - `++`, compound assignment, `fetch_add`, `Pop`,
+`Drain`, `release`, `Metrics::`, and every distinct function named inside an
+argument list - and **none of them had one**, so the guard went in and no call
+site had to change. If you add a log statement whose argument mutates
+something, you have written a bug that only appears at one log level.
+
+**A log statement is a statement and not an expression.** It expands to a
+`do { } while (false)`, so `REQUIRE_NOTHROW(ENGINE_WARN(...))` and
+`condition ? ENGINE_ERROR(...) : ...` do not compile. Neither shape existed in
+the tree; both would have been a log statement whose evaluation depended on
+something other than its level.
+
+**A category comes from the build, not from the call site.**
+`mono_add_library` defines `ENGINE_LOG_CATEGORY` as the module's own name on
+every target, which is how 711 call sites gained a category without one of them
+being edited. That is the whole of "one category per module by convention" -
+applied by the build rather than remembered by people. A file logging on behalf
+of another area passes one explicitly to `ENGINE_LOG`, which is the general form
+the five named macros expand to. There is deliberately no second family of
+uncategorised macros: two ways to do one job is the debt that outlives whoever
+added it.
+
+**The compiled floor is not a level, it is a preprocessor decision.**
+`ENGINE_LOG_COMPILED_LEVEL` is public on `Engine::core`, `trace` everywhere
+except `release` and `bench`, where it is `debug`. Below it a macro expands to a
+`sizeof` of an unevaluated call - so the format string is still checked, the
+arguments are still type-checked, a variable used only by a compiled-out
+statement is still used, and no instruction is emitted. Checked by looking:
+`store '{}' created` is in the `dev` object for `ecs/src/Store.cpp` and is not
+in the `release` one. `ENGINE_LOG` cannot be filtered this way, because its
+level is an expression and the preprocessor cannot see one.
+
+Measured at `preset=bench`: a disabled statement is under a nanosecond, with or
+without an argument; an enabled one into a null sink is 84 ns; a throttled one
+while it is quiet is 20 ns, which is one clock read.
+
+## `ENGINE_ASSERT` exists now, and `release` is the interesting column
+
+This file claimed an assertion facility from its first version and there was
+none. What the engine had instead was **one** `assert()`, at
+`render/src/ResourcePreview.hpp:34`, and every other module in the tree with no
+invariant check at all - which is the telling part, because a facility nobody
+has is a facility nobody reaches for. `Assert.hpp` is that facility, and the three macros
+differ in exactly one way: what a `release` build does.
+
+| Macro | `dev`, `ci`, `server`, `cdn` | `release`, `bench` |
+|---|---|---|
+| `ENGINE_ASSERT`, `ENGINE_ASSERT_MSG` | checks, reports, aborts | not compiled at all |
+| `ENGINE_UNREACHABLE` | reports, aborts | reports, aborts |
+| `ENGINE_ENSURE` | checks, reports, yields `false` | the same |
+
+`MONO_ASSERTS` is arranged exactly as `MONO_HEAP_PROFILE` is and for the same
+argument: a developer build checks its invariants without being reconfigured
+first, and a shipped build does not pay for a check on a hot path.
+`ENGINE_UNREACHABLE` is not switchable because there is nothing to carry on
+into, and `ENGINE_ENSURE` is not switchable because it is the one for a fact
+that might legitimately be false.
+
+**It goes through the log sink, and that is the whole reason it is here rather
+than being `assert()` with a nicer message.** The line is composed into one
+buffer and handed over in a single `log()` call, so an invariant that fails on a
+job worker is a line rather than fragments interleaved with three other workers.
+The thread id is in the pattern for the same reason. It is written unfiltered:
+an invariant that failed is not something a log setting may hide.
+
+`Assert::SetHandler` replaces what runs *after* the line. The default flushes
+and aborts. A handler that returns is what lets `tests/Assert.cpp` check that an
+assert fired without ending the suite; nothing shipped should install one.
+
+## The metrics sink is a seam, and its rule is about control flow
 
 `core::Metrics` exists so that `net` at L11 can report bytes-per-remote to the
-userland profiler at L13 without `net` depending on `script`. It is deliberately
-a write-only sink with no reader in this module.
+userland profiler at L13 without `net` depending on `script`. Writers name a
+counter; the sink does not know or care who reads.
 
-Do not add a `Metrics::Get(name)`. The moment a subsystem reads another
-subsystem's counter, the sink has become a global variable with extra steps.
+Until v0.19 this file said **"do not add a `Metrics::Get(name)`"**, and the
+argument was right: the moment a subsystem reads another subsystem's counter to
+decide something, the sink has become a global variable with extra steps. What
+that also prevented was *reporting*, which is a different thing and was the
+actual gap - the headless server had counted things since v0.9 and read none of
+them, and `FrameGraph`'s dropped-span count was reachable only from the F5
+overlay, which a server does not have.
+
+So the rule is now the one it always meant:
+
+> **Read to report. Never read to decide.**
+
+A caller that branches on `Get` is doing the thing this section refuses. A
+caller that prints, draws, folds or exports is what the read side is for.
+`Snapshot` is shaped for exactly that: one lock, resets nothing, sorted by name.
+
+`Drain` is still the counter reader and still has **exactly one caller per
+frame**, because that is what makes a counter a per-frame rate rather than a
+total that only goes up. Gauges and histograms are not drained: a gauge is a
+level and a histogram's window is what its percentiles are over.
+
+## Four counter mechanisms, and only one of them was a duplicate
+
+`core::Metrics`, `core::FrameGraph`, `core::HeapProfile` and `ecs::Scheduler`'s
+per-system timings all count things, and three of the four have a reason that
+survives review: `FrameGraph` needs tree structure and per-frame identity,
+`HeapProfile` is reached from inside `operator new` and would recurse if it took
+`Metrics`' lock, and the scheduler's timings are drained in system order by a
+panel that draws them in that order.
+
+**What was missing was not one write side. It was one read side.** So
+`FrameGraph::EndFrame` counts its dropped spans into
+`FrameGraph::DROPPED_COUNTER`, and the server drains and reports the sink - and
+a drop that no overlay is open to see is now a line in a headless run's report.
+Nothing is counted on a frame that dropped nothing, so an absent row means "lost
+no spans" rather than "nobody looked".
+
+The one genuine duplicate left is `ecs::ChunkPool`'s `Allocated`/`Reused`
+atomics, which are process-global, read only by tests, and would be two
+`Metrics::Count` calls. That is an `ecs` change, not a `core` one.
 
 ## There are three profilers and two of them are here
 
@@ -137,6 +271,11 @@ tree below it rather than just losing the part that overflowed.
 on a worker are dropped and counted in `Dropped()`, deliberately: a lock-free
 multi-thread span collector is Tracy's job, and Tracy is already here. Do not
 add locking to make it multi-thread - attach a profiler instead.
+
+**The drop is reported rather than silent.** `EndFrame` adds each frame's drops
+to `FrameGraph::DROPPED_COUNTER` in `core::Metrics`, because `Dropped()` was
+read by the F5 overlay and by nothing else - and a headless server is precisely
+the program that runs parallel compute and has no overlay.
 
 ## `Name` ids are session-local, and that is load-bearing
 

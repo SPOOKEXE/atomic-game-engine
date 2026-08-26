@@ -534,6 +534,8 @@ namespace studio {
 		// things all afternoon.
 		ImGui::Checkbox("Grid", &ShowGrid);
 		ImGui::SameLine();
+		ImGui::Checkbox("Particles", &ShowParticleEmitters);
+		ImGui::SameLine();
 		ImGui::Checkbox("Explorer", &ShowExplorer);
 		ImGui::SameLine();
 		ImGui::Checkbox("Properties", &ShowProperties);

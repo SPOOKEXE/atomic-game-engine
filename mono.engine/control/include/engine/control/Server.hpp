@@ -15,6 +15,52 @@
 
 namespace engine::control {
 
+	// The editor's conventional control port, and what `mcpbridge` dials with
+	// no `--port`.
+	//
+	// **Here because there were copies of this number and they disagreed.** The
+	// editor's `--mcp-port` help said 8738, its saved preferences seeded the
+	// panel's field with 8720 and `mcpbridge`'s own usage example still showed
+	// 8730 at v0.19, so somebody who followed one of them got a bridge talking
+	// to a closed port. `.mcp.json` and `RUNNING.md` both say 8738, so 8738 is
+	// the one that was right.
+	//
+	// **The number outside C++ is checked rather than trusted.**
+	// `mono.tools/mcpbridge/CMakeLists.txt` reads this declaration at configure
+	// time and fails the build when `.mcp.json` or the `just mcp` recipe
+	// disagrees with it - the three places a client is actually pointed at a
+	// port. A fourth copy is a configure error rather than a support question.
+	//
+	// @since v0.19
+	inline constexpr uint16_t DEFAULT_PORT = 8738;
+
+	// A dedicated server's conventional control port.
+	//
+	// **A different number from the editor's, and that is the whole reason it
+	// exists**: the two supported programs run on one machine while somebody is
+	// building a game, and a shared default would mean whichever started second
+	// failed to bind. Neither is enforced - any free port works - and neither is
+	// opened unless `--mcp-port` asks.
+	//
+	// @since v0.19
+	inline constexpr uint16_t DEFAULT_SERVER_PORT = 8734;
+
+	// A shipped client's conventional control port.
+	//
+	// Distinct from the studio and dedicated server so all three may run on one
+	// development machine. Still disabled unless `--mcp-port` is supplied.
+	//
+	// @since v0.20
+	inline constexpr uint16_t DEFAULT_CLIENT_PORT = 8736;
+
+	// A content origin's conventional control port.
+	//
+	// The origin has no universe or script features, and opens this only when an
+	// operator explicitly asks for it.
+	//
+	// @since v0.20
+	inline constexpr uint16_t DEFAULT_CDN_PORT = 8732;
+
 	// A listener with one client.
 	//
 	// @since v0.8

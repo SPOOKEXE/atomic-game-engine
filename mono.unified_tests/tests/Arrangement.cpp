@@ -4,7 +4,7 @@
 // arrangement is a name a person types and a name a report prints, so what has
 // to hold is that those are the same name and that the product is the whole
 // product - a matrix quietly missing a combination is a matrix that reports
-// twelve passes having run eleven things.
+// twenty passes having run nineteen things.
 
 #include <engine/testing/Suite.hpp>
 
@@ -41,8 +41,8 @@ TEST_CASE("every arrangement's name reads back as that arrangement", "[unified][
 TEST_CASE("the matrix is the whole cross product and holds no duplicates", "[unified][matrix]") {
 	const std::vector<Arrangement> all = AllArrangements();
 
-	// Three transports, two content modes, two discovery modes.
-	REQUIRE(all.size() == 12);
+	// Five transports, two content modes, two discovery modes.
+	REQUIRE(all.size() == 20);
 
 	std::set<std::string> names;
 	for (const Arrangement &arrangement : all) {

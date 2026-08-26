@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/SecureWipe.hpp>
@@ -49,6 +50,7 @@ namespace engine::net {
 			// success.
 			core::SecureWipe(secret);
 			core::Metrics::Count("net.handshake.no_entropy", 1.0);
+			ENGINE_ERROR("the operating system refused entropy; no session key can be agreed");
 			return std::nullopt;
 		}
 
@@ -122,15 +124,19 @@ namespace engine::net {
 			return false;
 		}
 
-		const auto refuse = [this]() {
+		// **The reason is a parameter rather than four identical counters.** A
+		// peer sending garbage, a socket wired to itself and a peer forcing a
+		// key it knows are three different problems that used to be one number.
+		const auto refuse = [this](const char *why) {
 			Forget();
 			Phase = HandshakeState::Refused;
 			core::Metrics::Count("net.handshake.refused", 1.0);
+			ENGINE_WARN("handshake refused: {}", why);
 			return false;
 		};
 
 		if (peerMessage.size() != MESSAGE_BYTES) {
-			return refuse();
+			return refuse("the message is not one key's worth of bytes");
 		}
 
 		std::array<uint8_t, MESSAGE_BYTES> peer{};
@@ -139,13 +145,13 @@ namespace engine::net {
 		// Our own key, echoed back. Either a loopback wired to itself or somebody
 		// reflecting, and neither is a peer worth deriving a key with.
 		if (CryptoPP::VerifyBufsEqual(peer.data(), Public.data(), MESSAGE_BYTES)) {
-			return refuse();
+			return refuse("the peer sent this end's own key back");
 		}
 
 		std::array<uint8_t, MESSAGE_BYTES> shared{};
 		if (CryptoPP::Donna::curve25519_mult(shared.data(), Secret.data(), peer.data()) != 0) {
 			core::SecureWipe(shared);
-			return refuse();
+			return refuse("the curve25519 agreement failed");
 		}
 
 		// Every low-order point on the curve agrees to all zeros against a
@@ -155,7 +161,7 @@ namespace engine::net {
 		const std::array<uint8_t, MESSAGE_BYTES> zero{};
 		if (CryptoPP::VerifyBufsEqual(shared.data(), zero.data(), zero.size())) {
 			core::SecureWipe(shared);
-			return refuse();
+			return refuse("the peer sent a low-order point, forcing an all-zero agreement");
 		}
 
 		Derive(peer, shared);
@@ -167,6 +173,7 @@ namespace engine::net {
 
 		Phase = HandshakeState::Established;
 		core::Metrics::Count("net.handshake.established", 1.0);
+		ENGINE_DEBUG("key agreed");
 		return true;
 	}
 
