@@ -6,6 +6,7 @@
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
+#include <array>
 #include <assetc/Bake.hpp>
 #include <fstream>
 #include <map>
