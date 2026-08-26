@@ -385,10 +385,22 @@ jobs:
         run: |
           set -euo pipefail
           ls -la dist
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" \
-            --verify-tag \
-            --generate-notes \
-            ${{ needs.version.outputs.prerelease == 'true' && '--prerelease' || '' }} \
-            dist/*
+          # Upload replaces rather than appends, and an existing release is
+          # uploaded into rather than fatal: this job re-runs after a failure,
+          # and a tag moved onto a fixed commit leaves its old release behind.
+          # Creating twice would fail the second attempt over work the first
+          # already did.
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber \
+              dist/*
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --verify-tag \
+              --generate-notes \
+              ${{ needs.version.outputs.prerelease == 'true' && '--prerelease' || '' }} \
+              dist/*
+          fi
