@@ -1,6 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
 #include <fstream>
@@ -398,11 +399,11 @@ namespace studio {
 	}
 
 	void Editor::PumpPlugins(float delta) {
+		ENGINE_PROFILE_CAT("plugins", engine::core::ProfileCategory::Render);
+
 		if (Plugins.empty()) {
 			return;
 		}
-
-		ENGINE_PROFILE_CAT("plugins", engine::core::ProfileCategory::Render);
 
 		// **The selection first, so a plugin's heartbeat sees this frame's.** A
 		// plugin that read a selection one frame stale would act on what was

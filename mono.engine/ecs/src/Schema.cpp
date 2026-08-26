@@ -272,7 +272,7 @@ namespace engine::ecs {
 
 		// --- the registry ----------------------------------------------------
 
-		struct Registry {
+		struct SchemaRegistry {
 			std::mutex Guard;
 
 			// A deque because `Of` hands back a pointer and registration
@@ -289,15 +289,15 @@ namespace engine::ecs {
 		// Never destroyed, for the reason `Components`' registry is not: a
 		// column reaches its schema to destroy its rows, and a store held in a
 		// static outlives this table under reverse destruction order.
-		Registry &Get() {
-			static Registry *registry = new Registry();
+		SchemaRegistry &SchemaRegistryOf() {
+			static SchemaRegistry *registry = new SchemaRegistry();
 			return *registry;
 		}
 
 		// What a generated hook reads, without taking the registry's lock.
 		//
 		// **A lock in `Destruct` would be a lock per row.** The pointers are
-		// written once under `Registry::Guard` and read from every tick
+		// written once under `SchemaRegistry::Guard` and read from every tick
 		// afterwards, so the array is atomic rather than plain - a plain read
 		// racing the registering write is a data race by the letter of the
 		// standard even where it happens to be benign.
@@ -601,7 +601,7 @@ namespace engine::ecs {
 		// bytes at all.
 		const uint32_t width = layout.empty() ? 0 : (offset + alignment - 1) / alignment * alignment;
 
-		auto &registry = Get();
+		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);
 
 		const core::Name key(name);
@@ -681,7 +681,7 @@ namespace engine::ecs {
 			return nullptr;
 		}
 
-		auto &registry = Get();
+		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);
 
 		const auto found = registry.ByComponent.find(component.Index);
@@ -689,7 +689,7 @@ namespace engine::ecs {
 	}
 
 	const Schema *Schemas::Find(core::Name name) {
-		auto &registry = Get();
+		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);
 
 		const auto found = registry.ByName.find(name.Id());
@@ -697,7 +697,7 @@ namespace engine::ecs {
 	}
 
 	std::vector<ComponentId> Schemas::All() {
-		auto &registry = Get();
+		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);
 
 		std::vector<ComponentId> ids;
@@ -709,7 +709,7 @@ namespace engine::ecs {
 	}
 
 	void Schemas::Clear() {
-		auto &registry = Get();
+		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);
 
 		for (size_t index = 0; index < registry.Entries.size(); index++) {

@@ -1,19 +1,15 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
-// Instanced opaque geometry: slot 0 is the mesh, slot 1 is per-instance data.
+// Instanced opaque geometry: attributes are the mesh; storage holds resident
+// instance rows and this view's ordered indices.
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
-layout(location = 3) in vec4 inModel0;
-layout(location = 4) in vec4 inModel1;
-layout(location = 5) in vec4 inModel2;
-layout(location = 6) in vec4 inModel3;
-layout(location = 7) in vec4 inColour;
-
-// One over the square of each axis' scale. See the normal below.
-layout(location = 8) in vec4 inInverseScaleSquared;
+// The resident-row storage declarations and their decode.
+#include "instance.glsl"
 
 // SDL's GPU API puts vertex uniform buffers in set 1 for SPIR-V.
 layout(set = 1, binding = 0) uniform Frame {
@@ -36,16 +32,28 @@ layout(location = 4) out vec2 outTexCoord;
 // position and not the view one**, because a light's range is in metres and a
 // view-space distance would make it depend on where the camera is.
 layout(location = 5) out vec3 outWorldPosition;
+layout(location = 6) flat out uint outAppearance;
+layout(location = 7) flat out vec3 outSurfaceColour;
+layout(location = 8) flat out vec4 outEmission;
 
 void main() {
-	mat4 model = mat4(inModel0, inModel1, inModel2, inModel3);
+	// **No model matrix is built.** The instance row carries the rotation, the
+	// scale and the translation separately, so the position is one quaternion
+	// rotate and an add - and the normal is the same rotate against a reciprocal
+	// scale, which is what the old `inInverseScaleSquared` float4 was for.
+	InstanceRow instance = LoadInstance();
+	vec3 position = InstancePosition(instance);
+	vec3 scale = InstanceScale(instance);
+	vec4 rotation = InstanceRotation(instance);
 
-	// The model includes scale, so inverse scale squared corrects its normals.
-	outNormal = mat3(model) * (inNormal * inInverseScaleSquared.xyz);
-	outColour = inColour;
+	outNormal = InstanceWorldNormal(rotation, scale, inNormal);
+	outColour = InstanceColour(instance);
 	outTexCoord = inTexCoord;
+	outAppearance = InstanceAppearance(instance);
+	outSurfaceColour = InstanceSurfaceColour(instance);
+	outEmission = InstanceEmission(instance);
 
-	vec4 world = model * vec4(inPosition, 1.0);
+	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, inPosition), 1.0);
 	outWorldPosition = world.xyz;
 
 	// Divide in the fragment to preserve perspective-correct interpolation.

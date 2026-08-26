@@ -235,6 +235,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
 | `mono.tools/linecount` | `linecount_lib` | `Tool::linecount` | `test_linecount` | shared |
+| `mono.tools/sourcecheck` | `sourcecheck_lib` | `Tool::sourcecheck` | `test_sourcecheck` | shared |
 
 The names are derived, not chosen per module: `mono_add_library` makes
 `engine_<name>` for an `Engine::` module and `<name>_lib` for a product's own
@@ -889,7 +890,7 @@ knobs at the top of the file and say what each one costs.
 
 | scene | what it loads | run it with |
 | --- | --- | --- |
-| `StressParticles.luau` | ten bays covering every authored `ParticleEmitter` property, then 1,024 parts carrying five emitters each - 512,000 particles | `just run --script .../StressParticles.luau --stats` |
+| `StressParticles.luau` | fourteen bays covering every authored `ParticleEmitter` property, then 1,024 parts carrying five emitters each - 512,000 particles | `just run --script .../StressParticles.luau --stats` |
 | `StressPhysics.luau` | 100,000 unanchored blocks in a tray that tilts, so nothing ever settles | `server --game .../StressPhysics.luau --physics-tick-rate 20` |
 | `StressMirrors.luau` | an ico-sphere mirror ball - 80 facets, 16 of them mirrors | `just run --script .../StressMirrors.luau` |
 
@@ -1344,15 +1345,25 @@ room; rotating the destination is the general answer.
 rather than to a blank pane. A surface that stopped reflecting reads as something
 to fix; a pane that vanished reads as a broken renderer.
 
-**You can walk through these.** `scene::CrossPortals` maps a body - and its
-velocity, and the camera's yaw when the body is the one the camera follows -
-through the same product the picture goes through, and `scene::OpenPortals`
+**You can walk through these.** `scene::CrossPortals` maps a body - and both
+halves of its `Motion`, and the camera's yaw when the body is the one the camera
+follows - through the same product the picture goes through, and `scene::OpenPortals`
 takes the pane's collider out of the solver's way so a walker reaches it at all.
 Press Play in the studio on `run-portals`' scene, or host it with
 `scripts/demos/run-local-server.sh`; the standalone client has no character and
 walks the lap on rails instead. What is left of `docs/retired/DEFERRED.md` D00112 is the
 seam on the frame you cross, which needs the portal chain rendered inside the
 frame, deepest first.
+
+**`Bidirectional` off makes it a one-way door.** By default a mouth may be
+entered from either side and the pair's map is its own inverse - walk through
+and walk back and you are where you started. Turn it off and only a body that
+enters *in front* crosses, where in front is the side the face's normal points
+at: the side the pane shows its image on. That is an entrance you cannot walk
+back out of, or an exit you cannot be pulled back into. Nothing else changes -
+the pane still draws from both sides, still cuts a body standing in it and still
+lights the room behind it, because a mouth that vanished when you walked round
+it would read as a rendering fault rather than as a rule.
 
 **A pane must be one part and it should be white.** One part because the
 rectangle a surface camera is fitted to and the rectangle `CrossPortals` tests
@@ -1628,6 +1639,33 @@ went with it".
 Collection only runs while the panel is open, so `F8` with `F5` closed has
 nothing to write and says so rather than leaving a zero-byte file.
 
+#### Stopping the graph on the bad frame
+
+In the studio's frame-graph panel, **Event scheduler** arms rules that pause the
+graph on the frame that meets one. The reported case is a pump that lags now and
+then:
+
+| Field | Set to |
+|---|---|
+| subject | `span` |
+| name | `pump events` |
+| test | `over` |
+| threshold | `2` |
+
+The next frame whose `pump events` spans total more than 2 ms freezes the panel
+with *that* frame on it, and the pause label says what fired and what it read.
+**Resume** disarms the latch, so the next bad frame stops it again.
+
+A rule is evaluated where the frame is collected, not where it is drawn. That is
+the whole reason the feature exists: the panel samples four times a second at its
+shortest interval, and the frame you are hunting is one frame long. Subjects are
+a span's inclusive or self time, a category's self time, the whole frame, the
+unmarked remainder, or the dropped-span count. Rules are saved with the rest of
+your preferences and armed at start-up, whether or not the panel is open.
+
+An `under` rule waits for its span rather than firing on a frame that never ran
+it: "`pump events` under 1 ms" is a question about a frame that pumped events.
+
 ### Measuring rather than watching
 
 ```sh
@@ -1729,6 +1767,7 @@ just host --ticks 300 --entities 20000
 --host-program PATH              The program a host runs (default: this one)
 --processes N                    How many processes share this machine
 --listen PORT                    Serve a world to clients over UDP
+--transport MODE                 quic (default), datagram, or both
 --identity-key HEX               Ed25519 seed for the server identity
 --content-store DIR              Serve a local content store
 --content-port PORT              Port for the attached content origin
@@ -1940,6 +1979,44 @@ somebody skips is a check that is not run.
 
 ---
 
+## Which transport a session runs on
+
+**QUIC is the default and the server decides. The client has no flag.**
+
+```sh
+server --listen 9000                       # quic, which is the default
+server --listen 9000 --transport datagram  # the stack this engine had before v0.19
+server --listen 9000 --transport both      # whichever a client opens with
+```
+
+A client always opens with QUIC. A server that does not serve it answers with a
+refusal rather than with silence, and the client retries over the datagram
+stack immediately - one round trip, not a timeout. A server that serves only
+QUIC refuses a datagram hello the same way. Either way the log line says which
+transport the connection landed on and why:
+
+```
+replication: quic did not connect (the server does not serve this transport) - retrying over the datagram wire.
+replication: connected over datagram on attempt 2 of 2
+```
+
+**Both modes share one UDP port.** There is no second socket and no second
+accept loop: the first packet from an unknown peer is a QUIC Initial or a
+`net::Packet`, and one bit of its first byte says which. `mono.engine/net/
+include/engine/net/Wire.hpp` carries the bit positions.
+
+A server that is announcing itself puts its mode in the advert, so a client that
+found it in a browser opens on the right stack and pays no refusal at all. A
+typed-in address has no advert, so that client pays one round trip when the
+server is on the old stack.
+
+`--transport quic` needs no `--identity-key`: a QUIC handshake needs an identity
+whether or not anybody pinned one, so a server without a key draws an ephemeral
+one for the run and says so. That authenticates nobody, exactly as an unsigned
+`Welcome` on the datagram stack does. The next section is how to fix that.
+
+---
+
 ## Proving which server a client reached
 
 ```sh
@@ -2079,6 +2156,69 @@ A stream is not a second kind of origin - the same six routes are served to
 everybody. What a stream decides is how a client *finds* it and whether it was
 invited, and `--stream-key` gates discovery rather than delivery: a grant is
 still what admits a fetch.
+
+### What a part collides as
+
+A part is drawn at its `Size` and collides at its `CollisionShape`, and nothing
+keeps those the same. **View → Collider Outlines** draws what the solver
+actually has: a colour per face, so a hull reads as an object rather than as a
+tangle of lines.
+
+**View → Collider Shape** picks which of the three a part has:
+
+| Mode | Draws |
+|---|---|
+| As chosen | What `CollisionShape` selects - what actually collides |
+| Precise | The baked triangle soup, for anything that has one |
+| Hull | The baked convex hull, for anything that has one |
+| Bounds | The part's own box - what a shape falls back to when its name does not resolve |
+
+The two that are *not* selected are usually what answers "why does this collide
+like that": a rock whose hull swallows the gap it should have, a chunk whose
+bound is a box the size of the whole tile. A mode with nothing baked to show
+falls back to drawing what the collider actually is, because the absence is the
+answer for a part somebody expected a hull on.
+
+**Fill faces** fills them as well as outlining them - filled is how a shape reads
+as a solid, outlined is how two overlapping ones stay separable. **Hide
+textures** draws the world flat while the view is open, because a wireframe over
+a textured scene is a wireframe over a photograph.
+
+### Geometry a script builds, and standing on it
+
+An `EditableMesh` is drawn *and* collides. `MeshPart.MeshId` names it for the
+renderer and `CollisionGeometry` names it for the solver:
+
+```lua
+local mesh = Instance.new("EditableMesh")
+-- ... AddVertex / AddTriangle ...
+
+local part = Instance.new("MeshPart")
+part.MeshId = mesh.ContentId
+part.Parent = workspace
+part.CollisionShape = Enum.ShapeKind.Mesh   -- or Hull
+part.CollisionGeometry = mesh.ContentId
+```
+
+**Build the vertices around the mesh's own origin.** A baked shape is used in
+the part's object space and is not scaled to it, so a mesh written in world
+coordinates draws correctly - `ToGpu` fits it to the part - and puts its
+collider wherever the part is not.
+
+**The shape arrives on the next tick.** `physics::RegisterPhysicsSystems` bakes
+it in `PreSimulation` for every host that solves, and a collider naming a shape
+that has not resolved yet collides as the part's own bound. For a terrain chunk
+that bound is a solid box the height of the whole tile, so a streamer should
+leave a new chunk `CanCollide = false` for one frame - `Terrain.luau` does, and
+says why where it does it.
+
+**The soup is baked always and the hull only when a collider asks for one.**
+Measured on a 4,225-point chunk the soup costs 1.3 ms and quickhull costs 7.3,
+and a heightfield's hull is a dome over its summit. Switching a part to `Hull`
+later still gets one, on the next tick.
+
+Shapes are forgotten when their mesh is destroyed, so a world that streams a
+mesh per chunk does not accumulate one per chunk ever built.
 
 ### In the editor
 
@@ -2736,6 +2876,48 @@ configure time and fails the build with the offending edge named. This checks
 the graph against the checked-in expectation, so that an architectural change
 shows up as a diff somebody reviews.
 
+## The source-text architecture rules
+
+```sh
+just source-check
+```
+
+The other half of `test-architecture`. That one reads CMake's output, so it can
+see the module set, the tiers, the link sets and the layer heights; it cannot
+see a member's type, a header's includers, or an argument reaching a writer.
+This reads first-party C++ as text and checks the four rules
+`docs/CODE_ARCH.md` §11 listed as convention until v0.19: a private copy of data
+the ECS owns, a pointer inside a type marked as crossing a world boundary, a
+`core::Name` serialized as its `Id()`, and a header under `include/` that
+nothing outside its module includes.
+
+It needs a *build* of one target and nothing else - the tool reads sources, not
+objects. Directly, and with `--rule` for one rule at a time:
+
+```sh
+./.cache/build/dev/tools/sourcecheck .                       # every rule
+./.cache/build/dev/tools/sourcecheck . --rule name-id        # one of them
+./.cache/build/dev/tools/sourcecheck . --verbose             # waived findings too
+```
+
+Three of the four gate. `public-header` reports and never fails: an unwired
+subsystem is not dead code, and it currently names 87 of 393 public headers,
+twenty-five of them `mono.studio`'s.
+
+A rule is switched off at one declaration with a comment above it, reason
+included - a waiver with nothing after the colon is reported rather than
+honoured:
+
+```cpp
+// arch-waiver ecs-copy: composed from N views for one frame out. No world
+// holds this camera, because it is not any world's camera.
+engine::scene::Camera ComposedCamera;
+```
+
+`just source-check` runs the fixture trees under
+`mono.tools/sourcecheck/tests/fixtures/` before it runs the repository, because
+a scanner that read nothing would report success over both.
+
 ## The shader check
 
 ```sh
@@ -2953,8 +3135,9 @@ only be a format for bun and npm to disagree about.
 The `server` and `studio` programs can open a socket that answers **Model
 Context Protocol**, so a language model or a script can watch them and steer
 them: list scenes, read and write properties, start and stop a world, read the
-log, and read the frame profile. The client, unified harness and content origin
-do not currently register `--mcp-port`.
+log and the metrics, ask what a module is allowed to link, type-check a script,
+and start a test run. The client, unified harness and content origin do not
+currently register `--mcp-port`.
 
 **It is off unless you ask.** Read
 [SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
@@ -2971,8 +3154,49 @@ one machine do not collide:
 
 | Program | Port | What it exposes |
 |---|---|---|
-| `server` | 8734 | its worlds, read and write |
+| `server` | 8734 | its worlds, who is connected, and what the game socket has done |
 | `studio` | 8738 | worlds, plus selection, Play and the output panel |
+
+Both also answer the tools that are about the repository rather than about the
+program - the module graph, the class table, the log and the test runner - and
+both serve resources and prompts. `--mcp-port` always takes a number; the ports
+above are conventions, and `engine::control::DEFAULT_PORT` and
+`DEFAULT_SERVER_PORT` are where they are written down. `.mcp.json` and the `just
+mcp` recipe are checked against that header at configure time, so a fourth copy
+of the number cannot quietly disagree.
+
+### What is on the surface
+
+**About this program.** `engine_info` first, always. Then `world_list`,
+`world_tree`, `instance_get`, `instance_set`, `component_list`, `entity_query`,
+`component_get`, `component_set`, `engine_components` and `profile_frame`. The
+editor adds `world_run`, `selection_get`, `select` and its own `log_tail`; the
+server adds `host_link` and `host_players`.
+
+**About the engine.** `layer_table` is the stack, `module_get` is one module with
+what links it, and `module_may_link` answers whether an edge would be legal -
+the question `just test-architecture` answers, out of the same file. `class_list`
+and `class_get` are the class table this process registered.
+
+**About what it has been doing.** `log_tail` is the last 1024 lines, filtered by
+level and category; `log_level` reads and changes the severity floors while the
+program runs; `metrics_read` is every counter, gauge and distribution, and reads
+without draining.
+
+**Doing work.** `script_check` type-checks Luau against the generated
+declarations and never runs any of it. `test_run` starts the suites and returns
+immediately, and `test_result` polls it - a full run is minutes, and a tool that
+blocked would hold the frame it was called in. Both need the checkout this
+program was built from and say so when there is not one.
+
+**Resources**, which a client may attach without a tool call:
+`atomic://architecture/layers`, `atomic://architecture/modules`,
+`atomic://components`, one `atomic://agents/<path>` per `AGENTS.md`, and
+`atomic://bindings/manifest` and `atomic://bindings/luau`. The last three groups
+are files, so they are listed only when the program is running out of a checkout.
+
+**Prompts**, one per file in `.claude/commands/` plus an `architecture-review`
+pass written for this surface.
 
 ### Connecting a client to it
 

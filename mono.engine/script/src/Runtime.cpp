@@ -1,6 +1,3 @@
-#include "JavaScriptRuntime.hpp"
-#include "LuauRuntime.hpp"
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/script/Instances.hpp>
@@ -139,12 +136,5 @@ namespace engine::script {
 
 		Error = firstError;
 		return started;
-	}
-
-	std::unique_ptr<Runtime> MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits) {
-		if (language == Language::JavaScript) {
-			return std::make_unique<JavaScriptRuntime>(store, limits);
-		}
-		return std::make_unique<LuauRuntime>(store, limits);
 	}
 }

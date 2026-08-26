@@ -163,6 +163,9 @@ namespace studio {
 		FindTruncated = false;
 
 		for (const WorldId world : Universe->Worlds()) {
+			if (ExplorerWorld.IsValid() && ExplorerWorld != world) {
+				continue;
+			}
 			Universe->Enter(world, [&](Store &store) {
 				store.EachEntity([&](Entity instance) {
 					if (FindResults.size() >= FIND_LIMIT) {
@@ -187,108 +190,4 @@ namespace studio {
 		}
 	}
 
-	void Editor::DrawFindInstances() {
-		if (!ShowFindInstances) {
-			return;
-		}
-
-		if (!ImGui::Begin("Find Instances", &ShowFindInstances)) {
-			ImGui::End();
-			return;
-		}
-
-		// Re-run on any change rather than behind a button. The search is a walk
-		// of the scene and the scene is in memory; making somebody press Enter
-		// to see what they have typed is a delay with nothing behind it.
-		bool changed = false;
-
-		ImGui::SetNextItemWidth(-1.0f);
-		changed |= TextField("##find-class", Find.Class, "class - Part, BasePart, Script");
-
-		ImGui::SetNextItemWidth(-1.0f);
-		changed |= TextField("##find-name", Find.Name, "name contains");
-
-		ImGui::SetNextItemWidth(-1.0f);
-		changed |= TextField("##find-property", Find.Property, "property - Transparency, Anchored");
-
-		ImGui::SetNextItemWidth(-1.0f);
-		changed |= TextField("##find-value", Find.Value, "value contains");
-
-		changed |= ImGui::Checkbox("exact", &Find.Exact);
-		ImGui::SameLine();
-		ImGui::TextDisabled("(?)");
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Compare through the property's own type rather than its text,\n"
-				"so 0.5 does not match 0.50001."
-			);
-		}
-
-		ImGui::SameLine();
-		if (ImGui::Button("Refresh")) {
-			changed = true;
-		}
-
-		// **Every frame while the panel is open, not only on change.** A search
-		// is a view of the world and the world moves - a result list that went
-		// stale the moment a script deleted something would be a list of dead
-		// handles, which is the exact thing `AGENTS.md` says a panel must not
-		// cache.
-		RunFind();
-		(void)changed;
-
-		ImGui::Separator();
-
-		if (FindResults.empty()) {
-			ImGui::TextDisabled("nothing matches");
-			ImGui::End();
-			return;
-		}
-
-		ImGui::Text("%zu match%s", FindResults.size(), FindResults.size() == 1 ? "" : "es");
-		if (FindTruncated) {
-			ImGui::SameLine();
-			ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.2f, 1.0f), "· stopped at %zu", FIND_LIMIT);
-		}
-
-		// Selecting from here is queued, not applied: `Select` is an action and
-		// every action in this program happens outside `Universe::Enter`.
-		WorldId pickWorld;
-		Entity pick = NULL_ENTITY;
-		bool add = false;
-
-		if (ImGui::BeginChild("##find-rows")) {
-			for (size_t index = 0; index < FindResults.size(); index++) {
-				const FindResult &result = FindResults[index];
-
-				ImGui::PushID(static_cast<int>(index));
-
-				const bool selected = SelectionWorld == result.World && IsSelected(result.Instance);
-				if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowOverlap)) {
-					pickWorld = result.World;
-					pick = result.Instance;
-					add = ImGui::GetIO().KeyCtrl;
-				}
-
-				ImGui::SameLine();
-				ImGui::TextUnformatted(result.Name.c_str());
-				ImGui::SameLine();
-				ImGui::TextDisabled("%s", result.Class.c_str());
-
-				if (!result.Matched.empty()) {
-					ImGui::SameLine();
-					ImGui::TextDisabled("· %s", result.Matched.c_str());
-				}
-
-				ImGui::PopID();
-			}
-		}
-		ImGui::EndChild();
-
-		ImGui::End();
-
-		if (pick != NULL_ENTITY) {
-			Select(pickWorld, pick, add);
-		}
-	}
 }

@@ -82,6 +82,9 @@ TEST_CASE("several views compose into one list", "[client]") {
 
 	views.Compose(0.0f);
 	REQUIRE(views.Instances().size() == 9);
+	CHECK(views.Instances()[0].SourceWorld == Name("a"));
+	CHECK(views.Instances()[2].SourceWorld == Name("b"));
+	CHECK(views.Instances()[5].SourceWorld == Name("c"));
 }
 
 TEST_CASE("views after the first are placed rather than overlaid", "[client]") {

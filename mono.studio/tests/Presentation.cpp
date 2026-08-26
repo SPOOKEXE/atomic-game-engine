@@ -14,6 +14,8 @@
 // `client::InstallPresentation` the editor installs.
 
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -23,6 +25,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <client/Scene.hpp>
 #include <studio/Presentation.hpp>
 
@@ -37,7 +40,16 @@ using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
 using engine::world::WorldState;
+using studio::AdvanceStudioParticlePreview;
+using studio::AppendReplicaVisualInstances;
+using studio::CollectStudioParticleBatches;
+using studio::ParticleEmitterVisibleInStudio;
 using studio::PresentationAlpha;
+using studio::PresentationCeiling;
+using studio::PresentationRates;
+using studio::StatusBarSnapshot;
+using studio::StudioParticleSelection;
+using studio::WorldSelectorLabel;
 
 namespace {
 	// An accumulator that is neither of the two answers, so a case that returns
@@ -72,7 +84,7 @@ namespace {
 
 		Vector3 where;
 		universe.Enter(world, [&where](Store &store) {
-			const auto *list = store.Resource<client::DrawList>();
+			const auto *list = store.Resource<engine::render::DrawList>();
 			REQUIRE(list != nullptr);
 			REQUIRE(list->Instances.size() == 1);
 			where = list->Instances[0].Frame.Position;
@@ -111,6 +123,182 @@ TEST_CASE("a world being ticked keeps its accumulator", "[studio][presentation]"
 	// world that was simulating perfectly well. `engine::world::Ticks` is what
 	// stopped that being a guess each caller makes.
 	CHECK(PresentationAlpha(true, WorldState::Idle, MIDWAY) == MIDWAY);
+}
+
+TEST_CASE("the world selector marks runtime activity, not selection", "[studio][presentation]") {
+	CHECK(WorldSelectorLabel("MeshGrid", false) == "MeshGrid");
+	CHECK(WorldSelectorLabel("MeshGrid", true) == "MeshGrid (ACTIVE)");
+	CHECK(WorldSelectorLabel({}, true) == "? (ACTIVE)");
+}
+
+TEST_CASE(
+	"Studio previews only enabled particle emitters placed in the world", "[studio][presentation][particles]"
+) {
+	Store store("studio-particle-preview");
+	Scheduler systems;
+	client::InstallPresentation(store, systems, 64);
+
+	const Entity part = store.CreateInstance(engine::scene::PartClass(), "EmitterPart");
+	const engine::ecs::ClassId emitterClass = engine::ecs::Classes::Find(Name("ParticleEmitter"));
+	REQUIRE(emitterClass.IsValid());
+	const Entity emitter = store.CreateInstance(emitterClass, "PreviewEmitter");
+	auto *settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+	REQUIRE(settings != nullptr);
+	settings->Rate = 10.0f;
+	settings->Lifetime = {1.0f, 1.0f};
+
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	engine::render::ParticleFrame frame;
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 0);
+	CHECK_FALSE(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks.empty());
+
+	REQUIRE(store.SetParent(emitter, part));
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	CHECK(CollectStudioParticleBatches(store, frame, true) == 1);
+	CHECK(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+	CHECK(CollectStudioParticleBatches(store, frame, false) == 0);
+	CHECK(frame.Batches.empty());
+
+	const Entity attachment = store.CreateInstance(engine::scene::AttachmentClass(), "EmitterAttachment");
+	REQUIRE(store.SetParent(attachment, part));
+	REQUIRE(store.SetParent(emitter, attachment));
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 1);
+	CHECK(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+
+	settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+	REQUIRE(settings != nullptr);
+	settings->Enabled = false;
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 0);
+	CHECK_FALSE(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+}
+
+TEST_CASE(
+	"hidden or running Studio particles are not advanced by the preview", "[studio][presentation][particles]"
+) {
+	Store store("studio-particle-preview-gate");
+	Scheduler systems;
+	client::InstallPresentation(store, systems, 64);
+
+	const auto *before = store.Resource<engine::effects::ParticleSystem>();
+	REQUIRE(before != nullptr);
+	const uint64_t baseline = before->PresentationRevision;
+
+	CHECK_FALSE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, false));
+	CHECK_FALSE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, true, true));
+	const auto *after = store.Resource<engine::effects::ParticleSystem>();
+	REQUIRE(after != nullptr);
+	CHECK(after->PresentationRevision == baseline);
+	CHECK(after->Blocks.empty());
+}
+
+TEST_CASE("a running world is not reduced to the input-idle rate", "[studio][presentation]") {
+	const PresentationRates rates{120.0f, 20.0f, 120.0f, 10.0f};
+
+	CHECK(PresentationCeiling(rates, true, true, true) == 120.0f);
+	CHECK(PresentationCeiling(rates, true, false, true) == 20.0f);
+}
+
+TEST_CASE("renderer focus and the active subsystem rates limit presentation", "[studio][presentation]") {
+	const PresentationRates rates{120.0f, 20.0f, 100.0f, 10.0f};
+
+	CHECK(PresentationCeiling(rates, true, true, false) == 100.0f);
+	CHECK(PresentationCeiling(rates, false, true, false) == 10.0f);
+	CHECK(PresentationCeiling(PresentationRates{}, true, true, true) == 0.0f);
+
+	const PresentationRates interfaceUnlimited{0.0f, 0.0f, 165.0f, 60.0f};
+	CHECK(PresentationCeiling(interfaceUnlimited, true, true, false) == 165.0f);
+	const PresentationRates sliderUnlimited{361.0f, 361.0f, 165.0f, 60.0f};
+	CHECK(PresentationCeiling(sliderUnlimited, true, true, false) == 165.0f);
+
+	const PresentationRates uncapped{120.0f, 20.0f, 100.0f, 10.0f, true};
+	CHECK(PresentationCeiling(uncapped, false, false, true) == 0.0f);
+}
+
+TEST_CASE("status counters stay retained between their display deadlines", "[studio][presentation][cache]") {
+	StatusBarSnapshot snapshot;
+	REQUIRE(snapshot.Refresh(10.0, 0, 300, 12, 400, 0));
+
+	CHECK_FALSE(snapshot.Refresh(10.1, 0, 297, 99, 9000, 0));
+	CHECK(snapshot.FramesPerSecond == 300);
+	CHECK(snapshot.DrawCalls == 12);
+	CHECK(snapshot.Triangles == 400);
+
+	CHECK(snapshot.Refresh(10.25, 0, 297, 99, 9000, 0));
+	CHECK(snapshot.FramesPerSecond == 297);
+	CHECK(snapshot.DrawCalls == 99);
+}
+
+TEST_CASE("changing the focused viewport refreshes status immediately", "[studio][presentation][cache]") {
+	StatusBarSnapshot snapshot;
+	REQUIRE(snapshot.Refresh(10.0, 0, 300, 12, 0, 0));
+
+	CHECK(snapshot.Refresh(10.01, 1, 300, 4, 0, 0));
+	CHECK(snapshot.Viewport == 1);
+	CHECK(snapshot.DrawCalls == 4);
+}
+
+// --- the hosted client visual scene -----------------------------------------
+
+TEST_CASE("a hosted client view keeps one copy of authority rows", "[studio][presentation]") {
+	const Name replicaWorld("studio.presentation.replica");
+
+	engine::scene::DrawInstance authority;
+	authority.Source = 42;
+	authority.Frame.Position.X = 4.0f;
+
+	engine::scene::DrawInstance replica = authority;
+	replica.Frame.Position.X = 3.5f;
+
+	std::vector<engine::scene::DrawInstance> merged;
+	merged.push_back(authority);
+	AppendReplicaVisualInstances(replicaWorld, {&replica, 1}, merged);
+
+	REQUIRE(merged.size() == 1);
+	CHECK(merged[0].Frame.Position.X == 4.0f);
+}
+
+TEST_CASE("a hosted client view appends only client-local rows", "[studio][presentation]") {
+	const Name replicaWorld("studio.presentation.replica");
+
+	engine::scene::DrawInstance authority;
+	authority.Source = 10;
+
+	engine::scene::DrawInstance replicated = authority;
+	replicated.SourceWorld = replicaWorld;
+
+	engine::scene::DrawInstance local;
+	local.Source = 0x8000'0000ull;
+	local.Variant = 2;
+
+	const std::array replica{replicated, local};
+	std::vector<engine::scene::DrawInstance> merged;
+	merged.push_back(authority);
+	AppendReplicaVisualInstances(replicaWorld, replica, merged);
+
+	REQUIRE(merged.size() == 2);
+	CHECK(merged[0].Source == authority.Source);
+	CHECK(merged[1].Source == local.Source);
+	CHECK(merged[1].Variant == local.Variant);
+	CHECK(merged[1].SourceWorld == replicaWorld);
+}
+
+TEST_CASE("anonymous replica rows cannot duplicate a published authority scene", "[studio][presentation]") {
+	const Name replicaWorld("studio.presentation.replica");
+
+	engine::scene::DrawInstance authority;
+	authority.Source = 0;
+	engine::scene::DrawInstance replica = authority;
+	replica.Frame.Position.X = 8.0f;
+
+	std::vector<engine::scene::DrawInstance> merged;
+	merged.push_back(authority);
+	AppendReplicaVisualInstances(replicaWorld, {&replica, 1}, merged);
+
+	REQUIRE(merged.size() == 1);
+	CHECK(merged[0].Frame.Position.X == authority.Frame.Position.X);
 }
 
 // --- the chain the predicate is the end of -----------------------------------

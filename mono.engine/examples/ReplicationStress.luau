@@ -19,11 +19,16 @@ local RunService = game:GetService("RunService")
 
 players.MaxPlayers = 16
 
-local movers: {Part} = {}
+local movers: {Instance} = {}
 local positions: {number} = {}
 local directions: {number} = {}
 local heights: {number} = {}
 local depths: {number} = {}
+
+-- The placements `BulkMoveTo` takes, beside `movers`. Overwritten in place every
+-- beat rather than rebuilt: at this object count a fresh table a tick is real
+-- allocation on top of the moves.
+local placements: {CFrame} = {}
 local built = false
 
 local function buildMovers()
@@ -47,6 +52,7 @@ local function buildMovers()
 		part.Parent = workspace
 
 		movers[index] = part
+		placements[index] = part.CFrame
 		positions[index] = x
 		directions[index] = if index % 2 == 0 then 1 else -1
 		heights[index] = y
@@ -81,6 +87,12 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 		end
 
 		positions[index] = x
-		movers[index].Position = Vector3.new(x, heights[index], depths[index])
+		placements[index] = CFrame.new(x, heights[index], depths[index])
 	end
+
+	-- **One call for the whole field.** This demo exists to put a large delta on
+	-- the wire every tick, and what it used to spend getting there was twenty
+	-- thousand crossings of the language boundary - which is the cost
+	-- `scene::BulkMoveTo` removes, and not the replication this is measuring.
+	workspace:BulkMoveTo(movers, placements)
 end)

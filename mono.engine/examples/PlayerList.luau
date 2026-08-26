@@ -48,14 +48,14 @@
 -- ## Running it
 --
 --     SCENE=PlayerList.luau scripts/demos/run-local-server.sh 4
---     ./client --script PlayerList.luau           # TAB works, nobody is in it
+--     ./client --script PlayerList.luau           # TAB works, one local player
 --
 -- The server is what makes it worth looking at: four clients means four names,
 -- and each one appearing and vanishing as a process starts and stops. A
--- standalone client has a keyboard and no players - `scene::AddPlayer` is a
--- host's call and a single-player world has no host to make it - so the panel
--- opens on TAB and is empty, which is the honest picture rather than a demo
--- with invented occupants in it.
+-- A standalone client is its own single-player host, so it establishes one
+-- local player before this script starts. The panel therefore contains that
+-- player. A networked run replaces the interface world with the replica after
+-- admission and shows everybody the authority has actually admitted.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -241,6 +241,22 @@ end
 -- time the list changes.
 local panels: { [Instance]: Frame } = {}
 
+local function existingRows(container: Instance): Frame?
+	local screen = container:FindFirstChild("PlayerList")
+	if screen == nil or not screen:IsA("ScreenGui") then
+		return nil
+	end
+	local card = screen:FindFirstChild("Card")
+	if card == nil or not card:IsA("Frame") then
+		return nil
+	end
+	local rows = card:FindFirstChild("Rows")
+	if rows == nil or not rows:IsA("Frame") then
+		return nil
+	end
+	return rows :: Frame
+end
+
 -- **Every one of these takes a `Player` and `GetPlayers` hands back
 -- `{ Instance }`, so each caller casts once at the loop.** That is the union
 -- `D00114` describes rather than a gap: the buffer narrows wherever it writes a
@@ -250,9 +266,10 @@ local panels: { [Instance]: Frame } = {}
 -- several.
 local function panelFor(player: Player): Frame?
 	local existing = panels[player]
-	if existing then
+	if existing and existing.Parent ~= nil then
 		return existing
 	end
+	panels[player] = nil
 
 	-- `PlayerGui` is a computed property: the container has existed since v0.8
 	-- and nothing could name it until v0.15.
@@ -261,7 +278,14 @@ local function panelFor(player: Player): Frame?
 		return nil
 	end
 
-	local rows = buildPanel(container)
+	local rows = existingRows(container)
+	if rows == nil then
+		local stale = container:FindFirstChild("PlayerList")
+		if stale ~= nil then
+			stale:Destroy()
+		end
+		rows = buildPanel(container)
+	end
 	panels[player] = rows
 	return rows
 end
@@ -331,7 +355,10 @@ refreshEverybody()
 
 -- --- the toggle --------------------------------------------------------------
 
-local function setShown(shown: boolean)
+local shown = not RunService:IsClient()
+
+local function setShown(value: boolean)
+	shown = value
 	-- Over the panels rather than over the players, because a panel is what has
 	-- a `ScreenGui` and there is exactly one per player.
 	for _, rows in panels do
@@ -339,7 +366,7 @@ local function setShown(shown: boolean)
 		if card then
 			local screen = card.Parent :: ScreenGui?
 			if screen then
-				screen.Enabled = shown
+				screen.Enabled = value
 			end
 		end
 	end
@@ -392,7 +419,8 @@ RunService.Heartbeat:Connect(function(delta: number)
 
 	local missing = false
 	for _, entry in Players:GetPlayers() do
-		if not panels[entry] then
+		local rows = panels[entry]
+		if not rows or rows.Parent == nil then
 			missing = true
 		end
 	end
@@ -400,10 +428,8 @@ RunService.Heartbeat:Connect(function(delta: number)
 	if missing then
 		refreshEverybody()
 
-		-- A panel built after the toggle was decided starts in whatever state
-		-- the others are in, rather than shown by default on a client.
-		if not RunService:IsClient() then
-			setShown(true)
-		end
+		-- A panel built after the toggle was decided starts in the same state as
+		-- the others, including one created while TAB is held.
+		setShown(shown)
 	end
 end)

@@ -31,6 +31,9 @@ layout(location = 2) in vec4 inLightPosition;
 layout(location = 3) in vec4 inSurfacePosition;
 layout(location = 4) in vec2 inTexCoord;
 layout(location = 5) in vec3 inWorldPosition;
+layout(location = 6) flat in uint inAppearance;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 8) flat in vec4 inEmission;
 
 layout(location = 0) out vec4 outColour;
 
@@ -46,6 +49,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Flags;
 	vec4 BaseColour;
 	vec4 Surface;
+	vec4 Material;
 	vec4 Flipbook;
 	vec4 Mirror;
 	vec4 PaneNormal;
@@ -54,6 +58,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Eye;
+	vec4 MaterialExtra;
 } lighting;
 
 float FogFactor() {
@@ -76,17 +81,26 @@ void main() {
 
 	// The cut-out and the seam, kept for `unlit.frag`'s reason: a scene must not
 	// break by having a shader selected in it.
-	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
-	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
+	uint alphaMode = inAppearance & 0xFFu;
+	float cutoff = float((inAppearance >> 8u) & 0xFFu) / 255.0;
+	float materialAlpha = sampled.a * lighting.BaseColour.a;
+	if (alphaMode == 1u && inColour.a >= 0.98 && materialAlpha < cutoff) {
 		discard;
 	}
+	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 
 	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
 		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
 		discard;
 	}
 
-	vec3 albedo = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
+	vec3 mappedColour = sampled.rgb * lighting.BaseColour.rgb;
+	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;
+	if (alphaMode == 0u) {
+		albedo = mix(inColour.rgb, albedo, materialAlpha);
+	} else if (alphaMode == 2u) {
+		albedo = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, materialAlpha);
+	}
 
 	vec3 normal = normalize(inNormal);
 	vec3 toLight = -normalize(lighting.Direction.xyz);

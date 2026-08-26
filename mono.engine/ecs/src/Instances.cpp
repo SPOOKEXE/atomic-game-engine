@@ -229,6 +229,29 @@ namespace engine::ecs {
 	}
 
 	void RegisterInstanceComponents() {
+		// **The three the table used to name after the compiler, and they are
+		// first here because order is the whole of it.** `Components::Of<T>()`
+		// mints an id under `TypeNameOf<T>()` when it finds nothing, and
+		// `Adopt` aborts on an explicit registration that arrives *after* one -
+		// a type has one name. So these have to beat their own first use, and
+		// their first use is close: `Store`'s constructor calls this function
+		// and then immediately does `SetResource(WorldTime{})`.
+		//
+		// **Why they need a name at all.** All three reach a `.agame`, and the
+		// automatic name is the compiler's spelling of the type. It is stable
+		// within one build and nothing wider, so a file written by one compiler
+		// and read by another would carry a column nothing matched. That is
+		// rule 4 and decision 21: a name that crosses a boundary is a string
+		// somebody chose.
+		//
+		// Registered before `RegisterAttributeComponents` below rather than
+		// after, for no reason beyond the one above - nothing there touches
+		// these, and "first" is easier to keep true than "before the four
+		// things that matter".
+		Components::Register<DirtyBits>("ecs.DirtyBits");
+		Components::Register<NotArchivable>("ecs.NotArchivable");
+		Components::Register<WorldTime>("ecs.WorldTime");
+
 		// **The attribute table, registered here rather than by its own entry
 		// point.** It is a resource every world may grow one of, and a resource
 		// `Store::SetResource` mints an id for after `Components::Seal` aborts -

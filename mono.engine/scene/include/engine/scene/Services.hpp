@@ -56,14 +56,20 @@ namespace engine::scene {
 	// the properties panel edits it. It simply does not survive being written
 	// out, because it was never the file's to keep.
 	//
-	// @since v0.7
-	struct TransientComponent {
-		// Explicit padding, so the object representation a snapshot writes holds
-		// no uninitialised bytes. A snapshot *does* carry these - Stop has to
-		// put the editor's camera back exactly as it was, and that is a
-		// different question from what a game file holds.
-		uint32_t Reserved = 0;
-	};
+	// **A tag since v0.19, because presence was always the whole of it.** It
+	// carried a four-byte `Reserved` that existed only so the struct had a body
+	// - a column of nothing but padding on every viewer-made instance, and four
+	// bytes in every snapshot row describing a fact the row's existence already
+	// stated. A snapshot still carries it: `ecs::WriteComponents` names the
+	// entity and writes nothing for a zero-sized component, which is how
+	// `scene.Simulated` and `ecs.NotArchivable` already cross a file. Stop still
+	// puts the editor's camera back exactly as it was.
+	//
+	// Ask with `Store::Has`, not with `Store::Get`. A tag has no column to point
+	// into.
+	//
+	// @since v0.7, a tag since v0.19
+	struct TransientComponent {};
 
 	// What every service has, and nothing else does.
 	//
@@ -535,4 +541,7 @@ namespace engine::scene {
 	//         that is not under one - which is almost everything.
 	// @since v0.15
 	ecs::Entity PlayerOwning(const ecs::Store &store, ecs::Entity instance);
+
+	// Which player's private container owns this instance, or a null entity.
+	ecs::Entity PrivatePlayerOwning(const ecs::Store &store, ecs::Entity instance);
 }

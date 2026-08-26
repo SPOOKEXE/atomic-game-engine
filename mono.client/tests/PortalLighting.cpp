@@ -1,6 +1,6 @@
 // Light carried through portal seams, measured on the scenes authored for it.
 //
-// **The transport under test is `client::CollectLights`' seam-copy pass**, and
+// **The transport under test is `engine::render::CollectLights`' seam-copy pass**, and
 // the fixtures are the two shipped scenes rather than hand-built stores, so
 // what the GPU capture script points a camera at and what this suite asserts
 // are one authored arrangement. What a headless test can decide is the light
@@ -69,7 +69,7 @@ namespace {
 
 		std::vector<SceneLight> Collect() {
 			std::vector<SceneLight> lights;
-			client::CollectLights(World, Vector3{}, lights);
+			engine::render::CollectLights(World, Vector3{}, lights);
 			return lights;
 		}
 

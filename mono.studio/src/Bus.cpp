@@ -108,6 +108,13 @@ namespace studio {
 		ImGui::Text("%zu queued", totalPending);
 		ImGui::SameLine();
 		ImGui::TextDisabled("· %zu arrived at the last barrier", totalArrived);
+		const engine::world::UniverseStatistics statistics = Universe->Statistics();
+		ImGui::SameLine();
+		ImGui::TextDisabled(
+			"· %llu operations, %llu deliveries this barrier",
+			static_cast<unsigned long long>(statistics.BusOperations),
+			static_cast<unsigned long long>(statistics.Deliveries)
+		);
 		ImGui::Separator();
 
 		for (const WorldId world : Universe->Worlds()) {

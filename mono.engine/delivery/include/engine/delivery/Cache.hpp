@@ -128,5 +128,18 @@ namespace engine::delivery {
 
 		std::filesystem::path Base;
 		uint64_t Ceiling = 0;
+
+		// How many bytes this cache believes the directory holds.
+		//
+		// **A trigger, never an answer.** It decides whether `MakeRoom` walks
+		// the directory at all; what gets evicted is always chosen from the
+		// walk itself. Seeded by one scan when the cache is opened and kept up
+		// by every store, eviction and clear, so in the ordinary case - this
+		// process is the only writer - it is exact. When it is not, it is wrong
+		// in a way that costs a scan or a small overshoot of the ceiling and
+		// then corrects itself, because the scan replaces it with what was
+		// found. An index that decided *which* entries exist could not make
+		// that trade, which is why this holds a total and not a listing.
+		uint64_t Held = 0;
 	};
 }

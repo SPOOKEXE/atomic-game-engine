@@ -2,14 +2,33 @@
 
 L12, `client` tier. Absent from the server binary entirely.
 
-## No SDL GPU type in a public header
+## No SDL GPU header in a public header, and no SDL GPU type in `Renderer.hpp`
 
-`Renderer.hpp` names `struct SDL_Window;` as a forward declaration and nothing
-else. Everything else is behind the pimpl in `Renderer.cpp`.
+Two claims, and they are not the same claim. Keeping them apart is the point,
+because one is absolute and the other has two named exceptions.
 
-That is what lets a caller hand this module a frame without acquiring a graphics
-API, and it is what will let the L9 render graph sit on top of this without
-inheriting SDL's vocabulary.
+**No public header includes an SDL header.** That is what keeps this module's
+build cost off every consumer, and it holds everywhere with no exceptions.
+
+**`Renderer.hpp` names `struct SDL_Window;` as a forward declaration and
+nothing else.** `Renderer.hpp:721` states the consequence at the type: `Device`
+is an `SDL_GPUDevice *` and `ColourFormat` an `SDL_GPUTextureFormat`, and
+neither name appears. That is what lets a caller hand this module a frame
+without acquiring a graphics API.
+
+**`MeshTable.hpp` and `TextureTable.hpp` are the exceptions, and they are
+deliberate.** Both forward-declare `SDL_GPUDevice`, `SDL_GPUBuffer` and
+`SDL_GPUTexture` and hand them out - `MeshTable.hpp:140` takes a device,
+`MeshTable.hpp:242` returns a buffer. A resident-resource table is a handle to
+a device object and there is nothing else for it to be; hiding it behind an
+opaque integer would buy a caller nothing and cost a lookup per draw. Their
+callers are inside this module and `mono.studio`, both of which already speak
+SDL.
+
+Until v0.19 this section claimed the first sentence for every public header,
+which was true of `Renderer.hpp` and false of the module. If a third header
+grows an SDL type, the question to answer here is why it is not a fourth
+mistake.
 
 ## What crosses into this module is `scene`, and the conversion happens here
 
@@ -191,45 +210,112 @@ frame pacing. One texture upload per frame, and only while a panel is open.
 
 Do not reimplement them over an immediate-mode UI library.
 
-## Six passes are not an architecture either
+## The pass list is gone. A pipeline is a graph, and this module runs its nodes
 
-`Renderer::Render` is a shadow pass, a surface pass, an opaque pass, a
-transparent pass, an overlay pass and an interface pass, submitted in that order
-by a function that knows all six by name. It is enough to prove the
-staged-shader path, the depth buffer, an offscreen target and the swapchain, and
-that is all it claims to be.
+**Until v0.15 `Renderer::Render` submitted six passes by name** - shadow,
+surface, opaque, transparent, overlay, interface - and this section described a
+`render::Pass` enum, a `PassOrder()`, a `PassRecorder` and a
+`graph::StandardPipeline` kept in step with it by `tests/Passes.cpp`. None of
+those five names exists in the tree. The render-node system that section said
+"when it arrives, this class becomes the backend those nodes compile to"
+arrived, and this is that backend.
 
-**The sixth draws nothing this module owns.** `interface` is a
-`FrameOverlayHook`, which is what lets `mono.engine/ui` record an editor's
-chrome into this frame without Dear ImGui appearing anywhere in the engine. A
-game runs five.
+**The seam is `graph::NodeRunner` and this module's adapter is
+`render::GraphRunner`.** `graph/RenderGraph.hpp:47` states it from the other
+side: the graph is executed through a `NodeRunner` the caller supplies, so
+`render` implements one over SDL. `graph` knows the order, the resources and
+which node reads a target nothing wrote; this module knows how to draw one. The
+edge runs `render` to `graph` and never back, which is what §6.2 of
+`docs/CODE_ARCH.md` means by `graph` not depending on `render`.
 
-**`mono.engine/graph` describes that order and does not execute it.**
-`graph::StandardPipeline` is the same six stages as data, and
-`Pipeline::Validate` catches the one mistake that matters - a stage reading a
-target nothing earlier wrote.
+**What `tests/Passes.cpp` checks now is acceptance, not order.** Its own header
+says it: "The renderer no longer has a parallel enum or fixed pass list. A
+pipeline is accepted only when every enabled node has a backend implementation."
+A node enabled in a document with nothing here to draw it fails without a
+device. That is the check that replaced the two-lists-in-step one, and it is
+strictly better: the old one could only catch a seventh entry added to one side.
 
-**Keeping the two in step is a check, not a convention.** `render::Pass` and
-`PassOrder()` name this module's six in submission order, and
-`tests/Passes.cpp` compares them against that pipeline's stage names, in order,
-with no device. A seventh stage on one side and not the other fails the build.
-`PassRecorder` walks the same list as `Render` submits and refuses to go
-backwards, which is the half a headless test cannot see.
+**The hole the old section named was closed at v0.19, and this is the shape it
+left.** A pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to
+the graph, and `src/Renderer.cpp` did that inside a `RenderView` that ran 5,485
+lines - two fifths of the module - holding its node handlers as lambdas over its
+own locals. `docs/ARCH_REVIEW.md` C2 is the finding; `D00016` is the entry.
 
-**Do not write the count into that test.** This section said "five" until v0.7
-added `interface` and then said something false for a release; `tests/Passes.cpp`
-compares the two descriptions against each other and neither against a number,
-which is why it did not rot with the prose.
+**Fifteen calls rather than the eighteen C2 counted**, because three of the
+eighteen were `ENGINE_ERROR` strings naming the function rather than calls to
+it. Eight are inside a node family's runner now and five are inside the shared
+recording in `src/ScenePasses.cpp` - `OpenScenePass`, `Fullscreen`, `DrawImage`,
+`DrawOverlayImage` and `ClearOcclusion` - each of which runs only from a node,
+so the pass it opens is still inside a node's execution and still named in the
+frame graph.
 
-**So: enter every pass through `PassRecorder`, and add its stage to
-`StandardPipeline` in the same change.** The first is what the check hangs on -
-a pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to all of
-the above, and that is the one hole left. See `D00016`.
+**Two stay outside the graph deliberately, and both are in
+`ViewRecording::Finish`.** Neither is a candidate for a node family:
 
-The render-node system is where passes become nodes and the description becomes
-the execution. When it arrives, this class becomes the backend those nodes
-compile to - so do not grow the hand-rolled list further in the meantime. Two
-competing ways to describe a frame is worse than either.
+- **The host chrome pass.** Studio panels are a host concern rather than a stage
+  of a universe's render graph, and they are recorded *after* `output-image` for
+  exactly that reason - so a graph preview, an authored capture and a rendering
+  profile hold only the game image and the game interface. Making it a node
+  would put it in the graph's description of the frame and therefore in every
+  capture taken from one.
+- **The clear of a window nothing touched.** It exists precisely for the frame
+  where *no* node reached the swapchain: the world went offscreen and neither
+  the overlay nor the interface is open. There is no node to put it in, because
+  its whole condition is that none ran. Presenting a texture the driver handed
+  back unwritten shows last frame's image or uninitialised memory.
+
+### Where a pass lives
+
+| File | What is in it |
+|---|---|
+| `src/RendererState.hpp` | `Renderer::Impl` - every device object the module owns |
+| `src/RenderTypes.hpp` | the GPU layouts and the frame-wide constants |
+| `src/ViewRecording.hpp` | what one view's recording holds, and the operations every family shares |
+| `src/ViewRecording.cpp` | `Begin`, which works the frame out, and `Finish`, which runs the graph and submits |
+| `src/ScenePasses.cpp` | `OpenScenePass`, `DrawWorldInto`, `Fullscreen`, `DrawImage` and the rest of the shared recording |
+| `src/nodes/*.cpp` | one file per node family, each registering its own runners |
+
+**`ViewRecording` is what the handlers used to close over, and naming it is the
+whole trick.** A handler needed `openScenePass`, so it had to be written in the
+same function as it; the state is a type now, the shared operations are its
+members, and a family is a file. `Renderer` makes it a friend so that
+`Renderer::Impl` stays private to `src/` - nothing about the split reaches
+`include/`.
+
+**Its members are not published from locals, they *are* the locals.** `Begin`
+binds a reference per name and writes through it, and each handler binds the
+same names back the other way. A value the passes read a thousand lines from
+where it was decided therefore has one home rather than two that can drift.
+
+**It is also why this module is no longer slow to build.** One 13,680-line
+translation unit cannot be split across cores, so the whole module waited on one
+compile. Measured on a 24-core machine with `release`'s flags, `CCACHE_DISABLE=1`
+and no unity build, compiling every source in the module at `-j24`:
+
+| | before | after |
+|---|---|---|
+| units | 22 | 38 |
+| wall clock | **11.0 s** | **6.5 s** |
+| CPU seconds | 34.9 | 76.3 |
+| slowest unit | `Renderer.cpp`, **10.6 s** | `ViewRecording.cpp`, **3.8 s** |
+
+**The CPU seconds nearly double, and that is the trade rather than a
+regression.** Sixteen more files parse `RendererState.hpp` and `RenderTypes.hpp`,
+and 72% of this repository's first-party compile cost is the frontend. What a
+developer waits on is the wall clock, and the module no longer has a unit long
+enough to be the whole build's critical path - which was the other half of C2's
+argument.
+
+**`docs/ARCH_REVIEW.md` E2 estimated 22 s off the tree's wall clock and that
+number is stale.** It was derived from `Renderer.cpp` at 31.2 s, measured with
+another job stealing 420% CPU and before E1's include fixes landed. The same
+unit is 10.6 s today, so the saving available from this change was at most about
+7 s of critical path, not 22.
+
+**So: a new way of drawing is a node with a backend in `src/nodes/`, and never
+an inline render pass.** Adding the second is what makes the graph a description
+of some of the frame rather than of the frame - and there is now nowhere else to
+put one, which is the point of the layout above.
 
 ## The textures this module owns, and what each pass may assume
 
@@ -306,9 +392,34 @@ That reads as the renderer dropping triangles at random. It shipped that way
 once and was diagnosed from a screenshot rather than from the symptom
 description.
 
-The geometry lives in `Primitives.hpp` rather than inside `Renderer.cpp` for one
-reason: so `tests/Primitives.cpp` can assert this for all twelve triangles
-without a GPU. Any mesh added there gets the same check.
+**Geometry that can be asserted without a GPU should live where a test can reach
+it.** `AdornmentGeometry.hpp` is the module's public example: it is a public
+header precisely so `tests/AdornmentGeometry.cpp` can check every triangle it
+emits with no device. `src/Primitives.hpp` is the private one, checked by
+`tests/Primitives.cpp` - a module's own tests may reach its `src/`, so a header
+does not have to be published to be tested.
+
+**What that file is, and what it is not.** Until v0.19 this section pointed at a
+`Primitives.hpp` and a `tests/Primitives.cpp` that did not exist, and
+`docs/ARCH_REVIEW.md` B recorded the gap as "the built-in shapes are back inside
+`src/Renderer.cpp` and `src/InterfacePass.cpp`, where nothing checks their
+winding". **That description was wrong and the gap was real.** The built-in
+shapes are `assets::MakeBuiltin` and `assets/tests/Builtin.cpp` checks every
+triangle of every one of them against its declared normal - the winding rule
+above is enforced, one module down. What genuinely had no home and no suite was
+the arithmetic those two files did around the shapes:
+
+- **the portal beam atlas quadrant**, which was `index % 2` and `index / 2`
+  written out three times - once as the shader's lookup window, once as a
+  viewport and once as a scissor. Three expressions of one rectangle, and a beam
+  that drew into one quadrant while sampling another shadows through the wrong
+  doorway. `BeamQuadrant` is the one expression; the suite checks that the four
+  tile the atlas exactly and that each one's window is its own viewport.
+- **the quad a spatial canvas occupies**, whose normal is deliberately *not* the
+  cross product of its own axes: a canvas is laid out in interface pixels so
+  `AxisY` runs down the image, and a caller deriving the normal from the axes
+  would light every billboard from behind. `SpatialQuad` carries both and the
+  suite asserts the sign.
 
 ## SDL's clip space is Y-up. Do not "fix" it
 
@@ -521,3 +632,51 @@ a misspelled sheet expected for ever and the marker would never appear for the
 one case it exists for. A failure carries no name - `Take` answers nothing - so
 `delivery::AssetClient::NameOf` exists for it, and both hosts read the name
 *before* taking because a take is what destroys the record.
+
+## Cascaded presentation caches describe dependencies, not extra copies
+
+`PresentationDamageTracker` is the common invalidation boundary used by the
+client and by every Studio viewport. Its graph has three kinds of node:
+
+- resident sources: object rows, particle rows, environment inputs and portal
+  inputs;
+- retained images: portal history, the scene image, the game interface and the
+  Studio interface;
+- compositions: game, Studio, then the final presented image.
+
+This is a dependency graph, not an instruction to allocate one full-size
+texture for every named node. A node may be a resident buffer, a retained draw
+list, an existing renderer target or the decision to avoid acquiring a
+swapchain image. Adding a duplicate image merely to make the diagram literal is
+wrong unless a measured consumer needs it.
+
+`ScenePresentationSignaturesOf` signs the four source groups independently.
+Those signatures are causes, not another scene registry and not dirty flags.
+The ECS remains the storage, renderer residency remains keyed by its stable
+slots, and a signature only answers whether the retained result may be reused.
+A source change invalidates the scene image and every composition above it; it
+does not invalidate either interface sideways. A game-interface change starts
+at the game composition. A Studio-interface change starts at the Studio
+composition.
+
+The baseline advances only after pixels were successfully rendered or a
+headless render completed. A failed swapchain acquisition must leave the old
+baseline intact so the same damage is retried. Portals are the special retained
+input: their history is the last image actually rendered for that portal, and
+`FrameResult::PortalPasses` is the evidence that history was written. Do not
+infer a portal-history write from a changed portal descriptor alone.
+
+Cache profiling uses hit and write counters in
+`PresentationCacheProfile`. A hit has no duration, so it must not be represented
+as a fabricated timing span. The Frame Graph panel's `Cascaded Cache Hits` view
+shows the dependency depth, last decision and cumulative hit rate per viewport.
+Any new retained layer must add one row there and tests for its upward cascade.
+An absent source is `n/a`, not a hit: no environment provider, portal, particle
+list or interface exists to reuse. Counting absence as reuse inflates the rate
+and makes an idle scene look healthier as more optional systems are disabled.
+
+On a hit, that layer owes no upload, no command buffer and no transient
+allocation. Validate this in a steady scene with the release preset, the cache
+counters, `FrameResult` traffic counters and GPU heap statistics together. A
+high hit rate with upload bytes or logical GPU memory still growing is a bug,
+not a successful cache.

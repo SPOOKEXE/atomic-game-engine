@@ -6,6 +6,9 @@ layout(location = 2) in vec4 inLightPosition;
 layout(location = 3) in vec4 inSurfacePosition;
 layout(location = 4) in vec2 inTexCoord;
 layout(location = 5) in vec3 inWorldPosition;
+layout(location = 6) flat in uint inAppearance;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 8) flat in vec4 inEmission;
 
 layout(location = 0) out vec4 outColour;
 
@@ -27,6 +30,7 @@ layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
 layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
+layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -65,6 +69,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 
 	// x: which `scene::SurfaceEffect` the projected image goes through.
 	// y: the animation clock, for the effects that move.
+	// z: 1 when this draw is being captured into a surface texture that will be
+	//    sampled back as a *display-encoded* colour, so the output has to be
+	//    tonemapped here. See `Encode` below.
 	vec4 Mirror;
 
 	// The face normal of the pane this draw is, for a portal, and zero
@@ -94,7 +101,49 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: start distance. y: complete distance.
 	vec4 Fog;
 	vec4 Eye;
+
+	// x: 1 when a metalness map is present.
+	vec4 MaterialExtra;
 } lighting;
+
+// The tonemap, for a pass whose output is sampled rather than presented.
+//
+// **Why a mirror needs this and the main view does not.** The main view is
+// deferred: `gbuffer` writes surfaces, `deferred-lighting` writes radiance into
+// a float target, and the `tonemap` node encodes that for display. A mirror is
+// forward - `mirror-capture` runs this shader straight into the surface texture
+// - and nothing encodes it afterwards, because there is no `mirror-tonemap`
+// node the way there is a `portal-tonemap` one.
+//
+// The pane then samples that texture and treats it as a display colour, so it
+// runs it back through `WorkingFromDisplay`, and the frame's own tonemap
+// encodes the result a second time. A linear value put through that round trip
+// comes out about a fifth as bright, which is exactly what a mirror measured:
+// 0.0588 against 0.2843 for the same floor seen directly.
+//
+// Encoding at capture makes the round trip an identity. The same maths as
+// `tonemap.frag`, deliberately - two tonemaps that drift apart would show as a
+// mirror whose colours are close but not right, which is harder to see and
+// harder to explain than one that is plainly too dark.
+vec3 Aces(vec3 value) {
+	return clamp(
+		(value * (2.51 * value + 0.03)) / (value * (2.43 * value + 0.59) + 0.14),
+		0.0,
+		1.0
+	);
+}
+
+vec3 Encode(vec3 lit) {
+	// **Only when asked.** `portal-capture` runs this same shader and *does*
+	// have a `portal-tonemap` node after it, so encoding unconditionally would
+	// tonemap a portal twice. `transparent` runs it too, straight onto the
+	// already-encoded frame - that one is un-tonemapped for the same reason a
+	// mirror was, and is a separate fix rather than a rider on this one.
+	if (lighting.Mirror.z < 0.5) {
+		return lit;
+	}
+	return pow(Aces(max(lit, vec3(0.0))), vec3(1.0 / 2.2));
+}
 
 float FogFactor() {
 	float interval = max(lighting.Fog.y - lighting.Fog.x, 0.0001);
@@ -533,15 +582,22 @@ void main() {
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	roughness = clamp(roughness, 0.045, 1.0);
 	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(0.0);
+	vec3 emissive = lighting.Material.w > 0.5
+		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
+		: vec3(0.0);
+	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
+	metalness = clamp(metalness, 0.0, 1.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a
 	// plane with a mask, and discarding is what keeps it opaque and out of the
 	// sorted pass - see `scene::AlphaMode`.
-	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
-	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
+	uint alphaMode = inAppearance & 0xFFu;
+	float cutoff = float((inAppearance >> 8u) & 0xFFu) / 255.0;
+	float materialAlpha = sampled.a * lighting.BaseColour.a;
+	if (alphaMode == 1u && inColour.a >= 0.98 && materialAlpha < cutoff) {
 		discard;
 	}
+	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 
 	// **The seam, before any shading is computed.** A fragment on the far side of
 	// the plane this instance was cut at belongs to the other half of the body,
@@ -558,7 +614,13 @@ void main() {
 		discard;
 	}
 
-	vec3 albedo = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
+	vec3 mappedColour = sampled.rgb * lighting.BaseColour.rgb;
+	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;
+	if (alphaMode == 0u) {
+		albedo = mix(inColour.rgb, albedo, materialAlpha);
+	} else if (alphaMode == 2u) {
+		albedo = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, materialAlpha);
+	}
 
 	// Ambient is unshadowed and direct light is not, which is what makes a
 	// shadow dark rather than black.
@@ -568,15 +630,18 @@ void main() {
 	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
 	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
 	vec3 halfway = normalize(viewDirection + toLight);
-	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.04));
+	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness);
+	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
 		GeometrySchlickGGX(lambert, roughness);
 	vec3 specular = distribution * geometry * fresnel /
 		max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
-	vec3 ambient = albedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
-	vec3 direct = (albedo * (1.0 - fresnel) * lambert + specular) * lighting.Direct.rgb * shadow;
-	vec3 lit = ambient + direct + albedo * LocalLight(normal) + emissive;
+	vec3 diffuse = albedo * (1.0 - fresnel) * (1.0 - metalness);
+	vec3 ambientAlbedo = mix(albedo, baseReflectance, metalness);
+	vec3 ambient = ambientAlbedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
+	vec3 direct = (diffuse * lambert + specular) * lighting.Direct.rgb * shadow;
+	vec3 lit = ambient + direct + diffuse * LocalLight(normal) + emissive;
 	lit = mix(lit, lighting.FogColour.rgb, FogFactor());
 
 	// **A portal pane reads the sub-render by screen position**, which is the
@@ -603,7 +668,7 @@ void main() {
 	// The ambient is the far room's own unlit tone, so the chain fades into it
 	// rather than stopping against something.
 	if (lighting.Flags.z > 2.5) {
-		outColour = vec4(lighting.Ambient.rgb, max(alpha, lighting.Flags.w));
+		outColour = vec4(Encode(lighting.Ambient.rgb), max(alpha, lighting.Flags.w));
 		return;
 	}
 
@@ -629,7 +694,7 @@ void main() {
 		vec3 image = texture(surfaceMap, portalUv).rgb;
 
 		float imageAlpha = lighting.Flags.w;
-		outColour = vec4(mix(lit, image, imageAlpha), max(alpha, imageAlpha));
+		outColour = vec4(Encode(mix(lit, image, imageAlpha)), max(alpha, imageAlpha));
 		return;
 	}
 
@@ -664,10 +729,10 @@ void main() {
 			float imageAlpha = lighting.Flags.w;
 
 			// Preserve the image opacity independently from the pane transparency.
-			outColour = vec4(mix(lit, image, imageAlpha), max(alpha, imageAlpha));
+			outColour = vec4(Encode(mix(lit, image, imageAlpha)), max(alpha, imageAlpha));
 			return;
 		}
 	}
 
-	outColour = vec4(lit, alpha);
+	outColour = vec4(Encode(lit), alpha);
 }

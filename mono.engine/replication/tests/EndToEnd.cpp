@@ -2,6 +2,7 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/testing/Suite.hpp>
@@ -132,11 +133,17 @@ TEST_CASE("a refused chunk rewinds its own cursor and not the other one", "[repl
 }
 
 TEST_CASE("the listener's own send loop hands refusals back", "[replication]") {
+	// **The datagram stack, named rather than defaulted.** `ListenerSettings`
+	// serves QUIC by default as of v0.19; this suite is about the framing,
+	// budgets and reliability window of the other one, and `QuicWire.cpp` is
+	// its QUIC twin.
 	engine::replication::ListenerSettings serving;
+	serving.Wire = engine::net::WireMode::Datagram;
 	serving.Session.Link.PacketsPerTick = 4;
 	serving.Authority.ChunksPerTick = 8;
 
 	engine::replication::ConnectorSettings connecting;
+	connecting.Advertised = engine::net::WireMode::Datagram;
 
 	RegisterTypes();
 
@@ -183,6 +190,7 @@ namespace {
 	// `Authority::Statistics::Bytes` is reset per `Publish` for that reason.
 	size_t BusiestTick(size_t linkBytesPerTick) {
 		engine::replication::ListenerSettings serving;
+		serving.Wire = engine::net::WireMode::Datagram;
 		serving.Session.Link.BytesPerTick = static_cast<uint32_t>(linkBytesPerTick);
 
 		RegisterTypes();
@@ -205,7 +213,9 @@ namespace {
 		listener.Authority().Replicate(Name("endtoend_test.Spot"));
 
 		Store replica("client");
-		engine::replication::Connector connector(*transports[1], transports[0]->Local(), now);
+		engine::replication::ConnectorSettings connecting;
+		connecting.Advertised = engine::net::WireMode::Datagram;
+		engine::replication::Connector connector(*transports[1], transports[0]->Local(), now, connecting);
 
 		uint64_t tick = 0;
 		const auto step = [&]() {

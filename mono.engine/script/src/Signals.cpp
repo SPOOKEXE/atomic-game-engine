@@ -1,4 +1,4 @@
-#include "Signals.hpp"
+#include <engine/script/Signals.hpp>
 
 #include <algorithm>
 

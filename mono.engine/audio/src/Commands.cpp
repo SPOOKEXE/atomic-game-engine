@@ -58,6 +58,16 @@ namespace engine::audio {
 		return taken;
 	}
 
+	size_t CommandQueue::Free() const {
+		const size_t write = Write.load(std::memory_order_relaxed);
+		const size_t read = Read.load(std::memory_order_acquire);
+
+		// `CAPACITY - 1` usable, because the ring keeps one slot empty so that
+		// full and empty are distinguishable. `write - read` is the count in
+		// flight and wraps correctly for unsigned arithmetic.
+		return (CAPACITY - 1) - (write - read);
+	}
+
 	size_t CommandQueue::Pending() const {
 		const size_t write = Write.load(std::memory_order_acquire);
 		const size_t read = Read.load(std::memory_order_acquire);

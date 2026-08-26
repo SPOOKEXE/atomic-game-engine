@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/net/Packet.hpp>
 
@@ -35,11 +36,17 @@ namespace engine::net {
 	}
 
 	std::optional<Packet::Inbound> Packet::Read(core::ByteReader &reader) {
-		const auto refuse = [&reader]() -> std::optional<Inbound> {
+		// **The reason is a parameter and the line is rate-limited.** Five
+		// different malformed headers share one counter, and an operator
+		// watching it tick cannot tell a version mismatch from a truncated
+		// buffer - but this runs once per inbound datagram, so a flood of bad
+		// packets must not become a flood of lines.
+		const auto refuse = [&reader](const char *why) -> std::optional<Inbound> {
 			// One flag carries the verdict for the whole buffer, so a caller
 			// reading further from it cannot miss the refusal.
 			reader.Fail();
 			core::Metrics::Count("net.packet.refused", 1.0);
+			ENGINE_DEBUG_EVERY(1.0, "packet refused: {}", why);
 			return std::nullopt;
 		};
 
@@ -50,19 +57,19 @@ namespace engine::net {
 		Inbound inbound;
 		inbound.HeaderBytes = reader.ReadRawView(HEADER_BYTES);
 		if (reader.Failed()) {
-			return refuse();
+			return refuse("shorter than one header");
 		}
 
 		core::ByteReader head(inbound.HeaderBytes);
 
 		if (head.ReadUInt32() != MAGIC) {
-			return refuse();
+			return refuse("the magic is not this protocol's");
 		}
 		if (head.ReadUInt16() != VERSION) {
 			// Refused rather than negotiated downward. A server speaking an old
 			// version to an old client is a server running two protocols, and
 			// the second one is the one nobody tests.
-			return refuse();
+			return refuse("the protocol version is not this build's");
 		}
 
 		const uint8_t channel = head.ReadUInt8();
@@ -71,7 +78,7 @@ namespace engine::net {
 			// `ChannelKind` no switch handles, and every `Describe` and every
 			// dispatch downstream would then be reading a value the type says
 			// cannot exist.
-			return refuse();
+			return refuse("the channel byte is outside the enum");
 		}
 		inbound.Header.Channel = static_cast<ChannelKind>(channel);
 
@@ -82,7 +89,7 @@ namespace engine::net {
 
 		const uint16_t length = head.ReadUInt16();
 		if (length > MAXIMUM_PAYLOAD_BYTES) {
-			return refuse();
+			return refuse("the declared payload is past the maximum");
 		}
 
 		// ReadRawView refuses rather than clamping when the buffer is short, so
@@ -90,7 +97,7 @@ namespace engine::net {
 		// memory the packet did not contain.
 		inbound.Payload = reader.ReadRawView(length);
 		if (reader.Failed()) {
-			return refuse();
+			return refuse("the declared payload is longer than what arrived");
 		}
 
 		core::Metrics::Count("net.packet.read", 1.0);

@@ -9,9 +9,23 @@ namespace unified {
 		// **Parsed against the same table they are printed from**, so a name
 		// that comes out of `Name` goes back in through `ParseArrangement` and
 		// there is nowhere for the two spellings to drift apart.
-		constexpr std::array<std::string_view, 3> TRANSPORTS{"direct", "loopback", "lossy"};
+		constexpr std::array<std::string_view, 5> TRANSPORTS{
+			"direct", "loopback", "lossy", "quic", "quic-lossy"
+		};
 		constexpr std::array<std::string_view, 2> CONTENTS{"", "relayed"};
 		constexpr std::array<std::string_view, 2> DISCOVERIES{"", "advertised"};
+	}
+
+	bool OverAWire(Transport carrying) {
+		return carrying != Transport::Direct;
+	}
+
+	bool Loses(Transport carrying) {
+		return carrying == Transport::Lossy || carrying == Transport::QuicLossy;
+	}
+
+	bool OverQuic(Transport carrying) {
+		return carrying == Transport::Quic || carrying == Transport::QuicLossy;
 	}
 
 	std::string_view Name(Transport carrying) {
@@ -109,7 +123,7 @@ namespace unified {
 
 		// A name that mentioned no transport is `relayed`, which describes half
 		// an arrangement. `direct+relayed` is the thing it probably meant and
-		// guessing at it is how a matrix silently runs eleven of its twelve.
+		// guessing at it is how a matrix silently runs nineteen of its twenty.
 		if (!namedTransport) {
 			return std::nullopt;
 		}

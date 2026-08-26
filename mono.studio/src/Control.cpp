@@ -15,9 +15,25 @@
 // Every tool here runs on the editor thread, called from `PumpControl` in the
 // frame loop, because `Universe::Enter` aborts on a foreign one.
 
+#include "ControlAutomation.hpp"
+
+#include <engine/control/Features.hpp>
+#include <engine/control/features/Script.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_video.h>
+
+#include <algorithm>
+#include <array>
+#include <cfloat>
+#include <filesystem>
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -27,6 +43,129 @@ namespace studio {
 
 	using engine::control::Tool;
 	using nlohmann::json;
+
+	namespace {
+		constexpr int MINIMUM_WINDOW_SIZE = 64;
+		constexpr int MAXIMUM_WINDOW_SIZE = 16384;
+
+		json WindowGeometry(SDL_Window *window) {
+			int x = 0;
+			int y = 0;
+			int width = 0;
+			int height = 0;
+			(void)SDL_GetWindowPosition(window, &x, &y);
+			(void)SDL_GetWindowSize(window, &width, &height);
+			return json{{"x", x}, {"y", y}, {"width", width}, {"height", height}};
+		}
+
+		std::filesystem::path ScreenshotDirectory(std::string &failure) {
+			std::error_code error;
+			const std::filesystem::path directory =
+				std::filesystem::temp_directory_path(error) / "atomic-game-engine" / "screenshots";
+			if (error) {
+				failure = "could not find the system temporary directory: " + error.message();
+				return {};
+			}
+
+			std::filesystem::create_directories(directory, error);
+			if (error) {
+				failure = "could not create the screenshot directory: " + error.message();
+				return {};
+			}
+			return directory;
+		}
+
+		uint8_t MouseButton(std::string_view button) {
+			if (button == "left") {
+				return SDL_BUTTON_LEFT;
+			}
+			if (button == "middle") {
+				return SDL_BUTTON_MIDDLE;
+			}
+			if (button == "right") {
+				return SDL_BUTTON_RIGHT;
+			}
+			return 0;
+		}
+
+		// Where `mcpbridge` is, spelled the way somebody would have to type it.
+		//
+		// **A guess that is checked.** The bridge stages beside this program -
+		// `<stage>/studio/studio` and `<stage>/tools/mcpbridge` - so the path is
+		// derivable, and a derived path that turns out not to exist is worse
+		// than no path at all in a block somebody is about to paste into a
+		// config file. When it is not there the bare name is offered instead,
+		// which is right for anyone who installed the tools on their PATH.
+		std::string BridgePath() {
+			const std::filesystem::path staged = engine::core::Paths::Base().parent_path() / "tools" /
+												 engine::core::Paths::Program("mcpbridge");
+
+			std::error_code failed;
+			if (std::filesystem::exists(staged, failed)) {
+				return std::filesystem::absolute(staged, failed).string();
+			}
+			return engine::core::Paths::Program("mcpbridge").string();
+		}
+
+		// A path as it has to appear inside a quoted JSON or TOML string.
+		//
+		// **Windows is the whole reason.** A staged path there is
+		// `C:\...\tools\mcpbridge.exe`, and a backslash inside a JSON string
+		// starts an escape - pasted as it stands it is not valid JSON, and the
+		// client reports a parse error rather than anything about this editor.
+		// TOML basic strings take the same doubling, so one function covers both.
+		std::string Quoted(const std::string &path) {
+			std::string escaped;
+			escaped.reserve(path.size());
+			for (const char letter : path) {
+				if (letter == '\\' || letter == '"') {
+					escaped.push_back('\\');
+				}
+				escaped.push_back(letter);
+			}
+			return escaped;
+		}
+
+		// A block of text somebody is meant to copy.
+		//
+		// An input rather than `TextUnformatted` because the job is selecting
+		// it: imgui text cannot be dragged over, and a config block that has to
+		// be retyped by hand is one that gets retyped wrong. Read-only, so the
+		// buffer is never written and `text` may be a temporary this frame.
+		//
+		// @param id    The imgui identity, and half of the copy button's.
+		// @param text  What to show.
+		// @param lines How tall to draw it.
+		void Snippet(const char *id, std::string text, int lines) {
+			const ImVec2 size(
+				-FLT_MIN,
+				ImGui::GetTextLineHeight() * static_cast<float>(lines) +
+					ImGui::GetStyle().FramePadding.y * 2.0f
+			);
+			ImGui::InputTextMultiline(id, text.data(), text.size() + 1, size, ImGuiInputTextFlags_ReadOnly);
+
+			const std::string button = std::string("Copy##") + id;
+			if (ImGui::Button(button.c_str())) {
+				ImGui::SetClipboardText(text.c_str());
+			}
+		}
+	}
+
+	void Editor::EnableControlFeatures() {
+		const std::array features{
+			engine::control::features::Universe(*Universe),
+			engine::control::features::Architecture(),
+			engine::control::features::Script(),
+			engine::control::features::Diagnostics(),
+			engine::control::features::Build(),
+			engine::control::features::Resources(),
+			engine::control::features::Prompts(),
+			engine::control::features::Custom("studio", [this](engine::control::Surface &) {
+				RegisterControlTools();
+			}),
+		};
+		ControlSurface.Enable(features);
+	}
 
 	void Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
@@ -48,8 +187,7 @@ namespace studio {
 		// filled once per process and the socket is opened and closed as often
 		// as somebody likes.
 		if (ControlSurface.Count() == 0) {
-			ControlSurface.AddUniverseTools(*Universe);
-			RegisterControlTools();
+			EnableControlFeatures();
 		}
 
 		if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
@@ -63,11 +201,12 @@ namespace studio {
 	}
 
 	void Editor::PumpControl() {
+		ENGINE_PROFILE("control");
+
 		if (!ControlServer.IsRunning()) {
 			return;
 		}
 
-		ENGINE_PROFILE("control");
 		ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 	}
 
@@ -245,6 +384,338 @@ namespace studio {
 				},
 			}
 		);
+
+		ControlSurface.Add(
+			Tool{
+				"screenshot",
+				"Queues BMP screenshots under the system temporary directory. `scene` captures visible "
+				"scene views separately, `studio` captures the complete Studio window, and `all` does both.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"target",
+							  json{
+								  {"type", "string"},
+								  {"enum", json::array({"scene", "studio", "all"})},
+								  {"description", "What to capture. Defaults to all."},
+							  }},
+							 {"scene",
+							  json{
+								  {"type", "string"},
+								  {"description", "An exact visible scene name to capture."},
+							  }},
+						 }},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (!editor->ControlScreenshots.empty() || editor->ControlScreenshotIssued ||
+						editor->Renderer.CapturePending()) {
+						failure = "a screenshot batch is already in progress";
+						return nullptr;
+					}
+
+					automation::ScreenshotTarget target;
+					const std::string targetName = arguments.value("target", std::string("all"));
+					if (!automation::ParseScreenshotTarget(targetName, target)) {
+						failure = "target must be scene, studio or all";
+						return nullptr;
+					}
+
+					if ((target == automation::ScreenshotTarget::Studio ||
+						 target == automation::ScreenshotTarget::All) &&
+						editor->Window == nullptr) {
+						failure = "Studio has no window in headless mode; use target scene";
+						return nullptr;
+					}
+
+					std::vector<automation::VisibleScene> visible;
+					if (editor->ShowViewport && editor->WorldTarget.IsValid()) {
+						const WorldId world = editor->ViewportWorld(0);
+						if (world.IsValid()) {
+							visible.push_back(
+								automation::VisibleScene{
+									std::string(editor->Universe->NameOf(world).Text()),
+									0,
+								}
+							);
+						}
+					}
+					for (size_t index = 0; index < editor->Extras.size(); index++) {
+						const Editor::ViewportState &viewport = editor->Extras[index];
+						if (!viewport.Open || !viewport.Target.IsValid()) {
+							continue;
+						}
+						const WorldId world = editor->ViewportWorld(index + 1);
+						if (world.IsValid()) {
+							visible.push_back(
+								automation::VisibleScene{
+									std::string(editor->Universe->NameOf(world).Text()),
+									index + 1,
+								}
+							);
+						}
+					}
+
+					const std::filesystem::path directory = ScreenshotDirectory(failure);
+					if (!failure.empty()) {
+						return nullptr;
+					}
+					const std::string scene = arguments.value("scene", std::string());
+					const std::vector<automation::ScreenshotTask> tasks =
+						automation::PlanScreenshots(directory, target, visible, scene, failure);
+					if (!failure.empty()) {
+						return nullptr;
+					}
+
+					json captures = json::array();
+					for (const automation::ScreenshotTask &task : tasks) {
+						editor->ControlScreenshots.push_back(
+							Editor::ControlScreenshot{task.Path, task.Slot, task.Studio}
+						);
+						json capture{
+							{"kind", task.Studio ? "studio" : "scene"}, {"path", task.Path.string()}
+						};
+						if (!task.Studio) {
+							capture["scene"] = task.Scene;
+						}
+						captures.push_back(std::move(capture));
+					}
+
+					return json{
+						{"queued", true},
+						{"directory", directory.string()},
+						{"captures", std::move(captures)},
+					};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"emulate_click",
+				"Queues one mouse click at Studio client coordinates. The press and release cross rendered "
+				"frames so ImGui observes the same lifecycle as physical input.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"x", json{{"type", "number"}}},
+							 {"y", json{{"type", "number"}}},
+							 {"button",
+							  json{
+								  {"type", "string"},
+								  {"enum", json::array({"left", "middle", "right"})},
+								  {"description", "Defaults to left."},
+							  }},
+						 }},
+						{"required", json::array({"x", "y"})},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (editor->Window == nullptr) {
+						failure = "Studio has no window in headless mode";
+						return nullptr;
+					}
+					if (editor->PendingControlClick.has_value()) {
+						failure = "an emulated click is already in progress";
+						return nullptr;
+					}
+					if (!arguments.contains("x") || !arguments["x"].is_number() || !arguments.contains("y") ||
+						!arguments["y"].is_number()) {
+						failure = "x and y must be numbers";
+						return nullptr;
+					}
+
+					const float x = arguments["x"].get<float>();
+					const float y = arguments["y"].get<float>();
+					int width = 0;
+					int height = 0;
+					(void)SDL_GetWindowSize(editor->Window, &width, &height);
+					if (x < 0.0f || y < 0.0f || x >= static_cast<float>(width) ||
+						y >= static_cast<float>(height)) {
+						failure = "click coordinates are outside the Studio window";
+						return nullptr;
+					}
+
+					const std::string buttonName = arguments.value("button", std::string("left"));
+					const uint8_t button = MouseButton(buttonName);
+					if (button == 0) {
+						failure = "button must be left, middle or right";
+						return nullptr;
+					}
+
+					SDL_Event motion{};
+					motion.type = SDL_EVENT_MOUSE_MOTION;
+					motion.motion.timestamp = SDL_GetTicksNS();
+					motion.motion.windowID = SDL_GetWindowID(editor->Window);
+					motion.motion.x = x;
+					motion.motion.y = y;
+					if (!SDL_PushEvent(&motion)) {
+						failure = std::string("could not queue mouse motion: ") + SDL_GetError();
+						return nullptr;
+					}
+
+					SDL_Event press{};
+					press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+					press.button.timestamp = SDL_GetTicksNS();
+					press.button.windowID = SDL_GetWindowID(editor->Window);
+					press.button.button = button;
+					press.button.down = true;
+					press.button.clicks = 1;
+					press.button.x = x;
+					press.button.y = y;
+					if (!SDL_PushEvent(&press)) {
+						failure = std::string("could not queue mouse press: ") + SDL_GetError();
+						return nullptr;
+					}
+
+					editor->PendingControlClick = Editor::ControlClick{x, y, button, false};
+					return json{
+						{"queued", true},
+						{"x", x},
+						{"y", y},
+						{"button", buttonName},
+					};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"open_window",
+				"Shows, restores and raises the Studio window, then reports its client geometry.",
+				[] { return json{{"type", "object"}}; },
+				[editor](const json &, std::string &failure) -> json {
+					if (editor->Window == nullptr) {
+						failure = "Studio has no window in headless mode";
+						return nullptr;
+					}
+					if (!SDL_ShowWindow(editor->Window)) {
+						failure = std::string("could not show Studio: ") + SDL_GetError();
+						return nullptr;
+					}
+					const SDL_WindowFlags flags = SDL_GetWindowFlags(editor->Window);
+					if ((flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_MAXIMIZED)) != 0 &&
+						!SDL_RestoreWindow(editor->Window)) {
+						failure = std::string("could not restore Studio: ") + SDL_GetError();
+						return nullptr;
+					}
+					if (!SDL_RaiseWindow(editor->Window)) {
+						failure = std::string("could not raise Studio: ") + SDL_GetError();
+						return nullptr;
+					}
+					(void)SDL_SyncWindow(editor->Window);
+					return json{{"open", true}, {"geometry", WindowGeometry(editor->Window)}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"set_window_geometry",
+				"Sets the Studio client window position and size, then reports the geometry accepted by the "
+				"window system.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"x", json{{"type", "integer"}}},
+							 {"y", json{{"type", "integer"}}},
+							 {"width", json{{"type", "integer"}}},
+							 {"height", json{{"type", "integer"}}},
+						 }},
+						{"required", json::array({"x", "y", "width", "height"})},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (editor->Window == nullptr) {
+						failure = "Studio has no window in headless mode";
+						return nullptr;
+					}
+					for (const char *field : {"x", "y", "width", "height"}) {
+						if (!arguments.contains(field) || !arguments[field].is_number_integer()) {
+							failure = std::string(field) + " must be an integer";
+							return nullptr;
+						}
+					}
+
+					const int x = arguments["x"].get<int>();
+					const int y = arguments["y"].get<int>();
+					const int width = arguments["width"].get<int>();
+					const int height = arguments["height"].get<int>();
+					if (width < MINIMUM_WINDOW_SIZE || width > MAXIMUM_WINDOW_SIZE ||
+						height < MINIMUM_WINDOW_SIZE || height > MAXIMUM_WINDOW_SIZE) {
+						failure = "width and height must be between 64 and 16384";
+						return nullptr;
+					}
+
+					const SDL_WindowFlags flags = SDL_GetWindowFlags(editor->Window);
+					if ((flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_MAXIMIZED)) != 0 &&
+						!SDL_RestoreWindow(editor->Window)) {
+						failure = std::string("could not restore Studio: ") + SDL_GetError();
+						return nullptr;
+					}
+					if (!SDL_SetWindowSize(editor->Window, width, height)) {
+						failure = std::string("could not resize Studio: ") + SDL_GetError();
+						return nullptr;
+					}
+					if (!SDL_SetWindowPosition(editor->Window, x, y)) {
+						failure = std::string("could not move Studio: ") + SDL_GetError();
+						return nullptr;
+					}
+					if (!SDL_SyncWindow(editor->Window)) {
+						failure = std::string("could not synchronize Studio geometry: ") + SDL_GetError();
+						return nullptr;
+					}
+					return json{{"geometry", WindowGeometry(editor->Window)}};
+				},
+			}
+		);
+	}
+
+	void Editor::PrepareControlScreenshot() {
+		if (ControlScreenshotIssued || ControlScreenshots.empty() || Renderer.CapturePending()) {
+			return;
+		}
+
+		const ControlScreenshot &screenshot = ControlScreenshots.front();
+		if (screenshot.Studio) {
+			Renderer.RequestWindowCapture(screenshot.Path);
+		} else {
+			Renderer.RequestSceneCapture(screenshot.Path, screenshot.Slot);
+		}
+		ControlScreenshotIssued = true;
+	}
+
+	void Editor::FinishControlAutomationFrame() {
+		if (ControlScreenshotIssued && !Renderer.CapturePending()) {
+			ControlScreenshots.pop_front();
+			ControlScreenshotIssued = false;
+		}
+
+		if (!PendingControlClick.has_value() || !PendingControlClick->DownProcessed) {
+			return;
+		}
+
+		SDL_Event release{};
+		release.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		release.button.timestamp = SDL_GetTicksNS();
+		release.button.windowID = SDL_GetWindowID(Window);
+		release.button.button = PendingControlClick->Button;
+		release.button.down = false;
+		release.button.clicks = 1;
+		release.button.x = PendingControlClick->X;
+		release.button.y = PendingControlClick->Y;
+		if (!SDL_PushEvent(&release)) {
+			Say(std::string("control: could not release emulated click: ") + SDL_GetError(),
+				engine::core::LogLevel::Error);
+			return;
+		}
+		PendingControlClick.reset();
 	}
 
 	WorldId Editor::ControlWorld(const json &arguments, std::string &failure) {
@@ -273,12 +744,11 @@ namespace studio {
 
 		// **The tools are registered once, not once per start.** `Surface::Add`
 		// replaces by name, so a second registration would be harmless and a
-		// second `AddUniverseTools` would still be work nobody asked for - and
+		// second feature pass would still be work nobody asked for, and
 		// the count in the log line would go on saying the same number while
 		// doing it twice.
 		if (ControlSurface.Count() == 0) {
-			ControlSurface.AddUniverseTools(*Universe);
-			RegisterControlTools();
+			EnableControlFeatures();
 		}
 
 		if (!ControlServer.Start(static_cast<uint16_t>(std::max(0, ControlPortField)))) {
@@ -351,6 +821,110 @@ namespace studio {
 
 		if (ImGui::Button(running ? "Stop" : "Start", ImVec2(120.0f, 0.0f))) {
 			ToggleControl();
+		}
+
+		ImGui::Spacing();
+		ImGui::Spacing();
+
+		// **How to attach, in the window that knows the port.** The two facts a
+		// config file needs are where the bridge is and which port it should
+		// dial, and both are known here and nowhere in the documentation - a
+		// page cannot say what port this editor bound when it was given zero.
+		//
+		// The port shown is the bound one while it is listening, and the field's
+		// otherwise, so a block copied before pressing Start still says what
+		// Start will open.
+		ImGui::SeparatorText("Attach a model");
+
+		const unsigned short port =
+			running ? ControlServer.Port() : static_cast<unsigned short>(std::max(0, ControlPortField));
+		const std::string bridge = BridgePath();
+
+		ImGui::TextWrapped(
+			"A model speaks stdio and this is a socket, so mcpbridge sits between them. "
+			"It is started by the model's client, not from here."
+		);
+
+		if (port == 0) {
+			// Zero is "the operating system picks", and it has not picked yet.
+			// Writing 0 into somebody's config file would be a port that is
+			// never listened on.
+			ImGui::TextDisabled("Start the server to see the port it was given.");
+		} else if (ImGui::BeginTabBar("##attach")) {
+			if (ImGui::BeginTabItem("Claude")) {
+				ImGui::TextWrapped("Once, from anywhere:");
+				Snippet(
+					"##claude-cli",
+					"claude mcp add atomic-studio -- \"" + bridge + "\" --port " + std::to_string(port),
+					1
+				);
+
+				ImGui::Spacing();
+				ImGui::TextWrapped("Or per project, as .mcp.json beside the game file:");
+				Snippet(
+					"##claude-json",
+					"{\n"
+					"  \"mcpServers\": {\n"
+					"    \"atomic-studio\": {\n"
+					"      \"type\": \"stdio\",\n"
+					"      \"command\": \"" +
+						Quoted(bridge) +
+						"\",\n"
+						"      \"args\": [\"--port\", \"" +
+						std::to_string(port) +
+						"\"]\n"
+						"    }\n"
+						"  }\n"
+						"}",
+					10
+				);
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Codex")) {
+				ImGui::TextWrapped("In ~/.codex/config.toml:");
+				Snippet(
+					"##codex-toml",
+					"[mcp_servers.atomic-studio]\n"
+					"command = \"" +
+						Quoted(bridge) +
+						"\"\n"
+						"args = [\"--port\", \"" +
+						std::to_string(port) + "\"]",
+					3
+				);
+				ImGui::EndTabItem();
+			}
+
+			// **For handing to a model rather than to a config file.** Somebody
+			// whose client has no config they can reach still has a model in
+			// front of them, and that model can run the command itself if it is
+			// told what the thing is and where.
+			if (ImGui::BeginTabItem("Prompt")) {
+				ImGui::TextWrapped("Paste this to a model that can edit your MCP config:");
+				Snippet(
+					"##prompt",
+					"The Atomic editor is running with a Model Context Protocol server on\n"
+					"127.0.0.1:" +
+						std::to_string(port) +
+						". Add it to my MCP configuration as \"atomic-studio\": it is a\n"
+						"stdio server, the command is \"" +
+						bridge +
+						"\" and its\n"
+						"arguments are --port " +
+						std::to_string(port) +
+						". Do not start the editor yourself; it is\n"
+						"already open, and the bridge exits when it cannot reach one. Once it is\n"
+						"attached, call tools/list - it offers " +
+						std::to_string(ControlSurface.Count()) +
+						" tools for reading and editing\n"
+						"the open worlds.",
+					8
+				);
+				ImGui::EndTabItem();
+			}
+
+			ImGui::EndTabBar();
 		}
 
 		ImGui::Spacing();

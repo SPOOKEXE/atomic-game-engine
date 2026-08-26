@@ -1,17 +1,16 @@
-// Model Context Protocol on stdio, forwarded to a running editor.
+// Model Context Protocol on stdio, forwarded to a running engine product.
 //
 // **A byte pump, and it understands nothing.** MCP clients start a server as a
 // subprocess and speak newline-delimited JSON-RPC over its stdin and stdout.
-// The editor cannot be that subprocess: it is a windowed program with a
-// renderer and a universe, started by a person or by `just edit`, and outliving
-// any one client. So the editor listens on loopback and this stands in front of
-// it - everything a client writes goes to the socket, everything the socket
-// says goes back out.
+// The client, server, studio, and content origin are started independently and
+// may outlive any one MCP client. Each listens on loopback when asked, and this
+// stands in front of it: everything a client writes goes to the socket and
+// everything the socket says goes back out.
 //
 // Because it parses nothing, there is no second copy of the protocol to keep in
-// step. A tool added to `engine/control/src/Tools.cpp` or to the editor's own
-// `mono.studio/src/Control.cpp` is reachable through here the moment it exists,
-// and this file never changes.
+// step. A tool added through an engine control feature or a product's custom
+// feature is reachable through here the moment it exists, and adding one needs
+// no edit to this file.
 //
 // **Two threads, because both directions block.** A single-threaded pump would
 // have to poll one side while the other was mid-read, and the whole point of
@@ -19,12 +18,20 @@
 //
 // Point a client at it:
 //
-//     "atomic": { "command": "…/tools/mcpbridge", "args": ["--port", "8730"] }
+//     "atomic": { "command": ".cache/build/dev/tools/mcpbridge", "args": ["--port", "8738"] }
+//
+// which is what the checked-in `.mcp.json` already says, and 8738 is
+// `engine::control::DEFAULT_PORT`. This example read 8730 until v0.19 - a port
+// nothing has opened since that constant existed, and the third copy of a number
+// that had already gone wrong twice. `mono.tools/mcpbridge/CMakeLists.txt` now
+// fails the configure when `.mcp.json` or the `just mcp` recipe disagrees with
+// the header, so a fourth copy cannot appear quietly.
 //
 // It exits when either side closes, which is what makes a client's own
 // lifecycle management work: killing the bridge does not touch the editor, and
 // closing the editor ends the bridge.
 
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 
 #include <array>
@@ -71,7 +78,11 @@ int main(int argc, char **argv) {
 	engine::core::Arguments arguments(
 		"mcpbridge", "atomic - carries Model Context Protocol between stdio and a running editor."
 	);
-	arguments.Value("port", "PORT", "The editor's --mcp-port (default 8730)");
+	arguments.Value(
+		"port",
+		"PORT",
+		"The editor's --mcp-port (default " + std::to_string(engine::control::DEFAULT_PORT) + ")"
+	);
 	arguments.Value("host", "ADDRESS", "Where the editor is listening (default 127.0.0.1)");
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
@@ -92,7 +103,7 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	const auto port = static_cast<uint16_t>(arguments.GetInteger("port", 8730));
+	const auto port = static_cast<uint16_t>(arguments.GetInteger("port", engine::control::DEFAULT_PORT));
 	const std::string host(arguments.Get("host").value_or("127.0.0.1"));
 
 	asio::io_context context;

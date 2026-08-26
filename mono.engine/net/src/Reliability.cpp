@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/net/Reliability.hpp>
@@ -72,6 +73,11 @@ namespace engine::net {
 				// A clock that went backwards, or a caller passing nonsense.
 				// Dropped rather than folded in: one bad sample survives in a
 				// smoothed value for dozens of good ones.
+				//
+				// A caller feeding a broken clock produces a congestion
+				// controller with no round trip at all, which reads as the
+				// connection being slow for no reason.
+				ENGINE_WARN_EVERY(5.0, "round trip sample of {}s discarded as impossible", trip);
 				return;
 			}
 
@@ -169,6 +175,9 @@ namespace engine::net {
 			// gone, whatever else is still arriving from it.
 			Overflowed = DisconnectReason::TimedOut;
 			core::Metrics::Count("net.reliability.overflow", 1.0);
+			ENGINE_WARN(
+				"sequence {} went unanswered after {} resends; the peer is gone", sequence, at->Attempts
+			);
 		}
 		return true;
 	}
@@ -236,6 +245,10 @@ namespace engine::net {
 			// without ever exceeding a per-tick budget.
 			Overflowed = DisconnectReason::BudgetExceeded;
 			core::Metrics::Count("net.reliability.overflow", 1.0);
+			ENGINE_WARN(
+				"the peer holds {} out-of-order packets, its own send window's worth; disconnecting it",
+				Held.size()
+			);
 			return false;
 		}
 

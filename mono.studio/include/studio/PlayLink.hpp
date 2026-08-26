@@ -53,6 +53,7 @@
 #include <engine/world/World.hpp>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -197,6 +198,10 @@ namespace studio {
 		//
 		// @param universe The editor's universe.
 		void Step(engine::world::Universe &universe);
+
+		// Steps independent in-process clients together. Their authority signing
+		// work is submitted as one engine batch across all served scenes.
+		static void StepMany(engine::world::Universe &universe, std::span<PlayLink *const> links);
 
 		// Destroys the replica world and forgets the client.
 		//

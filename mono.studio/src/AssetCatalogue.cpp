@@ -1,9 +1,9 @@
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/LocalStore.hpp>
 
 #include <algorithm>
 #include <assetc/Bake.hpp>
-#include <cdn/LocalStore.hpp>
 #include <studio/AssetCatalogue.hpp>
 #include <utility>
 
@@ -70,15 +70,15 @@ namespace studio {
 	std::vector<CatalogueEntry>
 	DirectoryAssets(const std::filesystem::path &processed, std::string_view source) {
 		// **The manifest reader the store already has, given only the folder it
-		// reads.** `cdn::PublishedContents` touches `Processed` and nothing
+		// reads.** `engine::assets::PublishedContents` touches `Processed` and nothing
 		// else, so a source pointing at somebody else's published tree is
 		// listed by exactly the code that lists this machine's own - a second
 		// reader would be a second thing to keep in step with the format.
-		cdn::LocalPaths paths;
+		engine::assets::LocalPaths paths;
 		paths.Processed = processed;
 
 		std::vector<CatalogueEntry> entries;
-		for (const cdn::PublishedEntry &published : cdn::PublishedContents(paths)) {
+		for (const engine::assets::PublishedEntry &published : engine::assets::PublishedContents(paths)) {
 			entries.push_back(
 				CatalogueEntry{
 					.Name = published.Name,

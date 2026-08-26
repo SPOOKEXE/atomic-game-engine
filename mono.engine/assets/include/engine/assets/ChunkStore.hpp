@@ -105,6 +105,13 @@ namespace engine::assets {
 		// either the asset or nothing - never a run of chunks that individually
 		// verified and together are not the asset.
 		//
+		// **Every byte is hashed once, not twice.** `Read` already checks each
+		// chunk against its own name on the way past, so what is left is the
+		// tree over those names - `VerifyAssetShape`, which is the half of
+		// `VerifyAsset` that touches no content. Hashing the concatenation again
+		// was a second BLAKE3 pass over the whole asset for an answer the reads
+		// had produced already.
+		//
 		// @param asset The manifest's entry for it.
 		// @return The bytes, or nothing when any chunk is missing or the
 		//         assembled whole does not match the root.

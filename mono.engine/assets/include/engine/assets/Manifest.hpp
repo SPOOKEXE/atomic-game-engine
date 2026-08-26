@@ -84,6 +84,33 @@ namespace engine::assets {
 	// @since v0.9
 	bool VerifyAsset(const AssetEntry &asset, std::span<const std::byte> bytes);
 
+	// The half of `VerifyAsset` that needs no content.
+	//
+	// **Not a second way to verify an asset.** `VerifyAsset` is two questions
+	// asked together: are these bytes the chunks the entry lists, and do those
+	// chunks add up to the asset the entry claims. The first needs the content
+	// and costs a BLAKE3 pass over all of it; the second needs only the entry
+	// and costs one compression per chunk. This is the second, and `VerifyAsset`
+	// is implemented as the first followed by a call to this, so there is one
+	// definition of each rather than two that agree until they do not.
+	//
+	// It exists because one caller has already asked the first question a
+	// better way. `ChunkStore::ReadAsset` reads each chunk through
+	// `ChunkStore::Read`, which hashes it against its own name - the same
+	// comparison, a chunk at a time, and able to say *which* chunk was wrong.
+	// Handing the concatenation to `VerifyAsset` afterwards hashed every byte a
+	// second time for an answer already known.
+	//
+	// **A caller that has not checked the content must not call this.** It says
+	// nothing whatever about any bytes; on its own it is satisfied by an entry
+	// that describes content nobody has looked at.
+	//
+	// @param asset The manifest's entry.
+	// @return Whether the chunk list totals what the entry claims and roots to
+	//         what the entry is addressed by.
+	// @since v0.19
+	bool VerifyAssetShape(const AssetEntry &asset);
+
 	// Where one asset's bytes sit inside its bundle's payload.
 	//
 	// @since v0.9
@@ -199,9 +226,29 @@ namespace engine::assets {
 
 		// The asset with this root.
 		//
+		// A binary search through `RootOrder`. It was a scan until v0.19, on
+		// the argument that it ran while a manifest was being built rather than
+		// while one was being served - which stopped being true when
+		// `delivery::Client::Split` began calling it per member of every
+		// arriving group, inside `Pump`, at the tick barrier.
+		//
 		// @param root The asset root.
-		// @return The entry, or nullptr.
+		// @return The entry, or nullptr. The first in name order when two names
+		//         carry identical content, which is the answer the scan gave.
 		const AssetEntry *FindByRoot(const ContentHash &root) const;
+
+		// The bundle with this root.
+		//
+		// Bundles are held in root order, so this is a binary search. It is here
+		// rather than at its two callers - a delivery job holds a bundle root
+		// and a relay is asked for one by route - because both of them walked
+		// the list instead, which is the format's own knowledge of its own
+		// arrangement written out twice somewhere else.
+		//
+		// @param root The bundle root.
+		// @return The bundle, or nullptr.
+		// @since v0.19
+		const BundleEntry *FindBundle(const ContentHash &root) const;
 
 		// The bundle a given asset is delivered in.
 		//
@@ -273,10 +320,55 @@ namespace engine::assets {
 		static std::optional<Manifest> Read(core::ByteReader &reader);
 
 	  private:
+		// Where `AssetsByName[position]` belongs in `RootOrder`.
+		std::vector<uint32_t>::const_iterator IndexSlotOf(size_t position) const;
+
+		// Puts `AssetsByName[position]` into `RootOrder`, shifting nothing.
+		void IndexPlace(size_t position);
+
+		// Puts `AssetsByName[position]` into `RootOrder`, having just inserted
+		// it there. Shifts the positions the insert moved along, which is what
+		// makes it wrong for a replacement.
+		void IndexInserted(size_t position);
+
+		// Takes `AssetsByName[position]` out of `RootOrder`, before it is
+		// overwritten. The entry must still be the one the index was built for.
+		void IndexReplaced(size_t position);
+
+		// Builds `RootOrder` from scratch, for the parse path that fills
+		// `AssetsByName` in one go.
+		void IndexAll();
+
+		// The first entry in `RootOrder` whose root is not below `root`.
+		std::vector<uint32_t>::const_iterator LowerBoundByRoot(const ContentHash &root) const;
+
 		// Sorted by Name, so the serialisation has one arrangement.
 		std::vector<AssetEntry> AssetsByName;
 
 		// Sorted by Root, for the same reason.
 		std::vector<BundleEntry> BundlesByRoot;
+
+		// Positions into `AssetsByName`, ordered by the root each names and
+		// then by the position itself.
+		//
+		// **Derived, and derived from one place.** `AssetsByName` is the only
+		// statement of what this manifest describes; this holds no roots of its
+		// own, only where to find them, so the two cannot say different things
+		// about an asset. Every operation that changes `AssetsByName` updates
+		// this in the same call, and there is no path that appends an asset
+		// without one - which is what makes the "second thing to keep true"
+		// objection the old scan was defended with not apply.
+		//
+		// **Positions and not pointers**, so a copy of a manifest copies a
+		// working index and a reallocation of `AssetsByName` does not invalidate
+		// it.
+		//
+		// **Ties break towards the earlier asset.** Two names can carry
+		// identical content and so share a root - that is what dedup is - and
+		// the scan this replaced returned the first of them in name order. The
+		// position is the tiebreaker precisely so that it still does.
+		//
+		// @since v0.19
+		std::vector<uint32_t> RootOrder;
 	};
 }

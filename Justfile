@@ -64,8 +64,25 @@ configure:
     cmake --preset {{preset}}
 
 # Build everything, or one target. `just build engine_ecs` builds one module.
+#
+# **The configure runs when there is no build directory, and otherwise Ninja
+# decides.** An unconditional `cmake --preset` here would re-configure on every
+# build including the ones with nothing to do, which is the whole of what a null
+# build appears to cost. It is also unnecessary: `build.ninja` carries a
+# regeneration edge over every `CMakeLists.txt`, every `.cmake` module and the
+# `CONFIGURE_DEPENDS` glob check, so `cmake --build` re-configures itself the
+# moment any of those changes.
+#
+# `CMakePresets.json` is the one input that edge does not name, and a preset
+# that gains a cache variable would otherwise reach nobody who did not know to
+# re-configure by hand. Hence the timestamp test rather than a bare existence
+# test.
 build target="":
-    cmake --preset {{preset}} > /dev/null
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f {{build}}/build.ninja ] || [ CMakePresets.json -nt {{build}}/CMakeCache.txt ]; then
+        cmake --preset {{preset}} > /dev/null
+    fi
     cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
 
 # One program and only its dependencies.
@@ -128,11 +145,151 @@ linecount *args: (build "linecount")
 
 # The architecture test on its own - the target graph against the expectation.
 # Needs a configure, not a build: it reads what CMake emitted.
+#
+# Then the fixtures, and they are the half worth explaining. This check walks an
+# expectation and reports what it finds wrong; an expectation it fails to parse
+# walks as zero entries and reports success, so the check is the one in the
+# repository that can go green by doing nothing. Each directory under
+# `mono.tools/architecture/tests/` is a graph and an expectation that must fail,
+# with the message it must produce in its own `expect` file, plus one `clean`
+# pair that must pass so that "everything fails" is not how the suite goes green.
 test-architecture:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cmake --preset {{preset}} > /dev/null
     cmake -DGRAPH={{build}}/target-graph.json \
           -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -P mono.tools/architecture/CheckTargetGraph.cmake
+
+    failures=0
+    for fixture in mono.tools/architecture/tests/*/; do
+        name=$(basename "$fixture")
+        want=$(cat "$fixture/expect")
+        set +e
+        out=$(cmake -DGRAPH="$fixture/graph.json" -DEXPECTED="$fixture/expected.json" \
+                    -P mono.tools/architecture/CheckTargetGraph.cmake 2>&1)
+        code=$?
+        set -e
+
+        if [ -z "$want" ]; then
+            if [ "$code" -ne 0 ]; then
+                echo "fixture '$name' should pass and did not:"
+                printf '%s\n' "$out" | sed 's/^/    /'
+                failures=$((failures + 1))
+            fi
+        elif [ "$code" -eq 0 ]; then
+            echo "fixture '$name' should fail and passed. The check has stopped catching it."
+            failures=$((failures + 1))
+        elif ! printf '%s' "$out" | grep -qF "$want"; then
+            echo "fixture '$name' failed for the wrong reason. Wanted: $want"
+            printf '%s\n' "$out" | sed 's/^/    /'
+            failures=$((failures + 1))
+        fi
+    done
+
+    if [ "$failures" -ne 0 ]; then
+        echo "architecture fixtures: $failures wrong"
+        exit 1
+    fi
+    count=$(find mono.tools/architecture/tests -mindepth 1 -maxdepth 1 -type d | wc -l)
+    echo "-- architecture fixtures ok - $count fixture(s)"
+
+# The four architecture rules that live in source text rather than in the graph.
+#
+# **The other half of `test-architecture`.** That one reads CMake's own output
+# and checks the module set, the tiers, the link sets and the layer heights.
+# These four are invisible there, and `docs/CODE_ARCH.md` §11 listed all four as
+# convention until v0.19 - root `AGENTS.md` rule 2 (the ECS owns the storage),
+# rule 3 (nothing crossing a world boundary is a pointer), rule 4 (a `Name` is
+# serialised as its text) and §3's rule that a public header is one somebody
+# outside the module includes.
+#
+# **The fixtures run before the repository does, and that ordering is the
+# point.** `sourcecheck` reads C++ as text, so a tree it fails to read scans as
+# zero declarations and reports success - the failure `mono.tools/architecture`
+# already has a fixture directory for, with a wider mouth. Three of the four
+# rules find nothing at all in this repository, so a green scan means nothing
+# until the scanner has been shown to bite. Each fixture names the sentence it
+# must produce, and the runner also holds the exit status to `Gating`: a rule
+# that found something and did not fail the build is the same bug as a rule that
+# found nothing.
+#
+# `public-header` reports and never gates. Root `AGENTS.md` warns that an
+# unwired subsystem is not dead code - `IssueContentGrant` and the viewpoint
+# pair are deliberate forward API - so this one prints a list somebody reads
+# rather than a verdict, and `// arch-waiver public-header: <reason>` in the
+# header takes one off the list.
+source-check: (build "sourcecheck")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failures=0
+    for fixture in mono.tools/sourcecheck/tests/fixtures/*/; do
+        [ -f "$fixture/expect" ] || continue
+        name=$(basename "$fixture")
+        want=$(cat "$fixture/expect")
+        set +e
+        out=$(./{{build}}/tools/sourcecheck "$fixture/tree" 2>&1)
+        code=$?
+        set -e
+
+        # The open findings on the three rules that gate, which is what the exit
+        # status has to agree with.
+        gating=$(printf '%s\n' "$out" | awk '/^(ecs-copy|world-pointer|name-id) - / { total += $3 } END { print total + 0 }')
+
+        if [ -z "$want" ]; then
+            if [ "$code" -ne 0 ] || printf '%s\n' "$out" | grep -q '^  open '; then
+                echo "fixture '$name' should be clean and is not:"
+                printf '%s\n' "$out" | sed 's/^/    /'
+                failures=$((failures + 1))
+            fi
+        elif ! printf '%s' "$out" | grep -qF "$want"; then
+            echo "fixture '$name' did not report what it exists to report. Wanted: $want"
+            printf '%s\n' "$out" | sed 's/^/    /'
+            failures=$((failures + 1))
+        elif [ "$gating" -gt 0 ] && [ "$code" -eq 0 ]; then
+            echo "fixture '$name' found a gating violation and let the build pass."
+            failures=$((failures + 1))
+        elif [ "$gating" -eq 0 ] && [ "$code" -ne 0 ]; then
+            echo "fixture '$name' failed the build for a rule that only reports."
+            failures=$((failures + 1))
+        fi
+    done
+
+    if [ "$failures" -ne 0 ]; then
+        echo "sourcecheck fixtures: $failures wrong"
+        exit 1
+    fi
+    # A glob that matched nothing would leave `failures` at zero and print a
+    # tick, which is the exact failure this recipe exists to refuse.
+    count=$(find mono.tools/sourcecheck/tests/fixtures -mindepth 1 -maxdepth 1 -type d | wc -l)
+    if [ "$count" -lt 13 ]; then
+        echo "only $count fixture(s) under mono.tools/sourcecheck/tests/fixtures - there are thirteen."
+        exit 1
+    fi
+    echo "-- sourcecheck fixtures ok - $count fixture(s)"
+
+    ./{{build}}/tools/sourcecheck .
+
+# The module index for the API reference, from the graph and the AGENTS.md files.
+#
+# `mono.tools/docgen/pages/Modules.md` was hand-maintained and listed ten of the
+# engine's twenty-nine modules, which is what a hand-maintained list of a
+# generated fact always becomes. It is now a walk of the tree ordered by the
+# layers, so a module that exists is on the page.
+docs-pages:
+    cmake -DEXPECTED=mono.tools/architecture/expected_graph.json \
+          -DROOT="$(pwd)" \
+          -DOUT=mono.tools/docgen/pages/Modules.md \
+          -P mono.tools/architecture/WriteModulePages.cmake
+
+# The checked-in page against the tree. Rule 6: adding a module without running
+# `just docs-pages` is exactly how the old page fell nineteen modules behind.
+docs-pages-check:
+    cmake -DEXPECTED=mono.tools/architecture/expected_graph.json \
+          -DROOT="$(pwd)" \
+          -DOUT=mono.tools/docgen/pages/Modules.md \
+          -DCHECK=YES \
+          -P mono.tools/architecture/WriteModulePages.cmake
 
 # Every first-party object against the header dependencies ninja recorded for it.
 #
@@ -280,6 +437,35 @@ shader-check: build
         exit 0
     fi
     ./{{build}}/tools/shadercheck --quiet "$stage"
+
+# Regenerate the ECS component catalogue.
+#
+# **Generated because a hand-written list of a hundred and twenty-nine
+# components is wrong within a month, and wrong quietly.** Everything mechanical
+# about a component - its registered name, its size, whether it is a tag,
+# whether it can be saved, whether it has a compact wire form, whether it has
+# padding a raw writer would leak into a file - is already in `ecs::Components`.
+# The tool walks that table.
+#
+# The one thing the table cannot know is what a component is *for*, so that
+# lives in `mono.tools/componentdoc/purposes.md`, one line per component, and
+# **that is the file to edit.** `docs/ECS_COMPONENTS.md` is output.
+#
+# The tool builds in a `server` preset as well as a `dev` one: every module it
+# links is `shared`, which is correct rather than incidental - a dedicated
+# server holds the same components a client does.
+components: (build "componentdoc")
+    ./{{build}}/tools/componentdoc
+
+# The catalogue against the registry, and the registry against the purposes.
+#
+# Three ways to fail, and the third is the one worth having: the checked-in
+# catalogue is stale; a purpose line names a component nothing registers, which
+# is what a rename leaves behind; or a registered component has no purpose line,
+# which is what adding one leaves behind. Without the third, adding a component
+# would regenerate a row reading "undocumented" and nothing would object.
+components-check: (build "componentdoc")
+    ./{{build}}/tools/componentdoc --check
 
 # Regenerate the scripting manifest and the type declarations.
 #
@@ -490,8 +676,8 @@ luau-lsp:
 # `.githooks/pre-push` does for you - because that is the half that has gone
 # uncompilable three times while being described as the standard, twice inside
 # v0.15 alone, and a check nobody runs stops being true.
-check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check orphan-check
-    @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+check: format-check em-dash-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check ok - format, em dashes, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
 #
@@ -545,9 +731,9 @@ edit *args: (build "studio")
 # plate and says nothing.
 studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.bmp": (build "studio")
     @rm -f {{out}} {{meshes}}
-    ./{{build}}/studio/studio --headless --frames 12 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
+    ./{{build}}/studio/studio --headless --frames 60 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
     @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
-    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world Assets --capture {{meshes}} --width 1280 --height 900
+    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world MeshGrid --capture {{meshes}} --width 1280 --height 900
     @test -s {{meshes}} || (echo "FAIL: the headless editor wrote no mesh capture" && exit 1)
     @echo "studio ok - loaded, played and rendered with no display, into {{out}} and {{meshes}}"
 
@@ -574,6 +760,17 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 # router was right, the events were right, and the last hop was missing.
 #
 # Not part of `just check`: it needs a GPU, for `studio-smoke`'s reason.
+# **In `just check` since v0.19, and the reason is the component table.** The
+# programs seal it after start-up, so a component registered during a tick now
+# aborts rather than quietly taking an id that depends on which world got there
+# first. `just determinism` and `just replay-check` already run the *server*, so
+# that half was covered; nothing in the umbrella check ran the *client*, and the
+# client is where five of the six late registrations found at v0.19 lived.
+#
+# A suite cannot replace this. `Store` construction and `RegisterSceneComponents`
+# happen in a test too, but a lazily-registered resource only appears when the
+# pass that uses it runs against a real scene - which is what this recipe does
+# and what a unit test deliberately does not.
 client-smoke: (build "client")
     #!/usr/bin/env bash
     set -euo pipefail
@@ -920,7 +1117,7 @@ check-cdn-is-bare:
         || (echo "FAIL: the server was built into a cdn-only preset" && exit 1)
     @echo "cdn contains no graphics stack and nothing else's program"
 
-# There is one node graph in this repository and it is `mono.engine/nodegraph`.
+# There is one node graph in this repository and it is `mono.studio/nodegraph`.
 #
 # **The rule `D00113` spent two versions carrying.** That entry was open because
 # this design existed twice - the editor's `studio/NodeGraph.hpp` and the
@@ -934,10 +1131,10 @@ check-cdn-is-bare:
 # anybody noticing until the first divergence - which is exactly what AGENTS.md
 # rule 6 says to make the build check rather than leave in somebody's memory.
 #
-# Extend the library where it lives. `mono.engine/nodegraph` is ours: it was a
-# vendored submodule against a separate repository until v0.18.0 and is a
-# first-party engine module now, so extending it is an edit here rather than a
-# pull request against somewhere else.
+# Extend the library where it lives. `mono.studio/nodegraph` is ours: it was a
+# vendored submodule against a separate repository until v0.18.0, an engine
+# module until v0.19, and a library of the editor's since - so extending it is
+# an edit here rather than a pull request against somewhere else.
 #
 # The studio's Demo Nodes set is not a second implementation. It registers types
 # through that module's public `NodeTypes::Register` and implements none of the
@@ -945,21 +1142,22 @@ check-cdn-is-bare:
 check-one-node-graph:
     #!/usr/bin/env bash
     set -euo pipefail
-    # `(engine::)?` because the module's own namespace is `engine::nodegraph`
-    # since v0.18.0, and a second implementation would plausibly be spelled
+    # `(engine::)?` because the namespace was `engine::nodegraph` between
+    # v0.18.0 and v0.19 and is plain `nodegraph` again since the move to
+    # `mono.studio`, and a second implementation would plausibly be spelled
     # either way. Its own directory is the one place the name is allowed.
     found=$(grep -rlE 'namespace[[:space:]]+(engine::)?nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
         mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network \
         mono.server mono.studio mono.tools mono.unified_tests \
-        | grep -v '^mono\.engine/nodegraph/' || true)
+        | grep -v '^mono\.studio/nodegraph/' || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
-        echo "The one this repository has is mono.engine/nodegraph. Extend it there."
+        echo "The one this repository has is mono.studio/nodegraph. Extend it there."
         exit 1
     fi
-    echo "one node graph, and it is engine/nodegraph"
+    echo "one node graph, and it is mono.studio/nodegraph"
 
 # The API reference, from the comments already in the headers.
 #
@@ -1105,6 +1303,96 @@ format-check:
     echo "format-check with $cf $("$cf" --version | sed -nE 's/.*version ([0-9.]+).*/\1/p')" >&2
     find {{mono_sources}} \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
         | xargs -0 "$cf" --dry-run --Werror
+
+# Every em dash in first-party prose. The root `AGENTS.md` bans them in capitals,
+# and rule 6 there says a rule the build does not check is documentation.
+#
+# **It reports the character and deliberately offers no replacement.** An em dash
+# is doing one of several different jobs - a parenthetical aside, the work of a
+# colon, two sentences run together - and each one wants a different rewrite. A
+# recipe that printed a substitute would be sed'd across the tree the first time
+# somebody was in a hurry, and prose that has been sed'd reads worse than the
+# prose it replaced. Rewrite the sentence.
+#
+# **U+2014 and nothing else.** An en dash spanning a range and a minus sign in
+# front of a number are not violations, and `fixtures/clean.md` is full of both
+# so that a scanner which started matching them fails here rather than sending
+# somebody to rewrite `pages 10-14`.
+#
+# `mono.vendor/` is out for `format-check`'s reason: their code, their style.
+# `mono.tools/emdash/` is out because one file in it holds a planted em dash on
+# purpose, and `.claude/RESUME.md` is out because Claude Code writes it and would
+# put the character straight back.
+#
+# **The seven files agents may not edit are in scope, and that is the point.**
+# `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README.md` and the three
+# `docs/CODE_*.md` are the maintainer's own, so the sweep that added this recipe
+# excluded them rather than risk editing one. They were measured at zero em
+# dashes, so including them costs nothing today and closes the hole: the file
+# that bans the character in capitals is now held to its own rule. If one ever
+# reports, the fix belongs to whoever owns the file, and that is the correct
+# place for it to land rather than in a list that quietly grows.
+em-dash-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Spelled as bytes, so this recipe carries no em dash of its own and the
+    # scan of the tree cannot match the scanner.
+    dash=$(printf '\xe2\x80\x94')
+    fixtures=mono.tools/emdash/fixtures
+
+    # `/dev/null` on the end so grep prints a filename even when handed one file.
+    scan() { grep -n -I -F -e "$dash" -- "$@" /dev/null || true; }
+
+    # Untracked-but-not-ignored as well as tracked, so a file is checked before
+    # it is added rather than after.
+    mapfile -t files < <(
+        git ls-files -c -o --exclude-standard -- \
+            '*.cpp' '*.hpp' '*.luau' '*.ts' '*.cmake' '*.md' '*CMakeLists.txt' '*Justfile' \
+        | grep -Ev '^(mono\.vendor/|mono\.tools/emdash/)' \
+        | grep -Fxv '.claude/RESUME.md'
+    )
+
+    # --- the check checks itself first ------------------------------------
+    #
+    # A scan of nothing prints a tick, which is the one way this recipe could
+    # be worse than not existing.
+    if [ "${#files[@]}" -lt 1200 ]; then
+        echo "em-dash-check FAILED - only ${#files[@]} file(s) in scope, so the file list is broken."
+        exit 1
+    fi
+    # A here-string and not a pipe: `grep -q` leaves early, `printf` takes the
+    # SIGPIPE, and `pipefail` would read that as the pattern being absent.
+    listing=$(printf '%s\n' "${files[@]}")
+    for want in '\.cpp$' '\.hpp$' '\.luau$' '\.ts$' '\.cmake$' '\.md$' 'CMakeLists\.txt$' 'Justfile$'; do
+        if ! grep -qE "$want" <<< "$listing"; then
+            echo "em-dash-check FAILED - nothing in scope matches /$want/, so the pathspec dropped it."
+            exit 1
+        fi
+    done
+
+    expected=$(cat "$fixtures/expect")
+    planted=$(scan "$fixtures/planted.md")
+    if ! grep -qF "$expected:" <<< "$planted"; then
+        echo "em-dash-check FAILED - the planted em dash was not reported at $expected."
+        printf '%s\n' "$planted" | sed 's/^/    /'
+        exit 1
+    fi
+    if [ -n "$(scan "$fixtures/clean.md")" ]; then
+        echo "em-dash-check FAILED - the clean fixture was reported, so this matches more than U+2014:"
+        scan "$fixtures/clean.md" | sed 's/^/    /'
+        exit 1
+    fi
+
+    # --- and then the tree --------------------------------------------------
+    hits=$(scan "${files[@]}")
+    if [ -n "$hits" ]; then
+        printf '%s\n' "$hits" | sed 's/^/  /'
+        echo "em-dash-check FAILED - $(printf '%s\n' "$hits" | wc -l) em dash(es) above."
+        echo "AGENTS.md: NEVER USE EM-DASHES. Rewrite the sentence, do not swap the character."
+        exit 1
+    fi
+    echo "em-dash-check ok - no U+2014 in ${#files[@]} first-party file(s)"
 
 clean:
     rm -rf .cache/build

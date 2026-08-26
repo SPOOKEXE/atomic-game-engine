@@ -2,6 +2,11 @@
 
 The editor. `client` tier, with a named escape to `Mono::server`.
 
+**Two libraries live here, not one.** `Mono::studio` is this directory's
+`include/`, `src/` and `app/`. `Mono::nodegraph` is `nodegraph/` beside them, a
+node graph and its ImGui canvas that nothing else in the repository links; it
+has its own `AGENTS.md` and the section below says what each half owns.
+
 ## Nothing in this program is world state
 
 Selection, expansion, scroll, splitter positions, which panels are open, where
@@ -373,6 +378,53 @@ the step budget already maintains; History reads `CommandLog`'s two stacks.
 bites hardest on the Bus panel, because `Inbox` is replaced wholesale every
 barrier.
 
+## Presentation caches are per viewport and visible in diagnostics
+
+Every viewport owns a `PresentationDamageTracker`. Sharing one across panels
+would let a camera, extent or game interface compiled for one panel become the
+baseline of another. The round robin changes which tracker is observed; it
+must not reset any tracker or copy retained images between slots.
+
+An edit-mode viewport compiles `StarterGui`, which is the template an author is
+editing. A running viewport, including a client replica, compiles `PlayerGui`,
+which is the live per-player copy. It also supplies `LocalPlayer` as the viewer,
+so another player's private `PlayerGui` cannot enter the same list; a running
+world with no local viewer draws no screen interface. The source selection is
+signed, so entering or leaving Run forces the correct interface to replace the
+old one even when their contents happen to match.
+
+The Frame Graph window has a `Cascaded Cache Hits` view for this state. Keep it
+as counters rather than timing bars: it reports whether resident sources,
+retained images and their compositions were reused or written, while the normal
+view reports how long actual work took. Portal-history writes come from
+`FrameResult::PortalPasses`, not from guessing that a changed descriptor must
+have produced a visible pass. GPU heap statistics and transfer counters remain
+the other half of the check.
+
+An inactive source is reported as `n/a`, never as a hit. A hidden panel may
+continue collecting CPU diagnostics, but it must not alter ImGui draw geometry
+or the host-interface signature. Always-visible diagnostic text such as FPS and
+draw counts is retained between display deadlines; feeding raw per-frame
+counters into it turns an unchanged Studio window into an interface write every
+uncapped frame.
+
+Studio content demand follows the same component-revision gate and name
+deduplication as the shipped client. Do not replace it with a walk over every
+open world on each presentation. The unissued tail stays queued across bounded
+pumps so that the gate can remain closed while delivery catches up.
+
+Edit-mode particle preview advances the engine's resident particle system after
+PreRender resolves attachments. It admits only enabled emitters parented to a
+PVInstance, directly or through an Attachment, so invalid authored emitters do
+not consume pool rows. The global Particle Emitters view toggle suppresses both
+that edit-mode step and particle submission without changing any emitter's
+Enabled property. Running worlds keep their own simulation clock.
+
+When every layer hits, `PresentWorld` returns before `Renderer::Render`; no
+command buffer or swapchain image is owed. Headless, frame-budget and capture
+runs force diagnostic writes so their requested output and termination cannot
+be starved by a valid cache hit.
+
 ## The testable half of a panel goes in a free function
 
 `MatchesQuery`, `DiffText` and `ParseRojoProject` are not methods, and that is
@@ -404,43 +456,48 @@ detector is known to work rather than merely known to pass. **Reach for that
 harness before extracting a free function**: a panel's imgui behaviour is now
 testable, and moving logic out to avoid testing it is no longer the only option.
 
-## The node graph is an engine module, and the panel is all that is left here
+## The node graph is a library of this program, and the panel is what is left here
 
-`studio/NodeGraph.hpp` was this program's own implementation of a design that
-already existed as a standalone library. Two of one thing is the debt
-`AGENTS.md` calls the most expensive kind, and `D00113` closed by taking the
-further-along copy - this one - upstream.
+`nodegraph/` beside this file is `Mono::nodegraph`: the registry, the model,
+folding, layout, evaluation, the canvas, the save format and pictures as pixels.
+It has its own `AGENTS.md`, its own `tests/` and no first-party dependency at
+all, and it is here because this editor is the only thing in the repository that
+links it.
 
-Upstream was a private repository, which made this public one unclonable by
-anybody but its owner and stopped the v0.18.0 release at checkout. So at v0.18.0
-the library came back in as `Engine::nodegraph`, a first-party module with its
-own `AGENTS.md`. `src/NodeDemo.cpp` is what stayed here, plus one thing that did
-not exist before: `src/DemoNodes.cpp`.
+It has moved three times and the trail matters. `studio/NodeGraph.hpp` was this
+program's own implementation of a design that already existed as a standalone
+library, and `D00113` closed by taking the further-along copy - this one -
+upstream. Upstream was a private repository, which made this public one
+unclonable by anybody but its owner and stopped the v0.18.0 release at checkout,
+so at v0.18.0 the library came back in as `Engine::nodegraph`. At v0.19 it came
+the rest of the way: an imgui-carrying `client` target that nothing in the
+engine reaches is an editor widget library, and `mono.engine` ships nothing on
+its own. Its row in `expected_graph.json` has no `layer`, which is what makes
+"only the editor links this" a rule the architecture check enforces rather than
+a fact about today.
 
 The split is worth stating, because the next node editor has to know which side
-it is adding to. **The module owns everything that is true of any node graph** -
-the registry, the model, folding, layout, evaluation, the canvas, the save
-format, and pictures as pixels. **This program owns what only an engine has**: a
-texture for a picture, a theme, an undo stack, a file dialog and a dockable
-window.
+it is adding to. **The library owns everything that is true of any node graph.**
+**The program owns what only a host has**: a texture for a picture, a theme, an
+undo stack, a file dialog and a dockable window - `src/NodeDemo.cpp`.
 
 **And it owns the node types.** `src/DemoNodes.cpp` is the set the Demo Nodes
-panel runs, and it is here rather than beside the module because it is content
+panel runs, and it is here rather than inside `nodegraph/` because it is content
 rather than library: it registers terrain-shaped types through the same public
-`NodeTypes::Register` any host would use, and the module knows nothing about it.
-That is the same seam by another name - a host with its own vocabulary links
-`Engine::nodegraph` and gets none of this. The module's own suite registers a
+`NodeTypes::Register` any host would use, and the library knows nothing about
+it. That is the same seam by another name - a host with its own vocabulary links
+`Mono::nodegraph` and gets none of this. The library's own suite registers a
 fixture it owns rather than reaching for these, so nothing but this panel
 depends on them.
 
 Two seams, both in `studio/Editor.hpp` as free functions so that
 `tests/NodeGraph.cpp` can reach them, and both silent when they break:
 
-- **`NodePreviewTexture`** copies an `engine::nodegraph::PreviewImage` into an
+- **`NodePreviewTexture`** copies a `nodegraph::PreviewImage` into an
   `assets::TextureData`. It is a `memcpy` because both sides mean red first and
   the top row first - and the day one of them stops meaning that, the editor
   keeps drawing thumbnails with their channels swapped.
-- **`ApplyNodeChrome`** hands the module the four values it draws chrome with.
+- **`ApplyNodeChrome`** hands the library the four values it draws chrome with.
   Called every frame the panel draws, because the theme and the interface scale
   are both settings somebody can change while it is open.
 
@@ -449,9 +506,9 @@ file rather than as a decision - the render pipeline as a node editor is still
 to be written, and it could start its own registry and its own canvas without
 anybody noticing until the cycle guard or the hash diverged.
 `just check-one-node-graph` is what stops it: no first-party file outside
-`mono.engine/nodegraph` may open `namespace engine::nodegraph`, and registering
-types into it - which is what `DemoNodes.cpp` does - is not opening it. Extend
-the module where it lives.
+`mono.studio/nodegraph` may open `namespace nodegraph`, and registering types
+into it - which is what `DemoNodes.cpp` does - is not opening it. Extend the
+library where it lives.
 
 ## Configuration lives in the person's folder, not beside the binary
 
@@ -524,4 +581,3 @@ There is deliberately **no toolbar or editor-command API**, and the absence is
 stated in `studio/Plugins.hpp` rather than left to be discovered. `D00105`
 carries what adding one would take, and the obstacle is `script/AGENTS.md`'s
 first rule rather than an opinion.
-

@@ -14,7 +14,7 @@ namespace engine::game {
 		// length and not the tag alone is what separates this from a shot.
 		constexpr size_t MOVE_BYTES = 1 + 3 * sizeof(float) + 1;
 
-		std::vector<std::byte> Finish(const core::ByteWriter &writer) {
+		std::vector<std::byte> FinishedBytes(const core::ByteWriter &writer) {
 			const std::span<const std::byte> bytes = writer.Bytes();
 			return {bytes.begin(), bytes.end()};
 		}
@@ -24,7 +24,7 @@ namespace engine::game {
 		core::ByteWriter writer;
 		writer.WriteUInt8(static_cast<uint8_t>(PlayMessage::AssignPlayer));
 		writer.WriteUInt64(notice.Player.Id);
-		return Finish(writer);
+		return FinishedBytes(writer);
 	}
 
 	bool DecodeJoinNotice(std::span<const std::byte> message, JoinNotice &out) {
@@ -51,7 +51,7 @@ namespace engine::game {
 		writer.WriteFloat(input.Direction.Y);
 		writer.WriteFloat(input.Direction.Z);
 		writer.WriteUInt8(input.Jump ? 1 : 0);
-		return Finish(writer);
+		return FinishedBytes(writer);
 	}
 
 	bool DecodeMoveInput(std::span<const std::byte> bytes, MoveInput &out) {

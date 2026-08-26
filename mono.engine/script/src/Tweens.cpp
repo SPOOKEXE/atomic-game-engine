@@ -12,13 +12,12 @@
 //
 // @tier L9 · shared
 
-#include "Tweens.hpp"
-
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Rect.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/script/Tweens.hpp>
 
 #include <algorithm>
 #include <cmath>

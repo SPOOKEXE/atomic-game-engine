@@ -72,9 +72,10 @@
 -- `scripts/demos/run-local-server.sh`. The `SpawnLocation` below is inside the
 -- door for exactly that.
 --
--- The standalone client has no character, so the camera at the bottom of this
--- file walks the lap on rails instead: in through the door, round the three
--- rooms, through the hole, round again, forever.
+-- The camera and a demo character at the bottom of this file both walk the lap:
+-- in through the door, round the three rooms, through the hole, round again,
+-- forever. Neither route performs its own teleport, so the traversal system is
+-- what closes the lap.
 --
 -- **A portal's image is one frame old**, because the surface pass draws with
 -- last frame's textures - which is what breaks the cycle between a surface and
@@ -92,6 +93,7 @@
 -- `SkyGrid.luau` and it gives every surface something to slide against.
 
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 -- ## One grid, and everything measured off it
 --
@@ -493,7 +495,7 @@ for index = 0, 17 do
 	})
 end
 
--- --- the lap, walked on rails ---------------------------------------------
+-- --- the lap, crossed by the engine ---------------------------------------
 --
 -- **A position only** - every portal is placed from wherever this camera is,
 -- every frame, so moving it moves both images with it rather than leaving them
@@ -505,13 +507,9 @@ end
 -- whoever is walking it and a quarter turn in world coordinates, which is the
 -- whole scene in two table entries.
 --
--- **The crossing is written out rather than computed**, because a `CFrame` in a
--- script has no inverse to multiply by. `scene::CrossPortals` evaluates
--- `destination · half-turn · source⁻¹` for a body; for the one point this walk
--- crosses at, that product is a quarter turn about Y and a nudge of one wall
--- thickness, and the two legs are its answer. `examples/tests/Scene.cpp` runs
--- the real pass over the real panes and checks it lands where these say - so if
--- the geometry above moves and this does not, a test says so.
+-- The camera and the character below both walk continuously across the garden
+-- pane. `scene::CrossPortals` supplies the quarter-turn and the destination;
+-- no hand-written jump can hide a traversal regression.
 local EAST = Vector3.new(1, 0, 0)
 local SOUTH = Vector3.new(0, 0, 1)
 local WEST = Vector3.new(-1, 0, 0)
@@ -520,34 +518,33 @@ local NORTH = Vector3.new(0, 0, -1)
 local EYE = 6
 local PACE = 9
 
--- How far into a leg a corner takes to turn. The walker's own turns are eased
--- over this; the portal's is not, because that one is the room turning and not
--- the walker.
-local TURN = 6
+type Route = { Stage: number }
 
-type Leg = { Start: Vector3, Heading: Vector3, Length: number, Turn: boolean }
+local function heading(route: Route, at: Vector3): Vector3
+	if route.Stage == 1 and at.X >= -HALF then
+		route.Stage = 2
+	elseif route.Stage == 2 and at.X >= HALF then
+		route.Stage = 3
+	elseif route.Stage == 3 and at.Z >= HALF then
+		route.Stage = 4
+	elseif route.Stage == 4 and at.X < -HALF / 2 then
+		-- Only the portal can move the westbound traveller from the garden's
+		-- non-negative X coordinates to the hall at X = -HALF.
+		route.Stage = 5
+	elseif route.Stage == 5 and at.Z <= -HALF then
+		route.Stage = 2
+	end
 
-local LEGS: { Leg } = {
-	-- Outside, walking at the break. Walked once and never again: the loop has
-	-- no way back out of the building, which is the joke.
-	-- Thirty metres of lawn, then the wall, then half a room to the middle of
-	-- the hall - which is where the lap starts.
-	{ Start = Vector3.new(-OUTER - 30, 0, -HALF), Heading = EAST, Length = 30 + HALF, Turn = false },
-
-	{ Start = HALL.Centre, Heading = EAST, Length = ROOM, Turn = true },
-	{ Start = LIBRARY.Centre, Heading = SOUTH, Length = ROOM, Turn = true },
-
-	-- Into the garden's west pane, stopping on its face.
-	{ Start = GARDEN.Centre, Heading = WEST, Length = HALF - PANE_THICKNESS / 2, Turn = false },
-
-	-- And out of the hall's south pane, still walking straight ahead.
-	{
-		Start = Vector3.new(-HALF, 0, -PANE_THICKNESS / 2),
-		Heading = NORTH,
-		Length = HALF - PANE_THICKNESS / 2,
-		Turn = true,
-	},
-}
+	if route.Stage == 1 or route.Stage == 2 then
+		return EAST
+	elseif route.Stage == 3 then
+		return SOUTH
+	elseif route.Stage == 4 then
+		return WEST
+	else
+		return NORTH
+	end
+end
 
 local view = Instance.new("Camera")
 view.Name = "Viewer"
@@ -555,20 +552,33 @@ view.FieldOfView = 70
 view.Parent = workspace
 workspace.CurrentCamera = view
 
-local leg = 1
-local walked = 0
-local turningFrom = LEGS[1].Heading
+view.CFrame = CFrame.lookAt(
+	Vector3.new(-OUTER - 30, EYE, -HALF),
+	Vector3.new(-OUTER - 29, EYE, -HALF)
+)
+local cameraRoute: Route = { Stage = 1 }
 
-local function place()
-	local current = LEGS[leg]
-	local blend = math.min(walked / TURN, 1)
-	local look = turningFrom * (1 - blend) + current.Heading * blend
-	local eye = current.Start + current.Heading * walked + Vector3.new(0, EYE, 0)
+local walker = Instance.new("Player")
+walker.Name = "PortalWalker"
+walker.Parent = Players
 
-	view.CFrame = CFrame.lookAt(eye, eye + look)
+local character = walker:LoadCharacter()
+local root: BasePart? = nil
+local humanoid: Humanoid? = nil
+if character ~= nil then
+	root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
+	if root ~= nil then
+		root.CFrame = CFrame.lookAt(
+			Vector3.new(-OUTER - 22, 3, -HALF),
+			Vector3.new(-OUTER, 3, -HALF)
+		)
+	end
+	if humanoid ~= nil then
+		humanoid.WalkSpeed = PACE
+	end
 end
-
-place()
+local characterRoute: Route = { Stage = 1 }
 
 RunService.Heartbeat:Connect(function(deltaTime: number)
 	for _, drifter in drifters do
@@ -577,22 +587,13 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 		drifter.Part.CFrame *= CFrame.Angles(0, drifter.Rate * deltaTime, 0)
 	end
 
-	walked += PACE * deltaTime
+	local cameraHeading = heading(cameraRoute, view.CFrame.Position)
+	local eye = view.CFrame.Position + cameraHeading * PACE * deltaTime
+	view.CFrame = CFrame.lookAt(eye, eye + cameraHeading)
 
-	-- A `while` rather than an `if`, so a frame long enough to cover a whole leg
-	-- steps through it rather than overshooting into the middle of the next one.
-	while walked >= LEGS[leg].Length do
-		local finished = LEGS[leg]
-		walked -= finished.Length
-
-		-- Back to the second leg and never the first: the walk into the
-		-- building happens once.
-		leg = if leg == #LEGS then 2 else leg + 1
-
-		turningFrom = if finished.Turn then finished.Heading else LEGS[leg].Heading
+	if root ~= nil and humanoid ~= nil then
+		humanoid.MoveDirection = heading(characterRoute, root.Position)
 	end
-
-	place()
 end)
 
 print(

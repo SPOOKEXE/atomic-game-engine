@@ -51,8 +51,8 @@ namespace unified {
 	//
 	// **Optional where the arrangement omits the module**, rather than
 	// zero-filled. A relay that served nothing and a run with no relay in it
-	// are different facts, and a zero for both is how a matrix reports twelve
-	// passes when it ran one arrangement eleven times.
+	// are different facts, and a zero for both is how a matrix reports twenty
+	// passes when it ran one arrangement nineteen times.
 	//
 	// @since v0.18
 	struct Reports {
@@ -106,7 +106,11 @@ namespace unified {
 
 		// The two sessions, server end and client end. `Engine::replication`.
 		//
-		// Absent under `Transport::Direct`, which has no session at all.
+		// Absent under `Transport::Direct`, which has no session at all, and
+		// under the two QUIC transports, whose sessions are a `QuicSession` and
+		// keep none of these counters. A number that meant something else under
+		// one transport would be worse than an absence, because `CrossCheck`
+		// reads these against each other.
 		//@{
 		std::optional<engine::replication::Session::Statistics> ServerSession;
 		std::optional<engine::replication::Session::Statistics> ClientSession;
@@ -114,7 +118,9 @@ namespace unified {
 
 		// The two links. `Engine::net`.
 		//
-		// Absent under `Transport::Direct`.
+		// Absent under `Transport::Direct` and under the two QUIC transports: a
+		// QUIC session owns no `net::Link`, which is `docs/QUIC.md` §6's whole
+		// point about what that type is.
 		//@{
 		std::optional<engine::net::ConnectionStats> ServerLink;
 		std::optional<engine::net::ConnectionStats> ClientLink;
@@ -123,7 +129,8 @@ namespace unified {
 		// What each end's lossy wrapper did to what reached it. `Engine::net`.
 		//
 		// `ToClient` is the wrapper on the client's end, so it is the one that
-		// loses what the server sent. Absent unless `Transport::Lossy`.
+		// loses what the server sent. Absent unless the transport loses things -
+		// `unified::Loses`.
 		//@{
 		std::optional<engine::net::LossStatistics> ToClient;
 		std::optional<engine::net::LossStatistics> ToServer;

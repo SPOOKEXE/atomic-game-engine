@@ -57,7 +57,7 @@ namespace engine::scene {
 	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_PIXELS = 16u * 1024u * 1024u;
 
 	// Row-major RGBA8, top row first - `assets::TextureData::Pixels`'s own
-	// layout, so `client::BuildTextureData` is a copy and not a conversion.
+	// layout, so `engine::render::BuildTextureData` is a copy and not a conversion.
 	//
 	// @since v0.18
 	struct EditableImage {

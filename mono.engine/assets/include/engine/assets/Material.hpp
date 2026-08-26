@@ -12,13 +12,9 @@
 // like a mesh or a texture, it is published and fetched like one, and what it
 // carries is which textures to sample.
 //
-// **One map, and the rest are absent rather than declared.** `ColourMap` is what
-// the opaque pass samples today; a `MetalnessMap` field nothing read would be
-// half a feature somebody would reasonably assume worked - the same rule
-// `scene::SurfaceAppearance` already states about exactly these fields.
-// `ROADMAP.md` v0.11 is where the G-buffer arrives and where the other maps get
-// a reader. The fetched content already carries them as ordinary textures beside
-// the material, so what is missing is a field and a pass rather than the pixels.
+// **Every declared map has a renderer.** A field nothing read would be half a
+// feature somebody would reasonably assume worked, which is why the names were
+// added with their forward and deferred PBR readers rather than ahead of them.
 //
 // **A name, not a hash, and not a handle.** Rule 4: a material references its
 // texture across a save file, a manifest and a wire, so the reference is the
@@ -92,6 +88,9 @@ namespace engine::assets {
 		// substance. So this is carried and sampled with a hand-authored test
 		// material rather than with the seeded set.
 		std::string EmissiveMap;
+
+		// Per-texel metalness. Absent means dielectric.
+		std::string MetalnessMap;
 		//@}
 
 		// Whether this describes a material at all.
@@ -119,13 +118,11 @@ namespace engine::assets {
 
 		// The version. Bumped when the layout changes, never reused.
 		//
-		// **3 adds emissive, 2 added the other four, and 1 still reads.** A version 1 file is a
-		// colour map and nothing else, which is exactly a material whose other
-		// four names are empty - so the older format is not a special case to
-		// translate, it is the newer one with four absent fields. That is what
-		// makes reading it a branch on how many strings to expect rather than a
-		// second parser.
-		static constexpr uint16_t VERSION = 3;
+		// **4 adds metalness, 3 adds emissive, 2 added the other four, and 1 still reads.** A version 1 file
+		// is a colour map and nothing else, which is exactly a material whose other four names are empty - so
+		// the older format is not a special case to translate, it is the newer one with four absent fields.
+		// That is what makes reading it a branch on how many strings to expect rather than a second parser.
+		static constexpr uint16_t VERSION = 4;
 
 		// The longest asset name this will read.
 		//

@@ -1,3 +1,7 @@
+#include "StableFilter.hpp"
+
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 
@@ -7,7 +11,7 @@
 namespace engine::graph {
 
 	core::AABB BoundsOf(const scene::DrawInstance &instance) {
-		return core::AABB::FromOrientedBox(instance.Frame, instance.HalfExtent);
+		return core::OrientedBoxBounds(instance.Frame, instance.HalfExtent);
 	}
 
 	size_t Cull(
@@ -19,14 +23,18 @@ namespace engine::graph {
 		// case is "everything is visible", which is also the common case for a
 		// camera framing its own scene - so a reserve that assumed otherwise
 		// would reallocate on exactly the frames that matter.
-		visible.clear();
-		visible.reserve(instances.size());
+		detail::StableFilter(
+			instances.size(),
+			[](size_t index) { return static_cast<uint32_t>(index); },
+			[&](uint32_t index) { return frustum.Intersects(BoundsOf(instances[index])); },
+			visible
+		);
 
-		for (size_t index = 0; index < instances.size(); index++) {
-			if (frustum.Intersects(BoundsOf(instances[index]))) {
-				visible.push_back(static_cast<uint32_t>(index));
-			}
-		}
+		// Outside the loop, once per view per frame. What the frustum kept
+		// against what it was offered is the number that answers "is the cull
+		// doing anything" and "is it doing too much".
+		core::Metrics::Count("graph.cull.tested", static_cast<double>(instances.size()));
+		core::Metrics::Count("graph.cull.visible", static_cast<double>(visible.size()));
 		return visible.size();
 	}
 
@@ -183,6 +191,9 @@ namespace engine::graph {
 			// is also the termination proof: `seen` only ever rises and is bounded
 			// by the slot count, so a round that adds nothing is a fixpoint.
 			if (seen == before) {
+				ENGINE_TRACE(
+					"surface visibility settled after {} round(s) with {} pane(s) seen", round + 1, seen
+				);
 				break;
 			}
 		}
@@ -196,7 +207,7 @@ namespace engine::graph {
 		const core::Vector3 &first,
 		const core::Vector3 &second
 	) {
-		// **The absolute half-axes summed, which is `FromOrientedBox` written for
+		// **The absolute half-axes summed, which is `OrientedBoxBounds` written for
 		// a rectangle.** Whatever way the pane is turned, its box reaches
 		// `|first| + |second|` from the centre on each world axis - and the axis
 		// the rectangle has no thickness on comes out zero, which is exact rather

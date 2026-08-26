@@ -392,3 +392,95 @@ TEST_CASE("every interface component obeys the serialisation rules", "[gui][regi
 
 	CHECK(engine::ecs::Describe(engine::ecs::AuditComponents("gui.")) == "");
 }
+
+// **The widest row in the interface set, and what it was actually carrying.**
+//
+// `gui.Gradient` is 672 bytes and 656 of them are two sequences of twenty
+// keypoint slots. Until v0.19 it had no hand-written pair, so the generated
+// writer copied the object representation and every gradient wrote all forty
+// slots into every save and every replication delta whatever `Count` said - and
+// `gui.Gradient` is under the shared prefix, so it crossed at full width to
+// every client.
+//
+// A `UIGradient` an author never touched is the two-stop default. This measures
+// what that costs now against what it cost then.
+TEST_CASE("a gradient writes the stops it has and not the ones it could", "[gui][registration]") {
+	engine::gui::RegisterGuiComponents();
+
+	const TypeDescriptor &type = Components::Describe(Components::Find(Name("gui.Gradient")));
+	REQUIRE(type.Serialisable);
+
+	const auto written = [&type](const engine::gui::Gradient &gradient) {
+		ByteWriter writer;
+		type.Write(writer, &gradient, 1);
+		return writer.Size();
+	};
+
+	// The default: two colour stops and two transparency stops. Four bytes of
+	// count and four sixteen-byte colour stops' worth... written out, it is
+	// 4 + 2*16 for the ramp, 4 + 2*12 for the curve, and 8 + 4 + 1 for the
+	// offset, rotation and flag: **77 bytes against a 672-byte row.**
+	const engine::gui::Gradient plain;
+	CHECK(written(plain) == 77);
+	CHECK(written(plain) < sizeof(engine::gui::Gradient) / 8);
+
+	// And a ramp somebody actually authored costs more, which is the half that
+	// says the count is being honoured rather than a constant written down.
+	engine::gui::Gradient rich;
+	REQUIRE(rich.Color.Add(engine::core::ColorKeypoint{0.5f, engine::core::Color3{1.0f, 0.0f, 0.0f}}));
+	CHECK(written(rich) > written(plain));
+
+	// The round trip, over a ramp with a stop in the middle and an envelope on
+	// the curve - the field `core::NumberSequence` carries and nothing samples,
+	// which still has to come back or a re-save loses it.
+	engine::gui::Gradient authored;
+	authored.Color = engine::core::ColorSequence{
+		engine::core::Color3{1.0f, 0.0f, 0.0f}, engine::core::Color3{0.0f, 0.0f, 1.0f}
+	};
+	REQUIRE(authored.Color.Add(engine::core::ColorKeypoint{0.25f, engine::core::Color3{0.0f, 1.0f, 0.0f}}));
+	authored.Transparency = engine::core::NumberSequence{0.0f, 1.0f};
+	REQUIRE(authored.Transparency.Add(engine::core::NumberKeypoint{0.5f, 0.25f, 0.125f}));
+	authored.Offset = engine::core::Vector2{0.25f, -0.75f};
+	authored.Rotation = 45.0f;
+	authored.Enabled = false;
+
+	ByteWriter writer;
+	type.Write(writer, &authored, 1);
+	ByteReader reader(writer.Bytes());
+
+	engine::gui::Gradient restored;
+	type.Read(reader, &restored, 1);
+
+	REQUIRE(restored.Color.Count == authored.Color.Count);
+	for (uint32_t stop = 0; stop < authored.Color.Count; stop++) {
+		INFO("colour stop " << stop);
+		CHECK(restored.Color.Keypoints[stop].Time == authored.Color.Keypoints[stop].Time);
+		CHECK(restored.Color.Keypoints[stop].Value.R == authored.Color.Keypoints[stop].Value.R);
+		CHECK(restored.Color.Keypoints[stop].Value.G == authored.Color.Keypoints[stop].Value.G);
+		CHECK(restored.Color.Keypoints[stop].Value.B == authored.Color.Keypoints[stop].Value.B);
+	}
+
+	REQUIRE(restored.Transparency.Count == authored.Transparency.Count);
+	for (uint32_t stop = 0; stop < authored.Transparency.Count; stop++) {
+		INFO("transparency stop " << stop);
+		CHECK(restored.Transparency.Keypoints[stop].Time == authored.Transparency.Keypoints[stop].Time);
+		CHECK(restored.Transparency.Keypoints[stop].Value == authored.Transparency.Keypoints[stop].Value);
+		CHECK(
+			restored.Transparency.Keypoints[stop].Envelope == authored.Transparency.Keypoints[stop].Envelope
+		);
+	}
+
+	CHECK(restored.Offset.X == authored.Offset.X);
+	CHECK(restored.Offset.Y == authored.Offset.Y);
+	CHECK(restored.Rotation == authored.Rotation);
+	CHECK(restored.Enabled == authored.Enabled);
+
+	// **A count past the capacity is a file claiming something the type cannot
+	// hold**, and `Sequence::Add` refuses rather than writing past the array.
+	ByteWriter hostile;
+	hostile.WriteUInt32(9999);
+	engine::gui::Gradient decoded;
+	ByteReader attack(hostile.Bytes());
+	type.Read(attack, &decoded, 1);
+	CHECK(decoded.Color.Count <= engine::core::SEQUENCE_CAPACITY);
+}

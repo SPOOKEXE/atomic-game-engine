@@ -157,6 +157,34 @@ TEST_CASE("a fresh state reports nothing down", "[scene][input]") {
 	CHECK(state.MouseIconEnabled);
 	CHECK(state.LastSource == InputSource::Keyboard);
 	CHECK_FALSE(state.WasLastSourceChanged());
+	CHECK_FALSE(state.HasFrameEvents());
+}
+
+TEST_CASE("frame input work is gated by whole-state edges", "[scene][input]") {
+	InputState state;
+
+	state.Down.Set(KeyCode::W, true);
+	CHECK(state.HasFrameEvents());
+	state.Previous = state.Down;
+	CHECK_FALSE(state.HasFrameEvents());
+
+	state.Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(MouseButton::Right));
+	CHECK(state.HasFrameEvents());
+	state.PreviousButtons = state.Buttons;
+	CHECK_FALSE(state.HasFrameEvents());
+
+	state.MouseDelta.X = 1.0f;
+	CHECK(state.HasFrameEvents());
+	state.MouseDelta = {};
+	state.WheelDelta = -1.0f;
+	CHECK(state.HasFrameEvents());
+	state.WheelDelta = 0.0f;
+
+	state.Focused = false;
+	CHECK(state.HasFrameEvents());
+	state.PreviousFocused = false;
+	state.LastSource = InputSource::MouseMovement;
+	CHECK(state.HasFrameEvents());
 }
 
 TEST_CASE("the device change is an edge and not a value", "[scene][input]") {

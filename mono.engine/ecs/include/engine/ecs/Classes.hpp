@@ -26,18 +26,6 @@
 // @tier L3 · shared
 
 #include <engine/core/Name.hpp>
-// The three value types a property can carry beyond the primitives. `ecs` is
-// storage and must not know what a `Transform` is - it still has to be able to
-// *name* the types userland holds, and these are `core/types` primitives rather
-// than anything about a scene. Nothing here reads a field of one.
-#include <engine/core/types/CFrame.hpp>
-#include <engine/core/types/Color3.hpp>
-#include <engine/core/types/NumberRange.hpp>
-#include <engine/core/types/Rect.hpp>
-#include <engine/core/types/Sequence.hpp>
-#include <engine/core/types/UDim.hpp>
-#include <engine/core/types/Vector2.hpp>
-#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/ComponentSet.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -48,6 +36,30 @@
 #include <span>
 #include <string>
 #include <string_view>
+
+// The value types a property can carry beyond the primitives. `ecs` is storage
+// and must not know what a `Transform` is - it still has to be able to *name*
+// the types userland holds, and these are `core/types` primitives rather than
+// anything about a scene.
+//
+// **Declared rather than included, because naming is all this header does with
+// them.** `TypeOf` asks `std::is_same_v`, which an incomplete type answers, and
+// every caller that instantiates it holds the complete type already. The eight
+// headers this replaced cost 35,742 preprocessed lines on a header 179
+// translation units include, almost all of it `CFrame.hpp` reaching glm. A
+// consumer that stores one of these includes `core/types/` itself.
+namespace engine::core {
+	struct CFrame;
+	struct Color3;
+	struct ColorSequence;
+	struct NumberRange;
+	struct NumberSequence;
+	struct Rect;
+	struct UDim;
+	struct UDim2;
+	struct Vector2;
+	struct Vector3;
+}
 
 namespace engine::ecs {
 

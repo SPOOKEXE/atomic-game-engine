@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/input/Translate.hpp>
 
 namespace engine::input {
@@ -213,6 +214,13 @@ namespace engine::input {
 
 			const KeyCode key = KeyOf(event.key.key);
 			if (key == KeyCode::Unknown) {
+				// **`KeyCode` only names keys this engine can produce**, which is
+				// `scene/Input.hpp`'s rule, so dropping the event is right. What
+				// was missing is any way to tell: a script that cannot see a key
+				// the player can see on their keyboard is a bug report with no
+				// evidence in it, and the SDL keycode here is the thing somebody
+				// would add to the switch above.
+				ENGINE_DEBUG("SDL keycode {} has no scene::KeyCode; the event is dropped", event.key.key);
 				return false;
 			}
 			Current.Down.Set(key, event.type == SDL_EVENT_KEY_DOWN);
@@ -257,6 +265,8 @@ namespace engine::input {
 		case SDL_EVENT_MOUSE_BUTTON_UP: {
 			const MouseButton button = ButtonOf(event.button.button);
 			if (button == MouseButton::Count) {
+				// Three buttons are named and a mouse may have eight.
+				ENGINE_DEBUG("SDL mouse button {} is not one of the three named", event.button.button);
 				return false;
 			}
 			const uint8_t bit = 1u << static_cast<uint8_t>(button);
@@ -301,6 +311,12 @@ namespace engine::input {
 			// in another window.** Without this a character walks forever after an
 			// alt-tab, which is the bug every engine ships once.
 			Current.Focused = false;
+
+			// The frame this happens on reports every held key as released, and
+			// a character that keeps walking after an alt-tab is what a missing
+			// one looks like. Said at `debug` because it is the first thing to
+			// check when that is the report.
+			ENGINE_DEBUG("window focus lost; releasing everything held");
 			ReleaseAll();
 			return true;
 

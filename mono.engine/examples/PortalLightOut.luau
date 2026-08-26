@@ -3,7 +3,7 @@
 --
 -- **The scene the roadmap's "light in a portal emits out of the portal" line is
 -- measured against.** A local light within reach of a seam is copied through it
--- by `client::CollectLights`, so a lamp *in* the pane's own plane has to light
+-- by `engine::render::CollectLights`, so a lamp *in* the pane's own plane has to light
 -- both mouths: its own room directly, and the far room through the copy that
 -- lands on the far pane. What makes the far half readable is that nothing else
 -- here shines - the sun is turned off and both ambients are black, so every lit

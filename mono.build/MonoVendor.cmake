@@ -81,6 +81,52 @@ if(NOT EXISTS "${MONO_VENDOR}/glm/CMakeLists.txt")
 		"  git submodule update --init --recursive --depth 1")
 endif()
 
+# --- vendor includes are SYSTEM includes ------------------------------------
+
+# Re-declare a vendored target's public include directories as SYSTEM ones, so
+# that a warning raised inside a header we do not own cannot fail our build.
+#
+# **The `ci` preset compiles first-party code with `-Werror`.** A vendor bump
+# that introduces one `-Wdeprecated-declarations` in a header 500 translation
+# units include is then a red build in code nobody here can fix without a fork,
+# and the fix under time pressure is always to weaken the warning set for
+# everybody. `-isystem` is the flag that says "not ours"; this is how a target
+# gets it.
+#
+# **What it is not: a build-time optimisation.** Measured, because §E2 item 7
+# left it unmeasured and the intuition is that skipping diagnostics inside
+# enormous template headers must be faster. It is not. The eight heaviest
+# first-party translation units, `release` flags, ccache bypassed, every
+# `-I` naming `mono.vendor` rewritten to `-isystem`, best of three and run
+# twice each way: 57.84 and 58.15 CPU-seconds plain against 61.91 and 58.01
+# SYSTEM. That is one noise band, not an effect. Applied for the warning
+# argument alone.
+#
+# `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` rather than `add_subdirectory(...
+# SYSTEM)`, which says the same thing in one word and is CMake 3.25; the root
+# file asks for 3.24. A target that does not exist, or that declares no include
+# directories of its own, is skipped rather than an error - the vendor set
+# differs by preset, and a `server` configure has no SDL at all.
+function(mono_vendor_system)
+	foreach(target IN LISTS ARGN)
+		if(NOT TARGET ${target})
+			continue()
+		endif()
+		# An alias cannot carry a property, so resolve to what it names. Passing
+		# an alias here is the natural mistake, because an alias is the spelling
+		# every link line uses.
+		get_target_property(aliased ${target} ALIASED_TARGET)
+		if(aliased)
+			set(target ${aliased})
+		endif()
+		get_target_property(includes ${target} INTERFACE_INCLUDE_DIRECTORIES)
+		if(includes)
+			set_property(TARGET ${target}
+				APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${includes})
+		endif()
+	endforeach()
+endfunction()
+
 # --- SDL3 -------------------------------------------------------------------
 # Only when a client-tier program is being built. A server or delivery-service
 # configure has to work on a machine with no Vulkan SDK and no SDL development
@@ -134,6 +180,10 @@ if(MONO_BUILD_CLIENT)
 	# worse than no setting at all.
 
 	add_subdirectory("${MONO_VENDOR}/sdl" EXCLUDE_FROM_ALL)
+
+	# SDL declares its include directories PUBLIC and not SYSTEM, and 149
+	# first-party translation units carry them. mono_vendor_system above.
+	mono_vendor_system(SDL3-shared SDL3-static SDL3_Headers)
 endif()
 
 # --- glm --------------------------------------------------------------------
@@ -142,10 +192,17 @@ set(GLM_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/glm" EXCLUDE_FROM_ALL)
 
+# Every first-party translation unit that links `core` carries this one - 504 of
+# them. mono_vendor_system above.
+mono_vendor_system(glm glm-header-only)
+
 # --- spdlog -----------------------------------------------------------------
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
 set(SPDLOG_INSTALL       OFF CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/spdlog" EXCLUDE_FROM_ALL)
+
+# The other of the two that reach all 504. mono_vendor_system above.
+mono_vendor_system(spdlog spdlog_header_only)
 
 # --- Tracy ------------------------------------------------------------------
 # On-demand: the client collects nothing until a profiler attaches, so leaving
@@ -337,6 +394,10 @@ if(MONO_BUILD_TESTS)
 	set(CATCH_INSTALL_EXTRAS   OFF CACHE BOOL "" FORCE)
 	set(CATCH_BUILD_TESTING    OFF CACHE BOOL "" FORCE)
 	add_subdirectory("${MONO_VENDOR}/catch2" EXCLUDE_FROM_ALL)
+
+	# On 73 test binaries, and the only vendor left arriving as a plain -I.
+	# mono_vendor_system above.
+	mono_vendor_system(Catch2 Catch2WithMain)
 endif()
 
 # --- shaderc ----------------------------------------------------------------
@@ -460,6 +521,13 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory("${MONO_VENDOR}/shaderc/third_party/glslang" EXCLUDE_FROM_ALL)
 
 	add_subdirectory("${MONO_VENDOR}/shaderc" EXCLUDE_FROM_ALL)
+
+	# mono_vendor_system above. glslang and SPIRV-Tools are swept too: they are
+	# not on a first-party include line today, but they are one `#include` away
+	# from being, and a vendored tree of this size is the last place a warning
+	# should be allowed to reach `-Werror` from.
+	mono_vendor_system(shaderc shaderc_static shaderc_util
+		glslang SPIRV SPIRV-Tools-static SPIRV-Headers)
 endif()
 
 # --- SPIRV-Cross -------------------------------------------------------------
@@ -518,11 +586,7 @@ if(MONO_BUILD_CLIENT)
 	# and not SYSTEM, so it is re-declared here rather than wrapped -
 	# `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` is what CMake 3.24 has; the `SYSTEM`
 	# target property is 3.25 and the root file asks for 3.24.
-	foreach(spirv_cross_target IN ITEMS spirv-cross-core spirv-cross-glsl spirv-cross-msl)
-		get_target_property(spirv_cross_includes ${spirv_cross_target} INTERFACE_INCLUDE_DIRECTORIES)
-		set_property(TARGET ${spirv_cross_target}
-			APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${spirv_cross_includes})
-	endforeach()
+	mono_vendor_system(spirv-cross-core spirv-cross-glsl spirv-cross-msl)
 endif()
 
 # --- Crypto++ ---------------------------------------------------------------
@@ -575,10 +639,7 @@ add_subdirectory("${MONO_VENDOR}/cryptopp-cmake" EXCLUDE_FROM_ALL)
 # that parent is mono.vendor/ itself, so anything linking this target can also
 # reach <sdl/...> and <glm/...> by accident. Write <cryptopp/sha.h> and treat
 # the bare <sha.h> spelling as unavailable.
-get_target_property(_cryptopp_includes cryptopp INTERFACE_INCLUDE_DIRECTORIES)
-set_target_properties(cryptopp PROPERTIES
-	INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_cryptopp_includes}")
-unset(_cryptopp_includes)
+mono_vendor_system(cryptopp)
 
 # Vendor:: to match asio and imgui. cryptopp::cryptopp is upstream's own alias
 # and keeps working; this is the spelling the rest of the tree should use.
@@ -622,10 +683,7 @@ add_subdirectory("${MONO_VENDOR}/blake3/c" EXCLUDE_FROM_ALL)
 
 # Same reason as Crypto++: the `ci` preset builds first-party code with -Werror
 # and a warning in a vendored header must never be able to fail our build.
-get_target_property(_blake3_includes blake3 INTERFACE_INCLUDE_DIRECTORIES)
-set_target_properties(blake3 PROPERTIES
-	INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_blake3_includes}")
-unset(_blake3_includes)
+mono_vendor_system(blake3)
 
 # Vendor:: to match the rest. BLAKE3::blake3 is upstream's own alias and keeps
 # working; this is the spelling the rest of the tree should use.
@@ -685,12 +743,7 @@ add_subdirectory("${MONO_VENDOR}/zstd/build/cmake" EXCLUDE_FROM_ALL)
 
 # Same reason as Crypto++ and BLAKE3: the `ci` preset builds first-party code
 # with -Werror, and a warning in a vendored header must never fail our build.
-get_target_property(_zstd_includes libzstd_static INTERFACE_INCLUDE_DIRECTORIES)
-if(_zstd_includes)
-	set_target_properties(libzstd_static PROPERTIES
-		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_zstd_includes}")
-endif()
-unset(_zstd_includes)
+mono_vendor_system(libzstd_static)
 
 # Vendor:: to match the rest.
 add_library(Vendor::zstd ALIAS libzstd_static)
@@ -729,17 +782,10 @@ set(LUAU_WERROR OFF CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/luau" EXCLUDE_FROM_ALL)
 
 # Same reason as Crypto++, BLAKE3 and Zstd.
-foreach(_luau_target Luau.VM Luau.Compiler Luau.Ast Luau.Common Luau.Analysis Luau.Config Luau.EqSat)
-	if(TARGET ${_luau_target})
-		get_target_property(_luau_includes ${_luau_target} INTERFACE_INCLUDE_DIRECTORIES)
-		if(_luau_includes)
-			set_target_properties(${_luau_target} PROPERTIES
-				INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_luau_includes}")
-		endif()
-		unset(_luau_includes)
-	endif()
-endforeach()
-unset(_luau_target)
+# Luau.Bytecode is on the list because it was the one Luau target still arriving
+# as a plain -I, on 20 translation units.
+mono_vendor_system(Luau.VM Luau.Compiler Luau.Ast Luau.Common Luau.Bytecode
+	Luau.Analysis Luau.Config Luau.EqSat Luau.CodeGen)
 
 # Two aliases, not eleven, and the omissions are the decision here.
 #
@@ -831,13 +877,67 @@ set(BUILD_SHARED_LIBS    OFF CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/quickjs" EXCLUDE_FROM_ALL)
 
 # Same reason as Crypto++, BLAKE3, Zstd and Luau.
-get_target_property(_qjs_includes qjs INTERFACE_INCLUDE_DIRECTORIES)
-if(_qjs_includes)
-	set_target_properties(qjs PROPERTIES
-		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_qjs_includes}")
-endif()
-unset(_qjs_includes)
+mono_vendor_system(qjs)
 
 # Vendor:: to match the rest. `qjs` is upstream's own target name and keeps
 # working; this is the spelling the rest of the tree should use.
 add_library(Vendor::quickjs ALIAS qjs)
+
+# --- ngtcp2 -----------------------------------------------------------------
+# QUIC. `docs/QUIC.md` is the survey and `docs/DEFERRED.md` D00014 is the
+# argument; what belongs here is why this library and what is switched off.
+#
+# **Nothing under its `lib/` names a TLS stack**, which is the property that
+# decided it over seven alternatives. Every other candidate hard-wires one:
+# picoquic and quicly require picotls, lsquic requires BoringSSL which requires
+# Go, quiche is Rust, mvfst depends on folly, and msquic brings its own event
+# loop with Schannel on Windows and OpenSSL elsewhere. This one takes a callback
+# table, so the crypto is `engine::net::quic` over Crypto++ and the fresh-clone
+# rule in `mono.vendor/AGENTS.md` survives - CMake, Ninja and a C++ compiler and
+# nothing else.
+#
+# **Every entry point takes an explicit `ngtcp2_tstamp`.** That is not a
+# convenience, it is the only shape compatible with `net`'s rule that time is
+# passed in and never read, and `just determinism` and `just replay-check` both
+# rest on it.
+#
+# MIT. Not gated on a tier: portable C with no platform dependency, like asio,
+# Crypto++ and BLAKE3. Who may link it stays a tier question, decided by
+# whichever module first lists it - which is `Engine::net` at L11.
+if(NOT EXISTS "${MONO_VENDOR}/ngtcp2/lib/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/ngtcp2 is missing. Run `just setup`.")
+endif()
+
+# `lib/` and nothing else. Upstream's `crypto/` holds the helper libraries for
+# OpenSSL, GnuTLS, wolfSSL, picotls and BoringSSL, and `examples/` wants libev
+# and nghttp3 - none of which is vendored and none of which may be looked for at
+# configure time. ENABLE_LIB_ONLY is what makes that a stated decision rather
+# than a set of find_package calls that happen to fail.
+set(ENABLE_LIB_ONLY   ON  CACHE BOOL "" FORCE)
+set(ENABLE_STATIC_LIB ON  CACHE BOOL "" FORCE)
+set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING     OFF CACHE BOOL "" FORCE)
+
+# Upstream defaults the OpenSSL backend ON. Off here, and it is the load-bearing
+# line rather than a tidy-up: left on, the configure looks for a system OpenSSL
+# and a build would silently differ between a machine that has one and a machine
+# that does not.
+set(ENABLE_OPENSSL   OFF CACHE BOOL "" FORCE)
+set(ENABLE_BORINGSSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_GNUTLS    OFF CACHE BOOL "" FORCE)
+set(ENABLE_WOLFSSL   OFF CACHE BOOL "" FORCE)
+set(ENABLE_PICOTLS   OFF CACHE BOOL "" FORCE)
+
+# Same reason LUAU_WERROR and QJS_BUILD_WERROR are off: the `ci` preset builds
+# first-party code with -Werror and a vendored tree that promotes its own
+# warnings is a build we cannot fix without a fork.
+set(ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${MONO_VENDOR}/ngtcp2" EXCLUDE_FROM_ALL)
+
+# Same reason as Crypto++, BLAKE3, Zstd, Luau and QuickJS.
+mono_vendor_system(ngtcp2_static)
+
+# Vendor:: to match the rest. `ngtcp2_static` is upstream's own target name and
+# keeps working; this is the spelling the rest of the tree should use.
+add_library(Vendor::ngtcp2 ALIAS ngtcp2_static)

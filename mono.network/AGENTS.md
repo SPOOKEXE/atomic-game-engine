@@ -10,6 +10,24 @@ What comes out of here is an `engine::net::Endpoint`. That is the argument
 `replication::Connector` takes, the address a `delivery::Source` names and the
 host an `http::Client` dials.
 
+**An advert carries no connection id, and that is a decision rather than an
+omission.** `docs/QUIC.md` §11 asked whether discovery should carry a QUIC
+connection id; the answer written into §12 is no, on three grounds. A
+`SessionId` lives as long as a host and a QUIC connection id lives as long as
+one connection - and QUIC lets an endpoint hold several and rotate them - so
+announcing one would let a re-announcement invalidate a live session. It would
+be the first half of growing a connection, which the next paragraph forbids. And
+it would buy nothing: the handshake picks the ids itself, and the *server*
+chooses the one a client addresses it by, so there is no id worth knowing before
+there is a connection.
+
+**What an advert does carry is `Advert::Transports`**, which is the one fact a
+client can act on early: a row saying `datagram` means the first attempt opens
+there and the QUIC refusal round trip is never paid. It is a hint like every
+other field here - it arrived from an address anybody can write - so a wrong one
+costs the round trip it was meant to save and `replication::Connector`'s
+fallback still runs.
+
 **It must not grow a connection.** `replication::Listener` and
 `replication::Connector` already own a connected session over a transport, and
 two ways to do one job is the most expensive debt in a monorepo - AGENTS.md
@@ -80,6 +98,11 @@ rather than something fixable here.
 added at the end; none may be reordered or removed. `tests/Enums.cpp` writes the
 numbers out by hand rather than deriving them, because a test that computed them
 from the enum would agree with any reordering.
+
+`engine::net::WireMode` reaches this wire too, through `Advert::Transports`, and
+it is `net`'s list rather than a fifth one here - `replication` and this module
+are the same layer, so a type either of them owned would be a lateral edge for
+the other. It is range-checked on decode like the three above.
 
 `Reach`'s order is also behaviour: `Directory` keeps the *smaller* value when
 one session arrives twice, because the order is how much has to keep working.

@@ -1,6 +1,8 @@
 #include <engine/core/Flags.hpp>
 
+#include <algorithm>
 #include <client/Settings.hpp>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -30,7 +32,7 @@ namespace client {
 				built.Integer(
 					"client.max-fps",
 					defaults.MaximumFrameRate,
-					"Hold this frame rate. Needs client.uncapped; 0 is no limit"
+					"Cap presentation FPS. Needs client.uncapped; 0 presents every update"
 				);
 				built.Boolean("client.uncapped", defaults.Uncapped, "Present without waiting for vblank");
 
@@ -139,7 +141,9 @@ namespace client {
 		options.ViewSpacing = static_cast<float>(Flag("client.view-spacing").Number());
 		options.TickRate = Flag("client.tick-rate").Number();
 		options.SurfaceBounces = static_cast<int>(Flag("client.surface-bounces").Integer());
-		options.MaximumFrameRate = static_cast<uint32_t>(Flag("client.max-fps").Integer());
+		options.MaximumFrameRate = static_cast<uint32_t>(
+			std::clamp<int64_t>(Flag("client.max-fps").Integer(), 0, std::numeric_limits<uint32_t>::max())
+		);
 		options.Uncapped = Flag("client.uncapped").Boolean();
 
 		options.ShowStatistics = Flag("client.show-statistics").Boolean();

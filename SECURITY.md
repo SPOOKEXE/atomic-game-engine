@@ -45,10 +45,21 @@ sandbox on their own machine.
 **`--mcp-port` opens a socket that can read and write a running program's
 worlds.** It answers Model Context Protocol, which is what lets a language model
 or a script watch the engine and drive it: list scenes, read and write
-properties, start and stop a world, read the log, read the profile. The control
-surface is currently exposed by `server` and `studio`; `client`, the unified
-harness and `cdn` do not register this option. It is a development surface and
-it is deliberately powerful.
+properties, start and stop a world, read the log and the metrics, change what the
+program logs, read any `AGENTS.md` in the checkout, type-check a script, and
+start a test run. The control surface is currently exposed by `server` and
+`studio`; `client`, the unified harness and `cdn` do not register this option. It
+is a development surface and it is deliberately powerful.
+
+**Two of its tools start a child process, and neither takes a command line.**
+`test_run` runs the staged `testrunner` and `script_check` runs the staged
+`scriptcheck`, both with an argument list the engine assembles - no shell, no
+`just`, and no executable path a client can influence. `script_check` refuses a
+path that resolves outside the checkout. That restraint is the boundary: a tool
+that accepted a command line would turn "can reach loopback" into "can run
+anything", which is a far larger grant than the rest of this surface makes.
+
+**Nothing on it evaluates a script.** Checking is offered and running is not.
 
 It has **no authentication of any kind**. It does not need any, because of the
 three properties below - and it would need a great deal if any of them were
@@ -81,6 +92,10 @@ defaults only exist so the two supported programs on one machine do not collide:
 |---|---|
 | `server` | 8734 |
 | `studio` | 8738 |
+
+Both are `engine::control::DEFAULT_SERVER_PORT` and `DEFAULT_PORT`. Neither is a
+default in the sense that matters here: `--mcp-port` takes a number and has to be
+given, and no program opens a socket without it.
 
 ## How the code is meant to defend itself
 

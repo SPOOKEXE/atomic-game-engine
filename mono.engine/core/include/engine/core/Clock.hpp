@@ -8,7 +8,6 @@
 //
 // @tier L0 · shared
 
-#include <chrono>
 #include <cstdint>
 
 namespace engine::core {

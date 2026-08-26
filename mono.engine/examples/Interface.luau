@@ -65,7 +65,7 @@ local SWATCHES = {
 local screen = Instance.new("ScreenGui")
 screen.Name = "InterfaceExample"
 
--- **Parented into `StarterGui`, which is what makes it draw at all.**
+-- **The editing template or this client's live copy, never both.**
 --
 -- A `ScreenGui` is only laid out when it sits under `StarterGui` or under a
 -- player's `PlayerGui` - Roblox's containment rule, and `gui::Layout` enforces
@@ -74,11 +74,19 @@ screen.Name = "InterfaceExample"
 -- could have shipped an interface that appeared in the studio and was missing
 -- in the client, because the place it worked was the place it was checked.
 --
--- `GetService` finds it in the tree, the same way `Players` and
--- `ReplicatedStorage` are found. It is `StarterGui` rather than a `PlayerGui`
--- because this is a scene an editor opens, and a player's copy is made when a
--- player spawns.
-screen.Parent = game:GetService("StarterGui")
+-- Studio edit mode has no local player and authors the reusable template. A
+-- standalone client already has its local player before this script starts, so
+-- the interactive instances go straight into the only live tree that client
+-- compiles. Keeping the callback on the live instances matters: connections are
+-- runtime state and cloning a template does not clone a VM connection.
+local localPlayer = game:GetService("Players").LocalPlayer
+if localPlayer then
+	local playerGui = localPlayer:FindFirstChild("PlayerGui")
+	assert(playerGui, "the local player has no PlayerGui")
+	screen.Parent = playerGui
+else
+	screen.Parent = game:GetService("StarterGui")
+end
 
 -- The card everything else sits in. Anchored at its own centre and placed at
 -- the screen's centre, so it stays centred at any window size - which is the

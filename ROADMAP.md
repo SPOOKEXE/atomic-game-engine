@@ -37,73 +37,147 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.19
-
-- [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md.
-- [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE.
-- [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine).
-- [_] properly make a ECS component document list so i can see all components and what they're for.
-- [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
-- [_] think plan for future features as well listed in roadmap and plan for them now.
-- [_] improve build times (flamegraph => optimise).
-- [_] check all asynchronous points, all parallel points, etc and ensure they are implemented nicely and are good
-- [_] scan through all seriel loops and see if we can improve any with parallel / vectorised
-- [_] update AGENTS.md in root and subdirectories
-- [_] quic implementation.
-- [_] choose networking backend (quic, tcp, udp, etc) for each engine feature like replication and whatnot.
-- [_] build out a full logging, metrics, etc so we can track what the engine is doing in dev builds effectively.
-- [_] add more MCP integrations in engine for models to use.
-- [_] e.g. "does this component property make sense here?", "if not, where should it belong? a physics component? a transform component? a mesh component? new component?".
-
 ### v0.20
 
-- [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
-- [_] build out all remaining roblox surfaces with available underlying surface
-- [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
+- [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
+	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
+- [_] add stack watch and breakpoint watch dock widgets
+- [_] auto complete popup doesn't position properly above/below text we're editing.
+- [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
+- [_] properly build out team create menu
+- [_] team create build out options properly
+- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
+- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
+- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
+- [_] consolidate render pipeline to a easy-to-find location for future work.
+- [_] ensure when you read the render pipeline, its obvious what it does and in what order
+- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
+- [_] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
+- [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
+- [_] go through and do a full batched-compute of all world systems for things like replication, iterating cpu data, iterating components, etc. Assume multi-processing for each individual world (hytale-style) and multi-threading for viable options. Vectorise rest (we test with -O0/-O1, but assume release -O2/3 will greatly improve it).
+- [_] find remaining bottlenecks in simulation code, check we're properly iterating components. use both dev AND release builds to find bottlenecks we need to improve (`-O0`, `-O1`, `-O2` and `-O3`).
+- [_] cleanup old demos or merge into a few, scripts/ folder and luau/ts scripts
+- [_] list all items that become resident on GPU and those that don't but should. check over their code to ensure we only update when they change, and whether we should split some others apart as they are always hit during rendering (statistics label, flamegraph, etc). Also we should minimize pcie traffic (i.e. instead of sending a full image to gpu, we only send the data and then render on gpu where possible - what about imgui? do we need to send gui image for it)
+- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
+- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
+- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
+- [_] ensure we have the ability to create custom components in scripting
+- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
+- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
+- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
+- [_] read the documents folder on what else we need to add and ask user for each one.
+- [_] add better memory packing for components by adding a DataQuantization component or something similar. Add quantization support for storing and packing values within components, like (u)float16, (u)float8, (u)int16, (u)int8, (u)int4 and bool. Need a way to decide who packs with what, maybe a `Component Data Packing` dock widget that shows you what values a component stores?
+- [_] ensure we build out and test UserInputService and ContextActionService.
+- [_] plan out base plugin system + default plugins + move default tools into plugins instead.
+- [_] setup a toolbar editor system where you can create new tabs, select which tools are visible on the toolbar, and plugins can modify their buttons and whatnot (with size constraints and such)
+- [_] setup and plan out dock widgets
+- [_] plugin manager widget
+- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
+- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
+- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [_] viewport indictator direction gizmo (select and lock to certain directions)
+- [_] 3d cursor and camera orbit options under gizmo
+- [_] expand ShaderCapabilities out
+- [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
+- [_] add tests to validate each step of the rendering pipeline graph
+- [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
+- [_] add beams/trails/decals/textures, etc if they aren't added
+- [_] build out different types of physics colliders components (capsule, square, use-mesh, hull, etc). add properties to meshpart.
+- [_] add websocket support
+- [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
+- [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
+- [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
+- [_] StackGuard to prevent stack errors, infinite recursion, etc.
+- [_] Random.new(seed) with functions
 
 ### v0.21
 
-- [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
-- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
-- [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system.
-- [_] port semi-real raytrace and path-trace as part of nodes
-- [_] make demo render pipelines with semi-real raytrace and path-trace
-- [_] (dynamic) ambient occulusion, screen-space, fog, atmosphere, clouds, global illumination, displacement maps (make it rendering only but not physical)
-- [_] render pipeline nodes for above
-- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
-
-### v0.22
-
-- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
-- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
+- [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
+- [_] in cdn, add optinos for compression saving, compressed network traffic, etc.
+- [_] add custom backgrounds and customization to the script editor too
+- [_] add external editor connections like vscode, notepad, etc.
+- [_] add settings for selected external editors
+- [_] plugin modify the viewport grid colors, sizes/scales, offsets, etc
+- [_] plugin enable/disable visible particles
+- [_] ask about the other view widgets and which you actually would change to dockwidgets.
+- [_] build out more plugins layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
+- [_] move a bunch of View > ... widgets into plugins instead. List: explorer, properties, component inspector, script editor
+- [_] build out more plugin functions (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
 - [_] universe shared assets folder and setup easy cdn with it (when you load the universe file, it sets up a cdn with it).
 - [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
 - [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
+- [_] create a universe/world export menu with options to include assets in the export (only processed, also raw), as a folder of a assets/ with name.aworld (or we can do a name.auniverse that loads a bunch of name.aworld and warns on missing ones listed in auniverse)?
+- [_] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
+- [_] setup datastores and memorystores (sqlite, mongo, supabase, etc - make a selection with local and remote setups, server settings and studio settings). add mock options that separate into a mock/ folder vs live/ folder. make a dataset editor plugin too.
+- [_] add platform-specific backend tooling where only "admitted keys" can connect to a given server - i.e. whitelist-based servers (press play on website => generate play key => platform tells server user is connecting with key => send key + server to user => user connects to server using key and info => join)
+- [_] cleanup launcher options and make it far more user friendly
+- [_] cleanup cdn config and make it far more friendly
+- [_] build out client settings for enabling/disabling certain features to help performance (editablemesh, editableimage, etc). make it LIVE so you can change it in-game.
+- [_] add a ESC settings menu to the client and in studio client. add the client settings to it.
+- [_] add a way for scripts to modify the ESC menu.
 
-### v0.23
+### v0.22
 
 - [_] default R6 base character (capsule collider)
 - [_] gtlf default character (unreal)
+- [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
 - [_] make humanoid a shim for character controller (so not a black box), loads a default one in
 - [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 - [_] animation handler
-- [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
+- [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet - joint palettes are visual transform state and go GPU-resident beside the instance rows; the animation *controller* that produces them stays on the CPU, per the split above
 - [_] add accessories support
+- [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
+- [_] animation + animation track + animator => binds to character controller
+- [_] build out ArcHandles, BoxHandleAdornments (and similar), etc
+- [_] make virtualised Gui2D and such where they are just a set of components instead of an actual class that is accessible (since you normally cannot create them in studio). Ask user which to keep and which to convert to virtual instances. Needs hierarchy too.
+- [_] ensure :IsA() handles virtual instances and does hierarchy.
+- [_] ensure valueobjects work
+- [_] ensure you built out all the UI items and they work (e.g. drag selector)
+- [_] ensure weld / weld constraints work
+- [_] ensure ViewportFrame and WorldRoot are implemented and work
+
+### v0.23
+
+- [_] security audit, fuzzy tests, bound tests, etc.
+
+### v0.24
+
+- [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
+- [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
+- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc. - per-mesh capability flags are per-instance visual state and belong in the GPU-resident row, so a compute pass can branch on them without a CPU readback
+- [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system. - the residency and delta upload are a node too, so the sweep and the GPU-resident work are the same refactor rather than two passes over the same files
+- [_] port semi-real raytrace and path-trace as part of nodes
+- [_] make demo render pipelines with semi-real raytrace and path-trace
+- [_] add compute shaders / postprocessing shaders to all visual items as a additional node to attach (render pipeline pulls and residents shaders on gpu when active)
+- [_] (dynamic) ambient occulusion, emissivity, mipmapping, occulusion culling (bbox first, extra after), sRGB handle, proper PBR with tests, tesselation, add Fog/Clouds/Skybox compute shader support, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
+- [_] more blender-like render pipeline ideas and build-out
+- [_] render pipeline nodes for above
+- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
+- [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
+- [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
+- [_] different antialiasing choices as render nodes
 
 ### FUTURE
 
+- [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
 - [_] unity porting tools / unity shop
-- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
-- [_] (procedural, node-based) terrain generator (refer to discord references)
-- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
-- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
-- [_] embedded whiteboxing tools (planning)
+- [_] embedded whiteboxing tools (planning) for building
 - [_] full procedural terrain studio tools
-- [_] full ui features
-- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area)
+- [_] full ui feature buildout + custom
+- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 - [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?)
-- [_] datastores (sqlite, mongo, supabase, etc - make a selection with local and remote setups)
+- [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well
+- [_] import blender files in asset explorer natively (drag .blend files on engine)
+- [_] rpg maker port tool
+- [_] docs/MOBILE.md implementation
+- [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
+- [_] localization support
+- [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
+- [_] atomic engine icons
+- [_] studio icons

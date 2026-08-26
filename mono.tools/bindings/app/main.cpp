@@ -2009,6 +2009,7 @@ declare task: {
 				out << "\tfunction IsDescendantOf(self, ancestor: Instance): boolean\n";
 				out << "\tfunction IsAncestorOf(self, descendant: Instance): boolean\n";
 				out << "\tfunction ClearAllChildren(self): ()\n";
+				out << "\tfunction Emit(self, count: number): ()\n";
 
 				// **The pivot pair, declared on `Instance` rather than on
 				// `PVInstance`.** Roblox puts them on the latter and the binding
@@ -2020,6 +2021,22 @@ declare task: {
 				// merely convenient.
 				out << "\tfunction GetPivot(self): CFrame\n";
 				out << "\tfunction PivotTo(self, target: CFrame): ()\n";
+
+				// **The batch pair, declared here for the same reason.**
+				// Roblox puts `BulkMoveTo` on `WorldRoot`; the method table is
+				// one table and the subject carries nothing - every part is
+				// named in the argument - so declaring it narrower would type
+				// against a rule the run time does not have. `BulkPivotTo` has
+				// no Roblox counterpart at all and is the engine's own, because
+				// its single-instance pair is `CFrame =` *and* `PivotTo`.
+				//
+				// **`{ Instance }` and not `{ Part }`**, which is what the run
+				// time takes: a list is whatever a script put in it and
+				// anything with no placement is skipped rather than refused.
+				// Luau's arrays are invariant, so a caller holding a `{ Part }`
+				// annotates it `{ Instance }` - the demos in `examples/` do.
+				out << "\tfunction BulkMoveTo(self, parts: { Instance }, placements: { CFrame }): ()\n";
+				out << "\tfunction BulkPivotTo(self, parts: { Instance }, targets: { CFrame }): ()\n";
 				out << "\tfunction GetPropertyChangedSignal(self, property: string): "
 					   "PropertyChangedSignal\n";
 
@@ -2138,6 +2155,8 @@ declare task: {
 				out << "\tfunction SetVertexUV(self, vertex: number, uv: Vector2): boolean\n";
 				out << "\tfunction SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): "
 					   "boolean\n";
+				out << "\tfunction SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, "
+					   "UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean\n";
 				out << "\tfunction Clear(self): boolean\n";
 
 				// The `EditableImage` core, declared the same way.
@@ -3546,11 +3565,16 @@ declare const task: {
 				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
 				out << "\tIsAncestorOf(descendant: Instance): boolean;\n";
 				out << "\tClearAllChildren(): void;\n";
+				out << "\tEmit(count: number): void;\n";
 
 				// The pivot pair, matching the Luau half and declared in the
 				// same place for the same reason.
 				out << "\tGetPivot(): CFrame;\n";
 				out << "\tPivotTo(target: CFrame): void;\n";
+
+				// The batch pair, matching the Luau half.
+				out << "\tBulkMoveTo(parts: Instance[], placements: CFrame[]): void;\n";
+				out << "\tBulkPivotTo(parts: Instance[], targets: CFrame[]): void;\n";
 				out << "\tGetPropertyChangedSignal(property: string): PropertyChangedSignal;\n";
 
 				// Ownership, matching the Luau half. `Instance` rather than a
@@ -3601,6 +3625,8 @@ declare const task: {
 				out << "\tSetVertexNormal(vertex: number, normal: Vector3): boolean;\n";
 				out << "\tSetVertexUV(vertex: number, uv: Vector2): boolean;\n";
 				out << "\tSetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;\n";
+				out << "\tSetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; "
+					   "Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;\n";
 				out << "\tClear(): boolean;\n";
 
 				// The `EditableImage` core, matching the Luau half.

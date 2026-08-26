@@ -1,9 +1,12 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/net/Packet.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Connector.hpp>
 
 #include <algorithm>
+#include <array>
+#include <memory>
 #include <utility>
 
 namespace engine::replication {
@@ -14,15 +17,69 @@ namespace engine::replication {
 		double nowSeconds,
 		const ConnectorSettings &settings
 	)
-		: Transport_(&transport),
-		  Wire(transport, server, net::ConnectionId{1, 1}, nowSeconds, settings.Session),
-		  Prediction_(settings.Prediction), Settings(settings) {
+		: Transport_(&transport), Server(server), Prediction_(settings.Prediction), Settings(settings) {
 		if (!Settings.ServerIdentity.has_value()) {
 			ENGINE_WARN(
 				"replication: no server identity pinned - the exchange is encrypted but "
 				"authenticates nobody, so a relay in the path can read everything."
 			);
 		}
+
+		// **QUIC first, always, and no flag says otherwise.** The only thing
+		// that moves the first attempt is an advert from the server itself
+		// saying it does not serve QUIC, which saves the refusal round trip and
+		// changes nothing else.
+		const bool datagramOnly =
+			Settings.Advertised.has_value() && !net::Serves(*Settings.Advertised, net::WireKind::Quic);
+		Begin(datagramOnly ? net::WireKind::Datagram : net::WireKind::Quic, nowSeconds);
+	}
+
+	void Connector::Begin(net::WireKind wire, double nowSeconds) {
+		Attempting = wire;
+		AttemptStartedAt = nowSeconds;
+		Tried++;
+
+		// Everything an attempt accumulated goes with it. A half-finished key
+		// exchange carried into the next attempt is a state machine two
+		// attempts can be in at once, which is the shape a reconnect is banned
+		// from having for the same reason.
+		Phase = Stage::Greeting;
+		Turned = false;
+		Spoken = false;
+		Cookie_ = {};
+		Mine = {};
+		Exchange.reset();
+		Quic = nullptr;
+		Port.reset();
+
+		if (wire == net::WireKind::Quic) {
+			// The pin is stated once by the caller and lands wherever the wire
+			// needs it. Under QUIC that is the RFC 7250 raw public key the TLS
+			// handshake checks against the server's CertificateVerify.
+			QuicSessionSettings quic = Settings.Quic;
+			quic.Connection.Tls.PinIdentity = Settings.ServerIdentity.has_value();
+			if (Settings.ServerIdentity.has_value()) {
+				for (size_t index = 0; index < net::quic::IDENTITY_BYTES; index++) {
+					quic.Connection.Tls.Expected[index] =
+						static_cast<std::byte>(Settings.ServerIdentity->Value[index]);
+				}
+			}
+
+			std::unique_ptr<QuicSession> session =
+				QuicSession::Connect(*Transport_, Server, nowSeconds, quic);
+			if (session == nullptr) {
+				ENGINE_ERROR("replication: a QUIC connection could not be opened, so nothing connects.");
+				Phase = Stage::Refused;
+				return;
+			}
+			Quic = session.get();
+			Port = std::move(session);
+			return;
+		}
+
+		Port = std::make_unique<Session>(
+			*Transport_, Server, net::ConnectionId{1, 1}, nowSeconds, Settings.Session
+		);
 
 		Exchange = net::Handshake::Begin(net::HandshakeRole::Initiator);
 		if (!Exchange.has_value()) {
@@ -33,6 +90,101 @@ namespace engine::replication {
 
 		const std::span<const std::byte> mine = Exchange->Message();
 		std::copy(mine.begin(), mine.end(), Mine.begin());
+	}
+
+	bool Connector::Fallback(double nowSeconds, const char *why) {
+		const bool exhausted = Attempting == net::WireKind::Datagram || Tried >= MAXIMUM_ATTEMPTS;
+		const bool pointless =
+			Settings.Advertised.has_value() && !net::Serves(*Settings.Advertised, net::WireKind::Datagram);
+
+		if (exhausted || pointless) {
+			ENGINE_ERROR(
+				"replication: could not connect over {} ({}); {} attempt(s) made and no transport left.",
+				net::Describe(Attempting),
+				why,
+				Tried
+			);
+			Refuse();
+			return false;
+		}
+
+		// **Said out loud, and it says which and why.** A client that quietly
+		// changed transport is one whose operator cannot tell a server running
+		// the old stack from a QUIC handshake that is failing for its own
+		// reasons.
+		ENGINE_INFO(
+			"replication: {} did not connect ({}) - retrying over the datagram wire.",
+			net::Describe(Attempting),
+			why
+		);
+		Begin(net::WireKind::Datagram, nowSeconds);
+		return true;
+	}
+
+	void Connector::Reconsider(double nowSeconds) {
+		if (Phase == Stage::Admitted || Phase == Stage::Refused) {
+			return;
+		}
+
+		// **An explicit refusal costs one round trip and a silence costs the
+		// deadline**, which is the whole reason the server answers at all.
+		if (Turned || (Quic != nullptr && Quic->Refused())) {
+			Fallback(nowSeconds, "the server does not serve this transport");
+			return;
+		}
+
+		if (Port == nullptr || !Port->Live()) {
+			Fallback(nowSeconds, "the link ended before the handshake did");
+			return;
+		}
+
+		if (nowSeconds - AttemptStartedAt >= Settings.AttemptSeconds) {
+			Fallback(nowSeconds, "no answer");
+		}
+	}
+
+	void Connector::Landed() {
+		ENGINE_INFO(
+			"replication: connected over {} on attempt {} of {}",
+			net::Describe(Attempting),
+			Tried,
+			MAXIMUM_ATTEMPTS
+		);
+	}
+
+	void Connector::Settle(double nowSeconds) {
+		// **The QUIC admission, which is the handshake finishing and nothing
+		// else.** There is no hello, no cookie and no welcome: the address
+		// validation is Retry's, the key exchange is TLS 1.3's, and the pinned
+		// identity was checked inside the handshake rather than after it.
+		if (Phase != Stage::Greeting || !Port->Carrying()) {
+			return;
+		}
+
+		Phase = Stage::Admitted;
+		Landed();
+
+		if (Settings.ClientIdentity == nullptr) {
+			return;
+		}
+
+		// The claim is signed over a value derived from this connection and no
+		// other, so a signature captured here proves nothing anywhere else.
+		std::array<std::byte, 2 * net::Handshake::MESSAGE_BYTES + net::Cookie::COOKIE_BYTES> binding{};
+		if (!Port->Binding(binding)) {
+			ENGINE_WARN("replication: no binding to sign an identity over - not claiming one.");
+			return;
+		}
+
+		Identify claim;
+		claim.Key = Settings.ClientIdentity->Public();
+		claim.Signature = Settings.ClientIdentity->SignSessionTranscript(binding);
+
+		core::ByteWriter writer;
+		WriteMessage(writer, claim);
+		if (!Port->Send(writer.Bytes(), nowSeconds)) {
+			ENGINE_WARN("replication: the identity claim did not fit - the server may refuse us.");
+		}
 	}
 
 	void
@@ -56,22 +208,30 @@ namespace engine::replication {
 		User payload;
 		payload.Bytes.assign(message.begin(), message.end());
 		WriteMessage(writer, payload);
-		return Wire.Send(writer.Bytes(), nowSeconds);
+		return Port->Send(writer.Bytes(), nowSeconds);
 	}
 
 	void Connector::Refuse() {
 		Phase = Stage::Refused;
 		Exchange.reset();
-		Wire.Link().Close(net::DisconnectReason::HandshakeFailed);
+		if (Port == nullptr) {
+			return;
+		}
+		if (Quic != nullptr) {
+			Port->Disconnect(0.0);
+			return;
+		}
+		// **`HandshakeFailed` and not `Requested`, and the distinction is the
+		// whole of what `net/AGENTS.md` asks a lifecycle to preserve**: a peer
+		// that left politely must be distinguishable from one that never got in.
+		// `SessionPort::Disconnect` carries no reason on purpose - QUIC's is an
+		// application error code and `net`'s is an enum - so the one caller that
+		// needs the distinction reaches for the concrete type it already has.
+		static_cast<Session *>(Port.get())->Link().Close(net::DisconnectReason::HandshakeFailed);
 	}
 
 	void Connector::Repeat(double nowSeconds) {
 		if (Phase == Stage::Refused || Phase == Stage::Admitted) {
-			return;
-		}
-		if (Wire.Link().State() != net::ConnectionState::Connecting) {
-			Phase = Stage::Refused;
-			Exchange.reset();
 			return;
 		}
 		if (Spoken && nowSeconds - SpokeAt < Settings.RepeatEverySeconds) {
@@ -98,7 +258,7 @@ namespace engine::replication {
 			return;
 		}
 
-		Transport_->Send(Wire.Peer(), datagram.Bytes());
+		Transport_->Send(Server, datagram.Bytes());
 	}
 
 	void Connector::Consume(std::span<const std::byte> datagram, double nowSeconds) {
@@ -155,6 +315,7 @@ namespace engine::replication {
 			}
 
 			const auto transcript = AdmissionTranscript(Mine, message.Welcome.PublicKey, Cookie_);
+			static_cast<Session *>(Port.get())->SetBinding(transcript);
 			if (!keys->Receiving.Open(message.Welcome.Counter, message.Welcome.Confirmation, transcript)
 					 .has_value()) {
 				ENGINE_ERROR("replication: the server's key exchange did not verify, so nothing connects.");
@@ -180,7 +341,7 @@ namespace engine::replication {
 				}
 			}
 
-			if (!Wire.AdoptKeys(std::move(*keys))) {
+			if (!static_cast<Session *>(Port.get())->AdoptKeys(std::move(*keys))) {
 				ENGINE_ERROR("replication: the session already held keys, so nothing connects.");
 				Stats_.Refused++;
 				Refuse();
@@ -189,7 +350,8 @@ namespace engine::replication {
 
 			Phase = Stage::Admitted;
 			Exchange.reset();
-			Wire.Link().CompleteHandshake(nowSeconds);
+			static_cast<Session *>(Port.get())->Link().CompleteHandshake(nowSeconds);
+			Landed();
 
 			if (Settings.ClientIdentity != nullptr) {
 				Identify claim;
@@ -198,12 +360,23 @@ namespace engine::replication {
 
 				core::ByteWriter writer;
 				WriteMessage(writer, claim);
-				if (!Wire.Send(writer.Bytes(), nowSeconds)) {
+				if (!Port->Send(writer.Bytes(), nowSeconds)) {
 					ENGINE_WARN("replication: the identity claim did not fit - the server may refuse us.");
 				}
 			}
 			return;
 		}
+
+		case AdmissionKind::Refuse:
+			// **The server saying which stack it does serve.** Acted on rather
+			// than counted: the alternative is waiting out `AttemptSeconds` to
+			// learn what this datagram already said.
+			ENGINE_INFO(
+				"replication: the server refused the datagram wire and serves {}.",
+				net::Describe(message.Refusal.Wire)
+			);
+			Turned = true;
+			return;
 
 		case AdmissionKind::Hello:
 		case AdmissionKind::Answer:
@@ -221,6 +394,12 @@ namespace engine::replication {
 			store.SetAdoptOnly(true);
 		}
 
+		// A connector whose first attempt could not even be built. Terminal, so
+		// there is nothing to drain and nothing to fall back to.
+		if (Port == nullptr) {
+			return;
+		}
+
 		for (;;) {
 			const net::Transport::Inbound inbound = Transport_->Receive(Datagram);
 			if (inbound.Status != net::TransportStatus::Ok) {
@@ -234,8 +413,16 @@ namespace engine::replication {
 				continue;
 			}
 
-			if (!(inbound.From == Wire.Peer())) {
+			if (!(inbound.From == Server)) {
 				Stats_.Refused++;
+				continue;
+			}
+
+			if (Attempting == net::WireKind::Quic) {
+				// Including a Version Negotiation packet, which is how a server
+				// that serves the other stack says so. `QuicSession::Refused`
+				// is what `Reconsider` reads afterwards.
+				Port->Receive(Datagram, nowSeconds);
 				continue;
 			}
 
@@ -249,15 +436,33 @@ namespace engine::replication {
 				continue;
 			}
 
-			Wire.Receive(Datagram, nowSeconds);
+			Port->Receive(Datagram, nowSeconds);
 		}
 
+		// **Before the fallback is considered.** A QUIC handshake commonly
+		// finishes on the poll its last flight arrived in, and a connector that
+		// asked "should I fall back" first would fall back off a deadline it had
+		// already met.
+		if (Attempting == net::WireKind::Quic) {
+			Settle(nowSeconds);
+		}
+
+		Reconsider(nowSeconds);
+
 		if (Phase != Stage::Admitted) {
-			Repeat(nowSeconds);
+			if (Phase != Stage::Refused) {
+				if (Attempting == net::WireKind::Quic) {
+					// Nothing to repeat: the handshake retransmits itself off
+					// its own timers, which is what `Flush` drives.
+					Port->Flush(nowSeconds);
+				} else {
+					Repeat(nowSeconds);
+				}
+			}
 			return;
 		}
 
-		for (const std::vector<std::byte> &message : Wire.Inbound()) {
+		for (const std::vector<std::byte> &message : Port->Inbound()) {
 			// Routed before the replica sees it, for `Listener::Poll`'s reason:
 			// a user message is not this module's, and handing one to the
 			// replica would count a failure for a message that arrived
@@ -280,7 +485,7 @@ namespace engine::replication {
 				Stats_.Refused++;
 			}
 		}
-		Wire.ClearInbound();
+		Port->ClearInbound();
 
 		std::vector<std::byte> acknowledgement = Replica_.Acknowledge();
 
@@ -290,26 +495,66 @@ namespace engine::replication {
 			acknowledgement.assign(writer.Bytes().begin(), writer.Bytes().end());
 		}
 
-		Wire.Send(acknowledgement, nowSeconds);
+		Port->Send(acknowledgement, nowSeconds);
 
 		// After the acknowledgement, because it is the message the server needs
 		// and this is the message it can wait a tick for.
 		if (const std::vector<std::byte> dispute = Replica_.Dispute(); !dispute.empty()) {
-			Wire.Send(dispute, nowSeconds);
+			Port->Send(dispute, nowSeconds);
 		}
 
 		Prediction_.Reconcile(Replica_.Applied());
 
-		Wire.Flush(nowSeconds);
+		Port->Flush(nowSeconds);
+	}
+
+	net::Link *Connector::Link() {
+		return Quic != nullptr || Port == nullptr ? nullptr : &static_cast<Session *>(Port.get())->Link();
+	}
+
+	net::ConnectionStats Connector::LinkStats() const {
+		if (Port == nullptr) {
+			return {};
+		}
+		if (Quic == nullptr) {
+			return static_cast<const Session *>(Port.get())->Link().Stats();
+		}
+
+		// Refilled from ngtcp2 rather than restated. `docs/QUIC.md` §2 keeps
+		// `ConnectionStats` on the surviving list for exactly this: a panel reads
+		// the same fields whichever transport is underneath.
+		const net::quic::Connection::Statistics stats = Quic->Stats();
+		net::ConnectionStats out;
+		out.RoundTripMilliseconds = static_cast<float>(stats.RoundTripMilliseconds);
+		out.PacketsLost = stats.PacketsLost;
+		out.PacketsSent = stats.Sent;
+		// **`SendsOverBudget` keeps its meaning and gains no second one.** It is
+		// a number somebody configured being enforced, so what fills it here is
+		// the ceiling refusing rather than the path refusing - the distinction
+		// `D00007`'s reopen trigger and `render`'s panel are both phrased
+		// against.
+		out.SendsOverBudget = stats.DatagramsRefused;
+		return out;
 	}
 
 	void Connector::Advance(double nowSeconds) {
-		Wire.Link().Advance(nowSeconds);
-		Wire.Link().ResetBudget();
+		if (Port == nullptr) {
+			return;
+		}
+		Port->Advance(nowSeconds);
+		if (Attempting == net::WireKind::Quic) {
+			// A QUIC handshake can finish on a tick where nothing arrived,
+			// because its last flight is driven by its own timers.
+			Settle(nowSeconds);
+		}
 	}
 
 	bool Connector::Submit(uint64_t tick, std::span<const std::byte> bytes, double nowSeconds) {
 		Prediction_.Record(tick, bytes);
+
+		if (Port == nullptr) {
+			return false;
+		}
 
 		Input input;
 		input.Tick = tick;
@@ -317,7 +562,7 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		WriteMessage(writer, input);
-		return Wire.Send(writer.Bytes(), nowSeconds);
+		return Port->Send(writer.Bytes(), nowSeconds);
 	}
 
 	bool Connector::SubmitState(const Delta &delta, double nowSeconds) {
@@ -327,8 +572,12 @@ namespace engine::replication {
 		// format. What differs is that the server checks the sender's right to
 		// say it - see `Authority::SetOwnership` - and the client does not,
 		// because the server has no right to check.
+		if (Port == nullptr) {
+			return false;
+		}
+
 		core::ByteWriter writer;
 		WriteMessage(writer, delta);
-		return Wire.Send(writer.Bytes(), nowSeconds);
+		return Port->Send(writer.Bytes(), nowSeconds);
 	}
 }

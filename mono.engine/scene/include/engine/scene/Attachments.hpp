@@ -34,15 +34,32 @@ namespace engine::scene {
 
 	// Fills every `Attachment::WorldFrame` from its parent part.
 	//
-	// A `void(Store &)` so it registers as an ordinary system, exactly as
-	// `ResolveActiveCamera` does and for the same reason.
+	// A `void(Store &)` so it registers as an ordinary system, which is what lets
+	// every host that owns a world register the same pass rather than each
+	// growing its own.
 	//
-	// **Runs in `PreRender` beside the other presentation-derived passes**, not
-	// in the simulation: what reads a world frame is a beam, a trail and a
-	// particle emitter, all of which are drawn rather than simulated. A caller
-	// that needs an attachment's world frame *during* the tick - a weld, a
-	// constraint - is asking for something this pass does not promise, and should
-	// say so rather than moving this one earlier.
+	// **Every host registers it, and the phase follows from what that host reads
+	// the field for.** It is not presentation-only, and treating it as such is
+	// what left the two sides of a session disagreeing until v0.19:
+	//
+	//   - `mono.client`'s scripted and presented worlds run it in `PreSimulation`
+	//     - `effects::RefreshEmitters` wants a spawn point before the tick moves
+	//     anything - and again in `PreRender`, where `engine::render::CollectLights`
+	//     places a lamp parented to an attachment.
+	//   - `mono.client`'s *replica* runs it in `PreRender` alone. A replica ticks
+	//     no simulation, and its lamps were lighting the world origin without it.
+	//   - `mono.server` runs it in `PostSimulation`, where the tick's transforms
+	//     are final. Nothing there draws; what the authority needs is the
+	//     *reported* write, which is what makes `WorldCFrame` and `WorldPosition`
+	//     fire their change signal for a server script.
+	//
+	// **Two production readers of the field, and beams are not among them.**
+	// `effects::ParticleSystem` places a spawn from it and `engine::render::CollectLights`
+	// places a lamp; `effects::BuildRibbons` calls `ResolveAttachment` below per
+	// beam instead, because a ribbon is built from two named attachments rather
+	// than from a walk over all of them. A caller that needs a world frame
+	// *during* the tick - a weld, a constraint - should call that one rather than
+	// move this pass.
 	//
 	// An attachment whose parent is not a `BasePart`, or has no parent at all,
 	// takes its local frame as its world frame. That is the useful state rather

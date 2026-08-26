@@ -58,7 +58,16 @@ namespace engine::ecs {
 				return;
 			}
 
-			static_cast<DirtyBits *>(bits->At(row))->Mark(static_cast<size_t>(at - ids.begin()));
+			const size_t position = static_cast<size_t>(at - ids.begin());
+			auto *dirty = static_cast<DirtyBits *>(bits->At(row));
+			const bool firstWrite = !dirty->Test(position);
+			dirty->Mark(position);
+			if (id.Index < state.ComponentChanges.size() && state.ComponentChanges[id.Index] != 0) {
+				state.ComponentChanges[id.Index]++;
+				if (firstWrite) {
+					state.ChangedEntities[id.Index].push_back(archetype.Entities()[row]);
+				}
+			}
 			state.Changes++;
 		}
 	}
@@ -69,6 +78,11 @@ namespace engine::ecs {
 		}
 
 		state.Watched.push_back(id);
+		if (state.ComponentChanges.size() <= id.Index) {
+			state.ComponentChanges.resize(static_cast<size_t>(id.Index) + 1, 0);
+			state.ChangedEntities.resize(static_cast<size_t>(id.Index) + 1);
+		}
+		state.ComponentChanges[id.Index] = 1;
 
 		// The edges are now wrong rather than merely cold: a table holding this
 		// component needs a `DirtyBits` column from here on, so a transition

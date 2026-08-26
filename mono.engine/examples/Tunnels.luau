@@ -51,6 +51,7 @@
 -- six, so a pane's rotation is the whole of its aim.
 
 local WORLD = workspace
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- --- the shape ------------------------------------------------------------
@@ -137,10 +138,20 @@ block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5 + GROUND_LIFT, 0),
 -- open - both tunnels are walked *into*, not through a hole in a wall - but the
 -- shell is still the right build, because the panes inside have to fill the
 -- cross-section exactly and a lipped section would leave a crack round each.
-local function tunnel(name: string, x: number, half: number)
+local function tunnel(name: string, x: number, half: number, supportedByPlain: boolean)
 	local span = half * 2
 
-	block(name .. "Floor", Vector3.new(WIDTH + WALL * 2, WALL, span), Vector3.new(x, -WALL / 2 + INSIDE, 0), FLOOR)
+	local floor = block(
+		name .. "Floor",
+		Vector3.new(WIDTH + WALL * 2, WALL, span),
+		Vector3.new(x, -WALL / 2 + INSIDE, 0),
+		FLOOR
+	)
+	-- The visible tunnels already have the plain under them. Their floor is a
+	-- colour layer lifted by 0.01 to avoid a depth tie, and colliding with that
+	-- layer turns the box's front face into a wall at each mouth. The isolated
+	-- interior has no plain beneath it and remains the real supporting floor.
+	floor.CanCollide = not supportedByPlain
 	block(
 		name .. "Ceiling",
 		Vector3.new(WIDTH + WALL * 2, WALL, span),
@@ -161,9 +172,9 @@ local function tunnel(name: string, x: number, half: number)
 	)
 end
 
-tunnel("Long", LONG_X, LONG / 2)
-tunnel("Short", SHORT_X, SHORT / 2)
-tunnel("ShortInterior", SUBSPACE_X, SPLICE)
+tunnel("Long", LONG_X, LONG / 2, true)
+tunnel("Short", SHORT_X, SHORT / 2, true)
+tunnel("ShortInterior", SUBSPACE_X, SPLICE, false)
 
 -- --- the panes ------------------------------------------------------------
 
@@ -240,7 +251,8 @@ link(interiorSouth, entrySouth, "InteriorToShortSouth")
 -- who steps into a four-stud box and finds twenty-six studs of blue floor sees
 -- one continuous tunnel even though the physical room is elsewhere.
 local function stripe(name: string, x: number, z: number, colour: Color3)
-	block(name, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(x, 0.2, z), colour)
+	local marking = block(name, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(x, 0.2, z), colour)
+	marking.CanCollide = false
 end
 
 -- The west tunnel's two stubs, which are all of it anybody walks.
@@ -377,12 +389,37 @@ local DRIFT_SIZE = Vector3.new(1.6, 1.6, 1.6)
 -- offset across the tunnel comes out the far side where it went in.
 local DRIFT_SIDE = 2
 
+-- **The lit pair runs the west side, at a third of the fixed lamps' output.**
+-- `lamp()` sits seven studs up in a shell that swallows most of its throw; a
+-- lantern at eye height on the open plain does not, so the same brightness
+-- floods the whole ground and the stripes stop reading. Forty-five over a
+-- sixteen-stud range is a pool the block carries with it and nothing more.
+local LANTERN_SIDE = -DRIFT_SIDE
+local LANTERN_RANGE = 16
+local LANTERN_BRIGHTNESS = 45
+
 -- **Ping-pong rather than a loop.** A block that restarted at the north end
 -- would only ever show the southbound crossing, and half the point of a pair of
 -- portals is that the walk works both ways.
-local function drifter(name: string, colour: Color3, route: { Leg })
+local function drifter(name: string, colour: Color3, route: { Leg }, range: number?)
 	local body = block(name, DRIFT_SIZE, route[1].From, colour)
 	body.CanCollide = false
+
+	-- **A lamp on the block is what makes a drifter a lighting test rather than
+	-- a timing one.** The fixed lamps above prove a pane carries a *static*
+	-- light; one that crosses a pane proves it carries a light whose position
+	-- moves on the far side of a seam, which is the case a surface camera has to
+	-- re-place every frame. Nil leaves the block unlit, which is what the two
+	-- timing drifters want - a lamp riding them would wash out the stripes they
+	-- are read against.
+	if range ~= nil then
+		local bulb = Instance.new("PointLight")
+		bulb.Name = "Bulb"
+		bulb.Color = colour
+		bulb.Brightness = LANTERN_BRIGHTNESS
+		bulb.Range = range
+		bulb.Parent = body
+	end
 
 	local total = routeLength(route)
 	local travelled = 0
@@ -435,6 +472,48 @@ drifter("ShortDrifter", SHORT_MARK, {
 	),
 })
 
+-- --- and the pair that carries a light -------------------------------------
+--
+-- **The same two walks, lit, down the west side and started at the far end.**
+-- Two studs west leaves the block clear of the walked channel for
+-- `DRIFT_SIDE`'s reason - a tunnel is `WIDTH` across, so a lantern occupies
+-- `x - 2.8` to `x - 1.2` and the middle of the floor stays open between it and
+-- the timing block opposite. Starting at the south end puts a lantern deep in
+-- one tunnel while the block it shares that tunnel with is still outside the
+-- other, so a still of either mouth shows one of the two rather than both in
+-- the doorway.
+--
+-- **What they add over the fixed lamps is the only lighting case a fixed lamp
+-- cannot make.** A pane's camera re-places the far side's lights every frame; a
+-- lamp that does not move never says whether it re-placed them *correctly*.
+-- Watch the far stub brighten through a skip pane before the lantern itself
+-- arrives in it.
+drifter("LongLantern", LONG_MARK, {
+	leg(
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -(LONG / 2 + 6)),
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -SKIP)
+	),
+	leg(
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, SKIP),
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, LONG / 2 + 6)
+	),
+}, LANTERN_RANGE)
+
+drifter("ShortLantern", SHORT_MARK, {
+	leg(
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -(SHORT / 2 + 6)),
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -ENTRY)
+	),
+	leg(
+		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, -SPLICE),
+		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, SPLICE)
+	),
+	leg(
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, ENTRY),
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, SHORT / 2 + 6)
+	),
+}, LANTERN_RANGE)
+
 -- --- where you start ------------------------------------------------------
 --
 -- North of both, facing them. The name is the contract: `scene::FindSpawn` looks
@@ -442,6 +521,37 @@ drifter("ShortDrifter", SHORT_MARK, {
 -- at the origin - which here is between the two tunnels and level with neither
 -- mouth.
 block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
+
+-- A controller-driven character repeatedly crosses the west tunnel's skip.
+-- Its root and every limb are ordinary portal crossers, so watching it enter,
+-- straddle and leave exercises the path an interactive player uses.
+local walker = Instance.new("Player")
+walker.Name = "TunnelWalker"
+walker.Parent = Players
+
+local character = walker:LoadCharacter()
+if character ~= nil then
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
+	if root ~= nil and humanoid ~= nil then
+		local movingRoot: BasePart = root
+		local movingHumanoid: Humanoid = humanoid
+		movingRoot.CFrame = CFrame.lookAt(
+			Vector3.new(LONG_X, 3, LONG / 2 + 6),
+			Vector3.new(LONG_X, 3, LONG / 2)
+		)
+		movingHumanoid.WalkSpeed = DRIFT_SPEED
+		local heading = -1
+		RunService.Heartbeat:Connect(function(_deltaTime: number)
+			if movingRoot.Position.Z <= -(LONG / 2 + 6) then
+				heading = 1
+			elseif movingRoot.Position.Z >= LONG / 2 + 6 then
+				heading = -1
+			end
+			movingHumanoid.MoveDirection = Vector3.new(0, 0, heading)
+		end)
+	end
+end
 
 -- --- a still, for when nobody is walking ----------------------------------
 --
@@ -463,25 +573,59 @@ local viewpoint: CFrame? = nil
 local VIEW = ""
 local WHICH = if VIEW == "" then nil else VIEW
 
+local cameraFrames = {
+	["long-north"] = CFrame.lookAt(
+		Vector3.new(LONG_X, 4, LONG / 2 + 12),
+		Vector3.new(LONG_X, 4, LONG / 2)
+	),
+	["long-south"] = CFrame.lookAt(
+		Vector3.new(LONG_X, 4, -(LONG / 2 + 12)),
+		Vector3.new(LONG_X, 4, -(LONG / 2))
+	),
+	["short-north"] = CFrame.lookAt(
+		Vector3.new(SHORT_X, 4, SHORT / 2 + 12),
+		Vector3.new(SHORT_X, 4, SHORT / 2)
+	),
+	["short-south"] = CFrame.lookAt(
+		Vector3.new(SHORT_X, 4, -(SHORT / 2 + 12)),
+		Vector3.new(SHORT_X, 4, -(SHORT / 2))
+	),
+}
+
+-- Named cameras remain available to separate Studio viewports without making
+-- any one of them the player's camera. The capture mode selects one explicitly.
+local cameras: { [string]: Camera } = {}
+for name, frame in cameraFrames do
+	local camera = Instance.new("Camera")
+	camera.Name = name
+	camera.FieldOfView = 70
+	camera.CFrame = frame
+	camera.Parent = WORLD
+	cameras[name] = camera
+end
+
 if WHICH == "long" then
-	-- Outside the west tunnel's north mouth, looking down it. The far end is
-	-- four studs away through a building thirty-two studs long.
-	viewpoint = CFrame.new(Vector3.new(LONG_X, 4, LONG / 2 + 12))
+	WHICH = "long-north"
 elseif WHICH == "short" then
-	-- Outside the east tunnel's north mouth. Twenty-six studs of corridor
-	-- stretch away out of a four-stud box.
-	viewpoint = CFrame.new(Vector3.new(SHORT_X, 4, SHORT / 2 + 12))
+	WHICH = "short-north"
+end
+
+if WHICH ~= nil and cameraFrames[WHICH] ~= nil then
+	viewpoint = cameraFrames[WHICH]
 elseif WHICH == "plain" then
 	-- Both buildings at once, which is the comparison the walks turn on.
 	viewpoint = CFrame.new(Vector3.new(0, 12, 62)) * CFrame.Angles(-0.14, 0, 0)
 end
 
 if viewpoint ~= nil then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = viewpoint
-	view.Parent = WORLD
+	local view = cameras[WHICH :: string]
+	if view == nil then
+		view = Instance.new("Camera")
+		view.Name = "Viewer"
+		view.FieldOfView = 70
+		view.CFrame = viewpoint
+		view.Parent = WORLD
+	end
 	WORLD.CurrentCamera = view
 end
 

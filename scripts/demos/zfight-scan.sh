@@ -76,9 +76,10 @@ mkdir -p "$out"
 # **A scene that is deliberately wrong, scanned alongside the real ones.**
 # A detector nobody has ever seen fire is a detector that reads zero for both
 # "nothing is wrong" and "this cannot see anything", and those are the two
-# answers it exists to tell apart. Two slabs at exactly one height is the fault
-# in its simplest form; if `zfight-control` does not come out at the top of the
-# table below, the run says nothing about the scenes under it.
+# answers it exists to tell apart. Two slabs at exactly one height are the fault
+# in its simplest form. The second control capture moves the winner down by a
+# hundredth of a stud, forcing the other coplanar face to win. If that region is
+# not detected, the run says nothing about the scenes under it.
 cat > "$out/zfight-control.luau" <<'CONTROL'
 local function slab(name, colour, z)
 	local part = Instance.new("Part")
@@ -127,6 +128,9 @@ for scene in "${scenes[@]}"; do
 	{
 		cat "$source"
 		printf '\nlocal __cam = workspace.CurrentCamera\nif __cam then\n\t__cam.CFrame = __cam.CFrame * CFrame.new(0, %s, 0)\nend\n' "$nudge"
+		if [ "$scene" = "zfight-control" ]; then
+			printf 'workspace.FloorB.Position = workspace.FloorB.Position - Vector3.new(0, 0.01, 0)\n'
+		fi
 	} > "$out/$scene-b.luau"
 
 	for half in a b; do

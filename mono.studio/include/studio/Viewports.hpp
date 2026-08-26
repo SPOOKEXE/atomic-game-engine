@@ -19,10 +19,13 @@
 //
 // @tier L13 · client
 
+#include <engine/core/types/CFrame.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
+#include <unordered_map>
 
 namespace studio {
 
@@ -67,6 +70,39 @@ namespace studio {
 		float PointerX = 0.0f;
 		float PointerY = 0.0f;
 		//@}
+	};
+
+	// The editor-owned pose of one viewport camera.
+	//
+	// @since v0.19
+	struct ViewportCameraPose {
+		engine::core::CFrame Frame;
+		float Yaw = 0.0f;
+		float Pitch = 0.0f;
+	};
+
+	// The default eye for a world a viewport has not visited before.
+	//
+	// @since v0.19
+	ViewportCameraPose DefaultViewportCamera();
+
+	// Per-panel, per-world camera memory. This is editor session state only and
+	// never enters a world document, snapshot or replication stream.
+	//
+	// @since v0.19
+	class ViewportCameraMemory {
+	  public:
+		// Saves the current world's pose and restores the destination's. The
+		// first world adopts the pose the panel was initialised with.
+		void Use(engine::world::WorldId world, ViewportCameraPose &pose);
+
+		// Starts this panel on an explicit pose, used when another viewport asks
+		// for a sibling view of what it is already showing.
+		void Place(engine::world::WorldId world, const ViewportCameraPose &pose);
+
+	  private:
+		engine::world::WorldId Current;
+		std::unordered_map<uint32_t, ViewportCameraPose> Remembered;
 	};
 
 	// Resolves panel-local game UI coordinates without involving render-target

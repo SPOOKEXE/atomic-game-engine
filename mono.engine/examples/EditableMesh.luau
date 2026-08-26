@@ -11,7 +11,7 @@
 --
 -- **And it keeps editing after the part is already on screen.** The apex
 -- rises and falls on `RunService.Heartbeat`, through the same `SetVertexPosition`
--- an author would call once. `client::EditableMeshUploader` re-converts and
+-- an author would call once. `engine::render::EditableMeshUploader` re-converts and
 -- re-uploads whenever `EditableMesh.Revision` moves, so this is the "real
 -- time" half of the feature and not only the "creation" half.
 --
@@ -56,7 +56,7 @@ mesh:AddTriangle(v3 :: number, v2 :: number, apex :: number)
 mesh:AddTriangle(v0 :: number, v3 :: number, apex :: number)
 
 -- A colour per vertex, so the pyramid reads as more than a grey wedge.
--- `assets::MeshVertex` has no colour of its own, so `client::BuildMeshData`
+-- `assets::MeshVertex` has no colour of its own, so `engine::render::BuildMeshData`
 -- averages each *triangle's* three corners and gives every distinct result its
 -- own submesh run - which is why the four sides here come out as four shades
 -- rather than as one blended amber.

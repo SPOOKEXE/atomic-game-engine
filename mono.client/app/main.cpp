@@ -1,20 +1,23 @@
 // Thin argument-parsing entry point over the client library.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/LocalStore.hpp>
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
 
 #include <cctype>
-#include <cdn/LocalStore.hpp>
 #include <client/Client.hpp>
 #include <client/Settings.hpp>
 #include <cstdio>
 #include <discord/Settings.hpp>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -65,8 +68,16 @@ int main(int argc, char **argv) {
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
-	arguments.Value("max-fps", "N", "Hold this frame rate. Needs --uncapped; 0 is no limit");
+	arguments.Value("max-fps", "N", "Cap presentation FPS. Needs --uncapped; 0 presents every update");
 	arguments.Flag("verbose", "Log at trace level");
+	// Value-taking and absent by default. The conventional number remains in
+	// one constant, while any valid port supplied here is used as written.
+	arguments.Value(
+		"mcp-port",
+		"PORT",
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
+			std::to_string(engine::control::DEFAULT_CLIENT_PORT) + ")"
+	);
 	arguments.Flag(
 		"force-serial-compute",
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
@@ -195,6 +206,10 @@ int main(int argc, char **argv) {
 	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	if (arguments.Has("mcp-port")) {
+		options.ControlPort =
+			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_CLIENT_PORT));
+	}
 	options.SurfaceBounces =
 		static_cast<int>(arguments.GetInteger("surface-bounces", options.SurfaceBounces));
 
@@ -217,8 +232,13 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "--headless needs --frames N: there is no window to close.\n");
 		return 2;
 	}
-	options.MaximumFrameRate =
-		static_cast<uint32_t>(arguments.GetInteger("max-fps", options.MaximumFrameRate));
+	const int64_t maximumFrameRate = arguments.GetInteger("max-fps", options.MaximumFrameRate);
+	if (maximumFrameRate < 0 ||
+		static_cast<uint64_t>(maximumFrameRate) > std::numeric_limits<uint32_t>::max()) {
+		std::fprintf(stderr, "--max-fps must be between 0 and %u.\n", std::numeric_limits<uint32_t>::max());
+		return 2;
+	}
+	options.MaximumFrameRate = static_cast<uint32_t>(maximumFrameRate);
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
@@ -295,8 +315,8 @@ int main(int argc, char **argv) {
 	// The folder is created rather than merely looked for, so a first run leaves
 	// somewhere to drag files into instead of a path that does not exist.
 	if (options.ContentSources.empty()) {
-		const cdn::LocalPaths local = cdn::DefaultLocalPaths();
-		if (cdn::EnsureLocalStore(local)) {
+		const engine::assets::LocalPaths local = engine::assets::DefaultLocalPaths();
+		if (engine::assets::EnsureLocalStore(local)) {
 			options.ContentSources.push_back("dir:" + local.Processed.string());
 		}
 	}
@@ -325,7 +345,8 @@ int main(int argc, char **argv) {
 	if (auto key = arguments.Get("publisher-key")) {
 		options.ContentPublisherKey = std::string(*key);
 	} else if (options.ContentSources.size() == 1 &&
-			   options.ContentSources.front() == "dir:" + cdn::DefaultLocalPaths().Processed.string()) {
+			   options.ContentSources.front() ==
+				   "dir:" + engine::assets::DefaultLocalPaths().Processed.string()) {
 		// **The development key, and only for the store on this machine.** A
 		// client with no `--publisher-key` refused to start at all, which is
 		// right for an origin across a network and was pure friction for the
@@ -338,9 +359,9 @@ int main(int argc, char **argv) {
 		// store's own directory. Naming any origin - `--cdn`, a remote, even
 		// another directory - leaves the key required, because a key that
 		// everybody knows is not a trust boundary and must never become one for
-		// content somebody else served. `cdn::DevelopmentSigningKey` carries the
+		// content somebody else served. `engine::assets::DevelopmentSigningKey` carries the
 		// same argument from the publishing end.
-		options.ContentPublisherKey = cdn::DevelopmentPublisher().ToHex();
+		options.ContentPublisherKey = engine::assets::DevelopmentPublisher().ToHex();
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {
@@ -363,6 +384,26 @@ int main(int argc, char **argv) {
 		ENGINE_ERROR("client failed to start");
 		return 1;
 	}
+
+	// **The component table closes here, and this is what makes the determinism
+	// promise real rather than intended.** Registration order fixes component
+	// ids, ids identify archetypes, and archetypes are iterated in id order -
+	// so two runs that register the same types in a different order visit rows
+	// in a different order, and a floating-point sum over those rows diverges.
+	// `Components::Seal` is what pins it, and until v0.19 its only caller was a
+	// test, which meant the guarantee `just determinism` and `just replay-check`
+	// rest on was not switched on in any shipped binary.
+	//
+	// **After `Initialise`, because that is what registers everything.** Every
+	// module's `Register*Components` runs during start-up, and a `Store`'s
+	// constructor registers the instance components on the way past. Sealing
+	// before that would close an empty table.
+	//
+	// **A script that declares a component after this gets a clean refusal, not
+	// a crash.** `Schemas::Register` checks `Components::Sealed()` and returns
+	// `Status::Sealed`, whose own comment is the reason above. That path was
+	// built for this and had nothing switching it on.
+	engine::ecs::Components::Seal();
 
 	return client.Run();
 }

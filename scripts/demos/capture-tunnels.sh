@@ -30,6 +30,7 @@ root=$(cd -- "$here/../.." && pwd)
 preset=${PRESET:-dev}
 build="$root/.cache/build/$preset"
 out=${OUT:-$build/captures}
+frames=${FRAMES:-30}
 
 cmake -S "$root" --preset "$preset" > /dev/null
 cmake --build "$build" --target client
@@ -56,16 +57,16 @@ capture() {
 		exit 1
 	fi
 
-	# **A fixed frame count, because the blocks are moving.** Their route is a
-	# function of elapsed simulated time, so the same number of frames puts them
-	# in the same place and two runs are comparable. Thirty is far enough along
-	# each route for a block to have entered its tunnel.
+	# **A fixed 60 Hz presentation rate, because the blocks are moving.** Their
+	# route is a function of elapsed simulated time, so a frame count only names
+	# a repeatable instant when presentation is tied to the tick rate. `FRAMES`
+	# lets a portal traversal be inspected later in the same deterministic run.
 	local shot="$out/tunnels-$view.bmp"
 	rm -f "$shot"
 
 	echo "capturing $view"
 	timeout --signal=KILL 120 "$build/client/client" \
-		--script "$staged" --frames 30 --capture "$shot" > /dev/null 2>&1 || true
+		--script "$staged" --uncapped --max-fps 60 --frames "$frames" --capture "$shot" > /dev/null 2>&1 || true
 
 	if [ ! -f "$shot" ]; then
 		echo "  no capture written - run the client by hand to see why" >&2
@@ -78,7 +79,7 @@ capture() {
 if [ $# -ge 1 ]; then
 	capture "$1"
 else
-	for view in long short plain; do
+	for view in long-north long-south short-north short-south plain; do
 		capture "$view"
 	done
 fi

@@ -9,6 +9,7 @@ endif()
 
 # Documentation and binding tools.
 add_subdirectory(bindings)
+add_subdirectory(componentdoc)
 add_subdirectory(docgen)
 
 # Script type checker over generated declarations.
@@ -63,6 +64,15 @@ add_subdirectory(shadercheck)
 if(MONO_BUILD_CLIENT)
 	add_subdirectory(shadercross)
 endif()
+
+# The architecture rules that live in source text rather than in the target
+# graph - a private copy of data the ECS owns, a pointer crossing a world
+# boundary, a `core::Name` serialised as its `Id()`, and a header in `include/`
+# that nothing outside its module includes.
+#
+# Unconditional, like `shadercheck`: it reads first-party sources as text and
+# links no device, so every preset checks the same rules over the same tree.
+add_subdirectory(sourcecheck)
 
 # Asset compiler; shared-tier and device-free.
 add_subdirectory(assetc)

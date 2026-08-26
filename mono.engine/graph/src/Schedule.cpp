@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/graph/Schedule.hpp>
 
 #include <algorithm>
@@ -65,7 +66,7 @@ namespace engine::graph {
 	}
 
 	namespace {
-		uint8_t ScopeRank(NodeScope scope) {
+		uint8_t RankOfScope(NodeScope scope) {
 			switch (scope) {
 			case NodeScope::World:
 				return 0;
@@ -263,6 +264,11 @@ namespace engine::graph {
 				if (producer == count) {
 					if (desc == nullptr || !desc->External) {
 						offender = desc != nullptr ? desc->Name : nodes[reader]->Name;
+						ENGINE_WARN(
+							"'{}' reads '{}' and nothing in the graph writes it",
+							nodes[reader]->Name.Text(),
+							offender.Text()
+						);
 						return ScheduleStatus::MissingProducer;
 					}
 					const auto later = std::find_if(writers.begin(), writers.end(), [reader](size_t writer) {
@@ -274,8 +280,13 @@ namespace engine::graph {
 					continue;
 				}
 
-				if (ScopeRank(nodes[producer]->Scope) > ScopeRank(nodes[reader]->Scope)) {
+				if (RankOfScope(nodes[producer]->Scope) > RankOfScope(nodes[reader]->Scope)) {
 					offender = nodes[reader]->Name;
+					ENGINE_WARN(
+						"'{}' reads something '{}' writes at a narrower scope",
+						nodes[reader]->Name.Text(),
+						nodes[producer]->Name.Text()
+					);
 					return ScheduleStatus::ScopeDependency;
 				}
 				AddDependency(outgoing, incoming, producer, reader);
@@ -303,7 +314,7 @@ namespace engine::graph {
 		// making `World`, `View`, and `Frame` mean more than labels in the editor.
 		for (size_t before = 0; before < count; before++) {
 			for (size_t after = 0; after < count; after++) {
-				if (ScopeRank(nodes[before]->Scope) < ScopeRank(nodes[after]->Scope)) {
+				if (RankOfScope(nodes[before]->Scope) < RankOfScope(nodes[after]->Scope)) {
 					AddDependency(outgoing, incoming, before, after);
 				}
 			}
@@ -326,10 +337,17 @@ namespace engine::graph {
 			}
 
 			if (ready.empty()) {
+				// **Every node still in the cycle, not only the first.**
+				// `offender` holds one name and a cycle needs at least two to be
+				// findable, so the rest go to the log rather than nowhere.
+				bool named = false;
 				for (size_t index = 0; index < count; index++) {
 					if (remaining[index] != static_cast<size_t>(-1)) {
-						offender = nodes[index]->Name;
-						break;
+						if (!named) {
+							offender = nodes[index]->Name;
+							named = true;
+						}
+						ENGINE_WARN("'{}' is in the unschedulable cycle", nodes[index]->Name.Text());
 					}
 				}
 				out.Clear();
@@ -343,6 +361,7 @@ namespace engine::graph {
 				ScheduledNode scheduled;
 				if (!ReadHints(graph, *nodes[index], ids[index], scheduled)) {
 					offender = nodes[index]->Name;
+					ENGINE_WARN("'{}' carries a hint this build cannot read", offender.Text());
 					out.Clear();
 					return ScheduleStatus::InvalidHint;
 				}
@@ -360,6 +379,19 @@ namespace engine::graph {
 		}
 
 		offender = core::Name{};
+
+		// The wave shape is what decides how much of a frame can overlap, and it
+		// is computed once at compile and never reported. `--log graph=debug`
+		// answers "why is nothing running on the compute queue".
+		ENGINE_DEBUG("scheduled {} node(s) into {} wave(s)", emitted, out.Waves.size());
+		for (size_t index = 0; index < out.Waves.size(); index++) {
+			ENGINE_TRACE(
+				"wave {}: {} node(s), {}",
+				index,
+				out.Waves[index].Nodes.size(),
+				out.Waves[index].Concurrent ? "concurrent" : "serial"
+			);
+		}
 		return ScheduleStatus::Ok;
 	}
 }

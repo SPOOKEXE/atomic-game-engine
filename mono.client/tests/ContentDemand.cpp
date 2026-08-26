@@ -21,9 +21,11 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -56,7 +58,13 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	Store store = Fresh("contentdemand.all");
 
 	const Entity part = store.Create();
-	store.Set(part, engine::scene::SurfaceAppearance{.ColourMap = Name("part.atex")});
+	store.Set(
+		part,
+		engine::scene::SurfaceAppearance{
+			.ColourMap = Name("part.atex"),
+			.MetalnessMap = Name("part-metalness.atex"),
+		}
+	);
 
 	const Entity label = store.Create();
 	engine::gui::Picture badge;
@@ -98,6 +106,7 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	client::CollectWantedContent(store, wanted);
 
 	CHECK(Holds(wanted, "part.atex"));
+	CHECK(Holds(wanted, "part-metalness.atex"));
 	CHECK(Holds(wanted, "label.atex"));
 	CHECK(Holds(wanted, "spark.atex"));
 	CHECK(Holds(wanted, "bolt.atex"));
@@ -147,6 +156,74 @@ TEST_CASE("a world naming nothing asks for nothing", "[client][contentdemand]") 
 	CHECK(wanted.empty());
 }
 
+TEST_CASE("unchanged demand revisions ignore simulation and unrelated writes", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.steady");
+	const Entity emitter = store.Create();
+	engine::effects::ParticleEmitter particles;
+	particles.Texture = Name("shared.atex");
+	store.Set(emitter, particles);
+
+	const uint64_t before = client::WantedContentRevision(store);
+	store.AdvanceTick(1.0 / 60.0);
+	const Entity unrelated = store.Create();
+	store.Set(unrelated, engine::scene::Transform{});
+
+	CHECK(client::WantedContentRevision(store) == before);
+}
+
+TEST_CASE("content property changes advance the precise demand revision", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.changed");
+	const Entity emitter = store.Create();
+	store.Set(emitter, engine::effects::ParticleEmitter{});
+	const uint64_t before = client::WantedContentRevision(store);
+
+	store.GetMutable<engine::effects::ParticleEmitter>(emitter)->Texture = Name("changed.atex");
+
+	CHECK(client::WantedContentRevision(store) != before);
+}
+
+TEST_CASE("collecting demand does not dirty the references it reads", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.readonly");
+	const Entity part = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = Name("readonly.amesh");
+	store.Set(part, visual);
+	const uint64_t before = client::WantedContentRevision(store);
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+
+	CHECK(client::WantedContentRevision(store) == before);
+	REQUIRE(wanted.size() == 1);
+}
+
+TEST_CASE("removing a content-bearing row advances demand revision", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.removed");
+	const Entity emitter = store.Create();
+	store.Set(emitter, engine::effects::ParticleEmitter{});
+	const uint64_t before = client::WantedContentRevision(store);
+
+	store.Remove<engine::effects::ParticleEmitter>(emitter);
+
+	CHECK(client::WantedContentRevision(store) != before);
+}
+
+TEST_CASE("many emitters share one demanded texture name", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.shared.texture");
+	for (size_t index = 0; index < 4096; index++) {
+		const Entity emitter = store.Create();
+		engine::effects::ParticleEmitter particles;
+		particles.Texture = Name("shared.atex");
+		store.Set(emitter, particles);
+	}
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+
+	REQUIRE(wanted.size() == 1);
+	CHECK(wanted.front() == Name("shared.atex"));
+}
+
 TEST_CASE("a material's texture is collected once it has resolved", "[client][contentdemand]") {
 	// **The indirection that let materials stay out of the demand path.** A
 	// material reaches a part through `ResolveMaterials`, which writes its
@@ -180,4 +257,32 @@ TEST_CASE("a material's texture is collected once it has resolved", "[client][co
 	std::vector<Name> after;
 	client::CollectWantedContent(store, after);
 	CHECK(Holds(after, "oak_Color.atex"));
+}
+
+TEST_CASE("a selected skybox asks only for faces it names", "[client][contentdemand][skybox]") {
+	Store store = Fresh("contentdemand.skybox");
+	engine::scene::RegisterSceneClasses();
+	engine::scene::InstallServices(store);
+	const Entity lighting = store.FindFirstRoot("Lighting");
+	REQUIRE(lighting != engine::ecs::NULL_ENTITY);
+
+	const Entity selected =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SkyboxTextures")), "Selected");
+	REQUIRE(store.SetParent(selected, lighting));
+	auto *faces = store.GetMutable<engine::scene::SkyboxTextures>(selected);
+	REQUIRE(faces != nullptr);
+	faces->Front = Name("sky/front.atex");
+	faces->Up = Name("sky/up.atex");
+
+	const Entity ignored =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SkyboxTextures")), "Ignored");
+	REQUIRE(store.SetParent(ignored, lighting));
+	store.GetMutable<engine::scene::SkyboxTextures>(ignored)->Front = Name("sky/ignored.atex");
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(wanted.size() == 2);
+	CHECK(Holds(wanted, "sky/front.atex"));
+	CHECK(Holds(wanted, "sky/up.atex"));
+	CHECK_FALSE(Holds(wanted, "sky/ignored.atex"));
 }

@@ -27,7 +27,7 @@ namespace engine::render {
 		// as a convex polygon without sorting them. Getting a winding wrong here
 		// draws a bow tie rather than a face, which is unmistakable and is
 		// exactly what the case in `AdornmentGeometry.cpp`'s suite checks.
-		constexpr std::array<std::array<int, 4>, 6> FACES{{
+		constexpr std::array<std::array<int, 4>, 6> BOX_FACES{{
 			{0, 1, 3, 2},
 			{4, 6, 7, 5},
 			{0, 4, 5, 1},
@@ -86,7 +86,7 @@ namespace engine::render {
 			return;
 		}
 
-		for (const auto &face : FACES) {
+		for (const auto &face : BOX_FACES) {
 			AdornmentFace filled = *fill;
 			for (size_t corner = 0; corner < 4; corner++) {
 				filled.Corners[corner] = corners[static_cast<size_t>(face[corner])];

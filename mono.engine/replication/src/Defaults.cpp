@@ -20,6 +20,34 @@ namespace engine::replication {
 		// arrive.** A `ScreenGui` crossed as a name and a class with no
 		// `gui.Element` on it, so a client held the shape of an interface and
 		// none of it - which reads as the server having authored nothing.
+		//
+		// **`effects.` was proposed at v0.19 and refused, and the refusal is
+		// worth keeping here because the proposal is a reasonable one to make
+		// twice.** `docs/ARCH_REVIEW.md` §D3 noticed that no particle, beam or
+		// trail ever reaches a client and read that as an omission. It is the
+		// design, and adding the prefix would break joining outright:
+		//
+		// - **A replica does not register the module at all.**
+		//   `client::BuildReplicatedWorld` registers `scene`, `gui`, `script`,
+		//   `client` and `replication` and stops there; effects arrive on a
+		//   `--game` client because the *world loader* registers them.
+		//   `ecs::LoadSnapshot` refuses a whole snapshot that names a component
+		//   the build does not have, so one `ParticleEmitter` in a server world
+		//   would fail every join.
+		// - **The rows would arrive empty if it did.** `Beam::Attachment0`,
+		//   `Trail::Attachment0` and `EmitterSlot::Index` are all deliberately
+		//   dropped by their own writers and cleared by their readers, because a
+		//   handle and a pool index are facts about one process. A replicated
+		//   beam has no endpoints and draws nothing.
+		// - **And it is the three largest rows in the engine.**
+		//   `effects.ParticleEmitter` is 1264 bytes and all of it is trivially
+		//   copyable, so it would take the signature path and be hashed per row
+		//   per tick. `examples/StressParticles.luau` builds 102,400 emitters.
+		//
+		// A server-spawned effect that a client should see is the *instance*
+		// crossing - `ecs.InstanceClass` already does - and the client rebuilding
+		// the component from its class. That is a feature with a design, not a
+		// prefix.
 		constexpr std::string_view SHARED_PREFIXES[] = {"scene.", "gui."};
 
 		bool UnderASharedPrefix(std::string_view component) {
@@ -146,44 +174,60 @@ namespace engine::replication {
 		bool WrittenEveryTick(std::string_view component) {
 			return component == "scene.Transform" || component == "scene.Motion";
 		}
+	}
 
-		// The three a signature cannot cover, because a signature hashes the
-		// object representation.
+	// The components a signature cannot cover, because a signature hashes the
+	// object representation.
+	//
+	// **A `std::string` is a pointer in its object representation, so
+	// hashing one answers about the allocation and not about the text.**
+	// Two boxes holding the same words hash differently, one box hashes
+	// differently after a reallocation that did not change a character, and
+	// - the failure that matters - text edited in place inside a capacity
+	// that did not move hashes the *same*. `Authority::Resign` refuses a
+	// non-trivial type outright and says to observe it instead; these are
+	// the ones that took it up on that.
+	//
+	// **What `Observed` costs is a dirty bit per row and nothing per tick**,
+	// which is the opposite trade from `Signature` and the right one here:
+	// a label's text and a script's program are written by an author and
+	// then left alone for the life of the world, so the bit is set on the
+	// tick somebody wrote and never again. A signature over
+	// `script.Program` would be a hash of every kilobyte of Luau in the
+	// world, sixty times a second, to learn that nobody had touched it.
+	//
+	// `Authority::Survey` is what turns the observation on, so declaring one
+	// here is the whole of the wiring.
+	bool CannotBeSigned(std::string_view component) {
+		// **`scene.EditableMesh` joins this list for the same reason as
+		// the three above it, arriving at a different scale.** Five
+		// `std::vector`s are five pointers in the object representation
+		// a signature would hash - it would answer about the allocation
+		// and never about a vertex actually moving. `Observed` is exactly
+		// right here rather than merely convenient: every mutator in
+		// `scene/EditableMesh.hpp` reaches the row through `Store::
+		// GetMutable`, which marks the dirty bit for free - there is no
+		// `EachBatch` or raw-pointer door for this type the way there is
+		// for `Visual` and `Bounds`, so there is no hole `Observed`
+		// leaves open for it.
 		//
-		// **A `std::string` is a pointer in its object representation, so
-		// hashing one answers about the allocation and not about the text.**
-		// Two boxes holding the same words hash differently, one box hashes
-		// differently after a reallocation that did not change a character, and
-		// - the failure that matters - text edited in place inside a capacity
-		// that did not move hashes the *same*. `Authority::Resign` refuses a
-		// non-trivial type outright and says to observe it instead; these are
-		// the three that took it up on that.
+		// **`scene.TextContent` and `scene.ShaderSource` were dropped for eight
+		// versions and nothing said so, which is the failure this list is the
+		// cure for rather than an instance of.** Both carry hand-written
+		// `Write`/`Read` pairs in `scene/Registration.cpp`, written expressly so
+		// the text could cross; both hold a `std::string`; and the `Trivial`
+		// gate in `DefaultReplicatedComponents` therefore removed them from the
+		// table without a word. A `StringValue` a server authored arrived on
+		// every client holding an empty string, and a `ShaderScript`'s GLSL
+		// never arrived at all - so a client drew the default tonemap while the
+		// server believed the world had been re-graded.
 		//
-		// **What `Observed` costs is a dirty bit per row and nothing per tick**,
-		// which is the opposite trade from `Signature` and the right one here:
-		// a label's text and a script's program are written by an author and
-		// then left alone for the life of the world, so the bit is set on the
-		// tick somebody wrote and never again. A signature over
-		// `script.Program` would be a hash of every kilobyte of Luau in the
-		// world, sixty times a second, to learn that nobody had touched it.
-		//
-		// `Authority::Survey` is what turns the observation on, so declaring one
-		// here is the whole of the wiring.
-		bool CannotBeSigned(std::string_view component) {
-			// **`scene.EditableMesh` joins this list for the same reason as
-			// the three above it, arriving at a different scale.** Five
-			// `std::vector`s are five pointers in the object representation
-			// a signature would hash - it would answer about the allocation
-			// and never about a vertex actually moving. `Observed` is exactly
-			// right here rather than merely convenient: every mutator in
-			// `scene/EditableMesh.hpp` reaches the row through `Store::
-			// GetMutable`, which marks the dirty bit for free - there is no
-			// `EachBatch` or raw-pointer door for this type the way there is
-			// for `Visual` and `Bounds`, so there is no hole `Observed`
-			// leaves open for it.
-			return component == "gui.Label" || component == "gui.Entry" || component == "script.Program" ||
-				   component == "scene.EditableMesh" || component == "scene.EditableImage";
-		}
+		// They are the same shape as `script.Program` one row up: an author
+		// writes the text and then leaves it alone for the life of the world, so
+		// the dirty bit is set on the tick somebody wrote and never again.
+		return component == "gui.Label" || component == "gui.Entry" || component == "script.Program" ||
+			   component == "scene.EditableMesh" || component == "scene.EditableImage" ||
+			   component == "scene.TextContent" || component == "scene.ShaderSource";
 	}
 
 	bool LocalToTheClient(std::string_view component) {
@@ -257,11 +301,41 @@ namespace engine::replication {
 		// **Derived every frame on whichever machine draws.** A previous
 		// transform is what interpolation is measured from and the client builds
 		// its own in `replication::SnapshotBuffer`; the render gate is computed
-		// by the client's own presentation pass; the hash exists to notice a
-		// change and means nothing to a receiver. Sending any of them is paying
-		// wire for something the far side is about to overwrite.
+		// by the client's own presentation pass. Sending either is paying wire
+		// for something the far side is about to overwrite.
+		//
+		// **`scene.RenderedSignature` is the memo behind the second of them, and
+		// sending it is wrong rather than merely wasteful.** The stamp means
+		// "the walk has already been run against a tree that folds to this", and
+		// that is a claim about the machine holding it. A client handed the
+		// authority's stamp has had no walk run against its own tree at all, so
+		// the first `SyncRendered` matches, skips, and leaves `scene.Rendered`
+		// as whatever arrived. The symptom is one frame drawn wrong with nothing
+		// in the frame to explain it - which is exactly the bug the component's
+		// own serialisation refuses to persist for, at
+		// `scene/Registration.cpp`'s `WriteRenderedSignatures`. The wire was the
+		// second door into that room and it was open.
 		if (component == "scene.PreviousTransform" || component == "scene.Rendered" ||
-			component == "scene.QuickHash") {
+			component == "scene.RenderedSignature") {
+			return true;
+		}
+
+		// **This viewer's record of which crossings it has already corrected
+		// for, and the authority's copy of it defeats the correction.**
+		//
+		// `scene::SnapPortalTransit` collapses the interpolation onto where a
+		// body arrived, once per crossing, and knows which crossings are done
+		// from this row - it writes the serial after it snaps. The authority
+		// runs the same pass and writes the same serial, so a replicated row
+		// arrives on the client in the very snapshot that carries the crossing
+		// it describes. The client's own pass then finds
+		// `seen->Serial == went.Serial` on its first look and returns without
+		// snapping, and the body interpolates from the room it left to the room
+		// it arrived in - a smear across however far apart the two panes are.
+		//
+		// `scene.PortalTransit` itself is a fact about the body and stays
+		// shared: it is what tells a client a crossing happened at all.
+		if (component == "scene.PortalTransitSeen") {
 			return true;
 		}
 
@@ -335,7 +409,18 @@ namespace engine::replication {
 		// `Scrolling::CanvasPosition` - the destination - and each end animates
 		// to it on its own clock, which is also what makes a laggy client
 		// arrive rather than stutter.
-		if (component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
+		// **`gui.Canvas` is `gui.Resolved` written three lines earlier, and it
+		// crossed for four versions while its twin did not.** `gui::Layout`
+		// sets both on the same collector in the same block - the canvas
+		// rectangle, and then `Resolved::AbsolutePosition` and
+		// `::AbsoluteSize` taken straight off it - and neither holds an
+		// authored field: a collector's canvas is the local viewport, which is
+		// a fact about this display. `Components.hpp` says so of `Canvas` in
+		// its own words, "holds the resolved rectangle rather than any authored
+		// field". Only the exclusion was missing, so the authority's screen
+		// rectangle crossed to every client and was overwritten by that
+		// client's next layout pass.
+		if (component == "gui.Canvas" || component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
 			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
 			component == "gui.PageMotion" || component == "gui.ScrollMotion") {
 			return true;

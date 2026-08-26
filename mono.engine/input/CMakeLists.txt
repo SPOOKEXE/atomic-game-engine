@@ -10,9 +10,9 @@ mono_add_library(input
 		# **L7, `shared`, and it is a public dependency.** `Translate.hpp` writes
 		# `scene::InputState` and names it in its own signature, because that is
 		# the whole job: this module is where an SDL keycode becomes a name, and
-		# the name lives on a resource a script can reach. `Actions.hpp`'s rule -
-		# nothing outside this module names a key - is what puts the translation
-		# here rather than in the client.
+		# the name lives on a resource a script can reach. That is what is left
+		# here after v0.19 moved `Action` to `mono.client`, and it is the half
+		# that is genuinely the engine's.
 		Engine::scene
 
 	# SDL_Event appears in the public header: this module translates events, it

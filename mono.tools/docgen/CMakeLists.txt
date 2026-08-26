@@ -216,6 +216,13 @@ file(GLOB MONO_INCLUDE_ROOTS
 	"${CMAKE_SOURCE_DIR}/mono.client/include"
 	"${CMAKE_SOURCE_DIR}/mono.server/include"
 	"${CMAKE_SOURCE_DIR}/mono.cdn/include"
+	# The editor, and the node graph library beside it. `mono.studio/nodegraph`
+	# was `mono.engine/nodegraph` until v0.19 and was covered by the engine glob
+	# above; without this line its headers would show `<mono.studio/nodegraph/
+	# include/nodegraph/Graph.hpp>` rather than `<nodegraph/Graph.hpp>`, and
+	# nothing would fail.
+	"${CMAKE_SOURCE_DIR}/mono.studio/include"
+	"${CMAKE_SOURCE_DIR}/mono.studio/*/include"
 	"${CMAKE_SOURCE_DIR}/mono.tools/*/include"
 	"${CMAKE_SOURCE_DIR}/mono.build/*/include")
 set(MONO_DOCS_INCLUDE_ROOTS "")

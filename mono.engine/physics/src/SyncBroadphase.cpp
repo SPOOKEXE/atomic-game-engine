@@ -26,7 +26,7 @@ namespace engine::physics {
 		// `Proxy::Id` is the index the two arrays share, not the entity - see
 		// `PhysicsWorld`, which explains why. The entity is on the record, so
 		// resolving a candidate is a subscript and never a store lookup.
-		void Append(
+		void AppendEntry(
 			std::vector<spatial::Proxy> &proxies,
 			std::vector<ColliderRecord> &records,
 			std::vector<PlacedCollider> &shapes,
@@ -138,14 +138,21 @@ namespace engine::physics {
 		// decision the solver makes about `scene::SurfaceTable`.
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
-		store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
-			[&dynamicProxies, &dynamicRecords, &dynamicShapes, baked](
-				ecs::Entity entity,
-				const scene::Transform &transform,
-				const scene::Collider &collider,
-				const scene::Motion &
-			) { Append(dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider); }
-		);
+		{
+			ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
+			store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+				[&dynamicProxies, &dynamicRecords, &dynamicShapes, baked](
+					ecs::Entity entity,
+					const scene::Transform &transform,
+					const scene::Collider &collider,
+					const scene::Motion &
+				) {
+					AppendEntry(
+						dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider
+					);
+				}
+			);
+		}
 
 		{
 			// The rebuild on its own, separate from gathering the proxies that
@@ -184,7 +191,11 @@ namespace engine::physics {
 		// `ecs::Store` has no "without this component" query term, so the count
 		// is a subtraction and the pass below asks per row - which is affordable
 		// exactly because it is not a per-tick pass.
-		const size_t colliders = store.CountMatching<scene::Transform, scene::Collider>();
+		size_t colliders = 0;
+		{
+			ENGINE_PROFILE_CAT("physics.count-colliders", core::ProfileCategory::Physics);
+			colliders = store.CountMatching<scene::Transform, scene::Collider>();
+		}
 		const size_t staticCount = colliders - dynamicRecords.size();
 
 		if (!StaticSetChanged(store, *world, staticCount)) {
@@ -208,7 +219,7 @@ namespace engine::physics {
 				if (store.Has<scene::Motion>(entity)) {
 					return;
 				}
-				Append(staticProxies, staticRecords, staticShapes, baked, entity, transform, collider);
+				AppendEntry(staticProxies, staticRecords, staticShapes, baked, entity, transform, collider);
 			}
 		);
 

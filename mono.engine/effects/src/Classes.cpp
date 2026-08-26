@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -110,7 +111,12 @@ namespace engine::effects {
 				size_t ordinal = 0;
 				if (!ecs::EnumTable::OrdinalOf(EnumOf(), *static_cast<const core::Name *>(value), ordinal)) {
 					// Refused where it was written, rather than landing in the
-					// component as a value nobody chose.
+					// component as a value nobody chose. The script sees a
+					// failed assignment and nothing says which name was wrong.
+					ENGINE_DEBUG(
+						"'{}' is not a member of this enum; the property is unchanged",
+						static_cast<const core::Name *>(value)->Text()
+					);
 					return false;
 				}
 				emitter->*Member = static_cast<Enum>(ordinal);
@@ -122,6 +128,36 @@ namespace engine::effects {
 	}
 
 	namespace {
+		template <auto Member, int32_t Low, int32_t High>
+		PropertyDescriptor ClampedIntegerProperty(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ParticleEmitter>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const ParticleEmitter *emitter = store.Get<ParticleEmitter>(instance);
+				if (emitter == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = emitter->*Member;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				ParticleEmitter *emitter = store.GetMutable<ParticleEmitter>(instance);
+				if (emitter == nullptr) {
+					return false;
+				}
+				emitter->*Member = std::clamp(*static_cast<const int32_t *>(value), Low, High);
+				return true;
+			};
+			return property;
+		}
+
 		// How many of the grid's cells hold a frame, as a number a script writes.
 		//
 		// **A conversion, because `uint8_t` is not a `PropertyType`.** The storage
@@ -249,13 +285,31 @@ namespace engine::effects {
 			ecs::Classes::Property<&ParticleEmitter::Acceleration>(emitter, "Acceleration");
 			ecs::Classes::Property<&ParticleEmitter::SpreadAngle>(emitter, "SpreadAngle");
 			ecs::Classes::Property<&ParticleEmitter::Texture>(emitter, "Texture");
+			ecs::Classes::Computed(
+				emitter, ClampedIntegerProperty<&ParticleEmitter::MaxParticles, 0, 1000000>("MaxParticles")
+			);
 
 			// **Rate is clamped and Roblox's ceiling is 500.** Kept here because
 			// the ceiling is what stops one emitter taking the whole pool: a block
 			// is `Rate * Lifetime` slots, so an unclamped rate with a long life is
 			// an emitter that refuses every other emitter in the world.
 			ecs::Classes::ClampedProperty<&ParticleEmitter::Rate, 0.0f, 500.0f>(emitter, "Rate");
+			ecs::Classes::ClampedProperty<&ParticleEmitter::RateOverDistance, 0.0f, 500.0f>(
+				emitter, "RateOverDistance"
+			);
 			ecs::Classes::ClampedProperty<&ParticleEmitter::Drag, -100.0f, 100.0f>(emitter, "Drag");
+			ecs::Classes::ClampedProperty<&ParticleEmitter::MaxSpeed, 0.0f, 100000.0f>(emitter, "MaxSpeed");
+			ecs::Classes::ClampedProperty<&ParticleEmitter::NoiseStrength, 0.0f, 100000.0f>(
+				emitter, "NoiseStrength"
+			);
+			ecs::Classes::ClampedProperty<&ParticleEmitter::NoiseFrequency, 0.0f, 1000.0f>(
+				emitter, "NoiseFrequency"
+			);
+			ecs::Classes::Property<&ParticleEmitter::NoiseScrollSpeed>(emitter, "NoiseScrollSpeed");
+			ecs::Classes::Property<&ParticleEmitter::RadialAcceleration>(emitter, "RadialAcceleration");
+			ecs::Classes::Property<&ParticleEmitter::TangentialAcceleration>(
+				emitter, "TangentialAcceleration"
+			);
 			ecs::Classes::ClampedProperty<&ParticleEmitter::VelocityInheritance, -100.0f, 100.0f>(
 				emitter, "VelocityInheritance"
 			);

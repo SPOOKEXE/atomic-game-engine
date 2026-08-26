@@ -301,6 +301,22 @@ namespace engine::delivery {
 				// Filled once the manifest has resolved what was asked for.
 				bool Located = false;
 
+				// The bundle carrying it, from the same `Resolve` that located
+				// it.
+				//
+				// **A memo of one lookup, not a second copy of the manifest.**
+				// `Resolve` has to ask `BundleFor` anyway to queue the job, and
+				// the two loops that later ask "is anyone still waiting on this
+				// bundle?" asked it again per pending request per pump - which
+				// is a walk of the bundle list inside a walk of the requests,
+				// inside `Pump`. The catalogue is adopted once and never
+				// replaced, so what was resolved against it cannot go stale.
+				//
+				// Set only where `BundleFor` answered, so it means something
+				// only while the request is still `Pending` and `Located` -
+				// which is the only state either loop that reads it looks at.
+				assets::ContentHash Carrier;
+
 				RequestState State = RequestState::Pending;
 				Asset Result;
 			};
@@ -560,6 +576,7 @@ namespace engine::delivery {
 						++finished;
 						continue;
 					}
+					pending.Carrier = bundle->Root;
 					Queue(bundle->Root);
 				}
 				return finished;
@@ -667,7 +684,7 @@ namespace engine::delivery {
 						// compress and no group to expand - the chunks are read
 						// and the assets fall out of them. Same manifest, same
 						// verification, no transport.
-						const assets::BundleEntry *const bundle = FindBundle(job.Bundle);
+						const assets::BundleEntry *const bundle = Known->FindBundle(job.Bundle);
 						if (bundle != nullptr) {
 							if (std::optional<std::vector<std::byte>> payload =
 									source.Store->ReadBundle(*Known, *bundle)) {
@@ -733,7 +750,7 @@ namespace engine::delivery {
 					return false;
 				}
 
-				const assets::BundleEntry *const bundle = FindBundle(job.Bundle);
+				const assets::BundleEntry *const bundle = Known->FindBundle(job.Bundle);
 				if (bundle == nullptr) {
 					Abandon(job.Bundle);
 					return true;
@@ -763,23 +780,13 @@ namespace engine::delivery {
 				return true;
 			}
 
-			const assets::BundleEntry *FindBundle(const assets::ContentHash &root) const {
-				for (const assets::BundleEntry &bundle : Known->Bundles()) {
-					if (bundle.Root == root) {
-						return &bundle;
-					}
-				}
-				return nullptr;
-			}
-
 			bool AnyWaiting(const assets::ContentHash &bundle) const {
 				for (const auto &entry : Requests) {
 					const Pending &pending = entry.second;
 					if (pending.State != RequestState::Pending || !pending.Located) {
 						continue;
 					}
-					const assets::BundleEntry *const carrier = Known->BundleFor(pending.Root);
-					if (carrier != nullptr && carrier->Root == bundle) {
+					if (pending.Carrier == bundle) {
 						return true;
 					}
 				}
@@ -843,8 +850,7 @@ namespace engine::delivery {
 					if (pending.State != RequestState::Pending || !pending.Located) {
 						continue;
 					}
-					const assets::BundleEntry *const carrier = Known->BundleFor(pending.Root);
-					if (carrier != nullptr && carrier->Root == bundle) {
+					if (pending.Carrier == bundle) {
 						pending.State = RequestState::Failed;
 					}
 				}

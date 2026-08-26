@@ -169,24 +169,30 @@ namespace engine::scene {
 	//
 	// @since v0.9
 	enum class AlphaMode : uint8_t {
-		// The alpha channel is ignored and the surface is solid. What almost
-		// every texture is, and the only mode that costs nothing.
-		Opaque = 0,
+		// The colour-map alpha reveals the part colour beneath it.
+		Overlay = 0,
 
-		// A fragment below `SurfaceAppearance::AlphaCutoff` is discarded and
-		// everything else is solid.
-		//
-		// **The mode a character model needs.** Hair, eyelashes and foliage are
-		// authored as cut-out planes on a sheet with a mask; blending them puts
-		// every plane in the sorted pass, where a hundred overlapping strands
-		// cost a hundred sorted draws and still get the order wrong. A discard
-		// keeps them opaque, keeps them in the depth buffer and keeps them out
-		// of the sort.
-		Clip = 1,
+		// The colour-map alpha controls opacity. Fully opaque parts use
+		// `SurfaceAppearance::AlphaCutoff` so masked surfaces retain depth and
+		// shadows; a transparent part joins the sorted pass.
+		Transparency = 1,
 
-		// The alpha channel is a blend factor, so the surface joins the sorted
-		// transparent pass.
-		Blend = 2,
+		// The colour-map alpha controls how strongly `SurfaceAppearance::Colour`
+		// tints the sampled colour.
+		TintMask = 2,
+
+		// The colour-map alpha is ignored and the surface is solid.
+		Opaque = 3,
+	};
+
+	// How a surface's maps are filtered between source pixels.
+	//
+	// The ordinals match `ResamplerMode`, which GUI registers independently at
+	// its own layer. Scene cannot depend sideways on GUI, while scripts should
+	// still see one enum vocabulary.
+	enum class SurfaceResampleMode : uint8_t {
+		Default = 0,
+		Pixelated = 1,
 	};
 
 	// Who may see what a service holds.

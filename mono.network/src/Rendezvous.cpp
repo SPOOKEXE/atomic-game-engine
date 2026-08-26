@@ -1,6 +1,7 @@
 #include "Codec.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -533,6 +534,12 @@ namespace network {
 				// possession plus return routability and nothing more - the
 				// connection made over this address authenticates on its own
 				// terms, one layer up.
+				//
+				// A mistyped key on either side produces exactly this and looks
+				// from outside like a hole punch that never lands.
+				ENGINE_DEBUG_EVERY(
+					2.0, "poke from {} does not hold the {} key", from.Text(), guesting ? "reach" : "host"
+				);
 				Tally.Refused++;
 				return;
 			}
@@ -541,6 +548,9 @@ namespace network {
 
 			if (guesting) {
 				if (nonce != Nonce) {
+					ENGINE_DEBUG_EVERY(
+						2.0, "poke from {} carries a nonce this end did not send", from.Text()
+					);
 					Tally.Refused++;
 					return;
 				}
@@ -568,6 +578,12 @@ namespace network {
 			// A poke for a meeting this host was never told about. Dropped: the
 			// point is what introduces, and answering an uninvited poke would
 			// let anybody who guessed a session id open a mapping here.
+			ENGINE_DEBUG_EVERY(
+				2.0,
+				"poke from {} names no introduction this host was told about; {} pending",
+				from.Text(),
+				Introductions.size()
+			);
 			Tally.Refused++;
 			return;
 		}

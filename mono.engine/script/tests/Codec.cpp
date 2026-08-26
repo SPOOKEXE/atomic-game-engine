@@ -1,5 +1,4 @@
-#include "../src/Codec.hpp"
-
+#include <engine/script/Codec.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -106,6 +105,53 @@ TEST_CASE("map keys are sorted by bytes, whatever order they arrived in", "[code
 	REQUIRE(Encode(backwards, out) == CodecStatus::Ok);
 	CHECK(backwards.Entries[0].first == "alpha");
 	CHECK(backwards.Entries[2].first == "gamma");
+}
+
+TEST_CASE("two entries with one key are refused rather than sorted together", "[codec]") {
+	// **A binding can build one**, which is why this is `Encode`'s problem and
+	// not the caller's: Lua's `[1]` and `["1"]` are two table keys and one name
+	// once a key becomes a string. Writing both leaves a payload whose decode
+	// keeps whichever the sort put second, and `std::sort` does not promise
+	// which that is - so the value a receiver ends up with would depend on the
+	// order the VM walked the table in. That is exactly the determinism §1 of
+	// `Codec.hpp` exists to protect, arriving through a case the sort alone does
+	// not cover.
+	ScriptValue collided{ValueTag::Map};
+	collided.Entries.emplace_back("1", Text("from the number"));
+	collided.Entries.emplace_back("1", Text("from the string"));
+
+	std::vector<std::byte> out;
+	CHECK(Encode(collided, out) == CodecStatus::DuplicateKey);
+
+	// Nested, so the refusal is not only checked at the top of a tree.
+	ScriptValue outer{ValueTag::Map};
+	outer.Entries.emplace_back("inner", collided);
+	CHECK(Encode(outer, out) == CodecStatus::DuplicateKey);
+
+	// And two keys that merely sort next to each other are fine.
+	ScriptValue neighbours{ValueTag::Map};
+	neighbours.Entries.emplace_back("1", Number(1.0));
+	neighbours.Entries.emplace_back("10", Number(2.0));
+	neighbours.Entries.emplace_back("2", Number(3.0));
+	CHECK(Encode(neighbours, out) == CodecStatus::Ok);
+}
+
+TEST_CASE("one sort serves the bus and the JSON document", "[codec]") {
+	// `SortEntries` is public because `HttpService` writes the same tree as text
+	// and the two orders have to be one order. A caller sorting for itself is
+	// how the guarantee ends up living in two places and drifting.
+	std::vector<std::pair<std::string, ScriptValue>> entries;
+	entries.emplace_back("z", Number(1.0));
+	entries.emplace_back("\xC3\xA9", Number(2.0)); // "é" in UTF-8
+	entries.emplace_back("a", Number(3.0));
+
+	REQUIRE(engine::script::SortEntries(entries) == CodecStatus::Ok);
+	CHECK(entries[0].first == "a");
+	CHECK(entries[1].first == "z");
+	CHECK(entries[2].first == "\xC3\xA9");
+
+	entries.emplace_back("a", Number(4.0));
+	CHECK(engine::script::SortEntries(entries) == CodecStatus::DuplicateKey);
 }
 
 TEST_CASE("the sort is by bytes and not by any language's collation", "[codec]") {

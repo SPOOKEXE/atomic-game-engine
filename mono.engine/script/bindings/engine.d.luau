@@ -516,10 +516,16 @@ end
 declare extern type Enum_AlphaMode extends EnumItem with
 end
 
+declare extern type Enum_AnimationPriority extends EnumItem with
+end
+
 declare extern type Enum_ApplyStrokeMode extends EnumItem with
 end
 
 declare extern type Enum_AspectType extends EnumItem with
+end
+
+declare extern type Enum_AtmosphereProceduralShader extends EnumItem with
 end
 
 declare extern type Enum_AutomaticSize extends EnumItem with
@@ -532,6 +538,12 @@ declare extern type Enum_BorderMode extends EnumItem with
 end
 
 declare extern type Enum_CameraType extends EnumItem with
+end
+
+declare extern type Enum_CloudComputeShader extends EnumItem with
+end
+
+declare extern type Enum_ConstraintMotion extends EnumItem with
 end
 
 declare extern type Enum_ContextActionResult extends EnumItem with
@@ -618,6 +630,9 @@ end
 declare extern type Enum_SizeConstraint extends EnumItem with
 end
 
+declare extern type Enum_SkyboxComputeShader extends EnumItem with
+end
+
 declare extern type Enum_SortOrder extends EnumItem with
 end
 
@@ -671,9 +686,17 @@ end
 
 declare Enum: {
 	AlphaMode: {
+		Overlay: Enum_AlphaMode,
+		Transparency: Enum_AlphaMode,
+		TintMask: Enum_AlphaMode,
 		Opaque: Enum_AlphaMode,
-		Clip: Enum_AlphaMode,
-		Blend: Enum_AlphaMode,
+	},
+	AnimationPriority: {
+		Core: Enum_AnimationPriority,
+		Idle: Enum_AnimationPriority,
+		Movement: Enum_AnimationPriority,
+		Action: Enum_AnimationPriority,
+		Override: Enum_AnimationPriority,
 	},
 	ApplyStrokeMode: {
 		Contextual: Enum_ApplyStrokeMode,
@@ -682,6 +705,12 @@ declare Enum: {
 	AspectType: {
 		FitWithinMaxSize: Enum_AspectType,
 		ScaleWithParentSize: Enum_AspectType,
+	},
+	AtmosphereProceduralShader: {
+		Earth: Enum_AtmosphereProceduralShader,
+		Thin: Enum_AtmosphereProceduralShader,
+		Mars: Enum_AtmosphereProceduralShader,
+		Alien: Enum_AtmosphereProceduralShader,
 	},
 	AutomaticSize: {
 		None: Enum_AutomaticSize,
@@ -704,6 +733,17 @@ declare Enum: {
 		LockFirstPerson: Enum_CameraType,
 		ShiftLock: Enum_CameraType,
 		Scriptable: Enum_CameraType,
+	},
+	CloudComputeShader: {
+		Cumulus: Enum_CloudComputeShader,
+		Stratus: Enum_CloudComputeShader,
+		Storm: Enum_CloudComputeShader,
+		Voxel: Enum_CloudComputeShader,
+	},
+	ConstraintMotion: {
+		Locked: Enum_ConstraintMotion,
+		Limited: Enum_ConstraintMotion,
+		Free: Enum_ConstraintMotion,
 	},
 	ContextActionResult: {
 		Sink: Enum_ContextActionResult,
@@ -920,6 +960,13 @@ declare Enum: {
 		RelativeXY: Enum_SizeConstraint,
 		RelativeXX: Enum_SizeConstraint,
 		RelativeYY: Enum_SizeConstraint,
+	},
+	SkyboxComputeShader: {
+		Gradient: Enum_SkyboxComputeShader,
+		Sunset: Enum_SkyboxComputeShader,
+		Night: Enum_SkyboxComputeShader,
+		Nebula: Enum_SkyboxComputeShader,
+		Voxel: Enum_SkyboxComputeShader,
 	},
 	SortOrder: {
 		Name: Enum_SortOrder,
@@ -1243,8 +1290,11 @@ declare extern type Instance with
 	function IsDescendantOf(self, ancestor: Instance): boolean
 	function IsAncestorOf(self, descendant: Instance): boolean
 	function ClearAllChildren(self): ()
+	function Emit(self, count: number): ()
 	function GetPivot(self): CFrame
 	function PivotTo(self, target: CFrame): ()
+	function BulkMoveTo(self, parts: { Instance }, placements: { CFrame }): ()
+	function BulkPivotTo(self, parts: { Instance }, targets: { CFrame }): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
 	ChildAdded: InstanceSignal
 	ChildRemoved: InstanceSignal
@@ -1273,6 +1323,7 @@ declare extern type Instance with
 	function SetVertexNormal(self, vertex: number, normal: Vector3): boolean
 	function SetVertexUV(self, vertex: number, uv: Vector2): boolean
 	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
+	function SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean
 	function Clear(self): boolean
 	function Resize(self, width: number, height: number): boolean
 	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean
@@ -1326,12 +1377,16 @@ declare extern type BasePart extends PVInstance with
 	CustomPhysicalProperties: boolean
 	Density: number
 	Elasticity: number
+	EmissiveStrength: number
+	EmissiveTint: Color3
 	Friction: number
 	LinearDamping: number
 	read LocalTransparency: number
 	Locked: boolean
 	read Mass: number
+	ResampleMode: Enum_ResamplerMode
 	Size: Vector3
+	SurfaceColor: Color3
 	Transparency: number
 	Visible: boolean
 end
@@ -1341,6 +1396,7 @@ end
 
 declare extern type SpawnLocation extends Part with
 	Enabled: boolean
+	Forced: boolean
 	Neutral: boolean
 	TeamColor: Color3
 end
@@ -1353,7 +1409,13 @@ declare extern type Tool extends Model with
 end
 
 declare extern type MeshPart extends BasePart with
+	EmissiveMap: string
+	HeightMap: string
 	MeshId: string
+	MetalnessMap: string
+	NormalMap: string
+	OcclusionMap: string
+	RoughnessMap: string
 	TextureID: string
 	read TrianglesCount: number
 end
@@ -1374,6 +1436,7 @@ declare extern type SurfaceCamera extends Camera with
 end
 
 declare extern type Portal extends SurfaceCamera with
+	Bidirectional: boolean
 	Destination: Instance
 	DestinationWorld: string
 	Enabled: boolean
@@ -1442,6 +1505,139 @@ end
 declare extern type LocalizationTable extends ValueBase with
 end
 
+declare extern type Bone extends Instance with
+	InverseBindCFrame: CFrame
+	RestCFrame: CFrame
+	Transform: CFrame
+	read TransformedWorldCFrame: CFrame
+end
+
+declare extern type Animation extends Instance with
+	AnimationId: string
+	RigId: string
+end
+
+declare extern type Animator extends Instance with
+	EvaluationThrottled: boolean
+	Rig: Instance
+	RootMotion: boolean
+	RootMotionWeight: number
+end
+
+declare extern type AnimationTrack extends Instance with
+	Animation: Instance
+	FadeTime: number
+	IsPlaying: boolean
+	Looped: boolean
+	Priority: Enum_AnimationPriority
+	Speed: number
+	TimePosition: number
+	WeightCurrent: number
+	WeightTarget: number
+end
+
+declare extern type Atmosphere extends Instance with
+	Color: Color3
+	Decay: Color3
+	Density: number
+	Glare: number
+	Haze: number
+	Offset: number
+end
+
+declare extern type AtmosphereComponent extends Atmosphere with
+end
+
+declare extern type AtmosphereProcedural extends AtmosphereComponent with
+	AtmosphereHeight: number
+	Mie: number
+	PlanetRadius: number
+	ProceduralEnabled: boolean
+	Rayleigh: number
+	Samples: number
+	Shader: Enum_AtmosphereProceduralShader
+end
+
+declare extern type Clouds extends Instance with
+	Color: Color3
+	Cover: number
+	Density: number
+	Enabled: boolean
+	WindDirection: Vector2
+	WindSpeed: number
+end
+
+declare extern type CloudProcedural extends Clouds with
+end
+
+declare extern type CloudCompute extends CloudProcedural with
+	CellSize: number
+	ComputeEnabled: boolean
+	Detail: number
+	Height: number
+	Seed: number
+	Shader: Enum_CloudComputeShader
+	Steps: number
+	Thickness: number
+end
+
+declare extern type SkyboxTextures extends Instance with
+	Back: string
+	Down: string
+	Enabled: boolean
+	Front: string
+	Left: string
+	Right: string
+	Up: string
+end
+
+declare extern type SkyboxCompute extends Instance with
+	Enabled: boolean
+	GroundColor: Color3
+	HorizonColor: Color3
+	Seed: number
+	Shader: Enum_SkyboxComputeShader
+	StarDensity: number
+	SunSize: number
+	ZenithColor: Color3
+end
+
+declare extern type Constraint extends Instance with
+	Attachment0: Instance
+	Attachment1: Instance
+	Damping: number
+	Enabled: boolean
+	LowerAngle: number
+	LowerLimit: number
+	MaxForce: number
+	MaxTorque: number
+	Stiffness: number
+	Target: CFrame
+	UpperAngle: number
+	UpperLimit: number
+end
+
+declare extern type WeldConstraint extends Constraint with
+end
+
+declare extern type BallSocketConstraint extends Constraint with
+end
+
+declare extern type HingeConstraint extends Constraint with
+end
+
+declare extern type PrismaticConstraint extends Constraint with
+end
+
+declare extern type CylindricalConstraint extends Constraint with
+end
+
+declare extern type RopeConstraint extends Constraint with
+end
+
+declare extern type SpringConstraint extends Constraint with
+end
+
 declare extern type ShaderScript extends Instance with
 	read Revision: number
 end
@@ -1488,8 +1684,15 @@ declare extern type ParticleEmitter extends Instance with
 	LightEmission: number
 	LightInfluence: number
 	LockedToPart: boolean
+	MaxParticles: number
+	MaxSpeed: number
+	NoiseFrequency: number
+	NoiseScrollSpeed: number
+	NoiseStrength: number
 	Orientation: Enum_ParticleOrientation
+	RadialAcceleration: number
 	Rate: number
+	RateOverDistance: number
 	RotSpeed: NumberRange
 	Rotation: NumberRange
 	Shape: Enum_ParticleEmitterShape
@@ -1500,6 +1703,7 @@ declare extern type ParticleEmitter extends Instance with
 	Speed: NumberRange
 	SpreadAngle: Vector2
 	Squash: NumberSequence
+	TangentialAcceleration: number
 	Texture: string
 	TimeScale: number
 	Transparency: NumberSequence
@@ -1954,6 +2158,11 @@ declare extern type Workspace extends Service with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
+	TerrainChunkSize: number
+	TerrainEnabled: boolean
+	TerrainGenerator: string
+	TerrainSeed: number
+	TerrainViewDistance: number
 	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
 	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
 	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
@@ -2531,6 +2740,26 @@ type CreatableInstances = {
 	ValueBase: ValueBase,
 	StringValue: StringValue,
 	LocalizationTable: LocalizationTable,
+	Bone: Bone,
+	Animation: Animation,
+	Animator: Animator,
+	AnimationTrack: AnimationTrack,
+	Atmosphere: Atmosphere,
+	AtmosphereComponent: AtmosphereComponent,
+	AtmosphereProcedural: AtmosphereProcedural,
+	Clouds: Clouds,
+	CloudProcedural: CloudProcedural,
+	CloudCompute: CloudCompute,
+	SkyboxTextures: SkyboxTextures,
+	SkyboxCompute: SkyboxCompute,
+	Constraint: Constraint,
+	WeldConstraint: WeldConstraint,
+	BallSocketConstraint: BallSocketConstraint,
+	HingeConstraint: HingeConstraint,
+	PrismaticConstraint: PrismaticConstraint,
+	CylindricalConstraint: CylindricalConstraint,
+	RopeConstraint: RopeConstraint,
+	SpringConstraint: SpringConstraint,
 	ShaderScript: ShaderScript,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,

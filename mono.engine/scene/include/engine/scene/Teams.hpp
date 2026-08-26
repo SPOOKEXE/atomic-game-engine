@@ -104,10 +104,33 @@ namespace engine::scene {
 		// destroying the pads, so the geometry stays and the spawn stops.
 		bool Enabled = true;
 
+		// Whether this pad wins over every other, team or not.
+		//
+		// **The answer to "spawn me *there*", which the rules above cannot
+		// give.** `FindSpawn` picks the first pad in tree order that a player
+		// is allowed on, so a scene with several pads has no way to say which
+		// one a particular start should use - and reordering the tree to move a
+		// spawn is a change to the file for a decision that is not about the
+		// file. A forced pad is checked before team matching and before tree
+		// order, so it is the one the next character appears on.
+		//
+		// **Still subject to `Enabled`**, so turning a forced pad off returns
+		// the world to its ordinary rules rather than leaving nowhere to stand.
+		//
+		// **Two forced pads is a scene mistake and the first in tree order
+		// wins**, which is the same tie-break every other rule here uses. It is
+		// not an error, because a round that forces a pad per side is a
+		// reasonable thing to build and only one side's player reaches each.
+		//
+		// Taken from `Reserved`, so the row is the same size it was and a
+		// snapshot written before this reads back with `Forced` false - which is
+		// every pad that existed.
+		bool Forced = false;
+
 		// Explicit padding, so the object representation a snapshot writes
 		// holds no uninitialised bytes. The reason every other `Reserved` in
 		// this module gives.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[1] = {};
 	};
 
 	// How far apart two team colours may be and still be one side.

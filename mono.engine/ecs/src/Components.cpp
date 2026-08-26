@@ -20,12 +20,12 @@ namespace engine::ecs {
 		// `{anonymous}::Label`, so the second silently adopted the first's
 		// descriptor. Every lifetime hook then belonged to the wrong type, and
 		// the only symptom was a leak count that did not add up.
-		struct Entry {
+		struct TypeEntry {
 			ComponentId Id;
 			const void *Owner = nullptr;
 		};
 
-		struct Registry {
+		struct TypeRegistry {
 			std::mutex Guard;
 
 			// A deque rather than a vector because Describe hands back a
@@ -34,7 +34,7 @@ namespace engine::ecs {
 			// dangling pointer, at a moment - startup - when nothing is looking
 			// for that kind of bug.
 			std::deque<TypeDescriptor> Descriptors;
-			std::unordered_map<uint32_t, Entry> ByName;
+			std::unordered_map<uint32_t, TypeEntry> ByName;
 			bool Closed = false;
 		};
 
@@ -49,14 +49,14 @@ namespace engine::ecs {
 		// whole report and then segfaulted, and it depends on which static was
 		// touched first, so it appears and disappears with unrelated changes.
 		// The process reclaims the memory.
-		Registry &Get() {
-			static Registry *registry = new Registry();
+		TypeRegistry &Types() {
+			static TypeRegistry *registry = new TypeRegistry();
 			return *registry;
 		}
 
 		// Returned for an id nobody registered, so that a caller reading a
 		// corrupt snapshot gets an empty descriptor rather than a bad index.
-		const TypeDescriptor &Missing() {
+		const TypeDescriptor &MissingDescriptor() {
 			static const TypeDescriptor missing;
 			return missing;
 		}
@@ -64,7 +64,7 @@ namespace engine::ecs {
 
 	ComponentId
 	Components::Adopt(core::Name name, const TypeDescriptor &descriptor, ComponentId &slot, bool automatic) {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 
 		// The per-type check comes first, because the name table cannot make
@@ -127,24 +127,24 @@ namespace engine::ecs {
 
 		const ComponentId id{static_cast<uint32_t>(registry.Descriptors.size())};
 		registry.Descriptors.push_back(descriptor);
-		registry.ByName.emplace(name.Id(), Entry{id, &slot});
+		registry.ByName.emplace(name.Id(), TypeEntry{id, &slot});
 		slot = id;
 
 		return id;
 	}
 
 	const TypeDescriptor &Components::Describe(ComponentId id) {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 
 		if (!id.IsValid() || id.Index >= registry.Descriptors.size()) {
-			return Missing();
+			return MissingDescriptor();
 		}
 		return registry.Descriptors[id.Index];
 	}
 
 	ComponentId Components::Find(core::Name name) {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 
 		const auto found = registry.ByName.find(name.Id());
@@ -152,25 +152,25 @@ namespace engine::ecs {
 	}
 
 	size_t Components::Count() {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 		return registry.Descriptors.size();
 	}
 
 	void Components::Seal() {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 		registry.Closed = true;
 	}
 
 	void Components::Unseal() {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 		registry.Closed = false;
 	}
 
 	bool Components::Sealed() {
-		auto &registry = Get();
+		auto &registry = Types();
 		std::lock_guard lock(registry.Guard);
 		return registry.Closed;
 	}

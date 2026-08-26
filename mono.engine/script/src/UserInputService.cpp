@@ -16,16 +16,16 @@
 // @tier L9 · shared
 // @since v0.16
 
-#include "Actions.hpp"
-#include "LuauTags.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
+#include <engine/core/Log.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/script/Actions.hpp>
+#include <engine/script/LuauTags.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <algorithm>
 #include <array>
@@ -68,7 +68,7 @@ namespace engine::script {
 		// `UserInputService:IsKeyDown(Enum.KeyCode.Space)`
 		//
 		// **Takes an `EnumItem` or a string**, which is the same latitude a
-		// property with `PropertyType::Enum` gives: `part.AlphaMode = "Clip"` is
+		// property with `PropertyType::Enum` gives: `part.AlphaMode = "Transparency"` is
 		// what a migrating script already contains, and refusing it here would
 		// make input the one surface that is stricter than the rest.
 		void IsKeyDown(ScriptCall &call) {
@@ -192,6 +192,30 @@ namespace engine::script {
 
 		// --- the properties ----------------------------------------------------
 
+		// Says out loud that a write onto the window was thrown away.
+		//
+		// **Three of this service's properties are writes travelling towards a
+		// window**, and all three are dropped on a world that has no
+		// `InputState` - which is the right behaviour and was the wrong silence.
+		// A dedicated server is the ordinary case and has no window to obey; a
+		// scene script writing one of them before its host installed the
+		// resource was the bug, and it read as "the engine ignores
+		// `MouseBehavior`" because nothing anywhere said the write had gone.
+		//
+		// **Throttled rather than once**, because the honest failure here is a
+		// script setting the pointer mode every `Heartbeat` on a server: once
+		// would hide how persistent it is and unthrottled would be sixty lines a
+		// second. `ENGINE_WARN_EVERY` counts what it suppressed, so the number
+		// says which of the two is happening.
+		void ReportDroppedWindowWrite(const char *property) {
+			ENGINE_WARN_EVERY(
+				5.0,
+				"UserInputService.{} was set on a world with no input state, and the write was dropped. "
+				"A server has no window to obey; a client sets this up before its scene script runs.",
+				property
+			);
+		}
+
 		// `UserInputService.MouseBehavior`, read and written.
 		//
 		// **The one member here that travels towards the client.** A script sets
@@ -219,13 +243,18 @@ namespace engine::script {
 
 			// **Dropped on a world with no input state rather than creating
 			// one**, which is the opposite of `SoundService.Volume` and is right
-			// for the opposite reason: an `InputState` is written every frame by
-			// whoever owns the window, so a resource minted here would be one the
-			// device layer immediately overwrites - where an `AudioState` is only
-			// ever written by a script.
+			// for the opposite reason: the presence of an `InputState` is how a
+			// world says somebody is looking at it, so minting one here would
+			// have a script on a dedicated server declare a window that does not
+			// exist - where an `AudioState` has no such meaning.
+			//
+			// **Said out loud since v0.19.** See `ReportDroppedWindowWrite`: the
+			// drop is correct and the silence was not.
 			if (auto *input = call.World().ResourceMutable<InputState>()) {
 				input->Behaviour = static_cast<MouseBehavior>(ordinal);
+				return;
 			}
+			ReportDroppedWindowWrite("MouseBehavior");
 		}
 
 		// `UserInputService.MouseIconEnabled`, read and written.
@@ -244,12 +273,15 @@ namespace engine::script {
 		}
 
 		void SetMouseIconEnabled(ScriptCall &call) {
-			// Dropped on a world with no input state, for `SetMouseBehavior`'s
-			// reason: the device layer would overwrite a resource minted here.
+			// Dropped on a world with no input state and reported, for
+			// `SetMouseBehavior`'s reason: minting one would have a script
+			// declare a window that is not there.
 			const bool wanted = call.OptionalBoolean(0, true);
 			if (auto *input = call.World().ResourceMutable<InputState>()) {
 				input->MouseIconEnabled = wanted;
+				return;
 			}
+			ReportDroppedWindowWrite("MouseIconEnabled");
 		}
 
 		// What a `MouseDeltaSensitivity` of one means, in radians per pixel.
@@ -284,7 +316,9 @@ namespace engine::script {
 			const auto scale = static_cast<float>(call.AsNumber(0));
 			if (auto *controller = call.World().ResourceMutable<scene::CameraController>()) {
 				controller->Sensitivity = RADIANS_PER_PIXEL * std::max(scale, 0.0f);
+				return;
 			}
+			ReportDroppedWindowWrite("MouseDeltaSensitivity");
 		}
 
 		// `UserInputService:GetFocusedTextBox()` - the box being typed into, or

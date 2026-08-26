@@ -26,7 +26,7 @@ namespace studio {
 		// What may appear in an identifier in either language. `$` is
 		// JavaScript's alone but costs nothing to accept in Luau: this decides
 		// where a word starts, not whether it is legal.
-		bool IsWordCharacter(const char character) {
+		bool IsCompletionWordCharacter(const char character) {
 			const auto value = static_cast<unsigned char>(character);
 			return std::isalnum(value) != 0 || character == '_' || character == '$';
 		}
@@ -99,7 +99,7 @@ namespace studio {
 		size_t ChainStart(std::string_view text, size_t at) {
 			while (at > 0) {
 				const char character = text[at - 1];
-				if (IsWordCharacter(character) || character == '.' || character == ':') {
+				if (IsCompletionWordCharacter(character) || character == '.' || character == ':') {
 					at--;
 					continue;
 				}
@@ -135,7 +135,7 @@ namespace studio {
 		// typing, and following one has to stop somewhere.
 		constexpr int ASSIGNMENT_DEPTH = 8;
 
-		std::string_view Trim(std::string_view value) {
+		std::string_view TrimCompletion(std::string_view value) {
 			const size_t first = value.find_first_not_of(" \t\r");
 			if (first == std::string_view::npos) {
 				return {};
@@ -148,7 +148,7 @@ namespace studio {
 			if (value.empty() || std::isdigit(static_cast<unsigned char>(value.front())) != 0) {
 				return false;
 			}
-			return std::all_of(value.begin(), value.end(), IsWordCharacter);
+			return std::all_of(value.begin(), value.end(), IsCompletionWordCharacter);
 		}
 
 		// A dotted chain and nothing else - `part`, `game:GetService`,
@@ -159,7 +159,7 @@ namespace studio {
 				return false;
 			}
 			return std::all_of(value.begin(), value.end(), [](const char character) {
-				return IsWordCharacter(character) || character == '.' || character == ':';
+				return IsCompletionWordCharacter(character) || character == '.' || character == ':';
 			});
 		}
 
@@ -182,7 +182,7 @@ namespace studio {
 		// answers nothing, because the literal is not what the call was given
 		// first.
 		std::string_view FirstStringArgument(const std::string_view arguments) {
-			const std::string_view value = Trim(arguments);
+			const std::string_view value = TrimCompletion(arguments);
 			if (value.size() < 2 || (value.front() != '"' && value.front() != '\'')) {
 				return {};
 			}
@@ -244,12 +244,12 @@ namespace studio {
 				return {};
 			}
 
-			std::string_view value = Trim(WithoutComment(expression));
+			std::string_view value = TrimCompletion(WithoutComment(expression));
 
 			// JavaScript's statement terminator, which is the only difference
 			// between the two languages this function can see.
 			while (!value.empty() && value.back() == ';') {
-				value = Trim(value.substr(0, value.size() - 1));
+				value = TrimCompletion(value.substr(0, value.size() - 1));
 			}
 
 			if (value.empty()) {
@@ -284,7 +284,7 @@ namespace studio {
 				return {};
 			}
 
-			const std::string_view callee = Trim(value.substr(0, open));
+			const std::string_view callee = TrimCompletion(value.substr(0, open));
 			const std::string_view arguments = value.substr(open + 1, value.size() - open - 2);
 			if (!IsChain(callee)) {
 				return {};
@@ -303,7 +303,7 @@ namespace studio {
 				return ClassNamed(FirstStringArgument(arguments));
 			}
 
-			if (method == "Clone" && Trim(arguments).empty() && IsIdentifier(receiver)) {
+			if (method == "Clone" && TrimCompletion(arguments).empty() && IsIdentifier(receiver)) {
 				return ClassOfLocal(text, before, receiver, depth - 1);
 			}
 
@@ -338,9 +338,9 @@ namespace studio {
 				// A whole word, so `part` does not match inside `parts` - and
 				// not a member, so `model.part = x` is not an assignment to a
 				// local called `part`.
-				const bool wordStart = hit == 0 || (!IsWordCharacter(text[hit - 1]) && text[hit - 1] != '.' &&
-													text[hit - 1] != ':');
-				const bool wordEnd = at >= text.size() || !IsWordCharacter(text[at]);
+				const bool wordStart = hit == 0 || (!IsCompletionWordCharacter(text[hit - 1]) &&
+													text[hit - 1] != '.' && text[hit - 1] != ':');
+				const bool wordEnd = at >= text.size() || !IsCompletionWordCharacter(text[at]);
 				if (!wordStart || !wordEnd) {
 					continue;
 				}
@@ -471,13 +471,14 @@ namespace studio {
 
 			size_t at = 0;
 			while (at < text.size()) {
-				if (!IsWordCharacter(text[at]) || std::isdigit(static_cast<unsigned char>(text[at])) != 0) {
+				if (!IsCompletionWordCharacter(text[at]) ||
+					std::isdigit(static_cast<unsigned char>(text[at])) != 0) {
 					at++;
 					continue;
 				}
 
 				const size_t start = at;
-				while (at < text.size() && IsWordCharacter(text[at])) {
+				while (at < text.size() && IsCompletionWordCharacter(text[at])) {
 					at++;
 				}
 
@@ -516,7 +517,7 @@ namespace studio {
 
 		const size_t wordStart = [&] {
 			size_t at = caret;
-			while (at > 0 && IsWordCharacter(text[at - 1])) {
+			while (at > 0 && IsCompletionWordCharacter(text[at - 1])) {
 				at--;
 			}
 			return at;
@@ -859,16 +860,16 @@ namespace studio {
 	}
 
 	std::string_view WordAt(const std::string_view text, const size_t offset) {
-		if (offset >= text.size() || !IsWordCharacter(text[offset])) {
+		if (offset >= text.size() || !IsCompletionWordCharacter(text[offset])) {
 			return {};
 		}
 
 		size_t start = offset;
-		while (start > 0 && IsWordCharacter(text[start - 1])) {
+		while (start > 0 && IsCompletionWordCharacter(text[start - 1])) {
 			start--;
 		}
 		size_t end = offset;
-		while (end < text.size() && IsWordCharacter(text[end])) {
+		while (end < text.size() && IsCompletionWordCharacter(text[end])) {
 			end++;
 		}
 		return text.substr(start, end - start);

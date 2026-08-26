@@ -1,59 +1,81 @@
 # script - module invariants
 
-L9. Running a script against a world. Above `scene` at L7, because a script's
-whole vocabulary is the class tree and the property surface that module
-declares; below anything that presents, because a script builds a world and does
-not draw one.
+L9. **What a script may name, said without naming a VM.** Above `scene` at L7,
+because a script's whole vocabulary is the class tree and the property surface
+that module declares; below anything that presents, because a script builds a
+world and does not draw one.
 
-## The VM never leaves this directory
+## This module links no VM at all
 
-No `lua_State` appears in a public header. `Runtime.hpp` forward-declares it and
-holds a pointer, so nothing outside compiles against Luau and no consumer can
-call the VM directly.
+**That is the invariant, and until v0.19 it was a filename convention.** Both
+Luau and QuickJS were `VENDOR` on this row, every file in `src/` that reached
+`<lua.h>` or `<quickjs.h>` had to be named `Luau*`, `Js*` or `JavaScript*`, and
+a sixty-line CMake closure walk called `mono_check_script_vm_naming` re-derived
+that transitively on every configure. It worked, and it was the only rule in the
+repository shaped like that.
 
-That is what makes `v05.md` §5.7's second VM a source file here rather than a
-second module: JavaScript arrives beside Luau over the same `Runtime` shape,
-and every caller keeps working. The moment a vendor type reaches a public
-header, that stops being true - which is why the CMake row says `VENDOR` and not
-`VENDOR_PUBLIC`.
+It is a module boundary now, and the closure walk is deleted:
 
-## Three kinds of file in `src/`, and the build tells them apart
+| Module | L | What is in it |
+|---|---|---|
+| `script` | 9 | the port, the object model glue, the services. **No vendor** |
+| `scriptluau` | 10 | the Luau adapter, and every `lua_State *` in the engine |
+| `scriptjs` | 10 | the QuickJS adapter, and every `JSContext *` |
+| `scripthost` | 11 | one switch on `Language`, and the suites that need both |
 
-`mono_check_script_vm_naming` in this module's `CMakeLists.txt` enforces one
-sentence, on every configure, transitively:
+A `lua_State` in this directory no longer fails a naming rule. It fails to
+compile, because `<lua.h>` is not on the include path - which is what the tier
+and layer checks now buy for free, and what rule 6 asks of any constraint.
 
-> **A file in `src/` that reaches `<lua.h>` or `<quickjs.h>` - however many
-> `#include` hops away - has a name beginning `Luau`, `Js` or `JavaScript`.**
+**Neither adapter may name the other**, which is why the choice lives at L11
+rather than in one of them. Two languages over one binding surface means neither
+is the real one, and a module that hosted the other would decide that quietly.
 
-Which makes the three kinds legible from the file list alone:
+**A public header here still may not carry a VM type**, and the reason is now
+mechanical rather than moral: `ServiceSurface.hpp` forward-declares `lua_State`
+for the `lua_CFunction` rows a service surface holds, and the four functions
+that *build* one from those rows - `InstallService`, its two metamethods and
+`InstallLuauServiceMethods` - moved to `scriptluau/src/LuauBindings.hpp`. A
+declaration taking a `lua_State *` in this module is one nothing here could ever
+define.
+
+**A neutral file needing one Luau *number* is not an exception.**
+`ServiceProperty` makes a service a userdata in Luau, so `UserInputService.cpp`
+and `SoundService.cpp` each name a tag - `LuauTags.hpp` is the tag block on its
+own, with no `<lua.h>` under it, and it is a public header of *this* module
+because the surface author is the one who writes the number. The same shape
+closed `Vocabulary.cpp`: `LuauInstanceSignalNames()` has no VM type in its
+signature, so it is declared in `Signals.hpp`.
+
+## Two kinds of file in `src/`, and both compile with no VM present
 
 - **Internal machinery** - runs per tick whether or not a script exists.
   `Tweens.cpp`, `Debris.cpp`, `Bus.cpp`, `Actions.cpp`, `Teleport.cpp`,
-  `Signals.cpp`, `Changes.cpp`, `Tasks.cpp`. A system here compiles in a build
-  that never opens a VM, which is what `AdmitTeleports` has to be: a world can be
-  a teleport destination without containing a line of script.
+  `Signals.cpp`, `Changes.cpp`, `Tasks.cpp`. This is what `AdmitTeleports` has to
+  be: a world can be a teleport destination without containing a line of script.
 - **The scripting-exposed surface** - `ServiceSurface`, `ScriptMethod`,
   `ServiceProperty` and `ServiceSignal` rows, named for the service a script
   names. `UserInputService.cpp`, `ContextActionService.cpp`, `HttpService.cpp`,
-  `TweenService.cpp`, `RunService.cpp` and the rest. No VM, so both languages
-  install from the one description.
-- **Per-VM adapters** - `Luau*.cpp` and `Js*.cpp`, in pairs wherever the fact is
-  shared and only the wrapper is not: `LuauInput.cpp`/`JsInput.cpp`,
-  `LuauTween.cpp`/`JsTween.cpp`, `LuauServiceSurface.cpp`/`JsServiceSurface.cpp`.
+  `TweenService.cpp`, `RunService.cpp` and the rest. Both languages install from
+  the one description.
 
-**`ServiceCatalogue.cpp` is the one exemption and it is named in the check.** It
-has met both VMs deliberately - it names every installer so the static archive
-cannot drop one, and it walks the table once per language. A second name on that
-list is a claim that a file cannot be split and needs the same kind of argument
-written where the file is.
+**`ServiceCatalogue.cpp` used to be the one file that had met both VMs and no
+longer has.** It hands back rows of data - a name, an availability, a language
+mask and one `ServiceSurface` accessor - and each adapter walks them in its own
+currency. The linker argument that made it a *table* rather than a registrar per
+service file is unchanged and is the reason it must keep naming every accessor:
+these are static libraries, and an object file no symbol reaches is one the
+archive may drop.
 
-**A neutral file needing one Luau *number* is not an exception to this.**
-`ServiceProperty` makes a service a userdata in Luau, so `UserInputService.cpp`
-and `SoundService.cpp` each name a tag - `LuauTags.hpp` is the tag block on its
-own, with no `<lua.h>` under it, which is why they are still descriptions. The
-same shape closed `Vocabulary.cpp`: `LuauInstanceSignalNames()` has no VM type in
-its signature, so it is declared in `Signals.hpp` rather than reached through the
-Luau umbrella.
+**`Datatypes.cpp` and `PlayerSignals.cpp` are the two files the split created,
+and they are worth knowing about because they name the mistake it exposed.**
+`RegisterDatatypeEnums`, `DirectionOfAxis`, `DirectionOfNormalId`,
+`IsPlayerOfService` and `PlayerLosingCharacter` are declared in this module's
+public headers and were *defined* in `LuauDatatypes.cpp` and
+`LuauInstances.cpp` - which the old filename rule was perfectly happy with,
+because those files do meet `lua.h`. `scriptjs` called all five. That worked
+while both VMs were one library and became a link error the moment they were
+two. A neutral function defined in an adapter is the shape to refuse.
 
 ## An instance is a shim, and there is nothing underneath it
 
@@ -145,10 +167,11 @@ unreachable from JavaScript with the catalogue naming the gap and nothing able
 to close it.
 
 `ServiceSurface.hpp` is the answer: `ServiceMethod` carries a `ScriptMethod`, a
-service is a name and four lists with no VM in it, and `ServiceCatalogue.cpp`
-reads one description twice. A service method is an instance method whose
-`Subject()` is `NULL_ENTITY`, so the two adapters gained a constructor apiece
-and nothing else.
+service is a name and four lists with no VM in it, and each adapter reads that
+one description - `LuauServices.cpp` and `JsServices.cpp`, one walk each over
+the rows `ServiceCatalogue.cpp` hands back. A service method is an instance
+method whose `Subject()` is `NULL_ENTITY`, so the two adapters gained a
+constructor apiece and nothing else.
 
 **A property is not a method, and closing the last two took a second mechanism
 rather than more of the first.** `UserInputService` and `SoundService` carry live
@@ -320,7 +343,7 @@ instance in the world.
 **If you add a library, the question is what it can observe that a recording
 cannot reproduce.** That is the test, not whether it looks dangerous.
 
-## The budget counts steps, not seconds
+## The budget counts steps, not seconds - and it is spent once
 
 `RuntimeLimits::StepBudget` bounds an interrupt counter. A wall-clock deadline
 would make whether a script finished depend on how busy the machine was, and a
@@ -329,6 +352,37 @@ the desync rule 5 names, arriving through the one mechanism meant to prevent it.
 
 Memory is a hard ceiling through the allocator, so exhaustion surfaces as an
 ordinary script error rather than as a `bad_alloc` inside the interpreter.
+
+**One call spends one budget, and both interrupt handlers used to zero their
+counter on the trip.** That is not a budget: a `pcall` around a runaway loop
+caught the refusal and the next iteration got a whole fresh two hundred million
+steps, so a script could run for as long as it liked one trip at a time. Each
+runtime now carries a counter that only goes up and a *mark* that every host
+entry moves - `Run`, `Heartbeat`, `Invoke`, `Surface`; the budget is the
+difference. A reviewer should refuse anything that resets the count rather than
+the mark.
+
+**A host entry that does not move the mark is the bug this shape can still
+have.** Once tripped a runtime stays tripped, so `Surface` reading a completion
+list off a runtime whose last script ran away would have handed back an empty
+one. The rule is: if the host can call it and it passes safepoints, it moves the
+mark.
+
+**`StepsTaken()` is the same counter and the zeroing lost it**, which made
+`Costs()` report nothing for whichever script had just spent the most - the one
+the Script Profile panel is opened to find. Two readings are subtracted, so a
+counter that goes backwards anywhere reports zero somewhere.
+
+**The step budget cannot bound a microtask queue, and `RuntimeLimits::JobBudget`
+is what does.** QuickJS polls its interrupt handler once per ten thousand
+safepoints, so a reaction that queues a reaction runs essentially for ever
+without moving the step counter: measured against the vendored VM, 52 million
+jobs and 31,201 polls in two minutes, against a default budget of 200 million.
+The drain is bounded by a *count* of jobs for `StepBudget`'s reason exactly - a
+deadline would make `just determinism` and `just replay-check` depend on the
+machine. Past the bound the script is refused, the queue is left where it is, and
+the next tick drains at most another `JobBudget` of it: bounded per tick is the
+property rule 5 needs, and pretending the queue can be emptied is not available.
 
 ## A yield is legal only when something is already coming back for it
 

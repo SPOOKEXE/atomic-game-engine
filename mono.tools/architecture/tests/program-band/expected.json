@@ -1,0 +1,30 @@
+{
+  "modules": {
+    "bottom": {
+      "tier": "shared",
+      "links": []
+    },
+    "middle": {
+      "tier": "shared",
+      "layer": 2,
+      "links": [
+        "bottom"
+      ]
+    },
+    "sibling": {
+      "tier": "shared",
+      "layer": 2,
+      "links": [
+        "bottom"
+      ]
+    }
+  },
+  "programs": {
+    "app": {
+      "tier": "shared",
+      "links": [
+        "middle"
+      ]
+    }
+  }
+}

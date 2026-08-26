@@ -445,12 +445,16 @@ declare interface EnumItem { readonly Name: string; readonly EnumType: string; E
 
 declare namespace Enum {
 	interface AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
+	interface AnimationPriority extends EnumItem { readonly __enum: "AnimationPriority"; }
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
+	interface AtmosphereProceduralShader extends EnumItem { readonly __enum: "AtmosphereProceduralShader"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
+	interface CloudComputeShader extends EnumItem { readonly __enum: "CloudComputeShader"; }
+	interface ConstraintMotion extends EnumItem { readonly __enum: "ConstraintMotion"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
 	interface EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
@@ -479,6 +483,7 @@ declare namespace Enum {
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 	interface ShapeKind extends EnumItem { readonly __enum: "ShapeKind"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
+	interface SkyboxComputeShader extends EnumItem { readonly __enum: "SkyboxComputeShader"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
 	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
@@ -498,9 +503,17 @@ declare namespace Enum {
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
+		readonly Overlay: AlphaMode;
+		readonly Transparency: AlphaMode;
+		readonly TintMask: AlphaMode;
 		readonly Opaque: AlphaMode;
-		readonly Clip: AlphaMode;
-		readonly Blend: AlphaMode;
+	};
+	const AnimationPriority: {
+		readonly Core: AnimationPriority;
+		readonly Idle: AnimationPriority;
+		readonly Movement: AnimationPriority;
+		readonly Action: AnimationPriority;
+		readonly Override: AnimationPriority;
 	};
 	const ApplyStrokeMode: {
 		readonly Contextual: ApplyStrokeMode;
@@ -509,6 +522,12 @@ declare namespace Enum {
 	const AspectType: {
 		readonly FitWithinMaxSize: AspectType;
 		readonly ScaleWithParentSize: AspectType;
+	};
+	const AtmosphereProceduralShader: {
+		readonly Earth: AtmosphereProceduralShader;
+		readonly Thin: AtmosphereProceduralShader;
+		readonly Mars: AtmosphereProceduralShader;
+		readonly Alien: AtmosphereProceduralShader;
 	};
 	const AutomaticSize: {
 		readonly None: AutomaticSize;
@@ -531,6 +550,17 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+	};
+	const CloudComputeShader: {
+		readonly Cumulus: CloudComputeShader;
+		readonly Stratus: CloudComputeShader;
+		readonly Storm: CloudComputeShader;
+		readonly Voxel: CloudComputeShader;
+	};
+	const ConstraintMotion: {
+		readonly Locked: ConstraintMotion;
+		readonly Limited: ConstraintMotion;
+		readonly Free: ConstraintMotion;
 	};
 	const ContextActionResult: {
 		readonly Sink: ContextActionResult;
@@ -747,6 +777,13 @@ declare namespace Enum {
 		readonly RelativeXY: SizeConstraint;
 		readonly RelativeXX: SizeConstraint;
 		readonly RelativeYY: SizeConstraint;
+	};
+	const SkyboxComputeShader: {
+		readonly Gradient: SkyboxComputeShader;
+		readonly Sunset: SkyboxComputeShader;
+		readonly Night: SkyboxComputeShader;
+		readonly Nebula: SkyboxComputeShader;
+		readonly Voxel: SkyboxComputeShader;
 	};
 	const SortOrder: {
 		readonly Name: SortOrder;
@@ -1047,8 +1084,11 @@ declare interface Instance {
 	IsDescendantOf(ancestor: Instance): boolean;
 	IsAncestorOf(descendant: Instance): boolean;
 	ClearAllChildren(): void;
+	Emit(count: number): void;
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
+	BulkMoveTo(parts: Instance[], placements: CFrame[]): void;
+	BulkPivotTo(parts: Instance[], targets: CFrame[]): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
 	readonly ChildAdded: InstanceSignal;
 	readonly ChildRemoved: InstanceSignal;
@@ -1077,6 +1117,7 @@ declare interface Instance {
 	SetVertexNormal(vertex: number, normal: Vector3): boolean;
 	SetVertexUV(vertex: number, uv: Vector2): boolean;
 	SetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;
+	SetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;
 	Clear(): boolean;
 	Resize(width: number, height: number): boolean;
 	DrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: number): boolean;
@@ -1130,12 +1171,16 @@ declare interface BasePart extends PVInstance {
 	CustomPhysicalProperties: boolean;
 	Density: number;
 	Elasticity: number;
+	EmissiveStrength: number;
+	EmissiveTint: Color3;
 	Friction: number;
 	LinearDamping: number;
 	readonly LocalTransparency: number;
 	Locked: boolean;
 	readonly Mass: number;
+	ResampleMode: Enum.ResamplerMode;
 	Size: Vector3;
+	SurfaceColor: Color3;
 	Transparency: number;
 	Visible: boolean;
 }
@@ -1145,6 +1190,7 @@ declare interface Part extends BasePart {
 
 declare interface SpawnLocation extends Part {
 	Enabled: boolean;
+	Forced: boolean;
 	Neutral: boolean;
 	TeamColor: Color3;
 }
@@ -1157,7 +1203,13 @@ declare interface Tool extends Model {
 }
 
 declare interface MeshPart extends BasePart {
+	EmissiveMap: string;
+	HeightMap: string;
 	MeshId: string;
+	MetalnessMap: string;
+	NormalMap: string;
+	OcclusionMap: string;
+	RoughnessMap: string;
 	TextureID: string;
 	readonly TrianglesCount: number;
 }
@@ -1178,6 +1230,7 @@ declare interface SurfaceCamera extends Camera {
 }
 
 declare interface Portal extends SurfaceCamera {
+	Bidirectional: boolean;
 	Destination: Instance;
 	DestinationWorld: string;
 	Enabled: boolean;
@@ -1246,6 +1299,139 @@ declare interface StringValue extends ValueBase {
 declare interface LocalizationTable extends ValueBase {
 }
 
+declare interface Bone extends Instance {
+	InverseBindCFrame: CFrame;
+	RestCFrame: CFrame;
+	Transform: CFrame;
+	readonly TransformedWorldCFrame: CFrame;
+}
+
+declare interface Animation extends Instance {
+	AnimationId: string;
+	RigId: string;
+}
+
+declare interface Animator extends Instance {
+	EvaluationThrottled: boolean;
+	Rig: Instance;
+	RootMotion: boolean;
+	RootMotionWeight: number;
+}
+
+declare interface AnimationTrack extends Instance {
+	Animation: Instance;
+	FadeTime: number;
+	IsPlaying: boolean;
+	Looped: boolean;
+	Priority: Enum.AnimationPriority;
+	Speed: number;
+	TimePosition: number;
+	WeightCurrent: number;
+	WeightTarget: number;
+}
+
+declare interface Atmosphere extends Instance {
+	Color: Color3;
+	Decay: Color3;
+	Density: number;
+	Glare: number;
+	Haze: number;
+	Offset: number;
+}
+
+declare interface AtmosphereComponent extends Atmosphere {
+}
+
+declare interface AtmosphereProcedural extends AtmosphereComponent {
+	AtmosphereHeight: number;
+	Mie: number;
+	PlanetRadius: number;
+	ProceduralEnabled: boolean;
+	Rayleigh: number;
+	Samples: number;
+	Shader: Enum.AtmosphereProceduralShader;
+}
+
+declare interface Clouds extends Instance {
+	Color: Color3;
+	Cover: number;
+	Density: number;
+	Enabled: boolean;
+	WindDirection: Vector2;
+	WindSpeed: number;
+}
+
+declare interface CloudProcedural extends Clouds {
+}
+
+declare interface CloudCompute extends CloudProcedural {
+	CellSize: number;
+	ComputeEnabled: boolean;
+	Detail: number;
+	Height: number;
+	Seed: number;
+	Shader: Enum.CloudComputeShader;
+	Steps: number;
+	Thickness: number;
+}
+
+declare interface SkyboxTextures extends Instance {
+	Back: string;
+	Down: string;
+	Enabled: boolean;
+	Front: string;
+	Left: string;
+	Right: string;
+	Up: string;
+}
+
+declare interface SkyboxCompute extends Instance {
+	Enabled: boolean;
+	GroundColor: Color3;
+	HorizonColor: Color3;
+	Seed: number;
+	Shader: Enum.SkyboxComputeShader;
+	StarDensity: number;
+	SunSize: number;
+	ZenithColor: Color3;
+}
+
+declare interface Constraint extends Instance {
+	Attachment0: Instance;
+	Attachment1: Instance;
+	Damping: number;
+	Enabled: boolean;
+	LowerAngle: number;
+	LowerLimit: number;
+	MaxForce: number;
+	MaxTorque: number;
+	Stiffness: number;
+	Target: CFrame;
+	UpperAngle: number;
+	UpperLimit: number;
+}
+
+declare interface WeldConstraint extends Constraint {
+}
+
+declare interface BallSocketConstraint extends Constraint {
+}
+
+declare interface HingeConstraint extends Constraint {
+}
+
+declare interface PrismaticConstraint extends Constraint {
+}
+
+declare interface CylindricalConstraint extends Constraint {
+}
+
+declare interface RopeConstraint extends Constraint {
+}
+
+declare interface SpringConstraint extends Constraint {
+}
+
 declare interface ShaderScript extends Instance {
 	readonly Revision: number;
 }
@@ -1292,8 +1478,15 @@ declare interface ParticleEmitter extends Instance {
 	LightEmission: number;
 	LightInfluence: number;
 	LockedToPart: boolean;
+	MaxParticles: number;
+	MaxSpeed: number;
+	NoiseFrequency: number;
+	NoiseScrollSpeed: number;
+	NoiseStrength: number;
 	Orientation: Enum.ParticleOrientation;
+	RadialAcceleration: number;
 	Rate: number;
+	RateOverDistance: number;
 	RotSpeed: NumberRange;
 	Rotation: NumberRange;
 	Shape: Enum.ParticleEmitterShape;
@@ -1304,6 +1497,7 @@ declare interface ParticleEmitter extends Instance {
 	Speed: NumberRange;
 	SpreadAngle: Vector2;
 	Squash: NumberSequence;
+	TangentialAcceleration: number;
 	Texture: string;
 	TimeScale: number;
 	Transparency: NumberSequence;
@@ -1758,6 +1952,11 @@ declare interface Workspace extends Service {
 	CurrentCamera: Instance;
 	MaxSurfaces: number;
 	SurfaceBounces: number;
+	TerrainChunkSize: number;
+	TerrainEnabled: boolean;
+	TerrainGenerator: string;
+	TerrainSeed: number;
+	TerrainViewDistance: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	RaycastThroughPortals(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	OverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): Instance[];
@@ -2229,6 +2428,26 @@ declare const Instance: {
 		(className: "ValueBase", parent?: Instance): ValueBase;
 		(className: "StringValue", parent?: Instance): StringValue;
 		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
+		(className: "Bone", parent?: Instance): Bone;
+		(className: "Animation", parent?: Instance): Animation;
+		(className: "Animator", parent?: Instance): Animator;
+		(className: "AnimationTrack", parent?: Instance): AnimationTrack;
+		(className: "Atmosphere", parent?: Instance): Atmosphere;
+		(className: "AtmosphereComponent", parent?: Instance): AtmosphereComponent;
+		(className: "AtmosphereProcedural", parent?: Instance): AtmosphereProcedural;
+		(className: "Clouds", parent?: Instance): Clouds;
+		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
+		(className: "CloudCompute", parent?: Instance): CloudCompute;
+		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;
+		(className: "SkyboxCompute", parent?: Instance): SkyboxCompute;
+		(className: "Constraint", parent?: Instance): Constraint;
+		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
+		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;
+		(className: "HingeConstraint", parent?: Instance): HingeConstraint;
+		(className: "PrismaticConstraint", parent?: Instance): PrismaticConstraint;
+		(className: "CylindricalConstraint", parent?: Instance): CylindricalConstraint;
+		(className: "RopeConstraint", parent?: Instance): RopeConstraint;
+		(className: "SpringConstraint", parent?: Instance): SpringConstraint;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;

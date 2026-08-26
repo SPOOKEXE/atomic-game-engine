@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/msl/Translate.hpp>
 
 #include <algorithm>
@@ -79,6 +80,16 @@ namespace engine::msl {
 			Collect(compiler, resources.separate_samplers, false, samplers);
 			SortBySlot(samplers);
 
+			// The first shader in this engine to reach the untested branch says
+			// so, because the symptom otherwise is a sampler on the wrong index
+			// on one platform and a correct picture on the other.
+			if (!samplers.empty()) {
+				ENGINE_WARN(
+					"{} separate sampler(s): the sampler index path below has never run in this engine",
+					samplers.size()
+				);
+			}
+
 			uint32_t textureIndex = 0;
 			uint32_t samplerIndex = 0;
 			for (const Slot &slot : textures) {
@@ -91,6 +102,18 @@ namespace engine::msl {
 					binding.msl_sampler = samplerIndex++;
 				}
 				compiler.add_msl_resource_binding(binding);
+
+				// The one fact this module produces, and the one nothing can
+				// read back off a machine with no Metal device. A texture on the
+				// wrong index samples another map on macOS and is right on
+				// Linux, so the assignment is traced rather than inferred.
+				ENGINE_TRACE(
+					"set {} binding {} -> [[texture({})]]{}",
+					slot.Set,
+					slot.Binding,
+					binding.msl_texture,
+					slot.Combined ? " with its own sampler" : ""
+				);
 			}
 
 			for (const Slot &slot : samplers) {
@@ -100,6 +123,9 @@ namespace engine::msl {
 				binding.binding = slot.Binding;
 				binding.msl_sampler = samplerIndex++;
 				compiler.add_msl_resource_binding(binding);
+				ENGINE_TRACE(
+					"set {} binding {} -> [[sampler({})]]", slot.Set, slot.Binding, binding.msl_sampler
+				);
 			}
 
 			uint32_t bufferIndex = 0;
@@ -110,7 +136,20 @@ namespace engine::msl {
 				binding.binding = slot.Binding;
 				binding.msl_buffer = bufferIndex++;
 				compiler.add_msl_resource_binding(binding);
+				ENGINE_TRACE(
+					"set {} binding {} -> [[buffer({})]]", slot.Set, slot.Binding, binding.msl_buffer
+				);
 			}
+
+			// The counts are what a caller compares against `shadercheck`'s
+			// independent derivation when the two disagree.
+			ENGINE_DEBUG(
+				"execution model {}: {} texture(s), {} sampler(s), {} buffer(s)",
+				static_cast<int>(stage),
+				textures.size(),
+				samplerIndex,
+				buffers.size()
+			);
 		}
 	}
 
@@ -119,6 +158,7 @@ namespace engine::msl {
 		if (spirv.empty()) {
 			translation.Failed = true;
 			translation.Error = "no SPIR-V to translate";
+			ENGINE_WARN("asked to translate an empty module");
 			return translation;
 		}
 
@@ -149,6 +189,9 @@ namespace engine::msl {
 			compiler.set_msl_options(options);
 			AssignBindings(compiler);
 			translation.Source = compiler.compile();
+			ENGINE_DEBUG(
+				"translated {} words of SPIR-V into {} bytes of MSL", spirv.size(), translation.Source.size()
+			);
 		} catch (const spirv_cross::CompilerError &failure) {
 			// **The exception stops here and becomes a string.** One caller is a
 			// build step that turns it into a failed build and the other is a
@@ -157,6 +200,11 @@ namespace engine::msl {
 			translation.Failed = true;
 			translation.Error = failure.what();
 			translation.Source.clear();
+
+			// `Debug` rather than `Warning`: one caller fails a build with this
+			// and the other shows it to whoever wrote the shader, so the line
+			// here is for the developer watching both, not a second report.
+			ENGINE_DEBUG("SPIRV-Cross refused {} words: {}", spirv.size(), translation.Error);
 		}
 
 		return translation;

@@ -1,5 +1,6 @@
 #include "Utf8.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
@@ -177,6 +178,10 @@ namespace engine::gui {
 		// gives: a selection parked on something no move can leave is a state a
 		// player recovers from by restarting.
 		if (instance != ecs::NULL_ENTITY && !Selectable(store, instance)) {
+			// `Select` answers `false` for four different reasons and a caller
+			// cannot tell them apart, so each one names itself. This is the one
+			// a gamepad author hits: the target is not selectable.
+			ENGINE_DEBUG("selection refused: entity {} is not selectable", instance.Id);
 			return false;
 		}
 
@@ -252,7 +257,17 @@ namespace engine::gui {
 								 : move == SelectionMove::Left ? selection->NextLeft
 															   : selection->NextRight;
 			if (named != ecs::NULL_ENTITY && Selectable(store, named)) {
+				ENGINE_DEBUG("selection: authored override {} -> {}", current.Id, named.Id);
 				return Select(store, named);
+			}
+			if (named != ecs::NULL_ENTITY) {
+				// A dead override is what makes a menu jump somewhere the author
+				// did not write, and the fall-through is silent without this.
+				ENGINE_DEBUG(
+					"selection: override {} from {} is gone or not selectable; scoring instead",
+					named.Id,
+					current.Id
+				);
 			}
 		}
 
@@ -292,8 +307,12 @@ namespace engine::gui {
 		}
 
 		if (best == ecs::NULL_ENTITY) {
+			ENGINE_DEBUG(
+				"selection: nothing scored from {} among {} command(s)", current.Id, list.Commands.size()
+			);
 			return false;
 		}
+		ENGINE_DEBUG("selection: {} -> {} at score {}", current.Id, best.Id, bestScore);
 		return Select(store, best);
 	}
 

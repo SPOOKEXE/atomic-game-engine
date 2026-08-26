@@ -45,7 +45,7 @@ namespace engine::ui {
 			return ImGui::GetColorU32(ImVec4{tint.R, tint.G, tint.B, alpha});
 		}
 
-		struct Space {
+		struct GradientSpace {
 			ImVec2 Origin;
 			float Scale = 1.0f;
 
@@ -95,7 +95,9 @@ namespace engine::ui {
 		// many-stop one is smoother here than it should be. The editor is not
 		// the shipping surface and `ui/AGENTS.md` says so; what matters is that
 		// neither backend disagrees about *where* an element is.
-		void ShadeVertices(ImDrawList *into, int first, const gui::DrawGradient &ramp, const Space &space) {
+		void ShadeVertices(
+			ImDrawList *into, int first, const gui::DrawGradient &ramp, const GradientSpace &space
+		) {
 			const float span = ramp.Axis.X * ramp.Axis.X + ramp.Axis.Y * ramp.Axis.Y;
 
 			for (int index = first; index < into->VtxBuffer.Size; index++) {
@@ -257,7 +259,10 @@ namespace engine::ui {
 		}
 
 		size_t PaintImage(
-			const DrawCommand &command, ImDrawList *into, const Space &space, const ImageSource &images
+			const DrawCommand &command,
+			ImDrawList *into,
+			const GradientSpace &space,
+			const ImageSource &images
 		) {
 			const ImVec2 min = space.Point(command.Bounds.Min);
 			const ImVec2 max = space.Point(command.Bounds.Max);
@@ -369,7 +374,7 @@ namespace engine::ui {
 		// one thing `PaintText` below refuses in as many words. `ui/AGENTS.md`
 		// carries why the editor is allowed to be the poorer of the two: what
 		// must agree between them is *where an element is*, and that does.
-		size_t PaintRichText(const DrawCommand &command, ImDrawList *into, const Space &space) {
+		size_t PaintRichText(const DrawCommand &command, ImDrawList *into, const GradientSpace &space) {
 			const float baseSize = static_cast<float>(command.TextSize) * space.Scale;
 			ImFont *baseFont = Font(FaceFor(command.Font));
 			ImFont *measure = baseFont != nullptr ? baseFont : ImGui::GetFont();
@@ -503,7 +508,7 @@ namespace engine::ui {
 			return drawn;
 		}
 
-		size_t PaintText(const DrawCommand &command, ImDrawList *into, const Space &space) {
+		size_t PaintText(const DrawCommand &command, ImDrawList *into, const GradientSpace &space) {
 			if (!command.Spans.empty() && command.TextSize > 0 && !command.Text.empty()) {
 				return PaintRichText(command, into, space);
 			}
@@ -606,7 +611,7 @@ namespace engine::ui {
 			return 0;
 		}
 
-		const Space space{target.Origin, target.Scale};
+		const GradientSpace space{target.Origin, target.Scale};
 		size_t drawn = 0;
 
 		for (const DrawCommand &command : list.Commands) {

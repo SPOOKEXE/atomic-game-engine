@@ -1,5 +1,7 @@
 #include "Importers.hpp"
 
+#include <engine/core/Log.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -519,9 +521,22 @@ namespace engine::bake {
 			// index expansion and the line and point modes are not geometry
 			// this renders, so both are skipped rather than mis-expanded.
 			if (primitive.value("mode", 4u) != 4u) {
+				// A whole primitive vanishes from the model and nothing in the
+				// result says a piece is missing.
+				ENGINE_WARN(
+					"gltf: mesh {} primitive {} is mode {}, not triangles; it is skipped",
+					piece.MeshIndex,
+					piece.PrimitiveIndex,
+					primitive.value("mode", 4u)
+				);
 				continue;
 			}
 			if (!primitive.contains("attributes") || !primitive["attributes"].contains("POSITION")) {
+				ENGINE_WARN(
+					"gltf: mesh {} primitive {} has no POSITION attribute; it is skipped",
+					piece.MeshIndex,
+					piece.PrimitiveIndex
+				);
 				continue;
 			}
 
@@ -616,8 +631,17 @@ namespace engine::bake {
 			// A run that is not whole triangles would be refused by
 			// `MeshData::IsValid` later with nothing to say which primitive did
 			// it, so it is trimmed here where the name is still to hand.
+			const size_t beforeTrim = imported.Mesh.Indices.size();
 			while ((imported.Mesh.Indices.size() - firstIndex) % 3 != 0) {
 				imported.Mesh.Indices.pop_back();
+			}
+			if (imported.Mesh.Indices.size() != beforeTrim) {
+				ENGINE_WARN(
+					"gltf: mesh {} primitive {} had {} trailing index/indices that were not a whole triangle",
+					piece.MeshIndex,
+					piece.PrimitiveIndex,
+					beforeTrim - imported.Mesh.Indices.size()
+				);
 			}
 			if (imported.Mesh.Indices.size() == firstIndex) {
 				continue;

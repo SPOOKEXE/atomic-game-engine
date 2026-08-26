@@ -12,7 +12,7 @@ namespace engine::ecs {
 		// One node's tree links, for writing. Every call may move the row it
 		// points into, so a caller holding two of these at once is holding one
 		// that has already gone stale.
-		Hierarchy *MutableNodeOf(StoreState &state, Entity instance) {
+		Hierarchy *MutableNode(StoreState &state, Entity instance) {
 			return static_cast<Hierarchy *>(
 				GetComponentMutable(state, instance, Components::Of<Hierarchy>())
 			);
@@ -26,7 +26,7 @@ namespace engine::ecs {
 		// neighbourhood: a parent, two siblings and the direct children are
 		// every link that can name it.
 		void RelinkTree(StoreState &state, Entity from, Entity to) {
-			const Hierarchy *node = MutableNodeOf(state, to);
+			const Hierarchy *node = MutableNode(state, to);
 			if (node == nullptr) {
 				// Not an instance, so there is no tree to relink.
 				return;
@@ -36,7 +36,7 @@ namespace engine::ecs {
 			// pointer above naming somebody else's node.
 			const Hierarchy links = *node;
 
-			Hierarchy *parent = MutableNodeOf(state, links.Parent);
+			Hierarchy *parent = MutableNode(state, links.Parent);
 			if (parent != nullptr) {
 				if (parent->FirstChild == from) {
 					parent->FirstChild = to;
@@ -46,18 +46,18 @@ namespace engine::ecs {
 				}
 			}
 
-			Hierarchy *previous = MutableNodeOf(state, links.PreviousSibling);
+			Hierarchy *previous = MutableNode(state, links.PreviousSibling);
 			if (previous != nullptr) {
 				previous->NextSibling = to;
 			}
 
-			Hierarchy *next = MutableNodeOf(state, links.NextSibling);
+			Hierarchy *next = MutableNode(state, links.NextSibling);
 			if (next != nullptr) {
 				next->PreviousSibling = to;
 			}
 
 			for (Entity child = links.FirstChild; child != NULL_ENTITY;) {
-				Hierarchy *link = MutableNodeOf(state, child);
+				Hierarchy *link = MutableNode(state, child);
 				if (link == nullptr) {
 					break;
 				}

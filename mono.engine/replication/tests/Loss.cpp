@@ -17,6 +17,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/net/LossyTransport.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
@@ -563,12 +564,23 @@ TEST_CASE("a handshake survives a link that is dropping datagrams", "[replicatio
 		world.Set<Spot>(world.Create(), Spot{static_cast<float>(index), 0.0f});
 	}
 
+	// **The datagram stack, named rather than defaulted.** This case is about
+	// the admission exchange that stack has and QUIC does not - a hello, a
+	// cookie and a welcome on the unreliable channel, covered by the
+	// initiator's repeat timer and nothing else. QUIC's own handshake loss is
+	// `QuicWire.cpp`'s and `Negotiation.cpp`'s.
+	engine::replication::ListenerSettings serving;
+	serving.Wire = engine::net::WireMode::Datagram;
+
+	engine::replication::ConnectorSettings connecting;
+	connecting.Advertised = engine::net::WireMode::Datagram;
+
 	double now = 0.0;
-	engine::replication::Listener listener(*serverEnd, {});
+	engine::replication::Listener listener(*serverEnd, serving);
 	listener.Authority().Replicate(engine::core::Name("endtoend_test.Spot"));
 
 	engine::ecs::Store replica("client");
-	engine::replication::Connector connector(*clientEnd, serverEnd->Local(), now, {});
+	engine::replication::Connector connector(*clientEnd, serverEnd->Local(), now, connecting);
 
 	for (int tick = 1; tick <= 2048 && !connector.Joined(); tick++) {
 		now += 1.0 / 60.0;

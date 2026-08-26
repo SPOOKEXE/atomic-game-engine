@@ -36,7 +36,31 @@ namespace engine::core {
 	// A broad owner used to group a span's self time in the frame overlay.
 	enum class ProfileCategory : uint8_t {
 		Engine, // General engine work.
-		Render, // Rendering work.
+		Render, // Rendering work: culling, ordering, and recording commands.
+
+		// Time the *device* spent executing, as its own timestamps measured it.
+		//
+		// **A category rather than part of `Render`, because the two are
+		// different resources and adding them makes the panel lie.** `Render` is
+		// CPU wall clock inside this process: how long it took to walk the draw
+		// list and record command buffers. This is how long the GPU was busy
+		// afterwards, which overlaps that recording, overlaps the next frame's,
+		// and is not spent by this thread at all. Folded into `Render` it would
+		// read as a renderer that costs twice what it does, and a frame CPU-bound
+		// on command recording would be indistinguishable from one GPU-bound on
+		// fill rate - which is the single most useful thing a reader wants this
+		// panel to tell them apart.
+		//
+		// **Always a `Reported` span, and never a `Scope`.** Nothing on the CPU
+		// can hold a scope open across a GPU pass, so this arrives after the fact
+		// through `FrameGraph::Report` once the device's query pool resolves -
+		// which is up to a few frames after the work happened.
+		// `render::Renderer::CollectTimings` is the only producer, and the
+		// guarantee it keeps is that every measurement is reported exactly once:
+		// per-frame attribution lags, and totals over a run are exact.
+		//
+		// @since v0.19
+		Gpu,
 
 		// Time inside the entity-component system: the scheduler, and every
 		// system it ran that no narrower category below claims.
@@ -183,6 +207,15 @@ namespace engine::core {
 		// one millisecond of wall clock. The overlay marks them so a reader
 		// knows which bars are concurrent.
 		bool Reported = false;
+
+		// Whether this reported span is a structural total whose direct
+		// reported children break that total down.
+		//
+		// Ordinary reported spans are leaves and are not subtracted from a
+		// measured parent's self time. A summary is different: its duration is
+		// already the total of the work below it, so retaining every child's
+		// duration as self time would count that work once per tree level.
+		bool Summary = false;
 	};
 
 	// Fills in `FrameSpan::IdleMilliseconds` across a frame's spans.
@@ -250,6 +283,96 @@ namespace engine::core {
 	//         complete.
 	// @since v0.16
 	bool WriteFoldedStacks(const std::filesystem::path &path, const FoldedStacks &totals);
+
+	// How a rule compares a reading with its threshold.
+	//
+	// @since v0.19
+	enum class TriggerTest : uint8_t {
+		Above, // The reading is greater than the threshold.
+		Below, // The reading is less than the threshold.
+	};
+
+	// What a rule reads out of a completed frame.
+	//
+	// @since v0.19
+	enum class TriggerSubject : uint8_t {
+		// Total inclusive milliseconds of every span named `Name`. A frame
+		// that did not run the span is not a reading at all rather than a
+		// reading of zero, so an `under` rule waits for the span rather than
+		// firing on the first frame without it.
+		Span,
+		SpanSelf, // The same, self time only, and absent the same way.
+		Category, // `CategoryMilliseconds(Category)`.
+		Frame,	  // `FrameMilliseconds()`.
+		Unmarked, // `UnmarkedMilliseconds()`.
+		Dropped,  // `Dropped()`, as a count rather than a duration.
+	};
+
+	// One condition that stops the graph when a frame meets it.
+	//
+	// **Deliberately one comparison and no expression language.** Every rule
+	// anybody has asked for is "this number got too big"; a grammar would be a
+	// second thing to learn for the same answer, and a rule nobody can read at
+	// a glance is one nobody trusts when it fires.
+	//
+	// @since v0.19
+	struct FrameTrigger {
+		// The span name to total, exactly. Ignored unless `Subject` is `Span`
+		// or `SpanSelf`.
+		//
+		// Owned rather than a view: a rule outlives the frame that named it,
+		// and the panel's text field is edited under it.
+		std::string Name;
+
+		// Which category to read. Ignored unless `Subject` is `Category`.
+		ProfileCategory Category = ProfileCategory::Engine;
+
+		// What this rule reads, which decides whether `Name` or `Category` is
+		// the one that matters.
+		TriggerSubject Subject = TriggerSubject::Span;
+
+		// Which side of `Threshold` fires the rule.
+		TriggerTest Test = TriggerTest::Above;
+
+		// Milliseconds, or a count for `Dropped`.
+		float Threshold = 0.0f;
+
+		// A rule that is off is kept rather than removed, so somebody may
+		// switch one on for a run without retyping it.
+		bool Enabled = true;
+	};
+
+	// Returns the name a rule's subject is written under, in a file and in the
+	// panel's list. Stable: preferences are matched against it.
+	//
+	// @since v0.19
+	std::string_view GetTriggerSubjectName(TriggerSubject subject);
+
+	// Returns the name a rule's comparison is written under. Stable, for the
+	// same reason.
+	//
+	// @since v0.19
+	std::string_view GetTriggerTestName(TriggerTest test);
+
+	// What fired, and what the reading was.
+	//
+	// @since v0.19
+	struct FrameTriggerHit {
+		// Index into the list that was armed. The list may have been edited
+		// since, which is why the name below is copied rather than looked up.
+		size_t Rule = 0;
+
+		// The reading that met the condition.
+		float Reading = 0.0f;
+
+		// The threshold it met.
+		float Threshold = 0.0f;
+
+		// What the rule was reading, spelled for a person. The span name for a
+		// span rule, the category name for a category rule, and the subject's
+		// own name otherwise.
+		std::string Subject;
+	};
 
 	// Collects one thread's nested scopes into a bounded per-frame tree and
 	// short spike history for the in-game overlay.
@@ -356,6 +479,21 @@ namespace engine::core {
 		// count because a partial flame graph must not look complete.
 		static size_t Dropped();
 
+		// The counter `EndFrame` adds every frame's drops to.
+		//
+		// **Because the overlay was the only thing that could see them**, and a
+		// headless server is precisely the program that runs parallel compute
+		// and has no overlay. `docs/ARCH_REVIEW.md` §G2 asks for the drop to be
+		// visible rather than silent; this is how. Named here rather than
+		// spelled twice, because a counter whose name is a literal in two files
+		// is a counter that gets renamed in one of them.
+		//
+		// Nothing is added on a frame that dropped nothing, so a report with no
+		// such row is a run that lost no spans.
+		//
+		// @since v0.19
+		static constexpr std::string_view DROPPED_COUNTER = "core.framegraph.dropped";
+
 		// --- timings measured somewhere else -----------------------------------
 
 		// Records a span whose duration was measured on another thread or in
@@ -375,10 +513,11 @@ namespace engine::core {
 		// behind about a worker is worth far more than being silent about one.
 		//
 		// The span is placed at the current depth, so a reported worker sits
-		// under whatever opened the batch. Its start is the moment of the call
-		// rather than the moment the work happened: this is a duration in a
-		// tree, not a position on a timeline, and pretending otherwise would
-		// draw bars that overlap their own parent.
+		// under whatever opened the batch. EndFrame packs reported siblings in
+		// their recorded order from their parent's start. Their producer supplied
+		// no wall-clock start, so this is deliberately a logical work layout: it
+		// preserves the hierarchy without drawing every reconstructed child at
+		// the instant the report was copied onto this thread.
 		//
 		// @param name         What ran. Same lifetime rule as `Scope`: a
 		//                     literal, or text outliving the frame.
@@ -428,21 +567,25 @@ namespace engine::core {
 		// profiler caught a headless client at 10 MiB across 20,249 blocks and
 		// still climbing after forty seconds, for a panel nobody had open.
 		//
-		// A quarter of a million readings is exactly 2 MiB, allocated once when
+		// One million readings is exactly 8 MiB, allocated once when
 		// collection is switched on. What it buys in window depth depends on how
 		// many distinct spans a frame has: fifty is about five thousand frames,
-		// which is five seconds at a thousand frames a second and rather less
-		// above that. `HistoryFrames` and `HistorySeconds` report what was
-		// actually kept, so a snapshot says what it covers rather than assuming.
+		// while five hundred is about two thousand frames. Both cover the five
+		// second window at the rates those workloads sustain. `HistoryFrames` and
+		// `HistorySeconds` report what was actually kept, so a snapshot says what
+		// it covers rather than assuming.
 		//
 		// @since v0.18
-		static constexpr size_t MAXIMUM_HISTORY_READINGS = 1 << 18;
+		static constexpr size_t MAXIMUM_HISTORY_READINGS = 1 << 20;
 
 		// Distinct span names the history tracks. Past this a name is not
-		// recorded and the snapshot says how many it turned away - a copied
-		// name is arbitrary text, so a script naming a zone per chunk could
-		// otherwise grow this without limit.
-		static constexpr size_t MAXIMUM_HISTORY_NAMES = 256;
+		// recorded and the snapshot says how many it turned away. The original
+		// 256 bound was below this repository's own instrumentation: a Studio run
+		// of its three default worlds measured 29,711 refused occurrences in five
+		// seconds, making the retained names depend on which systems ran first.
+		// Two thousand names retain every first-party section with room for
+		// runtime system names while keeping arbitrary script text bounded.
+		static constexpr size_t MAXIMUM_HISTORY_NAMES = 2048;
 
 		// Returns the worst *single* reading for a named span in any of the last
 		// RECENT_FRAMES frames - not a total. A span that opens six times in a
@@ -477,6 +620,41 @@ namespace engine::core {
 		// @return False if no history is retained, the file cannot be opened, or
 		//         writing does not complete successfully.
 		static bool WriteSnapshot(const std::filesystem::path &path);
+
+		// --- triggers --------------------------------------------------------
+		//
+		// **A rule cannot be evaluated by a panel, and that is the whole design
+		// decision.** A panel draws once per repaint and, at the 250 ms interval
+		// it offers, samples four times a second - so the 12 ms `pump events` in
+		// one frame out of fifteen is gone before anything looks at it. That is
+		// the exact failure this exists to fix. So a rule runs in `EndFrame`,
+		// where the tree is still in hand, and it latches.
+
+		// Replaces the armed rules.
+		//
+		// Evaluated at the end of every collected frame, on the collecting
+		// thread, before the frame is published - so a rule that fires does so
+		// on the frame a reader is about to be shown.
+		//
+		// @param triggers The rules. Copied. An empty list disarms.
+		// @since v0.19
+		static void SetTriggers(std::span<const FrameTrigger> triggers);
+
+		// Returns the rule that fired, or `nullptr`.
+		//
+		// **A latch, not a poll.** The reader looks a few times a second and the
+		// spike is one frame long; a reader asking "is anything wrong now" would
+		// answer no on the frame after every hit worth catching. Stays set until
+		// `ClearTrigger`, and while it is set no further rule is evaluated - the
+		// frame that fired is the frame being kept, and overwriting it with the
+		// next one would lose it.
+		//
+		// @since v0.19
+		static const FrameTriggerHit *Triggered();
+
+		// Disarms the latch so the next matching frame can set it again.
+		// @since v0.19
+		static void ClearTrigger();
 
 		// --- folded stacks ---------------------------------------------------
 		//
@@ -585,6 +763,34 @@ namespace engine::core {
 
 			// Closes the copied-name span through Scope's RAII destructor.
 			~CopiedScope() = default;
+		};
+
+		// Opens a reported container whose duration was measured by its producer.
+		//
+		// Unlike `Report`, this may contain other reported spans. It is used when
+		// a worker hands the owner a hierarchy such as world, scheduler, phase and
+		// system after the work has joined. The supplied duration replaces the
+		// negligible time spent constructing the tree on this thread.
+		class ReportedScope {
+		  public:
+			// Opens a structural reported span at the current depth.
+			//
+			// @param name Stable span name storage; the text is not copied.
+			// @param category Broad owner used for category totals.
+			// @param milliseconds Inclusive duration measured by the producer.
+			ReportedScope(std::string_view name, ProfileCategory category, float milliseconds);
+
+			// Closes the span and publishes the producer's duration.
+			~ReportedScope();
+
+			ReportedScope(const ReportedScope &) = delete;
+			ReportedScope &operator=(const ReportedScope &) = delete;
+			ReportedScope(ReportedScope &&) = delete;
+			ReportedScope &operator=(ReportedScope &&) = delete;
+
+		  private:
+			size_t Index = NOT_RECORDING;
+			float Milliseconds = 0.0f;
 		};
 
 	  private:

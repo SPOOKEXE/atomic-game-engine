@@ -366,7 +366,7 @@ TEST_CASE("a size changed after the join reaches what is drawn", "[unified]") {
 
 	// And it reached the draw list rather than only the store, which is the
 	// half `Report::Drawn` exists to separate.
-	const auto *drawList = harness.ClientWorld().Resource<client::DrawList>();
+	const auto *drawList = harness.ClientWorld().Resource<engine::render::DrawList>();
 	REQUIRE(drawList != nullptr);
 
 	bool drawn = false;
@@ -384,8 +384,8 @@ TEST_CASE("a value written in bulk is noticed", "[unified]") {
 	// deliberately, because checking per row is the cost that path exists to
 	// avoid - so a system writing in bulk is invisible to `ChangeDetection::
 	// Observed` however carefully it was observed. `ecs/ChangeChannel.hpp` says
-	// so in its own words, and `scene::QuickHash` is the same answer one layer
-	// up.
+	// so in its own words, and `gui::Compiled`'s signature is the same answer
+	// one layer up.
 	Harness harness(Small());
 	REQUIRE(harness.Join());
 	SettledBytes(harness);

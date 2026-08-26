@@ -43,13 +43,12 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
 #include <engine/core/Name.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <algorithm>
 #include <array>
@@ -224,7 +223,7 @@ namespace engine::script {
 			);
 		}
 
-		constexpr std::array<ServiceMethod, 6> METHODS{{
+		constexpr std::array<ServiceMethod, 6> CONTENT_METHODS{{
 			{"GetMeshes", GetMeshes},
 			{"GetPublishedMeshes", GetPublishedMeshes},
 			{"GetMeshTextures", GetMeshTextures},
@@ -238,7 +237,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "ContentService";
-			surface.Methods = METHODS;
+			surface.Methods = CONTENT_METHODS;
 			return surface;
 		}();
 		return SURFACE;

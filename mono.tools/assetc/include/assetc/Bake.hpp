@@ -72,7 +72,7 @@ namespace assetc {
 		// relies on.** A `.pmx` names its sheets the way it was authored -
 		// `tex/体.png`, relative to the folder the model sat in - and that works
 		// perfectly while the bake walks an art tree with the `tex/` folder still
-		// beside the model. `cdn::ImportFile` renames every file to
+		// beside the model. `engine::assets::ImportFile` renames every file to
 		// `<hash><extension>` in one flat directory, so after an import the
 		// model is `<hash>.pmx`, the sheet is a different `<hash>.png`, and
 		// nothing in the folder records that the two belong together.
@@ -85,7 +85,7 @@ namespace assetc {
 		// string joining it to its pixels points at nothing.
 		//
 		// **The import log is the only surviving link**, so the resolver lives
-		// with whoever owns the log rather than here - `cdn::StoreTextureResolver`
+		// with whoever owns the log rather than here - `engine::assets::StoreTextureResolver`
 		// builds one. This module stays ignorant of `mono.cdn`, which the tier
 		// check would refuse anyway.
 		//

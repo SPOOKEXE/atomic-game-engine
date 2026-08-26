@@ -11,9 +11,8 @@
 //
 // @tier L9 · shared
 
-#include "Actions.hpp"
-
 #include <engine/gui/Services.hpp>
+#include <engine/script/Actions.hpp>
 
 #include <algorithm>
 #include <utility>

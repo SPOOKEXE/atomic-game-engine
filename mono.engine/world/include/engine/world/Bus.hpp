@@ -277,6 +277,11 @@ namespace engine::world {
 	// Bytes rather than a typed payload, because this is what crosses a process
 	// boundary and a type that could hold a pointer is a type that would.
 	//
+	// arch-crossing - `mono.tools/sourcecheck` walks every field of this and of
+	// everything it reaches, and refuses a pointer, a reference or a view among
+	// them. That is rule 3 checked rather than asserted: the paragraph above has
+	// been true since v0.2 and nothing but a reviewer was keeping it true.
+	//
 	// @since v0.2
 	struct Envelope {
 		// Which bus.
@@ -324,6 +329,9 @@ namespace engine::world {
 	// Both a reply to something this world asked for and a message somebody
 	// else published, because a world reads one queue rather than two and the
 	// ticket is what tells them apart.
+	//
+	// arch-crossing - the other half of what leaves and enters a world. See
+	// `Envelope`.
 	//
 	// @since v0.2
 	struct Delivery {

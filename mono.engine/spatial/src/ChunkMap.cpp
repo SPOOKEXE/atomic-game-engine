@@ -1,5 +1,7 @@
 #include "GridInternals.hpp"
 
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/spatial/ChunkMap.hpp>
 
 #include <algorithm>
@@ -27,6 +29,10 @@ namespace engine::spatial {
 		// answer rather than a failure.
 		Spacing = chunkSize > 0.0f ? chunkSize : DEFAULT_CHUNK_SIZE;
 		InverseSpacing = 1.0f / Spacing;
+
+		if (!(chunkSize > 0.0f)) {
+			ENGINE_WARN("chunk size {} is not positive; using the default {}", chunkSize, DEFAULT_CHUNK_SIZE);
+		}
 	}
 
 	void ChunkMap::Clear() {
@@ -41,6 +47,8 @@ namespace engine::spatial {
 	}
 
 	void ChunkMap::Rebuild(std::span<const Proxy> proxies) {
+		const core::ScopedObservation timed("spatial.chunks.rebuild");
+
 		Clear();
 
 		if (proxies.empty()) {
@@ -104,6 +112,22 @@ namespace engine::spatial {
 			Owners[placement.Proxy] = static_cast<uint32_t>(Coordinates.size() - 1);
 			Starts.back() = static_cast<uint32_t>(at + 1);
 		}
+
+		// **The chunk count is the width of the parallelism a consumer can get**,
+		// so one chunk holding a whole scene is a solver running on one thread
+		// and nothing else saying so.
+		core::Metrics::Count("spatial.chunks", static_cast<double>(Coordinates.size()));
+		ENGINE_TRACE(
+			"rebuilt: {} proxies into {} chunk(s) at spacing {}", proxies.size(), Coordinates.size(), Spacing
+		);
+		if (Coordinates.size() == 1 && proxies.size() > 1) {
+			ENGINE_DEBUG_EVERY(
+				5.0,
+				"all {} proxies landed in one chunk at spacing {}; nothing can be split",
+				proxies.size(),
+				Spacing
+			);
+		}
 	}
 
 	void ChunkMap::SetChunkSize(float chunkSize) {
@@ -114,6 +138,8 @@ namespace engine::spatial {
 			// is usually the same one.
 			return;
 		}
+
+		ENGINE_DEBUG("chunk size {} -> {}; the partition is dropped", Spacing, resolved);
 
 		Spacing = resolved;
 		InverseSpacing = 1.0f / resolved;
@@ -177,6 +203,9 @@ namespace engine::spatial {
 		}
 
 		if (!any) {
+			ENGINE_WARN(
+				"every one of {} proxy centres is a NaN; suggesting the default chunk size", proxies.size()
+			);
 			return ChunkMap::DEFAULT_CHUNK_SIZE;
 		}
 
@@ -204,6 +233,11 @@ namespace engine::spatial {
 		if (!(wanted > 0.0)) {
 			// Every centre in one place. There is nothing to cut and no size that
 			// would cut it, so the default is the honest answer.
+			ENGINE_DEBUG(
+				"{} proxy centres share one place; no chunk size cuts them into {} groups",
+				proxies.size(),
+				groups
+			);
 			return ChunkMap::DEFAULT_CHUNK_SIZE;
 		}
 

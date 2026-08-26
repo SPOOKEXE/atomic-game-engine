@@ -100,6 +100,11 @@ namespace engine::scene {
 		// built in code.
 		std::vector<uint32_t> Indices;
 
+		// A content signature computed by a bulk geometry commit. Zero means the
+		// incremental editing API changed an array and the signature has not been
+		// recomputed yet. It is derived state and is never a content identifier.
+		uint64_t Signature = 0;
+
 		// Bumped by every call that changes what this describes.
 		//
 		// **The whole of how `client::UpdateEditableMeshes` knows to
@@ -109,6 +114,102 @@ namespace engine::scene {
 		// forward is compared instead.
 		uint32_t Revision = 0;
 	};
+
+	// All semantic arrays needed to replace one editable mesh in one operation.
+	// This is independent of the renderer's packed vertex layout, so a renderer
+	// layout change does not change the scene or script contract.
+	//
+	// @since v0.19
+	struct EditableMeshGeometry {
+		// Object-space positions, one per vertex.
+		std::vector<core::Vector3> Positions;
+
+		// Object-space normals, one per vertex.
+		std::vector<core::Vector3> Normals;
+
+		// Texture coordinates, one per vertex.
+		std::vector<core::Vector2> UVs;
+
+		// Linear colours, one per vertex.
+		std::vector<core::Color3> Colours;
+
+		// Transparency values, one per vertex.
+		std::vector<float> Alphas;
+
+		// Triangle vertex indices, three consecutive values per triangle.
+		std::vector<uint32_t> Indices;
+	};
+
+	// The result of preparing or committing a complete geometry transaction.
+	//
+	// @since v0.19
+	enum class EditableMeshCommit : uint8_t {
+		Applied,
+		Unchanged,
+		Missing,
+		Stale,
+		Invalid,
+	};
+
+	// A validated geometry value and its content signature. Preparation is pure
+	// and may run on a worker. Committing it must run on the world's owner thread.
+	//
+	// @since v0.19
+	struct PreparedEditableMesh {
+		// The owned geometry to publish.
+		EditableMeshGeometry Geometry;
+
+		// Exact content signature of `Geometry`.
+		uint64_t Signature = 0;
+
+		// Whether every array and index satisfies the geometry contract.
+		bool Valid = false;
+	};
+
+	// Validates and signs a geometry transaction without touching a world.
+	//
+	// Attribute arrays must have the same length, the index count must be a
+	// multiple of three, and every index must name a vertex.
+	//
+	// @param geometry Geometry owned by the returned value.
+	// @return The prepared transaction. `Valid` says whether it may be committed.
+	// @since v0.19
+	PreparedEditableMesh PrepareEditableMesh(EditableMeshGeometry geometry);
+
+	// Commits a prepared transaction if the target still has the revision it had
+	// when the request was submitted. Identical content is a no-op, so neither
+	// collision nor GPU residency is disturbed by a redundant authoring call.
+	//
+	// @param store            The target world.
+	// @param instance         The editable mesh.
+	// @param prepared         A value returned by `PrepareEditableMesh`.
+	// @param expectedRevision The revision observed when work was submitted.
+	// @return What happened.
+	// @since v0.19
+	EditableMeshCommit CommitEditableMesh(
+		ecs::Store &store, ecs::Entity instance, PreparedEditableMesh prepared, uint32_t expectedRevision
+	);
+
+	// Replaces all geometry immediately. Script adapters use the prepared form
+	// so several requests can be computed as one batch before their owner-thread
+	// commits.
+	//
+	// @param store    The target world.
+	// @param instance The editable mesh.
+	// @param geometry Complete semantic geometry.
+	// @return What happened.
+	// @since v0.19
+	EditableMeshCommit
+	ReplaceEditableMesh(ecs::Store &store, ecs::Entity instance, EditableMeshGeometry geometry);
+
+	// Computes the same non-zero process-local signature used by a bulk commit.
+	// Invalid geometry still has a stable signature. Validity is a separate
+	// question answered by `PrepareEditableMesh`.
+	//
+	// @param geometry Geometry to sign.
+	// @return A non-zero signature.
+	// @since v0.19
+	uint64_t EditableMeshSignature(const EditableMeshGeometry &geometry);
 
 	// The `core::Name` a part's `MeshId` names this mesh by.
 	//
@@ -229,4 +330,63 @@ namespace engine::scene {
 	// @return The class id.
 	// @since v0.18
 	ecs::ClassId EditableMeshClass();
+
+	// Which revision of each `EditableMesh` has a collision shape baked for it.
+	//
+	// **A resource and not a field on the presentation host, which the render
+	// side's `engine::render::EditableMeshUploader` is.** An uploader belongs to
+	// the renderer because its device does; a shape table belongs to a *world*,
+	// and a server holds many at once. A map on the host keyed by entity id
+	// would have two worlds' meshes collide on the same key the first time two
+	// of them minted the same id, which they do constantly.
+	//
+	// Derived state: it is registered with a reader that clears, so a world
+	// restored from a snapshot bakes everything again rather than inheriting a
+	// claim about shapes it does not have. See `CollisionShapes`, which is
+	// cleared on load for the same reason.
+	//
+	// @since v0.19
+	struct EditableMeshCollision {
+		// One mesh that has been baked, and at which revision.
+		struct Baked {
+			// The `EditableMesh` instance, by complete entity id.
+			uint64_t Instance = 0;
+
+			// `EditableMesh::Revision` at the time it was baked.
+			uint32_t Revision = 0;
+		};
+
+		// **A vector and a linear scan, for `CollisionShapes`' own reason** -
+		// a world holds a handful of these, and the walk that reads it is
+		// already walking every `EditableMesh` in the world.
+		std::vector<Baked> Rows;
+	};
+
+	// Bakes a collision hull and triangle mesh for every `EditableMesh` whose
+	// geometry has changed, and forgets the shapes of meshes that are gone.
+	//
+	// **The engine gap this closes**: a script that built geometry built
+	// something that could be seen and not touched. `client::
+	// EditableMeshUploader` hands the mesh to the renderer and registered
+	// nothing with `CollisionShapes`, so a `MeshPart` naming a run-time mesh
+	// fell back to colliding as its own bound - a box the size of the whole
+	// thing. A character standing on a script-built heightfield was standing
+	// *inside* that box and could not move in any direction.
+	//
+	// **A free function on a store rather than a class on a host**, so a
+	// dedicated server can call it too. That is the half of the gap that
+	// matters most: the server is the machine that decides where anybody is
+	// standing, and it has no uploader at all.
+	//
+	// Revision-tracked, because baking is quickhull plus a triangle soup and a
+	// streamed world builds a mesh a frame. A mesh whose revision has not moved
+	// costs one integer compare.
+	//
+	// Call it wherever the geometry is settled and before physics reads it -
+	// which for every host in this repository is once a tick.
+	//
+	// @param store The world.
+	// @return How many meshes were baked or forgotten this call.
+	// @since v0.19
+	size_t RefreshEditableMeshCollision(ecs::Store &store);
 }

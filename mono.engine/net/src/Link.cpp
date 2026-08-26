@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/net/Link.hpp>
@@ -41,6 +42,7 @@ namespace engine::net {
 		LastReceiveAt = nowSeconds;
 		LastSendAt = nowSeconds;
 		core::Metrics::Count("net.link.connected", 1.0);
+		ENGINE_INFO("link connected");
 		return true;
 	}
 
@@ -56,6 +58,10 @@ namespace engine::net {
 
 		Phase = ConnectionState::Disconnecting;
 		Ending = reason;
+
+		// The one lifecycle edge that had neither a counter nor a line, and the
+		// one carrying the reason a player's session ended.
+		ENGINE_INFO("link disconnecting: {}", Describe(reason));
 		return true;
 	}
 
@@ -72,6 +78,7 @@ namespace engine::net {
 
 		Phase = ConnectionState::Disconnected;
 		core::Metrics::Count("net.link.closed", 1.0);
+		ENGINE_INFO("link closed: {}", Describe(Ending));
 	}
 
 	void Link::Advance(double nowSeconds) {
@@ -290,6 +297,14 @@ namespace engine::net {
 			return false;
 		}
 		if (payloadBytes > Packet::MAXIMUM_MESSAGE_BYTES) {
+			// A message that can never be sent, whatever the path does. Kept
+			// apart from the two budget refusals below, which are a busy link.
+			ENGINE_WARN_EVERY(
+				1.0,
+				"a {} byte message is past the {} byte limit and can never be sent",
+				payloadBytes,
+				Packet::MAXIMUM_MESSAGE_BYTES
+			);
 			// **The message limit, not the payload limit.** What a caller hands
 			// over is sealed before it goes, so the tag is sixteen bytes of the
 			// datagram that this number does not get to spend. Measuring against

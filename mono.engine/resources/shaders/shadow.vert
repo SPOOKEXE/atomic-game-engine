@@ -1,17 +1,16 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
-// Depth-only pass. It shares the colour pass's vertex layout and instance buffer.
+// Depth-only pass. It shares the colour pass's mesh layout and resident rows.
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
-layout(location = 3) in vec4 inModel0;
-layout(location = 4) in vec4 inModel1;
-layout(location = 5) in vec4 inModel2;
-layout(location = 6) in vec4 inModel3;
-layout(location = 7) in vec4 inColour;
-layout(location = 8) in vec4 inInverseScaleSquared;
+// The same storage decode `opaque.vert` includes. The two stages read the same forty-eight bytes,
+// and the day one of them was edited and the other was not is the day a shadow
+// stopped matching the body casting it.
+#include "instance.glsl"
 
 layout(set = 1, binding = 0) uniform Light {
 	mat4 ViewProjection;
@@ -24,11 +23,21 @@ layout(set = 1, binding = 0) uniform Light {
 // standing in a doorway would darken the near floor as if none of them had gone
 // through - and the far half would darken the far floor twice over.
 layout(location = 0) out vec3 outWorldPosition;
+layout(location = 1) out vec2 outTexCoord;
+layout(location = 2) flat out uint outAppearance;
+layout(location = 3) flat out float outInstanceAlpha;
 
 void main() {
-	mat4 model = mat4(inModel0, inModel1, inModel2, inModel3);
-	vec4 world = model * vec4(inPosition, 1.0);
+	InstanceRow instance = LoadInstance();
+	vec4 rotation = InstanceRotation(instance);
+	vec4 world = vec4(
+		InstanceWorldPosition(rotation, InstanceScale(instance), InstancePosition(instance), inPosition),
+		1.0
+	);
 
 	outWorldPosition = world.xyz;
+	outTexCoord = inTexCoord;
+	outAppearance = InstanceAppearance(instance);
+	outInstanceAlpha = InstanceColour(instance).a;
 	gl_Position = light.ViewProjection * world;
 }

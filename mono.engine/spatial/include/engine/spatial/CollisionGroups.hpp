@@ -29,7 +29,7 @@
 // restored into another, and two worlds disagreeing about which bit is
 // "Players" is a collision matrix that changes when a world migrates.
 //
-// @tier L2 · shared
+// @tier L6 · shared
 
 #include <engine/core/Name.hpp>
 #include <engine/spatial/LayerMask.hpp>

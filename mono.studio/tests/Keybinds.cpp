@@ -21,6 +21,8 @@
 #include <set>
 #include <string>
 #include <studio/Keybinds.hpp>
+#include <utility>
+#include <vector>
 
 TEST_SUITE_ID("studio.keybinds")
 
@@ -260,4 +262,106 @@ TEST_CASE("the active scope is what was last set", "[studio][keybinds]") {
 
 	Keybinds::SetScope(Scope::Tree);
 	CHECK(Keybinds::CurrentScope() == Scope::Tree);
+}
+
+TEST_CASE("every action addresses its own row", "[studio][keybinds]") {
+	const Fixture fixture;
+
+	// **The check that would have caught seven cross-wired bindings.** The
+	// action enum and the `DEFAULTS` table are two lists of the same things
+	// written in two places, and they disagreed: the enum put
+	// `ShowStatistics`, `ShowFrameGraph` and `ShowHeap` before the four tools
+	// and the table put the tools first. `IndexOf` cast the enum to a
+	// subscript, so binding "Select Tool" wrote onto the frame graph's row.
+	//
+	// The counts matched, so it compiled and every menu label looked plausible.
+	// The cases above did not find it because they exercise `Save`, `SaveAs`,
+	// `Play`, `RunServer` and `Delete` - all inside the prefix where the two
+	// orders happen to agree.
+	//
+	// Asserted through the public surface rather than on `IndexOf`, which is
+	// private: `All()` hands back the rows, so a row's `Bound` is what says
+	// which action it is, and `Of` is what everything else reads.
+	// **Asserted after a `Set`, because both sides agree while nothing is
+	// bound.** `Of` and `Set` use the same index, so a wrong index is
+	// self-consistent - and the seven cross-wired rows all ship *unbound*, so
+	// reading them straight compares one empty string against another and finds
+	// nothing. What the page shows is `All()`, and what the page writes is
+	// `Set(row.Bound, ...)`; the bug is that those two disagree.
+	Chord marker{ImGuiKey_F9};
+	marker.Ctrl = true;
+	marker.Alt = true;
+
+	std::vector<Action> subjects;
+	for (const Keybind &binding : Keybinds::All()) {
+		subjects.push_back(binding.Bound);
+	}
+
+	for (const Action subject : subjects) {
+		const Chord original = Keybinds::Of(subject);
+		Keybinds::Set(subject, marker);
+
+		bool found = false;
+		for (const Keybind &row : Keybinds::All()) {
+			if (row.Bound != subject) {
+				continue;
+			}
+			found = true;
+			INFO(row.Id);
+			CHECK(row.Keys.Text() == marker.Text());
+		}
+		CHECK(found);
+
+		Keybinds::Set(subject, original);
+	}
+}
+
+TEST_CASE("binding one action leaves every other alone", "[studio][keybinds]") {
+	const Fixture fixture;
+
+	// The report was "keybinds do not set properly (changes other keybinds)",
+	// and this is that sentence as a test: bind each action in turn to
+	// something unmistakable and check that nothing else moved.
+	// **Every action's own row, taken by value first.** `All()` hands back the
+	// live rows, so anything read through that reference after a `Set` is the
+	// value `Set` just wrote - restoring from it would put the marker back
+	// rather than the original, and the next iteration would find the marker
+	// already held.
+	std::vector<std::pair<Action, std::string>> subjects;
+	for (const Keybind &binding : Keybinds::All()) {
+		subjects.emplace_back(binding.Bound, std::string(binding.Id));
+	}
+
+	for (const auto &[subject, id] : subjects) {
+		const Chord original = Keybinds::Of(subject);
+
+		std::vector<std::pair<Action, std::string>> before;
+		for (const auto &[other, ignored] : subjects) {
+			if (other != subject) {
+				before.emplace_back(other, Keybinds::Of(other).Text());
+			}
+		}
+
+		// **A chord nothing holds**, because `Set` deliberately takes a chord
+		// away from whoever had it - `Keybinds::Holder` is that rule - and a
+		// marker some other action already owned would make this assert that a
+		// designed behaviour is a bug.
+		Chord marker{ImGuiKey_F12};
+		marker.Ctrl = true;
+		marker.Shift = true;
+		marker.Alt = true;
+		REQUIRE(Keybinds::Holder(marker) == Action::Count);
+
+		Keybinds::Set(subject, marker);
+
+		INFO(id);
+		CHECK(Keybinds::Of(subject).Text() == marker.Text());
+
+		for (const auto &[action, text] : before) {
+			INFO(id);
+			CHECK(Keybinds::Of(action).Text() == text);
+		}
+
+		Keybinds::Set(subject, original);
+	}
 }

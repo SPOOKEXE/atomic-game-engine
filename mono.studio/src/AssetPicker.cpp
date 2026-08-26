@@ -16,18 +16,18 @@
 // kind, which is exactly the pair a picker needs.
 //
 // **And it only ever lists `~/Documents/atomic-game-engine/cdn`.** One store,
-// the one every program in this repo agrees on - `cdn::DefaultLocalPaths`. A
+// the one every program in this repo agrees on - `engine::assets::DefaultLocalPaths`. A
 // picker that browsed the filesystem would offer paths that mean nothing to a
 // manifest, and a name that is not in one is a name no client can fetch.
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
-#include <cdn/LocalStore.hpp>
 #include <filesystem>
 #include <imgui.h>
 #include <string>
@@ -74,6 +74,12 @@ namespace studio {
 			// the halves to drift.
 			{"MeshId", AssetKind::Mesh},
 			{"TextureID", AssetKind::Texture},
+			{"NormalMap", AssetKind::Texture},
+			{"RoughnessMap", AssetKind::Texture},
+			{"MetalnessMap", AssetKind::Texture},
+			{"OcclusionMap", AssetKind::Texture},
+			{"HeightMap", AssetKind::Texture},
+			{"EmissiveMap", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
 			// all three mean the same thing - which is why the key is the
@@ -131,7 +137,7 @@ namespace studio {
 			PickerFilter.clear();
 		}
 
-		ImGui::TextDisabled("%s", cdn::DefaultLocalPaths().Root.string().c_str());
+		ImGui::TextDisabled("%s", engine::assets::DefaultLocalPaths().Root.string().c_str());
 
 		ImGui::SetNextItemWidth(-engine::ui::Scaled(90.0f));
 
@@ -154,7 +160,7 @@ namespace studio {
 		// `FuzzyMatch`'s reason: typing "fox" should not put `foxglove_bark`
 		// above `fox_dance`.
 		struct Candidate {
-			const cdn::PublishedEntry *Entry;
+			const engine::assets::PublishedEntry *Entry;
 			int Score;
 		};
 		std::vector<Candidate> shown;
@@ -165,7 +171,7 @@ namespace studio {
 		// machine with no store - a picker that appears not to work rather than
 		// a store that is not there. Sorted with everything else below, so a
 		// filter still finds what it matches.
-		for (const cdn::PublishedEntry &entry : PickerBuiltins) {
+		for (const engine::assets::PublishedEntry &entry : PickerBuiltins) {
 			if (entry.Kind != kind) {
 				continue;
 			}
@@ -179,7 +185,7 @@ namespace studio {
 			}
 		}
 
-		for (const cdn::PublishedEntry &entry : PickerContents) {
+		for (const engine::assets::PublishedEntry &entry : PickerContents) {
 			if (entry.Kind != kind) {
 				continue;
 			}
@@ -303,7 +309,7 @@ namespace studio {
 
 			while (clipper.Step()) {
 				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-					const cdn::PublishedEntry &entry = *shown[static_cast<size_t>(row)].Entry;
+					const engine::assets::PublishedEntry &entry = *shown[static_cast<size_t>(row)].Entry;
 					ImGui::PushID(entry.Name.c_str());
 
 					const RowAction action = DrawAssetRow(entry.Name == chosen, side, [&](ImVec2 corner) {
@@ -399,9 +405,9 @@ namespace studio {
 		// `ImportFile` renames to `<hash><extension>` and the extension is the
 		// half that survives. `RawEntry::Original` is the name somebody gave it,
 		// which is also what a person is scanning the list for.
-		std::vector<const cdn::RawEntry *> shown;
+		std::vector<const engine::assets::RawEntry *> shown;
 		shown.reserve(PickerRaw.size());
-		for (const cdn::RawEntry &entry : PickerRaw) {
+		for (const engine::assets::RawEntry &entry : PickerRaw) {
 			if (engine::assets::KindOfName(entry.Original) != kind) {
 				continue;
 			}
@@ -416,7 +422,7 @@ namespace studio {
 
 		while (clipper.Step()) {
 			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
+				const engine::assets::RawEntry &entry = *shown[static_cast<size_t>(row)];
 
 				const std::string relative = RawRelativePath(entry);
 				ImGui::PushID(relative.c_str());
@@ -455,17 +461,17 @@ namespace studio {
 		}
 	}
 
-	std::string Editor::RawRelativePath(const cdn::RawEntry &entry) {
+	std::string Editor::RawRelativePath(const engine::assets::RawEntry &entry) {
 		std::error_code failure;
 		const std::filesystem::path relative =
-			std::filesystem::relative(entry.Path, cdn::DefaultLocalPaths().Raw, failure);
+			std::filesystem::relative(entry.Path, engine::assets::DefaultLocalPaths().Raw, failure);
 		return failure ? entry.Path.filename().generic_string() : relative.generic_string();
 	}
 
 	void Editor::RefreshPickerContents() {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-		PickerContents = cdn::PublishedContents(paths);
-		PickerRaw = cdn::RawContents(paths);
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+		PickerContents = engine::assets::PublishedContents(paths);
+		PickerRaw = engine::assets::RawContents(paths);
 
 		// **The engine's own assets, at the top, and they are not in any
 		// manifest.** `assets::MakeBuiltin` generates them in every process -
@@ -494,7 +500,7 @@ namespace studio {
 		PickerBuiltins.reserve(EngineAssets().size());
 		for (const CatalogueEntry &entry : EngineAssets()) {
 			PickerBuiltins.push_back(
-				cdn::PublishedEntry{
+				engine::assets::PublishedEntry{
 					.Name = entry.Name,
 					.Kind = entry.Kind,
 					.Root = entry.Root,

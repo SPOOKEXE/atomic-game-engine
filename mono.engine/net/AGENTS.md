@@ -256,19 +256,97 @@ asio is `VENDOR`, never `VENDOR_PUBLIC`. No public header here names a socket, a
 `io_context` or an `error_code`. That is what keeps a transport swappable and
 what stops asio reaching every module that links this.
 
+## `quic/` is a second stack, both are live, and neither is going away
+
+`quic/` holds a QUIC transport - ngtcp2 underneath, `quic/Crypto.hpp` and
+`quic/Tls.hpp` above it, both first-party. It arrived at v0.19 **beside** the
+datagram stack rather than instead of it. `docs/QUIC.md` is the survey, the
+staging and the account of what the survey got wrong.
+
+**QUIC is the default and the server picks.** `net::WireMode` is the choice -
+`quic`, `datagram` or `both` - and it belongs to a listener.
+`replication::ConnectorSettings` has no such field: a connector opens with QUIC
+and falls back once when it is refused. A flag on both ends that had to agree is
+a flag that will disagree, and what it produces is a connection that hangs with
+nothing saying why.
+
+**`Datagram` is a supported mode, so nothing is deleted.** `docs/QUIC.md` §8's
+step 6 was "delete the old stack" and is now closed as will-not-do: `Packet`,
+`Reliability`, `Handshake`, `Cookie` and `ConnectionId` are what
+`--transport datagram` runs on, and they are also what the client's fallback
+lands on. **A change to one stack is therefore a permanent question about the
+other**: a rule that holds here and not there is a rule one of them has lost.
+
+## One port, two stacks, and one bit tells them apart
+
+`Wire.hpp` is the seam. A server reads the first packet from an unknown peer and
+decides which stack it belongs to before either stack sees it.
+
+**The discriminator is bit 7 of byte 0 and the two forms cannot be confused.** A
+QUIC long header - which every Initial packet is, RFC 9000 §17.2 - sets bit 7
+(Header Form) and bit 6 (Fixed Bit), so an Initial starts in `0xC0..0xFF`. A
+`net::Packet` starts with `Packet::MAGIC` written little-endian, so its first
+byte is `0x41` and bit 7 is clear. Neither format can set it the other way: the
+magic is a constant and the Fixed Bit pair is what makes a long header long.
+
+**A QUIC short header is not separable this way and does not need to be.** A
+1-RTT packet has bit 7 clear and bit 6 set, so `0x40..0x7F` contains `0x41`. It
+never reaches the discriminator: it belongs to an established connection and is
+routed by the destination connection id in it, and one that matches no
+connection is refused by the full six-byte magic-and-version check.
+
+**A refusal is answered, not dropped, and both directions cost one round trip.**
+A `datagram`-only listener answers a QUIC Initial with
+`quic::WriteVersionNegotiation` - stateless, keyless, and under sixty bytes
+against a 1200-byte Initial. A `quic`-only listener answers a datagram hello
+with `replication::AdmissionKind::Refuse`. Both keep this module's two rules for
+answering a stranger: **nothing is remembered per refusal**, and **the reply is
+smaller than the question**. A refusal larger than what caused it is a reflector
+somebody else's traffic gets bounced off.
+
+Three things survive the swap and are the reason they are not on the delete
+list:
+
+- **`LinkSettings::BytesPerTick`**, as a ceiling *above* the congestion
+  controller. The two answer different questions - a game may refuse to spend
+  more than N on one player on a path that would carry ten times that, because
+  a hundred players on one host is a hundred of these and the operator's bill is
+  not a function of what the path can take.
+- **`net::CongestionControl`.** Copa is a delay-based controller tuned for input
+  latency and ngtcp2's default is Cubic. Deleting it is a decision to take
+  Cubic's latency and belongs in a commit that says so.
+- **`ConnectionStats`**, refilled from ngtcp2. `SendsOverBudget` keeps its one
+  meaning - a number somebody configured being enforced - because `render`'s
+  panel and `D00007` are both phrased against it.
+
+**No vendor type in a public header applies to ngtcp2 hardest.** A QUIC
+connection is ngtcp2 all the way through, so `quic/Connection.hpp` holds a pimpl
+and every `ngtcp2_` name stays inside one translation unit. The crypto and the
+handshake beside it name none at all, which is what lets `docs/QUIC.md` §4's
+decision be revisited without the transport noticing.
+
+**The nonce discipline is inverted here and that is not a weakening.**
+`quic::Seal` takes its nonce as an argument, which `Cipher` refuses to do. It is
+safe for one reason and the reason is not care: a QUIC nonce is the packet
+number exclusive-ORed into a derived IV, packet numbers within a key phase do
+not repeat by construction of the transport, and the key phase changes before
+the space could be exhausted. **The uniqueness is the transport's invariant
+rather than the cipher's**, which is exactly why it is a second surface beside
+`Cipher` and not a widening of it - and why nothing that is not the transport
+may call it.
+
 ## Not here yet
 
 - **The transports.** A loopback and an asio UDP socket, both driving `Link`.
 - **Reliability.** The acknowledgement window is carried and recorded; nothing
   resends against it yet.
-- **Binding the agreement to a server identity.** The stream is encrypted and
-  the exchange is unauthenticated, and those are two different things: a peer
-  knows it is talking to *something* that completed X25519, not that it is
-  talking to this server. So the traffic is safe against a listener and not
+- ~~**Binding the agreement to a server identity.**~~ Closed. On the datagram
+  wire it is a signature over the admission transcript; under QUIC it is RFC
+  7250's raw public key inside the handshake, checked against
+  `ConnectorSettings::ServerIdentity`. The argument is unchanged and worth
+  keeping: an unauthenticated agreement is safe against a listener and not
   against a relay, which can hold one exchange with each side and read
-  everything. `Handshake.hpp` carries the `TODO(D00006)`. A static server key and
-  a signature over the transcript is the shape; where the key comes from and who
-  trusts it is a deployment question.
+  everything.
 - `upstream/`, `downstream/`, `predict/` - replication, v0.3's remaining items.
 - `http/`, `websocket/` - userland networking and the origin's asset serving,
   which is what `mono.cdn`'s streaming waits on.
@@ -276,6 +354,10 @@ what stops asio reaching every module that links this.
   rate-limits and has no answer for two peers that cannot see each other.
 - **Interest management and lag compensation**, both later and both with their
   own plans.
+- **HTTP/3**, which `quic/` could carry and the in-tree TLS gives up. It is the
+  half of `D00014`'s second-consumer argument that is now unserved, and it comes
+  back with a certificate-verifying backend rather than with new transport
+  work.
 
 ## `http/` is a content protocol, not a web framework
 

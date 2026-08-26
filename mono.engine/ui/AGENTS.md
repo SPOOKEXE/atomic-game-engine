@@ -90,3 +90,17 @@ module's palette.
 scope is wrong: a font still pushed when `ImGui::End` runs asserts as "Missing
 PopFont()" at the *end of the frame*, naming neither the window nor the font.
 Scope it to the run of text, not to the function.
+
+## Studio chrome is a separate presentation layer
+
+Dear ImGui produces the host interface only. Its signature may invalidate the
+Studio composition and final image, but it must never invalidate a viewport's
+scene image or the game's compiled interface. The game interface remains
+`engine::gui::Compiled` plus the render interface pass; do not merge it into
+this module to share a cache.
+
+The host signature describes commands and resources, not backend texture
+handles whose numeric value may change without visible pixels changing. When a
+signature matches, reuse the resident host geometry and bindings. Cache hit and
+write counts are recorded by the viewport's `PresentationDamageTracker`, not as
+fake-duration spans inside this module.

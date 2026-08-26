@@ -23,6 +23,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/ProfilerTab.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -31,43 +32,6 @@
 #include <vector>
 
 namespace engine::render {
-
-	// A view available in the F5 profiler panel.
-	//
-	// @client
-	enum class ProfilerTab : uint8_t {
-		// The flamegraph.
-		Frame,
-		// Time per category, as bars.
-		Categories,
-		// Per-system cost from the scheduler.
-		Systems,
-		// Whatever was written to core::Metrics this frame.
-		Counters,
-
-		// Where the live bytes are, and whether they are climbing.
-		//
-		// **The one tab that is not about this frame.** Everything above
-		// reports what the last frame cost, and a frame that is fast and forty
-		// megabytes heavier than the one before it reads as healthy on every
-		// one of them. So this view leads with a graph of live bytes over
-		// minutes and puts the tag tree under it, which is the opposite
-		// arrangement to the flamegraph and is the right way round for a
-		// quantity whose shape over time is the finding.
-		//
-		// @since v0.18
-		Heap,
-
-		// Number of selectable tabs; not itself a view.
-		Count,
-	};
-
-	// Returns the lowercase display name of a profiler tab, or `?` for a sentinel or invalid value.
-	//
-	// @param tab The tab to name.
-	// @return A string literal with static lifetime.
-	// @client
-	std::string_view GetProfilerTabName(ProfilerTab tab);
 
 	// One scheduler system's elapsed time for the current frame.
 	//
@@ -349,6 +313,23 @@ namespace engine::render {
 
 		// Seconds the growth figures are fitted over.
 		double HeapHistorySeconds = 0.0;
+
+		// Logical GPU resource payload sampled with the process heap. SDL has no
+		// portable driver-heap query, so this covers buffers, transfer buffers,
+		// textures, mip levels, and samples rather than backend allocation slack.
+		//@{
+		uint64_t GpuHeapLiveBytes = 0;
+		uint64_t GpuHeapPeakBytes = 0;
+		uint64_t GpuAllocatedBytes = 0;
+		uint64_t GpuReleasedBytes = 0;
+		uint64_t GpuBufferAllocations = 0;
+		uint64_t GpuTransferBufferAllocations = 0;
+		uint64_t GpuTextureAllocations = 0;
+		uint64_t GpuBufferBytes = 0;
+		uint64_t GpuTransferBufferBytes = 0;
+		uint64_t GpuTextureBytes = 0;
+		std::span<const uint64_t> GpuHeapHistory;
+		//@}
 
 		// Positive integer pixel scale, raised on high-DPI displays to keep the panels legible.
 		int Scale = 2;

@@ -17,7 +17,7 @@
 //
 // ## The interface, which is `opaque.frag`'s and is not negotiable
 //
-// `Renderer::AddShader` creates every fragment shader with four samplers and
+// `Renderer::AddShader` creates every fragment shader with ten samplers and
 // three uniform buffers, because a shader object carries those counts rather
 // than the pipeline doing so. A module declaring a different arrangement binds
 // and silently samples nothing.
@@ -35,6 +35,9 @@ layout(location = 2) in vec4 inLightPosition;
 layout(location = 3) in vec4 inSurfacePosition;
 layout(location = 4) in vec2 inTexCoord;
 layout(location = 5) in vec3 inWorldPosition;
+layout(location = 6) flat in uint inAppearance;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 8) flat in vec4 inEmission;
 
 layout(location = 0) out vec4 outColour;
 
@@ -50,6 +53,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Flags;
 	vec4 BaseColour;
 	vec4 Surface;
+	vec4 Material;
 	vec4 Flipbook;
 	vec4 Mirror;
 	vec4 PaneNormal;
@@ -58,6 +62,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Eye;
+	vec4 MaterialExtra;
 } lighting;
 
 float FogFactor() {
@@ -78,10 +83,13 @@ void main() {
 	// would break by selecting a shader, which is the one thing selecting one
 	// must not do. Every default here keeps them, and a `ShaderScript` that
 	// wants to work in those scenes keeps them too.
-	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
-	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
+	uint alphaMode = inAppearance & 0xFFu;
+	float cutoff = float((inAppearance >> 8u) & 0xFFu) / 255.0;
+	float materialAlpha = sampled.a * lighting.BaseColour.a;
+	if (alphaMode == 1u && inColour.a >= 0.98 && materialAlpha < cutoff) {
 		discard;
 	}
+	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 
 	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
 		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
@@ -92,6 +100,12 @@ void main() {
 	// `opaque.frag`'s rule and the reason an untextured import looks right: the
 	// texture is what was painted, the base colour is what the material says
 	// the run is, and the tint is what the scene says this copy is.
-	vec3 colour = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
+	vec3 mappedColour = sampled.rgb * lighting.BaseColour.rgb;
+	vec3 colour = inColour.rgb * mappedColour * inSurfaceColour;
+	if (alphaMode == 0u) {
+		colour = mix(inColour.rgb, colour, materialAlpha);
+	} else if (alphaMode == 2u) {
+		colour = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, materialAlpha);
+	}
 	outColour = vec4(mix(colour, lighting.FogColour.rgb, FogFactor()), alpha);
 }

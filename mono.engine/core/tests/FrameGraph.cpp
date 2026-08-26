@@ -1,5 +1,6 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -15,6 +16,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.core.framegraph")
+TEST_DEPENDS("engine.core.metrics")
 
 using engine::core::FrameGraph;
 using engine::core::ProfileCategory;
@@ -249,6 +251,40 @@ TEST_CASE("a scope on another thread is dropped and counted", "[framegraph]") {
 	REQUIRE(FrameGraph::Spans().size() == 1);
 	REQUIRE(FrameGraph::Spans()[0].Name == "main");
 	REQUIRE(FrameGraph::Dropped() == 1);
+}
+
+TEST_CASE("a dropped scope reaches the metrics sink", "[framegraph]") {
+	// **The half of the drop that a headless program can see.** `Dropped()` is
+	// read by the F5 overlay and by nothing else, so a server running parallel
+	// compute lost spans and had no way to say so. `EndFrame` counts them into
+	// `core::Metrics`, which the server drains and reports.
+	engine::core::Metrics::Clear();
+
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		{
+			ENGINE_PROFILE("main");
+			std::thread worker([] { ENGINE_PROFILE("worker"); });
+			worker.join();
+		}
+		FrameGraph::EndFrame();
+	}
+
+	const auto counted = engine::core::Metrics::Get(FrameGraph::DROPPED_COUNTER);
+	REQUIRE(counted.has_value());
+	CHECK(counted->Value == 1.0);
+
+	// Nothing is added on a frame that dropped nothing, so an absent row means
+	// "lost no spans" rather than "nobody looked".
+	engine::core::Metrics::Clear();
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		{ ENGINE_PROFILE("main"); }
+		FrameGraph::EndFrame();
+	}
+	CHECK_FALSE(engine::core::Metrics::Get(FrameGraph::DROPPED_COUNTER).has_value());
 }
 
 // --- parentage ---------------------------------------------------------------
@@ -659,6 +695,103 @@ TEST_CASE("reported time counts towards its category", "[framegraph]") {
 	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::ECS) == 7.0f);
 }
 
+TEST_CASE("reported scopes retain a worker timing hierarchy", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::ReportedScope workers("worlds", ProfileCategory::ECS, 10.0f);
+		FrameGraph::ReportedScope world("world", ProfileCategory::ECS, 8.0f);
+		FrameGraph::ReportedScope systems("ecs.systems", ProfileCategory::ECS, 7.0f);
+		FrameGraph::ReportedScope phase("post-simulation", ProfileCategory::ECS, 7.0f);
+		FrameGraph::Report("cleanup", ProfileCategory::ECS, 7.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 5);
+	for (size_t index = 0; index < spans.size(); index++) {
+		CHECK(spans[index].Depth == index);
+		CHECK(spans[index].Reported);
+		if (index > 0) {
+			CHECK(spans[index].Parent == index - 1);
+		}
+	}
+	CHECK(spans[2].Name == "ecs.systems");
+	CHECK(spans[3].Name == "post-simulation");
+	CHECK(spans[4].Name == "cleanup");
+}
+
+TEST_CASE("reported scope totals are not counted once per tree level", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::ReportedScope workers("worlds", ProfileCategory::ECS, 10.0f);
+		FrameGraph::ReportedScope world("world", ProfileCategory::ECS, 8.0f);
+		FrameGraph::ReportedScope systems("ecs.systems", ProfileCategory::ECS, 7.0f);
+		FrameGraph::ReportedScope phase("simulation", ProfileCategory::ECS, 7.0f);
+		FrameGraph::Report("step", ProfileCategory::ECS, 7.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	CHECK(spans[0].SelfMilliseconds == 2.0f);
+	CHECK(spans[1].SelfMilliseconds == 1.0f);
+	CHECK(spans[2].SelfMilliseconds == 0.0f);
+	CHECK(spans[3].SelfMilliseconds == 0.0f);
+	CHECK(spans[4].SelfMilliseconds == 7.0f);
+	CHECK(FrameGraph::CategoryMilliseconds(ProfileCategory::ECS) == 10.0f);
+}
+
+TEST_CASE("reported siblings occupy adjacent logical time inside their parent", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope root("root", ProfileCategory::Engine);
+		FrameGraph::ReportedScope workers("workers", ProfileCategory::ECS, 5.0f);
+		FrameGraph::Report("first", ProfileCategory::ECS, 2.0f);
+		FrameGraph::Report("second", ProfileCategory::ECS, 3.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 4);
+	CHECK(spans[1].StartMilliseconds == spans[0].StartMilliseconds);
+	CHECK(spans[2].StartMilliseconds == spans[1].StartMilliseconds);
+	CHECK(spans[3].StartMilliseconds == spans[2].StartMilliseconds + 2.0f);
+}
+
+TEST_CASE("reported world branches remain nested and adjacent", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope application("Application", ProfileCategory::Engine);
+		FrameGraph::ReportedScope workers("worlds", ProfileCategory::ECS, 10.0f);
+		{
+			FrameGraph::ReportedScope left("left", ProfileCategory::ECS, 4.0f);
+			FrameGraph::Report("left systems", ProfileCategory::ECS, 4.0f);
+		}
+		{
+			FrameGraph::ReportedScope right("right", ProfileCategory::ECS, 6.0f);
+			FrameGraph::Report("right systems", ProfileCategory::ECS, 6.0f);
+		}
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 6);
+	CHECK(spans[0].Name == "Application");
+	CHECK(spans[0].Depth == 0);
+	CHECK(spans[0].Parent == FrameGraph::NO_PARENT);
+	CHECK(spans[2].StartMilliseconds == spans[1].StartMilliseconds);
+	CHECK(spans[3].StartMilliseconds == spans[2].StartMilliseconds);
+	CHECK(spans[4].StartMilliseconds == spans[2].StartMilliseconds + 4.0f);
+	CHECK(spans[5].StartMilliseconds == spans[4].StartMilliseconds);
+}
+
 TEST_CASE("a reported span is a leaf and never becomes a parent", "[framegraph]") {
 	// Its work happened elsewhere, so nothing recorded on this thread was
 	// inside it. A sibling opened afterwards must sit beside it, not under it.
@@ -998,4 +1131,156 @@ TEST_CASE("turning folding on clears what the last capture accumulated", "[frame
 	REQUIRE_FALSE(std::filesystem::exists(path));
 
 	FrameGraph::SetFoldingEnabled(false);
+}
+
+// --- the event scheduler -----------------------------------------------------
+//
+// The rules are process-wide, the same as the collector, so every case here
+// disarms on the way out.
+
+namespace {
+	struct Armed {
+		explicit Armed(std::vector<engine::core::FrameTrigger> rules) : Rules(std::move(rules)) {
+			FrameGraph::SetTriggers(Rules);
+			FrameGraph::ClearTrigger();
+		}
+		~Armed() {
+			FrameGraph::SetTriggers({});
+			FrameGraph::ClearTrigger();
+		}
+
+		std::vector<engine::core::FrameTrigger> Rules;
+	};
+
+	// A frame containing one span that takes at least `milliseconds`.
+	void SlowFrame(std::string_view name, int milliseconds) {
+		FrameGraph::BeginFrame();
+		{
+			ENGINE_PROFILE_DYNAMIC("rule", name, ProfileCategory::Engine);
+			std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+		}
+		FrameGraph::EndFrame();
+	}
+}
+
+TEST_CASE("a rule stops the graph on the frame that meets it", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{.Name = "slow", .Threshold = 1.0f}});
+
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+
+	SlowFrame("slow", 3);
+
+	const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered();
+	REQUIRE(hit != nullptr);
+	REQUIRE(hit->Subject == "slow");
+	REQUIRE(hit->Reading > 1.0f);
+}
+
+TEST_CASE("the latch holds past the frame that set it", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{.Name = "slow", .Threshold = 1.0f}});
+
+	SlowFrame("slow", 3);
+	REQUIRE(FrameGraph::Triggered() != nullptr);
+
+	// **The point of the latch.** A reader looks a few times a second and the
+	// spike is one frame; a hit that cleared itself on the next frame would be
+	// gone before anything saw it.
+	FrameGraph::BeginFrame();
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::Triggered() != nullptr);
+
+	FrameGraph::ClearTrigger();
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+}
+
+TEST_CASE("an under rule waits for the span rather than firing without it", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{
+		.Name = "absent",
+		.Test = engine::core::TriggerTest::Below,
+		.Threshold = 1000.0f,
+	}});
+
+	// The span never runs, so there is no reading. Read as a zero this would
+	// fire on every frame, which is the bug the optional exists to prevent.
+	SlowFrame("something else", 1);
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+
+	SlowFrame("absent", 1);
+	REQUIRE(FrameGraph::Triggered() != nullptr);
+}
+
+TEST_CASE("a rule that is off does not fire", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{.Name = "slow", .Threshold = 1.0f, .Enabled = false}});
+
+	SlowFrame("slow", 3);
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+}
+
+TEST_CASE("device time is its own category and does not inflate render", "[framegraph]") {
+	// **The claim `ProfileCategory::Gpu` exists to make true.** `Render` is CPU
+	// wall clock spent walking a draw list and recording commands; GPU time is
+	// the device executing them afterwards, overlapping that recording and the
+	// next frame's. Added together they read as a renderer costing twice what it
+	// does, and - worse - a frame CPU-bound on command recording becomes
+	// indistinguishable from one GPU-bound on fill rate, which is the single
+	// thing a reader most wants this panel to separate.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE_CAT("record", ProfileCategory::Render);
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+		// What `render::Renderer::CollectTimings` does once a query pool
+		// resolves: a duration measured by the device, handed over after the
+		// fact because nothing on the CPU can hold a scope open across a pass.
+		FrameGraph::Report("opaque", ProfileCategory::Gpu, 9.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const float device = FrameGraph::CategoryMilliseconds(ProfileCategory::Gpu);
+	REQUIRE(device > 8.9f);
+	REQUIRE(device < 9.1f);
+
+	// The CPU side kept its own number. Nine milliseconds of device time did not
+	// land on it.
+	const float render = FrameGraph::CategoryMilliseconds(ProfileCategory::Render);
+	REQUIRE(render > 0.0f);
+	REQUIRE(render < 9.0f);
+}
+
+TEST_CASE("device time reaches the flamegraph as its own line", "[framegraph]") {
+	// A folded stack is what a flamegraph renderer reads, and until v0.19 no GPU
+	// measurement reached one: the device timings existed but only a Studio panel
+	// ever read them, so every `render` bar in a flamegraph was command recording
+	// and the device was absent from the picture entirely.
+	const std::vector<engine::core::FrameSpan> spans{
+		{.Name = "frame", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .SelfMilliseconds = 1.0f},
+		{.Name = "record",
+		 .Depth = 1,
+		 .Parent = 0,
+		 .SelfMilliseconds = 2.0f,
+		 .Category = ProfileCategory::Render},
+		{.Name = "opaque",
+		 .Depth = 1,
+		 .Parent = 0,
+		 .SelfMilliseconds = 9.0f,
+		 .Category = ProfileCategory::Gpu,
+		 .Reported = true},
+	};
+
+	engine::core::FoldedStacks totals;
+	engine::core::AccumulateFoldedStacks(spans, totals);
+
+	// **Its own line, kept apart from the recording that dispatched it.** A
+	// reported span keeps its own stack rather than being merged, which is why
+	// the totals of a run that used a GPU add to more than its wall clock - the
+	// same arithmetic a worker pool already produces, not a new exception.
+	REQUIRE(totals.at("frame;opaque") == 9000.0);
+	REQUIRE(totals.at("frame;record") == 2000.0);
+	REQUIRE(totals.at("frame") == 1000.0);
 }

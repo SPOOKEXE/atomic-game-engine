@@ -55,7 +55,7 @@ namespace engine::physics {
 	// shape it *collides* as, and an index built from the first can be smaller
 	// than the shape in the second. A broad phase whose bound is too small drops
 	// contacts and reports nothing - the exact failure
-	// `core::AABB::FromOrientedBox` was written to avoid. `v02v03v04.md` §3.5
+	// `core::OrientedBoxBounds` was written to avoid. `v02v03v04.md` §3.5
 	// says `Bounds`; it was written before `Collider` carried its own extent,
 	// and `AGENTS.md` in this directory records the departure.
 	//

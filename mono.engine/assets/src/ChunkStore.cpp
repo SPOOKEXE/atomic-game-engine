@@ -151,11 +151,20 @@ namespace engine::assets {
 			whole.insert(whole.end(), bytes->begin(), bytes->end());
 		}
 
-		// Against the chunk list and the tree, which is what an asset root is.
-		// One implementation of that check - `assets::VerifyAsset` - because the
-		// delivery client makes the identical one against bytes off a wire and
-		// against bytes out of its own cache.
-		if (!VerifyAsset(asset, whole)) {
+		// **The content half of the check has already happened, a chunk at a
+		// time.** `Read` hashes every chunk against its own name on the way
+		// past, which is exactly the comparison `VerifyAsset` makes over the
+		// concatenation and says which chunk was wrong as well. Calling
+		// `VerifyAsset` here hashed all of it a second time for an answer
+		// already known. Measured in `bench` over a 4 MiB asset in 64 chunks:
+		// 14.76 us per chunk before and 9.17 us after, against 5.66 us for that
+		// second pass measured on its own with no disk in it.
+		//
+		// What is left is the half that needs no content - the chunk list's
+		// total and the tree over its hashes, which is what an asset root is.
+		// `VerifyAssetShape` is that half, and `VerifyAsset` is still defined as
+		// this one after the other, so there is one implementation of each.
+		if (whole.size() != asset.TotalBytes || !VerifyAssetShape(asset)) {
 			core::Metrics::Count("assets.chunkstore.corrupt", 1.0);
 			return std::nullopt;
 		}

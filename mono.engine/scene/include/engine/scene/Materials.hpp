@@ -29,7 +29,7 @@
 // `ResolveMaterials` walks every `MaterialRef` row, looks its asset up in the
 // world's `MaterialCatalogue`, and writes the resulting texture name into the
 // **parent's** `SurfaceAppearance::ColourMap`. That is the field the draw-list
-// pass already reads - `client::CollectInstances` is a batched parallel loop
+// pass already reads - `engine::render::CollectInstances` is a batched parallel loop
 // over a fixed signature, and a child lookup is precisely what that shape cannot
 // express, which is the same wall `SurfaceAppearance`'s own comment hits.
 //
@@ -117,6 +117,9 @@ namespace engine::scene {
 		// Height sampled by the default PBR paths for bounded parallax mapping.
 		core::Name Height = {};
 
+		// Per-texel metalness. Absent leaves the surface dielectric.
+		core::Name Metalness = {};
+
 		// What the surface emits on its own, independent of any light.
 		core::Name Emissive = {};
 
@@ -127,7 +130,7 @@ namespace engine::scene {
 		//         catalogue knows this material" rather than "it is usable".
 		bool IsValid() const {
 			return Colour.IsValid() || Normal.IsValid() || Roughness.IsValid() || Occlusion.IsValid() ||
-				   Height.IsValid() || Emissive.IsValid();
+				   Height.IsValid() || Metalness.IsValid() || Emissive.IsValid();
 		}
 	};
 

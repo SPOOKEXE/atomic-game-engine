@@ -853,6 +853,7 @@ namespace engine::graph {
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -954,8 +955,13 @@ namespace engine::graph {
 		touches(EditKind::Reads, "portal-light", "portal-light");
 		touches(EditKind::Writes, "lit", "colour");
 
-		node("tonemap", NodeScope::View);
+		node("sky", NodeScope::View);
 		touches(EditKind::Reads, "lit", "colour");
+		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Writes, "sky-lit", "colour");
+
+		node("tonemap", NodeScope::View);
+		touches(EditKind::Reads, "sky-lit", "colour");
 		touches(EditKind::Writes, "tonemapped", "colour");
 
 		node("portal-overlay", NodeScope::View);

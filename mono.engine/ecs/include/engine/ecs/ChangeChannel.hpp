@@ -26,9 +26,10 @@
 // **What it cannot see.** `EachBatch` and `EachBatchParallel` hand out raw
 // column pointers, and a write through one sets no bit. That is deliberate -
 // checking per row is exactly the cost those paths exist to avoid - and it is
-// the gap `QuickHash` fills at v0.4 for consumers that need row granularity
-// over batch-written data. A batch write does bump the coarse version, so a
-// consumer that only needs "did anything move" is still served.
+// the gap a content signature fills for a consumer that needs row granularity
+// over batch-written data - `gui::Compiled` and `studio::HierarchyView` are the
+// two that do, and each folds its own hash rather than sharing one. A batch write does bump the coarse
+// version, so a consumer that only needs "did anything move" is still served.
 //
 // @tier L3 · shared
 

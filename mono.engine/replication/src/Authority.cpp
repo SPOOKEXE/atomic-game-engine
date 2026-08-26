@@ -1,5 +1,7 @@
+#include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/net/Packet.hpp>
@@ -377,6 +379,12 @@ namespace engine::replication {
 
 	void Authority::Survey(ecs::Store &store) {
 		ENGINE_PROFILE_CAT("Authority::Survey", core::ProfileCategory::Network);
+		PrepareSurvey(store);
+		SignSignatures();
+		FinishSurvey(store);
+	}
+
+	void Authority::PrepareSurvey(ecs::Store &store) {
 
 		{
 			ENGINE_PROFILE_CAT("Authority::ResolveComponents", core::ProfileCategory::Network);
@@ -389,22 +397,63 @@ namespace engine::replication {
 			Resolved.clear();
 			ResolvedNames.clear();
 
-			// **The same ids a third time, indexed by slot rather than
-			// compacted.** `Detection`, `Signatures` and `Suppressors` are all
-			// keyed by slot, so a pass over them cannot use `Resolved`'s indices
-			// - and `Resign` was calling `Components::Find` again to get back
-			// what this loop already has. That call takes the component
-			// registry's process-wide mutex, once per signed slot per tick, on
-			// the thread every other world is also publishing from.
-			ResolvedSlots.assign(Components.size(), ecs::ComponentId{});
+			// **This is the only place in a publish that reads the component
+			// registry, and that is the invariant rather than an
+			// optimisation.** `Components::Find` and `Components::Describe`
+			// both take the registry's process-wide mutex; every world in the
+			// process publishes through the same one. Asking it per slot per
+			// *client* made a two-hundred-client tick take that lock some nine
+			// thousand times, which is a serialisation point no amount of
+			// parallelism downstream can get past. `Crossing` holds the answers
+			// for the rest of the tick.
+			//
+			// Indexed by slot rather than compacted, because `Detection`,
+			// `Signatures` and `Suppressors` are all keyed by slot and a pass
+			// over them cannot use `Resolved`'s indices.
+			Crossings.resize(Components.size());
 
 			for (size_t slot = 0; slot < Components.size(); slot++) {
-				const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
+				// Cleared field by field rather than assigned a fresh
+				// `Crossing`, so `Changed` keeps the capacity it grew last
+				// tick.
+				Crossing &crossing = Crossings[slot];
+				crossing.Id = ecs::ComponentId{};
+				crossing.Descriptor = nullptr;
+				crossing.Sendable = false;
+				crossing.Changed.clear();
+
+				const core::Name name = Components[slot];
+				const ecs::ComponentId id = ecs::Components::Find(name);
 				if (!id.IsValid()) {
+					ENGINE_WARN("replication: '{}' is replicated but not registered here.", name.Text());
 					continue;
 				}
 
-				ResolvedSlots[slot] = id;
+				crossing.Id = id;
+				crossing.Descriptor = &ecs::Components::Describe(id);
+
+				// **The two guards a delta row has to pass, asked about the
+				// component rather than about a row and asked once a tick.** A
+				// type with no serialisation has no bytes to write, and a type
+				// whose *stored* size already exceeds a message can never
+				// produce a row that fits - both are properties of the type, so
+				// both used to be re-derived, and re-warned about, once per
+				// client per tick.
+				const ecs::TypeDescriptor &descriptor = *crossing.Descriptor;
+				if (descriptor.Size > 0 && !descriptor.Serialisable) {
+					ENGINE_WARN("replication: '{}' has no serialisation and cannot cross.", name.Text());
+				} else if (const size_t crossingBytes = WireBytes(descriptor);
+						   MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossingBytes >
+						   Settings_.ChunkBytes) {
+					ENGINE_WARN(
+						"replication: '{}' is {} bytes stored and cannot fit a delta message.",
+						name.Text(),
+						crossingBytes
+					);
+				} else {
+					crossing.Sendable = true;
+				}
+
 				Resolved.push_back(id);
 				ResolvedNames.push_back(Components[slot]);
 
@@ -484,8 +533,45 @@ namespace engine::replication {
 		}
 
 		{
-			ENGINE_PROFILE_CAT("Authority::Resign", core::ProfileCategory::Network);
-			Resign(store);
+			ENGINE_PROFILE_CAT("Authority::Resign::gather", core::ProfileCategory::Network);
+			GatherSignatures(store);
+		}
+	}
+
+	void Authority::FinishSurvey(ecs::Store &store) {
+		{
+			ENGINE_PROFILE_CAT("Authority::GatherChanged", core::ProfileCategory::Network);
+
+			// **What moved is a fact about the world, not about a client, so it
+			// is collected once.** `BuildComponents` used to call
+			// `Store::EachChangedRuns` per slot per *client* - a walk of the
+			// archetype tables, a deferral scope and a query plan, all to hand
+			// back the identical runs it had handed back for the previous
+			// client. Two hundred clients over two dozen slots is nine thousand
+			// walks a tick where two dozen answer the same question.
+			//
+			// It is also what makes the per-client loop reach the store through
+			// nothing but `Alive`, `HasComponent` and `GetComponent`, which are
+			// `const` and take no affinity - the run walk is the one call in
+			// that loop that `Store::RequireOwningThread` would have aborted on
+			// a worker.
+			//
+			// A signed slot has no runs here: it carries its changed ids in
+			// `Signature::Changed`, which `Resign` has just rebuilt.
+			for (size_t slot = 0; slot < Crossings.size(); slot++) {
+				Crossing &crossing = Crossings[slot];
+				if (!crossing.Sendable || Detection[slot] != ChangeDetection::Observed) {
+					continue;
+				}
+
+				store.EachChangedRuns(
+					crossing.Id, [&crossing](const ecs::Entity *entities, void *values, size_t rows) {
+						crossing.Changed.push_back(
+							ColumnRun{entities, static_cast<const std::byte *>(values), rows}
+						);
+					}
+				);
+			}
 		}
 	}
 
@@ -500,7 +586,7 @@ namespace engine::replication {
 		const auto began = std::chrono::steady_clock::now();
 
 		signature.Hashed.clear();
-		for (const Signature::Run &run : signature.Runs) {
+		for (const ColumnRun &run : signature.Runs) {
 			for (size_t row = 0; row < run.Rows; row++) {
 				signature.Hashed.emplace_back(
 					run.Entities[row].Id, HashBytes(run.Values + row * signature.Stride, signature.Stride)
@@ -556,7 +642,7 @@ namespace engine::replication {
 		);
 	}
 
-	void Authority::Resign(ecs::Store &store) {
+	void Authority::GatherSignatures(ecs::Store &store) {
 		// --- what to sign, on the thread that owns the store -----------------
 		//
 		// `Store::EachRuns` walks the archetype tables and may only be called by
@@ -577,14 +663,15 @@ namespace engine::replication {
 			signature.Runs.clear();
 
 			// Resolved by `Survey` a moment ago rather than looked up again
-			// here: `Components::Find` takes the registry's process-wide mutex,
-			// and this loop runs once per signed slot per tick.
-			const ecs::ComponentId id = ResolvedSlots[slot];
-			if (!id.IsValid()) {
+			// here: both registry calls take its process-wide mutex, and this
+			// loop runs once per signed slot per tick.
+			const Crossing &crossing = Crossings[slot];
+			if (!crossing.Id.IsValid()) {
 				continue;
 			}
 
-			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
+			const ecs::ComponentId id = crossing.Id;
+			const ecs::TypeDescriptor &descriptor = *crossing.Descriptor;
 			if (descriptor.Size == 0) {
 				continue;
 			}
@@ -611,14 +698,14 @@ namespace engine::replication {
 			// of paying a directory lookup and an archetype fetch per entity.
 			signature.Stride = descriptor.Size;
 			store.EachRuns(id, [&signature](const ecs::Entity *entities, void *values, size_t rows) {
-				signature.Runs.push_back(
-					Signature::Run{entities, static_cast<const std::byte *>(values), rows}
-				);
+				signature.Runs.push_back(ColumnRun{entities, static_cast<const std::byte *>(values), rows});
 			});
 
 			ResignWork.push_back(slot);
 		}
+	}
 
+	void Authority::SignSignatures() {
 		// --- the signing, spread across whatever workers there are -----------
 		//
 		// A grain of one because a slot is the unit: they are within a factor of
@@ -635,6 +722,10 @@ namespace engine::replication {
 			});
 		}
 
+		ReportSignatures();
+	}
+
+	void Authority::ReportSignatures() {
 		// --- the per-component rows, put back on the graph -------------------
 		//
 		// A span opened by a worker is dropped, so the breakdown is reported
@@ -671,14 +762,16 @@ namespace engine::replication {
 
 		const ecs::ComponentId hierarchyId = ecs::Components::Of<ecs::Hierarchy>();
 
-		for (const core::Name name : Components) {
-			const ecs::ComponentId id = ecs::Components::Find(name);
-			if (!id.IsValid()) {
-				ENGINE_WARN("replication: '{}' is replicated but not registered here.", name.Text());
+		// `Survey` resolved every slot a moment ago and warned about the ones
+		// this process does not register, so this walks its answers rather than
+		// asking the registry again per component per join.
+		for (const Crossing &crossing : Crossings) {
+			if (!crossing.Id.IsValid()) {
 				continue;
 			}
 
-			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
+			const ecs::ComponentId id = crossing.Id;
+			const ecs::TypeDescriptor &descriptor = *crossing.Descriptor;
 			const bool quantised = descriptor.Wire.Present() && descriptor.Size > 0;
 			decoded.assign(quantised ? descriptor.Size : 0, std::byte{0});
 
@@ -740,7 +833,7 @@ namespace engine::replication {
 		return {writer.Bytes().begin(), writer.Bytes().end()};
 	}
 
-	void Authority::BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick) {
+	void Authority::BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick) {
 		// **Both blobs are taken at one tick, from one world, in one call.** The
 		// alternative - build the world's only once the preface has gone - would
 		// give the two halves of a join two different ticks and a window in
@@ -748,7 +841,7 @@ namespace engine::replication {
 		// complete view never existed.
 		Preceding.clear();
 		if (Preface) {
-			for (const ecs::Entity entity : Visible) {
+			for (const ecs::Entity entity : lane.Visible) {
 				if (Preface(entity, store)) {
 					Preceding.push_back(entity);
 				}
@@ -761,7 +854,7 @@ namespace engine::replication {
 		preface = Staged{};
 		world = Staged{};
 
-		world.Bytes = Capture(store, Visible);
+		world.Bytes = Capture(store, lane.Visible);
 		if (world.Bytes.empty()) {
 			ENGINE_ERROR("replication: the world cannot be snapshotted, so no client can join it.");
 			return;
@@ -779,7 +872,7 @@ namespace engine::replication {
 		}
 
 		client.Known.clear();
-		for (const ecs::Entity entity : Visible) {
+		for (const ecs::Entity entity : lane.Visible) {
 			client.Known.insert(entity.Id);
 		}
 
@@ -878,11 +971,9 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::Prioritise(ClientId client, uint64_t tick) {
-		ENGINE_PROFILE_CAT("Authority::Prioritise", core::ProfileCategory::Network);
-
+	void Authority::Prioritise(Lane &lane, ClientId client, uint64_t tick) {
 		if (Priority) {
-			ENGINE_PROFILE_CAT("Authority::Score", core::ProfileCategory::Network);
+			const Lane::Timed timed(lane, Lane::Phase::Score);
 
 			// **Once per entity rather than once per row.** `SetPriority`'s
 			// hook is `(client, entity)` and nothing else, so the four rows an
@@ -900,30 +991,69 @@ namespace engine::replication {
 			//
 			// A quiet NaN is the "not yet asked" mark, which is exact because
 			// every score stored below has been through `std::isfinite`.
-			Scores.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
+			lane.Scores.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
 
-			for (Candidate &candidate : Candidates) {
-				const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
+			// **A cursor rather than a binary search from the ends, and on a
+			// full scene it is most of what this pass cost.** A `lower_bound`
+			// over twenty thousand entities is fifteen probes at fifteen
+			// unrelated addresses, and there is one candidate per changed row -
+			// so a scene where everything moves paid three hundred thousand
+			// cache misses a tick to answer a question whose answer was one
+			// entry along from the last one.
+			//
+			// Candidates arrive in ascending entity order within a component:
+			// `Signature::Changed` is built by a merge over sorted ids,
+			// `EachChangedRuns` visits tables in id order, and the recovery pass
+			// walks an `OutstandingSet` that holds its rows ascending. So the
+			// cursor walks forward with them and the search galloping from it
+			// touches the line it is already on. A slot boundary resets the ids,
+			// which is what the backwards test catches - and a candidate list
+			// that is not ordered at all still gets the right answer, from a
+			// gallop that degenerates to the binary search this replaces.
+			size_t cursor = 0;
+			uint64_t previousId = 0;
+
+			for (Candidate &candidate : lane.Candidates) {
+				if (candidate.Entity.Id < previousId) {
+					cursor = 0;
+				}
+				previousId = candidate.Entity.Id;
+
+				// The bracket, doubled until it passes the wanted id. `low` is
+				// the last index known to be below it; `high` is one past the
+				// first that is not.
+				size_t low = cursor;
+				size_t step = 1;
+				while (low + step < Bearing.size() && Bearing[low + step] < candidate.Entity.Id) {
+					low += step;
+					step *= 2;
+				}
+				const size_t high = std::min(low + step + 1, Bearing.size());
+
+				const auto found = std::lower_bound(
+					Bearing.begin() + static_cast<ptrdiff_t>(low),
+					Bearing.begin() + static_cast<ptrdiff_t>(high),
+					candidate.Entity.Id
+				);
 				const bool known = found != Bearing.end() && *found == candidate.Entity.Id;
 				const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
+				cursor = static_cast<size_t>(found - Bearing.begin());
 
-				if (known && !std::isnan(Scores[slot])) {
-					candidate.Hint = Scores[slot];
+				if (known && !std::isnan(lane.Scores[slot])) {
+					candidate.Hint = lane.Scores[slot];
 					continue;
 				}
 
 				const float hint = Priority(client, candidate.Entity);
 				candidate.Hint = std::isfinite(hint) ? hint : 0.0f;
 				if (known) {
-					Scores[slot] = candidate.Hint;
+					lane.Scores[slot] = candidate.Hint;
 				}
 			}
 		}
 
-		ENGINE_PROFILE_CAT("Authority::Sort", core::ProfileCategory::Network);
-
 		const uint64_t deadline = Settings_.StarvationTicks;
-		const std::vector<Candidate> &candidates = Candidates;
+		const std::vector<Candidate> &candidates = lane.Candidates;
 
 		const auto before = [&candidates, tick, deadline](uint32_t left, uint32_t right) {
 			const Candidate &first = candidates[left];
@@ -985,31 +1115,39 @@ namespace engine::replication {
 		// one of them reads memory in the order it is laid out, and this runs
 		// per client per tick over every row in the world.
 		size_t shortest = SIZE_MAX;
-		for (const Candidate &candidate : Candidates) {
+		for (const Candidate &candidate : lane.Candidates) {
 			shortest = std::min(shortest, static_cast<size_t>(candidate.Bytes));
 		}
 
 		const size_t leastRow = sizeof(uint64_t) + (shortest == SIZE_MAX ? 0 : shortest);
 		const size_t reachable = spend / leastRow + 1;
 
-		if (reachable < Order.size()) {
-			std::partial_sort(
-				Order.begin(), Order.begin() + static_cast<ptrdiff_t>(reachable), Order.end(), before
-			);
-		} else {
-			std::sort(Order.begin(), Order.end(), before);
+		{
+			const Lane::Timed timed(lane, Lane::Phase::Sort);
+
+			if (reachable < lane.Order.size()) {
+				std::partial_sort(
+					lane.Order.begin(),
+					lane.Order.begin() + static_cast<ptrdiff_t>(reachable),
+					lane.Order.end(),
+					before
+				);
+			} else {
+				std::sort(lane.Order.begin(), lane.Order.end(), before);
+			}
 		}
 
-		Refine(client, reachable, spend, before);
+		Refine(lane, client, reachable, spend, before);
 	}
 
 	template <class Before>
-	void Authority::Refine(ClientId client, size_t reachable, size_t spend, const Before &before) {
-		if (!Refinement || Settings_.PriorityRefinementFactor == 0 || Order.empty()) {
+	void
+	Authority::Refine(Lane &lane, ClientId client, size_t reachable, size_t spend, const Before &before) {
+		if (!Refinement || Settings_.PriorityRefinementFactor == 0 || lane.Order.empty()) {
 			return;
 		}
 
-		ENGINE_PROFILE_CAT("Authority::Refine", core::ProfileCategory::Network);
+		const Lane::Timed timed(lane, Lane::Phase::Refine);
 
 		// **What the budget really reaches, not the bound the sort used.**
 		// `reachable` assumes every row ahead of a row is the shortest row in
@@ -1022,12 +1160,12 @@ namespace engine::replication {
 		// walk of a prefix, out of lengths `BuildComponents` already measured.
 		// Per-message overhead is left out, so the count errs wide - which is
 		// the safe direction for a window.
-		const size_t ordered = std::min(reachable, Order.size());
+		const size_t ordered = std::min(reachable, lane.Order.size());
 
 		size_t carried = 0;
 		size_t spent = 0;
 		while (carried < ordered && spent < spend) {
-			spent += sizeof(uint64_t) + Candidates[Order[carried]].Bytes;
+			spent += sizeof(uint64_t) + lane.Candidates[lane.Order[carried]].Bytes;
 			carried++;
 		}
 
@@ -1043,31 +1181,35 @@ namespace engine::replication {
 		// re-sorted: the tail was never in order past `reachable` anyway, and a
 		// row in it carries a score nothing refined.
 		const size_t window = std::min(
-			Order.size(), SaturatingProduct(std::max<size_t>(carried, 1), Settings_.PriorityRefinementFactor)
+			lane.Order.size(),
+			SaturatingProduct(std::max<size_t>(carried, 1), Settings_.PriorityRefinementFactor)
 		);
 
 		if (window > reachable) {
 			// The window reaches past what the first sort put in order, so the
 			// rows between have to be brought in before they can be refined.
 			std::partial_sort(
-				Order.begin(), Order.begin() + static_cast<ptrdiff_t>(window), Order.end(), before
+				lane.Order.begin(),
+				lane.Order.begin() + static_cast<ptrdiff_t>(window),
+				lane.Order.end(),
+				before
 			);
 		}
 
 		// Per *entity*, exactly as the cheap half is memoised, and for the same
 		// reason: the hook is `(client, entity)` and the four rows an entity
 		// produces are four questions with one answer.
-		Refined.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
+		lane.Refined.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
 
 		for (size_t position = 0; position < window; position++) {
-			Candidate &candidate = Candidates[Order[position]];
+			Candidate &candidate = lane.Candidates[lane.Order[position]];
 
 			const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
 			const bool known = found != Bearing.end() && *found == candidate.Entity.Id;
 			const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
 
-			if (known && !std::isnan(Refined[slot])) {
-				candidate.Hint = Refined[slot];
+			if (known && !std::isnan(lane.Refined[slot])) {
+				candidate.Hint = lane.Refined[slot];
 				continue;
 			}
 
@@ -1080,15 +1222,15 @@ namespace engine::replication {
 			// back rather than a silently reordered stream.
 			candidate.Hint = std::isfinite(refined) && refined < candidate.Hint ? refined : candidate.Hint;
 			if (known) {
-				Refined[slot] = candidate.Hint;
+				lane.Refined[slot] = candidate.Hint;
 			}
 		}
 
-		std::sort(Order.begin(), Order.begin() + static_cast<ptrdiff_t>(window), before);
+		std::sort(lane.Order.begin(), lane.Order.begin() + static_cast<ptrdiff_t>(window), before);
 	}
 
-	Authority::Placement Authority::Pack(Client &client, const Delta &delta, size_t messageLimit) {
-		ENGINE_PROFILE_CAT("Authority::Pack", core::ProfileCategory::Network);
+	Authority::Placement
+	Authority::Pack(Lane &lane, Client &client, const Delta &delta, size_t messageLimit) {
 
 		const size_t budget = Settings_.ChunkBytes;
 
@@ -1109,7 +1251,7 @@ namespace engine::replication {
 		Delta piece;
 		piece.Tick = delta.Tick;
 		piece.Baseline = delta.Baseline;
-		OpenEntry.assign(delta.Components.size(), NOWHERE);
+		lane.OpenEntry.assign(delta.Components.size(), NOWHERE);
 
 		Delta emitted;
 		size_t emittedAt = NOWHERE;
@@ -1142,16 +1284,16 @@ namespace engine::replication {
 			piece.Baseline = delta.Baseline;
 			used = MESSAGE_OVERHEAD;
 			rows = 0;
-			OpenEntry.assign(delta.Components.size(), NOWHERE);
+			lane.OpenEntry.assign(delta.Components.size(), NOWHERE);
 			return true;
 		};
 
 		bool room = true;
-		for (size_t position = 0; room && position < Order.size(); position++) {
-			const Candidate &candidate = Candidates[Order[position]];
+		for (size_t position = 0; room && position < lane.Order.size(); position++) {
+			const Candidate &candidate = lane.Candidates[lane.Order[position]];
 			const size_t perEntity = sizeof(uint64_t) + candidate.Bytes;
 
-			size_t entry = OpenEntry[candidate.Entry];
+			size_t entry = lane.OpenEntry[candidate.Entry];
 			size_t needs = perEntity + (entry == NOWHERE ? ENTRY_OVERHEAD : 0);
 
 			if (used + needs > budget) {
@@ -1164,7 +1306,7 @@ namespace engine::replication {
 
 			if (entry == NOWHERE) {
 				entry = piece.Components.size();
-				OpenEntry[candidate.Entry] = entry;
+				lane.OpenEntry[candidate.Entry] = entry;
 
 				ComponentDelta opened;
 				opened.Component = delta.Components[candidate.Entry].Component;
@@ -1238,7 +1380,9 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::EmitAudit(const ecs::Store &store, ClientId handle, Client &client, uint64_t tick) {
+	void Authority::EmitAudit(
+		Lane &lane, const ecs::Store &store, ClientId handle, Client &client, uint64_t tick
+	) {
 		if (!Settings_.Audit.Enabled || Resolved.empty() || client.Known.empty()) {
 			return;
 		}
@@ -1248,12 +1392,12 @@ namespace engine::replication {
 
 		client.AuditedAt = tick;
 
-		Auditing.clear();
-		Auditing.reserve(client.Known.size());
+		lane.Auditing.clear();
+		lane.Auditing.reserve(client.Known.size());
 		for (const uint64_t known : client.Known) {
-			Auditing.push_back(ecs::Entity{known});
+			lane.Auditing.push_back(ecs::Entity{known});
 		}
-		std::sort(Auditing.begin(), Auditing.end(), [](ecs::Entity left, ecs::Entity right) {
+		std::sort(lane.Auditing.begin(), lane.Auditing.end(), [](ecs::Entity left, ecs::Entity right) {
 			return left.Id < right.Id;
 		});
 
@@ -1300,13 +1444,14 @@ namespace engine::replication {
 		batch.reserve(wanted);
 
 		const auto from = std::lower_bound(
-			Auditing.begin(), Auditing.end(), client.AuditCursor, [](ecs::Entity left, uint64_t right) {
-				return left.Id < right;
-			}
+			lane.Auditing.begin(),
+			lane.Auditing.end(),
+			client.AuditCursor,
+			[](ecs::Entity left, uint64_t right) { return left.Id < right; }
 		);
 
 		auto cursor = from;
-		for (; cursor != Auditing.end() && batch.size() < wanted; ++cursor) {
+		for (; cursor != lane.Auditing.end() && batch.size() < wanted; ++cursor) {
 			if (!store.Alive(*cursor) || !settled(*cursor) || derives(*cursor)) {
 				continue;
 			}
@@ -1319,7 +1464,7 @@ namespace engine::replication {
 		// Wraps rather than stalls at the end of the set, so a sweep that ran
 		// out of world starts the next one immediately instead of waiting a
 		// rotation for the cursor to be reset by something else.
-		client.AuditCursor = cursor == Auditing.end() ? 0 : cursor->Id;
+		client.AuditCursor = cursor == lane.Auditing.end() ? 0 : cursor->Id;
 
 		if (batch.empty()) {
 			return;
@@ -1327,7 +1472,7 @@ namespace engine::replication {
 
 		GroupSignatures signatures;
 		signatures.Tick = tick;
-		Auditable.clear();
+		lane.Auditable.clear();
 
 		// **Only the components this batch actually touches.** A host
 		// replicating thirty of them would otherwise spend most of the datagram
@@ -1339,7 +1484,7 @@ namespace engine::replication {
 			};
 			if (std::any_of(batch.begin(), batch.end(), present)) {
 				signatures.Components.push_back(ResolvedNames[slot]);
-				Auditable.push_back(Resolved[slot]);
+				lane.Auditable.push_back(Resolved[slot]);
 			}
 		}
 
@@ -1360,7 +1505,7 @@ namespace engine::replication {
 				batch.begin() + static_cast<ptrdiff_t>(first),
 				batch.begin() + static_cast<ptrdiff_t>(first + take)
 			);
-			entry.Digest = AuditDigest(store, Auditable, entry.Entities, AuditSide::Authority);
+			entry.Digest = AuditDigest(store, lane.Auditable, entry.Entities, AuditSide::Authority);
 			signatures.Groups.push_back(std::move(entry));
 		}
 
@@ -1378,7 +1523,11 @@ namespace engine::replication {
 			// Switched off rather than retried, because the next attempt would
 			// be the same arithmetic against the same settings - a warning every
 			// `EveryTicks` for the life of the process, saying the same thing.
-			Settings_.Audit.Enabled = false;
+			//
+			// **Recorded on the lane and applied by the owner**, because this
+			// runs on a worker and `Settings_` is read by every other lane at
+			// the same moment. See `Lane::AuditTooLarge`.
+			lane.AuditTooLarge = true;
 			ENGINE_WARN(
 				"replication: an audit of one group does not fit {} bytes, so the audit is off. "
 				"Lower AuditSettings::EntitiesPerGroup or raise ChunkBytes.",
@@ -1396,7 +1545,7 @@ namespace engine::replication {
 
 		client.Outgoing.push_back(std::move(encoded));
 		client.Carried_.push_back(carried);
-		Stats_.Audits++;
+		lane.Stats.Audits++;
 	}
 
 	bool Authority::Dispute(Client &into, const replication::Disputed &disputed) {
@@ -1455,11 +1604,12 @@ namespace engine::replication {
 		return true;
 	}
 
-	void Authority::BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick) {
+	void
+	Authority::BuildComponents(Lane &lane, ecs::Store &store, Client &client, Delta &delta, uint64_t tick) {
 		client.Unconfirmed.resize(Components.size());
 
-		Candidates.clear();
-		SourceSlot.clear();
+		lane.Candidates.clear();
+		lane.SourceSlot.clear();
 
 		for (size_t slot = 0; slot < Components.size(); slot++) {
 			const core::Name name = Components[slot];
@@ -1469,8 +1619,8 @@ namespace engine::replication {
 			// and inserting that into a sorted list one entity at a time moves
 			// the tail once per entity.
 			{
-				ENGINE_PROFILE_CAT("Authority::PrepareOutstanding", core::ProfileCategory::Network);
-				unconfirmed.EmplaceAll(Appearing);
+				const Lane::Timed timed(lane, Lane::Phase::PrepareOutstanding);
+				unconfirmed.EmplaceAll(lane.Appearing);
 
 				// **The repair is the recovery walk, not a second way to resend.**
 				// An audit that disagreed says nothing about *which* value is
@@ -1486,40 +1636,26 @@ namespace engine::replication {
 				}
 			}
 
-			const ecs::ComponentId id = ecs::Components::Find(name);
-			if (!id.IsValid()) {
-				ENGINE_WARN("replication: '{}' is replicated but not registered here.", name.Text());
+			// **Resolved by `Survey`, not asked for here.** Whether a component
+			// is registered, what its descriptor says and whether its widest
+			// stored row could ever fit a message are three facts about the
+			// type - none of them depends on the client - and asking the
+			// registry for the first two takes its process-wide mutex. See
+			// `Crossing`: this loop runs per slot per client per tick, and the
+			// warnings that used to sit here fired at the same rate.
+			const Crossing &crossing = Crossings[slot];
+			if (!crossing.Sendable) {
 				continue;
 			}
 
-			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
-			if (descriptor.Size > 0 && !descriptor.Serialisable) {
-				ENGINE_WARN("replication: '{}' has no serialisation and cannot cross.", name.Text());
-				continue;
-			}
-
-			// **A coarse guard, and it is about the component rather than about
-			// a row.** A type whose *stored* size already exceeds a message can
-			// never produce a row that fits, which is worth saying once at the
-			// top instead of building rows nothing will take. It is not a bound
-			// on the encoded length: a serialiser that writes names writes as
-			// many bytes as the text is long, so what a given row costs is only
-			// known after `offer` has written it.
-			const size_t crossing = WireBytes(descriptor);
-			if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossing > Settings_.ChunkBytes) {
-				ENGINE_WARN(
-					"replication: '{}' is {} bytes stored and cannot fit a delta message.",
-					name.Text(),
-					crossing
-				);
-				continue;
-			}
+			const ecs::ComponentId id = crossing.Id;
+			const ecs::TypeDescriptor &descriptor = *crossing.Descriptor;
 
 			ComponentDelta component;
 			component.Component = name;
 
 			const uint32_t entry = static_cast<uint32_t>(delta.Components.size());
-			const size_t before = Candidates.size();
+			const size_t before = lane.Candidates.size();
 
 			core::ByteWriter values;
 
@@ -1574,11 +1710,11 @@ namespace engine::replication {
 				if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + wrote > Settings_.ChunkBytes) {
 					unconfirmed.Erase(entity.Id);
 					client.Oversize.push_back(entity.Id);
-					Stats_.Oversized++;
+					lane.Stats.Oversized++;
 					return;
 				}
 
-				Candidates.push_back(
+				lane.Candidates.push_back(
 					Candidate{
 						entry,
 						static_cast<uint32_t>(at),
@@ -1606,7 +1742,7 @@ namespace engine::replication {
 			};
 
 			{
-				ENGINE_PROFILE_CAT("Authority::DetectRows", core::ProfileCategory::Network);
+				const Lane::Timed timed(lane, Lane::Phase::DetectRows);
 				if (Detection[slot] == ChangeDetection::Signature) {
 					for (const uint64_t changed : Signatures[slot].Changed) {
 						const ecs::Entity entity{changed};
@@ -1625,9 +1761,14 @@ namespace engine::replication {
 						offer(entity, value);
 					}
 				} else {
-					store.EachChangedRuns(id, [&](const ecs::Entity *entities, void *data, size_t rows) {
-						for (size_t row = 0; row < rows; row++) {
-							const ecs::Entity entity = entities[row];
+					// **The runs `Survey` gathered, not a walk of the store per
+					// client.** What moved is a fact about the world, so it is
+					// collected once a tick; what is left here is the filter,
+					// which is the only part that depends on who is being sent
+					// to. See `Crossing::Changed`.
+					for (const ColumnRun &run : crossing.Changed) {
+						for (size_t row = 0; row < run.Rows; row++) {
+							const ecs::Entity entity = run.Entities[row];
 							if (client.Known.find(entity.Id) == client.Known.end()) {
 								continue;
 							}
@@ -1635,9 +1776,9 @@ namespace engine::replication {
 								continue;
 							}
 
-							offer(entity, static_cast<const std::byte *>(data) + row * descriptor.Size);
+							offer(entity, run.Values + row * descriptor.Size);
 						}
-					});
+					}
 				}
 			}
 
@@ -1656,8 +1797,8 @@ namespace engine::replication {
 			// Ids rather than an iterator, because `offer` inserts into
 			// `unconfirmed` and would invalidate one.
 			{
-				ENGINE_PROFILE_CAT("Authority::RecoverRows", core::ProfileCategory::Network);
-				unconfirmed.SelectRecovering(tick, Settings_.RecoveryRowsPerTick, Recovering);
+				const Lane::Timed timed(lane, Lane::Phase::RecoverRows);
+				unconfirmed.SelectRecovering(tick, Settings_.RecoveryRowsPerTick, lane.Recovering);
 
 				// **Dropped in one pass at the end rather than one at a time.** A
 				// row leaves the set when the entity has gone, and erasing from a
@@ -1666,51 +1807,51 @@ namespace engine::replication {
 				// input ascending and `Recovering` wraps, so this is sorted rather
 				// than assumed - it holds only rows with nothing behind them, which
 				// is a handful next to the walk that produced them.
-				Dropping.clear();
-				for (const uint64_t known : Recovering) {
+				lane.Dropping.clear();
+				for (const uint64_t known : lane.Recovering) {
 					const ecs::Entity entity{known};
 
 					if (client.Known.find(known) == client.Known.end() || !store.Alive(entity)) {
-						Dropping.push_back(known);
+						lane.Dropping.push_back(known);
 						continue;
 					}
 
 					const void *value = store.GetComponent(entity, id);
 					if (value == nullptr) {
-						Dropping.push_back(known);
+						lane.Dropping.push_back(known);
 						continue;
 					}
 
 					offer(entity, value);
 				}
-				std::sort(Dropping.begin(), Dropping.end());
-				unconfirmed.EraseSorted(Dropping);
+				std::sort(lane.Dropping.begin(), lane.Dropping.end());
+				unconfirmed.EraseSorted(lane.Dropping);
 			}
 
 			{
-				ENGINE_PROFILE_CAT("Authority::CommitRows", core::ProfileCategory::Network);
+				const Lane::Timed timed(lane, Lane::Phase::CommitRows);
 				if (component.Entities.empty()) {
-					Candidates.resize(before);
+					lane.Candidates.resize(before);
 					continue;
 				}
 
 				component.Values.assign(values.Bytes().begin(), values.Bytes().end());
 
-				SourceSlot.push_back(slot);
+				lane.SourceSlot.push_back(slot);
 				delta.Components.push_back(std::move(component));
 			}
 		}
 	}
 
-	void Authority::Record(Client &client, const Placement &placed, uint64_t tick) {
+	void Authority::Record(Lane &lane, Client &client, const Placement &placed, uint64_t tick) {
 		if (placed.Values > 0) {
 			client.StreamedBefore = client.Streamed;
 			client.Streamed = tick;
 		}
 
-		for (size_t position = 0; position < Order.size(); position++) {
-			const Candidate &candidate = Candidates[Order[position]];
-			Outstanding &pending = client.Unconfirmed[SourceSlot[candidate.Entry]][candidate.Entity.Id];
+		for (size_t position = 0; position < lane.Order.size(); position++) {
+			const Candidate &candidate = lane.Candidates[lane.Order[position]];
+			Outstanding &pending = client.Unconfirmed[lane.SourceSlot[candidate.Entry]][candidate.Entity.Id];
 
 			if (position < placed.Values) {
 				pending.SentAt = tick;
@@ -1719,9 +1860,177 @@ namespace engine::replication {
 			}
 
 			pending.SentAt = 0;
-			Stats_.Deferred++;
-			Stats_.Stalest = std::max(Stats_.Stalest, tick - pending.WaitingSince);
+			lane.Stats.Deferred++;
+			lane.Stats.Stalest = std::max(lane.Stats.Stalest, tick - pending.WaitingSince);
 		}
+	}
+
+	Authority::Lane::Timed::Timed(Lane &lane, Phase phase)
+		: Into(lane.Spent[static_cast<size_t>(phase)]), Began(core::Clock::Nanoseconds()) {}
+
+	Authority::Lane::Timed::~Timed() {
+		Into += static_cast<double>(core::Clock::Nanoseconds() - Began);
+	}
+
+	void Authority::SelectVisible(Lane &lane, ClientId handle, const ecs::Store &store) {
+		// **`Bearing` rather than the whole store, which is the same set by a
+		// shorter road.** `Survey` has just built the sorted ids of everything
+		// carrying a replicated component, so walking the store and asking
+		// whether each entity is in that list is an archetype walk plus a binary
+		// search per entity to arrive at a list already in hand - once per
+		// client, so on a full server it is that walk two hundred times.
+		//
+		// It also leaves `Visible` ascending by handle, which the structural
+		// pass takes rather than re-deriving.
+		lane.Visible.clear();
+		lane.Visible.reserve(Bearing.size());
+		for (const uint64_t id : Bearing) {
+			const ecs::Entity entity{id};
+			if (!Interest || Interest(handle, entity, store)) {
+				lane.Visible.push_back(entity);
+			}
+		}
+	}
+
+	void
+	Authority::PublishOne(Lane &lane, ClientId handle, Client &client, ecs::Store &store, uint64_t tick) {
+		{
+			const Lane::Timed timed(lane, Lane::Phase::Interest);
+			SelectVisible(lane, handle, store);
+		}
+		lane.Stats.Visible += lane.Visible.size();
+
+		Structure structure;
+		structure.Tick = tick;
+
+		{
+			const Lane::Timed timed(lane, Lane::Phase::Structure);
+
+			for (const ecs::Entity entity : lane.Visible) {
+				if (client.Known.find(entity.Id) == client.Known.end()) {
+					structure.Created.push_back(entity);
+				}
+			}
+
+			// **`Visible` is already ascending by handle**, because the walk
+			// above takes `Bearing` in order - so this searches it directly
+			// rather than copying every id out and sorting the copy, which was a
+			// pass over the client's whole world per client per tick.
+			const auto byHandleId = [](const ecs::Entity entity, uint64_t id) { return entity.Id < id; };
+
+			for (const uint64_t known : client.Known) {
+				const auto at = std::lower_bound(lane.Visible.begin(), lane.Visible.end(), known, byHandleId);
+				if (at != lane.Visible.end() && at->Id == known) {
+					continue;
+				}
+				if (store.Alive(ecs::Entity{known})) {
+					structure.Forgotten.push_back(ecs::Entity{known});
+				} else {
+					structure.Destroyed.push_back(ecs::Entity{known});
+				}
+			}
+
+			const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
+			std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
+			std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
+			std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
+
+			for (const ecs::Entity entity : structure.Created) {
+				client.Known.insert(entity.Id);
+			}
+			for (const ecs::Entity entity : structure.Destroyed) {
+				client.Known.erase(entity.Id);
+			}
+			for (const ecs::Entity entity : structure.Forgotten) {
+				client.Known.erase(entity.Id);
+			}
+
+			if (!structure.Created.empty() || !structure.Destroyed.empty() || !structure.Forgotten.empty()) {
+				EmitStructure(client, structure);
+			}
+		}
+
+		lane.Appearing.clear();
+		for (const ecs::Entity entity : structure.Created) {
+			lane.Appearing.push_back(entity.Id);
+		}
+
+		const size_t structureMessages = client.Outgoing.size();
+		const size_t structureEdits = client.Edits.size();
+
+		Delta delta;
+		delta.Tick = tick;
+		delta.Baseline = client.Applied;
+
+		BuildComponents(lane, store, client, delta, tick);
+		client.Repairing.clear();
+
+		if (!delta.Components.empty()) {
+			lane.Order.resize(lane.Candidates.size());
+			for (size_t position = 0; position < lane.Order.size(); position++) {
+				lane.Order[position] = static_cast<uint32_t>(position);
+			}
+
+			Placement placed;
+			{
+				const Lane::Timed timed(lane, Lane::Phase::Pack);
+				placed = Pack(lane, client, delta, Settings_.MessagesPerTick);
+			}
+
+			if (placed.Values < lane.Candidates.size()) {
+				client.Outgoing.resize(structureMessages);
+				client.Carried_.resize(structureMessages);
+				client.Edits.resize(structureEdits);
+
+				Prioritise(lane, handle, tick);
+
+				const Lane::Timed repacked(lane, Lane::Phase::Pack);
+				placed = Pack(lane, client, delta, Settings_.MessagesPerTick);
+			}
+
+			const Lane::Timed recorded(lane, Lane::Phase::Record);
+			Record(lane, client, placed, tick);
+		}
+
+		// Last, so that the byte budget turns this away before it turns away
+		// anything that matters. A lost audit costs one rotation and a lost
+		// delta costs a client its agreement with the world.
+		{
+			const Lane::Timed timed(lane, Lane::Phase::Audit);
+			EmitAudit(lane, store, handle, client, tick);
+		}
+
+		for (const std::vector<std::byte> &message : client.Outgoing) {
+			lane.Stats.Bytes += message.size();
+		}
+		lane.Stats.Messages += client.Outgoing.size();
+	}
+
+	size_t Authority::LanesFor(size_t clients) const {
+		// **Below the threshold the loop stays exactly the loop it was**, which
+		// is the whole of the measurement: dispatching costs a batch, a lane's
+		// scratch is cold, and a client's publish is not big enough to pay for
+		// either until there are enough of them. See
+		// `AuthoritySettings::ParallelClientThreshold` for the number and where
+		// it came from.
+		if (clients < Settings_.ParallelClientThreshold) {
+			return 1;
+		}
+
+		// The caller drains ranges alongside the pool, so it is a lane too. A
+		// lane per client past that point would be lanes that never run.
+		const size_t available = static_cast<size_t>(parallel::Jobs::WorkerCount()) + 1;
+		return std::min(clients, available);
+	}
+
+	void Authority::ResetPublishStatistics() {
+		Stats_.Messages = 0;
+		Stats_.Bytes = 0;
+		Stats_.Visible = 0;
+		Stats_.Resnapshots = 0;
+		Stats_.Deferred = 0;
+		Stats_.Stalest = 0;
+		Stats_.Audits = 0;
 	}
 
 	void Authority::Publish(ecs::Store &store, uint64_t tick) {
@@ -1731,199 +2040,319 @@ namespace engine::replication {
 		// the instrumentation. Every client's visibility walk shares one stack in
 		// the folded output, which is the number a reader wants anyway - what one
 		// client costs is this over the client count.
+		//
+		// **And the per-client phases have no `ENGINE_PROFILE` any more**,
+		// because they run on a worker and `core::FrameGraph` drops a span it
+		// did not open on the recording thread - so keeping them would have
+		// quietly turned the whole replication breakdown into a number in the
+		// drop counter. Each lane counts nanoseconds into `Lane::Spent` instead
+		// and `ReportPhases` folds the totals back into the graph under the
+		// names the spans used, and into `core::Metrics` as histograms because
+		// that is the sink a headless server can drain.
 		ENGINE_PROFILE_CAT("Authority::Publish", core::ProfileCategory::Network);
-
-		Stats_.Messages = 0;
-		Stats_.Bytes = 0;
-		Stats_.Visible = 0;
-		Stats_.Resnapshots = 0;
-		Stats_.Deferred = 0;
-		Stats_.Stalest = 0;
-		Stats_.Audits = 0;
-
+		ResetPublishStatistics();
 		if (Count() == 0) {
 			return;
 		}
 
 		Survey(store);
+		PublishAfterSurvey(store, tick);
+	}
 
-		for (size_t index = 0; index < Clients.size(); index++) {
-			Client &client = Clients[index];
-			if (!client.Live) {
-				continue;
-			}
-
-			const ClientId handle{static_cast<uint32_t>(index), client.Generation};
-			client.Outgoing.clear();
-			client.Carried_.clear();
-			client.Edits.clear();
-
-			// Released a tick after the cursor reached the end, because `Unsent`
-			// is called after `Publish` has returned and may put it back.
-			for (Staged &staged : client.Snapshots) {
-				if (!staged.Bytes.empty() && staged.Sent >= staged.Bytes.size()) {
-					staged.Bytes.clear();
-					staged.Bytes.shrink_to_fit();
-					staged.Sent = 0;
-				}
-			}
-
-			{
-				ENGINE_PROFILE_CAT("Authority::Interest", core::ProfileCategory::Network);
-
-				// **`Bearing` rather than the whole store, which is the same set
-				// by a shorter road.** `Survey` has just built the sorted ids of
-				// everything carrying a replicated component, so walking the
-				// store and asking whether each entity is in that list is an
-				// archetype walk plus a binary search per entity to arrive at a
-				// list already in hand - once per client, so on a full server it
-				// is that walk two hundred times.
-				//
-				// It also leaves `Visible` ascending by handle, which the
-				// structural pass below takes rather than re-deriving.
-				Visible.clear();
-				Visible.reserve(Bearing.size());
-				for (const uint64_t id : Bearing) {
-					const ecs::Entity entity{id};
-					if (!Interest || Interest(handle, entity, store)) {
-						Visible.push_back(entity);
-					}
-				}
-			}
-			Stats_.Visible += Visible.size();
-
-			const bool adrift = Owed(client) == 0 && client.Applied > 0 && client.Streamed > client.Applied &&
-								tick > client.Applied + Settings_.ResnapshotAfterTicks;
-			if (adrift) {
-				Stats_.Resnapshots++;
-			}
-
-			const bool joining = Owed(client) == 0 && client.Known.empty() && client.Applied == 0;
-			if (joining || adrift) {
-				BeginSnapshot(client, store, tick);
-			} else if (Owed(client) == 0 && !client.Oversize.empty()) {
-				// **After the two above and never beside them.** A join or a
-				// re-snapshot carries these entities in the world blob, so
-				// staging a slice as well would send the same bytes twice - and
-				// the list is cleared by `BeginSnapshot` for exactly that
-				// reason. Owed nothing, because a blob part way out must not be
-				// replaced by one taken later.
-				StageOversize(client, store, tick);
-			}
-
-			if (Owed(client) > 0) {
-				StreamSnapshot(client);
-
-				for (const std::vector<std::byte> &message : client.Outgoing) {
-					Stats_.Bytes += message.size();
-				}
-				Stats_.Messages += client.Outgoing.size();
-				continue;
-			}
-
-			Structure structure;
-			structure.Tick = tick;
-
-			{
-				ENGINE_PROFILE_CAT("Authority::Structure", core::ProfileCategory::Network);
-
-				for (const ecs::Entity entity : Visible) {
-					if (client.Known.find(entity.Id) == client.Known.end()) {
-						structure.Created.push_back(entity);
-					}
-				}
-
-				{
-					// **`Visible` is already ascending by handle**, because the walk
-					// above takes `Bearing` in order - so this searches it directly
-					// rather than copying every id out and sorting the copy, which
-					// was a pass over the client's whole world per client per tick.
-					const auto byHandleId = [](const ecs::Entity entity, uint64_t id) {
-						return entity.Id < id;
-					};
-
-					for (const uint64_t known : client.Known) {
-						const auto at = std::lower_bound(Visible.begin(), Visible.end(), known, byHandleId);
-						if (at != Visible.end() && at->Id == known) {
-							continue;
-						}
-						if (store.Alive(ecs::Entity{known})) {
-							structure.Forgotten.push_back(ecs::Entity{known});
-						} else {
-							structure.Destroyed.push_back(ecs::Entity{known});
-						}
-					}
-				}
-
-				const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
-				std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
-				std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
-				std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
-
-				for (const ecs::Entity entity : structure.Created) {
-					client.Known.insert(entity.Id);
-				}
-				for (const ecs::Entity entity : structure.Destroyed) {
-					client.Known.erase(entity.Id);
-				}
-				for (const ecs::Entity entity : structure.Forgotten) {
-					client.Known.erase(entity.Id);
-				}
-
-				if (!structure.Created.empty() || !structure.Destroyed.empty() ||
-					!structure.Forgotten.empty()) {
-					EmitStructure(client, structure);
-				}
-			}
-
-			Appearing.clear();
-			for (const ecs::Entity entity : structure.Created) {
-				Appearing.push_back(entity.Id);
-			}
-
-			const size_t structureMessages = client.Outgoing.size();
-			const size_t structureEdits = client.Edits.size();
-
-			Delta delta;
-			delta.Tick = tick;
-			delta.Baseline = client.Applied;
-
-			{
-				ENGINE_PROFILE_CAT("Authority::BuildComponents", core::ProfileCategory::Network);
-				BuildComponents(store, client, delta, tick);
-			}
-			client.Repairing.clear();
-
-			if (!delta.Components.empty()) {
-				Order.resize(Candidates.size());
-				for (size_t position = 0; position < Order.size(); position++) {
-					Order[position] = static_cast<uint32_t>(position);
-				}
-
-				Placement placed = Pack(client, delta, Settings_.MessagesPerTick);
-
-				if (placed.Values < Candidates.size()) {
-					client.Outgoing.resize(structureMessages);
-					client.Carried_.resize(structureMessages);
-					client.Edits.resize(structureEdits);
-
-					Prioritise(handle, tick);
-					placed = Pack(client, delta, Settings_.MessagesPerTick);
-				}
-
-				Record(client, placed, tick);
-			}
-
-			// Last, so that the byte budget turns this away before it turns
-			// away anything that matters. A lost audit costs one rotation and a
-			// lost delta costs a client its agreement with the world.
-			EmitAudit(store, handle, client, tick);
-
-			for (const std::vector<std::byte> &message : client.Outgoing) {
-				Stats_.Bytes += message.size();
-			}
-			Stats_.Messages += client.Outgoing.size();
+	size_t Authority::PublishMany(std::span<const PublishRequest> requests) {
+		if (requests.empty()) {
+			return 0;
 		}
+		if (requests.size() == 1) {
+			PublishRequest request = requests.front();
+			const bool active = request.Source.Count() > 0;
+			request.Source.Publish(request.World, request.Tick);
+			return active ? 1 : 0;
+		}
+
+		ENGINE_PROFILE_CAT("Authority::PublishMany", core::ProfileCategory::Network);
+
+		struct SignWork {
+			Authority *Source = nullptr;
+			size_t Slot = 0;
+		};
+		static thread_local std::vector<size_t> active;
+		static thread_local std::vector<SignWork> signing;
+		active.clear();
+		signing.clear();
+
+		{
+			ENGINE_PROFILE_CAT("Authority::PrepareMany", core::ProfileCategory::Network);
+			for (size_t index = 0; index < requests.size(); index++) {
+				Authority &source = requests[index].Source;
+				source.ResetPublishStatistics();
+				if (source.Count() == 0) {
+					continue;
+				}
+
+				source.PrepareSurvey(requests[index].World);
+				active.push_back(index);
+				for (const size_t slot : source.ResignWork) {
+					signing.push_back(SignWork{&source, slot});
+				}
+			}
+		}
+
+		{
+			ENGINE_PROFILE_CAT("Authority::Resign::sign many", core::ProfileCategory::Network);
+			std::vector<SignWork> *workList = &signing;
+			parallel::Jobs::For(signing.size(), 1, [workList](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; index++) {
+					const SignWork &work = (*workList)[index];
+					SignSlot(work.Source->Signatures[work.Slot]);
+				}
+			});
+		}
+
+		{
+			ENGINE_PROFILE_CAT("Authority::FinishMany", core::ProfileCategory::Network);
+			for (const size_t index : active) {
+				const PublishRequest &request = requests[index];
+				request.Source.ReportSignatures();
+				request.Source.FinishSurvey(request.World);
+				request.Source.PublishAfterSurvey(request.World, request.Tick);
+			}
+		}
+
+		return active.size();
+	}
+
+	void Authority::PublishAfterSurvey(ecs::Store &store, uint64_t tick) {
+		// --- what has to happen on the thread that owns the store ------------
+		//
+		// **A join is the one part of a publish that builds a world**, and
+		// `Capture` builds one: a scratch `ecs::Store`, an entity per row, a
+		// component per row and a `Save` over the result. Every one of those
+		// calls `Store::RequireOwningThread`, which aborts rather than races, so
+		// the snapshot half stays here and the steady-state half goes to the
+		// lanes. That is the same split `Resign` already makes one function up,
+		// for the same reason.
+		//
+		// It is also bounded in a way the steady state is not: a client joins
+		// once, and the listener staggers arrivals.
+		Steady.clear();
+		if (Lanes.empty()) {
+			Lanes.resize(1);
+		}
+		Lane &owner = Lanes.front();
+
+		{
+			ENGINE_PROFILE_CAT("Authority::Streaming", core::ProfileCategory::Network);
+
+			size_t blobs = 0;
+			for (size_t index = 0; index < Clients.size(); index++) {
+				Client &client = Clients[index];
+				if (!client.Live) {
+					continue;
+				}
+
+				const ClientId handle{static_cast<uint32_t>(index), client.Generation};
+				client.Outgoing.clear();
+				client.Carried_.clear();
+				client.Edits.clear();
+
+				// Released a tick after the cursor reached the end, because
+				// `Unsent` is called after `Publish` has returned and may put it
+				// back.
+				for (Staged &staged : client.Snapshots) {
+					if (!staged.Bytes.empty() && staged.Sent >= staged.Bytes.size()) {
+						staged.Bytes.clear();
+						staged.Bytes.shrink_to_fit();
+						staged.Sent = 0;
+					}
+				}
+
+				const bool adrift = Owed(client) == 0 && client.Applied > 0 &&
+									client.Streamed > client.Applied &&
+									tick > client.Applied + Settings_.ResnapshotAfterTicks;
+				const bool joining = Owed(client) == 0 && client.Known.empty() && client.Applied == 0;
+
+				if (joining || adrift) {
+					// **Bounded, and the bound is why a server can be joined at
+					// all.** See `AuthoritySettings::JoinsPerTick`: a client
+					// turned away here is sent nothing this tick and is still
+					// joining on the next, which is one tick of waiting against
+					// a tick that used to build every arriving client's world
+					// before it answered anybody.
+					if (Settings_.JoinsPerTick > 0 && blobs >= Settings_.JoinsPerTick) {
+						continue;
+					}
+					blobs++;
+
+					if (adrift) {
+						Stats_.Resnapshots++;
+					}
+
+					// **The interest walk is here rather than above it**,
+					// because a client part way through a join is being sent a
+					// blob taken when it started and asking again would be a
+					// walk of the world whose answer is thrown away. That walk
+					// used to run for every client on every tick of every join.
+					SelectVisible(owner, handle, store);
+					Stats_.Visible += owner.Visible.size();
+					BeginSnapshot(owner, client, store, tick);
+				} else if (Owed(client) == 0 && !client.Oversize.empty()) {
+					// **After the two above and never beside them.** A join or a
+					// re-snapshot carries these entities in the world blob, so
+					// staging a slice as well would send the same bytes twice -
+					// and the list is cleared by `BeginSnapshot` for exactly
+					// that reason. Owed nothing, because a blob part way out
+					// must not be replaced by one taken later.
+					StageOversize(client, store, tick);
+				}
+
+				if (Owed(client) > 0) {
+					StreamSnapshot(client);
+
+					for (const std::vector<std::byte> &message : client.Outgoing) {
+						Stats_.Bytes += message.size();
+					}
+					Stats_.Messages += client.Outgoing.size();
+					continue;
+				}
+
+				Steady.push_back(static_cast<uint32_t>(index));
+			}
+		}
+
+		if (Steady.empty()) {
+			return;
+		}
+
+		// --- the steady state, one lane per thread ---------------------------
+		//
+		// **Rule 5, and the two halves of it are separate claims.** The batch
+		// blocks, so the tick is still one thing that starts and finishes and
+		// nothing lands a tick later on a slower machine. And the bytes a client
+		// receives do not depend on which lane published it: every client writes
+		// only into its own `Client` and its lane's scratch, everything shared -
+		// `Bearing`, `Crossings`, `Signatures`, the store - is read and never
+		// written, and the counters merge by sum and maximum. So a run with
+		// twenty-three workers and a run with none produce the same recording,
+		// which is what `just determinism` and `just replay-check` check.
+		//
+		// **Striped rather than blocked**, because a lane's cost is the sum of
+		// its clients' and those are near enough identical: the same world, the
+		// same slot list, and an interest walk over the same `Bearing`. Blocks
+		// would leave the last lane short whenever the client count is not a
+		// multiple of the lane count.
+		const size_t lanes = LanesFor(Steady.size());
+		if (Lanes.size() < lanes) {
+			Lanes.resize(lanes);
+		}
+		for (size_t at = 0; at < lanes; at++) {
+			Lanes[at].Stats = Lane::Tally{};
+			Lanes[at].Spent = {};
+			Lanes[at].AuditTooLarge = false;
+		}
+
+		const auto publishLane = [this, &store, tick, lanes](size_t begin, size_t end) {
+			for (size_t at = begin; at < end; at++) {
+				Lane &lane = Lanes[at];
+				for (size_t position = at; position < Steady.size(); position += lanes) {
+					Client &client = Clients[Steady[position]];
+					const ClientId handle{Steady[position], client.Generation};
+					PublishOne(lane, handle, client, store, tick);
+				}
+			}
+		};
+
+		{
+			ENGINE_PROFILE_CAT("Authority::Steady", core::ProfileCategory::Network);
+
+			if (lanes <= 1) {
+				publishLane(0, 1);
+			} else {
+				// A minimum of two, because a lane is an expensive unit of work by
+				// construction - `LanesFor` has already decided there is enough of
+				// it - and the default derives one from the grain on the
+				// assumption that an index is cheap.
+				parallel::Jobs::For(lanes, 1, publishLane, 2);
+			}
+		}
+
+		for (size_t at = 0; at < lanes; at++) {
+			const Lane &lane = Lanes[at];
+			Stats_.Messages += lane.Stats.Messages;
+			Stats_.Bytes += lane.Stats.Bytes;
+			Stats_.Visible += lane.Stats.Visible;
+			Stats_.Deferred += lane.Stats.Deferred;
+			Stats_.Audits += lane.Stats.Audits;
+			Stats_.Oversized += lane.Stats.Oversized;
+			Stats_.Stalest = std::max(Stats_.Stalest, lane.Stats.Stalest);
+
+			// Applied here rather than where it was found, because a worker
+			// writing a setting every other lane is reading is a data race. See
+			// `Lane::AuditTooLarge`.
+			if (lane.AuditTooLarge) {
+				Settings_.Audit.Enabled = false;
+			}
+		}
+
+		ReportPhases(lanes);
+	}
+
+	// Folds every lane's phase timings into the frame graph and the metrics
+	// sink, on the thread that owns both.
+	void Authority::ReportPhases(size_t lanes) {
+		// The bar names the spans used, and the metric names beside them. One
+		// table rather than two lists, because a phase whose bar and counter
+		// were named in two places is a phase that ends up with two meanings.
+		static constexpr std::
+			array<std::pair<std::string_view, std::string_view>, static_cast<size_t>(Lane::Phase::Count)>
+				PHASES = {{
+					{"Authority::Interest", "replication.publish.interest"},
+					{"Authority::Structure", "replication.publish.structure"},
+					{"Authority::PrepareOutstanding", "replication.publish.outstanding"},
+					{"Authority::DetectRows", "replication.publish.detect"},
+					{"Authority::RecoverRows", "replication.publish.recover"},
+					{"Authority::CommitRows", "replication.publish.commit"},
+					{"Authority::Score", "replication.publish.score"},
+					{"Authority::Sort", "replication.publish.sort"},
+					{"Authority::Refine", "replication.publish.refine"},
+					{"Authority::Pack", "replication.publish.pack"},
+					{"Authority::Record", "replication.publish.record"},
+					{"Authority::EmitAudit", "replication.publish.audit"},
+				}};
+
+		for (size_t phase = 0; phase < PHASES.size(); phase++) {
+			// **The sum across lanes, not the wall time**, which is the
+			// distinction `Universe::Tick` already draws for its own worker
+			// bars: this says how much work the publish contained and the
+			// `Authority::Steady` scope around it says how long that took. More
+			// than one lane makes the first larger than the second, which is the
+			// whole point of having them.
+			double nanoseconds = 0.0;
+			for (size_t at = 0; at < lanes; at++) {
+				nanoseconds += Lanes[at].Spent[phase];
+			}
+
+			const auto &[bar, counter] = PHASES[phase];
+			core::FrameGraph::Report(
+				bar, core::ProfileCategory::Network, static_cast<float>(nanoseconds / 1e6)
+			);
+
+			// **And the same figure into `core::Metrics`, which is where a
+			// headless server can reach it.** The frame graph is a ring the F5
+			// overlay reads and a `.folded` capture drains; `Metrics` keeps
+			// percentiles and `--metrics-every` prints them, which is the
+			// difference between knowing the mean tick and knowing how often one
+			// missed.
+			core::Metrics::ObserveTime(counter, static_cast<uint64_t>(nanoseconds));
+		}
+
+		// **A histogram and not a gauge, which the first version got wrong.** A
+		// gauge keeps the value last written, so on a run whose final tick
+		// happened to hold two clients it reported one lane for the whole run -
+		// a number that is true about one tick and says nothing about any other.
+		// How wide a publish spread is a per-tick quantity, so it has a
+		// distribution.
+		core::Metrics::Observe("replication.publish.lanes", static_cast<double>(lanes));
 	}
 
 	void Authority::SetAllowance(ClientId client, size_t bytes) {

@@ -134,5 +134,14 @@ already have bytes for. **`Engine::bake` remains forbidden** for the reason the
 readers, `server` links this target, and a dedicated server has no business
 holding a decoder. `D00102`.
 
-Nothing here opens a file or a socket. A caller hands over bytes it already has,
-and the trust boundary stays `delivery`'s.
+**This module opens files and does not fetch, and the difference is the whole
+point.** `Game.hpp` takes a `std::filesystem::path` in six places - `LoadGame`,
+`SaveGame` and the world-level pair either side of them - because reading and
+writing a `.agame` a caller named is what this module is for. What it does not
+do is open a socket, resolve a content reference or decide *which* file: a path
+arrives already chosen, and everything behind a content id arrives as bytes the
+caller already has. The trust boundary stays `delivery`'s.
+
+Until v0.19 this paragraph read "nothing here opens a file or a socket", which
+was true of the `assets` edge it was written about and false of the module. Say
+the narrow thing, because the narrow thing is the one that is load-bearing.

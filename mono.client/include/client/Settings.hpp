@@ -10,9 +10,9 @@
 //
 // **The built-in defaults are read off a default-constructed `Options`**, so
 // there is one statement of what a client does with nothing configured and it
-// is the member initialiser in `Client.hpp`. A table that spelled `1280` again
-// would be a second copy of exactly the fact rule 2 is about, and the first
-// place it would drift is a `--help` line.
+// is the member initialiser in `client/Options.hpp`. A table that spelled
+// `1280` again would be a second copy of exactly the fact rule 2 is about, and
+// the first place it would drift is a `--help` line.
 //
 // ## What is deliberately not here
 //
@@ -32,7 +32,7 @@
 //
 // @since v0.15
 
-#include <client/Client.hpp>
+#include <client/Options.hpp>
 
 namespace client {
 

@@ -13,10 +13,9 @@
 // - **`CollectInstances`** walks every visible part, interpolates it between the
 //   last two ticks and writes a `scene::DrawInstance`. This is the triangle
 //   count's proxy and the one that scales with the scene.
-// - **`CollectParticleBatches`** turns the world's emitter blocks into batches.
-//   Since v0.17 the device owns the particle pool, so what crosses here is a few
-//   hundred bytes an emitter rather than the half million particles they hold -
-//   and the whole point of that redesign is a number this file can now state.
+// - **`CollectParticleBatches`** refreshes block data only when its resident
+//   revision changes and authored batches only when emitter layout changes.
+//   Both paths are measured below.
 // - **`CollectLights`** resolves each light to where it shines from, which is a
 //   walk to a parent, and then sorts to a cap.
 // - **`CollectSurfaceViews`** finds every mirror, which is a scan that usually
@@ -45,11 +44,13 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <client/ContentDemand.hpp>
 #include <client/Scene.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -195,7 +196,7 @@ namespace frame_bench {
 	// ticks however many times the display asks for.
 	size_t Present(Presented &scene) {
 		scene.Systems->RunPhases(*scene.World, Phase::PreRender, Phase::PreRender);
-		const auto *list = scene.World->Resource<client::DrawList>();
+		const auto *list = scene.World->Resource<engine::render::DrawList>();
 		return list == nullptr ? 0 : list->Instances.size();
 	}
 }
@@ -223,48 +224,85 @@ BENCH("PreRender · 100,000 parts", 1) {
 // --- what runs beside it ------------------------------------------------------
 
 BENCH("CollectParticleBatches · a world with no emitters", 10'000) {
-	// **The row that prices a scan that usually finds nothing.** Most worlds
-	// have no particles in them at all, and this runs every frame regardless -
-	// so it is the most frequently executed call in this file and the one whose
-	// cost has to round to zero.
+	// Most worlds have no particles. The first call establishes that fact and
+	// render-rate repeats reuse it without scanning an empty emitter column.
 	Presented &scene = Scene(SMALL);
-	client::ParticleFrame frame;
+	engine::render::ParticleFrame frame;
 	size_t batches = 0;
 	for (size_t call = 0; call < 10'000; call++) {
-		batches += client::CollectParticleBatches(*scene.World, frame);
+		batches += engine::render::CollectParticleBatches(*scene.World, frame);
 	}
 	Consume(batches);
 }
 
-BENCH("CollectParticleBatches · 1,000 live emitters", 1000) {
-	// **The particle path's whole per-frame cost on the CPU.** A thousand
-	// emitters at thirty a second hold tens of thousands of particles, and none
-	// of them are touched here: the batch carries the emitter's shared half -
-	// texture, blend mode, flipbook layout, Z offset - and points at the block
-	// the device steps. Read this against `engine.effects.bench.particles`,
-	// which measures the simulation the device now does, and the two together
-	// are what the redesign moved and what it left behind.
-	//
-	// As measured it is under a nanosecond an emitter and it stays that way at
-	// ten times the emitters, so the claim holds: the CPU's share of particles
-	// is the emitter column and nothing else.
+BENCH("ContentDemand revision · unchanged world with 10,000 emitters", 10'000) {
+	Store &store = Emitting(10'000);
+	const uint64_t settled = client::WantedContentRevision(store);
+	for (size_t call = 0; call < 10'000; call++) {
+		Consume(client::WantedContentRevision(store) == settled);
+	}
+}
+
+BENCH("ContentDemand scan · 10,000 emitters sharing one texture", 100) {
+	Store &store = Emitting(10'000);
+	std::vector<engine::core::Name> wanted;
+	for (size_t call = 0; call < 100; call++) {
+		wanted.clear();
+		client::CollectWantedContent(store, wanted);
+		Consume(wanted.size());
+	}
+}
+
+BENCH("CollectParticleBatches · reuse 1,000 live emitters", 1000) {
+	// The render-rate path between simulation revisions. This is one source-name
+	// and revision comparison regardless of emitter count.
 	Store &store = Emitting(1000);
-	client::ParticleFrame frame;
+	engine::render::ParticleFrame frame;
+	engine::render::CollectParticleBatches(store, frame);
 	size_t batches = 0;
 	for (size_t call = 0; call < 1000; call++) {
-		batches += client::CollectParticleBatches(store, frame);
+		batches += engine::render::CollectParticleBatches(store, frame);
 	}
 	Consume(batches);
 }
 
-BENCH("CollectParticleBatches · 10,000 live emitters", 100) {
-	// Ten times the emitters. Ten times the cost is a collector that scales with
-	// the emitter column; anything steeper is it reaching into the pool.
-	Store &store = Emitting(10'000);
-	client::ParticleFrame frame;
+BENCH("CollectParticleBatches · refresh 1,000 resident emitters", 100) {
+	Store &store = Emitting(1000);
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	engine::render::ParticleFrame frame;
 	size_t batches = 0;
 	for (size_t call = 0; call < 100; call++) {
-		batches += client::CollectParticleBatches(store, frame);
+		system->PresentationRevision++;
+		batches += engine::render::CollectParticleBatches(store, frame);
+	}
+	Consume(batches);
+}
+
+BENCH("CollectParticleBatches · refresh 10,000 resident emitters", 100) {
+	// A simulation revision refreshes resident block pointers without
+	// walking the authored emitter column or rebuilding material order.
+	Store &store = Emitting(10'000);
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	engine::render::ParticleFrame frame;
+	size_t batches = 0;
+	for (size_t call = 0; call < 100; call++) {
+		system->PresentationRevision++;
+		batches += engine::render::CollectParticleBatches(store, frame);
+	}
+	Consume(batches);
+}
+
+BENCH("CollectParticleBatches · rebuild 10,000 emitter layout", 100) {
+	// This is the deliberately rare path: membership or material state changed,
+	// so every emitter has to publish new batch metadata.
+	Store &store = Emitting(10'000);
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	engine::render::ParticleFrame frame;
+	size_t batches = 0;
+	for (size_t call = 0; call < 100; call++) {
+		system->PresentationRevision++;
+		system->LayoutRevision++;
+		batches += engine::render::CollectParticleBatches(store, frame);
 	}
 	Consume(batches);
 }
@@ -272,16 +310,16 @@ BENCH("CollectParticleBatches · 10,000 live emitters", 100) {
 BENCH("ParticleFrame::Detach · 10,000 live emitters", 100) {
 	// What the studio pays and the client does not. `Renderer::Render` happens
 	// after `Universe::Enter` has returned there, so the batches have to stop
-	// pointing into a world that may be stepping again - which copies the blocks
-	// they point at. As measured it is a few times what collecting them cost, so
-	// the studio pays a real multiple of the client's particle path and the
-	// client's decision to render inside the tick is worth what it looks like it
-	// is worth.
+	// pointing into a world that may be stepping again. The first call copies the
+	// blocks; later simulation-only revisions retain that detached storage because
+	// no device table input changed.
 	Store &store = Emitting(10'000);
-	client::ParticleFrame frame;
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	engine::render::ParticleFrame frame;
 	size_t blocks = 0;
 	for (size_t call = 0; call < 100; call++) {
-		client::CollectParticleBatches(store, frame);
+		system->PresentationRevision++;
+		engine::render::CollectParticleBatches(store, frame);
 		frame.Detach();
 		blocks += frame.Blocks.size();
 	}
@@ -295,7 +333,7 @@ BENCH("CollectLights · a world with no lights", 10'000) {
 	std::vector<engine::render::SceneLight> lights;
 	size_t found = 0;
 	for (size_t call = 0; call < 10'000; call++) {
-		found += client::CollectLights(*scene.World, Vector3{0.0f, 0.0f, 0.0f}, lights);
+		found += engine::render::CollectLights(*scene.World, Vector3{0.0f, 0.0f, 0.0f}, lights);
 	}
 	Consume(found);
 }

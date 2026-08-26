@@ -1,0 +1,314 @@
+#version 450
+
+// Advances emitter clocks and writes newborn states directly into the resident
+// particle pool. One invocation out of each block's flat work run owns that
+// block, so emitters execute in parallel without an atomic allocator. Blocks
+// own disjoint state ranges.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint STATE_WORDS = 15u;
+const uint STATE_VELOCITY = 0u;
+const uint STATE_AGE = 3u;
+const uint STATE_LIFETIME = 4u;
+const uint STATE_OFFSET = 5u;
+const uint STATE_SPIN = 8u;
+const uint STATE_SEED = 9u;
+const uint STATE_POSITION = 10u;
+const uint STATE_GENERATION = 13u;
+const uint STATE_ROTATION = 14u;
+
+const uint WORK_WORDS = 2u;
+
+const uint PARAM_WORDS = 50u;
+const uint PARAM_ROTATION = 0u;
+const uint PARAM_POSITION = 4u;
+const uint PARAM_FIRST = 11u;
+const uint PARAM_CAPACITY = 12u;
+const uint PARAM_FLAGS = 13u;
+const uint PARAM_CELLS = 14u;
+const uint PARAM_GENERATION = 17u;
+const uint PARAM_OWNER = 24u;
+const uint PARAM_CONTINUOUS_RATE = 25u;
+const uint PARAM_REQUESTED = 26u;
+const uint PARAM_HALF = 27u;
+const uint PARAM_EMISSION = 30u;
+const uint PARAM_INHERITED = 33u;
+const uint PARAM_SPEED = 36u;
+const uint PARAM_LIFETIME = 38u;
+const uint PARAM_ROTATION_SPEED = 40u;
+const uint PARAM_ROTATION_RANGE = 42u;
+const uint PARAM_SPREAD = 44u;
+const uint PARAM_SHAPE_PARTIAL = 46u;
+const uint PARAM_SHAPE = 47u;
+const uint PARAM_SHAPE_STYLE = 48u;
+const uint PARAM_SHAPE_DIRECTION = 49u;
+
+// generation, monotonic spawn index, fractional rate debt, consumed explicit
+// request total, and whether the guaranteed first birth still owes its phase.
+const uint EMITTER_WORDS = 5u;
+const uint EMITTER_GENERATION = 0u;
+const uint EMITTER_SPAWNED = 1u;
+const uint EMITTER_PENDING = 2u;
+const uint EMITTER_REQUESTED = 3u;
+const uint EMITTER_PHASE_PENDING = 4u;
+
+layout(set = 0, binding = 0) readonly buffer Work { uint words[]; } work_;
+layout(set = 0, binding = 1) readonly buffer Params { uint words[]; } params;
+layout(set = 1, binding = 0) buffer States { uint words[]; } states;
+layout(set = 1, binding = 1) buffer Emitters { uint words[]; } emitters;
+
+layout(set = 2, binding = 0) uniform Step {
+	// x: elapsed simulation seconds. y: flat work item count.
+	vec4 Delta;
+} step_;
+
+float ParamFloat(uint base, uint word) { return uintBitsToFloat(params.words[base + word]); }
+uint ParamUint(uint base, uint word) { return params.words[base + word]; }
+
+vec3 ParamVector(uint base, uint word) {
+	return vec3(ParamFloat(base, word), ParamFloat(base, word + 1u), ParamFloat(base, word + 2u));
+}
+
+vec4 ParamTurn(uint base) {
+	return vec4(
+		ParamFloat(base, PARAM_ROTATION),
+		ParamFloat(base, PARAM_ROTATION + 1u),
+		ParamFloat(base, PARAM_ROTATION + 2u),
+		ParamFloat(base, PARAM_ROTATION + 3u)
+	);
+}
+
+vec3 TurnedBy(vec4 turn, vec3 value) {
+	vec3 axis = turn.xyz;
+	vec3 crossed = cross(axis, value) + turn.w * value;
+	return value + 2.0 * cross(axis, crossed);
+}
+
+// SplitMix64's finaliser, expressed as two words because the portable shader
+// profile does not require 64-bit integers. This is the same seed construction
+// and constant sequence as ParticleSystem.cpp, including the high half of each
+// multiply.
+uvec2 ShiftRight64(uvec2 value, uint amount) {
+	if (amount == 0u) {
+		return value;
+	}
+	if (amount < 32u) {
+		return uvec2((value.x >> amount) | (value.y << (32u - amount)), value.y >> amount);
+	}
+	return uvec2(value.y >> (amount - 32u), 0u);
+}
+
+uvec2 Add64(uvec2 left, uvec2 right) {
+	uint low = left.x + right.x;
+	return uvec2(low, left.y + right.y + uint(low < left.x));
+}
+
+uvec2 Multiply64(uvec2 left, uvec2 right) {
+	uint high;
+	uint low;
+	umulExtended(left.x, right.x, high, low);
+	high += left.x * right.y + left.y * right.x;
+	return uvec2(low, high);
+}
+
+uint Mix(uvec2 seed) {
+	seed = Add64(seed, uvec2(0x7F4A7C15u, 0x9E3779B9u));
+	uvec2 mixed = seed ^ ShiftRight64(seed, 30u);
+	mixed = Multiply64(mixed, uvec2(0x1CE4E5B9u, 0xBF58476Du));
+	mixed ^= ShiftRight64(mixed, 27u);
+	mixed = Multiply64(mixed, uvec2(0x133111EBu, 0x94D049BBu));
+	mixed ^= ShiftRight64(mixed, 31u);
+	return mixed.y;
+}
+
+float Unit(uint emitter, uint particle, uint purpose) {
+	// (emitter << 40) xor (particle << 8) xor purpose.
+	uvec2 seed = uvec2((particle << 8u) ^ purpose, (emitter << 8u) ^ (particle >> 24u));
+	return float(Mix(seed) >> 8u) * (1.0 / 16777216.0);
+}
+
+float Between(uint base, uint word, uint emitter, uint particle, uint purpose) {
+	float minimum = ParamFloat(base, word);
+	return minimum + Unit(emitter, particle, purpose) * (ParamFloat(base, word + 1u) - minimum);
+}
+
+vec3 SafeUnit(vec3 value, vec3 fallback) {
+	float squared = dot(value, value);
+	return squared > 0.0 ? value * inversesqrt(squared) : fallback;
+}
+
+vec3 SpawnPoint(uint base, uint emitter, uint particle) {
+	vec3 point = vec3(
+		Unit(emitter, particle, 1u) * 2.0 - 1.0,
+		Unit(emitter, particle, 2u) * 2.0 - 1.0,
+		Unit(emitter, particle, 3u) * 2.0 - 1.0
+	);
+	vec3 halfExtent = ParamVector(base, PARAM_HALF);
+	uint shape = ParamUint(base, PARAM_SHAPE);
+	bool surface = ParamUint(base, PARAM_SHAPE_STYLE) == 1u;
+
+	if (shape == 1u) {
+		point = SafeUnit(point, vec3(0.0));
+		if (!surface) {
+			point *= pow(Unit(emitter, particle, 4u), 1.0 / 3.0);
+		}
+		point *= halfExtent;
+	} else if (shape == 2u || shape == 3u) {
+		float angle = Unit(emitter, particle, 4u) * 6.283185307179586;
+		float radius = surface ? 1.0 : sqrt(Unit(emitter, particle, 5u));
+		point = vec3(cos(angle) * radius * halfExtent.x,
+			shape == 2u ? point.y * halfExtent.y : 0.0,
+			sin(angle) * radius * halfExtent.z);
+	} else {
+		if (surface) {
+			vec3 absolutePoint = abs(point);
+			if (absolutePoint.x >= absolutePoint.y && absolutePoint.x >= absolutePoint.z) {
+				point.x = point.x < 0.0 ? -1.0 : 1.0;
+			} else if (absolutePoint.y >= absolutePoint.z) {
+				point.y = point.y < 0.0 ? -1.0 : 1.0;
+			} else {
+				point.z = point.z < 0.0 ? -1.0 : 1.0;
+			}
+		}
+		point *= halfExtent;
+	}
+
+	if (ParamFloat(base, PARAM_SHAPE_PARTIAL) > Unit(emitter, particle, 6u)) {
+		point.y = abs(point.y);
+	}
+	return point;
+}
+
+vec3 SpawnDirection(uint base, vec3 localPoint, uint emitter, uint particle) {
+	uint shape = ParamUint(base, PARAM_SHAPE);
+	vec3 direction = ParamVector(base, PARAM_EMISSION);
+	if (shape != 0u && dot(localPoint, localPoint) > 0.0) {
+		direction = normalize(localPoint);
+	}
+
+	uint shapeDirection = ParamUint(base, PARAM_SHAPE_DIRECTION);
+	if (shapeDirection == 1u || (shapeDirection == 2u && Unit(emitter, particle, 7u) < 0.5)) {
+		direction = -direction;
+	}
+
+	float pitch = (Unit(emitter, particle, 8u) * 2.0 - 1.0) * ParamFloat(base, PARAM_SPREAD);
+	float yaw = (Unit(emitter, particle, 9u) * 2.0 - 1.0) * ParamFloat(base, PARAM_SPREAD + 1u);
+	if (pitch != 0.0 || yaw != 0.0) {
+		float sinPitch = sin(pitch);
+		float cosPitch = cos(pitch);
+		float sinYaw = sin(yaw);
+		float cosYaw = cos(yaw);
+		vec3 pitched = vec3(
+			direction.x,
+			direction.y * cosPitch - direction.z * sinPitch,
+			direction.y * sinPitch + direction.z * cosPitch
+		);
+		direction = vec3(
+			pitched.x * cosYaw + pitched.z * sinYaw,
+			pitched.y,
+			-pitched.x * sinYaw + pitched.z * cosYaw
+		);
+	}
+	return SafeUnit(direction, vec3(0.0, 1.0, 0.0));
+}
+
+void Spawn(uint base, uint row, uint emitter, uint particle, uint generation) {
+	vec3 localPoint = SpawnPoint(base, emitter, particle);
+	vec3 localDirection = SpawnDirection(base, localPoint, emitter, particle);
+	vec4 turn = ParamTurn(base);
+	vec3 origin = ParamVector(base, PARAM_POSITION);
+	vec3 velocity = TurnedBy(turn, localDirection) *
+		Between(base, PARAM_SPEED, emitter, particle, 10u) + ParamVector(base, PARAM_INHERITED);
+	vec3 position = origin + TurnedBy(turn, localPoint);
+
+	uint stateAt = row * STATE_WORDS;
+	states.words[stateAt + STATE_VELOCITY] = floatBitsToUint(velocity.x);
+	states.words[stateAt + STATE_VELOCITY + 1u] = floatBitsToUint(velocity.y);
+	states.words[stateAt + STATE_VELOCITY + 2u] = floatBitsToUint(velocity.z);
+	states.words[stateAt + STATE_AGE] = floatBitsToUint(0.0);
+	states.words[stateAt + STATE_LIFETIME] = floatBitsToUint(max(
+		Between(base, PARAM_LIFETIME, emitter, particle, 11u), 0.0001
+	));
+	states.words[stateAt + STATE_OFFSET] = floatBitsToUint(localPoint.x);
+	states.words[stateAt + STATE_OFFSET + 1u] = floatBitsToUint(localPoint.y);
+	states.words[stateAt + STATE_OFFSET + 2u] = floatBitsToUint(localPoint.z);
+	states.words[stateAt + STATE_SPIN] = floatBitsToUint(
+		Between(base, PARAM_ROTATION_SPEED, emitter, particle, 13u) / 360.0
+	);
+	states.words[stateAt + STATE_SEED] = particle;
+	states.words[stateAt + STATE_POSITION] = floatBitsToUint(position.x);
+	states.words[stateAt + STATE_POSITION + 1u] = floatBitsToUint(position.y);
+	states.words[stateAt + STATE_POSITION + 2u] = floatBitsToUint(position.z);
+	states.words[stateAt + STATE_GENERATION] = generation;
+
+	float degrees = Between(base, PARAM_ROTATION_RANGE, emitter, particle, 12u);
+	uint rotation = uint(fract(degrees / 360.0 + 1.0) * 65535.0) & 0xFFFFu;
+	if ((ParamUint(base, PARAM_FLAGS) & 2u) != 0u) {
+		uint cells = ParamUint(base, PARAM_CELLS);
+		uint cell = cells > 1u ? min(uint(Unit(emitter, particle, 15u) * float(cells)), cells - 1u) : 0u;
+		rotation |= cell << 16u;
+	}
+	states.words[stateAt + STATE_ROTATION] = rotation;
+}
+
+void main() {
+	uint item = gl_GlobalInvocationID.x;
+	if (item >= uint(step_.Delta.y)) {
+		return;
+	}
+
+	uint block = work_.words[item * WORK_WORDS];
+	uint stateRow = work_.words[item * WORK_WORDS + 1u];
+	uint base = block * PARAM_WORDS;
+	uint first = ParamUint(base, PARAM_FIRST);
+	uint capacity = ParamUint(base, PARAM_CAPACITY);
+	if (stateRow != first || capacity == 0u) {
+		return;
+	}
+
+	uint generation = ParamUint(base, PARAM_GENERATION);
+	uint runtimeAt = block * EMITTER_WORDS;
+	uint spawned;
+	float pending;
+	uint handledRequests;
+	uint phasePending;
+	if (emitters.words[runtimeAt + EMITTER_GENERATION] != generation) {
+		spawned = 0u;
+		pending = ParamFloat(base, PARAM_CONTINUOUS_RATE) > 0.0 ? 1.0 : 0.0;
+		handledRequests = 0u;
+		phasePending = 1u;
+	} else {
+		spawned = emitters.words[runtimeAt + EMITTER_SPAWNED];
+		pending = uintBitsToFloat(emitters.words[runtimeAt + EMITTER_PENDING]);
+		handledRequests = emitters.words[runtimeAt + EMITTER_REQUESTED];
+		phasePending = emitters.words[runtimeAt + EMITTER_PHASE_PENDING];
+	}
+
+	pending += max(ParamFloat(base, PARAM_CONTINUOUS_RATE), 0.0) * step_.Delta.x;
+	uint continuous = uint(max(floor(pending), 0.0));
+	pending -= float(continuous);
+	uint requestedTotal = ParamUint(base, PARAM_REQUESTED);
+	uint requested = requestedTotal - handledRequests;
+	if (phasePending != 0u && continuous > 0u) {
+		pending = Unit(ParamUint(base, PARAM_OWNER), 0u, 14u);
+		phasePending = 0u;
+	}
+
+	uint owed = continuous + requested;
+	if (owed > capacity) {
+		spawned += owed - capacity;
+		owed = capacity;
+	}
+	uint owner = ParamUint(base, PARAM_OWNER);
+	for (uint birth = 0u; birth < owed; birth++) {
+		uint particle = spawned++;
+		Spawn(base, first + particle % capacity, owner, particle, generation);
+	}
+
+	emitters.words[runtimeAt + EMITTER_GENERATION] = generation;
+	emitters.words[runtimeAt + EMITTER_SPAWNED] = spawned;
+	emitters.words[runtimeAt + EMITTER_PENDING] = floatBitsToUint(pending);
+	emitters.words[runtimeAt + EMITTER_REQUESTED] = requestedTotal;
+	emitters.words[runtimeAt + EMITTER_PHASE_PENDING] = phasePending;
+}

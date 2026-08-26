@@ -38,6 +38,20 @@ mono_add_library(core
 		# everywhere.
 		$<$<BOOL:${MONO_HEAP_PROFILE}>:MONO_HEAP_PROFILE>
 
+		# **Public, and it has to be, for `MONO_HEAP_PROFILE`'s reason one step
+		# weaker.** `ENGINE_TRACE` expands to a live statement or to a `sizeof`
+		# depending on this number, so a module compiled with a different floor
+		# than the one `core` was compiled with contains a different set of log
+		# statements than the program thinks it does. Every module links `core`,
+		# so putting it here is what makes the answer the same everywhere.
+		ENGINE_LOG_COMPILED_LEVEL=${MONO_LOG_LEVEL_NUMBER}
+
+		# Public for the same reason, and for a stronger one: `Assert::IsCompiledIn`
+		# reports what this build checks, and a core that answered `true` while
+		# half the modules had their asserts compiled out would be reporting
+		# about a program that does not exist.
+		ENGINE_ASSERTS_ENABLED=$<IF:$<BOOL:${MONO_ASSERTS}>,1,0>
+
 		# glm settings belong here rather than in render, because CFrame is L1
 		# and the two must agree about handedness and clip space. A projection
 		# matrix built under a different GLM_FORCE_ is a depth buffer that is

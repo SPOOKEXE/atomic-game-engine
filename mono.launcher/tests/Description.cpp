@@ -62,6 +62,18 @@ TEST_CASE("options can be looked up by name", "[launcher]") {
 	CHECK(description->Option("no-such-option") == nullptr);
 }
 
+TEST_CASE("settings can be looked up by name", "[launcher]") {
+	std::string failure;
+	const auto description = ParseDescription(GOOD, failure);
+	REQUIRE(description.has_value());
+
+	// The settings tab draws its rows from the form and its kinds from here,
+	// so the two are joined by name on every frame.
+	REQUIRE(description->Setting("content.gif") != nullptr);
+	CHECK(description->Setting("content.gif")->Kind == "boolean");
+	CHECK(description->Setting("content.svg") == nullptr);
+}
+
 TEST_CASE("output that is not an object is refused with a reason", "[launcher]") {
 	std::string failure;
 

@@ -170,16 +170,23 @@ TEST_CASE("the systems land in the phases the plan names", "[physics][pipeline]"
 
 	Scheduler scheduler;
 	RegisterPhysicsSystems(scheduler);
-	REQUIRE(scheduler.SystemCount() == 2);
+	REQUIRE(scheduler.SystemCount() == 3);
 
 	scheduler.Tick(store, TICK);
 
 	const auto &timings = scheduler.Timings();
-	REQUIRE(timings.size() == 2);
-	CHECK(timings[0].Name == "physics.simulation");
-	CHECK(timings[0].RunPhase == Phase::Simulation);
-	CHECK(timings[1].Name == "physics.contacts");
-	CHECK(timings[1].RunPhase == Phase::PostSimulation);
+	REQUIRE(timings.size() == 3);
+
+	// **The bake first, and in its own phase.** A mesh a script built this tick
+	// has no collision shape until something makes one, and the broad phase
+	// indexes the collider that names it in the very next phase - see
+	// `scene::RefreshEditableMeshCollision`.
+	CHECK(timings[0].Name == "physics.editable-mesh");
+	CHECK(timings[0].RunPhase == Phase::PreSimulation);
+	CHECK(timings[1].Name == "physics.simulation");
+	CHECK(timings[1].RunPhase == Phase::Simulation);
+	CHECK(timings[2].Name == "physics.contacts");
+	CHECK(timings[2].RunPhase == Phase::PostSimulation);
 }
 
 TEST_CASE("a scheduled tick integrates before it indexes", "[physics][pipeline]") {

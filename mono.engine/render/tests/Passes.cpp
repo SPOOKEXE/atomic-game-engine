@@ -4,6 +4,8 @@
 // accepted only when every enabled node has a backend implementation. The
 // default output path belongs to the engine's default graph, not this boundary.
 
+#include "EnvironmentModes.hpp"
+
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
@@ -177,6 +179,55 @@ TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
 
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
+}
+
+TEST_CASE("environment enabled switches select only their authored GPU mode", "[render][environment]") {
+	engine::scene::Environment environment;
+	environment.Skybox = engine::scene::SkyboxSource::Textures;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 1);
+	environment.Textures.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 0);
+
+	environment.Skybox = engine::scene::SkyboxSource::Compute;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 2);
+	environment.SkyCompute.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 0);
+
+	environment.HasClouds = true;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 1);
+	environment.HasCloudCompute = true;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 2);
+	environment.CloudVolume.Shader = engine::scene::CloudComputeShader::Voxel;
+	CHECK(
+		engine::render::EnvironmentShadersOf(environment).Clouds ==
+		static_cast<uint32_t>(engine::scene::CloudComputeShader::Voxel)
+	);
+	environment.CloudVolume.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
+	CHECK(engine::render::EnvironmentShadersOf(environment).Clouds == 0);
+	CHECK(
+		engine::render::EnvironmentCloudComputeOf(environment).Shader ==
+		engine::scene::CloudComputeShader::Cumulus
+	);
+	environment.CloudLayer.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
+
+	environment.HasAtmosphere = true;
+	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 1);
+	environment.HasAtmosphereCompute = true;
+	environment.AirCompute.Shader = engine::scene::AtmosphereProceduralShader::Alien;
+	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 2);
+	CHECK(
+		engine::render::EnvironmentShadersOf(environment).Atmosphere ==
+		static_cast<uint32_t>(engine::scene::AtmosphereProceduralShader::Alien)
+	);
+	environment.AirCompute.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 0);
+	CHECK(engine::render::EnvironmentShadersOf(environment).Atmosphere == 0);
+	CHECK(
+		engine::render::EnvironmentAtmosphereComputeOf(environment).Shader ==
+		engine::scene::AtmosphereProceduralShader::Earth
+	);
 }
 
 TEST_CASE("optional default nodes can be disabled at the backend boundary", "[render][graph]") {
@@ -377,6 +428,8 @@ TEST_CASE("a renderer returns the complete lighting state it was given", "[rende
 	lighting.FogColor = {0.11f, 0.22f, 0.33f};
 	lighting.FogStart = 12.0f;
 	lighting.FogEnd = 48.0f;
+	lighting.EnvironmentState.Skybox = engine::scene::SkyboxSource::Compute;
+	lighting.EnvironmentState.SkyCompute.Seed = 83;
 	renderer.SetLighting(lighting);
 
 	const engine::scene::WorldLighting current = renderer.CurrentLighting();
@@ -387,6 +440,8 @@ TEST_CASE("a renderer returns the complete lighting state it was given", "[rende
 	CHECK(current.FogColor == lighting.FogColor);
 	CHECK(current.FogStart == 12.0f);
 	CHECK(current.FogEnd == 48.0f);
+	CHECK(current.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
+	CHECK(current.EnvironmentState.SkyCompute.Seed == 83);
 }
 
 // The other half of D00016's neighbourhood: a decision that was recorded and

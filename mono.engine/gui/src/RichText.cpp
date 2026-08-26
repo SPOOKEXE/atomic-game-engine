@@ -1,6 +1,7 @@
 #include "Utf8.hpp"
 
 #include <engine/core/Chars.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/gui/RichText.hpp>
 
 #include <algorithm>
@@ -253,13 +254,21 @@ namespace engine::gui {
 		// **Every failure below restores the input**, because half a parse is
 		// worse than none: a caller shown a partly-stripped string cannot tell
 		// whether the markup ran out or the text did.
+		// Declared before `refuse` so the diagnostic can say where the parse
+		// gave up; the walk below is what advances it.
+		size_t at = 0;
+
 		const auto refuse = [&] {
+			// **The whole string is shown with its tags literal.** That is the
+			// documented behaviour and it is indistinguishable from text that
+			// was meant to contain angle brackets, so a mistyped tag renders
+			// wrong and nothing says why.
+			ENGINE_DEBUG_EVERY(5.0, "rich text refused at byte {} of {}; shown literally", at, source.size());
 			plain.assign(source);
 			spans.clear();
 			return false;
 		};
 
-		size_t at = 0;
 		while (at < source.size()) {
 			const char here = source[at];
 

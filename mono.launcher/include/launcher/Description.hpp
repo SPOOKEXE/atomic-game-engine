@@ -102,6 +102,9 @@ namespace launcher {
 
 		// The option by that name, or nothing.
 		const DescribedOption *Option(std::string_view name) const;
+
+		// The setting by that name, or nothing.
+		const DescribedSetting *Setting(std::string_view name) const;
 	};
 
 	// Reads one `--describe` object.

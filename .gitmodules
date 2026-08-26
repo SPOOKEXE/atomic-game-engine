@@ -300,3 +300,34 @@
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git
 	branch = vulkan-sdk-1.4.357
 	shallow = true
+; QUIC. `docs/QUIC.md` is the survey that chose it and `docs/DEFERRED.md`
+; D00014 is the argument for wanting it at all; what belongs here is why this
+; library and not one of the seven that were considered.
+;
+; MIT, C, and **nothing under its `lib/` names a TLS stack** - which is the
+; property that decides it, because every other candidate hard-wires one. That
+; is what lets the crypto stay in `engine::net::quic` over Crypto++, and what
+; keeps a fresh clone needing CMake, Ninja and a C++ compiler and nothing else.
+; picoquic and quicly require picotls, lsquic requires BoringSSL which requires
+; Go, quiche is Rust, mvfst depends on folly, and msquic brings its own event
+; loop and a different TLS per platform.
+;
+; **Every entry point takes an explicit `ngtcp2_tstamp`**, which is the only
+; shape compatible with `net`'s standing rule that time is passed in and never
+; read. A library that called `clock_gettime` inside would put a
+; non-deterministic input in the middle of the subsystem whose failures are
+; hardest to reproduce, and `just determinism` and `just replay-check` both
+; depend on it not doing that.
+;
+; Pinned at the `v1.25.0` tag rather than at the head of `main`, for the reason
+; SDL is pinned at a release: the version is a number documents quote. Upstream
+; cuts no release branch, so `main` is what the tag sits on.
+;
+; Only `lib/` is built - `MonoVendor.cmake` configures with `ENABLE_LIB_ONLY`,
+; so the `crypto/` helpers for OpenSSL, GnuTLS, wolfSSL and picotls are never
+; configured and none of their dependencies is looked for.
+[submodule "mono.vendor/ngtcp2"]
+	path = mono.vendor/ngtcp2
+	url = https://github.com/ngtcp2/ngtcp2.git
+	branch = main
+	shallow = true

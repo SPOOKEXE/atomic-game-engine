@@ -62,9 +62,13 @@ namespace engine::game {
 			return;
 		}
 
-		const std::vector<core::Vector3> points = PositionsOf(mesh);
-		into.SetHull(name, collision::BuildConvexHull(points));
-		into.SetMesh(name, collision::BuildTriangleMesh(points, mesh.Indices));
+		// **Through `scene::BakeCollisionShapes`, which is the one place either
+		// shape is built.** A script that builds a mesh at run time bakes the
+		// same two out of the same arrays - see
+		// `scene::RefreshEditableMeshCollision` - and a second copy of
+		// "quickhull the points, then soup the triangles" is two places for the
+		// two paths to disagree about tolerance or winding.
+		scene::BakeCollisionShapes(into, name, PositionsOf(mesh), mesh.Indices);
 	}
 
 	void AddBuiltinCollisionShapes(scene::CollisionShapes &into) {

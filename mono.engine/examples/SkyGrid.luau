@@ -64,7 +64,23 @@ local PALETTE = {
 	Color3.fromRGB(206, 206, 206),
 }
 
-local blocks = {}
+-- The drift state, one record a block. The engine holds the part; how it moves
+-- is the script's business.
+type Block = {
+	Base: Vector3,
+	Phase: number,
+}
+
+local blocks: { Block } = {}
+
+-- **The two lists `BulkMoveTo` takes, built once and kept.** The parts never
+-- change, so that half is filled below and never touched again; the placements
+-- are overwritten in place every tick. Rebuilding either one per tick would put
+-- back most of what the batch saves - the allocation, not the boundary, but a
+-- table of two hundred entries a tick is not free either.
+local parts: { Instance } = {}
+local placements: { CFrame } = {}
+
 local index = 0
 
 for column = 0, COLUMNS - 1 do
@@ -85,10 +101,11 @@ for column = 0, COLUMNS - 1 do
 			-- below travels across the lattice as a wave instead of moving every
 			-- block together. Together would read as the camera moving.
 			table.insert(blocks, {
-				Part = block,
 				Base = block.Position,
 				Phase = (column + layer + row) * 0.6,
 			})
+			parts[index] = block
+			placements[index] = block.CFrame
 		end
 	end
 end
@@ -114,12 +131,18 @@ workspace.CurrentCamera = view
 local DRIFT = 0.55
 local SPEED = 0.9
 
+-- **One `BulkMoveTo` rather than a write per block**, which is what this demo
+-- is here to exercise as much as the drift is. A per-part `Position =` crosses
+-- the language boundary once per block, and the boundary is most of what a move
+-- costs - `scene::BulkMoveTo` carries the measurement. At two hundred blocks it
+-- is a fraction of a millisecond; the scene it stands in for is a crowd, a
+-- swarm or a conveyor with thousands.
 RunService.Heartbeat:Connect(function(deltaTime: number)
-	for _, block in blocks do
+	for at, block in blocks do
 		block.Phase += SPEED * deltaTime
-		block.Part.Position = block.Base
-			+ Vector3.new(0, math.sin(block.Phase) * DRIFT, 0)
+		placements[at] = CFrame.new(block.Base + Vector3.new(0, math.sin(block.Phase) * DRIFT, 0))
 	end
+	workspace:BulkMoveTo(parts, placements)
 end)
 
 print(`skygrid: {#blocks} blocks, {COLUMNS}x{LAYERS}x{ROWS} at {SPACING} spacing`)

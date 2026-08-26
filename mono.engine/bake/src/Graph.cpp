@@ -4,6 +4,9 @@
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Clock.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <algorithm>
 
@@ -19,6 +22,9 @@ namespace engine::bake {
 
 	NodeId Graph::Append(Node node) {
 		if (Nodes.size() >= MAXIMUM_NODES) {
+			// The caller gets an invalid id it may not check, and the pipeline
+			// then bakes with a node silently missing from it.
+			ENGINE_WARN("bake graph is at its {} node cap; the node was not appended", MAXIMUM_NODES);
 			return {};
 		}
 		Nodes.push_back(std::move(node));
@@ -143,6 +149,12 @@ namespace engine::bake {
 	bool Graph::Evaluate(size_t index, std::string &failure) {
 		Node &node = Nodes[index];
 
+		// **The one chokepoint every one of the nine decoders passes through.**
+		// Timing here rather than in each format keeps one place to read, and
+		// this is per asset rather than per frame - so a plain statement per
+		// node is the right granularity.
+		const uint64_t began = core::Clock::Nanoseconds();
+
 		if (IsInput(node.Kind)) {
 			if (node.Kind == NodeKind::Source) {
 				node.Result.Kind = PayloadKind::Bytes;
@@ -189,9 +201,17 @@ namespace engine::bake {
 			// claim anything beginning with a brace. An image signature is
 			// unambiguous, so trying it first costs nothing and removes the
 			// overlap.
-			if (ImageFormatOfBytes(input.Bytes) != ImageFormat::Unknown) {
+			if (const ImageFormat sniffed = ImageFormatOfBytes(input.Bytes);
+				sniffed != ImageFormat::Unknown) {
+				// Which decoder claimed a file is the fact a wrong-looking
+				// import needs first: a `.svg` holding a PNG decodes as a PNG
+				// here, by design, and nothing else says so.
+				ENGINE_DEBUG(
+					"'{}' sniffed as {} from {} bytes", input.Source, Describe(sniffed), input.Bytes.size()
+				);
 				assets::TextureData texture;
 				if (!ReadImage(input.Bytes, texture, failure)) {
+					ENGINE_WARN("'{}' failed to decode: {}", input.Source, failure);
 					return false;
 				}
 				result.Kind = PayloadKind::Texture;
@@ -223,12 +243,18 @@ namespace engine::bake {
 				return false;
 			}
 
+			ENGINE_DEBUG(
+				"'{}' importing as {} from {} bytes", input.Source, Describe(format), input.Bytes.size()
+			);
+
 			ImportedModel model;
 			if (!ReadModel(format, input.Bytes, model, failure)) {
+				ENGINE_WARN("'{}' failed to import: {}", input.Source, failure);
 				return false;
 			}
 			result.Kind = PayloadKind::Mesh;
 			result.Mesh = std::move(model.Mesh);
+			result.MaterialLibrary = std::move(model.MaterialLibrary);
 			result.Bytes.clear();
 			break;
 		}
@@ -376,6 +402,12 @@ namespace engine::bake {
 		}
 
 		node.Result = std::move(result);
+
+		// Per node and per asset, not per frame. The histogram is what says
+		// which decoder a slow bake is spending its time in.
+		const uint64_t elapsed = core::Clock::Nanoseconds() - began;
+		core::Metrics::ObserveTime("bake.node", elapsed);
+		ENGINE_TRACE("node {} took {} ms", index, static_cast<double>(elapsed) / 1.0e6);
 		return true;
 	}
 
@@ -414,6 +446,9 @@ namespace engine::bake {
 				// Unreachable while `Connect` refuses cycles, and left in
 				// because the alternative to an impossible-state check here is
 				// an infinite loop.
+				// Unreachable while `Connect` refuses cycles, so reaching it is a
+				// bug in the wiring check rather than in the document.
+				ENGINE_ERROR("a cycle survived the wiring check with {} node(s) unevaluated", remaining);
 				failure = "graph: a cycle survived the wiring check";
 				return false;
 			}

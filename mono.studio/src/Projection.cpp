@@ -2,7 +2,9 @@
 #include <glm/mat3x3.hpp>
 #include <glm/vec4.hpp>
 
+#include <array>
 #include <cmath>
+#include <limits>
 #include <studio/Projection.hpp>
 
 namespace studio {
@@ -10,6 +12,19 @@ namespace studio {
 	using engine::core::CFrame;
 	using engine::core::Ray;
 	using engine::core::Vector3;
+
+	ViewportImageRect FitViewportImage(glm::vec2 panelSize, uint32_t imageWidth, uint32_t imageHeight) {
+		panelSize.x = std::max(panelSize.x, 0.0f);
+		panelSize.y = std::max(panelSize.y, 0.0f);
+		if (imageWidth == 0 || imageHeight == 0 || panelSize.x == 0.0f || panelSize.y == 0.0f) {
+			return ViewportImageRect{glm::vec2(0.0f), panelSize};
+		}
+
+		const glm::vec2 imageSize{static_cast<float>(imageWidth), static_cast<float>(imageHeight)};
+		const float scale = std::min(panelSize.x / imageSize.x, panelSize.y / imageSize.y);
+		const glm::vec2 fitted = imageSize * scale;
+		return ViewportImageRect{(panelSize - fitted) * 0.5f, fitted};
+	}
 
 	namespace {
 		// Anything at or behind this much clip-space `w` is treated as behind
@@ -180,6 +195,63 @@ namespace studio {
 	bool PanelProjection::ContainsPanel(glm::vec2 panel) const {
 		return IsValid() && panel.x >= ImageMin.x && panel.y >= ImageMin.y &&
 			   panel.x <= ImageMin.x + ImageSize.x && panel.y <= ImageMin.y + ImageSize.y;
+	}
+
+	bool ProjectBoxBounds(
+		const PanelProjection &panel,
+		const CFrame &frame,
+		const Vector3 &half,
+		glm::vec2 &minimum,
+		glm::vec2 &maximum
+	) {
+		static constexpr std::array<std::array<uint8_t, 2>, 12> EDGES{{
+			{{0, 1}},
+			{{0, 2}},
+			{{0, 4}},
+			{{1, 3}},
+			{{1, 5}},
+			{{2, 3}},
+			{{2, 6}},
+			{{3, 7}},
+			{{4, 5}},
+			{{4, 6}},
+			{{5, 7}},
+			{{6, 7}},
+		}};
+
+		std::array<Vector3, 8> corners;
+		for (uint8_t corner = 0; corner < corners.size(); corner++) {
+			const Vector3 local{
+				(corner & 1u) != 0 ? half.X : -half.X,
+				(corner & 2u) != 0 ? half.Y : -half.Y,
+				(corner & 4u) != 0 ? half.Z : -half.Z,
+			};
+			corners[corner] = frame.PointToWorldSpace(local);
+		}
+
+		minimum = glm::vec2(std::numeric_limits<float>::max());
+		maximum = glm::vec2(std::numeric_limits<float>::lowest());
+		bool projected = false;
+		for (const auto &edge : EDGES) {
+			glm::vec2 first;
+			glm::vec2 second;
+			if (!panel.ProjectSegment(corners[edge[0]], corners[edge[1]], first, second)) {
+				continue;
+			}
+			minimum = glm::min(minimum, glm::min(first, second));
+			maximum = glm::max(maximum, glm::max(first, second));
+			projected = true;
+		}
+		return projected;
+	}
+
+	bool PanelRectanglesOverlap(glm::vec2 firstA, glm::vec2 firstB, glm::vec2 secondA, glm::vec2 secondB) {
+		const glm::vec2 firstMin = glm::min(firstA, firstB);
+		const glm::vec2 firstMax = glm::max(firstA, firstB);
+		const glm::vec2 secondMin = glm::min(secondA, secondB);
+		const glm::vec2 secondMax = glm::max(secondA, secondB);
+		return firstMin.x <= secondMax.x && firstMax.x >= secondMin.x && firstMin.y <= secondMax.y &&
+			   firstMax.y >= secondMin.y;
 	}
 
 	// How far an oriented box reaches along a direction from its centre.

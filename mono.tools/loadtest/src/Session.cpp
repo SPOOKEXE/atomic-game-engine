@@ -21,7 +21,7 @@ namespace loadtest {
 		case Stage::Playing:
 			return "playing";
 		case Stage::Refused:
-			return "refused";
+			return "gave up";
 		case Stage::TimedOut:
 			return "timed out";
 		}
@@ -61,6 +61,14 @@ namespace loadtest {
 
 	void RegisterReplicaTypes() {
 		engine::scene::RegisterSceneComponents();
+
+		// **`scene`'s classes, for the reason `client::BuildReplicatedWorld`
+		// gives at length.** Without them every instance a snapshot names
+		// arrives untyped, `ecs.InstanceClass` crosses as an empty name, and the
+		// audit disputes every group it looks at - which re-arms the recovery
+		// walk for ever. This harness is what measured that: 91,507 B/s at rest
+		// before, 16,964 after.
+		engine::scene::RegisterSceneClasses();
 
 		// Both are idempotent and both register their components before their
 		// classes, which is why the return values are discarded here as they are
@@ -193,7 +201,7 @@ namespace loadtest {
 		}
 
 		if (Link != nullptr) {
-			const engine::net::ConnectionStats &stats = Link->Link().Stats();
+			const engine::net::ConnectionStats stats = Link->LinkStats();
 			report.BytesSent = stats.BytesSent;
 			report.BytesReceived = stats.BytesReceived;
 			report.PacketsSent = stats.PacketsSent;

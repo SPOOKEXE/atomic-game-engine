@@ -1,3 +1,10 @@
+// The instance model: the three components, the tree, cloning and churn.
+//
+// The class table itself is `Classes.cpp`. This file covers what is built on
+// top of it, which is `Instance.hpp` plus the instance half of `Store.hpp`.
+
+#include "ClassTree.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -15,6 +22,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.instance")
+TEST_DEPENDS("engine.ecs.classes")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
@@ -31,197 +39,14 @@ using engine::ecs::NULL_ENTITY;
 using engine::ecs::PropertyType;
 using engine::ecs::Store;
 
-namespace instance_test {
-	struct Transform {
-		float X = 0.0f;
-		float Y = 0.0f;
-	};
-	struct Bounds {
-		float HalfExtent = 0.5f;
-	};
-	struct Visual {
-		Name Mesh;
-		bool Visible = true;
-	};
-	struct Motion {
-		float Speed = 0.0f;
-	};
+using namespace ecs_test;
 
-	// A handle to another instance, for the one thing `Clone` has to reason
-	// about that no other component does. A weld naming the two parts it joins
-	// is this shape.
-	struct Link {
-		Entity Target;
-	};
-
-	// One class tree, registered once for the whole suite. Classes are
-	// process-wide and never unregister, exactly like components.
-	struct Tree {
-		ClassId Instance;
-		ClassId PVInstance;
-		ClassId BasePart;
-		ClassId Part;
-		ClassId Model;
-	};
-
-	const Tree &Classes_() {
-		static const Tree tree = [] {
-			Tree built;
-			built.Instance = Classes::Register("test.Instance", {});
-
-			const ComponentId transform = Components::Register<Transform>("test.Transform");
-			const ComponentId bounds = Components::Register<Bounds>("test.Bounds");
-			const ComponentId visual = Components::Register<Visual>("test.Visual");
-			const ComponentId motion = Components::Register<Motion>("test.Motion");
-			const ComponentId link = Components::Register<Link>("test.Link");
-
-			const ComponentId pv[] = {transform};
-			built.PVInstance = Classes::Register("test.PVInstance", built.Instance, pv);
-
-			const ComponentId base[] = {bounds};
-			built.BasePart = Classes::Register("test.BasePart", built.PVInstance, base);
-
-			const ComponentId part[] = {visual, link};
-			built.Part = Classes::Register("test.Part", built.BasePart, part);
-
-			const ComponentId model[] = {motion};
-			built.Model = Classes::Register("test.Model", built.PVInstance, model);
-
-			// The prototype rows. A default declared on a base applies to
-			// everything registered under it afterwards.
-			Classes::Default<Bounds>(built.BasePart, Bounds{2.5f});
-			Classes::Default<Visual>(built.Part, Visual{Name("test.mesh.cube"), true});
-
-			Classes::Property<&Transform::X>(built.PVInstance, "X");
-			Classes::Property<&Transform::Y>(built.PVInstance, "Y");
-			Classes::Property<&Bounds::HalfExtent>(built.BasePart, "HalfExtent");
-			Classes::Property<&Visual::Visible>(built.Part, "Visible");
-			Classes::Property<&Visual::Mesh>(built.Part, "Mesh");
-			Classes::Property<&Link::Target>(built.Part, "Target");
-
-			return built;
-		}();
-		return tree;
-	}
-
+namespace {
 	std::vector<Name> ChildNames(const Store &store, Entity parent) {
 		std::vector<Name> names;
 		store.EachChild(parent, [&](Entity child) { names.push_back(store.InstanceNameOf(child)); });
 		return names;
 	}
-}
-
-using namespace instance_test;
-
-// --- the class table ------------------------------------------------------
-
-TEST_CASE("a class is a name, a parent and a component set", "[ecs]") {
-	const Tree &tree = Classes_();
-
-	REQUIRE(Classes::Describe(tree.Part).Name == Name("test.Part"));
-	REQUIRE(Classes::Describe(tree.Part).Parent == tree.BasePart);
-	REQUIRE(Classes::Find(Name("test.Part")) == tree.Part);
-}
-
-TEST_CASE("a derived class's set contains its base's", "[ecs]") {
-	// Inheritance is set inclusion, which is what makes :IsA an ancestor test
-	// and lets a query for the base match every derived instance.
-	const Tree &tree = Classes_();
-
-	const auto &base = *Classes::Describe(tree.BasePart).Set;
-	const auto &derived = *Classes::Describe(tree.Part).Set;
-
-	REQUIRE(derived.ContainsAll(base.Ids()));
-	REQUIRE(derived.Size() > base.Size());
-}
-
-TEST_CASE("IsA walks the ancestry and stops there", "[ecs]") {
-	const Tree &tree = Classes_();
-
-	REQUIRE(Classes::IsA(tree.Part, tree.Part));
-	REQUIRE(Classes::IsA(tree.Part, tree.BasePart));
-	REQUIRE(Classes::IsA(tree.Part, tree.PVInstance));
-	REQUIRE(Classes::IsA(tree.Part, tree.Instance));
-
-	// Not the other way, and not across a sibling branch.
-	REQUIRE_FALSE(Classes::IsA(tree.BasePart, tree.Part));
-	REQUIRE_FALSE(Classes::IsA(tree.Part, tree.Model));
-	REQUIRE_FALSE(Classes::IsA(tree.Model, tree.BasePart));
-
-	REQUIRE_FALSE(Classes::IsA(ClassId{}, tree.Part));
-	REQUIRE_FALSE(Classes::IsA(tree.Part, ClassId{}));
-}
-
-TEST_CASE("registering the same class name twice returns the same id", "[ecs]") {
-	const Tree &tree = Classes_();
-	REQUIRE(Classes::Register("test.Part", {}) == tree.Part);
-}
-
-TEST_CASE("a field property generates a conversion that reads and writes it", "[ecs]") {
-	const Tree &tree = Classes_();
-	const auto properties = Classes::Describe(tree.Part).Properties;
-
-	const auto find = [&properties](const char *name) {
-		for (const auto &property : properties) {
-			if (property.Name == Name(name)) {
-				return property;
-			}
-		}
-		FAIL("no property named " << name);
-		return properties.front();
-	};
-
-	const auto x = find("X");
-	REQUIRE(x.Type == PropertyType::Float);
-	REQUIRE(x.Kind == engine::ecs::PropertyKind::Field);
-	REQUIRE(x.Size == sizeof(float));
-
-	// The components it touches are declared rather than inferred. v0.6's
-	// per-instance `.Changed` needs this to fan one component write out to
-	// every property name observing it.
-	REQUIRE(x.Reads->Contains(Components::Of<Transform>()));
-	REQUIRE(x.Writes->Contains(Components::Of<Transform>()));
-
-	// This is the assertion that used to be `Offset == 0`, and it is a stronger
-	// one: a generated conversion pointed at the wrong field passes an offset
-	// check and fails this.
-	Store store("test");
-	const Entity part = store.CreateInstance(tree.Part);
-
-	float read = -1.0f;
-	REQUIRE(x.Get(store, part, &read));
-	REQUIRE(read == 0.0f);
-
-	const float written = 4.5f;
-	REQUIRE(x.Set(store, part, &written));
-	REQUIRE(store.Get<Transform>(part)->X == 4.5f);
-	REQUIRE(store.Get<Transform>(part)->Y == 0.0f);
-
-	// The other field of the same component, so a conversion that ignored its
-	// member pointer and wrote the front of the struct would fail here.
-	const auto y = find("Y");
-	const float second = -2.25f;
-	REQUIRE(y.Set(store, part, &second));
-	REQUIRE(store.Get<Transform>(part)->Y == -2.25f);
-	REQUIRE(store.Get<Transform>(part)->X == 4.5f);
-
-	REQUIRE(find("Visible").Type == PropertyType::Bool);
-	REQUIRE(find("Mesh").Type == PropertyType::Name);
-}
-
-TEST_CASE("a derived class inherits its base's properties", "[ecs]") {
-	const Tree &tree = Classes_();
-
-	// Part declares two properties and gets four more from above it.
-	REQUIRE(Classes::Describe(tree.Part).Properties.size() == 6);
-	REQUIRE(Classes::Describe(tree.PVInstance).Properties.size() == 2);
-	REQUIRE(Classes::Describe(tree.Instance).Properties.empty());
-}
-
-TEST_CASE("an unregistered class describes as empty rather than crashing", "[ecs]") {
-	REQUIRE(Classes::Describe(ClassId{}).Set == nullptr);
-	REQUIRE(Classes::Describe(ClassId{0xFFFF'FFF0u}).Set == nullptr);
-	REQUIRE_FALSE(Classes::Find(Name("test.never.registered")).IsValid());
 }
 
 // --- the three components every instance carries ---------------------------
@@ -263,7 +88,7 @@ TEST_CASE("an instance name crosses a snapshot as text", "[ecs][instance]") {
 	// One process shares one registry, so this cannot reproduce the wrong
 	// answer; what it can do is hold the round trip still, and assert that the
 	// type carries a serialisation of its own rather than the default.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store source("name-snapshot");
 
 	const Entity model = source.CreateInstance(tree.Model, "Chassis");
@@ -297,7 +122,7 @@ TEST_CASE("an instance class crosses as its registered name", "[ecs][instance]")
 	//
 	// One process shares one class table, so a wrong answer cannot be reproduced
 	// here. What can be asserted is that what goes on the wire is the *text*.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("class-text");
 
 	const Entity part = store.CreateInstance(tree.Part, "Baseplate");
@@ -329,7 +154,7 @@ TEST_CASE("a class this build has never heard of reads back as no class", "[ecs]
 	// rightly, because a Rojo project is written against a class tree this engine
 	// implements a fraction of - would make `:IsA` answer a confident lie about
 	// two builds that do not match.
-	(void)Classes_();
+	(void)ClassTree();
 
 	ByteWriter writer;
 	writer.WriteName(Name("AClassNothingRegisters"));
@@ -356,7 +181,7 @@ TEST_CASE("a class this build has never heard of reads back as no class", "[ecs]
 // --- creating instances ---------------------------------------------------
 
 TEST_CASE("Instance.new lands in the class's archetype", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity part = store.CreateInstance(tree.Part, "Baseplate");
@@ -377,7 +202,7 @@ TEST_CASE("Instance.new lands in the class's archetype", "[ecs]") {
 TEST_CASE("a new instance starts from the prototype row", "[ecs]") {
 	// The defaults are values copied from a hidden row, not a constructor. That
 	// is what lets a snapshot carry them and the manifest describe them.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity part = store.CreateInstance(tree.Part);
@@ -392,7 +217,7 @@ TEST_CASE("a new instance starts from the prototype row", "[ecs]") {
 }
 
 TEST_CASE("a base class default reaches a derived class", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	// Bounds was defaulted on BasePart; Part inherits both the component and
@@ -405,7 +230,7 @@ TEST_CASE("creating one instance builds one table, not a chain of them", "[ecs]"
 	// Adding the components one at a time would walk the entity through every
 	// intermediate archetype and create each of them, which is a table per
 	// prefix of the class's component list.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	store.CreateInstance(tree.Part);
@@ -423,7 +248,7 @@ TEST_CASE("an invalid class creates nothing", "[ecs]") {
 TEST_CASE("a query for a base component matches every derived instance", "[ecs]") {
 	// The payoff of inheritance being set inclusion: a system over Transform
 	// sees parts and models without knowing either exists.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	store.CreateInstance(tree.Part);
@@ -436,7 +261,7 @@ TEST_CASE("a query for a base component matches every derived instance", "[ecs]"
 }
 
 TEST_CASE("IsA works through an instance", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity part = store.CreateInstance(tree.Part);
@@ -455,7 +280,7 @@ TEST_CASE("children come back in insertion order", "[ecs]") {
 	// Not an incidental property: replication and replay both compare child
 	// lists, and an order that varied between runs would make them disagree
 	// about something neither changed.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model, "Model");
@@ -472,7 +297,7 @@ TEST_CASE("children come back in insertion order", "[ecs]") {
 }
 
 TEST_CASE("reparenting unlinks from the old parent", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity first = store.CreateInstance(tree.Model, "First");
@@ -489,7 +314,7 @@ TEST_CASE("reparenting unlinks from the old parent", "[ecs]") {
 }
 
 TEST_CASE("unparenting to nothing leaves a root", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model);
@@ -506,7 +331,7 @@ TEST_CASE("unparenting to nothing leaves a root", "[ecs]") {
 TEST_CASE("removing the first, middle and last child all relink", "[ecs]") {
 	// Three different paths through the doubly-linked sibling list, and the
 	// one most likely to leave a dangling link.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 
 	for (int target = 0; target < 3; target++) {
 		Store store("test");
@@ -536,7 +361,7 @@ TEST_CASE("removing the first, middle and last child all relink", "[ecs]") {
 TEST_CASE("a cycle is refused rather than hung on", "[ecs]") {
 	// A cycle is not a wrong answer; it is an infinite loop in every walk of
 	// the tree, including the one that would destroy it.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity grandparent = store.CreateInstance(tree.Model);
@@ -552,7 +377,7 @@ TEST_CASE("a cycle is refused rather than hung on", "[ecs]") {
 }
 
 TEST_CASE("descendancy walks upwards", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity root = store.CreateInstance(tree.Model);
@@ -569,7 +394,7 @@ TEST_CASE("descendancy walks upwards", "[ecs]") {
 
 TEST_CASE("FindFirstChild takes the first match in insertion order", "[ecs]") {
 	// Siblings may share a name, exactly as they may in Roblox.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model);
@@ -583,7 +408,7 @@ TEST_CASE("FindFirstChild takes the first match in insertion order", "[ecs]") {
 }
 
 TEST_CASE("EachChild survives the body reparenting what it was handed", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity from = store.CreateInstance(tree.Model);
@@ -616,7 +441,7 @@ TEST_CASE("a sibling list that loops is truncated rather than walked forever", "
 	// the allocator refused. Measured out of a studio Play session as a single
 	// sixteen-gigabyte request and `std::bad_alloc`, after about eighty craters
 	// of `Magic.luau`.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model);
@@ -650,7 +475,7 @@ TEST_CASE("a sibling list that loops is truncated rather than walked forever", "
 // --- destroying -----------------------------------------------------------
 
 TEST_CASE("destroying an instance takes its whole subtree", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity root = store.CreateInstance(tree.Model);
@@ -679,7 +504,7 @@ TEST_CASE("destroying an instance takes its whole subtree", "[ecs]") {
 }
 
 TEST_CASE("destroying a child leaves the parent's list intact", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model);
@@ -700,7 +525,7 @@ TEST_CASE("destroying a child leaves the parent's list intact", "[ecs]") {
 TEST_CASE("a handle to a destroyed instance is a tombstone", "[ecs]") {
 	// Roblox keeps a destroyed instance readable while a script holds it. Here
 	// the row is freed and the generation check makes the stale handle safe.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity part = store.CreateInstance(tree.Part);
@@ -718,7 +543,7 @@ TEST_CASE("a clone copies values and belongs to no tree", "[ecs]") {
 	// :Clone() leaves the copy parented nowhere. A clone that appeared in the
 	// world at the moment it was made would run before the caller had finished
 	// configuring it.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model, "Model");
@@ -739,7 +564,7 @@ TEST_CASE("a clone copies values and belongs to no tree", "[ecs]") {
 }
 
 TEST_CASE("a clone is independent of its source", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity part = store.CreateInstance(tree.Part);
@@ -753,7 +578,7 @@ TEST_CASE("a clone is independent of its source", "[ecs]") {
 }
 
 TEST_CASE("cloning takes the whole subtree", "[ecs]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model, "Model");
@@ -793,7 +618,7 @@ TEST_CASE("a tree survives a snapshot", "[ecs]") {
 	// The hierarchy is four entity handles in a component, so this is the case
 	// that fails if a snapshot re-allocates the directory rather than
 	// reproducing it.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store source("source");
 
 	const Entity model = source.CreateInstance(tree.Model, "Model");
@@ -829,7 +654,7 @@ TEST_CASE("a tree survives a snapshot", "[ecs]") {
 TEST_CASE("the tree stays consistent under random reparenting", "[ecs][fuzz]") {
 	// The invariants that must hold whatever the operations were: every child
 	// names its parent, every parent lists its children, and no walk loops.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("churn");
 
 	std::vector<Entity> nodes;
@@ -882,7 +707,7 @@ TEST_CASE("the tree stays consistent under random reparenting", "[ecs][fuzz]") {
 }
 
 TEST_CASE("destroying random subtrees leaves no orphans", "[ecs][fuzz]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("churn");
 
 	std::vector<Entity> nodes;
@@ -934,7 +759,7 @@ TEST_CASE("a tree churned by raw destroys keeps every live instance reachable", 
 	// So this walks down from the roots and requires the set it reaches to be
 	// exactly the set that is alive. And it churns through `Store::Destroy` -
 	// the raw one, which `DestroyInstance` and the two tests above never use.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("raw-churn");
 
 	std::vector<Entity> nodes;
@@ -1014,7 +839,7 @@ TEST_CASE("reparenting to the parent it already has changes nothing", "[ecs][ins
 	// The shape that finds it is ordinary: a script assigning a parent that may
 	// or may not have changed, or an editor applying a drag onto the row the
 	// instance was already under.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("test");
 
 	const Entity model = store.CreateInstance(tree.Model, "Model");
@@ -1049,7 +874,7 @@ TEST_CASE("a raw destroy takes the row out of the tree first", "[ecs][instance]"
 	// Destroying the middle of three children therefore truncated the list to
 	// one and lost the other two: still alive, still in the save file, and
 	// reachable from nothing. The unlink now happens before the free.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("raw-destroy");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1104,7 +929,7 @@ TEST_CASE("a raw destroy inside a loop unlinks now and frees afterwards", "[ecs]
 	// So the tree is right immediately and the directory catches up at the end
 	// of the loop. Both halves are asserted here because a change to either one
 	// on its own is a bug the other one hides.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("destroy-in-loop");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1139,7 +964,7 @@ TEST_CASE("a raw destroy re-roots the children it leaves behind", "[ecs][instanc
 	// a root, because `EachRoot` asks for `Parent == NULL_ENTITY` and this one
 	// names something merely *dead*; so it is in the world, in the save file,
 	// and reachable from nothing.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("re-root");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1176,7 +1001,7 @@ TEST_CASE("EachChild never hands over a link that resolves to nothing", "[ecs][i
 	// Built by hand, because `Store::Destroy` no longer leaves this state: the
 	// parent is pointed at a live entity that carries no `Hierarchy` at all,
 	// which is what a link out of the tree looks like from in here.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("dangling-link");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1201,7 +1026,7 @@ TEST_CASE("EachChild never hands over a link that resolves to nothing", "[ecs][i
 TEST_CASE("descendants come back in the order a recursive walk would", "[ecs][instance]") {
 	// Scripts index into `GetDescendants()`, so this is a contract. A child,
 	// then everything under that child, then the next child.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("descendants");
 
 	const Entity root = store.CreateInstance(tree.Model, "Root");
@@ -1229,7 +1054,7 @@ TEST_CASE("a recursive FindFirstChild answers the nearest match", "[ecs][instanc
 	// **Children before descendants, deliberately.** A script asking for a name
 	// it expects one level down must not be handed one six levels down inside
 	// the first child because a depth-first pass reached it sooner.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("find-recursive");
 
 	const Entity root = store.CreateInstance(tree.Model, "Root");
@@ -1256,7 +1081,7 @@ TEST_CASE("a recursive FindFirstChild answers the nearest match", "[ecs][instanc
 TEST_CASE("OfClass is exact and WhichIsA is not", "[ecs][instance]") {
 	// The split Roblox draws, and the reason both methods exist: a `Part` is a
 	// `BasePart`, so one of these finds it by that name and the other does not.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("of-class");
 
 	const Entity root = store.CreateInstance(tree.Model, "Root");
@@ -1280,7 +1105,7 @@ TEST_CASE("OfClass is exact and WhichIsA is not", "[ecs][instance]") {
 }
 
 TEST_CASE("ancestors are searched upwards and exclude the instance", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("ancestors");
 
 	const Entity top = store.CreateInstance(tree.Model, "Top");
@@ -1307,7 +1132,7 @@ TEST_CASE("ancestors are searched upwards and exclude the instance", "[ecs][inst
 }
 
 TEST_CASE("GetFullName is the path from the root down", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("full-name");
 
 	const Entity workspace = store.CreateInstance(tree.Model, "Workspace");
@@ -1328,7 +1153,7 @@ TEST_CASE("GetFullName is the path from the root down", "[ecs][instance]") {
 }
 
 TEST_CASE("renaming an instance changes what finds it", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("rename");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1353,7 +1178,7 @@ TEST_CASE("renaming an instance changes what finds it", "[ecs][instance]") {
 // --- Archivable and clone -----------------------------------------------------
 
 TEST_CASE("Clone skips what is not archivable", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("archivable");
 
 	const Entity model = store.CreateInstance(tree.Model, "Model");
@@ -1390,7 +1215,7 @@ TEST_CASE("a clone rewires references that pointed inside it", "[ecs][instance]"
 	// the duplicate is welded to the original and dragging it moves the thing
 	// it was copied from. A part naming the terrain it sits on has to keep
 	// naming the terrain, because there is only one.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("clone-references");
 
 	const Entity outside = store.CreateInstance(tree.Part, "Outside");
@@ -1440,7 +1265,7 @@ TEST_CASE("a clone rewires references that pointed inside it", "[ecs][instance]"
 // --- roots -----------------------------------------------------------------
 
 TEST_CASE("roots are every instance with no parent", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("roots");
 
 	const Entity first = store.CreateInstance(tree.Model, "First");
@@ -1480,7 +1305,7 @@ TEST_CASE("roots come back in creation order, not insertion order", "[ecs][insta
 	// place here. Deterministic either way, which is what a recording needs -
 	// an archetype walk would not have been, because a row moves when its
 	// archetype does.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("root-order");
 
 	const Entity first = store.CreateInstance(tree.Model, "First");
@@ -1507,7 +1332,7 @@ TEST_CASE("roots come back in creation order, not insertion order", "[ecs][insta
 }
 
 TEST_CASE("FindFirstRoot takes the first root with the name", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("find-root");
 
 	const Entity first = store.CreateInstance(tree.Model, "Same");
@@ -1531,7 +1356,7 @@ TEST_CASE("HasChildren answers what EachChild would find", "[ecs][instance]") {
 	// The probe a tree view asks per row. It is `FirstChild != NULL_ENTITY` and
 	// never a walk, so what it has to be tested for is that it stays in step
 	// with the list through every edit that empties one.
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("has-children");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1565,7 +1390,7 @@ TEST_CASE("HasChildren answers what EachChild would find", "[ecs][instance]") {
 }
 
 TEST_CASE("descendancy includes the instance itself and stops at a root", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("descendancy");
 
 	const Entity top = store.CreateInstance(tree.Model, "Top");
@@ -1593,7 +1418,7 @@ TEST_CASE("descendancy includes the instance itself and stops at a root", "[ecs]
 }
 
 TEST_CASE("FindFirstChild searches one level and reports nothing honestly", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("find-child");
 
 	const Entity parent = store.CreateInstance(tree.Model, "Parent");
@@ -1623,7 +1448,7 @@ TEST_CASE("FindFirstChild searches one level and reports nothing honestly", "[ec
 }
 
 TEST_CASE("SetParent refuses ends that are not instances", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("bad-ends");
 
 	const Entity instance = store.CreateInstance(tree.Part, "Part");
@@ -1640,7 +1465,7 @@ TEST_CASE("SetParent refuses ends that are not instances", "[ecs][instance]") {
 }
 
 TEST_CASE("parenting survives a child freed without unlinking", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("dangling");
 
 	const Entity parent = store.CreateInstance(tree.Model);
@@ -1667,7 +1492,7 @@ TEST_CASE("parenting survives a child freed without unlinking", "[ecs][instance]
 }
 
 TEST_CASE("parenting survives an only child freed without unlinking", "[ecs][instance]") {
-	const Tree &tree = Classes_();
+	const Tree &tree = ClassTree();
 	Store store("dangling-only");
 
 	const Entity parent = store.CreateInstance(tree.Model);

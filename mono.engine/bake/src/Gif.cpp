@@ -29,6 +29,8 @@
 
 #include "Decoders.hpp"
 
+#include <engine/core/Log.hpp>
+
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -139,7 +141,7 @@ namespace engine::bake {
 		// The dictionary is a pair of parallel arrays rather than a vector of
 		// vectors: an entry is "a previous entry plus one byte", so a prefix index
 		// and a suffix byte describe it in five bytes instead of an allocation.
-		bool Inflate(
+		bool InflateGif(
 			const std::vector<uint8_t> &data, uint8_t minimumWidth, size_t expected, std::vector<uint8_t> &out
 		) {
 			if (minimumWidth < 2 || minimumWidth > 11) {
@@ -343,6 +345,10 @@ namespace engine::bake {
 		std::vector<uint8_t> indices;
 		std::vector<Pixel> local;
 
+		// Counted past the cap so the line below can say what was lost rather
+		// than only what was kept.
+		uint32_t seenImages = 0;
+
 		while (reader.Has(1) && frames.size() < MAX_SIDE * MAX_SIDE) {
 			const uint8_t marker = reader.Byte();
 
@@ -389,6 +395,7 @@ namespace engine::bake {
 			}
 
 			// An image descriptor.
+			seenImages++;
 			if (!reader.Has(9)) {
 				failure = "an image descriptor running past the end";
 				return false;
@@ -432,7 +439,7 @@ namespace engine::bake {
 			}
 
 			const size_t pixels = static_cast<size_t>(width) * height;
-			if (!Inflate(blocks, minimumWidth, pixels, indices) || indices.size() < pixels) {
+			if (!InflateGif(blocks, minimumWidth, pixels, indices) || indices.size() < pixels) {
 				failure = "a GIF frame that would not decompress";
 				return false;
 			}
@@ -488,6 +495,24 @@ namespace engine::bake {
 			failure = "a GIF with no frames";
 			return false;
 		}
+
+		// **The truncation is documented in the file comment and silent at run
+		// time.** A 70-frame GIF becomes a 64-frame one and the animation is
+		// simply shorter, which is the kind of thing a person reports as the
+		// import being broken.
+		if (reader.Has(1) && frames.size() >= MAX_SIDE * MAX_SIDE) {
+			ENGINE_WARN(
+				"gif truncated at {} frames; the grid holds no more and the rest of the file is not read",
+				frames.size()
+			);
+		}
+		ENGINE_DEBUG(
+			"gif: {} frame(s) kept of {} image descriptor(s), {}x{} canvas",
+			frames.size(),
+			seenImages,
+			canvasWidth,
+			canvasHeight
+		);
 
 		// **The grid is the next power of two that fits, and square.** That is
 		// `effects::FlipbookLayout`'s shape and not a choice this decoder gets to

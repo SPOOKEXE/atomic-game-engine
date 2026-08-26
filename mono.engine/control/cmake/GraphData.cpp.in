@@ -1,0 +1,19 @@
+// The checked-in target graph, compiled in.
+//
+// **Generated at configure time from `mono.tools/architecture/expected_graph.json`,
+// which is the file `just test-architecture` checks the build against.** Nothing
+// here is edited: `mono.engine/control/CMakeLists.txt` reads that file and writes
+// this one, and `CMAKE_CONFIGURE_DEPENDS` re-runs when it changes.
+//
+// **Compiled in rather than read from disk**, because a program answering this
+// is a dedicated server or an editor started from wherever somebody happened to
+// be standing. A tool that could only answer when the current directory was the
+// repository would be a tool that fails exactly when a model most needs it, and
+// the graph is a constant of the build rather than state of the run.
+
+namespace engine::control {
+
+	extern const char *const GRAPH_JSON;
+
+	const char *const GRAPH_JSON = R"MONOGRAPH(@MONO_CONTROL_GRAPH@)MONOGRAPH";
+}

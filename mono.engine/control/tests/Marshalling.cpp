@@ -12,6 +12,7 @@
 // once, which no real class does.
 
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/NumberRange.hpp>

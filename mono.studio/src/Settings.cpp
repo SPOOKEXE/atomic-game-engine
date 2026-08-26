@@ -183,6 +183,9 @@ namespace studio {
 		// image; setting the mode here used to rebuild the swapchain underneath
 		// it and the frame then presented a freed texture. See
 		// `render::Renderer::SetVerticalSync`.
+		const bool forcedUncapped = Settings.Uncapped;
+
+		ImGui::BeginDisabled(forcedUncapped);
 		if (ImGui::Checkbox("Vertical sync", &VerticalSync)) {
 			if (Renderer.SetVerticalSync(VerticalSync)) {
 				Say(VerticalSync ? "frames are paced by the display" : "vertical sync off");
@@ -195,32 +198,23 @@ namespace studio {
 				Say("this device will not change vertical sync", engine::core::LogLevel::Warning);
 			}
 		}
+		ImGui::EndDisabled();
 
-		ImGui::BeginDisabled(VerticalSync);
+		ImGui::BeginDisabled(VerticalSync || forcedUncapped);
 
-		bool capped = FrameCap > 0.0f;
-		if (ImGui::Checkbox("Limit frame rate", &capped)) {
-			FrameCap = capped ? 120.0f : 0.0f;
-		}
-
-		ImGui::BeginDisabled(!capped);
-		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
-		ImGui::SliderFloat("Frames per second", &FrameCap, 30.0f, 360.0f, "%.0f fps");
-
-		// **Four rates under the one ceiling, because a still editor and a busy
-		// one are not the same question.** The number above is the most this
-		// program will ever draw; these four are what it settles to when nobody
-		// is asking it for anything. An editor behind a browser drawing a
+		// **Four rates, because a still editor and a busy one are not the same
+		// question.** These are what it settles to when nobody is asking it for
+		// anything. An editor behind a browser drawing a
 		// hundred and twenty identical pictures a second is what they exist to
 		// stop.
 		ImGui::Spacing();
 		ImGui::SeparatorText("Rates");
 
-		ImGui::TextDisabled("the lowest ceiling that applies is the one the frame is paced at");
+		ImGui::TextDisabled("the lowest ceiling that applies is the image presentation rate");
 
 		const auto rate = [](const char *label, float &value, const char *tip) {
 			ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
-			ImGui::SliderFloat(label, &value, 0.0f, 360.0f, value <= 0.0f ? "no limit" : "%.0f Hz");
+			ImGui::SliderFloat(label, &value, 0.0f, 361.0f, value >= 361.0f ? "no limit" : "%.0f Hz");
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", tip);
 			}
@@ -248,8 +242,6 @@ namespace studio {
 			"While the window is behind something else. There is nobody looking at it,\n"
 			"so this is the one worth setting low."
 		);
-
-		ImGui::EndDisabled();
 
 		ImGui::EndDisabled();
 
@@ -470,6 +462,7 @@ namespace studio {
 		// edits one of them.
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##keybind-filter", KeybindFilter, "Search Actions");
+		ImGui::TextDisabled("Use ESC to set as unbound");
 
 		ImGui::Spacing();
 
@@ -901,20 +894,31 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::SeparatorText("Dispatch");
 
-		// **The one global switch, and the one that can make every measurement
-		// on this machine a lie.** It is here rather than on the frame graph
-		// because it is not a property of that panel; the panel says when it is
-		// on, which is the half that mattered.
-		bool serial = engine::parallel::ForceSerialCompute();
-		if (ImGui::Checkbox("Force serial compute", &serial)) {
+		// The engine pool, world lanes and node graphs are independently
+		// selectable domains. The master includes all three.
+		bool engineSerial = engine::parallel::ForceSerialCompute();
+		bool worldsSerial = Universe->Settings().Mode == engine::world::ExecutionMode::WorldSerial;
+		bool nodeGraphsSerial = NodeDemoRunner.IsSerial() && RenderPipelinePreviewEvaluator.IsSerial();
+		bool serial = engineSerial && worldsSerial && nodeGraphsSerial;
+		if (ImGui::Checkbox("Force all serial compute", &serial)) {
 			engine::parallel::SetForceSerialCompute(serial);
-			Say(serial ? "every parallel dispatch now runs on the thread that asked"
+			Universe->SetMode(
+				serial ? engine::world::ExecutionMode::WorldSerial
+					   : engine::world::ExecutionMode::WorldParallel
+			);
+			NodeDemoRunner.SetSerial(serial);
+			RenderPipelinePreviewEvaluator.SetSerial(serial);
+			engineSerial = serial;
+			worldsSerial = serial;
+			nodeGraphsSerial = serial;
+			Modified = true;
+			Say(serial ? "every compute dispatch now runs on the thread that asked"
 					   : "parallel dispatch restored");
 		}
 
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Every parallel dispatch runs on the thread that asked, so no span is dropped\n"
+				"Every compute dispatch runs on the thread that asked, so no span is dropped\n"
 				"and the frame graph keeps the whole tree.\n"
 				"The frame gets slower on purpose: this measures a serial cost, not a verdict\n"
 				"on the parallel one."
@@ -926,6 +930,23 @@ namespace studio {
 			ImGui::TextUnformatted("every timing taken while this is on is a serial one");
 			ImGui::PopStyleColor();
 		}
+
+		ImGui::Indent();
+		if (ImGui::Checkbox("Engine jobs", &engineSerial)) {
+			engine::parallel::SetForceSerialCompute(engineSerial);
+		}
+		if (ImGui::Checkbox("World scheduling", &worldsSerial)) {
+			Universe->SetMode(
+				worldsSerial ? engine::world::ExecutionMode::WorldSerial
+							 : engine::world::ExecutionMode::WorldParallel
+			);
+			Modified = true;
+		}
+		if (ImGui::Checkbox("Editor node graphs", &nodeGraphsSerial)) {
+			NodeDemoRunner.SetSerial(nodeGraphsSerial);
+			RenderPipelinePreviewEvaluator.SetSerial(nodeGraphsSerial);
+		}
+		ImGui::Unindent();
 
 		ImGui::Spacing();
 

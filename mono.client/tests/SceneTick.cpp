@@ -16,10 +16,15 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -27,6 +32,8 @@
 
 #include <algorithm>
 #include <client/Scene.hpp>
+#include <filesystem>
+#include <fstream>
 
 TEST_SUITE_ID("client.scene.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
@@ -36,6 +43,8 @@ TEST_DEPENDS("engine.render.debugpanels")
 TEST_DEPENDS("engine.core.framegraph")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
+TEST_DEPENDS("engine.scene.input")
+TEST_DEPENDS("engine.gui.services")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -67,7 +76,7 @@ namespace {
 		Store World{"integration"};
 		Scheduler Systems;
 
-		Session() {
+		explicit Session(std::string_view scene = "Rings.luau") {
 			engine::parallel::Jobs::Start(2);
 
 			// **The staged assets root, not the test binary's own directory.**
@@ -78,7 +87,7 @@ namespace {
 			engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
 
 			const bool built = client::BuildScriptedWorld(
-				World, Systems, engine::examples::ExamplePath("Rings.luau"), ENTITIES
+				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES
 			);
 			REQUIRE(built);
 		}
@@ -94,9 +103,15 @@ namespace {
 		}
 
 		const std::vector<DrawInstance> &Drawn() const {
-			return World.Resource<client::DrawList>()->Instances;
+			return World.Resource<engine::render::DrawList>()->Instances;
 		}
 	};
+
+	engine::ecs::Entity InWorkspace(Store &store, std::string_view name) {
+		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
+		return workspace == engine::ecs::NULL_ENTITY ? engine::ecs::NULL_ENTITY
+													 : store.FindFirstChild(workspace, name);
+	}
 }
 
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {
@@ -120,7 +135,7 @@ TEST_CASE("the world holds the scene's state, not a scene object", "[demo]") {
 	// being serialised with the world.
 	REQUIRE(session.World.HasResource<WorldBounds>());
 	REQUIRE(session.World.HasResource<ActiveCamera>());
-	REQUIRE(session.World.HasResource<client::DrawList>());
+	REQUIRE(session.World.HasResource<engine::render::DrawList>());
 
 	// And the clock, which every store has from birth.
 	REQUIRE(session.World.Time().Tick == 0);
@@ -164,6 +179,59 @@ TEST_CASE("entities actually move", "[demo]") {
 
 	const bool moved = before.X != after.X || before.Z != after.Z;
 	REQUIRE(moved);
+}
+
+TEST_CASE("a scripted NPC is integrated and crosses a portal in a standalone client", "[demo][portal]") {
+	// `MoveDirection` alone is not movement. The `--script` path used to install
+	// character control without the physics pipeline, so the tunnel walker held
+	// the right intent while its root stayed at the same position forever.
+	Session session("Tunnels.luau");
+	const engine::ecs::Entity character = InWorkspace(session.World, "TunnelWalker");
+	REQUIRE(character != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity root = session.World.FindFirstChild(character, "HumanoidRootPart");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+
+	const float before = session.World.Get<Transform>(root)->Frame.Position.Z;
+	session.Tick(240);
+	const float after = session.World.Get<Transform>(root)->Frame.Position.Z;
+	CHECK(after != Approx(before));
+
+	const auto *transit = session.World.Get<engine::scene::PortalTransit>(root);
+	REQUIRE(transit != nullptr);
+	CHECK(transit->Serial >= 1u);
+}
+
+TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[demo][portal]") {
+	Session session("Hallway.luau");
+	const engine::ecs::Entity character = InWorkspace(session.World, "HallwayWalker");
+	REQUIRE(character != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity root = session.World.FindFirstChild(character, "HumanoidRootPart");
+	const engine::ecs::Entity humanoid = session.World.FindFirstChild(character, "Humanoid");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+	REQUIRE(humanoid != engine::ecs::NULL_ENTITY);
+
+	const engine::ecs::Entity camera = session.World.Resource<ActiveCamera>()->Entity;
+	session.Tick(100);
+	CHECK(session.World.Get<Transform>(camera)->Frame.Position.X == Approx(20.0f).margin(0.1f));
+
+	session.Tick(140);
+	const auto *characterTransit = session.World.Get<engine::scene::PortalTransit>(root);
+	REQUIRE(characterTransit != nullptr);
+	CHECK(characterTransit->Serial >= 1u);
+
+	// The demonstration is a shuttle rather than a one-way walk. Wait for the
+	// authored controller to reverse at the south end, then prove the same body
+	// is walking north and has crossed another mouth on its return leg.
+	bool returning = false;
+	for (int tick = 0; tick < 240 && !returning; tick++) {
+		session.Tick(1);
+		const auto *intent = session.World.Get<engine::scene::Humanoid>(humanoid);
+		returning = intent != nullptr && intent->MoveDirection.Z > 0.5f;
+	}
+	CHECK(returning);
+	const auto *returnTransit = session.World.Get<engine::scene::PortalTransit>(root);
+	REQUIRE(returnTransit != nullptr);
+	CHECK(returnTransit->Serial >= 2u);
 }
 
 TEST_CASE("the camera is a row the systems move, not a resource holding a value", "[demo]") {
@@ -497,7 +565,12 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// previous frame the authority computes - the body is drawn once or twice
 	// somewhere in between. `PreRender`, because the serial it reads arrives
 	// with a replication delta and a delta lands after `PreSimulation` has run.
-	REQUIRE(timings.size() == 22);
+	//
+	// **And twenty-seven for a standalone client's authority pipeline.** The
+	// script path now installs editable collision refresh, integration, contacts,
+	// gravity and abandoned-owner reclamation. Without those five a scripted
+	// Humanoid produced velocity that no system ever integrated.
+	REQUIRE(timings.size() == 27);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);
@@ -515,4 +588,72 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	FrameGraph::SetEnabled(false);
 
 	REQUIRE(image.IsDirty());
+}
+
+// --- what a scene script may write before the systems are installed ---------
+
+TEST_CASE("a top-level pointer-mode write survives the install", "[demo]") {
+	// **`InputState` used to be minted after the script had already run.**
+	// `UserInputService.MouseBehavior` writes onto that resource and the setter
+	// drops a write onto a world that has none - correctly, because a server
+	// must not mint a window's state - so a `--script` scene that locked the
+	// pointer at the top level was silently ignored and only a write from inside
+	// a `Heartbeat` took. Reproduced with a real scene before it was fixed: the
+	// top-level write read back `Default` and the tick-three write read back
+	// `LockCenter`.
+	engine::parallel::Jobs::Start(2);
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "client_scene_tick_pointer_mode.luau";
+	{
+		std::ofstream out(scene);
+		out << "local UIS = game:GetService('UserInputService')\n";
+		out << "UIS.MouseBehavior = Enum.MouseBehavior.LockCenter\n";
+		out << "UIS.MouseIconEnabled = false\n";
+		out << "local block = Instance.new('Part')\n";
+		out << "block.Parent = workspace\n";
+	}
+
+	Store world("pointer_mode");
+	Scheduler systems;
+	REQUIRE(client::BuildScriptedWorld(world, systems, scene.string(), 1));
+
+	const auto *input = world.Resource<engine::scene::InputState>();
+	REQUIRE(input != nullptr);
+	CHECK(input->Behaviour == engine::scene::MouseBehavior::LockCenter);
+	CHECK_FALSE(input->MouseIconEnabled);
+
+	std::filesystem::remove(scene);
+	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE("a scripted client sees a local player and draws its completed PlayerGui", "[demo][gui]") {
+	engine::parallel::Jobs::Start(2);
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "client_scene_tick_player_gui.luau";
+	{
+		std::ofstream out(scene);
+		out << "local Players = game:GetService('Players')\n";
+		out << "assert(Players.LocalPlayer ~= nil, 'LocalPlayer was absent during startup')\n";
+		out << "local screen = Instance.new('ScreenGui')\n";
+		out << "screen.Name = 'ClientScreen'\n";
+		out << "screen.Parent = game:GetService('StarterGui')\n";
+	}
+
+	Store world("player_gui");
+	Scheduler systems;
+	REQUIRE(client::BuildScriptedWorld(world, systems, scene.string(), 1));
+
+	const auto *local = world.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(local != nullptr);
+	REQUIRE(local->Instance != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity playerGui = world.FindFirstChild(local->Instance, engine::gui::PLAYER_GUI);
+	REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
+	CHECK(world.FindFirstChild(playerGui, "ClientScreen") != engine::ecs::NULL_ENTITY);
+
+	std::filesystem::remove(scene);
+	engine::parallel::Jobs::Stop();
 }

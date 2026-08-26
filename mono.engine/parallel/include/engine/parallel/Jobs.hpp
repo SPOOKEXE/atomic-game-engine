@@ -219,30 +219,42 @@ namespace engine::parallel {
 		// `Pool::Guard` whether it took a range or not; that join, not the
 		// notify, was what a short span could not repay.
 		//
-		// **The per-worker term is gone, and it has been re-measured.** The
+		// **The idle-worker term is gone, and it has been re-measured.** The
 		// barrier counts ranges rather than workers now, and only as many
 		// workers are woken as there are ranges to give them, so a dispatch no
 		// longer pays for the threads it had no work for - a two-range batch
 		// across twenty-three workers measured 0.35 ms of pure join in
-		// `studio`'s frame graph. `engine.parallel.bench.dispatch`, re-run at
-		// `-O3` against the figures above:
+		// `studio`'s frame graph. `engine.parallel.bench.dispatch` at `-O3`, on
+		// twenty-four logical processors, against the figures above:
 		//
-		// | | | |
+		// | ranges | workers woken | |
 		// |---|---|---|
-		// | below the floor, so inline | 50 ns | unchanged |
-		// | dispatched, 8 empty ranges | **7.74 us** | 69.7% faster |
-		// | dispatched, 128 empty ranges | 30.85 us | unchanged |
-		// | dispatched, 8 empty ranges, **one** worker | 865 ns | 57.7% faster |
+		// | below the floor, so inline | 0 | 50 ns |
+		// | 8 | 1 | 793 ns |
+		// | 8 | 7 | 8.71 us |
+		// | 128 | 4 | 6.11 us |
+		// | 128 | 23 | 27.37 us |
+		// | 1024 | 23 | 66.51 us |
 		//
-		// **It is linear in the ranges now and not in the pool, which is what
-		// removing the per-worker join predicted.** 128 ranges cost what 8 used
-		// to and did not move at all; 8 ranges fell by a factor of four; the
-		// one-worker case, which never had many workers to pay for, still fell
-		// from 2.3 us to 865 ns because the guard it queued on is gone. Fitting
-		// the two dispatched rows gives about **6.2 us to wake the pool and
-		// 0.19 us a range** on top, against 95 ns a range when the join
-		// dominated everything. A range costs twice what it did and a handover
-		// costs a quarter.
+		// **It is linear in the workers a dispatch wakes, and only weakly in
+		// the ranges** - which the first four rows of the table above could not
+		// have told apart, because `For` wakes `ranges - 1` workers up to the
+		// pool size and every one of them varied both at once. The last two
+		// pairs separate them: holding the ranges at 128 and dropping the pool
+		// from 23 workers to 4 takes 27.37 us to 6.11 us, while holding the
+		// pool at 23 and taking the ranges from 128 to 1024 costs only 43.7 ns
+		// each. So a dispatch is about **1.1 us a woken worker and 44 ns a
+		// range**, and the per-worker term is twenty-five times the other one.
+		//
+		// **That term is additive across workers on distinct cores, which is
+		// what makes it a serialisation rather than a wake latency.** Seven
+		// woken workers cost seven times one, and twenty-three cost twenty-three
+		// times it; a cost paid concurrently would not add up like that. What
+		// every woken worker does in turn is take `Pool::Guard` twice - once to
+		// read the batch and count itself in, once to count itself out - and the
+		// join's own notify queues on the same mutex behind them. That is what
+		// to attack if the floor ever has to come down, and it is a rewrite of
+		// the join rather than a change to a constant.
 		//
 		// **The constant stays at 8, because the floor's job is the cheap body
 		// and it is still doing it.** A cheaper handover is an argument for

@@ -5,6 +5,7 @@
 #include <engine/net/Handshake.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
@@ -219,6 +220,13 @@ namespace admission_test {
 
 		explicit Dialogue(const ConnectorSettings &settings = {}) : Options(settings) {
 			REQUIRE(Transports.size() == 2);
+			// **The datagram stack, named by every case in this file.** A
+			// connector opens with QUIC by default as of v0.19 and this whole
+			// suite is about the exchange the other stack does not have - the
+			// cookie, the transcript and the signed welcome. `Advertised` is the
+			// only thing that moves the first attempt, which is what a client
+			// that found a datagram-only server in a browser has.
+			Options.Advertised = engine::net::WireMode::Datagram;
 			Issuer = Cookie::Begin();
 			REQUIRE(Issuer.has_value());
 
@@ -257,7 +265,11 @@ namespace admission_test {
 		explicit Port(size_t peers, const ListenerSettings &settings = {}) {
 			Transports = MakeLoopbackTransport(peers + 1);
 			REQUIRE(Transports.size() == peers + 1);
-			Server.emplace(*Transports[0], settings);
+			// The datagram stack, for `Dialogue`'s reason: every case here is
+			// about the admission exchange the other stack does not have.
+			ListenerSettings serving = settings;
+			serving.Wire = engine::net::WireMode::Datagram;
+			Server.emplace(*Transports[0], serving);
 			REQUIRE(Server->Admitting());
 		}
 
@@ -588,7 +600,7 @@ TEST_CASE("a connector that gets its welcome is admitted", "[replication][admiss
 
 	CHECK(dialogue.Client->Admitted());
 	CHECK_FALSE(dialogue.Client->Rejected());
-	CHECK(dialogue.Client->Link().State() == engine::net::ConnectionState::Connected);
+	CHECK(dialogue.Client->Link()->State() == engine::net::ConnectionState::Connected);
 }
 
 TEST_CASE("a tampered welcome is refused rather than half-accepted", "[replication][admission]") {
@@ -618,8 +630,8 @@ TEST_CASE("a tampered welcome is refused rather than half-accepted", "[replicati
 
 	CHECK_FALSE(dialogue.Client->Admitted());
 	CHECK(dialogue.Client->Rejected());
-	CHECK(dialogue.Client->Link().State() == engine::net::ConnectionState::Disconnected);
-	CHECK(dialogue.Client->Link().Reason() == engine::net::DisconnectReason::HandshakeFailed);
+	CHECK(dialogue.Client->Link()->State() == engine::net::ConnectionState::Disconnected);
+	CHECK(dialogue.Client->Link()->Reason() == engine::net::DisconnectReason::HandshakeFailed);
 }
 
 TEST_CASE("a welcome bound to another cookie does not verify", "[replication][admission]") {
@@ -646,7 +658,9 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 	REQUIRE(transports.size() == 2);
 
 	Store replica("client");
-	Connector client(*transports[1], transports[0]->Local(), 0.0);
+	ConnectorSettings connecting;
+	connecting.Advertised = engine::net::WireMode::Datagram;
+	Connector client(*transports[1], transports[0]->Local(), 0.0, connecting);
 
 	for (int tick = 0; tick < 8; tick++) {
 		const double now = static_cast<double>(tick) * 0.25;
@@ -656,11 +670,11 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 
 	CHECK_FALSE(client.Admitted());
 	CHECK_FALSE(client.Rejected());
-	CHECK(client.Link().State() == engine::net::ConnectionState::Connecting);
+	CHECK(client.Link()->State() == engine::net::ConnectionState::Connecting);
 
 	client.Advance(6.0);
-	CHECK(client.Link().State() == engine::net::ConnectionState::Disconnected);
-	CHECK(client.Link().Reason() == engine::net::DisconnectReason::HandshakeFailed);
+	CHECK(client.Link()->State() == engine::net::ConnectionState::Disconnected);
+	CHECK(client.Link()->Reason() == engine::net::DisconnectReason::HandshakeFailed);
 
 	std::vector<std::byte> scratch;
 	while (transports[0]->Receive(scratch).Status == TransportStatus::Ok) {}

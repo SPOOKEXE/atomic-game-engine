@@ -1,6 +1,7 @@
 #include "ChunkPool.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Column.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -20,6 +21,22 @@ using engine::ecs::ChunkPool;
 using engine::ecs::Column;
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
+
+namespace {
+	// Chunks the pool has taken from the allocator, read off the metrics sink
+	// the pool now counts into. Nothing in this binary drains, so the value is
+	// a running total for the length of the suite.
+	double ChunksAllocated() {
+		const auto counter = engine::core::Metrics::Get(ChunkPool::ALLOCATED_COUNTER);
+		return counter ? counter->Value : 0.0;
+	}
+
+	// Chunks handed back out of the freelist, read the same way.
+	double ChunksReused() {
+		const auto counter = engine::core::Metrics::Get(ChunkPool::REUSED_COUNTER);
+		return counter ? counter->Value : 0.0;
+	}
+}
 
 namespace column_test {
 	struct Point {
@@ -253,13 +270,13 @@ TEST_CASE("a population oscillating across a chunk boundary never reaches the al
 	column.PushDefault();
 	column.RemoveSwapBack(column.Size() - 1);
 
-	const uint64_t allocated = ChunkPool::Allocations();
+	const double allocated = ChunksAllocated();
 	for (int cycle = 0; cycle < 200; cycle++) {
 		column.PushDefault();
 		column.RemoveSwapBack(column.Size() - 1);
 	}
 
-	REQUIRE(ChunkPool::Allocations() == allocated);
+	REQUIRE(ChunksAllocated() == allocated);
 }
 
 TEST_CASE("clearing hands every chunk back and refilling takes them from the pool", "[ecs]") {
@@ -277,13 +294,19 @@ TEST_CASE("clearing hands every chunk back and refilling takes them from the poo
 	REQUIRE(column.ChunkCount() == 0);
 	REQUIRE(column.ResidentBytes() == 0);
 
-	const uint64_t allocated = ChunkPool::Allocations();
+	const double allocated = ChunksAllocated();
+	const double reused = ChunksReused();
 	for (size_t index = 0; index < 1024; index++) {
 		column.PushDefault();
 	}
 
 	REQUIRE(column.ChunkCount() == chunks);
-	REQUIRE(ChunkPool::Allocations() == allocated);
+	REQUIRE(ChunksAllocated() == allocated);
+
+	// The other half of the same claim, and the half that had no coverage at
+	// all while it was a counter only this module could read: the refill came
+	// out of the freelist rather than being satisfied some other way.
+	REQUIRE(ChunksReused() == reused + static_cast<double>(chunks));
 }
 
 TEST_CASE("reserve never shrinks", "[ecs]") {

@@ -38,6 +38,15 @@ namespace launcher {
 		return nullptr;
 	}
 
+	const DescribedSetting *Description::Setting(std::string_view name) const {
+		for (const DescribedSetting &setting : Settings) {
+			if (setting.Name == name) {
+				return &setting;
+			}
+		}
+		return nullptr;
+	}
+
 	std::optional<Description> ParseDescription(const std::string &json, std::string &failure) {
 		// **`parse` with throwing off.** The input is another process's stdout,
 		// which is the one input this program has no control over at all: a

@@ -338,7 +338,8 @@ namespace engine::graph {
 			 "Sky",
 			 C::Draw,
 			 S::View,
-			 {{"depth", K::Depth, D24, true, "So it fills only what nothing covered."}},
+			 {{"colour", K::Colour, RGBA16, true, "The lit scene to preserve."},
+			  {"depth", K::Depth, D24, true, "So it fills only what nothing covered."}},
 			 {{"colour", K::Colour, RGBA16, true, "The background."}},
 			 "The background, drawn where the depth buffer is still far."},
 

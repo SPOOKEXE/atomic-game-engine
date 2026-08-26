@@ -158,14 +158,14 @@ namespace engine::physics {
 	// **Exact per shape, not one oriented-box bound for all three.** A sphere
 	// does not grow when it turns, and a cylinder turned 45 degrees is narrower
 	// than the box around it - deriving all three from
-	// `core::AABB::FromOrientedBox` would be conservative and therefore correct,
+	// `core::OrientedBoxBounds` would be conservative and therefore correct,
 	// and it would also hand the broad phase a sphere 73 per cent too wide and a
 	// candidate list to match. The looseness is not free: it is paid once per
 	// collider per tick in candidate pairs the narrow phase then rejects.
 	//
 	// What it must never be is *smaller* than the shape. A broad phase whose
 	// bound is too small drops contacts and reports nothing, which is the
-	// failure `core::AABB::FromOrientedBox` was written to avoid and the reason
+	// failure `core::OrientedBoxBounds` was written to avoid and the reason
 	// the rotated cases are covered by their own tests.
 	//
 	// @param collider The shape and its extent.

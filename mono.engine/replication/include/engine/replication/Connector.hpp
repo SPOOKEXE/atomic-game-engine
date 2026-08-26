@@ -3,19 +3,23 @@
 // @tier L12 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/net/ConnectionStats.hpp>
 #include <engine/net/Cookie.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Handshake.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Prediction.hpp>
+#include <engine/replication/QuicSession.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Session.hpp>
+#include <engine/replication/SessionPort.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -26,6 +30,44 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ConnectorSettings {
+		// What discovery said this server accepts, or nothing.
+		//
+		// **A hint, never a choice, and never the client's own.** There is no
+		// flag that selects a transport: a connector opens with QUIC and falls
+		// back when the server refuses, and the server is the only end that
+		// decides. What this saves is the one refusal round trip - an advert
+		// from a datagram-only server means the first attempt can go there
+		// directly rather than being turned away first.
+		//
+		// It is a hint because it arrived on an open UDP port from an address
+		// anybody can write, exactly like every other field of an advert. Being
+		// wrong costs the round trip it was meant to save and nothing else: the
+		// fallback still runs.
+		//
+		// @since v0.19
+		std::optional<net::WireMode> Advertised;
+
+		// How long one transport attempt waits for an answer, in seconds.
+		//
+		// **Only the silent case waits this long.** A server that refuses says
+		// so in one round trip and the fallback happens immediately; this is the
+		// deadline for a server that says nothing at all, which is what a
+		// firewall or a wrong address looks like.
+		//
+		// @since v0.19
+		double AttemptSeconds = 3.0;
+
+		// How a QUIC session is configured, when the attempt is on QUIC.
+		//
+		// **`ServerIdentity` is copied into it**, so a caller pins the server in
+		// one place whichever wire it is on. Under QUIC that pin becomes the
+		// RFC 7250 raw public key the TLS handshake checks; under the datagram
+		// wire it is the signature over the admission transcript. Same key,
+		// same guarantee, different mechanism.
+		//
+		// @since v0.19
+		QuicSessionSettings Quic;
+
 		// The server's public key, or nothing to accept any server.
 		// @since v0.9
 		std::optional<assets::PublicKey> ServerIdentity;
@@ -208,12 +250,47 @@ namespace engine::replication {
 			Replica_.ClearForgotten();
 		}
 
+		// Which transport this connection landed on.
+		//
+		// **Read after `Admitted`, and not a setting.** The server chose it; a
+		// caller that wants to show a person which stack they are on, or a suite
+		// that wants to prove the fallback happened, reads this.
+		//
+		// @return The wire the current attempt is on.
+		// @since v0.19
+		net::WireKind Wire() const {
+			return Attempting;
+		}
+
+		// How many transports have been tried, including the one in progress.
+		//
+		// @return One when QUIC connected, two once the fallback has started.
+		// @since v0.19
+		unsigned Attempts() const {
+			return Tried;
+		}
+
 		// The link's state machine.
 		//
-		// @return The link.
-		net::Link &Link() {
-			return Wire.Link();
-		}
+		// **Datagram wire only, and null under QUIC.** A QUIC connection has no
+		// `net::Link`: its lifecycle, its acknowledgements and its window are
+		// the transport's own, and `docs/QUIC.md` §6 keeps only `BytesPerTick`
+		// out of that type. A pointer rather than a reference so the absence is
+		// something a caller has to look at rather than something it walks into.
+		//
+		// @return The link, or null when this connector runs on QUIC.
+		net::Link *Link();
+
+		// The counters a debug panel reads, whichever wire this is on.
+		//
+		// **What `Link()` used to be for**, and it works on both: the bytes, the
+		// round trip and the loss are facts about a connection rather than about
+		// a framing, so they are refilled from whichever transport is underneath
+		// rather than reached for through a type only one of them has.
+		//
+		// @return The statistics.
+		// @since v0.19
+		net::ConnectionStats LinkStats() const;
 
 		// What this connection has done.
 		//
@@ -245,6 +322,12 @@ namespace engine::replication {
 			return Replica_.Stats();
 		}
 
+		// The most transports one connector will try before giving up.
+		//
+		// Two, because there are two, and a bound is stated rather than implied
+		// by the list happening to be short.
+		static constexpr unsigned MAXIMUM_ATTEMPTS = 2;
+
 	  private:
 		// How far through the admission exchange this end is.
 		//
@@ -259,9 +342,29 @@ namespace engine::replication {
 		void Consume(std::span<const std::byte> datagram, double nowSeconds);
 		void Refuse();
 
+		void Begin(net::WireKind wire, double nowSeconds);
+		bool Fallback(double nowSeconds, const char *why);
+		void Reconsider(double nowSeconds);
+		void Landed();
+
+		void Settle(double nowSeconds);
+
 		net::Transport *Transport_;
 
-		Session Wire;
+		// Where the server is. Held here rather than read back off the session,
+		// because a fallback replaces the session and the address is the one
+		// thing that survives it.
+		net::Endpoint Server;
+
+		// Whichever session the attempt in flight produced. See
+		// `SessionPort.hpp` for why there are two of them and one interface, and
+		// `Begin` for why a fallback replaces it whole rather than reusing it.
+		std::unique_ptr<SessionPort> Port;
+
+		// The same object as `Port` when the attempt is on QUIC, and null
+		// otherwise.
+		QuicSession *Quic = nullptr;
+
 		Replica Replica_;
 		Prediction Prediction_;
 
@@ -275,6 +378,16 @@ namespace engine::replication {
 		std::array<std::byte, net::Cookie::COOKIE_BYTES> Cookie_{};
 
 		Stage Phase = Stage::Greeting;
+
+		// Which stack the attempt in flight is on, and how many have been made.
+		net::WireKind Attempting = net::WireKind::Quic;
+		unsigned Tried = 0;
+		double AttemptStartedAt = 0.0;
+
+		// Whether the server said, in as many words, that it does not serve the
+		// stack this attempt is on. Kept apart from a timeout because the two
+		// want different waits: a refusal is acted on now.
+		bool Turned = false;
 
 		double SpokeAt = 0.0;
 		bool Spoken = false;

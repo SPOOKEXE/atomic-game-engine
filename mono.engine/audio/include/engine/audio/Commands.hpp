@@ -177,13 +177,59 @@ namespace engine::audio {
 		//
 		// **A full queue drops the command and says so, rather than blocking.**
 		// The producer is a tick and the consumer has a deadline: waiting would
-		// stall the world to keep a sound, which is the wrong way round. A
-		// caller that cares checks the return; the counter is what an operator
-		// looks at.
+		// stall the world to keep a sound, which is the wrong way round.
+		//
+		// ## What a producer owes a refusal, and it is not one policy
+		//
+		// "Check the return" is not an instruction until it says what to do
+		// with a `false`, and the answer is different for three kinds of
+		// command. Until v0.19 every one of `mono.client/src/Sounds.cpp`'s
+		// fifteen call sites discarded it and recorded the state as landed,
+		// which turns each of the three into a different permanent fault.
+		//
+		//  * **Coalescable** - `SetGain`, `SetPan`, `SetMuted`, `SetLooping`,
+		//    `SetPlacement`, `SetListener`. Each states a value rather than an
+		//    edge, so a dropped one is repaired by the next pass that notices
+		//    the value still differs. The producer must therefore record what
+		//    it *posted*, never what it meant to post: a producer that updates
+		//    its last-sent value before the refusal has coalesced the command
+		//    into nothing, and the node keeps the old level for ever.
+		//  * **Repairable** - `AddNode`, `Connect`, `SetSound`, `Play`,
+		//    `Rewind`. These build state and are not idempotent under a partial
+		//    burst: half a voice is a player wired to nothing. A producer
+		//    reserves with `Free()` before it starts, and treats a refusal as
+		//    "not opened" so the next pass builds it again.
+		//  * **Terminal** - `Stop`, `Disconnect`, `RemoveNode`. Nothing later
+		//    reposts these, because the row that would have noticed is the one
+		//    being torn down. A producer that drops one has leaked a node and
+		//    left a voice sounding, so it must hold the teardown and retry it.
+		//
+		// The counter is what an operator looks at; `Dropped()` is the
+		// difference between "audio is broken" and "the queue is too small for
+		// what this scene does".
 		//
 		// @param command What to do and when.
 		// @return Whether it was queued.
 		bool Post(const Command &command);
+
+		// How many more commands fit right now.
+		//
+		// **For reserving a burst, which is the only way to post one safely.**
+		// A voice is five to eight commands that mean nothing apart, and
+		// posting them one at a time and checking each leaves the producer
+		// holding half a graph with no way to undo it - the undo is itself
+		// commands, into the queue that just refused. Asking first turns that
+		// into a decision made before anything was built.
+		//
+		// **A floor, not a reservation.** One producer is the whole contract of
+		// this class, so nothing else can take the space; the consumer only
+		// ever frees it. So the answer can grow between the ask and the post
+		// and never shrink, which is the direction that makes it safe.
+		//
+		// @return Slots free for this producer, which is one less than the
+		//         distance to `CAPACITY` because the ring always leaves one
+		//         empty.
+		size_t Free() const;
 
 		// Takes every command that is waiting.
 		//

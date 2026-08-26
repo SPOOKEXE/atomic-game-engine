@@ -57,12 +57,22 @@ cmake --preset ci && cmake --build .cache/build/ci -j
 
 ## 2 · Architecture
 
-- [ ] **Does every new dependency edge go downward?** The tier check catches
-      client/server mistakes; it does not catch L3 including L7. Check the
-      layer heights by hand.
+- [ ] **Does every new dependency edge go downward?** Both halves are checked
+      now, so this is a question about intent rather than about compliance: the
+      tier check catches client/server at configure time, and
+      `just test-architecture` catches L3 including L7. What neither can tell
+      you is whether the edge should exist at all.
+- [ ] **If the edge runs sideways, is it named and argued?** A module may link
+      a sibling at its own layer only where its `lateral` array in
+      `expected_graph.json` says so, and the reason belongs in a comment beside
+      the edge. There are three; `docs/CODE_ARCH.md` §6.1 lists them.
 - [ ] **Is a new module recorded in
-      `mono.tools/architecture/expected_graph.json`?** The architecture test
-      fails otherwise, and that failure is the point.
+      `mono.tools/architecture/expected_graph.json`, with a `layer`?** The
+      architecture test fails otherwise, and that failure is the point. A module
+      with no layer is the program band, and nothing with a layer may link it.
+- [ ] **Is a new ECS component in `mono.tools/componentdoc/purposes.md`?**
+      `just components-check` fails otherwise. It is one line saying what the
+      component is for; everything mechanical is generated.
 - [ ] **Does anything new cross a world boundary as a pointer?** It must be a
       copy, and the copy must be describable as a schema.
 - [ ] **Is there now a second way to do something that already existed?** Two
@@ -128,6 +138,41 @@ cmake --preset ci && cmake --build .cache/build/ci -j
       is tens of thousands of rows. A/B it in `release` and record both numbers.
 - [ ] **Was the grain chosen or inherited?** `DEFAULT_GRAIN` suits a body that
       does almost nothing. Real work per row wants a much smaller one.
+
+### Cascaded presentation caches
+
+- [ ] **Does each visible fact invalidate only its source layer?** Object,
+      particle, environment, portal, game-interface and host-interface
+      signatures must remain separate until their documented composition.
+- [ ] **Does a write cascade upward and never sideways?** A scene write reaches
+      game composition, Studio composition and final image. It does not rebuild
+      game or Studio interface geometry. A UI write does not touch resident
+      scene rows.
+- [ ] **Does a hit perform no work for that layer?** Check uploads, command
+      buffers, transfer bytes and transient allocations. A counter labelled
+      `hit` beside non-zero traffic is evidence of a broken cache boundary.
+- [ ] **Is the cache bounded and owned by the output it represents?** One
+      tracker and retained target per viewport or surface, with portal history
+      bounded by visible portal capacity. Never retain one full-size image per
+      frame.
+- [ ] **Is the baseline committed only after a successful write?** A failed
+      acquire, submit or render must retry the same damage rather than turn it
+      into a false hit.
+- [ ] **Are hits and writes profiled as counters rather than durations?** Use
+      the Frame Graph's `Cascaded Cache Hits` view. Use the timing graph for work
+      that actually ran, and `FrameResult` plus GPU heap statistics for traffic
+      and residency.
+- [ ] **Are absent optional layers excluded?** No selected environment, visible
+      portals, particles or interface means `n/a`, not a free cache hit. A
+      stable hidden diagnostics panel must not dirty host-interface geometry or
+      the final image.
+- [ ] **Do content references gate their own discovery?** A transform or world
+      tick must not rescan content-bearing components. Repeated references to
+      one texture must become one delivery request and one resident GPU texture.
+- [ ] **Was the steady state measured in `release`?** Record the source and
+      composition hit rates, uploaded bytes, command-buffer counts and GPU
+      logical bytes before and after the change. Exercise a still scene, moving
+      particles, a UI-only edit, a resize and a visible portal.
 
 ## 6 · Tests
 

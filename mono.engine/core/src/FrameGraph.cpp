@@ -1,12 +1,15 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <deque>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -63,12 +66,25 @@ namespace engine::core {
 			bool Enabled = false;
 			bool Recording = false;
 
-			std::thread::id Owner;
+			// **Atomic for the reason `ecs::Store`'s owner is**, and the two
+			// should stay the same shape. One thread writes this at
+			// `BeginRecording` and every job worker reads it below to decide
+			// whether a span is theirs; a plain `std::thread::id` read
+			// concurrently with that write is a data race by the letter of the
+			// standard even where it happens to be benign. Relaxed on both
+			// sides: nothing is published through it, and a worker that reads
+			// a stale owner for one span drops a span it would have dropped.
+			std::atomic<std::thread::id> Owner;
+
 			uint64_t FrameStartNanoseconds = 0;
 
 			// Built during the frame.
 			std::vector<FrameSpan> Building;
 			std::vector<size_t> Open;
+			// Logical placement scratch for reported worker hierarchies. Retained
+			// because EndFrame is part of the profiler and must not allocate every
+			// frame in order to describe allocations elsewhere.
+			std::vector<float> ReportedChildEnds;
 			// Tracked past MAXIMUM_DEPTH as well as below it, so that a Pop
 			// under the budget still matches the Push that opened it.
 			uint32_t Depth = 0;
@@ -87,7 +103,13 @@ namespace engine::core {
 			float PublishedUnmarked = 0.0f;
 			float PublishedCategories[static_cast<size_t>(ProfileCategory::Count)] = {};
 
-			size_t DroppedThisFrame = 0;
+			// **Incremented from worker threads**, which is the whole reason
+			// the counter exists - a span opened off the owning thread is
+			// counted rather than locked for. Concurrent `++` on a plain
+			// `size_t` is a data race, and one that loses counts silently,
+			// which for a counter whose only job is to say "the overlay is
+			// under-reporting" is the worst possible failure.
+			std::atomic<size_t> DroppedThisFrame{0};
 			size_t PublishedDropped = 0;
 
 			// --- history ------------------------------------------------------
@@ -139,6 +161,14 @@ namespace engine::core {
 			// --- folded stacks ------------------------------------------------
 			bool Folding = false;
 			FoldedStacks Folded;
+
+			// --- triggers -----------------------------------------------------
+			//
+			// Owned by the collecting thread, the same as everything above:
+			// armed from it, evaluated in `EndFrame`, read from it.
+			std::vector<FrameTrigger> Triggers;
+			FrameTriggerHit Hit;
+			bool Latched = false;
 			size_t FoldedFrameCount = 0;
 		};
 
@@ -362,12 +392,42 @@ namespace engine::core {
 		constexpr size_t WORST_FRAME_SPANS = 6;
 	}
 
+	std::string_view GetTriggerSubjectName(TriggerSubject subject) {
+		switch (subject) {
+		case TriggerSubject::Span:
+			return "span";
+		case TriggerSubject::SpanSelf:
+			return "span self";
+		case TriggerSubject::Category:
+			return "category";
+		case TriggerSubject::Frame:
+			return "frame";
+		case TriggerSubject::Unmarked:
+			return "unmarked";
+		case TriggerSubject::Dropped:
+			return "dropped";
+		}
+		return "?";
+	}
+
+	std::string_view GetTriggerTestName(TriggerTest test) {
+		switch (test) {
+		case TriggerTest::Above:
+			return "over";
+		case TriggerTest::Below:
+			return "under";
+		}
+		return "?";
+	}
+
 	std::string_view GetCategoryName(ProfileCategory category) {
 		switch (category) {
 		case ProfileCategory::Engine:
 			return "engine";
 		case ProfileCategory::Render:
 			return "render";
+		case ProfileCategory::Gpu:
+			return "GPU";
 		case ProfileCategory::ECS:
 			return "ECS";
 		case ProfileCategory::Physics:
@@ -452,18 +512,21 @@ namespace engine::core {
 		// ran before the switch, and published it would read as one enormous
 		// frame with three spans in it.
 		state.Recording = true;
-		state.Owner = std::this_thread::get_id();
+		state.Owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
 		state.FrameStartNanoseconds = Clock::Nanoseconds();
 		state.Building.clear();
 		state.Open.clear();
 		state.Depth = 0;
 		state.BuildingNameCount = 0;
-		state.DroppedThisFrame = 0;
+		state.DroppedThisFrame.store(0, std::memory_order_relaxed);
 
 		// Reserving once, on the first enabled frame, keeps the allocation out
 		// of every subsequent measurement.
 		if (state.Building.capacity() < MAXIMUM_SPANS) {
 			state.Building.reserve(MAXIMUM_SPANS);
+		}
+		if (state.ReportedChildEnds.capacity() < MAXIMUM_SPANS) {
+			state.ReportedChildEnds.reserve(MAXIMUM_SPANS);
 		}
 	}
 
@@ -548,6 +611,131 @@ namespace engine::core {
 		return out.good();
 	}
 
+	namespace {
+
+		// Reads what one rule asks for out of the frame that has just been
+		// measured.
+		//
+		// `state.Building` is still the frame being described - `EndFrame` calls
+		// this before the publish swap - and the category totals and the idle
+		// accounting are already in it.
+		//
+		// @param state The collector, mid-`EndFrame`.
+		// @param rule  What to read.
+		// @param total The frame's wall clock, which is not published yet.
+		// @return The reading, in milliseconds or a count for `Dropped`, or
+		//         nothing when the rule names a span this frame did not run.
+		//
+		// **Nothing rather than zero for an absent span, and it is the `under`
+		// rules that need it.** "`pump events` under 1 ms" is a question about a
+		// frame that pumped events; answering it with the zero of a frame that
+		// did not would stop the graph on the first frame where nothing
+		// happened, which is every frame before the one somebody is waiting for.
+		std::optional<float> ReadTrigger(const State &state, const FrameTrigger &rule, float total) {
+			switch (rule.Subject) {
+			case TriggerSubject::Span:
+			case TriggerSubject::SpanSelf: {
+				// Totalled over every occurrence rather than taking the
+				// worst, because a span that opens forty times in a bad
+				// frame is a bad frame even when no single one of the forty
+				// is slow. That is the reported case exactly: `pump events`
+				// is one span per event.
+				float found = 0.0f;
+				bool ran = false;
+				for (const FrameSpan &span : state.Building) {
+					if (span.Name == rule.Name) {
+						found +=
+							rule.Subject == TriggerSubject::Span ? span.Milliseconds : span.SelfMilliseconds;
+						ran = true;
+					}
+				}
+				if (!ran) {
+					return std::nullopt;
+				}
+				return found;
+			}
+
+			case TriggerSubject::Category:
+				return state.PublishedCategories[static_cast<size_t>(rule.Category)];
+
+			case TriggerSubject::Frame:
+				return total;
+
+			case TriggerSubject::Unmarked:
+				return state.PublishedUnmarked;
+
+			case TriggerSubject::Dropped:
+				return static_cast<float>(state.DroppedThisFrame.load(std::memory_order_relaxed));
+			}
+			return 0.0f;
+		}
+
+		// What a rule was reading, spelled for whoever reads the hit.
+		std::string DescribeTrigger(const FrameTrigger &rule) {
+			switch (rule.Subject) {
+			case TriggerSubject::Span:
+				return rule.Name;
+			case TriggerSubject::SpanSelf:
+				return rule.Name + " (self)";
+			case TriggerSubject::Category:
+				return std::string(GetCategoryName(rule.Category));
+			case TriggerSubject::Frame:
+				return "frame";
+			case TriggerSubject::Unmarked:
+				return "unmarked";
+			case TriggerSubject::Dropped:
+				return "dropped spans";
+			}
+			return "";
+		}
+
+		// Arms the latch on the first rule this frame meets.
+		//
+		// First rather than worst: the rules are a list somebody wrote in an
+		// order, and a reader who is told two things fired at once has to work
+		// out which one they care about. One rule, one reading, one frame.
+		void EvaluateTriggers(State &state, float total) {
+			for (size_t index = 0; index < state.Triggers.size(); index++) {
+				const FrameTrigger &rule = state.Triggers[index];
+				if (!rule.Enabled) {
+					continue;
+				}
+
+				const std::optional<float> reading = ReadTrigger(state, rule, total);
+				if (!reading.has_value()) {
+					continue;
+				}
+
+				const bool met =
+					rule.Test == TriggerTest::Above ? *reading > rule.Threshold : *reading < rule.Threshold;
+				if (!met) {
+					continue;
+				}
+
+				state.Hit.Rule = index;
+				state.Hit.Reading = *reading;
+				state.Hit.Threshold = rule.Threshold;
+				state.Hit.Subject = DescribeTrigger(rule);
+				state.Latched = true;
+				return;
+			}
+		}
+	}
+
+	void FrameGraph::SetTriggers(std::span<const FrameTrigger> triggers) {
+		State &state = Get();
+		state.Triggers.assign(triggers.begin(), triggers.end());
+	}
+
+	const FrameTriggerHit *FrameGraph::Triggered() {
+		const State &state = Get();
+		return state.Latched ? &state.Hit : nullptr;
+	}
+
+	void FrameGraph::ClearTrigger() {
+		Get().Latched = false;
+	}
+
 	void FrameGraph::SetFoldingEnabled(bool enabled) {
 		auto &state = Get();
 		if (enabled) {
@@ -593,6 +781,27 @@ namespace engine::core {
 		state.Open.clear();
 		state.Depth = 0;
 
+		// Reported spans are reconstructed after their worker has joined. Their
+		// wall-clock start is therefore the tiny call that builds the report, not
+		// where the work belongs in its parent. Place reported children after the
+		// preceding direct child so scheduler phases and systems remain adjacent.
+		state.ReportedChildEnds.assign(state.Building.size(), 0.0f);
+		for (size_t index = 0; index < state.Building.size(); index++) {
+			FrameSpan &span = state.Building[index];
+			if (span.Parent < index) {
+				FrameSpan &parent = state.Building[span.Parent];
+				float &childEnd = state.ReportedChildEnds[span.Parent];
+				if (childEnd < parent.StartMilliseconds) {
+					childEnd = parent.StartMilliseconds;
+				}
+				if (span.Reported) {
+					span.StartMilliseconds = childEnd;
+				}
+				childEnd = std::max(childEnd, span.StartMilliseconds + span.Milliseconds);
+			}
+			state.ReportedChildEnds[index] = span.StartMilliseconds;
+		}
+
 		// Self time: a span's duration less the duration of its direct
 		// children. Spans are in open order, so a child is always a later entry
 		// with a greater depth, up to the next entry at the same depth or less.
@@ -609,11 +818,11 @@ namespace engine::core {
 				// time as soon as the work it dispatched outran the wall clock
 				// it waited for - which is the normal case for anything
 				// parallel, not an edge one.
-				if (candidate.Depth == span.Depth + 1 && !candidate.Reported) {
+				if (candidate.Depth == span.Depth + 1 && (!candidate.Reported || span.Summary)) {
 					children += candidate.Milliseconds;
 				}
 			}
-			span.SelfMilliseconds = span.Milliseconds - children;
+			span.SelfMilliseconds = std::max(span.Milliseconds - children, 0.0f);
 		}
 
 		// Idle inside: what part of each span's inclusive time was waiting.
@@ -668,9 +877,36 @@ namespace engine::core {
 			state.FoldedFrameCount++;
 		}
 
+		// **Here, and not in the panel.** The panel samples four times a second
+		// at the shortest interval it offers; the frame a rule is written for is
+		// one frame long. Where the tree still exists is the only place a rule
+		// can see the frame that broke it.
+		//
+		// Before the swap, so `Building` is the frame being described, and after
+		// the category totals and `AccumulateIdleMilliseconds` so a rule may
+		// read either.
+		if (!state.Triggers.empty() && !state.Latched) {
+			EvaluateTriggers(state, total);
+		}
+
 		state.Published.swap(state.Building);
 		state.PublishedMilliseconds = total;
-		state.PublishedDropped = state.DroppedThisFrame;
+		state.PublishedDropped = state.DroppedThisFrame.load(std::memory_order_relaxed);
+
+		// **Reported rather than left silent**, which is what `docs/ARCH_REVIEW.md`
+		// §A1 made this counter atomic for and what §G2 asks of it. This
+		// collector records one thread by design, so every scope opened inside
+		// an `EachParallel` body is dropped - and until v0.19 the only thing
+		// that could see that was the F5 overlay, which a headless server does
+		// not have and a headless server is exactly the program that runs
+		// parallel compute.
+		//
+		// Only when something was dropped, so a run whose report has no such
+		// row is a run that lost no spans, rather than one nobody can tell
+		// apart from a row of zeroes.
+		if (state.PublishedDropped > 0) {
+			Metrics::Count(FrameGraph::DROPPED_COUNTER, static_cast<double>(state.PublishedDropped));
+		}
 		// The names go with the spans that view into them.
 		state.PublishedNames.swap(state.BuildingNames);
 		state.BuildingNameCount = 0;
@@ -953,8 +1189,8 @@ namespace engine::core {
 		//
 		// Not depth-tracked either: the depth belongs to the owning thread's
 		// stack, and a worker moving it would corrupt that thread's nesting.
-		if (std::this_thread::get_id() != state.Owner) {
-			state.DroppedThisFrame++;
+		if (std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return NOT_RECORDING;
 		}
 
@@ -962,7 +1198,7 @@ namespace engine::core {
 		// so the matching close moves it back - otherwise every sibling after a
 		// dropped span is recorded one level too deep.
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
-			state.DroppedThisFrame++;
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			state.Depth++;
 			return DEPTH_ONLY;
 		}
@@ -1035,7 +1271,7 @@ namespace engine::core {
 		std::string_view fallback, std::string_view name, ProfileCategory category
 	) {
 		auto &state = Get();
-		if (!state.Recording || std::this_thread::get_id() != state.Owner) {
+		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
 			Index = Push(name, category);
 			return;
 		}
@@ -1057,6 +1293,35 @@ namespace engine::core {
 		Index = Push(Intern(state, name), category);
 	}
 
+	FrameGraph::ReportedScope::ReportedScope(
+		std::string_view name, ProfileCategory category, float milliseconds
+	)
+		: Milliseconds(milliseconds) {
+		auto &state = Get();
+		if (!(milliseconds >= 0.0f)) {
+			if (state.Recording &&
+				std::this_thread::get_id() == state.Owner.load(std::memory_order_relaxed)) {
+				state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			}
+			return;
+		}
+		Index = Push(name, category);
+	}
+
+	FrameGraph::ReportedScope::~ReportedScope() {
+		const size_t index = Index;
+		Pop(index);
+		if (index == NOT_RECORDING || index == DEPTH_ONLY) {
+			return;
+		}
+
+		auto &state = Get();
+		FrameSpan &span = state.Building[index];
+		span.Milliseconds = Milliseconds;
+		span.Reported = true;
+		span.Summary = true;
+	}
+
 	void FrameGraph::Report(std::string_view name, ProfileCategory category, float milliseconds) {
 		auto &state = Get();
 		if (!state.Recording) {
@@ -1066,8 +1331,8 @@ namespace engine::core {
 		// The same owner rule `Push` applies, and for the same reason. What is
 		// different is only where the number came from: a producer that cannot
 		// record its own span hands the duration to whoever can.
-		if (std::this_thread::get_id() != state.Owner) {
-			state.DroppedThisFrame++;
+		if (std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
@@ -1076,12 +1341,12 @@ namespace engine::core {
 		// it to zero would put a plausible bar on the graph instead of a
 		// missing one.
 		if (!(milliseconds >= 0.0f)) {
-			state.DroppedThisFrame++;
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
-			state.DroppedThisFrame++;
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
@@ -1111,7 +1376,8 @@ namespace engine::core {
 		std::string_view fallback, std::string_view name, ProfileCategory category, float milliseconds
 	) {
 		auto &state = Get();
-		if (!state.Recording || std::this_thread::get_id() != state.Owner || name.empty()) {
+		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed) ||
+			name.empty()) {
 			Report(fallback, category, milliseconds);
 			return;
 		}

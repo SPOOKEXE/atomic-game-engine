@@ -86,7 +86,7 @@ namespace studio {
 		// when the key is *absent* - a key holding a string still comes back as
 		// a throw. These files are hand-editable by design, so every read has to
 		// survive somebody typing the wrong thing.
-		float Number(const json &document, const char *key, float fallback) {
+		float JsonNumber(const json &document, const char *key, float fallback) {
 			const auto found = document.find(key);
 			return found != document.end() && found->is_number() ? found->get<float>() : fallback;
 		}
@@ -125,7 +125,7 @@ namespace studio {
 
 		// `create_directories` reports "already there" as `false` with no error,
 		// which is why the error code rather than the return value decides -
-		// the same reading `cdn::EnsureLocalStore` makes.
+		// the same reading `engine::assets::EnsureLocalStore` makes.
 		std::filesystem::create_directories(Root(), failed);
 		if (failed) {
 			ENGINE_ERROR("studio config: could not create {}: {}", Root().string(), failed.message());
@@ -276,11 +276,12 @@ namespace studio {
 		// **Every field defaults to what this object already holds**, so a
 		// document written by an older build is read forward rather than
 		// clearing whatever it did not mention.
-		Scale = Number(document, "scale", Scale);
+		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
+		ShowParticleEmitters = Flag(document, "showParticleEmitters", ShowParticleEmitters);
 		SnapEnabled = Flag(document, "snap", SnapEnabled);
-		SnapDistance = Number(document, "gridStep", SnapDistance);
-		SnapDegrees = Number(document, "rotationStep", SnapDegrees);
+		SnapDistance = JsonNumber(document, "gridStep", SnapDistance);
+		SnapDegrees = JsonNumber(document, "rotationStep", SnapDegrees);
 		PivotEditing = Flag(document, "pivotEditing", PivotEditing);
 		DragAligns = Flag(document, "dragAligns", DragAligns);
 		ShowFacing = Flag(document, "showFacing", ShowFacing);
@@ -301,11 +302,11 @@ namespace studio {
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
 		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
-			FrameCap = Number(*rates, "cap", FrameCap);
-			InterfaceActiveHz = Number(*rates, "interfaceActive", InterfaceActiveHz);
-			InterfaceIdleHz = Number(*rates, "interfaceIdle", InterfaceIdleHz);
-			RendererFocusedHz = Number(*rates, "rendererFocused", RendererFocusedHz);
-			RendererUnfocusedHz = Number(*rates, "rendererUnfocused", RendererUnfocusedHz);
+			Uncapped = Flag(*rates, "uncapped", Uncapped);
+			InterfaceActiveHz = JsonNumber(*rates, "interfaceActive", InterfaceActiveHz);
+			InterfaceIdleHz = JsonNumber(*rates, "interfaceIdle", InterfaceIdleHz);
+			RendererFocusedHz = JsonNumber(*rates, "rendererFocused", RendererFocusedHz);
+			RendererUnfocusedHz = JsonNumber(*rates, "rendererUnfocused", RendererUnfocusedHz);
 		}
 
 		if (const auto panels = document.find("panels"); panels != document.end() && panels->is_object()) {
@@ -314,6 +315,63 @@ namespace studio {
 			ShowHeap = Flag(*panels, "heap", ShowHeap);
 			ShowAssets = Flag(*panels, "assets", ShowAssets);
 			ShowControl = Flag(*panels, "control", ShowControl);
+		}
+
+		// **Words rather than numbers, and matched against the same names the
+		// panel shows.** A rule written as `{"subject": 2}` is a file nobody can
+		// read or hand-edit, and an enum that gains a value in the middle would
+		// silently turn every saved rule into a different one.
+		//
+		// A rule naming a subject this build does not know is dropped rather
+		// than defaulted: an unrecognised word means the file came from a
+		// different version, and arming a rule that watches something other
+		// than what it says is worse than not arming it.
+		if (const auto rules = document.find("frameGraphRules");
+			rules != document.end() && rules->is_array()) {
+			FrameGraphRules.clear();
+			for (const json &entry : *rules) {
+				if (!entry.is_object()) {
+					continue;
+				}
+
+				engine::core::FrameTrigger rule;
+				rule.Name = Words(entry, "span", "");
+				rule.Threshold = JsonNumber(entry, "threshold", 0.0f);
+				rule.Enabled = Flag(entry, "enabled", true);
+
+				const std::string subject = Words(entry, "subject", "");
+				bool known = false;
+				for (size_t at = 0; at <= static_cast<size_t>(engine::core::TriggerSubject::Dropped); at++) {
+					const auto option = static_cast<engine::core::TriggerSubject>(at);
+					if (subject == engine::core::GetTriggerSubjectName(option)) {
+						rule.Subject = option;
+						known = true;
+						break;
+					}
+				}
+				if (!known) {
+					continue;
+				}
+
+				// The comparison defaults rather than drops: a missing or
+				// misspelled `test` still leaves a rule that says what it
+				// watches, and "over" is what every rule anybody writes means.
+				const std::string test = Words(entry, "test", "");
+				if (test == engine::core::GetTriggerTestName(engine::core::TriggerTest::Below)) {
+					rule.Test = engine::core::TriggerTest::Below;
+				}
+
+				const std::string category = Words(entry, "category", "");
+				for (size_t at = 0; at < static_cast<size_t>(engine::core::ProfileCategory::Count); at++) {
+					const auto option = static_cast<engine::core::ProfileCategory>(at);
+					if (category == engine::core::GetCategoryName(option)) {
+						rule.Category = option;
+						break;
+					}
+				}
+
+				FrameGraphRules.push_back(std::move(rule));
+			}
 		}
 
 		// **A missing array and an empty one are different answers.** Absent is
@@ -401,15 +459,13 @@ namespace studio {
 		SnapDegrees = std::max(0.001f, SnapDegrees);
 		ControlPort = std::clamp(ControlPort, 0, 65535);
 
-		// **Clamped rather than refused, and zero survives.** Zero means "this
-		// one imposes no ceiling", which is a real answer for every one of them
-		// - a negative is not, and a file with one in it is a typo rather than a
-		// document to reject.
-		FrameCap = std::clamp(FrameCap, 0.0f, 1000.0f);
-		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 1000.0f);
-		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 1000.0f);
-		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 1000.0f);
-		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 1000.0f);
+		// **Clamped rather than refused.** 361 means "this one imposes no
+		// ceiling"; a negative is not, and a file with one in it is a typo rather
+		// than a document to reject.
+		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 361.0f);
+		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 361.0f);
+		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 361.0f);
+		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 361.0f);
 		return true;
 	}
 
@@ -434,9 +490,28 @@ namespace studio {
 			}
 		}
 
+		// A rule per line, spelled the way the panel spells it. `span` and
+		// `category` are written whatever the subject is: a rule switched from
+		// a span to a frame keeps the name it had, so switching back does not
+		// mean typing it again.
+		json frameGraphRules = json::array();
+		for (const engine::core::FrameTrigger &rule : FrameGraphRules) {
+			frameGraphRules.push_back(
+				json{
+					{"subject", engine::core::GetTriggerSubjectName(rule.Subject)},
+					{"span", rule.Name},
+					{"category", engine::core::GetCategoryName(rule.Category)},
+					{"test", engine::core::GetTriggerTestName(rule.Test)},
+					{"threshold", rule.Threshold},
+					{"enabled", rule.Enabled},
+				}
+			);
+		}
+
 		json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
+			{"showParticleEmitters", ShowParticleEmitters},
 			{"snap", SnapEnabled},
 			{"gridStep", SnapDistance},
 			{"rotationStep", SnapDegrees},
@@ -453,6 +528,7 @@ namespace studio {
 				 {"assets", ShowAssets},
 				 {"control", ShowControl},
 			 }},
+			{"frameGraphRules", std::move(frameGraphRules)},
 			{"panelColours", std::move(panelColours)},
 			{"discord",
 			 json{
@@ -470,7 +546,7 @@ namespace studio {
 			 }},
 			{"frameRates",
 			 json{
-				 {"cap", FrameCap},
+				 {"uncapped", Uncapped},
 				 {"interfaceActive", InterfaceActiveHz},
 				 {"interfaceIdle", InterfaceIdleHz},
 				 {"rendererFocused", RendererFocusedHz},
@@ -557,7 +633,14 @@ namespace studio {
 		Recent.Load();
 
 		ShowGrid = Prefs.ShowGrid;
+		ShowParticleEmitters = Prefs.ShowParticleEmitters;
 		ShowControl = Prefs.ShowControl;
+
+		// Armed here rather than when the panel first draws, because the panel
+		// may never be opened and a rule is worth arming either way - the point
+		// of one is catching a frame nobody was watching for.
+		FrameGraphState.Triggers = Prefs.FrameGraphRules;
+		engine::core::FrameGraph::SetTriggers(FrameGraphState.Triggers);
 		ControlPortField = Prefs.ControlPort;
 		SnapEnabled = Prefs.SnapEnabled;
 		SnapDistance = Prefs.SnapDistance;
@@ -576,11 +659,11 @@ namespace studio {
 			Settings.Scale = Prefs.Scale;
 		}
 
-		FrameCap = Prefs.FrameCap;
 		InterfaceActiveHz = Prefs.InterfaceActiveHz;
 		InterfaceIdleHz = Prefs.InterfaceIdleHz;
 		RendererFocusedHz = Prefs.RendererFocusedHz;
 		RendererUnfocusedHz = Prefs.RendererUnfocusedHz;
+		Uncapped = Prefs.Uncapped;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file -
@@ -620,7 +703,9 @@ namespace studio {
 		// reading them back here is what makes "it remembered what I left open"
 		// true without every toggle having to write a file.
 		Prefs.ShowGrid = ShowGrid;
+		Prefs.ShowParticleEmitters = ShowParticleEmitters;
 		Prefs.ShowControl = ShowControl;
+		Prefs.FrameGraphRules = FrameGraphState.Triggers;
 		Prefs.ShowStatistics = ShowStatistics;
 		Prefs.ShowFrameGraph = ShowFrameGraph;
 		Prefs.ShowHeap = ShowHeap;
@@ -634,11 +719,11 @@ namespace studio {
 		Prefs.DragAligns = DragAligns;
 		Prefs.ShowFacing = ShowFacing;
 		Prefs.Scale = Settings.Scale;
-		Prefs.FrameCap = FrameCap;
 		Prefs.InterfaceActiveHz = InterfaceActiveHz;
 		Prefs.InterfaceIdleHz = InterfaceIdleHz;
 		Prefs.RendererFocusedHz = RendererFocusedHz;
 		Prefs.RendererUnfocusedHz = RendererUnfocusedHz;
+		Prefs.Uncapped = Uncapped;
 
 		Prefs.Save();
 		Recent.Save();

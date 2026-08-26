@@ -569,6 +569,23 @@ namespace engine::scene {
 		bool WasLastSourceChanged() const {
 			return LastSource != PreviousLastSource;
 		}
+
+		// Whether this frame has anything an event-driven input service can fire.
+		//
+		// The script pumps used to discover the ordinary empty answer by asking
+		// about every key and button separately. A world with a VM paid that scan
+		// on every heartbeat even while the window was untouched. The state already
+		// stores its edges as whole words, so the empty path is a handful of word
+		// compares and does not enter either language runtime.
+		bool HasFrameEvents() const {
+			for (size_t word = 0; word < sizeof(Down.Words) / sizeof(Down.Words[0]); word++) {
+				if (Down.Words[word] != Previous.Words[word]) {
+					return true;
+				}
+			}
+			return Buttons != PreviousButtons || MouseDelta.X != 0.0f || MouseDelta.Y != 0.0f ||
+				   WheelDelta != 0.0f || Focused != PreviousFocused || LastSource != PreviousLastSource;
+		}
 	};
 
 	// The name a key is known by.

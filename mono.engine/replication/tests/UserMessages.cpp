@@ -9,12 +9,19 @@
 //
 // Over the loopback with real encoding, like every other case in this module:
 // the same `Session`, the same reliable channel, the same framing.
+//
+// **The datagram stack, named by every case here.** A listener serves QUIC by
+// default as of v0.19, and what these cases reach for is that stack's own
+// machinery: `net::Link`'s keep-alive, its acknowledgement window and its
+// resend limit, none of which a QUIC session has. `QuicWire.cpp` carries the
+// same seam over the other transport.
 
 #include "Wire.hpp"
 
 #include <engine/ecs/Store.hpp>
 #include <engine/net/Enums.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Protocol.hpp>
@@ -79,9 +86,14 @@ namespace {
 			Transports = MakeLoopbackTransport(2);
 			REQUIRE(Transports.size() == 2);
 
-			Server = std::make_unique<Listener>(*Transports[0]);
+			engine::replication::ListenerSettings serving;
+			serving.Wire = engine::net::WireMode::Datagram;
+			Server = std::make_unique<Listener>(*Transports[0], serving);
 			Server->Authority().Replicate(Name("endtoend_test.Spot"));
-			Client = std::make_unique<Connector>(*Transports[1], Transports[0]->Local(), Now);
+
+			engine::replication::ConnectorSettings connecting;
+			connecting.Advertised = engine::net::WireMode::Datagram;
+			Client = std::make_unique<Connector>(*Transports[1], Transports[0]->Local(), Now, connecting);
 		}
 
 		// One barrier's worth, in the order a program runs them.
@@ -203,15 +215,21 @@ TEST_CASE("a broadcast reaches everybody except who it came from", "[replication
 	std::vector<std::unique_ptr<Transport>> transports = MakeLoopbackTransport(3);
 	REQUIRE(transports.size() == 3);
 
+	engine::replication::ListenerSettings serving;
+	serving.Wire = engine::net::WireMode::Datagram;
+
+	engine::replication::ConnectorSettings connecting;
+	connecting.Advertised = engine::net::WireMode::Datagram;
+
 	double now = 0.0;
 	Store world("server");
-	Listener host(*transports[0]);
+	Listener host(*transports[0], serving);
 	host.Authority().Replicate(Name("endtoend_test.Spot"));
 
 	Store firstReplica("first");
 	Store secondReplica("second");
-	Connector first(*transports[1], transports[0]->Local(), now);
-	Connector second(*transports[2], transports[0]->Local(), now);
+	Connector first(*transports[1], transports[0]->Local(), now, connecting);
+	Connector second(*transports[2], transports[0]->Local(), now, connecting);
 
 	const auto tick = [&](uint64_t at) {
 		now += 1.0 / 60.0;
@@ -378,7 +396,7 @@ TEST_CASE("a quiet link still acknowledges, so its window never stalls", "[repli
 	// Well past the default keep-alive, and past the resend limit that would
 	// have been reached if nothing acknowledged.
 	for (int round = 0; round < 12; ++round) {
-		INFO("round " << round << " state " << engine::net::Describe(pair.Client->Link().State()));
+		INFO("round " << round << " state " << engine::net::Describe(pair.Client->Link()->State()));
 		REQUIRE(pair.Client->SendUser(Bytes("edit " + std::to_string(round)), pair.Now));
 		quiet(90);
 	}
@@ -387,5 +405,5 @@ TEST_CASE("a quiet link still acknowledges, so its window never stalls", "[repli
 
 	// The link is still up rather than timed out, which is the other half of
 	// what a keep-alive is for.
-	CHECK(pair.Client->Link().State() == engine::net::ConnectionState::Connected);
+	CHECK(pair.Client->Link()->State() == engine::net::ConnectionState::Connected);
 }

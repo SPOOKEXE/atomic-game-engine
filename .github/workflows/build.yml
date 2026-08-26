@@ -39,6 +39,7 @@ jobs:
       version: ${{ steps.pick.outputs.version }}
       release: ${{ steps.pick.outputs.release }}
       prerelease: ${{ steps.pick.outputs.prerelease }}
+      matrix: ${{ steps.pick.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
 
@@ -79,14 +80,42 @@ jobs:
             *)   prerelease=false ;;
           esac
 
+          # **The build matrix is decided here, because a job cannot decide it
+          # for itself.** `jobs.<id>.if` cannot see the `matrix` context - only
+          # a step can - so "build the dev flavour on a tag and not on a branch
+          # push" has to be a matrix that is shorter on a branch push. It is
+          # written out rather than filtered, because a two-entry list twice is
+          # shorter than the expression that would trim one.
+          #
+          # `dev` is the same tree from the `dist-dev` preset: -O1, heap
+          # profiler compiled in. It doubles an hour-long matrix, which is why
+          # it runs for a tag only - nothing publishes it otherwise.
+          shipped='
+            {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"release","preset":"release"},
+            {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"release","preset":"release"},
+            {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"release","preset":"release"}'
+          diagnostic='
+            {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"dev","preset":"dist-dev"},
+            {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"dev","preset":"dist-dev"},
+            {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"dev","preset":"dist-dev"}'
+
+          if [ "$release" = true ]; then
+            matrix="{\"include\":[$shipped,$diagnostic]}"
+          else
+            matrix="{\"include\":[$shipped]}"
+          fi
+          matrix=$(printf '%s' "$matrix" | tr -d '\n' | tr -s ' ')
+
           echo "version=$version"       >> "$GITHUB_OUTPUT"
           echo "release=$release"       >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix"         >> "$GITHUB_OUTPUT"
           echo "building $version (release=$release)"
+          echo "$matrix"
 
   build:
     needs: version
-    name: ${{ matrix.platform }}
+    name: ${{ matrix.platform }} ${{ matrix.flavour }}
     runs-on: ${{ matrix.runner }}
     # Linux is the platform this engine is developed on and its failure is a
     # real failure. Windows compiles but has never shipped, and macOS has never
@@ -94,19 +123,14 @@ jobs:
     # gets to hold up a Linux release; both upload what they manage to build.
     continue-on-error: ${{ matrix.optional }}
     timeout-minutes: 180
+
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux-x86_64
-            runner: ubuntu-24.04
-            optional: false
-          - platform: windows-x86_64
-            runner: windows-2022
-            optional: true
-          - platform: macos-arm64
-            runner: macos-14
-            optional: true
+      # Decided by the `version` job. See the comment there: a job-level `if`
+      # cannot read the `matrix` context, so the flavour that only ships with a
+      # tag is expressed as a matrix with fewer entries rather than as a
+      # condition on the job.
+      matrix: ${{ fromJSON(needs.version.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +174,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build \
+            ninja-build ccache \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
             libxfixes-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols libdecor-0-dev \
@@ -158,7 +182,7 @@ jobs:
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install ninja ccache
 
       # The pinned TypeScript, and it is not optional here even though the build
       # treats it as optional.
@@ -178,11 +202,103 @@ jobs:
         shell: bash
         run: npm install --no-audit --no-fund
 
+      # **A cold build here is 3508 CPU-seconds and a warm one is 197.** The
+      # compiler cache is wired in `CMakeLists.txt` and used automatically once
+      # `ccache` is on PATH, which the dependency steps above now arrange - but
+      # a runner is a fresh machine every time, so without somewhere to keep the
+      # cache between runs every CI build is the cold number.
+      #
+      # **`actions/cache` rather than a marketplace ccache action**, for the
+      # reason the Windows build step gives about vcvars: a first-party
+      # mechanism whose behaviour is written down here beats one whose is
+      # written down somewhere else.
+      #
+      # The key carries the run's own SHA so every run writes a fresh entry, and
+      # `restore-keys` falls back to the most recent entry for this platform.
+      # That is the standard rolling-cache shape: an exact hit never happens and
+      # is not meant to, because the point is to start from whatever the last
+      # build left behind.
+      #
+      # **Not Windows.** ccache does work with MSVC, but only where debug info
+      # is `/Z7` rather than `/Zi`, and this workflow's own comments record that
+      # the Windows build compiles and has never shipped. Adding a caching layer
+      # with a compiler-flag precondition to the one platform nobody runs is how
+      # an optional build becomes a flaky one.
+      # **Pinned rather than left to ccache's default, because the default is not
+      # the same path on every runner.** ccache resolves its directory from
+      # `XDG_CACHE_HOME` on Linux and from `~/Library/Caches` on macOS, and a
+      # `path:` below that named the wrong one would restore nothing, report
+      # nothing, and look exactly like a cache that was simply cold. One name,
+      # set here, used by the cache step and by ccache alike.
+      #
+      # It is also where `--set-config` writes, so the settings below travel
+      # with the cache rather than living on a machine that is deleted at the
+      # end of the job.
+      #
+      # `RUNNER_TEMP` rather than a path under the checkout or one reached with
+      # `..`: it is absolute on every runner, it is not somewhere
+      # `actions/checkout` will clean, and `actions/cache` globs its `path:` -
+      # so a `..` in one is a thing that may or may not resolve depending on the
+      # version.
+      #
+      # **A step rather than the job's `env:`, because the `runner` context does
+      # not exist there.** `jobs.<id>.env` may only read `github`, `needs`,
+      # `strategy`, `matrix`, `vars`, `inputs` and `secrets`; a `runner` in it
+      # is not a value that comes out empty, it is a file GitHub refuses to
+      # parse, and the whole workflow fails in zero seconds saying only
+      # "workflow file issue". The `$RUNNER_TEMP` variable is the same value and
+      # is readable in any step.
+      - name: Pin the compiler cache directory
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+
+      # **Keyed by flavour as well as platform.** The two flavours compile the
+      # same files with different flags, so they share no objects; one key for
+      # both would be two builds evicting each other's entries all day and
+      # reporting a hit rate that never recovers.
+      - name: Restore the compiler cache
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.platform }}-${{ matrix.flavour }}-
+
+      # `content` rather than the default `mtime`: a runner checks out fresh
+      # every time, so a compiler's mtime says nothing about whether it is the
+      # same compiler. Hashing it costs once per run.
+      #
+      # 2 GiB per platform against GitHub's 10 GiB per-repository ceiling, which
+      # three platforms and a little churn have to fit inside. One preset
+      # measured 0.7 GiB, so this is headroom rather than a limit anything
+      # reaches - and a cache that silently began evicting would show up below
+      # as a hit rate that fell and stayed fallen.
+      - name: Configure the compiler cache
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ccache --set-config max_size=2G
+          ccache --set-config compiler_check=content
+          ccache --zero-stats
+
       - name: Build
         if: runner.os != 'Windows'
         run: |
-          cmake --preset release
-          cmake --build --preset release
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
+
+      # **Always, and not only on failure.** A cache that stopped being used is
+      # indistinguishable from one that never was, which is the argument
+      # `CMakeLists.txt` makes where it reports an absent cache rather than
+      # staying quiet. A hit rate that falls to zero and stays there is a
+      # regression worth seeing in a green build.
+      - name: What the compiler cache did
+        if: runner.os != 'Windows'
+        continue-on-error: true
+        shell: bash
+        run: ccache --show-stats --verbose
 
       # The repository's own Windows entry point rather than a marketplace
       # action that sets the same variables. Every preset generates for Ninja,
@@ -194,7 +310,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          set PRESET=release
+          set PRESET=${{ matrix.preset }}
           scripts\build-windows.bat
 
       # **Why a build failed, when the machine that failed is not one anybody can
@@ -212,7 +328,7 @@ jobs:
         shell: bash
         run: |
           set -u
-          root=.cache/build/release/CMakeFiles
+          root=.cache/build/${{ matrix.preset }}/CMakeFiles
           for name in CMakeConfigureLog.yaml CMakeError.log CMakeOutput.log; do
             if [ -f "$root/$name" ]; then
               echo "===== $root/$name ====="
@@ -222,7 +338,7 @@ jobs:
               echo
             fi
           done
-          sdl=.cache/build/release/mono.vendor/sdl/CMakeFiles
+          sdl=.cache/build/${{ matrix.preset }}/mono.vendor/sdl/CMakeFiles
           for name in CMakeError.log CMakeOutput.log; do
             if [ -f "$sdl/$name" ]; then
               echo "===== $sdl/$name ====="
@@ -233,11 +349,17 @@ jobs:
 
       - name: Package
         shell: bash
-        run: scripts/package-release.sh .cache/build/release "${{ needs.version.outputs.version }}" "${{ matrix.platform }}" dist
+        run: |
+          scripts/package-release.sh \
+            .cache/build/${{ matrix.preset }} \
+            "${{ needs.version.outputs.version }}" \
+            "${{ matrix.platform }}" \
+            dist \
+            "${{ matrix.flavour == 'dev' && 'dev' || '' }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.platform }}
+          name: dist-${{ matrix.platform }}-${{ matrix.flavour }}
           path: dist/
           if-no-files-found: error
 

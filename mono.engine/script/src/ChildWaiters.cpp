@@ -1,6 +1,5 @@
-#include "ChildWaiters.hpp"
-
 #include <engine/ecs/Store.hpp>
+#include <engine/script/ChildWaiters.hpp>
 
 #include <utility>
 

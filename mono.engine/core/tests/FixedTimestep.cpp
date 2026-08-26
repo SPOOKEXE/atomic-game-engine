@@ -92,6 +92,17 @@ TEST_CASE("a long stall is dropped, not carried", "[timestep]") {
 	REQUIRE(timestep.Advance(1.0f / 60.0f) == 1);
 }
 
+TEST_CASE("a host can choose a narrower catch-up ceiling", "[timestep]") {
+	FixedTimestep timestep(60.0);
+
+	REQUIRE(timestep.Advance(1.0f, 2) == 2);
+	CHECK(timestep.TotalTicks() == 2);
+	CHECK(timestep.Dropped() > 50);
+
+	// The discarded time is not carried into another expensive driver frame.
+	CHECK(timestep.Advance(1.0f / 60.0f, 2) == 1);
+}
+
 TEST_CASE("alpha is where the render sits between ticks", "[timestep]") {
 	FixedTimestep timestep(60.0);
 

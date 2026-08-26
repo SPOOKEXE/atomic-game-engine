@@ -14,6 +14,7 @@
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -482,8 +483,9 @@ namespace engine::render {
 	// finished instances straight into the sorted draw stream, so what has to
 	// cross is the block - its frame, its drag, its curves, its run of the pool -
 	// and not half a million particles. The block is the caller's and is read
-	// during the call; nothing is retained past `Render`, exactly as the draw
-	// list is not.
+	// during the call. Batch state is copied only so later cameras in that same
+	// call can draw the already-prepared pool; its block pointer is never read
+	// after `Render` returns.
 	//
 	// @since v0.10
 	struct ParticleBatch {
@@ -495,11 +497,17 @@ namespace engine::render {
 		// curves out of it, and reads nothing else.
 		const effects::EmitterBlock *Block = nullptr;
 
+		// Spawn configuration and device-owned rate counters for this block.
+		// These are separate from EmitterBlock so the host fallback can stream its
+		// compact runtime row without pulling curves and transforms into cache.
+		const effects::EmitterSpawnState *Spawn = nullptr;
+		const effects::EmitterRuntime *Runtime = nullptr;
+
 		// Which block this is, from `effects::EmitterSlot::Index`.
 		//
 		// **The index and not only the pointer**, because the renderer keeps two
 		// device tables indexed by block and a note of what it last told each
-		// row - see `PARTICLE_DRAW_WORDS` in `Renderer.cpp`. A pointer says where
+		// row. A pointer says where
 		// the block is in this frame's list; the index says which block it *is*,
 		// which is what survives a frame.
 		uint32_t Index = 0;
@@ -588,6 +596,11 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// Which retained parts of this view differ from the last completed
+		// presentation. The conservative default preserves callers that do not
+		// yet provide independent signatures.
+		PresentationDamage Damage{true, true, true, true};
+
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
@@ -609,6 +622,11 @@ namespace engine::render {
 		// A stable key shared only by views of the same logical world.
 		uint64_t World = 0;
 
+		// The persistent identity of that world for resident visual state. Entity
+		// handles and particle block indices collide between stores, so both the
+		// instance rows and particle pool use this with `World`.
+		core::Name WorldName;
+
 		// A graph installed through `Renderer::SetPipeline`, or invalid for the default.
 		core::Name Pipeline;
 
@@ -616,20 +634,24 @@ namespace engine::render {
 		//@{
 		std::span<const ParticleBatch> Particles;
 
-		// What was born this tick, and where it goes in the device pool.
-		//
-		// **The host still spawns**, because a birth reads `ParticleEmitter`, the
-		// entity tree and the parent's motion, and none of those is going to the
-		// device. So the one thing that crosses per frame besides the blocks is
-		// this: a few thousand rows of sixty bytes, scattered into the device's
-		// state pool by a compute pass before the step runs.
-		std::span<const effects::ParticleBirth> ParticleBirths;
-
 		// The panes a particle can be drawn through, already flattened.
 		//
 		// Empty in a scene with no portals, which is nearly all of them. See
 		// `ParticleSeam`.
 		std::span<const ParticleSeam> ParticleSeams;
+
+		// Which simulation revision produced the particle blocks and seams. An
+		// unchanged value needs only another device step for the new
+		// visual delta; ParticleLayoutRevision separately owns ordering.
+		uint64_t ParticleRevision = 0;
+
+		// Which emitter membership and material ordering `Particles` describes.
+		// Unlike ParticleRevision, this stays constant while only simulation and
+		// resident block values advance.
+		uint64_t ParticleLayoutRevision = 0;
+
+		// Which resident parameter and curve-table content `Particles` names.
+		uint64_t ParticleResidentRevision = 0;
 
 		// How far to advance the particle simulation, in seconds.
 		//
@@ -638,12 +660,12 @@ namespace engine::render {
 		// happens on the tick, and the two agree because both are rates per
 		// second.
 		//
-		// **Zero on every view of a frame but one.** A frame has several views
-		// and one pool - a mirror and the room it reflects are two pictures of
-		// the same particles - so a caller that passed the frame's step to each
-		// would age them once per camera. Zero draws what the step already wrote,
-		// which for a repeat view is exactly right, and it is also what a paused
-		// view wants.
+		// **Consumed by the first view of this logical world in one `Render`
+		// call.** A mirror, a surface camera and the room are several pictures of
+		// the same particles, so the renderer prepares the pool once and later
+		// cameras reuse it even when they repeat this value. Two different worlds
+		// own different pools and each may advance once. Zero draws the last
+		// prepared state, which is also what a paused view wants.
 		float ParticleDelta = 0.0f;
 
 		// How many blocks the world's pool has ever handed out, from
@@ -680,6 +702,54 @@ namespace engine::render {
 
 		// Whether to replace the renderer's current lighting for this view.
 		bool OverrideLighting = false;
+
+		// The editor's ground grid, drawn in this view or not drawn at all.
+		//
+		// **On the view rather than in the pipeline document, because the grid
+		// is a property of who is looking.** A profile is chosen per world and
+		// the studio shows one world in several panels - a replica panel beside
+		// an authored one - so a grid wired into the graph would appear in the
+		// panel that exists to show exactly what a player sees. `Renderer`
+		// draws it as one triangle at the head of the transparent pass, which
+		// already has the depth attached; `grid.frag` carries the rest.
+		//
+		// @since v0.19
+		struct GroundGrid {
+			// Whether to draw it at all. Off, so a client pays one branch.
+			bool Enabled = false;
+
+			// Studs between thin lines, and how many cells to a heavy one.
+			//@{
+			float Step = 4.0f;
+			float Major = 8.0f;
+			//@}
+
+			// The studs at which it has faded out entirely.
+			float Reach = 480.0f;
+
+			// An overall multiplier on every line's alpha, so a host can dim
+			// the whole grid without restating its colours.
+			float Strength = 1.0f;
+
+			// The line colour, and the alpha a heavy line reaches.
+			//@{
+			core::Color3 Colour{0.6f, 0.65f, 0.75f};
+			float Alpha = 0.5f;
+			//@}
+
+			// The two axes at the origin: X red, Z blue, the convention every
+			// editor uses. `AxisAlpha` is theirs for the same reason `Alpha` is
+			// the grid's.
+			//@{
+			core::Color3 AxisX{0.85f, 0.30f, 0.32f};
+			core::Color3 AxisZ{0.32f, 0.50f, 0.90f};
+			float AxisAlpha = 0.65f;
+			//@}
+		};
+
+		// This view's grid. Off unless the view says otherwise, so a client that
+		// never mentions it draws none.
+		GroundGrid Grid;
 	};
 
 	// How much of a slot's texture the world was actually drawn into.
@@ -796,6 +866,12 @@ namespace engine::render {
 			return 0;
 		}
 
+		// Whether a game-interface change also changes world-space pixels. Screen
+		// UI returns false; SurfaceGui and BillboardGui implementations return true.
+		virtual bool AffectsScene() const {
+			return false;
+		}
+
 		// Records draw commands into the supplied image target.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
@@ -873,7 +949,12 @@ namespace engine::render {
 		// @since v0.10
 		uint32_t Particles = 0;
 
-		// How many instances the frustum rejected.
+		// How many particle quads reached a draw in any camera pass. This may exceed
+		// Particles when portals draw the pool again. Zero means resident simulation
+		// changed no scene pixel and the particle image can remain cached.
+		uint32_t ParticlesDrawn = 0;
+
+		// How many mesh instances or particle quads the frustum rejected.
 		//
 		// **Reported rather than inferred**, because the interesting number is
 		// the ratio and the denominator is the caller's draw list - which the
@@ -882,6 +963,34 @@ namespace engine::render {
 		// almost everything; a reading that never moves means the frustum is
 		// wrong, not that the scene is small.
 		uint32_t Culled = 0;
+
+		// How many chunks the resident instance pool spans, and how many contain
+		// a row uploaded by this view.
+		//
+		// **Resident rows, not draw-order rows.** Visibility and ordering are a
+		// separate uint index stream, so a camera turn or a frustum edge no longer
+		// moves packed rows. A chunk is dirty only when a stable entity slot is
+		// new or its packed transform, scale, rotation, or colour changed.
+		//
+		// The upload-order experiment that preceded residency rewrote 100% when a
+		// cull or membership edit shifted rows. This pair measures the stable-slot
+		// result that experiment selected.
+		//
+		// Equal counts every frame in a still scene means resident rows are still
+		// changing and the delta is not paying.
+		//
+		// @since v0.19
+		//@{
+		uint32_t InstanceChunks = 0;
+		uint32_t InstanceChunksDirty = 0;
+		//@}
+
+		// The same resident-pool measurement at row granularity. Chunks say how
+		// scattered a copy is; rows say how many 36-byte payloads actually crossed.
+		//@{
+		uint32_t InstanceRows = 0;
+		uint32_t InstanceRowsDirty = 0;
+		//@}
 
 		// Resource traffic declared by the graph after world and view scopes are
 		// expanded for this frame. QueueTransferBytes is visibility traffic across
@@ -892,11 +1001,11 @@ namespace engine::render {
 		uint64_t QueueTransferBytes = 0;
 		//@}
 
-		// Bytes actually copied from CPU staging memory, and the dedicated SDL
+		// Bytes actually copied from CPU staging memory, and any dedicated SDL
 		// copy command buffers that carried them. Unlike the scheduled figures
-		// above, these are observed backend traffic for this frame. A command
-		// buffer is submitted without a fence so the GPU can consume uploads
-		// while the CPU continues recording render and compute passes.
+		// above, these are observed backend traffic for this frame. Ordinary frame
+		// uploads are recorded into the main buffer, so a non-zero buffer count
+		// identifies a transfer that could not join the batch.
 		//@{
 		uint64_t UploadedBytes = 0;
 		uint32_t UploadCommandBuffers = 0;
@@ -946,6 +1055,35 @@ namespace engine::render {
 
 		// Adds one view's counters while keeping node names unique and ordered.
 		void Accumulate(const FrameResult &view);
+	};
+
+	// Logical payload held by the renderer's live GPU resources.
+	//
+	// SDL does not expose backend heap commitments portably, so these figures
+	// count the bytes requested for buffers, transfer buffers, textures, mip
+	// levels, and samples. Driver alignment, pipelines, samplers, shaders, and
+	// swapchain images are deliberately outside the total.
+	//
+	// `AllocatedBytes`, `ReleasedBytes`, and the allocation counts are cumulative
+	// for the device lifetime. Live bytes can stay flat while a target is rebuilt
+	// every frame, so these figures distinguish residency from allocation churn.
+	//
+	// @since v0.19
+	// @client
+	struct GpuMemoryStatistics {
+		uint64_t LiveBytes = 0;
+		uint64_t PeakBytes = 0;
+		uint64_t AllocatedBytes = 0;
+		uint64_t ReleasedBytes = 0;
+		uint64_t BufferBytes = 0;
+		uint64_t TransferBufferBytes = 0;
+		uint64_t TextureBytes = 0;
+		uint64_t Buffers = 0;
+		uint64_t TransferBuffers = 0;
+		uint64_t Textures = 0;
+		uint64_t BufferAllocations = 0;
+		uint64_t TransferBufferAllocations = 0;
+		uint64_t TextureAllocations = 0;
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
@@ -1009,6 +1147,13 @@ namespace engine::render {
 		//
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
+
+		// Releases GPU residency owned by one world while keeping shared content
+		// such as meshes and images available to the remaining worlds.
+		//
+		// @param world The process-local world identity.
+		// @param name The stable world name used by the presentation cache.
+		void ForgetWorld(uint64_t world, core::Name name);
 
 		// Registers a mesh under the name a `DrawInstance` will ask for.
 		//
@@ -1323,6 +1468,36 @@ namespace engine::render {
 		// @since v0.18
 		bool Wireframe() const;
 
+		// Draws every instance with the default white texture rather than its
+		// own, from here on.
+		//
+		// **For looking at shapes rather than at surfaces**, which is the
+		// collider view's whole problem: a wireframe drawn over a textured
+		// scene is a wireframe over a photograph, and the shape somebody opened
+		// the view to check is the thing they cannot pick out of it. With the
+		// images gone, what is left is the lighting on the geometry - enough to
+		// read form, quiet enough that an overlay sits on top of it.
+		//
+		// **A binding and not a pipeline**, which is the difference from
+		// `SetWireframe`: a fill mode is baked into a pipeline and had to
+		// become a second family, and a texture is chosen per draw. So this
+		// costs one branch in `DrawSlots` and works on every device.
+		//
+		// The data maps go with the colour map. A normal map on a flat white
+		// surface is the one that still reads, and reading it is what makes a
+		// shape hard to see.
+		//
+		// @param enabled Whether to ignore instance textures from here on.
+		// @since v0.19
+		void SetUntextured(bool enabled);
+
+		// Whether untextured drawing was asked for.
+		//
+		// @return The last value passed to `SetUntextured`, or `false` before
+		//         the renderer has a device.
+		// @since v0.19
+		bool Untextured() const;
+
 		// What it is set to: zero for automatic, and zero before the renderer has
 		// a device.
 		//
@@ -1447,6 +1622,15 @@ namespace engine::render {
 		// @since v0.10
 		FlipbookCell TextureCell(const core::Name &name, double seconds) const;
 
+		// A signature of the current cells of all registered animated textures.
+		//
+		// This lets a presentation scheduler distinguish a still visual state from
+		// one whose pixels changed only because a resident flipbook advanced.
+		// Static textures contribute nothing.
+		//
+		// @since v0.19
+		uint64_t TextureAnimationSignature(double seconds) const;
+
 		// How big a registered texture is, in source pixels.
 		//
 		// **Handed out with the handle, because an interface painter needs
@@ -1483,7 +1667,7 @@ namespace engine::render {
 		// the build. Neither is this class's concern - it builds the pipelines a
 		// `scene::DrawInstance::Shader` naming this resolves to.
 		//
-		// **The module must declare what `opaque.frag` declares**: nine fragment
+		// **The module must declare what `opaque.frag` declares**: ten fragment
 		// samplers and three uniform buffers, in those slots. A shader object
 		// carries those counts rather than the pipeline doing so, so a module
 		// that declares different ones binds and silently samples nothing - the
@@ -1614,6 +1798,19 @@ namespace engine::render {
 		// or destruction. It is empty before successful initialisation.
 		std::string_view BackendName() const;
 
+		// Reports logical bytes held by tracked GPU resources on this device.
+		//
+		// The snapshot is cheap enough for the heap profiler's one-second sample,
+		// but it takes the tracker's lock and is not a per-draw counter.
+		GpuMemoryStatistics MemoryStatistics() const;
+
+		// Appends the logical GPU section to an existing process heap report.
+		//
+		// This is separate from `core::HeapProfile::WriteReport` because the core
+		// layer cannot name a client renderer. The report stays one artifact at
+		// the program boundary where both sources are visible.
+		bool AppendMemoryReport(const std::filesystem::path &path) const;
+
 		// Off presents without waiting for vblank, which is what makes a frame
 		// time measure the engine rather than the display. Returns false, and
 		// stays as it was, when the backend has no unsynchronised mode.
@@ -1646,7 +1843,7 @@ namespace engine::render {
 			FrameOverlayHook *hostOverlayHook = nullptr
 		);
 
-		// The texture the most recent `Render` drew that slot's world into.
+		// The newest completed texture for that scene slot.
 		//
 		// **Slots exist because an editor has more than one viewport.** A game
 		// draws one view of one world and only ever uses slot 0. A studio
@@ -1657,17 +1854,22 @@ namespace engine::render {
 		// measurable: it is a colour and a depth texture destroyed and created
 		// per frame.
 		//
-		// **Valid until the next `Render` into that slot with a different
-		// size**, which is when the target is reallocated. An interface layer hands it straight to
-		// whatever draws it - for Dear ImGui's SDL_GPU backend that is an
-		// `ImTextureID`, which is an `SDL_GPUTexture *` and therefore this
-		// pointer unchanged.
+		// Three completed frames are retained on the device. Submission fences
+		// publish a new one only at a CPU synchronization point, so a UI repaint
+		// either gets a whole new frame or keeps the previous one. It never binds
+		// the target the renderer is currently replacing. An interface layer hands
+		// the pointer straight to whatever draws it; Dear ImGui's SDL_GPU backend
+		// uses the same `SDL_GPUTexture *` as its `ImTextureID`.
 		//
 		// @param slot Which offscreen target to ask about. A program with one
 		//             viewport uses 0 and never passes this.
-		// @return The texture, or `nullptr` when nothing has been drawn into
-		//         that slot.
+		// @return The texture, or `nullptr` before the first frame completes.
 		void *SceneTexture(size_t slot = 0) const;
+
+		// The counters belonging to the completed image `SceneTexture` returns.
+		// They publish at the same fence, so a retained image is never labelled
+		// with the draw counts of a newer frame still running on the device.
+		FrameResult SceneFrameResult(size_t slot = 0) const;
 
 		// A graph resource's current device image. Supports the default PBR
 		// resources and `colour`; returns null when the selected slot has not run
@@ -1690,6 +1892,20 @@ namespace engine::render {
 
 		// The most recently refreshed retained copy, or null before its first frame.
 		void *ResourcePreviewTexture(core::Name pipeline, core::Name resource, size_t slot = 0) const;
+
+		// How wide that copy is against its height.
+		//
+		// **A preview keeps the resource's own shape**, capped at 256 on its
+		// long side, so a full-screen target's preview is as wide as the screen
+		// - and a caller that drew it into a square slot squashed it. The
+		// node-graph canvas is such a caller; `nodegraph::Editor::Aspects` is
+		// what this feeds.
+		//
+		// @param pipeline The installed graph that owns the image.
+		// @param resource The graph image.
+		// @param slot     The viewport that produced it.
+		// @return Width over height, or 0 when there is no such preview.
+		float ResourcePreviewAspect(core::Name pipeline, core::Name resource, size_t slot = 0) const;
 
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//
@@ -1767,6 +1983,23 @@ namespace engine::render {
 		//             is right for a host with one panel.
 		void RequestSceneCapture(std::filesystem::path path, size_t slot = ANY_VIEWPORT);
 
+		// Writes the next complete host overlay to a file, once.
+		//
+		// The swapchain is write-only, so a requested frame records the host
+		// overlay into a readable target and blits that target to the window. The
+		// extra image and blit exist only on a requested frame.
+		//
+		// This is asynchronous with respect to the caller: `Render` consumes the
+		// request and performs the GPU wait needed to write the BMP.
+		//
+		// @param path Where to write a BMP. Empty cancels a pending request.
+		void RequestWindowCapture(std::filesystem::path path);
+
+		// Whether either kind of file capture is waiting for a frame.
+		//
+		// @return `true` until the renderer has completed the requested readback.
+		bool CapturePending() const;
+
 		// Any viewport will do. See `RequestSceneCapture`.
 		//
 		// @since v0.15
@@ -1809,6 +2042,19 @@ namespace engine::render {
 
 		struct Impl;
 		std::unique_ptr<Impl> State;
+
+		// The recording of one view, which is where the node families reach
+		// this state from.
+		//
+		// **A friend rather than a public `Impl`, and rather than lifting the
+		// state out of this class.** Splitting `RenderView` put each node
+		// family in its own translation unit, and every one of them records
+		// against the device objects `Impl` holds - so the type has to be
+		// nameable from `src/nodes/`. Naming it through one class keeps the
+		// definition private to `src/RendererState.hpp` and adds no type a
+		// consumer of this header can do anything with. `src/ViewRecording.hpp`
+		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
+		friend class ViewRecording;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//
