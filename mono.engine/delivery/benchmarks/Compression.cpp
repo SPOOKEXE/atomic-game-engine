@@ -1,9 +1,8 @@
 // What compression costs an origin and what it saves a client.
 //
 // **This suite exists to answer two questions the headers admit are open.**
-// `GroupCodec::DEFAULT_LEVEL` says of its value of 9: "Chosen rather than
-// derived, and CDN.md §9 carries it as an open question - there is no
-// measurement behind it yet and saying so is better than implying there is."
+// `GroupCodec::DEFAULT_LEVEL` is a chosen number waiting for a measurement -
+// there is none behind it yet, and saying so is better than implying there is.
 // `Dictionary::DEFAULT_TRAINED_BYTES` says the same of 110 KiB. Neither number
 // can be argued about without a ratio-against-time curve, and this is where
 // that curve comes from.

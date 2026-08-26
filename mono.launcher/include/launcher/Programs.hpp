@@ -5,7 +5,7 @@
 // **The staged tree is the discovery rule, and there is deliberately no
 // setting for it.** `mono_add_program` puts every program in
 // `<stage>/<name>/<name>` with its shared libraries beside it and an rpath of
-// `$ORIGIN` - repo_layout.md §15 - so a launcher staged as
+// `$ORIGIN`, so a launcher staged as
 // `<stage>/launcher/launcher` finds the client at `../client/client` and is
 // right by construction, in a build tree and in a shipped copy alike.
 //

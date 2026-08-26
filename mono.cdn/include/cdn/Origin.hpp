@@ -6,7 +6,7 @@
 // **The origin has no tick, and that is why async is allowed.** AGENTS.md rule 5
 // governs work inside a tick; this is not a simulation, has no store and no
 // replay obligation, so a request that completes later changes nothing a
-// recorded run would reproduce. CDN.md §3.
+// recorded run would reproduce.
 //
 // The client side is the opposite and the boundary matters: a fetch issued from
 // a world *does* live inside a tick, and there rule 5 applies with no exception
@@ -28,8 +28,8 @@
 // from its cause.
 //
 // **Local content is looked at before anything external.** That one default is
-// what makes an origin a *cache server* rather than a proxy, and CDN.md §6's
-// three sources are three `CDNSettings` field combinations rather than three
+// what makes an origin a *cache server* rather than a proxy, and the three
+// sources are three `CDNSettings` field combinations rather than three
 // programs. What an upstream returns is checked against the local manifest
 // before it is cached or served, because a proxy that forwards bytes it cannot
 // check is a proxy that launders a compromised upstream.
@@ -149,8 +149,8 @@ namespace cdn {
 	// Where a bundle's uncompressed bytes come from.
 	//
 	// **A seam, not a placeholder.** The on-disk chunk layout is a separate
-	// thing this module deliberately does not decide - CDN.md §7 lists it as not
-	// started - and wiring the pipeline directly to a filesystem would bake that
+	// thing this module deliberately does not decide - that design is still
+	// open - and wiring the pipeline directly to a filesystem would bake that
 	// undecided layout into the request path. A source returns nothing when the
 	// bundle's bytes are unavailable, which the pipeline treats as a refusal
 	// rather than an empty group.
@@ -179,7 +179,7 @@ namespace cdn {
 	// lookup and no network at all, which is the entire reason to deploy one of
 	// these next to a population of players.
 	//
-	// The three deployments CDN.md §6 names fall out of these fields rather than
+	// The three deployments fall out of these fields rather than
 	// out of three programs:
 	//
 	// | Deployment | Settings |
@@ -317,9 +317,9 @@ namespace cdn {
 
 		// Abandons a request.
 		//
-		// **Cancellation is load-bearing, not a convenience.** The absence of it
-		// is what produces a game that hitches every time a player turns around
-		// - DATATYPES_LIBRARIES.md on the `assets` surface. A cancelled request
+		// **Cancellation is load-bearing, not a convenience.** Its absence on
+		// the `assets` surface is what produces a game that hitches every time
+		// a player turns around. A cancelled request
 		// is never prepared, and one cancelled mid-preparation has its result
 		// discarded rather than delivered to nobody.
 		//
@@ -338,7 +338,7 @@ namespace cdn {
 		//    `CDNSettings`. This is the IO, and it is deliberately *outside* the
 		//    fan-out below: a construct that occupies a worker while it waits on
 		//    a filesystem or a socket turns an IO-bound origin into a
-		//    thread-starved one. CDN.md §3.
+		//    thread-starved one.
 		// 3. **Compress**, with `Jobs::For`. The one place a fan-out job is right
 		//    here, because compressing a known set of groups is CPU work with a
 		//    known end.

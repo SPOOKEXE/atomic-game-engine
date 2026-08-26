@@ -118,9 +118,9 @@ TEST_CASE("an empty allow-list permits anything", "[delivery][source]") {
 }
 
 TEST_CASE("a host outside the allow-list is refused", "[delivery][source]") {
-	// repo_layout.md §11: a client told to fetch from an arbitrary host is a
-	// request-forgery primitive, so a descriptor is validated against the
-	// session's declared origins.
+	// A client told to fetch from an arbitrary host is a request-forgery
+	// primitive, so a descriptor is validated against the session's declared
+	// origins.
 	const std::vector<std::string> allowed{"cdn.example.com", "127.0.0.1"};
 
 	CHECK(HostPermitted("127.0.0.1:9080", allowed));

@@ -173,8 +173,9 @@ namespace {
 		CHECK(pair.Second->Open());
 	}
 
-	// The claim §16.6 rests on: the loopback carries the same bytes through the
-	// same framing as the socket, so single-player is not a path that skips it.
+	// The single-player claim rests on: the loopback carries the same bytes
+	// through the same framing as the socket, so single-player is not a path
+	// that skips it.
 	void CarriesRealFraming(Pair &pair) {
 		PacketHeader header;
 		header.Channel = ChannelKind::Reliable;

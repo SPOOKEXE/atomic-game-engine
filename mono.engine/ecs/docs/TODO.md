@@ -201,7 +201,7 @@ delta is a memcpy per run rather than a copy per entity.
 Today `Load` clears first. A client replica applies authoritative state into a
 world that is already ticking and already holds entities the server also knows
 about. That is a merge, not a replace: same entity, new values, no destroy and
-re-create. `v02v03.md` §2.12 names this as the one capability worth reserving
+re-create. This was named early as the one capability worth reserving
 now because it is expensive to retrofit.
 
 ### ~~An index range for locally predicted entities~~ - built at v0.4

@@ -421,8 +421,7 @@ namespace engine::assets {
 
 		// Every refusal below returns nothing rather than a partly built
 		// manifest. A half-parsed manifest is the shape a caller uses by
-		// accident, and this input arrives from an origin - repo_layout.md §1
-		// says anyone can run one.
+		// accident, and this input arrives from an origin anyone can run.
 		// Marks the reader failed as well as returning nothing. ByteReader::Fail
 		// exists for exactly this - a caller that has decided the contents are
 		// wrong for a reason the reader cannot see - so that one flag carries

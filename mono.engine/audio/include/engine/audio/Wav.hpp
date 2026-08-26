@@ -11,7 +11,7 @@
 // support them by listing an extension would be worse than the honest gap.
 //
 // **Every field is hostile.** A `.wav` arrives over the delivery path from an
-// origin that `repo_layout.md` §1 says anyone can run, and the format is a
+// origin anyone can run, and the format is a
 // chain of length-prefixed chunks - which is to say it is a list of numbers
 // that tell a parser how far to jump. So nothing here allocates from a length
 // it has not bounded against the actual buffer, no chunk header is read without

@@ -7,11 +7,11 @@
 // field names here are the ones a game developer reads, and renaming one is a
 // breaking change to a scripting surface rather than an internal tidy-up.
 //
-// **The overflow counters are the reason this type is not optional.**
-// DATATYPES_LIBRARIES.md §15.1 asks for a per-player byte budget "enforced, with
-// the overflow visible in `ConnectionStats` rather than as a mystery stall". A
-// budget that silently drops traffic is indistinguishable from a network that
-// silently drops traffic, and the two want completely different fixes.
+// **The overflow counters are the reason this type is not optional.** A
+// per-player byte budget must be enforced, with the overflow visible in
+// `ConnectionStats` rather than surfacing as a mystery stall. A budget that
+// silently drops traffic is indistinguishable from a network that silently
+// drops traffic, and the two want completely different fixes.
 //
 // @tier L11 · shared
 
@@ -58,9 +58,9 @@ namespace engine::net {
 
 		// Sends refused because a *configured* budget was spent.
 		//
-		// The number DATATYPES_LIBRARIES.md §15.1 asks to be visible. Without
-		// it, an enforced budget and a congested link look identical from a
-		// game's point of view.
+		// The number an enforced budget needs visible. Without it, an enforced
+		// budget and a congested link look identical from a game's point of
+		// view.
 		//
 		// The byte budget, the packet budget and a payload too large to frame -
 		// every reason that is a number somebody chose, and therefore every

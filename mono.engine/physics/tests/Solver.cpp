@@ -125,9 +125,9 @@ namespace {
 	//
 	// Written out rather than driven through a `Scheduler` so that a case can
 	// step gravity, or leave it out, without a system to hang it on. Gravity is
-	// deliberately not part of this module - `v02v03v04.md` §3.5 has no gravity
-	// row and `RigidBody` has no gravity scale - so a scene that wants weight
-	// applies it, which is what this does.
+	// deliberately not part of this module - `RigidBody` has no gravity scale,
+	// and a world with no down should not have one forced on it - so a scene
+	// that wants weight applies it, which is what this does.
 	void StepWorld(Store &store, float delta, bool gravity) {
 		store.AdvanceTick(delta);
 		if (gravity) {
@@ -362,8 +362,8 @@ TEST_CASE("friction resists sliding across a contact", "[physics][solver]") {
 // --- the warm start ----------------------------------------------------------
 
 TEST_CASE("the impulse cache survives from one tick to the next", "[physics][solver]") {
-	// `v02v03v04.md`'s allocation table calls this a reuse structure rather
-	// than an optimisation bolted on, and this is what makes that true: a
+	// A warm start is a reuse structure rather than an optimisation bolted on,
+	// and this is what makes that true: a
 	// resting contact is found under the same `(entityA, entityB, feature)` key
 	// next tick and starts from the impulse it settled on.
 	Store store("solver.warmstart");
@@ -457,8 +457,8 @@ TEST_CASE("a tower stands up because of the warm start", "[physics][solver]") {
 // --- sleeping ----------------------------------------------------------------
 
 TEST_CASE("a settled body falls asleep and leaves the dynamic archetype", "[physics][solver]") {
-	// **The archetype move.** `v02v03v04.md`'s allocation table asks for a
-	// sleeping row the query never visits; losing `Motion` is what delivers
+	// **The archetype move.** A sleeping row the query never visits is what is
+	// wanted; losing `Motion` is what delivers
 	// that with the components that already exist, because `ecs::Store` has no
 	// "without this component" term for a tag to be excluded by.
 	Store store("solver.sleep");

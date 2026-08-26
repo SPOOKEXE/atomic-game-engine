@@ -11,8 +11,7 @@
 // after another and letting each one see the velocities the previous ones left
 // behind - that is the whole method. Two threads visiting the same contact set
 // in whatever order they got to it produce a different answer every run, and
-// the run that differs is the one somebody recorded. `v02v03v04.md` §3.5 and
-// decision 8 both say serial in as many words. **Do not "fix" this with a
+// the run that differs is the one somebody recorded. **Do not "fix" this with a
 // `Jobs::For`.** If contact solving ever has to be parallel, the change is
 // graph colouring into independent batches with a fixed batch order, which is a
 // different algorithm and needs its own measurement.
@@ -20,10 +19,10 @@
 // **Sleeping lives here, and `scene::RigidBody` no longer carries a flag for
 // it.** A body that has been still long enough loses its `scene::Motion`, which
 // moves its row out of the dynamic archetype so `IntegrateMotion` and the
-// dynamic half of the broad phase stop visiting it at all - the archetype move
-// `v02v03v04.md`'s allocation table asks for, done with the components that
-// already exist rather than with a tag no query could exclude. `AGENTS.md` in
-// this directory carries the whole of that decision.
+// dynamic half of the broad phase stop visiting it at all - the archetype move,
+// done with the components that already exist rather than with a tag no query
+// could exclude. `AGENTS.md` in this directory carries the whole of that
+// decision.
 //
 // @tier L8 · shared
 
@@ -38,8 +37,7 @@ namespace engine::physics {
 	// How many times the solver sweeps the contact list.
 	//
 	// **Measured**, and from two directions, because the two disagree about
-	// which way to move it. `v02v03v04.md` §3.6 asks for solver cost per
-	// contact by name; this is the number that comes out of it.
+	// which way to move it. Solver cost per contact is the number below.
 	//
 	// Cost is `benchmarks/Solver.cpp` in the `bench` preset, 3520 contacts over
 	// 200 stacks of four, minimum sample with the spread beside it. Error is a

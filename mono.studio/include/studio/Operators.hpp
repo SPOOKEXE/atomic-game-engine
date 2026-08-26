@@ -2,9 +2,12 @@
 
 // Every command the editor offers, as data rather than as call sites.
 //
-// **`MCP.md` §3's argument, taken at face value.** A studio operator - a name, a
+// **An operator and an agent tool are one shape, so one table serves both.**
+// A studio operator - a name, a
 // description, a poll saying whether it can run, and something that runs it - is
-// an MCP tool descriptor field for field. Written once as a table, it has three
+// an MCP tool descriptor field for field. Written once as a table, every editor
+// command becomes an agent capability at no extra cost and neither surface can
+// drift from the other - so this table has three
 // consumers rather than three implementations:
 //
 //   - the **command palette**, which walks it and filters,

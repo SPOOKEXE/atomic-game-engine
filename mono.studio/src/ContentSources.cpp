@@ -77,10 +77,10 @@ namespace studio {
 			settings.Publisher = *key;
 		}
 		// **`AllowedHosts` is deliberately left empty here.** That check exists
-		// for a source list a *server* sent - `repo_layout.md` §11's
-		// request-forgery note - and this list is one a person typed into their
-		// own preferences. Restricting what somebody may point their own editor
-		// at would be security theatre with a real cost.
+		// for a source list a *server* sent, where fetching from a hostile host
+		// is a request-forgery primitive - and this list is one a person typed
+		// into their own preferences. Restricting what somebody may point their
+		// own editor at would be security theatre with a real cost.
 		return settings;
 	}
 

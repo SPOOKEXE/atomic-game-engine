@@ -12,10 +12,8 @@
 // `IntegrateMotion` just wrote is not a preference - it is a hard dependency. So
 // the order is expressed by composition, which the scheduler's contract
 // supports, rather than by registration order, which it does not.
-// `v02v03v04.md` §3.5 lists them as separate rows in the same phase; that table
-// describes the steps and not their registration, and `AGENTS.md` in this
-// directory records the departure. Each step still opens its own profiler span,
-// so the overlay separates them anyway.
+// Each step still opens its own profiler span, so the overlay separates them
+// anyway.
 //
 // @tier L8 · shared
 
@@ -61,7 +59,7 @@ namespace engine::physics {
 	// Two systems: `physics.simulation` in `Phase::Simulation`, which
 	// integrates and then indexes, and `physics.contacts` in
 	// `Phase::PostSimulation`, which pairs, intersects, solves and publishes.
-	// Six steps in two systems, in the order `v02v03v04.md` §3.5 lists them.
+	// Six steps in two systems, in pipeline order.
 	//
 	// **How many times the six run is the world's `PhysicsClock`'s business.**
 	// A world that never set a rate runs them once per tick, which is what they

@@ -183,7 +183,7 @@ BENCH("Assemble · 10k assets across 64 priority bands", 1) {
 
 // --- the envelope -------------------------------------------------------------
 //
-// Same assets, different bound. CDN.md §9 carries the group size as an open
+// Same assets, different bound. The group size is an open
 // question with no number beside it; these are what the question costs.
 
 BENCH("Assemble · 10k assets into 4 MiB groups", 1) {

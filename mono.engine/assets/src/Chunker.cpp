@@ -97,7 +97,7 @@ namespace engine::assets {
 		// makes an early cut less likely; above it, a *looser* one makes a late
 		// cut more likely. The average is unchanged and the spread is much
 		// tighter, which is what makes a group's compressed size predictable
-		// enough to bound - CDN.md §5.
+		// enough to bound.
 		const int target = ClampBits(BitsForSize(Envelope.TargetBytes));
 		StrictMask = SpreadMask(ClampBits(target + 2));
 		LooseMask = SpreadMask(ClampBits(target - 2));
@@ -200,7 +200,7 @@ namespace engine::assets {
 		// Both, because either alone is misleading: a chunk count says nothing
 		// about size and a byte total says nothing about how finely it was cut,
 		// and the ratio between them is the number that says whether the mask
-		// is doing what CDN.md §9 assumes it does.
+		// is doing the job the delivery design assumes of it.
 		core::Metrics::Count("assets.chunks.cut", static_cast<double>(chunks.size()));
 		core::Metrics::Count("assets.chunks.bytes", static_cast<double>(data.size()));
 

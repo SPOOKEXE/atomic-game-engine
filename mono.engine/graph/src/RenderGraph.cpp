@@ -93,9 +93,8 @@ namespace engine::graph {
 		case ResourceFormat::BC5:
 		case ResourceFormat::BC7_SRGB:
 			// Sixteen bytes a 4x4 block. **This is the number that makes a BC5
-			// normal map expensive** - `PIPELINE_NODES.md` §1.4 notes a single
-			// one costing more than the alternatives, and it costs twice what a
-			// BC1 does for the same pixels.
+			// normal map expensive** - twice what a BC1 pays for the same
+			// pixels.
 			return 8;
 		case ResourceFormat::R8:
 			return 8;

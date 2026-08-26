@@ -99,8 +99,7 @@ namespace engine::physics {
 	// shape: a rotated box through its own inverse transform, a sphere and a
 	// cylinder analytically. **That inverse is the thing this function exists
 	// for** - every axis-aligned test in the engine passes whether or not it is
-	// right, which is why `v02v03v04.md` §3.7 names a raycast against a rotated
-	// box as one of the behavioural tests.
+	// right, so the rotated-box raycast is the case worth testing.
 	//
 	// @param store       The world to ask. Must hold a `PhysicsWorld`.
 	// @param ray         Origin and **unit** direction. A ray with no direction

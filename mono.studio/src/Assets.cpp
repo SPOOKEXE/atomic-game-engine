@@ -205,7 +205,7 @@ namespace studio {
 		//
 		// **Uploading and publishing are two acts and stay two.** What an
 		// origin's inbox receives is unsigned content, and no client will look
-		// at it until a publisher has signed a manifest naming it - CDN.md §1.
+		// at it until a publisher has signed a manifest naming it.
 		// A single button doing both would need the signing seed to be around
 		// for the upload, which is the one thing this panel refuses to keep.
 		ImGui::BeginDisabled(ContentUploads == nullptr || ContentUploads->Remaining() > 0);

@@ -1,8 +1,8 @@
 // What the broad phase costs, and how that moves with cell size.
 //
-// **This is where `HashGrid::DEFAULT_CELL_SIZE` comes from.** `v02v03v04.md`
-// §3.6 asks for "broad-phase cost per 1000 colliders, and how it moves with cell
-// size", and there is nowhere else for that number to live: the grid has no
+// **This is where `HashGrid::DEFAULT_CELL_SIZE` comes from.** Broad-phase cost
+// per 1000 colliders, and how it moves with cell size, is the question - and
+// there is nowhere else for that number to live: the grid has no
 // consumer until `physics` exists, so running the client tells nobody anything
 // about it yet.
 //

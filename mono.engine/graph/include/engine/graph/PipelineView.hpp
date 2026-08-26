@@ -2,15 +2,15 @@
 
 // Where a render graph's nodes sit on a canvas, and what joins them.
 //
-// **The half of a node editor that is arithmetic.** v0.11 §4.4 wants a Render
-// Pipeline widget shaped like Blender's, and the document settles the order to
-// build it in: *read-only view first - columns, edges, per-node timings - then
-// inspection, then editing.* This is the read-only view's data, computed with
-// no UI in front of it, so the thing that decides where a node is drawn can be
-// wrong in a test rather than on somebody's screen.
+// **The half of a node editor that is arithmetic.** A Render Pipeline widget
+// shaped like Blender's is wanted, and the order to build it in is settled:
+// *read-only view first - columns, edges, per-node timings - then inspection,
+// then editing.* This is the read-only view's data, computed with no UI in
+// front of it, so the thing that decides where a node is drawn can be wrong in
+// a test rather than on somebody's screen.
 //
 // A widget on the `gui` tree consumes this. So could a text dump, a diagnostic,
-// or the Luau binding §13.1 asks for. None of them re-derives it.
+// or a Luau binding. None of them re-derives it.
 //
 // ## Edges are derived, because the runtime does not store any
 //

@@ -481,7 +481,7 @@ TEST_CASE(
 // Local first, then upstream - the cache-server deployment
 // ---------------------------------------------------------------------------
 //
-// CDN.md §6 names three sources and this is where two of them meet: an origin
+// There are three sources and this is where two of them meet: an origin
 // that holds content of its own and can forward what it does not hold. Which
 // one it is is a `CDNSettings` field rather than a different program.
 

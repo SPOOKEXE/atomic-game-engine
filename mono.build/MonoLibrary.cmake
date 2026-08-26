@@ -6,7 +6,8 @@
 # violation fails the build with the offending edge named rather than becoming a
 # convention somebody has to remember.
 #
-# See repo_layout.md §4 (module shape), §6 (tiers) and §15 (staged trees).
+# See docs/CODE_ARCH.md for the shape of a module (§3), the tiers (§5) and what
+# each program links (§7).
 
 include_guard(GLOBAL)
 
@@ -659,7 +660,7 @@ endfunction()
 # A program is a thin main over libraries. It stages into its own directory -
 # binary, shared libraries and the shaders of every module it links, and nothing
 # else. A server/ directory that has grown a shaders/ folder is a link-line
-# mistake anyone can see. repo_layout.md §15.
+# mistake anyone can see.
 function(mono_add_program name)
 	cmake_parse_arguments(ARG
 		""

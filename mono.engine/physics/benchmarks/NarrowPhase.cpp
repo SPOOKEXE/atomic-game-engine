@@ -1,7 +1,7 @@
 // What the narrow phase costs per pair, by shape combination.
 //
-// `v02v03v04.md` §3.6 asks for it by name, and by shape combination rather than
-// as one number, because the six pairs are not one algorithm: two of them are a
+// By shape combination rather than as one number, because the six pairs are not
+// one algorithm: two of them are a
 // handful of subtractions, one is a fifteen-axis search with a polygon clip, and
 // the cylinder pairs add a longer axis list on top of the same clip. A single
 // average over a mixed scene would hide the one that matters.

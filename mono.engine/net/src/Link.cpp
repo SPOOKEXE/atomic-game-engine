@@ -319,7 +319,7 @@ namespace engine::net {
 			return false;
 		}
 		if (PacketsLeft == 0 || BytesLeft < payloadBytes) {
-			// The number DATATYPES_LIBRARIES.md §15.1 asks to be visible.
+			// The number an enforced budget needs visible.
 			// Without it an enforced budget and a congested link look identical
 			// from a game's point of view.
 			++Totals.SendsOverBudget;

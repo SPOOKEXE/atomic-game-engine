@@ -209,9 +209,8 @@ TEST_CASE("a default body is dynamic and unit mass", "[scene][components]") {
 	// **There is no `Sleeping` here and there must not be one.** Whether a
 	// body is at rest is the solver's, held in `physics::PhysicsWorld` and
 	// expressed to the ECS by the row losing its `Motion` - the archetype move
-	// `v02v03v04.md`'s allocation table asks for. A flag on this row would be
-	// that same state a second time, and readable only by making the visit the
-	// move exists to avoid.
+	// itself. A flag on this row would be that same state a second time, and
+	// readable only by making the visit the move exists to avoid.
 	STATIC_REQUIRE(sizeof(RigidBody) == 16);
 
 	// Damping defaults to a vacuum rather than to a guess, so a scene that

@@ -118,8 +118,8 @@ namespace {
 // --- raycast ------------------------------------------------------------------
 
 TEST_CASE("a raycast against a rotated box uses the box's own axes", "[physics][query]") {
-	// **The case `v02v03v04.md` §3.7 names, and the reason it names it.** A
-	// wrong inverse transform passes every axis-aligned test there is, so the
+	// **Why this is the case to have.** A wrong inverse transform passes every
+	// axis-aligned test there is, so the
 	// box here is long on one axis and turned 45 degrees: an answer taken
 	// against the collider's bound arrives at 3.23 metres with a normal of
 	// +X, and the right one arrives at 4.29 with a normal 45 degrees off it.

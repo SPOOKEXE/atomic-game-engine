@@ -62,7 +62,8 @@ namespace studio {
 		//
 		// **Not `Sources`, and the separation is the point.** A `Source` is a
 		// place `delivery::AssetClient` fetches from, and everything it fetches
-		// is named by a signed manifest - CDN.md §1's whole argument. A folder
+		// is named by a signed manifest, which is what makes it trustworthy at
+		// all. A folder
 		// of PNGs has no manifest and no signature, so admitting one as a source
 		// would mean either a client that trusts a directory or a manifest
 		// somebody has to fabricate. Neither is worth having.

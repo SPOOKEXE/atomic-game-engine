@@ -484,8 +484,8 @@ TEST_CASE("marking the static set dirty forces one rebuild", "[physics][broadpha
 }
 
 TEST_CASE("the pair list is cleared and not freed", "[physics][broadphase]") {
-	// `v02v03v04.md`'s allocation table states it for exactly these lists: a
-	// steady scene stops allocating after its first tick.
+	// The property for exactly these lists: a steady scene stops allocating
+	// after its first tick.
 	Store store("broadphase.capacity");
 	PreparePhysicsWorld(store, UNIT_CELL);
 

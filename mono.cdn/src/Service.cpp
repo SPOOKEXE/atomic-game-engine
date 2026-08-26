@@ -408,7 +408,7 @@ namespace cdn {
 				}
 
 				// **The path is built from the parsed hash**, never from the
-				// target text - CDN.md §8. `ToHex` re-renders it, so even a
+				// target text. `ToHex` re-renders it, so even a
 				// target that parsed is not the thing that names the file.
 				const std::filesystem::path stored = Writes.Inbox / (named->ToHex() + *suffix);
 				const bool present = std::filesystem::exists(stored, failure);

@@ -147,7 +147,7 @@ TEST_CASE("an insertion moves only the chunks around it", "[assets][chunker]") {
 	INFO("shared " << shared << " of " << after.size());
 	// Loose on purpose. The exact figure depends on the mask and the content,
 	// and pinning it would make this test a change-detector for a constant
-	// CDN.md §9 says is not measured yet. Half is far above what fixed-size
+	// that is not measured yet. Half is far above what fixed-size
 	// chunking manages here, which is near zero.
 	CHECK(shared > after.size() / 2);
 }

@@ -56,9 +56,9 @@ namespace cdn {
 	  public:
 		// What the cache is allowed to hold.
 		//
-		// Chosen rather than derived - CDN.md §9 carries "memory, disk or both"
-		// as an open question, and this is the memory half with no measurement
-		// behind its size yet.
+		// Chosen rather than derived - whether this cache belongs in memory,
+		// on disk or both is an open question, and this is the memory half
+		// with no measurement behind its size yet.
 		static constexpr uint64_t DEFAULT_CAPACITY_BYTES = 256ull * 1024 * 1024;
 
 		// @param capacityBytes The most this may hold. Zero falls back to the

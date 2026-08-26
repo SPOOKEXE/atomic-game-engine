@@ -87,7 +87,7 @@ TEST_CASE("a grant permits exactly what it names", "[assets][grant]") {
 	CHECK(opened->Permits(Bundle("audio")));
 
 	// The origin's whole authorisation decision. Nothing else about the client
-	// is knowable from here, and nothing else needs to be - CDN.md §4.
+	// is knowable from here, and nothing else needs to be.
 	CHECK_FALSE(opened->Permits(Bundle("someone else's content")));
 	CHECK_FALSE(opened->Permits(ContentHash{}));
 }
@@ -236,7 +236,7 @@ TEST_CASE("a token names no player and no path", "[assets][grant]") {
 	const auto token = Issue(key).Encode();
 
 	// The origin learns a session number, some hashes, a time and a budget, and
-	// nothing else - CDN.md §4.
+	// nothing else.
 	//
 	// Checked structurally rather than by scanning for path-ish bytes. A token
 	// is binary, so a stray '/' turns up inside a hash or a MAC by chance about

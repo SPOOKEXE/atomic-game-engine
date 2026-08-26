@@ -1,7 +1,7 @@
 // A thin main over the cdn library, for the same reason the client's and the
 // server's are thin: the test binary needs something to link, and a server
 // serving its own assets links this library in-process rather than starting a
-// second program. repo_layout.md §2, §11.
+// second program.
 //
 // **It serves, as of v0.9.** The warning this file carried since v0.2 - that
 // nothing was served because the manifest and the HTTP layer did not exist - is
@@ -18,7 +18,7 @@
 // deploy on hardware nobody here owns. A single mode that published on start-up
 // would put a signing key on every serving box, permanently.
 //
-// The three deployments CDN.md §6 names are flag combinations rather than three
+// The three deployments are flag combinations rather than three
 // programs, exactly as `CDNSettings` is one type rather than three.
 
 #include <engine/assets/ChunkStore.hpp>
@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
 		const auto seed = arguments.Get("signing-key");
 		if (!seed) {
 			ENGINE_ERROR("cdn: --publish needs --signing-key, and it is not optional");
-			ENGINE_ERROR("cdn: a manifest nobody signed is a manifest no client can trust - CDN.md §2");
+			ENGINE_ERROR("cdn: a manifest nobody signed is a manifest no client can trust");
 			return 2;
 		}
 		const auto key = SigningKeyFromHex(*seed);
@@ -329,7 +329,7 @@ int main(int argc, char **argv) {
 		ENGINE_ERROR("cdn: --grant-key is required - it is the secret shared with the server");
 		ENGINE_ERROR(
 			"cdn: an origin that admitted everyone would be deciding who may have what, "
-			"which is the server's job - CDN.md §4"
+			"which is the server's job"
 		);
 		return 2;
 	}

@@ -11,7 +11,7 @@
 // The set of *files* a test touches is not declared here - a hand-written file
 // list goes stale silently, and a stale list means a skipped test that should
 // have run. mono.tools/testrunner derives that from the compiler's .d files
-// instead. repo_layout.md §14.
+// instead.
 //
 // Both macros register at static-initialisation time, so `--mono-suites` can
 // print what a binary actually contains rather than what a script guessed.

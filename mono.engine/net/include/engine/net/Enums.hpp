@@ -71,9 +71,9 @@ namespace engine::net {
 		// A packet arrived that this build refuses to parse: a bad magic, an
 		// unknown version, a length that contradicts the frame.
 		//
-		// **Never treated as corruption to be retried.** repo_layout.md §1 says
-		// anyone can run a server, so a malformed packet is as likely to be an
-		// attempt as an accident, and retrying is exactly what an attacker wants.
+		// **Never treated as corruption to be retried.** Anyone can run a
+		// server, so a malformed packet is as likely to be an attempt as an
+		// accident, and retrying is exactly what an attacker wants.
 		ProtocolError,
 
 		// The far side exceeded a budget - bytes per tick, packets per tick, or
@@ -87,7 +87,7 @@ namespace engine::net {
 	// How much the transport promises about a payload.
 	//
 	// **Unreliable is the default and that is a design commitment**, not an
-	// omission - DATATYPES_LIBRARIES.md §15.1. A late position update is worse
+	// omission. A late position update is worse
 	// than a dropped one, because the next one is already on its way and is more
 	// correct than the one being waited for. Making everything reliable is the
 	// mistake that turns one lost packet into a visible stall for every player.

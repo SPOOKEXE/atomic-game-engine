@@ -7,7 +7,7 @@
 // shapes inside them and writes a `ContactManifold` for each pair that really
 // meets.
 //
-// **Six exact analytic pairs and no library** - `v02v03v04.md` decision 3.
+// **Six exact analytic pairs and no library.**
 // Box-box, box-sphere, box-cylinder, sphere-sphere, sphere-cylinder,
 // cylinder-cylinder, written in `src/ContactPairs.cpp`. There is no physics
 // engine behind this module and there is not going to be one.

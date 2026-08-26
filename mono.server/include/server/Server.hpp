@@ -59,9 +59,9 @@ namespace server {
 	// Which way this server gives its clients content.
 	//
 	// **A field rather than two server classes**, which is `cdn::CDNSettings`'
-	// rule one layer up: the moment the mode is a *type*, moving between them is a
-	// rebuild rather than a configuration change, and `repo_layout.md` §11 says
-	// that has to stay a deployment decision.
+	// rule one layer up: the moment the mode is a *type*, moving between them is
+	// a rebuild rather than a configuration change, and which way a server
+	// serves content has to stay a deployment decision.
 	//
 	// @since v0.16
 	enum class ContentMode : uint8_t {
@@ -642,7 +642,7 @@ namespace server {
 
 		// Issues a grant admitting every bundle this server serves.
 		//
-		// **This is the server's half of CDN.md §4 and the only half it has.**
+		// **This is the server's half of the grant and the only half it has.**
 		// The server decides what a client may have; the origin checks a token
 		// and serves. A client is handed this and presents it, and the origin
 		// learns nothing about who asked.
@@ -984,12 +984,13 @@ namespace server {
 		// The issuing half of the shared secret.
 		//
 		// **Two holders of one key, and that is the design rather than a
-		// duplication.** CDN.md §4 splits the job in two: the server decides
+		// duplication.** The grant splits the job in two: the server decides
 		// what a client may have and issues a token, the origin checks it and
 		// serves. Here both ends happen to be this process, and the key still
 		// exists twice because the *roles* do - collapsing them into one object
 		// would make the in-process arrangement a different code path from the
-		// deployed one, which is exactly what §16.6 forbids for the transport.
+		// deployed one, which is exactly what the transport refuses too:
+		// single-player runs a loopback carrying real encoding.
 		std::unique_ptr<engine::assets::GrantKey> ContentGrantSecret;
 
 		// The collision geometry of every mesh in the content store.

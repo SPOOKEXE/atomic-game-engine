@@ -182,8 +182,8 @@ TEST_CASE("a body larger than a kernel send buffer arrives whole", "[http]") {
 }
 
 TEST_CASE("several fetches run concurrently over their own connections", "[http]") {
-	// CDN.md §5: groups stream in parallel so a slow one does not hold up the
-	// others. Sharing a socket would put them back in one queue.
+	// Groups stream in parallel so a slow one does not hold up the others.
+	// Sharing a socket would put them back in one queue.
 	std::optional<Wire> wire = Wire::Open();
 	REQUIRE(wire.has_value());
 

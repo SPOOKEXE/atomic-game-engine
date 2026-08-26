@@ -1708,8 +1708,8 @@ namespace studio {
 		// shows what somebody wired; this shows what will run, in what order,
 		// touching what, and how much memory is live while it does - which is a
 		// different question and wants a different shape.
-		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
-		// is the arithmetic and this is only the drawing.
+		// `graph::PipelineProfile` is the arithmetic and this is only the
+		// drawing.
 		// The picture and histogram under the access grid use the renderer's
 		// nonblocking resource readback. See `ProfileWatched`.
 

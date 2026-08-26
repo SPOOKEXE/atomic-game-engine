@@ -2022,7 +2022,7 @@ namespace engine::ecs {
 		// predicted and make every correction a visible pop.
 		//
 		// Cheap to allow for now and expensive to retrofit, which is why it is
-		// here before the layer that needs it. `v02v03.md` §2.12.
+		// here before the layer that needs it.
 		//
 		// Entity handles are matched by index *and* generation, so an entity the
 		// sender destroyed and recreated is a different entity here too rather

@@ -5,10 +5,10 @@
 // Everything in content delivery is named by the hash of its bytes and never by
 // where it sits: a chunk, an asset, a bundle and the manifest are each a
 // `ContentHash`. A path that reaches the request layer is a bug, because a path
-// can be walked and a hash cannot - CDN.md §1.
+// can be walked and a hash cannot.
 //
-// The hash is BLAKE3-256. DATATYPES_LIBRARIES.md §1.1 picks it for content
-// addressing because that job is adversarial by definition: anyone can run a
+// The hash is BLAKE3-256, picked for content addressing because that job is
+// adversarial by definition: anyone can run a
 // server, so a chunk's address has to be collision-resistant against somebody
 // trying rather than merely against accident. A fast non-cryptographic hash
 // here is a content-poisoning bug, not a performance decision.
@@ -79,7 +79,7 @@ namespace engine::assets {
 	// Construct, Update as many times as there are pieces, then Finish. The
 	// streaming form is the one content delivery actually uses: a chunk arriving
 	// over a socket is verified as it lands rather than after it is whole, which
-	// is the property CDN.md §2 is built on.
+	// is the property content addressing is built on.
 	//
 	// Holds no allocation. The state is inline, so hashing a million chunks
 	// costs a million hashes and no trips to the allocator.

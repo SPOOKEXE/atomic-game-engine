@@ -34,8 +34,8 @@ namespace engine::physics {
 		ShapeHit BoxRay(const ShapeInstance &shape, const core::Ray &ray, float maxDistance) {
 			// **In the box's own axes.** This inverse transform is the whole of
 			// the rotated-box case: every axis-aligned test passes whether or
-			// not it is here, which is why `v02v03v04.md` §3.7 asks for a
-			// raycast against a rotated box by name.
+			// not it is here, which is why the rotated-box raycast deserves
+			// its own test.
 			const core::Vector3 origin = ToLocalPoint(shape.Frame, ray.Origin);
 			const core::Vector3 direction = ToLocalVector(shape.Frame, ray.Direction);
 

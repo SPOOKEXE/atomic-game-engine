@@ -257,7 +257,7 @@ trusted it.
   `script/CMakeLists.txt:13-14` carried the same sentence and is also fixed.
 - `mono.server/AGENTS.md` is stale on rewind and silent on both networking and
   content.
-- ~~`docs/QUIC.md:55` calls `net` L2. It is L11.~~ Fixed at v0.19, with the
+- ~~the QUIC survey called `net` L2. It is L11.~~ Fixed at v0.19, with the
   same line gaining `Vendor::ngtcp2`.
 - ~~`README.md:34` says "four rules"; there are six.~~ Fixed at v0.19.
 - ~~`docgen/pages/Modules.md` lists ten of the engine's twenty-nine modules.~~
@@ -533,7 +533,8 @@ The survey's line count measures `src/` plus `include/` only: 88 files and
 Decision 22 reserves it for leaves. Measured, there are two: `collision` (STL
 plus `core/types` only) and `spatial` (the same, plus `core::Name`). `msl`
 carries SPIRV-Cross and `nodegraph` carries imgui and four concurrency headers,
-so neither qualifies. `repo_layout.md` §4.1 sets the bar at three. This entry
+so neither qualifies. The bar is three leaf libraries, not one
+(`docs/CODE_ARCH.md` §4.3). This entry
 exists so the next person to notice `collision` is a leaf does not create the
 directory either.
 

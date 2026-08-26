@@ -2,8 +2,8 @@
 
 // Compressing a delivery group, and only a delivery group.
 //
-// **Per group. Not per file, and not per manifest.** CDN.md §5 settles the level
-// and both alternatives are worse in a specific way: per file loses the
+// **Per group. Not per file, and not per manifest.** Both alternatives are
+// worse in a specific way: per file loses the
 // cross-file redundancy that is most of the ratio on many small assets, and per
 // manifest defeats range requests, partial fetch and everything the hash tree
 // exists for.
@@ -21,8 +21,8 @@
 // shipped as a group, so it versions like everything else instead of becoming an
 // out-of-band file that can drift.
 //
-// **Decompression treats its input as hostile.** A frame arrives from an origin,
-// and `repo_layout.md` §1 says anyone can run one. A frame header can claim any
+// **Decompression treats its input as hostile.** A frame arrives from an
+// origin anyone can run. A frame header can claim any
 // decompressed size it likes, so nothing here allocates against what the frame
 // says - only against what the *manifest* already said the group weighs.
 //
@@ -50,7 +50,7 @@ namespace engine::delivery {
 		// 110 KiB is Zstd's own suggested size and is chosen rather than
 		// derived. It ships to every client once and then improves the ratio of
 		// every group forever, so it is the cheapest large thing in the format -
-		// but the *size* is still a number CDN.md §9 has no measurement behind.
+		// but the *size* is still a chosen number waiting for a measurement.
 		//
 		// **What has been measured is that the dictionary works, and on which
 		// groups.** `engine.delivery.bench.compression` reports it as worthless

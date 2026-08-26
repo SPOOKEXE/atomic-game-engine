@@ -2,8 +2,8 @@
 
 // The only decision the origin makes about who may have what.
 //
-// It is a small decision on purpose. **The server decides; the origin checks a
-// token and serves** - CDN.md §4. Everything about *who* is the server's: the
+// It is a small decision on purpose. **The server decides; the origin checks
+// a token and serves.** Everything about *who* is the server's: the
 // session, the player, what they have loaded, what they are entitled to. This
 // class knows none of it and must never learn it.
 //

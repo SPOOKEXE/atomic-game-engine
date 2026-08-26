@@ -104,10 +104,9 @@ namespace engine::physics {
 			if (world->Sleeping(body.Owner)) {
 				// **The archetype move.** Losing `scene::Motion` takes the row
 				// out of `IntegrateMotion`'s query and out of the dynamic half
-				// of the broad phase - the query never visits it, which is what
-				// `v02v03v04.md`'s allocation table asks a sleeping tag to do
-				// and what a tag could not deliver without a "without this
-				// component" query term the ECS does not have.
+				// of the broad phase - the query never visits it, which a tag
+				// could not deliver without a "without this component" query
+				// term the ECS does not have.
 				if (store.Has<scene::Motion>(body.Owner)) {
 					store.Remove<scene::Motion>(body.Owner);
 				}

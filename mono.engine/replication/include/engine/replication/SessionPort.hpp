@@ -10,11 +10,10 @@
 // **This is the answer, and it is the first of the two.** A `Session` whose
 // `ReliableSender`, `ReliableReceiver`, `Sealer` and `Opener` become optional is
 // one class with two modes, and every method on it grows a branch that only one
-// configuration exercises - which is the same argument `docs/QUIC.md` §8 makes
-// about the tree as a whole ("two overlapping reliability stacks is worse than
-// either") applied inside a single type. The four members are not incidental
-// state; they *are* the design, and a QUIC session does not have a different
-// version of them, it has none.
+// configuration exercises - two overlapping reliability stacks is worse
+// than either, applied inside a single type. The four members are not
+// incidental state; they *are* the design, and a QUIC session does not have a
+// different version of them, it has none.
 //
 // So there are two implementations and one interface, and what the interface
 // contains is exactly what a caller above the transport does: queue a message,

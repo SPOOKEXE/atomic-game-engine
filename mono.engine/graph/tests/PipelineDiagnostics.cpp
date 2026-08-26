@@ -1,10 +1,9 @@
 // The faults a pipeline can have that the pipeline itself can report.
 //
-// **Every case here is a fault observed in a shipping frame**, tabulated in
-// `docs/PIPELINE_NODES.md` §1.5 from a GPU capture somebody spent an afternoon
-// reading. The point of this file is that six of them are arithmetic: a graph
-// that knows who writes what and who reads it can find them with no GPU, no
-// capture and no timing.
+// **Every case here is a fault observed in a shipping frame**, taken from a GPU
+// capture somebody spent an afternoon reading. The point of this file is that
+// six of them are arithmetic: a graph that knows who writes what and who reads
+// it can find them with no GPU, no capture and no timing.
 //
 // So each case builds the smallest graph that has one fault, asserts it is
 // reported, and - the half that matters more - asserts the *correct* version of

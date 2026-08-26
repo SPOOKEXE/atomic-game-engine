@@ -525,7 +525,7 @@ namespace server {
 		ContentLink = std::make_unique<ContentRelay>(std::move(fetcher));
 
 		// **The grant this server presents to its own upstreams**, which is the
-		// half of CDN.md §4 a relay sits on: a client presents nothing because it
+		// grant half a relay sits on: a client presents nothing because it
 		// reaches no origin, and this process presents what it issued itself. A
 		// `dir:` source admits nobody and needs none, which is why an absent grant
 		// is not an error here.
@@ -968,9 +968,8 @@ namespace server {
 				streaming.Quic.Connection.Tls.Seed = seed;
 				streaming.Quic.Connection.Tls.HasSeed = true;
 			}
-			// The ceiling is the one a game already stated. `docs/QUIC.md` §6:
-			// it survives above the congestion controller rather than instead of
-			// it.
+			// The ceiling is the one a game already stated, and it survives above
+			// the congestion controller rather than instead of it.
 			streaming.Quic.BytesPerTick = streaming.Session.Link.BytesPerTick;
 		}
 
@@ -2488,7 +2487,7 @@ namespace server {
 			// Beside the control surface, and for the same reason it is here:
 			// content delivery is not part of the tick. A fetch that completes
 			// between two ticks changes nothing a recorded run would have to
-			// reproduce - CDN.md §3 - so it is pumped where the frame is
+			// reproduce, so it is pumped where the frame is
 			// bookkept rather than where the world is simulated, and
 			// `just determinism` is unaffected by whether anyone is fetching.
 			if (ContentService) {

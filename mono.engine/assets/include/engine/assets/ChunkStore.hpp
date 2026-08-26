@@ -2,9 +2,9 @@
 
 // Where chunks actually live on a disk.
 //
-// CDN.md §7 listed "the chunk store - how chunks are laid out on disk" as *not
-// started*, and `cdn::PayloadSource` was left as the seam so that an undecided
-// layout would not get baked into the request path. This decides it, and it
+// The chunk store was left undecided on purpose, with `cdn::PayloadSource`
+// kept as the seam so that no layout would get baked into the request path
+// before one existed. This decides it, and it
 // decides it here rather than in the origin for the reason the manifest is here:
 // **a publisher writes this tree and a client reads it, so one implementation
 // or the two acquire a dialect.**
@@ -23,7 +23,7 @@
 // patching work on chunk boundaries, and a compressed chunk store would trade
 // the property content addressing exists for against a ratio the delivery group
 // already gets. Two levels, two jobs: chunks are storage, groups are delivery -
-// `assets/AGENTS.md` and CDN.md §5.
+// `assets/AGENTS.md` says the same.
 //
 // **Every read verifies.** A chunk's name *is* the hash of its bytes, so
 // checking costs one BLAKE3 pass and catches a corrupt disk, a partial write

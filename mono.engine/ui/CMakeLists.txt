@@ -24,7 +24,7 @@ mono_add_library(ui
 		# L12, `client`. `render::FrameOverlayHook` is the base class this
 		# module implements and `render::Renderer::Backend` is where the device
 		# and the swapchain format come from. Sideways within a layer rather
-		# than upward - repo_layout.md §6 allows it and the tier check agrees,
+		# than upward, and the tier check agrees,
 		# because both are `client`.
 		Engine::render
 

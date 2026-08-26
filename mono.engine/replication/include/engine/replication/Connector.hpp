@@ -274,8 +274,8 @@ namespace engine::replication {
 		//
 		// **Datagram wire only, and null under QUIC.** A QUIC connection has no
 		// `net::Link`: its lifecycle, its acknowledgements and its window are
-		// the transport's own, and `docs/QUIC.md` §6 keeps only `BytesPerTick`
-		// out of that type. A pointer rather than a reference so the absence is
+		// the transport's own, and only `BytesPerTick` survives out of that
+		// type. A pointer rather than a reference so the absence is
 		// something a caller has to look at rather than something it walks into.
 		//
 		// @return The link, or null when this connector runs on QUIC.

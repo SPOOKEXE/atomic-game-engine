@@ -12,9 +12,8 @@
 // **A block is split at every command deadline**, which is the whole of
 // sample-accurate scheduling. Rendering 512 frames with a `Play` due at sample
 // 200 means two sub-blocks: 0..200 without it, 200..512 with it. The alternative
-// - applying everything at the top of the block - is what
-// `DATATYPES_LIBRARIES.md` §11.2 calls out as audible jitter, and it is the one
-// place where "close enough to the frame" is wrong.
+// - applying everything at the top of the block - is audible jitter, and it is
+// the one place where "close enough to the frame" is wrong.
 //
 // **Nothing is allocated during a render.** Every scratch buffer is sized when
 // the graph changes and reused after that. A device callback that allocated

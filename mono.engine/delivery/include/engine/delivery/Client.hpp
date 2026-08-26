@@ -1,7 +1,7 @@
 #pragma once
 
 // Asking for content by name or by kind, and getting bytes back - the client
-// half CDN.md §7 listed as not started.
+// half of delivery.
 //
 // **The completion becomes visible when the caller pumps, and at no other
 // moment.** That single sentence is why this class exists in the shape it does.
@@ -12,7 +12,7 @@
 // background thread that could deliver at a moment scheduling decided. There is
 // `Pump`, and a world calls it at the barrier.
 //
-// **The client trusts the manifest, not the origin** - CDN.md §1. Everything
+// **The client trusts the manifest, not the origin.** Everything
 // that arrives is verified against a root the publisher signed, so an origin
 // that is compromised, misconfigured or stale can withhold content but cannot
 // substitute it. That property is what makes it safe to fetch from a delivery
@@ -30,7 +30,7 @@
 // internet" a configuration rather than code.
 //
 // **The unit that travels is a group, and the unit asked for is an asset.**
-// CDN.md §5: a group is the thing that is compressed, streamed and cancelled,
+// A group is the thing that is compressed, streamed and cancelled,
 // because per-asset requests are thousands of round trips. So asking for one
 // asset fetches the bundle that carries it, and the other assets in that
 // bundle land in the cache as a consequence - which is the whole of "the game
@@ -176,9 +176,9 @@ namespace engine::delivery {
 		// Hands over the grant a server issued.
 		//
 		// The origin admits a request against this and nothing else - it holds
-		// no accounts and no sessions, and CDN.md §4 keeps it that way. A
-		// client with no grant can still read a `Directory` source, because
-		// there is no origin in that path to admit anything.
+		// no accounts and no sessions, because an origin that knew players is a
+		// second authority. A client with no grant can still read a `Directory`
+		// source, because there is no origin in that path to admit anything.
 		//
 		// @param token The bytes the server sent.
 		virtual void UseGrant(std::span<const std::byte> token) = 0;

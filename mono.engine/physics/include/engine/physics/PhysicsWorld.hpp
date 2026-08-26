@@ -10,9 +10,8 @@
 // is covered by the affinity check, visible to a snapshot, and there is exactly
 // one of it per world.
 //
-// **Everything here is cleared and never freed.** `v02v03v04.md`'s allocation
-// table states it as a standing rule for exactly these lists, and a steady scene
-// stops allocating after its first tick.
+// **Everything here is cleared and never freed**, a standing rule for exactly
+// these lists: a steady scene stops allocating after its first tick.
 //
 // **Two indexes, not one.** `spatial::HashGrid` is rebuild-only by design, so
 // "only re-insert what moved" is not a call this module can make - it is a
@@ -308,8 +307,8 @@ namespace engine::physics {
 	// One contact point's accumulated impulse, kept for the next tick.
 	//
 	// **The warm start, and it is a reuse structure rather than an
-	// optimisation bolted on** - `v02v03v04.md`'s allocation table names it as
-	// one. A resting stack converges to the same impulses every tick, so
+	// optimisation bolted on.** A resting stack converges to the same impulses
+	// every tick, so
 	// starting from last tick's answer instead of from zero costs a lookup and
 	// saves most of the iterations it would otherwise take to find them again.
 	//
@@ -406,8 +405,8 @@ namespace engine::physics {
 	// responses each body gives them, the effective masses, the friction the
 	// two `scene::Surface` rows combine to, the target speed the penetration
 	// asks for. Recomputing any of it inside the iteration loop would multiply
-	// it by `SOLVER_ITERATIONS`, which is exactly the "read the surface once"
-	// rule in `v02v03v04.md` §3.2 applied where it bites.
+	// it by `SOLVER_ITERATIONS`, which is the "read the surface once" rule
+	// applied where it bites.
 	//
 	// The lever arms are deliberately **not** here. Everything that needs them
 	// folds them into `Along` during setup, and a field the sweeps would reload

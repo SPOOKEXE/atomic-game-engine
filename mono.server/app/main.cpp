@@ -120,7 +120,11 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"rendezvous", "HOST:PORT", "Register with a rendezvous point, so clients off this subnet can reach it"
 	);
-	arguments.Value("content-store", "DIR", "Serve this content store to clients - CDN.md §6's local store");
+	arguments.Value(
+		"content-store",
+		"DIR",
+		"Serve this content store to clients - the server serving its own disk"
+	);
 	arguments.Value("content-port", "PORT", "Port the attached origin listens on (0 for ephemeral)");
 	arguments.Value(
 		"content-grant-key", "HEX", "64 hex characters - the secret grants are issued and checked with"

@@ -9,32 +9,24 @@ Read it when adding a module, moving a type between modules, adding a
 dependency edge, or arguing about which module a thing belongs to. Nothing here
 is about a single function.
 
-## Its relationship to `repo_layout.md`
+## Its relationship to the design notes
 
-Sixty-two comments in this repository cite `repo_layout.md` by section number,
-from CMake, from public headers, from `.gitmodules` and from
-`THIRD_PARTY_NOTICES.md`. That document is not in this repository and never has
-been. It lives with `CDN.md`, `RENDER_PIPELINE.md`, `MCP.md` and
-`DATATYPES_LIBRARIES.md` in the sibling `atomic-game-engine-hidden-docs`, which
-`docs/retired/ROADMAP.md` records and nothing else does.
+This document used to be the in-tree half of a pair. The other half was
+`repo_layout.md`, the design note the tree was built from, which lived outside
+this repository beside `CDN.md` and `MCP.md` and was cited by section number
+from CMake, public headers and `THIRD_PARTY_NOTICES.md`. Those notes are gone,
+and nothing here depends on them any more: every rule below stands on its own,
+and where an argument mattered it was written into this file rather than left a
+citation away. `docs/retired/ROADMAP.md` records what they were.
 
-**This file is the in-tree half of it, and it is deliberately not a copy.**
-`repo_layout.md` is a hundred and seventeen kilobytes of design written before
-most of this engine existed; it argues positions and records rejected
-alternatives. What follows is the part a contributor needs in front of them,
-reconciled against the tree as it is at v0.19, with the drift between the two
-named rather than smoothed over. Section numbers below are this file's own. Where
-a rule comes from a `repo_layout.md` section, the section is cited so the
-argument behind it can still be followed.
+Section numbers below are this file's own.
 
 ---
 
 ## 1 · The trust model, because it decides more than it looks like it does
 
-**Anyone can run a server.** That is the single most-cited line in the design
-notes - `repo_layout.md` §1, fifteen of the sixty-two citations - and it is the
-reason a dozen unrelated-looking pieces of this engine are built the way they
-are.
+**Anyone can run a server.** It is the reason a dozen unrelated-looking pieces
+of this engine are built the way they are.
 
 It means there is no trusted direction on a wire. A client's packet is hostile
 because a hostile client is trivial to write; a *server's* packet is hostile
@@ -81,7 +73,7 @@ ships from it alone. Every program picks the subset of modules it needs, and §7
 below is the table of which.
 
 **Tools do not live in a central `tools/` directory of their own invention.**
-`mono.tools/AGENTS.md:117` records the rule from `repo_layout.md` §3: each tool
+`mono.tools/AGENTS.md:117` records the rule: each tool
 arrives with the thing it serves, in its own directory, with its own tests.
 
 ---
@@ -182,9 +174,9 @@ is what turns "only the editor uses this" from a fact about today into an edge
 the architecture check refuses. §4.3 recounts the leaf band after the move and
 reaches the same answer it did before.
 
-### 4.2 · Where the built stack and the designed one disagree
+### 4.2 · Where the built stack and the first design disagree
 
-`repo_layout.md` §5.1 draws a different stack, and the difference is worth
+The first design drew a different stack, and the difference is worth
 knowing before somebody "corrects" one of them.
 
 | Designed | Built | What happened |
@@ -249,16 +241,9 @@ committed and `persistence` at L3 to keep the log, and nothing above either.
 lateral edge. The cost of this decision is the table above, which is what
 deciding early was supposed to cost.
 
-Thirteen modules that exist today appear nowhere in the designed stack:
-`collision`, `spatial`, `gui`, `bakegraph`, `examples`, `delivery`,
-`replication`, `control`, `resources`, `msl`, `scripthost`, `scriptluau` and
-`scriptjs`. Their placement above is this file's, not `repo_layout.md`'s. It was
-eleven until v0.19, which took `nodegraph` out of `mono.engine/` and split
-`script` into the three modules that close this list.
-
 ### 4.3 · The leaf band, and why it does not exist yet
 
-`repo_layout.md` §4.1 and decision 22 reserve `mono.libraries/` for leaves: a
+Decision 22 reserves `mono.libraries/` for leaves: a
 library that may depend on the STL and `core/types` and on other leaves, and on
 nothing else. No platform layer, no logging, no `ecs`. The section also sets the
 bar for creating the directory: **"create it at three libraries, not one"**,
@@ -527,8 +512,8 @@ engine honours that, and mostly **not** with abstract base classes.
 
 ### 9.1 · The primary port is a column, not an interface
 
-Root `AGENTS.md` rule 2: the ECS owns the storage. `repo_layout.md` §7 says the
-same thing from the other side: *when two subsystems need to share data, the
+Root `AGENTS.md` rule 2: the ECS owns the storage. The same rule from the
+other side: *when two subsystems need to share data, the
 data is an ECS column and the coupling is a change channel.*
 
 That is ports and adapters implemented with data. `physics` writes a column;
@@ -569,8 +554,8 @@ with no GPU in the process is the payoff**, and it is why `gui` is in the
 
 `net::Transport` is the one to study, because it is the port that decision 6
 depends on. Single-player runs a loopback transport **with real encoding**, so
-the bytes a solo session moves are the bytes a networked one moves. That makes
-`repo_layout.md` §16.6 honest rather than aspirational, and
+the bytes a solo session moves are the bytes a networked one moves. That keeps
+the single-player promise true rather than aspirational, and
 `mono.engine/net/tests/Transport.cpp:176` is the test that keeps it so.
 
 ### 9.4 · The test of a hexagon is whether the domain runs headless
@@ -743,9 +728,9 @@ source beside it.
 
 ## 12 · The decisions
 
-From `repo_layout.md` §16. A decision is settled until its revisit condition
-fires; nothing is reopened because somebody new dislikes it. The full argument
-for each, with the rejected alternatives, is in that document.
+A decision is settled until its revisit condition
+fires; nothing is reopened because somebody new dislikes it. This table is the
+record of them.
 
 | # | Decision | Reopen when |
 |---|---|---|

@@ -9,8 +9,8 @@
 //
 // **Addressed by asset root, and by nothing else.** A cache keyed on a name
 // would go stale the moment content changed under that name, and would need an
-// invalidation mechanism - which is precisely the subsystem CDN.md §2 says
-// falls out of the hash tree instead of being built. A content address cannot
+// invalidation mechanism - which is precisely the subsystem the hash tree
+// provides instead of having to be built. A content address cannot
 // go stale: different content is a different key, so a new build populates new
 // entries and the old ones age out.
 //

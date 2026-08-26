@@ -362,7 +362,7 @@ TEST_CASE("assets can be fetched by kind", "[cdn][delivery][e2e]") {
 }
 
 TEST_CASE("a group that lands brings its neighbours with it", "[cdn][delivery][e2e]") {
-	// CDN.md §5 seen from the client: the unit that travels is a group, so
+	// Seen from the client: the unit that travels is a group, so
 	// asking for one asset puts the others in the cache - which is the whole of
 	// "the game progressively builds".
 	World world;
@@ -521,7 +521,7 @@ TEST_CASE("an asset the manifest does not describe fails", "[cdn][delivery][e2e]
 // --- the source list -------------------------------------------------------
 
 TEST_CASE("a local directory source needs no wire and no grant", "[cdn][delivery][e2e]") {
-	// CDN.md §6's "local store": the server serving its own disk. Same manifest,
+	// The local store source: the server serving its own disk. Same manifest,
 	// same verification, no transport - so there is no group to compress and
 	// nothing to admit.
 	World world;

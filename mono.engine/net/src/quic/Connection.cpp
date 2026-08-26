@@ -1272,7 +1272,7 @@ namespace engine::net::quic {
 		inside.Last = std::max(inside.Last, Stamp(nowSeconds));
 
 		// The expiry timer is driven off the tick rather than off a thread, which
-		// is `docs/QUIC.md` §7 and is the whole reason ngtcp2 was the library.
+		// is the whole reason ngtcp2 was the library.
 		if (ngtcp2_conn_get_expiry(inside.Conn) <= inside.Last) {
 			const int result = ngtcp2_conn_handle_expiry(inside.Conn, inside.Last);
 			if (result != 0) {

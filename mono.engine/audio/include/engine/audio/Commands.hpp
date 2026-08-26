@@ -2,8 +2,8 @@
 
 // How a tick tells the mixer what to do, and **when** to do it.
 //
-// This file exists because of one line in `DATATYPES_LIBRARIES.md` §11.2, which
-// marks it `!` - required rather than desirable:
+// This file exists because of one requirement, marked required rather than
+// desirable:
 //
 //   *Sample-accurate scheduling. A game ticks at frame rate and audio runs at
 //   sample rate. Events scheduled on tick boundaries jitter audibly.*

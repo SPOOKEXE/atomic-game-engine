@@ -15,7 +15,7 @@
 // MP3 frame is about a hundred bytes and expands to 1152 frames of stereo -
 // nine kilobytes - so a small file can ask for gigabytes, and the input's
 // length bounds nothing. The output is therefore bounded directly, which is the
-// same rule `CDN.md` §5 already applies to a Zstd frame: **size the result from
+// same rule delivery already applies to a Zstd frame: **size the result from
 // something other than the attacker's number, and refuse rather than truncate.**
 //
 // **A stream that changes shape mid-file is refused.** MPEG allows the sample

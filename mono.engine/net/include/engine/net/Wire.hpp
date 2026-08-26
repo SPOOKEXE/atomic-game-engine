@@ -39,7 +39,7 @@ namespace engine::net {
 		Datagram,
 
 		// QUIC: a stream per channel, RFC 9221 datagrams for what is unreliable,
-		// and TLS 1.3 in place of the exchange. `docs/QUIC.md`.
+		// and TLS 1.3 in place of the exchange.
 		Quic,
 	};
 

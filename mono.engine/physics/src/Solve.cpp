@@ -529,13 +529,13 @@ namespace engine::physics {
 				}
 
 				// **The one `Surface` read.** One row per body per tick, resolved
-				// before a single impulse is computed - `v02v03v04.md` §3.2 asks
-				// for exactly this and the cost it is avoiding is a name lookup per
-				// contact per iteration. An unregistered material takes the
-				// defaults rather than logging: `SurfaceTable` refuses a
-				// get-or-default so that the caller decides, and the caller's
-				// decision here is that a missing row is ordinary rather than an
-				// error worth a line per body per tick.
+				// before a single impulse is computed; the cost being avoided is
+				// a name lookup per contact per iteration. An unregistered
+				// material takes the defaults rather than logging:
+				// `SurfaceTable` refuses a get-or-default so that the caller
+				// decides, and the caller's decision here is that a missing row
+				// is ordinary rather than an error worth a line per body per
+				// tick.
 				const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
 				scene::SurfaceProperties properties;
 				if (surfaces != nullptr && surface != nullptr) {

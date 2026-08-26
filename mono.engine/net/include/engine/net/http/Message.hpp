@@ -2,11 +2,11 @@
 
 // HTTP/1.1 requests and responses as values, with no socket anywhere near them.
 //
-// `repo_layout.md` §5.2 gives this module an `http/` sub-area for "userland
-// networking, and the server's own asset serving", and CDN.md §5 is what needs
-// it: a content origin serves bulk bytes over a request/response protocol
-// rather than over a game datagram channel with a per-tick packet budget. A
-// group is megabytes; `Packet::MAXIMUM_PAYLOAD_BYTES` is 1200.
+// This module owns an `http/` sub-area for userland networking and the
+// server's own asset serving, and a content origin is what needs it: bulk
+// bytes go over a request/response protocol rather than over a game datagram
+// channel with a per-tick packet budget. A group is megabytes;
+// `Packet::MAXIMUM_PAYLOAD_BYTES` is 1200.
 //
 // **The protocol is split from the socket, and that split is the design.**
 // Everything here is parsing and formatting over spans, so the whole of the
@@ -18,7 +18,7 @@
 // This is a content origin's protocol, not a web framework:
 //
 // - **`GET` and `HEAD` only.** An origin serves. Upload is `control/`'s, in
-//   TypeScript, over its own API - CDN.md §6.
+//   TypeScript, over its own API.
 // - **`Content-Length` framing only. No `Transfer-Encoding`.** A body that can
 //   be framed two ways is request smuggling: two parsers in a chain disagree
 //   about where one message ends and the next begins, and the disagreement is
@@ -27,8 +27,7 @@
 //   Each is a parsing subtlety with a documented desync behind it.
 //
 // **Every byte parsed here is hostile.** A request arrives from anyone who can
-// reach the port and a response arrives from an origin that `repo_layout.md` §1
-// says anyone can run. Nothing here allocates from a length field it has not
+// reach the port and a response arrives from an origin anyone can run. Nothing here allocates from a length field it has not
 // bounded, and a malformed message is refused whole rather than half-read into
 // a partly filled value - the shape a caller uses by accident.
 //
@@ -212,9 +211,8 @@ namespace engine::net::http {
 		//
 		// Mostly this bounds a *response*, which is a compressed group and is
 		// genuinely large. The delivery client also checks the length against
-		// the signed manifest before it believes it - CDN.md §5's
-		// decompression-bomb rule - so this is the transport's backstop rather
-		// than the real check.
+		// the signed manifest before it believes it - the decompression-bomb
+		// rule - so this is the transport's backstop rather than the real check.
 		//
 		// Since v0.10 it also bounds a `Put` request's body. **That is not the
 		// binding limit on an upload** and should not be mistaken for one:

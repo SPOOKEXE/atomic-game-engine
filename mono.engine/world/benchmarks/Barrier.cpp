@@ -1,7 +1,7 @@
 // What a driver tick costs, and how it scales with the shape of the universe.
 //
-// The target from `v02v03v04.md` is mixed: one or two worlds at 50k–500k
-// entities, plus tens to hundreds at 1k–10k. Both shapes are here, because they
+// The target is mixed: one or two worlds at 50k-500k
+// entities, plus tens to hundreds at 1k-10k. Both shapes are here, because they
 // stress different things - the large one measures the inner loop and the small
 // one measures the *per-world* overhead, which is the cost that a hundred
 // worlds multiply.

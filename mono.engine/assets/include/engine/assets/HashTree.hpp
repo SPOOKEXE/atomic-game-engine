@@ -3,7 +3,7 @@
 // The hierarchical hash - one root standing for many chunks.
 //
 // A flat list of chunk hashes would be enough to *store* an asset. It is not
-// enough to deliver one, and CDN.md §2 turns on four properties a tree has and
+// enough to deliver one, and delivery turns on four properties a tree has and
 // a list does not:
 //
 // - **Verify while streaming.** A client checks chunk *k* against the root with

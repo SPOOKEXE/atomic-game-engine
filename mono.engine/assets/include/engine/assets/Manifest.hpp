@@ -63,7 +63,7 @@ namespace engine::assets {
 	//
 	// What goes in one is policy rather than format, and it lives with the
 	// origin - a group has to be independently useful, which is a statement
-	// about the game rather than about bytes. CDN.md §5.
+	// about the game rather than about bytes.
 	struct BundleEntry {
 		// The hash tree root over Assets, in order.
 		ContentHash Root;
@@ -279,7 +279,7 @@ namespace engine::assets {
 		//
 		// It also costs nothing on the wire, which is the smaller reason.
 		//
-		// CDN.md §7 listed the on-disk chunk layout as undecided; this settles
+		// The on-disk chunk layout is `ChunkStore`'s to decide; this settles
 		// the *group* layout, which is the half delivery needs.
 		//
 		// @param bundle The bundle whose payload is being cut up.
@@ -308,8 +308,8 @@ namespace engine::assets {
 
 		// Parses what Write produced.
 		//
-		// **Every field is hostile.** A manifest arrives from an origin, and
-		// §1 of repo_layout.md says anyone can run one. A wrong magic, an
+		// **Every field is hostile.** A manifest arrives from an origin
+		// anyone can run. A wrong magic, an
 		// unknown version, a count that does not match what follows, a chunk
 		// total that disagrees with its chunks, or a bundle naming an unknown
 		// asset are each a refusal - not a warning, and not a partly built

@@ -349,7 +349,7 @@ TEST_CASE("a grant for one bundle does not admit another", "[cdn][service]") {
 
 TEST_CASE("a bundle target that is not a hash is refused", "[cdn][service]") {
 	// There is no route that takes a name, so there is nothing to walk out of a
-	// directory - CDN.md §8.
+	// directory.
 	Deployment origin;
 
 	for (const std::string &target : {

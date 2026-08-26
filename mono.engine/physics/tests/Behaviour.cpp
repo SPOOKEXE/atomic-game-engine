@@ -21,7 +21,7 @@
 
 // What a world made of these parts actually does.
 //
-// One suite for the behavioural cases `v02v03v04.md` §3.7 names, rather than
+// One suite for the cross-pipeline behavioural cases, rather than
 // one case each bolted onto the suite of whichever header happened to be
 // involved. Every one of them spans the whole pipeline - integrate, index,
 // pair, intersect, solve, publish - so attaching them to `NarrowPhase.hpp` or
@@ -68,8 +68,8 @@ namespace {
 	// Weight, as a `PreSimulation` system.
 	//
 	// **Not part of this module**, and the omission is deliberate rather than
-	// unfinished: `v02v03v04.md` §3.5 has no gravity row, `scene::RigidBody`
-	// has no gravity scale, and a world with no down - an orbital simulation, a
+	// unfinished: `scene::RigidBody` has no gravity scale, and a world with no
+	// down - an orbital simulation, a
 	// top-down game - should not have to switch one off. A scene that wants
 	// weight adds it, which is exactly what a host would do.
 	//
@@ -349,8 +349,8 @@ namespace {
 }
 
 TEST_CASE("two runs of one scene agree byte for byte", "[physics][behaviour]") {
-	// Same binary, same platform, same result - `v02v03v04.md` §2.4 and §3.5.
-	// A snapshot rather than a field comparison, because a snapshot is what
+	// Same binary, same platform, same result. A snapshot rather than a field
+	// comparison, because a snapshot is what
 	// `just determinism` compares and it also catches a component whose padding
 	// reached the file uninitialised.
 	const std::vector<std::byte> first = RunScene("behaviour.determinism", SIXTY_HERTZ, 120);
