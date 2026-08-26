@@ -46,11 +46,11 @@ because anybody can stand one up and point a player at it. So:
   believed. `mono.engine/delivery/include/engine/delivery/GroupCodec.hpp:25`.
 - A manifest, a WAV, a content directory and a source list are all content an
   origin served, not data the engine produced.
-  `mono.engine/assets/include/engine/assets/Manifest.hpp:265`,
+  `mono.engine/assets/include/engine/assets/Manifest.hpp:311`,
   `mono.engine/audio/include/engine/audio/Wav.hpp:14`,
   `mono.studio/src/ContentSources.cpp:80`.
 - A client that is told to fetch from an arbitrary host is a vulnerability, not
-  a feature. `mono.engine/delivery/AGENTS.md:96`.
+  a feature. `mono.engine/delivery/AGENTS.md:124`.
 
 **Decoding is the largest attack surface in a game engine and this engine
 decodes untrusted bytes in six modules.** If a change adds a seventh, the
@@ -81,7 +81,7 @@ ships from it alone. Every program picks the subset of modules it needs, and §7
 below is the table of which.
 
 **Tools do not live in a central `tools/` directory of their own invention.**
-`mono.tools/AGENTS.md:88` records the rule from `repo_layout.md` §3: each tool
+`mono.tools/AGENTS.md:117` records the rule from `repo_layout.md` §3: each tool
 arrives with the thing it serves, in its own directory, with its own tests.
 
 ---
@@ -168,19 +168,19 @@ ceiling, not a slot" is for.
 
 Above L13 is the **program band**: `client`, `server`, `studio`, `launcher`,
 `cdn`, `loadtest`, `unified_tests`, the tool libraries `assetc`, `docgen`,
-`linecount`, `shadercheck`, `testrunner`, and `nodegraph`. These have no layer,
-and that absence is itself checked: **nothing that has a layer may link
-something that has not.** A program-band entry is the thing that links modules
-and that no module links.
+`linecount`, `shadercheck`, `sourcecheck`, `testrunner`, and `nodegraph`. These
+have no layer, and that absence is itself checked: **nothing that has a layer
+may link something that has not.** A program-band entry is the thing that links
+modules and that no module links.
 
 **`nodegraph` is in the band for the second half of that definition rather than
-the first.** It links no module at all - `shadercheck` is the other row shaped
-that way - and it is a library of one program: `mono.studio/nodegraph` since
-v0.19, moved out of `mono.engine/` because `studio` was the only target in the
-repository that ever linked it. Dropping its `layer` is what turns "only the
-editor uses this" from a fact about today into an edge the architecture check
-refuses. §4.3 recounts the leaf band after the move and reaches the same answer
-it did before.
+the first.** It links no module at all - `shadercheck` and `sourcecheck` are the
+other rows shaped that way - and it is a library of one program:
+`mono.studio/nodegraph` since v0.19, moved out of `mono.engine/` because `studio`
+was the only target in the repository that ever linked it. Dropping its `layer`
+is what turns "only the editor uses this" from a fact about today into an edge
+the architecture check refuses. §4.3 recounts the leaf band after the move and
+reaches the same answer it did before.
 
 ### 4.2 · Where the built stack and the designed one disagree
 
@@ -202,8 +202,8 @@ choice once a module needed one of them was a renumber of eleven modules or a
 fractional layer.
 
 **It is neither, because a layer is a ceiling and not a slot.** §4's first
-paragraph says exactly that, and the built table already carries six modules at
-L12 and six at L11. Two modules at one height are a problem only when one needs
+paragraph says exactly that, and the built table already carries eight modules
+at L12 and six at L11. Two modules at one height are a problem only when one needs
 to see the other, and that is the case the `lateral` array already covers by
 name. So the reservation is:
 
@@ -249,11 +249,12 @@ committed and `persistence` at L3 to keep the log, and nothing above either.
 lateral edge. The cost of this decision is the table above, which is what
 deciding early was supposed to cost.
 
-Ten modules that exist today appear nowhere in the designed stack:
+Thirteen modules that exist today appear nowhere in the designed stack:
 `collision`, `spatial`, `gui`, `bakegraph`, `examples`, `delivery`,
-`replication`, `control`, `resources` and `msl`. Their placement above is this
-file's, not `repo_layout.md`'s. It was eleven until v0.19, when `nodegraph`
-stopped being an engine module.
+`replication`, `control`, `resources`, `msl`, `scripthost`, `scriptluau` and
+`scriptjs`. Their placement above is this file's, not `repo_layout.md`'s. It was
+eleven until v0.19, which took `nodegraph` out of `mono.engine/` and split
+`script` into the three modules that close this list.
 
 ### 4.3 · The leaf band, and why it does not exist yet
 
@@ -288,7 +289,7 @@ this count without changing it. Two.
 ## 5 · Tiers
 
 Three tiers, checked at configure time by `mono_check_all_tiers` in
-`mono.build/MonoLibrary.cmake:42`, which fails the build with the offending edge
+`mono.build/MonoLibrary.cmake:893`, which fails the build with the offending edge
 named.
 
 | Tier | May link | Means |
@@ -326,7 +327,7 @@ names the target. Three exist:
 |---|---|
 | `bake` → `bakegraph` L9 | `bake` runs the pipeline `bakegraph` describes. The split is that `bakegraph` carries no decoders, so a game file's bake pipelines travel without them |
 | `delivery` → `net` L11 | `delivery` frames its fetches with `net::Packet` rather than inventing a second framing |
-| `ui` → `render` L12 | `ui` implements `render::FrameOverlayHook`. Both are `client`, and `mono.engine/ui/CMakeLists.txt:23` argues the case at the edge |
+| `ui` → `render` L12 | `ui` implements `render::FrameOverlayHook`. Both are `client`, and `mono.engine/ui/CMakeLists.txt:24` argues the case at the edge |
 
 Adding a fourth means editing a checked-in file, which puts it in front of a
 reviewer. That is the entire mechanism.
@@ -396,26 +397,29 @@ this table is stale.
 | `gui` | 7 | shared | O | O | O | O | . | O | O |
 | `scene` | 7 | shared | O | O | O | O | . | O | O |
 | `assets` | 8 | shared | O | O | O | O | O | O | O |
-| `effects` | 8 | shared | O | O | O | O | . | . | O |
+| `effects` | 8 | shared | O | O | O | O | . | O | O |
 | `physics` | 8 | shared | O | O | O | . | . | O | O |
 | `bake` | 9 | shared | . | . | O | . | . | . | . |
 | `bakegraph` | 9 | shared | O | O | O | . | . | O | O |
 | `graph` | 9 | shared | O | O | O | O | . | O | O |
 | `script` | 9 | shared | O | O | O | . | . | O | O |
-| `examples` | 10 | shared | O | O | O | . | . | . | O |
-| `game` | 10 | shared | O | O | O | . | . | O | O |
+| `scriptluau` | 10 | shared | O | O | O | . | . | O | O |
+| `scriptjs` | 10 | shared | O | O | O | . | . | O | O |
 | `delivery` | 11 | shared | O | O | O | . | O | . | O |
 | `discord` | 11 | shared | O | O | O | . | O | . | O |
 | `msl` | 11 | client | O | . | O | O | . | . | O |
 | `net` | 11 | shared | O | O | O | . | O | O | O |
 | `resources` | 11 | client | O | . | O | O | . | . | O |
+| `scripthost` | 11 | shared | O | O | O | . | . | O | O |
 | `audio` | 12 | client | O | . | O | . | . | . | O |
+| `examples` | 12 | shared | O | O | O | . | . | . | O |
+| `game` | 12 | shared | O | O | O | . | . | O | O |
 | `input` | 12 | client | O | . | O | . | . | . | O |
 | `network` | 12 | shared | O | O | O | . | O | . | O |
 | `render` | 12 | client | O | . | O | O | . | . | O |
 | `replication` | 12 | shared | O | O | O | . | . | O | O |
 | `ui` | 12 | client | . | . | O | O | . | . | . |
-| `control` | 13 | shared | . | O | O | . | . | . | O |
+| `control` | 13 | shared | O | O | O | . | O | . | O |
 | `nodegraph` | . | client | . | . | O | . | . | . | . |
 
 Four rows are worth reading twice.
@@ -430,10 +434,10 @@ above it carries a number, and none of those may link this one.
 in one of those cells has made the server contain a graphics stack, and
 `just check-server-is-headless` is the recipe that notices.
 
-**The `cdn` column is the "partial engine" proof.** Seven modules, none of them
-above L12, and no `ecs`. A content origin does not know what an entity is. The
-moment somebody adds a convenience function that needs one, `mono.cdn` starts
-linking the engine and the claim stops being true.
+**The `cdn` column is the "partial engine" proof.** Eight modules, every one of
+them `shared`, and no `ecs`. A content origin does not know what an entity is.
+The moment somebody adds a convenience function that needs one, `mono.cdn`
+starts linking the engine and the claim stops being true.
 
 **Three modules are absent from the `tests` column**: `bake`, `nodegraph` and
 `ui`. They are covered only by their own `tests/` directories and by nothing
@@ -483,10 +487,10 @@ filesystem: bytes, and only bytes. `bake` is the layer that knows about bytes
 *and* the object model, and it is a separate module for exactly this reason.
 
 Without the split, the content origin links the whole engine. With it,
-`mono.cdn` links seven modules, none above L12, and the `cdn` preset configures
-on a machine with no Vulkan SDK. **That is a bounded context boundary paying for
-itself in a build configuration**, which is the most concrete form the argument
-ever takes.
+`mono.cdn` links eight modules, every one of them `shared`, and the `cdn` preset
+configures on a machine with no Vulkan SDK. **That is a bounded context boundary
+paying for itself in a build configuration**, which is the most concrete form the
+argument ever takes.
 
 The same shape appears twice more: `bakegraph` is the description without the
 decoders, and `msl` translates SPIR-V without knowing whether a build tool or a
@@ -544,7 +548,7 @@ goes in `src/`.
 nothing about drawing. It produces a flat `gui::DrawList`. `ui` is `client`,
 sits at L12, and turns that list into draw calls.
 
-`mono.engine/ui/CMakeLists.txt:31` states the property that makes it a port:
+`mono.engine/ui/CMakeLists.txt:32` states the property that makes it a port:
 *"`gui` is the engine's own widget tree and knows nothing about this module,
 exactly as `render` knows nothing about it. What arrives here is a flat
 `gui::DrawList` - no store, no tree, no class table - which is what lets a
@@ -634,7 +638,7 @@ first design question of the work rather than the last.
 `ListenerSettings::Wire` chooses. The argument against the second option is in
 `SessionPort.hpp`: a `Session` whose four members become optional is one class
 with two modes, and every method on it grows a branch that only one
-configuration exercises - which is `docs/QUIC.md` §8's "two overlapping
+configuration exercises - which is the QUIC survey's "two overlapping
 reliability stacks is worse than either" applied inside a single type. Those
 members are not incidental state, they *are* the design, and a QUIC session does
 not have a different version of them, it has none.
@@ -661,7 +665,7 @@ This is the current honest accounting.
 
 | Rule | Checked by | When |
 |---|---|---|
-| Tier edges | `mono_check_all_tiers`, `mono.build/MonoLibrary.cmake:701` | configure |
+| Tier edges | `mono_check_all_tiers`, `mono.build/MonoLibrary.cmake:893` | configure |
 | Module set, tiers, exact link sets | `mono.tools/architecture/CheckTargetGraph.cmake` | `just test-architecture` |
 | **Layer edges: downward, or lateral by name** | the same file, `_check_layers` | `just test-architecture` |
 | **A layered module linking the program band** | the same | `just test-architecture` |
