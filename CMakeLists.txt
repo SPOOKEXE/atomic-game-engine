@@ -331,6 +331,18 @@ else()
 	endif()
 endif()
 
+# **NOMINMAX tree-wide, because unity builds make per-file guards meaningless.**
+# windows.h defines min and max as function-like macros unless NOMINMAX is set
+# before its first include, and under MONO_UNITY_BUILD which file includes
+# windows.h first is batch order rather than authorship - parallel's
+# ThreadAffinity.cpp carried a correct per-file guard and still failed on MSVC
+# whenever Capture.cpp landed in the same concatenated unit ahead of it.
+# Applied beside MONO_COMPILE_OPTIONS, so first-party targets only; no
+# first-party source uses the raw macros.
+if(WIN32)
+	set(MONO_COMPILE_DEFINITIONS NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # The compiler cache, if there is one.
 #
 # **The largest single build-time win available, measured rather than assumed.**
