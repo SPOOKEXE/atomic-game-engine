@@ -1988,3 +1988,131 @@ should file rather than a bullet here.
 - ~~`render` must not grow a hand-rolled pass list before it does.~~ **It grew one anyway, and that is an overrun rather than a revision.** v0.6's roadmap asked for shadows and a render-to-texture surface, the graph runtime executes nothing, so the passes had nowhere else to live. The part that is not defensible is that the two descriptions of a frame are now unchecked against each other - filed as **D00016**, which is where the argument about what to do belongs.
 - §12.3's remaining additions to F5 - per-stage cache hit/miss, and the undemanded capability of a dead node - **unchanged, and now for the right reason**: they need the cache and the executor, not the directory. The tick rate on F3 and the tick/render split of §14 are done.
 - **Reopen trigger, stated for the first time: v0.8's extended pipeline.** "Handle multiple worlds in parallel" is the first roadmap line that cannot be met by making the function longer - per-world pass sharing is exactly the decision `Stage::PerView` was written to record and that nothing yet reads, and HDR plus a G-buffer change what every later stage reads, which is the change a hand-rolled list makes by editing five call sites and a graph makes by editing a list.
+
+### [x] D00014
+
+**Closed at v0.19, and closed by being built rather than by being argued out
+of.** ngtcp2 is vendored, the crypto seam and a TLS 1.3 handshake are in
+`mono.engine/net/quic/`, a QUIC session runs beside the datagram one behind
+`ListenerSettings::Wire`, and at v0.19 QUIC became the default with the server
+choosing - `mono.server --transport quic|datagram|both`, and no transport flag
+on the client at all. **`docs/QUIC.md` §0 is the staging table and §12 is what the survey
+got right and wrong**; what belongs here is which of this entry's own arguments
+were answered.
+
+- **Per-stream loss recovery** - answered. One stream per `MessageKind`, which
+  is `docs/CODE_ARCH.md` §10's table read literally rather than one stream per
+  reliability class. A join snapshot and a structural change no longer share an
+  ordering.
+- **TLS 1.3** - answered, and by the option this entry listed third: a minimal
+  in-tree stack over `D00006`'s primitives with RFC 7250 raw public keys.
+  `docs/QUIC.md` §4 recommended AWS-LC first and §11 listed its build claim as
+  an open question; a transport standing on an unverified claim is one that has
+  to be rebuilt when the claim fails, so the fallback was taken and the
+  fresh-clone rule survives unargued-with.
+- **A delivery signal for unreliable traffic** - answered.
+  `quic::Connection::Statistics::DatagramsAcknowledged` is the counter this
+  entry says the hand-rolled stack structurally cannot have without a second
+  ack path.
+- **The second consumer** - **not** answered, and this is the one thing that got
+  worse rather than better. The in-tree TLS gives up interoperability, so it
+  gives up HTTP/3, so the cdn half of the argument is unserved. A
+  certificate-verifying backend would restore it and changes only which object
+  fills `quic::Tls`'s interface.
+- **`net::CongestionControl` on the delete list** - untouched. It is on no path
+  a QUIC session runs, and what §9 asks for is a deliberate decision about
+  taking Cubic's latency rather than housekeeping. Nobody has made it.
+
+The paragraphs below are as they were written and are the reasoning that got
+here.
+
+**Congestion control shipped at v0.15 without QUIC, which takes this entry's
+first and heaviest argument away from it.** The rest of the argument is intact
+and is what the entry now is. Recorded rather than closed, and recorded rather
+than deleted, because the reason the first argument could be answered separately
+is itself the finding: *congestion control is a property of the send rate, and
+the send rate is ours whatever carries the bytes.*
+
+- **The algorithm is Copa** - Arun and Balakrishnan, *Copa: Practical Delay-Based Congestion Control for the Internet*, NSDI 2018 - a delay-based window steering toward a standing queue of `1/delta` packets at the bottleneck, spelled `CongestionSettings::TargetQueuePackets` because that number *is* the packets of queue it settles at. **A loss-based AIMD window in the NewReno lineage was rejected and the reason is not a preference**: a loss-based controller finds the bottleneck by *filling its buffer*, which is the mechanism and not a side effect, so on a home router with a hundred milliseconds of buffer it adds a hundred milliseconds to every input a player sends. Vegas was the other delay-based candidate and Copa is strictly better: same equilibrium argument, plus an answer for the case Vegas is famous for losing. BBR trades better than either and wants per-packet delivery-rate sampling and a pacing engine, neither of which this transport has.
+- **Against a TCP download on the same bottleneck it stops being polite, and only for as long as it has to.** A pure delay-based controller is starved - it backs off as the queue grows, the loss-based flow does not back off until the queue overflows, and the delay-based share converges toward nothing. Copa's competitive mode is implemented: when the window is reduced round trip after round trip and the queueing delay does not follow it down, the queue is not this flow's, and `TargetQueuePackets` then moves AIMD-style - one packet added per round trip, halved on a loss - which is the law the neighbour is playing. When the queue comes back down the mode ends and the target returns to two packets. **Latency is given up only while somebody else is taking it anyway.**
+- **The mode-switch predicate is a restatement of Copa's and it was measured being wrong first.** The paper asks whether the queue is ever nearly empty, which holds because its per-acknowledgement window oscillates hard enough to empty it. A window steered once a tick settles at its target instead and empties nothing, so the paper's form read *every* ordinary path as contested - the controller latched into competitive mode on a solo 250 kB/s path and ratcheted its own standing queue from 9 ms to 190 ms. Both the absolute form and the fraction-of-recent-range form did that. The response test does not.
+- **`LinkSettings::BytesPerTick` survives as a hard ceiling with the controller underneath it.** Kept rather than deleted because the two answer different questions: a game may legitimately refuse to spend more than N on one player on a path that would carry ten times that, and a hundred players on one host is a hundred of these - the operator's bill is not a function of what the path can take. What it stopped being is a *rate*. `PacketsPerTick` is left a fixed cap for a different reason: per-packet cost is a property of the two endpoints rather than of the path between them, so there is nothing on the wire for a controller to measure it against.
+- **`SendsOverBudget` did not stop meaning what it meant, which this entry predicted it would have to.** The prediction assumed one counter for both refusals. There are two: `SendsOverBudget` is a number somebody configured being enforced and `SendsOverAllowance` is the path refusing, and the distinction is that a caller answers the first by changing the number and cannot answer the second by changing anything. `render`'s debug panel documents the first meaning against `D00007` and is untouched, and the panel and its header therefore do **not** have to move with this after all.
+- **No second acknowledgement path was added and none may be.** Both signals come out of what already crosses the wire. The delay is `ReliableSender`'s RFC 6298 estimate arriving at `Link::RecordRoundTrip`, which `replication::Session` has called on every inbound packet since v0.9 - the estimator grew the variance it never had, because a controller told only the mean cannot tell a wireless link's fifteen-millisecond swing from fifteen milliseconds of queue. The loss is holes in `PacketHeader::Acknowledge` and `AcknowledgeBits`, the fields `ReliableReceiver::Acknowledging` already stamps on every outgoing packet whatever its channel: `ReliableSender` reads them to retire payloads and `Link::ObserveAcknowledgement` reads them to find out whether the path dropped something. One acknowledgement, two questions.
+- **The honest limitation is that both signals are about the reliable channel.** Unreliable loss on the way out is reported by nothing, and a direction whose reliable stream is quiet offers no samples at all - which on a server publishing a still world is a real gap, since deltas are unreliable and structure messages are occasional. The controller is built so that no sample is never a *stall*: the slow-start ramp falls back on an assumed round trip and the queueing delay reads as zero rather than unknown. Closing the gap properly wants per-packet delivery feedback, which is a second ack path, which is QUIC - see below.
+- **Determinism was answered before it was written and not after.** `net` reads no clock and nothing here is random, so the controller's whole state is a function of the sequence of calls it was handed - the same property the idle timeout has had since v0.3. `just determinism` and `just replay-check` are unaffected twice over: by construction, and because `mono.server` does not call `ServeClients` on the replay path at all, so no recording has ever contained network state. Both pass byte-identical.
+- **Cold start is RFC 6928's initial window, once.** Ten datagrams on the opening tick, because that is what an initial *window* is and there is no feedback yet to pace against; every tick after it is paced at the window over the round trip. The controller is then clocked by acknowledgements rather than by a timer - the doubling, Copa's velocity parameter and the mode switch all wait for the far side to acknowledge what was outstanding when the period opened, which is one round trip measured rather than assumed, and is what makes one implementation behave on a loopback and on a satellite.
+- **Twenty-nine mutations, twenty-nine red.** Four of them needed a test written that did not exist, and the two worth naming are the ones a review would not have found. Measuring the round-trip variance *after* moving the mean rather than before survives every directional assertion, because the wrong order is still in the right direction - it is pinned as arithmetic. And a tick's length measured against the last time anybody named a time, rather than against the last `Advance`, reads every tick as a stall and clamps the allowance to sixty bytes: the packets that arrived earlier in the tick named the same instant. That one was found by `replication`'s suite and now has a `net` case of its own.
+
+**What is left of the QUIC argument, which is most of it.**
+
+- Per-stream loss recovery without head-of-line blocking across streams, which is the shape this module arrived at by hand - structure reliable, values not.
+- TLS 1.3, which subsumes the engine's X25519/HKDF/ChaCha20-Poly1305 and the server-identity binding closed in `D00006`.
+- Connection migration and 0-RTT resumption, neither of which we would build.
+- **A delivery signal for unreliable traffic**, which is new to the argument and which v0.15 could not give itself. QUIC's ACK frames acknowledge packets rather than payloads, so DATAGRAM frames are acknowledged too - the controller would see the whole outbound stream instead of the reliable slice of it, and that is the one thing the hand-rolled version structurally cannot have without inventing a second ack path.
+- **It still passes the second-consumer test.** The game link is one; `ROADMAP.md`'s cdn wire streaming is the other, blocked on `net` growing an `http/` sub-area because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both.
+- The clock question is settled and stays settled: `ngtcp2` takes an explicit `ngtcp2_tstamp` on every entry point, which is the only shape compatible with *time is passed in, never read*.
+
+**The implementation survey lives in [`docs/QUIC.md`](QUIC.md) as of v0.17**,
+so that the day this trigger fires starts from a survey rather than from a
+search engine. It re-checked the library landscape and **three of the paragraph
+below have moved**: `quictls`' ngtcp2 helper is deprecated upstream, OpenSSL
+3.5 shipped a QUIC TLS API so vanilla OpenSSL is a candidate at all, and
+**AWS-LC ships pre-generated build files precisely so a project that cannot take
+a Go or Perl dependency can still build it** - which is a fourth answer to the
+TLS question that did not exist when this was written, keeps the fresh-clone
+property, and uses ngtcp2's mature BoringSSL helper rather than the experimental
+OpenSSL one. The `http/` sub-area the cdn half was blocked on has also since
+shipped. The paragraph below is kept as written because what it *reasoned* is
+still right; the document carries the corrections and the staging.
+
+**Everything the v0.13 scoping wrote out still stands, minus one line.** The
+library is `ngtcp2`, because nothing under its `lib/` references a TLS stack -
+one MIT submodule, no Perl and no Go, which is the only shape that keeps a fresh
+clone needing CMake, Ninja and a C++ compiler and nothing else. `picoquic` was
+ruled out for hard-requiring picotls by `find_package` or `FetchContent`;
+**wolfSSL is GPLv2 or commercial**, which is a licence problem against MPL-2.0
+and not a preference; BoringSSL needs Go *and* Perl; quictls and LibreSSL need
+Perl. The crypto is a callback table, which is the good news and the trap:
+`net::Cipher` cannot serve those callbacks as it stands, and the three mismatches
+are structural - QUIC owns the nonce where `Sealer` holds it privately and only
+moves it forward, header protection is a raw ChaCha20 keystream this engine does
+not expose, and AES-128-GCM is mandatory for Initial packets and Retry integrity
+whatever suite is negotiated. The TLS backend is the one open decision and the
+three answers differ in what they buy: a minimal in-tree TLS 1.3 over `D00006`'s
+primitives with RFC 7250 raw public keys, `D00006`'s exchange carried inside
+CRYPTO frames (smallest, and it serves neither HTTP/3 nor the cdn argument), or
+quictls beside ngtcp2 (interoperable, and it costs the fresh-clone property).
+The whole of what has to land is unchanged - the vendor and its
+`MonoVendor.cmake` target, a `THIRD_PARTY_NOTICES.md` line, the TLS answer, a
+crypto seam for the three mismatches, connection ids and transport parameters and
+Retry and stateless-reset tokens (which subsume `Cookie` and must keep its rule
+that an unanswered challenge costs zero bytes), the expiry timer driven off the
+tick through `ngtcp2_conn_get_expiry`/`handle_expiry`, the channel model mapped
+onto DATAGRAM frames and streams, the deletions with their suites and benchmarks,
+then the rewiring of `replication::Session`, `Listener`, `Connector`,
+`mono.server`, `mono.client`, `mono.studio`, `mono.unified_tests` and
+`mono.network`'s discovery, then `expected_graph.json` and the tier check, then
+the suites. **The one line that comes off the list is `ConnectionStats` and
+`render`'s panel**, which v0.15 has already sorted out by adding a counter rather
+than redefining one.
+
+**Staging is not a preference here.** Two overlapping reliability stacks is worse
+than either, so the order is: land the QUIC session beside the old one and prove
+it, rewire, and only then delete - with every commit green, rather than a sweep
+that leaves the tree with no working link. **`net::CongestionControl` is on the
+delete list when that happens**, since ngtcp2 carries Reno, Cubic and BBRv2, and
+it is a hundred and eighty lines rather than a project.
+
+**Reopen trigger, replaced because the old one fired and was answered by
+something other than this entry.** It read "whichever comes first of cdn wire
+streaming or the first deployment over a path that is not loopback or a LAN", and
+the second half is now covered: a real path is paced by a real controller, and
+`ConnectionStats` counts refusals against what the path would have carried as well
+as against our own cap. **What is left is cdn wire streaming**, which is a second
+consumer that request/response over TCP would also serve - so the trigger is
+sharpened to the point where one dependency is cheaper than two protocols: *the
+first time `http/` needs something TCP does not give it*, or *the first
+measurement showing head-of-line blocking inside the reliable channel costing a
+player something visible*. Either is a thing that can be observed rather than a
+version number, which is what the v0.7 correction to this entry was about.
