@@ -88,7 +88,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 - [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
-- [_] StackGuard to prevent stack errors, infinite recursion, etc.
+- [x] StackGuard to prevent stack errors, infinite recursion, etc.
 - [_] Random.new(seed) with functions
 - [_] fix billboard gui in scene not rendering properly and stuff
 - [_] check if particles load textures properly (the particle demo world is just a white box?)

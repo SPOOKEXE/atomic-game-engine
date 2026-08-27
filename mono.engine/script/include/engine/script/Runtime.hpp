@@ -338,6 +338,53 @@ namespace engine::script {
 			return Error;
 		}
 
+		// Stack guard to prevent infinite recursion across the host/script boundary.
+		//
+		// A script may call a host function which calls back into the runtime via
+		// `Invoke` or `Run`, which may call another host function, and so on.
+		// Without a bound this can exhaust the C stack. The guard is per-runtime
+		// so two runtimes over two worlds are independent.
+		//
+		// @since v0.20
+		class StackGuard {
+		  public:
+			static constexpr unsigned MAX_DEPTH = 64;
+
+			StackGuard(Runtime &runtime) : RuntimeRef(runtime) {
+				if (RuntimeRef.Depth >= MAX_DEPTH) {
+					RuntimeRef.Error = "script recursion limit exceeded";
+					Allowed = false;
+					return;
+				}
+				RuntimeRef.Depth++;
+				Allowed = true;
+			}
+
+			StackGuard(const Runtime &runtime) : RuntimeRef(const_cast<Runtime &>(runtime)) {
+				if (RuntimeRef.Depth >= MAX_DEPTH) {
+					RuntimeRef.Error = "script recursion limit exceeded";
+					Allowed = false;
+					return;
+				}
+				RuntimeRef.Depth++;
+				Allowed = true;
+			}
+
+			~StackGuard() {
+				if (Allowed) {
+					RuntimeRef.Depth--;
+				}
+			}
+
+			operator bool() const {
+				return Allowed;
+			}
+
+		  private:
+			Runtime &RuntimeRef;
+			bool Allowed = false;
+		};
+
 		// Which host this runtime's scripts believe they are on.
 		//
 		// @return The role given at construction.
@@ -519,6 +566,11 @@ namespace engine::script {
 		// the same world, and a second copy of "which generation have I
 		// mirrored" is a second answer to it.
 		SourceMirror Mirrored;
+
+		// Current re-entrancy depth for the stack guard. Zero when no script is
+		// executing. Incremented on every entry to Run/RunInstance/Heartbeat/
+		// Invoke/Surface. Mutable because Surface is const but still counts.
+		mutable unsigned Depth = 0;
 
 	  private:
 		// Records `instance` as started here, answering whether it is new.
