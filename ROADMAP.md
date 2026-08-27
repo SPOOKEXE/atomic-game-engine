@@ -90,6 +90,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
 - [_] StackGuard to prevent stack errors, infinite recursion, etc.
 - [_] Random.new(seed) with functions
+- [_] fix billboard gui in scene not rendering properly and stuff
+- [_] check if particles load textures properly (the particle demo world is just a white box?)
 
 ### v0.21
 
@@ -183,3 +185,4 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] studio icons
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
+- [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
