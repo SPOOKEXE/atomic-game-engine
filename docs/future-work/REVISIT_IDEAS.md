@@ -3551,3 +3551,1853 @@ close
 And honestly, **the cross-system group is where I think the really novel Atomic Engine architecture could emerge**. Your documents already have several of the ingredients—GPU-resident state, delta uploads, quantization, parallel world processing, render graphs, strict determinism, and a clean ECS/shim separation. 
 
 Rather than accumulating 500 independent features, you can make a handful of systems—**Spatial, Visibility, Importance, LOD, Residency, Budgeting, Temporal History, and Scheduling**—that cause *all* those features to become cheaper automatically. That's the kind of architecture I'd aim for if the goal is **"Atomic can render/simulate an absurd amount of stuff without requiring absurd hardware."**
+
+---
+---
+---
+
+Yes — **this is the more interesting direction**. Looking at the architecture documents together, I think there is a much deeper philosophy you can push Atomic toward than "implement the usual AAA features."
+
+Your existing design already has several unusual pieces: ECS-first separation, GPU-resident visual state, delta-only synchronization, strict determinism, parallel work within ticks, batched world processing, node-based rendering, and portals that are intended to cross the physics/rendering/projection boundary seamlessly.  
+
+I'd build on those with something like:
+
+# The overarching idea: optimize for **end-to-end wall clock**
+
+Most engines implicitly optimize:
+
+> "Make each operation as cheap as possible."
+
+I'd instead make Atomic optimize:
+
+> **"Minimize time from input/state change → final observable result."**
+
+That changes some architectural decisions dramatically.
+
+For example, this can be faster:
+
+```text
+CPU computes extra data
+        ↓
+GPU receives extra data
+        ↓
+GPU has enough information to finish independently
+```
+
+than:
+
+```text
+CPU computes minimal data
+        ↓
+GPU stalls
+        ↓
+CPU computes another thing
+        ↓
+synchronization
+        ↓
+GPU continues
+```
+
+So I'd explicitly introduce an **end-to-end latency optimization philosophy**.
+
+---
+
+# 1. Predicted / Speculative Compute
+
+This is probably the most interesting thing you mentioned.
+
+Instead of always waiting for the exact answer:
+
+```text
+A → compute → B → compute → C → render
+```
+
+the engine can predict likely outcomes:
+
+```text
+A
+│
+├── predicted B₁ ──→ predicted C₁
+├── predicted B₂ ──→ predicted C₂
+└── predicted B₃ ──→ predicted C₃
+                         │
+                         ↓
+                    actual B
+                         │
+                  accept / discard
+```
+
+The key is that **extra computation can be worthwhile if it removes a synchronization point**.
+
+## Where this could work
+
+### Rendering
+
+Predict:
+
+* camera transform
+* object visibility
+* LOD
+* shadow visibility
+* portal views
+* animation pose
+* temporal history
+
+Then correct when the authoritative state arrives.
+
+### Physics
+
+Predict:
+
+* broadphase pairs
+* likely contacts
+* sleeping/waking
+* next transforms
+
+Then the actual solver validates/corrects.
+
+### ECS
+
+Predict which queries/components will become dirty next tick.
+
+### Streaming
+
+Predict what assets the camera will need **before** it reaches them.
+
+### Networking
+
+Client predicts future state while authoritative state arrives asynchronously.
+
+---
+
+# 2. Speculative Visibility
+
+This could be extremely useful with your GPU-resident architecture.
+
+Suppose frame N sees:
+
+```text
+A B C D
+```
+
+Frame N+1 will *probably* see:
+
+```text
+A B C E
+```
+
+Instead of waiting for a full visibility calculation:
+
+```text
+Previous visible set
+        ↓
+predict next visible set
+        ↓
+start work
+        ↓
+actual camera arrives
+        ↓
+correct
+```
+
+You could maintain:
+
+* previous visible set
+* predicted visible set
+* confirmed visible set
+
+Then rendering can begin work before the final camera state is completely resolved.
+
+---
+
+# 3. Speculative Portal Rendering
+
+This becomes **really interesting** for your non-Euclidean system.
+
+Your roadmap wants portals to make lighting, physics, projection, clipping and geometry crossing the seam seamless. 
+
+Imagine:
+
+```text
+Camera
+  ↓
+Portal A
+  ↓
+Portal B
+  ↓
+Portal C
+```
+
+Instead of synchronously rendering:
+
+```text
+Camera
+ → A
+   → B
+     → C
+```
+
+you could maintain cached predicted portal views.
+
+```text
+Frame N:
+    Portal A view
+       ↓
+    Portal B view
+       ↓
+    Portal C view
+
+Frame N+1:
+    predict all three
+       ↓
+    render concurrently
+       ↓
+    validate camera transforms
+```
+
+And because portals transform coordinates, you can potentially identify **equivalent views**.
+
+---
+
+# 4. Portal View Deduplication
+
+This is a big one I haven't mentioned before.
+
+Suppose you have:
+
+```text
+Camera
+ ├── Portal A → Room X
+ ├── Portal B → Room X
+ └── Portal C → Room X
+```
+
+The naive renderer may render three separate views.
+
+But if their resulting view states overlap sufficiently, Atomic could detect:
+
+> "These are effectively the same view."
+
+Then share:
+
+* visibility
+* depth
+* shadows
+* lighting
+* geometry
+* temporal history
+* GPU work
+
+You could have a:
+
+## View Cache
+
+```text
+ViewKey =
+    camera transform
+    projection
+    world
+    portal transform chain
+    clip region
+    render settings
+```
+
+Hash that.
+
+Then:
+
+```text
+Request View X
+       ↓
+View cache?
+   ↙       ↘
+ YES       NO
+  ↓         ↓
+reuse     render
+```
+
+This is particularly suited to non-Euclidean rendering.
+
+---
+
+# 5. Portal Transform Chains as First-Class Objects
+
+Instead of thinking:
+
+> camera → portal → camera
+
+think:
+
+```text
+TransformChain
+
+World A
+  ↓
+Portal A
+  ↓
+World B
+  ↓
+Portal B
+  ↓
+World C
+```
+
+Represent the entire transformation as a composable object:
+
+```text
+T = Tportal3 × Tportal2 × Tportal1
+```
+
+Then the same chain can drive:
+
+* rendering
+* physics
+* raycasts
+* audio
+* AI perception
+* spatial queries
+* camera placement
+* shadows
+* GI
+
+That prevents each subsystem from implementing its own version of "what happens when you cross a portal."
+
+---
+
+# 6. Recursive Portal Budgeting
+
+Rather than:
+
+> render portals up to depth 4
+
+use a **cost-based recursion budget**.
+
+Example:
+
+```text
+Portal A
+importance = 0.92
+→ recurse
+
+Portal B
+importance = 0.63
+→ recurse
+
+Portal C
+importance = 0.11
+→ stop
+```
+
+Factors:
+
+* screen area
+* distance
+* portal depth
+* motion
+* visibility
+* expected contribution
+* previous-frame stability
+
+So a tiny portal doesn't consume the same recursion budget as a giant doorway occupying half the screen.
+
+---
+
+# 7. Temporal Portal Reprojection
+
+You currently use last-frame information for cameras-in-cameras.
+
+I'd push this much further.
+
+A portal view can have its own temporal history:
+
+```text
+Portal A
+ ├── previous color
+ ├── previous depth
+ ├── previous motion
+ ├── previous visibility
+ └── previous transform
+```
+
+Then when the portal view moves slightly:
+
+```text
+Previous portal frame
+        ↓
+reproject
+        ↓
+only calculate changed regions
+```
+
+This could make recursive portals **far cheaper** than brute-force rerendering every recursion every frame.
+
+---
+
+# 8. Multi-Camera as a General Rendering Primitive
+
+Your architecture already wants to batch all cameras across active scenes. 
+
+I'd make "camera" almost equivalent to a **View Request**.
+
+A view request contains:
+
+```text
+World
+Camera transform
+Projection
+Viewport
+Clip planes
+Portal chain
+Render features
+Quality budget
+Temporal history
+```
+
+Then the renderer doesn't fundamentally care whether the view came from:
+
+* player camera
+* reflection
+* portal
+* security camera
+* minimap
+* shadow camera
+* probe
+* editor viewport
+* VR eye
+* spectator
+* cinematic camera
+
+They're all **views**.
+
+That gives you enormous opportunities for deduplication and batching.
+
+---
+
+# 9. View Graph
+
+Take that one step further.
+
+Instead of:
+
+```text
+Camera → Render
+```
+
+construct:
+
+```text
+                  View Graph
+
+                 Main Camera
+                /     |      \
+               /      |       \
+          Portal    Reflection  Shadow
+             |           |
+          Portal       Probe
+             |
+          Portal
+```
+
+Each node is a view.
+
+The renderer can:
+
+* deduplicate views
+* schedule independent views concurrently
+* share resources
+* determine dependencies
+* prioritize important views
+* reuse previous results
+
+This fits naturally into your render-node philosophy.
+
+---
+
+# 10. Cross-View Work Sharing
+
+This could be **massive**.
+
+Suppose:
+
+```text
+Main camera
+Reflection camera
+Portal camera
+Shadow camera
+```
+
+all see the same castle.
+
+Don't independently perform:
+
+```text
+cull castle
+cull castle
+cull castle
+cull castle
+```
+
+Instead:
+
+```text
+                 Scene
+                   ↓
+             Shared visibility
+              /    |     \
+             ↓     ↓      ↓
+          Camera  Portal Reflection
+```
+
+Similarly:
+
+* mesh residency
+* material residency
+* animation
+* skinning
+* geometry processing
+* texture residency
+
+can be shared.
+
+---
+
+# 11. Incremental Everything
+
+This is another principle I'd explicitly add.
+
+Instead of:
+
+> recompute X every frame
+
+ask:
+
+> **what changed since last frame?**
+
+You already apply this philosophy to GPU state, where only changed data should be updated to minimize PCIe traffic. 
+
+Generalize it:
+
+### Incremental ECS
+
+Only process changed components.
+
+### Incremental rendering
+
+Only recompute changed visibility/material state.
+
+### Incremental physics
+
+Reuse contact/manifold state.
+
+### Incremental GI
+
+Update only changed regions.
+
+### Incremental shadows
+
+Invalidate only affected pages.
+
+### Incremental streaming
+
+Only change residency where needed.
+
+### Incremental networking
+
+Send only changed state.
+
+### Incremental editor
+
+Only rebuild affected subtrees.
+
+---
+
+# 12. Dependency-Aware Dirty Propagation
+
+Rather than every system scanning for changes:
+
+```text
+Transform changed
+       ↓
+dependency graph
+       ├── render transform dirty
+       ├── spatial bounds dirty
+       ├── shadow dirty
+       ├── physics dirty
+       └── portal visibility dirty
+```
+
+One change propagates through a dependency graph.
+
+This could drastically reduce ECS iteration.
+
+---
+
+# 13. Change Masks Per Component
+
+You already have the idea of packed component data and quantization. 
+
+Go further:
+
+```text
+Transform
+ ├── position dirty
+ ├── rotation clean
+ └── scale clean
+```
+
+Then downstream systems can avoid touching unchanged fields.
+
+At a lower level:
+
+```text
+dirty_mask = 00100101
+```
+
+could identify changed fields.
+
+This becomes useful for:
+
+* ECS
+* GPU upload
+* replication
+* persistence
+* undo/redo
+* networking
+* editor inspection
+
+**One dirty-bit system could serve all of them.**
+
+---
+
+# 14. ECS Query Compilation
+
+Rather than interpreting ECS queries every frame:
+
+```text
+query:
+Position + Velocity + Health
+```
+
+compile them into an optimized execution plan.
+
+For example:
+
+```text
+Query
+ ↓
+matching archetypes
+ ↓
+chunk list
+ ↓
+SIMD loop
+ ↓
+parallel partitions
+```
+
+Cache the result.
+
+If archetypes don't change, the query doesn't need to rediscover them.
+
+---
+
+# 15. Query Result Caching
+
+Even more aggressive:
+
+```text
+Query A:
+Position + Velocity
+
+Frame N:
+chunks [4,7,9,13]
+
+Frame N+1:
+same chunks
+```
+
+Reuse the chunk list.
+
+Only invalidate when structural ECS changes occur.
+
+This is particularly attractive for an ECS-first engine.
+
+---
+
+# 16. ECS Prefetching
+
+Since you're specifically thinking about cache hits:
+
+```text
+Process chunk N
+       ↓
+hardware/software prefetch
+chunk N+1
+       ↓
+process N
+       ↓
+N+1 already in cache
+```
+
+But make it adaptive.
+
+If the access pattern is predictable:
+
+```text
+prefetch aggressively
+```
+
+If random:
+
+```text
+don't pollute cache
+```
+
+The ECS scheduler could learn access patterns from profiling data.
+
+---
+
+# 17. Structure-of-Arrays **and** Array-of-Structures Hybridization
+
+Don't dogmatically make everything SoA.
+
+Different systems want different layouts.
+
+For example:
+
+```text
+Rendering:
+SoA
+
+Physics:
+AoSoA
+
+Animation:
+SoA
+
+Tiny frequently-used components:
+packed AoS
+
+GPU:
+structure optimized for coalescing
+```
+
+Atomic could automatically select component storage based on observed access patterns.
+
+---
+
+# 18. Runtime Data Layout Specialization
+
+This is a more ambitious idea.
+
+Suppose profiling says:
+
+```text
+Transform.Position
+Transform.Rotation
+Velocity
+```
+
+are almost always accessed together.
+
+Atomic could create a specialized packed view:
+
+```text
+HotTransformView
+[Position][Rotation][Velocity]
+```
+
+without changing the logical ECS component model.
+
+So:
+
+> **logical ECS layout ≠ physical execution layout**
+
+That could be extremely powerful.
+
+---
+
+# 19. Predictive Streaming
+
+This is almost certainly worth doing.
+
+Instead of:
+
+```text
+player reaches cell
+ ↓
+load cell
+```
+
+predict:
+
+```text
+velocity
+direction
+camera
+terrain topology
+road/path
+historical movement
+ ↓
+predict next cells
+ ↓
+stream them before needed
+```
+
+Even better:
+
+### Multiple predictions
+
+```text
+80% → road ahead
+15% → side path
+5%  → turn around
+```
+
+Load the cheap/common data for all three.
+
+Then fully load the most likely path.
+
+---
+
+# 20. Streaming as a speculative computation
+
+Streaming doesn't have to be binary.
+
+```text
+Unknown
+ ↓
+metadata
+ ↓
+compressed asset
+ ↓
+CPU decoded
+ ↓
+GPU resident
+ ↓
+high-res resident
+```
+
+Predictive streaming can advance an asset through these states before it's actually visible.
+
+This is a beautiful match for your asset system, which already separates GUIDs, content addressing, chunking, manifests and the virtual filesystem. 
+
+---
+
+# 21. GPU-Resident State with GPU Authority
+
+Your current architecture deliberately keeps visual state GPU-resident while CPU controllers produce it. 
+
+I'd introduce a stronger distinction:
+
+### CPU-authoritative
+
+Gameplay state.
+
+### GPU-authoritative
+
+Purely visual derived state.
+
+For example:
+
+```text
+CPU:
+Transform
+Animation state
+Material parameters
+
+GPU derives:
+world matrix
+skinning
+visibility
+LOD
+fade
+instance flags
+shadow state
+```
+
+Then **don't copy derived values back to CPU**.
+
+This sounds obvious, but making it a hard architectural rule can eliminate enormous amounts of synchronization.
+
+---
+
+# 22. GPU-Side Dependency Graph
+
+If GPU state is resident, let GPU computations feed each other directly:
+
+```text
+Transform
+   ↓
+Bounds
+   ↓
+Visibility
+   ↓
+LOD
+   ↓
+Material
+   ↓
+Shadow
+   ↓
+Draw
+```
+
+No CPU round trips.
+
+You already explicitly want per-instance render capabilities in the GPU-resident row so compute passes can branch without CPU readback. 
+
+I'd make that philosophy universal.
+
+---
+
+# 23. Synchronization Elision
+
+This could become an Atomic-specific optimization category.
+
+For every synchronization:
+
+> **Prove whether it is actually required.**
+
+Instead of:
+
+```text
+CPU → sync → GPU → sync → CPU → sync → GPU
+```
+
+aim for:
+
+```text
+CPU ───────────────→ GPU
+       async work
+       async work
+       async work
+       ↓
+     fence only
+```
+
+Potential tools:
+
+* [ ] dependency-based fences
+* [ ] timeline semaphores
+* [ ] asynchronous compute
+* [ ] deferred readback
+* [ ] batched readback
+* [ ] double/triple buffering
+* [ ] persistent mapped buffers
+* [ ] lock-free queues
+* [ ] frame-lagged feedback
+* [ ] speculative execution
+
+---
+
+# 24. Delayed Feedback as a Feature
+
+This is subtle.
+
+Sometimes **a one-frame-old answer is better than blocking for a current answer**.
+
+You already do this with camera-in-camera rendering.
+
+Generalize it:
+
+```text
+Current frame:
+use previous result
+
+Meanwhile:
+calculate current result
+
+Next frame:
+use new result
+```
+
+Potentially for:
+
+* occlusion
+* reflections
+* GI
+* shadows
+* portal views
+* expensive physics queries
+* AI perception
+* streaming decisions
+
+The engine needs to know **which information can safely be stale**.
+
+---
+
+# 25. Quality-Staleness Tradeoffs
+
+This could be formalized.
+
+Every subsystem declares:
+
+```text
+maximum acceptable staleness
+```
+
+Examples:
+
+```text
+Physics:
+0 frames
+
+Gameplay:
+0 frames
+
+Main visibility:
+0–1
+
+Reflection:
+1–2
+
+GI:
+2–8
+
+Distant shadow:
+several
+
+Far-away AI:
+many
+```
+
+Then the scheduler can spend computation where freshness matters.
+
+That's much more sophisticated than simply having "quality = high/medium/low."
+
+---
+
+# 26. Work Stealing + Critical Path Scheduling
+
+Your docs currently say work inside a tick may be parallel but cannot cross tick boundaries. 
+
+I'd go beyond simple parallelism.
+
+Build the tick as a DAG:
+
+```text
+Input
+ │
+ ├── Physics ──┐
+ ├── Animation ─┤
+ ├── Streaming ─┤
+ └── ECS ───────┤
+                ↓
+           Derived state
+                ↓
+             Render
+```
+
+Then schedule based on **critical path**, not just workload.
+
+A 1 ms job blocking a 5 ms chain should potentially execute before a 4 ms independent job.
+
+---
+
+# 27. Critical-Path-Aware ECS Scheduling
+
+Imagine:
+
+```text
+System A: 3ms
+System B: 1ms
+System C: 1ms
+System D: 4ms
+```
+
+If:
+
+```text
+A → D
+B → C
+```
+
+then:
+
+```text
+A → D = 7ms critical path
+B → C = 2ms
+```
+
+The scheduler should prioritize A/D.
+
+Not merely:
+
+> "give every worker roughly equal work."
+
+This is a genuine **end-to-end wall-clock optimization**.
+
+---
+
+# 28. Memory-for-Time Algorithms
+
+I think you should explicitly embrace this.
+
+Your docs already pursue quantization and memory packing, but you're not forced to minimize memory at every cost. 
+
+Allow:
+
+```text
++200 MB memory
+→ -4 ms/frame
+```
+
+if the target platform has the RAM/VRAM.
+
+Examples:
+
+* cached query results
+* duplicated hot ECS data
+* precomputed transforms
+* visibility caches
+* portal view caches
+* physics broadphase caches
+* decoded asset caches
+* precomputed SDFs
+* shadow caches
+* GI caches
+* animation pose caches
+* network delta baselines
+
+Basically:
+
+> **Memory is another form of computation budget.**
+
+---
+
+# 29. Multi-Version Data
+
+This is particularly interesting.
+
+Instead of synchronizing one state:
+
+```text
+State N
+```
+
+maintain:
+
+```text
+State N
+State N+1 prediction
+State N-1 history
+```
+
+This helps:
+
+* temporal rendering
+* rollback
+* networking
+* prediction
+* physics
+* portals
+* interpolation
+
+It turns time itself into a cached dimension.
+
+---
+
+# 30. History Buffers as a General Engine Primitive
+
+You already use previous-frame camera information.
+
+I'd create a generic:
+
+## Temporal Data Store
+
+```text
+Current
+Previous
+Previous²
+Predicted
+Authoritative
+```
+
+Systems can request whichever version they need.
+
+That means temporal algorithms don't each invent their own buffering mechanism.
+
+---
+
+# 31. Deterministic Rollback / Re-simulation
+
+Your strict IEEE determinism decision makes this particularly valuable. 
+
+If the engine can deterministically replay ticks:
+
+```text
+Tick 100
+Tick 101
+Tick 102
+Tick 103
+```
+
+then speculative systems become much safer.
+
+You can:
+
+```text
+predict
+ ↓
+continue simulation
+ ↓
+receive correction
+ ↓
+rollback
+ ↓
+replay
+```
+
+This has applications far beyond multiplayer.
+
+---
+
+# 32. Eventual-Consistency Engine State
+
+Not every subsystem needs instantaneous synchronization.
+
+For example:
+
+```text
+Gameplay state
+    ↓ authoritative
+
+Rendering
+    ↓ eventually consistent
+
+Audio
+    ↓ eventually consistent
+
+Streaming
+    ↓ eventually consistent
+
+Analytics
+    ↓ very eventually consistent
+```
+
+The engine could explicitly classify state as:
+
+* authoritative
+* derived
+* speculative
+* cached
+* eventually consistent
+
+That gives the scheduler permission to avoid unnecessary synchronization.
+
+---
+
+# 33. Delta Everything
+
+You've already explicitly identified delta-state uploads and minimizing PCIe traffic. 
+
+I'd make deltas a universal primitive:
+
+```text
+ECS
+    delta
+
+GPU
+    delta
+
+Network
+    delta
+
+Persistence
+    delta
+
+Undo/redo
+    delta
+
+Streaming
+    delta
+
+Replication
+    delta
+```
+
+And ideally one common change representation:
+
+```text
+Entity
+Component
+Field
+Old value
+New value
+Version
+```
+
+Then different consumers encode it differently.
+
+---
+
+# 34. Versioned State Instead of Full Synchronization
+
+Rather than:
+
+```text
+"GPU is synchronized with ECS."
+```
+
+have:
+
+```text
+ECS version = 91822
+GPU version = 91818
+```
+
+GPU requests:
+
+```text
+91818 → 91822
+```
+
+and receives exactly those deltas.
+
+This makes synchronization measurable and explicit.
+
+---
+
+# 35. Partial Synchronization
+
+You don't necessarily need:
+
+> "GPU is synchronized."
+
+You can have:
+
+```text
+Transform:
+GPU v91
+
+Material:
+GPU v104
+
+Animation:
+GPU v73
+
+Visibility:
+GPU v120
+```
+
+Each subsystem progresses independently.
+
+That could be **very powerful** for your resident-state architecture.
+
+---
+
+# 36. GPU Feedback Without Immediate Readback
+
+GPU-generated data often doesn't need to reach the CPU immediately.
+
+Instead:
+
+```text
+GPU frame N
+   ↓
+feedback buffer
+   ↓
+GPU frame N+1
+```
+
+and only occasionally:
+
+```text
+GPU → CPU
+```
+
+for things like:
+
+* visibility statistics
+* streaming requests
+* occlusion results
+* LOD statistics
+* GPU counters
+
+This minimizes synchronization.
+
+---
+
+# 37. Adaptive Algorithms
+
+Rather than choosing one algorithm forever:
+
+```text
+BVH
+vs
+grid
+vs
+SAP
+```
+
+the engine could choose based on observed scene characteristics.
+
+For example:
+
+```text
+Mostly static scene
+→ BVH
+
+Huge uniform crowd
+→ spatial grid
+
+Sparse moving objects
+→ dynamic tree
+
+Terrain
+→ hierarchical grid
+```
+
+Even better, choose **per spatial region**.
+
+---
+
+# 38. Runtime Algorithm Selection
+
+This could be generalized:
+
+```text
+Small N
+→ O(N²), highly vectorized
+
+Medium N
+→ spatial partition
+
+Huge N
+→ GPU parallel algorithm
+```
+
+The asymptotically "better" algorithm isn't always faster at small N.
+
+Atomic could select based on:
+
+```text
+N
+distribution
+hardware
+cache
+GPU occupancy
+historical timing
+```
+
+This is exactly aligned with your "slightly more memory for less wall-clock" idea.
+
+---
+
+# 39. Algorithm Portfolio
+
+You could actually maintain multiple implementations:
+
+```text
+Collision:
+ ├── scalar
+ ├── SIMD
+ ├── multithreaded
+ └── GPU
+
+Visibility:
+ ├── CPU BVH
+ ├── SIMD BVH
+ └── GPU
+
+Particles:
+ ├── CPU
+ └── GPU
+```
+
+Then a runtime cost model selects one.
+
+Not every feature has to have one canonical implementation.
+
+---
+
+# 40. Auto-Tuning
+
+This is where it gets really wild.
+
+Atomic could benchmark itself during development / first-run / controlled intervals:
+
+```text
+Scene characteristics:
+  250k entities
+  30k visible
+  8k dynamic
+  400 lights
+
+Algorithm A: 2.1ms
+Algorithm B: 1.6ms
+Algorithm C: 2.7ms
+
+→ choose B
+```
+
+Store the result by hardware/content profile.
+
+This is essentially **JIT-style optimization for engine algorithms**.
+
+---
+
+# 41. Predictive Compute Budgeting
+
+Combine prediction + budgets.
+
+Instead of:
+
+> "We have 2ms for particles."
+
+predict:
+
+```text
+Next frame estimated:
+GPU = 14.2ms
+
+Portal recursion = +1.4ms
+Particles = +0.7ms
+Shadow update = +0.8ms
+
+Predicted = 17.1ms
+```
+
+So the engine can reduce work **before** exceeding the frame budget.
+
+That's much better than reacting after the frame is already slow.
+
+---
+
+# 42. Frame-Time Prediction
+
+You could have:
+
+```text
+Frame N
+ ↓
+measure
+
+Frame N+1
+ ↓
+predict cost
+
+Frame N+2
+ ↓
+schedule based on prediction
+```
+
+Inputs:
+
+* number of visible objects
+* camera velocity
+* portal count
+* particle count
+* physics bodies
+* GPU timing history
+* streaming
+* resolution
+
+This could drive dynamic quality proactively.
+
+---
+
+# 43. "Do Nothing" as an Explicit Optimization
+
+This sounds silly, but it's incredibly important.
+
+Every system should have a cheap answer:
+
+> **Nothing changed.**
+
+For example:
+
+```text
+Physics:
+sleep
+
+Animation:
+reuse pose
+
+Shadow:
+reuse cache
+
+GI:
+reuse probes
+
+Portal:
+reuse view
+
+GPU:
+no upload
+
+ECS:
+no structural change
+
+Streaming:
+already resident
+```
+
+A lot of engine performance comes from making the common case:
+
+```text
+if unchanged:
+    return
+```
+
+extremely cheap.
+
+---
+
+# 44. Zero-Copy Data Paths
+
+You should aggressively look for:
+
+```text
+CPU data
+ ↓ copy
+temporary
+ ↓ copy
+GPU buffer
+```
+
+and replace with:
+
+```text
+shared/persistent resource
+```
+
+where hardware permits.
+
+Especially:
+
+* ECS → renderer
+* animation → skinning
+* terrain → renderer
+* physics → transforms
+* network → replication
+* asset decompression → GPU upload
+
+---
+
+# 45. Cross-System GPU Pipelines
+
+Here's a potentially very Atomic-specific architecture:
+
+```text
+ECS state
+    ↓
+GPU resident state
+    ↓
+Compute
+ ├── bounds
+ ├── visibility
+ ├── LOD
+ ├── animation
+ ├── skinning
+ ├── particles
+ ├── lighting lists
+ └── draw generation
+    ↓
+Graphics
+```
+
+Rather than CPU orchestrating every little stage.
+
+---
+
+# 46. ECS → GPU "Derived State"
+
+I'd distinguish:
+
+```text
+Authoritative ECS components
+```
+
+from:
+
+```text
+Derived GPU components
+```
+
+For example:
+
+```text
+ECS:
+Transform
+Mesh
+Material
+VisibilitySettings
+
+GPU derives:
+WorldMatrix
+BoundingSphere
+LOD
+Fade
+DrawArguments
+SkinningPalette
+```
+
+Those derived values **should not exist as duplicated CPU state**.
+
+---
+
+# 47. One More Big Idea: Computational Coherence
+
+You have cache coherence at the hardware level.
+
+I'd design for **semantic coherence**.
+
+If several systems need the same result:
+
+```text
+"Is this object visible?"
+```
+
+don't have:
+
+```text
+renderer calculates visibility
+physics calculates visibility
+shadow calculates visibility
+portal calculates visibility
+```
+
+Instead:
+
+```text
+Visibility result
+       ↓
+shared by:
+ renderer
+ shadows
+ reflections
+ portals
+ VFX
+ audio
+```
+
+Likewise:
+
+```text
+spatial query
+distance
+importance
+material
+surface type
+```
+
+should become reusable derived data.
+
+---
+
+# 48. "Compute Once, Consume Many"
+
+I'd make this a hard design principle.
+
+For every expensive calculation ask:
+
+> **Can its result become an engine-wide primitive?**
+
+Examples:
+
+### Distance
+
+Used by:
+
+* LOD
+* physics
+* audio
+* animation
+* streaming
+* particles
+
+### Visibility
+
+Used by:
+
+* renderer
+* shadows
+* reflections
+* audio
+* animation
+* AI
+
+### Surface material
+
+Used by:
+
+* physics
+* particles
+* audio
+* footsteps
+* rendering
+
+### SDF
+
+Used by:
+
+* collision
+* GI
+* AO
+* shadows
+* VFX
+
+This is how you get disproportionate performance gains.
+
+---
+
+# The architecture I'd actually aim for
+
+Your current documents already point toward:
+
+**ECS → GPU-resident state → delta synchronization → batched parallel worlds → node-based renderer.** 
+
+I'd evolve that into:
+
+```text
+                         ATOMIC
+                           │
+                 ┌─────────┴─────────┐
+                 │  AUTHORITATIVE    │
+                 │    WORLD STATE    │
+                 └─────────┬─────────┘
+                           │
+                    Change / Version
+                           │
+                 ┌─────────┴─────────┐
+                 │   DERIVED STATE   │
+                 │ CPU + GPU caches  │
+                 └─────────┬─────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        ↓                  ↓                  ↓
+    Visibility          Spatial           Importance
+        │                  │                  │
+        └──────────────────┼──────────────────┘
+                           ↓
+                  SIMULATION LOD
+                           │
+             ┌─────────────┼─────────────┐
+             ↓             ↓             ↓
+          Render        Physics       Animation
+             │             │             │
+             └─────────────┼─────────────┘
+                           ↓
+                  COMPUTE SCHEDULER
+                           │
+                ┌──────────┴──────────┐
+                ↓                     ↓
+             CPU DAG               GPU DAG
+                │                     │
+                └──────────┬──────────┘
+                           ↓
+                    OBSERVABLE FRAME
+```
+
+And surrounding that:
+
+```text
+Prediction
+Temporal history
+Caching
+Speculation
+Delta state
+Versioning
+Budget prediction
+Algorithm selection
+```
