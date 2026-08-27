@@ -93,7 +93,31 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] fix billboard gui in scene not rendering properly and stuff
 - [_] check if particles load textures properly (the particle demo world is just a white box?)
 
+### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
+- [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
+- [_] one registration path for render nodes — fold scope/queue metadata and requirements into graph::NodeCatalogue; derive BackendNodes(); studio widgets read Params
+- [_] DeviceCaps probe + CheckCapabilities — probe in Initialise(); wire refusal messages; studio requirements column
+- [_] custom native node kinds — RegisterNodeKind + Renderer::InstallNodeHandler; lifecycle hook on reinstall; demo custom kind in examples
+- [_] per-node GPU profiling — mark assignment in GraphRunner, grid column, tier switch; assert dropped-mark accounting
+- [_] explicit conversion nodes + narrowing rule — explicit blit format targeting; LossyWire demoted to hint when explicit conversion sits between producer/consumer
+- [_] tiered default pipelines by capability — Tier B/C documents; capability-driven pick at install; WorldPipelines extension asserting fall-through reasons
+- [_] ECS component change tracking — dirty bits/version counters so systems only process changed data
+- [_] archetype/query optimizer — cached ECS queries, change filters, parallel query execution
+- [_] entity references/handles — generation-safe references instead of raw entity IDs
+- [_] world snapshots & cloning — serialize/restore entire world state; instant-ish duplicate world for testing, previews, server simulation
+- [_] rollback/snapshot system — for networking and deterministic simulation
+- [_] system dependency graph — explicitly declare before/after, parallelize independent systems
+- [_] frame scheduler — CPU jobs, GPU jobs, async jobs and synchronization points represented together
+- [_] engine tick phases — Input → Simulation → Physics → Animation → Replication → Render preparation → Render
+- [_] determinism mode — detect nondeterministic simulation and optionally enforce deterministic ordering
+- [_] hot-reloadable components/systems
+- [_] parallel::Jobs pool fix — static Pool *pool = new Pool(); never destroy to avoid exit hang with waiters on condition variables
+
 ### v0.21
+
+- [_] wire future components — scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
+- [_] skinning pipeline — assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
+- [_] atmosphere/clouds at v0.22 — render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
 
 - [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
 - [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
