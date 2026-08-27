@@ -181,3 +181,5 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 - [_] atomic engine icons
 - [_] studio icons
+- [_] pathfinding
+- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
