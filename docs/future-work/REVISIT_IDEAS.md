@@ -5401,3 +5401,1505 @@ Versioning
 Budget prediction
 Algorithm selection
 ```
+
+---
+---
+---
+
+Absolutely. I think **DX + AI + customization** could become one of Atomic's strongest differentiators. The engine shouldn't just be powerful internally; it should make the *power accessible* without forcing developers to understand the entire engine architecture.
+
+I'd think about it as:
+
+> **Anything the engine can do internally should eventually be inspectable, controllable, automatable, and replaceable by the developer.**
+
+## 1. Studio as an "engine operating system"
+
+Don't make Studio just a scene editor.
+
+Make it the unified interface to essentially everything Atomic can do.
+
+```text
+                         ATOMIC STUDIO
+                              │
+       ┌──────────┬───────────┼───────────┬──────────┐
+       ↓          ↓           ↓           ↓          ↓
+     Scene      Assets      Code       Runtime     Data
+       ↓          ↓           ↓           ↓          ↓
+    Physics    Materials    ECS       Profiler   Network
+    Render     Shaders      Jobs      GPU         Replay
+    Portals    Animation    AI        Memory      Tests
+```
+
+Every engine subsystem gets a Studio-facing interface.
+
+For example, select an entity and see:
+
+```text
+ENTITY: Castle_Gate
+
+ECS
+ ├─ Transform
+ ├─ Renderable
+ ├─ PhysicsBody
+ ├─ PortalSurface
+ └─ AudioEmitter
+
+RUNTIME
+ ├─ GPU resident ✓
+ ├─ Physics island #128
+ ├─ LOD 1
+ ├─ Visible ✓
+ └─ Streaming state: Resident
+
+COST
+ CPU: 0.04ms
+ GPU: 0.17ms
+ VRAM: 18.2MB
+```
+
+---
+
+# 2. "Everything is inspectable"
+
+This is probably one of the most important DX principles.
+
+If Atomic has:
+
+* ECS
+* render graph
+* GPU buffers
+* physics
+* jobs
+* portals
+* streaming
+* resource residency
+* synchronization
+* temporal caches
+
+then Studio should expose them.
+
+Not just:
+
+> "FPS: 83"
+
+but:
+
+```text
+WHY IS THIS FRAME 12.1ms?
+```
+
+and drill down:
+
+```text
+Frame
+ ├─ Simulation       2.1ms
+ │   ├─ Physics      0.8
+ │   ├─ ECS          0.6
+ │   └─ Animation    0.7
+ │
+ ├─ Rendering        8.4ms
+ │   ├─ Shadows      1.8
+ │   ├─ Geometry     2.0
+ │   ├─ GI           1.6
+ │   ├─ Portals      1.2
+ │   └─ Post         1.8
+ │
+ └─ Streaming        1.6ms
+```
+
+Then click **Portals**:
+
+```text
+Portal rendering: 1.2ms
+
+Portal A
+ ├─ recursion: 3
+ ├─ views: 7
+ ├─ cache hit: 82%
+ └─ 0.41ms
+
+Portal B
+ ├─ recursion: 2
+ ├─ views: 4
+ ├─ cache hit: 91%
+ └─ 0.17ms
+```
+
+That's developer experience worth building.
+
+---
+
+# 3. Universal "Why?" inspector
+
+I'd actually make this a formal feature.
+
+Select anything and ask:
+
+> **Why is this here?**
+
+Examples:
+
+**Why is this mesh LOD2?**
+
+```text
+Distance: 84m
+Screen coverage: 2.3%
+Importance: 0.18
+Triangle budget: exceeded
+Selected LOD: 2
+```
+
+**Why is this texture resident?**
+
+```text
+Referenced by:
+  18 visible objects
+  2 portal views
+  1 reflection
+
+Predicted usage: HIGH
+```
+
+**Why did this object get simulated?**
+
+```text
+Physics:
+ awake
+ connected to Island #382
+ player proximity: 14m
+ collision importance: 0.71
+```
+
+This turns optimization from archaeology into debugging.
+
+---
+
+# 4. Visual debugging everywhere
+
+Studio should have debug visualizations for basically every subsystem.
+
+### ECS
+
+* archetypes
+* chunks
+* query ranges
+* entity ownership
+* structural changes
+* cache behavior
+
+### Physics
+
+* broadphase
+* BVH
+* contact manifolds
+* islands
+* sleeping
+* CCD
+* collision layers
+
+### Rendering
+
+* LOD
+* visibility
+* overdraw
+* meshlets
+* shadows
+* light clusters
+* GPU timings
+
+### Portals
+
+* portal frustums
+* recursion
+* transform chains
+* clip planes
+* view dependencies
+* cached views
+
+### Streaming
+
+* loaded cells
+* loading predictions
+* residency
+* memory pressure
+
+And importantly, **these should be available at runtime**, not only in editor mode.
+
+---
+
+# 5. Time Travel Debugging
+
+This pairs extremely well with your deterministic architecture.
+
+Have:
+
+**Record → rewind → inspect → replay**
+
+```text
+        Timeline
+────────────────────────────────
+ 100 101 102 103 104 105 106
+                 ↑
+             breakpoint
+```
+
+Click tick 103 and inspect:
+
+* ECS state
+* physics
+* transforms
+* portal state
+* GPU-visible state
+* network state
+* events
+
+Then:
+
+> Step one tick.
+
+This could be an incredible tool for engine development.
+
+---
+
+# 6. "Freeze this subsystem"
+
+Imagine debugging a rendering problem.
+
+You can tell Studio:
+
+```text
+Freeze:
+ ✓ Physics
+ ✓ ECS
+ ✓ Streaming
+
+Run:
+ ✓ Renderer
+```
+
+Or:
+
+```text
+Freeze:
+ ✓ Renderer
+
+Run:
+ ✓ Physics
+```
+
+Or freeze **one entity**.
+
+```text
+Entity 1842:
+[Freeze Transform]
+[Freeze Physics]
+[Freeze Animation]
+[Freeze GPU State]
+```
+
+This is much more useful than traditional debugger breakpoints for complex real-time systems.
+
+---
+
+# 7. Live engine modification
+
+I'd make as much of Atomic as possible **hot-editable**.
+
+Change:
+
+* shader
+* material
+* render graph
+* physics parameters
+* LOD thresholds
+* streaming rules
+* ECS component
+* pipeline configuration
+* portal recursion
+* lighting
+* asset processing
+
+without restarting.
+
+Especially:
+
+### Live Render Graph
+
+```text
+GBuffer
+ ↓
+Lighting
+ ↓
+GI
+ ↓
+Post
+```
+
+Drag a node.
+
+Connect something else.
+
+Compile.
+
+See it immediately.
+
+---
+
+# 8. Pipeline Graph Editor
+
+Since you specifically mentioned customizable full pipelines:
+
+**Absolutely.**
+
+Don't make rendering the only graph.
+
+Atomic could expose multiple graph types:
+
+```text
+Render Graph
+Physics Graph
+Asset Graph
+Compute Graph
+ECS System Graph
+Streaming Graph
+Audio Graph
+Animation Graph
+Build Graph
+```
+
+And potentially:
+
+```text
+                Atomic Graph Runtime
+                       │
+       ┌───────────────┼────────────────┐
+       ↓               ↓                ↓
+    CPU nodes        GPU nodes      IO nodes
+```
+
+The important distinction:
+
+> **Graph describes execution; code implements nodes.**
+
+Developers can replace either.
+
+---
+
+# 9. Pipeline Overrides
+
+Every major subsystem should have an escape hatch.
+
+For example:
+
+```python
+engine.renderer = MyRenderer()
+engine.physics = MyPhysics()
+engine.scheduler = MyScheduler()
+engine.asset_cooker = MyCooker()
+```
+
+But preferably without requiring a fork.
+
+Something like:
+
+```text
+Atomic
+ ├─ DefaultRenderer
+ ├─ CustomRenderer
+ ├─ DefaultPhysics
+ ├─ CustomPhysics
+ └─ CustomScheduler
+```
+
+This is where your modular architecture becomes extremely valuable.
+
+---
+
+# 10. "Replace one algorithm"
+
+Even better than replacing entire systems.
+
+Expose interfaces such as:
+
+```text
+VisibilityAlgorithm
+LODAlgorithm
+BroadphaseAlgorithm
+StreamingPolicy
+SchedulerPolicy
+PortalRecursionPolicy
+MemoryAllocator
+ECSStoragePolicy
+```
+
+Then someone could write:
+
+```text
+Atomic default:
+Dynamic BVH
+
+Developer:
+GPU spatial hash
+```
+
+without rewriting the physics engine.
+
+---
+
+# 11. Custom scheduling policies
+
+This is especially relevant given your wall-clock philosophy.
+
+Allow developers to define:
+
+```text
+CriticalPathScheduler
+ThroughputScheduler
+LowLatencyScheduler
+DeterministicScheduler
+```
+
+or even custom policies.
+
+For example:
+
+```text
+VR game:
+prioritize camera latency
+
+RTS:
+prioritize simulation throughput
+
+Cinematic:
+prioritize renderer
+
+MMO:
+prioritize networking + simulation
+```
+
+---
+
+# 12. AI-native Studio
+
+Since you already have MCP, I'd make AI a **first-class Studio operator**, not merely a chatbot.
+
+The AI should be able to interact with the same APIs as the developer.
+
+For example:
+
+> "Why does this scene run at 48 FPS?"
+
+AI gets:
+
+```text
+frame captures
+GPU timings
+ECS statistics
+memory
+draw calls
+LOD
+streaming
+physics
+```
+
+and responds:
+
+> "The largest issue is Portal A. It creates 11 recursive views and consumes 2.4ms. Reducing its recursion budget to 2 would save approximately 1.1ms."
+
+Then:
+
+> "Apply that."
+
+AI changes the actual engine configuration.
+
+---
+
+# 13. AI should operate on structured engine state
+
+Don't give the MCP agent only:
+
+```text
+screenshots + text
+```
+
+Give it structured concepts:
+
+```text
+Scene
+Entity
+Component
+Resource
+RenderPass
+GPUBuffer
+Texture
+Portal
+PhysicsBody
+ECSQuery
+Job
+Frame
+MemoryAllocation
+```
+
+So the AI can reason:
+
+```text
+Entity 1842
+ ├─ Mesh: castle_wall
+ ├─ Material: stone_02
+ ├─ LOD: 1
+ ├─ GPU resident: yes
+ └─ Physics: static
+```
+
+This is vastly more powerful.
+
+---
+
+# 14. AI-generated engine tooling
+
+Your MCP shouldn't just be:
+
+> "create an entity."
+
+It could expose **capability discovery**.
+
+AI asks:
+
+```text
+What can Atomic do?
+```
+
+and gets machine-readable descriptions of:
+
+```text
+available systems
+available components
+available graph nodes
+available asset processors
+available debug tools
+available render features
+```
+
+Then the AI can construct workflows dynamically.
+
+---
+
+# 15. AI as an engine operator
+
+Give AI commands like:
+
+```text
+profile_frame()
+inspect_entity()
+inspect_gpu_memory()
+capture_frame()
+trace_system()
+trace_entity()
+find_expensive_assets()
+find_stale_gpu_state()
+find_sync_points()
+find_cache_misses()
+compare_frames()
+modify_render_graph()
+modify_material()
+run_benchmark()
+```
+
+Then AI becomes essentially:
+
+> **a senior engine programmer sitting inside Studio.**
+
+---
+
+# 16. AI-generated profiling experiments
+
+This would be particularly good for your architecture.
+
+Developer:
+
+> "Find out if increasing portal cache memory by 256MB improves frame time."
+
+AI:
+
+```text
+Baseline:
+GPU: 14.7ms
+VRAM: 6.2GB
+
+Experiment:
+Portal cache +256MB
+
+Result:
+GPU: 13.1ms
+VRAM: 6.46GB
+
+Improvement:
+-1.6ms / -10.9%
+```
+
+Then:
+
+> "Keep it."
+
+This is exactly your **memory-for-wall-clock** philosophy becoming an automated workflow.
+
+---
+
+# 17. AI-generated optimization patches
+
+AI could identify:
+
+```text
+Physics:
+87% of broadphase queries are static-static
+```
+
+and propose:
+
+> "Enable static-static pair elimination."
+
+Then generate a change and benchmark it.
+
+The important part:
+
+**AI shouldn't be trusted to declare an optimization successful.**
+
+Atomic should benchmark it.
+
+```text
+AI hypothesis
+      ↓
+automated experiment
+      ↓
+benchmark
+      ↓
+statistical comparison
+      ↓
+accept/reject
+```
+
+That's much safer and more useful.
+
+---
+
+# 18. AI-powered Asset Pipeline
+
+Developer drops in:
+
+```text
+castle.fbx
+```
+
+Atomic AI could inspect:
+
+```text
+4.8M triangles
+73 materials
+214 textures
+```
+
+and recommend:
+
+```text
+Generate:
+✓ 4 LODs
+✓ collision hull
+✓ SDF
+✓ HLOD
+✓ impostor
+✓ compressed textures
+
+Warnings:
+⚠ 11 redundant materials
+⚠ 8 textures unnecessarily 4K
+```
+
+Then one click:
+
+> **Optimize Asset**
+
+---
+
+# 19. AI semantic search across the entire project
+
+Instead of:
+
+```text
+Find "CastleGate"
+```
+
+ask:
+
+> "Where do we create physics bodies for destructible structures?"
+
+or:
+
+> "What causes this portal to recurse?"
+
+or:
+
+> "Show me every system that modifies Transform.Position."
+
+This requires Atomic's internal metadata/reflection system to be excellent.
+
+Which leads to:
+
+---
+
+# 20. Deep Reflection / Introspection
+
+I'd make this a major engine feature.
+
+Everything has metadata:
+
+```text
+Component
+System
+Resource
+Shader
+Graph
+Node
+Pipeline
+Asset
+Entity
+Property
+```
+
+Metadata includes:
+
+```text
+type
+dependencies
+owners
+readers
+writers
+memory
+GPU residency
+version
+serialization
+editor UI
+AI description
+```
+
+Then **Studio, MCP, debugging, serialization, documentation and tooling can all use the same reflection layer.**
+
+That's an enormous architectural win.
+
+---
+
+# 21. Automatic Editor UI from Reflection
+
+If a component says:
+
+```text
+float mass
+range 0–10000
+category Physics
+```
+
+Studio automatically gets:
+
+```text
+Mass ───────────── 50 kg
+```
+
+If a resource exposes:
+
+```text
+PortalRecursionDepth
+PortalCacheSize
+PortalImportance
+```
+
+Studio generates its inspector.
+
+This means engine developers don't have to manually build editor panels for everything.
+
+---
+
+# 22. Custom Editor Extensions
+
+Then developers can add:
+
+```text
+CustomInspector
+CustomViewportTool
+CustomGraphNode
+CustomAssetImporter
+CustomGizmo
+CustomProfilerView
+CustomDebugger
+```
+
+without modifying Studio itself.
+
+Think:
+
+> **Studio is a platform, not a closed application.**
+
+---
+
+# 23. "Everything can become a Studio tool"
+
+For example, your MCP could create a tool:
+
+```text
+AnalyzePortalPerformance
+```
+
+and Studio automatically exposes:
+
+```text
+Tools
+ └─ Analyze Portal Performance
+```
+
+Likewise an engine plugin can provide:
+
+```text
+Tools
+ ├─ Bake SDF
+ ├─ Analyze Physics
+ └─ Optimize Mesh
+```
+
+The AI and human developer use the **same underlying tool registry**.
+
+That's a very nice convergence.
+
+---
+
+# 24. Universal Command Palette
+
+Have one:
+
+**Ctrl+K**
+
+and search literally everything:
+
+```text
+> Render Graph
+> Entity 19283
+> Physics Profiler
+> Portal A
+> Material Stone
+> Capture Frame
+> Bake SDF
+> Generate LOD
+> AI: Explain this frame
+> AI: Optimize selected asset
+> Open ECS Query Inspector
+```
+
+This makes a giant engine feel much smaller.
+
+---
+
+# 25. Command-driven Studio
+
+And make Studio deeply commandable.
+
+Almost everything should be expressible as:
+
+```text
+atomic entity create
+atomic asset import
+atomic render capture
+atomic benchmark
+atomic build
+atomic profile
+atomic test
+```
+
+Then the same commands work through:
+
+* GUI
+* terminal
+* MCP
+* scripts
+* CI
+* AI
+
+That's extremely valuable.
+
+---
+
+# 26. Reproducible Engine Workspaces
+
+A project should be able to say:
+
+```text
+AtomicProject
+ ├── engine configuration
+ ├── pipeline configuration
+ ├── plugins
+ ├── renderer configuration
+ ├── physics configuration
+ ├── asset pipeline
+ ├── editor configuration
+ └── AI tools
+```
+
+Then:
+
+> clone repo → open project → everything reproduces.
+
+No mysterious machine-local editor state.
+
+---
+
+# 27. Project Profiles
+
+For example:
+
+```text
+Project
+ ├── Desktop
+ ├── SteamDeck
+ ├── Mobile
+ ├── VR
+ └── Console
+```
+
+Each profile can alter:
+
+* renderer
+* budgets
+* shader permutations
+* streaming
+* physics
+* texture quality
+* LOD
+* CPU/GPU scheduling
+
+And Studio can preview:
+
+> **What would this scene look like on Steam Deck?**
+
+---
+
+# 28. Pipeline Versioning
+
+This one is easy to overlook.
+
+If your render pipeline is customizable:
+
+```text
+Pipeline v1
+Pipeline v2
+Pipeline v3
+```
+
+should be versioned like code.
+
+Then:
+
+```text
+git diff
+
+Render Graph:
++ TemporalGI
+- SSR
+changed ShadowAtlas
+```
+
+You could even diff **graphs visually**.
+
+---
+
+# 29. Engine-level Undo/Redo
+
+Not just scene transforms.
+
+Undo:
+
+* render graph changes
+* ECS schema
+* materials
+* shaders
+* physics configuration
+* pipeline configuration
+* asset processing
+* Studio layout
+* project settings
+
+Your universal delta-state architecture could potentially make this much easier.
+
+---
+
+# 30. "Explain this system"
+
+This is where AI + reflection + docs becomes really cool.
+
+Select:
+
+```text
+PhysicsBroadphase
+```
+
+Click:
+
+**Explain**
+
+AI can inspect:
+
+* source
+* metadata
+* profiling
+* current state
+* dependencies
+
+and explain:
+
+```text
+This broadphase is currently using a dynamic AABB tree.
+
+Current:
+184,392 nodes
+7,293 updates/frame
+1.2ms
+
+The largest cost is reinsertion caused by high-velocity objects.
+```
+
+Not generic documentation — **contextual explanation of the actual running engine**.
+
+---
+
+# 31. AI-generated documentation from the running engine
+
+Because Atomic knows its own reflection metadata:
+
+```text
+Generate documentation
+```
+
+could produce:
+
+```text
+PhysicsBody
+ ├── properties
+ ├── lifecycle
+ ├── threading guarantees
+ ├── determinism guarantees
+ ├── GPU interaction
+ └── performance characteristics
+```
+
+And keep it synchronized with the actual API.
+
+---
+
+# 32. Automated Performance Contracts
+
+This would be very Atomic.
+
+Developers could specify:
+
+```text
+Portal recursion ≤ 1ms
+Physics ≤ 2ms
+Renderer ≤ 10ms
+Frame ≤ 16.67ms
+VRAM ≤ 8GB
+```
+
+Then CI runs benchmark scenes.
+
+```text
+Performance Contract
+
+Frame time:
+Target 16.67ms
+Actual 15.92ms ✓
+
+VRAM:
+Target 8GB
+Actual 7.42GB ✓
+
+Portal:
+Target 1ms
+Actual 1.08ms ✗
+```
+
+This prevents performance regression.
+
+---
+
+# 33. Performance as a first-class test
+
+Instead of only:
+
+```text
+assert result == expected
+```
+
+allow:
+
+```text
+assert frame_time < 16.67ms
+assert gpu_memory < 8GB
+assert synchronization_count < N
+assert draw_count < N
+assert cache_miss_rate < X
+```
+
+This fits your existing emphasis on benchmark-driven development extremely well.
+
+---
+
+# 34. Automatic "Optimization Suggestions"
+
+Studio could continuously surface:
+
+```text
+⚡ Optimization Opportunities
+
+Portal A:
+cache hit rate 43%
+Potential saving: ~0.8ms
+
+Texture X:
+resident but unused
+Potential saving: 212MB
+
+ECS Query #42:
+random memory access
+Potential saving: ~0.3ms
+
+Physics:
+12,400 sleeping bodies being queried
+Potential saving: ~0.2ms
+```
+
+And AI can investigate them.
+
+---
+
+# 35. Customization should extend all the way down
+
+I'd make Atomic's customization hierarchy something like:
+
+```text
+Project
+ ↓
+Engine configuration
+ ↓
+Subsystem implementation
+ ↓
+Algorithm
+ ↓
+Data representation
+ ↓
+Scheduling policy
+ ↓
+Pipeline
+ ↓
+Shader
+ ↓
+GPU implementation
+```
+
+A developer should be able to say:
+
+> "I want Atomic's ECS, but my own renderer."
+
+or:
+
+> "Atomic renderer, custom physics."
+
+or:
+
+> "Atomic physics, but replace broadphase."
+
+or:
+
+> "Default renderer, but replace shadow pipeline."
+
+or:
+
+> "Default everything except how GPU residency is managed."
+
+**No fork required.**
+
+---
+
+# 36. But don't expose complexity by default
+
+This is the counterbalance.
+
+You don't want a new developer opening Atomic and seeing:
+
+```text
+847 configuration options
+```
+
+So have levels:
+
+### Beginner
+
+```text
+Graphics Quality: High
+Physics Quality: High
+Streaming: Automatic
+```
+
+### Advanced
+
+```text
+LOD distances
+shadow budgets
+GI
+physics iterations
+```
+
+### Engine
+
+```text
+render graph
+schedulers
+residency
+allocators
+pipeline nodes
+```
+
+### Expert
+
+```text
+custom implementations
+GPU synchronization
+memory layouts
+execution policies
+```
+
+**Progressive disclosure** is probably essential.
+
+---
+
+# 37. One API for Human + AI + Automation
+
+This is the part I'd be most deliberate about.
+
+Don't build:
+
+```text
+Studio API
+MCP API
+CLI API
+Plugin API
+```
+
+as separate systems.
+
+Build:
+
+```text
+                    Atomic Tool/Reflection API
+                              │
+              ┌───────────────┼───────────────┐
+              ↓               ↓               ↓
+           Studio            CLI             MCP
+              │               │               │
+              └───────────────┼───────────────┘
+                              ↓
+                         Engine Runtime
+```
+
+Then anything you expose to one can potentially be exposed to all three.
+
+That would make your existing MCP dramatically more valuable.
+
+---
+
+# 38. The really ambitious version: AI can build Studio itself
+
+Because everything is reflected and graph-based:
+
+> "Create me a profiler that shows ECS cache misses by archetype."
+
+AI creates:
+
+```text
+Tool
+ ├── data source
+ ├── query
+ ├── visualization
+ └── interaction
+```
+
+and installs it into Studio.
+
+Or:
+
+> "Make a portal debugging panel showing recursive view cost."
+
+AI generates the panel.
+
+This becomes **AI-extensible tooling**, rather than AI merely generating game scripts.
+
+---
+
+# 39. Atomic as an engine you can interrogate
+
+I'd ultimately want this experience:
+
+Developer:
+
+> **Why is my frame slow?**
+
+Atomic:
+
+> Portal recursion accounts for 18.4% of GPU time.
+
+Developer:
+
+> **Why?**
+
+Atomic:
+
+> Portal A generates 9 views. Four overlap substantially with cached View 1832. Increasing the cache by 128MB is predicted to reduce GPU time by 0.7ms.
+
+Developer:
+
+> **Test it.**
+
+Atomic:
+
+> Benchmark complete. 1,000 frames.
+> Baseline: 14.83ms ±0.11
+> New: 14.09ms ±0.09
+> Improvement: 5.0%
+> VRAM: +126MB.
+
+Developer:
+
+> **Keep it.**
+
+That is the sort of workflow I'd aim for.
+
+---
+
+# The big DX/AI roadmap I'd add
+
+### 🧠 Engine Intelligence
+
+* [ ] Runtime reflection
+* [ ] Universal metadata system
+* [ ] Dependency graph introspection
+* [ ] Engine state query API
+* [ ] Performance reasoning API
+* [ ] Temporal state inspection
+* [ ] GPU residency inspection
+
+### 🛠 Studio
+
+* [ ] Universal inspector
+* [ ] Universal command palette
+* [ ] Runtime debugging
+* [ ] Visual system graphs
+* [ ] Render graph editor
+* [ ] Physics debugger
+* [ ] ECS debugger
+* [ ] GPU memory inspector
+* [ ] Frame debugger
+* [ ] Time-travel debugger
+* [ ] Replay system
+* [ ] Live editing
+* [ ] Hot reload
+* [ ] Visual profiler
+* [ ] "Why?" inspector
+* [ ] Performance opportunity detector
+
+### 🧩 Extensibility
+
+* [ ] Plugin API
+* [ ] Custom components
+* [ ] Custom systems
+* [ ] Custom render nodes
+* [ ] Custom physics algorithms
+* [ ] Custom schedulers
+* [ ] Custom allocators
+* [ ] Custom asset processors
+* [ ] Custom inspectors
+* [ ] Custom Studio tools
+* [ ] Custom graph nodes
+* [ ] Custom pipeline implementations
+
+### 🤖 AI
+
+* [ ] MCP engine introspection
+* [ ] MCP Studio control
+* [ ] Structured engine-state API
+* [ ] Tool discovery
+* [ ] AI profiler
+* [ ] AI debugger
+* [ ] AI asset optimizer
+* [ ] AI performance experiments
+* [ ] AI-generated Studio tools
+* [ ] AI-generated pipeline modifications
+* [ ] AI documentation
+* [ ] AI benchmark analysis
+* [ ] AI-assisted render graph design
+
+### ⚡ Performance DX
+
+* [ ] Performance contracts
+* [ ] Automated benchmark scenes
+* [ ] Performance regression CI
+* [ ] Frame capture/replay
+* [ ] Deterministic replay
+* [ ] Optimization experiments
+* [ ] CPU/GPU critical-path visualization
+* [ ] Synchronization visualization
+* [ ] Cache behavior visualization
+* [ ] Memory-for-time experiments
+* [ ] Automatic algorithm benchmarking
+
+### 🎛 Custom Pipeline
+
+* [ ] Renderer replacement
+* [ ] Physics replacement
+* [ ] ECS storage policies
+* [ ] Scheduler policies
+* [ ] Visibility policies
+* [ ] LOD policies
+* [ ] Streaming policies
+* [ ] Memory allocator policies
+* [ ] GPU residency policies
+* [ ] Temporal policies
+* [ ] Portal recursion policies
+* [ ] Per-platform pipeline profiles
+
+---
+
+## One architectural principle I'd add to the documents
+
+I think this is the missing piece tying together **ECS-first + GPU residency + delta synchronization + portals + parallelism + AI + Studio**:
+
+> **Atomic exposes the same underlying engine state and capabilities to runtime systems, Studio, plugins, automation, CLI tooling, and AI agents through a common reflection, command, and introspection layer.**
+
+Then:
+
+```text
+                         ATOMIC ENGINE
+                              │
+                    ┌─────────┴─────────┐
+                    │  Reflection/API   │
+                    │  Command System   │
+                    │  State Introspection
+                    └─────────┬─────────┘
+                              │
+       ┌──────────────┬───────┼────────┬──────────────┐
+       ↓              ↓       ↓        ↓              ↓
+    Runtime         Studio   Plugin    CLI           MCP
+       │              │       │        │              │
+       └──────────────┴───────┼────────┴──────────────┘
+                              ↓
+                       SAME ENGINE STATE
+```
+
+That means **AI doesn't get a special fake interface to the engine**. It gets the same capabilities a human developer gets, subject to permissions.
+
+And I think that pairs exceptionally well with your ECS-first philosophy: the ECS remains the authoritative semantic state, while GPU-resident state, caches, derived state, render views, physics structures, temporal histories, etc. are inspectable derived representations rather than opaque magic. Your existing architecture is already explicitly trying to keep the engine layers separated this way. 
+
+The end goal is basically **"the engine is self-describing and self-debugging."** That's much more ambitious—and IMO much more interesting—than simply building another Studio with an MCP bolted onto it.
