@@ -29,19 +29,7 @@
 
 set -euo pipefail
 
-# Git normally starts a non-bare hook at the worktree root, but GUI clients can
-# launch it with a reduced PATH and no usable `git` command. The hook location
-# is already inside the worktree, so derive the root without a command
-# substitution that can leave `cd` with an empty argument.
-hook_path="${BASH_SOURCE[0]}"
-hook_directory="${hook_path%/*}"
-if [ "$hook_directory" = "$hook_path" ]; then
-	hook_directory="."
-fi
-cd -- "$hook_directory/.." || {
-	echo "pre-push: unable to locate the repository from $hook_path." >&2
-	exit 1
-}
+cd "$(git rev-parse --show-toplevel)"
 
 # A push that only deletes refs compiles nothing. Everything else, including a
 # tag, is somebody publishing a tree and gets built.
@@ -55,25 +43,17 @@ if [ "$only_deletions" = "1" ]; then
 	exit 0
 fi
 
-# CMake is the actual build gate. Calling it here rather than calling the
-# developer convenience wrapper keeps pushes from GUI clients independent of
-# whether `just` was installed into their PATH.
-if ! command -v cmake > /dev/null; then
-	echo "pre-push: cmake is not on PATH, so the ci preset was not built." >&2
-	echo "  Install cmake or add its bin directory to PATH." >&2
-	echo "  Deliberately anyway:  git push --no-verify" >&2
+# Missing tool is a failure, not a skip - `just format-check` argues this at
+# length and it is the same argument: a gate that exits 0 having run nothing is
+# worse than no gate, because the push looks checked.
+if ! command -v just > /dev/null; then
+	echo "pre-push: no 'just' on PATH, so the ci preset was not built." >&2
+	echo "  Install just, or push with --no-verify and say so." >&2
 	exit 1
 fi
 
 echo "pre-push: building the ci preset - every warning fatal." >&2
-ci_build_directory=".cache/build/ci"
-if [ ! -f "$ci_build_directory/build.ninja" ] || [ CMakePresets.json -nt "$ci_build_directory/CMakeCache.txt" ]; then
-	if ! cmake --preset ci > /dev/null; then
-		echo "pre-push: unable to configure the ci preset, so the push is refused." >&2
-		exit 1
-	fi
-fi
-if ! cmake --build --preset ci; then
+if ! just preset=ci build; then
 	echo "" >&2
 	echo "pre-push: the ci preset does not compile, so the push is refused." >&2
 	echo "  Fix the warning. Relaxing the preset is not the fix - being strict" >&2
