@@ -1007,6 +1007,11 @@ namespace engine::ecs {
 		// @since v0.12
 		void EachMatching(std::span<const ComponentId> components, const std::function<void(Entity)> &body);
 
+		// Visits entities carrying every required component and none of the
+		// excluded components. Runtime callers use this when a query's filter is
+		// assembled from names rather than C++ types.
+		void EachMatching(const QueryTerms &terms, const std::function<void(Entity)> &body);
+
 		// Visits every entity carrying **any** of `components`, a run at a time.
 		//
 		// **The other half of the runtime query, and the cheap half.** `EachMatching`
@@ -1052,6 +1057,9 @@ namespace engine::ecs {
 		// @return The live number of entities carrying every one of them.
 		// @since v0.12
 		size_t CountMatching(std::span<const ComponentId> components);
+
+		// Counts an include/exclude query without requiring a typed selection.
+		size_t CountMatching(const QueryTerms &terms);
 
 		// --- instances -----------------------------------------------------
 		//

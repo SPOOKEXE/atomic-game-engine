@@ -616,6 +616,20 @@ namespace engine::ecs {
 		});
 	}
 
+	void Store::EachMatching(const QueryTerms &terms, const std::function<void(Entity)> &body) {
+		RequireOwningThread("EachMatching");
+		if (terms.Bound.empty() && terms.Required.empty()) {
+			return;
+		}
+
+		const DeferScope defer(*this);
+		VisitTables(terms, [&body](const TableSlice &slice) {
+			for (size_t row = 0; row < slice.Rows; row++) {
+				body(slice.Entities[row]);
+			}
+		});
+	}
+
 	void Store::EachMatchingAny(
 		std::span<const ComponentId> components, const std::function<void(const Entity *, size_t)> &body
 	) {
@@ -662,6 +676,14 @@ namespace engine::ecs {
 			return 0;
 		}
 		return CountRows(Canonical(components));
+	}
+
+	size_t Store::CountMatching(const QueryTerms &terms) {
+		RequireOwningThread("CountMatching");
+		if (terms.Bound.empty() && terms.Required.empty()) {
+			return 0;
+		}
+		return CountRows(terms);
 	}
 
 	// --- instances ---------------------------------------------------------

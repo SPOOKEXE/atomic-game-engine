@@ -2352,6 +2352,10 @@ interface EngineWorld {
 	// empty result.
 	Query(...components: string[]): Instance[];
 
+	// Every entity carrying all included components and none of the excluded
+	// components.
+	QueryFiltered(include: string[], exclude: string[]): Instance[];
+
 	Count(...components: string[]): number;
 }
 

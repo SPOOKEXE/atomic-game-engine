@@ -57,6 +57,7 @@ namespace engine::script {
 		using ecs::FieldDescriptor;
 		using ecs::FieldSpec;
 		using ecs::PropertyType;
+		using ecs::QueryTerms;
 		using ecs::Schema;
 		using ecs::Schemas;
 		using ecs::Store;
@@ -367,6 +368,24 @@ namespace engine::script {
 			return terms;
 		}
 
+		std::vector<ComponentId> CheckTermTable(lua_State *state, int index, const char *label) {
+			luaL_checktype(state, index, LUA_TTABLE);
+			std::vector<ComponentId> terms;
+			const size_t count = lua_objlen(state, index);
+			terms.reserve(count);
+			for (size_t at = 1; at <= count; at++) {
+				lua_rawgeti(state, index, static_cast<int>(at));
+				const char *name = luaL_checkstring(state, -1);
+				const ComponentId id = Components::Find(Name(name));
+				if (!id.IsValid()) {
+					luaL_errorL(state, "no component named '%s' in %s filter", name, label);
+				}
+				terms.push_back(id);
+				lua_pop(state, 1);
+			}
+			return terms;
+		}
+
 		// `World:Query(...componentNames)` -> `{ Instance }`
 		//
 		// **An array, not an iterator.** A coroutine-shaped iterator would hold
@@ -382,6 +401,26 @@ namespace engine::script {
 			lua_newtable(state);
 			int index = 0;
 
+			store.EachMatching(terms, [state, &index](Entity entity) {
+				PushInstanceValue(state, entity);
+				lua_rawseti(state, -2, ++index);
+			});
+			return 1;
+		}
+
+		// `World:QueryFiltered({ include... }, { exclude... })`
+		int WorldQueryFiltered(lua_State *state) {
+			Store &store = StoreOf(state);
+			const std::vector<ComponentId> required = CheckTermTable(state, 2, "include");
+			const std::vector<ComponentId> excluded = CheckTermTable(state, 3, "exclude");
+			const QueryTerms terms{
+				{},
+				std::span<const ComponentId>(required),
+				std::span<const ComponentId>(excluded),
+			};
+
+			lua_newtable(state);
+			int index = 0;
 			store.EachMatching(terms, [state, &index](Entity entity) {
 				PushInstanceValue(state, entity);
 				lua_rawseti(state, -2, ++index);
@@ -563,6 +602,7 @@ namespace engine::script {
 			{"GetComponentSchema", WorldGetComponentSchema},
 			{"CreateEntity", WorldCreateEntity},
 			{"Query", WorldQuery},
+			{"QueryFiltered", WorldQueryFiltered},
 			{"Count", WorldCount},
 		};
 

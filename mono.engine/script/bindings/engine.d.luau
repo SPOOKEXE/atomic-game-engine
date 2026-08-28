@@ -2649,6 +2649,10 @@ declare extern type EngineWorld with
 	-- empty result.
 	function Query(self, ...: string): { Instance }
 
+	-- Every entity carrying all included components and none of the excluded
+	-- components.
+	function QueryFiltered(self, include: { string }, exclude: { string }): { Instance }
+
 	function Count(self, ...: string): number
 end
 

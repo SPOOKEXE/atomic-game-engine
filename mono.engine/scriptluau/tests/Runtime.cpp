@@ -65,3 +65,21 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
 }
+
+TEST_CASE("the luau adapter supports include and exclude component filters", "[scriptluau]") {
+	RegisterClasses();
+	Store store("scriptluau_filter_test");
+
+	const auto runtime = MakeLuauRuntime(store);
+	REQUIRE(runtime->Run(R"(
+		World:DefineComponent("scriptluau.FilterA", { Value = "int32" })
+		World:DefineComponent("scriptluau.FilterB", {})
+		local included = World:CreateEntity("included")
+		included:SetComponent("scriptluau.FilterA", { Value = 1 })
+		local excluded = World:CreateEntity("excluded")
+		excluded:SetComponent("scriptluau.FilterA", { Value = 2 })
+		excluded:SetComponent("scriptluau.FilterB")
+		local found = World:QueryFiltered({ "scriptluau.FilterA" }, { "scriptluau.FilterB" })
+		assert(#found == 1, "include/exclude query")
+	)"));
+}
