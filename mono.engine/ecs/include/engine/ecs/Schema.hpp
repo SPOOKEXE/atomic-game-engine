@@ -90,6 +90,9 @@ namespace engine::ecs {
 		// Descriptive metadata tags attached to this field.
 		std::vector<std::string> Tags;
 
+		// Whether Studio should surface this field as an exposed config value.
+		bool Exposed = false;
+
 		// The set an `Enum` field's value must belong to. Invalid otherwise.
 		core::Name Enum;
 
@@ -276,6 +279,7 @@ namespace engine::ecs {
 		// Replaces the metadata tags on one field of a described component.
 		static bool
 		SetFieldTags(ComponentId component, core::Name field, std::span<const std::string_view> tags);
+		static bool SetFieldExposed(ComponentId component, core::Name field, bool exposed);
 
 		// Returns a copy so callers do not retain a view across registry access.
 		static std::vector<std::string> Tags(ComponentId component);

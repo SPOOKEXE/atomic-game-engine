@@ -750,6 +750,27 @@ namespace engine::ecs {
 		return true;
 	}
 
+	bool Schemas::SetFieldExposed(ComponentId component, core::Name field, bool exposed) {
+		auto &registry = SchemaRegistryOf();
+		std::lock_guard lock(registry.Guard);
+		const auto found = registry.ByComponent.find(component.Index);
+		if (found == registry.ByComponent.end()) {
+			return false;
+		}
+		FieldDescriptor *descriptor = nullptr;
+		for (FieldDescriptor &candidate : registry.Entries[found->second].Layout) {
+			if (candidate.Name == field) {
+				descriptor = &candidate;
+				break;
+			}
+		}
+		if (descriptor == nullptr) {
+			return false;
+		}
+		descriptor->Exposed = exposed;
+		return true;
+	}
+
 	std::vector<std::string> Schemas::Tags(ComponentId component) {
 		auto &registry = SchemaRegistryOf();
 		std::lock_guard lock(registry.Guard);

@@ -337,6 +337,19 @@ namespace engine::script {
 			return 1;
 		}
 
+		// `World:ExposeComponentField(name, field, exposed)`
+		int WorldExposeComponentField(lua_State *state) {
+			const char *name = luaL_checkstring(state, 2);
+			const ComponentId component = Components::Find(Name(name));
+			if (!component.IsValid() || Schemas::Of(component) == nullptr) {
+				luaL_errorL(state, "'%s' is not a script component", name);
+			}
+			const char *field = luaL_checkstring(state, 3);
+			const bool exposed = lua_toboolean(state, 4) != 0;
+			lua_pushboolean(state, Schemas::SetFieldExposed(component, Name(field), exposed));
+			return 1;
+		}
+
 		// `World:GetComponentMetadata(name)` -> `{ Tags = {}, Fields = {} }`
 		int WorldGetComponentMetadata(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
@@ -366,6 +379,8 @@ namespace engine::script {
 					lua_rawseti(state, -2, static_cast<int>(at) + 1);
 				}
 				lua_setfield(state, -2, "Tags");
+				lua_pushboolean(state, field.Exposed);
+				lua_setfield(state, -2, "Exposed");
 				lua_setfield(state, -2, field.Spelling.data());
 			}
 			lua_setfield(state, -2, "Fields");
@@ -691,6 +706,7 @@ namespace engine::script {
 			{"GetComponentSchema", WorldGetComponentSchema},
 			{"SetComponentTags", WorldSetComponentTags},
 			{"SetComponentFieldTags", WorldSetComponentFieldTags},
+			{"ExposeComponentField", WorldExposeComponentField},
 			{"GetComponentMetadata", WorldGetComponentMetadata},
 			{"CreateEntity", WorldCreateEntity},
 			{"Query", WorldQuery},

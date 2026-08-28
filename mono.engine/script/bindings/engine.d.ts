@@ -2344,9 +2344,10 @@ interface EngineWorld {
 	GetComponentSchema(component: string): { [field: string]: string } | null;
 	SetComponentTags(component: string, tags: string[]): boolean;
 	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
+	ExposeComponentField(component: string, field: string, exposed: boolean): boolean;
 	GetComponentMetadata(component: string): {
 		Tags: string[];
-		Fields: { [field: string]: { Type: string; Tags: string[] } };
+		Fields: { [field: string]: { Type: string; Tags: string[]; Exposed: boolean } };
 	} | null;
 
 	// An entity carrying nothing: no class, no place in the tree, nothing drawn.

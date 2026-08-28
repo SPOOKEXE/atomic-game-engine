@@ -2641,9 +2641,10 @@ declare extern type EngineWorld with
 	function GetComponentSchema(self, component: string): { [string]: string }?
 	function SetComponentTags(self, component: string, tags: { string }): boolean
 	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
+	function ExposeComponentField(self, component: string, field: string, exposed: boolean): boolean
 	function GetComponentMetadata(self, component: string): {
 		Tags: { string },
-		Fields: { [string]: { Type: string, Tags: { string } } },
+		Fields: { [string]: { Type: string, Tags: { string }, Exposed: boolean } },
 	}?
 
 	-- An entity carrying nothing: no class, no place in the tree, nothing drawn.

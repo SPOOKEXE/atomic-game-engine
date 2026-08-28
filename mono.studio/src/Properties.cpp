@@ -1151,6 +1151,10 @@ namespace studio {
 						}
 						for (const FieldDescriptor &field : schema->Fields()) {
 							ImGui::BulletText("%s", field.Spelling.data());
+							if (field.Exposed) {
+								ImGui::SameLine();
+								ImGui::TextDisabled("[config]");
+							}
 							for (const std::string &tag : field.Tags) {
 								ImGui::SameLine();
 								ImGui::TextDisabled("[%s]", tag.c_str());
