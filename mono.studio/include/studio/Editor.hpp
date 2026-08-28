@@ -4605,6 +4605,7 @@ namespace studio {
 		bool ShowCursor = true;
 		bool OrbitCamera = false;
 		bool DirectionLocked = false;
+		std::unordered_map<std::string, std::string> ComponentConfigDrafts;
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate
 		// from each emitter's Enabled property so hiding effects is an editor view

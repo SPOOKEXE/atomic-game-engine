@@ -1601,6 +1601,10 @@ namespace engine::ecs {
 		// @return A pointer to the value, or null when absent.
 		const void *GetComponent(Entity entity, ComponentId component) const;
 
+		// Returns mutable access to a runtime-named component and records a write.
+		// The pointer remains valid until the entity's row moves.
+		void *GetComponentMutable(Entity entity, ComponentId component);
+
 		// Removes a component named at runtime.
 		//
 		// @param entity    The entity to write to.
