@@ -57,15 +57,33 @@ fi
 
 # Missing tool is a failure, not a skip - `just format-check` argues this at
 # length and it is the same argument: a gate that exits 0 having run nothing is
-# worse than no gate, because the push looks checked.
-if ! command -v just > /dev/null; then
+# worse than no gate, because the push looks checked. GUI clients commonly
+# omit Cargo and user-local bin directories from PATH, so check those locations
+# explicitly after the normal command lookup.
+just_command="$(command -v just 2> /dev/null || true)"
+if [ -z "$just_command" ]; then
+	for candidate in \
+		/usr/bin/just \
+		/usr/local/bin/just \
+		"${HOME:-}/.cargo/bin/just" \
+		"${HOME:-}/.local/bin/just" \
+		"${USERPROFILE:-}/.cargo/bin/just.exe" \
+		"${USERPROFILE:-}/.local/bin/just.exe"; do
+		if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+			just_command="$candidate"
+			break
+		fi
+	done
+fi
+if [ -z "$just_command" ]; then
 	echo "pre-push: no 'just' on PATH, so the ci preset was not built." >&2
-	echo "  Install just, or push with --no-verify and say so." >&2
+	echo "  Install just or add its bin directory to PATH." >&2
+	echo "  Deliberately anyway:  git push --no-verify" >&2
 	exit 1
 fi
 
 echo "pre-push: building the ci preset - every warning fatal." >&2
-if ! just preset=ci build; then
+if ! "$just_command" preset=ci build; then
 	echo "" >&2
 	echo "pre-push: the ci preset does not compile, so the push is refused." >&2
 	echo "  Fix the warning. Relaxing the preset is not the fix - being strict" >&2
