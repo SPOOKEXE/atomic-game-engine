@@ -861,6 +861,9 @@ namespace studio {
 			CameraYaw = angles.Y;
 			CameraPitch = angles.X;
 		}
+		if (ImGui::GetIO().KeyShift) {
+			DirectionLocked = true;
+		}
 	}
 
 	bool Editor::DrawGizmo(size_t viewport, const PanelProjection &panel) {

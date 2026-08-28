@@ -4603,6 +4603,8 @@ namespace studio {
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
 		bool ShowCursor = true;
+		bool OrbitCamera = false;
+		bool DirectionLocked = false;
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate
 		// from each emitter's Enabled property so hiding effects is an editor view

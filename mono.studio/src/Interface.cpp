@@ -690,7 +690,7 @@ namespace studio {
 			Say("back to the editor camera");
 		}
 
-		if (looking) {
+		if (looking && !DirectionLocked) {
 			const float sensitivity = 0.0035f;
 			yaw -= io.MouseDelta.x * sensitivity;
 			pitch -= io.MouseDelta.y * sensitivity;
@@ -779,10 +779,22 @@ namespace studio {
 		// down.
 
 		const bool overViewport = hovered || active;
+		const bool orbiting = OrbitCamera && ShowCursor && overViewport &&
+			ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+		if (orbiting) {
+			const float sensitivity = 0.0035f;
+			yaw -= io.MouseDelta.x * sensitivity;
+			pitch -= io.MouseDelta.y * sensitivity;
+			constexpr float LIMIT = 1.5533f;
+			pitch = std::clamp(pitch, -LIMIT, LIMIT);
+			const CFrame orbitRotation = CFrame::Angles(pitch, yaw, 0.0f);
+			const float distance = std::max((position - CursorPosition).Magnitude(), 1.0f);
+			position = CursorPosition - orbitRotation.LookVector() * distance;
+		}
 
 		// Middle-drag slides the camera across its own plane, so the thing
 		// under the pointer stays roughly under the pointer.
-		if ((overViewport || panning) && ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+		if (!orbiting && (overViewport || panning) && ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
 			panning = true;
 
 			// Scaled by distance-independent speed rather than by depth: there

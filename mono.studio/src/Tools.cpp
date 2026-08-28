@@ -538,6 +538,10 @@ namespace studio {
 		ImGui::SameLine();
 		ImGui::Checkbox("3D Cursor", &ShowCursor);
 		ImGui::SameLine();
+		ImGui::Checkbox("Orbit", &OrbitCamera);
+		ImGui::SameLine();
+		ImGui::Checkbox("Lock Direction", &DirectionLocked);
+		ImGui::SameLine();
 		ImGui::Checkbox("Particles", &ShowParticleEmitters);
 		ImGui::SameLine();
 		ImGui::Checkbox("Explorer", &ShowExplorer);
