@@ -8,8 +8,8 @@
 #include <asio/post.hpp>
 #include <asio/read.hpp>
 #include <asio/read_until.hpp>
-#include <asio/streambuf.hpp>
 #include <asio/strand.hpp>
+#include <asio/streambuf.hpp>
 #include <asio/write.hpp>
 #include <atomic>
 #include <cctype>
@@ -157,7 +157,8 @@ namespace engine::net::websocket {
 		class TcpServer final : public Server {
 		  public:
 			TcpServer(uint16_t port, Callbacks callbacks, ServerSettings settings)
-				: Limits(settings), Callbacks_(std::move(callbacks)), Strand(Context.get_executor()), Acceptor(Context) {
+				: Limits(settings), Callbacks_(std::move(callbacks)), Strand(Context.get_executor()),
+				  Acceptor(Context) {
 				std::error_code failure;
 				Acceptor.open(tcp::v4(), failure);
 				if (!failure) {
@@ -246,23 +247,26 @@ namespace engine::net::websocket {
 
 		  private:
 			void Accept() {
-				Acceptor.async_accept(asio::bind_executor(Strand, [this](std::error_code failure, tcp::socket socket) {
-					if (!failure && Running.load(std::memory_order_relaxed)) {
-						if (Sessions.size() < Limits.MaximumConnections) {
-							const ConnectionId id = NextId++;
-							auto session = std::make_shared<Session>(*this, std::move(socket), id, Limits);
-							Sessions.emplace(id, session);
-							ConnectionCount.fetch_add(1, std::memory_order_relaxed);
-							session->Start();
-						} else {
-							std::error_code ignored;
-							socket.close(ignored);
+				Acceptor.async_accept(
+					asio::bind_executor(Strand, [this](std::error_code failure, tcp::socket socket) {
+						if (!failure && Running.load(std::memory_order_relaxed)) {
+							if (Sessions.size() < Limits.MaximumConnections) {
+								const ConnectionId id = NextId++;
+								auto session =
+									std::make_shared<Session>(*this, std::move(socket), id, Limits);
+								Sessions.emplace(id, session);
+								ConnectionCount.fetch_add(1, std::memory_order_relaxed);
+								session->Start();
+							} else {
+								std::error_code ignored;
+								socket.close(ignored);
+							}
 						}
-					}
-					if (Running.load(std::memory_order_relaxed)) {
-						Accept();
-					}
-				}));
+						if (Running.load(std::memory_order_relaxed)) {
+							Accept();
+						}
+					})
+				);
 			}
 
 			void Stop() {
@@ -311,7 +315,10 @@ namespace engine::net::websocket {
 		void Session::Handshake() {
 			auto self = shared_from_this();
 			asio::async_read_until(
-				Socket, Request, "\r\n\r\n", asio::bind_executor(self->Owner.Dispatcher(), [self](std::error_code failure, size_t bytes) {
+				Socket,
+				Request,
+				"\r\n\r\n",
+				asio::bind_executor(self->Owner.Dispatcher(), [self](std::error_code failure, size_t bytes) {
 					if (failure || bytes > 16u * 1024u) {
 						self->Finish();
 						return;
@@ -355,25 +362,26 @@ namespace engine::net::websocket {
 						self->Owner.Handlers().Open(self->Id);
 					}
 					self->Read();
-				}
-				));
+				})
+			);
 		}
 
 		void Session::Read() {
 			auto self = shared_from_this();
 			Socket.async_read_some(
-				asio::buffer(ReadBuffer), asio::bind_executor(self->Owner.Dispatcher(), [self](std::error_code failure, size_t bytes) {
-				if (failure || bytes == 0) {
-					self->Finish();
-					return;
-				}
-				self->Inbox.insert(
-					self->Inbox.end(), self->ReadBuffer.begin(), self->ReadBuffer.begin() + bytes
-				);
-				self->ParseFrames();
-				if (!self->Finished) {
-					self->Read();
-				}
+				asio::buffer(ReadBuffer),
+				asio::bind_executor(self->Owner.Dispatcher(), [self](std::error_code failure, size_t bytes) {
+					if (failure || bytes == 0) {
+						self->Finish();
+						return;
+					}
+					self->Inbox.insert(
+						self->Inbox.end(), self->ReadBuffer.begin(), self->ReadBuffer.begin() + bytes
+					);
+					self->ParseFrames();
+					if (!self->Finished) {
+						self->Read();
+					}
 				})
 			);
 		}
@@ -461,15 +469,16 @@ namespace engine::net::websocket {
 			Writing = true;
 			auto self = shared_from_this();
 			asio::async_write(
-				Socket, asio::buffer(Outbox.front()),
+				Socket,
+				asio::buffer(Outbox.front()),
 				asio::bind_executor(self->Owner.Dispatcher(), [self](std::error_code failure, size_t) {
-				if (failure) {
-					self->Finish();
-					return;
-				}
-				self->Outbox.pop_front();
-				self->Writing = false;
-				self->Write();
+					if (failure) {
+						self->Finish();
+						return;
+					}
+					self->Outbox.pop_front();
+					self->Writing = false;
+					self->Write();
 				})
 			);
 		}

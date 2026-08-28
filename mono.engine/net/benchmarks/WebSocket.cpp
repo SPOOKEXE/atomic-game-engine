@@ -7,7 +7,6 @@
 #include <asio/read_until.hpp>
 #include <asio/streambuf.hpp>
 #include <asio/write.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -50,24 +49,24 @@ BENCH_PER_ITEM("async accept and handshake, 10k peers", CONNECTIONS) {
 		std::vector<std::unique_ptr<asio::ip::tcp::socket>> clients;
 		clients.reserve(std::min(BATCH_SIZE, CONNECTIONS - first));
 		for (size_t index = first; index < std::min(CONNECTIONS, first + BATCH_SIZE); index++) {
-		auto client = std::make_unique<asio::ip::tcp::socket>(context);
-		std::error_code failure;
-		client->connect(
-			asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), server->Local().Port), failure
-		);
-		if (failure) {
-			throw std::runtime_error("WebSocket benchmark client could not connect");
-		}
-		asio::write(*client, asio::buffer(Request()), failure);
-		if (failure) {
-			throw std::runtime_error("WebSocket benchmark client could not send handshake");
-		}
-		asio::streambuf response;
-		asio::read_until(*client, response, "\r\n\r\n", failure);
-		if (failure) {
-			throw std::runtime_error("WebSocket benchmark handshake did not complete");
-		}
-		clients.push_back(std::move(client));
+			auto client = std::make_unique<asio::ip::tcp::socket>(context);
+			std::error_code failure;
+			client->connect(
+				asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), server->Local().Port), failure
+			);
+			if (failure) {
+				throw std::runtime_error("WebSocket benchmark client could not connect");
+			}
+			asio::write(*client, asio::buffer(Request()), failure);
+			if (failure) {
+				throw std::runtime_error("WebSocket benchmark client could not send handshake");
+			}
+			asio::streambuf response;
+			asio::read_until(*client, response, "\r\n\r\n", failure);
+			if (failure) {
+				throw std::runtime_error("WebSocket benchmark handshake did not complete");
+			}
+			clients.push_back(std::move(client));
 		}
 	}
 

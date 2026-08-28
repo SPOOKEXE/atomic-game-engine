@@ -121,9 +121,7 @@ int main(int argc, char **argv) {
 		"rendezvous", "HOST:PORT", "Register with a rendezvous point, so clients off this subnet can reach it"
 	);
 	arguments.Value(
-		"content-store",
-		"DIR",
-		"Serve this content store to clients - the server serving its own disk"
+		"content-store", "DIR", "Serve this content store to clients - the server serving its own disk"
 	);
 	arguments.Value("content-port", "PORT", "Port the attached origin listens on (0 for ephemeral)");
 	arguments.Value(

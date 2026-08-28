@@ -64,26 +64,61 @@ namespace studio {
 			value = PropertyValue{};
 			value.Type = field.Type;
 			switch (field.Type) {
-			case PropertyType::Bool: value.Bool = *reinterpret_cast<const bool *>(source); return true;
-			case PropertyType::Int32: value.Int32 = *reinterpret_cast<const int32_t *>(source); return true;
-			case PropertyType::Int64: value.Int64 = *reinterpret_cast<const int64_t *>(source); return true;
-			case PropertyType::Float: value.Float = *reinterpret_cast<const float *>(source); return true;
-			case PropertyType::Double: value.Double = *reinterpret_cast<const double *>(source); return true;
+			case PropertyType::Bool:
+				value.Bool = *reinterpret_cast<const bool *>(source);
+				return true;
+			case PropertyType::Int32:
+				value.Int32 = *reinterpret_cast<const int32_t *>(source);
+				return true;
+			case PropertyType::Int64:
+				value.Int64 = *reinterpret_cast<const int64_t *>(source);
+				return true;
+			case PropertyType::Float:
+				value.Float = *reinterpret_cast<const float *>(source);
+				return true;
+			case PropertyType::Double:
+				value.Double = *reinterpret_cast<const double *>(source);
+				return true;
 			case PropertyType::Name:
-			case PropertyType::Enum: value.Name = *reinterpret_cast<const Name *>(source); return true;
-			case PropertyType::String: value.String = *reinterpret_cast<const std::string *>(source); return true;
-			case PropertyType::Vector3: value.Vector3 = *reinterpret_cast<const engine::core::Vector3 *>(source); return true;
-			case PropertyType::CFrame: value.CFrame = *reinterpret_cast<const engine::core::CFrame *>(source); return true;
-			case PropertyType::Color3: value.Color3 = *reinterpret_cast<const engine::core::Color3 *>(source); return true;
-			case PropertyType::Vector2: value.Vector2 = *reinterpret_cast<const engine::core::Vector2 *>(source); return true;
-			case PropertyType::UDim: value.UDim = *reinterpret_cast<const engine::core::UDim *>(source); return true;
-			case PropertyType::UDim2: value.UDim2 = *reinterpret_cast<const engine::core::UDim2 *>(source); return true;
-			case PropertyType::Rect: value.Rect = *reinterpret_cast<const engine::core::Rect *>(source); return true;
-			case PropertyType::NumberRange: value.NumberRange = *reinterpret_cast<const engine::core::NumberRange *>(source); return true;
-			case PropertyType::NumberSequence: value.NumberSequence = *reinterpret_cast<const engine::core::NumberSequence *>(source); return true;
-			case PropertyType::ColorSequence: value.ColorSequence = *reinterpret_cast<const engine::core::ColorSequence *>(source); return true;
+			case PropertyType::Enum:
+				value.Name = *reinterpret_cast<const Name *>(source);
+				return true;
+			case PropertyType::String:
+				value.String = *reinterpret_cast<const std::string *>(source);
+				return true;
+			case PropertyType::Vector3:
+				value.Vector3 = *reinterpret_cast<const engine::core::Vector3 *>(source);
+				return true;
+			case PropertyType::CFrame:
+				value.CFrame = *reinterpret_cast<const engine::core::CFrame *>(source);
+				return true;
+			case PropertyType::Color3:
+				value.Color3 = *reinterpret_cast<const engine::core::Color3 *>(source);
+				return true;
+			case PropertyType::Vector2:
+				value.Vector2 = *reinterpret_cast<const engine::core::Vector2 *>(source);
+				return true;
+			case PropertyType::UDim:
+				value.UDim = *reinterpret_cast<const engine::core::UDim *>(source);
+				return true;
+			case PropertyType::UDim2:
+				value.UDim2 = *reinterpret_cast<const engine::core::UDim2 *>(source);
+				return true;
+			case PropertyType::Rect:
+				value.Rect = *reinterpret_cast<const engine::core::Rect *>(source);
+				return true;
+			case PropertyType::NumberRange:
+				value.NumberRange = *reinterpret_cast<const engine::core::NumberRange *>(source);
+				return true;
+			case PropertyType::NumberSequence:
+				value.NumberSequence = *reinterpret_cast<const engine::core::NumberSequence *>(source);
+				return true;
+			case PropertyType::ColorSequence:
+				value.ColorSequence = *reinterpret_cast<const engine::core::ColorSequence *>(source);
+				return true;
 			case PropertyType::Reference:
-			case PropertyType::Opaque: return false;
+			case PropertyType::Opaque:
+				return false;
 			}
 			return false;
 		}
@@ -92,26 +127,61 @@ namespace studio {
 			if (value.Type != field.Type) return false;
 			auto *target = static_cast<std::byte *>(component) + field.Offset;
 			switch (field.Type) {
-			case PropertyType::Bool: *reinterpret_cast<bool *>(target) = value.Bool; return true;
-			case PropertyType::Int32: *reinterpret_cast<int32_t *>(target) = value.Int32; return true;
-			case PropertyType::Int64: *reinterpret_cast<int64_t *>(target) = value.Int64; return true;
-			case PropertyType::Float: *reinterpret_cast<float *>(target) = value.Float; return true;
-			case PropertyType::Double: *reinterpret_cast<double *>(target) = value.Double; return true;
+			case PropertyType::Bool:
+				*reinterpret_cast<bool *>(target) = value.Bool;
+				return true;
+			case PropertyType::Int32:
+				*reinterpret_cast<int32_t *>(target) = value.Int32;
+				return true;
+			case PropertyType::Int64:
+				*reinterpret_cast<int64_t *>(target) = value.Int64;
+				return true;
+			case PropertyType::Float:
+				*reinterpret_cast<float *>(target) = value.Float;
+				return true;
+			case PropertyType::Double:
+				*reinterpret_cast<double *>(target) = value.Double;
+				return true;
 			case PropertyType::Name:
-			case PropertyType::Enum: *reinterpret_cast<Name *>(target) = value.Name; return true;
-			case PropertyType::String: *reinterpret_cast<std::string *>(target) = value.String; return true;
-			case PropertyType::Vector3: *reinterpret_cast<engine::core::Vector3 *>(target) = value.Vector3; return true;
-			case PropertyType::CFrame: *reinterpret_cast<engine::core::CFrame *>(target) = value.CFrame; return true;
-			case PropertyType::Color3: *reinterpret_cast<engine::core::Color3 *>(target) = value.Color3; return true;
-			case PropertyType::Vector2: *reinterpret_cast<engine::core::Vector2 *>(target) = value.Vector2; return true;
-			case PropertyType::UDim: *reinterpret_cast<engine::core::UDim *>(target) = value.UDim; return true;
-			case PropertyType::UDim2: *reinterpret_cast<engine::core::UDim2 *>(target) = value.UDim2; return true;
-			case PropertyType::Rect: *reinterpret_cast<engine::core::Rect *>(target) = value.Rect; return true;
-			case PropertyType::NumberRange: *reinterpret_cast<engine::core::NumberRange *>(target) = value.NumberRange; return true;
-			case PropertyType::NumberSequence: *reinterpret_cast<engine::core::NumberSequence *>(target) = value.NumberSequence; return true;
-			case PropertyType::ColorSequence: *reinterpret_cast<engine::core::ColorSequence *>(target) = value.ColorSequence; return true;
+			case PropertyType::Enum:
+				*reinterpret_cast<Name *>(target) = value.Name;
+				return true;
+			case PropertyType::String:
+				*reinterpret_cast<std::string *>(target) = value.String;
+				return true;
+			case PropertyType::Vector3:
+				*reinterpret_cast<engine::core::Vector3 *>(target) = value.Vector3;
+				return true;
+			case PropertyType::CFrame:
+				*reinterpret_cast<engine::core::CFrame *>(target) = value.CFrame;
+				return true;
+			case PropertyType::Color3:
+				*reinterpret_cast<engine::core::Color3 *>(target) = value.Color3;
+				return true;
+			case PropertyType::Vector2:
+				*reinterpret_cast<engine::core::Vector2 *>(target) = value.Vector2;
+				return true;
+			case PropertyType::UDim:
+				*reinterpret_cast<engine::core::UDim *>(target) = value.UDim;
+				return true;
+			case PropertyType::UDim2:
+				*reinterpret_cast<engine::core::UDim2 *>(target) = value.UDim2;
+				return true;
+			case PropertyType::Rect:
+				*reinterpret_cast<engine::core::Rect *>(target) = value.Rect;
+				return true;
+			case PropertyType::NumberRange:
+				*reinterpret_cast<engine::core::NumberRange *>(target) = value.NumberRange;
+				return true;
+			case PropertyType::NumberSequence:
+				*reinterpret_cast<engine::core::NumberSequence *>(target) = value.NumberSequence;
+				return true;
+			case PropertyType::ColorSequence:
+				*reinterpret_cast<engine::core::ColorSequence *>(target) = value.ColorSequence;
+				return true;
 			case PropertyType::Reference:
-			case PropertyType::Opaque: return false;
+			case PropertyType::Opaque:
+				return false;
 			}
 			return false;
 		}
@@ -1222,7 +1292,8 @@ namespace studio {
 							ImGui::TextDisabled("[config]");
 							ImGui::SameLine();
 							ImGui::PushID(field.Name.Id());
-							std::string key = std::string(descriptor.Name.Text()) + "." + std::string(field.Spelling);
+							std::string key =
+								std::string(descriptor.Name.Text()) + "." + std::string(field.Spelling);
 							std::string &draft = ComponentConfigDrafts[key];
 							if (!ImGui::IsItemActive() && draft.empty()) {
 								draft = FormatValue(value);
@@ -1233,7 +1304,9 @@ namespace studio {
 								PropertyValue parsed;
 								std::string reason;
 								if (ParseValue(field.Type, draft, parsed, reason) &&
-									WriteSchemaValue(store.GetComponentMutable(instance, component), field, parsed)) {
+									WriteSchemaValue(
+										store.GetComponentMutable(instance, component), field, parsed
+									)) {
 									MarkModified();
 								}
 								draft.clear();

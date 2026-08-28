@@ -2003,10 +2003,9 @@ namespace engine::scene {
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
 
 			// Part adds nothing of its own: BasePart already holds the full
-			// set, and Part is the concrete leaf a script asks for by name. `Motion` and `Simulated` are the two
-			// deliberately absent - whether a part has them is
-			// `PartDesc::Simulated`'s decision, and putting either in the class
-			// set would land static geometry in the dynamic archetype.
+			// set, and Part is the concrete leaf a script asks for by name. `Motion` and `Simulated` are the
+			// two deliberately absent - whether a part has them is `PartDesc::Simulated`'s decision, and
+			// putting either in the class set would land static geometry in the dynamic archetype.
 			// `RigidBody` used to be in that sentence and no longer is: it holds
 			// the author's numbers rather than the world's decision.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});

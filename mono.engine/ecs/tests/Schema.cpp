@@ -19,6 +19,7 @@ using engine::ecs::Components;
 using engine::ecs::Entity;
 using engine::ecs::FieldSpec;
 using engine::ecs::PropertyType;
+using engine::ecs::QueryTerms;
 using engine::ecs::Schema;
 using engine::ecs::Schemas;
 using engine::ecs::Store;
@@ -223,10 +224,10 @@ TEST_CASE("an empty query matches nothing rather than everything", "[schema]") {
 	store.Create();
 
 	size_t visited = 0;
-	store.EachMatching({}, [&visited](Entity) { visited++; });
+	store.EachMatching(QueryTerms{}, [&visited](Entity) { visited++; });
 
 	REQUIRE(visited == 0);
-	REQUIRE(store.CountMatching({}) == 0);
+	REQUIRE(store.CountMatching(QueryTerms{}) == 0);
 }
 
 TEST_CASE("a union query visits a carrier of any named component, exactly once", "[schema]") {

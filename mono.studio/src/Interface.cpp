@@ -779,8 +779,8 @@ namespace studio {
 		// down.
 
 		const bool overViewport = hovered || active;
-		const bool orbiting = OrbitCamera && ShowCursor && overViewport &&
-			ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+		const bool orbiting =
+			OrbitCamera && ShowCursor && overViewport && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
 		if (orbiting) {
 			const float sensitivity = 0.0035f;
 			yaw -= io.MouseDelta.x * sensitivity;
