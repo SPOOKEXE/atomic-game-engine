@@ -39,27 +39,28 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.20
 
-- [_] add stack watch and breakpoint watch dock widgets
-- [_] auto complete popup doesn't position properly above/below text we're editing.
-- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
-- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
-- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
-- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
-- [_] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
-- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
-- [_] viewport indictator direction gizmo (select and lock to certain directions)
-- [_] 3d cursor and camera orbit options under gizmo
-- [_] add tests to validate each step of the rendering pipeline graph
-- [_] add websocket support (full async, test 10k connections and improve bottleneck spots).
+- [x] add stack watch and breakpoint watch dock widgets
+- [x] auto complete popup doesn't position properly above/below text we're editing.
+- [x] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
+- [x] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
+- [x] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
+- [x] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
+- [x] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
+- [x] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
+- [x] viewport indictator direction gizmo (select and lock to certain directions)
+- [x] 3d cursor and camera orbit options under gizmo
+- [x] add tests to validate each step of the rendering pipeline graph
+- [x] add websocket support (full async, test 10k connections and improve bottleneck spots).
 
-- [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
+- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
 - [_] properly build out team create menu
 - [_] team create build out options properly
-- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
+- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
+
+- [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [_] consolidate render pipeline to a easy-to-find location for future work.
 - [_] ensure when you read the render pipeline, its obvious what it does and in what order
-- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
 - [_] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
 - [_] go through and do a full batched-compute of all world systems for things like replication, iterating cpu data, iterating components, etc. Assume multi-processing for each individual world (hytale-style) and multi-threading for viable options. Vectorise rest (we test with -O0/-O1, but assume release -O2/3 will greatly improve it).
@@ -88,6 +89,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 - [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
+
 - [x] StackGuard to prevent stack errors, infinite recursion, etc.
 - [x] Random.new(seed) with functions
 - [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
