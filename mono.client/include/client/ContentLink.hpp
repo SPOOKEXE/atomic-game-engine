@@ -60,9 +60,9 @@ namespace client {
 
 	// Turns what a server said into sources this client may use.
 	//
-	// **Every field of a directory is untrusted**, which `repo_layout.md` §11
-	// states in one sentence: *a client that is told to fetch from an arbitrary
-	// host is a request-forgery primitive.* So an HTTP endpoint passes
+	// **Every field of a directory is untrusted**, because a client that is
+	// told to fetch from an arbitrary host is a request-forgery primitive. So
+	// an HTTP endpoint passes
 	// `HostPermitted` against this client's own allow-list and then has to be an
 	// address rather than a name, and anything that fails either is dropped and
 	// counted rather than fetched from and reported later.
@@ -102,7 +102,7 @@ namespace client {
 	// The most bytes one relayed route may claim to be.
 	//
 	// **A bound on what a message can make this process allocate.** A server is
-	// something anybody can run - `repo_layout.md` §1 - so a total arriving on
+	// something anybody can run, so a total arriving on
 	// the first chunk of a route is attacker-controlled, and a buffer sized from
 	// it without a ceiling is a few bytes on the wire becoming a gigabyte in the
 	// allocator. Comfortably above any group a publisher produces.

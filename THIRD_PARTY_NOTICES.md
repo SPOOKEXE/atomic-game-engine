@@ -145,7 +145,7 @@ contains the `yes` rows and not the others:
   in the same repository is upstream's reference and is not vendored, compiled
   or shipped.
 
-  It ships wherever `assets` is linked, which by `repo_layout.md` §8 is every
+  It ships wherever `assets` is linked, which is every
   program: the client, the server, studio, the CLI and the origin. Like
   Crypto++ and unlike SDL, it produces no tier split.
 - **ngtcp2 is transport only, and that is why it is here and not a TLS stack.**
@@ -154,7 +154,7 @@ contains the `yes` rows and not the others:
   QUIC dependency arrive without a second cryptography library and without
   `mono.vendor/AGENTS.md`'s fresh-clone rule being argued against. Every other
   candidate hard-wires a backend, and two of them would have wanted Go or Perl
-  on every clone. `docs/QUIC.md` §3 and §4 hold the survey.
+  on every clone; that survey was run when ngtcp2 was chosen.
 
   Obligations are MIT's: retain the notice and the permission text, which ship
   in `COPYING` with the submodule.

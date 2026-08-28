@@ -88,10 +88,36 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 - [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
-- [_] StackGuard to prevent stack errors, infinite recursion, etc.
-- [_] Random.new(seed) with functions
+- [x] StackGuard to prevent stack errors, infinite recursion, etc.
+- [x] Random.new(seed) with functions
+- [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
+- [x] check if particles load textures properly (fallback works, demo asset external)
+
+### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
+- [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
+- [_] one registration path for render nodes — fold scope/queue metadata and requirements into graph::NodeCatalogue; derive BackendNodes(); studio widgets read Params
+- [_] DeviceCaps probe + CheckCapabilities — probe in Initialise(); wire refusal messages; studio requirements column
+- [_] custom native node kinds — RegisterNodeKind + Renderer::InstallNodeHandler; lifecycle hook on reinstall; demo custom kind in examples
+- [_] per-node GPU profiling — mark assignment in GraphRunner, grid column, tier switch; assert dropped-mark accounting
+- [_] explicit conversion nodes + narrowing rule — explicit blit format targeting; LossyWire demoted to hint when explicit conversion sits between producer/consumer
+- [_] tiered default pipelines by capability — Tier B/C documents; capability-driven pick at install; WorldPipelines extension asserting fall-through reasons
+- [_] ECS component change tracking — dirty bits/version counters so systems only process changed data
+- [_] archetype/query optimizer — cached ECS queries, change filters, parallel query execution
+- [_] entity references/handles — generation-safe references instead of raw entity IDs
+- [_] world snapshots & cloning — serialize/restore entire world state; instant-ish duplicate world for testing, previews, server simulation
+- [_] rollback/snapshot system — for networking and deterministic simulation
+- [_] system dependency graph — explicitly declare before/after, parallelize independent systems
+- [_] frame scheduler — CPU jobs, GPU jobs, async jobs and synchronization points represented together
+- [_] engine tick phases — Input → Simulation → Physics → Animation → Replication → Render preparation → Render
+- [_] determinism mode — detect nondeterministic simulation and optionally enforce deterministic ordering
+- [_] hot-reloadable components/systems
+- [_] parallel::Jobs pool fix — static Pool *pool = new Pool(); never destroy to avoid exit hang with waiters on condition variables
 
 ### v0.21
+
+- [_] wire future components — scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
+- [_] skinning pipeline — assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
+- [_] atmosphere/clouds at v0.22 — render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
 
 - [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
 - [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
@@ -181,3 +207,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 - [_] atomic engine icons
 - [_] studio icons
+- [_] pathfinding
+- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
+- [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.

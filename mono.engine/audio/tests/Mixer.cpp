@@ -225,7 +225,8 @@ TEST_CASE("a mismatched output format produces silence rather than a resample", 
 // --- the reason this module exists ----------------------------------------
 
 TEST_CASE("a command lands on its sample, not on the block boundary", "[audio][mixer][schedule]") {
-	// **This is the requirement DATATYPES_LIBRARIES.md §11.2 marks `!`.** A
+	// **This is the sample-accuracy requirement, marked required rather than
+	// desirable.** A
 	// game ticks at frame rate and audio runs at sample rate; a Play applied at
 	// the top of whichever block comes next lands up to a block early or late,
 	// and a run of footsteps is then audibly uneven.

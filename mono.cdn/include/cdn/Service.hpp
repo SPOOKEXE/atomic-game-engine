@@ -3,8 +3,8 @@
 // The origin, reachable. `cdn::Origin` decides what to serve; this is what a
 // client can actually talk to.
 //
-// **This is the hop CDN.md §7 listed as missing** - "HTTP range serving, and the
-// wire hop itself" - and it is why `mono.cdn` now links `Engine::net`. Before
+// **This is the hop that used to be missing** - HTTP range serving, and the
+// wire hop itself - and it is why `mono.cdn` now links `Engine::net`. Before
 // it, everything between a request and its compressed group was built and
 // tested and nothing could reach any of it.
 //
@@ -34,8 +34,8 @@
 //
 // **A path never becomes a filesystem path.** `/bundle/<root>` and
 // `/ingest/<hash>` parse a 64-character hex hash or refuse; there is no route
-// that takes a name, and there must not be. CDN.md §8: a request layer taking a
-// path would have to repeat `ContentRoot`'s traversal checking, and a repeated
+// that takes a name, and there must not be. A request layer taking a path
+// would have to repeat `ContentRoot`'s traversal checking, and a repeated
 // check is one that will eventually differ. The ingest route is the place that
 // rule earns its keep twice over, because it *writes*: the filename is built
 // from the parsed hash and never from anything the client spelled.
@@ -182,7 +182,7 @@ namespace cdn {
 	// substitute anybody else's.
 	//
 	// **Nothing published here is trusted by a reader either.** A client
-	// verifies against a manifest the publisher signed - CDN.md §1 - so content
+	// verifies against a manifest the publisher signed, so content
 	// that reached this inbox still has to be published and signed before any
 	// client will look at it. An ingest key that leaks costs disk, not trust.
 	//

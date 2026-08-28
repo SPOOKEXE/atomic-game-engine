@@ -1423,6 +1423,10 @@ end
 declare extern type Camera extends PVInstance with
 	FarPlaneZ: number
 	FieldOfView: number
+	ImageHeight: number
+	ImageWidth: number
+	MaxImageHeight: number
+	MaxImageWidth: number
 	NearPlaneZ: number
 	SurfaceSize: Vector3
 end

@@ -4,10 +4,10 @@
 // makes possible.
 //
 // **A deployment decides which mode it is in, and both are the same programs.**
-// `CDN.md` §6's three origins are `cdn::CDNSettings` field combinations rather
-// than three classes, and this is the same argument one layer up: a host is in
-// one of two content modes and moving between them is a setting rather than a
-// rebuild.
+// The origin's three deployments are `cdn::CDNSettings` field combinations
+// rather than three classes, and this is the same argument one layer up: a host
+// is in one of two content modes and moving between them is a setting rather
+// than a rebuild.
 //
 // - **Relay.** The host holds the origin connection and the client holds none.
 //   A client asks for the routes an origin serves - `/manifest`,

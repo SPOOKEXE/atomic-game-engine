@@ -18,10 +18,10 @@
 // exchange, `Cipher`'s sealing, `Cookie`'s challenge and `ConnectionId`. QUIC
 // supplies every one, interoperably tested, with per-stream loss recovery that
 // the hand-rolled window structurally cannot have. What it does **not** replace
-// is `Link::BytesPerTick` and `CongestionControl`, and `docs/QUIC.md` §6 and §9
-// are why: a per-player byte ceiling answers a question about an operator's
-// bill rather than about a path, and Copa is a delay-based controller tuned for
-// input latency where ngtcp2's default is Cubic.
+// is `Link::BytesPerTick` and `CongestionControl`: a per-player byte
+// ceiling answers a question about an operator's bill rather than about a
+// path, and Copa is a delay-based controller tuned for input latency where
+// ngtcp2's default is Cubic.
 //
 // ## Channels are sender-owned unidirectional streams
 //

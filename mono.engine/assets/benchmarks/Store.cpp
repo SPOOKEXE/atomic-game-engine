@@ -305,7 +305,7 @@ BENCH_PER_ITEM("Control · the same 32 MiB written as one file", CHUNKS) {
 	// same bytes, one `open` and one `close`, so the difference between this
 	// row and the fresh-write row is exactly what a file per chunk costs on
 	// this machine. That number is the price of dedup and patching, and it is
-	// worth knowing rather than assuming - CDN.md's chunk layout is a trade and
+	// worth knowing rather than assuming - the chunk layout is a trade and
 	// this is the side of it nothing else states.
 	Tree tree("control");
 	std::ofstream file(tree.Root / "whole", std::ios::binary);

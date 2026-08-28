@@ -904,11 +904,10 @@ namespace engine::gui {
 		// @since v0.18
 		bool ClipsDescendants = true;
 
-		// Whether a pointer in the world may land on it at all. `Surface::Active`
-		// carries the argument for the default.
+		// Whether a pointer in the world may land on it at all.
 		//
 		// @since v0.18
-		bool Active = false;
+		bool Active = true;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[5] = {};

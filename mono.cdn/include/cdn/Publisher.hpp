@@ -30,7 +30,7 @@
 // something an origin does when it starts.
 //
 // **Affinity is derived from the directory a file sits in.** A group has to be
-// independently useful - CDN.md §5 - and without an authoring tool to declare
+// independently useful, and without an authoring tool to declare
 // what belongs with what, the directory is the best available statement of it:
 // somebody who put a mesh and its textures in one folder was saying they go
 // together. Stated plainly because it is a heuristic standing in for a decision

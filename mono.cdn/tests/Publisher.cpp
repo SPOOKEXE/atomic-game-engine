@@ -213,7 +213,7 @@ TEST_CASE("republishing unchanged content is a no-op on the store", "[cdn][publi
 }
 
 TEST_CASE("changing one file changes the root and reuses the rest", "[cdn][publisher]") {
-	// The invalidation set is the chain of changed hashes - CDN.md §2 - so a
+	// The invalidation set is the chain of changed hashes, so a
 	// one-file edit must not rewrite the store.
 	Workspace workspace;
 	workspace.Add("meshes/rock.mesh", "MESHv1 rock");

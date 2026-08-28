@@ -10,10 +10,10 @@
 // are what that producer had to be built against.
 //
 // **A manifold holds several points, and that is the load-bearing decision.**
-// `v02v03v04.md` §3.5 is explicit: a single-point manifold cannot hold a resting
-// box still. One point gives the solver one constraint, so a box on a floor
-// pivots about that point and rocks - every frame the contact moves, and the
-// rocking never damps out because each frame is a fresh single constraint.
+// A single-point manifold cannot hold a resting box still. One point gives the
+// solver one constraint, so a box on a floor pivots about that point and rocks
+// - every frame the contact moves, and the rocking never damps out because
+// each frame is a fresh single constraint.
 // Designing for one point now and adding the rest later means rewriting the
 // solver, the cache key and the event surface together.
 //

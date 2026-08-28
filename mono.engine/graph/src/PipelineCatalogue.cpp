@@ -178,9 +178,7 @@ namespace engine::graph {
 
 		// **A table rather than forty blocks.** The vocabulary is the point; the
 		// registration is not, and forty near-identical paragraphs would bury
-		// what differs between two kinds under what does not. The reasoning for
-		// every entry is `docs/PIPELINE_NODES.md` §4, which is where a reader
-		// should go - this is the machine-readable half of that section.
+		// what differs between two kinds under what does not.
 		struct Port {
 			const char *Name;
 			K Kind;

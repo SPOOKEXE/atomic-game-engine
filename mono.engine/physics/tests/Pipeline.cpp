@@ -221,8 +221,8 @@ TEST_CASE("a scheduled tick integrates before it indexes", "[physics][pipeline]"
 }
 
 TEST_CASE("two runs of one scene tick to identical bytes", "[physics][pipeline]") {
-	// Same binary, same platform, same result - `v02v03v04.md` §2.4 and §3.5.
-	// A snapshot rather than a field-by-field comparison, because the snapshot
+	// Same binary, same platform, same result. A snapshot rather than a
+	// field-by-field comparison, because the snapshot
 	// is what `just determinism` compares and it also catches a component whose
 	// padding reached the file uninitialised.
 	const auto run = [](int ticks) {

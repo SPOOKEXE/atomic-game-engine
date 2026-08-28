@@ -1,6 +1,6 @@
 # L11. The wire between two machines, and who is authoritative across it.
 #
-# repo_layout.md §5.2 splits this module four ways: `upstream/` is client to
+# The layer plan splits this module four ways: `upstream/` is client to
 # server and every field of it is hostile until validated, `downstream/` is
 # server to clients and authoritative at its source, `predict/` is the client's
 # run-ahead and its reconciliation, and `http/`/`websocket/` is userland
@@ -13,9 +13,9 @@
 # script's remote call or a group of content bytes.
 #
 # `shared` tier, because both halves run the same code. The server encodes and
-# the client decodes and then they swap - repo_layout.md §16.6 goes further and
-# has single-player ride a loopback with **real encoding**, so there is no
-# configuration in which this path is skipped.
+# the client decodes and then they swap - single-player goes further still and
+# rides a loopback with **real encoding**, so there is no configuration in which
+# this path is skipped.
 #
 # asio is VENDOR rather than VENDOR_PUBLIC: no public header here names a
 # socket, an io_context or an error_code. That is what keeps a transport
@@ -25,7 +25,7 @@
 # connection is ngtcp2 all the way through, so `quic/Connection.hpp` holds a
 # pimpl and every `ngtcp2_` type stays inside one translation unit. The crypto
 # and the TLS handshake beside it name none at all - they are ours, over
-# Crypto++ - which is what lets `docs/QUIC.md` §4's decision be revisited
+# Crypto++ - which is what lets the QUIC backend choice be revisited
 # without the transport noticing.
 mono_add_library(net
 	TIER shared

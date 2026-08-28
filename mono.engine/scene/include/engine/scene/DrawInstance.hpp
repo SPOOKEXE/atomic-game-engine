@@ -24,8 +24,8 @@
 // the presentation module, once, at the point of upload - putting it here would
 // put a device's memory layout in the type a headless server writes.
 //
-// `HalfExtent` is the one field `v02v03v04.md` does not name and it is not
-// optional: a `CFrame` carries no scale on purpose, and the `mat4` this
+// `HalfExtent` is the one field beyond that list and it is not optional: a
+// `CFrame` carries no scale on purpose, and the `mat4` this
 // replaces carried it. Without it a two-metre cube and a one-metre cube are the
 // same draw instance, and the demo this has to be able to publish scales
 // cubes.

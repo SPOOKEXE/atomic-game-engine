@@ -285,7 +285,7 @@ namespace cdn {
 		//
 		// Resolving a payload reads a filesystem or talks to an upstream. A
 		// construct that occupies a worker while it waits turns an IO-bound
-		// origin into a thread-starved one - CDN.md §3 - so this stage is its
+		// origin into a thread-starved one, so this stage is its
 		// own, and only the compression that follows is fanned out.
 		std::vector<std::optional<std::vector<std::byte>>> payloads(toCompress.size());
 		std::vector<bool> forwarded(toCompress.size(), false);

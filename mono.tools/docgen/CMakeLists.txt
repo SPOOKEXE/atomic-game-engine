@@ -102,13 +102,9 @@ foreach(root IN ITEMS
 	"${CMAKE_SOURCE_DIR}/CONTRIBUTING.md"
 	"${CMAKE_SOURCE_DIR}/RUNNING.md"
 	"${CMAKE_SOURCE_DIR}/ROADMAP.md"
-	# RUNNING.md links to this from its content-origin section, so leaving it out
-	# is a dangling link rather than a smaller site - and `docs-check` fails on
-	# those. The design notes that used to sit beside it here were deleted in
-	# `document-cleanup`; the entry went with them, because an input that does
-	# not exist is guarded by `EXISTS` below and therefore silently does nothing,
-	# which is how a stale line survives being wrong.
-	"${CMAKE_SOURCE_DIR}/SETUP-CDN.md"
+	# SETUP-CDN.md used to be listed here and was deleted with the design-note
+	# cleanup; nothing links it any more, so the entry goes rather than sitting
+	# as a stale line an EXISTS guard would silently skip.
 	"${CMAKE_SOURCE_DIR}/SECURITY.md"
 	"${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
 	"${CMAKE_SOURCE_DIR}/docs"

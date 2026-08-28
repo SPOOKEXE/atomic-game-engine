@@ -1,8 +1,8 @@
 // What the solver costs per contact, which is the number that decides
 // `SOLVER_ITERATIONS`.
 //
-// `v02v03v04.md` §3.6 asks for exactly this figure. It is the cost side of the
-// decision; the accuracy side - how far a stack sinks and whether it settles at
+// This is the cost side of the decision; the accuracy side - how far a stack
+// sinks and whether it settles at
 // all - is in `Solver.hpp` beside the constant, because that is where somebody
 // changing the number will be looking.
 //

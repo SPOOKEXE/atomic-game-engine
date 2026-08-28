@@ -147,8 +147,8 @@ namespace engine::assets {
 
 		// A verification failure is a security signal and not a miss. A rate
 		// that climbs means somebody is serving bytes that do not match a root
-		// the client trusts - which, per CDN.md §1, is the one thing a
-		// compromised origin cannot do without being seen. It is seen here.
+		// the client trusts - which is the one thing a compromised origin
+		// cannot do without being seen. It is seen here.
 		core::Metrics::Count(passed ? "assets.verify.passed" : "assets.verify.failed", 1.0);
 		return passed;
 	}

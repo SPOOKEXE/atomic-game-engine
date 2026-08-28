@@ -2535,9 +2535,9 @@ are a log nobody can read.
 
 `--grant-key` is **required to serve**, and it is not a convenience to remove.
 An origin that admitted everyone would be deciding who may have what, which is
-the server's job - CDN.md §4.
+the server's job.
 
-CDN.md §6's three deployments are flag combinations rather than three programs:
+The three deployments are flag combinations rather than three programs:
 
 | Deployment | Flags |
 |---|---|
@@ -2675,9 +2675,9 @@ checked for containment, which catches the symlink. A symlink that stays inside
 the root is served, because an atomically swapped `current` is the deployment
 pattern this is for.
 
-The design - content addressing, the hierarchical hash, grants, and how groups
-are streamed so a game builds progressively - is `CDN.md` in the design notes.
-What is still open at v0.9 is `control/` (the upload API and dashboard, in
+Content addressing, the hierarchical hash, grants, and streaming groups so a
+game builds progressively are built. What is still open at v0.9 is `control/`
+(the upload API and dashboard, in
 TypeScript), invalidation, and chunk-level verification of what an upstream
 returned - today that is a length check against the signed manifest, which is
 real and is not the whole of one.

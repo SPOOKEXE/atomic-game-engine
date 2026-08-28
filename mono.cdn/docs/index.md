@@ -1,8 +1,7 @@
 # mono.cdn - the content origin
 
 A `shared`-tier library and a thin main over it, serving a game's content out of
-a directory. `repo_layout.md` §11 is the design;
-[`AGENTS.md`](../AGENTS.md) is what a reviewer refuses.
+a directory. [`AGENTS.md`](../AGENTS.md) is what a reviewer refuses.
 
 Two deployments, one program:
 

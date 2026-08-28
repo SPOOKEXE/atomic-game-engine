@@ -215,9 +215,9 @@ namespace engine::graph {
 
 		// --- writes overwritten before anybody read them -----------------------
 		//
-		// **The clearest case is a clear followed by a full copy**, which is what
-		// `PIPELINE_NODES.md` §1.5 fault 2 is: three targets cleared at the top
-		// of the frame, two of them wholly overwritten a few draws later. Stated
+		// **The clearest case is a clear followed by a full copy**, which is
+		// fault 2 in the taxonomy: three targets cleared at the top of the
+		// frame, two of them wholly overwritten a few draws later. Stated
 		// generally, because a clear is not the only pass that can be wasted.
 
 		for (const auto &[value, wrote] : writers) {

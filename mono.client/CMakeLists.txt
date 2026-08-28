@@ -3,7 +3,7 @@
 # The split is not cosmetic. A test binary needs something to link, and
 # single-player needs the client to be able to link a server library and host
 # one in-process. Neither is possible when the program is one executable's worth
-# of globbed sources. repo_layout.md §2.
+# of globbed sources.
 
 mono_add_library(client
 	TIER client
@@ -148,5 +148,4 @@ mono_add_program(client
 	# Naming it keeps it a decision rather than a precedent. Not declared yet,
 	# because nothing here hosts a server - and an escape that is not currently
 	# needed is an escape somebody will eventually use for something else.
-	# repo_layout.md §8.
 )

@@ -1099,8 +1099,8 @@ check-server-is-headless:
         || (echo "FAIL: the client was built into a server-only preset" && exit 1)
     @echo "server contains no graphics stack"
 
-# The origin on its own, which is how repo_layout.md §11's claim is proved
-# rather than asserted: it configures and builds where there is no Vulkan SDK,
+# The origin on its own, which proves rather than asserts the claim: it
+# configures and builds where there is no Vulkan SDK,
 # no SDL and no shader compiler.
 #
 # MONO_VENDORED_GLSLC is left alone deliberately. The preset builds no client,

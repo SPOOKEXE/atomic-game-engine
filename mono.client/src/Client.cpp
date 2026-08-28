@@ -211,10 +211,7 @@ namespace client {
 		// **Only with a window**, because a present mode belongs to a swapchain
 		// and a headless run has none.
 		if (Window != nullptr && !Renderer.SetVerticalSync(!Settings.Uncapped)) {
-			ENGINE_WARN(
-				"client could not select {} present mode",
-				Settings.Uncapped ? "immediate" : "vsync"
-			);
+			ENGINE_WARN("client could not select {} present mode", Settings.Uncapped ? "immediate" : "vsync");
 		}
 
 		// **The configured count wins, and zero means work it out.** A machine

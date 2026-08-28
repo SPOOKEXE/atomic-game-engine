@@ -119,8 +119,8 @@ namespace unified {
 		// The two links. `Engine::net`.
 		//
 		// Absent under `Transport::Direct` and under the two QUIC transports: a
-		// QUIC session owns no `net::Link`, which is `docs/QUIC.md` §6's whole
-		// point about what that type is.
+		// QUIC session owns no `net::Link`, whose lifecycle and window are the
+		// transport's own.
 		//@{
 		std::optional<engine::net::ConnectionStats> ServerLink;
 		std::optional<engine::net::ConnectionStats> ClientLink;

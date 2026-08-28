@@ -471,9 +471,8 @@ namespace studio {
 		// see `ListenerSettings::Quic`.
 		engine::replication::ListenerSettings serving;
 		serving.Session = EditSession();
-		// The ceiling is the one the edit session already stated.
-		// `docs/QUIC.md` §6: it survives above the congestion controller rather
-		// than instead of it.
+		// The ceiling is the one the edit session already stated, and it
+		// survives above the congestion controller rather than instead of it.
 		serving.Quic.BytesPerTick = serving.Session.Link.BytesPerTick;
 
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));

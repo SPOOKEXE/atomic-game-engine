@@ -3,7 +3,7 @@
 // Who is allowed to fetch what, and who decides.
 //
 // **The server decides. The origin checks a token and serves.** Two jobs, two
-// programs - CDN.md §4. The server is the only thing that knows the session, the
+// programs. The server is the only thing that knows the session, the
 // player, what they have loaded and what they are entitled to; the origin knows
 // none of it and must not learn it. An origin with a player database is a second
 // authority, and two authorities that can disagree eventually do.

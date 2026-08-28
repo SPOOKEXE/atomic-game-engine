@@ -6,8 +6,8 @@
 // framing its own - is how two builds end up disagreeing about a length field,
 // and the disagreement surfaces as a desync a long way from its cause.
 //
-// **Every field of an inbound packet is hostile.** `repo_layout.md` §1 says
-// anyone can run a server, so a client's packets and a server's packets are both
+// **Every field of an inbound packet is hostile.** Anyone can run a server,
+// so a client's packets and a server's packets are both
 // attacker-controlled from the other side's point of view. There is no
 // "trusted direction" here and the reader has no fast path that skips a check.
 //

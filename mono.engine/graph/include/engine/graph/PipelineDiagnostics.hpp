@@ -2,12 +2,12 @@
 
 // What is wrong with a pipeline, worked out from the pipeline alone.
 //
-// **This is the cheapest useful thing in `docs/PIPELINE_NODES.md` and the
-// reason that document exists.** Its §1.5 tabulates eleven faults found by a
-// specialist reading a GPU capture of a shipping frame for an afternoon - a
-// target cleared and never used, a scene copied into a buffer nothing reads
-// again, normals in four times the bits they need, a group of draws whose
-// resources connect to nothing before or after them.
+// **This is the cheapest useful half of the fault taxonomy this file
+// implements, and the reason that taxonomy was written down.** Eleven faults,
+// tabulated by a specialist reading a GPU capture of a shipping frame for an
+// afternoon - a target cleared and never used, a scene copied into a buffer
+// nothing reads again, normals in four times the bits they need, a group of
+// draws whose resources connect to nothing before or after them.
 //
 // Six of the eleven are **static properties of the graph**. They need no
 // capture, no GPU, no timing and no readback: they are arithmetic over who
@@ -42,7 +42,7 @@ namespace engine::graph {
 
 	// What sort of fault a `Diagnostic` reports.
 	//
-	// **One entry per row of `PIPELINE_NODES.md` §1.5 that a graph can answer.**
+	// **One entry per row of the fault taxonomy that a graph can answer.**
 	// The three that need a readback - is this channel constant, is this target
 	// uniform, how many times was this pixel shaded - are deliberately absent,
 	// because guessing at them from the declaration would produce a warning
@@ -107,9 +107,9 @@ namespace engine::graph {
 		// the whole reason a redundant-looking check earns its place.
 		//
 		// **Written on the assumption that `Compile` sorted silently**, which is
-		// what Unreal and Unity both do and what `PIPELINE_NODES.md` §1.5
-		// recorded. The test that was meant to prove the frame still ran is what
-		// found otherwise.
+		// what Unreal and Unity both do and what the fault survey assumed when
+		// it was written down. The test that was meant to prove the frame still
+		// ran is what found otherwise.
 		OutOfOrder,
 
 		// A target with an alpha channel no reader looks at.

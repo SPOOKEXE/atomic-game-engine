@@ -2,8 +2,8 @@
 
 // The six exact pair functions, and the one place a normal is ever flipped.
 //
-// `v02v03v04.md` decision 3: box-box, box-sphere, box-cylinder, sphere-sphere,
-// sphere-cylinder, cylinder-cylinder, analytic and written here. There is no
+// All six are analytic: box-box, box-sphere, box-cylinder, sphere-sphere,
+// sphere-cylinder, cylinder-cylinder, written here. There is no
 // physics library behind this and there is not going to be one.
 //
 // # The convention, stated once

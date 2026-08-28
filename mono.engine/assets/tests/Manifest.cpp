@@ -106,7 +106,7 @@ TEST_CASE("a name resolves to exactly one asset", "[assets][manifest]") {
 	CHECK(manifest.Find("") == nullptr);
 
 	// The manifest is where a name becomes a hash, and the last place a name is
-	// used at all - CDN.md §1.
+	// used at all.
 	CHECK(manifest.Find("meshes/rock.mesh")->Name == "meshes/rock.mesh");
 }
 
@@ -176,7 +176,7 @@ TEST_CASE("the manifest root changes when anything below it changes", "[assets][
 	const ContentHash root = original.Root();
 
 	// One edited chunk changes its asset root, its bundle root and this. That
-	// chain is the invalidation set an edge cache is handed - CDN.md §2.
+	// chain is the invalidation set an edge cache is handed.
 	Manifest edited;
 	const ContentHash rock =
 		edited.AddAsset("meshes/rock.mesh", AssetKind::Mesh, {Chunk("rock-one"), Chunk("rock-CHANGED")});

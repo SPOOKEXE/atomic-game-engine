@@ -465,6 +465,11 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Run(std::string_view source, std::string_view name) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		Error.clear();
 
 		// Compiled to bytecode first: Luau is a compiler and a VM, and they are
@@ -732,6 +737,11 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		Error.clear();
 
 		// **The active container** - `script::CodeSourceContainerSelector` says
@@ -776,6 +786,11 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Heartbeat(float delta) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		// **One budget for the whole beat.** Every connection, every resumed
 		// task and every delivery handler spends the same one, because a budget
 		// refreshed per handler bounds no tick: a script gets as many of them as
@@ -994,6 +1009,11 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		// A host call is its own entry from its own frame rather than part of a
 		// tick, so it gets its own budget - the same grant `Run` and `Heartbeat`
 		// make, and for the same reason: the mark moves, the counter does not.
@@ -1006,6 +1026,11 @@ namespace engine::script {
 	}
 
 	ScriptSurface LuauRuntime::Surface() const {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return {};
+		}
+
 		ScriptSurface surface;
 		if (State == nullptr) {
 			return surface;

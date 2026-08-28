@@ -11,9 +11,18 @@
 // repository would be a tool that fails exactly when a model most needs it, and
 // the graph is a constant of the build rather than state of the run.
 
+// **One literal per 16 KiB chunk.** MSVC refuses a single string literal over
+// 65,535 bytes (C2026) and the graph grows toward that every time modules are
+// added, so `mono.engine/control/CMakeLists.txt` splits the JSON by byte
+// offset into adjacent raw string literals. Translation phase 6 concatenates
+// them back into one string before the compiler ever sees it, byte for byte.
+// The indexed delimiter stays under the standard's 16-character raw-delimiter
+// cap and keeps one chunk's closer from matching another's content.
+
 namespace engine::control {
 
 	extern const char *const GRAPH_JSON;
 
-	const char *const GRAPH_JSON = R"MONOGRAPH(@MONO_CONTROL_GRAPH@)MONOGRAPH";
+	const char *const GRAPH_JSON =
+@MONO_CONTROL_GRAPH_LITERALS@;
 }

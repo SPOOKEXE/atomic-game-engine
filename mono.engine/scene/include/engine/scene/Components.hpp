@@ -285,12 +285,12 @@ namespace engine::scene {
 		// differ.
 		//
 		// **Three bytes and not two, because a `Sleeping` flag used to sit
-		// here.** It does not any more: `v02v03v04.md`'s allocation table puts
-		// sleeping in a different archetype so the query never visits a
-		// sleeping row, and a flag on this row is the opposite of that - it is
-		// only readable by making the visit the archetype move exists to avoid,
-		// and it is the same state the solver already has to keep. `physics`
-		// owns it now, and `physics/AGENTS.md` carries the whole decision.
+		// here.** It does not any more: sleeping belongs in a different
+		// archetype so the query never visits a sleeping row, and a flag on
+		// this row is the opposite of that - it is only readable by making the
+		// visit the archetype move exists to avoid, and it is the same state
+		// the solver already has to keep. `physics` owns it now, and
+		// `physics/AGENTS.md` carries the whole decision.
 		uint8_t Reserved[3] = {};
 	};
 

@@ -688,7 +688,7 @@ TEST_CASE("a world destroyed with traffic in flight loses it cleanly", "[world]"
 
 // A replica's bus handle refuses writes.
 //
-// `v02v03.md` §2.12 puts this in v0.2 rather than with replication, because the
+// This was put in v0.2 rather than with replication, because the
 // value is in no system ever being *written* assuming it can reach a DataStore
 // from a client. A flag added after the systems exist finds them one crash at a
 // time.

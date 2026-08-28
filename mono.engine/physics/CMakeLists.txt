@@ -6,8 +6,8 @@
 # make the two disagree by construction.
 #
 # **L8 is shared with `assets`, and that is confirmed rather than inherited.**
-# `v02v03v04.md` §3.1 put this module at L8 when the height was free and flags
-# that `assets` has since taken it. Sharing a height is legal - `replication`,
+# The height was free when this module was placed and `assets` has since taken
+# it. Sharing a height is legal - `replication`,
 # `input` and `render` already share L12 - and it is safe here because the two
 # are disjoint: nothing in this module depends on `assets` and nothing in
 # `assets` depends on this. Every dependency below is strictly lower (L7, L6,

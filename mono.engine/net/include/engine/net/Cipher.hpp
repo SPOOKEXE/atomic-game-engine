@@ -2,8 +2,8 @@
 
 // Frame encryption, and the one rule that makes it safe to use.
 //
-// ChaCha20-Poly1305, RFC 8439, which is what DATATYPES_LIBRARIES.md picks for
-// the transport. One pass over the bytes, no lookup tables, and constant time on
+// ChaCha20-Poly1305, RFC 8439, which is what this transport seals with. One
+// pass over the bytes, no lookup tables, and constant time on
 // hardware with no AES instructions - a phone, which is exactly where AES-GCM in
 // software is both slow and a timing risk.
 //

@@ -17,8 +17,7 @@
 //
 // That table is the whole feature, and it is a table rather than four code
 // paths because the origin cannot tell the difference. A stream that changed
-// what was served would be a second answer to what content is, and CDN.md
-// refuses that twice.
+// what was served would be a second answer to what content is.
 //
 // ## Why the origin can host the meeting place
 //

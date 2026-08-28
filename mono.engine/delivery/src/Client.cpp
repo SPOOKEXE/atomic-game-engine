@@ -30,13 +30,13 @@
 //
 // A source that fails any of them is passed over and the next one is tried.
 // That is what makes a compromised or stale origin able to withhold content and
-// unable to substitute it - CDN.md §1.
+// unable to substitute it.
 
 namespace engine::delivery {
 	namespace {
 		// How many bundle fetches may be in flight.
 		//
-		// CDN.md §5 wants groups streaming concurrently so a slow one does not
+		// Groups stream concurrently so a slow one does not
 		// hold up the others. Bounded rather than unlimited because each is a
 		// socket and a decompression buffer.
 		constexpr size_t MAXIMUM_BUNDLES_IN_FLIGHT = 4;

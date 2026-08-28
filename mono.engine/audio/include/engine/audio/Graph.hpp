@@ -7,11 +7,11 @@
 // kinds: a `Player` is an input, a `Fader`, `Emitter` and `Bus` are processors,
 // and an `Output` is where it all lands.
 //
-// **Why this is not `engine::graph`.** `repo_layout.md` §9 plans one graph
-// runtime with five consumers and lists audio among them, and that is right
-// eventually. But §16 decision 12 states the losing condition and the ordering
-// with it: *build `mono.engine/graph/` against render only, and do not claim it
-// is general until the physics graph is the second user.* Today `graph` holds
+// **Why this is not `engine::graph`.** The plan is one graph runtime with
+// several consumers and audio listed among them, and that is right eventually.
+// But the stated ordering for building it is strict: *build
+// `mono.engine/graph/` against render only, and do not claim it is general
+// until the physics graph is the second user.* Today `graph` holds
 // the description of a frame and none of the execution - no nodes, no compiler,
 // no executor - so routing audio through it would mean building that runtime
 // against a second consumer before it exists for the first. This graph is small

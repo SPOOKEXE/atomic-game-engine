@@ -1,7 +1,7 @@
 // The replication seam: applying authoritative state to a world that is
 // already running.
 //
-// `v02v03.md` §2.12 reserves exactly this and builds nothing else. A client
+// This seam was reserved early and built as nothing more. A client
 // holding a replica receives state every tick and reconciles against what it
 // already has - same entity, new values, no destroy-and-recreate, because
 // recreating would reset everything the client predicted and turn every

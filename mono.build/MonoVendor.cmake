@@ -647,8 +647,8 @@ add_library(Vendor::cryptopp ALIAS cryptopp)
 
 # --- BLAKE3 -----------------------------------------------------------------
 # The content hash. `assets` at L8 keys chunks, assets, bundles and the manifest
-# on it, and CDN.md §2 is built on the property that makes it the right choice
-# rather than merely a fast one: BLAKE3 is natively tree-structured, so
+# on it, and the content model is built on the property that makes BLAKE3 the
+# right choice rather than merely a fast one: BLAKE3 is natively tree-structured, so
 # verifying one chunk of a large asset does not require the whole file. That is
 # exactly the origin's access pattern, and it is what lets a client verify a
 # stream as it lands instead of buffering an asset to check it.
@@ -657,7 +657,7 @@ add_library(Vendor::cryptopp ALIAS cryptopp)
 # Taking it would not have been the same decision. Content addressing is the one
 # place a hash is compared against an attacker's rather than against accident,
 # and changing the algorithm afterwards rehashes every byte anyone has stored -
-# so it is picked once, on purpose, and DATATYPES_LIBRARIES.md §1.1 picks this.
+# so it is picked once, on purpose, and BLAKE3 is that pick.
 #
 # Only the upstream `c/` directory is built. The Rust crate above it is the
 # reference implementation and is not vendored - one implementation of a format
@@ -692,7 +692,7 @@ add_library(Vendor::blake3 ALIAS blake3)
 # --- Zstandard --------------------------------------------------------------
 # Compression for delivery groups, and only for delivery groups.
 #
-# CDN.md §5 puts it at one level and no other: **per group, never per file and
+# Compression sits at one level and no other: **per group, never per file and
 # never per manifest.** Per file loses the cross-file redundancy that is most of
 # the ratio on many small assets; per manifest defeats range requests, partial
 # fetch and the whole hash tree. Chunks stay uncompressed at rest so that dedup
@@ -727,7 +727,7 @@ set(ZSTD_BUILD_CONTRIB   OFF CACHE BOOL "" FORCE)
 # Legacy support decodes frames from Zstd 0.x - formats that predate the
 # stabilised one and that nothing here could ever have written. It costs a large
 # amount of extra decoder surface, and that surface parses bytes an origin
-# supplied. `repo_layout.md` §1 says anyone can run a server, so a decoder we
+# supplied. Anyone can run a server, so a decoder we
 # cannot ever need is attack surface we should not carry.
 set(ZSTD_LEGACY_SUPPORT  OFF CACHE BOOL "" FORCE)
 
@@ -751,12 +751,11 @@ add_library(Vendor::zstd ALIAS libzstd_static)
 # --- Luau -------------------------------------------------------------------
 # The script VM, vendored ahead of its consumer.
 #
-# `v05.md` open question 3 asked which VM and said the answer should be taken
-# before the bindings manifest generates declaration files, because a `.d.ts`
-# and a Luau type file are written against a value model rather than in the
-# abstract. This is that answer. **Nothing links it yet** - v0.6 is where a
-# script runs - and EXCLUDE_FROM_ALL is what makes vendoring it early cost
-# nothing until then.
+# Luau was settled as the VM before the bindings manifest generates its
+# declaration files, because a `.d.ts` and a Luau type file are written against
+# a value model rather than in the abstract. This is that answer. **Nothing
+# links it yet** - v0.6 is where a script runs - and EXCLUDE_FROM_ALL is what
+# makes vendoring it early cost nothing until then.
 #
 # MIT, twice over: Roblox's own text in LICENSE.txt and Lua.org's in
 # lua_LICENSE.txt, since Luau is a fork of Lua 5.1. Both are permissive and both
@@ -823,14 +822,14 @@ add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
 add_library(Vendor::luau_analysis ALIAS Luau.Analysis)
 
 # --- QuickJS-ng -------------------------------------------------------------
-# The second script VM, and the JavaScript/TypeScript half of the two-language
-# choice `v05.md` §5.7 records.
+# The second script VM, and the JavaScript/TypeScript half of the recorded
+# choice: two languages, each its own VM, over one binding surface.
 #
-# Vendored alongside Luau rather than instead of it. `v05.md` argued for one
-# runtime and the decision went the other way deliberately - two languages, two
-# VMs, one binding surface - so what matters here is that the *engine* keeps one
-# tick and one determinism story across both. Three properties of this engine
-# are what make that possible, and each is an API rather than a hope:
+# Vendored alongside Luau rather than instead of it. One runtime was argued
+# for and the decision went the other way deliberately, so what matters here
+# is that the *engine* keeps one tick and one determinism story across both.
+# Three properties of this engine are what make that possible, and each is an
+# API rather than a hope:
 #
 # - **The host drives the microtask queue.** `JS_ExecutePendingJob` and
 #   `JS_IsJobPending` are called by us, in a drain loop, at a point we choose.
@@ -842,8 +841,8 @@ add_library(Vendor::luau_analysis ALIAS Luau.Analysis)
 #   collector can be taken off automatic and run at a fixed point in the tick,
 #   so GC timing cannot differ between two runs of one recording.
 # - **The host can stop a script.** `JS_SetInterruptHandler`, `JS_SetMemoryLimit`
-#   and `JS_SetMaxStackSize` are what bound untrusted user code, which is the
-#   situation `repo_layout.md` §1 puts this engine in.
+#   and `JS_SetMaxStackSize` are what bound untrusted user code, which is every
+#   script this engine runs.
 #
 # No JIT: it is a bytecode interpreter, which is the same reason `Luau.CodeGen`
 # is left unaliased one block up. MIT, Bellard and Gordon, continued by the ng
@@ -884,8 +883,7 @@ mono_vendor_system(qjs)
 add_library(Vendor::quickjs ALIAS qjs)
 
 # --- ngtcp2 -----------------------------------------------------------------
-# QUIC. `docs/QUIC.md` is the survey and `docs/DEFERRED.md` D00014 is the
-# argument; what belongs here is why this library and what is switched off.
+# QUIC. What belongs here is why this library and what is switched off.
 #
 # **Nothing under its `lib/` names a TLS stack**, which is the property that
 # decided it over seven alternatives. Every other candidate hard-wires one:

@@ -71,7 +71,7 @@ TEST_CASE("the gate refuses a bundle outside the grant", "[cdn][gate]") {
 	const auto token = Token(Key());
 
 	// A valid grant asking for content it was not given. The origin has no way
-	// to widen it and no reason to want one - CDN.md §4.
+	// to widen it and no reason to want one.
 	CHECK_FALSE(gate.Admits(token, Bundle("someone else's content"), NOW));
 	CHECK_FALSE(gate.Admits(token, ContentHash{}, NOW));
 }

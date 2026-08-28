@@ -16,7 +16,7 @@
 //
 // ## The UI is a consumer of this and not its owner
 //
-// v0.11 §4.4 settles the order: *"the API comes first and the UI is a consumer
+// The order is settled: *"the API comes first and the UI is a consumer
 // of it, which also means a graph can be edited from a script with no UI at
 // all."* Everything an Assets Pipeline widget does - add a node, wire two,
 // change a number - is `Record` with a different `Operation`, so a script and a
@@ -304,7 +304,7 @@ namespace engine::bake {
 	// Several named pipelines, which is what one world carries.
 	//
 	// **A world does not have *a* bake pipeline any more than it has *a*
-	// script.** v0.11 asks for many node trees in one editor, so the thing a
+	// script.** One editor holds many node trees, so the thing a
 	// save file holds is the collection rather than one document - and a format
 	// that carried one would need a second format the day somebody added a
 	// second chain.

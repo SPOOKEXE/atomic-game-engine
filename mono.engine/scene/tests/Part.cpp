@@ -101,10 +101,9 @@ TEST_CASE("size is halved once, into bounds and collider", "[scene][part]") {
 }
 
 TEST_CASE("MakePart with Anchored adds no Motion", "[scene][part]") {
-	// Named in `v02v03v04.md` §3.7. The decision is presence and not a flag, so
-	// an anchored part is in a different archetype and the dynamic queries never
-	// visit it - which is the whole reason static geometry costs nothing per
-	// tick.
+	// The decision is presence and not a flag, so an anchored part is in a
+	// different archetype and the dynamic queries never visit it - which is the
+	// whole reason static geometry costs nothing per tick.
 	//
 	// Since v0.18 an anchored part stores *neither* component, so this asserts
 	// two absences. That is the polarity: static is what a row looks like when
@@ -244,8 +243,11 @@ TEST_CASE("a replica refuses to mint a part", "[scene][part]") {
 
 // --- the property surface ---------------------------------------------------
 //
-// `v05.md` §5.5's tests. The interesting ones are not "does a setter set" -
-// they are the four ways a property write can look like it worked and not have.
+// The interesting cases here are not "does a setter set" - they are the four
+// ways a property write can look like it worked and not have: a change channel
+// left unmarked so no replication delta ever carries the value, a structural
+// set applied in the middle of an iteration, a foreign `Entity` handle
+// accepted, and an authoritative write let through on a replica.
 
 namespace {
 	// Reads a property into a value of the type it says it is.

@@ -290,6 +290,11 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Run(std::string_view source, std::string_view name) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		Error.clear();
 
 		// A fresh budget for this chunk, and the counter keeps running. The
@@ -338,6 +343,11 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::RunInstance(ecs::Entity instance) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		Error.clear();
 
 		// **The active container, not a component of its own.** An instance
@@ -382,6 +392,11 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Heartbeat(float delta) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
 		// **One budget for the whole beat.** Every connection, every resumed
 		// task and every reaction they queue spends the same one, because a
 		// budget refreshed per handler bounds no tick: a script gets as many of
@@ -472,6 +487,11 @@ namespace engine::script {
 	}
 
 	ScriptSurface JavaScriptRuntime::Surface() const {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return {};
+		}
+
 		ScriptSurface surface;
 		if (Context == nullptr) {
 			return surface;

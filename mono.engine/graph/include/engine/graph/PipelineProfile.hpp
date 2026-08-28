@@ -7,7 +7,6 @@
 // what happens" than a node canvas is.** A canvas shows *intent* - what
 // somebody wired. This shows *consequence* - what will actually run, in what
 // order, touching what, and how much memory is live while it does.
-// `docs/PIPELINE_NODES.md` §1.2 and §7 carry the argument at length.
 //
 // ## Derived, never maintained
 //
@@ -206,9 +205,9 @@ namespace engine::graph {
 	//
 	// **Takes the view size, because half of what makes a frame expensive is
 	// resolution** and a resource that follows the view has no size until one is
-	// named. `PIPELINE_NODES.md` §1.4 counts six resolutions in one frame; a
-	// profile that could not price them would be reporting the wrong number for
-	// every intermediate in a downsample chain.
+	// named. One captured frame runs six different resolutions; a profile that
+	// could not price them would be reporting the wrong number for every
+	// intermediate in a downsample chain.
 	//
 	// @param graph      The pipeline.
 	// @param compiled   What `Compile` produced. Its order is the column order.

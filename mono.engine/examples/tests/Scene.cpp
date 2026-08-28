@@ -44,9 +44,9 @@ TEST_SUITE_ID("engine.examples.scene")
 TEST_DEPENDS("engine.scripthost.scripting")
 
 using Catch::Approx;
-using engine::core::Name;
 using engine::core::HeapProfile;
 using engine::core::HeapSample;
+using engine::core::Name;
 using engine::ecs::Entity;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
@@ -241,7 +241,7 @@ TEST_CASE("demo scene heaps settle after repeated lifecycles", "[examples][scene
 		CHECK(highest->LiveBytes - lowest->LiveBytes <= 512 * 1024);
 		CHECK(
 			static_cast<double>(samples.back().LiveBytes - samples.front().LiveBytes) / seconds <=
-				256 * 1024.0
+			256 * 1024.0
 		);
 	}
 }

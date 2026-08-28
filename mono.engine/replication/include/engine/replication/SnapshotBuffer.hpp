@@ -29,7 +29,7 @@
 // interpolated pose is handed back by value to whoever is filling a draw list;
 // nothing in this file writes a component, and letting a render-rate quantity
 // back into a tick would make the simulation depend on the frame rate of
-// whoever was watching. `v02v03v04.md` §2.11.
+// whoever was watching.
 //
 // **Time is passed in, never read.** `Advance` takes the frame's seconds and
 // `Record` takes a tick, so a suite states a stall rather than waiting for one -

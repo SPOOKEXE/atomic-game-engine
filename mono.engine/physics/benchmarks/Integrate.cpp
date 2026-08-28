@@ -4,8 +4,8 @@
 // records a crossover near sixty to eighty thousand rows, measured over an
 // integration step of three float multiply-adds against the previous backing
 // store. This body carries a whole `core::CFrame`: a position add, a quaternion
-// product and a normalise. `v02v03v04.md` §3.6 asks for the measurement to be
-// re-taken for exactly that reason, and this is where it is taken.
+// product and a normalise. That is why the measurement is re-taken here rather
+// than carried forward.
 //
 // The counts bracket the answer rather than land on it, so the day the body
 // changes this suite says which side of the crossover it moved to.

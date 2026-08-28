@@ -6,12 +6,15 @@
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
+#include <array>
 #include <assetc/Bake.hpp>
 #include <fstream>
 #include <map>
 #include <set>
 #include <span>
+#include <sstream>
 #include <string_view>
+#include <unordered_map>
 
 namespace assetc {
 

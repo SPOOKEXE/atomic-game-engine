@@ -1,7 +1,7 @@
 // What the broad phase costs per 1000 colliders.
 //
-// `v02v03v04.md` §3.6 asks for the figure and `spatial/benchmarks/HashGrid.cpp`
-// holds the half of it that belongs to the index - the rebuild alone, over bare
+// The figure splits in two: `spatial/benchmarks/HashGrid.cpp` holds the half of
+// it that belongs to the index - the rebuild alone, over bare
 // proxies. This is the other half: what a *world* pays, which is the pass that
 // derives every world box from a `Transform` and a `Collider`, the rebuild, and
 // then the pair walk over it.

@@ -6,8 +6,8 @@
 // how much. It says nothing about **where**, and where is what decides whether
 // a resting box stays still: one point gives the solver one constraint, so the
 // box pivots about it and rocks, and the rocking never damps because every tick
-// is a fresh single constraint. `v02v03v04.md` §3.5 states it and
-// `Contacts.hpp` repeats it beside `MAXIMUM_POINTS`.
+// is a fresh single constraint. `Contacts.hpp` repeats it beside
+// `MAXIMUM_POINTS`.
 //
 // So the axis is followed by a clip: take the face each shape presents to the
 // other, cut the second against the side planes of the first, and keep the

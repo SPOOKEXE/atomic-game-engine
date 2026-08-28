@@ -78,8 +78,8 @@ namespace engine::graph {
 		//
 		// **Distinct from `Colour` because the hardware treats it so**, and
 		// because a pass writing storage is `Compute` work while a pass writing
-		// a colour attachment is `Raster` work - `docs/PIPELINE_NODES.md` §1.5
-		// fault 10 is what conflating the two costs.
+		// a colour attachment is `Raster` work - fault 10 in the taxonomy is
+		// what conflating the two costs.
 		Storage,
 
 		// A structured buffer rather than an image: a light list, a draw list,
@@ -128,8 +128,8 @@ namespace engine::graph {
 
 	// What is in each pixel.
 	//
-	// **Separate from `ResourceKind` because the two are orthogonal**, which is
-	// the whole of `docs/PIPELINE_NODES.md` §3. A kind says whether a pass may
+	// **Separate from `ResourceKind` because the two are orthogonal**, and that
+	// is the whole point of having both. A kind says whether a pass may
 	// render into a thing or only sample it; a format says how many bits it gets
 	// and how many channels. A wire is legal when the kinds allow it and *lossy*
 	// when the formats disagree, and only the second is a warning rather than a
@@ -153,8 +153,8 @@ namespace engine::graph {
 		RGBA8_SRGB,
 
 		// Ten bits of colour and two of alpha. **The right format for normals**
-		// and for a tone-mapped frame - `PIPELINE_NODES.md` §1.5 fault 6 is a
-		// frame that used four times the bits for the first of those.
+		// and for a tone-mapped frame - fault 6 in the taxonomy is a frame that
+		// used four times the bits for the first of those.
 		RGB10A2,
 
 		// Eleven, eleven and ten bits of float with no alpha. HDR colour at half
@@ -181,9 +181,9 @@ namespace engine::graph {
 		//@}
 
 		// Block-compressed, which is how a texture arrives from the content
-		// store. **Named here so an upload is describable**: `PIPELINE_NODES.md`
-		// §1.4 counts eight of these bound to one draw, and a pipeline that
-		// cannot say what it sampled cannot say what it cost.
+		// store. **Named here so an upload is describable**: one captured frame
+		// binds eight of these to a single draw, and a pipeline that cannot say
+		// what it sampled cannot say what it cost.
 		//@{
 		BC1_SRGB,
 		BC3,
@@ -218,7 +218,7 @@ namespace engine::graph {
 
 	// Whether a format has an alpha channel at all.
 	//
-	// **The question `PIPELINE_NODES.md` fault 3 turns on.** A blank alpha is
+	// **The question fault 3 turns on.** A blank alpha is
 	// only wasteful if there is one; asking this before reporting it is what
 	// stops the check firing on every `RG11B10F` in a frame.
 	//
@@ -323,9 +323,9 @@ namespace engine::graph {
 		//
 		// **One means full, two means half on each axis, four means a quarter.**
 		// A fraction rather than a second pair of numbers, because that is what
-		// a downsample chain actually is - `PIPELINE_NODES.md` §1.4 counts six
-		// resolutions in one frame reached by seven halvings, and every one of
-		// them is a divisor rather than an authored size.
+		// a downsample chain actually is - one captured frame reaches six
+		// resolutions through seven halvings, and every one of them is a divisor
+		// rather than an authored size.
 		//
 		// Ignored when `Width` and `Height` are set. Zero is read as one, so a
 		// resource written before this field existed still means "the view".

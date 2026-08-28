@@ -10,8 +10,8 @@
 // owns a `quic::Connection` and nothing else that carries bytes.
 //
 // **What it keeps from the old design is the ceiling, and only the ceiling.**
-// `docs/QUIC.md` §6: `LinkSettings::BytesPerTick` survives *above* ngtcp2's
-// controller, because the two answer different questions. A game may refuse to
+// `LinkSettings::BytesPerTick` survives *above* ngtcp2's controller,
+// because the two answer different questions. A game may refuse to
 // spend more than N on one player on a path that would carry ten times that,
 // since a hundred players on one host is a hundred of these and the operator's
 // bill is not a function of what the path can take. So there is a per-tick byte
@@ -54,7 +54,7 @@ namespace engine::replication {
 		// The hard ceiling on what one peer costs per tick, in bytes.
 		//
 		// **Above the congestion controller rather than instead of it.** See the
-		// note at the top of this file, and `docs/QUIC.md` §6.
+		// note at the top of this file.
 		uint32_t BytesPerTick = 64 * 1024;
 
 		// How long a session may sit queued before the delay simulation lets it

@@ -7,7 +7,7 @@
 // appear.** That is the whole of "the game progressively builds", and it is
 // decided here - when the group is *built* - rather than by anything about how
 // the bytes travel. A group holding half a scene's meshes and none of its
-// textures has arrived and shown nothing. CDN.md §5.
+// textures has arrived and shown nothing.
 //
 // Both naive answers are bad and this exists because of them: one request per
 // asset is thousands of round trips, and one archive for the game means nothing
@@ -39,8 +39,8 @@ namespace cdn {
 
 	// The size envelope groups are assembled within.
 	//
-	// Starting points rather than measurements - CDN.md §9 carries the group
-	// bound as an open question, and there is no number beside it yet.
+	// Starting points rather than measurements - the group bound is an open
+	// question, and there is no number beside it yet.
 	struct GroupPolicy {
 		// What a group aims to weigh, uncompressed.
 		uint64_t TargetBytes = 16ull * 1024 * 1024;

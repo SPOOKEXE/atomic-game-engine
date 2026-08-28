@@ -6,7 +6,8 @@
 # violation fails the build with the offending edge named rather than becoming a
 # convention somebody has to remember.
 #
-# See repo_layout.md §4 (module shape), §6 (tiers) and §15 (staged trees).
+# See docs/CODE_ARCH.md for the shape of a module (§3), the tiers (§5) and what
+# each program links (§7).
 
 include_guard(GLOBAL)
 
@@ -481,6 +482,9 @@ function(mono_add_library name)
 		target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
 
 		target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+		if(MONO_COMPILE_DEFINITIONS)
+			target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})
+		endif()
 
 		# **`NO_UNITY` names a source that has to stay a translation unit of its
 		# own, and every use of it is a defect somewhere else.** A static archive
@@ -540,6 +544,9 @@ function(mono_add_tests name)
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::testmain Catch2::Catch2)
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+	if(MONO_COMPILE_DEFINITIONS)
+		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})
+	endif()
 	_mono_batch_headers(${target} "${sources}" FALSE)
 
 	# A module's own tests may reach its src/ directory, and only its own tests
@@ -627,6 +634,9 @@ function(mono_add_benchmarks name)
 	# a debug build and is harder to notice. If `release` changes level again,
 	# change it here in the same commit.
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+	if(MONO_COMPILE_DEFINITIONS)
+		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})
+	endif()
 	if(NOT MSVC)
 		target_compile_options(${target} PRIVATE -O3 -g)
 	endif()
@@ -650,7 +660,7 @@ endfunction()
 # A program is a thin main over libraries. It stages into its own directory -
 # binary, shared libraries and the shaders of every module it links, and nothing
 # else. A server/ directory that has grown a shaders/ folder is a link-line
-# mistake anyone can see. repo_layout.md §15.
+# mistake anyone can see.
 function(mono_add_program name)
 	cmake_parse_arguments(ARG
 		""
@@ -671,6 +681,9 @@ function(mono_add_program name)
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} ${ARG_VENDOR})
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
+	if(MONO_COMPILE_DEFINITIONS)
+		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})
+	endif()
 
 	set_property(TARGET ${target} PROPERTY MONO_TIER "${ARG_TIER}")
 	set_property(TARGET ${target} PROPERTY MONO_DEPS "${ARG_DEPS};${ARG_VENDOR}")

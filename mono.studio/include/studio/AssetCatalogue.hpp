@@ -218,7 +218,7 @@ namespace studio {
 		// The most entries collected across every page of one origin.
 		//
 		// A bound rather than a preference: an origin is something anybody can
-		// run - `repo_layout.md` §1 - and a cursor it never terminates is an
+		// run, and a cursor it never terminates is an
 		// allocator with a stranger's hand on it.
 		size_t MaximumEntries = 100000;
 	};

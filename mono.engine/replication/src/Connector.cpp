@@ -520,8 +520,8 @@ namespace engine::replication {
 			return static_cast<const Session *>(Port.get())->Link().Stats();
 		}
 
-		// Refilled from ngtcp2 rather than restated. `docs/QUIC.md` §2 keeps
-		// `ConnectionStats` on the surviving list for exactly this: a panel reads
+		// Refilled from ngtcp2 rather than restated, which is why
+		// `ConnectionStats` survives the swap: a panel reads
 		// the same fields whichever transport is underneath.
 		const net::quic::Connection::Statistics stats = Quic->Stats();
 		net::ConnectionStats out;

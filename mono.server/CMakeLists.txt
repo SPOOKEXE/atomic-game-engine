@@ -104,10 +104,11 @@ mono_add_library(server
 		Engine::delivery
 
 		# `shared`. The content origin, run in-process when `--content-store`
-		# asks for it - CDN.md §6's "local store", which is the self-hosted
+		# asks for it - the local store source, which is the self-hosted
 		# case: a small game, a LAN session, development. It is the same
 		# library `mono.cdn` deploys on its own and scaled, so a client cannot
-		# tell the two apart, which is the property repo_layout.md §11 wants.
+		# tell the two apart: one store, one manifest format, whichever way
+		# it is deployed.
 		#
 		# **It costs the headless property nothing**, which is the line to check
 		# when this row is edited: `Mono::cdn` is `shared` tier and links

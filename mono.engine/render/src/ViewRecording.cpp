@@ -40,9 +40,7 @@ namespace engine::render {
 	namespace {
 		template <typename Value>
 		void StageBulk(
-			Value *destination,
-			std::span<const InstanceUploadRange> ranges,
-			std::span<const Value> source
+			Value *destination, std::span<const InstanceUploadRange> ranges, std::span<const Value> source
 		) {
 			if (ranges.empty()) {
 				return;
@@ -54,9 +52,7 @@ namespace engine::render {
 				last = std::max(last, range.First + range.Count);
 			}
 			std::memcpy(
-				destination + first,
-				source.data() + first,
-				static_cast<size_t>(last - first) * sizeof(Value)
+				destination + first, source.data() + first, static_cast<size_t>(last - first) * sizeof(Value)
 			);
 		}
 	}

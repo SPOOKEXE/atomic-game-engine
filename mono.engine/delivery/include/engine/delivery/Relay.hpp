@@ -5,7 +5,7 @@
 // **Two halves of one arrangement, and they are deliberately in one file.** A
 // relay is a route asked for at one end and answered at the other; splitting
 // the asking from the answering into two headers is how the two ends acquire a
-// dialect, which is the mistake `CDN.md` §6 refuses twice for the manifest.
+// dialect, and a dialect is the same mistake the manifest refuses twice over.
 //
 // - `RelayChannel` and `MakeRelayClient` are the **asking** half. A client with
 //   no origin connection at all asks for the same three routes an origin

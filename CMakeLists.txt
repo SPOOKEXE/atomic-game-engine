@@ -1,8 +1,8 @@
 # atomic-game-engine
 #
 # This file holds options, tiers and add_subdirectory. Nothing compiles here.
-# Where a file goes and what it may depend on is repo_layout.md; how a module is
-# declared is mono.build/MonoLibrary.cmake.
+# Where a file goes and what it may depend on is docs/CODE_ARCH.md; how a module
+# is declared is mono.build/MonoLibrary.cmake.
 
 cmake_minimum_required(VERSION 3.24)
 
@@ -257,7 +257,7 @@ endif()
 option(MONO_VENDORED_GLSLC "Compile shaders with the vendored shaderc" ON)
 
 # Libraries are intermediate; programs are products. Each program stages into a
-# directory that is runnable as it stands. repo_layout.md §15.
+# directory that is runnable as it stands.
 set(MONO_STAGE_ROOT "${CMAKE_BINARY_DIR}")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/lib")
 set(MONO_SHADER_STAGE "${CMAKE_BINARY_DIR}/shaderstage")
@@ -329,6 +329,18 @@ else()
 	if(MONO_DEBUG_INFO STREQUAL "line-tables")
 		list(APPEND MONO_COMPILE_OPTIONS -g1)
 	endif()
+endif()
+
+# **NOMINMAX tree-wide, because unity builds make per-file guards meaningless.**
+# windows.h defines min and max as function-like macros unless NOMINMAX is set
+# before its first include, and under MONO_UNITY_BUILD which file includes
+# windows.h first is batch order rather than authorship - parallel's
+# ThreadAffinity.cpp carried a correct per-file guard and still failed on MSVC
+# whenever Capture.cpp landed in the same concatenated unit ahead of it.
+# Applied beside MONO_COMPILE_OPTIONS, so first-party targets only; no
+# first-party source uses the raw macros.
+if(WIN32)
+	set(MONO_COMPILE_DEFINITIONS NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 # The compiler cache, if there is one.
@@ -537,11 +549,10 @@ endif()
 
 # The content origin. `shared` tier rather than `server`, so the tier rule
 # itself - not a guard here - is what keeps a graphics stack off its link line.
-# repo_layout.md §11.
 #
 # **The library is built whenever the server is, and the program is what
 # MONO_BUILD_CDN gates.** Since v0.9 a server can attach an origin and serve its
-# own disk - CDN.md §6's local store - so `Mono::cdn` is on `mono.server`'s link
+# own disk, the local store, so `Mono::cdn` is on `mono.server`'s link
 # line and has to exist under the `server` preset, which sets MONO_BUILD_CDN
 # OFF. The alternative was a conditional dependency and an `#ifdef` around the
 # attachment, which would make "does this server serve content" a build-time

@@ -92,7 +92,7 @@ namespace engine::graph {
 		// `RGBA16F` where it declared `RGBA8` works perfectly well; a pass that
 		// *writes* fewer bits than the reader wanted loses them. So a format
 		// mismatch is a mark on the wire rather than a refusal - see
-		// `IsLossy`, and `docs/PIPELINE_NODES.md` §1.5 fault 6 for the frame
+		// `IsLossy`, and `DiagnosticKind::FormatOverspend` for the frame
 		// that spent four times the bits it needed on its normals.
 		ResourceFormat Format = ResourceFormat::RGBA8;
 
@@ -166,7 +166,8 @@ namespace engine::graph {
 		// nothing from the frame; a clear writes a constant; a velocity pass
 		// reads the scene rather than a target. Everything else that declares no
 		// inputs is a box no wire can reach - which is what `overlay` and
-		// `interface` were before v0.11, and the reason the rule exists.
+		// `interface` were before `Source` existed, and the reason the rule
+		// exists.
 		//
 		// **Not derived from `Category`.** It was, and `clear` broke it: a pass
 		// can be a compositing kind and still be a source, and the category is
@@ -271,8 +272,8 @@ namespace engine::graph {
 		// One kind.
 		//
 		// **The pointer is valid until the next `Register`, and the mutex does
-		// not extend past the return.** `All` has carried that contract since
-		// v0.11 and `Find` did not, which made the two look like different
+		// not extend past the return.** `All` carried that contract from the
+		// start and `Find` did not, which made the two look like different
 		// strengths of the same guarantee when they are the same one.
 		// `Specs` is a sorted vector, so a `Register` does `push_back` and
 		// `std::sort`: the pointer can dangle on a reallocation, and it can

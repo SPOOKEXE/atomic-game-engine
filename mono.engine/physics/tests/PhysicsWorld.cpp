@@ -101,8 +101,8 @@ TEST_CASE("a fresh world has no bodies and nothing asleep", "[physics][physicswo
 }
 
 TEST_CASE("the contact buffers are cleared rather than freed", "[physics][physicsworld]") {
-	// `v02v03v04.md`'s allocation table names the pair, contact and manifold
-	// lists together: capacity retained across ticks. Only the pair list has a
+	// The pair, contact and manifold lists share one property: capacity
+	// retained across ticks. Only the pair list has a
 	// producer today, so this is what pins the property for the other two
 	// before the narrow phase arrives and has to keep it.
 	PhysicsWorld world;

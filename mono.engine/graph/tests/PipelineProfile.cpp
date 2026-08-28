@@ -2,8 +2,7 @@
 //
 // **The half of the profiler that is arithmetic**, and therefore the half a
 // headless suite can hold. What is left for the panel is drawing coloured
-// squares, which is the part `docs/PIPELINE_NODES.md` §7 argues cannot be
-// tested and should therefore contain no decisions.
+// squares, which cannot be tested and should therefore contain no decisions.
 //
 // The lifetime pair is the interesting content. Everything a transient
 // allocator does rests on "these two resources are never live at the same

@@ -1,7 +1,7 @@
 # L12 [client]. The mixer graph, spatialisation and the device.
 #
-# repo_layout.md §5.2 puts `audio` at L12 client, beside `render`, `text`, `ui`
-# and `input` - so it is absent from the server binary entirely, and a
+# The layer plan puts `audio` at L12 client, beside `render`, `ui` and `input` -
+# so it is absent from the server binary entirely, and a
 # server-side script reaching for it fails because the class was never
 # registered into that binary rather than because a check rejected it.
 #

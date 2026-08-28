@@ -11,10 +11,10 @@
 //
 // **A caller cannot tell which implementation it holds**, exactly as with
 // `parallel::Channel`. The loopback and the UDP socket answer the same calls
-// with the same statuses, so `repo_layout.md` §16.6 is honest: single-player
-// rides the loopback through **real encoding** - the same `Packet::Write`, the
-// same bytes, the same `Packet::Read` - rather than through a shortcut that
-// skips framing. A path only one configuration exercises is a path that breaks
+// with the same statuses, so the single-player promise stays honest:
+// single-player rides the loopback through **real encoding** - the same
+// `Packet::Write`, the same bytes, the same `Packet::Read` - rather than through
+// a shortcut that skips framing. A path only one configuration exercises is a path that breaks
 // in the other one.
 //
 // **Never blocks, in either direction.** A tick occupies a job worker, so a send
@@ -202,8 +202,8 @@ namespace engine::net {
 		// **The loopback honours it too, and that is the point.** A datagram
 		// sent to the broadcast address on a loopback network reaches every
 		// other end attached to it - which makes LAN discovery a path a suite
-		// exercises with real encoding and no socket, exactly as §16.6 has
-		// single-player ride the loopback rather than a shortcut. A discovery
+		// exercises with real encoding and no socket, exactly as single-player
+		// rides the loopback rather than a shortcut. A discovery
 		// protocol that could only be tested against a live subnet is one that
 		// would be tested on somebody's machine and nowhere else.
 		//

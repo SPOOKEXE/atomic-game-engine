@@ -9,21 +9,22 @@
 // this usable from a world is the one a future does not have: **the completion
 // becomes visible when the caller pumps, and at no other moment.**
 //
-// That is CDN.md §3's boundary. The origin may finish a transfer whenever it
+// That is the boundary an origin lives on. The origin may finish a transfer
+// whenever it
 // likes; a world applies the result at the barrier, because a chunk that becomes
 // visible to a system mid-tick is a desync - two machines whose networks
 // happened to differ would simulate different things. `AGENTS.md` rule 5 with no
 // exception, and this class is what makes obeying it the easy path.
 //
-// **One connection per outstanding fetch, and that is deliberate.** CDN.md §5
-// wants N groups streaming concurrently so a slow group does not hold up the
+// **One connection per outstanding fetch, and that is deliberate.** The point
+// is N groups streaming concurrently so a slow group does not hold up the
 // others and a dropped connection re-fetches one group rather than restarting
 // the run. Multiplexing them onto one socket would reintroduce exactly the
-// head-of-line blocking that arrangement exists to avoid - §9 leaves HTTP/2 or
-// /3 open for the same question.
+// head-of-line blocking that arrangement exists to avoid - HTTP/2 or /3 stays
+// open as a future answer to the same question.
 //
-// **Every byte that arrives is hostile.** An origin is something anyone can run
-// - `repo_layout.md` §1 - so a response is bounded before it is buffered, and
+// **Every byte that arrives is hostile.** An origin is something anyone can
+// run, so a response is bounded before it is buffered, and
 // what it decompresses to is bounded by the *signed manifest* rather than by
 // anything the origin said. That second check is the delivery client's;
 // this one bounds the transfer.

@@ -68,7 +68,7 @@ TEST_CASE("a wrong leaf does not verify", "[assets][hashtree]") {
 	CHECK(HashTree::Verify(leaves[3], 3, 9, proof, tree.Root()));
 
 	// The whole point: a client holding a root will not accept bytes that do
-	// not hash into it. CDN.md §1 - a compromised origin may withhold content,
+	// not hash into it. A compromised origin may withhold content,
 	// never substitute it.
 	CHECK_FALSE(HashTree::Verify(Leaf(999), 3, 9, proof, tree.Root()));
 	CHECK_FALSE(HashTree::Verify(leaves[4], 3, 9, proof, tree.Root()));

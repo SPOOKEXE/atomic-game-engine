@@ -438,7 +438,7 @@ TEST_CASE("two write destinations both receive every file", "[cdn][ingest]") {
 
 TEST_CASE("what an origin ingests can then be published and fetched", "[cdn][ingest]") {
 	// **The point of the whole route.** An inbox is not content until somebody
-	// signs a manifest naming it - CDN.md §1 - so this pins that what lands
+	// signs a manifest naming it, so this pins that what lands
 	// there is in the shape `Publish` reads, extension and all.
 	Host host("publishable", true);
 

@@ -11,9 +11,8 @@
 // *data*, so the only part that genuinely needs hardware is the handover. That
 // part is small and is the only part left uncovered.
 //
-// **The real device owns a thread with a hard deadline.**
-// `DATATYPES_LIBRARIES.md` puts it plainly: *a device thread with a hard
-// deadline. A missed buffer is audible.* So the callback does exactly one
+// **The real device owns a thread with a hard deadline, and a missed buffer
+// is audible.** So the callback does exactly one
 // thing - render a block into the buffer SDL asked for - and everything that
 // could allocate, block or take a lock happens elsewhere:
 //

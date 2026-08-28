@@ -27,8 +27,8 @@ using engine::physics::ContactPoint;
 // stay because the two now have a producer that has to keep them true.
 
 TEST_CASE("a manifold holds several points", "[physics][contacts]") {
-	// `v02v03v04.md` §3.5: a single-point manifold cannot hold a resting box
-	// still. One point is one constraint, so a box on a floor pivots about it
+	// A single-point manifold cannot hold a resting box still. One point is one
+	// constraint, so a box on a floor pivots about it
 	// and rocks, and the rocking never damps because every tick is a fresh
 	// single constraint. A capacity of one here would compile and would force
 	// the solver, the contact cache and the event surface to be rewritten
@@ -80,7 +80,7 @@ TEST_CASE("a manifold and an event name their bodies the same way round", "[phys
 TEST_CASE("contact types stay trivially copyable", "[physics][contacts]") {
 	// The lists are cleared and refilled every tick, and a manifold that grew a
 	// vector of points would allocate per contact per tick - the exact shape
-	// `v02v03v04.md`'s allocation table refuses. A fixed array is what makes
+	// these types refuse. A fixed array is what makes
 	// "cleared, not freed" true of the manifold list and not only of the
 	// pointer inside it.
 	STATIC_REQUIRE(std::is_trivially_copyable_v<ContactPoint>);

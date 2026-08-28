@@ -2002,9 +2002,8 @@ namespace engine::scene {
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
 
-			// Part adds nothing of its own: BasePart already holds the set
-			// `v02v03v04.md` §3.3 names, and Part is the concrete leaf a script
-			// asks for by name. `Motion` and `Simulated` are the two
+			// Part adds nothing of its own: BasePart already holds the full
+			// set, and Part is the concrete leaf a script asks for by name. `Motion` and `Simulated` are the two
 			// deliberately absent - whether a part has them is
 			// `PartDesc::Simulated`'s decision, and putting either in the class
 			// set would land static geometry in the dynamic archetype.

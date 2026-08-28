@@ -67,7 +67,7 @@ TEST_CASE("a signature does not verify against a different root", "[assets][sign
 	const SignatureBytes signature = key.SignManifestRoot(Root("manifest one"));
 
 	// The property the whole trust model rests on: a client holding a root the
-	// publisher signed will not accept a different one. CDN.md §1.
+	// publisher signed will not accept a different one.
 	CHECK_FALSE(VerifyManifestRoot(Root("manifest two"), signature, key.Public()));
 }
 

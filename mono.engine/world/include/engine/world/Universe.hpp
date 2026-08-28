@@ -591,7 +591,7 @@ namespace engine::world {
 
 		// Reads a bus value directly, on the driver thread.
 		//
-		// The escape hatch `v02v03.md` §2.8 describes: for persistence, an
+		// The escape hatch: for persistence, an
 		// admin console, a stats scrape - consumers genuinely outside the
 		// simulation. **A system may never call this.** Anything read through
 		// it is non-replayable by definition, so nothing the simulation depends

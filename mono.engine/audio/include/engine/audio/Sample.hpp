@@ -171,11 +171,10 @@ namespace engine::audio {
 		//
 		// **Linear interpolation, and saying so matters.** It is adequate for
 		// content that is close to the target rate and audibly poor for large
-		// ratios; a polyphase resampler is what this wants and
-		// `DATATYPES_LIBRARIES.md` lists one as a dependency this engine does
-		// not have yet. It runs at load time and never on the device thread,
-		// so the cost of replacing it later is a decode path rather than a
-		// mixer.
+		// ratios; a polyphase resampler is what this wants and is a dependency
+		// this engine does not have yet. It runs at load time and never on the
+		// device thread, so the cost of replacing it later is a decode path
+		// rather than a mixer.
 		//
 		// @param target The format to produce.
 		// @return The converted buffer, or an empty one when `target` is

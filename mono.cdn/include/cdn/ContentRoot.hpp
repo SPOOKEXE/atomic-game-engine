@@ -4,7 +4,7 @@
 //
 // The origin serves bytes out of a directory, and every name it is asked for
 // arrives from outside this process - a manifest, a session descriptor, a
-// request. repo_layout.md §11 treats the descriptor as untrusted content like
+// request. The descriptor is untrusted content like
 // everything else, and the names inside it are untrusted for the same reason: a
 // resolver that hands back `../../etc/passwd` is a file-disclosure primitive
 // with a friendly name.
@@ -12,7 +12,7 @@
 // So resolution refuses by default and the check lives here, once, rather than
 // at the call sites. A call site added later is a call site that forgot.
 //
-// This is the local-filesystem half of §11's three sources - the one the server
+// This is the local-filesystem half of the three sources - the one the server
 // uses when it serves its own disk, and the one the origin uses when it is
 // deployed on its own. Server-proxied and direct delivery are the same store
 // reached over `net`, not a second implementation, and they arrive with

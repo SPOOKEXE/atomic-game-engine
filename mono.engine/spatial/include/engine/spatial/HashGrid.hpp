@@ -9,8 +9,8 @@
 // vector and no allocation once the arrays have reached their size. An editable
 // grid needs a per-cell list with holes in it, which allocates, fragments, and
 // iterates in an order that depends on the history of the edits rather than on
-// the contents. `v02v03v04.md` describes both in different paragraphs; the
-// allocation table is the one written as a standing rule, so this is that one.
+// the contents. Both designs were weighed when this was chosen; the
+// rebuild-only grid is the one written as a standing rule, so this is that one.
 //
 // **The cost of that is real and is not hidden here:** everything in the index
 // is re-measured on every `Rebuild`, including the static geometry that has not

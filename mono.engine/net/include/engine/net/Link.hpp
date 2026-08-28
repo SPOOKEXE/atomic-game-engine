@@ -4,10 +4,10 @@
 //
 // Join, leave, timeout and reconnect - v0.3's first roadmap item - expressed as
 // a state machine over *events*, not over a transport. A datagram socket, a
-// loopback and a test all drive the same object, which is what makes
-// `repo_layout.md` §16.6 honest: single-player uses a loopback with real
-// encoding, so there is no configuration in which this path is skipped and no
-// second lifecycle that only the real network exercises.
+// loopback and a test all drive the same object, which keeps the single-player
+// promise honest: single-player uses a loopback with real encoding, so there is
+// no configuration in which this path is skipped and no second lifecycle that
+// only the real network exercises.
 //
 // **Time is passed in, never read.** Every call that could care about "now"
 // takes it as an argument. A wall clock read inside would put a
@@ -15,11 +15,11 @@
 // hardest to reproduce, and `ecs/AGENTS.md` already bans exactly that inside a
 // system. It also makes a timeout something a test states rather than waits for.
 //
-// **Budgets are per tick and enforced here.** DATATYPES_LIBRARIES.md §15.1 asks
-// for a byte budget per player per tick with the overflow visible in
-// `ConnectionStats` rather than as a mystery stall. Enforcing it at the transport
-// rather than in userland is the whole point: a limiter above this runs *after*
-// the payload has been received and parsed, which is the half that costs.
+// **Budgets are per tick and enforced here.** The byte budget is per player
+// per tick, with the overflow visible in `ConnectionStats` rather than as a
+// mystery stall. Enforcing it at the transport rather than in userland is
+// the whole point: a limiter above this runs *after* the payload has been
+// received and parsed, which is the half that costs.
 //
 // **There are two limits on a send and they answer different questions.**
 // `BytesPerTick` is a cap a game states and it never moves; `CongestionControl`

@@ -70,6 +70,31 @@ file(READ "${control_graph}" MONO_CONTROL_GRAPH)
 # by a different door.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${control_graph}")
 
+# The graph goes in as several raw string literals rather than one. MSVC fails
+# any single literal over 65,535 bytes with C2026, and the graph has been
+# growing toward that cap since v0.19 - one added module cluster was all it
+# took. Adjacent literals concatenate in translation phase 6, so `json::parse`
+# still sees exactly the bytes of the file.
+#
+# Chunking is by byte offset rather than by line, deliberately: the JSON's own
+# comment strings carry semicolons, and anything that routes the content
+# through a CMake list splits on them and corrupts the document.
+# `string(SUBSTRING)` never touches the bytes it copies. The per-chunk suffix
+# on the raw-string delimiter keeps one chunk's closer from matching another's
+# content.
+set(control_chunk_bytes 16384)
+string(LENGTH "${MONO_CONTROL_GRAPH}" control_total)
+set(MONO_CONTROL_GRAPH_LITERALS "")
+set(control_index 0)
+set(control_offset 0)
+while(control_offset LESS control_total)
+	string(SUBSTRING "${MONO_CONTROL_GRAPH}" ${control_offset} ${control_chunk_bytes} control_chunk)
+	string(APPEND MONO_CONTROL_GRAPH_LITERALS
+		"\tR\"GRAPH_${control_index}(${control_chunk})GRAPH_${control_index}\"\n")
+	math(EXPR control_offset "${control_offset} + ${control_chunk_bytes}")
+	math(EXPR control_index "${control_index} + 1")
+endwhile()
+
 configure_file(
 	"${CMAKE_CURRENT_SOURCE_DIR}/cmake/GraphData.cpp.in"
 	"${CMAKE_CURRENT_BINARY_DIR}/generated/GraphData.cpp"

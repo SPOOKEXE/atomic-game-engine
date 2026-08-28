@@ -298,8 +298,8 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 TEST_CASE("a recorded run replays to the same state", "[server]") {
 	// The determinism guarantee end to end, through the program's own options
 	// rather than through the engine API: record a run, replay it, and compare
-	// every entity. Same binary, same machine - which is what `v02v03.md`
-	// decision 8 promises and all it promises.
+	// every entity. Same binary, same machine - which is all the guarantee
+	// ever promised.
 	const std::filesystem::path recording = std::filesystem::temp_directory_path() / "mono-server-replay.rec";
 
 	const auto positionsOf = [](server::Server &host) {

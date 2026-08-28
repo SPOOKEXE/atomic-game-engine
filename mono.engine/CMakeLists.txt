@@ -1,8 +1,8 @@
 # mono.engine holds libraries and nothing else, and is never a product.
 #
 # No main.cpp lives under here and nothing ships from it on its own. Every
-# program selects the subset of modules it needs; repo_layout.md §8 records
-# which, and mono.tools/architecture/ checks the real graph against that table.
+# program selects the subset of modules it needs, and mono.tools/architecture/
+# checks the real graph against that table.
 #
 # Each module carries its own tests/ and its own AGENTS.md. The order below is
 # the layer order, for reading - CMake resolves the real graph from each

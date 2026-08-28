@@ -4,8 +4,8 @@
 //
 // **The same decision as `bake::GraphDocument`, one module over**, and
 // deliberately the same shape: an ordered record of edits, replayed to build,
-// written to save, truncated to undo. v0.11 §4.4 asks for a Render Pipeline
-// widget and an Assets Pipeline widget, and two editors that agreed about
+// written to save, truncated to undo. A Render Pipeline widget and an Assets
+// Pipeline widget are asked for together, and two editors that agreed about
 // nothing would be two sets of bugs - so the operation record, the position
 // based references, the text format and the escaping rules are held in common.
 // What differs is the vocabulary, because a bake chain and a frame are not the
@@ -28,7 +28,7 @@
 //
 // Everything a Render Pipeline panel does is `Record` with a different
 // `Operation`, so a script and a panel reach the same surface and a pipeline
-// built either way saves identically. That is §13.1's *"the API comes first and
+// built either way saves identically. The rule is *"the API comes first and
 // the UI is a consumer of it"*, and it is why this file exists before any
 // widget does.
 //
@@ -274,7 +274,7 @@ namespace engine::graph {
 
 	// Several named pipelines, which is what one editor holds.
 	//
-	// **v0.11 asks for "many node trees in one editor", and for render "as
+	// **The requirement: many node trees in one editor, and render "as
 	// different subpipelines".** A world does not have *a* pipeline any more
 	// than it has *a* script: a frame may be described by a main pass chain, a
 	// cheaper one for a reflection, and a debug one somebody switches to. This

@@ -25,7 +25,7 @@
 //
 // **Nothing here signs anything and nothing here publishes.** What arrives at
 // an origin's inbox is raw content, and a client will not look at it until a
-// publisher has signed a manifest naming it - CDN.md §1. Uploading is moving
+// publisher has signed a manifest naming it. Uploading is moving
 // bytes; publishing is `cdn::Publish`, it needs a signing key, and it stays a
 // separate act on purpose.
 //

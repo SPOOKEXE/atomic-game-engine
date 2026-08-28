@@ -24,10 +24,9 @@
 // refused connection would sit there until an idle bound expired instead of
 // failing immediately.
 //
-// **One socket per fetch.** CDN.md §5 wants groups streaming concurrently so
-// one slow group does not hold up the others; sharing a socket would put them
-// back in one queue, which is the head-of-line blocking that arrangement exists
-// to remove.
+// **One socket per fetch.** Groups stream concurrently so one slow group does
+// not hold up the others; sharing a socket would put them back in one queue,
+// which is the head-of-line blocking that arrangement exists to remove.
 
 namespace engine::net::http {
 	namespace {

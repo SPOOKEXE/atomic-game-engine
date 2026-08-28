@@ -40,8 +40,9 @@
 // generation and a recycled index does not answer `Alive`. What it is not is
 // complete: the honest reading is that undo reaches back past a restored subtree
 // for the subtree itself and not for edits *inside* it. Closing that needs the
-// document format to carry an identity, which is `StableId` in `MCP.md`'s
-// `project` server and does not exist yet.
+// document format to carry an identity - `StableId`, an instance id that
+// survives the instance being rebuilt across worlds and sessions - and none
+// exists yet.
 //
 // ## What records, and what deliberately does not
 //
