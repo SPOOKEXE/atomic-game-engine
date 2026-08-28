@@ -65,6 +65,20 @@ namespace engine::script {
 		// The services this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
 
+		// The program surface installed for plugin runtimes.
+		HostSurface *Host = nullptr;
+
+		// Stable host callback ids over the callable table below. The callable
+		// table owns the QuickJS values and recycles its slots; these ids never
+		// expose those implementation details to the host.
+		uint64_t NextHostCallback = 0;
+		std::unordered_map<uint64_t, CallbackRef> HostCallbacks;
+
+		// What the last host installation added to the global. Kept so replacing
+		// or removing a host does not leave stale service objects behind.
+		std::string HostGlobal;
+		std::vector<std::string> HostServices;
+
 		// The shared machinery.
 		SignalTable Signals;
 		ChangeQueue Changes;

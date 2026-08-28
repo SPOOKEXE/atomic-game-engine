@@ -2,15 +2,20 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
 #include <fstream>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
+#include <tuple>
 
 namespace studio {
 
@@ -63,6 +68,86 @@ namespace studio {
 			return true;
 		}
 
+		bool WriteWhole(const std::filesystem::path &path, std::string_view text, std::string &error) {
+			std::error_code failed;
+			if (!path.parent_path().empty()) {
+				std::filesystem::create_directories(path.parent_path(), failed);
+				if (failed) {
+					error = "could not create " + path.parent_path().string();
+					return false;
+				}
+			}
+
+			const std::filesystem::path temporary = path.string() + ".tmp";
+			{
+				std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+				if (!out) {
+					error = "could not write " + temporary.string();
+					return false;
+				}
+				out.write(text.data(), static_cast<std::streamsize>(text.size()));
+				if (!out) {
+					error = "could not finish " + temporary.string();
+					return false;
+				}
+			}
+
+			std::filesystem::rename(temporary, path, failed);
+			if (!failed) {
+				return true;
+			}
+
+			// Windows does not replace an existing file with `rename`. The old
+			// document stays valid until the complete temporary file exists.
+			std::filesystem::remove(path, failed);
+			failed.clear();
+			std::filesystem::rename(temporary, path, failed);
+			if (failed) {
+				error = "could not replace " + path.string();
+				return false;
+			}
+			return true;
+		}
+
+		bool LoadPluginState(
+			const std::filesystem::path &path,
+			std::map<std::string, bool, std::less<>> &enabled,
+			std::string &error
+		) {
+			std::string text;
+			if (!ReadWhole(path, text)) {
+				error = "could not read " + path.string();
+				return false;
+			}
+
+			const json document = json::parse(text, nullptr, false);
+			if (document.is_discarded() || !document.is_object()) {
+				error = "plugin state is not a JSON object";
+				return false;
+			}
+
+			enabled.clear();
+			for (const auto &[id, value] : document.items()) {
+				if (value.is_boolean()) {
+					enabled[id] = value.get<bool>();
+				}
+			}
+			error.clear();
+			return true;
+		}
+
+		bool SavePluginState(
+			const std::filesystem::path &path,
+			const std::map<std::string, bool, std::less<>> &enabled,
+			std::string &error
+		) {
+			json document = json::object();
+			for (const auto &[id, value] : enabled) {
+				document[id] = value;
+			}
+			return WriteWhole(path, document.dump(2) + "\n", error);
+		}
+
 		// The language a plugin's entry file is written in.
 		//
 		// **From the extension, which is the same rule the Rojo sync uses one
@@ -73,6 +158,324 @@ namespace studio {
 			return extension == ".js" || extension == ".mjs" ? engine::script::Language::JavaScript
 															 : engine::script::Language::Luau;
 		}
+	}
+
+	const char *Describe(PluginDock dock) {
+		switch (dock) {
+		case PluginDock::Floating:
+			return "Floating";
+		case PluginDock::Centre:
+			return "Centre";
+		case PluginDock::Left:
+			return "Left";
+		case PluginDock::Right:
+			return "Right";
+		case PluginDock::Bottom:
+			return "Bottom";
+		}
+		return "Floating";
+	}
+
+	std::optional<PluginDock> ParsePluginDock(std::string_view text) {
+		if (text == "Floating" || text == "floating") {
+			return PluginDock::Floating;
+		}
+		if (text == "Centre" || text == "Center" || text == "centre" || text == "center") {
+			return PluginDock::Centre;
+		}
+		if (text == "Left" || text == "left") {
+			return PluginDock::Left;
+		}
+		if (text == "Right" || text == "right") {
+			return PluginDock::Right;
+		}
+		if (text == "Bottom" || text == "bottom") {
+			return PluginDock::Bottom;
+		}
+		return std::nullopt;
+	}
+
+	float ClampPluginToolWidth(float width) {
+		if (!std::isfinite(width)) {
+			return 92.0f;
+		}
+		return std::clamp(width, PLUGIN_TOOL_MINIMUM_WIDTH, PLUGIN_TOOL_MAXIMUM_WIDTH);
+	}
+
+	std::string PluginIdentity(const LoadedPlugin &plugin) {
+		if (!plugin.Manifest.Id.empty()) {
+			return plugin.Manifest.Id;
+		}
+		if (!plugin.Root.filename().empty()) {
+			return plugin.Root.filename().string();
+		}
+		return plugin.Manifest.Name;
+	}
+
+	std::string PluginToolbarKey(const LoadedPlugin &plugin, const PluginToolbar &toolbar, size_t index) {
+		const std::string pluginId = PluginIdentity(plugin);
+		const std::string toolbarId = toolbar.Id.empty() ? std::to_string(index + 1) : toolbar.Id;
+		return std::to_string(pluginId.size()) + ":" + pluginId + std::to_string(toolbarId.size()) + ":" +
+			   toolbarId;
+	}
+
+	std::string PluginToolKey(
+		const LoadedPlugin &plugin,
+		const PluginToolbar &toolbar,
+		size_t toolbarIndex,
+		const PluginButton &button,
+		size_t itemIndex
+	) {
+		const std::string toolbarKey = PluginToolbarKey(plugin, toolbar, toolbarIndex);
+		const std::string itemId = button.Id.empty() ? std::to_string(itemIndex + 1) : button.Id;
+		return toolbarKey + std::to_string(itemId.size()) + ":" + itemId;
+	}
+
+	std::vector<ToolbarTabView>
+	ComposeToolbar(const std::vector<LoadedPlugin> &plugins, const ToolbarPreferences &preferences) {
+		std::vector<ToolbarTabView> tabs;
+		std::vector<bool> visible;
+
+		const auto ensureTab = [&](std::string id, std::string name, bool shown) -> size_t {
+			for (size_t index = 0; index < tabs.size(); index++) {
+				if (tabs[index].Id == id) {
+					visible[index] = visible[index] && shown;
+					return index;
+				}
+			}
+			tabs.push_back(ToolbarTabView{std::move(id), std::move(name), {}});
+			visible.push_back(shown);
+			return tabs.size() - 1;
+		};
+
+		for (const ToolbarTabPreference &tab : preferences.Tabs) {
+			if (!tab.Id.empty() && !tab.Name.empty()) {
+				ensureTab(tab.Id, tab.Name, tab.Visible);
+			}
+		}
+
+		for (size_t pluginIndex = 0; pluginIndex < plugins.size(); pluginIndex++) {
+			const LoadedPlugin &plugin = plugins[pluginIndex];
+			if (!plugin.Running) {
+				continue;
+			}
+
+			for (size_t toolbarIndex = 0; toolbarIndex < plugin.Toolbars.size(); toolbarIndex++) {
+				const PluginToolbar &toolbar = plugin.Toolbars[toolbarIndex];
+				const std::string defaultTab = PluginToolbarKey(plugin, toolbar, toolbarIndex);
+				size_t tabIndex = ensureTab(defaultTab, toolbar.Name, toolbar.Visible);
+
+				for (size_t itemIndex = 0; itemIndex < toolbar.Buttons.size(); itemIndex++) {
+					const PluginButton &button = toolbar.Buttons[itemIndex];
+					const std::string key = PluginToolKey(plugin, toolbar, toolbarIndex, button, itemIndex);
+
+					const ToolbarItemPreference *preference = nullptr;
+					for (const ToolbarItemPreference &candidate : preferences.Items) {
+						if (candidate.Key == key) {
+							preference = &candidate;
+							break;
+						}
+					}
+
+					const bool itemVisible = preference == nullptr ? button.Visible : preference->Visible;
+					if (!itemVisible) {
+						continue;
+					}
+
+					if (preference != nullptr && !preference->Tab.empty() && preference->Tab != defaultTab) {
+						tabIndex = ensureTab(preference->Tab, preference->Tab, true);
+					} else {
+						tabIndex = ensureTab(defaultTab, toolbar.Name, toolbar.Visible);
+					}
+
+					const float width = preference == nullptr ? ClampPluginToolWidth(button.Width)
+															  : ClampPluginToolWidth(preference->Width);
+					tabs[tabIndex].Items.push_back(
+						ToolbarItemLocation{pluginIndex, toolbarIndex, itemIndex, key, width}
+					);
+				}
+			}
+		}
+
+		std::vector<ToolbarTabView> composed;
+		for (size_t index = 0; index < tabs.size(); index++) {
+			if (visible[index] && !tabs[index].Items.empty()) {
+				composed.push_back(std::move(tabs[index]));
+			}
+		}
+		return composed;
+	}
+
+	bool
+	LoadToolbarPreferences(const std::filesystem::path &path, ToolbarPreferences &out, std::string &error) {
+		std::string text;
+		if (!ReadWhole(path, text)) {
+			error = "could not read " + path.string();
+			return false;
+		}
+
+		const json document = json::parse(text, nullptr, false);
+		if (document.is_discarded() || !document.is_object()) {
+			error = "toolbar preferences are not a JSON object";
+			return false;
+		}
+
+		ToolbarPreferences loaded;
+		if (const auto found = document.find("tabs"); found != document.end() && found->is_array()) {
+			for (const json &entry : *found) {
+				if (!entry.is_object()) {
+					continue;
+				}
+				ToolbarTabPreference tab;
+				if (const auto value = entry.find("id"); value != entry.end() && value->is_string()) {
+					tab.Id = value->get<std::string>();
+				}
+				if (const auto value = entry.find("name"); value != entry.end() && value->is_string()) {
+					tab.Name = value->get<std::string>();
+				}
+				if (const auto value = entry.find("visible"); value != entry.end() && value->is_boolean()) {
+					tab.Visible = value->get<bool>();
+				}
+				if (const auto value = entry.find("user"); value != entry.end() && value->is_boolean()) {
+					tab.UserCreated = value->get<bool>();
+				}
+				if (!tab.Id.empty() && !tab.Name.empty()) {
+					loaded.Tabs.push_back(std::move(tab));
+				}
+			}
+		}
+
+		if (const auto found = document.find("items"); found != document.end() && found->is_array()) {
+			for (const json &entry : *found) {
+				if (!entry.is_object()) {
+					continue;
+				}
+				ToolbarItemPreference item;
+				if (const auto value = entry.find("key"); value != entry.end() && value->is_string()) {
+					item.Key = value->get<std::string>();
+				}
+				if (const auto value = entry.find("tab"); value != entry.end() && value->is_string()) {
+					item.Tab = value->get<std::string>();
+				}
+				if (const auto value = entry.find("visible"); value != entry.end() && value->is_boolean()) {
+					item.Visible = value->get<bool>();
+				}
+				if (const auto value = entry.find("width"); value != entry.end() && value->is_number()) {
+					item.Width = ClampPluginToolWidth(value->get<float>());
+				}
+				if (!item.Key.empty()) {
+					loaded.Items.push_back(std::move(item));
+				}
+			}
+		}
+
+		out = std::move(loaded);
+		error.clear();
+		return true;
+	}
+
+	bool SaveToolbarPreferences(
+		const std::filesystem::path &path, const ToolbarPreferences &preferences, std::string &error
+	) {
+		json document;
+		document["tabs"] = json::array();
+		for (const ToolbarTabPreference &tab : preferences.Tabs) {
+			if (tab.Id.empty() || tab.Name.empty()) {
+				continue;
+			}
+			document["tabs"].push_back(
+				{{"id", tab.Id}, {"name", tab.Name}, {"visible", tab.Visible}, {"user", tab.UserCreated}}
+			);
+		}
+
+		document["items"] = json::array();
+		for (const ToolbarItemPreference &item : preferences.Items) {
+			if (item.Key.empty()) {
+				continue;
+			}
+			document["items"].push_back(
+				{{"key", item.Key},
+				 {"tab", item.Tab},
+				 {"visible", item.Visible},
+				 {"width", ClampPluginToolWidth(item.Width)}}
+			);
+		}
+
+		return WriteWhole(path, document.dump(2) + "\n", error);
+	}
+
+	LoadedPlugin MakeDefaultStudioPlugin() {
+		LoadedPlugin plugin;
+		plugin.Root = "@builtin/default-studio";
+		plugin.Manifest.Name = "Default Studio";
+		plugin.Manifest.Description = "The standard Studio toolbar and management surfaces.";
+		plugin.Manifest.Id = "atomic.default-studio";
+		plugin.Manifest.Version = "1";
+		plugin.Manifest.Author = "Atomic Game Engine";
+		plugin.Running = true;
+		plugin.Builtin = true;
+
+		const auto addToolbar = [&](std::string id, std::string name, auto controls) {
+			PluginToolbar toolbar;
+			toolbar.Name = std::move(name);
+			toolbar.Id = std::move(id);
+			for (const auto &[controlId, label, tool] : controls) {
+				PluginButton item;
+				item.Name = label;
+				item.Id = controlId;
+				item.Kind = PluginControlKind::Builtin;
+				item.Builtin = tool;
+				item.Width = PLUGIN_TOOL_MAXIMUM_WIDTH;
+				toolbar.Buttons.push_back(std::move(item));
+			}
+			plugin.Toolbars.push_back(std::move(toolbar));
+		};
+
+		using Row = std::tuple<const char *, const char *, BuiltinStudioTool>;
+		addToolbar(
+			"home",
+			"Home",
+			std::initializer_list<Row>{
+				{"insert", "Insert Object", BuiltinStudioTool::InsertObject},
+				{"transform", "Transform Modes", BuiltinStudioTool::TransformModes},
+				{"snap", "Snap Controls", BuiltinStudioTool::SnapControls},
+				{"selection", "Selection Flags", BuiltinStudioTool::SelectionFlags},
+			}
+		);
+		addToolbar(
+			"model",
+			"Model",
+			std::initializer_list<Row>{
+				{"pivot", "Pivot Controls", BuiltinStudioTool::PivotControls},
+				{"selection", "Selection Actions", BuiltinStudioTool::SelectionActions},
+			}
+		);
+		addToolbar(
+			"script",
+			"Script",
+			std::initializer_list<Row>{
+				{"create", "Create Scripts", BuiltinStudioTool::ScriptCreation},
+				{"panels", "Script Panels", BuiltinStudioTool::ScriptPanels},
+			}
+		);
+		addToolbar(
+			"view",
+			"View",
+			std::initializer_list<Row>{
+				{"viewport", "Viewport Options", BuiltinStudioTool::ViewportOptions},
+				{"panels", "Panel Options", BuiltinStudioTool::PanelOptions},
+				{"camera", "Camera Speed", BuiltinStudioTool::CameraSpeed},
+			}
+		);
+		addToolbar(
+			"plugins",
+			"Plugins",
+			std::initializer_list<Row>{{"manage", "Plugin Management", BuiltinStudioTool::Plugins}}
+		);
+		addToolbar(
+			"demo", "Demo", std::initializer_list<Row>{{"demo", "Demo Tools", BuiltinStudioTool::Demo}}
+		);
+		return plugin;
 	}
 
 	bool RegisterSelectionComponent() {
@@ -118,6 +521,19 @@ namespace studio {
 		}
 		if (const auto found = document.find("enabled"); found != document.end() && found->is_boolean()) {
 			out.Enabled = found->get<bool>();
+		}
+		if (const auto found = document.find("id"); found != document.end()) {
+			if (!found->is_string() || found->get<std::string>().empty()) {
+				error = "'id' has to be non-empty text";
+				return false;
+			}
+			out.Id = found->get<std::string>();
+		}
+		if (const auto found = document.find("version"); found != document.end() && found->is_string()) {
+			out.Version = found->get<std::string>();
+		}
+		if (const auto found = document.find("author"); found != document.end() && found->is_string()) {
+			out.Author = found->get<std::string>();
 		}
 
 		if (!StaysInside(out.Main)) {
@@ -178,6 +594,18 @@ namespace studio {
 				continue;
 			}
 
+			if (plugin.Manifest.Id.empty()) {
+				plugin.Manifest.Id = folder.filename().string();
+			}
+
+			const auto duplicate = std::find_if(found.begin(), found.end(), [&](const LoadedPlugin &other) {
+				return PluginIdentity(other) == plugin.Manifest.Id;
+			});
+			if (duplicate != found.end()) {
+				plugin.Error = "duplicate plugin id '" + plugin.Manifest.Id + "'";
+				duplicate->Error = plugin.Error;
+			}
+
 			found.push_back(std::move(plugin));
 		}
 
@@ -200,6 +628,11 @@ namespace studio {
 			}
 			if (!plugin.Manifest.Enabled) {
 				plugin.Error = "switched off";
+				continue;
+			}
+			if (plugin.Builtin) {
+				plugin.Running = true;
+				plugin.Error.clear();
 				continue;
 			}
 
@@ -307,14 +740,39 @@ namespace studio {
 		Plugins.clear();
 		PublishedSelection.clear();
 
+		if (!ToolbarPreferencesLoaded) {
+			ToolbarPreferencesLoaded = true;
+			std::string error;
+			const std::filesystem::path path = ConfigPath("toolbar.json");
+			if (std::filesystem::exists(path) && !LoadToolbarPreferences(path, ToolbarPrefs, error)) {
+				Say(error, engine::core::LogLevel::Warning);
+			}
+		}
+		if (!PluginStateLoaded) {
+			PluginStateLoaded = true;
+			std::string error;
+			const std::filesystem::path path = ConfigPath("plugins.json");
+			if (std::filesystem::exists(path) && !LoadPluginState(path, PluginEnabled, error)) {
+				Say(error, engine::core::LogLevel::Warning);
+			}
+		}
+
+		Plugins.push_back(MakeDefaultStudioPlugin());
+
 		if (Universe == nullptr || !Active.IsValid()) {
 			return;
 		}
 
 		RegisterSelectionComponent();
-		Plugins = DiscoverPlugins(PluginRoot());
-		if (Plugins.empty()) {
-			return;
+		std::vector<LoadedPlugin> discovered = DiscoverPlugins(PluginRoot());
+		for (LoadedPlugin &plugin : discovered) {
+			if (PluginIdentity(plugin) == PluginIdentity(Plugins.front())) {
+				plugin.Error = "plugin id is reserved by Default Studio";
+			}
+			if (const auto found = PluginEnabled.find(PluginIdentity(plugin)); found != PluginEnabled.end()) {
+				plugin.Manifest.Enabled = found->second;
+			}
+			Plugins.push_back(std::move(plugin));
 		}
 
 		Universe->Enter(Active, [this](Store &store) {
@@ -462,7 +920,9 @@ namespace studio {
 				continue;
 			}
 
-			for (PluginWidget &widget : plugin.Widgets) {
+			const size_t widgetCount = plugin.Widgets.size();
+			for (size_t widgetIndex = 0; widgetIndex < widgetCount; widgetIndex++) {
+				PluginWidget &widget = plugin.Widgets[widgetIndex];
 				if (!widget.Open) {
 					continue;
 				}
@@ -472,7 +932,45 @@ namespace studio {
 				// window on its whole label - so the id suffix keeps them apart
 				// without putting a prefix in front of what a person reads.
 				const std::string label =
-					widget.Title + "###plugin." + plugin.Manifest.Name + "." + widget.Title;
+					widget.Title + "###plugin." + PluginIdentity(plugin) + "." + widget.Id;
+
+				const ImVec2 minimum(
+					engine::ui::Scaled(std::max(1.0f, widget.MinimumWidth)),
+					engine::ui::Scaled(std::max(1.0f, widget.MinimumHeight))
+				);
+				const ImVec2 maximum(
+					widget.MaximumWidth > 0.0f
+						? engine::ui::Scaled(std::max(widget.MaximumWidth, widget.MinimumWidth))
+						: FLT_MAX,
+					widget.MaximumHeight > 0.0f
+						? engine::ui::Scaled(std::max(widget.MaximumHeight, widget.MinimumHeight))
+						: FLT_MAX
+				);
+				ImGui::SetNextWindowSizeConstraints(minimum, maximum);
+
+				const char *dockWindow = nullptr;
+				switch (widget.Dock) {
+				case PluginDock::Centre:
+					dockWindow = "Viewport 1";
+					break;
+				case PluginDock::Left:
+					dockWindow = "Explorer";
+					break;
+				case PluginDock::Right:
+					dockWindow = "Properties";
+					break;
+				case PluginDock::Bottom:
+					dockWindow = "Output";
+					break;
+				case PluginDock::Floating:
+					break;
+				}
+				if (dockWindow != nullptr) {
+					if (const ImGuiWindow *target = ImGui::FindWindowByName(dockWindow);
+						target != nullptr && target->DockId != 0) {
+						ImGui::SetNextWindowDockID(target->DockId, ImGuiCond_FirstUseEver);
+					}
+				}
 
 				// **Around `Begin` and `End`, not inside them.** A window's
 				// background is read at `Begin`, so colours pushed within the
@@ -488,6 +986,161 @@ namespace studio {
 				ImGui::End();
 			}
 		}
+	}
+
+	void Editor::DrawBuiltinStudioTool(BuiltinStudioTool tool) {
+		switch (tool) {
+		case BuiltinStudioTool::InsertObject:
+			DrawInsertObjectTool();
+			break;
+		case BuiltinStudioTool::TransformModes:
+			DrawTransformModesTool();
+			break;
+		case BuiltinStudioTool::SnapControls:
+			DrawSnapControlsTool();
+			break;
+		case BuiltinStudioTool::SelectionFlags:
+			DrawSelectionFlagsTool();
+			break;
+		case BuiltinStudioTool::PivotControls:
+			DrawPivotControlsTool();
+			break;
+		case BuiltinStudioTool::SelectionActions:
+			DrawSelectionActionsTool();
+			break;
+		case BuiltinStudioTool::ScriptCreation:
+			DrawScriptCreationTool();
+			break;
+		case BuiltinStudioTool::ScriptPanels:
+			DrawScriptPanelsTool();
+			break;
+		case BuiltinStudioTool::ViewportOptions:
+			DrawViewportOptionsTool();
+			break;
+		case BuiltinStudioTool::PanelOptions:
+			DrawPanelOptionsTool();
+			break;
+		case BuiltinStudioTool::CameraSpeed:
+			DrawCameraSpeedTool();
+			break;
+		case BuiltinStudioTool::Plugins:
+			DrawPluginTools();
+			break;
+		case BuiltinStudioTool::Demo:
+			DrawDemoTools();
+			break;
+		case BuiltinStudioTool::None:
+			break;
+		}
+	}
+
+	void Editor::DrawPluginToolbar() {
+		const std::vector<ToolbarTabView> tabs = ComposeToolbar(Plugins, ToolbarPrefs);
+		if (tabs.empty()) {
+			if (ImGui::Button("Manage Plugins")) {
+				ShowPlugins = true;
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Edit Toolbar")) {
+				ShowToolbarEditor = true;
+			}
+			return;
+		}
+
+		if (!ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
+			return;
+		}
+
+		int selected = -1;
+		for (size_t index = 0; index < tabs.size(); index++) {
+			const ToolbarTabView &tab = tabs[index];
+			const std::string label = tab.Name + "###toolbar." + tab.Id;
+			if (ImGui::BeginTabItem(label.c_str())) {
+				selected = static_cast<int>(index);
+				ImGui::EndTabItem();
+			}
+		}
+		ImGui::EndTabBar();
+
+		if (selected < 0) {
+			selected = 0;
+		}
+		const ToolbarTabView &tab = tabs[static_cast<size_t>(selected)];
+
+		ImGui::BeginChild("toolbar-row", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_HorizontalScrollbar);
+		for (size_t shown = 0; shown < tab.Items.size(); shown++) {
+			const ToolbarItemLocation &location = tab.Items[shown];
+			if (location.Plugin >= Plugins.size()) {
+				continue;
+			}
+			LoadedPlugin &plugin = Plugins[location.Plugin];
+			if (location.Toolbar >= plugin.Toolbars.size()) {
+				continue;
+			}
+			PluginToolbar &toolbar = plugin.Toolbars[location.Toolbar];
+			if (location.Item >= toolbar.Buttons.size()) {
+				continue;
+			}
+			PluginButton &button = toolbar.Buttons[location.Item];
+			const std::string tooltip = button.Tooltip;
+
+			if (shown > 0) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("|");
+				ImGui::SameLine();
+			}
+
+			ImGui::PushID(location.Key.c_str());
+			if (button.Kind == PluginControlKind::Builtin) {
+				DrawBuiltinStudioTool(button.Builtin);
+				ImGui::PopID();
+				continue;
+			}
+
+			const std::string label = button.Name + "###control";
+			if (button.Kind == PluginControlKind::Button) {
+				const bool pressed =
+					button.Active ? ImGui::Selectable(label.c_str(), true, 0, ImVec2(location.Width, 0.0f))
+								  : ImGui::Button(label.c_str(), ImVec2(location.Width, 0.0f));
+				if (pressed) {
+					InvokePlugin(plugin, button.OnClick, false);
+				}
+			} else if (button.Kind == PluginControlKind::Toggle) {
+				const bool before = button.Active;
+				ImGui::Checkbox(label.c_str(), &button.Active);
+				if (before != button.Active) {
+					const engine::script::HostValue value = engine::script::HostValue::Of(button.Active);
+					InvokePlugin(plugin, button.OnChanged, false, engine::script::HostArguments(&value, 1));
+				}
+			} else if (button.Kind == PluginControlKind::Dropdown) {
+				ImGui::SetNextItemWidth(location.Width);
+				const char *preview = button.Selected < button.Options.size()
+										  ? button.Options[button.Selected].c_str()
+										  : "(none)";
+				if (ImGui::BeginCombo(label.c_str(), preview)) {
+					for (size_t option = 0; option < button.Options.size(); option++) {
+						if (!ImGui::Selectable(button.Options[option].c_str(), option == button.Selected)) {
+							continue;
+						}
+						button.Selected = option;
+						const engine::script::HostValue arguments[] = {
+							engine::script::HostValue::Of(static_cast<double>(option + 1)),
+							engine::script::HostValue::Of(std::string_view(button.Options[option])),
+						};
+						InvokePlugin(
+							plugin, button.OnChanged, false, engine::script::HostArguments(arguments, 2)
+						);
+					}
+					ImGui::EndCombo();
+				}
+			}
+
+			if (!tooltip.empty() && ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", tooltip.c_str());
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndChild();
 	}
 
 	void Editor::DrawPluginTools() {
@@ -509,76 +1162,280 @@ namespace studio {
 			ImGui::SetTooltip("%s", PluginRoot().string().c_str());
 		}
 
-		size_t drawn = 0;
-		for (LoadedPlugin &plugin : Plugins) {
-			// **A stopped plugin's toolbar is not drawn.** Its buttons call
-			// handlers in a runtime that has been torn down, and a button that
-			// looks live and cannot run is worse than one that is not there -
-			// the Manage panel is where a stopped plugin is explained.
-			if (!plugin.Running) {
-				continue;
-			}
-
-			for (size_t bar = 0; bar < plugin.Toolbars.size(); bar++) {
-				PluginToolbar &toolbar = plugin.Toolbars[bar];
-
-				ImGui::SameLine();
-				ImGui::TextDisabled("|");
-				ImGui::SameLine();
-
-				// The toolbar's own name, dimmed, so a row of buttons from three
-				// plugins can be read as three groups.
-				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-				ImGui::TextUnformatted(toolbar.Name.c_str());
-				ImGui::PopStyleColor();
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("%s", plugin.Manifest.Name.c_str());
-				}
-				drawn++;
-
-				for (size_t at = 0; at < toolbar.Buttons.size(); at++) {
-					PluginButton &button = toolbar.Buttons[at];
-					ImGui::SameLine();
-
-					// The id keeps two buttons of one name apart; the label is
-					// what somebody reads.
-					const std::string id = button.Name + "###plugin." + plugin.Manifest.Name + "." +
-										   std::to_string(bar) + "." + std::to_string(at);
-
-					const bool pressed = button.Active
-											 ? ImGui::Selectable(id.c_str(), true, 0, ImVec2(92.0f, 0.0f))
-											 : ImGui::Button(id.c_str(), ImVec2(92.0f, 0.0f));
-
-					if (!button.Tooltip.empty() && ImGui::IsItemHovered()) {
-						ImGui::SetTooltip("%s", button.Tooltip.c_str());
-					}
-
-					if (pressed) {
-						// **Not drawing.** A click handler runs the plugin's own
-						// code, which may open a widget or change the selection;
-						// letting it draw here would put its widgets on the
-						// toolbar rather than in their own window.
-						InvokePlugin(plugin, button.OnClick, false);
-					}
-				}
-			}
-		}
-
-		if (drawn > 0) {
-			return;
-		}
-
-		// **Says which of the two nothings it is.** No plugins installed and
-		// plugins installed that asked for no toolbar are different situations,
-		// and a single "nothing here" would send somebody looking in the wrong
-		// place.
 		ImGui::SameLine();
 		ImGui::TextDisabled("|");
 		ImGui::SameLine();
-		ImGui::TextDisabled(
-			Plugins.empty() ? "no plugins installed - Manage says where they go"
-							: "nothing installed a toolbar - Manage says what is running"
+		if (ImGui::Button("Toolbar", ImVec2(84.0f, 0.0f))) {
+			ShowToolbarEditor = true;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Dock Widgets", ImVec2(104.0f, 0.0f))) {
+			ShowDockWidgetEditor = true;
+		}
+		ImGui::SameLine();
+		const size_t running =
+			static_cast<size_t>(std::count_if(Plugins.begin(), Plugins.end(), [](const LoadedPlugin &plugin) {
+				return plugin.Running;
+			}));
+		ImGui::TextDisabled("%zu of %zu running", running, Plugins.size());
+	}
+
+	void Editor::DrawToolbarEditor() {
+		if (!ShowToolbarEditor) {
+			return;
+		}
+		if (!ImGui::Begin("Toolbar Editor", &ShowToolbarEditor)) {
+			ImGui::End();
+			return;
+		}
+
+		const auto save = [this]() {
+			std::string error;
+			if (!SaveToolbarPreferences(ConfigPath("toolbar.json"), ToolbarPrefs, error)) {
+				Say(error, engine::core::LogLevel::Warning);
+			}
+		};
+
+		ImGui::SetNextItemWidth(engine::ui::Scaled(220.0f));
+		ImGui::InputTextWithHint(
+			"##new-toolbar-tab", "New tab name", ToolbarTabDraft, sizeof(ToolbarTabDraft)
 		);
+		ImGui::SameLine();
+		if (ImGui::Button("Add Tab") && ToolbarTabDraft[0] != '\0') {
+			size_t serial = 1;
+			for (;;) {
+				const std::string candidate = "user/" + std::to_string(serial++);
+				const bool used = std::any_of(
+					ToolbarPrefs.Tabs.begin(), ToolbarPrefs.Tabs.end(), [&](const ToolbarTabPreference &tab) {
+						return tab.Id == candidate;
+					}
+				);
+				if (used) {
+					continue;
+				}
+				ToolbarPrefs.Tabs.push_back(ToolbarTabPreference{candidate, ToolbarTabDraft, true, true});
+				ToolbarTabDraft[0] = '\0';
+				save();
+				break;
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Reset")) {
+			ToolbarPrefs = ToolbarPreferences{};
+			save();
+		}
+
+		if (!ToolbarPrefs.Tabs.empty()) {
+			ImGui::SeparatorText("Custom tabs");
+			for (size_t index = 0; index < ToolbarPrefs.Tabs.size();) {
+				ToolbarTabPreference &tab = ToolbarPrefs.Tabs[index];
+				if (!tab.UserCreated) {
+					index++;
+					continue;
+				}
+				ImGui::PushID(tab.Id.c_str());
+				bool changed = ImGui::Checkbox("##visible", &tab.Visible);
+				ImGui::SameLine();
+				ImGui::TextUnformatted(tab.Name.c_str());
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Remove")) {
+					for (ToolbarItemPreference &item : ToolbarPrefs.Items) {
+						if (item.Tab == tab.Id) {
+							item.Tab.clear();
+						}
+					}
+					ToolbarPrefs.Tabs.erase(ToolbarPrefs.Tabs.begin() + static_cast<std::ptrdiff_t>(index));
+					save();
+					ImGui::PopID();
+					continue;
+				}
+				if (changed) {
+					save();
+				}
+				ImGui::PopID();
+				index++;
+			}
+		}
+
+		struct TabChoice {
+			std::string Id;
+			std::string Name;
+		};
+		std::vector<TabChoice> choices;
+		for (const ToolbarTabPreference &tab : ToolbarPrefs.Tabs) {
+			choices.push_back(TabChoice{tab.Id, tab.Name});
+		}
+		for (const LoadedPlugin &plugin : Plugins) {
+			for (size_t toolbarIndex = 0; toolbarIndex < plugin.Toolbars.size(); toolbarIndex++) {
+				const PluginToolbar &toolbar = plugin.Toolbars[toolbarIndex];
+				const std::string id = PluginToolbarKey(plugin, toolbar, toolbarIndex);
+				if (std::none_of(choices.begin(), choices.end(), [&](const TabChoice &choice) {
+						return choice.Id == id;
+					})) {
+					choices.push_back(TabChoice{id, toolbar.Name});
+				}
+			}
+		}
+
+		ImGui::SeparatorText("Tools");
+		if (ImGui::BeginTable(
+				"toolbar-items",
+				4,
+				ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY
+			)) {
+			ImGui::TableSetupColumn("Visible", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(58.0f));
+			ImGui::TableSetupColumn("Tool", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Tab", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(170.0f));
+			ImGui::TableSetupColumn("Width", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(130.0f));
+			ImGui::TableHeadersRow();
+
+			for (size_t pluginIndex = 0; pluginIndex < Plugins.size(); pluginIndex++) {
+				LoadedPlugin &plugin = Plugins[pluginIndex];
+				for (size_t toolbarIndex = 0; toolbarIndex < plugin.Toolbars.size(); toolbarIndex++) {
+					PluginToolbar &toolbar = plugin.Toolbars[toolbarIndex];
+					const std::string defaultTab = PluginToolbarKey(plugin, toolbar, toolbarIndex);
+					for (size_t itemIndex = 0; itemIndex < toolbar.Buttons.size(); itemIndex++) {
+						PluginButton &button = toolbar.Buttons[itemIndex];
+						const std::string key =
+							PluginToolKey(plugin, toolbar, toolbarIndex, button, itemIndex);
+						auto found = std::find_if(
+							ToolbarPrefs.Items.begin(),
+							ToolbarPrefs.Items.end(),
+							[&](const ToolbarItemPreference &item) { return item.Key == key; }
+						);
+						const auto ensure = [&]() -> ToolbarItemPreference & {
+							if (found == ToolbarPrefs.Items.end()) {
+								ToolbarPrefs.Items.push_back(
+									ToolbarItemPreference{
+										key, defaultTab, button.Visible, ClampPluginToolWidth(button.Width)
+									}
+								);
+								found = std::prev(ToolbarPrefs.Items.end());
+							}
+							return *found;
+						};
+
+						ImGui::TableNextRow();
+						ImGui::PushID(key.c_str());
+						ImGui::TableNextColumn();
+						bool visible = found == ToolbarPrefs.Items.end() ? button.Visible : found->Visible;
+						if (ImGui::Checkbox("##visible", &visible)) {
+							ensure().Visible = visible;
+							save();
+						}
+
+						ImGui::TableNextColumn();
+						ImGui::TextUnformatted(button.Name.c_str());
+						ImGui::TextDisabled("%s", plugin.Manifest.Name.c_str());
+
+						ImGui::TableNextColumn();
+						const std::string current =
+							found == ToolbarPrefs.Items.end() || found->Tab.empty() ? defaultTab : found->Tab;
+						const auto currentChoice =
+							std::find_if(choices.begin(), choices.end(), [&](const TabChoice &choice) {
+								return choice.Id == current;
+							});
+						const char *preview =
+							currentChoice == choices.end() ? current.c_str() : currentChoice->Name.c_str();
+						if (ImGui::BeginCombo("##tab", preview)) {
+							for (const TabChoice &choice : choices) {
+								if (ImGui::Selectable(choice.Name.c_str(), choice.Id == current)) {
+									ensure().Tab = choice.Id;
+									save();
+								}
+							}
+							ImGui::EndCombo();
+						}
+
+						ImGui::TableNextColumn();
+						float width = found == ToolbarPrefs.Items.end() ? ClampPluginToolWidth(button.Width)
+																		: found->Width;
+						ImGui::BeginDisabled(button.Kind == PluginControlKind::Builtin);
+						ImGui::SetNextItemWidth(-1.0f);
+						if (ImGui::DragFloat(
+								"##width",
+								&width,
+								1.0f,
+								PLUGIN_TOOL_MINIMUM_WIDTH,
+								PLUGIN_TOOL_MAXIMUM_WIDTH,
+								"%.0f px",
+								ImGuiSliderFlags_AlwaysClamp
+							)) {
+							ensure().Width = ClampPluginToolWidth(width);
+							save();
+						}
+						ImGui::EndDisabled();
+						ImGui::PopID();
+					}
+				}
+			}
+			ImGui::EndTable();
+		}
+
+		ImGui::End();
+	}
+
+	void Editor::DrawDockWidgetEditor() {
+		if (!ShowDockWidgetEditor) {
+			return;
+		}
+		if (!ImGui::Begin("Dock Widgets", &ShowDockWidgetEditor)) {
+			ImGui::End();
+			return;
+		}
+
+		ImGui::TextWrapped(
+			"Plugin widgets are ordinary ImGui dock windows. The requested dock and size limits apply on "
+			"first use; "
+			"after that, the saved layout belongs to the person using Studio."
+		);
+		ImGui::Separator();
+
+		bool any = false;
+		for (LoadedPlugin &plugin : Plugins) {
+			for (PluginWidget &widget : plugin.Widgets) {
+				any = true;
+				const std::string id =
+					PluginIdentity(plugin) + "/widget/" + (widget.Id.empty() ? widget.Title : widget.Id);
+				ImGui::PushID(id.c_str());
+				ImGui::Checkbox("##open", &widget.Open);
+				ImGui::SameLine();
+				ImGui::Text("%s  (%s)", widget.Title.c_str(), plugin.Manifest.Name.c_str());
+
+				ImGui::SetNextItemWidth(engine::ui::Scaled(140.0f));
+				if (ImGui::BeginCombo("Dock", Describe(widget.Dock))) {
+					for (size_t ordinal = 0; ordinal <= static_cast<size_t>(PluginDock::Bottom); ordinal++) {
+						const auto dock = static_cast<PluginDock>(ordinal);
+						if (ImGui::Selectable(Describe(dock), dock == widget.Dock)) {
+							widget.Dock = dock;
+						}
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+				ImGui::DragFloat("Min W", &widget.MinimumWidth, 1.0f, 1.0f, 4096.0f, "%.0f px");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+				ImGui::DragFloat("Min H", &widget.MinimumHeight, 1.0f, 1.0f, 4096.0f, "%.0f px");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+				ImGui::DragFloat("Max W", &widget.MaximumWidth, 1.0f, 0.0f, 8192.0f, "%.0f px");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+				ImGui::DragFloat("Max H", &widget.MaximumHeight, 1.0f, 0.0f, 8192.0f, "%.0f px");
+				widget.MinimumWidth = std::max(1.0f, widget.MinimumWidth);
+				widget.MinimumHeight = std::max(1.0f, widget.MinimumHeight);
+				widget.MaximumWidth = std::max(0.0f, widget.MaximumWidth);
+				widget.MaximumHeight = std::max(0.0f, widget.MaximumHeight);
+				ImGui::Separator();
+				ImGui::PopID();
+			}
+		}
+		if (!any) {
+			ImGui::TextDisabled("No running plugin created a dock widget.");
+		}
+		ImGui::End();
 	}
 
 	void Editor::DrawPlugins() {
@@ -619,7 +1476,10 @@ namespace studio {
 			return;
 		}
 
-		if (ImGui::BeginTable("plugins", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+		bool reloadAfterTable = false;
+		bool saveState = false;
+		if (ImGui::BeginTable("plugins", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+			ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 36.0f);
 			ImGui::TableSetupColumn("Plugin", ImGuiTableColumnFlags_WidthFixed, 150.0f);
 			ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 90.0f);
 			ImGui::TableSetupColumn("What it is doing", ImGuiTableColumnFlags_WidthStretch);
@@ -630,9 +1490,29 @@ namespace studio {
 				ImGui::TableNextRow();
 
 				ImGui::TableNextColumn();
+				const std::string identity = PluginIdentity(plugin);
+				bool enabled = plugin.Manifest.Enabled;
+				const std::string enabledId = "##enabled." + identity;
+				ImGui::BeginDisabled(plugin.Builtin);
+				if (ImGui::Checkbox(enabledId.c_str(), &enabled)) {
+					PluginEnabled[identity] = enabled;
+					saveState = true;
+					reloadAfterTable = true;
+				}
+				ImGui::EndDisabled();
+
+				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(plugin.Manifest.Name.c_str());
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("%s", plugin.Root.string().c_str());
+				}
+				if (!plugin.Manifest.Version.empty() || !plugin.Manifest.Author.empty()) {
+					ImGui::TextDisabled(
+						"%s%s%s",
+						plugin.Manifest.Version.empty() ? "" : plugin.Manifest.Version.c_str(),
+						!plugin.Manifest.Version.empty() && !plugin.Manifest.Author.empty() ? " by " : "",
+						plugin.Manifest.Author.empty() ? "" : plugin.Manifest.Author.c_str()
+					);
 				}
 
 				ImGui::TableNextColumn();
@@ -667,6 +1547,17 @@ namespace studio {
 				}
 			}
 			ImGui::EndTable();
+		}
+
+		if (saveState) {
+			std::string error;
+			if (!SavePluginState(ConfigPath("plugins.json"), PluginEnabled, error)) {
+				Say(error, engine::core::LogLevel::Warning);
+				reloadAfterTable = false;
+			}
+		}
+		if (reloadAfterTable) {
+			LoadPlugins();
 		}
 
 		ImGui::End();

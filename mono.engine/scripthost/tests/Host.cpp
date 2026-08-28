@@ -31,6 +31,8 @@ using engine::script::Language;
 using engine::script::MakeRuntime;
 
 namespace {
+	const std::vector<Language> HOST_LANGUAGES = {Language::Luau, Language::JavaScript};
+
 	engine::script::RuntimeLimits PluginLimits() {
 		engine::script::RuntimeLimits limits;
 		limits.Role.Server = false;
@@ -38,6 +40,10 @@ namespace {
 		limits.Role.Studio = true;
 		limits.Origin = engine::script::ScriptOrigin::Plugin;
 		return limits;
+	}
+
+	std::string_view Source(Language language, std::string_view luau, std::string_view javascript) {
+		return language == Language::Luau ? luau : javascript;
 	}
 
 	// A host that records what it was asked and answers what it was told to.
@@ -391,4 +397,172 @@ TEST_CASE("an empty table crosses as an array", "[script][host]") {
 
 	// And it comes back as a table either way, so a script cannot tell.
 	REQUIRE(runtime->Run("local back = test.Echo({}) assert(type(back) == 'table' and #back == 0)"));
+}
+
+TEST_CASE("the host seam has JavaScript parity", "[script][host][javascript]") {
+	engine::scene::EnsureClassTree();
+
+	for (const Language language : HOST_LANGUAGES) {
+		SECTION(language == Language::Luau ? "luau" : "javascript") {
+			Store store(language == Language::Luau ? "host_parity_luau" : "host_parity_javascript");
+			Recorder host;
+			const auto runtime = MakeRuntime(store, language, PluginLimits());
+			runtime->SetHost(&host);
+
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				R"(
+					assert(type(test) == 'table', 'no host global')
+					assert(test.Missing == nil, 'an unlisted name is a member')
+					assert(test.Echo(7) == 7, 'number')
+					assert(test.Echo('hello') == 'hello', 'string')
+					assert(test.Echo(true) == true, 'boolean')
+					assert(test.Echo(nil) == nil, 'nil')
+					assert(test.Echo(Vector3.new(1, 2, 3)) == Vector3.new(1, 2, 3), 'Vector3')
+					assert(test.Echo(Color3.new(0.2, 0.4, 0.8)) == Color3.new(0.2, 0.4, 0.8), 'Color3')
+					assert(test.Echo(CFrame.new(1, 2, 3)).Position.X == 1, 'CFrame')
+					local list = test.Echo({1, 2, 3})
+					assert(#list == 3 and list[2] == 2, 'array')
+					local map = test.Echo({ a = 1, b = 'two' })
+					assert(map.a == 1 and map.b == 'two', 'map')
+				)",
+				R"(
+					if (typeof test !== 'object') throw new Error('no host global');
+					if (test.Missing !== undefined) throw new Error('an unlisted name is a member');
+					if (test.Echo(7) !== 7) throw new Error('number');
+					if (test.Echo('hello') !== 'hello') throw new Error('string');
+					if (test.Echo(true) !== true) throw new Error('boolean');
+					if (test.Echo(null) !== null) throw new Error('nil');
+					if (!test.Echo(Vector3.new(1, 2, 3)).Equals(Vector3.new(1, 2, 3))) throw new Error('Vector3');
+					if (!test.Echo(Color3.new(0.2, 0.4, 0.8)).Equals(Color3.new(0.2, 0.4, 0.8))) throw new Error('Color3');
+					if (test.Echo(CFrame.new(1, 2, 3)).Position.X !== 1) throw new Error('CFrame');
+					const hostList = test.Echo([1, 2, 3]);
+					if (hostList.length !== 3 || hostList[1] !== 2) throw new Error('array');
+					const hostMap = test.Echo({ a: 1, b: 'two' });
+					if (hostMap.a !== 1 || hostMap.b !== 'two') throw new Error('map');
+				)"
+			)));
+
+			host.First = store.CreateInstance(engine::scene::PartClass(), "Crate");
+			host.Second = store.CreateInstance(engine::scene::PartClass(), "Barrel");
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				R"(
+					local held = test.Instances()
+					assert(#held == 2 and held[1].Name == 'Crate' and held[2].Name == 'Barrel')
+					assert(test.Echo(held[1]) == held[1], 'instance round trip')
+				)",
+				R"(
+					const hostInstances = test.Instances();
+					if (hostInstances.length !== 2 || hostInstances[0].Name !== 'Crate' || hostInstances[1].Name !== 'Barrel') throw new Error('instances');
+					if (test.Echo(hostInstances[0]).Name !== 'Crate') throw new Error('instance round trip');
+				)"
+			)));
+
+			CHECK_FALSE(runtime->Run("test.Refuse()"));
+			CHECK(runtime->LastError().find("told to") != std::string::npos);
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				R"(
+					local ok, message = pcall(function() test.Refuse() end)
+					assert(not ok and string.find(message, 'told to') ~= nil, 'the refusal was lost')
+				)",
+				R"(
+					let hostRefused = false;
+					try { test.Refuse(); } catch (error) { hostRefused = String(error).includes('told to'); }
+					if (!hostRefused) throw new Error('the refusal was lost');
+				)"
+			)));
+
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				"test.Remember(function(value) test.Echo(value) end)",
+				"test.Remember(function(value) { test.Echo(value); });"
+			)));
+			REQUIRE(host.Handler.Valid());
+
+			const HostValue argument = HostValue::Of(std::string_view("pressed"));
+			const HostValue arguments[] = {argument};
+			CHECK(runtime->Invoke(host.Handler, arguments));
+			CHECK(host.Seen.Tag == HostTag::String);
+			CHECK(host.Seen.Text == "pressed");
+			CHECK_FALSE(runtime->Invoke(HostCallback{999}, {}));
+			CHECK_FALSE(runtime->Invoke(HostCallback{}, {}));
+
+			runtime->Release(host.Handler);
+			runtime->Release(host.Handler);
+			CHECK_FALSE(runtime->Invoke(host.Handler, arguments));
+
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				"test.Remember(function() error('inside the handler') end)",
+				"test.Remember(function() { throw new Error('inside the handler'); });"
+			)));
+			REQUIRE(host.Handler.Valid());
+			CHECK_FALSE(runtime->Invoke(host.Handler, {}));
+			runtime->Release(host.Handler);
+
+			INFO(runtime->LastError());
+			REQUIRE(runtime->Run(Source(
+				language,
+				R"(
+					assert(Thing:Get() == 'Thing.Get', 'service method')
+					assert(Other.Get() == 'Other.Get', 'other service')
+					assert(game:GetService('Thing') == Thing, 'GetService')
+					Thing:Set({1, 2, 3})
+				)",
+				R"(
+					if (Thing.Get() !== 'Thing.Get') throw new Error('service method');
+					if (Other.Get() !== 'Other.Get') throw new Error('other service');
+					if (game.GetService('Thing') !== Thing) throw new Error('GetService');
+					Thing.Set([1, 2, 3]);
+				)"
+			)));
+			CHECK(host.Received == 1);
+			CHECK(host.Seen.Tag == HostTag::Array);
+			CHECK(host.Seen.Items.size() == 3);
+
+			CHECK_FALSE(runtime->Run(Source(
+				language, "test.Echo(coroutine.create(function() end))", "test.Echo(Symbol('unsupported'));"
+			)));
+			CHECK_FALSE(runtime->Run(Source(
+				language,
+				R"(
+					local deep = {}
+					local at = deep
+					for _ = 1, 40 do at.next = {}; at = at.next end
+					test.Echo(deep)
+				)",
+				R"(
+					const hostDeep = {};
+					let hostAt = hostDeep;
+					for (let index = 0; index < 40; index++) { hostAt.next = {}; hostAt = hostAt.next; }
+					test.Echo(hostDeep);
+				)"
+			)));
+			INFO(runtime->LastError());
+			CHECK(runtime->Run("test.Echo(1)"));
+		}
+	}
+
+	for (const Language language : HOST_LANGUAGES) {
+		SECTION(language == Language::Luau ? "luau capability" : "javascript capability") {
+			Store store(language == Language::Luau ? "host_bare_luau" : "host_bare_javascript");
+			Recorder host;
+			const auto runtime = MakeRuntime(store, language);
+			runtime->SetHost(&host);
+			CHECK(runtime->LastError().find("plugin-host") != std::string::npos);
+			INFO(runtime->LastError());
+			CHECK(runtime->Run(Source(
+				language,
+				"assert(test == nil, 'a game script got a host')",
+				"if (typeof test !== 'undefined') throw new Error('a game script got a host');"
+			)));
+		}
+	}
 }

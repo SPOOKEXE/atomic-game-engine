@@ -778,6 +778,7 @@ namespace studio {
 		// of every one of them before it goes away.
 		EndAllRuns();
 		Runs.clear();
+		Plugins.clear();
 
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();
@@ -2860,6 +2861,10 @@ namespace studio {
 
 	void Editor::NewGame() {
 		EndAllRuns();
+
+		// Plugin runtimes borrow a Store from the current universe. They must die
+		// before the worlds below, then restart against the new active world.
+		Plugins.clear();
 		PendingFrame.clear();
 		Scripts.clear();
 		ActiveScript = -1;
@@ -2985,6 +2990,9 @@ namespace studio {
 		}
 		said += " - ticking in parallel";
 		Say(said);
+		if (Running) {
+			LoadPlugins();
+		}
 	}
 
 	bool Editor::DefaultWorldEnabled(std::string_view key) const {
@@ -3031,10 +3039,24 @@ namespace studio {
 	bool Editor::OpenGame(const std::filesystem::path &path) {
 		EndAllRuns();
 
+		// `LoadGame` replaces worlds. A plugin VM retains a Store reference, so
+		// keeping it alive across this call would leave it pointing into freed
+		// storage even when the replacement succeeds.
+		Plugins.clear();
+
 		engine::game::GameInfo info;
 		std::string error;
 
 		if (!engine::game::LoadGame(*Universe, path, info, error)) {
+			const std::vector<WorldId> remaining = Universe->Worlds();
+			if (std::find(remaining.begin(), remaining.end(), Active) == remaining.end()) {
+				Active = remaining.empty() ? WorldId{} : remaining.front();
+				SelectionWorld = Active;
+				ClearSelection();
+			}
+			if (Running) {
+				LoadPlugins();
+			}
 			Say("open failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -3077,7 +3099,9 @@ namespace studio {
 		// plugin holds a `Store &` from the universe this call has just torn
 		// down, so carrying them across would be a reference into storage that
 		// is gone - which is a crash rather than a stale reading.
-		LoadPlugins();
+		if (Running) {
+			LoadPlugins();
+		}
 
 		Say("opened " + path.string() + " - " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;

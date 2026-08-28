@@ -19,7 +19,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <studio/Config.hpp>
 #include <studio/Plugins.hpp>
@@ -32,8 +34,12 @@ using engine::core::Name;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 using studio::BeatPlugins;
+using studio::ClampPluginToolWidth;
+using studio::ComposeToolbar;
 using studio::DiscoverPlugins;
 using studio::LoadedPlugin;
+using studio::LoadToolbarPreferences;
+using studio::MakeDefaultStudioPlugin;
 using studio::ParsePluginManifest;
 using studio::PLUGIN_FAULT_LIMIT;
 using studio::PluginButton;
@@ -41,8 +47,12 @@ using studio::PluginManifest;
 using studio::PluginToolbar;
 using studio::PluginWidget;
 using studio::RegisterSelectionComponent;
+using studio::SaveToolbarPreferences;
 using studio::SELECTED_COMPONENT;
 using studio::StartPlugins;
+using studio::ToolbarItemPreference;
+using studio::ToolbarPreferences;
+using studio::ToolbarTabPreference;
 
 namespace {
 	// A plugins folder, written per case and removed after it.
@@ -120,6 +130,101 @@ TEST_CASE("a main that escapes its own folder is refused", "[studio][plugins]") 
 	// Down is fine. It is only up that is refused.
 	CHECK(ParsePluginManifest(R"({"name": "Fine", "main": "src/main.luau"})", manifest, error));
 	CHECK(ParsePluginManifest(R"({"name": "Fine", "main": "a/../b/main.luau"})", manifest, error));
+}
+
+TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugins]") {
+	const LoadedPlugin plugin = MakeDefaultStudioPlugin();
+
+	CHECK(plugin.Builtin);
+	CHECK(plugin.Running);
+	CHECK(plugin.Manifest.Id == "atomic.default-studio");
+	REQUIRE(plugin.Toolbars.size() == 6);
+
+	std::set<std::string> toolbarIds;
+	std::set<std::string> controlIds;
+	for (const PluginToolbar &toolbar : plugin.Toolbars) {
+		CHECK(toolbarIds.insert(toolbar.Id).second);
+		CHECK_FALSE(toolbar.Buttons.empty());
+		for (const PluginButton &button : toolbar.Buttons) {
+			CHECK(controlIds.insert(toolbar.Id + "/" + button.Id).second);
+		}
+	}
+}
+
+TEST_CASE("toolbar composition uses stable overrides", "[studio][plugins]") {
+	std::vector<LoadedPlugin> plugins;
+	plugins.push_back(MakeDefaultStudioPlugin());
+
+	const std::string moved =
+		studio::PluginToolKey(plugins[0], plugins[0].Toolbars[0], 0, plugins[0].Toolbars[0].Buttons[0], 0);
+	const std::string hidden =
+		studio::PluginToolKey(plugins[0], plugins[0].Toolbars[0], 0, plugins[0].Toolbars[0].Buttons[1], 1);
+
+	ToolbarPreferences preferences;
+	preferences.Tabs.push_back(ToolbarTabPreference{"custom", "My Tools", true, true});
+	preferences.Items.push_back(ToolbarItemPreference{moved, "custom", true, 12.0f});
+	preferences.Items.push_back(ToolbarItemPreference{hidden, "", false, 92.0f});
+
+	const auto composed = ComposeToolbar(plugins, preferences);
+	const auto custom =
+		std::find_if(composed.begin(), composed.end(), [](const auto &tab) { return tab.Id == "custom"; });
+	REQUIRE(custom != composed.end());
+	REQUIRE(custom->Items.size() == 1);
+	CHECK(custom->Items.front().Key == moved);
+	CHECK(custom->Items.front().Width == studio::PLUGIN_TOOL_MINIMUM_WIDTH);
+
+	for (const auto &tab : composed) {
+		CHECK(std::none_of(tab.Items.begin(), tab.Items.end(), [&](const auto &item) {
+			return item.Key == hidden;
+		}));
+	}
+}
+
+TEST_CASE("toolbar preferences round trip by stable text keys", "[studio][plugins]") {
+	Folder folder;
+	const std::filesystem::path path = folder.Root / "toolbar.json";
+
+	ToolbarPreferences saved;
+	saved.Tabs.push_back(ToolbarTabPreference{"custom", "Custom", false, true});
+	saved.Items.push_back(ToolbarItemPreference{"plugin/toolbar/tool", "custom", true, 144.0f});
+
+	std::string error;
+	REQUIRE(SaveToolbarPreferences(path, saved, error));
+	ToolbarPreferences loaded;
+	REQUIRE(LoadToolbarPreferences(path, loaded, error));
+	REQUIRE(loaded.Tabs.size() == 1);
+	REQUIRE(loaded.Items.size() == 1);
+	CHECK(loaded.Tabs[0].Id == "custom");
+	CHECK_FALSE(loaded.Tabs[0].Visible);
+	CHECK(loaded.Items[0].Key == "plugin/toolbar/tool");
+	CHECK(loaded.Items[0].Width == 144.0f);
+}
+
+TEST_CASE("toolbar preferences ignore fields of the wrong type", "[studio][plugins]") {
+	Folder folder;
+	const std::filesystem::path path = folder.Root / "toolbar.json";
+	{
+		std::ofstream out(path);
+		out << R"({"tabs":[{"id":7,"name":false},{"id":"kept","name":"Kept"}],)"
+			   R"("items":[{"key":"kept/tool","tab":9,"visible":"yes","width":[]} ]})";
+	}
+
+	ToolbarPreferences loaded;
+	std::string error;
+	REQUIRE(LoadToolbarPreferences(path, loaded, error));
+	REQUIRE(loaded.Tabs.size() == 1);
+	CHECK(loaded.Tabs[0].Id == "kept");
+	REQUIRE(loaded.Items.size() == 1);
+	CHECK(loaded.Items[0].Tab.empty());
+	CHECK(loaded.Items[0].Visible);
+	CHECK(loaded.Items[0].Width == 92.0f);
+}
+
+TEST_CASE("toolbar widths reject non-finite values and clamp bounds", "[studio][plugins]") {
+	CHECK(ClampPluginToolWidth(-20.0f) == studio::PLUGIN_TOOL_MINIMUM_WIDTH);
+	CHECK(ClampPluginToolWidth(900.0f) == studio::PLUGIN_TOOL_MAXIMUM_WIDTH);
+	CHECK(ClampPluginToolWidth(std::numeric_limits<float>::quiet_NaN()) == 92.0f);
+	CHECK(ClampPluginToolWidth(std::numeric_limits<float>::infinity()) == 92.0f);
 }
 
 // --- discovery -----------------------------------------------------------------
@@ -359,7 +464,9 @@ namespace {
 			};
 
 			if (name == "CreateToolbar") {
-				Plugin.Toolbars.push_back(PluginToolbar{text(0), {}});
+				PluginToolbar toolbar;
+				toolbar.Name = text(0);
+				Plugin.Toolbars.push_back(std::move(toolbar));
 				result = HostValue::Of(static_cast<double>(Plugin.Toolbars.size()));
 				return true;
 			}
@@ -382,7 +489,10 @@ namespace {
 				return true;
 			}
 			if (name == "CreateWidget") {
-				Plugin.Widgets.push_back(PluginWidget{text(0), true, {}});
+				PluginWidget widget;
+				widget.Title = text(0);
+				widget.Open = true;
+				Plugin.Widgets.push_back(std::move(widget));
 				result = HostValue::Of(static_cast<double>(Plugin.Widgets.size()));
 				return true;
 			}

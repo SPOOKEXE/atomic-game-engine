@@ -75,6 +75,16 @@ namespace engine::script {
 	// Releases what the two `Open` calls attached. Before the context is freed.
 	void CloseJsBindings(JSContext *context);
 
+	// Installs the program host currently recorded on `JsContext`, replacing
+	// the previous host global and service objects.
+	void OpenJsHost(JSContext *context);
+
+	// Calls and releases functions a script handed to its program host.
+	bool CallJsHostCallback(
+		JSContext *context, HostCallback callback, HostArguments arguments, std::string &error
+	);
+	void ReleaseJsHostCallback(JSContext *context, HostCallback callback);
+
 	// Calls every connected Heartbeat function with `delta`.
 	std::string PumpJsHeartbeat(JSContext *context, float delta);
 

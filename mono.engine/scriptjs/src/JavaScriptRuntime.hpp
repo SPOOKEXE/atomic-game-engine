@@ -41,6 +41,12 @@ namespace engine::script {
 		// @return Cumulative steps since this runtime was made.
 		uint64_t StepsTaken() const override;
 
+		// --- the host seam ---------------------------------------------------
+
+		void SetHost(HostSurface *host) override;
+		bool Invoke(HostCallback callback, HostArguments arguments) override;
+		void Release(HostCallback callback) override;
+
 	  private:
 		// Drains promise reactions until there are none left, or until
 		// `RuntimeLimits::JobBudget` of them have run.

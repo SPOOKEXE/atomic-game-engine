@@ -75,13 +75,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] complete collider components for `Box`, `Sphere`, `Cylinder`, `Capsule`, `Hull` and exact `Mesh` geometry. Bounds, support, contacts, rays, inertia and Studio previews cover the analytic shapes; baked hulls and triangle soups cover mesh-backed shapes. `MeshPart` exposes mesh, seven surface maps and triangle metadata through the shared property surface.
 - [x] enforce script access levels, capabilities and sandbox profiles for plugin, game, server and client contexts. Both VMs derive or accept explicit grants, refuse unavailable services with the required capability named, keep plugin host access separate from server services, and retain memory, step, job, global and host-surface sandbox limits.
 
-- [_] plan out base plugin system + default plugins + move default tools into plugins instead.
-- [_] setup a toolbar editor system where you can create new tabs, select which tools are visible on the toolbar, and plugins can modify their buttons and whatnot (with size constraints and such)
-- [_] setup and plan out dock widgets
-- [_] plugin manager widget
-- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
-- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
-- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [x] plan out and implement the base plugin system with stable manifests, isolated runtimes, persisted enable state, a built-in Default Studio plugin, and safe teardown before world replacement.
+- [x] add a toolbar editor where tabs can be created, hidden and removed, tools can be moved or hidden, and script controls can declare and change bounded widths.
+- [x] add plugin dock widgets with stable identities, first-use dock targets, size constraints, an editor panel, and a generated View menu for reopening them.
+- [x] add a plugin manager widget with metadata, running and faulted states, persisted enable controls, error details, widget access, and reload.
+- [x] bridge engine behavior through the shared plugin host surface in Luau and JavaScript with matching value, service and callback behavior.
+- [x] move the standard Home, Model, Script, View, Plugins and Demo ribbon tools into the built-in Default Studio plugin while keeping transport and scene controls host-owned.
+- [x] add plugin functions for buttons, toggles, dropdowns, toolbar visibility and sizing, dock widgets, viewport options and creation, script source editing, and opening script-editor tabs.
 
 - [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed

@@ -222,23 +222,29 @@ namespace studio {
 		// how far it steps, what the selection is - and a run of twelve
 		// evenly-spaced buttons is a row nobody can find anything in.
 
-		ImGui::BeginDisabled(!Active.IsValid());
-		if (ImGui::Button("Insert Object")) {
-			ImGui::OpenPopup("insert-object");
-		}
-		ImGui::EndDisabled();
+		const bool all = DrawingBuiltinTool == BuiltinStudioTool::None;
 
-		if (ImGui::BeginPopup("insert-object")) {
-			if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-toolbar"); chosen.IsValid()) {
-				InsertInstance(
-					Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
-				);
-				ImGui::CloseCurrentPopup();
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::InsertObject) {
+			ImGui::BeginDisabled(!Active.IsValid());
+			if (ImGui::Button("Insert Object")) {
+				ImGui::OpenPopup("insert-object");
 			}
-			ImGui::EndPopup();
+			ImGui::EndDisabled();
+
+			if (ImGui::BeginPopup("insert-object")) {
+				if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-toolbar"); chosen.IsValid()) {
+					InsertInstance(
+						Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
+					);
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndPopup();
+			}
 		}
 
-		Divider();
+		if (all) {
+			Divider();
+		}
 
 		// --- the manipulators ------------------------------------------------
 		//
@@ -249,199 +255,214 @@ namespace studio {
 		// to.** Clicking the held mode puts the handles away without reaching
 		// across the strip, and somebody who wants no handles and has not
 		// learned that has an obvious thing to press.
-		if (RunButton("Select", CurrentTool == ToolMode::Select, engine::ui::AccentColour())) {
-			CurrentTool = ToolMode::Select;
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("click to select - no handles");
-		}
-		ImGui::SameLine();
-
-		const auto tool = [this](ToolMode mode, const char *label, const char *tip) {
-			if (RunButton(label, CurrentTool == mode, engine::ui::AccentColour())) {
-				CurrentTool = CurrentTool == mode ? ToolMode::Select : mode;
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::TransformModes) {
+			if (RunButton("Select", CurrentTool == ToolMode::Select, engine::ui::AccentColour())) {
+				CurrentTool = ToolMode::Select;
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", tip);
+				ImGui::SetTooltip("click to select - no handles");
 			}
 			ImGui::SameLine();
-		};
 
-		tool(ToolMode::Move, "Move", "drag an axis to move the selection along it");
-		tool(ToolMode::Rotate, "Rotate", "drag a ring to turn the selection about its axis");
-		tool(ToolMode::Scale, "Scale", "drag an axis to grow the selection along it");
+			const auto tool = [this](ToolMode mode, const char *label, const char *tip) {
+				if (RunButton(label, CurrentTool == mode, engine::ui::AccentColour())) {
+					CurrentTool = CurrentTool == mode ? ToolMode::Select : mode;
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", tip);
+				}
+				ImGui::SameLine();
+			};
 
-		Divider();
+			tool(ToolMode::Move, "Move", "drag an axis to move the selection along it");
+			tool(ToolMode::Rotate, "Rotate", "drag a ring to turn the selection about its axis");
+			tool(ToolMode::Scale, "Scale", "drag an axis to grow the selection along it");
+		}
+
+		if (all) {
+			Divider();
+		}
 
 		// --- the steps -------------------------------------------------------
 
-		ImGui::Checkbox("Snap", &SnapEnabled);
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Off by default. Snapping is a constraint you turn on for a job,\n"
-				"and an editor that quietly rounded every drag could not place\n"
-				"anything where it was asked to."
-			);
-		}
-
-		// **Disabled rather than hidden when snapping is off.** A field that
-		// vanishes takes its value with it as far as a reader is concerned, and
-		// the number is exactly what somebody wants to check before switching
-		// the checkbox back on.
-		ImGui::SameLine();
-		ImGui::BeginDisabled(!SnapEnabled);
-		ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
-		ImGui::DragFloat(
-			"##snap-distance", &SnapDistance, 0.1f, 0.05f, 100.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp
-		);
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
-		ImGui::DragFloat(
-			"##snap-degrees", &SnapDegrees, 1.0f, 1.0f, 90.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp
-		);
-		ImGui::EndDisabled();
-
-		Divider();
-
-		// --- which faces a resize moves --------------------------------------
-		//
-		// **Beside the steps rather than in Preferences**, because it is the
-		// same kind of decision: how far a drag goes and which end of the part
-		// it goes from are one thought, and separating them puts half of it two
-		// clicks away.
-		//
-		// Not disabled when the scale tool is not selected. A person sets this
-		// before reaching for the tool as often as after, and a control that
-		// greys itself out until you are already doing the thing it configures
-		// is a control you find by accident.
-		ImGui::TextDisabled("Faces");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
-		if (ImGui::BeginCombo("##scale-sides", Describe(ScaleSides))) {
-			for (size_t index = 0; index < SCALE_SIDE_COUNT; index++) {
-				const auto side = static_cast<ScaleSide>(index);
-				if (ImGui::Selectable(Describe(side), side == ScaleSides)) {
-					ScaleSides = side;
-				}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::SnapControls) {
+			ImGui::Checkbox("Snap", &SnapEnabled);
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Off by default. Snapping is a constraint you turn on for a job,\n"
+					"and an editor that quietly rounded every drag could not place\n"
+					"anything where it was asked to."
+				);
 			}
-			ImGui::EndCombo();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Which faces a scale drag moves.\\n\\n"
-				"Side       the face you grabbed, and the opposite one stays put\\n"
-				"Both       both faces move by the step, so the part grows by twice it\\n"
-				"Both Half  both faces move by half the step, so it grows by the step"
+
+			// **Disabled rather than hidden when snapping is off.** A field that
+			// vanishes takes its value with it as far as a reader is concerned, and
+			// the number is exactly what somebody wants to check before switching
+			// the checkbox back on.
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!SnapEnabled);
+			ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
+			ImGui::DragFloat(
+				"##snap-distance", &SnapDistance, 0.1f, 0.05f, 100.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp
 			);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
+			ImGui::DragFloat(
+				"##snap-degrees", &SnapDegrees, 1.0f, 1.0f, 90.0f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp
+			);
+			ImGui::EndDisabled();
+
+			Divider();
+
+			// --- which faces a resize moves --------------------------------------
+			//
+			// **Beside the steps rather than in Preferences**, because it is the
+			// same kind of decision: how far a drag goes and which end of the part
+			// it goes from are one thought, and separating them puts half of it two
+			// clicks away.
+			//
+			// Not disabled when the scale tool is not selected. A person sets this
+			// before reaching for the tool as often as after, and a control that
+			// greys itself out until you are already doing the thing it configures
+			// is a control you find by accident.
+			ImGui::TextDisabled("Faces");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+			if (ImGui::BeginCombo("##scale-sides", Describe(ScaleSides))) {
+				for (size_t index = 0; index < SCALE_SIDE_COUNT; index++) {
+					const auto side = static_cast<ScaleSide>(index);
+					if (ImGui::Selectable(Describe(side), side == ScaleSides)) {
+						ScaleSides = side;
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Which faces a scale drag moves.\\n\\n"
+					"Side       the face you grabbed, and the opposite one stays put\\n"
+					"Both       both faces move by the step, so the part grows by twice it\\n"
+					"Both Half  both faces move by half the step, so it grows by the step"
+				);
+			}
 		}
 
-		Divider();
+		if (all) {
+			Divider();
+		}
 
 		// --- what is selected ------------------------------------------------
 
-		ImGui::BeginDisabled(Selection.empty());
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::SelectionFlags) {
+			ImGui::BeginDisabled(Selection.empty());
 
-		// **A press turns the whole selection on when any of it is off**, which
-		// is what one button means to a person. `SelectionFlag` answers `false`
-		// for a mixed selection for exactly this reason.
-		const bool anchored = SelectionFlag("Anchored");
-		if (ImGui::Button(anchored ? "Unanchor" : "Anchor", ImVec2(engine::ui::Scaled(84.0f), 0.0f))) {
-			SetSelectionFlag("Anchored", !anchored, anchored ? "Unanchor" : "Anchor");
-		}
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-			ImGui::SetTooltip(
-				"Whether physics moves it. An anchored part carries no rigid body\n"
-				"at all, so this moves the row to another archetype."
-			);
-		}
+			// **A press turns the whole selection on when any of it is off**, which
+			// is what one button means to a person. `SelectionFlag` answers `false`
+			// for a mixed selection for exactly this reason.
+			const bool anchored = SelectionFlag("Anchored");
+			if (ImGui::Button(anchored ? "Unanchor" : "Anchor", ImVec2(engine::ui::Scaled(84.0f), 0.0f))) {
+				SetSelectionFlag("Anchored", !anchored, anchored ? "Unanchor" : "Anchor");
+			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip(
+					"Whether physics moves it. An anchored part carries no rigid body\n"
+					"at all, so this moves the row to another archetype."
+				);
+			}
 
-		ImGui::SameLine();
+			ImGui::SameLine();
 
-		const bool locked = SelectionFlag("Locked");
-		if (ImGui::Button(locked ? "Unlock" : "Lock", ImVec2(engine::ui::Scaled(84.0f), 0.0f))) {
-			SetSelectionFlag("Locked", !locked, locked ? "Unlock" : "Lock");
-		}
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-			ImGui::SetTooltip(
-				"Whether a click in the viewport can select it. A locked part\n"
-				"still draws, still collides and is still reachable from the\n"
-				"explorer and from a script."
-			);
-		}
+			const bool locked = SelectionFlag("Locked");
+			if (ImGui::Button(locked ? "Unlock" : "Lock", ImVec2(engine::ui::Scaled(84.0f), 0.0f))) {
+				SetSelectionFlag("Locked", !locked, locked ? "Unlock" : "Lock");
+			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip(
+					"Whether a click in the viewport can select it. A locked part\n"
+					"still draws, still collides and is still reachable from the\n"
+					"explorer and from a script."
+				);
+			}
 
-		ImGui::SameLine();
+			ImGui::SameLine();
 
-		// **Two buttons about a drag, beside the two about the selection**,
-		// because that is what somebody is doing when they reach for either:
-		// Anchor and Lock decide what a drag may touch, and these two decide
-		// what it does and what it shows while it does it.
-		//
-		// Not disabled with an empty selection, unlike the pair above. Both are
-		// modes rather than edits - there is nothing to apply them to and
-		// nothing to fail - and greying a mode until you have chosen a target
-		// is the wrong way round for somebody who sets it before reaching for
-		// the part.
-		ImGui::EndDisabled();
+			// **Two buttons about a drag, beside the two about the selection**,
+			// because that is what somebody is doing when they reach for either:
+			// Anchor and Lock decide what a drag may touch, and these two decide
+			// what it does and what it shows while it does it.
+			//
+			// Not disabled with an empty selection, unlike the pair above. Both are
+			// modes rather than edits - there is nothing to apply them to and
+			// nothing to fail - and greying a mode until you have chosen a target
+			// is the wrong way round for somebody who sets it before reaching for
+			// the part.
+			ImGui::EndDisabled();
 
-		if (RunButton("Align", DragAligns, engine::ui::AccentColour())) {
-			DragAligns = !DragAligns;
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Held: a dragged part turns to sit flat on whatever it lands on.\n"
-				"Off: it keeps the rotation it already had.\n\n"
-				"The old facing is turned onto the new surface rather than\n"
-				"thrown away, so parts dropped on one wall do not all end up\n"
-				"pointing the same way."
-			);
-		}
+			if (RunButton("Align", DragAligns, engine::ui::AccentColour())) {
+				DragAligns = !DragAligns;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Held: a dragged part turns to sit flat on whatever it lands on.\n"
+					"Off: it keeps the rotation it already had.\n\n"
+					"The old facing is turned onto the new surface rather than\n"
+					"thrown away, so parts dropped on one wall do not all end up\n"
+					"pointing the same way."
+				);
+			}
 
-		ImGui::SameLine();
+			ImGui::SameLine();
 
-		if (RunButton("Facing", ShowFacing, engine::ui::AccentColour())) {
-			ShowFacing = !ShowFacing;
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Draws which way the selection is facing: a line out of the\n"
-				"front face to a ball, and a ring round the ball with an arrow\n"
-				"at the point that is up.\n\n"
-				"A box says nothing about its orientation - two parts sitting\n"
-				"identically may be turned a quarter apart."
-			);
+			if (RunButton("Facing", ShowFacing, engine::ui::AccentColour())) {
+				ShowFacing = !ShowFacing;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Draws which way the selection is facing: a line out of the\n"
+					"front face to a ball, and a ring round the ball with an arrow\n"
+					"at the point that is up.\n\n"
+					"A box says nothing about its orientation - two parts sitting\n"
+					"identically may be turned a quarter apart."
+				);
+			}
 		}
 	}
 
 	void Editor::DrawModelTools() {
 		const bool nothing = Selection.empty();
+		const bool all = DrawingBuiltinTool == BuiltinStudioTool::None;
 
 		// --- the pivot -------------------------------------------------------
 
-		ImGui::Checkbox("Edit Pivot", &PivotEditing);
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Points the Move and Rotate handles at the pivot instead of the\n"
-				"part. The part does not move - which is the point: a door whose\n"
-				"hinge is wrong is fixed by moving the hinge."
-			);
-		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::PivotControls) {
+			ImGui::Checkbox("Edit Pivot", &PivotEditing);
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Points the Move and Rotate handles at the pivot instead of the\n"
+					"part. The part does not move - which is the point: a door whose\n"
+					"hinge is wrong is fixed by moving the hinge."
+				);
+			}
 
-		ImGui::SameLine();
-		ImGui::BeginDisabled(nothing);
-		if (ImGui::Button("Reset Pivot", ImVec2(engine::ui::Scaled(96.0f), 0.0f))) {
-			ResetSelectionPivot();
-		}
-		ImGui::EndDisabled();
-
-		if (PivotEditing && CurrentTool == ToolMode::Scale) {
-			// **Said rather than left to be discovered.** A pivot has no size,
-			// so the scale handles go on resizing the part while the mode claims
-			// to be editing pivots - which reads as the mode being broken.
 			ImGui::SameLine();
-			ImGui::TextDisabled("Scale still resizes the part.");
+			ImGui::BeginDisabled(nothing);
+			if (ImGui::Button("Reset Pivot", ImVec2(engine::ui::Scaled(96.0f), 0.0f))) {
+				ResetSelectionPivot();
+			}
+			ImGui::EndDisabled();
+
+			if (PivotEditing && CurrentTool == ToolMode::Scale) {
+				// **Said rather than left to be discovered.** A pivot has no size,
+				// so the scale handles go on resizing the part while the mode claims
+				// to be editing pivots - which reads as the mode being broken.
+				ImGui::SameLine();
+				ImGui::TextDisabled("Scale still resizes the part.");
+			}
 		}
 
-		Divider();
+		if (all) {
+			Divider();
+		}
 
 		// --- what is on the selection ----------------------------------------
 		//
@@ -452,124 +473,210 @@ namespace studio {
 		// right now", and the two would disagree the first time one learned
 		// about a running world.
 
-		OperatorButton(Action::Duplicate, "Duplicate");
-		ImGui::SameLine();
-		OperatorButton(Action::Delete, "Delete");
-		ImGui::SameLine();
-		OperatorButton(Action::SelectNone, "Deselect");
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::SelectionActions) {
+			OperatorButton(Action::Duplicate, "Duplicate");
+			ImGui::SameLine();
+			OperatorButton(Action::Delete, "Delete");
+			ImGui::SameLine();
+			OperatorButton(Action::SelectNone, "Deselect");
 
-		Divider();
+			Divider();
 
-		OperatorButton(Action::Undo, "Undo");
-		ImGui::SameLine();
-		OperatorButton(Action::Redo, "Redo");
+			OperatorButton(Action::Undo, "Undo");
+			ImGui::SameLine();
+			OperatorButton(Action::Redo, "Redo");
 
-		Divider();
+			Divider();
 
-		ImGui::BeginDisabled(nothing);
-		ImGui::Text("%zu selected", Selection.size());
-		ImGui::EndDisabled();
+			ImGui::BeginDisabled(nothing);
+			ImGui::Text("%zu selected", Selection.size());
+			ImGui::EndDisabled();
+		}
 	}
 
 	void Editor::DrawScriptTools() {
+		const bool all = DrawingBuiltinTool == BuiltinStudioTool::None;
 		// **The three programs, inserted where the explorer would put them.**
 		// Which class a file becomes is the whole of Rojo's naming convention
 		// one door along - `Script` runs on a server, `LocalScript` on a client
 		// and `ModuleScript` runs when something requires it - so offering the
 		// three by name is offering the decision an author actually makes.
-		if (Universe == nullptr || !Active.IsValid()) {
+		if ((all || DrawingBuiltinTool == BuiltinStudioTool::ScriptCreation) &&
+			(Universe == nullptr || !Active.IsValid())) {
 			ImGui::TextDisabled("no scene");
-			return;
 		}
 
-		static const struct {
-			const char *Class;
-			const char *Tip;
-		} PROGRAMS[] = {
-			{"Script", "Runs on the server."},
-			{"LocalScript", "Runs on the client."},
-			{"ModuleScript", "Runs when something requires it."},
-		};
+		if ((all || DrawingBuiltinTool == BuiltinStudioTool::ScriptCreation) && Universe != nullptr &&
+			Active.IsValid()) {
+			static const struct {
+				const char *Class;
+				const char *Tip;
+			} PROGRAMS[] = {
+				{"Script", "Runs on the server."},
+				{"LocalScript", "Runs on the client."},
+				{"ModuleScript", "Runs when something requires it."},
+			};
 
-		for (const auto &program : PROGRAMS) {
-			const engine::ecs::ClassId klass = engine::ecs::Classes::Find(Name(program.Class));
-			const float buttonWidth =
-				ImGui::CalcTextSize(program.Class).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+			for (const auto &program : PROGRAMS) {
+				const engine::ecs::ClassId klass = engine::ecs::Classes::Find(Name(program.Class));
+				const float buttonWidth =
+					ImGui::CalcTextSize(program.Class).x + ImGui::GetStyle().FramePadding.x * 2.0f;
 
-			ImGui::BeginDisabled(!klass.IsValid());
-			if (ImGui::Button(program.Class, ImVec2(buttonWidth, 0.0f))) {
-				// Queued for the same reason the explorer's own menu queues it:
-				// `InsertInstance` enters the world, and entering twice is what
-				// the affinity check exists to catch.
-				PendingInsert.World = Active;
-				PendingInsert.Class = klass;
-				PendingInsert.Parent = Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front();
+				ImGui::BeginDisabled(!klass.IsValid());
+				if (ImGui::Button(program.Class, ImVec2(buttonWidth, 0.0f))) {
+					// Queued for the same reason the explorer's own menu queues it:
+					// `InsertInstance` enters the world, and entering twice is what
+					// the affinity check exists to catch.
+					PendingInsert.World = Active;
+					PendingInsert.Class = klass;
+					PendingInsert.Parent = Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front();
+				}
+				ImGui::EndDisabled();
+
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+					ImGui::SetTooltip("%s", program.Tip);
+				}
+				ImGui::SameLine();
 			}
-			ImGui::EndDisabled();
 
-			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-				ImGui::SetTooltip("%s", program.Tip);
-			}
-			ImGui::SameLine();
+			Divider();
+			ImGui::TextDisabled(Selection.empty() ? "Goes under the scene." : "Goes under what is selected.");
 		}
 
-		Divider();
-
-		ImGui::TextDisabled(Selection.empty() ? "Goes under the scene." : "Goes under what is selected.");
-
-		Divider();
+		if (all) {
+			Divider();
+		}
 
 		// **The script panels, here rather than under View.** Somebody on this
 		// tab is writing a program, and the editor and the debugger are the two
 		// windows that job needs open.
-		ImGui::Checkbox("Script Editor", &ShowScripts);
-		ImGui::SameLine();
-		ImGui::Checkbox("Debugger", &ShowDebugger);
-		ImGui::SameLine();
-		ImGui::Checkbox("Command Bar", &ShowCommandBar);
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::ScriptPanels) {
+			ImGui::Checkbox("Script Editor", &ShowScripts);
+			ImGui::SameLine();
+			ImGui::Checkbox("Debugger", &ShowDebugger);
+			ImGui::SameLine();
+			ImGui::Checkbox("Command Bar", &ShowCommandBar);
+		}
 	}
 
 	void Editor::DrawViewTools() {
+		const bool all = DrawingBuiltinTool == BuiltinStudioTool::None;
 		// **The panels somebody flips while working**, which is a subset of the
 		// View menu rather than a copy of it: a menu is where you go to find
 		// something once, and this is where you go to toggle the same three
 		// things all afternoon.
-		ImGui::Checkbox("Grid", &ShowGrid);
-		ImGui::SameLine();
-		ImGui::Checkbox("3D Cursor", &ShowCursor);
-		ImGui::SameLine();
-		ImGui::Checkbox("Orbit", &OrbitCamera);
-		ImGui::SameLine();
-		ImGui::Checkbox("Lock Direction", &DirectionLocked);
-		ImGui::SameLine();
-		ImGui::Checkbox("Particles", &ShowParticleEmitters);
-		ImGui::SameLine();
-		ImGui::Checkbox("Explorer", &ShowExplorer);
-		ImGui::SameLine();
-		ImGui::Checkbox("Properties", &ShowProperties);
-		ImGui::SameLine();
-		ImGui::Checkbox("Output", &ShowOutput);
-		ImGui::SameLine();
-		ImGui::Checkbox("Assets", &ShowAssets);
-		ImGui::SameLine();
-		ImGui::Checkbox("Statistics", &ShowStatistics);
-		ImGui::SameLine();
-		ImGui::Checkbox("Frame Graph", &ShowFrameGraph);
-		ImGui::SameLine();
-		ImGui::Checkbox("Heap", &ShowHeap);
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::ViewportOptions) {
+			ImGui::Checkbox("Grid", &ShowGrid);
+			ImGui::SameLine();
+			ImGui::Checkbox("3D Cursor", &ShowCursor);
+			ImGui::SameLine();
+			ImGui::Checkbox("Orbit", &OrbitCamera);
+			ImGui::SameLine();
+			ImGui::Checkbox("Lock Direction", &DirectionLocked);
+			ImGui::SameLine();
+			ImGui::Checkbox("Particles", &ShowParticleEmitters);
+		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::PanelOptions) {
+			if (all) {
+				ImGui::SameLine();
+			}
+			ImGui::Checkbox("Explorer", &ShowExplorer);
+			ImGui::SameLine();
+			ImGui::Checkbox("Properties", &ShowProperties);
+			ImGui::SameLine();
+			ImGui::Checkbox("Output", &ShowOutput);
+			ImGui::SameLine();
+			ImGui::Checkbox("Assets", &ShowAssets);
+			ImGui::SameLine();
+			ImGui::Checkbox("Statistics", &ShowStatistics);
+			ImGui::SameLine();
+			ImGui::Checkbox("Frame Graph", &ShowFrameGraph);
+			ImGui::SameLine();
+			ImGui::Checkbox("Heap", &ShowHeap);
+		}
 
-		Divider();
+		if (all) {
+			Divider();
+		}
 
 		// **Camera speed is a control, so it lives on the ribbon rather than in
 		// the status bar.** The status bar reported it and could not change it,
 		// which is the wrong half of the pair to have. It still reads it out;
 		// this sets it.
-		ImGui::TextDisabled("Camera");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(engine::ui::Scaled(140.0f));
-		ImGui::SliderFloat("##camera-speed", &CameraSpeed, 1.0f, 200.0f, "%.0f u/s");
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("how fast the viewport camera flies");
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::CameraSpeed) {
+			ImGui::TextDisabled("Camera");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(140.0f));
+			ImGui::SliderFloat("##camera-speed", &CameraSpeed, 1.0f, 200.0f, "%.0f u/s");
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("how fast the viewport camera flies");
+			}
 		}
+	}
+
+	void Editor::DrawInsertObjectTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::InsertObject;
+		DrawHomeTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawTransformModesTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::TransformModes;
+		DrawHomeTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawSnapControlsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::SnapControls;
+		DrawHomeTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawSelectionFlagsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::SelectionFlags;
+		DrawHomeTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawPivotControlsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::PivotControls;
+		DrawModelTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawSelectionActionsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::SelectionActions;
+		DrawModelTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawScriptCreationTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::ScriptCreation;
+		DrawScriptTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawScriptPanelsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::ScriptPanels;
+		DrawScriptTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawViewportOptionsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::ViewportOptions;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawPanelOptionsTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::PanelOptions;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawCameraSpeedTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::CameraSpeed;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
 	}
 }

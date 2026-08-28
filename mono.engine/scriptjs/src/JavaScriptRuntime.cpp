@@ -289,6 +289,37 @@ namespace engine::script {
 		return budget != nullptr ? budget->Taken : 0;
 	}
 
+	void JavaScriptRuntime::SetHost(HostSurface *host) {
+		if (host != nullptr && !Can(ScriptCapabilities::PluginHost)) {
+			Error = "script runtime lacks the 'plugin-host' capability";
+			return;
+		}
+
+		JsOf(Context).Host = host;
+		OpenJsHost(Context);
+	}
+
+	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
+		Error.clear();
+		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr) {
+			budget->Base = budget->Taken;
+		}
+
+		if (!CallJsHostCallback(Context, callback, arguments, Error)) {
+			return false;
+		}
+		return DrainJobs();
+	}
+
+	void JavaScriptRuntime::Release(HostCallback callback) {
+		ReleaseJsHostCallback(Context, callback);
+	}
+
 	bool JavaScriptRuntime::Run(std::string_view source, std::string_view name) {
 		Runtime::StackGuard guard(*this);
 		if (!guard) {

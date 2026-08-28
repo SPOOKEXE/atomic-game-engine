@@ -2419,8 +2419,20 @@ namespace studio {
 		// and the checkboxes that reopen a widget somebody closed.
 		void DrawPluginTools();
 
+		// Draws the complete plugin-owned ribbon, including Default Studio.
+		void DrawPluginToolbar();
+
+		// Editors for toolbar composition and plugin dock-widget defaults.
+		//@{
+		void DrawToolbarEditor();
+		void DrawDockWidgetEditor();
+		//@}
+
 		// Draws every open plugin panel, each in its own window.
 		void DrawPluginWidgets();
+
+		// Draws one native control group contributed by Default Studio.
+		void DrawBuiltinStudioTool(BuiltinStudioTool tool);
 
 		// Calls one of a plugin's handlers, counting a raise as a fault.
 		//
@@ -4293,6 +4305,17 @@ namespace studio {
 		void DrawModelTools();
 		void DrawScriptTools();
 		void DrawViewTools();
+		void DrawInsertObjectTool();
+		void DrawTransformModesTool();
+		void DrawSnapControlsTool();
+		void DrawSelectionFlagsTool();
+		void DrawPivotControlsTool();
+		void DrawSelectionActionsTool();
+		void DrawScriptCreationTool();
+		void DrawScriptPanelsTool();
+		void DrawViewportOptionsTool();
+		void DrawPanelOptionsTool();
+		void DrawCameraSpeedTool();
 		//@}
 
 		// A button that runs a registered command, greyed with its reason.
@@ -5456,6 +5479,26 @@ namespace studio {
 
 		// The plugins panel. See `DrawPlugins`.
 		bool ShowPlugins = false;
+
+		// Editors over the two plugin-owned interface registries.
+		//@{
+		bool ShowToolbarEditor = false;
+		bool ShowDockWidgetEditor = false;
+		//@}
+
+		// Sparse toolbar overrides and the draft for a user-created tab.
+		//@{
+		ToolbarPreferences ToolbarPrefs;
+		bool ToolbarPreferencesLoaded = false;
+		char ToolbarTabDraft[64] = {};
+		BuiltinStudioTool DrawingBuiltinTool = BuiltinStudioTool::None;
+		//@}
+
+		// Enabled overrides by stable plugin id. Missing means the manifest's
+		// default. Kept outside the plugin folder so updates do not overwrite a
+		// person's choice.
+		std::map<std::string, bool, std::less<>> PluginEnabled;
+		bool PluginStateLoaded = false;
 
 		// The Demo Nodes panel, and everything it holds.
 		//

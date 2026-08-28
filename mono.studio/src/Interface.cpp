@@ -59,9 +59,9 @@ namespace studio {
 		// a corner - which is exactly the failure it exists to fix.
 		// **v12 because v11 was briefly built with the old side-by-side split.**
 		// Reusing that id leaves half the scene empty for anybody who launched it.
-		// **v15 because Components is a new panel that the saved layout has
-		// never heard of.**
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v15";
+		// **v16 because Toolbar Editor and Dock Widgets are new panels that the
+		// saved layout has never heard of.**
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v16";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -84,17 +84,19 @@ namespace studio {
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
 		constexpr const char *HEAP = "Heap";
 		constexpr const char *ROJO_SYNC = "Sync Rojo";
+		constexpr const char *TOOLBAR_EDITOR = "Toolbar Editor";
+		constexpr const char *DOCK_WIDGET_EDITOR = "Dock Widgets";
 
 		// The rest, which have no constant of their own because only this list
 		// and their own `Begin` ever name them. Spelled here rather than
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,		  VIEWPORT2, EXPLORER,		WORLDS,			 INSTANCES, PROPERTIES,
-			COMPONENTS,		  SCRIPTS,	 OUTPUT,		"Command Bar",	 SETTINGS,	STATISTICS,
-			FRAMEGRAPH,		  HEAP,		 ROJO_SYNC,		"History",		 "Assets",	"Render Pipeline",
-			"World Lighting", "Network", "Team Create", "Control (MCP)", "Plugins", "Bus",
-			"Script Profile", "Changes", "Debugger",
+			VIEWPORT,			VIEWPORT2, EXPLORER,		 WORLDS,		  INSTANCES,  PROPERTIES,
+			COMPONENTS,			SCRIPTS,   OUTPUT,			 "Command Bar",	  SETTINGS,	  STATISTICS,
+			FRAMEGRAPH,			HEAP,	   ROJO_SYNC,		 "History",		  "Assets",	  "Render Pipeline",
+			"World Lighting",	"Network", "Team Create",	 "Control (MCP)", "Plugins",  TOOLBAR_EDITOR,
+			DOCK_WIDGET_EDITOR, "Bus",	   "Script Profile", "Changes",		  "Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -176,6 +178,8 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(HEAP, bottom);
 			ImGui::DockBuilderDockWindow(ROJO_SYNC, rightLower);
 			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
+			ImGui::DockBuilderDockWindow(TOOLBAR_EDITOR, bottom);
+			ImGui::DockBuilderDockWindow(DOCK_WIDGET_EDITOR, rightLower);
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
@@ -392,6 +396,8 @@ namespace studio {
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
 			Skinned("Plugins", [&] { DrawPlugins(); });
+			Skinned(TOOLBAR_EDITOR, [&] { DrawToolbarEditor(); });
+			Skinned(DOCK_WIDGET_EDITOR, [&] { DrawDockWidgetEditor(); });
 			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
 			// **Not `Skinned`, and that is the difference between the two
@@ -1281,6 +1287,23 @@ namespace studio {
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
+		ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
+		ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
+		if (ImGui::BeginMenu("Plugin Widgets")) {
+			for (LoadedPlugin &plugin : Plugins) {
+				if (!plugin.Running) {
+					continue;
+				}
+				for (PluginWidget &widget : plugin.Widgets) {
+					ImGui::PushID(PluginIdentity(plugin).c_str());
+					ImGui::PushID(widget.Id.c_str());
+					ImGui::MenuItem(widget.Title.c_str(), nullptr, &widget.Open);
+					ImGui::PopID();
+					ImGui::PopID();
+				}
+			}
+			ImGui::EndMenu();
+		}
 		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
@@ -2118,74 +2141,10 @@ namespace studio {
 		// **The tab bar owns which one is selected.** A member holding it would
 		// be a second answer to a question imgui already answers, and the two
 		// would disagree the first time anything else opened a tab.
-		if (!ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
-			ImGui::End();
-			return;
-		}
-
-		// **Grouped by what somebody is doing, not by what the code is.** "Home"
-		// is the loop somebody is in most of the day - pick a tool, set a step,
-		// anchor the thing. "Model" is the operations on what is already
-		// selected. "Script" is the programs. "View" is the furniture.
-		//
-		// Each strip is drawn *after* `EndTabBar` rather than inside its tab
-		// item, because a tab item's contents go under the bar at the bar's own
-		// width - and this row is the whole toolbar's width. So the tab item is
-		// a label that answers "was I clicked", and `tab` carries the answer
-		// down to the row below.
-		int tab = -1;
-		const auto item = [&tab](const char *label, int which) {
-			if (ImGui::BeginTabItem(label)) {
-				tab = which;
-				ImGui::EndTabItem();
-			}
-		};
-
-		item("Home", 0);
-		item("Model", 1);
-		item("Script", 2);
-		item("View", 3);
-
-		// **Always there, whether or not anything is installed.** A tab that
-		// appeared once a plugin loaded would be the answer to "where do
-		// plugins go" only for people who already had one - and the row says
-		// which of the two empty states it is.
-		item("Plugins", 4);
-
-		// **Demos, last, because they are the tab nobody needs while working.**
-		// What is on it is a thing to look at rather than a tool to use, and
-		// putting it before Plugins would push a row somebody uses every day one
-		// place further along.
-		item("Demo", 5);
-
-		ImGui::EndTabBar();
-
-		switch (tab) {
-		case 0:
-			DrawHomeTools();
-			break;
-		case 1:
-			DrawModelTools();
-			break;
-		case 2:
-			DrawScriptTools();
-			break;
-		case 3:
-			DrawViewTools();
-			break;
-		case 4:
-			DrawPluginTools();
-			break;
-		case 5:
-			DrawDemoTools();
-			break;
-		default:
-			// No tab is open only on the frame the bar is first submitted, and
-			// a row that briefly drew nothing would be a toolbar that flickers
-			// its height on startup.
-			DrawHomeTools();
-			break;
-		}
+		// Tabs and controls are plugin-owned data. Default Studio contributes the
+		// standard Home, Model, Script, View, Plugins and Demo rows through the
+		// same composition path as installed plugins.
+		DrawPluginToolbar();
 
 		ImGui::End();
 	}
