@@ -36,3 +36,14 @@ mono_add_library(net
 		Vendor::cryptopp
 		Vendor::ngtcp2
 )
+
+# The WebSocket integration suite drives a real TCP peer through Asio. Keep
+# this vendor edge on the test target; the public net target still hides Asio
+# behind its value-only headers.
+if(TARGET test_net)
+	target_link_libraries(test_net PRIVATE Vendor::asio)
+endif()
+
+if(TARGET bench_net)
+	target_link_libraries(bench_net PRIVATE Vendor::asio)
+endif()
