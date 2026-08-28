@@ -137,6 +137,10 @@ namespace studio {
 						// this that can be built honestly.
 						if (ShowFind) {
 							ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+							if (FocusFind) {
+								ImGui::SetKeyboardFocusHere();
+								FocusFind = false;
+							}
 							TextField("##find", FindText, "find");
 
 							ImGui::SameLine();
@@ -565,10 +569,11 @@ namespace studio {
 		}
 
 		const ImVec2 padding = ImGui::GetStyle().FramePadding;
-		ImVec2 position(
+		const ImVec2 caretTop(
 			fieldMin.x + padding.x + (column * glyph) - scroll.x,
-			fieldMin.y + padding.y + ((line + 1.0f) * rowHeight) - scroll.y
+			fieldMin.y + padding.y + (line * rowHeight) - scroll.y
 		);
+		ImVec2 position(caretTop.x, caretTop.y + rowHeight);
 
 		// One footer row under the list: what kind of thing is chosen, and a
 		// keyword's doc line when it has one. The size accounts for it up
@@ -584,10 +589,21 @@ namespace studio {
 		// otherwise open where nobody can read it, which is the state an author
 		// hits on the longest line in the file.
 		const ImGuiViewport *viewport = ImGui::GetMainViewport();
-		position.x = std::min(position.x, viewport->Pos.x + viewport->Size.x - size.x);
-		if (position.y + size.y > viewport->Pos.y + viewport->Size.y) {
-			position.y -= size.y + rowHeight;
-		}
+		const ImVec2 workMin = viewport->WorkPos;
+		const ImVec2 workMax(
+			viewport->WorkPos.x + viewport->WorkSize.x, viewport->WorkPos.y + viewport->WorkSize.y
+		);
+		const float belowY = caretTop.y + rowHeight;
+		const float aboveY = caretTop.y - size.y;
+		const bool fitsBelow = belowY + size.y <= workMax.y;
+		const bool fitsAbove = aboveY >= workMin.y;
+
+		// Prefer below the caret, then above it when the editor is near the
+		// bottom edge. Clamping both axes also handles a narrow or scrolled
+		// viewport where neither side has the full popup height available.
+		position.y = !fitsBelow && fitsAbove ? aboveY : belowY;
+		position.x = std::clamp(position.x, workMin.x, std::max(workMin.x, workMax.x - size.x));
+		position.y = std::clamp(position.y, workMin.y, std::max(workMin.y, workMax.y - size.y));
 
 		ImGui::SetNextWindowPos(position);
 		ImGui::SetNextWindowSize(size);
@@ -598,8 +614,7 @@ namespace studio {
 		// `BeginPopup`.
 		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
 										   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-										   ImGuiWindowFlags_NoFocusOnAppearing |
-										   ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_AlwaysAutoResize;
+										   ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNavInputs;
 
 		// What the author has typed of the word being completed, for the
 		// matched-prefix highlight. The anchor is where the word began.

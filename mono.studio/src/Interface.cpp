@@ -59,12 +59,15 @@ namespace studio {
 		// a corner - which is exactly the failure it exists to fix.
 		// **v12 because v11 was briefly built with the old side-by-side split.**
 		// Reusing that id leaves half the scene empty for anybody who launched it.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v14";
+		// **v15 because Components is a new panel that the saved layout has
+		// never heard of.**
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v15";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
+		constexpr const char *COMPONENTS = "Components";
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *INSTANCES = "Live Instances";
 		constexpr const char *SCRIPTS = "Script Editor";
@@ -87,32 +90,11 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,
-			VIEWPORT2,
-			EXPLORER,
-			WORLDS,
-			INSTANCES,
-			PROPERTIES,
-			SCRIPTS,
-			OUTPUT,
-			"Command Bar",
-			SETTINGS,
-			STATISTICS,
-			FRAMEGRAPH,
-			HEAP,
-			ROJO_SYNC,
-			"History",
-			"Assets",
-			"Render Pipeline",
-			"World Lighting",
-			"Network",
-			"Team Create",
-			"Control (MCP)",
-			"Plugins",
-			"Bus",
-			"Script Profile",
-			"Changes",
-			"Debugger",
+			VIEWPORT,		  VIEWPORT2, EXPLORER,		WORLDS,			 INSTANCES, PROPERTIES,
+			COMPONENTS,		  SCRIPTS,	 OUTPUT,		"Command Bar",	 SETTINGS,	STATISTICS,
+			FRAMEGRAPH,		  HEAP,		 ROJO_SYNC,		"History",		 "Assets",	"Render Pipeline",
+			"World Lighting", "Network", "Team Create", "Control (MCP)", "Plugins", "Bus",
+			"Script Profile", "Changes", "Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -180,6 +162,7 @@ namespace studio {
 			// question: what this game *has*, and what of it is *running*.
 			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
+			ImGui::DockBuilderDockWindow(COMPONENTS, rightLower);
 			ImGui::DockBuilderDockWindow("World Lighting", rightLower);
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
@@ -352,6 +335,7 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
 			Skinned(PROPERTIES, [&] { DrawProperties(); });
+			Skinned(COMPONENTS, [&] { DrawComponents(); });
 		}
 		{
 			ENGINE_PROFILE_CAT("scripts", engine::core::ProfileCategory::Render);
@@ -1242,6 +1226,7 @@ namespace studio {
 		// server's view had nothing at all. Both are rows here now.
 		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
+		ImGui::MenuItem("Components", nullptr, &ShowComponents);
 		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
 		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
@@ -1678,6 +1663,11 @@ namespace studio {
 	}
 
 	void Editor::DrawShortcuts() {
+		if (Keybinds::Fired(Action::SearchAllReplaceAll)) {
+			ShowFind = true;
+			FocusFind = true;
+		}
+
 		// **At the end of the frame, and that is the whole reason this is its own
 		// function.** `io.WantTextInput` is cleared by `NewFrame` and set by
 		// whatever field turns out to be active *during* the frame - so reading

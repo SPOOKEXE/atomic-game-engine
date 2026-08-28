@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
@@ -22,10 +23,17 @@ namespace studio {
 	using engine::core::Name;
 	using engine::ecs::Classes;
 	using engine::ecs::ClassId;
+	using engine::ecs::ComponentId;
+	using engine::ecs::ComponentKind;
+	using engine::ecs::Components;
+	using engine::ecs::FieldDescriptor;
 	using engine::ecs::NULL_ENTITY;
 	using engine::ecs::PropertyDescriptor;
 	using engine::ecs::PropertyType;
+	using engine::ecs::Schema;
+	using engine::ecs::Schemas;
 	using engine::ecs::Store;
+	using engine::ecs::TypeDescriptor;
 	using engine::game::FormatValue;
 	using engine::game::ParseValue;
 	using engine::game::PropertyValue;
@@ -1088,5 +1096,73 @@ namespace studio {
 		if (authoritative) {
 			MarkModified();
 		}
+	}
+
+	void Editor::DrawComponents() {
+		if (!ShowComponents) {
+			return;
+		}
+
+		if (!ImGui::Begin("Components", &ShowComponents)) {
+			ImGui::End();
+			return;
+		}
+
+		if (Selection.empty() || !SelectionWorld.IsValid()) {
+			ImGui::TextDisabled("nothing selected");
+			ImGui::End();
+			return;
+		}
+
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##component-filter", ComponentFilter, "filter components");
+		ImGui::Separator();
+
+		Universe->Enter(SelectionWorld, [&](Store &store) {
+			const Entity instance = Selection.front();
+			if (!store.Alive(instance)) {
+				ImGui::TextDisabled("the selection is gone");
+				return;
+			}
+
+			for (const ComponentId component : store.ComponentsOf(instance)) {
+				const TypeDescriptor &descriptor = Components::Describe(component);
+				int score = 0;
+				if (!ComponentFilter.empty() && !FuzzyMatch(ComponentFilter, Label(descriptor.Name), score)) {
+					continue;
+				}
+
+				ImGui::PushID(component.Index);
+				if (ImGui::CollapsingHeader(Label(descriptor.Name), ImGuiTreeNodeFlags_DefaultOpen)) {
+					ImGui::TextDisabled(
+						"%s, %u bytes",
+						descriptor.Kind == ComponentKind::Tag ? "tag" : "data",
+						descriptor.Size
+					);
+
+					if (const Schema *schema = Schemas::Of(component); schema != nullptr) {
+						for (const FieldDescriptor &field : schema->Fields()) {
+							ImGui::BulletText("%s", field.Spelling.data());
+						}
+					}
+
+					for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
+						if (property.Reads == nullptr || !property.Reads->Contains(component)) {
+							continue;
+						}
+
+						PropertyValue value;
+						ImGui::Text("%s", Label(property.Name));
+						if (ReadProperty(store, instance, property, value)) {
+							ImGui::SameLine();
+							ImGui::TextDisabled("%s", FormatValue(value).c_str());
+						}
+					}
+				}
+				ImGui::PopID();
+			}
+		});
+
+		ImGui::End();
 	}
 }

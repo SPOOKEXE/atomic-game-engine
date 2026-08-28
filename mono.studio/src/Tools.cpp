@@ -493,9 +493,11 @@ namespace studio {
 
 		for (const auto &program : PROGRAMS) {
 			const engine::ecs::ClassId klass = engine::ecs::Classes::Find(Name(program.Class));
+			const float buttonWidth =
+				ImGui::CalcTextSize(program.Class).x + ImGui::GetStyle().FramePadding.x * 2.0f;
 
 			ImGui::BeginDisabled(!klass.IsValid());
-			if (ImGui::Button(program.Class, ImVec2(engine::ui::Scaled(110.0f), 0.0f))) {
+			if (ImGui::Button(program.Class, ImVec2(buttonWidth, 0.0f))) {
 				// Queued for the same reason the explorer's own menu queues it:
 				// `InsertInstance` enters the world, and entering twice is what
 				// the affinity check exists to catch.

@@ -51,7 +51,7 @@ namespace {
 	}
 }
 
-TEST_CASE("every action ships unbound", "[studio][keybinds]") {
+TEST_CASE("only the search shortcut has a built-in binding", "[studio][keybinds]") {
 	const Fixture fixture;
 
 	// **The decision this suite exists to hold still.** The editor's commands
@@ -60,7 +60,11 @@ TEST_CASE("every action ships unbound", "[studio][keybinds]") {
 	// a default without deciding to will fail here.
 	for (const Keybind &binding : Keybinds::All()) {
 		INFO(binding.Id);
-		CHECK_FALSE(binding.Keys.IsBound());
+		if (binding.Bound == Action::SearchAllReplaceAll) {
+			CHECK(binding.Keys == Chord{ImGuiKey_F, true, true, false});
+		} else {
+			CHECK_FALSE(binding.Keys.IsBound());
+		}
 	}
 }
 

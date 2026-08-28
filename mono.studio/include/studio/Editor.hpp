@@ -887,6 +887,7 @@ namespace studio {
 		// `FocusedViewport`.
 		void ResolveFocusedViewport();
 		void DrawProperties();
+		void DrawComponents();
 		void DrawUniverseProperties();
 
 		// The settings of one world, when its row in the explorer is selected.
@@ -4559,6 +4560,8 @@ namespace studio {
 		bool ShowFind = false;
 		std::string FindText;
 		std::string ReplaceText;
+		bool FocusFind = false;
+		std::string ComponentFilter;
 		//@}
 
 		// What the output panel is showing, and what it is searching for.
@@ -5051,6 +5054,7 @@ namespace studio {
 		bool ShowExplorer = true;
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
+		bool ShowComponents = true;
 		bool ShowScripts = true;
 		bool ShowOutput = true;
 		//@}

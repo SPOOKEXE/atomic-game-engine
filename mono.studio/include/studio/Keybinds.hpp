@@ -79,6 +79,9 @@ namespace studio {
 		// it without leaving it.
 		CommandPalette,
 
+		// Opens the script search bar while the script editor owns the keyboard.
+		SearchAllReplaceAll,
+
 		Count,
 	};
 
