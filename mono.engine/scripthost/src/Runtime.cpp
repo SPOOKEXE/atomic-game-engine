@@ -12,6 +12,7 @@
 //
 // @tier L11 · shared
 
+#include <engine/effects/Registration.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/scriptjs/Runtime.hpp>
 #include <engine/scriptluau/Runtime.hpp>
@@ -19,6 +20,12 @@
 namespace engine::script {
 
 	std::unique_ptr<Runtime> MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits) {
+		// Neutral script methods probe effect components even when a world has no
+		// particle classes yet. Register their stable names before either VM can
+		// call those methods, or the first probe would claim the compiler name and
+		// a later effect-class registration would abort.
+		effects::RegisterEffectComponents();
+
 		if (language == Language::JavaScript) {
 			return MakeJavaScriptRuntime(store, limits);
 		}
