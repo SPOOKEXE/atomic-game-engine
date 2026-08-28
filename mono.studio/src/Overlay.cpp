@@ -358,6 +358,7 @@ namespace studio {
 				overHandle = true;
 			}
 			DrawDirectionGizmo(index, panel);
+			DrawCursor(index, panel);
 
 			// **After the gizmo, and it declines while a handle is held.** Both
 			// write placements, and two of them running against one selection
@@ -373,6 +374,18 @@ namespace studio {
 			// rather than being fetched by index inside.
 			if (!overHandle && pick.Viewport < projections.size()) {
 				PickInViewport(pick.Viewport, pick.X, pick.Y, pick.Add, projections[pick.Viewport]);
+			}
+		}
+
+		if (PendingCursor.Wanted) {
+			const PendingCursorAction cursor = PendingCursor;
+			PendingCursor = PendingCursorAction{};
+			if (cursor.Viewport < projections.size() && ShowCursor) {
+				const Ray ray = projections[cursor.Viewport].PanelToRay(glm::vec2(cursor.X, cursor.Y));
+				Vector3 point;
+				if (IntersectRayPlane(Vector3::Zero, Vector3::YAxis, ray, point)) {
+					CursorPosition = point;
+				}
 			}
 		}
 
@@ -737,6 +750,32 @@ namespace studio {
 
 		centre = total * (1.0f / static_cast<float>(counted));
 		return true;
+	}
+
+	void Editor::DrawCursor(size_t viewport, const PanelProjection &panel) {
+		if (!ShowCursor || !panel.IsValid()) {
+			return;
+		}
+
+		OverlaySlot &slot = Overlays[viewport];
+		if (slot.List == nullptr) {
+			return;
+		}
+
+		glm::vec2 screen;
+		if (!panel.WorldToPanel(CursorPosition, screen)) {
+			return;
+		}
+
+		const ImVec2 at(screen.x, screen.y);
+		const float size = 10.0f * Settings.Scale;
+		slot.List->AddLine(
+			ImVec2(at.x - size, at.y), ImVec2(at.x + size, at.y), IM_COL32(255, 190, 60, 255), 2.0f
+		);
+		slot.List->AddLine(
+			ImVec2(at.x, at.y - size), ImVec2(at.x, at.y + size), IM_COL32(255, 190, 60, 255), 2.0f
+		);
+		slot.List->AddCircle(at, size * 0.7f, IM_COL32(255, 190, 60, 255), 16, 1.0f);
 	}
 
 	void Editor::DrawDirectionGizmo(size_t viewport, const PanelProjection &panel) {

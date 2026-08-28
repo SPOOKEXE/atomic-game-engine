@@ -4107,6 +4107,18 @@ namespace studio {
 		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
 
+		// An Alt-click waiting to place the editor's 3D cursor after projection
+		// data is available.
+		struct PendingCursorAction {
+			size_t Viewport = 0;
+			float X = 0.0f;
+			float Y = 0.0f;
+			bool Wanted = false;
+		};
+
+		PendingCursorAction PendingCursor;
+		engine::core::Vector3 CursorPosition;
+
 		// A selection rectangle begun on empty viewport space. Starting on a
 		// part remains Select's direct surface move.
 		struct BoxSelectionAction {
@@ -4431,6 +4443,7 @@ namespace studio {
 		//         would otherwise pick is swallowed.
 		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
 		void DrawDirectionGizmo(size_t viewport, const PanelProjection &panel);
+		void DrawCursor(size_t viewport, const PanelProjection &panel);
 
 		// Outlines what every nearby part actually collides as.
 		//
@@ -4589,6 +4602,7 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+		bool ShowCursor = true;
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate
 		// from each emitter's Enabled property so hiding effects is an editor view

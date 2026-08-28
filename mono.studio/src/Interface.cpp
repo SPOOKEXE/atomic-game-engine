@@ -1094,11 +1094,18 @@ namespace studio {
 		if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
 			!ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left)) {
 			const ImVec2 at = ImGui::GetIO().MousePos;
-			PendingPick.Viewport = index;
-			PendingPick.X = at.x;
-			PendingPick.Y = at.y;
-			PendingPick.Add = ImGui::GetIO().KeyCtrl;
-			PendingPick.Wanted = true;
+			if (ImGui::GetIO().KeyAlt) {
+				PendingCursor.Viewport = index;
+				PendingCursor.X = at.x;
+				PendingCursor.Y = at.y;
+				PendingCursor.Wanted = true;
+			} else {
+				PendingPick.Viewport = index;
+				PendingPick.X = at.x;
+				PendingPick.Y = at.y;
+				PendingPick.Add = ImGui::GetIO().KeyCtrl;
+				PendingPick.Wanted = true;
+			}
 		}
 
 		if (second) {
