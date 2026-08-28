@@ -1315,6 +1315,10 @@ namespace studio {
 		// them - but it is a thing somebody turns off and has to be able to
 		// turn back on, which is the rule this menu exists for.
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
+		ImGui::MenuItem("Direction Gizmo", nullptr, &ShowDirectionGizmo);
+		ImGui::MenuItem("3D Cursor", nullptr, &ShowCursor);
+		ImGui::MenuItem("Orbit Around Cursor", nullptr, &OrbitCamera);
+		ImGui::MenuItem("Lock Camera Direction", nullptr, &DirectionLocked);
 		ImGui::MenuItem("Particle Emitters", nullptr, &ShowParticleEmitters);
 
 		// **Beside the grid, because it is the same kind of thing**: furniture

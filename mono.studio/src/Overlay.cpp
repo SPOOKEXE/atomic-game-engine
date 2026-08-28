@@ -780,6 +780,9 @@ namespace studio {
 
 	void Editor::DrawDirectionGizmo(size_t viewport, const PanelProjection &panel) {
 		(void)panel;
+		if (!ShowDirectionGizmo) {
+			return;
+		}
 		OverlaySlot &slot = Overlays[viewport];
 		ImDrawList *list = slot.List;
 		if (list == nullptr) {

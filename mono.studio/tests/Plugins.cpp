@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -34,6 +35,7 @@ using engine::core::Name;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 using studio::BeatPlugins;
+using studio::BuiltinStudioTool;
 using studio::ClampPluginToolWidth;
 using studio::ComposeToolbar;
 using studio::DiscoverPlugins;
@@ -43,6 +45,7 @@ using studio::MakeDefaultStudioPlugin;
 using studio::ParsePluginManifest;
 using studio::PLUGIN_FAULT_LIMIT;
 using studio::PluginButton;
+using studio::PluginControlKind;
 using studio::PluginManifest;
 using studio::PluginToolbar;
 using studio::PluginWidget;
@@ -148,6 +151,27 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		for (const PluginButton &button : toolbar.Buttons) {
 			CHECK(controlIds.insert(toolbar.Id + "/" + button.Id).second);
 		}
+	}
+
+	const auto view =
+		std::find_if(plugin.Toolbars.begin(), plugin.Toolbars.end(), [](const PluginToolbar &toolbar) {
+			return toolbar.Id == "view";
+		});
+	REQUIRE(view != plugin.Toolbars.end());
+	const std::array expected = {
+		std::pair{"viewport", BuiltinStudioTool::ViewportOptions},
+		std::pair{"indicator", BuiltinStudioTool::ViewportIndicator},
+		std::pair{"cursor", BuiltinStudioTool::Cursor3D},
+		std::pair{"orbit", BuiltinStudioTool::OrbitAroundCursor},
+		std::pair{"direction-lock", BuiltinStudioTool::DirectionLock},
+		std::pair{"panels", BuiltinStudioTool::PanelOptions},
+		std::pair{"camera", BuiltinStudioTool::CameraSpeed},
+	};
+	REQUIRE(view->Buttons.size() == expected.size());
+	for (size_t index = 0; index < expected.size(); index++) {
+		CHECK(view->Buttons[index].Id == expected[index].first);
+		CHECK(view->Buttons[index].Kind == PluginControlKind::Builtin);
+		CHECK(view->Buttons[index].Builtin == expected[index].second);
 	}
 }
 

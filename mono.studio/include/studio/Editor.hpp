@@ -4314,6 +4314,10 @@ namespace studio {
 		void DrawScriptCreationTool();
 		void DrawScriptPanelsTool();
 		void DrawViewportOptionsTool();
+		void DrawViewportIndicatorTool();
+		void DrawCursor3DTool();
+		void DrawOrbitAroundCursorTool();
+		void DrawDirectionLockTool();
 		void DrawPanelOptionsTool();
 		void DrawCameraSpeedTool();
 		//@}
@@ -4680,6 +4684,7 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+		bool ShowDirectionGizmo = true;
 		bool ShowCursor = true;
 		bool OrbitCamera = false;
 		bool DirectionLocked = false;

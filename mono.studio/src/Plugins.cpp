@@ -463,6 +463,10 @@ namespace studio {
 			"View",
 			std::initializer_list<Row>{
 				{"viewport", "Viewport Options", BuiltinStudioTool::ViewportOptions},
+				{"indicator", "Direction Gizmo", BuiltinStudioTool::ViewportIndicator},
+				{"cursor", "3D Cursor", BuiltinStudioTool::Cursor3D},
+				{"orbit", "Orbit Around Cursor", BuiltinStudioTool::OrbitAroundCursor},
+				{"direction-lock", "Lock Direction", BuiltinStudioTool::DirectionLock},
 				{"panels", "Panel Options", BuiltinStudioTool::PanelOptions},
 				{"camera", "Camera Speed", BuiltinStudioTool::CameraSpeed},
 			}
@@ -1016,6 +1020,18 @@ namespace studio {
 			break;
 		case BuiltinStudioTool::ViewportOptions:
 			DrawViewportOptionsTool();
+			break;
+		case BuiltinStudioTool::ViewportIndicator:
+			DrawViewportIndicatorTool();
+			break;
+		case BuiltinStudioTool::Cursor3D:
+			DrawCursor3DTool();
+			break;
+		case BuiltinStudioTool::OrbitAroundCursor:
+			DrawOrbitAroundCursorTool();
+			break;
+		case BuiltinStudioTool::DirectionLock:
+			DrawDirectionLockTool();
 			break;
 		case BuiltinStudioTool::PanelOptions:
 			DrawPanelOptionsTool();

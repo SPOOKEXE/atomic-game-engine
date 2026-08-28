@@ -568,13 +568,51 @@ namespace studio {
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::ViewportOptions) {
 			ImGui::Checkbox("Grid", &ShowGrid);
 			ImGui::SameLine();
-			ImGui::Checkbox("3D Cursor", &ShowCursor);
-			ImGui::SameLine();
-			ImGui::Checkbox("Orbit", &OrbitCamera);
-			ImGui::SameLine();
-			ImGui::Checkbox("Lock Direction", &DirectionLocked);
-			ImGui::SameLine();
 			ImGui::Checkbox("Particles", &ShowParticleEmitters);
+		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::ViewportIndicator) {
+			if (all) {
+				ImGui::SameLine();
+			}
+			if (RunButton("Direction Gizmo", ShowDirectionGizmo, engine::ui::AccentColour())) {
+				ShowDirectionGizmo = !ShowDirectionGizmo;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("show the clickable viewport direction indicator");
+			}
+		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::Cursor3D) {
+			if (all) {
+				ImGui::SameLine();
+			}
+			if (RunButton("3D Cursor", ShowCursor, engine::ui::AccentColour())) {
+				ShowCursor = !ShowCursor;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("show the viewport orbit point; Alt+left-click places it");
+			}
+		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::OrbitAroundCursor) {
+			if (all) {
+				ImGui::SameLine();
+			}
+			if (RunButton("Orbit Cursor", OrbitCamera, engine::ui::AccentColour())) {
+				OrbitCamera = !OrbitCamera;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("middle-drag to orbit the camera around the 3D cursor");
+			}
+		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::DirectionLock) {
+			if (all) {
+				ImGui::SameLine();
+			}
+			if (RunButton("Lock Direction", DirectionLocked, engine::ui::AccentColour())) {
+				DirectionLocked = !DirectionLocked;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("keep the camera on its current direction");
+			}
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::PanelOptions) {
 			if (all) {
@@ -664,6 +702,30 @@ namespace studio {
 
 	void Editor::DrawViewportOptionsTool() {
 		DrawingBuiltinTool = BuiltinStudioTool::ViewportOptions;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawViewportIndicatorTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::ViewportIndicator;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawCursor3DTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::Cursor3D;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawOrbitAroundCursorTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::OrbitAroundCursor;
+		DrawViewTools();
+		DrawingBuiltinTool = BuiltinStudioTool::None;
+	}
+
+	void Editor::DrawDirectionLockTool() {
+		DrawingBuiltinTool = BuiltinStudioTool::DirectionLock;
 		DrawViewTools();
 		DrawingBuiltinTool = BuiltinStudioTool::None;
 	}

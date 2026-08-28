@@ -937,6 +937,8 @@ namespace studio {
 			bool *toggle = nullptr;
 			if (option == "Grid") {
 				toggle = &Owner.ShowGrid;
+			} else if (option == "Direction Gizmo") {
+				toggle = &Owner.ShowDirectionGizmo;
 			} else if (option == "3D Cursor") {
 				toggle = &Owner.ShowCursor;
 			} else if (option == "Orbit") {

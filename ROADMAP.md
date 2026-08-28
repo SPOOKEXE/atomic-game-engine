@@ -82,7 +82,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] bridge engine behavior through the shared plugin host surface in Luau and JavaScript with matching value, service and callback behavior.
 - [x] move the standard Home, Model, Script, View, Plugins and Demo ribbon tools into the built-in Default Studio plugin while keeping transport and scene controls host-owned.
 - [x] add plugin functions for buttons, toggles, dropdowns, toolbar visibility and sizing, dock widgets, viewport options and creation, script source editing, and opening script-editor tabs.
-- [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
+- [x] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
+- [_] merge toolbar tools - select, move, rotate, stud amount, rotate amount, etc - to plugin
+- [_] make studio default tool plugin disable work. also make hot-reloading a thing
 
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
