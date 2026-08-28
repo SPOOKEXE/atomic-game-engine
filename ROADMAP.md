@@ -219,3 +219,5 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
+- [_] add model providers (e.g. npcs in a game and can chat with you)
+- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
