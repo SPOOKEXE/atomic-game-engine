@@ -82,20 +82,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] bridge engine behavior through the shared plugin host surface in Luau and JavaScript with matching value, service and callback behavior.
 - [x] move the standard Home, Model, Script, View, Plugins and Demo ribbon tools into the built-in Default Studio plugin while keeping transport and scene controls host-owned.
 - [x] add plugin functions for buttons, toggles, dropdowns, toolbar visibility and sizing, dock widgets, viewport options and creation, script source editing, and opening script-editor tabs.
-
 - [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
+
+- [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
+- [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
+
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
-- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
-- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
-- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
-- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
-- [_] read the documents folder on what else we need to add and ask user for each one.
 - [_] add better memory packing for components by adding a DataQuantization component or something similar. Add quantization support for storing and packing values within components, like (u)float16, (u)float8, (u)int16, (u)int8, (u)int4 and bool. Need a way to decide who packs with what, maybe a `Component Data Packing` dock widget that shows you what values a component stores?
 - [_] expand ShaderCapabilities out
 - [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
-- [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
-- [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
 - [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
@@ -116,6 +112,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] determinism mode — detect nondeterministic simulation and optionally enforce deterministic ordering
 - [_] hot-reloadable components/systems
 - [_] parallel::Jobs pool fix — static Pool *pool = new Pool(); never destroy to avoid exit hang with waiters on condition variables
+
+- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
+- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 
 ### v0.21
 
@@ -214,3 +214,4 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
+- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
