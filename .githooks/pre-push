@@ -29,7 +29,19 @@
 
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+# Git normally starts a non-bare hook at the worktree root, but GUI clients can
+# launch it with a reduced PATH and no usable `git` command. The hook location
+# is already inside the worktree, so derive the root without a command
+# substitution that can leave `cd` with an empty argument.
+hook_path="${BASH_SOURCE[0]}"
+hook_directory="${hook_path%/*}"
+if [ "$hook_directory" = "$hook_path" ]; then
+	hook_directory="."
+fi
+cd -- "$hook_directory/.." || {
+	echo "pre-push: unable to locate the repository from $hook_path." >&2
+	exit 1
+}
 
 # A push that only deletes refs compiles nothing. Everything else, including a
 # tag, is somebody publishing a tree and gets built.
