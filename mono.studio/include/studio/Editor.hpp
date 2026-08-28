@@ -2761,6 +2761,12 @@ namespace studio {
 		// Breakpoints, the paused stack, and stepping.
 		void DrawDebugger();
 
+		// Call stack watch panel - shows the stack for the selected capture.
+		void DrawCallStack();
+
+		// Breakpoints watch panel - shows all breakpoints across all worlds.
+		void DrawBreakpointsWatch();
+
 		// One frame's locals or upvalues, as a two-column table.
 		//
 		// @param values What to show, or null when no frame is chosen.
@@ -5605,6 +5611,11 @@ namespace studio {
 		//
 		// @since v0.18
 		bool ShowHeap = false;
+
+		// Call stack and breakpoints watch panels.
+		// @since v0.20
+		bool ShowCallStack = false;
+		bool ShowBreakpointsWatch = false;
 		//@}
 
 		// Frame times, sampled every frame so the panel has history the moment

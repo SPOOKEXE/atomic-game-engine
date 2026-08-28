@@ -421,6 +421,8 @@ namespace studio {
 			Skinned("Script Profile", [&] { DrawScriptProfile(); });
 			Skinned("Changes", [&] { DrawDiff(); });
 			Skinned("Debugger", [&] { DrawDebugger(); });
+			Skinned("Call Stack", [&] { DrawCallStack(); });
+			Skinned("Breakpoints", [&] { DrawBreakpointsWatch(); });
 		}
 
 		// **After every panel, because any of them may be the one under the
@@ -1256,6 +1258,8 @@ namespace studio {
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
 		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
+		ImGui::MenuItem("Call Stack", nullptr, &ShowCallStack);
+		ImGui::MenuItem("Breakpoints", nullptr, &ShowBreakpointsWatch);
 
 		ImGui::Separator();
 
