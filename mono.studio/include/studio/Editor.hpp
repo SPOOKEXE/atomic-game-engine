@@ -4430,6 +4430,7 @@ namespace studio {
 		// @return `true` when the pointer is over a handle, so the click that
 		//         would otherwise pick is swallowed.
 		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
+		void DrawDirectionGizmo(size_t viewport, const PanelProjection &panel);
 
 		// Outlines what every nearby part actually collides as.
 		//

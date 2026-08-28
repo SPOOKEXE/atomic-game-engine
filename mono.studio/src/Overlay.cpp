@@ -357,6 +357,7 @@ namespace studio {
 			if (DrawGizmo(index, panel) && index == PendingPick.Viewport) {
 				overHandle = true;
 			}
+			DrawDirectionGizmo(index, panel);
 
 			// **After the gizmo, and it declines while a handle is held.** Both
 			// write placements, and two of them running against one selection
@@ -736,6 +737,91 @@ namespace studio {
 
 		centre = total * (1.0f / static_cast<float>(counted));
 		return true;
+	}
+
+	void Editor::DrawDirectionGizmo(size_t viewport, const PanelProjection &panel) {
+		(void)panel;
+		OverlaySlot &slot = Overlays[viewport];
+		ImDrawList *list = slot.List;
+		if (list == nullptr) {
+			return;
+		}
+
+		const float radius = 28.0f * Settings.Scale;
+		const ImVec2 centre(slot.X + slot.Width - radius - 20.0f, slot.Y + radius + 20.0f);
+		const ImVec2 min(centre.x - radius - 18.0f, centre.y - radius - 18.0f);
+		const ImVec2 max(centre.x + radius + 18.0f, centre.y + radius + 18.0f);
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const bool hovered = mouse.x >= min.x && mouse.x <= max.x && mouse.y >= min.y && mouse.y <= max.y;
+
+		ViewportState *view = ExtraAt(viewport);
+		const CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
+		const CFrame rotation = CFrame::Angles(
+			view != nullptr ? view->Pitch : CameraPitch, view != nullptr ? view->Yaw : CameraYaw, 0.0f
+		);
+		const Vector3 axes[3] = {
+			Vector3{1.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 0.0f, 1.0f}
+		};
+		const ImU32 colours[3] = {
+			IM_COL32(220, 80, 85, 255), IM_COL32(115, 215, 105, 255), IM_COL32(85, 130, 235, 255)
+		};
+		const char labels[3] = {'X', 'Y', 'Z'};
+		int nearestAxis = -1;
+		float nearestDistance = radius * radius;
+		int nearestSign = 1;
+
+		for (int axis = 0; axis < 3; axis++) {
+			const float horizontal = axes[axis].Dot(rotation.RightVector());
+			const float vertical = -axes[axis].Dot(rotation.UpVector());
+			const ImVec2 endpoint(centre.x + horizontal * radius, centre.y + vertical * radius);
+			list->AddLine(centre, endpoint, colours[axis], 2.0f * Settings.Scale);
+			list->AddCircleFilled(endpoint, 4.0f * Settings.Scale, colours[axis]);
+			list->AddText(
+				ImVec2(endpoint.x + 5.0f, endpoint.y - 7.0f), colours[axis], &labels[axis], &labels[axis] + 1
+			);
+
+			if (!hovered) {
+				continue;
+			}
+			const ImVec2 delta(mouse.x - endpoint.x, mouse.y - endpoint.y);
+			const float distance = delta.x * delta.x + delta.y * delta.y;
+			if (distance < nearestDistance) {
+				nearestAxis = axis;
+				nearestDistance = distance;
+				nearestSign = 1;
+			}
+
+			const ImVec2 opposite(centre.x - horizontal * radius, centre.y - vertical * radius);
+			const ImVec2 oppositeDelta(mouse.x - opposite.x, mouse.y - opposite.y);
+			const float oppositeDistance =
+				oppositeDelta.x * oppositeDelta.x + oppositeDelta.y * oppositeDelta.y;
+			if (oppositeDistance < nearestDistance) {
+				nearestAxis = axis;
+				nearestDistance = oppositeDistance;
+				nearestSign = -1;
+			}
+		}
+
+		list->AddCircle(centre, radius, IM_COL32(180, 180, 180, 180), 24, 1.0f * Settings.Scale);
+		if (nearestAxis < 0 || !ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			return;
+		}
+
+		// The direction control owns this click, so it must not also become a
+		// world pick when the overlay pass drains the pending surface action.
+		PendingPick.Wanted = false;
+		const Vector3 direction = axes[nearestAxis] * static_cast<float>(nearestSign);
+		const CFrame snapped = CFrame::LookAt(frame.Position, frame.Position + direction);
+		const Vector3 angles = snapped.ToAngles();
+		if (view != nullptr) {
+			view->Frame = snapped;
+			view->Yaw = angles.Y;
+			view->Pitch = angles.X;
+		} else {
+			CameraFrame = snapped;
+			CameraYaw = angles.Y;
+			CameraPitch = angles.X;
+		}
 	}
 
 	bool Editor::DrawGizmo(size_t viewport, const PanelProjection &panel) {
