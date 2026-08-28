@@ -89,9 +89,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 - [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
 - [x] StackGuard to prevent stack errors, infinite recursion, etc.
-- [_] Random.new(seed) with functions
-- [_] fix billboard gui in scene not rendering properly and stuff
-- [_] check if particles load textures properly (the particle demo world is just a white box?)
+- [x] Random.new(seed) with functions
+- [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
+- [x] check if particles load textures properly (fallback works, demo asset external)
 
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
 - [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
