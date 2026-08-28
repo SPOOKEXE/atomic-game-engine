@@ -39,8 +39,6 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.20
 
-- [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
-	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 - [_] add stack watch and breakpoint watch dock widgets
 - [_] auto complete popup doesn't position properly above/below text we're editing.
 - [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
@@ -92,6 +90,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Random.new(seed) with functions
 - [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
 - [x] check if particles load textures properly (fallback works, demo asset external)
+- [x] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
+	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
 - [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
