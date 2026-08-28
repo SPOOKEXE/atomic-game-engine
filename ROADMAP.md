@@ -86,6 +86,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] compose plugin toolbars as cached pinned or tabbed row, column and cell grids, with persisted tab creation, renaming, ordering, hiding and deletion from the tab context menu.
 - [x] make Default Studio disable-able, expose matching Luau and JavaScript toolbar tab, row, column, cell and label functions, and hot-reload changed plugin source trees with debounced targeted restarts and structural rescans.
 
+- [_] convert explorer, properties, inspector, asset manager, etc into luau default plugins like toolbar one.
+
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 
