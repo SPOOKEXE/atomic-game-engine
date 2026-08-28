@@ -41,12 +41,22 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [_] add stack watch and breakpoint watch dock widgets
 - [_] auto complete popup doesn't position properly above/below text we're editing.
+- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
+- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
+- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
+- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
+- [_] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
+- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
+- [_] viewport indictator direction gizmo (select and lock to certain directions)
+- [_] 3d cursor and camera orbit options under gizmo
+- [_] add tests to validate each step of the rendering pipeline graph
+- [_] add websocket support (full async, test 10k connections and improve bottleneck spots).
+
+- [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
 - [_] properly build out team create menu
 - [_] team create build out options properly
-- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
 - [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
-- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
 - [_] consolidate render pipeline to a easy-to-find location for future work.
 - [_] ensure when you read the render pipeline, its obvious what it does and in what order
 - [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
@@ -56,10 +66,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] find remaining bottlenecks in simulation code, check we're properly iterating components. use both dev AND release builds to find bottlenecks we need to improve (`-O0`, `-O1`, `-O2` and `-O3`).
 - [_] cleanup old demos or merge into a few, scripts/ folder and luau/ts scripts
 - [_] list all items that become resident on GPU and those that don't but should. check over their code to ensure we only update when they change, and whether we should split some others apart as they are always hit during rendering (statistics label, flamegraph, etc). Also we should minimize pcie traffic (i.e. instead of sending a full image to gpu, we only send the data and then render on gpu where possible - what about imgui? do we need to send gui image for it)
-- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
-- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
-- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
-- [_] ensure we have the ability to create custom components in scripting
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
@@ -74,15 +80,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
 - [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
 - [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
-- [_] viewport indictator direction gizmo (select and lock to certain directions)
-- [_] 3d cursor and camera orbit options under gizmo
 - [_] expand ShaderCapabilities out
 - [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
-- [_] add tests to validate each step of the rendering pipeline graph
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
 - [_] add beams/trails/decals/textures, etc if they aren't added
 - [_] build out different types of physics colliders components (capsule, square, use-mesh, hull, etc). add properties to meshpart.
-- [_] add websocket support
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 - [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
