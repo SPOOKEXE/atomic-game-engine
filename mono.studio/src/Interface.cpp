@@ -1902,6 +1902,134 @@ namespace studio {
 		FocusedIsViewport = false;
 	}
 
+	void Editor::DrawTransportTools() {
+		const WorldId focused = ViewportWorld(FocusedViewport);
+		const WorldRun *owner = RunOwning(focused);
+		const bool client = IsReplicaWorld(focused);
+		const WorldId scope = client && owner != nullptr ? owner->World : focused;
+		const RunMode mode = ModeOf(scope);
+		const bool running = mode != RunMode::Edit;
+		const bool paused = IsPaused(scope);
+		const size_t players = owner == nullptr ? 0 : owner->Links.size();
+
+		if (DrawingBuiltinTool == BuiltinStudioTool::Play) {
+			ImGui::BeginDisabled(running);
+			if (RunButton("Play", false, engine::ui::AccentColour())) {
+				SetRunMode(scope, RunMode::Play);
+			}
+			ImGui::EndDisabled();
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::PlayHere) {
+			ImGui::BeginDisabled(running);
+			if (ImGui::Button("Play Here")) {
+				PlayFromCamera(scope);
+			}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Play, with the character spawned where this viewport is looking");
+			}
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::Run) {
+			if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
+				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
+			}
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::Pause) {
+			ImGui::BeginDisabled(!running);
+			if (RunButton(paused ? "Resume" : "Pause", paused, engine::ui::WarningColour())) {
+				if (WorldRun *record = RunOf(scope); record != nullptr) {
+					record->Paused = !record->Paused;
+					Say(record->Paused ? "paused - the clock is stopped, the run is not" : "resumed");
+				}
+			}
+			ImGui::EndDisabled();
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::Stop) {
+			ImGui::BeginDisabled(!running);
+			if (ImGui::Button(client ? "Stop Client" : "Stop")) {
+				if (client) {
+					(void)RemovePlayer(focused);
+				} else {
+					SetRunMode(scope, RunMode::Edit);
+				}
+			}
+			if (client && ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"removes this client and its player\nstop the scene from the server's view"
+				);
+			}
+			ImGui::EndDisabled();
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::SpawnPlayer) {
+			ImGui::BeginDisabled(!running);
+			if (ImGui::Button("Spawn Player")) {
+				(void)SpawnPlayer(focused);
+			}
+			ImGui::EndDisabled();
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::RemovePlayer) {
+			ImGui::BeginDisabled(!running || players == 0);
+			if (ImGui::Button("Remove Player")) {
+				(void)RemovePlayer(focused);
+			}
+			ImGui::EndDisabled();
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::PlayerCount) {
+			ImGui::TextDisabled("%zu player%s", players, players == 1 ? "" : "s");
+			return;
+		}
+
+		const size_t reporting = FocusedViewport;
+		const WorldId shown = ViewportWorld(reporting);
+		if (DrawingBuiltinTool == BuiltinStudioTool::ViewportName) {
+			ImGui::TextDisabled("Viewport %zu", reporting + 1);
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::SceneSelector) {
+			ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+			const Name shownName = Universe->NameOf(shown);
+			const auto selectorLabel = [&](WorldId world, const Name &name) {
+				return WorldSelectorLabel(
+					name.IsValid() ? Label(name) : std::string_view{},
+					world.IsValid() && IsActivelyRunning(world)
+				);
+			};
+			const std::string shownLabel =
+				shown.IsValid() ? selectorLabel(shown, shownName) : std::string("(no scene)");
+			if (ImGui::BeginCombo("##scene", shownLabel.c_str())) {
+				for (const WorldId id : Universe->Worlds()) {
+					const Name name = Universe->NameOf(id);
+					const std::string itemLabel = selectorLabel(id, name);
+					if (ImGui::Selectable(itemLabel.c_str(), id == shown)) {
+						RetargetEditingViewport(reporting, id);
+					}
+				}
+				ImGui::EndCombo();
+			}
+			return;
+		}
+		if (DrawingBuiltinTool == BuiltinStudioTool::WorldState) {
+			if (shown.IsValid()) {
+				const engine::world::WorldState state = Universe->StateOf(shown);
+				const bool healthy = state == engine::world::WorldState::Active;
+				ImGui::PushStyleColor(
+					ImGuiCol_Text, healthy ? engine::ui::MutedColour() : engine::ui::WarningColour()
+				);
+				ImGui::TextUnformatted(engine::world::Describe(state));
+				ImGui::PopStyleColor();
+			} else {
+				ImGui::TextDisabled("no scene");
+			}
+		}
+	}
+
 	void Editor::DrawToolbar() {
 		ImGuiViewport *viewport = ImGui::GetMainViewport();
 
@@ -1915,22 +2043,28 @@ namespace studio {
 		// Pinned rather than dockable, because a toolbar you can accidentally
 		// drag into a corner is a toolbar somebody loses.
 		//
-		// **Two rows since v0.13, which is what makes it a ribbon.** The first
-		// is the transport and which scene it is about - facts that are true
-		// whatever somebody is doing, so they never move. The second is the
-		// selected tab's controls, because what is wanted while placing geometry
-		// and what is wanted while writing a script are different sets and
-		// putting both on screen at once means neither is findable. Studio's
-		// arrangement, and this is the reference `ROADMAP.md` points at.
+		// **The height follows the composed plugin grid.** Pinned rows and the
+		// selected tab's rows all reserve space here, so a plugin can add a row
+		// without drawing over the dockspace. Default Studio declares transport as
+		// pinned and the editing tools as tabs, but both use the same layout path.
 		//
-		// **Two item spacings rather than the one between the rows.** The tab
-		// bar draws a border under itself and reserves a little of its own, and
-		// the window is `NoScrollbar` - so a height that is a few pixels short
-		// clips the bottom of the second row silently rather than growing a
-		// scrollbar. One spacing of slack is cheaper than that.
+		// The tab bar reserves part of a frame-height row even though it is not a
+		// control row. Counting that row explicitly keeps `NoScrollbar` from
+		// silently clipping the final plugin row.
+		if (ToolbarLayoutDirty) {
+			ToolbarLayout = ComposeToolbar(Plugins, ToolbarPrefs);
+			ToolbarLayoutDirty = false;
+		}
+		size_t tabRows = 0;
+		for (const ToolbarTabView &tab : ToolbarLayout.Tabs) {
+			tabRows = std::max(tabRows, tab.Rows.size());
+		}
+		const size_t pinnedRows = ToolbarLayout.PinnedRows.empty() ? 0 : ToolbarLayout.PinnedRows.size() - 1;
+		const size_t visualRows = std::max<size_t>(1, 1 + pinnedRows + tabRows);
 		const ImGuiStyle &style = ImGui::GetStyle();
-		const float height =
-			ImGui::GetFrameHeight() * 2.0f + style.ItemSpacing.y * 2.0f + style.WindowPadding.y * 2.0f;
+		const float height = ImGui::GetFrameHeight() * static_cast<float>(visualRows) +
+							 style.ItemSpacing.y * static_cast<float>(visualRows) +
+							 style.WindowPadding.y * 2.0f;
 
 		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
 										   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
@@ -1941,213 +2075,6 @@ namespace studio {
 			return;
 		}
 
-		// **The transport is about one scene: the one in the viewport you are
-		// in.** Every button below reads and writes that world's run record, so
-		// switching viewports genuinely swaps the transport rather than
-		// relabelling it. A universe is a collection of scenes and each of them
-		// runs, pauses and stops on its own - see `Editor::WorldRun`.
-		const WorldId focused = ViewportWorld(FocusedViewport);
-
-		// **A client view belongs to a run and is not one, so the transport asks
-		// the run it is part of.** A replica carries no run record - `ModeOf`
-		// answers `Edit` for it - so every button here read "nothing is running"
-		// while looking at a live client, and Play would have started a *second*
-		// run inside the replica world: a snapshot of somebody else's view, with
-		// its scripts started, ticking beside the server it is a copy of.
-		const WorldRun *owner = RunOwning(focused);
-		const bool client = IsReplicaWorld(focused);
-		const WorldId scope = client && owner != nullptr ? owner->World : focused;
-
-		const RunMode mode = ModeOf(scope);
-		const bool running = mode != RunMode::Edit;
-		const bool paused = IsPaused(scope);
-
-		ImGui::BeginDisabled(running);
-		if (RunButton("Play", false, engine::ui::AccentColour())) {
-			SetRunMode(scope, RunMode::Play);
-		}
-		ImGui::EndDisabled();
-		ImGui::SameLine();
-
-		// **Play, starting where you are looking rather than where the pad is.**
-		// Testing something built a long way from the spawn meant playing, then
-		// walking there, every time - or moving the pad, which is an edit to the
-		// scene for a decision that is not about the scene.
-		//
-		// **A forced pad rather than a teleport after the fact.** A character is
-		// built by `LoadCharacter` from whatever `FindSpawn` answers, and moving
-		// it afterwards is a frame of it standing somewhere else plus a race
-		// with the client that is joining. `SpawnLocation::Forced` is the scene
-		// saying "here", which is exactly what this button means, and it goes
-		// through the same door every other spawn does.
-		//
-		// Disabled while running, because it starts a run.
-		ImGui::BeginDisabled(running);
-		if (ImGui::Button("Play Here")) {
-			PlayFromCamera(scope);
-		}
-		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Play, with the character spawned where this viewport is looking");
-		}
-		ImGui::SameLine();
-		if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
-			SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
-		}
-		ImGui::SameLine();
-
-		// **Pause between Run and Stop, and only while this scene runs.** It is
-		// the transport a person reaches for mid-run, so it sits where a
-		// transport does; disabled in Edit because there is no clock to stop -
-		// a button that could be pressed and did nothing would read as a
-		// pause that failed.
-		ImGui::BeginDisabled(!running);
-		if (RunButton(paused ? "Resume" : "Pause", paused, engine::ui::WarningColour())) {
-			if (WorldRun *record = RunOf(scope); record != nullptr) {
-				record->Paused = !record->Paused;
-				Say(record->Paused ? "paused - the clock is stopped, the run is not" : "resumed");
-			}
-		}
-		ImGui::SameLine();
-
-		// **Stop means "this client leaves" while a client view is focused.**
-		// Stopping the whole run from a panel showing one player's screen is the
-		// larger of the two things somebody could mean and the one they cannot
-		// undo - the server's own view is a click away and still stops
-		// everything. The label says which of the two this press is.
-		if (ImGui::Button(client ? "Stop Client" : "Stop")) {
-			if (client) {
-				(void)RemovePlayer(focused);
-			} else {
-				SetRunMode(scope, RunMode::Edit);
-			}
-		}
-		if (client && ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("removes this client and its player\nstop the scene from the server's view");
-		}
-		ImGui::EndDisabled();
-
-		ImGui::SameLine();
-		ImGui::TextDisabled("|");
-		ImGui::SameLine();
-
-		// **Players, and they are what turn Run into Play one at a time.** A
-		// `RunMode::Server` run is a dedicated server with nobody in it; Spawn
-		// Player admits somebody, gives them a character and opens a viewport
-		// they can see it from. A Play run gains a second client, which is the
-		// arrangement that shows a bug two clients disagree about and the one a
-		// single replica cannot.
-		//
-		// **Scoped to the viewport you are in, like every other button here.**
-		// `RunOwning` is what makes that work from a *client* panel as well as
-		// from the server's - pressing Remove Player while looking at a client
-		// removes that one, which is the only reading somebody would expect.
-		ImGui::BeginDisabled(!running);
-		if (ImGui::Button("Spawn Player")) {
-			(void)SpawnPlayer(focused);
-		}
-		ImGui::SameLine();
-
-		const size_t players = owner == nullptr ? 0 : owner->Links.size();
-
-		ImGui::BeginDisabled(players == 0);
-		if (ImGui::Button("Remove Player")) {
-			(void)RemovePlayer(focused);
-		}
-		ImGui::EndDisabled();
-		ImGui::EndDisabled();
-
-		if (running) {
-			ImGui::SameLine();
-			ImGui::TextDisabled("%zu player%s", players, players == 1 ? "" : "s");
-		}
-
-		ImGui::SameLine();
-		ImGui::TextDisabled("|");
-		ImGui::SameLine();
-
-		// **Everything from here reports on the viewport you are in, not on
-		// "the" world.** With two panels showing two worlds ticking in
-		// parallel, a transport that always described the active world was
-		// describing the wrong one half the time - you would be looking at the
-		// mirror and reading the skygrid's state. See `FocusedViewport`.
-		const size_t reporting = FocusedViewport;
-		const WorldId shown = ViewportWorld(reporting);
-
-		// Which panel is being described, so the readout is never ambiguous
-		// about *whose* state it is showing.
-		if (reporting > 0) {
-			ImGui::TextDisabled("Viewport %zu", reporting + 1);
-			ImGui::SameLine();
-		}
-
-		// The scene selector, because a universe with several worlds needs one
-		// click to switch and a menu is two.
-		//
-		// **It retargets the focused panel rather than always the active
-		// world.** Picking a scene while looking at Viewport 2 moves *that*
-		// panel - the alternative is a selector that appears to be about the
-		// picture in front of you and silently changes a different one.
-		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
-		const Name shownName = Universe->NameOf(shown);
-		// Runtime activity belongs on the selector's rows and preview. Putting it
-		// on the viewport tab confuses the scene being shown with the scene an
-		// edit command will target.
-		const auto selectorLabel = [&](WorldId world, const Name &name) {
-			return WorldSelectorLabel(
-				name.IsValid() ? Label(name) : std::string_view{}, world.IsValid() && IsActivelyRunning(world)
-			);
-		};
-		const std::string shownLabel =
-			shown.IsValid() ? selectorLabel(shown, shownName) : std::string("(no scene)");
-		if (ImGui::BeginCombo("##scene", shownLabel.c_str())) {
-			for (const WorldId id : Universe->Worlds()) {
-				const Name name = Universe->NameOf(id);
-				const std::string itemLabel = selectorLabel(id, name);
-				if (ImGui::Selectable(itemLabel.c_str(), id == shown)) {
-					RetargetEditingViewport(reporting, id);
-				}
-			}
-			ImGui::EndCombo();
-		}
-
-		ImGui::SameLine();
-
-		// **The world's own state, which is not the same claim as the mode.**
-		// The mode is the universe's - Play runs every world - while this is
-		// whether *this* world is ticking, and the two disagree exactly when
-		// something interesting has happened: a world suspended for being empty
-		// during a run, or faulted because its tick threw. That is the reading
-		// somebody switches viewports to get.
-		if (shown.IsValid()) {
-			const engine::world::WorldState state = Universe->StateOf(shown);
-			const bool healthy = state == engine::world::WorldState::Active;
-			ImGui::PushStyleColor(
-				ImGuiCol_Text, healthy ? engine::ui::MutedColour() : engine::ui::WarningColour()
-			);
-			ImGui::TextUnformatted(engine::world::Describe(state));
-			ImGui::PopStyleColor();
-		} else {
-			ImGui::TextDisabled("no scene");
-		}
-
-		ImGui::SameLine();
-		ImGui::TextDisabled("|");
-		ImGui::SameLine();
-
-		// --- the second row --------------------------------------------------
-		//
-		// **The tab strip sits on the first row and its contents on the second**,
-		// which is the arrangement of every ribbon and of the reference in
-		// `ROADMAP.md`. Naming the tabs beside the transport keeps the row that
-		// never changes short and gives the row that does the full width.
-		//
-		// **The tab bar owns which one is selected.** A member holding it would
-		// be a second answer to a question imgui already answers, and the two
-		// would disagree the first time anything else opened a tab.
-		// Tabs and controls are plugin-owned data. Default Studio contributes the
-		// standard Home, Model, Script, View, Plugins and Demo rows through the
-		// same composition path as installed plugins.
 		DrawPluginToolbar();
 
 		ImGui::End();

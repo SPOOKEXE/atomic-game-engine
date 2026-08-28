@@ -61,11 +61,15 @@
 // | the editor | `plugin.Notify`, `plugin.GetActiveWorld` |
 // | the selection | `Selection:Get`, `:Set`, `:Add`, `:Remove` |
 // | scripts in the scene | `plugin.GetScripts`, `.GetScriptSource`, `.SetScriptSource` |
-// | toolbars | `plugin.CreateToolbar`, `.CreateButton`, `.CreateToggle`, `.CreateDropdown`,
-// `.SetToolVisible`, `.SetToolWidth` | | panels | `plugin.CreateWidget`, `.SetWidgetRender`,
-// `.SetWidgetOpen`, `.SetWidgetDock`, `.SetWidgetSizeConstraints` | | viewport | `plugin.GetViewportOption`,
-// `.SetViewportOption`, `.AddViewport` | | script editor | `plugin.OpenScript`, `.GetScriptSource`,
-// `.SetScriptSource` | | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Combo`, `.Separator`,
+// | toolbars | `plugin.CreateToolbar`, `.CreateToolbarTab`, `.CreateToolbarRow`,
+// `.CreateToolbarColumn`, `.CreateButton`, `.CreateToggle`, `.CreateDropdown`,
+// `.CreateLabel`, `.SetToolCell`, `.SetToolVisible`, `.SetToolWidth`,
+// `.SetToolbarVisible`, `.SetToolbarPlacement` |
+// | panels | `plugin.CreateWidget`, `.SetWidgetRender`, `.SetWidgetOpen`,
+// `.SetWidgetDock`, `.SetWidgetSizeConstraints` |
+// | viewport | `plugin.GetViewportOption`, `.SetViewportOption`, `.AddViewport` |
+// | script editor | `plugin.OpenScript`, `.GetScriptSource`, `.SetScriptSource` |
+// | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Combo`, `.Separator`,
 // `.InputText` |
 //
 // **`Selection` is a service and the rest is a table**, which is Roblox's own
@@ -186,8 +190,23 @@ namespace studio {
 		Button,
 		Toggle,
 		Dropdown,
+		Label,
 		Builtin,
 	};
+
+	// Where a toolbar is composed in Studio's top strip.
+	// @since v0.20
+	enum class PluginToolbarPlacement : uint8_t {
+		Tabbed,
+		Pinned,
+	};
+
+	// Stable text for script/config input.
+	// @since v0.20
+	//@{
+	const char *Describe(PluginToolbarPlacement placement);
+	std::optional<PluginToolbarPlacement> ParsePluginToolbarPlacement(std::string_view text);
+	//@}
 
 	// One native control group contributed by the Default Studio plugin.
 	//
@@ -197,23 +216,67 @@ namespace studio {
 	// @since v0.20
 	enum class BuiltinStudioTool : uint8_t {
 		None,
+		Play,
+		PlayHere,
+		Run,
+		Pause,
+		Stop,
+		SpawnPlayer,
+		RemovePlayer,
+		PlayerCount,
+		ViewportName,
+		SceneSelector,
+		WorldState,
 		InsertObject,
-		TransformModes,
-		SnapControls,
-		SelectionFlags,
-		PivotControls,
-		SelectionActions,
-		ScriptCreation,
-		ScriptPanels,
-		ViewportOptions,
+		SelectMode,
+		MoveMode,
+		RotateMode,
+		ScaleMode,
+		SnapToggle,
+		SnapDistance,
+		SnapDegrees,
+		ScaleFaces,
+		Anchor,
+		Lock,
+		Align,
+		Facing,
+		EditPivot,
+		ResetPivot,
+		PivotNotice,
+		Duplicate,
+		Delete,
+		Deselect,
+		Undo,
+		Redo,
+		SelectionCount,
+		CreateScript,
+		CreateLocalScript,
+		CreateModuleScript,
+		ScriptDestination,
+		ScriptEditorPanel,
+		DebuggerPanel,
+		CommandBarPanel,
+		Grid,
+		Particles,
 		ViewportIndicator,
 		Cursor3D,
 		OrbitAroundCursor,
 		DirectionLock,
-		PanelOptions,
+		ExplorerPanel,
+		PropertiesPanel,
+		OutputPanel,
+		AssetsPanel,
+		StatisticsPanel,
+		FrameGraphPanel,
+		HeapPanel,
 		CameraSpeed,
-		Plugins,
-		Demo,
+		PluginReload,
+		PluginManage,
+		ToolbarEditor,
+		DockWidgetEditor,
+		PluginStatus,
+		DemoNodes,
+		DemoDescription,
 	};
 
 	// Where a plugin asks its dock widget to appear on first use.
@@ -312,6 +375,23 @@ namespace studio {
 
 		// Native control group when `Kind` is `Builtin`.
 		BuiltinStudioTool Builtin = BuiltinStudioTool::None;
+
+		// Stable grid cell names. Empty means automatic placement in declaration
+		// order, which preserves every pre-grid plugin.
+		//@{
+		std::string Row;
+		std::string Column;
+		//@}
+	};
+
+	// One named row or column in a plugin toolbar grid.
+	// @since v0.20
+	struct PluginToolbarTrack {
+		std::string Id;
+
+		// Optional control width for a declared column. Zero keeps each control's
+		// own width. Rows do not use this field.
+		float Width = 0.0f;
 	};
 
 	// @since v0.12
@@ -327,6 +407,17 @@ namespace studio {
 
 		// Whether this tab is offered by default.
 		bool Visible = true;
+
+		// Pinned toolbars share the permanent first row. Tabbed toolbars appear in
+		// the selectable ribbon below it.
+		PluginToolbarPlacement Placement = PluginToolbarPlacement::Tabbed;
+
+		// Stable grid declarations. Empty vectors produce an implicit row and one
+		// automatic column per control.
+		//@{
+		std::vector<PluginToolbarTrack> Rows;
+		std::vector<PluginToolbarTrack> Columns;
+		//@}
 	};
 
 	// A docked panel a plugin asked for.
@@ -406,6 +497,10 @@ namespace studio {
 		// Why it is not, in the words somebody can act on. Empty when it is.
 		std::string Error;
 
+		// Whether discovery accepted the manifest and identity. Source reloads may
+		// retry runtime failures, but only a manifest rescan may clear this gate.
+		bool DefinitionValid = true;
+
 		// How many times its heartbeat has raised. A plugin that throws every
 		// frame is switched off rather than logged sixty times a second.
 		size_t Faults = 0;
@@ -454,6 +549,8 @@ namespace studio {
 		std::string Name;
 		bool Visible = true;
 		bool UserCreated = true;
+		PluginToolbarPlacement Placement = PluginToolbarPlacement::Tabbed;
+		size_t Order = 0;
 	};
 
 	// A person's override for one plugin-owned toolbar item.
@@ -463,6 +560,9 @@ namespace studio {
 		std::string Tab;
 		bool Visible = true;
 		float Width = 92.0f;
+		std::string Row;
+		std::string Column;
+		size_t Order = 0;
 	};
 
 	// Persistent toolbar customization. Plugin declarations remain the defaults
@@ -481,6 +581,22 @@ namespace studio {
 		size_t Item = 0;
 		std::string Key;
 		float Width = 92.0f;
+		size_t Order = 0;
+	};
+
+	// One grid cell. Multiple items are retained in declaration order if a
+	// plugin deliberately assigns them to the same cell.
+	// @since v0.20
+	struct ToolbarCellView {
+		std::string Column;
+		std::vector<ToolbarItemLocation> Items;
+	};
+
+	// One named row in a composed toolbar grid.
+	// @since v0.20
+	struct ToolbarRowView {
+		std::string Id;
+		std::vector<ToolbarCellView> Cells;
 	};
 
 	// One visible tab and its visible controls.
@@ -488,7 +604,15 @@ namespace studio {
 	struct ToolbarTabView {
 		std::string Id;
 		std::string Name;
-		std::vector<ToolbarItemLocation> Items;
+		std::vector<ToolbarRowView> Rows;
+		bool UserCreated = false;
+	};
+
+	// The cached toolbar projection drawn by the editor.
+	// @since v0.20
+	struct ToolbarLayoutView {
+		std::vector<ToolbarRowView> PinnedRows;
+		std::vector<ToolbarTabView> Tabs;
 	};
 
 	// Pure toolbar model helpers used by the editor and its suite.
@@ -504,7 +628,7 @@ namespace studio {
 		const PluginButton &button,
 		size_t itemIndex
 	);
-	std::vector<ToolbarTabView>
+	ToolbarLayoutView
 	ComposeToolbar(const std::vector<LoadedPlugin> &plugins, const ToolbarPreferences &preferences);
 	bool
 	LoadToolbarPreferences(const std::filesystem::path &path, ToolbarPreferences &out, std::string &error);

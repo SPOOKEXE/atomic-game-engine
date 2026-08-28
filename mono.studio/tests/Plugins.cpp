@@ -48,6 +48,8 @@ using studio::PluginButton;
 using studio::PluginControlKind;
 using studio::PluginManifest;
 using studio::PluginToolbar;
+using studio::PluginToolbarPlacement;
+using studio::PluginToolbarTrack;
 using studio::PluginWidget;
 using studio::RegisterSelectionComponent;
 using studio::SaveToolbarPreferences;
@@ -97,6 +99,16 @@ namespace {
 		}
 		return nullptr;
 	}
+
+	std::vector<studio::ToolbarItemLocation> ItemsOf(const studio::ToolbarTabView &tab) {
+		std::vector<studio::ToolbarItemLocation> items;
+		for (const studio::ToolbarRowView &row : tab.Rows) {
+			for (const studio::ToolbarCellView &cell : row.Cells) {
+				items.insert(items.end(), cell.Items.begin(), cell.Items.end());
+			}
+		}
+		return items;
+	}
 }
 
 // --- the manifest --------------------------------------------------------------
@@ -141,17 +153,24 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Builtin);
 	CHECK(plugin.Running);
 	CHECK(plugin.Manifest.Id == "atomic.default-studio");
-	REQUIRE(plugin.Toolbars.size() == 6);
+	REQUIRE(plugin.Toolbars.size() == 7);
 
 	std::set<std::string> toolbarIds;
 	std::set<std::string> controlIds;
 	for (const PluginToolbar &toolbar : plugin.Toolbars) {
 		CHECK(toolbarIds.insert(toolbar.Id).second);
 		CHECK_FALSE(toolbar.Buttons.empty());
+		CHECK(toolbar.Rows.size() == 1);
+		CHECK(toolbar.Columns.size() == toolbar.Buttons.size());
 		for (const PluginButton &button : toolbar.Buttons) {
 			CHECK(controlIds.insert(toolbar.Id + "/" + button.Id).second);
+			CHECK_FALSE(button.Row.empty());
+			CHECK_FALSE(button.Column.empty());
 		}
 	}
+	CHECK(plugin.Toolbars.front().Id == "transport");
+	CHECK(plugin.Toolbars.front().Placement == PluginToolbarPlacement::Pinned);
+	CHECK(plugin.Toolbars.front().Buttons.size() == 11);
 
 	const auto view =
 		std::find_if(plugin.Toolbars.begin(), plugin.Toolbars.end(), [](const PluginToolbar &toolbar) {
@@ -159,12 +178,19 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		});
 	REQUIRE(view != plugin.Toolbars.end());
 	const std::array expected = {
-		std::pair{"viewport", BuiltinStudioTool::ViewportOptions},
+		std::pair{"grid", BuiltinStudioTool::Grid},
+		std::pair{"particles", BuiltinStudioTool::Particles},
 		std::pair{"indicator", BuiltinStudioTool::ViewportIndicator},
 		std::pair{"cursor", BuiltinStudioTool::Cursor3D},
 		std::pair{"orbit", BuiltinStudioTool::OrbitAroundCursor},
 		std::pair{"direction-lock", BuiltinStudioTool::DirectionLock},
-		std::pair{"panels", BuiltinStudioTool::PanelOptions},
+		std::pair{"explorer", BuiltinStudioTool::ExplorerPanel},
+		std::pair{"properties", BuiltinStudioTool::PropertiesPanel},
+		std::pair{"output", BuiltinStudioTool::OutputPanel},
+		std::pair{"assets", BuiltinStudioTool::AssetsPanel},
+		std::pair{"statistics", BuiltinStudioTool::StatisticsPanel},
+		std::pair{"frame-graph", BuiltinStudioTool::FrameGraphPanel},
+		std::pair{"heap", BuiltinStudioTool::HeapPanel},
 		std::pair{"camera", BuiltinStudioTool::CameraSpeed},
 	};
 	REQUIRE(view->Buttons.size() == expected.size());
@@ -173,6 +199,17 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		CHECK(view->Buttons[index].Kind == PluginControlKind::Builtin);
 		CHECK(view->Buttons[index].Builtin == expected[index].second);
 	}
+}
+
+TEST_CASE("a disabled Default Studio plugin contributes no toolbar", "[studio][plugins]") {
+	std::vector<LoadedPlugin> plugins;
+	plugins.push_back(MakeDefaultStudioPlugin());
+	plugins.front().Manifest.Enabled = false;
+	plugins.front().Running = false;
+
+	const studio::ToolbarLayoutView layout = ComposeToolbar(plugins, {});
+	CHECK(layout.PinnedRows.empty());
+	CHECK(layout.Tabs.empty());
 }
 
 TEST_CASE("toolbar composition uses stable overrides", "[studio][plugins]") {
@@ -186,22 +223,26 @@ TEST_CASE("toolbar composition uses stable overrides", "[studio][plugins]") {
 
 	ToolbarPreferences preferences;
 	preferences.Tabs.push_back(ToolbarTabPreference{"custom", "My Tools", true, true});
-	preferences.Items.push_back(ToolbarItemPreference{moved, "custom", true, 12.0f});
-	preferences.Items.push_back(ToolbarItemPreference{hidden, "", false, 92.0f});
+	preferences.Items.push_back(ToolbarItemPreference{moved, "custom", true, 12.0f, "custom-row", "left", 0});
+	preferences.Items.push_back(ToolbarItemPreference{hidden, "", false, 92.0f, {}, {}, 0});
 
 	const auto composed = ComposeToolbar(plugins, preferences);
-	const auto custom =
-		std::find_if(composed.begin(), composed.end(), [](const auto &tab) { return tab.Id == "custom"; });
-	REQUIRE(custom != composed.end());
-	REQUIRE(custom->Items.size() == 1);
-	CHECK(custom->Items.front().Key == moved);
-	CHECK(custom->Items.front().Width == studio::PLUGIN_TOOL_MINIMUM_WIDTH);
+	const auto custom = std::find_if(composed.Tabs.begin(), composed.Tabs.end(), [](const auto &tab) {
+		return tab.Id == "custom";
+	});
+	REQUIRE(custom != composed.Tabs.end());
+	const auto customItems = ItemsOf(*custom);
+	REQUIRE(customItems.size() == 1);
+	CHECK(customItems.front().Key == moved);
+	CHECK(customItems.front().Width == studio::PLUGIN_TOOL_MINIMUM_WIDTH);
+	REQUIRE(custom->Rows.size() == 1);
+	CHECK(custom->Rows.front().Id == "custom-row");
 
-	for (const auto &tab : composed) {
-		CHECK(std::none_of(tab.Items.begin(), tab.Items.end(), [&](const auto &item) {
-			return item.Key == hidden;
-		}));
+	for (const auto &tab : composed.Tabs) {
+		const auto items = ItemsOf(tab);
+		CHECK(std::none_of(items.begin(), items.end(), [&](const auto &item) { return item.Key == hidden; }));
 	}
+	CHECK_FALSE(composed.PinnedRows.empty());
 }
 
 TEST_CASE("toolbar preferences round trip by stable text keys", "[studio][plugins]") {
@@ -210,18 +251,28 @@ TEST_CASE("toolbar preferences round trip by stable text keys", "[studio][plugin
 
 	ToolbarPreferences saved;
 	saved.Tabs.push_back(ToolbarTabPreference{"custom", "Custom", false, true});
-	saved.Items.push_back(ToolbarItemPreference{"plugin/toolbar/tool", "custom", true, 144.0f});
+	saved.Tabs.push_back(
+		ToolbarTabPreference{"pinned", "Pinned", true, false, PluginToolbarPlacement::Pinned, 4}
+	);
+	saved.Items.push_back(
+		ToolbarItemPreference{"plugin/toolbar/tool", "custom", true, 144.0f, "row-a", "column-b", 7}
+	);
 
 	std::string error;
 	REQUIRE(SaveToolbarPreferences(path, saved, error));
 	ToolbarPreferences loaded;
 	REQUIRE(LoadToolbarPreferences(path, loaded, error));
-	REQUIRE(loaded.Tabs.size() == 1);
+	REQUIRE(loaded.Tabs.size() == 2);
 	REQUIRE(loaded.Items.size() == 1);
 	CHECK(loaded.Tabs[0].Id == "custom");
 	CHECK_FALSE(loaded.Tabs[0].Visible);
 	CHECK(loaded.Items[0].Key == "plugin/toolbar/tool");
 	CHECK(loaded.Items[0].Width == 144.0f);
+	CHECK(loaded.Items[0].Row == "row-a");
+	CHECK(loaded.Items[0].Column == "column-b");
+	CHECK(loaded.Items[0].Order == 7);
+	CHECK(loaded.Tabs[1].Placement == PluginToolbarPlacement::Pinned);
+	CHECK(loaded.Tabs[1].Order == 4);
 }
 
 TEST_CASE("toolbar preferences ignore fields of the wrong type", "[studio][plugins]") {
@@ -249,6 +300,81 @@ TEST_CASE("toolbar widths reject non-finite values and clamp bounds", "[studio][
 	CHECK(ClampPluginToolWidth(900.0f) == studio::PLUGIN_TOOL_MAXIMUM_WIDTH);
 	CHECK(ClampPluginToolWidth(std::numeric_limits<float>::quiet_NaN()) == 92.0f);
 	CHECK(ClampPluginToolWidth(std::numeric_limits<float>::infinity()) == 92.0f);
+}
+
+TEST_CASE("toolbar grids preserve declared cells and flat plugin compatibility", "[studio][plugins]") {
+	LoadedPlugin plugin;
+	plugin.Manifest.Id = "grid";
+	plugin.Running = true;
+
+	PluginToolbar pinned;
+	pinned.Name = "Pinned";
+	pinned.Id = "pinned";
+	pinned.Placement = PluginToolbarPlacement::Pinned;
+	pinned.Rows = {PluginToolbarTrack{"top"}, PluginToolbarTrack{"bottom"}};
+	pinned.Columns = {PluginToolbarTrack{"left"}, PluginToolbarTrack{"right", 180.0f}};
+	PluginButton a;
+	a.Name = "A";
+	a.Id = "a";
+	a.Row = "bottom";
+	a.Column = "right";
+	pinned.Buttons.push_back(std::move(a));
+	PluginButton b;
+	b.Name = "B";
+	b.Id = "b";
+	b.Row = "top";
+	b.Column = "left";
+	pinned.Buttons.push_back(std::move(b));
+	plugin.Toolbars.push_back(std::move(pinned));
+
+	PluginToolbar legacy;
+	legacy.Name = "Legacy";
+	legacy.Id = "legacy";
+	PluginButton first;
+	first.Name = "First";
+	legacy.Buttons.push_back(std::move(first));
+	PluginButton second;
+	second.Name = "Second";
+	legacy.Buttons.push_back(std::move(second));
+	plugin.Toolbars.push_back(std::move(legacy));
+
+	std::vector<LoadedPlugin> plugins;
+	plugins.push_back(std::move(plugin));
+	const studio::ToolbarLayoutView layout = ComposeToolbar(plugins, {});
+	REQUIRE(layout.PinnedRows.size() == 2);
+	CHECK(layout.PinnedRows[0].Id.find("top") != std::string::npos);
+	CHECK(layout.PinnedRows[1].Id.find("bottom") != std::string::npos);
+	REQUIRE(layout.PinnedRows[1].Cells.size() == 1);
+	REQUIRE(layout.PinnedRows[1].Cells.front().Items.size() == 1);
+	CHECK(layout.PinnedRows[1].Cells.front().Items.front().Width == 180.0f);
+	REQUIRE(layout.Tabs.size() == 1);
+	REQUIRE(layout.Tabs.front().Rows.size() == 1);
+	REQUIRE(layout.Tabs.front().Rows.front().Cells.size() == 2);
+	CHECK(ItemsOf(layout.Tabs.front()).size() == 2);
+
+	ToolbarPreferences hidden;
+	hidden.Tabs.push_back(
+		ToolbarTabPreference{
+			studio::PluginToolbarKey(plugins.front(), plugins.front().Toolbars.front(), 0),
+			"Pinned",
+			false,
+			false,
+			PluginToolbarPlacement::Pinned,
+			0,
+		}
+	);
+	const studio::ToolbarLayoutView hiddenLayout = ComposeToolbar(plugins, hidden);
+	CHECK(hiddenLayout.PinnedRows.empty());
+	REQUIRE(hiddenLayout.Tabs.size() == 1);
+	CHECK(hiddenLayout.Tabs.front().Name == "Legacy");
+}
+
+TEST_CASE("toolbar placement text is strict and stable", "[studio][plugins]") {
+	CHECK(std::string(studio::Describe(PluginToolbarPlacement::Tabbed)) == "Tabbed");
+	CHECK(std::string(studio::Describe(PluginToolbarPlacement::Pinned)) == "Pinned");
+	CHECK(studio::ParsePluginToolbarPlacement("tabbed") == PluginToolbarPlacement::Tabbed);
+	CHECK(studio::ParsePluginToolbarPlacement("Pinned") == PluginToolbarPlacement::Pinned);
+	CHECK_FALSE(studio::ParsePluginToolbarPlacement("floating").has_value());
 }
 
 // --- discovery -----------------------------------------------------------------
@@ -289,8 +415,22 @@ TEST_CASE("a broken manifest is listed with its reason", "[studio][plugins]") {
 	REQUIRE(broken != nullptr);
 	CHECK_FALSE(broken->Error.empty());
 	CHECK_FALSE(broken->Running);
+	CHECK_FALSE(broken->DefinitionValid);
 
 	CHECK(Named(found, "Good") != nullptr);
+}
+
+TEST_CASE("duplicate plugin identities remain blocked until rediscovery", "[studio][plugins]") {
+	Folder folder;
+	folder.Add("first", R"({"name":"First","id":"shared"})", "return\n");
+	folder.Add("second", R"({"name":"Second","id":"shared"})", "return\n");
+
+	const std::vector<LoadedPlugin> found = DiscoverPlugins(folder.Root);
+	REQUIRE(found.size() == 2);
+	CHECK_FALSE(found[0].DefinitionValid);
+	CHECK_FALSE(found[1].DefinitionValid);
+	CHECK(found[0].Error.find("duplicate plugin id") != std::string::npos);
+	CHECK(found[1].Error == found[0].Error);
 }
 
 // --- running -------------------------------------------------------------------
@@ -395,6 +535,27 @@ TEST_CASE("a plugin that throws every beat is switched off", "[studio][plugins]"
 	CHECK(BeatPlugins(plugins, 1.0f / 60.0f) == 1);
 }
 
+TEST_CASE("restarting a plugin drops callbacks owned by its old runtime", "[studio][plugins]") {
+	LoadedPlugin plugin;
+	plugin.Manifest.Name = "Rejected";
+	plugin.Error = "invalid definition";
+	plugin.DefinitionValid = false;
+	plugin.OnUndo = engine::script::HostCallback{11};
+	plugin.OnRedo = engine::script::HostCallback{12};
+	plugin.OnRecordingStarted = engine::script::HostCallback{13};
+	plugin.OnRecordingFinished = engine::script::HostCallback{14};
+
+	std::vector<LoadedPlugin> plugins;
+	plugins.push_back(std::move(plugin));
+	Store store("callbacks");
+	StartPlugins(plugins, store);
+
+	CHECK_FALSE(plugins.front().OnUndo.Valid());
+	CHECK_FALSE(plugins.front().OnRedo.Valid());
+	CHECK_FALSE(plugins.front().OnRecordingStarted.Valid());
+	CHECK_FALSE(plugins.front().OnRecordingFinished.Valid());
+}
+
 // --- the selection bridge ------------------------------------------------------
 
 TEST_CASE("a plugin reads the selection as a component", "[studio][plugins]") {
@@ -468,7 +629,12 @@ namespace {
 		std::vector<std::string> Names() const override {
 			return {
 				"CreateToolbar",
+				"CreateToolbarTab",
+				"CreateToolbarRow",
+				"CreateToolbarColumn",
 				"CreateButton",
+				"CreateLabel",
+				"SetToolCell",
 				"CreateWidget",
 				"SetWidgetRender",
 				"Label",
@@ -487,11 +653,30 @@ namespace {
 				return at < arguments.size() ? std::string(arguments[at].AsText()) : std::string{};
 			};
 
-			if (name == "CreateToolbar") {
+			if (name == "CreateToolbar" || name == "CreateToolbarTab") {
 				PluginToolbar toolbar;
 				toolbar.Name = text(0);
+				if (name == "CreateToolbarTab" && text(2) == "Pinned") {
+					toolbar.Placement = PluginToolbarPlacement::Pinned;
+				}
 				Plugin.Toolbars.push_back(std::move(toolbar));
 				result = HostValue::Of(static_cast<double>(Plugin.Toolbars.size()));
+				return true;
+			}
+			if (name == "CreateToolbarRow" || name == "CreateToolbarColumn") {
+				const auto bar = static_cast<size_t>(arguments[0].AsNumber(0.0));
+				if (bar < 1 || bar > Plugin.Toolbars.size()) {
+					failure = "no such toolbar";
+					return false;
+				}
+				auto &tracks = name == "CreateToolbarRow" ? Plugin.Toolbars[bar - 1].Rows
+														  : Plugin.Toolbars[bar - 1].Columns;
+				const float width = name == "CreateToolbarColumn" && arguments.size() > 2 &&
+											arguments[2].Tag == HostTag::Number
+										? static_cast<float>(arguments[2].Number)
+										: 0.0f;
+				tracks.push_back(PluginToolbarTrack{text(1), width});
+				result = HostValue::Of(static_cast<double>(tracks.size()));
 				return true;
 			}
 			if (name == "CreateButton") {
@@ -510,6 +695,36 @@ namespace {
 
 				Plugin.Toolbars[bar - 1].Buttons.push_back(button);
 				result = HostValue::Of(static_cast<double>(Plugin.Toolbars[bar - 1].Buttons.size()));
+				return true;
+			}
+			if (name == "CreateLabel") {
+				const auto bar = static_cast<size_t>(arguments[0].AsNumber(0.0));
+				if (bar < 1 || bar > Plugin.Toolbars.size()) {
+					failure = "no such toolbar";
+					return false;
+				}
+				PluginButton label;
+				label.Name = text(1);
+				label.Kind = PluginControlKind::Label;
+				Plugin.Toolbars[bar - 1].Buttons.push_back(std::move(label));
+				result = HostValue::Of(static_cast<double>(Plugin.Toolbars[bar - 1].Buttons.size()));
+				return true;
+			}
+			if (name == "SetToolCell") {
+				const auto bar = static_cast<size_t>(arguments[0].AsNumber(0.0));
+				const auto tool = static_cast<size_t>(arguments[1].AsNumber(0.0));
+				const auto row = static_cast<size_t>(arguments[2].AsNumber(0.0));
+				const auto column = static_cast<size_t>(arguments[3].AsNumber(0.0));
+				if (bar < 1 || bar > Plugin.Toolbars.size() || tool < 1 ||
+					tool > Plugin.Toolbars[bar - 1].Buttons.size() || row < 1 ||
+					row > Plugin.Toolbars[bar - 1].Rows.size() || column < 1 ||
+					column > Plugin.Toolbars[bar - 1].Columns.size()) {
+					failure = "no such toolbar cell";
+					return false;
+				}
+				PluginButton &button = Plugin.Toolbars[bar - 1].Buttons[tool - 1];
+				button.Row = Plugin.Toolbars[bar - 1].Rows[row - 1].Id;
+				button.Column = Plugin.Toolbars[bar - 1].Columns[column - 1].Id;
 				return true;
 			}
 			if (name == "CreateWidget") {
@@ -628,6 +843,41 @@ TEST_CASE("a plugin creates toolbars and buttons at its top level", "[studio][pl
 	CHECK(plugins.front().Vm->Invoke(click, {}));
 
 	(void)surface;
+}
+
+TEST_CASE("a Luau plugin declares a pinned toolbar grid and label", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"grid-tools",
+		R"({"name": "Grid Tools"})",
+		"local bar = plugin.CreateToolbarTab('Transport', 'transport', 'Pinned')\n"
+		"local row = plugin.CreateToolbarRow(bar, 'primary')\n"
+		"local left = plugin.CreateToolbarColumn(bar, 'left')\n"
+		"local right = plugin.CreateToolbarColumn(bar, 'right', 240)\n"
+		"local action = plugin.CreateButton(bar, 'Act', '', function() end)\n"
+		"local status = plugin.CreateLabel(bar, 'Ready')\n"
+		"plugin.SetToolCell(bar, action, row, left)\n"
+		"plugin.SetToolCell(bar, status, row, right)\n"
+	);
+
+	Store store("plugins");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [](LoadedPlugin &plugin) { return std::make_unique<Surface>(plugin); });
+
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+	REQUIRE(plugins.front().Toolbars.size() == 1);
+	const PluginToolbar &toolbar = plugins.front().Toolbars.front();
+	CHECK(toolbar.Placement == PluginToolbarPlacement::Pinned);
+	REQUIRE(toolbar.Rows.size() == 1);
+	REQUIRE(toolbar.Columns.size() == 2);
+	REQUIRE(toolbar.Buttons.size() == 2);
+	CHECK(toolbar.Buttons[0].Row == "primary");
+	CHECK(toolbar.Buttons[0].Column == "left");
+	CHECK(toolbar.Columns[1].Width == 240.0f);
+	CHECK(toolbar.Buttons[1].Kind == PluginControlKind::Label);
+	CHECK(toolbar.Buttons[1].Column == "right");
 }
 
 TEST_CASE("a widget renders through its callback and only then", "[studio][plugins]") {

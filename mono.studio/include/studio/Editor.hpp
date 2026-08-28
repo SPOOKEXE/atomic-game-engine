@@ -95,6 +95,7 @@
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/PluginReload.hpp>
 #include <studio/Plugins.hpp>
 #include <studio/Presentation.hpp>
 #include <studio/Preview.hpp>
@@ -2422,6 +2423,10 @@ namespace studio {
 		// Draws the complete plugin-owned ribbon, including Default Studio.
 		void DrawPluginToolbar();
 
+		// Invalidates the cached projection after a plugin or toolbar preference
+		// changes its layout declarations.
+		void InvalidateToolbarLayout();
+
 		// Editors for toolbar composition and plugin dock-widget defaults.
 		//@{
 		void DrawToolbarEditor();
@@ -4293,33 +4298,17 @@ namespace studio {
 		// @return `true` when everything selected has it set.
 		bool SelectionFlag(const char *property) const;
 
-		// The ribbon's four strips, one per tab. `Tools.cpp`.
+		// The native controls rendered from Default Studio's descriptors.
 		//
-		// **Called by `DrawToolbar`, not by a panel.** Each is one row of the
-		// pinned strip under the menu bar; the tab bar that chooses between them
-		// is on the row above. Split so that each is a list of controls rather
-		// than a list of controls with a `BeginTabItem` between every fourth
-		// one.
+		// Each call draws only `DrawingBuiltinTool`, so every visible control has
+		// its own movable cell while the behavior stays in the editor layer that
+		// owns its state.
 		//@{
 		void DrawHomeTools();
 		void DrawModelTools();
 		void DrawScriptTools();
 		void DrawViewTools();
-		void DrawInsertObjectTool();
-		void DrawTransformModesTool();
-		void DrawSnapControlsTool();
-		void DrawSelectionFlagsTool();
-		void DrawPivotControlsTool();
-		void DrawSelectionActionsTool();
-		void DrawScriptCreationTool();
-		void DrawScriptPanelsTool();
-		void DrawViewportOptionsTool();
-		void DrawViewportIndicatorTool();
-		void DrawCursor3DTool();
-		void DrawOrbitAroundCursorTool();
-		void DrawDirectionLockTool();
-		void DrawPanelOptionsTool();
-		void DrawCameraSpeedTool();
+		void DrawTransportTools();
 		//@}
 
 		// A button that runs a registered command, greyed with its reason.
@@ -5495,7 +5484,11 @@ namespace studio {
 		//@{
 		ToolbarPreferences ToolbarPrefs;
 		bool ToolbarPreferencesLoaded = false;
+		ToolbarLayoutView ToolbarLayout;
+		bool ToolbarLayoutDirty = true;
 		char ToolbarTabDraft[64] = {};
+		char ToolbarRenameDraft[64] = {};
+		std::string ToolbarRenamingTab;
 		BuiltinStudioTool DrawingBuiltinTool = BuiltinStudioTool::None;
 		//@}
 
@@ -5504,6 +5497,9 @@ namespace studio {
 		// person's choice.
 		std::map<std::string, bool, std::less<>> PluginEnabled;
 		bool PluginStateLoaded = false;
+		PluginReloadTracker PluginReloader;
+		std::vector<PluginReloadRoot> PluginReloadRoots;
+		double NextPluginRootScanSeconds = 0.0;
 
 		// The Demo Nodes panel, and everything it holds.
 		//

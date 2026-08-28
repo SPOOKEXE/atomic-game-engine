@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <cmath>
 #include <imgui.h>
+#include <limits>
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
@@ -83,7 +84,8 @@ namespace studio {
 		// `false`, which the caller turns into a named refusal.
 		bool SurfaceIndexOf(const HostValue &value, size_t count, size_t &out) {
 			const double number = value.AsNumber(0.0);
-			if (number < 1.0 || number > static_cast<double>(count)) {
+			if (!std::isfinite(number) || number != std::floor(number) || number < 1.0 ||
+				number > static_cast<double>(count)) {
 				return false;
 			}
 			out = static_cast<size_t>(number) - 1;
@@ -149,13 +151,19 @@ namespace studio {
 
 				// Toolbars and buttons.
 				"CreateToolbar",
+				"CreateToolbarTab",
+				"CreateToolbarRow",
+				"CreateToolbarColumn",
 				"CreateButton",
 				"CreateToggle",
 				"CreateDropdown",
+				"CreateLabel",
+				"SetToolCell",
 				"SetButtonActive",
 				"SetToolVisible",
 				"SetToolWidth",
 				"SetToolbarVisible",
+				"SetToolbarPlacement",
 
 				// Docked panels, and what may be drawn in one.
 				"CreateWidget",
@@ -219,7 +227,7 @@ namespace studio {
 			if (name == "GetScripts") {
 				return GetScripts(result, failure);
 			}
-			if (name == "CreateToolbar") {
+			if (name == "CreateToolbar" || name == "CreateToolbarTab") {
 				PluginToolbar toolbar;
 				toolbar.Name = std::string(At(arguments, 0).AsText());
 				if (toolbar.Name.empty()) {
@@ -231,17 +239,37 @@ namespace studio {
 					failure = "a toolbar with id '" + toolbar.Id + "' already exists";
 					return false;
 				}
+				if (name == "CreateToolbarTab" && At(arguments, 2).Tag != HostTag::Nil) {
+					const auto placement = ParsePluginToolbarPlacement(At(arguments, 2).AsText());
+					if (!placement.has_value()) {
+						failure = "toolbar placement has to be 'Tabbed' or 'Pinned'";
+						return false;
+					}
+					toolbar.Placement = *placement;
+				}
+				if (name == "CreateToolbarTab" && At(arguments, 3).Tag != HostTag::Nil) {
+					toolbar.Visible = At(arguments, 3).AsBoolean();
+				}
 				Plugin.Toolbars.push_back(std::move(toolbar));
 				result = HostValue::Of(static_cast<double>(Plugin.Toolbars.size()));
+				Owner.InvalidateToolbarLayout();
 				return true;
 			}
-			if (name == "CreateButton" || name == "CreateToggle" || name == "CreateDropdown") {
+			if (name == "CreateToolbarRow" || name == "CreateToolbarColumn") {
+				return CreateToolbarTrack(name, arguments, result, failure);
+			}
+			if (name == "CreateButton" || name == "CreateToggle" || name == "CreateDropdown" ||
+				name == "CreateLabel") {
 				return CreateControl(name, arguments, result, failure);
+			}
+			if (name == "SetToolCell") {
+				return SetToolCell(arguments, failure);
 			}
 			if (name == "SetButtonActive") {
 				return SetButtonActive(arguments, failure);
 			}
-			if (name == "SetToolVisible" || name == "SetToolWidth" || name == "SetToolbarVisible") {
+			if (name == "SetToolVisible" || name == "SetToolWidth" || name == "SetToolbarVisible" ||
+				name == "SetToolbarPlacement") {
 				return ConfigureToolbar(name, arguments, failure);
 			}
 			if (name == "CreateWidget") {
@@ -728,6 +756,70 @@ namespace studio {
 			});
 		}
 
+		bool CreateToolbarTrack(
+			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
+		) {
+			size_t toolbar = 0;
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+				failure = "no such toolbar";
+				return false;
+			}
+
+			std::vector<PluginToolbarTrack> &tracks =
+				name == "CreateToolbarRow" ? Plugin.Toolbars[toolbar].Rows : Plugin.Toolbars[toolbar].Columns;
+			const std::string prefix = name == "CreateToolbarRow" ? "row" : "column";
+			PluginToolbarTrack track;
+			track.Id = StableId(At(arguments, 1), prefix, tracks.size());
+			if (name == "CreateToolbarColumn" && At(arguments, 2).Tag != HostTag::Nil) {
+				if (At(arguments, 2).Tag != HostTag::Number || !std::isfinite(At(arguments, 2).Number)) {
+					failure = "a toolbar column width has to be a finite number";
+					return false;
+				}
+				track.Width = ClampPluginToolWidth(static_cast<float>(At(arguments, 2).Number));
+			}
+			if (std::any_of(tracks.begin(), tracks.end(), [&](const PluginToolbarTrack &existing) {
+					return existing.Id == track.Id;
+				})) {
+				failure = "a toolbar " + prefix + " with id '" + track.Id + "' already exists";
+				return false;
+			}
+
+			tracks.push_back(std::move(track));
+			result = HostValue::Of(static_cast<double>(tracks.size()));
+			Owner.InvalidateToolbarLayout();
+			return true;
+		}
+
+		bool SetToolCell(HostArguments arguments, std::string &failure) {
+			size_t toolbar = 0;
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+				failure = "no such toolbar";
+				return false;
+			}
+
+			PluginToolbar &target = Plugin.Toolbars[toolbar];
+			size_t button = 0;
+			size_t row = 0;
+			size_t column = 0;
+			if (!SurfaceIndexOf(At(arguments, 1), target.Buttons.size(), button)) {
+				failure = "no such toolbar control";
+				return false;
+			}
+			if (!SurfaceIndexOf(At(arguments, 2), target.Rows.size(), row)) {
+				failure = "no such toolbar row";
+				return false;
+			}
+			if (!SurfaceIndexOf(At(arguments, 3), target.Columns.size(), column)) {
+				failure = "no such toolbar column";
+				return false;
+			}
+
+			target.Buttons[button].Row = target.Rows[row].Id;
+			target.Buttons[button].Column = target.Columns[column].Id;
+			Owner.InvalidateToolbarLayout();
+			return true;
+		}
+
 		bool CreateControl(
 			std::string_view kind, HostArguments arguments, HostValue &result, std::string &failure
 		) {
@@ -740,7 +832,7 @@ namespace studio {
 			PluginButton button;
 			button.Name = std::string(At(arguments, 1).AsText());
 			if (button.Name.empty()) {
-				failure = "a button needs a name";
+				failure = "a toolbar control needs a name";
 				return false;
 			}
 
@@ -750,7 +842,13 @@ namespace studio {
 			size_t idIndex = 4;
 			size_t widthIndex = 5;
 			size_t visibleIndex = 6;
-			if (kind == "CreateToggle") {
+			if (kind == "CreateLabel") {
+				button.Kind = PluginControlKind::Label;
+				handlerIndex = std::numeric_limits<size_t>::max();
+				idIndex = 3;
+				widthIndex = 4;
+				visibleIndex = 5;
+			} else if (kind == "CreateToggle") {
 				button.Kind = PluginControlKind::Toggle;
 				button.Active = At(arguments, 3).AsBoolean();
 				handlerIndex = 4;
@@ -786,16 +884,18 @@ namespace studio {
 				visibleIndex = 8;
 			}
 
-			const HostValue &handler = At(arguments, handlerIndex);
-			if (handler.Tag == HostTag::Callback) {
-				if (button.Kind == PluginControlKind::Button) {
-					button.OnClick = handler.Callback;
-				} else {
-					button.OnChanged = handler.Callback;
+			if (button.Kind != PluginControlKind::Label) {
+				const HostValue &handler = At(arguments, handlerIndex);
+				if (handler.Tag == HostTag::Callback) {
+					if (button.Kind == PluginControlKind::Button) {
+						button.OnClick = handler.Callback;
+					} else {
+						button.OnChanged = handler.Callback;
+					}
+				} else if (handler.Tag != HostTag::Nil) {
+					failure = "a toolbar control's handler has to be a function";
+					return false;
 				}
-			} else if (handler.Tag != HostTag::Nil) {
-				failure = "a toolbar control's handler has to be a function";
-				return false;
 			}
 
 			button.Id = StableId(At(arguments, idIndex), "tool", Plugin.Toolbars[toolbar].Buttons.size());
@@ -808,6 +908,10 @@ namespace studio {
 				return false;
 			}
 			if (At(arguments, widthIndex).Tag == HostTag::Number) {
+				if (!std::isfinite(At(arguments, widthIndex).Number)) {
+					failure = "a toolbar control width has to be a finite number";
+					return false;
+				}
 				button.Width = ClampPluginToolWidth(static_cast<float>(At(arguments, widthIndex).Number));
 			}
 			if (At(arguments, visibleIndex).Tag != HostTag::Nil) {
@@ -816,6 +920,7 @@ namespace studio {
 
 			Plugin.Toolbars[toolbar].Buttons.push_back(std::move(button));
 			result = HostValue::Of(static_cast<double>(Plugin.Toolbars[toolbar].Buttons.size()));
+			Owner.InvalidateToolbarLayout();
 			return true;
 		}
 
@@ -827,6 +932,17 @@ namespace studio {
 			}
 			if (name == "SetToolbarVisible") {
 				Plugin.Toolbars[toolbar].Visible = At(arguments, 1).AsBoolean();
+				Owner.InvalidateToolbarLayout();
+				return true;
+			}
+			if (name == "SetToolbarPlacement") {
+				const auto placement = ParsePluginToolbarPlacement(At(arguments, 1).AsText());
+				if (!placement.has_value()) {
+					failure = "toolbar placement has to be 'Tabbed' or 'Pinned'";
+					return false;
+				}
+				Plugin.Toolbars[toolbar].Placement = *placement;
+				Owner.InvalidateToolbarLayout();
 				return true;
 			}
 
@@ -838,6 +954,7 @@ namespace studio {
 			PluginButton &control = Plugin.Toolbars[toolbar].Buttons[button];
 			if (name == "SetToolVisible") {
 				control.Visible = At(arguments, 2).AsBoolean();
+				Owner.InvalidateToolbarLayout();
 				return true;
 			}
 			if (At(arguments, 2).Tag != HostTag::Number || !std::isfinite(At(arguments, 2).Number)) {
@@ -845,6 +962,7 @@ namespace studio {
 				return false;
 			}
 			control.Width = ClampPluginToolWidth(static_cast<float>(At(arguments, 2).Number));
+			Owner.InvalidateToolbarLayout();
 			return true;
 		}
 

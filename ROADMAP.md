@@ -80,11 +80,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add plugin dock widgets with stable identities, first-use dock targets, size constraints, an editor panel, and a generated View menu for reopening them.
 - [x] add a plugin manager widget with metadata, running and faulted states, persisted enable controls, error details, widget access, and reload.
 - [x] bridge engine behavior through the shared plugin host surface in Luau and JavaScript with matching value, service and callback behavior.
-- [x] move the standard Home, Model, Script, View, Plugins and Demo ribbon tools into the built-in Default Studio plugin while keeping transport and scene controls host-owned.
+- [x] move every ribbon control, including transport, scene selection, manipulators and snap amounts, into atomic cells owned by the built-in Default Studio plugin.
 - [x] add plugin functions for buttons, toggles, dropdowns, toolbar visibility and sizing, dock widgets, viewport options and creation, script source editing, and opening script-editor tabs.
 - [x] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
-- [_] merge toolbar tools - select, move, rotate, stud amount, rotate amount, etc - to plugin
-- [_] make studio default tool plugin disable work. also make hot-reloading a thing
+- [x] compose plugin toolbars as cached pinned or tabbed row, column and cell grids, with persisted tab creation, renaming, ordering, hiding and deletion from the tab context menu.
+- [x] make Default Studio disable-able, expose matching Luau and JavaScript toolbar tab, row, column, cell and label functions, and hot-reload changed plugin source trees with debounced targeted restarts and structural rescans.
 
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
