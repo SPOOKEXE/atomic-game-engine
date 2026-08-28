@@ -1,7 +1,7 @@
 #pragma once
 
-// Team create's networking half: an editor saying it is here, and seeing the
-// others.
+// Team create's session: discovery, invitation, and the ordered edit stream
+// shared by the editors in it.
 //
 // **What this is, exactly.** It is the session layer - an editor announces
 // itself on the subnet or registers at a rendezvous point, other editors see
@@ -11,19 +11,9 @@
 // `Content`, which is the whole reason discovery is a member rather than three
 // features.
 //
-// **What this is not, and saying so plainly matters more than usual here.**
-// There is no shared document. Two editors that can see each other cannot yet
-// edit one place together - that needs a change model with an ordering, and
-// this repository has one (`replication::Authority`) that is built for a
-// server's world rather than for two people's undo stacks. So what exists is
-// the part that has to exist first and the part that was actually asked for at
-// v0.13: **the network**. A panel that pretended otherwise would be the worse
-// outcome, because "half-added is worse than not started" is exactly about a
-// feature nobody can tell the shape of.
-//
-// The address a peer is listed at is the editor's hosted server - the one
-// `RunMode::Play` already stands up - so when the shared document arrives it
-// has somewhere to arrive.
+// Discovery only hands over an endpoint. `EditStream` is the shared-document
+// half: committed waypoints cross that endpoint in order, remote changes stay
+// out of local undo, and model leases serialize edits that overlap.
 //
 // @tier client
 
@@ -34,8 +24,10 @@
 #include <network/Advert.hpp>
 #include <network/Directory.hpp>
 #include <network/Presence.hpp>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <studio/EditStream.hpp>
 
 namespace studio {
@@ -113,7 +105,12 @@ namespace studio {
 		// @return `false` when the address is not one, or no socket could be
 		//         opened.
 		// @since v0.13
-		bool Join(const engine::net::Endpoint &at, double nowSeconds, std::string &error);
+		bool Join(
+			const engine::net::Endpoint &at,
+			double nowSeconds,
+			std::string &error,
+			std::string_view secret = {}
+		);
 
 		// The edits crossing between this editor and the others.
 		//
@@ -212,7 +209,8 @@ namespace studio {
 			const TeamCreateSettings &settings,
 			bool announce,
 			std::span<const std::string> secrets,
-			std::string &error
+			std::string &error,
+			std::optional<network::SessionKey> key = std::nullopt
 		);
 
 		std::unique_ptr<network::Presence> Presence_;

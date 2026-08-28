@@ -164,10 +164,17 @@ namespace engine::ui {
 		// The semantic pair, which no palette declares.
 		Warning,
 		Error,
+
+		// Script editor syntax roles.
+		ScriptKeyword,
+		ScriptString,
+		ScriptComment,
+		ScriptNumber,
+		ScriptType,
 	};
 
 	// How many there are, for a settings panel and a loop that iterates them.
-	inline constexpr size_t THEME_COLOUR_COUNT = 7;
+	inline constexpr size_t THEME_COLOUR_COUNT = 12;
 
 	// A colour's name, as a settings panel shows it and as a file spells it.
 	//

@@ -138,7 +138,7 @@ namespace engine::ui {
 			return PALETTES[index < PALETTE_COUNT ? index : 0];
 		}
 
-		// The seven colours a theme is built from, with nothing left unchosen.
+		// The resolved colours a theme is built from, with nothing left unchosen.
 		//
 		// **A resolved skin rather than a `PaletteSpec`**, because a spec is what
 		// a palette *declares* and this is what is actually being drawn: the
@@ -184,6 +184,11 @@ namespace engine::ui {
 			skin[ThemeColour::TextMuted] = spec.TextMuted;
 			skin[ThemeColour::Warning] = DEFAULT_WARNING;
 			skin[ThemeColour::Error] = DEFAULT_ERROR;
+			skin[ThemeColour::ScriptKeyword] = spec.AccentHot;
+			skin[ThemeColour::ScriptString] = ImVec4{0.42f, 0.78f, 0.50f, 1.0f};
+			skin[ThemeColour::ScriptComment] = spec.TextMuted;
+			skin[ThemeColour::ScriptNumber] = ImVec4{0.95f, 0.68f, 0.35f, 1.0f};
+			skin[ThemeColour::ScriptType] = ImVec4{0.52f, 0.76f, 1.0f, 1.0f};
 
 			const auto apply = [&skin](const ThemeColours &chosen) {
 				for (size_t index = 0; index < THEME_COLOUR_COUNT; index++) {
@@ -357,6 +362,11 @@ namespace engine::ui {
 			"TextMuted",
 			"Warning",
 			"Error",
+			"ScriptKeyword",
+			"ScriptString",
+			"ScriptComment",
+			"ScriptNumber",
+			"ScriptType",
 		};
 	}
 
@@ -571,6 +581,16 @@ namespace engine::ui {
 			return Pack(DEFAULT_WARNING);
 		case ThemeColour::Error:
 			return Pack(DEFAULT_ERROR);
+		case ThemeColour::ScriptKeyword:
+			return Pack(spec.AccentHot);
+		case ThemeColour::ScriptString:
+			return IM_COL32(0x6B, 0xC7, 0x80, 0xFF);
+		case ThemeColour::ScriptComment:
+			return Pack(spec.TextMuted);
+		case ThemeColour::ScriptNumber:
+			return IM_COL32(0xF2, 0xAD, 0x59, 0xFF);
+		case ThemeColour::ScriptType:
+			return IM_COL32(0x85, 0xC2, 0xFF, 0xFF);
 		}
 		// No default label, so adding a colour is a warning here.
 		return Pack(spec.Surface);

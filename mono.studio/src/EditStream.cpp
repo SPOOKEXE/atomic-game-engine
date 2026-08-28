@@ -4,6 +4,8 @@
 #include <engine/game/Values.hpp>
 
 #include <algorithm>
+#include <array>
+#include <string_view>
 #include <studio/EditStream.hpp>
 #include <utility>
 
@@ -15,6 +17,19 @@ namespace studio {
 	using engine::world::WorldId;
 
 	namespace {
+		constexpr std::string_view SERVER_IDENTITY_DOMAIN = "atomic.studio.server.v1";
+		constexpr std::string_view CLIENT_IDENTITY_DOMAIN = "atomic.studio.client.v1";
+
+		std::span<const std::byte> BytesOf(std::string_view text) {
+			return {reinterpret_cast<const std::byte *>(text.data()), text.size()};
+		}
+
+		std::optional<engine::assets::SigningKey>
+		DeriveIdentity(const network::SessionKey &key, std::string_view domain) {
+			const std::array<std::byte, network::SessionKey::TAG_BYTES> seed = key.Tag(BytesOf(domain));
+			return engine::assets::SigningKey::FromSeed(seed);
+		}
+
 		// How this session is paced.
 		//
 		// **A short keep-alive, and it is load-bearing rather than tidy.** An
@@ -461,8 +476,13 @@ namespace studio {
 	// The session
 	// -------------------------------------------------------------------------
 
-	std::unique_ptr<EditStream>
-	EditStream::Host(engine::net::Transport &transport, CommandLog &log, engine::world::Universe &universe) {
+	std::unique_ptr<EditStream> EditStream::Host(
+		engine::net::Transport &transport,
+		CommandLog &log,
+		engine::world::Universe &universe,
+		uint16_t editorLimit,
+		const network::SessionKey *accessKey
+	) {
 		// **QUIC by default, which is `ListenerSettings`'s own default and not a
 		// choice made here.** The studio has one host path and one join path and
 		// both go through `SessionPort`, so what the editor gets is whatever the
@@ -476,11 +496,43 @@ namespace studio {
 		serving.Quic.BytesPerTick = serving.Session.Link.BytesPerTick;
 
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));
+		stream->EditorLimit = editorLimit;
+		if (accessKey != nullptr) {
+			stream->ServerIdentity = DeriveIdentity(*accessKey, SERVER_IDENTITY_DOMAIN);
+			std::optional<engine::assets::SigningKey> expectedClient =
+				DeriveIdentity(*accessKey, CLIENT_IDENTITY_DOMAIN);
+			if (!stream->ServerIdentity || !expectedClient) {
+				return nullptr;
+			}
+
+			stream->RequiredClientIdentity = expectedClient->Public();
+			serving.Quic.Connection.Tls.Seed = accessKey->Tag(BytesOf(SERVER_IDENTITY_DOMAIN));
+			serving.Quic.Connection.Tls.HasSeed = true;
+			stream->Private = true;
+		}
 		stream->Server = std::make_unique<engine::replication::Listener>(transport, serving);
+		if (stream->Private) {
+			stream->Server->SetIdentity(&*stream->ServerIdentity);
+			const engine::assets::PublicKey required = *stream->RequiredClientIdentity;
+			stream->Server->SetClientPolicy(
+				[required](engine::replication::ClientId, const engine::assets::PublicKey &claimed) {
+					return claimed == required;
+				}
+			);
+			stream->Server->RequireClientIdentity(true);
+		}
 
 		EditStream *self = stream.get();
+		stream->Server->OnDropped([self](engine::replication::ClientId client) { self->Forget(client); });
 		stream->Server->OnUserMessage(
 			[self](engine::replication::ClientId from, std::span<const std::byte> payload) {
+				if (self->Private) {
+					const std::optional<engine::assets::PublicKey> identity = self->Server->IdentityOf(from);
+					if (!identity || !self->RequiredClientIdentity ||
+						*identity != *self->RequiredClientIdentity) {
+						return;
+					}
+				}
 				// The host's clock at the moment it polled. Passed down rather
 				// than read here, for the module rule every layer under this
 				// one keeps.
@@ -495,7 +547,8 @@ namespace studio {
 		const engine::net::Endpoint &host,
 		double nowSeconds,
 		CommandLog &log,
-		engine::world::Universe &universe
+		engine::world::Universe &universe,
+		const network::SessionKey *accessKey
 	) {
 		std::unique_ptr<EditStream> stream(new EditStream(log, universe));
 		stream->Unused = std::make_unique<Store>("teamcreate.unused");
@@ -506,6 +559,16 @@ namespace studio {
 		engine::replication::ConnectorSettings joining;
 		joining.Session = EditSession();
 		joining.Quic.BytesPerTick = joining.Session.Link.BytesPerTick;
+		if (accessKey != nullptr) {
+			stream->ServerIdentity = DeriveIdentity(*accessKey, SERVER_IDENTITY_DOMAIN);
+			stream->ClientIdentity = DeriveIdentity(*accessKey, CLIENT_IDENTITY_DOMAIN);
+			if (!stream->ServerIdentity || !stream->ClientIdentity) {
+				return nullptr;
+			}
+			joining.ServerIdentity = stream->ServerIdentity->Public();
+			joining.ClientIdentity = &*stream->ClientIdentity;
+			stream->Private = true;
+		}
 		stream->Client =
 			std::make_unique<engine::replication::Connector>(transport, host, nowSeconds, joining);
 
@@ -520,18 +583,16 @@ namespace studio {
 
 	bool EditStream::Connected() const {
 		// A host needs nobody's permission to edit its own document.
-		return Server != nullptr || (Client != nullptr && Client->Admitted());
+		// A guest is connected only after the host's edit-stream welcome. Transport
+		// admission alone does not prove a private host accepted its identity.
+		return Server != nullptr || (Client != nullptr && Me != HOST_EDITOR);
 	}
 
 	size_t EditStream::Editors() const {
 		if (Server != nullptr) {
-			// **`Carrying` and not `Count`.** Under QUIC a connection exists
-			// before its handshake finishes, and a peer in that window cannot be
-			// sent an edit - so counting it would show a person an editor who
-			// would miss whatever they typed next.
-			return Server->Carrying() + 1;
+			return Members.size() + 1;
 		}
-		return Client != nullptr && Client->Admitted() ? 2 : 1;
+		return Connected() ? 2 : 1;
 	}
 
 	bool EditStream::Publish(uint64_t waypoint, std::span<const Command> commands, double nowSeconds) {
@@ -560,7 +621,7 @@ namespace studio {
 			// thing advisory.
 			const Turn turn = Holds.Request(held.Subject, HOST_EDITOR, nowSeconds);
 			if (turn == Turn::Granted) {
-				Server->Broadcast(held.Payload, nowSeconds);
+				Broadcast(held.Payload, nowSeconds);
 				Tally.Sent++;
 				for (const Waiting &woken : Holds.Release(held.Subject, HOST_EDITOR, nowSeconds)) {
 					Grant(woken.Holder, woken.Subject, nowSeconds);
@@ -645,7 +706,7 @@ namespace studio {
 			Pending.erase(Pending.begin() + static_cast<ptrdiff_t>(index));
 
 			if (Server != nullptr) {
-				Server->Broadcast(payload, nowSeconds);
+				Broadcast(payload, nowSeconds);
 				Tally.Sent++;
 				for (const Waiting &woken : Holds.Release(subject, HOST_EDITOR, nowSeconds)) {
 					Grant(woken.Holder, woken.Subject, nowSeconds);
@@ -671,6 +732,31 @@ namespace studio {
 		Members.emplace_back(editor, client);
 	}
 
+	void EditStream::Forget(engine::replication::ClientId client) {
+		std::erase_if(Members, [client](const auto &member) { return member.second == client; });
+	}
+
+	size_t EditStream::Broadcast(
+		std::span<const std::byte> payload, double nowSeconds, engine::replication::ClientId except
+	) {
+		if (Server == nullptr) {
+			return 0;
+		}
+
+		size_t sent = 0;
+		for (const auto &member : Members) {
+			if (member.second == except) {
+				continue;
+			}
+			if (Server->SendTo(member.second, payload, nowSeconds)) {
+				sent++;
+			} else {
+				Tally.Undelivered++;
+			}
+		}
+		return sent;
+	}
+
 	void EditStream::PublishLocks(double nowSeconds) {
 		if (Server == nullptr) {
 			return;
@@ -679,7 +765,7 @@ namespace studio {
 		EditMessage message;
 		message.Kind = EditFrame::Locks;
 		message.Locks.assign(Holds.Held().begin(), Holds.Held().end());
-		Server->Broadcast(EncodeMessage(message), nowSeconds);
+		Broadcast(EncodeMessage(message), nowSeconds);
 	}
 
 	void EditStream::Receive(
@@ -701,6 +787,14 @@ namespace studio {
 		// as far as every turn is concerned, and the two take turns with
 		// themselves.
 		const EditorId sender = Server != nullptr ? from.Index + 1 : HOST_EDITOR;
+		const bool knownMember =
+			Server == nullptr || std::any_of(Members.begin(), Members.end(), [from](const auto &member) {
+				return member.second == from;
+			});
+		if (Server != nullptr && message->Kind != EditFrame::Hello && !knownMember) {
+			Tally.Malformed++;
+			return;
+		}
 
 		switch (message->Kind) {
 		case EditFrame::Locks:
@@ -728,6 +822,9 @@ namespace studio {
 				// A guest does not arbitrate. A hello arriving at one is a peer
 				// that has the roles the wrong way round.
 				Tally.Malformed++;
+				return;
+			}
+			if (!knownMember && EditorLimit != 0 && Members.size() + 1 >= EditorLimit) {
 				return;
 			}
 
@@ -801,7 +898,7 @@ namespace studio {
 			// makes a path resolve to the same instance in every editor;
 			// sending it back to its author would have them apply their own
 			// change twice.
-			Server->Broadcast(payload, nowSeconds, from);
+			Broadcast(payload, nowSeconds, from);
 			Tally.Relayed++;
 
 			// The turn is over the moment the edit has landed and gone out.

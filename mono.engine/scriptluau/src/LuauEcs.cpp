@@ -371,7 +371,10 @@ namespace engine::script {
 			lua_newtable(state);
 			for (const FieldDescriptor &field : schema->Fields()) {
 				lua_newtable(state);
-				lua_pushstring(state, ecs::Describe(field.Type));
+				const std::string type = field.Type == PropertyType::Enum
+											 ? "Enum." + std::string(field.Enum.Text())
+											 : std::string(ecs::Describe(field.Type));
+				lua_pushlstring(state, type.data(), type.size());
 				lua_setfield(state, -2, "Type");
 				lua_newtable(state);
 				for (size_t at = 0; at < field.Tags.size(); at++) {

@@ -443,6 +443,89 @@ TEST_CASE("a schema reads back in a shape the declaration accepts", "[script-ecs
 	REQUIRE(Schemas::Find(engine::core::Name(second))->Fields().size() == 3);
 }
 
+TEST_CASE("component metadata and filtered queries agree across both languages", "[script-ecs]") {
+	engine::scene::EnsureClassTree();
+	Store store("script_ecs");
+	const std::string included = Unique("filtered");
+	const std::string excluded = Unique("filtered-tag");
+
+	{
+		const auto luau = MakeRuntime(store, Language::Luau);
+		MustRun(
+			*luau,
+			"World:DefineComponent('" + included +
+				"', { Value = 'int32', Mode = 'Enum.AlphaMode' })\n"
+				"World:DefineComponent('" +
+				excluded +
+				"', {})\n"
+				"assert(World:SetComponentTags('" +
+				included +
+				"', { 'experiment' }))\n"
+				"assert(World:SetComponentFieldTags('" +
+				included +
+				"', 'Value', { 'constant' }))\n"
+				"assert(World:ExposeComponentField('" +
+				included +
+				"', 'Value', true))\n"
+				"local metadata = World:GetComponentMetadata('" +
+				included +
+				"')\n"
+				"assert(metadata.Tags[1] == 'experiment')\n"
+				"assert(metadata.Fields.Value.Tags[1] == 'constant')\n"
+				"assert(metadata.Fields.Value.Exposed)\n"
+				"assert(metadata.Fields.Mode.Type == 'Enum.AlphaMode')\n"
+				"local keep = World:CreateEntity('luau-included')\n"
+				"keep:SetComponent('" +
+				included +
+				"', { Value = 1 })\n"
+				"local drop = World:CreateEntity('luau-excluded')\n"
+				"drop:SetComponent('" +
+				included +
+				"', { Value = 2 })\n"
+				"drop:SetComponent('" +
+				excluded +
+				"')\n"
+				"assert(#World:QueryFiltered({ '" +
+				included + "' }, { '" + excluded + "' }) == 1)\n"
+		);
+	}
+
+	const auto javascript = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*javascript,
+		"const metadata = World.GetComponentMetadata('" + included +
+			"');\n"
+			"if (metadata.Tags[0] !== 'experiment') throw new Error('component tags');\n"
+			"if (metadata.Fields.Value.Tags[0] !== 'constant') throw new Error('field tags');\n"
+			"if (!metadata.Fields.Value.Exposed) throw new Error('exposed field');\n"
+			"if (metadata.Fields.Mode.Type !== 'Enum.AlphaMode') throw new Error('enum metadata');\n"
+			"if (!World.SetComponentTags('" +
+			included +
+			"', ['experiment'])) throw new Error('set component tags');\n"
+			"if (!World.SetComponentFieldTags('" +
+			included +
+			"', 'Value', ['constant'])) throw new Error('set field tags');\n"
+			"if (!World.ExposeComponentField('" +
+			included +
+			"', 'Value', true)) throw new Error('expose field');\n"
+			"const keep = World.CreateEntity('js-included');\n"
+			"keep.SetComponent('" +
+			included +
+			"', { Value: 3 });\n"
+			"const drop = World.CreateEntity('js-excluded');\n"
+			"drop.SetComponent('" +
+			included +
+			"', { Value: 4 });\n"
+			"drop.SetComponent('" +
+			excluded +
+			"');\n"
+			"const found = World.QueryFiltered(['" +
+			included + "'], ['" + excluded +
+			"']);\n"
+			"if (found.length !== 2) throw new Error('include/exclude query');\n"
+	);
+}
+
 // --- the other language ------------------------------------------------------
 
 TEST_CASE("the JavaScript surface reaches the same storage", "[script-ecs]") {

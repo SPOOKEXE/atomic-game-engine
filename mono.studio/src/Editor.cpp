@@ -2874,6 +2874,8 @@ namespace studio {
 		GameName = Name(DEFAULT_GAME);
 		UniverseNameDraft = std::string(GameName.Text());
 		GamePath.clear();
+		DiffLoaded = false;
+		SavedChangesFor.clear();
 		Modified = false;
 		RenderingProfiles.Clear();
 		RenderingProfiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument());
@@ -3050,6 +3052,8 @@ namespace studio {
 		PipelineSelected.clear();
 		UniverseNameDraft = std::string(GameName.Text());
 		GamePath = path;
+		DiffLoaded = false;
+		SavedChangesFor.clear();
 		Modified = false;
 		InstanceCounts.clear();
 
@@ -3232,6 +3236,22 @@ namespace studio {
 			}
 		}
 
+		// Capture the exact old bytes before the writer replaces them. A first
+		// save has no previous document and therefore no synthetic history row.
+		std::string previousDocument;
+		bool hadPreviousDocument = false;
+		{
+			std::ifstream previous(path, std::ios::binary);
+			if (previous) {
+				std::ostringstream buffer;
+				buffer << previous.rdbuf();
+				if (previous.eof() || !previous.fail()) {
+					previousDocument = buffer.str();
+					hadPreviousDocument = true;
+				}
+			}
+		}
+
 		std::string error;
 		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
 			Say("save failed: " + error, LogLevel::Error);
@@ -3240,6 +3260,21 @@ namespace studio {
 
 		GamePath = path;
 		Modified = false;
+		DiffLoaded = false;
+
+		if (hadPreviousDocument) {
+			std::ifstream saved(path, std::ios::binary);
+			std::ostringstream buffer;
+			buffer << saved.rdbuf();
+			if (!saved || (saved.fail() && !saved.eof())) {
+				Say("saved, but could not read the new file for Changes history", LogLevel::Warning);
+			} else {
+				std::string historyError;
+				if (!RecordSavedChange(path, previousDocument, buffer.str(), historyError)) {
+					Say("saved, but Changes history failed: " + historyError, LogLevel::Warning);
+				}
+			}
+		}
 
 		// A Save As is how a game gets its real name, so the list has to follow
 		// it - otherwise the menu would go on offering the scratch file it was

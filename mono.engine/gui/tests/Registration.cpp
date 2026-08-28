@@ -70,6 +70,82 @@ namespace {
 		"gui.PageLayout",
 		"gui.DragDetector",
 	};
+
+	struct ExpectedProperty {
+		std::string_view Class;
+		std::string_view Property;
+		bool Writable = true;
+	};
+
+	// The exact v0.20 GUI surface. The Studio Properties panel and both script
+	// bindings consume this same descriptor list, so absence or wrong mutability
+	// here is absence or wrong mutability in all three places.
+	const std::vector<ExpectedProperty> V020_PROPERTIES{
+		{"SurfaceGui", "ZOffset"},
+		{"SurfaceGui", "MaxDistance"},
+		{"SurfaceGui", "ClipsDescendants"},
+		{"SurfaceGui", "Active"},
+		{"BillboardGui", "Active"},
+		{"BillboardGui", "Brightness"},
+		{"BillboardGui", "ClipsDescendants"},
+		{"BillboardGui", "CurrentDistance", false},
+		{"BillboardGui", "DistanceStep"},
+		{"BillboardGui", "ExtentsOffsetWorldSpace"},
+		{"BillboardGui", "SizeOffset"},
+		{"BillboardGui", "PlayerToHideFrom"},
+		{"ScrollingFrame", "ScrollingEnabled"},
+		{"ScrollingFrame", "AutomaticCanvasSize"},
+		{"ScrollingFrame", "HorizontalScrollBarInset"},
+		{"ScrollingFrame", "VerticalScrollBarInset"},
+		{"ScrollingFrame", "VerticalScrollBarPosition"},
+		{"ScrollingFrame", "ElasticBehavior"},
+		{"ScrollingFrame", "TopImage"},
+		{"ScrollingFrame", "MidImage"},
+		{"ScrollingFrame", "BottomImage"},
+		{"ScrollingFrame", "AbsoluteCanvasSize", false},
+		{"ScrollingFrame", "AbsoluteWindowSize", false},
+		{"GuiObject", "Interactable"},
+		{"GuiObject", "NextSelectionUp"},
+		{"GuiObject", "NextSelectionDown"},
+		{"GuiObject", "NextSelectionLeft"},
+		{"GuiObject", "NextSelectionRight"},
+		{"GuiObject", "SelectionOrder"},
+		{"GuiObject", "SelectionImageObject"},
+		{"ImageButton", "HoverImage"},
+		{"ImageButton", "PressedImage"},
+		{"ImageButton", "ResampleMode"},
+		{"ImageLabel", "ResampleMode"},
+		{"UIStroke", "Enabled"},
+		{"UIStroke", "ApplyStrokeMode"},
+		{"UIGradient", "Color"},
+		{"UIGradient", "Transparency"},
+		{"UIGradient", "Offset"},
+		{"UIGradient", "Rotation"},
+		{"UIGradient", "Enabled"},
+		{"UITableLayout", "Padding"},
+		{"UITableLayout", "FillEmptySpaceColumns"},
+		{"UITableLayout", "FillEmptySpaceRows"},
+		{"UITableLayout", "FillDirection"},
+		{"UITableLayout", "HorizontalAlignment"},
+		{"UITableLayout", "VerticalAlignment"},
+		{"UITableLayout", "SortOrder"},
+		{"UIPageLayout", "CurrentPage"},
+		{"UIPageLayout", "Padding"},
+		{"UIPageLayout", "Circular"},
+		{"UIPageLayout", "FillDirection"},
+		{"UIPageLayout", "SortOrder"},
+		{"UIPageLayout", "Animated"},
+		{"UIPageLayout", "TweenTime"},
+		{"UIPageLayout", "EasingStyle"},
+		{"UIPageLayout", "EasingDirection"},
+		{"UIDragDetector", "BoundingUI"},
+		{"UIDragDetector", "DragAxis"},
+		{"UIDragDetector", "MinDragTranslation"},
+		{"UIDragDetector", "MaxDragTranslation"},
+		{"UIDragDetector", "Enabled"},
+		{"UIDragDetector", "DragStyle"},
+		{"UIDragDetector", "ResponseStyle"},
+	};
 }
 
 TEST_CASE("every component registers under its promised name", "[gui][registration]") {
@@ -84,6 +160,52 @@ TEST_CASE("every component registers under its promised name", "[gui][registrati
 		// compilers and would put `engine::gui::Element` as GCC happens to
 		// print it into a save file.
 		CHECK(Components::Describe(id).Name.Text() == name);
+	}
+}
+
+TEST_CASE("the complete v0.20 GUI surface reaches descriptor consumers", "[gui][registration]") {
+	RegisterGuiClasses();
+	Store store("gui_registration.v020_surface");
+
+	for (const ExpectedProperty &expected : V020_PROPERTIES) {
+		INFO("property: " << expected.Class << "." << expected.Property);
+		const Entity instance = store.CreateInstance(GuiClass(expected.Class), std::string(expected.Class));
+		REQUIRE(instance != engine::ecs::NULL_ENTITY);
+
+		const engine::ecs::PropertyDescriptor *found = nullptr;
+		for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(instance)) {
+			if (property.Name == Name(expected.Property)) {
+				found = &property;
+				break;
+			}
+		}
+		REQUIRE(found != nullptr);
+		CHECK(found->Writable == expected.Writable);
+	}
+
+	for (const std::string_view textClass : {"TextButton", "TextLabel", "TextBox"}) {
+		for (const ExpectedProperty &expected : std::vector<ExpectedProperty>{
+				 {textClass, "RichText"},
+				 {textClass, "MaxVisibleGraphemes"},
+				 {textClass, "ContentText", false},
+				 {textClass, "TextBounds", false},
+				 {textClass, "TextFits", false},
+			 }) {
+			INFO("property: " << expected.Class << "." << expected.Property);
+			const Entity instance =
+				store.CreateInstance(GuiClass(expected.Class), std::string(expected.Class));
+			REQUIRE(instance != engine::ecs::NULL_ENTITY);
+
+			const engine::ecs::PropertyDescriptor *found = nullptr;
+			for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(instance)) {
+				if (property.Name == Name(expected.Property)) {
+					found = &property;
+					break;
+				}
+			}
+			REQUIRE(found != nullptr);
+			CHECK(found->Writable == expected.Writable);
+		}
 	}
 }
 

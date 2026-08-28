@@ -1669,6 +1669,11 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Team Create")) {
+			DrawTeamCreateMenu();
+			ImGui::EndMenu();
+		}
+
 		// The title, right-aligned. A window title bar is the platform's and
 		// says "atomic studio"; what is *open* belongs where the eye already is.
 		{

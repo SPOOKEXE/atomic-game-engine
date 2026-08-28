@@ -1758,6 +1758,13 @@ declare extern type EngineWorld with
 	-- The field list a component was declared with, in a shape
 	-- `DefineComponent` accepts back.
 	function GetComponentSchema(self, component: string): { [string]: string }?
+	function SetComponentTags(self, component: string, tags: { string }): boolean
+	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
+	function ExposeComponentField(self, component: string, field: string, exposed: boolean): boolean
+	function GetComponentMetadata(self, component: string): {
+		Tags: { string },
+		Fields: { [string]: { Type: string, Tags: { string }, Exposed: boolean } },
+	}?
 
 	-- An entity carrying nothing: no class, no place in the tree, nothing drawn.
 	-- Still an `Instance`, because an instance *is* an entity.
@@ -1767,6 +1774,10 @@ declare extern type EngineWorld with
 	-- order. Naming a component nothing declared is an error rather than an
 	-- empty result.
 	function Query(self, ...: string): { Instance }
+
+	-- Every entity carrying all included components and none of the excluded
+	-- components.
+	function QueryFiltered(self, include: { string }, exclude: { string }): { Instance }
 
 	function Count(self, ...: string): number
 end
@@ -3385,6 +3396,13 @@ interface EngineWorld {
 	// The field list a component was declared with, in a shape
 	// `DefineComponent` accepts back.
 	GetComponentSchema(component: string): { [field: string]: string } | null;
+	SetComponentTags(component: string, tags: string[]): boolean;
+	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
+	ExposeComponentField(component: string, field: string, exposed: boolean): boolean;
+	GetComponentMetadata(component: string): {
+		Tags: string[];
+		Fields: { [field: string]: { Type: string; Tags: string[]; Exposed: boolean } };
+	} | null;
 
 	// An entity carrying nothing: no class, no place in the tree, nothing drawn.
 	// Still an `Instance`, because an instance is an entity.
@@ -3394,6 +3412,10 @@ interface EngineWorld {
 	// order. Naming a component nothing declared is an error rather than an
 	// empty result.
 	Query(...components: string[]): Instance[];
+
+	// Every entity carrying all included components and none of the excluded
+	// components.
+	QueryFiltered(include: string[], exclude: string[]): Instance[];
 
 	Count(...components: string[]): number;
 }

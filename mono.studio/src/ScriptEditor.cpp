@@ -5,10 +5,12 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <string>
+#include <string_view>
 #include <studio/CodeMetrics.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
@@ -17,6 +19,10 @@ namespace studio {
 
 	using engine::core::Name;
 	using engine::ecs::Store;
+
+	namespace {
+		void DrawScriptSource(std::string_view text, const CodeEdit &edit, ImVec2 fieldMin, ImVec2 fieldSize);
+	}
 
 	void Editor::DrawScripts() {
 		if (!ShowScripts) {
@@ -276,6 +282,7 @@ namespace studio {
 						const float available = ImGui::GetContentRegionAvail().x;
 						const bool minimapFits = available > minimapWidth * 3.0f;
 
+						ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 0));
 						const bool changed = CodeField(
 							"##text",
 							tab.Text,
@@ -283,6 +290,8 @@ namespace studio {
 							minimapFits ? available - minimapWidth : -1.0f,
 							-1.0f
 						);
+						ImGui::PopStyleColor();
+						DrawScriptSource(tab.Text, tab.Edit, fieldMin, ImGui::GetItemRectSize());
 
 						// Read here, while the field is still the last item,
 						// so imgui's own rest delay decides when a tooltip is
@@ -384,6 +393,158 @@ namespace studio {
 				walk(engine::script::Language::JavaScript);
 
 			return language == engine::script::Language::Luau ? luau : javascript;
+		}
+
+		enum class ScriptToken : uint8_t {
+			Plain,
+			Keyword,
+			String,
+			Comment,
+			Number,
+			Type,
+		};
+
+		bool IsScriptKeyword(const std::string_view word) {
+			static constexpr std::array<std::string_view, 31> KEYWORDS{
+				"and",	 "break",  "continue", "do",	 "else", "elseif", "end",	"export",
+				"false", "for",	   "function", "if",	 "in",	 "local",  "nil",	"not",
+				"or",	 "repeat", "return",   "then",	 "true", "type",   "until", "while",
+				"class", "const",  "extends",  "import", "new",	 "this",   "throw",
+			};
+			return std::find(KEYWORDS.begin(), KEYWORDS.end(), word) != KEYWORDS.end();
+		}
+
+		bool IsScriptType(const std::string_view word) {
+			return word == "any" || word == "boolean" || word == "number" || word == "string" ||
+				   word == "table" || word == "thread" || word == "userdata" || word == "Vector2" ||
+				   word == "Vector3" || word == "CFrame" || word == "Color3" || word == "Instance" ||
+				   word == "Enum" || word == "UDim2" || word == "BrickColor";
+		}
+
+		ScriptToken TokenFor(const std::string_view word) {
+			if (IsScriptKeyword(word)) {
+				return ScriptToken::Keyword;
+			}
+			if (IsScriptType(word)) {
+				return ScriptToken::Type;
+			}
+			return ScriptToken::Plain;
+		}
+
+		unsigned int ColourFor(const ScriptToken token) {
+			switch (token) {
+			case ScriptToken::Keyword:
+				return engine::ui::ColourOf(engine::ui::ThemeColour::ScriptKeyword);
+			case ScriptToken::String:
+				return engine::ui::ColourOf(engine::ui::ThemeColour::ScriptString);
+			case ScriptToken::Comment:
+				return engine::ui::ColourOf(engine::ui::ThemeColour::ScriptComment);
+			case ScriptToken::Number:
+				return engine::ui::ColourOf(engine::ui::ThemeColour::ScriptNumber);
+			case ScriptToken::Type:
+				return engine::ui::ColourOf(engine::ui::ThemeColour::ScriptType);
+			case ScriptToken::Plain:
+				return engine::ui::ColourOf(engine::ui::ThemeColour::Text);
+			}
+			return engine::ui::ColourOf(engine::ui::ThemeColour::Text);
+		}
+
+		void DrawScriptSource(
+			const std::string_view text, const CodeEdit &edit, const ImVec2 fieldMin, const ImVec2 fieldSize
+		) {
+			ImGuiWindow *code = ImGui::FindWindowByName("##text");
+			if (code == nullptr) {
+				return;
+			}
+
+			const float rowHeight = ImGui::GetTextLineHeight();
+			const float glyph = ImGui::CalcTextSize("0").x;
+			const ImVec2 padding = ImGui::GetStyle().FramePadding;
+			const ImVec2 origin(
+				fieldMin.x + padding.x - code->Scroll.x, fieldMin.y + padding.y - code->Scroll.y
+			);
+			// Append to the multiline field's child window. Drawing on the parent
+			// puts the child background over the syntax layer when ImGui submits
+			// its windows.
+			ImDrawList *draw = code->DrawList;
+			draw->PushClipRect(fieldMin, ImVec2(fieldMin.x + fieldSize.x, fieldMin.y + fieldSize.y), true);
+
+			size_t lineStart = 0;
+			size_t line = 0;
+			while (lineStart <= text.size()) {
+				const size_t lineEnd = text.find('\n', lineStart);
+				const size_t end = lineEnd == std::string_view::npos ? text.size() : lineEnd;
+				size_t at = lineStart;
+				while (at < end) {
+					const char character = text[at];
+					ScriptToken token = ScriptToken::Plain;
+					size_t tokenEnd = at + 1;
+
+					if ((character == '-' && at + 1 < end && text[at + 1] == '-') ||
+						(character == '/' && at + 1 < end && text[at + 1] == '/')) {
+						token = ScriptToken::Comment;
+						tokenEnd = end;
+					} else if (character == '\'' || character == '"' || character == '`') {
+						token = ScriptToken::String;
+						const char quote = character;
+						while (tokenEnd < end) {
+							if (text[tokenEnd] == '\\') {
+								tokenEnd = std::min(end, tokenEnd + 2);
+								continue;
+							}
+							if (text[tokenEnd++] == quote) {
+								break;
+							}
+						}
+					} else if (std::isdigit(static_cast<unsigned char>(character))) {
+						token = ScriptToken::Number;
+						while (tokenEnd < end && (std::isalnum(static_cast<unsigned char>(text[tokenEnd])) ||
+												  text[tokenEnd] == '.')) {
+							tokenEnd++;
+						}
+					} else if (std::isalpha(static_cast<unsigned char>(character)) || character == '_') {
+						while (tokenEnd < end && (std::isalnum(static_cast<unsigned char>(text[tokenEnd])) ||
+												  text[tokenEnd] == '_')) {
+							tokenEnd++;
+						}
+						token = TokenFor(text.substr(at, tokenEnd - at));
+					}
+
+					const size_t column = ColumnAt(text, at);
+					const ImVec2 position(
+						origin.x + static_cast<float>(column) * glyph,
+						origin.y + static_cast<float>(line) * rowHeight
+					);
+					draw->AddText(
+						ImGui::GetFont(),
+						ImGui::GetFontSize(),
+						position,
+						ColourFor(token),
+						text.data() + at,
+						text.data() + tokenEnd
+					);
+					at = tokenEnd;
+				}
+
+				if (lineEnd == std::string_view::npos) {
+					break;
+				}
+				lineStart = lineEnd + 1;
+				line++;
+			}
+
+			if (edit.Active && edit.SelectionStart == edit.SelectionEnd) {
+				const size_t caret =
+					static_cast<size_t>(std::clamp(edit.Caret, 0, static_cast<int>(text.size())));
+				const std::string_view before = text.substr(0, caret);
+				const float caretLine = static_cast<float>(std::count(before.begin(), before.end(), '\n'));
+				const float caretColumn = static_cast<float>(ColumnAt(text, caret));
+				const float x = origin.x + caretColumn * glyph;
+				const float y = origin.y + caretLine * rowHeight;
+				draw->AddLine(ImVec2(x, y), ImVec2(x, y + rowHeight), ColourFor(ScriptToken::Plain), 1.0f);
+			}
+
+			draw->PopClipRect();
 		}
 
 	}

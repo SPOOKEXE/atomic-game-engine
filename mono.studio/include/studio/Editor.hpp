@@ -728,6 +728,39 @@ namespace studio {
 		std::string Text;
 	};
 
+	// One save recorded by the Changes panel.
+	//
+	// The two documents are the exact bytes before and after the successful
+	// save. `Source` is where the record was discovered and is not serialized.
+	//
+	// @since v0.20
+	struct SavedChange {
+		std::string SavedAt;
+		std::string Before;
+		std::string After;
+		std::filesystem::path Source;
+	};
+
+	// Serializes one saved change as the sidecar XML format.
+	//
+	// @param change The record to serialize.
+	// @return A complete XML document.
+	std::string SavedChangeXml(const SavedChange &change);
+
+	// Parses one saved change sidecar.
+	//
+	// @param text  The complete XML document.
+	// @param out   Filled only on success.
+	// @param error Filled with a stable reason on failure, when supplied.
+	// @return Whether the document was valid.
+	bool ParseSavedChangeXml(std::string_view text, SavedChange &out, std::string *error = nullptr);
+
+	// Where timestamped change records for a game are stored.
+	//
+	// @param game The game file.
+	// @return A directory beside the game, scoped by its filename.
+	std::filesystem::path SavedChangesDirectory(const std::filesystem::path &game);
+
 	// Compares two documents line by line.
 	//
 	// **A free function with its own suite**, because a comparator that reports
@@ -2150,6 +2183,17 @@ namespace studio {
 		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
 		void DrawTeamCreate();
 
+		// The main-menu entry points into the same collaboration state as the
+		// panel. Keeping the actions here prevents the menu and panel from growing
+		// separate hosting rules.
+		//@{
+		void DrawTeamCreateMenu();
+		void WatchForTeam();
+		void HostTeam();
+		void JoinTeam(const engine::net::Endpoint &address, bool privateSession);
+		void LeaveTeam();
+		//@}
+
 		// Gives one world everything this editor expects every world to have.
 		//
 		// **Five call sites wrote three lines each and one of them wrote two**,
@@ -2733,6 +2777,17 @@ namespace studio {
 
 		// Re-reads the file and re-writes the live game, then compares them.
 		void RefreshDiff();
+
+		// Discovers and parses timestamped save records for the current game.
+		void RefreshSavedChanges();
+
+		// Writes one timestamped record after a successful overwrite.
+		bool RecordSavedChange(
+			const std::filesystem::path &game,
+			std::string_view before,
+			std::string_view after,
+			std::string &error
+		);
 
 		// Builds a Rojo project's tree into the active world.
 		//
@@ -5390,6 +5445,13 @@ namespace studio {
 		char TeamNameField[64] = {};
 		char TeamKeyField[80] = {};
 		char TeamPointField[64] = {};
+		char TeamJoinField[64] = {};
+		int TeamPortField = 0;
+		int TeamPeerLimitField = 8;
+		bool TeamPrivateField = false;
+		bool TeamJoinPrivateField = false;
+		bool TeamRevealKey = false;
+		std::string TeamStatus;
 		//@}
 
 		// The plugins panel. See `DrawPlugins`.
@@ -5560,6 +5622,26 @@ namespace studio {
 
 		// Whether the alignment was abandoned for size. Reported, never silent.
 		bool DiffCoarse = false;
+
+		// Whether the live comparison has run for `GamePath`.
+		bool DiffLoaded = false;
+
+		// Timestamped saves discovered beside the current game.
+		std::vector<SavedChange> SavedChanges;
+
+		// Which saved change the panel is showing.
+		int SavedChangeSelection = 0;
+
+		// The game the saved list belongs to. A Save As invalidates it.
+		std::filesystem::path SavedChangesFor;
+
+		// Records skipped while scanning, summarized for the panel.
+		std::string SavedChangesError;
+
+		// The selected saved record's diff, cached until selection changes.
+		std::vector<DiffLine> SavedDiffRows;
+		std::filesystem::path SavedDiffSource;
+		bool SavedDiffCoarse = false;
 
 		// Breakpoints and the captured stacks. See `DrawDebugger`.
 		bool ShowDebugger = false;
