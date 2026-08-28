@@ -186,6 +186,9 @@ namespace engine::script {
 			return "the declaration was refused";
 		}
 
+		std::vector<std::string> CheckTags(lua_State *state, int index);
+		std::vector<std::string_view> TagViews(const std::vector<std::string> &tags);
+
 		// --- World:DefineComponent -------------------------------------------
 
 		// The field list a script wrote, read out of a Luau table.
@@ -307,6 +310,68 @@ namespace engine::script {
 			return 1;
 		}
 
+		// `World:SetComponentTags(name, { "tag" })`
+		int WorldSetComponentTags(lua_State *state) {
+			const char *name = luaL_checkstring(state, 2);
+			const ComponentId component = Components::Find(Name(name));
+			if (!component.IsValid() || Schemas::Of(component) == nullptr) {
+				luaL_errorL(state, "'%s' is not a script component", name);
+			}
+			const std::vector<std::string> tags = CheckTags(state, 3);
+			const std::vector<std::string_view> views = TagViews(tags);
+			lua_pushboolean(state, Schemas::SetTags(component, views));
+			return 1;
+		}
+
+		// `World:SetComponentFieldTags(name, field, { "tag" })`
+		int WorldSetComponentFieldTags(lua_State *state) {
+			const char *name = luaL_checkstring(state, 2);
+			const ComponentId component = Components::Find(Name(name));
+			if (!component.IsValid() || Schemas::Of(component) == nullptr) {
+				luaL_errorL(state, "'%s' is not a script component", name);
+			}
+			const char *field = luaL_checkstring(state, 3);
+			const std::vector<std::string> tags = CheckTags(state, 4);
+			const std::vector<std::string_view> views = TagViews(tags);
+			lua_pushboolean(state, Schemas::SetFieldTags(component, Name(field), views));
+			return 1;
+		}
+
+		// `World:GetComponentMetadata(name)` -> `{ Tags = {}, Fields = {} }`
+		int WorldGetComponentMetadata(lua_State *state) {
+			const char *name = luaL_checkstring(state, 2);
+			const Schema *schema = Schemas::Find(Name(name));
+			if (schema == nullptr) {
+				lua_pushnil(state);
+				return 1;
+			}
+
+			const std::vector<std::string> componentTags = schema->Tags();
+			lua_newtable(state);
+			lua_newtable(state);
+			for (size_t at = 0; at < componentTags.size(); at++) {
+				lua_pushlstring(state, componentTags[at].data(), componentTags[at].size());
+				lua_rawseti(state, -2, static_cast<int>(at) + 1);
+			}
+			lua_setfield(state, -2, "Tags");
+
+			lua_newtable(state);
+			for (const FieldDescriptor &field : schema->Fields()) {
+				lua_newtable(state);
+				lua_pushstring(state, ecs::Describe(field.Type));
+				lua_setfield(state, -2, "Type");
+				lua_newtable(state);
+				for (size_t at = 0; at < field.Tags.size(); at++) {
+					lua_pushlstring(state, field.Tags[at].data(), field.Tags[at].size());
+					lua_rawseti(state, -2, static_cast<int>(at) + 1);
+				}
+				lua_setfield(state, -2, "Tags");
+				lua_setfield(state, -2, field.Spelling.data());
+			}
+			lua_setfield(state, -2, "Fields");
+			return 1;
+		}
+
 		// `World:CreateEntity(name?)`
 		//
 		// **A bare entity: no class, no place in the tree, nothing drawn.** That
@@ -384,6 +449,30 @@ namespace engine::script {
 				lua_pop(state, 1);
 			}
 			return terms;
+		}
+
+		std::vector<std::string> CheckTags(lua_State *state, int index) {
+			luaL_checktype(state, index, LUA_TTABLE);
+			std::vector<std::string> tags;
+			const size_t count = lua_objlen(state, index);
+			tags.reserve(count);
+			for (size_t at = 1; at <= count; at++) {
+				lua_rawgeti(state, index, static_cast<int>(at));
+				size_t length = 0;
+				const char *tag = luaL_checklstring(state, -1, &length);
+				tags.emplace_back(tag, length);
+				lua_pop(state, 1);
+			}
+			return tags;
+		}
+
+		std::vector<std::string_view> TagViews(const std::vector<std::string> &tags) {
+			std::vector<std::string_view> views;
+			views.reserve(tags.size());
+			for (const std::string &tag : tags) {
+				views.emplace_back(tag);
+			}
+			return views;
 		}
 
 		// `World:Query(...componentNames)` -> `{ Instance }`
@@ -600,6 +689,9 @@ namespace engine::script {
 			{"DefineComponent", WorldDefineComponent},
 			{"HasComponentType", WorldHasComponentType},
 			{"GetComponentSchema", WorldGetComponentSchema},
+			{"SetComponentTags", WorldSetComponentTags},
+			{"SetComponentFieldTags", WorldSetComponentFieldTags},
+			{"GetComponentMetadata", WorldGetComponentMetadata},
 			{"CreateEntity", WorldCreateEntity},
 			{"Query", WorldQuery},
 			{"QueryFiltered", WorldQueryFiltered},

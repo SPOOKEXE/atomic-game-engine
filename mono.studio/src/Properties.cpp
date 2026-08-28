@@ -1141,8 +1141,20 @@ namespace studio {
 					);
 
 					if (const Schema *schema = Schemas::Of(component); schema != nullptr) {
+						const std::vector<std::string> tags = schema->Tags();
+						if (!tags.empty()) {
+							ImGui::TextDisabled("tags:");
+							for (const std::string &tag : tags) {
+								ImGui::SameLine();
+								ImGui::TextDisabled("[%s]", tag.c_str());
+							}
+						}
 						for (const FieldDescriptor &field : schema->Fields()) {
 							ImGui::BulletText("%s", field.Spelling.data());
+							for (const std::string &tag : field.Tags) {
+								ImGui::SameLine();
+								ImGui::TextDisabled("[%s]", tag.c_str());
+							}
 						}
 					}
 

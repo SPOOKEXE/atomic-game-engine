@@ -74,6 +74,10 @@ TEST_CASE("the luau adapter supports include and exclude component filters", "[s
 	REQUIRE(runtime->Run(R"(
 		World:DefineComponent("scriptluau.FilterA", { Value = "int32" })
 		World:DefineComponent("scriptluau.FilterB", {})
+		assert(World:SetComponentTags("scriptluau.FilterA", { "experiment" }))
+		assert(World:SetComponentFieldTags("scriptluau.FilterA", "Value", { "constant" }))
+		local metadata = World:GetComponentMetadata("scriptluau.FilterA")
+		assert(metadata.Tags[1] == "experiment" and metadata.Fields.Value.Tags[1] == "constant", "component metadata")
 		local included = World:CreateEntity("included")
 		included:SetComponent("scriptluau.FilterA", { Value = 1 })
 		local excluded = World:CreateEntity("excluded")

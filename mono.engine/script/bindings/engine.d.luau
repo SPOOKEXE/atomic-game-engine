@@ -2639,6 +2639,12 @@ declare extern type EngineWorld with
 	-- The field list a component was declared with, in a shape
 	-- `DefineComponent` accepts back.
 	function GetComponentSchema(self, component: string): { [string]: string }?
+	function SetComponentTags(self, component: string, tags: { string }): boolean
+	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
+	function GetComponentMetadata(self, component: string): {
+		Tags: { string },
+		Fields: { [string]: { Type: string, Tags: { string } } },
+	}?
 
 	-- An entity carrying nothing: no class, no place in the tree, nothing drawn.
 	-- Still an `Instance`, because an instance *is* an entity.

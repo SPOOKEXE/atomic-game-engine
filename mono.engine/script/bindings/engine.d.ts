@@ -2342,6 +2342,12 @@ interface EngineWorld {
 	// The field list a component was declared with, in a shape
 	// `DefineComponent` accepts back.
 	GetComponentSchema(component: string): { [field: string]: string } | null;
+	SetComponentTags(component: string, tags: string[]): boolean;
+	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
+	GetComponentMetadata(component: string): {
+		Tags: string[];
+		Fields: { [field: string]: { Type: string; Tags: string[] } };
+	} | null;
 
 	// An entity carrying nothing: no class, no place in the tree, nothing drawn.
 	// Still an `Instance`, because an instance is an entity.

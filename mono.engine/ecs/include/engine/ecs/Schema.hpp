@@ -87,6 +87,9 @@ namespace engine::ecs {
 		// What the field holds.
 		PropertyType Type = PropertyType::Opaque;
 
+		// Descriptive metadata tags attached to this field.
+		std::vector<std::string> Tags;
+
 		// The set an `Enum` field's value must belong to. Invalid otherwise.
 		core::Name Enum;
 
@@ -141,6 +144,9 @@ namespace engine::ecs {
 		// @return The descriptor, or `nullptr` when the schema has no such field.
 		const FieldDescriptor *Find(std::string_view field) const;
 
+		// Metadata tags attached to this component by its author.
+		std::vector<std::string> Tags() const;
+
 		// How many bytes one value of this component occupies.
 		//
 		// @return The blob size, including any padding the layout needed.
@@ -160,6 +166,7 @@ namespace engine::ecs {
 
 		core::Name TypeName;
 		std::vector<FieldDescriptor> Layout;
+		std::vector<std::string> TagNames;
 		uint32_t Width = 0;
 		uint32_t Align = 1;
 
@@ -261,6 +268,18 @@ namespace engine::ecs {
 		// @return The schema, or `nullptr` when nothing described is registered
 		//         under it.
 		static const Schema *Find(core::Name name);
+
+		// Replaces the metadata tags on a component. Tags are descriptive names
+		// such as `deprecated`, `experiment`, or `constant`.
+		static bool SetTags(ComponentId component, std::span<const std::string_view> tags);
+
+		// Replaces the metadata tags on one field of a described component.
+		static bool
+		SetFieldTags(ComponentId component, core::Name field, std::span<const std::string_view> tags);
+
+		// Returns a copy so callers do not retain a view across registry access.
+		static std::vector<std::string> Tags(ComponentId component);
+		static std::vector<std::string> FieldTags(ComponentId component, core::Name field);
 
 		// Every described component, in registration order.
 		//

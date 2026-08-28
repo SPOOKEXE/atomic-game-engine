@@ -480,6 +480,10 @@ namespace engine::ecs {
 		return nullptr;
 	}
 
+	std::vector<std::string> Schema::Tags() const {
+		return TagNames;
+	}
+
 	// --- Schemas -----------------------------------------------------------
 
 	uint32_t Schemas::SizeOf(PropertyType type) {
@@ -694,6 +698,75 @@ namespace engine::ecs {
 
 		const auto found = registry.ByName.find(name.Id());
 		return found == registry.ByName.end() ? nullptr : &registry.Entries[found->second];
+	}
+
+	bool Schemas::SetTags(ComponentId component, std::span<const std::string_view> tags) {
+		auto &registry = SchemaRegistryOf();
+		std::lock_guard lock(registry.Guard);
+		const auto found = registry.ByComponent.find(component.Index);
+		if (found == registry.ByComponent.end()) {
+			return false;
+		}
+
+		Schema &schema = registry.Entries[found->second];
+		schema.TagNames.clear();
+		schema.TagNames.reserve(tags.size());
+		for (const std::string_view tag : tags) {
+			if (!tag.empty()) {
+				schema.TagNames.emplace_back(tag);
+			}
+		}
+		return true;
+	}
+
+	bool
+	Schemas::SetFieldTags(ComponentId component, core::Name field, std::span<const std::string_view> tags) {
+		auto &registry = SchemaRegistryOf();
+		std::lock_guard lock(registry.Guard);
+		const auto found = registry.ByComponent.find(component.Index);
+		if (found == registry.ByComponent.end()) {
+			return false;
+		}
+
+		Schema &schema = registry.Entries[found->second];
+		FieldDescriptor *descriptor = nullptr;
+		for (FieldDescriptor &candidate : schema.Layout) {
+			if (candidate.Name == field) {
+				descriptor = &candidate;
+				break;
+			}
+		}
+		if (descriptor == nullptr) {
+			return false;
+		}
+
+		descriptor->Tags.clear();
+		descriptor->Tags.reserve(tags.size());
+		for (const std::string_view tag : tags) {
+			if (!tag.empty()) {
+				descriptor->Tags.emplace_back(tag);
+			}
+		}
+		return true;
+	}
+
+	std::vector<std::string> Schemas::Tags(ComponentId component) {
+		auto &registry = SchemaRegistryOf();
+		std::lock_guard lock(registry.Guard);
+		const auto found = registry.ByComponent.find(component.Index);
+		return found == registry.ByComponent.end() ? std::vector<std::string>{}
+												   : registry.Entries[found->second].Tags();
+	}
+
+	std::vector<std::string> Schemas::FieldTags(ComponentId component, core::Name field) {
+		auto &registry = SchemaRegistryOf();
+		std::lock_guard lock(registry.Guard);
+		const auto found = registry.ByComponent.find(component.Index);
+		if (found == registry.ByComponent.end()) {
+			return {};
+		}
+		const FieldDescriptor *descriptor = registry.Entries[found->second].Find(field);
+		return descriptor == nullptr ? std::vector<std::string>{} : descriptor->Tags;
 	}
 
 	std::vector<ComponentId> Schemas::All() {
