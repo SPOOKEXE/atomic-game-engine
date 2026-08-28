@@ -2,11 +2,11 @@
 
 ## Status
 
-This document is the authority for how a frame becomes a graph of nodes, how
-that graph compiles, and what runs it. `mono.engine/render/AGENTS.md` names
-it as such. It is written against the tree as it stands: the `graph` runtime
-at L9, the render backend at L12, the Studio editor, and
-`docs/OPTIMISATIONS_RENDER.md` as the backlog feeding it.
+This root-level document is the authority for how a frame becomes a graph of
+nodes, how that graph compiles, what runs it, and which data stays resident on
+the GPU. `mono.engine/render/AGENTS.md` names it as such. It is written against
+the tree as it stands: the `graph` runtime at L9, the render backend at L12,
+the Studio editor, and `docs/OPTIMISATIONS_RENDER.md` as the backlog feeding it.
 
 - **§1 to §2** describe what exists today, by name, so nothing here invents
   a second vocabulary for something already in the tree.
@@ -207,6 +207,93 @@ The default graph is `graph::DefaultPbrDocument()` ("Default PBR"):
 `transparent`, `present`, `interface*`, `overlay`, `output-image` (`*`
 optional). It already runs deferred shading with the HZB two-phase occlusion
 inside `gbuffer` and SSAO as an optional insert.
+
+### 1.7 Exact default execution order
+
+The table below is the shortest authoritative reading order for the shipped
+default. Rows remain in declaration order. An asterisk means the node is
+optional in the document, not that the executor may reorder it.
+
+| Order | Node | Scope | What it does |
+|---:|---|---|---|
+| 1 | `world` | World | Selects the world and opens its shared inputs. |
+| 2 | `shadow*` | World | Captures shadow casters before any view shades them. |
+| 3 | `camera` | View | Publishes the view camera. |
+| 4 | `last-frame` | View | Makes retained history available to later nodes. |
+| 5 | `entities` | View | Produces the stable world draw list. |
+| 6 | `cull-frustum` | View | Filters that list against the view frustum. |
+| 7 | `order-draw` | View | Orders visible entities into deterministic draw runs. |
+| 8 | `upload-instances` | View | Rewrites only dirty resident instance and index ranges. |
+| 9 | `mirror-capture*` | View | Renders reflected views into persistent mirror targets. |
+| 10 | `portal-capture` | View | Renders visible linked views into portal targets. |
+| 11 | `portal-tonemap` | View | Converts portal HDR captures for composition. |
+| 12 | `gbuffer` | View | Draws opaque and masked geometry and seeds HZB occlusion. |
+| 13 | `depth-linearise` | View | Converts device depth for screen-space consumers. |
+| 14 | `ssao*` | View | Computes ambient occlusion when enabled. |
+| 15 | `deferred-lighting` | View | Shades the G-buffer into HDR colour. |
+| 16 | `sky` | View | Composites the environment behind scene geometry. |
+| 17 | `tonemap` | View | Maps HDR scene colour to the presentation range. |
+| 18 | `portal-overlay` | View | Composites portal surfaces over the main view. |
+| 19 | `mirror-overlay` | View | Composites mirror surfaces over the main view. |
+| 20 | `transparent` | View | Draws blended geometry after opaque composition. |
+| 21 | `present` | View | Resolves the scene image for presentation. |
+| 22 | `interface*` | View | Draws retained game-interface geometry. |
+| 23 | `overlay` | Final | Applies the dirty diagnostic-overlay region. |
+| 24 | `output-image` | Final | Publishes the final image to its requested sink. |
+
+`graph::Compile` preserves this order. `CompileSchedule` may place independent
+work in the same dependency wave, but the current SDL backend records on one
+thread and submits transfer, compute, and graphics command buffers in the
+planned order. A wave is therefore eligibility for overlap, not a claim that
+this backend executed it concurrently.
+
+### 1.8 GPU residency and transfer policy
+
+The renderer does not upload a completed scene or interface image. It keeps
+reusable resources resident, uploads changed data, and rasterises on the GPU.
+The only full images crossing to the device are source textures or explicitly
+edited image content.
+
+| Data | GPU state | Update gate | Current transfer policy |
+|---|---|---|---|
+| Mesh vertices and indices | Resident shared buffers | Dirty vertex/index spans in `MeshTable` | Coalesced changed ranges only. |
+| Draw instances | Resident 48-byte rows | Chunk and row comparison in `InstanceResidency` | Dirty chunks and rows only. |
+| Draw-order indices | Resident index stream | Versioned `IndexResidency` ranges | Dirty index ranges only. |
+| Static and streamed textures | Resident `TextureTable` entries | Content name, delivery, replacement, or animated-sheet cell | Upload once, then bind by slot; animation changes only the selected cell state. |
+| Editable meshes and images | Resident named resources | Per-object `Revision` | Refresh only revisions not already uploaded. |
+| Authored shader modules and variants | Resident compiled modules/pipelines | `ShaderSource::Revision`, format, and variant key | Recompile and replace only the changed shader or variant. |
+| Game-interface mesh and glyph atlas | Resident vertex/index buffers and atlas texture | Compiled-list signature, atlas change, or capacity growth | Reuse matching geometry; upload changed geometry or atlas content only. |
+| ImGui interface | Backend-owned vertex/index buffers plus resident textures | `DrawGeometrySignature` or texture-status change | Upload draw vertices and indices when the signature changes. No CPU-rasterised GUI image is sent. |
+| Particles | Resident pool, emitter parameters, curves, and live instances | Layout, resident-parameter, and simulation revisions | Rebuild layout only when layout changes; update resident values and run simulation in place. |
+| Beam, trail, decal, and texture ribbons | Frame geometry over resident sampled textures | Authored/effect revision and visible-run contents | Upload compact vertices and runs, not a composed image. |
+| Lights, cameras, and per-pass uniforms | Per-frame small buffers | Current view and frame signature | Upload compact structured values because the camera and simulation may move each frame. |
+| Shadow, portal, mirror, history, and graph targets | Resident render targets | Descriptor, owner, extent, pipeline reinstall, or explicit release | Render into existing targets; never round-trip their pixels through the CPU. |
+| Diagnostic overlay | Resident texture | `Overlay::UploadRegion` dirty rectangle | Upload only the changed rectangle, including the previous showing region when clearing. |
+| GPU timing and captures | Normally nonresident on CPU | Explicit profiling collection or capture node | Read back only completed timestamp slots or requested captures. |
+
+Two frequently confused interface paths are intentionally separate. Game GUI
+is compiled into retained geometry by `InterfacePass`. ImGui produces CPU draw
+lists, and the SDL GPU backend turns those lists into device vertex and index
+buffers. Sending a full GUI image would add a large pixel upload, discard GPU
+clipping and texture composition, and usually cost more PCIe bandwidth. The
+current signature gate already avoids re-uploading unchanged ImGui geometry.
+
+Always-changing diagnostics are isolated from scene and interface signatures.
+Statistics labels and flame-graph samples may refresh on their own display
+cadence without forcing object, environment, game-interface, or host-interface
+cache misses. `PresentationDamage` and the panel refresh deadline are the two
+gates to preserve when adding another live counter.
+
+`SurfaceAppearance` follows the same retained path. Colour, normal, roughness,
+occlusion, height, metalness, and emissive maps resolve and stream separately,
+then bind as seven resident texture slots. Opaque and masked materials enter the
+G-buffer; transparent and overlay materials enter the later forward pass.
+Metalness is consumed by both lighting paths, and masked shadows use the same
+alpha cutoff as the visible material. Surface colour, emission, resampling, and
+alpha state are saved and replicated as components, then packed into each
+48-byte instance row. Roblox `Content`-object aliases are deliberately absent:
+the engine has no `Content` value type beneath such aliases, so the string
+content-name properties are the supported boundary.
 
 ---
 
@@ -459,7 +546,7 @@ Quantisation exists in three layers and gains a fourth:
   consumer reads. New pipelines should declare the narrowest format that
   survives, per `docs/OPTIMISATIONS_RENDER.md`.
 - **Instance packing is done and pinned**: snorm16 quaternion, packed
-  colour, forty-byte rows, decode mirrored in GLSL, byte-for-byte tested.
+  colour, 48-byte rows, decode mirrored in GLSL, byte-for-byte tested.
   Vertex quantisation (octahedral normals, box-relative positions) is the
   OPTIMISATIONS_RENDER candidate that lands beside this doc's stage plan.
 - **Block-compressed arrival formats** flow through `ResourceFormat` so an

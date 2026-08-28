@@ -62,6 +62,9 @@ namespace engine::script {
 		// What the host is, for `RunService.IsServer()` and friends.
 		HostRole Role;
 
+		// The services this runtime may reach.
+		ScriptCapabilities Access = ScriptCapabilities::None;
+
 		// The shared machinery.
 		SignalTable Signals;
 		ChangeQueue Changes;

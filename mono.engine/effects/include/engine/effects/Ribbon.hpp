@@ -31,6 +31,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/Enums.hpp>
 
 #include <cstdint>
 #include <span>
@@ -240,6 +241,40 @@ namespace engine::effects {
 		uint8_t Reserved[2] = {};
 	};
 
+	// An image projected over one face of its parent BasePart.
+	//
+	// Kept in the ribbon stream because it is one transparent textured quad,
+	// not a mesh that should acquire its own resident vertex buffer.
+	//
+	// @since v0.20
+	struct Decal {
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+		core::Name Image;
+		float Transparency = 0.0f;
+		int32_t ZIndex = 1;
+		scene::NormalId Face = scene::NormalId::Front;
+		uint8_t Reserved[3] = {};
+	};
+
+	// A tiled image projected over one face of its parent BasePart.
+	//
+	// The offsets and tile sizes are in studs, matching the part-space size
+	// used to build the face quad.
+	//
+	// @since v0.20
+	struct Texture {
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+		core::Name Image;
+		float Transparency = 0.0f;
+		float StudsPerTileU = 2.0f;
+		float StudsPerTileV = 2.0f;
+		float OffsetStudsU = 0.0f;
+		float OffsetStudsV = 0.0f;
+		int32_t ZIndex = 1;
+		scene::NormalId Face = scene::NormalId::Front;
+		uint8_t Reserved[3] = {};
+	};
+
 	// Every ribbon vertex a world produces this frame, and where each ribbon sits.
 	//
 	// **One buffer and a run per ribbon**, exactly as the particle pool is one
@@ -262,8 +297,12 @@ namespace engine::effects {
 		// Whether it is added rather than blended.
 		bool Additive = false;
 
+		// Whether the second texture coordinate wraps too. Beams and trails
+		// clamp across their width; a Texture tiles in both dimensions.
+		bool RepeatV = false;
+
 		// Explicit padding.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// What a world's ribbons came out as.
@@ -325,5 +364,9 @@ namespace engine::effects {
 	void ReadBeams(core::ByteReader &reader, void *destination, size_t count);
 	void WriteTrails(core::ByteWriter &writer, const void *source, size_t count);
 	void ReadTrails(core::ByteReader &reader, void *destination, size_t count);
+	void WriteDecals(core::ByteWriter &writer, const void *source, size_t count);
+	void ReadDecals(core::ByteReader &reader, void *destination, size_t count);
+	void WriteTextures(core::ByteWriter &writer, const void *source, size_t count);
+	void ReadTextures(core::ByteReader &reader, void *destination, size_t count);
 	//@}
 }

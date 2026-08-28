@@ -81,6 +81,13 @@ namespace {
 		};
 	}
 
+	ShapeInstance
+	Capsule(const Vector3 &position, float radius, float halfSegment, const CFrame &rotation = CFrame{}) {
+		return ShapeInstance{
+			CFrame{position, rotation.Rotation()}, Vector3{radius, halfSegment, 0.0f}, ShapeKind::Capsule
+		};
+	}
+
 	// The deepest penetration in a solution, which is the number a known-answer
 	// case is stated in.
 	float DeepestOf(const ContactSolution &solution) {
@@ -120,6 +127,25 @@ namespace {
 		BroadPhase(store);
 		NarrowPhase(store);
 	}
+}
+
+TEST_CASE("capsules use the general convex contact path", "[physics][narrowphase]") {
+	const ContactSolution sphereTouch =
+		ContactBetween(Sphere(Vector3::Zero, 0.5f), Capsule(Vector3{0.8f, 0.0f, 0.0f}, 0.5f, 1.0f));
+	REQUIRE(sphereTouch.Touching);
+	CHECK(DeepestOf(sphereTouch) == Approx(0.2f).margin(2e-3));
+	CHECK(sphereTouch.Normal.X > 0.999f);
+	CHECK(std::abs(sphereTouch.Normal.Y) < 2e-3f);
+	CHECK(std::abs(sphereTouch.Normal.Z) < 2e-3f);
+
+	const ContactSolution capsuleTouch =
+		ContactBetween(Capsule(Vector3::Zero, 0.5f, 1.0f), Capsule(Vector3{0.8f, 0.0f, 0.0f}, 0.5f, 1.0f));
+	REQUIRE(capsuleTouch.Touching);
+	CHECK(DeepestOf(capsuleTouch) == Approx(0.2f).margin(2e-3));
+
+	CHECK_FALSE(
+		ContactBetween(Sphere(Vector3::Zero, 0.5f), Capsule(Vector3{1.2f, 0.0f, 0.0f}, 0.5f, 1.0f)).Touching
+	);
 }
 
 // --- the six, each with a known answer ---------------------------------------

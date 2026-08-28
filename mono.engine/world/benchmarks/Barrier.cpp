@@ -118,7 +118,7 @@ namespace barrier_bench {
 			world.TickRate = 60.0;
 
 			const WorldId id = universe->Create(world);
-			universe->Enter(id, [](Store &store, Scheduler &systems) {
+			universe->Enter(id, [](Store &, Scheduler &systems) {
 				systems.Add("chat", Phase::PreSimulation, [](Store &world) {
 					Postbox box(world);
 					if (world.Time().Tick <= 1) {

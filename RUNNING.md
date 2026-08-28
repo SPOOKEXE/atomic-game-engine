@@ -1349,7 +1349,7 @@ to fix; a pane that vanished reads as a broken renderer.
 halves of its `Motion`, and the camera's yaw when the body is the one the camera
 follows - through the same product the picture goes through, and `scene::OpenPortals`
 takes the pane's collider out of the solver's way so a walker reaches it at all.
-Press Play in the studio on `run-portals`' scene, or host it with
+Press Play in the studio on `Portals-1-world.luau`, or host it with
 `scripts/demos/run-local-server.sh`; the standalone client has no character and
 walks the lap on rails instead. What is left of `docs/retired/DEFERRED.md` D00112 is the
 seam on the frame you cross, which needs the portal chain rendered inside the
@@ -1372,7 +1372,7 @@ against a budget of sixteen. White because `opaque.frag` tints the projected
 image by the pane's own colour, so a grey pane shows the far room dimmed, which
 reads as a lighting bug in a room that is lit correctly.
 
-**`run-non-euclidean` is the catalogue rather than the mechanism.** Six exhibits
+**`NonEuclidean.luau` is the catalogue rather than the mechanism.** Six exhibits
 in a row, twelve holes, and the camera sweeps past them: a tunnel shorter inside
 than out and one longer inside than out, a house with four doors onto three
 rooms, a pillar with a different room behind each side, a hill whose bottom
@@ -1383,12 +1383,12 @@ that changes your scale, because the map through a portal is rigid; that is
 filed with D00112 as well.
 
 ```sh
-scripts/demos/run-terrain.sh                 # uncapped, held at 165 fps
-scripts/demos/run-terrain.sh --graph         # extra flags reach the client
-MAX_FPS=60 scripts/demos/run-terrain.sh      # hold a different rate
-MAX_FPS=0 scripts/demos/run-terrain.sh       # no limit at all
-PRESET=release scripts/demos/run-terrain.sh  # any preset but `server`
-scripts\demos\run-terrain.bat                # Windows, same everything
+scripts/demos/run-demo.sh Terrain --stats                 # uncapped, held at 165 fps
+scripts/demos/run-demo.sh Terrain --stats --graph         # extra flags reach the client
+MAX_FPS=60 scripts/demos/run-demo.sh Terrain --stats      # hold a different rate
+MAX_FPS=0 scripts/demos/run-demo.sh Terrain --stats       # no limit at all
+PRESET=release scripts/demos/run-demo.sh Terrain --stats  # any preset but `server`
+scripts\demos\run-demo.bat Terrain --stats                # Windows, same everything
 ```
 
 **`--uncapped --max-fps 165` is one decision rather than two**, and every script

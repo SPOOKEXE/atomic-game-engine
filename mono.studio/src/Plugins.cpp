@@ -225,6 +225,7 @@ namespace studio {
 			limits.Role.Server = false;
 			limits.Role.Client = false;
 			limits.Role.Studio = true;
+			limits.Origin = engine::script::ScriptOrigin::Plugin;
 
 			plugin.Vm = engine::script::MakeRuntime(store, LanguageOf(main), limits);
 			if (plugin.Vm == nullptr) {

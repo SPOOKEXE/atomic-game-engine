@@ -1911,7 +1911,7 @@ namespace engine::scene {
 			// would silently make every part a different shape than it says.
 			ecs::EnumTable::Register(
 				ShapeKindEnum().Text(),
-				std::array<std::string_view, 5>{"Box", "Sphere", "Cylinder", "Hull", "Mesh"}
+				std::array<std::string_view, 6>{"Box", "Sphere", "Cylinder", "Hull", "Mesh", "Capsule"}
 			);
 
 			// The default collision group, so `CollisionGroup` reads back
@@ -3076,6 +3076,11 @@ namespace engine::scene {
 			// Radius from X, half-height from Y - the axes `InverseInertiaOf`
 			// puts the barrel along.
 			return std::numbers::pi_v<float> * x * x * (2.0f * y);
+		case ShapeKind::Capsule:
+			// A cylinder whose half-height is Y plus the two hemispheres that
+			// together make one sphere.
+			return std::numbers::pi_v<float> * x * x * (2.0f * y) +
+				   (4.0f / 3.0f) * std::numbers::pi_v<float> * x * x * x;
 
 		case ShapeKind::Hull:
 		case ShapeKind::Mesh:

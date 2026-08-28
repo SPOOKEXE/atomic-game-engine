@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
 #
-# The built-in demo scene, which is C++ rather than a script.
+# Runs any staged Luau or TypeScript example through one launcher.
 #
-# `mono.client/src/Demo.cpp`, selected by nothing and built into the client. It
-# is the one thing here that is not a file the client is pointed at, which is
-# why it has no `--script`.
+# Scene sources live in `mono.engine/examples`. TypeScript scenes are staged as
+# JavaScript, so an explicit `.ts` name is translated to its emitted `.js` name.
+# A bare stem means Luau. With no scene, the client opens Rings.luau.
 #
-#   scripts/demos/run-demo.sh                  # uncapped, held at 165 fps
-#   scripts/demos/run-demo.sh --graph          # extra flags reach the client
-#   MAX_FPS=60 scripts/demos/run-demo.sh       # hold a different rate
-#   MAX_FPS=0 scripts/demos/run-demo.sh        # no limit at all
-#   PRESET=release scripts/demos/run-demo.sh   # the shipped numbers instead
+#   scripts/demos/run-demo.sh Terrain --stats
+#   scripts/demos/run-demo.sh Mirrors-1-world.ts --stats
+#   scripts/demos/run-demo.sh Mirrors-4-worlds --worlds 4 --stats
+#   MAX_FPS=60 scripts/demos/run-demo.sh Interface
+#   PRESET=release scripts/demos/run-demo.sh Magic --stats
 #
-# Everything after the script name is appended to the client's own arguments, so
-# `client --help` is the list of what may go there. RUNNING.md has the rest.
+# Everything after the optional scene name reaches the client unchanged.
 
 SCENE=""
 SCENE_ARGS=()
+
+if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
+	SCENE=$1
+	shift
+	case "$SCENE" in
+	*.luau | *.js) ;;
+	*.ts) SCENE="${SCENE%.ts}.js" ;;
+	*) SCENE="$SCENE.luau" ;;
+	esac
+fi
 
 source "$(dirname -- "${BASH_SOURCE[0]}")/_common.sh"

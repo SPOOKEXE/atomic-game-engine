@@ -67,6 +67,9 @@ namespace engine::script {
 		// What the host is, for `RunService:IsServer()` and friends.
 		HostRole Role;
 
+		// The services and host seams this runtime may reach.
+		ScriptCapabilities Access = ScriptCapabilities::None;
+
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
 
@@ -552,7 +555,7 @@ namespace engine::script {
 	// @param state The VM.
 	// @param phase Which set to install.
 	// @since v0.15
-	void InstallLuauServices(lua_State *state, ServiceAvailability phase);
+	void InstallLuauServices(lua_State *state, ServiceAvailability phase, ScriptCapabilities access);
 
 	// Installs the `InputObject` metatable, and pushes one.
 	//

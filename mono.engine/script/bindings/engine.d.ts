@@ -772,6 +772,7 @@ declare namespace Enum {
 		readonly Cylinder: ShapeKind;
 		readonly Hull: ShapeKind;
 		readonly Mesh: ShapeKind;
+		readonly Capsule: ShapeKind;
 	};
 	const SizeConstraint: {
 		readonly RelativeXY: SizeConstraint;
@@ -1538,6 +1539,29 @@ declare interface Trail extends Instance {
 	Texture: string;
 	TextureLength: number;
 	Transparency: NumberSequence;
+}
+
+declare interface FaceInstance extends Instance {
+}
+
+declare interface Decal extends FaceInstance {
+	Color3: Color3;
+	Face: Enum.NormalId;
+	Texture: string;
+	Transparency: number;
+	ZIndex: number;
+}
+
+declare interface Texture extends FaceInstance {
+	Color3: Color3;
+	Face: Enum.NormalId;
+	OffsetStudsU: number;
+	OffsetStudsV: number;
+	StudsPerTileU: number;
+	StudsPerTileV: number;
+	Texture: string;
+	Transparency: number;
+	ZIndex: number;
 }
 
 declare interface GuiBase extends Instance {
@@ -2473,6 +2497,9 @@ declare const Instance: {
 		(className: "ParticleEmitter", parent?: Instance): ParticleEmitter;
 		(className: "Beam", parent?: Instance): Beam;
 		(className: "Trail", parent?: Instance): Trail;
+		(className: "FaceInstance", parent?: Instance): FaceInstance;
+		(className: "Decal", parent?: Instance): Decal;
+		(className: "Texture", parent?: Instance): Texture;
 		(className: "GuiBase", parent?: Instance): GuiBase;
 		(className: "GuiService", parent?: Instance): GuiService;
 		(className: "GuiBase3d", parent?: Instance): GuiBase3d;

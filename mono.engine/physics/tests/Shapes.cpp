@@ -62,6 +62,10 @@ TEST_CASE("extent is a half-extent in the shape's own definition", "[physics][sh
 	// A cylinder is radius in X and half-height in Y, about local Y. Z is not
 	// read and takes the radius.
 	CHECK(ShapeHalfExtent(ShapeKind::Cylinder, Vector3{1.5f, 4.0f, 99.0f}) == Vector3{1.5f, 4.0f, 1.5f});
+
+	// A capsule is a segment swept by a sphere. Y is the segment half-length,
+	// so the sphere radius extends the total reach at both ends.
+	CHECK(ShapeHalfExtent(ShapeKind::Capsule, Vector3{1.5f, 4.0f, 99.0f}) == Vector3{1.5f, 5.5f, 1.5f});
 }
 
 TEST_CASE("the aabb derivation reads extent the same way the shape does", "[physics][shapes]") {
@@ -77,6 +81,7 @@ TEST_CASE("the aabb derivation reads extent the same way the shape does", "[phys
 		Of(ShapeKind::Box, Vector3{0.5f, 1.0f, 2.0f}),
 		Of(ShapeKind::Sphere, Vector3{2.0f, 99.0f, -7.0f}),
 		Of(ShapeKind::Cylinder, Vector3{1.5f, 4.0f, 99.0f}),
+		Of(ShapeKind::Capsule, Vector3{1.5f, 4.0f, 99.0f}),
 	};
 
 	for (const Collider &collider : shapes) {
@@ -176,6 +181,21 @@ TEST_CASE("an upright cylinder bounds to its own radius, not its diagonal", "[ph
 	CHECK(spun.X == Approx(upright.X));
 	CHECK(spun.Y == Approx(upright.Y));
 	CHECK(spun.Z == Approx(upright.Z));
+}
+
+TEST_CASE("a capsule bound follows its segment and spherical ends", "[physics][shapes]") {
+	const Collider capsule = Of(ShapeKind::Capsule, Vector3{1.0f, 3.0f, 0.0f});
+
+	const Vector3 upright = ReachOf(ShapeWorldBounds(capsule, CFrame{}));
+	CHECK(upright.X == Approx(1.0f));
+	CHECK(upright.Y == Approx(4.0f));
+	CHECK(upright.Z == Approx(1.0f));
+
+	const Vector3 onSide =
+		ReachOf(ShapeWorldBounds(capsule, CFrame::Angles(0.0f, 0.0f, QUARTER_TURN * 2.0f)));
+	CHECK(onSide.X == Approx(4.0f));
+	CHECK(onSide.Y == Approx(1.0f));
+	CHECK(onSide.Z == Approx(1.0f));
 }
 
 TEST_CASE("a negative extent is left alone rather than clamped", "[physics][shapes]") {

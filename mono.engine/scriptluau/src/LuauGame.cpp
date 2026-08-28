@@ -77,8 +77,18 @@ namespace engine::script {
 			// sends an author looking in the wrong place - they check their
 			// spelling when the answer is that the service exists and this VM
 			// does not have it. `ServiceCatalogue.hpp` carries the argument.
-			if (const ServiceDefinition *known = FindService(name);
-				known != nullptr && !Binds(known->Languages, ServiceLanguages::Luau)) {
+			const ServiceDefinition *known = FindService(name);
+			if (known != nullptr && !Permits(*known, UpvalueContext(state).Access)) {
+				const std::string_view capability = CapabilityName(known->RequiredCapabilities);
+				luaL_errorL(
+					state,
+					"'%s' requires the '%.*s' script capability",
+					name,
+					static_cast<int>(capability.size()),
+					capability.data()
+				);
+			}
+			if (known != nullptr && !Binds(known->Languages, ServiceLanguages::Luau)) {
 				luaL_errorL(state, "'%s' is not bound for Luau in this engine", name);
 			}
 

@@ -411,4 +411,8 @@ TEST_CASE("the shape enum is registered in its own declaration order", "[bakedsh
 	);
 	CHECK(engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Hull)) == Name("Hull"));
 	CHECK(engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Mesh)) == Name("Mesh"));
+	CHECK(
+		engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Capsule)) ==
+		Name("Capsule")
+	);
 }

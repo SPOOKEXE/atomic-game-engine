@@ -343,12 +343,13 @@ namespace engine::script {
 		return *static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(1)));
 	}
 
-	LuauRuntime::LuauRuntime(ecs::Store &store, const RuntimeLimits &limits) : Runtime(store, limits.Role) {
+	LuauRuntime::LuauRuntime(ecs::Store &store, const RuntimeLimits &limits) : Runtime(store, limits) {
 		auto *bounds = new Bounds();
 		bounds->MemoryLimit = limits.MemoryBytes;
 		bounds->StepBudget = limits.StepBudget;
 		bounds->Context.World = &Store;
 		bounds->Context.Role = limits.Role;
+		bounds->Context.Access = limits.EffectiveCapabilities();
 
 		State = lua_newstate(Allocate, bounds);
 		lua_setthreaddata(State, bounds);
@@ -392,7 +393,7 @@ namespace engine::script {
 		// came to be two lists - this one and the JavaScript runtime's - that
 		// drifted by four services with nothing in the build to say so. See
 		// `ServiceCatalogue.hpp`.
-		InstallLuauServices(State, ServiceAvailability::Always);
+		InstallLuauServices(State, ServiceAvailability::Always, bounds->Context.Access);
 
 		OpenQueries(State);
 
@@ -429,7 +430,7 @@ namespace engine::script {
 		// it writes a global, so it cannot run once the table is frozen. That is
 		// the whole reason `ServiceAvailability` has a second value and the
 		// catalogue is walked twice.
-		InstallLuauServices(State, ServiceAvailability::Studio);
+		InstallLuauServices(State, ServiceAvailability::Studio, bounds->Context.Access);
 
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot
@@ -1000,6 +1001,11 @@ namespace engine::script {
 	}
 
 	void LuauRuntime::SetHost(HostSurface *host) {
+		if (host != nullptr && !Can(ScriptCapabilities::PluginHost)) {
+			Error = "script runtime lacks the 'plugin-host' capability";
+			return;
+		}
+
 		// **Recorded on the context and the global rebuilt**, because
 		// `OpenHost` reads `Names()` once: a host installed after a chunk had
 		// already captured `host` would be invisible to it, which is `D00030`'s

@@ -61,7 +61,8 @@ namespace engine::script {
 	// @param context The JS context.
 	// @param store   The world instances are created in.
 	// @param role    Where scripts under this runtime are standing.
-	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role);
+	void
+	OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role, ScriptCapabilities access);
 
 	// Installs v0.6's surface: signals, the instance methods, `task`, the
 	// datatype vocabulary, the clock, `typeOf`/`warn` and the store services.
@@ -380,7 +381,9 @@ namespace engine::script {
 	//        because the *catalogue* has one and a second signature would be a
 	//        second place that fact lives.
 	// @since v0.15
-	void InstallJsServices(JSContext *context, JSValueConst global, ServiceAvailability phase);
+	void InstallJsServices(
+		JSContext *context, JSValueConst global, ServiceAvailability phase, ScriptCapabilities access
+	);
 
 	// --- what is left of this language's own service code ---------------------
 	//

@@ -28,6 +28,8 @@ namespace engine::scene {
 			return "hull";
 		case ShapeKind::Mesh:
 			return "mesh";
+		case ShapeKind::Capsule:
+			return "capsule";
 		}
 		return "?";
 	}

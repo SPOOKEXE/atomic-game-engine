@@ -1047,6 +1047,50 @@
 			]
 		},
 		{
+			"name": "FaceInstance",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+			]
+		},
+		{
+			"name": "Decal",
+			"parent": "FaceInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "effects.Decal"],
+			"properties": [
+				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
+				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Texture", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
+				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Decal"], "writes": ["effects.Decal"]},
+				{"name": "ZIndex", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["effects.Decal"], "writes": ["effects.Decal"]}
+			]
+		},
+		{
+			"name": "Texture",
+			"parent": "FaceInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "effects.Texture"],
+			"properties": [
+				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "OffsetStudsU", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "OffsetStudsV", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "StudsPerTileU", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "StudsPerTileV", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "Texture", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]},
+				{"name": "ZIndex", "type": "int32", "kind": "computed", "bytes": 4, "writable": true, "reads": ["effects.Texture"], "writes": ["effects.Texture"]}
+			]
+		},
+		{
 			"name": "GuiBase",
 			"parent": "Instance",
 			"constructible": true,
@@ -2465,7 +2509,7 @@
 		{"name": "ScrollBarInset", "members": ["None", "ScrollBar", "Always"]},
 		{"name": "ScrollingDirection", "members": ["X", "Y", "XY"]},
 		{"name": "ServiceScope", "members": ["Shared", "Server", "Client"]},
-		{"name": "ShapeKind", "members": ["Box", "Sphere", "Cylinder", "Hull", "Mesh"]},
+		{"name": "ShapeKind", "members": ["Box", "Sphere", "Cylinder", "Hull", "Mesh", "Capsule"]},
 		{"name": "SizeConstraint", "members": ["RelativeXY", "RelativeXX", "RelativeYY"]},
 		{"name": "SkyboxComputeShader", "members": ["Gradient", "Sunset", "Night", "Nebula", "Voxel"]},
 		{"name": "SortOrder", "members": ["Name", "Custom", "LayoutOrder"]},

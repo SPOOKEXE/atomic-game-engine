@@ -52,16 +52,28 @@ namespace engine::script {
 			// suspend, and the two languages suspend differently - a yielded
 			// coroutine and a `Promise` - which is one member on the interface
 			// rather than seven methods written twice.
-			{{"MessagingService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"MessagingService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Messaging},
 			 MessagingServiceSurface},
 
-			{{"TeleportService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"TeleportService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Teleport},
 			 TeleportServiceSurface},
 
-			{{"MemoryStoreService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"MemoryStoreService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Persistence},
 			 MemoryStoreServiceSurface},
 
-			{{"DataStoreService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"DataStoreService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Persistence},
 			 DataStoreServiceSurface},
 
 			// --- where a script is standing, and when ---------------------------
@@ -78,7 +90,10 @@ namespace engine::script {
 			// **A channel is named as well as addressed since v0.17**, so
 			// `OpenChannel` hands back the signal for one channel rather than the
 			// service carrying a field that heard all of them.
-			{{"CrossWorldService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"CrossWorldService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Messaging},
 			 CrossWorldServiceSurface},
 
 			{{"RunService", ServiceAvailability::Always, ServiceLanguages::Both}, RunServiceSurface},
@@ -98,10 +113,14 @@ namespace engine::script {
 			// name* - so the catch-all `__index` had to become a list before the
 			// other language could have one. The Luau half walks that same list
 			// now, which also retires a chain of `if (field == ...)`.
-			{{"UserInputService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"UserInputService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Input},
 			 UserInputServiceSurface},
 
-			{{"SoundService", ServiceAvailability::Always, ServiceLanguages::Both}, SoundServiceSurface},
+			{{"SoundService", ServiceAvailability::Always, ServiceLanguages::Both, ScriptCapabilities::Audio},
+			 SoundServiceSurface},
 
 			// --- the four that stopped being Luau's at v0.16 --------------------
 			//
@@ -115,7 +134,10 @@ namespace engine::script {
 			// action that never fires is worse than one that cannot be bound, so
 			// this language gained an input pump - `PumpJsInput` - at the same
 			// time.
-			{{"ContextActionService", ServiceAvailability::Always, ServiceLanguages::Both},
+			{{"ContextActionService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::Input},
 			 ContextActionServiceSurface},
 
 			{{"ContentService", ServiceAvailability::Always, ServiceLanguages::Both}, ContentServiceSurface},
@@ -164,7 +186,11 @@ namespace engine::script {
 		// decided. Closing it means teaching QuickJS to report a line, which is
 		// `DEFERRED.md` D00106 and not a `ServiceSurface`.
 		constexpr std::array<Row, 1> STUDIO_ROWS{{
-			{{"BreakpointService", ServiceAvailability::Studio, ServiceLanguages::Luau}, nullptr},
+			{{"BreakpointService",
+			  ServiceAvailability::Studio,
+			  ServiceLanguages::Luau,
+			  ScriptCapabilities::StudioDebug},
+			 nullptr},
 		}};
 
 		// Every definition, both phases, for the callers that want the whole

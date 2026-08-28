@@ -129,7 +129,7 @@ namespace engine::script {
 	}
 
 	JavaScriptRuntime::JavaScriptRuntime(ecs::Store &store, const RuntimeLimits &limits)
-		: Runtime(store, limits.Role) {
+		: Runtime(store, limits) {
 		Vm = JS_NewRuntime();
 
 		// A hard ceiling rather than a hope. Allocation past it fails inside
@@ -187,7 +187,7 @@ namespace engine::script {
 		// arbitrary precision. Revisit when one does, and check the teardown
 		// again rather than assuming it was fixed.
 
-		OpenJsBindings(Context, Store, limits.Role);
+		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
 		OpenJsSurface(Context);
 
 		// `eval` removed after the fact, because the intrinsic that provides

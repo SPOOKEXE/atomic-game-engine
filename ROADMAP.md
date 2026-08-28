@@ -39,6 +39,12 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.20
 
+- [x] StackGuard to prevent stack errors, infinite recursion, etc.
+- [x] Random.new(seed) with functions
+- [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
+- [x] check if particles load textures properly (fallback works, demo asset external)
+- [x] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
+	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 - [x] add stack watch and breakpoint watch dock widgets
 - [x] auto complete popup doesn't position properly above/below text we're editing.
 - [x] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
@@ -51,24 +57,23 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] 3d cursor and camera orbit options under gizmo
 - [x] add tests to validate each step of the rendering pipeline graph
 - [x] add websocket support (full async, test 10k connections and improve bottleneck spots).
-
 - [x] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
 - [x] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
 - [x] properly build out team create menu
 - [x] team create build out options properly
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
 
-- [_] consolidate render pipeline to a easy-to-find location for future work.
-- [_] ensure when you read the render pipeline, its obvious what it does and in what order
-- [_] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
-- [_] go through and do a full batched-compute of all world systems for things like replication, iterating cpu data, iterating components, etc. Assume multi-processing for each individual world (hytale-style) and multi-threading for viable options. Vectorise rest (we test with -O0/-O1, but assume release -O2/3 will greatly improve it).
-- [_] find remaining bottlenecks in simulation code, check we're properly iterating components. use both dev AND release builds to find bottlenecks we need to improve (`-O0`, `-O1`, `-O2` and `-O3`).
-- [_] cleanup old demos or merge into a few, scripts/ folder and luau/ts scripts
-- [_] list all items that become resident on GPU and those that don't but should. check over their code to ensure we only update when they change, and whether we should split some others apart as they are always hit during rendering (statistics label, flamegraph, etc). Also we should minimize pcie traffic (i.e. instead of sending a full image to gpu, we only send the data and then render on gpu where possible - what about imgui? do we need to send gui image for it)
-- [_] ensure we build out and test UserInputService and ContextActionService with tests.
-- [_] add beams/trails/decals/textures, etc if they aren't added. also tests.
-- [_] build out different types of physics colliders components (capsule, square, use-mesh, hull, etc). add properties to meshpart.
-- [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
+- [x] consolidate render pipeline to a easy-to-find location for future work.
+- [x] ensure when you read the render pipeline, its obvious what it does and in what order
+- [x] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
+- [x] go through and do a full batched-compute of all world systems for things like replication, iterating cpu data, iterating components, etc. Assume multi-processing for each individual world (hytale-style) and multi-threading for viable options. Vectorise rest (we test with -O0/-O1, but assume release -O2/3 will greatly improve it).
+- [x] find remaining bottlenecks in simulation code, check we're properly iterating components. use both dev AND release builds to find bottlenecks we need to improve (`-O0`, `-O1`, `-O2` and `-O3`).
+- [x] cleanup old demos or merge into a few, scripts/ folder and luau/ts scripts
+- [x] list all items that become resident on GPU and those that don't but should. check over their code to ensure we only update when they change, and whether we should split some others apart as they are always hit during rendering (statistics label, flamegraph, etc). Also we should minimize pcie traffic (i.e. instead of sending a full image to gpu, we only send the data and then render on gpu where possible - what about imgui? do we need to send gui image for it)
+- [x] ensure we build out and test UserInputService and ContextActionService with tests.
+- [x] add beams/trails/decals/textures, etc if they aren't added. also tests.
+- [x] build out different types of physics colliders components (capsule, square, use-mesh, hull, etc). add properties to meshpart.
+- [x] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
 
 - [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
@@ -90,13 +95,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
-
-- [x] StackGuard to prevent stack errors, infinite recursion, etc.
-- [x] Random.new(seed) with functions
-- [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
-- [x] check if particles load textures properly (fallback works, demo asset external)
-- [x] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
-	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
 - [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling

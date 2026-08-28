@@ -46,6 +46,8 @@ namespace client {
 		ObserveRevision<engine::effects::ParticleEmitter>(store, revision);
 		ObserveRevision<engine::effects::Beam>(store, revision);
 		ObserveRevision<engine::effects::Trail>(store, revision);
+		ObserveRevision<engine::effects::Decal>(store, revision);
+		ObserveRevision<engine::effects::Texture>(store, revision);
 		ObserveRevision<engine::scene::SkyboxTextures>(store, revision);
 		ObserveRevision<engine::ecs::Hierarchy>(store, revision);
 		return revision;
@@ -111,6 +113,16 @@ namespace client {
 		store.Each<const engine::effects::Trail>([&out, &seen](
 													 engine::ecs::Entity, const engine::effects::Trail &trail
 												 ) { Want(out, seen, trail.Texture); });
+
+		store.Each<const engine::effects::Decal>([&out, &seen](
+													 engine::ecs::Entity, const engine::effects::Decal &decal
+												 ) { Want(out, seen, decal.Image); });
+
+		store.Each<const engine::effects::Texture>(
+			[&out, &seen](engine::ecs::Entity, const engine::effects::Texture &texture) {
+				Want(out, seen, texture.Image);
+			}
+		);
 
 		// Skybox faces are demand-loaded like every other texture, but only for
 		// the provider hierarchy resolution selected. Asking for every inactive

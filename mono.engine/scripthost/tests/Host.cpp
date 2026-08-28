@@ -31,6 +31,15 @@ using engine::script::Language;
 using engine::script::MakeRuntime;
 
 namespace {
+	engine::script::RuntimeLimits PluginLimits() {
+		engine::script::RuntimeLimits limits;
+		limits.Role.Server = false;
+		limits.Role.Client = false;
+		limits.Role.Studio = true;
+		limits.Origin = engine::script::ScriptOrigin::Plugin;
+		return limits;
+	}
+
 	// A host that records what it was asked and answers what it was told to.
 	class Recorder final : public HostSurface {
 	  public:
@@ -110,7 +119,7 @@ TEST_CASE("a host installs its own global and only its own names", "[script][hos
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	// **The host names the global**, so an editor's API reads as `plugin` and a
@@ -123,6 +132,8 @@ TEST_CASE("a host installs its own global and only its own names", "[script][hos
 
 	// And a world with no host has no global at all.
 	const auto bare = MakeRuntime(store, Language::Luau);
+	bare->SetHost(&host);
+	CHECK(bare->LastError().find("plugin-host") != std::string::npos);
 	CHECK(bare->Run("assert(test == nil, 'a game script got a host')"));
 }
 
@@ -131,7 +142,7 @@ TEST_CASE("every value shape survives the crossing", "[script][host]") {
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	REQUIRE(runtime->Run(
@@ -174,7 +185,7 @@ TEST_CASE("a refusal is a script error naming the reason", "[script][host]") {
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	// **An ordinary error, not a crash.** A host that aborted would take the
@@ -199,7 +210,7 @@ TEST_CASE("a function handed over can be called back", "[script][host]") {
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	REQUIRE(runtime->Run(
@@ -240,7 +251,7 @@ TEST_CASE("a handler that raises is reported rather than propagated", "[script][
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	REQUIRE(runtime->Run("test.Remember(function() error('inside the handler') end)"));
@@ -259,7 +270,7 @@ TEST_CASE("a value with no host representation is refused at the call", "[script
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	// A coroutine has nothing a host could hold. Named at the argument rather
@@ -286,7 +297,7 @@ TEST_CASE("a dotted host name becomes a service", "[script][host]") {
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	// **A service is a global table**, which is what makes `game:GetService`
@@ -320,7 +331,7 @@ TEST_CASE("a service method takes a colon or a dot", "[script][host]") {
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	// **`Thing:Get()` is what a Roblox script writes**, and it passes the
@@ -356,7 +367,7 @@ TEST_CASE("an empty table crosses as an array", "[script][host]") {
 	Store store("host");
 
 	Recorder host;
-	const auto runtime = MakeRuntime(store, Language::Luau);
+	const auto runtime = MakeRuntime(store, Language::Luau, PluginLimits());
 	runtime->SetHost(&host);
 
 	// **`{}` is the same Luau value whichever way it is read**, and the binding

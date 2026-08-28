@@ -955,6 +955,7 @@ declare Enum: {
 		Cylinder: Enum_ShapeKind,
 		Hull: Enum_ShapeKind,
 		Mesh: Enum_ShapeKind,
+		Capsule: Enum_ShapeKind,
 	},
 	SizeConstraint: {
 		RelativeXY: Enum_SizeConstraint,
@@ -1744,6 +1745,29 @@ declare extern type Trail extends Instance with
 	Texture: string
 	TextureLength: number
 	Transparency: NumberSequence
+end
+
+declare extern type FaceInstance extends Instance with
+end
+
+declare extern type Decal extends FaceInstance with
+	Color3: Color3
+	Face: Enum_NormalId
+	Texture: string
+	Transparency: number
+	ZIndex: number
+end
+
+declare extern type Texture extends FaceInstance with
+	Color3: Color3
+	Face: Enum_NormalId
+	OffsetStudsU: number
+	OffsetStudsV: number
+	StudsPerTileU: number
+	StudsPerTileV: number
+	Texture: string
+	Transparency: number
+	ZIndex: number
 end
 
 declare extern type GuiBase extends Instance with
@@ -2785,6 +2809,9 @@ type CreatableInstances = {
 	ParticleEmitter: ParticleEmitter,
 	Beam: Beam,
 	Trail: Trail,
+	FaceInstance: FaceInstance,
+	Decal: Decal,
+	Texture: Texture,
 	GuiBase: GuiBase,
 	GuiService: GuiService,
 	GuiBase3d: GuiBase3d,

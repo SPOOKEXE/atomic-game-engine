@@ -79,7 +79,8 @@ namespace client {
 	//     because one of this store's own files is a six-minute MP3 that costs a
 	//     decode on arrival.
 	//   * `gui::Picture::Image` - an `ImageLabel`.
-	//   * `effects::ParticleEmitter::Texture`, and a `Beam`'s and a `Trail`'s.
+	//   * `effects::ParticleEmitter::Texture`, plus Beam, Trail, Decal and
+	//     Texture images.
 	//
 	// **A mesh's own sheets are not here**, and cannot be: `Submesh::Texture`
 	// lives inside the mesh file, so the name is not known until the mesh has

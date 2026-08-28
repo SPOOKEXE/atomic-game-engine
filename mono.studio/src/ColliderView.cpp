@@ -348,6 +348,65 @@ namespace studio {
 					break;
 				}
 
+				case engine::scene::ShapeKind::Capsule: {
+					// The two equators and four straight joins establish the
+					// cylindrical middle. Two half-rings in each upright plane
+					// show the spherical caps without drawing their hidden halves.
+					const float radius = collider.Extent.X;
+					const float halfSegment = collider.Extent.Y;
+					constexpr int STEPS = 24;
+
+					for (int equator = 0; equator < 2; equator++) {
+						const float height = equator == 0 ? -halfSegment : halfSegment;
+						const ImU32 colour = ColourOf(tint, static_cast<uint32_t>(equator));
+						for (int step = 0; step < STEPS; step++) {
+							const auto on = [&](int at) {
+								const float angle =
+									static_cast<float>(at) * 6.2831853f / static_cast<float>(STEPS);
+								const Vector3 local{
+									std::cos(angle) * radius, height, std::sin(angle) * radius
+								};
+								return frame.Position + frame.VectorToWorldSpace(local);
+							};
+							segment(on(step), on(step + 1), colour);
+						}
+					}
+
+					const ImU32 barrel = ColourOf(tint, 2);
+					for (int side = 0; side < 4; side++) {
+						const float angle = static_cast<float>(side) * 6.2831853f / 4.0f;
+						const Vector3 across{std::cos(angle) * radius, 0.0f, std::sin(angle) * radius};
+						segment(
+							frame.Position +
+								frame.VectorToWorldSpace(Vector3{across.X, -halfSegment, across.Z}),
+							frame.Position +
+								frame.VectorToWorldSpace(Vector3{across.X, halfSegment, across.Z}),
+							barrel
+						);
+					}
+
+					for (int plane = 0; plane < 2; plane++) {
+						for (int cap = 0; cap < 2; cap++) {
+							const float centre = cap == 0 ? -halfSegment : halfSegment;
+							const float start = cap == 0 ? 3.14159265f : 0.0f;
+							const ImU32 colour = ColourOf(tint, static_cast<uint32_t>(3 + plane * 2 + cap));
+							for (int step = 0; step < STEPS / 2; step++) {
+								const auto on = [&](int at) {
+									const float angle = start + static_cast<float>(at) * 3.14159265f /
+																	static_cast<float>(STEPS / 2);
+									const float across = std::cos(angle) * radius;
+									const float height = centre + std::sin(angle) * radius;
+									const Vector3 local = plane == 0 ? Vector3{across, height, 0.0f}
+																	 : Vector3{0.0f, height, across};
+									return frame.Position + frame.VectorToWorldSpace(local);
+								};
+								segment(on(step), on(step + 1), colour);
+							}
+						}
+					}
+					break;
+				}
+
 				case engine::scene::ShapeKind::Hull: {
 					if (hull == nullptr) {
 						unresolved();

@@ -1,7 +1,7 @@
 // What the packed instance row costs in accuracy.
 //
 // **The whole point of these cases is the size of a number, not a boolean.**
-// `GpuInstance` went from ninety-six bytes to forty by quantising the
+// `GpuInstance` went from ninety-six bytes to forty-eight by quantising the
 // rotation to four sixteen-bit codes and the colour to RGBA8, and "is that
 // visible" is a question with an answer in metres. So the reference here is the
 // matrix the old layout uploaded, rebuilt inline, and every case measures how far
