@@ -75,6 +75,14 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] complete collider components for `Box`, `Sphere`, `Cylinder`, `Capsule`, `Hull` and exact `Mesh` geometry. Bounds, support, contacts, rays, inertia and Studio previews cover the analytic shapes; baked hulls and triangle soups cover mesh-backed shapes. `MeshPart` exposes mesh, seven surface maps and triangle metadata through the shared property surface.
 - [x] enforce script access levels, capabilities and sandbox profiles for plugin, game, server and client contexts. Both VMs derive or accept explicit grants, refuse unavailable services with the required capability named, keep plugin host access separate from server services, and retain memory, step, job, global and host-surface sandbox limits.
 
+- [_] plan out base plugin system + default plugins + move default tools into plugins instead.
+- [_] setup a toolbar editor system where you can create new tabs, select which tools are visible on the toolbar, and plugins can modify their buttons and whatnot (with size constraints and such)
+- [_] setup and plan out dock widgets
+- [_] plugin manager widget
+- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
+- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
+- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+
 - [_] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
@@ -83,13 +91,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 - [_] read the documents folder on what else we need to add and ask user for each one.
 - [_] add better memory packing for components by adding a DataQuantization component or something similar. Add quantization support for storing and packing values within components, like (u)float16, (u)float8, (u)int16, (u)int8, (u)int4 and bool. Need a way to decide who packs with what, maybe a `Component Data Packing` dock widget that shows you what values a component stores?
-- [_] plan out base plugin system + default plugins + move default tools into plugins instead.
-- [_] setup a toolbar editor system where you can create new tabs, select which tools are visible on the toolbar, and plugins can modify their buttons and whatnot (with size constraints and such)
-- [_] setup and plan out dock widgets
-- [_] plugin manager widget
-- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
-- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
-- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
 - [_] expand ShaderCapabilities out
 - [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
