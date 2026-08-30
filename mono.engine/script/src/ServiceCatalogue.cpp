@@ -38,7 +38,7 @@ namespace engine::script {
 		// studio row installs after the debugger pointer is set and before
 		// `luaL_sandbox` freezes the globals - which is why it is walked in a
 		// second pass rather than moved up the list.
-		constexpr std::array<Row, 14> ROWS{{
+		constexpr std::array<Row, 15> ROWS{{
 			// --- the bus, which is the only route out of a world ---------------
 			//
 			// **All four described once since v0.16, and the last of them is what
@@ -97,6 +97,8 @@ namespace engine::script {
 			 CrossWorldServiceSurface},
 
 			{{"RunService", ServiceAvailability::Always, ServiceLanguages::Both}, RunServiceSurface},
+
+			{{"ComputeService", ServiceAvailability::Always, ServiceLanguages::Both}, ComputeServiceSurface},
 
 			// --- the two the property mechanism closed --------------------------
 			//

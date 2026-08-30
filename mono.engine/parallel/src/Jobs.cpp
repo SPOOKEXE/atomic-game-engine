@@ -12,10 +12,23 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 namespace engine::parallel {
+
+	const char *Describe(JobContext context) {
+		switch (context) {
+		case JobContext::Serial:
+			return "Serial";
+		case JobContext::Threaded:
+			return "Threaded";
+		case JobContext::Processed:
+			return "Processed";
+		}
+		return "Unknown";
+	}
 
 	namespace {
 		struct Pool;
@@ -476,6 +489,30 @@ namespace engine::parallel {
 		if (batch.Failure) {
 			std::rethrow_exception(batch.Failure);
 		}
+	}
+
+	void Jobs::For(
+		JobContext context,
+		size_t count,
+		size_t grain,
+		const std::function<void(size_t, size_t)> &body,
+		size_t minimum
+	) {
+		if (context == JobContext::Processed) {
+			throw std::invalid_argument("Jobs::For cannot send a callback to another process");
+		}
+		if (context == JobContext::Threaded) {
+			For(count, grain, body, minimum);
+			return;
+		}
+		if (count == 0) {
+			LastTiming = {};
+			return;
+		}
+
+		const uint64_t started = core::Clock::Nanoseconds();
+		body(0, count);
+		LastTiming = Inline(core::Clock::Nanoseconds() - started);
 	}
 
 	void Jobs::ForWorkers(

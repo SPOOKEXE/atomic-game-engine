@@ -7,6 +7,7 @@
 
 TEST_SUITE_ID("engine.parallel.bench.dispatch")
 
+using engine::parallel::JobContext;
 using engine::parallel::Jobs;
 using engine::testing::Consume;
 
@@ -33,6 +34,18 @@ using namespace dispatch_bench;
 BENCH("For · below the floor, so inline", 10'000) {
 	for (int pass = 0; pass < 10'000; pass++) {
 		Jobs::For(1024, 1024, [](size_t begin, size_t end) { Nothing(begin, end); });
+	}
+}
+
+BENCH("For · explicit Serial context", 10'000) {
+	for (int pass = 0; pass < 10'000; pass++) {
+		Jobs::For(JobContext::Serial, 1024, 1024, [](size_t begin, size_t end) { Nothing(begin, end); });
+	}
+}
+
+BENCH("For · explicit Threaded context below the floor", 10'000) {
+	for (int pass = 0; pass < 10'000; pass++) {
+		Jobs::For(JobContext::Threaded, 1024, 1024, [](size_t begin, size_t end) { Nothing(begin, end); });
 	}
 }
 

@@ -19,6 +19,22 @@
 
 namespace engine::parallel {
 
+	// Where a job's work executes.
+	//
+	// Arbitrary callbacks support `Serial` and `Threaded`. `Processed` is for
+	// typed jobs whose inputs and outputs have an explicit byte format, because
+	// a closure and the memory it captures have no meaning in another process.
+	//
+	// @since v0.20
+	enum class JobContext : uint8_t {
+		Serial,
+		Threaded,
+		Processed,
+	};
+
+	// Returns the stable spelling used by scripts, settings and reports.
+	const char *Describe(JobContext context);
+
 	// What one dispatch of `Jobs::For` cost.
 	//
 	// **Busy time is not wall time and the difference is the point.** Eight
@@ -126,6 +142,26 @@ namespace engine::parallel {
 		//                the count where that actually pays.
 		static void
 		For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body, size_t minimum = 0);
+
+		// Runs a batch in an explicit execution context.
+		//
+		// `Serial` always runs inline. `Threaded` has the same blocking fork-join
+		// contract as the overload above. `Processed` throws `invalid_argument`:
+		// process work must use a typed protocol rather than capture live memory.
+		//
+		// @param context Where the work may execute.
+		// @param count Number of indices in `[0, count)`.
+		// @param grain Maximum indices per threaded range.
+		// @param body Callable given each half-open range.
+		// @param minimum Threaded dispatch floor, or zero to derive it.
+		// @tick
+		// @threadsafe
+		static void
+		For(JobContext context,
+			size_t count,
+			size_t grain,
+			const std::function<void(size_t, size_t)> &body,
+			size_t minimum = 0);
 
 		// Runs each index on the pinned worker named for it and blocks until done.
 		//

@@ -314,6 +314,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		  "GetFlipbook",
 		  "GetTriangleCount"},
 		 {}},
+		{"ComputeService", {"NoiseGridAsync"}, {}},
 		{"CollectionService", {"AddTag", "RemoveTag", "HasTag", "GetTagged", "GetTags", "GetAllTags"}, {}},
 		{"HttpService", {"JSONEncode", "JSONDecode", "GenerateGUID", "UrlEncode"}, {}},
 		{"TweenService", {"GetValue", "Create"}, {}},

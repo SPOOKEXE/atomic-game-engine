@@ -108,6 +108,7 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/ComputeJobs.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/Signals.hpp>
@@ -200,6 +201,10 @@ namespace engine::script {
 		// second member rather than this one handing back a thread. See
 		// `ChildWaiters.hpp`.
 		virtual ChildWaiters &Waiters() = 0;
+
+		// The typed computations owned by this runtime. A submission copies its
+		// inputs and no VM or world state crosses the worker boundary.
+		virtual ComputeJobs &Computations() = 0;
 
 		// Who is listening to which bus topic in this VM.
 		//
@@ -489,6 +494,7 @@ namespace engine::script {
 		virtual void ReturnNil() = 0;
 		virtual void ReturnBoolean(bool value) = 0;
 		virtual void ReturnNumber(double value) = 0;
+
 		virtual void ReturnCFrame(const core::CFrame &value) = 0;
 
 		// One `Vector2`, which is what a pointer position is.
@@ -710,9 +716,14 @@ namespace engine::script {
 
 		// Queues a complete editable-mesh transaction and suspends this call until
 		// the next script barrier has prepared and owner-thread committed it. This
-		// is the third deterministic resume source, separate from bus and tree ids
-		// because all three counters have independent meanings.
+		// is a deterministic resume source, separate from bus and tree ids because
+		// each queue's counter has an independent meaning.
 		virtual void AwaitEditableMesh(scene::EditableMeshGeometry geometry) = 0;
+
+		// Suspends until the compute queue publishes this ticket at a heartbeat.
+		// Compute tickets stay separate from every other resume source so their
+		// ordered publication cannot alias an unrelated queue's identifier.
+		virtual void AwaitCompute(uint64_t ticket) = 0;
 
 		// Refuses the call, in the language's own idiom. Never returns.
 		//

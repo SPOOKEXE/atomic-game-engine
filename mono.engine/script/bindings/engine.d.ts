@@ -1439,6 +1439,7 @@ declare interface SpringConstraint extends Constraint {
 
 declare interface ShaderScript extends Instance {
 	readonly Revision: number;
+	Source: string;
 }
 
 declare interface EditableMesh extends Instance {
@@ -2167,6 +2168,20 @@ declare interface ContentService {
 	GetTriangleCount(mesh: string): number;
 }
 
+// Runs a rectangular batch of values compatible with `math.noise` without
+// holding the VM thread. The result is flat and row-major.
+declare interface ComputeService {
+	NoiseGridAsync(
+		width: number,
+		depth: number,
+		originX: number,
+		originZ: number,
+		step: number,
+		context?: "Serial" | "Threaded" | "Processed",
+		originY?: number
+	): Promise<number[]>;
+}
+
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
 // No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
@@ -2333,6 +2348,7 @@ declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
+declare const ComputeService: ComputeService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -2428,6 +2444,7 @@ declare const game: {
 		(service: "Players"): Players;
 		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
+		(service: "ComputeService"): ComputeService;
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
 		(service: "DataStoreService"): DataStoreService;

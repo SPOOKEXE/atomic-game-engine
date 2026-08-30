@@ -21,6 +21,7 @@
 #include <engine/script/Bus.hpp>
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
+#include <engine/script/ComputeJobs.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Runtime.hpp>
@@ -231,6 +232,9 @@ namespace engine::script {
 
 		EditableMeshJobs EditableMeshes;
 		std::unordered_map<uint64_t, CallbackRef> AwaitedEditableMeshes;
+
+		ComputeJobs Computations;
+		std::unordered_map<uint64_t, CallbackRef> AwaitedComputations;
 
 		// How many ticks a `task.wait` asked for, so its resolution can report
 		// how long it actually waited. Keyed by the resolver's ref.

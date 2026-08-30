@@ -11,6 +11,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/script/ComputeJobs.hpp>
 
 #include <cctype>
 #include <client/Client.hpp>
@@ -43,6 +44,10 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	if (engine::script::ComputeWorkerRequested(argc, argv)) {
+		return engine::script::RunComputeWorker();
+	}
+	engine::script::ConfigureComputeWorkerProgram(argv[0]);
 	engine::core::Log::Initialise("client");
 
 	// **Declared before anything is parsed or read**, because a config key that

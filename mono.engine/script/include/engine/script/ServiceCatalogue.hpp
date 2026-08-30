@@ -250,6 +250,14 @@ namespace engine::script {
 	// @since v0.10
 	const ServiceSurface &ContentServiceSurface();
 
+	// `ComputeService`, the bounded asynchronous numeric batch surface.
+	//
+	// Work crosses a heartbeat only through a typed noise-grid request and an
+	// owned numeric result. Arbitrary script functions do not leave their VM.
+	//
+	// @since v0.20
+	const ServiceSurface &ComputeServiceSurface();
+
 	// `CollectionService`, which answers what carries a tag.
 	//
 	// **The other side of `Instance:AddTag`.** The same three methods, plus the

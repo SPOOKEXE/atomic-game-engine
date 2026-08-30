@@ -1645,6 +1645,7 @@ end
 
 declare extern type ShaderScript extends Instance with
 	read Revision: number
+	Source: string
 end
 
 declare extern type EditableMesh extends Instance with
@@ -2427,6 +2428,21 @@ declare extern type ContentService with
 	function GetTriangleCount(self, mesh: string): number
 end
 
+-- Runs a rectangular batch of values compatible with `math.noise` without
+-- holding the VM thread. The result is flat and row-major.
+declare extern type ComputeService with
+	function NoiseGridAsync(
+		self,
+		width: number,
+		depth: number,
+		originX: number,
+		originZ: number,
+		step: number,
+		context: "Serial" | "Threaded" | "Processed"?,
+		originY: number?
+	): { number }
+end
+
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
 --
 -- The same three methods the instance has, plus the one nothing else can do:
@@ -2627,6 +2643,7 @@ declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare ComputeService: ComputeService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
@@ -2744,6 +2761,7 @@ type Services = {
 	MessagingService: MessagingService,
 	TeleportService: TeleportService,
 	ContentService: ContentService,
+	ComputeService: ComputeService,
 	CollectionService: CollectionService,
 	HttpService: HttpService,
 	CrossWorldService: CrossWorldService,

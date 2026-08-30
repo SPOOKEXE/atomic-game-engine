@@ -449,7 +449,11 @@ namespace engine::script {
 		// every save.
 		MirrorSourcePrograms(Store, Mirrored);
 
-		Error = PumpJsEditableMeshJobs(Context);
+		Error = PumpJsComputeJobs(Context);
+		const std::string editableMeshError = PumpJsEditableMeshJobs(Context);
+		if (Error.empty()) {
+			Error = editableMeshError;
+		}
 
 		const auto note = [&](std::string message) {
 			if (Error.empty()) {

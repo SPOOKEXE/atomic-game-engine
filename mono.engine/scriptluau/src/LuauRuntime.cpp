@@ -836,11 +836,19 @@ namespace engine::script {
 
 		std::string firstError;
 		{
-			// The third deterministic resume source. Work submitted by the previous
-			// barrier is prepared together, committed in ticket order on this world
-			// thread, and only then handed back to scripts.
+			// Completion polling is nonblocking. Results are copied into the VM on
+			// this owner thread before any script-visible events for the beat.
+			ENGINE_PROFILE_CAT("script compute jobs", core::ProfileCategory::Script);
+			firstError = PumpComputeJobs(State);
+		}
+		{
+			// Editable-mesh work is prepared together, committed in ticket order on
+			// this world thread, and only then handed back to scripts.
 			ENGINE_PROFILE_CAT("script editable meshes", core::ProfileCategory::Script);
-			firstError = PumpEditableMeshJobs(State);
+			const std::string editableMeshError = PumpEditableMeshJobs(State);
+			if (firstError.empty()) {
+				firstError = editableMeshError;
+			}
 		}
 		{
 			ENGINE_PROFILE_CAT("script deliveries", core::ProfileCategory::Script);

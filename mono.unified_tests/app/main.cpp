@@ -16,6 +16,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/ComputeJobs.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -282,6 +283,10 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	if (engine::script::ComputeWorkerRequested(argc, argv)) {
+		return engine::script::RunComputeWorker();
+	}
+	engine::script::ConfigureComputeWorkerProgram(argv[0]);
 	engine::core::Log::Initialise("unified");
 
 	// **The engine's settings and no `unified.*` table.** This is a diagnostic

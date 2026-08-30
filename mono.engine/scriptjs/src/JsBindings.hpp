@@ -249,9 +249,12 @@ namespace engine::script {
 	// @since v0.15
 	std::string PumpJsChildWaiters(JSContext *context);
 
-	// Resolves the third deterministic resume source after its ordered
-	// editable-mesh batch has committed on the world thread.
+	// Resolves an editable-mesh batch after it has committed in ticket order on
+	// the world thread.
 	std::string PumpJsEditableMeshJobs(JSContext *context);
+
+	// Resolves completed compute tickets in their deterministic publish order.
+	std::string PumpJsComputeJobs(JSContext *context);
 
 	// The JavaScript half of `PumpCharacters`.
 	//

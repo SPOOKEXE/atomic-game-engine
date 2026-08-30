@@ -1520,6 +1520,21 @@ declare extern type ContentService with
 	function GetTriangleCount(self, mesh: string): number
 end
 
+-- Runs a rectangular batch of values compatible with `math.noise` without
+-- holding the VM thread. The result is flat and row-major.
+declare extern type ComputeService with
+	function NoiseGridAsync(
+		self,
+		width: number,
+		depth: number,
+		originX: number,
+		originZ: number,
+		step: number,
+		context: "Serial" | "Threaded" | "Processed"?,
+		originY: number?
+	): { number }
+end
+
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
 --
 -- The same three methods the instance has, plus the one nothing else can do:
@@ -1722,6 +1737,7 @@ declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare ComputeService: ComputeService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
@@ -2387,6 +2403,7 @@ declare task: {
 		out << "\tMessagingService: MessagingService,\n";
 		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
+		out << "\tComputeService: ComputeService,\n";
 		out << "\tCollectionService: CollectionService,\n";
 		out << "\tHttpService: HttpService,\n";
 		out << "\tCrossWorldService: CrossWorldService,\n";
@@ -3197,6 +3214,20 @@ declare interface ContentService {
 	GetTriangleCount(mesh: string): number;
 }
 
+// Runs a rectangular batch of values compatible with `math.noise` without
+// holding the VM thread. The result is flat and row-major.
+declare interface ComputeService {
+	NoiseGridAsync(
+		width: number,
+		depth: number,
+		originX: number,
+		originZ: number,
+		step: number,
+		context?: "Serial" | "Threaded" | "Processed",
+		originY?: number
+	): Promise<number[]>;
+}
+
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
 // No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
@@ -3363,6 +3394,7 @@ declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
+declare const ComputeService: ComputeService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -3779,6 +3811,7 @@ declare const task: {
 			out << "\t\t(service: \"" << name << "\"): " << name << ";\n";
 		}
 		out << "\t\t(service: \"RunService\"): RunService;\n";
+		out << "\t\t(service: \"ComputeService\"): ComputeService;\n";
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
 		out << "\t\t(service: \"DataStoreService\"): DataStoreService;\n";

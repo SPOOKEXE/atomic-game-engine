@@ -10,6 +10,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/script/ComputeJobs.hpp>
 #include <engine/world/Lifecycle.hpp>
 
 #include <algorithm>
@@ -33,6 +34,10 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	if (engine::script::ComputeWorkerRequested(argc, argv)) {
+		return engine::script::RunComputeWorker();
+	}
+	engine::script::ConfigureComputeWorkerProgram(argv[0]);
 	engine::core::Log::Initialise("server");
 
 	// Declared before anything is parsed or read - see the client's `main` for
