@@ -55,6 +55,59 @@
 #include <vector>
 
 namespace engine::render {
+	namespace {
+		bool IsDepthFormat(graph::ResourceFormat format) {
+			return format == graph::ResourceFormat::D24S8 || format == graph::ResourceFormat::D32F;
+		}
+
+		bool IsCompressedFormat(graph::ResourceFormat format) {
+			return format == graph::ResourceFormat::BC1_SRGB || format == graph::ResourceFormat::BC3 ||
+				   format == graph::ResourceFormat::BC5 || format == graph::ResourceFormat::BC7_SRGB;
+		}
+
+		DeviceCaps ProbeCapabilities(SDL_GPUDevice *device, const ShaderBinary &binary, bool hasTimestamps) {
+			DeviceCaps caps;
+			if (device == nullptr) {
+				return caps;
+			}
+
+			// Compute and indexed indirect commands are baseline operations of an
+			// SDL GPU device. Texture formats remain device-specific and are
+			// queried below instead of inferred from the backend name.
+			caps.HasCompute = true;
+			caps.HasIndirectDraws = true;
+			caps.HasTimestamps = hasTimestamps;
+			caps.UnifiedQueue = true;
+			caps.PrefersMSL = binary.Form == resources::ShaderForm::Msl;
+			caps.MaxSamplersPerDraw = 10;
+			caps.MaxColourTargets = 4;
+
+			const SDL_GPUTextureUsageFlags storageUsage = SDL_GPU_TEXTUREUSAGE_SAMPLER |
+														  SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ |
+														  SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+			caps.HasStorageTextures = SDL_GPUTextureSupportsFormat(
+				device, DeviceFormat(graph::ResourceFormat::R32F), SDL_GPU_TEXTURETYPE_2D, storageUsage
+			);
+
+			for (uint8_t value = static_cast<uint8_t>(graph::ResourceFormat::R8);
+				 value <= static_cast<uint8_t>(graph::ResourceFormat::BC7_SRGB);
+				 value++) {
+				const auto format = static_cast<graph::ResourceFormat>(value);
+				SDL_GPUTextureUsageFlags usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+				if (IsDepthFormat(format)) {
+					usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+				} else if (!IsCompressedFormat(format)) {
+					usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+				}
+				if (SDL_GPUTextureSupportsFormat(
+						device, DeviceFormat(format), SDL_GPU_TEXTURETYPE_2D, usage
+					)) {
+					caps.Formats.push_back(format);
+				}
+			}
+			return caps;
+		}
+	}
 
 	void Renderer::Impl::CollectTimings() {
 		for (uint32_t slot = 0; slot < VulkanTimestamps::SLOTS; slot++) {
@@ -331,6 +384,33 @@ namespace engine::render {
 		return State != nullptr && State->Timestamps.Ready();
 	}
 
+	void Renderer::SetProfiling(ProfilingTier tier) {
+		RequireOwningThread("SetProfiling");
+		if (State->ProfileTier == tier) {
+			return;
+		}
+		if (tier != ProfilingTier::Full) {
+			for (uint32_t slot = 0; slot < VulkanTimestamps::SLOTS; slot++) {
+				State->Timestamps.Abandon(slot);
+			}
+		}
+		State->ProfileTier = tier;
+		State->DroppedProfileMarks = 0;
+	}
+
+	ProfilingTier Renderer::Profiling() const {
+		return State != nullptr ? State->ProfileTier : ProfilingTier::Off;
+	}
+
+	size_t Renderer::DroppedProfileMarks() const {
+		return State != nullptr ? State->DroppedProfileMarks : 0;
+	}
+
+	const DeviceCaps &Renderer::Capabilities() const {
+		static const DeviceCaps unavailable;
+		return State != nullptr ? State->Caps : unavailable;
+	}
+
 	std::string_view Renderer::BackendName() const {
 		return State->Backend;
 	}
@@ -496,7 +576,16 @@ namespace engine::render {
 
 		const char *driver = SDL_GetGPUDeviceDriver(State->Device);
 		State->Backend = driver ? driver : "unknown";
-		(void)State->Timestamps.Probe(State->Device);
+		const bool hasTimestamps = State->Timestamps.Probe(State->Device);
+		State->Caps = ProbeCapabilities(State->Device, State->Binary, hasTimestamps);
+		for (InstalledNodeHandler &installed : CustomNodeHandlers) {
+			if (installed.Lifecycle.Reinstall && !installed.Lifecycle.Reinstall(Backend())) {
+				ENGINE_ERROR("custom render node '{}' failed to install", installed.Kind.Text());
+				Shutdown();
+				return false;
+			}
+			installed.Live = true;
+		}
 
 		// **Before the pipelines, because they name the format too.** A pipeline
 		// built against one depth format and bound beside a texture in another
@@ -529,6 +618,39 @@ namespace engine::render {
 				// Guaranteed by SDL, so there is no third case to handle.
 				State->DepthFormat = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
 			}
+		}
+
+		const PipelineTierDecision defaultTier = ChooseDefaultPipeline(State->Caps);
+		for (const PipelineTierRejection &rejected : defaultTier.Fallthrough) {
+			ENGINE_INFO(
+				"{} engine default skipped: {}{}{}",
+				Describe(rejected.Tier),
+				Describe(rejected.Cause.Status),
+				rejected.Cause.Status == CapabilityStatus::MissingFormat ? ": " : "",
+				rejected.Cause.Status == CapabilityStatus::MissingFormat
+					? graph::Describe(rejected.Cause.Format)
+					: ""
+			);
+		}
+		graph::PipelineDocument defaultDocument;
+		switch (defaultTier.Tier) {
+		case DefaultPipelineTier::A:
+			defaultDocument = graph::DefaultPbrDocument();
+			break;
+		case DefaultPipelineTier::B:
+			defaultDocument = graph::DefaultPbrTierBDocument();
+			break;
+		case DefaultPipelineTier::C:
+			defaultDocument = graph::DefaultForwardTierCDocument();
+			break;
+		case DefaultPipelineTier::Unavailable:
+			ENGINE_ERROR("renderer has no supported default pipeline tier");
+			Shutdown();
+			return false;
+		}
+		if (!InstallEngineDefault(defaultDocument)) {
+			Shutdown();
+			return false;
 		}
 
 		SDL_GPUSamplerCreateInfo sampler{};
@@ -568,6 +690,14 @@ namespace engine::render {
 		if (!device) {
 			return;
 		}
+		const BackendHandles handles = Backend();
+		for (auto installed = CustomNodeHandlers.rbegin(); installed != CustomNodeHandlers.rend();
+			 installed++) {
+			if (installed->Live && installed->Lifecycle.Release) {
+				installed->Lifecycle.Release(handles);
+			}
+			installed->Live = false;
+		}
 
 		// Everything below is still referenced by frames that may not have
 		// finished. Waiting once here is simpler and no slower than tracking
@@ -601,6 +731,9 @@ namespace engine::render {
 
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
+		}
+		if (State->ForwardPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->ForwardPipeline);
 		}
 		if (State->WireframeOpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeOpaquePipeline);
@@ -784,7 +917,11 @@ namespace engine::render {
 		// `*State = Impl{}` no longer compiles - and it should not: an
 		// assignment would have released their buffers a second time, after
 		// `Shutdown` above already did.
+		const ProfilingTier profileTier = State->ProfileTier;
+		const uint32_t profileSampleRate = State->ProfileSampleRate;
 		State = std::make_unique<Impl>();
+		State->ProfileTier = profileTier;
+		State->ProfileSampleRate = profileSampleRate;
 	}
 
 	void Renderer::ForgetWorld(uint64_t world, core::Name name) {
@@ -1928,6 +2065,9 @@ namespace engine::render {
 		// through it, and a kind with a runner registered below replaces the
 		// default.
 		NodeTable frameNodes = BackendTable([](const graph::RunContext &) { return true; });
+		for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
+			frameNodes.Set(installed.Kind, installed.Handler);
+		}
 		if (request.Damage.Scene) {
 			recording.RegisterUploadNodes(frameNodes);
 			recording.RegisterShadowNodes(frameNodes);

@@ -101,9 +101,8 @@ namespace engine::script {
 		// and the other an orphan nobody drives, standing in the world for ever
 		// and one more of them per teleport.
 		//
-		// A second registration is now a wasted walk over an empty list rather
-		// than a second person, which is the difference between a mistake that
-		// costs nothing and one somebody has to photograph to find.
+		// `RegisterTeleportAdmission` is idempotent, so two installers still
+		// produce one admission pass.
 		//
 		// **Only teleports are taken.** A subscriber's message has to still be
 		// there when a runtime pumps - the delivery pump reads the same list -
@@ -149,6 +148,9 @@ namespace engine::script {
 	}
 
 	void RegisterTeleportAdmission(ecs::Scheduler &scheduler) {
+		if (scheduler.HasSystem("teleport.admit", ecs::Phase::PreSimulation)) {
+			return;
+		}
 		scheduler.Add("teleport.admit", ecs::Phase::PreSimulation, [](ecs::Store &store) {
 			(void)AdmitTeleports(store);
 		});

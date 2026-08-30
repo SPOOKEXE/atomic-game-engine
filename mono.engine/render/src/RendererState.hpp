@@ -52,6 +52,7 @@ namespace engine::render {
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
+		DeviceCaps Caps;
 
 		struct NamedPipeline {
 			core::Name Name;
@@ -142,6 +143,9 @@ namespace engine::render {
 							ResourceRole::Depth,
 						};
 						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+					}
+					if (node->Kind == core::Name("forward")) {
+						return output == 1 ? ResourceRole::Depth : ResourceRole::Unknown;
 					}
 					if (node->Kind == core::Name("depth-linearise")) {
 						return ResourceRole::LinearDepth;
@@ -258,6 +262,9 @@ namespace engine::render {
 		uint64_t ResolvedTimingSequence = 0;
 		std::unordered_map<uint32_t, double> GpuTimings;
 		std::unordered_map<uint32_t, double> WallTimings;
+		ProfilingTier ProfileTier = ProfilingTier::Full;
+		uint32_t ProfileSampleRate = 4;
+		size_t DroppedProfileMarks = 0;
 
 		// The frame-graph span name for each pass's *device* time, keyed by the
 		// pass's `core::Name::Id`.
@@ -289,6 +296,7 @@ namespace engine::render {
 		void CollectTimings();
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *ForwardPipeline = nullptr;
 
 		// The two above, redrawn as lines. See where they are created for why
 		// there are two objects and not a bindable state.

@@ -683,6 +683,13 @@ namespace studio {
 		}
 
 		FrameGraphView &view = FrameGraphState;
+		if (Renderer.DroppedProfileMarks() > 0) {
+			ImGui::TextColored(
+				ImVec4(1.0f, 0.55f, 0.2f, 1.0f),
+				"%zu GPU timestamp marks dropped; device rows are partial",
+				Renderer.DroppedProfileMarks()
+			);
+		}
 		if (ImGui::RadioButton("Frame timings", !view.ShowCascadedCaches)) {
 			view.ShowCascadedCaches = false;
 		}

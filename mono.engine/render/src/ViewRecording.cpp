@@ -1130,8 +1130,12 @@ namespace engine::render {
 		if (State->BatchFirst || !State->BatchActive) {
 			State->CollectTimings();
 			State->WallTimings.clear();
+			State->DroppedProfileMarks = 0;
 		}
-		timingSlot = State->BatchActive
+		const bool sampleGpu = State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
+							   State->FrameCounter % State->ProfileSampleRate == 0;
+		timingSlot = !sampleGpu ? VulkanTimestamps::NO_SLOT
+					 : State->BatchActive
 						 ? (State->BatchFirst ? State->Timestamps.Begin(command) : State->BatchTimingSlot)
 						 : State->Timestamps.Begin(command);
 		if (State->BatchActive && State->BatchFirst) {
@@ -1907,7 +1911,11 @@ namespace engine::render {
 		// `GraphRunner::Run` now names each node; this is the bar they sit under.
 		ENGINE_PROFILE_CAT("execute graph", core::ProfileCategory::Render);
 
-		GraphRunner frameRunner(frameNodes);
+		NodeProfileHooks profile;
+		profile.Enabled = [this](const graph::RunContext &context) { return ProfileEnabled(context); };
+		profile.Begin = [this](const graph::RunContext &context) { BeginNodeProfile(context); };
+		profile.End = [this](const graph::RunContext &context) { return EndNodeProfile(context); };
+		GraphRunner frameRunner(frameNodes, State->ProfileTier, std::move(profile));
 		bool dispatched = false;
 		if (State->BatchActive) {
 			dispatched = selectedPipeline->Graph.ExecuteView(
@@ -1924,6 +1932,7 @@ namespace engine::render {
 			const uint64_t worlds[] = {world};
 			dispatched = selectedPipeline->Graph.Execute(selectedPipeline->Compiled, frameRunner, worlds);
 		}
+		State->DroppedProfileMarks += frameRunner.DroppedProfileMarks();
 		if (!dispatched) {
 			ENGINE_ERROR(
 				"render graph '{}' refused while executing '{}'",

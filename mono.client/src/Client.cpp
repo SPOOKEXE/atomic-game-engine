@@ -2615,6 +2615,7 @@ namespace client {
 				panels.IdleMilliseconds =
 					FrameGraph::CategoryMilliseconds(engine::core::ProfileCategory::Idle);
 				panels.DroppedSpans = FrameGraph::Dropped();
+				panels.DroppedGpuMarks = Renderer.DroppedProfileMarks();
 				panels.Systems = SystemTimings;
 				panels.Counters = counters;
 				panels.HeapCompiledIn = HeapProfile::IsCompiledIn();

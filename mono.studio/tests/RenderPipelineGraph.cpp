@@ -204,6 +204,21 @@ TEST_CASE(
 	"dispatch and output controls are graph data rather than decorative widgets", "[studio][pipeline]"
 ) {
 	studio::RegisterRenderPipelineNodeTypes();
+	nodegraph::Graph blitCanvas;
+	const nodegraph::NodeId blitId = blitCanvas.Add("render.pass.blit", 0.0f, 0.0f);
+	REQUIRE(blitId != nodegraph::NO_NODE);
+	REQUIRE(blitCanvas.Find(blitId)->Widgets.contains("format"));
+	blitCanvas.Find(blitId)->Widgets["format"].Text = "RGB10A2";
+	PipelineDocument blitDocument;
+	std::string blitError;
+	REQUIRE(studio::SaveRenderPipelineGraph(blitCanvas, {}, blitDocument, blitError));
+	const auto blitResource =
+		std::find_if(blitDocument.Edits().begin(), blitDocument.Edits().end(), [](const Edit &edit) {
+			return edit.Kind == EditKind::AddResource;
+		});
+	REQUIRE(blitResource != blitDocument.Edits().end());
+	CHECK(blitResource->Format == ResourceFormat::RGB10A2);
+
 	nodegraph::Graph dispatchCanvas;
 	const nodegraph::NodeId dispatchId = dispatchCanvas.Add("render.pass.dispatch", 0.0f, 0.0f);
 	REQUIRE(dispatchId != nodegraph::NO_NODE);

@@ -84,6 +84,17 @@ namespace engine::graph {
 		return "?";
 	}
 
+	bool ParseResourceFormat(std::string_view text, ResourceFormat &out) {
+		for (uint8_t value = 0; value <= static_cast<uint8_t>(ResourceFormat::BC7_SRGB); value++) {
+			const ResourceFormat candidate = static_cast<ResourceFormat>(value);
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
 	uint32_t BitsPerPixel(ResourceFormat format) {
 		switch (format) {
 		case ResourceFormat::BC1_SRGB:

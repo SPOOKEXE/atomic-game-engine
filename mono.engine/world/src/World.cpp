@@ -115,7 +115,7 @@ namespace engine::world {
 					Store_.AdvanceTick(Timestep.Delta());
 				}
 
-				Scheduler_.RunPhases(Store_, ecs::Phase::PreSimulation, ecs::Phase::PostSimulation);
+				Scheduler_.RunPhases(Store_, ecs::Phase::Input, ecs::Phase::Replication);
 
 				{
 					ENGINE_PROFILE_CAT("tick commit", engine::core::ProfileCategory::Simulation);
@@ -202,7 +202,7 @@ namespace engine::world {
 
 		Store_.BindToCallingThread();
 		Store_.SetFrame(frameSeconds, alpha);
-		Scheduler_.RunPhases(Store_, ecs::Phase::PreRender, ecs::Phase::PreRender);
+		Scheduler_.RunPhases(Store_, ecs::Phase::RenderPreparation, ecs::Phase::Render);
 	}
 
 	void World::SetState(WorldState state) {

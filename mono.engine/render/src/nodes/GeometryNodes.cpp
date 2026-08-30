@@ -18,6 +18,64 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterGeometryNodes(NodeTable &frameNodes) {
+		frameNodes.Set(core::Name("forward"), [this](const graph::RunContext &context) {
+			if (context.Writes.size() != 2) {
+				return false;
+			}
+			Impl::NamedTexture colour = GraphTexture(context.Writes[0], context, true);
+			Impl::NamedTexture depth = GraphTexture(context.Writes[1], context, true);
+			if (!colour.IsValid() || !depth.IsValid()) {
+				return false;
+			}
+
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo colourTarget{};
+			colourTarget.texture = colour.Texture;
+			colourTarget.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
+			colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
+			colourTarget.cycle = true;
+			SDL_GPUDepthStencilTargetInfo depthTarget{};
+			depthTarget.texture = depth.Texture;
+			depthTarget.clear_depth = 1.0f;
+			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			depthTarget.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+			depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+			depthTarget.cycle = true;
+
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(Command, &colourTarget, 1, &depthTarget);
+			if (pass == nullptr) {
+				ENGINE_ERROR("forward: SDL_BeginGPURenderPass: {}", SDL_GetError());
+				return false;
+			}
+			State->BindPipeline(pass, State->ForwardPipeline, Impl::PipelineFamily::Opaque);
+			SDL_SetGPUViewport(pass, &SceneViewport);
+			SDL_SetGPUScissor(pass, &SceneScissor);
+			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
+			if (HaveInstances && PlainOpaque > 0) {
+				State->BindInstanceBuffers(pass, State->InstanceIndexBuffer);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				Result.DrawCalls += State->DrawSlots(
+					Command,
+					pass,
+					SceneCount,
+					PlainOpaque,
+					&Lighting,
+					State->ShadowTexture,
+					State->ShadowSampler,
+					nullptr,
+					State->SurfaceSampler,
+					0,
+					Result.Triangles,
+					nullptr
+				);
+			}
+			SDL_EndGPURenderPass(pass);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("gbuffer"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;

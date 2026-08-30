@@ -221,6 +221,21 @@ namespace studio {
 			return nullptr;
 		}
 
+		const ParameterSpec *ParameterNamed(const NodeKindSpec &kind, std::string_view name) {
+			for (const ParameterSpec &parameter : kind.Params) {
+				if (parameter.Name.Text() == name) {
+					return &parameter;
+				}
+			}
+			return nullptr;
+		}
+
+		uint32_t UnsignedParameter(std::string_view text, uint32_t fallback) {
+			uint32_t value = fallback;
+			const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+			return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? value : fallback;
+		}
+
 		Name UniqueNodeName(const nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
 			const std::string base = node.Label.empty() ? std::string(kind.Text()) : node.Label;
 			Name candidate(base);
@@ -288,6 +303,7 @@ namespace studio {
 			const std::array commonWidgets{
 				nodegraph::Toggle("enabled", "Enabled", true),
 				nodegraph::Toggle("optional", "Optional", false),
+				nodegraph::Toggle("profile", "Profile", true),
 				nodegraph::Select(
 					"scope",
 					"Scope",
@@ -300,50 +316,40 @@ namespace studio {
 				nodegraph::Select("async", "Async", {"auto", "allow", "serial"}, 0),
 			};
 			type.Widgets.insert(type.Widgets.end(), commonWidgets.begin(), commonWidgets.end());
-			if (spec.Kind == Name("cull-frustum")) {
-				// "occlusion" composes behind the frustum test: the entity flow
-				// still culls by frustum on the CPU, and the renderer's gbuffer
-				// pass adds the depth-pyramid test on the GPU.
-				type.Widgets.push_back(
-					nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum", "occlusion"}, 0)
-				);
-			}
-			if (spec.Kind == Name("cull-distance")) {
-				type.Widgets.push_back(nodegraph::Text("radius", "Radius", "0"));
-			}
-			if (spec.Kind == Name("filter-tag")) {
-				type.Widgets.push_back(nodegraph::Text("mask", "Tag mask", "0"));
-			}
-			if (spec.Kind == Name("mirror-capture")) {
-				type.Widgets.push_back(nodegraph::Select("feedback", "Feedback", {"last-frame", "flat"}, 0));
-				type.Widgets.push_back(nodegraph::Number("max-recursion", "Max recursion", 3));
-			}
-			if (spec.Kind == Name("raster") || spec.Kind == Name("dispatch")) {
-				type.Widgets.push_back(nodegraph::Text("shader", "Shader", ""));
-				type.Widgets.push_back(nodegraph::Text("source", "GLSL source", ""));
-			}
-			if (spec.Kind == Name("raster")) {
-				type.Widgets.push_back(nodegraph::Select("load", "Load", {"clear", "load"}, 0));
-			}
-			if (spec.Kind == Name("dispatch")) {
-				type.Widgets.push_back(
-					nodegraph::Select("dispatch.mode", "Dispatch", {"target", "groups"}, 0)
-				);
-				type.Widgets.push_back(nodegraph::Number("local.x", "Threads X", 8));
-				type.Widgets.push_back(nodegraph::Number("local.y", "Threads Y", 8));
-				type.Widgets.push_back(nodegraph::Number("local.z", "Threads Z", 1));
-				type.Widgets.push_back(nodegraph::Number("dispatch.x", "Groups X", 1));
-				type.Widgets.push_back(nodegraph::Number("dispatch.y", "Groups Y", 1));
-				type.Widgets.push_back(nodegraph::Number("dispatch.z", "Groups Z", 1));
-			}
-			if (spec.Kind == Name("viewer") || spec.Kind == Name("capture")) {
-				type.Widgets.push_back(nodegraph::Number("view", "Viewport slot", 0));
-			}
-			if (spec.Kind == Name("capture")) {
-				type.Widgets.push_back(nodegraph::Text("path", "BMP path", ""));
-				type.Widgets.push_back(
-					nodegraph::Select("capture.mode", "Capture", {"once", "every-frame"}, 0)
-				);
+			for (const ParameterSpec &parameter : spec.Params) {
+				const std::string key(parameter.Name.Text());
+				switch (parameter.Widget) {
+				case ParameterWidget::Text:
+					type.Widgets.push_back(nodegraph::Text(key, parameter.Label, parameter.Default));
+					break;
+				case ParameterWidget::Number:
+					type.Widgets.push_back(
+						nodegraph::Number(
+							key, parameter.Label, static_cast<double>(UnsignedParameter(parameter.Default, 0))
+						)
+					);
+					break;
+				case ParameterWidget::Toggle:
+					type.Widgets.push_back(
+						nodegraph::Toggle(key, parameter.Label, parameter.Default == "true")
+					);
+					break;
+				case ParameterWidget::Select: {
+					const auto selected =
+						std::find(parameter.Options.begin(), parameter.Options.end(), parameter.Default);
+					type.Widgets.push_back(
+						nodegraph::Select(
+							key,
+							parameter.Label,
+							parameter.Options,
+							selected == parameter.Options.end()
+								? 0
+								: static_cast<int>(selected - parameter.Options.begin())
+						)
+					);
+					break;
+				}
+				}
 			}
 			for (const PortSpec &port : spec.Outputs) {
 				const std::string output(port.Name.Text());
@@ -405,33 +411,40 @@ namespace studio {
 			PutToggle(node, "enabled", source.Enabled);
 			PutToggle(node, "optional", source.Optional);
 			PutSelect(node, "scope", Describe(source.Scope));
+			const NodeKindSpec *spec = NodeCatalogue::Find(source.Kind);
 			for (const NodeParameter &parameter : source.Parameters) {
 				const std::string key(parameter.Key.Text());
-				if (key == PREVIEW_ENABLED || key == PREVIEW_REVERSE) {
+				if (key == PREVIEW_ENABLED || key == PREVIEW_REVERSE || key == "profile") {
 					PutToggle(node, key.c_str(), parameter.Value == "true");
-				} else if (key == "queue" || key == "async" || key == "load" || key == "dispatch.mode" ||
-						   key == "capture.mode" || key == "feedback") {
+				} else if (key == "queue" || key == "async") {
 					PutSelect(node, key.c_str(), parameter.Value);
-				} else if (key == "culling" && node.Widgets.contains("culling")) {
-					PutSelect(node, key.c_str(), parameter.Value);
-				} else if (key == "dispatch.x" || key == "dispatch.y" || key == "dispatch.z" ||
-						   key == "local.x" || key == "local.y" || key == "local.z" || key == "view" ||
-						   key == "max-recursion") {
-					uint32_t number = 1;
-					std::from_chars(
-						parameter.Value.data(), parameter.Value.data() + parameter.Value.size(), number
-					);
-					PutNumber(node, key.c_str(), number);
-				} else if (key == "shader" || key == "source" || key == "path" ||
-						   (key == "radius" && source.Kind == Name("cull-distance")) ||
-						   (key == "mask" && source.Kind == Name("filter-tag"))) {
-					PutText(node, key, parameter.Value);
 				} else {
-					PutText(node, Key("parameter", key), parameter.Value);
+					const ParameterSpec *declared = spec == nullptr ? nullptr : ParameterNamed(*spec, key);
+					if (declared == nullptr) {
+						PutText(node, Key("parameter", key), parameter.Value);
+						continue;
+					}
+					switch (declared->Widget) {
+					case ParameterWidget::Text:
+						PutText(node, key, parameter.Value);
+						break;
+					case ParameterWidget::Number:
+						PutNumber(
+							node,
+							key.c_str(),
+							UnsignedParameter(parameter.Value, UnsignedParameter(declared->Default, 0))
+						);
+						break;
+					case ParameterWidget::Toggle:
+						PutToggle(node, key.c_str(), parameter.Value == "true");
+						break;
+					case ParameterWidget::Select:
+						PutSelect(node, key.c_str(), parameter.Value);
+						break;
+					}
 				}
 			}
 
-			const NodeKindSpec *spec = NodeCatalogue::Find(source.Kind);
 			for (size_t index = 0; spec != nullptr && index < source.Reads.size(); index++) {
 				const std::string port = BindingPort(source.Reads[index], spec->Inputs, index);
 				PutText(node, Key("read", port), std::string(source.Reads[index].Resource.Text()));
@@ -596,6 +609,14 @@ namespace studio {
 				}
 				ensureResource(Name(resource), port);
 				Edit &settings = resources.at(Name(resource).Id());
+				if (kind == Name("blit")) {
+					ResourceFormat selected = ResourceFormat::RGBA16F;
+					if (!ParseResourceFormat(SelectOf(node, "format", "RGBA16F"), selected)) {
+						error = "blit target format is not recognised";
+						return false;
+					}
+					settings.Format = selected;
+				}
 				const std::string output(port.Name.Text());
 				settings.External =
 					SelectOf(node, ResourceKey("lifetime", output).c_str(), "transient") == "external";
@@ -690,6 +711,13 @@ namespace studio {
 				set.Value = SelectOf(node, key, "auto");
 				document.Record(set);
 			}
+			{
+				Edit set;
+				set.Kind = EditKind::Set;
+				set.Key = Name("profile");
+				set.Value = ToggleOf(node, "profile", true) ? "true" : "false";
+				document.Record(set);
+			}
 			if (node.Widgets.contains(PREVIEW_ENABLED)) {
 				for (const char *key : {PREVIEW_ENABLED, PREVIEW_REVERSE}) {
 					Edit set;
@@ -699,82 +727,32 @@ namespace studio {
 					document.Record(set);
 				}
 			}
-			if (node.Widgets.contains("culling")) {
+			for (const ParameterSpec &parameter : spec.Params) {
+				const std::string key(parameter.Name.Text());
 				Edit set;
 				set.Kind = EditKind::Set;
-				set.Key = Name("culling");
-				set.Value = SelectOf(node, "culling", "inherit");
-				document.Record(set);
-			}
-			if (kind == Name("mirror-capture")) {
-				Edit feedback;
-				feedback.Kind = EditKind::Set;
-				feedback.Key = Name("feedback");
-				feedback.Value = SelectOf(node, "feedback", "last-frame");
-				document.Record(feedback);
-				Edit recursion;
-				recursion.Kind = EditKind::Set;
-				recursion.Key = Name("max-recursion");
-				recursion.Value = NumberText(node, "max-recursion");
-				document.Record(recursion);
-			}
-			if (kind == Name("cull-distance") || kind == Name("filter-tag")) {
-				const char *key = kind == Name("cull-distance") ? "radius" : "mask";
-				Edit set;
-				set.Kind = EditKind::Set;
-				set.Key = Name(key);
-				set.Value = TextOf(node, key);
-				document.Record(set);
-			}
-			if (kind == Name("raster") || kind == Name("dispatch")) {
-				for (const char *key : {"shader", "source"}) {
-					Edit set;
-					set.Kind = EditKind::Set;
-					set.Key = Name(key);
+				set.Key = parameter.Name;
+				switch (parameter.Widget) {
+				case ParameterWidget::Text:
 					set.Value = TextOf(node, key);
-					document.Record(set);
+					break;
+				case ParameterWidget::Number:
+					set.Value = NumberText(
+						node,
+						key.c_str(),
+						parameter.HasRange && parameter.Minimum > 0.0
+							? static_cast<uint32_t>(parameter.Minimum)
+							: 0
+					);
+					break;
+				case ParameterWidget::Toggle:
+					set.Value = ToggleOf(node, key.c_str(), parameter.Default == "true") ? "true" : "false";
+					break;
+				case ParameterWidget::Select:
+					set.Value = SelectOf(node, key.c_str(), parameter.Default);
+					break;
 				}
-			}
-			if (kind == Name("raster")) {
-				Edit load;
-				load.Kind = EditKind::Set;
-				load.Key = Name("load");
-				load.Value = SelectOf(node, "load", "clear");
-				document.Record(load);
-			}
-			if (kind == Name("dispatch")) {
-				Edit mode;
-				mode.Kind = EditKind::Set;
-				mode.Key = Name("dispatch.mode");
-				mode.Value = SelectOf(node, "dispatch.mode", "target");
-				document.Record(mode);
-				for (const char *key :
-					 {"local.x", "local.y", "local.z", "dispatch.x", "dispatch.y", "dispatch.z"}) {
-					Edit set;
-					set.Kind = EditKind::Set;
-					set.Key = Name(key);
-					set.Value = NumberText(node, key);
-					document.Record(set);
-				}
-			}
-			if (kind == Name("viewer") || kind == Name("capture")) {
-				Edit view;
-				view.Kind = EditKind::Set;
-				view.Key = Name("view");
-				view.Value = NumberText(node, "view", 0);
-				document.Record(view);
-			}
-			if (kind == Name("capture")) {
-				Edit path;
-				path.Kind = EditKind::Set;
-				path.Key = Name("path");
-				path.Value = TextOf(node, "path");
-				document.Record(path);
-				Edit mode;
-				mode.Kind = EditKind::Set;
-				mode.Key = Name("capture.mode");
-				mode.Value = SelectOf(node, "capture.mode", "once");
-				document.Record(mode);
+				document.Record(set);
 			}
 
 			Edit enable;

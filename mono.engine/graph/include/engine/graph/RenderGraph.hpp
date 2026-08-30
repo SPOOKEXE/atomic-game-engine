@@ -201,6 +201,13 @@ namespace engine::graph {
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(ResourceFormat format);
 
+	// Parses the stable spelling returned by Describe.
+	//
+	// @param text The complete format name.
+	// @param out Filled on success and left alone on failure.
+	// @return Whether text named a format.
+	bool ParseResourceFormat(std::string_view text, ResourceFormat &out);
+
 	// How many bits one pixel of a format takes.
 	//
 	// @param format The format.
@@ -422,8 +429,14 @@ namespace engine::graph {
 		// What it must be able to read.
 		std::vector<ResourceId> Reads{};
 
+		// Catalogue port names parallel to Reads when a document supplied them.
+		std::vector<core::Name> ReadPorts{};
+
 		// What it writes.
 		std::vector<ResourceId> Writes{};
+
+		// Catalogue port names parallel to Writes when a document supplied them.
+		std::vector<core::Name> WritePorts{};
 
 		// How often the work runs.
 		//

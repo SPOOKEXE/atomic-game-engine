@@ -459,10 +459,13 @@ TEST_CASE("small world batches stay on the driver unless dispatch is forced", "[
 	CHECK_FALSE(has(pair.Names, "worlds (serial)"));
 	CHECK(hasEdge(pair, "worlds (pinned workers)", "world.branch.0"));
 	CHECK(hasEdge(pair, "world.branch.0", "ecs.systems"));
-	CHECK(hasEdge(pair, "ecs.systems", "pre-simulation"));
+	CHECK(hasEdge(pair, "ecs.systems", "input"));
 	CHECK(hasEdge(pair, "ecs.systems", "simulation"));
-	CHECK(hasEdge(pair, "ecs.systems", "post-simulation"));
-	CHECK(hasEdge(pair, "ecs.systems", "pre-render"));
+	CHECK(hasEdge(pair, "ecs.systems", "physics"));
+	CHECK(hasEdge(pair, "ecs.systems", "animation"));
+	CHECK(hasEdge(pair, "ecs.systems", "replication"));
+	CHECK(hasEdge(pair, "ecs.systems", "render preparation"));
+	CHECK(hasEdge(pair, "ecs.systems", "render"));
 	CHECK(hasEdge(pair, "simulation", "advance"));
 }
 

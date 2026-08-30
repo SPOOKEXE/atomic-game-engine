@@ -9,9 +9,40 @@
 
 #include <functional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace engine::render {
+	// Runtime instrumentation paid for by graph execution.
+	//
+	// @since v0.20
+	enum class ProfilingTier : uint8_t {
+		// No per-node CPU scopes or GPU marks.
+		Off,
+
+		// Per-node CPU scopes only.
+		Cpu,
+
+		// CPU scopes and backend timestamp marks.
+		Full,
+	};
+
+	// Backend hooks around one logical graph node.
+	//
+	// GraphRunner owns assignment and accounting. The device adapter owns the
+	// command buffer and reports how many mark writes could not be recorded.
+	//
+	// @since v0.20
+	struct NodeProfileHooks {
+		// Optional per-node opt-out. Empty means enabled.
+		std::function<bool(const graph::RunContext &)> Enabled;
+
+		// Opens the logical node's device timing range.
+		std::function<void(const graph::RunContext &)> Begin;
+
+		// Closes the range and returns dropped timestamp mark writes.
+		std::function<size_t(const graph::RunContext &)> End;
+	};
 
 	// What one node kind does when the graph reaches it.
 	//
@@ -86,7 +117,10 @@ namespace engine::render {
 		//
 		// @param table The handlers. Borrowed, so it has to outlive the runner -
 		//              in practice both belong to the renderer.
-		explicit GraphRunner(const NodeTable &table) : Table(table) {}
+		explicit GraphRunner(
+			const NodeTable &table, ProfilingTier tier = ProfilingTier::Cpu, NodeProfileHooks profile = {}
+		)
+			: Table(table), Tier(tier), Profile(std::move(profile)) {}
 
 		// Records one node, or refuses.
 		//
@@ -110,14 +144,24 @@ namespace engine::render {
 			return SubmittedCount;
 		}
 
+		// Timestamp mark writes omitted because the backend budget filled.
+		size_t DroppedProfileMarks() const {
+			return DroppedMarks;
+		}
+
 	  private:
 		// The handlers, borrowed.
 		const NodeTable &Table;
+
+		ProfilingTier Tier = ProfilingTier::Cpu;
+		NodeProfileHooks Profile;
 
 		// The first kind found without a handler.
 		core::Name Missing;
 
 		// How many nodes have been recorded.
 		size_t SubmittedCount = 0;
+
+		size_t DroppedMarks = 0;
 	};
 }

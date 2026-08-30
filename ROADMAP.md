@@ -96,24 +96,24 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
 
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
-- [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
-- [_] one registration path for render nodes — fold scope/queue metadata and requirements into graph::NodeCatalogue; derive BackendNodes(); studio widgets read Params
-- [_] DeviceCaps probe + CheckCapabilities — probe in Initialise(); wire refusal messages; studio requirements column
-- [_] custom native node kinds — RegisterNodeKind + Renderer::InstallNodeHandler; lifecycle hook on reinstall; demo custom kind in examples
-- [_] per-node GPU profiling — mark assignment in GraphRunner, grid column, tier switch; assert dropped-mark accounting
-- [_] explicit conversion nodes + narrowing rule — explicit blit format targeting; LossyWire demoted to hint when explicit conversion sits between producer/consumer
-- [_] tiered default pipelines by capability — Tier B/C documents; capability-driven pick at install; WorldPipelines extension asserting fall-through reasons
-- [_] ECS component change tracking — dirty bits/version counters so systems only process changed data
-- [_] archetype/query optimizer — cached ECS queries, change filters, parallel query execution
-- [_] entity references/handles — generation-safe references instead of raw entity IDs
-- [_] world snapshots & cloning — serialize/restore entire world state; instant-ish duplicate world for testing, previews, server simulation
-- [_] rollback/snapshot system — for networking and deterministic simulation
-- [_] system dependency graph — explicitly declare before/after, parallelize independent systems
-- [_] frame scheduler — CPU jobs, GPU jobs, async jobs and synchronization points represented together
-- [_] engine tick phases — Input → Simulation → Physics → Animation → Replication → Render preparation → Render
-- [_] determinism mode — detect nondeterministic simulation and optionally enforce deterministic ordering
-- [_] hot-reloadable components/systems
-- [_] parallel::Jobs pool fix — static Pool *pool = new Pool(); never destroy to avoid exit hang with waiters on condition variables
+- [x] engine graph architecture: Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
+- [x] one registration path for render nodes: fold scope/queue metadata and requirements into graph::NodeCatalogue; derive BackendNodes(); studio widgets read Params
+- [x] DeviceCaps probe + CheckCapabilities: probe in Initialise(); wire refusal messages; studio requirements column
+- [x] custom native node kinds: RegisterNodeKind + Renderer::InstallNodeHandler; lifecycle hook on reinstall; demo custom kind in examples
+- [x] per-node GPU profiling: mark assignment in GraphRunner, grid column, tier switch; assert dropped-mark accounting
+- [x] explicit conversion nodes + narrowing rule: explicit blit format targeting; LossyWire demoted to hint when explicit conversion sits between producer/consumer
+- [x] tiered default pipelines by capability: Tier B/C documents; capability-driven pick at install; WorldPipelines extension asserting fall-through reasons
+- [x] ECS component change tracking: dirty bits/version counters so systems only process changed data
+- [x] archetype/query optimizer: cached ECS queries, change filters, parallel query execution
+- [x] entity references/handles: generation-safe references instead of raw entity IDs
+- [x] world snapshots & cloning: serialize/restore entire world state; instant-ish duplicate world for testing, previews, server simulation
+- [x] rollback/snapshot system for networking and deterministic simulation
+- [x] system dependency graph: explicitly declare before/after, parallelize independent systems
+- [x] frame scheduler: CPU jobs, GPU jobs, async jobs and synchronization points represented together
+- [x] engine tick phases: Input → Simulation → Physics → Animation → Replication → Render preparation → Render
+- [x] determinism mode: detect nondeterministic simulation and optionally enforce deterministic ordering
+- [x] hot-reloadable components/systems
+- [x] parallel::Jobs pool fix: replace the leaked static pool and join worker waiters during teardown
 
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).

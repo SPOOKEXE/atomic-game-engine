@@ -45,6 +45,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 
 #include <cstdint>
 #include <span>
@@ -137,6 +138,82 @@ namespace engine::graph {
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(NodeCategory category);
 
+	// How an authored node parameter is edited.
+	//
+	// The graph stores parameter values as text. This tag only chooses the
+	// Studio control that authors that text and has no effect at runtime.
+	//
+	// @since v0.20
+	enum class ParameterWidget : uint8_t {
+		// Free-form text.
+		Text,
+
+		// A numeric value.
+		Number,
+
+		// A true or false choice.
+		Toggle,
+
+		// One value from ParameterSpec::Options.
+		Select,
+	};
+
+	// One typed parameter accepted by a node kind.
+	//
+	// Values remain text in RenderGraph. This schema gives editors one source
+	// for labels, defaults, choices, and numeric bounds.
+	//
+	// @since v0.20
+	struct ParameterSpec {
+		// The stable key written into a pipeline document.
+		core::Name Name;
+
+		// What an editor displays beside the control.
+		std::string Label;
+
+		// Which control authors the value.
+		ParameterWidget Widget = ParameterWidget::Text;
+
+		// The text used when a node has no authored value.
+		std::string Default;
+
+		// Choices for Select. Empty for every other widget.
+		std::vector<std::string> Options;
+
+		// Inclusive numeric bounds. They apply only when HasRange is true.
+		//@{
+		double Minimum = 0.0;
+		double Maximum = 0.0;
+		bool HasRange = false;
+		//@}
+	};
+
+	// Device features a node kind needs before it may be installed.
+	//
+	// The graph layer only declares the requirements. A device adapter probes
+	// its own capabilities and checks them without exposing a device type here.
+	//
+	// @since v0.20
+	struct NodeRequirements {
+		// Requires compute pipeline support.
+		bool Compute = false;
+
+		// Requires read-write texture bindings.
+		bool StorageTextures = false;
+
+		// Requires indirect draw argument buffers.
+		bool IndirectDraws = false;
+
+		// Benefits from timestamps but remains runnable without them.
+		bool TimestampsUseful = false;
+
+		// Colour formats that must be creatable.
+		std::vector<ResourceFormat> Formats;
+
+		// A kind that may replace this one on a less capable device.
+		core::Name FallbackKind;
+	};
+
 	// One sort of node, with its slots.
 	//
 	// @since v0.11
@@ -181,6 +258,26 @@ namespace engine::graph {
 		// but `RenderGraph` lets a node say otherwise and an author may have a
 		// reason.
 		NodeScope Scope = NodeScope::View;
+
+		// The queue used when a node does not author a queue override.
+		ExecutionQueue Queue = ExecutionQueue::Graphics;
+
+		// Whether the built-in renderer installs a handler for this kind.
+		//
+		// Custom render handlers are installed at runtime and do not set this.
+		bool BuiltInBackend = false;
+
+		// Whether one pipeline may contain this kind more than once.
+		bool Repeatable = false;
+
+		// Whether an authored node may override Scope.
+		bool FlexibleScope = false;
+
+		// Typed authored settings, in editor order.
+		std::vector<ParameterSpec> Params;
+
+		// Device features required by this kind.
+		NodeRequirements Needs;
 
 		// The shader this kind runs when a node does not name one.
 		//
@@ -308,6 +405,17 @@ namespace engine::graph {
 		// Forgets everything. For tests, which need a table they control.
 		static void Reset();
 	};
+
+	// Registers or replaces one render node kind.
+	//
+	// This is the public extension door. Built-in registration and native
+	// adapters use the same catalogue entry, so Studio, validation, scheduling,
+	// and execution cannot learn different metadata.
+	//
+	// @param spec The complete node declaration.
+	// @return False when Kind is invalid.
+	// @since v0.20
+	bool RegisterNodeKind(NodeKindSpec spec);
 
 	// One slot of one node, resolved.
 	//

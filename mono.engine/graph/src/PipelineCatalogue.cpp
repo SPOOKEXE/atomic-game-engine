@@ -1,8 +1,11 @@
 #include <engine/graph/PipelineCatalogue.hpp>
 
 #include <algorithm>
+#include <initializer_list>
 #include <mutex>
+#include <tuple>
 #include <unordered_map>
+#include <utility>
 
 namespace engine::graph {
 
@@ -127,6 +130,220 @@ namespace engine::graph {
 		return "precision is dropped - an HDR range lands in fewer bits than it needs";
 	}
 
+	namespace {
+		bool Named(core::Name kind, std::initializer_list<std::string_view> names) {
+			return std::find(names.begin(), names.end(), kind.Text()) != names.end();
+		}
+
+		ParameterSpec TextParam(const char *name, const char *label, const char *fallback) {
+			return ParameterSpec{
+				.Name = core::Name(name),
+				.Label = label,
+				.Widget = ParameterWidget::Text,
+				.Default = fallback,
+				.Options = {},
+			};
+		}
+
+		ParameterSpec NumberParam(
+			const char *name, const char *label, const char *fallback, double minimum, double maximum
+		) {
+			return ParameterSpec{
+				.Name = core::Name(name),
+				.Label = label,
+				.Widget = ParameterWidget::Number,
+				.Default = fallback,
+				.Options = {},
+				.Minimum = minimum,
+				.Maximum = maximum,
+				.HasRange = true,
+			};
+		}
+
+		ParameterSpec SelectParam(
+			const char *name,
+			const char *label,
+			const char *fallback,
+			std::initializer_list<const char *> options
+		) {
+			ParameterSpec spec{
+				.Name = core::Name(name),
+				.Label = label,
+				.Widget = ParameterWidget::Select,
+				.Default = fallback,
+				.Options = {},
+			};
+			for (const char *option : options) {
+				spec.Options.emplace_back(option);
+			}
+			return spec;
+		}
+
+		ExecutionQueue QueueFor(const NodeKindSpec &spec) {
+			if (Named(spec.Kind, {"viewer", "capture", "upload-instances", "output-image", "blit"})) {
+				return ExecutionQueue::Transfer;
+			}
+			if (Named(
+					spec.Kind,
+					{"world",
+					 "camera",
+					 "entities",
+					 "cull-frustum",
+					 "cull-distance",
+					 "filter-tag",
+					 "order-draw"}
+				)) {
+				return ExecutionQueue::Cpu;
+			}
+			if (Named(spec.Kind, {"hzb", "dispatch"})) {
+				return ExecutionQueue::Compute;
+			}
+			return ExecutionQueue::Graphics;
+		}
+
+		void AddParameters(NodeKindSpec &spec) {
+			if (spec.Kind == core::Name("cull-frustum")) {
+				spec.Params.push_back(
+					SelectParam("culling", "Culling", "inherit", {"inherit", "none", "frustum", "occlusion"})
+				);
+			}
+			if (spec.Kind == core::Name("cull-distance")) {
+				spec.Params.push_back(TextParam("radius", "Radius", "0"));
+			}
+			if (spec.Kind == core::Name("filter-tag")) {
+				spec.Params.push_back(TextParam("mask", "Tag mask", "0"));
+			}
+			if (spec.Kind == core::Name("mirror-capture")) {
+				spec.Params.push_back(
+					SelectParam("feedback", "Feedback", "last-frame", {"last-frame", "flat"})
+				);
+				spec.Params.push_back(NumberParam("max-recursion", "Max recursion", "3", 1.0, 32.0));
+			}
+			if (Named(spec.Kind, {"raster", "dispatch"})) {
+				spec.Params.push_back(TextParam("shader", "Shader", ""));
+				spec.Params.push_back(TextParam("source", "GLSL source", ""));
+			}
+			if (spec.Kind == core::Name("raster")) {
+				spec.Params.push_back(SelectParam("load", "Load", "clear", {"clear", "load"}));
+			}
+			if (spec.Kind == core::Name("dispatch")) {
+				spec.Params.push_back(
+					SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
+				);
+				for (const auto &[name, label, fallback] :
+					 std::initializer_list<std::tuple<const char *, const char *, const char *>>{
+						 {"local.x", "Threads X", "8"},
+						 {"local.y", "Threads Y", "8"},
+						 {"local.z", "Threads Z", "1"},
+						 {"dispatch.x", "Groups X", "1"},
+						 {"dispatch.y", "Groups Y", "1"},
+						 {"dispatch.z", "Groups Z", "1"},
+					 }) {
+					spec.Params.push_back(NumberParam(name, label, fallback, 1.0, 65'535.0));
+				}
+			}
+			if (Named(spec.Kind, {"viewer", "capture"})) {
+				spec.Params.push_back(NumberParam("view", "Viewport slot", "0", 0.0, 65'535.0));
+			}
+			if (spec.Kind == core::Name("capture")) {
+				spec.Params.push_back(TextParam("path", "BMP path", ""));
+				spec.Params.push_back(
+					SelectParam("capture.mode", "Capture", "once", {"once", "every-frame"})
+				);
+			}
+			if (spec.Kind == core::Name("blit")) {
+				spec.Params.push_back(SelectParam(
+					"format",
+					"Target format",
+					"RGBA16F",
+					{"R8",
+					 "RG8",
+					 "RGBA8",
+					 "RGBA8_SRGB",
+					 "RGB10A2",
+					 "RG11B10F",
+					 "R16F",
+					 "RG16F",
+					 "RGBA16F",
+					 "R32F",
+					 "RG32F"}
+				));
+			}
+		}
+
+		void AddExecutionMetadata(NodeKindSpec &spec) {
+			spec.Queue = QueueFor(spec);
+			spec.BuiltInBackend = Named(
+				spec.Kind,
+				{"world",
+				 "shadow",
+				 "camera",
+				 "entities",
+				 "cull-frustum",
+				 "cull-distance",
+				 "filter-tag",
+				 "order-draw",
+				 "upload-instances",
+				 "last-frame",
+				 "mirror-capture",
+				 "portal-capture",
+				 "portal-tonemap",
+				 "forward",
+				 "gbuffer",
+				 "depth-linearise",
+				 "hzb",
+				 "ssao",
+				 "deferred-lighting",
+				 "sky",
+				 "tonemap",
+				 "portal-overlay",
+				 "mirror-overlay",
+				 "transparent",
+				 "blit",
+				 "raster",
+				 "dispatch",
+				 "present",
+				 "viewer",
+				 "capture",
+				 "overlay",
+				 "interface",
+				 "output-image"}
+			);
+			spec.Repeatable = Named(
+				spec.Kind,
+				{"cull-frustum",
+				 "cull-distance",
+				 "filter-tag",
+				 "order-draw",
+				 "blit",
+				 "raster",
+				 "dispatch",
+				 "viewer",
+				 "capture"}
+			);
+			spec.FlexibleScope = spec.Kind == core::Name("dispatch");
+			spec.Needs.Compute = spec.Queue == ExecutionQueue::Compute;
+			spec.Needs.StorageTextures =
+				std::any_of(spec.Outputs.begin(), spec.Outputs.end(), [](const PortSpec &port) {
+					return port.Kind == ResourceKind::Storage;
+				});
+			spec.Needs.IndirectDraws =
+				Named(spec.Kind, {"shadow", "mirror-capture", "portal-capture", "gbuffer", "transparent"});
+			for (const PortSpec &output : spec.Outputs) {
+				if (output.Kind != ResourceKind::Colour && output.Kind != ResourceKind::Depth &&
+					output.Kind != ResourceKind::Texture && output.Kind != ResourceKind::Storage) {
+					continue;
+				}
+				if (std::find(spec.Needs.Formats.begin(), spec.Needs.Formats.end(), output.Format) ==
+					spec.Needs.Formats.end()) {
+					spec.Needs.Formats.push_back(output.Format);
+				}
+			}
+			spec.Needs.TimestampsUseful = spec.Queue != ExecutionQueue::Cpu;
+			AddParameters(spec);
+		}
+	}
+
 	bool NodeCatalogue::Register(NodeKindSpec spec) {
 		if (!spec.Kind.IsValid()) {
 			return false;
@@ -168,6 +385,10 @@ namespace engine::graph {
 		const std::lock_guard<std::mutex> held(table.Guard);
 		table.Specs.clear();
 		table.Index.clear();
+	}
+
+	bool RegisterNodeKind(NodeKindSpec spec) {
+		return NodeCatalogue::Register(std::move(spec));
 	}
 
 	void RegisterRenderNodeKinds() {
@@ -310,6 +531,16 @@ namespace engine::graph {
 			 "**Built** - three targets, and the engine ships the shader. Declare "
 			 "albedo, normal and material in that order; a node declaring fewer is "
 			 "refused rather than drawn short."},
+
+			{"forward",
+			 "Forward",
+			 C::Draw,
+			 S::View,
+			 {{"entities", K::Entities, F::R8, false, "What to draw."},
+			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
+			 {{"colour", K::Colour, LDR, true, "The directly lit scene."},
+			  {"depth", K::Depth, D24, true, "Depth for the directly lit scene."}},
+			 "A reduced direct-lighting path for devices that cannot allocate the deferred frame."},
 
 			{"velocity",
 			 "Velocity",
@@ -967,6 +1198,7 @@ namespace engine::graph {
 			};
 			fill(row.Inputs, spec.Inputs);
 			fill(row.Outputs, spec.Outputs);
+			AddExecutionMetadata(spec);
 
 			NodeCatalogue::Register(std::move(spec));
 		}

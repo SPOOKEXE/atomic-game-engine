@@ -85,6 +85,24 @@ namespace engine::render {
 		}
 	}
 
+	bool ViewRecording::ProfileEnabled(const graph::RunContext &context) const {
+		const graph::Node *node = Pipeline != nullptr ? Pipeline->Graph.Find(context.Node) : nullptr;
+		const std::string *profile = node != nullptr ? node->Parameter(core::Name("profile")) : nullptr;
+		return profile == nullptr || *profile != "false";
+	}
+
+	void ViewRecording::BeginNodeProfile(const graph::RunContext &) {
+		ClosePass();
+		NodeProfileActive = true;
+		DroppedNodeMarks = 0;
+	}
+
+	size_t ViewRecording::EndNodeProfile(const graph::RunContext &) {
+		ClosePass();
+		NodeProfileActive = false;
+		return DroppedNodeMarks;
+	}
+
 	void ViewRecording::ClosePass() {
 		Impl *const State = this->State;
 		core::Name &timedName = TimedName;
@@ -99,10 +117,13 @@ namespace engine::render {
 		const auto now = std::chrono::steady_clock::now();
 		State->WallTimings[timedName.Id()] +=
 			std::chrono::duration<double, std::micro>(now - openedWall).count();
-		if (timingSlot < VulkanTimestamps::SLOTS) {
+		if (State->ProfileTier == ProfilingTier::Full && timingSlot < VulkanTimestamps::SLOTS) {
 			const uint32_t closedMark = State->Timestamps.Mark(timedCommand);
 			if (openedMark < VulkanTimestamps::MARKS && closedMark < VulkanTimestamps::MARKS) {
 				State->PendingMarks[timingSlot].push_back({timedName, openedMark, closedMark});
+			}
+			if (closedMark >= VulkanTimestamps::MARKS) {
+				DroppedNodeMarks++;
 			}
 		}
 		timedName = {};
@@ -121,8 +142,6 @@ namespace engine::render {
 		bool &mainGpuWorkRecorded = MainGpuWorkRecorded;
 
 		ClosePass();
-		timedName = name;
-		timedCommand = recordedCommand != nullptr ? recordedCommand : command;
 		const graph::Node *node = nullptr;
 		const graph::ScheduledNode *scheduled = nullptr;
 		for (const graph::ExecutionWave &wave : selectedPipeline->Schedule.Waves) {
@@ -147,9 +166,19 @@ namespace engine::render {
 		if (std::find(result.Nodes.begin(), result.Nodes.end(), name) == result.Nodes.end()) {
 			result.Nodes.push_back(name);
 		}
+		if (!NodeProfileActive) {
+			return;
+		}
+		timedName = name;
+		timedCommand = recordedCommand != nullptr ? recordedCommand : command;
 		openedWall = std::chrono::steady_clock::now();
-		openedMark = timingSlot < VulkanTimestamps::SLOTS ? State->Timestamps.Mark(timedCommand)
-														  : VulkanTimestamps::MARKS;
+		openedMark = State->ProfileTier == ProfilingTier::Full && timingSlot < VulkanTimestamps::SLOTS
+						 ? State->Timestamps.Mark(timedCommand)
+						 : VulkanTimestamps::MARKS;
+		if (State->ProfileTier == ProfilingTier::Full && timingSlot < VulkanTimestamps::SLOTS &&
+			openedMark >= VulkanTimestamps::MARKS) {
+			DroppedNodeMarks++;
+		}
 	}
 
 	bool ViewRecording::FinishCpuNode(const graph::RunContext &context) {
@@ -161,8 +190,11 @@ namespace engine::render {
 		if (std::find(result.Nodes.begin(), result.Nodes.end(), context.Name) == result.Nodes.end()) {
 			result.Nodes.push_back(context.Name);
 		}
-		if (const auto found = cpuNodeWall.find(context.Name.Id()); found != cpuNodeWall.end()) {
-			State->WallTimings[context.Name.Id()] += found->second;
+		if (State->ProfileTier != ProfilingTier::Off && ProfileEnabled(context)) {
+			const auto found = cpuNodeWall.find(context.Name.Id());
+			if (found != cpuNodeWall.end()) {
+				State->WallTimings[context.Name.Id()] += found->second;
+			}
 		}
 		return true;
 	}

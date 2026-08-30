@@ -10,6 +10,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -17,9 +18,11 @@
 namespace engine::parallel {
 
 	namespace {
+		struct Pool;
 
 		// One batch may use the pool; competing dispatches run inline.
 		struct Batch {
+			Pool *Owner = nullptr;
 			const std::function<void(size_t, size_t)> *Body = nullptr;
 			const unsigned *AssignedWorkers = nullptr;
 			size_t Count = 0;
@@ -48,6 +51,11 @@ namespace engine::parallel {
 		}
 
 		struct Pool {
+			Pool() {
+				Slot.Owner = this;
+			}
+			~Pool();
+
 			std::vector<std::thread> Workers;
 			std::vector<platform::Processor> WorkerProcessors;
 			std::vector<uint8_t> WorkerPinned;
@@ -75,19 +83,29 @@ namespace engine::parallel {
 			bool Stopping = false;
 		};
 
-		// Never destroyed, deliberately, the same way `ecs::Components` and
-		// `ecs::ChunkPool` are and for a problem of the same shape.
-		//
-		// Destroying the pool destroys four condition variables with every
-		// worker still parked on `Available`, and `pthread_cond_destroy` waits
-		// for the last waiter - so a process that called `Jobs::Start` and did
-		// not call `Jobs::Stop` returned zero from `main` and then hung in
-		// `exit` for ever. It reads as a hung test suite rather than as a stuck
-		// teardown, which is what made it expensive to find. `Jobs::Stop` still
-		// joins whoever asks for it; the process reclaims the memory.
-		Pool &Get() {
-			static Pool *pool = new Pool();
-			return *pool;
+		struct PoolStorage {
+			std::mutex Guard;
+			std::unique_ptr<Pool> Active;
+		};
+
+		PoolStorage &Storage() {
+			static PoolStorage storage;
+			return storage;
+		}
+
+		Pool &CreatePool() {
+			PoolStorage &storage = Storage();
+			std::lock_guard lock(storage.Guard);
+			if (storage.Active == nullptr) {
+				storage.Active = std::make_unique<Pool>();
+			}
+			return *storage.Active;
+		}
+
+		Pool *ExistingPool() {
+			PoolStorage &storage = Storage();
+			std::lock_guard lock(storage.Guard);
+			return storage.Active.get();
 		}
 
 		constexpr size_t NO_RANGE = static_cast<size_t>(-1);
@@ -111,7 +129,7 @@ namespace engine::parallel {
 		void Retire(Batch &batch) {
 			// Hold the guard while notifying to avoid a lost wakeup.
 			if (batch.Outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-				Pool &pool = Get();
+				Pool &pool = *batch.Owner;
 				std::lock_guard lock(pool.Guard);
 				pool.Finished.notify_all();
 			}
@@ -183,7 +201,7 @@ namespace engine::parallel {
 			}
 		}
 
-		void WorkerLoop(unsigned workerIndex) {
+		void WorkerLoop(Pool &pool, unsigned workerIndex) {
 			// **The whole thread, not each batch.** A heap tag is per thread, so
 			// opening one here means everything a worker ever allocates is
 			// attributed to the pool rather than landing in the untagged pile
@@ -191,7 +209,6 @@ namespace engine::parallel {
 			// on a job thread would otherwise be invisible.
 			ENGINE_HEAP_SCOPE("jobs.worker");
 
-			auto &pool = Get();
 			uint64_t seen = 0;
 
 			const bool pinned = platform::PinCurrentThread(pool.WorkerProcessors[workerIndex]);
@@ -233,10 +250,36 @@ namespace engine::parallel {
 				}
 			}
 		}
+
+		void ShutdownPool(Pool &pool) {
+			{
+				std::lock_guard lock(pool.Guard);
+				if (pool.Workers.empty()) {
+					return;
+				}
+				pool.Stopping = true;
+			}
+			pool.Available.notify_all();
+
+			for (std::thread &worker : pool.Workers) {
+				worker.join();
+			}
+
+			std::lock_guard lock(pool.Guard);
+			pool.Workers.clear();
+			pool.WorkerProcessors.clear();
+			pool.WorkerPinned.clear();
+			pool.Ready = 0;
+			pool.PinnedWorkers = 0;
+		}
+
+		Pool::~Pool() {
+			ShutdownPool(*this);
+		}
 	}
 
 	void Jobs::Start(unsigned workers) {
-		auto &pool = Get();
+		auto &pool = CreatePool();
 		std::unique_lock lock(pool.Guard);
 
 		if (!pool.Workers.empty()) {
@@ -260,7 +303,7 @@ namespace engine::parallel {
 			pool.WorkerProcessors[index] = distinctCores[index];
 		}
 		for (unsigned index = 0; index < workers; index++) {
-			pool.Workers.emplace_back(WorkerLoop, index);
+			pool.Workers.emplace_back(WorkerLoop, std::ref(pool), index);
 		}
 
 		pool.ReadyCondition.wait(lock, [&] { return pool.Ready == workers; });
@@ -289,46 +332,32 @@ namespace engine::parallel {
 	}
 
 	void Jobs::Stop() {
-		auto &pool = Get();
+		PoolStorage &storage = Storage();
+		std::unique_ptr<Pool> stopped;
 		{
-			std::lock_guard lock(pool.Guard);
-			if (pool.Workers.empty()) {
-				return;
-			}
-			pool.Stopping = true;
+			std::lock_guard lock(storage.Guard);
+			stopped = std::move(storage.Active);
 		}
-		pool.Available.notify_all();
-
-		// Outside the guard, and it has to be: a worker needs that mutex to
-		// observe `Stopping`, so joining while holding it deadlocks.
-		for (auto &worker : pool.Workers) {
-			worker.join();
-		}
-
-		// Back under it for the tail. Every worker is joined by now so nothing
-		// contends, but these five are read under the guard by `WorkerCount`,
-		// `PinnedWorkerCount` and `For`, and one uncontended acquisition is
-		// cheaper than an exception to the rule that they always are. It does
-		// **not** make `Stop` thread-safe: two of them still join the same
-		// threads, which is undefined whatever this holds.
-		std::lock_guard lock(pool.Guard);
-		pool.Workers.clear();
-		pool.WorkerProcessors.clear();
-		pool.WorkerPinned.clear();
-		pool.Ready = 0;
-		pool.PinnedWorkers = 0;
+		// Destruction joins every worker before releasing the condition variables.
+		stopped.reset();
 	}
 
 	unsigned Jobs::WorkerCount() {
-		auto &pool = Get();
-		std::lock_guard lock(pool.Guard);
-		return static_cast<unsigned>(pool.Workers.size());
+		Pool *pool = ExistingPool();
+		if (pool == nullptr) {
+			return 0;
+		}
+		std::lock_guard lock(pool->Guard);
+		return static_cast<unsigned>(pool->Workers.size());
 	}
 
 	unsigned Jobs::PinnedWorkerCount() {
-		auto &pool = Get();
-		std::lock_guard lock(pool.Guard);
-		return pool.PinnedWorkers;
+		Pool *pool = ExistingPool();
+		if (pool == nullptr) {
+			return 0;
+		}
+		std::lock_guard lock(pool->Guard);
+		return pool->PinnedWorkers;
 	}
 
 	void
@@ -347,7 +376,14 @@ namespace engine::parallel {
 			return;
 		}
 
-		auto &pool = Get();
+		Pool *existing = ExistingPool();
+		if (existing == nullptr) {
+			const uint64_t started = core::Clock::Nanoseconds();
+			body(0, count);
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
+			return;
+		}
+		Pool &pool = *existing;
 
 		size_t workers = 0;
 		{
@@ -449,7 +485,14 @@ namespace engine::parallel {
 			return;
 		}
 
-		auto &pool = Get();
+		Pool *existing = ExistingPool();
+		if (existing == nullptr) {
+			const uint64_t started = core::Clock::Nanoseconds();
+			body(0, workerByIndex.size());
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
+			return;
+		}
+		Pool &pool = *existing;
 		unsigned pinnedWorkers = 0;
 		{
 			std::lock_guard lock(pool.Guard);

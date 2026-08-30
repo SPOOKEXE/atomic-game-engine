@@ -33,6 +33,7 @@ namespace server {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::ecs::SystemOrder;
 	using engine::scene::Bounds;
 	using engine::scene::Motion;
 	using engine::scene::Transform;
@@ -223,16 +224,21 @@ namespace server {
 		// in the same phase. Composed into its own entry rather than into
 		// `character.link` because it reads that system's writes and nothing
 		// else reads its own.
-		scheduler.Add("player.respawn", Phase::PreSimulation, [](Store &store) {
-			std::vector<engine::ecs::Entity> spawned;
-			if (engine::scene::UpdateRespawns(store, spawned) == 0) {
-				return;
-			}
+		scheduler.Add(
+			"player.respawn",
+			Phase::PreSimulation,
+			[](Store &store) {
+				std::vector<engine::ecs::Entity> spawned;
+				if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+					return;
+				}
 
-			for (const engine::ecs::Entity player : spawned) {
-				(void)engine::gui::ResetPlayerGui(store, player);
-			}
-		});
+				for (const engine::ecs::Entity player : spawned) {
+					(void)engine::gui::ResetPlayerGui(store, player);
+				}
+			},
+			SystemOrder{{}, {"character.link"}}
+		);
 
 		// **The authority derives the derived half of an `Attachment` too**, and
 		// until v0.19 only `mono.client`'s presentation did. Nothing here draws a

@@ -500,6 +500,19 @@ TEST_CASE("Start is idempotent and Stop is safe without Start", "[jobs]") {
 	REQUIRE(Jobs::WorkerCount() == 0);
 }
 
+TEST_CASE("the worker pool can be destroyed and created again", "[jobs]") {
+	EmptyPool empty;
+	for (int cycle = 0; cycle < 3; cycle++) {
+		Jobs::Start(2);
+		REQUIRE(Jobs::WorkerCount() == 2);
+		std::atomic<size_t> visited = 0;
+		Jobs::For(20'000, 64, [&](size_t begin, size_t end) { visited.fetch_add(end - begin); });
+		CHECK(visited.load() == 20'000);
+		Jobs::Stop();
+		CHECK(Jobs::WorkerCount() == 0);
+	}
+}
+
 // --- forcing the whole pipeline onto one thread ------------------------------
 
 namespace {

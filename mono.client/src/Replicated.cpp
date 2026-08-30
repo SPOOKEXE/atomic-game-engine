@@ -31,6 +31,7 @@ namespace client {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::ecs::SystemOrder;
 	using engine::render::DrawList;
 	using engine::replication::InterpolationSettings;
 	using engine::replication::SnapshotBuffer;
@@ -361,8 +362,18 @@ namespace client {
 			(void)engine::scene::PoseCharacters(store);
 		});
 
-		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimReplicatedSurfaces);
-		scheduler.Add("collect-replicated", Phase::PreRender, CollectReplicated);
+		scheduler.Add(
+			"aim-surface-cameras",
+			Phase::PreRender,
+			AimReplicatedSurfaces,
+			SystemOrder{{}, {"replica-camera"}}
+		);
+		scheduler.Add(
+			"collect-replicated",
+			Phase::PreRender,
+			CollectReplicated,
+			SystemOrder{{}, {"resolve-attachments", "pose-characters", "aim-surface-cameras"}}
+		);
 
 		// **`GuiService` comes over the wire without the thing it is for**, and
 		// that stayed true when the rest of `gui.` started crossing at v0.15.

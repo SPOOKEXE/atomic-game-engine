@@ -84,6 +84,24 @@ TEST_CASE("an empty world round-trips", "[ecs]") {
 	REQUIRE(restored.TableCount() == 0);
 }
 
+TEST_CASE("a cloned world is independent and keeps its identity", "[ecs]") {
+	Store source("simulation");
+	const Entity entity = source.Create();
+	source.Set<Spot>(entity, Spot{3.0f, 4.0f});
+	source.AdvanceTick(0.25f);
+
+	Store preview("preview");
+	REQUIRE(source.CloneTo(preview));
+	REQUIRE(preview.Name() == "preview");
+	REQUIRE(preview.Alive(entity));
+	REQUIRE(preview.Get<Spot>(entity)->X == 3.0f);
+	REQUIRE(preview.Time().Tick == source.Time().Tick);
+
+	preview.Set<Spot>(entity, Spot{9.0f, 4.0f});
+	REQUIRE(source.Get<Spot>(entity)->X == 3.0f);
+	REQUIRE(preview.Get<Spot>(entity)->X == 9.0f);
+}
+
 TEST_CASE("entities and components come back", "[ecs]") {
 	Store source("source");
 

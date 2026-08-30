@@ -26,6 +26,7 @@ using engine::core::Name;
 using engine::graph::NodeCatalogue;
 using engine::graph::NodeCategory;
 using engine::graph::NodeKindSpec;
+using engine::graph::ParameterWidget;
 using engine::graph::PortsCompatible;
 using engine::graph::PortSpec;
 using engine::graph::ResourceKind;
@@ -230,6 +231,60 @@ TEST_CASE("the composed frame ends at one output image sink", "[graph][catalogue
 	CHECK(final->Scope == engine::graph::NodeScope::Frame);
 	CHECK(final->Inputs.size() == 1);
 	CHECK(final->Outputs.empty());
+}
+
+TEST_CASE("execution and parameter metadata live on the catalogue row", "[graph][catalogue]") {
+	Kinds();
+
+	const NodeKindSpec *world = NodeCatalogue::Find(Name("world"));
+	const NodeKindSpec *hzb = NodeCatalogue::Find(Name("hzb"));
+	const NodeKindSpec *capture = NodeCatalogue::Find(Name("capture"));
+	const NodeKindSpec *dispatch = NodeCatalogue::Find(Name("dispatch"));
+	REQUIRE(world != nullptr);
+	REQUIRE(hzb != nullptr);
+	REQUIRE(capture != nullptr);
+	REQUIRE(dispatch != nullptr);
+
+	CHECK(world->Queue == engine::graph::ExecutionQueue::Cpu);
+	CHECK(hzb->Queue == engine::graph::ExecutionQueue::Compute);
+	CHECK(capture->Queue == engine::graph::ExecutionQueue::Transfer);
+	CHECK(hzb->Needs.Compute);
+	CHECK(hzb->Needs.StorageTextures);
+	CHECK(dispatch->FlexibleScope);
+	CHECK(dispatch->Repeatable);
+
+	const auto mode = std::find_if(
+		dispatch->Params.begin(), dispatch->Params.end(), [](const engine::graph::ParameterSpec &param) {
+			return param.Name == Name("dispatch.mode");
+		}
+	);
+	REQUIRE(mode != dispatch->Params.end());
+	CHECK(mode->Widget == ParameterWidget::Select);
+	CHECK(mode->Default == "target");
+	CHECK(mode->Options == std::vector<std::string>{"target", "groups"});
+}
+
+TEST_CASE("parameter schemas have unique names and valid defaults", "[graph][catalogue]") {
+	Kinds();
+
+	for (const NodeKindSpec &kind : NodeCatalogue::All()) {
+		std::vector<std::string_view> names;
+		for (const engine::graph::ParameterSpec &parameter : kind.Params) {
+			INFO("kind: " << kind.Kind.Text() << ", parameter: " << parameter.Name.Text());
+			CHECK(parameter.Name.IsValid());
+			CHECK_FALSE(parameter.Label.empty());
+			CHECK(std::find(names.begin(), names.end(), parameter.Name.Text()) == names.end());
+			names.push_back(parameter.Name.Text());
+
+			if (parameter.Widget == ParameterWidget::Select) {
+				CHECK_FALSE(parameter.Options.empty());
+				CHECK(
+					std::find(parameter.Options.begin(), parameter.Options.end(), parameter.Default) !=
+					parameter.Options.end()
+				);
+			}
+		}
+	}
 }
 
 TEST_CASE("registering a kind twice replaces it", "[graph][catalogue]") {

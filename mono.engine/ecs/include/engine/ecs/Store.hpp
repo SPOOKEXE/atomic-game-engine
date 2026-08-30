@@ -2024,6 +2024,16 @@ namespace engine::ecs {
 		//         or when it names a component this build does not have.
 		bool Load(core::ByteReader &reader);
 
+		// Replaces another store with an independent copy of this world.
+		//
+		// The destination keeps its diagnostic name so preview and simulation
+		// worlds remain distinguishable. Entity indices, generations, resources,
+		// and the clock are copied exactly through the snapshot boundary.
+		//
+		// @param destination The store to replace on its owning thread.
+		// @return `false` under the same conditions as `Save` or `Load`.
+		bool CloneTo(Store &destination) const;
+
 		// Applies a snapshot to a world that is already running.
 		//
 		// **The capability the replication seam exists to reserve.** `Load`

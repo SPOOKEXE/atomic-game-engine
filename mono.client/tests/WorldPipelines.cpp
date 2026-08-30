@@ -2,6 +2,7 @@
 // runtime cache.
 
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/Capabilities.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -9,6 +10,7 @@
 
 #include <client/Scene.hpp>
 #include <string>
+#include <tuple>
 #include <vector>
 
 TEST_SUITE_ID("client.scene.worldpipelines")
@@ -55,6 +57,42 @@ TEST_CASE("an empty profile library installs the engine default graph", "[client
 		client::InstallRenderingProfiles(profiles, renderer, 3, Name("Default PBR")) == Name("Default PBR#3")
 	);
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#3")});
+}
+
+TEST_CASE("capability tiers fall through with reasons and runnable documents", "[client][pipeline]") {
+	engine::render::DeviceCaps caps;
+	caps.HasIndirectDraws = true;
+	caps.Formats = {
+		engine::graph::ResourceFormat::RGBA8,
+		engine::graph::ResourceFormat::RGBA8_SRGB,
+		engine::graph::ResourceFormat::RGB10A2,
+		engine::graph::ResourceFormat::RGBA16F,
+		engine::graph::ResourceFormat::R32F,
+		engine::graph::ResourceFormat::D24S8,
+		engine::graph::ResourceFormat::D32F,
+	};
+	const engine::render::PipelineTierDecision decision = engine::render::ChooseDefaultPipeline(caps);
+	CHECK(decision.Tier == engine::render::DefaultPipelineTier::B);
+	REQUIRE(decision.Fallthrough.size() == 1);
+	CHECK(decision.Fallthrough.front().Cause.Status == engine::render::CapabilityStatus::MissingCompute);
+
+	for (const auto &[document, expected, omitted] : {
+			 std::tuple{engine::graph::DefaultPbrTierBDocument(), Name("deferred-lighting"), Name("ssao")},
+			 std::tuple{engine::graph::DefaultForwardTierCDocument(), Name("forward"), Name("gbuffer")},
+		 }) {
+		engine::graph::RenderGraph graph;
+		Name offender;
+		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		bool foundExpected = false;
+		bool foundOmitted = false;
+		for (uint32_t value = 1; value <= graph.Count(); value++) {
+			const engine::graph::Node *node = graph.Find(engine::graph::NodeId{value});
+			foundExpected = foundExpected || (node != nullptr && node->Kind == expected);
+			foundOmitted = foundOmitted || (node != nullptr && node->Kind == omitted);
+		}
+		CHECK(foundExpected);
+		CHECK_FALSE(foundOmitted);
+	}
 }
 
 TEST_CASE("a missing selection falls back to Default PBR", "[client][pipeline]") {
