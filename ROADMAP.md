@@ -95,6 +95,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
 
+- [_] check we can create shaderscripts with luau (and set their source) and then also set SurfaceCamera / Camera / Meshes / etc to run through them. Give an example.
+
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
 - [x] engine graph architecture: Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
 - [x] one registration path for render nodes: fold scope/queue metadata and requirements into graph::NodeCatalogue; derive BackendNodes(); studio widgets read Params
