@@ -86,28 +86,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] compose plugin toolbars as cached pinned or tabbed row, column and cell grids, with persisted tab creation, renaming, ordering, hiding and deletion from the tab context menu.
 - [x] make Default Studio disable-able, expose matching Luau and JavaScript toolbar tab, row, column, cell and label functions, and hot-reload changed plugin source trees with debounced targeted restarts and structural rescans.
 
-- [_] convert explorer, properties, inspector, asset manager, etc into luau default plugins like toolbar one.
-  - Phase 1: Extend plugin drawing API with ImGui primitives (BeginTree/EndTree, Selectable, SameLine, Indent, BeginChild, InputFloat/Int/Double, ColorEdit, DragFloat, TextColored, BeginPopup/EndPopup, MenuItem, BeginTooltip, ProgressBar, TreeNodeEx, IsItemClicked/IsItemHovered, BeginTabBar/TabItem, Columns, InputTextMultiline, Spacing, Image, SeparatorText, SmallButton, InvisibleButton, GetCursorPos, SetCursorPos, BeginGroup/EndGroup, PushStyleColor/PopStyleColor, PushStyleVar/PopStyleVar, BeginDisabled/EndDisabled, GetForegroundDrawList for overlay, TableSetupColumn/NextRow for tables).
-  - Phase 2: Extend ECS/world query API for plugins (World:GetChildren, GetName, GetClassName, GetParent, GetProperties, GetProperty, SetProperty, Destroy, Clone, CreateInstance, SetParent, Query, GetChildrenOfClass, GetRootInstances, IsA, GetClassHierarchy, GetEntityCount, EachEntity).
-  - Phase 3: Extend editor integration API (WorldChanged callback, SelectionChanged callback, Refresh, SetTitle, GetDockState, RequestDock, FocusWidget, GetThemeColour, GetInterfaceScale, Undo, Redo, GetCommandName).
-  - Phase 4: Restructure plugin API into sub-namespaces:
-    - `plugin.Engine.*` — world/instance queries, ECS access, property reads/writes
-    - `plugin.Studio.*` — editor state, selection, undo/redo, themes, UI scale
-    - `plugin.Debug.*` — logging, profiling, breakpoints, diagnostics
-    - `plugin.Assets.*` — content store queries, thumbnail requests, asset metadata
-    - `plugin.UI.*` — all drawing primitives (tree, input, popup, tooltip, tab, table, etc.)
-    - `plugin.Network.*` — websocket, HTTP (future)
-    - Keep backward-compat: bare `plugin.X` still works for existing calls, sub-namespaces are additive
-  - Phase 5: Create Luau default plugins as bundled scripts under mono.studio/plugins/:
-    - `atomic.default.explorer` — instance hierarchy browser with tree, search, drag-reparent, context menus
-    - `atomic.default.properties` — property inspector with type-aware editors (bool, number, vector, color, enum, asset picker, CFrame)
-    - `atomic.default.assets` — content store browser with tabs, thumbnails, import, drag-drop
-    - `atomic.default.output` — log viewer with filters, search, auto-scroll
-    - `atomic.default.statistics` — frame stats, memory, entity counts, render pipeline info
-    - `atomic.default.inspector` — combined component inspector showing ECS components on selected entity
-  - Phase 6: Remove native C++ panel code (DrawExplorer, DrawProperties, DrawAssets from Interface.cpp), replace View toolbar toggles with SetWidgetOpen on default plugin widgets, remove ShowExplorer/ShowProperties/ShowAssets booleans from Editor.hpp.
-  - Phase 7: Add tests for extended drawing API, world queries, and each default plugin. Update expected_graph.json if module dependencies change.
-
 - [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
 - [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
 
