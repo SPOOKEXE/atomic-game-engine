@@ -95,7 +95,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
 
-- [_] check we can create shaderscripts with luau (and set their source) and then also set SurfaceCamera / Camera / Meshes / etc to run through them. Give an example.
+- [x] create `ShaderScript` instances from Luau and write their `Source`, with revision tracking preserved through the computed property. `Shaders.luau` demonstrates the two real fragment contracts: `Material.Shader` selects the opaque shader for a `MeshPart` and for the pane displaying a `SurfaceCamera`, while `Lighting.PostProcessShader` selects the tonemap shader for the active `Camera`. The Luau adapter, scene, example and render suites cover creation, selection, compilation and refresh, and the headless Vulkan client runs the example without a shader or pipeline error.
 
 ### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
 - [x] engine graph architecture: Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
