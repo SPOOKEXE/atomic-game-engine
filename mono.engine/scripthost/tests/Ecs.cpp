@@ -27,6 +27,7 @@ TEST_DEPENDS("engine.ecs.schema")
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
 using engine::ecs::Entity;
+using engine::ecs::FieldPacking;
 using engine::ecs::Schemas;
 using engine::ecs::Store;
 using engine::script::Language;
@@ -110,6 +111,68 @@ TEST_CASE("a field type nothing maps is refused where it was written", "[script-
 	MustFail(*runtime, "World:DefineComponent('" + Unique("bad") + "', { A = 5 })");
 	MustFail(*runtime, "World:DefineComponent('" + Unique("bad") + "', { [1] = 'number' })");
 	MustFail(*runtime, "World:DefineComponent('" + Unique("bad") + "', { A = 'Enum.' })");
+}
+
+TEST_CASE("both script runtimes author and read quantised component fields", "[script-ecs]") {
+	engine::scene::EnsureClassTree();
+	Store store("script_ecs");
+
+	const std::string luauName = Unique("packed.luau");
+	const auto luau = MakeRuntime(store, Language::Luau);
+	MustRun(
+		*luau,
+		"World:DefineComponent('" + luauName +
+			"', { Half = 'float16', Unit = 'ufloat8', Small = 'int4', Flag = 'bool' })\n"
+			"local entity = World:CreateEntity()\n"
+			"entity:SetComponent('" +
+			luauName +
+			"', { Half = 1.337, Unit = 2, Small = -20, Flag = true })\n"
+			"local held = entity:GetComponent('" +
+			luauName +
+			"')\n"
+			"assert(math.abs(held.Half - 1.337) < 0.001, 'float16 did not round-trip')\n"
+			"assert(held.Unit == 1 and held.Small == -8 and held.Flag, 'packed saturation failed')\n"
+			"local schema = World:GetComponentSchema('" +
+			luauName +
+			"')\n"
+			"assert(schema.Half == 'float16' and schema.Flag == 'bool', 'packing was not described')\n"
+			"local metadata = World:GetComponentMetadata('" +
+			luauName +
+			"')\n"
+			"assert(metadata.Fields.Small.Packing == 'int4', 'packing metadata is missing')\n"
+	);
+	const ComponentId luauId = Components::Find(engine::core::Name(luauName));
+	REQUIRE(Schemas::Of(luauId) != nullptr);
+	CHECK(Schemas::Of(luauId)->Size() == 4);
+	CHECK(Schemas::Of(luauId)->Find("Flag")->Packing == FieldPacking::Bool);
+
+	const std::string jsName = Unique("packed.js");
+	const auto js = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*js,
+		"World.DefineComponent('" + jsName +
+			"', { Half: 'float16', Unit: 'ufloat8', Small: 'int4', Flag: 'bool' });\n"
+			"const entity = World.CreateEntity();\n"
+			"entity.SetComponent('" +
+			jsName +
+			"', { Half: 1.337, Unit: 2, Small: -20, Flag: true });\n"
+			"const held = entity.GetComponent('" +
+			jsName +
+			"');\n"
+			"if (Math.abs(held.Half - 1.337) >= 0.001) throw new Error('float16 round-trip');\n"
+			"if (held.Unit !== 1 || held.Small !== -8 || !held.Flag) throw new Error('saturation');\n"
+			"const schema = World.GetComponentSchema('" +
+			jsName +
+			"');\n"
+			"if (schema.Half !== 'float16' || schema.Flag !== 'bool') throw new Error('schema');\n"
+			"const metadata = World.GetComponentMetadata('" +
+			jsName +
+			"');\n"
+			"if (metadata.Fields.Small.Packing !== 'int4') throw new Error('metadata');\n"
+	);
+	const ComponentId jsId = Components::Find(engine::core::Name(jsName));
+	REQUIRE(Schemas::Of(jsId) != nullptr);
+	CHECK(Schemas::Of(jsId)->Size() == 4);
 }
 
 TEST_CASE("a component the engine declares is not writable through this surface", "[script-ecs]") {

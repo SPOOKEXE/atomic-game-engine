@@ -35,6 +35,7 @@ using engine::core::Name;
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
 using engine::ecs::Entity;
+using engine::ecs::FieldPacking;
 using engine::ecs::FieldSpec;
 using engine::ecs::PropertyType;
 using engine::ecs::Schema;
@@ -212,6 +213,7 @@ TEST_CASE("component_list names what a game declared and how many carry it", "[c
 	const FieldSpec fields[] = {
 		{"Current", PropertyType::Double},
 		{"Max", PropertyType::Double},
+		{"Small", PropertyType::Int32, {}, FieldPacking::Int4},
 	};
 	REQUIRE(Schemas::Register(component, fields).Why == Schemas::Status::Ok);
 
@@ -245,6 +247,7 @@ TEST_CASE("component_list names what a game declared and how many carry it", "[c
 		CHECK(entry["entities"] == 2);
 		CHECK(entry["fields"]["Current"] == "double");
 		CHECK(entry["fields"]["Max"] == "double");
+		CHECK(entry["fields"]["Small"] == "int4");
 	}
 	CHECK(found);
 }
@@ -339,6 +342,9 @@ TEST_CASE("component_get and component_set read and write one entity's fields", 
 		{"Max", PropertyType::Double},
 		{"Label", PropertyType::String},
 		{"Where", PropertyType::Vector3},
+		{"Small", PropertyType::Int32, {}, FieldPacking::Int4},
+		{"Unit", PropertyType::Float, {}, FieldPacking::UFloat8},
+		{"Flag", PropertyType::Bool},
 	};
 	REQUIRE(Schemas::Register(component, fields).Why == Schemas::Status::Ok);
 
@@ -368,6 +374,9 @@ TEST_CASE("component_get and component_set read and write one entity's fields", 
 				 {"Max", 100.0},
 				 {"Label", "a score that changes"},
 				 {"Where", json{{"X", 1.0}, {"Y", 2.0}, {"Z", 3.0}}},
+				 {"Small", 20},
+				 {"Unit", 2.0},
+				 {"Flag", true},
 			 }},
 		}
 	);
@@ -378,6 +387,9 @@ TEST_CASE("component_get and component_set read and write one entity's fields", 
 	CHECK(held["fields"]["Max"] == 100.0);
 	CHECK(held["fields"]["Label"] == "a score that changes");
 	CHECK(held["fields"]["Where"]["Y"] == 2.0);
+	CHECK(held["fields"]["Small"] == 7);
+	CHECK(held["fields"]["Unit"] == 1.0);
+	CHECK(held["fields"]["Flag"] == true);
 
 	// A field left out keeps what it had, which is what anybody writing a
 	// partial update means.
@@ -391,6 +403,8 @@ TEST_CASE("component_get and component_set read and write one entity's fields", 
 	CHECK(after["fields"]["Current"] == 12.0);
 	CHECK(after["fields"]["Max"] == 100.0);
 	CHECK(after["fields"]["Label"] == "a score that changes");
+	CHECK(after["fields"]["Small"] == 7);
+	CHECK(after["fields"]["Flag"] == true);
 }
 
 TEST_CASE("a component the engine declares is refused with a reason", "[control]") {

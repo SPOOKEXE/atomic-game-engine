@@ -24,6 +24,7 @@
 #include <engine/ecs/Schema.hpp>
 
 #include <algorithm>
+#include <array>
 #include <new>
 #include <string>
 #include <string_view>
@@ -37,6 +38,7 @@ namespace engine::script {
 		using ecs::Components;
 		using ecs::Entity;
 		using ecs::FieldDescriptor;
+		using ecs::FieldPacking;
 		using ecs::FieldSpec;
 		using ecs::PropertyType;
 		using ecs::QueryTerms;
@@ -91,6 +93,10 @@ namespace engine::script {
 
 			void *At(const FieldDescriptor &field) {
 				return static_cast<std::byte *>(Bytes) + field.Offset;
+			}
+
+			void *RawMutable() {
+				return Bytes;
 			}
 
 			const void *Raw() const {
@@ -338,6 +344,7 @@ namespace engine::script {
 			std::vector<std::string> names;
 			std::vector<std::string> enums;
 			std::vector<PropertyType> types;
+			std::vector<FieldPacking> packings;
 
 			constexpr std::string_view ENUM_PREFIX = "Enum.";
 
@@ -369,21 +376,24 @@ namespace engine::script {
 					}
 					types.push_back(PropertyType::Enum);
 					enums.emplace_back(set);
+					packings.push_back(FieldPacking::Native);
 					continue;
 				}
 
 				PropertyType type = PropertyType::Opaque;
-				if (!Schemas::TypeNamed(text, type)) {
+				FieldPacking packing = FieldPacking::Native;
+				if (!Schemas::FieldTypeNamed(text, type, packing)) {
 					return JS_ThrowTypeError(context, "'%s' is not a field type", spelling.Get());
 				}
 				types.push_back(type);
 				enums.emplace_back();
+				packings.push_back(packing);
 			}
 
 			std::vector<FieldSpec> fields;
 			fields.reserve(names.size());
 			for (size_t at = 0; at < names.size(); at++) {
-				fields.push_back(FieldSpec{names[at], types[at], enums[at]});
+				fields.push_back(FieldSpec{names[at], types[at], enums[at], packings[at]});
 			}
 
 			const Schemas::Result result = Schemas::Register(name.Get(), fields);
@@ -426,9 +436,10 @@ namespace engine::script {
 
 			JSValue table = JS_NewObject(context);
 			for (const FieldDescriptor &field : schema->Fields()) {
-				const std::string spelling = field.Type == PropertyType::Enum
-												 ? "Enum." + std::string(field.Enum.Text())
-												 : std::string(ecs::Describe(field.Type));
+				const std::string spelling =
+					field.Packing != FieldPacking::Native ? ecs::Describe(field.Packing)
+					: field.Type == PropertyType::Enum	  ? "Enum." + std::string(field.Enum.Text())
+														  : std::string(ecs::Describe(field.Type));
 				JS_SetPropertyStr(
 					context,
 					table,
@@ -533,6 +544,9 @@ namespace engine::script {
 											 ? "Enum." + std::string(field.Enum.Text())
 											 : std::string(ecs::Describe(field.Type));
 				JS_SetPropertyStr(context, described, "Type", JS_NewString(context, type.c_str()));
+				JS_SetPropertyStr(
+					context, described, "Packing", JS_NewString(context, ecs::Describe(field.Packing))
+				);
 				JS_SetPropertyStr(context, described, "Tags", StringArray(context, field.Tags));
 				JS_SetPropertyStr(context, described, "Exposed", JS_NewBool(context, field.Exposed));
 				JS_SetPropertyStr(context, fields, std::string(field.Spelling).c_str(), described);
@@ -716,15 +730,20 @@ namespace engine::script {
 					// The string case is separate for the reason it is separate
 					// everywhere else: the destination is a live `std::string`
 					// and the shared marshaller writes into raw bytes.
+					alignas(8) std::array<std::byte, 8> scratch{};
+					void *target = field->Packing == FieldPacking::Native ? value.At(*field) : scratch.data();
 					bool ok = true;
 					if (field->Type == PropertyType::String) {
 						const Argument text(context, held);
 						ok = text.Present();
 						if (ok) {
-							*static_cast<std::string *>(value.At(*field)) = text.Get();
+							*static_cast<std::string *>(target) = text.Get();
 						}
 					} else {
-						ok = FromJsValue(context, held, field->Type, field->Enum, value.At(*field));
+						ok = FromJsValue(context, held, field->Type, field->Enum, target);
+					}
+					if (ok && field->Packing != FieldPacking::Native) {
+						ok = Schemas::WriteField(value.RawMutable(), *field, target);
 					}
 					JS_FreeValue(context, held);
 
@@ -773,7 +792,8 @@ namespace engine::script {
 
 			JSValue table = JS_NewObject(context);
 			for (const FieldDescriptor &field : schema->Fields()) {
-				const void *bytes = static_cast<const std::byte *>(held) + field.Offset;
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *bytes = Schemas::ReadField(held, field, scratch.data());
 
 				JSValue value;
 				if (field.Type == PropertyType::String) {

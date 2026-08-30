@@ -41,6 +41,7 @@
 #include <engine/ecs/Schema.hpp>
 
 #include <algorithm>
+#include <array>
 #include <lualib.h>
 #include <new>
 #include <string>
@@ -55,6 +56,7 @@ namespace engine::script {
 		using ecs::Components;
 		using ecs::Entity;
 		using ecs::FieldDescriptor;
+		using ecs::FieldPacking;
 		using ecs::FieldSpec;
 		using ecs::PropertyType;
 		using ecs::QueryTerms;
@@ -121,6 +123,10 @@ namespace engine::script {
 
 			void *At(const FieldDescriptor &field) {
 				return static_cast<std::byte *>(Bytes) + field.Offset;
+			}
+
+			void *RawMutable() {
+				return Bytes;
 			}
 
 			const void *Raw() const {
@@ -200,6 +206,7 @@ namespace engine::script {
 			std::vector<std::string> Names;
 			std::vector<std::string> Enums;
 			std::vector<PropertyType> Types;
+			std::vector<FieldPacking> Packings;
 		};
 
 		// `Kind = "Enum.BodyKind"` names an enum field; everything else is a
@@ -216,16 +223,19 @@ namespace engine::script {
 				}
 				into.Types.push_back(PropertyType::Enum);
 				into.Enums.emplace_back(set);
+				into.Packings.push_back(FieldPacking::Native);
 				return;
 			}
 
 			PropertyType type = PropertyType::Opaque;
-			if (!Schemas::TypeNamed(spelling, type)) {
+			FieldPacking packing = FieldPacking::Native;
+			if (!Schemas::FieldTypeNamed(spelling, type, packing)) {
 				luaL_errorL(state, "'%s' is not a field type", std::string(spelling).c_str());
 			}
 
 			into.Types.push_back(type);
 			into.Enums.emplace_back();
+			into.Packings.push_back(packing);
 		}
 
 		// `World:DefineComponent(name, { Field = "type", ... })`
@@ -259,7 +269,12 @@ namespace engine::script {
 			fields.reserve(declaration.Names.size());
 			for (size_t at = 0; at < declaration.Names.size(); at++) {
 				fields.push_back(
-					FieldSpec{declaration.Names[at], declaration.Types[at], declaration.Enums[at]}
+					FieldSpec{
+						declaration.Names[at],
+						declaration.Types[at],
+						declaration.Enums[at],
+						declaration.Packings[at]
+					}
 				);
 			}
 
@@ -299,7 +314,9 @@ namespace engine::script {
 
 			lua_newtable(state);
 			for (const FieldDescriptor &field : schema->Fields()) {
-				if (field.Type == PropertyType::Enum) {
+				if (field.Packing != FieldPacking::Native) {
+					lua_pushstring(state, ecs::Describe(field.Packing));
+				} else if (field.Type == PropertyType::Enum) {
 					const std::string spelling = "Enum." + std::string(field.Enum.Text());
 					lua_pushstring(state, spelling.c_str());
 				} else {
@@ -376,6 +393,8 @@ namespace engine::script {
 											 : std::string(ecs::Describe(field.Type));
 				lua_pushlstring(state, type.data(), type.size());
 				lua_setfield(state, -2, "Type");
+				lua_pushstring(state, ecs::Describe(field.Packing));
+				lua_setfield(state, -2, "Packing");
 				lua_newtable(state);
 				for (size_t at = 0; at < field.Tags.size(); at++) {
 					lua_pushlstring(state, field.Tags[at].data(), field.Tags[at].size());
@@ -593,11 +612,20 @@ namespace engine::script {
 					// separate everywhere else**: the destination is a live
 					// `std::string` and the shared marshaller writes into raw
 					// bytes, which would overwrite an allocated pointer.
+					alignas(8) std::array<std::byte, 8> scratch{};
+					void *target = field->Packing == FieldPacking::Native ? value.At(*field) : scratch.data();
+					bool written = true;
 					if (field->Type == PropertyType::String) {
 						size_t length = 0;
 						const char *text = luaL_checklstring(state, -1, &length);
-						*static_cast<std::string *>(value.At(*field)) = std::string(text, length);
-					} else if (!ReadPropertyValue(state, -1, field->Type, field->Enum, value.At(*field))) {
+						*static_cast<std::string *>(target) = std::string(text, length);
+					} else {
+						written = ReadPropertyValue(state, -1, field->Type, field->Enum, target);
+					}
+					if (written && field->Packing != FieldPacking::Native) {
+						written = Schemas::WriteField(value.RawMutable(), *field, target);
+					}
+					if (!written) {
 						luaL_errorL(state, "'%s.%s' cannot take that value", name, key);
 					}
 
@@ -629,7 +657,8 @@ namespace engine::script {
 
 			lua_newtable(state);
 			for (const FieldDescriptor &field : schema.Fields()) {
-				const void *bytes = static_cast<const std::byte *>(held) + field.Offset;
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *bytes = Schemas::ReadField(held, field, scratch.data());
 
 				if (field.Type == PropertyType::String) {
 					const auto &text = *static_cast<const std::string *>(bytes);

@@ -12,8 +12,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
+#include <cmath>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -117,6 +120,141 @@ namespace engine::ecs {
 			return {};
 		}
 
+		uint32_t BitsOf(FieldPacking packing, PropertyType type) {
+			switch (packing) {
+			case FieldPacking::Float16:
+			case FieldPacking::UFloat16:
+			case FieldPacking::Int16:
+			case FieldPacking::UInt16:
+				return 16;
+			case FieldPacking::Float8:
+			case FieldPacking::UFloat8:
+			case FieldPacking::Int8:
+			case FieldPacking::UInt8:
+				return 8;
+			case FieldPacking::Int4:
+			case FieldPacking::UInt4:
+				return 4;
+			case FieldPacking::Bool:
+				return 1;
+			case FieldPacking::Native:
+				return LayoutOf(type).Size * 8;
+			}
+			return 0;
+		}
+
+		bool PackingFits(FieldPacking packing, PropertyType type) {
+			switch (packing) {
+			case FieldPacking::Native:
+				return true;
+			case FieldPacking::Float16:
+			case FieldPacking::UFloat16:
+			case FieldPacking::Float8:
+			case FieldPacking::UFloat8:
+				return type == PropertyType::Float;
+			case FieldPacking::Int16:
+			case FieldPacking::UInt16:
+			case FieldPacking::Int8:
+			case FieldPacking::UInt8:
+			case FieldPacking::Int4:
+			case FieldPacking::UInt4:
+				return type == PropertyType::Int32;
+			case FieldPacking::Bool:
+				return type == PropertyType::Bool;
+			}
+			return false;
+		}
+
+		uint32_t ReadBits(const void *blob, const FieldDescriptor &field) {
+			const auto *bytes = static_cast<const uint8_t *>(blob) + field.Offset;
+			uint32_t value = 0;
+			for (uint8_t bit = 0; bit < field.StorageBits; bit++) {
+				const uint8_t source = static_cast<uint8_t>(field.BitOffset + bit);
+				value |= static_cast<uint32_t>((bytes[source / 8] >> (source % 8)) & 1u) << bit;
+			}
+			return value;
+		}
+
+		void WriteBits(void *blob, const FieldDescriptor &field, uint32_t value) {
+			auto *bytes = static_cast<uint8_t *>(blob) + field.Offset;
+			for (uint8_t bit = 0; bit < field.StorageBits; bit++) {
+				const uint8_t target = static_cast<uint8_t>(field.BitOffset + bit);
+				const uint8_t mask = static_cast<uint8_t>(1u << (target % 8));
+				bytes[target / 8] = static_cast<uint8_t>(
+					(bytes[target / 8] & ~mask) | (((value >> bit) & 1u) != 0 ? mask : 0u)
+				);
+			}
+		}
+
+		uint16_t PackFloat16(float value) {
+			const uint32_t bits = std::bit_cast<uint32_t>(value);
+			const uint32_t sign = (bits >> 16) & 0x8000u;
+			const uint32_t exponent = (bits >> 23) & 0xffu;
+			uint32_t mantissa = bits & 0x7fffffu;
+
+			if (exponent == 0xffu) {
+				return static_cast<uint16_t>(sign | (mantissa == 0 ? 0x7c00u : 0x7e00u));
+			}
+
+			const int32_t halfExponent = static_cast<int32_t>(exponent) - 127 + 15;
+			if (halfExponent >= 31) {
+				return static_cast<uint16_t>(sign | 0x7c00u);
+			}
+			if (halfExponent <= 0) {
+				if (halfExponent < -10) {
+					return static_cast<uint16_t>(sign);
+				}
+				mantissa |= 0x800000u;
+				const uint32_t shift = static_cast<uint32_t>(14 - halfExponent);
+				uint32_t rounded = mantissa >> shift;
+				const uint32_t remainder = mantissa & ((1u << shift) - 1u);
+				const uint32_t halfway = 1u << (shift - 1u);
+				if (remainder > halfway || (remainder == halfway && (rounded & 1u) != 0)) {
+					rounded++;
+				}
+				return static_cast<uint16_t>(sign | rounded);
+			}
+
+			uint32_t rounded = sign | (static_cast<uint32_t>(halfExponent) << 10) | (mantissa >> 13);
+			const uint32_t remainder = mantissa & 0x1fffu;
+			if (remainder > 0x1000u || (remainder == 0x1000u && (rounded & 1u) != 0)) {
+				rounded++;
+			}
+			return static_cast<uint16_t>(rounded);
+		}
+
+		float UnpackFloat16(uint16_t half) {
+			const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
+			uint32_t exponent = (half >> 10) & 0x1fu;
+			uint32_t mantissa = half & 0x3ffu;
+			uint32_t bits = 0;
+
+			if (exponent == 0) {
+				if (mantissa == 0) {
+					bits = sign;
+				} else {
+					int32_t normalExponent = -14;
+					while ((mantissa & 0x400u) == 0) {
+						mantissa <<= 1;
+						normalExponent--;
+					}
+					mantissa &= 0x3ffu;
+					bits = sign | (static_cast<uint32_t>(normalExponent + 127) << 23) | (mantissa << 13);
+				}
+			} else if (exponent == 0x1fu) {
+				bits = sign | 0x7f800000u | (mantissa << 13);
+			} else {
+				bits = sign | ((exponent - 15 + 127) << 23) | (mantissa << 13);
+			}
+			return std::bit_cast<float>(bits);
+		}
+
+		template <typename Integer> Integer Saturate(int32_t value) {
+			const int64_t lowest = static_cast<int64_t>(std::numeric_limits<Integer>::lowest());
+			const int64_t highest = static_cast<int64_t>(std::numeric_limits<Integer>::max());
+			return static_cast<Integer>(std::clamp<int64_t>(value, lowest, highest));
+		}
+
 		// Whether a field owns anything the bytes alone do not carry.
 		//
 		// One type does, and the whole non-trivial path exists for it: a
@@ -195,7 +333,8 @@ namespace engine::ecs {
 		// and read it back in a process where it means a different string.
 		void WriteOne(const Schema &schema, core::ByteWriter &writer, const void *blob) {
 			for (const FieldDescriptor &field : schema.Fields()) {
-				const void *value = FieldAt(blob, field.Offset);
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *value = Schemas::ReadField(blob, field, scratch.data());
 				switch (field.Type) {
 				case PropertyType::Bool:
 					writer.WriteBool(*static_cast<const bool *>(value));
@@ -234,7 +373,9 @@ namespace engine::ecs {
 
 		void ReadOne(const Schema &schema, core::ByteReader &reader, void *blob) {
 			for (const FieldDescriptor &field : schema.Fields()) {
-				void *value = FieldAt(blob, field.Offset);
+				alignas(8) std::array<std::byte, 8> scratch{};
+				void *value =
+					field.Packing == FieldPacking::Native ? FieldAt(blob, field.Offset) : scratch.data();
 				switch (field.Type) {
 				case PropertyType::Bool:
 					*static_cast<bool *>(value) = reader.ReadBool();
@@ -266,6 +407,9 @@ namespace engine::ecs {
 				default:
 					reader.ReadRaw(value, field.Size);
 					break;
+				}
+				if (field.Packing != FieldPacking::Native) {
+					Schemas::WriteField(blob, field, value);
 				}
 			}
 		}
@@ -452,12 +596,43 @@ namespace engine::ecs {
 			}
 			for (const FieldDescriptor &wanted : fields) {
 				const FieldDescriptor *held = schema.Find(wanted.Name);
-				if (held == nullptr || held->Type != wanted.Type || held->Enum != wanted.Enum) {
+				if (held == nullptr || held->Type != wanted.Type || held->Enum != wanted.Enum ||
+					held->Packing != wanted.Packing) {
 					return false;
 				}
 			}
 			return true;
 		}
+	}
+
+	const char *Describe(FieldPacking packing) {
+		switch (packing) {
+		case FieldPacking::Native:
+			return "native";
+		case FieldPacking::Float16:
+			return "float16";
+		case FieldPacking::UFloat16:
+			return "ufloat16";
+		case FieldPacking::Float8:
+			return "float8";
+		case FieldPacking::UFloat8:
+			return "ufloat8";
+		case FieldPacking::Int16:
+			return "int16";
+		case FieldPacking::UInt16:
+			return "uint16";
+		case FieldPacking::Int8:
+			return "int8";
+		case FieldPacking::UInt8:
+			return "uint8";
+		case FieldPacking::Int4:
+			return "int4";
+		case FieldPacking::UInt4:
+			return "uint4";
+		case FieldPacking::Bool:
+			return "bool";
+		}
+		return "native";
 	}
 
 	// --- Schema ------------------------------------------------------------
@@ -542,6 +717,163 @@ namespace engine::ecs {
 		return false;
 	}
 
+	bool Schemas::FieldTypeNamed(std::string_view spelling, PropertyType &type, FieldPacking &packing) {
+		static const struct {
+			std::string_view Spelling;
+			PropertyType Type;
+			FieldPacking Packing;
+		} PACKED[] = {
+			{"float16", PropertyType::Float, FieldPacking::Float16},
+			{"ufloat16", PropertyType::Float, FieldPacking::UFloat16},
+			{"float8", PropertyType::Float, FieldPacking::Float8},
+			{"ufloat8", PropertyType::Float, FieldPacking::UFloat8},
+			{"int16", PropertyType::Int32, FieldPacking::Int16},
+			{"uint16", PropertyType::Int32, FieldPacking::UInt16},
+			{"int8", PropertyType::Int32, FieldPacking::Int8},
+			{"uint8", PropertyType::Int32, FieldPacking::UInt8},
+			{"int4", PropertyType::Int32, FieldPacking::Int4},
+			{"uint4", PropertyType::Int32, FieldPacking::UInt4},
+		};
+
+		for (const auto &named : PACKED) {
+			if (named.Spelling == spelling) {
+				type = named.Type;
+				packing = named.Packing;
+				return true;
+			}
+		}
+
+		if (!TypeNamed(spelling, type)) {
+			return false;
+		}
+		packing = type == PropertyType::Bool ? FieldPacking::Bool : FieldPacking::Native;
+		return true;
+	}
+
+	const void *Schemas::ReadField(const void *component, const FieldDescriptor &field, void *scratch) {
+		if (component == nullptr) {
+			return nullptr;
+		}
+		if (field.Packing == FieldPacking::Native) {
+			return FieldAt(component, field.Offset);
+		}
+		if (scratch == nullptr) {
+			return nullptr;
+		}
+
+		const uint32_t bits = ReadBits(component, field);
+		switch (field.Packing) {
+		case FieldPacking::Float16:
+			*static_cast<float *>(scratch) = UnpackFloat16(static_cast<uint16_t>(bits));
+			break;
+		case FieldPacking::UFloat16:
+			*static_cast<float *>(scratch) = static_cast<float>(bits) / 65535.0f;
+			break;
+		case FieldPacking::Float8:
+			*static_cast<float *>(scratch) = std::max(
+				-1.0f,
+				static_cast<float>(
+					(bits & 0x80u) != 0 ? static_cast<int32_t>(bits) - 256 : static_cast<int32_t>(bits)
+				) / 127.0f
+			);
+			break;
+		case FieldPacking::UFloat8:
+			*static_cast<float *>(scratch) = static_cast<float>(bits) / 255.0f;
+			break;
+		case FieldPacking::Int16:
+			*static_cast<int32_t *>(scratch) =
+				(bits & 0x8000u) != 0 ? static_cast<int32_t>(bits) - 65536 : static_cast<int32_t>(bits);
+			break;
+		case FieldPacking::UInt16:
+			*static_cast<int32_t *>(scratch) = static_cast<uint16_t>(bits);
+			break;
+		case FieldPacking::Int8:
+			*static_cast<int32_t *>(scratch) =
+				(bits & 0x80u) != 0 ? static_cast<int32_t>(bits) - 256 : static_cast<int32_t>(bits);
+			break;
+		case FieldPacking::UInt8:
+			*static_cast<int32_t *>(scratch) = static_cast<uint8_t>(bits);
+			break;
+		case FieldPacking::Int4:
+			*static_cast<int32_t *>(scratch) =
+				(bits & 0x8u) != 0 ? static_cast<int32_t>(bits) - 16 : static_cast<int32_t>(bits);
+			break;
+		case FieldPacking::UInt4:
+			*static_cast<int32_t *>(scratch) = static_cast<int32_t>(bits);
+			break;
+		case FieldPacking::Bool:
+			*static_cast<bool *>(scratch) = bits != 0;
+			break;
+		case FieldPacking::Native:
+			break;
+		}
+		return scratch;
+	}
+
+	bool Schemas::WriteField(void *component, const FieldDescriptor &field, const void *value) {
+		if (component == nullptr || value == nullptr) {
+			return false;
+		}
+		if (field.Packing == FieldPacking::Native) {
+			if (Owns(field.Type)) {
+				*StringAt(component, field.Offset) = *static_cast<const std::string *>(value);
+			} else {
+				std::memcpy(FieldAt(component, field.Offset), value, LayoutOf(field.Type).Size);
+			}
+			return true;
+		}
+
+		uint32_t bits = 0;
+		switch (field.Packing) {
+		case FieldPacking::Float16:
+			bits = PackFloat16(*static_cast<const float *>(value));
+			break;
+		case FieldPacking::UFloat16: {
+			const float source = *static_cast<const float *>(value);
+			const float finite = std::isnan(source) ? 0.0f : source;
+			bits = static_cast<uint32_t>(std::lround(std::clamp(finite, 0.0f, 1.0f) * 65535.0f));
+			break;
+		}
+		case FieldPacking::Float8: {
+			const float source = *static_cast<const float *>(value);
+			const float finite = std::isnan(source) ? 0.0f : source;
+			bits = static_cast<uint8_t>(std::lround(std::clamp(finite, -1.0f, 1.0f) * 127.0f));
+			break;
+		}
+		case FieldPacking::UFloat8: {
+			const float source = *static_cast<const float *>(value);
+			const float finite = std::isnan(source) ? 0.0f : source;
+			bits = static_cast<uint32_t>(std::lround(std::clamp(finite, 0.0f, 1.0f) * 255.0f));
+			break;
+		}
+		case FieldPacking::Int16:
+			bits = static_cast<uint16_t>(Saturate<int16_t>(*static_cast<const int32_t *>(value)));
+			break;
+		case FieldPacking::UInt16:
+			bits = Saturate<uint16_t>(*static_cast<const int32_t *>(value));
+			break;
+		case FieldPacking::Int8:
+			bits = static_cast<uint8_t>(Saturate<int8_t>(*static_cast<const int32_t *>(value)));
+			break;
+		case FieldPacking::UInt8:
+			bits = Saturate<uint8_t>(*static_cast<const int32_t *>(value));
+			break;
+		case FieldPacking::Int4:
+			bits = static_cast<uint32_t>(std::clamp(*static_cast<const int32_t *>(value), -8, 7)) & 0xfu;
+			break;
+		case FieldPacking::UInt4:
+			bits = static_cast<uint32_t>(std::clamp(*static_cast<const int32_t *>(value), 0, 15));
+			break;
+		case FieldPacking::Bool:
+			bits = *static_cast<const bool *>(value) ? 1u : 0u;
+			break;
+		case FieldPacking::Native:
+			break;
+		}
+		WriteBits(component, field, bits);
+		return true;
+	}
+
 	Schemas::Result Schemas::Register(std::string_view name, std::span<const FieldSpec> fields) {
 		if (name.empty()) {
 			return {{}, Status::Unnamed, false};
@@ -554,7 +886,10 @@ namespace engine::ecs {
 
 		for (const FieldSpec &spec : fields) {
 			const ValueLayout value = LayoutOf(spec.Type);
-			if (spec.Name.empty() || value.Size == 0) {
+			const FieldPacking packing =
+				spec.Type == PropertyType::Bool && spec.Packing == FieldPacking::Native ? FieldPacking::Bool
+																						: spec.Packing;
+			if (spec.Name.empty() || value.Size == 0 || !PackingFits(packing, spec.Type)) {
 				return {{}, Status::BadField, false};
 			}
 
@@ -563,7 +898,9 @@ namespace engine::ecs {
 			field.Spelling = field.Name.Text();
 			field.Type = spec.Type;
 			field.Enum = spec.Enum.empty() ? core::Name{} : core::Name(spec.Enum);
-			field.Size = value.Size;
+			field.Packing = packing;
+			field.StorageBits = BitsOf(packing, spec.Type);
+			field.Size = static_cast<uint32_t>((field.StorageBits + 7) / 8);
 
 			for (const FieldDescriptor &held : layout) {
 				if (held.Name == field.Name) {
@@ -574,16 +911,21 @@ namespace engine::ecs {
 			layout.push_back(field);
 		}
 
-		// **Widest first, then by name, and never the caller's order.** A Luau
+		// **Native alignment first, then by name, and never the caller's order.** A Luau
 		// table iterates in hash order, so a layout that followed the caller
 		// would differ between two runs of one script - and a snapshot written
 		// by one of them would not be readable by the other. Sorting by
 		// alignment also removes most of the padding a naive order would leave.
+		// Packed values are byte-accessed, so they need no artificial alignment;
+		// sub-byte values sort last and consume one shared bit stream.
 		std::sort(layout.begin(), layout.end(), [](const FieldDescriptor &a, const FieldDescriptor &b) {
-			const uint32_t left = LayoutOf(a.Type).Align;
-			const uint32_t right = LayoutOf(b.Type).Align;
+			const uint32_t left = a.Packing == FieldPacking::Native ? LayoutOf(a.Type).Align : 1;
+			const uint32_t right = b.Packing == FieldPacking::Native ? LayoutOf(b.Type).Align : 1;
 			if (left != right) {
 				return left > right;
+			}
+			if ((a.StorageBits < 8) != (b.StorageBits < 8)) {
+				return a.StorageBits >= 8;
 			}
 			return a.Spelling < b.Spelling;
 		});
@@ -592,13 +934,29 @@ namespace engine::ecs {
 		uint32_t alignment = 1;
 		bool trivial = true;
 		for (FieldDescriptor &field : layout) {
-			const ValueLayout value = LayoutOf(field.Type);
+			if (field.StorageBits < 8) {
+				continue;
+			}
+			const ValueLayout value =
+				field.Packing == FieldPacking::Native ? LayoutOf(field.Type) : ValueLayout{field.Size, 1};
 			offset = (offset + value.Align - 1) / value.Align * value.Align;
 			field.Offset = offset;
 			offset += value.Size;
 			alignment = std::max(alignment, value.Align);
 			trivial = trivial && !Owns(field.Type);
 		}
+
+		uint32_t bit = offset * 8;
+		for (FieldDescriptor &field : layout) {
+			if (field.StorageBits >= 8) {
+				continue;
+			}
+			field.Offset = bit / 8;
+			field.BitOffset = static_cast<uint8_t>(bit % 8);
+			field.Size = static_cast<uint32_t>((field.BitOffset + field.StorageBits + 7) / 8);
+			bit += field.StorageBits;
+		}
+		offset = (bit + 7) / 8;
 
 		// Rounded up so that an array of these values keeps every field aligned.
 		// A component with no fields is a tag, and `Column` is asked for no

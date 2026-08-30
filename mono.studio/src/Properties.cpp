@@ -7,6 +7,7 @@
 #include <engine/world/Enums.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <imgui.h>
 #include <studio/Assets.hpp>
@@ -60,7 +61,9 @@ namespace studio {
 		}
 
 		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
-			const auto *source = static_cast<const std::byte *>(component) + field.Offset;
+			alignas(8) std::array<std::byte, 8> scratch{};
+			const void *source = Schemas::ReadField(component, field, scratch.data());
+			if (source == nullptr) return false;
 			value = PropertyValue{};
 			value.Type = field.Type;
 			switch (field.Type) {
@@ -125,60 +128,42 @@ namespace studio {
 
 		bool WriteSchemaValue(void *component, const FieldDescriptor &field, const PropertyValue &value) {
 			if (value.Type != field.Type) return false;
-			auto *target = static_cast<std::byte *>(component) + field.Offset;
 			switch (field.Type) {
 			case PropertyType::Bool:
-				*reinterpret_cast<bool *>(target) = value.Bool;
-				return true;
+				return Schemas::WriteField(component, field, &value.Bool);
 			case PropertyType::Int32:
-				*reinterpret_cast<int32_t *>(target) = value.Int32;
-				return true;
+				return Schemas::WriteField(component, field, &value.Int32);
 			case PropertyType::Int64:
-				*reinterpret_cast<int64_t *>(target) = value.Int64;
-				return true;
+				return Schemas::WriteField(component, field, &value.Int64);
 			case PropertyType::Float:
-				*reinterpret_cast<float *>(target) = value.Float;
-				return true;
+				return Schemas::WriteField(component, field, &value.Float);
 			case PropertyType::Double:
-				*reinterpret_cast<double *>(target) = value.Double;
-				return true;
+				return Schemas::WriteField(component, field, &value.Double);
 			case PropertyType::Name:
 			case PropertyType::Enum:
-				*reinterpret_cast<Name *>(target) = value.Name;
-				return true;
+				return Schemas::WriteField(component, field, &value.Name);
 			case PropertyType::String:
-				*reinterpret_cast<std::string *>(target) = value.String;
-				return true;
+				return Schemas::WriteField(component, field, &value.String);
 			case PropertyType::Vector3:
-				*reinterpret_cast<engine::core::Vector3 *>(target) = value.Vector3;
-				return true;
+				return Schemas::WriteField(component, field, &value.Vector3);
 			case PropertyType::CFrame:
-				*reinterpret_cast<engine::core::CFrame *>(target) = value.CFrame;
-				return true;
+				return Schemas::WriteField(component, field, &value.CFrame);
 			case PropertyType::Color3:
-				*reinterpret_cast<engine::core::Color3 *>(target) = value.Color3;
-				return true;
+				return Schemas::WriteField(component, field, &value.Color3);
 			case PropertyType::Vector2:
-				*reinterpret_cast<engine::core::Vector2 *>(target) = value.Vector2;
-				return true;
+				return Schemas::WriteField(component, field, &value.Vector2);
 			case PropertyType::UDim:
-				*reinterpret_cast<engine::core::UDim *>(target) = value.UDim;
-				return true;
+				return Schemas::WriteField(component, field, &value.UDim);
 			case PropertyType::UDim2:
-				*reinterpret_cast<engine::core::UDim2 *>(target) = value.UDim2;
-				return true;
+				return Schemas::WriteField(component, field, &value.UDim2);
 			case PropertyType::Rect:
-				*reinterpret_cast<engine::core::Rect *>(target) = value.Rect;
-				return true;
+				return Schemas::WriteField(component, field, &value.Rect);
 			case PropertyType::NumberRange:
-				*reinterpret_cast<engine::core::NumberRange *>(target) = value.NumberRange;
-				return true;
+				return Schemas::WriteField(component, field, &value.NumberRange);
 			case PropertyType::NumberSequence:
-				*reinterpret_cast<engine::core::NumberSequence *>(target) = value.NumberSequence;
-				return true;
+				return Schemas::WriteField(component, field, &value.NumberSequence);
 			case PropertyType::ColorSequence:
-				*reinterpret_cast<engine::core::ColorSequence *>(target) = value.ColorSequence;
-				return true;
+				return Schemas::WriteField(component, field, &value.ColorSequence);
 			case PropertyType::Reference:
 			case PropertyType::Opaque:
 				return false;
@@ -1270,6 +1255,15 @@ namespace studio {
 					);
 
 					if (const Schema *schema = Schemas::Of(component); schema != nullptr) {
+						uint32_t logicalBytes = 0;
+						for (const FieldDescriptor &field : schema->Fields()) {
+							logicalBytes += Schemas::SizeOf(field.Type);
+						}
+						if (logicalBytes != schema->Size()) {
+							ImGui::TextDisabled(
+								"packing: %u logical bytes -> %u resident bytes", logicalBytes, schema->Size()
+							);
+						}
 						const std::vector<std::string> tags = schema->Tags();
 						if (!tags.empty()) {
 							ImGui::TextDisabled("tags:");
@@ -1280,7 +1274,15 @@ namespace studio {
 						}
 						for (const FieldDescriptor &field : schema->Fields()) {
 							if (!field.Exposed || componentValue == nullptr) {
-								ImGui::BulletText("%s", field.Spelling.data());
+								ImGui::BulletText(
+									"%s: %s / %s, %u bits at %u:%u",
+									field.Spelling.data(),
+									engine::ecs::Describe(field.Type),
+									engine::ecs::Describe(field.Packing),
+									field.StorageBits,
+									field.Offset,
+									field.BitOffset
+								);
 								continue;
 							}
 							PropertyValue value;
@@ -1290,6 +1292,8 @@ namespace studio {
 							ImGui::TextUnformatted(field.Spelling.data());
 							ImGui::SameLine();
 							ImGui::TextDisabled("[config]");
+							ImGui::SameLine();
+							ImGui::TextDisabled("[%s]", engine::ecs::Describe(field.Packing));
 							ImGui::SameLine();
 							ImGui::PushID(field.Name.Id());
 							std::string key =

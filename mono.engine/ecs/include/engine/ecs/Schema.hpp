@@ -52,6 +52,38 @@
 
 namespace engine::ecs {
 
+	// How a described field occupies its component row.
+	//
+	// The property type remains the value scripts and Studio see. Packing only
+	// changes the resident representation. This keeps quantisation out of the
+	// save and replication formats, which have separate contracts.
+	//
+	// `Float16` is IEEE binary16. `Float8` is signed normalised over `[-1, 1]`,
+	// while `UFloat8` and `UFloat16` are unsigned normalised over `[0, 1]`.
+	// Integer formats saturate at their signed or unsigned range. Four-bit
+	// integers and bools share bytes with adjacent sub-byte fields.
+	//
+	// @since v0.20
+	enum class FieldPacking : uint8_t {
+		Native,
+		Float16,
+		UFloat16,
+		Float8,
+		UFloat8,
+		Int16,
+		UInt16,
+		Int8,
+		UInt8,
+		Int4,
+		UInt4,
+		Bool,
+	};
+
+	// The stable spelling used by scripts and Studio.
+	//
+	// @since v0.20
+	const char *Describe(FieldPacking packing);
+
 	// One field, as a caller declares it.
 	//
 	// @since v0.12
@@ -69,6 +101,11 @@ namespace engine::ecs {
 		// is. Named rather than pointed at, so the enum may be registered after
 		// the schema that uses it.
 		std::string_view Enum = {};
+
+		// The resident representation. A bool is always normalised to `Bool`,
+		// because spending a byte on a runtime-derived bit defeats the layout's
+		// ability to share that byte with adjacent flags.
+		FieldPacking Packing = FieldPacking::Native;
 	};
 
 	// One field, as the storage holds it.
@@ -101,6 +138,13 @@ namespace engine::ecs {
 
 		// How many bytes it occupies.
 		uint32_t Size = 0;
+
+		// The resident representation and its exact location within `Offset`.
+		// Native and byte-sized formats start at bit zero. Sub-byte fields may
+		// share the same byte.
+		FieldPacking Packing = FieldPacking::Native;
+		uint8_t BitOffset = 0;
+		uint32_t StorageBits = 0;
 	};
 
 	// A component type described at run time.
@@ -323,6 +367,19 @@ namespace engine::ecs {
 		// @param out      Filled in on a match.
 		// @return `false` when nothing maps that spelling.
 		static bool TypeNamed(std::string_view spelling, PropertyType &out);
+
+		// Resolves a script field spelling to its logical type and resident
+		// representation. Native type names accepted by `TypeNamed` remain valid.
+		static bool FieldTypeNamed(std::string_view spelling, PropertyType &type, FieldPacking &packing);
+
+		// Returns the logical field value. Native fields return an address inside
+		// `component`; packed fields decode into the caller's suitably aligned
+		// scratch storage and return `scratch`. The scratch must hold and align the
+		// logical `PropertyType`; every currently packable type needs four bytes.
+		static const void *ReadField(const void *component, const FieldDescriptor &field, void *scratch);
+
+		// Stores one logical value, quantising and saturating when requested.
+		static bool WriteField(void *component, const FieldDescriptor &field, const void *value);
 
 		// The bytes one value of a `PropertyType` occupies.
 		//
