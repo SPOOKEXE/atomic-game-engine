@@ -3,18 +3,18 @@
 
 ### Core Engine / ECS
 
-* [ ] **Entity lifecycle system** — spawn/despawn/deferred destruction, pooling, orphan handling
-* [ ] **Archetype/query optimizer** — cached ECS queries, change filters, parallel query execution
-* [ ] **Component change tracking** — dirty bits/version counters so systems only process changed data
-* [ ] **Entity references/handles** — generation-safe references instead of raw entity IDs
-* [ ] **World snapshots** — serialize/restore an entire world state
-* [ ] **World cloning** — instant-ish duplicate world for testing, previews, server simulation
-* [ ] **Rollback/snapshot system** — useful for networking and deterministic simulation
-* [ ] **Fixed-timestep simulation** — independent simulation/render frequencies
-* [ ] **System dependency graph** — explicitly declare `before/after`, parallelize independent systems
-* [ ] **Frame scheduler** — CPU jobs, GPU jobs, async jobs and synchronization points represented together
-* [ ] **Engine tick phases** — Input → Simulation → Physics → Animation → Replication → Render preparation → Render
-* [ ] **Determinism mode** — detect nondeterministic simulation and optionally enforce deterministic ordering
+* [ ] **Entity lifecycle system**: spawn/despawn/deferred destruction, pooling, orphan handling
+* [ ] **Archetype/query optimizer**: cached ECS queries, change filters, parallel query execution
+* [ ] **Component change tracking**: dirty bits/version counters so systems only process changed data
+* [ ] **Entity references/handles**: generation-safe references instead of raw entity IDs
+* [ ] **World snapshots**: serialize/restore an entire world state
+* [ ] **World cloning**: instant-ish duplicate world for testing, previews, server simulation
+* [ ] **Rollback/snapshot system**: useful for networking and deterministic simulation
+* [ ] **Fixed-timestep simulation**: independent simulation/render frequencies
+* [ ] **System dependency graph**: explicitly declare `before/after`, parallelize independent systems
+* [ ] **Frame scheduler**: CPU jobs, GPU jobs, async jobs and synchronization points represented together
+* [ ] **Engine tick phases**: Input → Simulation → Physics → Animation → Replication → Render preparation → Render
+* [ ] **Determinism mode**: detect nondeterministic simulation and optionally enforce deterministic ordering
 * [ ] **Hot-reloadable components/systems**
 
 This would complement your existing batched-compute/job-system work particularly well.
@@ -742,9 +742,9 @@ That could become one of the **defining architectural features of Atomic Engine*
 ---
 ---
 
-Yes — **this is a much better distinction**. You mean things that belong in the *engine/runtime/renderer itself*, rather than "add a grappling hook API."
+Yes. **This is a much better distinction**. You mean things that belong in the *engine/runtime/renderer itself*, rather than "add a grappling hook API."
 
-And I think the game you're remembering may be **Where Winds Meet** or **Crimson Desert**—both are examples of the current generation of very large open-world games pushing massive environments, dense scenes, streaming, vegetation, atmospheric effects, etc. If you give me anything else you remember about the game, I can identify it.
+And I think the game you're remembering may be **Where Winds Meet** or **Crimson Desert**. Both are examples of the current generation of very large open-world games pushing massive environments, dense scenes, streaming, vegetation, atmospheric effects, etc. If you give me anything else you remember about the game, I can identify it.
 
 For Atomic Engine, I'd think about the feature set in terms of **"what does a modern AAA engine do automatically so the game developer doesn't have to?"**
 
@@ -764,7 +764,7 @@ Your existing LOD item is actually just one part of a much larger family:
 
 You already have:
 
-> LOD — 4 different meshes, auto-decimate, smart triangle reduction
+> LOD: 4 different meshes, auto-decimate, smart triangle reduction
 
 I'd go considerably further.
 
@@ -1322,7 +1322,7 @@ If you want the **"massive medieval battle"** demo from your roadmap to actually
 
 # 19. Destruction
 
-Not game-specific destruction scripts—**engine destruction infrastructure**.
+Not game-specific destruction scripts. This is **engine destruction infrastructure**.
 
 * [ ] Runtime mesh fracture
 * [ ] Pre-fractured assets
@@ -3548,15 +3548,15 @@ close
 * [ ] **Automatic asset analysis**
 * [ ] **Cost/complexity visualization**
 
-And honestly, **the cross-system group is where I think the really novel Atomic Engine architecture could emerge**. Your documents already have several of the ingredients—GPU-resident state, delta uploads, quantization, parallel world processing, render graphs, strict determinism, and a clean ECS/shim separation. 
+And honestly, **the cross-system group is where I think the really novel Atomic Engine architecture could emerge**. Your documents already have several of the ingredients: GPU-resident state, delta uploads, quantization, parallel world processing, render graphs, strict determinism, and a clean ECS/shim separation.
 
-Rather than accumulating 500 independent features, you can make a handful of systems—**Spatial, Visibility, Importance, LOD, Residency, Budgeting, Temporal History, and Scheduling**—that cause *all* those features to become cheaper automatically. That's the kind of architecture I'd aim for if the goal is **"Atomic can render/simulate an absurd amount of stuff without requiring absurd hardware."**
+Rather than accumulating 500 independent features, you can make a handful of systems cause *all* those features to become cheaper automatically: **Spatial, Visibility, Importance, LOD, Residency, Budgeting, Temporal History, and Scheduling**. That's the kind of architecture I'd aim for if the goal is **"Atomic can render/simulate an absurd amount of stuff without requiring absurd hardware."**
 
 ---
 ---
 ---
 
-Yes — **this is the more interesting direction**. Looking at the architecture documents together, I think there is a much deeper philosophy you can push Atomic toward than "implement the usual AAA features."
+Yes. **This is the more interesting direction**. Looking at the architecture documents together, I think there is a much deeper philosophy you can push Atomic toward than "implement the usual AAA features."
 
 Your existing design already has several unusual pieces: ECS-first separation, GPU-resident visual state, delta-only synchronization, strict determinism, parallel work within ticks, batched world processing, node-based rendering, and portals that are intended to cross the physics/rendering/projection boundary seamlessly.  
 
@@ -6462,7 +6462,7 @@ Current:
 The largest cost is reinsertion caused by high-velocity objects.
 ```
 
-Not generic documentation — **contextual explanation of the actual running engine**.
+Not generic documentation. This is **contextual explanation of the actual running engine**.
 
 ---
 
@@ -6902,4 +6902,4 @@ That means **AI doesn't get a special fake interface to the engine**. It gets th
 
 And I think that pairs exceptionally well with your ECS-first philosophy: the ECS remains the authoritative semantic state, while GPU-resident state, caches, derived state, render views, physics structures, temporal histories, etc. are inspectable derived representations rather than opaque magic. Your existing architecture is already explicitly trying to keep the engine layers separated this way. 
 
-The end goal is basically **"the engine is self-describing and self-debugging."** That's much more ambitious—and IMO much more interesting—than simply building another Studio with an MCP bolted onto it.
+The end goal is basically **"the engine is self-describing and self-debugging."** That's much more ambitious, and IMO much more interesting, than simply building another Studio with an MCP bolted onto it.
