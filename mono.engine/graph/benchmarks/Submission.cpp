@@ -30,6 +30,7 @@
 // is in the resource relations and a chain has almost none.
 
 #include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Bench.hpp>
@@ -208,6 +209,26 @@ BENCH("CompileSchedule · a 64-pass pipeline", 100) {
 		ExecutionSchedule schedule;
 		Name offender;
 		Consume(CompileSchedule(pipeline.Graph, schedule, offender) == ScheduleStatus::Ok);
+	}
+}
+
+BENCH("BuildResourceAliases · a 8-pass pipeline", 1000) {
+	const Pipeline &pipeline = PipelineOf(8);
+	CompiledGraph compiled;
+	Name offender;
+	Consume(pipeline.Graph.Compile(compiled, offender) == GraphStatus::Ok);
+	for (size_t call = 0; call < 1000; call++) {
+		Consume(BuildResourceAliases(pipeline.Graph, compiled).PhysicalTargets);
+	}
+}
+
+BENCH("BuildResourceAliases · a 64-pass pipeline", 100) {
+	const Pipeline &pipeline = PipelineOf(64);
+	CompiledGraph compiled;
+	Name offender;
+	Consume(pipeline.Graph.Compile(compiled, offender) == GraphStatus::Ok);
+	for (size_t call = 0; call < 100; call++) {
+		Consume(BuildResourceAliases(pipeline.Graph, compiled).PhysicalTargets);
 	}
 }
 

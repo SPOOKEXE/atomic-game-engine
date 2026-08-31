@@ -728,6 +728,13 @@ namespace studio {
 		const uint32_t height = WorldTarget.IsValid() ? WorldTarget.Height : 1080;
 		engine::graph::PipelineProfile profile =
 			engine::graph::ProfilePipeline(graph, compiled, width, height);
+		engine::graph::ExecutionSchedule schedule;
+		engine::core::Name scheduleOffender;
+		std::vector<engine::graph::PlannedCommandBuffer> commandBuffers;
+		if (engine::graph::CompileSchedule(graph, schedule, scheduleOffender) ==
+			engine::graph::ScheduleStatus::Ok) {
+			commandBuffers = engine::graph::PlanCommandBuffers(schedule);
+		}
 		const auto &gpuTimings = Renderer.PassTimings();
 		const auto &wallTimings = Renderer.PassWallTimes();
 		for (engine::graph::ProfilePass &pass : profile.Passes) {
@@ -756,11 +763,24 @@ namespace studio {
 		ImGui::Text("%zu passes, %zu resources", profile.Passes.size(), profile.Resources.size());
 		ImGui::SameLine();
 		ImGui::TextDisabled(
-			"%.2f MiB peak / %.2f MiB declared / %.2f MiB aliasable",
+			"%.2f MiB peak / %.2f MiB declared / %.2f MiB transient allocation",
 			mib(profile.PeakBytes),
 			mib(profile.TotalBytes),
-			mib(profile.TotalBytes - profile.PeakBytes)
+			mib(profile.AllocatedBytes)
 		);
+		if (!commandBuffers.empty()) {
+			size_t gpuNodes = 0;
+			for (const engine::graph::PlannedCommandBuffer &buffer : commandBuffers) {
+				gpuNodes += buffer.Nodes.size();
+			}
+			ImGui::TextDisabled(
+				"compile: %zu GPU nodes -> %zu command buffers (%zu fused boundaries), %u aliased targets",
+				gpuNodes,
+				commandBuffers.size(),
+				gpuNodes > commandBuffers.size() ? gpuNodes - commandBuffers.size() : 0,
+				profile.AliasedResources
+			);
+		}
 		ImGui::SeparatorText("Stage images and timings");
 		if (ImGui::BeginTable(
 				"##pipeline-timings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp

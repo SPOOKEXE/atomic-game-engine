@@ -24,6 +24,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/graph/EntityFlow.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/MeshTable.hpp>
@@ -59,6 +60,7 @@ namespace engine::render {
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
 			graph::ExecutionSchedule Schedule;
+			graph::ResourceAliasPlan Aliases;
 
 			// The schedule's traffic plan, computed once at install. It decides
 			// which command buffer class records each node, and its order is the
@@ -439,6 +441,7 @@ namespace engine::render {
 		NamedTexture FindGraphTarget(
 			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
+		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
 			const NamedPipeline &pipeline,
 			graph::ResourceId resource,

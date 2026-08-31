@@ -1272,14 +1272,23 @@ namespace engine::render {
 			State->ReleaseGraphState(name);
 			installed.Graph = pipeline;
 			installed.Compiled = std::move(compiled);
+			installed.Aliases = graph::BuildResourceAliases(installed.Graph, installed.Compiled);
 			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
 			return true;
 		}
 
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
+		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		State->NamedPipelines.push_back(
-			Impl::NamedPipeline{name, pipeline, std::move(compiled), std::move(schedule), std::move(buffers)}
+			Impl::NamedPipeline{
+				name,
+				pipeline,
+				std::move(compiled),
+				std::move(schedule),
+				std::move(aliases),
+				std::move(buffers),
+			}
 		);
 		return true;
 	}
@@ -1369,11 +1378,13 @@ namespace engine::render {
 			return false;
 		}
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
+		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		State->EngineDefault = Impl::NamedPipeline{
 			core::Name("Engine Default"),
 			pipeline,
 			std::move(compiled),
 			std::move(schedule),
+			std::move(aliases),
 			std::move(buffers)
 		};
 		return true;

@@ -20,8 +20,8 @@
 // It can say what every pass reads and writes, when each resource comes alive
 // and when it dies, how many bytes each costs at a given view size, and - the
 // number worth having - what the **peak** live footprint is, against the naive
-// sum. The gap between those two is what a transient allocator would recover by
-// aliasing resources whose lifetimes do not overlap.
+// sum. `AllocatedBytes` is the stricter answer from the real transient
+// allocator after format, dimensions and scope compatibility are applied.
 //
 // It cannot say what anything *cost in time*. That needs timestamp queries
 // around each pass, which is the stage after this one; `ProfilePass::Elapsed`
@@ -116,6 +116,11 @@ namespace engine::graph {
 		// An external resource is alive for the whole frame by definition.
 		bool External = false;
 
+		// The physical allocation this logical resource occupies. Invalid for
+		// resources that do not own a graph target. Equal to `Id` when the target
+		// is not shared, and another resource's id when their lifetimes alias.
+		ResourceId Allocation;
+
 		// The value meaning "never".
 		static constexpr uint32_t NEVER = 0xFFFFFFFFu;
 
@@ -133,8 +138,8 @@ namespace engine::graph {
 
 		// Whether it is live at a pass.
 		//
-		// **Half-open at the start and closed at the end**: alive from the pass
-		// that first writes it, through the pass that last reads it. A resource
+		// **Closed at both ends**: alive from the pass that first writes it,
+		// through the pass that last reads it. A resource
 		// nothing writes is never alive; an external one always is.
 		//
 		// @param at The pass index.
@@ -183,10 +188,16 @@ namespace engine::graph {
 
 		// What every resource costs added together.
 		//
-		// **The gap between this and `PeakBytes` is what aliasing would
-		// recover.** A frame with a long chain of half-resolution intermediates
-		// can easily allocate three times what it ever has live at once.
+		// This is the naive upper bound. `PeakBytes` is a lifetime-only lower
+		// bound and `AllocatedBytes` is what compatible physical slots require.
 		uint64_t TotalBytes = 0;
+
+		// Bytes the graph target allocator actually needs after compatible,
+		// non-overlapping transient resources have been assigned one allocation.
+		uint64_t AllocatedBytes = 0;
+
+		// How many logical targets share an earlier target's allocation.
+		uint32_t AliasedResources = 0;
 
 		// What a pass does to a resource.
 		//
@@ -200,6 +211,42 @@ namespace engine::graph {
 			return Cells[resource * Passes.size() + pass];
 		}
 	};
+
+	// One stable physical-target assignment per declared resource.
+	//
+	// Entries are invalid for resources the graph target allocator does not
+	// own. Every other entry names the first logical resource assigned to its
+	// allocation. The plan depends on descriptors and compiled order, never on
+	// a device or a frame, so the renderer computes it once when installing a
+	// pipeline and Studio shows that same answer.
+	struct ResourceAliasPlan {
+		// Physical owner per logical resource, in resource declaration order.
+		std::vector<ResourceId> Allocations;
+
+		// Number of physical transient targets required.
+		uint32_t PhysicalTargets = 0;
+
+		// Number of logical targets reusing an earlier allocation.
+		uint32_t AliasedResources = 0;
+
+		// Finds the physical owner for a logical resource.
+		//
+		// @param resource Logical resource id.
+		// @return Physical owner, or invalid when it is not graph-allocated.
+		ResourceId AllocationOf(ResourceId resource) const {
+			if (!resource.IsValid() || resource.Value > Allocations.size()) {
+				return {};
+			}
+			return Allocations[resource.Value - 1];
+		}
+	};
+
+	// Assigns exact-match transient targets to non-overlapping allocations.
+	//
+	// @param graph    Graph holding descriptors and resource accesses.
+	// @param compiled Enabled nodes in execution order.
+	// @return Stable logical-to-physical target assignments.
+	ResourceAliasPlan BuildResourceAliases(const RenderGraph &graph, const CompiledGraph &compiled);
 
 	// Works out the grid.
 	//
