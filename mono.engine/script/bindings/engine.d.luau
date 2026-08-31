@@ -391,6 +391,21 @@ end
 
 declare ContextActionService: ContextActionServiceType
 
+declare extern type SettingsMenuActionSignal with
+	function Connect(self, handler: (name: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (name: string) -> ()): RBXScriptConnection
+end
+
+declare extern type SettingsServiceType with
+	-- Adds or relabels one named row and returns that row's activation signal.
+	-- Client scripts only. At most twelve actions may exist at once.
+	function SetMenuAction(self, name: string, label: string): SettingsMenuActionSignal
+	function RemoveMenuAction(self, name: string): boolean
+	function ClearMenuActions(self): ()
+end
+
+declare SettingsService: SettingsServiceType
+
 declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
 	function Once(self, handler: () -> ()): RBXScriptConnection
@@ -2766,6 +2781,7 @@ type Services = {
 	HttpService: HttpService,
 	CrossWorldService: CrossWorldService,
 	ContextActionService: ContextActionServiceType,
+	SettingsService: SettingsServiceType,
 	SoundService: SoundService,
 	UserInputService: UserInputServiceType,
 	MemoryStoreService: MemoryStoreService,

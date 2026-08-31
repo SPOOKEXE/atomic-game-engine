@@ -404,6 +404,11 @@ namespace engine::script {
 		// @param events What the router produced this frame.
 		void DeliverGuiEvents(std::span<const gui::GuiEvent> events);
 
+		// Queues one script-authored ESC menu action for the next heartbeat.
+		// The name is copied so no presentation-owned storage crosses the world
+		// boundary.
+		void DeliverSettingsMenuAction(core::Name action);
+
 		// How many gui events are waiting for the next beat.
 		//
 		// For a test and for a panel. A number that only grows is a host
@@ -695,6 +700,9 @@ namespace engine::script {
 		// `MouseEnter` is a rule `gui::Router` already decided, and re-deriving
 		// it here would be a second answer to it.
 		std::vector<gui::GuiEvent> PendingGuiEvents;
+
+		// Host menu presses waiting for the next script barrier, in input order.
+		std::vector<core::Name> PendingSettingsMenuActions;
 
 		// Where execution should be reported from. Read through `Debug`.
 		Debugger Breakpoints;

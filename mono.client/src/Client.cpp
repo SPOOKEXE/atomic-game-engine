@@ -1981,16 +1981,30 @@ namespace client {
 			PresentationInvalidated = true;
 		}
 
+		MenuActions.clear();
+		const engine::world::WorldId menuWorld = InterfaceWorld();
+		if (Menu.IsOpen() && menuWorld.IsValid()) {
+			Universe_->Enter(menuWorld, [this](engine::ecs::Store &store) {
+				const auto actions = engine::gui::SettingsMenuActionsOf(store);
+				MenuActions.assign(actions.begin(), actions.end());
+			});
+		}
+
 		if (Menu.IsOpen() && Actions.Fired(Action::SettingsUp)) {
-			Menu.Move(-1);
+			Menu.Move(-1, MenuActions.size());
 			PresentationInvalidated = true;
 		}
 		if (Menu.IsOpen() && Actions.Fired(Action::SettingsDown)) {
-			Menu.Move(1);
+			Menu.Move(1, MenuActions.size());
 			PresentationInvalidated = true;
 		}
 		if (Menu.IsOpen() && Actions.Fired(Action::SettingsActivate)) {
-			if (Menu.Activate(Settings) == SettingsMenuResult::Quit) {
+			const SettingsMenuActivation activated = Menu.Activate(Settings, MenuActions);
+			if (activated.Result == SettingsMenuResult::Action) {
+				if (engine::script::Runtime *runtime = RuntimeOf(menuWorld); runtime != nullptr) {
+					runtime->DeliverSettingsMenuAction(activated.Action);
+				}
+			} else if (activated.Result == SettingsMenuResult::Quit) {
 				Running = false;
 			}
 			PresentationInvalidated = true;
@@ -2735,7 +2749,7 @@ namespace client {
 
 				engine::render::DrawDebugPanels(Overlay, panels);
 				if (Menu.IsOpen()) {
-					DrawSettingsMenu(Overlay, Settings, Menu);
+					DrawSettingsMenu(Overlay, Settings, Menu, MenuActions);
 				}
 			} else {
 				// Nothing drawn means nothing uploaded and no overlay pass.

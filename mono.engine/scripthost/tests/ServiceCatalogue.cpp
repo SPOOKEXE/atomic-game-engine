@@ -306,6 +306,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		  "GetBoundActionInfo",
 		  "GetAllBoundActionInfo"},
 		 {}},
+		{"SettingsService", {"SetMenuAction", "RemoveMenuAction", "ClearMenuActions"}, {}},
 		{"ContentService",
 		 {"GetMeshes",
 		  "GetPublishedMeshes",

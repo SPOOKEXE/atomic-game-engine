@@ -49,6 +49,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/EditableImages.hpp>

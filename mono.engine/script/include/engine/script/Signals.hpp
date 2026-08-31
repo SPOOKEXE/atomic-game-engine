@@ -236,6 +236,17 @@ namespace engine::script {
 		// @since v0.15
 		CrossWorldMessage,
 
+		// `SettingsService:SetMenuAction(name, label)` - the named row was
+		// activated in the client's ESC menu. The action name is the connection's
+		// `Property`, so independently-authored rows share one signal kind without
+		// hearing each other.
+		//
+		// No subject, because the menu belongs to the client presentation rather
+		// than to an instance in the world.
+		//
+		// @since v0.21
+		SettingsMenuAction,
+
 		// `tween.Completed` - a tween reached the end of its last pass.
 		//
 		// **The subject is the tween's own entity, which is what a tween is.**

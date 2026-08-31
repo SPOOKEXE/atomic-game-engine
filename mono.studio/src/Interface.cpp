@@ -2577,6 +2577,25 @@ namespace studio {
 		ImGui::Checkbox("EditableImage updates", &ClientSettings.EnableEditableImages);
 		ImGui::Checkbox("Particles", &ClientSettings.EnableParticles);
 		ImGui::Checkbox("Post-processing", &ClientSettings.EnablePostProcessing);
+
+		WorldRun *run = RunOwning(playing);
+		std::vector<engine::gui::SettingsMenuAction> scriptActions;
+		if (run != nullptr) {
+			Universe->Enter(run->World, [&](Store &store) {
+				const auto actions = engine::gui::SettingsMenuActionsOf(store);
+				scriptActions.assign(actions.begin(), actions.end());
+			});
+		}
+		if (!scriptActions.empty()) {
+			ImGui::SeparatorText("Game");
+			for (const engine::gui::SettingsMenuAction &action : scriptActions) {
+				ImGui::PushID(action.Id.Text().data());
+				if (ImGui::Button(action.Label.c_str(), ImVec2{-1.0f, 0.0f}) && run->Runtime != nullptr) {
+					run->Runtime->DeliverSettingsMenuAction(action.Id);
+				}
+				ImGui::PopID();
+			}
+		}
 		ImGui::Separator();
 
 		if (ImGui::Button("Resume", ImVec2{120.0f, 0.0f})) {

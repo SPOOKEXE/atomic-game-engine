@@ -422,7 +422,8 @@ namespace engine::replication {
 		// client's next layout pass.
 		if (component == "gui.Canvas" || component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
 			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
-			component == "gui.PageMotion" || component == "gui.ScrollMotion") {
+			component == "gui.PageMotion" || component == "gui.ScrollMotion" ||
+			component == "gui.SettingsMenuExtensions") {
 			return true;
 		}
 

@@ -34,6 +34,12 @@ namespace engine::script {
 		PendingGuiEvents.insert(PendingGuiEvents.end(), events.begin(), events.end());
 	}
 
+	void Runtime::DeliverSettingsMenuAction(core::Name action) {
+		if (action.IsValid()) {
+			PendingSettingsMenuActions.push_back(action);
+		}
+	}
+
 	bool Runtime::RunFile(const std::string &path) {
 		std::ifstream file(path, std::ios::binary);
 		if (!file) {

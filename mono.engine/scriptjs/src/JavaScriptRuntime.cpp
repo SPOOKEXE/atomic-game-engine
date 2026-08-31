@@ -480,6 +480,19 @@ namespace engine::script {
 		// queued at this point and are drained below.
 		note(PumpJsInput(Context, PendingGuiEvents));
 
+		{
+			std::vector<core::Name> actions;
+			actions.swap(PendingSettingsMenuActions);
+			for (const core::Name &action : actions) {
+				const std::string_view name = action.Text();
+				JSValue argument = JS_NewStringLen(Context, name.data(), name.size());
+				note(FireJsSignal(
+					Context, SignalKind::SettingsMenuAction, ecs::NULL_ENTITY, 1, &argument, action
+				));
+				JS_FreeValue(Context, argument);
+			}
+		}
+
 		note(PumpJsChanges(Context));
 
 		// **After the property changes and before the tasks**, exactly as the

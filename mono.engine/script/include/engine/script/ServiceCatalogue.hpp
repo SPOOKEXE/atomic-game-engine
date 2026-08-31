@@ -301,6 +301,12 @@ namespace engine::script {
 	// @since v0.15
 	const ServiceSurface &CrossWorldServiceSurface();
 
+	// `SettingsService`, the client-only script seam for named ESC menu rows.
+	// `SetMenuAction` returns the filtered activation signal, while remove and
+	// clear affect presentation without owning a second callback table.
+	// @since v0.21
+	const ServiceSurface &SettingsServiceSurface();
+
 	// `UserInputService`, over `scene::InputState`.
 	//
 	// **Reads `scene::InputState` and never `engine::input`**, which is the tier

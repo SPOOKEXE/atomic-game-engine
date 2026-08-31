@@ -11,6 +11,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -1442,6 +1443,50 @@ TEST_CASE("a world with no input state answers rather than raising", "[scripting
 		assert(#UserInputService:GetKeysPressed() == 0, 'a headless world reported keys')
 		assert(not UserInputService.KeyboardEnabled, 'a headless world claimed a keyboard')
 	)");
+}
+
+TEST_CASE("client scripts add ESC menu actions and receive their activation", "[scripting][settings]") {
+	RegisterClasses();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		SECTION(language == Language::Luau ? "luau" : "javascript") {
+			Store store("settings_menu_script_test");
+			RuntimeLimits limits;
+			limits.Role = HostRole::OfClient();
+			const auto runtime = MakeRuntime(store, language, limits);
+			REQUIRE(runtime != nullptr);
+
+			const char *source = language == Language::Luau ? R"(
+				local activated = SettingsService:SetMenuAction('respawn', 'Respawn Character')
+				activated:Connect(function(name)
+					workspace.Name = name
+				end)
+			)"
+															: R"(
+				const activated = SettingsService.SetMenuAction('respawn', 'Respawn Character');
+				activated.Connect((name) => { workspace.Name = name; });
+			)";
+			MustRun(*runtime, source);
+
+			const auto actions = engine::gui::SettingsMenuActionsOf(store);
+			REQUIRE(actions.size() == 1);
+			CHECK(actions[0].Id == engine::core::Name("respawn"));
+			CHECK(actions[0].Label == "Respawn Character");
+
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+			runtime->DeliverSettingsMenuAction(engine::core::Name("respawn"));
+			REQUIRE(runtime->Heartbeat(0.016f));
+			CHECK(store.InstanceNameOf(workspace) == engine::core::Name("respawn"));
+
+			MustRun(
+				*runtime,
+				language == Language::Luau
+					? "assert(SettingsService:RemoveMenuAction('respawn'))\n"
+					: "if (!SettingsService.RemoveMenuAction('respawn')) throw new Error('remove failed');\n"
+			);
+			CHECK(engine::gui::SettingsMenuActionsOf(store).empty());
+		}
+	}
 }
 
 TEST_CASE("a bound action fires on the edge and the priority decides", "[scripting]") {

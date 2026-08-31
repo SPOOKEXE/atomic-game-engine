@@ -1002,6 +1002,21 @@ end
 
 declare ContextActionService: ContextActionServiceType
 
+declare extern type SettingsMenuActionSignal with
+	function Connect(self, handler: (name: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (name: string) -> ()): RBXScriptConnection
+end
+
+declare extern type SettingsServiceType with
+	-- Adds or relabels one named row and returns that row's activation signal.
+	-- Client scripts only. At most twelve actions may exist at once.
+	function SetMenuAction(self, name: string, label: string): SettingsMenuActionSignal
+	function RemoveMenuAction(self, name: string): boolean
+	function ClearMenuActions(self): ()
+end
+
+declare SettingsService: SettingsServiceType
+
 declare extern type PropertyChangedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
 	function Once(self, handler: () -> ()): RBXScriptConnection
@@ -2408,6 +2423,7 @@ declare task: {
 		out << "\tHttpService: HttpService,\n";
 		out << "\tCrossWorldService: CrossWorldService,\n";
 		out << "\tContextActionService: ContextActionServiceType,\n";
+		out << "\tSettingsService: SettingsServiceType,\n";
 
 		// **The two that carry a live property, and the TypeScript map has them
 		// too since v0.16.** They were this paragraph's exception for as long as
@@ -3343,6 +3359,19 @@ declare interface ContextActionService {
 	GetAllBoundActionInfo(): Record<string, BoundActionInfo>;
 }
 
+declare interface SettingsMenuActionSignal {
+	Connect(handler: (name: string) => void): RBXScriptConnection;
+	Once(handler: (name: string) => void): RBXScriptConnection;
+}
+
+declare interface SettingsService {
+	// Adds or relabels one named row and returns that row's activation signal.
+	// Client scripts only. At most twelve actions may exist at once.
+	SetMenuAction(name: string, label: string): SettingsMenuActionSignal;
+	RemoveMenuAction(name: string): boolean;
+	ClearMenuActions(): void;
+}
+
 // `tween.Completed`, which takes no arguments. Its own type rather than
 // `GuiSignal` for the reason the Luau half gives: they are structurally
 // identical and one of the two names would be false.
@@ -3409,6 +3438,7 @@ declare const ContentService: ContentService;
 declare const CollectionService: CollectionService;
 declare const HttpService: HttpService;
 declare const ContextActionService: ContextActionService;
+declare const SettingsService: SettingsService;
 declare const UserInputService: UserInputService;
 declare const SoundService: SoundService;
 

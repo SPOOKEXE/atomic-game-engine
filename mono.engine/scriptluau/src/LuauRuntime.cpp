@@ -914,6 +914,16 @@ namespace engine::script {
 			note(PumpInput(State, PendingGuiEvents));
 		}
 		{
+			ENGINE_PROFILE_CAT("script settings menu", core::ProfileCategory::Script);
+			std::vector<core::Name> actions;
+			actions.swap(PendingSettingsMenuActions);
+			for (const core::Name &action : actions) {
+				const std::string_view name = action.Text();
+				lua_pushlstring(State, name.data(), name.size());
+				note(FireSignal(State, SignalKind::SettingsMenuAction, ecs::NULL_ENTITY, 1, action));
+			}
+		}
+		{
 			ENGINE_PROFILE_CAT("script changes", core::ProfileCategory::Script);
 			note(PumpChanges(State));
 		}

@@ -474,6 +474,7 @@ namespace client {
 		// The shipped client's own settings overlay. It is presentation state,
 		// not a row in any simulated or replicated world.
 		client::SettingsMenu Menu;
+		std::vector<engine::gui::SettingsMenuAction> MenuActions;
 		bool SettingsMenuDrawn = false;
 
 		// This frame's raw input, before any world has been told about it.
