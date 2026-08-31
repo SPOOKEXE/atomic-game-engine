@@ -10,7 +10,6 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
-#include <stop_token>
 #include <thread>
 #include <utility>
 
@@ -149,16 +148,21 @@ namespace engine::script {
 			return true;
 		}
 
-		bool BuildNoise(const NoiseGridRequest &request, std::stop_token stop, std::vector<float> &values) {
+		bool BuildNoise(
+			const NoiseGridRequest &request,
+			const std::atomic<bool> *stopRequested,
+			std::vector<float> &values
+		) {
 			values.resize(static_cast<size_t>(request.Width) * request.Depth);
 			for (uint32_t row = 0; row < request.Depth; row++) {
-				if (stop.stop_requested()) {
+				if (stopRequested != nullptr && stopRequested->load(std::memory_order_relaxed)) {
 					values.clear();
 					return false;
 				}
 				const double z = request.OriginZ + static_cast<double>(row) * request.Step;
 				for (uint32_t column = 0; column < request.Width; column++) {
-					if ((column & 255u) == 0 && stop.stop_requested()) {
+					if ((column & 255u) == 0 && stopRequested != nullptr &&
+						stopRequested->load(std::memory_order_relaxed)) {
 						values.clear();
 						return false;
 					}
@@ -246,7 +250,8 @@ namespace engine::script {
 			size_t FallbackCursor = 0;
 			std::string Error;
 			std::atomic<WorkState> Status{WorkState::Pending};
-			std::jthread Thread;
+			std::atomic<bool> StopRequested{false};
+			std::thread Thread;
 			parallel::Process Process;
 			std::unique_ptr<parallel::Channel> Channel;
 			std::vector<std::byte> Frame;
@@ -267,10 +272,15 @@ namespace engine::script {
 	ComputeJobs::~ComputeJobs() {
 		for (const std::unique_ptr<State::Job> &job : Held->Active) {
 			if (job->Thread.joinable()) {
-				job->Thread.request_stop();
+				job->StopRequested.store(true, std::memory_order_relaxed);
 			}
 			if (job->Channel) {
 				job->Channel->Close();
+			}
+		}
+		for (const std::unique_ptr<State::Job> &job : Held->Active) {
+			if (job->Thread.joinable()) {
+				job->Thread.join();
 			}
 		}
 		Held->Active.clear();
@@ -297,11 +307,11 @@ namespace engine::script {
 		State::Job *owned = job.get();
 
 		if (context == parallel::JobContext::Serial) {
-			BuildNoise(request, {}, job->Values);
+			BuildNoise(request, nullptr, job->Values);
 			job->Status.store(WorkState::Complete, std::memory_order_release);
 		} else if (context == parallel::JobContext::Threaded) {
-			job->Thread = std::jthread([owned](std::stop_token stop) {
-				const bool complete = BuildNoise(owned->Request, stop, owned->Values);
+			job->Thread = std::thread([owned]() {
+				const bool complete = BuildNoise(owned->Request, &owned->StopRequested, owned->Values);
 				owned->Status.store(
 					complete ? WorkState::Complete : WorkState::Cancelled, std::memory_order_release
 				);
@@ -384,7 +394,7 @@ namespace engine::script {
 			} else if (job->FallbackCursor == sampleCount) {
 				Held->Completed.push_back(ComputeCompletion{job->Ticket, std::move(job->FallbackValues), {}});
 				if (job->Thread.joinable()) {
-					job->Thread.request_stop();
+					job->StopRequested.store(true, std::memory_order_relaxed);
 				}
 				if (job->Channel) {
 					job->Channel->Close();
@@ -397,7 +407,13 @@ namespace engine::script {
 		}
 
 		std::erase_if(Held->Active, [](const std::unique_ptr<State::Job> &job) {
-			return job->Published && job->Status.load(std::memory_order_acquire) != WorkState::Pending;
+			if (!job->Published || job->Status.load(std::memory_order_acquire) == WorkState::Pending) {
+				return false;
+			}
+			if (job->Thread.joinable()) {
+				job->Thread.join();
+			}
+			return true;
 		});
 	}
 
@@ -464,7 +480,7 @@ namespace engine::script {
 		}
 
 		std::vector<float> values;
-		BuildNoise(request, {}, values);
+		BuildNoise(request, nullptr, values);
 		const std::vector<std::byte> result = EncodeResult(values);
 		if (channel->Send(result) != parallel::ChannelStatus::Ok) {
 			return 2;

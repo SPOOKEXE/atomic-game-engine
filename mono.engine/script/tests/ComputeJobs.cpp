@@ -93,6 +93,19 @@ TEST_CASE("completion heartbeat depends on sample count rather than worker speed
 	CHECK(jobs.Completions().front().Values.size() == request.Width * request.Depth);
 }
 
+TEST_CASE("destroying compute jobs cancels and joins threaded work", "[compute]") {
+	NoiseGridRequest request = Request();
+	request.Width = 1024;
+	request.Depth = 1024;
+
+	{
+		ComputeJobs jobs;
+		REQUIRE(jobs.SubmitNoise(request, JobContext::Threaded) != 0);
+	}
+
+	SUCCEED();
+}
+
 TEST_CASE("compute process worker child", "[.child]") {
 	if (!engine::parallel::HasInheritedChannel()) {
 		return;
