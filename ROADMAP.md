@@ -51,9 +51,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add settings for selected external editors
 - [x] let Luau and JavaScript plugins modify viewport grid colours, step/scale, major spacing, reach/size, strength, alpha, and X/Z offsets through the shared host surface.
 - [x] let plugins enable or disable visible particles without changing emitter state.
-- [_] ask about the other view widgets and which you actually would change to dockwidgets.
+- [x] keep render/debug/transport views native until replacement is useful; migrate the daily editing panels whose declarations benefit from plugin ownership.
 - [x] route native editor behavior through one value-based plugin host surface shared by Luau and JavaScript.
-- [_] move a bunch of View > ... widgets into plugins instead. List: explorer, properties, component inspector, script editor
+- [x] move Explorer, Properties, Component Inspector, and Script Editor declarations into the Default Studio plugin while retaining their native ECS adapters.
 - [x] add plugin functions for dropdowns, toolbar layout, viewport creation/options, docked widgets, and script-editor source/open integration.
 - [x] give a universe a shared `assets/` store and mount it automatically as the first local content source when the universe loads.
 - [x] add a universe loading widget that lists declared CDNs and requests permission before enabling HTTP content access.

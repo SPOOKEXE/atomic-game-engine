@@ -287,6 +287,20 @@ namespace studio {
 		DemoDescription,
 	};
 
+	// One native panel declared by the Default Studio plugin.
+	//
+	// The declaration belongs to the plugin layer, while the body remains the
+	// native adapter that already owns its ECS and editor interactions.
+	//
+	// @since v0.21
+	enum class BuiltinStudioPanel : uint8_t {
+		None,
+		Explorer,
+		Properties,
+		ComponentInspector,
+		ScriptEditor,
+	};
+
 	// Where a plugin asks its dock widget to appear on first use.
 	//
 	// The person's saved ImGui layout wins after first use.
@@ -451,6 +465,15 @@ namespace studio {
 
 		// What to call while it is open, in the plugin's own VM.
 		engine::script::HostCallback Render;
+
+		// Native dispatch for widgets contributed by Default Studio. Installed
+		// plugins leave this as `None` and render through their VM callback.
+		BuiltinStudioPanel BuiltinPanel = BuiltinStudioPanel::None;
+
+		// The last open state shared with the native panel flag. This resolves
+		// changes from either side, including toolbar actions and window closes,
+		// without making two independent owners of the setting.
+		bool SynchronizedOpen = false;
 
 		// What the plugin coloured it, if anything. See `SetWidgetColour`.
 		//

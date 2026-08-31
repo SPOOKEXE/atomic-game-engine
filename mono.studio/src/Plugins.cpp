@@ -845,6 +845,24 @@ namespace studio {
 				{"description", "Demo Description", BuiltinStudioTool::DemoDescription},
 			}
 		);
+
+		const auto addPanel =
+			[&](std::string id, std::string title, BuiltinStudioPanel panel, PluginDock dock) {
+				PluginWidget widget;
+				widget.Id = std::move(id);
+				widget.Title = std::move(title);
+				widget.Open = true;
+				widget.SynchronizedOpen = true;
+				widget.BuiltinPanel = panel;
+				widget.Dock = dock;
+				plugin.Widgets.push_back(std::move(widget));
+			};
+		addPanel("explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left);
+		addPanel("properties", "Properties", BuiltinStudioPanel::Properties, PluginDock::Right);
+		addPanel(
+			"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
+		);
+		addPanel("script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre);
 		return plugin;
 	}
 
@@ -1380,6 +1398,34 @@ namespace studio {
 			const size_t widgetCount = plugin.Widgets.size();
 			for (size_t widgetIndex = 0; widgetIndex < widgetCount; widgetIndex++) {
 				PluginWidget &widget = plugin.Widgets[widgetIndex];
+				bool *builtinOpen = nullptr;
+				switch (widget.BuiltinPanel) {
+				case BuiltinStudioPanel::Explorer:
+					builtinOpen = &ShowExplorer;
+					break;
+				case BuiltinStudioPanel::Properties:
+					builtinOpen = &ShowProperties;
+					break;
+				case BuiltinStudioPanel::ComponentInspector:
+					builtinOpen = &ShowComponents;
+					break;
+				case BuiltinStudioPanel::ScriptEditor:
+					builtinOpen = &ShowScripts;
+					break;
+				case BuiltinStudioPanel::None:
+					break;
+				}
+
+				if (builtinOpen != nullptr) {
+					// A changed widget value came from the plugin/menu side. Otherwise
+					// native actions such as Open Script and toolbar buttons win.
+					if (widget.Open != widget.SynchronizedOpen) {
+						*builtinOpen = widget.Open;
+					} else {
+						widget.Open = *builtinOpen;
+					}
+					widget.SynchronizedOpen = widget.Open;
+				}
 				if (!widget.Open) {
 					continue;
 				}
@@ -1435,8 +1481,29 @@ namespace studio {
 				// which reads as a bug in the theme rather than as a widget that
 				// was coloured wrong. Same bracket the editor's own panels get
 				// from `Editor::Skinned`.
-				const engine::ui::ScopedColours skin(widget.Colours);
+				if (builtinOpen != nullptr) {
+					switch (widget.BuiltinPanel) {
+					case BuiltinStudioPanel::Explorer:
+						Skinned(widget.Title.c_str(), [&] { DrawExplorer(); });
+						break;
+					case BuiltinStudioPanel::Properties:
+						Skinned(widget.Title.c_str(), [&] { DrawProperties(); });
+						break;
+					case BuiltinStudioPanel::ComponentInspector:
+						Skinned(widget.Title.c_str(), [&] { DrawComponents(); });
+						break;
+					case BuiltinStudioPanel::ScriptEditor:
+						Skinned(widget.Title.c_str(), [&] { DrawScripts(); });
+						break;
+					case BuiltinStudioPanel::None:
+						break;
+					}
+					widget.Open = *builtinOpen;
+					widget.SynchronizedOpen = widget.Open;
+					continue;
+				}
 
+				const engine::ui::ScopedColours skin(widget.Colours);
 				if (ImGui::Begin(label.c_str(), &widget.Open)) {
 					InvokePlugin(plugin, widget.Render, true);
 				}

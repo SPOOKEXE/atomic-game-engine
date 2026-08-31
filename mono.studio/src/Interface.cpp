@@ -328,24 +328,10 @@ namespace studio {
 		}
 
 		{
-			ENGINE_PROFILE_CAT("explorer", engine::core::ProfileCategory::Render);
-			Skinned(EXPLORER, [&] { DrawExplorer(); });
-		}
-		{
 			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
 			Skinned(WORLDS, [&] { DrawWorlds(); });
 			Skinned(INSTANCES, [&] { DrawLiveInstances(); });
 		}
-		{
-			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
-			Skinned(PROPERTIES, [&] { DrawProperties(); });
-			Skinned(COMPONENTS, [&] { DrawComponents(); });
-		}
-		{
-			ENGINE_PROFILE_CAT("scripts", engine::core::ProfileCategory::Render);
-			Skinned(SCRIPTS, [&] { DrawScripts(); });
-		}
-
 		{
 			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
 			Skinned(OUTPUT, [&] { DrawOutput(); });
@@ -400,11 +386,8 @@ namespace studio {
 			Skinned(DOCK_WIDGET_EDITOR, [&] { DrawDockWidgetEditor(); });
 			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
-			// **Not `Skinned`, and that is the difference between the two
-			// halves of this feature.** Every panel above is the editor's and
-			// takes its colours from the settings page; a plugin's dock widget
-			// is the plugin's and takes them from `SetWidgetColour`, per widget,
-			// inside the loop.
+			// Default Studio contributes native panels through this same plugin
+			// path. Installed widgets retain their per-widget script colours.
 			DrawPluginWidgets();
 
 			Skinned("Bus", [&] { DrawBus(); });
@@ -1242,7 +1225,6 @@ namespace studio {
 		if (ImGui::MenuItem("New Viewport")) {
 			AddViewport();
 		}
-		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
 
 		// **Beside Worlds, and it is the way back to a view rather than to a
@@ -1250,9 +1232,6 @@ namespace studio {
 		// recoverable only because the replica had a row among the scenes; the
 		// server's view had nothing at all. Both are rows here now.
 		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
-		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
-		ImGui::MenuItem("Components", nullptr, &ShowComponents);
-		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
 		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);

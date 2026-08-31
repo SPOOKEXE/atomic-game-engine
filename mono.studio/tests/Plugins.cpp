@@ -36,6 +36,7 @@ using engine::core::Name;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 using studio::BeatPlugins;
+using studio::BuiltinStudioPanel;
 using studio::BuiltinStudioTool;
 using studio::ClampPluginToolWidth;
 using studio::ComposeToolbar;
@@ -47,6 +48,7 @@ using studio::ParsePluginManifest;
 using studio::PLUGIN_FAULT_LIMIT;
 using studio::PluginButton;
 using studio::PluginControlKind;
+using studio::PluginDock;
 using studio::PluginManifest;
 using studio::PluginToolbar;
 using studio::PluginToolbarPlacement;
@@ -162,6 +164,27 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Running);
 	CHECK(plugin.Manifest.Id == "atomic.default-studio");
 	REQUIRE(plugin.Toolbars.size() == 7);
+	REQUIRE(plugin.Widgets.size() == 4);
+
+	const std::array expectedWidgets = {
+		std::tuple{"explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left},
+		std::tuple{"properties", "Properties", BuiltinStudioPanel::Properties, PluginDock::Right},
+		std::tuple{
+			"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
+		},
+		std::tuple{"script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre},
+	};
+	for (size_t index = 0; index < expectedWidgets.size(); index++) {
+		const PluginWidget &widget = plugin.Widgets[index];
+		const auto &[id, title, panel, dock] = expectedWidgets[index];
+		CHECK(widget.Id == id);
+		CHECK(widget.Title == title);
+		CHECK(widget.BuiltinPanel == panel);
+		CHECK(widget.Dock == dock);
+		CHECK(widget.Open);
+		CHECK(widget.SynchronizedOpen);
+		CHECK_FALSE(widget.Render.Valid());
+	}
 
 	std::set<std::string> toolbarIds;
 	std::set<std::string> controlIds;
