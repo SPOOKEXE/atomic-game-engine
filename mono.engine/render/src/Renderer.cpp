@@ -851,6 +851,16 @@ namespace engine::render {
 					gpu::ReleaseTransferBuffer(device, indices.Transfer);
 				}
 			}
+			for (SDL_GPUBuffer *buffer : {slot.SkinOffsetBuffer, slot.JointBuffer}) {
+				if (buffer != nullptr) {
+					gpu::ReleaseBuffer(device, buffer);
+				}
+			}
+			for (SDL_GPUTransferBuffer *transfer : {slot.SkinOffsetTransfer, slot.JointTransfer}) {
+				if (transfer != nullptr) {
+					gpu::ReleaseTransferBuffer(device, transfer);
+				}
+			}
 		}
 		for (Impl::InstanceWorld &world : State->InstanceWorlds) {
 			if (world.Buffer != nullptr) {
@@ -2037,6 +2047,7 @@ namespace engine::render {
 			.CameraFrame = cameraFrame,
 			.Camera = camera,
 			.Instances = instances,
+			.JointFrames = source.JointFrames,
 			.Overlay = &overlay,
 			.Surfaces = surfaces,
 			.GameInterfaceHook = gameInterfaceHook,
@@ -2049,6 +2060,7 @@ namespace engine::render {
 			.RibbonRuns = ribbonRuns,
 			.Lights = lights,
 			.Foreign = foreign,
+			.ForeignJointFrames = source.ForeignJointFrames,
 			.Portals = portals,
 			.Present = present,
 			.Pipeline = pipeline,

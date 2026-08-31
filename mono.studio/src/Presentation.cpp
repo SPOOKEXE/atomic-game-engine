@@ -2,6 +2,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Attachments.hpp>
 
 #include <algorithm>
@@ -135,7 +136,9 @@ namespace studio {
 	void AppendReplicaVisualInstances(
 		engine::core::Name replicaWorld,
 		std::span<const engine::scene::DrawInstance> replica,
-		std::vector<engine::scene::DrawInstance> &authority
+		std::vector<engine::scene::DrawInstance> &authority,
+		std::span<const engine::core::CFrame> replicaJoints,
+		std::vector<engine::core::CFrame> *authorityJoints
 	) {
 		authority.reserve(authority.size() + 64);
 
@@ -147,6 +150,14 @@ namespace studio {
 			authority.push_back(instance);
 			if (!authority.back().SourceWorld.IsValid()) {
 				authority.back().SourceWorld = replicaWorld;
+			}
+			if (authorityJoints != nullptr) {
+				engine::render::RebaseSkinPalettes(
+					std::span(&authority.back(), 1), replicaJoints, *authorityJoints
+				);
+			} else {
+				authority.back().SkinFirst = 0;
+				authority.back().SkinCount = 0;
 			}
 		}
 	}

@@ -6,6 +6,8 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in uvec4 inJoints;
+layout(location = 4) in vec4 inWeights;
 
 // The same storage decode `opaque.vert` includes. The two stages read the same forty-eight bytes,
 // and the day one of them was edited and the other was not is the day a shadow
@@ -30,8 +32,11 @@ layout(location = 3) flat out float outInstanceAlpha;
 void main() {
 	InstanceRow instance = LoadInstance();
 	vec4 rotation = InstanceRotation(instance);
+	vec3 meshPosition = inPosition;
+	vec3 meshNormal = inNormal;
+	ApplySkin(inJoints, inWeights, meshPosition, meshNormal);
 	vec4 world = vec4(
-		InstanceWorldPosition(rotation, InstanceScale(instance), InstancePosition(instance), inPosition),
+		InstanceWorldPosition(rotation, InstanceScale(instance), InstancePosition(instance), meshPosition),
 		1.0
 	);
 

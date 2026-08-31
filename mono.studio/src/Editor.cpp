@@ -2130,6 +2130,8 @@ namespace studio {
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
+		std::vector<engine::core::CFrame> jointFrames;
+		std::vector<engine::core::CFrame> foreignJointFrames;
 		DrawnInstances.clear();
 		ForeignInstances.clear();
 
@@ -2166,6 +2168,7 @@ namespace studio {
 					// is inside is a pointer across a boundary that rule 3
 					// exists to keep closed.
 					DrawnInstances = list->Instances;
+					jointFrames = list->JointFrames;
 				}
 
 				// **The surface cameras, which the studio was never asking
@@ -2418,7 +2421,11 @@ namespace studio {
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
 						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
 						AppendReplicaVisualInstances(
-							Universe->NameOf(shown), list->Instances, DrawnInstances
+							Universe->NameOf(shown),
+							list->Instances,
+							DrawnInstances,
+							list->JointFrames,
+							&jointFrames
 						);
 					}
 				}
@@ -2472,7 +2479,13 @@ namespace studio {
 			// of those is what a cross-world portal was missing, and missing it
 			// is what made one draw only from A into B and never back.
 			(void)client::AttachForeignSurfaces(
-				*Universe, visual, DrawnInstances, ForeignInstances, Surfaces
+				*Universe,
+				visual,
+				DrawnInstances,
+				ForeignInstances,
+				Surfaces,
+				&jointFrames,
+				&foreignJointFrames
 			);
 
 			instances = &DrawnInstances;
@@ -2509,6 +2522,7 @@ namespace studio {
 			view.Camera = lens;
 			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 												  : std::span<const engine::scene::DrawInstance>{};
+			view.JointFrames = jointFrames;
 			view.Surfaces = Surfaces;
 			view.Particles = Particles.Batches;
 			view.ParticleSeams = Particles.Seams;
@@ -2527,6 +2541,7 @@ namespace studio {
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
 			view.Slot = DrawingViewport;
 			view.Foreign = ForeignInstances;
+			view.ForeignJointFrames = foreignJointFrames;
 			view.Portals = Portals;
 			view.Pipeline = selectedPipeline;
 			view.World = visual.IsValid() ? visual.Index : 0;

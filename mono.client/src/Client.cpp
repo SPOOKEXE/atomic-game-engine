@@ -2586,7 +2586,13 @@ namespace client {
 					}
 
 					Views.Publish(
-						id, placement->Frame, *lens, list->Instances, store.Time().Tick, store.Time().Alpha
+						id,
+						placement->Frame,
+						*lens,
+						list->Instances,
+						store.Time().Tick,
+						store.Time().Alpha,
+						list->JointFrames
 					);
 				});
 			}
@@ -2658,7 +2664,13 @@ namespace client {
 					}
 
 					Views.Publish(
-						Replicated, frame, lens, list->Instances, store.Time().Tick, store.Time().Alpha
+						Replicated,
+						frame,
+						lens,
+						list->Instances,
+						store.Time().Tick,
+						store.Time().Alpha,
+						list->JointFrames
 					);
 				});
 			}
@@ -3172,12 +3184,16 @@ namespace client {
 
 		Foreign.clear();
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
+		std::vector<engine::core::CFrame> drawnJoints(Views.JointFrames().begin(), Views.JointFrames().end());
+		std::vector<engine::core::CFrame> foreignJoints;
 
 		if (Windowed) {
 			// The copy `Drawn`'s comment argues for: the published list is
 			// `const` and the return leg has to go somewhere.
 			Drawn.assign(drawn.begin(), drawn.end());
-			(void)AttachForeignSurfaces(*Universe_, Rendered, Drawn, Foreign, Surfaces);
+			(void)AttachForeignSurfaces(
+				*Universe_, Rendered, Drawn, Foreign, Surfaces, &drawnJoints, &foreignJoints
+			);
 			drawn = Drawn;
 		}
 
@@ -3368,6 +3384,8 @@ namespace client {
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
 		view.Instances = drawn;
+		view.JointFrames = drawnJoints;
+		view.ForeignJointFrames = foreignJoints;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
 		if (Settings.EnableParticles) {

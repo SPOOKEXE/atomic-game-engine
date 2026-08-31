@@ -93,6 +93,9 @@ namespace engine::render {
 		// needs to know how much of the buffer stops being anybody's when this
 		// entry is replaced. `Whole.IndexCount` was already the other half.
 		uint32_t VertexCount = 0;
+
+		// Number of palette entries a skinned instance must provide.
+		uint16_t JointCount = 0;
 	};
 
 	// The meshes a renderer can draw.

@@ -292,6 +292,24 @@ namespace engine::render {
 				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 				uploadedBytes += destination.size;
 			}
+
+			const SDL_GPUTransferBufferLocation skinSource{State->SkinOffsetTransfer, 0};
+			const SDL_GPUBufferRegion skinDestination{
+				State->SkinOffsetBuffer,
+				0,
+				static_cast<uint32_t>(target.SkinOffsets.size() * sizeof(uint32_t)),
+			};
+			SDL_UploadToGPUBuffer(copy, &skinSource, &skinDestination, true);
+			uploadedBytes += skinDestination.size;
+
+			const SDL_GPUTransferBufferLocation jointSource{State->JointTransfer, 0};
+			const SDL_GPUBufferRegion jointDestination{
+				State->JointBuffer,
+				0,
+				static_cast<uint32_t>(target.JointWords.size() * sizeof(uint32_t)),
+			};
+			SDL_UploadToGPUBuffer(copy, &jointSource, &jointDestination, true);
+			uploadedBytes += jointDestination.size;
 		}
 
 		// The occlusion plan's five buffers, in the order its staging wrote

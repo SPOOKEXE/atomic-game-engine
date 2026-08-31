@@ -619,6 +619,7 @@ namespace engine::render {
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
 		std::span<const scene::DrawInstance> Instances;
+		std::span<const core::CFrame> JointFrames;
 		std::span<const SurfaceView> Surfaces;
 		//@}
 
@@ -703,6 +704,7 @@ namespace engine::render {
 		// Borrowed cross-world geometry and portal descriptions.
 		//@{
 		std::span<const scene::DrawInstance> Foreign;
+		std::span<const core::CFrame> ForeignJointFrames;
 		std::span<const PortalView> Portals;
 		//@}
 

@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <client/Compositor.hpp>
 #include <vector>
 
@@ -85,6 +86,29 @@ TEST_CASE("several views compose into one list", "[client]") {
 	CHECK(views.Instances()[0].SourceWorld == Name("a"));
 	CHECK(views.Instances()[2].SourceWorld == Name("b"));
 	CHECK(views.Instances()[5].SourceWorld == Name("c"));
+}
+
+TEST_CASE("composed skin palettes keep each world's adjusted offset", "[client][skinning]") {
+	Compositor views;
+	views.Track(WorldId{0}, Name("a"), 4);
+	views.Track(WorldId{1}, Name("b"), 4);
+
+	std::vector<DrawInstance> first = ListOf(1, 0.0f);
+	first[0].SkinCount = 1;
+	std::vector<DrawInstance> second = ListOf(1, 0.0f);
+	second[0].SkinCount = 2;
+	const std::array firstJoints{At(1.0f)};
+	const std::array secondJoints{At(2.0f), At(3.0f)};
+
+	REQUIRE(views.Publish(WorldId{0}, At(0.0f), LENS, first, 1, 0.0f, firstJoints));
+	REQUIRE(views.Publish(WorldId{1}, At(0.0f), LENS, second, 1, 0.0f, secondJoints));
+	views.Compose(0.0f);
+
+	REQUIRE(views.Instances().size() == 2);
+	CHECK(views.Instances()[0].SkinFirst == 0);
+	CHECK(views.Instances()[1].SkinFirst == 1);
+	REQUIRE(views.JointFrames().size() == 3);
+	CHECK(views.JointFrames()[2].Position.X == 3.0f);
 }
 
 TEST_CASE("views after the first are placed rather than overlaid", "[client]") {

@@ -338,7 +338,9 @@ namespace client {
 		engine::world::WorldId world,
 		std::vector<engine::scene::DrawInstance> &drawn,
 		std::vector<engine::scene::DrawInstance> &foreign,
-		std::vector<engine::render::SurfaceView> &views
+		std::vector<engine::render::SurfaceView> &views,
+		std::vector<engine::core::CFrame> *drawnJoints,
+		std::vector<engine::core::CFrame> *foreignJoints
 	) {
 		// **Cleared on every path, including the ones that attach nothing.** The
 		// vector is kept between frames so a steady scene stops allocating, and
@@ -348,6 +350,22 @@ namespace client {
 		// **`drawn` is not**, because it arrives holding this world's own rows.
 		// This pass adds to it rather than owning it.
 		foreign.clear();
+		if (foreignJoints != nullptr) {
+			foreignJoints->clear();
+		}
+
+		auto rebase = [](std::span<DrawInstance> rows,
+						 std::span<const engine::core::CFrame> source,
+						 std::vector<engine::core::CFrame> *destination) {
+			if (destination != nullptr) {
+				engine::render::RebaseSkinPalettes(rows, source, *destination);
+				return;
+			}
+			for (DrawInstance &row : rows) {
+				row.SkinFirst = 0;
+				row.SkinCount = 0;
+			}
+		};
 
 		if (views.empty() || !world.IsValid()) {
 			return 0;
@@ -542,6 +560,7 @@ namespace client {
 				// is still drawn opaque** - that limit is stated in
 				// `NON-EUCLIDEAN.md` rather than hidden here.
 				if (const auto *list = store.Resource<DrawList>()) {
+					const size_t copyFirst = foreign.size();
 					for (const DrawInstance &instance : list->Instances) {
 						if (instance.Surface >= 0 &&
 							std::find(returning.begin(), returning.end(), instance.Surface) !=
@@ -554,6 +573,7 @@ namespace client {
 						foreign.push_back(instance);
 						foreign.back().SourceWorld = foundName;
 					}
+					rebase(std::span(foreign).subspan(copyFirst), list->JointFrames, foreignJoints);
 				}
 
 				// **And whoever is standing in the far world's own pane, on
@@ -593,6 +613,7 @@ namespace client {
 						for (size_t index = cloneFirst; index < drawn.size(); index++) {
 							drawn[index].SourceWorld = foundName;
 						}
+						rebase(std::span(drawn).subspan(cloneFirst), list->JointFrames, drawnJoints);
 					}
 				}
 			});
@@ -610,13 +631,19 @@ namespace client {
 			// draw and a second reason for the two to fall out of order.
 			const auto surface = entry.Surface;
 			const std::span<const DrawInstance> own(drawn.data(), ownRows);
-			universe.Enter(world, [&foreign, own, surface, sourceName](Store &store) {
-				const size_t cloneFirst = foreign.size();
-				(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
-				for (size_t index = cloneFirst; index < foreign.size(); index++) {
-					foreign[index].SourceWorld = sourceName;
+			const std::span<const engine::core::CFrame> ownJoints =
+				drawnJoints != nullptr ? std::span<const engine::core::CFrame>(*drawnJoints)
+									   : std::span<const engine::core::CFrame>{};
+			universe.Enter(
+				world, [&foreign, own, ownJoints, surface, sourceName, foreignJoints, &rebase](Store &store) {
+					const size_t cloneFirst = foreign.size();
+					(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
+					for (size_t index = cloneFirst; index < foreign.size(); index++) {
+						foreign[index].SourceWorld = sourceName;
+					}
+					rebase(std::span(foreign).subspan(cloneFirst), ownJoints, foreignJoints);
 				}
-			});
+			);
 
 			const auto count = static_cast<uint32_t>(foreign.size() - first);
 			if (count == 0) {

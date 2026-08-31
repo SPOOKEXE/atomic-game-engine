@@ -15,6 +15,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 
@@ -25,6 +26,7 @@
 #include <cstddef>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <string>
 #include <type_traits>
@@ -89,6 +91,7 @@ namespace engine::render {
 		const bool objectLayer = !view.Instances.empty() || view.Grid.Enabled || state.PostProcess.IsValid();
 		if (objectLayer) {
 			objects = scene::SignatureOf(view.Instances);
+			objects = FoldPresentationSpan(objects, view.JointFrames);
 			objects = FoldPresentationObject(objects, view.CameraFrame);
 			objects = FoldPresentationObject(objects, view.Camera);
 			objects = FoldPresentation(objects, view.World);
@@ -187,6 +190,7 @@ namespace engine::render {
 			portals = FoldPresentation(portals, state.SurfaceBounces);
 			portals = FoldPresentation(portals, state.SurfaceLimit);
 			portals = FoldPresentation(portals, scene::SignatureOf(view.Foreign));
+			portals = FoldPresentationSpan(portals, view.ForeignJointFrames);
 
 			portals = FoldPresentation(portals, view.Portals.size());
 			for (const PortalView &portal : view.Portals) {
@@ -557,6 +561,8 @@ namespace engine::render {
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}
 
+		CollectSkinPalettes(store, *drawList);
+
 		// **After the metric, deliberately.** `render.instances` answers
 		// "how much scene is there", and a number that moved when somebody
 		// turned a debugging aid on would stop being comparable across the
@@ -590,6 +596,53 @@ namespace engine::render {
 		(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 
 		(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
+	}
+
+	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {
+		ENGINE_PROFILE_CAT("build skin palettes", engine::core::ProfileCategory::Simulation);
+		drawList.JointFrames.clear();
+		for (scene::DrawInstance &instance : drawList.Instances) {
+			instance.SkinFirst = 0;
+			instance.SkinCount = 0;
+
+			const ecs::Entity source(instance.Source);
+			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(source);
+			if (skeleton == nullptr || skeleton->JointCount == 0 ||
+				skeleton->JointCount > scene::MAX_JOINTS) {
+				continue;
+			}
+
+			instance.SkinFirst = static_cast<uint32_t>(drawList.JointFrames.size());
+			instance.SkinCount = skeleton->JointCount;
+			drawList.JointFrames.resize(drawList.JointFrames.size() + skeleton->JointCount);
+			store.EachDescendant(source, [&](ecs::Entity descendant) {
+				const scene::Bone *bone = store.Get<scene::Bone>(descendant);
+				if (bone != nullptr && bone->Joint < skeleton->JointCount) {
+					drawList.JointFrames[instance.SkinFirst + bone->Joint] =
+						instance.Frame.Inverse() * scene::SkinningFrameOf(*bone);
+				}
+			});
+		}
+	}
+
+	void RebaseSkinPalettes(
+		std::span<scene::DrawInstance> instances,
+		std::span<const core::CFrame> source,
+		std::vector<core::CFrame> &destination
+	) {
+		for (scene::DrawInstance &instance : instances) {
+			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+			if (instance.SkinCount == 0 || end > source.size() ||
+				destination.size() > std::numeric_limits<uint32_t>::max() - instance.SkinCount) {
+				instance.SkinFirst = 0;
+				instance.SkinCount = 0;
+				continue;
+			}
+
+			const size_t first = instance.SkinFirst;
+			instance.SkinFirst = static_cast<uint32_t>(destination.size());
+			destination.insert(destination.end(), source.begin() + first, source.begin() + end);
+		}
 	}
 
 	void ParticleFrame::Detach() {
@@ -964,6 +1017,7 @@ namespace engine::render {
 				auto *lists = static_cast<DrawList *>(destination);
 				for (size_t index = 0; index < count; index++) {
 					lists[index].Instances.clear();
+					lists[index].JointFrames.clear();
 				}
 			}
 		);

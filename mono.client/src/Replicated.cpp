@@ -236,6 +236,7 @@ namespace client {
 			engine::core::Metrics::Count(
 				"replica.instances", static_cast<double>(drawList->Instances.size())
 			);
+			engine::render::CollectSkinPalettes(store, *drawList);
 
 			// **A client sees itself in the hole too, and this is where.** The
 			// ghost is built from the list above, which holds interpolated

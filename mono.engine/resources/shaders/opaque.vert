@@ -7,6 +7,8 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
+layout(location = 3) in uvec4 inJoints;
+layout(location = 4) in vec4 inWeights;
 
 // The resident-row storage declarations and their decode.
 #include "instance.glsl"
@@ -45,15 +47,18 @@ void main() {
 	vec3 position = InstancePosition(instance);
 	vec3 scale = InstanceScale(instance);
 	vec4 rotation = InstanceRotation(instance);
+	vec3 meshPosition = inPosition;
+	vec3 meshNormal = inNormal;
+	ApplySkin(inJoints, inWeights, meshPosition, meshNormal);
 
-	outNormal = InstanceWorldNormal(rotation, scale, inNormal);
+	outNormal = InstanceWorldNormal(rotation, scale, meshNormal);
 	outColour = InstanceColour(instance);
 	outTexCoord = inTexCoord;
 	outAppearance = InstanceAppearance(instance);
 	outSurfaceColour = InstanceSurfaceColour(instance);
 	outEmission = InstanceEmission(instance);
 
-	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, inPosition), 1.0);
+	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
 	outWorldPosition = world.xyz;
 
 	// Divide in the fragment to preserve perspective-correct interpolation.
