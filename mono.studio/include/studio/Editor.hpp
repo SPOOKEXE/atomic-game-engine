@@ -947,6 +947,10 @@ namespace studio {
 		void DrawWorldProperties(WorldId world);
 		void DrawScripts();
 
+		// Edits copied MemoryStore and DataStore values through the universe's
+		// driver-side administration surface.
+		void DrawDatasets();
+
 		// The breakpoint column beside a script's text.
 		//
 		// **A sibling of the code rather than part of it**, because
@@ -5261,11 +5265,21 @@ namespace studio {
 		bool ShowProperties = true;
 		bool ShowComponents = true;
 		bool ShowScripts = true;
+		bool ShowDatasets = false;
 		bool ShowOutput = true;
 		//@}
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
+
+		// The dataset editor's selected store, row, filter and typed JSON draft.
+		engine::world::BusKind DatasetStore = engine::world::BusKind::DataStore;
+		std::string DatasetFilter;
+		std::string DatasetSelectedKey;
+		std::string DatasetKeyDraft;
+		std::string DatasetValueDraft;
+		std::string DatasetEditError;
+		bool DatasetCreating = false;
 
 		// The live instances, closed until something is live.
 		//

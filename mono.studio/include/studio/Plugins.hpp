@@ -277,6 +277,7 @@ namespace studio {
 		StatisticsPanel,
 		FrameGraphPanel,
 		HeapPanel,
+		DatasetEditorPanel,
 		CameraSpeed,
 		PluginReload,
 		PluginManage,
@@ -299,6 +300,7 @@ namespace studio {
 		Properties,
 		ComponentInspector,
 		ScriptEditor,
+		DatasetEditor,
 	};
 
 	// Where a plugin asks its dock widget to appear on first use.

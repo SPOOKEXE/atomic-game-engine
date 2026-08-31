@@ -724,6 +724,10 @@ namespace studio {
 			if (all) ImGui::SameLine();
 			ImGui::Checkbox("Heap", &ShowHeap);
 		}
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::DatasetEditorPanel) {
+			if (all) ImGui::SameLine();
+			ImGui::Checkbox("Datasets", &ShowDatasets);
+		}
 
 		if (all) {
 			Divider();

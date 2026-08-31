@@ -164,7 +164,7 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Running);
 	CHECK(plugin.Manifest.Id == "atomic.default-studio");
 	REQUIRE(plugin.Toolbars.size() == 7);
-	REQUIRE(plugin.Widgets.size() == 4);
+	REQUIRE(plugin.Widgets.size() == 5);
 
 	const std::array expectedWidgets = {
 		std::tuple{"explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left},
@@ -173,6 +173,7 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 			"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
 		},
 		std::tuple{"script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre},
+		std::tuple{"dataset-editor", "Dataset Editor", BuiltinStudioPanel::DatasetEditor, PluginDock::Bottom},
 	};
 	for (size_t index = 0; index < expectedWidgets.size(); index++) {
 		const PluginWidget &widget = plugin.Widgets[index];
@@ -181,8 +182,8 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		CHECK(widget.Title == title);
 		CHECK(widget.BuiltinPanel == panel);
 		CHECK(widget.Dock == dock);
-		CHECK(widget.Open);
-		CHECK(widget.SynchronizedOpen);
+		CHECK(widget.Open == (panel != BuiltinStudioPanel::DatasetEditor));
+		CHECK(widget.SynchronizedOpen == widget.Open);
 		CHECK_FALSE(widget.Render.Valid());
 	}
 
@@ -222,6 +223,7 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		std::pair{"statistics", BuiltinStudioTool::StatisticsPanel},
 		std::pair{"frame-graph", BuiltinStudioTool::FrameGraphPanel},
 		std::pair{"heap", BuiltinStudioTool::HeapPanel},
+		std::pair{"datasets", BuiltinStudioTool::DatasetEditorPanel},
 		std::pair{"camera", BuiltinStudioTool::CameraSpeed},
 	};
 	REQUIRE(view->Buttons.size() == expected.size());

@@ -302,6 +302,7 @@ namespace studio {
 		case BuiltinStudioTool::StatisticsPanel:
 		case BuiltinStudioTool::FrameGraphPanel:
 		case BuiltinStudioTool::HeapPanel:
+		case BuiltinStudioTool::DatasetEditorPanel:
 			return "panels";
 		case BuiltinStudioTool::PluginReload:
 		case BuiltinStudioTool::PluginManage:
@@ -821,6 +822,7 @@ namespace studio {
 				{"statistics", "Statistics", BuiltinStudioTool::StatisticsPanel},
 				{"frame-graph", "Frame Graph", BuiltinStudioTool::FrameGraphPanel},
 				{"heap", "Heap", BuiltinStudioTool::HeapPanel},
+				{"datasets", "Datasets", BuiltinStudioTool::DatasetEditorPanel},
 				{"camera", "Camera Speed", BuiltinStudioTool::CameraSpeed},
 			}
 		);
@@ -846,23 +848,29 @@ namespace studio {
 			}
 		);
 
-		const auto addPanel =
-			[&](std::string id, std::string title, BuiltinStudioPanel panel, PluginDock dock) {
-				PluginWidget widget;
-				widget.Id = std::move(id);
-				widget.Title = std::move(title);
-				widget.Open = true;
-				widget.SynchronizedOpen = true;
-				widget.BuiltinPanel = panel;
-				widget.Dock = dock;
-				plugin.Widgets.push_back(std::move(widget));
-			};
+		const auto addPanel = [&](std::string id,
+								  std::string title,
+								  BuiltinStudioPanel panel,
+								  PluginDock dock,
+								  bool open = true) {
+			PluginWidget widget;
+			widget.Id = std::move(id);
+			widget.Title = std::move(title);
+			widget.Open = open;
+			widget.SynchronizedOpen = open;
+			widget.BuiltinPanel = panel;
+			widget.Dock = dock;
+			plugin.Widgets.push_back(std::move(widget));
+		};
 		addPanel("explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left);
 		addPanel("properties", "Properties", BuiltinStudioPanel::Properties, PluginDock::Right);
 		addPanel(
 			"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
 		);
 		addPanel("script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre);
+		addPanel(
+			"dataset-editor", "Dataset Editor", BuiltinStudioPanel::DatasetEditor, PluginDock::Bottom, false
+		);
 		return plugin;
 	}
 
@@ -1412,6 +1420,9 @@ namespace studio {
 				case BuiltinStudioPanel::ScriptEditor:
 					builtinOpen = &ShowScripts;
 					break;
+				case BuiltinStudioPanel::DatasetEditor:
+					builtinOpen = &ShowDatasets;
+					break;
 				case BuiltinStudioPanel::None:
 					break;
 				}
@@ -1495,6 +1506,9 @@ namespace studio {
 					case BuiltinStudioPanel::ScriptEditor:
 						Skinned(widget.Title.c_str(), [&] { DrawScripts(); });
 						break;
+					case BuiltinStudioPanel::DatasetEditor:
+						Skinned(widget.Title.c_str(), [&] { DrawDatasets(); });
+						break;
 					case BuiltinStudioPanel::None:
 						break;
 					}
@@ -1572,6 +1586,7 @@ namespace studio {
 		case BuiltinStudioTool::StatisticsPanel:
 		case BuiltinStudioTool::FrameGraphPanel:
 		case BuiltinStudioTool::HeapPanel:
+		case BuiltinStudioTool::DatasetEditorPanel:
 			DrawViewTools();
 			break;
 		case BuiltinStudioTool::ViewportIndicator:
