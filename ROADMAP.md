@@ -57,7 +57,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add a Script Editor preferences page for the selected external editor, executable override, background and minimap.
 - [x] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [x] add shared DataStore and MemoryStore administration, durable local DataStore images, isolated mock/live folders, server and Studio local-provider settings, and a Default Studio dataset editor plugin.
-- [_] add remote datastore choices and per-datastore backend assignment through the DataStoreRouter/DataStoreAdapter seam below.
 - [x] add platform-specific backend tooling where only "admitted keys" can connect to a given server - the client proves a platform-issued Ed25519 play seed without sending it, servers accept repeatable configured public keys, and the loopback control surface can list, allow, revoke or explicitly open admission for future sessions.
 - [x] replace the launcher's raw option wall with discoverable mode cards, searchable Common/All options/Engine settings tabs, typed controls and path pickers generated from each program's declarations, a command preview, retained per-mode forms, and supervised launch/restart/stop status.
 - [x] consolidate CDN deployment configuration into declared `cdn.*` settings with config/environment/CLI precedence, readable serving and publishing options, repeatable named upstreams, explicit local/cache/proxy switches, safe opt-in ingest and forwarding, validation of contradictory setups, and a terminal dashboard for live status.
@@ -66,18 +65,25 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] let client Luau and JavaScript add, relabel, remove and activate named ESC menu actions through SettingsService; the ECS owns the bounded action list and both standalone and Studio Play render it.
 - [x] add gamepad and joystick support: SDL mapped pads and raw joysticks occupy eight stable world slots; normalized buttons, sticks, triggers and hats drive movement, camera, jump and firing in the client and Studio Play; Luau and JavaScript receive matching polling APIs, connection signals, input edges and analog changes.
 - [x] use SDL GPU's Vulkan-convention render path with SPIR-V on Vulkan devices and translated MSL on native Metal devices; choose the device's supported shader format at runtime and keep both built-in and live ShaderScripts on the same path.
-- [_] resolve the remaining graphics-backend direction: either require Vulkan everywhere and package MoltenVK for Apple targets, or retain native Metal and add a DXIL build/runtime translation path before enabling SDL GPU's Direct3D 12 backend.
 - [x] wire the future scene vocabulary: Skeleton, Bone, AnimationClip, Animator, AnimationTrack, Constraint, LevelOfDetail, Atmosphere, Clouds and Terrain are registered, reflected, persisted where their variable payload requires it, documented, and covered by scene suites.
-- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
 - [x] render atmosphere, clouds and textured or procedural skies from each view's `WorldLighting::EnvironmentState`: the environment render-graph pass selects authored or compute modes, keeps signatures and resident targets per presentation slot, and consumes presentation-only scene values without feeding simulation.
 - [x] review v0.21 Studio coverage: ShaderScripts are editable in the shared source editor with GLSL autocomplete, save through their revisioned ECS property, round-trip in world/universe files and compile by name in the renderer; the full headless check covers the authored chain.
+- [x] add the datastore routing seam: `DataStoreRouter` assigns stable datastore names to `DataStoreAdapter` providers owned by `DataStorageServices`; server and Studio persistence use its built-in atomic file adapter, while remote provider choices remain the current-work item above.
+- [_] add remote datastore choices and per-datastore backend assignment through the DataStoreRouter/DataStoreAdapter seam below.
+- [_] resolve the remaining graphics-backend direction: either require Vulkan everywhere and package MoltenVK for Apple targets, or retain native Metal and add a DXIL build/runtime translation path before enabling SDL GPU's Direct3D 12 backend.
+- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
+
+- [_] make C++ studio plugins which are separate from studio luau plugins. This way we can move all studio default toolbar stuff to the C++ studio plugins and support custom C++ / luau variants easier (e.g. we have a C++ core library with a luau bindings plugin for custom suites).
+- [_] add dynamic C++ plugin binding system also with dynamic luau bindings support to add/remove on plugin load/unload (and we auto collect these on plugin close).
+- [_] add plugin options such as: runs only in studio, runs only in playtest servers, runs only on playtest clients, etc (within studio).
+- [_] move current plugin system to this new C++/Luau bindings style
+- [_] move current studio plugin converted tools to new style
 
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 - [_] build out the bladeborne demo into a full mmo, test with thousands of connected clients with ai minds for them so they can run and do stuff
 
-- [x] add the datastore routing seam: `DataStoreRouter` assigns stable datastore names to `DataStoreAdapter` providers owned by `DataStorageServices`; server and Studio persistence use its built-in atomic file adapter, while remote provider choices remain the current-work item above.
 
 ### v0.22
 
