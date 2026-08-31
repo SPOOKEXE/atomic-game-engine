@@ -1042,6 +1042,31 @@ namespace server {
 
 		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
 
+		AdmittedClientKeys.clear();
+		for (const std::string &text : Settings.AdmittedKeys) {
+			const std::optional<engine::assets::PublicKey> key = engine::assets::PublicKey::FromHex(text);
+			if (!key.has_value()) {
+				ENGINE_ERROR("server: an --admit-key value is not 64 lowercase hex characters");
+				return false;
+			}
+			if (std::find(AdmittedClientKeys.begin(), AdmittedClientKeys.end(), *key) ==
+				AdmittedClientKeys.end()) {
+				AdmittedClientKeys.push_back(*key);
+			}
+		}
+		AdmissionRestricted = !Settings.AdmittedKeys.empty();
+		Replication->SetClientPolicy(
+			[this](engine::replication::ClientId, const engine::assets::PublicKey &key) {
+				return !AdmissionRestricted ||
+					   std::find(AdmittedClientKeys.begin(), AdmittedClientKeys.end(), key) !=
+						   AdmittedClientKeys.end();
+			}
+		);
+		Replication->RequireClientIdentity(AdmissionRestricted);
+		if (AdmissionRestricted) {
+			ENGINE_INFO("replication admission restricted to {} client key(s)", AdmittedClientKeys.size());
+		}
+
 		if (!Replication->Admitting()) {
 			// The admission challenge is drawn from operating system entropy and
 			// there was none. Refusing to start beats listening on a port that

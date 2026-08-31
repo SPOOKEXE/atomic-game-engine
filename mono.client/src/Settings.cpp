@@ -85,6 +85,11 @@ namespace client {
 					"64 hex characters - the server identity to pin. Without it a relay in the path can read "
 					"everything"
 				);
+				built.Text(
+					"client.play-key",
+					defaults.PlayKey,
+					"64 hex characters - the platform-issued client identity seed"
+				);
 
 				built.List(
 					"client.content-sources",
@@ -158,6 +163,7 @@ namespace client {
 		options.SessionSecret = std::string(Flag("client.session-key").Text());
 		options.RendezvousAddress = std::string(Flag("client.rendezvous").Text());
 		options.ServerKey = std::string(Flag("client.server-key").Text());
+		options.PlayKey = std::string(Flag("client.play-key").Text());
 
 		const Flag configured("client.content-sources");
 		const std::span<const std::string> sources = configured.Items();

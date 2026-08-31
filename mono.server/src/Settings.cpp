@@ -95,6 +95,10 @@ namespace server {
 					defaults.IdentityKey,
 					"64 hex characters - the Ed25519 seed this server proves its identity with"
 				);
+				built.List(
+					"server.admitted-keys",
+					"A client Ed25519 public key this server admits. Repeat the key for more"
+				);
 
 				built.Text(
 					"server.profile-out",
@@ -243,6 +247,8 @@ namespace server {
 			options.Transport = engine::net::WireMode::Quic;
 		}
 		options.IdentityKey = std::string(Flag("server.identity-key").Text());
+		const std::span<const std::string> admitted = Flag("server.admitted-keys").Items();
+		options.AdmittedKeys.assign(admitted.begin(), admitted.end());
 
 		options.ProfilePath = std::filesystem::path(Flag("server.profile-out").Text());
 		options.ProfileWindowTicks =

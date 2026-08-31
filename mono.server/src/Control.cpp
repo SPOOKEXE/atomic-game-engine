@@ -17,6 +17,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/replication/Listener.hpp>
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <server/Server.hpp>
 
@@ -137,6 +138,122 @@ namespace server {
 						{"players", std::move(players)},
 						{"connected", clients->Count()},
 					};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"admission_list",
+				"Lists the client public keys allowed to start new sessions. `restricted` false means "
+				"identity is optional and every client is admitted; true with no keys denies every new "
+				"client.",
+				[] { return json{{"type", "object"}}; },
+				[host](const json &, std::string &) {
+					json keys = json::array();
+					for (const engine::assets::PublicKey &key : host->AdmittedClientKeys) {
+						keys.push_back(key.ToHex());
+					}
+					return json{{"restricted", host->AdmissionRestricted}, {"keys", std::move(keys)}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"admission_allow",
+				"Allows a client public key to start future sessions and enables restricted admission. The "
+				"client keeps the matching secret and proves possession by signing its live session.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"key", json{{"type", "string"}, {"description", "64 lowercase hex characters"}}}
+						 }},
+						{"required", json::array({"key"})},
+					};
+				},
+				[host](const json &arguments, std::string &failure) -> json {
+					if (!arguments.contains("key") || !arguments["key"].is_string()) {
+						failure = "key must be a 64-character lowercase hexadecimal client public key.";
+						return nullptr;
+					}
+					const std::optional<engine::assets::PublicKey> key =
+						engine::assets::PublicKey::FromHex(arguments["key"].get<std::string>());
+					if (!key.has_value()) {
+						failure = "key must be a 64-character lowercase hexadecimal client public key.";
+						return nullptr;
+					}
+					const bool existed =
+						std::find(host->AdmittedClientKeys.begin(), host->AdmittedClientKeys.end(), *key) !=
+						host->AdmittedClientKeys.end();
+					if (!existed) {
+						host->AdmittedClientKeys.push_back(*key);
+					}
+					host->AdmissionRestricted = true;
+					if (host->Replication != nullptr) {
+						host->Replication->RequireClientIdentity(true);
+					}
+					return json{{"key", key->ToHex()}, {"added", !existed}, {"restricted", true}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"admission_revoke",
+				"Revokes a client public key for future sessions. Existing sessions are not disconnected. "
+				"Revoking the final key leaves admission restricted and denies every new client.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"key", json{{"type", "string"}, {"description", "64 lowercase hex characters"}}}
+						 }},
+						{"required", json::array({"key"})},
+					};
+				},
+				[host](const json &arguments, std::string &failure) -> json {
+					if (!arguments.contains("key") || !arguments["key"].is_string()) {
+						failure = "key must be a 64-character lowercase hexadecimal client public key.";
+						return nullptr;
+					}
+					const std::optional<engine::assets::PublicKey> key =
+						engine::assets::PublicKey::FromHex(arguments["key"].get<std::string>());
+					if (!key.has_value()) {
+						failure = "key must be a 64-character lowercase hexadecimal client public key.";
+						return nullptr;
+					}
+					const auto found =
+						std::find(host->AdmittedClientKeys.begin(), host->AdmittedClientKeys.end(), *key);
+					const bool removed = found != host->AdmittedClientKeys.end();
+					if (removed) {
+						host->AdmittedClientKeys.erase(found);
+					}
+					host->AdmissionRestricted = true;
+					if (host->Replication != nullptr) {
+						host->Replication->RequireClientIdentity(true);
+					}
+					return json{{"key", key->ToHex()}, {"removed", removed}, {"restricted", true}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"admission_open",
+				"Disables the client-key whitelist for future sessions. This is an explicit operation "
+				"because "
+				"an empty restricted whitelist means deny everyone, not open the server.",
+				[] { return json{{"type", "object"}}; },
+				[host](const json &, std::string &) {
+					host->AdmissionRestricted = false;
+					if (host->Replication != nullptr) {
+						host->Replication->RequireClientIdentity(false);
+					}
+					return json{{"restricted", false}};
 				},
 			}
 		);

@@ -131,6 +131,11 @@ int main(int argc, char **argv) {
 		"everything"
 	);
 	arguments.Value(
+		"play-key",
+		"HEX",
+		"64 hex characters - a platform-issued client identity seed. The secret is never sent"
+	);
+	arguments.Value(
 		"cdn", "HOST:PORT", "A content origin, in priority order. 'dir:PATH' for a local store. Repeatable"
 	);
 	arguments.Value(
@@ -294,6 +299,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto key = arguments.Get("server-key")) {
 		options.ServerKey = std::string(*key);
+	}
+	if (auto key = arguments.Get("play-key")) {
+		options.PlayKey = std::string(*key);
 	}
 
 	// **Prepended, so a named origin outranks a configured one.** The list is

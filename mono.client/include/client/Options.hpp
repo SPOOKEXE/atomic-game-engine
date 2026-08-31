@@ -312,6 +312,13 @@ namespace client {
 		// Optional server identity pin; encryption alone does not authenticate it.
 		std::string ServerKey;
 
+		// The Ed25519 seed this client proves possession of, as 64 hex
+		// characters, or empty for no platform-issued play identity.
+		//
+		// The seed is never sent. The connector signs the live session
+		// transcript and sends only the public half and signature.
+		std::string PlayKey;
+
 		// Run with no window at all.
 		//
 		// **What makes a shipped client drivable by something that is not a

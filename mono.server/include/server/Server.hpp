@@ -463,6 +463,10 @@ namespace server {
 		// `Listener::SetIdentity`. The same key a publisher signs manifests
 		// with, so a deployment distributes one public key and not two.
 		std::string IdentityKey;
+
+		// Client public keys admitted to this server. Empty leaves admission open.
+		// The corresponding seeds stay with the platform and clients.
+		std::vector<std::string> AdmittedKeys;
 	};
 
 	// What the run produced. Returned rather than logged only, so a test can
@@ -1097,6 +1101,11 @@ namespace server {
 		// move-only and zeroes itself, and a copy would be a second place a
 		// secret lives.
 		std::optional<engine::assets::SigningKey> Identity;
+
+		// The platform admission set. Restriction remains active after the final
+		// key is revoked so an empty live whitelist denies everybody.
+		std::vector<engine::assets::PublicKey> AdmittedClientKeys;
+		bool AdmissionRestricted = false;
 
 		// Where moving things were, for the last `RewindSettings::HistoryTicks`
 		// ticks.

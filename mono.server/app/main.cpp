@@ -146,6 +146,9 @@ int main(int argc, char **argv) {
 		"64 hex characters - the Ed25519 seed this server proves its identity with. Without it a "
 		"relay in the path can read everything"
 	);
+	arguments.Value(
+		"admit-key", "HEX", "Admit a client Ed25519 public key. Repeatable; clients prove the matching secret"
+	);
 
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
@@ -257,6 +260,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto key = arguments.Get("identity-key")) {
 		options.IdentityKey = std::string(*key);
+	}
+	for (const std::string_view key : arguments.GetAll("admit-key")) {
+		options.AdmittedKeys.emplace_back(key);
 	}
 	if (auto transport = arguments.Get("transport")) {
 		if (const std::optional<engine::net::WireMode> mode = engine::net::ParseWireMode(*transport)) {

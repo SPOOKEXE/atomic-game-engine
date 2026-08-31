@@ -3,6 +3,7 @@
 // Client-owned window, renderer, event loop and frame state.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/Signature.hpp>
 #include <engine/audio/Device.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
@@ -616,6 +617,8 @@ namespace client {
 		// `--connect` was given, which is what keeps a single-player run from
 		// opening a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
+		// The connector borrows this move-only secret for the session lifetime.
+		std::optional<engine::assets::SigningKey> ClientIdentity;
 		std::unique_ptr<engine::replication::Connector> Connection;
 
 		// How this client finds a session, when it was not told an address.

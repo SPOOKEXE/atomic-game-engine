@@ -61,6 +61,28 @@ namespace client {
 	using engine::render::ProfilerTab;
 
 	namespace {
+		// Parses an exact-length hexadecimal value into `out`.
+		bool ParseHex(std::string_view text, std::span<std::byte> out) {
+			if (text.size() != out.size() * 2) {
+				return false;
+			}
+			for (size_t index = 0; index < out.size(); index++) {
+				const auto digit = [](char character) -> int {
+					if (character >= '0' && character <= '9') return character - '0';
+					if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+					if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+					return -1;
+				};
+				const int high = digit(text[index * 2]);
+				const int low = digit(text[index * 2 + 1]);
+				if (high < 0 || low < 0) {
+					return false;
+				}
+				out[index] = static_cast<std::byte>((high << 4) | low);
+			}
+			return true;
+		}
+
 		// What a `MouseBehavior` is called in a log line.
 		//
 		// Roblox's own spelling of each, so a line and the property a script
@@ -1525,6 +1547,21 @@ namespace client {
 		engine::replication::ConnectorSettings connector;
 		connector.Advertised = Advertised;
 		connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
+		ClientIdentity.reset();
+		if (!Settings.PlayKey.empty()) {
+			std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+			if (!ParseHex(Settings.PlayKey, seed)) {
+				ENGINE_ERROR("client: --play-key is not {} hex characters", seed.size() * 2);
+				return false;
+			}
+			ClientIdentity = engine::assets::SigningKey::FromSeed(seed);
+			if (!ClientIdentity.has_value()) {
+				ENGINE_ERROR("client: --play-key is not a usable Ed25519 seed");
+				return false;
+			}
+			connector.ClientIdentity = &*ClientIdentity;
+			ENGINE_INFO("client play identity {}", ClientIdentity->Public().ToHex());
+		}
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {
