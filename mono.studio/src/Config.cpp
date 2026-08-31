@@ -279,6 +279,16 @@ namespace studio {
 		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
 		ShowParticleEmitters = Flag(document, "showParticleEmitters", ShowParticleEmitters);
+		if (const auto dataStore = document.find("dataStore");
+			dataStore != document.end() && dataStore->is_object()) {
+			DataStoreEnabled = Flag(*dataStore, "enabled", DataStoreEnabled);
+			DataStoreRoot = Words(*dataStore, "root", DataStoreRoot);
+			if (const auto environment = engine::world::SharedStoreEnvironmentOf(
+					Words(*dataStore, "environment", engine::world::Describe(DataStoreEnvironment))
+				)) {
+				DataStoreEnvironment = *environment;
+			}
+		}
 		SnapEnabled = Flag(document, "snap", SnapEnabled);
 		SnapDistance = JsonNumber(document, "gridStep", SnapDistance);
 		SnapDegrees = JsonNumber(document, "rotationStep", SnapDegrees);
@@ -512,6 +522,12 @@ namespace studio {
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
 			{"showParticleEmitters", ShowParticleEmitters},
+			{"dataStore",
+			 json{
+				 {"enabled", DataStoreEnabled},
+				 {"root", DataStoreRoot},
+				 {"environment", engine::world::Describe(DataStoreEnvironment)},
+			 }},
 			{"snap", SnapEnabled},
 			{"gridStep", SnapDistance},
 			{"rotationStep", SnapDegrees},

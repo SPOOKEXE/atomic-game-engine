@@ -49,6 +49,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/SharedStoreFile.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -227,6 +228,23 @@ namespace studio {
 		// viewports. This changes only the editor's view, never the saved Enabled
 		// property or a running world's simulation state.
 		bool ShowParticleEmitters = true;
+
+		// Whether Studio loads and saves the durable DataStore through the local
+		// provider. Off by default so opening an authored world cannot write
+		// external state without somebody choosing a location first.
+		//
+		// @since v0.22
+		bool DataStoreEnabled = false;
+
+		// The provider root. An empty path resolves to `stores` under Studio's
+		// configuration folder, keeping the saved document portable between home
+		// directory layouts.
+		std::string DataStoreRoot;
+
+		// Mock and live occupy separate subfolders. Studio defaults to mock so a
+		// play test cannot touch live data through an optimistic default.
+		engine::world::SharedStoreEnvironment DataStoreEnvironment =
+			engine::world::SharedStoreEnvironment::Mock;
 
 		// Whether a dragged handle snaps at all.
 		//

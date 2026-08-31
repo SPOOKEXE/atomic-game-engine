@@ -132,6 +132,9 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.Scale = 1.25f;
 	written.ShowGrid = false;
 	written.ShowParticleEmitters = false;
+	written.DataStoreEnabled = true;
+	written.DataStoreRoot = "/tmp/atomic-stores";
+	written.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Live;
 	written.SnapEnabled = true;
 	written.SnapDistance = 0.25f;
 	written.SnapDegrees = 45.0f;
@@ -147,6 +150,9 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.Scale == 1.25f);
 	CHECK_FALSE(read.ShowGrid);
 	CHECK_FALSE(read.ShowParticleEmitters);
+	CHECK(read.DataStoreEnabled);
+	CHECK(read.DataStoreRoot == "/tmp/atomic-stores");
+	CHECK(read.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Live);
 	CHECK(read.SnapEnabled);
 	CHECK(read.SnapDistance == 0.25f);
 	CHECK(read.SnapDegrees == 45.0f);
@@ -177,6 +183,20 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	REQUIRE(partial.Load());
 	CHECK(partial.SnapDistance == 2.0f);
 	CHECK(partial.SnapDegrees == 30.0f);
+}
+
+TEST_CASE("datastore preferences default safely and reject unknown environments", "[studio][config]") {
+	Scratch scratch;
+	scratch.Write(
+		"preferences.json",
+		R"({"dataStore": {"enabled": true, "root": "shared", "environment": "production"}})"
+	);
+
+	Preferences preferences;
+	REQUIRE(preferences.Load());
+	CHECK(preferences.DataStoreEnabled);
+	CHECK(preferences.DataStoreRoot == "shared");
+	CHECK(preferences.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Mock);
 }
 
 TEST_CASE("a panel's colours round trip, and a broken one is skipped", "[studio][config]") {

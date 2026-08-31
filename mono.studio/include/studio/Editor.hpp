@@ -1168,6 +1168,19 @@ namespace studio {
 		// The Preferences page for how this process spends its cores.
 		void DrawComputeSettings();
 
+		// The Preferences page for durable script data.
+		void DrawDataStoreSettings();
+
+		// Switches the local provider to the current preferences. Any active
+		// provider is flushed before its path changes.
+		bool ConfigureDataStore(bool flushActive = true);
+
+		// Writes the durable store when its copied image changed.
+		bool FlushDataStore();
+
+		// The configured root, resolving an empty preference under ConfigRoot.
+		std::filesystem::path DataStoreRoot() const;
+
 		// Applies Ctrl+wheel to a zoom, for the item just drawn.
 		//
 		// Separate from the control because the wheel belongs over the *text*
@@ -3278,6 +3291,14 @@ namespace studio {
 		// left it at, which is why the panel toggles are read off the live flags
 		// rather than out of this - see `SaveConfiguration`.
 		Preferences Prefs;
+
+		// The local durable provider's active file and last written image.
+		// MemoryStore deliberately has no file: it expires with this process.
+		std::filesystem::path ActiveDataStorePath;
+		std::vector<engine::world::SharedStoreEntry> SavedDataStoreEntries;
+		std::string DataStoreError;
+		double NextDataStoreFlush = 0.0;
+		bool DataStoreReady = false;
 
 		// The connection to Discord, or null when nothing is configured.
 		//

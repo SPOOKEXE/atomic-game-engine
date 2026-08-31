@@ -1099,6 +1099,11 @@ namespace studio {
 				ImGui::EndTabItem();
 			}
 
+			if (ImGui::BeginTabItem("Data")) {
+				DrawDataStoreSettings();
+				ImGui::EndTabItem();
+			}
+
 			if (ImGui::BeginTabItem("Default Worlds")) {
 				DrawDefaultWorldSettings();
 				ImGui::EndTabItem();

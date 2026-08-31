@@ -643,6 +643,11 @@ namespace studio {
 			NewGame();
 		}
 
+		// The provider is external to an authored game, so it is applied after
+		// the game has finished replacing worlds and before any script can run.
+		// A broken image is reported but does not make the editor unusable.
+		(void)ConfigureDataStore();
+
 		// **After the game, because a sync builds *into* a scene.** With no game
 		// named that scene is the empty one `NewGame` just made, which is the
 		// case somebody pointing this at a Rojo repository wants: the project is
@@ -775,6 +780,7 @@ namespace studio {
 		}
 
 		SaveConfiguration();
+		(void)FlushDataStore();
 
 		// Runtimes hold a `Store &`, and the stores are the universe's. Let go
 		// of every one of them before it goes away.
@@ -906,6 +912,10 @@ namespace studio {
 				PumpPlugins(delta);
 
 				Simulate(delta);
+				if (engine::core::Clock::Seconds() >= NextDataStoreFlush) {
+					(void)FlushDataStore();
+					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
+				}
 				if (renderingActive) {
 					Present(PresentationDeltaSeconds);
 					PresentationDeltaSeconds = 0.0f;
