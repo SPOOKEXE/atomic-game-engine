@@ -171,7 +171,7 @@ namespace studio {
 			return {{"type", "nil"}};
 		}
 
-		bool Number(const json &value, float &out) {
+		bool ParseFloat(const json &value, float &out) {
 			if (!value.is_number()) {
 				return false;
 			}
@@ -188,7 +188,7 @@ namespace studio {
 				return false;
 			}
 			for (size_t index = 0; index < out.size(); index++) {
-				if (!Number(value[index], out[index])) {
+				if (!ParseFloat(value[index], out[index])) {
 					return false;
 				}
 			}
