@@ -15,18 +15,17 @@
 #include <utility>
 
 namespace engine::script {
+	enum class WorkState : uint8_t {
+		Pending,
+		Complete,
+		Failed,
+		Cancelled,
+	};
 
 	namespace {
 		constexpr uint32_t PROTOCOL_MAGIC = 0x4E4F4953u;
 		constexpr uint16_t PROTOCOL_VERSION = 1;
 		constexpr std::string_view WORKER_ARGUMENT = "--engine-compute-worker";
-
-		enum class WorkState : uint8_t {
-			Pending,
-			Complete,
-			Failed,
-			Cancelled,
-		};
 
 		struct WorkerConfiguration {
 			std::filesystem::path Program;
