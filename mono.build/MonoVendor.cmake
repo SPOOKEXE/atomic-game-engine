@@ -184,6 +184,24 @@ if(MONO_BUILD_CLIENT)
 	# SDL declares its include directories PUBLIC and not SYSTEM, and 149
 	# first-party translation units carry them. mono_vendor_system above.
 	mono_vendor_system(SDL3-shared SDL3-static SDL3_Headers)
+
+	# SDL's Vulkan backend loads MoltenVK dynamically on Apple. The source is a
+	# pinned submodule and the matching upstream release artifact is fetched by
+	# `just setup` or CI with its published SHA-256 before configure.
+	if(APPLE)
+		set(MONO_MOLTENVK_ROOT
+			"${CMAKE_SOURCE_DIR}/.cache/vendor/moltenvk/1.4.2/MoltenVK"
+			CACHE PATH "Extracted MoltenVK 1.4.2 release root")
+		set(moltenvk_library
+			"${MONO_MOLTENVK_ROOT}/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib")
+		if(NOT EXISTS "${moltenvk_library}")
+			message(FATAL_ERROR
+				"MoltenVK 1.4.2 is missing. Run scripts/fetch-moltenvk.sh before configuring.")
+		endif()
+		add_library(MoltenVK-runtime SHARED IMPORTED GLOBAL)
+		add_library(MoltenVK::Runtime ALIAS MoltenVK-runtime)
+		set_target_properties(MoltenVK-runtime PROPERTIES IMPORTED_LOCATION "${moltenvk_library}")
+	endif()
 endif()
 
 # --- glm --------------------------------------------------------------------

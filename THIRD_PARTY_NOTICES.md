@@ -23,6 +23,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | Library | Licence | Used for | In a shipped game |
 |---|---|---|---|
 | [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
+| [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | Apache-2.0 | Vulkan portability over Metal | Apple client and Studio builds |
 | [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
 | [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
@@ -79,28 +80,22 @@ contains the `yes` rows and not the others:
   it drags in regardless - a program calling only SHA-256 still links 36 of
   Crypto++'s 173 members. So "we only use one function from it" is never on its
   own a reason to leave a notice out. Run the `nm` check.
-- **SPIRV-Cross is shaderc's other end, and it is both build-time and
-  runtime for the same reason.** `glslc` produces SPIR-V and SDL's Metal
-  backend takes MSL or a `metallib` and never SPIR-V, so something has to
-  stand between them. `mono.tools/shadercross` does it for the built-in
-  shaders during the build and produces no object code in any binary;
-  `Engine::msl` does it for a `ShaderScript`, which does not exist until
-  somebody writes one, and that copy is linked into `render`.
+- **SPIRV-Cross remains the build-time cross-check for MSL.** The shipped
+  renderer now requires Vulkan and feeds SPIR-V to native Vulkan or MoltenVK.
+  `mono.tools/shadercross` still translates built-in shaders during the build,
+  so an unsupported Metal construct fails before an Apple release is made.
 
-  **It reaches a shipped client on the same condition shaderc does**, and by
-  the same mechanism: `Renderer::AddShaderVariant` calls it only when the
-  device asked for MSL, so the objects are on the link line and whether they
-  survive dead-stripping is a question for `nm` against a real release build
-  rather than for this file. Re-run the check in
-  `docs/retired/CPP_LINKER.md` after a bump rather than copying this
-  sentence forward.
+  `Engine::msl` remains linked while the old native-Metal branches are removed,
+  so whether its objects survive dead-stripping remains a question for `nm`
+  against a real release build. Re-run the check in
+  `docs/retired/CPP_LINKER.md` after a bump.
 
   Apache-2.0, the same licence as shaderc and SPIRV-Tools, so it adds a row
   and no new obligation. Only three of its eight libraries are built - the
   parser, the GLSL emitter and the MSL emitter. The HLSL, C++, JSON
   reflection, C API and CLI targets are switched off in
   `mono.build/MonoVendor.cmake`, so no binary can contain them.
-- **SDL3, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
+- **SDL3, MoltenVK, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
   none of them, and the `server` preset does not even configure them - only the
   presentation modules own GLSL, so nothing server-tier needs a compiler for
   it.

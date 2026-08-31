@@ -32,6 +32,7 @@
 #include <engine/scene/Tagging.hpp>
 
 #include <SDL3/SDL_gpu.h>
+#include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_video.h>
 #include <glm/mat4x4.hpp>
@@ -525,13 +526,12 @@ namespace engine::render {
 		// right at v0.7.
 		State->Window = window;
 
-		// **Every format the build produces, which is now two.** `glslc`
-		// compiles the built-in GLSL to SPIR-V and `mono.tools/shadercross`
-		// translates each module to MSL beside it, so a Metal device has
-		// something to be given. D3D12 needs DXIL, which is still not built -
-		// asking for a format we cannot supply would find a device and then fail
-		// at pipeline creation, which is a worse error than being refused here.
-		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, nullptr);
+		// One backend on every platform. Apple packages MoltenVK beside the
+		// executable, so it follows this same Vulkan and SPIR-V path.
+#if defined(__APPLE__)
+		SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, "@executable_path/libMoltenVK.dylib");
+#endif
+		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, "vulkan");
 		if (!State->Device) {
 			ENGINE_ERROR("SDL_CreateGPUDevice: {}", SDL_GetError());
 			return false;

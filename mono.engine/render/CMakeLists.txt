@@ -1,5 +1,12 @@
 # L12 [client]. The GLSL this module binds lives in Engine::resources.
 
+set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross)
+if(APPLE)
+	# SDL loads this dynamically. Naming it here lets mono_add_program stage it
+	# for every executable that actually links the renderer.
+	list(APPEND render_vendor MoltenVK::Runtime)
+endif()
+
 mono_add_library(render
 	TIER client
 	DEPS
@@ -50,7 +57,7 @@ mono_add_library(render
 		Engine::msl
 
 	# Keep GPU and shader compiler types private to implementation files.
-	VENDOR SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross
+	VENDOR ${render_vendor}
 
 	# Atlas headers only; no imgui library is linked.
 	VENDOR_INCLUDES
