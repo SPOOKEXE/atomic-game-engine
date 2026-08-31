@@ -60,16 +60,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add shared DataStore and MemoryStore administration, durable local DataStore images, isolated mock/live folders, server and Studio local-provider settings, and a Default Studio dataset editor plugin.
 - [_] add remote datastore choices and per-datastore backend assignment through the DataStoreRouter/DataStoreAdapter seam below.
 - [x] add platform-specific backend tooling where only "admitted keys" can connect to a given server - the client proves a platform-issued Ed25519 play seed without sending it, servers accept repeatable configured public keys, and the loopback control surface can list, allow, revoke or explicitly open admission for future sessions.
-- [_] cleanup launcher options and make it far more user friendly
-- [_] cleanup cdn config and make it far more friendly
+- [x] replace the launcher's raw option wall with discoverable mode cards, searchable Common/All options/Engine settings tabs, typed controls and path pickers generated from each program's declarations, a command preview, retained per-mode forms, and supervised launch/restart/stop status.
+- [x] consolidate CDN deployment configuration into declared `cdn.*` settings with config/environment/CLI precedence, readable serving and publishing options, repeatable named upstreams, explicit local/cache/proxy switches, safe opt-in ingest and forwarding, validation of contradictory setups, and a terminal dashboard for live status.
 - [x] build out live client presentation settings: EditableMesh and EditableImage uploads, particles and post-processing can be disabled by config/CLI and toggled in-game without restarting.
 - [x] add a ESC settings menu to the client and in studio client. add the client settings to it.
 - [x] let client Luau and JavaScript add, relabel, remove and activate named ESC menu actions through SettingsService; the ECS owns the bounded action list and both standalone and Studio Play render it.
 - [x] add gamepad and joystick support: SDL mapped pads and raw joysticks occupy eight stable world slots; normalized buttons, sticks, triggers and hats drive movement, camera, jump and firing in the client and Studio Play; Luau and JavaScript receive matching polling APIs, connection signals, input edges and analog changes.
 - [_] completely move to vulkan and establish cross platform supports.
-- [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
+- [x] wire the future scene vocabulary: Skeleton, Bone, AnimationClip, Animator, AnimationTrack, Constraint, LevelOfDetail, Atmosphere, Clouds and Terrain are registered, reflected, persisted where their variable payload requires it, documented, and covered by scene suites.
 - [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
-- [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
+- [x] render atmosphere, clouds and textured or procedural skies from each view's `WorldLighting::EnvironmentState`: the environment render-graph pass selects authored or compute modes, keeps signatures and resident targets per presentation slot, and consumes presentation-only scene values without feeding simulation.
 - [_] (user) review v0.21 and ensure everything is implemented for studio and such (e.g. editing shader scripts and using them)
 
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
