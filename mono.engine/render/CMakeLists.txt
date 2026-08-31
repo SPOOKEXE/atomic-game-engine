@@ -50,7 +50,7 @@ mono_add_library(render
 		Engine::msl
 
 	# Keep GPU and shader compiler types private to implementation files.
-	VENDOR SDL3::SDL3 shaderc
+	VENDOR SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross
 
 	# Atlas headers only; no imgui library is linked.
 	VENDOR_INCLUDES
