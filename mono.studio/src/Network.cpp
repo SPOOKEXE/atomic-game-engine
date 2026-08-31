@@ -155,11 +155,13 @@ namespace studio {
 		// other holding the previous answer.
 		const engine::delivery::DeliverySettings settings = Content.ToSettings();
 
-		if (ContentClient && (UniverseAssetGrounding.State == AssetGroundingState::WaitingForCatalogue ||
-							  UniverseAssetGrounding.State == AssetGroundingState::Fetching ||
-							  UniverseAssetGrounding.State == AssetGroundingState::CopyingRaw)) {
-			CancelAssetGrounding(UniverseAssetGrounding, *ContentClient);
-			PendingUniverseExportPath.clear();
+		if (ContentClient && (ExportAssetGrounding.State == AssetGroundingState::WaitingForCatalogue ||
+							  ExportAssetGrounding.State == AssetGroundingState::Fetching ||
+							  ExportAssetGrounding.State == AssetGroundingState::CopyingRaw)) {
+			CancelAssetGrounding(ExportAssetGrounding, *ContentClient);
+			PendingGroundedExport = GroundedExportKind::None;
+			PendingGroundedExportPath.clear();
+			PendingGroundedWorld = {};
 			Say("asset export cancelled because content sources changed", engine::core::LogLevel::Warning);
 		}
 
@@ -214,6 +216,33 @@ namespace studio {
 		ContentUploads = engine::delivery::MakeUploader(settings);
 	}
 
+	void Editor::PumpAssetExport() {
+		if (!ContentClient) {
+			return;
+		}
+
+		PumpAssetGrounding(ExportAssetGrounding, *ContentClient);
+		if (ExportAssetGrounding.State == AssetGroundingState::Complete) {
+			const GroundedExportKind kind = PendingGroundedExport;
+			const std::filesystem::path exportPath = std::move(PendingGroundedExportPath);
+			const WorldId world = PendingGroundedWorld;
+			PendingGroundedExport = GroundedExportKind::None;
+			PendingGroundedWorld = {};
+			ExportAssetGrounding = AssetGrounding{};
+			if (kind == GroundedExportKind::World) {
+				ExportWorldFile(world, exportPath);
+			} else if (kind == GroundedExportKind::Universe) {
+				ExportUniverse(exportPath);
+			}
+		} else if (ExportAssetGrounding.State == AssetGroundingState::Failed) {
+			Say("asset export failed: " + ExportAssetGrounding.Error, engine::core::LogLevel::Error);
+			PendingGroundedExport = GroundedExportKind::None;
+			PendingGroundedExportPath.clear();
+			PendingGroundedWorld = {};
+			ExportAssetGrounding = AssetGrounding{};
+		}
+	}
+
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
@@ -236,16 +265,7 @@ namespace studio {
 				ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
 				ContentClient->Pump();
 			}
-			PumpAssetGrounding(UniverseAssetGrounding, *ContentClient);
-			if (UniverseAssetGrounding.State == AssetGroundingState::Complete) {
-				const std::filesystem::path exportPath = std::move(PendingUniverseExportPath);
-				UniverseAssetGrounding = AssetGrounding{};
-				ExportUniverse(exportPath);
-			} else if (UniverseAssetGrounding.State == AssetGroundingState::Failed) {
-				Say("asset export failed: " + UniverseAssetGrounding.Error, engine::core::LogLevel::Error);
-				PendingUniverseExportPath.clear();
-				UniverseAssetGrounding = AssetGrounding{};
-			}
+			PumpAssetExport();
 			DrainContent();
 		}
 

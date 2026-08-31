@@ -2926,6 +2926,9 @@ namespace studio {
 		// @return `false` when it could not be written.
 		bool ExportActiveWorld(const std::filesystem::path &path);
 
+		// Writes one captured world alone, without adopting the path.
+		bool ExportWorldFile(engine::world::WorldId world, const std::filesystem::path &path);
+
 		// Writes the universe and every world in it, without adopting the path.
 		//
 		// **Separate from Save As rather than a second name for it.** Save As
@@ -2939,9 +2942,16 @@ namespace studio {
 		bool ExportUniverse(const std::filesystem::path &path);
 
 		// Starts an export after applying its optional processed-asset policy.
-		// Asset grounding is pumped across frames and writes the universe only
+		// Asset grounding is pumped across frames and writes the document only
 		// after every verified asset has arrived.
+		//@{
+		void BeginWorldExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets);
 		void BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets);
+		//@}
+
+		// Advances the optional asset copy and writes its captured document when
+		// the copy completes. The caller pumps `ContentClient` first.
+		void PumpAssetExport();
 		// Adds one world file to this universe, keeping what is here.
 		//
 		// A world whose name is taken arrives under a suffixed one rather than
@@ -5075,6 +5085,7 @@ namespace studio {
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;
+		bool AskingWorldExportOptions = false;
 		bool AskingExportUniverse = false;
 		bool AskingUniverseExportOptions = false;
 		bool AskingImport = false;
@@ -5091,11 +5102,19 @@ namespace studio {
 		std::string NameBuffer;
 		//@}
 
-		// The second step of universe export and its incremental content copy.
+		// The second step of world/universe export and their one shared,
+		// incremental content copy.
+		bool GroundAssetsOnWorldExport = true;
+		bool IncludeRawAssetsOnWorldExport = false;
+		std::filesystem::path WorldExportPath;
 		bool GroundAssetsOnUniverseExport = true;
 		bool IncludeRawAssetsOnUniverseExport = false;
-		std::filesystem::path PendingUniverseExportPath;
-		AssetGrounding UniverseAssetGrounding;
+		std::filesystem::path UniverseExportPath;
+		enum class GroundedExportKind : uint8_t { None, World, Universe };
+		GroundedExportKind PendingGroundedExport = GroundedExportKind::None;
+		std::filesystem::path PendingGroundedExportPath;
+		engine::world::WorldId PendingGroundedWorld;
+		AssetGrounding ExportAssetGrounding;
 
 		// Read-only manifest metadata shown before a multi-file universe is
 		// allowed to add content sources to this editor.

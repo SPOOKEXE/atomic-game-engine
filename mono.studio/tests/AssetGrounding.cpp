@@ -6,10 +6,13 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Source.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -19,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <studio/AssetGrounding.hpp>
+#include <studio/Editor.hpp>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -128,4 +132,71 @@ TEST_CASE("grounding copies verified processed assets and their signed manifest"
 	CHECK(std::filesystem::is_regular_file(groundedRaw / "models/rock.obj"));
 	CHECK(std::filesystem::is_regular_file(groundedRaw / "notes.txt"));
 	CHECK_FALSE(std::filesystem::exists(groundedRaw / "ignored-link"));
+}
+
+TEST_CASE("standalone world export grounds processed and raw assets before writing", "[studio][grounding]") {
+	GroundingTree tree;
+	const std::filesystem::path sourcePath = tree.Root / "source";
+	const std::filesystem::path rawPath = tree.Root / "raw-source";
+	std::filesystem::create_directories(rawPath / "models");
+	std::ofstream(rawPath / "models/tree.obj") << "raw tree";
+
+	auto source = engine::assets::ChunkStore::Open(sourcePath, true);
+	REQUIRE(source.has_value());
+	const std::vector<std::byte> bytes = Bytes("processed tree");
+	const engine::assets::ContentHash chunk = engine::assets::Hasher::Of(bytes);
+	REQUIRE(source->Write(chunk, bytes));
+	engine::assets::Manifest manifest;
+	const engine::assets::ContentHash root = manifest.AddAsset(
+		"meshes/tree.amesh",
+		engine::assets::KindOfName("meshes/tree.amesh"),
+		{engine::assets::ChunkEntry{.Hash = chunk, .Bytes = static_cast<uint32_t>(bytes.size())}}
+	);
+	const std::array roots{root};
+	REQUIRE(manifest.AddBundle(roots).has_value());
+	const engine::assets::SignatureBytes signature =
+		engine::assets::DevelopmentSigningKey().SignManifestRoot(manifest.Root());
+	REQUIRE(source->WriteManifest(manifest, signature));
+
+	engine::delivery::DeliverySettings delivery;
+	delivery.Publisher = engine::assets::DevelopmentPublisher();
+	delivery.Sources.push_back(
+		engine::delivery::Source{
+			.Name = "fixture",
+			.Kind = engine::delivery::SourceKind::Directory,
+			.Location = sourcePath.string(),
+			.Enabled = true,
+			.Role = engine::delivery::SourceRole::Read,
+			.IngestKey = {},
+		}
+	);
+
+	studio::Editor editor;
+	editor.Universe = std::make_unique<engine::world::Universe>();
+	engine::world::WorldSettings world;
+	world.Name = engine::core::Name("Standalone");
+	editor.Active = editor.Universe->Create(world);
+	REQUIRE(editor.Active.IsValid());
+	editor.ContentClient = engine::delivery::MakeAssetClient(delivery);
+	REQUIRE(editor.ContentClient != nullptr);
+	editor.Content.RawFolders.push_back(rawPath);
+
+	const std::filesystem::path exportPath = tree.Root / "export" / "standalone.aworld";
+	editor.BeginWorldExport(exportPath, true, true);
+	for (size_t attempt = 0; attempt < 100 && !std::filesystem::is_regular_file(exportPath); attempt++) {
+		editor.ContentClient->Pump();
+		editor.PumpAssetExport();
+	}
+	REQUIRE(std::filesystem::is_regular_file(exportPath));
+
+	auto grounded = engine::assets::ChunkStore::Open(exportPath.parent_path() / "assets", false);
+	REQUIRE(grounded.has_value());
+	CHECK(grounded->ReadAsset(manifest.Assets().front()).has_value());
+	CHECK(
+		std::filesystem::is_regular_file(exportPath.parent_path() / "assets/raw/1-raw-source/models/tree.obj")
+	);
+
+	engine::world::Universe imported;
+	std::string error;
+	CHECK(engine::game::ImportWorld(imported, exportPath, engine::core::Name("Imported"), error).IsValid());
 }

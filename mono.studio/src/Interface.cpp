@@ -2558,6 +2558,9 @@ namespace studio {
 		if (AskingExport) {
 			ImGui::OpenPopup("Export World");
 		}
+		if (AskingWorldExportOptions) {
+			ImGui::OpenPopup("World Export Options");
+		}
 		if (AskingExportUniverse) {
 			ImGui::OpenPopup("Export Universe");
 		}
@@ -2687,10 +2690,50 @@ namespace studio {
 		}
 
 		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
-			ExportActiveWorld(std::filesystem::path(PathBuffer));
+			WorldExportPath = std::filesystem::path(PathBuffer);
+			AskingWorldExportOptions = true;
 			AskingExport = false;
 		} else if (!ImGui::IsPopupOpen("Export World")) {
 			AskingExport = false;
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
+		if (ImGui::BeginPopupModal(
+				"World Export Options",
+				nullptr,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+			)) {
+			ImGui::TextWrapped("Export %s", WorldExportPath.string().c_str());
+			ImGui::Separator();
+			ImGui::Checkbox("Include processed assets", &GroundAssetsOnWorldExport);
+			ImGui::BeginDisabled(!GroundAssetsOnWorldExport);
+			ImGui::Checkbox("Include raw authoring files", &IncludeRawAssetsOnWorldExport);
+			ImGui::EndDisabled();
+			ImGui::TextDisabled("Verified catalogue assets are copied into assets/ before export.");
+
+			ImGui::BeginDisabled(GroundAssetsOnWorldExport && !ContentClient);
+			if (ImGui::Button("Export")) {
+				const std::filesystem::path exportPath = WorldExportPath;
+				AskingWorldExportOptions = false;
+				ImGui::CloseCurrentPopup();
+				BeginWorldExport(
+					exportPath,
+					GroundAssetsOnWorldExport,
+					GroundAssetsOnWorldExport && IncludeRawAssetsOnWorldExport
+				);
+				WorldExportPath.clear();
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingWorldExportOptions = false;
+				WorldExportPath.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			if (GroundAssetsOnWorldExport && !ContentClient) {
+				ImGui::TextDisabled("Configure a publisher key and readable content source first.");
+			}
+			ImGui::EndPopup();
 		}
 
 		// **The universe, which is a different document from a world and not a
@@ -2699,7 +2742,7 @@ namespace studio {
 		// different extensions and say which they are - see
 		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
 		if (engine::ui::FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
-			PendingUniverseExportPath = std::filesystem::path(PathBuffer);
+			UniverseExportPath = std::filesystem::path(PathBuffer);
 			AskingUniverseExportOptions = true;
 			AskingExportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Export Universe")) {
@@ -2712,8 +2755,8 @@ namespace studio {
 				nullptr,
 				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
 			)) {
-			const bool multiFile = PendingUniverseExportPath.extension() == engine::game::UNIVERSE_EXTENSION;
-			ImGui::TextWrapped("Export %s", PendingUniverseExportPath.string().c_str());
+			const bool multiFile = UniverseExportPath.extension() == engine::game::UNIVERSE_EXTENSION;
+			ImGui::TextWrapped("Export %s", UniverseExportPath.string().c_str());
 			ImGui::Separator();
 			ImGui::BeginDisabled(!multiFile);
 			ImGui::Checkbox("Include processed assets", &GroundAssetsOnUniverseExport);
@@ -2730,16 +2773,17 @@ namespace studio {
 			const bool needsClient = multiFile && GroundAssetsOnUniverseExport;
 			ImGui::BeginDisabled(needsClient && !ContentClient);
 			if (ImGui::Button("Export")) {
-				const std::filesystem::path exportPath = PendingUniverseExportPath;
+				const std::filesystem::path exportPath = UniverseExportPath;
 				AskingUniverseExportOptions = false;
 				ImGui::CloseCurrentPopup();
 				BeginUniverseExport(exportPath, needsClient, needsClient && IncludeRawAssetsOnUniverseExport);
+				UniverseExportPath.clear();
 			}
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
 				AskingUniverseExportOptions = false;
-				PendingUniverseExportPath.clear();
+				UniverseExportPath.clear();
 				ImGui::CloseCurrentPopup();
 			}
 			if (needsClient && !ContentClient) {

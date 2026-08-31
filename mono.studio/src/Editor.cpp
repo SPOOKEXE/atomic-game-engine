@@ -3382,18 +3382,22 @@ namespace studio {
 	}
 
 	bool Editor::ExportActiveWorld(const std::filesystem::path &path) {
-		if (!Active.IsValid()) {
+		return ExportWorldFile(Active, path);
+	}
+
+	bool Editor::ExportWorldFile(WorldId world, const std::filesystem::path &path) {
+		if (!world.IsValid()) {
 			Say("no world to export", LogLevel::Warning);
 			return false;
 		}
 
 		std::string error;
-		if (!engine::game::ExportWorld(*Universe, Active, path, error)) {
+		if (!engine::game::ExportWorld(*Universe, world, path, error)) {
 			Say("export failed: " + error, LogLevel::Error);
 			return false;
 		}
 
-		Say("exported '" + std::string(Label(Universe->NameOf(Active))) + "' to " + path.string());
+		Say("exported '" + std::string(Label(Universe->NameOf(world))) + "' to " + path.string());
 		return true;
 	}
 
@@ -3431,6 +3435,39 @@ namespace studio {
 	}
 
 	void
+	Editor::BeginWorldExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
+		if (!groundAssets) {
+			ExportActiveWorld(path);
+			return;
+		}
+		if (path.extension() != engine::game::WORLD_EXTENSION) {
+			Say("processed assets can only be included by an .aworld export", LogLevel::Warning);
+			return;
+		}
+		if (!Active.IsValid()) {
+			Say("no world to export", LogLevel::Warning);
+			return;
+		}
+		if (!ContentClient) {
+			Say("asset export needs a valid publisher key and read source", LogLevel::Warning);
+			return;
+		}
+
+		const std::filesystem::path destination = path.parent_path() / "assets";
+		const std::span<const std::filesystem::path> rawSources =
+			includeRawAssets ? std::span<const std::filesystem::path>(Content.RawFolders)
+							 : std::span<const std::filesystem::path>{};
+		if (!BeginAssetGrounding(ExportAssetGrounding, destination, rawSources)) {
+			Say("another asset export is already running", LogLevel::Warning);
+			return;
+		}
+		PendingGroundedExport = GroundedExportKind::World;
+		PendingGroundedExportPath = path;
+		PendingGroundedWorld = Active;
+		Say("grounding processed assets into " + destination.string());
+	}
+
+	void
 	Editor::BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
 		if (!groundAssets) {
 			ExportUniverse(path);
@@ -3449,11 +3486,13 @@ namespace studio {
 		const std::span<const std::filesystem::path> rawSources =
 			includeRawAssets ? std::span<const std::filesystem::path>(Content.RawFolders)
 							 : std::span<const std::filesystem::path>{};
-		if (!BeginAssetGrounding(UniverseAssetGrounding, destination, rawSources)) {
+		if (!BeginAssetGrounding(ExportAssetGrounding, destination, rawSources)) {
 			Say("another asset export is already running", LogLevel::Warning);
 			return;
 		}
-		PendingUniverseExportPath = path;
+		PendingGroundedExport = GroundedExportKind::Universe;
+		PendingGroundedExportPath = path;
+		PendingGroundedWorld = {};
 		Say("grounding processed assets into " + destination.string());
 	}
 
