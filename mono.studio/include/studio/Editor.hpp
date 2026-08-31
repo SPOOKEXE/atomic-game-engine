@@ -606,6 +606,23 @@ namespace studio {
 		int SurfaceBounces = 0;
 	};
 
+	// One staged document and the last content shared by Studio and an external editor.
+	struct ExternalDocument {
+		// The file watched for external writes.
+		std::filesystem::path Path;
+		// The last content known to be equal in Studio and on disk.
+		std::string Baseline;
+		// The last observed write stamp.
+		std::filesystem::file_time_type Written{};
+		// Whether both editors changed the baseline differently.
+		bool Conflict = false;
+
+		// Whether this tab currently has a staged external document.
+		bool Active() const {
+			return !Path.empty();
+		}
+	};
+
 	// One open script tab.
 	//
 	// @since v0.7
@@ -632,6 +649,11 @@ namespace studio {
 
 		// Whether the buffer differs from what the world holds.
 		bool Modified = false;
+
+		// The optional live file bridge to a desktop source editor.
+		ExternalDocument External;
+		// The next monotonic time at which the staged file is inspected.
+		double ExternalCheckAt = 0.0;
 
 		// The caret, and the completion this tab has been asked to apply.
 		//
@@ -1209,6 +1231,9 @@ namespace studio {
 
 		// The theme picker and the interface scale.
 		void DrawAppearanceSettings();
+
+		// Code-field appearance and the selected external source editor.
+		void DrawScriptEditorSettings();
 
 		// The seven colours, chosen over whichever palette is selected.
 		//
@@ -3133,6 +3158,12 @@ namespace studio {
 		//
 		// @param tab The tab to save.
 		void SaveScriptTab(OpenScript &tab);
+
+		// Stages and opens a tab in the configured desktop editor.
+		void OpenScriptExternally(OpenScript &tab);
+
+		// Pulls a non-conflicting external write into a tab.
+		void RefreshExternalScript(OpenScript &tab);
 
 		// Closes a tab, discarding nothing - the text is already in the
 		// instance if it was saved, and a tab is a view rather than a document.

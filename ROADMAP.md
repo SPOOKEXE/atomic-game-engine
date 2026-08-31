@@ -52,9 +52,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add a universe loading widget that lists declared CDNs and requests permission before enabling HTTP content access.
 - [x] add universe loader tabs: General, Assets, Permissions, CDN, and Misc, with all-world and inherited per-world views.
 - [x] add `.auniverse` export options for verified processed assets and optional raw authoring files under `assets/`.
-- [_] add custom backgrounds and customization to the script editor too
-- [_] add external editor connections like vscode, notepad, etc.
-- [_] add settings for selected external editors
+- [x] add script-editor customization: a persisted code background override can follow or replace the active theme, and the minimap can be toggled independently.
+- [x] add external editor connections for the system default, Visual Studio Code, Notepad and a custom executable; program and ShaderScript tabs use watched staging files, import external writes, and expose two-sided conflict resolution.
+- [x] add a Script Editor preferences page for the selected external editor, executable override, background and minimap.
 - [x] add processed and optional raw grounded-asset options to standalone `.aworld` export.
 - [x] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [x] add shared DataStore and MemoryStore administration, durable local DataStore images, isolated mock/live folders, server and Studio local-provider settings, and a Default Studio dataset editor plugin.
@@ -70,7 +70,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] wire the future scene vocabulary: Skeleton, Bone, AnimationClip, Animator, AnimationTrack, Constraint, LevelOfDetail, Atmosphere, Clouds and Terrain are registered, reflected, persisted where their variable payload requires it, documented, and covered by scene suites.
 - [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
 - [x] render atmosphere, clouds and textured or procedural skies from each view's `WorldLighting::EnvironmentState`: the environment render-graph pass selects authored or compute modes, keeps signatures and resident targets per presentation slot, and consumes presentation-only scene values without feeding simulation.
-- [_] (user) review v0.21 and ensure everything is implemented for studio and such (e.g. editing shader scripts and using them)
+- [x] review v0.21 Studio coverage: ShaderScripts are editable in the shared source editor with GLSL autocomplete, save through their revisioned ECS property, round-trip in world/universe files and compile by name in the renderer; the full headless check covers the authored chain.
 
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).

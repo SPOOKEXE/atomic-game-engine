@@ -1,3 +1,5 @@
+#include "ExternalEditor.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -12,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <studio/CodeMetrics.hpp>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 
@@ -90,6 +93,7 @@ namespace studio {
 					if (!alive) {
 						ImGui::TextDisabled("the script this tab was editing has been deleted");
 					} else {
+						RefreshExternalScript(tab);
 						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 						ImGui::Text(
 							"%s   in %s",
@@ -103,6 +107,11 @@ namespace studio {
 						ImGui::SameLine();
 						if (ImGui::SmallButton("Save")) {
 							SaveScriptTab(tab);
+						}
+
+						ImGui::SameLine();
+						if (ImGui::SmallButton(tab.External.Active() ? "External Editor" : "Open External")) {
+							OpenScriptExternally(tab);
 						}
 
 						// This tab's own scene: a script in a world being edited is
@@ -202,6 +211,29 @@ namespace studio {
 							ImGui::Separator();
 						}
 
+						if (tab.External.Conflict) {
+							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+							ImGui::TextUnformatted("Studio and the external editor changed this file");
+							ImGui::PopStyleColor();
+							ImGui::SameLine();
+							if (ImGui::SmallButton("Use External")) {
+								std::string error;
+								if (AcceptExternalDocument(tab.External, tab.Text, error)) {
+									tab.Modified = true;
+								} else {
+									Say("external editor: " + error, engine::core::LogLevel::Warning);
+								}
+							}
+							ImGui::SameLine();
+							if (ImGui::SmallButton("Keep Studio")) {
+								std::string error;
+								if (!KeepStudioDocument(tab.External, tab.Text, error)) {
+									Say("external editor: " + error, engine::core::LogLevel::Warning);
+								}
+							}
+							ImGui::Separator();
+						}
+
 						// **The monospace face, which is what makes this a code
 						// editor rather than a text box.** Columns line up, an
 						// `l` is not an `I`, and indentation is a width rather
@@ -282,8 +314,11 @@ namespace studio {
 						// the code.
 						const float minimapWidth = 72.0f * Settings.Scale;
 						const float available = ImGui::GetContentRegionAvail().x;
-						const bool minimapFits = available > minimapWidth * 3.0f;
+						const bool minimapFits = Prefs.ScriptMinimap && available > minimapWidth * 3.0f;
 
+						if (Prefs.ScriptBackground.has_value()) {
+							ImGui::PushStyleColor(ImGuiCol_FrameBg, *Prefs.ScriptBackground);
+						}
 						ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 0));
 						const bool changed = CodeField(
 							"##text",
@@ -293,6 +328,9 @@ namespace studio {
 							-1.0f
 						);
 						ImGui::PopStyleColor();
+						if (Prefs.ScriptBackground.has_value()) {
+							ImGui::PopStyleColor();
+						}
 						DrawScriptSource(tab.Text, tab.Edit, fieldMin, ImGui::GetItemRectSize());
 
 						// Read here, while the field is still the last item,

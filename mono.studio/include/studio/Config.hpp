@@ -58,10 +58,33 @@
 #include <functional>
 #include <map>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace studio {
+	// A supported way to open a staged source document.
+	enum class ExternalEditorKind : uint8_t {
+		// The operating system's registered application for the file type.
+		System,
+		// Visual Studio Code's command-line launcher.
+		VisualStudioCode,
+		// The platform Notepad executable.
+		Notepad,
+		// A user-selected executable receiving the document path.
+		Custom,
+	};
+
+	// How many external editor choices the settings page presents.
+	inline constexpr size_t EXTERNAL_EDITOR_KIND_COUNT = 4;
+
+	// The selected editor and an optional executable override.
+	struct ExternalEditorSettings {
+		// Which launch convention to use.
+		ExternalEditorKind Kind = ExternalEditorKind::System;
+		// An executable path or command. Empty uses the selected preset's default.
+		std::string Executable;
+	};
 
 	// The folder every document below lives in.
 	//
@@ -245,6 +268,16 @@ namespace studio {
 		// play test cannot touch live data through an optimistic default.
 		engine::world::SharedStoreEnvironment DataStoreEnvironment =
 			engine::world::SharedStoreEnvironment::Mock;
+
+		// The external application used by source tabs and its executable override.
+		ExternalEditorSettings SourceEditor;
+
+		// A code-field background chosen independently of the panel theme. Empty
+		// follows the current theme.
+		std::optional<unsigned int> ScriptBackground;
+
+		// Whether code tabs reserve their right-hand minimap column.
+		bool ScriptMinimap = true;
 
 		// Whether a dragged handle snaps at all.
 		//

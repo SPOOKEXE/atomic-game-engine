@@ -38,6 +38,7 @@
 // that genuinely wants the type - `PanelSink` below installs itself into
 // `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
 // `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include "ExternalEditor.hpp"
 #include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
 
@@ -4524,6 +4525,80 @@ namespace studio {
 
 		tab.Modified = false;
 		MarkModified();
+	}
+
+	void Editor::OpenScriptExternally(OpenScript &tab) {
+		std::string error;
+		if (!tab.External.Active()) {
+			std::string documentName = "Source";
+			engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
+			Universe->Enter(tab.World, [&](Store &store) {
+				if (!store.Alive(tab.Instance)) {
+					return;
+				}
+				if (const Name name = store.InstanceNameOf(tab.Instance); name.IsValid()) {
+					documentName = std::string(name.Text());
+				}
+				if (!tab.Shader) {
+					language = engine::script::ActiveLanguageOf(store, tab.Instance);
+				}
+			});
+
+			const Name worldName = Universe->NameOf(tab.World);
+			const std::string_view extension = tab.Shader ? std::string_view("glsl")
+											   : language == engine::script::Language::JavaScript
+												   ? std::string_view("js")
+												   : std::string_view("luau");
+			const std::filesystem::path staged = ExternalDocumentPath(
+				ConfigPath("external-editor"),
+				worldName.IsValid() ? worldName.Text() : std::string_view("World"),
+				tab.Instance.Id,
+				documentName,
+				extension
+			);
+			if (!StageExternalDocument(staged, tab.Text, tab.External, error)) {
+				Say("external editor: " + error, LogLevel::Warning);
+				return;
+			}
+		}
+
+		if (!LaunchExternalEditor(Prefs.SourceEditor, tab.External.Path, error)) {
+			Say("external editor: " + error, LogLevel::Warning);
+			return;
+		}
+		Say("opened " + tab.External.Path.string());
+	}
+
+	void Editor::RefreshExternalScript(OpenScript &tab) {
+		if (!tab.External.Active()) {
+			return;
+		}
+		const double now = engine::core::Clock::Seconds();
+		if (now < tab.ExternalCheckAt) {
+			return;
+		}
+		tab.ExternalCheckAt = now + 0.25;
+
+		const bool wasConflict = tab.External.Conflict;
+		std::string reloaded;
+		std::string error;
+		switch (RefreshExternalDocument(tab.External, tab.Text, reloaded, error)) {
+		case ExternalRefresh::Reloaded:
+			tab.Text = std::move(reloaded);
+			tab.Modified = true;
+			break;
+		case ExternalRefresh::Conflict:
+			if (!wasConflict) {
+				Say("external editor conflict in " + tab.External.Path.string(), LogLevel::Warning);
+			}
+			break;
+		case ExternalRefresh::Failed:
+			Say("external editor disconnected: " + error, LogLevel::Warning);
+			tab.External = ExternalDocument{};
+			break;
+		case ExternalRefresh::Unchanged:
+			break;
+		}
 	}
 
 	void Editor::CloseScriptTab(size_t index) {

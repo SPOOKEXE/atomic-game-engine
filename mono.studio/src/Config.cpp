@@ -1,3 +1,5 @@
+#include "ExternalEditor.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 
@@ -289,6 +291,23 @@ namespace studio {
 				DataStoreEnvironment = *environment;
 			}
 		}
+		if (const auto sourceEditor = document.find("scriptEditor");
+			sourceEditor != document.end() && sourceEditor->is_object()) {
+			if (const auto kind = ExternalEditorKindOf(
+					Words(*sourceEditor, "externalEditor", Describe(SourceEditor.Kind))
+				)) {
+				SourceEditor.Kind = *kind;
+			}
+			SourceEditor.Executable = Words(*sourceEditor, "executable", SourceEditor.Executable);
+			ScriptMinimap = Flag(*sourceEditor, "minimap", ScriptMinimap);
+			if (const auto background = sourceEditor->find("background");
+				background != sourceEditor->end() && background->is_string()) {
+				if (const std::optional<unsigned int> parsed =
+						engine::ui::ParseColourText(background->get<std::string>())) {
+					ScriptBackground = *parsed;
+				}
+			}
+		}
 		SnapEnabled = Flag(document, "snap", SnapEnabled);
 		SnapDistance = JsonNumber(document, "gridStep", SnapDistance);
 		SnapDegrees = JsonNumber(document, "rotationStep", SnapDegrees);
@@ -528,6 +547,12 @@ namespace studio {
 				 {"root", DataStoreRoot},
 				 {"environment", engine::world::Describe(DataStoreEnvironment)},
 			 }},
+			{"scriptEditor",
+			 json{
+				 {"externalEditor", Describe(SourceEditor.Kind)},
+				 {"executable", SourceEditor.Executable},
+				 {"minimap", ScriptMinimap},
+			 }},
 			{"snap", SnapEnabled},
 			{"gridStep", SnapDistance},
 			{"rotationStep", SnapDegrees},
@@ -569,6 +594,9 @@ namespace studio {
 				 {"rendererUnfocused", RendererUnfocusedHz},
 			 }},
 		};
+		if (ScriptBackground.has_value()) {
+			document["scriptEditor"]["background"] = engine::ui::ColourText(*ScriptBackground);
+		}
 
 		if (DefaultWorldsChosen) {
 			document["defaultWorlds"] = DefaultWorlds;
