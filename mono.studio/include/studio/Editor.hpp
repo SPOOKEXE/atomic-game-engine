@@ -27,6 +27,7 @@
 // `world::Universe::Save` and `Load` are exactly that operation and already
 // exist; this program is the first caller with a reason to use them.
 
+#include <engine/assets/Animation.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Texture.hpp>
@@ -2755,6 +2756,7 @@ namespace studio {
 			std::vector<engine::core::Name> Sheets;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
+		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;
 
 		// The collision geometry of every mesh this session has taken in.
 		//
@@ -2785,6 +2787,7 @@ namespace studio {
 		// @since v0.11
 		size_t ContentShaders = 0;
 		size_t ContentMaterials = 0;
+		size_t ContentAnimations = 0;
 		//@}
 
 		// Fetches still in flight.

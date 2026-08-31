@@ -2,6 +2,7 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 
@@ -49,6 +50,7 @@ namespace client {
 		ObserveRevision<engine::effects::Decal>(store, revision);
 		ObserveRevision<engine::effects::Texture>(store, revision);
 		ObserveRevision<engine::scene::SkyboxTextures>(store, revision);
+		ObserveRevision<engine::scene::AnimationClip>(store, revision);
 		ObserveRevision<engine::ecs::Hierarchy>(store, revision);
 		return revision;
 	}
@@ -79,6 +81,12 @@ namespace client {
 		store.Each<const engine::scene::Sound>([&out, &seen](
 												   engine::ecs::Entity, const engine::scene::Sound &sound
 											   ) { Want(out, seen, sound.SoundId); });
+
+		store.Each<const engine::scene::AnimationClip>(
+			[&out, &seen](engine::ecs::Entity, const engine::scene::AnimationClip &clip) {
+				Want(out, seen, clip.Asset);
+			}
+		);
 
 		store.Each<const engine::scene::SurfaceAppearance>(
 			[&out, &seen](engine::ecs::Entity, const engine::scene::SurfaceAppearance &appearance) {

@@ -122,6 +122,9 @@ namespace engine::assets {
 		Vert,
 		Comp,
 		Glsl,
+
+		// Baked joint animation channels.
+		AAnim,
 	};
 
 	// The lowercase name for a form, which is also its canonical extension.

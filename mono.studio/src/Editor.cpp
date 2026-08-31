@@ -15,6 +15,7 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -2955,6 +2956,9 @@ namespace studio {
 			// falls back to the part's bound in silence. `ContentShapes` is the
 			// same argument `ContentMeshFacts` makes, one layer down.
 			engine::game::MergeCollisionShapes(store, ContentShapes);
+			for (const auto &[name, animation] : ContentAnimationFacts) {
+				(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
+			}
 		});
 	}
 

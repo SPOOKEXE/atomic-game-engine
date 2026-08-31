@@ -68,6 +68,9 @@ namespace engine::assets {
 		//
 		// @since v0.11
 		Shader = 9,
+
+		// Joint animation channels in the engine's baked `.aanim` format.
+		Animation = 10,
 	};
 
 	// Returns a stable, human-readable name for a kind.

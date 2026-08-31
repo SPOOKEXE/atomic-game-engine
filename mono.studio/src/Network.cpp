@@ -22,6 +22,7 @@
 // it - which is the same decision `Dashboard`'s minute buckets make, at the
 // resolution an interactive panel is read at.
 
+#include <engine/assets/Animation.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/ContentPolicy.hpp>
@@ -37,6 +38,7 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
@@ -523,6 +525,16 @@ namespace studio {
 				if (engine::assets::IsRuntimeReadable(asset->Name)) {
 					ContentShaders++;
 				}
+			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
+				engine::assets::AnimationData animation;
+				if (!engine::assets::Animation::Read(reader, animation)) {
+					continue;
+				}
+				EachOpenWorld([&name, &animation](engine::ecs::Store &store) {
+					(void)engine::render::RecordAnimation(store, name, animation);
+				});
+				ContentAnimationFacts[name.Id()] = animation;
+				ContentAnimations++;
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
 				if (!engine::assets::Material::Read(reader, material)) {
@@ -571,14 +583,15 @@ namespace studio {
 		// **Gated on the counts rather than on the queue**, so a pump that drains
 		// nothing new says nothing - otherwise this would be a line per frame for
 		// the life of the editor.
-		const size_t total = ContentMeshes + ContentTextures + ContentMaterials;
+		const size_t total = ContentMeshes + ContentTextures + ContentMaterials + ContentAnimations;
 		if (ContentPending.empty() && total != ContentReportedTotal) {
 			ContentReportedTotal = total;
 			ENGINE_INFO(
-				"assets: {} mesh(es), {} texture(s) and {} material(s) registered",
+				"assets: {} mesh(es), {} texture(s), {} material(s) and {} animation(s) registered",
 				ContentMeshes,
 				ContentTextures,
-				ContentMaterials
+				ContentMaterials,
+				ContentAnimations
 			);
 		}
 	}

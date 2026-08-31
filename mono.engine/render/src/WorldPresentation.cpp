@@ -10,6 +10,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
@@ -1018,6 +1019,16 @@ namespace engine::render {
 				for (size_t index = 0; index < count; index++) {
 					lists[index].Instances.clear();
 					lists[index].JointFrames.clear();
+				}
+			}
+		);
+		ecs::Components::Register<AnimationCatalogue>(
+			"render.AnimationCatalogue",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *catalogues = static_cast<AnimationCatalogue *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					catalogues[index].Clips.clear();
 				}
 			}
 		);

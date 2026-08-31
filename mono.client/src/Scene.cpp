@@ -14,7 +14,9 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -28,6 +30,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/script/Runtime.hpp>
@@ -1252,12 +1255,24 @@ namespace client {
 		// this frame's distance.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
+		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
+			(void)engine::scene::AdvanceAnimationTracks(world);
+		});
+		scheduler.Add("evaluate-animations", Phase::PreRender, [](Store &world) {
+			(void)engine::render::EvaluateAnimations(world);
+		});
+		scheduler.Add(
+			"resolve-bones",
+			Phase::PreRender,
+			[](Store &world) { (void)engine::scene::ResolveBones(world); },
+			SystemOrder{{}, {"evaluate-animations"}}
+		);
 
 		scheduler.Add(
 			"collect-instances",
 			Phase::PreRender,
 			engine::render::CollectInstances,
-			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons"}}
+			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons", "resolve-bones"}}
 		);
 		return true;
 	}
@@ -1442,12 +1457,24 @@ namespace client {
 		// list is built from. The collection dependencies state that order.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
+		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
+			(void)engine::scene::AdvanceAnimationTracks(world);
+		});
+		scheduler.Add("evaluate-animations", Phase::PreRender, [](Store &world) {
+			(void)engine::render::EvaluateAnimations(world);
+		});
+		scheduler.Add(
+			"resolve-bones",
+			Phase::PreRender,
+			[](Store &world) { (void)engine::scene::ResolveBones(world); },
+			SystemOrder{{}, {"evaluate-animations"}}
+		);
 
 		scheduler.Add(
 			"collect-instances",
 			Phase::PreRender,
 			engine::render::CollectInstances,
-			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons"}}
+			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons", "resolve-bones"}}
 		);
 	}
 }

@@ -1,3 +1,4 @@
+#include <engine/assets/Animation.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
@@ -23,6 +24,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -856,6 +858,22 @@ namespace client {
 					});
 				}
 				ContentMaterials++;
+			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
+				engine::assets::AnimationData animation;
+				if (!engine::assets::Animation::Read(reader, animation)) {
+					ENGINE_WARN("content: {} is not an animation this engine reads", asset->Name);
+					continue;
+				}
+				const auto record = [&name, &animation](engine::ecs::Store &store) {
+					(void)engine::render::RecordAnimation(store, name, animation);
+				};
+				for (const engine::world::WorldId id : Simulated) {
+					Universe_->Enter(id, record);
+				}
+				if (ReportedJoin) {
+					Universe_->Enter(Replicated, record);
+				}
+				ContentAnimations++;
 			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
 				// **Decoded and converted here, once.** The graph must never resample
 				// on the device thread, and a buffer converted per voice would pay
@@ -896,10 +914,12 @@ namespace client {
 		if (ContentRequested && ContentPending.empty() && !ContentReported) {
 			ContentReported = true;
 			ENGINE_INFO(
-				"content: {} mesh(es), {} texture(s), {} material(s) and {} sound(s) registered",
+				"content: {} mesh(es), {} texture(s), {} material(s), {} animation(s) and {} sound(s) "
+				"registered",
 				ContentMeshes,
 				ContentTextures,
 				ContentMaterials,
+				ContentAnimations,
 				ContentSounds
 			);
 		}

@@ -126,6 +126,7 @@ TEST_CASE("unknown is zero so an unwritten field makes no claim", "[assets]") {
 	// renumbering is not.
 	CHECK(static_cast<uint8_t>(AssetKind::Unknown) == 0);
 	CHECK(static_cast<uint8_t>(AssetKind::Mesh) == 1);
+	CHECK(static_cast<uint8_t>(AssetKind::Animation) == 10);
 	CHECK(static_cast<uint8_t>(AssetKind::Texture) == 2);
 	CHECK(static_cast<uint8_t>(AssetKind::Audio) == 3);
 }

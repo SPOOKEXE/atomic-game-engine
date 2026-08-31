@@ -4,6 +4,9 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Skinning.hpp>
 
+#include <algorithm>
+#include <cmath>
+
 namespace engine::scene {
 
 	ecs::Entity RigFor(const ecs::Store &store, ecs::Entity animator) {
@@ -68,6 +71,39 @@ namespace engine::scene {
 			return true;
 		}
 		return clip.Rig == skeleton.Rig;
+	}
+
+	size_t AdvanceAnimationTracks(ecs::Store &store) {
+		const float delta = store.Time().Delta;
+		size_t changed = 0;
+		store.Each<const AnimationTrack>([&](ecs::Entity entity, const AnimationTrack &track) {
+			AnimationTrack next = track;
+			if (track.Playing && std::isfinite(track.Speed) && std::isfinite(track.TimePosition)) {
+				const float advanced = track.TimePosition + delta * track.Speed;
+				if (std::isfinite(advanced)) {
+					next.TimePosition = advanced;
+				}
+			}
+
+			const float target = std::clamp(track.WeightTarget, 0.0f, 1.0f);
+			if (track.FadeTime <= 0.0f || !std::isfinite(track.FadeTime)) {
+				next.Weight = target;
+			} else {
+				const float step = delta / track.FadeTime;
+				if (track.Weight < target) {
+					next.Weight = std::min(track.Weight + step, target);
+				} else {
+					next.Weight = std::max(track.Weight - step, target);
+				}
+			}
+			next.Weight = std::clamp(next.Weight, 0.0f, 1.0f);
+
+			if (next.TimePosition != track.TimePosition || next.Weight != track.Weight) {
+				store.Set(entity, next);
+				changed++;
+			}
+		});
+		return changed;
 	}
 
 	ecs::ClassId AnimatorClass() {
