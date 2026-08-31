@@ -39,16 +39,9 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.21
 
-- [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
-- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
-- [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
-
 - [x] build out file format even more: save ShaderScripts and universe/world settings; support `.auniverse` manifests with separate `.aworld` files and optional recursive discovery that never walks links.
 - [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
 - [x] in CDN, support persisted trained compression dictionaries, configurable Zstd levels, compressed bundle traffic, and prepared-frame caching.
-- [_] add custom backgrounds and customization to the script editor too
-- [_] add external editor connections like vscode, notepad, etc.
-- [_] add settings for selected external editors
 - [x] let Luau and JavaScript plugins modify viewport grid colours, step/scale, major spacing, reach/size, strength, alpha, and X/Z offsets through the shared host surface.
 - [x] let plugins enable or disable visible particles without changing emitter state.
 - [x] keep render/debug/transport views native until replacement is useful; migrate the daily editing panels whose declarations benefit from plugin ownership.
@@ -59,6 +52,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add a universe loading widget that lists declared CDNs and requests permission before enabling HTTP content access.
 - [x] add universe loader tabs: General, Assets, Permissions, CDN, and Misc, with all-world and inherited per-world views.
 - [x] add `.auniverse` export options for verified processed assets and optional raw authoring files under `assets/`.
+- [_] add custom backgrounds and customization to the script editor too
+- [_] add external editor connections like vscode, notepad, etc.
+- [_] add settings for selected external editors
 - [_] add the matching grounded-assets options to standalone `.aworld` export.
 - [_] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [_] setup datastores and memorystores (sqlite, mongo, supabase, etc - make a selection with local and remote setups, server settings and studio settings). add mock options that separate into a mock/ folder vs live/ folder. make a dataset editor plugin too.
@@ -70,6 +66,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add a way for scripts to modify the ESC menu.
 - [_] gamepad and joystick support
 - [_] completely move to vulkan and establish cross platform supports.
+- [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
+- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
+- [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
 
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
