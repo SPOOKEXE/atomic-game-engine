@@ -73,6 +73,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] resolve the remaining graphics-backend direction: either require Vulkan everywhere and package MoltenVK for Apple targets, or retain native Metal and add a DXIL build/runtime translation path before enabling SDL GPU's Direct3D 12 backend.
 - [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
 
+- [_] review world export and world loading so that:
+	1. we can export a full game as a "project zip" which we can load on the server
+	2. we can connect to this server and download assets a we need them
+	3. support connecting cdns and doing a validation pass where we check if the cdns are configured
+	4. add export options in studio to also export cdn configs and such
+Ask user to plan this out further, expand into all domains and areas where we need to investigate before actually implementing.
+
 - [_] make C++ studio plugins which are separate from studio luau plugins. This way we can move all studio default toolbar stuff to the C++ studio plugins and support custom C++ / luau variants easier (e.g. we have a C++ core library with a luau bindings plugin for custom suites).
 - [_] add dynamic C++ plugin binding system also with dynamic luau bindings support to add/remove on plugin load/unload (and we auto collect these on plugin close).
 - [_] add plugin options such as: runs only in studio, runs only in playtest servers, runs only on playtest clients, etc (within studio).
