@@ -20,12 +20,15 @@ namespace engine::render {
 	//
 	// @since v0.20
 	struct DeviceCaps {
+		// Probed device features and backend shape.
+		//@{
 		bool HasCompute = false;
 		bool HasStorageTextures = false;
 		bool HasIndirectDraws = false;
 		bool HasTimestamps = false;
 		bool UnifiedQueue = true;
 		bool PrefersMSL = false;
+		//@}
 
 		// Portable limits used by built-in pipelines.
 		//@{
@@ -54,8 +57,11 @@ namespace engine::render {
 	//
 	// @since v0.20
 	struct CapabilityCheck {
+		// First missing feature and its associated format when applicable.
+		//@{
 		CapabilityStatus Status = CapabilityStatus::Ok;
 		graph::ResourceFormat Format = graph::ResourceFormat::RGBA8;
+		//@}
 
 		// Whether the node may run.
 		bool Accepted() const {
@@ -83,14 +89,20 @@ namespace engine::render {
 
 	// Why one richer built-in document was skipped.
 	struct PipelineTierRejection {
+		// Tier considered and its first unsupported requirement.
+		//@{
 		DefaultPipelineTier Tier = DefaultPipelineTier::A;
 		CapabilityCheck Cause{};
+		//@}
 	};
 
 	// The capability-driven built-in document choice.
 	struct PipelineTierDecision {
+		// Selected tier and richer tiers rejected before it.
+		//@{
 		DefaultPipelineTier Tier = DefaultPipelineTier::Unavailable;
 		std::vector<PipelineTierRejection> Fallthrough;
+		//@}
 	};
 
 	// Chooses the richest built-in document the device can execute.

@@ -139,6 +139,7 @@ namespace engine::render {
 		CommonSubexpressionElimination,
 	};
 
+	// Returns the stable diagnostic name of an optimizer stage.
 	const char *Describe(ShaderOptimizationKind kind);
 
 	// The observable effect of one optimizer stage.

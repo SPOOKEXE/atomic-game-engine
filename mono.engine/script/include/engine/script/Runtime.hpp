@@ -131,20 +131,24 @@ namespace engine::script {
 		Automatic = 1u << 15,
 	};
 
+	// Combines independently grantable capabilities.
 	constexpr ScriptCapabilities operator|(ScriptCapabilities left, ScriptCapabilities right) {
 		return static_cast<ScriptCapabilities>(static_cast<uint16_t>(left) | static_cast<uint16_t>(right));
 	}
 
+	// Adds capabilities to an existing set.
 	constexpr ScriptCapabilities &operator|=(ScriptCapabilities &left, ScriptCapabilities right) {
 		left = left | right;
 		return left;
 	}
 
+	// Reports whether every required capability is granted.
 	constexpr bool HasCapabilities(ScriptCapabilities granted, ScriptCapabilities required) {
 		return (static_cast<uint16_t>(granted) & static_cast<uint16_t>(required)) ==
 			   static_cast<uint16_t>(required);
 	}
 
+	// Returns the stable diagnostic name of one capability.
 	constexpr std::string_view CapabilityName(ScriptCapabilities capability) {
 		switch (capability) {
 		case ScriptCapabilities::World:
@@ -250,6 +254,7 @@ namespace engine::script {
 		// grants, so a host can construct a genuinely narrower sandbox.
 		ScriptCapabilities Capabilities = ScriptCapabilities::Automatic;
 
+		// Resolves an automatic profile or returns the explicitly granted set.
 		constexpr ScriptCapabilities EffectiveCapabilities() const {
 			return HasCapabilities(Capabilities, ScriptCapabilities::Automatic)
 					   ? CapabilitiesFor(Role, Origin)
@@ -455,8 +460,10 @@ namespace engine::script {
 		// @since v0.20
 		class StackGuard {
 		  public:
+			// Maximum nested crossings through one runtime.
 			static constexpr unsigned MAX_DEPTH = 64;
 
+			// Enters one host/script boundary for a mutable runtime.
 			StackGuard(Runtime &runtime) : RuntimeRef(runtime) {
 				if (RuntimeRef.Depth >= MAX_DEPTH) {
 					RuntimeRef.Error = "script recursion limit exceeded";
@@ -467,6 +474,7 @@ namespace engine::script {
 				Allowed = true;
 			}
 
+			// Enters one host/script boundary for a logically const call.
 			StackGuard(const Runtime &runtime) : RuntimeRef(const_cast<Runtime &>(runtime)) {
 				if (RuntimeRef.Depth >= MAX_DEPTH) {
 					RuntimeRef.Error = "script recursion limit exceeded";
@@ -483,6 +491,7 @@ namespace engine::script {
 				}
 			}
 
+			// Reports whether the recursion limit permitted this entry.
 			operator bool() const {
 				return Allowed;
 			}
@@ -509,6 +518,7 @@ namespace engine::script {
 			return ScriptCapabilitiesValue;
 		}
 
+		// Reports whether this runtime grants every required capability.
 		bool Can(ScriptCapabilities required) const {
 			return HasCapabilities(ScriptCapabilitiesValue, required);
 		}

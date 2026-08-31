@@ -143,8 +143,11 @@ namespace engine::ecs {
 		// Native and byte-sized formats start at bit zero. Sub-byte fields may
 		// share the same byte.
 		FieldPacking Packing = FieldPacking::Native;
+		// Bit position within the field byte and total resident storage width.
+		//@{
 		uint8_t BitOffset = 0;
 		uint32_t StorageBits = 0;
+		//@}
 	};
 
 	// A component type described at run time.
@@ -323,10 +326,12 @@ namespace engine::ecs {
 		// Replaces the metadata tags on one field of a described component.
 		static bool
 		SetFieldTags(ComponentId component, core::Name field, std::span<const std::string_view> tags);
+		// Changes whether Studio exposes one described field.
 		static bool SetFieldExposed(ComponentId component, core::Name field, bool exposed);
 
 		// Returns a copy so callers do not retain a view across registry access.
 		static std::vector<std::string> Tags(ComponentId component);
+		// Returns a copy of one field's descriptive metadata tags.
 		static std::vector<std::string> FieldTags(ComponentId component, core::Name field);
 
 		// Every described component, in registration order.

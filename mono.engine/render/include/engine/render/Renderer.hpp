@@ -507,8 +507,10 @@ namespace engine::render {
 		// Spawn configuration and device-owned rate counters for this block.
 		// These are separate from EmitterBlock so the host fallback can stream its
 		// compact runtime row without pulling curves and transforms into cache.
+		//@{
 		const effects::EmitterSpawnState *Spawn = nullptr;
 		const effects::EmitterRuntime *Runtime = nullptr;
+		//@}
 
 		// Which block this is, from `effects::EmitterSlot::Index`.
 		//
@@ -1095,19 +1097,34 @@ namespace engine::render {
 	// @since v0.19
 	// @client
 	struct GpuMemoryStatistics {
+		// Current, peak, and cumulative logical payload bytes.
+		//@{
 		uint64_t LiveBytes = 0;
 		uint64_t PeakBytes = 0;
 		uint64_t AllocatedBytes = 0;
 		uint64_t ReleasedBytes = 0;
+		//@}
+
+		// Current payload bytes by resource family.
+		//@{
 		uint64_t BufferBytes = 0;
 		uint64_t TransferBufferBytes = 0;
 		uint64_t TextureBytes = 0;
+		//@}
+
+		// Current live resources by family.
+		//@{
 		uint64_t Buffers = 0;
 		uint64_t TransferBuffers = 0;
 		uint64_t Textures = 0;
+		//@}
+
+		// Cumulative creations by resource family.
+		//@{
 		uint64_t BufferAllocations = 0;
 		uint64_t TransferBufferAllocations = 0;
 		uint64_t TextureAllocations = 0;
+		//@}
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.

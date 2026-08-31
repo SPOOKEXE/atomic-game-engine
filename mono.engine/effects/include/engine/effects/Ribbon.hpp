@@ -248,11 +248,16 @@ namespace engine::effects {
 	//
 	// @since v0.20
 	struct Decal {
+		// Appearance, draw order, and projected face.
+		//@{
 		core::Color3 Colour{1.0f, 1.0f, 1.0f};
 		core::Name Image;
 		float Transparency = 0.0f;
 		int32_t ZIndex = 1;
 		scene::NormalId Face = scene::NormalId::Front;
+		//@}
+
+		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -263,15 +268,28 @@ namespace engine::effects {
 	//
 	// @since v0.20
 	struct Texture {
+		// Appearance and image source.
+		//@{
 		core::Color3 Colour{1.0f, 1.0f, 1.0f};
 		core::Name Image;
 		float Transparency = 0.0f;
+		//@}
+
+		// Part-space tiling and scrolling controls.
+		//@{
 		float StudsPerTileU = 2.0f;
 		float StudsPerTileV = 2.0f;
 		float OffsetStudsU = 0.0f;
 		float OffsetStudsV = 0.0f;
+		//@}
+
+		// Draw order and projected face.
+		//@{
 		int32_t ZIndex = 1;
 		scene::NormalId Face = scene::NormalId::Front;
+		//@}
+
+		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[3] = {};
 	};
 

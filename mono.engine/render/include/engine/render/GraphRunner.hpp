@@ -117,6 +117,8 @@ namespace engine::render {
 		//
 		// @param table The handlers. Borrowed, so it has to outlive the runner -
 		//              in practice both belong to the renderer.
+		// @param tier The profiling detail enabled for this run.
+		// @param profile Hooks that open and close backend measurements.
 		explicit GraphRunner(
 			const NodeTable &table, ProfilingTier tier = ProfilingTier::Cpu, NodeProfileHooks profile = {}
 		)

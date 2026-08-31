@@ -666,6 +666,7 @@ namespace engine::control {
 		}
 	}
 
+	// Builds the component catalogue resource exposed through MCP.
 	inline json ComponentCatalogue() {
 		json out = json::array();
 		for (uint32_t index = 0; index < static_cast<uint32_t>(ecs::Components::Count()); index++) {

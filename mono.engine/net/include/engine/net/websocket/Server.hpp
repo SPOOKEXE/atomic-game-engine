@@ -19,8 +19,10 @@
 
 namespace engine::net::websocket {
 
+	// Stable identity for one accepted peer.
 	using ConnectionId = uint64_t;
 
+	// Resource limits for a WebSocket listener.
 	struct ServerSettings {
 		// The maximum number of handshaken and handshaking peers together.
 		size_t MaximumConnections = 10000;
@@ -32,18 +34,26 @@ namespace engine::net::websocket {
 		size_t WorkerThreads = 1;
 	};
 
+	// Events delivered in connection order by the server worker.
 	struct Callbacks {
+		// Connection, frame, and disconnection handlers.
+		//@{
 		std::function<void(ConnectionId)> Open;
 		std::function<void(ConnectionId, std::span<const std::byte>, bool)> Message;
 		std::function<void(ConnectionId)> Close;
+		//@}
 	};
 
+	// Owns a running asynchronous WebSocket listener.
 	class Server {
 	  public:
 		virtual ~Server() = default;
 
+		// Returns the bound local endpoint.
 		virtual Endpoint Local() const = 0;
+		// Reports whether the listener remains open.
 		virtual bool Open() const = 0;
+		// Returns the current peer count.
 		virtual size_t Connections() const = 0;
 
 		// Queues one server-to-client frame without blocking the caller.
@@ -54,5 +64,6 @@ namespace engine::net::websocket {
 		virtual void Close(ConnectionId connection) = 0;
 	};
 
+	// Starts a listener on `port`, returning null when setup fails.
 	std::unique_ptr<Server> Listen(uint16_t port, Callbacks callbacks, const ServerSettings &settings = {});
 }

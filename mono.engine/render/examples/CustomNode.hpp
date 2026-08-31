@@ -16,8 +16,11 @@ namespace engine::render::examples {
 
 	// Observable state shared by the example handler and its caller.
 	struct CustomNodeState {
+		// Device lifecycle state and completed execution count.
+		//@{
 		bool DeviceReady = false;
 		size_t Executions = 0;
+		//@}
 	};
 
 	// Registers `example-marker` and installs its native handler.

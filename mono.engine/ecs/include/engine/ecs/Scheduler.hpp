@@ -57,7 +57,9 @@ namespace engine::ecs {
 	// let reusable module installers order against host-specific systems when
 	// those systems are present.
 	struct SystemOrder {
+		// Creates an ordering declaration from required and optional edges.
 		SystemOrder() = default;
+		// Creates an ordering declaration from required and optional edges.
 		SystemOrder(
 			std::vector<std::string> before,
 			std::vector<std::string> after,
@@ -67,10 +69,17 @@ namespace engine::ecs {
 			: Before(std::move(before)), After(std::move(after)), BeforeIfPresent(std::move(beforeIfPresent)),
 			  AfterIfPresent(std::move(afterIfPresent)) {}
 
+		// Required systems that must run after and before this system, respectively.
+		//@{
 		std::vector<std::string> Before;
 		std::vector<std::string> After;
+		//@}
+
+		// Optional counterparts to `Before` and `After`.
+		//@{
 		std::vector<std::string> BeforeIfPresent;
 		std::vector<std::string> AfterIfPresent;
+		//@}
 	};
 
 	// Result of validating the authored system graph.
@@ -85,9 +94,12 @@ namespace engine::ecs {
 
 	// One actionable schedule validation result.
 	struct SystemScheduleIssue {
+		// The validation result and the edge that caused it.
+		//@{
 		SystemScheduleStatus Status = SystemScheduleStatus::Ready;
 		std::string System;
 		std::string Dependency;
+		//@}
 	};
 
 	// Runs named systems in fixed phase order and dependency waves.
@@ -106,6 +118,7 @@ namespace engine::ecs {
 		// and a system that captures nothing is one the L13 bindings can
 		// register, a recording can replay, and a second world can reuse.
 		using System = std::function<void(Store &)>;
+		// A read-only system eligible to share a dependency wave.
 		using ParallelSystem = std::function<void(const Store &)>;
 
 		// `name` is copied, so a caller may build one. It becomes the span

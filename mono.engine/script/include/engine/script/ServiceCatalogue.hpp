@@ -146,6 +146,7 @@ namespace engine::script {
 		ScriptCapabilities RequiredCapabilities = ScriptCapabilities::World;
 	};
 
+	// Reports whether a grant set permits installation of one service.
 	constexpr bool Permits(const ServiceDefinition &service, ScriptCapabilities granted) {
 		return HasCapabilities(granted, service.RequiredCapabilities);
 	}

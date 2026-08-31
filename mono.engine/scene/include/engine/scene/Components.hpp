@@ -900,8 +900,10 @@ namespace engine::scene {
 		core::Color3 Colour{1.0f, 1.0f, 1.0f};
 
 		// Emission is tinted and scaled per surface. The map remains optional.
+		//@{
 		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
 		float EmissiveStrength = 1.0f;
+		//@}
 
 		// Below this alpha a fragment is discarded rather than blended, when
 		// `Mode` is `Clip`.
@@ -910,6 +912,7 @@ namespace engine::scene {
 		// How the alpha channel of `ColourMap` is treated.
 		//
 		AlphaMode Mode = AlphaMode::Overlay;
+		// Texture filtering override for this surface.
 		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
@@ -1013,11 +1016,13 @@ namespace engine::scene {
 		// The largest image a renderer may allocate for this camera. The default
 		// keeps an editor viewport from allocating beyond a full HD frame.
 		uint32_t MaxImageWidth = 1920;
+		// Maximum render-target height in pixels.
 		uint32_t MaxImageHeight = 1080;
 
 		// A non-zero pair replaces the target size. This is useful for scripts
 		// that need a stable capture size independent of the host window.
 		uint32_t ImageWidth = 0;
+		// Requested render-target height, or zero for the host height.
 		uint32_t ImageHeight = 0;
 	};
 

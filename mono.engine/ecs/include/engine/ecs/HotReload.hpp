@@ -16,8 +16,10 @@
 #include <vector>
 
 namespace engine::ecs {
+	// Tracks the active semantic revision of each migrated component.
 	class ComponentReloads {
 	  public:
+		// Migrates every `T` value when `revision` is newer than the active one.
 		template <class T, class Migration>
 		bool Apply(Store &store, uint64_t revision, Migration &&migration) {
 			const ComponentId component = Components::Of<T>();
@@ -42,6 +44,7 @@ namespace engine::ecs {
 			return true;
 		}
 
+		// Returns the active semantic revision for `T`, or zero before migration.
 		template <class T> uint64_t Current() const {
 			const ComponentId component = Components::Of<T>();
 			const auto found = std::lower_bound(
