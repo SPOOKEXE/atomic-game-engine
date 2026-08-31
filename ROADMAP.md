@@ -76,7 +76,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 
-- [_] datastore backend + assign backend adapters to datastores themselves: class DatastoreRouter (router, high level api), class DatastoreAdapter (router => data storage), class DataStorageServices (sqlite, sql, mongodb, etc)
+- [x] add the datastore routing seam: `DataStoreRouter` assigns stable datastore names to `DataStoreAdapter` providers owned by `DataStorageServices`; server and Studio persistence use its built-in atomic file adapter, while remote provider choices remain the current-work item above.
 
 ### v0.22
 

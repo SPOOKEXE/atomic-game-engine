@@ -67,6 +67,7 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -3300,9 +3301,10 @@ namespace studio {
 		// rather than out of this - see `SaveConfiguration`.
 		Preferences Prefs;
 
-		// The local durable provider's active file and last written image.
+		// The durable provider route, active file and last written image.
 		// MemoryStore deliberately has no file: it expires with this process.
 		//@{
+		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
 		std::filesystem::path ActiveDataStorePath;
 		std::vector<engine::world::SharedStoreEntry> SavedDataStoreEntries;
 		std::string DataStoreError;

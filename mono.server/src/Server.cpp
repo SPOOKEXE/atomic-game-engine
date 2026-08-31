@@ -31,8 +31,8 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
-#include <engine/world/SharedStoreFile.hpp>
 
 #include <algorithm>
 #include <array>
@@ -613,6 +613,7 @@ namespace server {
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
 		DataStoreReady = false;
+		DataStorePersistence.reset();
 
 		if (!Settings.AssetsDirectory.empty()) {
 			engine::core::Paths::SetAssetsOverride(Settings.AssetsDirectory);
@@ -814,29 +815,45 @@ namespace server {
 
 	bool Server::LoadDataStore() {
 		PersistedDataStore.clear();
+		DataStorePersistence.reset();
 		if (Settings.DataStoreRoot.empty()) {
 			DataStoreReady = true;
 			return true;
 		}
 
-		const std::filesystem::path path = engine::world::SharedStorePath(
-			Settings.DataStoreRoot, Settings.DataStoreEnvironment, engine::world::BusKind::DataStore
+		const engine::core::Name adapterName(engine::world::FILE_DATASTORE_ADAPTER);
+		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
+		auto persistence = std::make_unique<engine::world::DataStoreRouter>();
+		if (!persistence->AddAdapter(
+				adapterName,
+				engine::world::MakeFileDataStoreAdapter(Settings.DataStoreRoot, Settings.DataStoreEnvironment)
+			) ||
+			!persistence->Assign(storeName, adapterName)) {
+			ENGINE_ERROR("could not configure the DataStore persistence route");
+			return false;
+		}
+
+		const std::filesystem::path path = engine::world::DataStoreFilePath(
+			Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
 		);
 		std::string error;
-		const engine::world::SharedStoreFileStatus loaded = engine::world::LoadSharedStoreFile(
-			path, engine::world::BusKind::DataStore, PersistedDataStore, error
-		);
-		if (loaded == engine::world::SharedStoreFileStatus::NotFound) {
+		const engine::world::DataStoreStatus loaded = persistence->Load(storeName, PersistedDataStore, error);
+		if (loaded == engine::world::DataStoreStatus::NotFound) {
 			ENGINE_INFO(
 				"DataStore {} environment is empty at '{}'",
 				engine::world::Describe(Settings.DataStoreEnvironment),
 				path.string()
 			);
+			DataStorePersistence = std::move(persistence);
 			DataStoreReady = true;
 			return true;
 		}
-		if (loaded != engine::world::SharedStoreFileStatus::Ok) {
-			ENGINE_ERROR("could not load DataStore '{}': {}", path.string(), error);
+		if (loaded != engine::world::DataStoreStatus::Ok) {
+			ENGINE_ERROR(
+				"could not load DataStore '{}': {}",
+				path.string(),
+				error.empty() ? engine::world::Describe(loaded) : error
+			);
 			PersistedDataStore.clear();
 			return false;
 		}
@@ -847,12 +864,13 @@ namespace server {
 			return false;
 		}
 		ENGINE_INFO("loaded {} DataStore record(s) from '{}'", PersistedDataStore.size(), path.string());
+		DataStorePersistence = std::move(persistence);
 		DataStoreReady = true;
 		return true;
 	}
 
 	bool Server::FlushDataStore() {
-		if (!DataStoreReady || Settings.DataStoreRoot.empty()) {
+		if (!DataStoreReady || DataStorePersistence == nullptr) {
 			return true;
 		}
 		const auto records = Worlds().SharedStoreEntries(engine::world::BusKind::DataStore);
@@ -860,13 +878,18 @@ namespace server {
 			return true;
 		}
 
-		const std::filesystem::path path = engine::world::SharedStorePath(
-			Settings.DataStoreRoot, Settings.DataStoreEnvironment, engine::world::BusKind::DataStore
+		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
+		const std::filesystem::path path = engine::world::DataStoreFilePath(
+			Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
 		);
 		std::string error;
-		if (engine::world::SaveSharedStoreFile(path, engine::world::BusKind::DataStore, records, error) !=
-			engine::world::SharedStoreFileStatus::Ok) {
-			ENGINE_ERROR("could not persist DataStore '{}': {}", path.string(), error);
+		const engine::world::DataStoreStatus status = DataStorePersistence->Save(storeName, records, error);
+		if (status != engine::world::DataStoreStatus::Ok) {
+			ENGINE_ERROR(
+				"could not persist DataStore '{}': {}",
+				path.string(),
+				error.empty() ? engine::world::Describe(status) : error
+			);
 			return false;
 		}
 		PersistedDataStore = records;
@@ -2476,6 +2499,7 @@ namespace server {
 		}
 
 		Driver_.reset();
+		DataStorePersistence.reset();
 		DataStoreReady = false;
 		engine::parallel::Jobs::Stop();
 	}

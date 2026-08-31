@@ -17,11 +17,11 @@
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/DataStore.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Lifecycle.hpp>
 #include <engine/world/Recording.hpp>
-#include <engine/world/SharedStoreFile.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
@@ -955,6 +955,7 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
 		std::vector<engine::world::SharedStoreEntry> PersistedDataStore;
 		bool DataStoreReady = false;
 

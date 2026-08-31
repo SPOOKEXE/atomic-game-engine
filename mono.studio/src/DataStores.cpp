@@ -1,5 +1,5 @@
 #include <engine/core/Log.hpp>
-#include <engine/world/SharedStoreFile.hpp>
+#include <engine/world/DataStore.hpp>
 
 #include <imgui.h>
 #include <studio/Config.hpp>
@@ -18,6 +18,7 @@ namespace studio {
 		}
 
 		DataStoreReady = false;
+		DataStorePersistence.reset();
 		ActiveDataStorePath.clear();
 		SavedDataStoreEntries.clear();
 		DataStoreError.clear();
@@ -26,23 +27,33 @@ namespace studio {
 			return true;
 		}
 
-		ActiveDataStorePath = engine::world::SharedStorePath(
-			DataStoreRoot(), Prefs.DataStoreEnvironment, engine::world::BusKind::DataStore
-		);
+		const engine::core::Name adapterName(engine::world::FILE_DATASTORE_ADAPTER);
+		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
+		auto persistence = std::make_unique<engine::world::DataStoreRouter>();
+		if (!persistence->AddAdapter(
+				adapterName,
+				engine::world::MakeFileDataStoreAdapter(DataStoreRoot(), Prefs.DataStoreEnvironment)
+			) ||
+			!persistence->Assign(storeName, adapterName)) {
+			DataStoreError = "could not configure the datastore persistence route";
+			ENGINE_ERROR("studio datastore: {}", DataStoreError);
+			return false;
+		}
+
+		ActiveDataStorePath =
+			engine::world::DataStoreFilePath(DataStoreRoot(), Prefs.DataStoreEnvironment, storeName);
 
 		std::vector<engine::world::SharedStoreEntry> loaded;
 		std::string error;
-		const engine::world::SharedStoreFileStatus status = engine::world::LoadSharedStoreFile(
-			ActiveDataStorePath, engine::world::BusKind::DataStore, loaded, error
-		);
-		if (status != engine::world::SharedStoreFileStatus::Ok &&
-			status != engine::world::SharedStoreFileStatus::NotFound) {
+		const engine::world::DataStoreStatus status = persistence->Load(storeName, loaded, error);
+		if (status != engine::world::DataStoreStatus::Ok &&
+			status != engine::world::DataStoreStatus::NotFound) {
 			DataStoreError = error.empty() ? engine::world::Describe(status) : std::move(error);
 			ENGINE_ERROR("studio datastore: {}", DataStoreError);
 			return false;
 		}
 
-		if (status == engine::world::SharedStoreFileStatus::Ok) {
+		if (status == engine::world::DataStoreStatus::Ok) {
 			if (Universe->ReplaceSharedStoreEntries(engine::world::BusKind::DataStore, loaded) !=
 				engine::world::BusStatus::Ok) {
 				DataStoreError = "the decoded image was refused by the universe";
@@ -54,6 +65,7 @@ namespace studio {
 			SavedDataStoreEntries = Universe->SharedStoreEntries(engine::world::BusKind::DataStore);
 		}
 
+		DataStorePersistence = std::move(persistence);
 		DataStoreReady = true;
 		NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
 		ENGINE_INFO("studio datastore: {}", ActiveDataStorePath.string());
@@ -61,7 +73,7 @@ namespace studio {
 	}
 
 	bool Editor::FlushDataStore() {
-		if (!DataStoreReady || Universe == nullptr || ActiveDataStorePath.empty()) {
+		if (!DataStoreReady || Universe == nullptr || DataStorePersistence == nullptr) {
 			return true;
 		}
 
@@ -72,10 +84,9 @@ namespace studio {
 		}
 
 		std::string error;
-		const engine::world::SharedStoreFileStatus status = engine::world::SaveSharedStoreFile(
-			ActiveDataStorePath, engine::world::BusKind::DataStore, current, error
-		);
-		if (status != engine::world::SharedStoreFileStatus::Ok) {
+		const engine::world::DataStoreStatus status =
+			DataStorePersistence->Save(engine::core::Name(engine::world::DEFAULT_DATASTORE), current, error);
+		if (status != engine::world::DataStoreStatus::Ok) {
 			DataStoreError = error.empty() ? engine::world::Describe(status) : std::move(error);
 			ENGINE_ERROR("studio datastore: {}", DataStoreError);
 			return false;
@@ -117,12 +128,13 @@ namespace studio {
 			(void)FlushDataStore();
 		}
 
-		const std::filesystem::path shown =
-			ActiveDataStorePath.empty()
-				? engine::world::SharedStorePath(
-					  DataStoreRoot(), Prefs.DataStoreEnvironment, engine::world::BusKind::DataStore
-				  )
-				: ActiveDataStorePath;
+		const std::filesystem::path shown = ActiveDataStorePath.empty()
+												? engine::world::DataStoreFilePath(
+													  DataStoreRoot(),
+													  Prefs.DataStoreEnvironment,
+													  engine::core::Name(engine::world::DEFAULT_DATASTORE)
+												  )
+												: ActiveDataStorePath;
 		ImGui::TextWrapped("%s", shown.string().c_str());
 		if (!DataStoreError.empty()) {
 			ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", DataStoreError.c_str());
