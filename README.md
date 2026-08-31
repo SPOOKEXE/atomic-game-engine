@@ -55,7 +55,7 @@ Development builds and media are in the discord server below.
 
 ## Version
 
-Current Version: **v0.19.0**
+Current Version: **v0.20.0**
 
 Project Start Date: **1st August 2026**
 
