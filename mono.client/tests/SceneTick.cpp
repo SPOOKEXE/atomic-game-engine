@@ -34,6 +34,7 @@
 #include <client/Scene.hpp>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 
 TEST_SUITE_ID("client.scene.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
@@ -574,7 +575,17 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// script path now installs editable collision refresh, integration, contacts,
 	// gravity and abandoned-owner reclamation. Without those five a scripted
 	// Humanoid produced velocity that no system ever integrated.
-	REQUIRE(timings.size() == 27);
+	//
+	// **And thirty for the animation pipeline.** Track clocks advance in
+	// `Simulation`; clip sampling and bone resolution are presentation work, so
+	// a suspended Studio scene retains and redraws its last simulated pose.
+	REQUIRE(timings.size() == 30);
+	const auto hasTiming = [&timings](const std::string_view name) {
+		return std::ranges::any_of(timings, [name](const auto &timing) { return timing.Name == name; });
+	};
+	CHECK(hasTiming("advance-animation-tracks"));
+	CHECK(hasTiming("evaluate-animations"));
+	CHECK(hasTiming("resolve-bones"));
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);
