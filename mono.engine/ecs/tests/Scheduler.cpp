@@ -1,10 +1,13 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -20,6 +23,8 @@ using engine::ecs::Entity;
 using engine::ecs::Phase;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
+using engine::ecs::SystemOrder;
+using engine::ecs::SystemScheduleStatus;
 
 namespace scheduler_test {
 	struct Health {
@@ -45,40 +50,180 @@ TEST_CASE("phases run in order regardless of registration order", "[scheduler]")
 	REQUIRE(order == std::vector<std::string>{"a", "b", "c", "d"});
 }
 
-// **The half the header used to deny, and every host in the repository relies
-// on it.** `client::InstallPresentation` puts `resolve-materials` ahead of
-// `collect-instances` in one phase because the second reads what the first
-// writes, and `sync-rendered` ahead of `aim-surface-cameras` for the same
-// reason. That was true and undeclared, which made it a trap: a reader was told
-// the order they could see meant nothing.
-//
-// Registered in a deliberately unhelpful order - reverse alphabetical, so a
-// scheduler that sorted by name would come out the other way round and a
-// scheduler that grouped by phase alone could come out either.
-TEST_CASE("systems in one phase run in the order they were added", "[scheduler]") {
+TEST_CASE("the complete engine tick exposes its seven fixed phases", "[scheduler]") {
+	CHECK(engine::ecs::GetPhaseName(Phase::Input) == "input");
+	CHECK(engine::ecs::GetPhaseName(Phase::Simulation) == "simulation");
+	CHECK(engine::ecs::GetPhaseName(Phase::Physics) == "physics");
+	CHECK(engine::ecs::GetPhaseName(Phase::Animation) == "animation");
+	CHECK(engine::ecs::GetPhaseName(Phase::Replication) == "replication");
+	CHECK(engine::ecs::GetPhaseName(Phase::RenderPreparation) == "render preparation");
+	CHECK(engine::ecs::GetPhaseName(Phase::Render) == "render");
+}
+
+TEST_CASE("a system body hot reload keeps its schedule position", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	std::vector<std::string> order;
+	scheduler.Add("first", Phase::Simulation, [&](Store &) { order.emplace_back("old"); });
+	scheduler.Add(
+		"second",
+		Phase::Simulation,
+		[&](Store &) { order.emplace_back("second"); },
+		SystemOrder{{}, {"first"}}
+	);
+
+	REQUIRE(scheduler.SystemRevision("first") == 1);
+	REQUIRE(scheduler.Replace("first", 2, [&](Store &) { order.emplace_back("new"); }));
+	REQUIRE_FALSE(scheduler.Replace("first", 2, [](Store &) {}));
+	REQUIRE(scheduler.SystemRevision("first") == 2);
+	scheduler.Tick(store, 0.016f);
+	CHECK(order == std::vector<std::string>{"new", "second"});
+}
+
+TEST_CASE("before and after edges order systems within one phase", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;
 	std::vector<std::string> order;
 
+	// Registered against the requested order so insertion cannot satisfy it.
+	scheduler.Add("finish", Phase::PreRender, [&](Store &) { order.emplace_back("finish"); });
+	scheduler.Add(
+		"consume",
+		Phase::PreRender,
+		[&](Store &) { order.emplace_back("consume"); },
+		SystemOrder{{"finish"}, {"derive"}}
+	);
 	scheduler.Add("derive", Phase::PreRender, [&](Store &) { order.emplace_back("derive"); });
-	scheduler.Add("consume", Phase::PreRender, [&](Store &) { order.emplace_back("consume"); });
-	scheduler.Add("also-consume", Phase::PreRender, [&](Store &) { order.emplace_back("also-consume"); });
 
 	scheduler.Tick(store, 0.016f);
-
-	REQUIRE(order == std::vector<std::string>{"derive", "consume", "also-consume"});
-
-	// And it survives a second run, because a scheduler that rebuilt its list
-	// per tick would be free to reorder it and nothing else here would notice.
-	order.clear();
-	scheduler.Tick(store, 0.016f);
-	REQUIRE(order == std::vector<std::string>{"derive", "consume", "also-consume"});
+	REQUIRE(order == std::vector<std::string>{"derive", "consume", "finish"});
 }
 
-// **Phase order still wins**, which is the half that was always declared: a
-// system added first but placed later runs later. The two rules meet here, and
-// this is what stops "registration order is a contract" being read as
-// "registration order is *the* contract".
+TEST_CASE("invalid system dependencies have actionable validation results", "[scheduler]") {
+	SECTION("unknown system") {
+		Scheduler scheduler;
+		scheduler.Add("consumer", Phase::Simulation, [](Store &) {}, SystemOrder{{}, {"missing"}});
+		const auto issue = scheduler.Validate();
+		CHECK(issue.Status == SystemScheduleStatus::UnknownDependency);
+		CHECK(issue.System == "consumer");
+		CHECK(issue.Dependency == "missing");
+	}
+
+	SECTION("cross phase") {
+		Scheduler scheduler;
+		scheduler.Add("input", Phase::Input, [](Store &) {});
+		scheduler.Add("simulation", Phase::Simulation, [](Store &) {}, SystemOrder{{}, {"input"}});
+		CHECK(scheduler.Validate().Status == SystemScheduleStatus::CrossPhaseDependency);
+	}
+
+	SECTION("cycle") {
+		Scheduler scheduler;
+		scheduler.Add("a", Phase::Simulation, [](Store &) {}, SystemOrder{{}, {"b"}});
+		scheduler.Add("b", Phase::Simulation, [](Store &) {}, SystemOrder{{}, {"a"}});
+		CHECK(scheduler.Validate().Status == SystemScheduleStatus::Cycle);
+	}
+
+	SECTION("duplicate name") {
+		Scheduler scheduler;
+		scheduler.Add("same", Phase::Simulation, [](Store &) {});
+		scheduler.Add("same", Phase::Simulation, [](Store &) {});
+		CHECK(scheduler.Validate().Status == SystemScheduleStatus::DuplicateName);
+	}
+}
+
+TEST_CASE("a shared installer can detect an existing phase-local system", "[scheduler]") {
+	Scheduler scheduler;
+	CHECK_FALSE(scheduler.HasSystem("shared", Phase::Input));
+	scheduler.Add("shared", Phase::Input, [](Store &) {});
+	CHECK(scheduler.HasSystem("shared", Phase::Input));
+	CHECK_FALSE(scheduler.HasSystem("shared", Phase::Simulation));
+}
+
+TEST_CASE("optional edges order modular systems only when both are installed", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	std::vector<std::string> order;
+
+	scheduler.Add("host", Phase::Simulation, [&](Store &) { order.emplace_back("host"); });
+	scheduler.Add(
+		"module",
+		Phase::Simulation,
+		[&](Store &) { order.emplace_back("module"); },
+		SystemOrder{{}, {}, {"host", "not-installed"}, {}}
+	);
+
+	REQUIRE(scheduler.Validate().Status == SystemScheduleStatus::Ready);
+	scheduler.Tick(store, 0.016f);
+	CHECK(order == std::vector<std::string>{"module", "host"});
+}
+
+TEST_CASE("independent read-only systems share a parallel wave", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	std::atomic<int> arrived = 0;
+	std::atomic<int> overlapped = 0;
+	std::atomic<int> sawStore = 0;
+
+	const auto body = [&](const Store &world) {
+		if (world.Name() == "test") {
+			sawStore.fetch_add(1, std::memory_order_relaxed);
+		}
+		arrived.fetch_add(1, std::memory_order_release);
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+		while (arrived.load(std::memory_order_acquire) < 2 && std::chrono::steady_clock::now() < deadline) {
+			std::this_thread::yield();
+		}
+		if (arrived.load(std::memory_order_acquire) == 2) {
+			overlapped.fetch_add(1, std::memory_order_relaxed);
+		}
+	};
+
+	const bool startedPool = engine::parallel::Jobs::WorkerCount() == 0;
+	if (startedPool) {
+		engine::parallel::Jobs::Start(1);
+	}
+	scheduler.AddParallel("read-a", Phase::Simulation, body);
+	scheduler.AddParallel("read-b", Phase::Simulation, body);
+	scheduler.Tick(store, 0.016f);
+	if (startedPool) {
+		engine::parallel::Jobs::Stop();
+	}
+
+	CHECK(overlapped.load(std::memory_order_relaxed) == 2);
+	CHECK(sawStore.load(std::memory_order_relaxed) == 2);
+}
+
+TEST_CASE("parallel system timings are reported on the frame owner", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	scheduler.AddParallel("read-a", Phase::Simulation, [](const Store &) {});
+	scheduler.AddParallel("read-b", Phase::Simulation, [](const Store &) {});
+
+	struct Collecting {
+		Collecting() {
+			FrameGraph::SetEnabled(true);
+		}
+		~Collecting() {
+			FrameGraph::SetEnabled(false);
+		}
+	} collecting;
+
+	FrameGraph::BeginFrame();
+	scheduler.Tick(store, 0.016f);
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	const auto first =
+		std::find_if(spans.begin(), spans.end(), [](const auto &span) { return span.Name == "read-a"; });
+	const auto second =
+		std::find_if(spans.begin(), spans.end(), [](const auto &span) { return span.Name == "read-b"; });
+	REQUIRE(first != spans.end());
+	REQUIRE(second != spans.end());
+	CHECK(first->Reported);
+	CHECK(second->Reported);
+}
+
+// Phase order is fixed and does not need a named edge.
 TEST_CASE("a phase boundary outranks registration order", "[scheduler]") {
 	Store store("test");
 	Scheduler scheduler;
@@ -212,18 +357,21 @@ TEST_CASE("systems appear in the frame graph without their own instrumentation",
 	// nothing is worth seeing, because a phase that suddenly costs something is
 	// how a bottleneck announces itself.
 	const auto &spans = FrameGraph::Spans();
-	REQUIRE(spans.size() == 6);
+	REQUIRE(spans.size() == 9);
 
 	REQUIRE(spans[0].Name == "ecs.systems");
 	REQUIRE(spans[0].Depth == 0);
 	REQUIRE(spans[0].Category == engine::core::ProfileCategory::ECS);
 
 	// Phases in declaration order, each a child of the scheduler.
-	REQUIRE(spans[1].Name == "pre-simulation");
+	REQUIRE(spans[1].Name == "input");
 	REQUIRE(spans[2].Name == "simulation");
-	REQUIRE(spans[4].Name == "post-simulation");
-	REQUIRE(spans[5].Name == "pre-render");
-	for (size_t index : {1u, 2u, 4u, 5u}) {
+	REQUIRE(spans[4].Name == "physics");
+	REQUIRE(spans[5].Name == "animation");
+	REQUIRE(spans[6].Name == "replication");
+	REQUIRE(spans[7].Name == "render preparation");
+	REQUIRE(spans[8].Name == "render");
+	for (size_t index : {1u, 2u, 4u, 5u, 6u, 7u, 8u}) {
 		REQUIRE(spans[index].Depth == 1);
 		REQUIRE(spans[index].Category == engine::core::ProfileCategory::ECS);
 	}

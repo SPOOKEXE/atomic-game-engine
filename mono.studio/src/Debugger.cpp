@@ -28,8 +28,9 @@ namespace studio {
 	using engine::script::DebugHit;
 	using engine::script::DebugLocal;
 	using engine::world::WorldId;
+	using studio::Label;
 
-	void Editor::DrawDebugger() {
+	void studio::Editor::DrawDebugger() {
 		if (!ShowDebugger) {
 			return;
 		}
@@ -196,7 +197,7 @@ namespace studio {
 			}
 
 			engine::script::Debugger &debug = run.Runtime->Debug();
-			const std::string world(Label(Universe->NameOf(run.World)));
+			const std::string world(studio::Label(this->Universe->NameOf(run.World)));
 
 			char header[192];
 			std::snprintf(
@@ -340,7 +341,7 @@ namespace studio {
 		ImGui::End();
 	}
 
-	void Editor::DrawDebugValues(const std::vector<DebugLocal> *values, const char *empty) {
+	void studio::Editor::DrawDebugValues(const std::vector<DebugLocal> *values, const char *empty) {
 		if (values == nullptr) {
 			ImGui::TextDisabled("pick a frame");
 			return;
@@ -377,4 +378,230 @@ namespace studio {
 
 		ImGui::EndTable();
 	}
+}
+
+void studio::Editor::DrawCallStack() {
+	if (!ShowCallStack) {
+		return;
+	}
+
+	if (!ImGui::Begin("Call Stack", &ShowCallStack)) {
+		ImGui::End();
+		return;
+	}
+
+	if (Runs.empty()) {
+		ImGui::TextDisabled("nothing is running - press Play or Run");
+		ImGui::End();
+		return;
+	}
+
+	// Find the selected hit across all runs
+	const DebugHit *selectedHit = nullptr;
+	WorldId selectedWorld = WorldId{};
+	for (WorldRun &run : Runs) {
+		if (run.Runtime == nullptr) continue;
+		if (SelectedWorld == run.World.Index && SelectedHit < run.Runtime->Debug().Hits().size()) {
+			selectedHit = &run.Runtime->Debug().Hits()[SelectedHit];
+			selectedWorld = run.World;
+			break;
+		}
+	}
+
+	if (selectedHit == nullptr) {
+		ImGui::TextDisabled("no capture selected - pick one in the Debugger panel");
+		ImGui::End();
+		return;
+	}
+
+	const std::string worldLabel(studio::Label(this->Universe->NameOf(selectedWorld)));
+	ImGui::TextDisabled("world: %s", worldLabel.c_str());
+
+	if (ImGui::BeginTable(
+			"##callstack",
+			3,
+			ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable |
+				ImGuiTableFlags_ScrollY
+		)) {
+		ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 40.0f * Settings.Scale);
+		ImGui::TableSetupColumn("Function", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Location", ImGuiTableColumnFlags_WidthFixed, 200.0f * Settings.Scale);
+		ImGui::TableHeadersRow();
+
+		for (size_t at = 0; at < selectedHit->Frames.size(); at++) {
+			const DebugFrame &frame = selectedHit->Frames[at];
+
+			ImGui::TableNextRow();
+
+			ImGui::TableNextColumn();
+			ImGui::Text("%zu", at);
+
+			ImGui::TableNextColumn();
+			const char *funcName = frame.Function.empty() ? "(chunk)" : frame.Function.c_str();
+			bool isSelected = (SelectedFrame == at);
+			if (ImGui::Selectable(funcName, isSelected, ImGuiSelectableFlags_SpanAllColumns)) {
+				SelectedFrame = at;
+			}
+
+			ImGui::TableNextColumn();
+			ImGui::Text("%s:%d", frame.Source.c_str(), frame.Line);
+		}
+
+		ImGui::EndTable();
+	}
+
+	ImGui::Separator();
+
+	// Show locals/upvalues for selected frame
+	const DebugFrame *frame =
+		SelectedFrame < selectedHit->Frames.size() ? &selectedHit->Frames[SelectedFrame] : nullptr;
+
+	if (frame != nullptr) {
+		if (ImGui::BeginTabBar("##callstack_values")) {
+			if (ImGui::BeginTabItem("Locals")) {
+				DrawDebugValues(&frame->Locals, "no locals");
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Upvalues")) {
+				DrawDebugValues(
+					&frame->Upvalues, "nothing captured - a chunk's own frame closes over nothing in Luau"
+				);
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
+		}
+	}
+
+	ImGui::End();
+}
+
+void studio::Editor::DrawBreakpointsWatch() {
+	if (!ShowBreakpointsWatch) {
+		return;
+	}
+
+	if (!ImGui::Begin("Breakpoints", &ShowBreakpointsWatch)) {
+		ImGui::End();
+		return;
+	}
+
+	if (Breakpoints.Breakpoints().empty() && Runs.empty()) {
+		ImGui::TextDisabled("no breakpoints set and nothing running");
+		ImGui::End();
+		return;
+	}
+
+	// Master breakpoints (editor's list)
+	if (!Breakpoints.Breakpoints().empty()) {
+		if (ImGui::CollapsingHeader("Master Breakpoints", ImGuiTreeNodeFlags_DefaultOpen)) {
+			std::string removeSource;
+			int removeLine = 0;
+
+			for (const auto &point : Breakpoints.Breakpoints()) {
+				ImGui::PushID(point.Line);
+				ImGui::PushID(point.Source.c_str());
+
+				bool enabled = point.Enabled;
+				if (ImGui::Checkbox("##master_on", &enabled)) {
+					Breakpoints.Enable(point.Source, point.Line, enabled);
+					for (WorldRun &run : Runs) {
+						if (run.Runtime != nullptr) {
+							run.Runtime->Debug().Enable(point.Source, point.Line, enabled);
+						}
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::Text("%s:%d", point.Source.c_str(), point.Line);
+
+				ImGui::SameLine();
+				ImGui::TextDisabled(
+					"%s", point.Action == engine::script::BreakAction::Stop ? "stop" : "capture"
+				);
+
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Remove##master")) {
+					removeSource = point.Source;
+					removeLine = point.Line;
+				}
+
+				ImGui::PopID();
+				ImGui::PopID();
+			}
+
+			if (removeLine > 0) {
+				Breakpoints.Remove(removeSource, removeLine);
+				for (WorldRun &run : Runs) {
+					if (run.Runtime != nullptr) {
+						run.Runtime->Debug().Remove(removeSource, removeLine);
+					}
+				}
+			}
+		}
+	}
+
+	// Per-world breakpoints with hit counts
+	if (!Runs.empty()) {
+		ImGui::Separator();
+		for (size_t runIdx = 0; runIdx < Runs.size(); ++runIdx) {
+			WorldRun &run = Runs[runIdx];
+			if (run.Runtime == nullptr) continue;
+
+			engine::script::Debugger &debug = run.Runtime->Debug();
+			const std::string worldLabel(studio::Label(this->Universe->NameOf(run.World)));
+
+			if (debug.Breakpoints().empty() && debug.Hits().empty()) continue;
+
+			std::string header = worldLabel + "###world_bp_" + std::to_string(run.World.Index);
+			if (ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+				if (debug.Breakpoints().empty()) {
+					ImGui::TextDisabled("no breakpoints in this world");
+				} else {
+					std::string removeSource;
+					int removeLine = 0;
+
+					for (const auto &point : debug.Breakpoints()) {
+						ImGui::PushID(point.Line);
+						ImGui::PushID(point.Source.c_str());
+
+						bool enabled = point.Enabled;
+						if (ImGui::Checkbox("##wp_on", &enabled)) {
+							debug.Enable(point.Source, point.Line, enabled);
+						}
+
+						ImGui::SameLine();
+						ImGui::Text("%s:%d", point.Source.c_str(), point.Line);
+
+						ImGui::SameLine();
+						ImGui::TextDisabled(
+							"%s · %llu hit%s",
+							point.Action == engine::script::BreakAction::Stop ? "stop" : "capture",
+							static_cast<unsigned long long>(point.Hits),
+							point.Hits == 1 ? "" : "s"
+						);
+
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Remove##wp")) {
+							removeSource = point.Source;
+							removeLine = point.Line;
+						}
+
+						ImGui::PopID();
+						ImGui::PopID();
+					}
+
+					if (removeLine > 0) {
+						debug.Remove(removeSource, removeLine);
+					}
+				}
+
+				if (!debug.Hits().empty()) {
+					ImGui::Separator();
+					ImGui::TextDisabled("%zu capture(s)", debug.Hits().size());
+				}
+			}
+		}
+	}
+
+	ImGui::End();
 }

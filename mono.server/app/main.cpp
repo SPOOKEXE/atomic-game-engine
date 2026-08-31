@@ -10,6 +10,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/script/ComputeJobs.hpp>
 #include <engine/world/Lifecycle.hpp>
 
 #include <algorithm>
@@ -33,6 +34,10 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	if (engine::script::ComputeWorkerRequested(argc, argv)) {
+		return engine::script::RunComputeWorker();
+	}
+	engine::script::ConfigureComputeWorkerProgram(argv[0]);
 	engine::core::Log::Initialise("server");
 
 	// Declared before anything is parsed or read - see the client's `main` for
@@ -121,9 +126,7 @@ int main(int argc, char **argv) {
 		"rendezvous", "HOST:PORT", "Register with a rendezvous point, so clients off this subnet can reach it"
 	);
 	arguments.Value(
-		"content-store",
-		"DIR",
-		"Serve this content store to clients - the server serving its own disk"
+		"content-store", "DIR", "Serve this content store to clients - the server serving its own disk"
 	);
 	arguments.Value("content-port", "PORT", "Port the attached origin listens on (0 for ephemeral)");
 	arguments.Value(

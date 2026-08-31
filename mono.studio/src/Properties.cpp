@@ -1,12 +1,18 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/render/ShaderCompiler.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <imgui.h>
+#include <optional>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PropertySelection.hpp>
@@ -22,10 +28,17 @@ namespace studio {
 	using engine::core::Name;
 	using engine::ecs::Classes;
 	using engine::ecs::ClassId;
+	using engine::ecs::ComponentId;
+	using engine::ecs::ComponentKind;
+	using engine::ecs::Components;
+	using engine::ecs::FieldDescriptor;
 	using engine::ecs::NULL_ENTITY;
 	using engine::ecs::PropertyDescriptor;
 	using engine::ecs::PropertyType;
+	using engine::ecs::Schema;
+	using engine::ecs::Schemas;
 	using engine::ecs::Store;
+	using engine::ecs::TypeDescriptor;
 	using engine::game::FormatValue;
 	using engine::game::ParseValue;
 	using engine::game::PropertyValue;
@@ -48,6 +61,206 @@ namespace studio {
 				return 0.05f;
 			}
 			return 0.5f;
+		}
+
+		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
+			alignas(8) std::array<std::byte, 8> scratch{};
+			const void *source = Schemas::ReadField(component, field, scratch.data());
+			if (source == nullptr) return false;
+			value = PropertyValue{};
+			value.Type = field.Type;
+			switch (field.Type) {
+			case PropertyType::Bool:
+				value.Bool = *reinterpret_cast<const bool *>(source);
+				return true;
+			case PropertyType::Int32:
+				value.Int32 = *reinterpret_cast<const int32_t *>(source);
+				return true;
+			case PropertyType::Int64:
+				value.Int64 = *reinterpret_cast<const int64_t *>(source);
+				return true;
+			case PropertyType::Float:
+				value.Float = *reinterpret_cast<const float *>(source);
+				return true;
+			case PropertyType::Double:
+				value.Double = *reinterpret_cast<const double *>(source);
+				return true;
+			case PropertyType::Name:
+			case PropertyType::Enum:
+				value.Name = *reinterpret_cast<const Name *>(source);
+				return true;
+			case PropertyType::String:
+				value.String = *reinterpret_cast<const std::string *>(source);
+				return true;
+			case PropertyType::Vector3:
+				value.Vector3 = *reinterpret_cast<const engine::core::Vector3 *>(source);
+				return true;
+			case PropertyType::CFrame:
+				value.CFrame = *reinterpret_cast<const engine::core::CFrame *>(source);
+				return true;
+			case PropertyType::Color3:
+				value.Color3 = *reinterpret_cast<const engine::core::Color3 *>(source);
+				return true;
+			case PropertyType::Vector2:
+				value.Vector2 = *reinterpret_cast<const engine::core::Vector2 *>(source);
+				return true;
+			case PropertyType::UDim:
+				value.UDim = *reinterpret_cast<const engine::core::UDim *>(source);
+				return true;
+			case PropertyType::UDim2:
+				value.UDim2 = *reinterpret_cast<const engine::core::UDim2 *>(source);
+				return true;
+			case PropertyType::Rect:
+				value.Rect = *reinterpret_cast<const engine::core::Rect *>(source);
+				return true;
+			case PropertyType::NumberRange:
+				value.NumberRange = *reinterpret_cast<const engine::core::NumberRange *>(source);
+				return true;
+			case PropertyType::NumberSequence:
+				value.NumberSequence = *reinterpret_cast<const engine::core::NumberSequence *>(source);
+				return true;
+			case PropertyType::ColorSequence:
+				value.ColorSequence = *reinterpret_cast<const engine::core::ColorSequence *>(source);
+				return true;
+			case PropertyType::Reference:
+			case PropertyType::Opaque:
+				return false;
+			}
+			return false;
+		}
+
+		bool WriteSchemaValue(void *component, const FieldDescriptor &field, const PropertyValue &value) {
+			if (value.Type != field.Type) return false;
+			switch (field.Type) {
+			case PropertyType::Bool:
+				return Schemas::WriteField(component, field, &value.Bool);
+			case PropertyType::Int32:
+				return Schemas::WriteField(component, field, &value.Int32);
+			case PropertyType::Int64:
+				return Schemas::WriteField(component, field, &value.Int64);
+			case PropertyType::Float:
+				return Schemas::WriteField(component, field, &value.Float);
+			case PropertyType::Double:
+				return Schemas::WriteField(component, field, &value.Double);
+			case PropertyType::Name:
+			case PropertyType::Enum:
+				return Schemas::WriteField(component, field, &value.Name);
+			case PropertyType::String:
+				return Schemas::WriteField(component, field, &value.String);
+			case PropertyType::Vector3:
+				return Schemas::WriteField(component, field, &value.Vector3);
+			case PropertyType::CFrame:
+				return Schemas::WriteField(component, field, &value.CFrame);
+			case PropertyType::Color3:
+				return Schemas::WriteField(component, field, &value.Color3);
+			case PropertyType::Vector2:
+				return Schemas::WriteField(component, field, &value.Vector2);
+			case PropertyType::UDim:
+				return Schemas::WriteField(component, field, &value.UDim);
+			case PropertyType::UDim2:
+				return Schemas::WriteField(component, field, &value.UDim2);
+			case PropertyType::Rect:
+				return Schemas::WriteField(component, field, &value.Rect);
+			case PropertyType::NumberRange:
+				return Schemas::WriteField(component, field, &value.NumberRange);
+			case PropertyType::NumberSequence:
+				return Schemas::WriteField(component, field, &value.NumberSequence);
+			case PropertyType::ColorSequence:
+				return Schemas::WriteField(component, field, &value.ColorSequence);
+			case PropertyType::Reference:
+			case PropertyType::Opaque:
+				return false;
+			}
+			return false;
+		}
+	}
+
+	void Editor::DrawShaderCapabilities(
+		Entity shader, const engine::scene::ShaderSource &source, engine::core::Name name
+	) {
+		if (InspectedShaderWorld != SelectionWorld || InspectedShaderEntity != shader ||
+			InspectedShaderRevision != source.Revision) {
+			ShaderInspector.SetOptimise(true);
+			InspectedShader =
+				ShaderInspector.Compile(source.Code, engine::render::ShaderStage::Fragment, name.Text());
+			InspectedShaderWorld = SelectionWorld;
+			InspectedShaderEntity = shader;
+			InspectedShaderRevision = source.Revision;
+		}
+
+		ImGui::SeparatorText("Shader capabilities");
+		if (InspectedShader.Failed) {
+			ImGui::TextWrapped("Compile failed: %s", InspectedShader.Error.c_str());
+			return;
+		}
+
+		const engine::render::ShaderCapabilities &caps = InspectedShader.Capabilities;
+		ImGui::Text(
+			"%s, %u instructions, %.2f KiB SPIR-V",
+			engine::render::Describe(caps.Stage),
+			caps.Instructions,
+			static_cast<double>(caps.SpirVBytes) / 1024.0
+		);
+		ImGui::TextDisabled(
+			"static estimate: %u arithmetic, %u texture, %u memory, %u control flow",
+			caps.ArithmeticInstructions,
+			caps.TextureInstructions,
+			caps.MemoryInstructions,
+			caps.ControlFlowInstructions
+		);
+		ImGui::TextDisabled(
+			"%u inputs, %u outputs, %zu resources, %llu minimum buffer bytes",
+			caps.Inputs,
+			caps.Outputs,
+			caps.Resources.size(),
+			static_cast<unsigned long long>(caps.DeclaredBufferBytes)
+		);
+		if (!caps.RequiredCapabilities.empty()) {
+			ImGui::TextDisabled("SPIR-V capabilities:");
+			for (const uint32_t capability : caps.RequiredCapabilities) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("[%s]", engine::render::ShaderCapabilityName(capability).c_str());
+			}
+		}
+		if (caps.Stage == engine::render::ShaderStage::Compute) {
+			ImGui::TextDisabled("workgroup: %u x %u x %u", caps.WorkgroupX, caps.WorkgroupY, caps.WorkgroupZ);
+		}
+
+		if (!caps.Resources.empty() &&
+			ImGui::BeginTable(
+				"##shader-resources", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+			)) {
+			ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, 54.0f);
+			ImGui::TableSetupColumn("Min bytes", ImGuiTableColumnFlags_WidthFixed, 74.0f);
+			ImGui::TableHeadersRow();
+			for (const engine::render::ShaderResourceEstimate &resource : caps.Resources) {
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::TextUnformatted(resource.Name.c_str());
+				ImGui::TableSetColumnIndex(1);
+				ImGui::TextUnformatted(engine::render::Describe(resource.Kind));
+				ImGui::TableSetColumnIndex(2);
+				ImGui::Text("%u:%u", resource.Set, resource.Binding);
+				ImGui::TableSetColumnIndex(3);
+				if (resource.MinimumBytes > 0) {
+					ImGui::Text("%llu", static_cast<unsigned long long>(resource.MinimumBytes));
+				} else {
+					ImGui::TextDisabled("runtime");
+				}
+			}
+			ImGui::EndTable();
+		}
+
+		for (const engine::render::ShaderOptimizationStep &step : InspectedShader.Optimizations) {
+			ImGui::BulletText(
+				"%s: %u -> %u instructions%s",
+				engine::render::Describe(step.Kind),
+				step.BeforeInstructions,
+				step.AfterInstructions,
+				step.Changed ? "" : " (no opportunity)"
+			);
 		}
 	}
 
@@ -509,6 +722,12 @@ namespace studio {
 			bool Wanted = false;
 		};
 		Edit edit;
+		struct SelectedShader {
+			Entity Instance;
+			engine::scene::ShaderSource Source;
+			Name Label;
+		};
+		std::optional<SelectedShader> selectedShader;
 
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 		Universe->Enter(SelectionWorld, [&](Store &store) {
@@ -559,6 +778,12 @@ namespace studio {
 			}
 
 			ImGui::Separator();
+			if (Selection.size() == 1 && oneClass && primaryClass == engine::scene::ShaderScriptClass()) {
+				if (const engine::scene::ShaderSource *source =
+						store.Get<engine::scene::ShaderSource>(*primary)) {
+					selectedShader = SelectedShader{*primary, *source, store.InstanceNameOf(*primary)};
+				}
+			}
 
 			const std::vector<SelectionPropertyGroup> groups = BuildPropertySelection(store, Selection);
 
@@ -991,6 +1216,9 @@ namespace studio {
 				ImGui::EndTable();
 			}
 		});
+		if (selectedShader) {
+			DrawShaderCapabilities(selectedShader->Instance, selectedShader->Source, selectedShader->Label);
+		}
 
 		// **Drawn at the window's root, which is the only place its id
 		// matches the `OpenPopup` beside it.** See the `...` button for why
@@ -1088,5 +1316,137 @@ namespace studio {
 		if (authoritative) {
 			MarkModified();
 		}
+	}
+
+	void Editor::DrawComponents() {
+		if (!ShowComponents) {
+			return;
+		}
+
+		if (!ImGui::Begin("Components", &ShowComponents)) {
+			ImGui::End();
+			return;
+		}
+
+		if (Selection.empty() || !SelectionWorld.IsValid()) {
+			ImGui::TextDisabled("nothing selected");
+			ImGui::End();
+			return;
+		}
+
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##component-filter", ComponentFilter, "filter components");
+		ImGui::Separator();
+
+		Universe->Enter(SelectionWorld, [&](Store &store) {
+			const Entity instance = Selection.front();
+			if (!store.Alive(instance)) {
+				ImGui::TextDisabled("the selection is gone");
+				return;
+			}
+
+			for (const ComponentId component : store.ComponentsOf(instance)) {
+				const TypeDescriptor &descriptor = Components::Describe(component);
+				int score = 0;
+				if (!ComponentFilter.empty() && !FuzzyMatch(ComponentFilter, Label(descriptor.Name), score)) {
+					continue;
+				}
+
+				ImGui::PushID(component.Index);
+				if (ImGui::CollapsingHeader(Label(descriptor.Name), ImGuiTreeNodeFlags_DefaultOpen)) {
+					const void *componentValue = store.GetComponent(instance, component);
+					ImGui::TextDisabled(
+						"%s, %u bytes",
+						descriptor.Kind == ComponentKind::Tag ? "tag" : "data",
+						descriptor.Size
+					);
+
+					if (const Schema *schema = Schemas::Of(component); schema != nullptr) {
+						uint32_t logicalBytes = 0;
+						for (const FieldDescriptor &field : schema->Fields()) {
+							logicalBytes += Schemas::SizeOf(field.Type);
+						}
+						if (logicalBytes != schema->Size()) {
+							ImGui::TextDisabled(
+								"packing: %u logical bytes -> %u resident bytes", logicalBytes, schema->Size()
+							);
+						}
+						const std::vector<std::string> tags = schema->Tags();
+						if (!tags.empty()) {
+							ImGui::TextDisabled("tags:");
+							for (const std::string &tag : tags) {
+								ImGui::SameLine();
+								ImGui::TextDisabled("[%s]", tag.c_str());
+							}
+						}
+						for (const FieldDescriptor &field : schema->Fields()) {
+							if (!field.Exposed || componentValue == nullptr) {
+								ImGui::BulletText(
+									"%s: %s / %s, %u bits at %u:%u",
+									field.Spelling.data(),
+									engine::ecs::Describe(field.Type),
+									engine::ecs::Describe(field.Packing),
+									field.StorageBits,
+									field.Offset,
+									field.BitOffset
+								);
+								continue;
+							}
+							PropertyValue value;
+							if (!ReadSchemaValue(componentValue, field, value)) {
+								continue;
+							}
+							ImGui::TextUnformatted(field.Spelling.data());
+							ImGui::SameLine();
+							ImGui::TextDisabled("[config]");
+							ImGui::SameLine();
+							ImGui::TextDisabled("[%s]", engine::ecs::Describe(field.Packing));
+							ImGui::SameLine();
+							ImGui::PushID(field.Name.Id());
+							std::string key =
+								std::string(descriptor.Name.Text()) + "." + std::string(field.Spelling);
+							std::string &draft = ComponentConfigDrafts[key];
+							if (!ImGui::IsItemActive() && draft.empty()) {
+								draft = FormatValue(value);
+							}
+							ImGui::SetNextItemWidth(-1.0f);
+							TextField("##config", draft);
+							if (ImGui::IsItemDeactivatedAfterEdit()) {
+								PropertyValue parsed;
+								std::string reason;
+								if (ParseValue(field.Type, draft, parsed, reason) &&
+									WriteSchemaValue(
+										store.GetComponentMutable(instance, component), field, parsed
+									)) {
+									MarkModified();
+								}
+								draft.clear();
+							}
+							ImGui::PopID();
+							for (const std::string &tag : field.Tags) {
+								ImGui::SameLine();
+								ImGui::TextDisabled("[%s]", tag.c_str());
+							}
+						}
+					}
+
+					for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
+						if (property.Reads == nullptr || !property.Reads->Contains(component)) {
+							continue;
+						}
+
+						PropertyValue value;
+						ImGui::Text("%s", Label(property.Name));
+						if (ReadProperty(store, instance, property, value)) {
+							ImGui::SameLine();
+							ImGui::TextDisabled("%s", FormatValue(value).c_str());
+						}
+					}
+				}
+				ImGui::PopID();
+			}
+		});
+
+		ImGui::End();
 	}
 }

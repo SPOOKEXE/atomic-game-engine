@@ -135,13 +135,20 @@ namespace engine::scene {
 	//
 	// @since v0.19
 	struct SkyboxTextures {
+		// Cube faces in their authored directions.
+		//@{
 		core::Name Front;
 		core::Name Back;
 		core::Name Left;
 		core::Name Right;
 		core::Name Up;
 		core::Name Down;
+		//@}
+
+		// Whether the textured sky is selected.
 		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[3] = {};
 	};
 
@@ -158,8 +165,11 @@ namespace engine::scene {
 		Voxel,
 	};
 
+	// Number of authored sky generator choices.
 	constexpr size_t SKYBOX_COMPUTE_SHADER_COUNT = 5;
 
+	// Built-in cloud generator programs.
+	//
 	// @since v0.19
 	enum class CloudComputeShader : uint8_t {
 		Cumulus,
@@ -168,8 +178,11 @@ namespace engine::scene {
 		Voxel,
 	};
 
+	// Number of authored cloud generator choices.
 	constexpr size_t CLOUD_COMPUTE_SHADER_COUNT = 4;
 
+	// Built-in atmospheric scattering programs.
+	//
 	// @since v0.19
 	enum class AtmosphereProceduralShader : uint8_t {
 		Earth,
@@ -178,28 +191,47 @@ namespace engine::scene {
 		Alien,
 	};
 
+	// Number of authored atmospheric generator choices.
 	constexpr size_t ATMOSPHERE_PROCEDURAL_SHADER_COUNT = 4;
 
+	// Stable labels for generated-environment program choices.
+	//@{
 	const char *Describe(SkyboxComputeShader shader);
 	const char *Describe(CloudComputeShader shader);
 	const char *Describe(AtmosphereProceduralShader shader);
+	//@}
+
+	// Resolves authored names to generated-environment program choices.
+	//@{
 	SkyboxComputeShader SkyboxComputeShaderFromName(const core::Name &name);
 	CloudComputeShader CloudComputeShaderFromName(const core::Name &name);
 	AtmosphereProceduralShader AtmosphereProceduralShaderFromName(const core::Name &name);
+	//@}
 
 	// A device-generated sky recipe. The generated image is derived render
 	// state and never becomes another ECS copy of these values.
 	//
 	// @since v0.19
 	struct SkyboxCompute {
+		// Gradient colours from the top of the sky to below the horizon.
+		//@{
 		core::Color3 Zenith{0.08f, 0.24f, 0.55f};
 		core::Color3 Horizon{0.62f, 0.76f, 0.92f};
 		core::Color3 Ground{0.035f, 0.04f, 0.055f};
+		//@}
+
+		// Generator inputs.
+		//@{
 		float StarDensity = 0.0f;
 		float SunSize = 0.025f;
 		uint32_t Seed = 1;
 		SkyboxComputeShader Shader = SkyboxComputeShader::Gradient;
+		//@}
+
+		// Whether the generated sky is selected.
 		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[2] = {};
 	};
 
@@ -209,14 +241,25 @@ namespace engine::scene {
 	//
 	// @since v0.19
 	struct CloudCompute {
+		// Shape and placement of the generated volume.
+		//@{
 		float CellSize = 0.18f;
 		float Detail = 0.55f;
 		float Height = 0.28f;
 		float Thickness = 0.12f;
+		//@}
+
+		// Generator inputs.
+		//@{
 		uint32_t Seed = 1;
 		uint32_t Steps = 12;
 		CloudComputeShader Shader = CloudComputeShader::Cumulus;
+		//@}
+
+		// Whether the generated cloud volume is selected.
 		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[2] = {};
 	};
 
@@ -225,16 +268,28 @@ namespace engine::scene {
 	//
 	// @since v0.19
 	struct AtmosphereProcedural {
+		// Physical scale and scattering controls.
+		//@{
 		float PlanetRadius = 6371000.0f;
 		float Height = 80000.0f;
 		float Rayleigh = 1.0f;
 		float Mie = 1.0f;
+		//@}
+
+		// Generator inputs.
+		//@{
 		uint32_t Samples = 12;
 		AtmosphereProceduralShader Shader = AtmosphereProceduralShader::Earth;
+		//@}
+
+		// Whether procedural scattering is selected.
 		bool Enabled = true;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[2] = {};
 	};
 
+	// Which sky provider won deterministic environment selection.
 	enum class SkyboxSource : uint8_t {
 		None,
 		Textures,
@@ -249,24 +304,33 @@ namespace engine::scene {
 	//
 	// @since v0.19
 	struct Environment {
+		// Authored and generated provider values selected from the world.
+		//@{
 		SkyboxTextures Textures;
 		SkyboxCompute SkyCompute;
 		Atmosphere Air;
 		AtmosphereProcedural AirCompute;
 		Clouds CloudLayer;
 		CloudCompute CloudVolume;
+		//@}
 
 		// Deterministic animation time supplied by the world's simulation clock.
 		// It is resolved render state rather than authored component storage, so
 		// moving clouds do not dirty or replicate their recipe sixty times a second.
 		double CloudTime = 0.0;
+
+		// Selected providers and their availability.
+		//@{
 		SkyboxSource Skybox = SkyboxSource::None;
 		bool HasAtmosphere = false;
 		bool HasClouds = false;
+		//@}
 		// The selected atmosphere provider owns procedural controls.
 		bool HasAtmosphereCompute = false;
 		// The selected cloud provider owns compute controls.
 		bool HasCloudCompute = false;
+
+		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[3] = {};
 	};
 

@@ -943,18 +943,14 @@ namespace engine::physics {
 			// `RemoveCharacter` by hand were the only reason it ever happened.
 			//
 			// Composed rather than a second `Add`, for the reason
-			// `character.control` below gives at length: the scheduler orders
-			// nothing within a phase, and releasing a player and collecting an
-			// orphan in either order against the same rows is a race worth not
-			// having.
+			// `character.control` below gives at length: these operations share
+			// storage and form one indivisible system.
 			(void)scene::ReclaimOrphanedCharacters(store);
 		});
 
 		// **Wake, ground and step are one system, and that is the whole fix.**
 		// They were two - the first two here and `character.step` in
-		// `Phase::Simulation` - and `RegisterPhysicsSystems` says in as many
-		// words why that could not work: *"`ecs::Scheduler` gives no ordering
-		// between two systems in one phase"*. `physics.simulation` is in
+		// `Phase::Simulation`. `physics.simulation` is in
 		// `Simulation` too and is registered first by every host, so
 		// `IntegrateMotion` ran *before* `StepCharacters` on every tick. The
 		// velocity a key press produced was therefore written immediately after
@@ -972,30 +968,34 @@ namespace engine::physics {
 		// commanded direction on some ticks and zero on others, and a body that
 		// never went anywhere.
 		//
-		// Composed rather than ordered by registration, which is the same
-		// decision `physics.contacts` makes for the same reason - the contract
-		// supports composition and does not support registration order. The
+		// Composed rather than split into smaller scheduled operations, which is
+		// the same decision `physics.contacts` makes for the same reason. The
 		// chain is: link the rig, wake the body so it *has* a `Motion`, ask what
 		// is under it, then write the velocity. `Simulation` then integrates
 		// what this left, in the tick that produced it.
-		scheduler.Add("character.control", ecs::Phase::PreSimulation, [](ecs::Store &store) {
-			(void)WakeMovingCharacters(store);
-			(void)GroundCharacters(store);
+		scheduler.Add(
+			"character.control",
+			ecs::Phase::PreSimulation,
+			[](ecs::Store &store) {
+				(void)WakeMovingCharacters(store);
+				(void)GroundCharacters(store);
 
-			// **Still against the fixed tick**, which is all
-			// `scene::StepCharacters` ever asked for - `PreSimulation` runs once
-			// per tick exactly as `Simulation` does, so moving it here costs the
-			// determinism nothing and buys the ordering everything.
-			(void)scene::StepCharacters(store, static_cast<float>(store.Time().Delta));
+				// **Still against the fixed tick**, which is all
+				// `scene::StepCharacters` ever asked for - `PreSimulation` runs once
+				// per tick exactly as `Simulation` does, so moving it here costs the
+				// determinism nothing and buys the ordering everything.
+				(void)scene::StepCharacters(store, static_cast<float>(store.Time().Delta));
 
-			// **Immediately after, and that ordering is the whole fix.**
-			// `StepCharacters` is the last writer of the walk before the
-			// integrator, and it writes an intent rather than a force - so
-			// anything solid in the way has to be taken out of that intent
-			// here, before the integrator acts on it. See
-			// `ClipCharacterVelocity`.
-			(void)ClipCharacterVelocity(store);
-		});
+				// **Immediately after, and that ordering is the whole fix.**
+				// `StepCharacters` is the last writer of the walk before the
+				// integrator, and it writes an intent rather than a force - so
+				// anything solid in the way has to be taken out of that intent
+				// here, before the integrator acts on it. See
+				// `ClipCharacterVelocity`.
+				(void)ClipCharacterVelocity(store);
+			},
+			ecs::SystemOrder{{}, {"character.link"}, {"scene.gravity"}, {"character-control"}}
+		);
 
 		// **In `PreRender`, beside `ResolveAttachments`, and on whatever machine
 		// draws.** A limb's place is derived from a root the solver moved this
@@ -1042,9 +1042,12 @@ namespace engine::physics {
 		// already on the far side when its proxies go - and unconditionally, or a
 		// proxy outlives the seam that explains it and becomes a wall nobody can
 		// see.
-		scheduler.Add("portal.retire", ecs::Phase::PostSimulation, [](ecs::Store &store) {
-			(void)RetirePortalProxies(store);
-		});
+		scheduler.Add(
+			"portal.retire",
+			ecs::Phase::PostSimulation,
+			[](ecs::Store &store) { (void)RetirePortalProxies(store); },
+			ecs::SystemOrder{{}, {"character.portal"}}
+		);
 
 		scheduler.Add("character.pose", ecs::Phase::PreRender, [](ecs::Store &store) {
 			(void)scene::PoseCharacters(store);

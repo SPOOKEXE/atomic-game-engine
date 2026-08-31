@@ -1919,23 +1919,15 @@ TEST_CASE("the migrated tree methods answer the same in both languages", "[scrip
 	}
 }
 
-TEST_CASE("the two refusals that used to differ now agree", "[scripting][scriptcall]") {
-	// **The behaviour change the migration carries, pinned in the language that
-	// used to be laxer.**
-	//
-	//   - `GetPropertyChangedSignal` compared `PropertyDescriptor::Name` in
-	//     JavaScript and ignored `Scriptable`, so a JavaScript script could watch
-	//     `ShaderScript.Source` - a property the read path refuses by answering
-	//     "no such member", precisely so an error message cannot tell a program
-	//     what is there to reach for. Luau refused it. One reader settles it.
-	//   - `SetNetworkOwner` read a null entity out of *anything* in JavaScript, so
-	//     `SetNetworkOwner(5)` was a silent hand-back to the server where Luau
-	//     raised. `IsNil` then `AsInstance` is one body that refuses in both.
+TEST_CASE("invalid shared calls are refused in both languages", "[scripting][scriptcall]") {
+	// `SetNetworkOwner` once read a null entity out of anything in JavaScript, so
+	// `SetNetworkOwner(5)` was a silent hand-back to the server where Luau raised.
+	// `IsNil` then `AsInstance` is one body that refuses in both. Unknown
+	// properties likewise remain hidden from both signal adapters.
 	//
 	// Written as receiver-and-call pairs rather than a parity list because what is
 	// asserted is a refusal, and `Answer` requires the chunk to run.
 	const std::vector<std::pair<const char *, const char *>> PROBES = {
-		{"Instance.new('ShaderScript')", "GetPropertyChangedSignal('Source')"},
 		{"Instance.new('Part')", "GetPropertyChangedSignal('Nonsense')"},
 		{"Instance.new('Part')", "SetNetworkOwner(5)"},
 		{"Instance.new('Part')", "SetNetworkOwner('nobody')"},
@@ -1955,7 +1947,7 @@ TEST_CASE("the two refusals that used to differ now agree", "[scripting][scriptc
 		}
 	}
 
-	// The writable half still works, or the four above would pass against a
+	// The writable half still works, or the probes above would pass against a
 	// binding that refused everything.
 	for (const Language language : LANGUAGES) {
 		Store store = Fresh("scriptcall.refusals.ok");

@@ -1,3 +1,6 @@
+#include "BackendNodes.hpp"
+
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/GraphRunner.hpp>
@@ -7,6 +10,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.graphrunner")
@@ -151,4 +155,60 @@ TEST_CASE("invalid node registrations are refused", "[render][graph]") {
 	CHECK(table.Count() == 1);
 	table.Clear();
 	CHECK(table.Count() == 0);
+}
+
+TEST_CASE("backend metadata is derived from the node catalogue", "[render][graph]") {
+	engine::graph::RegisterRenderNodeKinds();
+	const std::vector<engine::render::BackendNode> backends = engine::render::BackendNodes();
+
+	for (const engine::graph::NodeKindSpec &spec : engine::graph::NodeCatalogue::All()) {
+		const auto backend = std::find_if(
+			backends.begin(), backends.end(), [&spec](const engine::render::BackendNode &candidate) {
+				return candidate.Kind == spec.Kind;
+			}
+		);
+		INFO("kind: " << spec.Kind.Text());
+		CHECK((backend != backends.end()) == spec.BuiltInBackend);
+		if (backend != backends.end()) {
+			CHECK(backend->Scope == spec.Scope);
+			CHECK(backend->Queue == spec.Queue);
+		}
+	}
+}
+
+TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[render][profile]") {
+	const RenderGraph graph = DefaultGraph();
+	std::vector<std::string> ran;
+	NodeTable table;
+	Record(graph, table, ran);
+
+	size_t opened = 0;
+	size_t closed = 0;
+	engine::render::NodeProfileHooks profile;
+	profile.Enabled = [](const RunContext &context) { return context.Kind != Name("shadow"); };
+	profile.Begin = [&opened](const RunContext &) { opened++; };
+	profile.End = [&closed](const RunContext &context) {
+		closed++;
+		return context.Kind == Name("gbuffer") ? size_t{2} : size_t{0};
+	};
+	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
+	const uint64_t worlds[] = {7};
+	REQUIRE(graph.Execute(Compile(graph), full, worlds));
+	CHECK(opened == 23);
+	CHECK(closed == opened);
+	CHECK(full.DroppedProfileMarks() == 2);
+
+	opened = 0;
+	closed = 0;
+	engine::render::NodeProfileHooks disabled;
+	disabled.Begin = [&opened](const RunContext &) { opened++; };
+	disabled.End = [&closed](const RunContext &) {
+		closed++;
+		return size_t{4};
+	};
+	GraphRunner off(table, engine::render::ProfilingTier::Off, std::move(disabled));
+	REQUIRE(graph.Execute(Compile(graph), off, worlds));
+	CHECK(opened == 0);
+	CHECK(closed == 0);
+	CHECK(off.DroppedProfileMarks() == 0);
 }

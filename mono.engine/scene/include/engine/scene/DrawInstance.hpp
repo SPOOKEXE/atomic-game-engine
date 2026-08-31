@@ -66,11 +66,13 @@ namespace engine::scene {
 		// `Bounds` carries, so the producer copies rather than converts.
 		core::Vector3 HalfExtent{0.5f, 0.5f, 0.5f};
 
-		// Flat multiplier over the material.
+		// Flat, surface, and emission colour controls.
+		//@{
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
 		core::Color3 SurfaceColour{1.0f, 1.0f, 1.0f};
 		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
 		float EmissiveStrength = 1.0f;
+		//@}
 
 		// Which mesh, by name. Invalid means the consumer's default.
 		core::Name Mesh;
@@ -177,6 +179,7 @@ namespace engine::scene {
 		// `Transparency` is how see-through the *part* is and puts it in the
 		// sorted pass; this is what the texture's alpha means.
 		AlphaMode Alpha = AlphaMode::Opaque;
+		// Texture filtering override copied from the surface appearance.
 		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// **`Movable` was here and is gone.** It said whether an instance was a

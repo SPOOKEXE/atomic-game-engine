@@ -191,6 +191,82 @@ namespace engine::physics {
 
 			return ShapeHit{true, entry > 0.0f ? entry : 0.0f, shape.Frame.VectorToWorldSpace(local)};
 		}
+
+		ShapeHit CapsuleRay(const ShapeInstance &shape, const core::Ray &ray, float maxDistance) {
+			const float radius = shape.Extent.X;
+			const float halfSegment = shape.Extent.Y;
+			const core::Vector3 origin = ToLocalPoint(shape.Frame, ray.Origin);
+			const core::Vector3 direction = ToLocalVector(shape.Frame, ray.Direction);
+			const float closestY = std::clamp(origin.Y, -halfSegment, halfSegment);
+			const core::Vector3 closest{0.0f, closestY, 0.0f};
+			const core::Vector3 fromSegment = origin - closest;
+
+			if (fromSegment.MagnitudeSquared() <= radius * radius) {
+				const core::Vector3 localNormal =
+					fromSegment.MagnitudeSquared() > 0.0f ? fromSegment.Unit() : -direction;
+				return ShapeHit{true, 0.0f, shape.Frame.VectorToWorldSpace(localNormal)};
+			}
+
+			ShapeHit nearest;
+			nearest.Distance = maxDistance;
+
+			// The straight barrel has no caps. Its roots are accepted only while
+			// the hit lies between the two hemisphere centres.
+			const float quadratic = direction.X * direction.X + direction.Z * direction.Z;
+			if (quadratic >= PARALLEL_EPSILON) {
+				const float linear = 2.0f * (origin.X * direction.X + origin.Z * direction.Z);
+				const float constant = origin.X * origin.X + origin.Z * origin.Z - radius * radius;
+				const float discriminant = linear * linear - 4.0f * quadratic * constant;
+				if (discriminant >= 0.0f) {
+					const float root = std::sqrt(discriminant);
+					const float roots[2] = {
+						(-linear - root) / (2.0f * quadratic),
+						(-linear + root) / (2.0f * quadratic),
+					};
+					for (const float distance : roots) {
+						const float y = origin.Y + direction.Y * distance;
+						if (distance < 0.0f || distance > nearest.Distance || std::abs(y) > halfSegment) {
+							continue;
+						}
+						const core::Vector3 point = origin + direction * distance;
+						nearest = ShapeHit{
+							true,
+							distance,
+							shape.Frame.VectorToWorldSpace(core::Vector3{point.X, 0.0f, point.Z}.Unit()),
+						};
+					}
+				}
+			}
+
+			// Each sphere contributes only its outward hemisphere. The other half
+			// lies inside the barrel and is not part of the capsule surface.
+			for (int side = -1; side <= 1; side += 2) {
+				const core::Vector3 centre{0.0f, halfSegment * static_cast<float>(side), 0.0f};
+				const core::Vector3 offset = origin - centre;
+				const float along = offset.Dot(direction);
+				const float gap = offset.MagnitudeSquared() - radius * radius;
+				const float discriminant = along * along - gap;
+				if (discriminant < 0.0f) {
+					continue;
+				}
+
+				const float distance = -along - std::sqrt(discriminant);
+				if (distance < 0.0f || distance > nearest.Distance) {
+					continue;
+				}
+				const core::Vector3 point = origin + direction * distance;
+				if ((side > 0 && point.Y < halfSegment) || (side < 0 && point.Y > -halfSegment)) {
+					continue;
+				}
+				nearest = ShapeHit{
+					true,
+					distance,
+					shape.Frame.VectorToWorldSpace((point - centre).Unit()),
+				};
+			}
+
+			return nearest.Touched ? nearest : ShapeHit{};
+		}
 	}
 
 	namespace {
@@ -361,6 +437,8 @@ namespace engine::physics {
 			return SphereRay(shape, ray, maxDistance);
 		case scene::ShapeKind::Cylinder:
 			return CylinderRay(shape, ray, maxDistance);
+		case scene::ShapeKind::Capsule:
+			return CapsuleRay(shape, ray, maxDistance);
 
 		case scene::ShapeKind::Hull:
 			return HullRay(shape, ray, maxDistance);

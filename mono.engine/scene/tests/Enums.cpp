@@ -26,7 +26,14 @@ TEST_CASE("every body kind has a name", "[scene][enums]") {
 }
 
 TEST_CASE("every shape kind has a name", "[scene][enums]") {
-	for (const ShapeKind kind : {ShapeKind::Box, ShapeKind::Sphere, ShapeKind::Cylinder}) {
+	for (const ShapeKind kind : {
+			 ShapeKind::Box,
+			 ShapeKind::Sphere,
+			 ShapeKind::Cylinder,
+			 ShapeKind::Hull,
+			 ShapeKind::Mesh,
+			 ShapeKind::Capsule,
+		 }) {
 		CHECK(std::string(Describe(kind)) != "?");
 	}
 }
@@ -41,6 +48,9 @@ TEST_CASE("names are distinct", "[scene][enums]") {
 		Describe(ShapeKind::Box),
 		Describe(ShapeKind::Sphere),
 		Describe(ShapeKind::Cylinder),
+		Describe(ShapeKind::Hull),
+		Describe(ShapeKind::Mesh),
+		Describe(ShapeKind::Capsule),
 	};
 
 	const std::unordered_set<std::string_view> unique(names.begin(), names.end());
@@ -56,6 +66,11 @@ TEST_CASE("both enums are one byte", "[scene][enums]") {
 	CHECK(sizeof(ShapeKind) == 1);
 	CHECK(static_cast<uint8_t>(BodyKind::Static) == 0);
 	CHECK(static_cast<uint8_t>(ShapeKind::Box) == 0);
+	CHECK(static_cast<uint8_t>(ShapeKind::Sphere) == 1);
+	CHECK(static_cast<uint8_t>(ShapeKind::Cylinder) == 2);
+	CHECK(static_cast<uint8_t>(ShapeKind::Hull) == 3);
+	CHECK(static_cast<uint8_t>(ShapeKind::Mesh) == 4);
+	CHECK(static_cast<uint8_t>(ShapeKind::Capsule) == 5);
 }
 
 // --- faces ------------------------------------------------------------------

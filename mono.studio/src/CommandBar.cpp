@@ -109,6 +109,7 @@ namespace studio {
 				limits.Role.Server = false;
 				limits.Role.Client = false;
 				limits.Role.Studio = true;
+				limits.Origin = engine::script::ScriptOrigin::Plugin;
 
 				// The surface goes with the runtime that points at it, and in
 				// that order: a host outliving its VM is a pointer nothing

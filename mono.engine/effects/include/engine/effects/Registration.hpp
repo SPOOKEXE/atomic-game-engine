@@ -24,7 +24,7 @@ namespace engine::effects {
 	// is recomputed rather than carried.
 	void RegisterEffectComponents();
 
-	// Registers `ParticleEmitter`, `Beam` and `Trail`.
+	// Registers `ParticleEmitter`, `Beam`, `Trail`, `Decal` and `Texture`.
 	//
 	// Calls `RegisterEffectComponents` first, because a class is a set of
 	// component ids and cannot be declared before they exist. Also registers

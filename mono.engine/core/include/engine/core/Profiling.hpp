@@ -130,6 +130,18 @@
 		view, category                                                                                       \
 	}
 
+// Profiles producer work on a non-frame thread. The frame owner reports the
+// measured duration after joining, so opening a FrameGraph scope here would
+// only count a deliberately rejected cross-thread span.
+#define ENGINE_PROFILE_PRODUCER_DYNAMIC_STABLE(fallback, view)                                               \
+	ZoneNamedN(ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__), fallback, true);                         \
+	do {                                                                                                     \
+		if (!(view).empty()) {                                                                               \
+			ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__).Name((view).data(), (view).size());          \
+		}                                                                                                    \
+	} while (0);                                                                                             \
+	ENGINE_HEAP_SCOPE(view)
+
 // Marks the end of a frame in Tracy. FrameGraph uses BeginFrame() and
 // EndFrame() separately.
 #define ENGINE_PROFILE_FRAME() FrameMark
@@ -180,6 +192,9 @@
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
 		view, category                                                                                       \
 	}
+
+// Keeps heap attribution on producer threads when Tracy is not compiled in.
+#define ENGINE_PROFILE_PRODUCER_DYNAMIC_STABLE(fallback, view) ENGINE_HEAP_SCOPE(view)
 
 // Does nothing when Tracy support is not compiled in.
 #define ENGINE_PROFILE_FRAME() ((void)0)

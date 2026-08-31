@@ -42,8 +42,11 @@ namespace engine::control {
 	//
 	// @since v0.20
 	struct Feature {
+		// Stable feature identity and its immediate installer.
+		//@{
 		std::string Name;
 		std::function<void(Surface &)> Install;
+		//@}
 	};
 
 	// One thing a program can be asked to do.

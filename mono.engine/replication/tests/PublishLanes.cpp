@@ -28,7 +28,7 @@
 
 TEST_SUITE_ID("engine.replication.publishlanes")
 // The serial loop this is required to reproduce exactly.
-TEST_DEPENDS("engine.replication.replication")
+TEST_DEPENDS("engine.replication.stream")
 
 using engine::core::ByteWriter;
 using engine::core::Name;

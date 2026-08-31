@@ -44,6 +44,7 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -87,6 +88,13 @@ namespace engine::render {
 		// Whether this came from the engine's staged SPIR-V rather than from a
 		// script in the world.
 		bool BuiltIn = false;
+
+		// Static requirements and cost indicators reflected from the compiled
+		// module. Present for authored and built-in shaders alike.
+		ShaderCapabilities Capabilities;
+
+		// Explicit optimization passes applied to an authored module.
+		std::vector<ShaderOptimizationStep> Optimizations;
 	};
 
 	// The shaders this engine ships, by the name a material selects them with.

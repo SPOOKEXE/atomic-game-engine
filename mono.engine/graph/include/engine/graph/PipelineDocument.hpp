@@ -393,4 +393,10 @@ namespace engine::graph {
 	//
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
+
+	// The deferred fallback for devices without compute or storage images.
+	PipelineDocument DefaultPbrTierBDocument();
+
+	// The direct-lighting fallback for devices without the deferred target set.
+	PipelineDocument DefaultForwardTierCDocument();
 }

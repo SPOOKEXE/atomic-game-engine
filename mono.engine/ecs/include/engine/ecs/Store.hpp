@@ -1007,6 +1007,11 @@ namespace engine::ecs {
 		// @since v0.12
 		void EachMatching(std::span<const ComponentId> components, const std::function<void(Entity)> &body);
 
+		// Visits entities carrying every required component and none of the
+		// excluded components. Runtime callers use this when a query's filter is
+		// assembled from names rather than C++ types.
+		void EachMatching(const QueryTerms &terms, const std::function<void(Entity)> &body);
+
 		// Visits every entity carrying **any** of `components`, a run at a time.
 		//
 		// **The other half of the runtime query, and the cheap half.** `EachMatching`
@@ -1052,6 +1057,9 @@ namespace engine::ecs {
 		// @return The live number of entities carrying every one of them.
 		// @since v0.12
 		size_t CountMatching(std::span<const ComponentId> components);
+
+		// Counts an include/exclude query without requiring a typed selection.
+		size_t CountMatching(const QueryTerms &terms);
 
 		// --- instances -----------------------------------------------------
 		//
@@ -1593,6 +1601,10 @@ namespace engine::ecs {
 		// @return A pointer to the value, or null when absent.
 		const void *GetComponent(Entity entity, ComponentId component) const;
 
+		// Returns mutable access to a runtime-named component and records a write.
+		// The pointer remains valid until the entity's row moves.
+		void *GetComponentMutable(Entity entity, ComponentId component);
+
 		// Removes a component named at runtime.
 		//
 		// @param entity    The entity to write to.
@@ -2011,6 +2023,16 @@ namespace engine::ecs {
 		// @return `false` on a corrupt, truncated, or wrong-version snapshot,
 		//         or when it names a component this build does not have.
 		bool Load(core::ByteReader &reader);
+
+		// Replaces another store with an independent copy of this world.
+		//
+		// The destination keeps its diagnostic name so preview and simulation
+		// worlds remain distinguishable. Entity indices, generations, resources,
+		// and the clock are copied exactly through the snapshot boundary.
+		//
+		// @param destination The store to replace on its owning thread.
+		// @return `false` under the same conditions as `Save` or `Load`.
+		bool CloneTo(Store &destination) const;
 
 		// Applies a snapshot to a world that is already running.
 		//

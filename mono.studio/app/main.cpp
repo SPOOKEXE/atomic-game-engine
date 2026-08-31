@@ -13,6 +13,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/script/ComputeJobs.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -22,6 +23,10 @@
 #include <studio/Editor.hpp>
 
 int main(int argc, char **argv) {
+	if (engine::script::ComputeWorkerRequested(argc, argv)) {
+		return engine::script::RunComputeWorker();
+	}
+	engine::script::ConfigureComputeWorkerProgram(argv[0]);
 	engine::core::Log::Initialise("studio");
 
 	// **The engine's settings and the content policy, and no `studio.*` table.**

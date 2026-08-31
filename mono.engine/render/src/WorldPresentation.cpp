@@ -860,6 +860,36 @@ namespace engine::render {
 		const graph::PipelineSet &profiles, Renderer &renderer, uint64_t world, core::Name selected
 	) {
 		graph::RegisterRenderNodeKinds();
+		DefaultPipelineTier tier = DefaultPipelineTier::A;
+		PipelineTierDecision decision;
+		if (renderer.Backend().Device != nullptr) {
+			decision = ChooseDefaultPipeline(renderer.Capabilities());
+			tier = decision.Tier;
+			for (const PipelineTierRejection &rejected : decision.Fallthrough) {
+				ENGINE_INFO(
+					"{} default skipped: {}{}{}",
+					Describe(rejected.Tier),
+					Describe(rejected.Cause.Status),
+					rejected.Cause.Status == CapabilityStatus::MissingFormat ? ": " : "",
+					rejected.Cause.Status == CapabilityStatus::MissingFormat
+						? graph::Describe(rejected.Cause.Format)
+						: ""
+				);
+			}
+		}
+		const auto defaultDocument = [tier] {
+			switch (tier) {
+			case DefaultPipelineTier::A:
+				return graph::DefaultPbrDocument();
+			case DefaultPipelineTier::B:
+				return graph::DefaultPbrTierBDocument();
+			case DefaultPipelineTier::C:
+				return graph::DefaultForwardTierCDocument();
+			case DefaultPipelineTier::Unavailable:
+				return graph::PipelineDocument{};
+			}
+			return graph::PipelineDocument{};
+		};
 
 		const std::string suffix = "#" + std::to_string(world);
 		for (const core::Name key : renderer.Pipelines()) {
@@ -871,7 +901,7 @@ namespace engine::render {
 		graph::PipelineSet defaults;
 		const graph::PipelineSet *available = &profiles;
 		if (profiles.Count() == 0) {
-			defaults.Set(core::Name("Default PBR"), graph::DefaultPbrDocument());
+			defaults.Set(core::Name("Default PBR"), defaultDocument());
 			available = &defaults;
 		}
 
@@ -908,6 +938,17 @@ namespace engine::render {
 			const core::Name key(std::format("{}#{}", name.Text(), world));
 			if (renderer.SetPipeline(key, pipeline)) {
 				return key;
+			}
+		}
+
+		if (profiles.Count() > 0 && tier != DefaultPipelineTier::Unavailable) {
+			graph::RenderGraph pipeline;
+			core::Name offender;
+			if (graph::Build(defaultDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok) {
+				const core::Name key(std::format("Default PBR#{}", world));
+				if (renderer.SetPipeline(key, pipeline)) {
+					return key;
+				}
 			}
 		}
 		return {};

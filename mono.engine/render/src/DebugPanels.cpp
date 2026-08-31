@@ -1567,16 +1567,19 @@ namespace engine::render {
 				// the total makes a fast engine look like a slow one.
 				writer.Line(
 					Format(
-						"%.2f MS  BUSY %.2f  IDLE %.2f  DEPTH %u  TRACY %s  RMAX %.1fS%s",
+						"%.2f MS  BUSY %.2f  IDLE %.2f  DEPTH %u  TRACY %s  RMAX %.1fS%s%s",
 						static_cast<double>(data.FrameMilliseconds),
 						static_cast<double>(data.BusyMilliseconds()),
 						static_cast<double>(data.IdleMilliseconds),
 						data.DepthLimit,
 						data.TracyAttached ? "ON" : "OFF",
 						data.HistorySeconds,
-						data.DroppedSpans > 0 ? "   SPANS DROPPED!" : ""
+						data.DroppedSpans > 0 ? "   SPANS DROPPED!" : "",
+						data.DroppedGpuMarks > 0 ? "   GPU MARKS DROPPED!" : ""
 					),
-					data.DroppedSpans > 0 ? TEXT_WARN : ColourForMilliseconds(data.BusyMilliseconds())
+					data.DroppedSpans > 0 || data.DroppedGpuMarks > 0
+						? TEXT_WARN
+						: ColourForMilliseconds(data.BusyMilliseconds())
 				);
 				writer.Skip();
 			}

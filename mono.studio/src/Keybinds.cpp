@@ -125,6 +125,12 @@ namespace studio {
 			 "Find and run any command",
 			 Scope::Global,
 			 {}},
+			{Action::SearchAllReplaceAll,
+			 "script.search_replace_all",
+			 "Search-All-Replace-All",
+			 "Open script search and replace across the active script",
+			 Scope::Script,
+			 {ImGuiKey_F, true, true, false}},
 		}};
 
 		// The live table. A copy of the defaults until something rebinds.

@@ -43,6 +43,9 @@ using engine::script::Binds;
 using engine::script::Language;
 using engine::script::MakeRuntime;
 using engine::script::Runtime;
+using engine::script::RuntimeLimits;
+using engine::script::ScriptCapabilities;
+using engine::script::ScriptOrigin;
 using engine::script::ServiceAvailability;
 using engine::script::ServiceDefinition;
 using engine::script::ServiceLanguages;
@@ -61,6 +64,13 @@ namespace {
 		return language == Language::Luau ? "return game:GetService('" + name + "') ~= nil"
 										  : "game.GetService('" + name + "') !== undefined";
 	}
+
+	std::unique_ptr<Runtime> FullRuntime(Store &store, Language language) {
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		limits.Role.Studio = true;
+		return MakeRuntime(store, language, limits);
+	}
 }
 
 TEST_CASE("every service the catalogue claims for a language is reachable in it", "[scripting][services]") {
@@ -77,7 +87,7 @@ TEST_CASE("every service the catalogue claims for a language is reachable in it"
 			language == Language::Luau ? ServiceLanguages::Luau : ServiceLanguages::JavaScript;
 
 		Store store = Fresh("catalogue_present");
-		const auto runtime = MakeRuntime(store, language);
+		const auto runtime = FullRuntime(store, language);
 		REQUIRE(runtime != nullptr);
 
 		for (const ServiceDefinition &definition : Services()) {
@@ -94,6 +104,64 @@ TEST_CASE("every service the catalogue claims for a language is reachable in it"
 			INFO(runtime->LastError());
 			CHECK(ok);
 		}
+	}
+}
+
+TEST_CASE("runtime profiles gate host-sensitive services", "[scripting][services][security]") {
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		SECTION(language == Language::Luau ? "luau" : "javascript") {
+			Store serverStore = Fresh("capability_server");
+			RuntimeLimits serverLimits;
+			serverLimits.Role = engine::script::HostRole::OfServer();
+			const auto server = MakeRuntime(serverStore, language, serverLimits);
+			REQUIRE(server != nullptr);
+			CHECK(server->Can(ScriptCapabilities::Messaging));
+			CHECK(server->Can(ScriptCapabilities::Input));
+			CHECK(server->Run(Fetch(language, "MessagingService").c_str()));
+			CHECK(server->Run(Fetch(language, "UserInputService").c_str()));
+
+			Store clientStore = Fresh("capability_client");
+			RuntimeLimits clientLimits;
+			clientLimits.Role = engine::script::HostRole::OfClient();
+			const auto client = MakeRuntime(clientStore, language, clientLimits);
+			REQUIRE(client != nullptr);
+			CHECK(client->Can(ScriptCapabilities::Input));
+			CHECK_FALSE(client->Can(ScriptCapabilities::Persistence));
+			CHECK(client->Run(Fetch(language, "ContextActionService").c_str()));
+			CHECK_FALSE(client->Run(Fetch(language, "DataStoreService").c_str()));
+			CHECK(client->LastError().find("'persistence' script capability") != std::string::npos);
+
+			Store pluginStore = Fresh("capability_plugin");
+			RuntimeLimits pluginLimits;
+			pluginLimits.Role.Server = false;
+			pluginLimits.Role.Client = false;
+			pluginLimits.Role.Studio = true;
+			pluginLimits.Origin = ScriptOrigin::Plugin;
+			const auto plugin = MakeRuntime(pluginStore, language, pluginLimits);
+			REQUIRE(plugin != nullptr);
+			CHECK(plugin->Can(ScriptCapabilities::PluginHost));
+			CHECK(plugin->Can(ScriptCapabilities::StudioDebug));
+			CHECK_FALSE(plugin->Can(ScriptCapabilities::Messaging));
+			CHECK_FALSE(plugin->Run(Fetch(language, "CrossWorldService").c_str()));
+			CHECK(plugin->LastError().find("'messaging' script capability") != std::string::npos);
+		}
+	}
+}
+
+TEST_CASE("an explicit capability set narrows the automatic profile", "[scripting][services][security]") {
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store = Fresh("capability_override");
+		RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		limits.Capabilities = ScriptCapabilities::World;
+
+		const auto runtime = MakeRuntime(store, language, limits);
+		REQUIRE(runtime != nullptr);
+		CHECK(runtime->Run(Fetch(language, "RunService").c_str()));
+		CHECK_FALSE(runtime->Run(Fetch(language, "UserInputService").c_str()));
+		CHECK(runtime->LastError().find("'input' script capability") != std::string::npos);
+		CHECK_FALSE(runtime->Run(Fetch(language, "DataStoreService").c_str()));
+		CHECK(runtime->LastError().find("'persistence' script capability") != std::string::npos);
 	}
 }
 
@@ -146,7 +214,7 @@ TEST_CASE("a service the other language binds refuses by name", "[scripting][ser
 	// here is the *catalogue's* answer, which is a language refusal in JavaScript
 	// and an ordinary absence in Luau.
 	Store store = Fresh("catalogue_absent");
-	const auto runtime = MakeRuntime(store, Language::JavaScript);
+	const auto runtime = FullRuntime(store, Language::JavaScript);
 	REQUIRE(runtime != nullptr);
 
 	const ServiceDefinition *breakpoints = engine::script::FindService("BreakpointService");
@@ -165,7 +233,7 @@ TEST_CASE("a name in no row still fails the old way", "[scripting][services]") {
 	// migrating a place hits.
 	for (const Language language : {Language::Luau, Language::JavaScript}) {
 		Store store = Fresh("catalogue_unknown");
-		const auto runtime = MakeRuntime(store, language);
+		const auto runtime = FullRuntime(store, language);
 		REQUIRE(runtime != nullptr);
 
 		CHECK_FALSE(runtime->Run(Fetch(language, "MarketplaceService").c_str()));
@@ -246,6 +314,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		  "GetFlipbook",
 		  "GetTriangleCount"},
 		 {}},
+		{"ComputeService", {"NoiseGridAsync"}, {}},
 		{"CollectionService", {"AddTag", "RemoveTag", "HasTag", "GetTagged", "GetTags", "GetAllTags"}, {}},
 		{"HttpService", {"JSONEncode", "JSONDecode", "GenerateGUID", "UrlEncode"}, {}},
 		{"TweenService", {"GetValue", "Create"}, {}},
@@ -269,7 +338,7 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 
 	for (const Language language : {Language::Luau, Language::JavaScript}) {
 		Store store = Fresh("catalogue_members");
-		const auto runtime = MakeRuntime(store, language);
+		const auto runtime = FullRuntime(store, language);
 		REQUIRE(runtime != nullptr);
 
 		for (const Surface &surface : SURFACES) {
@@ -357,7 +426,7 @@ TEST_CASE("a row claims no language it has no installer for", "[scripting][servi
 			}
 
 			Store store = Fresh("catalogue_installer");
-			const auto runtime = MakeRuntime(store, language);
+			const auto runtime = FullRuntime(store, language);
 			REQUIRE(runtime != nullptr);
 
 			INFO(definition.Name);

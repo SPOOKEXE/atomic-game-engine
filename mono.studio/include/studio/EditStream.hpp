@@ -62,6 +62,7 @@
 //
 // @tier L12 · client
 
+#include <engine/assets/Signature.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Connector.hpp>
@@ -71,6 +72,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <network/SessionKey.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -318,9 +320,18 @@ namespace studio {
 		// @param transport The wire. Borrowed, not owned.
 		// @param log       The log to apply arriving edits through.
 		// @param universe  The worlds to apply them into.
+		// @param editorLimit The most editors including the host, or zero for the
+		//        listener's bounded default.
+		// @param accessKey The invitation key for a private stream, or null for a
+		//        public stream.
 		// @return The stream.
-		static std::unique_ptr<EditStream>
-		Host(engine::net::Transport &transport, CommandLog &log, engine::world::Universe &universe);
+		static std::unique_ptr<EditStream> Host(
+			engine::net::Transport &transport,
+			CommandLog &log,
+			engine::world::Universe &universe,
+			uint16_t editorLimit = 0,
+			const network::SessionKey *accessKey = nullptr
+		);
 
 		// Joins a session hosted elsewhere.
 		//
@@ -329,13 +340,16 @@ namespace studio {
 		// @param nowSeconds The current time.
 		// @param log        The log to apply arriving edits through.
 		// @param universe   The worlds to apply them into.
+		// @param accessKey  The invitation key for a private stream, or null for a
+		//        public stream.
 		// @return The stream.
 		static std::unique_ptr<EditStream> Join(
 			engine::net::Transport &transport,
 			const engine::net::Endpoint &host,
 			double nowSeconds,
 			CommandLog &log,
-			engine::world::Universe &universe
+			engine::world::Universe &universe,
+			const network::SessionKey *accessKey = nullptr
 		);
 
 		~EditStream();
@@ -476,6 +490,14 @@ namespace studio {
 		// addressed. Host only.
 		void Remember(EditorId editor, engine::replication::ClientId client);
 
+		// Removes a disconnected client from the session's address table.
+		void Forget(engine::replication::ClientId client);
+
+		// Sends to every editor that completed the edit-stream hello.
+		size_t Broadcast(
+			std::span<const std::byte> payload, double nowSeconds, engine::replication::ClientId except = {}
+		);
+
 		CommandLog *Log = nullptr;
 		engine::world::Universe *Worlds = nullptr;
 
@@ -504,6 +526,18 @@ namespace studio {
 		// Which client each editor id belongs to, so a grant can be addressed.
 		// Host only.
 		std::vector<std::pair<EditorId, engine::replication::ClientId>> Members;
+
+		// Domain-separated identities derived from a private invitation key.
+		// The listener and connector borrow these. Declaring the identities first
+		// makes them outlive those borrowers during the destructor's reverse walk.
+		//@{
+		std::optional<engine::assets::SigningKey> ServerIdentity;
+		std::optional<engine::assets::SigningKey> ClientIdentity;
+		std::optional<engine::assets::PublicKey> RequiredClientIdentity;
+		//@}
+
+		bool Private = false;
+		uint16_t EditorLimit = 0;
 
 		// Exactly one of these. A host orders; a guest is ordered.
 		std::unique_ptr<engine::replication::Listener> Server;

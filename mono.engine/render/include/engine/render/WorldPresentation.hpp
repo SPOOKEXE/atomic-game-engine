@@ -40,6 +40,8 @@ namespace engine::render {
 
 	// Renderer settings that affect scene pixels without changing a draw row.
 	struct ScenePresentationState {
+		// Lighting, animation, resource, surface, shader, and debug inputs.
+		//@{
 		scene::WorldLighting Lighting;
 		uint64_t Animation = 0;
 		uint64_t Resources = 0;
@@ -47,6 +49,7 @@ namespace engine::render {
 		uint32_t SurfaceLimit = 0;
 		core::Name PostProcess;
 		bool Untextured = false;
+		//@}
 	};
 
 	// Signs all inputs that can change the scene layer. Game and host interface
@@ -109,9 +112,11 @@ namespace engine::render {
 		core::Name SourceSelection;
 
 		// Copies of blocks used when the frame outlives the store boundary.
+		//@{
 		std::vector<effects::EmitterBlock> Blocks;
 		std::vector<effects::EmitterSpawnState> SpawnStates;
 		std::vector<effects::EmitterRuntime> RuntimeStates;
+		//@}
 
 		// Whether batch pointers already name Blocks.
 		bool Detached = false;
@@ -129,11 +134,15 @@ namespace engine::render {
 	// boundary and owns no callable allocation. Revision must change whenever
 	// state read only by the predicate changes.
 	struct ParticleBatchSelection {
+		// Non-owning test applied while the world is entered.
 		using Predicate = bool (*)(const ecs::Store &, ecs::Entity, const effects::ParticleEmitter &);
 
+		// Stable policy name, predicate, and caller-owned invalidation revision.
+		//@{
 		core::Name Name;
 		Predicate Includes = nullptr;
 		uint64_t Revision = 0;
+		//@}
 	};
 
 	// Rebuilds the world-owned draw list from visible scene rows.

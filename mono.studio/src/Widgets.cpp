@@ -71,6 +71,8 @@ namespace studio {
 			}
 
 			edit.Caret = data->CursorPos;
+			edit.SelectionStart = data->SelectionStart;
+			edit.SelectionEnd = data->SelectionEnd;
 			return 0;
 		}
 

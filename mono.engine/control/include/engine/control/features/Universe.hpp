@@ -31,6 +31,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -328,9 +329,10 @@ namespace engine::control {
 		json ReadSchema(const ecs::Schema &schema) {
 			json fields = json::object();
 			for (const ecs::FieldDescriptor &field : schema.Fields()) {
-				fields[std::string(field.Spelling)] = field.Type == PropertyType::Enum
-														  ? "Enum." + std::string(field.Enum.Text())
-														  : std::string(ecs::Describe(field.Type));
+				fields[std::string(field.Spelling)] =
+					field.Packing != ecs::FieldPacking::Native ? ecs::Describe(field.Packing)
+					: field.Type == PropertyType::Enum		   ? "Enum." + std::string(field.Enum.Text())
+															   : std::string(ecs::Describe(field.Type));
 			}
 			return fields;
 		}
@@ -664,6 +666,7 @@ namespace engine::control {
 		}
 	}
 
+	// Builds the component catalogue resource exposed through MCP.
 	inline json ComponentCatalogue() {
 		json out = json::array();
 		for (uint32_t index = 0; index < static_cast<uint32_t>(ecs::Components::Count()); index++) {
@@ -1066,14 +1069,16 @@ namespace engine::control {
 						return;
 					}
 
-					const auto *bytes = static_cast<const unsigned char *>(store.GetComponent(entity, id));
+					const void *component = store.GetComponent(entity, id);
 					json fields = json::object();
 
 					for (const ecs::FieldDescriptor &field : schema->Fields()) {
+						alignas(8) std::array<std::byte, 8> scratch{};
+						const void *value = ecs::Schemas::ReadField(component, field, scratch.data());
 						fields[std::string(field.Spelling)] =
 							field.Type == PropertyType::String
-								? json(*reinterpret_cast<const std::string *>(bytes + field.Offset))
-								: ValueToJson(field.Type, bytes + field.Offset);
+								? json(*static_cast<const std::string *>(value))
+								: ValueToJson(field.Type, value);
 					}
 					out = json{
 						{"id", entity.Id},
@@ -1152,16 +1157,24 @@ namespace engine::control {
 								break;
 							}
 
+							alignas(8) std::array<std::byte, 8> scratch{};
+							void *target = found->Packing == ecs::FieldPacking::Native
+											   ? static_cast<void *>(value.data() + found->Offset)
+											   : static_cast<void *>(scratch.data());
+							bool converted = true;
 							if (found->Type == PropertyType::String) {
 								if (!field.value().is_string()) {
 									failure = "'" + field.key() + "' takes a string";
 									break;
 								}
-								*reinterpret_cast<std::string *>(value.data() + found->Offset) =
-									field.value().get<std::string>();
-							} else if (!ValueFromJson(
-										   found->Type, field.value(), value.data() + found->Offset, failure
-									   )) {
+								*static_cast<std::string *>(target) = field.value().get<std::string>();
+							} else {
+								converted = ValueFromJson(found->Type, field.value(), target, failure);
+							}
+							if (converted && found->Packing != ecs::FieldPacking::Native) {
+								converted = ecs::Schemas::WriteField(value.data(), *found, target);
+							}
+							if (!converted) {
 								failure = "'" + field.key() + "': " + failure;
 								break;
 							}

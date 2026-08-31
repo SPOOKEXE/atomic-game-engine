@@ -48,6 +48,7 @@ namespace client {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::ecs::SystemOrder;
 	using engine::render::DrawList;
 	using engine::scene::ActiveCamera;
 	using engine::scene::DrawInstance;
@@ -139,13 +140,10 @@ namespace client {
 
 		// Brings the render gate in step with the tree.
 		//
-		// **`PreRender`, and registered before `collect-instances` in the same
-		// phase**, because what it produces is presentation state and this is
-		// the phase that derives presentation state. Registration order carries
-		// no ordering contract - `Scheduler` says so - but these two are
-		// independent in the only way that matters: a gate one frame stale
-		// would be a part that appears a frame after it was parented, and the
-		// phase runs them in the order they were added.
+		// **`PreRender`, before `aim-surface-cameras` and collection**, because
+		// what it produces is presentation state and this is the phase that
+		// derives presentation state. The scheduler edges at registration make
+		// that ordering explicit.
 		//
 		// **It is the one thing here that is structural**, which is worth
 		// naming rather than hiding: adding or removing `Rendered` moves a row
@@ -949,32 +947,45 @@ namespace client {
 			scheduler.Add("resolve-attachments", Phase::PreSimulation, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
 			});
-			scheduler.Add("refresh-emitters", Phase::PreSimulation, [](Store &world) {
-				(void)engine::effects::RefreshEmitters(world);
-			});
+			scheduler.Add(
+				"refresh-emitters",
+				Phase::PreSimulation,
+				[](Store &world) { (void)engine::effects::RefreshEmitters(world); },
+				SystemOrder{{}, {"resolve-attachments"}}
+			);
 			scheduler.Add("step-particles", Phase::Simulation, [](Store &world) {
 				(void)engine::effects::StepParticles(world, static_cast<float>(world.Time().Delta));
 			});
-			scheduler.Add("record-trails", Phase::Simulation, [](Store &world) {
-				(void)engine::effects::RecordTrails(world, static_cast<float>(world.Time().Delta));
-			});
-			// The `PreRender` half of the pair above. First in this phase, so
-			// `build-ribbons` and everything the host reads after `Present` -
+			scheduler.Add(
+				"record-trails",
+				Phase::Simulation,
+				[](Store &world) {
+					(void)engine::effects::RecordTrails(world, static_cast<float>(world.Time().Delta));
+				},
+				SystemOrder{{}, {"step-particles"}}
+			);
+			// The `PreRender` half of the pair above. `build-ribbons` depends on
+			// it, so everything the host reads after `Present` -
 			// `render::CollectLights`, `CollectParticleBatches` - see a frame
 			// resolved against the transforms this frame is being drawn with.
 			scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
 			});
-			scheduler.Add("build-ribbons", Phase::PreRender, [](Store &world) {
-				const auto *active = world.Resource<ActiveCamera>();
-				const engine::scene::Transform *eye =
-					active == nullptr ? nullptr : world.Get<engine::scene::Transform>(active->Entity);
-				(void)engine::effects::BuildRibbons(
-					world,
-					eye == nullptr ? Vector3::Zero : eye->Frame.Position,
-					static_cast<float>(world.Time().Elapsed)
-				);
-			});
+			scheduler.Add(
+				"build-ribbons",
+				Phase::PreRender,
+				[](Store &world) {
+					const auto *active = world.Resource<ActiveCamera>();
+					const engine::scene::Transform *eye =
+						active == nullptr ? nullptr : world.Get<engine::scene::Transform>(active->Entity);
+					(void)engine::effects::BuildRibbons(
+						world,
+						eye == nullptr ? Vector3::Zero : eye->Frame.Position,
+						static_cast<float>(world.Time().Elapsed)
+					);
+				},
+				SystemOrder{{}, {"resolve-attachments"}}
+			);
 		}
 
 		// The two resources a script writes `UserInputService` through.
@@ -1182,7 +1193,9 @@ namespace client {
 			(void)engine::scene::ResolveMaterials(world);
 		});
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
-		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
+		scheduler.Add(
+			"aim-surface-cameras", Phase::PreRender, AimSurfaces, SystemOrder{{}, {"sync-rendered"}}
+		);
 
 		// **Before the collection, and it was not.** Everything these two
 		// install in `PreRender` produces what the draw list is built *from*:
@@ -1192,7 +1205,8 @@ namespace client {
 		// they were added, so with these registered after `collect-instances`
 		// every one of them was published a frame late - a character's limbs
 		// drawn where the root was last frame, which is the judder that reads as
-		// a rig lagging its own body.
+		// a rig lagging its own body. The collection dependencies below now
+		// state that ordering directly.
 		//
 		// Three comments already asserted this order and none of them was true:
 		// the `PreRender` half of `resolve-attachments` says "first in this
@@ -1202,7 +1216,12 @@ namespace client {
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
 
-		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
+		scheduler.Add(
+			"collect-instances",
+			Phase::PreRender,
+			engine::render::CollectInstances,
+			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons"}}
+		);
 		return true;
 	}
 
@@ -1371,7 +1390,9 @@ namespace client {
 		// **Between the two, not beside them.** `sync-rendered` decides what is
 		// drawn at all and `collect-instances` reads the `Visual` this writes,
 		// so a mirror aimed after collection would publish last frame's answer.
-		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
+		scheduler.Add(
+			"aim-surface-cameras", Phase::PreRender, AimSurfaces, SystemOrder{{}, {"sync-rendered"}}
+		);
 
 		// **The same three systems `BuildScriptedWorld` installs, from the same
 		// place.** This is the argument `aim-surface-cameras` already makes one
@@ -1381,11 +1402,15 @@ namespace client {
 		//
 		// **And before the collection, for the reason `BuildScriptedWorld`
 		// gives at length**: what these install in `PreRender` is what the draw
-		// list is built from, and a phase runs its systems in the order they
-		// were added.
+		// list is built from. The collection dependencies state that order.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
 
-		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
+		scheduler.Add(
+			"collect-instances",
+			Phase::PreRender,
+			engine::render::CollectInstances,
+			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons"}}
+		);
 	}
 }

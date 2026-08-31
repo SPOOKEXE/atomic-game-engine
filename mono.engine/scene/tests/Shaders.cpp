@@ -134,10 +134,10 @@ TEST_CASE("the source property is the only thing that moves the revision", "[sce
 	REQUIRE(source != nullptr);
 	REQUIRE(source->Type == engine::ecs::PropertyType::String);
 
-	// **Not scriptable**, which is `LuaSourceContainer::Source`'s rule: a script
-	// that could write another instance's shader could put arbitrary GLSL in
-	// front of the driver. An author still can, through this descriptor.
-	REQUIRE_FALSE(source->Scriptable);
+	// Scriptable, because a generated shader is the runtime case this class
+	// exists to represent. The computed setter still owns the revision, so a
+	// Luau write and an editor write cannot disagree about whether it changed.
+	REQUIRE(source->Scriptable);
 
 	const uint32_t before = ShaderTextOf(store, Name("Toon")).Revision;
 

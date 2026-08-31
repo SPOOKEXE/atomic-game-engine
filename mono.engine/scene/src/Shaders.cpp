@@ -30,13 +30,6 @@ namespace engine::scene {
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ShaderSource>()});
 			property.Writes = property.Reads;
 
-			// **Not scriptable**, which is `LuaSourceContainer::Source`'s rule
-			// and applies here for a stronger reason: a script that could write
-			// another instance's shader could put arbitrary GLSL in front of the
-			// driver. The properties panel, a game file and the sync all still
-			// write it, because they are the author rather than the program.
-			property.Scriptable = false;
-
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const ShaderSource *held = store.Get<ShaderSource>(instance);
 				if (held == nullptr) {

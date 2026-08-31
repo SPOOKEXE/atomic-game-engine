@@ -61,9 +61,16 @@
 // | the editor | `plugin.Notify`, `plugin.GetActiveWorld` |
 // | the selection | `Selection:Get`, `:Set`, `:Add`, `:Remove` |
 // | scripts in the scene | `plugin.GetScripts`, `.GetScriptSource`, `.SetScriptSource` |
-// | toolbars | `plugin.CreateToolbar`, `.CreateButton`, `.SetButtonActive` |
-// | panels | `plugin.CreateWidget`, `.SetWidgetRender`, `.SetWidgetOpen`, `.IsWidgetOpen` |
-// | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Separator`, `.InputText` |
+// | toolbars | `plugin.CreateToolbar`, `.CreateToolbarTab`, `.CreateToolbarRow`,
+// `.CreateToolbarColumn`, `.CreateButton`, `.CreateToggle`, `.CreateDropdown`,
+// `.CreateLabel`, `.SetToolCell`, `.SetToolVisible`, `.SetToolWidth`,
+// `.SetToolbarVisible`, `.SetToolbarPlacement` |
+// | panels | `plugin.CreateWidget`, `.SetWidgetRender`, `.SetWidgetOpen`,
+// `.SetWidgetDock`, `.SetWidgetSizeConstraints` |
+// | viewport | `plugin.GetViewportOption`, `.SetViewportOption`, `.AddViewport` |
+// | script editor | `plugin.OpenScript`, `.GetScriptSource`, `.SetScriptSource` |
+// | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Combo`, `.Separator`,
+// `.InputText` |
 //
 // **`Selection` is a service and the rest is a table**, which is Roblox's own
 // split rather than an inconsistency: a selection is a thing the editor *has*,
@@ -147,6 +154,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -175,6 +183,122 @@ namespace studio {
 	// @since v0.12
 	bool RegisterSelectionComponent();
 
+	// The immediate-mode control represented by one toolbar item.
+	//
+	// @since v0.20
+	enum class PluginControlKind : uint8_t {
+		Button,
+		Toggle,
+		Dropdown,
+		Label,
+		Builtin,
+	};
+
+	// Where a toolbar is composed in Studio's top strip.
+	// @since v0.20
+	enum class PluginToolbarPlacement : uint8_t {
+		Tabbed,
+		Pinned,
+	};
+
+	// Stable text for script/config input.
+	// @since v0.20
+	//@{
+	const char *Describe(PluginToolbarPlacement placement);
+	std::optional<PluginToolbarPlacement> ParsePluginToolbarPlacement(std::string_view text);
+	//@}
+
+	// One native control group contributed by the Default Studio plugin.
+	//
+	// Keeping these as data is what lets the toolbar editor move and hide the
+	// built-in controls through the same path as an installed plugin's controls.
+	//
+	// @since v0.20
+	enum class BuiltinStudioTool : uint8_t {
+		None,
+		Play,
+		PlayHere,
+		Run,
+		Pause,
+		Stop,
+		SpawnPlayer,
+		RemovePlayer,
+		PlayerCount,
+		ViewportName,
+		SceneSelector,
+		WorldState,
+		InsertObject,
+		SelectMode,
+		MoveMode,
+		RotateMode,
+		ScaleMode,
+		SnapToggle,
+		SnapDistance,
+		SnapDegrees,
+		ScaleFaces,
+		Anchor,
+		Lock,
+		Align,
+		Facing,
+		EditPivot,
+		ResetPivot,
+		PivotNotice,
+		Duplicate,
+		Delete,
+		Deselect,
+		Undo,
+		Redo,
+		SelectionCount,
+		CreateScript,
+		CreateLocalScript,
+		CreateModuleScript,
+		ScriptDestination,
+		ScriptEditorPanel,
+		DebuggerPanel,
+		CommandBarPanel,
+		Grid,
+		Particles,
+		ViewportIndicator,
+		Cursor3D,
+		OrbitAroundCursor,
+		DirectionLock,
+		ExplorerPanel,
+		PropertiesPanel,
+		OutputPanel,
+		AssetsPanel,
+		StatisticsPanel,
+		FrameGraphPanel,
+		HeapPanel,
+		CameraSpeed,
+		PluginReload,
+		PluginManage,
+		ToolbarEditor,
+		DockWidgetEditor,
+		PluginStatus,
+		DemoNodes,
+		DemoDescription,
+	};
+
+	// Where a plugin asks its dock widget to appear on first use.
+	//
+	// The person's saved ImGui layout wins after first use.
+	//
+	// @since v0.20
+	enum class PluginDock : uint8_t {
+		Floating,
+		Centre,
+		Left,
+		Right,
+		Bottom,
+	};
+
+	// Stable text for a dock target and its parser for script/config input.
+	// @since v0.20
+	//@{
+	const char *Describe(PluginDock dock);
+	std::optional<PluginDock> ParsePluginDock(std::string_view text);
+	//@}
+
 	// What a `plugin.json` says.
 	//
 	// @since v0.12
@@ -196,6 +320,16 @@ namespace studio {
 		// Whether the editor should run it. A plugin somebody switched off stays
 		// on disk and stays listed.
 		bool Enabled = true;
+
+		// Stable identity used by toolbar and manager preferences. Empty in a
+		// manifest means the plugin folder name is used during discovery.
+		std::string Id;
+
+		// Optional manager metadata.
+		//@{
+		std::string Version;
+		std::string Author;
+		//@}
 	};
 
 	// A toolbar a plugin asked for, and the buttons on it.
@@ -218,6 +352,49 @@ namespace studio {
 
 		// Whether it draws as held. A plugin sets this to show a mode.
 		bool Active = false;
+
+		// Stable within its toolbar. Generated from creation order when the
+		// plugin does not provide one.
+		std::string Id;
+
+		// What this item draws. `Builtin` is reserved for Default Studio.
+		PluginControlKind Kind = PluginControlKind::Button;
+
+		// Dropdown choices and the selected zero-based row.
+		//@{
+		std::vector<std::string> Options;
+		size_t Selected = 0;
+		//@}
+
+		// Toggle and dropdown changes use this callback. A button uses `OnClick`.
+		engine::script::HostCallback OnChanged;
+
+		// The plugin's defaults. A person's toolbar layout may override both.
+		//@{
+		bool Visible = true;
+		float Width = 92.0f;
+		//@}
+
+		// Native control group when `Kind` is `Builtin`.
+		BuiltinStudioTool Builtin = BuiltinStudioTool::None;
+
+		// Stable grid cell names. Empty means automatic placement in declaration
+		// order, which preserves every pre-grid plugin.
+		//@{
+		std::string Row;
+		std::string Column;
+		//@}
+	};
+
+	// One named row or column in a plugin toolbar grid.
+	// @since v0.20
+	struct PluginToolbarTrack {
+		// Stable row or column identity.
+		std::string Id;
+
+		// Optional control width for a declared column. Zero keeps each control's
+		// own width. Rows do not use this field.
+		float Width = 0.0f;
 	};
 
 	// @since v0.12
@@ -227,6 +404,23 @@ namespace studio {
 
 		// Its buttons, in the order they were created.
 		std::vector<PluginButton> Buttons;
+
+		// Stable within the plugin. Generated from creation order when omitted.
+		std::string Id;
+
+		// Whether this tab is offered by default.
+		bool Visible = true;
+
+		// Pinned toolbars share the permanent first row. Tabbed toolbars appear in
+		// the selectable ribbon below it.
+		PluginToolbarPlacement Placement = PluginToolbarPlacement::Tabbed;
+
+		// Stable grid declarations. Empty vectors produce an implicit row and one
+		// automatic column per control.
+		//@{
+		std::vector<PluginToolbarTrack> Rows;
+		std::vector<PluginToolbarTrack> Columns;
+		//@}
 	};
 
 	// A docked panel a plugin asked for.
@@ -269,6 +463,20 @@ namespace studio {
 		// preset. An empty override set is "take the editor's theme", which is
 		// what those sites mean.
 		engine::ui::ThemeColours Colours = {};
+
+		// Stable within the plugin and the first-use docking request.
+		//@{
+		std::string Id;
+		PluginDock Dock = PluginDock::Floating;
+		//@}
+
+		// Window constraints in scaled pixels. A zero maximum means unbounded.
+		//@{
+		float MinimumWidth = 160.0f;
+		float MinimumHeight = 100.0f;
+		float MaximumWidth = 0.0f;
+		float MaximumHeight = 0.0f;
+		//@}
 	};
 
 	// One plugin, as the editor holds it.
@@ -291,6 +499,10 @@ namespace studio {
 
 		// Why it is not, in the words somebody can act on. Empty when it is.
 		std::string Error;
+
+		// Whether discovery accepted the manifest and identity. Source reloads may
+		// retry runtime failures, but only a manifest rescan may clear this gate.
+		bool DefinitionValid = true;
 
 		// How many times its heartbeat has raised. A plugin that throws every
 		// frame is switched off rather than logged sixty times a second.
@@ -323,7 +535,144 @@ namespace studio {
 		// list is**, and because the runtime holds a raw pointer to it - so it
 		// has to sit still while the vector it lives beside grows.
 		std::unique_ptr<engine::script::HostSurface> Surface;
+
+		// Built-in plugins have native controls and no script runtime.
+		bool Builtin = false;
 	};
+
+	// The allowed width range of one script-created toolbar control.
+	// @since v0.20
+	//@{
+	inline constexpr float PLUGIN_TOOL_MINIMUM_WIDTH = 40.0f;
+	inline constexpr float PLUGIN_TOOL_MAXIMUM_WIDTH = 320.0f;
+	//@}
+
+	// A custom toolbar tab saved by the toolbar editor.
+	// @since v0.20
+	struct ToolbarTabPreference {
+		// Stable identity, presentation, placement, and ordering for the tab.
+		//@{
+		std::string Id;
+		std::string Name;
+		bool Visible = true;
+		bool UserCreated = true;
+		PluginToolbarPlacement Placement = PluginToolbarPlacement::Tabbed;
+		size_t Order = 0;
+		//@}
+	};
+
+	// A person's override for one plugin-owned toolbar item.
+	// @since v0.20
+	struct ToolbarItemPreference {
+		// Stable item identity and the tab receiving it.
+		//@{
+		std::string Key;
+		std::string Tab;
+		//@}
+
+		// Visibility, size, grid placement, and ordering overrides.
+		//@{
+		bool Visible = true;
+		float Width = 92.0f;
+		std::string Row;
+		std::string Column;
+		size_t Order = 0;
+		//@}
+	};
+
+	// Persistent toolbar customization. Plugin declarations remain the defaults
+	// and this sparse list rides over them.
+	// @since v0.20
+	struct ToolbarPreferences {
+		// Sparse tab and item overrides owned by the user.
+		//@{
+		std::vector<ToolbarTabPreference> Tabs;
+		std::vector<ToolbarItemPreference> Items;
+		//@}
+	};
+
+	// One item in the toolbar composed for this frame.
+	// @since v0.20
+	struct ToolbarItemLocation {
+		// Source indices, stable key, width, and composed order for one item.
+		//@{
+		size_t Plugin = 0;
+		size_t Toolbar = 0;
+		size_t Item = 0;
+		std::string Key;
+		float Width = 92.0f;
+		size_t Order = 0;
+		//@}
+	};
+
+	// One grid cell. Multiple items are retained in declaration order if a
+	// plugin deliberately assigns them to the same cell.
+	// @since v0.20
+	struct ToolbarCellView {
+		// The named column and the controls assigned to it.
+		//@{
+		std::string Column;
+		std::vector<ToolbarItemLocation> Items;
+		//@}
+	};
+
+	// One named row in a composed toolbar grid.
+	// @since v0.20
+	struct ToolbarRowView {
+		// The named row and its composed cells.
+		//@{
+		std::string Id;
+		std::vector<ToolbarCellView> Cells;
+		//@}
+	};
+
+	// One visible tab and its visible controls.
+	// @since v0.20
+	struct ToolbarTabView {
+		// Identity, presentation, contents, and ownership of the composed tab.
+		//@{
+		std::string Id;
+		std::string Name;
+		std::vector<ToolbarRowView> Rows;
+		bool UserCreated = false;
+		//@}
+	};
+
+	// The cached toolbar projection drawn by the editor.
+	// @since v0.20
+	struct ToolbarLayoutView {
+		// Permanent rows and selectable tabs in the composed layout.
+		//@{
+		std::vector<ToolbarRowView> PinnedRows;
+		std::vector<ToolbarTabView> Tabs;
+		//@}
+	};
+
+	// Pure toolbar model helpers used by the editor and its suite.
+	// @since v0.20
+	//@{
+	float ClampPluginToolWidth(float width);
+	std::string PluginIdentity(const LoadedPlugin &plugin);
+	std::string PluginToolbarKey(const LoadedPlugin &plugin, const PluginToolbar &toolbar, size_t index);
+	std::string PluginToolKey(
+		const LoadedPlugin &plugin,
+		const PluginToolbar &toolbar,
+		size_t toolbarIndex,
+		const PluginButton &button,
+		size_t itemIndex
+	);
+	ToolbarLayoutView
+	ComposeToolbar(const std::vector<LoadedPlugin> &plugins, const ToolbarPreferences &preferences);
+	bool
+	LoadToolbarPreferences(const std::filesystem::path &path, ToolbarPreferences &out, std::string &error);
+	bool SaveToolbarPreferences(
+		const std::filesystem::path &path, const ToolbarPreferences &preferences, std::string &error
+	);
+	//@}
+
+	// Creates the engine-owned plugin that contributes Studio's standard ribbon.
+	// @since v0.20
+	LoadedPlugin MakeDefaultStudioPlugin();
 
 	// How many times a plugin may raise before it is switched off.
 	//

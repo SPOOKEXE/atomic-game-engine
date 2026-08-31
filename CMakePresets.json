@@ -95,6 +95,35 @@
       }
     },
     {
+      "name": "bench-o0",
+      "inherits": "bench",
+      "displayName": "simulation benchmarks at -O0",
+      "cacheVariables": {
+        "MONO_OPTIMISE": "OFF"
+      }
+    },
+    {
+      "name": "bench-o1",
+      "inherits": "bench",
+      "displayName": "simulation benchmarks at -O1",
+      "cacheVariables": {
+        "MONO_OPTIMISE_LEVEL": "1"
+      }
+    },
+    {
+      "name": "bench-o2",
+      "inherits": "bench",
+      "displayName": "simulation benchmarks at -O2",
+      "cacheVariables": {
+        "MONO_OPTIMISE_LEVEL": "2"
+      }
+    },
+    {
+      "name": "bench-o3",
+      "inherits": "bench",
+      "displayName": "simulation benchmarks at -O3"
+    },
+    {
       "name": "dist-dev",
       "inherits": "release",
       "displayName": "dist-dev: the shipped build with the diagnostics left in, at -O1",
@@ -141,6 +170,22 @@
     {
       "name": "bench",
       "configurePreset": "bench"
+    },
+    {
+      "name": "bench-o0",
+      "configurePreset": "bench-o0"
+    },
+    {
+      "name": "bench-o1",
+      "configurePreset": "bench-o1"
+    },
+    {
+      "name": "bench-o2",
+      "configurePreset": "bench-o2"
+    },
+    {
+      "name": "bench-o3",
+      "configurePreset": "bench-o3"
     },
     {
       "name": "dist-dev",

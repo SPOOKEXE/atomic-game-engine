@@ -23,29 +23,39 @@ namespace engine::render {
 	// combined scene image, while this split says which resident input invalidated
 	// it and keeps cache diagnostics from reporting every change as "scene".
 	struct ScenePresentationSignatures {
+		// Signatures of independently changing scene sources.
+		//@{
 		uint64_t Objects = 0;
 		uint64_t Particles = 0;
 		uint64_t Environment = 0;
 		uint64_t Portals = 0;
+		//@}
 
+		// Whether every retained source signature agrees.
 		bool operator==(const ScenePresentationSignatures &) const = default;
 	};
 
 	// Persistent signatures for the independently retained presentation layers.
 	struct PresentationSignatures {
+		// Signatures of independently retained presentation inputs.
+		//@{
 		ScenePresentationSignatures Scene;
 		uint64_t GameInterface = 0;
 		uint64_t HostInterface = 0;
 		uint64_t Viewport = 0;
+		//@}
 	};
 
 	// Which retained layers need new pixels or geometry.
 	struct PresentationDamage {
+		// Retained layers whose inputs changed.
+		//@{
 		bool Scene = false;
 		bool GameInterface = false;
 		bool HostInterface = false;
 		bool Viewport = false;
 		bool Overlay = false;
+		//@}
 
 		// Which resident scene source caused `Scene`. A forced diagnostic render
 		// may set `Scene` with all four false, which is reported honestly as a
@@ -63,6 +73,7 @@ namespace engine::render {
 			return Scene || GameInterface || Viewport || Overlay;
 		}
 
+		// Whether any retained layer needs work.
 		bool Any() const {
 			return Scene || GameInterface || HostInterface || Viewport || Overlay;
 		}
@@ -72,14 +83,19 @@ namespace engine::render {
 	// An invisible resident pool still advances on the device, but it does not
 	// invalidate the retained scene image until a camera or emitter input changes.
 	struct ParticleLayerVisibility {
+		// Last completed particle signature and its visibility result.
+		//@{
 		uint64_t Signature = 0;
 		bool Visible = true;
 		bool Valid = false;
+		//@}
 
+		// Whether particles or ribbons require a new scene image.
 		bool RequiresImage(bool particlesPresent, bool ribbonsPresent, uint64_t candidate) const {
 			return ribbonsPresent || (particlesPresent && (Visible || !Valid || Signature != candidate));
 		}
 
+		// Replaces tentative particle damage with the visibility-aware decision.
 		void Refine(
 			PresentationDamage &damage, bool particlesPresent, bool ribbonsPresent, uint64_t candidate
 		) const {
@@ -90,12 +106,14 @@ namespace engine::render {
 				damage.Viewport || damage.Objects || damage.Particles || damage.Environment || damage.Portals;
 		}
 
+		// Records the completed visibility query for a signature.
 		void Commit(uint64_t signature, bool visible) {
 			Signature = signature;
 			Visible = visible;
 			Valid = true;
 		}
 
+		// Forgets the completed query and restores conservative defaults.
 		void Reset() {
 			*this = {};
 		}
@@ -120,11 +138,16 @@ namespace engine::render {
 		Count,
 	};
 
+	// Display metadata for one retained cache layer.
 	struct PresentationCacheLayerInfo {
+		// Label and hierarchy depth used by diagnostics.
+		//@{
 		std::string_view Name;
 		uint8_t Depth = 0;
+		//@}
 	};
 
+	// Display metadata in `PresentationCacheLayer` order.
 	inline constexpr std::array PRESENTATION_CACHE_LAYERS{
 		PresentationCacheLayerInfo{"objects", 0},
 		PresentationCacheLayerInfo{"particles", 0},
@@ -145,16 +168,23 @@ namespace engine::render {
 
 	// One layer's cumulative decisions and its most recent one.
 	struct PresentationCacheActivity {
+		// Cumulative reuse and regeneration decisions.
+		//@{
 		uint64_t Hits = 0;
 		uint64_t Writes = 0;
+		//@}
+
+		// Most recent decision for a retained layer.
 		enum class Decision : uint8_t {
 			NotObserved,
 			NotApplicable,
 			Hit,
 			Write,
 		};
+		// Most recent decision.
 		Decision Last = Decision::NotObserved;
 
+		// Whether the most recent opportunity regenerated this layer.
 		bool Wrote() const {
 			return Last == Decision::Write;
 		}
@@ -163,6 +193,8 @@ namespace engine::render {
 	// Whether a retained source exists for this presentation opportunity.
 	// A missing source is not a cache hit: there was no resource to reuse.
 	struct PresentationCacheApplicability {
+		// Whether each optional source exists for this presentation.
+		//@{
 		bool Objects = true;
 		bool Particles = true;
 		bool Environment = true;
@@ -171,6 +203,7 @@ namespace engine::render {
 		bool HostInterface = true;
 		bool ViewportGeometry = true;
 		bool ViewportOverlay = true;
+		//@}
 	};
 
 	// Cheap per-viewport cache accounting for the diagnostics panel.
@@ -179,6 +212,7 @@ namespace engine::render {
 	// tree rather than a fake-duration span in the timing flame graph.
 	class PresentationCacheProfile {
 	  public:
+		// Records the cache decisions implied by one damage result.
 		void Record(
 			const PresentationDamage &damage,
 			bool studio,
@@ -238,10 +272,12 @@ namespace engine::render {
 			}
 		}
 
+		// Cumulative and latest activity in cache-layer order.
 		std::span<const PresentationCacheActivity> Activities() const {
 			return Rows;
 		}
 
+		// Clears cumulative and latest activity.
 		void Reset() {
 			Rows = {};
 		}
@@ -257,6 +293,7 @@ namespace engine::render {
 	// retained images now represent the candidate.
 	class PresentationDamageTracker {
 	  public:
+		// Computes damage without advancing the completed baseline.
 		PresentationDamage Inspect(const PresentationSignatures &candidate) const {
 			if (!Valid) {
 				return {
@@ -288,24 +325,29 @@ namespace engine::render {
 			};
 		}
 
+		// Advances the baseline after presentation completes.
 		void Commit(const PresentationSignatures &presented) {
 			Presented = presented;
 			Valid = true;
 		}
 
+		// Forgets the baseline and cache diagnostics.
 		void Reset() {
 			Presented = {};
 			Valid = false;
 		}
 
+		// Whether any presentation has completed since construction or reset.
 		bool HasPresentation() const {
 			return Valid;
 		}
 
+		// Mutable cache diagnostics for the owning viewport.
 		PresentationCacheProfile &CacheProfile() {
 			return Cache;
 		}
 
+		// Cache diagnostics for the owning viewport.
 		const PresentationCacheProfile &CacheProfile() const {
 			return Cache;
 		}

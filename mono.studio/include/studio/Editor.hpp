@@ -62,6 +62,7 @@
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
@@ -95,6 +96,7 @@
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/PluginReload.hpp>
 #include <studio/Plugins.hpp>
 #include <studio/Presentation.hpp>
 #include <studio/Preview.hpp>
@@ -728,6 +730,42 @@ namespace studio {
 		std::string Text;
 	};
 
+	// One save recorded by the Changes panel.
+	//
+	// The two documents are the exact bytes before and after the successful
+	// save. `Source` is where the record was discovered and is not serialized.
+	//
+	// @since v0.20
+	struct SavedChange {
+		// Timestamp, documents on either side, and the originating game file.
+		//@{
+		std::string SavedAt;
+		std::string Before;
+		std::string After;
+		std::filesystem::path Source;
+		//@}
+	};
+
+	// Serializes one saved change as the sidecar XML format.
+	//
+	// @param change The record to serialize.
+	// @return A complete XML document.
+	std::string SavedChangeXml(const SavedChange &change);
+
+	// Parses one saved change sidecar.
+	//
+	// @param text  The complete XML document.
+	// @param out   Filled only on success.
+	// @param error Filled with a stable reason on failure, when supplied.
+	// @return Whether the document was valid.
+	bool ParseSavedChangeXml(std::string_view text, SavedChange &out, std::string *error = nullptr);
+
+	// Where timestamped change records for a game are stored.
+	//
+	// @param game The game file.
+	// @return A directory beside the game, scoped by its filename.
+	std::filesystem::path SavedChangesDirectory(const std::filesystem::path &game);
+
 	// Compares two documents line by line.
 	//
 	// **A free function with its own suite**, because a comparator that reports
@@ -887,6 +925,10 @@ namespace studio {
 		// `FocusedViewport`.
 		void ResolveFocusedViewport();
 		void DrawProperties();
+		void DrawShaderCapabilities(
+			Entity shader, const engine::scene::ShaderSource &source, engine::core::Name name
+		);
+		void DrawComponents();
 		void DrawUniverseProperties();
 
 		// The settings of one world, when its row in the explorer is selected.
@@ -2149,6 +2191,17 @@ namespace studio {
 		// Who else is editing, and how to invite them. `TeamCreate.cpp`.
 		void DrawTeamCreate();
 
+		// The main-menu entry points into the same collaboration state as the
+		// panel. Keeping the actions here prevents the menu and panel from growing
+		// separate hosting rules.
+		//@{
+		void DrawTeamCreateMenu();
+		void WatchForTeam();
+		void HostTeam();
+		void JoinTeam(const engine::net::Endpoint &address, bool privateSession);
+		void LeaveTeam();
+		//@}
+
 		// Gives one world everything this editor expects every world to have.
 		//
 		// **Five call sites wrote three lines each and one of them wrote two**,
@@ -2374,8 +2427,24 @@ namespace studio {
 		// and the checkboxes that reopen a widget somebody closed.
 		void DrawPluginTools();
 
+		// Draws the complete plugin-owned ribbon, including Default Studio.
+		void DrawPluginToolbar();
+
+		// Invalidates the cached projection after a plugin or toolbar preference
+		// changes its layout declarations.
+		void InvalidateToolbarLayout();
+
+		// Editors for toolbar composition and plugin dock-widget defaults.
+		//@{
+		void DrawToolbarEditor();
+		void DrawDockWidgetEditor();
+		//@}
+
 		// Draws every open plugin panel, each in its own window.
 		void DrawPluginWidgets();
+
+		// Draws one native control group contributed by Default Studio.
+		void DrawBuiltinStudioTool(BuiltinStudioTool tool);
 
 		// Calls one of a plugin's handlers, counting a raise as a fault.
 		//
@@ -2733,6 +2802,17 @@ namespace studio {
 		// Re-reads the file and re-writes the live game, then compares them.
 		void RefreshDiff();
 
+		// Discovers and parses timestamped save records for the current game.
+		void RefreshSavedChanges();
+
+		// Writes one timestamped record after a successful overwrite.
+		bool RecordSavedChange(
+			const std::filesystem::path &game,
+			std::string_view before,
+			std::string_view after,
+			std::string &error
+		);
+
 		// Builds a Rojo project's tree into the active world.
 		//
 		// **Into the active world rather than a new one**, because a project is
@@ -2760,6 +2840,12 @@ namespace studio {
 
 		// Breakpoints, the paused stack, and stepping.
 		void DrawDebugger();
+
+		// Call stack watch panel - shows the stack for the selected capture.
+		void DrawCallStack();
+
+		// Breakpoints watch panel - shows all breakpoints across all worlds.
+		void DrawBreakpointsWatch();
 
 		// One frame's locals or upvalues, as a two-column table.
 		//
@@ -3123,21 +3209,30 @@ namespace studio {
 		// One file in a screenshot batch. Scene requests name a renderer slot;
 		// Studio requests capture the complete host overlay.
 		struct ControlScreenshot {
+			// Destination, renderer slot, and complete-Studio capture mode.
+			//@{
 			std::filesystem::path Path;
 			size_t Slot = 0;
 			bool Studio = false;
+			//@}
 		};
+		// Screenshot requests waiting for capture.
 		std::deque<ControlScreenshot> ControlScreenshots;
+		// Whether the front screenshot request has reached the renderer.
 		bool ControlScreenshotIssued = false;
 
 		// A click injected through SDL. The release waits until a presented ImGui
 		// frame has observed the press, matching a physical button lifecycle.
 		struct ControlClick {
+			// Screen position, SDL button, and press-observation state.
+			//@{
 			float X = 0.0f;
 			float Y = 0.0f;
 			uint8_t Button = 0;
 			bool DownProcessed = false;
+			//@}
 		};
+		// The synthetic click currently crossing the frame boundary.
 		std::optional<ControlClick> PendingControlClick;
 
 		// What this editor was started with.
@@ -3222,6 +3317,11 @@ namespace studio {
 		// caches over process-wide names, and `Refresh` takes whichever world
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
+		engine::render::ShaderCompiler ShaderInspector;
+		engine::render::ShaderCompilation InspectedShader;
+		WorldId InspectedShaderWorld;
+		Entity InspectedShaderEntity;
+		uint32_t InspectedShaderRevision = 0;
 
 		// **What an `EditableMesh` a script built converts into and uploads.**
 		//
@@ -4059,6 +4159,7 @@ namespace studio {
 		// viewport. A turn in the round robin can update one image without
 		// invalidating the other layers or the other panels.
 		std::vector<engine::render::PresentationDamageTracker> ViewportPresentations;
+		// Particle-layer visibility retained independently for each viewport.
 		std::vector<engine::render::ParticleLayerVisibility> ViewportParticleVisibility;
 
 		// Renderer-owned mesh, texture, shader, and editable content revision.
@@ -4100,16 +4201,38 @@ namespace studio {
 		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
 
+		// An Alt-click waiting to place the editor's 3D cursor after projection
+		// data is available.
+		struct PendingCursorAction {
+			// Viewport location and whether an action is pending.
+			//@{
+			size_t Viewport = 0;
+			float X = 0.0f;
+			float Y = 0.0f;
+			bool Wanted = false;
+			//@}
+		};
+
+		// The queued cursor placement and its current world position.
+		//@{
+		PendingCursorAction PendingCursor;
+		engine::core::Vector3 CursorPosition;
+		//@}
+
 		// A selection rectangle begun on empty viewport space. Starting on a
 		// part remains Select's direct surface move.
 		struct BoxSelectionAction {
+			// Lifecycle, viewport rectangle, and additive-selection mode.
+			//@{
 			bool Active = false;
 			size_t Viewport = 0;
 			glm::vec2 Start{0.0f};
 			glm::vec2 Current{0.0f};
 			bool Add = false;
+			//@}
 		};
 
+		// The active or most recently completed viewport box selection.
 		BoxSelectionAction BoxSelection;
 
 		// Which manipulator the viewport is offering.
@@ -4207,18 +4330,17 @@ namespace studio {
 		// @return `true` when everything selected has it set.
 		bool SelectionFlag(const char *property) const;
 
-		// The ribbon's four strips, one per tab. `Tools.cpp`.
+		// The native controls rendered from Default Studio's descriptors.
 		//
-		// **Called by `DrawToolbar`, not by a panel.** Each is one row of the
-		// pinned strip under the menu bar; the tab bar that chooses between them
-		// is on the row above. Split so that each is a list of controls rather
-		// than a list of controls with a `BeginTabItem` between every fourth
-		// one.
+		// Each call draws only `DrawingBuiltinTool`, so every visible control has
+		// its own movable cell while the behavior stays in the editor layer that
+		// owns its state.
 		//@{
 		void DrawHomeTools();
 		void DrawModelTools();
 		void DrawScriptTools();
 		void DrawViewTools();
+		void DrawTransportTools();
 		//@}
 
 		// A button that runs a registered command, greyed with its reason.
@@ -4423,6 +4545,10 @@ namespace studio {
 		// @return `true` when the pointer is over a handle, so the click that
 		//         would otherwise pick is swallowed.
 		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
+		// Draws the orientation control for the selected viewport.
+		void DrawDirectionGizmo(size_t viewport, const PanelProjection &panel);
+		// Draws the editor's world-space cursor in the selected viewport.
+		void DrawCursor(size_t viewport, const PanelProjection &panel);
 
 		// Outlines what every nearby part actually collides as.
 		//
@@ -4553,6 +4679,8 @@ namespace studio {
 		bool ShowFind = false;
 		std::string FindText;
 		std::string ReplaceText;
+		bool FocusFind = false;
+		std::string ComponentFilter;
 		//@}
 
 		// What the output panel is showing, and what it is searching for.
@@ -4579,6 +4707,14 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+		// Direction widget, cursor, orbit mode, direction lock, and config drafts.
+		//@{
+		bool ShowDirectionGizmo = true;
+		bool ShowCursor = true;
+		bool OrbitCamera = false;
+		bool DirectionLocked = false;
+		std::unordered_map<std::string, std::string> ComponentConfigDrafts;
+		//@}
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate
 		// from each emitter's Enabled property so hiding effects is an editor view
@@ -5045,6 +5181,7 @@ namespace studio {
 		bool ShowExplorer = true;
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
+		bool ShowComponents = true;
 		bool ShowScripts = true;
 		bool ShowOutput = true;
 		//@}
@@ -5362,10 +5499,47 @@ namespace studio {
 		char TeamNameField[64] = {};
 		char TeamKeyField[80] = {};
 		char TeamPointField[64] = {};
+		char TeamJoinField[64] = {};
+		int TeamPortField = 0;
+		int TeamPeerLimitField = 8;
+		bool TeamPrivateField = false;
+		bool TeamJoinPrivateField = false;
+		bool TeamRevealKey = false;
+		std::string TeamStatus;
 		//@}
 
 		// The plugins panel. See `DrawPlugins`.
 		bool ShowPlugins = false;
+
+		// Editors over the two plugin-owned interface registries.
+		//@{
+		bool ShowToolbarEditor = false;
+		bool ShowDockWidgetEditor = false;
+		//@}
+
+		// Sparse toolbar overrides and the draft for a user-created tab.
+		//@{
+		ToolbarPreferences ToolbarPrefs;
+		bool ToolbarPreferencesLoaded = false;
+		ToolbarLayoutView ToolbarLayout;
+		bool ToolbarLayoutDirty = true;
+		char ToolbarTabDraft[64] = {};
+		char ToolbarRenameDraft[64] = {};
+		std::string ToolbarRenamingTab;
+		BuiltinStudioTool DrawingBuiltinTool = BuiltinStudioTool::None;
+		//@}
+
+		// Enabled overrides by stable plugin id. Missing means the manifest's
+		// default. Kept outside the plugin folder so updates do not overwrite a
+		// person's choice.
+		std::map<std::string, bool, std::less<>> PluginEnabled;
+		// Persistent-state status and the filesystem reload scan state.
+		//@{
+		bool PluginStateLoaded = false;
+		PluginReloadTracker PluginReloader;
+		std::vector<PluginReloadRoot> PluginReloadRoots;
+		double NextPluginRootScanSeconds = 0.0;
+		//@}
 
 		// The Demo Nodes panel, and everything it holds.
 		//
@@ -5533,6 +5707,29 @@ namespace studio {
 		// Whether the alignment was abandoned for size. Reported, never silent.
 		bool DiffCoarse = false;
 
+		// Whether the live comparison has run for `GamePath`.
+		bool DiffLoaded = false;
+
+		// Timestamped saves discovered beside the current game.
+		std::vector<SavedChange> SavedChanges;
+
+		// Which saved change the panel is showing.
+		int SavedChangeSelection = 0;
+
+		// The game the saved list belongs to. A Save As invalidates it.
+		std::filesystem::path SavedChangesFor;
+
+		// Records skipped while scanning, summarized for the panel.
+		std::string SavedChangesError;
+
+		// The selected saved record's diff, cached until selection changes.
+		std::vector<DiffLine> SavedDiffRows;
+		// Source and coarse-mode flag for the cached diff.
+		//@{
+		std::filesystem::path SavedDiffSource;
+		bool SavedDiffCoarse = false;
+		//@}
+
 		// Breakpoints and the captured stacks. See `DrawDebugger`.
 		bool ShowDebugger = false;
 
@@ -5605,14 +5802,22 @@ namespace studio {
 		//
 		// @since v0.18
 		bool ShowHeap = false;
+
+		// Call stack and breakpoints watch panels.
+		// @since v0.20
+		bool ShowCallStack = false;
+		bool ShowBreakpointsWatch = false;
 		//@}
 
 		// Frame times, sampled every frame so the panel has history the moment
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
 
+		// Global and per-viewport slowly sampled status counters.
+		//@{
 		StatusBarSnapshot StatusBar;
 		std::vector<StatusBarSnapshot> ViewportStatistics;
+		//@}
 
 		// What the frame-graph panel is showing, and when it changes.
 		//
@@ -5742,6 +5947,7 @@ namespace studio {
 			// Driver-private allocations are not portable through SDL, so this is
 			// the payload of the renderer's buffers and textures rather than VRAM.
 			std::vector<float> GpuPlot;
+			// Current logical GPU allocation statistics.
 			engine::render::GpuMemoryStatistics Gpu;
 
 			// Seconds the plot and the growth figures cover.

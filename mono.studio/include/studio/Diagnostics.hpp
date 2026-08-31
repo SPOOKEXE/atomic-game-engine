@@ -22,17 +22,26 @@ namespace studio {
 	// `core::FrameSpan` borrows its name. Studio snapshots own the text because
 	// an interval can retain it for several seconds.
 	struct DiagnosticSpan {
+		// Owned identity and retained hierarchy coordinates.
+		//@{
 		std::string Name;
 		uint32_t Depth = 0;
 		uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
+		//@}
 
+		// Start, inclusive, self, and idle durations in milliseconds.
+		//@{
 		float StartMilliseconds = 0.0f;
 		float Milliseconds = 0.0f;
 		float SelfMilliseconds = 0.0f;
 		float IdleMilliseconds = 0.0f;
+		//@}
 
+		// Profiling category and whether producer work reported the span.
+		//@{
 		engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
 		bool Reported = false;
+		//@}
 
 		// How many frames contributed to this structural occurrence. Repeated
 		// siblings get separate rows, so this is at most the interval's frame

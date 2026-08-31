@@ -22,6 +22,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/testing/Suite.hpp>
@@ -265,6 +266,49 @@ TEST_CASE("the rings scene builds and moves itself", "[examples][scene]") {
 	// for.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 5.0f);
+}
+
+TEST_CASE("the shaders scene authors and selects runtime shaders from Luau", "[examples][scene][shaders]") {
+	const StagedAssets assets;
+
+	Store store("shaders");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Shaders.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const engine::scene::ShaderText surface = engine::scene::ShaderTextOf(store, Name("ExampleSurface"));
+	const engine::scene::ShaderText post = engine::scene::ShaderTextOf(store, Name("ExamplePost"));
+	REQUIRE(surface.Found);
+	REQUIRE(post.Found);
+	CHECK(surface.Code.find("surfaceMap") != std::string::npos);
+	CHECK(post.Code.find("colourImage") != std::string::npos);
+	CHECK(surface.Revision > 0);
+	CHECK(post.Revision > 0);
+
+	const Entity mesh = InScene(store, "ShaderMesh");
+	const Entity meshMaterial = store.FindFirstChild(mesh, "ShaderMaterial");
+	REQUIRE(meshMaterial != engine::ecs::NULL_ENTITY);
+	const auto *meshSelection = store.Get<engine::scene::MaterialRef>(meshMaterial);
+	REQUIRE(meshSelection != nullptr);
+	CHECK(meshSelection->Shader == Name("ExampleSurface"));
+
+	const Entity pane = InScene(store, "ShaderSurface");
+	const Entity paneMaterial = store.FindFirstChild(pane, "SurfaceMaterial");
+	const Entity surfaceCamera = store.FindFirstChild(pane, "ShaderSurfaceCamera");
+	REQUIRE(paneMaterial != engine::ecs::NULL_ENTITY);
+	REQUIRE(surfaceCamera != engine::ecs::NULL_ENTITY);
+	const auto *surfaceSelection = store.Get<engine::scene::MaterialRef>(paneMaterial);
+	REQUIRE(surfaceSelection != nullptr);
+	CHECK(surfaceSelection->Shader == Name("ExampleSurface"));
+	CHECK(store.Get<SurfaceCamera>(surfaceCamera) != nullptr);
+
+	CHECK(engine::scene::PostProcessShaderOf(store) == Name("ExamplePost"));
+	const ActiveCamera *active = store.Resource<ActiveCamera>();
+	REQUIRE(active != nullptr);
+	CHECK(active->Entity == InScene(store, "ShaderCamera"));
 }
 
 TEST_CASE("the mirrors scene builds what the render passes need", "[examples][scene]") {

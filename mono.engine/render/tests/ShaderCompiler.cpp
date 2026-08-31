@@ -3,12 +3,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 
 TEST_SUITE_ID("engine.render.shadercompiler")
 
 using engine::render::ShaderCompilation;
 using engine::render::ShaderCompiler;
+using engine::render::ShaderOptimizationKind;
+using engine::render::ShaderResourceKind;
 using engine::render::ShaderStage;
 
 namespace {
@@ -40,6 +43,18 @@ TEST_CASE("a valid fragment shader compiles to SPIR-V", "[shaderc]") {
 	REQUIRE(result.Error.empty());
 	REQUIRE_FALSE(result.SpirV.empty());
 	REQUIRE(result.SpirV.front() == SPIRV_MAGIC);
+	CHECK(result.Capabilities.Stage == ShaderStage::Fragment);
+	CHECK(result.Capabilities.SpirVBytes == result.SpirV.size() * sizeof(uint32_t));
+	CHECK(result.Capabilities.Instructions > 0);
+	CHECK(result.Capabilities.TextureInstructions > 0);
+	REQUIRE_FALSE(result.Capabilities.RequiredCapabilities.empty());
+	CHECK_FALSE(
+		engine::render::ShaderCapabilityName(result.Capabilities.RequiredCapabilities.front()).empty()
+	);
+	REQUIRE(result.Capabilities.Resources.size() == 1);
+	CHECK(result.Capabilities.Resources[0].Kind == ShaderResourceKind::SampledTexture);
+	CHECK(result.Capabilities.Resources[0].Set == 2);
+	CHECK(result.Capabilities.Resources[0].Binding == 0);
 }
 
 TEST_CASE("a malformed shader produces a non-empty error", "[shaderc]") {
@@ -118,8 +133,47 @@ TEST_CASE("optimising changes the output but not the outcome", "[shaderc]") {
 
 	REQUIRE_FALSE(optimised.Failed);
 	REQUIRE(optimised.SpirV.front() == SPIRV_MAGIC);
-	// Optimisation is worth having only if it does something.
-	REQUIRE(optimised.SpirV.size() < unoptimised.SpirV.size());
+	REQUIRE(optimised.Optimizations.size() == 2);
+	CHECK(optimised.Optimizations[0].Kind == ShaderOptimizationKind::ConstantFolding);
+	CHECK(optimised.Optimizations[1].Kind == ShaderOptimizationKind::CommonSubexpressionElimination);
+	CHECK(optimised.Optimizations[0].AfterInstructions <= optimised.Optimizations[0].BeforeInstructions);
+	CHECK(optimised.Optimizations[1].AfterInstructions <= optimised.Optimizations[1].BeforeInstructions);
+	// A trivial module may already be folded by the GLSL front end, but the
+	// explicit passes must never make its binary larger.
+	REQUIRE(optimised.SpirV.size() <= unoptimised.SpirV.size());
+}
+
+TEST_CASE("capabilities estimate buffers and compute workgroups", "[shaderc][capabilities]") {
+	constexpr const char *source = R"(#version 450
+layout(local_size_x = 8, local_size_y = 4, local_size_z = 2) in;
+layout(set = 1, binding = 0) uniform Parameters { vec4 scale; } parameters;
+layout(set = 1, binding = 1, rgba16f) uniform image2D outputImage;
+void main() { imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), parameters.scale); }
+)";
+	ShaderCompiler compiler;
+	const ShaderCompilation result = compiler.Compile(source, ShaderStage::Compute, "estimate.comp");
+
+	REQUIRE_FALSE(result.Failed);
+	CHECK(result.Capabilities.Stage == ShaderStage::Compute);
+	CHECK(result.Capabilities.WorkgroupX == 8);
+	CHECK(result.Capabilities.WorkgroupY == 4);
+	CHECK(result.Capabilities.WorkgroupZ == 2);
+	CHECK(result.Capabilities.DeclaredBufferBytes >= 16);
+	CHECK(result.Capabilities.MemoryInstructions > 0);
+	CHECK(
+		std::any_of(
+			result.Capabilities.Resources.begin(),
+			result.Capabilities.Resources.end(),
+			[](const auto &resource) { return resource.Kind == ShaderResourceKind::UniformBuffer; }
+		)
+	);
+	CHECK(
+		std::any_of(
+			result.Capabilities.Resources.begin(),
+			result.Capabilities.Resources.end(),
+			[](const auto &resource) { return resource.Kind == ShaderResourceKind::StorageTexture; }
+		)
+	);
 }
 
 TEST_CASE("one compiler can be reused", "[shaderc]") {

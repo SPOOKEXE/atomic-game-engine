@@ -315,6 +315,8 @@ namespace engine::render {
 		std::chrono::steady_clock::time_point OpenedWall;
 		bool MainGpuWorkRecorded = false;
 		bool DedicatedComputeSubmitted = false;
+		bool NodeProfileActive = false;
+		size_t DroppedNodeMarks = 0;
 		std::unordered_map<uint32_t, double> CpuNodeWall;
 
 		// --- what the passes call ------------------------------------------
@@ -336,6 +338,15 @@ namespace engine::render {
 		// @param id The node.
 		// @return Its scheduled entry, or null.
 		const graph::ScheduledNode *ScheduledFor(graph::NodeId id) const;
+
+		// Whether this authored node participates in the current profile.
+		bool ProfileEnabled(const graph::RunContext &context) const;
+
+		// Assigns GPU mark ownership to one GraphRunner invocation.
+		void BeginNodeProfile(const graph::RunContext &context);
+
+		// Closes that invocation and returns mark writes lost to the query budget.
+		size_t EndNodeProfile(const graph::RunContext &context);
 
 		// Closes the open timing span, recording its wall time and its GPU
 		// marks. Safe to call when nothing is open.

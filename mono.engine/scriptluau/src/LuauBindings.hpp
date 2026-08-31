@@ -28,6 +28,7 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/ComputeJobs.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
@@ -66,6 +67,9 @@ namespace engine::script {
 
 		// What the host is, for `RunService:IsServer()` and friends.
 		HostRole Role;
+
+		// The services and host seams this runtime may reach.
+		ScriptCapabilities Access = ScriptCapabilities::None;
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
@@ -208,6 +212,11 @@ namespace engine::script {
 		// waiters, so it has a distinct table.
 		EditableMeshJobs EditableMeshes;
 		std::unordered_map<uint64_t, lua_State *> AwaitedEditableMeshes;
+
+		// Typed work that may outlive the submitting heartbeat. The queue owns
+		// every worker and the map owns only suspended VM threads.
+		ComputeJobs Computations;
+		std::unordered_map<uint64_t, lua_State *> AwaitedComputations;
 
 		// How many GUIDs `HttpService:GenerateGUID` has handed out.
 		//
@@ -552,7 +561,7 @@ namespace engine::script {
 	// @param state The VM.
 	// @param phase Which set to install.
 	// @since v0.15
-	void InstallLuauServices(lua_State *state, ServiceAvailability phase);
+	void InstallLuauServices(lua_State *state, ServiceAvailability phase, ScriptCapabilities access);
 
 	// Installs the `InputObject` metatable, and pushes one.
 	//
@@ -799,6 +808,7 @@ namespace engine::script {
 	// Prepares every queued editable-mesh transaction as one batch, commits in
 	// ticket order on this world thread, and resumes its callers.
 	std::string PumpEditableMeshJobs(lua_State *state);
+	std::string PumpComputeJobs(lua_State *state);
 
 	// Fires `Player.CharacterAdded` and `CharacterRemoving` for everything
 	// `scene` recorded since the last barrier.

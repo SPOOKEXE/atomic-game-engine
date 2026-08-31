@@ -134,6 +134,55 @@ bench-all *args: (bench "--all" args)
 # something else was compiling makes every later run look like an improvement.
 bench-accept *args: (bench "--all" "--accept" args)
 
+# Measure the simulation hot paths at every optimisation level the shipped
+# build supports. Each preset has its own cache so a comparison never reuses a
+# binary from another level.
+simulation-sweep samples="5":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suites=(
+        engine.world.bench.barrier
+        engine.ecs.bench.iteration
+        engine.ecs.bench.structure
+        engine.physics.bench.broadphase
+        engine.physics.bench.integrate
+        engine.physics.bench.narrowphase
+        engine.physics.bench.solver
+        engine.physics.bench.stepping
+        engine.replication.bench.survey
+        engine.parallel.bench.dispatch
+        engine.parallel.bench.contention
+        engine.parallel.bench.channel
+    )
+    for level in 0 1 2 3; do
+        preset="bench-o${level}"
+        cmake --preset "$preset" > /dev/null
+        cmake --build --preset "$preset" --target benchrunner bench_world bench_ecs bench_physics bench_replication bench_parallel
+        for suite in "${suites[@]}"; do
+            ".cache/build/$preset/tools/benchrunner" \
+                --build ".cache/build/$preset" \
+                --filter "$suite" \
+                --all \
+                --samples "{{samples}}"
+        done
+    done
+
+# The 1-to-200-client replication ladder has a large joined-world fixture, so
+# keep it explicit instead of making every simulation sweep rebuild it.
+simulation-publish-sweep samples="3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for level in 0 1 2 3; do
+        preset="bench-o${level}"
+        cmake --preset "$preset" > /dev/null
+        cmake --build --preset "$preset" --target benchrunner bench_replication
+        ".cache/build/$preset/tools/benchrunner" \
+            --build ".cache/build/$preset" \
+            --filter engine.replication.bench.publish \
+            --all \
+            --samples "{{samples}}"
+    done
+
 # How much of the repository is code, comment and blank, as markdown.
 #
 # `just linecount` walks everything except mono.vendor and the dot-directories;
@@ -1350,7 +1399,14 @@ em-dash-check:
         git ls-files -c -o --exclude-standard -- \
             '*.cpp' '*.hpp' '*.luau' '*.ts' '*.cmake' '*.md' '*CMakeLists.txt' '*Justfile' \
         | grep -Ev '^(mono\.vendor/|mono\.tools/emdash/)' \
-        | grep -Fxv '.claude/RESUME.md'
+        | grep -Fxv '.claude/RESUME.md' \
+        | while IFS= read -r file; do
+            # A tracked path deleted in the worktree remains in `git ls-files`
+            # until the change is staged. It has no prose left to inspect.
+            if [ -f "$file" ]; then
+                printf '%s\n' "$file"
+            fi
+        done
     )
 
     # --- the check checks itself first ------------------------------------

@@ -246,6 +246,9 @@ namespace engine::physics {
 			return shape.Extent.Y * std::abs(along) + shape.Extent.X * across;
 		}
 
+		case scene::ShapeKind::Capsule:
+			return shape.Extent.Y * std::abs(axis.Dot(BarrelAxis(shape))) + shape.Extent.X;
+
 		case scene::ShapeKind::Hull:
 		case scene::ShapeKind::Mesh:
 			// Unreachable; see the paragraph above this switch. Zero reach means
@@ -308,6 +311,12 @@ namespace engine::physics {
 			const core::Vector3 outward = across > RADIAL_EPSILON ? radial / across : core::Vector3::Zero;
 			const float sign = along >= 0.0f ? 1.0f : -1.0f;
 			return shape.Frame.Position + axis * (shape.Extent.Y * sign) + outward * shape.Extent.X;
+		}
+
+		case scene::ShapeKind::Capsule: {
+			const core::Vector3 axis = BarrelAxis(shape);
+			const float sign = direction.Dot(axis) >= 0.0f ? 1.0f : -1.0f;
+			return shape.Frame.Position + axis * (shape.Extent.Y * sign) + direction * shape.Extent.X;
 		}
 		}
 
@@ -394,6 +403,15 @@ namespace engine::physics {
 
 		case scene::ShapeKind::Cylinder:
 			return CylinderFeature(shape, direction);
+
+		case scene::ShapeKind::Capsule: {
+			SupportFeature feature;
+			feature.Plane = direction;
+			feature.Count = 1;
+			feature.Points[0] = SupportPoint(shape, direction);
+			feature.Id = direction.Dot(BarrelAxis(shape)) >= 0.0f ? 1 : 0;
+			return feature;
+		}
 		}
 
 		SupportFeature feature;

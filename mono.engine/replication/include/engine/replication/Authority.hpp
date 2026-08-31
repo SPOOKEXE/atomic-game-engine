@@ -225,9 +225,12 @@ namespace engine::replication {
 		// One authoritative world participating in a shared publish dispatch.
 		// References are borrowed only for the duration of `PublishMany`.
 		struct PublishRequest {
+			// Replicator, live world, and authoritative tick to publish.
+			//@{
 			Authority &Source;
 			ecs::Store &World;
 			uint64_t Tick = 0;
+			//@}
 		};
 
 		// Creates a server-side replicator.

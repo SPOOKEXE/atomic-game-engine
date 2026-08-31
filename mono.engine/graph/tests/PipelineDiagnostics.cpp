@@ -73,12 +73,14 @@ namespace {
 		const char *name,
 		const char *kind,
 		std::vector<ResourceId> reads,
-		std::vector<ResourceId> writes) {
+		std::vector<ResourceId> writes,
+		std::vector<engine::graph::NodeParameter> parameters = {}) {
 		Node node;
 		node.Name = Name(name);
 		node.Kind = Name(kind);
 		node.Reads = std::move(reads);
 		node.Writes = std::move(writes);
+		node.Parameters = std::move(parameters);
 		return graph.AddNode(std::move(node));
 	}
 }
@@ -260,14 +262,33 @@ TEST_CASE("a target wider than its readers is reported", "[graph][diagnostics]")
 
 	CHECK(Names(found, DiagnosticKind::FormatOverspend, "lighting"));
 
-	// **A hint rather than a warning for the wire itself**, because landing HDR
-	// in fewer bits is what a tone mapper is *for* - the fault is only the
-	// spend, not the narrowing.
 	const auto lossy = std::find_if(found.begin(), found.end(), [](const Diagnostic &one) {
 		return one.Kind == DiagnosticKind::LossyWire;
 	});
 	REQUIRE(lossy != found.end());
+	CHECK(lossy->Severity == DiagnosticSeverity::Warning);
+}
+
+TEST_CASE("an explicit blit makes format narrowing an authored hint", "[graph][diagnostics]") {
+	Kinds();
+	RenderGraph graph;
+
+	const ResourceId hdr = Declare(graph, "hdr", ResourceKind::Colour, ResourceFormat::RGBA16F);
+	const ResourceId display = Declare(graph, "display", ResourceKind::Colour, ResourceFormat::RGB10A2);
+	const ResourceId window = Declare(graph, "window", ResourceKind::Colour, ResourceFormat::RGB10A2);
+
+	Add(graph, "lighting", "deferred-lighting", {}, {hdr});
+	Add(graph, "convert", "blit", {hdr}, {display}, {{.Key = Name("format"), .Value = "RGB10A2"}});
+	Add(graph, "present", "present", {display}, {window});
+
+	const std::vector<Diagnostic> found = Diagnose(graph);
+	const auto lossy = std::find_if(found.begin(), found.end(), [](const Diagnostic &one) {
+		return one.Kind == DiagnosticKind::LossyWire;
+	});
+	REQUIRE(lossy != found.end());
+	CHECK(lossy->Node == Name("convert"));
 	CHECK(lossy->Severity == DiagnosticSeverity::Hint);
+	CHECK_FALSE(Names(found, DiagnosticKind::FormatOverspend, "lighting"));
 }
 
 // --- fault 3, as far as a declaration reaches -------------------------------------

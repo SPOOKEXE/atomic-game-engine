@@ -55,6 +55,7 @@ namespace engine::ecs {
 
 namespace engine::gui {
 
+	// Selects which authored ScreenGui roots enter a compile.
 	enum class ScreenGuiSource : uint8_t {
 		All,
 		StarterGui,

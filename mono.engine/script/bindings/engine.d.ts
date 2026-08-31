@@ -772,6 +772,7 @@ declare namespace Enum {
 		readonly Cylinder: ShapeKind;
 		readonly Hull: ShapeKind;
 		readonly Mesh: ShapeKind;
+		readonly Capsule: ShapeKind;
 	};
 	const SizeConstraint: {
 		readonly RelativeXY: SizeConstraint;
@@ -1438,6 +1439,7 @@ declare interface SpringConstraint extends Constraint {
 
 declare interface ShaderScript extends Instance {
 	readonly Revision: number;
+	Source: string;
 }
 
 declare interface EditableMesh extends Instance {
@@ -1538,6 +1540,29 @@ declare interface Trail extends Instance {
 	Texture: string;
 	TextureLength: number;
 	Transparency: NumberSequence;
+}
+
+declare interface FaceInstance extends Instance {
+}
+
+declare interface Decal extends FaceInstance {
+	Color3: Color3;
+	Face: Enum.NormalId;
+	Texture: string;
+	Transparency: number;
+	ZIndex: number;
+}
+
+declare interface Texture extends FaceInstance {
+	Color3: Color3;
+	Face: Enum.NormalId;
+	OffsetStudsU: number;
+	OffsetStudsV: number;
+	StudsPerTileU: number;
+	StudsPerTileV: number;
+	Texture: string;
+	Transparency: number;
+	ZIndex: number;
 }
 
 declare interface GuiBase extends Instance {
@@ -2143,6 +2168,20 @@ declare interface ContentService {
 	GetTriangleCount(mesh: string): number;
 }
 
+// Runs a rectangular batch of values compatible with `math.noise` without
+// holding the VM thread. The result is flat and row-major.
+declare interface ComputeService {
+	NoiseGridAsync(
+		width: number,
+		depth: number,
+		originX: number,
+		originZ: number,
+		step: number,
+		context?: "Serial" | "Threaded" | "Processed",
+		originY?: number
+	): Promise<number[]>;
+}
+
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
 // No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
@@ -2309,6 +2348,7 @@ declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
+declare const ComputeService: ComputeService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -2342,6 +2382,13 @@ interface EngineWorld {
 	// The field list a component was declared with, in a shape
 	// `DefineComponent` accepts back.
 	GetComponentSchema(component: string): { [field: string]: string } | null;
+	SetComponentTags(component: string, tags: string[]): boolean;
+	SetComponentFieldTags(component: string, field: string, tags: string[]): boolean;
+	ExposeComponentField(component: string, field: string, exposed: boolean): boolean;
+	GetComponentMetadata(component: string): {
+		Tags: string[];
+		Fields: { [field: string]: { Type: string; Tags: string[]; Exposed: boolean } };
+	} | null;
 
 	// An entity carrying nothing: no class, no place in the tree, nothing drawn.
 	// Still an `Instance`, because an instance is an entity.
@@ -2351,6 +2398,10 @@ interface EngineWorld {
 	// order. Naming a component nothing declared is an error rather than an
 	// empty result.
 	Query(...components: string[]): Instance[];
+
+	// Every entity carrying all included components and none of the excluded
+	// components.
+	QueryFiltered(include: string[], exclude: string[]): Instance[];
 
 	Count(...components: string[]): number;
 }
@@ -2393,6 +2444,7 @@ declare const game: {
 		(service: "Players"): Players;
 		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
+		(service: "ComputeService"): ComputeService;
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
 		(service: "DataStoreService"): DataStoreService;
@@ -2462,6 +2514,9 @@ declare const Instance: {
 		(className: "ParticleEmitter", parent?: Instance): ParticleEmitter;
 		(className: "Beam", parent?: Instance): Beam;
 		(className: "Trail", parent?: Instance): Trail;
+		(className: "FaceInstance", parent?: Instance): FaceInstance;
+		(className: "Decal", parent?: Instance): Decal;
+		(className: "Texture", parent?: Instance): Texture;
 		(className: "GuiBase", parent?: Instance): GuiBase;
 		(className: "GuiService", parent?: Instance): GuiService;
 		(className: "GuiBase3d", parent?: Instance): GuiBase3d;

@@ -65,10 +65,27 @@ namespace engine::graph {
 				return false;
 			}
 			const std::vector<PortSpec> &side = reading ? spec->Inputs : spec->Outputs;
-			if (slot >= side.size()) {
-				return false;
+			const std::vector<core::Name> &bound = reading ? node.ReadPorts : node.WritePorts;
+			if (slot < bound.size() && bound[slot].IsValid()) {
+				const auto named = std::find_if(side.begin(), side.end(), [&](const PortSpec &port) {
+					return port.Name == bound[slot];
+				});
+				if (named == side.end()) {
+					return false;
+				}
+				out = named->Format;
+			} else {
+				if (slot >= side.size()) {
+					return false;
+				}
+				out = side[slot].Format;
 			}
-			out = side[slot].Format;
+			if (!reading && node.Kind == core::Name("blit")) {
+				const std::string *format = node.Parameter(core::Name("format"));
+				if (format != nullptr && !ParseResourceFormat(*format, out)) {
+					return false;
+				}
+			}
 			return true;
 		}
 
@@ -515,11 +532,28 @@ namespace engine::graph {
 					);
 				}
 
+				if (row.Body->Kind == core::Name("blit") && !row.Body->Reads.empty()) {
+					const ResourceDesc *source = graph.FindResource(row.Body->Reads.front());
+					if (source != nullptr && IsLossy(source->Format, produced)) {
+						found.push_back(
+							Diagnostic{
+								DiagnosticKind::LossyWire,
+								DiagnosticSeverity::Hint,
+								row.Body->Name,
+								described == nullptr ? core::Name{} : described->Name,
+								"'" + NameOf(graph, resource) + "' explicitly converts " +
+									std::string(Describe(source->Format)) + " to " +
+									std::string(Describe(produced)),
+							}
+						);
+					}
+				}
+
 				if (anyLossy) {
 					found.push_back(
 						Diagnostic{
 							DiagnosticKind::LossyWire,
-							DiagnosticSeverity::Hint,
+							DiagnosticSeverity::Warning,
 							row.Body->Name,
 							graph.FindResource(resource)->Name,
 							"'" + NameOf(graph, resource) +

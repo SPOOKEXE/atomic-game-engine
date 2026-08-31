@@ -439,7 +439,11 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 	// the tick" is answerable before "which system" - and every one of them is
 	// ECS time, because every engine and game system runs through the ECS.
 	REQUIRE(named("simulation"));
-	REQUIRE(named("pre-render"));
+	REQUIRE(named("physics"));
+	REQUIRE(named("animation"));
+	REQUIRE(named("replication"));
+	REQUIRE(named("render preparation"));
+	REQUIRE(named("render"));
 
 	const auto categorised = [&spans](std::string_view name) {
 		const auto found =

@@ -1,16 +1,13 @@
 @echo off
 REM
-REM What every `run-*.bat` in this directory is made of.
+REM Shared implementation for the generic scene launcher.
 REM
 REM Called with the scene's filename and its own flags, then everything the
 REM caller passed:
 REM
 REM   call "%~dp0_common.bat" Terrain.luau --stats %*
 REM
-REM An empty first argument means the built-in demo scene, which is C++ rather
-REM than a script. Eleven copies of a build sequence is eleven places to fix a
-REM preset name, and the copies would stop agreeing the first time one of them
-REM was edited in a hurry - which is the same reason `_common.sh` exists.
+REM An empty first argument lets the client use its default Rings.luau scene.
 REM
 REM Run these from a Developer Command Prompt for Visual Studio. They build
 REM before they run, the presets use the Ninja generator, and a plain cmd window
@@ -102,7 +99,7 @@ if not "%SCENE%"=="" (
 )
 
 if "%SCENE%"=="" (
-    echo running the built-in demo at %MAX_FPS% fps
+    echo running Rings.luau at %MAX_FPS% fps
 ) else (
     echo running %SCENE% at %MAX_FPS% fps
 )

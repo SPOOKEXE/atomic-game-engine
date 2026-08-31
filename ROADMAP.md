@@ -37,87 +37,11 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.20
-
-- [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
-	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
-- [_] add stack watch and breakpoint watch dock widgets
-- [_] auto complete popup doesn't position properly above/below text we're editing.
-- [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
-- [_] properly build out team create menu
-- [_] team create build out options properly
-- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
-- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
-- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
-- [_] consolidate render pipeline to a easy-to-find location for future work.
-- [_] ensure when you read the render pipeline, its obvious what it does and in what order
-- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
-- [_] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
-- [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
-- [_] go through and do a full batched-compute of all world systems for things like replication, iterating cpu data, iterating components, etc. Assume multi-processing for each individual world (hytale-style) and multi-threading for viable options. Vectorise rest (we test with -O0/-O1, but assume release -O2/3 will greatly improve it).
-- [_] find remaining bottlenecks in simulation code, check we're properly iterating components. use both dev AND release builds to find bottlenecks we need to improve (`-O0`, `-O1`, `-O2` and `-O3`).
-- [_] cleanup old demos or merge into a few, scripts/ folder and luau/ts scripts
-- [_] list all items that become resident on GPU and those that don't but should. check over their code to ensure we only update when they change, and whether we should split some others apart as they are always hit during rendering (statistics label, flamegraph, etc). Also we should minimize pcie traffic (i.e. instead of sending a full image to gpu, we only send the data and then render on gpu where possible - what about imgui? do we need to send gui image for it)
-- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
-- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
-- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
-- [_] ensure we have the ability to create custom components in scripting
-- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
-- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
-- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
-- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
-- [_] read the documents folder on what else we need to add and ask user for each one.
-- [_] add better memory packing for components by adding a DataQuantization component or something similar. Add quantization support for storing and packing values within components, like (u)float16, (u)float8, (u)int16, (u)int8, (u)int4 and bool. Need a way to decide who packs with what, maybe a `Component Data Packing` dock widget that shows you what values a component stores?
-- [_] ensure we build out and test UserInputService and ContextActionService.
-- [_] plan out base plugin system + default plugins + move default tools into plugins instead.
-- [_] setup a toolbar editor system where you can create new tabs, select which tools are visible on the toolbar, and plugins can modify their buttons and whatnot (with size constraints and such)
-- [_] setup and plan out dock widgets
-- [_] plugin manager widget
-- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
-- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
-- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
-- [_] viewport indictator direction gizmo (select and lock to certain directions)
-- [_] 3d cursor and camera orbit options under gizmo
-- [_] expand ShaderCapabilities out
-- [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
-- [_] add tests to validate each step of the rendering pipeline graph
-- [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
-- [_] add beams/trails/decals/textures, etc if they aren't added
-- [_] build out different types of physics colliders components (capsule, square, use-mesh, hull, etc). add properties to meshpart.
-- [_] add websocket support
-- [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
-- [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
-- [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
-- [x] StackGuard to prevent stack errors, infinite recursion, etc.
-- [x] Random.new(seed) with functions
-- [x] fix billboard gui in scene not rendering properly and stuff (tests pass)
-- [x] check if particles load textures properly (fallback works, demo asset external)
-
-### Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)
-- [_] engine graph architecture — Input Graph → AI Graph → World Graph → Physics Graph → Animation Graph → Render Graph, unified dependencies, scheduling, CPU/GPU jobs, synchronization, resource lifetime, profiling
-- [_] one registration path for render nodes — fold scope/queue metadata and requirements into graph::NodeCatalogue; derive BackendNodes(); studio widgets read Params
-- [_] DeviceCaps probe + CheckCapabilities — probe in Initialise(); wire refusal messages; studio requirements column
-- [_] custom native node kinds — RegisterNodeKind + Renderer::InstallNodeHandler; lifecycle hook on reinstall; demo custom kind in examples
-- [_] per-node GPU profiling — mark assignment in GraphRunner, grid column, tier switch; assert dropped-mark accounting
-- [_] explicit conversion nodes + narrowing rule — explicit blit format targeting; LossyWire demoted to hint when explicit conversion sits between producer/consumer
-- [_] tiered default pipelines by capability — Tier B/C documents; capability-driven pick at install; WorldPipelines extension asserting fall-through reasons
-- [_] ECS component change tracking — dirty bits/version counters so systems only process changed data
-- [_] archetype/query optimizer — cached ECS queries, change filters, parallel query execution
-- [_] entity references/handles — generation-safe references instead of raw entity IDs
-- [_] world snapshots & cloning — serialize/restore entire world state; instant-ish duplicate world for testing, previews, server simulation
-- [_] rollback/snapshot system — for networking and deterministic simulation
-- [_] system dependency graph — explicitly declare before/after, parallelize independent systems
-- [_] frame scheduler — CPU jobs, GPU jobs, async jobs and synchronization points represented together
-- [_] engine tick phases — Input → Simulation → Physics → Animation → Replication → Render preparation → Render
-- [_] determinism mode — detect nondeterministic simulation and optionally enforce deterministic ordering
-- [_] hot-reloadable components/systems
-- [_] parallel::Jobs pool fix — static Pool *pool = new Pool(); never destroy to avoid exit hang with waiters on condition variables
-
 ### v0.21
 
-- [_] wire future components — scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
-- [_] skinning pipeline — assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
-- [_] atmosphere/clouds at v0.22 — render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
+- [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
+- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
+- [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
 
 - [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
 - [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
@@ -143,6 +67,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] build out client settings for enabling/disabling certain features to help performance (editablemesh, editableimage, etc). make it LIVE so you can change it in-game.
 - [_] add a ESC settings menu to the client and in studio client. add the client settings to it.
 - [_] add a way for scripts to modify the ESC menu.
+
+- [_] gamepad and joystick support
+- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
+- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 
 ### v0.22
 
@@ -210,3 +139,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
+- [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
+- [_] add model providers (e.g. npcs in a game and can chat with you)
+- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
+- [_] VR support (oculus rift s)

@@ -25,6 +25,102 @@ namespace engine::graph {
 				into.push_back(ProfilePass{id, node->Name, node->Kind, where, 0.0, 0.0});
 			}
 		}
+
+		bool AllocatedTarget(const ResourceDesc &desc) {
+			return !desc.External && (desc.Kind == ResourceKind::Colour || desc.Kind == ResourceKind::Depth ||
+									  desc.Kind == ResourceKind::Storage);
+		}
+
+		bool Compatible(const ResourceDesc &left, const ResourceDesc &right) {
+			return left.Kind == right.Kind && left.Format == right.Format && left.Width == right.Width &&
+				   left.Height == right.Height && left.Divisor == right.Divisor;
+		}
+
+		NodeScope ScopeOf(const RenderGraph &graph, ResourceId resource) {
+			NodeScope found = NodeScope::Frame;
+			for (uint32_t value = 1; value <= graph.Count(); value++) {
+				const Node *node = graph.Find(NodeId{value});
+				if (node == nullptr || !TouchesResource(node->Writes, resource)) {
+					continue;
+				}
+				if (node->Scope == NodeScope::View) {
+					return NodeScope::View;
+				}
+				if (node->Scope == NodeScope::World) {
+					found = NodeScope::World;
+				}
+			}
+			return found;
+		}
+
+		std::vector<NodeId> OrderedNodes(const CompiledGraph &compiled) {
+			std::vector<NodeId> ordered;
+			ordered.reserve(compiled.Shared.size() + compiled.PerView.size() + compiled.Final.size());
+			ordered.insert(ordered.end(), compiled.Shared.begin(), compiled.Shared.end());
+			ordered.insert(ordered.end(), compiled.PerView.begin(), compiled.PerView.end());
+			ordered.insert(ordered.end(), compiled.Final.begin(), compiled.Final.end());
+			return ordered;
+		}
+	}
+
+	ResourceAliasPlan BuildResourceAliases(const RenderGraph &graph, const CompiledGraph &compiled) {
+		ResourceAliasPlan plan;
+		plan.Allocations.resize(graph.ResourceCount());
+		const std::vector<NodeId> ordered = OrderedNodes(compiled);
+
+		struct Lifetime {
+			uint32_t First = ProfileResource::NEVER;
+			uint32_t Last = ProfileResource::NEVER;
+		};
+		std::vector<Lifetime> lifetimes(graph.ResourceCount());
+		for (size_t pass = 0; pass < ordered.size(); pass++) {
+			const Node *node = graph.Find(ordered[pass]);
+			if (node == nullptr) {
+				continue;
+			}
+			for (const ResourceId resource : node->Writes) {
+				Lifetime &life = lifetimes[resource.Value - 1];
+				if (life.First == ProfileResource::NEVER) {
+					life.First = static_cast<uint32_t>(pass);
+				}
+				life.Last = static_cast<uint32_t>(pass);
+			}
+			for (const ResourceId resource : node->Reads) {
+				Lifetime &life = lifetimes[resource.Value - 1];
+				life.Last = static_cast<uint32_t>(pass);
+			}
+		}
+
+		struct Slot {
+			ResourceId Owner;
+			uint32_t Last = 0;
+		};
+		std::vector<Slot> slots;
+		for (size_t index = 0; index < graph.ResourceCount(); index++) {
+			const ResourceId resource{static_cast<uint32_t>(index + 1)};
+			const ResourceDesc *desc = graph.FindResource(resource);
+			const Lifetime life = lifetimes[index];
+			if (desc == nullptr || !AllocatedTarget(*desc) || life.First == ProfileResource::NEVER) {
+				continue;
+			}
+
+			auto reusable = std::find_if(slots.begin(), slots.end(), [&](const Slot &slot) {
+				const ResourceDesc *owner = graph.FindResource(slot.Owner);
+				return slot.Last < life.First && owner != nullptr && Compatible(*owner, *desc) &&
+					   ScopeOf(graph, slot.Owner) == ScopeOf(graph, resource);
+			});
+			if (reusable == slots.end()) {
+				plan.Allocations[index] = resource;
+				slots.push_back(Slot{resource, life.Last});
+				plan.PhysicalTargets++;
+				continue;
+			}
+
+			plan.Allocations[index] = reusable->Owner;
+			reusable->Last = life.Last;
+			plan.AliasedResources++;
+		}
+		return plan;
 	}
 
 	const char *Describe(Access access) {
@@ -45,6 +141,8 @@ namespace engine::graph {
 		const RenderGraph &graph, const CompiledGraph &compiled, uint32_t viewWidth, uint32_t viewHeight
 	) {
 		PipelineProfile profile;
+		const ResourceAliasPlan aliases = BuildResourceAliases(graph, compiled);
+		profile.AliasedResources = aliases.AliasedResources;
 
 		// **The three blocks in the order a frame runs them**, which is what
 		// `Compile` decided and is not this function's to re-derive. A grid that
@@ -70,11 +168,15 @@ namespace engine::graph {
 			row.Kind = desc->Kind;
 			row.Format = desc->Format;
 			row.External = desc->External;
+			row.Allocation = aliases.AllocationOf(id);
 			desc->Resolve(viewWidth, viewHeight, row.Width, row.Height);
 
 			// Bits per pixel rather than bytes per pixel, so a block-compressed
 			// format at four bits does not round to nothing.
-			row.Bytes = (static_cast<uint64_t>(row.Width) * row.Height * BitsPerPixel(row.Format) + 7) / 8;
+			if (row.Kind != ResourceKind::Camera && row.Kind != ResourceKind::Entities) {
+				row.Bytes =
+					(static_cast<uint64_t>(row.Width) * row.Height * BitsPerPixel(row.Format) + 7) / 8;
+			}
 
 			profile.Resources.push_back(row);
 		}
@@ -84,6 +186,9 @@ namespace engine::graph {
 		for (size_t at = 0; at < profile.Resources.size(); at++) {
 			ProfileResource &row = profile.Resources[at];
 			profile.TotalBytes += row.Bytes;
+			if (row.Allocation == row.Id) {
+				profile.AllocatedBytes += row.Bytes;
+			}
 
 			for (size_t pass = 0; pass < profile.Passes.size(); pass++) {
 				const Node *node = graph.Find(profile.Passes[pass].Node);

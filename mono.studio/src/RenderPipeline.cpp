@@ -67,6 +67,32 @@ namespace studio {
 			return microseconds;
 		}
 
+		std::string RequirementsText(const engine::graph::NodeRequirements &needs) {
+			std::string text;
+			const auto append = [&text](std::string_view name) {
+				if (!text.empty()) {
+					text += ", ";
+				}
+				text += name;
+			};
+			if (needs.Compute) {
+				append("compute");
+			}
+			if (needs.StorageTextures) {
+				append("storage image");
+			}
+			if (needs.IndirectDraws) {
+				append("indirect draw");
+			}
+			for (const engine::graph::ResourceFormat format : needs.Formats) {
+				append(engine::graph::Describe(format));
+			}
+			if (needs.TimestampsUseful) {
+				append("timestamps optional");
+			}
+			return text.empty() ? "none" : text;
+		}
+
 		template <typename Draw>
 		bool DrawStageImages(
 			const engine::graph::PipelineProfile &profile, const engine::graph::Node &node, Draw draw
@@ -385,6 +411,15 @@ namespace studio {
 		);
 		const std::string wanted = RenderPipelineFilter;
 
+		if (!ImGui::BeginTable(
+				"##render-pipeline-kinds", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+			)) {
+			return;
+		}
+		ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+		ImGui::TableSetupColumn("Requirements", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+		ImGui::TableHeadersRow();
+
 		for (const engine::graph::NodeKindSpec &spec : engine::graph::NodeCatalogue::All()) {
 			const std::string title = spec.Label.empty() ? std::string(spec.Kind.Text()) : spec.Label;
 			if (!wanted.empty() &&
@@ -393,8 +428,15 @@ namespace studio {
 				)) {
 				continue;
 			}
+			const engine::render::CapabilityCheck capability =
+				engine::render::CheckCapabilities(Renderer.Capabilities(), spec.Needs);
+			const std::string requirements = RequirementsText(spec.Needs);
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
 			ImGui::PushID(static_cast<int>(spec.Kind.Id()));
-			if (ImGui::Selectable(title.c_str())) {
+			if (ImGui::Selectable(
+					title.c_str(), false, capability.Accepted() ? 0 : ImGuiSelectableFlags_Disabled
+				)) {
 				const nodegraph::NodeId made =
 					RenderPipelineGraph.Add("render.pass." + std::string(spec.Kind.Text()), 0.0f, 0.0f);
 				if (made != nodegraph::NO_NODE) {
@@ -404,10 +446,23 @@ namespace studio {
 				}
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", spec.Summary.c_str());
+				if (capability.Accepted()) {
+					ImGui::SetTooltip("%s", spec.Summary.c_str());
+				} else if (capability.Status == engine::render::CapabilityStatus::MissingFormat) {
+					ImGui::SetTooltip(
+						"%s: %s",
+						engine::render::Describe(capability.Status),
+						engine::graph::Describe(capability.Format)
+					);
+				} else {
+					ImGui::SetTooltip("%s", engine::render::Describe(capability.Status));
+				}
 			}
+			ImGui::TableSetColumnIndex(1);
+			ImGui::TextDisabled("%s", requirements.c_str());
 			ImGui::PopID();
 		}
+		ImGui::EndTable();
 	}
 
 	void Editor::DrawRenderPipelineInspector() {
@@ -673,6 +728,13 @@ namespace studio {
 		const uint32_t height = WorldTarget.IsValid() ? WorldTarget.Height : 1080;
 		engine::graph::PipelineProfile profile =
 			engine::graph::ProfilePipeline(graph, compiled, width, height);
+		engine::graph::ExecutionSchedule schedule;
+		engine::core::Name scheduleOffender;
+		std::vector<engine::graph::PlannedCommandBuffer> commandBuffers;
+		if (engine::graph::CompileSchedule(graph, schedule, scheduleOffender) ==
+			engine::graph::ScheduleStatus::Ok) {
+			commandBuffers = engine::graph::PlanCommandBuffers(schedule);
+		}
 		const auto &gpuTimings = Renderer.PassTimings();
 		const auto &wallTimings = Renderer.PassWallTimes();
 		for (engine::graph::ProfilePass &pass : profile.Passes) {
@@ -683,16 +745,69 @@ namespace studio {
 			}
 		}
 		const auto mib = [](uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
+		int profilingTier = static_cast<int>(Renderer.Profiling());
+		const char *profilingTiers[] = {"Off", "CPU", "Full"};
+		ImGui::SetNextItemWidth(110.0f);
+		if (ImGui::Combo("Timing", &profilingTier, profilingTiers, 3)) {
+			Renderer.SetProfiling(static_cast<engine::render::ProfilingTier>(profilingTier));
+		}
+		if (Renderer.DroppedProfileMarks() > 0) {
+			ImGui::SameLine();
+			ImGui::TextColored(
+				ImVec4(1.0f, 0.55f, 0.2f, 1.0f),
+				"%zu GPU marks dropped; timings are partial",
+				Renderer.DroppedProfileMarks()
+			);
+		}
 
 		ImGui::Text("%zu passes, %zu resources", profile.Passes.size(), profile.Resources.size());
 		ImGui::SameLine();
 		ImGui::TextDisabled(
-			"%.2f MiB peak / %.2f MiB declared / %.2f MiB aliasable",
+			"%.2f MiB peak / %.2f MiB declared / %.2f MiB transient allocation",
 			mib(profile.PeakBytes),
 			mib(profile.TotalBytes),
-			mib(profile.TotalBytes - profile.PeakBytes)
+			mib(profile.AllocatedBytes)
 		);
+		if (!commandBuffers.empty()) {
+			size_t gpuNodes = 0;
+			for (const engine::graph::PlannedCommandBuffer &buffer : commandBuffers) {
+				gpuNodes += buffer.Nodes.size();
+			}
+			ImGui::TextDisabled(
+				"compile: %zu GPU nodes -> %zu command buffers (%zu fused boundaries), %u aliased targets",
+				gpuNodes,
+				commandBuffers.size(),
+				gpuNodes > commandBuffers.size() ? gpuNodes - commandBuffers.size() : 0,
+				profile.AliasedResources
+			);
+		}
 		ImGui::SeparatorText("Stage images and timings");
+		if (ImGui::BeginTable(
+				"##pipeline-timings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+			)) {
+			ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+			ImGui::TableSetupColumn("GPU ms", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+			ImGui::TableSetupColumn("Wall ms", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+			ImGui::TableHeadersRow();
+			for (const engine::graph::ProfilePass &pass : profile.Passes) {
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::TextUnformatted(std::string(pass.Name.Text()).c_str());
+				ImGui::TableSetColumnIndex(1);
+				if (pass.Elapsed > 0.0) {
+					ImGui::Text("%.3f", pass.Elapsed / 1000.0);
+				} else {
+					ImGui::TextDisabled("unmeasured");
+				}
+				ImGui::TableSetColumnIndex(2);
+				if (pass.Wall > 0.0) {
+					ImGui::Text("%.3f", pass.Wall / 1000.0);
+				} else {
+					ImGui::TextDisabled("unmeasured");
+				}
+			}
+			ImGui::EndTable();
+		}
 		for (const engine::graph::ProfilePass &pass : profile.Passes) {
 			ImGui::PushID(static_cast<int>(pass.Node.Value));
 			const std::string name(pass.Name.Text());

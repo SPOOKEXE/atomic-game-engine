@@ -10,6 +10,7 @@
 // still obey: the device layout is private and stays private, so nothing here
 // reaches a public header.
 
+#include "BackendNodes.hpp"
 #include "InstancePacking.hpp"
 
 #include <engine/graph/RenderGraph.hpp>
@@ -26,7 +27,6 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -34,73 +34,6 @@
 #include <vector>
 
 namespace engine::render {
-
-	struct BackendNode {
-		core::Name Kind;
-		graph::NodeScope Scope;
-		graph::ExecutionQueue Queue;
-	};
-
-	inline std::span<const BackendNode> BackendNodes() {
-		static const std::array nodes{
-			BackendNode{core::Name("world"), graph::NodeScope::World, graph::ExecutionQueue::Cpu},
-			BackendNode{core::Name("shadow"), graph::NodeScope::World, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("camera"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
-			BackendNode{core::Name("entities"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
-			BackendNode{core::Name("cull-frustum"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
-			BackendNode{core::Name("cull-distance"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
-			BackendNode{core::Name("filter-tag"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
-			BackendNode{core::Name("order-draw"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
-			BackendNode{
-				core::Name("upload-instances"), graph::NodeScope::View, graph::ExecutionQueue::Transfer
-			},
-			BackendNode{core::Name("last-frame"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{
-				core::Name("mirror-capture"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{
-				core::Name("portal-capture"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{
-				core::Name("portal-tonemap"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{core::Name("gbuffer"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{
-				core::Name("depth-linearise"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{core::Name("hzb"), graph::NodeScope::View, graph::ExecutionQueue::Compute},
-			BackendNode{core::Name("ssao"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{
-				core::Name("deferred-lighting"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{core::Name("sky"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("tonemap"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{
-				core::Name("portal-overlay"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{
-				core::Name("mirror-overlay"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
-			},
-			BackendNode{core::Name("transparent"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("raster"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("dispatch"), graph::NodeScope::View, graph::ExecutionQueue::Compute},
-			BackendNode{core::Name("present"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("viewer"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
-			BackendNode{core::Name("capture"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
-			BackendNode{core::Name("overlay"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("interface"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics},
-			BackendNode{core::Name("output-image"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
-		};
-		return nodes;
-	}
-
-	inline NodeTable BackendTable(const NodeHandler &handler) {
-		NodeTable nodes;
-		for (const BackendNode &node : BackendNodes()) {
-			nodes.Set(node.Kind, handler);
-		}
-		return nodes;
-	}
 
 	struct FrameUniforms {
 		glm::mat4 ViewProjection;
@@ -473,6 +406,14 @@ namespace engine::render {
 			return SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
 		case graph::ResourceFormat::D32F:
 			return SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		case graph::ResourceFormat::BC1_SRGB:
+			return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB;
+		case graph::ResourceFormat::BC3:
+			return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
+		case graph::ResourceFormat::BC5:
+			return SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM;
+		case graph::ResourceFormat::BC7_SRGB:
+			return SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB;
 		default:
 			return SDL_GPU_TEXTUREFORMAT_INVALID;
 		}

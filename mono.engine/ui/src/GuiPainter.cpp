@@ -628,6 +628,14 @@ namespace engine::ui {
 			const ImU32 tint = Colour(command.Tint, command.Transparency);
 			const float radius = command.CornerRadius * space.Scale;
 			const int firstVertex = into->VtxBuffer.Size;
+			const ImGuiPlatformIO &platform = ImGui::GetPlatformIO();
+			const bool nearest = command.Kind == DrawKind::Image &&
+								 command.Resample == gui::ResampleMode::Pixelated &&
+								 platform.DrawCallback_SetSamplerNearest != nullptr &&
+								 platform.DrawCallback_SetSamplerLinear != nullptr;
+			if (nearest) {
+				into->AddCallback(platform.DrawCallback_SetSamplerNearest);
+			}
 
 			switch (command.Kind) {
 			case DrawKind::Rectangle:
@@ -648,6 +656,12 @@ namespace engine::ui {
 			case DrawKind::Text:
 				drawn += PaintText(command, into, space);
 				break;
+			}
+			if (nearest) {
+				// The sampler is backend state rather than part of an imgui draw
+				// command. Restore the default so host chrome after this image does
+				// not inherit point sampling.
+				into->AddCallback(platform.DrawCallback_SetSamplerLinear);
 			}
 			// Shade before turning, because the ramp is measured against the
 			// unrotated bounds the compile resolved it from.

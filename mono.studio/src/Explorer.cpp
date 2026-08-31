@@ -563,25 +563,6 @@ namespace studio {
 				const bool toggled = ImGui::IsItemToggledOpen();
 				const bool hovered = ImGui::IsItemHovered();
 
-				// Keep insertion beside the object it will parent to. The context
-				// menu remains available for keyboard and right-click workflows, while
-				// this button makes the common action discoverable on hover.
-				if (hovered) {
-					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
-					if (ImGui::SmallButton("+##insert-hover")) {
-						ImGui::OpenPopup("##insert-hover-popup");
-					}
-				}
-				if (ImGui::BeginPopup("##insert-hover-popup")) {
-					if (const ClassId chosen = DrawClassPicker("insert-hover-picker"); chosen.IsValid()) {
-						PendingInsert.World = world;
-						PendingInsert.Class = chosen;
-						PendingInsert.Parent = row.Instance;
-						ImGui::CloseCurrentPopup();
-					}
-					ImGui::EndPopup();
-				}
-
 				if (toggled) {
 					const auto found = std::find(tree.Open.begin(), tree.Open.end(), row.Instance);
 					if (found != tree.Open.end()) {
@@ -674,6 +655,25 @@ namespace studio {
 
 				if (ImGui::BeginPopupContextItem("##actions")) {
 					DrawInstanceActions(store, world, row.Instance);
+					ImGui::EndPopup();
+				}
+
+				// **After every consumer of the tree node's last-item state.** The
+				// insertion button submits its own item, so drawing it any earlier makes
+				// clicks, drags and context menus target this button instead of the row.
+				if (hovered) {
+					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
+					if (ImGui::SmallButton("+##insert-hover")) {
+						ImGui::OpenPopup("##insert-hover-popup");
+					}
+				}
+				if (ImGui::BeginPopup("##insert-hover-popup")) {
+					if (const ClassId chosen = DrawClassPicker("insert-hover-picker"); chosen.IsValid()) {
+						PendingInsert.World = world;
+						PendingInsert.Class = chosen;
+						PendingInsert.Parent = row.Instance;
+						ImGui::CloseCurrentPopup();
+					}
 					ImGui::EndPopup();
 				}
 

@@ -271,6 +271,10 @@ namespace engine::script {
 				return Context.Waiters;
 			}
 
+			ComputeJobs &Computations() override {
+				return Context.Computations;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}
@@ -714,6 +718,10 @@ namespace engine::script {
 				Suspend(Context.AwaitedEditableMeshes, ticket);
 			}
 
+			void AwaitCompute(uint64_t ticket) override {
+				Suspend(Context.AwaitedComputations, ticket);
+			}
+
 			[[noreturn]] void Raise(const char *message) override {
 				// `"%s"` rather than the message as the format, because a message
 				// this file did not write may contain a percent and `luaL_errorL`
@@ -994,6 +1002,47 @@ namespace engine::script {
 			lua_unref(state, reference);
 		}
 		context.EditableMeshes.ClearCompletions();
+		return firstError;
+	}
+
+	std::string PumpComputeJobs(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		context.Computations.Poll();
+
+		std::string firstError;
+		for (const ComputeCompletion &completion : context.Computations.Completions()) {
+			const auto waiting = context.AwaitedComputations.find(completion.Ticket);
+			if (waiting == context.AwaitedComputations.end()) {
+				continue;
+			}
+
+			lua_State *thread = waiting->second;
+			context.AwaitedComputations.erase(waiting);
+			const auto held = context.Threads.find(thread);
+			if (held == context.Threads.end()) {
+				continue;
+			}
+			const CallbackRef reference = held->second;
+			context.Threads.erase(held);
+
+			if (completion.Error.empty()) {
+				lua_createtable(thread, static_cast<int>(completion.Values.size()), 0);
+				for (size_t index = 0; index < completion.Values.size(); index++) {
+					lua_pushnumber(thread, completion.Values[index]);
+					lua_rawseti(thread, -2, static_cast<int>(index) + 1);
+				}
+			} else {
+				lua_pushnil(thread);
+				firstError = completion.Error;
+			}
+			const int status = lua_resume(thread, nullptr, 1);
+			if (status != LUA_OK && status != LUA_YIELD && firstError.empty()) {
+				const char *message = lua_tostring(thread, -1);
+				firstError = message != nullptr ? message : "a resumed compute job failed";
+			}
+			lua_unref(state, reference);
+		}
+		context.Computations.ClearCompletions();
 		return firstError;
 	}
 }

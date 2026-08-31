@@ -5,6 +5,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/Components.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -253,6 +254,58 @@ namespace engine::effects {
 
 			(void)eye;
 		}
+
+		struct FaceBasis {
+			Vector3 Normal;
+			Vector3 Right;
+			Vector3 Up;
+			float HalfWidth = 0.0f;
+			float HalfHeight = 0.0f;
+			float Depth = 0.0f;
+		};
+
+		FaceBasis BasisOf(scene::NormalId face, const scene::Bounds &bounds) {
+			const Vector3 normal = scene::NormalOf(face);
+			const Vector3 reference = std::abs(normal.Y) > 0.5f ? Vector3::ZAxis : Vector3::YAxis;
+			const Vector3 right = reference.Cross(normal).Unit();
+			const Vector3 up = normal.Cross(right).Unit();
+			const auto reach = [&bounds](const Vector3 &axis) {
+				return std::abs(axis.X) * bounds.HalfExtent.X + std::abs(axis.Y) * bounds.HalfExtent.Y +
+					   std::abs(axis.Z) * bounds.HalfExtent.Z;
+			};
+			return FaceBasis{normal, right, up, reach(right), reach(up), reach(normal)};
+		}
+
+		template <class FaceImage>
+		bool BuildFaceImage(
+			const ecs::Store &store,
+			ecs::Entity instance,
+			const FaceImage &image,
+			float u0,
+			float v0,
+			float u1,
+			float v1,
+			std::vector<RibbonVertex> &out
+		) {
+			const ecs::Entity parent = store.ParentOf(instance);
+			const auto *transform = store.Get<scene::Transform>(parent);
+			const auto *bounds = store.Get<scene::Bounds>(parent);
+			if (transform == nullptr || bounds == nullptr || image.Transparency >= 1.0f) {
+				return false;
+			}
+
+			const FaceBasis basis = BasisOf(image.Face, *bounds);
+			const Vector3 centre = transform->Frame.PointToWorldSpace(basis.Normal * basis.Depth);
+			const Vector3 right = transform->Frame.VectorToWorldSpace(basis.Right) * basis.HalfWidth;
+			const Vector3 up = transform->Frame.VectorToWorldSpace(basis.Up) * basis.HalfHeight;
+			const uint32_t colour = PackRgba(image.Colour, 1.0f - image.Transparency);
+
+			out.push_back(RibbonVertex{centre - right + up, Vector2{u0, v0}, colour});
+			out.push_back(RibbonVertex{centre - right - up, Vector2{u0, v1}, colour});
+			out.push_back(RibbonVertex{centre + right + up, Vector2{u1, v0}, colour});
+			out.push_back(RibbonVertex{centre + right - up, Vector2{u1, v1}, colour});
+			return true;
+		}
 	}
 
 	size_t BuildRibbons(ecs::Store &store, const Vector3 &eye, float elapsed) {
@@ -318,6 +371,49 @@ namespace engine::effects {
 				ENGINE_TRACE("a trail produced {} vertices and was dropped", run.Count);
 				buffer->Vertices.resize(first);
 			}
+		});
+
+		store.Each<const Decal>([&](ecs::Entity entity, const Decal &decal) {
+			const auto first = static_cast<uint32_t>(buffer->Vertices.size());
+			if (!BuildFaceImage(store, entity, decal, 0.0f, 0.0f, 1.0f, 1.0f, buffer->Vertices)) {
+				return;
+			}
+
+			RibbonRun run;
+			run.First = first;
+			run.Count = 4;
+			run.Texture = decal.Image;
+			run.ZOffset = static_cast<float>(std::max(decal.ZIndex, 0) + 1) * 0.0005f;
+			buffer->Runs.push_back(run);
+		});
+
+		store.Each<const Texture>([&](ecs::Entity entity, const Texture &texture) {
+			const ecs::Entity parent = store.ParentOf(entity);
+			const auto *bounds = store.Get<scene::Bounds>(parent);
+			if (bounds == nullptr) {
+				return;
+			}
+
+			const FaceBasis basis = BasisOf(texture.Face, *bounds);
+			const float tileU = std::max(texture.StudsPerTileU, 0.001f);
+			const float tileV = std::max(texture.StudsPerTileV, 0.001f);
+			const float u0 = texture.OffsetStudsU / tileU;
+			const float v0 = texture.OffsetStudsV / tileV;
+			const float u1 = u0 + basis.HalfWidth * 2.0f / tileU;
+			const float v1 = v0 + basis.HalfHeight * 2.0f / tileV;
+
+			const auto first = static_cast<uint32_t>(buffer->Vertices.size());
+			if (!BuildFaceImage(store, entity, texture, u0, v0, u1, v1, buffer->Vertices)) {
+				return;
+			}
+
+			RibbonRun run;
+			run.First = first;
+			run.Count = 4;
+			run.Texture = texture.Image;
+			run.ZOffset = static_cast<float>(std::max(texture.ZIndex, 0) + 1) * 0.0005f;
+			run.RepeatV = true;
+			buffer->Runs.push_back(run);
 		});
 
 		core::Metrics::SetGauge("effects.ribbon.runs", static_cast<double>(buffer->Runs.size()));
@@ -472,6 +568,66 @@ namespace engine::effects {
 			trail.Attachment1 = ecs::NULL_ENTITY;
 			trail.Head = 0;
 			trail.Recorded = 0;
+		}
+	}
+
+	void WriteDecals(core::ByteWriter &writer, const void *source, size_t count) {
+		const auto *decals = static_cast<const Decal *>(source);
+		for (size_t index = 0; index < count; index++) {
+			const Decal &decal = decals[index];
+			writer.WriteFloat(decal.Colour.R);
+			writer.WriteFloat(decal.Colour.G);
+			writer.WriteFloat(decal.Colour.B);
+			writer.WriteName(decal.Image);
+			writer.WriteFloat(decal.Transparency);
+			writer.WriteInt32(decal.ZIndex);
+			writer.WriteUInt8(static_cast<uint8_t>(decal.Face));
+		}
+	}
+
+	void ReadDecals(core::ByteReader &reader, void *destination, size_t count) {
+		auto *decals = static_cast<Decal *>(destination);
+		for (size_t index = 0; index < count; index++) {
+			Decal &decal = decals[index];
+			decal.Colour = core::Color3{reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+			decal.Image = reader.ReadName();
+			decal.Transparency = reader.ReadFloat();
+			decal.ZIndex = reader.ReadInt32();
+			decal.Face = static_cast<scene::NormalId>(reader.ReadUInt8());
+		}
+	}
+
+	void WriteTextures(core::ByteWriter &writer, const void *source, size_t count) {
+		const auto *textures = static_cast<const Texture *>(source);
+		for (size_t index = 0; index < count; index++) {
+			const Texture &texture = textures[index];
+			writer.WriteFloat(texture.Colour.R);
+			writer.WriteFloat(texture.Colour.G);
+			writer.WriteFloat(texture.Colour.B);
+			writer.WriteName(texture.Image);
+			writer.WriteFloat(texture.Transparency);
+			writer.WriteFloat(texture.StudsPerTileU);
+			writer.WriteFloat(texture.StudsPerTileV);
+			writer.WriteFloat(texture.OffsetStudsU);
+			writer.WriteFloat(texture.OffsetStudsV);
+			writer.WriteInt32(texture.ZIndex);
+			writer.WriteUInt8(static_cast<uint8_t>(texture.Face));
+		}
+	}
+
+	void ReadTextures(core::ByteReader &reader, void *destination, size_t count) {
+		auto *textures = static_cast<Texture *>(destination);
+		for (size_t index = 0; index < count; index++) {
+			Texture &texture = textures[index];
+			texture.Colour = core::Color3{reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+			texture.Image = reader.ReadName();
+			texture.Transparency = reader.ReadFloat();
+			texture.StudsPerTileU = reader.ReadFloat();
+			texture.StudsPerTileV = reader.ReadFloat();
+			texture.OffsetStudsU = reader.ReadFloat();
+			texture.OffsetStudsV = reader.ReadFloat();
+			texture.ZIndex = reader.ReadInt32();
+			texture.Face = static_cast<scene::NormalId>(reader.ReadUInt8());
 		}
 	}
 }

@@ -61,7 +61,8 @@ namespace engine::script {
 	// @param context The JS context.
 	// @param store   The world instances are created in.
 	// @param role    Where scripts under this runtime are standing.
-	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role);
+	void
+	OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role, ScriptCapabilities access);
 
 	// Installs v0.6's surface: signals, the instance methods, `task`, the
 	// datatype vocabulary, the clock, `typeOf`/`warn` and the store services.
@@ -73,6 +74,16 @@ namespace engine::script {
 
 	// Releases what the two `Open` calls attached. Before the context is freed.
 	void CloseJsBindings(JSContext *context);
+
+	// Installs the program host currently recorded on `JsContext`, replacing
+	// the previous host global and service objects.
+	void OpenJsHost(JSContext *context);
+
+	// Calls and releases functions a script handed to its program host.
+	bool CallJsHostCallback(
+		JSContext *context, HostCallback callback, HostArguments arguments, std::string &error
+	);
+	void ReleaseJsHostCallback(JSContext *context, HostCallback callback);
 
 	// Calls every connected Heartbeat function with `delta`.
 	std::string PumpJsHeartbeat(JSContext *context, float delta);
@@ -238,9 +249,12 @@ namespace engine::script {
 	// @since v0.15
 	std::string PumpJsChildWaiters(JSContext *context);
 
-	// Resolves the third deterministic resume source after its ordered
-	// editable-mesh batch has committed on the world thread.
+	// Resolves an editable-mesh batch after it has committed in ticket order on
+	// the world thread.
 	std::string PumpJsEditableMeshJobs(JSContext *context);
+
+	// Resolves completed compute tickets in their deterministic publish order.
+	std::string PumpJsComputeJobs(JSContext *context);
 
 	// The JavaScript half of `PumpCharacters`.
 	//
@@ -380,7 +394,9 @@ namespace engine::script {
 	//        because the *catalogue* has one and a second signature would be a
 	//        second place that fact lives.
 	// @since v0.15
-	void InstallJsServices(JSContext *context, JSValueConst global, ServiceAvailability phase);
+	void InstallJsServices(
+		JSContext *context, JSValueConst global, ServiceAvailability phase, ScriptCapabilities access
+	);
 
 	// --- what is left of this language's own service code ---------------------
 	//

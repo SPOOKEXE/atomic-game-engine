@@ -55,6 +55,23 @@ namespace engine::render {
 			return false;
 		}
 
+		const bool profile = Tier != ProfilingTier::Off && (!Profile.Enabled || Profile.Enabled(context));
+		const auto submit = [&] {
+			if (profile && Profile.Begin) {
+				Profile.Begin(context);
+			}
+			SubmittedCount++;
+			const bool accepted = (*handler)(context);
+			if (profile && Profile.End) {
+				DroppedMarks += Profile.End(context);
+			}
+			return accepted;
+		};
+
+		if (!profile) {
+			return submit();
+		}
+
 		// **One span per node, here rather than in each handler.** The handlers
 		// live in `Renderer.cpp` as two dozen lambdas and most of them had no
 		// span at all - `gbuffer`, which records every opaque draw call in the
@@ -68,8 +85,6 @@ namespace engine::render {
 		// would answer with one bar for both. `core::Name` interns for the life
 		// of the process, so the stable form is right and nothing is copied.
 		ENGINE_PROFILE_DYNAMIC_STABLE("graph node", context.Name.Text(), core::ProfileCategory::Render);
-
-		SubmittedCount++;
-		return (*handler)(context);
+		return submit();
 	}
 }

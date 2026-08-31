@@ -15,7 +15,8 @@ layout(set = 3, binding = 0) uniform Material {
 	// x: whether `ribbonTexture` holds this run's texture. An untextured beam
 	// draws its gradient flat, which is a visible strip rather than nothing -
 	// the missing-texture rule the mesh and particle paths both follow.
-	// y, z, w: unused, named so the struct's size is stated.
+	// y: wrap V as well as U for a tiled face Texture.
+	// z, w: unused, named so the struct's size is stated.
 	vec4 Flags;
 } material;
 
@@ -28,7 +29,10 @@ void main() {
 	// beam. Wrapping here rather than in the sampler state keeps the *across*
 	// coordinate clamped, which is what stops a wide ribbon bleeding its top edge
 	// into its bottom one.
-	vec2 uv = vec2(fract(inTexCoord.x), clamp(inTexCoord.y, 0.0, 1.0));
+	vec2 uv = vec2(
+		fract(inTexCoord.x),
+		material.Flags.y > 0.5 ? fract(inTexCoord.y) : clamp(inTexCoord.y, 0.0, 1.0)
+	);
 
 	vec4 texel = material.Flags.x > 0.5 ? texture(ribbonTexture, uv) : vec4(1.0);
 	vec4 result = texel * inColour;

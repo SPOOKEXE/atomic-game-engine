@@ -12,7 +12,9 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/render/Capabilities.hpp>
 #include <engine/render/Flipbook.hpp>
+#include <engine/render/GraphRunner.hpp>
 #include <engine/render/Overlay.hpp>
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
@@ -29,6 +31,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -37,6 +40,10 @@
 #include <vector>
 
 struct SDL_Window;
+
+namespace engine::graph {
+	class PipelineDocument;
+}
 
 namespace engine::render {
 	struct SceneLight;
@@ -500,8 +507,10 @@ namespace engine::render {
 		// Spawn configuration and device-owned rate counters for this block.
 		// These are separate from EmitterBlock so the host fallback can stream its
 		// compact runtime row without pulling curves and transforms into cache.
+		//@{
 		const effects::EmitterSpawnState *Spawn = nullptr;
 		const effects::EmitterRuntime *Runtime = nullptr;
+		//@}
 
 		// Which block this is, from `effects::EmitterSlot::Index`.
 		//
@@ -808,6 +817,23 @@ namespace engine::render {
 		uint32_t ColourFormat = 0;
 	};
 
+	// Device-resource callbacks attached to a custom native node handler.
+	//
+	// Reinstall runs after each device creation, including a renderer that was
+	// shut down and initialised again. Release runs before that device is
+	// destroyed and before a replacement handler takes ownership of the kind.
+	// Both may be empty for a handler that owns no device resources.
+	//
+	// @since v0.20
+	struct NodeHandlerLifecycle {
+		// Recreates resources against the new device. False refuses Initialise or
+		// leaves an existing handler installed during replacement.
+		std::function<bool(BackendHandles)> Reinstall;
+
+		// Releases resources while the device is still valid.
+		std::function<void(BackendHandles)> Release;
+	};
+
 	// A layer that records into this renderer's frame.
 	//
 	// **This exists so that Dear ImGui is not in the engine.** An editor needs
@@ -1071,19 +1097,34 @@ namespace engine::render {
 	// @since v0.19
 	// @client
 	struct GpuMemoryStatistics {
+		// Current, peak, and cumulative logical payload bytes.
+		//@{
 		uint64_t LiveBytes = 0;
 		uint64_t PeakBytes = 0;
 		uint64_t AllocatedBytes = 0;
 		uint64_t ReleasedBytes = 0;
+		//@}
+
+		// Current payload bytes by resource family.
+		//@{
 		uint64_t BufferBytes = 0;
 		uint64_t TransferBufferBytes = 0;
 		uint64_t TextureBytes = 0;
+		//@}
+
+		// Current live resources by family.
+		//@{
 		uint64_t Buffers = 0;
 		uint64_t TransferBuffers = 0;
 		uint64_t Textures = 0;
+		//@}
+
+		// Cumulative creations by resource family.
+		//@{
 		uint64_t BufferAllocations = 0;
 		uint64_t TransferBufferAllocations = 0;
 		uint64_t TextureAllocations = 0;
+		//@}
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
@@ -1259,6 +1300,19 @@ namespace engine::render {
 		// @return Whether the complete graph can run on this backend.
 		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline);
 
+		// Installs, or replaces, the native implementation of a custom node kind.
+		//
+		// RegisterNodeKind must have declared the kind first. Built-in handlers
+		// cannot be replaced through this extension door. The handler survives
+		// Shutdown and is available again after Initialise invokes its lifecycle.
+		//
+		// @param kind The catalogue kind to implement.
+		// @param handler Work performed when the graph reaches the node.
+		// @param lifecycle Optional device resource ownership hooks.
+		// @return False for an undeclared or built-in kind, an empty handler, or a
+		//         failed reinstall against the current device.
+		bool InstallNodeHandler(core::Name kind, NodeHandler handler, NodeHandlerLifecycle lifecycle = {});
+
 		// Removes one named graph. A view naming it uses the engine default graph.
 		bool RemovePipeline(core::Name name);
 
@@ -1331,6 +1385,23 @@ namespace engine::render {
 
 		// Whether this backend can produce GPU timestamps.
 		bool Timed() const;
+
+		// Selects per-node instrumentation for subsequent frames.
+		//
+		// Must be changed between frames on the owning thread.
+		void SetProfiling(ProfilingTier tier);
+
+		// The current runtime profiling tier.
+		ProfilingTier Profiling() const;
+
+		// Timestamp mark writes omitted from the latest frame because its query
+		// budget filled. A non-zero value means GPU timing rows are partial.
+		size_t DroppedProfileMarks() const;
+
+		// The immutable feature snapshot probed during Initialise.
+		//
+		// Before initialisation every feature is unavailable.
+		const DeviceCaps &Capabilities() const;
 
 		// How many times the surface pass runs per frame.
 		//
@@ -2040,8 +2111,19 @@ namespace engine::render {
 		// @param what The call being refused, for the message.
 		void RequireOwningThread(const char *what) const;
 
+		// Rebuilds the unnamed fallback from the selected capability tier.
+		bool InstallEngineDefault(const graph::PipelineDocument &document);
+
 		struct Impl;
 		std::unique_ptr<Impl> State;
+
+		struct InstalledNodeHandler {
+			core::Name Kind;
+			NodeHandler Handler;
+			NodeHandlerLifecycle Lifecycle;
+			bool Live = false;
+		};
+		std::vector<InstalledNodeHandler> CustomNodeHandlers;
 
 		// The recording of one view, which is where the node families reach
 		// this state from.

@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 #include <utility>
 #include <vector>
 
@@ -107,6 +108,26 @@ namespace engine::physics {
 				// About the barrel it is a disc; across it, a disc plus a rod.
 				const float across = mass * (3.0f * extentX * extentX + 4.0f * extentY * extentY) / 12.0f;
 				inertia = core::Vector3{across, 0.5f * mass * extentX * extentX, across};
+				break;
+			}
+
+			case scene::ShapeKind::Capsule: {
+				const float radius = std::max(extentX, 0.0f);
+				const float halfSegment = std::max(extentY, 0.0f);
+				const float cylinderVolume =
+					std::numbers::pi_v<float> * radius * radius * (2.0f * halfSegment);
+				const float sphereVolume =
+					(4.0f / 3.0f) * std::numbers::pi_v<float> * radius * radius * radius;
+				const float totalVolume = cylinderVolume + sphereVolume;
+				const float cylinderMass = totalVolume > 0.0f ? mass * cylinderVolume / totalVolume : 0.0f;
+				const float sphereMass = mass - cylinderMass;
+				const float radiusSquared = radius * radius;
+				const float axial = 0.5f * cylinderMass * radiusSquared + 0.4f * sphereMass * radiusSquared;
+				const float capCentroid = halfSegment + 3.0f * radius / 8.0f;
+				const float across =
+					cylinderMass * (3.0f * radiusSquared + 4.0f * halfSegment * halfSegment) / 12.0f +
+					sphereMass * (83.0f * radiusSquared / 320.0f + capCentroid * capCentroid);
+				inertia = core::Vector3{across, axial, across};
 				break;
 			}
 

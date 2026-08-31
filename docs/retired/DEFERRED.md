@@ -2053,7 +2053,7 @@ the send rate is ours whatever carries the bytes.*
 - **It still passes the second-consumer test.** The game link is one; `ROADMAP.md`'s cdn wire streaming is the other, blocked on `net` growing an `http/` sub-area because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both.
 - The clock question is settled and stays settled: `ngtcp2` takes an explicit `ngtcp2_tstamp` on every entry point, which is the only shape compatible with *time is passed in, never read*.
 
-**The implementation survey lives in [`docs/QUIC.md`](QUIC.md) as of v0.17**,
+**`docs/QUIC.md` held the implementation survey as of v0.17**,
 so that the day this trigger fires starts from a survey rather than from a
 search engine. It re-checked the library landscape and **three of the paragraph
 below have moved**: `quictls`' ngtcp2 helper is deprecated upstream, OpenSSL

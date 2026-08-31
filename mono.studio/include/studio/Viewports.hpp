@@ -76,9 +76,12 @@ namespace studio {
 	//
 	// @since v0.19
 	struct ViewportCameraPose {
+		// World frame and the editor's decomposed orbit angles.
+		//@{
 		engine::core::CFrame Frame;
 		float Yaw = 0.0f;
 		float Pitch = 0.0f;
+		//@}
 	};
 
 	// The default eye for a world a viewport has not visited before.

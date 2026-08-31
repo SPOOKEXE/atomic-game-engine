@@ -585,6 +585,14 @@ TEST_CASE("every scope has a name and the names are distinct", "[graph]") {
 	CHECK_FALSE(engine::graph::RunsPerView(NodeScope::Frame));
 }
 
+TEST_CASE("resource format names parse exactly", "[graph]") {
+	engine::graph::ResourceFormat parsed = engine::graph::ResourceFormat::R8;
+	CHECK(engine::graph::ParseResourceFormat("RGBA16F", parsed));
+	CHECK(parsed == engine::graph::ResourceFormat::RGBA16F);
+	CHECK_FALSE(engine::graph::ParseResourceFormat("rgba16f", parsed));
+	CHECK(parsed == engine::graph::ResourceFormat::RGBA16F);
+}
+
 TEST_CASE("the graph refuses to grow past its bound", "[graph]") {
 	RenderGraph graph;
 	const ResourceId colour = Colour(graph, "colour");

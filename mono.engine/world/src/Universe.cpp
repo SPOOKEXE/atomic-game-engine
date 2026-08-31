@@ -431,6 +431,11 @@ namespace engine::world {
 		Settings_.MaximumCatchUpTicks = std::max(ticks, 1);
 	}
 
+	void Universe::SetWorldParallelFloorMilliseconds(float milliseconds) {
+		RequireDriverThread("SetWorldParallelFloorMilliseconds");
+		Settings_.WorldParallelFloorMilliseconds = std::max(milliseconds, 0.0f);
+	}
+
 	void Universe::SetBusBudgetPerTick(uint32_t budget) {
 		RequireDriverThread("SetBusBudgetPerTick");
 		Settings_.BusBudgetPerTick = budget;
@@ -716,11 +721,12 @@ namespace engine::world {
 		// - so handing one world to a lane does not make it parallel, it makes
 		// everything *inside* it serial while twenty-two workers watch.
 		//
-		// With two or more worlds that is the right trade: the lanes overlap the
-		// worlds themselves, which is the coarser and better-balanced split. With
-		// one there is nothing to overlap it with, so the dispatch buys no
-		// concurrency at all and spends the pool to get it. Ticking here leaves
-		// the pool free for whatever the world dispatches, and measured on
+		// With two or more substantial worlds the lanes overlap the worlds
+		// themselves, which is the coarser and better-balanced split. Cheap worlds
+		// stay here because the measured dispatch floor says the handoff costs more
+		// than their previous ticks. With one there is nothing to overlap at all.
+		// Ticking it here leaves the pool free for whatever the world dispatches,
+		// and measured on
 		// `StressParticles.luau` - one world, 5,120 emitters, 512,000 particles -
 		// that is the difference between `particles.age` having twenty-three
 		// workers and having one.
@@ -729,8 +735,15 @@ namespace engine::world {
 		// paragraph above worries about for the flag: the world's spans are now
 		// on the frame's owning thread and are kept, instead of arriving as one
 		// aggregate bar with everything it contained refused.
+		float estimatedWorldMilliseconds = 0.0f;
+		for (size_t index = 0; index < ActiveList.size(); index++) {
+			estimatedWorldMilliseconds +=
+				ActiveList[index]->Statistics().LastTickMilliseconds * static_cast<float>(OwedList[index]);
+		}
+
 		const bool parallel = Settings_.Mode == ExecutionMode::WorldParallel &&
-							  !parallel::ForceSerialCompute() && order.size() > 1;
+							  !parallel::ForceSerialCompute() && order.size() > 1 &&
+							  estimatedWorldMilliseconds >= Settings_.WorldParallelFloorMilliseconds;
 
 		if (parallel && !ActiveList.empty() && LaneCount > 0) {
 			// A world keeps its lane while the pinned worker prefix is unchanged.

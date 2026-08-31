@@ -97,6 +97,19 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
 }
 
+TEST_CASE("built-in capability fallbacks compile into the graph backend", "[render][graph]") {
+	Renderer renderer;
+	for (const auto &[name, document] : {
+			 std::pair{Name("Tier B#1"), engine::graph::DefaultPbrTierBDocument()},
+			 std::pair{Name("Tier C#1"), engine::graph::DefaultForwardTierCDocument()},
+		 }) {
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		CHECK(renderer.SetPipeline(name, graph));
+	}
+}
+
 TEST_CASE("default PBR stages are not mandatory backend policy", "[render][graph]") {
 	RenderGraph graph;
 	const engine::graph::ResourceId display = graph.AddResource(
@@ -179,6 +192,53 @@ TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
 
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
+}
+
+TEST_CASE("blit owns its target format at the installation boundary", "[render][graph]") {
+	RenderGraph graph;
+	const engine::graph::ResourceId source = graph.AddResource(
+		{.Name = Name("source"),
+		 .Kind = engine::graph::ResourceKind::Texture,
+		 .Format = engine::graph::ResourceFormat::RGBA16F,
+		 .External = true}
+	);
+	const engine::graph::ResourceId target = graph.AddResource(
+		{.Name = Name("target"),
+		 .Kind = engine::graph::ResourceKind::Colour,
+		 .Format = engine::graph::ResourceFormat::RGB10A2,
+		 .External = true}
+	);
+	REQUIRE(source.IsValid());
+	REQUIRE(target.IsValid());
+
+	engine::graph::Node blit;
+	blit.Name = Name("convert");
+	blit.Kind = Name("blit");
+	blit.Reads = {source};
+	blit.Writes = {target};
+	blit.Scope = engine::graph::NodeScope::View;
+	blit.Parameters.push_back({.Key = Name("format"), .Value = "RGB10A2"});
+	REQUIRE(graph.AddNode(blit).IsValid());
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("conversion#1"), graph));
+
+	blit.Name = Name("mismatch");
+	blit.Parameters.front().Value = "RGBA8";
+	RenderGraph mismatched;
+	const engine::graph::ResourceId mismatchSource = mismatched.AddResource(
+		{.Name = Name("source"), .Kind = engine::graph::ResourceKind::Texture, .External = true}
+	);
+	const engine::graph::ResourceId mismatchTarget = mismatched.AddResource(
+		{.Name = Name("target"),
+		 .Kind = engine::graph::ResourceKind::Colour,
+		 .Format = engine::graph::ResourceFormat::RGB10A2,
+		 .External = true}
+	);
+	blit.Reads = {mismatchSource};
+	blit.Writes = {mismatchTarget};
+	REQUIRE(mismatched.AddNode(blit).IsValid());
+	CHECK_FALSE(renderer.SetPipeline(Name("conversion#2"), mismatched));
 }
 
 TEST_CASE("environment enabled switches select only their authored GPU mode", "[render][environment]") {

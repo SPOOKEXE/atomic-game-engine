@@ -616,6 +616,20 @@ namespace engine::ecs {
 		});
 	}
 
+	void Store::EachMatching(const QueryTerms &terms, const std::function<void(Entity)> &body) {
+		RequireOwningThread("EachMatching");
+		if (terms.Bound.empty() && terms.Required.empty()) {
+			return;
+		}
+
+		const DeferScope defer(*this);
+		VisitTables(terms, [&body](const TableSlice &slice) {
+			for (size_t row = 0; row < slice.Rows; row++) {
+				body(slice.Entities[row]);
+			}
+		});
+	}
+
 	void Store::EachMatchingAny(
 		std::span<const ComponentId> components, const std::function<void(const Entity *, size_t)> &body
 	) {
@@ -662,6 +676,14 @@ namespace engine::ecs {
 			return 0;
 		}
 		return CountRows(Canonical(components));
+	}
+
+	size_t Store::CountMatching(const QueryTerms &terms) {
+		RequireOwningThread("CountMatching");
+		if (terms.Bound.empty() && terms.Required.empty()) {
+			return 0;
+		}
+		return CountRows(terms);
 	}
 
 	// --- instances ---------------------------------------------------------
@@ -1127,6 +1149,11 @@ namespace engine::ecs {
 		return GetRaw(entity, component);
 	}
 
+	void *Store::GetComponentMutable(Entity entity, ComponentId component) {
+		RequireOwningThread("GetComponentMutable");
+		return GetRawMutable(entity, component);
+	}
+
 	void Store::RemoveComponent(Entity entity, ComponentId component) {
 		RemoveRaw(entity, component);
 	}
@@ -1358,7 +1385,7 @@ namespace engine::ecs {
 		// definition of what marking a row means. `GetComponentMutable` marks
 		// and then hands back a pointer; the pointer is what this call does not
 		// want, and every other line of it is exactly right.
-		(void)GetComponentMutable(*State, entity, component);
+		(void)engine::ecs::GetComponentMutable(*State, entity, component);
 	}
 
 	void Store::MarkAllChangedRaw(ComponentId component) {
@@ -1456,6 +1483,23 @@ namespace engine::ecs {
 		RequireOwningThread("Load");
 
 		return LoadSnapshot(*State, StoreName, reader);
+	}
+
+	bool Store::CloneTo(Store &destination) const {
+		if (&destination == this) {
+			return true;
+		}
+
+		core::ByteWriter writer;
+		if (!Save(writer)) {
+			return false;
+		}
+
+		const std::string destinationName = destination.StoreName;
+		core::ByteReader reader(writer.Bytes());
+		const bool loaded = destination.Load(reader);
+		destination.StoreName = destinationName;
+		return loaded;
 	}
 
 	bool Store::Apply(core::ByteReader &reader, ApplyMode mode) {

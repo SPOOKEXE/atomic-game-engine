@@ -99,6 +99,103 @@ namespace engine::script {
 		}
 	};
 
+	// Who supplied the source running in a VM.
+	//
+	// A Studio game run and a plugin can share the same host role while having
+	// different authority. Keeping origin separate prevents editor placement
+	// from granting a game script the plugin host surface, or granting a plugin
+	// the server services of the world it edits.
+	enum class ScriptOrigin : uint8_t {
+		Game,
+		Plugin,
+	};
+
+	// Independently grantable pieces of the scripting surface.
+	//
+	// The default runtime profile derives these from `HostRole` and
+	// `ScriptOrigin`. A host may provide an explicit set for a narrower sandbox,
+	// which is useful for tools that should only inspect a world.
+	enum class ScriptCapabilities : uint16_t {
+		None = 0,
+		World = 1u << 0,
+		Messaging = 1u << 1,
+		Persistence = 1u << 2,
+		Teleport = 1u << 3,
+		Input = 1u << 4,
+		Audio = 1u << 5,
+		StudioDebug = 1u << 6,
+		PluginHost = 1u << 7,
+
+		// Ask `RuntimeLimits` to derive the profile. This bit is never present in
+		// the effective set exposed by a runtime.
+		Automatic = 1u << 15,
+	};
+
+	// Combines independently grantable capabilities.
+	constexpr ScriptCapabilities operator|(ScriptCapabilities left, ScriptCapabilities right) {
+		return static_cast<ScriptCapabilities>(static_cast<uint16_t>(left) | static_cast<uint16_t>(right));
+	}
+
+	// Adds capabilities to an existing set.
+	constexpr ScriptCapabilities &operator|=(ScriptCapabilities &left, ScriptCapabilities right) {
+		left = left | right;
+		return left;
+	}
+
+	// Reports whether every required capability is granted.
+	constexpr bool HasCapabilities(ScriptCapabilities granted, ScriptCapabilities required) {
+		return (static_cast<uint16_t>(granted) & static_cast<uint16_t>(required)) ==
+			   static_cast<uint16_t>(required);
+	}
+
+	// Returns the stable diagnostic name of one capability.
+	constexpr std::string_view CapabilityName(ScriptCapabilities capability) {
+		switch (capability) {
+		case ScriptCapabilities::World:
+			return "world";
+		case ScriptCapabilities::Messaging:
+			return "messaging";
+		case ScriptCapabilities::Persistence:
+			return "persistence";
+		case ScriptCapabilities::Teleport:
+			return "teleport";
+		case ScriptCapabilities::Input:
+			return "input";
+		case ScriptCapabilities::Audio:
+			return "audio";
+		case ScriptCapabilities::StudioDebug:
+			return "studio-debug";
+		case ScriptCapabilities::PluginHost:
+			return "plugin-host";
+		case ScriptCapabilities::None:
+			return "none";
+		case ScriptCapabilities::Automatic:
+			return "automatic";
+		}
+		return "unknown";
+	}
+
+	constexpr ScriptCapabilities CapabilitiesFor(const HostRole &role, ScriptOrigin origin) {
+		// Input and audio are safe service surfaces on every host. A headless
+		// world answers an empty input state and runs no mixer, which lets one
+		// shared script query them on both halves of a game. Explicit capability
+		// sets can still remove either surface from a narrower sandbox.
+		ScriptCapabilities granted =
+			ScriptCapabilities::World | ScriptCapabilities::Input | ScriptCapabilities::Audio;
+		if (role.Server) {
+			granted |= ScriptCapabilities::Messaging;
+			granted |= ScriptCapabilities::Persistence;
+			granted |= ScriptCapabilities::Teleport;
+		}
+		if (role.Studio) {
+			granted |= ScriptCapabilities::StudioDebug;
+		}
+		if (origin == ScriptOrigin::Plugin) {
+			granted |= ScriptCapabilities::PluginHost;
+		}
+		return granted;
+	}
+
 	// What bounds a script, and what a host may change about it.
 	//
 	// Both limits are refusals rather than throttles: past either one the script
@@ -148,6 +245,21 @@ namespace engine::script {
 
 		// Where scripts running under this runtime are standing.
 		HostRole Role;
+
+		// Whether the source belongs to the game or to an editor plugin.
+		ScriptOrigin Origin = ScriptOrigin::Game;
+
+		// The exact API grants, or `Automatic` for the profile derived from the
+		// role and origin above. Supplying an explicit set never adds implicit
+		// grants, so a host can construct a genuinely narrower sandbox.
+		ScriptCapabilities Capabilities = ScriptCapabilities::Automatic;
+
+		// Resolves an automatic profile or returns the explicitly granted set.
+		constexpr ScriptCapabilities EffectiveCapabilities() const {
+			return HasCapabilities(Capabilities, ScriptCapabilities::Automatic)
+					   ? CapabilitiesFor(Role, Origin)
+					   : Capabilities;
+		}
 	};
 
 	// What one script cost the last time it ran.
@@ -348,8 +460,10 @@ namespace engine::script {
 		// @since v0.20
 		class StackGuard {
 		  public:
+			// Maximum nested crossings through one runtime.
 			static constexpr unsigned MAX_DEPTH = 64;
 
+			// Enters one host/script boundary for a mutable runtime.
 			StackGuard(Runtime &runtime) : RuntimeRef(runtime) {
 				if (RuntimeRef.Depth >= MAX_DEPTH) {
 					RuntimeRef.Error = "script recursion limit exceeded";
@@ -360,6 +474,7 @@ namespace engine::script {
 				Allowed = true;
 			}
 
+			// Enters one host/script boundary for a logically const call.
 			StackGuard(const Runtime &runtime) : RuntimeRef(const_cast<Runtime &>(runtime)) {
 				if (RuntimeRef.Depth >= MAX_DEPTH) {
 					RuntimeRef.Error = "script recursion limit exceeded";
@@ -376,6 +491,7 @@ namespace engine::script {
 				}
 			}
 
+			// Reports whether the recursion limit permitted this entry.
 			operator bool() const {
 				return Allowed;
 			}
@@ -390,6 +506,21 @@ namespace engine::script {
 		// @return The role given at construction.
 		const HostRole &Role() const {
 			return HostRoleValue;
+		}
+
+		// Whether this runtime was created for game or plugin source.
+		ScriptOrigin Origin() const {
+			return ScriptOriginValue;
+		}
+
+		// The effective capability set after resolving the runtime profile.
+		ScriptCapabilities Access() const {
+			return ScriptCapabilitiesValue;
+		}
+
+		// Reports whether this runtime grants every required capability.
+		bool Can(ScriptCapabilities required) const {
+			return HasCapabilities(ScriptCapabilitiesValue, required);
 		}
 
 		// The world this runtime builds into.
@@ -527,8 +658,10 @@ namespace engine::script {
 		// it is on.
 		//
 		// @param store The world. Outlives the runtime.
-		// @param role  Where scripts under this runtime are standing.
-		Runtime(ecs::Store &store, const HostRole &role) : Store(store), HostRoleValue(role) {}
+		// @param limits Where the scripts stand and what they may access.
+		Runtime(ecs::Store &store, const RuntimeLimits &limits)
+			: Store(store), HostRoleValue(limits.Role), ScriptOriginValue(limits.Origin),
+			  ScriptCapabilitiesValue(limits.EffectiveCapabilities()) {}
 
 		// The world this runtime builds into. A reference rather than a handle,
 		// because a VM is created for one world and dies with it.
@@ -536,6 +669,12 @@ namespace engine::script {
 
 		// Where scripts under this runtime believe they are standing.
 		HostRole HostRoleValue;
+
+		// Source ownership is separate from where its host is standing.
+		ScriptOrigin ScriptOriginValue = ScriptOrigin::Game;
+
+		// The resolved grants. `Automatic` never survives construction.
+		ScriptCapabilities ScriptCapabilitiesValue = ScriptCapabilities::None;
 
 		// The last failure, or empty. Read through `LastError`.
 		std::string Error;

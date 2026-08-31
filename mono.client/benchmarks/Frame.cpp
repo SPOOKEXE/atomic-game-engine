@@ -132,7 +132,7 @@ namespace frame_bench {
 		// a running client never spends its time in.
 		for (int tick = 0; tick < 2; tick++) {
 			made.World->AdvanceTick(1.0f / 60.0f);
-			made.Systems->RunPhases(*made.World, Phase::PreSimulation, Phase::PostSimulation);
+			made.Systems->RunPhases(*made.World, Phase::Input, Phase::Replication);
 		}
 
 		built.push_back(std::move(made));
@@ -195,7 +195,7 @@ namespace frame_bench {
 	// One frame's presentation phase, which is what the client runs between two
 	// ticks however many times the display asks for.
 	size_t Present(Presented &scene) {
-		scene.Systems->RunPhases(*scene.World, Phase::PreRender, Phase::PreRender);
+		scene.Systems->RunPhases(*scene.World, Phase::RenderPreparation, Phase::Render);
 		const auto *list = scene.World->Resource<engine::render::DrawList>();
 		return list == nullptr ? 0 : list->Instances.size();
 	}

@@ -50,10 +50,17 @@ mono_add_library(render
 		Engine::msl
 
 	# Keep GPU and shader compiler types private to implementation files.
-	VENDOR SDL3::SDL3 shaderc
+	VENDOR SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross
 
 	# Atlas headers only; no imgui library is linked.
 	VENDOR_INCLUDES
 		${CMAKE_SOURCE_DIR}/mono.vendor/imgui
 		${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
 )
+
+# Compile the extension example as part of the render suite. It stays out of
+# the shipped library while every API call in it remains build-checked.
+if(TARGET test_render)
+	target_sources(test_render PRIVATE examples/CustomNode.cpp)
+	target_include_directories(test_render PRIVATE examples)
+endif()

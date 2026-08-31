@@ -955,6 +955,7 @@ declare Enum: {
 		Cylinder: Enum_ShapeKind,
 		Hull: Enum_ShapeKind,
 		Mesh: Enum_ShapeKind,
+		Capsule: Enum_ShapeKind,
 	},
 	SizeConstraint: {
 		RelativeXY: Enum_SizeConstraint,
@@ -1644,6 +1645,7 @@ end
 
 declare extern type ShaderScript extends Instance with
 	read Revision: number
+	Source: string
 end
 
 declare extern type EditableMesh extends Instance with
@@ -1744,6 +1746,29 @@ declare extern type Trail extends Instance with
 	Texture: string
 	TextureLength: number
 	Transparency: NumberSequence
+end
+
+declare extern type FaceInstance extends Instance with
+end
+
+declare extern type Decal extends FaceInstance with
+	Color3: Color3
+	Face: Enum_NormalId
+	Texture: string
+	Transparency: number
+	ZIndex: number
+end
+
+declare extern type Texture extends FaceInstance with
+	Color3: Color3
+	Face: Enum_NormalId
+	OffsetStudsU: number
+	OffsetStudsV: number
+	StudsPerTileU: number
+	StudsPerTileV: number
+	Texture: string
+	Transparency: number
+	ZIndex: number
 end
 
 declare extern type GuiBase extends Instance with
@@ -2403,6 +2428,21 @@ declare extern type ContentService with
 	function GetTriangleCount(self, mesh: string): number
 end
 
+-- Runs a rectangular batch of values compatible with `math.noise` without
+-- holding the VM thread. The result is flat and row-major.
+declare extern type ComputeService with
+	function NoiseGridAsync(
+		self,
+		width: number,
+		depth: number,
+		originX: number,
+		originZ: number,
+		step: number,
+		context: "Serial" | "Threaded" | "Processed"?,
+		originY: number?
+	): { number }
+end
+
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
 --
 -- The same three methods the instance has, plus the one nothing else can do:
@@ -2603,6 +2643,7 @@ declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare ComputeService: ComputeService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
@@ -2639,6 +2680,13 @@ declare extern type EngineWorld with
 	-- The field list a component was declared with, in a shape
 	-- `DefineComponent` accepts back.
 	function GetComponentSchema(self, component: string): { [string]: string }?
+	function SetComponentTags(self, component: string, tags: { string }): boolean
+	function SetComponentFieldTags(self, component: string, field: string, tags: { string }): boolean
+	function ExposeComponentField(self, component: string, field: string, exposed: boolean): boolean
+	function GetComponentMetadata(self, component: string): {
+		Tags: { string },
+		Fields: { [string]: { Type: string, Tags: { string }, Exposed: boolean } },
+	}?
 
 	-- An entity carrying nothing: no class, no place in the tree, nothing drawn.
 	-- Still an `Instance`, because an instance *is* an entity.
@@ -2648,6 +2696,10 @@ declare extern type EngineWorld with
 	-- order. Naming a component nothing declared is an error rather than an
 	-- empty result.
 	function Query(self, ...: string): { Instance }
+
+	-- Every entity carrying all included components and none of the excluded
+	-- components.
+	function QueryFiltered(self, include: { string }, exclude: { string }): { Instance }
 
 	function Count(self, ...: string): number
 end
@@ -2709,6 +2761,7 @@ type Services = {
 	MessagingService: MessagingService,
 	TeleportService: TeleportService,
 	ContentService: ContentService,
+	ComputeService: ComputeService,
 	CollectionService: CollectionService,
 	HttpService: HttpService,
 	CrossWorldService: CrossWorldService,
@@ -2774,6 +2827,9 @@ type CreatableInstances = {
 	ParticleEmitter: ParticleEmitter,
 	Beam: Beam,
 	Trail: Trail,
+	FaceInstance: FaceInstance,
+	Decal: Decal,
+	Texture: Texture,
 	GuiBase: GuiBase,
 	GuiService: GuiService,
 	GuiBase3d: GuiBase3d,

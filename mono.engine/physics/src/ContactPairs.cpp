@@ -462,6 +462,7 @@ namespace engine::physics {
 
 		case scene::ShapeKind::Hull:
 		case scene::ShapeKind::Mesh:
+		case scene::ShapeKind::Capsule:
 			// Unreachable: the guard at the top of this function sends both to
 			// the general search. The arms exist so the compiler still checks
 			// this switch is exhaustive, which is what caught every other site

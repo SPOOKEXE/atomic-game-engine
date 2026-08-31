@@ -44,6 +44,122 @@ namespace engine::render {
 		Compute,
 	};
 
+	// One descriptor-backed resource declared by a compiled shader.
+	enum class ShaderResourceKind : uint8_t {
+		// Combined sampled image and sampler.
+		SampledTexture,
+
+		// Texture and sampler declared separately.
+		SeparateTexture,
+		Sampler,
+
+		// Read-write image.
+		StorageTexture,
+
+		// Descriptor-backed data blocks.
+		UniformBuffer,
+		StorageBuffer,
+
+		// Small pipeline-layout data block.
+		PushConstants,
+	};
+
+	// Stable labels for report and editor surfaces.
+	//@{
+	const char *Describe(ShaderResourceKind kind);
+	const char *Describe(ShaderStage stage);
+	std::string ShaderCapabilityName(uint32_t capability);
+	//@}
+
+	// One reflected descriptor or push-constant block.
+	struct ShaderResourceEstimate {
+		// Debug name retained by the compiler, or `id N` when stripped.
+		std::string Name;
+
+		// What a pipeline must bind.
+		ShaderResourceKind Kind = ShaderResourceKind::UniformBuffer;
+
+		// Descriptor location. Push constants use zero for both.
+		//@{
+		uint32_t Set = 0;
+		uint32_t Binding = 0;
+		//@}
+
+		// Statically declared bytes. Zero means dimensions are runtime-owned.
+		uint64_t MinimumBytes = 0;
+	};
+
+	// Static requirements and cost indicators reflected from one SPIR-V module.
+	//
+	// Instruction figures are counts in the module, not predicted GPU cycles.
+	// They are deliberately named estimates in Studio because occupancy, cache
+	// behavior, divergence, and invocation count belong to a real workload.
+	struct ShaderCapabilities {
+		// Entry-point stage.
+		ShaderStage Stage = ShaderStage::Fragment;
+
+		// Every descriptor and push-constant block.
+		std::vector<ShaderResourceEstimate> Resources;
+
+		// Numeric SPIR-V capabilities in declaration order.
+		std::vector<uint32_t> RequiredCapabilities;
+
+		// Module residency and minimum buffer payload.
+		//@{
+		uint64_t SpirVBytes = 0;
+		uint64_t DeclaredBufferBytes = 0;
+		//@}
+
+		// Static instruction counts by broad cost family.
+		//@{
+		uint32_t Instructions = 0;
+		uint32_t ArithmeticInstructions = 0;
+		uint32_t TextureInstructions = 0;
+		uint32_t MemoryInstructions = 0;
+		uint32_t ControlFlowInstructions = 0;
+		//@}
+
+		// Entry-point interface variable counts.
+		//@{
+		uint32_t Inputs = 0;
+		uint32_t Outputs = 0;
+		//@}
+
+		// Compute local size. One in every dimension for non-compute stages.
+		//@{
+		uint32_t WorkgroupX = 1;
+		uint32_t WorkgroupY = 1;
+		uint32_t WorkgroupZ = 1;
+		//@}
+	};
+
+	// Explicit transforms in their compile order.
+	enum class ShaderOptimizationKind : uint8_t {
+		ConstantFolding,
+		CommonSubexpressionElimination,
+	};
+
+	// Returns the stable diagnostic name of an optimizer stage.
+	const char *Describe(ShaderOptimizationKind kind);
+
+	// The observable effect of one optimizer stage.
+	struct ShaderOptimizationStep {
+		// Which stage ran.
+		ShaderOptimizationKind Kind = ShaderOptimizationKind::ConstantFolding;
+
+		// Static instruction counts around the stage.
+		//@{
+		uint32_t BeforeInstructions = 0;
+		uint32_t AfterInstructions = 0;
+		//@}
+
+		// Whether any module word changed, including id compaction.
+		bool Changed = false;
+	};
+
+	// Reflects a compiled module without compiling or modifying it.
+	ShaderCapabilities InspectShaderCapabilities(std::span<const uint32_t> spirv);
+
 	// Owned output and diagnostics from one runtime shader compilation.
 	//
 	// `Failed` is the authoritative status. Successful output and diagnostic
@@ -69,6 +185,13 @@ namespace engine::render {
 		// Warnings on a successful compile. Not an error, and not silently
 		// dropped either.
 		uint32_t Warnings = 0;
+
+		// Reflected from `SpirV` after every enabled optimization pass.
+		ShaderCapabilities Capabilities;
+
+		// Empty when optimization is disabled. Otherwise one row per explicit
+		// pass in execution order, including passes that found nothing to change.
+		std::vector<ShaderOptimizationStep> Optimizations;
 	};
 
 	// Compiles runtime-authored GLSL to SPIR-V without exposing shaderc types.
@@ -104,8 +227,9 @@ namespace engine::render {
 		Compile(std::string_view source, ShaderStage stage, std::string_view name = "shader");
 
 		// Optimisation costs compile time and is worth it for anything that
-		// will be used for more than a frame or two. Off while a user is
-		// editing, on when the result is cached.
+		// will be used for more than a frame or two. Enabling it runs the named
+		// constant-folding and common-subexpression stages recorded in the result.
+		// Keep it off for keystroke previews and on when the result is cached.
 		//
 		// @param optimise Whether subsequent compilations use performance optimisation.
 		void SetOptimise(bool optimise);
