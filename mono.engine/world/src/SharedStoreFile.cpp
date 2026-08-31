@@ -18,6 +18,26 @@ namespace engine::world {
 		}
 	}
 
+	const char *Describe(SharedStoreEnvironment environment) {
+		return environment == SharedStoreEnvironment::Mock ? "mock" : "live";
+	}
+
+	std::optional<SharedStoreEnvironment> SharedStoreEnvironmentOf(std::string_view text) {
+		if (text == "mock") {
+			return SharedStoreEnvironment::Mock;
+		}
+		if (text == "live") {
+			return SharedStoreEnvironment::Live;
+		}
+		return std::nullopt;
+	}
+
+	std::filesystem::path
+	SharedStorePath(const std::filesystem::path &root, SharedStoreEnvironment environment, BusKind store) {
+		const char *file = store == BusKind::MemoryStore ? "memorystore.bin" : "datastore.bin";
+		return root / Describe(environment) / file;
+	}
+
 	const char *Describe(SharedStoreFileStatus status) {
 		switch (status) {
 		case SharedStoreFileStatus::Ok:

@@ -32,6 +32,7 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/world/Lifecycle.hpp>
+#include <engine/world/SharedStoreFile.hpp>
 
 #include <algorithm>
 #include <array>
@@ -611,6 +612,7 @@ namespace server {
 
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
+		DataStoreReady = false;
 
 		if (!Settings.AssetsDirectory.empty()) {
 			engine::core::Paths::SetAssetsOverride(Settings.AssetsDirectory);
@@ -760,6 +762,10 @@ namespace server {
 			});
 		}
 
+		if (!LoadDataStore()) {
+			return false;
+		}
+
 		if (!StartHosts()) {
 			return false;
 		}
@@ -804,6 +810,67 @@ namespace server {
 			return false;
 		}
 		return std::filesystem::path(path).extension() == engine::game::GAME_EXTENSION;
+	}
+
+	bool Server::LoadDataStore() {
+		PersistedDataStore.clear();
+		if (Settings.DataStoreRoot.empty()) {
+			DataStoreReady = true;
+			return true;
+		}
+
+		const std::filesystem::path path = engine::world::SharedStorePath(
+			Settings.DataStoreRoot, Settings.DataStoreEnvironment, engine::world::BusKind::DataStore
+		);
+		std::string error;
+		const engine::world::SharedStoreFileStatus loaded = engine::world::LoadSharedStoreFile(
+			path, engine::world::BusKind::DataStore, PersistedDataStore, error
+		);
+		if (loaded == engine::world::SharedStoreFileStatus::NotFound) {
+			ENGINE_INFO(
+				"DataStore {} environment is empty at '{}'",
+				engine::world::Describe(Settings.DataStoreEnvironment),
+				path.string()
+			);
+			DataStoreReady = true;
+			return true;
+		}
+		if (loaded != engine::world::SharedStoreFileStatus::Ok) {
+			ENGINE_ERROR("could not load DataStore '{}': {}", path.string(), error);
+			PersistedDataStore.clear();
+			return false;
+		}
+		if (Worlds().ReplaceSharedStoreEntries(engine::world::BusKind::DataStore, PersistedDataStore) !=
+			engine::world::BusStatus::Ok) {
+			ENGINE_ERROR("could not install DataStore '{}'", path.string());
+			PersistedDataStore.clear();
+			return false;
+		}
+		ENGINE_INFO("loaded {} DataStore record(s) from '{}'", PersistedDataStore.size(), path.string());
+		DataStoreReady = true;
+		return true;
+	}
+
+	bool Server::FlushDataStore() {
+		if (!DataStoreReady || Settings.DataStoreRoot.empty()) {
+			return true;
+		}
+		const auto records = Worlds().SharedStoreEntries(engine::world::BusKind::DataStore);
+		if (records == PersistedDataStore) {
+			return true;
+		}
+
+		const std::filesystem::path path = engine::world::SharedStorePath(
+			Settings.DataStoreRoot, Settings.DataStoreEnvironment, engine::world::BusKind::DataStore
+		);
+		std::string error;
+		if (engine::world::SaveSharedStoreFile(path, engine::world::BusKind::DataStore, records, error) !=
+			engine::world::SharedStoreFileStatus::Ok) {
+			ENGINE_ERROR("could not persist DataStore '{}': {}", path.string(), error);
+			return false;
+		}
+		PersistedDataStore = records;
+		return true;
 	}
 
 	bool Server::HostGameFile() {
@@ -2342,6 +2409,10 @@ namespace server {
 	}
 
 	void Server::Shutdown() {
+		if (Driver_ != nullptr && !Replayer_ && !IsHost() && !FlushDataStore()) {
+			ENGINE_ERROR("could not flush the configured DataStore during shutdown");
+		}
+
 		if (Recorder_ && Recorder_->Recording_() && !Settings.RecordPath.empty()) {
 			engine::core::ByteWriter writer;
 			if (Recorder_->Write(writer) && WriteFile(Settings.RecordPath, writer.Bytes())) {
@@ -2380,6 +2451,7 @@ namespace server {
 		}
 
 		Driver_.reset();
+		DataStoreReady = false;
 		engine::parallel::Jobs::Stop();
 	}
 
@@ -2414,6 +2486,7 @@ namespace server {
 		std::vector<float> tickMilliseconds;
 		size_t droppedSpans = 0;
 		uint64_t lastMetricsReport = started;
+		uint64_t lastDataStoreFlush = started;
 
 		const auto ticksSoFar = [this] { return Worlds().StatisticsOf(PrimaryWorld).Ticks; };
 
@@ -2494,6 +2567,15 @@ namespace server {
 				ContentService->Pump(
 					static_cast<uint64_t>(engine::core::Clock::Nanoseconds() / 1'000'000'000ull)
 				);
+			}
+
+			// Persistence is host work rather than simulation work. The in-memory
+			// router remains the tick's deterministic authority; this bounded flush
+			// copies it between ticks and writes only when a record changed.
+			if (!Settings.DataStoreRoot.empty() && !Replayer_ && !IsHost() &&
+				tickStarted - lastDataStoreFlush >= 1'000'000'000ull) {
+				lastDataStoreFlush = tickStarted;
+				(void)FlushDataStore();
 			}
 
 			if (Replayer_) {

@@ -55,6 +55,11 @@ namespace {
 		return options;
 	}
 
+	std::vector<std::byte> Bytes(std::string_view text) {
+		const auto *first = reinterpret_cast<const std::byte *>(text.data());
+		return {first, first + text.size()};
+	}
+
 	struct Hosted {
 		server::Server Host;
 
@@ -65,6 +70,73 @@ namespace {
 			Host.Shutdown();
 		}
 	};
+}
+
+TEST_CASE("mock and live datastores persist into separate server directories", "[server][datastore]") {
+	const std::filesystem::path root =
+		std::filesystem::temp_directory_path() / "atomic-server-datastore-environments";
+	std::error_code ignored;
+	std::filesystem::remove_all(root, ignored);
+
+	auto options = Headless(1, 0);
+	options.DataStoreRoot = root;
+	options.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Mock;
+	{
+		server::Server host;
+		REQUIRE(host.Initialise(options));
+		REQUIRE(
+			host.Worlds().SetSharedStoreValue(
+				engine::world::BusKind::DataStore, engine::core::Name("player:1"), Bytes("mock-value")
+			) == engine::world::BusStatus::Ok
+		);
+		host.Shutdown();
+	}
+	CHECK(std::filesystem::exists(root / "mock" / "datastore.bin"));
+	CHECK_FALSE(std::filesystem::exists(root / "live" / "datastore.bin"));
+
+	{
+		server::Server restored;
+		REQUIRE(restored.Initialise(options));
+		const auto records = restored.Worlds().SharedStoreEntries(engine::world::BusKind::DataStore);
+		REQUIRE(records.size() == 1);
+		CHECK(records[0].Value == Bytes("mock-value"));
+		restored.Shutdown();
+	}
+
+	options.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Live;
+	{
+		server::Server live;
+		REQUIRE(live.Initialise(options));
+		CHECK(live.Worlds().SharedStoreEntries(engine::world::BusKind::DataStore).empty());
+		live.Shutdown();
+	}
+
+	std::filesystem::remove_all(root, ignored);
+}
+
+TEST_CASE("a malformed datastore blocks startup and survives cleanup", "[server][datastore]") {
+	const std::filesystem::path root =
+		std::filesystem::temp_directory_path() / "atomic-server-malformed-datastore";
+	const std::filesystem::path file = root / "mock" / "datastore.bin";
+	std::error_code ignored;
+	std::filesystem::remove_all(root, ignored);
+	std::filesystem::create_directories(file.parent_path());
+	{
+		std::ofstream output(file, std::ios::binary);
+		output << "malformed";
+	}
+
+	auto options = Headless(1, 0);
+	options.DataStoreRoot = root;
+	options.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Mock;
+	server::Server host;
+	CHECK_FALSE(host.Initialise(options));
+	host.Shutdown();
+
+	std::ifstream input(file, std::ios::binary);
+	const std::string contents{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+	CHECK(contents == "malformed");
+	std::filesystem::remove_all(root, ignored);
 }
 
 TEST_CASE("a server hosts the requested number of entities", "[server]") {

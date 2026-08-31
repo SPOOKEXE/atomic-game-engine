@@ -21,6 +21,7 @@
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Lifecycle.hpp>
 #include <engine/world/Recording.hpp>
+#include <engine/world/SharedStoreFile.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
@@ -177,6 +178,14 @@ namespace server {
 		// the default location. Set once during Initialise, before anything has
 		// resolved a path through it.
 		std::filesystem::path AssetsDirectory;
+
+		// Root holding `mock/datastore.bin` and `live/datastore.bin`.
+		// Empty keeps the process-local store used before persistence existed.
+		std::filesystem::path DataStoreRoot;
+
+		// Mock and live never share a file, even under one configured root.
+		engine::world::SharedStoreEnvironment DataStoreEnvironment =
+			engine::world::SharedStoreEnvironment::Live;
 
 		// Write a recording of the run here. Empty means record nothing.
 		//
@@ -754,6 +763,12 @@ namespace server {
 		// @return `false` when the file would not load or holds no worlds.
 		bool HostGameFile();
 
+		// Loads the configured driver-owned DataStore before any world ticks.
+		bool LoadDataStore();
+
+		// Writes only when the driver-owned records changed since the last flush.
+		bool FlushDataStore();
+
 		// Builds the worlds a host was granted and announces itself.
 		//
 		// @return `false` when there is no link, or no worlds to hold.
@@ -936,6 +951,8 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+		std::vector<engine::world::SharedStoreEntry> PersistedDataStore;
+		bool DataStoreReady = false;
 
 		// How this server is found - the LAN beacon and the rendezvous
 		// registration. Null when `--advertise` and `--rendezvous` were both

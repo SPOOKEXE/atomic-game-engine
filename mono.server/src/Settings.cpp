@@ -169,6 +169,16 @@ namespace server {
 					defaults.AssetsDirectory.string(),
 					"Read staged data from here instead of from beside the binary"
 				);
+				built.Text(
+					"server.datastore-root",
+					defaults.DataStoreRoot.string(),
+					"Persist DataStore under this root; empty keeps it process-local"
+				);
+				built.Text(
+					"server.datastore-environment",
+					engine::world::Describe(defaults.DataStoreEnvironment),
+					"mock or live; each uses a separate directory"
+				);
 
 				return built;
 			}();
@@ -269,6 +279,16 @@ namespace server {
 		options.HostProgram = std::filesystem::path(Flag("server.host-program").Text());
 		options.Processes = static_cast<uint32_t>(Flag("server.processes").Integer());
 		options.AssetsDirectory = std::filesystem::path(Flag("server.assets-directory").Text());
+		options.DataStoreRoot = std::filesystem::path(Flag("server.datastore-root").Text());
+		if (const auto environment =
+				engine::world::SharedStoreEnvironmentOf(Flag("server.datastore-environment").Text())) {
+			options.DataStoreEnvironment = *environment;
+		} else {
+			ENGINE_WARN(
+				"server.datastore-environment: '{}' is not mock or live; using live",
+				Flag("server.datastore-environment").Text()
+			);
+		}
 
 		return options;
 	}

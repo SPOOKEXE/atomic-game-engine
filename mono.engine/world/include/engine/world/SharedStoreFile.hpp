@@ -11,11 +11,23 @@
 #include <engine/world/SharedStores.hpp>
 
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
 namespace engine::world {
+	enum class SharedStoreEnvironment {
+		Mock,
+		Live,
+	};
+
+	const char *Describe(SharedStoreEnvironment environment);
+	std::optional<SharedStoreEnvironment> SharedStoreEnvironmentOf(std::string_view text);
+
+	// Resolves `<root>/mock|live/datastore.bin` or `memorystore.bin`.
+	std::filesystem::path
+	SharedStorePath(const std::filesystem::path &root, SharedStoreEnvironment environment, BusKind store);
 
 	enum class SharedStoreFileStatus {
 		Ok,
