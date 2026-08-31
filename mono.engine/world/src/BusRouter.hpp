@@ -155,6 +155,9 @@ namespace engine::world {
 		// @param value Filled with the value when one is present.
 		// @return `Ok`, `NotFound`, or `Unsupported` for a bus with no keys.
 		BusStatus Peek(BusKind bus, core::Name key, std::vector<std::byte> *value) const;
+		std::vector<SharedStoreEntry> SharedStoreEntries(BusKind store) const;
+		BusStatus SetSharedStoreValue(BusKind store, core::Name key, std::span<const std::byte> value);
+		BusStatus RemoveSharedStoreValue(BusKind store, core::Name key);
 
 		// Empties the backends and everything queued against them.
 		//

@@ -669,6 +669,56 @@ namespace engine::world {
 		return BusStatus::Unsupported;
 	}
 
+	std::vector<SharedStoreEntry> BusRouter::SharedStoreEntries(BusKind store) const {
+		std::vector<SharedStoreEntry> entries;
+		if (store == BusKind::MemoryStore) {
+			entries.reserve(Backends.Memory.Values.size());
+			for (const auto &[key, value] : Backends.Memory.Values) {
+				entries.push_back({store, core::Name::FromId(key), value, 0});
+			}
+		} else if (store == BusKind::DataStore) {
+			entries.reserve(Backends.Data.Records.size());
+			for (const auto &[key, record] : Backends.Data.Records) {
+				entries.push_back({store, core::Name::FromId(key), record.Value, record.Version});
+			}
+		}
+
+		std::sort(
+			entries.begin(), entries.end(), [](const SharedStoreEntry &left, const SharedStoreEntry &right) {
+				return left.Key.Text() < right.Key.Text();
+			}
+		);
+		return entries;
+	}
+
+	BusStatus
+	BusRouter::SetSharedStoreValue(BusKind store, core::Name key, std::span<const std::byte> value) {
+		if (!key.IsValid()) {
+			return BusStatus::Unsupported;
+		}
+		if (store == BusKind::MemoryStore) {
+			Backends.Memory.Values[key.Id()] = {value.begin(), value.end()};
+			return BusStatus::Ok;
+		}
+		if (store == BusKind::DataStore) {
+			DataBus::Record &record = Backends.Data.Records[key.Id()];
+			record.Value.assign(value.begin(), value.end());
+			record.Version++;
+			return BusStatus::Ok;
+		}
+		return BusStatus::Unsupported;
+	}
+
+	BusStatus BusRouter::RemoveSharedStoreValue(BusKind store, core::Name key) {
+		if (store == BusKind::MemoryStore) {
+			return Backends.Memory.Values.erase(key.Id()) == 0 ? BusStatus::NotFound : BusStatus::Ok;
+		}
+		if (store == BusKind::DataStore) {
+			return Backends.Data.Records.erase(key.Id()) == 0 ? BusStatus::NotFound : BusStatus::Ok;
+		}
+		return BusStatus::Unsupported;
+	}
+
 	void BusRouter::Reset() {
 		Backends = Buses{};
 		Applied.clear();

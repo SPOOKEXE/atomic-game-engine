@@ -492,6 +492,21 @@ namespace engine::world {
 		return Router->Peek(bus, key, value);
 	}
 
+	std::vector<SharedStoreEntry> Universe::SharedStoreEntries(BusKind store) const {
+		RequireDriverThread("SharedStoreEntries");
+		return Router->SharedStoreEntries(store);
+	}
+
+	BusStatus Universe::SetSharedStoreValue(BusKind store, core::Name key, std::span<const std::byte> value) {
+		RequireDriverThread("SetSharedStoreValue");
+		return Router->SetSharedStoreValue(store, key, value);
+	}
+
+	BusStatus Universe::RemoveSharedStoreValue(BusKind store, core::Name key) {
+		RequireDriverThread("RemoveSharedStoreValue");
+		return Router->RemoveSharedStoreValue(store, key);
+	}
+
 	// --- snapshots ---------------------------------------------------------
 
 	namespace {
