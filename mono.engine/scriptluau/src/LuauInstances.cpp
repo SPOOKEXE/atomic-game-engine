@@ -1,9 +1,9 @@
 #include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
-#include <engine/ecs/Classes.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Subtree.hpp>
 
 #include <algorithm>
@@ -297,7 +297,7 @@ namespace engine::script {
 				// scanned a class's property list.
 				if (property->Type == PropertyType::String) {
 					std::string text;
-					if (!store.GetProperty(instance, *property, &text, sizeof(text))) {
+					if (!ReadInstanceProperty(store, instance, *property, &text, sizeof(text))) {
 						luaL_errorL(state, "could not read '%s'", field);
 					}
 					lua_pushlstring(state, text.data(), text.size());
@@ -313,7 +313,7 @@ namespace engine::script {
 				// half the class-table traffic of a scripted frame.
 				alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 				if (property->Size > sizeof(bytes) ||
-					!store.GetProperty(instance, *property, bytes, property->Size)) {
+					!ReadInstanceProperty(store, instance, *property, bytes, property->Size)) {
 					luaL_errorL(state, "could not read '%s'", field);
 				}
 
@@ -365,7 +365,7 @@ namespace engine::script {
 			// deliberately: a child named `Size` must not shadow the property,
 			// or a scene could break every script that touched it by adding a
 			// part with an unlucky name.
-			const Entity child = store.FindFirstChild(instance, name);
+			const Entity child = FindInstanceChild(store, instance, name);
 			if (child != ecs::NULL_ENTITY) {
 				PushInstance(state, child);
 				return 1;
@@ -405,7 +405,7 @@ namespace engine::script {
 				const char *text = luaL_checklstring(state, 3, &length);
 				const std::string value(text, length);
 
-				if (!store.SetProperty(instance, *property, &value, sizeof(value))) {
+				if (!WriteInstanceProperty(store, instance, *property, &value, sizeof(value))) {
 					luaL_errorL(state, "could not write '%s'", field);
 				}
 				return 0;
@@ -421,7 +421,7 @@ namespace engine::script {
 			// rejecting the write is the case that matters: a script author
 			// cannot tell "rejected" from "applied and then overwritten by the
 			// next delta" without being told.
-			if (!store.SetProperty(instance, *property, bytes, property->Size)) {
+			if (!WriteInstanceProperty(store, instance, *property, bytes, property->Size)) {
 				if (store.AdoptOnly()) {
 					luaL_errorL(
 						state,
@@ -438,7 +438,7 @@ namespace engine::script {
 		int InstanceToString(lua_State *state) {
 			Store &store = InstanceStoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
-			lua_pushstring(state, store.InstanceNameOf(instance).Text().data());
+			lua_pushstring(state, InstanceNameOf(store, instance).Text().data());
 			return 1;
 		}
 
@@ -453,14 +453,13 @@ namespace engine::script {
 		int InstanceNew(lua_State *state) {
 			Store &store = InstanceStoreOf(state);
 			const char *className = luaL_checkstring(state, 1);
+			const Entity parent = lua_isnoneornil(state, 2) ? ecs::NULL_ENTITY : CheckInstance(state, 2);
+			const InstanceCreateResult created = CreateScriptInstance(store, className, parent);
 
-			const ecs::ClassId id = ecs::Classes::Find(Name(className));
-			if (!id.IsValid()) {
+			if (created.Failure == InstanceCreateFailure::UnknownClass) {
 				luaL_errorL(state, "'%s' is not a registered class", className);
 			}
-
-			const Entity instance = store.CreateInstance(id, className);
-			if (instance == ecs::NULL_ENTITY) {
+			if (created.Failure == InstanceCreateFailure::StoreRefused) {
 				if (store.AdoptOnly()) {
 					luaL_errorL(
 						state,
@@ -469,6 +468,9 @@ namespace engine::script {
 					);
 				}
 				luaL_errorL(state, "could not create a '%s'", className);
+			}
+			if (created.Failure == InstanceCreateFailure::ParentRefused) {
+				luaL_errorL(state, "could not parent the new '%s'", className);
 			}
 
 			// **The second argument, which Roblox has and v0.5 did not.**
@@ -483,13 +485,7 @@ namespace engine::script {
 			// reaches it until somebody sets `.Parent`. That is what makes an
 			// object usable as pure data - a template, a marker, a thing a
 			// script holds and never shows.
-			if (!lua_isnoneornil(state, 2)) {
-				if (!store.SetParent(instance, CheckInstance(state, 2))) {
-					luaL_errorL(state, "could not parent the new '%s'", className);
-				}
-			}
-
-			PushInstance(state, instance);
+			PushInstance(state, created.Instance);
 			return 1;
 		}
 	}
@@ -857,7 +853,7 @@ namespace engine::script {
 				// `ChildAdded`. Walked upwards from the parent, which is a
 				// handful of steps rather than a search.
 				for (Entity above = change.To; above != ecs::NULL_ENTITY;
-					 above = context.World->ParentOf(above)) {
+					 above = InstanceParentOf(*context.World, above)) {
 					PushInstance(state, change.Instance);
 					note(FireSignal(state, SignalKind::DescendantAdded, above, 1));
 				}
@@ -869,12 +865,12 @@ namespace engine::script {
 			// model moved otherwise.
 			const auto ancestry = [&](Entity subject) {
 				PushInstance(state, subject);
-				PushInstance(state, context.World->ParentOf(subject));
+				PushInstance(state, InstanceParentOf(*context.World, subject));
 				note(FireSignal(state, SignalKind::AncestryChanged, subject, 2));
 			};
 
 			ancestry(change.Instance);
-			context.World->EachDescendant(change.Instance, ancestry);
+			EachDescendant(*context.World, change.Instance, ancestry);
 		}
 
 		return firstError;
@@ -955,7 +951,7 @@ namespace engine::script {
 			// that arrived and went inside one tick is one no handler could act
 			// on. What is left is the release that did not destroy -
 			// `player.Character = nil` - which the hook cannot see.
-			if (!context.World->Alive(change.Character)) {
+			if (!InstanceAlive(*context.World, change.Character)) {
 				continue;
 			}
 
@@ -994,7 +990,7 @@ namespace engine::script {
 			// one is about - which is the ordinary case for a close button, not
 			// an edge one. Firing at a dead entity would push a userdata for a
 			// row that is gone.
-			if (!context.World->Alive(event.Instance)) {
+			if (!InstanceAlive(*context.World, event.Instance)) {
 				continue;
 			}
 

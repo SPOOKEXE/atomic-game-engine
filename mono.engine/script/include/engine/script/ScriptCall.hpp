@@ -1,5 +1,7 @@
 #pragma once
 
+#include <engine/script/InstanceShim.hpp>
+
 // One method, written once, called from either language.
 //
 // **A property was already neutral and a method was not.**
@@ -799,32 +801,6 @@ namespace engine::script {
 		// name in both languages rather than being dropped.
 		ScriptMethod Set;
 	};
-
-	// One instance's property of a name, or null when a script may not see it.
-	//
-	// **A non-scriptable property is *not found* rather than found and refused**,
-	// which is `LuauInstances.cpp`'s rule and the reason this is one function rather
-	// than a predicate beside a lookup. `PropertyDescriptor::Scriptable` is about
-	// who is asking, and the honest answer to a script asking for a script's
-	// `Source` is the one it gets for a member that does not exist - otherwise the
-	// error message itself tells a program what is there to reach for.
-	//
-	// **One reader, because there were three.** The property surface, the tween
-	// goal policy and `GetPropertyChangedSignal` each had a copy of this loop, and
-	// the copies had already drifted: the JavaScript half of the third compared
-	// `PropertyDescriptor::Name` and ignored `Scriptable` entirely, so the two
-	// languages disagreed about what a script may watch.
-	//
-	// Compares the stored spelling directly rather than interning the name, which
-	// would take the process-wide registry's lock on every property access.
-	//
-	// @param store    The world.
-	// @param instance The instance whose class is asked.
-	// @param name     The property, as a script spells it.
-	// @return The descriptor, or null.
-	// @since v0.18
-	const ecs::PropertyDescriptor *
-	ScriptableProperty(const ecs::Store &store, ecs::Entity instance, std::string_view name);
 
 	// Every instance method that is written once.
 	//

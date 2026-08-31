@@ -56,7 +56,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add external editor connections like vscode, notepad, etc.
 - [_] add settings for selected external editors
 - [x] add processed and optional raw grounded-asset options to standalone `.aworld` export.
-- [_] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
+- [x] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [_] setup datastores and memorystores (sqlite, mongo, supabase, etc - make a selection with local and remote setups, server settings and studio settings). add mock options that separate into a mock/ folder vs live/ folder. make a dataset editor plugin too.
 - [_] add platform-specific backend tooling where only "admitted keys" can connect to a given server - i.e. whitelist-based servers (press play on website => generate play key => platform tells server user is connecting with key => send key + server to user => user connects to server using key and info => join)
 - [_] cleanup launcher options and make it far more user friendly

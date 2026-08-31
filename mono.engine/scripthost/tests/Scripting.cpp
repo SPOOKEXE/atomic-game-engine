@@ -3215,6 +3215,15 @@ TEST_CASE("a script cannot reach another script's source", "[scripting][instance
 		assert(not ok, 'a script wrote the JavaScript container directly')
 	)");
 
+	const auto javascript = MakeRuntime(store, Language::JavaScript);
+	MustRun(*javascript, R"(
+		const program = workspace.FindFirstChild('Behaviour');
+		if (program === null) throw new Error('the script is not in the tree');
+		if ('Source' in program || 'LuaSource' in program || 'JavaScriptSource' in program) {
+			throw new Error('a private source property is discoverable');
+		}
+	)");
+
 	// And the author still can, through the same property surface a panel uses.
 	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("examples/Rings.luau"));
 }

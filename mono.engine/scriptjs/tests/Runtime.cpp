@@ -48,3 +48,15 @@ TEST_CASE("the javascript adapter builds into the world it was handed", "[script
 	const auto runtime = MakeJavaScriptRuntime(store);
 	REQUIRE(runtime->Run("Instance.new('Part').Name = 'FromJavaScript';"));
 }
+
+TEST_CASE("the javascript adapter refuses a non-instance parent before creation", "[scriptjs]") {
+	RegisterClasses();
+	Store store("scriptjs_test");
+
+	const auto runtime = MakeJavaScriptRuntime(store);
+	CHECK_FALSE(runtime->Run("Instance.new('Part', 7);"));
+
+	int parts = 0;
+	store.Each<const engine::scene::Transform>([&](engine::ecs::Entity, const auto &) { ++parts; });
+	CHECK(parts == 0);
+}
