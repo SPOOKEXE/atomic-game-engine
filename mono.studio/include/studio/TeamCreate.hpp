@@ -102,6 +102,7 @@ namespace studio {
 		// @param at         Where the host is - `network::Listing::Dial`.
 		// @param nowSeconds The current time.
 		// @param[out] error Filled when this returns false.
+		// @param secret     Invitation key for a private session, or empty for public.
 		// @return `false` when the address is not one, or no socket could be
 		//         opened.
 		// @since v0.13

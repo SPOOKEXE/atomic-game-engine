@@ -78,6 +78,8 @@ namespace studio {
 	// deadlines prevents diagnostic text from invalidating the retained Studio
 	// interface and every composition above it at an uncapped render rate.
 	struct StatusBarSnapshot {
+		// Sampling deadline, source viewport, visible counters, and validity.
+		//@{
 		double NextSample = 0.0;
 		size_t Viewport = 0;
 		uint32_t FramesPerSecond = 0;
@@ -85,6 +87,7 @@ namespace studio {
 		uint64_t Triangles = 0;
 		uint32_t Culled = 0;
 		bool Valid = false;
+		//@}
 
 		// Refreshes the visible values when their deadline expires or the
 		// focused viewport changes. Returns whether the snapshot was sampled.
@@ -100,10 +103,13 @@ namespace studio {
 
 	// The presentation ceilings configured by Studio.
 	struct PresentationRates {
+		// Interface and renderer ceilings for active and inactive states.
+		//@{
 		float InterfaceActive = 0.0f;
 		float InterfaceIdle = 0.0f;
 		float RendererFocused = 0.0f;
 		float RendererUnfocused = 0.0f;
+		//@}
 
 		// Whether all four ceilings are bypassed.
 		bool Uncapped = false;

@@ -15,18 +15,26 @@
 #include <vector>
 
 namespace studio {
+	// One property projected across every selected instance where it applies.
 	struct SelectionPropertyRow {
+		// Descriptor, representative value, coverage counts, and disagreement state.
+		//@{
 		const engine::ecs::PropertyDescriptor *Descriptor = nullptr;
 		engine::game::PropertyValue Value;
 		size_t Applicable = 0;
 		size_t Readable = 0;
 		bool Mixed = false;
+		//@}
 	};
 
+	// Properties grouped beneath the class that first declared them.
 	struct SelectionPropertyGroup {
+		// Declaring class, applicable selection count, and projected rows.
+		//@{
 		engine::ecs::ClassId Owner;
 		size_t Applicable = 0;
 		std::vector<SelectionPropertyRow> Rows;
+		//@}
 	};
 
 	// Which ancestor first declares a property for this class.

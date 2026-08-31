@@ -81,8 +81,10 @@ namespace studio {
 		int ReplaceFrom = -1;
 
 		// The active selection, as byte offsets into the text.
+		//@{
 		int SelectionStart = 0;
 		int SelectionEnd = 0;
+		//@}
 	};
 
 	// A multi-line text field bound to a `std::string`.

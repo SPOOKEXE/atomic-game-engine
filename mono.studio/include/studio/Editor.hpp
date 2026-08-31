@@ -737,10 +737,13 @@ namespace studio {
 	//
 	// @since v0.20
 	struct SavedChange {
+		// Timestamp, documents on either side, and the originating game file.
+		//@{
 		std::string SavedAt;
 		std::string Before;
 		std::string After;
 		std::filesystem::path Source;
+		//@}
 	};
 
 	// Serializes one saved change as the sidecar XML format.
@@ -3206,21 +3209,30 @@ namespace studio {
 		// One file in a screenshot batch. Scene requests name a renderer slot;
 		// Studio requests capture the complete host overlay.
 		struct ControlScreenshot {
+			// Destination, renderer slot, and complete-Studio capture mode.
+			//@{
 			std::filesystem::path Path;
 			size_t Slot = 0;
 			bool Studio = false;
+			//@}
 		};
+		// Screenshot requests waiting for capture.
 		std::deque<ControlScreenshot> ControlScreenshots;
+		// Whether the front screenshot request has reached the renderer.
 		bool ControlScreenshotIssued = false;
 
 		// A click injected through SDL. The release waits until a presented ImGui
 		// frame has observed the press, matching a physical button lifecycle.
 		struct ControlClick {
+			// Screen position, SDL button, and press-observation state.
+			//@{
 			float X = 0.0f;
 			float Y = 0.0f;
 			uint8_t Button = 0;
 			bool DownProcessed = false;
+			//@}
 		};
+		// The synthetic click currently crossing the frame boundary.
 		std::optional<ControlClick> PendingControlClick;
 
 		// What this editor was started with.
@@ -4147,6 +4159,7 @@ namespace studio {
 		// viewport. A turn in the round robin can update one image without
 		// invalidating the other layers or the other panels.
 		std::vector<engine::render::PresentationDamageTracker> ViewportPresentations;
+		// Particle-layer visibility retained independently for each viewport.
 		std::vector<engine::render::ParticleLayerVisibility> ViewportParticleVisibility;
 
 		// Renderer-owned mesh, texture, shader, and editable content revision.
@@ -4191,25 +4204,35 @@ namespace studio {
 		// An Alt-click waiting to place the editor's 3D cursor after projection
 		// data is available.
 		struct PendingCursorAction {
+			// Viewport location and whether an action is pending.
+			//@{
 			size_t Viewport = 0;
 			float X = 0.0f;
 			float Y = 0.0f;
 			bool Wanted = false;
+			//@}
 		};
 
+		// The queued cursor placement and its current world position.
+		//@{
 		PendingCursorAction PendingCursor;
 		engine::core::Vector3 CursorPosition;
+		//@}
 
 		// A selection rectangle begun on empty viewport space. Starting on a
 		// part remains Select's direct surface move.
 		struct BoxSelectionAction {
+			// Lifecycle, viewport rectangle, and additive-selection mode.
+			//@{
 			bool Active = false;
 			size_t Viewport = 0;
 			glm::vec2 Start{0.0f};
 			glm::vec2 Current{0.0f};
 			bool Add = false;
+			//@}
 		};
 
+		// The active or most recently completed viewport box selection.
 		BoxSelectionAction BoxSelection;
 
 		// Which manipulator the viewport is offering.
@@ -4522,7 +4545,9 @@ namespace studio {
 		// @return `true` when the pointer is over a handle, so the click that
 		//         would otherwise pick is swallowed.
 		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
+		// Draws the orientation control for the selected viewport.
 		void DrawDirectionGizmo(size_t viewport, const PanelProjection &panel);
+		// Draws the editor's world-space cursor in the selected viewport.
 		void DrawCursor(size_t viewport, const PanelProjection &panel);
 
 		// Outlines what every nearby part actually collides as.
@@ -4682,11 +4707,14 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+		// Direction widget, cursor, orbit mode, direction lock, and config drafts.
+		//@{
 		bool ShowDirectionGizmo = true;
 		bool ShowCursor = true;
 		bool OrbitCamera = false;
 		bool DirectionLocked = false;
 		std::unordered_map<std::string, std::string> ComponentConfigDrafts;
+		//@}
 
 		// Whether particle emitters are drawn in Studio viewports. Kept separate
 		// from each emitter's Enabled property so hiding effects is an editor view
@@ -5505,10 +5533,13 @@ namespace studio {
 		// default. Kept outside the plugin folder so updates do not overwrite a
 		// person's choice.
 		std::map<std::string, bool, std::less<>> PluginEnabled;
+		// Persistent-state status and the filesystem reload scan state.
+		//@{
 		bool PluginStateLoaded = false;
 		PluginReloadTracker PluginReloader;
 		std::vector<PluginReloadRoot> PluginReloadRoots;
 		double NextPluginRootScanSeconds = 0.0;
+		//@}
 
 		// The Demo Nodes panel, and everything it holds.
 		//
@@ -5693,8 +5724,11 @@ namespace studio {
 
 		// The selected saved record's diff, cached until selection changes.
 		std::vector<DiffLine> SavedDiffRows;
+		// Source and coarse-mode flag for the cached diff.
+		//@{
 		std::filesystem::path SavedDiffSource;
 		bool SavedDiffCoarse = false;
+		//@}
 
 		// Breakpoints and the captured stacks. See `DrawDebugger`.
 		bool ShowDebugger = false;
@@ -5779,8 +5813,11 @@ namespace studio {
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
 
+		// Global and per-viewport slowly sampled status counters.
+		//@{
 		StatusBarSnapshot StatusBar;
 		std::vector<StatusBarSnapshot> ViewportStatistics;
+		//@}
 
 		// What the frame-graph panel is showing, and when it changes.
 		//
@@ -5910,6 +5947,7 @@ namespace studio {
 			// Driver-private allocations are not portable through SDL, so this is
 			// the payload of the renderer's buffers and textures rather than VRAM.
 			std::vector<float> GpuPlot;
+			// Current logical GPU allocation statistics.
 			engine::render::GpuMemoryStatistics Gpu;
 
 			// Seconds the plot and the growth figures cover.

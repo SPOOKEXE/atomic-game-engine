@@ -140,6 +140,7 @@ namespace nodegraph {
 			Serial = serial;
 		}
 
+		// Reports whether newly ready work runs on the caller.
 		bool IsSerial() const {
 			return Serial;
 		}

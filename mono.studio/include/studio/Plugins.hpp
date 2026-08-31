@@ -294,8 +294,10 @@ namespace studio {
 
 	// Stable text for a dock target and its parser for script/config input.
 	// @since v0.20
+	//@{
 	const char *Describe(PluginDock dock);
 	std::optional<PluginDock> ParsePluginDock(std::string_view text);
+	//@}
 
 	// What a `plugin.json` says.
 	//
@@ -387,6 +389,7 @@ namespace studio {
 	// One named row or column in a plugin toolbar grid.
 	// @since v0.20
 	struct PluginToolbarTrack {
+		// Stable row or column identity.
 		std::string Id;
 
 		// Optional control width for a declared column. Zero keeps each control's
@@ -537,82 +540,112 @@ namespace studio {
 		bool Builtin = false;
 	};
 
-	// The allowed width of one script-created toolbar control.
+	// The allowed width range of one script-created toolbar control.
 	// @since v0.20
+	//@{
 	inline constexpr float PLUGIN_TOOL_MINIMUM_WIDTH = 40.0f;
 	inline constexpr float PLUGIN_TOOL_MAXIMUM_WIDTH = 320.0f;
+	//@}
 
 	// A custom toolbar tab saved by the toolbar editor.
 	// @since v0.20
 	struct ToolbarTabPreference {
+		// Stable identity, presentation, placement, and ordering for the tab.
+		//@{
 		std::string Id;
 		std::string Name;
 		bool Visible = true;
 		bool UserCreated = true;
 		PluginToolbarPlacement Placement = PluginToolbarPlacement::Tabbed;
 		size_t Order = 0;
+		//@}
 	};
 
 	// A person's override for one plugin-owned toolbar item.
 	// @since v0.20
 	struct ToolbarItemPreference {
+		// Stable item identity and the tab receiving it.
+		//@{
 		std::string Key;
 		std::string Tab;
+		//@}
+
+		// Visibility, size, grid placement, and ordering overrides.
+		//@{
 		bool Visible = true;
 		float Width = 92.0f;
 		std::string Row;
 		std::string Column;
 		size_t Order = 0;
+		//@}
 	};
 
 	// Persistent toolbar customization. Plugin declarations remain the defaults
 	// and this sparse list rides over them.
 	// @since v0.20
 	struct ToolbarPreferences {
+		// Sparse tab and item overrides owned by the user.
+		//@{
 		std::vector<ToolbarTabPreference> Tabs;
 		std::vector<ToolbarItemPreference> Items;
+		//@}
 	};
 
 	// One item in the toolbar composed for this frame.
 	// @since v0.20
 	struct ToolbarItemLocation {
+		// Source indices, stable key, width, and composed order for one item.
+		//@{
 		size_t Plugin = 0;
 		size_t Toolbar = 0;
 		size_t Item = 0;
 		std::string Key;
 		float Width = 92.0f;
 		size_t Order = 0;
+		//@}
 	};
 
 	// One grid cell. Multiple items are retained in declaration order if a
 	// plugin deliberately assigns them to the same cell.
 	// @since v0.20
 	struct ToolbarCellView {
+		// The named column and the controls assigned to it.
+		//@{
 		std::string Column;
 		std::vector<ToolbarItemLocation> Items;
+		//@}
 	};
 
 	// One named row in a composed toolbar grid.
 	// @since v0.20
 	struct ToolbarRowView {
+		// The named row and its composed cells.
+		//@{
 		std::string Id;
 		std::vector<ToolbarCellView> Cells;
+		//@}
 	};
 
 	// One visible tab and its visible controls.
 	// @since v0.20
 	struct ToolbarTabView {
+		// Identity, presentation, contents, and ownership of the composed tab.
+		//@{
 		std::string Id;
 		std::string Name;
 		std::vector<ToolbarRowView> Rows;
 		bool UserCreated = false;
+		//@}
 	};
 
 	// The cached toolbar projection drawn by the editor.
 	// @since v0.20
 	struct ToolbarLayoutView {
+		// Permanent rows and selectable tabs in the composed layout.
+		//@{
 		std::vector<ToolbarRowView> PinnedRows;
 		std::vector<ToolbarTabView> Tabs;
+		//@}
 	};
 
 	// Pure toolbar model helpers used by the editor and its suite.
