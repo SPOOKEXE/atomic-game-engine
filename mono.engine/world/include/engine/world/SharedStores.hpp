@@ -25,5 +25,7 @@ namespace engine::world {
 
 		// DataStore's compare-and-set version. MemoryStore values are zero.
 		uint64_t Version = 0;
+
+		bool operator==(const SharedStoreEntry &) const = default;
 	};
 }

@@ -638,6 +638,13 @@ namespace engine::world {
 		// Removes one value from outside the simulation.
 		BusStatus RemoveSharedStoreValue(BusKind store, core::Name key);
 
+		// Replaces a shared key/value store from a validated persistence image.
+		//
+		// The replacement is all-or-nothing. Every row must name `store`, every
+		// key must be valid, keys must be unique, and DataStore versions must be
+		// non-zero. A refusal leaves the current table untouched.
+		BusStatus ReplaceSharedStoreEntries(BusKind store, std::span<const SharedStoreEntry> entries);
+
 		// --- snapshots and replay ------------------------------------------
 
 		// Writes every world, every bus, and the settings behind them.

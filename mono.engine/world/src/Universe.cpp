@@ -507,6 +507,11 @@ namespace engine::world {
 		return Router->RemoveSharedStoreValue(store, key);
 	}
 
+	BusStatus Universe::ReplaceSharedStoreEntries(BusKind store, std::span<const SharedStoreEntry> entries) {
+		RequireDriverThread("ReplaceSharedStoreEntries");
+		return Router->ReplaceSharedStoreEntries(store, entries);
+	}
+
 	// --- snapshots ---------------------------------------------------------
 
 	namespace {

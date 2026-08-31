@@ -67,3 +67,18 @@ TEST_CASE("only shared key value stores accept administration", "[world][shared-
 	CHECK(universe.RemoveSharedStoreValue(BusKind::Teleport, Name("key")) == BusStatus::Unsupported);
 	CHECK(universe.SharedStoreEntries(BusKind::Channel).empty());
 }
+
+TEST_CASE("shared store replacement preserves versions and refuses partial input", "[world][shared-stores]") {
+	Universe universe;
+	const std::vector<engine::world::SharedStoreEntry> replacement{
+		{BusKind::DataStore, Name("a"), Bytes("one"), 4},
+		{BusKind::DataStore, Name("b"), Bytes("two"), 9},
+	};
+	REQUIRE(universe.ReplaceSharedStoreEntries(BusKind::DataStore, replacement) == BusStatus::Ok);
+	CHECK(universe.SharedStoreEntries(BusKind::DataStore) == replacement);
+
+	auto invalid = replacement;
+	invalid[1].Key = invalid[0].Key;
+	CHECK(universe.ReplaceSharedStoreEntries(BusKind::DataStore, invalid) == BusStatus::Unsupported);
+	CHECK(universe.SharedStoreEntries(BusKind::DataStore) == replacement);
+}

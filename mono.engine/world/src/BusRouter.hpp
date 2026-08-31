@@ -158,6 +158,7 @@ namespace engine::world {
 		std::vector<SharedStoreEntry> SharedStoreEntries(BusKind store) const;
 		BusStatus SetSharedStoreValue(BusKind store, core::Name key, std::span<const std::byte> value);
 		BusStatus RemoveSharedStoreValue(BusKind store, core::Name key);
+		BusStatus ReplaceSharedStoreEntries(BusKind store, std::span<const SharedStoreEntry> entries);
 
 		// Empties the backends and everything queued against them.
 		//

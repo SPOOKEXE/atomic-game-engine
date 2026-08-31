@@ -719,6 +719,40 @@ namespace engine::world {
 		return BusStatus::Unsupported;
 	}
 
+	BusStatus BusRouter::ReplaceSharedStoreEntries(BusKind store, std::span<const SharedStoreEntry> entries) {
+		if (store != BusKind::MemoryStore && store != BusKind::DataStore) {
+			return BusStatus::Unsupported;
+		}
+
+		std::unordered_set<uint32_t> keys;
+		keys.reserve(entries.size());
+		for (const SharedStoreEntry &entry : entries) {
+			if (entry.Store != store || !entry.Key.IsValid() || !keys.insert(entry.Key.Id()).second ||
+				(store == BusKind::DataStore && entry.Version == 0) ||
+				(store == BusKind::MemoryStore && entry.Version != 0)) {
+				return BusStatus::Unsupported;
+			}
+		}
+
+		if (store == BusKind::MemoryStore) {
+			std::unordered_map<uint32_t, std::vector<std::byte>> replacement;
+			replacement.reserve(entries.size());
+			for (const SharedStoreEntry &entry : entries) {
+				replacement.emplace(entry.Key.Id(), entry.Value);
+			}
+			Backends.Memory.Values.swap(replacement);
+			return BusStatus::Ok;
+		}
+
+		std::unordered_map<uint32_t, DataBus::Record> replacement;
+		replacement.reserve(entries.size());
+		for (const SharedStoreEntry &entry : entries) {
+			replacement.emplace(entry.Key.Id(), DataBus::Record{entry.Value, entry.Version});
+		}
+		Backends.Data.Records.swap(replacement);
+		return BusStatus::Ok;
+	}
+
 	void BusRouter::Reset() {
 		Backends = Buses{};
 		Applied.clear();
