@@ -67,8 +67,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] build out client settings for enabling/disabling certain features to help performance (editablemesh, editableimage, etc). make it LIVE so you can change it in-game.
 - [_] add a ESC settings menu to the client and in studio client. add the client settings to it.
 - [_] add a way for scripts to modify the ESC menu.
-
 - [_] gamepad and joystick support
+- [_] completely move to vulkan and establish cross platform supports.
+
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
