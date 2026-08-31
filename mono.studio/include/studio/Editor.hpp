@@ -62,6 +62,7 @@
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
@@ -921,6 +922,9 @@ namespace studio {
 		// `FocusedViewport`.
 		void ResolveFocusedViewport();
 		void DrawProperties();
+		void DrawShaderCapabilities(
+			Entity shader, const engine::scene::ShaderSource &source, engine::core::Name name
+		);
 		void DrawComponents();
 		void DrawUniverseProperties();
 
@@ -3301,6 +3305,11 @@ namespace studio {
 		// caches over process-wide names, and `Refresh` takes whichever world
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
+		engine::render::ShaderCompiler ShaderInspector;
+		engine::render::ShaderCompilation InspectedShader;
+		WorldId InspectedShaderWorld;
+		Entity InspectedShaderEntity;
+		uint32_t InspectedShaderRevision = 0;
 
 		// **What an `EditableMesh` a script built converts into and uploads.**
 		//

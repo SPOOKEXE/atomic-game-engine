@@ -2,6 +2,8 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/render/ShaderCompiler.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
@@ -10,6 +12,7 @@
 #include <array>
 #include <cstring>
 #include <imgui.h>
+#include <optional>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PropertySelection.hpp>
@@ -169,6 +172,95 @@ namespace studio {
 				return false;
 			}
 			return false;
+		}
+	}
+
+	void Editor::DrawShaderCapabilities(
+		Entity shader, const engine::scene::ShaderSource &source, engine::core::Name name
+	) {
+		if (InspectedShaderWorld != SelectionWorld || InspectedShaderEntity != shader ||
+			InspectedShaderRevision != source.Revision) {
+			ShaderInspector.SetOptimise(true);
+			InspectedShader =
+				ShaderInspector.Compile(source.Code, engine::render::ShaderStage::Fragment, name.Text());
+			InspectedShaderWorld = SelectionWorld;
+			InspectedShaderEntity = shader;
+			InspectedShaderRevision = source.Revision;
+		}
+
+		ImGui::SeparatorText("Shader capabilities");
+		if (InspectedShader.Failed) {
+			ImGui::TextWrapped("Compile failed: %s", InspectedShader.Error.c_str());
+			return;
+		}
+
+		const engine::render::ShaderCapabilities &caps = InspectedShader.Capabilities;
+		ImGui::Text(
+			"%s, %u instructions, %.2f KiB SPIR-V",
+			engine::render::Describe(caps.Stage),
+			caps.Instructions,
+			static_cast<double>(caps.SpirVBytes) / 1024.0
+		);
+		ImGui::TextDisabled(
+			"static estimate: %u arithmetic, %u texture, %u memory, %u control flow",
+			caps.ArithmeticInstructions,
+			caps.TextureInstructions,
+			caps.MemoryInstructions,
+			caps.ControlFlowInstructions
+		);
+		ImGui::TextDisabled(
+			"%u inputs, %u outputs, %zu resources, %llu minimum buffer bytes",
+			caps.Inputs,
+			caps.Outputs,
+			caps.Resources.size(),
+			static_cast<unsigned long long>(caps.DeclaredBufferBytes)
+		);
+		if (!caps.RequiredCapabilities.empty()) {
+			ImGui::TextDisabled("SPIR-V capabilities:");
+			for (const uint32_t capability : caps.RequiredCapabilities) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("[%s]", engine::render::ShaderCapabilityName(capability).c_str());
+			}
+		}
+		if (caps.Stage == engine::render::ShaderStage::Compute) {
+			ImGui::TextDisabled("workgroup: %u x %u x %u", caps.WorkgroupX, caps.WorkgroupY, caps.WorkgroupZ);
+		}
+
+		if (!caps.Resources.empty() &&
+			ImGui::BeginTable(
+				"##shader-resources", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+			)) {
+			ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, 54.0f);
+			ImGui::TableSetupColumn("Min bytes", ImGuiTableColumnFlags_WidthFixed, 74.0f);
+			ImGui::TableHeadersRow();
+			for (const engine::render::ShaderResourceEstimate &resource : caps.Resources) {
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::TextUnformatted(resource.Name.c_str());
+				ImGui::TableSetColumnIndex(1);
+				ImGui::TextUnformatted(engine::render::Describe(resource.Kind));
+				ImGui::TableSetColumnIndex(2);
+				ImGui::Text("%u:%u", resource.Set, resource.Binding);
+				ImGui::TableSetColumnIndex(3);
+				if (resource.MinimumBytes > 0) {
+					ImGui::Text("%llu", static_cast<unsigned long long>(resource.MinimumBytes));
+				} else {
+					ImGui::TextDisabled("runtime");
+				}
+			}
+			ImGui::EndTable();
+		}
+
+		for (const engine::render::ShaderOptimizationStep &step : InspectedShader.Optimizations) {
+			ImGui::BulletText(
+				"%s: %u -> %u instructions%s",
+				engine::render::Describe(step.Kind),
+				step.BeforeInstructions,
+				step.AfterInstructions,
+				step.Changed ? "" : " (no opportunity)"
+			);
 		}
 	}
 
@@ -630,6 +722,12 @@ namespace studio {
 			bool Wanted = false;
 		};
 		Edit edit;
+		struct SelectedShader {
+			Entity Instance;
+			engine::scene::ShaderSource Source;
+			Name Label;
+		};
+		std::optional<SelectedShader> selectedShader;
 
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 		Universe->Enter(SelectionWorld, [&](Store &store) {
@@ -680,6 +778,12 @@ namespace studio {
 			}
 
 			ImGui::Separator();
+			if (Selection.size() == 1 && oneClass && primaryClass == engine::scene::ShaderScriptClass()) {
+				if (const engine::scene::ShaderSource *source =
+						store.Get<engine::scene::ShaderSource>(*primary)) {
+					selectedShader = SelectedShader{*primary, *source, store.InstanceNameOf(*primary)};
+				}
+			}
 
 			const std::vector<SelectionPropertyGroup> groups = BuildPropertySelection(store, Selection);
 
@@ -1112,6 +1216,9 @@ namespace studio {
 				ImGui::EndTable();
 			}
 		});
+		if (selectedShader) {
+			DrawShaderCapabilities(selectedShader->Instance, selectedShader->Source, selectedShader->Label);
+		}
 
 		// **Drawn at the window's root, which is the only place its id
 		// matches the `OpenPopup` beside it.** See the `...` button for why
