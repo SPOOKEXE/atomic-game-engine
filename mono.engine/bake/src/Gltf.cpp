@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -349,12 +350,60 @@ namespace engine::bake {
 			}
 		}
 
+		uint16_t ReadJointComponent(const Accessor &accessor, uint32_t element, uint32_t component) {
+			const std::byte *base = accessor.Data + static_cast<size_t>(element) * accessor.Stride +
+									static_cast<size_t>(component) * SizeOfComponent(accessor.ComponentType);
+			if (accessor.ComponentType == UNSIGNED_BYTE) {
+				return static_cast<uint8_t>(*base);
+			}
+
+			uint16_t value = 0;
+			std::memcpy(&value, base, sizeof(uint16_t));
+			return value;
+		}
+
+		bool
+		ReadWeights(const Accessor &accessor, uint32_t element, uint16_t (&out)[4], std::string &failure) {
+			std::array<double, 4> weights{};
+			double total = 0.0;
+			size_t largest = 0;
+			for (size_t influence = 0; influence < weights.size(); influence++) {
+				const float value = ReadFloatComponent(accessor, element, static_cast<uint32_t>(influence));
+				if (!std::isfinite(value) || value < 0.0f) {
+					failure = "gltf: skin weight is negative or non-finite";
+					return false;
+				}
+				weights[influence] = value;
+				total += value;
+				if (weights[influence] > weights[largest]) {
+					largest = influence;
+				}
+			}
+			if (total <= 0.0) {
+				failure = "gltf: skinned vertex has no weight";
+				return false;
+			}
+
+			int32_t quantizedTotal = 0;
+			for (size_t influence = 0; influence < weights.size(); influence++) {
+				out[influence] = static_cast<uint16_t>(std::lround(weights[influence] / total * 65535.0));
+				quantizedTotal += out[influence];
+			}
+			const int32_t corrected = static_cast<int32_t>(out[largest]) + 65535 - quantizedTotal;
+			if (corrected < 0 || corrected > 65535) {
+				failure = "gltf: skin weights cannot be normalized";
+				return false;
+			}
+			out[largest] = static_cast<uint16_t>(corrected);
+			return true;
+		}
+
 		// One primitive of one node, flattened.
 		struct Piece {
 			size_t MeshIndex = 0;
 			size_t PrimitiveIndex = 0;
 			Matrix Transform;
-			bool Skinned = false;
+			size_t SkinIndex = std::numeric_limits<size_t>::max();
 		};
 
 		// Walks the scene, recording every mesh primitive with the transform it
@@ -393,8 +442,11 @@ namespace engine::bake {
 							Piece piece;
 							piece.MeshIndex = meshIndex;
 							piece.PrimitiveIndex = primitive;
-							piece.Skinned = node.contains("skin");
-							piece.Transform = piece.Skinned ? Matrix{} : here;
+							if (node.contains("skin")) {
+								piece.SkinIndex = node["skin"].get<size_t>();
+							}
+							piece.Transform =
+								piece.SkinIndex != std::numeric_limits<size_t>::max() ? Matrix{} : here;
 							pieces.push_back(piece);
 						}
 					}
@@ -509,6 +561,7 @@ namespace engine::bake {
 		}
 
 		ImportedModel imported;
+		size_t importedSkin = std::numeric_limits<size_t>::max();
 
 		// Material index to where its texture landed in `Textures`, so a
 		// texture used by three materials is named once.
@@ -516,6 +569,28 @@ namespace engine::bake {
 
 		for (const Piece &piece : pieces) {
 			const json &primitive = document["meshes"][piece.MeshIndex]["primitives"][piece.PrimitiveIndex];
+			const bool skinned = piece.SkinIndex != std::numeric_limits<size_t>::max();
+			uint16_t jointCount = 0;
+			if (skinned) {
+				if (!document.contains("skins") || !document["skins"].is_array() ||
+					piece.SkinIndex >= document["skins"].size()) {
+					failure = "gltf: skin index out of range";
+					return false;
+				}
+				const json &skin = document["skins"][piece.SkinIndex];
+				if (!skin.contains("joints") || !skin["joints"].is_array() || skin["joints"].empty() ||
+					skin["joints"].size() > assets::Mesh::MAXIMUM_JOINTS) {
+					failure = "gltf: skin has no joints or exceeds the palette ceiling";
+					return false;
+				}
+				if (importedSkin != std::numeric_limits<size_t>::max() && importedSkin != piece.SkinIndex) {
+					failure = "gltf: one imported mesh cannot contain more than one skin";
+					return false;
+				}
+				importedSkin = piece.SkinIndex;
+				jointCount = static_cast<uint16_t>(skin["joints"].size());
+				imported.Mesh.JointCount = jointCount;
+			}
 
 			// Mode 4 is triangles. The strip and fan modes are a different
 			// index expansion and the line and point modes are not geometry
@@ -559,6 +634,44 @@ namespace engine::bake {
 					document, primitive["attributes"]["TEXCOORD_0"].get<size_t>(), binary, texCoords, failure
 				);
 
+			const bool hasJoints = primitive["attributes"].contains("JOINTS_0");
+			const bool hasWeights = primitive["attributes"].contains("WEIGHTS_0");
+			if (hasJoints != hasWeights || skinned != hasJoints) {
+				failure = "gltf: a skinned primitive requires matching JOINTS_0 and WEIGHTS_0 attributes";
+				return false;
+			}
+
+			Accessor joints;
+			Accessor weights;
+			if (skinned) {
+				if (!Resolve(
+						document, primitive["attributes"]["JOINTS_0"].get<size_t>(), binary, joints, failure
+					) ||
+					!Resolve(
+						document, primitive["attributes"]["WEIGHTS_0"].get<size_t>(), binary, weights, failure
+					)) {
+					return false;
+				}
+				if (joints.Components != 4 ||
+					(joints.ComponentType != UNSIGNED_BYTE && joints.ComponentType != UNSIGNED_SHORT) ||
+					joints.Normalised) {
+					failure = "gltf: JOINTS_0 must be an unnormalized unsigned VEC4";
+					return false;
+				}
+				const bool validWeightType =
+					weights.ComponentType == FLOAT ||
+					((weights.ComponentType == UNSIGNED_BYTE || weights.ComponentType == UNSIGNED_SHORT) &&
+					 weights.Normalised);
+				if (weights.Components != 4 || !validWeightType) {
+					failure = "gltf: WEIGHTS_0 must be a float or normalized unsigned VEC4";
+					return false;
+				}
+				if (joints.Count != positions.Count || weights.Count != positions.Count) {
+					failure = "gltf: skin attribute counts do not match POSITION";
+					return false;
+				}
+			}
+
 			const uint32_t firstVertex = static_cast<uint32_t>(imported.Mesh.Vertices.size());
 			if (static_cast<uint64_t>(firstVertex) + positions.Count > MAXIMUM_IMPORTED_VERTICES) {
 				failure = "gltf: model has more vertices than the format can hold";
@@ -594,6 +707,19 @@ namespace engine::bake {
 				if (haveTexCoords && index < texCoords.Count) {
 					vertex.TexCoord[0] = ReadFloatComponent(texCoords, index, 0);
 					vertex.TexCoord[1] = ReadFloatComponent(texCoords, index, 1);
+				}
+
+				if (skinned) {
+					for (uint32_t influence = 0; influence < 4; influence++) {
+						vertex.Joints[influence] = ReadJointComponent(joints, index, influence);
+						if (vertex.Joints[influence] >= jointCount) {
+							failure = "gltf: joint index is outside the skin palette";
+							return false;
+						}
+					}
+					if (!ReadWeights(weights, index, vertex.Weights, failure)) {
+						return false;
+					}
 				}
 
 				imported.Mesh.Vertices.push_back(vertex);
