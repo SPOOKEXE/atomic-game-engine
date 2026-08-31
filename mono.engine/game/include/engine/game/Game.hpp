@@ -95,7 +95,10 @@ namespace engine::game {
 	//
 	// @since v0.21
 	struct UniverseCdn {
+		// User-facing source name.
 		std::string Name;
+
+		// Origin URL or location passed to the content adapter.
 		std::string Location;
 	};
 
@@ -110,7 +113,11 @@ namespace engine::game {
 		// The network capability and origins the exported universe requests.
 		// Loading the document never grants this capability by itself.
 		bool HttpEnabled = false;
+
+		// Public key expected to sign content manifests from these origins.
 		std::string PublisherKey;
+
+		// Remote processed-content origins declared by the manifest.
 		std::vector<UniverseCdn> Cdns;
 	};
 
@@ -144,8 +151,14 @@ namespace engine::game {
 		// Capabilities and remote content locations requested by a multi-file
 		// manifest. A product must ask before enabling them.
 		bool HttpEnabled = false;
+
+		// Whether unlisted worlds were requested for recursive discovery.
 		bool RecursiveWorldDiscovery = false;
+
+		// Public key expected to sign declared remote content.
 		std::string PublisherKey;
+
+		// Remote processed-content origins requested by the universe.
 		std::vector<UniverseCdn> Cdns;
 	};
 

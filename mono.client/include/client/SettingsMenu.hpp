@@ -16,6 +16,7 @@ namespace engine::render {
 
 namespace client {
 
+	// What activating the selected settings-menu row asked the client to do.
 	enum class SettingsMenuResult {
 		None,
 		Changed,
@@ -24,25 +25,40 @@ namespace client {
 		Quit,
 	};
 
+	// The result and optional script action produced by one activation.
 	struct SettingsMenuActivation {
+		// The built-in operation selected by the row.
 		SettingsMenuResult Result = SettingsMenuResult::None;
+
+		// The script action identifier when `Result` is `Action`.
 		engine::core::Name Action;
 	};
 
+	// Keyboard navigation state for the shipped client's ESC settings menu.
 	class SettingsMenu {
 	  public:
+		// The number of built-in presentation capability toggles.
 		static constexpr size_t BUILTIN_TOGGLES = 4;
+
+		// The number of fixed rows, including close and quit.
 		static constexpr size_t FIXED_ROWS = 6;
 
+		// Opens a closed menu or closes an open one.
 		void Toggle();
+
+		// Moves the selected row with wraparound.
 		void Move(int direction, size_t actionCount = 0);
+
+		// Activates the selected built-in or script-authored row.
 		SettingsMenuActivation
 		Activate(Options &settings, std::span<const engine::gui::SettingsMenuAction> actions = {});
 
+		// Reports whether the menu currently owns keyboard navigation.
 		bool IsOpen() const {
 			return Open;
 		}
 
+		// Returns the selected row after accounting for script-authored actions.
 		size_t Selected(size_t actionCount = 0) const {
 			return Selection % (FIXED_ROWS + actionCount);
 		}

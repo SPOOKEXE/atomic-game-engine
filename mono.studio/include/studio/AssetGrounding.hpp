@@ -34,8 +34,13 @@ namespace studio {
 	//
 	// @since v0.21
 	struct GroundedAssetRequest {
+		// Verified catalogue row being copied.
 		engine::assets::AssetEntry Entry;
+
+		// Delivery request currently fetching the row.
 		engine::delivery::RequestId Request;
+
+		// Whether the processed payload has reached the destination.
 		bool Complete = false;
 	};
 
@@ -43,18 +48,43 @@ namespace studio {
 	//
 	// @since v0.21
 	struct AssetGrounding {
+		// Destination `assets/` store root.
 		std::filesystem::path Destination;
+
+		// Current incremental operation phase.
 		AssetGroundingState State = AssetGroundingState::Idle;
+
+		// Destination chunk store once opened.
 		std::optional<engine::assets::ChunkStore> Store;
+
+		// Verified catalogue being grounded.
 		std::optional<engine::assets::Manifest> Catalogue;
+
+		// Catalogue signature copied beside the processed store.
 		engine::assets::SignatureBytes Signature;
+
+		// Per-asset delivery requests.
 		std::vector<GroundedAssetRequest> Requests;
+
+		// Number of completed processed requests.
 		size_t Completed = 0;
+
+		// Raw authoring roots copied when requested.
 		std::vector<std::filesystem::path> RawSources;
+
+		// Current raw source index.
 		size_t RawSource = 0;
+
+		// Current raw source root and destination.
+		//@{
 		std::filesystem::path RawRoot;
 		std::filesystem::path RawDestination;
+		//@}
+
+		// Incremental iterator over the current raw source.
 		std::filesystem::recursive_directory_iterator RawIterator;
+
+		// Human-readable failure when the state is `Failed`.
 		std::string Error;
 	};
 

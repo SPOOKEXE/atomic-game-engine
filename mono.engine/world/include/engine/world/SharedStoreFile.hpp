@@ -17,18 +17,23 @@
 #include <vector>
 
 namespace engine::world {
+	// The isolated local provider namespace selected for a store image.
 	enum class SharedStoreEnvironment {
 		Mock,
 		Live,
 	};
 
+	// Returns the lowercase directory spelling of an environment.
 	const char *Describe(SharedStoreEnvironment environment);
+
+	// Parses a mock or live environment name.
 	std::optional<SharedStoreEnvironment> SharedStoreEnvironmentOf(std::string_view text);
 
 	// Resolves `<root>/mock|live/datastore.bin` or `memorystore.bin`.
 	std::filesystem::path
 	SharedStorePath(const std::filesystem::path &root, SharedStoreEnvironment environment, BusKind store);
 
+	// The result of reading or writing one shared-store image.
 	enum class SharedStoreFileStatus {
 		Ok,
 		NotFound,
@@ -37,6 +42,7 @@ namespace engine::world {
 		WrongStore,
 	};
 
+	// Returns a diagnostic spelling for a file operation result.
 	const char *Describe(SharedStoreFileStatus status);
 
 	// Atomically writes one MemoryStore or DataStore image.

@@ -34,9 +34,13 @@ namespace engine::script {
 
 	// The result of creating and optionally parenting one script instance.
 	struct InstanceCreateResult {
+		// The created entity, or null on failure.
 		ecs::Entity Instance = ecs::NULL_ENTITY;
+
+		// Why creation failed, or `None` on success.
 		InstanceCreateFailure Failure = InstanceCreateFailure::None;
 
+		// Reports whether a live entity was created without a failure.
 		explicit operator bool() const {
 			return Instance != ecs::NULL_ENTITY && Failure == InstanceCreateFailure::None;
 		}

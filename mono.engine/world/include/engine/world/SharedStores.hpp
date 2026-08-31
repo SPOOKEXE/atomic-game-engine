@@ -19,13 +19,19 @@ namespace engine::world {
 
 	// One copied shared-store value.
 	struct SharedStoreEntry {
+		// Which shared store owns the row.
 		BusKind Store = BusKind::MemoryStore;
+
+		// Stable string-backed key.
 		core::Name Key;
+
+		// Opaque encoded value bytes.
 		std::vector<std::byte> Value;
 
 		// DataStore's compare-and-set version. MemoryStore values are zero.
 		uint64_t Version = 0;
 
+		// Compares every persisted field.
 		bool operator==(const SharedStoreEntry &) const = default;
 	};
 }

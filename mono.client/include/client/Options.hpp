@@ -64,8 +64,14 @@ namespace client {
 		// Live presentation capabilities exposed in the ESC settings menu.
 		// Disabling one stops its per-frame preparation immediately.
 		bool EnableEditableMeshes = true;
+
+		// Whether EditableImage uploads are prepared and presented.
 		bool EnableEditableImages = true;
+
+		// Whether particle simulation and presentation are enabled.
 		bool EnableParticles = true;
+
+		// Whether post-processing render-graph passes are enabled.
 		bool EnablePostProcessing = true;
 
 		// -1 runs until the window is closed. A frame budget is what makes the
