@@ -182,7 +182,7 @@ namespace client {
 			ENGINE_INFO("scene from {}", Settings.ScriptPath);
 		}
 
-		if (!SDL_Init(SDL_INIT_VIDEO)) {
+		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
 		}
@@ -1294,6 +1294,14 @@ namespace client {
 		// windowed run never takes. One path, whether or not anybody is
 		// watching it.
 		Renderer.Shutdown();
+		for (SDL_Gamepad *gamepad : Gamepads) {
+			SDL_CloseGamepad(gamepad);
+		}
+		Gamepads.clear();
+		for (SDL_Joystick *joystick : Joysticks) {
+			SDL_CloseJoystick(joystick);
+		}
+		Joysticks.clear();
 		if (Window) {
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -1696,6 +1704,19 @@ namespace client {
 		// `scene::InputState`. `LatchPresses` is that latch for every key, in
 		// the state both the client and the studio already share.
 		state->LatchPresses();
+
+		if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+			controllers != nullptr) {
+			uint32_t latched[engine::scene::MAX_CONTROLLERS] = {};
+			for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+				latched[index] = controllers->Slots[index].PressedButtons;
+			}
+			*controllers = Input.Controllers();
+			for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+				controllers->Slots[index].PressedButtons |= latched[index];
+			}
+			controllers->LatchPresses();
+		}
 	}
 
 	void Client::SubmitMove(double nowSeconds) {
@@ -1785,6 +1806,10 @@ namespace client {
 			Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
 				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
 					input->ConsumeKeyTaps();
+				}
+				if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+					controllers != nullptr) {
+					controllers->ConsumeTaps();
 				}
 			});
 		}
@@ -1877,6 +1902,36 @@ namespace client {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_JOYSTICK_ADDED) {
+					if (SDL_IsGamepad(event.jdevice.which)) {
+						if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.jdevice.which); gamepad != nullptr) {
+							Gamepads.push_back(gamepad);
+							SDL_Event mapped = event;
+							mapped.type = SDL_EVENT_GAMEPAD_ADDED;
+							mapped.gdevice.which = event.jdevice.which;
+							Input.HandleEvent(mapped);
+						} else {
+							ENGINE_WARN("could not open gamepad {}: {}", event.jdevice.which, SDL_GetError());
+						}
+					} else if (SDL_Joystick *joystick = SDL_OpenJoystick(event.jdevice.which);
+							   joystick != nullptr) {
+						Joysticks.push_back(joystick);
+					} else {
+						ENGINE_WARN("could not open joystick {}: {}", event.jdevice.which, SDL_GetError());
+					}
+				}
+				if (event.type == SDL_EVENT_JOYSTICK_REMOVED) {
+					std::erase_if(Gamepads, [&event](SDL_Gamepad *gamepad) {
+						if (SDL_GetGamepadID(gamepad) != event.jdevice.which) return false;
+						SDL_CloseGamepad(gamepad);
+						return true;
+					});
+					std::erase_if(Joysticks, [&event](SDL_Joystick *joystick) {
+						if (SDL_GetJoystickID(joystick) != event.jdevice.which) return false;
+						SDL_CloseJoystick(joystick);
+						return true;
+					});
+				}
 				if (event.type == SDL_EVENT_WINDOW_EXPOSED || event.type == SDL_EVENT_WINDOW_SHOWN ||
 					event.type == SDL_EVENT_WINDOW_RESTORED || event.type == SDL_EVENT_WINDOW_RESIZED ||
 					event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {

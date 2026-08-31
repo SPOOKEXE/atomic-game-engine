@@ -319,6 +319,7 @@ namespace client {
 		// to keep this machine's keyboard and this machine's camera in a world
 		// whose every other row is somebody else's answer.
 		store.SetResource(engine::scene::InputState{});
+		store.SetResource(engine::scene::ControllerState{});
 		store.SetResource(engine::scene::CameraController{});
 
 		// **First in the phase, because everything below is derived from it.**

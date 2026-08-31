@@ -65,7 +65,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] build out live client presentation settings: EditableMesh and EditableImage uploads, particles and post-processing can be disabled by config/CLI and toggled in-game without restarting.
 - [x] add a ESC settings menu to the client and in studio client. add the client settings to it.
 - [x] let client Luau and JavaScript add, relabel, remove and activate named ESC menu actions through SettingsService; the ECS owns the bounded action list and both standalone and Studio Play render it.
-- [_] gamepad and joystick support
+- [x] add gamepad and joystick support: SDL mapped pads and raw joysticks occupy eight stable world slots; normalized buttons, sticks, triggers and hats drive movement, camera, jump and firing in the client and Studio Play; Luau and JavaScript receive matching polling APIs, connection signals, input edges and analog changes.
 - [_] completely move to vulkan and establish cross platform supports.
 - [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
 - [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips

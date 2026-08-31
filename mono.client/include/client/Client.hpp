@@ -57,6 +57,8 @@
 #include <vector>
 
 struct SDL_Window;
+struct SDL_Gamepad;
+struct SDL_Joystick;
 
 namespace client {
 
@@ -484,6 +486,8 @@ namespace client {
 		// for the frame graph", and this is "is W held". `input/Translate.hpp`
 		// carries the split.
 		engine::input::Translator Input;
+		std::vector<SDL_Gamepad *> Gamepads;
+		std::vector<SDL_Joystick *> Joysticks;
 
 		// What the window was last told about the pointer.
 		//

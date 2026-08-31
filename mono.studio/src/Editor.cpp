@@ -38,6 +38,7 @@
 // that genuinely wants the type - `PanelSink` below installs itself into
 // `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
 // `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
 
 #include <spdlog/logger.h>
@@ -330,6 +331,7 @@ namespace studio {
 	// empty until start-up would make every panel lookup in those a bounds check
 	// that returns null rather than the main viewport's neighbour.
 	Editor::Editor() {
+		PlayedInput = std::make_unique<PlayedInputAdapter>();
 		ResizeViewports(DEFAULT_EXTRA_VIEWPORTS);
 	}
 
@@ -462,7 +464,7 @@ namespace studio {
 			ENGINE_INFO("assets from {}", Settings.Assets.string());
 		}
 
-		if (!SDL_Init(SDL_INIT_VIDEO)) {
+		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
 		}
@@ -809,6 +811,12 @@ namespace studio {
 		GameInterface.Shutdown();
 		Interface.Shutdown();
 		Renderer.Shutdown();
+		for (SDL_Gamepad *gamepad : PlayedInput->Gamepads)
+			SDL_CloseGamepad(gamepad);
+		PlayedInput->Gamepads.clear();
+		for (SDL_Joystick *joystick : PlayedInput->Joysticks)
+			SDL_CloseJoystick(joystick);
+		PlayedInput->Joysticks.clear();
 
 		if (Window != nullptr) {
 			SDL_DestroyWindow(Window);
@@ -1006,6 +1014,7 @@ namespace studio {
 
 	void Editor::PumpEvents() {
 		ENGINE_PROFILE("pump events");
+		PlayedInput->Translator.BeginFrame();
 
 		// **The clock read once per pump rather than once per event.** Every
 		// input kind below set `LastInputSeconds` from `Clock::Seconds()`, and a
@@ -1022,6 +1031,32 @@ namespace studio {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_JOYSTICK_ADDED) {
+					if (SDL_IsGamepad(event.jdevice.which)) {
+						if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.jdevice.which); gamepad != nullptr) {
+							PlayedInput->Gamepads.push_back(gamepad);
+							SDL_Event mapped = event;
+							mapped.type = SDL_EVENT_GAMEPAD_ADDED;
+							mapped.gdevice.which = event.jdevice.which;
+							PlayedInput->Translator.HandleEvent(mapped);
+						}
+					} else if (SDL_Joystick *joystick = SDL_OpenJoystick(event.jdevice.which);
+							   joystick != nullptr) {
+						PlayedInput->Joysticks.push_back(joystick);
+					}
+				}
+				if (event.type == SDL_EVENT_JOYSTICK_REMOVED) {
+					std::erase_if(PlayedInput->Gamepads, [&event](SDL_Gamepad *gamepad) {
+						if (SDL_GetGamepadID(gamepad) != event.jdevice.which) return false;
+						SDL_CloseGamepad(gamepad);
+						return true;
+					});
+					std::erase_if(PlayedInput->Joysticks, [&event](SDL_Joystick *joystick) {
+						if (SDL_GetJoystickID(joystick) != event.jdevice.which) return false;
+						SDL_CloseJoystick(joystick);
+						return true;
+					});
+				}
 				// **A span per event kind**, because a pump that is slow says
 				// nothing about why: a window resize is a synchronous round trip to
 				// the window system and a keystroke is not, and one bar covering
@@ -1035,6 +1070,7 @@ namespace studio {
 				// program that filtered first would have a script editor that never
 				// received the letter W because the camera was listening for it.
 				Interface.ProcessEvent(event);
+				PlayedInput->Translator.HandleEvent(event);
 
 				if (PendingControlClick.has_value() && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
 					event.button.windowID == SDL_GetWindowID(Window) &&

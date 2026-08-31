@@ -1,8 +1,16 @@
 #include <engine/core/Log.hpp>
 #include <engine/input/Translate.hpp>
 
+#include <SDL3/SDL_gamepad.h>
+
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+
 namespace engine::input {
 
+	using scene::ControllerAxis;
+	using scene::ControllerButton;
 	using scene::KeyCode;
 	using scene::MouseButton;
 
@@ -151,6 +159,74 @@ namespace engine::input {
 	}
 
 	namespace {
+		constexpr float AXIS_DEADZONE = 0.12f;
+
+		float AxisValue(int16_t value, bool trigger = false) {
+			const float normalized = trigger ? std::max(0.0f, static_cast<float>(value) / 32767.0f)
+											 : std::max(-1.0f, static_cast<float>(value) / 32767.0f);
+			if (trigger) {
+				return normalized < AXIS_DEADZONE ? 0.0f : normalized;
+			}
+			const float magnitude = std::abs(normalized);
+			return magnitude < AXIS_DEADZONE
+					   ? 0.0f
+					   : std::copysign((magnitude - AXIS_DEADZONE) / (1.0f - AXIS_DEADZONE), normalized);
+		}
+
+		ControllerButton GamepadButtonOf(uint8_t button) {
+			switch (button) {
+			case SDL_GAMEPAD_BUTTON_SOUTH:
+				return ControllerButton::A;
+			case SDL_GAMEPAD_BUTTON_EAST:
+				return ControllerButton::B;
+			case SDL_GAMEPAD_BUTTON_WEST:
+				return ControllerButton::X;
+			case SDL_GAMEPAD_BUTTON_NORTH:
+				return ControllerButton::Y;
+			case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
+				return ControllerButton::LeftShoulder;
+			case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
+				return ControllerButton::RightShoulder;
+			case SDL_GAMEPAD_BUTTON_LEFT_STICK:
+				return ControllerButton::LeftStick;
+			case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
+				return ControllerButton::RightStick;
+			case SDL_GAMEPAD_BUTTON_START:
+				return ControllerButton::Start;
+			case SDL_GAMEPAD_BUTTON_BACK:
+				return ControllerButton::Select;
+			case SDL_GAMEPAD_BUTTON_DPAD_UP:
+				return ControllerButton::DPadUp;
+			case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+				return ControllerButton::DPadDown;
+			case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+				return ControllerButton::DPadLeft;
+			case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
+				return ControllerButton::DPadRight;
+			default:
+				return ControllerButton::Count;
+			}
+		}
+
+		ControllerAxis GamepadAxisOf(uint8_t axis) {
+			switch (axis) {
+			case SDL_GAMEPAD_AXIS_LEFTX:
+				return ControllerAxis::LeftX;
+			case SDL_GAMEPAD_AXIS_LEFTY:
+				return ControllerAxis::LeftY;
+			case SDL_GAMEPAD_AXIS_RIGHTX:
+				return ControllerAxis::RightX;
+			case SDL_GAMEPAD_AXIS_RIGHTY:
+				return ControllerAxis::RightY;
+			case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
+				return ControllerAxis::LeftTrigger;
+			case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
+				return ControllerAxis::RightTrigger;
+			default:
+				return ControllerAxis::Count;
+			}
+		}
+
 		// The mouse button an SDL index names, or `Count` for one this engine has
 		// no name for. Side buttons exist and are not exposed, because a name that
 		// mapped to nothing would be offering completion for a button no test has
@@ -195,13 +271,168 @@ namespace engine::input {
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
 
+		for (scene::ControllerSlot &slot : ControllerCurrent.Slots) {
+			slot.PreviousButtons = slot.Buttons;
+			slot.PreviousConnected = slot.Connected;
+			slot.PressedButtons = 0;
+			std::copy(std::begin(slot.Axes), std::end(slot.Axes), std::begin(slot.PreviousAxes));
+		}
+
 		// A delta like the two above it: a character was typed once, and there
 		// is no previous value for it to be an edge against.
 		Typed.clear();
 	}
 
 	bool Translator::HandleEvent(const SDL_Event &event) {
+		auto findSlot = [this](uint32_t id) -> size_t {
+			for (size_t index = 0; index < scene::MAX_CONTROLLERS; index++) {
+				if (ControllerIds[index] == id) {
+					return index;
+				}
+			}
+			return scene::MAX_CONTROLLERS;
+		};
+		auto connect = [this, &findSlot](uint32_t id, bool mapped) -> size_t {
+			size_t slot = findSlot(id);
+			if (slot == scene::MAX_CONTROLLERS) {
+				for (size_t index = 0; index < scene::MAX_CONTROLLERS; index++) {
+					if (ControllerIds[index] == 0) {
+						slot = index;
+						ControllerIds[index] = id;
+						break;
+					}
+				}
+			}
+			if (slot != scene::MAX_CONTROLLERS) {
+				ControllerCurrent.Slots[slot].Connected = true;
+				ControllerCurrent.Slots[slot].Mapped = mapped || ControllerCurrent.Slots[slot].Mapped;
+			}
+			return slot;
+		};
+
 		switch (event.type) {
+		case SDL_EVENT_GAMEPAD_ADDED:
+			return connect(event.gdevice.which, true) != scene::MAX_CONTROLLERS;
+		case SDL_EVENT_JOYSTICK_ADDED:
+			return connect(event.jdevice.which, false) != scene::MAX_CONTROLLERS;
+		case SDL_EVENT_GAMEPAD_REMOVED:
+		case SDL_EVENT_JOYSTICK_REMOVED: {
+			const uint32_t id =
+				event.type == SDL_EVENT_GAMEPAD_REMOVED ? event.gdevice.which : event.jdevice.which;
+			const size_t slot = findSlot(id);
+			if (slot == scene::MAX_CONTROLLERS) return false;
+			ControllerCurrent.Slots[slot].Buttons = 0;
+			std::fill(
+				std::begin(ControllerCurrent.Slots[slot].Axes),
+				std::end(ControllerCurrent.Slots[slot].Axes),
+				0.0f
+			);
+			ControllerCurrent.Slots[slot].Connected = false;
+			ControllerCurrent.Slots[slot].Mapped = false;
+			ControllerIds[slot] = 0;
+			return true;
+		}
+		case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+		case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+			const size_t slot = findSlot(event.gbutton.which);
+			const ControllerButton button = GamepadButtonOf(event.gbutton.button);
+			if (slot == scene::MAX_CONTROLLERS || button == ControllerButton::Count) return false;
+			const uint32_t bit = 1u << static_cast<uint8_t>(button);
+			if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+				if ((ControllerCurrent.Slots[slot].Buttons & bit) == 0) {
+					ControllerCurrent.Slots[slot].PressedButtons |= bit;
+				}
+				ControllerCurrent.Slots[slot].Buttons |= bit;
+			} else {
+				ControllerCurrent.Slots[slot].Buttons &= ~bit;
+			}
+			Current.LastSource =
+				static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+			return true;
+		}
+		case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+			const size_t slot = findSlot(event.gaxis.which);
+			const ControllerAxis axis = GamepadAxisOf(event.gaxis.axis);
+			if (slot == scene::MAX_CONTROLLERS || axis == ControllerAxis::Count) return false;
+			const bool trigger = axis == ControllerAxis::LeftTrigger || axis == ControllerAxis::RightTrigger;
+			const size_t axisIndex = static_cast<size_t>(axis);
+			const float normalized = AxisValue(event.gaxis.value, trigger);
+			if (ControllerCurrent.Slots[slot].Axes[axisIndex] == normalized) return false;
+			ControllerCurrent.Slots[slot].Axes[axisIndex] = normalized;
+			if (trigger) {
+				const ControllerButton button = axis == ControllerAxis::LeftTrigger
+													? ControllerButton::LeftTrigger
+													: ControllerButton::RightTrigger;
+				const uint32_t bit = 1u << static_cast<uint8_t>(button);
+				if (ControllerCurrent.Slots[slot].Axes[axisIndex] >= 0.5f) {
+					if ((ControllerCurrent.Slots[slot].Buttons & bit) == 0) {
+						ControllerCurrent.Slots[slot].PressedButtons |= bit;
+					}
+					ControllerCurrent.Slots[slot].Buttons |= bit;
+				} else {
+					ControllerCurrent.Slots[slot].Buttons &= ~bit;
+				}
+			}
+			Current.LastSource =
+				static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+			return true;
+		}
+		case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+		case SDL_EVENT_JOYSTICK_BUTTON_UP: {
+			const size_t slot = findSlot(event.jbutton.which);
+			if (slot == scene::MAX_CONTROLLERS || ControllerCurrent.Slots[slot].Mapped ||
+				event.jbutton.button >= static_cast<uint8_t>(ControllerButton::Count))
+				return false;
+			const uint32_t bit = 1u << event.jbutton.button;
+			if (event.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
+				if ((ControllerCurrent.Slots[slot].Buttons & bit) == 0) {
+					ControllerCurrent.Slots[slot].PressedButtons |= bit;
+				}
+				ControllerCurrent.Slots[slot].Buttons |= bit;
+			} else {
+				ControllerCurrent.Slots[slot].Buttons &= ~bit;
+			}
+			Current.LastSource =
+				static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+			return true;
+		}
+		case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
+			const size_t slot = findSlot(event.jaxis.which);
+			if (slot == scene::MAX_CONTROLLERS || ControllerCurrent.Slots[slot].Mapped ||
+				event.jaxis.axis >= static_cast<uint8_t>(ControllerAxis::Count))
+				return false;
+			const float normalized = AxisValue(event.jaxis.value);
+			if (ControllerCurrent.Slots[slot].Axes[event.jaxis.axis] == normalized) return false;
+			ControllerCurrent.Slots[slot].Axes[event.jaxis.axis] = normalized;
+			Current.LastSource =
+				static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+			return true;
+		}
+		case SDL_EVENT_JOYSTICK_HAT_MOTION: {
+			const size_t slot = findSlot(event.jhat.which);
+			if (slot == scene::MAX_CONTROLLERS || ControllerCurrent.Slots[slot].Mapped || event.jhat.hat != 0)
+				return false;
+			constexpr uint32_t HAT_BITS = (1u << static_cast<uint8_t>(ControllerButton::DPadUp)) |
+										  (1u << static_cast<uint8_t>(ControllerButton::DPadDown)) |
+										  (1u << static_cast<uint8_t>(ControllerButton::DPadLeft)) |
+										  (1u << static_cast<uint8_t>(ControllerButton::DPadRight));
+			auto &controller = ControllerCurrent.Slots[slot];
+			const uint32_t before = controller.Buttons;
+			auto &buttons = controller.Buttons;
+			buttons &= ~HAT_BITS;
+			if ((event.jhat.value & SDL_HAT_UP) != 0)
+				buttons |= 1u << static_cast<uint8_t>(ControllerButton::DPadUp);
+			if ((event.jhat.value & SDL_HAT_DOWN) != 0)
+				buttons |= 1u << static_cast<uint8_t>(ControllerButton::DPadDown);
+			if ((event.jhat.value & SDL_HAT_LEFT) != 0)
+				buttons |= 1u << static_cast<uint8_t>(ControllerButton::DPadLeft);
+			if ((event.jhat.value & SDL_HAT_RIGHT) != 0)
+				buttons |= 1u << static_cast<uint8_t>(ControllerButton::DPadRight);
+			controller.PressedButtons |= buttons & ~before;
+			Current.LastSource =
+				static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+			return true;
+		}
 		case SDL_EVENT_KEY_DOWN:
 		case SDL_EVENT_KEY_UP: {
 			// **A repeat is not an edge.** SDL sends key-down again while a key is
@@ -335,6 +566,10 @@ namespace engine::input {
 		Current.Buttons = 0;
 		Current.MouseDelta = {};
 		Current.WheelDelta = 0.0f;
+		for (scene::ControllerSlot &slot : ControllerCurrent.Slots) {
+			slot.Buttons = 0;
+			std::fill(std::begin(slot.Axes), std::end(slot.Axes), 0.0f);
+		}
 		Typed.clear();
 	}
 }

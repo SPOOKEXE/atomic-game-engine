@@ -97,6 +97,7 @@ state until v0.19.
 | `gui.Scrolling` | 64 | 4 | yes | yes | . | . | What a `ScrollingFrame` authors: the canvas size and position, which axes scroll, and the bars' thickness, colour, images and inset. |
 | `gui.Selection` | 48 | 8 | yes | yes | . | . | Where a gamepad's selection goes from a `GuiObject` in each direction, which object is drawn over it while selected, and its seeding order. |
 | `gui.SelectionOutline` | 20 | 4 | yes | yes | . | . | The box a `SelectionBox` or `SelectionSphere` draws: the line thickness, and the filled face's colour and transparency. |
+| `gui.SettingsMenuExtensions` | 24 | 8 | . | . | . | . | Resource: script-authored actions appended to the local escape menu, with stable ids, labels and the callback token dispatched when a player activates one. |
 | `gui.SizeLimits` | 16 | 4 | yes | yes | . | . | `UISizeConstraint`: clamps the parent element's resolved size between a minimum and a maximum, in pixels. |
 | `gui.SpatialCanvas` | 104 | 4 | yes | yes | . | . | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance. |
 | `gui.Stroke` | 24 | 4 | yes | yes | . | . | `UIStroke`: an outline drawn around the parent outside its own border, with its own colour, thickness, transparency, join and sizing. |
@@ -144,6 +145,7 @@ state until v0.19.
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
+| `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
 | `scene.EditableImage` | 40 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture. |
 | `scene.EditableMesh` | 160 | 8 | yes | . | . | . | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
@@ -227,4 +229,4 @@ state until v0.19.
 
 ---
 
-150 components registered by the engine, 0 without a purpose line.
+152 components registered by the engine, 0 without a purpose line.

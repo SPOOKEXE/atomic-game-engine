@@ -45,6 +45,9 @@ using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 using engine::scene::CameraController;
 using engine::scene::Character;
+using engine::scene::ControllerAxis;
+using engine::scene::ControllerButton;
+using engine::scene::ControllerState;
 using engine::scene::Humanoid;
 using engine::scene::InputState;
 using engine::scene::KeyCode;
@@ -61,6 +64,7 @@ namespace {
 		World() {
 			engine::scene::RegisterSceneClasses();
 			Store_.SetResource(InputState{});
+			Store_.SetResource(ControllerState{});
 			Store_.SetResource(CameraController{});
 		}
 
@@ -203,6 +207,36 @@ TEST_CASE("an unfocused panel produces neither a step nor a jump", "[scene][move
 	const MoveIntent intent = ReadMoveIntent(world.Store_);
 	CHECK(intent.Direction.Magnitude() == Approx(0.0f));
 	CHECK_FALSE(intent.Jump);
+}
+
+TEST_CASE("the first connected controller drives movement and jump", "[scene][moveinput][gamepad]") {
+	World world;
+	auto &slot = world.Store_.ResourceMutable<ControllerState>()->Slots[0];
+	slot.Connected = true;
+	slot.Axes[static_cast<size_t>(ControllerAxis::LeftX)] = 0.5f;
+	slot.Axes[static_cast<size_t>(ControllerAxis::LeftY)] = -1.0f;
+	slot.Buttons = 1u << static_cast<uint8_t>(ControllerButton::A);
+	world.Store_.ResourceMutable<ControllerState>()->LatchPresses();
+
+	const MoveIntent intent = ReadMoveIntent(world.Store_);
+	CHECK(intent.Direction.X > 0.0f);
+	CHECK(intent.Direction.Z < 0.0f);
+	CHECK(intent.Direction.Magnitude() == Approx(1.0f));
+	CHECK(intent.Jump);
+}
+
+TEST_CASE("the controller that spoke last drives when several are connected", "[scene][moveinput][gamepad]") {
+	World world;
+	auto *controllers = world.Store_.ResourceMutable<ControllerState>();
+	controllers->Slots[0].Connected = true;
+	controllers->Slots[1].Connected = true;
+	controllers->Slots[1].Axes[static_cast<size_t>(ControllerAxis::LeftX)] = -1.0f;
+	controllers->Slots[1].PressedButtons = 1u << static_cast<uint8_t>(ControllerButton::A);
+	world.Input().LastSource = engine::scene::InputSource::Gamepad2;
+
+	const MoveIntent intent = ReadMoveIntent(world.Store_);
+	CHECK(intent.Direction.X == Approx(-1.0f));
+	CHECK(intent.Jump);
 }
 
 // --- who a keyboard is allowed to write --------------------------------------

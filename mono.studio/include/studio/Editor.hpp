@@ -125,6 +125,7 @@ struct ImGuiTableSortSpecs;
 struct ImGuiTableSortSpecs;
 
 namespace studio {
+	struct PlayedInputAdapter;
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
@@ -3301,11 +3302,13 @@ namespace studio {
 
 		// The local durable provider's active file and last written image.
 		// MemoryStore deliberately has no file: it expires with this process.
+		//@{
 		std::filesystem::path ActiveDataStorePath;
 		std::vector<engine::world::SharedStoreEntry> SavedDataStoreEntries;
 		std::string DataStoreError;
 		double NextDataStoreFlush = 0.0;
 		bool DataStoreReady = false;
+		//@}
 
 		// The connection to Discord, or null when nothing is configured.
 		//
@@ -3364,6 +3367,7 @@ namespace studio {
 		// renderer before the window it borrowed its device from.
 		//@{
 		SDL_Window *Window = nullptr;
+		std::unique_ptr<PlayedInputAdapter> PlayedInput;
 		engine::render::Renderer Renderer;
 
 		// **What a `Material.Shader` name resolves to in the editor.** One per
@@ -5138,24 +5142,34 @@ namespace studio {
 
 		// The second step of world/universe export and their one shared,
 		// incremental content copy.
+		//@{
 		bool GroundAssetsOnWorldExport = true;
 		bool IncludeRawAssetsOnWorldExport = false;
 		std::filesystem::path WorldExportPath;
 		bool GroundAssetsOnUniverseExport = true;
 		bool IncludeRawAssetsOnUniverseExport = false;
 		std::filesystem::path UniverseExportPath;
+		//@}
+
+		// Which document will be written after incremental asset grounding.
 		enum class GroundedExportKind : uint8_t { None, World, Universe };
+
+		// The pending grounded export and its incremental copy state.
+		//@{
 		GroundedExportKind PendingGroundedExport = GroundedExportKind::None;
 		std::filesystem::path PendingGroundedExportPath;
 		engine::world::WorldId PendingGroundedWorld;
 		AssetGrounding ExportAssetGrounding;
+		//@}
 
 		// Read-only manifest metadata shown before a multi-file universe is
 		// allowed to add content sources to this editor.
+		//@{
 		std::filesystem::path PendingUniverseOpenPath;
 		engine::game::GameInfo PendingUniverseOpenInfo;
 		bool AllowUniverseHttp = false;
 		size_t UniverseLoadScope = 0;
+		//@}
 
 		// What the explorer's, the properties panel's and the keybind page's
 		// filter boxes hold.
@@ -5282,6 +5296,7 @@ namespace studio {
 		bool ShowSettings = false;
 
 		// The dataset editor's selected store, row, filter and typed JSON draft.
+		//@{
 		engine::world::BusKind DatasetStore = engine::world::BusKind::DataStore;
 		std::string DatasetFilter;
 		std::string DatasetSelectedKey;
@@ -5289,6 +5304,7 @@ namespace studio {
 		std::string DatasetValueDraft;
 		std::string DatasetEditError;
 		bool DatasetCreating = false;
+		//@}
 
 		// The live instances, closed until something is live.
 		//

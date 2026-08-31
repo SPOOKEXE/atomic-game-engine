@@ -224,6 +224,10 @@ namespace studio {
 							input != nullptr) {
 							input->ConsumeTaps();
 						}
+						if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+							controllers != nullptr) {
+							controllers->ConsumeTaps();
+						}
 					});
 					hasInput = engine::game::DecodeMoveInput(engine::game::EncodeMoveInput(wanted), arrived);
 				}

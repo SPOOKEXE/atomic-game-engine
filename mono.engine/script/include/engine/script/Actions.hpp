@@ -120,6 +120,16 @@ namespace engine::script {
 	// A report for this frame's wheel movement.
 	InputReport WheelReport(const scene::InputState &input);
 
+	// A controller button edge in one stable gamepad slot.
+	InputReport ControllerButtonReport(size_t slot, scene::ControllerButton button, bool began);
+
+	// A controller stick change in one stable gamepad slot.
+	InputReport ControllerStickReport(size_t slot, const scene::ControllerSlot &controller, bool right);
+
+	// A controller trigger change in one stable gamepad slot.
+	InputReport
+	ControllerTriggerReport(size_t slot, const scene::ControllerSlot &controller, scene::ControllerAxis axis);
+
 	// Whether the 2D interface has the pointer this beat.
 	//
 	// **What `gameProcessedEvent` actually is here, and it is shared for the

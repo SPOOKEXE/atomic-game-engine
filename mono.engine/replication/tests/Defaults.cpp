@@ -223,6 +223,7 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	// A client's own input and its own identity. Sending the server's copy would
 	// tell every client what some other machine is pressing.
 	CHECK(LocalToTheClient("scene.InputState"));
+	CHECK(LocalToTheClient("scene.ControllerState"));
 	CHECK(LocalToTheClient("scene.LocalPlayer"));
 
 	// A viewer's own occlusion fade. Sending it would put one client's

@@ -61,6 +61,49 @@ namespace engine::script {
 		return report;
 	}
 
+	InputReport ControllerButtonReport(size_t slot, scene::ControllerButton button, bool began) {
+		InputReport report;
+		report.Source =
+			static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+		report.Key = scene::KeyOf(button);
+		report.State = core::Name(began ? "Begin" : "End");
+		return report;
+	}
+
+	InputReport ControllerStickReport(size_t slot, const scene::ControllerSlot &controller, bool right) {
+		const size_t x =
+			static_cast<size_t>(right ? scene::ControllerAxis::RightX : scene::ControllerAxis::LeftX);
+		const size_t y =
+			static_cast<size_t>(right ? scene::ControllerAxis::RightY : scene::ControllerAxis::LeftY);
+		InputReport report;
+		report.Source =
+			static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+		report.Key = right ? scene::KeyCode::Thumbstick2 : scene::KeyCode::Thumbstick1;
+		report.State = core::Name("Change");
+		report.Position = core::Vector3{controller.Axes[x], controller.Axes[y], 0.0f};
+		report.Delta = core::Vector3{
+			controller.Axes[x] - controller.PreviousAxes[x],
+			controller.Axes[y] - controller.PreviousAxes[y],
+			0.0f
+		};
+		return report;
+	}
+
+	InputReport ControllerTriggerReport(
+		size_t slot, const scene::ControllerSlot &controller, scene::ControllerAxis axis
+	) {
+		InputReport report;
+		report.Source =
+			static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
+		report.Key =
+			axis == scene::ControllerAxis::LeftTrigger ? scene::KeyCode::ButtonL2 : scene::KeyCode::ButtonR2;
+		report.State = core::Name("Change");
+		const size_t index = static_cast<size_t>(axis);
+		report.Position.Z = controller.Axes[index];
+		report.Delta.Z = controller.Axes[index] - controller.PreviousAxes[index];
+		return report;
+	}
+
 	bool InterfaceHasPointer(std::span<const gui::GuiEvent> events) {
 		for (const gui::GuiEvent &event : events) {
 			if (event.Kind != gui::EventKind::MouseLeave) {
@@ -75,7 +118,8 @@ namespace engine::script {
 	}
 
 	bool IsPointerReport(const InputReport &report) {
-		return report.Source != scene::InputSource::Keyboard;
+		return report.Source != scene::InputSource::Keyboard &&
+			   report.Source <= scene::InputSource::MouseWheel;
 	}
 
 	bool ActionStack::Bind(BoundAction action, CallbackRef &released) {

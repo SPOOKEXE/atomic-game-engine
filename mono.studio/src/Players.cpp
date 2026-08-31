@@ -18,6 +18,8 @@
 // `BeginRun` calls `SpawnPlayer` for the clients Play asks for, so there is one
 // path that admits somebody and one place that can be wrong about it.
 
+#include "PlayedInput.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -183,6 +185,22 @@ namespace studio {
 			// share, so jump is now an ordinary key: it goes into `Down` with W,
 			// A, S and D above and leaves through `ReadMoveIntent` with them.
 			input->LatchPresses();
+
+			if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+				controllers != nullptr) {
+				uint32_t latched[engine::scene::MAX_CONTROLLERS] = {};
+				for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+					latched[index] = controllers->Slots[index].PressedButtons;
+				}
+				*controllers = PlayedInput->Translator.Controllers();
+				if (controllers->HasFrameEvents()) {
+					input->LastSource = PlayedInput->Translator.State().LastSource;
+				}
+				for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+					controllers->Slots[index].PressedButtons |= latched[index];
+				}
+				controllers->LatchPresses();
+			}
 			drove = true;
 		});
 

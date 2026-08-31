@@ -1014,6 +1014,9 @@ namespace client {
 			if (!store.HasResource<engine::scene::InputState>()) {
 				store.SetResource(engine::scene::InputState{});
 			}
+			if (!store.HasResource<engine::scene::ControllerState>()) {
+				store.SetResource(engine::scene::ControllerState{});
+			}
 			if (!store.HasResource<engine::scene::CameraController>()) {
 				store.SetResource(engine::scene::CameraController{});
 			}
@@ -1053,6 +1056,13 @@ namespace client {
 
 			scheduler.Add("character-control", Phase::PreSimulation, [](Store &world) {
 				(void)engine::scene::UpdateCharacterControl(world);
+				if (auto *input = world.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+					input->ConsumeKeyTaps();
+				}
+				if (auto *controllers = world.ResourceMutable<engine::scene::ControllerState>();
+					controllers != nullptr) {
+					controllers->ConsumeTaps();
+				}
 			});
 
 			// **The other three are `physics`', because grounding needs a

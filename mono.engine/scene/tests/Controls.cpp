@@ -34,6 +34,8 @@ using engine::ecs::Store;
 using engine::scene::ActiveCamera;
 using engine::scene::CameraController;
 using engine::scene::CameraMode;
+using engine::scene::ControllerButton;
+using engine::scene::ControllerState;
 using engine::scene::Humanoid;
 using engine::scene::InputState;
 using engine::scene::KeyCode;
@@ -47,7 +49,7 @@ using engine::scene::UpdateCameraControl;
 using engine::scene::UpdateCharacterControl;
 
 namespace {
-	// A world with the scene classes registered and the two control resources
+	// A world with the scene classes registered and the control resources
 	// present, which is the state `client::InstallControls` leaves behind.
 	struct World {
 		Store Store_{"controls-test"};
@@ -55,6 +57,7 @@ namespace {
 		World() {
 			engine::scene::RegisterSceneClasses();
 			Store_.SetResource(InputState{});
+			Store_.SetResource(ControllerState{});
 			Store_.SetResource(CameraController{});
 		}
 
@@ -600,6 +603,13 @@ TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[s
 	// shots when a host catching up runs two ticks between two frames.
 	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
 	world.Input().ConsumeButtonTaps();
+	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Fired);
+
+	auto &gamepad = world.Store_.ResourceMutable<ControllerState>()->Slots[0];
+	gamepad.Connected = true;
+	gamepad.PressedButtons = 1u << static_cast<uint8_t>(ControllerButton::RightTrigger);
+	CHECK(engine::scene::ReadAimIntent(world.Store_).Fired);
+	world.Store_.ResourceMutable<ControllerState>()->ConsumeTaps();
 	CHECK_FALSE(engine::scene::ReadAimIntent(world.Store_).Fired);
 
 	// An unfocused window fires nothing. Alt-tabbing away mid-click must not

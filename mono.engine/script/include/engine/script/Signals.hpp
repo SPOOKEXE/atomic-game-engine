@@ -52,6 +52,12 @@ namespace engine::script {
 		// property per instance for a surface most scripts never touch.
 		PropertyChanged,
 
+		// `UserInputService` events. One per world and filtered by their public
+		// signal name. Separate from `PropertyChanged` because controller state is
+		// a resource change, not an instance property event, and the generic change
+		// pump supplies a different argument shape.
+		Input,
+
 		// `instance.ChildAdded` and `instance.ChildRemoved`. The subject is the
 		// parent, and the handler is called with the child.
 		ChildAdded,

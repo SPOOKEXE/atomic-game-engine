@@ -234,9 +234,8 @@ declare interface InputObject {
 //
 // Its own type rather than `PropertyChangedSignal`, which passes nothing.
 //
-// `gameProcessedEvent` is true when the 2D interface took the pointer this beat,
-// which is what a click on a `TextButton` is. Always false for a keyboard event:
-// `gui` has no keyboard focus to take one with.
+// `gameProcessedEvent` is true when the 2D interface took the pointer or keyboard
+// this beat. Controller reports are not claimed by the interface and answer false.
 declare interface InputSignal {
 	Connect(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
 	Once(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
@@ -254,6 +253,12 @@ declare interface LastInputTypeSignal {
 	Once(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
 }
 
+// What the gamepad connection signals call a handler with.
+declare interface GamepadConnectionSignal {
+	Connect(handler: (gamepad: Enum.UserInputType) => void): RBXScriptConnection;
+	Once(handler: (gamepad: Enum.UserInputType) => void): RBXScriptConnection;
+}
+
 declare interface UserInputService {
 	MouseBehavior: Enum.MouseBehavior;
 
@@ -265,11 +270,10 @@ declare interface UserInputService {
 	readonly KeyboardEnabled: boolean;
 	readonly MouseEnabled: boolean;
 
-	// **Present and always false.** There is no gamepad, touch surface, headset
-	// or motion sensor anywhere in `engine::input`, and a Roblox place branches
-	// on these to pick a control scheme - a missing property is `undefined` here
-	// where a false one takes the other branch.
+	// Live when any mapped gamepad or raw joystick is connected.
 	readonly GamepadEnabled: boolean;
+
+	// These devices are not implemented, so their capability flags stay false.
 	readonly TouchEnabled: boolean;
 	readonly VREnabled: boolean;
 	readonly AccelerometerEnabled: boolean;
@@ -278,9 +282,10 @@ declare interface UserInputService {
 	readonly InputBegan: InputSignal;
 	readonly InputEnded: InputSignal;
 
-	// Fires for pointer motion and for the wheel, which are the two things this
-	// engine can report changing.
+	// Fires for pointer motion, wheel motion, controller sticks and triggers.
 	readonly InputChanged: InputSignal;
+	readonly GamepadConnected: GamepadConnectionSignal;
+	readonly GamepadDisconnected: GamepadConnectionSignal;
 
 	// Everything reads as released on the frame focus is lost, and
 	// `WindowFocusReleased` is delivered before those releases so a listener can
@@ -293,7 +298,7 @@ declare interface UserInputService {
 
 	IsKeyDown(key: Enum.KeyCode): boolean;
 
-	// False for the three `Enum.UserInputType` members that are not buttons.
+	// False for every `Enum.UserInputType` member that is not a mouse button.
 	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
 
 	GetMouseLocation(): Vector2;
@@ -312,13 +317,17 @@ declare interface UserInputService {
 	// tally of the focus signals: `gui::Focus` is the one door a focus change
 	// goes through and `GuiServiceState::FocusedTextBox` is where it rests.
 	GetFocusedTextBox(): Instance | null;
+
+	GetConnectedGamepads(): Enum.UserInputType[];
+	GetGamepadState(gamepad: Enum.UserInputType): InputObject[];
+	GetSupportedGamepadKeyCodes(gamepad: Enum.UserInputType): Enum.KeyCode[];
+	IsGamepadButtonDown(gamepad: Enum.UserInputType, button: Enum.KeyCode): boolean;
 }
 
 // What `UserInputService` deliberately does not have, and it is the half a
-// migrating author needs most: no gamepad, no touch surface, no cursor image in
-// `render`, no keyboard-layout query below L12. So `GetConnectedGamepads`,
-// `GetGamepadState`, the six touch signals, `MouseIcon` and
-// `GetStringForKeyCode` are absent rather than present and useless.
+// migrating author needs most: no touch surface, no cursor image in `render`,
+// and no keyboard-layout query below L12. The six touch signals, `MouseIcon`
+// and `GetStringForKeyCode` are absent rather than present and useless.
 // `TextBoxFocused` and its twin are absent for a different reason: the fact
 // exists and reaches a script as `textBox.Focused`, and a world-subject row
 // firing about an instance would put the two input pumps in each other's work.
@@ -680,6 +689,24 @@ declare namespace Enum {
 		readonly F10: KeyCode;
 		readonly F11: KeyCode;
 		readonly F12: KeyCode;
+		readonly ButtonA: KeyCode;
+		readonly ButtonB: KeyCode;
+		readonly ButtonX: KeyCode;
+		readonly ButtonY: KeyCode;
+		readonly ButtonL1: KeyCode;
+		readonly ButtonR1: KeyCode;
+		readonly ButtonL2: KeyCode;
+		readonly ButtonR2: KeyCode;
+		readonly ButtonL3: KeyCode;
+		readonly ButtonR3: KeyCode;
+		readonly ButtonStart: KeyCode;
+		readonly ButtonSelect: KeyCode;
+		readonly DPadUp: KeyCode;
+		readonly DPadDown: KeyCode;
+		readonly DPadLeft: KeyCode;
+		readonly DPadRight: KeyCode;
+		readonly Thumbstick1: KeyCode;
+		readonly Thumbstick2: KeyCode;
 	};
 	const LineJoinMode: {
 		readonly Round: LineJoinMode;
@@ -865,6 +892,14 @@ declare namespace Enum {
 		readonly Keyboard: UserInputType;
 		readonly MouseMovement: UserInputType;
 		readonly MouseWheel: UserInputType;
+		readonly Gamepad1: UserInputType;
+		readonly Gamepad2: UserInputType;
+		readonly Gamepad3: UserInputType;
+		readonly Gamepad4: UserInputType;
+		readonly Gamepad5: UserInputType;
+		readonly Gamepad6: UserInputType;
+		readonly Gamepad7: UserInputType;
+		readonly Gamepad8: UserInputType;
 	};
 	const VerticalAlignment: {
 		readonly Top: VerticalAlignment;
