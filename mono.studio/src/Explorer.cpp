@@ -1,3 +1,5 @@
+#include "SourceEditor.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Components.hpp>
@@ -188,8 +190,7 @@ namespace studio {
 		if (haveInstance) {
 			ImGui::Separator();
 
-			const ClassId scriptClass = Classes::Find(Name("LuaSourceContainer"));
-			if (scriptClass.IsValid() && store.IsA(instance, scriptClass)) {
+			if (SourceDocumentKindOf(store, instance).has_value()) {
 				if (ImGui::MenuItem("Edit Script")) {
 					PendingOpenScript.World = world;
 					PendingOpenScript.Instance = instance;
@@ -593,8 +594,7 @@ namespace studio {
 				}
 
 				if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-					const ClassId scriptClass = Classes::Find(Name("LuaSourceContainer"));
-					if (scriptClass.IsValid() && store.IsA(row.Instance, scriptClass)) {
+					if (SourceDocumentKindOf(store, row.Instance).has_value()) {
 						PendingOpenScript.World = world;
 						PendingOpenScript.Instance = row.Instance;
 					}

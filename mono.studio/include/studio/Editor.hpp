@@ -613,6 +613,9 @@ namespace studio {
 		// the script is deleted.
 		Entity Instance;
 
+		// Whether this tab writes a `ShaderSource` rather than `SourceCache`.
+		bool Shader = false;
+
 		// The asset-relative path its text is filed under.
 		engine::core::Name Path;
 
@@ -3773,6 +3776,9 @@ namespace studio {
 		//
 		// @since v0.17
 		engine::script::Language ScriptPopupLanguage = engine::script::Language::Luau;
+
+		// Whether the popup was built from the script or GLSL vocabulary.
+		CompletionDomain ScriptPopupDomain = CompletionDomain::Script;
 		//@}
 
 		// The hover tooltip's cache: which occurrence of which word it was

@@ -38,6 +38,8 @@
 // that genuinely wants the type - `PanelSink` below installs itself into
 // `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
 // `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include "SourceEditor.hpp"
+
 #include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
 
@@ -4267,29 +4269,18 @@ namespace studio {
 		tab.World = world;
 		tab.Instance = instance;
 
+		bool opened = false;
 		Universe->Enter(world, [&](Store &store) {
-			// **Whichever container the instance is set to run**, so opening a
-			// script that has been switched to JavaScript edits the JavaScript
-			// rather than the Luau it still holds.
-			tab.Path = engine::script::ActiveSourceOf(store, instance);
-
-			if (!tab.Path.IsValid()) {
-				return;
-			}
-
-			// Through `ReadSource`, so an unsaved edit already in the cache is
-			// what opens and a script whose text is only on disk still opens.
-			// A second resolver here would be a second place to forget the
-			// cache.
-			std::string error;
-			if (!engine::script::ReadSource(store, tab.Path, tab.Text, error)) {
-				// Empty rather than refused. A script instance whose file does
-				// not exist yet is a legal state - an author makes the instance
-				// before choosing the file - so the editor opens an empty
-				// buffer and saving creates it.
-				tab.Text.clear();
+			if (const std::optional<SourceDocument> document = ReadSourceDocument(store, instance)) {
+				tab.Shader = document->Kind == SourceDocumentKind::Shader;
+				tab.Path = document->Path;
+				tab.Text = document->Text;
+				opened = true;
 			}
 		});
+		if (!opened) {
+			return;
+		}
 
 		Scripts.push_back(std::move(tab));
 		ActiveScript = static_cast<int>(Scripts.size() - 1);
@@ -4300,32 +4291,19 @@ namespace studio {
 			return;
 		}
 
+		bool saved = false;
 		Universe->Enter(tab.World, [&](Store &store) {
-			if (!store.Alive(tab.Instance)) {
-				return;
-			}
-
-			if (!tab.Path.IsValid()) {
-				// A script with no path cannot be filed, so the editor gives it
-				// one derived from its name. Under `Scripts/` so a game file's
-				// paths look like paths rather than like bare identifiers.
-				const Name name = store.InstanceNameOf(tab.Instance);
-				const std::string leaf = name.IsValid() ? std::string(Label(name)) : "Script";
-				tab.Path = Name("Scripts/" + leaf + ".luau");
-
-				// One rule for which container a path belongs in, and the
-				// selector follows it - `script::SetSourcePath`.
-				engine::script::SetSourcePath(store, tab.Instance, tab.Path);
-			}
-
-			auto *cache = store.ResourceMutable<engine::script::SourceCache>();
-			if (cache == nullptr) {
-				store.SetResource(engine::script::SourceCache{});
-				cache = store.ResourceMutable<engine::script::SourceCache>();
-			}
-
-			cache->Set(tab.Path, tab.Text);
+			saved = WriteSourceDocument(
+				store,
+				tab.Instance,
+				tab.Shader ? SourceDocumentKind::Shader : SourceDocumentKind::Program,
+				tab.Path,
+				tab.Text
+			);
 		});
+		if (!saved) {
+			return;
+		}
 
 		tab.Modified = false;
 		MarkModified();

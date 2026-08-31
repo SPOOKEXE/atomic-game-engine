@@ -594,13 +594,228 @@ namespace studio {
 		return ids;
 	}
 
+	namespace {
+
+		struct ShaderWord {
+			std::string_view Word;
+			std::string_view Detail;
+			CompletionKind Kind;
+		};
+
+		constexpr ShaderWord SHADER_KEYWORDS[] = {
+			{"version", "selects the GLSL version after #", CompletionKind::Keyword},
+			{"extension", "enables or requires a GLSL extension after #", CompletionKind::Keyword},
+			{"define", "defines a preprocessor macro after #", CompletionKind::Keyword},
+			{"ifdef", "tests whether a preprocessor macro exists after #", CompletionKind::Keyword},
+			{"ifndef", "tests whether a preprocessor macro is absent after #", CompletionKind::Keyword},
+			{"elif", "adds a preprocessor condition after #", CompletionKind::Keyword},
+			{"endif", "closes a preprocessor condition after #", CompletionKind::Keyword},
+			{"pragma", "passes an implementation directive after #", CompletionKind::Keyword},
+			{"line", "changes the source line reported by diagnostics after #", CompletionKind::Keyword},
+			{"error", "emits a preprocessor error after #", CompletionKind::Keyword},
+			{"break", "leaves the innermost loop or switch", CompletionKind::Keyword},
+			{"case", "one branch of a switch", CompletionKind::Keyword},
+			{"const", "declares a value that cannot be reassigned", CompletionKind::Keyword},
+			{"continue", "skips to the next pass of the innermost loop", CompletionKind::Keyword},
+			{"default", "the switch branch used when no case matches", CompletionKind::Keyword},
+			{"discard", "stops this fragment without writing its outputs", CompletionKind::Keyword},
+			{"do", "opens a loop that runs at least once", CompletionKind::Keyword},
+			{"else", "runs when the preceding condition is false", CompletionKind::Keyword},
+			{"false", "the boolean false", CompletionKind::Keyword},
+			{"for", "opens a counted loop", CompletionKind::Keyword},
+			{"if", "runs a block when its condition is true", CompletionKind::Keyword},
+			{"in", "declares a shader-stage input or read-only parameter", CompletionKind::Keyword},
+			{"inout", "declares a parameter that is read and written", CompletionKind::Keyword},
+			{"layout", "attaches locations, bindings, sets or storage layout", CompletionKind::Keyword},
+			{"out", "declares a shader-stage output or write-only parameter", CompletionKind::Keyword},
+			{"return", "hands a value back and ends the current function", CompletionKind::Keyword},
+			{"struct", "declares a record type", CompletionKind::Keyword},
+			{"switch", "branches on one integer value", CompletionKind::Keyword},
+			{"true", "the boolean true", CompletionKind::Keyword},
+			{"uniform", "declares read-only data supplied by the renderer", CompletionKind::Keyword},
+			{"while", "loops while a condition remains true", CompletionKind::Keyword},
+			{"buffer", "declares a shader storage block", CompletionKind::Keyword},
+			{"shared", "declares compute workgroup-shared storage", CompletionKind::Keyword},
+			{"centroid", "samples an interpolant within the covered fragment", CompletionKind::Keyword},
+			{"flat", "disables interpolation for a stage value", CompletionKind::Keyword},
+			{"smooth", "uses perspective-correct interpolation", CompletionKind::Keyword},
+			{"noperspective", "uses linear screen-space interpolation", CompletionKind::Keyword},
+			{"sample", "interpolates and evaluates per sample", CompletionKind::Keyword},
+			{"invariant", "requires repeatable output calculations", CompletionKind::Keyword},
+			{"precise", "prevents transformations that change operation order", CompletionKind::Keyword},
+		};
+
+		constexpr ShaderWord SHADER_TYPES[] = {
+			{"void", "GLSL type", CompletionKind::Type},
+			{"bool", "GLSL scalar type", CompletionKind::Type},
+			{"int", "GLSL signed scalar type", CompletionKind::Type},
+			{"uint", "GLSL unsigned scalar type", CompletionKind::Type},
+			{"float", "GLSL scalar type", CompletionKind::Type},
+			{"double", "GLSL double-precision scalar type", CompletionKind::Type},
+			{"bvec2", "GLSL two-component boolean vector", CompletionKind::Type},
+			{"bvec3", "GLSL three-component boolean vector", CompletionKind::Type},
+			{"bvec4", "GLSL four-component boolean vector", CompletionKind::Type},
+			{"ivec2", "GLSL two-component signed vector", CompletionKind::Type},
+			{"ivec3", "GLSL three-component signed vector", CompletionKind::Type},
+			{"ivec4", "GLSL four-component signed vector", CompletionKind::Type},
+			{"uvec2", "GLSL two-component unsigned vector", CompletionKind::Type},
+			{"uvec3", "GLSL three-component unsigned vector", CompletionKind::Type},
+			{"uvec4", "GLSL four-component unsigned vector", CompletionKind::Type},
+			{"vec2", "GLSL two-component float vector", CompletionKind::Type},
+			{"vec3", "GLSL three-component float vector", CompletionKind::Type},
+			{"vec4", "GLSL four-component float vector", CompletionKind::Type},
+			{"dvec2", "GLSL two-component double vector", CompletionKind::Type},
+			{"dvec3", "GLSL three-component double vector", CompletionKind::Type},
+			{"dvec4", "GLSL four-component double vector", CompletionKind::Type},
+			{"mat2", "GLSL 2 by 2 float matrix", CompletionKind::Type},
+			{"mat3", "GLSL 3 by 3 float matrix", CompletionKind::Type},
+			{"mat4", "GLSL 4 by 4 float matrix", CompletionKind::Type},
+			{"mat2x3", "GLSL 2-column, 3-row float matrix", CompletionKind::Type},
+			{"mat2x4", "GLSL 2-column, 4-row float matrix", CompletionKind::Type},
+			{"mat3x2", "GLSL 3-column, 2-row float matrix", CompletionKind::Type},
+			{"mat3x4", "GLSL 3-column, 4-row float matrix", CompletionKind::Type},
+			{"mat4x2", "GLSL 4-column, 2-row float matrix", CompletionKind::Type},
+			{"mat4x3", "GLSL 4-column, 3-row float matrix", CompletionKind::Type},
+			{"sampler2D", "GLSL sampled two-dimensional image", CompletionKind::Type},
+			{"sampler2DArray", "GLSL sampled two-dimensional image array", CompletionKind::Type},
+			{"samplerCube", "GLSL sampled cube image", CompletionKind::Type},
+			{"sampler2DShadow", "GLSL sampled depth-comparison image", CompletionKind::Type},
+			{"isampler2D", "GLSL sampled signed-integer image", CompletionKind::Type},
+			{"usampler2D", "GLSL sampled unsigned-integer image", CompletionKind::Type},
+			{"image2D", "GLSL storage image", CompletionKind::Type},
+			{"iimage2D", "GLSL signed-integer storage image", CompletionKind::Type},
+			{"uimage2D", "GLSL unsigned-integer storage image", CompletionKind::Type},
+		};
+
+		constexpr ShaderWord SHADER_FUNCTIONS[] = {
+			{"main", "fragment shader entry point", CompletionKind::Function},
+			{"abs", "GLSL built-in function", CompletionKind::Function},
+			{"acos", "GLSL built-in function", CompletionKind::Function},
+			{"asin", "GLSL built-in function", CompletionKind::Function},
+			{"atan", "GLSL built-in function", CompletionKind::Function},
+			{"ceil", "GLSL built-in function", CompletionKind::Function},
+			{"clamp", "GLSL built-in function", CompletionKind::Function},
+			{"cos", "GLSL built-in function", CompletionKind::Function},
+			{"cross", "GLSL built-in function", CompletionKind::Function},
+			{"dFdx", "fragment derivative in screen-space x", CompletionKind::Function},
+			{"dFdy", "fragment derivative in screen-space y", CompletionKind::Function},
+			{"distance", "GLSL built-in function", CompletionKind::Function},
+			{"dot", "GLSL built-in function", CompletionKind::Function},
+			{"exp", "GLSL built-in function", CompletionKind::Function},
+			{"exp2", "GLSL built-in function", CompletionKind::Function},
+			{"floor", "GLSL built-in function", CompletionKind::Function},
+			{"fract", "GLSL built-in function", CompletionKind::Function},
+			{"fwidth", "sum of absolute screen-space derivatives", CompletionKind::Function},
+			{"inversesqrt", "GLSL built-in function", CompletionKind::Function},
+			{"length", "GLSL built-in function", CompletionKind::Function},
+			{"log", "GLSL built-in function", CompletionKind::Function},
+			{"log2", "GLSL built-in function", CompletionKind::Function},
+			{"max", "GLSL built-in function", CompletionKind::Function},
+			{"min", "GLSL built-in function", CompletionKind::Function},
+			{"mix", "linearly interpolates two values", CompletionKind::Function},
+			{"mod", "GLSL built-in function", CompletionKind::Function},
+			{"normalize", "returns a vector with unit length", CompletionKind::Function},
+			{"pow", "GLSL built-in function", CompletionKind::Function},
+			{"reflect", "reflects an incident vector around a normal", CompletionKind::Function},
+			{"refract", "refracts an incident vector through a surface", CompletionKind::Function},
+			{"round", "GLSL built-in function", CompletionKind::Function},
+			{"sign", "GLSL built-in function", CompletionKind::Function},
+			{"sin", "GLSL built-in function", CompletionKind::Function},
+			{"smoothstep", "smooth Hermite interpolation between two edges", CompletionKind::Function},
+			{"sqrt", "GLSL built-in function", CompletionKind::Function},
+			{"step", "selects zero or one around an edge", CompletionKind::Function},
+			{"tan", "GLSL built-in function", CompletionKind::Function},
+			{"texelFetch", "fetches one texel without filtering", CompletionKind::Function},
+			{"texture", "samples a texture with implicit derivatives", CompletionKind::Function},
+			{"textureGrad", "samples a texture with explicit gradients", CompletionKind::Function},
+			{"textureLod", "samples a texture at an explicit level", CompletionKind::Function},
+			{"transpose", "GLSL built-in function", CompletionKind::Function},
+			{"trunc", "GLSL built-in function", CompletionKind::Function},
+		};
+
+		constexpr ShaderWord SHADER_BUILTINS[] = {
+			{"gl_FragCoord", "fragment window coordinate", CompletionKind::Builtin},
+			{"gl_FrontFacing",
+			 "whether this fragment belongs to a front-facing primitive",
+			 CompletionKind::Builtin},
+			{"gl_PointCoord", "coordinate within a point primitive", CompletionKind::Builtin},
+			{"gl_FragDepth", "fragment depth output", CompletionKind::Builtin},
+			{"gl_PrimitiveID", "the rasterized primitive's identifier", CompletionKind::Builtin},
+			{"gl_SampleID", "the current sample identifier", CompletionKind::Builtin},
+			{"gl_SamplePosition", "the current sample position", CompletionKind::Builtin},
+			{"gl_HelperInvocation",
+			 "whether this fragment exists only for derivatives",
+			 CompletionKind::Builtin},
+			{"gl_Layer", "the framebuffer layer being rendered", CompletionKind::Builtin},
+			{"gl_ViewportIndex", "the viewport being rendered", CompletionKind::Builtin},
+		};
+
+		constexpr std::string_view SHADER_SWIZZLES[] = {
+			"x",
+			"y",
+			"z",
+			"w",
+			"r",
+			"g",
+			"b",
+			"a",
+			"xy",
+			"xyz",
+			"xyzw",
+			"rg",
+			"rgb",
+			"rgba",
+		};
+
+		template <size_t Size>
+		void OfferShaderWords(
+			std::vector<Completion> &into, const std::string_view prefix, const ShaderWord (&words)[Size]
+		) {
+			for (const ShaderWord &word : words) {
+				Offer(into, prefix, word.Word, word.Detail, word.Kind);
+			}
+		}
+
+		const ShaderWord *ShaderWordNamed(const std::string_view name) {
+			for (const auto words :
+				 {std::span<const ShaderWord>(SHADER_KEYWORDS),
+				  std::span<const ShaderWord>(SHADER_TYPES),
+				  std::span<const ShaderWord>(SHADER_FUNCTIONS),
+				  std::span<const ShaderWord>(SHADER_BUILTINS)}) {
+				for (const ShaderWord &word : words) {
+					if (word.Word == name) {
+						return &word;
+					}
+				}
+			}
+			return nullptr;
+		}
+
+	}
+
 	std::vector<Completion> CompleteAt(
 		const std::string_view text, const size_t caret, const CompletionSources &sources, const size_t limit
 	) {
 		const CompletionQuery query = ScanBackwards(text, caret);
 		std::vector<Completion> offered;
 
-		if (query.InString) {
+		if (sources.Domain == CompletionDomain::Shader) {
+			if (query.InString) {
+				return {};
+			}
+
+			if (query.Separator == '.') {
+				for (const std::string_view swizzle : SHADER_SWIZZLES) {
+					Offer(offered, query.Prefix, swizzle, "vector swizzle", CompletionKind::Swizzle);
+				}
+			} else if (query.Separator == '\0') {
+				OfferShaderWords(offered, query.Prefix, SHADER_KEYWORDS);
+				OfferShaderWords(offered, query.Prefix, SHADER_TYPES);
+				OfferShaderWords(offered, query.Prefix, SHADER_FUNCTIONS);
+				OfferShaderWords(offered, query.Prefix, SHADER_BUILTINS);
+				OfferLocals(offered, text, query);
+			}
+		} else if (query.InString) {
 			// Only where a class name is what the string is for. Everywhere
 			// else a quote is prose, a path or an asset id, and a list of
 			// classes over it would be noise in the one place somebody is
@@ -832,12 +1047,20 @@ namespace studio {
 			return "property";
 		case CompletionKind::Member:
 			return "method or signal on every instance";
+		case CompletionKind::Swizzle:
+			return "vector swizzle";
 		case CompletionKind::Enum:
 			return "enum";
 		case CompletionKind::Global:
 			return "global";
 		case CompletionKind::Keyword:
 			return "keyword";
+		case CompletionKind::Type:
+			return "type";
+		case CompletionKind::Function:
+			return "built-in function";
+		case CompletionKind::Builtin:
+			return "built-in value";
 		case CompletionKind::Local:
 			return "in this file";
 		case CompletionKind::Child:
@@ -857,6 +1080,12 @@ namespace studio {
 			}
 		}
 		return {};
+	}
+
+	std::string_view ShaderKeywordDoc(const std::string_view word) {
+		const ShaderWord *entry = ShaderWordNamed(word);
+		return entry != nullptr && entry->Kind == CompletionKind::Keyword ? entry->Detail
+																		  : std::string_view{};
 	}
 
 	std::string_view WordAt(const std::string_view text, const size_t offset) {
@@ -887,6 +1116,13 @@ namespace studio {
 		// A keyword quoted in a string or written in a comment is prose.
 		size_t openedAt = 0;
 		if (InsideString(text, offset, openedAt) || InsideComment(text, offset)) {
+			return {};
+		}
+
+		if (sources.Domain == CompletionDomain::Shader) {
+			if (const ShaderWord *entry = ShaderWordNamed(word); entry != nullptr) {
+				return std::string(Describe(entry->Kind)) + "\n" + std::string(entry->Detail);
+			}
 			return {};
 		}
 

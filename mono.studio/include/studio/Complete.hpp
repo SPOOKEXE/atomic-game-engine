@@ -42,11 +42,10 @@
 // what the popup already draws, so the distinction survives without the drawing
 // code having to be told about it.
 //
-// Where the names come from is the point, and none of it is written down here:
-// classes, properties and enums are read live from `ecs::Classes` and
-// `ecs::EnumTable`, and the globals and instance members come from
-// `script::Runtime::Surface`, which walks a VM. `script/Vocabulary.hpp` carries
-// the argument and the two bugs that paid for it.
+// Script names are read live from `ecs::Classes`, `ecs::EnumTable` and a VM's
+// `script::Runtime::Surface`. Shader names are the exception: GLSL has no VM to
+// walk, so its stable language vocabulary is held here and checked directly by
+// this module's suite.
 //
 // @tier client
 
@@ -75,6 +74,9 @@ namespace studio {
 		// A method or signal every instance carries.
 		Member,
 
+		// A component selection from a GLSL vector.
+		Swizzle,
+
 		// An enum set, or one of its members.
 		Enum,
 
@@ -84,11 +86,31 @@ namespace studio {
 		// A reserved word of the language being written.
 		Keyword,
 
+		// A type name built into the language.
+		Type,
+
+		// A function built into the language.
+		Function,
+
+		// A non-function value built into the language.
+		Builtin,
+
 		// An identifier already written in this file.
 		Local,
 
 		// The name of an instance in the tree beside this script.
 		Child,
+	};
+
+	// Which vocabulary and member rules a completion uses.
+	//
+	// @since v0.21
+	enum class CompletionDomain : uint8_t {
+		// Luau or JavaScript authored against the engine's script surface.
+		Script,
+
+		// GLSL 4.50 fragment source authored in a `ShaderScript`.
+		Shader,
 	};
 
 	// One row of the popup.
@@ -165,6 +187,9 @@ namespace studio {
 	//
 	// @since v0.14
 	struct CompletionSources {
+		// Whether this document is an engine script or a shader.
+		CompletionDomain Domain = CompletionDomain::Script;
+
 		// Which language's keywords and globals to offer.
 		//
 		// **The script's own, not the editor's.** A `.luau` and a `.js` in one
@@ -221,6 +246,13 @@ namespace studio {
 	//         language's keywords.
 	// @since v0.17
 	std::string_view KeywordDoc(engine::script::Language language, std::string_view word);
+
+	// One sentence about a GLSL reserved word.
+	//
+	// @param word The keyword.
+	// @return The sentence, or empty when `word` is not a GLSL keyword.
+	// @since v0.21
+	std::string_view ShaderKeywordDoc(std::string_view word);
 
 	// The identifier under a byte offset.
 	//

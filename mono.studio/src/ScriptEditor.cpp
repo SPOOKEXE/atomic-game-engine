@@ -93,7 +93,9 @@ namespace studio {
 						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 						ImGui::Text(
 							"%s   in %s",
-							tab.Path.IsValid() ? Label(tab.Path) : "(unsaved - a path is chosen on save)",
+							tab.Shader ? "GLSL fragment shader"
+									   : (tab.Path.IsValid() ? Label(tab.Path)
+															 : "(unsaved - a path is chosen on save)"),
 							Label(Universe->NameOf(tab.World))
 						);
 						ImGui::PopStyleColor();
@@ -627,29 +629,30 @@ namespace studio {
 			return;
 		}
 
-		// **The language the script will actually run as**, which is the
-		// selector's answer and not the file extension's - a tab whose
-		// `CodeSourceContainerSelector` says JavaScript must be offered
-		// JavaScript's globals however the path is spelled.
-		engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
-		if (tab.World.IsValid()) {
-			Universe->Enter(tab.World, [&](Store &store) {
-				if (store.Alive(tab.Instance)) {
-					language = engine::script::ActiveLanguageOf(store, tab.Instance);
-				}
-			});
-		}
-
-		const std::vector<std::string> children = ScriptSiblings(tab);
-
-		// Kept for the popup's footer, which wants a keyword's doc line
-		// without re-resolving the container selector every frame.
-		ScriptPopupLanguage = language;
-
 		CompletionSources sources;
-		sources.Language = language;
-		sources.Surface = &SurfaceFor(language);
-		sources.Children = children;
+		std::vector<std::string> children;
+		if (tab.Shader) {
+			sources.Domain = CompletionDomain::Shader;
+			ScriptPopupDomain = CompletionDomain::Shader;
+		} else {
+			// **The language the script will actually run as**, which is the
+			// selector's answer and not the file extension's.
+			engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
+			if (tab.World.IsValid()) {
+				Universe->Enter(tab.World, [&](Store &store) {
+					if (store.Alive(tab.Instance)) {
+						language = engine::script::ActiveLanguageOf(store, tab.Instance);
+					}
+				});
+			}
+
+			children = ScriptSiblings(tab);
+			sources.Language = language;
+			sources.Surface = &SurfaceFor(language);
+			sources.Children = children;
+			ScriptPopupLanguage = language;
+			ScriptPopupDomain = CompletionDomain::Script;
+		}
 
 		ScriptCompletions = CompleteAt(tab.Text, caret, sources);
 
@@ -853,9 +856,11 @@ namespace studio {
 			ImGui::Separator();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 
-			const std::string_view doc = picked.Kind == CompletionKind::Keyword
-											 ? KeywordDoc(ScriptPopupLanguage, picked.Text)
-											 : std::string_view{};
+			const std::string_view doc = picked.Kind != CompletionKind::Keyword
+											 ? std::string_view{}
+											 : (ScriptPopupDomain == CompletionDomain::Shader
+													? ShaderKeywordDoc(picked.Text)
+													: KeywordDoc(ScriptPopupLanguage, picked.Text));
 			if (!doc.empty()) {
 				ImGui::TextUnformatted(doc.data(), doc.data() + doc.size());
 			} else {
@@ -928,7 +933,7 @@ namespace studio {
 
 		// Whether this script could carry one at all. Read once rather than per
 		// row, because it is a property of the file.
-		const bool breakable = engine::script::BreakpointsRefused(tab.Path.Text()).empty();
+		const bool breakable = !tab.Shader && engine::script::BreakpointsRefused(tab.Path.Text()).empty();
 
 		// Only the rows on screen. A script of ten thousand lines would
 		// otherwise cost ten thousand hit-tests a frame to draw forty of them.
@@ -1164,23 +1169,27 @@ namespace studio {
 			ScriptHoverAnchor = anchor;
 			ScriptHoverInstance = tab.Instance;
 
-			// The language the script will actually run as - the selector's
-			// answer, exactly as `UpdateScriptCompletion` resolves it.
-			engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
-			if (tab.World.IsValid()) {
-				Universe->Enter(tab.World, [&](Store &store) {
-					if (store.Alive(tab.Instance)) {
-						language = engine::script::ActiveLanguageOf(store, tab.Instance);
-					}
-				});
-			}
-
-			const std::vector<std::string> children = ScriptSiblings(tab);
-
 			CompletionSources sources;
-			sources.Language = language;
-			sources.Surface = &SurfaceFor(language);
-			sources.Children = children;
+			std::vector<std::string> children;
+			if (tab.Shader) {
+				sources.Domain = CompletionDomain::Shader;
+			} else {
+				// The language the script will actually run as, exactly as
+				// `UpdateScriptCompletion` resolves it.
+				engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
+				if (tab.World.IsValid()) {
+					Universe->Enter(tab.World, [&](Store &store) {
+						if (store.Alive(tab.Instance)) {
+							language = engine::script::ActiveLanguageOf(store, tab.Instance);
+						}
+					});
+				}
+
+				children = ScriptSiblings(tab);
+				sources.Language = language;
+				sources.Surface = &SurfaceFor(language);
+				sources.Children = children;
+			}
 
 			ScriptHoverText = HoverText(tab.Text, offset, sources);
 		}
