@@ -14,16 +14,14 @@ namespace studio {
 		// is the order somebody scans a shortcut list in: the file, then
 		// running, then editing, then the panels. The page sorts by name on
 		// request; this is what it sorts *from*.
-		// **Every action ships unbound, and that is a decision rather than an
-		// oversight.** The editor's commands are all reachable from the menus,
-		// and the menus are where a person finds a command they do not already
-		// know. Keys are then added deliberately - through the page, or by a
-		// later default set chosen once the manager they are managed by exists.
+		// **Only explicit text and play-surface actions ship bound.** Search is a
+		// text-editor convention and Escape is the settings door the client and
+		// Studio Play share. Other editor commands remain reachable from menus
+		// and are bound deliberately through the Keybinds page.
 		//
 		// Shipping a key nobody asked for is how F5 came to mean Play in one
-		// place and Stop in another, spelled out in three files. An unbound
-		// table cannot drift, and a binding added from here now costs one line
-		// and carries its scope with it.
+		// place and Stop in another, spelled out in three files. A central table
+		// cannot drift, and a binding added here carries its scope with it.
 		//
 		// Ordered by what they do rather than alphabetically, because that is
 		// the order somebody scans a shortcut list in: the file, then running,
@@ -42,6 +40,12 @@ namespace studio {
 			 {}},
 			{Action::RunServer, "run.server", "Run", "Run the server's scripts only", Scope::Global, {}},
 			{Action::Stop, "run.stop", "Stop", "Stop and restore the scene as it was", Scope::Global, {}},
+			{Action::ClientSettings,
+			 "run.client_settings",
+			 "Client Settings",
+			 "Open the in-game settings while Play is running",
+			 Scope::Viewport,
+			 {ImGuiKey_Escape, false, false, false}},
 
 			// **`Tree`, not `Global`, and the script editor is why.** A plain
 			// multiline field has imgui's own text undo on the same chord, and a

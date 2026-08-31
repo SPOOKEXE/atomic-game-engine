@@ -70,6 +70,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <array>
+#include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
@@ -1246,6 +1247,7 @@ namespace studio {
 
 		void DrawStatusBar();
 		void DrawDialogs();
+		void DrawClientSettings();
 
 		// The View menu, and the only way back to a panel somebody closed.
 		//
@@ -3368,6 +3370,7 @@ namespace studio {
 		// caches over process-wide names, and `Refresh` takes whichever world
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
+		engine::core::Name LastPostProcessShader;
 		engine::render::ShaderCompiler ShaderInspector;
 		engine::render::ShaderCompilation InspectedShader;
 		WorldId InspectedShaderWorld;
@@ -3391,6 +3394,11 @@ namespace studio {
 
 		// The identical ledger, for `EditableImage`.
 		engine::render::EditableImageUploader EditableImages;
+
+		// The embedded Play client's live presentation choices. Edit mode ignores
+		// them so authoring never hides content by accident.
+		client::Options ClientSettings;
+		bool ShowClientSettings = false;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;

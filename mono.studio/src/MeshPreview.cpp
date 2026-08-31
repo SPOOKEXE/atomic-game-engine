@@ -386,6 +386,14 @@ namespace studio {
 			return false;
 		}
 
+		// A preview is not part of the world that last used the renderer. Clear
+		// its post-process pipeline so a colour-grading script cannot tint every
+		// asset thumbnail until another world happens to render.
+		if (LastPostProcessShader.IsValid()) {
+			Renderer.ClearPostProcessShader();
+			LastPostProcessShader = {};
+		}
+
 		engine::render::SceneTarget target;
 		target.Width = PreviewSide;
 		target.Height = PreviewSide;

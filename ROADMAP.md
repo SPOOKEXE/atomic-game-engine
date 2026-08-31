@@ -63,7 +63,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] cleanup launcher options and make it far more user friendly
 - [_] cleanup cdn config and make it far more friendly
 - [x] build out live client presentation settings: EditableMesh and EditableImage uploads, particles and post-processing can be disabled by config/CLI and toggled in-game without restarting.
-- [_] add a ESC settings menu to the client and in studio client. add the client settings to it.
+- [x] add a ESC settings menu to the client and in studio client. add the client settings to it.
 - [_] add a way for scripts to modify the ESC menu.
 - [_] gamepad and joystick support
 - [_] completely move to vulkan and establish cross platform supports.

@@ -51,17 +51,19 @@ namespace {
 	}
 }
 
-TEST_CASE("only the search shortcut has a built-in binding", "[studio][keybinds]") {
+TEST_CASE("only explicit editor text and play shortcuts have built-in bindings", "[studio][keybinds]") {
 	const Fixture fixture;
 
-	// **The decision this suite exists to hold still.** The editor's commands
-	// are all reachable from the menus, and a default binding nobody asked for
-	// is how one key came to mean two things in three files. A build that adds
-	// a default without deciding to will fail here.
+	// **The decision this suite exists to hold still.** Search owns its text
+	// convention and Studio Play owns the same Escape settings door as the
+	// shipped client. A build that adds another default without deciding to
+	// will fail here.
 	for (const Keybind &binding : Keybinds::All()) {
 		INFO(binding.Id);
 		if (binding.Bound == Action::SearchAllReplaceAll) {
 			CHECK(binding.Keys == Chord{ImGuiKey_F, true, true, false});
+		} else if (binding.Bound == Action::ClientSettings) {
+			CHECK(binding.Keys == Chord{ImGuiKey_Escape, false, false, false});
 		} else {
 			CHECK_FALSE(binding.Keys.IsBound());
 		}

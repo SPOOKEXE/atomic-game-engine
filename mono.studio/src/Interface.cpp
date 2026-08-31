@@ -415,11 +415,14 @@ namespace studio {
 			ENGINE_PROFILE_CAT("dialogs", engine::core::ProfileCategory::Render);
 			DrawDialogs();
 			DrawPalette();
+			DrawClientSettings();
 		}
 
 		{
 			ENGINE_PROFILE_CAT("camera", engine::core::ProfileCategory::Render);
-			DriveCamera();
+			if (!ShowClientSettings) {
+				DriveCamera();
+			}
 		}
 
 		// **Immediately after the camera moves and before the frame ends.** See
@@ -1797,6 +1800,9 @@ namespace studio {
 		// click cannot disagree about which world F5 starts.
 		const WorldId transport = ViewportWorld(FocusedViewport);
 		const RunMode transportMode = ModeOf(transport);
+		if (Keybinds::Fired(Action::ClientSettings)) {
+			Operators.Run(Action::ClientSettings);
+		}
 
 		if (Keybinds::Fired(Action::Stop)) {
 			SetRunMode(transport, RunMode::Edit);
@@ -2536,6 +2542,50 @@ namespace studio {
 			} else {
 				SyncRojoWorlds(path);
 			}
+		}
+
+		ImGui::End();
+	}
+
+	void Editor::DrawClientSettings() {
+		if (!ShowClientSettings) {
+			return;
+		}
+
+		const WorldId playing = ViewportWorld(FocusedViewport);
+		if (ModeOf(playing) != RunMode::Play) {
+			ShowClientSettings = false;
+			return;
+		}
+
+		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, ImVec2{0.5f, 0.5f});
+		ImGui::SetNextWindowSize(ImVec2{390.0f, 0.0f}, ImGuiCond_Always);
+		if (!ImGui::Begin(
+				"Client Settings",
+				&ShowClientSettings,
+				ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+					ImGuiWindowFlags_AlwaysAutoResize
+			)) {
+			ImGui::End();
+			return;
+		}
+
+		ImGui::TextUnformatted("These presentation changes apply to Play immediately.");
+		ImGui::Separator();
+		ImGui::Checkbox("EditableMesh updates", &ClientSettings.EnableEditableMeshes);
+		ImGui::Checkbox("EditableImage updates", &ClientSettings.EnableEditableImages);
+		ImGui::Checkbox("Particles", &ClientSettings.EnableParticles);
+		ImGui::Checkbox("Post-processing", &ClientSettings.EnablePostProcessing);
+		ImGui::Separator();
+
+		if (ImGui::Button("Resume", ImVec2{120.0f, 0.0f})) {
+			ShowClientSettings = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Stop Play", ImVec2{120.0f, 0.0f})) {
+			ShowClientSettings = false;
+			SetRunMode(playing, RunMode::Edit);
 		}
 
 		ImGui::End();

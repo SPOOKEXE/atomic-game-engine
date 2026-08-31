@@ -1870,6 +1870,10 @@ namespace studio {
 			drawingWorld ? (drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active)
 						 : WorldId{};
 		const WorldId visual = VisualWorldOf(shown);
+		if (!visual.IsValid() && LastPostProcessShader.IsValid()) {
+			Renderer.ClearPostProcessShader();
+			LastPostProcessShader = {};
+		}
 
 		// **Resolved before anything presents, because `PreRender` reads it.**
 		// It used to be worked out after the present call, which was harmless
@@ -2107,6 +2111,9 @@ namespace studio {
 		uint32_t visualSurfaceBounces = Renderer.SurfaceBounces();
 		uint32_t visualSurfaceLimit = Renderer.SurfaceLimit();
 		const bool particleWorldRunning = visual.IsValid() && IsRunning(visual);
+		const bool clientPresentation = visual.IsValid() && ModeOf(visual) == RunMode::Play;
+		const bool particlesEnabled =
+			ShowParticleEmitters && (!clientPresentation || ClientSettings.EnableParticles);
 		if (visual.IsValid()) {
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
@@ -2159,7 +2166,7 @@ namespace studio {
 				{
 					ENGINE_PROFILE_CAT("collect effects", engine::core::ProfileCategory::Render);
 
-					if (ShowParticleEmitters) {
+					if (particlesEnabled) {
 						// Edit worlds run PreRender but no simulation phases. Advance
 						// the same resident system the client uses after attachments
 						// have resolved, then select only enabled emitters placed on a
@@ -2171,7 +2178,7 @@ namespace studio {
 								"preview particles", engine::core::ProfileCategory::Simulation
 							);
 							(void)AdvanceStudioParticlePreview(
-								store, frameSeconds, particleWorldRunning, ShowParticleEmitters
+								store, frameSeconds, particleWorldRunning, particlesEnabled
 							);
 						}
 					}
@@ -2181,7 +2188,7 @@ namespace studio {
 					// and a `ParticleBatch` points at a block the world may reclaim
 					// the moment the tick resumes. Copying the batches alone would
 					// copy the pointers.
-					(void)CollectStudioParticleBatches(store, Particles, ShowParticleEmitters);
+					(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
 					particleFrameCollected = true;
 					Particles.Detach();
 
@@ -2244,12 +2251,20 @@ namespace studio {
 				// world nobody is editing - see `scene::ShaderSource::Revision`.
 				{
 					ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
+					const engine::core::Name wantedPostProcess =
+						!clientPresentation || ClientSettings.EnablePostProcessing
+							? engine::scene::PostProcessShaderOf(store)
+							: engine::core::Name{};
 					if (Shaders.Refresh(store) > 0) {
 						VisualResourceRevision++;
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
 							if (module == nullptr) {
 								(void)Renderer.DropShader(shader);
+								if (shader == wantedPostProcess) {
+									Renderer.ClearPostProcessShader();
+									LastPostProcessShader = {};
+								}
 								continue;
 							}
 
@@ -2262,6 +2277,22 @@ namespace studio {
 							}
 
 							(void)Renderer.AddShader(shader, module->SpirV);
+							if (shader == wantedPostProcess &&
+								Renderer.SetPostProcessShader(shader, module->SpirV)) {
+								LastPostProcessShader = shader;
+							}
+						}
+					}
+
+					if (wantedPostProcess != LastPostProcessShader) {
+						if (!wantedPostProcess.IsValid()) {
+							Renderer.ClearPostProcessShader();
+							LastPostProcessShader = {};
+						} else if (const engine::render::ShaderModule *module =
+									   Shaders.Find(wantedPostProcess);
+								   module != nullptr && module->Error.empty() &&
+								   Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
+							LastPostProcessShader = wantedPostProcess;
 						}
 					}
 				}
@@ -2288,11 +2319,15 @@ namespace studio {
 					ENGINE_PROFILE_CAT("editable upload", engine::core::ProfileCategory::Assets);
 					{
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
-						VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						if (!clientPresentation || ClientSettings.EnableEditableMeshes) {
+							VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						}
 					}
 					{
 						ENGINE_PROFILE_CAT("editable images", engine::core::ProfileCategory::Assets);
-						VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						if (!clientPresentation || ClientSettings.EnableEditableImages) {
+							VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						}
 					}
 
 					// **And the collision shapes, which the editor needs on a
@@ -2496,7 +2531,7 @@ namespace studio {
 					.Resources = VisualResourceRevision,
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
-					.PostProcess = {},
+					.PostProcess = LastPostProcessShader,
 					.Untextured = ShowColliders && ColliderHideTextures,
 				}
 			);
