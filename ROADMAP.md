@@ -40,7 +40,7 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.21
 
 - [x] build out file format even more: save ShaderScripts and universe/world settings; support `.auniverse` manifests with separate `.aworld` files and optional recursive discovery that never walks links.
-- [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
+- [x] ground every verified catalogue asset into the standalone `.aworld` export's sibling `assets/` store, fetching through the configured delivery sources and optionally including raw authoring folders without following links.
 - [x] in CDN, support persisted trained compression dictionaries, configurable Zstd levels, compressed bundle traffic, and prepared-frame caching.
 - [x] let Luau and JavaScript plugins modify viewport grid colours, step/scale, major spacing, reach/size, strength, alpha, and X/Z offsets through the shared host surface.
 - [x] let plugins enable or disable visible particles without changing emitter state.
@@ -55,7 +55,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add script-editor customization: a persisted code background override can follow or replace the active theme, and the minimap can be toggled independently.
 - [x] add external editor connections for the system default, Visual Studio Code, Notepad and a custom executable; program and ShaderScript tabs use watched staging files, import external writes, and expose two-sided conflict resolution.
 - [x] add a Script Editor preferences page for the selected external editor, executable override, background and minimap.
-- [x] add processed and optional raw grounded-asset options to standalone `.aworld` export.
 - [x] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [x] add shared DataStore and MemoryStore administration, durable local DataStore images, isolated mock/live folders, server and Studio local-provider settings, and a Default Studio dataset editor plugin.
 - [_] add remote datastore choices and per-datastore backend assignment through the DataStoreRouter/DataStoreAdapter seam below.
