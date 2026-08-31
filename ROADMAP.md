@@ -135,6 +135,7 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 
 ### FUTURE
 
+- [_] review additions from v0.20 and refine further, was rewriting alot so its experimental
 - [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
 - [_] unity porting tools / unity shop
 - [_] consider adding C# as another scripting langauge?
