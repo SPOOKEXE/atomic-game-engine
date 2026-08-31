@@ -46,6 +46,8 @@
 // file on disk. A plugin cannot read `/etc/passwd` by calling it, which is the
 // property that matters.
 
+#include "SourceEditor.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
@@ -1102,9 +1104,7 @@ namespace studio {
 			}
 			bool script = false;
 			Owner.Universe->Enter(Owner.Active, [&](Store &store) {
-				const engine::ecs::ClassId container =
-					engine::ecs::Classes::Find(engine::core::Name("LuaSourceContainer"));
-				script = container.IsValid() && store.Alive(instance) && store.IsA(instance, container);
+				script = SourceDocumentKindOf(store, instance).has_value();
 			});
 			if (!script) {
 				failure = "OpenScript takes a script instance in the active world";

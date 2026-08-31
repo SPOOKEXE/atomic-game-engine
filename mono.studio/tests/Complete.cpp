@@ -34,6 +34,7 @@ using engine::script::NameKind;
 using engine::script::ScriptSurface;
 using studio::CompleteAt;
 using studio::Completion;
+using studio::CompletionDomain;
 using studio::CompletionKind;
 using studio::CompletionQuery;
 using studio::CompletionSources;
@@ -85,6 +86,18 @@ namespace {
 		sources.Surface = &surface;
 		sources.Children = children;
 
+		return CompleteAt(text, caret, sources);
+	}
+
+	std::vector<Completion> CompleteShader(const std::string &marked) {
+		const size_t caret = marked.find('|');
+		REQUIRE(caret != std::string::npos);
+
+		std::string text = marked;
+		text.erase(caret, 1);
+
+		CompletionSources sources;
+		sources.Domain = CompletionDomain::Shader;
 		return CompleteAt(text, caret, sources);
 	}
 
@@ -381,6 +394,37 @@ TEST_CASE("a missing VM degrades the list rather than emptying it", "[studio][co
 	CHECK(Offers(entries, "Anchored"));
 }
 
+TEST_CASE("a shader script completes against GLSL rather than the engine VM", "[studio][complete]") {
+	SECTION("types, functions and fragment built-ins are offered") {
+		CHECK(Offers(CompleteShader("#ver|"), "version"));
+		CHECK(Offers(CompleteShader("ve|"), "vec4"));
+		CHECK(Offers(CompleteShader("tex|"), "texture"));
+		CHECK(Offers(CompleteShader("gl_Frag|"), "gl_FragCoord"));
+	}
+
+	SECTION("vector member access offers swizzles") {
+		const std::vector<Completion> entries = CompleteShader("colour.r|");
+		CHECK(Offers(entries, "r"));
+		CHECK(Offers(entries, "rgb"));
+		CHECK_FALSE(Offers(entries, "Anchored"));
+		CHECK_FALSE(Offers(entries, "Destroy"));
+	}
+
+	SECTION("script vocabulary and scene names do not leak into a shader") {
+		CHECK_FALSE(Offers(CompleteShader("loc|"), "local"));
+		CHECK_FALSE(Offers(CompleteShader("work|"), "workspace"));
+		CHECK_FALSE(Offers(CompleteShader("Par|"), "Part"));
+	}
+
+	SECTION("identifiers already authored in the shader remain useful") {
+		CHECK(Offers(CompleteShader("vec3 surfaceColour;\nsurf|"), "surfaceColour"));
+	}
+
+	SECTION("quoted text is not code completion") {
+		CHECK(CompleteShader("const charName = \"ve|\";").empty());
+	}
+}
+
 TEST_CASE("insertable classes exclude services and abstract bases", "[studio][complete]") {
 	const Fixture fixture;
 	engine::ecs::Store world("complete_services");
@@ -493,9 +537,13 @@ TEST_CASE("every completion kind describes itself", "[studio][complete]") {
 		 {CompletionKind::Class,
 		  CompletionKind::Property,
 		  CompletionKind::Member,
+		  CompletionKind::Swizzle,
 		  CompletionKind::Enum,
 		  CompletionKind::Global,
 		  CompletionKind::Keyword,
+		  CompletionKind::Type,
+		  CompletionKind::Function,
+		  CompletionKind::Builtin,
 		  CompletionKind::Local,
 		  CompletionKind::Child}) {
 		CHECK_FALSE(studio::Describe(kind).empty());
