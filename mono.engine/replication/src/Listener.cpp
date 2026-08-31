@@ -91,6 +91,7 @@ namespace engine::replication {
 			}
 
 			peer->Identity = claim.Key;
+			ENGINE_INFO("replication: client {} proved identity {}", client.Index, claim.Key.ToHex());
 			return true;
 		});
 
@@ -646,6 +647,13 @@ namespace engine::replication {
 			// through `Advance`'s ordinary link timeout if it never identifies,
 			// which is why this needs no deadline of its own.
 			if (RequireIdentity && !peer.Identity.has_value()) {
+				// Publishing has already advanced the authority's cursors. Hand
+				// every withheld message back or a world that existed before the
+				// identity claim is silently consumed and never reaches this peer.
+				const std::span<const std::vector<std::byte>> withheld = Authority_.Outgoing(peer.Client);
+				for (size_t index = 0; index < withheld.size(); index++) {
+					Authority_.Unsent(peer.Client, index);
+				}
 				peer.Wire->Flush(nowSeconds);
 				continue;
 			}
