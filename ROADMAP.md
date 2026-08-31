@@ -75,6 +75,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
+- [_] build out the bladeborne demo into a full mmo, test with thousands of connected clients with ai minds for them so they can run and do stuff
 
 - [x] add the datastore routing seam: `DataStoreRouter` assigns stable datastore names to `DataStoreAdapter` providers owned by `DataStorageServices`; server and Studio persistence use its built-in atomic file adapter, while remote provider choices remain the current-work item above.
 
