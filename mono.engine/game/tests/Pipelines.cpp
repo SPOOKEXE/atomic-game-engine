@@ -128,6 +128,30 @@ TEST_CASE("rendering profiles are written once outside every world", "[game]") {
 	CHECK(text.find("<Pipelines>") == std::string::npos);
 }
 
+TEST_CASE("multi-file universe manifests carry shared rendering profiles", "[game]") {
+	engine::game::RegisterGameClasses();
+
+	Universe source;
+	const WorldId start = AddWorld(source, "Start");
+	REQUIRE(source.SetRenderingProfile(start, Name("reflection")) == engine::world::WorldStatus::Ok);
+
+	const std::filesystem::path directory =
+		std::filesystem::temp_directory_path() / "engine-game-multifile-pipelines";
+	std::filesystem::remove_all(directory);
+	std::filesystem::create_directories(directory);
+	const std::filesystem::path path = directory / "pipelines.auniverse";
+	std::string error;
+	REQUIRE(SaveGame(source, Name("Pipelines"), TwoPipelines(), path, error));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	CHECK(info.RenderingProfiles.Count() == 2);
+	CHECK(loaded.SettingsOf(loaded.Find(Name("Start"))).RenderingProfile == Name("reflection"));
+
+	std::filesystem::remove_all(directory);
+}
+
 TEST_CASE("an empty rendering profile library writes no element and loads clean", "[game]") {
 	// The ordinary case for a program constructing a universe directly, and it
 	// must not cost a byte.
