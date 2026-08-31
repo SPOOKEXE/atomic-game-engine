@@ -25,7 +25,7 @@
 
 TEST_SUITE_ID("engine.replication.prioritywindow")
 // The window is a slice of the order the authority builds.
-TEST_DEPENDS("engine.replication.replication")
+TEST_DEPENDS("engine.replication.stream")
 // The scorer whose two halves this splits.
 TEST_DEPENDS("engine.replication.priority")
 
