@@ -70,6 +70,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
 - [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
 - [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
+- [_] (user) review v0.21 and ensure everything is implemented for studio and such (e.g. editing shader scripts and using them)
 
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
