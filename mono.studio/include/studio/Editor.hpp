@@ -4726,6 +4726,10 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+
+		// Appearance of the depth-tested and drag-overlay copies of the grid.
+		// Plugins edit this one value and both paths read it each frame.
+		engine::render::View::GroundGrid GridSettings;
 		// Direction widget, cursor, orbit mode, direction lock, and config drafts.
 		//@{
 		bool ShowDirectionGizmo = true;

@@ -740,6 +740,10 @@ namespace engine::render {
 			// the whole grid without restating its colours.
 			float Strength = 1.0f;
 
+			// World-space X/Z origin used for line placement and the two axes.
+			// The ground plane itself remains at Y zero.
+			core::Vector3 Offset{};
+
 			// The line colour, and the alpha a heavy line reaches.
 			//@{
 			core::Color3 Colour{0.6f, 0.65f, 0.75f};

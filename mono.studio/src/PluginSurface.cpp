@@ -93,6 +93,28 @@ namespace studio {
 			out = static_cast<size_t>(number) - 1;
 			return true;
 		}
+
+		std::string ColourText(const engine::core::Color3 &colour) {
+			const auto channel = [](float value) {
+				return static_cast<unsigned int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+			};
+			return engine::ui::ColourText(
+				IM_COL32(channel(colour.R), channel(colour.G), channel(colour.B), 255u)
+			);
+		}
+
+		bool ParseColour(const HostValue &value, engine::core::Color3 &out) {
+			const std::optional<unsigned int> packed = engine::ui::ParseColourText(value.AsText());
+			if (!packed) {
+				return false;
+			}
+			out = engine::core::Color3{
+				static_cast<float>((*packed >> IM_COL32_R_SHIFT) & 0xFFu) / 255.0f,
+				static_cast<float>((*packed >> IM_COL32_G_SHIFT) & 0xFFu) / 255.0f,
+				static_cast<float>((*packed >> IM_COL32_B_SHIFT) & 0xFFu) / 255.0f,
+			};
+			return true;
+		}
 	}
 
 	// The editor's half of the seam, one per plugin.
@@ -1054,6 +1076,76 @@ namespace studio {
 			}
 
 			const std::string option(At(arguments, 0).AsText());
+			engine::core::Color3 *colour = nullptr;
+			if (option == "Grid Colour" || option == "Grid Color") {
+				colour = &Owner.GridSettings.Colour;
+			} else if (option == "Grid Axis X Colour" || option == "Grid Axis X Color") {
+				colour = &Owner.GridSettings.AxisX;
+			} else if (option == "Grid Axis Z Colour" || option == "Grid Axis Z Color") {
+				colour = &Owner.GridSettings.AxisZ;
+			}
+			if (colour != nullptr) {
+				if (name == "GetViewportOption") {
+					result = HostValue::Of(ColourText(*colour));
+					return true;
+				}
+				if (!ParseColour(At(arguments, 1), *colour)) {
+					failure = option + " has to be RRGGBB or RRGGBBAA text";
+					return false;
+				}
+				return true;
+			}
+
+			float *number = nullptr;
+			double minimum = 0.0;
+			double maximum = 0.0;
+			bool integer = false;
+			if (option == "Grid Step" || option == "Grid Scale") {
+				number = &Owner.GridSettings.Step;
+				minimum = 0.01;
+				maximum = 1000.0;
+			} else if (option == "Grid Major") {
+				number = &Owner.GridSettings.Major;
+				minimum = 1.0;
+				maximum = 100.0;
+				integer = true;
+			} else if (option == "Grid Reach" || option == "Grid Size") {
+				number = &Owner.GridSettings.Reach;
+				minimum = 1.0;
+				maximum = 100000.0;
+			} else if (option == "Grid Strength") {
+				number = &Owner.GridSettings.Strength;
+				maximum = 1.0;
+			} else if (option == "Grid Alpha") {
+				number = &Owner.GridSettings.Alpha;
+				maximum = 1.0;
+			} else if (option == "Grid Axis Alpha") {
+				number = &Owner.GridSettings.AxisAlpha;
+				maximum = 1.0;
+			} else if (option == "Grid Offset X") {
+				number = &Owner.GridSettings.Offset.X;
+				minimum = -1000000.0;
+				maximum = 1000000.0;
+			} else if (option == "Grid Offset Z") {
+				number = &Owner.GridSettings.Offset.Z;
+				minimum = -1000000.0;
+				maximum = 1000000.0;
+			}
+			if (number != nullptr) {
+				if (name == "GetViewportOption") {
+					result = HostValue::Of(static_cast<double>(*number));
+					return true;
+				}
+				const double value = At(arguments, 1).AsNumber(std::numeric_limits<double>::quiet_NaN());
+				if (!std::isfinite(value) || value < minimum || value > maximum ||
+					(integer && value != std::floor(value))) {
+					failure = option + " is outside its supported range";
+					return false;
+				}
+				*number = static_cast<float>(value);
+				return true;
+			}
+
 			bool *toggle = nullptr;
 			if (option == "Grid") {
 				toggle = &Owner.ShowGrid;

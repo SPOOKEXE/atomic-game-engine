@@ -49,12 +49,12 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add custom backgrounds and customization to the script editor too
 - [_] add external editor connections like vscode, notepad, etc.
 - [_] add settings for selected external editors
-- [_] plugin modify the viewport grid colors, sizes/scales, offsets, etc
-- [_] plugin enable/disable visible particles
+- [x] let Luau and JavaScript plugins modify viewport grid colours, step/scale, major spacing, reach/size, strength, alpha, and X/Z offsets through the shared host surface.
+- [x] let plugins enable or disable visible particles without changing emitter state.
 - [_] ask about the other view widgets and which you actually would change to dockwidgets.
-- [_] build out more plugins layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
+- [x] route native editor behavior through one value-based plugin host surface shared by Luau and JavaScript.
 - [_] move a bunch of View > ... widgets into plugins instead. List: explorer, properties, component inspector, script editor
-- [_] build out more plugin functions (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [x] add plugin functions for dropdowns, toolbar layout, viewport creation/options, docked widgets, and script-editor source/open integration.
 - [x] give a universe a shared `assets/` store and mount it automatically as the first local content source when the universe loads.
 - [x] add a universe loading widget that lists declared CDNs and requests permission before enabling HTTP content access.
 - [x] add universe loader tabs: General, Assets, Permissions, CDN, and Misc, with all-world and inherited per-world views.

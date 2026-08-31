@@ -44,18 +44,6 @@ namespace studio {
 	using engine::world::WorldId;
 
 	namespace {
-		// How far the grid reaches from the camera, in cells.
-		//
-		// **Bounded and camera-relative rather than a fixed slab at the
-		// origin.** A grid anchored at the origin disappears the moment
-		// somebody flies away from it, which is exactly when they most need to
-		// know which way is up.
-		//
-		// **160 studs was not far enough to fly in.** At the old radius of 40
-		// the grid ended well inside a baseplate, so anything built at any scale
-		// stood on nothing. 120 cells is 480 studs, three times the reach.
-		constexpr int GRID_RADIUS = 120;
-
 		// Where the grid stops drawing every line and draws only the heavy ones.
 		//
 		// **Tripling the radius must not triple the segment count.** Every line
@@ -69,10 +57,6 @@ namespace studio {
 		// The near band keeps the old radius exactly, so nothing within 160
 		// studs looks any different from before.
 		constexpr int GRID_DENSE = 40;
-
-		// Metres per cell, and per heavy cell.
-		constexpr float GRID_STEP = 4.0f;
-		constexpr int GRID_MAJOR = 5;
 
 		// Lines are drawn thinner than the axes so the axes read as different
 		// things rather than as brighter grid lines.
@@ -109,15 +93,15 @@ namespace studio {
 		// though every thin line was standing still.
 		//
 		// `std::lround` rather than a cast, because the coordinate is a
-		// multiple of `GRID_STEP` computed in floating point and truncating
+		// multiple of the configured step computed in floating point and truncating
 		// `-4.0f/4.0f` that arrives as `-0.9999999` gives 0 rather than -1 -
 		// which would put two heavy lines side by side at the origin.
 		//
 		// @param coordinate A world X or Z that a grid line sits on.
 		// @return `true` when the line should be drawn heavy.
-		bool IsMajorLine(float coordinate) {
-			const long cell = std::lround(coordinate / GRID_STEP);
-			return cell % GRID_MAJOR == 0;
+		bool IsMajorLine(float coordinate, float origin, float step, int major) {
+			const long cell = std::lround((coordinate - origin) / step);
+			return cell % major == 0;
 		}
 
 		// How much of its strength the grid keeps while nothing is being
@@ -137,9 +121,10 @@ namespace studio {
 		//
 		// @param fade  The distance fade, from `GridFade`.
 		// @param major Whether this is one of the heavy lines.
-		ImU32 GridColour(float fade, bool major) {
-			const float alpha = std::clamp(fade, 0.0f, 1.0f) * (major ? 0.5f : 0.25f);
-			return ImGui::GetColorU32(ImVec4(0.6f, 0.65f, 0.75f, alpha));
+		ImU32
+		GridColour(float fade, bool major, const engine::core::Color3 &colour, float alpha, float strength) {
+			const float opacity = std::clamp(fade, 0.0f, 1.0f) * (major ? alpha : alpha * 0.5f) * strength;
+			return ImGui::GetColorU32(ImVec4(colour.R, colour.G, colour.B, opacity));
 		}
 
 		// How visible a piece of grid is, from where its middle is.
@@ -175,17 +160,15 @@ namespace studio {
 			return;
 		}
 
+		view.Grid = GridSettings;
 		view.Grid.Enabled = true;
-		view.Grid.Step = GRID_STEP;
-		view.Grid.Major = static_cast<float>(GRID_MAJOR);
-		view.Grid.Reach = static_cast<float>(GRID_RADIUS) * GRID_STEP;
 
 		// **Whole while a handle is held and faint otherwise**, which is the
 		// same rule the overlay copy below uses and the same reason: while a
 		// drag is running the grid is the thing being read, and the rest of the
 		// time it is furniture behind whatever is being looked at.
 		const bool dragged = Dragging.Axis >= 0 || SurfaceDragging.Active;
-		view.Grid.Strength = dragged ? 1.0f : GRID_IDLE;
+		view.Grid.Strength *= dragged ? 1.0f : GRID_IDLE;
 	}
 
 	PanelProjection Editor::ProjectionFor(size_t viewport) {
@@ -504,9 +487,15 @@ namespace studio {
 
 			if (ShowGrid && authoring && dragged) {
 				const Vector3 eye = panel.Eye;
-				const float originX = SnapDown(eye.X, GRID_STEP);
-				const float originZ = SnapDown(eye.Z, GRID_STEP);
-				const float reach = GRID_RADIUS * GRID_STEP;
+				const float gridStep = GridSettings.Step;
+				const int gridMajor = static_cast<int>(GridSettings.Major);
+				const int gridRadius = static_cast<int>(std::ceil(GridSettings.Reach / gridStep));
+				const int gridDense = std::min(GRID_DENSE, gridRadius);
+				const float gridOriginX = GridSettings.Offset.X;
+				const float gridOriginZ = GridSettings.Offset.Z;
+				const float originX = gridOriginX + SnapDown(eye.X - gridOriginX, gridStep);
+				const float originZ = gridOriginZ + SnapDown(eye.Z - gridOriginZ, gridStep);
+				const float reach = GridSettings.Reach;
 
 				// One line, cut into pieces, each faded by where its own middle
 				// is. See `GRID_PIECES` and `GridFade` for why a whole line
@@ -516,7 +505,8 @@ namespace studio {
 				// coordinate that picks the line, so the same lambda draws both
 				// directions and there is one copy of the fading to be wrong in.
 				const auto fadedLine = [&](float across, bool alongZ) {
-					const bool major = IsMajorLine(across);
+					const float gridOrigin = alongZ ? gridOriginX : gridOriginZ;
+					const bool major = IsMajorLine(across, gridOrigin, gridStep, gridMajor);
 					const float centre = alongZ ? originZ : originX;
 					const float span = (2.0f * reach) / static_cast<float>(GRID_PIECES);
 
@@ -535,14 +525,23 @@ namespace studio {
 						const Vector3 from =
 							alongZ ? Vector3{across, 0.0f, start} : Vector3{start, 0.0f, across};
 						const Vector3 to = alongZ ? Vector3{across, 0.0f, end} : Vector3{end, 0.0f, across};
-						segment(from, to, GridColour(fade, major), GRID_THICKNESS);
+						segment(
+							from,
+							to,
+							GridColour(
+								fade, major, GridSettings.Colour, GridSettings.Alpha, GridSettings.Strength
+							),
+							GRID_THICKNESS
+						);
 					}
 				};
 
-				for (int step = -GRID_RADIUS; step <= GRID_RADIUS; step++) {
-					const float offset = static_cast<float>(step) * GRID_STEP;
+				for (int step = -gridRadius; step <= gridRadius; step++) {
+					const float offset = static_cast<float>(step) * gridStep;
 					const float x = originX + offset;
 					const float z = originZ + offset;
+					const bool majorX = IsMajorLine(x, gridOriginX, gridStep, gridMajor);
+					const bool majorZ = IsMajorLine(z, gridOriginZ, gridStep, gridMajor);
 
 					// **The axes are drawn separately below, so the two lines
 					// that would sit under them are skipped.** Drawing both
@@ -550,14 +549,14 @@ namespace studio {
 					// reads as the axis being the wrong colour.
 					// Past the dense band, only the heavy lines continue. See
 					// `GRID_DENSE`.
-					if (std::abs(step) > GRID_DENSE && !IsMajorLine(x) && !IsMajorLine(z)) {
+					if (std::abs(step) > gridDense && !majorX && !majorZ) {
 						continue;
 					}
 
-					if (std::abs(x) > 0.001f && (std::abs(step) <= GRID_DENSE || IsMajorLine(x))) {
+					if (std::abs(x - gridOriginX) > 0.001f && (std::abs(step) <= gridDense || majorX)) {
 						fadedLine(x, true);
 					}
-					if (std::abs(z) > 0.001f && (std::abs(step) <= GRID_DENSE || IsMajorLine(z))) {
+					if (std::abs(z - gridOriginZ) > 0.001f && (std::abs(step) <= gridDense || majorZ)) {
 						fadedLine(z, false);
 					}
 				}
@@ -565,22 +564,32 @@ namespace studio {
 				// The origin axes, in the conventional colours: X red, Z blue.
 				// Y is not drawn along the ground because it is not on it -
 				// a vertical line at the origin instead, so "up" has a mark.
-				const float reachAxis = GRID_RADIUS * GRID_STEP;
+				const float reachAxis = reach;
 				segment(
-					Vector3{originX - reachAxis, 0.0f, 0.0f},
-					Vector3{originX + reachAxis, 0.0f, 0.0f},
-					ImGui::GetColorU32(ImVec4(0.85f, 0.30f, 0.32f, 0.65f)),
+					Vector3{originX - reachAxis, 0.0f, gridOriginZ},
+					Vector3{originX + reachAxis, 0.0f, gridOriginZ},
+					ImGui::GetColorU32(ImVec4(
+						GridSettings.AxisX.R,
+						GridSettings.AxisX.G,
+						GridSettings.AxisX.B,
+						GridSettings.AxisAlpha * GridSettings.Strength
+					)),
 					AXIS_THICKNESS
 				);
 				segment(
-					Vector3{0.0f, 0.0f, originZ - reachAxis},
-					Vector3{0.0f, 0.0f, originZ + reachAxis},
-					ImGui::GetColorU32(ImVec4(0.32f, 0.50f, 0.90f, 0.65f)),
+					Vector3{gridOriginX, 0.0f, originZ - reachAxis},
+					Vector3{gridOriginX, 0.0f, originZ + reachAxis},
+					ImGui::GetColorU32(ImVec4(
+						GridSettings.AxisZ.R,
+						GridSettings.AxisZ.G,
+						GridSettings.AxisZ.B,
+						GridSettings.AxisAlpha * GridSettings.Strength
+					)),
 					AXIS_THICKNESS
 				);
 				segment(
-					Vector3{0.0f, 0.0f, 0.0f},
-					Vector3{0.0f, GRID_STEP, 0.0f},
+					Vector3{gridOriginX, 0.0f, gridOriginZ},
+					Vector3{gridOriginX, gridStep, gridOriginZ},
 					ImGui::GetColorU32(ImVec4(0.45f, 0.85f, 0.40f, 0.65f)),
 					AXIS_THICKNESS
 				);

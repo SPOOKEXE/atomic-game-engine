@@ -25,6 +25,7 @@
 #include <set>
 #include <string>
 #include <studio/Config.hpp>
+#include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
 #include <vector>
 
@@ -88,6 +89,13 @@ namespace {
 				std::ofstream script(Root / folder / "main.luau");
 				script << source;
 			}
+		}
+
+		void
+		AddWithMain(const std::string &folder, const char *manifest, const char *main, const char *source) {
+			std::filesystem::create_directories(Root / folder);
+			std::ofstream(Root / folder / "plugin.json") << manifest;
+			std::ofstream(Root / folder / main) << source;
 		}
 	};
 
@@ -843,6 +851,60 @@ TEST_CASE("a plugin creates toolbars and buttons at its top level", "[studio][pl
 	CHECK(plugins.front().Vm->Invoke(click, {}));
 
 	(void)surface;
+}
+
+TEST_CASE("Luau and JavaScript plugins configure the same viewport grid", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.AddWithMain(
+		"grid-luau",
+		R"({"name":"Grid Luau","main":"main.luau"})",
+		"main.luau",
+		"plugin.SetViewportOption('Grid Step', 2.5)\n"
+		"plugin.SetViewportOption('Grid Major', 6)\n"
+		"plugin.SetViewportOption('Grid Offset X', 12)\n"
+		"plugin.SetViewportOption('Grid Colour', '#336699')\n"
+		"plugin.SetViewportOption('Particles', false)\n"
+		"local bar = plugin.CreateToolbar('Grid Controls')\n"
+		"plugin.CreateDropdown(bar, 'Spacing', '', {'Fine', 'Coarse'}, 1, function() end)\n"
+		"assert(plugin.GetViewportOption('Grid Step') == 2.5)\n"
+		"assert(plugin.GetViewportOption('Grid Major') == 6)\n"
+		"assert(plugin.GetViewportOption('Grid Offset X') == 12)\n"
+		"assert(plugin.GetViewportOption('Grid Colour') == '336699FF')\n"
+		"assert(plugin.GetViewportOption('Particles') == false)\n"
+	);
+	folder.AddWithMain(
+		"grid-js",
+		R"({"name":"Grid JavaScript","main":"main.js"})",
+		"main.js",
+		"plugin.SetViewportOption('Grid Scale', 3.5);\n"
+		"plugin.SetViewportOption('Grid Size', 900);\n"
+		"plugin.SetViewportOption('Grid Offset Z', -24);\n"
+		"plugin.SetViewportOption('Grid Axis X Color', '#CC3344');\n"
+		"const bar = plugin.CreateToolbar('Grid Controls JS');\n"
+		"plugin.CreateDropdown(bar, 'Spacing', '', ['Fine', 'Coarse'], 2, function() {});\n"
+		"if (plugin.GetViewportOption('Grid Scale') !== 3.5) throw new Error('step');\n"
+		"if (plugin.GetViewportOption('Grid Size') !== 900) throw new Error('reach');\n"
+		"if (plugin.GetViewportOption('Grid Offset Z') !== -24) throw new Error('offset');\n"
+		"if (plugin.GetViewportOption('Grid Axis X Colour') !== 'CC3344FF') throw new Error('colour');\n"
+	);
+
+	studio::Editor editor;
+	Store store("plugin-grid-options");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin);
+	});
+
+	REQUIRE(plugins.size() == 2);
+	for (const LoadedPlugin &plugin : plugins) {
+		INFO(plugin.Manifest.Name << ": " << plugin.Error);
+		CHECK(plugin.Running);
+		REQUIRE(plugin.Toolbars.size() == 1);
+		REQUIRE(plugin.Toolbars.front().Buttons.size() == 1);
+		CHECK(plugin.Toolbars.front().Buttons.front().Kind == PluginControlKind::Dropdown);
+		CHECK(plugin.Toolbars.front().Buttons.front().Options.size() == 2);
+	}
 }
 
 TEST_CASE("a Luau plugin declares a pinned toolbar grid and label", "[studio][plugins]") {

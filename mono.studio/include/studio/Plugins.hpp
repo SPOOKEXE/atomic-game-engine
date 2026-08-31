@@ -72,6 +72,14 @@
 // | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Combo`, `.Separator`,
 // `.InputText` |
 //
+// Viewport options use stable text names. `Grid`, `Particles`, `Direction
+// Gizmo`, `3D Cursor`, `Orbit`, `Lock Direction`, and `Collider Outlines` are
+// booleans. `Camera Speed`, `Grid Step` (`Grid Scale`), `Grid Major`, `Grid
+// Reach` (`Grid Size`), `Grid Strength`, `Grid Alpha`, `Grid Axis Alpha`,
+// `Grid Offset X`, and `Grid Offset Z` are numbers. `Grid Colour`, `Grid Axis X
+// Colour`, and `Grid Axis Z Colour` take `RRGGBB` or `RRGGBBAA` text; `Color`
+// spellings are accepted too.
+//
 // **`Selection` is a service and the rest is a table**, which is Roblox's own
 // split rather than an inconsistency: a selection is a thing the editor *has*,
 // so it is reached with `game:GetService` like every other service, and the
