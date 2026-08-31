@@ -27,9 +27,9 @@
 //   Each is a parsing subtlety with a documented desync behind it.
 //
 // **Every byte parsed here is hostile.** A request arrives from anyone who can
-// reach the port and a response arrives from an origin anyone can run. Nothing here allocates from a length field it has not
-// bounded, and a malformed message is refused whole rather than half-read into
-// a partly filled value - the shape a caller uses by accident.
+// reach the port and a response arrives from an origin anyone can run. Nothing here allocates from a length
+// field it has not bounded, and a malformed message is refused whole rather than half-read into a partly
+// filled value - the shape a caller uses by accident.
 //
 // @tier L11 · shared
 

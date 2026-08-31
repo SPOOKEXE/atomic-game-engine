@@ -167,11 +167,9 @@ namespace engine::physics {
 			(void)scene::RefreshEditableMeshCollision(store);
 		});
 
-		// One system per phase rather than one per step. `ecs::Scheduler` gives
-		// no ordering between two systems in one phase, and `SyncBroadphase`
-		// reading what `IntegrateMotion` just wrote is a hard dependency - so
-		// the order is composition, which the contract supports, and not
-		// registration order, which it does not. Each step opens its own
+		// One system per phase rather than one per step. `SyncBroadphase`
+		// reading what `IntegrateMotion` just wrote is a tight dependency, so
+		// this pipeline remains one indivisible scheduled operation. Each step opens its own
 		// profiler span, so the overlay still separates them.
 		scheduler.Add("physics.simulation", ecs::Phase::Simulation, [](ecs::Store &store) {
 			// **The tick is charged here and spent across both systems.** A

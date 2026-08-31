@@ -62,7 +62,12 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 		part,
 		engine::scene::SurfaceAppearance{
 			.ColourMap = Name("part.atex"),
+			.NormalMap = Name("part-normal.atex"),
+			.RoughnessMap = Name("part-roughness.atex"),
+			.OcclusionMap = Name("part-occlusion.atex"),
+			.HeightMap = Name("part-height.atex"),
 			.MetalnessMap = Name("part-metalness.atex"),
+			.EmissiveMap = Name("part-emissive.atex"),
 		}
 	);
 
@@ -86,6 +91,16 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	swoosh.Texture = Name("swoosh.atex");
 	store.Set(trail, swoosh);
 
+	const Entity decal = store.Create();
+	engine::effects::Decal sign;
+	sign.Image = Name("sign.atex");
+	store.Set(decal, sign);
+
+	const Entity texture = store.Create();
+	engine::effects::Texture tiles;
+	tiles.Image = Name("tiles.atex");
+	store.Set(texture, tiles);
+
 	// **The kinds that used to be fetched by kind**, which is what the freeze
 	// was: a mesh and a material are named by a world exactly as a texture is,
 	// and asking for all of them instead pulled the whole store.
@@ -106,11 +121,18 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	client::CollectWantedContent(store, wanted);
 
 	CHECK(Holds(wanted, "part.atex"));
+	CHECK(Holds(wanted, "part-normal.atex"));
+	CHECK(Holds(wanted, "part-roughness.atex"));
+	CHECK(Holds(wanted, "part-occlusion.atex"));
+	CHECK(Holds(wanted, "part-height.atex"));
 	CHECK(Holds(wanted, "part-metalness.atex"));
+	CHECK(Holds(wanted, "part-emissive.atex"));
 	CHECK(Holds(wanted, "label.atex"));
 	CHECK(Holds(wanted, "spark.atex"));
 	CHECK(Holds(wanted, "bolt.atex"));
 	CHECK(Holds(wanted, "swoosh.atex"));
+	CHECK(Holds(wanted, "sign.atex"));
+	CHECK(Holds(wanted, "tiles.atex"));
 
 	CHECK(Holds(wanted, "model.amesh"));
 	CHECK(Holds(wanted, "oak.amat"));

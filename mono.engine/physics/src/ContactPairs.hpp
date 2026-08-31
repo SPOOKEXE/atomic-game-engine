@@ -104,7 +104,8 @@ namespace engine::physics {
 	//
 	// @since v0.17
 	constexpr bool Baked(scene::ShapeKind kind) {
-		return kind == scene::ShapeKind::Hull || kind == scene::ShapeKind::Mesh;
+		return kind == scene::ShapeKind::Hull || kind == scene::ShapeKind::Mesh ||
+			   kind == scene::ShapeKind::Capsule;
 	}
 
 	// The contact between two shapes at least one of which is baked.

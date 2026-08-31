@@ -164,6 +164,38 @@ TEST_CASE("a breakpoint matches a path by its tail", "[debugger]") {
 	CHECK(debug.Match("scripts/ai/friend.luau", 12) == nullptr);
 }
 
+TEST_CASE("a breakpoint fires with a path like examples/test.luau", "[debugger]") {
+	// Example scenes use paths like examples/MeshGrid.luau. The chunk name
+	// passed to Luau is =examples/..., and short_src should include that.
+	// The breakpoint source is examples/... (without =). Suffix match must work.
+	Store store("debug_test");
+	engine::scene::EnsureClassTree();
+	engine::script::RegisterScriptComponents();
+	store.SetResource(engine::script::SourceCache{});
+
+	constexpr const char *PROGRAM2 = R"(
+local a = 1
+local b = 2
+return a + b
+)";
+
+	store.ResourceMutable<engine::script::SourceCache>()->Set(Name("examples/test.luau"), PROGRAM2);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+	runtime->Debug().Add("examples/test.luau", 2);
+
+	REQUIRE(runtime->Debug().Armed());
+	REQUIRE(runtime->Run(PROGRAM2, "examples/test.luau"));
+
+	const std::span<const engine::script::DebugHit> hits = runtime->Debug().Hits();
+	REQUIRE_FALSE(hits.empty());
+
+	for (const engine::script::DebugHit &hit : hits) {
+		CHECK(hit.Line == 2);
+		CHECK(hit.Source == "examples/test.luau");
+	}
+}
+
 TEST_CASE("adding twice at one place replaces rather than duplicates", "[debugger]") {
 	// Two breakpoints on one line is two reports of one event and no way to
 	// tell which is which.

@@ -21,6 +21,7 @@
 #include <engine/script/Bus.hpp>
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
+#include <engine/script/ComputeJobs.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Runtime.hpp>
@@ -61,6 +62,23 @@ namespace engine::script {
 
 		// What the host is, for `RunService.IsServer()` and friends.
 		HostRole Role;
+
+		// The services this runtime may reach.
+		ScriptCapabilities Access = ScriptCapabilities::None;
+
+		// The program surface installed for plugin runtimes.
+		HostSurface *Host = nullptr;
+
+		// Stable host callback ids over the callable table below. The callable
+		// table owns the QuickJS values and recycles its slots; these ids never
+		// expose those implementation details to the host.
+		uint64_t NextHostCallback = 0;
+		std::unordered_map<uint64_t, CallbackRef> HostCallbacks;
+
+		// What the last host installation added to the global. Kept so replacing
+		// or removing a host does not leave stale service objects behind.
+		std::string HostGlobal;
+		std::vector<std::string> HostServices;
 
 		// The shared machinery.
 		SignalTable Signals;
@@ -214,6 +232,9 @@ namespace engine::script {
 
 		EditableMeshJobs EditableMeshes;
 		std::unordered_map<uint64_t, CallbackRef> AwaitedEditableMeshes;
+
+		ComputeJobs Computations;
+		std::unordered_map<uint64_t, CallbackRef> AwaitedComputations;
 
 		// How many ticks a `task.wait` asked for, so its resolution can report
 		// how long it actually waited. Keyed by the resolver's ref.

@@ -96,6 +96,15 @@ namespace engine::scene {
 		//
 		// @since v0.17
 		Mesh,
+
+		// A capsule about the local Y axis, with radius in X and half the
+		// distance between the hemisphere centres in Y.
+		//
+		// Appended because this ordinal is stored in snapshots and replication
+		// payloads. Existing shape values must never move when a kind is added.
+		//
+		// @since v0.20
+		Capsule,
 	};
 
 	// Returns a stable, human-readable name for a body kind.

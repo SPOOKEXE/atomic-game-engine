@@ -194,6 +194,36 @@ TEST_CASE("a raycast hits a sphere and a cylinder where they are", "[physics][qu
 	CHECK(onWall->Normal.X == Approx(1.0f).margin(1e-3));
 }
 
+TEST_CASE("a raycast distinguishes a capsule barrel from its round ends", "[physics][query]") {
+	Store store("query.capsule");
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity capsule = Place(
+		store,
+		Placed{
+			.Extent = Vector3{1.0f, 2.0f, 0.0f},
+			.Shape = ShapeKind::Capsule,
+		}
+	);
+	Index(store);
+
+	const std::optional<ColliderHit> onEnd =
+		Raycast(store, Ray{Vector3{0.0f, 10.0f, 0.0f}, -Vector3::YAxis}, 20.0f);
+	REQUIRE(onEnd.has_value());
+	CHECK(onEnd->Owner == capsule);
+	CHECK(onEnd->Distance == Approx(7.0f).margin(1e-3));
+	CHECK(onEnd->Normal.Y == Approx(1.0f).margin(1e-3));
+
+	const std::optional<ColliderHit> onBarrel =
+		Raycast(store, Ray{Vector3{6.0f, 0.0f, 0.0f}, -Vector3::XAxis}, 20.0f);
+	REQUIRE(onBarrel.has_value());
+	CHECK(onBarrel->Owner == capsule);
+	CHECK(onBarrel->Distance == Approx(5.0f).margin(1e-3));
+	CHECK(onBarrel->Normal.X == Approx(1.0f).margin(1e-3));
+
+	CHECK_FALSE(Raycast(store, Ray{Vector3{6.0f, 2.9f, 0.9f}, -Vector3::XAxis}, 20.0f).has_value());
+}
+
 TEST_CASE("a raycast misses a shape its bound would have caught", "[physics][query]") {
 	// The whole difference between this `Raycast` and `spatial`'s. A ray
 	// through the corner of a sphere's bounding box meets the box and not the

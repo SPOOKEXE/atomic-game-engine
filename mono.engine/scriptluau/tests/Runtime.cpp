@@ -14,6 +14,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scriptluau/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -22,6 +23,7 @@
 TEST_SUITE_ID("engine.scriptluau.runtime")
 // A script's vocabulary is the class tree, so a change to it has to re-run this.
 TEST_DEPENDS("engine.scene.part")
+TEST_DEPENDS("engine.scene.shaders")
 
 using engine::ecs::Store;
 using engine::script::Language;
@@ -64,4 +66,26 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
+}
+
+TEST_CASE("luau creates shader scripts and writes their source", "[scriptluau][shaders]") {
+	RegisterClasses();
+	engine::scene::ShaderScriptClass();
+	Store store("scriptluau_shader_test");
+
+	const auto runtime = MakeLuauRuntime(store);
+	REQUIRE(runtime->Run(R"(
+		local shader = Instance.new("ShaderScript")
+		shader.Name = "Generated"
+		local before = shader.Revision
+		shader.Source = "#version 450\nvoid main() {}"
+		assert(shader.Source == "#version 450\nvoid main() {}", "source did not round-trip")
+		assert(shader.Revision > before, "source write did not move the revision")
+	)"));
+
+	const engine::scene::ShaderText shader =
+		engine::scene::ShaderTextOf(store, engine::core::Name("Generated"));
+	REQUIRE(shader.Found);
+	CHECK(shader.Code == "#version 450\nvoid main() {}");
+	CHECK(shader.Revision > 0);
 }

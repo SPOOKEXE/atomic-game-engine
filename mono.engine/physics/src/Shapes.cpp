@@ -15,6 +15,10 @@ namespace engine::physics {
 		case scene::ShapeKind::Cylinder:
 			// Radius on both axes across the barrel, half-height along it.
 			return core::Vector3{extent.X, extent.Y, extent.X};
+		case scene::ShapeKind::Capsule:
+			// The straight segment reaches Y either side of centre, then each
+			// hemisphere adds the radius in every direction.
+			return core::Vector3{extent.X, extent.Y + extent.X, extent.X};
 
 		case scene::ShapeKind::Hull:
 		case scene::ShapeKind::Mesh:
@@ -71,6 +75,23 @@ namespace engine::physics {
 
 			return core::AABB::FromCentre(
 				frame.Position, core::Vector3{reachOn(axis.X), reachOn(axis.Y), reachOn(axis.Z)}
+			);
+		}
+
+		case scene::ShapeKind::Capsule: {
+			// A line segment of half-length Y swept by a sphere of radius X.
+			// Projecting it onto a world axis is the segment projection plus
+			// the sphere radius.
+			const core::Vector3 axis = frame.UpVector();
+			const float radius = collider.Extent.X;
+			const float halfSegment = collider.Extent.Y;
+			return core::AABB::FromCentre(
+				frame.Position,
+				core::Vector3{
+					radius + halfSegment * std::abs(axis.X),
+					radius + halfSegment * std::abs(axis.Y),
+					radius + halfSegment * std::abs(axis.Z),
+				}
 			);
 		}
 

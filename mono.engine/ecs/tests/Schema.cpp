@@ -6,7 +6,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -17,8 +20,11 @@ using engine::core::Name;
 using engine::ecs::ComponentId;
 using engine::ecs::Components;
 using engine::ecs::Entity;
+using engine::ecs::FieldDescriptor;
+using engine::ecs::FieldPacking;
 using engine::ecs::FieldSpec;
 using engine::ecs::PropertyType;
+using engine::ecs::QueryTerms;
 using engine::ecs::Schema;
 using engine::ecs::Schemas;
 using engine::ecs::Store;
@@ -39,6 +45,23 @@ namespace {
 		REQUIRE(result.Why == Schemas::Status::Ok);
 		REQUIRE(result.Id.IsValid());
 		return result.Id;
+	}
+
+	template <typename Value>
+	void WritePacked(std::vector<std::byte> &row, const Schema &schema, const char *field, Value value) {
+		const FieldDescriptor *descriptor = schema.Find(field);
+		REQUIRE(descriptor != nullptr);
+		REQUIRE(Schemas::WriteField(row.data(), *descriptor, &value));
+	}
+
+	template <typename Value>
+	Value ReadPacked(const std::vector<std::byte> &row, const Schema &schema, const char *field) {
+		const FieldDescriptor *descriptor = schema.Find(field);
+		REQUIRE(descriptor != nullptr);
+		alignas(8) std::array<std::byte, 8> scratch{};
+		const void *value = Schemas::ReadField(row.data(), *descriptor, scratch.data());
+		REQUIRE(value != nullptr);
+		return *static_cast<const Value *>(value);
 	}
 }
 
@@ -103,6 +126,12 @@ TEST_CASE("a different field set under one name is refused", "[schema]") {
 
 	const FieldSpec retyped[] = {{"A", PropertyType::Int32}};
 	REQUIRE(Schemas::Register(name, retyped).Why == Schemas::Status::Conflict);
+
+	const std::string packedName = Unique("packing-conflict");
+	const FieldSpec native[] = {{"A", PropertyType::Float}};
+	const FieldSpec packed[] = {{"A", PropertyType::Float, {}, FieldPacking::Float16}};
+	REQUIRE(Schemas::Register(packedName, native).Why == Schemas::Status::Ok);
+	REQUIRE(Schemas::Register(packedName, packed).Why == Schemas::Status::Conflict);
 }
 
 TEST_CASE("a name a C++ type already holds is a conflict, not an abort", "[schema]") {
@@ -170,6 +199,136 @@ TEST_CASE("the layout is widest-first and leaves no gaps a field could not use",
 	REQUIRE(schema->Size() % schema->Alignment() == 0);
 }
 
+TEST_CASE("quantised fields share bits and saturate at their declared ranges", "[schema]") {
+	const std::string name = Unique("packed");
+	const FieldSpec fields[] = {
+		{"Half", PropertyType::Float, {}, FieldPacking::Float16},
+		{"UNorm16", PropertyType::Float, {}, FieldPacking::UFloat16},
+		{"SNorm8", PropertyType::Float, {}, FieldPacking::Float8},
+		{"UNorm8", PropertyType::Float, {}, FieldPacking::UFloat8},
+		{"I16", PropertyType::Int32, {}, FieldPacking::Int16},
+		{"U16", PropertyType::Int32, {}, FieldPacking::UInt16},
+		{"I8", PropertyType::Int32, {}, FieldPacking::Int8},
+		{"U8", PropertyType::Int32, {}, FieldPacking::UInt8},
+		{"I4", PropertyType::Int32, {}, FieldPacking::Int4},
+		{"U4", PropertyType::Int32, {}, FieldPacking::UInt4},
+		{"FlagA", PropertyType::Bool},
+		{"FlagB", PropertyType::Bool},
+		{"Native", PropertyType::Int32},
+	};
+
+	const ComponentId id = Describe(name, fields);
+	const Schema *schema = Schemas::Of(id);
+	REQUIRE(schema != nullptr);
+	CHECK(schema->Size() == 20);
+	CHECK(schema->Alignment() == alignof(int32_t));
+	CHECK(schema->Find("FlagA")->Offset == schema->Find("FlagB")->Offset);
+	CHECK(schema->Find("FlagA")->BitOffset != schema->Find("FlagB")->BitOffset);
+
+	std::vector<std::byte> row(schema->Size());
+	const TypeDescriptor &type = Components::Describe(id);
+	type.DefaultConstruct(row.data(), 1);
+
+	WritePacked(row, *schema, "Half", 1.337f);
+	WritePacked(row, *schema, "UNorm16", 2.0f);
+	WritePacked(row, *schema, "SNorm8", -0.37f);
+	WritePacked(row, *schema, "UNorm8", 0.42f);
+	WritePacked(row, *schema, "I16", int32_t{-50000});
+	WritePacked(row, *schema, "U16", int32_t{70000});
+	WritePacked(row, *schema, "I8", int32_t{-200});
+	WritePacked(row, *schema, "U8", int32_t{300});
+	WritePacked(row, *schema, "I4", int32_t{-20});
+	WritePacked(row, *schema, "U4", int32_t{20});
+	WritePacked(row, *schema, "FlagA", true);
+	WritePacked(row, *schema, "FlagB", false);
+	WritePacked(row, *schema, "Native", int32_t{123456});
+
+	CHECK(std::abs(ReadPacked<float>(row, *schema, "Half") - 1.337f) < 0.001f);
+	CHECK(ReadPacked<float>(row, *schema, "UNorm16") == 1.0f);
+	CHECK(std::abs(ReadPacked<float>(row, *schema, "SNorm8") + 0.37f) < 0.005f);
+	CHECK(std::abs(ReadPacked<float>(row, *schema, "UNorm8") - 0.42f) < 0.005f);
+	CHECK(ReadPacked<int32_t>(row, *schema, "I16") == -32768);
+	CHECK(ReadPacked<int32_t>(row, *schema, "U16") == 65535);
+	CHECK(ReadPacked<int32_t>(row, *schema, "I8") == -128);
+	CHECK(ReadPacked<int32_t>(row, *schema, "U8") == 255);
+	CHECK(ReadPacked<int32_t>(row, *schema, "I4") == -8);
+	CHECK(ReadPacked<int32_t>(row, *schema, "U4") == 15);
+	CHECK(ReadPacked<bool>(row, *schema, "FlagA"));
+	CHECK_FALSE(ReadPacked<bool>(row, *schema, "FlagB"));
+	CHECK(ReadPacked<int32_t>(row, *schema, "Native") == 123456);
+
+	engine::core::ByteWriter writer;
+	type.Write(writer, row.data(), 1);
+	std::vector<std::byte> restored(schema->Size());
+	type.DefaultConstruct(restored.data(), 1);
+	engine::core::ByteReader reader(writer.Bytes());
+	type.Read(reader, restored.data(), 1);
+	CHECK_FALSE(reader.Failed());
+	CHECK(std::memcmp(row.data(), restored.data(), row.size()) == 0);
+
+	type.Destruct(restored.data(), 1);
+	type.Destruct(row.data(), 1);
+}
+
+TEST_CASE("packed field spellings resolve to logical property types", "[schema]") {
+	const struct {
+		const char *Spelling;
+		PropertyType Type;
+		FieldPacking Packing;
+	} cases[] = {
+		{"float16", PropertyType::Float, FieldPacking::Float16},
+		{"ufloat16", PropertyType::Float, FieldPacking::UFloat16},
+		{"float8", PropertyType::Float, FieldPacking::Float8},
+		{"ufloat8", PropertyType::Float, FieldPacking::UFloat8},
+		{"int16", PropertyType::Int32, FieldPacking::Int16},
+		{"uint16", PropertyType::Int32, FieldPacking::UInt16},
+		{"int8", PropertyType::Int32, FieldPacking::Int8},
+		{"uint8", PropertyType::Int32, FieldPacking::UInt8},
+		{"int4", PropertyType::Int32, FieldPacking::Int4},
+		{"uint4", PropertyType::Int32, FieldPacking::UInt4},
+		{"bool", PropertyType::Bool, FieldPacking::Bool},
+	};
+
+	for (const auto &expected : cases) {
+		PropertyType type = PropertyType::Opaque;
+		FieldPacking packing = FieldPacking::Native;
+		REQUIRE(Schemas::FieldTypeNamed(expected.Spelling, type, packing));
+		CHECK(type == expected.Type);
+		CHECK(packing == expected.Packing);
+		CHECK(std::string_view(engine::ecs::Describe(packing)) == expected.Spelling);
+	}
+
+	PropertyType type = PropertyType::Opaque;
+	FieldPacking packing = FieldPacking::Native;
+	CHECK_FALSE(Schemas::FieldTypeNamed("float7", type, packing));
+	const FieldSpec invalid[] = {{"Wrong", PropertyType::String, {}, FieldPacking::Int4}};
+	CHECK(Schemas::Register(Unique("invalid-packing"), invalid).Why == Schemas::Status::BadField);
+}
+
+TEST_CASE("float16 keeps IEEE finite, subnormal, infinity and NaN behaviour", "[schema]") {
+	const FieldSpec fields[] = {{"Value", PropertyType::Float, {}, FieldPacking::Float16}};
+	const Schema *schema = Schemas::Of(Describe(Unique("half-boundaries"), fields));
+	REQUIRE(schema != nullptr);
+	std::vector<std::byte> row(schema->Size());
+	const TypeDescriptor &type = Components::Describe(Components::Find(schema->Name()));
+	type.DefaultConstruct(row.data(), 1);
+
+	const float finite[] = {0.0f, -0.0f, 1.0f, 65504.0f, 0.00006103515625f, 0.000000059604645f};
+	for (const float expected : finite) {
+		WritePacked(row, *schema, "Value", expected);
+		const float held = ReadPacked<float>(row, *schema, "Value");
+		CHECK(held == expected);
+		CHECK(std::signbit(held) == std::signbit(expected));
+	}
+
+	WritePacked(row, *schema, "Value", std::numeric_limits<float>::infinity());
+	CHECK(std::isinf(ReadPacked<float>(row, *schema, "Value")));
+	WritePacked(row, *schema, "Value", std::numeric_limits<float>::quiet_NaN());
+	CHECK(std::isnan(ReadPacked<float>(row, *schema, "Value")));
+
+	type.Destruct(row.data(), 1);
+}
+
 TEST_CASE("a described component is stored, read back and queried", "[schema]") {
 	const std::string name = Unique("stored");
 	const FieldSpec fields[] = {
@@ -223,10 +382,10 @@ TEST_CASE("an empty query matches nothing rather than everything", "[schema]") {
 	store.Create();
 
 	size_t visited = 0;
-	store.EachMatching({}, [&visited](Entity) { visited++; });
+	store.EachMatching(QueryTerms{}, [&visited](Entity) { visited++; });
 
 	REQUIRE(visited == 0);
-	REQUIRE(store.CountMatching({}) == 0);
+	REQUIRE(store.CountMatching(QueryTerms{}) == 0);
 }
 
 TEST_CASE("a union query visits a carrier of any named component, exactly once", "[schema]") {

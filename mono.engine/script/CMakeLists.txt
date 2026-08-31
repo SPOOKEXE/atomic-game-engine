@@ -66,4 +66,5 @@ mono_add_library(script
 		# The only edge from `script` to a simulation module, and it is one-way:
 		# nothing in `physics` knows a script exists.
 		Engine::physics
+		Engine::parallel
 )

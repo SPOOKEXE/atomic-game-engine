@@ -992,3 +992,19 @@ TEST_CASE("scrolling past the last heap row draws the header and stops", "[panel
 	DrawDebugPanels(image, data);
 	REQUIRE(image.IsDirty());
 }
+
+TEST_CASE("the frame graph row exposes partial GPU mark accounting", "[panels][profile]") {
+	OverlayImage image;
+	image.Resize(800, 480);
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.FrameMilliseconds = 16.0f;
+	data.HistorySeconds = 5.0;
+
+	DrawDebugPanels(image, data);
+	const std::vector<uint8_t> complete(image.GetPixels(), image.GetPixels() + image.GetByteCount());
+
+	data.DroppedGpuMarks = 2;
+	DrawDebugPanels(image, data);
+	CHECK_FALSE(std::equal(complete.begin(), complete.end(), image.GetPixels()));
+}

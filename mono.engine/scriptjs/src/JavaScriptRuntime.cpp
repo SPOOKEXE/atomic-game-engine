@@ -129,7 +129,7 @@ namespace engine::script {
 	}
 
 	JavaScriptRuntime::JavaScriptRuntime(ecs::Store &store, const RuntimeLimits &limits)
-		: Runtime(store, limits.Role) {
+		: Runtime(store, limits) {
 		Vm = JS_NewRuntime();
 
 		// A hard ceiling rather than a hope. Allocation past it fails inside
@@ -187,7 +187,7 @@ namespace engine::script {
 		// arbitrary precision. Revisit when one does, and check the teardown
 		// again rather than assuming it was fixed.
 
-		OpenJsBindings(Context, Store, limits.Role);
+		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
 		OpenJsSurface(Context);
 
 		// `eval` removed after the fact, because the intrinsic that provides
@@ -287,6 +287,37 @@ namespace engine::script {
 	uint64_t JavaScriptRuntime::StepsTaken() const {
 		const auto *budget = Vm != nullptr ? static_cast<const Budget *>(JS_GetRuntimeOpaque(Vm)) : nullptr;
 		return budget != nullptr ? budget->Taken : 0;
+	}
+
+	void JavaScriptRuntime::SetHost(HostSurface *host) {
+		if (host != nullptr && !Can(ScriptCapabilities::PluginHost)) {
+			Error = "script runtime lacks the 'plugin-host' capability";
+			return;
+		}
+
+		JsOf(Context).Host = host;
+		OpenJsHost(Context);
+	}
+
+	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) {
+			return false;
+		}
+
+		Error.clear();
+		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr) {
+			budget->Base = budget->Taken;
+		}
+
+		if (!CallJsHostCallback(Context, callback, arguments, Error)) {
+			return false;
+		}
+		return DrainJobs();
+	}
+
+	void JavaScriptRuntime::Release(HostCallback callback) {
+		ReleaseJsHostCallback(Context, callback);
 	}
 
 	bool JavaScriptRuntime::Run(std::string_view source, std::string_view name) {
@@ -418,7 +449,11 @@ namespace engine::script {
 		// every save.
 		MirrorSourcePrograms(Store, Mirrored);
 
-		Error = PumpJsEditableMeshJobs(Context);
+		Error = PumpJsComputeJobs(Context);
+		const std::string editableMeshError = PumpJsEditableMeshJobs(Context);
+		if (Error.empty()) {
+			Error = editableMeshError;
+		}
 
 		const auto note = [&](std::string message) {
 			if (Error.empty()) {

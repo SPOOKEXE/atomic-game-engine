@@ -59,8 +59,11 @@
 namespace studio {
 	// A source image fitted uniformly inside a viewport panel.
 	struct ViewportImageRect {
+		// Top-left corner and fitted dimensions in panel coordinates.
+		//@{
 		glm::vec2 Min{0.0f, 0.0f};
 		glm::vec2 Size{0.0f, 0.0f};
+		//@}
 	};
 
 	// Preserves a completed frame's aspect ratio while its panel is resizing.

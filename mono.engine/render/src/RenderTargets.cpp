@@ -490,6 +490,7 @@ namespace engine::render {
 	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphTarget(
 		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 	) const {
+		resource = GraphTargetName(pipeline, resource);
 		for (const GraphTarget &target : GraphTargets) {
 			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
 				target.Owner == owner) {
@@ -497,6 +498,20 @@ namespace engine::render {
 			}
 		}
 		return {};
+	}
+
+	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {
+		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
+			const graph::ResourceId id{value};
+			const graph::ResourceDesc *desc = pipeline.Graph.FindResource(id);
+			if (desc == nullptr || desc->Name != resource) {
+				continue;
+			}
+			const graph::ResourceId allocation = pipeline.Aliases.AllocationOf(id);
+			const graph::ResourceDesc *physical = pipeline.Graph.FindResource(allocation);
+			return physical != nullptr ? physical->Name : resource;
+		}
+		return resource;
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::EnsureGraphTarget(
@@ -538,8 +553,9 @@ namespace engine::render {
 		uint32_t height = 0;
 		desc->Resolve(viewWidth, viewHeight, width, height);
 		const graph::NodeScope scope = ResourceScope(pipeline, resource);
+		const core::Name targetName = GraphTargetName(pipeline, desc->Name);
 		for (GraphTarget &target : GraphTargets) {
-			if (target.Pipeline != pipeline.Name || target.Resource != desc->Name || target.Scope != scope ||
+			if (target.Pipeline != pipeline.Name || target.Resource != targetName || target.Scope != scope ||
 				target.Owner != owner) {
 				continue;
 			}
@@ -579,7 +595,7 @@ namespace engine::render {
 			return NamedTexture{target.Texture, width, height, format};
 		}
 
-		GraphTargets.push_back(GraphTarget{pipeline.Name, desc->Name, scope, owner});
+		GraphTargets.push_back(GraphTarget{pipeline.Name, targetName, scope, owner});
 		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
 	}
 

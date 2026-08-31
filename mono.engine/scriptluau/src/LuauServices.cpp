@@ -20,7 +20,7 @@
 
 namespace engine::script {
 
-	void InstallLuauServices(lua_State *state, ServiceAvailability phase) {
+	void InstallLuauServices(lua_State *state, ServiceAvailability phase, ScriptCapabilities access) {
 		// **The mailbox types, before the services that need them, and this is
 		// not a formality.** A `Postbox` is a view over two resources, and
 		// reading one on a store that never registered them mints them under the
@@ -37,6 +37,10 @@ namespace engine::script {
 		}
 
 		for (const ServiceRow &row : ServiceRows(phase)) {
+			if (!Permits(row.Definition, access)) {
+				continue;
+			}
+
 			// **A surface first, because a surface is how both languages get
 			// it.** A row this language does not bind installs nothing at all;
 			// the refusal happens where a script asks for it by name, which is

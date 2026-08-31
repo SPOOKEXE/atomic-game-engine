@@ -1234,24 +1234,31 @@ namespace studio {
 		}
 	}
 	void Editor::DrawDemoTools() {
+		const bool all = DrawingBuiltinTool == BuiltinStudioTool::None;
 		// One demo today, and the row is the list of them. A tab whose contents
 		// are a single button is what a second demo turns into a strip with no
 		// other change.
-		if (ImGui::Button("Demo Nodes", ImVec2(engine::ui::Scaled(110.0f), 0.0f))) {
-			ShowNodeDemo = true;
-			ImGui::SetWindowFocus("Demo Nodes");
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("A typed node graph with live evaluation - Mono::nodegraph");
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::DemoNodes) {
+			if (ImGui::Button("Demo Nodes", ImVec2(engine::ui::Scaled(110.0f), 0.0f))) {
+				ShowNodeDemo = true;
+				ImGui::SetWindowFocus("Demo Nodes");
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("A typed node graph with live evaluation - Mono::nodegraph");
+			}
 		}
 
-		ImGui::SameLine();
-		ImGui::TextDisabled("|");
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::TextUnformatted(
-			"demos of engine parts, built to be looked at - nothing here changes the scene"
-		);
-		ImGui::PopStyleColor();
+		if (all || DrawingBuiltinTool == BuiltinStudioTool::DemoDescription) {
+			if (all) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("|");
+				ImGui::SameLine();
+			}
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted(
+				"demos of engine parts, built to be looked at - nothing here changes the scene"
+			);
+			ImGui::PopStyleColor();
+		}
 	}
 }

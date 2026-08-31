@@ -24,6 +24,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/graph/EntityFlow.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/MeshTable.hpp>
@@ -52,12 +53,14 @@ namespace engine::render {
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
+		DeviceCaps Caps;
 
 		struct NamedPipeline {
 			core::Name Name;
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
 			graph::ExecutionSchedule Schedule;
+			graph::ResourceAliasPlan Aliases;
 
 			// The schedule's traffic plan, computed once at install. It decides
 			// which command buffer class records each node, and its order is the
@@ -142,6 +145,9 @@ namespace engine::render {
 							ResourceRole::Depth,
 						};
 						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+					}
+					if (node->Kind == core::Name("forward")) {
+						return output == 1 ? ResourceRole::Depth : ResourceRole::Unknown;
 					}
 					if (node->Kind == core::Name("depth-linearise")) {
 						return ResourceRole::LinearDepth;
@@ -258,6 +264,9 @@ namespace engine::render {
 		uint64_t ResolvedTimingSequence = 0;
 		std::unordered_map<uint32_t, double> GpuTimings;
 		std::unordered_map<uint32_t, double> WallTimings;
+		ProfilingTier ProfileTier = ProfilingTier::Full;
+		uint32_t ProfileSampleRate = 4;
+		size_t DroppedProfileMarks = 0;
 
 		// The frame-graph span name for each pass's *device* time, keyed by the
 		// pass's `core::Name::Id`.
@@ -289,6 +298,7 @@ namespace engine::render {
 		void CollectTimings();
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *ForwardPipeline = nullptr;
 
 		// The two above, redrawn as lines. See where they are created for why
 		// there are two objects and not a bindable state.
@@ -431,6 +441,7 @@ namespace engine::render {
 		NamedTexture FindGraphTarget(
 			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
+		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
 			const NamedPipeline &pipeline,
 			graph::ResourceId resource,

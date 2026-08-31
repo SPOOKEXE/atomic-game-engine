@@ -237,6 +237,71 @@ TEST_CASE("joining a session with no address is refused with a reason", "[studio
 	CHECK(guest.Team.Edits() == nullptr);
 }
 
+TEST_CASE("the editor limit is enforced by the hosted stream", "[studio][teamcreate]") {
+	Editor host;
+	Editor guest;
+
+	TeamCreateSettings offering;
+	offering.Name = "host only";
+	offering.PeerLimit = 1;
+
+	std::string trouble;
+	REQUIRE(host.Team.Host(offering, trouble));
+	REQUIRE(guest.Team.Join(engine::net::Endpoint::LoopbackIPv4(host.Team.Session().At.Port), 0.0, trouble));
+
+	double now = 0.0;
+	for (int step = 0; step < 256; ++step) {
+		now += 1.0 / 60.0;
+		guest.Team.Pump(now);
+		host.Team.Pump(now);
+	}
+
+	REQUIRE(host.Team.Edits() != nullptr);
+	REQUIRE(guest.Team.Edits() != nullptr);
+	CHECK(host.Team.Edits()->Editors() == 1);
+	CHECK_FALSE(guest.Team.Edits()->Connected());
+	CHECK(host.Team.Session().Peers == 1);
+	CHECK(host.Team.Session().IsFull());
+}
+
+TEST_CASE("private edit streams require the invitation key after discovery", "[studio][teamcreate]") {
+	Editor host;
+	Editor invited;
+	Editor wrongKey;
+	Editor noKey;
+
+	TeamCreateSettings offering;
+	offering.Name = "invited editors";
+	offering.Secret = "the shared invitation";
+	offering.PeerLimit = 2;
+
+	std::string trouble;
+	REQUIRE(host.Team.Host(offering, trouble));
+	const engine::net::Endpoint address = engine::net::Endpoint::LoopbackIPv4(host.Team.Session().At.Port);
+	REQUIRE(invited.Team.Join(address, 0.0, trouble, offering.Secret));
+	REQUIRE(wrongKey.Team.Join(address, 0.0, trouble, "somebody else's invitation"));
+	REQUIRE(noKey.Team.Join(address, 0.0, trouble));
+
+	double now = 0.0;
+	for (int step = 0; step < 512; ++step) {
+		now += 1.0 / 60.0;
+		invited.Team.Pump(now);
+		wrongKey.Team.Pump(now);
+		noKey.Team.Pump(now);
+		host.Team.Pump(now);
+	}
+
+	REQUIRE(host.Team.Edits() != nullptr);
+	REQUIRE(invited.Team.Edits() != nullptr);
+	REQUIRE(wrongKey.Team.Edits() != nullptr);
+	REQUIRE(noKey.Team.Edits() != nullptr);
+	CHECK(invited.Team.Edits()->Connected());
+	CHECK_FALSE(wrongKey.Team.Edits()->Connected());
+	CHECK_FALSE(noKey.Team.Edits()->Connected());
+	CHECK(host.Team.Edits()->Editors() == 2);
+	CHECK(host.Team.Session().Peers == 2);
+}
+
 TEST_CASE("a hosted session carries an edit to a guest", "[studio][teamcreate]") {
 	// **The two halves together**, which is the whole point of the panel:
 	// discovery hands over an address and the edit stream makes joining mean
@@ -277,6 +342,7 @@ TEST_CASE("a hosted session carries an edit to a guest", "[studio][teamcreate]")
 	}
 	REQUIRE(guest.Team.Edits()->Connected());
 	CHECK(host.Team.Edits()->Editors() == 2);
+	CHECK(host.Team.Session().Peers == 2);
 
 	// The host makes an edit. Nothing wires the two together but the watcher
 	// the editor installs, so this suite does what `InstallHistoryWatcher`

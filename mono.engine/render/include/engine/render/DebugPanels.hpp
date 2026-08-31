@@ -243,6 +243,9 @@ namespace engine::render {
 		// Number of spans omitted while the published frame was collected.
 		size_t DroppedSpans = 0;
 
+		// GPU timestamp writes omitted because the per-frame query budget filled.
+		size_t DroppedGpuMarks = 0;
+
 		// How much history the RMAX column is a maximum over. Shown because a
 		// worst-case over a fifth of a second and one over five seconds are
 		// different claims, and the column looks identical either way.

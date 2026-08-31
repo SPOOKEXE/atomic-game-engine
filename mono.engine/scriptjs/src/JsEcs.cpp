@@ -24,6 +24,7 @@
 #include <engine/ecs/Schema.hpp>
 
 #include <algorithm>
+#include <array>
 #include <new>
 #include <string>
 #include <string_view>
@@ -37,8 +38,10 @@ namespace engine::script {
 		using ecs::Components;
 		using ecs::Entity;
 		using ecs::FieldDescriptor;
+		using ecs::FieldPacking;
 		using ecs::FieldSpec;
 		using ecs::PropertyType;
+		using ecs::QueryTerms;
 		using ecs::Schema;
 		using ecs::Schemas;
 		using ecs::Store;
@@ -90,6 +93,10 @@ namespace engine::script {
 
 			void *At(const FieldDescriptor &field) {
 				return static_cast<std::byte *>(Bytes) + field.Offset;
+			}
+
+			void *RawMutable() {
+				return Bytes;
 			}
 
 			const void *Raw() const {
@@ -233,6 +240,87 @@ namespace engine::script {
 			bool Ok = false;
 		};
 
+		bool ReadStringArray(
+			JSContext *context, JSValueConst value, const char *label, std::vector<std::string> &strings
+		) {
+			if (!JS_IsArray(value)) {
+				JS_ThrowTypeError(context, "%s has to be an array of strings", label);
+				return false;
+			}
+
+			JSValue held = JS_GetPropertyStr(context, value, "length");
+			uint32_t length = 0;
+			const int converted = JS_ToUint32(context, &length, held);
+			JS_FreeValue(context, held);
+			if (converted < 0) {
+				return false;
+			}
+
+			strings.clear();
+			strings.reserve(length);
+			for (uint32_t at = 0; at < length; at++) {
+				held = JS_GetPropertyUint32(context, value, at);
+				if (!JS_IsString(held)) {
+					JS_FreeValue(context, held);
+					JS_ThrowTypeError(context, "%s has to contain only strings", label);
+					return false;
+				}
+
+				const Argument string(context, held);
+				JS_FreeValue(context, held);
+				if (!string.Present()) {
+					return false;
+				}
+				strings.emplace_back(string.Get());
+			}
+			return true;
+		}
+
+		std::vector<std::string_view> ViewsOf(const std::vector<std::string> &strings) {
+			std::vector<std::string_view> views;
+			views.reserve(strings.size());
+			for (const std::string &string : strings) {
+				views.emplace_back(string);
+			}
+			return views;
+		}
+
+		bool ReadComponentArray(
+			JSContext *context, JSValueConst value, const char *label, std::vector<ComponentId> &components
+		) {
+			std::vector<std::string> names;
+			if (!ReadStringArray(context, value, label, names)) {
+				return false;
+			}
+
+			components.clear();
+			components.reserve(names.size());
+			for (const std::string &name : names) {
+				const ComponentId component = Components::Find(Name(name));
+				if (!component.IsValid()) {
+					JS_ThrowReferenceError(
+						context, "no component named '%s' in %s filter", name.c_str(), label
+					);
+					return false;
+				}
+				components.push_back(component);
+			}
+			return true;
+		}
+
+		JSValue StringArray(JSContext *context, const std::vector<std::string> &strings) {
+			JSValue array = JS_NewArray(context);
+			for (size_t at = 0; at < strings.size(); at++) {
+				JS_SetPropertyUint32(
+					context,
+					array,
+					static_cast<uint32_t>(at),
+					JS_NewStringLen(context, strings[at].data(), strings[at].size())
+				);
+			}
+			return array;
+		}
+
 		// --- World -------------------------------------------------------------
 
 		// `World.DefineComponent(name, { Field: "type" })`
@@ -256,6 +344,7 @@ namespace engine::script {
 			std::vector<std::string> names;
 			std::vector<std::string> enums;
 			std::vector<PropertyType> types;
+			std::vector<FieldPacking> packings;
 
 			constexpr std::string_view ENUM_PREFIX = "Enum.";
 
@@ -287,21 +376,24 @@ namespace engine::script {
 					}
 					types.push_back(PropertyType::Enum);
 					enums.emplace_back(set);
+					packings.push_back(FieldPacking::Native);
 					continue;
 				}
 
 				PropertyType type = PropertyType::Opaque;
-				if (!Schemas::TypeNamed(text, type)) {
+				FieldPacking packing = FieldPacking::Native;
+				if (!Schemas::FieldTypeNamed(text, type, packing)) {
 					return JS_ThrowTypeError(context, "'%s' is not a field type", spelling.Get());
 				}
 				types.push_back(type);
 				enums.emplace_back();
+				packings.push_back(packing);
 			}
 
 			std::vector<FieldSpec> fields;
 			fields.reserve(names.size());
 			for (size_t at = 0; at < names.size(); at++) {
-				fields.push_back(FieldSpec{names[at], types[at], enums[at]});
+				fields.push_back(FieldSpec{names[at], types[at], enums[at], packings[at]});
 			}
 
 			const Schemas::Result result = Schemas::Register(name.Get(), fields);
@@ -344,9 +436,10 @@ namespace engine::script {
 
 			JSValue table = JS_NewObject(context);
 			for (const FieldDescriptor &field : schema->Fields()) {
-				const std::string spelling = field.Type == PropertyType::Enum
-												 ? "Enum." + std::string(field.Enum.Text())
-												 : std::string(ecs::Describe(field.Type));
+				const std::string spelling =
+					field.Packing != FieldPacking::Native ? ecs::Describe(field.Packing)
+					: field.Type == PropertyType::Enum	  ? "Enum." + std::string(field.Enum.Text())
+														  : std::string(ecs::Describe(field.Type));
 				JS_SetPropertyStr(
 					context,
 					table,
@@ -355,6 +448,111 @@ namespace engine::script {
 				);
 			}
 			return table;
+		}
+
+		JSValue WorldSetComponentTags(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (count < 2) {
+				return JS_ThrowTypeError(context, "SetComponentTags takes a component name and tags");
+			}
+
+			const Argument name(context, argv[0]);
+			if (!name.Present()) {
+				return JS_EXCEPTION;
+			}
+			ComponentId component;
+			JSValue error = JS_UNDEFINED;
+			if (FindSchema(context, name.Get(), component, error) == nullptr) {
+				return error;
+			}
+
+			std::vector<std::string> tags;
+			if (!ReadStringArray(context, argv[1], "component tags", tags)) {
+				return JS_EXCEPTION;
+			}
+			return JS_NewBool(context, Schemas::SetTags(component, ViewsOf(tags)));
+		}
+
+		JSValue WorldSetComponentFieldTags(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (count < 3) {
+				return JS_ThrowTypeError(
+					context, "SetComponentFieldTags takes a component name, field, and tags"
+				);
+			}
+
+			const Argument name(context, argv[0]);
+			const Argument field(context, argv[1]);
+			if (!name.Present() || !field.Present()) {
+				return JS_EXCEPTION;
+			}
+			ComponentId component;
+			JSValue error = JS_UNDEFINED;
+			if (FindSchema(context, name.Get(), component, error) == nullptr) {
+				return error;
+			}
+
+			std::vector<std::string> tags;
+			if (!ReadStringArray(context, argv[2], "component field tags", tags)) {
+				return JS_EXCEPTION;
+			}
+			return JS_NewBool(context, Schemas::SetFieldTags(component, Name(field.Get()), ViewsOf(tags)));
+		}
+
+		JSValue WorldExposeComponentField(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (count < 3) {
+				return JS_ThrowTypeError(
+					context, "ExposeComponentField takes a component name, field, and boolean"
+				);
+			}
+
+			const Argument name(context, argv[0]);
+			const Argument field(context, argv[1]);
+			if (!name.Present() || !field.Present()) {
+				return JS_EXCEPTION;
+			}
+			ComponentId component;
+			JSValue error = JS_UNDEFINED;
+			if (FindSchema(context, name.Get(), component, error) == nullptr) {
+				return error;
+			}
+			return JS_NewBool(
+				context,
+				Schemas::SetFieldExposed(component, Name(field.Get()), JS_ToBool(context, argv[2]) != 0)
+			);
+		}
+
+		JSValue WorldGetComponentMetadata(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (count < 1) {
+				return JS_ThrowTypeError(context, "GetComponentMetadata takes a component name");
+			}
+
+			const Argument name(context, argv[0]);
+			if (!name.Present()) {
+				return JS_EXCEPTION;
+			}
+			const Schema *schema = Schemas::Find(Name(name.Get()));
+			if (schema == nullptr) {
+				return JS_NULL;
+			}
+
+			JSValue metadata = JS_NewObject(context);
+			JS_SetPropertyStr(context, metadata, "Tags", StringArray(context, schema->Tags()));
+
+			JSValue fields = JS_NewObject(context);
+			for (const FieldDescriptor &field : schema->Fields()) {
+				JSValue described = JS_NewObject(context);
+				const std::string type = field.Type == PropertyType::Enum
+											 ? "Enum." + std::string(field.Enum.Text())
+											 : std::string(ecs::Describe(field.Type));
+				JS_SetPropertyStr(context, described, "Type", JS_NewString(context, type.c_str()));
+				JS_SetPropertyStr(
+					context, described, "Packing", JS_NewString(context, ecs::Describe(field.Packing))
+				);
+				JS_SetPropertyStr(context, described, "Tags", StringArray(context, field.Tags));
+				JS_SetPropertyStr(context, described, "Exposed", JS_NewBool(context, field.Exposed));
+				JS_SetPropertyStr(context, fields, std::string(field.Spelling).c_str(), described);
+			}
+			JS_SetPropertyStr(context, metadata, "Fields", fields);
+			return metadata;
 		}
 
 		// `World.CreateEntity(name?)`
@@ -435,6 +633,35 @@ namespace engine::script {
 			return array;
 		}
 
+		JSValue WorldQueryFiltered(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (count < 2) {
+				return JS_ThrowTypeError(context, "QueryFiltered takes include and exclude arrays");
+			}
+
+			std::vector<ComponentId> required;
+			std::vector<ComponentId> excluded;
+			if (!ReadComponentArray(context, argv[0], "include", required) ||
+				!ReadComponentArray(context, argv[1], "exclude", excluded)) {
+				return JS_EXCEPTION;
+			}
+
+			std::vector<Entity> found;
+			StoreOf(context).EachMatching(
+				QueryTerms{
+					{}, std::span<const ComponentId>(required), std::span<const ComponentId>(excluded)
+				},
+				[&found](Entity entity) { found.push_back(entity); }
+			);
+
+			JSValue array = JS_NewArray(context);
+			for (size_t at = 0; at < found.size(); at++) {
+				JS_SetPropertyUint32(
+					context, array, static_cast<uint32_t>(at), MakeJsInstance(context, found[at])
+				);
+			}
+			return array;
+		}
+
 		// `World.Count(...componentNames)`
 		JSValue WorldCount(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
 			Store &store = StoreOf(context);
@@ -503,15 +730,20 @@ namespace engine::script {
 					// The string case is separate for the reason it is separate
 					// everywhere else: the destination is a live `std::string`
 					// and the shared marshaller writes into raw bytes.
+					alignas(8) std::array<std::byte, 8> scratch{};
+					void *target = field->Packing == FieldPacking::Native ? value.At(*field) : scratch.data();
 					bool ok = true;
 					if (field->Type == PropertyType::String) {
 						const Argument text(context, held);
 						ok = text.Present();
 						if (ok) {
-							*static_cast<std::string *>(value.At(*field)) = text.Get();
+							*static_cast<std::string *>(target) = text.Get();
 						}
 					} else {
-						ok = FromJsValue(context, held, field->Type, field->Enum, value.At(*field));
+						ok = FromJsValue(context, held, field->Type, field->Enum, target);
+					}
+					if (ok && field->Packing != FieldPacking::Native) {
+						ok = Schemas::WriteField(value.RawMutable(), *field, target);
 					}
 					JS_FreeValue(context, held);
 
@@ -560,7 +792,8 @@ namespace engine::script {
 
 			JSValue table = JS_NewObject(context);
 			for (const FieldDescriptor &field : schema->Fields()) {
-				const void *bytes = static_cast<const std::byte *>(held) + field.Offset;
+				alignas(8) std::array<std::byte, 8> scratch{};
+				const void *bytes = Schemas::ReadField(held, field, scratch.data());
 
 				JSValue value;
 				if (field.Type == PropertyType::String) {
@@ -653,8 +886,13 @@ namespace engine::script {
 			JS_CFUNC_DEF("DefineComponent", 2, WorldDefineComponent),
 			JS_CFUNC_DEF("HasComponentType", 1, WorldHasComponentType),
 			JS_CFUNC_DEF("GetComponentSchema", 1, WorldGetComponentSchema),
+			JS_CFUNC_DEF("SetComponentTags", 2, WorldSetComponentTags),
+			JS_CFUNC_DEF("SetComponentFieldTags", 3, WorldSetComponentFieldTags),
+			JS_CFUNC_DEF("ExposeComponentField", 3, WorldExposeComponentField),
+			JS_CFUNC_DEF("GetComponentMetadata", 1, WorldGetComponentMetadata),
 			JS_CFUNC_DEF("CreateEntity", 1, WorldCreateEntity),
 			JS_CFUNC_DEF("Query", 1, WorldQuery),
+			JS_CFUNC_DEF("QueryFiltered", 2, WorldQueryFiltered),
 			JS_CFUNC_DEF("Count", 1, WorldCount),
 		};
 

@@ -199,6 +199,10 @@ namespace engine::script {
 				return JsOf(Context).Waiters;
 			}
 
+			ComputeJobs &Computations() override {
+				return JsOf(Context).Computations;
+			}
+
 			Entity Subject() const override {
 				return Self;
 			}
@@ -771,6 +775,10 @@ namespace engine::script {
 				Suspend(bound.AwaitedEditableMeshes, ticket);
 			}
 
+			void AwaitCompute(uint64_t ticket) override {
+				Suspend(JsOf(Context).AwaitedComputations, ticket);
+			}
+
 			[[noreturn]] void Raise(const char *message) override {
 				// The value is discarded because the exception is on the context
 				// now; the trampoline turns the throw below back into
@@ -1056,6 +1064,46 @@ namespace engine::script {
 			Release(context, resolver);
 		}
 		bound.EditableMeshes.ClearCompletions();
+		return firstError;
+	}
+
+	std::string PumpJsComputeJobs(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		bound.Computations.Poll();
+
+		std::string firstError;
+		for (const ComputeCompletion &completion : bound.Computations.Completions()) {
+			const auto waiting = bound.AwaitedComputations.find(completion.Ticket);
+			if (waiting == bound.AwaitedComputations.end()) {
+				continue;
+			}
+			const CallbackRef resolver = waiting->second;
+			bound.AwaitedComputations.erase(waiting);
+
+			JSValue value = JS_NULL;
+			if (completion.Error.empty()) {
+				value = JS_NewArray(context);
+				for (size_t index = 0; index < completion.Values.size(); index++) {
+					JS_SetPropertyUint32(
+						context,
+						value,
+						static_cast<uint32_t>(index),
+						JS_NewFloat64(context, completion.Values[index])
+					);
+				}
+			} else if (firstError.empty()) {
+				firstError = completion.Error;
+			}
+
+			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &value);
+			JS_FreeValue(context, value);
+			if (JS_IsException(result) && firstError.empty()) {
+				firstError = "a resumed compute job failed";
+			}
+			JS_FreeValue(context, result);
+			Release(context, resolver);
+		}
+		bound.Computations.ClearCompletions();
 		return firstError;
 	}
 }

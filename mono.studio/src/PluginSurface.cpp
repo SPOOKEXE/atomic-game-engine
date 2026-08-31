@@ -52,7 +52,9 @@
 #include <engine/script/SourceCache.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <imgui.h>
+#include <limits>
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
@@ -82,7 +84,8 @@ namespace studio {
 		// `false`, which the caller turns into a named refusal.
 		bool SurfaceIndexOf(const HostValue &value, size_t count, size_t &out) {
 			const double number = value.AsNumber(0.0);
-			if (number < 1.0 || number > static_cast<double>(count)) {
+			if (!std::isfinite(number) || number != std::floor(number) || number < 1.0 ||
+				number > static_cast<double>(count)) {
 				return false;
 			}
 			out = static_cast<size_t>(number) - 1;
@@ -148,8 +151,19 @@ namespace studio {
 
 				// Toolbars and buttons.
 				"CreateToolbar",
+				"CreateToolbarTab",
+				"CreateToolbarRow",
+				"CreateToolbarColumn",
 				"CreateButton",
+				"CreateToggle",
+				"CreateDropdown",
+				"CreateLabel",
+				"SetToolCell",
 				"SetButtonActive",
+				"SetToolVisible",
+				"SetToolWidth",
+				"SetToolbarVisible",
+				"SetToolbarPlacement",
 
 				// Docked panels, and what may be drawn in one.
 				"CreateWidget",
@@ -157,9 +171,18 @@ namespace studio {
 				"SetWidgetOpen",
 				"IsWidgetOpen",
 				"SetWidgetColour",
+				"SetWidgetDock",
+				"SetWidgetSizeConstraints",
+
+				// Viewport and script editor integration.
+				"GetViewportOption",
+				"SetViewportOption",
+				"AddViewport",
+				"OpenScript",
 				"Label",
 				"Button",
 				"Checkbox",
+				"Combo",
 				"Separator",
 				"InputText",
 			};
@@ -204,22 +227,50 @@ namespace studio {
 			if (name == "GetScripts") {
 				return GetScripts(result, failure);
 			}
-			if (name == "CreateToolbar") {
+			if (name == "CreateToolbar" || name == "CreateToolbarTab") {
 				PluginToolbar toolbar;
 				toolbar.Name = std::string(At(arguments, 0).AsText());
 				if (toolbar.Name.empty()) {
 					failure = "a toolbar needs a name";
 					return false;
 				}
+				toolbar.Id = StableId(At(arguments, 1), "toolbar", Plugin.Toolbars.size());
+				if (HasToolbarId(toolbar.Id)) {
+					failure = "a toolbar with id '" + toolbar.Id + "' already exists";
+					return false;
+				}
+				if (name == "CreateToolbarTab" && At(arguments, 2).Tag != HostTag::Nil) {
+					const auto placement = ParsePluginToolbarPlacement(At(arguments, 2).AsText());
+					if (!placement.has_value()) {
+						failure = "toolbar placement has to be 'Tabbed' or 'Pinned'";
+						return false;
+					}
+					toolbar.Placement = *placement;
+				}
+				if (name == "CreateToolbarTab" && At(arguments, 3).Tag != HostTag::Nil) {
+					toolbar.Visible = At(arguments, 3).AsBoolean();
+				}
 				Plugin.Toolbars.push_back(std::move(toolbar));
 				result = HostValue::Of(static_cast<double>(Plugin.Toolbars.size()));
+				Owner.InvalidateToolbarLayout();
 				return true;
 			}
-			if (name == "CreateButton") {
-				return CreateButton(arguments, result, failure);
+			if (name == "CreateToolbarRow" || name == "CreateToolbarColumn") {
+				return CreateToolbarTrack(name, arguments, result, failure);
+			}
+			if (name == "CreateButton" || name == "CreateToggle" || name == "CreateDropdown" ||
+				name == "CreateLabel") {
+				return CreateControl(name, arguments, result, failure);
+			}
+			if (name == "SetToolCell") {
+				return SetToolCell(arguments, failure);
 			}
 			if (name == "SetButtonActive") {
 				return SetButtonActive(arguments, failure);
+			}
+			if (name == "SetToolVisible" || name == "SetToolWidth" || name == "SetToolbarVisible" ||
+				name == "SetToolbarPlacement") {
+				return ConfigureToolbar(name, arguments, failure);
 			}
 			if (name == "CreateWidget") {
 				PluginWidget widget;
@@ -229,13 +280,32 @@ namespace studio {
 					return false;
 				}
 				widget.Open = At(arguments, 1).AsBoolean();
+				widget.Id = StableId(At(arguments, 2), "widget", Plugin.Widgets.size());
+				if (HasWidgetId(widget.Id)) {
+					failure = "a widget with id '" + widget.Id + "' already exists";
+					return false;
+				}
+				if (At(arguments, 3).Tag != HostTag::Nil) {
+					const std::optional<PluginDock> dock = ParsePluginDock(At(arguments, 3).AsText());
+					if (!dock) {
+						failure = "a widget dock is Floating, Centre, Left, Right, or Bottom";
+						return false;
+					}
+					widget.Dock = *dock;
+				}
 				Plugin.Widgets.push_back(std::move(widget));
 				result = HostValue::Of(static_cast<double>(Plugin.Widgets.size()));
 				return true;
 			}
 			if (name == "SetWidgetRender" || name == "SetWidgetOpen" || name == "IsWidgetOpen" ||
-				name == "SetWidgetColour") {
+				name == "SetWidgetColour" || name == "SetWidgetDock" || name == "SetWidgetSizeConstraints") {
 				return Widget(name, arguments, result, failure);
+			}
+			if (name == "GetViewportOption" || name == "SetViewportOption" || name == "AddViewport") {
+				return Viewport(name, arguments, result, failure);
+			}
+			if (name == "OpenScript") {
+				return OpenScript(At(arguments, 0), failure);
 			}
 
 			// Everything below draws, and drawing is only legal from inside a
@@ -665,7 +735,94 @@ namespace studio {
 			return true;
 		}
 
-		bool CreateButton(HostArguments arguments, HostValue &result, std::string &failure) {
+		static std::string StableId(const HostValue &value, std::string_view prefix, size_t index) {
+			if (value.Tag == HostTag::String && !value.Text.empty()) {
+				return value.Text;
+			}
+			return std::string(prefix) + "-" + std::to_string(index + 1);
+		}
+
+		bool HasToolbarId(std::string_view id) const {
+			return std::any_of(
+				Plugin.Toolbars.begin(), Plugin.Toolbars.end(), [&](const PluginToolbar &toolbar) {
+					return toolbar.Id == id;
+				}
+			);
+		}
+
+		bool HasWidgetId(std::string_view id) const {
+			return std::any_of(Plugin.Widgets.begin(), Plugin.Widgets.end(), [&](const PluginWidget &widget) {
+				return widget.Id == id;
+			});
+		}
+
+		bool CreateToolbarTrack(
+			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
+		) {
+			size_t toolbar = 0;
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+				failure = "no such toolbar";
+				return false;
+			}
+
+			std::vector<PluginToolbarTrack> &tracks =
+				name == "CreateToolbarRow" ? Plugin.Toolbars[toolbar].Rows : Plugin.Toolbars[toolbar].Columns;
+			const std::string prefix = name == "CreateToolbarRow" ? "row" : "column";
+			PluginToolbarTrack track;
+			track.Id = StableId(At(arguments, 1), prefix, tracks.size());
+			if (name == "CreateToolbarColumn" && At(arguments, 2).Tag != HostTag::Nil) {
+				if (At(arguments, 2).Tag != HostTag::Number || !std::isfinite(At(arguments, 2).Number)) {
+					failure = "a toolbar column width has to be a finite number";
+					return false;
+				}
+				track.Width = ClampPluginToolWidth(static_cast<float>(At(arguments, 2).Number));
+			}
+			if (std::any_of(tracks.begin(), tracks.end(), [&](const PluginToolbarTrack &existing) {
+					return existing.Id == track.Id;
+				})) {
+				failure = "a toolbar " + prefix + " with id '" + track.Id + "' already exists";
+				return false;
+			}
+
+			tracks.push_back(std::move(track));
+			result = HostValue::Of(static_cast<double>(tracks.size()));
+			Owner.InvalidateToolbarLayout();
+			return true;
+		}
+
+		bool SetToolCell(HostArguments arguments, std::string &failure) {
+			size_t toolbar = 0;
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+				failure = "no such toolbar";
+				return false;
+			}
+
+			PluginToolbar &target = Plugin.Toolbars[toolbar];
+			size_t button = 0;
+			size_t row = 0;
+			size_t column = 0;
+			if (!SurfaceIndexOf(At(arguments, 1), target.Buttons.size(), button)) {
+				failure = "no such toolbar control";
+				return false;
+			}
+			if (!SurfaceIndexOf(At(arguments, 2), target.Rows.size(), row)) {
+				failure = "no such toolbar row";
+				return false;
+			}
+			if (!SurfaceIndexOf(At(arguments, 3), target.Columns.size(), column)) {
+				failure = "no such toolbar column";
+				return false;
+			}
+
+			target.Buttons[button].Row = target.Rows[row].Id;
+			target.Buttons[button].Column = target.Columns[column].Id;
+			Owner.InvalidateToolbarLayout();
+			return true;
+		}
+
+		bool CreateControl(
+			std::string_view kind, HostArguments arguments, HostValue &result, std::string &failure
+		) {
 			size_t toolbar = 0;
 			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
 				failure = "no such toolbar - CreateToolbar answers the id to pass here";
@@ -675,22 +832,137 @@ namespace studio {
 			PluginButton button;
 			button.Name = std::string(At(arguments, 1).AsText());
 			if (button.Name.empty()) {
-				failure = "a button needs a name";
+				failure = "a toolbar control needs a name";
 				return false;
 			}
 
 			button.Tooltip = std::string(At(arguments, 2).AsText());
 
-			const HostValue &handler = At(arguments, 3);
-			if (handler.Tag == HostTag::Callback) {
-				button.OnClick = handler.Callback;
-			} else if (handler.Tag != HostTag::Nil) {
-				failure = "a button's handler has to be a function";
+			size_t handlerIndex = 3;
+			size_t idIndex = 4;
+			size_t widthIndex = 5;
+			size_t visibleIndex = 6;
+			if (kind == "CreateLabel") {
+				button.Kind = PluginControlKind::Label;
+				handlerIndex = std::numeric_limits<size_t>::max();
+				idIndex = 3;
+				widthIndex = 4;
+				visibleIndex = 5;
+			} else if (kind == "CreateToggle") {
+				button.Kind = PluginControlKind::Toggle;
+				button.Active = At(arguments, 3).AsBoolean();
+				handlerIndex = 4;
+				idIndex = 5;
+				widthIndex = 6;
+				visibleIndex = 7;
+			} else if (kind == "CreateDropdown") {
+				button.Kind = PluginControlKind::Dropdown;
+				if (At(arguments, 3).Tag != HostTag::Array) {
+					failure = "a dropdown needs an array of option strings";
+					return false;
+				}
+				for (const HostValue &option : At(arguments, 3).Items) {
+					if (option.Tag != HostTag::String) {
+						failure = "every dropdown option has to be a string";
+						return false;
+					}
+					button.Options.push_back(option.Text);
+				}
+				if (button.Options.empty()) {
+					failure = "a dropdown needs at least one option";
+					return false;
+				}
+				size_t selected = 0;
+				if (!SurfaceIndexOf(At(arguments, 4), button.Options.size(), selected)) {
+					failure = "a dropdown selection has to name one of its options";
+					return false;
+				}
+				button.Selected = selected;
+				handlerIndex = 5;
+				idIndex = 6;
+				widthIndex = 7;
+				visibleIndex = 8;
+			}
+
+			if (button.Kind != PluginControlKind::Label) {
+				const HostValue &handler = At(arguments, handlerIndex);
+				if (handler.Tag == HostTag::Callback) {
+					if (button.Kind == PluginControlKind::Button) {
+						button.OnClick = handler.Callback;
+					} else {
+						button.OnChanged = handler.Callback;
+					}
+				} else if (handler.Tag != HostTag::Nil) {
+					failure = "a toolbar control's handler has to be a function";
+					return false;
+				}
+			}
+
+			button.Id = StableId(At(arguments, idIndex), "tool", Plugin.Toolbars[toolbar].Buttons.size());
+			if (std::any_of(
+					Plugin.Toolbars[toolbar].Buttons.begin(),
+					Plugin.Toolbars[toolbar].Buttons.end(),
+					[&](const PluginButton &existing) { return existing.Id == button.Id; }
+				)) {
+				failure = "a toolbar control with id '" + button.Id + "' already exists";
 				return false;
+			}
+			if (At(arguments, widthIndex).Tag == HostTag::Number) {
+				if (!std::isfinite(At(arguments, widthIndex).Number)) {
+					failure = "a toolbar control width has to be a finite number";
+					return false;
+				}
+				button.Width = ClampPluginToolWidth(static_cast<float>(At(arguments, widthIndex).Number));
+			}
+			if (At(arguments, visibleIndex).Tag != HostTag::Nil) {
+				button.Visible = At(arguments, visibleIndex).AsBoolean();
 			}
 
 			Plugin.Toolbars[toolbar].Buttons.push_back(std::move(button));
 			result = HostValue::Of(static_cast<double>(Plugin.Toolbars[toolbar].Buttons.size()));
+			Owner.InvalidateToolbarLayout();
+			return true;
+		}
+
+		bool ConfigureToolbar(std::string_view name, HostArguments arguments, std::string &failure) {
+			size_t toolbar = 0;
+			if (!SurfaceIndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
+				failure = "no such toolbar";
+				return false;
+			}
+			if (name == "SetToolbarVisible") {
+				Plugin.Toolbars[toolbar].Visible = At(arguments, 1).AsBoolean();
+				Owner.InvalidateToolbarLayout();
+				return true;
+			}
+			if (name == "SetToolbarPlacement") {
+				const auto placement = ParsePluginToolbarPlacement(At(arguments, 1).AsText());
+				if (!placement.has_value()) {
+					failure = "toolbar placement has to be 'Tabbed' or 'Pinned'";
+					return false;
+				}
+				Plugin.Toolbars[toolbar].Placement = *placement;
+				Owner.InvalidateToolbarLayout();
+				return true;
+			}
+
+			size_t button = 0;
+			if (!SurfaceIndexOf(At(arguments, 1), Plugin.Toolbars[toolbar].Buttons.size(), button)) {
+				failure = "no such toolbar control";
+				return false;
+			}
+			PluginButton &control = Plugin.Toolbars[toolbar].Buttons[button];
+			if (name == "SetToolVisible") {
+				control.Visible = At(arguments, 2).AsBoolean();
+				Owner.InvalidateToolbarLayout();
+				return true;
+			}
+			if (At(arguments, 2).Tag != HostTag::Number || !std::isfinite(At(arguments, 2).Number)) {
+				failure = "a toolbar control width has to be a finite number";
+				return false;
+			}
+			control.Width = ClampPluginToolWidth(static_cast<float>(At(arguments, 2).Number));
+			Owner.InvalidateToolbarLayout();
 			return true;
 		}
 
@@ -725,6 +997,35 @@ namespace studio {
 			if (name == "SetWidgetColour") {
 				return SetWidgetColour(widget, At(arguments, 1), At(arguments, 2), failure);
 			}
+			if (name == "SetWidgetDock") {
+				const std::optional<PluginDock> dock = ParsePluginDock(At(arguments, 1).AsText());
+				if (!dock) {
+					failure = "a widget dock is Floating, Centre, Left, Right, or Bottom";
+					return false;
+				}
+				Plugin.Widgets[widget].Dock = *dock;
+				return true;
+			}
+			if (name == "SetWidgetSizeConstraints") {
+				const double minimumWidth = At(arguments, 1).AsNumber(-1.0);
+				const double minimumHeight = At(arguments, 2).AsNumber(-1.0);
+				const double maximumWidth = At(arguments, 3).AsNumber(-1.0);
+				const double maximumHeight = At(arguments, 4).AsNumber(-1.0);
+				if (!std::isfinite(minimumWidth) || !std::isfinite(minimumHeight) ||
+					!std::isfinite(maximumWidth) || !std::isfinite(maximumHeight) || minimumWidth < 1.0 ||
+					minimumHeight < 1.0 || maximumWidth < 0.0 || maximumHeight < 0.0) {
+					failure = "widget constraints need finite positive minimums and non-negative maximums";
+					return false;
+				}
+				PluginWidget &target = Plugin.Widgets[widget];
+				target.MinimumWidth = static_cast<float>(minimumWidth);
+				target.MinimumHeight = static_cast<float>(minimumHeight);
+				target.MaximumWidth =
+					maximumWidth > 0.0 ? static_cast<float>(std::max(maximumWidth, minimumWidth)) : 0.0f;
+				target.MaximumHeight =
+					maximumHeight > 0.0 ? static_cast<float>(std::max(maximumHeight, minimumHeight)) : 0.0f;
+				return true;
+			}
 
 			const HostValue &handler = At(arguments, 1);
 			if (handler.Tag != HostTag::Callback) {
@@ -740,6 +1041,77 @@ namespace studio {
 			}
 
 			Plugin.Widgets[widget].Render = handler.Callback;
+			return true;
+		}
+
+		bool
+		Viewport(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
+			if (name == "AddViewport") {
+				result = HostValue::Of(static_cast<double>(Owner.AddViewport() + 1));
+				return true;
+			}
+
+			const std::string option(At(arguments, 0).AsText());
+			bool *toggle = nullptr;
+			if (option == "Grid") {
+				toggle = &Owner.ShowGrid;
+			} else if (option == "Direction Gizmo") {
+				toggle = &Owner.ShowDirectionGizmo;
+			} else if (option == "3D Cursor") {
+				toggle = &Owner.ShowCursor;
+			} else if (option == "Orbit") {
+				toggle = &Owner.OrbitCamera;
+			} else if (option == "Lock Direction") {
+				toggle = &Owner.DirectionLocked;
+			} else if (option == "Particles") {
+				toggle = &Owner.ShowParticleEmitters;
+			} else if (option == "Collider Outlines") {
+				toggle = &Owner.ShowColliders;
+			}
+
+			if (option == "Camera Speed") {
+				if (name == "GetViewportOption") {
+					result = HostValue::Of(static_cast<double>(Owner.CameraSpeed));
+					return true;
+				}
+				const double speed = At(arguments, 1).AsNumber(-1.0);
+				if (!std::isfinite(speed) || speed < 1.0 || speed > 200.0) {
+					failure = "Camera Speed has to be between 1 and 200";
+					return false;
+				}
+				Owner.CameraSpeed = static_cast<float>(speed);
+				return true;
+			}
+			if (toggle == nullptr) {
+				failure = "no such viewport option";
+				return false;
+			}
+			if (name == "GetViewportOption") {
+				result = HostValue::Of(*toggle);
+			} else {
+				*toggle = At(arguments, 1).AsBoolean();
+			}
+			return true;
+		}
+
+		bool OpenScript(const HostValue &value, std::string &failure) {
+			const Entity instance = value.AsInstance();
+			if (instance == engine::ecs::NULL_ENTITY || !Owner.Active.IsValid()) {
+				failure = "OpenScript takes a script instance in the active world";
+				return false;
+			}
+			bool script = false;
+			Owner.Universe->Enter(Owner.Active, [&](Store &store) {
+				const engine::ecs::ClassId container =
+					engine::ecs::Classes::Find(engine::core::Name("LuaSourceContainer"));
+				script = container.IsValid() && store.Alive(instance) && store.IsA(instance, container);
+			});
+			if (!script) {
+				failure = "OpenScript takes a script instance in the active world";
+				return false;
+			}
+			Owner.OpenScriptTab(Owner.Active, instance);
+			Owner.ShowScripts = true;
 			return true;
 		}
 
@@ -803,6 +1175,39 @@ namespace studio {
 				bool value = At(arguments, 1).AsBoolean();
 				ImGui::Checkbox(text.c_str(), &value);
 				result = HostValue::Of(value);
+				return true;
+			}
+			if (name == "Combo") {
+				if (At(arguments, 1).Tag != HostTag::Array) {
+					failure = "Combo takes an array of option strings";
+					return false;
+				}
+				std::vector<std::string> options;
+				for (const HostValue &option : At(arguments, 1).Items) {
+					if (option.Tag != HostTag::String) {
+						failure = "every Combo option has to be a string";
+						return false;
+					}
+					options.push_back(option.Text);
+				}
+				if (options.empty()) {
+					failure = "Combo needs at least one option";
+					return false;
+				}
+				size_t selected = 0;
+				if (!SurfaceIndexOf(At(arguments, 2), options.size(), selected)) {
+					failure = "Combo selection has to name one of its options";
+					return false;
+				}
+				if (ImGui::BeginCombo(text.c_str(), options[selected].c_str())) {
+					for (size_t index = 0; index < options.size(); index++) {
+						if (ImGui::Selectable(options[index].c_str(), index == selected)) {
+							selected = index;
+						}
+					}
+					ImGui::EndCombo();
+				}
+				result = HostValue::Of(static_cast<double>(selected + 1));
 				return true;
 			}
 			if (name == "InputText") {

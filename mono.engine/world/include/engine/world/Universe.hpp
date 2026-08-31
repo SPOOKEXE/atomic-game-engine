@@ -69,6 +69,20 @@ namespace engine::world {
 		// ticks in one frame - it will only fall further behind.
 		int MaximumCatchUpTicks = 8;
 
+		// Minimum estimated work across the active worlds before their ticks take
+		// ownership of the worker pool. The estimate is the previous measured tick
+		// cost multiplied by ticks owed. Below this floor the driver runs the batch
+		// directly and leaves the pool available to systems inside each world.
+		//
+		// The O0 to O3 simulation sweep measures an empty worker dispatch at 8 to
+		// 58 microseconds on the development machine. Fifty microseconds keeps tiny
+		// worlds out of that noisy crossover while preserving coarse world-level
+		// parallelism for expensive simulations. Zero forces every multi-world
+		// batch onto its assigned lanes.
+		//
+		// @since v0.20
+		float WorldParallelFloorMilliseconds = 0.05f;
+
 		// Whether the buses live in another process.
 		//
 		// A supervised host holds worlds and nothing else: the MessagingService
@@ -548,6 +562,11 @@ namespace engine::world {
 		//
 		// @param ticks The new catch-up limit.
 		void SetMaximumCatchUpTicks(int ticks);
+
+		// Changes the measured-cost floor for dispatching a multi-world batch.
+		//
+		// @param milliseconds Non-negative wall milliseconds. Zero always dispatches.
+		void SetWorldParallelFloorMilliseconds(float milliseconds);
 
 		// Changes how many bus operations one world may issue per tick.
 		//

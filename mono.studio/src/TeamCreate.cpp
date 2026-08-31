@@ -2,12 +2,14 @@
 #include <engine/core/Log.hpp>
 #include <engine/replication/Listener.hpp>
 
+#include <algorithm>
 #include <imgui.h>
 #include <optional>
 #include <span>
 #include <studio/Editor.hpp>
 #include <studio/TeamCreate.hpp>
 #include <utility>
+#include <vector>
 
 namespace studio {
 
@@ -22,7 +24,7 @@ namespace studio {
 
 		// Hex when it is exactly that, words otherwise - `cdn::Stream` makes
 		// the same choice for the same reason.
-		std::optional<network::SessionKey> ReadSecret(const std::string &secret) {
+		std::optional<network::SessionKey> ReadSecret(std::string_view secret) {
 			if (secret.empty()) {
 				return std::nullopt;
 			}
@@ -40,29 +42,51 @@ namespace studio {
 	TeamCreate::~TeamCreate() = default;
 
 	bool TeamCreate::Host(const TeamCreateSettings &settings, std::string &error) {
+		std::optional<network::SessionKey> key;
+		if (!settings.Secret.empty()) {
+			key = ReadSecret(settings.Secret);
+			if (!key) {
+				error = "the session key is neither 64 hex characters nor a passphrase";
+				return false;
+			}
+		}
+
 		// The stream first, because the port it binds is the port the
 		// announcement has to carry - `settings.Port` of zero binds an
 		// ephemeral one, and an advert naming zero sends every guest nowhere.
 		engine::net::TransportSettings socket;
-		Socket = engine::net::MakeUdpTransport(settings.Port, socket);
-		if (Socket == nullptr) {
+		std::unique_ptr<engine::net::Transport> nextSocket =
+			engine::net::MakeUdpTransport(settings.Port, socket);
+		if (nextSocket == nullptr) {
 			error = "could not open a socket to host the session on";
 			return false;
 		}
-		Stream = EditStream::Host(*Socket, *Log, *Worlds);
-
-		TeamCreateSettings offering = settings;
-		offering.Port = Socket->Local().Port;
-
-		if (!Open(offering, true, {}, error)) {
-			Stream.reset();
-			Socket.reset();
+		std::unique_ptr<EditStream> nextStream =
+			EditStream::Host(*nextSocket, *Log, *Worlds, settings.PeerLimit, key ? &*key : nullptr);
+		if (nextStream == nullptr) {
+			error = "could not derive the private session identity";
 			return false;
 		}
+
+		TeamCreateSettings offering = settings;
+		offering.Port = nextSocket->Local().Port;
+
+		if (!Open(offering, true, {}, error, std::move(key))) {
+			return false;
+		}
+
+		// The stream borrows its transport, so replacement follows destruction
+		// order as deliberately as Leave does.
+		Stream.reset();
+		Socket.reset();
+		Socket = std::move(nextSocket);
+		Stream = std::move(nextStream);
 		return true;
 	}
 
-	bool TeamCreate::Join(const engine::net::Endpoint &at, double nowSeconds, std::string &error) {
+	bool TeamCreate::Join(
+		const engine::net::Endpoint &at, double nowSeconds, std::string &error, std::string_view secret
+	) {
 		if (!at.IsValid()) {
 			error = "that session has no address to join";
 			return false;
@@ -71,13 +95,31 @@ namespace studio {
 		// An ephemeral port: a guest is dialling out, and a well-known one
 		// would be a port a second editor on the same machine could not take.
 		engine::net::TransportSettings socket;
-		Socket = engine::net::MakeUdpTransport(0, socket);
-		if (Socket == nullptr) {
+		std::unique_ptr<engine::net::Transport> nextSocket = engine::net::MakeUdpTransport(0, socket);
+		if (nextSocket == nullptr) {
 			error = "could not open a socket to join from";
 			return false;
 		}
 
-		Stream = EditStream::Join(*Socket, at, nowSeconds, *Log, *Worlds);
+		std::optional<network::SessionKey> key;
+		if (!secret.empty()) {
+			key = ReadSecret(secret);
+			if (!key) {
+				error = "the session key is neither 64 hex characters nor a passphrase";
+				return false;
+			}
+		}
+
+		std::unique_ptr<EditStream> nextStream =
+			EditStream::Join(*nextSocket, at, nowSeconds, *Log, *Worlds, key ? &*key : nullptr);
+		if (nextStream == nullptr) {
+			error = "could not derive the private session identity";
+			return false;
+		}
+		Stream.reset();
+		Socket.reset();
+		Socket = std::move(nextSocket);
+		Stream = std::move(nextStream);
 		return true;
 	}
 
@@ -103,10 +145,10 @@ namespace studio {
 		const TeamCreateSettings &settings,
 		bool announce,
 		std::span<const std::string> secrets,
-		std::string &error
+		std::string &error,
+		std::optional<network::SessionKey> key
 	) {
-		std::optional<network::SessionKey> key;
-		if (announce && !settings.Secret.empty()) {
+		if (announce && !key && !settings.Secret.empty()) {
 			key = ReadSecret(settings.Secret);
 			if (!key) {
 				error = "the session key is neither 64 hex characters nor a passphrase";
@@ -199,6 +241,9 @@ namespace studio {
 		}
 		if (Stream != nullptr) {
 			Stream->Pump(nowSeconds);
+			if (Announcing) {
+				SetCollaborators(static_cast<uint16_t>(Stream->Editors()));
+			}
 		}
 	}
 
@@ -221,13 +266,127 @@ namespace studio {
 		return Presence_ == nullptr ? network::PresenceFault::None : Presence_->Fault();
 	}
 
-	// --- the panel -----------------------------------------------------------
-	//
-	// **Deliberately small, and it says what it does not do.** The session layer
-	// is what v0.13 asked for and what exists; the shared document is not here,
-	// and a panel that implied otherwise would be the "half-added" outcome
-	// AGENTS.md calls worse than not starting. So the line at the bottom of this
-	// window is part of the feature rather than an apology for it.
+	// --- the menu and panel --------------------------------------------------
+
+	void Editor::WatchForTeam() {
+		if (Team == nullptr) {
+			TeamStatus = "team create is not initialised";
+			return;
+		}
+
+		std::vector<std::string> keys;
+		if (TeamKeyField[0] != '\0') {
+			keys.emplace_back(TeamKeyField);
+		}
+		if (Team->Watch(TeamPointField, keys)) {
+			TeamStatus = keys.empty() ? "looking for public sessions" : "looking for invited sessions";
+		} else {
+			TeamStatus = "the invitation key could not be used";
+		}
+	}
+
+	void Editor::HostTeam() {
+		if (Team == nullptr) {
+			TeamStatus = "team create is not initialised";
+			return;
+		}
+		if (TeamPrivateField && TeamKeyField[0] == '\0') {
+			TeamStatus = "a private session needs an invitation key or passphrase";
+			return;
+		}
+
+		TeamCreateSettings offering;
+		offering.Name = TeamNameField;
+		offering.Project = GamePath.empty() ? std::string() : GamePath.stem().string();
+		offering.Secret = TeamPrivateField ? std::string(TeamKeyField) : std::string();
+		offering.RendezvousAddress = TeamPointField;
+		offering.Port = static_cast<uint16_t>(std::clamp(TeamPortField, 0, 65535));
+		offering.PeerLimit = static_cast<uint16_t>(std::clamp(TeamPeerLimitField, 0, 65535));
+
+		std::string trouble;
+		if (!Team->Host(offering, trouble)) {
+			TeamStatus = trouble;
+			Say("team create: " + trouble, engine::core::LogLevel::Error);
+			return;
+		}
+
+		TeamStatus = "hosting on " + Team->Session().At.Text();
+	}
+
+	void Editor::JoinTeam(const engine::net::Endpoint &address, bool privateSession) {
+		if (Team == nullptr) {
+			TeamStatus = "team create is not initialised";
+			return;
+		}
+		if (Team->Hosting()) {
+			TeamStatus = "stop hosting before joining another session";
+			return;
+		}
+		if (privateSession && TeamKeyField[0] == '\0') {
+			TeamStatus = "a private session needs its invitation key";
+			return;
+		}
+
+		std::string trouble;
+		if (!Team->Join(
+				address,
+				engine::core::Clock::Seconds(),
+				trouble,
+				privateSession ? std::string_view(TeamKeyField) : std::string_view()
+			)) {
+			TeamStatus = trouble;
+			Say("team create: " + trouble, engine::core::LogLevel::Error);
+			return;
+		}
+		TeamStatus = "connecting to " + address.Text();
+	}
+
+	void Editor::LeaveTeam() {
+		if (Team == nullptr) {
+			return;
+		}
+		Team->Leave(engine::core::Clock::Seconds());
+		TeamStatus = "left team create";
+	}
+
+	void Editor::DrawTeamCreateMenu() {
+		if (ImGui::MenuItem("Open Team Create", nullptr, ShowTeamCreate)) {
+			ShowTeamCreate = true;
+		}
+		ImGui::Separator();
+
+		if (Team == nullptr) {
+			ImGui::TextDisabled("Not initialised");
+			return;
+		}
+
+		if (!Team->Watching()) {
+			if (ImGui::MenuItem("Look for Editors")) {
+				WatchForTeam();
+			}
+		} else {
+			ImGui::TextDisabled(
+				"%zu session%s found", Team->Peers().size(), Team->Peers().size() == 1 ? "" : "s"
+			);
+		}
+
+		const bool joined = Team->Edits() != nullptr && !Team->Hosting();
+		ImGui::BeginDisabled(joined);
+		if (ImGui::MenuItem(Team->Hosting() ? "Stop Hosting" : "Host Session", nullptr, Team->Hosting())) {
+			if (Team->Hosting()) {
+				LeaveTeam();
+			} else {
+				HostTeam();
+			}
+		}
+		ImGui::EndDisabled();
+
+		if (!Team->Hosting() && (Team->Watching() || Team->Edits() != nullptr)) {
+			if (ImGui::MenuItem(joined ? "Leave Session" : "Stop Looking")) {
+				LeaveTeam();
+			}
+		}
+	}
 
 	void Editor::DrawTeamCreate() {
 		if (!ShowTeamCreate) {
@@ -238,15 +397,11 @@ namespace studio {
 			return;
 		}
 
-		const double now = engine::core::Clock::Seconds();
-
 		if (!Team->Watching()) {
 			ImGui::TextUnformatted("Not looking for anybody yet.");
 			ImGui::Spacing();
 			if (ImGui::Button("Look for editors")) {
-				// Watching costs one socket and announces nothing, which is
-				// what somebody opening this panel to look wants.
-				Team->Watch(TeamPointField, {});
+				WatchForTeam();
 			}
 		} else {
 			if (Team->Hosting()) {
@@ -278,38 +433,65 @@ namespace studio {
 		ImGui::Separator();
 
 		ImGui::InputTextWithHint("Name", "what to call this session", TeamNameField, sizeof(TeamNameField));
+		ImGui::Checkbox("Private session", &TeamPrivateField);
+		ImGui::SameLine();
+		ImGui::Checkbox("Show key", &TeamRevealKey);
 		ImGui::InputTextWithHint(
-			"Key",
-			"a passphrase, or blank to invite the whole subnet",
+			"Invitation key",
+			"passphrase or 64 hex characters",
 			TeamKeyField,
 			sizeof(TeamKeyField),
-			ImGuiInputTextFlags_Password
+			TeamRevealKey ? ImGuiInputTextFlags_None : ImGuiInputTextFlags_Password
 		);
+		ImGui::TextDisabled("The key also unlocks private sessions you discover.");
 		ImGui::InputTextWithHint(
 			"Rendezvous", "host:port, for editors off this subnet", TeamPointField, sizeof(TeamPointField)
 		);
 
-		if (ImGui::Button(Team->Hosting() ? "Stop hosting" : "Host")) {
-			if (Team->Hosting()) {
-				Team->Leave(now);
-			} else {
-				TeamCreateSettings offering;
-				offering.Name = TeamNameField;
-				offering.Project = GamePath.empty() ? std::string() : GamePath.stem().string();
-				offering.Secret = TeamKeyField;
-				offering.RendezvousAddress = TeamPointField;
-				// The port a peer would connect to is the editor's hosted
-				// server, which only exists while Play is running. Zero when it
-				// is not, and an announcement carrying zero is one nothing can
-				// act on - so it is reported rather than hidden.
-				offering.Port = 0;
+		ImGui::SetNextItemWidth(120.0f);
+		if (ImGui::InputInt("Listen port", &TeamPortField, 0, 0)) {
+			TeamPortField = std::clamp(TeamPortField, 0, 65535);
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("0 chooses an available port automatically");
+		}
+		ImGui::SetNextItemWidth(120.0f);
+		if (ImGui::InputInt("Editor limit", &TeamPeerLimitField, 1, 4)) {
+			TeamPeerLimitField = std::clamp(TeamPeerLimitField, 0, 65535);
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("0 allows any number of editors");
+		}
 
-				std::string trouble;
-				if (!Team->Host(offering, trouble)) {
-					Say("team create: " + trouble, engine::core::LogLevel::Error);
-				}
+		const bool joined = Team->Edits() != nullptr && !Team->Hosting();
+		ImGui::BeginDisabled(joined);
+		if (ImGui::Button(Team->Hosting() ? "Stop hosting" : "Host session")) {
+			if (Team->Hosting()) {
+				LeaveTeam();
+			} else {
+				HostTeam();
 			}
 		}
+		ImGui::EndDisabled();
+		if (!Team->Hosting() && (Team->Watching() || Team->Edits() != nullptr)) {
+			ImGui::SameLine();
+			if (ImGui::Button(joined ? "Leave session" : "Stop looking")) {
+				LeaveTeam();
+			}
+		}
+
+		if (!TeamStatus.empty()) {
+			ImGui::TextDisabled("%s", TeamStatus.c_str());
+		}
+
+		ImGui::InputTextWithHint("Join address", "127.0.0.1:47600", TeamJoinField, sizeof(TeamJoinField));
+		ImGui::Checkbox("Private address", &TeamJoinPrivateField);
+		const std::optional<engine::net::Endpoint> manual = engine::net::Endpoint::Parse(TeamJoinField);
+		ImGui::BeginDisabled(!manual.has_value() || Team->Hosting());
+		if (ImGui::Button("Join address") && manual) {
+			JoinTeam(*manual, TeamJoinPrivateField);
+		}
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 
@@ -317,12 +499,13 @@ namespace studio {
 		if (peers.empty()) {
 			ImGui::TextDisabled("No other editors seen.");
 		} else if (ImGui::BeginTable(
-					   "editors", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+					   "editors", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
 				   )) {
 			ImGui::TableSetupColumn("Editor");
 			ImGui::TableSetupColumn("Project");
 			ImGui::TableSetupColumn("Found");
-			ImGui::TableSetupColumn("Address");
+			ImGui::TableSetupColumn("Editors");
+			ImGui::TableSetupColumn("Action");
 			ImGui::TableHeadersRow();
 
 			for (const network::Listing &row : peers) {
@@ -339,12 +522,29 @@ namespace studio {
 				ImGui::TableNextColumn();
 				ImGui::TextUnformatted(network::Describe(row.Via));
 				ImGui::TableNextColumn();
-				if (row.Joinable()) {
-					ImGui::TextUnformatted(row.Dial().Text().c_str());
+				if (row.Session.PeerLimit == 0) {
+					ImGui::Text("%u", row.Session.Peers);
 				} else {
-					ImGui::TextDisabled(
-						"%s", row.Session.Admits == network::Access::Private ? "locked" : "full"
-					);
+					ImGui::Text("%u/%u", row.Session.Peers, row.Session.PeerLimit);
+				}
+				ImGui::TableNextColumn();
+				const std::string rowId = row.Session.Session.Text();
+				if (row.Joinable() && row.Dial().IsValid()) {
+					ImGui::BeginDisabled(Team->Hosting());
+					if (ImGui::SmallButton(("Join##" + rowId).c_str())) {
+						JoinTeam(row.Dial(), row.Session.Admits == network::Access::Private);
+					}
+					ImGui::EndDisabled();
+				} else if (row.Session.IsFull()) {
+					ImGui::TextDisabled("full");
+				} else if (row.Session.Admits == network::Access::Private) {
+					if (TeamKeyField[0] == '\0') {
+						ImGui::TextDisabled("key required");
+					} else if (ImGui::SmallButton(("Unlock##" + rowId).c_str())) {
+						WatchForTeam();
+					}
+				} else {
+					ImGui::TextDisabled("no address");
 				}
 			}
 			ImGui::EndTable();

@@ -836,6 +836,80 @@ TEST_CASE("javascript reaches the same enum through its own spelling", "[scripti
 	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = Enum.EasingStyle.Linear;"));
 }
 
+TEST_CASE("surface appearance properties bind in both languages", "[scripting][surface]") {
+	RegisterClasses();
+
+	{
+		Store store("surface_luau");
+		const auto runtime = MakeRuntime(store, Language::Luau);
+		MustRun(*runtime, R"(
+			local part = Instance.new('MeshPart')
+			part.TextureID = 'surface-colour.atex'
+			part.NormalMap = 'surface-normal.atex'
+			part.RoughnessMap = 'surface-roughness.atex'
+			part.OcclusionMap = 'surface-occlusion.atex'
+			part.HeightMap = 'surface-height.atex'
+			part.MetalnessMap = 'surface-metalness.atex'
+			part.EmissiveMap = 'surface-emissive.atex'
+			part.SurfaceColor = Color3.new(0.2, 0.4, 0.8)
+			part.EmissiveTint = Color3.new(1.0, 0.25, 0.1)
+			part.EmissiveStrength = 3.5
+			part.AlphaMode = Enum.AlphaMode.TintMask
+			part.AlphaCutoff = 0.3
+			part.ResampleMode = Enum.ResamplerMode.Pixelated
+
+			assert(part.TextureID == 'surface-colour.atex')
+			assert(part.NormalMap == 'surface-normal.atex')
+			assert(part.RoughnessMap == 'surface-roughness.atex')
+			assert(part.OcclusionMap == 'surface-occlusion.atex')
+			assert(part.HeightMap == 'surface-height.atex')
+			assert(part.MetalnessMap == 'surface-metalness.atex')
+			assert(part.EmissiveMap == 'surface-emissive.atex')
+			assert(part.SurfaceColor == Color3.new(0.2, 0.4, 0.8))
+			assert(part.EmissiveTint == Color3.new(1.0, 0.25, 0.1))
+			assert(part.EmissiveStrength == 3.5)
+			assert(part.AlphaMode == Enum.AlphaMode.TintMask)
+			assert(math.abs(part.AlphaCutoff - 0.3) < 1e-5)
+			assert(part.ResampleMode == Enum.ResamplerMode.Pixelated)
+		)");
+	}
+
+	{
+		Store store("surface_javascript");
+		const auto runtime = MakeRuntime(store, Language::JavaScript);
+		MustRun(*runtime, R"(
+			const part = Instance.new('MeshPart');
+			part.TextureID = 'surface-colour.atex';
+			part.NormalMap = 'surface-normal.atex';
+			part.RoughnessMap = 'surface-roughness.atex';
+			part.OcclusionMap = 'surface-occlusion.atex';
+			part.HeightMap = 'surface-height.atex';
+			part.MetalnessMap = 'surface-metalness.atex';
+			part.EmissiveMap = 'surface-emissive.atex';
+			part.SurfaceColor = Color3.new(0.2, 0.4, 0.8);
+			part.EmissiveTint = Color3.new(1.0, 0.25, 0.1);
+			part.EmissiveStrength = 3.5;
+			part.AlphaMode = Enum.AlphaMode.TintMask;
+			part.AlphaCutoff = 0.3;
+			part.ResampleMode = Enum.ResamplerMode.Pixelated;
+
+			if (part.TextureID !== 'surface-colour.atex') throw new Error('colour map');
+			if (part.NormalMap !== 'surface-normal.atex') throw new Error('normal map');
+			if (part.RoughnessMap !== 'surface-roughness.atex') throw new Error('roughness map');
+			if (part.OcclusionMap !== 'surface-occlusion.atex') throw new Error('occlusion map');
+			if (part.HeightMap !== 'surface-height.atex') throw new Error('height map');
+			if (part.MetalnessMap !== 'surface-metalness.atex') throw new Error('metalness map');
+			if (part.EmissiveMap !== 'surface-emissive.atex') throw new Error('emissive map');
+			if (!part.SurfaceColor.Equals(Color3.new(0.2, 0.4, 0.8))) throw new Error('surface colour');
+			if (!part.EmissiveTint.Equals(Color3.new(1.0, 0.25, 0.1))) throw new Error('emissive tint');
+			if (part.EmissiveStrength !== 3.5) throw new Error('emissive strength');
+			if (!part.AlphaMode.Equals(Enum.AlphaMode.TintMask)) throw new Error('alpha mode');
+			if (Math.abs(part.AlphaCutoff - 0.3) > 1e-5) throw new Error('alpha cutoff');
+			if (!part.ResampleMode.Equals(Enum.ResamplerMode.Pixelated)) throw new Error('resample mode');
+		)");
+	}
+}
+
 TEST_CASE("javascript sees transparency and collision groups too", "[scripting][js]") {
 	RegisterClasses();
 	engine::spatial::CollisionGroups::Reset();

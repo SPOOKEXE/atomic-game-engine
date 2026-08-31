@@ -33,6 +33,31 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("blit"), [this](const graph::RunContext &context) {
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) {
+				return false;
+			}
+			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !target.IsValid()) {
+				return false;
+			}
+
+			EnterNamedPass(context.Name);
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = source.Texture;
+			blit.source.w = source.Width;
+			blit.source.h = source.Height;
+			blit.destination.texture = target.Texture;
+			blit.destination.w = target.Width;
+			blit.destination.h = target.Height;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = SDL_GPU_FILTER_LINEAR;
+			blit.cycle = true;
+			SDL_BlitGPUTexture(Command, &blit);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("depth-linearise"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;

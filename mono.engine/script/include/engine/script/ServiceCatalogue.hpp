@@ -54,6 +54,8 @@
 // @tier L9 · shared
 // @since v0.15
 
+#include <engine/script/Runtime.hpp>
+
 #include <cstdint>
 #include <span>
 
@@ -137,7 +139,17 @@ namespace engine::script {
 		// **A language without one is a refusal, not a silence.** See the header
 		// comment: the runtime says which language does have it.
 		ServiceLanguages Languages;
+
+		// The grants a runtime needs before either VM installs this service.
+		// Core deterministic services use `World`; host-sensitive services name
+		// their narrower capability on the catalogue row.
+		ScriptCapabilities RequiredCapabilities = ScriptCapabilities::World;
 	};
+
+	// Reports whether a grant set permits installation of one service.
+	constexpr bool Permits(const ServiceDefinition &service, ScriptCapabilities granted) {
+		return HasCapabilities(granted, service.RequiredCapabilities);
+	}
 
 	// Every service this engine declares, in install order.
 	//
@@ -238,6 +250,14 @@ namespace engine::script {
 	//
 	// @since v0.10
 	const ServiceSurface &ContentServiceSurface();
+
+	// `ComputeService`, the bounded asynchronous numeric batch surface.
+	//
+	// Work crosses a heartbeat only through a typed noise-grid request and an
+	// owned numeric result. Arbitrary script functions do not leave their VM.
+	//
+	// @since v0.20
+	const ServiceSurface &ComputeServiceSurface();
 
 	// `CollectionService`, which answers what carries a tag.
 	//

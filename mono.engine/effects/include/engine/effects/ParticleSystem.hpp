@@ -384,8 +384,10 @@ namespace engine::effects {
 
 		// The guaranteed first birth chooses a deterministic recurring phase after
 		// it is planned, preserving immediate start without synchronising a crowd.
+		//@{
 		bool RatePhasePending = true;
 		bool Enabled = true;
+		//@}
 
 		// A disabled device emitter remains resident until its longest possible
 		// particle has expired. Only those rare blocks are revisited by the host;
@@ -401,15 +403,23 @@ namespace engine::effects {
 	// removes the steady 1.5 KiB `ParticleEmitter` walk from `StepParticles` while
 	// preserving the small hot block used by both host and device stepping.
 	struct EmitterSpawnState {
+		// Local emitter extent, emission direction, and inherited parent velocity.
+		//@{
 		core::Vector3 Half;
 		core::Vector3 Emission;
 		core::Vector3 Inherited;
+		//@}
 
+		// Random ranges sampled once at birth.
+		//@{
 		core::NumberRange Speed;
 		core::NumberRange Lifetime;
 		core::NumberRange RotationSpeed;
 		core::NumberRange Rotation;
+		//@}
 
+		// Authored directional and shape controls.
+		//@{
 		float SpreadX = 0.0f;
 		float SpreadY = 0.0f;
 		float ShapePartial = 0.0f;
@@ -418,6 +428,7 @@ namespace engine::effects {
 		ParticleShape Shape = ParticleShape::Box;
 		ParticleShapeStyle ShapeStyle = ParticleShapeStyle::Volume;
 		ParticleShapeDirection ShapeDirection = ParticleShapeDirection::Outward;
+		//@}
 	};
 
 	// One particle's simulation half.
@@ -586,12 +597,14 @@ namespace engine::effects {
 		// Observed ECS epochs already folded into the resident emitter rows.
 		// Keeping the six exact component epochs makes the steady refresh path
 		// independent of the number of quiet entities carrying those components.
+		//@{
 		uint64_t EmitterChangeVersion = 0;
 		uint64_t TransformChangeVersion = 0;
 		uint64_t AttachmentChangeVersion = 0;
 		uint64_t BoundsChangeVersion = 0;
 		uint64_t MotionChangeVersion = 0;
 		uint64_t HierarchyChangeVersion = 0;
+		//@}
 
 		// Caller-owned activation policy revision already applied to resident
 		// blocks. The predicate itself lives only for one refresh call and never
@@ -743,6 +756,7 @@ namespace engine::effects {
 	// @return False when the entity is not a ParticleEmitter.
 	bool ClearParticles(ecs::Store &store, ecs::Entity emitter);
 
+	// Optional host policy deciding whether one emitter contributes to a snapshot.
 	using EmitterActivationPredicate = bool (*)(const ecs::Store &, ecs::Entity);
 
 	// Hands out and reclaims blocks, and refreshes each one from its emitter.

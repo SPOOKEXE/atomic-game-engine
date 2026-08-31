@@ -263,6 +263,8 @@ namespace engine::effects {
 		ecs::Components::Register<EmitterSlot>("effects.EmitterSlot", WriteSlots, ReadSlots);
 		ecs::Components::Register<Beam>("effects.Beam", WriteBeams, ReadBeams);
 		ecs::Components::Register<Trail>("effects.Trail", WriteTrails, ReadTrails);
+		ecs::Components::Register<Decal>("effects.Decal", WriteDecals, ReadDecals);
+		ecs::Components::Register<Texture>("effects.Texture", WriteTextures, ReadTextures);
 		ecs::Components::Register<ParticleSystem>("effects.ParticleSystem", WriteSystems, ReadSystems);
 
 		// **The ribbon buffer, and forgetting it was caught by a snapshot test

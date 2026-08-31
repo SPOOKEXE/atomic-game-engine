@@ -52,6 +52,38 @@
 
 namespace engine::ecs {
 
+	// How a described field occupies its component row.
+	//
+	// The property type remains the value scripts and Studio see. Packing only
+	// changes the resident representation. This keeps quantisation out of the
+	// save and replication formats, which have separate contracts.
+	//
+	// `Float16` is IEEE binary16. `Float8` is signed normalised over `[-1, 1]`,
+	// while `UFloat8` and `UFloat16` are unsigned normalised over `[0, 1]`.
+	// Integer formats saturate at their signed or unsigned range. Four-bit
+	// integers and bools share bytes with adjacent sub-byte fields.
+	//
+	// @since v0.20
+	enum class FieldPacking : uint8_t {
+		Native,
+		Float16,
+		UFloat16,
+		Float8,
+		UFloat8,
+		Int16,
+		UInt16,
+		Int8,
+		UInt8,
+		Int4,
+		UInt4,
+		Bool,
+	};
+
+	// The stable spelling used by scripts and Studio.
+	//
+	// @since v0.20
+	const char *Describe(FieldPacking packing);
+
 	// One field, as a caller declares it.
 	//
 	// @since v0.12
@@ -69,6 +101,11 @@ namespace engine::ecs {
 		// is. Named rather than pointed at, so the enum may be registered after
 		// the schema that uses it.
 		std::string_view Enum = {};
+
+		// The resident representation. A bool is always normalised to `Bool`,
+		// because spending a byte on a runtime-derived bit defeats the layout's
+		// ability to share that byte with adjacent flags.
+		FieldPacking Packing = FieldPacking::Native;
 	};
 
 	// One field, as the storage holds it.
@@ -87,6 +124,12 @@ namespace engine::ecs {
 		// What the field holds.
 		PropertyType Type = PropertyType::Opaque;
 
+		// Descriptive metadata tags attached to this field.
+		std::vector<std::string> Tags;
+
+		// Whether Studio should surface this field as an exposed config value.
+		bool Exposed = false;
+
 		// The set an `Enum` field's value must belong to. Invalid otherwise.
 		core::Name Enum;
 
@@ -95,6 +138,16 @@ namespace engine::ecs {
 
 		// How many bytes it occupies.
 		uint32_t Size = 0;
+
+		// The resident representation and its exact location within `Offset`.
+		// Native and byte-sized formats start at bit zero. Sub-byte fields may
+		// share the same byte.
+		FieldPacking Packing = FieldPacking::Native;
+		// Bit position within the field byte and total resident storage width.
+		//@{
+		uint8_t BitOffset = 0;
+		uint32_t StorageBits = 0;
+		//@}
 	};
 
 	// A component type described at run time.
@@ -141,6 +194,9 @@ namespace engine::ecs {
 		// @return The descriptor, or `nullptr` when the schema has no such field.
 		const FieldDescriptor *Find(std::string_view field) const;
 
+		// Metadata tags attached to this component by its author.
+		std::vector<std::string> Tags() const;
+
 		// How many bytes one value of this component occupies.
 		//
 		// @return The blob size, including any padding the layout needed.
@@ -160,6 +216,7 @@ namespace engine::ecs {
 
 		core::Name TypeName;
 		std::vector<FieldDescriptor> Layout;
+		std::vector<std::string> TagNames;
 		uint32_t Width = 0;
 		uint32_t Align = 1;
 
@@ -262,6 +319,21 @@ namespace engine::ecs {
 		//         under it.
 		static const Schema *Find(core::Name name);
 
+		// Replaces the metadata tags on a component. Tags are descriptive names
+		// such as `deprecated`, `experiment`, or `constant`.
+		static bool SetTags(ComponentId component, std::span<const std::string_view> tags);
+
+		// Replaces the metadata tags on one field of a described component.
+		static bool
+		SetFieldTags(ComponentId component, core::Name field, std::span<const std::string_view> tags);
+		// Changes whether Studio exposes one described field.
+		static bool SetFieldExposed(ComponentId component, core::Name field, bool exposed);
+
+		// Returns a copy so callers do not retain a view across registry access.
+		static std::vector<std::string> Tags(ComponentId component);
+		// Returns a copy of one field's descriptive metadata tags.
+		static std::vector<std::string> FieldTags(ComponentId component, core::Name field);
+
 		// Every described component, in registration order.
 		//
 		// **A copy of the ids rather than a view of the table**, because the
@@ -300,6 +372,19 @@ namespace engine::ecs {
 		// @param out      Filled in on a match.
 		// @return `false` when nothing maps that spelling.
 		static bool TypeNamed(std::string_view spelling, PropertyType &out);
+
+		// Resolves a script field spelling to its logical type and resident
+		// representation. Native type names accepted by `TypeNamed` remain valid.
+		static bool FieldTypeNamed(std::string_view spelling, PropertyType &type, FieldPacking &packing);
+
+		// Returns the logical field value. Native fields return an address inside
+		// `component`; packed fields decode into the caller's suitably aligned
+		// scratch storage and return `scratch`. The scratch must hold and align the
+		// logical `PropertyType`; every currently packable type needs four bytes.
+		static const void *ReadField(const void *component, const FieldDescriptor &field, void *scratch);
+
+		// Stores one logical value, quantising and saturating when requested.
+		static bool WriteField(void *component, const FieldDescriptor &field, const void *value);
 
 		// The bytes one value of a `PropertyType` occupies.
 		//

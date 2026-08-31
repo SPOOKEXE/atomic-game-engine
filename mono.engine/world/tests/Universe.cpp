@@ -304,12 +304,14 @@ TEST_CASE("universe tuning can change between driver ticks", "[world]") {
 
 	universe.SetMode(ExecutionMode::WorldSerial);
 	universe.SetMaximumCatchUpTicks(2);
+	universe.SetWorldParallelFloorMilliseconds(0.125f);
 	universe.SetBusBudgetPerTick(17);
 	universe.SetChannelQueueLimit(5);
 	universe.SetChannelsPerWorld(3);
 
 	CHECK(universe.Settings().Mode == ExecutionMode::WorldSerial);
 	CHECK(universe.Settings().MaximumCatchUpTicks == 2);
+	CHECK(universe.Settings().WorldParallelFloorMilliseconds == 0.125f);
 	CHECK(universe.Settings().BusBudgetPerTick == 17);
 	CHECK(universe.Settings().ChannelQueueLimit == 5);
 	CHECK(universe.Settings().ChannelsPerWorld == 3);
@@ -319,6 +321,8 @@ TEST_CASE("universe tuning can change between driver ticks", "[world]") {
 
 	universe.SetMaximumCatchUpTicks(0);
 	CHECK(universe.Settings().MaximumCatchUpTicks == 1);
+	universe.SetWorldParallelFloorMilliseconds(-1.0f);
+	CHECK(universe.Settings().WorldParallelFloorMilliseconds == 0.0f);
 }
 
 TEST_CASE("many worlds tick independently", "[world]") {
@@ -374,15 +378,16 @@ TEST_CASE("parallel and serial execution produce the same result", "[world]") {
 	REQUIRE(run(ExecutionMode::WorldParallel) == run(ExecutionMode::WorldSerial));
 }
 
-// **Which branch a tick takes, and it turns on the world count.**
+// **Which branch a tick takes, and it turns on world count and measured cost.**
 //
 // A `Jobs::ForWorkers` batch owns the process-wide pool, so a nested `Jobs::For`
 // from an assigned task runs inline - which means handing a *lone* world to a
 // lane buys no concurrency and spends the pool that everything inside the world
 // would otherwise have dispatched to. `Universe::Tick` carries the argument. The
-// visible half is the span it names, and that is what this pins: a name is the
-// only thing a caller can see the decision through.
-TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]") {
+// Tiny worlds also stay on the driver because the dispatch itself is more work
+// than their ticks. The visible half is the span it names, and that is what this
+// pins: a name is the only thing a caller can see the decision through.
+TEST_CASE("small world batches stay on the driver unless dispatch is forced", "[world]") {
 	Pool pool{4};
 	if (Jobs::PinnedWorkerCount() < 2) {
 		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
@@ -394,8 +399,10 @@ TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]"
 		std::vector<std::pair<std::string, std::string>> Edges;
 	};
 
-	const auto tickWith = [](size_t worlds) {
-		Universe universe;
+	const auto tickWith = [](size_t worlds, float dispatchFloor) {
+		UniverseSettings settings;
+		settings.WorldParallelFloorMilliseconds = dispatchFloor;
+		Universe universe(settings);
 		for (size_t index = 0; index < worlds; index++) {
 			const WorldId id = universe.Create(Named(("world.branch." + std::to_string(index)).c_str()));
 			universe.Enter(id, [](Store &store, Scheduler &systems) {
@@ -434,23 +441,31 @@ TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]"
 
 	// One world: on this thread, so everything it contains keeps its spans and
 	// the pool is free for whatever it dispatches.
-	const RecordedTree alone = tickWith(1);
+	const RecordedTree alone = tickWith(1, 0.0f);
 	CHECK(has(alone.Names, "worlds (driver)"));
 	CHECK_FALSE(has(alone.Names, "worlds (serial)"));
 	CHECK_FALSE(has(alone.Names, "worlds (pinned workers)"));
 
-	// Two: the lanes now have something to overlap, which is the case they are
-	// for. Their spans arrive as one reported total, because a worker cannot
-	// enter the driver's frame graph.
-	const RecordedTree pair = tickWith(2);
+	// A new pair has no measured cost yet and stays on the driver. Its first
+	// tick establishes the estimate used by the next frame.
+	const RecordedTree cheapPair = tickWith(2, 0.05f);
+	CHECK(has(cheapPair.Names, "worlds (driver)"));
+	CHECK_FALSE(has(cheapPair.Names, "worlds (pinned workers)"));
+
+	// A zero floor forces the pair onto its assigned lanes. Their spans arrive
+	// as one reported total because a worker cannot enter the driver's frame graph.
+	const RecordedTree pair = tickWith(2, 0.0f);
 	CHECK(has(pair.Names, "worlds (pinned workers)"));
 	CHECK_FALSE(has(pair.Names, "worlds (serial)"));
 	CHECK(hasEdge(pair, "worlds (pinned workers)", "world.branch.0"));
 	CHECK(hasEdge(pair, "world.branch.0", "ecs.systems"));
-	CHECK(hasEdge(pair, "ecs.systems", "pre-simulation"));
+	CHECK(hasEdge(pair, "ecs.systems", "input"));
 	CHECK(hasEdge(pair, "ecs.systems", "simulation"));
-	CHECK(hasEdge(pair, "ecs.systems", "post-simulation"));
-	CHECK(hasEdge(pair, "ecs.systems", "pre-render"));
+	CHECK(hasEdge(pair, "ecs.systems", "physics"));
+	CHECK(hasEdge(pair, "ecs.systems", "animation"));
+	CHECK(hasEdge(pair, "ecs.systems", "replication"));
+	CHECK(hasEdge(pair, "ecs.systems", "render preparation"));
+	CHECK(hasEdge(pair, "ecs.systems", "render"));
 	CHECK(hasEdge(pair, "simulation", "advance"));
 }
 
@@ -462,7 +477,9 @@ TEST_CASE("world ticks keep stable assigned workers", "[world]") {
 		return;
 	}
 
-	Universe universe;
+	UniverseSettings settings;
+	settings.WorldParallelFloorMilliseconds = 0.0f;
+	Universe universe(settings);
 
 	const std::thread::id driver = std::this_thread::get_id();
 	const size_t worldCount = pinned * 2 + 1;
@@ -680,7 +697,9 @@ TEST_CASE("presentation keeps each world on its physical-core lane", "[world][pa
 		SKIP("this platform could not pin two job workers to distinct physical cores");
 	}
 
-	Universe universe;
+	UniverseSettings settings;
+	settings.WorldParallelFloorMilliseconds = 0.0f;
+	Universe universe(settings);
 	const WorldId first = universe.Create(Named("world.present.first"));
 	const WorldId second = universe.Create(Named("world.present.second"));
 

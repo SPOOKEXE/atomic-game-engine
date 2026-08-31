@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 #
-# What every `run-*.sh` in this directory is made of.
+# Shared implementation for the generic scene launcher.
 #
-# **Sourced, not executed.** Each scene script sets a few variables and then
-# sources this; everything else - locating the repository, building, finding the
-# staged client, the frame-rate policy - happens once, here. Eleven copies of a
-# build sequence is eleven places to fix a preset name, and the copies would
-# stop agreeing the first time one of them was edited in a hurry.
+# **Sourced, not executed.** `run-demo.sh` resolves the requested scene and then
+# sources this; everything else happens once here.
 #
-# A scene script sets, before sourcing:
+# The launcher sets, before sourcing:
 #
-#   SCENE       the example's filename, or empty for the built-in demo scene
-#   SCENE_ARGS  an array of flags this scene needs to be itself
+#   SCENE       the staged example's filename, or empty for the default Rings.luau
+#   SCENE_ARGS  optional launcher-owned flags
 #
 # Everything a caller passes on the command line is appended after those, so a
 # scene's own flags can be overridden per run - the last spelling of an option
@@ -94,7 +91,7 @@ if [ -n "${SCENE:-}" ]; then
 	scene=(--script "$staged")
 fi
 
-echo "running ${SCENE:-the built-in demo} at ${MAX_FPS:-165} fps"
+echo "running ${SCENE:-Rings.luau} at ${MAX_FPS:-165} fps"
 
 # exec, so Ctrl-C and the exit status belong to the client rather than to a
 # shell sitting in front of it.

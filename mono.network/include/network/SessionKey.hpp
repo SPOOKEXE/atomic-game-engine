@@ -3,8 +3,8 @@
 // The secret that makes a session private, and the only thing in this module
 // that is secret at all.
 //
-// One key, held by the host and by everyone the host gave it to. It does two
-// jobs and no others:
+// One key, held by the host and by everyone the host gave it to. It does three
+// authentication jobs and no others:
 //
 // - **It authenticates an announcement.** A private session's advert carries a
 //   MAC under this key, so a browser that holds the key can tell the session it
@@ -13,8 +13,12 @@
 //   address of a private session to a client that cannot prove it holds the
 //   key, which is what stops a public rendezvous from being a directory of
 //   everybody's private games.
+// - **A connected-session owner may derive domain-separated signing identities
+//   from it.** Team Create does this one layer up so both ends prove possession
+//   after discovery. The derived Ed25519 keys authenticate the transport and
+//   are never used as traffic ciphers.
 //
-// **It is not a transport key and there is nothing here that encrypts.**
+// **It is not a traffic-encryption key and there is nothing here that encrypts.**
 // `engine::net::Handshake` already derives per-session ciphers from an
 // ephemeral exchange, and forward secrecy is the whole reason it is ephemeral -
 // a configured key that also encrypted traffic would make every past session

@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/Schedule.hpp>
 
 #include <algorithm>
@@ -92,9 +93,8 @@ namespace engine::graph {
 				}
 			}
 
-			if (node.Kind == core::Name("viewer") || node.Kind == core::Name("capture") ||
-				node.Kind == core::Name("upload-instances")) {
-				return ExecutionQueue::Transfer;
+			if (const NodeKindSpec *spec = NodeCatalogue::Find(node.Kind); spec != nullptr) {
+				return spec->Queue;
 			}
 
 			const auto inspect = [&](std::span<const ResourceId> resources) {
@@ -119,8 +119,7 @@ namespace engine::graph {
 			if (reads == ExecutionQueue::Cpu || writes == ExecutionQueue::Cpu) {
 				return ExecutionQueue::Cpu;
 			}
-			if (reads == ExecutionQueue::Compute || writes == ExecutionQueue::Compute ||
-				node.Kind == core::Name("dispatch")) {
+			if (reads == ExecutionQueue::Compute || writes == ExecutionQueue::Compute) {
 				return ExecutionQueue::Compute;
 			}
 			return ExecutionQueue::Graphics;

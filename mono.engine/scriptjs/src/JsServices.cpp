@@ -14,13 +14,19 @@
 
 namespace engine::script {
 
-	void InstallJsServices(JSContext *context, JSValueConst global, ServiceAvailability phase) {
+	void InstallJsServices(
+		JSContext *context, JSValueConst global, ServiceAvailability phase, ScriptCapabilities access
+	) {
 		// **No mailbox registration here, unlike the Luau walk.**
 		// `OpenJsBindings` already calls `world::RegisterMailboxTypes()` before
 		// anything constructs a `Postbox`, for the reason that walk states at
 		// length. A second call would be harmless and would also be a second
 		// place that rule is remembered.
 		for (const ServiceRow &row : ServiceRows(phase)) {
+			if (!Permits(row.Definition, access)) {
+				continue;
+			}
+
 			// **A surface or nothing at all**, which is the whole of this walk:
 			// there is no per-language installer on this side, so a row this
 			// language does not bind installs nothing and the refusal happens

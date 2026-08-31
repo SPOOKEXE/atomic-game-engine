@@ -1667,7 +1667,8 @@ namespace engine::render {
 				SDL_GPUTexture *const texture = Textures.Find(run.Texture);
 
 				RibbonMaterial material{};
-				material.Flags = glm::vec4{texture != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				material.Flags =
+					glm::vec4{texture != nullptr ? 1.0f : 0.0f, run.RepeatV ? 1.0f : 0.0f, 0.0f, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
 
 				// The fallback is bound rather than the sampler left unbound, for

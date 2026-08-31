@@ -20,6 +20,7 @@ TEST_DEPENDS("engine.graph.rendergraph")
 
 using engine::core::Name;
 using engine::graph::Access;
+using engine::graph::BuildResourceAliases;
 using engine::graph::CompiledGraph;
 using engine::graph::GraphStatus;
 using engine::graph::Node;
@@ -257,12 +258,96 @@ TEST_CASE("the peak is below the sum when lifetimes do not overlap", "[graph][pr
 
 	const PipelineProfile profile = Profiled(graph);
 
-	// **The gap between these two is what aliasing would recover**, and it is
-	// the number this whole type exists to produce. Without it, "the frame uses
-	// N megabytes" is a question with two very different answers and no way to
-	// tell which one somebody meant.
+	// Lifetime peak is the lower bound. The compatible allocation total below
+	// is the runtime answer and stays below the naive declaration sum.
 	CHECK(profile.PeakBytes < profile.TotalBytes);
 	CHECK(profile.TotalBytes > 0);
+	CHECK(profile.AliasedResources == 1);
+	CHECK(profile.AllocatedBytes < profile.TotalBytes);
+	CHECK(
+		profile.Resources[RowOf(profile, "a")].Allocation != profile.Resources[RowOf(profile, "b")].Allocation
+	);
+	CHECK(
+		profile.Resources[RowOf(profile, "a")].Allocation == profile.Resources[RowOf(profile, "c")].Allocation
+	);
+}
+
+TEST_CASE("aliasing requires an exact descriptor and a dead prior lifetime", "[graph][profile]") {
+	RenderGraph graph;
+	const ResourceId live = graph.AddResource({.Name = Name("live"), .Kind = ResourceKind::Colour});
+	const ResourceId overlap = graph.AddResource({.Name = Name("overlap"), .Kind = ResourceKind::Colour});
+	const ResourceId different = graph.AddResource({
+		.Name = Name("different"),
+		.Kind = ResourceKind::Colour,
+		.Format = ResourceFormat::RGBA16F,
+	});
+	const ResourceId later = graph.AddResource({.Name = Name("later"), .Kind = ResourceKind::Colour});
+	graph.AddNode({.Name = Name("one"), .Kind = Name("raster"), .Writes = {live}, .Scope = NodeScope::Frame});
+	graph.AddNode(
+		{.Name = Name("two"),
+		 .Kind = Name("raster"),
+		 .Reads = {live},
+		 .Writes = {overlap},
+		 .Scope = NodeScope::Frame}
+	);
+	graph.AddNode({
+		.Name = Name("three"),
+		.Kind = Name("raster"),
+		.Reads = {overlap},
+		.Writes = {different},
+		.Scope = NodeScope::Frame,
+	});
+	graph.AddNode({
+		.Name = Name("four"),
+		.Kind = Name("raster"),
+		.Reads = {different},
+		.Writes = {later},
+		.Scope = NodeScope::Frame,
+	});
+
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	const auto aliases = BuildResourceAliases(graph, compiled);
+	CHECK(aliases.AllocationOf(live) != aliases.AllocationOf(overlap));
+	CHECK(aliases.AllocationOf(different) != aliases.AllocationOf(later));
+	CHECK(aliases.AllocationOf(live) == aliases.AllocationOf(later));
+	CHECK(aliases.PhysicalTargets == 3);
+	CHECK(aliases.AliasedResources == 1);
+}
+
+TEST_CASE("targets from different execution scopes never alias", "[graph][profile]") {
+	RenderGraph graph;
+	const ResourceId shared = graph.AddResource({.Name = Name("shared"), .Kind = ResourceKind::Colour});
+	const ResourceId middle = graph.AddResource({.Name = Name("middle"), .Kind = ResourceKind::Colour});
+	const ResourceId later = graph.AddResource({.Name = Name("later"), .Kind = ResourceKind::Colour});
+	graph.AddNode({
+		.Name = Name("world"),
+		.Kind = Name("raster"),
+		.Writes = {shared},
+		.Scope = NodeScope::World,
+	});
+	graph.AddNode({
+		.Name = Name("view-one"),
+		.Kind = Name("raster"),
+		.Reads = {shared},
+		.Writes = {middle},
+		.Scope = NodeScope::View,
+	});
+	graph.AddNode({
+		.Name = Name("view-two"),
+		.Kind = Name("raster"),
+		.Reads = {middle},
+		.Writes = {later},
+		.Scope = NodeScope::View,
+	});
+
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	const auto aliases = BuildResourceAliases(graph, compiled);
+	CHECK(aliases.AllocationOf(shared) != aliases.AllocationOf(later));
+	CHECK(aliases.PhysicalTargets == 3);
 }
 
 // --- the shape of the grid -----------------------------------------------------------

@@ -94,7 +94,9 @@ TEST_CASE("bus and service traffic crosses pinned world lanes at the barrier", "
 		return;
 	}
 
-	Universe universe;
+	UniverseSettings settings;
+	settings.WorldParallelFloorMilliseconds = 0.0f;
+	Universe universe(settings);
 	const WorldId listener = universe.Create(Named("cross-core.listener"));
 	const WorldId sender = universe.Create(Named("cross-core.sender"));
 

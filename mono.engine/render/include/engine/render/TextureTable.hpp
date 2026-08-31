@@ -265,6 +265,7 @@ namespace engine::render {
 			return SharedSampler;
 		}
 
+		// Returns the shared nearest-neighbour sampler.
 		SDL_GPUSampler *PixelSampler() const {
 			return NearestSampler;
 		}

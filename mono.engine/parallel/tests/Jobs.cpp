@@ -23,6 +23,7 @@
 
 TEST_SUITE_ID("engine.parallel.jobs")
 
+using engine::parallel::JobContext;
 using engine::parallel::Jobs;
 
 namespace {
@@ -51,6 +52,41 @@ TEST_CASE("every index is visited exactly once", "[jobs]") {
 	for (size_t index = 0; index < COUNT; index++) {
 		REQUIRE(visits[index].load() == 1);
 	}
+}
+
+TEST_CASE("explicit serial context never enters the worker pool", "[jobs]") {
+	Pool pool{4};
+	const std::thread::id caller = std::this_thread::get_id();
+	std::thread::id visited;
+	size_t beginSeen = 1;
+	size_t endSeen = 0;
+
+	Jobs::For(JobContext::Serial, 100'000, 1, [&](size_t begin, size_t end) {
+		visited = std::this_thread::get_id();
+		beginSeen = begin;
+		endSeen = end;
+	});
+
+	CHECK(visited == caller);
+	CHECK(beginSeen == 0);
+	CHECK(endSeen == 100'000);
+	CHECK(Jobs::LastBatch().Participants == 1);
+}
+
+TEST_CASE("explicit threaded context uses the fork-join path", "[jobs]") {
+	Pool pool{4};
+	std::atomic<size_t> visited{0};
+
+	Jobs::For(JobContext::Threaded, 100'000, 128, [&](size_t begin, size_t end) {
+		visited.fetch_add(end - begin, std::memory_order_relaxed);
+	});
+
+	CHECK(visited.load(std::memory_order_relaxed) == 100'000);
+}
+
+TEST_CASE("arbitrary callbacks are refused for the processed context", "[jobs]") {
+	CHECK_THROWS_AS(Jobs::For(JobContext::Processed, 1, 1, [](size_t, size_t) {}), std::invalid_argument);
+	CHECK(std::string(engine::parallel::Describe(JobContext::Processed)) == "Processed");
 }
 
 TEST_CASE("ranges never overlap", "[jobs]") {
@@ -498,6 +534,19 @@ TEST_CASE("Start is idempotent and Stop is safe without Start", "[jobs]") {
 	Jobs::Stop();
 	Jobs::Stop();
 	REQUIRE(Jobs::WorkerCount() == 0);
+}
+
+TEST_CASE("the worker pool can be destroyed and created again", "[jobs]") {
+	EmptyPool empty;
+	for (int cycle = 0; cycle < 3; cycle++) {
+		Jobs::Start(2);
+		REQUIRE(Jobs::WorkerCount() == 2);
+		std::atomic<size_t> visited = 0;
+		Jobs::For(20'000, 64, [&](size_t begin, size_t end) { visited.fetch_add(end - begin); });
+		CHECK(visited.load() == 20'000);
+		Jobs::Stop();
+		CHECK(Jobs::WorkerCount() == 0);
+	}
 }
 
 // --- forcing the whole pipeline onto one thread ------------------------------

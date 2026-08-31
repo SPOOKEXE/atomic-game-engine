@@ -22,7 +22,7 @@
 
 TEST_SUITE_ID("engine.replication.recoverywalk")
 // The delta path the walk feeds.
-TEST_DEPENDS("engine.replication.replication")
+TEST_DEPENDS("engine.replication.stream")
 
 using engine::core::Name;
 using engine::ecs::Entity;

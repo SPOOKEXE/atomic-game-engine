@@ -28,7 +28,9 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <span>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::render {
@@ -42,7 +44,9 @@ namespace engine::render {
 			graph::CompiledGraph &compiled,
 			graph::ExecutionSchedule &schedule,
 			core::Name &offender,
-			std::string &reason
+			std::string &reason,
+			const DeviceCaps *caps = nullptr,
+			std::span<const core::Name> customKinds = {}
 		) {
 			const graph::GraphStatus graphStatus = pipeline.Compile(compiled, offender);
 			if (graphStatus != graph::GraphStatus::Ok) {
@@ -83,16 +87,18 @@ namespace engine::render {
 				}
 			}
 
-			const NodeTable backend = BackendTable([](const graph::RunContext &) { return true; });
-			const std::vector<core::Name> missing = backend.Missing(pipeline);
+			NodeTable available = BackendTable([](const graph::RunContext &) { return true; });
+			for (const core::Name kind : customKinds) {
+				available.Set(kind, [](const graph::RunContext &) { return true; });
+			}
+			const std::vector<core::Name> missing = available.Missing(pipeline);
 			if (!missing.empty()) {
 				offender = missing.front();
 				reason = "the renderer has no backend node for this kind";
 				return false;
 			}
 
-			const std::span<const BackendNode> supported = BackendNodes();
-			std::vector<bool> seen(supported.size(), false);
+			std::unordered_set<uint32_t> seen;
 			for (const graph::ExecutionWave &wave : schedule.Waves) {
 				for (const graph::ScheduledNode &scheduled : wave.Nodes) {
 					const graph::Node *node = pipeline.Find(scheduled.Node);
@@ -102,39 +108,62 @@ namespace engine::render {
 						return false;
 					}
 
-					const auto found =
-						std::find_if(supported.begin(), supported.end(), [node](const BackendNode &entry) {
-							return entry.Kind == node->Kind;
-						});
-					if (found == supported.end()) {
+					const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(node->Kind);
+					if (spec == nullptr) {
 						offender = node->Name;
-						reason = "the renderer has no backend node for this kind";
+						reason = "the render catalogue has no declaration for this kind";
 						return false;
 					}
-					const size_t index = static_cast<size_t>(found - supported.begin());
-					const bool repeatable =
-						node->Kind == core::Name("cull-frustum") ||
-						node->Kind == core::Name("cull-distance") || node->Kind == core::Name("filter-tag") ||
-						node->Kind == core::Name("order-draw") || node->Kind == core::Name("raster") ||
-						node->Kind == core::Name("dispatch") || node->Kind == core::Name("viewer") ||
-						node->Kind == core::Name("capture");
-					if (seen[index] && !repeatable) {
+					graph::NodeRequirements needs = spec->Needs;
+					if (node->Kind == core::Name("blit")) {
+						if (node->Reads.size() != 1 || node->Writes.size() != 1) {
+							offender = node->Name;
+							reason = "blit needs exactly one source and one target";
+							return false;
+						}
+						graph::ResourceFormat targetFormat = graph::ResourceFormat::RGBA16F;
+						if (const std::string *format = node->Parameter(core::Name("format"));
+							format != nullptr && !graph::ParseResourceFormat(*format, targetFormat)) {
+							offender = node->Name;
+							reason = "blit target format is not recognised";
+							return false;
+						}
+						const graph::ResourceDesc *target = pipeline.FindResource(node->Writes.front());
+						if (target == nullptr || target->Format != targetFormat) {
+							offender = node->Name;
+							reason = "blit target resource does not use its selected format";
+							return false;
+						}
+						needs.Formats = {targetFormat};
+					}
+					if (caps != nullptr) {
+						const CapabilityCheck capability = CheckCapabilities(*caps, needs);
+						if (!capability.Accepted()) {
+							offender = node->Name;
+							reason = Describe(capability.Status);
+							if (capability.Status == CapabilityStatus::MissingFormat) {
+								reason += ": ";
+								reason += graph::Describe(capability.Format);
+							}
+							return false;
+						}
+					}
+					if (seen.contains(node->Kind.Id()) && !spec->Repeatable) {
 						offender = node->Name;
-						reason = "a built-in render node kind may appear only once";
+						reason = "this render node kind may appear only once";
 						return false;
 					}
-					const bool flexibleScope = node->Kind == core::Name("dispatch");
-					if (node->Scope != found->Scope && !flexibleScope) {
+					if (node->Scope != spec->Scope && !spec->FlexibleScope) {
 						offender = node->Name;
 						reason = "this backend node cannot run at the authored scope";
 						return false;
 					}
-					seen[index] = true;
+					seen.insert(node->Kind.Id());
 					if (const std::string *queue = node->Parameter(core::Name("queue"));
-						queue != nullptr && *queue != "auto" && *queue != graph::Describe(found->Queue)) {
+						queue != nullptr && *queue != "auto" && *queue != graph::Describe(spec->Queue)) {
 						offender = node->Name;
 						reason = "this backend node requires the " +
-								 std::string(graph::Describe(found->Queue)) + " queue";
+								 std::string(graph::Describe(spec->Queue)) + " queue";
 						return false;
 					}
 					if (const std::string *culling = node->Parameter(core::Name("culling"));
@@ -347,6 +376,14 @@ namespace engine::render {
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
 		}
+		SDL_GPUColorTargetDescription forwardTarget{};
+		forwardTarget.format = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
+		SDL_GPUGraphicsPipelineCreateInfo forward = opaque;
+		forward.target_info.color_target_descriptions = &forwardTarget;
+		ForwardPipeline = SDL_CreateGPUGraphicsPipeline(Device, &forward);
+		if (ForwardPipeline == nullptr) {
+			ENGINE_ERROR("forward pipeline: {}", SDL_GetError());
+		}
 
 		// --- wireframe view mode ----------------------------------------------
 		//
@@ -390,6 +427,11 @@ namespace engine::render {
 		}
 
 		// --- default PBR graph -----------------------------------------------
+		const auto hasFormat = [this](graph::ResourceFormat format) {
+			return std::find(Caps.Formats.begin(), Caps.Formats.end(), format) != Caps.Formats.end();
+		};
+		const bool pbrSupported = Caps.MaxColourTargets >= 4 && hasFormat(graph::ResourceFormat::RGBA16F) &&
+								  hasFormat(graph::ResourceFormat::R32F);
 
 		SDL_GPUColorTargetDescription gbufferTargets[4]{};
 		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
@@ -401,9 +443,11 @@ namespace engine::render {
 		gbuffer.fragment_shader = gbufferFragment;
 		gbuffer.target_info.color_target_descriptions = gbufferTargets;
 		gbuffer.target_info.num_color_targets = 4;
-		GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
-		if (GBufferPipeline == nullptr) {
-			ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
+		if (pbrSupported) {
+			GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+			if (GBufferPipeline == nullptr) {
+				ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
+			}
 		}
 
 		const auto fullscreen = [&](SDL_GPUShader *fragment, SDL_GPUTextureFormat format) {
@@ -421,15 +465,17 @@ namespace engine::render {
 			return SDL_CreateGPUGraphicsPipeline(Device, &info);
 		};
 
-		DepthLinearPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R32_FLOAT);
-		SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
-		DeferredLightingPipeline =
-			fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
-		SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
-		TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
-		if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
-			DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || TonemapPipeline == nullptr) {
-			ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
+		if (pbrSupported) {
+			DepthLinearPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R32_FLOAT);
+			SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
+			DeferredLightingPipeline =
+				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
+			if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
+				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || TonemapPipeline == nullptr) {
+				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
+			}
 		}
 
 		// --- shadow ---------------------------------------------------------
@@ -794,30 +840,33 @@ namespace engine::render {
 		// the particle pipelines' reason: a build these failed on still draws a
 		// world, and the validation path refuses `culling = "occlusion"`
 		// documents with the failure named rather than the client dying here.
-		Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
-		Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
-		Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);
-		Occlusion.Args = LoadComputePipeline("occlusion-args.comp", 0, 2, 0, 1, 64, 1);
+		if (Caps.HasCompute) {
+			Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
+			Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
+			Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);
+			Occlusion.Args = LoadComputePipeline("occlusion-args.comp", 0, 2, 0, 1, 64, 1);
 
-		// The particle simulation. Emission reads the resident work and parameter
-		// tables, then writes newborn state and per-emitter counters. Integration
-		// reads those plus curves and portal panes, then writes the state pool and
-		// instance stream. The scatter updates changed parameter or curve rows.
-		ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
-		ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
-		ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
-		EnvironmentCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
+			// The particle simulation. Emission reads the resident work and parameter
+			// tables, then writes newborn state and per-emitter counters. Integration
+			// reads those plus curves and portal panes, then writes the state pool and
+			// instance stream. The scatter updates changed parameter or curve rows.
+			ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
+			ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
+			ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
+			EnvironmentCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
+		}
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
 		// build whose particle shaders failed to compile still draws a world, and
 		// failing initialisation over an effect would take the whole client down
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
-		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
-			   ImagePipeline != nullptr && OverlayPipeline != nullptr && GBufferPipeline != nullptr &&
-			   DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
-			   DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && TonemapPipeline != nullptr &&
-			   EnvironmentCompute != nullptr;
+		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
+			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
+			   (!pbrSupported || (GBufferPipeline != nullptr && DepthLinearPipeline != nullptr &&
+								  SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr &&
+								  SkyPipeline != nullptr && TonemapPipeline != nullptr)) &&
+			   (!Caps.HasCompute || EnvironmentCompute != nullptr);
 	}
 
 	void Renderer::Impl::BindPipeline(
@@ -1202,7 +1251,13 @@ namespace engine::render {
 		graph::ExecutionSchedule schedule;
 		core::Name offender;
 		std::string reason;
-		if (!CompileRenderPipeline(pipeline, compiled, schedule, offender, reason)) {
+		std::vector<core::Name> customKinds;
+		customKinds.reserve(CustomNodeHandlers.size());
+		for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
+			customKinds.push_back(installed.Kind);
+		}
+		const DeviceCaps *caps = State->Device != nullptr ? &State->Caps : nullptr;
+		if (!CompileRenderPipeline(pipeline, compiled, schedule, offender, reason, caps, customKinds)) {
 			ENGINE_ERROR("pipeline '{}' refused: {} at '{}'", name.Text(), reason, offender.Text());
 			return false;
 		}
@@ -1217,14 +1272,53 @@ namespace engine::render {
 			State->ReleaseGraphState(name);
 			installed.Graph = pipeline;
 			installed.Compiled = std::move(compiled);
+			installed.Aliases = graph::BuildResourceAliases(installed.Graph, installed.Compiled);
 			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
 			return true;
 		}
 
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
+		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		State->NamedPipelines.push_back(
-			Impl::NamedPipeline{name, pipeline, std::move(compiled), std::move(schedule), std::move(buffers)}
+			Impl::NamedPipeline{
+				name,
+				pipeline,
+				std::move(compiled),
+				std::move(schedule),
+				std::move(aliases),
+				std::move(buffers),
+			}
+		);
+		return true;
+	}
+
+	bool Renderer::InstallNodeHandler(core::Name kind, NodeHandler handler, NodeHandlerLifecycle lifecycle) {
+		RequireOwningThread("InstallNodeHandler");
+		const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(kind);
+		if (spec == nullptr || spec->BuiltInBackend || !handler) {
+			return false;
+		}
+
+		const BackendHandles handles = Backend();
+		const bool live = handles.Device != nullptr;
+		if (live && lifecycle.Reinstall && !lifecycle.Reinstall(handles)) {
+			return false;
+		}
+
+		for (InstalledNodeHandler &installed : CustomNodeHandlers) {
+			if (installed.Kind != kind) {
+				continue;
+			}
+			if (installed.Live && installed.Lifecycle.Release) {
+				installed.Lifecycle.Release(handles);
+			}
+			installed = InstalledNodeHandler{kind, std::move(handler), std::move(lifecycle), live};
+			return true;
+		}
+
+		CustomNodeHandlers.push_back(
+			InstalledNodeHandler{kind, std::move(handler), std::move(lifecycle), live}
 		);
 		return true;
 	}
@@ -1268,13 +1362,12 @@ namespace engine::render {
 		State->NamedPipelines.clear();
 	}
 
-	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {
+	bool Renderer::InstallEngineDefault(const graph::PipelineDocument &document) {
 		graph::RenderGraph pipeline;
 		core::Name offender;
-		if (graph::Build(graph::DefaultPbrDocument(), pipeline, offender) !=
-			graph::PipelineDocumentStatus::Ok) {
+		if (graph::Build(document, pipeline, offender) != graph::PipelineDocumentStatus::Ok) {
 			ENGINE_ERROR("engine default render graph did not build at '{}'", offender.Text());
-			return;
+			return false;
 		}
 
 		graph::CompiledGraph compiled;
@@ -1282,16 +1375,23 @@ namespace engine::render {
 		std::string reason;
 		if (!CompileRenderPipeline(pipeline, compiled, schedule, offender, reason)) {
 			ENGINE_ERROR("engine default render graph refused: {} at '{}'", reason, offender.Text());
-			return;
+			return false;
 		}
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
+		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		State->EngineDefault = Impl::NamedPipeline{
 			core::Name("Engine Default"),
 			pipeline,
 			std::move(compiled),
 			std::move(schedule),
+			std::move(aliases),
 			std::move(buffers)
 		};
+		return true;
+	}
+
+	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {
+		(void)InstallEngineDefault(graph::DefaultPbrDocument());
 	}
 
 	Renderer::~Renderer() {

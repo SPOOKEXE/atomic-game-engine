@@ -80,9 +80,9 @@ namespace engine::effects {
 		// makes `Classes::Property` take its member as a template argument. A
 		// pointer to the interning accessor is a compile-time constant, so it
 		// bakes into the generated function and the descriptor stays a pointer.
-		template <auto Member, const core::Name &(*EnumOf)()>
+		template <class Component, auto Member, const core::Name &(*EnumOf)()>
 		PropertyDescriptor EnumProperty(std::string_view name) {
-			using Enum = std::remove_reference_t<decltype(std::declval<ParticleEmitter &>().*Member)>;
+			using Enum = std::remove_reference_t<decltype(std::declval<Component &>().*Member)>;
 
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
@@ -90,22 +90,22 @@ namespace engine::effects {
 			property.EnumName = EnumOf();
 			property.Size = sizeof(core::Name);
 			property.Kind = PropertyKind::Field;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ParticleEmitter>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
 			property.Writes = property.Reads;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const ParticleEmitter *emitter = store.Get<ParticleEmitter>(instance);
-				if (emitter == nullptr) {
+				const Component *component = store.Get<Component>(instance);
+				if (component == nullptr) {
 					return false;
 				}
 				*static_cast<core::Name *>(out) =
-					ecs::EnumTable::MemberAt(EnumOf(), static_cast<size_t>(emitter->*Member));
+					ecs::EnumTable::MemberAt(EnumOf(), static_cast<size_t>(component->*Member));
 				return true;
 			};
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				ParticleEmitter *emitter = store.GetMutable<ParticleEmitter>(instance);
-				if (emitter == nullptr) {
+				Component *component = store.GetMutable<Component>(instance);
+				if (component == nullptr) {
 					return false;
 				}
 				size_t ordinal = 0;
@@ -119,7 +119,7 @@ namespace engine::effects {
 					);
 					return false;
 				}
-				emitter->*Member = static_cast<Enum>(ordinal);
+				component->*Member = static_cast<Enum>(ordinal);
 				return true;
 			};
 
@@ -128,31 +128,31 @@ namespace engine::effects {
 	}
 
 	namespace {
-		template <auto Member, int32_t Low, int32_t High>
+		template <class Component, auto Member, int32_t Low, int32_t High>
 		PropertyDescriptor ClampedIntegerProperty(std::string_view name) {
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
 			property.Type = PropertyType::Int32;
 			property.Size = sizeof(int32_t);
 			property.Kind = PropertyKind::Computed;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ParticleEmitter>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
 			property.Writes = property.Reads;
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const ParticleEmitter *emitter = store.Get<ParticleEmitter>(instance);
-				if (emitter == nullptr) {
+				const Component *component = store.Get<Component>(instance);
+				if (component == nullptr) {
 					return false;
 				}
-				*static_cast<int32_t *>(out) = emitter->*Member;
+				*static_cast<int32_t *>(out) = component->*Member;
 				return true;
 			};
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				ParticleEmitter *emitter = store.GetMutable<ParticleEmitter>(instance);
-				if (emitter == nullptr) {
+				Component *component = store.GetMutable<Component>(instance);
+				if (component == nullptr) {
 					return false;
 				}
-				emitter->*Member = std::clamp(*static_cast<const int32_t *>(value), Low, High);
+				component->*Member = std::clamp(*static_cast<const int32_t *>(value), Low, High);
 				return true;
 			};
 			return property;
@@ -262,6 +262,12 @@ namespace engine::effects {
 			const std::array trailSet{ecs::Components::Of<Trail>()};
 			const ecs::ClassId trail = ecs::Classes::Register("Trail", instance, trailSet);
 
+			const ecs::ClassId faceInstance = ecs::Classes::Register("FaceInstance", instance, {});
+			const std::array decalSet{ecs::Components::Of<Decal>()};
+			const ecs::ClassId decal = ecs::Classes::Register("Decal", faceInstance, decalSet);
+			const std::array textureSet{ecs::Components::Of<Texture>()};
+			const ecs::ClassId texture = ecs::Classes::Register("Texture", faceInstance, textureSet);
+
 			// --- the emitter's property surface -----------------------------
 			//
 			// **Plain fields wherever the storage is what a script writes**, which
@@ -286,7 +292,10 @@ namespace engine::effects {
 			ecs::Classes::Property<&ParticleEmitter::SpreadAngle>(emitter, "SpreadAngle");
 			ecs::Classes::Property<&ParticleEmitter::Texture>(emitter, "Texture");
 			ecs::Classes::Computed(
-				emitter, ClampedIntegerProperty<&ParticleEmitter::MaxParticles, 0, 1000000>("MaxParticles")
+				emitter,
+				ClampedIntegerProperty<ParticleEmitter, &ParticleEmitter::MaxParticles, 0, 1000000>(
+					"MaxParticles"
+				)
 			);
 
 			// **Rate is clamped and Roblox's ceiling is 500.** Kept here because
@@ -335,23 +344,39 @@ namespace engine::effects {
 			ecs::Classes::Property<&ParticleEmitter::Additive>(emitter, "Additive");
 
 			ecs::Classes::Computed(
-				emitter, EnumProperty<&ParticleEmitter::EmissionDirection, NormalIdEnum>("EmissionDirection")
+				emitter,
+				EnumProperty<ParticleEmitter, &ParticleEmitter::EmissionDirection, NormalIdEnum>(
+					"EmissionDirection"
+				)
 			);
 			ecs::Classes::Computed(
-				emitter, EnumProperty<&ParticleEmitter::Orientation, OrientationEnum>("Orientation")
-			);
-			ecs::Classes::Computed(emitter, EnumProperty<&ParticleEmitter::Shape, ShapeEnum>("Shape"));
-			ecs::Classes::Computed(
-				emitter, EnumProperty<&ParticleEmitter::ShapeStyle, ShapeStyleEnum>("ShapeStyle")
+				emitter,
+				EnumProperty<ParticleEmitter, &ParticleEmitter::Orientation, OrientationEnum>("Orientation")
 			);
 			ecs::Classes::Computed(
-				emitter, EnumProperty<&ParticleEmitter::ShapeDirection, ShapeDirectionEnum>("ShapeInOut")
+				emitter, EnumProperty<ParticleEmitter, &ParticleEmitter::Shape, ShapeEnum>("Shape")
 			);
 			ecs::Classes::Computed(
-				emitter, EnumProperty<&ParticleEmitter::Flipbook, FlipbookLayoutEnum>("FlipbookLayout")
+				emitter,
+				EnumProperty<ParticleEmitter, &ParticleEmitter::ShapeStyle, ShapeStyleEnum>("ShapeStyle")
 			);
 			ecs::Classes::Computed(
-				emitter, EnumProperty<&ParticleEmitter::FlipbookPlayback, FlipbookModeEnum>("FlipbookMode")
+				emitter,
+				EnumProperty<ParticleEmitter, &ParticleEmitter::ShapeDirection, ShapeDirectionEnum>(
+					"ShapeInOut"
+				)
+			);
+			ecs::Classes::Computed(
+				emitter,
+				EnumProperty<ParticleEmitter, &ParticleEmitter::Flipbook, FlipbookLayoutEnum>(
+					"FlipbookLayout"
+				)
+			);
+			ecs::Classes::Computed(
+				emitter,
+				EnumProperty<ParticleEmitter, &ParticleEmitter::FlipbookPlayback, FlipbookModeEnum>(
+					"FlipbookMode"
+				)
 			);
 
 			// --- the beam's ---------------------------------------------------
@@ -384,6 +409,30 @@ namespace engine::effects {
 			ecs::Classes::Property<&Trail::TextureLength>(trail, "TextureLength");
 			ecs::Classes::Property<&Trail::Enabled>(trail, "Enabled");
 			ecs::Classes::Property<&Trail::Additive>(trail, "Additive");
+
+			// --- face images ---------------------------------------------------
+
+			ecs::Classes::Property<&Decal::Colour>(decal, "Color3");
+			ecs::Classes::Property<&Decal::Image>(decal, "Texture");
+			ecs::Classes::ClampedProperty<&Decal::Transparency, 0.0f, 1.0f>(decal, "Transparency");
+			ecs::Classes::Computed(decal, ClampedIntegerProperty<Decal, &Decal::ZIndex, 0, 10>("ZIndex"));
+			ecs::Classes::Computed(decal, EnumProperty<Decal, &Decal::Face, NormalIdEnum>("Face"));
+
+			ecs::Classes::Property<&Texture::Colour>(texture, "Color3");
+			ecs::Classes::Property<&Texture::Image>(texture, "Texture");
+			ecs::Classes::ClampedProperty<&Texture::Transparency, 0.0f, 1.0f>(texture, "Transparency");
+			ecs::Classes::ClampedProperty<&Texture::StudsPerTileU, 0.001f, 100000.0f>(
+				texture, "StudsPerTileU"
+			);
+			ecs::Classes::ClampedProperty<&Texture::StudsPerTileV, 0.001f, 100000.0f>(
+				texture, "StudsPerTileV"
+			);
+			ecs::Classes::Property<&Texture::OffsetStudsU>(texture, "OffsetStudsU");
+			ecs::Classes::Property<&Texture::OffsetStudsV>(texture, "OffsetStudsV");
+			ecs::Classes::Computed(
+				texture, ClampedIntegerProperty<Texture, &Texture::ZIndex, 0, 10>("ZIndex")
+			);
+			ecs::Classes::Computed(texture, EnumProperty<Texture, &Texture::Face, NormalIdEnum>("Face"));
 
 			return emitter;
 		}

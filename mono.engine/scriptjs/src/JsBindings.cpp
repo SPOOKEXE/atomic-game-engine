@@ -1228,6 +1228,18 @@ namespace engine::script {
 				// `BreakpointService`'s alone - which is a debugger feature this
 				// language does not have rather than a binding nobody wrote.
 				const ServiceDefinition *known = FindService(name);
+				if (known != nullptr && !Permits(*known, JsOf(context).Access)) {
+					const std::string_view capability = CapabilityName(known->RequiredCapabilities);
+					JSValue error = JS_ThrowTypeError(
+						context,
+						"'%s' requires the '%.*s' script capability",
+						name,
+						static_cast<int>(capability.size()),
+						capability.data()
+					);
+					JS_FreeCString(context, name);
+					return error;
+				}
 				const bool elsewhere =
 					known != nullptr && !Binds(known->Languages, ServiceLanguages::JavaScript);
 
@@ -1718,10 +1730,12 @@ namespace engine::script {
 		return MakeEnumItem(context, enumName, member);
 	}
 
-	void OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role) {
+	void
+	OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role, ScriptCapabilities access) {
 		auto *bound = new JsContext();
 		bound->World = &store;
 		bound->Role = role;
+		bound->Access = access;
 		bound->Js = context;
 		JS_SetContextOpaque(context, bound);
 

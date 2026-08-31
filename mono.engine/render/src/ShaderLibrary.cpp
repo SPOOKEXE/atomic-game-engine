@@ -87,6 +87,10 @@ namespace engine::render {
 		// the contract "cleared first, sorted, deduplicated" and a second
 		// caller into the same buffer would have to know not to violate it.
 		std::vector<core::Name> GuiDemanded;
+
+		Impl() {
+			Compiler.SetOptimise(true);
+		}
 	};
 
 	ShaderLibrary::ShaderLibrary() : State(std::make_unique<Impl>()) {}
@@ -158,6 +162,8 @@ namespace engine::render {
 					module.Error = std::move(result.Error);
 				} else {
 					module.SpirV = std::move(result.SpirV);
+					module.Capabilities = std::move(result.Capabilities);
+					module.Optimizations = std::move(result.Optimizations);
 				}
 
 				State->Modules[name.Id()] = std::move(module);
@@ -184,6 +190,9 @@ namespace engine::render {
 					resources::Shader(std::string(name.Text()) + ".frag", resources::ShaderForm::SpirV),
 					module.Error
 				);
+				if (module.Error.empty()) {
+					module.Capabilities = InspectShaderCapabilities(module.SpirV);
+				}
 			} else {
 				// **Said out loud rather than passed over.** A misspelled shader
 				// and a part deliberately left on the engine's default look

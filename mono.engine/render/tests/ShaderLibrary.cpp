@@ -138,6 +138,8 @@ TEST_CASE("a shader script in the world is compiled by name", "[render][shaders]
 	REQUIRE_FALSE(module->SpirV.empty());
 	REQUIRE(module->SpirV.front() == SPIRV_MAGIC);
 	REQUIRE_FALSE(module->BuiltIn);
+	CHECK(module->Capabilities.Instructions > 0);
+	CHECK(module->Optimizations.size() == 2);
 }
 
 TEST_CASE("a world's postprocess shader is compiled the same door a material uses", "[render][shaders]") {

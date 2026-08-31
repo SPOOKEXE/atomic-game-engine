@@ -206,20 +206,6 @@ namespace engine::graph {
 			return std::to_string(static_cast<int32_t>(std::lround(value)));
 		}
 
-		// **A word rather than a number**, for `FlagText`'s reason: these files
-		// are meant to be read, and `RGBA16F` says what it is where `8` needs
-		// the header open beside it.
-		bool FormatFromText(std::string_view text, ResourceFormat &out) {
-			for (uint8_t value = 0; value <= static_cast<uint8_t>(ResourceFormat::BC7_SRGB); value++) {
-				const auto candidate = static_cast<ResourceFormat>(value);
-				if (text == Describe(candidate)) {
-					out = candidate;
-					return true;
-				}
-			}
-			return false;
-		}
-
 		// A scope, by name.
 		//
 		// **A word rather than the boolean it replaced.** `perview no` said two
@@ -417,7 +403,13 @@ namespace engine::graph {
 					offender = edit.Target;
 					return PipelineDocumentStatus::UnknownName;
 				}
-				(edit.Kind == EditKind::Reads ? pending.Reads : pending.Writes).push_back(found->second);
+				if (edit.Kind == EditKind::Reads) {
+					pending.Reads.push_back(found->second);
+					pending.ReadPorts.push_back(edit.Key);
+				} else {
+					pending.Writes.push_back(found->second);
+					pending.WritePorts.push_back(edit.Key);
+				}
 				break;
 			}
 			case EditKind::Move:
@@ -571,7 +563,7 @@ namespace engine::graph {
 			if (word == "resource") {
 				edit.Kind = EditKind::AddResource;
 				parsed = TakeQuoted(line, name) && ResourceFromText(TakeWord(line), edit.Resource) &&
-						 FormatFromText(TakeWord(line), edit.Format) && TakeUnsigned(line, edit.Width) &&
+						 ParseResourceFormat(TakeWord(line), edit.Format) && TakeUnsigned(line, edit.Width) &&
 						 TakeUnsigned(line, edit.Height) && TakeUnsigned(line, edit.Divisor);
 				if (parsed && !legacy) {
 					parsed = TakeFlag(line, edit.External);
@@ -1002,6 +994,113 @@ namespace engine::graph {
 		node("output-image", NodeScope::Frame);
 		touches(EditKind::Reads, "composed-image", "image");
 
+		return document;
+	}
+
+	PipelineDocument DefaultPbrTierBDocument() {
+		const PipelineDocument full = DefaultPbrDocument();
+		PipelineDocument reduced;
+		bool skipNode = false;
+		for (const Edit &edit : full.Edits()) {
+			if (edit.Kind == EditKind::AddResource) {
+				skipNode = false;
+				if (edit.Name == core::Name("depth-pyramid") || edit.Name == core::Name("occlusion")) {
+					continue;
+				}
+			}
+			if (edit.Kind == EditKind::AddNode) {
+				skipNode = edit.NodeKind == core::Name("hzb") || edit.NodeKind == core::Name("ssao");
+			}
+			if (skipNode || (edit.Kind == EditKind::Reads && edit.Target == core::Name("occlusion"))) {
+				continue;
+			}
+			reduced.Record(edit);
+		}
+		return reduced;
+	}
+
+	PipelineDocument DefaultForwardTierCDocument() {
+		PipelineDocument document;
+		const auto resource =
+			[&document](
+				std::string_view name, ResourceKind kind, ResourceFormat format, bool external = false
+			) {
+				document.Record(
+					Edit{
+						.Kind = EditKind::AddResource,
+						.Name = core::Name(name),
+						.Resource = kind,
+						.Format = format,
+						.External = external,
+					}
+				);
+			};
+		const auto node = [&document](std::string_view name, NodeScope scope, bool optional = false) {
+			document.Record(
+				Edit{
+					.Kind = EditKind::AddNode,
+					.Name = core::Name(name),
+					.NodeKind = core::Name(name),
+					.Scope = scope,
+					.Optional = optional,
+				}
+			);
+		};
+		const auto touches = [&document](EditKind kind, std::string_view target, std::string_view port) {
+			document.Record(
+				Edit{
+					.Kind = kind,
+					.Target = core::Name(target),
+					.Key = core::Name(port),
+				}
+			);
+		};
+
+		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);
+		resource("view-camera", ResourceKind::Camera, ResourceFormat::R8);
+		resource("view-entities", ResourceKind::Entities, ResourceFormat::R8);
+		resource("visible-entities", ResourceKind::Entities, ResourceFormat::R8);
+		resource("ordered-entities", ResourceKind::Entities, ResourceFormat::R8);
+		resource("view-instances", ResourceKind::Buffer, ResourceFormat::R8);
+		resource("forward-colour", ResourceKind::Colour, ResourceFormat::RGB10A2);
+		resource("depth", ResourceKind::Depth, ResourceFormat::D24S8);
+		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+		resource("interface-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, true);
+		resource("composed-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+
+		node("world", NodeScope::World);
+		touches(EditKind::Writes, "world-entities", "entities");
+		node("camera", NodeScope::View);
+		touches(EditKind::Writes, "view-camera", "camera");
+		node("entities", NodeScope::View);
+		touches(EditKind::Writes, "view-entities", "entities");
+		node("cull-frustum", NodeScope::View);
+		touches(EditKind::Reads, "view-entities", "entities");
+		touches(EditKind::Reads, "view-camera", "camera");
+		touches(EditKind::Writes, "visible-entities", "entities");
+		node("order-draw", NodeScope::View);
+		touches(EditKind::Reads, "visible-entities", "entities");
+		touches(EditKind::Reads, "view-camera", "camera");
+		touches(EditKind::Writes, "ordered-entities", "entities");
+		node("upload-instances", NodeScope::View);
+		touches(EditKind::Reads, "ordered-entities", "entities");
+		touches(EditKind::Writes, "view-instances", "instances");
+		node("forward", NodeScope::View);
+		touches(EditKind::Reads, "ordered-entities", "entities");
+		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Writes, "forward-colour", "colour");
+		touches(EditKind::Writes, "depth", "depth");
+		node("present", NodeScope::Frame);
+		touches(EditKind::Reads, "forward-colour", "image");
+		touches(EditKind::Writes, "scene-image", "image");
+		node("interface", NodeScope::Frame, true);
+		touches(EditKind::Writes, "interface-image", "image");
+		node("overlay", NodeScope::Frame);
+		touches(EditKind::Reads, "scene-image", "scene");
+		touches(EditKind::Reads, "interface-image", "interface");
+		touches(EditKind::Writes, "composed-image", "image");
+		node("output-image", NodeScope::Frame);
+		touches(EditKind::Reads, "composed-image", "image");
 		return document;
 	}
 }

@@ -1331,8 +1331,8 @@ namespace engine::script {
 		// now.** No service is installed anywhere else: since v0.16 every one of
 		// them is a `ServiceSurface` the catalogue builds, and this walk is the
 		// only place this language builds one.
-		InstallJsServices(context, global, ServiceAvailability::Always);
-		InstallJsServices(context, global, ServiceAvailability::Studio);
+		InstallJsServices(context, global, ServiceAvailability::Always, JsOf(context).Access);
+		InstallJsServices(context, global, ServiceAvailability::Studio, JsOf(context).Access);
 
 		// After `InstallJsInstanceMethods`, which `OpenJsBindings` ran - this
 		// adds the component half of the ECS surface to the table it built.

@@ -18,8 +18,11 @@ namespace engine::render {
 	// @since v0.19
 	class PresentationSchedule {
 	  public:
+		// Monotonic clock and deadline types used by the schedule.
+		//@{
 		using Clock = std::chrono::steady_clock;
 		using TimePoint = Clock::time_point;
+		//@}
 
 		// Sets the maximum presentation rate. Zero is unlimited.
 		void SetRate(uint32_t framesPerSecond);

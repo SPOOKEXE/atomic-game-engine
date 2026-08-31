@@ -2,23 +2,23 @@
 
 ## Status
 
-This document is the authority for how a frame becomes a graph of nodes, how
-that graph compiles, and what runs it. `mono.engine/render/AGENTS.md` names
-it as such. It is written against the tree as it stands: the `graph` runtime
-at L9, the render backend at L12, the Studio editor, and
-`docs/OPTIMISATIONS_RENDER.md` as the backlog feeding it.
+This root-level document is the authority for how a frame becomes a graph of
+nodes, how that graph compiles, what runs it, and which data stays resident on
+the GPU. `mono.engine/render/AGENTS.md` names it as such. It is written against
+the tree as it stands: the `graph` runtime at L9, the render backend at L12,
+the Studio editor, and `docs/OPTIMISATIONS_RENDER.md` as the backlog feeding it.
 
 - **§1 to §2** describe what exists today, by name, so nothing here invents
   a second vocabulary for something already in the tree.
-- **§3 to §5** are the design for finishing the modularisation: one
-  registration path, custom nodes, shader capabilities, compilation stages,
-  data movement and quantisation, and the optimised default pipeline.
+- **§3 to §4** separate the modular compiler pieces that are implemented from
+  the remaining work: registration, custom nodes, device and shader
+  capabilities, optimization stages, data movement, and shader authoring.
 - **§6 to §8** cover profiling and introspection (GPU, render, heap, flame
   graph, with disable switches), the demo pipelines (anime, cartoony,
   drawing, anime screencap), and the staged migration.
 
-Nothing in §3 onward is committed work. Each item says what exists to build
-it on.
+The status at each subsection is authoritative. Sections 3.1 through 3.6 are
+implemented. Demo documents and the portability work in §7 remain planned.
 
 ---
 
@@ -169,11 +169,11 @@ shading-count overspend) are deliberately absent until readback exists.
 
 `graph::ProfilePipeline` derives the pass-by-resource viewer grid from the
 graph plus compiled order, never maintained separately: passes as columns in
-execution order, resources as rows with `FirstWrite`/`LastRead` lifetimes
-(half-open at start, closed at end; external always alive), access cells,
-and `PeakBytes` versus `TotalBytes`, whose difference is exactly what memory
-aliasing would recover. `Elapsed` and `Wall` stay zero until measurement
-exists; see §6.
+execution order, resources as rows with inclusive `FirstWrite`/`LastRead`
+lifetimes (external resources are always alive), access cells, and peak,
+declared and physically allocated byte counts. `BuildResourceAliases` produces
+the physical-target ids shown in the same rows. `Elapsed` and `Wall` are zero
+until a measurement is attached; see §6.
 
 ### 1.6 The backend
 
@@ -208,6 +208,93 @@ The default graph is `graph::DefaultPbrDocument()` ("Default PBR"):
 optional). It already runs deferred shading with the HZB two-phase occlusion
 inside `gbuffer` and SSAO as an optional insert.
 
+### 1.7 Exact default execution order
+
+The table below is the shortest authoritative reading order for the shipped
+default. Rows remain in declaration order. An asterisk means the node is
+optional in the document, not that the executor may reorder it.
+
+| Order | Node | Scope | What it does |
+|---:|---|---|---|
+| 1 | `world` | World | Selects the world and opens its shared inputs. |
+| 2 | `shadow*` | World | Captures shadow casters before any view shades them. |
+| 3 | `camera` | View | Publishes the view camera. |
+| 4 | `last-frame` | View | Makes retained history available to later nodes. |
+| 5 | `entities` | View | Produces the stable world draw list. |
+| 6 | `cull-frustum` | View | Filters that list against the view frustum. |
+| 7 | `order-draw` | View | Orders visible entities into deterministic draw runs. |
+| 8 | `upload-instances` | View | Rewrites only dirty resident instance and index ranges. |
+| 9 | `mirror-capture*` | View | Renders reflected views into persistent mirror targets. |
+| 10 | `portal-capture` | View | Renders visible linked views into portal targets. |
+| 11 | `portal-tonemap` | View | Converts portal HDR captures for composition. |
+| 12 | `gbuffer` | View | Draws opaque and masked geometry and seeds HZB occlusion. |
+| 13 | `depth-linearise` | View | Converts device depth for screen-space consumers. |
+| 14 | `ssao*` | View | Computes ambient occlusion when enabled. |
+| 15 | `deferred-lighting` | View | Shades the G-buffer into HDR colour. |
+| 16 | `sky` | View | Composites the environment behind scene geometry. |
+| 17 | `tonemap` | View | Maps HDR scene colour to the presentation range. |
+| 18 | `portal-overlay` | View | Composites portal surfaces over the main view. |
+| 19 | `mirror-overlay` | View | Composites mirror surfaces over the main view. |
+| 20 | `transparent` | View | Draws blended geometry after opaque composition. |
+| 21 | `present` | View | Resolves the scene image for presentation. |
+| 22 | `interface*` | View | Draws retained game-interface geometry. |
+| 23 | `overlay` | Final | Applies the dirty diagnostic-overlay region. |
+| 24 | `output-image` | Final | Publishes the final image to its requested sink. |
+
+`graph::Compile` preserves this order. `CompileSchedule` may place independent
+work in the same dependency wave, but the current SDL backend records on one
+thread and submits transfer, compute, and graphics command buffers in the
+planned order. A wave is therefore eligibility for overlap, not a claim that
+this backend executed it concurrently.
+
+### 1.8 GPU residency and transfer policy
+
+The renderer does not upload a completed scene or interface image. It keeps
+reusable resources resident, uploads changed data, and rasterises on the GPU.
+The only full images crossing to the device are source textures or explicitly
+edited image content.
+
+| Data | GPU state | Update gate | Current transfer policy |
+|---|---|---|---|
+| Mesh vertices and indices | Resident shared buffers | Dirty vertex/index spans in `MeshTable` | Coalesced changed ranges only. |
+| Draw instances | Resident 48-byte rows | Chunk and row comparison in `InstanceResidency` | Dirty chunks and rows only. |
+| Draw-order indices | Resident index stream | Versioned `IndexResidency` ranges | Dirty index ranges only. |
+| Static and streamed textures | Resident `TextureTable` entries | Content name, delivery, replacement, or animated-sheet cell | Upload once, then bind by slot; animation changes only the selected cell state. |
+| Editable meshes and images | Resident named resources | Per-object `Revision` | Refresh only revisions not already uploaded. |
+| Authored shader modules and variants | Resident compiled modules/pipelines | `ShaderSource::Revision`, format, and variant key | Recompile and replace only the changed shader or variant. |
+| Game-interface mesh and glyph atlas | Resident vertex/index buffers and atlas texture | Compiled-list signature, atlas change, or capacity growth | Reuse matching geometry; upload changed geometry or atlas content only. |
+| ImGui interface | Backend-owned vertex/index buffers plus resident textures | `DrawGeometrySignature` or texture-status change | Upload draw vertices and indices when the signature changes. No CPU-rasterised GUI image is sent. |
+| Particles | Resident pool, emitter parameters, curves, and live instances | Layout, resident-parameter, and simulation revisions | Rebuild layout only when layout changes; update resident values and run simulation in place. |
+| Beam, trail, decal, and texture ribbons | Frame geometry over resident sampled textures | Authored/effect revision and visible-run contents | Upload compact vertices and runs, not a composed image. |
+| Lights, cameras, and per-pass uniforms | Per-frame small buffers | Current view and frame signature | Upload compact structured values because the camera and simulation may move each frame. |
+| Shadow, portal, mirror, history, and graph targets | Resident render targets | Descriptor, owner, extent, pipeline reinstall, or explicit release | Render into existing targets; never round-trip their pixels through the CPU. |
+| Diagnostic overlay | Resident texture | `Overlay::UploadRegion` dirty rectangle | Upload only the changed rectangle, including the previous showing region when clearing. |
+| GPU timing and captures | Normally nonresident on CPU | Explicit profiling collection or capture node | Read back only completed timestamp slots or requested captures. |
+
+Two frequently confused interface paths are intentionally separate. Game GUI
+is compiled into retained geometry by `InterfacePass`. ImGui produces CPU draw
+lists, and the SDL GPU backend turns those lists into device vertex and index
+buffers. Sending a full GUI image would add a large pixel upload, discard GPU
+clipping and texture composition, and usually cost more PCIe bandwidth. The
+current signature gate already avoids re-uploading unchanged ImGui geometry.
+
+Always-changing diagnostics are isolated from scene and interface signatures.
+Statistics labels and flame-graph samples may refresh on their own display
+cadence without forcing object, environment, game-interface, or host-interface
+cache misses. `PresentationDamage` and the panel refresh deadline are the two
+gates to preserve when adding another live counter.
+
+`SurfaceAppearance` follows the same retained path. Colour, normal, roughness,
+occlusion, height, metalness, and emissive maps resolve and stream separately,
+then bind as seven resident texture slots. Opaque and masked materials enter the
+G-buffer; transparent and overlay materials enter the later forward pass.
+Metalness is consumed by both lighting paths, and masked shadows use the same
+alpha cutoff as the visible material. Surface colour, emission, resampling, and
+alpha state are saved and replicated as components, then packed into each
+48-byte instance row. Roblox `Content`-object aliases are deliberately absent:
+the engine has no `Content` value type beneath such aliases, so the string
+content-name properties are the supported boundary.
+
 ---
 
 ## 2. Invariants the conversion must not break
@@ -241,28 +328,30 @@ Each of these was bought with a bug:
 
 ---
 
-## 3. Finishing the modular node system
+## 3. Modular node and shader compilation
 
-Registration is currently split-brained: the catalogue declares sixty-three
-kinds, `BackendNodes()` declares thirty-one executor entries with their own
-scope/queue copy, and the studio re-derives per-kind editor widgets by hand.
-Three sources of one truth drift the first time someone adds a kind to two
-of the three. Closing that is stage one of the conversion.
+The core conversion is implemented. `NodeCatalogue` is the declaration source,
+native handlers install through `Renderer`, capability checks happen before a
+pipeline is accepted, and Studio consumes the same declarations and reports as
+the runtime. The remaining modularity work is named in sections 3.6 and 7.
 
 ### 3.1 One registration path
 
-Make `graph::NodeKindSpec` the unit and hang everything else off it:
+`graph::NodeKindSpec` is the unit every consumer reads:
 
 ```cpp
-struct NodeKindSpec {                 // extended in place
-    // existing: Kind, Label, Summary, Category, Inputs, Outputs,
-    //           Source, Scope, DefaultShader
-    ParamSchema     Params;           // 3.2: typed knobs, drives editor widgets
-    Requirements    Needs;            // 3.3: device/shader requirements
+struct NodeKindSpec {
+    // Kind, Label, Summary, Category, Inputs, Outputs and Source
+    NodeScope       Scope;
+    ExecutionQueue  Queue;
+    std::vector<ParameterSpec> Params;
+    NodeRequirements Needs;
+    std::string     DefaultShader;
+    bool            BuiltInBackend;
 };
 ```
 
-`render` keeps its handler table but derives acceptance from the registry:
+`render` keeps its handler table and derives acceptance from the registry:
 `BackendNodes()` becomes a view over `NodeCatalogue::All()` filtered to kinds
 that installed a handler. The studio's per-kind widget switch reads
 `Params` instead of its hand-written cases. One registration fills all three
@@ -297,20 +386,19 @@ Three mechanisms already exist and stay:
   custom multi-pass effect is composed today from stock nodes plus authored
   shaders.
 
-Missing is the **native custom kind**: a game or plugin registering a real
-kind with real backend behaviour. Design:
+The **native custom kind** path lets a game or plugin register a real kind with
+backend behaviour:
 
 ```cpp
 // once, before any Renderer exists, from game/plugin init:
 engine::graph::RegisterNodeKind({
-    .Declared = {
-        .Kind   = Name("game.dither"),
-        .Inputs = {{Name("colour"), ResourceKind::Texture, ResourceFormat::RGBA16F}},
-        .Outputs= {{Name("out"),    ResourceKind::Colour,  ResourceFormat::RGBA8}},
-        .Scope  = NodeScope::View,
-        .Params = {{Name("levels"), WidgetKind::Number, {2, 32}, /*default*/ 8}},
-    },
-    .Needs  = Requirements{},          // 3.3
+    .Kind    = Name("game.dither"),
+    .Inputs  = {{Name("colour"), ResourceKind::Texture, ResourceFormat::RGBA16F}},
+    .Outputs = {{Name("out"), ResourceKind::Colour, ResourceFormat::RGBA8}},
+    .Scope   = NodeScope::View,
+    .Params  = {{Name("levels"), "Levels", ParameterWidget::Number, "8",
+                 {}, 2.0, 32.0, true}},
+    .Needs   = NodeRequirements{},
 });
 // then, after Renderer::Initialise:
 renderer->InstallNodeHandler(Name("game.dither"),
@@ -337,71 +425,36 @@ Constraints, each inherited rather than new:
   nodes, lossy wires and overspent formats apply to it because diagnostics
   read the declaration, not a builtin list.
 
-### 3.3 ShaderCapabilities
+### 3.3 DeviceCaps and ShaderCapabilities
 
-Today capability knowledge is folklore spread across code: `AddShaderVariant`
-hard-codes `opaque.frag`'s binding counts (10 samplers, 3 uniform buffers),
-compute existence gates `hzb` to a no-op, `VulkanTimestamps::Probe` silently
-disables GPU timing, `msl::Translate` decides the shader form, SDL answers
-format questions. Nothing names these as a set, so a pipeline author cannot
-ask "will this run here" before installing. Design one probe and one
-vocabulary:
+Two capability records answer different questions and must not be merged:
 
-```cpp
-namespace engine::render {
+- `DeviceCaps` is probed once from SDL and the active backend. It records
+  compute, storage texture, indirect draw and timestamp support, queue shape,
+  preferred shader form, binding limits, colour-target limits, and creatable
+  formats. `NodeRequirements` in each catalogue entry is checked against it by
+  `CheckCapabilities` before install. Studio greys unavailable node kinds from
+  that same result.
+- `ShaderCapabilities` is reflected from the compiled SPIR-V module. It records
+  stage, required SPIR-V capabilities, inputs, outputs, compute workgroup size,
+  descriptor resources, minimum declared buffer bytes, module bytes, and a
+  static instruction mix split into arithmetic, texture, memory and control
+  flow operations.
 
-struct DeviceCaps {
-    // probed once in Initialise(), immutable afterwards:
-    bool HasCompute;              // compute pipelines created OK
-    bool HasStorageTextures;      // read-write texture bindings
-    bool HasIndirectDraws;        // indirect argument buffers
-    bool HasTimestamps;          // VulkanTimestamps::Probe succeeded
-    bool UnifiedQueue;           // SDL today: always true
-    bool PrefersMSL;             // !SPIR-V path => msl translation needed
-    uint32_t MaxSamplersPerDraw; // what AddShaderVariant assumes (10)
-    uint32_t MaxColourTargets;   // gbuffer writes four
-    std::span<const ResourceFormat> ColourFormats; // RGBA16F etc. creatable
-};
+Selecting a `ShaderScript` in Studio compiles its current revision through the
+same `ShaderCompiler` used by the runtime and shows this report in Properties.
+The report labels instruction counts as static estimates. They are not GPU
+cycles: invocation count, occupancy, divergence and cache behaviour require a
+running workload. Texture dimensions and runtime-sized storage buffers are
+shown as runtime costs rather than invented byte figures.
 
-struct Requirements {              // declared per kind in NodeKindSpec
-    bool Compute = false;
-    bool StorageTextures = false;
-    bool IndirectDraws = false;
-    bool TimestampsUseful = false; // not required; enables timing when present
-    std::span<const ResourceFormat> NeedsFormats; // e.g. RGBA16F for HDR chain
-    const char *FallbackKind;      // optional substitute kind name
-};
+Refusal remains whole-pipeline and loud. A missing device feature names the
+node and requirement. Shader compile failure retains a diagnostic with the
+asset name and line and does not terminate the engine.
 
-// checked at SetPipeline time, alongside backend acceptance:
-enum class CapabilityStatus : uint8_t { Ok, MissingCompute, MissingStorage,
-                                        MissingFormat, ... };
-CapabilityStatus CheckCapabilities(const DeviceCaps &, span<const Requirements>,
-                                   core::Name &offender);
-}
-```
+### 3.4 Compilation stages, optimization, and caches
 
-Behaviour rules:
-
-- **Refusal stays whole-pipeline and loud**, exactly like missing backends:
-  install falls through to the default rather than half-running. The reason
-  string names the requirement ("needs compute for hzb").
-- **`FallbackKind` is substitution, never silent degradation**: the compiled
-  graph literally contains the substitute node, so captures, profiles and
-  diagnostics describe what actually ran.
-- **The editor asks first.** Studio renders a requirements row per kind from
-  `Needs`, greying kinds the connected renderer cannot run, so an author
-  discovers the gap while wiring instead of at install.
-- **Shader-level caps ride the same struct.** Authored fragment shaders may
-  assume exactly `MaxSamplersPerDraw` samplers and three uniform buffers,
-  matching what `AddShaderVariant` and `GraphRasterFor` build today; the
-  number becomes data instead of a coincidence between two files.
-- **Tier selection uses caps** (§3.6): the default pipeline is chosen per
-  device by probing, not by a settings enum.
-
-### 3.4 Compilation stages and caches
-
-The full chain is already staged; what is missing is naming the stages as a
-contract and giving each its own cache key:
+The full chain and its cache boundaries are:
 
 | Stage | Input | Output | Cache key | Invalidate on |
 |---|---|---|---|---|
@@ -409,11 +462,38 @@ contract and giving each its own cache key:
 | build | document | `RenderGraph` | none | edit |
 | compile | graph | `CompiledGraph` blocks | none | edit |
 | schedule | graph | waves | none | edit |
-| plan | schedule | command buffer classes | none | edit |
+| node fusion | schedule waves | command buffer classes | none | edit |
+| resource aliasing | compiled order + descriptors | physical-target map | none | edit |
 | accept | compiled+schedule+backends+caps | installed pipeline | name | reinstall |
-| targets | descriptors | SDL textures | `(pipeline, resource, owner)` | `ReleaseGraphState(name)` |
+| targets | alias map + descriptors | SDL textures | `(pipeline, allocation, owner)` | `ReleaseGraphState(name)` |
 | pipelines | shaders+formats | SDL pipelines | `(pipeline, node, format, samplers, locals)` | eviction above |
-| modules | GLSL text | SPIR-V (+MSL) | script name + `Revision` integer | revision bump |
+| GLSL front end | GLSL text | SPIR-V | script name + `Revision` integer | revision bump |
+| constant folding | SPIR-V | folded SPIR-V | within module compile | revision bump |
+| common-subexpression elimination | folded SPIR-V | optimized SPIR-V | within module compile | revision bump |
+| reflection | optimized SPIR-V | `ShaderCapabilities` | module entry | revision bump |
+| backend translation | optimized SPIR-V | SPIR-V or MSL | module entry + backend form | revision bump or backend change |
+
+The two shader passes are explicit SPIRV-Tools transforms. Constant folding
+folds determined specialization expressions, propagates constants, simplifies,
+and removes dead results while preserving the entry-point interface.
+Common-subexpression elimination runs local and
+module redundancy elimination followed by dead-result cleanup and id
+compaction. `ShaderCompilation::Optimizations` records instruction counts
+before and after each pass and whether it found an opportunity.
+
+Node fusion means command-buffer fusion, not shader-source concatenation.
+`PlanCommandBuffers` groups adjacent dependency waves of one device queue class
+into one submission unit. Every node remains present and ordered, so profiles,
+capture names, and read-modify-write semantics survive. Pipeline Profile shows
+GPU node count, command-buffer count, and the removed boundaries.
+
+Resource aliasing is a compile-time physical-target assignment. It computes
+closed first-write to last-read lifetimes in compiled order, then reuses an
+allocation only when the prior lifetime ends before the next starts and kind,
+format, dimensions, divisor and scope match exactly. External resources,
+buffers, cameras, entities and sampled assets never enter the transient pool.
+The renderer resolves logical names through this map, and Pipeline Profile
+shows declared bytes, transient allocation bytes, and aliased target count.
 
 Two properties to preserve and state outright:
 
@@ -425,7 +505,7 @@ Two properties to preserve and state outright:
   reinstall releases old state after `WaitForFrame`. Custom handlers get the
   same lifecycle hook so they cannot leak across reinstalls.
 
-Hot-swap contract (already true, worth writing down): editing a
+Hot-swap contract: editing a
 `ShaderScript` bumps `Revision`; `ShaderLibrary::Refresh` recompiles on the
 next frame; `VariantFor(shader)` swaps the bound pipeline mid-run; failure
 yields the previous module plus a diagnostic, never a black screen.
@@ -451,7 +531,7 @@ Data moves five ways today; the conversion makes each one explicit:
    frame) are ordinary sinks reading any resource, which is also the seam a
    profiling readback would use (§6).
 
-Quantisation exists in three layers and gains a fourth:
+Quantisation exists in four layers:
 
 - **Formats are quantisation declarations.** `RGB10A2` for normals,
   `RG11B10F` HDR without alpha, `R8` AO: choosing a format is choosing bits,
@@ -459,12 +539,12 @@ Quantisation exists in three layers and gains a fourth:
   consumer reads. New pipelines should declare the narrowest format that
   survives, per `docs/OPTIMISATIONS_RENDER.md`.
 - **Instance packing is done and pinned**: snorm16 quaternion, packed
-  colour, forty-byte rows, decode mirrored in GLSL, byte-for-byte tested.
+  colour, 48-byte rows, decode mirrored in GLSL, byte-for-byte tested.
   Vertex quantisation (octahedral normals, box-relative positions) is the
   OPTIMISATIONS_RENDER candidate that lands beside this doc's stage plan.
 - **Block-compressed arrival formats** flow through `ResourceFormat` so an
   upload is describable in the profile grid.
-- **New: explicit conversion nodes.** Where a wire is lossy by design
+- **Explicit conversion nodes.** Where a wire is lossy by design
   (HDR lit image into LDR grade input), authors insert `blit` with an
   explicit target format rather than relying on implicit narrowing at bind
   time. Rule: **implicit narrowing warns (`LossyWire`), explicit conversion
@@ -473,11 +553,10 @@ Quantisation exists in three layers and gains a fourth:
 
 ### 3.6 The optimised default
 
-The default document should be the best-measured arrangement, selected per
-device, not a fixed list. Concretely:
+The default is selected per device rather than held as one fixed list:
 
-- **DefaultPbrDocument stays the shape** (deferred, HZB occlusion, SSAO
-  insert); the OPTIMISATIONS_RENDER candidates land inside it as enabled-by-
+- **DefaultPbrDocument is the Tier A shape** (deferred, HZB occlusion, SSAO
+  insert); future OPTIMISATIONS_RENDER candidates land inside it as enabled-by-
   default optional nodes once measured: cascaded shadow maps behind a
   `csm` capture node, clustered lighting behind a `light-cluster` dispatch,
   mip streaming behind residency bookkeeping.
@@ -641,10 +720,10 @@ switchable off without editing code.
 | Reported spans | workers report completed durations via `FrameGraph::Report`/`ReportNamed`/`ReportedScope` | producer-attributed, never spliced into the frame thread |
 | GPU memory | tracked wrappers in `gpu::` (`CreateBuffer`/`CreateTexture`...) with `MemoryStatistics` | logical payload: live, peak, cumulative allocated/released, creation counts |
 | CPU heap | every `ENGINE_PROFILE` scope opens a heap tag; `ENGINE_HEAP_SCOPE` for allocation-only boundaries; `--heap-report`, `just heap-soak` | hooks compile out of shipped release |
-| Static grid | `graph::ProfilePipeline` passes x resources, lifetimes, Peak vs Total bytes | `Elapsed`/`Wall` fields exist awaiting timestamps |
+| Static grid | `graph::ProfilePipeline` passes x resources, lifetimes, declared, peak and allocated bytes | resolved `Elapsed`/`Wall` values are joined by node name |
 | Cache health | `PresentationCacheProfile` hit/write counters, Frame Graph panel rows | hit means zero uploads and zero transient allocations |
 
-### 6.2 Closing the loop: per-node GPU time into the grid
+### 6.2 Per-node GPU time in the grid
 
 `ProfilePass::Elapsed` fills from `VulkanTimestamps`:
 
@@ -669,10 +748,10 @@ switchable off without editing code.
 
 Three views, one data source:
 
-1. **Studio Render Pipeline panel gains Timing and Memory columns** on the
-   profile grid: GPU ms per node (EMA plus last-frame spike), draw calls,
-   triangles, and per-target bytes from the tracked wrappers. Rows sort by
-   self cost; clicking a row highlights the node in the canvas.
+1. **Studio Render Pipeline panel has Timing and Memory views** in the profile
+   grid: GPU and wall time per node, stage images, resource lifetimes, declared
+   and transient allocation bytes, fused command boundaries, and aliased target
+   count. Draw-call and triangle attribution per node remain future work.
 2. **In-game overlay** stays the zero-dependency view: frame graph with
    node spans, GPU buckets, cache-hit rate per viewport, upload bytes per
    frame. Works headless-windowed on any machine, nothing attached.
@@ -719,34 +798,50 @@ Profiling has three tiers and two escape hatches:
 
 ---
 
-## 7. Migration stages
+## 7. Modularity status and remaining stages
 
 Independently shippable, each leaving the tree green:
 
-1. **One registration path** (§3.1): fold scope/queue metadata and
+1. **Done: one registration path** (§3.1): fold scope/queue metadata and
    requirements into the catalogue; derive `BackendNodes()`; studio widgets
    read `Params`. Tests: existing acceptance suite must pass untouched;
    add one asserting registry and backend agree on every kind.
-2. **DeviceCaps probe + CheckCapabilities** (§3.3): probe in Initialise;
+2. **Done: DeviceCaps probe + CheckCapabilities** (§3.3): probe in Initialise;
    wire refusal messages; studio requirements column. Headless tests pin
    the checker; the probe itself is client-tested by running the client.
-3. **Custom native kinds** (§3.2): `RegisterNodeKind` +
+3. **Done: custom native kinds** (§3.2): `RegisterNodeKind` +
    `Renderer::InstallNodeHandler`; lifecycle hook on reinstall; one demo
    custom kind in examples with its own suite.
-4. **Per-node profiling** (§6.2): mark assignment in GraphRunner, grid
+4. **Done: per-node profiling** (§6.2): mark assignment in GraphRunner, grid
    column, tier switch. Assert dropped-mark accounting in the Frame Graph
    panel rows.
-5. **Conversion nodes + narrowing rule** (§3.5): explicit `blit` format
+5. **Done: conversion nodes + narrowing rule** (§3.5): explicit `blit` format
    targeting; `LossyWire` demoted to hint when an explicit conversion sits
    between producer and consumer.
-6. **Tiered defaults** (§3.6): Tier B/C documents; capability-driven pick
+6. **Done: tiered defaults** (§3.6): Tier B/C documents; capability-driven pick
    at install; WorldPipelines extension asserting fall-through reasons.
-7. **Demo pipelines** (§5): new kinds (`palette`, `edges`, `hatch`),
+7. **Done: compiler introspection and transient allocation** (§3.3 to §3.4):
+   explicit shader passes, reflection, selected-asset Properties report,
+   command-buffer fusion report, and runtime target aliasing.
+8. **Remaining: demo pipelines** (§5): new kinds (`palette`, `edges`, `hatch`),
    example documents, acceptance assertions.
-8. **OPTIMISATIONS_RENDER candidates** land behind the same optional-node
+9. **Remaining: backend-neutral render pass API.** Native handlers still record
+   through SDL-specific render internals. A second backend needs a small command
+   interface for attachments, bindings, dispatch and barriers before custom
+   nodes are portable in the Unity or Unreal sense.
+10. **Remaining: shader permutations and disk cache.** Runtime modules cache by
+   name and revision in memory. Add defines, specialization values, compiler
+   version, target environment and backend form to a content-addressed key
+   before compiling large permutation families.
+11. **Remaining: typed shader contracts.** Reflection reports resources but
+   material and graph-pass binding layouts are still conventions. Validate
+   reflected set, binding, kind and minimum size against a named contract at
+   pipeline creation, with the mismatch attached to the shader asset.
+12. **Remaining: OPTIMISATIONS_RENDER candidates** land behind the same optional-node
    pattern afterwards, measured in release each time, in the priority order
    that document already states.
 
-Stages 1 to 4 unblock everything else; none of them changes what a frame
-looks like, which is the point: the conversion is mechanical first,
-expressive second, fast third.
+The completed stages preserve the frame image while making registration,
+acceptance, compilation cost, submission grouping and transient memory visible.
+The remaining stages broaden backend portability, shader scale and authored
+examples without weakening those contracts.
