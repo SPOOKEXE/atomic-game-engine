@@ -69,9 +69,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] render atmosphere, clouds and textured or procedural skies from each view's `WorldLighting::EnvironmentState`: the environment render-graph pass selects authored or compute modes, keeps signatures and resident targets per presentation slot, and consumes presentation-only scene values without feeding simulation.
 - [x] review v0.21 Studio coverage: ShaderScripts are editable in the shared source editor with GLSL autocomplete, save through their revisioned ECS property, round-trip in world/universe files and compile by name in the renderer; the full headless check covers the authored chain.
 - [x] add the datastore routing seam: `DataStoreRouter` assigns stable datastore names to `DataStoreAdapter` providers owned by `DataStorageServices`; server and Studio persistence use its built-in atomic file adapter, while remote provider choices remain the current-work item above.
-- [_] add remote datastore choices and per-datastore backend assignment through the DataStoreRouter/DataStoreAdapter seam below.
-- [_] resolve the remaining graphics-backend direction: either require Vulkan everywhere and package MoltenVK for Apple targets, or retain native Metal and add a DXIL build/runtime translation path before enabling SDL GPU's Direct3D 12 backend.
-- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
+- [x] add remote datastore choices and per-datastore backend assignment: the router assigns each logical store to the atomic file or bounded plain-HTTP snapshot adapter; server flags and Studio preferences select the default route, while TLS and named database protocols remain separate provider work rather than mislabeled HTTP.
+- [x] require SDL GPU's Vulkan backend everywhere, feed it SPIR-V only, and package pinned MoltenVK 1.4.2 beside Apple presentation executables with the upstream artifact checksum enforced.
+- [x] complete the skinning pipeline: `assets::MeshVertex` carries joint indices and weights, bake preserves glTF influences, render uploads and rebases a palette per rig, and fixed-tick animation tracks sample and blend bounded `.aanim` clips into bone poses before palette collection.
 
 - [_] review world export and world loading so that:
 	1. we can export a full game as a "project zip" which we can load on the server
@@ -91,7 +91,6 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 - [_] build out the bladeborne demo into a full mmo, test with thousands of connected clients with ai minds for them so they can run and do stuff
 
-
 ### v0.22
 
 - [_] default R6 base character (capsule collider)
@@ -99,8 +98,8 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
 - [_] make humanoid a shim for character controller (so not a black box), loads a default one in
 - [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
-- [_] animation handler
-- [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet - joint palettes are visual transform state and go GPU-resident beside the instance rows; the animation *controller* that produces them stays on the CPU, per the split above
+- [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
+- [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
 - [_] add accessories support
 - [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
 - [_] animation + animation track + animator => binds to character controller
@@ -135,6 +134,8 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 
 ### FUTURE
 
+- [_] maybe consider converting a bunch of custom tools to plugins and have them built-in to studio, or make a plugin pack as a extra release file you can import to a plugins/ folder in ~/Documents/atomic-game-engine/studio/plugins
+
 - [_] review additions from v0.20 and refine further, was rewriting alot so its experimental
 - [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
 - [_] unity porting tools / unity shop
@@ -142,14 +143,17 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] constraints system
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
-- [_] embedded whiteboxing tools (planning) for building
+- [_] built-in whiteboxing tools (planning) for building (plugin)
 - [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 - [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?)
+- [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well
+- [_] figma import tools
 - [_] import blender files in asset explorer natively (drag .blend files on engine)
 - [_] rpg maker port tool
+- [_] photoshop file reader and import tool
 - [_] docs/MOBILE.md implementation
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] localization support
