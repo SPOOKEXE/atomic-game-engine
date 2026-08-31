@@ -62,7 +62,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add platform-specific backend tooling where only "admitted keys" can connect to a given server - the client proves a platform-issued Ed25519 play seed without sending it, servers accept repeatable configured public keys, and the loopback control surface can list, allow, revoke or explicitly open admission for future sessions.
 - [_] cleanup launcher options and make it far more user friendly
 - [_] cleanup cdn config and make it far more friendly
-- [_] build out client settings for enabling/disabling certain features to help performance (editablemesh, editableimage, etc). make it LIVE so you can change it in-game.
+- [x] build out live client presentation settings: EditableMesh and EditableImage uploads, particles and post-processing can be disabled by config/CLI and toggled in-game without restarting.
 - [_] add a ESC settings menu to the client and in studio client. add the client settings to it.
 - [_] add a way for scripts to modify the ESC menu.
 - [_] gamepad and joystick support

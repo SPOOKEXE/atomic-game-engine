@@ -92,6 +92,10 @@ int main(int argc, char **argv) {
 	arguments.Value("worlds", "N", "Worlds to simulate and composite (default 1)");
 	arguments.Value("view-spacing", "UNITS", "World units between composited views (default 40)");
 	arguments.Value("tick-rate", "HZ", "Simulation ticks per second (default 60)");
+	arguments.Flag("disable-editable-meshes", "Do not upload live EditableMesh changes");
+	arguments.Flag("disable-editable-images", "Do not upload live EditableImage changes");
+	arguments.Flag("disable-particles", "Do not draw particles");
+	arguments.Flag("disable-post-processing", "Do not run world post-processing shaders");
 	arguments.Value("frames", "N", "Exit after N presented frames");
 	arguments.Value(
 		"surface-bounces",
@@ -215,6 +219,10 @@ int main(int argc, char **argv) {
 	options.Worlds = static_cast<uint32_t>(arguments.GetInteger("worlds", options.Worlds));
 	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
+	options.EnableEditableMeshes = options.EnableEditableMeshes && !arguments.Has("disable-editable-meshes");
+	options.EnableEditableImages = options.EnableEditableImages && !arguments.Has("disable-editable-images");
+	options.EnableParticles = options.EnableParticles && !arguments.Has("disable-particles");
+	options.EnablePostProcessing = options.EnablePostProcessing && !arguments.Has("disable-post-processing");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	if (arguments.Has("mcp-port")) {
 		options.ControlPort =

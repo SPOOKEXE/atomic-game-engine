@@ -61,6 +61,13 @@ namespace client {
 		// and the render interpolates between them.
 		double TickRate = 60.0;
 
+		// Live presentation capabilities exposed in the ESC settings menu.
+		// Disabling one stops its per-frame preparation immediately.
+		bool EnableEditableMeshes = true;
+		bool EnableEditableImages = true;
+		bool EnableParticles = true;
+		bool EnablePostProcessing = true;
+
 		// -1 runs until the window is closed. A frame budget is what makes the
 		// client usable from a test or a CI job.
 		int64_t MaximumFrames = -1;

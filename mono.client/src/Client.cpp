@@ -1976,6 +1976,33 @@ namespace client {
 			AppliedPointerIcon = pointerIcon;
 		}
 
+		if (Actions.Fired(Action::ToggleSettings)) {
+			Menu.Toggle();
+			PresentationInvalidated = true;
+		}
+
+		if (Menu.IsOpen() && Actions.Fired(Action::SettingsUp)) {
+			Menu.Move(-1);
+			PresentationInvalidated = true;
+		}
+		if (Menu.IsOpen() && Actions.Fired(Action::SettingsDown)) {
+			Menu.Move(1);
+			PresentationInvalidated = true;
+		}
+		if (Menu.IsOpen() && Actions.Fired(Action::SettingsActivate)) {
+			if (Menu.Activate(Settings) == SettingsMenuResult::Quit) {
+				Running = false;
+			}
+			PresentationInvalidated = true;
+		}
+
+		// A settings key is a host command, not game input. Releasing the raw
+		// state also prevents a key held before opening the menu from continuing
+		// to drive a character behind it.
+		if (Menu.IsOpen()) {
+			Input.ReleaseAll();
+		}
+
 		if (Actions.Fired(Action::Quit)) {
 			Running = false;
 		}
@@ -2604,14 +2631,17 @@ namespace client {
 			// tab to change reads as a dropped input.
 			const bool settingsChanged =
 				PanelsShown != (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph) ||
-				PanelTab != Settings.Tab || PanelScroll != ProfilerScroll || PanelDepth != ProfilerDepth ||
-				PanelWidth != pixelWidth || PanelHeight != pixelHeight;
+				SettingsMenuDrawn != Menu.IsOpen() || PanelTab != Settings.Tab ||
+				PanelScroll != ProfilerScroll || PanelDepth != ProfilerDepth || PanelWidth != pixelWidth ||
+				PanelHeight != pixelHeight;
 
-			const bool redraw = settingsChanged || Clock.Now() - PanelsDrawn >= PANEL_UPDATE_SECONDS;
+			const bool redraw =
+				Menu.IsOpen() || settingsChanged || Clock.Now() - PanelsDrawn >= PANEL_UPDATE_SECONDS;
 
 			if (redraw) {
 				PanelsDrawn = Clock.Now();
 				PanelsShown = Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph;
+				SettingsMenuDrawn = Menu.IsOpen();
 				PanelTab = Settings.Tab;
 				PanelScroll = ProfilerScroll;
 				PanelDepth = ProfilerDepth;
@@ -2624,7 +2654,8 @@ namespace client {
 				// frame that does not draw them still has to drain them or the
 				// next panel shows several frames added together.
 				Metrics::Clear();
-			} else if (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph) {
+			} else if (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph ||
+					   Menu.IsOpen()) {
 				SystemTimings.clear();
 				Universe_->Enter(Rendered, [this](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
 					for (const auto &timing : systems.Timings()) {
@@ -2703,6 +2734,9 @@ namespace client {
 				panels.Scale = pixelWidth >= 2400 ? 3 : 2;
 
 				engine::render::DrawDebugPanels(Overlay, panels);
+				if (Menu.IsOpen()) {
+					DrawSettingsMenu(Overlay, Settings, Menu);
+				}
 			} else {
 				// Nothing drawn means nothing uploaded and no overlay pass.
 				Overlay.Clear();
@@ -3143,7 +3177,9 @@ namespace client {
 		ENGINE_HEAP_SCOPE("client.shaders");
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
 			const size_t changed = Shaders.Refresh(shaded);
-			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
+			const engine::core::Name wantedPostProcess = Settings.EnablePostProcessing
+															 ? engine::scene::PostProcessShaderOf(shaded)
+															 : engine::core::Name{};
 
 			if (changed > 0) {
 				VisualResourcesChanged = true;
@@ -3251,8 +3287,10 @@ namespace client {
 		{
 			ENGINE_HEAP_SCOPE("client.editable");
 			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-				const size_t meshes = EditableMeshes.Refresh(shaded, Renderer);
-				const size_t images = EditableImages.Refresh(shaded, Renderer);
+				const size_t meshes =
+					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(shaded, Renderer) : 0;
+				const size_t images =
+					Settings.EnableEditableImages ? EditableImages.Refresh(shaded, Renderer) : 0;
 				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
 			});
 		}
@@ -3263,13 +3301,15 @@ namespace client {
 		view.Instances = drawn;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
-		view.Particles = Particles.Batches;
-		view.ParticleSeams = Particles.Seams;
-		view.ParticleRevision = Particles.Revision;
-		view.ParticleLayoutRevision = Particles.LayoutRevision;
-		view.ParticleResidentRevision = Particles.ResidentRevision;
-		view.ParticlePool = Particles.Pool;
-		view.ParticleBlocks = Particles.BlockCount;
+		if (Settings.EnableParticles) {
+			view.Particles = Particles.Batches;
+			view.ParticleSeams = Particles.Seams;
+			view.ParticleRevision = Particles.Revision;
+			view.ParticleLayoutRevision = Particles.LayoutRevision;
+			view.ParticleResidentRevision = Particles.ResidentRevision;
+			view.ParticlePool = Particles.Pool;
+			view.ParticleBlocks = Particles.BlockCount;
+		}
 
 		// The time since the last device step. Presentation may be slower than the
 		// update loop, and using only this update's delta would slow resident

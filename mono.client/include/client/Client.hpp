@@ -42,6 +42,7 @@
 #include <client/ContentLink.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
+#include <client/SettingsMenu.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
 #include <discord/Link.hpp>
@@ -469,6 +470,11 @@ namespace client {
 		engine::render::FrameStatistics Statistics;
 
 		client::Actions Actions;
+
+		// The shipped client's own settings overlay. It is presentation state,
+		// not a row in any simulated or replicated world.
+		client::SettingsMenu Menu;
+		bool SettingsMenuDrawn = false;
 
 		// This frame's raw input, before any world has been told about it.
 		//
