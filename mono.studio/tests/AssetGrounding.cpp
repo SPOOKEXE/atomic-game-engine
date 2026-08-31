@@ -24,7 +24,7 @@
 #include <vector>
 
 TEST_SUITE_ID("studio.assetgrounding")
-TEST_DEPENDS("engine.delivery.client")
+TEST_DEPENDS("engine.delivery.relay")
 TEST_DEPENDS("engine.assets.chunkstore")
 
 namespace {
