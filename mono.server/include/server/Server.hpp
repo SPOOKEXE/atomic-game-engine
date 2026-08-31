@@ -7,6 +7,8 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/datastore/Http.hpp>
+#include <engine/datastore/Provider.hpp>
 #include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -183,9 +185,15 @@ namespace server {
 		// Empty keeps the process-local store used before persistence existed.
 		std::filesystem::path DataStoreRoot;
 
+		// The adapter assigned to the default logical datastore.
+		engine::datastore::Provider DataStoreProvider = engine::datastore::Provider::File;
+
 		// Mock and live never share a file, even under one configured root.
 		engine::world::SharedStoreEnvironment DataStoreEnvironment =
 			engine::world::SharedStoreEnvironment::Live;
+
+		// Remote provider connection. Used only when DataStoreProvider is HTTP.
+		engine::datastore::HttpDataStoreSettings HttpDataStore;
 
 		// Write a recording of the run here. Empty means record nothing.
 		//

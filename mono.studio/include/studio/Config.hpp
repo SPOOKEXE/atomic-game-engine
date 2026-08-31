@@ -48,6 +48,7 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/datastore/Provider.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/SharedStoreFile.hpp>
 
@@ -268,6 +269,15 @@ namespace studio {
 		// play test cannot touch live data through an optimistic default.
 		engine::world::SharedStoreEnvironment DataStoreEnvironment =
 			engine::world::SharedStoreEnvironment::Mock;
+
+		// The provider assigned to Studio's default logical datastore.
+		engine::datastore::Provider DataStoreProvider = engine::datastore::Provider::File;
+
+		// Plain HTTP provider connection. Ignored while the file provider is selected.
+		std::string DataStoreHttpEndpoint = "127.0.0.1:8080";
+		std::string DataStoreHttpHost = "localhost";
+		std::string DataStoreHttpPrefix = "/datastores/";
+		std::string DataStoreHttpAuthorization;
 
 		// The external application used by source tabs and its executable override.
 		ExternalEditorSettings SourceEditor;

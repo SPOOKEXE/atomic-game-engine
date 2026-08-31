@@ -135,6 +135,11 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.DataStoreEnabled = true;
 	written.DataStoreRoot = "/tmp/atomic-stores";
 	written.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Live;
+	written.DataStoreProvider = engine::datastore::Provider::Http;
+	written.DataStoreHttpEndpoint = "127.0.0.1:9090";
+	written.DataStoreHttpHost = "stores.test";
+	written.DataStoreHttpPrefix = "/atomic/";
+	written.DataStoreHttpAuthorization = "Bearer test";
 	written.SourceEditor.Kind = studio::ExternalEditorKind::VisualStudioCode;
 	written.SourceEditor.Executable = "/opt/code/bin/code";
 	written.ScriptBackground = IM_COL32(0x12, 0x23, 0x34, 0xE0);
@@ -157,6 +162,11 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.DataStoreEnabled);
 	CHECK(read.DataStoreRoot == "/tmp/atomic-stores");
 	CHECK(read.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Live);
+	CHECK(read.DataStoreProvider == engine::datastore::Provider::Http);
+	CHECK(read.DataStoreHttpEndpoint == "127.0.0.1:9090");
+	CHECK(read.DataStoreHttpHost == "stores.test");
+	CHECK(read.DataStoreHttpPrefix == "/atomic/");
+	CHECK(read.DataStoreHttpAuthorization == "Bearer test");
 	CHECK(read.SourceEditor.Kind == studio::ExternalEditorKind::VisualStudioCode);
 	CHECK(read.SourceEditor.Executable == "/opt/code/bin/code");
 	CHECK(read.ScriptBackground == IM_COL32(0x12, 0x23, 0x34, 0xE0));

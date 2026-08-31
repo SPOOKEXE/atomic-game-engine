@@ -10,6 +10,7 @@
 
 #include <engine/world/SharedStores.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -17,6 +18,9 @@
 #include <vector>
 
 namespace engine::world {
+	// Maximum encoded size accepted by file and remote snapshot adapters.
+	inline constexpr uint64_t MAXIMUM_SHARED_STORE_IMAGE_BYTES = 256ull * 1024ull * 1024ull;
+
 	// The isolated local provider namespace selected for a store image.
 	enum class SharedStoreEnvironment {
 		Mock,
@@ -44,6 +48,22 @@ namespace engine::world {
 
 	// Returns a diagnostic spelling for a file operation result.
 	const char *Describe(SharedStoreFileStatus status);
+
+	// Encodes one complete shared-store image without performing I/O.
+	SharedStoreFileStatus EncodeSharedStoreImage(
+		BusKind store,
+		std::span<const SharedStoreEntry> entries,
+		std::vector<std::byte> &bytes,
+		std::string &error
+	);
+
+	// Decodes one complete shared-store image without performing I/O.
+	SharedStoreFileStatus DecodeSharedStoreImage(
+		std::span<const std::byte> bytes,
+		BusKind expectedStore,
+		std::vector<SharedStoreEntry> &entries,
+		std::string &error
+	);
 
 	// Atomically writes one MemoryStore or DataStore image.
 	SharedStoreFileStatus SaveSharedStoreFile(

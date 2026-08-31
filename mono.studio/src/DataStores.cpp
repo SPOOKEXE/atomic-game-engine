@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/datastore/Http.hpp>
 #include <engine/world/DataStore.hpp>
 
 #include <imgui.h>
@@ -19,7 +20,7 @@ namespace studio {
 
 		DataStoreReady = false;
 		DataStorePersistence.reset();
-		ActiveDataStorePath.clear();
+		ActiveDataStoreLocation.clear();
 		SavedDataStoreEntries.clear();
 		DataStoreError.clear();
 
@@ -27,21 +28,40 @@ namespace studio {
 			return true;
 		}
 
-		const engine::core::Name adapterName(engine::world::FILE_DATASTORE_ADAPTER);
+		const bool remote = Prefs.DataStoreProvider == engine::datastore::Provider::Http;
+		const engine::core::Name adapterName(
+			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER : engine::world::FILE_DATASTORE_ADAPTER
+		);
 		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
 		auto persistence = std::make_unique<engine::world::DataStoreRouter>();
-		if (!persistence->AddAdapter(
-				adapterName,
-				engine::world::MakeFileDataStoreAdapter(DataStoreRoot(), Prefs.DataStoreEnvironment)
-			) ||
+		std::unique_ptr<engine::world::DataStoreAdapter> adapter;
+		if (remote) {
+			const std::optional<engine::net::Endpoint> endpoint =
+				engine::net::Endpoint::Parse(Prefs.DataStoreHttpEndpoint);
+			if (!endpoint) {
+				DataStoreError = "HTTP endpoint must be a numeric HOST:PORT";
+				return false;
+			}
+			engine::datastore::HttpDataStoreSettings settings{
+				.Server = *endpoint,
+				.Host = Prefs.DataStoreHttpHost,
+				.TargetPrefix = Prefs.DataStoreHttpPrefix,
+				.Authorization = Prefs.DataStoreHttpAuthorization,
+			};
+			adapter = engine::datastore::MakeHttpDataStoreAdapter(std::move(settings));
+			ActiveDataStoreLocation = "http://" + endpoint->Text() + Prefs.DataStoreHttpPrefix;
+		} else {
+			adapter = engine::world::MakeFileDataStoreAdapter(DataStoreRoot(), Prefs.DataStoreEnvironment);
+			ActiveDataStoreLocation =
+				engine::world::DataStoreFilePath(DataStoreRoot(), Prefs.DataStoreEnvironment, storeName)
+					.string();
+		}
+		if (!persistence->AddAdapter(adapterName, std::move(adapter)) ||
 			!persistence->Assign(storeName, adapterName)) {
 			DataStoreError = "could not configure the datastore persistence route";
 			ENGINE_ERROR("studio datastore: {}", DataStoreError);
 			return false;
 		}
-
-		ActiveDataStorePath =
-			engine::world::DataStoreFilePath(DataStoreRoot(), Prefs.DataStoreEnvironment, storeName);
 
 		std::vector<engine::world::SharedStoreEntry> loaded;
 		std::string error;
@@ -68,7 +88,7 @@ namespace studio {
 		DataStorePersistence = std::move(persistence);
 		DataStoreReady = true;
 		NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
-		ENGINE_INFO("studio datastore: {}", ActiveDataStorePath.string());
+		ENGINE_INFO("studio datastore: {}", ActiveDataStoreLocation);
 		return true;
 	}
 
@@ -98,7 +118,7 @@ namespace studio {
 	}
 
 	void Editor::DrawDataStoreSettings() {
-		ImGui::SeparatorText("Local provider");
+		ImGui::SeparatorText("DataStore provider");
 
 		if (ImGui::Checkbox("Enable durable DataStore", &Prefs.DataStoreEnabled)) {
 			(void)ConfigureDataStore();
@@ -106,21 +126,44 @@ namespace studio {
 		ImGui::TextDisabled("MemoryStore remains ephemeral and is cleared when Studio exits.");
 
 		ImGui::BeginDisabled(!Prefs.DataStoreEnabled);
-		const std::string defaultRoot = ConfigPath("stores").string();
-		TextField("Root folder", Prefs.DataStoreRoot, defaultRoot.c_str());
-		if (ImGui::IsItemDeactivatedAfterEdit()) {
+		const char *providers[] = {"File", "HTTP"};
+		int provider = Prefs.DataStoreProvider == engine::datastore::Provider::File ? 0 : 1;
+		if (ImGui::Combo("Provider", &provider, providers, IM_ARRAYSIZE(providers))) {
+			Prefs.DataStoreProvider =
+				provider == 0 ? engine::datastore::Provider::File : engine::datastore::Provider::Http;
 			(void)ConfigureDataStore();
 		}
 
-		const char *environments[] = {"Mock", "Live"};
-		int environment = Prefs.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Mock ? 0 : 1;
-		if (ImGui::Combo("Environment", &environment, environments, IM_ARRAYSIZE(environments))) {
-			Prefs.DataStoreEnvironment = environment == 0 ? engine::world::SharedStoreEnvironment::Mock
-														  : engine::world::SharedStoreEnvironment::Live;
-			(void)ConfigureDataStore();
+		if (Prefs.DataStoreProvider == engine::datastore::Provider::File) {
+			const std::string defaultRoot = ConfigPath("stores").string();
+			TextField("Root folder", Prefs.DataStoreRoot, defaultRoot.c_str());
+			if (ImGui::IsItemDeactivatedAfterEdit()) {
+				(void)ConfigureDataStore();
+			}
+
+			const char *environments[] = {"Mock", "Live"};
+			int environment =
+				Prefs.DataStoreEnvironment == engine::world::SharedStoreEnvironment::Mock ? 0 : 1;
+			if (ImGui::Combo("Environment", &environment, environments, IM_ARRAYSIZE(environments))) {
+				Prefs.DataStoreEnvironment = environment == 0 ? engine::world::SharedStoreEnvironment::Mock
+															  : engine::world::SharedStoreEnvironment::Live;
+				(void)ConfigureDataStore();
+			}
+		} else {
+			TextField("Endpoint", Prefs.DataStoreHttpEndpoint, "127.0.0.1:8080");
+			bool connectionEdited = ImGui::IsItemDeactivatedAfterEdit();
+			TextField("Host header", Prefs.DataStoreHttpHost, "localhost");
+			connectionEdited = ImGui::IsItemDeactivatedAfterEdit() || connectionEdited;
+			TextField("Target prefix", Prefs.DataStoreHttpPrefix, "/datastores/");
+			connectionEdited = ImGui::IsItemDeactivatedAfterEdit() || connectionEdited;
+			TextField("Authorization", Prefs.DataStoreHttpAuthorization, "Bearer ...");
+			connectionEdited = ImGui::IsItemDeactivatedAfterEdit() || connectionEdited;
+			if (connectionEdited) {
+				(void)ConfigureDataStore();
+			}
 		}
 
-		if (ImGui::Button("Reload from disk")) {
+		if (ImGui::Button("Reload from provider")) {
 			(void)ConfigureDataStore(false);
 		}
 		ImGui::SameLine();
@@ -128,14 +171,18 @@ namespace studio {
 			(void)FlushDataStore();
 		}
 
-		const std::filesystem::path shown = ActiveDataStorePath.empty()
-												? engine::world::DataStoreFilePath(
-													  DataStoreRoot(),
-													  Prefs.DataStoreEnvironment,
-													  engine::core::Name(engine::world::DEFAULT_DATASTORE)
-												  )
-												: ActiveDataStorePath;
-		ImGui::TextWrapped("%s", shown.string().c_str());
+		const std::string inactiveLocation =
+			Prefs.DataStoreProvider == engine::datastore::Provider::Http
+				? "http://" + Prefs.DataStoreHttpEndpoint + Prefs.DataStoreHttpPrefix
+				: engine::world::DataStoreFilePath(
+					  DataStoreRoot(),
+					  Prefs.DataStoreEnvironment,
+					  engine::core::Name(engine::world::DEFAULT_DATASTORE)
+				  )
+					  .string();
+		const std::string shown =
+			ActiveDataStoreLocation.empty() ? inactiveLocation : ActiveDataStoreLocation;
+		ImGui::TextWrapped("%s", shown.c_str());
 		if (!DataStoreError.empty()) {
 			ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", DataStoreError.c_str());
 		} else if (DataStoreReady) {

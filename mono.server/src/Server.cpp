@@ -816,33 +816,42 @@ namespace server {
 	bool Server::LoadDataStore() {
 		PersistedDataStore.clear();
 		DataStorePersistence.reset();
-		if (Settings.DataStoreRoot.empty()) {
+		if (Settings.DataStoreProvider == engine::datastore::Provider::File &&
+			Settings.DataStoreRoot.empty()) {
 			DataStoreReady = true;
 			return true;
 		}
 
-		const engine::core::Name adapterName(engine::world::FILE_DATASTORE_ADAPTER);
+		const bool remote = Settings.DataStoreProvider == engine::datastore::Provider::Http;
+		const engine::core::Name adapterName(
+			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER : engine::world::FILE_DATASTORE_ADAPTER
+		);
 		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
 		auto persistence = std::make_unique<engine::world::DataStoreRouter>();
-		if (!persistence->AddAdapter(
-				adapterName,
-				engine::world::MakeFileDataStoreAdapter(Settings.DataStoreRoot, Settings.DataStoreEnvironment)
-			) ||
+		std::unique_ptr<engine::world::DataStoreAdapter> adapter =
+			remote ? engine::datastore::MakeHttpDataStoreAdapter(Settings.HttpDataStore)
+				   : engine::world::MakeFileDataStoreAdapter(
+						 Settings.DataStoreRoot, Settings.DataStoreEnvironment
+					 );
+		if (!persistence->AddAdapter(adapterName, std::move(adapter)) ||
 			!persistence->Assign(storeName, adapterName)) {
 			ENGINE_ERROR("could not configure the DataStore persistence route");
 			return false;
 		}
 
-		const std::filesystem::path path = engine::world::DataStoreFilePath(
-			Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
-		);
+		const std::string location =
+			remote ? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
+				   : engine::world::DataStoreFilePath(
+						 Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
+					 )
+						 .string();
 		std::string error;
 		const engine::world::DataStoreStatus loaded = persistence->Load(storeName, PersistedDataStore, error);
 		if (loaded == engine::world::DataStoreStatus::NotFound) {
 			ENGINE_INFO(
 				"DataStore {} environment is empty at '{}'",
 				engine::world::Describe(Settings.DataStoreEnvironment),
-				path.string()
+				location
 			);
 			DataStorePersistence = std::move(persistence);
 			DataStoreReady = true;
@@ -851,7 +860,7 @@ namespace server {
 		if (loaded != engine::world::DataStoreStatus::Ok) {
 			ENGINE_ERROR(
 				"could not load DataStore '{}': {}",
-				path.string(),
+				location,
 				error.empty() ? engine::world::Describe(loaded) : error
 			);
 			PersistedDataStore.clear();
@@ -859,11 +868,11 @@ namespace server {
 		}
 		if (Worlds().ReplaceSharedStoreEntries(engine::world::BusKind::DataStore, PersistedDataStore) !=
 			engine::world::BusStatus::Ok) {
-			ENGINE_ERROR("could not install DataStore '{}'", path.string());
+			ENGINE_ERROR("could not install DataStore '{}'", location);
 			PersistedDataStore.clear();
 			return false;
 		}
-		ENGINE_INFO("loaded {} DataStore record(s) from '{}'", PersistedDataStore.size(), path.string());
+		ENGINE_INFO("loaded {} DataStore record(s) from '{}'", PersistedDataStore.size(), location);
 		DataStorePersistence = std::move(persistence);
 		DataStoreReady = true;
 		return true;
@@ -879,15 +888,19 @@ namespace server {
 		}
 
 		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
-		const std::filesystem::path path = engine::world::DataStoreFilePath(
-			Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
-		);
+		const std::string location =
+			Settings.DataStoreProvider == engine::datastore::Provider::Http
+				? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
+				: engine::world::DataStoreFilePath(
+					  Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
+				  )
+					  .string();
 		std::string error;
 		const engine::world::DataStoreStatus status = DataStorePersistence->Save(storeName, records, error);
 		if (status != engine::world::DataStoreStatus::Ok) {
 			ENGINE_ERROR(
 				"could not persist DataStore '{}': {}",
-				path.string(),
+				location,
 				error.empty() ? engine::world::Describe(status) : error
 			);
 			return false;

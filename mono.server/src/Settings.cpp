@@ -174,6 +174,11 @@ namespace server {
 					"Read staged data from here instead of from beside the binary"
 				);
 				built.Text(
+					"server.datastore-provider",
+					engine::datastore::Describe(defaults.DataStoreProvider),
+					"file or http; selects the adapter assigned to the default datastore"
+				);
+				built.Text(
 					"server.datastore-root",
 					defaults.DataStoreRoot.string(),
 					"Persist DataStore under this root; empty keeps it process-local"
@@ -182,6 +187,26 @@ namespace server {
 					"server.datastore-environment",
 					engine::world::Describe(defaults.DataStoreEnvironment),
 					"mock or live; each uses a separate directory"
+				);
+				built.Text(
+					"server.datastore-http-endpoint",
+					defaults.HttpDataStore.Server.Text(),
+					"Numeric HOST:PORT for the plain HTTP datastore provider"
+				);
+				built.Text(
+					"server.datastore-http-host",
+					defaults.HttpDataStore.Host,
+					"HTTP Host header for the datastore provider"
+				);
+				built.Text(
+					"server.datastore-http-prefix",
+					defaults.HttpDataStore.TargetPrefix,
+					"HTTP target prefix ending in /"
+				);
+				built.Text(
+					"server.datastore-http-authorization",
+					defaults.HttpDataStore.Authorization,
+					"Optional complete Authorization header value"
 				);
 
 				return built;
@@ -285,6 +310,14 @@ namespace server {
 		options.HostProgram = std::filesystem::path(Flag("server.host-program").Text());
 		options.Processes = static_cast<uint32_t>(Flag("server.processes").Integer());
 		options.AssetsDirectory = std::filesystem::path(Flag("server.assets-directory").Text());
+		if (const auto provider = engine::datastore::ProviderOf(Flag("server.datastore-provider").Text())) {
+			options.DataStoreProvider = *provider;
+		} else {
+			ENGINE_WARN(
+				"server.datastore-provider: '{}' is not file or http; using file",
+				Flag("server.datastore-provider").Text()
+			);
+		}
 		options.DataStoreRoot = std::filesystem::path(Flag("server.datastore-root").Text());
 		if (const auto environment =
 				engine::world::SharedStoreEnvironmentOf(Flag("server.datastore-environment").Text())) {
@@ -295,6 +328,18 @@ namespace server {
 				Flag("server.datastore-environment").Text()
 			);
 		}
+		if (const auto endpoint =
+				engine::net::Endpoint::Parse(Flag("server.datastore-http-endpoint").Text())) {
+			options.HttpDataStore.Server = *endpoint;
+		} else if (options.DataStoreProvider == engine::datastore::Provider::Http) {
+			ENGINE_WARN(
+				"server.datastore-http-endpoint: '{}' is not a numeric endpoint",
+				Flag("server.datastore-http-endpoint").Text()
+			);
+		}
+		options.HttpDataStore.Host = std::string(Flag("server.datastore-http-host").Text());
+		options.HttpDataStore.TargetPrefix = std::string(Flag("server.datastore-http-prefix").Text());
+		options.HttpDataStore.Authorization = std::string(Flag("server.datastore-http-authorization").Text());
 
 		return options;
 	}

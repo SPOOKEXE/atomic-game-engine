@@ -3335,11 +3335,11 @@ namespace studio {
 		// rather than out of this - see `SaveConfiguration`.
 		Preferences Prefs;
 
-		// The durable provider route, active file and last written image.
+		// The durable provider route, active location and last written image.
 		// MemoryStore deliberately has no file: it expires with this process.
 		//@{
 		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
-		std::filesystem::path ActiveDataStorePath;
+		std::string ActiveDataStoreLocation;
 		std::vector<engine::world::SharedStoreEntry> SavedDataStoreEntries;
 		std::string DataStoreError;
 		double NextDataStoreFlush = 0.0;

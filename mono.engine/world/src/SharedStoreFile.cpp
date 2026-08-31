@@ -10,7 +10,6 @@ namespace engine::world {
 	namespace {
 		constexpr uint64_t MAGIC = 0x4552'4F54'5353'4441ull;
 		constexpr uint32_t FORMAT = 1;
-		constexpr uint64_t MAXIMUM_FILE_BYTES = 256ull * 1024ull * 1024ull;
 		constexpr uint32_t MAXIMUM_ENTRIES = 1'000'000;
 
 		bool Supported(BusKind store) {
@@ -60,42 +59,10 @@ namespace engine::world {
 		std::span<const SharedStoreEntry> entries,
 		std::string &error
 	) {
-		error.clear();
-		if (!Supported(store) || entries.size() > MAXIMUM_ENTRIES) {
-			error = "unsupported shared store image";
-			return SharedStoreFileStatus::WrongStore;
-		}
-
-		std::vector<const SharedStoreEntry *> ordered;
-		ordered.reserve(entries.size());
-		std::unordered_set<uint32_t> keys;
-		for (const SharedStoreEntry &entry : entries) {
-			if (entry.Store != store || !entry.Key.IsValid() || entry.Value.size() > MAXIMUM_FILE_BYTES ||
-				!keys.insert(entry.Key.Id()).second || (store == BusKind::DataStore && entry.Version == 0) ||
-				(store == BusKind::MemoryStore && entry.Version != 0)) {
-				error = "invalid or duplicate shared store entry";
-				return SharedStoreFileStatus::Malformed;
-			}
-			ordered.push_back(&entry);
-		}
-		std::sort(ordered.begin(), ordered.end(), [](const auto *left, const auto *right) {
-			return left->Key.Text() < right->Key.Text();
-		});
-
-		core::ByteWriter writer;
-		writer.WriteUInt64(MAGIC);
-		writer.WriteUInt32(FORMAT);
-		writer.WriteUInt8(static_cast<uint8_t>(store));
-		writer.WriteUInt32(static_cast<uint32_t>(ordered.size()));
-		for (const SharedStoreEntry *entry : ordered) {
-			writer.WriteName(entry->Key);
-			writer.WriteUInt64(entry->Version);
-			writer.WriteUInt32(static_cast<uint32_t>(entry->Value.size()));
-			writer.WriteRaw(entry->Value.data(), entry->Value.size());
-		}
-		if (writer.Size() > MAXIMUM_FILE_BYTES) {
-			error = "shared store image exceeds 256 MiB";
-			return SharedStoreFileStatus::Malformed;
+		std::vector<std::byte> bytes;
+		const SharedStoreFileStatus encoded = EncodeSharedStoreImage(store, entries, bytes, error);
+		if (encoded != SharedStoreFileStatus::Ok) {
+			return encoded;
 		}
 
 		std::error_code failure;
@@ -113,7 +80,6 @@ namespace engine::world {
 				error = "could not write " + temporary.string();
 				return SharedStoreFileStatus::IoError;
 			}
-			const auto bytes = writer.Bytes();
 			output.write(
 				reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size())
 			);
@@ -138,6 +104,56 @@ namespace engine::world {
 		return SharedStoreFileStatus::Ok;
 	}
 
+	SharedStoreFileStatus EncodeSharedStoreImage(
+		const BusKind store,
+		const std::span<const SharedStoreEntry> entries,
+		std::vector<std::byte> &bytes,
+		std::string &error
+	) {
+		error.clear();
+		if (!Supported(store) || entries.size() > MAXIMUM_ENTRIES) {
+			error = "unsupported shared store image";
+			return SharedStoreFileStatus::WrongStore;
+		}
+
+		std::vector<const SharedStoreEntry *> ordered;
+		ordered.reserve(entries.size());
+		std::unordered_set<uint32_t> keys;
+		for (const SharedStoreEntry &entry : entries) {
+			if (entry.Store != store || !entry.Key.IsValid() ||
+				entry.Value.size() > MAXIMUM_SHARED_STORE_IMAGE_BYTES ||
+				!keys.insert(entry.Key.Id()).second || (store == BusKind::DataStore && entry.Version == 0) ||
+				(store == BusKind::MemoryStore && entry.Version != 0)) {
+				error = "invalid or duplicate shared store entry";
+				return SharedStoreFileStatus::Malformed;
+			}
+			ordered.push_back(&entry);
+		}
+		std::sort(ordered.begin(), ordered.end(), [](const auto *left, const auto *right) {
+			return left->Key.Text() < right->Key.Text();
+		});
+
+		core::ByteWriter writer;
+		writer.WriteUInt64(MAGIC);
+		writer.WriteUInt32(FORMAT);
+		writer.WriteUInt8(static_cast<uint8_t>(store));
+		writer.WriteUInt32(static_cast<uint32_t>(ordered.size()));
+		for (const SharedStoreEntry *entry : ordered) {
+			writer.WriteName(entry->Key);
+			writer.WriteUInt64(entry->Version);
+			writer.WriteUInt32(static_cast<uint32_t>(entry->Value.size()));
+			writer.WriteRaw(entry->Value.data(), entry->Value.size());
+		}
+		if (writer.Size() > MAXIMUM_SHARED_STORE_IMAGE_BYTES) {
+			error = "shared store image exceeds 256 MiB";
+			return SharedStoreFileStatus::Malformed;
+		}
+
+		const auto encoded = writer.Bytes();
+		bytes.assign(encoded.begin(), encoded.end());
+		return SharedStoreFileStatus::Ok;
+	}
+
 	SharedStoreFileStatus LoadSharedStoreFile(
 		const std::filesystem::path &path,
 		BusKind expectedStore,
@@ -150,7 +166,7 @@ namespace engine::world {
 			return SharedStoreFileStatus::NotFound;
 		}
 		const uintmax_t length = std::filesystem::file_size(path, failure);
-		if (failure || length > MAXIMUM_FILE_BYTES) {
+		if (failure || length > MAXIMUM_SHARED_STORE_IMAGE_BYTES) {
 			error = "shared store file is unreadable or exceeds 256 MiB";
 			return SharedStoreFileStatus::IoError;
 		}
@@ -160,6 +176,21 @@ namespace engine::world {
 		if (!input || (!bytes.empty() && !input.read(reinterpret_cast<char *>(bytes.data()), bytes.size()))) {
 			error = "could not read " + path.string();
 			return SharedStoreFileStatus::IoError;
+		}
+
+		return DecodeSharedStoreImage(bytes, expectedStore, entries, error);
+	}
+
+	SharedStoreFileStatus DecodeSharedStoreImage(
+		const std::span<const std::byte> bytes,
+		const BusKind expectedStore,
+		std::vector<SharedStoreEntry> &entries,
+		std::string &error
+	) {
+		error.clear();
+		if (bytes.size() > MAXIMUM_SHARED_STORE_IMAGE_BYTES) {
+			error = "shared store image exceeds 256 MiB";
+			return SharedStoreFileStatus::Malformed;
 		}
 
 		core::ByteReader reader(bytes);

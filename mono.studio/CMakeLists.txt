@@ -28,6 +28,7 @@ mono_add_library(studio
 		Engine::parallel
 		Engine::ecs
 		Engine::world
+		Engine::datastore
 		Engine::scene
 		Engine::script
 

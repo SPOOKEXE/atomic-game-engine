@@ -285,11 +285,20 @@ namespace studio {
 			dataStore != document.end() && dataStore->is_object()) {
 			DataStoreEnabled = Flag(*dataStore, "enabled", DataStoreEnabled);
 			DataStoreRoot = Words(*dataStore, "root", DataStoreRoot);
+			if (const auto provider = engine::datastore::ProviderOf(
+					Words(*dataStore, "provider", engine::datastore::Describe(DataStoreProvider))
+				)) {
+				DataStoreProvider = *provider;
+			}
 			if (const auto environment = engine::world::SharedStoreEnvironmentOf(
 					Words(*dataStore, "environment", engine::world::Describe(DataStoreEnvironment))
 				)) {
 				DataStoreEnvironment = *environment;
 			}
+			DataStoreHttpEndpoint = Words(*dataStore, "httpEndpoint", DataStoreHttpEndpoint);
+			DataStoreHttpHost = Words(*dataStore, "httpHost", DataStoreHttpHost);
+			DataStoreHttpPrefix = Words(*dataStore, "httpPrefix", DataStoreHttpPrefix);
+			DataStoreHttpAuthorization = Words(*dataStore, "httpAuthorization", DataStoreHttpAuthorization);
 		}
 		if (const auto sourceEditor = document.find("scriptEditor");
 			sourceEditor != document.end() && sourceEditor->is_object()) {
@@ -544,8 +553,13 @@ namespace studio {
 			{"dataStore",
 			 json{
 				 {"enabled", DataStoreEnabled},
+				 {"provider", engine::datastore::Describe(DataStoreProvider)},
 				 {"root", DataStoreRoot},
 				 {"environment", engine::world::Describe(DataStoreEnvironment)},
+				 {"httpEndpoint", DataStoreHttpEndpoint},
+				 {"httpHost", DataStoreHttpHost},
+				 {"httpPrefix", DataStoreHttpPrefix},
+				 {"httpAuthorization", DataStoreHttpAuthorization},
 			 }},
 			{"scriptEditor",
 			 json{
