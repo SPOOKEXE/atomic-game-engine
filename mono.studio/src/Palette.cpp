@@ -37,7 +37,7 @@ namespace studio {
 						   NewGame();
 					   }});
 
-		Operators.Add({Action::OpenGame, "Open Game", "Open a .agame file", always, [this] {
+		Operators.Add({Action::OpenGame, "Open Game", "Open a game or universe file", always, [this] {
 						   AskingOpen = true;
 						   PathBuffer = GamePath.string();
 					   }});

@@ -155,6 +155,14 @@ namespace studio {
 		// other holding the previous answer.
 		const engine::delivery::DeliverySettings settings = Content.ToSettings();
 
+		if (ContentClient && (UniverseAssetGrounding.State == AssetGroundingState::WaitingForCatalogue ||
+							  UniverseAssetGrounding.State == AssetGroundingState::Fetching ||
+							  UniverseAssetGrounding.State == AssetGroundingState::CopyingRaw)) {
+			CancelAssetGrounding(UniverseAssetGrounding, *ContentClient);
+			PendingUniverseExportPath.clear();
+			Say("asset export cancelled because content sources changed", engine::core::LogLevel::Warning);
+		}
+
 		ContentClient.reset();
 		ContentUploads.reset();
 		ContentSamples = NetworkSamples{};
@@ -227,6 +235,16 @@ namespace studio {
 			{
 				ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
 				ContentClient->Pump();
+			}
+			PumpAssetGrounding(UniverseAssetGrounding, *ContentClient);
+			if (UniverseAssetGrounding.State == AssetGroundingState::Complete) {
+				const std::filesystem::path exportPath = std::move(PendingUniverseExportPath);
+				UniverseAssetGrounding = AssetGrounding{};
+				ExportUniverse(exportPath);
+			} else if (UniverseAssetGrounding.State == AssetGroundingState::Failed) {
+				Say("asset export failed: " + UniverseAssetGrounding.Error, engine::core::LogLevel::Error);
+				PendingUniverseExportPath.clear();
+				UniverseAssetGrounding = AssetGrounding{};
 			}
 			DrainContent();
 		}

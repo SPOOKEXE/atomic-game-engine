@@ -51,6 +51,15 @@ namespace studio {
 		// The sources, first tried first.
 		std::vector<engine::delivery::Source> Sources;
 
+		// Read-only sources declared by the universe currently open. Kept apart
+		// from preferences so saving Studio settings cannot make one project's
+		// local paths appear in another project.
+		std::vector<engine::delivery::Source> UniverseSources;
+
+		// Publisher identity declared by the open universe. Transient like its
+		// sources and never written into Studio preferences.
+		std::string UniversePublisherKey;
+
 		// Where verified content is kept between runs. Empty disables it.
 		std::filesystem::path CachePath;
 
@@ -100,6 +109,19 @@ namespace studio {
 		//         publisher key configured has a list and no trust, and
 		//         `MakeAssetClient` is the one that refuses.
 		engine::delivery::DeliverySettings ToSettings() const;
+
+		// Replaces the transient local source for the universe currently open.
+		//
+		// An empty path removes it. The source is first in delivery order because
+		// a grounded universe copy must resolve before machine-wide preferences.
+		void SetUniverseAssets(const std::filesystem::path &processed);
+
+		// Replaces every transient source approved for the open universe.
+		void SetUniverseContent(
+			const std::filesystem::path &processed,
+			std::vector<engine::delivery::Source> remote,
+			std::string publisherKey
+		);
 
 		// Writes the list.
 		//

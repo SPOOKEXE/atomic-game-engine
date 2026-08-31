@@ -779,7 +779,9 @@ namespace studio {
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Reset to default")) {
+			std::vector<engine::delivery::Source> universeSources = std::move(Content.UniverseSources);
 			Content = ContentSources::Default();
+			Content.UniverseSources = std::move(universeSources);
 			changed = true;
 		}
 

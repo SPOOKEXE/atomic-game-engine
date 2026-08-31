@@ -1494,7 +1494,8 @@ namespace studio {
 			// extension is what tells them apart afterwards.
 			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
 				AskingExportUniverse = true;
-				PathBuffer = std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
+				PathBuffer =
+					std::string(Label(GameName, "Game")) + std::string(engine::game::UNIVERSE_EXTENSION);
 			}
 
 			ImGui::Separator();
@@ -2511,7 +2512,9 @@ namespace studio {
 		// written out**, because the reader refuses a `<World>` where a `<Game>`
 		// belongs and a browser offering the wrong one would be offering a file
 		// that cannot load.
-		const std::vector<std::string> GAME_FILES{std::string(engine::game::GAME_EXTENSION)};
+		const std::vector<std::string> GAME_FILES{
+			std::string(engine::game::GAME_EXTENSION), std::string(engine::game::UNIVERSE_EXTENSION)
+		};
 		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
 
 	}
@@ -2570,11 +2573,17 @@ namespace studio {
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
 		}
+		if (AskingUniverseLoadPermissions) {
+			ImGui::OpenPopup("Load Universe");
+		}
 		if (AskingExport) {
 			ImGui::OpenPopup("Export World");
 		}
 		if (AskingExportUniverse) {
 			ImGui::OpenPopup("Export Universe");
+		}
+		if (AskingUniverseExportOptions) {
+			ImGui::OpenPopup("Universe Export Options");
 		}
 		if (AskingImport) {
 			ImGui::OpenPopup("Import World");
@@ -2597,10 +2606,105 @@ namespace studio {
 		}
 
 		if (engine::ui::FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
-			OpenGame(std::filesystem::path(PathBuffer));
+			const std::filesystem::path path(PathBuffer);
+			if (path.extension() == engine::game::UNIVERSE_EXTENSION) {
+				PrepareUniverseOpen(path);
+			} else {
+				OpenGame(path);
+			}
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
+		}
+
+		ImGui::SetNextWindowSize(
+			ImVec2(engine::ui::Scaled(660.0f), engine::ui::Scaled(460.0f)), ImGuiCond_Appearing
+		);
+		if (ImGui::BeginPopupModal("Load Universe", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+			const engine::game::GameInfo &info = PendingUniverseOpenInfo;
+			const char *scope = UniverseLoadScope == 0
+									? "All worlds"
+									: Label(info.Worlds[UniverseLoadScope - 1], "Unnamed world");
+			ImGui::SetNextItemWidth(engine::ui::Scaled(240.0f));
+			if (ImGui::BeginCombo("Scope", scope)) {
+				if (ImGui::Selectable("All worlds", UniverseLoadScope == 0)) {
+					UniverseLoadScope = 0;
+				}
+				for (size_t index = 0; index < info.Worlds.size(); index++) {
+					const bool selected = UniverseLoadScope == index + 1;
+					if (ImGui::Selectable(Label(info.Worlds[index], "Unnamed world"), selected)) {
+						UniverseLoadScope = index + 1;
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			if (ImGui::BeginTabBar("##universe-load-tabs")) {
+				if (ImGui::BeginTabItem("General")) {
+					ImGui::Text("Name: %s", Label(info.Name, "Universe"));
+					ImGui::Text("Worlds: %zu", info.Worlds.size());
+					ImGui::Text(
+						"Discovery: %s", info.RecursiveWorldDiscovery ? "recursive" : "listed files only"
+					);
+					ImGui::TextDisabled("Recursive discovery does not follow symbolic links.");
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Assets")) {
+					if (info.Assets.empty()) {
+						ImGui::TextDisabled("No local processed asset store is declared.");
+					} else {
+						ImGui::TextWrapped("Local processed assets: %s", info.Assets.string().c_str());
+					}
+					if (UniverseLoadScope != 0) {
+						ImGui::TextDisabled("This world inherits the universe asset store.");
+					}
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Permissions")) {
+					if (info.HttpEnabled) {
+						ImGui::Checkbox("Allow HTTP content access", &AllowUniverseHttp);
+						ImGui::TextDisabled("Off keeps every declared CDN disconnected.");
+					} else {
+						ImGui::TextDisabled("This universe requests no HTTP access.");
+					}
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("CDN")) {
+					if (info.Cdns.empty()) {
+						ImGui::TextDisabled("No remote content origins are declared.");
+					}
+					for (const engine::game::UniverseCdn &cdn : info.Cdns) {
+						ImGui::BulletText("%s: %s", cdn.Name.c_str(), cdn.Location.c_str());
+					}
+					if (UniverseLoadScope != 0 && !info.Cdns.empty()) {
+						ImGui::TextDisabled("This world inherits the universe CDN list.");
+					}
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Misc")) {
+					ImGui::TextWrapped("Manifest: %s", PendingUniverseOpenPath.string().c_str());
+					ImGui::TextWrapped(
+						"Publisher: %s",
+						info.PublisherKey.empty() ? "not declared" : info.PublisherKey.c_str()
+					);
+					ImGui::EndTabItem();
+				}
+				ImGui::EndTabBar();
+			}
+
+			ImGui::Separator();
+			if (ImGui::Button("Load")) {
+				ImGui::CloseCurrentPopup();
+				AcceptUniverseOpen();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingUniverseLoadPermissions = false;
+				PendingUniverseOpenPath.clear();
+				PendingUniverseOpenInfo = engine::game::GameInfo{};
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
 		}
 
 		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
@@ -2616,10 +2720,53 @@ namespace studio {
 		// different extensions and say which they are - see
 		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
 		if (engine::ui::FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
-			ExportUniverse(std::filesystem::path(PathBuffer));
+			PendingUniverseExportPath = std::filesystem::path(PathBuffer);
+			AskingUniverseExportOptions = true;
 			AskingExportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Export Universe")) {
 			AskingExportUniverse = false;
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
+		if (ImGui::BeginPopupModal(
+				"Universe Export Options",
+				nullptr,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+			)) {
+			const bool multiFile = PendingUniverseExportPath.extension() == engine::game::UNIVERSE_EXTENSION;
+			ImGui::TextWrapped("Export %s", PendingUniverseExportPath.string().c_str());
+			ImGui::Separator();
+			ImGui::BeginDisabled(!multiFile);
+			ImGui::Checkbox("Include processed assets", &GroundAssetsOnUniverseExport);
+			ImGui::EndDisabled();
+			ImGui::BeginDisabled(!multiFile || !GroundAssetsOnUniverseExport);
+			ImGui::Checkbox("Include raw authoring files", &IncludeRawAssetsOnUniverseExport);
+			ImGui::EndDisabled();
+			if (!multiFile) {
+				ImGui::TextDisabled("Processed assets require the .auniverse format.");
+			} else {
+				ImGui::TextDisabled("Verified catalogue assets are copied into assets/ before export.");
+			}
+
+			const bool needsClient = multiFile && GroundAssetsOnUniverseExport;
+			ImGui::BeginDisabled(needsClient && !ContentClient);
+			if (ImGui::Button("Export")) {
+				const std::filesystem::path exportPath = PendingUniverseExportPath;
+				AskingUniverseExportOptions = false;
+				ImGui::CloseCurrentPopup();
+				BeginUniverseExport(exportPath, needsClient, needsClient && IncludeRawAssetsOnUniverseExport);
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingUniverseExportOptions = false;
+				PendingUniverseExportPath.clear();
+				ImGui::CloseCurrentPopup();
+			}
+			if (needsClient && !ContentClient) {
+				ImGui::TextDisabled("Configure a publisher key and readable content source first.");
+			}
+			ImGui::EndPopup();
 		}
 
 		if (engine::ui::FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {

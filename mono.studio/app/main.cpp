@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("assets", "Open the assets manager");
 	arguments.Flag("viewport2", "Open the second viewport (same as --viewports 2)");
 
-	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
+	arguments.Value("game", "PATH", "Game file to open at startup (.agame or .auniverse)");
 	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
 	arguments.Value("config-root", "DIR", "Keep this run's Studio configuration in DIR");
 	arguments.Value("width", "PX", "Window width (default 1600)");

@@ -30,7 +30,7 @@ namespace studio {
 		// then editing, then the panels.
 		constexpr std::array<Keybind, static_cast<size_t>(Action::Count)> DEFAULTS{{
 			{Action::NewGame, "file.new", "New Game", "Start an empty universe", Scope::Global, {}},
-			{Action::OpenGame, "file.open", "Open Game", "Open a .agame file", Scope::Global, {}},
+			{Action::OpenGame, "file.open", "Open Game", "Open a game or universe file", Scope::Global, {}},
 			{Action::Save, "file.save", "Save", "Write the game to its file", Scope::Global, {}},
 			{Action::SaveAs, "file.saveas", "Save As", "Write the game somewhere new", Scope::Global, {}},
 

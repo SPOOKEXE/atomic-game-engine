@@ -43,9 +43,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
 - [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
 
-- [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
+- [x] build out file format even more: save ShaderScripts and universe/world settings; support `.auniverse` manifests with separate `.aworld` files and optional recursive discovery that never walks links.
 - [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
-- [_] in cdn, add optinos for compression saving, compressed network traffic, etc.
+- [x] in CDN, support persisted trained compression dictionaries, configurable Zstd levels, compressed bundle traffic, and prepared-frame caching.
 - [_] add custom backgrounds and customization to the script editor too
 - [_] add external editor connections like vscode, notepad, etc.
 - [_] add settings for selected external editors
@@ -55,10 +55,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] build out more plugins layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
 - [_] move a bunch of View > ... widgets into plugins instead. List: explorer, properties, component inspector, script editor
 - [_] build out more plugin functions (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
-- [_] universe shared assets folder and setup easy cdn with it (when you load the universe file, it sets up a cdn with it).
-- [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
-- [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
-- [_] create a universe/world export menu with options to include assets in the export (only processed, also raw), as a folder of a assets/ with name.aworld (or we can do a name.auniverse that loads a bunch of name.aworld and warns on missing ones listed in auniverse)?
+- [x] give a universe a shared `assets/` store and mount it automatically as the first local content source when the universe loads.
+- [x] add a universe loading widget that lists declared CDNs and requests permission before enabling HTTP content access.
+- [x] add universe loader tabs: General, Assets, Permissions, CDN, and Misc, with all-world and inherited per-world views.
+- [x] add `.auniverse` export options for verified processed assets and optional raw authoring files under `assets/`.
+- [_] add the matching grounded-assets options to standalone `.aworld` export.
 - [_] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [_] setup datastores and memorystores (sqlite, mongo, supabase, etc - make a selection with local and remote setups, server settings and studio settings). add mock options that separate into a mock/ folder vs live/ folder. make a dataset editor plugin too.
 - [_] add platform-specific backend tooling where only "admitted keys" can connect to a given server - i.e. whitelist-based servers (press play on website => generate play key => platform tells server user is connecting with key => send key + server to user => user connects to server using key and info => join)

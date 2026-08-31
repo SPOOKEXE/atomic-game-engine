@@ -87,6 +87,7 @@
 #include <string>
 #include <string_view>
 #include <studio/AssetCatalogue.hpp>
+#include <studio/AssetGrounding.hpp>
 #include <studio/CodeMetrics.hpp>
 #include <studio/Commands.hpp>
 #include <studio/Complete.hpp>
@@ -2898,9 +2899,16 @@ namespace studio {
 
 		// Loads a game file, adopting its path.
 		//
-		// @param path The `.agame` to read.
+		// @param path The `.agame` or `.auniverse` to read.
 		// @return `false` when it could not be read or is not one.
 		bool OpenGame(const std::filesystem::path &path);
+
+		// Reads a multi-file universe into staging and opens its permission
+		// summary without changing the current document.
+		bool PrepareUniverseOpen(const std::filesystem::path &path);
+
+		// Opens the staged path with only the content access explicitly allowed.
+		void AcceptUniverseOpen();
 
 		// Writes the whole game, adopting the path.
 		//
@@ -2929,6 +2937,11 @@ namespace studio {
 		// @param path Where to write.
 		// @return `false` when the file would not be written.
 		bool ExportUniverse(const std::filesystem::path &path);
+
+		// Starts an export after applying its optional processed-asset policy.
+		// Asset grounding is pumped across frames and writes the universe only
+		// after every verified asset has arrived.
+		void BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets);
 		// Adds one world file to this universe, keeping what is here.
 		//
 		// A world whose name is taken arrives under a suffixed one rather than
@@ -5043,6 +5056,7 @@ namespace studio {
 		//@{
 		bool AskingSaveAs = false;
 		bool AskingOpen = false;
+		bool AskingUniverseLoadPermissions = false;
 		//@}
 
 		// Whether the Rojo sync dock is open. See `DrawRojoSync`.
@@ -5058,6 +5072,7 @@ namespace studio {
 		//@{
 		bool AskingExport = false;
 		bool AskingExportUniverse = false;
+		bool AskingUniverseExportOptions = false;
 		bool AskingImport = false;
 		bool AskingImportUniverse = false;
 		bool AskingNewWorld = false;
@@ -5071,6 +5086,19 @@ namespace studio {
 		std::string PathBuffer;
 		std::string NameBuffer;
 		//@}
+
+		// The second step of universe export and its incremental content copy.
+		bool GroundAssetsOnUniverseExport = true;
+		bool IncludeRawAssetsOnUniverseExport = false;
+		std::filesystem::path PendingUniverseExportPath;
+		AssetGrounding UniverseAssetGrounding;
+
+		// Read-only manifest metadata shown before a multi-file universe is
+		// allowed to add content sources to this editor.
+		std::filesystem::path PendingUniverseOpenPath;
+		engine::game::GameInfo PendingUniverseOpenInfo;
+		bool AllowUniverseHttp = false;
+		size_t UniverseLoadScope = 0;
 
 		// What the explorer's, the properties panel's and the keybind page's
 		// filter boxes hold.

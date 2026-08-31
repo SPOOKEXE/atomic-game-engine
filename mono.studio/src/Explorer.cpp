@@ -891,7 +891,7 @@ namespace studio {
 			if (ImGui::MenuItem("Export Universe...")) {
 				AskingExportUniverse = true;
 				PathBuffer = std::string(GameName.IsValid() ? Label(GameName) : "Game") +
-							 std::string(engine::game::GAME_EXTENSION);
+							 std::string(engine::game::UNIVERSE_EXTENSION);
 			}
 			ImGui::EndPopup();
 		}

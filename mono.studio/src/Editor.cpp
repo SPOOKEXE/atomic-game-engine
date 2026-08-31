@@ -3070,6 +3070,8 @@ namespace studio {
 
 		GameName = info.Name;
 		RenderingProfiles = std::move(info.RenderingProfiles);
+		Content.SetUniverseAssets(info.Assets);
+		RebuildContentClients();
 		if (RenderingProfiles.Count() == 0) {
 			RenderingProfiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument());
 		}
@@ -3107,6 +3109,56 @@ namespace studio {
 
 		Say("opened " + path.string() + " - " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;
+	}
+
+	bool Editor::PrepareUniverseOpen(const std::filesystem::path &path) {
+		engine::world::Universe staged;
+		engine::game::GameInfo info;
+		std::string error;
+		if (!engine::game::LoadUniverse(staged, path, info, error)) {
+			Say("open failed: " + error, LogLevel::Error);
+			return false;
+		}
+
+		PendingUniverseOpenPath = path;
+		PendingUniverseOpenInfo = std::move(info);
+		AllowUniverseHttp = false;
+		UniverseLoadScope = 0;
+		AskingUniverseLoadPermissions = true;
+		return true;
+	}
+
+	void Editor::AcceptUniverseOpen() {
+		const std::filesystem::path path = PendingUniverseOpenPath;
+		const std::filesystem::path assets = PendingUniverseOpenInfo.Assets;
+		const std::string publisherKey = PendingUniverseOpenInfo.PublisherKey;
+		const std::vector<engine::game::UniverseCdn> cdns = PendingUniverseOpenInfo.Cdns;
+		const bool allowHttp = AllowUniverseHttp && PendingUniverseOpenInfo.HttpEnabled;
+		AskingUniverseLoadPermissions = false;
+		PendingUniverseOpenPath.clear();
+
+		if (!OpenGame(path)) {
+			return;
+		}
+
+		std::vector<engine::delivery::Source> sources;
+		if (allowHttp) {
+			for (const engine::game::UniverseCdn &cdn : cdns) {
+				sources.push_back(
+					engine::delivery::Source{
+						.Name = cdn.Name,
+						.Kind = engine::delivery::SourceKind::Http,
+						.Location = cdn.Location,
+						.Enabled = true,
+						.Role = engine::delivery::SourceRole::Read,
+					}
+				);
+			}
+		}
+		Content.SetUniverseContent(
+			assets, std::move(sources), (allowHttp || !assets.empty()) ? publisherKey : std::string{}
+		);
+		RebuildContentClients();
 	}
 
 	void Editor::SyncRojo(const std::filesystem::path &project) {
@@ -3279,7 +3331,25 @@ namespace studio {
 		}
 
 		std::string error;
-		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
+		bool saved = false;
+		if (path.extension() == engine::game::UNIVERSE_EXTENSION) {
+			engine::game::UniverseFileOptions options;
+			options.PublisherKey = Content.PublisherKey;
+			for (const engine::delivery::Source &source : Content.Sources) {
+				if (!source.Enabled || !source.Readable() ||
+					source.Kind != engine::delivery::SourceKind::Http) {
+					continue;
+				}
+				options.Cdns.push_back(
+					engine::game::UniverseCdn{.Name = source.Name, .Location = source.Location}
+				);
+			}
+			options.HttpEnabled = !options.Cdns.empty();
+			saved = engine::game::SaveUniverse(*Universe, GameName, RenderingProfiles, path, options, error);
+		} else {
+			saved = engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error);
+		}
+		if (!saved) {
 			Say("save failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -3328,8 +3398,8 @@ namespace studio {
 	}
 
 	bool Editor::ExportUniverse(const std::filesystem::path &path) {
-		// **The universe and every world under it, which is what an `.agame`
-		// already is** - so this shares `SaveGame`'s writer and differs from
+		// **The universe and every world under it.** This shares `SaveGame`'s
+		// writer and differs from
 		// Save As in what it does to the editor afterwards, which is nothing.
 		//
 		// That difference is the whole reason it is a separate action rather
@@ -3358,6 +3428,33 @@ namespace studio {
 		Say("exported the universe - " + std::to_string(Universe->Count()) + " world(s) - to " +
 			path.string());
 		return true;
+	}
+
+	void
+	Editor::BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
+		if (!groundAssets) {
+			ExportUniverse(path);
+			return;
+		}
+		if (path.extension() != engine::game::UNIVERSE_EXTENSION) {
+			Say("processed assets can only be included by a multi-file universe export", LogLevel::Warning);
+			return;
+		}
+		if (!ContentClient) {
+			Say("asset export needs a valid publisher key and read source", LogLevel::Warning);
+			return;
+		}
+
+		const std::filesystem::path destination = path.parent_path() / "assets";
+		const std::span<const std::filesystem::path> rawSources =
+			includeRawAssets ? std::span<const std::filesystem::path>(Content.RawFolders)
+							 : std::span<const std::filesystem::path>{};
+		if (!BeginAssetGrounding(UniverseAssetGrounding, destination, rawSources)) {
+			Say("another asset export is already running", LogLevel::Warning);
+			return;
+		}
+		PendingUniverseExportPath = path;
+		Say("grounding processed assets into " + destination.string());
 	}
 
 	bool Editor::ImportWorldFile(const std::filesystem::path &path) {
