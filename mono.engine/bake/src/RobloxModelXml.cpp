@@ -315,8 +315,7 @@ namespace engine::bake {
 			const std::string_view text = own != nullptr ? std::string_view(*own) : std::string_view();
 
 			if (element == "string" || element == "ProtectedString") {
-				out.Kind = RobloxValueKind::Text;
-				out.Text = text;
+				out.Set(std::string(text));
 				return ValueResult::Decoded;
 			}
 
@@ -324,14 +323,17 @@ namespace engine::bake {
 				// `<url>` when it names something and `<null/>` when it does not.
 				// Both are the plain string the binary container writes.
 				const std::string *url = TextOf(fields, "url");
-				out.Kind = RobloxValueKind::Text;
-				out.Text = url != nullptr ? *url : std::string();
+				out.Set(url != nullptr ? *url : std::string());
 				return ValueResult::Decoded;
 			}
 
 			if (element == "BinaryString") {
-				out.Kind = RobloxValueKind::Text;
-				return DecodeBase64(text, out.Text) ? ValueResult::Decoded : ValueResult::Malformed;
+				std::string decoded;
+				if (!DecodeBase64(text, decoded)) {
+					return ValueResult::Malformed;
+				}
+				out.Set(std::move(decoded));
+				return ValueResult::Decoded;
 			}
 
 			if (element == "SharedString") {
@@ -339,10 +341,7 @@ namespace engine::bake {
 				// parse ever sees it - the same rule the binary reader's `SSTR`
 				// index follows.
 				const auto found = shared.find(std::string(Trimmed(text)));
-				out.Kind = RobloxValueKind::Text;
-				if (found != shared.end()) {
-					out.Text = found->second;
-				}
+				out.Set(found != shared.end() ? found->second : std::string());
 				return ValueResult::Decoded;
 			}
 
@@ -351,8 +350,7 @@ namespace engine::bake {
 				if (value != "true" && value != "false") {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Bool;
-				out.Bool = value == "true";
+				out.Set(value == "true");
 				return ValueResult::Decoded;
 			}
 
@@ -361,8 +359,7 @@ namespace engine::bake {
 				if (!ParseLong(text, value)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Integer;
-				out.Integer = value;
+				out.Set(value);
 				return ValueResult::Decoded;
 			}
 
@@ -371,8 +368,7 @@ namespace engine::bake {
 				if (!ParseDouble(text, value)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Number;
-				out.Number = value;
+				out.Set(value);
 				return ValueResult::Decoded;
 			}
 
@@ -382,8 +378,7 @@ namespace engine::bake {
 				if (!XmlComponent(fields, "S", scale) || !XmlComponent(fields, "O", offset)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::UDim;
-				out.UDim = core::UDim{scale, offset};
+				out.Set(core::UDim{scale, offset});
 				return ValueResult::Decoded;
 			}
 
@@ -396,8 +391,7 @@ namespace engine::bake {
 					!XmlComponent(fields, "YS", yScale) || !XmlComponent(fields, "YO", yOffset)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::UDim2;
-				out.UDim2 = core::UDim2{core::UDim{xScale, xOffset}, core::UDim{yScale, yOffset}};
+				out.Set(core::UDim2{core::UDim{xScale, xOffset}, core::UDim{yScale, yOffset}});
 				return ValueResult::Decoded;
 			}
 
@@ -407,8 +401,7 @@ namespace engine::bake {
 				if (!XmlComponent(fields, "X", x) || !XmlComponent(fields, "Y", y)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Vector2;
-				out.Vector2 = core::Vector2{x, y};
+				out.Set(core::Vector2{x, y});
 				return ValueResult::Decoded;
 			}
 
@@ -420,8 +413,7 @@ namespace engine::bake {
 					!XmlComponent(fields, "Z", z)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Vector3;
-				out.Vector3 = core::Vector3{x, y, z};
+				out.Set(core::Vector3{x, y, z});
 				return ValueResult::Decoded;
 			}
 
@@ -433,8 +425,7 @@ namespace engine::bake {
 					!XmlComponent(fields, "B", blue)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Color3;
-				out.Color3 = core::Color3{red, green, blue};
+				out.Set(core::Color3{red, green, blue});
 				return ValueResult::Decoded;
 			}
 
@@ -447,12 +438,13 @@ namespace engine::bake {
 				if (!ParseWord(text, packed)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Color3;
-				out.Color3 = core::Color3{
-					static_cast<float>((packed >> 16) & 0xFFu) / 255.0f,
-					static_cast<float>((packed >> 8) & 0xFFu) / 255.0f,
-					static_cast<float>(packed & 0xFFu) / 255.0f,
-				};
+				out.Set(
+					core::Color3{
+						static_cast<float>((packed >> 16) & 0xFFu) / 255.0f,
+						static_cast<float>((packed >> 8) & 0xFFu) / 255.0f,
+						static_cast<float>(packed & 0xFFu) / 255.0f,
+					}
+				);
 				return ValueResult::Decoded;
 			}
 
@@ -465,11 +457,12 @@ namespace engine::bake {
 					!XmlComponent(fields, "max/X", maximumX) || !XmlComponent(fields, "max/Y", maximumY)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::Rect;
-				out.Rect = core::Rect{
-					core::Vector2{minimumX, minimumY},
-					core::Vector2{maximumX, maximumY},
-				};
+				out.Set(
+					core::Rect{
+						core::Vector2{minimumX, minimumY},
+						core::Vector2{maximumX, maximumY},
+					}
+				);
 				return ValueResult::Decoded;
 			}
 
@@ -484,8 +477,7 @@ namespace engine::bake {
 					!ParseDouble(rest.substr(split + 1), maximum)) {
 					return ValueResult::Malformed;
 				}
-				out.Kind = RobloxValueKind::NumberRange;
-				out.NumberRange = core::NumberRange{static_cast<float>(minimum), static_cast<float>(maximum)};
+				out.Set(core::NumberRange{static_cast<float>(minimum), static_cast<float>(maximum)});
 				return ValueResult::Decoded;
 			}
 
@@ -520,9 +512,9 @@ namespace engine::bake {
 				basis[1] = glm::vec3(rotation[1], rotation[4], rotation[7]);
 				basis[2] = glm::vec3(rotation[2], rotation[5], rotation[8]);
 
-				out.Kind = RobloxValueKind::CFrame;
-				out.CFrame =
-					core::CFrame(core::Vector3{position[0], position[1], position[2]}, glm::quat_cast(basis));
+				out.Set(
+					core::CFrame(core::Vector3{position[0], position[1], position[2]}, glm::quat_cast(basis))
+				);
 				return ValueResult::Decoded;
 			}
 
@@ -864,8 +856,8 @@ namespace engine::bake {
 				// property**, which is `RobloxModel.cpp`'s rule and has to be the
 				// same one: two readers disagreeing about where a name lives
 				// would be two trees the mapping treats differently.
-				if (name == "Name" && value.Kind == RobloxValueKind::Text) {
-					items.back().Name = value.Text;
+				if (name == "Name" && value.Kind() == RobloxValueKind::Text) {
+					items.back().Name = value.As<std::string>();
 					continue;
 				}
 				items.back().Properties.push_back(RobloxProperty{std::move(name), std::move(value)});

@@ -364,8 +364,8 @@ TEST_CASE("an rbxm comes back as the tree it describes", "[bake][rbxm]") {
 	// own carrying the same bytes a `String` does.
 	const engine::bake::RobloxValue *source = Find(boot, "Source");
 	REQUIRE(source != nullptr);
-	CHECK(source->Kind == RobloxValueKind::Text);
-	CHECK(source->Text == "print('hello')\n");
+	CHECK(source->Kind() == RobloxValueKind::Text);
+	CHECK(source->As<std::string>() == "print('hello')\n");
 
 	// **The name is lifted out of the properties rather than left in both**, so
 	// nothing downstream has two places to read it from.
@@ -384,42 +384,42 @@ TEST_CASE("every value type this reads comes back as itself", "[bake][rbxm]") {
 
 	const engine::bake::RobloxValue *anchored = Find(lid, "Anchored");
 	REQUIRE(anchored != nullptr);
-	CHECK(anchored->Kind == RobloxValueKind::Bool);
-	CHECK(anchored->Bool);
+	CHECK(anchored->Kind() == RobloxValueKind::Bool);
+	CHECK(anchored->As<bool>());
 
 	// A transposed float array read as a plain one gives numbers that are wrong
 	// rather than absent, so the components are pinned individually and are
 	// deliberately three different values.
 	const engine::bake::RobloxValue *size = Find(lid, "Size");
 	REQUIRE(size != nullptr);
-	CHECK(size->Kind == RobloxValueKind::Vector3);
-	CHECK(size->Vector3.X == Approx(4.0f));
-	CHECK(size->Vector3.Y == Approx(1.0f));
-	CHECK(size->Vector3.Z == Approx(2.0f));
+	CHECK(size->Kind() == RobloxValueKind::Vector3);
+	CHECK(size->As<engine::core::Vector3>().X == Approx(4.0f));
+	CHECK(size->As<engine::core::Vector3>().Y == Approx(1.0f));
+	CHECK(size->As<engine::core::Vector3>().Z == Approx(2.0f));
 
 	const engine::bake::RobloxValue *transparency = Find(lid, "Transparency");
 	REQUIRE(transparency != nullptr);
-	CHECK(transparency->Kind == RobloxValueKind::Number);
-	CHECK(transparency->Number == Approx(0.5));
+	CHECK(transparency->Kind() == RobloxValueKind::Number);
+	CHECK(transparency->As<double>() == Approx(0.5));
 
 	// Byte planes on 0..255, not float ones on 0..1.
 	const engine::bake::RobloxValue *colour = Find(lid, "Color");
 	REQUIRE(colour != nullptr);
-	CHECK(colour->Kind == RobloxValueKind::Color3);
-	CHECK(colour->Color3.R == Approx(1.0f));
-	CHECK(colour->Color3.G == Approx(0.0f));
-	CHECK(colour->Color3.B == Approx(0.0f));
+	CHECK(colour->Kind() == RobloxValueKind::Color3);
+	CHECK(colour->As<engine::core::Color3>().R == Approx(1.0f));
+	CHECK(colour->As<engine::core::Color3>().G == Approx(0.0f));
+	CHECK(colour->As<engine::core::Color3>().B == Approx(0.0f));
 
 	// **The positions live after every rotation, not beside each one.** A reader
 	// that expected them interleaved would consume the same number of bytes and
 	// put the model somewhere else.
 	const engine::bake::RobloxValue *frame = Find(lid, "CFrame");
 	REQUIRE(frame != nullptr);
-	CHECK(frame->Kind == RobloxValueKind::CFrame);
-	CHECK(frame->CFrame.Position.X == Approx(1.0f));
-	CHECK(frame->CFrame.Position.Y == Approx(2.0f));
-	CHECK(frame->CFrame.Position.Z == Approx(3.0f));
-	CHECK(frame->CFrame.QuaternionW == Approx(1.0f));
+	CHECK(frame->Kind() == RobloxValueKind::CFrame);
+	CHECK(frame->As<engine::core::CFrame>().Position.X == Approx(1.0f));
+	CHECK(frame->As<engine::core::CFrame>().Position.Y == Approx(2.0f));
+	CHECK(frame->As<engine::core::CFrame>().Position.Z == Approx(3.0f));
+	CHECK(frame->As<engine::core::CFrame>().QuaternionW == Approx(1.0f));
 }
 
 TEST_CASE("a property type this does not decode costs its property only", "[bake][rbxm]") {
@@ -780,39 +780,42 @@ namespace {
 	// same `float` through the same conversions, and a tolerance here would hide
 	// the day one of them stopped doing that.
 	bool Same(const RobloxValue &left, const RobloxValue &right) {
-		if (left.Kind != right.Kind) {
+		if (left.Kind() != right.Kind()) {
 			return false;
 		}
 
-		switch (left.Kind) {
+		switch (left.Kind()) {
 		case RobloxValueKind::Bool:
-			return left.Bool == right.Bool;
+			return left.As<bool>() == right.As<bool>();
 		case RobloxValueKind::Integer:
-			return left.Integer == right.Integer;
+			return left.As<int64_t>() == right.As<int64_t>();
 		case RobloxValueKind::Number:
-			return left.Number == right.Number;
+			return left.As<double>() == right.As<double>();
 		case RobloxValueKind::Text:
-			return left.Text == right.Text;
+			return left.As<std::string>() == right.As<std::string>();
 		case RobloxValueKind::Vector3:
-			return left.Vector3 == right.Vector3;
+			return left.As<engine::core::Vector3>() == right.As<engine::core::Vector3>();
 		case RobloxValueKind::Vector2:
-			return left.Vector2 == right.Vector2;
+			return left.As<engine::core::Vector2>() == right.As<engine::core::Vector2>();
 		case RobloxValueKind::Color3:
-			return left.Color3 == right.Color3;
-		case RobloxValueKind::CFrame:
-			return left.CFrame.Position == right.CFrame.Position &&
-				   left.CFrame.QuaternionX == right.CFrame.QuaternionX &&
-				   left.CFrame.QuaternionY == right.CFrame.QuaternionY &&
-				   left.CFrame.QuaternionZ == right.CFrame.QuaternionZ &&
-				   left.CFrame.QuaternionW == right.CFrame.QuaternionW;
+			return left.As<engine::core::Color3>() == right.As<engine::core::Color3>();
+		case RobloxValueKind::CFrame: {
+			const engine::core::CFrame &leftFrame = left.As<engine::core::CFrame>();
+			const engine::core::CFrame &rightFrame = right.As<engine::core::CFrame>();
+			return leftFrame.Position == rightFrame.Position &&
+				   leftFrame.QuaternionX == rightFrame.QuaternionX &&
+				   leftFrame.QuaternionY == rightFrame.QuaternionY &&
+				   leftFrame.QuaternionZ == rightFrame.QuaternionZ &&
+				   leftFrame.QuaternionW == rightFrame.QuaternionW;
+		}
 		case RobloxValueKind::UDim:
-			return left.UDim == right.UDim;
+			return left.As<engine::core::UDim>() == right.As<engine::core::UDim>();
 		case RobloxValueKind::UDim2:
-			return left.UDim2 == right.UDim2;
+			return left.As<engine::core::UDim2>() == right.As<engine::core::UDim2>();
 		case RobloxValueKind::Rect:
-			return left.Rect == right.Rect;
+			return left.As<engine::core::Rect>() == right.As<engine::core::Rect>();
 		case RobloxValueKind::NumberRange:
-			return left.NumberRange == right.NumberRange;
+			return left.As<engine::core::NumberRange>() == right.As<engine::core::NumberRange>();
 		}
 		return false;
 	}
@@ -868,18 +871,18 @@ TEST_CASE("an rbxmx comes back as the tree it describes", "[bake][rbxmx]") {
 
 	const RobloxValue *size = Find(lid, "Size");
 	REQUIRE(size != nullptr);
-	CHECK(size->Kind == RobloxValueKind::Vector3);
-	CHECK(size->Vector3.X == Approx(4.0f));
-	CHECK(size->Vector3.Y == Approx(1.0f));
-	CHECK(size->Vector3.Z == Approx(2.0f));
+	CHECK(size->Kind() == RobloxValueKind::Vector3);
+	CHECK(size->As<engine::core::Vector3>().X == Approx(4.0f));
+	CHECK(size->As<engine::core::Vector3>().Y == Approx(1.0f));
+	CHECK(size->As<engine::core::Vector3>().Z == Approx(2.0f));
 
 	// One packed number, alpha in the top byte and discarded.
 	const RobloxValue *colour = Find(lid, "Color");
 	REQUIRE(colour != nullptr);
-	CHECK(colour->Kind == RobloxValueKind::Color3);
-	CHECK(colour->Color3.R == Approx(1.0f));
-	CHECK(colour->Color3.G == Approx(0.0f));
-	CHECK(colour->Color3.B == Approx(0.0f));
+	CHECK(colour->Kind() == RobloxValueKind::Color3);
+	CHECK(colour->As<engine::core::Color3>().R == Approx(1.0f));
+	CHECK(colour->As<engine::core::Color3>().G == Approx(0.0f));
+	CHECK(colour->As<engine::core::Color3>().B == Approx(0.0f));
 
 	// **A script's source is a CDATA section**, which is this container's
 	// equivalent of the binary one's `ProtectedString` type number: a reader that
@@ -891,8 +894,8 @@ TEST_CASE("an rbxmx comes back as the tree it describes", "[bake][rbxmx]") {
 
 	const RobloxValue *source = Find(boot, "Source");
 	REQUIRE(source != nullptr);
-	CHECK(source->Kind == RobloxValueKind::Text);
-	CHECK(source->Text == "print('hello')\n");
+	CHECK(source->Kind() == RobloxValueKind::Text);
+	CHECK(source->As<std::string>() == "print('hello')\n");
 }
 
 TEST_CASE("an rbxmx and an rbxm of one model come back the same", "[bake][rbxmx]") {
@@ -977,7 +980,7 @@ TEST_CASE("an rbxmx script's ampersand is source and not a reference", "[bake][r
 	REQUIRE(model.Roots.size() == 1);
 	const RobloxValue *source = Find(model.Roots[0], "Source");
 	REQUIRE(source != nullptr);
-	CHECK(source->Text == "local mask = \"[&;]\"\nlocal both = a and b");
+	CHECK(source->As<std::string>() == "local mask = \"[&;]\"\nlocal both = a and b");
 
 	// And outside a CDATA section the same document is refused, so what is exempt
 	// is CDATA rather than this format.
@@ -1077,45 +1080,45 @@ TEST_CASE("the value types an rbxmx spells differently come back the same", "[ba
 
 	const RobloxValue *corner = Find(part, "CornerRadius");
 	REQUIRE(corner != nullptr);
-	CHECK(corner->Kind == RobloxValueKind::UDim);
-	CHECK(corner->UDim.Scale == Approx(0.5f));
-	CHECK(corner->UDim.Offset == Approx(8.0f));
+	CHECK(corner->Kind() == RobloxValueKind::UDim);
+	CHECK(corner->As<engine::core::UDim>().Scale == Approx(0.5f));
+	CHECK(corner->As<engine::core::UDim>().Offset == Approx(8.0f));
 
 	const RobloxValue *position = Find(part, "Position");
 	REQUIRE(position != nullptr);
-	CHECK(position->Kind == RobloxValueKind::UDim2);
-	CHECK(position->UDim2.X.Scale == Approx(0.25f));
-	CHECK(position->UDim2.Y.Offset == Approx(-6.0f));
+	CHECK(position->Kind() == RobloxValueKind::UDim2);
+	CHECK(position->As<engine::core::UDim2>().X.Scale == Approx(0.25f));
+	CHECK(position->As<engine::core::UDim2>().Y.Offset == Approx(-6.0f));
 
 	// `min` and `max` are child elements of their own, which is the one value
 	// here that nests twice.
 	const RobloxValue *slice = Find(part, "SliceCenter");
 	REQUIRE(slice != nullptr);
-	CHECK(slice->Kind == RobloxValueKind::Rect);
-	CHECK(slice->Rect.Min.X == Approx(1.0f));
-	CHECK(slice->Rect.Max.Y == Approx(4.0f));
+	CHECK(slice->Kind() == RobloxValueKind::Rect);
+	CHECK(slice->As<engine::core::Rect>().Min.X == Approx(1.0f));
+	CHECK(slice->As<engine::core::Rect>().Max.Y == Approx(4.0f));
 
 	// Two numbers in the element's own text, with the trailing space Studio
 	// always writes.
 	const RobloxValue *lifetime = Find(part, "Lifetime");
 	REQUIRE(lifetime != nullptr);
-	CHECK(lifetime->Kind == RobloxValueKind::NumberRange);
-	CHECK(lifetime->NumberRange.Minimum == Approx(1.0f));
-	CHECK(lifetime->NumberRange.Maximum == Approx(1.5f));
+	CHECK(lifetime->Kind() == RobloxValueKind::NumberRange);
+	CHECK(lifetime->As<engine::core::NumberRange>().Minimum == Approx(1.0f));
+	CHECK(lifetime->As<engine::core::NumberRange>().Maximum == Approx(1.5f));
 
 	const RobloxValue *assetId = Find(part, "SourceAssetId");
 	REQUIRE(assetId != nullptr);
-	CHECK(assetId->Kind == RobloxValueKind::Integer);
-	CHECK(assetId->Integer == -1);
+	CHECK(assetId->Kind() == RobloxValueKind::Integer);
+	CHECK(assetId->As<int64_t>() == -1);
 
 	// **`Content` and `BinaryString` are read rather than refused**, because the
 	// binary container stores both as a plain `String` - refusing them here would
 	// make a `Decal` lose the texture the same model keeps as a `.rbxm`.
 	const RobloxValue *texture = Find(part, "Texture");
 	REQUIRE(texture != nullptr);
-	CHECK(texture->Text == "rbxassetid://1");
-	CHECK(Find(part, "LinkedSource")->Text.empty());
-	CHECK(Find(part, "Tags")->Text == "hi");
+	CHECK(texture->As<std::string>() == "rbxassetid://1");
+	CHECK(Find(part, "LinkedSource")->As<std::string>().empty());
+	CHECK(Find(part, "Tags")->As<std::string>() == "hi");
 }
 
 TEST_CASE("a shared string is resolved out of the table that follows it", "[bake][rbxmx]") {
@@ -1133,8 +1136,8 @@ TEST_CASE("a shared string is resolved out of the table that follows it", "[bake
 	REQUIRE(model.Roots.size() == 1);
 	const RobloxValue *shared = Find(model.Roots[0], "PhysicalConfigData");
 	REQUIRE(shared != nullptr);
-	CHECK(shared->Kind == RobloxValueKind::Text);
-	CHECK(shared->Text == "hello");
+	CHECK(shared->Kind() == RobloxValueKind::Text);
+	CHECK(shared->As<std::string>() == "hello");
 
 	// The table itself is not an instance, however much it looks like one from
 	// the outside.

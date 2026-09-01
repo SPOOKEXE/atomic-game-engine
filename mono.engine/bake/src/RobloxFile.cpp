@@ -155,139 +155,120 @@ namespace engine::bake {
 			);
 		}
 
-		bool ConvertValue(const rbxl::Variant &source, RobloxValue &out) {
+		bool ConvertValue(rbxl::Variant &source, RobloxValue &out) {
 			using Type = rbxl::VariantType;
 			switch (rbxl::variantTypeOf(source)) {
 			case Type::String:
-				out.Kind = RobloxValueKind::Text;
-				out.Text = std::get<std::string>(source);
+				out.Set(std::move(std::get<std::string>(source)));
 				return true;
 			case Type::Bool:
-				out.Kind = RobloxValueKind::Bool;
-				out.Bool = std::get<bool>(source);
+				out.Set(std::get<bool>(source));
 				return true;
 			case Type::Int32:
-				out.Kind = RobloxValueKind::Integer;
-				out.Integer = std::get<int32_t>(source);
+				out.Set(static_cast<int64_t>(std::get<int32_t>(source)));
 				return true;
 			case Type::Int64:
-				out.Kind = RobloxValueKind::Integer;
-				out.Integer = std::get<int64_t>(source);
+				out.Set(std::get<int64_t>(source));
 				return true;
 			case Type::Float32:
-				out.Kind = RobloxValueKind::Number;
-				out.Number = std::get<float>(source);
+				out.Set(static_cast<double>(std::get<float>(source)));
 				return true;
 			case Type::Float64:
-				out.Kind = RobloxValueKind::Number;
-				out.Number = std::get<double>(source);
+				out.Set(std::get<double>(source));
 				return true;
 			case Type::UDim: {
 				const rbxl::UDim &value = std::get<rbxl::UDim>(source);
-				out.Kind = RobloxValueKind::UDim;
-				out.UDim = {value.scale, static_cast<float>(value.offset)};
+				out.Set(engine::core::UDim{value.scale, static_cast<float>(value.offset)});
 				return true;
 			}
 			case Type::UDim2: {
 				const rbxl::UDim2 &value = std::get<rbxl::UDim2>(source);
-				out.Kind = RobloxValueKind::UDim2;
-				out.UDim2 = {
-					value.x.scale,
-					static_cast<float>(value.x.offset),
-					value.y.scale,
-					static_cast<float>(value.y.offset),
-				};
+				out.Set(
+					engine::core::UDim2{
+						value.x.scale,
+						static_cast<float>(value.x.offset),
+						value.y.scale,
+						static_cast<float>(value.y.offset),
+					}
+				);
 				return true;
 			}
 			case Type::Color3: {
 				const rbxl::Color3 &value = std::get<rbxl::Color3>(source);
-				out.Kind = RobloxValueKind::Color3;
-				out.Color3 = {value.r, value.g, value.b};
+				out.Set(engine::core::Color3{value.r, value.g, value.b});
 				return true;
 			}
 			case Type::Color3uint8: {
 				const rbxl::Color3uint8 &value = std::get<rbxl::Color3uint8>(source);
-				out.Kind = RobloxValueKind::Color3;
-				out.Color3 = engine::core::Color3::FromRGB(value.r, value.g, value.b);
+				out.Set(engine::core::Color3::FromRGB(value.r, value.g, value.b));
 				return true;
 			}
 			case Type::Vector2: {
 				const rbxl::Vector2 &value = std::get<rbxl::Vector2>(source);
-				out.Kind = RobloxValueKind::Vector2;
-				out.Vector2 = {value.x, value.y};
+				out.Set(engine::core::Vector2{value.x, value.y});
 				return true;
 			}
 			case Type::Vector2int16: {
 				const rbxl::Vector2int16 &value = std::get<rbxl::Vector2int16>(source);
-				out.Kind = RobloxValueKind::Vector2;
-				out.Vector2 = {static_cast<float>(value.x), static_cast<float>(value.y)};
+				out.Set(engine::core::Vector2{static_cast<float>(value.x), static_cast<float>(value.y)});
 				return true;
 			}
 			case Type::Vector3: {
 				const rbxl::Vector3 &value = std::get<rbxl::Vector3>(source);
-				out.Kind = RobloxValueKind::Vector3;
-				out.Vector3 = {value.x, value.y, value.z};
+				out.Set(engine::core::Vector3{value.x, value.y, value.z});
 				return true;
 			}
 			case Type::Vector3int16: {
 				const rbxl::Vector3int16 &value = std::get<rbxl::Vector3int16>(source);
-				out.Kind = RobloxValueKind::Vector3;
-				out.Vector3 = {
-					static_cast<float>(value.x),
-					static_cast<float>(value.y),
-					static_cast<float>(value.z),
-				};
+				out.Set(
+					engine::core::Vector3{
+						static_cast<float>(value.x),
+						static_cast<float>(value.y),
+						static_cast<float>(value.z),
+					}
+				);
 				return true;
 			}
 			case Type::CFrame:
-				out.Kind = RobloxValueKind::CFrame;
-				out.CFrame = ToCFrame(std::get<rbxl::CFrame>(source));
+				out.Set(ToCFrame(std::get<rbxl::CFrame>(source)));
 				return true;
 			case Type::OptionalCFrame: {
 				const rbxl::OptionalCFrame &value = std::get<rbxl::OptionalCFrame>(source);
 				if (!value.hasValue) {
 					return false;
 				}
-				out.Kind = RobloxValueKind::CFrame;
-				out.CFrame = ToCFrame(value.value);
+				out.Set(ToCFrame(value.value));
 				return true;
 			}
 			case Type::Rect: {
 				const rbxl::Rect &value = std::get<rbxl::Rect>(source);
-				out.Kind = RobloxValueKind::Rect;
-				out.Rect = {value.min.x, value.min.y, value.max.x, value.max.y};
+				out.Set(engine::core::Rect{value.min.x, value.min.y, value.max.x, value.max.y});
 				return true;
 			}
 			case Type::NumberRange: {
 				const rbxl::NumberRange &value = std::get<rbxl::NumberRange>(source);
-				out.Kind = RobloxValueKind::NumberRange;
-				out.NumberRange = {value.min, value.max};
+				out.Set(engine::core::NumberRange{value.min, value.max});
 				return true;
 			}
 			case Type::Content: {
-				const rbxl::Content &value = std::get<rbxl::Content>(source);
+				rbxl::Content &value = std::get<rbxl::Content>(source);
 				if (value.sourceType == rbxl::Content::SourceType::Object) {
 					return false;
 				}
-				out.Kind = RobloxValueKind::Text;
-				out.Text = value.uri;
+				out.Set(std::move(value.uri));
 				return true;
 			}
 			case Type::ContentId:
-				out.Kind = RobloxValueKind::Text;
-				out.Text = std::get<rbxl::ContentId>(source).url;
+				out.Set(std::move(std::get<rbxl::ContentId>(source).url));
 				return true;
 			case Type::ProtectedString:
-				out.Kind = RobloxValueKind::Text;
-				out.Text = std::get<rbxl::ProtectedString>(source).value;
+				out.Set(std::move(std::get<rbxl::ProtectedString>(source).value));
 				return true;
 			case Type::SharedString:
-				out.Kind = RobloxValueKind::Text;
-				out.Text = std::get<rbxl::SharedString>(source).value;
+				out.Set(std::move(std::get<rbxl::SharedString>(source).value));
 				return true;
 			case Type::NetAssetRef:
-				out.Kind = RobloxValueKind::Text;
-				out.Text = std::get<rbxl::NetAssetRef>(source).value;
+				out.Set(std::move(std::get<rbxl::NetAssetRef>(source).value));
 				return true;
 			case Type::Nil:
 			case Type::Ray:
@@ -365,17 +346,18 @@ namespace engine::bake {
 		}
 
 		RobloxInstance
-		BuildInstance(const rbxl::Dom &dom, rbxl::InstanceId id, std::string path, RobloxModel &model) {
-			const rbxl::Instance &source = dom.at(id);
+		BuildInstance(rbxl::Dom &dom, rbxl::InstanceId id, std::string path, RobloxModel &model) {
+			rbxl::Instance &source = dom.at(id);
 			RobloxInstance instance;
-			instance.ClassName = source.className;
+			instance.ClassName = std::move(source.className);
 			instance.Name = dom.nameOf(id);
 			if (instance.Name.empty()) {
 				instance.Name = instance.ClassName;
 			}
 			path = path.empty() ? instance.Name : path + "/" + instance.Name;
+			instance.Properties.reserve(source.properties.size());
 
-			for (const auto &[nameId, sourceValue] : source.properties) {
+			for (auto &[nameId, sourceValue] : source.properties) {
 				const std::string &propertyName = dom.names().name(nameId);
 				if (propertyName == "Name") {
 					continue;
@@ -387,7 +369,7 @@ namespace engine::bake {
 									   sourceType == rbxl::VariantType::NetAssetRef;
 				if (sourceType == rbxl::VariantType::Font) {
 					const rbxl::Font &font = std::get<rbxl::Font>(sourceValue);
-					AnalyzeText(model, font.family, path, source.className, propertyName, true);
+					AnalyzeText(model, font.family, path, instance.ClassName, propertyName, true);
 				}
 
 				RobloxValue value;
@@ -395,7 +377,7 @@ namespace engine::bake {
 					model.LostProperties.push_back(
 						RobloxLostProperty{
 							path,
-							source.className,
+							instance.ClassName,
 							propertyName,
 							rbxl::variantTypeName(sourceType),
 							"the engine-facing Roblox value vocabulary has no lossless representation",
@@ -404,20 +386,31 @@ namespace engine::bake {
 					continue;
 				}
 
-				if (value.Kind == RobloxValueKind::Text) {
-					AnalyzeText(model, value.Text, path, source.className, propertyName, explicitContent);
+				if (value.Kind() == RobloxValueKind::Text) {
+					AnalyzeText(
+						model,
+						value.As<std::string>(),
+						path,
+						instance.ClassName,
+						propertyName,
+						explicitContent
+					);
 				}
-				if (IsScript(source.className) && propertyName == "Source" &&
-					value.Kind == RobloxValueKind::Text) {
-					model.Scripts.push_back(RobloxScript{path, source.className, value.Text});
+				if (IsScript(instance.ClassName) && propertyName == "Source" &&
+					value.Kind() == RobloxValueKind::Text) {
+					model.Scripts.push_back(RobloxScript{path, instance.ClassName, value.As<std::string>()});
 				}
 				instance.Properties.push_back(RobloxProperty{propertyName, std::move(value)});
 			}
+			// This reader owns the decoded DOM. Release each large row after its
+			// engine value exists so a place does not retain both full models.
+			decltype(source.properties){}.swap(source.properties);
 
 			instance.Children.reserve(source.children.size());
 			for (const rbxl::InstanceId child : source.children) {
 				instance.Children.push_back(BuildInstance(dom, child, path, model));
 			}
+			decltype(source.children){}.swap(source.children);
 			return instance;
 		}
 	}
@@ -439,7 +432,7 @@ namespace engine::bake {
 			return false;
 		}
 
-		const rbxl::Dom &dom = decoded.value();
+		rbxl::Dom &dom = decoded.value();
 		if (!CheckTree(dom, failure)) {
 			return false;
 		}

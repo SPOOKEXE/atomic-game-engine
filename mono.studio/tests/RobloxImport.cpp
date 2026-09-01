@@ -5,12 +5,14 @@
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/spatial/CollisionGroups.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <studio/Config.hpp>
 #include <studio/RobloxImport.hpp>
@@ -33,6 +35,16 @@ namespace {
 			std::filesystem::remove_all(Root);
 		}
 	};
+
+	struct CollisionGroupScope {
+		CollisionGroupScope() {
+			engine::spatial::CollisionGroups::Reset();
+		}
+
+		~CollisionGroupScope() {
+			engine::spatial::CollisionGroups::Reset();
+		}
+	};
 }
 
 TEST_CASE(
@@ -45,10 +57,10 @@ TEST_CASE(
 	part.ClassName = "Part";
 	part.Name = "Known";
 	engine::bake::RobloxValue size;
-	size.Kind = engine::bake::RobloxValueKind::Vector3;
+	size.Set(engine::core::Vector3{});
 	part.Properties.push_back({"Size", size});
 	engine::bake::RobloxValue wrongTransparency;
-	wrongTransparency.Kind = engine::bake::RobloxValueKind::Text;
+	wrongTransparency.Set(std::string{});
 	part.Properties.push_back({"Transparency", wrongTransparency});
 	part.Properties.push_back({"RobloxOnly", size});
 
@@ -132,8 +144,7 @@ TEST_CASE("a missing roblox class can map to an engine class", "[studio][robloxi
 	source.ClassName = "FuturePart";
 	source.Name = "Mapped";
 	engine::bake::RobloxValue size;
-	size.Kind = engine::bake::RobloxValueKind::Vector3;
-	size.Vector3 = {4.0f, 2.0f, 6.0f};
+	size.Set(engine::core::Vector3{4.0f, 2.0f, 6.0f});
 	source.Properties.push_back({"Size", size});
 	model.Roots.push_back(std::move(source));
 
@@ -155,6 +166,39 @@ TEST_CASE("a missing roblox class can map to an engine class", "[studio][robloxi
 	CHECK(report.Properties == 1);
 }
 
+TEST_CASE("a roblox collision group is registered before the part uses it", "[studio][robloximport]") {
+	CollisionGroupScope collisionGroups;
+	engine::scene::EnsureClassTree();
+
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance part;
+	part.ClassName = "Part";
+	part.Name = "Enemy";
+	engine::bake::RobloxValue group;
+	group.Set(std::string("Enemies"));
+	part.Properties.push_back({"CollisionGroup", std::move(group)});
+	model.Roots.push_back(std::move(part));
+
+	engine::ecs::Store store("roblox-collision-group");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(
+		studio::ImportRobloxPlace(
+			store, model, studio::RobloxAssetMappings{}, studio::RobloxClassMappings{}, report, error
+		)
+	);
+
+	const uint32_t index = engine::spatial::CollisionGroups::IndexOf(engine::core::Name("Enemies"));
+	REQUIRE(index != engine::spatial::NO_GROUP);
+	const engine::ecs::Entity enemy = store.FindFirstRoot("Enemy");
+	REQUIRE(enemy != engine::ecs::NULL_ENTITY);
+	const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(enemy);
+	REQUIRE(collider != nullptr);
+	CHECK(collider->Layer.Bits == engine::spatial::LayerMask::Only(index).Bits);
+	CHECK(collider->Mask.Bits == engine::spatial::CollisionGroups::MaskFor(index).Bits);
+	CHECK(report.Properties == 1);
+}
+
 TEST_CASE("a roblox place merges service roots and stages mapped script source", "[studio][robloximport]") {
 	engine::scene::EnsureClassTree();
 	engine::ecs::Store store("roblox-import");
@@ -170,8 +214,7 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	part.ClassName = "Part";
 	part.Name = "Floor";
 	engine::bake::RobloxValue size;
-	size.Kind = engine::bake::RobloxValueKind::Vector3;
-	size.Vector3 = {20.0f, 1.0f, 20.0f};
+	size.Set(engine::core::Vector3{20.0f, 1.0f, 20.0f});
 	part.Properties.push_back({"Size", size});
 	root.Children.push_back(std::move(part));
 
@@ -179,8 +222,7 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	script.ClassName = "LocalScript";
 	script.Name = "Driver";
 	engine::bake::RobloxValue source;
-	source.Kind = engine::bake::RobloxValueKind::Text;
-	source.Text = "local animation = 'rbxassetid://123'";
+	source.Set(std::string("local animation = 'rbxassetid://123'"));
 	script.Properties.push_back({"Source", source});
 	root.Children.push_back(std::move(script));
 	model.Roots.push_back(std::move(root));
@@ -220,4 +262,39 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	const engine::ecs::Entity driver = store.FindFirstChild(workspace, "Driver");
 	REQUIRE(driver != engine::ecs::NULL_ENTITY);
 	CHECK(store.Has<engine::script::Disabled>(driver));
+}
+
+TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloximport]") {
+	ScratchConfig scratch;
+	std::filesystem::create_directories(scratch.Root);
+	const std::filesystem::path source = scratch.Root / "source.rbxlx";
+	const std::filesystem::path destination = scratch.Root / "Ported.aworld";
+	std::ofstream(source) << R"xml(
+		<roblox version="4">
+			<Item class="Part" referent="RBX0">
+				<Properties><string name="Name">Block</string></Properties>
+			</Item>
+		</roblox>
+	)xml";
+
+	studio::RobloxWorldPortResult report;
+	std::string error;
+	REQUIRE(
+		studio::PortRobloxPlace(
+			source, destination, studio::RobloxAssetMappings{}, studio::RobloxClassMappings{}, report, error
+		)
+	);
+	CHECK(error.empty());
+	CHECK(report.Analysis.Instances == 1);
+	CHECK(report.Import.Instances == 1);
+	CHECK(std::filesystem::file_size(destination) > 0);
+
+	engine::world::Universe loaded;
+	const engine::world::WorldId world =
+		engine::game::ImportWorld(loaded, destination, engine::core::Name{}, error);
+	REQUIRE(world.IsValid());
+	CHECK(error.empty());
+	loaded.Enter(world, [](engine::ecs::Store &store) {
+		CHECK(store.FindFirstRoot("Block") != engine::ecs::NULL_ENTITY);
+	});
 }

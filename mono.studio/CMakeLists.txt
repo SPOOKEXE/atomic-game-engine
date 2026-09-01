@@ -48,6 +48,11 @@ mono_add_library(studio
 		# dependency a file includes is one its build file should say out loud.
 		Engine::physics
 
+		# L6, `shared`. Roblox place imports declare collision-group names
+		# before writing them onto parts, and viewport picking uses the spatial
+		# query types directly. Both are this program's own includes.
+		Engine::spatial
+
 		# L13, `shared`. The Model Context Protocol surface: the socket, the
 		# handshake and the tools any program with worlds can answer. This
 		# module adds the editor's own on top.

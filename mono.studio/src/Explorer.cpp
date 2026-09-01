@@ -877,7 +877,7 @@ namespace studio {
 			}
 			if (ImGui::MenuItem("Import World...", nullptr, false, !AnyRunning())) {
 				AskingImport = true;
-				PathBuffer.clear();
+				PathBuffer = ConfigPath("worlds").string();
 			}
 
 			// Beside the other two ways of getting a scene, because this menu is

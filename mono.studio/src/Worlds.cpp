@@ -123,7 +123,7 @@ namespace studio {
 		ImGui::SameLine();
 		if (ImGui::Button("Import...")) {
 			AskingImport = true;
-			PathBuffer.clear();
+			PathBuffer = ConfigPath("worlds").string();
 		}
 
 		// **The third way in, beside the two that were already here.** `World ->

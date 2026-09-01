@@ -515,8 +515,7 @@ namespace engine::bake {
 			case WireType::String:
 			case WireType::ProtectedString:
 				for (RobloxValue &value : out) {
-					value.Kind = RobloxValueKind::Text;
-					value.Text = cursor.Text();
+					value.Set(cursor.Text());
 					if (cursor.Failed()) {
 						return PropertyResult::Malformed;
 					}
@@ -525,8 +524,7 @@ namespace engine::bake {
 
 			case WireType::Bool:
 				for (RobloxValue &value : out) {
-					value.Kind = RobloxValueKind::Bool;
-					value.Bool = cursor.Byte() != 0;
+					value.Set(cursor.Byte() != 0);
 				}
 				return cursor.Failed() ? PropertyResult::Malformed : PropertyResult::Decoded;
 
@@ -535,8 +533,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Integer;
-					out[index].Integer = Zigzag(a[index]);
+					out[index].Set(static_cast<int64_t>(Zigzag(a[index])));
 				}
 				return PropertyResult::Decoded;
 
@@ -546,8 +543,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Integer;
-					out[index].Integer = Zigzag(longs[index]);
+					out[index].Set(Zigzag(longs[index]));
 				}
 				return PropertyResult::Decoded;
 			}
@@ -557,8 +553,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Number;
-					out[index].Number = x[index];
+					out[index].Set(static_cast<double>(x[index]));
 				}
 				return PropertyResult::Decoded;
 
@@ -567,8 +562,7 @@ namespace engine::bake {
 				// transposed nor rotated, which is the format's choice and not a
 				// simplification here.
 				for (RobloxValue &value : out) {
-					value.Kind = RobloxValueKind::Number;
-					value.Number = cursor.Double();
+					value.Set(cursor.Double());
 				}
 				return cursor.Failed() ? PropertyResult::Malformed : PropertyResult::Decoded;
 
@@ -577,8 +571,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::UDim;
-					out[index].UDim = core::UDim{x[index], static_cast<float>(Zigzag(a[index]))};
+					out[index].Set(core::UDim{x[index], static_cast<float>(Zigzag(a[index]))});
 				}
 				return PropertyResult::Decoded;
 
@@ -587,11 +580,12 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::UDim2;
-					out[index].UDim2 = core::UDim2{
-						core::UDim{x[index], static_cast<float>(Zigzag(a[index]))},
-						core::UDim{y[index], static_cast<float>(Zigzag(b[index]))},
-					};
+					out[index].Set(
+						core::UDim2{
+							core::UDim{x[index], static_cast<float>(Zigzag(a[index]))},
+							core::UDim{y[index], static_cast<float>(Zigzag(b[index]))},
+						}
+					);
 				}
 				return PropertyResult::Decoded;
 
@@ -600,8 +594,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Vector2;
-					out[index].Vector2 = core::Vector2{x[index], y[index]};
+					out[index].Set(core::Vector2{x[index], y[index]});
 				}
 				return PropertyResult::Decoded;
 
@@ -610,8 +603,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Vector3;
-					out[index].Vector3 = core::Vector3{x[index], y[index], z[index]};
+					out[index].Set(core::Vector3{x[index], y[index], z[index]});
 				}
 				return PropertyResult::Decoded;
 
@@ -620,8 +612,7 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Color3;
-					out[index].Color3 = core::Color3{x[index], y[index], z[index]};
+					out[index].Set(core::Color3{x[index], y[index], z[index]});
 				}
 				return PropertyResult::Decoded;
 
@@ -636,12 +627,13 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Color3;
-					out[index].Color3 = core::Color3{
-						static_cast<float>(raw[index]) / 255.0f,
-						static_cast<float>(raw[count + index]) / 255.0f,
-						static_cast<float>(raw[2 * count + index]) / 255.0f,
-					};
+					out[index].Set(
+						core::Color3{
+							static_cast<float>(raw[index]) / 255.0f,
+							static_cast<float>(raw[count + index]) / 255.0f,
+							static_cast<float>(raw[2 * count + index]) / 255.0f,
+						}
+					);
 				}
 				return PropertyResult::Decoded;
 			}
@@ -651,11 +643,12 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Rect;
-					out[index].Rect = core::Rect{
-						core::Vector2{x[index], y[index]},
-						core::Vector2{z[index], w[index]},
-					};
+					out[index].Set(
+						core::Rect{
+							core::Vector2{x[index], y[index]},
+							core::Vector2{z[index], w[index]},
+						}
+					);
 				}
 				return PropertyResult::Decoded;
 
@@ -663,10 +656,9 @@ namespace engine::bake {
 				// Two plain floats each, in place. Not an array of pairs and not
 				// a pair of arrays.
 				for (RobloxValue &value : out) {
-					value.Kind = RobloxValueKind::NumberRange;
 					const float minimum = cursor.Real();
 					const float maximum = cursor.Real();
-					value.NumberRange = core::NumberRange{minimum, maximum};
+					value.Set(core::NumberRange{minimum, maximum});
 				}
 				return cursor.Failed() ? PropertyResult::Malformed : PropertyResult::Decoded;
 
@@ -713,9 +705,9 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::CFrame;
-					out[index].CFrame =
-						core::CFrame(core::Vector3{x[index], y[index], z[index]}, rotations[index]);
+					out[index].Set(
+						core::CFrame(core::Vector3{x[index], y[index], z[index]}, rotations[index])
+					);
 				}
 				return PropertyResult::Decoded;
 			}
@@ -727,9 +719,10 @@ namespace engine::bake {
 					return PropertyResult::Malformed;
 				}
 				for (size_t index = 0; index < count; index++) {
-					out[index].Kind = RobloxValueKind::Text;
 					if (a[index] < parse.SharedStrings.size()) {
-						out[index].Text = parse.SharedStrings[a[index]];
+						out[index].Set(parse.SharedStrings[a[index]]);
+					} else {
+						out[index].Set(std::string{});
 					}
 				}
 				return PropertyResult::Decoded;
@@ -850,8 +843,8 @@ namespace engine::bake {
 				// **`Name` becomes the instance's name and is not also a
 				// property**, so that nothing downstream has two places to read
 				// one fact from. Anything else keeps the spelling the file used.
-				if (name == "Name" && values[index].Kind == RobloxValueKind::Text) {
-					instance.Name = values[index].Text;
+				if (name == "Name" && values[index].Kind() == RobloxValueKind::Text) {
+					instance.Name = values[index].As<std::string>();
 					continue;
 				}
 				instance.Properties.push_back(RobloxProperty{name, std::move(values[index])});

@@ -9,6 +9,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/spatial/CollisionGroups.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Prompts.hpp>
 
@@ -237,7 +238,7 @@ namespace studio {
 		) {
 			using engine::bake::RobloxValueKind;
 			using engine::ecs::PropertyType;
-			if (!Compatible(property.Type, source.Kind)) {
+			if (!Compatible(property.Type, source.Kind())) {
 				return false;
 			}
 
@@ -245,15 +246,15 @@ namespace studio {
 			out.Type = property.Type;
 			switch (property.Type) {
 			case PropertyType::Bool:
-				out.Bool = source.Bool;
+				out.Bool = source.As<bool>();
 				return true;
 			case PropertyType::Int32:
 			case PropertyType::Int64:
 			case PropertyType::Float:
 			case PropertyType::Double: {
-				const double number = source.Kind == RobloxValueKind::Integer
-										  ? static_cast<double>(source.Integer)
-										  : source.Number;
+				const double number = source.Kind() == RobloxValueKind::Integer
+										  ? static_cast<double>(source.As<int64_t>())
+										  : source.As<double>();
 				out.Int32 = static_cast<int32_t>(number);
 				out.Int64 = static_cast<int64_t>(number);
 				out.Float = static_cast<float>(number);
@@ -261,36 +262,36 @@ namespace studio {
 				return true;
 			}
 			case PropertyType::String:
-				out.String = source.Text;
+				out.String = source.As<std::string>();
 				return true;
 			case PropertyType::Name:
 			case PropertyType::Enum:
-				out.Name = engine::core::Name(source.Text);
+				out.Name = engine::core::Name(source.As<std::string>());
 				return property.Type != PropertyType::Enum ||
 					   engine::ecs::EnumTable::Has(property.EnumName, out.Name);
 			case PropertyType::Vector3:
-				out.Vector3 = source.Vector3;
+				out.Vector3 = source.As<engine::core::Vector3>();
 				return true;
 			case PropertyType::Color3:
-				out.Color3 = source.Color3;
+				out.Color3 = source.As<engine::core::Color3>();
 				return true;
 			case PropertyType::CFrame:
-				out.CFrame = source.CFrame;
+				out.CFrame = source.As<engine::core::CFrame>();
 				return true;
 			case PropertyType::Vector2:
-				out.Vector2 = source.Vector2;
+				out.Vector2 = source.As<engine::core::Vector2>();
 				return true;
 			case PropertyType::UDim:
-				out.UDim = source.UDim;
+				out.UDim = source.As<engine::core::UDim>();
 				return true;
 			case PropertyType::UDim2:
-				out.UDim2 = source.UDim2;
+				out.UDim2 = source.As<engine::core::UDim2>();
 				return true;
 			case PropertyType::Rect:
-				out.Rect = source.Rect;
+				out.Rect = source.As<engine::core::Rect>();
 				return true;
 			case PropertyType::NumberRange:
-				out.NumberRange = source.NumberRange;
+				out.NumberRange = source.As<engine::core::NumberRange>();
 				return true;
 			case PropertyType::Reference:
 			case PropertyType::NumberSequence:
@@ -363,7 +364,7 @@ namespace studio {
 				const auto found =
 					std::find_if(node.Properties.begin(), node.Properties.end(), [](const auto &property) {
 						return property.Name == "Source" &&
-							   property.Value.Kind == engine::bake::RobloxValueKind::Text;
+							   property.Value.Kind() == engine::bake::RobloxValueKind::Text;
 					});
 				if (found != node.Properties.end()) {
 					sourceProperty = &*found;
@@ -374,7 +375,7 @@ namespace studio {
 			if (instance == NULL_ENTITY && sourceProperty != nullptr) {
 				const std::string sourceKey = UniqueSourceKey(state, path);
 				std::string source = ApplyAssetMappings(
-					state.Replacements, path, sourceProperty->Name, sourceProperty->Value.Text
+					state.Replacements, path, sourceProperty->Name, sourceProperty->Value.As<std::string>()
 				);
 				if (!sourceKey.empty() && StageSource(state.Store, sourceKey, std::move(source))) {
 					instance = node.ClassName == "ModuleScript"
@@ -408,9 +409,22 @@ namespace studio {
 				}
 
 				engine::bake::RobloxValue mapped = property.Value;
-				if (mapped.Kind == engine::bake::RobloxValueKind::Text) {
-					mapped.Text =
-						ApplyAssetMappings(state.Replacements, path, property.Name, std::move(mapped.Text));
+				if (mapped.Kind() == engine::bake::RobloxValueKind::Text) {
+					mapped.Set(
+						ApplyAssetMappings(state.Replacements, path, property.Name, mapped.As<std::string>())
+					);
+				}
+				if (descriptor->Spelling == "CollisionGroup" &&
+					mapped.Kind() == engine::bake::RobloxValueKind::Text) {
+					// Roblox stores the group name on each part. The computed engine
+					// property rightly refuses unknown names, so declare the imported
+					// name before asking that property to apply it.
+					const std::string &group = mapped.As<std::string>();
+					if (group.empty() ||
+						engine::spatial::CollisionGroups::Register(group) == engine::spatial::NO_GROUP) {
+						state.Report.SkippedProperties++;
+						continue;
+					}
 				}
 				engine::game::PropertyValue value;
 				if (!ToGameValue(*descriptor, mapped, value) ||
@@ -458,15 +472,15 @@ namespace studio {
 					if (descriptor == nullptr) {
 						AddGap(
 							missingProperties,
-							{instance.ClassName, property.Name, Describe(property.Value.Kind), {}}
+							{instance.ClassName, property.Name, Describe(property.Value.Kind()), {}}
 						);
-					} else if (!Compatible(descriptor->Type, property.Value.Kind)) {
+					} else if (!Compatible(descriptor->Type, property.Value.Kind())) {
 						AddGap(
 							conflictingProperties,
 							{
 								instance.ClassName,
 								property.Name,
-								Describe(property.Value.Kind),
+								Describe(property.Value.Kind()),
 								engine::ecs::Describe(descriptor->Type),
 							}
 						);
