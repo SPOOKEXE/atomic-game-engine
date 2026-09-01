@@ -46,6 +46,7 @@
 // file on disk. A plugin cannot read `/etc/passwd` by calling it, which is the
 // property that matters.
 
+#include "PluginSurfaceInternal.hpp"
 #include "SourceEditor.hpp"
 
 #include <engine/core/Log.hpp>
@@ -56,6 +57,7 @@
 #include <algorithm>
 #include <cmath>
 #include <imgui.h>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <studio/Editor.hpp>
@@ -133,91 +135,35 @@ namespace studio {
 		}
 
 		std::vector<std::string> Names() const override {
-			return {
-				// The editor.
-				"Notify",
-				"GetActiveWorld",
-
-				// **`Selection` is a service, which is Roblox's own shape.**
-				// A dotted name becomes a global table of methods - see
-				// `OpenHost` - so `game:GetService("Selection")` finds it for
-				// free, and `Selection:Get()` is what a Roblox plugin author
-				// already types.
-				"Selection.Get",
-				"Selection.Set",
-				"Selection.Add",
-				"Selection.Remove",
-
-				// **`ChangeHistoryService` is how a plugin tells the editor what
-				// one undo should reverse**, and since v0.13 it is also how a
-				// plugin's edits reach the other people in a team-create
-				// session - a committed recording is the unit that travels.
-				// Roblox's shape, method for method.
-				"ChangeHistoryService.TryBeginRecording",
-				"ChangeHistoryService.FinishRecording",
-				"ChangeHistoryService.IsRecordingInProgress",
-				"ChangeHistoryService.GetCanUndo",
-				"ChangeHistoryService.GetCanRedo",
-				"ChangeHistoryService.Undo",
-				"ChangeHistoryService.Redo",
-				"ChangeHistoryService.SetWaypoint",
-				"ChangeHistoryService.ResetWaypoints",
-				"ChangeHistoryService.SetEnabled",
-				"ChangeHistoryService.OnUndo",
-				"ChangeHistoryService.OnRedo",
-				"ChangeHistoryService.OnRecordingStarted",
-				"ChangeHistoryService.OnRecordingFinished",
-
-				// Scripts in the world being edited.
-				"GetScriptSource",
-				"SetScriptSource",
-				"GetScripts",
-
-				// Toolbars and buttons.
-				"CreateToolbar",
-				"CreateToolbarTab",
-				"CreateToolbarRow",
-				"CreateToolbarColumn",
-				"CreateButton",
-				"CreateToggle",
-				"CreateDropdown",
-				"CreateLabel",
-				"SetToolCell",
-				"SetButtonActive",
-				"SetToolVisible",
-				"SetToolWidth",
-				"SetToolbarVisible",
-				"SetToolbarPlacement",
-
-				// Docked panels, and what may be drawn in one.
-				"CreateWidget",
-				"SetWidgetRender",
-				"SetWidgetOpen",
-				"IsWidgetOpen",
-				"SetWidgetColour",
-				"SetWidgetDock",
-				"SetWidgetSizeConstraints",
-
-				// Viewport and script editor integration.
-				"GetViewportOption",
-				"SetViewportOption",
-				"AddViewport",
-				"OpenScript",
-				"Label",
-				"Button",
-				"Checkbox",
-				"Combo",
-				"Separator",
-				"InputText",
-			};
+			std::vector<std::string> names;
+			if (Plugin.Target == PluginRunTarget::Studio) {
+				names.reserve(std::size(STUDIO_PLUGIN_HOST_NAMES));
+				for (const std::string_view name : STUDIO_PLUGIN_HOST_NAMES) {
+					names.emplace_back(name);
+				}
+			}
+			if (Plugin.Bindings != nullptr) {
+				for (std::string &dynamic : Plugin.Bindings->Names(Plugin.Language)) {
+					if (std::find(names.begin(), names.end(), dynamic) == names.end()) {
+						names.push_back(std::move(dynamic));
+					}
+				}
+			}
+			return names;
 		}
 
 		bool Call(
 			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
 		) override {
-			// A plain chain rather than a table of member pointers: nineteen
-			// names, each a handful of lines, and a dispatch table would be a
-			// second list to keep in step with `Names`.
+			if (Plugin.Target != PluginRunTarget::Studio) {
+				if (Plugin.Bindings != nullptr) {
+					return Plugin.Bindings->Call(Plugin.Language, name, arguments, result, failure);
+				}
+				failure = "no such playtest plugin binding";
+				return false;
+			}
+			// A plain chain rather than a table of member pointers. Each call is a
+			// handful of lines, and a dispatch table would duplicate this list.
 			if (name == "Notify") {
 				Owner.Say("[" + Plugin.Manifest.Name + "] " + std::string(At(arguments, 0).AsText()));
 				return true;
@@ -1317,6 +1263,9 @@ namespace studio {
 				return true;
 			}
 
+			if (Plugin.Bindings != nullptr) {
+				return Plugin.Bindings->Call(Plugin.Language, name, arguments, result, failure);
+			}
 			failure = "no such widget call";
 			return false;
 		}

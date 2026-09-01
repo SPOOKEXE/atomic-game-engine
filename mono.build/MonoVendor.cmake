@@ -766,6 +766,28 @@ mono_vendor_system(libzstd_static)
 # Vendor:: to match the rest.
 add_library(Vendor::zstd ALIAS libzstd_static)
 
+# --- Roblox files -----------------------------------------------------------
+# The four Roblox place and model containers. The importer needs one complete
+# decoder rather than separate Studio and Rojo dialects, and this library's DOM
+# keeps every class, property and asset reference long enough for the Studio
+# port report to explain what the engine cannot yet map.
+#
+# Upstream has no release branch or tag. The submodule follows its only branch,
+# `main`, while the superproject pins the exact commit like every other vendor.
+# Its tests are valuable in its own repository but are not a second copy of this
+# repository's bake tests, and its CLI is not one of our shipped tools.
+if(NOT EXISTS "${MONO_VENDOR}/roblox-files/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/roblox-files is missing. Run `just setup`.")
+endif()
+
+set(RBXL_BUILD_CLI   OFF CACHE BOOL "" FORCE)
+set(RBXL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/roblox-files" EXCLUDE_FROM_ALL)
+
+# A vendor header cannot turn a first-party warning into a CI failure.
+mono_vendor_system(rbxl)
+add_library(Vendor::roblox_files ALIAS rbxl)
+
 # --- miniz ------------------------------------------------------------------
 # ZIP reading and writing for portable project packages. Upstream has no
 # release branch, so the superproject pins the 3.1.2 tag while `.gitmodules`

@@ -1272,7 +1272,8 @@ namespace studio {
 		ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
 		ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
 		if (ImGui::BeginMenu("Plugin Widgets")) {
-			for (LoadedPlugin &plugin : Plugins) {
+			for (PluginPresentation *pluginPointer : Plugins) {
+				PluginPresentation &plugin = *pluginPointer;
 				if (!plugin.Running) {
 					continue;
 				}
@@ -1463,6 +1464,9 @@ namespace studio {
 			if (ImGui::MenuItem("Import Universe...", nullptr, false, true)) {
 				AskingImportUniverse = true;
 				PathBuffer.clear();
+			}
+			if (ImGui::MenuItem("Import Roblox Place...", nullptr, false, true)) {
+				ShowRobloxImport = true;
 			}
 			if (ImGui::MenuItem("Export...", nullptr, false, Universe->Count() > 0 && !ExportInProgress())) {
 				AskingExport = true;

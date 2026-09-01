@@ -30,10 +30,11 @@ mono_add_library(studio
 		Engine::world
 		Engine::datastore
 		Engine::scene
+		Engine::effects
 		Engine::script
 
-		# L11, `shared`. **Because a plugin is a script and the command bar opens
-		# its own VM.** `Plugins.cpp`, `CommandBar.cpp` and `ScriptEditor.cpp` each
+		# L11, `shared`. **Because script plugins and the command bar each open
+		# their own VM.** `Plugins.cpp`, `CommandBar.cpp` and `ScriptEditor.cpp` each
 		# call `MakeRuntime`; it was arriving through `Engine::game` and a
 		# dependency a file includes is one its build file should say out loud.
 		Engine::scripthost

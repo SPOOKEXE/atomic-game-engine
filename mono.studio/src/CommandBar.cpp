@@ -119,6 +119,10 @@ namespace studio {
 
 				CommandHost.Manifest.Name = "Command Bar";
 				CommandHost.Running = true;
+				CommandHost.Target = PluginRunTarget::Studio;
+				CommandHost.World = world;
+				CommandHost.Bindings = &StudioPluginBindings;
+				CommandHost.Language = engine::script::Language::Luau;
 				CommandHost.Vm = engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
 				if (CommandHost.Vm == nullptr) {
 					Say("command: could not start a runtime", engine::core::LogLevel::Error);

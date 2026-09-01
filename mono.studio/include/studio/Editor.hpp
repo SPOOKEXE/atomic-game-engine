@@ -107,6 +107,7 @@
 #include <studio/Presentation.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
+#include <studio/RobloxImport.hpp>
 #include <studio/TeamCreate.hpp>
 #include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
@@ -2372,6 +2373,10 @@ namespace studio {
 		void LoadPlugins();
 		void PumpPlugins(float delta);
 		void DrawPlugins();
+		void DrawRobloxImport();
+		void StartPlaytestPlugins(WorldId world, PluginRunTarget target);
+		void StopPlaytestPlugins(WorldId world);
+		void StopAllPlaytestPlugins();
 
 		// The ribbon's Demo row, and the panel it opens.
 		//
@@ -5681,6 +5686,7 @@ namespace studio {
 		//@{
 		bool ShowToolbarEditor = false;
 		bool ShowDockWidgetEditor = false;
+		bool ShowRobloxImport = false;
 		//@}
 
 		// Sparse toolbar overrides and the draft for a user-created tab.
@@ -5693,6 +5699,24 @@ namespace studio {
 		char ToolbarRenameDraft[64] = {};
 		std::string ToolbarRenamingTab;
 		BuiltinStudioTool DrawingBuiltinTool = BuiltinStudioTool::None;
+		//@}
+
+		// Event-driven Roblox analysis and asset mapping state. The place is
+		// decoded only when a path is confirmed, never once per frame.
+		//@{
+		std::string RobloxImportPath;
+		std::optional<engine::bake::RobloxModel> RobloxImportModel;
+		RobloxImportAnalysis RobloxAnalysis;
+		RobloxAssetMappings RobloxMappings;
+		std::vector<RobloxAssetChoice> RobloxChoices;
+		std::string RobloxImportStatus;
+		std::string RobloxMappingIdentifier;
+		std::string RobloxMappingBrowsePath;
+		bool RobloxMappingsLoaded = false;
+		bool RobloxImportApplied = false;
+		bool RobloxImportDisableScripts = true;
+		int RobloxSelectedScript = -1;
+		char RobloxImportFilter[256] = {};
 		//@}
 
 		// Enabled overrides by stable plugin id. Missing means the manifest's
@@ -5783,8 +5807,14 @@ namespace studio {
 		//@}
 		//@}
 
-		// What `DiscoverPlugins` found, in folder order.
-		std::vector<LoadedPlugin> Plugins;
+		// Native and script plugins have separate ownership. `Plugins` is only
+		// the stable presentation order consumed by the toolbar and manager.
+		PluginBindingRegistry StudioPluginBindings;
+		std::vector<LoadedCppPlugin> CppPlugins;
+		std::vector<LoadedPlugin> ScriptPlugins;
+		std::vector<PluginPresentation *> Plugins;
+		std::vector<std::unique_ptr<PluginRuntimeSet>> PlaytestPluginSets;
+		uint64_t SeenCppPluginRegistryRevision = 0;
 
 		// What the port field holds while somebody is editing it.
 		//

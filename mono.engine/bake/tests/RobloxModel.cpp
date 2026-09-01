@@ -37,6 +37,7 @@
 TEST_SUITE_ID("engine.bake.robloxmodel")
 
 using Catch::Approx;
+using engine::bake::ReadRobloxFile;
 using engine::bake::ReadRobloxModel;
 using engine::bake::ReadRobloxModelXml;
 using engine::bake::RobloxInstance;
@@ -1211,4 +1212,61 @@ TEST_CASE("an rbxmx may hold any number of instances at its top level", "[bake][
 	// file with nothing in it is the caller's question too.
 	const RobloxModel empty = ReadXml(R"xml(<roblox version="4"/>)xml");
 	CHECK(empty.Roots.empty());
+}
+
+TEST_CASE("the complete roblox reader analyzes assets scripts and lost properties", "[bake][rbxl]") {
+	const std::string_view document = R"xml(
+		<roblox version="4">
+			<Item class="Animation" referent="RBX0">
+				<Properties>
+					<string name="Name">Slash</string>
+					<Content name="AnimationId"><url>rbxassetid://12345</url></Content>
+					<NumberSequence name="Curve">0 1 0 1 2 0</NumberSequence>
+				</Properties>
+				<Item class="LocalScript" referent="RBX1">
+					<Properties>
+						<string name="Name">Driver</string>
+						<ProtectedString name="Source"><![CDATA[
+							local texture = "https://www.roblox.com/asset/?id=67890"
+						]]></ProtectedString>
+					</Properties>
+				</Item>
+			</Item>
+		</roblox>
+	)xml";
+
+	RobloxModel model;
+	std::string failure;
+	REQUIRE(ReadRobloxFile(Bytes(document), model, failure));
+	CHECK(failure.empty());
+	REQUIRE(model.Roots.size() == 1);
+	CHECK(model.Roots[0].Name == "Slash");
+	REQUIRE(model.Scripts.size() == 1);
+	CHECK(model.Scripts[0].InstancePath == "Slash/Driver");
+	CHECK(Mentions(model.Scripts[0].Source, "67890"));
+
+	REQUIRE(model.Assets.size() == 2);
+	CHECK(model.Assets[0].Identifier == "12345");
+	CHECK(model.Assets[0].Kind == engine::bake::RobloxAssetKind::Animation);
+	CHECK(model.Assets[1].Identifier == "67890");
+	CHECK(model.Assets[1].InstancePath == "Slash/Driver");
+
+	REQUIRE(model.LostProperties.size() == 1);
+	CHECK(model.LostProperties[0].PropertyName == "Curve");
+	CHECK(model.LostProperties[0].RobloxType == "NumberSequence");
+}
+
+TEST_CASE("the complete roblox reader sniffs binary and leaves output alone on failure", "[bake][rbxl]") {
+	const Blob binary = Fixture();
+	RobloxModel model;
+	std::string failure;
+	REQUIRE(ReadRobloxFile(Bytes(binary.Bytes), model, failure));
+	CHECK_FALSE(model.Roots.empty());
+
+	RobloxModel sentinel;
+	sentinel.Notes.push_back("unchanged");
+	CHECK_FALSE(ReadRobloxFile(Bytes(std::string_view("not a place")), sentinel, failure));
+	REQUIRE(sentinel.Notes.size() == 1);
+	CHECK(sentinel.Notes[0] == "unchanged");
+	CHECK_FALSE(failure.empty());
 }

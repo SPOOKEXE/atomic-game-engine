@@ -912,7 +912,11 @@ namespace studio {
 		// of every one of them before it goes away.
 		EndAllRuns();
 		Runs.clear();
+		StopAllPlaytestPlugins();
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();
@@ -3086,10 +3090,14 @@ namespace studio {
 
 	void Editor::NewGame() {
 		EndAllRuns();
+		StopAllPlaytestPlugins();
 
 		// Plugin runtimes borrow a Store from the current universe. They must die
 		// before the worlds below, then restart against the new active world.
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 		PendingFrame.clear();
 		Scripts.clear();
 		ActiveScript = -1;
@@ -3264,11 +3272,15 @@ namespace studio {
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
 		EndAllRuns();
+		StopAllPlaytestPlugins();
 
 		// `LoadGame` replaces worlds. A plugin VM retains a Store reference, so
 		// keeping it alive across this call would leave it pointing into freed
 		// storage even when the replacement succeeds.
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 
 		engine::game::GameInfo info;
 		std::string error;
@@ -4525,6 +4537,7 @@ namespace studio {
 		}
 
 		Runs.push_back(std::move(run));
+		StartPlaytestPlugins(world, PluginRunTarget::PlaytestServer);
 
 		// **The client half, and only for Play.** Run is a dedicated server:
 		// there is no client in the process, so there is nothing to replicate to
@@ -4597,6 +4610,7 @@ namespace studio {
 			// leave the panel following the active scene with no way to tell
 			// that it had stopped showing what it was opened for.
 			const WorldId replica = link->ReplicaWorld();
+			StopPlaytestPlugins(replica);
 			for (ViewportState &view : Extras) {
 				if (view.World == replica) {
 					view.World = WorldId{};
@@ -4607,6 +4621,7 @@ namespace studio {
 			link->Stop(*Universe);
 		}
 		record->Links.clear();
+		StopPlaytestPlugins(world);
 
 		// **And every client that is *playing* this world, whoever owns it.**
 		// A `PlayLink` belongs to the run an author pressed Play on and keeps
@@ -4639,6 +4654,7 @@ namespace studio {
 				}
 
 				const WorldId replica = (*link)->ReplicaWorld();
+				StopPlaytestPlugins(replica);
 				for (ViewportState &view : Extras) {
 					if (view.World == replica) {
 						view.World = WorldId{};
@@ -4715,6 +4731,7 @@ namespace studio {
 			ClearSelection();
 			Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
 			SelectionWorld = Active;
+			LoadPlugins();
 			SyncWorldStates();
 			return;
 		}
@@ -4752,6 +4769,12 @@ namespace studio {
 			ClearSelection();
 		}
 		Trees.clear();
+		if (wasActive) {
+			// Studio plugin VMs borrow the active Store. Stop rebuilt that Store,
+			// so every native context and script VM must be rebound before the
+			// next frame can beat it.
+			LoadPlugins();
+		}
 
 		SyncWorldStates();
 	}

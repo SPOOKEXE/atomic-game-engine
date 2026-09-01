@@ -311,6 +311,7 @@ namespace studio {
 		}
 
 		run->Links.push_back(std::move(link));
+		StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 		Say(label + " joined");
 		SyncWorldStates();
 		return true;
@@ -352,6 +353,7 @@ namespace studio {
 			}
 		}
 
+		StopPlaytestPlugins(replica);
 		(*chosen)->Stop(*Universe);
 		run->Links.erase(chosen);
 
@@ -515,6 +517,7 @@ namespace studio {
 							view.Follow = NULL_ENTITY;
 						}
 					}
+					StopPlaytestPlugins(oldReplica);
 					link->Stop(*Universe);
 					link.reset();
 					continue;
@@ -524,6 +527,7 @@ namespace studio {
 				// already gone** - so `PlayLink::Stop`'s own destroy finds
 				// nothing to destroy, which is exactly right: the teleport did
 				// it, in the world that was allowed to.
+				StopPlaytestPlugins(oldReplica);
 				link->Stop(*Universe);
 
 				auto moved = std::make_unique<PlayLink>();
@@ -535,6 +539,7 @@ namespace studio {
 				}
 
 				const WorldId replica = moved->ReplicaWorld();
+				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 
 				// The panel that was showing them follows too, or the author
 				// watches an empty room and the player is somewhere off screen.

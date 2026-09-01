@@ -242,6 +242,60 @@ namespace engine::bake {
 		std::vector<RobloxInstance> Children;
 	};
 
+	// The kind of external asset a Roblox property names.
+	//
+	// This is deliberately a suggestion rather than a promise. Roblox permits
+	// arbitrary content strings, and Studio lets the author correct `Unknown`
+	// references before an import mutates a world.
+	//
+	// @since v0.22
+	enum class RobloxAssetKind : uint8_t {
+		Unknown,
+		Animation,
+		Audio,
+		Font,
+		Mesh,
+		Texture,
+		Video,
+	};
+
+	// One external content reference and the property or script that used it.
+	//
+	// @since v0.22
+	struct RobloxAssetReference {
+		// Stable numeric id when the URI contains one, otherwise the URI itself.
+		std::string Identifier;
+
+		// The exact spelling found in the file.
+		std::string Uri;
+
+		RobloxAssetKind Kind = RobloxAssetKind::Unknown;
+		std::string InstancePath;
+		std::string ClassName;
+		std::string PropertyName;
+	};
+
+	// Source recovered from a Roblox script instance.
+	//
+	// @since v0.22
+	struct RobloxScript {
+		std::string InstancePath;
+		std::string ClassName;
+		std::string Source;
+	};
+
+	// A property the container decoder preserved but the engine-facing value
+	// vocabulary cannot represent yet.
+	//
+	// @since v0.22
+	struct RobloxLostProperty {
+		std::string InstancePath;
+		std::string ClassName;
+		std::string PropertyName;
+		std::string RobloxType;
+		std::string Reason;
+	};
+
 	// What a `.rbxm` held.
 	//
 	// @since v0.15
@@ -261,6 +315,12 @@ namespace engine::bake {
 		// three properties are not is still an import; the notes are how it says
 		// which three.
 		std::vector<std::string> Notes;
+
+		// Analysis collected while decoding. These rows are kept separate from
+		// `Notes` so Studio can filter and map them without parsing prose.
+		std::vector<RobloxAssetReference> Assets;
+		std::vector<RobloxScript> Scripts;
+		std::vector<RobloxLostProperty> LostProperties;
 	};
 
 	// The ceiling on how many instances one file may declare.
@@ -279,6 +339,20 @@ namespace engine::bake {
 	// It doubles as the cycle check - a parent chain longer than this is either
 	// too deep or a loop, and both answers are the same one.
 	constexpr uint32_t MAXIMUM_ROBLOX_DEPTH = 64;
+
+	// Reads any supported Roblox place or model container after sniffing it.
+	//
+	// This is the complete analyzer path used by Studio. It accepts `.rbxl`,
+	// `.rbxm`, `.rbxlx` and `.rbxmx` bytes, records scripts and external asset
+	// references, and reports every decoded property that cannot cross the
+	// engine-facing value boundary. Vendor types remain private to `bake`.
+	//
+	// @param bytes   The complete file contents.
+	// @param out     Filled on success, left alone on failure.
+	// @param failure Set to an actionable decoder failure. Untouched on success.
+	// @return `false` when the container is malformed or exceeds import bounds.
+	// @since v0.22
+	bool ReadRobloxFile(std::span<const std::byte> bytes, RobloxModel &out, std::string &failure);
 
 	// Reads a `.rbxm`, the binary container.
 	//

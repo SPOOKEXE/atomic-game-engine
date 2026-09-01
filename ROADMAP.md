@@ -80,14 +80,14 @@ The milestone headings below are development labels. Not in line with project ve
 	4. add export options in studio to also export cdn configs and such
 Ask user to plan this out further, expand into all domains and areas where we need to investigate before actually implementing.
 
-- [_] make C++ studio plugins which are separate from studio luau plugins. This way we can move all studio default toolbar stuff to the C++ studio plugins and support custom C++ / luau variants easier (e.g. we have a C++ core library with a luau bindings plugin for custom suites).
-- [_] add dynamic C++ plugin binding system also with dynamic luau bindings support to add/remove on plugin load/unload (and we auto collect these on plugin close).
-- [_] add plugin options such as: runs only in studio, runs only in playtest servers, runs only on playtest clients, etc (within studio).
-- [_] move current plugin system to this new C++/Luau bindings style
-- [_] move current studio plugin converted tools to new style
+- [x] make C++ studio plugins which are separate from studio luau plugins. This way we can move all studio default toolbar stuff to the C++ studio plugins and support custom C++ / luau variants easier (e.g. we have a C++ core library with a luau bindings plugin for custom suites).
+- [x] add dynamic C++ plugin binding system also with dynamic luau bindings support to add/remove on plugin load/unload (and we auto collect these on plugin close).
+- [x] add plugin options such as: runs only in studio, runs only in playtest servers, runs only on playtest clients, etc (within studio).
+- [x] move current plugin system to this new C++/Luau bindings style
+- [x] move current studio plugin converted tools to new style
 
-- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
-- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
+- [x] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+- [x] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 - [_] build out the bladeborne demo into a full mmo, test with thousands of connected clients with ai minds for them so they can run and do stuff
 
