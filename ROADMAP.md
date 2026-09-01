@@ -72,25 +72,21 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add remote datastore choices and per-datastore backend assignment: the router assigns each logical store to the atomic file or bounded plain-HTTP snapshot adapter; server flags and Studio preferences select the default route, while TLS and named database protocols remain separate provider work rather than mislabeled HTTP.
 - [x] require SDL GPU's Vulkan backend everywhere, feed it SPIR-V only, and package pinned MoltenVK 1.4.2 beside Apple presentation executables with the upstream artifact checksum enforced.
 - [x] complete the skinning pipeline: `assets::MeshVertex` carries joint indices and weights, bake preserves glTF influences, render uploads and rebases a palette per rig, and fixed-tick animation tracks sample and blend bounded `.aanim` clips into bone poses before palette collection.
-
 - [x] review world export and world loading so that:
 	1. we can export a full game as a "project zip" which we can load on the server
 	2. we can connect to this server and download assets a we need them
 	3. support connecting cdns and doing a validation pass where we check if the cdns are configured
 	4. add export options in studio to also export cdn configs and such
 Ask user to plan this out further, expand into all domains and areas where we need to investigate before actually implementing.
-
 - [x] make C++ studio plugins which are separate from studio luau plugins. This way we can move all studio default toolbar stuff to the C++ studio plugins and support custom C++ / luau variants easier (e.g. we have a C++ core library with a luau bindings plugin for custom suites).
 - [x] add dynamic C++ plugin binding system also with dynamic luau bindings support to add/remove on plugin load/unload (and we auto collect these on plugin close).
 - [x] add plugin options such as: runs only in studio, runs only in playtest servers, runs only on playtest clients, etc (within studio).
 - [x] move current plugin system to this new C++/Luau bindings style
 - [x] move current studio plugin converted tools to new style
-
 - [x] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [x] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [x] porting Roblox games: the compatibility widget reports missing classes and property conflicts, maps each missing Roblox class to an insertable engine class, persists those choices, and the headless converter reloads every `.aworld` it writes.
 - [x] review additions and ensure they all work, we benchmark critical ones and test them.
-
 - [x] the tooltip for "Faces Side" dropdown has "\n" embeded in text instead of actually doing newlines
 - [x] remove the "Remove Active World" button in World dropdown
 - [x] remove the `Reset to Default PBR` button.
@@ -116,14 +112,14 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] build out the `Components` dock widget like properties where you can edit the component values
 - [x] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
   manually - ensure it uses the CollectionService and such.
-
 - [x] in command bar, add auto complete as well
 - [x] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
 - [x] for live games, universe config for datastore location tells you the folder where its stored
 - [x] for live games, load datastore config from universe data (use a global universe manager not per world)
 - [x] allow shader scripts to be saved and served on CDN.
 - [x] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
-
+- [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
+- [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
 - [_] fix viewport size glitch
 - [_] fix multi-viewport camera collision fix
 - [_] fix script editor, all text matches background
@@ -133,8 +129,6 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 
 ### v0.22
 
-- [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
-- [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
 - [_] default R6 base character (capsule collider)
 - [_] gtlf default character (unreal)
 - [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
