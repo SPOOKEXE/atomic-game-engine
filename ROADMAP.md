@@ -167,3 +167,4 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] VR support (oculus rift s)
+- [_] port TornadoSim as a demo scene in the engine.
