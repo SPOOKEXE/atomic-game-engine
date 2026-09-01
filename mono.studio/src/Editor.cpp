@@ -3910,9 +3910,7 @@ namespace studio {
 		WorldImportCommitPending = false;
 		WorldImportDestination = {};
 		WorldImportFraction.store(0.0f, std::memory_order_relaxed);
-		ActiveWorldImportPhase.store(
-			engine::game::WorldImportPhase::Read, std::memory_order_relaxed
-		);
+		ActiveWorldImportPhase.store(engine::game::WorldImportPhase::Read, std::memory_order_relaxed);
 		WorldImportDone.store(false, std::memory_order_relaxed);
 		WorldImportActive = true;
 		WorldImportWorker = std::jthread([this, path] {
@@ -3985,9 +3983,7 @@ namespace studio {
 				return;
 			}
 			WorldImportCommitPending = true;
-			ActiveWorldImportPhase.store(
-				engine::game::WorldImportPhase::Commit, std::memory_order_relaxed
-			);
+			ActiveWorldImportPhase.store(engine::game::WorldImportPhase::Commit, std::memory_order_relaxed);
 			WorldImportFraction.store(0.95f, std::memory_order_relaxed);
 			return;
 		}

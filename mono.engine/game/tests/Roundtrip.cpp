@@ -949,12 +949,13 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 
 	engine::game::PreparedWorldImport prepared;
 	std::vector<engine::game::WorldImportPhase> phases;
-	REQUIRE(engine::game::PrepareWorldImport(
-		path,
-		prepared,
-		error,
-		[&](engine::game::WorldImportPhase phase, float) { phases.push_back(phase); }
-	));
+	REQUIRE(
+		engine::game::PrepareWorldImport(
+			path, prepared, error, [&](engine::game::WorldImportPhase phase, float) {
+				phases.push_back(phase);
+			}
+		)
+	);
 	CHECK(prepared.Settings.Name == Name("Start"));
 	CHECK_FALSE(prepared.Snapshot.empty());
 	CHECK(std::find(phases.begin(), phases.end(), engine::game::WorldImportPhase::Decode) != phases.end());
@@ -962,9 +963,7 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	const WorldId preparedCopy =
 		engine::game::CommitWorldImport(source, prepared, Name("StartPrepared"), error);
 	REQUIRE(preparedCopy.IsValid());
-	source.Enter(preparedCopy, [](Store &store) {
-		CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY);
-	});
+	source.Enter(preparedCopy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
 
 	// And refused without one, because the name is taken.
 	const WorldId clash = engine::game::ImportWorld(source, path, Name{}, error);

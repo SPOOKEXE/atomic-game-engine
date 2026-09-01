@@ -122,12 +122,7 @@ TEST_CASE("server uses one live DataStore declared by the universe", "[server][p
 	const fs::path manifest = tree.Root / "hosted.auniverse";
 	REQUIRE(
 		engine::game::SaveUniverse(
-			universe,
-			engine::core::Name("Hosted Universe"),
-			{},
-			manifest,
-			universeOptions,
-			error
+			universe, engine::core::Name("Hosted Universe"), {}, manifest, universeOptions, error
 		)
 	);
 
@@ -136,9 +131,7 @@ TEST_CASE("server uses one live DataStore declared by the universe", "[server][p
 		REQUIRE(host.Initialise(Headless(manifest)));
 		REQUIRE(
 			host.Worlds().SetSharedStoreValue(
-				engine::world::BusKind::DataStore,
-				engine::core::Name("universe:key"),
-				Bytes("live-value")
+				engine::world::BusKind::DataStore, engine::core::Name("universe:key"), Bytes("live-value")
 			) == engine::world::BusStatus::Ok
 		);
 		host.Shutdown();
@@ -165,12 +158,7 @@ TEST_CASE("operator DataStore options override universe defaults", "[server][pro
 	const fs::path manifest = tree.Root / "hosted.auniverse";
 	REQUIRE(
 		engine::game::SaveUniverse(
-			universe,
-			engine::core::Name("Hosted Universe"),
-			{},
-			manifest,
-			universeOptions,
-			error
+			universe, engine::core::Name("Hosted Universe"), {}, manifest, universeOptions, error
 		)
 	);
 
@@ -180,9 +168,7 @@ TEST_CASE("operator DataStore options override universe defaults", "[server][pro
 	REQUIRE(host.Initialise(options));
 	REQUIRE(
 		host.Worlds().SetSharedStoreValue(
-			engine::world::BusKind::DataStore,
-			engine::core::Name("operator:key"),
-			Bytes("operator-value")
+			engine::world::BusKind::DataStore, engine::core::Name("operator:key"), Bytes("operator-value")
 		) == engine::world::BusStatus::Ok
 	);
 	host.Shutdown();
@@ -295,11 +281,7 @@ TEST_CASE("Project ZIP DataStore survives temporary extraction cleanup", "[serve
 	engine::game::ProjectPackageInfo packageInfo;
 	engine::game::ProjectValidationReport report;
 	const fs::path package = tree.Root / "hosted.zip";
-	REQUIRE(
-		engine::game::WriteProjectPackage(
-			staging, package, packageOptions, packageInfo, report
-		)
-	);
+	REQUIRE(engine::game::WriteProjectPackage(staging, package, packageOptions, packageInfo, report));
 
 	auto options = Headless(package);
 	options.ContentGrantKey = std::string(64, '1');
@@ -308,9 +290,7 @@ TEST_CASE("Project ZIP DataStore survives temporary extraction cleanup", "[serve
 		REQUIRE(host.Initialise(options));
 		REQUIRE(
 			host.Worlds().SetSharedStoreValue(
-				engine::world::BusKind::DataStore,
-				engine::core::Name("zip:key"),
-				Bytes("persistent")
+				engine::world::BusKind::DataStore, engine::core::Name("zip:key"), Bytes("persistent")
 			) == engine::world::BusStatus::Ok
 		);
 		host.Shutdown();

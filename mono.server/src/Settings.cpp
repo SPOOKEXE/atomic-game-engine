@@ -351,8 +351,7 @@ namespace server {
 			options.DataStoreProvider = *provider;
 		} else {
 			ENGINE_WARN(
-				"server.datastore-provider: '{}' is not file or http; using file",
-				dataStoreProvider.Text()
+				"server.datastore-provider: '{}' is not file or http; using file", dataStoreProvider.Text()
 			);
 		}
 		options.DataStoreRoot = std::filesystem::path(dataStoreRoot.Text());
@@ -364,8 +363,7 @@ namespace server {
 				dataStoreBackend.Text()
 			);
 		}
-		if (const auto environment =
-				engine::world::SharedStoreEnvironmentOf(dataStoreEnvironment.Text())) {
+		if (const auto environment = engine::world::SharedStoreEnvironmentOf(dataStoreEnvironment.Text())) {
 			options.DataStoreEnvironment = *environment;
 		} else {
 			ENGINE_WARN(
@@ -373,13 +371,11 @@ namespace server {
 				dataStoreEnvironment.Text()
 			);
 		}
-		if (const auto endpoint =
-				engine::net::Endpoint::Parse(dataStoreHttpEndpoint.Text())) {
+		if (const auto endpoint = engine::net::Endpoint::Parse(dataStoreHttpEndpoint.Text())) {
 			options.HttpDataStore.Server = *endpoint;
 		} else if (options.DataStoreProvider == engine::datastore::Provider::Http) {
 			ENGINE_WARN(
-				"server.datastore-http-endpoint: '{}' is not a numeric endpoint",
-				dataStoreHttpEndpoint.Text()
+				"server.datastore-http-endpoint: '{}' is not a numeric endpoint", dataStoreHttpEndpoint.Text()
 			);
 		}
 		options.HttpDataStore.Host = std::string(dataStoreHttpHost.Text());

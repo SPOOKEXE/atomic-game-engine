@@ -175,9 +175,7 @@ namespace studio {
 			return false;
 		}
 
-		bool DrawSchemaValue(
-			const FieldDescriptor &field, PropertyValue &value, std::string &draft
-		) {
+		bool DrawSchemaValue(const FieldDescriptor &field, PropertyValue &value, std::string &draft) {
 			switch (field.Type) {
 			case PropertyType::Bool:
 				return ImGui::Checkbox("##value", &value.Bool);
@@ -284,9 +282,8 @@ namespace studio {
 			bool Wanted = false;
 		};
 
-		CollectionTagEdit DrawCollectionTags(
-			const Store &store, const std::vector<Entity> &selection, std::string &draft
-		) {
+		CollectionTagEdit
+		DrawCollectionTags(const Store &store, const std::vector<Entity> &selection, std::string &draft) {
 			CollectionTagEdit edit;
 			ImGui::SeparatorText("Collection Tags");
 
@@ -1417,7 +1414,7 @@ namespace studio {
 						continue;
 					}
 					changed |= tagEdit.Add ? engine::scene::AddTag(store, instance, tagEdit.Tag)
-									   : engine::scene::RemoveTag(store, instance, tagEdit.Tag);
+										   : engine::scene::RemoveTag(store, instance, tagEdit.Tag);
 				}
 			});
 			if (changed && authoritative) {
@@ -1643,7 +1640,8 @@ namespace studio {
 				}
 				for (const Entity instance : Selection) {
 					void *component = store.GetComponentMutable(instance, componentEdit.Component);
-					modified |= component != nullptr && WriteSchemaValue(component, *field, componentEdit.Value);
+					modified |=
+						component != nullptr && WriteSchemaValue(component, *field, componentEdit.Value);
 				}
 			});
 		}
@@ -1655,7 +1653,7 @@ namespace studio {
 						continue;
 					}
 					modified |= tagEdit.Add ? engine::scene::AddTag(store, instance, tagEdit.Tag)
-										: engine::scene::RemoveTag(store, instance, tagEdit.Tag);
+											: engine::scene::RemoveTag(store, instance, tagEdit.Tag);
 				}
 			});
 		}

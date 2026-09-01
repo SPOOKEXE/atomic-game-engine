@@ -199,12 +199,13 @@ namespace studio {
 		// Down walks history on the same frame the popup handles them.
 		const ImGuiID popupId = ImGui::GetID("##command-completion");
 		if (CommandPopupOpen) {
-			for (const ImGuiKey key : {ImGuiKey_UpArrow,
-									 ImGuiKey_DownArrow,
-									 ImGuiKey_Enter,
-									 ImGuiKey_KeypadEnter,
-									 ImGuiKey_Tab,
-									 ImGuiKey_Escape}) {
+			for (const ImGuiKey key :
+				 {ImGuiKey_UpArrow,
+				  ImGuiKey_DownArrow,
+				  ImGuiKey_Enter,
+				  ImGuiKey_KeypadEnter,
+				  ImGuiKey_Tab,
+				  ImGuiKey_Escape}) {
 				ImGui::SetKeyOwner(key, popupId, ImGuiInputFlags_LockThisFrame);
 			}
 		}
@@ -234,8 +235,7 @@ namespace studio {
 			CommandCursor = -1;
 		}
 
-		const bool asked =
-			CommandFieldActive && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
+		const bool asked = CommandFieldActive && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
 
 		if (!CommandFieldActive) {
 			CommandPopupOpen = false;
@@ -300,10 +300,12 @@ namespace studio {
 				const int rows = std::min(count, COMMAND_COMPLETION_ROWS);
 				const ImVec2 fieldSize = ImGui::GetItemRectSize();
 				const ImVec2 padding = ImGui::GetStyle().FramePadding;
-				const float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + 1.0f;
+				const float footer =
+					ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + 1.0f;
 				const ImVec2 popupSize(
 					std::max(fieldSize.x, 320.0f * Settings.Scale),
-					(static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing()) + padding.y * 2.0f + footer
+					(static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing()) + padding.y * 2.0f +
+						footer
 				);
 
 				const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -315,17 +317,15 @@ namespace studio {
 				if (popupPosition.y + popupSize.y > workMax.y && fieldMin.y - popupSize.y >= workMin.y) {
 					popupPosition.y = fieldMin.y - popupSize.y;
 				}
-				popupPosition.x = std::clamp(
-					popupPosition.x, workMin.x, std::max(workMin.x, workMax.x - popupSize.x)
-				);
-				popupPosition.y = std::clamp(
-					popupPosition.y, workMin.y, std::max(workMin.y, workMax.y - popupSize.y)
-				);
+				popupPosition.x =
+					std::clamp(popupPosition.x, workMin.x, std::max(workMin.x, workMax.x - popupSize.x));
+				popupPosition.y =
+					std::clamp(popupPosition.y, workMin.y, std::max(workMin.y, workMax.y - popupSize.y));
 
 				ImGui::SetNextWindowPos(popupPosition);
 				ImGui::SetNextWindowSize(popupSize);
-				constexpr ImGuiWindowFlags popupFlags = ImGuiWindowFlags_NoTitleBar |
-					ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+				constexpr ImGuiWindowFlags popupFlags =
+					ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
 					ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
 					ImGuiWindowFlags_NoNavInputs;
 
@@ -357,8 +357,8 @@ namespace studio {
 					ImGui::Separator();
 					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 					const std::string_view doc = picked.Kind == CompletionKind::Keyword
-						? KeywordDoc(engine::script::Language::Luau, picked.Text)
-						: std::string_view{};
+													 ? KeywordDoc(engine::script::Language::Luau, picked.Text)
+													 : std::string_view{};
 					const std::string_view footerText = doc.empty() ? Describe(picked.Kind) : doc;
 					ImGui::TextUnformatted(footerText.data(), footerText.data() + footerText.size());
 					ImGui::PopStyleColor();

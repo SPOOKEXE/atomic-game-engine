@@ -359,10 +359,7 @@ namespace engine::game {
 
 	// Adds one prepared world to its destination universe on the owning thread.
 	world::WorldId CommitWorldImport(
-		world::Universe &universe,
-		const PreparedWorldImport &prepared,
-		core::Name rename,
-		std::string &error
+		world::Universe &universe, const PreparedWorldImport &prepared, core::Name rename, std::string &error
 	);
 
 	// Starts every script a world holds, and keeps them running.

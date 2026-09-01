@@ -85,24 +85,39 @@ namespace studio {
 		// One declaration gives every native panel both its settings entry and its
 		// first-run home. Adding it to only one side is how panels became floaters.
 		constexpr NativePanelDock NATIVE_PANEL_DOCKS[]{
-			{EXPLORER, PluginDock::Left},			{WORLDS, PluginDock::Left},
-			{INSTANCES, PluginDock::Left},			{PROPERTIES, PluginDock::Right},
-			{COMPONENTS, PluginDock::Right},		{SCRIPTS, PluginDock::Bottom},
-			{OUTPUT, PluginDock::Bottom},			{"Command Bar", PluginDock::Bottom},
-			{SETTINGS, PluginDock::Right},			{STATISTICS, PluginDock::Right},
-			{FRAMEGRAPH, PluginDock::Bottom},		{HEAP, PluginDock::Bottom},
-			{ROJO_SYNC, PluginDock::Right},			{"History", PluginDock::Left},
-			{"Assets", PluginDock::Left},			{"Render Pipeline", PluginDock::Bottom},
+			{EXPLORER, PluginDock::Left},
+			{WORLDS, PluginDock::Left},
+			{INSTANCES, PluginDock::Left},
+			{PROPERTIES, PluginDock::Right},
+			{COMPONENTS, PluginDock::Right},
+			{SCRIPTS, PluginDock::Bottom},
+			{OUTPUT, PluginDock::Bottom},
+			{"Command Bar", PluginDock::Bottom},
+			{SETTINGS, PluginDock::Right},
+			{STATISTICS, PluginDock::Right},
+			{FRAMEGRAPH, PluginDock::Bottom},
+			{HEAP, PluginDock::Bottom},
+			{ROJO_SYNC, PluginDock::Right},
+			{"History", PluginDock::Left},
+			{"Assets", PluginDock::Left},
+			{"Render Pipeline", PluginDock::Bottom},
 			{"Pipeline Profile", PluginDock::Bottom},
-			{"Network", PluginDock::Right},			{"Team Create", PluginDock::Right},
-			{"Control (MCP)", PluginDock::Bottom},	{"Plugins", PluginDock::Right},
-			{TOOLBAR_EDITOR, PluginDock::Bottom},	{DOCK_WIDGET_EDITOR, PluginDock::Right},
-			{"Demo Nodes", PluginDock::Bottom},		{"Dataset Editor", PluginDock::Bottom},
-			{"DataStores", PluginDock::Right},		{"CDN", PluginDock::Right},
+			{"Network", PluginDock::Right},
+			{"Team Create", PluginDock::Right},
+			{"Control (MCP)", PluginDock::Bottom},
+			{"Plugins", PluginDock::Right},
+			{TOOLBAR_EDITOR, PluginDock::Bottom},
+			{DOCK_WIDGET_EDITOR, PluginDock::Right},
+			{"Demo Nodes", PluginDock::Bottom},
+			{"Dataset Editor", PluginDock::Bottom},
+			{"DataStores", PluginDock::Right},
+			{"CDN", PluginDock::Right},
 			{"Roblox Import", PluginDock::Bottom},
 			{"Bus", PluginDock::Bottom},
-			{"Script Profile", PluginDock::Bottom}, {"Changes", PluginDock::Bottom},
-			{"Debugger", PluginDock::Bottom},		{"Call Stack", PluginDock::Bottom},
+			{"Script Profile", PluginDock::Bottom},
+			{"Changes", PluginDock::Bottom},
+			{"Debugger", PluginDock::Bottom},
+			{"Call Stack", PluginDock::Bottom},
 			{"Breakpoints", PluginDock::Bottom},
 		};
 
@@ -3073,9 +3088,7 @@ namespace studio {
 					break;
 				}
 				ImGui::TextUnformatted(label);
-				ImGui::ProgressBar(
-					WorldImportFraction.load(std::memory_order_relaxed), ImVec2(-1.0f, 0.0f)
-				);
+				ImGui::ProgressBar(WorldImportFraction.load(std::memory_order_relaxed), ImVec2(-1.0f, 0.0f));
 			}
 			ImGui::EndPopup();
 		}

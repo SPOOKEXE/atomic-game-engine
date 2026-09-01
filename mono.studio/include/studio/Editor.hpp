@@ -91,7 +91,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/AssetGrounding.hpp>
 #include <studio/CodeMetrics.hpp>
@@ -113,6 +112,7 @@
 #include <studio/TeamCreate.hpp>
 #include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -5416,7 +5416,7 @@ namespace studio {
 		// somebody has to know about before they lose a view is not a way back.
 		// It stays open afterwards, like every other panel: what closes it is
 		// somebody closing it.
-		bool ShowLiveInstances = false;
+		bool ShowLiveInstances = true;
 
 		// Frames left to keep pulling the instances panel in front. See
 		// `FocusWorlds`, which is the same mechanism and the same reason.

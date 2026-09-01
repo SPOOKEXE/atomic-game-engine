@@ -117,12 +117,12 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
   manually - ensure it uses the CollectionService and such.
 
-- [_] in command bar, add auto complete as well
-- [_] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
-- [_] for live games, universe config for datastore location tells you the folder where its stored
-- [_] for live games, load datastore config from universe data (use a global universe manager not per world)
-- [_] allow shader scripts to be saved and served on CDN.
-- [_] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
+- [x] in command bar, add auto complete as well
+- [x] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
+- [x] for live games, universe config for datastore location tells you the folder where its stored
+- [x] for live games, load datastore config from universe data (use a global universe manager not per world)
+- [x] allow shader scripts to be saved and served on CDN.
+- [x] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
 
 - [_] fix viewport size glitch
 - [_] fix multi-viewport camera collision fix

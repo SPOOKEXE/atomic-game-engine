@@ -18,12 +18,10 @@ namespace engine::datastore {
 	inline constexpr std::string_view SQLITE_DATASTORE_ADAPTER = "sqlite";
 
 	// Resolves the SQLite database shared by one environment's logical stores.
-	std::filesystem::path SqliteDataStorePath(
-		const std::filesystem::path &root, world::SharedStoreEnvironment environment
-	);
+	std::filesystem::path
+	SqliteDataStorePath(const std::filesystem::path &root, world::SharedStoreEnvironment environment);
 
 	// Builds a SQLite adapter for one root and environment.
-	std::unique_ptr<world::DataStoreAdapter> MakeSqliteDataStoreAdapter(
-		std::filesystem::path root, world::SharedStoreEnvironment environment
-	);
+	std::unique_ptr<world::DataStoreAdapter>
+	MakeSqliteDataStoreAdapter(std::filesystem::path root, world::SharedStoreEnvironment environment);
 }

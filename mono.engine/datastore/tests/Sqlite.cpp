@@ -28,9 +28,8 @@ namespace {
 
 TEST_CASE("SQLite datastore saves, loads, and atomically replaces an image", "[datastore][sqlite]") {
 	const std::filesystem::path root = Scratch();
-	auto adapter = engine::datastore::MakeSqliteDataStoreAdapter(
-		root, engine::world::SharedStoreEnvironment::Live
-	);
+	auto adapter =
+		engine::datastore::MakeSqliteDataStoreAdapter(root, engine::world::SharedStoreEnvironment::Live);
 	const Name store("players");
 	std::vector<SharedStoreEntry> loaded;
 	std::string error;
@@ -60,16 +59,17 @@ TEST_CASE("SQLite datastore saves, loads, and atomically replaces an image", "[d
 
 TEST_CASE("SQLite datastore leaves the caller unchanged on malformed input", "[datastore][sqlite]") {
 	const std::filesystem::path root = Scratch();
-	auto adapter = engine::datastore::MakeSqliteDataStoreAdapter(
-		root, engine::world::SharedStoreEnvironment::Mock
-	);
+	auto adapter =
+		engine::datastore::MakeSqliteDataStoreAdapter(root, engine::world::SharedStoreEnvironment::Mock);
 	const std::vector<SharedStoreEntry> malformed{
 		{BusKind::MemoryStore, Name("wrong"), {}, 0},
 	};
 	std::string error;
 	CHECK(adapter->Save(Name("main"), malformed, error) == DataStoreStatus::Malformed);
 	CHECK_FALSE(error.empty());
-	CHECK_FALSE(std::filesystem::exists(
-		engine::datastore::SqliteDataStorePath(root, engine::world::SharedStoreEnvironment::Mock)
-	));
+	CHECK_FALSE(
+		std::filesystem::exists(
+			engine::datastore::SqliteDataStorePath(root, engine::world::SharedStoreEnvironment::Mock)
+		)
+	);
 }

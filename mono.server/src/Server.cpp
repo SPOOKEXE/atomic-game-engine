@@ -896,8 +896,7 @@ namespace server {
 		}
 
 		const bool remote = Settings.DataStoreProvider == engine::datastore::Provider::Http;
-		const bool sqlite =
-			!remote && Settings.DataStoreBackend == engine::datastore::Backend::SQLite;
+		const bool sqlite = !remote && Settings.DataStoreBackend == engine::datastore::Backend::SQLite;
 		const engine::core::Name adapterName(
 			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER
 				   : (sqlite ? engine::datastore::SQLITE_DATASTORE_ADAPTER
@@ -923,14 +922,16 @@ namespace server {
 			return false;
 		}
 
-		const std::string location = remote
-			? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
-			: (sqlite ? engine::datastore::SqliteDataStorePath(
-						 Settings.DataStoreRoot, Settings.DataStoreEnvironment
-					 ).string()
-					  : engine::world::DataStoreFilePath(
-							Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
-						).string());
+		const std::string location =
+			remote ? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
+				   : (sqlite ? engine::datastore::SqliteDataStorePath(
+								   Settings.DataStoreRoot, Settings.DataStoreEnvironment
+							   )
+								   .string()
+							 : engine::world::DataStoreFilePath(
+								   Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
+							   )
+								   .string());
 		std::string error;
 		const engine::world::DataStoreStatus loaded = persistence->Load(storeName, PersistedDataStore, error);
 		if (loaded == engine::world::DataStoreStatus::NotFound) {
@@ -978,13 +979,14 @@ namespace server {
 		if (Settings.DataStoreProvider == engine::datastore::Provider::Http) {
 			location = "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix;
 		} else if (Settings.DataStoreBackend == engine::datastore::Backend::SQLite) {
-			location = engine::datastore::SqliteDataStorePath(
-				Settings.DataStoreRoot, Settings.DataStoreEnvironment
-			).string();
+			location =
+				engine::datastore::SqliteDataStorePath(Settings.DataStoreRoot, Settings.DataStoreEnvironment)
+					.string();
 		} else {
 			location = engine::world::DataStoreFilePath(
-				Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
-			).string();
+						   Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
+			)
+						   .string();
 		}
 		std::string error;
 		const engine::world::DataStoreStatus status = DataStorePersistence->Save(storeName, records, error);
@@ -1038,8 +1040,8 @@ namespace server {
 					ENGINE_ERROR("--game '{}' has no durable DataStore location", Settings.GamePath);
 					return false;
 				}
-				Settings.DataStoreRoot = package.parent_path() /
-					(package.filename().string() + ".data") / info.DataStore.Root;
+				Settings.DataStoreRoot =
+					package.parent_path() / (package.filename().string() + ".data") / info.DataStore.Root;
 			} else {
 				Settings.DataStoreRoot = opened->Entrypoint().parent_path() / info.DataStore.Root;
 			}

@@ -1979,7 +1979,9 @@ namespace engine::game {
 			}
 			offset += bytes;
 			if (progress) {
-				progress(WorldImportPhase::Read, text.empty() ? 1.0f : static_cast<float>(offset) / text.size());
+				progress(
+					WorldImportPhase::Read, text.empty() ? 1.0f : static_cast<float>(offset) / text.size()
+				);
 			}
 		}
 
@@ -2019,10 +2021,7 @@ namespace engine::game {
 	}
 
 	world::WorldId CommitWorldImport(
-		world::Universe &universe,
-		const PreparedWorldImport &prepared,
-		core::Name rename,
-		std::string &error
+		world::Universe &universe, const PreparedWorldImport &prepared, core::Name rename, std::string &error
 	) {
 		error.clear();
 		world::WorldSettings settings = prepared.Settings;

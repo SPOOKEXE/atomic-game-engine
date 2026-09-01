@@ -1,11 +1,9 @@
 #include <engine/datastore/Sqlite.hpp>
-
 #include <engine/world/SharedStoreFile.hpp>
-
-#include <sqlite3.h>
 
 #include <limits>
 #include <span>
+#include <sqlite3.h>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -13,14 +11,12 @@
 
 namespace engine::datastore {
 	namespace {
-		constexpr const char *CREATE_SCHEMA =
-			"CREATE TABLE IF NOT EXISTS datastores ("
-			"name TEXT PRIMARY KEY NOT NULL, "
-			"image BLOB NOT NULL) WITHOUT ROWID";
+		constexpr const char *CREATE_SCHEMA = "CREATE TABLE IF NOT EXISTS datastores ("
+											  "name TEXT PRIMARY KEY NOT NULL, "
+											  "image BLOB NOT NULL) WITHOUT ROWID";
 		constexpr const char *LOAD_IMAGE = "SELECT image FROM datastores WHERE name = ?1";
-		constexpr const char *SAVE_IMAGE =
-			"INSERT INTO datastores(name, image) VALUES(?1, ?2) "
-			"ON CONFLICT(name) DO UPDATE SET image = excluded.image";
+		constexpr const char *SAVE_IMAGE = "INSERT INTO datastores(name, image) VALUES(?1, ?2) "
+										   "ON CONFLICT(name) DO UPDATE SET image = excluded.image";
 
 		class Database {
 		  public:
@@ -75,17 +71,14 @@ namespace engine::datastore {
 				   store.Text().size() <= world::MAXIMUM_DATASTORE_NAME_BYTES;
 		}
 
-		world::DataStoreStatus Open(
-			const std::filesystem::path &path, const int flags, Database &database, std::string &error
-		) {
+		world::DataStoreStatus
+		Open(const std::filesystem::path &path, const int flags, Database &database, std::string &error) {
 			const int opened = sqlite3_open_v2(path.string().c_str(), &database.Handle, flags, nullptr);
-			return opened == SQLITE_OK ? world::DataStoreStatus::Ok
-									   : Fail(database.Handle, opened, error);
+			return opened == SQLITE_OK ? world::DataStoreStatus::Ok : Fail(database.Handle, opened, error);
 		}
 
-		world::DataStoreStatus Prepare(
-			sqlite3 *database, const char *sql, Statement &statement, std::string &error
-		) {
+		world::DataStoreStatus
+		Prepare(sqlite3 *database, const char *sql, Statement &statement, std::string &error) {
 			sqlite3_stmt *prepared = nullptr;
 			const int result = sqlite3_prepare_v2(database, sql, -1, &prepared, nullptr);
 			if (result != SQLITE_OK) {
@@ -103,9 +96,7 @@ namespace engine::datastore {
 				: Path(SqliteDataStorePath(root, environment)) {}
 
 			world::DataStoreStatus Load(
-				const core::Name store,
-				std::vector<world::SharedStoreEntry> &entries,
-				std::string &error
+				const core::Name store, std::vector<world::SharedStoreEntry> &entries, std::string &error
 			) override {
 				error.clear();
 				if (!ValidStoreName(store)) {
@@ -123,8 +114,7 @@ namespace engine::datastore {
 				}
 
 				Database database;
-				world::DataStoreStatus status =
-					Open(Path, SQLITE_OPEN_READONLY, database, error);
+				world::DataStoreStatus status = Open(Path, SQLITE_OPEN_READONLY, database, error);
 				if (status != world::DataStoreStatus::Ok) {
 					return status;
 				}
@@ -157,8 +147,8 @@ namespace engine::datastore {
 				}
 
 				const int byteCount = sqlite3_column_bytes(statement.Handle, 0);
-				if (byteCount < 0 || static_cast<uint64_t>(byteCount) >
-								 world::MAXIMUM_SHARED_STORE_IMAGE_BYTES) {
+				if (byteCount < 0 ||
+					static_cast<uint64_t>(byteCount) > world::MAXIMUM_SHARED_STORE_IMAGE_BYTES) {
 					error = "SQLite DataStore image exceeds 256 MiB";
 					return world::DataStoreStatus::Malformed;
 				}
@@ -168,12 +158,10 @@ namespace engine::datastore {
 					return world::DataStoreStatus::IoError;
 				}
 				const std::span<const std::byte> image(first, static_cast<size_t>(byteCount));
-				const world::SharedStoreFileStatus decoded = world::DecodeSharedStoreImage(
-					image, world::BusKind::DataStore, entries, error
-				);
-				return decoded == world::SharedStoreFileStatus::Ok
-						   ? world::DataStoreStatus::Ok
-						   : world::DataStoreStatus::Malformed;
+				const world::SharedStoreFileStatus decoded =
+					world::DecodeSharedStoreImage(image, world::BusKind::DataStore, entries, error);
+				return decoded == world::SharedStoreFileStatus::Ok ? world::DataStoreStatus::Ok
+																   : world::DataStoreStatus::Malformed;
 			}
 
 			world::DataStoreStatus Save(
@@ -188,9 +176,8 @@ namespace engine::datastore {
 				}
 
 				std::vector<std::byte> image;
-				if (world::EncodeSharedStoreImage(
-						world::BusKind::DataStore, entries, image, error
-					) != world::SharedStoreFileStatus::Ok) {
+				if (world::EncodeSharedStoreImage(world::BusKind::DataStore, entries, image, error) !=
+					world::SharedStoreFileStatus::Ok) {
 					return world::DataStoreStatus::Malformed;
 				}
 				if (image.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
@@ -206,9 +193,8 @@ namespace engine::datastore {
 				}
 
 				Database database;
-				world::DataStoreStatus status = Open(
-					Path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, database, error
-				);
+				world::DataStoreStatus status =
+					Open(Path, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, database, error);
 				if (status != world::DataStoreStatus::Ok) {
 					return status;
 				}
@@ -230,18 +216,14 @@ namespace engine::datastore {
 					SQLITE_TRANSIENT
 				);
 				const int imageBound = sqlite3_bind_blob(
-					statement.Handle,
-					2,
-					image.data(),
-					static_cast<int>(image.size()),
-					SQLITE_TRANSIENT
+					statement.Handle, 2, image.data(), static_cast<int>(image.size()), SQLITE_TRANSIENT
 				);
 				if (nameBound != SQLITE_OK || imageBound != SQLITE_OK) {
 					return Fail(database.Handle, sqlite3_errcode(database.Handle), error);
 				}
 				const int stepped = sqlite3_step(statement.Handle);
 				return stepped == SQLITE_DONE ? world::DataStoreStatus::Ok
-									  : Fail(database.Handle, stepped, error);
+											  : Fail(database.Handle, stepped, error);
 			}
 
 		  private:
@@ -249,15 +231,13 @@ namespace engine::datastore {
 		};
 	}
 
-	std::filesystem::path SqliteDataStorePath(
-		const std::filesystem::path &root, const world::SharedStoreEnvironment environment
-	) {
+	std::filesystem::path
+	SqliteDataStorePath(const std::filesystem::path &root, const world::SharedStoreEnvironment environment) {
 		return root / world::Describe(environment) / "datastores.sqlite3";
 	}
 
-	std::unique_ptr<world::DataStoreAdapter> MakeSqliteDataStoreAdapter(
-		std::filesystem::path root, const world::SharedStoreEnvironment environment
-	) {
+	std::unique_ptr<world::DataStoreAdapter>
+	MakeSqliteDataStoreAdapter(std::filesystem::path root, const world::SharedStoreEnvironment environment) {
 		return std::make_unique<SqliteDataStoreAdapter>(std::move(root), environment);
 	}
 }
