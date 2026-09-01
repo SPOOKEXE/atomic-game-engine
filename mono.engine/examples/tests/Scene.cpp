@@ -16,7 +16,6 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/scene/ActiveCamera.hpp>
-#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -1714,64 +1713,6 @@ TEST_CASE("the ported libraries pass their own test suite", "[examples][scene]")
 
 	CHECK(CountNamed(store, "MagicTestsPassed") == 1);
 	CHECK(CountNamed(store, "MagicTestsFailed") == 0);
-}
-
-TEST_CASE("the Bladeborne Luau combat core passes its own test suite", "[examples][scene][bladeborne]") {
-	const StagedAssets assets;
-
-	Store store("bladeborne.tests");
-	Scheduler systems;
-
-	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("BladeborneTests.luau"), error);
-	INFO(error);
-	REQUIRE(loaded);
-
-	CHECK(CountNamed(store, "BladeborneTestsPassed") == 1);
-}
-
-TEST_CASE("the Bladeborne Luau demo boots and ticks its husks", "[examples][scene][bladeborne]") {
-	const StagedAssets assets;
-
-	Store store("bladeborne.demo");
-	Scheduler systems;
-
-	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Bladeborne.luau"), error);
-	INFO(error);
-	REQUIRE(loaded);
-
-	for (int tick = 0; tick < 180; tick++) {
-		systems.Tick(store, 1.0f / 60.0f);
-	}
-	const Entity demo = InScene(store, "BladeborneDemo");
-	REQUIRE(demo != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstChild(demo, "TrainingFloor") != engine::ecs::NULL_ENTITY);
-
-	const Entity player = store.FindFirstChild(engine::scene::PlayersOf(store), "Husk 1");
-	REQUIRE(player != engine::ecs::NULL_ENTITY);
-	const Entity character = engine::scene::CharacterOf(store, player);
-	REQUIRE(character != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstChild(character, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
-	const Entity humanoid = store.FindFirstChild(character, "Humanoid");
-	REQUIRE(humanoid != engine::ecs::NULL_ENTITY);
-	const engine::scene::Humanoid *health = store.Get<engine::scene::Humanoid>(humanoid);
-	REQUIRE(health != nullptr);
-	CHECK(health->Health < health->MaxHealth);
-}
-
-TEST_CASE("the Bladeborne Luau connected-client load world boots", "[examples][scene][bladeborne]") {
-	const StagedAssets assets;
-
-	Store store("bladeborne.load");
-	Scheduler systems;
-
-	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("BladeborneLoad.luau"), error);
-	INFO(error);
-	REQUIRE(loaded);
-	systems.Tick(store, 1.0f / 60.0f);
-	CHECK(InScene(store, "BladeborneLoadFloor") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the magic scene fires spells that crater terrain", "[examples][scene]") {

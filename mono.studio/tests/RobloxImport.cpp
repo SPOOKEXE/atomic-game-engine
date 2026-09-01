@@ -1,9 +1,12 @@
 // Roblox place analysis without an ImGui window.
 
+#include <engine/effects/Registration.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -168,4 +171,46 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	const engine::ecs::Entity driver = store.FindFirstChild(workspace, "Driver");
 	REQUIRE(driver != engine::ecs::NULL_ENTITY);
 	CHECK(store.Has<engine::script::Disabled>(driver));
+}
+
+TEST_CASE(
+	"the Bladeborne demo keeps its Luau inside one world artifact", "[studio][robloximport][bladeborne]"
+) {
+	engine::game::RegisterGameClasses();
+	engine::effects::RegisterEffectClasses();
+	(void)studio::FolderClass();
+
+	const std::filesystem::path repository =
+		std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+	const std::filesystem::path demo = repository / "mono.engine/examples/BladeborneFloor0.aworld";
+	REQUIRE(std::filesystem::is_regular_file(demo));
+
+	engine::world::Universe universe;
+	std::string error;
+	const engine::world::WorldId imported =
+		engine::game::ImportWorld(universe, demo, engine::core::Name("BladeborneFloor0Test"), error);
+	INFO(error);
+	REQUIRE(imported.IsValid());
+	CHECK(error.empty());
+
+	universe.Enter(imported, [](engine::ecs::Store &store) {
+		const engine::ecs::Entity serverScripts = store.FindFirstRoot("ServerScriptService");
+		REQUIRE(serverScripts != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity port = store.FindFirstChild(serverScripts, "BladebornePort");
+		REQUIRE(port != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(port, "BladeborneRuntime") != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity core = store.FindFirstChild(port, "BladeborneCore");
+		REQUIRE(core != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(core, "CombatConfig") != engine::ecs::NULL_ENTITY);
+
+		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
+		REQUIRE(sources != nullptr);
+		CHECK(
+			sources->Find(engine::core::Name("BladebornePort/BladeborneCore/CombatConfig.luau")) != nullptr
+		);
+		CHECK(
+			sources->Find(engine::core::Name("src/ReplicatedStorage/Modules/Data/CombatConfig.luau")) !=
+			nullptr
+		);
+	});
 }
