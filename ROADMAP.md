@@ -91,6 +91,7 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] porting Roblox games: the compatibility widget reports missing classes and property conflicts, maps each missing Roblox class to an insertable engine class, persists those choices, and the headless converter reloads every `.aworld` it writes.
 - [x] review additions and ensure they all work, we benchmark critical ones and test them.
 
+- [_] check above edits, changes and additions and test them
 - [_] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
 - [_] build out the `Components` dock widget like properties where you can edit the component values
 - [_] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
