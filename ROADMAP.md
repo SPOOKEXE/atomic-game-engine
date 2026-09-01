@@ -96,7 +96,7 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
   manually - ensure it uses the CollectionService and such.
 - [_] the tooltip for "Faces Side" dropdown has "\n" embeded in text instead of actually doing newlines
-- [_] add tooltip for: Play, Run, Pause, Stop, Spawn Player, Remove Player, Insert Object, 
+- [_] add tooltip for: Play, Run, Pause, Stop, Spawn Player, Remove Player, Insert Object
 - [_] remove the "Remove Active World" button in World dropdown
 - [_] create a `View > DataStores` dropdown for the datastore configuration and setup (move preferences - Data to this instead)
 - [_] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
@@ -105,7 +105,22 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] for live games, universe config for datastore location tells you the folder where its stored
 - [_] Make a `View > CDN` dropdown and move all preferences tab content there instead. Add a `Configure CDN` button in Assets dock widget that opens the the CDN dock widget (or focuses it if already open).
 - [_] allow shader scripts to be saved and served on CDN.
-- [_] 
+- [_] in command bar, add auto complete as well
+- [_] default widgets: 1. side top: Explorer, Worlds, Live Instances side bottom: Properties, Components
+- [_] move `View > Sync Rojo` to `Sync` dropdown
+- [_] Pipeline Profile and Bus do not do anything? even when running Rings demo. Does bus need to be swapped to jobs or something or be removed if redundant?
+- [_] in `View` dropdown in studio, separate by categories: General, Script, Render, Engine, Debug & Visual
+- [_] in `View` dropdown, add a `Hide Every Panel` button below the `Show Every Panel` button.
+- [_] Move `View > Toolbar Editor, Dock Widgets, Plugin Widgets` to `UI` dropdown
+- [_] Merge `World Lighting` into `Render Pipeline` and remove it
+- [_] Add a `New Profile` in `Render Pipeline` Profile dropdown above `Save Profile As...` which uses default pbr
+- [_] remove the `Reset to Default PBR` button.
+- [_] a bunch of the Render Pipeline nodes have a `Optional` that does not do anything? Check and remove if useless.
+- [_] ensure `Render Pipeline` previews do not render if: menu closed, menu is not visible (e.g. different tab open on same lock spot)
+- [_] rename "Datasets" to "DataStore" checkbox in `View` tab.
+- [_] make `Toolbar` and `Dock Widgets` buttons in `Plugins` tab toggle the state of the dock widget, not force true.
+- [_] remove `Demo` tab
+- [_] move `View > Demo Nodes` to a new dropdown called `Demo` and call it `Demo > Node Graph`
 
 ### v0.22
 
