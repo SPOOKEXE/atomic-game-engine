@@ -73,7 +73,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] require SDL GPU's Vulkan backend everywhere, feed it SPIR-V only, and package pinned MoltenVK 1.4.2 beside Apple presentation executables with the upstream artifact checksum enforced.
 - [x] complete the skinning pipeline: `assets::MeshVertex` carries joint indices and weights, bake preserves glTF influences, render uploads and rebases a palette per rig, and fixed-tick animation tracks sample and blend bounded `.aanim` clips into bone poses before palette collection.
 
-- [_] review world export and world loading so that:
+- [x] review world export and world loading so that:
 	1. we can export a full game as a "project zip" which we can load on the server
 	2. we can connect to this server and download assets a we need them
 	3. support connecting cdns and doing a validation pass where we check if the cdns are configured
