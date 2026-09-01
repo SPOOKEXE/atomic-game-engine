@@ -105,7 +105,7 @@ namespace studio {
 		}
 
 		const engine::ecs::PropertyDescriptor *
-		PropertyNamed(const engine::ecs::ClassInfo &info, std::string_view name) {
+		RobloxPropertyNamed(const engine::ecs::ClassInfo &info, std::string_view name) {
 			const auto found =
 				std::find_if(info.Properties.begin(), info.Properties.end(), [&](const auto &property) {
 					return property.Spelling == name;
@@ -267,8 +267,9 @@ namespace studio {
 			return false;
 		}
 
-		const engine::ecs::PropertyDescriptor *
-		PropertyNamed(const engine::ecs::Store &store, engine::ecs::Entity instance, std::string_view name) {
+		const engine::ecs::PropertyDescriptor *RobloxPropertyNamed(
+			const engine::ecs::Store &store, engine::ecs::Entity instance, std::string_view name
+		) {
 			const std::span<const engine::ecs::PropertyDescriptor> properties = store.PropertiesOf(instance);
 			const auto found = std::find_if(properties.begin(), properties.end(), [&](const auto &property) {
 				return property.Spelling == name;
@@ -368,7 +369,7 @@ namespace studio {
 					continue;
 				}
 				const engine::ecs::PropertyDescriptor *descriptor =
-					PropertyNamed(state.Store, instance, property.Name);
+					RobloxPropertyNamed(state.Store, instance, property.Name);
 				if (descriptor == nullptr) {
 					state.Report.SkippedProperties++;
 					continue;
@@ -419,7 +420,8 @@ namespace studio {
 			if (classId.IsValid()) {
 				const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(classId);
 				for (const engine::bake::RobloxProperty &property : instance.Properties) {
-					const engine::ecs::PropertyDescriptor *descriptor = PropertyNamed(info, property.Name);
+					const engine::ecs::PropertyDescriptor *descriptor =
+						RobloxPropertyNamed(info, property.Name);
 					if (descriptor == nullptr) {
 						AddGap(
 							missingProperties,
