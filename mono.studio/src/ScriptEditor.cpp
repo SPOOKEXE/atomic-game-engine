@@ -1,4 +1,5 @@
 #include "ExternalEditor.hpp"
+#include "ScriptFieldWindow.hpp"
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
@@ -23,8 +24,19 @@ namespace studio {
 	using engine::core::Name;
 	using engine::ecs::Store;
 
+	ImGuiWindow *FindCodeField(const ImGuiID fieldId) {
+		for (ImGuiWindow *window : GImGui->Windows) {
+			if (window->ChildId == fieldId) {
+				return window;
+			}
+		}
+		return nullptr;
+	}
+
 	namespace {
-		void DrawScriptSource(std::string_view text, const CodeEdit &edit, ImVec2 fieldMin, ImVec2 fieldSize);
+		void DrawScriptSource(
+			std::string_view text, const CodeEdit &edit, ImVec2 fieldMin, ImVec2 fieldSize, ImGuiID fieldId
+		);
 	}
 
 	void Editor::DrawScripts() {
@@ -272,7 +284,8 @@ namespace studio {
 						// See `DrawScriptGutter` for why reading one window's
 						// scroll is a different kind of reach into imgui from
 						// the one this file refuses two hundred lines up.
-						const float gutter = DrawScriptGutter(tab);
+						const ImGuiID fieldId = ImGui::GetID("##text");
+						const float gutter = DrawScriptGutter(tab, fieldId);
 
 						ImGui::SameLine(0.0f, 0.0f);
 
@@ -331,7 +344,7 @@ namespace studio {
 						if (Prefs.ScriptBackground.has_value()) {
 							ImGui::PopStyleColor();
 						}
-						DrawScriptSource(tab.Text, tab.Edit, fieldMin, ImGui::GetItemRectSize());
+						DrawScriptSource(tab.Text, tab.Edit, fieldMin, ImGui::GetItemRectSize(), fieldId);
 
 						// Read here, while the field is still the last item,
 						// so imgui's own rest delay decides when a tooltip is
@@ -348,7 +361,7 @@ namespace studio {
 
 						if (minimapFits) {
 							ImGui::SameLine(0.0f, 0.0f);
-							DrawScriptMinimap(tab, minimapWidth);
+							DrawScriptMinimap(tab, minimapWidth, fieldId);
 						}
 
 						// Ctrl+Space asks for the list whatever is under the
@@ -360,10 +373,10 @@ namespace studio {
 						UpdateScriptCompletion(tab, changed, asked);
 
 						if (ScriptPopupOpen) {
-							DrawScriptCompletion(tab, fieldMin, popupId);
+							DrawScriptCompletion(tab, fieldMin, popupId, fieldId);
 						}
 
-						DrawScriptHover(tab, fieldMin, resting);
+						DrawScriptHover(tab, fieldMin, resting, fieldId);
 
 						// Ctrl+wheel over the text, which is what every editor
 						// binds it to.
@@ -490,9 +503,13 @@ namespace studio {
 		}
 
 		void DrawScriptSource(
-			const std::string_view text, const CodeEdit &edit, const ImVec2 fieldMin, const ImVec2 fieldSize
+			const std::string_view text,
+			const CodeEdit &edit,
+			const ImVec2 fieldMin,
+			const ImVec2 fieldSize,
+			const ImGuiID fieldId
 		) {
-			ImGuiWindow *code = ImGui::FindWindowByName("##text");
+			ImGuiWindow *code = FindCodeField(fieldId);
 			if (code == nullptr) {
 				return;
 			}
@@ -717,7 +734,9 @@ namespace studio {
 		}
 	}
 
-	void Editor::DrawScriptCompletion(OpenScript &tab, const ImVec2 fieldMin, const unsigned int popupId) {
+	void Editor::DrawScriptCompletion(
+		OpenScript &tab, const ImVec2 fieldMin, const unsigned int popupId, const unsigned int fieldId
+	) {
 		const auto count = static_cast<int>(ScriptCompletions.size());
 		if (count == 0) {
 			ScriptPopupOpen = false;
@@ -766,7 +785,7 @@ namespace studio {
 		// The field's own scroll, from the window it made - the same lookup and
 		// the same justification `DrawScriptGutter` gives above.
 		ImVec2 scroll(0.0f, 0.0f);
-		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
+		if (const ImGuiWindow *code = FindCodeField(fieldId); code != nullptr) {
 			scroll = ImVec2(code->Scroll.x, code->Scroll.y);
 		}
 
@@ -926,7 +945,7 @@ namespace studio {
 		ScriptCompletions.clear();
 	}
 
-	float Editor::DrawScriptGutter(const OpenScript &tab) {
+	float Editor::DrawScriptGutter(const OpenScript &tab, const unsigned int fieldId) {
 		// **One column of line numbers, and a click on one toggles a
 		// breakpoint.** That is where every editor puts it, and it is the
 		// difference between a debugger somebody uses and one they read about:
@@ -955,14 +974,14 @@ namespace studio {
 		// lines up. That struct is a private *layout* - its fields move between
 		// releases and reading one is reading whatever happens to be at an
 		// offset. A window's `Scroll` is the same value `GetScrollY` returns for
-		// the current window in public API; what is internal is only *looking
-		// one up by name*, and a name imgui derives from a label it was given.
+		// the current window in public API; what is internal is only finding the
+		// child through the id imgui assigned it.
 		//
 		// The failure mode is also benign in a way the other is not: a lookup
 		// that stops working answers null, and the gutter draws from the top
 		// rather than misreading memory.
 		float scroll = 0.0f;
-		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
+		if (const ImGuiWindow *code = FindCodeField(fieldId); code != nullptr) {
 			scroll = code->Scroll.y;
 		}
 
@@ -1034,7 +1053,7 @@ namespace studio {
 		return width;
 	}
 
-	void Editor::DrawScriptMinimap(const OpenScript &tab, const float width) {
+	void Editor::DrawScriptMinimap(const OpenScript &tab, const float width, const unsigned int fieldId) {
 		const ImVec2 area = ImGui::GetContentRegionAvail();
 
 		ImGui::BeginChild("##minimap", ImVec2(width, area.y), false, ImGuiWindowFlags_NoScrollbar);
@@ -1050,7 +1069,7 @@ namespace studio {
 		// lookup, the same justification and the same benign fallback
 		// `DrawScriptGutter` documents above.
 		float scroll = 0.0f;
-		ImGuiWindow *code = ImGui::FindWindowByName("##text");
+		ImGuiWindow *code = FindCodeField(fieldId);
 		if (code != nullptr) {
 			scroll = code->Scroll.y;
 		}
@@ -1074,10 +1093,16 @@ namespace studio {
 
 			// Writing the field's scroll is the same reach as reading it:
 			// internal `SetScrollY(window, ...)` sets what public `SetScrollY`
-			// sets on the current window, and the only internal part is
-			// addressing the window by name - which already answered non-null
-			// on the line above, or this does nothing.
-			ImGui::SetScrollY(code, MinimapScrollFor(picked, lines, rowHeight, area.y));
+			// sets on the current window. The only internal part is addressing
+			// the child through its id, which already answered non-null above.
+			scroll = MinimapScrollFor(picked, lines, rowHeight, area.y);
+			ImGui::SetScrollY(code, scroll);
+		} else if (ImGui::IsItemHovered() && code != nullptr && ImGui::GetIO().MouseWheel != 0.0f) {
+			constexpr float WHEEL_ROWS = 3.0f;
+			scroll = std::clamp(
+				code->Scroll.y - (ImGui::GetIO().MouseWheel * rowHeight * WHEEL_ROWS), 0.0f, code->ScrollMax.y
+			);
+			ImGui::SetScrollY(code, scroll);
 		}
 
 		ImDrawList *draw = ImGui::GetWindowDrawList();
@@ -1144,7 +1169,9 @@ namespace studio {
 		ImGui::EndChild();
 	}
 
-	void Editor::DrawScriptHover(OpenScript &tab, const ImVec2 fieldMin, const bool hovered) {
+	void Editor::DrawScriptHover(
+		OpenScript &tab, const ImVec2 fieldMin, const bool hovered, const unsigned int fieldId
+	) {
 		// The popup wins outright: two floating answers at the caret would
 		// fight for the same spot and the one being typed against matters.
 		if (!hovered || ScriptPopupOpen) {
@@ -1163,7 +1190,7 @@ namespace studio {
 		// the top-left when it fails, which at worst hovers the wrong word
 		// for a frame.
 		ImVec2 scroll(0.0f, 0.0f);
-		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
+		if (const ImGuiWindow *code = FindCodeField(fieldId); code != nullptr) {
 			scroll = ImVec2(code->Scroll.x, code->Scroll.y);
 		}
 

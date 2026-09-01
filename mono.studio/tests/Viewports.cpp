@@ -22,6 +22,7 @@
 TEST_SUITE_ID("studio.viewports")
 
 using engine::world::WorldId;
+using studio::CameraRelativeMovement;
 using studio::CanvasForViewport;
 using studio::ChooseViewportFor;
 using studio::DefaultViewportCamera;
@@ -108,6 +109,18 @@ TEST_CASE("new worlds start above the scene looking at the origin", "[studio][vi
 	CHECK(pose.Frame.LookVector().Dot((engine::core::Vector3::Zero - pose.Frame.Position).Unit()) > 0.9999f);
 	const engine::core::CFrame rebuilt = engine::core::CFrame::Angles(pose.Pitch, pose.Yaw, 0.0f);
 	CHECK(rebuilt.LookVector().Dot(pose.Frame.LookVector()) > 0.9999f);
+}
+
+TEST_CASE("fly movement uses the camera's full basis", "[studio][viewports][camera]") {
+	const engine::core::CFrame rotation = engine::core::CFrame::Angles(0.65f, -0.4f, 0.0f);
+
+	CHECK(CameraRelativeMovement(rotation, 1.0f, 0.0f, 0.0f) == rotation.LookVector());
+	CHECK(CameraRelativeMovement(rotation, 0.0f, 1.0f, 0.0f) == rotation.RightVector());
+	CHECK(CameraRelativeMovement(rotation, 0.0f, 0.0f, 1.0f) == rotation.UpVector());
+	CHECK(CameraRelativeMovement(rotation, 0.0f, 0.0f, -1.0f) == rotation.UpVector() * -1.0f);
+
+	const engine::core::Vector3 combined = CameraRelativeMovement(rotation, 1.0f, -1.0f, 1.0f);
+	CHECK(combined == rotation.LookVector() - rotation.RightVector() + rotation.UpVector());
 }
 
 TEST_CASE("each viewport remembers an independent camera per world", "[studio][viewports][camera]") {

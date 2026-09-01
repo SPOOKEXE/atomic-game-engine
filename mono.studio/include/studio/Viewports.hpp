@@ -89,6 +89,19 @@ namespace studio {
 	// @since v0.19
 	ViewportCameraPose DefaultViewportCamera();
 
+	// Combines fly-camera input in the camera's own basis. Q and E belong to
+	// the same basis as WASD, so pitching the camera also pitches its vertical
+	// movement instead of leaving it tied to the world's Y axis.
+	//
+	// @param rotation Camera rotation without translation.
+	// @param forward  Signed W/S input.
+	// @param right    Signed D/A input.
+	// @param up       Signed E/Q input.
+	// @return The unnormalised movement vector.
+	// @since v0.20
+	engine::core::Vector3
+	CameraRelativeMovement(const engine::core::CFrame &rotation, float forward, float right, float up);
+
 	// Per-panel, per-world camera memory. This is editor session state only and
 	// never enters a world document, snapshot or replication stream.
 	//

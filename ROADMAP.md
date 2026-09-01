@@ -120,12 +120,12 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
 - [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
 - [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
-- [_] fix viewport size glitch
-- [_] fix multi-viewport camera collision fix
-- [_] fix script editor, all text matches background
-- [_] the sideview of the script editor doesn't scroll and is not interactable
-- [_] Q/E camera movement should depend on camera rotation, not global space
-- [_] shaders demo has no shaders loaded
+- [x] fix viewport size glitch
+- [x] fix multi-viewport camera collision fix
+- [x] fix script editor, all text matches background
+- [x] the sideview of the script editor doesn't scroll and is not interactable
+- [x] Q/E camera movement should depend on camera rotation, not global space
+- [x] shaders demo has no shaders loaded
 
 ### v0.22
 

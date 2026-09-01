@@ -989,23 +989,25 @@ namespace studio {
 		// child - so the column is drawn next to it and told where that child
 		// has scrolled to.
 		//
-		// @param tab The script being edited.
+		// @param tab     The script being edited.
+		// @param fieldId The multiline field's hierarchical imgui id.
 		// @return How wide the column drew, so the caller can lay out beside it.
-		float DrawScriptGutter(const OpenScript &tab);
+		float DrawScriptGutter(const OpenScript &tab, unsigned int fieldId);
 
 		// The minimap column on the code field's right.
 		//
 		// A shrunken impression of the whole file - stripes per text run, not
 		// tiny glyphs - with the visible region marked, and a click or drag
 		// scrolls the code there. The gutter's sibling in every discipline:
-		// its own child window, the same `##text` scroll lookup with the same
+		// its own child window, the same multiline child id with the same
 		// benign fallback, and one `InvisibleButton` so imgui owns the
 		// hit-testing.
 		//
-		// @param tab   The script being edited.
-		// @param width How wide to draw, already scaled.
+		// @param tab     The script being edited.
+		// @param width   How wide to draw, already scaled.
+		// @param fieldId The multiline field's hierarchical imgui id.
 		// @since v0.17
-		void DrawScriptMinimap(const OpenScript &tab, float width);
+		void DrawScriptMinimap(const OpenScript &tab, float width, unsigned int fieldId);
 
 		// The tooltip for whatever word the mouse is resting on.
 		//
@@ -1022,8 +1024,9 @@ namespace studio {
 		// @param hovered  Whether the field reported a rested hover this
 		//                 frame, read by the caller right after the field so
 		//                 imgui's hover delay owns the timing.
+		// @param fieldId  The multiline field's hierarchical imgui id.
 		// @since v0.17
-		void DrawScriptHover(OpenScript &tab, ImVec2 fieldMin, bool hovered);
+		void DrawScriptHover(OpenScript &tab, ImVec2 fieldMin, bool hovered, unsigned int fieldId);
 
 		// Rebuilds the completion list when there is a reason to.
 		//
@@ -1047,8 +1050,10 @@ namespace studio {
 		// @param tab      The script being edited.
 		// @param fieldMin The code field's top-left, in screen space.
 		// @param popupId  The id the navigation keys are owned by.
+		// @param fieldId  The multiline field's hierarchical imgui id.
 		// @since v0.14
-		void DrawScriptCompletion(OpenScript &tab, ImVec2 fieldMin, unsigned int popupId);
+		void
+		DrawScriptCompletion(OpenScript &tab, ImVec2 fieldMin, unsigned int popupId, unsigned int fieldId);
 
 		// The names of the instances beside a script in its tree.
 		//

@@ -770,7 +770,9 @@ namespace studio {
 		const Vector3 right = rotation.RightVector();
 
 		Vector3 position = frame.Position;
-		Vector3 move;
+		float forwardInput = 0.0f;
+		float rightInput = 0.0f;
+		float upInput = 0.0f;
 
 		// **WASD without holding a mouse button, which is what an author
 		// expects.** Flying used to require the right button down - the
@@ -808,24 +810,25 @@ namespace studio {
 
 		if (driving) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
-				move = move + forward;
+				forwardInput += 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_S)) {
-				move = move - forward;
+				forwardInput -= 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_D)) {
-				move = move + right;
+				rightInput += 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_A)) {
-				move = move - right;
+				rightInput -= 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_E)) {
-				move = move + Vector3{0.0f, 1.0f, 0.0f};
+				upInput += 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_Q)) {
-				move = move - Vector3{0.0f, 1.0f, 0.0f};
+				upInput -= 1.0f;
 			}
 		}
+		const Vector3 move = CameraRelativeMovement(rotation, forwardInput, rightInput, upInput);
 
 		// --- pan, dolly and focus -------------------------------------------
 		//
