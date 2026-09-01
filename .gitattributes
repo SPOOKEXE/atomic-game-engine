@@ -1,0 +1,2 @@
+# Authored world containers embed external scripts and should not be line-merged.
+*.aworld binary

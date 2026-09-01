@@ -181,6 +181,12 @@ endforeach()
 # `<scene>/<library>`, one pair per line. A scene that needs no modules is
 # absent, which is every scene but three.
 set(scene_libraries
+	Bladeborne/BladeborneCore
+	Bladeborne/BladeborneRuntime
+	BladeborneLoad/BladeborneCore
+	BladeborneLoad/BladeborneRuntime
+	BladeborneTests/BladeborneCore
+	BladeborneTests/BladeborneTests
 	Magic/MagicCore
 	Magic/MagicRuntime
 	Magic/TerrainCore
