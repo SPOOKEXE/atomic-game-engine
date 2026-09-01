@@ -73,6 +73,25 @@ namespace studio {
 		RobloxImportResult Import;
 	};
 
+	// One recovered script's eligibility for a generated Rojo project.
+	//
+	// A ready subject has a source path relative to the project root. An invalid
+	// subject stays visible with the exact hierarchy rule that refused it.
+	struct RobloxRojoSubject {
+		std::string InstancePath;
+		std::string ClassName;
+		std::filesystem::path SourcePath;
+		bool Valid = false;
+		std::string Reason;
+	};
+
+	// What creating a Rojo project wrote and what it deliberately left embedded.
+	struct RobloxRojoSetupResult {
+		std::filesystem::path ProjectFile;
+		size_t ScriptsWritten = 0;
+		std::vector<RobloxRojoSubject> Subjects;
+	};
+
 	// Compares every decoded instance and property with the current ECS class
 	// table. Callers must have registered the normal engine class tree first.
 	RobloxImportAnalysis AnalyzeRobloxImport(
@@ -83,6 +102,24 @@ namespace studio {
 	// any choices loaded from configuration.
 	std::vector<RobloxAssetChoice>
 	RobloxAssetChoices(const engine::bake::RobloxModel &model, const RobloxAssetMappings &mappings);
+
+	// Classifies recovered scripts before any files are written. A simple subject
+	// is under a service root through folders or standard script containers.
+	// Complex instance trees, ambiguous names and paths Rojo would reinterpret
+	// are reported as invalid instead of being flattened into a different game.
+	std::vector<RobloxRojoSubject> RobloxRojoSubjects(const engine::bake::RobloxModel &model);
+
+	// Creates a new Rojo project containing every valid recovered script. The
+	// destination must not exist, so setup can never overwrite an author's work.
+	// Files are staged beside it and renamed into place only after every write
+	// succeeds.
+	bool SetupRobloxRojoProject(
+		const engine::bake::RobloxModel &model,
+		const std::filesystem::path &destination,
+		std::string_view projectName,
+		RobloxRojoSetupResult &out,
+		std::string &error
+	);
 
 	// Builds a decoded place into one edit-mode world. Matching service roots
 	// are reused, missing classes use the selected engine class or a Folder

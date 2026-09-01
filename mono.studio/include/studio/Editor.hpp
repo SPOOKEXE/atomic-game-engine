@@ -5710,9 +5710,11 @@ namespace studio {
 		RobloxAssetMappings RobloxMappings;
 		RobloxClassMappings RobloxClassMap;
 		std::vector<RobloxAssetChoice> RobloxChoices;
+		std::vector<RobloxRojoSubject> RobloxRojoScripts;
 		std::string RobloxImportStatus;
 		std::string RobloxMappingIdentifier;
 		std::string RobloxMappingBrowsePath;
+		std::string RobloxRojoBrowsePath;
 		bool RobloxMappingsLoaded = false;
 		bool RobloxImportApplied = false;
 		bool RobloxImportDisableScripts = true;

@@ -191,7 +191,7 @@ namespace studio {
 		// Instances created, of any kind.
 		size_t Instances = 0;
 
-		// Of those, how many carry a program.
+		// Programs staged, including source refreshed on a reused script instance.
 		size_t Scripts = 0;
 
 		// Paths named by the project that are not on disk.

@@ -1509,6 +1509,44 @@ namespace studio {
 			}
 		}
 
+		// A project generator can name the script instance explicitly and point its
+		// `$path` at the source file. In that shape the file supplies the existing
+		// node's program rather than creating a script beneath the script. Ordinary
+		// `$path` nodes still fall through to `BuildPathInto` unchanged.
+		bool StageScriptPathInto(
+			Store &store,
+			const std::filesystem::path &root,
+			const std::string &path,
+			Entity into,
+			RojoSyncReport &report
+		) {
+			if (path.empty() || into == NULL_ENTITY) {
+				return false;
+			}
+
+			const std::filesystem::path source = root / path;
+			const ScriptFile file = ClassifyFile(source);
+			if (!file.IsScript) {
+				return false;
+			}
+
+			const ClassId expected = file.Module  ? engine::script::ModuleScriptClass()
+									 : file.Local ? engine::script::LocalScriptClass()
+												  : engine::script::ScriptClass();
+			if (!Classes::IsA(store.ClassOf(into), expected)) {
+				return false;
+			}
+			if (!StageProgram(store, source, path)) {
+				report.Missing.push_back(path);
+				return true;
+			}
+
+			engine::script::SetSourcePath(store, into, Name(path));
+			ApplySidecar(store, source, into, report);
+			report.Scripts++;
+			return true;
+		}
+
 		void BuildNode(
 			Store &store,
 			const RojoNode &node,
@@ -1535,7 +1573,9 @@ namespace studio {
 				}
 			}
 
-			BuildPathInto(store, root, node.Path, node_, report);
+			if (!StageScriptPathInto(store, root, node.Path, node_, report)) {
+				BuildPathInto(store, root, node.Path, node_, report);
+			}
 
 			for (const RojoNode &child : node.Children) {
 				BuildNode(store, child, root, node_, report);
@@ -1662,7 +1702,10 @@ namespace studio {
 		}
 
 		(void)FolderClass();
-		engine::script::RegisterScriptComponents();
+		// Explicit script nodes resolve `$className` before their `$path` is
+		// staged. Register the class tree now rather than relying on a directory
+		// file to call `MakeScript` later in the walk.
+		(void)engine::script::ScriptClass();
 
 		// **The tree's own children, not the tree itself.** The root node is the
 		// `DataModel`, which this engine models as the world rather than as an
@@ -1671,7 +1714,7 @@ namespace studio {
 			BuildNode(store, child, root, NULL_ENTITY, report);
 		}
 
-		if (report.Instances == 0) {
+		if (report.Instances == 0 && report.Scripts == 0) {
 			error = "the project named nothing this world could build";
 			return false;
 		}

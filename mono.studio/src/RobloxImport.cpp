@@ -14,6 +14,7 @@
 #include <engine/ui/Prompts.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -449,6 +450,270 @@ namespace studio {
 			}
 			return instance;
 		}
+
+		struct RojoTrace {
+			std::vector<const engine::bake::RobloxInstance *> Nodes;
+			bool Ambiguous = false;
+		};
+
+		struct RobloxRojoPlan {
+			std::vector<RobloxRojoSubject> Subjects;
+			std::vector<RojoTrace> Traces;
+		};
+
+		bool IsRojoServiceRoot(std::string_view className) {
+			if (className.size() >= 7 && className.substr(className.size() - 7) == "Service") {
+				return true;
+			}
+			constexpr std::array<std::string_view, 10> ROOTS{
+				"Workspace",
+				"ReplicatedFirst",
+				"ReplicatedStorage",
+				"ServerStorage",
+				"StarterGui",
+				"StarterPack",
+				"StarterPlayer",
+				"Teams",
+				"Lighting",
+				"Chat",
+			};
+			return std::find(ROOTS.begin(), ROOTS.end(), className) != ROOTS.end();
+		}
+
+		bool IsSimpleRojoContainer(std::string_view className) {
+			return className == "Folder" || className == "StarterPlayerScripts" ||
+				   className == "StarterCharacterScripts" || className == "PlayerScripts";
+		}
+
+		bool IsPortableRojoName(std::string_view name) {
+			if (name.empty() || name == "." || name == ".." || name.front() == '.' || name.front() == '$' ||
+				name.back() == '.' || name.back() == ' ') {
+				return false;
+			}
+			for (const unsigned char character : name) {
+				if (character < 32 ||
+					std::string_view("<>:\"/\\|?*").find(character) != std::string_view::npos) {
+					return false;
+				}
+			}
+
+			std::string reserved = Lowercase(name.substr(0, name.find('.')));
+			if (reserved == "con" || reserved == "prn" || reserved == "aux" || reserved == "nul") {
+				return false;
+			}
+			return !(
+				reserved.size() == 4 && (reserved.substr(0, 3) == "com" || reserved.substr(0, 3) == "lpt") &&
+				reserved[3] >= '1' && reserved[3] <= '9'
+			);
+		}
+
+		const char *RojoScriptSuffix(std::string_view className) {
+			if (className == "Script") {
+				return ".server.luau";
+			}
+			if (className == "LocalScript") {
+				return ".client.luau";
+			}
+			return className == "ModuleScript" ? ".luau" : nullptr;
+		}
+
+		void Invalidate(RobloxRojoSubject &subject, std::string reason) {
+			if (!subject.Valid) {
+				return;
+			}
+			subject.Valid = false;
+			subject.Reason = std::move(reason);
+		}
+
+		RobloxRojoPlan BuildRobloxRojoPlan(const engine::bake::RobloxModel &model) {
+			std::unordered_map<std::string, std::vector<RojoTrace>> scriptNodes;
+			std::vector<const engine::bake::RobloxInstance *> ancestry;
+
+			const auto collect =
+				[&](const auto &self, const engine::bake::RobloxInstance &node, bool ambiguous) -> void {
+				ancestry.push_back(&node);
+				if (RojoScriptSuffix(node.ClassName) != nullptr) {
+					std::string path;
+					for (const engine::bake::RobloxInstance *part : ancestry) {
+						if (!path.empty()) {
+							path += '/';
+						}
+						path += part->Name;
+					}
+					scriptNodes[path].push_back(RojoTrace{ancestry, ambiguous});
+				}
+
+				if (node.Children.size() == 1) {
+					self(self, node.Children.front(), ambiguous);
+				} else if (!node.Children.empty()) {
+					std::unordered_map<std::string, size_t> childNames;
+					for (const engine::bake::RobloxInstance &child : node.Children) {
+						childNames[child.Name]++;
+					}
+					for (const engine::bake::RobloxInstance &child : node.Children) {
+						self(self, child, ambiguous || childNames[child.Name] > 1);
+					}
+				}
+				ancestry.pop_back();
+			};
+
+			std::unordered_map<std::string, size_t> rootNames;
+			if (model.Roots.size() > 1) {
+				for (const engine::bake::RobloxInstance &root : model.Roots) {
+					rootNames[root.Name]++;
+				}
+			}
+			for (const engine::bake::RobloxInstance &root : model.Roots) {
+				collect(collect, root, model.Roots.size() > 1 && rootNames[root.Name] > 1);
+			}
+
+			RobloxRojoPlan plan;
+			plan.Subjects.reserve(model.Scripts.size());
+			plan.Traces.resize(model.Scripts.size());
+			for (size_t index = 0; index < model.Scripts.size(); index++) {
+				const engine::bake::RobloxScript &script = model.Scripts[index];
+				RobloxRojoSubject subject;
+				subject.InstancePath = script.InstancePath;
+				subject.ClassName = script.ClassName;
+
+				const auto found = scriptNodes.find(script.InstancePath);
+				if (found == scriptNodes.end() || found->second.empty()) {
+					subject.Reason = "not attached to a decoded script instance";
+					plan.Subjects.push_back(std::move(subject));
+					continue;
+				}
+				if (found->second.size() != 1 || found->second.front().Ambiguous) {
+					subject.Reason = "duplicate instance names make this hierarchy ambiguous";
+					plan.Subjects.push_back(std::move(subject));
+					continue;
+				}
+
+				const RojoTrace &trace = found->second.front();
+				plan.Traces[index] = trace;
+				if (trace.Nodes.back()->ClassName != script.ClassName) {
+					subject.Reason = "decoded script class does not match its hierarchy";
+					plan.Subjects.push_back(std::move(subject));
+					continue;
+				}
+				if (trace.Nodes.size() < 2 || !IsRojoServiceRoot(trace.Nodes.front()->ClassName)) {
+					subject.Reason = "not under a supported Roblox service root";
+					plan.Subjects.push_back(std::move(subject));
+					continue;
+				}
+
+				bool simple = true;
+				for (size_t depth = 1; depth + 1 < trace.Nodes.size(); depth++) {
+					if (!IsSimpleRojoContainer(trace.Nodes[depth]->ClassName)) {
+						subject.Reason =
+							"parent " + trace.Nodes[depth]->ClassName + " needs a complex Rojo hierarchy";
+						simple = false;
+						break;
+					}
+				}
+				if (!simple) {
+					plan.Subjects.push_back(std::move(subject));
+					continue;
+				}
+
+				for (const engine::bake::RobloxInstance *part : trace.Nodes) {
+					if (!IsPortableRojoName(part->Name)) {
+						subject.Reason = part->Name + " is not a safe Rojo file name";
+						simple = false;
+						break;
+					}
+				}
+				const std::string foldedName = Lowercase(trace.Nodes.back()->Name);
+				if (simple && foldedName == "init") {
+					subject.Reason = "init would turn its parent into the script";
+					simple = false;
+				}
+				if (simple && script.ClassName == "ModuleScript" &&
+					(foldedName.ends_with(".server") || foldedName.ends_with(".client"))) {
+					subject.Reason = "the module name would change its Rojo script class";
+					simple = false;
+				}
+				if (!simple) {
+					plan.Subjects.push_back(std::move(subject));
+					continue;
+				}
+
+				std::filesystem::path sourcePath("src");
+				for (size_t depth = 0; depth + 1 < trace.Nodes.size(); depth++) {
+					sourcePath /= trace.Nodes[depth]->Name;
+				}
+				sourcePath /= trace.Nodes.back()->Name + std::string(RojoScriptSuffix(script.ClassName));
+				subject.SourcePath = std::move(sourcePath);
+				subject.Valid = true;
+				plan.Subjects.push_back(std::move(subject));
+			}
+
+			std::unordered_map<std::string, std::vector<size_t>> files;
+			std::unordered_map<std::string, std::vector<size_t>> directories;
+			std::unordered_map<std::string, std::string> directorySpellings;
+			std::unordered_set<std::string> directoryCollisions;
+			for (size_t index = 0; index < plan.Subjects.size(); index++) {
+				const RobloxRojoSubject &subject = plan.Subjects[index];
+				if (!subject.Valid) {
+					continue;
+				}
+				files[Lowercase(subject.SourcePath.generic_string())].push_back(index);
+				for (std::filesystem::path directory = subject.SourcePath.parent_path(); !directory.empty();
+					 directory = directory.parent_path()) {
+					const std::string spelling = directory.generic_string();
+					const std::string key = Lowercase(spelling);
+					directories[key].push_back(index);
+					const auto [known, inserted] = directorySpellings.try_emplace(key, spelling);
+					if (!inserted && known->second != spelling) {
+						directoryCollisions.insert(key);
+					}
+					if (directoryCollisions.contains(key)) {
+						for (const size_t conflict : directories[key]) {
+							Invalidate(plan.Subjects[conflict], "case-only directory names collide on disk");
+						}
+					}
+				}
+			}
+			for (const auto &[path, conflicts] : files) {
+				if (conflicts.size() > 1) {
+					for (const size_t conflict : conflicts) {
+						Invalidate(plan.Subjects[conflict], "two scripts map to the same Rojo file");
+					}
+				}
+				if (const auto directory = directories.find(path); directory != directories.end()) {
+					for (const size_t conflict : conflicts) {
+						Invalidate(plan.Subjects[conflict], "a script file collides with a Rojo directory");
+					}
+					for (const size_t conflict : directory->second) {
+						Invalidate(plan.Subjects[conflict], "a Rojo directory collides with a script file");
+					}
+				}
+			}
+			return plan;
+		}
+
+		nlohmann::json RojoProjectDocument(const RobloxRojoPlan &plan, std::string_view projectName) {
+			nlohmann::json document{
+				{"name", projectName.empty() ? "RobloxPlace" : std::string(projectName)},
+				{"tree", nlohmann::json{{"$className", "DataModel"}}},
+			};
+			for (size_t index = 0; index < plan.Subjects.size(); index++) {
+				const RobloxRojoSubject &subject = plan.Subjects[index];
+				if (!subject.Valid) {
+					continue;
+				}
+				nlohmann::json *node = &document["tree"];
+				for (const engine::bake::RobloxInstance *part : plan.Traces[index].Nodes) {
+					nlohmann::json &child = (*node)[part->Name];
+					if (!child.is_object()) {
+						child = nlohmann::json::object();
+					}
+					child["$className"] = part->ClassName;
+					node = &child;
+				}
+				(*node)["$path"] = subject.SourcePath.generic_string();
+			}
+			return document;
+		}
 	}
 
 	RobloxImportAnalysis
@@ -535,6 +800,118 @@ namespace studio {
 			out.push_back(std::move(choice));
 		}
 		return out;
+	}
+
+	std::vector<RobloxRojoSubject> RobloxRojoSubjects(const engine::bake::RobloxModel &model) {
+		return BuildRobloxRojoPlan(model).Subjects;
+	}
+
+	bool SetupRobloxRojoProject(
+		const engine::bake::RobloxModel &model,
+		const std::filesystem::path &destination,
+		std::string_view projectName,
+		RobloxRojoSetupResult &out,
+		std::string &error
+	) {
+		RobloxRojoPlan plan = BuildRobloxRojoPlan(model);
+		const size_t ready = static_cast<size_t>(
+			std::count_if(plan.Subjects.begin(), plan.Subjects.end(), [](const RobloxRojoSubject &subject) {
+				return subject.Valid;
+			})
+		);
+		if (ready == 0) {
+			error = "no recovered script has a simple Rojo hierarchy";
+			return false;
+		}
+
+		std::error_code filesystemError;
+		const bool destinationExists = std::filesystem::exists(destination, filesystemError);
+		if (filesystemError) {
+			error = "could not inspect " + destination.string() + ": " + filesystemError.message();
+			return false;
+		}
+		if (destinationExists) {
+			error = destination.string() + " already exists; no files were overwritten";
+			return false;
+		}
+		const std::filesystem::path parent = destination.has_parent_path()
+												 ? destination.parent_path()
+												 : std::filesystem::current_path(filesystemError);
+		const bool parentIsDirectory =
+			!filesystemError && std::filesystem::is_directory(parent, filesystemError);
+		if (filesystemError || !parentIsDirectory) {
+			error = "Rojo project parent is not a directory: " + parent.string();
+			return false;
+		}
+
+		std::filesystem::path staging = destination;
+		staging += ".atomic-setup";
+		const bool stagingExists = std::filesystem::exists(staging, filesystemError);
+		if (filesystemError) {
+			error = "could not inspect " + staging.string() + ": " + filesystemError.message();
+			return false;
+		}
+		if (stagingExists) {
+			error = staging.string() + " already exists; remove the stale setup folder first";
+			return false;
+		}
+		if (!std::filesystem::create_directories(staging, filesystemError) || filesystemError) {
+			error = "could not create " + staging.string();
+			return false;
+		}
+
+		const auto fail = [&](std::string reason) {
+			error = std::move(reason);
+			std::error_code ignored;
+			std::filesystem::remove_all(staging, ignored);
+			return false;
+		};
+
+		for (size_t index = 0; index < plan.Subjects.size(); index++) {
+			const RobloxRojoSubject &subject = plan.Subjects[index];
+			if (!subject.Valid) {
+				continue;
+			}
+			const std::filesystem::path target = staging / subject.SourcePath;
+			std::filesystem::create_directories(target.parent_path(), filesystemError);
+			if (filesystemError) {
+				return fail("could not create " + target.parent_path().string());
+			}
+			std::ofstream source(target, std::ios::binary | std::ios::trunc);
+			if (source) {
+				source.write(
+					model.Scripts[index].Source.data(),
+					static_cast<std::streamsize>(model.Scripts[index].Source.size())
+				);
+			}
+			source.close();
+			if (!source) {
+				return fail("could not write " + target.string());
+			}
+		}
+
+		const std::filesystem::path stagedProject = staging / "default.project.json";
+		std::ofstream project(stagedProject, std::ios::binary | std::ios::trunc);
+		if (project) {
+			project << RojoProjectDocument(plan, projectName).dump(2) << '\n';
+		}
+		project.close();
+		if (!project) {
+			return fail("could not write " + stagedProject.string());
+		}
+
+		std::filesystem::rename(staging, destination, filesystemError);
+		if (filesystemError) {
+			return fail("could not finish " + destination.string() + ": " + filesystemError.message());
+		}
+
+		RobloxRojoSetupResult candidate;
+		candidate.ProjectFile = destination / "default.project.json";
+		candidate.ScriptsWritten = ready;
+		candidate.Subjects = std::move(plan.Subjects);
+		out = std::move(candidate);
+		error.clear();
+		return true;
 	}
 
 	bool ImportRobloxPlace(
@@ -792,9 +1169,11 @@ namespace studio {
 				} else {
 					RobloxAnalysis = AnalyzeRobloxImport(model, RobloxClassMap);
 					RobloxChoices = RobloxAssetChoices(model, RobloxMappings);
+					RobloxRojoScripts = RobloxRojoSubjects(model);
 					RobloxImportModel = std::move(model);
 					RobloxImportApplied = false;
 					RobloxSelectedScript = -1;
+					RobloxRojoBrowsePath = std::filesystem::path(RobloxImportPath).parent_path().string();
 					RobloxImportStatus = "analysis complete";
 				}
 			}
@@ -1044,10 +1423,26 @@ namespace studio {
 			}
 
 			if (ImGui::BeginTabItem("Scripts")) {
+				const size_t readyScripts = static_cast<size_t>(std::count_if(
+					RobloxRojoScripts.begin(), RobloxRojoScripts.end(), [](const RobloxRojoSubject &subject) {
+						return subject.Valid;
+					}
+				));
+				ImGui::BeginDisabled(readyScripts == 0);
+				if (ImGui::Button("Set up Rojo project...")) {
+					if (RobloxRojoBrowsePath.empty()) {
+						RobloxRojoBrowsePath = std::filesystem::path(RobloxImportPath).parent_path().string();
+					}
+					ImGui::OpenPopup("Set Up Roblox Rojo Project");
+				}
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				ImGui::Text("%zu ready   %zu invalid", readyScripts, RobloxRojoScripts.size() - readyScripts);
+
 				const float listHeight = engine::ui::Scaled(220.0f);
 				if (ImGui::BeginTable(
 						"##roblox-scripts",
-						2,
+						3,
 						ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY,
 						ImVec2(0.0f, listHeight)
 					)) {
@@ -1055,6 +1450,7 @@ namespace studio {
 					ImGui::TableSetupColumn(
 						"Class", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(110.0f)
 					);
+					ImGui::TableSetupColumn("Rojo subject");
 					ImGui::TableHeadersRow();
 					ImGuiListClipper clipper;
 					clipper.Begin(static_cast<int>(model.Scripts.size()));
@@ -1073,6 +1469,18 @@ namespace studio {
 							}
 							ImGui::TableNextColumn();
 							ImGui::TextUnformatted(script.ClassName.c_str());
+							ImGui::TableNextColumn();
+							if (static_cast<size_t>(index) >= RobloxRojoScripts.size()) {
+								ImGui::TextUnformatted("invalid: no hierarchy analysis");
+							} else {
+								const RobloxRojoSubject &subject =
+									RobloxRojoScripts[static_cast<size_t>(index)];
+								if (subject.Valid) {
+									ImGui::TextUnformatted(subject.SourcePath.generic_string().c_str());
+								} else {
+									ImGui::Text("invalid: %s", subject.Reason.c_str());
+								}
+							}
 						}
 					}
 					ImGui::EndTable();
@@ -1142,6 +1550,24 @@ namespace studio {
 				RobloxImportStatus = std::move(error);
 			} else {
 				RobloxImportStatus = "asset mapping saved";
+			}
+		}
+
+		if (engine::ui::FolderPrompt("Set Up Roblox Rojo Project", RobloxRojoBrowsePath, "Create project")) {
+			std::string projectName = std::filesystem::path(RobloxImportPath).stem().string();
+			if (projectName.empty()) {
+				projectName = "RobloxPlace";
+			}
+			const std::string folderName = IsPortableRojoName(projectName) ? projectName : "RobloxPlace";
+			const std::filesystem::path destination =
+				std::filesystem::path(RobloxRojoBrowsePath) / (folderName + "-rojo");
+			RobloxRojoSetupResult report;
+			std::string error;
+			if (!SetupRobloxRojoProject(model, destination, projectName, report, error)) {
+				RobloxImportStatus = std::move(error);
+			} else {
+				RobloxImportStatus = std::to_string(report.ScriptsWritten) + " scripts written to " +
+									 report.ProjectFile.string();
 			}
 		}
 

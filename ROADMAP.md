@@ -168,3 +168,7 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
+
+### Open Decision
+
+1. Move "roblox files to atomic game files" to a external program? The port tool.
