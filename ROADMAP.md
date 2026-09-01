@@ -93,13 +93,13 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 
 ### v0.22
 
+- [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
+- [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
 - [_] default R6 base character (capsule collider)
 - [_] gtlf default character (unreal)
 - [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
 - [_] make humanoid a shim for character controller (so not a black box), loads a default one in
 - [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
-- [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
-- [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
 - [_] add accessories support
 - [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
 - [_] animation + animation track + animator => binds to character controller
