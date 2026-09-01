@@ -240,6 +240,25 @@ namespace engine::script {
 				return value;
 			}
 
+			std::vector<std::byte> AsBytes(size_t index, size_t maximum) override {
+				if (index >= Argc || !JS_IsArrayBuffer(Argv[index])) {
+					Raise("expected an ArrayBuffer");
+				}
+				size_t length = 0;
+				const uint8_t *data = JS_GetArrayBuffer(Context, &length, Argv[index]);
+				if (data == nullptr && length != 0) {
+					Raise("expected an ArrayBuffer");
+				}
+				if (length > maximum) {
+					Raise("buffer is too large");
+				}
+				if (length == 0) {
+					return {};
+				}
+				const auto *first = reinterpret_cast<const std::byte *>(data);
+				return std::vector<std::byte>(first, first + length);
+			}
+
 			double AsNumber(size_t index) override {
 				// **By exact type, matching `luaL_checknumber`'s refusal of a
 				// table and deliberately *not* matching its acceptance of a
@@ -609,6 +628,11 @@ namespace engine::script {
 
 			void ReturnString(std::string_view value) override {
 				Set(JS_NewStringLen(Context, value.data(), value.size()));
+			}
+
+			void ReturnBytes(std::span<const std::byte> value) override {
+				const auto *data = reinterpret_cast<const uint8_t *>(value.data());
+				Set(JS_NewArrayBufferCopy(Context, value.empty() ? nullptr : data, value.size()));
 			}
 
 			void ReturnStrings(std::span<const std::string_view> values) override {

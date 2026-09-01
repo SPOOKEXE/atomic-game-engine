@@ -95,6 +95,7 @@ namespace {
 		BuiltinMesh::CornerWedge,
 		BuiltinMesh::Sphere,
 		BuiltinMesh::Cylinder,
+		BuiltinMesh::SkinnedWedge,
 	};
 
 	// The plane is the one built-in that is a surface rather than a solid, so
@@ -223,6 +224,19 @@ TEST_CASE("every texture coordinate is inside the sheet", "[assets][builtin]") {
 			REQUIRE(vertex.TexCoord[1] >= 0.0f);
 			REQUIRE(vertex.TexCoord[1] <= 1.0f);
 		}
+	}
+}
+
+TEST_CASE("the skinned wedge is fully bound to its only joint", "[assets][builtin]") {
+	const MeshData data = MakeBuiltin(BuiltinMesh::SkinnedWedge);
+
+	REQUIRE(data.JointCount == 1);
+	for (const MeshVertex &vertex : data.Vertices) {
+		CHECK(vertex.Joints[0] == 0);
+		CHECK(vertex.Weights[0] == 65535);
+		CHECK(vertex.Weights[1] == 0);
+		CHECK(vertex.Weights[2] == 0);
+		CHECK(vertex.Weights[3] == 0);
 	}
 }
 

@@ -120,6 +120,30 @@ namespace engine::render {
 			}
 			return pose;
 		}
+
+		const assets::AnimationData *FindBufferedAnimation(ecs::Store &store, ecs::Entity entity) {
+			const scene::AnimationBuffer *source = store.Get<scene::AnimationBuffer>(entity);
+			if (source == nullptr || source->Data.empty()) {
+				return nullptr;
+			}
+			if (!store.HasResource<AnimationCatalogue>()) {
+				store.SetResource(AnimationCatalogue{});
+			}
+
+			AnimationCatalogue::BufferedClip &cached =
+				store.ResourceMutable<AnimationCatalogue>()->Buffers[entity];
+			if (!cached.Loaded || cached.Revision != source->Revision) {
+				cached.Revision = source->Revision;
+				cached.Loaded = true;
+				cached.Clip.reset();
+				core::ByteReader reader(source->Data);
+				assets::AnimationData decoded;
+				if (assets::Animation::Read(reader, decoded) && reader.AtEnd()) {
+					cached.Clip = std::move(decoded);
+				}
+			}
+			return cached.Clip.has_value() ? &*cached.Clip : nullptr;
+		}
 	}
 
 	bool RecordAnimation(ecs::Store &store, const core::Name &name, const assets::AnimationData &clip) {
@@ -161,7 +185,9 @@ namespace engine::render {
 				if (reference == nullptr || !scene::ClipFitsRig(*reference, *skeleton)) {
 					return;
 				}
-				const assets::AnimationData *clip = FindAnimation(store, reference->Asset);
+				const assets::AnimationData *clip = reference->Buffer != ecs::NULL_ENTITY
+														? FindBufferedAnimation(store, reference->Buffer)
+														: FindAnimation(store, reference->Asset);
 				if (clip != nullptr) {
 					tracks.push_back(PlayingTrack{track, clip});
 				}

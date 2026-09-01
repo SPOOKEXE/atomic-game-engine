@@ -39,14 +39,15 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.22
 
+- [x] make animations scriptable with a world-owned `AnimationBuffer` that `Animation` references while `AnimationTrack` keeps its one reference to `Animation`. Luau buffers and JavaScript ArrayBuffers can procedurally build keyframes, bake to the canonical AAN1 format, import or export baked bytes, save and replicate them, and play through a revision-cached render path. The animation demo and both script runtimes cover the full path.
 - [_] default R6 base character (capsule collider)
-- [_] gtlf default character (unreal)
 - [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
 - [_] make humanoid a shim for character controller (so not a black box), loads a default one in
 - [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 - [_] add accessories support
-- [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
 - [_] animation + animation track + animator => binds to character controller
+- [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
+
 - [_] build out ArcHandles, BoxHandleAdornments (and similar), etc
 - [_] make virtualised Gui2D and such where they are just a set of components instead of an actual class that is accessible (since you normally cannot create them in studio). Ask user which to keep and which to convert to virtual instances. Needs hierarchy too.
 - [_] ensure :IsA() handles virtual instances and does hierarchy.
@@ -54,6 +55,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] ensure you built out all the UI items and they work (e.g. drag selector)
 - [_] ensure weld / weld constraints work
 - [_] ensure ViewportFrame and WorldRoot are implemented and work
+
+- [_] gtlf default character (unreal style)
 
 ### v0.23
 
@@ -112,6 +115,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
+- [_] setup a studio permissions system for: microphone, camera, etc
+- [_] setup a example plugin for mocap with camera point track
 
 ### Open Decision
 

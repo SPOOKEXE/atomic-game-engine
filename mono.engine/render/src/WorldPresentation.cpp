@@ -1029,6 +1029,7 @@ namespace engine::render {
 				auto *catalogues = static_cast<AnimationCatalogue *>(destination);
 				for (size_t index = 0; index < count; index++) {
 					catalogues[index].Clips.clear();
+					catalogues[index].Buffers.clear();
 				}
 			}
 		);

@@ -125,7 +125,8 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `scene.ActiveCamera` | 16 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`. |
-| `scene.AnimationClip` | 8 | 4 | yes | . | . | . | On an `Animation` instance: which clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
+| `scene.AnimationBuffer` | 32 | 8 | yes | . | . | . | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit. |
+| `scene.AnimationClip` | 16 | 8 | yes | . | . | . | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
 | `scene.AnimationTrack` | 32 | 8 | yes | yes | . | . | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler. |
 | `scene.Animator` | 16 | 8 | yes | yes | . | . | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance. |
 | `scene.Atmosphere` | 40 | 4 | yes | yes | . | . | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only. |
@@ -229,4 +230,4 @@ state until v0.19.
 
 ---
 
-152 components registered by the engine, 0 without a purpose line.
+153 components registered by the engine, 0 without a purpose line.

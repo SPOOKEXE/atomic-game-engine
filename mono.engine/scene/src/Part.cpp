@@ -1600,6 +1600,81 @@ namespace engine::scene {
 			return property;
 		}
 
+		// The palette count is stored compactly and authored as an ordinary script
+		// integer. The conversion also keeps a malformed rig from sizing a palette
+		// beyond the limit the renderer and mesh format share.
+		PropertyDescriptor SkeletonJointCountProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("JointCount");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Skeleton>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Skeleton *skeleton = store.Get<Skeleton>(instance);
+				if (skeleton == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(skeleton->JointCount);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t count = *static_cast<const int32_t *>(value);
+				if (count < 0 || count > static_cast<int32_t>(MAX_JOINTS)) {
+					return false;
+				}
+				Skeleton *skeleton = store.GetMutable<Skeleton>(instance);
+				if (skeleton == nullptr) {
+					return false;
+				}
+				skeleton->JointCount = static_cast<uint16_t>(count);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor AnimationBufferSizeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("DataSize");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AnimationBuffer>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Writable = false;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const AnimationBuffer *buffer = store.Get<AnimationBuffer>(instance);
+				if (buffer == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(buffer->Data.size());
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor AnimationBufferKeyframeBytesProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("KeyframeBytes");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AnimationBuffer>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Writable = false;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<AnimationBuffer>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(AnimationBuffer::KEYFRAME_BYTES);
+				return true;
+			};
+			return property;
+		}
+
 		// Interned once, for `SurfaceEffectEnum`'s reason: a `core::Name`
 		// constructed from a literal inside a getter is a registry lookup per
 		// property read.
@@ -2071,6 +2146,12 @@ namespace engine::scene {
 			// applied to the class v0.9 exists to add.
 			const ecs::ClassId meshPart = ecs::Classes::Register("MeshPart", basePart, {});
 
+			// A script-authored rig needs a class whose component set includes the
+			// optional skeleton. Imported meshes remain ordinary `MeshPart`s with the
+			// same component added by their importer.
+			const std::array skinned{ecs::Components::Of<Skeleton>()};
+			const ecs::ClassId skinnedMeshPart = ecs::Classes::Register("SkinnedMeshPart", meshPart, skinned);
+
 			// **A camera is an instance, because a camera is a row.**
 			// `scene::Camera` has been a component since v0.4 precisely so a
 			// world can hold several - a spectator, a cutscene, a security
@@ -2308,11 +2389,15 @@ namespace engine::scene {
 			// than under the thing they deform, and `SkeletonOf` walks up from a
 			// bone expecting to reach it. Roblox has no `Skeleton` class either.
 
-			// **Three animation classes, and a track is one of them.** Roblox's
+			// **Four animation classes, and a track is one of them.** Roblox's
 			// `AnimationTrack` is a userdata because its `Animator` is a black
 			// box; `ROADMAP.md` v0.24 says this engine's is not going to be one,
 			// and a row in the store is what that means here - it saves, it
 			// replicates and a script can read it.
+			const std::array animationBytes{ecs::Components::Of<AnimationBuffer>()};
+			const ecs::ClassId animationBufferClass =
+				ecs::Classes::Register("AnimationBuffer", instance, animationBytes);
+
 			const std::array clip{ecs::Components::Of<AnimationClip>()};
 			const ecs::ClassId animationClass = ecs::Classes::Register("Animation", instance, clip);
 
@@ -2830,12 +2915,21 @@ namespace engine::scene {
 			ecs::Classes::Property<&Bone::InverseBind>(boneClass, "InverseBindCFrame");
 			ecs::Classes::Computed(boneClass, BoneWorldProperty());
 
-			// The clip's two names. **`RigId` beside `AnimationId`**, because a
+			// The skeleton is guaranteed by this class's component set, unlike the
+			// optional component on an imported ordinary `MeshPart`.
+			ecs::Classes::Property<&Skeleton::Rig>(skinnedMeshPart, "RigId");
+			ecs::Classes::Computed(skinnedMeshPart, SkeletonJointCountProperty());
+
+			ecs::Classes::Computed(animationBufferClass, AnimationBufferSizeProperty());
+			ecs::Classes::Computed(animationBufferClass, AnimationBufferKeyframeBytesProperty());
+
+			// The clip source and rig. **`RigId` beside `AnimationId`**, because a
 			// clip authored against one skeleton means nothing on another and
 			// `ClipFitsRig` is what refuses it - an author who cannot set the
 			// second cannot make that refusal work.
 			ecs::Classes::Property<&AnimationClip::Asset>(animationClass, "AnimationId");
 			ecs::Classes::Property<&AnimationClip::Rig>(animationClass, "RigId");
+			ecs::Classes::Property<&AnimationClip::Buffer>(animationClass, "AnimationBuffer");
 
 			ecs::Classes::Property<&Animator::Rig>(animatorClass, "Rig");
 			ecs::Classes::Property<&Animator::RootMotion>(animatorClass, "RootMotion");

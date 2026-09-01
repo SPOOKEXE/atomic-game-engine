@@ -1155,6 +1155,11 @@ declare interface Instance {
 	SetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;
 	SetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;
 	Clear(): boolean;
+	/** Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20. */
+	BakeAnimation(duration: number, keyframes: ArrayBuffer): boolean;
+	SetAnimationData(data: ArrayBuffer): boolean;
+	GetAnimationData(): ArrayBuffer;
+	ClearAnimationData(): boolean;
 	Resize(width: number, height: number): boolean;
 	DrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: number): boolean;
 	DrawLine(from: Vector2, to: Vector2, colour: Color3, transparency?: number): boolean;
@@ -1248,6 +1253,11 @@ declare interface MeshPart extends BasePart {
 	RoughnessMap: string;
 	TextureID: string;
 	readonly TrianglesCount: number;
+}
+
+declare interface SkinnedMeshPart extends MeshPart {
+	JointCount: number;
+	RigId: string;
 }
 
 declare interface Camera extends PVInstance {
@@ -1346,7 +1356,13 @@ declare interface Bone extends Instance {
 	readonly TransformedWorldCFrame: CFrame;
 }
 
+declare interface AnimationBuffer extends Instance {
+	readonly DataSize: number;
+	readonly KeyframeBytes: number;
+}
+
 declare interface Animation extends Instance {
+	AnimationBuffer: Instance;
 	AnimationId: string;
 	RigId: string;
 }
@@ -2519,6 +2535,7 @@ declare const Instance: {
 		(className: "Model", parent?: Instance): Model;
 		(className: "Tool", parent?: Instance): Tool;
 		(className: "MeshPart", parent?: Instance): MeshPart;
+		(className: "SkinnedMeshPart", parent?: Instance): SkinnedMeshPart;
 		(className: "Camera", parent?: Instance): Camera;
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
 		(className: "Portal", parent?: Instance): Portal;
@@ -2534,6 +2551,7 @@ declare const Instance: {
 		(className: "StringValue", parent?: Instance): StringValue;
 		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
 		(className: "Bone", parent?: Instance): Bone;
+		(className: "AnimationBuffer", parent?: Instance): AnimationBuffer;
 		(className: "Animation", parent?: Instance): Animation;
 		(className: "Animator", parent?: Instance): Animator;
 		(className: "AnimationTrack", parent?: Instance): AnimationTrack;

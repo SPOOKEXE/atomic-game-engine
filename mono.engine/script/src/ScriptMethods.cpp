@@ -51,9 +51,12 @@
 //
 // @tier L9 · shared
 
+#include <engine/assets/Animation.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/EditableImage.hpp>
@@ -914,6 +917,104 @@ namespace engine::script {
 			call.ReturnBoolean(scene::ClearEditableMesh(call.World(), call.Subject()));
 		}
 
+		void RequireAnimationBuffer(ScriptCall &call, const char *method) {
+			if (call.World().Get<scene::AnimationBuffer>(call.Subject()) == nullptr) {
+				call.Raise((std::string(method) + " needs an AnimationBuffer").c_str());
+			}
+		}
+
+		bool ValidProceduralKey(const assets::AnimationKeyframe &key, float duration) {
+			const core::CFrame &frame = key.Transform;
+			const float rotationSquare =
+				frame.QuaternionX * frame.QuaternionX + frame.QuaternionY * frame.QuaternionY +
+				frame.QuaternionZ * frame.QuaternionZ + frame.QuaternionW * frame.QuaternionW;
+			return std::isfinite(key.Time) && key.Time >= 0.0f && key.Time <= duration &&
+				   std::isfinite(frame.Position.X) && std::isfinite(frame.Position.Y) &&
+				   std::isfinite(frame.Position.Z) && std::isfinite(frame.QuaternionX) &&
+				   std::isfinite(frame.QuaternionY) && std::isfinite(frame.QuaternionZ) &&
+				   std::isfinite(frame.QuaternionW) && std::abs(rotationSquare - 1.0f) <= 0.01f;
+		}
+
+		// Procedural keyframes are fixed 36-byte little-endian records:
+		// joint u16, reserved u16, time f32, position xyz f32, quaternion xyzw f32.
+		void BakeAnimation(ScriptCall &call) {
+			RequireAnimationBuffer(call, "BakeAnimation");
+			const float duration = static_cast<float>(call.AsNumber(0));
+			constexpr size_t MAXIMUM_INPUT =
+				static_cast<size_t>(assets::Animation::MAXIMUM_KEYS) * scene::AnimationBuffer::KEYFRAME_BYTES;
+			const std::vector<std::byte> records = call.AsBytes(1, MAXIMUM_INPUT);
+			if (!std::isfinite(duration) || duration <= 0.0f || records.empty() ||
+				records.size() % scene::AnimationBuffer::KEYFRAME_BYTES != 0) {
+				call.ReturnBoolean(false);
+				return;
+			}
+
+			std::array<std::vector<assets::AnimationKeyframe>, assets::Animation::MAXIMUM_JOINTS> channels;
+			core::ByteReader reader(records);
+			while (!reader.AtEnd()) {
+				const uint16_t joint = reader.ReadUInt16();
+				const uint16_t reserved = reader.ReadUInt16();
+				assets::AnimationKeyframe key;
+				key.Time = reader.ReadFloat();
+				key.Transform.Position.X = reader.ReadFloat();
+				key.Transform.Position.Y = reader.ReadFloat();
+				key.Transform.Position.Z = reader.ReadFloat();
+				key.Transform.QuaternionX = reader.ReadFloat();
+				key.Transform.QuaternionY = reader.ReadFloat();
+				key.Transform.QuaternionZ = reader.ReadFloat();
+				key.Transform.QuaternionW = reader.ReadFloat();
+				if (reader.Failed() || reserved != 0 || joint >= assets::Animation::MAXIMUM_JOINTS ||
+					!ValidProceduralKey(key, duration)) {
+					call.ReturnBoolean(false);
+					return;
+				}
+				channels[joint].push_back(key);
+			}
+
+			assets::AnimationData animation;
+			animation.Duration = duration;
+			for (uint16_t joint = 0; joint < assets::Animation::MAXIMUM_JOINTS; joint++) {
+				if (channels[joint].empty()) {
+					continue;
+				}
+				auto &keys = channels[joint];
+				std::sort(keys.begin(), keys.end(), [](const auto &left, const auto &right) {
+					return left.Time < right.Time;
+				});
+				animation.Channels.push_back(assets::AnimationChannel{joint, std::move(keys)});
+			}
+
+			core::ByteWriter writer;
+			if (!assets::Animation::Write(writer, animation) ||
+				!scene::SetAnimationBuffer(call.World(), call.Subject(), writer.Bytes())) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			call.ReturnBoolean(true);
+		}
+
+		void SetAnimationData(ScriptCall &call) {
+			RequireAnimationBuffer(call, "SetAnimationData");
+			const std::vector<std::byte> bytes = call.AsBytes(0, scene::AnimationBuffer::MAXIMUM_BYTES);
+			core::ByteReader reader(bytes);
+			assets::AnimationData animation;
+			if (!assets::Animation::Read(reader, animation) || !reader.AtEnd()) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			call.ReturnBoolean(scene::SetAnimationBuffer(call.World(), call.Subject(), bytes));
+		}
+
+		void GetAnimationData(ScriptCall &call) {
+			RequireAnimationBuffer(call, "GetAnimationData");
+			call.ReturnBytes(call.World().Get<scene::AnimationBuffer>(call.Subject())->Data);
+		}
+
+		void ClearAnimationData(ScriptCall &call) {
+			RequireAnimationBuffer(call, "ClearAnimationData");
+			call.ReturnBoolean(scene::SetAnimationBuffer(call.World(), call.Subject(), {}));
+		}
+
 		// `particleEmitter:Emit(count)`
 		void ParticleEmitterEmit(ScriptCall &call) {
 			const double requested = call.AsNumber(0);
@@ -1009,7 +1110,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 54> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 58> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1026,6 +1127,11 @@ namespace engine::script {
 			{"SetGeometry", EditableMeshSetGeometry},
 			{"Clear", EditableMeshClear},
 			{"Emit", ParticleEmitterEmit},
+
+			{"BakeAnimation", BakeAnimation},
+			{"SetAnimationData", SetAnimationData},
+			{"GetAnimationData", GetAnimationData},
+			{"ClearAnimationData", ClearAnimationData},
 
 			{"Resize", EditableImageResize},
 			{"DrawRectangle", EditableImageDrawRectangle},

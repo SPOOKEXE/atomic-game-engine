@@ -2210,6 +2210,15 @@ declare task: {
 					   "UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean\n";
 				out << "\tfunction Clear(self): boolean\n";
 
+				// AnimationBuffer stores canonical AAN1 bytes. BakeAnimation accepts
+				// fixed little-endian keyframe records described by KeyframeBytes.
+				out << "\t-- Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, "
+					   "time f32 at 4, position xyz at 8, and quaternion xyzw at 20.\n";
+				out << "\tfunction BakeAnimation(self, duration: number, keyframes: buffer): boolean\n";
+				out << "\tfunction SetAnimationData(self, data: buffer): boolean\n";
+				out << "\tfunction GetAnimationData(self): buffer\n";
+				out << "\tfunction ClearAnimationData(self): boolean\n";
+
 				// The `EditableImage` core, declared the same way.
 				out << "\tfunction Resize(self, width: number, height: number): boolean\n";
 				out << "\tfunction DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, "
@@ -3730,6 +3739,15 @@ declare const task: {
 				out << "\tSetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; "
 					   "Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;\n";
 				out << "\tClear(): boolean;\n";
+
+				// AnimationBuffer uses ArrayBuffer here for the same owned byte block
+				// Luau exposes as buffer.
+				out << "\t/** Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, "
+					   "time f32 at 4, position xyz at 8, and quaternion xyzw at 20. */\n";
+				out << "\tBakeAnimation(duration: number, keyframes: ArrayBuffer): boolean;\n";
+				out << "\tSetAnimationData(data: ArrayBuffer): boolean;\n";
+				out << "\tGetAnimationData(): ArrayBuffer;\n";
+				out << "\tClearAnimationData(): boolean;\n";
 
 				// The `EditableImage` core, matching the Luau half.
 				out << "\tResize(width: number, height: number): boolean;\n";

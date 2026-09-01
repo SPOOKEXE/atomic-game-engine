@@ -16,6 +16,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -23,6 +24,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/testing/Suite.hpp>
@@ -266,6 +268,37 @@ TEST_CASE("the rings scene builds and moves itself", "[examples][scene]") {
 	// for.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 5.0f);
+}
+
+TEST_CASE("the animation scene builds rigs around one procedural buffer", "[examples][scene][animation]") {
+	const StagedAssets assets;
+
+	Store store("animation");
+	Scheduler systems;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Animation.luau"), error));
+
+	const Entity rig = InScene(store, "AnimatedRig");
+	REQUIRE(rig != engine::ecs::NULL_ENTITY);
+	const auto *skeleton = store.Get<engine::scene::Skeleton>(rig);
+	REQUIRE(skeleton != nullptr);
+	CHECK(skeleton->Rig == Name("examples.SwingRig"));
+	CHECK(skeleton->JointCount == 1);
+
+	const Entity root = store.FindFirstChild(rig, "Root");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::Bone>(root) != nullptr);
+	CHECK(store.CountMatching<engine::scene::Animator>() == 3);
+	CHECK(store.CountMatching<engine::scene::AnimationTrack>() == 3);
+	CHECK(store.CountMatching<engine::scene::AnimationBuffer>() == 1);
+	const Entity clipBuffer = InScene(store, "ProceduralSwing");
+	const auto *baked = store.Get<engine::scene::AnimationBuffer>(clipBuffer);
+	REQUIRE(baked != nullptr);
+	CHECK_FALSE(baked->Data.empty());
+	store.Each<const engine::scene::AnimationClip>([&](Entity, const engine::scene::AnimationClip &clip) {
+		CHECK(clip.Buffer == clipBuffer);
+		CHECK_FALSE(clip.Asset.IsValid());
+	});
 }
 
 TEST_CASE("the shaders scene authors and selects runtime shaders from Luau", "[examples][scene][shaders]") {

@@ -116,6 +116,7 @@
 #include <engine/script/Signals.hpp>
 #include <engine/script/Tweens.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -246,6 +247,10 @@ namespace engine::script {
 
 		// An argument as a string. Raises when it is not one.
 		virtual std::string AsString(size_t index) = 0;
+
+		// An argument as an owned byte buffer. Luau accepts `buffer`; JavaScript
+		// accepts `ArrayBuffer`. The copy prevents VM memory from escaping the call.
+		virtual std::vector<std::byte> AsBytes(size_t index, size_t maximum) = 0;
 
 		// An argument as a number. Raises when it is not one.
 		virtual double AsNumber(size_t index) = 0;
@@ -562,6 +567,9 @@ namespace engine::script {
 		// encoding, so a length-carrying view is the only form that does not
 		// truncate at the first one.
 		virtual void ReturnString(std::string_view value) = 0;
+
+		// A fresh VM-owned byte buffer, copied from neutral storage.
+		virtual void ReturnBytes(std::span<const std::byte> value) = 0;
 
 		// A list of strings, as the one-based array each language means by one.
 		//

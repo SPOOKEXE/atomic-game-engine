@@ -1376,6 +1376,11 @@ declare extern type Instance with
 	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
 	function SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean
 	function Clear(self): boolean
+	-- Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20.
+	function BakeAnimation(self, duration: number, keyframes: buffer): boolean
+	function SetAnimationData(self, data: buffer): boolean
+	function GetAnimationData(self): buffer
+	function ClearAnimationData(self): boolean
 	function Resize(self, width: number, height: number): boolean
 	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean
 	function DrawLine(self, from: Vector2, to: Vector2, colour: Color3, transparency: number?): boolean
@@ -1469,6 +1474,11 @@ declare extern type MeshPart extends BasePart with
 	RoughnessMap: string
 	TextureID: string
 	read TrianglesCount: number
+end
+
+declare extern type SkinnedMeshPart extends MeshPart with
+	JointCount: number
+	RigId: string
 end
 
 declare extern type Camera extends PVInstance with
@@ -1567,7 +1577,13 @@ declare extern type Bone extends Instance with
 	read TransformedWorldCFrame: CFrame
 end
 
+declare extern type AnimationBuffer extends Instance with
+	read DataSize: number
+	read KeyframeBytes: number
+end
+
 declare extern type Animation extends Instance with
+	AnimationBuffer: Instance
 	AnimationId: string
 	RigId: string
 end
@@ -2834,6 +2850,7 @@ type CreatableInstances = {
 	Model: Model,
 	Tool: Tool,
 	MeshPart: MeshPart,
+	SkinnedMeshPart: SkinnedMeshPart,
 	Camera: Camera,
 	SurfaceCamera: SurfaceCamera,
 	Portal: Portal,
@@ -2849,6 +2866,7 @@ type CreatableInstances = {
 	StringValue: StringValue,
 	LocalizationTable: LocalizationTable,
 	Bone: Bone,
+	AnimationBuffer: AnimationBuffer,
 	Animation: Animation,
 	Animator: Animator,
 	AnimationTrack: AnimationTrack,

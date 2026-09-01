@@ -6,6 +6,8 @@
 // covers what a script can actually reach, which is the part a binding can get
 // wrong while every piece under it is correct.
 
+#include <engine/assets/Animation.hpp>
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
@@ -16,6 +18,7 @@
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -1032,6 +1035,81 @@ TEST_CASE("attributes hold what a script puts in them", "[scripting]") {
 		end)
 		assert(not ok, 'an instance was accepted as an attribute')
 	)");
+}
+
+// --- AnimationBuffer ---------------------------------------------------------
+
+TEST_CASE("both script languages bake and copy animation buffers", "[scripting][animation]") {
+	RegisterClasses();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store(language == Language::Luau ? "animation_buffer_luau" : "animation_buffer_js");
+		const auto runtime = MakeRuntime(store, language);
+		const char *source = language == Language::Luau ? R"(
+			local clip = Instance.new("AnimationBuffer")
+			clip.Name = "AnimationSource"
+			local keys = buffer.create(clip.KeyframeBytes)
+			buffer.writeu16(keys, 0, 0)
+			buffer.writeu16(keys, 2, 0)
+			buffer.writef32(keys, 4, 0.5)
+			buffer.writef32(keys, 8, 3)
+			buffer.writef32(keys, 32, 1)
+			buffer.writeu16(keys, 2, 1)
+			assert(not clip:BakeAnimation(1, keys), "BakeAnimation accepted reserved bits")
+			buffer.writeu16(keys, 2, 0)
+			assert(clip:BakeAnimation(1, keys), "BakeAnimation refused valid keys")
+			assert(clip.DataSize > 0, "BakeAnimation wrote no data")
+			local baked = clip:GetAnimationData()
+			assert(typeof(baked) == "buffer", "GetAnimationData did not return a buffer")
+
+			local copy = Instance.new("AnimationBuffer")
+			copy.Name = "AnimationCopy"
+			assert(copy:SetAnimationData(baked), "SetAnimationData refused baked data")
+			assert(copy:ClearAnimationData() and copy.DataSize == 0, "ClearAnimationData left bytes")
+			assert(buffer.len(copy:GetAnimationData()) == 0, "cleared data did not return an empty buffer")
+			assert(not copy:SetAnimationData(buffer.create(4)), "SetAnimationData accepted junk")
+			assert(copy:SetAnimationData(baked), "SetAnimationData could not restore baked data")
+			copy.Parent = workspace
+		)"
+														: R"(
+			const clip = Instance.new('AnimationBuffer');
+			clip.Name = 'AnimationSource';
+			const keys = new ArrayBuffer(clip.KeyframeBytes);
+			const view = new DataView(keys);
+			view.setUint16(0, 0, true);
+			view.setUint16(2, 0, true);
+			view.setFloat32(4, 0.5, true);
+			view.setFloat32(8, 3, true);
+			view.setFloat32(32, 1, true);
+			view.setUint16(2, 1, true);
+			if (clip.BakeAnimation(1, keys)) throw new Error('BakeAnimation accepted reserved bits');
+			view.setUint16(2, 0, true);
+			if (!clip.BakeAnimation(1, keys)) throw new Error('BakeAnimation refused valid keys');
+			const baked = clip.GetAnimationData();
+			if (!(baked instanceof ArrayBuffer)) throw new Error('GetAnimationData did not return ArrayBuffer');
+
+			const copy = Instance.new('AnimationBuffer');
+			copy.Name = 'AnimationCopy';
+			if (!copy.SetAnimationData(baked)) throw new Error('SetAnimationData refused baked data');
+			if (!copy.ClearAnimationData() || copy.DataSize !== 0) throw new Error('ClearAnimationData left bytes');
+			if (copy.GetAnimationData().byteLength !== 0) throw new Error('cleared data was not empty');
+			if (copy.SetAnimationData(new ArrayBuffer(4))) throw new Error('SetAnimationData accepted junk');
+			if (!copy.SetAnimationData(baked)) throw new Error('SetAnimationData could not restore baked data');
+			copy.Parent = workspace;
+		)";
+		MustRun(*runtime, source);
+
+		const Entity copy = InScene(store, "AnimationCopy");
+		const auto *buffer = store.Get<engine::scene::AnimationBuffer>(copy);
+		REQUIRE(buffer != nullptr);
+		engine::core::ByteReader reader(buffer->Data);
+		engine::assets::AnimationData animation;
+		REQUIRE(engine::assets::Animation::Read(reader, animation));
+		REQUIRE(reader.AtEnd());
+		REQUIRE(animation.Channels.size() == 1);
+		REQUIRE(animation.Channels[0].Keys.size() == 1);
+		CHECK(animation.Channels[0].Keys[0].Time == 0.5f);
+		CHECK(animation.Channels[0].Keys[0].Transform.Position.X == 3.0f);
+	}
 }
 
 // --- EditableMesh ------------------------------------------------------------

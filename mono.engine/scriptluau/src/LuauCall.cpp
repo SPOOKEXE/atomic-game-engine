@@ -316,6 +316,19 @@ namespace engine::script {
 				return std::string(text, length);
 			}
 
+			std::vector<std::byte> AsBytes(size_t index, size_t maximum) override {
+				size_t length = 0;
+				const void *data = luaL_checkbuffer(State, Slot(index), &length);
+				if (length > maximum) {
+					Raise("buffer is too large");
+				}
+				if (length == 0) {
+					return {};
+				}
+				const auto *first = static_cast<const std::byte *>(data);
+				return std::vector<std::byte>(first, first + length);
+			}
+
 			double AsNumber(size_t index) override {
 				// **By exact type and not `luaL_checknumber`, which accepts a
 				// numeric *string*.** That leniency is Lua's and the JavaScript
@@ -554,6 +567,14 @@ namespace engine::script {
 				// empty, and a default-constructed `string_view` is exactly that
 				// - which is what an invalid `core::Name::Text()` hands back.
 				lua_pushlstring(State, value.empty() ? "" : value.data(), value.size());
+				Pushed++;
+			}
+
+			void ReturnBytes(std::span<const std::byte> value) override {
+				void *destination = lua_newbuffer(State, value.size());
+				if (!value.empty()) {
+					std::memcpy(destination, value.data(), value.size());
+				}
 				Pushed++;
 			}
 

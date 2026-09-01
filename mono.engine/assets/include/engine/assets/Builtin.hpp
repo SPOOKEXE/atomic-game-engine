@@ -39,10 +39,13 @@ namespace engine::assets {
 
 		// Cylinder of radius 0.5 about Y.
 		Cylinder,
+
+		// One-joint wedge used to exercise skinning without delivered content.
+		SkinnedWedge,
 	};
 
 	// Number of built-ins.
-	constexpr uint8_t BUILTIN_MESH_COUNT = 6;
+	constexpr uint8_t BUILTIN_MESH_COUNT = 7;
 
 	// In-process selector; names cross persistence boundaries.
 	//

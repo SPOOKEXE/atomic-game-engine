@@ -2,12 +2,10 @@
 
 // What is playing on a rig, and what it is playing.
 //
-// **Three rows rather than one, because they have three lifetimes.** A clip is
-// content and outlives the world; an animator belongs to a body and lasts as
-// long as the body does; a track lasts as long as somebody is playing it. One
-// component holding all three would be rewritten on every play and stop for the
-// sake of two fields nobody touches, which is the split `PlayerIdentity` and
-// `PlayerCharacter` already make one file along.
+// **Four rows rather than one, because they have separate lifetimes.** A
+// published clip outlives the world, a procedural buffer belongs to one world,
+// an animator belongs to a body, and a track lasts as long as somebody is
+// playing it. Combining them would rewrite content whenever playback changes.
 //
 // **A track is an instance here and a userdata in Roblox, and that is a
 // deliberate departure.** Roblox's `AnimationTrack` is opaque because Roblox's
@@ -38,12 +36,31 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
 }
 
 namespace engine::scene {
+
+	// Baked animation bytes owned by a world rather than by an asset catalogue.
+	// Scripts build the input records and the script layer bakes them into the
+	// same AAN1 format delivered animation assets use. Scene keeps those bytes
+	// opaque so it does not gain an upward dependency on assets.
+	struct AnimationBuffer {
+		// One procedural input record: joint, reserved, time, position, quaternion.
+		static constexpr size_t KEYFRAME_BYTES = 36;
+
+		// The existing animation format permits four million 32-byte baked keys.
+		static constexpr size_t MAXIMUM_BYTES = 128u * 1024u * 1024u + 2048u;
+
+		std::vector<std::byte> Data;
+
+		// Bumped whenever Data changes so presentation decodes at most once per edit.
+		uint32_t Revision = 0;
+	};
 
 	// How a track's channels combine with the ones already playing.
 	//
@@ -74,7 +91,7 @@ namespace engine::scene {
 
 	// What an `Animation` instance holds.
 	//
-	// **Two names, and the second is what makes a mismatch refusable.** A clip is
+	// **Two names plus an optional buffer, and the rig name makes a mismatch refusable.** A clip is
 	// authored against one rig: its channels name joint slots, and those slots
 	// mean nothing on a different skeleton. Without `Rig` the failure is a
 	// character folding itself inside out with nothing in the file to explain it;
@@ -89,7 +106,16 @@ namespace engine::scene {
 		// Which `Skeleton::Rig` this clip's channels were authored against. An
 		// invalid name means the author has not said, which plays anywhere.
 		core::Name Rig;
+
+		// A world-owned clip. When present it takes precedence over Asset, allowing
+		// an Animation to switch from published content to procedurally baked data
+		// without giving AnimationTrack a second reference path.
+		ecs::Entity Buffer = ecs::NULL_ENTITY;
 	};
+
+	// Replaces one AnimationBuffer's canonical bytes and advances its revision.
+	// The byte format remains opaque at this layer.
+	bool SetAnimationBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> bytes);
 
 	// What drives a rig's pose, on an `Animator` instance.
 	//
