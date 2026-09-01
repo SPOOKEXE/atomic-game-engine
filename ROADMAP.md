@@ -147,7 +147,9 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
-- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?)
+- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?), ai village with daily routines and such
+- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
+- [_] port TornadoSim as a demo scene in the engine.
 - [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well
 - [_] figma import tools
@@ -165,6 +167,4 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
-- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] VR support (oculus rift s)
-- [_] port TornadoSim as a demo scene in the engine.
