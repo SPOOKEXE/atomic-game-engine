@@ -6,6 +6,8 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
+#include "ViewportFrameScene.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -15,7 +17,7 @@ namespace engine::render {
 		constexpr uint32_t MAX_VIEWPORT_EDGE = 2048;
 		constexpr int MAX_TREE_DEPTH = 256;
 
-		void CollectViewportInstances(
+		void CollectViewportDescendants(
 			const ecs::Store &store, ecs::Entity parent, int depth, std::vector<scene::DrawInstance> &out
 		) {
 			if (depth > MAX_TREE_DEPTH) {
@@ -41,9 +43,15 @@ namespace engine::render {
 					);
 				}
 
-				CollectViewportInstances(store, child, depth + 1, out);
+				CollectViewportDescendants(store, child, depth + 1, out);
 			});
 		}
+	}
+
+	void CollectViewportInstances(
+		const ecs::Store &store, ecs::Entity viewport, std::vector<scene::DrawInstance> &out
+	) {
+		CollectViewportDescendants(store, viewport, 0, out);
 	}
 
 	size_t ViewportFrames::Render(
@@ -95,7 +103,7 @@ namespace engine::render {
 
 			const size_t slot = firstSlot + Entries.size();
 			instances.emplace_back();
-			CollectViewportInstances(store, command.Source, 0, instances.back());
+			CollectViewportInstances(store, command.Source, instances.back());
 			targets.push_back({std::clamp(imageWidth, 1u, maxWidth), std::clamp(imageHeight, 1u, maxHeight)});
 
 			View view;

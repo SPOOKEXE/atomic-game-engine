@@ -1614,13 +1614,13 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct SelectionOutline {
-		// Reserved until the renderer consumes variable-width world lines.
+		// Width of the outline's world-space line segments, in studs.
 		float LineThickness = 0.05f;
 
-		// Reserved until adornment geometry emits filled faces.
+		// Colour of the optional filled faces.
 		core::Color3 SurfaceColor{0.0f, 0.65f, 1.0f};
 
-		// Kept at the invisible default while filled faces are unsupported.
+		// Zero is opaque and one omits the filled faces entirely.
 		float SurfaceTransparency = 1.0f;
 	};
 
@@ -1631,9 +1631,88 @@ namespace engine::gui {
 		// The offset from the adornee's own frame.
 		core::CFrame Offset;
 
-		// The handle's extent, in studs. What it means depends on the class: a
-		// box uses all three, a sphere the largest, a line the Z.
+		// A positional offset scaled by the adornee's half extent, so one reaches
+		// the corresponding surface.
+		core::Vector3 SizeRelativeOffset;
+	};
+
+	// The extent of a box handle, in studs.
+	//
+	// @since v0.22
+	struct BoxHandleShape {
+		// Full width, height and depth.
 		core::Vector3 Size{1.0f, 1.0f, 1.0f};
+	};
+
+	// The radius of a sphere handle, in studs.
+	//
+	// @since v0.22
+	struct SphereHandleShape {
+		// Distance from the centre to the wire surface.
+		float Radius = 0.5f;
+	};
+
+	// The dimensions of a cylinder handle, in studs and degrees.
+	//
+	// @since v0.22
+	struct CylinderHandleShape {
+		// Outer radius.
+		float Radius = 0.5f;
+
+		// Inner radius. Zero makes a solid ring profile.
+		float InnerRadius = 0.0f;
+
+		// Length along the handle's local Z axis.
+		float Height = 1.0f;
+
+		// Portion of the circumference to draw, in degrees.
+		float Angle = 360.0f;
+	};
+
+	// The dimensions of a line handle.
+	//
+	// @since v0.22
+	struct LineHandleShape {
+		// Length along the handle's local Z axis, in studs.
+		float Length = 1.0f;
+
+		// Width passed to the overlay drawer.
+		float Thickness = 1.0f;
+	};
+
+	// The dimensions of a cone handle.
+	//
+	// @since v0.22
+	struct ConeHandleShape {
+		// Length from base to tip, in studs.
+		float Height = 1.0f;
+
+		// Radius of the circular base, in studs.
+		float Radius = 0.5f;
+
+		// Whether the base cap is omitted.
+		bool Hollow = false;
+
+		// Named padding for deterministic generated serialisation.
+		uint8_t Reserved[3] = {};
+	};
+
+	// Which resize handles a `Handles` instance draws.
+	//
+	// Bits follow the six `NormalId` ordinals registered by this module.
+	//
+	// @since v0.22
+	struct HandlesShape {
+		// Enabled faces. The low six bits are used and default to all faces.
+		uint32_t Faces = 0x3fu;
+	};
+
+	// Which rotation rings an `ArcHandles` instance draws.
+	//
+	// @since v0.22
+	struct ArcHandlesShape {
+		// Enabled axes: X, Y and Z in the low three bits.
+		uint32_t Axes = 0x7u;
 	};
 
 	// What `GuiService` holds.

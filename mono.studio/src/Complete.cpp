@@ -553,8 +553,6 @@ namespace studio {
 		std::vector<ClassId> ids;
 
 		const ClassId instanceClass = Classes::Find(Name("Instance"));
-		const ClassId serviceClass = Classes::Find(Name("Service"));
-
 		for (size_t index = 0; index < Classes::Count(); index++) {
 			const ClassId id{static_cast<uint32_t>(index)};
 			const ClassInfo &info = Classes::Describe(id);
@@ -570,11 +568,9 @@ namespace studio {
 				continue;
 			}
 
-			// **A category, not nine names.** A world has exactly one of each
-			// service and `scene::InstallServices` is what puts it there, so
-			// offering one is offering a second that nothing resolves - and
-			// asking `IsA` is what keeps a tenth service out of this function.
-			if (serviceClass.IsValid() && Classes::IsA(id, serviceClass)) {
+			// The class table owns this answer so scripts, generated overloads and
+			// this palette cannot disagree about a virtual base or a fixture.
+			if (!info.Creatable) {
 				continue;
 			}
 

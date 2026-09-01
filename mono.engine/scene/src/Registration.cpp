@@ -1526,6 +1526,23 @@ namespace engine::scene {
 		ecs::Components::Register<AtmosphereProcedural>(
 			"scene.AtmosphereProcedural", WriteAtmosphereProcedural, ReadAtmosphereProcedural
 		);
+
+		// Appended because component ids are registration order. These are plain
+		// values with no process-local names, so the generated form is the stable
+		// form each one needs.
+		ecs::Components::Register<BoolValue>("scene.BoolValue");
+		ecs::Components::Register<CFrameValue>("scene.CFrameValue");
+		ecs::Components::Register<Color3Value>("scene.Color3Value");
+		ecs::Components::Register<IntValue>("scene.IntValue");
+		ecs::Components::Register<NumberValue>("scene.NumberValue");
+		ecs::Components::Register<ObjectValue>("scene.ObjectValue");
+		ecs::Components::Register<Vector3Value>("scene.Vector3Value");
+
+		// Appended because component ids are registration order. Both are authored
+		// rigid links and use the generated form because they contain only entity
+		// handles, frames, flags and explicit padding.
+		ecs::Components::Register<JointInstance>("scene.JointInstance");
+		ecs::Components::Register<WeldConstraint>("scene.WeldConstraint");
 	}
 
 	void RegisterSceneClasses() {

@@ -57,6 +57,10 @@ TEST_CASE("the javascript adapter refuses a non-instance parent before creation"
 	CHECK_FALSE(runtime->Run("Instance.new('Part', 7);"));
 
 	int parts = 0;
-	store.Each<const engine::scene::Transform>([&](engine::ecs::Entity, const auto &) { ++parts; });
+	store.EachEntity([&](engine::ecs::Entity entity) {
+		if (store.ClassOf(entity) == engine::scene::PartClass()) {
+			++parts;
+		}
+	});
 	CHECK(parts == 0);
 }

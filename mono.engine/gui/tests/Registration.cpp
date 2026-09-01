@@ -59,6 +59,11 @@ namespace {
 		"gui.Stroke",
 		"gui.Scale",
 		"gui.Resolved",
+		"gui.SpatialCanvas",
+		"gui.GuiServiceState",
+		"gui.Adornment",
+		"gui.SelectionOutline",
+		"gui.HandleShape",
 		"gui.FlexItem",
 
 		// v0.18: the gradient, the scrolling frame's derived state, the
@@ -69,6 +74,16 @@ namespace {
 		"gui.TableLayout",
 		"gui.PageLayout",
 		"gui.DragDetector",
+		"gui.PageMotion",
+		"gui.ScrollMotion",
+		"gui.SettingsMenuExtensions",
+		"gui.BoxHandleShape",
+		"gui.SphereHandleShape",
+		"gui.CylinderHandleShape",
+		"gui.LineHandleShape",
+		"gui.ConeHandleShape",
+		"gui.HandlesShape",
+		"gui.ArcHandlesShape",
 	};
 
 	struct ExpectedProperty {
@@ -216,16 +231,17 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 		INFO("class: " << name);
 		CHECK(GuiClass(name).IsValid());
 	}
+	CHECK_FALSE(Classes::Describe(GuiClass("GuiService")).Creatable);
 
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//
-	// **Fifty**: the thirty-eight of the 2D tree, `GuiService`, and the eleven
+	// **Fifty-one**: the thirty-eight of the 2D tree, `GuiService`, and the twelve
 	// of the 3D branch. The service is in this list rather than in
 	// `scene`'s because it is a `gui` class - the two modules may not link each
 	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
-	CHECK(GuiClassNames().size() == 50);
+	CHECK(GuiClassNames().size() == 51);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {
@@ -244,6 +260,8 @@ TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]"
 	CHECK(Classes::IsA(GuiClass("DockWidgetPluginGui"), GuiClass("PluginGui")));
 	CHECK(Classes::IsA(GuiClass("UIListLayout"), GuiClass("UILayout")));
 	CHECK(Classes::IsA(GuiClass("UIAspectRatioConstraint"), GuiClass("UIConstraint")));
+	CHECK(Classes::IsA(GuiClass("ConeHandleAdornment"), GuiClass("HandleAdornment")));
+	CHECK(Classes::IsA(GuiClass("ArcHandles"), GuiClass("PVAdornment")));
 
 	// A `UIFlexItem` is a component-style modifier and not a constraint - a
 	// migrating script tells the two apart with exactly this pair.

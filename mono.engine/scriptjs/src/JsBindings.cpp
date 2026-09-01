@@ -713,6 +713,11 @@ namespace engine::script {
 				JS_FreeCString(context, className);
 				return error;
 			}
+			if (created.Failure == InstanceCreateFailure::NotCreatable) {
+				JSValue error = JS_ThrowTypeError(context, "'%s' is not a creatable class", className);
+				JS_FreeCString(context, className);
+				return error;
+			}
 			JS_FreeCString(context, className);
 
 			if (created.Failure == InstanceCreateFailure::StoreRefused) {

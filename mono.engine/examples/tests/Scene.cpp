@@ -18,6 +18,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
@@ -50,6 +51,7 @@ using Catch::Approx;
 using engine::core::HeapProfile;
 using engine::core::HeapSample;
 using engine::core::Name;
+using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
@@ -1208,6 +1210,11 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	for (int index = 1; index <= 6; index++) {
 		CHECK(CountElements(store, "Swatch" + std::to_string(index)) == 1);
 	}
+	const Entity dragSelector = FirstElement(store, "DragSelector");
+	REQUIRE(dragSelector != engine::ecs::NULL_ENTITY);
+	const Entity dragDetector = store.FindFirstChild(dragSelector, "DragDetector");
+	REQUIRE(dragDetector != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::gui::DragDetector>(dragDetector) != nullptr);
 
 	const Entity hint = FirstElement(store, "Hint");
 	REQUIRE(hint != engine::ecs::NULL_ENTITY);
@@ -1221,6 +1228,15 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 
 	const size_t rendered = engine::gui::Layout(store, display);
 	CHECK(rendered > 0);
+
+	const Entity card = FirstElement(store, "Card");
+	REQUIRE(card != engine::ecs::NULL_ENTITY);
+	const engine::gui::Element *cardElement = store.Get<engine::gui::Element>(card);
+	REQUIRE(cardElement != nullptr);
+	CHECK(cardElement->Automatic == engine::gui::AutomaticSize::Y);
+	const engine::gui::Resolved *cardPlacement = store.Get<engine::gui::Resolved>(card);
+	REQUIRE(cardPlacement != nullptr);
+	CHECK(cardPlacement->AbsoluteSize.Y == Approx(402.0f));
 
 	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(hint);
 	REQUIRE(placed != nullptr);
@@ -1277,8 +1293,11 @@ TEST_CASE("the world interface scene contains every collector and a nested scene
 	const engine::gui::Viewport *scene = store.Get<engine::gui::Viewport>(viewport);
 	REQUIRE(scene != nullptr);
 	CHECK(store.Get<engine::scene::Camera>(scene->CurrentCamera) != nullptr);
-	CHECK(store.FindFirstChild(viewport, "PreviewFloor") != engine::ecs::NULL_ENTITY);
-	CHECK(store.FindFirstChild(viewport, "PreviewCube") != engine::ecs::NULL_ENTITY);
+	const Entity previewWorld = store.FindFirstChild(viewport, "PreviewWorld");
+	REQUIRE(previewWorld != engine::ecs::NULL_ENTITY);
+	CHECK(store.IsA(previewWorld, Classes::Find(Name("WorldRoot"))));
+	CHECK(store.FindFirstChild(previewWorld, "PreviewFloor") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(previewWorld, "PreviewCube") != engine::ecs::NULL_ENTITY);
 
 	engine::gui::Screen display;
 	display.Width = 1280.0f;
@@ -1289,6 +1308,93 @@ TEST_CASE("the world interface scene contains every collector and a nested scene
 	CHECK(placed->Rendered);
 	CHECK(placed->AbsoluteSize.X == Approx(640.0f));
 	CHECK(placed->AbsoluteSize.Y == Approx(360.0f));
+}
+
+TEST_CASE("the value object demo loads every typed leaf", "[examples][scene][values]") {
+	const StagedAssets assets;
+	Store store("value_objects");
+	Scheduler systems;
+
+	std::string error;
+	INFO(error);
+	REQUIRE(LoadScene(store, systems, ExamplePath("ValueObjects.luau"), error));
+
+	const Entity target = InScene(store, "ValueTarget");
+	REQUIRE(target != engine::ecs::NULL_ENTITY);
+	const engine::ecs::ClassId valueBase = Classes::Find(Name("ValueBase"));
+	for (const char *name : {"Enabled", "Placement", "Tint", "Score", "Ratio", "Target", "Message", "Direction"}) {
+		const Entity value = store.FindFirstChild(target, name);
+		INFO(name);
+		REQUIRE(value != engine::ecs::NULL_ENTITY);
+		CHECK(store.IsA(value, valueBase));
+	}
+
+	const Entity object = store.FindFirstChild(target, "Target");
+	REQUIRE(store.Get<engine::scene::ObjectValue>(object) != nullptr);
+	CHECK(store.Get<engine::scene::ObjectValue>(object)->Value == target);
+	CHECK(store.Get<engine::scene::IntValue>(store.FindFirstChild(target, "Score"))->Value == 9000000000ll);
+	CHECK(store.Get<engine::scene::TextContent>(store.FindFirstChild(target, "Message"))->Value ==
+		  "value objects are live");
+}
+
+TEST_CASE("the adornment demo loads every concrete decoration", "[examples][scene][adornments]") {
+	const StagedAssets assets;
+	Store store("adornments");
+	Scheduler systems;
+
+	std::string error;
+	INFO(error);
+	REQUIRE(LoadScene(store, systems, ExamplePath("Adornments.luau"), error));
+
+	for (const char *klass : {
+			 "SelectionBox",
+			 "SelectionSphere",
+			 "BoxHandleAdornment",
+			 "SphereHandleAdornment",
+			 "CylinderHandleAdornment",
+			 "LineHandleAdornment",
+			 "ConeHandleAdornment",
+			 "Handles",
+			 "ArcHandles",
+		 }) {
+		INFO(klass);
+		CHECK(CountOfClass(store, klass) == 1);
+	}
+
+	size_t linked = 0;
+	store.Each<const engine::gui::Adornment>([&](Entity, const engine::gui::Adornment &adornment) {
+		if (adornment.Adornee != engine::ecs::NULL_ENTITY && store.Alive(adornment.Adornee)) {
+			linked++;
+		}
+	});
+	CHECK(linked == 9);
+}
+
+TEST_CASE("the weld demo loads both rigid joint families", "[examples][scene][welds]") {
+	const StagedAssets assets;
+	Store store("welds");
+	Scheduler systems;
+
+	std::string error;
+	INFO(error);
+	REQUIRE(LoadScene(store, systems, ExamplePath("Welds.luau"), error));
+
+	const Entity legacyRoot = InScene(store, "LegacyRoot");
+	const Entity directRoot = InScene(store, "DirectRoot");
+	REQUIRE(legacyRoot != engine::ecs::NULL_ENTITY);
+	REQUIRE(directRoot != engine::ecs::NULL_ENTITY);
+
+	const Entity legacy = store.FindFirstChild(legacyRoot, "OffsetWeld");
+	const Entity first = store.FindFirstChild(directRoot, "FirstLink");
+	REQUIRE(legacy != engine::ecs::NULL_ENTITY);
+	REQUIRE(first != engine::ecs::NULL_ENTITY);
+	const auto *joint = store.Get<engine::scene::JointInstance>(legacy);
+	const auto *constraint = store.Get<engine::scene::WeldConstraint>(first);
+	REQUIRE(joint != nullptr);
+	REQUIRE(constraint != nullptr);
+	CHECK(joint->Part0 == legacyRoot);
+	CHECK(constraint->Part0 == directRoot);
+	CHECK(CountOfClass(store, "WeldConstraint") == 2);
 }
 
 TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][worlds]") {

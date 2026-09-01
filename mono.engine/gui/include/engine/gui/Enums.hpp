@@ -210,10 +210,8 @@ namespace engine::gui {
 
 	// Whether a scrolling frame lets a drag pull the canvas past its end.
 	//
-	// **Declared and pinned even though the pull is not animated yet.** Roblox's
-	// three members are the format, and a set registered with two of them now
-	// and three later would renumber `Never` - which is the failure this file's
-	// opening paragraph is about. `Scrolling::Elastic` says what each does here.
+	// All three members are consumed by the input router and spring motion.
+	// `Scrolling::Elastic` states when each one permits overscroll.
 	//
 	// @since v0.18
 	enum class ElasticBehavior : uint8_t {

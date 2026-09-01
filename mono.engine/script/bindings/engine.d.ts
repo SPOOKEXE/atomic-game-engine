@@ -1239,6 +1239,12 @@ declare interface SpawnLocation extends Part {
 declare interface Model extends PVInstance {
 }
 
+declare interface WorldRoot extends Model {
+}
+
+declare interface WorldModel extends WorldRoot {
+}
+
 declare interface Tool extends Model {
 	Grip: CFrame;
 }
@@ -1340,13 +1346,42 @@ declare interface SurfaceLight extends Light {
 }
 
 declare interface ValueBase extends Instance {
-	Value: string;
 }
 
 declare interface StringValue extends ValueBase {
+	Value: string;
 }
 
 declare interface LocalizationTable extends ValueBase {
+	Value: string;
+}
+
+declare interface BoolValue extends ValueBase {
+	Value: boolean;
+}
+
+declare interface CFrameValue extends ValueBase {
+	Value: CFrame;
+}
+
+declare interface Color3Value extends ValueBase {
+	Value: Color3;
+}
+
+declare interface IntValue extends ValueBase {
+	Value: number;
+}
+
+declare interface NumberValue extends ValueBase {
+	Value: number;
+}
+
+declare interface ObjectValue extends ValueBase {
+	Value: Instance;
+}
+
+declare interface Vector3Value extends ValueBase {
+	Value: Vector3;
 }
 
 declare interface Bone extends Instance {
@@ -1467,9 +1502,6 @@ declare interface Constraint extends Instance {
 	UpperLimit: number;
 }
 
-declare interface WeldConstraint extends Constraint {
-}
-
 declare interface BallSocketConstraint extends Constraint {
 }
 
@@ -1486,6 +1518,25 @@ declare interface RopeConstraint extends Constraint {
 }
 
 declare interface SpringConstraint extends Constraint {
+}
+
+declare interface JointInstance extends Instance {
+	readonly Active: boolean;
+	C0: CFrame;
+	C1: CFrame;
+	Enabled: boolean;
+	Part0: Instance;
+	Part1: Instance;
+}
+
+declare interface Weld extends JointInstance {
+}
+
+declare interface WeldConstraint extends Instance {
+	readonly Active: boolean;
+	Enabled: boolean;
+	Part0: Instance;
+	Part1: Instance;
 }
 
 declare interface ShaderScript extends Instance {
@@ -1651,25 +1702,41 @@ declare interface SelectionSphere extends PVAdornment {
 
 declare interface HandleAdornment extends PVAdornment {
 	CFrame: CFrame;
-	Size: Vector3;
+	SizeRelativeOffset: Vector3;
 }
 
 declare interface BoxHandleAdornment extends HandleAdornment {
+	Size: Vector3;
 }
 
 declare interface SphereHandleAdornment extends HandleAdornment {
+	Radius: number;
 }
 
 declare interface CylinderHandleAdornment extends HandleAdornment {
+	Angle: number;
+	Height: number;
+	InnerRadius: number;
+	Radius: number;
 }
 
 declare interface LineHandleAdornment extends HandleAdornment {
+	Length: number;
+	Thickness: number;
+}
+
+declare interface ConeHandleAdornment extends HandleAdornment {
+	Height: number;
+	Hollow: boolean;
+	Radius: number;
 }
 
 declare interface Handles extends PVAdornment {
+	Faces: number;
 }
 
 declare interface ArcHandles extends PVAdornment {
+	Axes: number;
 }
 
 declare interface GuiBase2d extends GuiBase {
@@ -2028,7 +2095,7 @@ declare interface Service extends Instance {
 	Scope: Enum.ServiceScope;
 }
 
-declare interface Workspace extends Service {
+declare interface Workspace extends WorldRoot {
 	CurrentCamera: Instance;
 	MaxSurfaces: number;
 	SurfaceBounces: number;
@@ -2533,6 +2600,8 @@ declare const Instance: {
 		(className: "Part", parent?: Instance): Part;
 		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
+		(className: "WorldRoot", parent?: Instance): WorldRoot;
+		(className: "WorldModel", parent?: Instance): WorldModel;
 		(className: "Tool", parent?: Instance): Tool;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "SkinnedMeshPart", parent?: Instance): SkinnedMeshPart;
@@ -2550,6 +2619,13 @@ declare const Instance: {
 		(className: "ValueBase", parent?: Instance): ValueBase;
 		(className: "StringValue", parent?: Instance): StringValue;
 		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
+		(className: "BoolValue", parent?: Instance): BoolValue;
+		(className: "CFrameValue", parent?: Instance): CFrameValue;
+		(className: "Color3Value", parent?: Instance): Color3Value;
+		(className: "IntValue", parent?: Instance): IntValue;
+		(className: "NumberValue", parent?: Instance): NumberValue;
+		(className: "ObjectValue", parent?: Instance): ObjectValue;
+		(className: "Vector3Value", parent?: Instance): Vector3Value;
 		(className: "Bone", parent?: Instance): Bone;
 		(className: "AnimationBuffer", parent?: Instance): AnimationBuffer;
 		(className: "Animation", parent?: Instance): Animation;
@@ -2564,13 +2640,15 @@ declare const Instance: {
 		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;
 		(className: "SkyboxCompute", parent?: Instance): SkyboxCompute;
 		(className: "Constraint", parent?: Instance): Constraint;
-		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
 		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;
 		(className: "HingeConstraint", parent?: Instance): HingeConstraint;
 		(className: "PrismaticConstraint", parent?: Instance): PrismaticConstraint;
 		(className: "CylindricalConstraint", parent?: Instance): CylindricalConstraint;
 		(className: "RopeConstraint", parent?: Instance): RopeConstraint;
 		(className: "SpringConstraint", parent?: Instance): SpringConstraint;
+		(className: "JointInstance", parent?: Instance): JointInstance;
+		(className: "Weld", parent?: Instance): Weld;
+		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;
@@ -2585,7 +2663,6 @@ declare const Instance: {
 		(className: "Decal", parent?: Instance): Decal;
 		(className: "Texture", parent?: Instance): Texture;
 		(className: "GuiBase", parent?: Instance): GuiBase;
-		(className: "GuiService", parent?: Instance): GuiService;
 		(className: "GuiBase3d", parent?: Instance): GuiBase3d;
 		(className: "PVAdornment", parent?: Instance): PVAdornment;
 		(className: "SelectionBox", parent?: Instance): SelectionBox;
@@ -2595,6 +2672,7 @@ declare const Instance: {
 		(className: "SphereHandleAdornment", parent?: Instance): SphereHandleAdornment;
 		(className: "CylinderHandleAdornment", parent?: Instance): CylinderHandleAdornment;
 		(className: "LineHandleAdornment", parent?: Instance): LineHandleAdornment;
+		(className: "ConeHandleAdornment", parent?: Instance): ConeHandleAdornment;
 		(className: "Handles", parent?: Instance): Handles;
 		(className: "ArcHandles", parent?: Instance): ArcHandles;
 		(className: "GuiBase2d", parent?: Instance): GuiBase2d;

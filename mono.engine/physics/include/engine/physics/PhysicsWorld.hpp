@@ -23,6 +23,7 @@
 // @tier L8 · shared
 
 #include <engine/core/types/AABB.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/physics/Contacts.hpp>
@@ -38,6 +39,29 @@
 #include <vector>
 
 namespace engine::physics {
+
+	// A direct WeldConstraint's captured relative frame.
+	struct WeldPose {
+		ecs::Entity Owner;
+		ecs::Entity Part0;
+		ecs::Entity Part1;
+		core::CFrame Part0ToPart1;
+	};
+
+	// One active rigid edge and one part in the resolved assembly graph.
+	struct RigidEdge {
+		ecs::Entity Owner;
+		ecs::Entity Part0;
+		ecs::Entity Part1;
+		core::CFrame Part0ToPart1;
+	};
+
+	struct RigidNode {
+		ecs::Entity Part;
+		ecs::Entity Root;
+		core::CFrame Frame;
+		bool Placed = false;
+	};
 
 	// What the broad phase remembers about one collider, beside its box.
 	//
@@ -678,6 +702,9 @@ namespace engine::physics {
 			return StaticStale;
 		}
 
+		// Whether two parts belong to the same active rigid assembly.
+		bool RigidlyConnected(ecs::Entity first, ecs::Entity second) const;
+
 		// How many colliders the dynamic index held after the last sync.
 		//
 		// @return The dynamic collider count.
@@ -942,6 +969,13 @@ namespace engine::physics {
 		// not, because a body in mid-air is not resting.
 		std::vector<RestingBody> RestingList;
 		std::vector<RestingBody> RestingNext;
+
+		// Rigid-link state and scratch, all retained so a steady assembly stops
+		// allocating. Weld poses outlive a tick; edges and nodes are rebuilt.
+		std::vector<WeldPose> WeldPoses;
+		std::vector<WeldPose> WeldPosesNext;
+		std::vector<RigidEdge> RigidEdges;
+		std::vector<RigidNode> RigidNodes;
 
 		// The pairs that were touching last tick, sorted, so `Publish` can say
 		// which began, which persisted and which ended without holding a set.

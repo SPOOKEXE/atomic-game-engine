@@ -396,6 +396,7 @@ namespace engine::gui {
 			"SphereHandleAdornment",
 			"CylinderHandleAdornment",
 			"LineHandleAdornment",
+			"ConeHandleAdornment",
 			"Handles",
 			"ArcHandles",
 		};
@@ -474,6 +475,7 @@ namespace engine::gui {
 			// root the same way, and `GetService` finds either by name.
 			const std::array guiServiceState{Components::Of<GuiServiceState>()};
 			const ClassId guiService = Classes::Register("GuiService", instance, guiServiceState);
+			Classes::SetCreatable(guiService, false);
 
 			// --- the 3D branch -----------------------------------------------
 			//
@@ -498,24 +500,33 @@ namespace engine::gui {
 			const ClassId selectionBox = Classes::Register("SelectionBox", pvAdornment, outline);
 			const ClassId selectionSphere = Classes::Register("SelectionSphere", pvAdornment, outline);
 
-			// A handle is an adornment with a shape and an offset. The four
-			// leaves below differ only in what a drawer makes of `HandleShape`,
-			// which is why they add no components of their own - the same shape
-			// `Frame` and `CanvasGroup` have on the 2D side.
+			// A handle is an adornment with a common frame and relative offset.
+			// Each leaf owns the dimensions only that shape understands, so a
+			// cylinder cannot accidentally expose a box's `Size`.
 			const std::array handle{Components::Of<HandleShape>()};
 			const ClassId handleAdornment = Classes::Register("HandleAdornment", pvAdornment, handle);
 
-			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, {});
-			const ClassId sphereHandle = Classes::Register("SphereHandleAdornment", handleAdornment, {});
-			const ClassId cylinderHandle = Classes::Register("CylinderHandleAdornment", handleAdornment, {});
-			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, {});
+			const std::array boxShape{Components::Of<BoxHandleShape>()};
+			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, boxShape);
+			const std::array sphereShape{Components::Of<SphereHandleShape>()};
+			const ClassId sphereHandle =
+				Classes::Register("SphereHandleAdornment", handleAdornment, sphereShape);
+			const std::array cylinderShape{Components::Of<CylinderHandleShape>()};
+			const ClassId cylinderHandle =
+				Classes::Register("CylinderHandleAdornment", handleAdornment, cylinderShape);
+			const std::array lineShape{Components::Of<LineHandleShape>()};
+			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, lineShape);
+			const std::array coneShape{Components::Of<ConeHandleShape>()};
+			const ClassId coneHandle = Classes::Register("ConeHandleAdornment", handleAdornment, coneShape);
 
 			// `Handles` and `ArcHandles` are the draggable ones - the editor's
 			// move and rotate gizmos. They carry the same `Adornment` their
 			// siblings do and differ in what a drawer offers to grab, which is
 			// the drawer's business rather than the tree's.
-			const ClassId handles = Classes::Register("Handles", pvAdornment, {});
-			const ClassId arcHandles = Classes::Register("ArcHandles", pvAdornment, {});
+			const std::array faceHandles{Components::Of<HandlesShape>()};
+			const ClassId handles = Classes::Register("Handles", pvAdornment, faceHandles);
+			const std::array arcShape{Components::Of<ArcHandlesShape>()};
+			const ClassId arcHandles = Classes::Register("ArcHandles", pvAdornment, arcShape);
 
 			// `Resolved` arrives here because both halves below need it: a
 			// `LayerCollector` has an absolute rectangle just as an element
@@ -931,7 +942,20 @@ namespace engine::gui {
 			Classes::Property<&Adornment::ZIndex>(pvAdornment, "ZIndex");
 
 			Classes::Property<&HandleShape::Offset>(handleAdornment, "CFrame");
-			Classes::Property<&HandleShape::Size>(handleAdornment, "Size");
+			Classes::Property<&HandleShape::SizeRelativeOffset>(handleAdornment, "SizeRelativeOffset");
+			Classes::Property<&BoxHandleShape::Size>(boxHandle, "Size");
+			Classes::Property<&SphereHandleShape::Radius>(sphereHandle, "Radius");
+			Classes::Property<&CylinderHandleShape::Radius>(cylinderHandle, "Radius");
+			Classes::Property<&CylinderHandleShape::InnerRadius>(cylinderHandle, "InnerRadius");
+			Classes::Property<&CylinderHandleShape::Height>(cylinderHandle, "Height");
+			Classes::Property<&CylinderHandleShape::Angle>(cylinderHandle, "Angle");
+			Classes::Property<&LineHandleShape::Length>(lineHandle, "Length");
+			Classes::Property<&LineHandleShape::Thickness>(lineHandle, "Thickness");
+			Classes::Property<&ConeHandleShape::Height>(coneHandle, "Height");
+			Classes::Property<&ConeHandleShape::Radius>(coneHandle, "Radius");
+			Classes::Property<&ConeHandleShape::Hollow>(coneHandle, "Hollow");
+			Classes::Property<&HandlesShape::Faces>(handles, "Faces");
+			Classes::Property<&ArcHandlesShape::Axes>(arcHandles, "Axes");
 
 			Classes::Property<&GuiServiceState::SelectedObject>(guiService, "SelectedObject");
 			Classes::Property<&GuiServiceState::MenuIsOpen>(guiService, "MenuIsOpen");
@@ -964,6 +988,7 @@ namespace engine::gui {
 			(void)sphereHandle;
 			(void)cylinderHandle;
 			(void)lineHandle;
+			(void)coneHandle;
 			(void)handles;
 			(void)arcHandles;
 

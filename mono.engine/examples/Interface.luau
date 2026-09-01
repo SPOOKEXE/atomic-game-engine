@@ -88,6 +88,35 @@ else
 	screen.Parent = game:GetService("StarterGui")
 end
 
+-- A free panel for the input half of the interface. Dragging it proves the
+-- detector moves its parent without turning the gesture into a button click.
+local dragSelector = Instance.new("Frame")
+dragSelector.Name = "DragSelector"
+dragSelector.Position = UDim2.new(0, 32, 0, 32)
+dragSelector.Size = UDim2.new(0, 180, 0, 48)
+dragSelector.BackgroundColor3 = ACCENT
+dragSelector.BorderSizePixel = 0
+dragSelector.Parent = screen
+
+local dragLabel = Instance.new("TextLabel")
+dragLabel.Name = "DragLabel"
+dragLabel.Size = UDim2.new(1, 0, 1, 0)
+dragLabel.BackgroundTransparency = 1
+dragLabel.Text = "drag selector"
+dragLabel.TextColor3 = INK
+dragLabel.TextSize = 18
+dragLabel.Parent = dragSelector
+
+local dragCorner = Instance.new("UICorner")
+dragCorner.CornerRadius = UDim.new(0, 8)
+dragCorner.Parent = dragSelector
+
+local dragDetector = Instance.new("UIDragDetector")
+dragDetector.Name = "DragDetector"
+dragDetector.DragStyle = Enum.UIDragDetectorDragStyle.TranslatePlane
+dragDetector.ResponseStyle = Enum.UIDragDetectorDragStyleResponse.Offset
+dragDetector.Parent = dragSelector
+
 -- The card everything else sits in. Anchored at its own centre and placed at
 -- the screen's centre, so it stays centred at any window size - which is the
 -- assertion, not the decoration.
@@ -95,11 +124,11 @@ local card = Instance.new("Frame")
 card.Name = "Card"
 card.AnchorPoint = Vector2.new(0.5, 0.5)
 card.Position = UDim2.new(0.5, 0, 0.5, 0)
--- **Tall enough for the sections plus the list's gaps and the padding**, added
--- up rather than eyeballed: 44 + 96 + 56 + 52 + 74 of section, four 12-pixel
--- gaps and 16 of padding at each end is 402. `AutomaticSize` is the property
--- that would derive it and it is declared and not implemented - `D00021`.
-card.Size = UDim2.new(0, 520, 0, 412)
+-- The list owns the height. Adding a section changes the card without another
+-- literal to keep in step: 44 + 96 + 56 + 52 + 74 of section, four 12-pixel
+-- gaps and 16 of padding at each end resolves to 402 pixels today.
+card.Size = UDim2.new(0, 520, 0, 0)
+card.AutomaticSize = Enum.AutomaticSize.Y
 card.BackgroundColor3 = PANEL
 card.BorderSizePixel = 0
 card.Parent = screen
@@ -435,8 +464,8 @@ end)
 local close = Instance.new("TextButton")
 close.Name = "Close"
 
--- Anchored to the card's own top-right corner, so it stays there whatever the
--- card's size resolves to.
+-- Anchored to the header's top-right corner. Keeping it inside the header also
+-- keeps the card's list from treating the overlay as a sixth row.
 close.AnchorPoint = Vector2.new(1, 0)
 close.Position = UDim2.new(1, 0, 0, 0)
 close.Size = UDim2.new(0, 22, 0, 22)
@@ -446,7 +475,7 @@ close.Text = "X"
 close.TextColor3 = MUTED
 close.TextSize = 13
 close.ZIndex = 2
-close.Parent = card
+close.Parent = header
 
 local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 4)

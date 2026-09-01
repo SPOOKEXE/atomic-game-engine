@@ -57,9 +57,10 @@ namespace engine::physics {
 	// Adds the physics steps to a world's scheduler.
 	//
 	// Two systems: `physics.simulation` in `Phase::Simulation`, which
-	// integrates and then indexes, and `physics.contacts` in
+// integrates, projects rigid assemblies, then indexes, and `physics.contacts` in
 	// `Phase::PostSimulation`, which pairs, intersects, solves and publishes.
-	// Six steps in two systems, in pipeline order.
+// The contact steps then publish and project rigid assemblies once more so a
+// collision correction cannot pull a welded part loose.
 	//
 	// **How many times the six run is the world's `PhysicsClock`'s business.**
 	// A world that never set a rate runs them once per tick, which is what they

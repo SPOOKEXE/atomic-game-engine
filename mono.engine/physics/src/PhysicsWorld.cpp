@@ -55,4 +55,17 @@ namespace engine::physics {
 		}
 		return count;
 	}
+
+	bool PhysicsWorld::RigidlyConnected(ecs::Entity first, ecs::Entity second) const {
+		const auto node = [this](ecs::Entity part) {
+			return std::lower_bound(
+				RigidNodes.begin(), RigidNodes.end(), part,
+				[](const RigidNode &entry, ecs::Entity wanted) { return entry.Part.Id < wanted.Id; }
+			);
+		};
+		const auto a = node(first);
+		const auto b = node(second);
+		return a != RigidNodes.end() && b != RigidNodes.end() && a->Part == first && b->Part == second &&
+			a->Root != ecs::NULL_ENTITY && a->Root == b->Root;
+	}
 }

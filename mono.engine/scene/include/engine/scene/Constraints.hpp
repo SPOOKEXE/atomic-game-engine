@@ -12,7 +12,7 @@
 //
 // The family falls out of the six modes rather than out of a `Kind` field:
 //
-// - **Weld / Rigid** is every axis `Locked`.
+// - **Rigid** is every axis `Locked`.
 // - **BallSocket** is three angular axes `Free`.
 // - **Hinge** is one angular axis `Free` and the rest `Locked`.
 // - **Prismatic** is one linear axis `Free`.
@@ -198,6 +198,36 @@ namespace engine::scene {
 		float MaxTorque = 100000.0f;
 	};
 
+	// The shared surface of legacy rigid joints such as `Weld`.
+	//
+	// `Part0 * C0 == Part1 * C1` is the invariant enforced by physics. The two
+	// frames are authored rather than cached so changing either moves the joined
+	// part without destroying the intended offset.
+	//
+	// @since v0.22
+	struct JointInstance {
+		ecs::Entity Part0;
+		ecs::Entity Part1;
+		core::CFrame C0;
+		core::CFrame C1;
+		bool Enabled = true;
+		uint8_t Reserved[7] = {};
+	};
+
+	// A rigid link between two parts which captures their current relative pose.
+	//
+	// Unlike `Weld`, this class has no authored C0 or C1. Physics remembers the
+	// relative frame when a valid pair first becomes active and keeps it until a
+	// part assignment changes.
+	//
+	// @since v0.22
+	struct WeldConstraint {
+		ecs::Entity Part0;
+		ecs::Entity Part1;
+		bool Enabled = true;
+		uint8_t Reserved[7] = {};
+	};
+
 	// Whether every axis of a constraint is held at zero.
 	//
 	// **The one predicate this module offers about a constraint**, because it is
@@ -236,7 +266,7 @@ namespace engine::scene {
 
 	// The base `Constraint` class id, registering the scene tree on first call.
 	//
-	// The concrete classes - `WeldConstraint`, `BallSocketConstraint`,
+	// The concrete classes - `BallSocketConstraint`,
 	// `HingeConstraint`, `PrismaticConstraint`, `CylindricalConstraint`,
 	// `RopeConstraint` and `SpringConstraint` - all derive from it and differ only
 	// in the prototype row `Instance.new` copies.

@@ -459,6 +459,9 @@ namespace engine::script {
 			if (created.Failure == InstanceCreateFailure::UnknownClass) {
 				luaL_errorL(state, "'%s' is not a registered class", className);
 			}
+			if (created.Failure == InstanceCreateFailure::NotCreatable) {
+				luaL_errorL(state, "'%s' is not a creatable class", className);
+			}
 			if (created.Failure == InstanceCreateFailure::StoreRefused) {
 				if (store.AdoptOnly()) {
 					luaL_errorL(

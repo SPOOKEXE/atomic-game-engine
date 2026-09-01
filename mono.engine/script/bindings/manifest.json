@@ -176,6 +176,34 @@
 			]
 		},
 		{
+			"name": "WorldRoot",
+			"parent": "Model",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+			]
+		},
+		{
+			"name": "WorldModel",
+			"parent": "WorldRoot",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+			]
+		},
+		{
 			"name": "Tool",
 			"parent": "Model",
 			"constructible": true,
@@ -493,11 +521,10 @@
 			"name": "ValueBase",
 			"parent": "Instance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.TextContent"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
 			]
 		},
 		{
@@ -520,6 +547,83 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
+			"name": "BoolValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.BoolValue"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.BoolValue"], "writes": ["scene.BoolValue"]}
+			]
+		},
+		{
+			"name": "CFrameValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CFrameValue"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.CFrameValue"], "writes": ["scene.CFrameValue"]}
+			]
+		},
+		{
+			"name": "Color3Value",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Color3Value"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Color3Value"], "writes": ["scene.Color3Value"]}
+			]
+		},
+		{
+			"name": "IntValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.IntValue"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "int64", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.IntValue"], "writes": ["scene.IntValue"]}
+			]
+		},
+		{
+			"name": "NumberValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.NumberValue"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "double", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.NumberValue"], "writes": ["scene.NumberValue"]}
+			]
+		},
+		{
+			"name": "ObjectValue",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ObjectValue"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.ObjectValue"], "writes": ["scene.ObjectValue"]}
+			]
+		},
+		{
+			"name": "Vector3Value",
+			"parent": "ValueBase",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Vector3Value"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Value", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Vector3Value"], "writes": ["scene.Vector3Value"]}
 			]
 		},
 		{
@@ -763,28 +867,6 @@
 			]
 		},
 		{
-			"name": "WeldConstraint",
-			"parent": "Constraint",
-			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Constraint"],
-			"properties": [
-				{"name": "Attachment0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "Attachment1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "Damping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "LowerAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "LowerLimit", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "MaxForce", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "MaxTorque", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
-				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Stiffness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
-				{"name": "UpperLimit", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]}
-			]
-		},
-		{
 			"name": "BallSocketConstraint",
 			"parent": "Constraint",
 			"constructible": true,
@@ -914,6 +996,52 @@
 				{"name": "Target", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperAngle", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
 				{"name": "UpperLimit", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]}
+			]
+		},
+		{
+			"name": "JointInstance",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.JointInstance"],
+			"properties": [
+				{"name": "Active", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["ecs.Hierarchy", "scene.JointInstance"], "writes": []},
+				{"name": "C0", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "C1", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]}
+			]
+		},
+		{
+			"name": "Weld",
+			"parent": "JointInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.JointInstance"],
+			"properties": [
+				{"name": "Active", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["ecs.Hierarchy", "scene.JointInstance"], "writes": []},
+				{"name": "C0", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "C1", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]},
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.JointInstance"], "writes": ["scene.JointInstance"]}
+			]
+		},
+		{
+			"name": "WeldConstraint",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.WeldConstraint"],
+			"properties": [
+				{"name": "Active", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["ecs.Hierarchy", "scene.WeldConstraint"], "writes": []},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Part0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]},
+				{"name": "Part1", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.WeldConstraint"], "writes": ["scene.WeldConstraint"]}
 			]
 		},
 		{
@@ -1166,7 +1294,7 @@
 		{
 			"name": "GuiService",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.GuiServiceState"],
 			"properties": [
 				{"name": "AutoSelectGuiEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.GuiServiceState"], "writes": ["gui.GuiServiceState"]},
@@ -1252,7 +1380,7 @@
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1262,7 +1390,7 @@
 			"name": "BoxHandleAdornment",
 			"parent": "HandleAdornment",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.BoxHandleShape", "gui.HandleShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -1270,7 +1398,8 @@
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.BoxHandleShape"], "writes": ["gui.BoxHandleShape"]},
+				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1280,7 +1409,7 @@
 			"name": "SphereHandleAdornment",
 			"parent": "HandleAdornment",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape", "gui.SphereHandleShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -1288,7 +1417,8 @@
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SphereHandleShape"], "writes": ["gui.SphereHandleShape"]},
+				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1298,15 +1428,19 @@
 			"name": "CylinderHandleAdornment",
 			"parent": "HandleAdornment",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.CylinderHandleShape", "gui.HandleShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Angle", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.CylinderHandleShape"], "writes": ["gui.CylinderHandleShape"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Height", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.CylinderHandleShape"], "writes": ["gui.CylinderHandleShape"]},
+				{"name": "InnerRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.CylinderHandleShape"], "writes": ["gui.CylinderHandleShape"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.CylinderHandleShape"], "writes": ["gui.CylinderHandleShape"]},
+				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1316,15 +1450,38 @@
 			"name": "LineHandleAdornment",
 			"parent": "HandleAdornment",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape", "gui.LineHandleShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Length", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.LineHandleShape"], "writes": ["gui.LineHandleShape"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Size", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "Thickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.LineHandleShape"], "writes": ["gui.LineHandleShape"]},
+				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
+			]
+		},
+		{
+			"name": "ConeHandleAdornment",
+			"parent": "HandleAdornment",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.ConeHandleShape", "gui.HandleShape"],
+			"properties": [
+				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
+				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Height", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.ConeHandleShape"], "writes": ["gui.ConeHandleShape"]},
+				{"name": "Hollow", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.ConeHandleShape"], "writes": ["gui.ConeHandleShape"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.ConeHandleShape"], "writes": ["gui.ConeHandleShape"]},
+				{"name": "SizeRelativeOffset", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.HandleShape"], "writes": ["gui.HandleShape"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1334,11 +1491,12 @@
 			"name": "Handles",
 			"parent": "PVAdornment",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandlesShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Faces", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.HandlesShape"], "writes": ["gui.HandlesShape"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -1350,10 +1508,11 @@
 			"name": "ArcHandles",
 			"parent": "PVAdornment",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.ArcHandlesShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "Axes", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.ArcHandlesShape"], "writes": ["gui.ArcHandlesShape"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
@@ -2326,16 +2485,18 @@
 		},
 		{
 			"name": "Workspace",
-			"parent": "Service",
+			"parent": "WorldRoot",
 			"constructible": false,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Service", "scene.Transform"],
 			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "CurrentCamera", "type": "Instance", "kind": "resource", "bytes": 8, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
-				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "MaxSurfaces", "type": "int32", "kind": "resource", "bytes": 4, "writable": true, "reads": ["scene.SurfaceLimit"], "writes": ["scene.SurfaceLimit"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
 				{"name": "SurfaceBounces", "type": "int32", "kind": "resource", "bytes": 4, "writable": true, "reads": ["scene.SurfaceBounces"], "writes": ["scene.SurfaceBounces"]},
 				{"name": "TerrainChunkSize", "type": "float", "kind": "resource", "bytes": 4, "writable": true, "reads": ["scene.Terrain"], "writes": ["scene.Terrain"]},
 				{"name": "TerrainEnabled", "type": "bool", "kind": "resource", "bytes": 1, "writable": true, "reads": ["scene.Terrain"], "writes": ["scene.Terrain"]},

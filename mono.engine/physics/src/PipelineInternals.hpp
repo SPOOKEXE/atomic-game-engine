@@ -163,6 +163,22 @@ namespace engine::physics {
 			return world.RestingNext;
 		}
 
+		static std::vector<WeldPose> &WeldPoses(PhysicsWorld &world) {
+			return world.WeldPoses;
+		}
+
+		static std::vector<WeldPose> &WeldPosesNext(PhysicsWorld &world) {
+			return world.WeldPosesNext;
+		}
+
+		static std::vector<RigidEdge> &RigidEdges(PhysicsWorld &world) {
+			return world.RigidEdges;
+		}
+
+		static std::vector<RigidNode> &RigidNodes(PhysicsWorld &world) {
+			return world.RigidNodes;
+		}
+
 		// The pairs that were touching at the end of the previous tick.
 		static std::vector<CandidatePair> &TouchingLast(PhysicsWorld &world) {
 			return world.TouchingLast;

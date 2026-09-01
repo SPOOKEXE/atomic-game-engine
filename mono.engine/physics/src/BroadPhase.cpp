@@ -99,7 +99,7 @@ namespace engine::physics {
 				}
 
 				const ColliderRecord &b = dynamicRecords[other];
-				if (!PairAdmitted(a, b)) {
+				if (!PairAdmitted(a, b) || world->RigidlyConnected(a.Owner, b.Owner)) {
 					continue;
 				}
 				sourced.push_back(
@@ -120,7 +120,7 @@ namespace engine::physics {
 				if (b.Owner == a.Owner) {
 					continue;
 				}
-				if (!PairAdmitted(a, b)) {
+				if (!PairAdmitted(a, b) || world->RigidlyConnected(a.Owner, b.Owner)) {
 					continue;
 				}
 				sourced.push_back(Ordered(
