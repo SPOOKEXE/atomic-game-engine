@@ -766,6 +766,36 @@ mono_vendor_system(libzstd_static)
 # Vendor:: to match the rest.
 add_library(Vendor::zstd ALIAS libzstd_static)
 
+# --- miniz ------------------------------------------------------------------
+# ZIP reading and writing for portable project packages. Upstream has no
+# release branch, so the superproject pins the 3.1.2 tag while `.gitmodules`
+# follows its only development branch.
+#
+# The upstream CMake file changes global output and verbosity settings and uses
+# generic BUILD_TESTS/BUILD_EXAMPLES cache names. Declare its four source files
+# here so those settings cannot leak into first-party targets. `MINIZ_NO_TIME`
+# makes every writer timestamp zero and removes local-time-zone drift from a
+# reproducible archive.
+if(NOT EXISTS "${MONO_VENDOR}/miniz/miniz_zip.c")
+	message(FATAL_ERROR "mono.vendor/miniz is missing. Run `just setup`.")
+endif()
+
+include(GenerateExportHeader)
+add_library(mono_miniz STATIC
+	"${MONO_VENDOR}/miniz/miniz.c"
+	"${MONO_VENDOR}/miniz/miniz_zip.c"
+	"${MONO_VENDOR}/miniz/miniz_tinfl.c"
+	"${MONO_VENDOR}/miniz/miniz_tdef.c")
+generate_export_header(mono_miniz
+	BASE_NAME miniz
+	EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/miniz_export.h")
+target_include_directories(mono_miniz PUBLIC
+	"${MONO_VENDOR}/miniz"
+	"${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(mono_miniz PUBLIC MINIZ_NO_TIME MINIZ_STATIC_DEFINE)
+mono_vendor_system(mono_miniz)
+add_library(Vendor::miniz ALIAS mono_miniz)
+
 # --- Luau -------------------------------------------------------------------
 # The script VM, vendored ahead of its consumer.
 #

@@ -336,3 +336,11 @@
 	url = https://github.com/KhronosGroup/MoltenVK.git
 	branch = main
 	shallow = true
+; miniz supplies the ZIP byte codec under the project-package policy in
+; Engine::game. Upstream publishes tags but no release branch, so this follows
+; its only development branch while the superproject pins the 3.1.2 tag.
+[submodule "mono.vendor/miniz"]
+	path = mono.vendor/miniz
+	url = https://github.com/richgel999/miniz.git
+	branch = master
+	shallow = true

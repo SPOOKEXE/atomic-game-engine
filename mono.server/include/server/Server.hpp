@@ -52,6 +52,10 @@ namespace engine::scene {
 	struct CollisionShapes;
 }
 
+namespace engine::game {
+	class OpenedProject;
+}
+
 namespace server {
 	class ContentRelay;
 	struct ContentRelayStatistics;
@@ -373,16 +377,30 @@ namespace server {
 		// `ContentStore` is set. Zero binds an ephemeral one.
 		uint16_t ContentPort = 0;
 
+		// Numeric address clients may use to reach the attached origin.
+		//
+		// Empty keeps the wildcard listening address private. Redirect mode needs
+		// an explicit address because `0.0.0.0` is not a client destination.
+		std::string ContentPublicHost;
+
 		// The secret shared with whoever issues grants - which, for an attached
 		// origin, is this same process.
 		//
-		// Empty generates an in-process-only grant key at startup.
+		// Empty disables grants and therefore cannot serve an attached origin.
 		std::string ContentGrantKey;
 
 		// Which way clients are given content.
 		//
 		// @since v0.16
 		ContentMode ContentDelivery = ContentMode::Relay;
+
+		// Whether an operator explicitly selected the mode. False lets a package
+		// supply a weaker public hint after config and environment precedence.
+		bool ContentDeliveryConfigured = false;
+
+		// Whether public HTTP sources declared by a project may be used.
+		// A package never turns this on by itself.
+		bool AllowPackageHttp = false;
 
 		// The origins this server fetches content from, in priority order.
 		//
@@ -760,20 +778,10 @@ namespace server {
 		// @return `false` when a named scene could not be loaded.
 		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
-		// Whether `--game` names a game file rather than a scene script.
-		//
-		// By extension. `--game` has accepted a `.luau` since v0.3 and every
-		// recipe that uses it still passes one, so the new format is added
-		// beside the old rather than in place of it.
-		//
-		// @param path What `--game` was given.
-		// @return `true` for a `.agame`.
-		static bool IsGameFile(const std::string &path);
-
-		// Loads a game file's universe and starts every world's scripts.
+		// Opens a game, universe folder, or Project ZIP and starts its worlds.
 		//
 		// @return `false` when the file would not load or holds no worlds.
-		bool HostGameFile();
+		bool HostProject();
 
 		// Loads the configured driver-owned DataStore before any world ticks.
 		bool LoadDataStore();
@@ -950,6 +958,15 @@ namespace server {
 		};
 
 		Options Settings;
+
+		// Owns temporary package extraction until every world and content user is
+		// destroyed. Declared before the driver so reverse destruction is safe.
+		std::unique_ptr<engine::game::OpenedProject> HostedProject;
+
+		// Public project content considered after operator policy is applied.
+		std::filesystem::path ProjectContentStore;
+		std::vector<engine::delivery::Source> ProjectContentSources;
+		std::string ProjectPublisherKey;
 
 		// The universe this process holds, plus the hosts holding the rest.
 		//

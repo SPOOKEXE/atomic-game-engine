@@ -98,6 +98,7 @@
 #include <studio/Config.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Diagnostics.hpp>
+#include <studio/Export.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
@@ -2999,9 +3000,30 @@ namespace studio {
 		void BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets);
 		//@}
 
+		// Starts one frozen request after its preflight has passed.
+		bool BeginExport(const ExportRequest &request);
+
+		// Cancels outstanding delivery and removes private staging.
+		void CancelExport();
+
+		// Whether an export owns staging or delivery work.
+		bool ExportInProgress() const;
+
+		// Current named progress phase.
+		ExportPhase CurrentExportPhase() const;
+
+		// Public universe metadata shared by Save As and export.
+		engine::game::UniverseFileOptions UniverseOptions(bool includePublicCdns) const;
+
+		// Flushes every modified Program and ShaderScript editor buffer.
+		void FlushExportBuffers();
+
 		// Advances the optional asset copy and writes its captured document when
 		// the copy completes. The caller pumps `ContentClient` first.
 		void PumpAssetExport();
+
+		// Publishes a fully grounded staging tree.
+		void FinishAssetExport();
 		// Adds one world file to this universe, keeping what is here.
 		//
 		// A world whose name is taken arrives under a suffixed one rather than
@@ -3490,6 +3512,7 @@ namespace studio {
 		std::string UniverseNameDraft;
 		std::filesystem::path GamePath;
 		bool Modified = false;
+		engine::game::UniverseFileOptions UniverseFileSettings;
 		//@}
 
 		// The world the viewport draws and the properties panel edits.
@@ -5159,9 +5182,8 @@ namespace studio {
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;
-		bool AskingWorldExportOptions = false;
-		bool AskingExportUniverse = false;
-		bool AskingUniverseExportOptions = false;
+		bool AskingExportDestination = false;
+		bool AskingExportPreflight = false;
 		bool AskingImport = false;
 		bool AskingImportUniverse = false;
 		bool AskingNewWorld = false;
@@ -5176,26 +5198,17 @@ namespace studio {
 		std::string NameBuffer;
 		//@}
 
-		// The second step of world/universe export and their one shared,
-		// incremental content copy.
-		//@{
-		bool GroundAssetsOnWorldExport = true;
-		bool IncludeRawAssetsOnWorldExport = false;
-		std::filesystem::path WorldExportPath;
-		bool GroundAssetsOnUniverseExport = true;
-		bool IncludeRawAssetsOnUniverseExport = false;
-		std::filesystem::path UniverseExportPath;
-		//@}
-
-		// Which document will be written after incremental asset grounding.
-		enum class GroundedExportKind : uint8_t { None, World, Universe };
-
-		// The pending grounded export and its incremental copy state.
-		//@{
-		GroundedExportKind PendingGroundedExport = GroundedExportKind::None;
-		std::filesystem::path PendingGroundedExportPath;
-		engine::world::WorldId PendingGroundedWorld;
+		// Incremental content copy for the active unified export.
 		AssetGrounding ExportAssetGrounding;
+
+		// Unified export dialog, frozen preflight, and active staging lifetime.
+		//@{
+		ExportOptions ExportChoices;
+		std::optional<ExportRequest> PreparedExportRequest;
+		ExportPreflight PreparedExportPreflight;
+		std::optional<ExportRequest> ActiveExportRequest;
+		std::filesystem::path ExportStagingRoot;
+		ExportPhase ActiveExportPhase = ExportPhase::Idle;
 		//@}
 
 		// Read-only manifest metadata shown before a multi-file universe is

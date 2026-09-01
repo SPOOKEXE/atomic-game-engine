@@ -157,13 +157,8 @@ namespace studio {
 		// other holding the previous answer.
 		const engine::delivery::DeliverySettings settings = Content.ToSettings();
 
-		if (ContentClient && (ExportAssetGrounding.State == AssetGroundingState::WaitingForCatalogue ||
-							  ExportAssetGrounding.State == AssetGroundingState::Fetching ||
-							  ExportAssetGrounding.State == AssetGroundingState::CopyingRaw)) {
-			CancelAssetGrounding(ExportAssetGrounding, *ContentClient);
-			PendingGroundedExport = GroundedExportKind::None;
-			PendingGroundedExportPath.clear();
-			PendingGroundedWorld = {};
+		if (ExportInProgress()) {
+			CancelExport();
 			Say("asset export cancelled because content sources changed", engine::core::LogLevel::Warning);
 		}
 
@@ -219,29 +214,25 @@ namespace studio {
 	}
 
 	void Editor::PumpAssetExport() {
-		if (!ContentClient) {
+		if (!ActiveExportRequest) {
 			return;
 		}
 
-		PumpAssetGrounding(ExportAssetGrounding, *ContentClient);
+		PumpAssetGrounding(ExportAssetGrounding, ContentClient.get());
+		if (ExportAssetGrounding.State == AssetGroundingState::WaitingForCatalogue) {
+			ActiveExportPhase = ExportPhase::ValidateCatalogue;
+		} else if (ExportAssetGrounding.State == AssetGroundingState::Fetching) {
+			ActiveExportPhase = ExportPhase::FetchAssets;
+		} else if (ExportAssetGrounding.State == AssetGroundingState::CopyingRaw) {
+			ActiveExportPhase = ExportPhase::CopyRawFiles;
+		}
 		if (ExportAssetGrounding.State == AssetGroundingState::Complete) {
-			const GroundedExportKind kind = PendingGroundedExport;
-			const std::filesystem::path exportPath = std::move(PendingGroundedExportPath);
-			const WorldId world = PendingGroundedWorld;
-			PendingGroundedExport = GroundedExportKind::None;
-			PendingGroundedWorld = {};
-			ExportAssetGrounding = AssetGrounding{};
-			if (kind == GroundedExportKind::World) {
-				ExportWorldFile(world, exportPath);
-			} else if (kind == GroundedExportKind::Universe) {
-				ExportUniverse(exportPath);
-			}
+			ActiveExportPhase = ExportPhase::ValidateCdnSources;
+			FinishAssetExport();
 		} else if (ExportAssetGrounding.State == AssetGroundingState::Failed) {
 			Say("asset export failed: " + ExportAssetGrounding.Error, engine::core::LogLevel::Error);
-			PendingGroundedExport = GroundedExportKind::None;
-			PendingGroundedExportPath.clear();
-			PendingGroundedWorld = {};
-			ExportAssetGrounding = AssetGrounding{};
+			CancelExport();
+			ActiveExportPhase = ExportPhase::Failed;
 		}
 	}
 
@@ -267,9 +258,9 @@ namespace studio {
 				ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
 				ContentClient->Pump();
 			}
-			PumpAssetExport();
 			DrainContent();
 		}
+		PumpAssetExport();
 
 		// **Outside the `ContentClient` guard on purpose.** A part can meet an
 		// already-loaded mesh in a process with no delivery client at all - a

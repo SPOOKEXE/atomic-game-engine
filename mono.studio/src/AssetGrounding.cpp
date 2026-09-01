@@ -7,10 +7,10 @@ namespace studio {
 	namespace {
 		constexpr size_t RAW_ENTRIES_PER_PUMP = 8;
 
-		void Fail(AssetGrounding &grounding, engine::delivery::AssetClient &client, std::string error) {
+		void Fail(AssetGrounding &grounding, engine::delivery::AssetClient *client, std::string error) {
 			for (const GroundedAssetRequest &request : grounding.Requests) {
-				if (!request.Complete) {
-					client.Cancel(request.Request);
+				if (!request.Complete && client != nullptr) {
+					client->Cancel(request.Request);
 				}
 			}
 			grounding.Error = std::move(error);
@@ -41,7 +41,7 @@ namespace studio {
 			return true;
 		}
 
-		bool StartRawFolder(AssetGrounding &grounding, engine::delivery::AssetClient &client) {
+		bool StartRawFolder(AssetGrounding &grounding, engine::delivery::AssetClient *client) {
 			while (grounding.RawSource < grounding.RawSources.size()) {
 				const size_t ordinal = grounding.RawSource++;
 				std::error_code error;
@@ -55,9 +55,11 @@ namespace studio {
 					);
 					return false;
 				}
-				const std::filesystem::path destination =
-					std::filesystem::weakly_canonical(grounding.Destination, error) / "raw" /
-					RawFolderName(source, ordinal);
+				const std::filesystem::path rawBase =
+					grounding.RawBaseDestination.empty()
+						? std::filesystem::weakly_canonical(grounding.Destination, error) / "raw"
+						: std::filesystem::weakly_canonical(grounding.RawBaseDestination, error);
+				const std::filesystem::path destination = rawBase / RawFolderName(source, ordinal);
 				if (error || IsWithin(destination, source)) {
 					Fail(grounding, client, "raw asset export cannot be placed inside its source folder");
 					return false;
@@ -85,7 +87,7 @@ namespace studio {
 			return false;
 		}
 
-		void FinishProcessed(AssetGrounding &grounding, engine::delivery::AssetClient &client) {
+		void FinishProcessed(AssetGrounding &grounding, engine::delivery::AssetClient *client) {
 			if (!grounding.Store->WriteManifest(*grounding.Catalogue, grounding.Signature)) {
 				Fail(grounding, client, "could not write the grounded manifest");
 				return;
@@ -102,9 +104,12 @@ namespace studio {
 	bool BeginAssetGrounding(
 		AssetGrounding &grounding,
 		const std::filesystem::path &destination,
-		std::span<const std::filesystem::path> rawSources
+		std::span<const std::filesystem::path> rawSources,
+		const std::filesystem::path &rawBaseDestination,
+		bool includeProcessed
 	) {
-		if (destination.empty() || grounding.State == AssetGroundingState::WaitingForCatalogue ||
+		if (destination.empty() || (!includeProcessed && rawSources.empty()) ||
+			grounding.State == AssetGroundingState::WaitingForCatalogue ||
 			grounding.State == AssetGroundingState::Fetching ||
 			grounding.State == AssetGroundingState::CopyingRaw) {
 			return false;
@@ -112,18 +117,21 @@ namespace studio {
 
 		grounding = AssetGrounding{};
 		grounding.Destination = destination;
+		grounding.RawBaseDestination = rawBaseDestination;
+		grounding.IncludeProcessed = includeProcessed;
 		grounding.RawSources.assign(rawSources.begin(), rawSources.end());
-		grounding.State = AssetGroundingState::WaitingForCatalogue;
+		grounding.State =
+			includeProcessed ? AssetGroundingState::WaitingForCatalogue : AssetGroundingState::CopyingRaw;
 		return true;
 	}
 
-	void PumpAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient &client) {
+	void PumpAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient *client) {
 		if (grounding.State == AssetGroundingState::WaitingForCatalogue) {
-			if (!client.Ready()) {
+			if (client == nullptr || !client->Ready()) {
 				return;
 			}
-			const engine::assets::Manifest *catalogue = client.Catalogue();
-			const engine::assets::SignatureBytes *signature = client.CatalogueSignature();
+			const engine::assets::Manifest *catalogue = client->Catalogue();
+			const engine::assets::SignatureBytes *signature = client->CatalogueSignature();
 			if (catalogue == nullptr || signature == nullptr) {
 				Fail(grounding, client, "delivery reported ready without a signed catalogue");
 				return;
@@ -138,7 +146,7 @@ namespace studio {
 			grounding.Signature = *signature;
 			grounding.Requests.reserve(catalogue->Assets().size());
 			for (const engine::assets::AssetEntry &entry : catalogue->Assets()) {
-				const engine::delivery::RequestId request = client.Request(entry.Name);
+				const engine::delivery::RequestId request = client->Request(entry.Name);
 				if (!request.IsValid()) {
 					Fail(grounding, client, "could not request '" + entry.Name + "'");
 					return;
@@ -214,7 +222,7 @@ namespace studio {
 			if (pending.Complete) {
 				continue;
 			}
-			const engine::delivery::RequestState state = client.StateOf(pending.Request);
+			const engine::delivery::RequestState state = client->StateOf(pending.Request);
 			if (state == engine::delivery::RequestState::Pending) {
 				continue;
 			}
@@ -223,7 +231,7 @@ namespace studio {
 				return;
 			}
 
-			std::optional<engine::delivery::Asset> asset = client.Take(pending.Request);
+			std::optional<engine::delivery::Asset> asset = client->Take(pending.Request);
 			if (!asset || asset->Root != pending.Entry.Root ||
 				!grounding.Store->WriteAsset(pending.Entry, asset->Bytes)) {
 				Fail(grounding, client, "delivered asset disagrees with '" + pending.Entry.Name + "'");
@@ -239,12 +247,20 @@ namespace studio {
 		FinishProcessed(grounding, client);
 	}
 
-	void CancelAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient &client) {
+	void PumpAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient &client) {
+		PumpAssetGrounding(grounding, &client);
+	}
+
+	void CancelAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient *client) {
 		for (const GroundedAssetRequest &request : grounding.Requests) {
-			if (!request.Complete) {
-				client.Cancel(request.Request);
+			if (!request.Complete && client != nullptr) {
+				client->Cancel(request.Request);
 			}
 		}
 		grounding = AssetGrounding{};
+	}
+
+	void CancelAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient &client) {
+		CancelAssetGrounding(grounding, &client);
 	}
 }

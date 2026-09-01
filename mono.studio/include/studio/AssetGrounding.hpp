@@ -51,6 +51,12 @@ namespace studio {
 		// Destination `assets/` store root.
 		std::filesystem::path Destination;
 
+		// Optional raw root. Empty writes beneath `Destination/raw/`.
+		std::filesystem::path RawBaseDestination;
+
+		// Whether the signed processed catalogue is part of this operation.
+		bool IncludeProcessed = true;
+
 		// Current incremental operation phase.
 		AssetGroundingState State = AssetGroundingState::Idle;
 
@@ -94,12 +100,20 @@ namespace studio {
 	bool BeginAssetGrounding(
 		AssetGrounding &grounding,
 		const std::filesystem::path &destination,
-		std::span<const std::filesystem::path> rawSources = {}
+		std::span<const std::filesystem::path> rawSources = {},
+		const std::filesystem::path &rawBaseDestination = {},
+		bool includeProcessed = true
 	);
 
 	// Advances an operation without waiting for pending delivery requests.
+	void PumpAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient *client);
+
+	// Convenience overload for a processed operation with a client.
 	void PumpAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient &client);
 
 	// Cancels every outstanding request and returns the operation to idle.
+	void CancelAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient *client);
+
+	// Convenience overload for an operation with a client.
 	void CancelAssetGrounding(AssetGrounding &grounding, engine::delivery::AssetClient &client);
 }

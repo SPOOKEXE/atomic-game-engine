@@ -1464,20 +1464,16 @@ namespace studio {
 				AskingImportUniverse = true;
 				PathBuffer.clear();
 			}
-			if (ImGui::MenuItem("Export Active World...", nullptr, false, Active.IsValid())) {
+			if (ImGui::MenuItem("Export...", nullptr, false, Universe->Count() > 0 && !ExportInProgress())) {
 				AskingExport = true;
-				PathBuffer =
-					std::string(Label(Universe->NameOf(Active))) + std::string(engine::game::WORLD_EXTENSION);
-			}
-
-			// **Beside the world export rather than beside Save As**, because
-			// the pair an author is choosing between is "this scene" and "all
-			// of them" - not "write it" and "write it somewhere else". The
-			// extension is what tells them apart afterwards.
-			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
-				AskingExportUniverse = true;
-				PathBuffer =
-					std::string(Label(GameName, "Game")) + std::string(engine::game::UNIVERSE_EXTENSION);
+				ExportChoices = ExportOptions{};
+				ExportChoices.Product = Active.IsValid() ? engine::game::ExportProduct::WorldFile
+														 : engine::game::ExportProduct::UniverseFolder;
+				PathBuffer = ExportChoices.Product == engine::game::ExportProduct::WorldFile
+								 ? std::string(Label(Universe->NameOf(Active), "World")) +
+									   std::string(engine::game::ExtensionOf(ExportChoices.Product))
+								 : std::string(Label(GameName, "Game")) +
+									   std::string(engine::game::ExtensionOf(ExportChoices.Product));
 			}
 
 			ImGui::Separator();
@@ -2501,6 +2497,8 @@ namespace studio {
 			std::string(engine::game::GAME_EXTENSION), std::string(engine::game::UNIVERSE_EXTENSION)
 		};
 		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
+		const std::vector<std::string> UNIVERSE_FILES{std::string(engine::game::UNIVERSE_EXTENSION)};
+		const std::vector<std::string> ZIP_FILES{".zip"};
 
 	}
 
@@ -2625,16 +2623,16 @@ namespace studio {
 			ImGui::OpenPopup("Load Universe");
 		}
 		if (AskingExport) {
-			ImGui::OpenPopup("Export World");
+			ImGui::OpenPopup("Export");
 		}
-		if (AskingWorldExportOptions) {
-			ImGui::OpenPopup("World Export Options");
+		if (AskingExportDestination) {
+			ImGui::OpenPopup("Export Destination");
 		}
-		if (AskingExportUniverse) {
-			ImGui::OpenPopup("Export Universe");
+		if (AskingExportPreflight) {
+			ImGui::OpenPopup("Export Preflight");
 		}
-		if (AskingUniverseExportOptions) {
-			ImGui::OpenPopup("Universe Export Options");
+		if (ExportInProgress()) {
+			ImGui::OpenPopup("Export Progress");
 		}
 		if (AskingImport) {
 			ImGui::OpenPopup("Import World");
@@ -2758,105 +2756,212 @@ namespace studio {
 			ImGui::EndPopup();
 		}
 
-		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
-			WorldExportPath = std::filesystem::path(PathBuffer);
-			AskingWorldExportOptions = true;
-			AskingExport = false;
-		} else if (!ImGui::IsPopupOpen("Export World")) {
-			AskingExport = false;
-		}
-
-		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(560.0f), 0.0f), ImGuiCond_Appearing);
 		if (ImGui::BeginPopupModal(
-				"World Export Options",
-				nullptr,
-				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+				"Export", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
 			)) {
-			ImGui::TextWrapped("Export %s", WorldExportPath.string().c_str());
-			ImGui::Separator();
-			ImGui::Checkbox("Include processed assets", &GroundAssetsOnWorldExport);
-			ImGui::BeginDisabled(!GroundAssetsOnWorldExport);
-			ImGui::Checkbox("Include raw authoring files", &IncludeRawAssetsOnWorldExport);
-			ImGui::EndDisabled();
-			ImGui::TextDisabled("Verified catalogue assets are copied into assets/ before export.");
-
-			ImGui::BeginDisabled(GroundAssetsOnWorldExport && !ContentClient);
-			if (ImGui::Button("Export")) {
-				const std::filesystem::path exportPath = WorldExportPath;
-				AskingWorldExportOptions = false;
-				ImGui::CloseCurrentPopup();
-				BeginWorldExport(
-					exportPath,
-					GroundAssetsOnWorldExport,
-					GroundAssetsOnWorldExport && IncludeRawAssetsOnWorldExport
-				);
-				WorldExportPath.clear();
+			const char *selectedProduct =
+				ExportChoices.Product == engine::game::ExportProduct::WorldFile ? "World file (.aworld)"
+				: ExportChoices.Product == engine::game::ExportProduct::UniverseFolder
+					? "Universe folder (.auniverse)"
+					: "Project ZIP (.zip)";
+			if (ImGui::BeginCombo("Product", selectedProduct)) {
+				for (const engine::game::ExportProduct product : {
+						 engine::game::ExportProduct::WorldFile,
+						 engine::game::ExportProduct::UniverseFolder,
+						 engine::game::ExportProduct::ProjectZip,
+					 }) {
+					const char *label = product == engine::game::ExportProduct::WorldFile
+											? "World file (.aworld)"
+										: product == engine::game::ExportProduct::UniverseFolder
+											? "Universe folder (.auniverse)"
+											: "Project ZIP (.zip)";
+					const bool selected = ExportChoices.Product == product;
+					if (ImGui::Selectable(label, selected)) {
+						ExportChoices.Product = product;
+						ExportChoices.IncludeProcessedAssets =
+							product == engine::game::ExportProduct::ProjectZip;
+						ExportChoices.RequireCompleteCatalogue =
+							product == engine::game::ExportProduct::ProjectZip;
+						ExportChoices.Reproducible = product == engine::game::ExportProduct::ProjectZip;
+						ExportChoices.IncludePublicCdns = false;
+						ExportChoices.Delivery = engine::game::ProjectDeliveryPreference::Relay;
+						PathBuffer = (product == engine::game::ExportProduct::WorldFile
+										  ? std::string(Label(Universe->NameOf(Active), "World"))
+										  : std::string(Label(GameName, "Game"))) +
+									 engine::game::ExtensionOf(product);
+					}
+				}
+				ImGui::EndCombo();
 			}
+			if (ExportChoices.Product == engine::game::ExportProduct::WorldFile) {
+				ImGui::TextWrapped(
+					"Active world only. Universe settings, other worlds, and deployment settings are not "
+					"included."
+				);
+			} else if (ExportChoices.Product == engine::game::ExportProduct::UniverseFolder) {
+				ImGui::TextWrapped(
+					"Editable manifest with sibling worlds and assets. Move the files and folders together."
+				);
+			} else {
+				ImGui::TextWrapped("One portable server package with a complete signed processed catalogue.");
+			}
+
+			const bool projectZip = ExportChoices.Product == engine::game::ExportProduct::ProjectZip;
+			const bool worldFile = ExportChoices.Product == engine::game::ExportProduct::WorldFile;
+			ImGui::BeginDisabled(projectZip);
+			ImGui::Checkbox("Include processed assets", &ExportChoices.IncludeProcessedAssets);
 			ImGui::EndDisabled();
+			ImGui::Checkbox("Include raw authoring files", &ExportChoices.IncludeRawAuthoring);
+			ImGui::BeginDisabled(worldFile);
+			ImGui::Checkbox("Include public CDN configuration", &ExportChoices.IncludePublicCdns);
+			ImGui::EndDisabled();
+			ImGui::BeginDisabled(!ExportChoices.IncludePublicCdns);
+			ImGui::Checkbox("Validate CDN configuration", &ExportChoices.ValidateCdnConfiguration);
+			ImGui::Checkbox("Check remote reachability", &ExportChoices.CheckRemoteReachability);
+			ImGui::EndDisabled();
+			ImGui::BeginDisabled(projectZip);
+			ImGui::Checkbox("Require every catalogue asset", &ExportChoices.RequireCompleteCatalogue);
+			ImGui::EndDisabled();
+			if (projectZip) {
+				int delivery =
+					ExportChoices.Delivery == engine::game::ProjectDeliveryPreference::Relay ? 0 : 1;
+				ImGui::RadioButton("Relay", &delivery, 0);
+				ImGui::SameLine();
+				ImGui::RadioButton("Redirect", &delivery, 1);
+				ExportChoices.Delivery = delivery == 0 ? engine::game::ProjectDeliveryPreference::Relay
+													   : engine::game::ProjectDeliveryPreference::Redirect;
+				ImGui::BeginDisabled();
+				ImGui::Checkbox("Reproducible archive", &ExportChoices.Reproducible);
+				ImGui::EndDisabled();
+			}
+			ImGui::Checkbox("Replace existing output", &ExportChoices.ReplaceExisting);
+
+			ImGui::Separator();
+			if (ImGui::Button("Choose Destination...")) {
+				AskingExport = false;
+				AskingExportDestination = true;
+				ImGui::CloseCurrentPopup();
+			}
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-				AskingWorldExportOptions = false;
-				WorldExportPath.clear();
+				AskingExport = false;
 				ImGui::CloseCurrentPopup();
-			}
-			if (GroundAssetsOnWorldExport && !ContentClient) {
-				ImGui::TextDisabled("Configure a publisher key and readable content source first.");
 			}
 			ImGui::EndPopup();
 		}
 
-		// **The universe, which is a different document from a world and not a
-		// bigger one.** `<Game>` and `<World>` are separate roots and the
-		// reader refuses each in the other's place, so the two exports write
-		// different extensions and say which they are - see
-		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
-		if (engine::ui::FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
-			UniverseExportPath = std::filesystem::path(PathBuffer);
-			AskingUniverseExportOptions = true;
-			AskingExportUniverse = false;
-		} else if (!ImGui::IsPopupOpen("Export Universe")) {
-			AskingExportUniverse = false;
+		const std::vector<std::string> &exportFiles =
+			ExportChoices.Product == engine::game::ExportProduct::WorldFile		   ? WORLD_FILES
+			: ExportChoices.Product == engine::game::ExportProduct::UniverseFolder ? UNIVERSE_FILES
+																				   : ZIP_FILES;
+		if (engine::ui::FilePrompt("Export Destination", PathBuffer, "Preflight", exportFiles, false)) {
+			engine::game::ProjectValidationReport requestReport;
+			PreparedExportRequest =
+				BuildExportRequest(std::filesystem::path(PathBuffer), ExportChoices, requestReport);
+			AskingExportDestination = false;
+			if (PreparedExportRequest) {
+				PreparedExportPreflight =
+					PreflightExport(*PreparedExportRequest, *Universe, Content, ContentClient.get());
+				AskingExportPreflight = true;
+			} else if (!requestReport.Findings.empty()) {
+				Say("export request: " + requestReport.Findings.front().Explanation, LogLevel::Error);
+				AskingExport = true;
+			}
+		} else if (AskingExportDestination && !ImGui::IsPopupOpen("Export Destination")) {
+			AskingExportDestination = false;
+		}
+
+		ImGui::SetNextWindowSize(
+			ImVec2(engine::ui::Scaled(680.0f), engine::ui::Scaled(540.0f)), ImGuiCond_Appearing
+		);
+		if (ImGui::BeginPopupModal("Export Preflight", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+			const ExportPreflight &preflight = PreparedExportPreflight;
+			ImGui::Text("Product: %s", engine::game::ExtensionOf(preflight.Request.Product));
+			ImGui::TextWrapped("Destination: %s", preflight.Request.Destination.string().c_str());
+			ImGui::Text(
+				"Worlds: %llu local, %llu remote",
+				static_cast<unsigned long long>(preflight.LocalWorlds),
+				static_cast<unsigned long long>(preflight.RemoteWorlds)
+			);
+			ImGui::Text(
+				"Processed assets: %llu, %llu bytes",
+				static_cast<unsigned long long>(preflight.ProcessedAssets),
+				static_cast<unsigned long long>(preflight.ProcessedBytes)
+			);
+			ImGui::Text(
+				"Estimated: %llu bytes uncompressed, %llu bytes archive",
+				static_cast<unsigned long long>(preflight.EstimatedUncompressedBytes),
+				static_cast<unsigned long long>(preflight.EstimatedArchiveBytes)
+			);
+			ImGui::Text("Publisher key: %s", preflight.PublisherKeyValid ? "valid" : "missing or invalid");
+			ImGui::Text("Public HTTP: %s", preflight.PublicHttpIncluded ? "included" : "not included");
+			ImGui::SeparatorText("Content source order");
+			if (preflight.EffectiveSources.empty()) {
+				ImGui::TextDisabled("No content sources included.");
+			}
+			for (size_t index = 0; index < preflight.EffectiveSources.size(); index++) {
+				const engine::delivery::Source &source = preflight.EffectiveSources[index];
+				ImGui::Text("%zu. %s: %s", index + 1, source.Name.c_str(), source.Location.c_str());
+			}
+			ImGui::SeparatorText("Findings");
+			if (preflight.Validation.Findings.empty()) {
+				ImGui::TextUnformatted("Ready to export.");
+			}
+			for (const engine::game::ProjectValidationFinding &finding : preflight.Validation.Findings) {
+				const char *severity =
+					finding.Severity == engine::game::ProjectFindingSeverity::Error		? "error"
+					: finding.Severity == engine::game::ProjectFindingSeverity::Warning ? "warning"
+																						: "skipped";
+				ImGui::TextWrapped("%s [%s] %s", severity, finding.Code.c_str(), finding.Explanation.c_str());
+			}
+
+			ImGui::Separator();
+			ImGui::BeginDisabled(!preflight.Validation.Passed());
+			if (ImGui::Button("Export")) {
+				const ExportRequest request = preflight.Request;
+				AskingExportPreflight = false;
+				PreparedExportRequest.reset();
+				ImGui::CloseCurrentPopup();
+				BeginExport(request);
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Back")) {
+				AskingExportPreflight = false;
+				AskingExport = true;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingExportPreflight = false;
+				PreparedExportRequest.reset();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
 		}
 
 		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
 		if (ImGui::BeginPopupModal(
-				"Universe Export Options",
+				"Export Progress",
 				nullptr,
 				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
 			)) {
-			const bool multiFile = UniverseExportPath.extension() == engine::game::UNIVERSE_EXTENSION;
-			ImGui::TextWrapped("Export %s", UniverseExportPath.string().c_str());
-			ImGui::Separator();
-			ImGui::BeginDisabled(!multiFile);
-			ImGui::Checkbox("Include processed assets", &GroundAssetsOnUniverseExport);
-			ImGui::EndDisabled();
-			ImGui::BeginDisabled(!multiFile || !GroundAssetsOnUniverseExport);
-			ImGui::Checkbox("Include raw authoring files", &IncludeRawAssetsOnUniverseExport);
-			ImGui::EndDisabled();
-			if (!multiFile) {
-				ImGui::TextDisabled("Processed assets require the .auniverse format.");
+			if (!ExportInProgress()) {
+				ImGui::CloseCurrentPopup();
 			} else {
-				ImGui::TextDisabled("Verified catalogue assets are copied into assets/ before export.");
-			}
-
-			const bool needsClient = multiFile && GroundAssetsOnUniverseExport;
-			ImGui::BeginDisabled(needsClient && !ContentClient);
-			if (ImGui::Button("Export")) {
-				const std::filesystem::path exportPath = UniverseExportPath;
-				AskingUniverseExportOptions = false;
-				ImGui::CloseCurrentPopup();
-				BeginUniverseExport(exportPath, needsClient, needsClient && IncludeRawAssetsOnUniverseExport);
-				UniverseExportPath.clear();
-			}
-			ImGui::EndDisabled();
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-				AskingUniverseExportOptions = false;
-				UniverseExportPath.clear();
-				ImGui::CloseCurrentPopup();
-			}
-			if (needsClient && !ContentClient) {
-				ImGui::TextDisabled("Configure a publisher key and readable content source first.");
+				ImGui::Text("Phase: %s", Describe(CurrentExportPhase()));
+				if (ExportAssetGrounding.State == AssetGroundingState::Fetching &&
+					!ExportAssetGrounding.Requests.empty()) {
+					const float fraction = static_cast<float>(ExportAssetGrounding.Completed) /
+										   static_cast<float>(ExportAssetGrounding.Requests.size());
+					ImGui::ProgressBar(fraction, ImVec2(-1.0f, 0.0f));
+				}
+				if (ImGui::Button("Cancel")) {
+					CancelExport();
+					Say("export cancelled", LogLevel::Warning);
+					ImGui::CloseCurrentPopup();
+				}
 			}
 			ImGui::EndPopup();
 		}

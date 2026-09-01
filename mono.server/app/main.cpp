@@ -255,6 +255,9 @@ int main(int argc, char **argv) {
 		options.ContentStore = std::filesystem::path(*store);
 	}
 	options.ContentPort = static_cast<uint16_t>(arguments.GetInteger("content-port", options.ContentPort));
+	if (auto host = arguments.Get("content-public-host")) {
+		options.ContentPublicHost = std::string(*host);
+	}
 	if (auto key = arguments.Get("content-grant-key")) {
 		options.ContentGrantKey = std::string(*key);
 	}

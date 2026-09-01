@@ -96,6 +96,128 @@ namespace studio {
 		constexpr std::string_view PORTAL_WORLD = "Portals";
 		constexpr std::string_view TUNNELS_WORLD = "Tunnels";
 
+		std::filesystem::path CreateExportStaging(const std::filesystem::path &destination) {
+			static uint64_t serial = 0;
+			const std::filesystem::path parent =
+				destination.parent_path().empty() ? std::filesystem::path(".") : destination.parent_path();
+			std::error_code failure;
+			std::filesystem::create_directories(parent, failure);
+			if (failure) {
+				return {};
+			}
+			for (size_t attempt = 0; attempt < 64; attempt++) {
+				const std::filesystem::path candidate =
+					parent / (".atomic-export-staging-" + std::to_string(++serial));
+				if (std::filesystem::create_directory(candidate, failure)) {
+					return candidate;
+				}
+				failure.clear();
+			}
+			return {};
+		}
+
+		struct PublishedPath {
+			std::filesystem::path Destination;
+			std::filesystem::path Backup;
+			bool Replaced = false;
+		};
+
+		bool PublishExportTree(
+			const ExportRequest &request,
+			const std::filesystem::path &staging,
+			engine::game::ProjectValidationReport &report
+		) {
+			std::vector<std::pair<std::filesystem::path, std::filesystem::path>> moves;
+			const std::filesystem::path document = staging / request.Destination.filename();
+			if (request.Product == engine::game::ExportProduct::WorldFile) {
+				if (std::filesystem::exists(staging / "assets")) {
+					moves.emplace_back(staging / "assets", request.Destination.parent_path() / "assets");
+				}
+			} else {
+				const std::filesystem::path worlds =
+					staging / (request.Destination.stem().string() + ".worlds");
+				if (std::filesystem::exists(worlds)) {
+					moves.emplace_back(
+						worlds,
+						request.Destination.parent_path() / (request.Destination.stem().string() + ".worlds")
+					);
+				}
+				if (std::filesystem::exists(staging / "assets")) {
+					moves.emplace_back(staging / "assets", request.Destination.parent_path() / "assets");
+				}
+			}
+			moves.emplace_back(document, request.Destination);
+
+			std::vector<PublishedPath> published;
+			std::error_code failure;
+			for (const auto &[source, destination] : moves) {
+				PublishedPath row{
+					.Destination = destination,
+					.Backup = {},
+					.Replaced = false,
+				};
+				if (std::filesystem::exists(destination, failure)) {
+					if (!request.ReplaceExisting) {
+						report.Add(
+							"export.destination.exists",
+							engine::game::ProjectFindingSeverity::Error,
+							"export",
+							destination.string(),
+							"destination or export sidecar exists and replacement was not requested"
+						);
+						failure.clear();
+						break;
+					}
+					row.Backup = destination.string() + ".previous";
+					if (std::filesystem::exists(row.Backup, failure)) {
+						report.Add(
+							"export.destination.backup",
+							engine::game::ProjectFindingSeverity::Error,
+							"export",
+							row.Backup.string(),
+							"recoverable replacement backup already exists"
+						);
+						break;
+					}
+					std::filesystem::rename(destination, row.Backup, failure);
+					if (failure) {
+						break;
+					}
+					row.Replaced = true;
+				}
+				std::filesystem::rename(source, destination, failure);
+				if (failure) {
+					if (row.Replaced) {
+						std::error_code ignored;
+						std::filesystem::rename(row.Backup, destination, ignored);
+					}
+					break;
+				}
+				published.push_back(std::move(row));
+			}
+
+			if (!failure && published.size() == moves.size()) {
+				return true;
+			}
+			for (auto row = published.rbegin(); row != published.rend(); ++row) {
+				std::error_code ignored;
+				std::filesystem::rename(row->Destination, staging / row->Destination.filename(), ignored);
+				if (row->Replaced) {
+					std::filesystem::rename(row->Backup, row->Destination, ignored);
+				}
+			}
+			if (report.Passed()) {
+				report.Add(
+					"export.publish.failed",
+					engine::game::ProjectFindingSeverity::Error,
+					"export",
+					request.Destination.string(),
+					"could not publish the staged export"
+				);
+			}
+			return false;
+		}
+
 		// **The pair, and they are a pair on purpose.** A teleport needs
 		// somewhere to go, and until v0.14 there were five worlds a player could
 		// not be in - no characters, so no players, so a `TeleportService` with
@@ -2982,6 +3104,7 @@ namespace studio {
 		GameName = Name(DEFAULT_GAME);
 		UniverseNameDraft = std::string(GameName.Text());
 		GamePath.clear();
+		UniverseFileSettings = {};
 		DiffLoaded = false;
 		SavedChangesFor.clear();
 		Modified = false;
@@ -3170,6 +3293,10 @@ namespace studio {
 		Trees.clear();
 
 		GameName = info.Name;
+		UniverseFileSettings.HttpEnabled = info.HttpEnabled;
+		UniverseFileSettings.RecursiveWorldDiscovery = info.RecursiveWorldDiscovery;
+		UniverseFileSettings.PublisherKey = info.PublisherKey;
+		UniverseFileSettings.Cdns = info.Cdns;
 		RenderingProfiles = std::move(info.RenderingProfiles);
 		Content.SetUniverseAssets(info.Assets);
 		RebuildContentClients();
@@ -3434,18 +3561,7 @@ namespace studio {
 		std::string error;
 		bool saved = false;
 		if (path.extension() == engine::game::UNIVERSE_EXTENSION) {
-			engine::game::UniverseFileOptions options;
-			options.PublisherKey = Content.PublisherKey;
-			for (const engine::delivery::Source &source : Content.Sources) {
-				if (!source.Enabled || !source.Readable() ||
-					source.Kind != engine::delivery::SourceKind::Http) {
-					continue;
-				}
-				options.Cdns.push_back(
-					engine::game::UniverseCdn{.Name = source.Name, .Location = source.Location}
-				);
-			}
-			options.HttpEnabled = !options.Cdns.empty();
+			const engine::game::UniverseFileOptions options = UniverseOptions(true);
 			saved = engine::game::SaveUniverse(*Universe, GameName, RenderingProfiles, path, options, error);
 		} else {
 			saved = engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error);
@@ -3492,6 +3608,7 @@ namespace studio {
 			return false;
 		}
 
+		FlushExportBuffers();
 		std::string error;
 		if (!engine::game::ExportWorld(*Universe, world, path, error)) {
 			Say("export failed: " + error, LogLevel::Error);
@@ -3515,17 +3632,12 @@ namespace studio {
 		// then pressed Ctrl+S expecting to save their own file would have
 		// written over the copy instead. `ExportActiveWorld` has always drawn
 		// the same line one level down.
-		for (OpenScript &tab : Scripts) {
-			// Same order as `SaveGame`, and for the same reason: an export
-			// taken before the buffers were flushed is the game minus whatever
-			// is currently being typed.
-			if (tab.Modified) {
-				SaveScriptTab(tab);
-			}
-		}
+		FlushExportBuffers();
 
 		std::string error;
-		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
+		if (!engine::game::SaveUniverse(
+				*Universe, GameName, RenderingProfiles, path, UniverseOptions(true), error
+			)) {
 			Say("export failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -3535,66 +3647,225 @@ namespace studio {
 		return true;
 	}
 
-	void
-	Editor::BeginWorldExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
-		if (!groundAssets) {
-			ExportActiveWorld(path);
-			return;
+	engine::game::UniverseFileOptions Editor::UniverseOptions(bool includePublicCdns) const {
+		engine::game::UniverseFileOptions options = UniverseFileSettings;
+		options.Cdns.clear();
+		const std::string &publisher =
+			Content.UniversePublisherKey.empty() ? Content.PublisherKey : Content.UniversePublisherKey;
+		if (!publisher.empty()) {
+			options.PublisherKey = publisher;
 		}
-		if (path.extension() != engine::game::WORLD_EXTENSION) {
-			Say("processed assets can only be included by an .aworld export", LogLevel::Warning);
-			return;
+		if (includePublicCdns) {
+			for (const engine::delivery::Source &source : Content.ToSettings().Sources) {
+				if (source.Enabled && source.Readable() &&
+					source.Kind == engine::delivery::SourceKind::Http) {
+					options.Cdns.push_back({source.Name, source.Location});
+				}
+			}
+			if (options.Cdns.empty()) {
+				options.Cdns = UniverseFileSettings.Cdns;
+			}
 		}
-		if (!Active.IsValid()) {
+		options.HttpEnabled = includePublicCdns && !options.Cdns.empty();
+		return options;
+	}
+
+	void Editor::FlushExportBuffers() {
+		for (OpenScript &tab : Scripts) {
+			if (tab.Modified) {
+				SaveScriptTab(tab);
+			}
+		}
+	}
+
+	bool Editor::ExportInProgress() const {
+		return ActiveExportRequest.has_value();
+	}
+
+	ExportPhase Editor::CurrentExportPhase() const {
+		return ActiveExportPhase;
+	}
+
+	bool Editor::BeginExport(const ExportRequest &request) {
+		if (ExportInProgress()) {
+			Say("another export is already running", LogLevel::Warning);
+			return false;
+		}
+		if (Universe == nullptr ||
+			(request.Product == engine::game::ExportProduct::WorldFile && !Active.IsValid())) {
 			Say("no world to export", LogLevel::Warning);
-			return;
+			return false;
 		}
-		if (!ContentClient) {
-			Say("asset export needs a valid publisher key and read source", LogLevel::Warning);
-			return;
+		const ExportPreflight preflight = PreflightExport(request, *Universe, Content, ContentClient.get());
+		if (!preflight.Validation.Passed()) {
+			Say("export preflight has blocking findings", LogLevel::Error);
+			return false;
 		}
 
-		const std::filesystem::path destination = path.parent_path() / "assets";
+		FlushExportBuffers();
+		ExportStagingRoot = CreateExportStaging(request.Destination);
+		if (ExportStagingRoot.empty()) {
+			Say("export failed: could not create staging directory", LogLevel::Error);
+			return false;
+		}
+		ActiveExportRequest = request;
+		ActiveExportPhase = ExportPhase::SerializeWorlds;
+
+		std::string error;
+		std::filesystem::path stagedDocument;
+		bool serialized = false;
+		if (request.Product == engine::game::ExportProduct::WorldFile) {
+			stagedDocument = ExportStagingRoot / request.Destination.filename();
+			serialized = engine::game::ExportWorld(*Universe, Active, stagedDocument, error);
+		} else if (request.Product == engine::game::ExportProduct::UniverseFolder) {
+			stagedDocument = ExportStagingRoot / request.Destination.filename();
+			serialized = engine::game::SaveUniverse(
+				*Universe,
+				GameName,
+				RenderingProfiles,
+				stagedDocument,
+				UniverseOptions(request.IncludePublicCdns),
+				error
+			);
+		} else {
+			stagedDocument = ExportStagingRoot / "game.auniverse";
+			serialized = engine::game::SaveUniverse(
+				*Universe,
+				GameName,
+				RenderingProfiles,
+				stagedDocument,
+				UniverseOptions(request.IncludePublicCdns),
+				error
+			);
+		}
+		if (!serialized) {
+			Say("export failed: " + error, LogLevel::Error);
+			CancelExport();
+			ActiveExportPhase = ExportPhase::Failed;
+			return false;
+		}
+
+		if (!request.IncludeProcessedAssets && !request.IncludeRawAuthoring) {
+			engine::game::ProjectValidationReport report;
+			ActiveExportPhase = ExportPhase::PublishResult;
+			const bool published = PublishExportTree(request, ExportStagingRoot, report);
+			std::error_code ignored;
+			std::filesystem::remove_all(ExportStagingRoot, ignored);
+			ActiveExportRequest.reset();
+			ExportStagingRoot.clear();
+			ActiveExportPhase = published ? ExportPhase::Complete : ExportPhase::Failed;
+			Say(published ? "exported to " + request.Destination.string() : "export publication failed",
+				published ? LogLevel::Info : LogLevel::Error);
+			return published;
+		}
+
 		const std::span<const std::filesystem::path> rawSources =
-			includeRawAssets ? std::span<const std::filesystem::path>(Content.RawFolders)
-							 : std::span<const std::filesystem::path>{};
-		if (!BeginAssetGrounding(ExportAssetGrounding, destination, rawSources)) {
-			Say("another asset export is already running", LogLevel::Warning);
+			request.IncludeRawAuthoring ? std::span<const std::filesystem::path>(Content.RawFolders)
+										: std::span<const std::filesystem::path>{};
+		const std::filesystem::path rawDestination =
+			request.Product == engine::game::ExportProduct::ProjectZip && request.IncludeRawAuthoring
+				? ExportStagingRoot / "authoring"
+				: std::filesystem::path{};
+		if (!BeginAssetGrounding(
+				ExportAssetGrounding,
+				ExportStagingRoot / "assets",
+				rawSources,
+				rawDestination,
+				request.IncludeProcessedAssets
+			)) {
+			Say("export failed: could not start asset staging", LogLevel::Error);
+			CancelExport();
+			ActiveExportPhase = ExportPhase::Failed;
+			return false;
+		}
+		ActiveExportPhase =
+			request.IncludeProcessedAssets ? ExportPhase::ValidateCatalogue : ExportPhase::CopyRawFiles;
+		Say("export started: " + request.Destination.string());
+		return true;
+	}
+
+	void Editor::CancelExport() {
+		CancelAssetGrounding(ExportAssetGrounding, ContentClient.get());
+		std::error_code ignored;
+		if (!ExportStagingRoot.empty()) {
+			std::filesystem::remove_all(ExportStagingRoot, ignored);
+		}
+		ActiveExportRequest.reset();
+		ExportStagingRoot.clear();
+		ActiveExportPhase = ExportPhase::Cancelled;
+	}
+
+	void Editor::FinishAssetExport() {
+		if (!ActiveExportRequest) {
 			return;
 		}
-		PendingGroundedExport = GroundedExportKind::World;
-		PendingGroundedExportPath = path;
-		PendingGroundedWorld = Active;
-		Say("grounding processed assets into " + destination.string());
+		const ExportRequest request = *ActiveExportRequest;
+		engine::game::ProjectValidationReport report;
+		bool published = false;
+		if (request.Product == engine::game::ExportProduct::ProjectZip) {
+			ActiveExportPhase = ExportPhase::BuildArchive;
+			const engine::game::UniverseFileOptions universeOptions =
+				UniverseOptions(request.IncludePublicCdns);
+			engine::game::ProjectPackageOptions packageOptions;
+			packageOptions.PublisherKey = universeOptions.PublisherKey;
+			packageOptions.Delivery = request.Delivery;
+			packageOptions.Cdns = universeOptions.Cdns;
+			packageOptions.CreationProfile = "studio";
+			packageOptions.ReplaceExisting = request.ReplaceExisting;
+			engine::game::ProjectPackageInfo written;
+			published = engine::game::WriteProjectPackage(
+				ExportStagingRoot, request.Destination, packageOptions, written, report
+			);
+			if (published) {
+				ActiveExportPhase = ExportPhase::VerifyArchive;
+			}
+		} else {
+			ActiveExportPhase = ExportPhase::PublishResult;
+			published = PublishExportTree(request, ExportStagingRoot, report);
+		}
+
+		std::error_code ignored;
+		std::filesystem::remove_all(ExportStagingRoot, ignored);
+		ActiveExportRequest.reset();
+		ExportStagingRoot.clear();
+		ExportAssetGrounding = {};
+		ActiveExportPhase = published ? ExportPhase::Complete : ExportPhase::Failed;
+		if (published) {
+			Say("exported to " + request.Destination.string());
+			return;
+		}
+		if (report.Findings.empty()) {
+			Say("export failed", LogLevel::Error);
+		} else {
+			Say("export failed: " + report.Findings.front().Explanation, LogLevel::Error);
+		}
+	}
+
+	void
+	Editor::BeginWorldExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
+		ExportOptions options;
+		options.Product = engine::game::ExportProduct::WorldFile;
+		options.IncludeProcessedAssets = groundAssets;
+		options.IncludeRawAuthoring = includeRawAssets;
+		engine::game::ProjectValidationReport report;
+		const auto request = BuildExportRequest(path, options, report);
+		if (!request || !BeginExport(*request)) {
+			Say("world export could not start", LogLevel::Warning);
+		}
 	}
 
 	void
 	Editor::BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
-		if (!groundAssets) {
-			ExportUniverse(path);
-			return;
+		ExportOptions options;
+		options.Product = engine::game::ExportProduct::UniverseFolder;
+		options.IncludeProcessedAssets = groundAssets;
+		options.IncludeRawAuthoring = includeRawAssets;
+		options.IncludePublicCdns = true;
+		engine::game::ProjectValidationReport report;
+		const auto request = BuildExportRequest(path, options, report);
+		if (!request || !BeginExport(*request)) {
+			Say("universe export could not start", LogLevel::Warning);
 		}
-		if (path.extension() != engine::game::UNIVERSE_EXTENSION) {
-			Say("processed assets can only be included by a multi-file universe export", LogLevel::Warning);
-			return;
-		}
-		if (!ContentClient) {
-			Say("asset export needs a valid publisher key and read source", LogLevel::Warning);
-			return;
-		}
-
-		const std::filesystem::path destination = path.parent_path() / "assets";
-		const std::span<const std::filesystem::path> rawSources =
-			includeRawAssets ? std::span<const std::filesystem::path>(Content.RawFolders)
-							 : std::span<const std::filesystem::path>{};
-		if (!BeginAssetGrounding(ExportAssetGrounding, destination, rawSources)) {
-			Say("another asset export is already running", LogLevel::Warning);
-			return;
-		}
-		PendingGroundedExport = GroundedExportKind::Universe;
-		PendingGroundedExportPath = path;
-		PendingGroundedWorld = {};
-		Say("grounding processed assets into " + destination.string());
 	}
 
 	bool Editor::ImportWorldFile(const std::filesystem::path &path) {

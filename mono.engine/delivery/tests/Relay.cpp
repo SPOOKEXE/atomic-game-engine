@@ -338,6 +338,30 @@ TEST_CASE("a relay passes over a manifest that does not verify", "[delivery][rel
 	CHECK(fetcher->Counters().SourceFailures == 1);
 }
 
+TEST_CASE("a route fetcher falls back after an unavailable higher-priority source", "[delivery][relay]") {
+	const Published store("fallback");
+	DeliverySettings settings;
+	settings.Publisher = store.Publisher;
+	settings.Sources.push_back(
+		Source{
+			.Name = "offline",
+			.Kind = SourceKind::Directory,
+			.Location = (store.Root / "missing").string(),
+			.Enabled = true,
+		}
+	);
+	settings.Sources.push_back(store.Directory());
+	std::unique_ptr<RouteFetcher> fetcher = MakeRouteFetcher(settings);
+	REQUIRE(fetcher != nullptr);
+
+	const uint64_t ticket = fetcher->Request("/manifest");
+	REQUIRE(ticket != 0);
+	for (size_t attempt = 0; attempt < 8 && fetcher->StateOf(ticket) == RouteState::Pending; attempt++) {
+		fetcher->Pump();
+	}
+	CHECK(fetcher->StateOf(ticket) == RouteState::Ready);
+}
+
 TEST_CASE("a relay with no publisher key forwards without checking", "[delivery][relay]") {
 	const Published store("nokey");
 

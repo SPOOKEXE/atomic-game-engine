@@ -11,12 +11,15 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Relay.hpp>
+#include <engine/delivery/Validation.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/Project.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/net/Endpoint.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
@@ -37,6 +40,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cdn/Origin.hpp>
 #include <cdn/Service.hpp>
 #include <chrono>
@@ -206,6 +210,26 @@ namespace server {
 			source.Role = engine::delivery::SourceRole::Read;
 			return source;
 		}
+
+		std::optional<std::string> PublicContentEndpoint(std::string_view host, uint16_t port) {
+			if (host.empty() || port == 0) {
+				return std::nullopt;
+			}
+			std::string text;
+			if (host.find(':') == std::string_view::npos) {
+				text = std::string(host) + ":" + std::to_string(port);
+			} else {
+				text = "[" + std::string(host) + "]:" + std::to_string(port);
+			}
+			const std::optional<engine::net::Endpoint> endpoint = engine::net::Endpoint::Parse(text);
+			if (!endpoint ||
+				std::all_of(endpoint->Address.begin(), endpoint->Address.end(), [](std::byte part) {
+					return part == std::byte{0};
+				})) {
+				return std::nullopt;
+			}
+			return endpoint->Text();
+		}
 	}
 
 	const char *Describe(ContentMode mode) {
@@ -300,6 +324,8 @@ namespace server {
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+		Driver_.reset();
+		HostedProject.reset();
 	}
 
 	void Server::InstallCollisionShapes(engine::ecs::Store &store) {
@@ -455,6 +481,17 @@ namespace server {
 
 	std::vector<engine::delivery::Source> Server::ConfiguredContentSources() const {
 		std::vector<engine::delivery::Source> sources;
+		if (!ProjectContentStore.empty()) {
+			sources.push_back(
+				engine::delivery::Source{
+					.Name = "project-assets",
+					.Kind = engine::delivery::SourceKind::Directory,
+					.Location = ProjectContentStore.string(),
+					.Enabled = true,
+					.Role = engine::delivery::SourceRole::Read,
+				}
+			);
+		}
 		for (const std::string &entry : Settings.ContentSources) {
 			if (entry.empty()) {
 				continue;
@@ -462,7 +499,8 @@ namespace server {
 			sources.push_back(ParseContentSource(entry));
 		}
 
-		if (sources.empty() && !Settings.ContentStore.empty()) {
+		if (Settings.ContentSources.empty() && !Settings.ContentStore.empty() &&
+			Settings.ContentStore != ProjectContentStore) {
 			// **One flag rather than two saying the same thing.** A server told to
 			// serve a store is a server whose content source is that store, and
 			// making an operator write it twice is two places to get it wrong.
@@ -472,6 +510,22 @@ namespace server {
 			own.Location = Settings.ContentStore.string();
 			own.Role = engine::delivery::SourceRole::Read;
 			sources.push_back(std::move(own));
+		}
+		for (const engine::delivery::Source &hint : ProjectContentSources) {
+			const bool shadowed = std::any_of(sources.begin(), sources.end(), [&](const auto &source) {
+				return source.Name.size() == hint.Name.size() &&
+					   std::equal(
+						   source.Name.begin(),
+						   source.Name.end(),
+						   hint.Name.begin(),
+						   [](unsigned char left, unsigned char right) {
+							   return std::tolower(left) == std::tolower(right);
+						   }
+					   );
+			});
+			if (!shadowed) {
+				sources.push_back(hint);
+			}
 		}
 		return sources;
 	}
@@ -571,14 +625,29 @@ namespace server {
 		// in relay mode would hand a client a second way to get content that this
 		// deployment deliberately did not give it.
 		if (Settings.ContentDelivery == ContentMode::Redirect) {
+			if (ContentService) {
+				if (const std::optional<std::string> endpoint =
+						PublicContentEndpoint(Settings.ContentPublicHost, ContentService->Local().Port)) {
+					directory.Endpoints.push_back(
+						engine::game::ContentEndpoint{
+							.Name = "server-assets",
+							.Kind = "http",
+							.Location = *endpoint,
+						}
+					);
+				}
+			}
 			for (const engine::delivery::Source &source : ConfiguredContentSources()) {
 				if (directory.Endpoints.size() >= engine::game::MAXIMUM_CONTENT_ENDPOINTS) {
 					break;
 				}
+				if (source.Kind != engine::delivery::SourceKind::Http) {
+					continue;
+				}
 				directory.Endpoints.push_back(
 					engine::game::ContentEndpoint{
 						.Name = source.Name,
-						.Kind = source.Kind == engine::delivery::SourceKind::Directory ? "dir" : "http",
+						.Kind = "http",
 						.Location = source.Location,
 					}
 				);
@@ -736,8 +805,11 @@ namespace server {
 			return true;
 		}
 
-		if (IsGameFile(Settings.GamePath)) {
-			if (!HostGameFile()) {
+		const engine::game::ProjectKind projectKind = engine::game::ClassifyProject(Settings.GamePath);
+		if (projectKind == engine::game::ProjectKind::GameFile ||
+			projectKind == engine::game::ProjectKind::UniverseFolder ||
+			projectKind == engine::game::ProjectKind::ProjectZip) {
+			if (!HostProject()) {
 				return false;
 			}
 		} else {
@@ -798,19 +870,6 @@ namespace server {
 		Running = true;
 		ENGINE_INFO("server ready at {:.1f} Hz", Settings.TickRate);
 		return true;
-	}
-
-	bool Server::IsGameFile(const std::string &path) {
-		// **By extension, and that is the whole discriminator.** `--game` has
-		// accepted a scene *script* since v0.3 and every recipe and test that
-		// uses it still passes one; refusing those to make room for the new
-		// format would break the working half to add the missing one. A
-		// `.agame` is a universe of worlds and anything else is one scene, and
-		// `game::GAME_EXTENSION` is the single place that spelling lives.
-		if (path.empty()) {
-			return false;
-		}
-		return std::filesystem::path(path).extension() == engine::game::GAME_EXTENSION;
 	}
 
 	bool Server::LoadDataStore() {
@@ -909,14 +968,125 @@ namespace server {
 		return true;
 	}
 
-	bool Server::HostGameFile() {
+	bool Server::HostProject() {
+		engine::game::ProjectValidationReport projectReport;
+		auto opened = engine::game::OpenProject(Settings.GamePath, {}, projectReport);
+		if (!opened) {
+			const std::string reason = projectReport.Findings.empty()
+										   ? "project could not be opened"
+										   : projectReport.Findings.front().Explanation;
+			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, reason);
+			return false;
+		}
 		engine::game::GameInfo info;
 		std::string error;
 
-		if (!engine::game::LoadGame(Worlds(), Settings.GamePath, info, error)) {
+		if (!engine::game::LoadGame(Worlds(), opened->Entrypoint(), info, error)) {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
 			return false;
 		}
+
+		ProjectContentStore.clear();
+		ProjectContentSources.clear();
+		ProjectPublisherKey =
+			opened->Package().FormatVersion == 0 ? info.PublisherKey : opened->Package().PublisherKey;
+		const std::string effectivePublisherKey =
+			Settings.ContentPublisherKey.empty() ? ProjectPublisherKey : Settings.ContentPublisherKey;
+		const std::filesystem::path candidateStore =
+			opened->Assets().empty() ? info.Assets : opened->Assets();
+		if (!candidateStore.empty()) {
+			const auto store = engine::assets::ChunkStore::Open(candidateStore, false);
+			if (store) {
+				engine::assets::SignatureBytes signature;
+				const auto manifest = store->ReadManifest(signature);
+				const auto publisher = engine::assets::PublicKey::FromHex(effectivePublisherKey);
+				if (manifest && publisher &&
+					engine::assets::VerifyManifestRoot(manifest->Root(), signature, *publisher)) {
+					ProjectContentStore = candidateStore;
+				} else if (manifest) {
+					ENGINE_ERROR("--game '{}' has an untrusted local asset catalogue", Settings.GamePath);
+					return false;
+				}
+			}
+		}
+
+		const std::vector<engine::game::UniverseCdn> publicCdns =
+			opened->Package().FormatVersion == 0 ? info.Cdns : opened->Package().Cdns;
+		if (Settings.AllowPackageHttp) {
+			for (const engine::game::UniverseCdn &cdn : publicCdns) {
+				ProjectContentSources.push_back(
+					engine::delivery::Source{
+						.Name = cdn.Name,
+						.Kind = engine::delivery::SourceKind::Http,
+						.Location = cdn.Location,
+						.Enabled = true,
+						.Role = engine::delivery::SourceRole::Read,
+					}
+				);
+			}
+		}
+		if (ProjectContentStore.empty() && Settings.ContentSources.empty() && Settings.ContentStore.empty() &&
+			!publicCdns.empty() && !Settings.AllowPackageHttp) {
+			ENGINE_ERROR(
+				"--game '{}' has no local catalogue and package HTTP sources are denied", Settings.GamePath
+			);
+			return false;
+		}
+		if (Settings.ContentPublisherKey.empty()) {
+			Settings.ContentPublisherKey = ProjectPublisherKey;
+		}
+		if (Settings.ContentStore.empty() && !ProjectContentStore.empty()) {
+			Settings.ContentStore = ProjectContentStore;
+		}
+		if (!Settings.ContentDeliveryConfigured && opened->Package().FormatVersion != 0) {
+			Settings.ContentDelivery =
+				opened->Package().Delivery == engine::game::ProjectDeliveryPreference::Redirect
+					? ContentMode::Redirect
+					: ContentMode::Relay;
+		}
+
+		if (!ProjectPublisherKey.empty() || !ProjectContentStore.empty() || !ProjectContentSources.empty()) {
+			const std::vector<engine::delivery::Source> effectiveSources = ConfiguredContentSources();
+			engine::delivery::ValidationOptions validation;
+			validation.HttpDeclared = true;
+			// Package HTTP sources have already been filtered above. Any HTTP source
+			// left here was explicitly supplied by the operator and remains authoritative.
+			validation.HttpAllowed = true;
+			validation.CataloguePresent = !effectiveSources.empty();
+			validation.CatalogueTrusted =
+				engine::assets::PublicKey::FromHex(Settings.ContentPublisherKey).has_value();
+			validation.RequireComplete = opened->Package().FormatVersion != 0;
+			validation.CatalogueComplete =
+				opened->Package().FormatVersion != 0 || !ProjectContentStore.empty();
+			validation.ValidateDeployment = true;
+			validation.RelayRequested = Settings.ContentDelivery == ContentMode::Relay;
+			validation.RelayAvailable = !effectiveSources.empty();
+			validation.RedirectAvailable =
+				!Settings.ContentStore.empty() &&
+				PublicContentEndpoint(
+					Settings.ContentPublicHost, Settings.ContentPort == 0 ? 1 : Settings.ContentPort
+				)
+					.has_value() &&
+				Settings.ContentGrantKey.size() == engine::assets::GrantKey::BYTES * 2;
+			const engine::delivery::ValidationReport deliveryReport =
+				engine::delivery::ValidateSources(effectiveSources, validation);
+			if (!deliveryReport.Passed()) {
+				const auto failed = std::find_if(
+					deliveryReport.Findings.begin(),
+					deliveryReport.Findings.end(),
+					[](const engine::delivery::ValidationFinding &finding) {
+						return finding.Severity == engine::delivery::ValidationSeverity::Error;
+					}
+				);
+				ENGINE_ERROR(
+					"--game '{}' content validation failed: {}",
+					Settings.GamePath,
+					failed == deliveryReport.Findings.end() ? "unknown validation error" : failed->Explanation
+				);
+				return false;
+			}
+		}
+		HostedProject = std::make_unique<engine::game::OpenedProject>(std::move(*opened));
 
 		const auto worlds = Worlds().Worlds();
 		if (worlds.empty()) {

@@ -132,6 +132,11 @@ namespace server {
 					"server.content-port", defaults.ContentPort, "Port the attached origin listens on"
 				);
 				built.Text(
+					"server.content-public-host",
+					defaults.ContentPublicHost,
+					"Numeric address clients use for the attached origin in redirect mode"
+				);
+				built.Text(
 					"server.content-grant-key",
 					defaults.ContentGrantKey,
 					"64 hex characters - the secret grants are issued and checked with"
@@ -141,6 +146,11 @@ namespace server {
 					Describe(defaults.ContentDelivery),
 					"relay or redirect - whether this server streams content to clients or names the "
 					"origins they should fetch from"
+				);
+				built.Boolean(
+					"server.allow-package-http",
+					defaults.AllowPackageHttp,
+					"Allow public HTTP content sources declared by a universe or Project ZIP"
 				);
 				// **Repeatable, and the order is the priority** - the same shape
 				// `client.content-sources` has, because it means the same thing. A
@@ -285,8 +295,11 @@ namespace server {
 
 		options.ContentStore = std::filesystem::path(Flag("server.content-store").Text());
 		options.ContentPort = static_cast<uint16_t>(Flag("server.content-port").Integer());
+		options.ContentPublicHost = std::string(Flag("server.content-public-host").Text());
 		options.ContentGrantKey = std::string(Flag("server.content-grant-key").Text());
-		if (const std::optional<ContentMode> mode = ContentModeOf(Flag("server.content-mode").Text())) {
+		const Flag contentMode("server.content-mode");
+		options.ContentDeliveryConfigured = contentMode.Source() != engine::core::FlagSource::Default;
+		if (const std::optional<ContentMode> mode = ContentModeOf(contentMode.Text())) {
 			options.ContentDelivery = *mode;
 		} else {
 			// **Named rather than defaulted**, the same position `server.idle-sleep`
@@ -305,6 +318,7 @@ namespace server {
 		const std::span<const std::string> sources = configured.Items();
 		options.ContentSources.assign(sources.begin(), sources.end());
 		options.ContentPublisherKey = std::string(Flag("server.content-publisher-key").Text());
+		options.AllowPackageHttp = Flag("server.allow-package-http").Boolean();
 
 		options.WorldsPerHost = static_cast<uint32_t>(Flag("server.worlds-per-host").Integer());
 		options.HostProgram = std::filesystem::path(Flag("server.host-program").Text());
