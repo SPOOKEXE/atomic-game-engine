@@ -214,6 +214,18 @@ namespace studio {
 						   ShowPalette = true;
 					   }});
 
+		Operators.Add(
+			{Action::SearchAllReplaceAll,
+			 "Search-All-Replace-All",
+			 "Open script search and replace across the active script",
+			 [this] { return Scripts.empty() ? Availability::No("no script is open") : Availability::Yes(); },
+			 [this] {
+				 ShowScripts = true;
+				 ShowFind = true;
+				 FocusFind = true;
+			 }}
+		);
+
 		// **The join, checked where it is made.** `tests/Operators.cpp` proves
 		// the property is satisfiable; this proves these registrations satisfy
 		// it. Without it, an `Action` added to `Keybinds.cpp` and forgotten here

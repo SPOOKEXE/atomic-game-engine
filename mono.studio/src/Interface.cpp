@@ -13,6 +13,7 @@
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -50,19 +51,7 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		// **v3 because Settings is a panel the saved layout has never heard
-		// of**, and a panel a layout does not know about opens floating in a
-		// corner. Bumping costs everybody the arrangement they dragged into
-		// place, which is why `mono.studio/AGENTS.md` says to do it when a
-		// panel is added and not otherwise.
-		// **v9 because Render Pipeline is a panel the saved layout has never
-		// heard of**, and a panel a layout does not know about opens floating in
-		// a corner - which is exactly the failure it exists to fix.
-		// **v12 because v11 was briefly built with the old side-by-side split.**
-		// Reusing that id leaves half the scene empty for anybody who launched it.
-		// **v16 because Toolbar Editor and Dock Widgets are new panels that the
-		// saved layout has never heard of.**
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v16";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v17";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -88,16 +77,46 @@ namespace studio {
 		constexpr const char *TOOLBAR_EDITOR = "Toolbar Editor";
 		constexpr const char *DOCK_WIDGET_EDITOR = "Dock Widgets";
 
-		// The rest, which have no constant of their own because only this list
-		// and their own `Begin` ever name them. Spelled here rather than
-		// hoisted into a dozen more constants: a name used twice in one file is
-		// not the drift a constant prevents.
-		constexpr const char *SKINNABLE[]{
-			VIEWPORT,			VIEWPORT2, EXPLORER,		 WORLDS,		  INSTANCES,  PROPERTIES,
-			COMPONENTS,			SCRIPTS,   OUTPUT,			 "Command Bar",	  SETTINGS,	  STATISTICS,
-			FRAMEGRAPH,			HEAP,	   ROJO_SYNC,		 "History",		  "Assets",	  "Render Pipeline",
-			"World Lighting",	"Network", "Team Create",	 "Control (MCP)", "Plugins",  TOOLBAR_EDITOR,
-			DOCK_WIDGET_EDITOR, "Bus",	   "Script Profile", "Changes",		  "Debugger",
+		struct NativePanelDock {
+			const char *Label = nullptr;
+			PluginDock Dock = PluginDock::Floating;
+		};
+
+		// One declaration gives every native panel both its settings entry and its
+		// first-run home. Adding it to only one side is how panels became floaters.
+		constexpr NativePanelDock NATIVE_PANEL_DOCKS[]{
+			{EXPLORER, PluginDock::Left},			{WORLDS, PluginDock::Left},
+			{INSTANCES, PluginDock::Left},			{PROPERTIES, PluginDock::Right},
+			{COMPONENTS, PluginDock::Right},		{SCRIPTS, PluginDock::Bottom},
+			{OUTPUT, PluginDock::Bottom},			{"Command Bar", PluginDock::Bottom},
+			{SETTINGS, PluginDock::Right},			{STATISTICS, PluginDock::Right},
+			{FRAMEGRAPH, PluginDock::Bottom},		{HEAP, PluginDock::Bottom},
+			{ROJO_SYNC, PluginDock::Right},			{"History", PluginDock::Left},
+			{"Assets", PluginDock::Left},			{"Render Pipeline", PluginDock::Bottom},
+			{"World Lighting", PluginDock::Right},	{"Pipeline Profile", PluginDock::Bottom},
+			{"Network", PluginDock::Right},			{"Team Create", PluginDock::Right},
+			{"Control (MCP)", PluginDock::Bottom},	{"Plugins", PluginDock::Right},
+			{TOOLBAR_EDITOR, PluginDock::Bottom},	{DOCK_WIDGET_EDITOR, PluginDock::Right},
+			{"Demo Nodes", PluginDock::Bottom},		{"Dataset Editor", PluginDock::Bottom},
+			{"Roblox Import", PluginDock::Bottom},	{"Bus", PluginDock::Bottom},
+			{"Script Profile", PluginDock::Bottom}, {"Changes", PluginDock::Bottom},
+			{"Debugger", PluginDock::Bottom},		{"Call Stack", PluginDock::Bottom},
+			{"Breakpoints", PluginDock::Bottom},
+		};
+
+		constexpr auto SKINNABLE = [] {
+			std::array<const char *, std::size(NATIVE_PANEL_DOCKS) + 2> panels{};
+			panels[0] = VIEWPORT;
+			panels[1] = VIEWPORT2;
+			for (size_t index = 0; index < std::size(NATIVE_PANEL_DOCKS); index++) {
+				panels[index + 2] = NATIVE_PANEL_DOCKS[index].Label;
+			}
+			return panels;
+		}();
+
+		struct PluginDockRequest {
+			std::string Label;
+			PluginDock Dock = PluginDock::Floating;
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -111,8 +130,13 @@ namespace studio {
 		//                      both how many there are and what they are called -
 		//                      see `Editor::ResizeViewports`.
 		// @param splitViewports Whether an extra viewport is open in this layout.
-		void
-		BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles, bool splitViewports) {
+		// @param pluginWindows  The dynamic plugin windows and their requested homes.
+		void BuildDefaultLayout(
+			ImGuiID dockspace,
+			std::span<const char *const> extraTitles,
+			bool splitViewports,
+			std::span<const PluginDockRequest> pluginWindows
+		) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
@@ -158,36 +182,43 @@ namespace studio {
 					ImGui::DockBuilderDockWindow(title, centre);
 				}
 			}
-			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
-			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
+			const auto dockNodeFor = [&](PluginDock dock) {
+				switch (dock) {
+				case PluginDock::Centre:
+					return centre;
+				case PluginDock::Left:
+					return rightUpper;
+				case PluginDock::Right:
+					return rightLower;
+				case PluginDock::Bottom:
+					return bottom;
+				case PluginDock::Floating:
+					return ImGuiID{0};
+				}
+				return ImGuiID{0};
+			};
 
-			// Beside the Worlds panel, because they answer the two halves of one
-			// question: what this game *has*, and what of it is *running*.
-			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
-			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
-			ImGui::DockBuilderDockWindow(COMPONENTS, rightLower);
-			ImGui::DockBuilderDockWindow("World Lighting", rightLower);
-			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
-			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
+			// Closed panels still get a home. Otherwise the first time somebody
+			// opens one it appears as a loose window unrelated to the dockspace.
+			for (const NativePanelDock &panel : NATIVE_PANEL_DOCKS) {
+				ImGui::DockBuilderDockWindow(panel.Label, dockNodeFor(panel.Dock));
+			}
 
-			// Beside the properties rather than in the centre: they are panels
-			// somebody opens, reads or changes one thing in, and leaves - and
-			// the centre belongs to the world.
-			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
-			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
-			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
-			ImGui::DockBuilderDockWindow(HEAP, bottom);
-			ImGui::DockBuilderDockWindow(ROJO_SYNC, rightLower);
-			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
-			ImGui::DockBuilderDockWindow(TOOLBAR_EDITOR, bottom);
-			ImGui::DockBuilderDockWindow(DOCK_WIDGET_EDITOR, rightLower);
+			// A dockspace version changes every node id. Plugin windows are dynamic,
+			// so omitting them here strands their saved old id and makes them float.
+			for (const PluginDockRequest &window : pluginWindows) {
+				const ImGuiID target = dockNodeFor(window.Dock);
+				if (target != 0) {
+					ImGui::DockBuilderDockWindow(window.Label.c_str(), target);
+				}
+			}
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
 	}
 
 	std::span<const char *const> SkinnablePanels() {
-		return std::span<const char *const>(SKINNABLE, std::size(SKINNABLE));
+		return std::span<const char *const>(SKINNABLE.data(), SKINNABLE.size());
 	}
 
 	const engine::ui::ThemeColours &Editor::PanelColoursFor(const char *panel) const {
@@ -258,21 +289,36 @@ namespace studio {
 		for (const ViewportState &view : Extras) {
 			extraTitles.push_back(view.Title.c_str());
 		}
-		const bool splitViewports =
-			std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) { return view.Open; });
-
-		if (ResetLayout) {
-			ResetLayout = false;
-			BuildDefaultLayout(dockspace, extraTitles, splitViewports);
-		}
-
 		static bool built = false;
+		bool buildLayout = ResetLayout;
+		ResetLayout = false;
 		if (!built) {
 			built = true;
 			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
 				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
-				BuildDefaultLayout(dockspace, extraTitles, splitViewports);
+				buildLayout = true;
 			}
+		}
+
+		if (buildLayout) {
+			std::vector<PluginDockRequest> pluginWindows;
+			for (const PluginPresentation *plugin : Plugins) {
+				if (plugin == nullptr || !plugin->Running) {
+					continue;
+				}
+				for (const PluginWidget &widget : plugin->Widgets) {
+					if (widget.BuiltinPanel == BuiltinStudioPanel::None) {
+						pluginWindows.push_back(
+							PluginDockRequest{PluginWidgetLabel(*plugin, widget), widget.Dock}
+						);
+					}
+				}
+			}
+			const bool splitViewports =
+				std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) {
+					return view.Open;
+				});
+			BuildDefaultLayout(dockspace, extraTitles, splitViewports, pluginWindows);
 		}
 
 		// Reset before any panel draws: the claim is a within-frame fact, not
@@ -1701,8 +1747,7 @@ namespace studio {
 
 	void Editor::DrawShortcuts() {
 		if (Keybinds::Fired(Action::SearchAllReplaceAll)) {
-			ShowFind = true;
-			FocusFind = true;
+			Operators.Run(Action::SearchAllReplaceAll);
 		}
 
 		// **At the end of the frame, and that is the whole reason this is its own

@@ -60,6 +60,7 @@ using studio::PluginToolbar;
 using studio::PluginToolbarPlacement;
 using studio::PluginToolbarTrack;
 using studio::PluginWidget;
+using studio::PluginWidgetLabel;
 using studio::RegisterSelectionComponent;
 using studio::SaveToolbarPreferences;
 using studio::SELECTED_COMPONENT;
@@ -519,6 +520,20 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		CHECK(view->Buttons[index].Kind == PluginControlKind::Builtin);
 		CHECK(view->Buttons[index].Builtin == expected[index].second);
 	}
+}
+
+TEST_CASE("plugin widget labels keep matching titles separate", "[studio][plugins]") {
+	studio::PluginPresentation first;
+	first.Root = "plugins/first";
+	studio::PluginPresentation second;
+	second.Manifest.Id = "tools.second";
+
+	PluginWidget widget;
+	widget.Title = "Explorer";
+	widget.Id = "tree";
+
+	CHECK(PluginWidgetLabel(first, widget) == "Explorer###plugin.first.tree");
+	CHECK(PluginWidgetLabel(second, widget) == "Explorer###plugin.tools.second.tree");
 }
 
 TEST_CASE("a disabled Default Studio plugin contributes no toolbar", "[studio][plugins]") {

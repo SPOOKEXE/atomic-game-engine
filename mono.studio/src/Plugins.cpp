@@ -262,6 +262,10 @@ namespace studio {
 		return plugin.Manifest.Name;
 	}
 
+	std::string PluginWidgetLabel(const PluginPresentation &plugin, const PluginWidget &widget) {
+		return widget.Title + "###plugin." + PluginIdentity(plugin) + "." + widget.Id;
+	}
+
 	static void BlockCppOwnedPluginIdentities(
 		std::vector<LoadedPlugin> &scripts, const std::vector<CppPluginDefinition> &native
 	) {
@@ -1815,8 +1819,7 @@ namespace studio {
 				// plugins may both call a panel "Settings", and ImGui keys a
 				// window on its whole label - so the id suffix keeps them apart
 				// without putting a prefix in front of what a person reads.
-				const std::string label =
-					widget.Title + "###plugin." + PluginIdentity(plugin) + "." + widget.Id;
+				const std::string label = PluginWidgetLabel(plugin, widget);
 
 				const ImVec2 minimum(
 					engine::ui::Scaled(std::max(1.0f, widget.MinimumWidth)),

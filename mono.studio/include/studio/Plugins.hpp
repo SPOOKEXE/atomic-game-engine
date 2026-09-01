@@ -496,7 +496,8 @@ namespace studio {
 	//
 	// @since v0.12
 	struct PluginWidget {
-		// The window title, which is also how ImGui identifies it.
+		// The visible window title. Its ImGui identity also includes the plugin
+		// and widget ids, so two plugins may use the same title.
 		std::string Title;
 
 		// Whether the window is open. A plugin may set it and a person may close
@@ -892,6 +893,12 @@ namespace studio {
 	//@{
 	float ClampPluginToolWidth(float width);
 	std::string PluginIdentity(const PluginPresentation &plugin);
+
+	// Builds the visible widget title and its stable ImGui identity.
+	//
+	// @return A label safe to use both with `Begin` and `DockBuilderDockWindow`.
+	std::string PluginWidgetLabel(const PluginPresentation &plugin, const PluginWidget &widget);
+
 	std::string
 	PluginToolbarKey(const PluginPresentation &plugin, const PluginToolbar &toolbar, size_t index);
 	std::string PluginToolKey(
