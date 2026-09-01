@@ -1,5 +1,7 @@
 #include <engine/core/Log.hpp>
+#include <engine/datastore/Backend.hpp>
 #include <engine/datastore/Http.hpp>
+#include <engine/datastore/Sqlite.hpp>
 #include <engine/ui/Prompts.hpp>
 #include <engine/world/DataStore.hpp>
 
@@ -30,8 +32,12 @@ namespace studio {
 		}
 
 		const bool remote = Prefs.DataStoreProvider == engine::datastore::Provider::Http;
+		const bool sqlite =
+			!remote && Prefs.DataStoreBackend == engine::datastore::Backend::SQLite;
 		const engine::core::Name adapterName(
-			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER : engine::world::FILE_DATASTORE_ADAPTER
+			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER
+				   : (sqlite ? engine::datastore::SQLITE_DATASTORE_ADAPTER
+							 : engine::world::FILE_DATASTORE_ADAPTER)
 		);
 		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
 		auto persistence = std::make_unique<engine::world::DataStoreRouter>();
@@ -51,6 +57,13 @@ namespace studio {
 			};
 			adapter = engine::datastore::MakeHttpDataStoreAdapter(std::move(settings));
 			ActiveDataStoreLocation = "http://" + endpoint->Text() + Prefs.DataStoreHttpPrefix;
+		} else if (sqlite) {
+			adapter = engine::datastore::MakeSqliteDataStoreAdapter(
+				DataStoreRoot(), Prefs.DataStoreEnvironment
+			);
+			ActiveDataStoreLocation = engine::datastore::SqliteDataStorePath(
+				DataStoreRoot(), Prefs.DataStoreEnvironment
+			).string();
 		} else {
 			adapter = engine::world::MakeFileDataStoreAdapter(DataStoreRoot(), Prefs.DataStoreEnvironment);
 			ActiveDataStoreLocation =
@@ -148,6 +161,14 @@ namespace studio {
 		}
 
 		if (Prefs.DataStoreProvider == engine::datastore::Provider::File) {
+			const char *backends[] = {"Binary (.bin)", "SQLite (.sqlite3)"};
+			int backend = Prefs.DataStoreBackend == engine::datastore::Backend::Binary ? 0 : 1;
+			if (ImGui::Combo("Backend", &backend, backends, IM_ARRAYSIZE(backends))) {
+				Prefs.DataStoreBackend = backend == 0 ? engine::datastore::Backend::Binary
+											 : engine::datastore::Backend::SQLite;
+				(void)ConfigureDataStore();
+			}
+
 			const std::string root = DataStoreRoot().string();
 			ImGui::TextUnformatted("Root folder");
 			ImGui::TextWrapped("%s", root.c_str());
@@ -190,15 +211,20 @@ namespace studio {
 			(void)FlushDataStore();
 		}
 
-		const std::string inactiveLocation =
-			Prefs.DataStoreProvider == engine::datastore::Provider::Http
-				? "http://" + Prefs.DataStoreHttpEndpoint + Prefs.DataStoreHttpPrefix
-				: engine::world::DataStoreFilePath(
-					  DataStoreRoot(),
-					  Prefs.DataStoreEnvironment,
-					  engine::core::Name(engine::world::DEFAULT_DATASTORE)
-				  )
-					  .string();
+		std::string inactiveLocation;
+		if (Prefs.DataStoreProvider == engine::datastore::Provider::Http) {
+			inactiveLocation = "http://" + Prefs.DataStoreHttpEndpoint + Prefs.DataStoreHttpPrefix;
+		} else if (Prefs.DataStoreBackend == engine::datastore::Backend::SQLite) {
+			inactiveLocation = engine::datastore::SqliteDataStorePath(
+				DataStoreRoot(), Prefs.DataStoreEnvironment
+			).string();
+		} else {
+			inactiveLocation = engine::world::DataStoreFilePath(
+				DataStoreRoot(),
+				Prefs.DataStoreEnvironment,
+				engine::core::Name(engine::world::DEFAULT_DATASTORE)
+			).string();
+		}
 		const std::string shown =
 			ActiveDataStoreLocation.empty() ? inactiveLocation : ActiveDataStoreLocation;
 		ImGui::TextWrapped("%s", shown.c_str());

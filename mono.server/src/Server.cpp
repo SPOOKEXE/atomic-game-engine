@@ -10,6 +10,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/datastore/Sqlite.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/delivery/Validation.hpp>
 #include <engine/examples/Scene.hpp>
@@ -681,6 +682,19 @@ namespace server {
 
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
+		if (!Settings.DataStoreConfigured) {
+			const Options defaults;
+			Settings.DataStoreConfigured =
+				Settings.DataStoreRoot != defaults.DataStoreRoot ||
+				Settings.DataStoreProvider != defaults.DataStoreProvider ||
+				Settings.DataStoreBackend != defaults.DataStoreBackend ||
+				Settings.DataStoreEnvironment != defaults.DataStoreEnvironment ||
+				Settings.HttpDataStore.Server != defaults.HttpDataStore.Server ||
+				Settings.HttpDataStore.Host != defaults.HttpDataStore.Host ||
+				Settings.HttpDataStore.TargetPrefix != defaults.HttpDataStore.TargetPrefix ||
+				Settings.HttpDataStore.Authorization != defaults.HttpDataStore.Authorization ||
+				Settings.HttpDataStore.MaximumPumpCalls != defaults.HttpDataStore.MaximumPumpCalls;
+		}
 		DataStoreReady = false;
 		DataStorePersistence.reset();
 
@@ -882,28 +896,41 @@ namespace server {
 		}
 
 		const bool remote = Settings.DataStoreProvider == engine::datastore::Provider::Http;
+		const bool sqlite =
+			!remote && Settings.DataStoreBackend == engine::datastore::Backend::SQLite;
 		const engine::core::Name adapterName(
-			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER : engine::world::FILE_DATASTORE_ADAPTER
+			remote ? engine::datastore::HTTP_DATASTORE_ADAPTER
+				   : (sqlite ? engine::datastore::SQLITE_DATASTORE_ADAPTER
+							 : engine::world::FILE_DATASTORE_ADAPTER)
 		);
 		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
 		auto persistence = std::make_unique<engine::world::DataStoreRouter>();
-		std::unique_ptr<engine::world::DataStoreAdapter> adapter =
-			remote ? engine::datastore::MakeHttpDataStoreAdapter(Settings.HttpDataStore)
-				   : engine::world::MakeFileDataStoreAdapter(
-						 Settings.DataStoreRoot, Settings.DataStoreEnvironment
-					 );
+		std::unique_ptr<engine::world::DataStoreAdapter> adapter;
+		if (remote) {
+			adapter = engine::datastore::MakeHttpDataStoreAdapter(Settings.HttpDataStore);
+		} else if (sqlite) {
+			adapter = engine::datastore::MakeSqliteDataStoreAdapter(
+				Settings.DataStoreRoot, Settings.DataStoreEnvironment
+			);
+		} else {
+			adapter = engine::world::MakeFileDataStoreAdapter(
+				Settings.DataStoreRoot, Settings.DataStoreEnvironment
+			);
+		}
 		if (!persistence->AddAdapter(adapterName, std::move(adapter)) ||
 			!persistence->Assign(storeName, adapterName)) {
 			ENGINE_ERROR("could not configure the DataStore persistence route");
 			return false;
 		}
 
-		const std::string location =
-			remote ? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
-				   : engine::world::DataStoreFilePath(
-						 Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
-					 )
-						 .string();
+		const std::string location = remote
+			? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
+			: (sqlite ? engine::datastore::SqliteDataStorePath(
+						 Settings.DataStoreRoot, Settings.DataStoreEnvironment
+					 ).string()
+					  : engine::world::DataStoreFilePath(
+							Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
+						).string());
 		std::string error;
 		const engine::world::DataStoreStatus loaded = persistence->Load(storeName, PersistedDataStore, error);
 		if (loaded == engine::world::DataStoreStatus::NotFound) {
@@ -947,13 +974,18 @@ namespace server {
 		}
 
 		const engine::core::Name storeName(engine::world::DEFAULT_DATASTORE);
-		const std::string location =
-			Settings.DataStoreProvider == engine::datastore::Provider::Http
-				? "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix
-				: engine::world::DataStoreFilePath(
-					  Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
-				  )
-					  .string();
+		std::string location;
+		if (Settings.DataStoreProvider == engine::datastore::Provider::Http) {
+			location = "http://" + Settings.HttpDataStore.Server.Text() + Settings.HttpDataStore.TargetPrefix;
+		} else if (Settings.DataStoreBackend == engine::datastore::Backend::SQLite) {
+			location = engine::datastore::SqliteDataStorePath(
+				Settings.DataStoreRoot, Settings.DataStoreEnvironment
+			).string();
+		} else {
+			location = engine::world::DataStoreFilePath(
+				Settings.DataStoreRoot, Settings.DataStoreEnvironment, storeName
+			).string();
+		}
 		std::string error;
 		const engine::world::DataStoreStatus status = DataStorePersistence->Save(storeName, records, error);
 		if (status != engine::world::DataStoreStatus::Ok) {
@@ -984,6 +1016,36 @@ namespace server {
 		if (!engine::game::LoadGame(Worlds(), opened->Entrypoint(), info, error)) {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
 			return false;
+		}
+		if (!Settings.DataStoreConfigured && info.DataStore.Enabled) {
+			const auto backend = engine::datastore::BackendOf(info.DataStore.Backend);
+			if (!backend) {
+				ENGINE_ERROR(
+					"--game '{}' declares unsupported DataStore backend '{}'",
+					Settings.GamePath,
+					info.DataStore.Backend
+				);
+				return false;
+			}
+			// A ZIP's manifest lives in a private extraction removed at shutdown.
+			// Put durable state beside the deployment instead, under one package-
+			// specific directory so neighbouring games never share a live store.
+			if (opened->Temporary()) {
+				std::error_code absoluteError;
+				const std::filesystem::path package =
+					std::filesystem::absolute(Settings.GamePath, absoluteError);
+				if (absoluteError) {
+					ENGINE_ERROR("--game '{}' has no durable DataStore location", Settings.GamePath);
+					return false;
+				}
+				Settings.DataStoreRoot = package.parent_path() /
+					(package.filename().string() + ".data") / info.DataStore.Root;
+			} else {
+				Settings.DataStoreRoot = opened->Entrypoint().parent_path() / info.DataStore.Root;
+			}
+			Settings.DataStoreProvider = engine::datastore::Provider::File;
+			Settings.DataStoreBackend = *backend;
+			Settings.DataStoreEnvironment = engine::world::SharedStoreEnvironment::Live;
 		}
 
 		ProjectContentStore.clear();

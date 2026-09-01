@@ -1485,6 +1485,15 @@ namespace engine::ecs {
 		return LoadSnapshot(*State, StoreName, reader);
 	}
 
+	bool Store::LoadContents(core::ByteReader &reader) {
+		RequireOwningThread("LoadContents");
+
+		const std::string destinationName = StoreName;
+		const bool loaded = LoadSnapshot(*State, StoreName, reader);
+		StoreName = destinationName;
+		return loaded;
+	}
+
 	bool Store::CloneTo(Store &destination) const {
 		if (&destination == this) {
 			return true;
@@ -1495,11 +1504,8 @@ namespace engine::ecs {
 			return false;
 		}
 
-		const std::string destinationName = destination.StoreName;
 		core::ByteReader reader(writer.Bytes());
-		const bool loaded = destination.Load(reader);
-		destination.StoreName = destinationName;
-		return loaded;
+		return destination.LoadContents(reader);
 	}
 
 	bool Store::Apply(core::ByteReader &reader, ApplyMode mode) {

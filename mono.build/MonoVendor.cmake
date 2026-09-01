@@ -222,6 +222,14 @@ add_subdirectory("${MONO_VENDOR}/spdlog" EXCLUDE_FROM_ALL)
 # The other of the two that reach all 504. mono_vendor_system above.
 mono_vendor_system(spdlog spdlog_header_only)
 
+# --- SQLite -----------------------------------------------------------------
+# SQLiteCpp carries the released SQLite amalgamation in-tree. Only its sqlite3
+# target is configured: the engine owns its adapter and needs no second C++ API
+# over the C boundary.
+set(SQLITE_OMIT_LOAD_EXTENSION ON CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/sqlitecpp/sqlite3" EXCLUDE_FROM_ALL)
+mono_vendor_system(sqlite3 SQLite::SQLite3)
+
 # --- Tracy ------------------------------------------------------------------
 # On-demand: the client collects nothing until a profiler attaches, so leaving
 # it compiled in for ordinary builds costs almost nothing. Localhost-only,

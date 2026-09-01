@@ -2683,6 +2683,7 @@ namespace studio {
 	}
 
 	void Editor::DrawDialogs() {
+		PumpWorldImport();
 		// **One modal shape for five questions, because they are one question.**
 		// Every dialog here asks for a path or a name and then does something
 		// with it; five hand-written popups would be five places for the Enter
@@ -2707,6 +2708,9 @@ namespace studio {
 		}
 		if (ExportInProgress()) {
 			ImGui::OpenPopup("Export Progress");
+		}
+		if (WorldImportInProgress()) {
+			ImGui::OpenPopup("Import World Progress");
 		}
 		if (AskingImport) {
 			ImGui::OpenPopup("Import World");
@@ -3036,6 +3040,42 @@ namespace studio {
 					Say("export cancelled", LogLevel::Warning);
 					ImGui::CloseCurrentPopup();
 				}
+			}
+			ImGui::EndPopup();
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
+		if (ImGui::BeginPopupModal(
+				"Import World Progress",
+				nullptr,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+			)) {
+			if (!WorldImportInProgress()) {
+				ImGui::CloseCurrentPopup();
+			} else {
+				const auto phase = ActiveWorldImportPhase.load(std::memory_order_relaxed);
+				const char *label = "reading world";
+				switch (phase) {
+				case engine::game::WorldImportPhase::Read:
+					label = "reading world";
+					break;
+				case engine::game::WorldImportPhase::Decode:
+					label = "decoding XML";
+					break;
+				case engine::game::WorldImportPhase::Build:
+					label = "building world";
+					break;
+				case engine::game::WorldImportPhase::Encode:
+					label = "preparing transfer";
+					break;
+				case engine::game::WorldImportPhase::Commit:
+					label = "installing world";
+					break;
+				}
+				ImGui::TextUnformatted(label);
+				ImGui::ProgressBar(
+					WorldImportFraction.load(std::memory_order_relaxed), ImVec2(-1.0f, 0.0f)
+				);
 			}
 			ImGui::EndPopup();
 		}

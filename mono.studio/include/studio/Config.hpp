@@ -48,6 +48,7 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/datastore/Backend.hpp>
 #include <engine/datastore/Provider.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/SharedStoreFile.hpp>
@@ -272,6 +273,9 @@ namespace studio {
 
 		// The provider assigned to Studio's default logical datastore.
 		engine::datastore::Provider DataStoreProvider = engine::datastore::Provider::File;
+
+		// The local provider's durable file format. Ignored by HTTP.
+		engine::datastore::Backend DataStoreBackend = engine::datastore::Backend::Binary;
 
 		// Plain HTTP provider connection. Ignored while the file provider is selected.
 		std::string DataStoreHttpEndpoint = "127.0.0.1:8080";

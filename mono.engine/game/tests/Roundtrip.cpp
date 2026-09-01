@@ -21,6 +21,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -177,6 +178,9 @@ TEST_CASE("a multi-file universe restores authored settings and shader scripts",
 		engine::game::UniverseCdn{.Name = "primary", .Location = "cdn.example.test:9080"},
 		engine::game::UniverseCdn{.Name = "fallback", .Location = "cdn-backup.example.test:9080"},
 	};
+	fileOptions.DataStore.Enabled = true;
+	fileOptions.DataStore.Backend = "sqlite";
+	fileOptions.DataStore.Root = "stores";
 	REQUIRE(SaveUniverse(source, Name("Cinematic Game"), {}, manifest, fileOptions, error));
 	CHECK(error.empty());
 	CHECK(std::filesystem::is_regular_file(manifest));
@@ -196,6 +200,9 @@ TEST_CASE("a multi-file universe restores authored settings and shader scripts",
 	CHECK(info.Cdns[0].Name == "primary");
 	CHECK(info.Cdns[0].Location == "cdn.example.test:9080");
 	CHECK(info.Cdns[1].Name == "fallback");
+	CHECK(info.DataStore.Enabled);
+	CHECK(info.DataStore.Backend == "sqlite");
+	CHECK(info.DataStore.Root == std::filesystem::path("stores"));
 	CHECK(loaded.Settings().Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(loaded.Settings().MaximumCatchUpTicks == 5);
 	CHECK(loaded.Settings().WorldParallelFloorMilliseconds == 0.125f);
@@ -278,6 +285,31 @@ TEST_CASE("a universe world reference cannot escape its directory", "[game][roun
 		file << R"(<?xml version="1.0"?>
 <UniverseManifest format="1" name="Unsafe" recursive="false">
 	<WorldFile path="../outside.aworld" />
+</UniverseManifest>
+)";
+	}
+
+	Universe loaded;
+	AddWorld(loaded, "Existing");
+	GameInfo info;
+	std::string error;
+	CHECK_FALSE(LoadGame(loaded, manifest, info, error));
+	CHECK(error.find("leaves the universe directory") != std::string::npos);
+	CHECK(loaded.Count() == 0);
+
+	std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("a universe DataStore path cannot escape its directory", "[game][roundtrip]") {
+	RegisterEverything();
+
+	const std::filesystem::path directory = ScratchDirectory("atomic-datastore-contained");
+	const std::filesystem::path manifest = directory / "unsafe.auniverse";
+	{
+		std::ofstream file(manifest, std::ios::binary);
+		file << R"(<?xml version="1.0"?>
+<UniverseManifest format="1" name="Unsafe" recursive="false">
+	<DataStore backend="binary" path="../outside" />
 </UniverseManifest>
 )";
 	}
@@ -914,6 +946,25 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	CHECK(error.empty());
 
 	source.Enter(copy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
+
+	engine::game::PreparedWorldImport prepared;
+	std::vector<engine::game::WorldImportPhase> phases;
+	REQUIRE(engine::game::PrepareWorldImport(
+		path,
+		prepared,
+		error,
+		[&](engine::game::WorldImportPhase phase, float) { phases.push_back(phase); }
+	));
+	CHECK(prepared.Settings.Name == Name("Start"));
+	CHECK_FALSE(prepared.Snapshot.empty());
+	CHECK(std::find(phases.begin(), phases.end(), engine::game::WorldImportPhase::Decode) != phases.end());
+	CHECK(std::find(phases.begin(), phases.end(), engine::game::WorldImportPhase::Build) != phases.end());
+	const WorldId preparedCopy =
+		engine::game::CommitWorldImport(source, prepared, Name("StartPrepared"), error);
+	REQUIRE(preparedCopy.IsValid());
+	source.Enter(preparedCopy, [](Store &store) {
+		CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY);
+	});
 
 	// And refused without one, because the name is taken.
 	const WorldId clash = engine::game::ImportWorld(source, path, Name{}, error);

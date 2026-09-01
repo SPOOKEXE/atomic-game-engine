@@ -127,6 +127,27 @@ TEST_CASE("a name is relative and uses forward slashes", "[cdn][publisher]") {
 	CHECK(manifest->Assets()[0].Name == "meshes/rock.mesh");
 }
 
+TEST_CASE("shader scripts and compiled modules are saved in the catalogue", "[cdn][publisher][shader]") {
+	Workspace workspace;
+	workspace.Add("shaders/toon.frag", "#version 450\nvoid main() {}\n");
+	workspace.Add("shaders/toon.frag.spv", "compiled module bytes");
+
+	const SigningKey key = Key();
+	REQUIRE(cdn::Publish(workspace.Content(), workspace.Store(), key).has_value());
+
+	auto store = ChunkStore::Open(workspace.Store(), false);
+	REQUIRE(store.has_value());
+	SignatureBytes signature;
+	const auto manifest = store->ReadManifest(signature);
+	REQUIRE(manifest.has_value());
+	const auto *source = manifest->Find("shaders/toon.frag");
+	const auto *module = manifest->Find("shaders/toon.frag.spv");
+	REQUIRE(source != nullptr);
+	REQUIRE(module != nullptr);
+	CHECK(source->Kind == AssetKind::Shader);
+	CHECK(module->Kind == AssetKind::Shader);
+}
+
 TEST_CASE("the kind is decided once, at publish", "[cdn][publisher]") {
 	// Nothing downstream re-derives it - that is the whole argument in
 	// AssetKind.hpp for the kind being in the manifest at all.

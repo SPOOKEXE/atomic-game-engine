@@ -7,6 +7,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/datastore/Backend.hpp>
 #include <engine/datastore/Http.hpp>
 #include <engine/datastore/Provider.hpp>
 #include <engine/delivery/Source.hpp>
@@ -185,12 +186,19 @@ namespace server {
 		// resolved a path through it.
 		std::filesystem::path AssetsDirectory;
 
-		// Root holding `mock/datastore.bin` and `live/datastore.bin`.
+		// Root holding isolated mock and live files in the selected backend.
 		// Empty keeps the process-local store used before persistence existed.
 		std::filesystem::path DataStoreRoot;
 
 		// The adapter assigned to the default logical datastore.
 		engine::datastore::Provider DataStoreProvider = engine::datastore::Provider::File;
+
+		// The local provider's durable file format. Ignored by HTTP.
+		engine::datastore::Backend DataStoreBackend = engine::datastore::Backend::Binary;
+
+		// Whether an operator or embedding API chose any DataStore field. A
+		// universe manifest fills the defaults only when this is false.
+		bool DataStoreConfigured = false;
 
 		// Mock and live never share a file, even under one configured root.
 		engine::world::SharedStoreEnvironment DataStoreEnvironment =
@@ -980,6 +988,9 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+
+		// One route and one snapshot for the universe. Worlds reach the shared
+		// store through `Driver`, so no per-world persistence copy can diverge.
 		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
 		std::vector<engine::world::SharedStoreEntry> PersistedDataStore;
 		bool DataStoreReady = false;

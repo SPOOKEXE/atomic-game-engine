@@ -110,6 +110,87 @@ TEST_CASE("server loads a multi-file universe directly", "[server][project]") {
 	host.Shutdown();
 }
 
+TEST_CASE("server uses one live DataStore declared by the universe", "[server][project][datastore]") {
+	Tree tree("universe-datastore");
+	engine::world::Universe universe;
+	AddWorld(universe);
+	engine::game::UniverseFileOptions universeOptions;
+	universeOptions.DataStore.Enabled = true;
+	universeOptions.DataStore.Backend = "sqlite";
+	universeOptions.DataStore.Root = "stores";
+	std::string error;
+	const fs::path manifest = tree.Root / "hosted.auniverse";
+	REQUIRE(
+		engine::game::SaveUniverse(
+			universe,
+			engine::core::Name("Hosted Universe"),
+			{},
+			manifest,
+			universeOptions,
+			error
+		)
+	);
+
+	{
+		server::Server host;
+		REQUIRE(host.Initialise(Headless(manifest)));
+		REQUIRE(
+			host.Worlds().SetSharedStoreValue(
+				engine::world::BusKind::DataStore,
+				engine::core::Name("universe:key"),
+				Bytes("live-value")
+			) == engine::world::BusStatus::Ok
+		);
+		host.Shutdown();
+	}
+	CHECK(fs::is_regular_file(tree.Root / "stores/live/datastores.sqlite3"));
+
+	server::Server restored;
+	REQUIRE(restored.Initialise(Headless(manifest)));
+	const auto records = restored.Worlds().SharedStoreEntries(engine::world::BusKind::DataStore);
+	REQUIRE(records.size() == 1);
+	CHECK(records[0].Value == Bytes("live-value"));
+	restored.Shutdown();
+}
+
+TEST_CASE("operator DataStore options override universe defaults", "[server][project][datastore]") {
+	Tree tree("operator-datastore");
+	engine::world::Universe universe;
+	AddWorld(universe);
+	engine::game::UniverseFileOptions universeOptions;
+	universeOptions.DataStore.Enabled = true;
+	universeOptions.DataStore.Backend = "sqlite";
+	universeOptions.DataStore.Root = "stores";
+	std::string error;
+	const fs::path manifest = tree.Root / "hosted.auniverse";
+	REQUIRE(
+		engine::game::SaveUniverse(
+			universe,
+			engine::core::Name("Hosted Universe"),
+			{},
+			manifest,
+			universeOptions,
+			error
+		)
+	);
+
+	auto options = Headless(manifest);
+	options.DataStoreRoot = tree.Root / "operator-store";
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	REQUIRE(
+		host.Worlds().SetSharedStoreValue(
+			engine::world::BusKind::DataStore,
+			engine::core::Name("operator:key"),
+			Bytes("operator-value")
+		) == engine::world::BusStatus::Ok
+	);
+	host.Shutdown();
+
+	CHECK(fs::is_regular_file(tree.Root / "operator-store/live/datastore.bin"));
+	CHECK_FALSE(fs::exists(tree.Root / "stores/live/datastores.sqlite3"));
+}
+
 TEST_CASE("shared project loading preserves monolithic game support", "[server][project]") {
 	Tree tree("game");
 	engine::world::Universe universe;
@@ -183,6 +264,65 @@ TEST_CASE("server owns and hosts a self-contained Project ZIP", "[server][projec
 	REQUIRE(operatorHost.Initialise(overridden));
 	CHECK(operatorHost.ContentRelayStats() != nullptr);
 	operatorHost.Shutdown();
+}
+
+TEST_CASE("Project ZIP DataStore survives temporary extraction cleanup", "[server][project][datastore]") {
+	Tree tree("zip-datastore");
+	const fs::path staging = tree.Root / "staging";
+	fs::create_directories(staging);
+	const std::string publisher = PrepareStore(staging);
+
+	engine::world::Universe universe;
+	AddWorld(universe);
+	engine::game::UniverseFileOptions universeOptions;
+	universeOptions.PublisherKey = publisher;
+	universeOptions.DataStore.Enabled = true;
+	universeOptions.DataStore.Backend = "sqlite";
+	universeOptions.DataStore.Root = "stores";
+	std::string error;
+	REQUIRE(
+		engine::game::SaveUniverse(
+			universe,
+			engine::core::Name("Packaged Store"),
+			{},
+			staging / "game.auniverse",
+			universeOptions,
+			error
+		)
+	);
+	engine::game::ProjectPackageOptions packageOptions;
+	packageOptions.PublisherKey = publisher;
+	engine::game::ProjectPackageInfo packageInfo;
+	engine::game::ProjectValidationReport report;
+	const fs::path package = tree.Root / "hosted.zip";
+	REQUIRE(
+		engine::game::WriteProjectPackage(
+			staging, package, packageOptions, packageInfo, report
+		)
+	);
+
+	auto options = Headless(package);
+	options.ContentGrantKey = std::string(64, '1');
+	{
+		server::Server host;
+		REQUIRE(host.Initialise(options));
+		REQUIRE(
+			host.Worlds().SetSharedStoreValue(
+				engine::world::BusKind::DataStore,
+				engine::core::Name("zip:key"),
+				Bytes("persistent")
+			) == engine::world::BusStatus::Ok
+		);
+		host.Shutdown();
+	}
+	CHECK(fs::is_regular_file(tree.Root / "hosted.zip.data/stores/live/datastores.sqlite3"));
+
+	server::Server restored;
+	REQUIRE(restored.Initialise(options));
+	const auto records = restored.Worlds().SharedStoreEntries(engine::world::BusKind::DataStore);
+	REQUIRE(records.size() == 1);
+	CHECK(records[0].Value == Bytes("persistent"));
+	restored.Shutdown();
 }
 
 TEST_CASE("server policy denies package HTTP without local content", "[server][project]") {

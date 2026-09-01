@@ -124,6 +124,13 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] allow shader scripts to be saved and served on CDN.
 - [_] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
 
+- [_] fix viewport size glitch
+- [_] fix multi-viewport camera collision fix
+- [_] fix script editor, all text matches background
+- [_] the sideview of the script editor doesn't scroll and is not interactable
+- [_] Q/E camera movement should depend on camera rotation, not global space
+- [_] shaders demo has no shaders loaded
+
 ### v0.22
 
 - [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.

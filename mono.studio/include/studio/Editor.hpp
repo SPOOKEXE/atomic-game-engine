@@ -73,6 +73,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <array>
+#include <atomic>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
@@ -90,6 +91,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/AssetGrounding.hpp>
 #include <studio/CodeMetrics.hpp>
@@ -2345,6 +2347,14 @@ namespace studio {
 		// @since v0.13
 		bool RunCommand(const std::string &source);
 
+		// Builds the command VM for one world, or keeps the matching live one.
+		//
+		// @param store The active world's store.
+		// @param world The world that owns the store.
+		// @return Whether a runtime is ready.
+		// @since v0.22
+		bool EnsureCommandRuntime(engine::ecs::Store &store, engine::world::WorldId world);
+
 		// Walks the command history for the input's arrow keys.
 		//
 		// **Public because imgui's callback is a free function** and the only
@@ -2354,6 +2364,14 @@ namespace studio {
 		// @return Zero, which is what imgui expects of a history callback.
 		// @since v0.13
 		int WalkCommandHistory(ImGuiInputTextCallbackData *data);
+
+		// Receives the command field's caret and applies a completion through
+		// imgui's public edit callback, keeping its undo state in step.
+		//
+		// @param data The callback data for the command field.
+		// @return Zero, which is what imgui expects of an input callback.
+		// @since v0.22
+		int EditCommandField(ImGuiInputTextCallbackData *data);
 
 		// The control surface: whether it is listening, and what it offers.
 		//
@@ -3041,6 +3059,12 @@ namespace studio {
 		// @param path The world file to read.
 		// @return `false` when nothing could be imported.
 		bool ImportWorldFile(const std::filesystem::path &path);
+
+		// Polls the background preparation and commits completed bytes on the
+		// universe's owner thread.
+		void PumpWorldImport();
+
+		bool WorldImportInProgress() const;
 
 		// Adds another game's worlds to this universe, keeping what is here.
 		//
@@ -5222,6 +5246,23 @@ namespace studio {
 		ExportPhase ActiveExportPhase = ExportPhase::Idle;
 		//@}
 
+		// One world import prepared away from the UI thread. The worker touches
+		// only its result bytes and atomics; `PumpWorldImport` owns the universe.
+		//@{
+		std::jthread WorldImportWorker;
+		engine::game::PreparedWorldImport PreparedWorld;
+		std::string WorldImportError;
+		std::atomic<engine::game::WorldImportPhase> ActiveWorldImportPhase{
+			engine::game::WorldImportPhase::Read
+		};
+		std::atomic<float> WorldImportFraction{0.0f};
+		std::atomic<bool> WorldImportDone{false};
+		bool WorldImportSucceeded = false;
+		bool WorldImportCommitPending = false;
+		engine::core::Name WorldImportDestination;
+		bool WorldImportActive = false;
+		//@}
+
 		// Read-only manifest metadata shown before a multi-file universe is
 		// allowed to add content sources to this editor.
 		//@{
@@ -5624,6 +5665,26 @@ namespace studio {
 		// fields: this repository's imgui has no `imgui_stdlib` on its link
 		// line.
 		char CommandField[1024] = {};
+
+		// The caret and focus reported by the field's callback.
+		//@{
+		int CommandCaret = 0;
+		bool CommandFieldActive = false;
+		//@}
+
+		// The command completion popup. The replacement is requested here and
+		// applied by `EditCommandField` on the next field callback, so imgui owns
+		// every edit to its buffer.
+		//@{
+		bool CommandPopupOpen = false;
+		int CommandPopupChoice = 0;
+		int CommandPopupAnchor = 0;
+		int CommandPopupCaret = -1;
+		int CommandReplaceFrom = -1;
+		bool CommandRefocus = false;
+		std::string CommandInsert;
+		std::vector<Completion> CommandCompletions;
+		//@}
 
 		// What has been run, oldest first, so the arrows can walk back through
 		// it.

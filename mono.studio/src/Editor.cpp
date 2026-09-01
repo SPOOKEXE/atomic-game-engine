@@ -863,6 +863,13 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		// A prepared import owns no universe state, but its result fields belong
+		// to this editor and must outlive the worker writing them.
+		if (WorldImportWorker.joinable()) {
+			WorldImportWorker.join();
+		}
+		WorldImportActive = false;
+
 		// **First, and before the universe goes.** A socket thread parked on a
 		// request the frame loop will never pump again would keep the process
 		// alive; Stop wakes it and joins.
@@ -3309,6 +3316,14 @@ namespace studio {
 		UniverseFileSettings.RecursiveWorldDiscovery = info.RecursiveWorldDiscovery;
 		UniverseFileSettings.PublisherKey = info.PublisherKey;
 		UniverseFileSettings.Cdns = info.Cdns;
+		UniverseFileSettings.DataStore = info.DataStore;
+		if (info.DataStore.Enabled) {
+			Prefs.DataStoreEnabled = true;
+			if (const auto backend = engine::datastore::BackendOf(info.DataStore.Backend)) {
+				Prefs.DataStoreBackend = *backend;
+			}
+		}
+		(void)ConfigureDataStore();
 		RenderingProfiles = std::move(info.RenderingProfiles);
 		Content.SetUniverseAssets(info.Assets);
 		RebuildContentClients();
@@ -3679,6 +3694,9 @@ namespace studio {
 			}
 		}
 		options.HttpEnabled = includePublicCdns && !options.Cdns.empty();
+		options.DataStore.Enabled = Prefs.DataStoreEnabled;
+		options.DataStore.Backend = engine::datastore::Describe(Prefs.DataStoreBackend);
+		options.DataStore.Root = "stores";
 		return options;
 	}
 
@@ -3881,25 +3899,107 @@ namespace studio {
 	}
 
 	bool Editor::ImportWorldFile(const std::filesystem::path &path) {
-		std::string error;
+		if (WorldImportActive) {
+			Say("another world import is already running", LogLevel::Warning);
+			return false;
+		}
+		engine::game::RegisterGameClasses();
+		PreparedWorld = {};
+		WorldImportError.clear();
+		WorldImportSucceeded = false;
+		WorldImportCommitPending = false;
+		WorldImportDestination = {};
+		WorldImportFraction.store(0.0f, std::memory_order_relaxed);
+		ActiveWorldImportPhase.store(
+			engine::game::WorldImportPhase::Read, std::memory_order_relaxed
+		);
+		WorldImportDone.store(false, std::memory_order_relaxed);
+		WorldImportActive = true;
+		WorldImportWorker = std::jthread([this, path] {
+			WorldImportSucceeded = engine::game::PrepareWorldImport(
+				path,
+				PreparedWorld,
+				WorldImportError,
+				[this](engine::game::WorldImportPhase phase, float fraction) {
+					ActiveWorldImportPhase.store(phase, std::memory_order_relaxed);
+					float overall = 0.0f;
+					switch (phase) {
+					case engine::game::WorldImportPhase::Read:
+						overall = 0.25f * fraction;
+						break;
+					case engine::game::WorldImportPhase::Decode:
+						overall = 0.25f;
+						break;
+					case engine::game::WorldImportPhase::Build:
+						overall = 0.50f;
+						break;
+					case engine::game::WorldImportPhase::Encode:
+						overall = 0.80f + 0.15f * fraction;
+						break;
+					case engine::game::WorldImportPhase::Commit:
+						overall = 0.95f;
+						break;
+					}
+					WorldImportFraction.store(overall, std::memory_order_relaxed);
+				}
+			);
+			WorldImportDone.store(true, std::memory_order_release);
+		});
+		Say("import started: " + path.string());
+		return true;
+	}
 
-		// No rename first: a world whose name is free keeps the one the file
-		// gave it, which is what somebody importing into an empty universe
-		// expects. A clash gets a suffix rather than a refusal, because being
-		// told "that name is taken" and having to guess a free one is a worse
-		// answer than being given one.
-		WorldId imported = engine::game::ImportWorld(*Universe, path, Name{}, error);
+	bool Editor::WorldImportInProgress() const {
+		return WorldImportActive;
+	}
 
-		if (!imported.IsValid()) {
-			for (int attempt = 2; attempt < 100 && !imported.IsValid(); attempt++) {
-				const std::string candidate = path.stem().string() + " " + std::to_string(attempt);
-				imported = engine::game::ImportWorld(*Universe, path, Name(candidate), error);
+	void Editor::PumpWorldImport() {
+		if (!WorldImportActive || !WorldImportDone.load(std::memory_order_acquire)) {
+			return;
+		}
+		if (!WorldImportCommitPending) {
+			if (WorldImportWorker.joinable()) {
+				WorldImportWorker.join();
 			}
+			if (!WorldImportSucceeded) {
+				WorldImportActive = false;
+				Say("import failed: " + WorldImportError, LogLevel::Error);
+				return;
+			}
+
+			WorldImportDestination = PreparedWorld.Settings.Name;
+			if (Universe->Find(WorldImportDestination).IsValid()) {
+				const std::string base(WorldImportDestination.Text());
+				WorldImportDestination = {};
+				for (uint32_t suffix = 2; suffix < 1000; suffix++) {
+					const Name candidate(base + " " + std::to_string(suffix));
+					if (!Universe->Find(candidate).IsValid()) {
+						WorldImportDestination = candidate;
+						break;
+					}
+				}
+			}
+			if (!WorldImportDestination.IsValid()) {
+				WorldImportActive = false;
+				Say("import failed: could not find a free world name", LogLevel::Error);
+				return;
+			}
+			WorldImportCommitPending = true;
+			ActiveWorldImportPhase.store(
+				engine::game::WorldImportPhase::Commit, std::memory_order_relaxed
+			);
+			WorldImportFraction.store(0.95f, std::memory_order_relaxed);
+			return;
 		}
 
+		const WorldId imported = engine::game::CommitWorldImport(
+			*Universe, PreparedWorld, WorldImportDestination, WorldImportError
+		);
+		WorldImportActive = false;
+		WorldImportCommitPending = false;
 		if (!imported.IsValid()) {
-			Say("import failed: " + error, LogLevel::Error);
-			return false;
+			Say("import failed: " + WorldImportError, LogLevel::Error);
+			return;
 		}
 
 		PrepareWorldIn(imported);
@@ -3910,7 +4010,6 @@ namespace studio {
 		MarkModified();
 
 		Say("imported '" + std::string(Label(Universe->NameOf(imported))) + "'");
-		return true;
 	}
 
 	bool Editor::ImportUniverseFile(const std::filesystem::path &path) {

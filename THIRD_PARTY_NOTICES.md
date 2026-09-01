@@ -50,6 +50,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
 | [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
 | [ngtcp2](https://github.com/ngtcp2/ngtcp2) | MIT | the QUIC transport under `engine::net::quic`, from v0.19 | yes, where `net` is linked |
+| [SQLite / SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | SQLite public domain / MIT | SQLite-backed durable DataStore files; only the bundled SQLite C amalgamation is compiled | server and Studio |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They

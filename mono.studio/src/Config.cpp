@@ -290,6 +290,11 @@ namespace studio {
 				)) {
 				DataStoreProvider = *provider;
 			}
+			if (const auto backend = engine::datastore::BackendOf(
+					Words(*dataStore, "backend", engine::datastore::Describe(DataStoreBackend))
+				)) {
+				DataStoreBackend = *backend;
+			}
 			if (const auto environment = engine::world::SharedStoreEnvironmentOf(
 					Words(*dataStore, "environment", engine::world::Describe(DataStoreEnvironment))
 				)) {
@@ -554,6 +559,7 @@ namespace studio {
 			 json{
 				 {"enabled", DataStoreEnabled},
 				 {"provider", engine::datastore::Describe(DataStoreProvider)},
+				 {"backend", engine::datastore::Describe(DataStoreBackend)},
 				 {"root", DataStoreRoot},
 				 {"environment", engine::world::Describe(DataStoreEnvironment)},
 				 {"httpEndpoint", DataStoreHttpEndpoint},

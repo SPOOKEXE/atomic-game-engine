@@ -5,4 +5,6 @@ mono_add_library(datastore
 		Engine::core
 		Engine::net
 		Engine::world
+	VENDOR
+		SQLite::SQLite3
 )

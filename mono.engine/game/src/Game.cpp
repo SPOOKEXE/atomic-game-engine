@@ -38,6 +38,7 @@ namespace engine::game {
 		constexpr std::string_view GAME_ROOT = "Game";
 		constexpr std::string_view UNIVERSE_ROOT = "UniverseManifest";
 		constexpr std::string_view WORLD_ROOT = "World";
+		constexpr size_t MAXIMUM_WORLD_BYTES = 256u * 1024u * 1024u;
 		constexpr uint32_t UNIVERSE_FORMAT_VERSION = 1;
 		constexpr size_t MAXIMUM_UNIVERSE_WORLDS = 4096;
 
@@ -1255,6 +1256,19 @@ namespace engine::game {
 			}
 			writer.Close();
 		}
+		if (options.DataStore.Enabled) {
+			std::filesystem::path relative;
+			std::filesystem::path absolute;
+			if (!detail::ResolveDirectoryReference(
+					path.parent_path(), options.DataStore.Root.generic_string(), relative, absolute, error
+				)) {
+				return false;
+			}
+			writer.Open("DataStore");
+			writer.Attribute("backend", options.DataStore.Backend);
+			writer.Attribute("path", relative.generic_string());
+			writer.Close();
+		}
 		const std::filesystem::path assetsDirectory = path.parent_path() / "assets";
 		std::error_code assetsError;
 		std::filesystem::create_directories(assetsDirectory, assetsError);
@@ -1344,6 +1358,7 @@ namespace engine::game {
 		std::unordered_set<std::string> seen;
 		std::vector<ManifestWorld> worlds;
 		bool assetsDeclared = false;
+		bool dataStoreDeclared = false;
 
 		for (const uint32_t index : root.Children) {
 			const XmlElement *child = document.At(index);
@@ -1385,6 +1400,26 @@ namespace engine::game {
 					}
 					out.Cdns.push_back(std::move(cdn));
 				}
+				continue;
+			}
+			if (child->Name == "DataStore") {
+				if (dataStoreDeclared) {
+					error = "universe declares more than one DataStore";
+					EmptyUniverse(universe);
+					return false;
+				}
+				std::filesystem::path relative;
+				std::filesystem::path absolute;
+				if (!detail::ResolveDirectoryReference(
+						base, child->Attribute("path"), relative, absolute, error
+					)) {
+					EmptyUniverse(universe);
+					return false;
+				}
+				out.DataStore.Enabled = true;
+				out.DataStore.Backend = TextOf(*child, "backend", "binary");
+				out.DataStore.Root = std::move(relative);
+				dataStoreDeclared = true;
 				continue;
 			}
 			if (child->Name == "Assets") {
@@ -1851,7 +1886,6 @@ namespace engine::game {
 		// A standalone world can hold hundreds of thousands of imported instances.
 		// Keep the parser bounded, but do not let the writer produce a normal world
 		// that its paired reader refuses at the generic 64 MiB document limit.
-		constexpr size_t MAXIMUM_WORLD_BYTES = 256u * 1024u * 1024u;
 		XmlDocument parsed;
 		if (!Parse(std::string(document), WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
 			return world::WorldId{};
@@ -1904,6 +1938,122 @@ namespace engine::game {
 			return world::WorldId{};
 		}
 		return ReadWorldDocument(universe, text, rename, error);
+	}
+
+	bool PrepareWorldImport(
+		const std::filesystem::path &path,
+		PreparedWorldImport &out,
+		std::string &error,
+		const WorldImportProgress &progress
+	) {
+		out = {};
+		error.clear();
+		RegisterGameClasses();
+
+		std::error_code sizeError;
+		const uintmax_t size = std::filesystem::file_size(path, sizeError);
+		if (sizeError) {
+			error = "could not inspect " + path.string();
+			return false;
+		}
+		if (size > MAXIMUM_WORLD_BYTES) {
+			error = "world document exceeds the 256 MiB limit";
+			return false;
+		}
+
+		std::ifstream file(path, std::ios::binary);
+		if (!file) {
+			error = "could not open " + path.string();
+			return false;
+		}
+		std::string text;
+		text.resize(static_cast<size_t>(size));
+		constexpr size_t READ_BLOCK = 1024u * 1024u;
+		size_t offset = 0;
+		while (offset < text.size()) {
+			const size_t bytes = std::min(READ_BLOCK, text.size() - offset);
+			file.read(text.data() + offset, static_cast<std::streamsize>(bytes));
+			if (!file) {
+				error = "could not finish reading " + path.string();
+				return false;
+			}
+			offset += bytes;
+			if (progress) {
+				progress(WorldImportPhase::Read, text.empty() ? 1.0f : static_cast<float>(offset) / text.size());
+			}
+		}
+
+		if (progress) {
+			progress(WorldImportPhase::Decode, 0.0f);
+		}
+		XmlDocument parsed;
+		if (!Parse(text, WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
+			return false;
+		}
+		const XmlElement &root = *parsed.Root();
+		out.Settings = ReadWorldAttributes(parsed, root);
+
+		if (progress) {
+			progress(WorldImportPhase::Build, 0.0f);
+		}
+		ecs::Store staged("game.world-import");
+		if (!ReadWorldBody(parsed, root, staged, error)) {
+			out = {};
+			return false;
+		}
+
+		if (progress) {
+			progress(WorldImportPhase::Encode, 0.0f);
+		}
+		core::ByteWriter writer;
+		if (!staged.Save(writer)) {
+			error = "world contains data that cannot cross the import boundary";
+			out = {};
+			return false;
+		}
+		out.Snapshot.assign(writer.Bytes().begin(), writer.Bytes().end());
+		if (progress) {
+			progress(WorldImportPhase::Encode, 1.0f);
+		}
+		return true;
+	}
+
+	world::WorldId CommitWorldImport(
+		world::Universe &universe,
+		const PreparedWorldImport &prepared,
+		core::Name rename,
+		std::string &error
+	) {
+		error.clear();
+		world::WorldSettings settings = prepared.Settings;
+		if (rename.IsValid()) {
+			settings.Name = rename;
+		}
+		if (!settings.Name.IsValid() || prepared.Snapshot.empty()) {
+			error = "prepared world is empty";
+			return {};
+		}
+		if (universe.Find(settings.Name).IsValid()) {
+			error = "a world called '" + std::string(settings.Name.Text()) + "' is already in this universe";
+			return {};
+		}
+
+		const world::WorldId id = universe.Create(settings);
+		if (!id.IsValid()) {
+			error = "could not create world '" + std::string(settings.Name.Text()) + "'";
+			return {};
+		}
+		bool restored = false;
+		universe.Enter(id, [&](Store &store) {
+			core::ByteReader reader(prepared.Snapshot);
+			restored = store.LoadContents(reader) && reader.AtEnd();
+		});
+		if (!restored) {
+			universe.Destroy(id);
+			error = "could not restore the prepared world";
+			return {};
+		}
+		return id;
 	}
 
 }

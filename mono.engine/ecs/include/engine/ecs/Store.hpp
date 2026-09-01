@@ -2024,6 +2024,16 @@ namespace engine::ecs {
 		//         or when it names a component this build does not have.
 		bool Load(core::ByteReader &reader);
 
+		// Replaces the contents while retaining this store's diagnostic name.
+		//
+		// A transferred world already has an identity assigned by its owner. The
+		// snapshot supplies its ECS data, not a second answer to that identity.
+		//
+		// @param reader The reader to consume.
+		// @return `false` under the same conditions as `Load`.
+		// @since v0.22
+		bool LoadContents(core::ByteReader &reader);
+
 		// Replaces another store with an independent copy of this world.
 		//
 		// The destination keeps its diagnostic name so preview and simulation

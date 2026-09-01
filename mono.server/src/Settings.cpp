@@ -194,6 +194,11 @@ namespace server {
 					"Persist DataStore under this root; empty keeps it process-local"
 				);
 				built.Text(
+					"server.datastore-backend",
+					engine::datastore::Describe(defaults.DataStoreBackend),
+					"binary or sqlite; selects the local durable file format"
+				);
+				built.Text(
 					"server.datastore-environment",
 					engine::world::Describe(defaults.DataStoreEnvironment),
 					"mock or live; each uses a separate directory"
@@ -324,36 +329,62 @@ namespace server {
 		options.HostProgram = std::filesystem::path(Flag("server.host-program").Text());
 		options.Processes = static_cast<uint32_t>(Flag("server.processes").Integer());
 		options.AssetsDirectory = std::filesystem::path(Flag("server.assets-directory").Text());
-		if (const auto provider = engine::datastore::ProviderOf(Flag("server.datastore-provider").Text())) {
+		const Flag dataStoreProvider("server.datastore-provider");
+		const Flag dataStoreRoot("server.datastore-root");
+		const Flag dataStoreBackend("server.datastore-backend");
+		const Flag dataStoreEnvironment("server.datastore-environment");
+		const Flag dataStoreHttpEndpoint("server.datastore-http-endpoint");
+		const Flag dataStoreHttpHost("server.datastore-http-host");
+		const Flag dataStoreHttpPrefix("server.datastore-http-prefix");
+		const Flag dataStoreHttpAuthorization("server.datastore-http-authorization");
+		options.DataStoreConfigured =
+			dataStoreProvider.Source() != engine::core::FlagSource::Default ||
+			dataStoreRoot.Source() != engine::core::FlagSource::Default ||
+			dataStoreBackend.Source() != engine::core::FlagSource::Default ||
+			dataStoreEnvironment.Source() != engine::core::FlagSource::Default ||
+			dataStoreHttpEndpoint.Source() != engine::core::FlagSource::Default ||
+			dataStoreHttpHost.Source() != engine::core::FlagSource::Default ||
+			dataStoreHttpPrefix.Source() != engine::core::FlagSource::Default ||
+			dataStoreHttpAuthorization.Source() != engine::core::FlagSource::Default;
+
+		if (const auto provider = engine::datastore::ProviderOf(dataStoreProvider.Text())) {
 			options.DataStoreProvider = *provider;
 		} else {
 			ENGINE_WARN(
 				"server.datastore-provider: '{}' is not file or http; using file",
-				Flag("server.datastore-provider").Text()
+				dataStoreProvider.Text()
 			);
 		}
-		options.DataStoreRoot = std::filesystem::path(Flag("server.datastore-root").Text());
+		options.DataStoreRoot = std::filesystem::path(dataStoreRoot.Text());
+		if (const auto backend = engine::datastore::BackendOf(dataStoreBackend.Text())) {
+			options.DataStoreBackend = *backend;
+		} else {
+			ENGINE_WARN(
+				"server.datastore-backend: '{}' is not binary or sqlite; using binary",
+				dataStoreBackend.Text()
+			);
+		}
 		if (const auto environment =
-				engine::world::SharedStoreEnvironmentOf(Flag("server.datastore-environment").Text())) {
+				engine::world::SharedStoreEnvironmentOf(dataStoreEnvironment.Text())) {
 			options.DataStoreEnvironment = *environment;
 		} else {
 			ENGINE_WARN(
 				"server.datastore-environment: '{}' is not mock or live; using live",
-				Flag("server.datastore-environment").Text()
+				dataStoreEnvironment.Text()
 			);
 		}
 		if (const auto endpoint =
-				engine::net::Endpoint::Parse(Flag("server.datastore-http-endpoint").Text())) {
+				engine::net::Endpoint::Parse(dataStoreHttpEndpoint.Text())) {
 			options.HttpDataStore.Server = *endpoint;
 		} else if (options.DataStoreProvider == engine::datastore::Provider::Http) {
 			ENGINE_WARN(
 				"server.datastore-http-endpoint: '{}' is not a numeric endpoint",
-				Flag("server.datastore-http-endpoint").Text()
+				dataStoreHttpEndpoint.Text()
 			);
 		}
-		options.HttpDataStore.Host = std::string(Flag("server.datastore-http-host").Text());
-		options.HttpDataStore.TargetPrefix = std::string(Flag("server.datastore-http-prefix").Text());
-		options.HttpDataStore.Authorization = std::string(Flag("server.datastore-http-authorization").Text());
+		options.HttpDataStore.Host = std::string(dataStoreHttpHost.Text());
+		options.HttpDataStore.TargetPrefix = std::string(dataStoreHttpPrefix.Text());
+		options.HttpDataStore.Authorization = std::string(dataStoreHttpAuthorization.Text());
 
 		return options;
 	}

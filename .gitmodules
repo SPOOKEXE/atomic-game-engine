@@ -348,3 +348,7 @@
 	path = mono.vendor/roblox-files
 	url = https://github.com/SPOOKEXE/roblox-files.git
 	branch = main
+[submodule "mono.vendor/sqlitecpp"]
+	path = mono.vendor/sqlitecpp
+	url = https://github.com/SRombauts/SQLiteCpp.git
+	branch = sqlitecpp-3.x

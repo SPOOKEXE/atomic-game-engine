@@ -44,13 +44,47 @@
 #include <engine/world/Universe.hpp>
 #include <engine/world/World.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace engine::game {
+
+	// Coarse preparation stages reported while a world is built off-thread.
+	//
+	// @since v0.22
+	enum class WorldImportPhase : uint8_t {
+		// Reading bytes from the selected file.
+		Read,
+		// Decoding and validating the XML document.
+		Decode,
+		// Building the standalone ECS contents.
+		Build,
+		// Encoding transferable snapshot bytes.
+		Encode,
+		// Restoring the prepared bytes into the destination universe.
+		Commit,
+	};
+
+	// A world prepared away from its destination universe.
+	//
+	// Only settings and bytes cross the thread boundary. Committing creates the
+	// destination world on its owning thread and restores this snapshot into it.
+	//
+	// @since v0.22
+	struct PreparedWorldImport {
+		// Authored world settings decoded from the document.
+		world::WorldSettings Settings;
+		// Portable ECS snapshot built from the document.
+		std::vector<std::byte> Snapshot;
+	};
+
+	// Receives the current preparation phase and phase-local fraction.
+	using WorldImportProgress = std::function<void(WorldImportPhase, float)>;
 
 	// The format this build writes and accepts.
 	//
@@ -102,6 +136,19 @@ namespace engine::game {
 		std::string Location;
 	};
 
+	// Local durable storage requested by a deployed universe.
+	//
+	// The folder is always relative to the manifest while writing and resolved
+	// beside it while loading. This keeps a package portable and prevents a
+	// downloaded manifest from selecting an arbitrary host path.
+	//
+	// @since v0.21
+	struct UniverseDataStore {
+		bool Enabled = false;
+		std::string Backend = "binary";
+		std::filesystem::path Root = "stores";
+	};
+
 	// Controls how a multi-file universe is written.
 	//
 	// @since v0.21
@@ -119,6 +166,9 @@ namespace engine::game {
 
 		// Remote processed-content origins declared by the manifest.
 		std::vector<UniverseCdn> Cdns;
+
+		// Local live DataStore configuration embedded in the export.
+		UniverseDataStore DataStore;
 	};
 
 	// What a game file says about itself, and the settings behind it.
@@ -160,6 +210,11 @@ namespace engine::game {
 
 		// Remote processed-content origins requested by the universe.
 		std::vector<UniverseCdn> Cdns;
+
+		// Local live DataStore configuration. Its root remains universe-relative;
+		// a host resolves it against the durable deployment location rather than
+		// against a temporary package extraction.
+		UniverseDataStore DataStore;
 	};
 
 	// Registers every class a document can name.
@@ -292,6 +347,22 @@ namespace engine::game {
 	// @return The new world, or an invalid handle.
 	world::WorldId ImportWorld(
 		world::Universe &universe, const std::filesystem::path &path, core::Name rename, std::string &error
+	);
+
+	// Reads, decodes, and builds a standalone world without touching a universe.
+	bool PrepareWorldImport(
+		const std::filesystem::path &path,
+		PreparedWorldImport &out,
+		std::string &error,
+		const WorldImportProgress &progress = {}
+	);
+
+	// Adds one prepared world to its destination universe on the owning thread.
+	world::WorldId CommitWorldImport(
+		world::Universe &universe,
+		const PreparedWorldImport &prepared,
+		core::Name rename,
+		std::string &error
 	);
 
 	// Starts every script a world holds, and keeps them running.
