@@ -89,7 +89,7 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [x] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [x] porting Roblox games: the compatibility widget reports missing classes and property conflicts, maps each missing Roblox class to an insertable engine class, persists those choices, and the headless converter reloads every `.aworld` it writes.
-- [_] review additions and ensure they all work; one issue was the world import doesn't see examples in ~/Documents/atomic-game-engine/...
+- [_] review additions and ensure they all work, we benchmark critical ones and test them.
 
 ### v0.22
 
