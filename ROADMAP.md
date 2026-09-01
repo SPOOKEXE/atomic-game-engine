@@ -116,6 +116,7 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [_] build out the `Components` dock widget like properties where you can edit the component values
 - [_] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
   manually - ensure it uses the CollectionService and such.
+
 - [_] in command bar, add auto complete as well
 - [_] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
 - [_] for live games, universe config for datastore location tells you the folder where its stored
