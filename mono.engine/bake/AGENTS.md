@@ -315,10 +315,11 @@ pipeline puts the node immediately before the write.
 
 ## What is not here yet, so nobody adds half of one
 
-- **No skinning.** Joints and weights are skipped and the rest pose is kept.
-  A glTF node carrying a `skin` contributes the identity rather than its own
-  transform, which is the specification's rule and is what stops a skinned model
-  importing on its side.
+- **glTF skinning keeps one skin-local palette.** Joints and weights are baked
+  into the mesh vertex. A glTF node carrying a `skin` contributes the identity
+  rather than its own transform, because its vertices are already in skin
+  space. Combining distinct skins into one mesh is refused until the asset
+  format can name more than one palette.
 - **No materials.** `AssetKind::Material` names a kind nothing writes.
   `Submesh::Material` is what the source file called a run and `Submesh::Texture`
   is an asset that exists; when a material format arrives, the second becomes

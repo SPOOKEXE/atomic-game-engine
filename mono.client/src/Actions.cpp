@@ -17,7 +17,11 @@ namespace client {
 		// a search. `input::KeyOf` is the only other place an `SDLK_` appears,
 		// and it answers a different question: what a script sees.
 		constexpr Binding BINDINGS[] = {
-			{Action::Quit, SDLK_ESCAPE, "Esc"},
+			{Action::Quit, SDLK_F12, "F12"},
+			{Action::ToggleSettings, SDLK_ESCAPE, "Esc"},
+			{Action::SettingsUp, SDLK_UP, "Up"},
+			{Action::SettingsDown, SDLK_DOWN, "Down"},
+			{Action::SettingsActivate, SDLK_RETURN, "Enter"},
 			{Action::ToggleStatistics, SDLK_F3, "F3"},
 			{Action::ToggleNetwork, SDLK_F4, "F4"},
 			{Action::ToggleFrameGraph, SDLK_F5, "F5"},
@@ -36,6 +40,14 @@ namespace client {
 		switch (action) {
 		case Action::Quit:
 			return "quit";
+		case Action::ToggleSettings:
+			return "toggle settings";
+		case Action::SettingsUp:
+			return "settings up";
+		case Action::SettingsDown:
+			return "settings down";
+		case Action::SettingsActivate:
+			return "activate setting";
 		case Action::ToggleStatistics:
 			return "toggle statistics";
 		case Action::ToggleNetwork:

@@ -3,6 +3,7 @@
 #include <engine/core/Log.hpp>
 
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string_view>
 #include <studio/ContentSources.hpp>
@@ -71,9 +72,11 @@ namespace studio {
 
 	engine::delivery::DeliverySettings ContentSources::ToSettings() const {
 		engine::delivery::DeliverySettings settings;
-		settings.Sources = Sources;
+		settings.Sources = UniverseSources;
+		settings.Sources.insert(settings.Sources.end(), Sources.begin(), Sources.end());
 		settings.CachePath = CachePath;
-		if (const auto key = engine::assets::PublicKey::FromHex(PublisherKey)) {
+		const std::string &publisher = UniversePublisherKey.empty() ? PublisherKey : UniversePublisherKey;
+		if (const auto key = engine::assets::PublicKey::FromHex(publisher)) {
 			settings.Publisher = *key;
 		}
 		// **`AllowedHosts` is deliberately left empty here.** That check exists
@@ -82,6 +85,38 @@ namespace studio {
 		// into their own preferences. Restricting what somebody may point their
 		// own editor at would be security theatre with a real cost.
 		return settings;
+	}
+
+	void ContentSources::SetUniverseAssets(const std::filesystem::path &processed) {
+		SetUniverseContent(processed, {}, {});
+	}
+
+	void ContentSources::SetUniverseContent(
+		const std::filesystem::path &processed,
+		std::vector<engine::delivery::Source> remote,
+		std::string publisherKey
+	) {
+		UniverseSources.clear();
+		UniversePublisherKey = std::move(publisherKey);
+		if (processed.empty()) {
+			UniverseSources = std::move(remote);
+			return;
+		}
+		UniverseSources.push_back(
+			engine::delivery::Source{
+				.Name = "universe assets",
+				.Kind = engine::delivery::SourceKind::Directory,
+				.Location = processed.string(),
+				.Enabled = true,
+				.Role = engine::delivery::SourceRole::Read,
+				.IngestKey = {},
+			}
+		);
+		UniverseSources.insert(
+			UniverseSources.end(),
+			std::make_move_iterator(remote.begin()),
+			std::make_move_iterator(remote.end())
+		);
 	}
 
 	bool ContentSources::Save(const std::filesystem::path &path) const {

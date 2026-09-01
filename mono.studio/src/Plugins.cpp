@@ -9,6 +9,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <fstream>
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -219,6 +220,31 @@ namespace studio {
 		return std::nullopt;
 	}
 
+	const char *Describe(PluginRunTarget target) {
+		switch (target) {
+		case PluginRunTarget::Studio:
+			return "studio";
+		case PluginRunTarget::PlaytestServer:
+			return "playtest-server";
+		case PluginRunTarget::PlaytestClient:
+			return "playtest-client";
+		}
+		return "studio";
+	}
+
+	std::optional<PluginRunTarget> ParsePluginRunTarget(std::string_view text) {
+		if (text == "studio") {
+			return PluginRunTarget::Studio;
+		}
+		if (text == "playtest-server" || text == "server") {
+			return PluginRunTarget::PlaytestServer;
+		}
+		if (text == "playtest-client" || text == "client") {
+			return PluginRunTarget::PlaytestClient;
+		}
+		return std::nullopt;
+	}
+
 	float ClampPluginToolWidth(float width) {
 		if (!std::isfinite(width)) {
 			return 92.0f;
@@ -226,7 +252,7 @@ namespace studio {
 		return std::clamp(width, PLUGIN_TOOL_MINIMUM_WIDTH, PLUGIN_TOOL_MAXIMUM_WIDTH);
 	}
 
-	std::string PluginIdentity(const LoadedPlugin &plugin) {
+	std::string PluginIdentity(const PluginPresentation &plugin) {
 		if (!plugin.Manifest.Id.empty()) {
 			return plugin.Manifest.Id;
 		}
@@ -236,7 +262,27 @@ namespace studio {
 		return plugin.Manifest.Name;
 	}
 
-	std::string PluginToolbarKey(const LoadedPlugin &plugin, const PluginToolbar &toolbar, size_t index) {
+	std::string PluginWidgetLabel(const PluginPresentation &plugin, const PluginWidget &widget) {
+		return widget.Title + "###plugin." + PluginIdentity(plugin) + "." + widget.Id;
+	}
+
+	static void BlockCppOwnedPluginIdentities(
+		std::vector<LoadedPlugin> &scripts, const std::vector<CppPluginDefinition> &native
+	) {
+		for (LoadedPlugin &script : scripts) {
+			const auto duplicate = std::find_if(native.begin(), native.end(), [&](const auto &definition) {
+				return definition.Manifest.Id == PluginIdentity(script);
+			});
+			if (duplicate == native.end()) {
+				continue;
+			}
+			script.Error = "plugin id is already owned by C++ plugin '" + duplicate->Manifest.Name + "'";
+			script.DefinitionValid = false;
+		}
+	}
+
+	std::string
+	PluginToolbarKey(const PluginPresentation &plugin, const PluginToolbar &toolbar, size_t index) {
 		const std::string pluginId = PluginIdentity(plugin);
 		const std::string toolbarId = toolbar.Id.empty() ? std::to_string(index + 1) : toolbar.Id;
 		return std::to_string(pluginId.size()) + ":" + pluginId + std::to_string(toolbarId.size()) + ":" +
@@ -244,7 +290,7 @@ namespace studio {
 	}
 
 	std::string PluginToolKey(
-		const LoadedPlugin &plugin,
+		const PluginPresentation &plugin,
 		const PluginToolbar &toolbar,
 		size_t toolbarIndex,
 		const PluginButton &button,
@@ -302,6 +348,7 @@ namespace studio {
 		case BuiltinStudioTool::StatisticsPanel:
 		case BuiltinStudioTool::FrameGraphPanel:
 		case BuiltinStudioTool::HeapPanel:
+		case BuiltinStudioTool::DatasetEditorPanel:
 			return "panels";
 		case BuiltinStudioTool::PluginReload:
 		case BuiltinStudioTool::PluginManage:
@@ -317,8 +364,13 @@ namespace studio {
 		}
 	}
 
-	ToolbarLayoutView
-	ComposeToolbar(const std::vector<LoadedPlugin> &plugins, const ToolbarPreferences &preferences) {
+	static LoadedPlugin *ScriptOwner(PluginPresentation &plugin) {
+		return plugin.Native ? nullptr : static_cast<LoadedPlugin *>(&plugin);
+	}
+
+	static ToolbarLayoutView ComposeToolbarImpl(
+		const std::vector<const PluginPresentation *> &plugins, const ToolbarPreferences &preferences
+	) {
 		ToolbarLayoutView layout;
 		std::vector<bool> tabVisible;
 		std::vector<size_t> tabOrder;
@@ -336,7 +388,8 @@ namespace studio {
 				toolbarVisibility.insert_or_assign(preference.Id, preference.Visible);
 			}
 		}
-		for (const LoadedPlugin &plugin : plugins) {
+		for (const PluginPresentation *pluginPointer : plugins) {
+			const PluginPresentation &plugin = *pluginPointer;
 			if (!plugin.Running) {
 				continue;
 			}
@@ -413,7 +466,7 @@ namespace studio {
 		}
 
 		for (size_t pluginIndex = 0; pluginIndex < plugins.size(); pluginIndex++) {
-			const LoadedPlugin &plugin = plugins[pluginIndex];
+			const PluginPresentation &plugin = *plugins[pluginIndex];
 			if (!plugin.Running) {
 				continue;
 			}
@@ -575,6 +628,22 @@ namespace studio {
 		return layout;
 	}
 
+	ToolbarLayoutView
+	ComposeToolbar(const std::vector<LoadedPlugin> &plugins, const ToolbarPreferences &preferences) {
+		std::vector<const PluginPresentation *> views;
+		views.reserve(plugins.size());
+		for (const LoadedPlugin &plugin : plugins) {
+			views.push_back(&plugin);
+		}
+		return ComposeToolbarImpl(views, preferences);
+	}
+
+	ToolbarLayoutView
+	ComposeToolbar(const std::vector<PluginPresentation *> &plugins, const ToolbarPreferences &preferences) {
+		std::vector<const PluginPresentation *> views(plugins.begin(), plugins.end());
+		return ComposeToolbarImpl(views, preferences);
+	}
+
 	bool
 	LoadToolbarPreferences(const std::filesystem::path &path, ToolbarPreferences &out, std::string &error) {
 		std::string text;
@@ -701,151 +770,182 @@ namespace studio {
 		return WriteWhole(path, document.dump(2) + "\n", error);
 	}
 
-	LoadedPlugin MakeDefaultStudioPlugin() {
-		LoadedPlugin plugin;
-		plugin.Root = "@builtin/default-studio";
-		plugin.Manifest.Name = "Default Studio";
-		plugin.Manifest.Description = "The standard Studio toolbar and management surfaces.";
-		plugin.Manifest.Id = "atomic.default-studio";
-		plugin.Manifest.Version = "1";
-		plugin.Manifest.Author = "Atomic Game Engine";
-		plugin.Running = true;
-		plugin.Builtin = true;
+	CppPluginDefinition MakeDefaultStudioPlugin() {
+		CppPluginDefinition definition;
+		definition.Manifest.Name = "Default Studio";
+		definition.Manifest.Description = "The standard Studio toolbar and management surfaces.";
+		definition.Manifest.Id = "atomic.default-studio";
+		definition.Manifest.Version = "1";
+		definition.Manifest.Author = "Atomic Game Engine";
+		definition.Manifest.Runs = PluginTarget(PluginRunTarget::Studio);
+		definition.Open = [](CppPluginContext &context, std::string &error) {
+			if (context.Presentation == nullptr) {
+				error = "Default Studio has no presentation";
+				return false;
+			}
+			PluginPresentation &plugin = *context.Presentation;
+			plugin.Root = "@builtin/default-studio";
+			plugin.Builtin = true;
 
-		const auto addToolbar =
-			[&](std::string id, std::string name, PluginToolbarPlacement placement, auto controls) {
-				PluginToolbar toolbar;
-				toolbar.Name = std::move(name);
-				toolbar.Id = std::move(id);
-				toolbar.Placement = placement;
-				toolbar.Rows.push_back(PluginToolbarTrack{"row-1"});
-				for (const auto &[controlId, label, tool] : controls) {
-					PluginButton item;
-					item.Name = label;
-					item.Id = controlId;
-					item.Kind = PluginControlKind::Builtin;
-					item.Builtin = tool;
-					item.Width = PLUGIN_TOOL_MAXIMUM_WIDTH;
-					item.Row = "row-1";
-					item.Column = controlId;
-					toolbar.Columns.push_back(PluginToolbarTrack{controlId});
-					toolbar.Buttons.push_back(std::move(item));
+			const auto addToolbar =
+				[&](std::string id, std::string name, PluginToolbarPlacement placement, auto controls) {
+					PluginToolbar toolbar;
+					toolbar.Name = std::move(name);
+					toolbar.Id = std::move(id);
+					toolbar.Placement = placement;
+					toolbar.Rows.push_back(PluginToolbarTrack{"row-1"});
+					for (const auto &[controlId, label, tool] : controls) {
+						PluginButton item;
+						item.Name = label;
+						item.Id = controlId;
+						item.Kind = PluginControlKind::Builtin;
+						item.Builtin = tool;
+						item.Width = PLUGIN_TOOL_MAXIMUM_WIDTH;
+						item.Row = "row-1";
+						item.Column = controlId;
+						toolbar.Columns.push_back(PluginToolbarTrack{controlId});
+						toolbar.Buttons.push_back(std::move(item));
+					}
+					plugin.Toolbars.push_back(std::move(toolbar));
+				};
+
+			using Row = std::tuple<const char *, const char *, BuiltinStudioTool>;
+			addToolbar(
+				"transport",
+				"Transport",
+				PluginToolbarPlacement::Pinned,
+				std::initializer_list<Row>{
+					{"play", "Play", BuiltinStudioTool::Play},
+					{"play-here", "Play Here", BuiltinStudioTool::PlayHere},
+					{"run", "Run", BuiltinStudioTool::Run},
+					{"pause", "Pause", BuiltinStudioTool::Pause},
+					{"stop", "Stop", BuiltinStudioTool::Stop},
+					{"spawn-player", "Spawn Player", BuiltinStudioTool::SpawnPlayer},
+					{"remove-player", "Remove Player", BuiltinStudioTool::RemovePlayer},
+					{"player-count", "Player Count", BuiltinStudioTool::PlayerCount},
+					{"viewport-name", "Viewport Name", BuiltinStudioTool::ViewportName},
+					{"scene", "Scene", BuiltinStudioTool::SceneSelector},
+					{"world-state", "World State", BuiltinStudioTool::WorldState},
 				}
-				plugin.Toolbars.push_back(std::move(toolbar));
+			);
+			addToolbar(
+				"home",
+				"Home",
+				PluginToolbarPlacement::Tabbed,
+				std::initializer_list<Row>{
+					{"insert", "Insert Object", BuiltinStudioTool::InsertObject},
+					{"select", "Select", BuiltinStudioTool::SelectMode},
+					{"move", "Move", BuiltinStudioTool::MoveMode},
+					{"rotate", "Rotate", BuiltinStudioTool::RotateMode},
+					{"scale", "Scale", BuiltinStudioTool::ScaleMode},
+					{"snap-toggle", "Snap", BuiltinStudioTool::SnapToggle},
+					{"snap-distance", "Stud Amount", BuiltinStudioTool::SnapDistance},
+					{"snap-degrees", "Rotate Amount", BuiltinStudioTool::SnapDegrees},
+					{"scale-faces", "Faces", BuiltinStudioTool::ScaleFaces},
+					{"anchor", "Anchor", BuiltinStudioTool::Anchor},
+					{"lock", "Lock", BuiltinStudioTool::Lock},
+					{"align", "Align", BuiltinStudioTool::Align},
+					{"facing", "Facing", BuiltinStudioTool::Facing},
+				}
+			);
+			addToolbar(
+				"model",
+				"Model",
+				PluginToolbarPlacement::Tabbed,
+				std::initializer_list<Row>{
+					{"edit-pivot", "Edit Pivot", BuiltinStudioTool::EditPivot},
+					{"reset-pivot", "Reset Pivot", BuiltinStudioTool::ResetPivot},
+					{"pivot-notice", "Pivot Notice", BuiltinStudioTool::PivotNotice},
+					{"duplicate", "Duplicate", BuiltinStudioTool::Duplicate},
+					{"delete", "Delete", BuiltinStudioTool::Delete},
+					{"deselect", "Deselect", BuiltinStudioTool::Deselect},
+					{"undo", "Undo", BuiltinStudioTool::Undo},
+					{"redo", "Redo", BuiltinStudioTool::Redo},
+					{"selection-count", "Selection Count", BuiltinStudioTool::SelectionCount},
+				}
+			);
+			addToolbar(
+				"script",
+				"Script",
+				PluginToolbarPlacement::Tabbed,
+				std::initializer_list<Row>{
+					{"create-script", "Script", BuiltinStudioTool::CreateScript},
+					{"create-local-script", "LocalScript", BuiltinStudioTool::CreateLocalScript},
+					{"create-module-script", "ModuleScript", BuiltinStudioTool::CreateModuleScript},
+					{"destination", "Script Destination", BuiltinStudioTool::ScriptDestination},
+					{"script-editor", "Script Editor", BuiltinStudioTool::ScriptEditorPanel},
+					{"debugger", "Debugger", BuiltinStudioTool::DebuggerPanel},
+					{"command-bar", "Command Bar", BuiltinStudioTool::CommandBarPanel},
+				}
+			);
+			addToolbar(
+				"view",
+				"View",
+				PluginToolbarPlacement::Tabbed,
+				std::initializer_list<Row>{
+					{"grid", "Grid", BuiltinStudioTool::Grid},
+					{"particles", "Particles", BuiltinStudioTool::Particles},
+					{"indicator", "Direction Gizmo", BuiltinStudioTool::ViewportIndicator},
+					{"cursor", "3D Cursor", BuiltinStudioTool::Cursor3D},
+					{"orbit", "Orbit Around Cursor", BuiltinStudioTool::OrbitAroundCursor},
+					{"direction-lock", "Lock Direction", BuiltinStudioTool::DirectionLock},
+					{"explorer", "Explorer", BuiltinStudioTool::ExplorerPanel},
+					{"properties", "Properties", BuiltinStudioTool::PropertiesPanel},
+					{"output", "Output", BuiltinStudioTool::OutputPanel},
+					{"assets", "Assets", BuiltinStudioTool::AssetsPanel},
+					{"statistics", "Statistics", BuiltinStudioTool::StatisticsPanel},
+					{"frame-graph", "Frame Graph", BuiltinStudioTool::FrameGraphPanel},
+					{"heap", "Heap", BuiltinStudioTool::HeapPanel},
+					{"datasets", "DataStore", BuiltinStudioTool::DatasetEditorPanel},
+					{"camera", "Camera Speed", BuiltinStudioTool::CameraSpeed},
+				}
+			);
+			addToolbar(
+				"plugins",
+				"Plugins",
+				PluginToolbarPlacement::Tabbed,
+				std::initializer_list<Row>{
+					{"reload", "Reload", BuiltinStudioTool::PluginReload},
+					{"plugin-manage", "Manage", BuiltinStudioTool::PluginManage},
+					{"toolbar", "Toolbar", BuiltinStudioTool::ToolbarEditor},
+					{"dock-widgets", "Dock Widgets", BuiltinStudioTool::DockWidgetEditor},
+					{"status", "Plugin Status", BuiltinStudioTool::PluginStatus},
+				}
+			);
+			const auto addPanel = [&](std::string id,
+									  std::string title,
+									  BuiltinStudioPanel panel,
+									  PluginDock dock,
+									  bool open = true) {
+				PluginWidget widget;
+				widget.Id = std::move(id);
+				widget.Title = std::move(title);
+				widget.Open = open;
+				widget.SynchronizedOpen = open;
+				widget.BuiltinPanel = panel;
+				widget.Dock = dock;
+				plugin.Widgets.push_back(std::move(widget));
 			};
-
-		using Row = std::tuple<const char *, const char *, BuiltinStudioTool>;
-		addToolbar(
-			"transport",
-			"Transport",
-			PluginToolbarPlacement::Pinned,
-			std::initializer_list<Row>{
-				{"play", "Play", BuiltinStudioTool::Play},
-				{"play-here", "Play Here", BuiltinStudioTool::PlayHere},
-				{"run", "Run", BuiltinStudioTool::Run},
-				{"pause", "Pause", BuiltinStudioTool::Pause},
-				{"stop", "Stop", BuiltinStudioTool::Stop},
-				{"spawn-player", "Spawn Player", BuiltinStudioTool::SpawnPlayer},
-				{"remove-player", "Remove Player", BuiltinStudioTool::RemovePlayer},
-				{"player-count", "Player Count", BuiltinStudioTool::PlayerCount},
-				{"viewport-name", "Viewport Name", BuiltinStudioTool::ViewportName},
-				{"scene", "Scene", BuiltinStudioTool::SceneSelector},
-				{"world-state", "World State", BuiltinStudioTool::WorldState},
-			}
-		);
-		addToolbar(
-			"home",
-			"Home",
-			PluginToolbarPlacement::Tabbed,
-			std::initializer_list<Row>{
-				{"insert", "Insert Object", BuiltinStudioTool::InsertObject},
-				{"select", "Select", BuiltinStudioTool::SelectMode},
-				{"move", "Move", BuiltinStudioTool::MoveMode},
-				{"rotate", "Rotate", BuiltinStudioTool::RotateMode},
-				{"scale", "Scale", BuiltinStudioTool::ScaleMode},
-				{"snap-toggle", "Snap", BuiltinStudioTool::SnapToggle},
-				{"snap-distance", "Stud Amount", BuiltinStudioTool::SnapDistance},
-				{"snap-degrees", "Rotate Amount", BuiltinStudioTool::SnapDegrees},
-				{"scale-faces", "Faces", BuiltinStudioTool::ScaleFaces},
-				{"anchor", "Anchor", BuiltinStudioTool::Anchor},
-				{"lock", "Lock", BuiltinStudioTool::Lock},
-				{"align", "Align", BuiltinStudioTool::Align},
-				{"facing", "Facing", BuiltinStudioTool::Facing},
-			}
-		);
-		addToolbar(
-			"model",
-			"Model",
-			PluginToolbarPlacement::Tabbed,
-			std::initializer_list<Row>{
-				{"edit-pivot", "Edit Pivot", BuiltinStudioTool::EditPivot},
-				{"reset-pivot", "Reset Pivot", BuiltinStudioTool::ResetPivot},
-				{"pivot-notice", "Pivot Notice", BuiltinStudioTool::PivotNotice},
-				{"duplicate", "Duplicate", BuiltinStudioTool::Duplicate},
-				{"delete", "Delete", BuiltinStudioTool::Delete},
-				{"deselect", "Deselect", BuiltinStudioTool::Deselect},
-				{"undo", "Undo", BuiltinStudioTool::Undo},
-				{"redo", "Redo", BuiltinStudioTool::Redo},
-				{"selection-count", "Selection Count", BuiltinStudioTool::SelectionCount},
-			}
-		);
-		addToolbar(
-			"script",
-			"Script",
-			PluginToolbarPlacement::Tabbed,
-			std::initializer_list<Row>{
-				{"create-script", "Script", BuiltinStudioTool::CreateScript},
-				{"create-local-script", "LocalScript", BuiltinStudioTool::CreateLocalScript},
-				{"create-module-script", "ModuleScript", BuiltinStudioTool::CreateModuleScript},
-				{"destination", "Script Destination", BuiltinStudioTool::ScriptDestination},
-				{"script-editor", "Script Editor", BuiltinStudioTool::ScriptEditorPanel},
-				{"debugger", "Debugger", BuiltinStudioTool::DebuggerPanel},
-				{"command-bar", "Command Bar", BuiltinStudioTool::CommandBarPanel},
-			}
-		);
-		addToolbar(
-			"view",
-			"View",
-			PluginToolbarPlacement::Tabbed,
-			std::initializer_list<Row>{
-				{"grid", "Grid", BuiltinStudioTool::Grid},
-				{"particles", "Particles", BuiltinStudioTool::Particles},
-				{"indicator", "Direction Gizmo", BuiltinStudioTool::ViewportIndicator},
-				{"cursor", "3D Cursor", BuiltinStudioTool::Cursor3D},
-				{"orbit", "Orbit Around Cursor", BuiltinStudioTool::OrbitAroundCursor},
-				{"direction-lock", "Lock Direction", BuiltinStudioTool::DirectionLock},
-				{"explorer", "Explorer", BuiltinStudioTool::ExplorerPanel},
-				{"properties", "Properties", BuiltinStudioTool::PropertiesPanel},
-				{"output", "Output", BuiltinStudioTool::OutputPanel},
-				{"assets", "Assets", BuiltinStudioTool::AssetsPanel},
-				{"statistics", "Statistics", BuiltinStudioTool::StatisticsPanel},
-				{"frame-graph", "Frame Graph", BuiltinStudioTool::FrameGraphPanel},
-				{"heap", "Heap", BuiltinStudioTool::HeapPanel},
-				{"camera", "Camera Speed", BuiltinStudioTool::CameraSpeed},
-			}
-		);
-		addToolbar(
-			"plugins",
-			"Plugins",
-			PluginToolbarPlacement::Tabbed,
-			std::initializer_list<Row>{
-				{"reload", "Reload", BuiltinStudioTool::PluginReload},
-				{"plugin-manage", "Manage", BuiltinStudioTool::PluginManage},
-				{"toolbar", "Toolbar", BuiltinStudioTool::ToolbarEditor},
-				{"dock-widgets", "Dock Widgets", BuiltinStudioTool::DockWidgetEditor},
-				{"status", "Plugin Status", BuiltinStudioTool::PluginStatus},
-			}
-		);
-		addToolbar(
-			"demo",
-			"Demo",
-			PluginToolbarPlacement::Tabbed,
-			std::initializer_list<Row>{
-				{"nodes", "Demo Nodes", BuiltinStudioTool::DemoNodes},
-				{"description", "Demo Description", BuiltinStudioTool::DemoDescription},
-			}
-		);
-		return plugin;
+			addPanel("explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left);
+			addPanel("properties", "Properties", BuiltinStudioPanel::Properties, PluginDock::Right);
+			addPanel(
+				"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
+			);
+			addPanel("script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre);
+			addPanel(
+				"dataset-editor",
+				"Dataset Editor",
+				BuiltinStudioPanel::DatasetEditor,
+				PluginDock::Bottom,
+				false
+			);
+			addPanel(
+				"roblox-import", "Roblox Import", BuiltinStudioPanel::RobloxImport, PluginDock::Bottom, false
+			);
+			error.clear();
+			return true;
+		};
+		return definition;
 	}
 
 	bool RegisterSelectionComponent() {
@@ -871,6 +971,7 @@ namespace studio {
 			error = "not a JSON object";
 			return false;
 		}
+		out = PluginManifest{};
 
 		const auto name = document.find("name");
 		if (name == document.end() || !name->is_string() || name->get<std::string>().empty()) {
@@ -904,6 +1005,49 @@ namespace studio {
 		}
 		if (const auto found = document.find("author"); found != document.end() && found->is_string()) {
 			out.Author = found->get<std::string>();
+		}
+		if (const auto found = document.find("runs"); found != document.end()) {
+			PluginRunTargets targets = 0;
+			const auto addTarget = [&](const json &value) {
+				if (!value.is_string()) {
+					error = "'runs' entries have to be text";
+					return false;
+				}
+				const std::string text = value.get<std::string>();
+				if (text == "all") {
+					targets |= PluginTarget(PluginRunTarget::Studio) |
+							   PluginTarget(PluginRunTarget::PlaytestServer) |
+							   PluginTarget(PluginRunTarget::PlaytestClient);
+					return true;
+				}
+				const auto target = ParsePluginRunTarget(text);
+				if (!target.has_value()) {
+					error = "unknown plugin run target '" + text + "'";
+					return false;
+				}
+				targets |= PluginTarget(*target);
+				return true;
+			};
+
+			if (found->is_string()) {
+				if (!addTarget(*found)) {
+					return false;
+				}
+			} else if (found->is_array()) {
+				for (const json &value : *found) {
+					if (!addTarget(value)) {
+						return false;
+					}
+				}
+			} else {
+				error = "'runs' has to be text or an array of text";
+				return false;
+			}
+			if (targets == 0) {
+				error = "'runs' needs at least one target";
+				return false;
+			}
+			out.Runs = targets;
 		}
 
 		if (!StaysInside(out.Main)) {
@@ -989,7 +1133,10 @@ namespace studio {
 	static void StartPlugin(
 		LoadedPlugin &plugin,
 		engine::ecs::Store &store,
-		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface
+		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface,
+		PluginRunTarget target,
+		engine::world::WorldId world,
+		PluginBindingRegistry *bindings
 	) {
 		plugin.Vm.reset();
 		plugin.Surface.reset();
@@ -999,6 +1146,9 @@ namespace studio {
 		plugin.OnRedo = {};
 		plugin.OnRecordingStarted = {};
 		plugin.OnRecordingFinished = {};
+		plugin.Target = target;
+		plugin.World = world;
+		plugin.Bindings = bindings;
 
 		if (!plugin.DefinitionValid || !plugin.Error.empty()) {
 			return;
@@ -1007,9 +1157,8 @@ namespace studio {
 			plugin.Error = "switched off";
 			return;
 		}
-		if (plugin.Builtin) {
-			plugin.Running = true;
-			plugin.Error.clear();
+		if (!RunsIn(plugin.Manifest.Runs, target)) {
+			plugin.Error = std::string("does not run in ") + Describe(target);
 			return;
 		}
 		plugin.Toolbars.clear();
@@ -1028,13 +1177,14 @@ namespace studio {
 			return;
 		}
 
+		plugin.Language = LanguageOf(main);
 		engine::script::RuntimeLimits limits;
-		limits.Role.Server = false;
-		limits.Role.Client = false;
+		limits.Role.Server = target == PluginRunTarget::PlaytestServer;
+		limits.Role.Client = target == PluginRunTarget::PlaytestClient;
 		limits.Role.Studio = true;
 		limits.Origin = engine::script::ScriptOrigin::Plugin;
 
-		plugin.Vm = engine::script::MakeRuntime(store, LanguageOf(main), limits);
+		plugin.Vm = engine::script::MakeRuntime(store, plugin.Language, limits);
 		if (plugin.Vm == nullptr) {
 			plugin.Error = "could not start a runtime";
 			return;
@@ -1062,10 +1212,13 @@ namespace studio {
 	void StartPlugins(
 		std::vector<LoadedPlugin> &plugins,
 		engine::ecs::Store &store,
-		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface
+		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface,
+		PluginRunTarget target,
+		engine::world::WorldId world,
+		PluginBindingRegistry *bindings
 	) {
 		for (LoadedPlugin &plugin : plugins) {
-			StartPlugin(plugin, store, surface);
+			StartPlugin(plugin, store, surface, target, world, bindings);
 		}
 	}
 	size_t BeatPlugins(std::vector<LoadedPlugin> &plugins, float delta) {
@@ -1101,13 +1254,228 @@ namespace studio {
 		return beaten;
 	}
 
+	void StartCppPlugins(
+		std::vector<LoadedCppPlugin> &plugins,
+		const std::vector<CppPluginDefinition> &definitions,
+		engine::ecs::Store &store,
+		PluginBindingRegistry &bindings,
+		PluginRunTarget target,
+		engine::world::WorldId world,
+		Editor *owner
+	) {
+		StopCppPlugins(plugins);
+		plugins.reserve(definitions.size());
+
+		for (const CppPluginDefinition &definition : definitions) {
+			plugins.emplace_back();
+			LoadedCppPlugin &plugin = plugins.back();
+			plugin.Definition = definition;
+			plugin.Manifest = definition.Manifest;
+			plugin.Root = "@cpp/" + definition.Manifest.Id;
+			plugin.Native = true;
+			plugin.Context = CppPluginContext{owner, &store, world, target, &plugin, &plugin.Bindings};
+
+			if (!plugin.Manifest.Enabled) {
+				plugin.Error = "switched off";
+				continue;
+			}
+			if (!RunsIn(plugin.Manifest.Runs, target)) {
+				plugin.Error = std::string("does not run in ") + Describe(target);
+				continue;
+			}
+			if (!plugin.Definition.Open) {
+				plugin.Error = "native plugin has no open function";
+				plugin.DefinitionValid = false;
+				continue;
+			}
+
+			plugin.Bindings = bindings.OpenScope();
+			try {
+				if (!plugin.Definition.Open(plugin.Context, plugin.Error)) {
+					plugin.Bindings.Close();
+					continue;
+				}
+			} catch (const std::exception &failure) {
+				plugin.Error = failure.what();
+				plugin.Bindings.Close();
+				continue;
+			} catch (...) {
+				plugin.Error = "native plugin raised an unknown exception while opening";
+				plugin.Bindings.Close();
+				continue;
+			}
+
+			plugin.Running = true;
+			plugin.Error.clear();
+			ENGINE_INFO("C++ plugin '{}' started in {}", plugin.Manifest.Name, Describe(target));
+		}
+	}
+
+	static void CloseCppPlugin(LoadedCppPlugin &plugin) {
+		if (plugin.Running && plugin.Definition.Close) {
+			try {
+				plugin.Definition.Close(plugin.Context);
+			} catch (const std::exception &failure) {
+				ENGINE_ERROR("C++ plugin '{}' close failed: {}", plugin.Manifest.Name, failure.what());
+			} catch (...) {
+				ENGINE_ERROR("C++ plugin '{}' close failed with an unknown exception", plugin.Manifest.Name);
+			}
+		}
+		plugin.Running = false;
+		plugin.Bindings.Close();
+	}
+
+	size_t BeatCppPlugins(std::vector<LoadedCppPlugin> &plugins, float delta) {
+		size_t beaten = 0;
+		for (LoadedCppPlugin &plugin : plugins) {
+			if (!plugin.Running || !plugin.Definition.Heartbeat) {
+				continue;
+			}
+			beaten++;
+			bool ok = false;
+			try {
+				ok = plugin.Definition.Heartbeat(plugin.Context, delta, plugin.Error);
+			} catch (const std::exception &failure) {
+				plugin.Error = failure.what();
+			} catch (...) {
+				plugin.Error = "native plugin raised an unknown exception while beating";
+			}
+			if (ok) {
+				continue;
+			}
+			plugin.Faults++;
+			if (plugin.Faults >= PLUGIN_FAULT_LIMIT) {
+				ENGINE_ERROR(
+					"C++ plugin '{}' switched off after {} fault(s): {}",
+					plugin.Manifest.Name,
+					plugin.Faults,
+					plugin.Error
+				);
+				CloseCppPlugin(plugin);
+			}
+		}
+		return beaten;
+	}
+
+	void StopCppPlugins(std::vector<LoadedCppPlugin> &plugins) {
+		for (auto at = plugins.rbegin(); at != plugins.rend(); ++at) {
+			CloseCppPlugin(*at);
+		}
+		plugins.clear();
+	}
+
+	PluginRuntimeSet::~PluginRuntimeSet() {
+		Bindings.OnChanged({});
+		Scripts.clear();
+		StopCppPlugins(Cpp);
+	}
+
+	PluginRuntimeSet::PluginRuntimeSet(PluginRunTarget target, WorldId world)
+		: World(world), Target(target), Bindings(target) {}
+
 	// --- the editor's half ---------------------------------------------------
+
+	void Editor::StopPlaytestPlugins(WorldId world) {
+		for (auto at = PlaytestPluginSets.begin(); at != PlaytestPluginSets.end();) {
+			PluginRuntimeSet &set = **at;
+			if (set.World != world) {
+				at++;
+				continue;
+			}
+			set.Bindings.OnChanged({});
+			set.Scripts.clear();
+			StopCppPlugins(set.Cpp);
+			at = PlaytestPluginSets.erase(at);
+		}
+	}
+
+	void Editor::StopAllPlaytestPlugins() {
+		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
+			set->Bindings.OnChanged({});
+			set->Scripts.clear();
+			StopCppPlugins(set->Cpp);
+		}
+		PlaytestPluginSets.clear();
+	}
+
+	void Editor::StartPlaytestPlugins(WorldId world, PluginRunTarget target) {
+		if (Universe == nullptr || !world.IsValid() || target == PluginRunTarget::Studio) {
+			return;
+		}
+		StopPlaytestPlugins(world);
+
+		auto set = std::make_unique<PluginRuntimeSet>(target, world);
+
+		std::vector<CppPluginDefinition> native = RegisteredCppPlugins();
+		set->Scripts = DiscoverPlugins(PluginRoot());
+		BlockCppOwnedPluginIdentities(set->Scripts, native);
+		std::erase_if(native, [&](const CppPluginDefinition &definition) {
+			return !RunsIn(definition.Manifest.Runs, target);
+		});
+		for (CppPluginDefinition &definition : native) {
+			if (const auto found = PluginEnabled.find(definition.Manifest.Id); found != PluginEnabled.end()) {
+				definition.Manifest.Enabled = found->second;
+			}
+		}
+
+		std::erase_if(set->Scripts, [&](const LoadedPlugin &plugin) {
+			return !RunsIn(plugin.Manifest.Runs, target);
+		});
+		for (LoadedPlugin &plugin : set->Scripts) {
+			if (const auto found = PluginEnabled.find(PluginIdentity(plugin)); found != PluginEnabled.end()) {
+				plugin.Manifest.Enabled = found->second;
+			}
+		}
+
+		PluginRuntimeSet *runtimeSet = set.get();
+		Universe->Enter(world, [this, runtimeSet, &native, world, target](Store &store) {
+			StartCppPlugins(runtimeSet->Cpp, native, store, runtimeSet->Bindings, target, world, this);
+			StartPlugins(
+				runtimeSet->Scripts,
+				store,
+				[this](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin); },
+				target,
+				world,
+				&runtimeSet->Bindings
+			);
+		});
+
+		runtimeSet->Bindings.OnChanged([runtimeSet] {
+			for (LoadedPlugin &plugin : runtimeSet->Scripts) {
+				if (plugin.Vm != nullptr && plugin.Surface != nullptr) {
+					plugin.Vm->SetHost(plugin.Surface.get());
+				}
+			}
+		});
+		for (const LoadedCppPlugin &plugin : runtimeSet->Cpp) {
+			if (!plugin.Running && !plugin.Error.empty()) {
+				Say("C++ plugin '" + plugin.Manifest.Name + "' in " + Describe(target) + ": " + plugin.Error,
+					engine::core::LogLevel::Warning);
+			}
+		}
+		for (const LoadedPlugin &plugin : runtimeSet->Scripts) {
+			if (!plugin.Running && !plugin.Error.empty()) {
+				Say("plugin '" + plugin.Manifest.Name + "' in " + Describe(target) + ": " + plugin.Error,
+					engine::core::LogLevel::Warning);
+			}
+		}
+		PlaytestPluginSets.push_back(std::move(set));
+	}
 
 	void Editor::LoadPlugins() {
 		// Every plugin holds a `Store &`. Stopping them before the discovery
 		// replaces the list is what stops a runtime outliving the world it was
 		// started against.
+		std::vector<std::pair<WorldId, PluginRunTarget>> playtestContexts;
+		playtestContexts.reserve(PlaytestPluginSets.size());
+		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
+			playtestContexts.emplace_back(set->World, set->Target);
+		}
+		StopAllPlaytestPlugins();
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 		PublishedSelection.clear();
 		InvalidateToolbarLayout();
 		PluginReloader.Reset();
@@ -1131,23 +1499,14 @@ namespace studio {
 			}
 		}
 
-		LoadedPlugin defaultStudio = MakeDefaultStudioPlugin();
-		if (const auto found = PluginEnabled.find(PluginIdentity(defaultStudio));
-			found != PluginEnabled.end()) {
-			defaultStudio.Manifest.Enabled = found->second;
-			defaultStudio.Running = found->second;
-			defaultStudio.Error = found->second ? std::string{} : std::string("switched off");
-		}
-		Plugins.push_back(std::move(defaultStudio));
-
 		if (Universe == nullptr || !Active.IsValid()) {
 			return;
 		}
 
 		RegisterSelectionComponent();
-		std::vector<LoadedPlugin> discovered = DiscoverPlugins(PluginRoot());
-		for (LoadedPlugin &plugin : discovered) {
-			if (PluginIdentity(plugin) == PluginIdentity(Plugins.front())) {
+		ScriptPlugins = DiscoverPlugins(PluginRoot());
+		for (LoadedPlugin &plugin : ScriptPlugins) {
+			if (PluginIdentity(plugin) == "atomic.default-studio") {
 				plugin.Error = "plugin id is reserved by Default Studio";
 				plugin.DefinitionValid = false;
 			}
@@ -1157,25 +1516,68 @@ namespace studio {
 			PluginReloadRoots.push_back(
 				PluginReloadRoot{plugin.Root.lexically_normal().generic_string(), plugin.Root}
 			);
-			Plugins.push_back(std::move(plugin));
 		}
 
-		Universe->Enter(Active, [this](Store &store) {
-			StartPlugins(Plugins, store, [this](LoadedPlugin &plugin) {
-				return MakePluginSurface(*this, plugin);
-			});
+		std::vector<CppPluginDefinition> native;
+		native.push_back(MakeDefaultStudioPlugin());
+		std::vector<CppPluginDefinition> registered = RegisteredCppPlugins();
+		native.insert(native.end(), registered.begin(), registered.end());
+		BlockCppOwnedPluginIdentities(ScriptPlugins, native);
+		for (CppPluginDefinition &definition : native) {
+			if (const auto found = PluginEnabled.find(definition.Manifest.Id); found != PluginEnabled.end()) {
+				definition.Manifest.Enabled = found->second;
+			}
+		}
+
+		Universe->Enter(Active, [this, &native](Store &store) {
+			StartCppPlugins(
+				CppPlugins, native, store, StudioPluginBindings, PluginRunTarget::Studio, Active, this
+			);
+			StartPlugins(
+				ScriptPlugins,
+				store,
+				[this](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin); },
+				PluginRunTarget::Studio,
+				Active,
+				&StudioPluginBindings
+			);
 		});
 
+		Plugins.reserve(CppPlugins.size() + ScriptPlugins.size());
+		for (LoadedCppPlugin &plugin : CppPlugins) {
+			Plugins.push_back(&plugin);
+		}
+		for (LoadedPlugin &plugin : ScriptPlugins) {
+			Plugins.push_back(&plugin);
+		}
+		StudioPluginBindings.OnChanged([this] {
+			for (LoadedPlugin &plugin : ScriptPlugins) {
+				if (plugin.Vm != nullptr && plugin.Surface != nullptr) {
+					plugin.Vm->SetHost(plugin.Surface.get());
+				}
+			}
+			if (CommandHost.Vm != nullptr && CommandHost.Surface != nullptr) {
+				CommandHost.Vm->SetHost(CommandHost.Surface.get());
+			}
+		});
+		SeenCppPluginRegistryRevision = CppPluginRegistryRevision();
+		for (const auto &[world, target] : playtestContexts) {
+			StartPlaytestPlugins(world, target);
+		}
+
 		size_t running = 0;
-		for (const LoadedPlugin &plugin : Plugins) {
-			if (plugin.Running) {
+		for (const PluginPresentation *plugin : Plugins) {
+			if (plugin->Running) {
 				running++;
+				continue;
+			}
+			if (!RunsIn(plugin->Manifest.Runs, PluginRunTarget::Studio)) {
 				continue;
 			}
 			// Named on the way in rather than only in the panel, because the
 			// output pane is where somebody is already looking when a plugin
 			// they just installed does nothing.
-			Say("plugin '" + plugin.Manifest.Name + "': " + plugin.Error, engine::core::LogLevel::Warning);
+			Say("plugin '" + plugin->Manifest.Name + "': " + plugin->Error, engine::core::LogLevel::Warning);
 		}
 
 		Say("plugins: " + std::to_string(running) + " of " + std::to_string(Plugins.size()) + " running");
@@ -1245,6 +1647,10 @@ namespace studio {
 	void Editor::PumpPlugins(float delta) {
 		ENGINE_PROFILE_CAT("plugins", engine::core::ProfileCategory::Render);
 
+		if (SeenCppPluginRegistryRevision != CppPluginRegistryRevision()) {
+			LoadPlugins();
+			return;
+		}
 		if (Plugins.empty()) {
 			return;
 		}
@@ -1279,34 +1685,12 @@ namespace studio {
 					": " + issue.Error.message(),
 				engine::core::LogLevel::Warning);
 		}
-		if (reload.Action == PluginReloadAction::RescanPlugins) {
+		if (reload.Action != PluginReloadAction::None) {
+			// One source definition may have Studio, server, and several client
+			// instances. Rebuilding all contexts keeps those instances on the
+			// same source revision and closes their old bindings first.
 			LoadPlugins();
 			return;
-		}
-		if (reload.Action == PluginReloadAction::ReloadPlugins && Universe != nullptr && Active.IsValid()) {
-			Universe->Enter(Active, [&](Store &store) {
-				for (const std::string &identity : reload.PluginIds) {
-					const auto found =
-						std::find_if(Plugins.begin(), Plugins.end(), [&](const LoadedPlugin &plugin) {
-							return plugin.Root.lexically_normal().generic_string() == identity;
-						});
-					if (found == Plugins.end() || found->Builtin) {
-						continue;
-					}
-					if (!found->DefinitionValid) {
-						continue;
-					}
-					found->Error.clear();
-					StartPlugin(*found, store, [this](LoadedPlugin &plugin) {
-						return MakePluginSurface(*this, plugin);
-					});
-					if (!found->Running) {
-						Say("plugin '" + found->Manifest.Name + "': " + found->Error,
-							engine::core::LogLevel::Warning);
-					}
-				}
-			});
-			InvalidateToolbarLayout();
 		}
 
 		// **The selection first, so a plugin's heartbeat sees this frame's.** A
@@ -1314,16 +1698,18 @@ namespace studio {
 		// selected before the click that ran it.
 		PublishSelection();
 
-		const size_t runningBefore =
-			static_cast<size_t>(std::count_if(Plugins.begin(), Plugins.end(), [](const LoadedPlugin &plugin) {
-				return plugin.Running;
-			}));
-		const size_t beaten = BeatPlugins(Plugins, delta);
+		const size_t runningBefore = static_cast<size_t>(std::count_if(
+			Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) { return plugin->Running; }
+		));
+		size_t beaten = BeatPlugins(ScriptPlugins, delta) + BeatCppPlugins(CppPlugins, delta);
+		for (const std::unique_ptr<PluginRuntimeSet> &set : PlaytestPluginSets) {
+			beaten += BeatPlugins(set->Scripts, delta);
+			beaten += BeatCppPlugins(set->Cpp, delta);
+		}
 		(void)beaten;
-		const size_t runningAfter =
-			static_cast<size_t>(std::count_if(Plugins.begin(), Plugins.end(), [](const LoadedPlugin &plugin) {
-				return plugin.Running;
-			}));
+		const size_t runningAfter = static_cast<size_t>(std::count_if(
+			Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) { return plugin->Running; }
+		));
 		if (runningAfter != runningBefore) {
 			InvalidateToolbarLayout();
 		}
@@ -1372,7 +1758,8 @@ namespace studio {
 	}
 
 	void Editor::DrawPluginWidgets() {
-		for (LoadedPlugin &plugin : Plugins) {
+		for (PluginPresentation *pluginPointer : Plugins) {
+			PluginPresentation &plugin = *pluginPointer;
 			if (!plugin.Running) {
 				continue;
 			}
@@ -1380,6 +1767,40 @@ namespace studio {
 			const size_t widgetCount = plugin.Widgets.size();
 			for (size_t widgetIndex = 0; widgetIndex < widgetCount; widgetIndex++) {
 				PluginWidget &widget = plugin.Widgets[widgetIndex];
+				bool *builtinOpen = nullptr;
+				switch (widget.BuiltinPanel) {
+				case BuiltinStudioPanel::Explorer:
+					builtinOpen = &ShowExplorer;
+					break;
+				case BuiltinStudioPanel::Properties:
+					builtinOpen = &ShowProperties;
+					break;
+				case BuiltinStudioPanel::ComponentInspector:
+					builtinOpen = &ShowComponents;
+					break;
+				case BuiltinStudioPanel::ScriptEditor:
+					builtinOpen = &ShowScripts;
+					break;
+				case BuiltinStudioPanel::DatasetEditor:
+					builtinOpen = &ShowDatasets;
+					break;
+				case BuiltinStudioPanel::RobloxImport:
+					builtinOpen = &ShowRobloxImport;
+					break;
+				case BuiltinStudioPanel::None:
+					break;
+				}
+
+				if (builtinOpen != nullptr) {
+					// A changed widget value came from the plugin/menu side. Otherwise
+					// native actions such as Open Script and toolbar buttons win.
+					if (widget.Open != widget.SynchronizedOpen) {
+						*builtinOpen = widget.Open;
+					} else {
+						widget.Open = *builtinOpen;
+					}
+					widget.SynchronizedOpen = widget.Open;
+				}
 				if (!widget.Open) {
 					continue;
 				}
@@ -1388,8 +1809,7 @@ namespace studio {
 				// plugins may both call a panel "Settings", and ImGui keys a
 				// window on its whole label - so the id suffix keeps them apart
 				// without putting a prefix in front of what a person reads.
-				const std::string label =
-					widget.Title + "###plugin." + PluginIdentity(plugin) + "." + widget.Id;
+				const std::string label = PluginWidgetLabel(plugin, widget);
 
 				const ImVec2 minimum(
 					engine::ui::Scaled(std::max(1.0f, widget.MinimumWidth)),
@@ -1435,10 +1855,41 @@ namespace studio {
 				// which reads as a bug in the theme rather than as a widget that
 				// was coloured wrong. Same bracket the editor's own panels get
 				// from `Editor::Skinned`.
-				const engine::ui::ScopedColours skin(widget.Colours);
+				if (builtinOpen != nullptr) {
+					switch (widget.BuiltinPanel) {
+					case BuiltinStudioPanel::Explorer:
+						Skinned(widget.Title.c_str(), [&] { DrawExplorer(); });
+						break;
+					case BuiltinStudioPanel::Properties:
+						Skinned(widget.Title.c_str(), [&] { DrawProperties(); });
+						break;
+					case BuiltinStudioPanel::ComponentInspector:
+						Skinned(widget.Title.c_str(), [&] { DrawComponents(); });
+						break;
+					case BuiltinStudioPanel::ScriptEditor:
+						Skinned(widget.Title.c_str(), [&] { DrawScripts(); });
+						break;
+					case BuiltinStudioPanel::DatasetEditor:
+						Skinned(widget.Title.c_str(), [&] { DrawDatasets(); });
+						break;
+					case BuiltinStudioPanel::RobloxImport:
+						Skinned(widget.Title.c_str(), [&] { DrawRobloxImport(); });
+						break;
+					case BuiltinStudioPanel::None:
+						break;
+					}
+					widget.Open = *builtinOpen;
+					widget.SynchronizedOpen = widget.Open;
+					continue;
+				}
 
+				const engine::ui::ScopedColours skin(widget.Colours);
 				if (ImGui::Begin(label.c_str(), &widget.Open)) {
-					InvokePlugin(plugin, widget.Render, true);
+					if (widget.NativeRender) {
+						widget.NativeRender();
+					} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+						InvokePlugin(*script, widget.Render, true);
+					}
 				}
 				ImGui::End();
 			}
@@ -1505,6 +1956,7 @@ namespace studio {
 		case BuiltinStudioTool::StatisticsPanel:
 		case BuiltinStudioTool::FrameGraphPanel:
 		case BuiltinStudioTool::HeapPanel:
+		case BuiltinStudioTool::DatasetEditorPanel:
 			DrawViewTools();
 			break;
 		case BuiltinStudioTool::ViewportIndicator:
@@ -1622,7 +2074,7 @@ namespace studio {
 			if (location.Plugin >= Plugins.size()) {
 				return;
 			}
-			LoadedPlugin &plugin = Plugins[location.Plugin];
+			PluginPresentation &plugin = *Plugins[location.Plugin];
 			if (location.Toolbar >= plugin.Toolbars.size()) {
 				return;
 			}
@@ -1644,16 +2096,23 @@ namespace studio {
 							? ImGui::Selectable(label.c_str(), true, 0, ImVec2(location.Width, 0.0f))
 							: ImGui::Button(label.c_str(), ImVec2(location.Width, 0.0f));
 					if (pressed) {
-						InvokePlugin(plugin, button.OnClick, false);
+						if (button.NativeOnClick) {
+							button.NativeOnClick({});
+						} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+							InvokePlugin(*script, button.OnClick, false);
+						}
 					}
 				} else if (button.Kind == PluginControlKind::Toggle) {
 					const bool before = button.Active;
 					ImGui::Checkbox(label.c_str(), &button.Active);
 					if (before != button.Active) {
 						const engine::script::HostValue value = engine::script::HostValue::Of(button.Active);
-						InvokePlugin(
-							plugin, button.OnChanged, false, engine::script::HostArguments(&value, 1)
-						);
+						const engine::script::HostArguments arguments(&value, 1);
+						if (button.NativeOnChanged) {
+							button.NativeOnChanged(arguments);
+						} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+							InvokePlugin(*script, button.OnChanged, false, arguments);
+						}
 					}
 				} else if (button.Kind == PluginControlKind::Dropdown) {
 					ImGui::SetNextItemWidth(location.Width);
@@ -1672,9 +2131,12 @@ namespace studio {
 								engine::script::HostValue::Of(static_cast<double>(option + 1)),
 								engine::script::HostValue::Of(std::string_view(button.Options[option])),
 							};
-							InvokePlugin(
-								plugin, button.OnChanged, false, engine::script::HostArguments(arguments, 2)
-							);
+							const engine::script::HostArguments values(arguments, 2);
+							if (button.NativeOnChanged) {
+								button.NativeOnChanged(values);
+							} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+								InvokePlugin(*script, button.OnChanged, false, values);
+							}
 							break;
 						}
 						ImGui::EndCombo();
@@ -1843,7 +2305,7 @@ namespace studio {
 				LoadPlugins();
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Restarts every plugin against the active scene");
+				ImGui::SetTooltip("Restarts Studio and active playtest plugin instances");
 			}
 		}
 
@@ -1866,7 +2328,7 @@ namespace studio {
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::ToolbarEditor) {
 			if (ImGui::Button("Toolbar", ImVec2(84.0f, 0.0f))) {
-				ShowToolbarEditor = true;
+				ShowToolbarEditor = !ShowToolbarEditor;
 			}
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::DockWidgetEditor) {
@@ -1874,16 +2336,18 @@ namespace studio {
 				ImGui::SameLine();
 			}
 			if (ImGui::Button("Dock Widgets", ImVec2(104.0f, 0.0f))) {
-				ShowDockWidgetEditor = true;
+				ShowDockWidgetEditor = !ShowDockWidgetEditor;
 			}
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::PluginStatus) {
 			if (all) {
 				ImGui::SameLine();
 			}
-			const size_t running = static_cast<size_t>(std::count_if(
-				Plugins.begin(), Plugins.end(), [](const LoadedPlugin &plugin) { return plugin.Running; }
-			));
+			const size_t running = static_cast<size_t>(
+				std::count_if(Plugins.begin(), Plugins.end(), [](const PluginPresentation *plugin) {
+					return plugin->Running;
+				})
+			);
 			ImGui::TextDisabled("%zu of %zu running", running, Plugins.size());
 		}
 	}
@@ -1972,7 +2436,8 @@ namespace studio {
 		for (const ToolbarTabPreference &tab : ToolbarPrefs.Tabs) {
 			choices.push_back(TabChoice{tab.Id, tab.Name});
 		}
-		for (const LoadedPlugin &plugin : Plugins) {
+		for (const PluginPresentation *pluginPointer : Plugins) {
+			const PluginPresentation &plugin = *pluginPointer;
 			for (size_t toolbarIndex = 0; toolbarIndex < plugin.Toolbars.size(); toolbarIndex++) {
 				const PluginToolbar &toolbar = plugin.Toolbars[toolbarIndex];
 				const std::string id = PluginToolbarKey(plugin, toolbar, toolbarIndex);
@@ -1997,7 +2462,7 @@ namespace studio {
 			ImGui::TableHeadersRow();
 
 			for (size_t pluginIndex = 0; pluginIndex < Plugins.size(); pluginIndex++) {
-				LoadedPlugin &plugin = Plugins[pluginIndex];
+				PluginPresentation &plugin = *Plugins[pluginIndex];
 				for (size_t toolbarIndex = 0; toolbarIndex < plugin.Toolbars.size(); toolbarIndex++) {
 					PluginToolbar &toolbar = plugin.Toolbars[toolbarIndex];
 					const std::string defaultTab = PluginToolbarKey(plugin, toolbar, toolbarIndex);
@@ -2134,7 +2599,8 @@ namespace studio {
 		ImGui::Separator();
 
 		bool any = false;
-		for (LoadedPlugin &plugin : Plugins) {
+		for (PluginPresentation *pluginPointer : Plugins) {
+			PluginPresentation &plugin = *pluginPointer;
 			for (PluginWidget &widget : plugin.Widgets) {
 				any = true;
 				const std::string id =
@@ -2197,7 +2663,7 @@ namespace studio {
 			LoadPlugins();
 		}
 		ImGui::SameLine();
-		ImGui::TextDisabled("A reload restarts every plugin against the active scene.");
+		ImGui::TextDisabled("A reload restarts Studio and active playtest plugin instances.");
 
 		ImGui::Spacing();
 
@@ -2209,11 +2675,7 @@ namespace studio {
 
 		if (Plugins.empty()) {
 			ImGui::TextDisabled("nothing installed");
-			ImGui::TextWrapped(
-				"A plugin is a folder holding a plugin.json and a script. It runs "
-				"against the scene you are editing, with the same surface a game "
-				"script gets - including World, the ECS underneath."
-			);
+			ImGui::TextWrapped("No native definitions or script plugin folders are available.");
 			ImGui::End();
 			return;
 		}
@@ -2228,7 +2690,8 @@ namespace studio {
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
-			for (LoadedPlugin &plugin : Plugins) {
+			for (PluginPresentation *pluginPointer : Plugins) {
+				PluginPresentation &plugin = *pluginPointer;
 				ImGui::TableNextRow();
 
 				ImGui::TableNextColumn();
@@ -2254,11 +2717,27 @@ namespace studio {
 						plugin.Manifest.Author.empty() ? "" : plugin.Manifest.Author.c_str()
 					);
 				}
+				std::string targets;
+				for (const PluginRunTarget target : {
+						 PluginRunTarget::Studio,
+						 PluginRunTarget::PlaytestServer,
+						 PluginRunTarget::PlaytestClient,
+					 }) {
+					if (!RunsIn(plugin.Manifest.Runs, target)) {
+						continue;
+					}
+					if (!targets.empty()) {
+						targets += ", ";
+					}
+					targets += Describe(target);
+				}
+				ImGui::TextDisabled("%s | %s", plugin.Native ? "C++" : "script", targets.c_str());
 
 				ImGui::TableNextColumn();
 				if (plugin.Running) {
 					ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "running");
-				} else if (plugin.Faults > 0) {
+				} else if ((plugin.Native ? static_cast<LoadedCppPlugin &>(plugin).Faults
+										  : static_cast<LoadedPlugin &>(plugin).Faults) > 0) {
 					ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "faulted");
 				} else {
 					ImGui::TextDisabled("stopped");
@@ -2324,14 +2803,14 @@ namespace studio {
 
 		watcher.Undone = [this](std::string_view waypoint) {
 			const engine::script::HostValue name = engine::script::HostValue::Of(waypoint);
-			for (LoadedPlugin &plugin : Plugins) {
+			for (LoadedPlugin &plugin : ScriptPlugins) {
 				InvokePlugin(plugin, plugin.OnUndo, false, engine::script::HostArguments(&name, 1));
 			}
 		};
 
 		watcher.Redone = [this](std::string_view waypoint) {
 			const engine::script::HostValue name = engine::script::HostValue::Of(waypoint);
-			for (LoadedPlugin &plugin : Plugins) {
+			for (LoadedPlugin &plugin : ScriptPlugins) {
 				InvokePlugin(plugin, plugin.OnRedo, false, engine::script::HostArguments(&name, 1));
 			}
 		};
@@ -2342,7 +2821,7 @@ namespace studio {
 				engine::script::HostValue::Of(std::string_view(recording.Name)),
 				engine::script::HostValue::Of(std::string_view(recording.DisplayName)),
 			};
-			for (LoadedPlugin &plugin : Plugins) {
+			for (LoadedPlugin &plugin : ScriptPlugins) {
 				InvokePlugin(
 					plugin, plugin.OnRecordingStarted, false, engine::script::HostArguments(arguments, 2)
 				);
@@ -2359,7 +2838,7 @@ namespace studio {
 				engine::script::HostValue::Of(std::string_view(recording.Identifier)),
 				engine::script::HostValue::Of(std::string_view(Describe(operation))),
 			};
-			for (LoadedPlugin &plugin : Plugins) {
+			for (LoadedPlugin &plugin : ScriptPlugins) {
 				InvokePlugin(
 					plugin, plugin.OnRecordingFinished, false, engine::script::HostArguments(arguments, 4)
 				);

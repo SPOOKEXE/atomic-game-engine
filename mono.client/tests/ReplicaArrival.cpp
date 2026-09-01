@@ -337,7 +337,7 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
 							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
 							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
-							  name == "script.SourceCache";
+							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

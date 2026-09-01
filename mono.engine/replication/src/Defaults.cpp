@@ -263,7 +263,8 @@ namespace engine::replication {
 
 		// A client's own input and its own identity. Sending the server's copy
 		// would tell every client what some other machine is pressing.
-		if (component == "scene.InputState" || component == "scene.LocalPlayer") {
+		if (component == "scene.InputState" || component == "scene.ControllerState" ||
+			component == "scene.LocalPlayer") {
 			return true;
 		}
 
@@ -422,7 +423,8 @@ namespace engine::replication {
 		// client's next layout pass.
 		if (component == "gui.Canvas" || component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
 			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
-			component == "gui.PageMotion" || component == "gui.ScrollMotion") {
+			component == "gui.PageMotion" || component == "gui.ScrollMotion" ||
+			component == "gui.SettingsMenuExtensions") {
 			return true;
 		}
 

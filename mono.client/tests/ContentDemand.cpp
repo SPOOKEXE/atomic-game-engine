@@ -21,6 +21,7 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Materials.hpp>
@@ -117,6 +118,9 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	sound.SoundId = Name("theme.mp3");
 	store.Set(speaker, sound);
 
+	const Entity animation = store.Create();
+	store.Set(animation, engine::scene::AnimationClip{Name("walk.aanim"), {}});
+
 	std::vector<Name> wanted;
 	client::CollectWantedContent(store, wanted);
 
@@ -137,6 +141,7 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	CHECK(Holds(wanted, "model.amesh"));
 	CHECK(Holds(wanted, "oak.amat"));
 	CHECK(Holds(wanted, "theme.mp3"));
+	CHECK(Holds(wanted, "walk.aanim"));
 }
 
 TEST_CASE("a world names nothing it does not use", "[client][contentdemand]") {

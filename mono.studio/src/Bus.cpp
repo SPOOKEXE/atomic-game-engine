@@ -115,6 +115,13 @@ namespace studio {
 			static_cast<unsigned long long>(statistics.BusOperations),
 			static_cast<unsigned long long>(statistics.Deliveries)
 		);
+		if (totalPending == 0 && totalArrived == 0 && statistics.BusOperations == 0 &&
+			statistics.Deliveries == 0) {
+			ImGui::TextDisabled(
+				"No cross-world DataStore, MemoryStore, or Teleport traffic this barrier. "
+				"Jobs run inside a world and do not use this bus."
+			);
+		}
 		ImGui::Separator();
 
 		for (const WorldId world : Universe->Worlds()) {

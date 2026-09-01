@@ -184,6 +184,24 @@ if(MONO_BUILD_CLIENT)
 	# SDL declares its include directories PUBLIC and not SYSTEM, and 149
 	# first-party translation units carry them. mono_vendor_system above.
 	mono_vendor_system(SDL3-shared SDL3-static SDL3_Headers)
+
+	# SDL's Vulkan backend loads MoltenVK dynamically on Apple. The source is a
+	# pinned submodule and the matching upstream release artifact is fetched by
+	# `just setup` or CI with its published SHA-256 before configure.
+	if(APPLE)
+		set(MONO_MOLTENVK_ROOT
+			"${CMAKE_SOURCE_DIR}/.cache/vendor/moltenvk/1.4.2/MoltenVK"
+			CACHE PATH "Extracted MoltenVK 1.4.2 release root")
+		set(moltenvk_library
+			"${MONO_MOLTENVK_ROOT}/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib")
+		if(NOT EXISTS "${moltenvk_library}")
+			message(FATAL_ERROR
+				"MoltenVK 1.4.2 is missing. Run scripts/fetch-moltenvk.sh before configuring.")
+		endif()
+		add_library(MoltenVK-runtime SHARED IMPORTED GLOBAL)
+		add_library(MoltenVK::Runtime ALIAS MoltenVK-runtime)
+		set_target_properties(MoltenVK-runtime PROPERTIES IMPORTED_LOCATION "${moltenvk_library}")
+	endif()
 endif()
 
 # --- glm --------------------------------------------------------------------
@@ -203,6 +221,14 @@ add_subdirectory("${MONO_VENDOR}/spdlog" EXCLUDE_FROM_ALL)
 
 # The other of the two that reach all 504. mono_vendor_system above.
 mono_vendor_system(spdlog spdlog_header_only)
+
+# --- SQLite -----------------------------------------------------------------
+# SQLiteCpp carries the released SQLite amalgamation in-tree. Only its sqlite3
+# target is configured: the engine owns its adapter and needs no second C++ API
+# over the C boundary.
+set(SQLITE_OMIT_LOAD_EXTENSION ON CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/sqlitecpp/sqlite3" EXCLUDE_FROM_ALL)
+mono_vendor_system(sqlite3 SQLite::SQLite3)
 
 # --- Tracy ------------------------------------------------------------------
 # On-demand: the client collects nothing until a profiler attaches, so leaving
@@ -747,6 +773,58 @@ mono_vendor_system(libzstd_static)
 
 # Vendor:: to match the rest.
 add_library(Vendor::zstd ALIAS libzstd_static)
+
+# --- Roblox files -----------------------------------------------------------
+# The four Roblox place and model containers. The importer needs one complete
+# decoder rather than separate Studio and Rojo dialects, and this library's DOM
+# keeps every class, property and asset reference long enough for the Studio
+# port report to explain what the engine cannot yet map.
+#
+# Upstream has no release branch or tag. The submodule follows its only branch,
+# `main`, while the superproject pins the exact commit like every other vendor.
+# Its tests are valuable in its own repository but are not a second copy of this
+# repository's bake tests, and its CLI is not one of our shipped tools.
+if(NOT EXISTS "${MONO_VENDOR}/roblox-files/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/roblox-files is missing. Run `just setup`.")
+endif()
+
+set(RBXL_BUILD_CLI   OFF CACHE BOOL "" FORCE)
+set(RBXL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/roblox-files" EXCLUDE_FROM_ALL)
+
+# A vendor header cannot turn a first-party warning into a CI failure.
+mono_vendor_system(rbxl)
+add_library(Vendor::roblox_files ALIAS rbxl)
+
+# --- miniz ------------------------------------------------------------------
+# ZIP reading and writing for portable project packages. Upstream has no
+# release branch, so the superproject pins the 3.1.2 tag while `.gitmodules`
+# follows its only development branch.
+#
+# The upstream CMake file changes global output and verbosity settings and uses
+# generic BUILD_TESTS/BUILD_EXAMPLES cache names. Declare its four source files
+# here so those settings cannot leak into first-party targets. `MINIZ_NO_TIME`
+# makes every writer timestamp zero and removes local-time-zone drift from a
+# reproducible archive.
+if(NOT EXISTS "${MONO_VENDOR}/miniz/miniz_zip.c")
+	message(FATAL_ERROR "mono.vendor/miniz is missing. Run `just setup`.")
+endif()
+
+include(GenerateExportHeader)
+add_library(mono_miniz STATIC
+	"${MONO_VENDOR}/miniz/miniz.c"
+	"${MONO_VENDOR}/miniz/miniz_zip.c"
+	"${MONO_VENDOR}/miniz/miniz_tinfl.c"
+	"${MONO_VENDOR}/miniz/miniz_tdef.c")
+generate_export_header(mono_miniz
+	BASE_NAME miniz
+	EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/miniz_export.h")
+target_include_directories(mono_miniz PUBLIC
+	"${MONO_VENDOR}/miniz"
+	"${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(mono_miniz PUBLIC MINIZ_NO_TIME MINIZ_STATIC_DEFINE)
+mono_vendor_system(mono_miniz)
+add_library(Vendor::miniz ALIAS mono_miniz)
 
 # --- Luau -------------------------------------------------------------------
 # The script VM, vendored ahead of its consumer.

@@ -75,6 +75,33 @@ namespace {
 		event.type = focused ? SDL_EVENT_WINDOW_FOCUS_GAINED : SDL_EVENT_WINDOW_FOCUS_LOST;
 		return event;
 	}
+
+	SDL_Event ControllerAdded(uint32_t id, bool mapped) {
+		SDL_Event event{};
+		event.type = mapped ? SDL_EVENT_GAMEPAD_ADDED : SDL_EVENT_JOYSTICK_ADDED;
+		if (mapped)
+			event.gdevice.which = id;
+		else
+			event.jdevice.which = id;
+		return event;
+	}
+
+	SDL_Event GamepadButton(uint32_t id, uint8_t button, bool down) {
+		SDL_Event event{};
+		event.type = down ? SDL_EVENT_GAMEPAD_BUTTON_DOWN : SDL_EVENT_GAMEPAD_BUTTON_UP;
+		event.gbutton.which = id;
+		event.gbutton.button = button;
+		return event;
+	}
+
+	SDL_Event GamepadAxis(uint32_t id, uint8_t axis, int16_t value) {
+		SDL_Event event{};
+		event.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+		event.gaxis.which = id;
+		event.gaxis.axis = axis;
+		event.gaxis.value = value;
+		return event;
+	}
 }
 
 TEST_CASE("the keycode table round-trips every named key", "[input]") {
@@ -314,4 +341,57 @@ TEST_CASE("typed text arrives as UTF-8 and is a frame delta", "[input][translate
 	// other delta is dropped there: the frame did not finish delivering.
 	REQUIRE(translator.HandleEvent(WindowEvent(false)));
 	CHECK(translator.TypedText().empty());
+}
+
+TEST_CASE("gamepads occupy stable slots and normalize buttons and axes", "[input][gamepad]") {
+	Translator translator;
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ControllerAdded(42, true)));
+	REQUIRE(translator.HandleEvent(GamepadButton(42, SDL_GAMEPAD_BUTTON_SOUTH, true)));
+	REQUIRE(translator.HandleEvent(GamepadAxis(42, SDL_GAMEPAD_AXIS_LEFTX, 32767)));
+
+	const auto &slot = translator.Controllers().Slots[0];
+	CHECK(slot.Connected);
+	CHECK(slot.Mapped);
+	CHECK(slot.IsDown(engine::scene::ControllerButton::A));
+	CHECK(slot.WasPressed(engine::scene::ControllerButton::A));
+	CHECK(slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftX)] == 1.0f);
+	CHECK(translator.State().LastSource == InputSource::Gamepad1);
+
+	translator.BeginFrame();
+	CHECK_FALSE(translator.Controllers().Slots[0].WasPressed(engine::scene::ControllerButton::A));
+	CHECK(translator.Controllers().Slots[0].PressedButtons == 0);
+	REQUIRE(translator.HandleEvent(GamepadButton(42, SDL_GAMEPAD_BUTTON_SOUTH, false)));
+	CHECK(translator.Controllers().Slots[0].WasReleased(engine::scene::ControllerButton::A));
+
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(GamepadButton(42, SDL_GAMEPAD_BUTTON_SOUTH, true)));
+	REQUIRE(translator.HandleEvent(GamepadButton(42, SDL_GAMEPAD_BUTTON_SOUTH, false)));
+	CHECK_FALSE(translator.Controllers().Slots[0].IsDown(engine::scene::ControllerButton::A));
+	CHECK(
+		(translator.Controllers().Slots[0].PressedButtons &
+		 (1u << static_cast<uint8_t>(engine::scene::ControllerButton::A))) != 0
+	);
+}
+
+TEST_CASE("raw joysticks use their first standard controls and apply a deadzone", "[input][joystick]") {
+	Translator translator;
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ControllerAdded(7, false)));
+
+	SDL_Event axis{};
+	axis.type = SDL_EVENT_JOYSTICK_AXIS_MOTION;
+	axis.jaxis.which = 7;
+	axis.jaxis.axis = 0;
+	axis.jaxis.value = 1000;
+	CHECK_FALSE(translator.HandleEvent(axis));
+	CHECK(translator.Controllers().Slots[0].Axes[0] == 0.0f);
+	CHECK(translator.State().LastSource == InputSource::Keyboard);
+
+	SDL_Event button{};
+	button.type = SDL_EVENT_JOYSTICK_BUTTON_DOWN;
+	button.jbutton.which = 7;
+	button.jbutton.button = 0;
+	REQUIRE(translator.HandleEvent(button));
+	CHECK(translator.Controllers().Slots[0].IsDown(engine::scene::ControllerButton::A));
 }

@@ -40,6 +40,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/script/Datatypes.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Subtree.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -882,7 +883,7 @@ namespace engine::script {
 				// parent's - that is the whole difference between it and
 				// `ChildAdded`.
 				for (Entity above = change.To; above != ecs::NULL_ENTITY;
-					 above = bound.World->ParentOf(above)) {
+					 above = InstanceParentOf(*bound.World, above)) {
 					fire(SignalKind::DescendantAdded, above, change.Instance);
 				}
 			}
@@ -894,7 +895,7 @@ namespace engine::script {
 			const auto ancestry = [&](Entity subject) {
 				JSValue arguments[2] = {
 					MakeJsInstance(context, subject),
-					MakeJsInstance(context, bound.World->ParentOf(subject)),
+					MakeJsInstance(context, InstanceParentOf(*bound.World, subject)),
 				};
 				note(FireJsSignal(context, SignalKind::AncestryChanged, subject, 2, arguments));
 				JS_FreeValue(context, arguments[0]);
@@ -902,7 +903,7 @@ namespace engine::script {
 			};
 
 			ancestry(change.Instance);
-			bound.World->EachDescendant(change.Instance, ancestry);
+			EachDescendant(*bound.World, change.Instance, ancestry);
 		}
 
 		return firstError;
@@ -969,7 +970,7 @@ namespace engine::script {
 			// pump's rule and the reason the two halves are disjoint: a
 			// destroyed body already fired `CharacterRemoving` synchronously
 			// with the instance still readable.
-			if (!bound.World->Alive(change.Character)) {
+			if (!InstanceAlive(*bound.World, change.Character)) {
 				continue;
 			}
 
@@ -1011,7 +1012,7 @@ namespace engine::script {
 			// The Luau pump's reason, unchanged: a handler earlier in this loop
 			// may have destroyed what a later one is about, and a close button
 			// is the ordinary case rather than an edge one.
-			if (!bound.World->Alive(event.Instance)) {
+			if (!InstanceAlive(*bound.World, event.Instance)) {
 				continue;
 			}
 

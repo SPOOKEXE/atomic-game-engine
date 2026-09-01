@@ -2,6 +2,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 
 #include <array>
 #include <cstddef>
@@ -364,5 +365,9 @@ namespace engine::gui {
 		// clock.
 		ecs::Components::Register<PageMotion>("gui.PageMotion");
 		ecs::Components::Register<ScrollMotion>("gui.ScrollMotion");
+
+		// Local presentation policy authored by client scripts. The vector and
+		// process-local names deliberately have no file or wire form.
+		ecs::Components::Register<SettingsMenuExtensions>("gui.SettingsMenuExtensions", nullptr, nullptr);
 	}
 }

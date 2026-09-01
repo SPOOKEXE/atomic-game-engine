@@ -13,9 +13,11 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Skinning.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::graph {
@@ -36,6 +38,9 @@ namespace engine::render {
 	struct DrawList {
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+
+		// Joint transforms for those instances, flattened into one allocation.
+		std::vector<core::CFrame> JointFrames;
 	};
 
 	// Renderer settings that affect scene pixels without changing a draw row.
@@ -153,6 +158,18 @@ namespace engine::render {
 	//
 	// @param store The world being presented.
 	void CollectInstances(ecs::Store &store);
+
+	// Rebuilds the flat joint palette and assigns each skinned draw row its run.
+	// Useful to both the live-world and replicated collectors.
+	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList);
+
+	// Copies the palettes referenced by copied rows into their destination and
+	// rewrites every offset. An invalid source range becomes an unskinned row.
+	void RebaseSkinPalettes(
+		std::span<scene::DrawInstance> instances,
+		std::span<const core::CFrame> source,
+		std::vector<core::CFrame> &destination
+	);
 
 	// Collects a world's resident particle inputs into one frame snapshot.
 	//

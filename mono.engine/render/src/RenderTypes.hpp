@@ -199,6 +199,7 @@ namespace engine::render {
 		// x: studs between thin lines. y: cells to a heavy one. z: the
 		// studs at which it has faded out. w: overall strength.
 		glm::vec4 Params{};
+		glm::vec4 Offset{};
 
 		glm::vec4 Colour{};
 		glm::vec4 AxisX{};

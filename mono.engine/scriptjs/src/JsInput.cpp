@@ -155,34 +155,32 @@ namespace engine::script {
 			// this is copied from.
 			std::vector<ConnectionId> spent;
 
-			bound.Signals.Fire(
-				SignalKind::PropertyChanged, ecs::NULL_ENTITY, [&](const Connection &connection) {
-					if (connection.Property != signal) {
-						return;
-					}
-
-					JSValue result = JS_Call(
-						context,
-						Held(context, connection.Callback),
-						JS_UNDEFINED,
-						static_cast<int>(arguments.size()),
-						arguments.data()
-					);
-
-					// **Every connection runs even when one throws**, which is
-					// `FireJsSignal`'s rule and the reason it is stated there: a
-					// handler that threw once would otherwise silently stop
-					// everything registered after it.
-					if (JS_IsException(result) && firstError.empty()) {
-						firstError = ThrownBy(context, "an input listener failed");
-					}
-					JS_FreeValue(context, result);
-
-					if (connection.Once) {
-						spent.push_back(connection.Id);
-					}
+			bound.Signals.Fire(SignalKind::Input, ecs::NULL_ENTITY, [&](const Connection &connection) {
+				if (connection.Property != signal) {
+					return;
 				}
-			);
+
+				JSValue result = JS_Call(
+					context,
+					Held(context, connection.Callback),
+					JS_UNDEFINED,
+					static_cast<int>(arguments.size()),
+					arguments.data()
+				);
+
+				// **Every connection runs even when one throws**, which is
+				// `FireJsSignal`'s rule and the reason it is stated there: a
+				// handler that threw once would otherwise silently stop
+				// everything registered after it.
+				if (JS_IsException(result) && firstError.empty()) {
+					firstError = ThrownBy(context, "an input listener failed");
+				}
+				JS_FreeValue(context, result);
+
+				if (connection.Once) {
+					spent.push_back(connection.Id);
+				}
+			});
 
 			// After the fire and not inside it, so a `Once` handler that connects
 			// another one does not have the list compacted under the walk still
@@ -289,7 +287,12 @@ namespace engine::script {
 		// **Null is the ordinary case on a server**, not an error: a headless
 		// world ticks the same scripts and finds nothing pressed.
 		const InputState *input = bound.World->Resource<InputState>();
-		if (input == nullptr) {
+		const auto *controllers = bound.World->Resource<scene::ControllerState>();
+		if (input == nullptr && controllers == nullptr) {
+			return {};
+		}
+		if ((input == nullptr || !input->HasFrameEvents()) &&
+			(controllers == nullptr || !controllers->HasFrameEvents())) {
 			return {};
 		}
 
@@ -312,7 +315,11 @@ namespace engine::script {
 		const auto fireReport = [&](core::Name signal, const InputReport &report) {
 			JSValue arguments[2];
 			arguments[0] = MakeJsInputObject(context, report);
-			arguments[1] = JS_NewBool(context, IsPointerReport(report) ? pointerTaken : keyboardTaken);
+			arguments[1] = JS_NewBool(
+				context,
+				IsPointerReport(report) ? pointerTaken
+										: report.Source == scene::InputSource::Keyboard && keyboardTaken
+			);
 
 			note(FireInputSignal(context, signal, arguments));
 
@@ -326,15 +333,15 @@ namespace engine::script {
 		// lost, so this pump is also the one that reports them released - and a
 		// listener that hears "you lost focus" after "W came up" has to guess
 		// which of the two explains the other.
-		if (input->WasFocusGained()) {
+		if (input != nullptr && input->WasFocusGained()) {
 			note(FireInputSignal(context, core::Name("WindowFocused"), {}));
 		}
-		if (input->WasFocusLost()) {
+		if (input != nullptr && input->WasFocusLost()) {
 			note(FireInputSignal(context, core::Name("WindowFocusReleased"), {}));
 		}
 
 		// Before the edges, because it explains them - the Luau pump's order.
-		if (input->WasLastSourceChanged()) {
+		if (input != nullptr && input->WasLastSourceChanged()) {
 			JSValue member = MakeJsEnumItem(
 				context, core::Name("UserInputType"), core::Name(scene::Describe(input->LastSource))
 			);
@@ -347,7 +354,8 @@ namespace engine::script {
 		// every action a repeat-rate question. The same walk the Luau pump does,
 		// over the same `KeyCode` order, so two worlds scripted in the two
 		// languages see one sequence.
-		for (size_t index = 0; index < static_cast<size_t>(KeyCode::Count); index++) {
+		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(KeyCode::KeyboardCount);
+			 index++) {
 			const auto key = static_cast<KeyCode>(index);
 			const bool began = input->WasKeyPressed(key);
 			if (!began && !input->WasKeyReleased(key)) {
@@ -364,11 +372,66 @@ namespace engine::script {
 			fireReport(core::Name(began ? "InputBegan" : "InputEnded"), report);
 		}
 
+		if (controllers != nullptr) {
+			for (size_t slotIndex = 0; slotIndex < scene::MAX_CONTROLLERS; slotIndex++) {
+				const scene::ControllerSlot &slot = controllers->Slots[slotIndex];
+				if (slot.Connected != slot.PreviousConnected) {
+					JSValue gamepad = MakeJsEnumItem(
+						context,
+						core::Name("UserInputType"),
+						core::Name(
+							scene::Describe(
+								static_cast<scene::InputSource>(
+									static_cast<uint8_t>(scene::InputSource::Gamepad1) + slotIndex
+								)
+							)
+						)
+					);
+					note(FireInputSignal(
+						context,
+						core::Name(slot.Connected ? "GamepadConnected" : "GamepadDisconnected"),
+						std::span(&gamepad, 1)
+					));
+					JS_FreeValue(context, gamepad);
+				}
+				for (size_t buttonIndex = 0;
+					 buttonIndex < static_cast<size_t>(scene::ControllerButton::Count);
+					 buttonIndex++) {
+					const auto button = static_cast<scene::ControllerButton>(buttonIndex);
+					const bool began = slot.WasPressed(button);
+					if (!began && !slot.WasReleased(button)) continue;
+					const InputReport report = ControllerButtonReport(slotIndex, button, began);
+					note(RunBoundActions(context, report.Key, report));
+					fireReport(core::Name(began ? "InputBegan" : "InputEnded"), report);
+				}
+
+				for (const bool right : {false, true}) {
+					const size_t x = static_cast<size_t>(
+						right ? scene::ControllerAxis::RightX : scene::ControllerAxis::LeftX
+					);
+					const size_t y = static_cast<size_t>(
+						right ? scene::ControllerAxis::RightY : scene::ControllerAxis::LeftY
+					);
+					if (slot.Axes[x] == slot.PreviousAxes[x] && slot.Axes[y] == slot.PreviousAxes[y])
+						continue;
+					fireReport(core::Name("InputChanged"), ControllerStickReport(slotIndex, slot, right));
+				}
+
+				for (const scene::ControllerAxis axis :
+					 {scene::ControllerAxis::LeftTrigger, scene::ControllerAxis::RightTrigger}) {
+					const size_t index = static_cast<size_t>(axis);
+					if (slot.Axes[index] == slot.PreviousAxes[index]) continue;
+					fireReport(core::Name("InputChanged"), ControllerTriggerReport(slotIndex, slot, axis));
+				}
+			}
+		}
+
 		// **The buttons.** No bound actions here, for the reason
 		// `BoundAction::Keys` gives: the stack holds `scene::KeyCode` ordinals
 		// and binding a button would need the vector to say which of the two
 		// spaces each entry is in.
-		for (size_t index = 0; index < static_cast<size_t>(scene::MouseButton::Count); index++) {
+		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(scene::MouseButton::Count);
+			 index++) {
 			const auto button = static_cast<scene::MouseButton>(index);
 			const bool began = input->WasButtonPressed(button);
 			if (!began && !input->WasButtonReleased(button)) {
@@ -385,11 +448,11 @@ namespace engine::script {
 		// to a literal zero every frame, so a compare answers exactly the question
 		// - and an epsilon would swallow the one-pixel move a slow drag is made
 		// of.
-		if (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f) {
+		if (input != nullptr && (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f)) {
 			fireReport(core::Name("InputChanged"), MotionReport(*input));
 		}
 
-		if (input->WheelDelta != 0.0f) {
+		if (input != nullptr && input->WheelDelta != 0.0f) {
 			fireReport(core::Name("InputChanged"), WheelReport(*input));
 		}
 

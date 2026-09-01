@@ -1,3 +1,5 @@
+#include "ExternalEditor.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 
@@ -279,6 +281,47 @@ namespace studio {
 		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
 		ShowParticleEmitters = Flag(document, "showParticleEmitters", ShowParticleEmitters);
+		if (const auto dataStore = document.find("dataStore");
+			dataStore != document.end() && dataStore->is_object()) {
+			DataStoreEnabled = Flag(*dataStore, "enabled", DataStoreEnabled);
+			DataStoreRoot = Words(*dataStore, "root", DataStoreRoot);
+			if (const auto provider = engine::datastore::ProviderOf(
+					Words(*dataStore, "provider", engine::datastore::Describe(DataStoreProvider))
+				)) {
+				DataStoreProvider = *provider;
+			}
+			if (const auto backend = engine::datastore::BackendOf(
+					Words(*dataStore, "backend", engine::datastore::Describe(DataStoreBackend))
+				)) {
+				DataStoreBackend = *backend;
+			}
+			if (const auto environment = engine::world::SharedStoreEnvironmentOf(
+					Words(*dataStore, "environment", engine::world::Describe(DataStoreEnvironment))
+				)) {
+				DataStoreEnvironment = *environment;
+			}
+			DataStoreHttpEndpoint = Words(*dataStore, "httpEndpoint", DataStoreHttpEndpoint);
+			DataStoreHttpHost = Words(*dataStore, "httpHost", DataStoreHttpHost);
+			DataStoreHttpPrefix = Words(*dataStore, "httpPrefix", DataStoreHttpPrefix);
+			DataStoreHttpAuthorization = Words(*dataStore, "httpAuthorization", DataStoreHttpAuthorization);
+		}
+		if (const auto sourceEditor = document.find("scriptEditor");
+			sourceEditor != document.end() && sourceEditor->is_object()) {
+			if (const auto kind = ExternalEditorKindOf(
+					Words(*sourceEditor, "externalEditor", Describe(SourceEditor.Kind))
+				)) {
+				SourceEditor.Kind = *kind;
+			}
+			SourceEditor.Executable = Words(*sourceEditor, "executable", SourceEditor.Executable);
+			ScriptMinimap = Flag(*sourceEditor, "minimap", ScriptMinimap);
+			if (const auto background = sourceEditor->find("background");
+				background != sourceEditor->end() && background->is_string()) {
+				if (const std::optional<unsigned int> parsed =
+						engine::ui::ParseColourText(background->get<std::string>())) {
+					ScriptBackground = *parsed;
+				}
+			}
+		}
 		SnapEnabled = Flag(document, "snap", SnapEnabled);
 		SnapDistance = JsonNumber(document, "gridStep", SnapDistance);
 		SnapDegrees = JsonNumber(document, "rotationStep", SnapDegrees);
@@ -512,6 +555,24 @@ namespace studio {
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
 			{"showParticleEmitters", ShowParticleEmitters},
+			{"dataStore",
+			 json{
+				 {"enabled", DataStoreEnabled},
+				 {"provider", engine::datastore::Describe(DataStoreProvider)},
+				 {"backend", engine::datastore::Describe(DataStoreBackend)},
+				 {"root", DataStoreRoot},
+				 {"environment", engine::world::Describe(DataStoreEnvironment)},
+				 {"httpEndpoint", DataStoreHttpEndpoint},
+				 {"httpHost", DataStoreHttpHost},
+				 {"httpPrefix", DataStoreHttpPrefix},
+				 {"httpAuthorization", DataStoreHttpAuthorization},
+			 }},
+			{"scriptEditor",
+			 json{
+				 {"externalEditor", Describe(SourceEditor.Kind)},
+				 {"executable", SourceEditor.Executable},
+				 {"minimap", ScriptMinimap},
+			 }},
 			{"snap", SnapEnabled},
 			{"gridStep", SnapDistance},
 			{"rotationStep", SnapDegrees},
@@ -553,6 +614,9 @@ namespace studio {
 				 {"rendererUnfocused", RendererUnfocusedHz},
 			 }},
 		};
+		if (ScriptBackground.has_value()) {
+			document["scriptEditor"]["background"] = engine::ui::ColourText(*ScriptBackground);
+		}
 
 		if (DefaultWorldsChosen) {
 			document["defaultWorlds"] = DefaultWorlds;

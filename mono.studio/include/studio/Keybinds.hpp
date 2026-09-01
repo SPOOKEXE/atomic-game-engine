@@ -40,6 +40,8 @@ namespace studio {
 		Play,
 		RunServer,
 		Stop,
+		// Opens the client settings overlay while a viewport is playing.
+		ClientSettings,
 
 		Undo,
 		Redo,

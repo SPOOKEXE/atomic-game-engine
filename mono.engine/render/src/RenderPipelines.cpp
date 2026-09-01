@@ -276,7 +276,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::CreatePipelines() {
-		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 2);
+		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
 
 		// **Two samplers now: the shadow map and the surface.** The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
@@ -294,7 +294,7 @@ namespace engine::render {
 			3
 		);
 
-		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 2);
+		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
@@ -331,6 +331,8 @@ namespace engine::render {
 			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position)},
 			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Normal)},
 			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, TexCoord)},
+			{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_USHORT4, offsetof(Vertex, Joints)},
+			{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_USHORT4_NORM, offsetof(Vertex, Weights)},
 		};
 
 		SDL_GPUColorTargetDescription opaqueTarget{};
@@ -343,7 +345,7 @@ namespace engine::render {
 		opaque.vertex_input_state.vertex_buffer_descriptions = vertexBuffers;
 		opaque.vertex_input_state.num_vertex_buffers = 1;
 		opaque.vertex_input_state.vertex_attributes = attributes;
-		opaque.vertex_input_state.num_vertex_attributes = 3;
+		opaque.vertex_input_state.num_vertex_attributes = 5;
 		opaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 		opaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 		// The cube winds counter-clockwise when seen from outside.

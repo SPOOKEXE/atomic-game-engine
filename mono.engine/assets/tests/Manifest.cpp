@@ -257,6 +257,8 @@ TEST_CASE("an asset's kind survives a round trip", "[assets][manifest]") {
 	manifest.AddAsset("a.mesh", AssetKind::Mesh, {Chunk("a")});
 	manifest.AddAsset("b.png", AssetKind::Texture, {Chunk("b")});
 	manifest.AddAsset("c.wav", AssetKind::Audio, {Chunk("c")});
+	manifest.AddAsset("d.spv", AssetKind::Shader, {Chunk("d")});
+	manifest.AddAsset("e.aanim", AssetKind::Animation, {Chunk("e")});
 
 	// The bytes are held in a named local: a ByteReader is a view, so reading
 	// from a temporary would be reading freed memory.
@@ -269,6 +271,8 @@ TEST_CASE("an asset's kind survives a round trip", "[assets][manifest]") {
 	CHECK(parsed->Find("a.mesh")->Kind == AssetKind::Mesh);
 	CHECK(parsed->Find("b.png")->Kind == AssetKind::Texture);
 	CHECK(parsed->Find("c.wav")->Kind == AssetKind::Audio);
+	CHECK(parsed->Find("d.spv")->Kind == AssetKind::Shader);
+	CHECK(parsed->Find("e.aanim")->Kind == AssetKind::Animation);
 }
 
 TEST_CASE("assets can be selected by kind", "[assets][manifest]") {

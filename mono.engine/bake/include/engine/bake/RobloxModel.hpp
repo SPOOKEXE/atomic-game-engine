@@ -94,11 +94,14 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace engine::bake {
 
-	// Which of a `RobloxValue`'s fields carries the value.
+	// Which alternative a `RobloxValue` carries.
 	//
 	// @since v0.15
 	enum class RobloxValueKind : uint8_t {
@@ -146,10 +149,6 @@ namespace engine::bake {
 
 	// One property's value as the file spelled it.
 	//
-	// **A struct with every field rather than a variant**, which is
-	// `game::PropertyValue`'s argument and holds here for the same reason: this
-	// crosses once per property of an import and is never stored in bulk.
-	//
 	// **It is not `game::PropertyValue` and cannot be.** That type lives in
 	// `game`, which is above this module and links `ecs`, `scene` and `world`; an
 	// importer that named it would put half the engine underneath a foreign-format
@@ -158,48 +157,58 @@ namespace engine::bake {
 	// caller converts, keyed on the type its own class table declares rather than
 	// on what the file happened to store.
 	//
+	// A place can hold tens of millions of properties at once. Keeping only the
+	// active payload makes this row 40 bytes on the supported toolchains instead
+	// of carrying twelve mostly empty fields in every property.
+	//
 	// @since v0.15
-	struct RobloxValue {
-		// Which field below is meaningful.
-		RobloxValueKind Kind = RobloxValueKind::Bool;
+	class RobloxValue {
+	  public:
+		// The active alternative. Its order is pinned to `RobloxValueKind` below.
+		[[nodiscard]] RobloxValueKind Kind() const {
+			return static_cast<RobloxValueKind>(Payload.index());
+		}
 
-		// A `RobloxValueKind::Bool` value.
-		bool Bool = false;
+		// Replaces the active value with one of the supported types.
+		template <typename T> void Set(T value) {
+			Payload = std::move(value);
+		}
 
-		// A `RobloxValueKind::Integer` value.
-		int64_t Integer = 0;
+		// Reads the active value after the caller checked `Kind()`.
+		template <typename T> [[nodiscard]] const T &As() const {
+			return std::get<T>(Payload);
+		}
 
-		// A `RobloxValueKind::Number` value.
-		double Number = 0.0;
+	  private:
+		using Storage = std::variant<
+			bool,
+			int64_t,
+			double,
+			std::string,
+			core::Vector3,
+			core::Vector2,
+			core::Color3,
+			core::CFrame,
+			core::UDim,
+			core::UDim2,
+			core::Rect,
+			core::NumberRange>;
 
-		// A `RobloxValueKind::Text` value. Bytes as the file held them, which is
-		// UTF-8 for anything Studio wrote.
-		std::string Text;
+		static_assert(std::is_same_v<std::variant_alternative_t<0, Storage>, bool>);
+		static_assert(std::is_same_v<std::variant_alternative_t<1, Storage>, int64_t>);
+		static_assert(std::is_same_v<std::variant_alternative_t<2, Storage>, double>);
+		static_assert(std::is_same_v<std::variant_alternative_t<3, Storage>, std::string>);
+		static_assert(std::is_same_v<std::variant_alternative_t<4, Storage>, core::Vector3>);
+		static_assert(std::is_same_v<std::variant_alternative_t<5, Storage>, core::Vector2>);
+		static_assert(std::is_same_v<std::variant_alternative_t<6, Storage>, core::Color3>);
+		static_assert(std::is_same_v<std::variant_alternative_t<7, Storage>, core::CFrame>);
+		static_assert(std::is_same_v<std::variant_alternative_t<8, Storage>, core::UDim>);
+		static_assert(std::is_same_v<std::variant_alternative_t<9, Storage>, core::UDim2>);
+		static_assert(std::is_same_v<std::variant_alternative_t<10, Storage>, core::Rect>);
+		static_assert(std::is_same_v<std::variant_alternative_t<11, Storage>, core::NumberRange>);
+		static_assert(std::variant_size_v<Storage> == static_cast<size_t>(RobloxValueKind::NumberRange) + 1);
 
-		// A `RobloxValueKind::Vector3` value.
-		core::Vector3 Vector3;
-
-		// A `RobloxValueKind::Vector2` value.
-		core::Vector2 Vector2;
-
-		// A `RobloxValueKind::Color3` value, on 0..1 whichever type it arrived
-		// as.
-		core::Color3 Color3;
-
-		// A `RobloxValueKind::CFrame` value.
-		core::CFrame CFrame;
-
-		// A `RobloxValueKind::UDim` value.
-		core::UDim UDim;
-
-		// A `RobloxValueKind::UDim2` value.
-		core::UDim2 UDim2;
-
-		// A `RobloxValueKind::Rect` value.
-		core::Rect Rect;
-
-		// A `RobloxValueKind::NumberRange` value.
-		core::NumberRange NumberRange;
+		Storage Payload = false;
 	};
 
 	// One property, as the file named it.
@@ -242,6 +251,60 @@ namespace engine::bake {
 		std::vector<RobloxInstance> Children;
 	};
 
+	// The kind of external asset a Roblox property names.
+	//
+	// This is deliberately a suggestion rather than a promise. Roblox permits
+	// arbitrary content strings, and Studio lets the author correct `Unknown`
+	// references before an import mutates a world.
+	//
+	// @since v0.22
+	enum class RobloxAssetKind : uint8_t {
+		Unknown,
+		Animation,
+		Audio,
+		Font,
+		Mesh,
+		Texture,
+		Video,
+	};
+
+	// One external content reference and the property or script that used it.
+	//
+	// @since v0.22
+	struct RobloxAssetReference {
+		// Stable numeric id when the URI contains one, otherwise the URI itself.
+		std::string Identifier;
+
+		// The exact spelling found in the file.
+		std::string Uri;
+
+		RobloxAssetKind Kind = RobloxAssetKind::Unknown;
+		std::string InstancePath;
+		std::string ClassName;
+		std::string PropertyName;
+	};
+
+	// Source recovered from a Roblox script instance.
+	//
+	// @since v0.22
+	struct RobloxScript {
+		std::string InstancePath;
+		std::string ClassName;
+		std::string Source;
+	};
+
+	// A property the container decoder preserved but the engine-facing value
+	// vocabulary cannot represent yet.
+	//
+	// @since v0.22
+	struct RobloxLostProperty {
+		std::string InstancePath;
+		std::string ClassName;
+		std::string PropertyName;
+		std::string RobloxType;
+		std::string Reason;
+	};
+
 	// What a `.rbxm` held.
 	//
 	// @since v0.15
@@ -261,6 +324,12 @@ namespace engine::bake {
 		// three properties are not is still an import; the notes are how it says
 		// which three.
 		std::vector<std::string> Notes;
+
+		// Analysis collected while decoding. These rows are kept separate from
+		// `Notes` so Studio can filter and map them without parsing prose.
+		std::vector<RobloxAssetReference> Assets;
+		std::vector<RobloxScript> Scripts;
+		std::vector<RobloxLostProperty> LostProperties;
 	};
 
 	// The ceiling on how many instances one file may declare.
@@ -279,6 +348,20 @@ namespace engine::bake {
 	// It doubles as the cycle check - a parent chain longer than this is either
 	// too deep or a loop, and both answers are the same one.
 	constexpr uint32_t MAXIMUM_ROBLOX_DEPTH = 64;
+
+	// Reads any supported Roblox place or model container after sniffing it.
+	//
+	// This is the complete analyzer path used by Studio. It accepts `.rbxl`,
+	// `.rbxm`, `.rbxlx` and `.rbxmx` bytes, records scripts and external asset
+	// references, and reports every decoded property that cannot cross the
+	// engine-facing value boundary. Vendor types remain private to `bake`.
+	//
+	// @param bytes   The complete file contents.
+	// @param out     Filled on success, left alone on failure.
+	// @param failure Set to an actionable decoder failure. Untouched on success.
+	// @return `false` when the container is malformed or exceeds import bounds.
+	// @since v0.22
+	bool ReadRobloxFile(std::span<const std::byte> bytes, RobloxModel &out, std::string &failure);
 
 	// Reads a `.rbxm`, the binary container.
 	//

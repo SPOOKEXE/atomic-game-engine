@@ -19,11 +19,14 @@
 // extracting a free function to avoid testing something. This is that harness,
 // used for exactly that reason.
 
+#include "ScriptFieldWindow.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <string>
 #include <studio/Widgets.hpp>
 
@@ -31,6 +34,7 @@ TEST_SUITE_ID("studio.codefield")
 
 using studio::CodeEdit;
 using studio::CodeField;
+using studio::FindCodeField;
 
 namespace {
 
@@ -200,4 +204,28 @@ TEST_CASE("a field given no edit still grows its string", "[studio][codefield]")
 	ImGui::Render();
 
 	CHECK(text == "unchanged");
+}
+
+TEST_CASE("a code field child is found through its hierarchical id", "[studio][codefield]") {
+	const Context context;
+	std::string text = "local visible = true";
+	CodeEdit edit;
+
+	ImGui::NewFrame();
+	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
+	ImGuiID fieldId = 0;
+	if (ImGui::Begin("code", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+		ImGui::PushID(7);
+		fieldId = ImGui::GetID("##text");
+		CodeField("##text", text, &edit, 400.0f, 200.0f);
+		ImGui::PopID();
+	}
+	ImGui::End();
+	ImGui::Render();
+
+	ImGuiWindow *child = FindCodeField(fieldId);
+	REQUIRE(child != nullptr);
+	CHECK(child->ChildId == fieldId);
+	CHECK(std::string_view(child->Name) != "##text");
 }

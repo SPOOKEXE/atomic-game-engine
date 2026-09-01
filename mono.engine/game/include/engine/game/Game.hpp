@@ -4,10 +4,11 @@
 //
 // **A game is a universe and every world in it.** v0.7's roadmap line says the
 // save file for a game contains the universe plus all subworlds, and that
-// sentence is this module: `world::Universe` is the container, a world is a
-// scene, and the file carries the lot in one document. There is deliberately no
-// per-world file format that a game file is a list of - a game split across
-// files is a game somebody ships half of.
+// sentence is this module: `world::Universe` is the container and a world is a
+// scene. A compact `.agame` carries the lot in one document. An `.auniverse`
+// manifest keeps the same authored data while referring to standalone
+// `.aworld` documents, so a large project can review and merge its worlds
+// independently without inventing a second world schema.
 //
 // **Text, and specifically XML, for a reason that is not taste.**
 // `world::Universe::Save` already writes a binary snapshot and keeps working;
@@ -43,13 +44,47 @@
 #include <engine/world/Universe.hpp>
 #include <engine/world/World.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace engine::game {
+
+	// Coarse preparation stages reported while a world is built off-thread.
+	//
+	// @since v0.22
+	enum class WorldImportPhase : uint8_t {
+		// Reading bytes from the selected file.
+		Read,
+		// Decoding and validating the XML document.
+		Decode,
+		// Building the standalone ECS contents.
+		Build,
+		// Encoding transferable snapshot bytes.
+		Encode,
+		// Restoring the prepared bytes into the destination universe.
+		Commit,
+	};
+
+	// A world prepared away from its destination universe.
+	//
+	// Only settings and bytes cross the thread boundary. Committing creates the
+	// destination world on its owning thread and restores this snapshot into it.
+	//
+	// @since v0.22
+	struct PreparedWorldImport {
+		// Authored world settings decoded from the document.
+		world::WorldSettings Settings;
+		// Portable ECS snapshot built from the document.
+		std::vector<std::byte> Snapshot;
+	};
+
+	// Receives the current preparation phase and phase-local fraction.
+	using WorldImportProgress = std::function<void(WorldImportPhase, float)>;
 
 	// The format this build writes and accepts.
 	//
@@ -77,6 +112,9 @@ namespace engine::game {
 	// The extension a whole game takes.
 	inline constexpr std::string_view GAME_EXTENSION = ".agame";
 
+	// The extension a multi-file universe manifest takes.
+	inline constexpr std::string_view UNIVERSE_EXTENSION = ".auniverse";
+
 	// The extension one exported world takes.
 	//
 	// **A different extension from a whole game, because they are different
@@ -85,6 +123,53 @@ namespace engine::game {
 	// you nothing. The root element says which, so the reader refuses either
 	// mistake rather than half-reading it - the extension is the courtesy.
 	inline constexpr std::string_view WORLD_EXTENSION = ".aworld";
+
+	// One remote processed-content origin declared by a universe manifest.
+	// It is metadata only: callers decide whether network access is allowed.
+	//
+	// @since v0.21
+	struct UniverseCdn {
+		// User-facing source name.
+		std::string Name;
+
+		// Origin URL or location passed to the content adapter.
+		std::string Location;
+	};
+
+	// Local durable storage requested by a deployed universe.
+	//
+	// The folder is always relative to the manifest while writing and resolved
+	// beside it while loading. This keeps a package portable and prevents a
+	// downloaded manifest from selecting an arbitrary host path.
+	//
+	// @since v0.21
+	struct UniverseDataStore {
+		bool Enabled = false;
+		std::string Backend = "binary";
+		std::filesystem::path Root = "stores";
+	};
+
+	// Controls how a multi-file universe is written.
+	//
+	// @since v0.21
+	struct UniverseFileOptions {
+		// Whether loading the manifest also discovers unlisted `.aworld` files
+		// below its directory. Discovery never follows symbolic links.
+		bool RecursiveWorldDiscovery = false;
+
+		// The network capability and origins the exported universe requests.
+		// Loading the document never grants this capability by itself.
+		bool HttpEnabled = false;
+
+		// Public key expected to sign content manifests from these origins.
+		std::string PublisherKey;
+
+		// Remote processed-content origins declared by the manifest.
+		std::vector<UniverseCdn> Cdns;
+
+		// Local live DataStore configuration embedded in the export.
+		UniverseDataStore DataStore;
+	};
 
 	// What a game file says about itself, and the settings behind it.
 	//
@@ -108,6 +193,28 @@ namespace engine::game {
 		// here makes an export self-contained without duplicating the same node
 		// document into every world.
 		graph::PipelineSet RenderingProfiles;
+
+		// The manifest's local processed content store, resolved beside it.
+		// Empty for a monolithic `.agame` or a manifest that declares none.
+		std::filesystem::path Assets;
+
+		// Capabilities and remote content locations requested by a multi-file
+		// manifest. A product must ask before enabling them.
+		bool HttpEnabled = false;
+
+		// Whether unlisted worlds were requested for recursive discovery.
+		bool RecursiveWorldDiscovery = false;
+
+		// Public key expected to sign declared remote content.
+		std::string PublisherKey;
+
+		// Remote processed-content origins requested by the universe.
+		std::vector<UniverseCdn> Cdns;
+
+		// Local live DataStore configuration. Its root remains universe-relative;
+		// a host resolves it against the durable deployment location rather than
+		// against a temporary package extraction.
+		UniverseDataStore DataStore;
 	};
 
 	// Registers every class a document can name.
@@ -242,6 +349,19 @@ namespace engine::game {
 		world::Universe &universe, const std::filesystem::path &path, core::Name rename, std::string &error
 	);
 
+	// Reads, decodes, and builds a standalone world without touching a universe.
+	bool PrepareWorldImport(
+		const std::filesystem::path &path,
+		PreparedWorldImport &out,
+		std::string &error,
+		const WorldImportProgress &progress = {}
+	);
+
+	// Adds one prepared world to its destination universe on the owning thread.
+	world::WorldId CommitWorldImport(
+		world::Universe &universe, const PreparedWorldImport &prepared, core::Name rename, std::string &error
+	);
+
 	// Starts every script a world holds, and keeps them running.
 	//
 	// **The one place three programs agree about what "running a game" means.**
@@ -312,6 +432,44 @@ namespace engine::game {
 		std::string &error
 	);
 
+	// Writes a manifest and one standalone document per local authored world.
+	//
+	// World files are written below a sibling `worlds/` directory and named in
+	// the manifest. The manifest is written last, so a failed world write never
+	// publishes references to incomplete content.
+	//
+	// @param universe         The universe to write.
+	// @param name             The universe's authored name.
+	// @param renderingProfiles Its shared rendering profile library.
+	// @param path             The `.auniverse` manifest path.
+	// @param options          Discovery behavior recorded in the manifest.
+	// @param error            Filled in with why, on failure.
+	// @return `false` when any world or the manifest could not be written.
+	bool SaveUniverse(
+		world::Universe &universe,
+		core::Name name,
+		const graph::PipelineSet &renderingProfiles,
+		const std::filesystem::path &path,
+		const UniverseFileOptions &options,
+		std::string &error
+	);
+
+	// Replaces a universe from a multi-file manifest.
+	//
+	// Relative world references cannot leave the manifest directory. Recursive
+	// discovery is deterministic, bounded, and skips file and directory links.
+	//
+	// @param universe The universe to replace.
+	// @param path     The `.auniverse` manifest to read.
+	// @param out      Filled in with its name, settings, profiles, and worlds.
+	// @param error    Filled in with why, on failure.
+	// @return `false` when the manifest or any referenced world is invalid. A
+	//         manifest rejected before construction leaves the existing universe
+	//         untouched; failure after construction begins leaves it empty.
+	bool LoadUniverse(
+		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
+	);
+
 	// Adds a game file's worlds to a universe, keeping what is already there.
 	//
 	// **The merging counterpart to `LoadGame`, and the reason both exist.**
@@ -329,7 +487,7 @@ namespace engine::game {
 	// names a missing class would throw away work that loaded perfectly.
 	//
 	// @param universe The universe to add to.
-	// @param path     The `.agame` to read.
+	// @param path     The `.agame` or `.auniverse` to read.
 	// @param out      Filled in with what the file said, and the names the
 	//                 worlds were actually created under.
 	// @param error    Filled in with why, when fewer worlds arrived than the

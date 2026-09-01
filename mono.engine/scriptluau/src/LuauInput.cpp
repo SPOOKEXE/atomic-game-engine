@@ -56,6 +56,10 @@ namespace engine::script {
 			return ContextOf(state).World->Resource<InputState>();
 		}
 
+		const scene::ControllerState *ControllersOf(lua_State *state) {
+			return ContextOf(state).World->Resource<scene::ControllerState>();
+		}
+
 		// --- InputObject ------------------------------------------------------
 		//
 		// **What Roblox hands an input handler, and what this engine used to hand
@@ -187,28 +191,26 @@ namespace engine::script {
 			// copied from rather than invented beside.
 			std::vector<ConnectionId> spent;
 
-			live.Signals.Fire(
-				SignalKind::PropertyChanged, ecs::NULL_ENTITY, [&](const Connection &connection) {
-					if (connection.Property != signal) {
-						return;
-					}
-
-					lua_getref(state, connection.Callback);
-					const int arguments = push();
-
-					if (lua_pcall(state, arguments, 0, 0) != LUA_OK) {
-						if (firstError.empty()) {
-							const char *message = lua_tostring(state, -1);
-							firstError = message != nullptr ? message : "an input listener failed";
-						}
-						lua_pop(state, 1);
-					}
-
-					if (connection.Once) {
-						spent.push_back(connection.Id);
-					}
+			live.Signals.Fire(SignalKind::Input, ecs::NULL_ENTITY, [&](const Connection &connection) {
+				if (connection.Property != signal) {
+					return;
 				}
-			);
+
+				lua_getref(state, connection.Callback);
+				const int arguments = push();
+
+				if (lua_pcall(state, arguments, 0, 0) != LUA_OK) {
+					if (firstError.empty()) {
+						const char *message = lua_tostring(state, -1);
+						firstError = message != nullptr ? message : "an input listener failed";
+					}
+					lua_pop(state, 1);
+				}
+
+				if (connection.Once) {
+					spent.push_back(connection.Id);
+				}
+			});
 
 			// **After the fire and not inside it**, which is the reason the list
 			// exists at all: a `:Once` handler that connects another one would
@@ -298,10 +300,12 @@ namespace engine::script {
 
 	std::string PumpInput(lua_State *state, std::span<const gui::GuiEvent> interface) {
 		const InputState *input = StateOf(state);
-		if (input == nullptr) {
+		const scene::ControllerState *controllers = ControllersOf(state);
+		if (input == nullptr && controllers == nullptr) {
 			return {};
 		}
-		if (!input->HasFrameEvents()) {
+		if ((input == nullptr || !input->HasFrameEvents()) &&
+			(controllers == nullptr || !controllers->HasFrameEvents())) {
 			return {};
 		}
 
@@ -329,7 +333,11 @@ namespace engine::script {
 				// written `if not processed then` on a signal that passed nothing
 				// would too, which is exactly why the gap was invisible for six
 				// versions.
-				lua_pushboolean(state, IsPointerReport(report) ? pointerTaken : keyboardTaken);
+				lua_pushboolean(
+					state,
+					IsPointerReport(report) ? pointerTaken
+											: report.Source == scene::InputSource::Keyboard && keyboardTaken
+				);
 				return 2;
 			};
 		};
@@ -339,10 +347,10 @@ namespace engine::script {
 		// lost, so this pump is also the one that reports them released - and a
 		// listener that hears "you lost focus" after "W came up" has to guess
 		// which of the two explains the other.
-		if (input->WasFocusGained()) {
+		if (input != nullptr && input->WasFocusGained()) {
 			FireInputSignal(state, core::Name("WindowFocused"), pushNothing, firstError);
 		}
-		if (input->WasFocusLost()) {
+		if (input != nullptr && input->WasFocusLost()) {
 			FireInputSignal(state, core::Name("WindowFocusReleased"), pushNothing, firstError);
 		}
 
@@ -350,7 +358,7 @@ namespace engine::script {
 		// prompts on this signal should have swapped them before the handler for
 		// the press that changed the device runs, or the first press after a
 		// switch is read against the old scheme.
-		if (input->WasLastSourceChanged()) {
+		if (input != nullptr && input->WasLastSourceChanged()) {
 			const core::Name member(scene::Describe(input->LastSource));
 			FireInputSignal(
 				state,
@@ -367,7 +375,8 @@ namespace engine::script {
 		// means - `Enum.UserInputState.Begin` and `.End` are the two calls a
 		// handler gets, and a third every frame would make every action a
 		// repeat-rate question.
-		for (size_t index = 0; index < static_cast<size_t>(KeyCode::Count); index++) {
+		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(KeyCode::KeyboardCount);
+			 index++) {
 			const auto key = static_cast<KeyCode>(index);
 			const bool began = input->WasKeyPressed(key);
 			if (!began && !input->WasKeyReleased(key)) {
@@ -386,12 +395,69 @@ namespace engine::script {
 			);
 		}
 
+		if (controllers != nullptr) {
+			for (size_t slotIndex = 0; slotIndex < scene::MAX_CONTROLLERS; slotIndex++) {
+				const scene::ControllerSlot &slot = controllers->Slots[slotIndex];
+				if (slot.Connected != slot.PreviousConnected) {
+					const core::Name member(
+						scene::Describe(
+							static_cast<scene::InputSource>(
+								static_cast<uint8_t>(scene::InputSource::Gamepad1) + slotIndex
+							)
+						)
+					);
+					FireInputSignal(
+						state,
+						core::Name(slot.Connected ? "GamepadConnected" : "GamepadDisconnected"),
+						[state, member] {
+							PushEnumItem(state, core::Name("UserInputType"), member);
+							return 1;
+						},
+						firstError
+					);
+				}
+				for (size_t buttonIndex = 0;
+					 buttonIndex < static_cast<size_t>(scene::ControllerButton::Count);
+					 buttonIndex++) {
+					const auto button = static_cast<scene::ControllerButton>(buttonIndex);
+					const bool began = slot.WasPressed(button);
+					if (!began && !slot.WasReleased(button)) continue;
+					const InputReport report = ControllerButtonReport(slotIndex, button, began);
+					RunBoundActions(state, report.Key, report, firstError);
+					FireInputSignal(
+						state, core::Name(began ? "InputBegan" : "InputEnded"), pushReport(report), firstError
+					);
+				}
+
+				for (const bool right : {false, true}) {
+					const size_t x = static_cast<size_t>(
+						right ? scene::ControllerAxis::RightX : scene::ControllerAxis::LeftX
+					);
+					const size_t y = static_cast<size_t>(
+						right ? scene::ControllerAxis::RightY : scene::ControllerAxis::LeftY
+					);
+					if (slot.Axes[x] == slot.PreviousAxes[x] && slot.Axes[y] == slot.PreviousAxes[y])
+						continue;
+					const InputReport report = ControllerStickReport(slotIndex, slot, right);
+					FireInputSignal(state, core::Name("InputChanged"), pushReport(report), firstError);
+				}
+
+				for (const scene::ControllerAxis axis :
+					 {scene::ControllerAxis::LeftTrigger, scene::ControllerAxis::RightTrigger}) {
+					const size_t index = static_cast<size_t>(axis);
+					if (slot.Axes[index] == slot.PreviousAxes[index]) continue;
+					const InputReport report = ControllerTriggerReport(slotIndex, slot, axis);
+					FireInputSignal(state, core::Name("InputChanged"), pushReport(report), firstError);
+				}
+			}
+		}
+
 		// **The buttons, which fired nothing at all before v0.16.** `InputState`
 		// has carried `WasButtonPressed` since v0.10 and nothing in the script
 		// layer ever asked it, so a click was invisible to a script that was not
 		// polling - the one input this engine had that a Roblox place could not
 		// hear. No bound actions here, for the reason `RunBoundActions` gives.
-		for (size_t index = 0; index < static_cast<size_t>(MouseButton::Count); index++) {
+		for (size_t index = 0; input != nullptr && index < static_cast<size_t>(MouseButton::Count); index++) {
 			const auto button = static_cast<MouseButton>(index);
 			const bool began = input->WasButtonPressed(button);
 			if (!began && !input->WasButtonReleased(button)) {
@@ -415,12 +481,12 @@ namespace engine::script {
 		// zero every frame, so "did anything happen" is exactly the question a
 		// compare answers here - and an epsilon would swallow the one-pixel move
 		// that a slow drag is made of.
-		if (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f) {
+		if (input != nullptr && (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f)) {
 			const InputReport report = MotionReport(*input);
 			FireInputSignal(state, core::Name("InputChanged"), pushReport(report), firstError);
 		}
 
-		if (input->WheelDelta != 0.0f) {
+		if (input != nullptr && input->WheelDelta != 0.0f) {
 			const InputReport report = WheelReport(*input);
 			FireInputSignal(state, core::Name("InputChanged"), pushReport(report), firstError);
 		}

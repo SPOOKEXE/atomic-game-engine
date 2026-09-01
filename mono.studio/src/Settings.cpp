@@ -1,3 +1,5 @@
+#include "ExternalEditor.hpp"
+
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -316,6 +318,54 @@ namespace studio {
 			Say("interface scale is now " + std::to_string(Settings.Scale) +
 				"x - restart to rasterise the fonts at it");
 		}
+	}
+
+	void Editor::DrawScriptEditorSettings() {
+		ImGui::SeparatorText("Code field");
+
+		bool minimap = Prefs.ScriptMinimap;
+		if (ImGui::Checkbox("Show minimap", &minimap)) {
+			Prefs.ScriptMinimap = minimap;
+		}
+
+		const unsigned int inherited = ImGui::GetColorU32(ImGuiCol_FrameBg);
+		ImVec4 background = ImGui::ColorConvertU32ToFloat4(Prefs.ScriptBackground.value_or(inherited));
+		if (ImGui::ColorEdit4("Background", &background.x, ImGuiColorEditFlags_AlphaBar)) {
+			Prefs.ScriptBackground = ImGui::ColorConvertFloat4ToU32(background);
+		}
+		if (Prefs.ScriptBackground.has_value()) {
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Follow theme")) {
+				Prefs.ScriptBackground.reset();
+			}
+		}
+
+		ImGui::SeparatorText("External editor");
+		ImGui::TextDisabled("Open programs and ShaderScripts through a watched staging file.");
+
+		if (ImGui::BeginCombo("Editor", Describe(Prefs.SourceEditor.Kind))) {
+			for (size_t index = 0; index < EXTERNAL_EDITOR_KIND_COUNT; index++) {
+				const auto kind = static_cast<ExternalEditorKind>(index);
+				const bool selected = kind == Prefs.SourceEditor.Kind;
+				if (ImGui::Selectable(Describe(kind), selected)) {
+					Prefs.SourceEditor.Kind = kind;
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		ImGui::BeginDisabled(Prefs.SourceEditor.Kind == ExternalEditorKind::System);
+		TextField(
+			"Executable",
+			Prefs.SourceEditor.Executable,
+			Prefs.SourceEditor.Kind == ExternalEditorKind::VisualStudioCode ? "code (or an absolute path)"
+			: Prefs.SourceEditor.Kind == ExternalEditorKind::Notepad		? "notepad (or an absolute path)"
+																			: "absolute path or command"
+		);
+		ImGui::EndDisabled();
 	}
 
 	void Editor::DrawThemeColours() {
@@ -779,7 +829,9 @@ namespace studio {
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Reset to default")) {
+			std::vector<engine::delivery::Source> universeSources = std::move(Content.UniverseSources);
 			Content = ContentSources::Default();
+			Content.UniverseSources = std::move(universeSources);
 			changed = true;
 		}
 
@@ -875,6 +927,18 @@ namespace studio {
 			// in a field.
 			RebuildContentClients();
 		}
+	}
+
+	void Editor::DrawCdn() {
+		if (!ShowCdn) {
+			return;
+		}
+		if (!ImGui::Begin("CDN", &ShowCdn)) {
+			ImGui::End();
+			return;
+		}
+		DrawContentSettings();
+		ImGui::End();
 	}
 
 	void Editor::DrawComputeSettings() {
@@ -1092,8 +1156,8 @@ namespace studio {
 				ImGui::EndTabItem();
 			}
 
-			if (ImGui::BeginTabItem("Content")) {
-				DrawContentSettings();
+			if (ImGui::BeginTabItem("Script Editor")) {
+				DrawScriptEditorSettings();
 				ImGui::EndTabItem();
 			}
 

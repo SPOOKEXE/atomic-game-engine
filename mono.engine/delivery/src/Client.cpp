@@ -175,6 +175,10 @@ namespace engine::delivery {
 				return Known ? &*Known : nullptr;
 			}
 
+			const assets::SignatureBytes *CatalogueSignature() const override {
+				return Known ? &KnownSignature : nullptr;
+			}
+
 			RequestId Request(std::string_view name) override {
 				Pending pending;
 				pending.Name = std::string(name);
@@ -358,7 +362,7 @@ namespace engine::delivery {
 						assets::SignatureBytes signature;
 						std::optional<assets::Manifest> manifest = source.Store->ReadManifest(signature);
 						if (manifest && Accepts(*manifest, signature)) {
-							Adopt(std::move(*manifest), CatalogueCursor);
+							Adopt(std::move(*manifest), signature, CatalogueCursor);
 							return;
 						}
 						Passed(source, manifest.has_value());
@@ -402,7 +406,7 @@ namespace engine::delivery {
 						std::optional<assets::Manifest> manifest = ParseSigned(answer->Body, signature);
 						if (manifest && Accepts(*manifest, signature)) {
 							Tally.TransferredBytes += answer->Body.size();
-							Adopt(std::move(*manifest), CatalogueCursor);
+							Adopt(std::move(*manifest), signature, CatalogueCursor);
 							return;
 						}
 						Passed(source, manifest.has_value());
@@ -514,8 +518,9 @@ namespace engine::delivery {
 				}
 			}
 
-			void Adopt(assets::Manifest manifest, size_t index) {
+			void Adopt(assets::Manifest manifest, const assets::SignatureBytes &signature, size_t index) {
 				Known = std::move(manifest);
+				KnownSignature = signature;
 				CatalogueSource = index;
 				ENGINE_INFO(
 					"delivery: catalogue from '{}' - {} assets, {} bundles",
@@ -898,6 +903,7 @@ namespace engine::delivery {
 			std::vector<std::byte> Grant;
 
 			std::optional<assets::Manifest> Known;
+			assets::SignatureBytes KnownSignature;
 			std::optional<Dictionary> Codebook;
 			size_t CatalogueCursor = 0;
 			size_t CatalogueSource = 0;

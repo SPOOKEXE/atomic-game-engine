@@ -39,6 +39,7 @@ a module that exists is listed. Run `just docs-pages` after adding one;
 - @subpage md_mono_8engine_2resources_2AGENTS
 - @subpage md_mono_8engine_2scripthost_2AGENTS
 - @subpage md_mono_8engine_2audio_2AGENTS
+- @subpage md_mono_8engine_2datastore_2AGENTS
 - @subpage md_mono_8engine_2game_2AGENTS
 - @subpage md_mono_8engine_2input_2AGENTS
 - @subpage md_mono_8network_2AGENTS

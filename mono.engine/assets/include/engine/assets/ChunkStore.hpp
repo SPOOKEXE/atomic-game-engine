@@ -99,6 +99,18 @@ namespace engine::assets {
 		// @return Whether a file is there.
 		bool Contains(const ContentHash &hash) const;
 
+		// Splits and writes one verified manifest entry's complete asset bytes.
+		//
+		// The entry supplies the chunk boundaries and hashes. A mismatch refuses
+		// the asset; chunks written before a later mismatch are harmless because
+		// content-addressed chunks are unreachable until a manifest names them.
+		//
+		// @param asset The signed manifest entry describing the bytes.
+		// @param bytes The complete processed asset.
+		// @return Whether every described chunk is now stored.
+		// @since v0.21
+		bool WriteAsset(const AssetEntry &asset, std::span<const std::byte> bytes);
+
 		// Reassembles one asset from its chunks.
 		//
 		// The result is verified against the asset's root, so a caller gets

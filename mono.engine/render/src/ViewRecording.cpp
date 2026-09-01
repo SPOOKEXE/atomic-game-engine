@@ -1021,9 +1021,28 @@ namespace engine::render {
 		{
 			ENGINE_PROFILE_CAT("copy scene instances", core::ProfileCategory::Render);
 			State->SceneInstances.assign(instances.begin(), instances.end());
+			State->SceneJointFrames.assign(Request.JointFrames.begin(), Request.JointFrames.end());
 		}
 		ownCount = static_cast<uint32_t>(State->SceneInstances.size());
 		State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
+		const uint32_t foreignJointBase = static_cast<uint32_t>(State->SceneJointFrames.size());
+		State->SceneJointFrames.insert(
+			State->SceneJointFrames.end(),
+			Request.ForeignJointFrames.begin(),
+			Request.ForeignJointFrames.end()
+		);
+		for (uint32_t index = 0; index < State->SceneInstances.size(); index++) {
+			scene::DrawInstance &instance = State->SceneInstances[index];
+			const size_t available =
+				index < ownCount ? Request.JointFrames.size() : Request.ForeignJointFrames.size();
+			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+			if (instance.SkinCount == 0 || end > available) {
+				instance.SkinFirst = 0;
+				instance.SkinCount = 0;
+			} else if (index >= ownCount) {
+				instance.SkinFirst += foreignJointBase;
+			}
+		}
 
 		// **Every range the three scene passes submit, from one call.** The
 		// ordering, the mirror partition and the caster partition are arithmetic
@@ -1706,6 +1725,107 @@ namespace engine::render {
 			Result.InstanceRowsDirty = 0;
 			return;
 		}
+
+		target.SkinOffsets.assign(std::max<uint32_t>(residency.SlotCount(), 1), UINT32_MAX);
+		const auto assignSkin = [&](uint32_t drawSlot, const scene::DrawInstance &instance) {
+			const uint32_t residentSlot = target.InstanceIndices[drawSlot];
+			const MeshEntry *mesh = State->SlotMesh[drawSlot];
+			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+			if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && instance.SkinCount != 0 &&
+				mesh->JointCount == instance.SkinCount && end <= State->SceneJointFrames.size()) {
+				target.SkinOffsets[residentSlot] = instance.SkinFirst;
+			}
+		};
+		for (uint32_t drawSlot = 0; drawSlot < ownCount; drawSlot++) {
+			assignSkin(drawSlot, State->SceneInstances[State->SceneOrder[drawSlot]]);
+		}
+		for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
+			assignSkin(drawSlot, State->SceneInstances[drawSlot]);
+		}
+
+		target.JointWords.assign(std::max<size_t>(State->SceneJointFrames.size() * 5, 5), 0);
+		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
+			const core::CFrame &frame = State->SceneJointFrames[index];
+			const PackedRotation rotation = PackRotation(frame.Rotation());
+			const size_t word = index * 5;
+			target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
+			target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
+			target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
+			target.JointWords[word + 3] = rotation.Words[0];
+			target.JointWords[word + 4] = rotation.Words[1];
+		}
+
+		const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
+										  SDL_GPUTransferBuffer *&transfer,
+										  uint32_t &capacity,
+										  uint32_t words,
+										  const char *label) {
+			if (buffer != nullptr && transfer != nullptr && capacity >= words) {
+				return true;
+			}
+			uint32_t grown = capacity == 0 ? 256 : capacity;
+			while (grown < words) {
+				grown *= 2;
+			}
+			if (buffer != nullptr) {
+				gpu::ReleaseBuffer(State->Device, buffer);
+			}
+			if (transfer != nullptr) {
+				gpu::ReleaseTransferBuffer(State->Device, transfer);
+			}
+			SDL_GPUBufferCreateInfo bufferInfo{};
+			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			bufferInfo.size = grown * sizeof(uint32_t);
+			buffer = gpu::CreateBuffer(State->Device, &bufferInfo);
+			SDL_GPUTransferBufferCreateInfo transferInfo{};
+			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			transferInfo.size = bufferInfo.size;
+			transfer = gpu::CreateTransferBuffer(State->Device, &transferInfo);
+			if (buffer == nullptr || transfer == nullptr) {
+				ENGINE_ERROR("{} buffer of {} words: {}", label, grown, SDL_GetError());
+				capacity = 0;
+				return false;
+			}
+			capacity = grown;
+			return true;
+		};
+		if (!ensureSkinBuffer(
+				target.SkinOffsetBuffer,
+				target.SkinOffsetTransfer,
+				target.SkinOffsetCapacity,
+				static_cast<uint32_t>(target.SkinOffsets.size()),
+				"skin offset"
+			) ||
+			!ensureSkinBuffer(
+				target.JointBuffer,
+				target.JointTransfer,
+				target.JointWordCapacity,
+				static_cast<uint32_t>(target.JointWords.size()),
+				"joint palette"
+			)) {
+			return;
+		}
+
+		void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
+		void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
+		if (skinMapped == nullptr || jointMapped == nullptr) {
+			ENGINE_ERROR("skin palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+			if (skinMapped != nullptr) {
+				SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+			}
+			if (jointMapped != nullptr) {
+				SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+			}
+			return;
+		}
+		std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
+		std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
+		SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+		SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+		State->SkinOffsetBuffer = target.SkinOffsetBuffer;
+		State->SkinOffsetTransfer = target.SkinOffsetTransfer;
+		State->JointBuffer = target.JointBuffer;
+		State->JointTransfer = target.JointTransfer;
 
 		bool rowsReallocated = false;
 		bool indicesReallocated = false;

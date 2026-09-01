@@ -331,3 +331,24 @@
 	url = https://github.com/ngtcp2/ngtcp2.git
 	branch = main
 	shallow = true
+[submodule "mono.vendor/moltenvk"]
+	path = mono.vendor/moltenvk
+	url = https://github.com/KhronosGroup/MoltenVK.git
+	branch = main
+	shallow = true
+; miniz supplies the ZIP byte codec under the project-package policy in
+; Engine::game. Upstream publishes tags but no release branch, so this follows
+; its only development branch while the superproject pins the 3.1.2 tag.
+[submodule "mono.vendor/miniz"]
+	path = mono.vendor/miniz
+	url = https://github.com/richgel999/miniz.git
+	branch = master
+	shallow = true
+[submodule "mono.vendor/roblox-files"]
+	path = mono.vendor/roblox-files
+	url = https://github.com/SPOOKEXE/roblox-files.git
+	branch = main
+[submodule "mono.vendor/sqlitecpp"]
+	path = mono.vendor/sqlitecpp
+	url = https://github.com/SRombauts/SQLiteCpp.git
+	branch = sqlitecpp-3.x

@@ -847,6 +847,19 @@ function(mono_add_program name)
 			endif()
 		endif()
 	endif()
+
+	# A Vulkan presentation program on Apple needs the portability driver beside
+	# its executable. The renderer links the imported runtime only to declare
+	# that packaging edge; SDL opens it dynamically through its Vulkan loader.
+	if(APPLE AND TARGET MoltenVK::Runtime)
+		list(FIND all_deps MoltenVK::Runtime links_moltenvk)
+		if(links_moltenvk GREATER_EQUAL 0)
+			add_custom_command(TARGET ${target} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
+					"$<TARGET_FILE:MoltenVK::Runtime>" "${stage}"
+				VERBATIM)
+		endif()
+	endif()
 endfunction()
 
 # Walks MONO_DEPS breadth-first. Vendor targets have no such property, so the

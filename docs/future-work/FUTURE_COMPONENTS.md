@@ -30,11 +30,11 @@ to behaviour rather than a change to the save format.
 
 | Component | Wired by | Reads it | Writes it |
 |---|---|---|---|
-| `scene.Skeleton` | v0.24 | the skinning palette build in `render` | the publisher, out of `bake` |
-| `scene.Bone` | v0.24 | `scene::ResolveBones`, then the palette | the animation handler |
-| `scene.AnimationClip` | v0.24 | the animation handler | an author, or a `.rbxl` import |
-| `scene.Animator` | v0.24 | the animation handler | an author |
-| `scene.AnimationTrack` | v0.24 | the animation handler | a script, through `Instance.new` |
+| `scene.Skeleton` | v0.21 | the skinning palette build in `render` | an importer or author |
+| `scene.Bone` | v0.21 | `scene::ResolveBones`, then the palette | the animation handler |
+| `scene.AnimationClip` | v0.21 | the animation handler | an author, or a `.rbxl` import |
+| `scene.Animator` | v0.21 | the animation handler | an author |
+| `scene.AnimationTrack` | v0.21 | the animation handler | a script, through `Instance.new` |
 | `scene.Constraint` | after v0.24 | a constraint solver in `physics` | an author |
 | `scene.LevelOfDetail` | after v0.24 | `scene::SelectLevel`, from the draw-list build | the publisher, out of `bake` |
 | `scene.Atmosphere` | v0.22 | a render-graph node, through `scene::WorldLighting` | an author |
@@ -50,32 +50,27 @@ and the cloud layer into `WorldLighting` beside the fog terms. Each has a suite.
 
 ## The order, and why it is that order
 
-### 1. Skinning, at v0.24
+### 1. Skinning, completed at v0.21
 
-`bake` reads a glTF's `skins` array today only to learn that a node is skinned,
-so that it contributes the identity rather than its own transform
-(`bake/src/Gltf.cpp`, `Walk`). Everything else is parsed and dropped: the joint
-list, the inverse bind matrices, and the per-vertex `JOINTS_0` and `WEIGHTS_0`
-streams. The importer reads `POSITION`, `NORMAL` and `TEXCOORD_0` and nothing
-else.
+`bake` preserves glTF `JOINTS_0` and `WEIGHTS_0`, the mesh format carries a
+bounded skin-local palette size, and the renderer uploads resolved palettes
+beside its resident instance rows. Imported bone-tree authoring remains a
+separate model-import concern because the current bake graph exports one mesh
+payload rather than a scene tree.
 
-**`scene::Skeleton` and `scene::Bone` are where the rig half of that lands.**
-The per-vertex half is not a component and is not in this file's scope: it is
-two more arrays on `assets::MeshVertex`, which is a change to the `AMS1` mesh
-format and belongs to whoever writes the importer. That is the one piece of
-v0.24's storage this work deliberately did not declare, because guessing a
-vertex layout without the code that fills it is guessing.
+**`scene::Skeleton` and `scene::Bone` are where the rig half lands.** The
+per-vertex half is four joint indices and four quantised weights on
+`assets::MeshVertex`; mesh format version two carries them without widening the
+world-to-renderer instance payload.
 
 The order inside skinning is forced by what depends on what:
 
 1. `assets::MeshVertex` gains joint indices and weights; `Mesh::VERSION` is
    bumped. Save-format break, which `docs/RELEASING.md` says is allowed
    pre-release.
-2. `bake` fills them, and fills `Skeleton` and the `Bone` tree from the glTF
-   skin. The joints must be emitted so that every bone's `ParentJoint` is lower
-   than its `Joint`; a glTF `joints` array is not required to be sorted that way,
-   so the importer topologically sorts it. That constraint is what turns the
-   pose resolve into a forward pass instead of a recursive walk.
+2. `bake` fills the per-vertex streams. A future scene-tree importer must emit
+   bones so that every `ParentJoint` is lower than its `Joint`; a glTF `joints`
+   array is not required to be sorted that way.
 3. `render` builds a palette per rig from `SkinningFrameOf`, and skins in the
    vertex shader.
 4. The animation handler samples clips and writes `Bone::Transform`.
@@ -84,7 +79,7 @@ Steps 1 to 3 give a rig standing in its bind pose, which is a visible,
 testable result with no animation system in it at all. That ordering is the
 point of the split.
 
-### 2. The animation handler, at v0.24
+### 2. The animation handler, started at v0.21
 
 The roadmap's line is "character controller + humanoid + character states +
 state controller + bone controller, etc. More modular than roblox standard
@@ -97,20 +92,18 @@ in the store saves, replicates, is readable from a script and shows up in a
 debugger. The cost is that playing a clip is `Instance.new` rather than a method
 call, which is the trade `Sound.Playing` already makes.
 
-What the handler has to do, and what it needs that is not here yet:
+The current handler covers the content-to-pose path:
 
-- **Sample a clip.** Clip data - channels, keyframes, interpolation - is content
-  and belongs in `assets`, beside `MeshData`. `AnimationClip::Asset` names it,
-  exactly as `Visual::Mesh` names a mesh.
+- **Sample a clip.** `.aanim` channels and keyframes live in `assets`, beside
+  `MeshData`. `AnimationClip::Asset` names one exactly as `Visual::Mesh` names a
+  mesh, and demand loading fetches only clips a world names.
 - **Blend by priority and weight.** `AnimationTrack` carries both. Nothing about
   the blend needs new storage.
-- **Advance the play head.** `AnimationTrack::TimePosition` is advanced by
-  whoever owns the row. The authority owns it exactly as it owns
-  `scene.Transform`, and a client predicting its own play head predicts the same
-  field. Either decision needs no new storage, which is why this file does not
-  make it.
-- **Root motion.** `Animator::RootMotion` and `RootMotionWeight` say what to do;
-  where the motion goes is `Transform` on the rig, which exists.
+- **Advance the play head.** `AnimationTrack::TimePosition` and fades advance on
+  the fixed simulation tick; presentation samples that stored position.
+- **Root motion remains controller work.** `Animator::RootMotion` and
+  `RootMotionWeight` say what to do; applying sampled root deltas to a body stays
+  with the character-controller integration rather than the presentation pass.
 
 **`Humanoid` is not touched and must not be.** A component agent deleted
 `Humanoid::Radius` at v0.19 for having two writers and no reader, and kept

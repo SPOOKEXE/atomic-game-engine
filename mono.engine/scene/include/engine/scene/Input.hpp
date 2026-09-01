@@ -116,6 +116,30 @@ namespace engine::scene {
 		F11,
 		F12,
 
+		// The keyboard bitset ends here. Controller buttons live in
+		// `ControllerState`, so adding them does not move `InputState`'s saved
+		// layout.
+		KeyboardCount,
+
+		ButtonA = KeyboardCount,
+		ButtonB,
+		ButtonX,
+		ButtonY,
+		ButtonL1,
+		ButtonR1,
+		ButtonL2,
+		ButtonR2,
+		ButtonL3,
+		ButtonR3,
+		ButtonStart,
+		ButtonSelect,
+		DPadUp,
+		DPadDown,
+		DPadLeft,
+		DPadRight,
+		Thumbstick1,
+		Thumbstick2,
+
 		// Not a key. The count, for the bitset below.
 		Count,
 	};
@@ -145,7 +169,7 @@ namespace engine::scene {
 	// have to come first and keep their numbers. The `static_assert`s in
 	// `Input.cpp` are what hold that rather than a comment.
 	//
-	// The three that are not buttons exist because an `InputObject` has to be able
+	// The sources that are not mouse buttons exist because an `InputObject` has to be able
 	// to say where an event came from, and `MouseButton1..3` can only describe a
 	// click - a key press, a pointer move and a wheel notch had no spelling at
 	// all. Roblox's `Enum.UserInputType` is longer than this; every member absent
@@ -161,6 +185,14 @@ namespace engine::scene {
 		Keyboard = 3,
 		MouseMovement = 4,
 		MouseWheel = 5,
+		Gamepad1 = 6,
+		Gamepad2,
+		Gamepad3,
+		Gamepad4,
+		Gamepad5,
+		Gamepad6,
+		Gamepad7,
+		Gamepad8,
 
 		// Not a source. The count.
 		Count,
@@ -193,7 +225,7 @@ namespace engine::scene {
 	// @since v0.10
 	struct KeyBits {
 		// One bit per `KeyCode`, in ordinal order.
-		uint64_t Words[(static_cast<size_t>(KeyCode::Count) + 63) / 64] = {};
+		uint64_t Words[(static_cast<size_t>(KeyCode::KeyboardCount) + 63) / 64] = {};
 
 		// Whether a key's bit is set.
 		//
@@ -201,7 +233,7 @@ namespace engine::scene {
 		// @return `true` when it is down.
 		bool Has(KeyCode key) const {
 			const auto index = static_cast<size_t>(key);
-			return index < static_cast<size_t>(KeyCode::Count) &&
+			return index < static_cast<size_t>(KeyCode::KeyboardCount) &&
 				   (Words[index / 64] & (1ull << (index % 64))) != 0;
 		}
 
@@ -211,7 +243,7 @@ namespace engine::scene {
 		// @param down Whether it is down.
 		void Set(KeyCode key, bool down) {
 			const auto index = static_cast<size_t>(key);
-			if (index >= static_cast<size_t>(KeyCode::Count)) {
+			if (index >= static_cast<size_t>(KeyCode::KeyboardCount)) {
 				return;
 			}
 			const uint64_t bit = 1ull << (index % 64);
@@ -234,6 +266,145 @@ namespace engine::scene {
 			return false;
 		}
 	};
+
+	// The stable controller slots exposed as `Gamepad1` through `Gamepad8`.
+	//
+	// @since v0.21
+	inline constexpr size_t MAX_CONTROLLERS = 8;
+
+	// A standardized gamepad button, or the corresponding raw joystick button.
+	//
+	// @since v0.21
+	enum class ControllerButton : uint8_t {
+		A,
+		B,
+		X,
+		Y,
+		LeftShoulder,
+		RightShoulder,
+		LeftTrigger,
+		RightTrigger,
+		LeftStick,
+		RightStick,
+		Start,
+		Select,
+		DPadUp,
+		DPadDown,
+		DPadLeft,
+		DPadRight,
+		Count,
+	};
+
+	// A standardized gamepad axis, normalized to a float by the input adapter.
+	//
+	// @since v0.21
+	enum class ControllerAxis : uint8_t {
+		LeftX,
+		LeftY,
+		RightX,
+		RightY,
+		LeftTrigger,
+		RightTrigger,
+		Count,
+	};
+
+	// One connected gamepad or raw joystick, normalized for a world.
+	//
+	// @since v0.21
+	struct ControllerSlot {
+		// Current, previous and tick-latched standardized button bits.
+		//@{
+		uint32_t Buttons = 0;
+		uint32_t PreviousButtons = 0;
+		uint32_t PressedButtons = 0;
+		//@}
+
+		// Current and previous normalized axis values.
+		//@{
+		float Axes[static_cast<size_t>(ControllerAxis::Count)] = {};
+		float PreviousAxes[static_cast<size_t>(ControllerAxis::Count)] = {};
+		//@}
+
+		// Current and previous connection state.
+		//@{
+		bool Connected = false;
+		bool PreviousConnected = false;
+		//@}
+
+		// Whether SDL recognized this as a standardized gamepad.
+		bool Mapped = false;
+
+		// Keeps the serialized layout explicitly initialized.
+		uint8_t Reserved = 0;
+
+		// Reports whether a button is currently held.
+		bool IsDown(ControllerButton button) const {
+			return (Buttons & (1u << static_cast<uint8_t>(button))) != 0;
+		}
+
+		// Reports a button's up-to-down edge in this frame.
+		bool WasPressed(ControllerButton button) const {
+			const uint32_t bit = 1u << static_cast<uint8_t>(button);
+			return (Buttons & bit) != 0 && (PreviousButtons & bit) == 0;
+		}
+
+		// Reports a button's down-to-up edge in this frame.
+		bool WasReleased(ControllerButton button) const {
+			const uint32_t bit = 1u << static_cast<uint8_t>(button);
+			return (Buttons & bit) == 0 && (PreviousButtons & bit) != 0;
+		}
+	};
+
+	// Controller input is separate from `InputState` so its addition does not
+	// rewrite the established keyboard and pointer save layout.
+	//
+	// @since v0.21
+	struct ControllerState {
+		// Stable Gamepad1 through Gamepad8 slots.
+		ControllerSlot Slots[MAX_CONTROLLERS];
+
+		// Retains button presses until the simulation tick consumes them.
+		void LatchPresses() {
+			for (ControllerSlot &slot : Slots) {
+				slot.PressedButtons |= slot.Buttons & ~slot.PreviousButtons;
+			}
+		}
+
+		// Clears every retained button press after a simulation tick.
+		void ConsumeTaps() {
+			for (ControllerSlot &slot : Slots) {
+				slot.PressedButtons = 0;
+			}
+		}
+
+		// Reports whether at least one controller slot is connected.
+		bool AnyConnected() const {
+			for (const ControllerSlot &slot : Slots) {
+				if (slot.Connected) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		// Reports whether a connection, button or axis changed this frame.
+		bool HasFrameEvents() const {
+			for (const ControllerSlot &slot : Slots) {
+				if (slot.Connected != slot.PreviousConnected || slot.Buttons != slot.PreviousButtons) {
+					return true;
+				}
+				for (size_t axis = 0; axis < static_cast<size_t>(ControllerAxis::Count); axis++) {
+					if (slot.Axes[axis] != slot.PreviousAxes[axis]) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+	};
+
+	// Returns the script-facing key name for a standardized button.
+	KeyCode KeyOf(ControllerButton button);
 
 	// What the player is doing this frame.
 	//

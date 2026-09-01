@@ -34,6 +34,7 @@
 #include <engine/world/Bus.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Postbox.hpp>
+#include <engine/world/SharedStores.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
@@ -621,6 +622,28 @@ namespace engine::world {
 		// @param value Filled with the value when one is present.
 		// @return `Ok`, or `NotFound`.
 		BusStatus Peek(BusKind bus, core::Name key, std::vector<std::byte> *value) const;
+
+		// Copies every value in a shared store, sorted by key text.
+		//
+		// MemoryStore queues are operational traffic and are deliberately absent.
+		// This view is for persistence and administration, not for consuming a
+		// queue on a world's behalf.
+		std::vector<SharedStoreEntry> SharedStoreEntries(BusKind store) const;
+
+		// Creates or replaces one value from outside the simulation.
+		//
+		// A DataStore edit advances the record version exactly as a bus write does.
+		BusStatus SetSharedStoreValue(BusKind store, core::Name key, std::span<const std::byte> value);
+
+		// Removes one value from outside the simulation.
+		BusStatus RemoveSharedStoreValue(BusKind store, core::Name key);
+
+		// Replaces a shared key/value store from a validated persistence image.
+		//
+		// The replacement is all-or-nothing. Every row must name `store`, every
+		// key must be valid, keys must be unique, and DataStore versions must be
+		// non-zero. A refusal leaves the current table untouched.
+		BusStatus ReplaceSharedStoreEntries(BusKind store, std::span<const SharedStoreEntry> entries);
 
 		// --- snapshots and replay ------------------------------------------
 

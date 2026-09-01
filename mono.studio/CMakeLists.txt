@@ -28,11 +28,13 @@ mono_add_library(studio
 		Engine::parallel
 		Engine::ecs
 		Engine::world
+		Engine::datastore
 		Engine::scene
+		Engine::effects
 		Engine::script
 
-		# L11, `shared`. **Because a plugin is a script and the command bar opens
-		# its own VM.** `Plugins.cpp`, `CommandBar.cpp` and `ScriptEditor.cpp` each
+		# L11, `shared`. **Because script plugins and the command bar each open
+		# their own VM.** `Plugins.cpp`, `CommandBar.cpp` and `ScriptEditor.cpp` each
 		# call `MakeRuntime`; it was arriving through `Engine::game` and a
 		# dependency a file includes is one its build file should say out loud.
 		Engine::scripthost
@@ -45,6 +47,11 @@ mono_add_library(studio
 		# makes, so `Editor.cpp` includes `physics/Pipeline.hpp` directly and a
 		# dependency a file includes is one its build file should say out loud.
 		Engine::physics
+
+		# L6, `shared`. Roblox place imports declare collision-group names
+		# before writing them onto parts, and viewport picking uses the spatial
+		# query types directly. Both are this program's own includes.
+		Engine::spatial
 
 		# L13, `shared`. The Model Context Protocol surface: the socket, the
 		# handshake and the tools any program with worlds can answer. This

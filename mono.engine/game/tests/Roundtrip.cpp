@@ -13,6 +13,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
@@ -20,6 +21,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -63,6 +65,14 @@ namespace {
 	// A temporary path that does not collide between test cases.
 	std::filesystem::path ScratchFile(std::string_view leaf) {
 		return std::filesystem::temp_directory_path() / leaf;
+	}
+
+	std::filesystem::path ScratchDirectory(std::string_view leaf) {
+		const std::filesystem::path directory = ScratchFile(leaf);
+		std::error_code ignored;
+		std::filesystem::remove_all(directory, ignored);
+		std::filesystem::create_directories(directory);
+		return directory;
 	}
 
 	Entity ChildNamed(const Store &store, Entity parent, std::string_view name) {
@@ -119,6 +129,236 @@ TEST_CASE("a universe of worlds survives a save and a load", "[game][roundtrip]"
 	CHECK(found);
 
 	std::filesystem::remove(path);
+}
+
+TEST_CASE("a multi-file universe restores authored settings and shader scripts", "[game][roundtrip]") {
+	RegisterEverything();
+
+	engine::world::UniverseSettings universeSettings;
+	universeSettings.Mode = engine::world::ExecutionMode::WorldSerial;
+	universeSettings.MaximumCatchUpTicks = 5;
+	universeSettings.WorldParallelFloorMilliseconds = 0.125f;
+	universeSettings.BusBudgetPerTick = 17;
+	universeSettings.ChannelQueueLimit = 23;
+	universeSettings.ChannelsPerWorld = 29;
+	Universe source(universeSettings);
+
+	WorldSettings worldSettings;
+	worldSettings.Name = Name("Shader World");
+	worldSettings.TickRate = 30.0;
+	worldSettings.IdleTickRate = 3.0;
+	worldSettings.PhysicsTickRate = 15.0;
+	worldSettings.ReplicationTickRate = 10.0;
+	worldSettings.GlobalSimulatedNetworkLatency = 12.5;
+	worldSettings.IsolationLevel = engine::world::Isolation::Dedicated;
+	worldSettings.FaultLimit = 7;
+	worldSettings.RenderingProfile = Name("Cinematic");
+	const WorldId world = source.Create(worldSettings);
+	REQUIRE(world.IsValid());
+	WorldSettings remoteSettings;
+	remoteSettings.Name = Name("Match Host");
+	remoteSettings.TickRate = 20.0;
+	remoteSettings.IsolationLevel = engine::world::Isolation::Dedicated;
+	REQUIRE(source.CreateRemote(remoteSettings, Name("host-1")).IsValid());
+
+	const std::string shaderCode = "#version 450\nvoid main() { }";
+	source.Enter(world, [&](Store &store) {
+		const Entity shader = store.CreateInstance(engine::scene::ShaderScriptClass(), "Atmosphere");
+		REQUIRE(shader != NULL_ENTITY);
+		REQUIRE(engine::scene::SetShaderSource(store, shader, shaderCode));
+	});
+
+	const std::filesystem::path directory = ScratchDirectory("atomic-multifile-roundtrip");
+	const std::filesystem::path manifest = directory / "cinematic.auniverse";
+	std::string error;
+	engine::game::UniverseFileOptions fileOptions;
+	fileOptions.HttpEnabled = true;
+	fileOptions.PublisherKey = "0123456789abcdef";
+	fileOptions.Cdns = {
+		engine::game::UniverseCdn{.Name = "primary", .Location = "cdn.example.test:9080"},
+		engine::game::UniverseCdn{.Name = "fallback", .Location = "cdn-backup.example.test:9080"},
+	};
+	fileOptions.DataStore.Enabled = true;
+	fileOptions.DataStore.Backend = "sqlite";
+	fileOptions.DataStore.Root = "stores";
+	REQUIRE(SaveUniverse(source, Name("Cinematic Game"), {}, manifest, fileOptions, error));
+	CHECK(error.empty());
+	CHECK(std::filesystem::is_regular_file(manifest));
+	CHECK(std::filesystem::is_regular_file(directory / "cinematic.worlds/1-Shader_World.aworld"));
+	CHECK(std::filesystem::is_directory(directory / "assets"));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, manifest, info, error));
+	CHECK(error.empty());
+	CHECK(info.Name == Name("Cinematic Game"));
+	CHECK(info.Assets == directory / "assets");
+	CHECK(info.HttpEnabled);
+	CHECK_FALSE(info.RecursiveWorldDiscovery);
+	CHECK(info.PublisherKey == "0123456789abcdef");
+	REQUIRE(info.Cdns.size() == 2);
+	CHECK(info.Cdns[0].Name == "primary");
+	CHECK(info.Cdns[0].Location == "cdn.example.test:9080");
+	CHECK(info.Cdns[1].Name == "fallback");
+	CHECK(info.DataStore.Enabled);
+	CHECK(info.DataStore.Backend == "sqlite");
+	CHECK(info.DataStore.Root == std::filesystem::path("stores"));
+	CHECK(loaded.Settings().Mode == engine::world::ExecutionMode::WorldSerial);
+	CHECK(loaded.Settings().MaximumCatchUpTicks == 5);
+	CHECK(loaded.Settings().WorldParallelFloorMilliseconds == 0.125f);
+	CHECK(loaded.Settings().BusBudgetPerTick == 17);
+	CHECK(loaded.Settings().ChannelQueueLimit == 23);
+	CHECK(loaded.Settings().ChannelsPerWorld == 29);
+
+	const WorldId restored = loaded.Find(Name("Shader World"));
+	REQUIRE(restored.IsValid());
+	const WorldSettings restoredSettings = loaded.SettingsOf(restored);
+	CHECK(restoredSettings.TickRate == 30.0);
+	CHECK(restoredSettings.IdleTickRate == 3.0);
+	CHECK(restoredSettings.PhysicsTickRate == 15.0);
+	CHECK(restoredSettings.ReplicationTickRate == 10.0);
+	CHECK(restoredSettings.GlobalSimulatedNetworkLatency == 12.5);
+	CHECK(restoredSettings.IsolationLevel == engine::world::Isolation::Dedicated);
+	CHECK(restoredSettings.FaultLimit == 7);
+	CHECK(restoredSettings.RenderingProfile == Name("Cinematic"));
+	loaded.Enter(restored, [&](Store &store) {
+		const engine::scene::ShaderText shader = engine::scene::ShaderTextOf(store, Name("Atmosphere"));
+		REQUIRE(shader.Found);
+		CHECK(shader.Code == shaderCode);
+	});
+	const WorldId restoredRemote = loaded.Find(Name("Match Host"));
+	REQUIRE(restoredRemote.IsValid());
+	CHECK(loaded.IsRemote(restoredRemote));
+	CHECK(loaded.HostOf(restoredRemote) == Name("host-1"));
+	CHECK(loaded.SettingsOf(restoredRemote).TickRate == 20.0);
+	CHECK(loaded.SettingsOf(restoredRemote).IsolationLevel == engine::world::Isolation::Dedicated);
+
+	std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("recursive universe discovery is ordered and does not walk links", "[game][roundtrip]") {
+	RegisterEverything();
+
+	const std::filesystem::path directory = ScratchDirectory("atomic-multifile-discovery");
+	const std::filesystem::path nested = directory / "nested";
+	std::filesystem::create_directories(nested);
+
+	Universe source;
+	const WorldId alpha = AddWorld(source, "Alpha");
+	std::string error;
+	REQUIRE(engine::game::ExportWorld(source, alpha, nested / "alpha.aworld", error));
+
+	const std::filesystem::path outside = ScratchDirectory("atomic-multifile-outside");
+	Universe hiddenSource;
+	const WorldId hidden = AddWorld(hiddenSource, "Hidden");
+	REQUIRE(engine::game::ExportWorld(hiddenSource, hidden, outside / "hidden.aworld", error));
+	std::error_code linkError;
+	std::filesystem::create_directory_symlink(outside, directory / "linked", linkError);
+
+	const std::filesystem::path manifest = directory / "discovery.auniverse";
+	{
+		std::ofstream file(manifest, std::ios::binary);
+		file << R"(<?xml version="1.0"?>
+<UniverseManifest format="1" name="Discovery" recursive="true" />
+)";
+	}
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, manifest, info, error));
+	REQUIRE(info.Worlds.size() == 1);
+	CHECK(info.Worlds[0] == Name("Alpha"));
+	CHECK(loaded.Find(Name("Alpha")).IsValid());
+	CHECK_FALSE(loaded.Find(Name("Hidden")).IsValid());
+
+	std::filesystem::remove_all(directory);
+	std::filesystem::remove_all(outside);
+}
+
+TEST_CASE("a universe world reference cannot escape its directory", "[game][roundtrip]") {
+	RegisterEverything();
+
+	const std::filesystem::path directory = ScratchDirectory("atomic-multifile-contained");
+	const std::filesystem::path manifest = directory / "unsafe.auniverse";
+	{
+		std::ofstream file(manifest, std::ios::binary);
+		file << R"(<?xml version="1.0"?>
+<UniverseManifest format="1" name="Unsafe" recursive="false">
+	<WorldFile path="../outside.aworld" />
+</UniverseManifest>
+)";
+	}
+
+	Universe loaded;
+	AddWorld(loaded, "Existing");
+	GameInfo info;
+	std::string error;
+	CHECK_FALSE(LoadGame(loaded, manifest, info, error));
+	CHECK(error.find("leaves the universe directory") != std::string::npos);
+	CHECK(loaded.Count() == 0);
+
+	std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("a universe DataStore path cannot escape its directory", "[game][roundtrip]") {
+	RegisterEverything();
+
+	const std::filesystem::path directory = ScratchDirectory("atomic-datastore-contained");
+	const std::filesystem::path manifest = directory / "unsafe.auniverse";
+	{
+		std::ofstream file(manifest, std::ios::binary);
+		file << R"(<?xml version="1.0"?>
+<UniverseManifest format="1" name="Unsafe" recursive="false">
+	<DataStore backend="binary" path="../outside" />
+</UniverseManifest>
+)";
+	}
+
+	Universe loaded;
+	AddWorld(loaded, "Existing");
+	GameInfo info;
+	std::string error;
+	CHECK_FALSE(LoadGame(loaded, manifest, info, error));
+	CHECK(error.find("leaves the universe directory") != std::string::npos);
+	CHECK(loaded.Count() == 0);
+
+	std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("a missing or future multi-file universe leaves no partial worlds", "[game][roundtrip]") {
+	RegisterEverything();
+
+	const std::filesystem::path directory = ScratchDirectory("atomic-multifile-invalid");
+	const std::filesystem::path manifest = directory / "invalid.auniverse";
+	{
+		std::ofstream file(manifest, std::ios::binary);
+		file << R"(<?xml version="1.0"?>
+<UniverseManifest format="1" name="Missing" recursive="false">
+	<WorldFile path="missing.aworld" />
+</UniverseManifest>
+)";
+	}
+
+	Universe loaded;
+	AddWorld(loaded, "Existing");
+	GameInfo info;
+	std::string error;
+	CHECK_FALSE(LoadGame(loaded, manifest, info, error));
+	CHECK(error.find("missing.aworld") != std::string::npos);
+	CHECK(loaded.Count() == 0);
+
+	{
+		std::ofstream file(manifest, std::ios::binary | std::ios::trunc);
+		file << R"(<?xml version="1.0"?>
+<UniverseManifest format="2" name="Future" recursive="false" />
+)";
+	}
+	AddWorld(loaded, "Existing Again");
+	CHECK_FALSE(LoadGame(loaded, manifest, info, error));
+	CHECK(error.find("this build reads 1") != std::string::npos);
+	CHECK(loaded.Count() == 1);
+
+	std::filesystem::remove_all(directory);
 }
 
 TEST_CASE("a world's settings are an element and survive the trip", "[game][roundtrip]") {
@@ -201,6 +441,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" "
 			"physicsTickRate=\"0\" replicationTickRate=\"0\" "
 			"globalSimulatedNetworkLatency=\"0\" faultLimit=\"3\" "
+			"isolation=\"Shared\" "
 			"renderingProfile=\"Default PBR\" />"
 		) != std::string::npos
 	);
@@ -230,6 +471,7 @@ TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundt
 	engine::world::UniverseSettings settings;
 	settings.Mode = engine::world::ExecutionMode::WorldSerial;
 	settings.MaximumCatchUpTicks = 3;
+	settings.WorldParallelFloorMilliseconds = 0.25f;
 	settings.BusBudgetPerTick = 19;
 	settings.ChannelQueueLimit = 7;
 	settings.ChannelsPerWorld = 9;
@@ -247,11 +489,13 @@ TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundt
 
 	CHECK(loaded.Settings().Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(loaded.Settings().MaximumCatchUpTicks == 3);
+	CHECK(loaded.Settings().WorldParallelFloorMilliseconds == 0.25f);
 	CHECK(loaded.Settings().BusBudgetPerTick == 19);
 	CHECK(loaded.Settings().ChannelQueueLimit == 7);
 	CHECK(loaded.Settings().ChannelsPerWorld == 9);
 	CHECK(info.Universe.Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(info.Universe.MaximumCatchUpTicks == 3);
+	CHECK(info.Universe.WorldParallelFloorMilliseconds == 0.25f);
 	CHECK(info.Universe.BusBudgetPerTick == 19);
 	CHECK(info.Universe.ChannelQueueLimit == 7);
 	CHECK(info.Universe.ChannelsPerWorld == 9);
@@ -702,6 +946,24 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	CHECK(error.empty());
 
 	source.Enter(copy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
+
+	engine::game::PreparedWorldImport prepared;
+	std::vector<engine::game::WorldImportPhase> phases;
+	REQUIRE(
+		engine::game::PrepareWorldImport(
+			path, prepared, error, [&](engine::game::WorldImportPhase phase, float) {
+				phases.push_back(phase);
+			}
+		)
+	);
+	CHECK(prepared.Settings.Name == Name("Start"));
+	CHECK_FALSE(prepared.Snapshot.empty());
+	CHECK(std::find(phases.begin(), phases.end(), engine::game::WorldImportPhase::Decode) != phases.end());
+	CHECK(std::find(phases.begin(), phases.end(), engine::game::WorldImportPhase::Build) != phases.end());
+	const WorldId preparedCopy =
+		engine::game::CommitWorldImport(source, prepared, Name("StartPrepared"), error);
+	REQUIRE(preparedCopy.IsValid());
+	source.Enter(preparedCopy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
 
 	// And refused without one, because the name is taken.
 	const WorldId clash = engine::game::ImportWorld(source, path, Name{}, error);

@@ -145,7 +145,6 @@ namespace studio {
 			Name Name_;
 			Name Kind;
 			NodeScope Scope = NodeScope::View;
-			bool Optional = false;
 			bool Enabled = true;
 			float X = 0.0f;
 			float Y = 0.0f;
@@ -165,7 +164,6 @@ namespace studio {
 					nodes.back().Name_ = edit.Name;
 					nodes.back().Kind = edit.NodeKind;
 					nodes.back().Scope = edit.Scope;
-					nodes.back().Optional = edit.Optional;
 					current = &nodes.back();
 					break;
 				case EditKind::Reads:
@@ -302,7 +300,6 @@ namespace studio {
 			}
 			const std::array commonWidgets{
 				nodegraph::Toggle("enabled", "Enabled", true),
-				nodegraph::Toggle("optional", "Optional", false),
 				nodegraph::Toggle("profile", "Profile", true),
 				nodegraph::Select(
 					"scope",
@@ -409,7 +406,6 @@ namespace studio {
 			nodegraph::Node &node = *graph.Find(id);
 			node.Label = std::string(source.Name_.Text());
 			PutToggle(node, "enabled", source.Enabled);
-			PutToggle(node, "optional", source.Optional);
 			PutSelect(node, "scope", Describe(source.Scope));
 			const NodeKindSpec *spec = NodeCatalogue::Find(source.Kind);
 			for (const NodeParameter &parameter : source.Parameters) {
@@ -655,7 +651,6 @@ namespace studio {
 			add.Scope = scope == "world"   ? NodeScope::World
 						: scope == "frame" ? NodeScope::Frame
 										   : NodeScope::View;
-			add.Optional = ToggleOf(node, "optional", false);
 			document.Record(add);
 
 			for (const PortSpec &port : spec.Inputs) {

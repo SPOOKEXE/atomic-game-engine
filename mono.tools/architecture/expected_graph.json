@@ -185,6 +185,17 @@
         "net"
       ]
     },
+    "datastore": {
+      "tier": "shared",
+      "layer": 12,
+      "links": [
+        "core",
+        "ecs",
+        "net",
+        "parallel",
+        "world"
+      ]
+    },
     "discord": {
       "tier": "shared",
       "layer": 11,
@@ -521,6 +532,7 @@
         "collision",
         "control",
         "core",
+        "datastore",
         "delivery",
         "discord",
         "ecs",
@@ -572,6 +584,7 @@
         "collision",
         "control",
         "core",
+        "datastore",
         "delivery",
         "discord",
         "ecs",
@@ -642,6 +655,7 @@
         "collision",
         "control",
         "core",
+        "datastore",
         "delivery",
         "discord",
         "ecs",
@@ -760,6 +774,7 @@
         "collision",
         "control",
         "core",
+        "datastore",
         "delivery",
         "discord",
         "ecs",
@@ -796,6 +811,7 @@
         "collision",
         "control",
         "core",
+        "datastore",
         "delivery",
         "discord",
         "ecs",
@@ -837,6 +853,7 @@
         "collision",
         "control",
         "core",
+        "datastore",
         "delivery",
         "discord",
         "ecs",

@@ -359,25 +359,17 @@ TEST_CASE("the game interface can be disabled without removing the frame output"
 	}));
 }
 
-TEST_CASE("per-view and optional survive the round trip", "[graph]") {
-	// The field the whole version turns on, and the one a text format is most
-	// likely to write and forget to parse.
+TEST_CASE("legacy optional flags are accepted and discarded", "[graph]") {
+	std::string legacy = Write(DefaultPbrDocument());
+	const std::string oldNode = "node \"shadow\" \"shadow\" world no";
+	const size_t nodeAt = legacy.find(oldNode);
+	REQUIRE(nodeAt != std::string::npos);
+	legacy.replace(nodeAt, oldNode.size(), "node \"shadow\" \"shadow\" world yes");
+
 	PipelineDocument document;
-	document.Record(Resource("shadow", ResourceKind::Depth));
-
-	Edit shared = NodeEdit("shadow", false);
-	shared.Optional = true;
-	document.Record(std::move(shared));
-	document.Record(Touch(EditKind::Writes, "shadow"));
-
-	PipelineDocument reloaded;
 	Name offender;
-	REQUIRE(Read(Write(document), reloaded, offender) == PipelineDocumentStatus::Ok);
-
-	REQUIRE(reloaded.Count() == 3);
-	CHECK(reloaded.Edits()[1].Scope == NodeScope::Frame);
-	CHECK(reloaded.Edits()[1].Optional);
-	CHECK(reloaded.Edits()[0].Resource == ResourceKind::Depth);
+	REQUIRE(Read(legacy, document, offender) == PipelineDocumentStatus::Ok);
+	CHECK(Write(document).find(oldNode) != std::string::npos);
 }
 
 // --- the text format ----------------------------------------------------------

@@ -102,6 +102,22 @@ TEST_CASE("a cloned world is independent and keeps its identity", "[ecs]") {
 	REQUIRE(preview.Get<Spot>(entity)->X == 9.0f);
 }
 
+TEST_CASE("transferred snapshot contents keep the destination identity", "[ecs]") {
+	Store source("source");
+	const Entity entity = source.Create();
+	source.Set<Spot>(entity, Spot{5.0f, 6.0f});
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	Store destination("destination");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(destination.LoadContents(reader));
+	CHECK(reader.AtEnd());
+	CHECK(destination.Name() == "destination");
+	REQUIRE(destination.Get<Spot>(entity) != nullptr);
+	CHECK(destination.Get<Spot>(entity)->X == 5.0f);
+}
+
 TEST_CASE("entities and components come back", "[ecs]") {
 	Store source("source");
 

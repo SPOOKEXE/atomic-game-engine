@@ -71,6 +71,20 @@ namespace engine::scene {
 		// as the view flipping over. A hundredth of a radian of clearance costs
 		// nothing anybody can see and removes the case entirely.
 		constexpr float PITCH_LIMIT = std::numbers::pi_v<float> * 0.5f - 0.01f;
+
+		const ControllerSlot *ActiveController(const InputState &input, const ControllerState *controllers) {
+			if (controllers == nullptr) return nullptr;
+			const auto source = static_cast<size_t>(input.LastSource);
+			const auto first = static_cast<size_t>(InputSource::Gamepad1);
+			const auto last = static_cast<size_t>(InputSource::Gamepad8);
+			if (source >= first && source <= last && controllers->Slots[source - first].Connected) {
+				return &controllers->Slots[source - first];
+			}
+			for (const ControllerSlot &controller : controllers->Slots) {
+				if (controller.Connected) return &controller;
+			}
+			return nullptr;
+		}
 	}
 
 	bool FollowPortalTransit(ecs::Store &store) {
@@ -108,6 +122,7 @@ namespace engine::scene {
 
 		auto *controller = store.ResourceMutable<CameraController>();
 		const auto *input = store.Resource<InputState>();
+		const auto *gamepads = store.Resource<ControllerState>();
 		if (controller == nullptr || input == nullptr) {
 			return turned;
 		}
@@ -136,6 +151,21 @@ namespace engine::scene {
 			controller->Angles.X -= input->MouseDelta.Y * controller->Sensitivity;
 			controller->Angles.X = std::clamp(controller->Angles.X, -PITCH_LIMIT, PITCH_LIMIT);
 			moved = true;
+		}
+
+		if (input->Focused) {
+			constexpr float GAMEPAD_TURN_RADIANS_PER_SECOND = 2.5f;
+			if (const ControllerSlot *gamepad = ActiveController(*input, gamepads); gamepad != nullptr) {
+				const float horizontal = gamepad->Axes[static_cast<size_t>(ControllerAxis::RightX)];
+				const float vertical = gamepad->Axes[static_cast<size_t>(ControllerAxis::RightY)];
+				if (horizontal != 0.0f || vertical != 0.0f) {
+					const float step = GAMEPAD_TURN_RADIANS_PER_SECOND * store.Time().Delta;
+					controller->Angles.Y -= horizontal * step;
+					controller->Angles.X -= vertical * step;
+					controller->Angles.X = std::clamp(controller->Angles.X, -PITCH_LIMIT, PITCH_LIMIT);
+					moved = true;
+				}
+			}
 		}
 
 		if (input->WheelDelta != 0.0f) {
@@ -292,6 +322,7 @@ namespace engine::scene {
 
 	MoveIntent ReadMoveIntent(const ecs::Store &store) {
 		const auto *input = store.Resource<InputState>();
+		const auto *gamepads = store.Resource<ControllerState>();
 		const auto *controller = store.Resource<CameraController>();
 		if (input == nullptr) {
 			return {};
@@ -324,6 +355,12 @@ namespace engine::scene {
 			if (input->IsKeyDown(KeyCode::A) || input->IsKeyDown(KeyCode::Left)) {
 				wanted = wanted - side;
 			}
+
+			if (const ControllerSlot *gamepad = ActiveController(*input, gamepads); gamepad != nullptr) {
+				const float horizontal = gamepad->Axes[static_cast<size_t>(ControllerAxis::LeftX)];
+				const float vertical = gamepad->Axes[static_cast<size_t>(ControllerAxis::LeftY)];
+				wanted = wanted + side * horizontal - forward * vertical;
+			}
 		}
 
 		MoveIntent intent;
@@ -341,6 +378,14 @@ namespace engine::scene {
 		// hosts grow a private `PendingJump` beside this function instead of
 		// through it.
 		intent.Jump = input->Focused && input->WasKeyTapped(KeyCode::Space);
+		if (input->Focused) {
+			if (const ControllerSlot *gamepad = ActiveController(*input, gamepads); gamepad != nullptr) {
+				const uint32_t a = 1u << static_cast<uint8_t>(ControllerButton::A);
+				if ((gamepad->PressedButtons & a) != 0) {
+					intent.Jump = true;
+				}
+			}
+		}
 		return intent;
 	}
 
@@ -372,6 +417,13 @@ namespace engine::scene {
 		// times in three. That latch did not exist until there was something to
 		// act on it.
 		intent.Fired = input->Focused && input->WasButtonTapped(MouseButton::Left);
+		if (input->Focused) {
+			const auto *controllers = store.Resource<ControllerState>();
+			if (const ControllerSlot *gamepad = ActiveController(*input, controllers); gamepad != nullptr) {
+				const uint32_t trigger = 1u << static_cast<uint8_t>(ControllerButton::RightTrigger);
+				intent.Fired = intent.Fired || (gamepad->PressedButtons & trigger) != 0;
+			}
+		}
 		return intent;
 	}
 

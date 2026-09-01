@@ -143,9 +143,6 @@ namespace engine::graph {
 		// `AddNode`'s partition, and the field the whole version turns on.
 		NodeScope Scope = NodeScope::View;
 
-		// `AddNode`'s skippability.
-		bool Optional = false;
-
 		// `Enable`'s new state.
 		bool Enabled = true;
 

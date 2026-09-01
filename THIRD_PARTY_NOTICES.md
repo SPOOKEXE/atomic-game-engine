@@ -23,6 +23,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | Library | Licence | Used for | In a shipped game |
 |---|---|---|---|
 | [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
+| [MoltenVK](https://github.com/KhronosGroup/MoltenVK) | Apache-2.0 | Vulkan portability over Metal | Apple client and Studio builds |
 | [glm](https://github.com/g-truc/glm) | MIT / Happy Bunny | the maths under `core/types` | yes |
 | [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
@@ -35,10 +36,12 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [cryptopp-cmake](https://github.com/abdes/cryptopp-cmake) | BSD-3-Clause | the CMake build for Crypto++ | no - build system only |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | CC0-1.0, or Apache-2.0, or Apache-2.0 with LLVM exception | the content hash under `assets` - chunk, asset, bundle and manifest addressing | yes, once linked |
 | [Zstandard](https://github.com/facebook/zstd) | **BSD-3-Clause** (dual-licensed; we do not take the GPLv2 option) | compression for content-delivery groups | yes, once linked |
+| [miniz](https://github.com/richgel999/miniz) | MIT | bounded ZIP project-package reading and deterministic writing | server, client, and Studio through `Engine::game` |
 | [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) | MIT | the API reference's stylesheet | no - `just docs` only |
 | [Luau](https://github.com/luau-lang/luau) | MIT (and MIT for the Lua 5.1 it forks) | the Luau script VM and compiler; its analysis library behind `mono.tools/scriptcheck` | yes, where the Luau runtime is linked |
 | [luau-lsp](https://github.com/JohnnyMorganz/luau-lsp) | MIT | the editor's Luau language server, from v0.7 | no - never built by this build; `just luau-lsp` builds it separately |
 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | Model Context Protocol control messages and glTF import | server/studio control and studio tooling |
+| [roblox-files](https://github.com/SPOOKEXE/roblox-files) | MIT | reading and writing Roblox place and model containers for offline import | no - Studio and content tooling only |
 | [toml++](https://github.com/marzer/tomlplusplus) | MIT | the Rojo sync's `*.toml` row, from v0.13 | studio only |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | MIT | the JavaScript/TypeScript script VM | yes, where the JavaScript runtime is linked |
 | [Inter](https://github.com/rsms/inter) | SIL OFL 1.1 | interface text in the editor and game UI | staged beside programs linking `engine::ui` or `engine::render` |
@@ -47,6 +50,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
 | [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
 | [ngtcp2](https://github.com/ngtcp2/ngtcp2) | MIT | the QUIC transport under `engine::net::quic`, from v0.19 | yes, where `net` is linked |
+| [SQLite / SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | SQLite public domain / MIT | SQLite-backed durable DataStore files; only the bundled SQLite C amalgamation is compiled | server and Studio |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They
@@ -79,28 +83,22 @@ contains the `yes` rows and not the others:
   it drags in regardless - a program calling only SHA-256 still links 36 of
   Crypto++'s 173 members. So "we only use one function from it" is never on its
   own a reason to leave a notice out. Run the `nm` check.
-- **SPIRV-Cross is shaderc's other end, and it is both build-time and
-  runtime for the same reason.** `glslc` produces SPIR-V and SDL's Metal
-  backend takes MSL or a `metallib` and never SPIR-V, so something has to
-  stand between them. `mono.tools/shadercross` does it for the built-in
-  shaders during the build and produces no object code in any binary;
-  `Engine::msl` does it for a `ShaderScript`, which does not exist until
-  somebody writes one, and that copy is linked into `render`.
+- **SPIRV-Cross remains the build-time cross-check for MSL.** The shipped
+  renderer now requires Vulkan and feeds SPIR-V to native Vulkan or MoltenVK.
+  `mono.tools/shadercross` still translates built-in shaders during the build,
+  so an unsupported Metal construct fails before an Apple release is made.
 
-  **It reaches a shipped client on the same condition shaderc does**, and by
-  the same mechanism: `Renderer::AddShaderVariant` calls it only when the
-  device asked for MSL, so the objects are on the link line and whether they
-  survive dead-stripping is a question for `nm` against a real release build
-  rather than for this file. Re-run the check in
-  `docs/retired/CPP_LINKER.md` after a bump rather than copying this
-  sentence forward.
+  `Engine::msl` remains linked while the old native-Metal branches are removed,
+  so whether its objects survive dead-stripping remains a question for `nm`
+  against a real release build. Re-run the check in
+  `docs/retired/CPP_LINKER.md` after a bump.
 
   Apache-2.0, the same licence as shaderc and SPIRV-Tools, so it adds a row
   and no new obligation. Only three of its eight libraries are built - the
   parser, the GLSL emitter and the MSL emitter. The HLSL, C++, JSON
   reflection, C API and CLI targets are switched off in
   `mono.build/MonoVendor.cmake`, so no binary can contain them.
-- **SDL3, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
+- **SDL3, MoltenVK, shaderc, SPIRV-Cross and Dear ImGui are client-side.** A headless server links
   none of them, and the `server` preset does not even configure them - only the
   presentation modules own GLSL, so nothing server-tier needs a compiler for
   it.

@@ -254,7 +254,9 @@ namespace client {
 		engine::world::WorldId world,
 		std::vector<engine::scene::DrawInstance> &drawn,
 		std::vector<engine::scene::DrawInstance> &foreign,
-		std::vector<engine::render::SurfaceView> &views
+		std::vector<engine::render::SurfaceView> &views,
+		std::vector<engine::core::CFrame> *drawnJoints = nullptr,
+		std::vector<engine::core::CFrame> *foreignJoints = nullptr
 	);
 
 	// Builds the scene by running a Luau file instead of a C++ loop.

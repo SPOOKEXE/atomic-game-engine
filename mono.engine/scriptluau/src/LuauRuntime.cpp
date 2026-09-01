@@ -5,7 +5,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/ecs/Classes.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -617,7 +617,7 @@ namespace engine::script {
 			const ecs::Entity module = *static_cast<ecs::Entity *>(value);
 			ecs::Store &store = *context.World;
 
-			if (!store.Alive(module) || !ecs::Classes::IsA(store.ClassOf(module), ModuleScriptClass())) {
+			if (!InstanceAlive(store, module) || !InstanceIsA(store, module, ModuleScriptClass())) {
 				// Named rather than nil, for `GetService`'s reason: a script that
 				// gets nil back fails one line later, somewhere that says nothing
 				// about the cause.
@@ -639,7 +639,7 @@ namespace engine::script {
 					luaL_errorL(
 						state,
 						"require cycle: '%s' is already being required",
-						store.InstanceNameOf(module).Text().data()
+						InstanceNameOf(store, module).Text().data()
 					);
 				}
 			}
@@ -706,7 +706,7 @@ namespace engine::script {
 				luaL_errorL(
 					state,
 					"'%s' returned nothing - a ModuleScript must return one value",
-					store.InstanceNameOf(module).Text().data()
+					InstanceNameOf(store, module).Text().data()
 				);
 			}
 
@@ -912,6 +912,16 @@ namespace engine::script {
 			// each.
 			ENGINE_PROFILE_CAT("script input", core::ProfileCategory::Script);
 			note(PumpInput(State, PendingGuiEvents));
+		}
+		{
+			ENGINE_PROFILE_CAT("script settings menu", core::ProfileCategory::Script);
+			std::vector<core::Name> actions;
+			actions.swap(PendingSettingsMenuActions);
+			for (const core::Name &action : actions) {
+				const std::string_view name = action.Text();
+				lua_pushlstring(State, name.data(), name.size());
+				note(FireSignal(State, SignalKind::SettingsMenuAction, ecs::NULL_ENTITY, 1, action));
+			}
 		}
 		{
 			ENGINE_PROFILE_CAT("script changes", core::ProfileCategory::Script);

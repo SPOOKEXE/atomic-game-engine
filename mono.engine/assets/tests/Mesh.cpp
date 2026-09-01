@@ -57,6 +57,9 @@ namespace {
 
 TEST_CASE("a mesh round-trips", "[assets][mesh]") {
 	MeshData source = Triangle();
+	source.JointCount = 2;
+	source.Vertices[0].Joints[0] = 1;
+	source.Vertices[0].Weights[0] = 65535;
 	source.Submeshes.push_back(Submesh{0, 3, "skin", "characters/fox_body"});
 	REQUIRE(source.IsValid());
 
@@ -75,6 +78,61 @@ TEST_CASE("a mesh round-trips", "[assets][mesh]") {
 	CHECK(read.Submeshes[0].Texture == "characters/fox_body");
 	CHECK(read.Vertices[1].Position[0] == 1.0f);
 	CHECK(read.Vertices[2].TexCoord[1] == 1.0f);
+	CHECK(read.JointCount == 2);
+	CHECK(read.Vertices[0].Joints[0] == 1);
+	CHECK(read.Vertices[0].Weights[0] == 65535);
+}
+
+TEST_CASE("legacy vertices read as unskinned", "[assets][mesh]") {
+	const MeshData source = Triangle();
+	ByteWriter writer;
+	writer.WriteUInt32(Mesh::MAGIC);
+	writer.WriteUInt16(Mesh::LEGACY_VERSION);
+	writer.WriteUInt32(3);
+	writer.WriteUInt32(3);
+	writer.WriteUInt32(0);
+	for (const MeshVertex &vertex : source.Vertices) {
+		for (const float coordinate : vertex.Position) {
+			writer.WriteFloat(coordinate);
+		}
+		for (const float coordinate : vertex.Normal) {
+			writer.WriteFloat(coordinate);
+		}
+		for (const float coordinate : vertex.TexCoord) {
+			writer.WriteFloat(coordinate);
+		}
+	}
+	for (const uint32_t index : source.Indices) {
+		writer.WriteUInt32(index);
+	}
+
+	MeshData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Mesh::Read(reader, read));
+	CHECK(read.JointCount == 0);
+	CHECK(read.Vertices[0].Weights[0] == 0);
+}
+
+TEST_CASE("invalid skinning influences are refused", "[assets][mesh]") {
+	MeshData data = Triangle();
+	data.JointCount = 2;
+	data.Vertices[0].Weights[0] = 65535;
+
+	SECTION("a weighted joint is outside the palette") {
+		data.Vertices[0].Joints[0] = 2;
+		CHECK_FALSE(data.IsValid());
+	}
+
+	SECTION("normalized weights do not sum exactly") {
+		data.Vertices[0].Joints[0] = 1;
+		data.Vertices[0].Weights[0] = 32767;
+		CHECK_FALSE(data.IsValid());
+	}
+
+	SECTION("the palette exceeds the runtime ceiling") {
+		data.JointCount = Mesh::MAXIMUM_JOINTS + 1;
+		CHECK_FALSE(data.IsValid());
+	}
 }
 
 TEST_CASE("bounds are derived from the vertices and never read", "[assets][mesh]") {

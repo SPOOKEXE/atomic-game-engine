@@ -1,7 +1,7 @@
 #pragma once
 
-// Model import to one `assets::MeshData`; node transforms are baked in.
-// Skinning remains in the rest pose.
+// Model import to one `assets::MeshData`; rigid node transforms are baked in.
+// glTF joint indices and weights retain their skin-local palette indices.
 // @tier L9 · shared
 
 #include <engine/assets/Mesh.hpp>

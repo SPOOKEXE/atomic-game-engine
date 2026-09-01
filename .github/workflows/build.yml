@@ -182,7 +182,9 @@ jobs:
 
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
-        run: brew install ninja ccache
+        run: |
+          brew install ninja ccache
+          scripts/fetch-moltenvk.sh
 
       # The pinned TypeScript, and it is not optional here even though the build
       # treats it as optional.

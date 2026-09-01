@@ -31,26 +31,14 @@ namespace engine::render {
 		const char *EntryPoint = "main";
 	};
 
-	// What this device takes, from the device rather than from the platform.
-	//
-	// **SPIR-V wins where a backend offers both**, which is not hypothetical:
-	// MoltenVK is a Vulkan device on Apple hardware and takes SPIR-V. Preferring
-	// it keeps the only path anybody has verified on the machines that can run
-	// it, and leaves MSL for the backend that has no other option.
+	// The forced Vulkan backend always consumes SPIR-V, including through
+	// MoltenVK on Apple.
 	inline ShaderBinary ShaderBinaryFor(SDL_GPUDevice *device) {
-		const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(device);
-		if ((formats & SDL_GPU_SHADERFORMAT_MSL) != 0 && (formats & SDL_GPU_SHADERFORMAT_SPIRV) == 0) {
-			return ShaderBinary{SDL_GPU_SHADERFORMAT_MSL, resources::ShaderForm::Msl, msl::ENTRY_POINT};
-		}
+		(void)device;
 		return ShaderBinary{SDL_GPU_SHADERFORMAT_SPIRV, resources::ShaderForm::SpirV, "main"};
 	}
 
 	// The formats this build can supply, for `SDL_CreateGPUDevice`.
 	//
-	// Both, because the build produces both: `glslc` compiles the GLSL to SPIR-V
-	// and `mono.tools/shadercross` translates every module to MSL beside it. A
-	// request naming only one is a request for a device the build could have
-	// served, refused before a shader is read.
-	inline constexpr SDL_GPUShaderFormat SUPPORTED_SHADER_FORMATS =
-		SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL;
+	inline constexpr SDL_GPUShaderFormat SUPPORTED_SHADER_FORMATS = SDL_GPU_SHADERFORMAT_SPIRV;
 }

@@ -1,3 +1,5 @@
+#include "UniversePaths.hpp"
+
 #include <engine/bakegraph/Document.hpp>
 #include <engine/core/Chars.hpp>
 #include <engine/core/Log.hpp>
@@ -19,6 +21,7 @@
 #include <sstream>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::game {
@@ -33,7 +36,11 @@ namespace engine::game {
 		using ecs::Store;
 
 		constexpr std::string_view GAME_ROOT = "Game";
+		constexpr std::string_view UNIVERSE_ROOT = "UniverseManifest";
 		constexpr std::string_view WORLD_ROOT = "World";
+		constexpr size_t MAXIMUM_WORLD_BYTES = 256u * 1024u * 1024u;
+		constexpr uint32_t UNIVERSE_FORMAT_VERSION = 1;
+		constexpr size_t MAXIMUM_UNIVERSE_WORLDS = 4096;
 
 		// A world's settings, as of format 2. See `WriteWorldProperties`.
 		constexpr std::string_view WORLD_PROPERTIES = "WorldProperties";
@@ -696,6 +703,46 @@ namespace engine::game {
 			return value;
 		}
 
+		void WriteUniverseSettings(XmlWriter &writer, const world::UniverseSettings &settings) {
+			writer.Open("Universe");
+			writer.Attribute(
+				"mode", settings.Mode == world::ExecutionMode::WorldSerial ? "WorldSerial" : "WorldParallel"
+			);
+			writer.Attribute("catchUp", std::to_string(settings.MaximumCatchUpTicks));
+			writer.Attribute("worldParallelFloor", FormatNumber(settings.WorldParallelFloorMilliseconds));
+			writer.Attribute("busBudget", std::to_string(settings.BusBudgetPerTick));
+			writer.Attribute("channelQueue", std::to_string(settings.ChannelQueueLimit));
+			writer.Attribute("channelsPerWorld", std::to_string(settings.ChannelsPerWorld));
+			writer.Close();
+		}
+
+		world::UniverseSettings
+		ReadUniverseSettings(const XmlElement &element, const world::UniverseSettings &fallback) {
+			world::UniverseSettings settings = fallback;
+			settings.Mode = TextOf(element, "mode", "WorldParallel") == "WorldSerial"
+								? world::ExecutionMode::WorldSerial
+								: world::ExecutionMode::WorldParallel;
+			settings.MaximumCatchUpTicks = static_cast<int>(
+				CountOf(element, "catchUp", static_cast<uint32_t>(settings.MaximumCatchUpTicks))
+			);
+			settings.WorldParallelFloorMilliseconds = static_cast<float>(
+				NumberOf(element, "worldParallelFloor", settings.WorldParallelFloorMilliseconds)
+			);
+			settings.BusBudgetPerTick = CountOf(element, "busBudget", settings.BusBudgetPerTick);
+			settings.ChannelQueueLimit = CountOf(element, "channelQueue", settings.ChannelQueueLimit);
+			settings.ChannelsPerWorld = CountOf(element, "channelsPerWorld", settings.ChannelsPerWorld);
+			return settings;
+		}
+
+		void ApplyUniverseSettings(world::Universe &universe, const world::UniverseSettings &settings) {
+			universe.SetMode(settings.Mode);
+			universe.SetMaximumCatchUpTicks(settings.MaximumCatchUpTicks);
+			universe.SetWorldParallelFloorMilliseconds(settings.WorldParallelFloorMilliseconds);
+			universe.SetBusBudgetPerTick(settings.BusBudgetPerTick);
+			universe.SetChannelQueueLimit(settings.ChannelQueueLimit);
+			universe.SetChannelsPerWorld(settings.ChannelsPerWorld);
+		}
+
 		// The first child of an element with a given name, or null.
 		const XmlElement *
 		ChildNamed(const XmlDocument &document, const XmlElement &element, std::string_view name) {
@@ -733,6 +780,9 @@ namespace engine::game {
 			);
 			writer.Attribute("faultLimit", std::to_string(settings.FaultLimit));
 			writer.Attribute(
+				"isolation", settings.IsolationLevel == world::Isolation::Dedicated ? "Dedicated" : "Shared"
+			);
+			writer.Attribute(
 				"renderingProfile",
 				settings.RenderingProfile.IsValid() ? settings.RenderingProfile.Text() : ""
 			);
@@ -766,6 +816,9 @@ namespace engine::game {
 
 			settings.GlobalSimulatedNetworkLatency = NumberOf(source, "globalSimulatedNetworkLatency", 0.0);
 			settings.FaultLimit = CountOf(source, "faultLimit", 3);
+			settings.IsolationLevel = TextOf(source, "isolation", "Shared") == "Dedicated"
+										  ? world::Isolation::Dedicated
+										  : world::Isolation::Shared;
 			settings.RenderingProfile = core::Name(TextOf(source, "renderingProfile", "Default PBR"));
 			return settings;
 		}
@@ -807,10 +860,17 @@ namespace engine::game {
 		}
 
 		bool Parse(
-			const std::string &text, std::string_view expectedRoot, XmlDocument &document, std::string &error
+			const std::string &text,
+			std::string_view expectedRoot,
+			XmlDocument &document,
+			std::string &error,
+			uint32_t maximumFormat = FORMAT_VERSION,
+			size_t maximumBytes = XmlLimits{}.MaximumBytes
 		) {
 			uint32_t line = 0;
-			const XmlStatus status = ParseXml(text, document, {}, &line);
+			XmlLimits limits;
+			limits.MaximumBytes = maximumBytes;
+			const XmlStatus status = ParseXml(text, document, limits, &line);
 			if (status != XmlStatus::Ok) {
 				error = std::string("line ") + std::to_string(line) + ": " + Describe(status);
 				return false;
@@ -823,9 +883,9 @@ namespace engine::game {
 			}
 
 			const uint32_t format = CountOf(*root, "format", 0);
-			if (format == 0 || format > FORMAT_VERSION) {
+			if (format == 0 || format > maximumFormat) {
 				error = "this is a format " + std::to_string(format) + " file and this build reads " +
-						std::to_string(FORMAT_VERSION);
+						std::to_string(maximumFormat);
 				return false;
 			}
 
@@ -1002,16 +1062,7 @@ namespace engine::game {
 		writer.Attribute("format", std::to_string(FORMAT_VERSION));
 		writer.Attribute("name", name.IsValid() ? name.Text() : "Game");
 
-		const world::UniverseSettings &settings = universe.Settings();
-		writer.Open("Universe");
-		writer.Attribute(
-			"mode", settings.Mode == world::ExecutionMode::WorldSerial ? "WorldSerial" : "WorldParallel"
-		);
-		writer.Attribute("catchUp", std::to_string(settings.MaximumCatchUpTicks));
-		writer.Attribute("busBudget", std::to_string(settings.BusBudgetPerTick));
-		writer.Attribute("channelQueue", std::to_string(settings.ChannelQueueLimit));
-		writer.Attribute("channelsPerWorld", std::to_string(settings.ChannelsPerWorld));
-		writer.Close();
+		WriteUniverseSettings(writer, universe.Settings());
 
 		WriteRenderingProfiles(writer, renderingProfiles);
 
@@ -1080,6 +1131,192 @@ namespace engine::game {
 		return WriteGame(universe, name, graph::PipelineSet{});
 	}
 
+	namespace {
+		constexpr size_t MAXIMUM_UNIVERSE_CDNS = 64;
+
+		struct ManifestWorld {
+			std::filesystem::path RelativePath;
+			world::WorldSettings Settings;
+			core::Name Host;
+			bool Remote = false;
+		};
+
+		bool AuthoredLocalWorld(world::Universe &universe, world::WorldId id) {
+			if (universe.IsRemote(id)) {
+				return false;
+			}
+			bool replica = false;
+			universe.Enter(id, [&replica](Store &store) { replica = store.AdoptOnly(); });
+			return !replica;
+		}
+
+		bool AddManifestWorldFile(
+			const std::filesystem::path &base,
+			std::string_view text,
+			std::unordered_set<std::string> &seen,
+			std::vector<ManifestWorld> &worlds,
+			std::string &error
+		) {
+			std::filesystem::path relative;
+			std::filesystem::path absolute;
+			if (!detail::ResolveWorldReference(base, text, relative, absolute, error)) {
+				return false;
+			}
+			const std::string key = relative.generic_string();
+			if (!seen.insert(key).second) {
+				return true;
+			}
+			if (worlds.size() >= MAXIMUM_UNIVERSE_WORLDS) {
+				error = "universe names too many worlds";
+				return false;
+			}
+			worlds.push_back(
+				ManifestWorld{
+					.RelativePath = std::move(relative),
+					.Settings = {},
+					.Host = {},
+					.Remote = false,
+				}
+			);
+			return true;
+		}
+
+		bool DiscoverManifestWorlds(
+			const std::filesystem::path &base,
+			std::unordered_set<std::string> &seen,
+			std::vector<ManifestWorld> &worlds,
+			std::string &error
+		) {
+			std::vector<std::filesystem::path> discovered;
+			if (!detail::DiscoverWorldReferences(base, discovered, error)) {
+				return false;
+			}
+			for (const std::filesystem::path &relative : discovered) {
+				if (seen.contains(relative.generic_string())) {
+					continue;
+				}
+				if (!AddManifestWorldFile(base, relative.generic_string(), seen, worlds, error)) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void EmptyUniverse(world::Universe &universe) {
+			for (const world::WorldId existing : universe.Worlds()) {
+				universe.Destroy(existing);
+			}
+		}
+
+		core::Name ImportedWorldName(world::Universe &universe, core::Name authored) {
+			if (!universe.Find(authored).IsValid()) {
+				return authored;
+			}
+			const std::string base(authored.Text());
+			for (int attempt = 2; attempt < 1000; attempt++) {
+				const core::Name candidate(base + " " + std::to_string(attempt));
+				if (!universe.Find(candidate).IsValid()) {
+					return candidate;
+				}
+			}
+			return {};
+		}
+	}
+
+	bool SaveUniverse(
+		world::Universe &universe,
+		core::Name name,
+		const graph::PipelineSet &renderingProfiles,
+		const std::filesystem::path &path,
+		const UniverseFileOptions &options,
+		std::string &error
+	) {
+		error.clear();
+		XmlWriter writer;
+		writer.Open(UNIVERSE_ROOT);
+		writer.Attribute("format", std::to_string(UNIVERSE_FORMAT_VERSION));
+		writer.Attribute("name", name.IsValid() ? name.Text() : "Universe");
+		writer.Attribute("recursive", options.RecursiveWorldDiscovery ? "true" : "false");
+		WriteUniverseSettings(writer, universe.Settings());
+		WriteRenderingProfiles(writer, renderingProfiles);
+		writer.Open("Permissions");
+		writer.Attribute("http", options.HttpEnabled ? "true" : "false");
+		writer.Close();
+		if (!options.PublisherKey.empty() || !options.Cdns.empty()) {
+			writer.Open("Content");
+			writer.Attribute("publisher", options.PublisherKey);
+			for (const UniverseCdn &cdn : options.Cdns) {
+				if (cdn.Name.empty() || cdn.Location.empty()) {
+					continue;
+				}
+				writer.Open("Cdn");
+				writer.Attribute("name", cdn.Name);
+				writer.Attribute("location", cdn.Location);
+				writer.Close();
+			}
+			writer.Close();
+		}
+		if (options.DataStore.Enabled) {
+			std::filesystem::path relative;
+			std::filesystem::path absolute;
+			if (!detail::ResolveDirectoryReference(
+					path.parent_path(), options.DataStore.Root.generic_string(), relative, absolute, error
+				)) {
+				return false;
+			}
+			writer.Open("DataStore");
+			writer.Attribute("backend", options.DataStore.Backend);
+			writer.Attribute("path", relative.generic_string());
+			writer.Close();
+		}
+		const std::filesystem::path assetsDirectory = path.parent_path() / "assets";
+		std::error_code assetsError;
+		std::filesystem::create_directories(assetsDirectory, assetsError);
+		if (assetsError) {
+			error = "could not create the universe assets directory";
+			return false;
+		}
+		writer.Open("Assets");
+		writer.Attribute("path", "assets");
+		writer.Close();
+
+		const std::filesystem::path worldDirectory = path.parent_path() / (path.stem().string() + ".worlds");
+		size_t localOrdinal = 0;
+		for (const world::WorldId id : universe.Worlds()) {
+			const world::WorldSettings settings = universe.SettingsOf(id);
+			if (universe.IsRemote(id)) {
+				writer.Open("RemoteWorld");
+				WriteWorldAttributes(writer, settings);
+				writer.Attribute("host", universe.HostOf(id).Text());
+				WriteWorldProperties(writer, settings);
+				writer.Close();
+				continue;
+			}
+			if (!AuthoredLocalWorld(universe, id)) {
+				continue;
+			}
+
+			localOrdinal++;
+			const std::filesystem::path worldPath =
+				worldDirectory / (std::to_string(localOrdinal) + "-" +
+								  detail::SafeWorldFileStem(settings.Name) + std::string(WORLD_EXTENSION));
+			const std::string document = WriteWorldDocument(universe, id, error);
+			if (document.empty()) {
+				return false;
+			}
+			if (!WriteFile(worldPath, document, error)) {
+				return false;
+			}
+
+			writer.Open("WorldFile");
+			writer.Attribute("path", worldPath.lexically_relative(path.parent_path()).generic_string());
+			writer.Close();
+		}
+
+		writer.Close();
+		return WriteFile(path, writer.Finish(), error);
+	}
+
 	bool SaveGame(
 		world::Universe &universe, core::Name name, const std::filesystem::path &path, std::string &error
 	) {
@@ -1093,12 +1330,230 @@ namespace engine::game {
 		const std::filesystem::path &path,
 		std::string &error
 	) {
+		if (path.extension() == UNIVERSE_EXTENSION) {
+			return SaveUniverse(universe, name, renderingProfiles, path, UniverseFileOptions{}, error);
+		}
 		return WriteFile(path, WriteGame(universe, name, renderingProfiles), error);
+	}
+
+	bool LoadUniverse(
+		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
+	) {
+		out = GameInfo{};
+		std::string text;
+		if (!ReadFile(path, text, error)) {
+			return false;
+		}
+
+		XmlDocument document;
+		if (!Parse(text, UNIVERSE_ROOT, document, error, UNIVERSE_FORMAT_VERSION)) {
+			return false;
+		}
+
+		const XmlElement &root = *document.Root();
+		out.Name = core::Name(TextOf(root, "name", "Universe"));
+		out.RecursiveWorldDiscovery = TextOf(root, "recursive", "false") == "true";
+		out.Universe = universe.Settings();
+		const std::filesystem::path base = path.parent_path();
+		std::unordered_set<std::string> seen;
+		std::vector<ManifestWorld> worlds;
+		bool assetsDeclared = false;
+		bool dataStoreDeclared = false;
+
+		for (const uint32_t index : root.Children) {
+			const XmlElement *child = document.At(index);
+			if (child == nullptr) {
+				continue;
+			}
+			if (child->Name == "Universe") {
+				out.Universe = ReadUniverseSettings(*child, universe.Settings());
+				continue;
+			}
+			if (child->Name == RENDERING_PROFILES) {
+				ReadRenderingProfiles(*child, out.RenderingProfiles);
+				continue;
+			}
+			if (child->Name == "Permissions") {
+				out.HttpEnabled = TextOf(*child, "http", "false") == "true";
+				continue;
+			}
+			if (child->Name == "Content") {
+				out.PublisherKey = std::string(child->Attribute("publisher"));
+				for (const uint32_t sourceIndex : child->Children) {
+					const XmlElement *source = document.At(sourceIndex);
+					if (source == nullptr || source->Name != "Cdn") {
+						continue;
+					}
+					if (out.Cdns.size() >= MAXIMUM_UNIVERSE_CDNS) {
+						error = "universe names too many content origins";
+						EmptyUniverse(universe);
+						return false;
+					}
+					UniverseCdn cdn{
+						.Name = std::string(source->Attribute("name")),
+						.Location = std::string(source->Attribute("location")),
+					};
+					if (cdn.Name.empty() || cdn.Location.empty()) {
+						error = "universe content origin needs a name and location";
+						EmptyUniverse(universe);
+						return false;
+					}
+					out.Cdns.push_back(std::move(cdn));
+				}
+				continue;
+			}
+			if (child->Name == "DataStore") {
+				if (dataStoreDeclared) {
+					error = "universe declares more than one DataStore";
+					EmptyUniverse(universe);
+					return false;
+				}
+				std::filesystem::path relative;
+				std::filesystem::path absolute;
+				if (!detail::ResolveDirectoryReference(
+						base, child->Attribute("path"), relative, absolute, error
+					)) {
+					EmptyUniverse(universe);
+					return false;
+				}
+				out.DataStore.Enabled = true;
+				out.DataStore.Backend = TextOf(*child, "backend", "binary");
+				out.DataStore.Root = std::move(relative);
+				dataStoreDeclared = true;
+				continue;
+			}
+			if (child->Name == "Assets") {
+				if (assetsDeclared) {
+					error = "universe declares more than one assets directory";
+					EmptyUniverse(universe);
+					return false;
+				}
+				std::filesystem::path relative;
+				if (!detail::ResolveDirectoryReference(
+						base, child->Attribute("path"), relative, out.Assets, error
+					)) {
+					EmptyUniverse(universe);
+					return false;
+				}
+				assetsDeclared = true;
+				continue;
+			}
+			if (child->Name == "WorldFile") {
+				if (!AddManifestWorldFile(base, child->Attribute("path"), seen, worlds, error)) {
+					EmptyUniverse(universe);
+					return false;
+				}
+				continue;
+			}
+			if (child->Name == "RemoteWorld") {
+				if (worlds.size() >= MAXIMUM_UNIVERSE_WORLDS) {
+					error = "universe names too many worlds";
+					EmptyUniverse(universe);
+					return false;
+				}
+				worlds.push_back(
+					ManifestWorld{
+						.RelativePath = {},
+						.Settings = ReadWorldAttributes(document, *child),
+						.Host = core::Name(child->Attribute("host")),
+						.Remote = true,
+					}
+				);
+			}
+		}
+
+		if (out.RecursiveWorldDiscovery && !DiscoverManifestWorlds(base, seen, worlds, error)) {
+			EmptyUniverse(universe);
+			return false;
+		}
+
+		EmptyUniverse(universe);
+		ApplyUniverseSettings(universe, out.Universe);
+		for (const ManifestWorld &entry : worlds) {
+			if (entry.Remote) {
+				world::WorldStatus status = world::WorldStatus::Ok;
+				const world::WorldId created = universe.CreateRemote(entry.Settings, entry.Host, &status);
+				if (!created.IsValid()) {
+					error = "could not create remote world '" + std::string(entry.Settings.Name.Text()) + "'";
+					EmptyUniverse(universe);
+					return false;
+				}
+				out.Worlds.push_back(entry.Settings.Name);
+				continue;
+			}
+
+			std::filesystem::path relative;
+			std::filesystem::path absolute;
+			if (!detail::ResolveWorldReference(
+					base, entry.RelativePath.generic_string(), relative, absolute, error
+				)) {
+				EmptyUniverse(universe);
+				return false;
+			}
+			std::string worldError;
+			const world::WorldId created = ImportWorld(universe, absolute, core::Name{}, worldError);
+			if (!created.IsValid()) {
+				error = "world '" + relative.generic_string() + "': " + worldError;
+				EmptyUniverse(universe);
+				return false;
+			}
+			out.Worlds.push_back(universe.NameOf(created));
+		}
+		return true;
 	}
 
 	size_t ImportUniverse(
 		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
 	) {
+		if (path.extension() == UNIVERSE_EXTENSION) {
+			world::Universe staged;
+			GameInfo stagedInfo;
+			if (!LoadUniverse(staged, path, stagedInfo, error)) {
+				out = std::move(stagedInfo);
+				return 0;
+			}
+
+			out = std::move(stagedInfo);
+			out.Worlds.clear();
+			size_t imported = 0;
+			for (const world::WorldId source : staged.Worlds()) {
+				const world::WorldSettings sourceSettings = staged.SettingsOf(source);
+				const core::Name destinationName = ImportedWorldName(universe, sourceSettings.Name);
+				if (!destinationName.IsValid()) {
+					error = "could not find a free name to import '" +
+							std::string(sourceSettings.Name.Text()) + "' under";
+					return imported;
+				}
+
+				world::WorldId created;
+				if (staged.IsRemote(source)) {
+					world::WorldSettings renamed = sourceSettings;
+					renamed.Name = destinationName;
+					created = universe.CreateRemote(renamed, staged.HostOf(source));
+				} else {
+					std::string documentError;
+					const std::string worldDocument = WriteWorldDocument(staged, source, documentError);
+					if (worldDocument.empty()) {
+						error = documentError;
+						return imported;
+					}
+					created = ReadWorldDocument(universe, worldDocument, destinationName, documentError);
+					if (!created.IsValid()) {
+						error = documentError;
+						return imported;
+					}
+				}
+
+				if (!created.IsValid()) {
+					error = "could not create world '" + std::string(destinationName.Text()) + "'";
+					return imported;
+				}
+				out.Worlds.push_back(destinationName);
+				imported++;
+			}
+			return imported;
+		}
+
 		out = GameInfo{};
 
 		std::string text;
@@ -1206,6 +1661,9 @@ namespace engine::game {
 	bool LoadGame(
 		world::Universe &universe, const std::filesystem::path &path, GameInfo &out, std::string &error
 	) {
+		if (path.extension() == UNIVERSE_EXTENSION) {
+			return LoadUniverse(universe, path, out, error);
+		}
 		out = GameInfo{};
 
 		std::string text;
@@ -1236,25 +1694,12 @@ namespace engine::game {
 			}
 
 			if (child->Name == "Universe") {
-				world::UniverseSettings settings = universe.Settings();
-				settings.MaximumCatchUpTicks = static_cast<int>(
-					CountOf(*child, "catchUp", static_cast<uint32_t>(settings.MaximumCatchUpTicks))
-				);
-				settings.BusBudgetPerTick = CountOf(*child, "busBudget", settings.BusBudgetPerTick);
-				settings.ChannelQueueLimit = CountOf(*child, "channelQueue", settings.ChannelQueueLimit);
-				settings.ChannelsPerWorld = CountOf(*child, "channelsPerWorld", settings.ChannelsPerWorld);
+				const world::UniverseSettings settings = ReadUniverseSettings(*child, universe.Settings());
 
 				// These are authored tuning, so opening a game applies the same
 				// values its file reports. Federation alone remains
 				// construction-time host policy and is not in this file.
-				settings.Mode = TextOf(*child, "mode", "WorldParallel") == "WorldSerial"
-									? world::ExecutionMode::WorldSerial
-									: world::ExecutionMode::WorldParallel;
-				universe.SetMode(settings.Mode);
-				universe.SetMaximumCatchUpTicks(settings.MaximumCatchUpTicks);
-				universe.SetBusBudgetPerTick(settings.BusBudgetPerTick);
-				universe.SetChannelQueueLimit(settings.ChannelQueueLimit);
-				universe.SetChannelsPerWorld(settings.ChannelsPerWorld);
+				ApplyUniverseSettings(universe, settings);
 				out.Universe = settings;
 				continue;
 			}
@@ -1438,8 +1883,11 @@ namespace engine::game {
 	world::WorldId ReadWorldDocument(
 		world::Universe &universe, std::string_view document, core::Name rename, std::string &error
 	) {
+		// A standalone world can hold hundreds of thousands of imported instances.
+		// Keep the parser bounded, but do not let the writer produce a normal world
+		// that its paired reader refuses at the generic 64 MiB document limit.
 		XmlDocument parsed;
-		if (!Parse(std::string(document), WORLD_ROOT, parsed, error)) {
+		if (!Parse(std::string(document), WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
 			return world::WorldId{};
 		}
 
@@ -1490,6 +1938,121 @@ namespace engine::game {
 			return world::WorldId{};
 		}
 		return ReadWorldDocument(universe, text, rename, error);
+	}
+
+	bool PrepareWorldImport(
+		const std::filesystem::path &path,
+		PreparedWorldImport &out,
+		std::string &error,
+		const WorldImportProgress &progress
+	) {
+		out = {};
+		error.clear();
+		RegisterGameClasses();
+
+		std::error_code sizeError;
+		const uintmax_t size = std::filesystem::file_size(path, sizeError);
+		if (sizeError) {
+			error = "could not inspect " + path.string();
+			return false;
+		}
+		if (size > MAXIMUM_WORLD_BYTES) {
+			error = "world document exceeds the 256 MiB limit";
+			return false;
+		}
+
+		std::ifstream file(path, std::ios::binary);
+		if (!file) {
+			error = "could not open " + path.string();
+			return false;
+		}
+		std::string text;
+		text.resize(static_cast<size_t>(size));
+		constexpr size_t READ_BLOCK = 1024u * 1024u;
+		size_t offset = 0;
+		while (offset < text.size()) {
+			const size_t bytes = std::min(READ_BLOCK, text.size() - offset);
+			file.read(text.data() + offset, static_cast<std::streamsize>(bytes));
+			if (!file) {
+				error = "could not finish reading " + path.string();
+				return false;
+			}
+			offset += bytes;
+			if (progress) {
+				progress(
+					WorldImportPhase::Read, text.empty() ? 1.0f : static_cast<float>(offset) / text.size()
+				);
+			}
+		}
+
+		if (progress) {
+			progress(WorldImportPhase::Decode, 0.0f);
+		}
+		XmlDocument parsed;
+		if (!Parse(text, WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
+			return false;
+		}
+		const XmlElement &root = *parsed.Root();
+		out.Settings = ReadWorldAttributes(parsed, root);
+
+		if (progress) {
+			progress(WorldImportPhase::Build, 0.0f);
+		}
+		ecs::Store staged("game.world-import");
+		if (!ReadWorldBody(parsed, root, staged, error)) {
+			out = {};
+			return false;
+		}
+
+		if (progress) {
+			progress(WorldImportPhase::Encode, 0.0f);
+		}
+		core::ByteWriter writer;
+		if (!staged.Save(writer)) {
+			error = "world contains data that cannot cross the import boundary";
+			out = {};
+			return false;
+		}
+		out.Snapshot.assign(writer.Bytes().begin(), writer.Bytes().end());
+		if (progress) {
+			progress(WorldImportPhase::Encode, 1.0f);
+		}
+		return true;
+	}
+
+	world::WorldId CommitWorldImport(
+		world::Universe &universe, const PreparedWorldImport &prepared, core::Name rename, std::string &error
+	) {
+		error.clear();
+		world::WorldSettings settings = prepared.Settings;
+		if (rename.IsValid()) {
+			settings.Name = rename;
+		}
+		if (!settings.Name.IsValid() || prepared.Snapshot.empty()) {
+			error = "prepared world is empty";
+			return {};
+		}
+		if (universe.Find(settings.Name).IsValid()) {
+			error = "a world called '" + std::string(settings.Name.Text()) + "' is already in this universe";
+			return {};
+		}
+
+		const world::WorldId id = universe.Create(settings);
+		if (!id.IsValid()) {
+			error = "could not create world '" + std::string(settings.Name.Text()) + "'";
+			return {};
+		}
+		bool restored = false;
+		universe.Enter(id, [&](Store &store) {
+			core::ByteReader reader(prepared.Snapshot);
+			restored = store.LoadContents(reader) && reader.AtEnd();
+		});
+		if (!restored) {
+			universe.Destroy(id);
+			error = "could not restore the prepared world";
+			return {};
+		}
+		return id;
 	}
 
 }

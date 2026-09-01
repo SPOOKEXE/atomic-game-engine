@@ -97,10 +97,6 @@ local function hash2(x: number, z: number, seed: number): number
 	return scramble(band(x * 374761393 + z * 668265263 + seed * 2246822519, MASK))
 end
 
-local function hash3(x: number, y: number, z: number, seed: number): number
-	return scramble(band(x * 374761393 + y * 1274126177 + z * 668265263 + seed * 2246822519, MASK))
-end
-
 -- Quintic fade, `6t^5 - 15t^4 + 10t^3`.
 local function fade(t: number): number
 	return t * t * t * (t * (t * 6 - 15) + 10)
@@ -152,43 +148,6 @@ local function noise2(x: number, z: number, seed: number): number
 	local n11 = gradient2(hash2(x0 + 1, z0 + 1, seed), dx - 1, dz - 1)
 
 	return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v)
-end
-
--- One lattice corner of the 3D field, in [-1, 1]. The hash is 32 bits, so
--- dividing by 2^31 and subtracting one is the whole conversion.
---
--- **A file-level function rather than a closure inside `noise3`.** It captures
--- nothing, and a closure that captures nothing is still allocated on every call
--- to the function containing it - which here was once per column, per chunk,
--- for a value that could have been made once.
-local function corner3(x: number, y: number, z: number, seed: number): number
-	return hash3(x, y, z, seed) / 2147483648.0 - 1.0
-end
-
--- 3D value noise, in [-1, 1]. Value rather than gradient because it is only
--- used to carve caves, where the cheaper field is indistinguishable and the
--- eight gradient dot products are not.
-local function noise3(x: number, y: number, z: number, seed: number): number
-	local x0 = math.floor(x)
-	local y0 = math.floor(y)
-	local z0 = math.floor(z)
-
-	local u = fade(x - x0)
-	local v = fade(y - y0)
-	local w = fade(z - z0)
-
-	local c000 = corner3(x0, y0, z0, seed)
-	local c100 = corner3(x0 + 1, y0, z0, seed)
-	local c010 = corner3(x0, y0 + 1, z0, seed)
-	local c110 = corner3(x0 + 1, y0 + 1, z0, seed)
-	local c001 = corner3(x0, y0, z0 + 1, seed)
-	local c101 = corner3(x0 + 1, y0, z0 + 1, seed)
-	local c011 = corner3(x0, y0 + 1, z0 + 1, seed)
-	local c111 = corner3(x0 + 1, y0 + 1, z0 + 1, seed)
-
-	local y00 = lerp(lerp(c000, c100, u), lerp(c001, c101, u), w)
-	local y11 = lerp(lerp(c010, c110, u), lerp(c011, c111, u), w)
-	return lerp(y00, y11, v)
 end
 
 -- Dividing fBm by its amplitude sum bounds it at ±1 and leaves it nowhere near

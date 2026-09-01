@@ -35,8 +35,10 @@ namespace engine::render {
 		SDL_GPUBuffer *const storage[] = {
 			InstanceBuffer,
 			indices != nullptr ? indices : InstanceIndexBuffer,
+			SkinOffsetBuffer,
+			JointBuffer,
 		};
-		SDL_BindGPUVertexStorageBuffers(pass, 0, storage, 2);
+		SDL_BindGPUVertexStorageBuffers(pass, 0, storage, 4);
 	}
 
 	uint32_t Renderer::Impl::DrawSlots(

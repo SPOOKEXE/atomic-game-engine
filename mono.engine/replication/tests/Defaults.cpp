@@ -223,6 +223,7 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	// A client's own input and its own identity. Sending the server's copy would
 	// tell every client what some other machine is pressing.
 	CHECK(LocalToTheClient("scene.InputState"));
+	CHECK(LocalToTheClient("scene.ControllerState"));
 	CHECK(LocalToTheClient("scene.LocalPlayer"));
 
 	// A viewer's own occlusion fade. Sending it would put one client's
@@ -483,6 +484,7 @@ TEST_CASE("an interface crosses and the machine looking at it does not", "[repli
 	// one row of it per world - so two clients typing into two boxes would be
 	// two clients writing one row.
 	CHECK(LocalToTheClient("gui.GuiServiceState"));
+	CHECK(LocalToTheClient("gui.SettingsMenuExtensions"));
 
 	// Everything else about an interface is authored, and authored state is what
 	// replication is for.

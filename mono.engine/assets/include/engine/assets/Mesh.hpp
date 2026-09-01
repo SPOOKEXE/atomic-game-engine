@@ -13,7 +13,7 @@
 
 namespace engine::assets {
 
-	// Stable vertex-buffer layout using plain float arrays.
+	// Stable 48-byte vertex-buffer layout.
 	struct MeshVertex {
 		// Object-space position.
 		float Position[3];
@@ -23,7 +23,16 @@ namespace engine::assets {
 
 		// Texture coordinate; importers normalize `v` to image row order.
 		float TexCoord[2];
+
+		// Indices into the mesh's joint palette. An unweighted entry is ignored.
+		uint16_t Joints[4]{};
+
+		// Normalized unsigned weights. A skinned vertex sums to 65535; an
+		// unskinned vertex leaves all four at zero.
+		uint16_t Weights[4]{};
 	};
+
+	static_assert(sizeof(MeshVertex) == 48);
 
 	// One run of indices drawn with one material.
 	struct Submesh {
@@ -56,6 +65,10 @@ namespace engine::assets {
 
 	// A mesh ready to upload.
 	struct MeshData {
+		// Number of entries the runtime palette must provide. Zero means the
+		// mesh is not skinned.
+		uint16_t JointCount = 0;
+
 		// The vertices, referenced by `Indices`.
 		std::vector<MeshVertex> Vertices;
 
@@ -114,13 +127,19 @@ namespace engine::assets {
 		static constexpr uint32_t MAGIC = 0x31534D41;
 
 		// The version. Bumped when the layout changes, never reused.
-		static constexpr uint16_t VERSION = 1;
+		static constexpr uint16_t VERSION = 2;
+
+		// The previous eight-float vertex format, accepted as an unskinned mesh.
+		static constexpr uint16_t LEGACY_VERSION = 1;
+
+		// Palettes are bounded so a file cannot request an unbounded GPU buffer.
+		static constexpr uint16_t MAXIMUM_JOINTS = 256;
 
 		// The most vertices this will read.
 		//
 		// A bound on what a corrupt count can make a reader allocate, and the
 		// same reasoning `Texture::MAXIMUM_DIMENSION` carries. Four million at
-		// 32 bytes each is 128 MB, which is far past any single mesh anybody
+		// 48 bytes each is 192 MB, which is far past any single mesh anybody
 		// should publish and far below what would take a machine down before
 		// the check ran.
 		static constexpr uint32_t MAXIMUM_VERTICES = 4u * 1024u * 1024u;

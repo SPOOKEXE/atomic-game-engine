@@ -1176,6 +1176,7 @@ namespace engine::scene {
 		// The camera controller is authored state - a mode, a zoom, a sensitivity
 		// - and crosses for the ordinary reason.
 		ecs::Components::Register<InputState>("scene.InputState");
+		ecs::Components::Register<ControllerState>("scene.ControllerState");
 
 		// **`AudioState` crosses for `CameraController`'s reason and not
 		// `InputState`'s.** It is authored state - a master gain and where the ear

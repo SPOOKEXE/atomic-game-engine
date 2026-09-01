@@ -41,6 +41,7 @@
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Manifest.hpp>
+#include <engine/assets/Signature.hpp>
 #include <engine/delivery/Cache.hpp>
 #include <engine/delivery/Source.hpp>
 
@@ -194,6 +195,15 @@ namespace engine::delivery {
 		//
 		// @return The verified manifest, or nullptr before one has arrived.
 		virtual const assets::Manifest *Catalogue() const = 0;
+
+		// The signature that authenticated the current catalogue.
+		//
+		// Kept beside `Catalogue` so an exporter can ground the verified manifest
+		// without owning the publisher's private key or changing its identity.
+		//
+		// @return The signature, or nullptr before a catalogue has arrived.
+		// @since v0.21
+		virtual const assets::SignatureBytes *CatalogueSignature() const = 0;
 
 		// Asks for an asset by the name a game author wrote.
 		//
