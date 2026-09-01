@@ -5254,7 +5254,8 @@ namespace studio {
 		// One world import prepared away from the UI thread. The worker touches
 		// only its result bytes and atomics; `PumpWorldImport` owns the universe.
 		//@{
-		std::jthread WorldImportWorker;
+		// Joined by PumpWorldImport or Shutdown before its result fields are read or destroyed.
+		std::thread WorldImportWorker;
 		engine::game::PreparedWorldImport PreparedWorld;
 		std::string WorldImportError;
 		std::atomic<engine::game::WorldImportPhase> ActiveWorldImportPhase{

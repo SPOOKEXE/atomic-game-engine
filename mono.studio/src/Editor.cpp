@@ -3913,7 +3913,7 @@ namespace studio {
 		ActiveWorldImportPhase.store(engine::game::WorldImportPhase::Read, std::memory_order_relaxed);
 		WorldImportDone.store(false, std::memory_order_relaxed);
 		WorldImportActive = true;
-		WorldImportWorker = std::jthread([this, path] {
+		WorldImportWorker = std::thread([this, path] {
 			WorldImportSucceeded = engine::game::PrepareWorldImport(
 				path,
 				PreparedWorld,
