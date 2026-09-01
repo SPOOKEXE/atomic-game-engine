@@ -10,6 +10,7 @@
 #include <engine/bake/RobloxModel.hpp>
 
 #include <cstddef>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
@@ -49,6 +50,7 @@ namespace studio {
 	};
 
 	using RobloxAssetMappings = std::map<std::string, std::string, std::less<>>;
+	using RobloxClassMappings = std::map<std::string, std::string, std::less<>>;
 
 	struct RobloxImportOptions {
 		// Roblox scripts are useful source material, but running them before their
@@ -66,9 +68,16 @@ namespace studio {
 		std::vector<std::string> Notes;
 	};
 
+	struct RobloxWorldPortResult {
+		RobloxImportAnalysis Analysis;
+		RobloxImportResult Import;
+	};
+
 	// Compares every decoded instance and property with the current ECS class
 	// table. Callers must have registered the normal engine class tree first.
-	RobloxImportAnalysis AnalyzeRobloxImport(const engine::bake::RobloxModel &model);
+	RobloxImportAnalysis AnalyzeRobloxImport(
+		const engine::bake::RobloxModel &model, const RobloxClassMappings &classMappings = {}
+	);
 
 	// Groups repeated references by their stable Roblox id or URI and applies
 	// any choices loaded from configuration.
@@ -76,14 +85,27 @@ namespace studio {
 	RobloxAssetChoices(const engine::bake::RobloxModel &model, const RobloxAssetMappings &mappings);
 
 	// Builds a decoded place into one edit-mode world. Matching service roots
-	// are reused, missing classes become Folders, script source is staged in the
-	// world's source cache, and selected asset URIs are rewritten before values
-	// cross into ECS storage.
+	// are reused, missing classes use the selected engine class or a Folder
+	// fallback, script source is staged in the world's source cache, and selected
+	// asset URIs are rewritten before values cross into ECS storage.
 	bool ImportRobloxPlace(
 		engine::ecs::Store &store,
 		const engine::bake::RobloxModel &model,
-		const RobloxAssetMappings &mappings,
+		const RobloxAssetMappings &assetMappings,
+		const RobloxClassMappings &classMappings,
 		RobloxImportResult &out,
+		std::string &error,
+		const RobloxImportOptions &options = {}
+	);
+
+	// Converts one Roblox place through the same analysis and import path as
+	// the widget, then writes a standalone world document.
+	bool PortRobloxPlace(
+		const std::filesystem::path &source,
+		const std::filesystem::path &destination,
+		const RobloxAssetMappings &assetMappings,
+		const RobloxClassMappings &classMappings,
+		RobloxWorldPortResult &out,
 		std::string &error,
 		const RobloxImportOptions &options = {}
 	);
@@ -92,6 +114,8 @@ namespace studio {
 	// Missing configuration is a successful empty mapping.
 	bool LoadRobloxAssetMappings(RobloxAssetMappings &out, std::string &error);
 	bool SaveRobloxAssetMappings(const RobloxAssetMappings &mappings, std::string &error);
+	bool LoadRobloxClassMappings(RobloxClassMappings &out, std::string &error);
+	bool SaveRobloxClassMappings(const RobloxClassMappings &mappings, std::string &error);
 
 	const char *Describe(engine::bake::RobloxAssetKind kind);
 }

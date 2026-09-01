@@ -5708,6 +5708,7 @@ namespace studio {
 		std::optional<engine::bake::RobloxModel> RobloxImportModel;
 		RobloxImportAnalysis RobloxAnalysis;
 		RobloxAssetMappings RobloxMappings;
+		RobloxClassMappings RobloxClassMap;
 		std::vector<RobloxAssetChoice> RobloxChoices;
 		std::string RobloxImportStatus;
 		std::string RobloxMappingIdentifier;

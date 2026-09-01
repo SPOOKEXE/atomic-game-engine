@@ -4,7 +4,9 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -21,6 +23,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <studio/Complete.hpp>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/RobloxImport.hpp>
@@ -168,6 +171,37 @@ namespace studio {
 
 		using Replacement = std::pair<std::string, std::string>;
 		using ReplacementTable = std::unordered_map<std::string, std::vector<Replacement>>;
+		using ClassTable = std::unordered_map<std::string, engine::ecs::ClassId>;
+
+		ClassTable
+		ResolveClassMappings(const RobloxClassMappings &mappings, std::vector<std::string> *notes = nullptr) {
+			ClassTable resolved;
+			std::unordered_set<uint32_t> insertable;
+			for (const engine::ecs::ClassId id : InsertableClasses()) {
+				insertable.insert(id.Index);
+			}
+			for (const auto &[source, target] : mappings) {
+				const engine::ecs::ClassId id = engine::ecs::Classes::Find(engine::core::Name(target));
+				if (source.empty() || !id.IsValid() || !insertable.contains(id.Index)) {
+					if (notes != nullptr && !source.empty()) {
+						notes->push_back(source + " has an invalid engine class mapping to " + target);
+					}
+					continue;
+				}
+				resolved.emplace(source, id);
+			}
+			return resolved;
+		}
+
+		engine::ecs::ClassId ResolveClass(const ClassTable &mappings, std::string_view source) {
+			const engine::ecs::ClassId native =
+				engine::ecs::Classes::Find(engine::core::Name(std::string(source)));
+			if (native.IsValid()) {
+				return native;
+			}
+			const auto mapped = mappings.find(std::string(source));
+			return mapped == mappings.end() ? FolderClass() : mapped->second;
+		}
 
 		std::string ReplacementKey(std::string_view path, std::string_view property) {
 			return std::string(path) + '\n' + std::string(property);
@@ -280,6 +314,7 @@ namespace studio {
 		struct BuildState {
 			engine::ecs::Store &Store;
 			const ReplacementTable &Replacements;
+			const ClassTable &Classes;
 			RobloxImportResult &Report;
 			const RobloxImportOptions &Options;
 			std::unordered_set<std::string> SourceKeys;
@@ -352,10 +387,7 @@ namespace studio {
 			}
 
 			if (instance == NULL_ENTITY) {
-				engine::ecs::ClassId classId = engine::ecs::Classes::Find(engine::core::Name(node.ClassName));
-				if (!classId.IsValid()) {
-					classId = FolderClass();
-				}
+				const engine::ecs::ClassId classId = ResolveClass(state.Classes, node.ClassName);
 				instance = state.Store.CreateInstance(classId, node.Name);
 			}
 			if (instance == NULL_ENTITY) {
@@ -405,18 +437,19 @@ namespace studio {
 		}
 	}
 
-	RobloxImportAnalysis AnalyzeRobloxImport(const engine::bake::RobloxModel &model) {
+	RobloxImportAnalysis
+	AnalyzeRobloxImport(const engine::bake::RobloxModel &model, const RobloxClassMappings &classMappings) {
 		engine::game::RegisterGameClasses();
 		engine::effects::RegisterEffectClasses();
 		(void)FolderClass();
+		const ClassTable mappedClasses = ResolveClassMappings(classMappings);
 		std::map<std::string, size_t, std::less<>> classCounts;
 		std::map<GapKey, size_t> missingProperties;
 		std::map<GapKey, size_t> conflictingProperties;
 
 		const auto visit = [&](const auto &self, const engine::bake::RobloxInstance &instance) -> void {
 			classCounts[instance.ClassName]++;
-			const engine::ecs::ClassId classId =
-				engine::ecs::Classes::Find(engine::core::Name(instance.ClassName));
+			const engine::ecs::ClassId classId = ResolveClass(mappedClasses, instance.ClassName);
 			if (classId.IsValid()) {
 				const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(classId);
 				for (const engine::bake::RobloxProperty &property : instance.Properties) {
@@ -493,7 +526,8 @@ namespace studio {
 	bool ImportRobloxPlace(
 		engine::ecs::Store &store,
 		const engine::bake::RobloxModel &model,
-		const RobloxAssetMappings &mappings,
+		const RobloxAssetMappings &assetMappings,
+		const RobloxClassMappings &classMappings,
 		RobloxImportResult &out,
 		std::string &error,
 		const RobloxImportOptions &options
@@ -506,11 +540,13 @@ namespace studio {
 		engine::game::RegisterGameClasses();
 		engine::effects::RegisterEffectClasses();
 		(void)FolderClass();
+		RobloxImportResult candidate;
+		const ClassTable mappedClasses = ResolveClassMappings(classMappings, &candidate.Notes);
 
 		ReplacementTable replacements;
 		for (const engine::bake::RobloxAssetReference &asset : model.Assets) {
-			const auto mapped = mappings.find(asset.Identifier);
-			if (mapped == mappings.end() || mapped->second.empty()) {
+			const auto mapped = assetMappings.find(asset.Identifier);
+			if (mapped == assetMappings.end() || mapped->second.empty()) {
 				continue;
 			}
 			replacements[ReplacementKey(asset.InstancePath, asset.PropertyName)].emplace_back(
@@ -518,15 +554,13 @@ namespace studio {
 			);
 		}
 
-		RobloxImportResult candidate;
-		BuildState state{store, replacements, candidate, options, {}, {}};
+		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}};
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
 			if (existing != engine::ecs::NULL_ENTITY) {
 				candidate.ReusedRoots++;
 				const engine::ecs::ClassId existingClass = store.ClassOf(existing);
-				const engine::ecs::ClassId wantedClass =
-					engine::ecs::Classes::Find(engine::core::Name(root.ClassName));
+				const engine::ecs::ClassId wantedClass = ResolveClass(mappedClasses, root.ClassName);
 				if (wantedClass.IsValid() && existingClass != wantedClass) {
 					candidate.Notes.push_back(
 						root.Name + " reused an existing root of a different engine class"
@@ -538,6 +572,63 @@ namespace studio {
 				error = state.Error;
 				return false;
 			}
+		}
+
+		out = std::move(candidate);
+		error.clear();
+		return true;
+	}
+
+	bool PortRobloxPlace(
+		const std::filesystem::path &source,
+		const std::filesystem::path &destination,
+		const RobloxAssetMappings &assetMappings,
+		const RobloxClassMappings &classMappings,
+		RobloxWorldPortResult &out,
+		std::string &error,
+		const RobloxImportOptions &options
+	) {
+		std::vector<std::byte> bytes;
+		if (!ReadBytes(source, bytes, error)) {
+			return false;
+		}
+
+		engine::bake::RobloxModel model;
+		if (!engine::bake::ReadRobloxFile(bytes, model, error)) {
+			return false;
+		}
+
+		RobloxWorldPortResult candidate;
+		candidate.Analysis = AnalyzeRobloxImport(model, classMappings);
+
+		engine::world::Universe universe;
+		const std::string stem = destination.stem().string();
+		engine::world::WorldSettings settings;
+		settings.Name = engine::core::Name(stem.empty() ? "RobloxPort" : stem);
+		const engine::world::WorldId world = universe.Create(settings);
+		if (!world.IsValid()) {
+			error = "could not create the destination world";
+			return false;
+		}
+
+		const engine::world::WorldStatus status = universe.Enter(world, [&](engine::ecs::Store &store) {
+			engine::scene::InstallServices(store);
+			ImportRobloxPlace(store, model, assetMappings, classMappings, candidate.Import, error, options);
+		});
+		if (status != engine::world::WorldStatus::Ok) {
+			error = "the destination world became unavailable";
+			return false;
+		}
+		if (!error.empty()) {
+			return false;
+		}
+		if (!engine::game::ExportWorld(universe, world, destination, error)) {
+			return false;
+		}
+		engine::world::Universe validation;
+		if (!engine::game::ImportWorld(validation, destination, engine::core::Name{}, error).IsValid()) {
+			error = "the written world did not round-trip: " + error;
+			return false;
 		}
 
 		out = std::move(candidate);
@@ -584,6 +675,45 @@ namespace studio {
 		);
 	}
 
+	bool LoadRobloxClassMappings(RobloxClassMappings &out, std::string &error) {
+		nlohmann::json document;
+		if (!ReadConfigDocument("roblox-classes.json", document, error)) {
+			if (error.empty()) {
+				out.clear();
+				return true;
+			}
+			return false;
+		}
+
+		const auto mappings = document.find("mappings");
+		if (mappings == document.end() || !mappings->is_object()) {
+			error = ConfigPath("roblox-classes.json").string() + " has no mappings object";
+			return false;
+		}
+
+		RobloxClassMappings candidate;
+		for (const auto &[source, value] : mappings->items()) {
+			if (!source.empty() && value.is_string() && !value.get_ref<const std::string &>().empty()) {
+				candidate.emplace(source, value.get<std::string>());
+			}
+		}
+		out = std::move(candidate);
+		error.clear();
+		return true;
+	}
+
+	bool SaveRobloxClassMappings(const RobloxClassMappings &mappings, std::string &error) {
+		nlohmann::json values = nlohmann::json::object();
+		for (const auto &[source, target] : mappings) {
+			if (!source.empty() && !target.empty()) {
+				values[source] = target;
+			}
+		}
+		return WriteConfigDocument(
+			"roblox-classes.json", nlohmann::json{{"version", 1}, {"mappings", std::move(values)}}, error
+		);
+	}
+
 	const char *Describe(engine::bake::RobloxAssetKind kind) {
 		using Kind = engine::bake::RobloxAssetKind;
 		switch (kind) {
@@ -619,6 +749,9 @@ namespace studio {
 			if (!LoadRobloxAssetMappings(RobloxMappings, error)) {
 				RobloxImportStatus = std::move(error);
 			}
+			if (!LoadRobloxClassMappings(RobloxClassMap, error)) {
+				RobloxImportStatus = std::move(error);
+			}
 			RobloxMappingsLoaded = true;
 		}
 
@@ -643,7 +776,7 @@ namespace studio {
 				if (!engine::bake::ReadRobloxFile(bytes, model, error)) {
 					RobloxImportStatus = std::move(error);
 				} else {
-					RobloxAnalysis = AnalyzeRobloxImport(model);
+					RobloxAnalysis = AnalyzeRobloxImport(model, RobloxClassMap);
 					RobloxChoices = RobloxAssetChoices(model, RobloxMappings);
 					RobloxImportModel = std::move(model);
 					RobloxImportApplied = false;
@@ -692,6 +825,7 @@ namespace studio {
 					store,
 					model,
 					RobloxMappings,
+					RobloxClassMap,
 					report,
 					error,
 					RobloxImportOptions{.DisableScripts = RobloxImportDisableScripts}
@@ -721,9 +855,11 @@ namespace studio {
 					RobloxAnalysis.ConflictingProperties.size()
 				);
 
+				std::string changedSource;
+				std::string changedTarget;
 				if (ImGui::BeginTable(
 						"##roblox-class-gaps",
-						2,
+						3,
 						ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY,
 						ImVec2(0.0f, engine::ui::Scaled(180.0f))
 					)) {
@@ -731,15 +867,54 @@ namespace studio {
 					ImGui::TableSetupColumn(
 						"Instances", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(90.0f)
 					);
+					ImGui::TableSetupColumn("Engine class");
 					ImGui::TableHeadersRow();
 					for (const RobloxClassGap &gap : RobloxAnalysis.MissingClasses) {
+						ImGui::PushID(gap.ClassName.c_str());
 						ImGui::TableNextRow();
 						ImGui::TableNextColumn();
 						ImGui::TextUnformatted(gap.ClassName.c_str());
 						ImGui::TableNextColumn();
 						ImGui::Text("%zu", gap.Instances);
+						ImGui::TableNextColumn();
+						const auto mapped = RobloxClassMap.find(gap.ClassName);
+						const char *label =
+							mapped == RobloxClassMap.end() ? "Folder (fallback)" : mapped->second.c_str();
+						if (ImGui::Button(label)) {
+							ImGui::OpenPopup("Choose Engine Class");
+						}
+						if (ImGui::BeginPopup("Choose Engine Class")) {
+							if (const engine::ecs::ClassId chosen = DrawClassPicker("roblox-import-class");
+								chosen.IsValid()) {
+								changedSource = gap.ClassName;
+								changedTarget =
+									std::string(engine::ecs::Classes::Describe(chosen).Name.Text());
+								ImGui::CloseCurrentPopup();
+							}
+							if (mapped != RobloxClassMap.end() && ImGui::Button("Use Folder fallback")) {
+								changedSource = gap.ClassName;
+								changedTarget.clear();
+								ImGui::CloseCurrentPopup();
+							}
+							ImGui::EndPopup();
+						}
+						ImGui::PopID();
 					}
 					ImGui::EndTable();
+				}
+				if (!changedSource.empty()) {
+					if (changedTarget.empty()) {
+						RobloxClassMap.erase(changedSource);
+					} else {
+						RobloxClassMap[changedSource] = changedTarget;
+					}
+					std::string error;
+					if (!SaveRobloxClassMappings(RobloxClassMap, error)) {
+						RobloxImportStatus = std::move(error);
+					} else {
+						RobloxImportStatus = "class mapping saved";
+					}
+					RobloxAnalysis = AnalyzeRobloxImport(model, RobloxClassMap);
 				}
 
 				const auto drawPropertyGaps = [&](const char *id,

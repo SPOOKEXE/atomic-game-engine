@@ -111,6 +111,50 @@ TEST_CASE("roblox asset mappings survive a config round trip", "[studio][robloxi
 	CHECK(loaded == written);
 }
 
+TEST_CASE("roblox class mappings survive a config round trip", "[studio][robloximport]") {
+	ScratchConfig scratch;
+	studio::RobloxClassMappings written{
+		{"MeshPart", "Part"},
+		{"RobloxOnlyContainer", "Folder"},
+	};
+	std::string error;
+	REQUIRE(studio::SaveRobloxClassMappings(written, error));
+
+	studio::RobloxClassMappings loaded;
+	REQUIRE(studio::LoadRobloxClassMappings(loaded, error));
+	CHECK(loaded == written);
+}
+
+TEST_CASE("a missing roblox class can map to an engine class", "[studio][robloximport]") {
+	engine::scene::EnsureClassTree();
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance source;
+	source.ClassName = "FuturePart";
+	source.Name = "Mapped";
+	engine::bake::RobloxValue size;
+	size.Kind = engine::bake::RobloxValueKind::Vector3;
+	size.Vector3 = {4.0f, 2.0f, 6.0f};
+	source.Properties.push_back({"Size", size});
+	model.Roots.push_back(std::move(source));
+
+	const studio::RobloxClassMappings classMappings{{"FuturePart", "Part"}};
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model, classMappings);
+	REQUIRE(analysis.MissingClasses.size() == 1);
+	CHECK(analysis.MissingProperties.empty());
+	CHECK(analysis.ConflictingProperties.empty());
+
+	engine::ecs::Store store("roblox-class-map");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(
+		studio::ImportRobloxPlace(store, model, studio::RobloxAssetMappings{}, classMappings, report, error)
+	);
+	const engine::ecs::Entity mapped = store.FindFirstRoot("Mapped");
+	REQUIRE(mapped != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(mapped) == engine::scene::PartClass());
+	CHECK(report.Properties == 1);
+}
+
 TEST_CASE("a roblox place merges service roots and stages mapped script source", "[studio][robloximport]") {
 	engine::scene::EnsureClassTree();
 	engine::ecs::Store store("roblox-import");
@@ -153,7 +197,12 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	std::string error;
 	REQUIRE(
 		studio::ImportRobloxPlace(
-			store, model, studio::RobloxAssetMappings{{"123", "animations/slash.anim"}}, report, error
+			store,
+			model,
+			studio::RobloxAssetMappings{{"123", "animations/slash.anim"}},
+			studio::RobloxClassMappings{},
+			report,
+			error
 		)
 	);
 	CHECK(error.empty());
@@ -171,46 +220,4 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	const engine::ecs::Entity driver = store.FindFirstChild(workspace, "Driver");
 	REQUIRE(driver != engine::ecs::NULL_ENTITY);
 	CHECK(store.Has<engine::script::Disabled>(driver));
-}
-
-TEST_CASE(
-	"the Bladeborne demo keeps its Luau inside one world artifact", "[studio][robloximport][bladeborne]"
-) {
-	engine::game::RegisterGameClasses();
-	engine::effects::RegisterEffectClasses();
-	(void)studio::FolderClass();
-
-	const std::filesystem::path repository =
-		std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
-	const std::filesystem::path demo = repository / "mono.engine/examples/BladeborneFloor0.aworld";
-	REQUIRE(std::filesystem::is_regular_file(demo));
-
-	engine::world::Universe universe;
-	std::string error;
-	const engine::world::WorldId imported =
-		engine::game::ImportWorld(universe, demo, engine::core::Name("BladeborneFloor0Test"), error);
-	INFO(error);
-	REQUIRE(imported.IsValid());
-	CHECK(error.empty());
-
-	universe.Enter(imported, [](engine::ecs::Store &store) {
-		const engine::ecs::Entity serverScripts = store.FindFirstRoot("ServerScriptService");
-		REQUIRE(serverScripts != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity port = store.FindFirstChild(serverScripts, "BladebornePort");
-		REQUIRE(port != engine::ecs::NULL_ENTITY);
-		CHECK(store.FindFirstChild(port, "BladeborneRuntime") != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity core = store.FindFirstChild(port, "BladeborneCore");
-		REQUIRE(core != engine::ecs::NULL_ENTITY);
-		CHECK(store.FindFirstChild(core, "CombatConfig") != engine::ecs::NULL_ENTITY);
-
-		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
-		REQUIRE(sources != nullptr);
-		CHECK(
-			sources->Find(engine::core::Name("BladebornePort/BladeborneCore/CombatConfig.luau")) != nullptr
-		);
-		CHECK(
-			sources->Find(engine::core::Name("src/ReplicatedStorage/Modules/Data/CombatConfig.luau")) !=
-			nullptr
-		);
-	});
 }

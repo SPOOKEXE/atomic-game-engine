@@ -863,10 +863,13 @@ namespace engine::game {
 			std::string_view expectedRoot,
 			XmlDocument &document,
 			std::string &error,
-			uint32_t maximumFormat = FORMAT_VERSION
+			uint32_t maximumFormat = FORMAT_VERSION,
+			size_t maximumBytes = XmlLimits{}.MaximumBytes
 		) {
 			uint32_t line = 0;
-			const XmlStatus status = ParseXml(text, document, {}, &line);
+			XmlLimits limits;
+			limits.MaximumBytes = maximumBytes;
+			const XmlStatus status = ParseXml(text, document, limits, &line);
 			if (status != XmlStatus::Ok) {
 				error = std::string("line ") + std::to_string(line) + ": " + Describe(status);
 				return false;
@@ -1845,8 +1848,12 @@ namespace engine::game {
 	world::WorldId ReadWorldDocument(
 		world::Universe &universe, std::string_view document, core::Name rename, std::string &error
 	) {
+		// A standalone world can hold hundreds of thousands of imported instances.
+		// Keep the parser bounded, but do not let the writer produce a normal world
+		// that its paired reader refuses at the generic 64 MiB document limit.
+		constexpr size_t MAXIMUM_WORLD_BYTES = 256u * 1024u * 1024u;
 		XmlDocument parsed;
-		if (!Parse(std::string(document), WORLD_ROOT, parsed, error)) {
+		if (!Parse(std::string(document), WORLD_ROOT, parsed, error, FORMAT_VERSION, MAXIMUM_WORLD_BYTES)) {
 			return world::WorldId{};
 		}
 
