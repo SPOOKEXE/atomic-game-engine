@@ -229,6 +229,9 @@ namespace studio {
 			if (ImGui::Button("Insert Object")) {
 				ImGui::OpenPopup("insert-object");
 			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Creates an object under the selection, or at the world root");
+			}
 			ImGui::EndDisabled();
 
 			if (ImGui::BeginPopup("insert-object")) {
@@ -368,9 +371,9 @@ namespace studio {
 			}
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip(
-					"Which faces a scale drag moves.\\n\\n"
-					"Side       the face you grabbed, and the opposite one stays put\\n"
-					"Both       both faces move by the step, so the part grows by twice it\\n"
+					"Which faces a scale drag moves.\n\n"
+					"Side       the face you grabbed, and the opposite one stays put\n"
+					"Both       both faces move by the step, so the part grows by twice it\n"
 					"Both Half  both faces move by half the step, so it grows by the step"
 				);
 			}
@@ -726,7 +729,7 @@ namespace studio {
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::DatasetEditorPanel) {
 			if (all) ImGui::SameLine();
-			ImGui::Checkbox("Datasets", &ShowDatasets);
+			ImGui::Checkbox("DataStore", &ShowDatasets);
 		}
 
 		if (all) {

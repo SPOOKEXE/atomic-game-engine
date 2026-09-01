@@ -929,6 +929,18 @@ namespace studio {
 		}
 	}
 
+	void Editor::DrawCdn() {
+		if (!ShowCdn) {
+			return;
+		}
+		if (!ImGui::Begin("CDN", &ShowCdn)) {
+			ImGui::End();
+			return;
+		}
+		DrawContentSettings();
+		ImGui::End();
+	}
+
 	void Editor::DrawComputeSettings() {
 		// **How this process spends its cores, in one place.** These used to be
 		// nowhere or on whichever panel first needed them - `force serial
@@ -1146,16 +1158,6 @@ namespace studio {
 
 			if (ImGui::BeginTabItem("Script Editor")) {
 				DrawScriptEditorSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Content")) {
-				DrawContentSettings();
-				ImGui::EndTabItem();
-			}
-
-			if (ImGui::BeginTabItem("Data")) {
-				DrawDataStoreSettings();
 				ImGui::EndTabItem();
 			}
 

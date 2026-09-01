@@ -91,30 +91,30 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] porting Roblox games: the compatibility widget reports missing classes and property conflicts, maps each missing Roblox class to an insertable engine class, persists those choices, and the headless converter reloads every `.aworld` it writes.
 - [x] review additions and ensure they all work, we benchmark critical ones and test them.
 
-- [_] the tooltip for "Faces Side" dropdown has "\n" embeded in text instead of actually doing newlines
-- [_] remove the "Remove Active World" button in World dropdown
-- [_] remove the `Reset to Default PBR` button.
-- [_] remove `Demo` tab
-- [_] rename "Datasets" to "DataStore" checkbox in `View` tab.
-- [_] add tooltip for: Play, Run, Pause, Stop, Spawn Player, Remove Player, Insert Object
-- [_] make `Toolbar` and `Dock Widgets` buttons in `Plugins` tab toggle the state of the dock widget, not force true.
-- [_] in `View` dropdown, add a `Hide Every Panel` button below the `Show Every Panel` button.
-- [_] move `View > Sync Rojo` to `Sync` dropdown
-- [_] Move `View > Toolbar Editor, Dock Widgets, Plugin Widgets` to `UI` dropdown
-- [_] move `View > Demo Nodes` to a new dropdown called `Demo` and call it `Demo > Node Graph`
-- [_] in `View` dropdown in studio, separate by categories: General, Script, Render, Engine, Debug & Visual
-- [_] Add a `New Profile` in `Render Pipeline` Profile dropdown above `Save Profile As...` which uses default pbr
-- [_] default widgets: 1. side top: Explorer, Worlds, Live Instances side bottom: Properties, Components
-- [_] check above edits, changes and additions and test them
-- [_] ensure `Render Pipeline` previews do not render if: menu closed, menu is not visible (e.g. different tab open on same lock spot)
-- [_] a bunch of the Render Pipeline nodes have a `Optional` that does not do anything? Check and remove if useless.
-- [_] Pipeline Profile and Bus do not do anything? even when running Rings demo. Does bus need to be swapped to jobs or something or be removed if redundant?
-- [_] Merge `World Lighting` into `Render Pipeline` and remove it
-- [_] For "Root Folder", make it a "folder selector" instead. Also make `~/Documents/atomic-game-engine/studio/stores` the default.
-- [_] create a `View > DataStores` dropdown for the datastore configuration and setup (move preferences - Data to this instead)
-- [_] Make a `View > CDN` dropdown and move all preferences tab content there instead. Add a `Configure CDN` button in Assets dock widget that opens the the CDN dock widget (or focuses it if already open).
-- [_] build out the `Components` dock widget like properties where you can edit the component values
-- [_] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
+- [x] the tooltip for "Faces Side" dropdown has "\n" embeded in text instead of actually doing newlines
+- [x] remove the "Remove Active World" button in World dropdown
+- [x] remove the `Reset to Default PBR` button.
+- [x] remove `Demo` tab
+- [x] rename "Datasets" to "DataStore" checkbox in `View` tab.
+- [x] add tooltip for: Play, Run, Pause, Stop, Spawn Player, Remove Player, Insert Object
+- [x] make `Toolbar` and `Dock Widgets` buttons in `Plugins` tab toggle the state of the dock widget, not force true.
+- [x] in `View` dropdown, add a `Hide Every Panel` button below the `Show Every Panel` button.
+- [x] move `View > Sync Rojo` to `Sync` dropdown
+- [x] Move `View > Toolbar Editor, Dock Widgets, Plugin Widgets` to `UI` dropdown
+- [x] move `View > Demo Nodes` to a new dropdown called `Demo` and call it `Demo > Node Graph`
+- [x] in `View` dropdown in studio, separate by categories: General, Script, Render, Engine, Debug & Visual
+- [x] Add a `New Profile` in `Render Pipeline` Profile dropdown above `Save Profile As...` which uses default pbr
+- [x] default widgets: 1. side top: Explorer, Worlds, Live Instances side bottom: Properties, Components
+- [x] check above edits, changes and additions and test them
+- [x] ensure `Render Pipeline` previews do not render if: menu closed, menu is not visible (e.g. different tab open on same lock spot)
+- [x] a bunch of the Render Pipeline nodes have a `Optional` that does not do anything? Check and remove if useless.
+- [x] Pipeline Profile and Bus do not do anything? even when running Rings demo. Does bus need to be swapped to jobs or something or be removed if redundant?
+- [x] Merge `World Lighting` into `Render Pipeline` and remove it
+- [x] For "Root Folder", make it a "folder selector" instead. Also make `~/Documents/atomic-game-engine/studio/stores` the default.
+- [x] create a `View > DataStores` dropdown for the datastore configuration and setup (move preferences - Data to this instead)
+- [x] Make a `View > CDN` dropdown and move all preferences tab content there instead. Add a `Configure CDN` button in Assets dock widget that opens the the CDN dock widget (or focuses it if already open).
+- [x] build out the `Components` dock widget like properties where you can edit the component values
+- [x] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
   manually - ensure it uses the CollectionService and such.
 
 - [_] in command bar, add auto complete as well

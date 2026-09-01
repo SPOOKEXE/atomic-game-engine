@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/datastore/Http.hpp>
+#include <engine/ui/Prompts.hpp>
 #include <engine/world/DataStore.hpp>
 
 #include <imgui.h>
@@ -117,6 +118,18 @@ namespace studio {
 		return true;
 	}
 
+	void Editor::DrawDataStores() {
+		if (!ShowDataStores) {
+			return;
+		}
+		if (!ImGui::Begin("DataStores", &ShowDataStores)) {
+			ImGui::End();
+			return;
+		}
+		DrawDataStoreSettings();
+		ImGui::End();
+	}
+
 	void Editor::DrawDataStoreSettings() {
 		ImGui::SeparatorText("DataStore provider");
 
@@ -135,9 +148,15 @@ namespace studio {
 		}
 
 		if (Prefs.DataStoreProvider == engine::datastore::Provider::File) {
-			const std::string defaultRoot = ConfigPath("stores").string();
-			TextField("Root folder", Prefs.DataStoreRoot, defaultRoot.c_str());
-			if (ImGui::IsItemDeactivatedAfterEdit()) {
+			const std::string root = DataStoreRoot().string();
+			ImGui::TextUnformatted("Root folder");
+			ImGui::TextWrapped("%s", root.c_str());
+			if (ImGui::Button("Select folder...")) {
+				DataStoreBrowsePath = root;
+				ImGui::OpenPopup("Select DataStore Root");
+			}
+			if (engine::ui::FolderPrompt("Select DataStore Root", DataStoreBrowsePath, "Use folder")) {
+				Prefs.DataStoreRoot = DataStoreBrowsePath;
 				(void)ConfigureDataStore();
 			}
 

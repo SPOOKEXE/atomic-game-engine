@@ -179,6 +179,8 @@ namespace studio {
 		if (!ShowRenderPipeline) {
 			return;
 		}
+		// A hidden dock tab makes Begin return false. Keep every preview evaluation,
+		// graph build, texture lookup, and GPU refresh below this gate.
 		if (!ImGui::Begin("Render Pipeline", &ShowRenderPipeline, ImGuiWindowFlags_MenuBar)) {
 			ImGui::End();
 			return;
@@ -222,16 +224,18 @@ namespace studio {
 				if (RenderingProfiles.Count() > 0) {
 					ImGui::Separator();
 				}
-				if (ImGui::MenuItem("Save Profile As...")) {
-					RenderPipelineNewName[0] = '\0';
-					RenderPipelineSaveAsWanted = true;
-				}
-				if (ImGui::MenuItem("Reset to Default PBR")) {
-					RenderPipelineName = engine::core::Name("Default PBR");
+				if (ImGui::MenuItem("New Profile")) {
+					RenderPipelineName = {};
 					RenderPipelineBasis = engine::graph::DefaultPbrDocument();
 					LoadRenderPipelineGraph(RenderPipelineBasis, RenderPipelineGraph, RenderPipelineStatus);
 					RenderPipelineCanvas.Fit(RenderPipelineGraph);
 					RenderPipelineDirty = true;
+					RenderPipelineNewName[0] = '\0';
+					RenderPipelineSaveAsWanted = true;
+				}
+				if (ImGui::MenuItem("Save Profile As...")) {
+					RenderPipelineNewName[0] = '\0';
+					RenderPipelineSaveAsWanted = true;
 				}
 				ImGui::EndMenu();
 			}
@@ -382,6 +386,10 @@ namespace studio {
 				}
 				if (ImGui::BeginTabItem("Schedule")) {
 					DrawRenderPipelineSchedule();
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Lighting")) {
+					DrawRenderPipelineLighting();
 					ImGui::EndTabItem();
 				}
 				ImGui::EndTabBar();
@@ -643,17 +651,9 @@ namespace studio {
 		);
 	}
 
-	void Editor::DrawWorldLighting() {
-		if (!ShowWorldLighting) {
-			return;
-		}
-		if (!ImGui::Begin("World Lighting", &ShowWorldLighting)) {
-			ImGui::End();
-			return;
-		}
+	void Editor::DrawRenderPipelineLighting() {
 		if (Universe == nullptr || !Active.IsValid()) {
 			ImGui::TextDisabled("no active world");
-			ImGui::End();
 			return;
 		}
 
@@ -688,11 +688,9 @@ namespace studio {
 		}
 
 		if (ImGui::Button("Edit Rendering Profiles")) {
-			ShowRenderPipeline = true;
 			LoadRenderPipeline(Active, settings.RenderingProfile);
 		}
 		ImGui::TextDisabled("Lighting values remain properties of this world's Lighting service.");
-		ImGui::End();
 	}
 
 	void Editor::DrawPipelineProfile() {
@@ -757,6 +755,12 @@ namespace studio {
 				ImVec4(1.0f, 0.55f, 0.2f, 1.0f),
 				"%zu GPU marks dropped; timings are partial",
 				Renderer.DroppedProfileMarks()
+			);
+		}
+		if (profilingTier == static_cast<int>(engine::render::ProfilingTier::Off)) {
+			ImGui::TextDisabled(
+				"Passes and memory are available now. Select CPU or Full timing while a viewport runs "
+				"to collect elapsed times."
 			);
 		}
 

@@ -134,6 +134,11 @@ namespace studio {
 		if (ImGui::SmallButton("Refresh")) {
 			RefreshStoreContents();
 		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Configure CDN")) {
+			ShowCdn = true;
+			ImGui::SetWindowFocus("CDN");
+		}
 
 		ImGui::Separator();
 

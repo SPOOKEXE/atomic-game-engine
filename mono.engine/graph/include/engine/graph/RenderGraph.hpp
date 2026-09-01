@@ -446,9 +446,6 @@ namespace engine::graph {
 		// from "once for the world".
 		NodeScope Scope = NodeScope::View;
 
-		// Whether it may be skipped when there is nothing for it to do.
-		bool Optional = false;
-
 		// Whether it runs at all.
 		//
 		// **Distinct from being dead, and an editor must keep them distinct.**

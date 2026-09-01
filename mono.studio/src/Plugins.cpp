@@ -896,7 +896,7 @@ namespace studio {
 					{"statistics", "Statistics", BuiltinStudioTool::StatisticsPanel},
 					{"frame-graph", "Frame Graph", BuiltinStudioTool::FrameGraphPanel},
 					{"heap", "Heap", BuiltinStudioTool::HeapPanel},
-					{"datasets", "Datasets", BuiltinStudioTool::DatasetEditorPanel},
+					{"datasets", "DataStore", BuiltinStudioTool::DatasetEditorPanel},
 					{"camera", "Camera Speed", BuiltinStudioTool::CameraSpeed},
 				}
 			);
@@ -912,16 +912,6 @@ namespace studio {
 					{"status", "Plugin Status", BuiltinStudioTool::PluginStatus},
 				}
 			);
-			addToolbar(
-				"demo",
-				"Demo",
-				PluginToolbarPlacement::Tabbed,
-				std::initializer_list<Row>{
-					{"nodes", "Demo Nodes", BuiltinStudioTool::DemoNodes},
-					{"description", "Demo Description", BuiltinStudioTool::DemoDescription},
-				}
-			);
-
 			const auto addPanel = [&](std::string id,
 									  std::string title,
 									  BuiltinStudioPanel panel,
@@ -2338,7 +2328,7 @@ namespace studio {
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::ToolbarEditor) {
 			if (ImGui::Button("Toolbar", ImVec2(84.0f, 0.0f))) {
-				ShowToolbarEditor = true;
+				ShowToolbarEditor = !ShowToolbarEditor;
 			}
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::DockWidgetEditor) {
@@ -2346,7 +2336,7 @@ namespace studio {
 				ImGui::SameLine();
 			}
 			if (ImGui::Button("Dock Widgets", ImVec2(104.0f, 0.0f))) {
-				ShowDockWidgetEditor = true;
+				ShowDockWidgetEditor = !ShowDockWidgetEditor;
 			}
 		}
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::PluginStatus) {

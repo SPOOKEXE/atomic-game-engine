@@ -447,7 +447,7 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Builtin);
 	CHECK(plugin.Running);
 	CHECK(plugin.Manifest.Id == "atomic.default-studio");
-	REQUIRE(plugin.Toolbars.size() == 7);
+	REQUIRE(plugin.Toolbars.size() == 6);
 	REQUIRE(plugin.Widgets.size() == 6);
 
 	const std::array expectedWidgets = {
@@ -491,6 +491,9 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Toolbars.front().Id == "transport");
 	CHECK(plugin.Toolbars.front().Placement == PluginToolbarPlacement::Pinned);
 	CHECK(plugin.Toolbars.front().Buttons.size() == 11);
+	CHECK(std::none_of(plugin.Toolbars.begin(), plugin.Toolbars.end(), [](const PluginToolbar &toolbar) {
+		return toolbar.Id == "demo";
+	}));
 
 	const auto view =
 		std::find_if(plugin.Toolbars.begin(), plugin.Toolbars.end(), [](const PluginToolbar &toolbar) {

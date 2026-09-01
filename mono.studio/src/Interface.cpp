@@ -51,7 +51,7 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v17";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v18";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -93,12 +93,14 @@ namespace studio {
 			{FRAMEGRAPH, PluginDock::Bottom},		{HEAP, PluginDock::Bottom},
 			{ROJO_SYNC, PluginDock::Right},			{"History", PluginDock::Left},
 			{"Assets", PluginDock::Left},			{"Render Pipeline", PluginDock::Bottom},
-			{"World Lighting", PluginDock::Right},	{"Pipeline Profile", PluginDock::Bottom},
+			{"Pipeline Profile", PluginDock::Bottom},
 			{"Network", PluginDock::Right},			{"Team Create", PluginDock::Right},
 			{"Control (MCP)", PluginDock::Bottom},	{"Plugins", PluginDock::Right},
 			{TOOLBAR_EDITOR, PluginDock::Bottom},	{DOCK_WIDGET_EDITOR, PluginDock::Right},
 			{"Demo Nodes", PluginDock::Bottom},		{"Dataset Editor", PluginDock::Bottom},
-			{"Roblox Import", PluginDock::Bottom},	{"Bus", PluginDock::Bottom},
+			{"DataStores", PluginDock::Right},		{"CDN", PluginDock::Right},
+			{"Roblox Import", PluginDock::Bottom},
+			{"Bus", PluginDock::Bottom},
 			{"Script Profile", PluginDock::Bottom}, {"Changes", PluginDock::Bottom},
 			{"Debugger", PluginDock::Bottom},		{"Call Stack", PluginDock::Bottom},
 			{"Breakpoints", PluginDock::Bottom},
@@ -420,9 +422,10 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
+			Skinned("DataStores", [&] { DrawDataStores(); });
+			Skinned("CDN", [&] { DrawCdn(); });
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
-			Skinned("World Lighting", [&] { DrawWorldLighting(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
 			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
@@ -1258,92 +1261,48 @@ namespace studio {
 	}
 
 	void Editor::DrawViewMenu() {
-		// **One entry for every viewport there is or could be.** A row per panel
-		// was right while there were four of them and is not now they are minted
-		// on demand: the list grew as somebody worked, most of it was off, and
-		// the one thing anybody came to this menu for - another view - was at
-		// the bottom of it.
-		//
-		// **It is still the way back**, which is this menu's whole job.
-		// `AddViewport` reopens a closed panel before it makes a new one and
-		// reopens the main one first of all, so a viewport somebody shut from
-		// its title bar comes back from here rather than being lost.
-		//
-		// N open viewports each refresh at a Nth of the frame rate, which is why
-		// there is no ceiling and no default beyond the first - see
-		// `DrawingViewport`.
+		ImGui::SeparatorText("General");
+		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
 		if (ImGui::MenuItem("New Viewport")) {
 			AddViewport();
 		}
+		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
-
-		// **Beside Worlds, and it is the way back to a view rather than to a
-		// panel.** A viewport pinned to a client and then closed used to be
-		// recoverable only because the replica had a row among the scenes; the
-		// server's view had nothing at all. Both are rows here now.
 		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
+		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
+		ImGui::MenuItem("Components", nullptr, &ShowComponents);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
-		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);
+		ImGui::MenuItem("History", nullptr, &ShowHistory);
+		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
+		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
-		ImGui::Separator();
-
-		// **In the View menu like every other panel**, because that is this
-		// program's rule: a thing that can be toggled and has no menu entry is
-		// a thing somebody turns on by accident and cannot turn off. No
-		// shortcuts of their own - the Keybinds page is where keys are decided
-		// now, and two places to bind a key is one too many.
-		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
-		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
-		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
+		ImGui::SeparatorText("Script");
+		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
+		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
 		ImGui::MenuItem("Call Stack", nullptr, &ShowCallStack);
 		ImGui::MenuItem("Breakpoints", nullptr, &ShowBreakpointsWatch);
+		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
 
-		ImGui::Separator();
-
-		// The inspectors. Closed by default and grouped apart from the panels
-		// somebody works in all day, because these are opened to answer a
-		// question and closed again.
-		ImGui::MenuItem("History", nullptr, &ShowHistory);
-		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
-		ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
+		ImGui::SeparatorText("Render");
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
-		ImGui::MenuItem("World Lighting", nullptr, &ShowWorldLighting);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
-		// TODO(asset-pipeline): expose the asset processing graph from this menu.
+
+		ImGui::SeparatorText("Engine");
+		ImGui::MenuItem("DataStore", nullptr, &ShowDatasets);
+		ImGui::MenuItem("DataStores", nullptr, &ShowDataStores);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
-		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
-		ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
-		ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
-		if (ImGui::BeginMenu("Plugin Widgets")) {
-			for (PluginPresentation *pluginPointer : Plugins) {
-				PluginPresentation &plugin = *pluginPointer;
-				if (!plugin.Running) {
-					continue;
-				}
-				for (PluginWidget &widget : plugin.Widgets) {
-					ImGui::PushID(PluginIdentity(plugin).c_str());
-					ImGui::PushID(widget.Id.c_str());
-					ImGui::MenuItem(widget.Title.c_str(), nullptr, &widget.Open);
-					ImGui::PopID();
-					ImGui::PopID();
-				}
-			}
-			ImGui::EndMenu();
-		}
-		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
-		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
 
-		ImGui::Separator();
-
-		// Not a panel, so it is below the separator rather than in the list of
-		// them - but it is a thing somebody turns off and has to be able to
-		// turn back on, which is the rule this menu exists for.
+		ImGui::SeparatorText("Debug & Visual");
+		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
+		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 		ImGui::MenuItem("Direction Gizmo", nullptr, &ShowDirectionGizmo);
 		ImGui::MenuItem("3D Cursor", nullptr, &ShowCursor);
@@ -1396,9 +1355,31 @@ namespace studio {
 
 		ImGui::Separator();
 
+		const auto setEveryPanel = [this](bool open) {
+			ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
+			ShowProperties = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores = open;
+			ShowCdn = open;
+			ShowOutput = ShowSettings = ShowHistory = ShowAssets = open;
+			ShowRenderPipeline = ShowPipelineProfile = open;
+			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
+			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
+			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowDiff = ShowDebugger = open;
+			ShowStatistics = ShowFrameGraph = ShowHeap = ShowCallStack = ShowBreakpointsWatch = open;
+			ShowRojoSync = open;
+			for (PluginPresentation *plugin : Plugins) {
+				if (plugin == nullptr || !plugin->Running) {
+					continue;
+				}
+				for (PluginWidget &widget : plugin->Widgets) {
+					widget.Open = open;
+				}
+			}
+		};
 		if (ImGui::MenuItem("Show Every Panel")) {
-			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowScripts = ShowOutput = true;
+			setEveryPanel(true);
+		}
+		if (ImGui::MenuItem("Hide Every Panel")) {
+			setEveryPanel(false);
 		}
 
 		if (ImGui::MenuItem("Reset Layout")) {
@@ -1407,7 +1388,7 @@ namespace studio {
 			// menu is rearranging the tree that is being walked.
 			ResetLayout = true;
 			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowScripts = ShowOutput = true;
+			ShowProperties = ShowComponents = ShowScripts = ShowOutput = true;
 		}
 	}
 
@@ -1626,10 +1607,6 @@ namespace studio {
 			// `examples::ExampleScenes` walks it.
 			DrawExampleSceneMenu();
 
-			if (ImGui::MenuItem("Remove Active World", nullptr, false, Universe->Count() > 1)) {
-				RemoveWorld(Active);
-			}
-
 			ImGui::Separator();
 			ImGui::TextDisabled("scenes");
 
@@ -1647,6 +1624,33 @@ namespace studio {
 
 		if (ImGui::BeginMenu("View")) {
 			DrawViewMenu();
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("UI")) {
+			ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
+			ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
+			if (ImGui::BeginMenu("Plugin Widgets")) {
+				for (PluginPresentation *pluginPointer : Plugins) {
+					PluginPresentation &plugin = *pluginPointer;
+					if (!plugin.Running) {
+						continue;
+					}
+					for (PluginWidget &widget : plugin.Widgets) {
+						ImGui::PushID(PluginIdentity(plugin).c_str());
+						ImGui::PushID(widget.Id.c_str());
+						ImGui::MenuItem(widget.Title.c_str(), nullptr, &widget.Open);
+						ImGui::PopID();
+						ImGui::PopID();
+					}
+				}
+				ImGui::EndMenu();
+			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Demo")) {
+			ImGui::MenuItem("Node Graph", nullptr, &ShowNodeDemo);
 			ImGui::EndMenu();
 		}
 
@@ -1705,6 +1709,8 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Sync")) {
+			ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
+			ImGui::Separator();
 			if (ImGui::MenuItem("Sync Rojo Project...")) {
 				ShowRojoSync = true;
 				std::snprintf(
@@ -1951,6 +1957,9 @@ namespace studio {
 			if (RunButton("Play", false, engine::ui::AccentColour())) {
 				SetRunMode(scope, RunMode::Play);
 			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Starts the scene with a server and client");
+			}
 			ImGui::EndDisabled();
 			return;
 		}
@@ -1969,6 +1978,9 @@ namespace studio {
 			if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
 				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Starts or stops the scene server without a client");
+			}
 			return;
 		}
 		if (DrawingBuiltinTool == BuiltinStudioTool::Pause) {
@@ -1978,6 +1990,9 @@ namespace studio {
 					record->Paused = !record->Paused;
 					Say(record->Paused ? "paused - the clock is stopped, the run is not" : "resumed");
 				}
+			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Pauses or resumes the active run");
 			}
 			ImGui::EndDisabled();
 			return;
@@ -1991,9 +2006,10 @@ namespace studio {
 					SetRunMode(scope, RunMode::Edit);
 				}
 			}
-			if (client && ImGui::IsItemHovered()) {
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 				ImGui::SetTooltip(
-					"removes this client and its player\nstop the scene from the server's view"
+					client ? "Removes this client and its player\nStop the scene from the server's view"
+						   : "Stops the active run and restores the edited scene"
 				);
 			}
 			ImGui::EndDisabled();
@@ -2004,6 +2020,9 @@ namespace studio {
 			if (ImGui::Button("Spawn Player")) {
 				(void)SpawnPlayer(focused);
 			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Adds a player and client to the active run");
+			}
 			ImGui::EndDisabled();
 			return;
 		}
@@ -2011,6 +2030,9 @@ namespace studio {
 			ImGui::BeginDisabled(!running || players == 0);
 			if (ImGui::Button("Remove Player")) {
 				(void)RemovePlayer(focused);
+			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Removes one player and its client from the active run");
 			}
 			ImGui::EndDisabled();
 			return;

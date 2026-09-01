@@ -1201,7 +1201,10 @@ namespace studio {
 		// The Preferences page for how this process spends its cores.
 		void DrawComputeSettings();
 
-		// The Preferences page for durable script data.
+		// The docked setup panel for durable script data.
+		void DrawDataStores();
+
+		// The controls inside the DataStores panel.
 		void DrawDataStoreSettings();
 
 		// Switches the local provider to the current preferences. Any active
@@ -1268,12 +1271,13 @@ namespace studio {
 		// @since v0.17
 		void DrawDiscordSettings();
 
-		// The Preferences page that says where content comes from.
+		// The CDN panel that says where content comes from.
 		//
 		// A reorderable list, because the order *is* the policy: a delivery
 		// client walks it and stops at the first source that answers, so "local
 		// cache first, then the origin next door" is what the list says rather
 		// than something the engine decides.
+		void DrawCdn();
 		void DrawContentSettings();
 
 		void DrawStatusBar();
@@ -1788,9 +1792,9 @@ namespace studio {
 		void DrawRenderPipelineLibrary();
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
+		void DrawRenderPipelineLighting();
 		void DrawPipelineProfile();
 		void DrawRojoSync();
-		void DrawWorldLighting();
 		void DrawProfileWatch();
 		void
 		DrawProfileImage(engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth);
@@ -3369,6 +3373,7 @@ namespace studio {
 		std::string ActiveDataStoreLocation;
 		std::vector<engine::world::SharedStoreEntry> SavedDataStoreEntries;
 		std::string DataStoreError;
+		std::string DataStoreBrowsePath;
 		double NextDataStoreFlush = 0.0;
 		bool DataStoreReady = false;
 		//@}
@@ -4812,6 +4817,7 @@ namespace studio {
 		std::string ReplaceText;
 		bool FocusFind = false;
 		std::string ComponentFilter;
+		std::string CollectionTagDraft;
 		//@}
 
 		// What the output panel is showing, and what it is searching for.
@@ -5343,6 +5349,8 @@ namespace studio {
 		bool ShowComponents = true;
 		bool ShowScripts = true;
 		bool ShowDatasets = false;
+		bool ShowDataStores = false;
+		bool ShowCdn = false;
 		bool ShowOutput = true;
 		//@}
 
@@ -5395,9 +5403,6 @@ namespace studio {
 		// The frame as a grid rather than as a canvas: every pass across the
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
 		bool ShowPipelineProfile = false;
-
-		// Per-world lighting and rendering profile selection.
-		bool ShowWorldLighting = true;
 
 		// Which resource the profile panel is showing a picture of.
 		//

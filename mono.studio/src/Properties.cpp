@@ -4,6 +4,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Enums.hpp>
@@ -172,6 +173,162 @@ namespace studio {
 				return false;
 			}
 			return false;
+		}
+
+		bool DrawSchemaValue(
+			const FieldDescriptor &field, PropertyValue &value, std::string &draft
+		) {
+			switch (field.Type) {
+			case PropertyType::Bool:
+				return ImGui::Checkbox("##value", &value.Bool);
+			case PropertyType::Int32:
+				return ImGui::DragInt("##value", &value.Int32);
+			case PropertyType::Int64:
+				return ImGui::InputScalar("##value", ImGuiDataType_S64, &value.Int64);
+			case PropertyType::Float:
+				return ImGui::DragFloat("##value", &value.Float, StepFor(value.Float));
+			case PropertyType::Double: {
+				const double step = static_cast<double>(StepFor(static_cast<float>(value.Double)));
+				return ImGui::DragScalar("##value", ImGuiDataType_Double, &value.Double, step);
+			}
+			case PropertyType::Vector3: {
+				float parts[]{value.Vector3.X, value.Vector3.Y, value.Vector3.Z};
+				if (!ImGui::DragFloat3("##value", parts, StepFor(parts[0]))) {
+					return false;
+				}
+				value.Vector3 = engine::core::Vector3{parts[0], parts[1], parts[2]};
+				return true;
+			}
+			case PropertyType::CFrame: {
+				float parts[]{value.CFrame.Position.X, value.CFrame.Position.Y, value.CFrame.Position.Z};
+				if (!ImGui::DragFloat3("##value", parts, StepFor(parts[0]))) {
+					return false;
+				}
+				value.CFrame.Position = engine::core::Vector3{parts[0], parts[1], parts[2]};
+				return true;
+			}
+			case PropertyType::Color3: {
+				float parts[]{value.Color3.R, value.Color3.G, value.Color3.B};
+				if (!ImGui::ColorEdit3("##value", parts, ImGuiColorEditFlags_Float)) {
+					return false;
+				}
+				value.Color3 = engine::core::Color3{parts[0], parts[1], parts[2]};
+				return true;
+			}
+			case PropertyType::Vector2: {
+				float parts[]{value.Vector2.X, value.Vector2.Y};
+				if (!ImGui::DragFloat2("##value", parts, StepFor(parts[0]))) {
+					return false;
+				}
+				value.Vector2 = engine::core::Vector2{parts[0], parts[1]};
+				return true;
+			}
+			case PropertyType::Enum: {
+				const char *current = value.Name.IsValid() ? Label(value.Name) : "";
+				if (!ImGui::BeginCombo("##value", current)) {
+					return false;
+				}
+				bool changed = false;
+				for (const Name member : engine::ecs::EnumTable::MembersOf(field.Enum)) {
+					if (ImGui::Selectable(Label(member), member == value.Name)) {
+						value.Name = member;
+						changed = true;
+					}
+				}
+				ImGui::EndCombo();
+				return changed;
+			}
+			case PropertyType::Name: {
+				std::string text = value.Name.IsValid() ? std::string(Label(value.Name)) : std::string{};
+				if (!TextField("##value", text)) {
+					return false;
+				}
+				value.Name = text.empty() ? Name{} : Name(text);
+				return true;
+			}
+			case PropertyType::String:
+				return TextField("##value", value.String);
+			case PropertyType::UDim:
+			case PropertyType::UDim2:
+			case PropertyType::Rect:
+			case PropertyType::NumberRange:
+			case PropertyType::NumberSequence:
+			case PropertyType::ColorSequence: {
+				if (draft.empty()) {
+					draft = FormatValue(value);
+				}
+				TextField("##value", draft);
+				if (!ImGui::IsItemDeactivatedAfterEdit()) {
+					return false;
+				}
+				PropertyValue parsed;
+				std::string reason;
+				if (!ParseValue(field.Type, draft, parsed, reason)) {
+					return false;
+				}
+				value = std::move(parsed);
+				draft.clear();
+				return true;
+			}
+			case PropertyType::Reference:
+			case PropertyType::Opaque:
+				ImGui::TextDisabled("read only");
+				return false;
+			}
+			return false;
+		}
+
+		struct CollectionTagEdit {
+			Name Tag;
+			bool Add = false;
+			bool Wanted = false;
+		};
+
+		CollectionTagEdit DrawCollectionTags(
+			const Store &store, const std::vector<Entity> &selection, std::string &draft
+		) {
+			CollectionTagEdit edit;
+			ImGui::SeparatorText("Collection Tags");
+
+			size_t taggable = 0;
+			for (const Entity instance : selection) {
+				if (store.Alive(instance) && store.Get<engine::scene::Tags>(instance) != nullptr) {
+					taggable++;
+				}
+			}
+			if (taggable == 0) {
+				ImGui::TextDisabled("the selection has no taggable instances");
+			}
+
+			if (const engine::scene::TagTable *table = store.Resource<engine::scene::TagTable>()) {
+				for (const Name tag : table->Names) {
+					size_t tagged = 0;
+					for (const Entity instance : selection) {
+						tagged += engine::scene::HasTag(store, instance, tag) ? 1u : 0u;
+					}
+					bool enabled = taggable > 0 && tagged == taggable;
+					ImGui::PushID(tag.Id());
+					if (ImGui::Checkbox(Label(tag), &enabled)) {
+						edit = CollectionTagEdit{tag, enabled, true};
+					}
+					if (tagged > 0 && tagged < taggable) {
+						ImGui::SameLine();
+						ImGui::TextDisabled("mixed");
+					}
+					ImGui::PopID();
+				}
+			}
+
+			ImGui::SetNextItemWidth(-engine::ui::Scaled(70.0f));
+			TextField("##new-collection-tag", draft, "new tag");
+			ImGui::SameLine();
+			ImGui::BeginDisabled(draft.empty() || taggable == 0);
+			if (ImGui::Button("Add")) {
+				edit = CollectionTagEdit{Name(draft), true, true};
+				draft.clear();
+			}
+			ImGui::EndDisabled();
+			return edit;
 		}
 	}
 
@@ -722,6 +879,7 @@ namespace studio {
 			bool Wanted = false;
 		};
 		Edit edit;
+		CollectionTagEdit tagEdit;
 		struct SelectedShader {
 			Entity Instance;
 			engine::scene::ShaderSource Source;
@@ -778,6 +936,7 @@ namespace studio {
 			}
 
 			ImGui::Separator();
+			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
 			if (Selection.size() == 1 && oneClass && primaryClass == engine::scene::ShaderScriptClass()) {
 				if (const engine::scene::ShaderSource *source =
 						store.Get<engine::scene::ShaderSource>(*primary)) {
@@ -1249,6 +1408,23 @@ namespace studio {
 
 		ImGui::End();
 
+		if (tagEdit.Wanted) {
+			bool changed = false;
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				for (const Entity instance : Selection) {
+					const bool had = engine::scene::HasTag(store, instance, tagEdit.Tag);
+					if (had == tagEdit.Add) {
+						continue;
+					}
+					changed |= tagEdit.Add ? engine::scene::AddTag(store, instance, tagEdit.Tag)
+									   : engine::scene::RemoveTag(store, instance, tagEdit.Tag);
+				}
+			});
+			if (changed && authoritative) {
+				MarkModified();
+			}
+		}
+
 		if (!edit.Wanted) {
 			return;
 		}
@@ -1338,12 +1514,23 @@ namespace studio {
 		TextField("##component-filter", ComponentFilter, "filter components");
 		ImGui::Separator();
 
+		struct ComponentEdit {
+			ComponentId Component;
+			Name Field;
+			PropertyValue Value;
+			bool Wanted = false;
+		};
+		ComponentEdit componentEdit;
+		CollectionTagEdit tagEdit;
+		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			const Entity instance = Selection.front();
 			if (!store.Alive(instance)) {
 				ImGui::TextDisabled("the selection is gone");
 				return;
 			}
+			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
 
 			for (const ComponentId component : store.ComponentsOf(instance)) {
 				const TypeDescriptor &descriptor = Components::Describe(component);
@@ -1379,54 +1566,46 @@ namespace studio {
 								ImGui::TextDisabled("[%s]", tag.c_str());
 							}
 						}
-						for (const FieldDescriptor &field : schema->Fields()) {
-							if (!field.Exposed || componentValue == nullptr) {
-								ImGui::BulletText(
-									"%s: %s / %s, %u bits at %u:%u",
-									field.Spelling.data(),
-									engine::ecs::Describe(field.Type),
-									engine::ecs::Describe(field.Packing),
-									field.StorageBits,
-									field.Offset,
-									field.BitOffset
-								);
-								continue;
-							}
-							PropertyValue value;
-							if (!ReadSchemaValue(componentValue, field, value)) {
-								continue;
-							}
-							ImGui::TextUnformatted(field.Spelling.data());
-							ImGui::SameLine();
-							ImGui::TextDisabled("[config]");
-							ImGui::SameLine();
-							ImGui::TextDisabled("[%s]", engine::ecs::Describe(field.Packing));
-							ImGui::SameLine();
-							ImGui::PushID(field.Name.Id());
-							std::string key =
-								std::string(descriptor.Name.Text()) + "." + std::string(field.Spelling);
-							std::string &draft = ComponentConfigDrafts[key];
-							if (!ImGui::IsItemActive() && draft.empty()) {
-								draft = FormatValue(value);
-							}
-							ImGui::SetNextItemWidth(-1.0f);
-							TextField("##config", draft);
-							if (ImGui::IsItemDeactivatedAfterEdit()) {
-								PropertyValue parsed;
-								std::string reason;
-								if (ParseValue(field.Type, draft, parsed, reason) &&
-									WriteSchemaValue(
-										store.GetComponentMutable(instance, component), field, parsed
-									)) {
-									MarkModified();
+						if (ImGui::BeginTable(
+								"##component-fields",
+								2,
+								ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+							)) {
+							ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+							ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+							for (const FieldDescriptor &field : schema->Fields()) {
+								if (!field.Exposed || componentValue == nullptr) {
+									continue;
 								}
-								draft.clear();
+								PropertyValue value;
+								if (!ReadSchemaValue(componentValue, field, value)) {
+									continue;
+								}
+								ImGui::TableNextRow();
+								ImGui::TableSetColumnIndex(0);
+								ImGui::AlignTextToFramePadding();
+								ImGui::TextUnformatted(field.Spelling.data());
+								if (ImGui::IsItemHovered()) {
+									ImGui::SetTooltip(
+										"%s, %s packing, %u bits at %u:%u",
+										engine::ecs::Describe(field.Type),
+										engine::ecs::Describe(field.Packing),
+										field.StorageBits,
+										field.Offset,
+										field.BitOffset
+									);
+								}
+								ImGui::TableSetColumnIndex(1);
+								ImGui::PushID(field.Name.Id());
+								ImGui::SetNextItemWidth(-1.0f);
+								const std::string key =
+									std::string(descriptor.Name.Text()) + "." + std::string(field.Spelling);
+								if (DrawSchemaValue(field, value, ComponentConfigDrafts[key])) {
+									componentEdit = ComponentEdit{component, field.Name, value, true};
+								}
+								ImGui::PopID();
 							}
-							ImGui::PopID();
-							for (const std::string &tag : field.Tags) {
-								ImGui::SameLine();
-								ImGui::TextDisabled("[%s]", tag.c_str());
-							}
+							ImGui::EndTable();
 						}
 					}
 
@@ -1446,6 +1625,43 @@ namespace studio {
 				ImGui::PopID();
 			}
 		});
+
+		bool modified = false;
+		if (componentEdit.Wanted) {
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				const Schema *schema = Schemas::Of(componentEdit.Component);
+				if (schema == nullptr) {
+					return;
+				}
+				const auto field = std::find_if(
+					schema->Fields().begin(), schema->Fields().end(), [&](const FieldDescriptor &candidate) {
+						return candidate.Name == componentEdit.Field;
+					}
+				);
+				if (field == schema->Fields().end()) {
+					return;
+				}
+				for (const Entity instance : Selection) {
+					void *component = store.GetComponentMutable(instance, componentEdit.Component);
+					modified |= component != nullptr && WriteSchemaValue(component, *field, componentEdit.Value);
+				}
+			});
+		}
+		if (tagEdit.Wanted) {
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				for (const Entity instance : Selection) {
+					const bool had = engine::scene::HasTag(store, instance, tagEdit.Tag);
+					if (had == tagEdit.Add) {
+						continue;
+					}
+					modified |= tagEdit.Add ? engine::scene::AddTag(store, instance, tagEdit.Tag)
+										: engine::scene::RemoveTag(store, instance, tagEdit.Tag);
+				}
+			});
+		}
+		if (modified && authoritative) {
+			MarkModified();
+		}
 
 		ImGui::End();
 	}

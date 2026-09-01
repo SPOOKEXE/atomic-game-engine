@@ -352,7 +352,6 @@ namespace engine::graph {
 				pending.Name = edit.Name;
 				pending.Kind = edit.NodeKind;
 				pending.Scope = edit.Scope;
-				pending.Optional = edit.Optional;
 				building = true;
 				break;
 			case EditKind::Set: {
@@ -484,7 +483,9 @@ namespace engine::graph {
 				out.push_back(' ');
 				AppendQuoted(out, edit.NodeKind.Text());
 				out += ' ' + std::string(Describe(edit.Scope));
-				out += ' ' + std::string(FlagText(edit.Optional));
+				// Kept as false in version 2 documents so older readers retain the
+				// same token shape. The old optional field never affected a schedule.
+				out += " no";
 				break;
 			case EditKind::Reads:
 			case EditKind::Writes:
@@ -571,8 +572,9 @@ namespace engine::graph {
 				edit.Name = core::Name(name);
 			} else if (word == "node") {
 				edit.Kind = EditKind::AddNode;
+				bool ignoredOptional = false;
 				parsed = TakeQuoted(line, name) && TakeQuoted(line, second) &&
-						 ScopeFromText(TakeWord(line), edit.Scope) && TakeFlag(line, edit.Optional);
+						 ScopeFromText(TakeWord(line), edit.Scope) && TakeFlag(line, ignoredOptional);
 				edit.Name = core::Name(name);
 				edit.NodeKind = core::Name(second);
 			} else if (word == "reads" || word == "writes") {
@@ -807,13 +809,12 @@ namespace engine::graph {
 			document.Record(std::move(edit));
 		};
 
-		const auto node = [&document](std::string_view name, NodeScope scope, bool optional = false) {
+		const auto node = [&document](std::string_view name, NodeScope scope) {
 			Edit edit;
 			edit.Kind = EditKind::AddNode;
 			edit.Name = core::Name(name);
 			edit.NodeKind = core::Name(name);
 			edit.Scope = scope;
-			edit.Optional = optional;
 			document.Record(std::move(edit));
 		};
 
@@ -857,7 +858,7 @@ namespace engine::graph {
 		node("world", NodeScope::World);
 		touches(EditKind::Writes, "world-entities", "entities");
 
-		node("shadow", NodeScope::World, true);
+		node("shadow", NodeScope::World);
 		touches(EditKind::Reads, "world-entities", "entities");
 		touches(EditKind::Writes, "shadow", "shadow");
 
@@ -884,7 +885,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Writes, "view-instances", "instances");
 
-		node("mirror-capture", NodeScope::View, true);
+		node("mirror-capture", NodeScope::View);
 		touches(EditKind::Reads, "last-frame", "last-frame");
 		touches(EditKind::Reads, "world-entities", "world-state");
 		touches(EditKind::Reads, "shadow", "shadow");
@@ -929,7 +930,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "linear-depth", "linear");
 
-		node("ssao", NodeScope::View, true);
+		node("ssao", NodeScope::View);
 		touches(EditKind::Reads, "linear-depth", "depth");
 		touches(EditKind::Reads, "normal", "normal");
 		touches(EditKind::Writes, "occlusion", "occlusion");
@@ -983,7 +984,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "display", "image");
 		touches(EditKind::Writes, "scene-image", "image");
 
-		node("interface", NodeScope::Frame, true);
+		node("interface", NodeScope::Frame);
 		touches(EditKind::Writes, "interface-image", "image");
 
 		node("overlay", NodeScope::Frame);
@@ -1035,14 +1036,13 @@ namespace engine::graph {
 					}
 				);
 			};
-		const auto node = [&document](std::string_view name, NodeScope scope, bool optional = false) {
+		const auto node = [&document](std::string_view name, NodeScope scope) {
 			document.Record(
 				Edit{
 					.Kind = EditKind::AddNode,
 					.Name = core::Name(name),
 					.NodeKind = core::Name(name),
 					.Scope = scope,
-					.Optional = optional,
 				}
 			);
 		};
@@ -1093,7 +1093,7 @@ namespace engine::graph {
 		node("present", NodeScope::Frame);
 		touches(EditKind::Reads, "forward-colour", "image");
 		touches(EditKind::Writes, "scene-image", "image");
-		node("interface", NodeScope::Frame, true);
+		node("interface", NodeScope::Frame);
 		touches(EditKind::Writes, "interface-image", "image");
 		node("overlay", NodeScope::Frame);
 		touches(EditKind::Reads, "scene-image", "scene");
