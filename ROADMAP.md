@@ -56,7 +56,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] ensure weld / weld constraints work
 - [_] ensure ViewportFrame and WorldRoot are implemented and work
 
+- [_] fix selection box not being aligned to object
+
 - [_] gtlf default character (unreal style)
+
+in StressParticles demo:
+- [_] graph.cull-bound needs optimisations (0.3ms-0.5ms), see what we can do there.
+- [_] between `ViewRecording` and `execute graph` there is a big unaccounted section
+- [_] `render preperation` takes 0.373ms of which `collect instances` takes 0.277ms of which `interpolate` and `build skin palettes` takes 0.123ms and 0.143ms respectively (these seem weird and should not be here - check batched compute).
+- [_] check we are only sending newly updated information to the gpu to render (cascaded cache hit - "objects" and "particles" both update)
+- [_] also why is `objects` updating for the StressParticles? `particles` should be the only one. Check what causes the update.
 
 ### v0.23
 
@@ -117,6 +126,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] VR support (oculus rift s)
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
+- [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
+- [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
 
 ### Open Decision
 
