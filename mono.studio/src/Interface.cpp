@@ -20,6 +20,7 @@
 #include <imgui_internal.h>
 #include <span>
 #include <string_view>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
@@ -1454,7 +1455,9 @@ namespace studio {
 
 			if (ImGui::MenuItem("Import World...", nullptr, false, true)) {
 				AskingImport = true;
-				PathBuffer.clear();
+				// Converted example worlds live with Studio's other durable files,
+				// outside whichever build or checkout launched the editor.
+				PathBuffer = ConfigPath("worlds").string();
 			}
 
 			// **Import rather than Open, and they are different operations.**
