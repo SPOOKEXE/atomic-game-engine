@@ -13,6 +13,7 @@
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@
 #include <imgui_internal.h>
 #include <span>
 #include <string_view>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
@@ -49,19 +51,7 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		// **v3 because Settings is a panel the saved layout has never heard
-		// of**, and a panel a layout does not know about opens floating in a
-		// corner. Bumping costs everybody the arrangement they dragged into
-		// place, which is why `mono.studio/AGENTS.md` says to do it when a
-		// panel is added and not otherwise.
-		// **v9 because Render Pipeline is a panel the saved layout has never
-		// heard of**, and a panel a layout does not know about opens floating in
-		// a corner - which is exactly the failure it exists to fix.
-		// **v12 because v11 was briefly built with the old side-by-side split.**
-		// Reusing that id leaves half the scene empty for anybody who launched it.
-		// **v16 because Toolbar Editor and Dock Widgets are new panels that the
-		// saved layout has never heard of.**
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v16";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v18";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -87,16 +77,63 @@ namespace studio {
 		constexpr const char *TOOLBAR_EDITOR = "Toolbar Editor";
 		constexpr const char *DOCK_WIDGET_EDITOR = "Dock Widgets";
 
-		// The rest, which have no constant of their own because only this list
-		// and their own `Begin` ever name them. Spelled here rather than
-		// hoisted into a dozen more constants: a name used twice in one file is
-		// not the drift a constant prevents.
-		constexpr const char *SKINNABLE[]{
-			VIEWPORT,			VIEWPORT2, EXPLORER,		 WORLDS,		  INSTANCES,  PROPERTIES,
-			COMPONENTS,			SCRIPTS,   OUTPUT,			 "Command Bar",	  SETTINGS,	  STATISTICS,
-			FRAMEGRAPH,			HEAP,	   ROJO_SYNC,		 "History",		  "Assets",	  "Render Pipeline",
-			"World Lighting",	"Network", "Team Create",	 "Control (MCP)", "Plugins",  TOOLBAR_EDITOR,
-			DOCK_WIDGET_EDITOR, "Bus",	   "Script Profile", "Changes",		  "Debugger",
+		struct NativePanelDock {
+			const char *Label = nullptr;
+			PluginDock Dock = PluginDock::Floating;
+		};
+
+		// One declaration gives every native panel both its settings entry and its
+		// first-run home. Adding it to only one side is how panels became floaters.
+		constexpr NativePanelDock NATIVE_PANEL_DOCKS[]{
+			{EXPLORER, PluginDock::Left},
+			{WORLDS, PluginDock::Left},
+			{INSTANCES, PluginDock::Left},
+			{PROPERTIES, PluginDock::Right},
+			{COMPONENTS, PluginDock::Right},
+			{SCRIPTS, PluginDock::Bottom},
+			{OUTPUT, PluginDock::Bottom},
+			{"Command Bar", PluginDock::Bottom},
+			{SETTINGS, PluginDock::Right},
+			{STATISTICS, PluginDock::Right},
+			{FRAMEGRAPH, PluginDock::Bottom},
+			{HEAP, PluginDock::Bottom},
+			{ROJO_SYNC, PluginDock::Right},
+			{"History", PluginDock::Left},
+			{"Assets", PluginDock::Left},
+			{"Render Pipeline", PluginDock::Bottom},
+			{"Pipeline Profile", PluginDock::Bottom},
+			{"Network", PluginDock::Right},
+			{"Team Create", PluginDock::Right},
+			{"Control (MCP)", PluginDock::Bottom},
+			{"Plugins", PluginDock::Right},
+			{TOOLBAR_EDITOR, PluginDock::Bottom},
+			{DOCK_WIDGET_EDITOR, PluginDock::Right},
+			{"Demo Nodes", PluginDock::Bottom},
+			{"Dataset Editor", PluginDock::Bottom},
+			{"DataStores", PluginDock::Right},
+			{"CDN", PluginDock::Right},
+			{"Roblox Import", PluginDock::Bottom},
+			{"Bus", PluginDock::Bottom},
+			{"Script Profile", PluginDock::Bottom},
+			{"Changes", PluginDock::Bottom},
+			{"Debugger", PluginDock::Bottom},
+			{"Call Stack", PluginDock::Bottom},
+			{"Breakpoints", PluginDock::Bottom},
+		};
+
+		constexpr auto SKINNABLE = [] {
+			std::array<const char *, std::size(NATIVE_PANEL_DOCKS) + 2> panels{};
+			panels[0] = VIEWPORT;
+			panels[1] = VIEWPORT2;
+			for (size_t index = 0; index < std::size(NATIVE_PANEL_DOCKS); index++) {
+				panels[index + 2] = NATIVE_PANEL_DOCKS[index].Label;
+			}
+			return panels;
+		}();
+
+		struct PluginDockRequest {
+			std::string Label;
+			PluginDock Dock = PluginDock::Floating;
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -110,8 +147,13 @@ namespace studio {
 		//                      both how many there are and what they are called -
 		//                      see `Editor::ResizeViewports`.
 		// @param splitViewports Whether an extra viewport is open in this layout.
-		void
-		BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles, bool splitViewports) {
+		// @param pluginWindows  The dynamic plugin windows and their requested homes.
+		void BuildDefaultLayout(
+			ImGuiID dockspace,
+			std::span<const char *const> extraTitles,
+			bool splitViewports,
+			std::span<const PluginDockRequest> pluginWindows
+		) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
@@ -157,36 +199,43 @@ namespace studio {
 					ImGui::DockBuilderDockWindow(title, centre);
 				}
 			}
-			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
-			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
+			const auto dockNodeFor = [&](PluginDock dock) {
+				switch (dock) {
+				case PluginDock::Centre:
+					return centre;
+				case PluginDock::Left:
+					return rightUpper;
+				case PluginDock::Right:
+					return rightLower;
+				case PluginDock::Bottom:
+					return bottom;
+				case PluginDock::Floating:
+					return ImGuiID{0};
+				}
+				return ImGuiID{0};
+			};
 
-			// Beside the Worlds panel, because they answer the two halves of one
-			// question: what this game *has*, and what of it is *running*.
-			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
-			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
-			ImGui::DockBuilderDockWindow(COMPONENTS, rightLower);
-			ImGui::DockBuilderDockWindow("World Lighting", rightLower);
-			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
-			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
+			// Closed panels still get a home. Otherwise the first time somebody
+			// opens one it appears as a loose window unrelated to the dockspace.
+			for (const NativePanelDock &panel : NATIVE_PANEL_DOCKS) {
+				ImGui::DockBuilderDockWindow(panel.Label, dockNodeFor(panel.Dock));
+			}
 
-			// Beside the properties rather than in the centre: they are panels
-			// somebody opens, reads or changes one thing in, and leaves - and
-			// the centre belongs to the world.
-			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
-			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
-			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
-			ImGui::DockBuilderDockWindow(HEAP, bottom);
-			ImGui::DockBuilderDockWindow(ROJO_SYNC, rightLower);
-			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
-			ImGui::DockBuilderDockWindow(TOOLBAR_EDITOR, bottom);
-			ImGui::DockBuilderDockWindow(DOCK_WIDGET_EDITOR, rightLower);
+			// A dockspace version changes every node id. Plugin windows are dynamic,
+			// so omitting them here strands their saved old id and makes them float.
+			for (const PluginDockRequest &window : pluginWindows) {
+				const ImGuiID target = dockNodeFor(window.Dock);
+				if (target != 0) {
+					ImGui::DockBuilderDockWindow(window.Label.c_str(), target);
+				}
+			}
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
 	}
 
 	std::span<const char *const> SkinnablePanels() {
-		return std::span<const char *const>(SKINNABLE, std::size(SKINNABLE));
+		return std::span<const char *const>(SKINNABLE.data(), SKINNABLE.size());
 	}
 
 	const engine::ui::ThemeColours &Editor::PanelColoursFor(const char *panel) const {
@@ -257,21 +306,36 @@ namespace studio {
 		for (const ViewportState &view : Extras) {
 			extraTitles.push_back(view.Title.c_str());
 		}
-		const bool splitViewports =
-			std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) { return view.Open; });
-
-		if (ResetLayout) {
-			ResetLayout = false;
-			BuildDefaultLayout(dockspace, extraTitles, splitViewports);
-		}
-
 		static bool built = false;
+		bool buildLayout = ResetLayout;
+		ResetLayout = false;
 		if (!built) {
 			built = true;
 			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
 				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
-				BuildDefaultLayout(dockspace, extraTitles, splitViewports);
+				buildLayout = true;
 			}
+		}
+
+		if (buildLayout) {
+			std::vector<PluginDockRequest> pluginWindows;
+			for (const PluginPresentation *plugin : Plugins) {
+				if (plugin == nullptr || !plugin->Running) {
+					continue;
+				}
+				for (const PluginWidget &widget : plugin->Widgets) {
+					if (widget.BuiltinPanel == BuiltinStudioPanel::None) {
+						pluginWindows.push_back(
+							PluginDockRequest{PluginWidgetLabel(*plugin, widget), widget.Dock}
+						);
+					}
+				}
+			}
+			const bool splitViewports =
+				std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) {
+					return view.Open;
+				});
+			BuildDefaultLayout(dockspace, extraTitles, splitViewports, pluginWindows);
 		}
 
 		// Reset before any panel draws: the claim is a within-frame fact, not
@@ -328,24 +392,10 @@ namespace studio {
 		}
 
 		{
-			ENGINE_PROFILE_CAT("explorer", engine::core::ProfileCategory::Render);
-			Skinned(EXPLORER, [&] { DrawExplorer(); });
-		}
-		{
 			ENGINE_PROFILE_CAT("worlds", engine::core::ProfileCategory::Render);
 			Skinned(WORLDS, [&] { DrawWorlds(); });
 			Skinned(INSTANCES, [&] { DrawLiveInstances(); });
 		}
-		{
-			ENGINE_PROFILE_CAT("properties", engine::core::ProfileCategory::Render);
-			Skinned(PROPERTIES, [&] { DrawProperties(); });
-			Skinned(COMPONENTS, [&] { DrawComponents(); });
-		}
-		{
-			ENGINE_PROFILE_CAT("scripts", engine::core::ProfileCategory::Render);
-			Skinned(SCRIPTS, [&] { DrawScripts(); });
-		}
-
 		{
 			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
 			Skinned(OUTPUT, [&] { DrawOutput(); });
@@ -387,9 +437,10 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
+			Skinned("DataStores", [&] { DrawDataStores(); });
+			Skinned("CDN", [&] { DrawCdn(); });
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
-			Skinned("World Lighting", [&] { DrawWorldLighting(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
 			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
@@ -400,11 +451,8 @@ namespace studio {
 			Skinned(DOCK_WIDGET_EDITOR, [&] { DrawDockWidgetEditor(); });
 			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
-			// **Not `Skinned`, and that is the difference between the two
-			// halves of this feature.** Every panel above is the editor's and
-			// takes its colours from the settings page; a plugin's dock widget
-			// is the plugin's and takes them from `SetWidgetColour`, per widget,
-			// inside the loop.
+			// Default Studio contributes native panels through this same plugin
+			// path. Installed widgets retain their per-widget script colours.
 			DrawPluginWidgets();
 
 			Skinned("Bus", [&] { DrawBus(); });
@@ -432,11 +480,14 @@ namespace studio {
 			ENGINE_PROFILE_CAT("dialogs", engine::core::ProfileCategory::Render);
 			DrawDialogs();
 			DrawPalette();
+			DrawClientSettings();
 		}
 
 		{
 			ENGINE_PROFILE_CAT("camera", engine::core::ProfileCategory::Render);
-			DriveCamera();
+			if (!ShowClientSettings) {
+				DriveCamera();
+			}
 		}
 
 		// **Immediately after the camera moves and before the frame ends.** See
@@ -719,7 +770,9 @@ namespace studio {
 		const Vector3 right = rotation.RightVector();
 
 		Vector3 position = frame.Position;
-		Vector3 move;
+		float forwardInput = 0.0f;
+		float rightInput = 0.0f;
+		float upInput = 0.0f;
 
 		// **WASD without holding a mouse button, which is what an author
 		// expects.** Flying used to require the right button down - the
@@ -757,24 +810,25 @@ namespace studio {
 
 		if (driving) {
 			if (ImGui::IsKeyDown(ImGuiKey_W)) {
-				move = move + forward;
+				forwardInput += 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_S)) {
-				move = move - forward;
+				forwardInput -= 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_D)) {
-				move = move + right;
+				rightInput += 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_A)) {
-				move = move - right;
+				rightInput -= 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_E)) {
-				move = move + Vector3{0.0f, 1.0f, 0.0f};
+				upInput += 1.0f;
 			}
 			if (ImGui::IsKeyDown(ImGuiKey_Q)) {
-				move = move - Vector3{0.0f, 1.0f, 0.0f};
+				upInput -= 1.0f;
 			}
 		}
+		const Vector3 move = CameraRelativeMovement(rotation, forwardInput, rightInput, upInput);
 
 		// --- pan, dolly and focus -------------------------------------------
 		//
@@ -1225,95 +1279,48 @@ namespace studio {
 	}
 
 	void Editor::DrawViewMenu() {
-		// **One entry for every viewport there is or could be.** A row per panel
-		// was right while there were four of them and is not now they are minted
-		// on demand: the list grew as somebody worked, most of it was off, and
-		// the one thing anybody came to this menu for - another view - was at
-		// the bottom of it.
-		//
-		// **It is still the way back**, which is this menu's whole job.
-		// `AddViewport` reopens a closed panel before it makes a new one and
-		// reopens the main one first of all, so a viewport somebody shut from
-		// its title bar comes back from here rather than being lost.
-		//
-		// N open viewports each refresh at a Nth of the frame rate, which is why
-		// there is no ceiling and no default beyond the first - see
-		// `DrawingViewport`.
+		ImGui::SeparatorText("General");
+		ImGui::MenuItem("Viewport", nullptr, &ShowViewport);
 		if (ImGui::MenuItem("New Viewport")) {
 			AddViewport();
 		}
 		ImGui::MenuItem("Explorer", nullptr, &ShowExplorer);
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
-
-		// **Beside Worlds, and it is the way back to a view rather than to a
-		// panel.** A viewport pinned to a client and then closed used to be
-		// recoverable only because the replica had a row among the scenes; the
-		// server's view had nothing at all. Both are rows here now.
 		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
 		ImGui::MenuItem("Components", nullptr, &ShowComponents);
-		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
-		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);
+		ImGui::MenuItem("History", nullptr, &ShowHistory);
+		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
+		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
-		ImGui::Separator();
-
-		// **In the View menu like every other panel**, because that is this
-		// program's rule: a thing that can be toggled and has no menu entry is
-		// a thing somebody turns on by accident and cannot turn off. No
-		// shortcuts of their own - the Keybinds page is where keys are decided
-		// now, and two places to bind a key is one too many.
-		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
-		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
-		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
+		ImGui::SeparatorText("Script");
+		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
+		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
 		ImGui::MenuItem("Call Stack", nullptr, &ShowCallStack);
 		ImGui::MenuItem("Breakpoints", nullptr, &ShowBreakpointsWatch);
+		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
 
-		ImGui::Separator();
-
-		// The inspectors. Closed by default and grouped apart from the panels
-		// somebody works in all day, because these are opened to answer a
-		// question and closed again.
-		ImGui::MenuItem("History", nullptr, &ShowHistory);
-		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
-		ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
+		ImGui::SeparatorText("Render");
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
-		ImGui::MenuItem("World Lighting", nullptr, &ShowWorldLighting);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
-		// TODO(asset-pipeline): expose the asset processing graph from this menu.
+
+		ImGui::SeparatorText("Engine");
+		ImGui::MenuItem("DataStore", nullptr, &ShowDatasets);
+		ImGui::MenuItem("DataStores", nullptr, &ShowDataStores);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
-		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
-		ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
-		ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
-		if (ImGui::BeginMenu("Plugin Widgets")) {
-			for (LoadedPlugin &plugin : Plugins) {
-				if (!plugin.Running) {
-					continue;
-				}
-				for (PluginWidget &widget : plugin.Widgets) {
-					ImGui::PushID(PluginIdentity(plugin).c_str());
-					ImGui::PushID(widget.Id.c_str());
-					ImGui::MenuItem(widget.Title.c_str(), nullptr, &widget.Open);
-					ImGui::PopID();
-					ImGui::PopID();
-				}
-			}
-			ImGui::EndMenu();
-		}
-		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
-		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
 
-		ImGui::Separator();
-
-		// Not a panel, so it is below the separator rather than in the list of
-		// them - but it is a thing somebody turns off and has to be able to
-		// turn back on, which is the rule this menu exists for.
+		ImGui::SeparatorText("Debug & Visual");
+		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
+		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 		ImGui::MenuItem("Direction Gizmo", nullptr, &ShowDirectionGizmo);
 		ImGui::MenuItem("3D Cursor", nullptr, &ShowCursor);
@@ -1366,9 +1373,31 @@ namespace studio {
 
 		ImGui::Separator();
 
+		const auto setEveryPanel = [this](bool open) {
+			ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
+			ShowProperties = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores = open;
+			ShowCdn = open;
+			ShowOutput = ShowSettings = ShowHistory = ShowAssets = open;
+			ShowRenderPipeline = ShowPipelineProfile = open;
+			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
+			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
+			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowDiff = ShowDebugger = open;
+			ShowStatistics = ShowFrameGraph = ShowHeap = ShowCallStack = ShowBreakpointsWatch = open;
+			ShowRojoSync = open;
+			for (PluginPresentation *plugin : Plugins) {
+				if (plugin == nullptr || !plugin->Running) {
+					continue;
+				}
+				for (PluginWidget &widget : plugin->Widgets) {
+					widget.Open = open;
+				}
+			}
+		};
 		if (ImGui::MenuItem("Show Every Panel")) {
-			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowScripts = ShowOutput = true;
+			setEveryPanel(true);
+		}
+		if (ImGui::MenuItem("Hide Every Panel")) {
+			setEveryPanel(false);
 		}
 
 		if (ImGui::MenuItem("Reset Layout")) {
@@ -1377,7 +1406,7 @@ namespace studio {
 			// menu is rearranging the tree that is being walked.
 			ResetLayout = true;
 			ShowViewport = ShowExplorer = ShowWorlds = true;
-			ShowProperties = ShowScripts = ShowOutput = true;
+			ShowProperties = ShowComponents = ShowScripts = ShowOutput = true;
 		}
 	}
 
@@ -1471,7 +1500,9 @@ namespace studio {
 
 			if (ImGui::MenuItem("Import World...", nullptr, false, true)) {
 				AskingImport = true;
-				PathBuffer.clear();
+				// Converted example worlds live with Studio's other durable files,
+				// outside whichever build or checkout launched the editor.
+				PathBuffer = ConfigPath("worlds").string();
 			}
 
 			// **Import rather than Open, and they are different operations.**
@@ -1482,19 +1513,19 @@ namespace studio {
 				AskingImportUniverse = true;
 				PathBuffer.clear();
 			}
-			if (ImGui::MenuItem("Export Active World...", nullptr, false, Active.IsValid())) {
-				AskingExport = true;
-				PathBuffer =
-					std::string(Label(Universe->NameOf(Active))) + std::string(engine::game::WORLD_EXTENSION);
+			if (ImGui::MenuItem("Import Roblox Place...", nullptr, false, true)) {
+				ShowRobloxImport = true;
 			}
-
-			// **Beside the world export rather than beside Save As**, because
-			// the pair an author is choosing between is "this scene" and "all
-			// of them" - not "write it" and "write it somewhere else". The
-			// extension is what tells them apart afterwards.
-			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
-				AskingExportUniverse = true;
-				PathBuffer = std::string(Label(GameName, "Game")) + std::string(engine::game::GAME_EXTENSION);
+			if (ImGui::MenuItem("Export...", nullptr, false, Universe->Count() > 0 && !ExportInProgress())) {
+				AskingExport = true;
+				ExportChoices = ExportOptions{};
+				ExportChoices.Product = Active.IsValid() ? engine::game::ExportProduct::WorldFile
+														 : engine::game::ExportProduct::UniverseFolder;
+				PathBuffer = ExportChoices.Product == engine::game::ExportProduct::WorldFile
+								 ? std::string(Label(Universe->NameOf(Active), "World")) +
+									   std::string(engine::game::ExtensionOf(ExportChoices.Product))
+								 : std::string(Label(GameName, "Game")) +
+									   std::string(engine::game::ExtensionOf(ExportChoices.Product));
 			}
 
 			ImGui::Separator();
@@ -1594,10 +1625,6 @@ namespace studio {
 			// `examples::ExampleScenes` walks it.
 			DrawExampleSceneMenu();
 
-			if (ImGui::MenuItem("Remove Active World", nullptr, false, Universe->Count() > 1)) {
-				RemoveWorld(Active);
-			}
-
 			ImGui::Separator();
 			ImGui::TextDisabled("scenes");
 
@@ -1615,6 +1642,33 @@ namespace studio {
 
 		if (ImGui::BeginMenu("View")) {
 			DrawViewMenu();
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("UI")) {
+			ImGui::MenuItem("Toolbar Editor", nullptr, &ShowToolbarEditor);
+			ImGui::MenuItem("Dock Widgets", nullptr, &ShowDockWidgetEditor);
+			if (ImGui::BeginMenu("Plugin Widgets")) {
+				for (PluginPresentation *pluginPointer : Plugins) {
+					PluginPresentation &plugin = *pluginPointer;
+					if (!plugin.Running) {
+						continue;
+					}
+					for (PluginWidget &widget : plugin.Widgets) {
+						ImGui::PushID(PluginIdentity(plugin).c_str());
+						ImGui::PushID(widget.Id.c_str());
+						ImGui::MenuItem(widget.Title.c_str(), nullptr, &widget.Open);
+						ImGui::PopID();
+						ImGui::PopID();
+					}
+				}
+				ImGui::EndMenu();
+			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Demo")) {
+			ImGui::MenuItem("Node Graph", nullptr, &ShowNodeDemo);
 			ImGui::EndMenu();
 		}
 
@@ -1673,6 +1727,8 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Sync")) {
+			ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
+			ImGui::Separator();
 			if (ImGui::MenuItem("Sync Rojo Project...")) {
 				ShowRojoSync = true;
 				std::snprintf(
@@ -1715,8 +1771,7 @@ namespace studio {
 
 	void Editor::DrawShortcuts() {
 		if (Keybinds::Fired(Action::SearchAllReplaceAll)) {
-			ShowFind = true;
-			FocusFind = true;
+			Operators.Run(Action::SearchAllReplaceAll);
 		}
 
 		// **At the end of the frame, and that is the whole reason this is its own
@@ -1817,6 +1872,9 @@ namespace studio {
 		// click cannot disagree about which world F5 starts.
 		const WorldId transport = ViewportWorld(FocusedViewport);
 		const RunMode transportMode = ModeOf(transport);
+		if (Keybinds::Fired(Action::ClientSettings)) {
+			Operators.Run(Action::ClientSettings);
+		}
 
 		if (Keybinds::Fired(Action::Stop)) {
 			SetRunMode(transport, RunMode::Edit);
@@ -1917,6 +1975,9 @@ namespace studio {
 			if (RunButton("Play", false, engine::ui::AccentColour())) {
 				SetRunMode(scope, RunMode::Play);
 			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Starts the scene with a server and client");
+			}
 			ImGui::EndDisabled();
 			return;
 		}
@@ -1935,6 +1996,9 @@ namespace studio {
 			if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
 				SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Starts or stops the scene server without a client");
+			}
 			return;
 		}
 		if (DrawingBuiltinTool == BuiltinStudioTool::Pause) {
@@ -1944,6 +2008,9 @@ namespace studio {
 					record->Paused = !record->Paused;
 					Say(record->Paused ? "paused - the clock is stopped, the run is not" : "resumed");
 				}
+			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Pauses or resumes the active run");
 			}
 			ImGui::EndDisabled();
 			return;
@@ -1957,9 +2024,10 @@ namespace studio {
 					SetRunMode(scope, RunMode::Edit);
 				}
 			}
-			if (client && ImGui::IsItemHovered()) {
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 				ImGui::SetTooltip(
-					"removes this client and its player\nstop the scene from the server's view"
+					client ? "Removes this client and its player\nStop the scene from the server's view"
+						   : "Stops the active run and restores the edited scene"
 				);
 			}
 			ImGui::EndDisabled();
@@ -1970,6 +2038,9 @@ namespace studio {
 			if (ImGui::Button("Spawn Player")) {
 				(void)SpawnPlayer(focused);
 			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Adds a player and client to the active run");
+			}
 			ImGui::EndDisabled();
 			return;
 		}
@@ -1977,6 +2048,9 @@ namespace studio {
 			ImGui::BeginDisabled(!running || players == 0);
 			if (ImGui::Button("Remove Player")) {
 				(void)RemovePlayer(focused);
+			}
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip("Removes one player and its client from the active run");
 			}
 			ImGui::EndDisabled();
 			return;
@@ -2511,8 +2585,12 @@ namespace studio {
 		// written out**, because the reader refuses a `<World>` where a `<Game>`
 		// belongs and a browser offering the wrong one would be offering a file
 		// that cannot load.
-		const std::vector<std::string> GAME_FILES{std::string(engine::game::GAME_EXTENSION)};
+		const std::vector<std::string> GAME_FILES{
+			std::string(engine::game::GAME_EXTENSION), std::string(engine::game::UNIVERSE_EXTENSION)
+		};
 		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
+		const std::vector<std::string> UNIVERSE_FILES{std::string(engine::game::UNIVERSE_EXTENSION)};
+		const std::vector<std::string> ZIP_FILES{".zip"};
 
 	}
 
@@ -2559,7 +2637,71 @@ namespace studio {
 		ImGui::End();
 	}
 
+	void Editor::DrawClientSettings() {
+		if (!ShowClientSettings) {
+			return;
+		}
+
+		const WorldId playing = ViewportWorld(FocusedViewport);
+		if (ModeOf(playing) != RunMode::Play) {
+			ShowClientSettings = false;
+			return;
+		}
+
+		const ImGuiViewport *viewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, ImVec2{0.5f, 0.5f});
+		ImGui::SetNextWindowSize(ImVec2{390.0f, 0.0f}, ImGuiCond_Always);
+		if (!ImGui::Begin(
+				"Client Settings",
+				&ShowClientSettings,
+				ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+					ImGuiWindowFlags_AlwaysAutoResize
+			)) {
+			ImGui::End();
+			return;
+		}
+
+		ImGui::TextUnformatted("These presentation changes apply to Play immediately.");
+		ImGui::Separator();
+		ImGui::Checkbox("EditableMesh updates", &ClientSettings.EnableEditableMeshes);
+		ImGui::Checkbox("EditableImage updates", &ClientSettings.EnableEditableImages);
+		ImGui::Checkbox("Particles", &ClientSettings.EnableParticles);
+		ImGui::Checkbox("Post-processing", &ClientSettings.EnablePostProcessing);
+
+		WorldRun *run = RunOwning(playing);
+		std::vector<engine::gui::SettingsMenuAction> scriptActions;
+		if (run != nullptr) {
+			Universe->Enter(run->World, [&](Store &store) {
+				const auto actions = engine::gui::SettingsMenuActionsOf(store);
+				scriptActions.assign(actions.begin(), actions.end());
+			});
+		}
+		if (!scriptActions.empty()) {
+			ImGui::SeparatorText("Game");
+			for (const engine::gui::SettingsMenuAction &action : scriptActions) {
+				ImGui::PushID(action.Id.Text().data());
+				if (ImGui::Button(action.Label.c_str(), ImVec2{-1.0f, 0.0f}) && run->Runtime != nullptr) {
+					run->Runtime->DeliverSettingsMenuAction(action.Id);
+				}
+				ImGui::PopID();
+			}
+		}
+		ImGui::Separator();
+
+		if (ImGui::Button("Resume", ImVec2{120.0f, 0.0f})) {
+			ShowClientSettings = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Stop Play", ImVec2{120.0f, 0.0f})) {
+			ShowClientSettings = false;
+			SetRunMode(playing, RunMode::Edit);
+		}
+
+		ImGui::End();
+	}
+
 	void Editor::DrawDialogs() {
+		PumpWorldImport();
 		// **One modal shape for five questions, because they are one question.**
 		// Every dialog here asks for a path or a name and then does something
 		// with it; five hand-written popups would be five places for the Enter
@@ -2570,11 +2712,23 @@ namespace studio {
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
 		}
-		if (AskingExport) {
-			ImGui::OpenPopup("Export World");
+		if (AskingUniverseLoadPermissions) {
+			ImGui::OpenPopup("Load Universe");
 		}
-		if (AskingExportUniverse) {
-			ImGui::OpenPopup("Export Universe");
+		if (AskingExport) {
+			ImGui::OpenPopup("Export");
+		}
+		if (AskingExportDestination) {
+			ImGui::OpenPopup("Export Destination");
+		}
+		if (AskingExportPreflight) {
+			ImGui::OpenPopup("Export Preflight");
+		}
+		if (ExportInProgress()) {
+			ImGui::OpenPopup("Export Progress");
+		}
+		if (WorldImportInProgress()) {
+			ImGui::OpenPopup("Import World Progress");
 		}
 		if (AskingImport) {
 			ImGui::OpenPopup("Import World");
@@ -2597,29 +2751,349 @@ namespace studio {
 		}
 
 		if (engine::ui::FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
-			OpenGame(std::filesystem::path(PathBuffer));
+			const std::filesystem::path path(PathBuffer);
+			if (path.extension() == engine::game::UNIVERSE_EXTENSION) {
+				PrepareUniverseOpen(path);
+			} else {
+				OpenGame(path);
+			}
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
 		}
 
-		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
-			ExportActiveWorld(std::filesystem::path(PathBuffer));
-			AskingExport = false;
-		} else if (!ImGui::IsPopupOpen("Export World")) {
-			AskingExport = false;
+		ImGui::SetNextWindowSize(
+			ImVec2(engine::ui::Scaled(660.0f), engine::ui::Scaled(460.0f)), ImGuiCond_Appearing
+		);
+		if (ImGui::BeginPopupModal("Load Universe", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+			const engine::game::GameInfo &info = PendingUniverseOpenInfo;
+			const char *scope = UniverseLoadScope == 0
+									? "All worlds"
+									: Label(info.Worlds[UniverseLoadScope - 1], "Unnamed world");
+			ImGui::SetNextItemWidth(engine::ui::Scaled(240.0f));
+			if (ImGui::BeginCombo("Scope", scope)) {
+				if (ImGui::Selectable("All worlds", UniverseLoadScope == 0)) {
+					UniverseLoadScope = 0;
+				}
+				for (size_t index = 0; index < info.Worlds.size(); index++) {
+					const bool selected = UniverseLoadScope == index + 1;
+					if (ImGui::Selectable(Label(info.Worlds[index], "Unnamed world"), selected)) {
+						UniverseLoadScope = index + 1;
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			if (ImGui::BeginTabBar("##universe-load-tabs")) {
+				if (ImGui::BeginTabItem("General")) {
+					ImGui::Text("Name: %s", Label(info.Name, "Universe"));
+					ImGui::Text("Worlds: %zu", info.Worlds.size());
+					ImGui::Text(
+						"Discovery: %s", info.RecursiveWorldDiscovery ? "recursive" : "listed files only"
+					);
+					ImGui::TextDisabled("Recursive discovery does not follow symbolic links.");
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Assets")) {
+					if (info.Assets.empty()) {
+						ImGui::TextDisabled("No local processed asset store is declared.");
+					} else {
+						ImGui::TextWrapped("Local processed assets: %s", info.Assets.string().c_str());
+					}
+					if (UniverseLoadScope != 0) {
+						ImGui::TextDisabled("This world inherits the universe asset store.");
+					}
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Permissions")) {
+					if (info.HttpEnabled) {
+						ImGui::Checkbox("Allow HTTP content access", &AllowUniverseHttp);
+						ImGui::TextDisabled("Off keeps every declared CDN disconnected.");
+					} else {
+						ImGui::TextDisabled("This universe requests no HTTP access.");
+					}
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("CDN")) {
+					if (info.Cdns.empty()) {
+						ImGui::TextDisabled("No remote content origins are declared.");
+					}
+					for (const engine::game::UniverseCdn &cdn : info.Cdns) {
+						ImGui::BulletText("%s: %s", cdn.Name.c_str(), cdn.Location.c_str());
+					}
+					if (UniverseLoadScope != 0 && !info.Cdns.empty()) {
+						ImGui::TextDisabled("This world inherits the universe CDN list.");
+					}
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Misc")) {
+					ImGui::TextWrapped("Manifest: %s", PendingUniverseOpenPath.string().c_str());
+					ImGui::TextWrapped(
+						"Publisher: %s",
+						info.PublisherKey.empty() ? "not declared" : info.PublisherKey.c_str()
+					);
+					ImGui::EndTabItem();
+				}
+				ImGui::EndTabBar();
+			}
+
+			ImGui::Separator();
+			if (ImGui::Button("Load")) {
+				ImGui::CloseCurrentPopup();
+				AcceptUniverseOpen();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingUniverseLoadPermissions = false;
+				PendingUniverseOpenPath.clear();
+				PendingUniverseOpenInfo = engine::game::GameInfo{};
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
 		}
 
-		// **The universe, which is a different document from a world and not a
-		// bigger one.** `<Game>` and `<World>` are separate roots and the
-		// reader refuses each in the other's place, so the two exports write
-		// different extensions and say which they are - see
-		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
-		if (engine::ui::FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
-			ExportUniverse(std::filesystem::path(PathBuffer));
-			AskingExportUniverse = false;
-		} else if (!ImGui::IsPopupOpen("Export Universe")) {
-			AskingExportUniverse = false;
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(560.0f), 0.0f), ImGuiCond_Appearing);
+		if (ImGui::BeginPopupModal(
+				"Export", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+			)) {
+			const char *selectedProduct =
+				ExportChoices.Product == engine::game::ExportProduct::WorldFile ? "World file (.aworld)"
+				: ExportChoices.Product == engine::game::ExportProduct::UniverseFolder
+					? "Universe folder (.auniverse)"
+					: "Project ZIP (.zip)";
+			if (ImGui::BeginCombo("Product", selectedProduct)) {
+				for (const engine::game::ExportProduct product : {
+						 engine::game::ExportProduct::WorldFile,
+						 engine::game::ExportProduct::UniverseFolder,
+						 engine::game::ExportProduct::ProjectZip,
+					 }) {
+					const char *label = product == engine::game::ExportProduct::WorldFile
+											? "World file (.aworld)"
+										: product == engine::game::ExportProduct::UniverseFolder
+											? "Universe folder (.auniverse)"
+											: "Project ZIP (.zip)";
+					const bool selected = ExportChoices.Product == product;
+					if (ImGui::Selectable(label, selected)) {
+						ExportChoices.Product = product;
+						ExportChoices.IncludeProcessedAssets =
+							product == engine::game::ExportProduct::ProjectZip;
+						ExportChoices.RequireCompleteCatalogue =
+							product == engine::game::ExportProduct::ProjectZip;
+						ExportChoices.Reproducible = product == engine::game::ExportProduct::ProjectZip;
+						ExportChoices.IncludePublicCdns = false;
+						ExportChoices.Delivery = engine::game::ProjectDeliveryPreference::Relay;
+						PathBuffer = (product == engine::game::ExportProduct::WorldFile
+										  ? std::string(Label(Universe->NameOf(Active), "World"))
+										  : std::string(Label(GameName, "Game"))) +
+									 engine::game::ExtensionOf(product);
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ExportChoices.Product == engine::game::ExportProduct::WorldFile) {
+				ImGui::TextWrapped(
+					"Active world only. Universe settings, other worlds, and deployment settings are not "
+					"included."
+				);
+			} else if (ExportChoices.Product == engine::game::ExportProduct::UniverseFolder) {
+				ImGui::TextWrapped(
+					"Editable manifest with sibling worlds and assets. Move the files and folders together."
+				);
+			} else {
+				ImGui::TextWrapped("One portable server package with a complete signed processed catalogue.");
+			}
+
+			const bool projectZip = ExportChoices.Product == engine::game::ExportProduct::ProjectZip;
+			const bool worldFile = ExportChoices.Product == engine::game::ExportProduct::WorldFile;
+			ImGui::BeginDisabled(projectZip);
+			ImGui::Checkbox("Include processed assets", &ExportChoices.IncludeProcessedAssets);
+			ImGui::EndDisabled();
+			ImGui::Checkbox("Include raw authoring files", &ExportChoices.IncludeRawAuthoring);
+			ImGui::BeginDisabled(worldFile);
+			ImGui::Checkbox("Include public CDN configuration", &ExportChoices.IncludePublicCdns);
+			ImGui::EndDisabled();
+			ImGui::BeginDisabled(!ExportChoices.IncludePublicCdns);
+			ImGui::Checkbox("Validate CDN configuration", &ExportChoices.ValidateCdnConfiguration);
+			ImGui::Checkbox("Check remote reachability", &ExportChoices.CheckRemoteReachability);
+			ImGui::EndDisabled();
+			ImGui::BeginDisabled(projectZip);
+			ImGui::Checkbox("Require every catalogue asset", &ExportChoices.RequireCompleteCatalogue);
+			ImGui::EndDisabled();
+			if (projectZip) {
+				int delivery =
+					ExportChoices.Delivery == engine::game::ProjectDeliveryPreference::Relay ? 0 : 1;
+				ImGui::RadioButton("Relay", &delivery, 0);
+				ImGui::SameLine();
+				ImGui::RadioButton("Redirect", &delivery, 1);
+				ExportChoices.Delivery = delivery == 0 ? engine::game::ProjectDeliveryPreference::Relay
+													   : engine::game::ProjectDeliveryPreference::Redirect;
+				ImGui::BeginDisabled();
+				ImGui::Checkbox("Reproducible archive", &ExportChoices.Reproducible);
+				ImGui::EndDisabled();
+			}
+			ImGui::Checkbox("Replace existing output", &ExportChoices.ReplaceExisting);
+
+			ImGui::Separator();
+			if (ImGui::Button("Choose Destination...")) {
+				AskingExport = false;
+				AskingExportDestination = true;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingExport = false;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		const std::vector<std::string> &exportFiles =
+			ExportChoices.Product == engine::game::ExportProduct::WorldFile		   ? WORLD_FILES
+			: ExportChoices.Product == engine::game::ExportProduct::UniverseFolder ? UNIVERSE_FILES
+																				   : ZIP_FILES;
+		if (engine::ui::FilePrompt("Export Destination", PathBuffer, "Preflight", exportFiles, false)) {
+			engine::game::ProjectValidationReport requestReport;
+			PreparedExportRequest =
+				BuildExportRequest(std::filesystem::path(PathBuffer), ExportChoices, requestReport);
+			AskingExportDestination = false;
+			if (PreparedExportRequest) {
+				PreparedExportPreflight =
+					PreflightExport(*PreparedExportRequest, *Universe, Content, ContentClient.get());
+				AskingExportPreflight = true;
+			} else if (!requestReport.Findings.empty()) {
+				Say("export request: " + requestReport.Findings.front().Explanation, LogLevel::Error);
+				AskingExport = true;
+			}
+		} else if (AskingExportDestination && !ImGui::IsPopupOpen("Export Destination")) {
+			AskingExportDestination = false;
+		}
+
+		ImGui::SetNextWindowSize(
+			ImVec2(engine::ui::Scaled(680.0f), engine::ui::Scaled(540.0f)), ImGuiCond_Appearing
+		);
+		if (ImGui::BeginPopupModal("Export Preflight", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+			const ExportPreflight &preflight = PreparedExportPreflight;
+			ImGui::Text("Product: %s", engine::game::ExtensionOf(preflight.Request.Product));
+			ImGui::TextWrapped("Destination: %s", preflight.Request.Destination.string().c_str());
+			ImGui::Text(
+				"Worlds: %llu local, %llu remote",
+				static_cast<unsigned long long>(preflight.LocalWorlds),
+				static_cast<unsigned long long>(preflight.RemoteWorlds)
+			);
+			ImGui::Text(
+				"Processed assets: %llu, %llu bytes",
+				static_cast<unsigned long long>(preflight.ProcessedAssets),
+				static_cast<unsigned long long>(preflight.ProcessedBytes)
+			);
+			ImGui::Text(
+				"Estimated: %llu bytes uncompressed, %llu bytes archive",
+				static_cast<unsigned long long>(preflight.EstimatedUncompressedBytes),
+				static_cast<unsigned long long>(preflight.EstimatedArchiveBytes)
+			);
+			ImGui::Text("Publisher key: %s", preflight.PublisherKeyValid ? "valid" : "missing or invalid");
+			ImGui::Text("Public HTTP: %s", preflight.PublicHttpIncluded ? "included" : "not included");
+			ImGui::SeparatorText("Content source order");
+			if (preflight.EffectiveSources.empty()) {
+				ImGui::TextDisabled("No content sources included.");
+			}
+			for (size_t index = 0; index < preflight.EffectiveSources.size(); index++) {
+				const engine::delivery::Source &source = preflight.EffectiveSources[index];
+				ImGui::Text("%zu. %s: %s", index + 1, source.Name.c_str(), source.Location.c_str());
+			}
+			ImGui::SeparatorText("Findings");
+			if (preflight.Validation.Findings.empty()) {
+				ImGui::TextUnformatted("Ready to export.");
+			}
+			for (const engine::game::ProjectValidationFinding &finding : preflight.Validation.Findings) {
+				const char *severity =
+					finding.Severity == engine::game::ProjectFindingSeverity::Error		? "error"
+					: finding.Severity == engine::game::ProjectFindingSeverity::Warning ? "warning"
+																						: "skipped";
+				ImGui::TextWrapped("%s [%s] %s", severity, finding.Code.c_str(), finding.Explanation.c_str());
+			}
+
+			ImGui::Separator();
+			ImGui::BeginDisabled(!preflight.Validation.Passed());
+			if (ImGui::Button("Export")) {
+				const ExportRequest request = preflight.Request;
+				AskingExportPreflight = false;
+				PreparedExportRequest.reset();
+				ImGui::CloseCurrentPopup();
+				BeginExport(request);
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Back")) {
+				AskingExportPreflight = false;
+				AskingExport = true;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+				AskingExportPreflight = false;
+				PreparedExportRequest.reset();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
+		if (ImGui::BeginPopupModal(
+				"Export Progress",
+				nullptr,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+			)) {
+			if (!ExportInProgress()) {
+				ImGui::CloseCurrentPopup();
+			} else {
+				ImGui::Text("Phase: %s", Describe(CurrentExportPhase()));
+				if (ExportAssetGrounding.State == AssetGroundingState::Fetching &&
+					!ExportAssetGrounding.Requests.empty()) {
+					const float fraction = static_cast<float>(ExportAssetGrounding.Completed) /
+										   static_cast<float>(ExportAssetGrounding.Requests.size());
+					ImGui::ProgressBar(fraction, ImVec2(-1.0f, 0.0f));
+				}
+				if (ImGui::Button("Cancel")) {
+					CancelExport();
+					Say("export cancelled", LogLevel::Warning);
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			ImGui::EndPopup();
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(engine::ui::Scaled(460.0f), 0.0f), ImGuiCond_Appearing);
+		if (ImGui::BeginPopupModal(
+				"Import World Progress",
+				nullptr,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+			)) {
+			if (!WorldImportInProgress()) {
+				ImGui::CloseCurrentPopup();
+			} else {
+				const auto phase = ActiveWorldImportPhase.load(std::memory_order_relaxed);
+				const char *label = "reading world";
+				switch (phase) {
+				case engine::game::WorldImportPhase::Read:
+					label = "reading world";
+					break;
+				case engine::game::WorldImportPhase::Decode:
+					label = "decoding XML";
+					break;
+				case engine::game::WorldImportPhase::Build:
+					label = "building world";
+					break;
+				case engine::game::WorldImportPhase::Encode:
+					label = "preparing transfer";
+					break;
+				case engine::game::WorldImportPhase::Commit:
+					label = "installing world";
+					break;
+				}
+				ImGui::TextUnformatted(label);
+				ImGui::ProgressBar(WorldImportFraction.load(std::memory_order_relaxed), ImVec2(-1.0f, 0.0f));
+			}
+			ImGui::EndPopup();
 		}
 
 		if (engine::ui::FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {

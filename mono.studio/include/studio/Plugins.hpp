@@ -1,13 +1,13 @@
 #pragma once
 
-// Scripts the editor runs, written by somebody who is not the editor.
+// Native C++ plugins and isolated script plugins hosted by Studio.
 //
-// **A plugin is a script against the world, and that is the whole design.** The
-// engine already has a scripting surface with a sandbox, a step budget, a memory
-// ceiling and two languages - `script/Runtime.hpp` - and a plugin is that surface
-// pointed at the world an author is editing rather than at one a game is running.
-// Inventing a second scripting model for tools would be two sandboxes to keep
-// safe and two vocabularies to learn.
+// Native definitions own editor adapters and may publish value-shaped bindings.
+// Script plugins keep the engine's existing sandbox, step budget, memory ceiling,
+// and one runtime per instance. Both contribute the same presentation records,
+// so toolbar and widget composition does not care which language owns a tool.
+// Binding scopes are move-only cleanup handles: closing one removes every Luau
+// or JavaScript function the native plugin installed.
 //
 //     ~/Documents/atomic-game-engine/studio/plugins/
 //       align-tool/
@@ -72,6 +72,14 @@
 // | inside a panel | `plugin.Label`, `.Button`, `.Checkbox`, `.Combo`, `.Separator`,
 // `.InputText` |
 //
+// Viewport options use stable text names. `Grid`, `Particles`, `Direction
+// Gizmo`, `3D Cursor`, `Orbit`, `Lock Direction`, and `Collider Outlines` are
+// booleans. `Camera Speed`, `Grid Step` (`Grid Scale`), `Grid Major`, `Grid
+// Reach` (`Grid Size`), `Grid Strength`, `Grid Alpha`, `Grid Axis Alpha`,
+// `Grid Offset X`, and `Grid Offset Z` are numbers. `Grid Colour`, `Grid Axis X
+// Colour`, and `Grid Axis Z Colour` take `RRGGBB` or `RRGGBBAA` text; `Color`
+// spellings are accepted too.
+//
 // **`Selection` is a service and the rest is a table**, which is Roblox's own
 // split rather than an inconsistency: a selection is a thing the editor *has*,
 // so it is reached with `game:GetService` like every other service, and the
@@ -130,9 +138,9 @@
 // to a file on disk. A plugin is a tool running on a project somebody opened; it
 // reads what its user is already looking at.
 //
-// ## One runtime each, and one failure each
+// ## One runtime per script instance, and one failure each
 //
-// **Every plugin gets its own `script::Runtime`.** Two plugins sharing one would
+// **Every script plugin gets its own `script::Runtime`.** Two plugins sharing one would
 // share a global table, a step budget and a memory ceiling, so a plugin that
 // looped would stop the others and a plugin that set a global would be read by
 // them. The cost is a VM per plugin, which is the same trade the engine already
@@ -151,6 +159,7 @@
 #include <engine/ui/Theme.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -160,6 +169,33 @@
 #include <vector>
 
 namespace studio {
+	class Editor;
+
+	// One place a plugin may run while it is hosted by Studio.
+	//
+	// @since v0.21
+	enum class PluginRunTarget : uint8_t {
+		Studio = 1u << 0,
+		PlaytestServer = 1u << 1,
+		PlaytestClient = 1u << 2,
+	};
+
+	using PluginRunTargets = uint8_t;
+
+	// Target mask helpers and stable manifest text.
+	// @since v0.21
+	//@{
+	constexpr PluginRunTargets PluginTarget(PluginRunTarget target) {
+		return static_cast<PluginRunTargets>(target);
+	}
+
+	constexpr bool RunsIn(PluginRunTargets targets, PluginRunTarget target) {
+		return (targets & PluginTarget(target)) != 0;
+	}
+
+	const char *Describe(PluginRunTarget target);
+	std::optional<PluginRunTarget> ParsePluginRunTarget(std::string_view text);
+	//@}
 
 	// The component the editor's selection is published as.
 	//
@@ -269,6 +305,7 @@ namespace studio {
 		StatisticsPanel,
 		FrameGraphPanel,
 		HeapPanel,
+		DatasetEditorPanel,
 		CameraSpeed,
 		PluginReload,
 		PluginManage,
@@ -277,6 +314,22 @@ namespace studio {
 		PluginStatus,
 		DemoNodes,
 		DemoDescription,
+	};
+
+	// One native panel declared by the Default Studio plugin.
+	//
+	// The declaration belongs to the plugin layer, while the body remains the
+	// native adapter that already owns its ECS and editor interactions.
+	//
+	// @since v0.21
+	enum class BuiltinStudioPanel : uint8_t {
+		None,
+		Explorer,
+		Properties,
+		ComponentInspector,
+		ScriptEditor,
+		DatasetEditor,
+		RobloxImport,
 	};
 
 	// Where a plugin asks its dock widget to appear on first use.
@@ -330,6 +383,10 @@ namespace studio {
 		std::string Version;
 		std::string Author;
 		//@}
+
+		// The Studio-owned contexts that receive an instance. Old manifests run
+		// only while authoring, which preserves their existing behaviour.
+		PluginRunTargets Runs = PluginTarget(PluginRunTarget::Studio);
 	};
 
 	// A toolbar a plugin asked for, and the buttons on it.
@@ -350,6 +407,10 @@ namespace studio {
 		// What to call when it is pressed, in the plugin's own VM.
 		engine::script::HostCallback OnClick;
 
+		// Native C++ plugins use value arguments too, keeping toolbar dispatch
+		// independent of either scripting VM.
+		std::function<void(engine::script::HostArguments)> NativeOnClick;
+
 		// Whether it draws as held. A plugin sets this to show a mode.
 		bool Active = false;
 
@@ -368,6 +429,7 @@ namespace studio {
 
 		// Toggle and dropdown changes use this callback. A button uses `OnClick`.
 		engine::script::HostCallback OnChanged;
+		std::function<void(engine::script::HostArguments)> NativeOnChanged;
 
 		// The plugin's defaults. A person's toolbar layout may override both.
 		//@{
@@ -434,7 +496,8 @@ namespace studio {
 	//
 	// @since v0.12
 	struct PluginWidget {
-		// The window title, which is also how ImGui identifies it.
+		// The visible window title. Its ImGui identity also includes the plugin
+		// and widget ids, so two plugins may use the same title.
 		std::string Title;
 
 		// Whether the window is open. A plugin may set it and a person may close
@@ -443,6 +506,18 @@ namespace studio {
 
 		// What to call while it is open, in the plugin's own VM.
 		engine::script::HostCallback Render;
+
+		// Immediate-mode render callback for a native C++ plugin widget.
+		std::function<void()> NativeRender;
+
+		// Native dispatch for widgets contributed by Default Studio. Installed
+		// plugins leave this as `None` and render through their VM callback.
+		BuiltinStudioPanel BuiltinPanel = BuiltinStudioPanel::None;
+
+		// The last open state shared with the native panel flag. This resolves
+		// changes from either side, including toolbar actions and window closes,
+		// without making two independent owners of the setting.
+		bool SynchronizedOpen = false;
 
 		// What the plugin coloured it, if anything. See `SetWidgetColour`.
 		//
@@ -479,19 +554,17 @@ namespace studio {
 		//@}
 	};
 
-	// One plugin, as the editor holds it.
+	// Presentation shared by native and script plugins. Runtime ownership stays
+	// in the two distinct loaded records below.
 	//
-	// @since v0.12
-	struct LoadedPlugin {
+	// @since v0.21
+	struct PluginPresentation {
 		// Its folder, which is also its identity: two plugins may call
 		// themselves the same thing and they are still two plugins.
 		std::filesystem::path Root;
 
 		// What its manifest said.
 		PluginManifest Manifest;
-
-		// Its own VM, or null when it could not be started.
-		std::shared_ptr<engine::script::Runtime> Vm;
 
 		// Whether it is running. False for one that was switched off, and for
 		// one that failed.
@@ -504,14 +577,41 @@ namespace studio {
 		// retry runtime failures, but only a manifest rescan may clear this gate.
 		bool DefinitionValid = true;
 
-		// How many times its heartbeat has raised. A plugin that throws every
-		// frame is switched off rather than logged sixty times a second.
-		size_t Faults = 0;
-
 		// What it asked the editor for.
 		//@{
 		std::vector<PluginToolbar> Toolbars;
 		std::vector<PluginWidget> Widgets;
+		//@}
+
+		// Default Studio uses compatibility keys for toolbar preferences written
+		// before each built-in control gained its own stable id.
+		bool Builtin = false;
+
+		// Native presentations are owned by `LoadedCppPlugin`; the rest by a
+		// `LoadedPlugin` script instance.
+		bool Native = false;
+	};
+
+	class PluginBindingRegistry;
+
+	// One script plugin instance. A definition may have one instance per
+	// matching Studio, playtest-server, or playtest-client world.
+	//
+	// @since v0.21
+	struct LoadedPlugin : PluginPresentation {
+		// Its own VM, or null when it could not be started.
+		std::shared_ptr<engine::script::Runtime> Vm;
+
+		// How many times its heartbeat has raised. A plugin that throws every
+		// frame is switched off rather than logged sixty times a second.
+		size_t Faults = 0;
+
+		// The context this instance belongs to.
+		//@{
+		PluginRunTarget Target = PluginRunTarget::Studio;
+		engine::world::WorldId World;
+		PluginBindingRegistry *Bindings = nullptr;
+		engine::script::Language Language = engine::script::Language::Luau;
 		//@}
 
 		// What it asked to hear about from `ChangeHistoryService`.
@@ -535,10 +635,150 @@ namespace studio {
 		// list is**, and because the runtime holds a raw pointer to it - so it
 		// has to sit still while the vector it lives beside grows.
 		std::unique_ptr<engine::script::HostSurface> Surface;
-
-		// Built-in plugins have native controls and no script runtime.
-		bool Builtin = false;
 	};
+
+	// Script languages a dynamic native binding is visible to.
+	// @since v0.21
+	enum class PluginBindingLanguage : uint8_t {
+		Luau = 1u << 0,
+		JavaScript = 1u << 1,
+		Both = (1u << 0) | (1u << 1),
+	};
+
+	using PluginBindingLanguages = uint8_t;
+	using PluginBindingFunction =
+		std::function<bool(engine::script::HostArguments, engine::script::HostValue &, std::string &)>;
+
+	// A move-only owner for dynamic script bindings. Destroying or closing it
+	// removes every binding installed through it in one operation.
+	// @since v0.21
+	class PluginBindingScope {
+	  public:
+		PluginBindingScope() = default;
+		~PluginBindingScope();
+
+		PluginBindingScope(const PluginBindingScope &) = delete;
+		PluginBindingScope &operator=(const PluginBindingScope &) = delete;
+		PluginBindingScope(PluginBindingScope &&other) noexcept;
+		PluginBindingScope &operator=(PluginBindingScope &&other) noexcept;
+
+		[[nodiscard]] bool
+		Add(std::string name,
+			PluginBindingFunction function,
+			std::string &error,
+			PluginBindingLanguages languages =
+				static_cast<PluginBindingLanguages>(PluginBindingLanguage::Luau));
+		void Close();
+		bool IsOpen() const;
+
+	  private:
+		friend class PluginBindingRegistry;
+		struct State;
+		PluginBindingScope(std::shared_ptr<State> state, uint64_t owner);
+
+		std::shared_ptr<State> Shared;
+		uint64_t Owner = 0;
+	};
+
+	// The dynamic host-call table for one world and one run target.
+	// @since v0.21
+	class PluginBindingRegistry {
+	  public:
+		explicit PluginBindingRegistry(PluginRunTarget target = PluginRunTarget::Studio);
+
+		PluginBindingRegistry(const PluginBindingRegistry &) = delete;
+		PluginBindingRegistry &operator=(const PluginBindingRegistry &) = delete;
+		PluginBindingRegistry(PluginBindingRegistry &&) = delete;
+		PluginBindingRegistry &operator=(PluginBindingRegistry &&) = delete;
+
+		PluginBindingScope OpenScope();
+		std::vector<std::string> Names(engine::script::Language language) const;
+		bool Call(
+			engine::script::Language language,
+			std::string_view name,
+			engine::script::HostArguments arguments,
+			engine::script::HostValue &result,
+			std::string &failure
+		) const;
+		void OnChanged(std::function<void()> changed);
+		uint64_t Revision() const;
+
+	  private:
+		std::shared_ptr<PluginBindingScope::State> Shared;
+	};
+
+	// The data and callbacks that make one native C++ plugin.
+	//
+	// A custom library registers this record. Studio copies it into every
+	// execution context selected by `Manifest.Runs`.
+	// @since v0.21
+	struct CppPluginContext;
+	using CppPluginOpen = std::function<bool(CppPluginContext &, std::string &)>;
+	using CppPluginClose = std::function<void(CppPluginContext &)>;
+	using CppPluginHeartbeat = std::function<bool(CppPluginContext &, float, std::string &)>;
+
+	struct CppPluginDefinition {
+		PluginManifest Manifest;
+		CppPluginOpen Open;
+		CppPluginClose Close;
+		CppPluginHeartbeat Heartbeat;
+	};
+
+	struct CppPluginContext {
+		Editor *Owner = nullptr;
+		engine::ecs::Store *WorldStore = nullptr;
+		engine::world::WorldId World;
+		PluginRunTarget Target = PluginRunTarget::Studio;
+		PluginPresentation *Presentation = nullptr;
+		PluginBindingScope *Bindings = nullptr;
+	};
+
+	struct LoadedCppPlugin : PluginPresentation {
+		CppPluginDefinition Definition;
+		PluginBindingScope Bindings;
+		CppPluginContext Context;
+		size_t Faults = 0;
+	};
+
+	// All native and script plugin instances attached to one Studio-owned world
+	// role. Kept by pointer because binding scopes retain its registry address.
+	// @since v0.21
+	struct PluginRuntimeSet {
+		PluginRuntimeSet(PluginRunTarget target, engine::world::WorldId world);
+		~PluginRuntimeSet();
+
+		engine::world::WorldId World;
+		PluginRunTarget Target = PluginRunTarget::Studio;
+		PluginBindingRegistry Bindings;
+		std::vector<LoadedCppPlugin> Cpp;
+		std::vector<LoadedPlugin> Scripts;
+	};
+
+	// A native definition registration. Keeping this handle keeps the
+	// definition available; destroying it removes the definition.
+	// @since v0.21
+	class CppPluginRegistration {
+	  public:
+		CppPluginRegistration() = default;
+		~CppPluginRegistration();
+
+		CppPluginRegistration(const CppPluginRegistration &) = delete;
+		CppPluginRegistration &operator=(const CppPluginRegistration &) = delete;
+		CppPluginRegistration(CppPluginRegistration &&other) noexcept;
+		CppPluginRegistration &operator=(CppPluginRegistration &&other) noexcept;
+
+		void Close();
+		bool IsOpen() const;
+
+	  private:
+		friend CppPluginRegistration RegisterCppPlugin(CppPluginDefinition, std::string &);
+		explicit CppPluginRegistration(uint64_t id) : Id(id) {}
+		uint64_t Id = 0;
+	};
+
+	[[nodiscard]] CppPluginRegistration RegisterCppPlugin(CppPluginDefinition definition, std::string &error);
+	std::vector<CppPluginDefinition> RegisteredCppPlugins();
+	uint64_t CppPluginRegistryRevision();
 
 	// The allowed width range of one script-created toolbar control.
 	// @since v0.20
@@ -652,10 +892,17 @@ namespace studio {
 	// @since v0.20
 	//@{
 	float ClampPluginToolWidth(float width);
-	std::string PluginIdentity(const LoadedPlugin &plugin);
-	std::string PluginToolbarKey(const LoadedPlugin &plugin, const PluginToolbar &toolbar, size_t index);
+	std::string PluginIdentity(const PluginPresentation &plugin);
+
+	// Builds the visible widget title and its stable ImGui identity.
+	//
+	// @return A label safe to use both with `Begin` and `DockBuilderDockWindow`.
+	std::string PluginWidgetLabel(const PluginPresentation &plugin, const PluginWidget &widget);
+
+	std::string
+	PluginToolbarKey(const PluginPresentation &plugin, const PluginToolbar &toolbar, size_t index);
 	std::string PluginToolKey(
-		const LoadedPlugin &plugin,
+		const PluginPresentation &plugin,
 		const PluginToolbar &toolbar,
 		size_t toolbarIndex,
 		const PluginButton &button,
@@ -663,6 +910,8 @@ namespace studio {
 	);
 	ToolbarLayoutView
 	ComposeToolbar(const std::vector<LoadedPlugin> &plugins, const ToolbarPreferences &preferences);
+	ToolbarLayoutView
+	ComposeToolbar(const std::vector<PluginPresentation *> &plugins, const ToolbarPreferences &preferences);
 	bool
 	LoadToolbarPreferences(const std::filesystem::path &path, ToolbarPreferences &out, std::string &error);
 	bool SaveToolbarPreferences(
@@ -670,9 +919,10 @@ namespace studio {
 	);
 	//@}
 
-	// Creates the engine-owned plugin that contributes Studio's standard ribbon.
-	// @since v0.20
-	LoadedPlugin MakeDefaultStudioPlugin();
+	// Creates the engine-owned native plugin that contributes Studio's standard
+	// ribbon and the converted native panel adapters.
+	// @since v0.21
+	CppPluginDefinition MakeDefaultStudioPlugin();
 
 	// How many times a plugin may raise before it is switched off.
 	//
@@ -681,8 +931,6 @@ namespace studio {
 	// tell a transient from a broken one and few enough that the log stays
 	// readable.
 	inline constexpr size_t PLUGIN_FAULT_LIMIT = 3;
-
-	class Editor;
 
 	// The editor's half of the seam, for one plugin.
 	//
@@ -762,7 +1010,10 @@ namespace studio {
 	void StartPlugins(
 		std::vector<LoadedPlugin> &plugins,
 		engine::ecs::Store &store,
-		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface = {}
+		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface = {},
+		PluginRunTarget target = PluginRunTarget::Studio,
+		engine::world::WorldId world = {},
+		PluginBindingRegistry *bindings = nullptr
 	);
 
 	// Beats every running plugin once.
@@ -777,4 +1028,22 @@ namespace studio {
 	// @return How many plugins were beaten.
 	// @since v0.12
 	size_t BeatPlugins(std::vector<LoadedPlugin> &plugins, float delta);
+
+	// Starts, beats, and closes native definitions in one execution context.
+	// Bindings are closed after `Close` returns, so plugin cleanup may still use
+	// functions it registered during `Open`.
+	// @since v0.21
+	//@{
+	void StartCppPlugins(
+		std::vector<LoadedCppPlugin> &plugins,
+		const std::vector<CppPluginDefinition> &definitions,
+		engine::ecs::Store &store,
+		PluginBindingRegistry &bindings,
+		PluginRunTarget target = PluginRunTarget::Studio,
+		engine::world::WorldId world = {},
+		Editor *owner = nullptr
+	);
+	size_t BeatCppPlugins(std::vector<LoadedCppPlugin> &plugins, float delta);
+	void StopCppPlugins(std::vector<LoadedCppPlugin> &plugins);
+	//@}
 }

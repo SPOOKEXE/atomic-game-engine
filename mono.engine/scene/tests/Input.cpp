@@ -226,6 +226,22 @@ TEST_CASE("key names are distinct", "[scene][input]") {
 	}
 }
 
+TEST_CASE("controller buttons have key names without growing InputState", "[scene][input][gamepad]") {
+	CHECK(sizeof(InputState) == 56);
+	CHECK(engine::scene::KeyOf(engine::scene::ControllerButton::A) == KeyCode::ButtonA);
+	CHECK(engine::scene::KeyOf(engine::scene::ControllerButton::RightTrigger) == KeyCode::ButtonR2);
+
+	engine::scene::ControllerState controllers;
+	auto &slot = controllers.Slots[0];
+	slot.Connected = true;
+	slot.Buttons = 1u << static_cast<uint8_t>(engine::scene::ControllerButton::A);
+	controllers.LatchPresses();
+	CHECK(slot.IsDown(engine::scene::ControllerButton::A));
+	CHECK(controllers.AnyConnected());
+	controllers.ConsumeTaps();
+	CHECK(slot.PressedButtons == 0);
+}
+
 TEST_CASE("an unknown name is Unknown rather than a guess", "[scene][input]") {
 	CHECK(KeyFromName("") == KeyCode::Unknown);
 	CHECK(KeyFromName("NotAKey") == KeyCode::Unknown);

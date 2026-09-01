@@ -14,7 +14,9 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -28,6 +30,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/script/Runtime.hpp>
@@ -338,7 +341,9 @@ namespace client {
 		engine::world::WorldId world,
 		std::vector<engine::scene::DrawInstance> &drawn,
 		std::vector<engine::scene::DrawInstance> &foreign,
-		std::vector<engine::render::SurfaceView> &views
+		std::vector<engine::render::SurfaceView> &views,
+		std::vector<engine::core::CFrame> *drawnJoints,
+		std::vector<engine::core::CFrame> *foreignJoints
 	) {
 		// **Cleared on every path, including the ones that attach nothing.** The
 		// vector is kept between frames so a steady scene stops allocating, and
@@ -348,6 +353,22 @@ namespace client {
 		// **`drawn` is not**, because it arrives holding this world's own rows.
 		// This pass adds to it rather than owning it.
 		foreign.clear();
+		if (foreignJoints != nullptr) {
+			foreignJoints->clear();
+		}
+
+		auto rebase = [](std::span<DrawInstance> rows,
+						 std::span<const engine::core::CFrame> source,
+						 std::vector<engine::core::CFrame> *destination) {
+			if (destination != nullptr) {
+				engine::render::RebaseSkinPalettes(rows, source, *destination);
+				return;
+			}
+			for (DrawInstance &row : rows) {
+				row.SkinFirst = 0;
+				row.SkinCount = 0;
+			}
+		};
 
 		if (views.empty() || !world.IsValid()) {
 			return 0;
@@ -542,6 +563,7 @@ namespace client {
 				// is still drawn opaque** - that limit is stated in
 				// `NON-EUCLIDEAN.md` rather than hidden here.
 				if (const auto *list = store.Resource<DrawList>()) {
+					const size_t copyFirst = foreign.size();
 					for (const DrawInstance &instance : list->Instances) {
 						if (instance.Surface >= 0 &&
 							std::find(returning.begin(), returning.end(), instance.Surface) !=
@@ -554,6 +576,7 @@ namespace client {
 						foreign.push_back(instance);
 						foreign.back().SourceWorld = foundName;
 					}
+					rebase(std::span(foreign).subspan(copyFirst), list->JointFrames, foreignJoints);
 				}
 
 				// **And whoever is standing in the far world's own pane, on
@@ -593,6 +616,7 @@ namespace client {
 						for (size_t index = cloneFirst; index < drawn.size(); index++) {
 							drawn[index].SourceWorld = foundName;
 						}
+						rebase(std::span(drawn).subspan(cloneFirst), list->JointFrames, drawnJoints);
 					}
 				}
 			});
@@ -610,13 +634,19 @@ namespace client {
 			// draw and a second reason for the two to fall out of order.
 			const auto surface = entry.Surface;
 			const std::span<const DrawInstance> own(drawn.data(), ownRows);
-			universe.Enter(world, [&foreign, own, surface, sourceName](Store &store) {
-				const size_t cloneFirst = foreign.size();
-				(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
-				for (size_t index = cloneFirst; index < foreign.size(); index++) {
-					foreign[index].SourceWorld = sourceName;
+			const std::span<const engine::core::CFrame> ownJoints =
+				drawnJoints != nullptr ? std::span<const engine::core::CFrame>(*drawnJoints)
+									   : std::span<const engine::core::CFrame>{};
+			universe.Enter(
+				world, [&foreign, own, ownJoints, surface, sourceName, foreignJoints, &rebase](Store &store) {
+					const size_t cloneFirst = foreign.size();
+					(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
+					for (size_t index = cloneFirst; index < foreign.size(); index++) {
+						foreign[index].SourceWorld = sourceName;
+					}
+					rebase(std::span(foreign).subspan(cloneFirst), ownJoints, foreignJoints);
 				}
-			});
+			);
 
 			const auto count = static_cast<uint32_t>(foreign.size() - first);
 			if (count == 0) {
@@ -1014,6 +1044,9 @@ namespace client {
 			if (!store.HasResource<engine::scene::InputState>()) {
 				store.SetResource(engine::scene::InputState{});
 			}
+			if (!store.HasResource<engine::scene::ControllerState>()) {
+				store.SetResource(engine::scene::ControllerState{});
+			}
 			if (!store.HasResource<engine::scene::CameraController>()) {
 				store.SetResource(engine::scene::CameraController{});
 			}
@@ -1053,6 +1086,13 @@ namespace client {
 
 			scheduler.Add("character-control", Phase::PreSimulation, [](Store &world) {
 				(void)engine::scene::UpdateCharacterControl(world);
+				if (auto *input = world.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+					input->ConsumeKeyTaps();
+				}
+				if (auto *controllers = world.ResourceMutable<engine::scene::ControllerState>();
+					controllers != nullptr) {
+					controllers->ConsumeTaps();
+				}
 			});
 
 			// **The other three are `physics`', because grounding needs a
@@ -1215,12 +1255,24 @@ namespace client {
 		// this frame's distance.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
+		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
+			(void)engine::scene::AdvanceAnimationTracks(world);
+		});
+		scheduler.Add("evaluate-animations", Phase::PreRender, [](Store &world) {
+			(void)engine::render::EvaluateAnimations(world);
+		});
+		scheduler.Add(
+			"resolve-bones",
+			Phase::PreRender,
+			[](Store &world) { (void)engine::scene::ResolveBones(world); },
+			SystemOrder{{}, {"evaluate-animations"}}
+		);
 
 		scheduler.Add(
 			"collect-instances",
 			Phase::PreRender,
 			engine::render::CollectInstances,
-			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons"}}
+			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons", "resolve-bones"}}
 		);
 		return true;
 	}
@@ -1405,12 +1457,24 @@ namespace client {
 		// list is built from. The collection dependencies state that order.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
+		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
+			(void)engine::scene::AdvanceAnimationTracks(world);
+		});
+		scheduler.Add("evaluate-animations", Phase::PreRender, [](Store &world) {
+			(void)engine::render::EvaluateAnimations(world);
+		});
+		scheduler.Add(
+			"resolve-bones",
+			Phase::PreRender,
+			[](Store &world) { (void)engine::scene::ResolveBones(world); },
+			SystemOrder{{}, {"evaluate-animations"}}
+		);
 
 		scheduler.Add(
 			"collect-instances",
 			Phase::PreRender,
 			engine::render::CollectInstances,
-			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons"}}
+			SystemOrder{{}, {"resolve-materials", "aim-surface-cameras", "build-ribbons", "resolve-bones"}}
 		);
 	}
 }

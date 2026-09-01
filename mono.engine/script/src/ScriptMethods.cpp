@@ -1076,16 +1076,6 @@ namespace engine::script {
 		}};
 	}
 
-	const ecs::PropertyDescriptor *
-	ScriptableProperty(const ecs::Store &store, ecs::Entity instance, std::string_view name) {
-		for (const ecs::PropertyDescriptor &property : store.PropertiesOf(instance)) {
-			if (property.Spelling == name) {
-				return property.Scriptable ? &property : nullptr;
-			}
-		}
-		return nullptr;
-	}
-
 	std::span<const InstanceMethod> NeutralInstanceMethods() {
 		// **One table built from two arrays, and a function-local static because
 		// the order across a translation-unit boundary is otherwise nobody's.**

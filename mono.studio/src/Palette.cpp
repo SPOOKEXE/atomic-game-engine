@@ -37,7 +37,7 @@ namespace studio {
 						   NewGame();
 					   }});
 
-		Operators.Add({Action::OpenGame, "Open Game", "Open a .agame file", always, [this] {
+		Operators.Add({Action::OpenGame, "Open Game", "Open a game or universe file", always, [this] {
 						   AskingOpen = true;
 						   PathBuffer = GamePath.string();
 					   }});
@@ -104,6 +104,18 @@ namespace studio {
 			 "Stop and restore the scene as it was",
 			 [this] { return AnyRunning() ? Availability::Yes() : Availability::No("nothing is running"); },
 			 [this] { EndAllRuns(); }}
+		);
+
+		Operators.Add(
+			{Action::ClientSettings,
+			 "Client Settings",
+			 "Open the in-game settings for this viewport",
+			 [this] {
+				 return ModeOf(ViewportWorld(FocusedViewport)) == RunMode::Play
+							? Availability::Yes()
+							: Availability::No("this viewport is not playing");
+			 },
+			 [this] { ShowClientSettings = !ShowClientSettings; }}
 		);
 
 		// --- editing --------------------------------------------------------
@@ -201,6 +213,18 @@ namespace studio {
 		Operators.Add({Action::CommandPalette, "Command Palette", "Find and run any command", always, [this] {
 						   ShowPalette = true;
 					   }});
+
+		Operators.Add(
+			{Action::SearchAllReplaceAll,
+			 "Search-All-Replace-All",
+			 "Open script search and replace across the active script",
+			 [this] { return Scripts.empty() ? Availability::No("no script is open") : Availability::Yes(); },
+			 [this] {
+				 ShowScripts = true;
+				 ShowFind = true;
+				 FocusFind = true;
+			 }}
+		);
 
 		// **The join, checked where it is made.** `tests/Operators.cpp` proves
 		// the property is satisfiable; this proves these registrations satisfy

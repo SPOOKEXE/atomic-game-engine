@@ -31,9 +31,47 @@ struct InstanceRow {
 };
 layout(set = 0, binding = 0) readonly buffer InstanceRows { InstanceRow rows[]; } residentInstances;
 layout(set = 0, binding = 1) readonly buffer InstanceIndices { uint slots[]; } drawInstances;
+layout(set = 0, binding = 2) readonly buffer SkinOffsets { uint first[]; } skinOffsets;
+layout(set = 0, binding = 3) readonly buffer JointWords { uint words[]; } jointRows;
+
+uint InstanceSlot() {
+	return drawInstances.slots[gl_InstanceIndex];
+}
 
 InstanceRow LoadInstance() {
-	return residentInstances.rows[drawInstances.slots[gl_InstanceIndex]];
+	return residentInstances.rows[InstanceSlot()];
+}
+
+vec3 RotateByQuaternion(vec4 quaternion, vec3 point);
+
+void ApplySkin(uvec4 joints, vec4 weights, inout vec3 position, inout vec3 normal) {
+	uint first = skinOffsets.first[InstanceSlot()];
+	float total = dot(weights, vec4(1.0));
+	if (first == 0xFFFFFFFFu || total <= 0.0) {
+		return;
+	}
+
+	vec3 skinnedPosition = vec3(0.0);
+	vec3 skinnedNormal = vec3(0.0);
+	for (uint influence = 0; influence < 4; influence++) {
+		if (weights[influence] <= 0.0) {
+			continue;
+		}
+		uint word = (first + joints[influence]) * 5u;
+		vec3 translation = vec3(
+			uintBitsToFloat(jointRows.words[word]),
+			uintBitsToFloat(jointRows.words[word + 1u]),
+			uintBitsToFloat(jointRows.words[word + 2u]));
+		vec4 raw = vec4(
+			unpackSnorm2x16(jointRows.words[word + 3u]),
+			unpackSnorm2x16(jointRows.words[word + 4u]));
+		float square = dot(raw, raw);
+		vec4 rotation = square > 1e-12 ? raw * inversesqrt(square) : vec4(0.0, 0.0, 0.0, 1.0);
+		skinnedPosition += (RotateByQuaternion(rotation, position) + translation) * weights[influence];
+		skinnedNormal += RotateByQuaternion(rotation, normal) * weights[influence];
+	}
+	position = skinnedPosition / total;
+	normal = skinnedNormal / total;
 }
 
 vec3 InstancePosition(InstanceRow instance) {

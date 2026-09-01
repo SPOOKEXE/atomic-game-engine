@@ -1,3 +1,4 @@
+#include <engine/assets/Animation.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
@@ -23,6 +24,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -61,6 +63,28 @@ namespace client {
 	using engine::render::ProfilerTab;
 
 	namespace {
+		// Parses an exact-length hexadecimal value into `out`.
+		bool ParseHex(std::string_view text, std::span<std::byte> out) {
+			if (text.size() != out.size() * 2) {
+				return false;
+			}
+			for (size_t index = 0; index < out.size(); index++) {
+				const auto digit = [](char character) -> int {
+					if (character >= '0' && character <= '9') return character - '0';
+					if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+					if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+					return -1;
+				};
+				const int high = digit(text[index * 2]);
+				const int low = digit(text[index * 2 + 1]);
+				if (high < 0 || low < 0) {
+					return false;
+				}
+				out[index] = static_cast<std::byte>((high << 4) | low);
+			}
+			return true;
+		}
+
 		// What a `MouseBehavior` is called in a log line.
 		//
 		// Roblox's own spelling of each, so a line and the property a script
@@ -160,7 +184,7 @@ namespace client {
 			ENGINE_INFO("scene from {}", Settings.ScriptPath);
 		}
 
-		if (!SDL_Init(SDL_INIT_VIDEO)) {
+		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
 		}
@@ -834,6 +858,22 @@ namespace client {
 					});
 				}
 				ContentMaterials++;
+			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
+				engine::assets::AnimationData animation;
+				if (!engine::assets::Animation::Read(reader, animation)) {
+					ENGINE_WARN("content: {} is not an animation this engine reads", asset->Name);
+					continue;
+				}
+				const auto record = [&name, &animation](engine::ecs::Store &store) {
+					(void)engine::render::RecordAnimation(store, name, animation);
+				};
+				for (const engine::world::WorldId id : Simulated) {
+					Universe_->Enter(id, record);
+				}
+				if (ReportedJoin) {
+					Universe_->Enter(Replicated, record);
+				}
+				ContentAnimations++;
 			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
 				// **Decoded and converted here, once.** The graph must never resample
 				// on the device thread, and a buffer converted per voice would pay
@@ -874,10 +914,12 @@ namespace client {
 		if (ContentRequested && ContentPending.empty() && !ContentReported) {
 			ContentReported = true;
 			ENGINE_INFO(
-				"content: {} mesh(es), {} texture(s), {} material(s) and {} sound(s) registered",
+				"content: {} mesh(es), {} texture(s), {} material(s), {} animation(s) and {} sound(s) "
+				"registered",
 				ContentMeshes,
 				ContentTextures,
 				ContentMaterials,
+				ContentAnimations,
 				ContentSounds
 			);
 		}
@@ -1272,6 +1314,14 @@ namespace client {
 		// windowed run never takes. One path, whether or not anybody is
 		// watching it.
 		Renderer.Shutdown();
+		for (SDL_Gamepad *gamepad : Gamepads) {
+			SDL_CloseGamepad(gamepad);
+		}
+		Gamepads.clear();
+		for (SDL_Joystick *joystick : Joysticks) {
+			SDL_CloseJoystick(joystick);
+		}
+		Joysticks.clear();
 		if (Window) {
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -1525,6 +1575,21 @@ namespace client {
 		engine::replication::ConnectorSettings connector;
 		connector.Advertised = Advertised;
 		connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
+		ClientIdentity.reset();
+		if (!Settings.PlayKey.empty()) {
+			std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+			if (!ParseHex(Settings.PlayKey, seed)) {
+				ENGINE_ERROR("client: --play-key is not {} hex characters", seed.size() * 2);
+				return false;
+			}
+			ClientIdentity = engine::assets::SigningKey::FromSeed(seed);
+			if (!ClientIdentity.has_value()) {
+				ENGINE_ERROR("client: --play-key is not a usable Ed25519 seed");
+				return false;
+			}
+			connector.ClientIdentity = &*ClientIdentity;
+			ENGINE_INFO("client play identity {}", ClientIdentity->Public().ToHex());
+		}
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {
@@ -1659,6 +1724,19 @@ namespace client {
 		// `scene::InputState`. `LatchPresses` is that latch for every key, in
 		// the state both the client and the studio already share.
 		state->LatchPresses();
+
+		if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+			controllers != nullptr) {
+			uint32_t latched[engine::scene::MAX_CONTROLLERS] = {};
+			for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+				latched[index] = controllers->Slots[index].PressedButtons;
+			}
+			*controllers = Input.Controllers();
+			for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+				controllers->Slots[index].PressedButtons |= latched[index];
+			}
+			controllers->LatchPresses();
+		}
 	}
 
 	void Client::SubmitMove(double nowSeconds) {
@@ -1748,6 +1826,10 @@ namespace client {
 			Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
 				if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
 					input->ConsumeKeyTaps();
+				}
+				if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+					controllers != nullptr) {
+					controllers->ConsumeTaps();
 				}
 			});
 		}
@@ -1840,6 +1922,36 @@ namespace client {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_JOYSTICK_ADDED) {
+					if (SDL_IsGamepad(event.jdevice.which)) {
+						if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.jdevice.which); gamepad != nullptr) {
+							Gamepads.push_back(gamepad);
+							SDL_Event mapped = event;
+							mapped.type = SDL_EVENT_GAMEPAD_ADDED;
+							mapped.gdevice.which = event.jdevice.which;
+							Input.HandleEvent(mapped);
+						} else {
+							ENGINE_WARN("could not open gamepad {}: {}", event.jdevice.which, SDL_GetError());
+						}
+					} else if (SDL_Joystick *joystick = SDL_OpenJoystick(event.jdevice.which);
+							   joystick != nullptr) {
+						Joysticks.push_back(joystick);
+					} else {
+						ENGINE_WARN("could not open joystick {}: {}", event.jdevice.which, SDL_GetError());
+					}
+				}
+				if (event.type == SDL_EVENT_JOYSTICK_REMOVED) {
+					std::erase_if(Gamepads, [&event](SDL_Gamepad *gamepad) {
+						if (SDL_GetGamepadID(gamepad) != event.jdevice.which) return false;
+						SDL_CloseGamepad(gamepad);
+						return true;
+					});
+					std::erase_if(Joysticks, [&event](SDL_Joystick *joystick) {
+						if (SDL_GetJoystickID(joystick) != event.jdevice.which) return false;
+						SDL_CloseJoystick(joystick);
+						return true;
+					});
+				}
 				if (event.type == SDL_EVENT_WINDOW_EXPOSED || event.type == SDL_EVENT_WINDOW_SHOWN ||
 					event.type == SDL_EVENT_WINDOW_RESTORED || event.type == SDL_EVENT_WINDOW_RESIZED ||
 					event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
@@ -1937,6 +2049,47 @@ namespace client {
 
 			AppliedPointerMode = pointerMode;
 			AppliedPointerIcon = pointerIcon;
+		}
+
+		if (Actions.Fired(Action::ToggleSettings)) {
+			Menu.Toggle();
+			PresentationInvalidated = true;
+		}
+
+		MenuActions.clear();
+		const engine::world::WorldId menuWorld = InterfaceWorld();
+		if (Menu.IsOpen() && menuWorld.IsValid()) {
+			Universe_->Enter(menuWorld, [this](engine::ecs::Store &store) {
+				const auto actions = engine::gui::SettingsMenuActionsOf(store);
+				MenuActions.assign(actions.begin(), actions.end());
+			});
+		}
+
+		if (Menu.IsOpen() && Actions.Fired(Action::SettingsUp)) {
+			Menu.Move(-1, MenuActions.size());
+			PresentationInvalidated = true;
+		}
+		if (Menu.IsOpen() && Actions.Fired(Action::SettingsDown)) {
+			Menu.Move(1, MenuActions.size());
+			PresentationInvalidated = true;
+		}
+		if (Menu.IsOpen() && Actions.Fired(Action::SettingsActivate)) {
+			const SettingsMenuActivation activated = Menu.Activate(Settings, MenuActions);
+			if (activated.Result == SettingsMenuResult::Action) {
+				if (engine::script::Runtime *runtime = RuntimeOf(menuWorld); runtime != nullptr) {
+					runtime->DeliverSettingsMenuAction(activated.Action);
+				}
+			} else if (activated.Result == SettingsMenuResult::Quit) {
+				Running = false;
+			}
+			PresentationInvalidated = true;
+		}
+
+		// A settings key is a host command, not game input. Releasing the raw
+		// state also prevents a key held before opening the menu from continuing
+		// to drive a character behind it.
+		if (Menu.IsOpen()) {
+			Input.ReleaseAll();
 		}
 
 		if (Actions.Fired(Action::Quit)) {
@@ -2453,7 +2606,13 @@ namespace client {
 					}
 
 					Views.Publish(
-						id, placement->Frame, *lens, list->Instances, store.Time().Tick, store.Time().Alpha
+						id,
+						placement->Frame,
+						*lens,
+						list->Instances,
+						store.Time().Tick,
+						store.Time().Alpha,
+						list->JointFrames
 					);
 				});
 			}
@@ -2525,7 +2684,13 @@ namespace client {
 					}
 
 					Views.Publish(
-						Replicated, frame, lens, list->Instances, store.Time().Tick, store.Time().Alpha
+						Replicated,
+						frame,
+						lens,
+						list->Instances,
+						store.Time().Tick,
+						store.Time().Alpha,
+						list->JointFrames
 					);
 				});
 			}
@@ -2567,14 +2732,17 @@ namespace client {
 			// tab to change reads as a dropped input.
 			const bool settingsChanged =
 				PanelsShown != (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph) ||
-				PanelTab != Settings.Tab || PanelScroll != ProfilerScroll || PanelDepth != ProfilerDepth ||
-				PanelWidth != pixelWidth || PanelHeight != pixelHeight;
+				SettingsMenuDrawn != Menu.IsOpen() || PanelTab != Settings.Tab ||
+				PanelScroll != ProfilerScroll || PanelDepth != ProfilerDepth || PanelWidth != pixelWidth ||
+				PanelHeight != pixelHeight;
 
-			const bool redraw = settingsChanged || Clock.Now() - PanelsDrawn >= PANEL_UPDATE_SECONDS;
+			const bool redraw =
+				Menu.IsOpen() || settingsChanged || Clock.Now() - PanelsDrawn >= PANEL_UPDATE_SECONDS;
 
 			if (redraw) {
 				PanelsDrawn = Clock.Now();
 				PanelsShown = Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph;
+				SettingsMenuDrawn = Menu.IsOpen();
 				PanelTab = Settings.Tab;
 				PanelScroll = ProfilerScroll;
 				PanelDepth = ProfilerDepth;
@@ -2587,7 +2755,8 @@ namespace client {
 				// frame that does not draw them still has to drain them or the
 				// next panel shows several frames added together.
 				Metrics::Clear();
-			} else if (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph) {
+			} else if (Settings.ShowStatistics || Settings.ShowNetwork || Settings.ShowFrameGraph ||
+					   Menu.IsOpen()) {
 				SystemTimings.clear();
 				Universe_->Enter(Rendered, [this](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
 					for (const auto &timing : systems.Timings()) {
@@ -2666,6 +2835,9 @@ namespace client {
 				panels.Scale = pixelWidth >= 2400 ? 3 : 2;
 
 				engine::render::DrawDebugPanels(Overlay, panels);
+				if (Menu.IsOpen()) {
+					DrawSettingsMenu(Overlay, Settings, Menu, MenuActions);
+				}
 			} else {
 				// Nothing drawn means nothing uploaded and no overlay pass.
 				Overlay.Clear();
@@ -3032,12 +3204,16 @@ namespace client {
 
 		Foreign.clear();
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
+		std::vector<engine::core::CFrame> drawnJoints(Views.JointFrames().begin(), Views.JointFrames().end());
+		std::vector<engine::core::CFrame> foreignJoints;
 
 		if (Windowed) {
 			// The copy `Drawn`'s comment argues for: the published list is
 			// `const` and the return leg has to go somewhere.
 			Drawn.assign(drawn.begin(), drawn.end());
-			(void)AttachForeignSurfaces(*Universe_, Rendered, Drawn, Foreign, Surfaces);
+			(void)AttachForeignSurfaces(
+				*Universe_, Rendered, Drawn, Foreign, Surfaces, &drawnJoints, &foreignJoints
+			);
 			drawn = Drawn;
 		}
 
@@ -3106,7 +3282,9 @@ namespace client {
 		ENGINE_HEAP_SCOPE("client.shaders");
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
 			const size_t changed = Shaders.Refresh(shaded);
-			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
+			const engine::core::Name wantedPostProcess = Settings.EnablePostProcessing
+															 ? engine::scene::PostProcessShaderOf(shaded)
+															 : engine::core::Name{};
 
 			if (changed > 0) {
 				VisualResourcesChanged = true;
@@ -3214,8 +3392,10 @@ namespace client {
 		{
 			ENGINE_HEAP_SCOPE("client.editable");
 			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-				const size_t meshes = EditableMeshes.Refresh(shaded, Renderer);
-				const size_t images = EditableImages.Refresh(shaded, Renderer);
+				const size_t meshes =
+					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(shaded, Renderer) : 0;
+				const size_t images =
+					Settings.EnableEditableImages ? EditableImages.Refresh(shaded, Renderer) : 0;
 				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
 			});
 		}
@@ -3224,15 +3404,19 @@ namespace client {
 		view.CameraFrame = Views.CameraFrame();
 		view.Camera = Views.Camera();
 		view.Instances = drawn;
+		view.JointFrames = drawnJoints;
+		view.ForeignJointFrames = foreignJoints;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
-		view.Particles = Particles.Batches;
-		view.ParticleSeams = Particles.Seams;
-		view.ParticleRevision = Particles.Revision;
-		view.ParticleLayoutRevision = Particles.LayoutRevision;
-		view.ParticleResidentRevision = Particles.ResidentRevision;
-		view.ParticlePool = Particles.Pool;
-		view.ParticleBlocks = Particles.BlockCount;
+		if (Settings.EnableParticles) {
+			view.Particles = Particles.Batches;
+			view.ParticleSeams = Particles.Seams;
+			view.ParticleRevision = Particles.Revision;
+			view.ParticleLayoutRevision = Particles.LayoutRevision;
+			view.ParticleResidentRevision = Particles.ResidentRevision;
+			view.ParticlePool = Particles.Pool;
+			view.ParticleBlocks = Particles.BlockCount;
+		}
 
 		// The time since the last device step. Presentation may be slower than the
 		// update loop, and using only this update's delta would slow resident

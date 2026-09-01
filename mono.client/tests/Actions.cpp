@@ -37,6 +37,19 @@ TEST_CASE("F5 fires the frame graph action", "[input]") {
 	REQUIRE(actions.Fired(Action::ToggleFrameGraph));
 }
 
+TEST_CASE("escape opens settings and F12 remains the explicit quit binding", "[input]") {
+	Actions actions;
+	actions.BeginFrame();
+
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_ESCAPE, true)));
+	CHECK(actions.Fired(Action::ToggleSettings));
+	CHECK_FALSE(actions.Fired(Action::Quit));
+
+	actions.BeginFrame();
+	REQUIRE(actions.HandleEvent(KeyEvent(SDLK_F12, true)));
+	CHECK(actions.Fired(Action::Quit));
+}
+
 TEST_CASE("a fire lasts one frame", "[input]") {
 	Actions actions;
 

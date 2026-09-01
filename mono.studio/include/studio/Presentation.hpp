@@ -167,6 +167,8 @@ namespace studio {
 	void AppendReplicaVisualInstances(
 		engine::core::Name replicaWorld,
 		std::span<const engine::scene::DrawInstance> replica,
-		std::vector<engine::scene::DrawInstance> &authority
+		std::vector<engine::scene::DrawInstance> &authority,
+		std::span<const engine::core::CFrame> replicaJoints = {},
+		std::vector<engine::core::CFrame> *authorityJoints = nullptr
 	);
 }

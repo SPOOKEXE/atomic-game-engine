@@ -1,0 +1,83 @@
+#pragma once
+
+// A bounded, portable persistence image for one shared key/value store.
+//
+// The file is an adapter boundary, not another store. It contains copied keys,
+// values and DataStore versions, and `Universe::ReplaceSharedStoreEntries`
+// installs a successfully decoded image in one operation.
+//
+// @tier L4 · shared
+
+#include <engine/world/SharedStores.hpp>
+
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace engine::world {
+	// Maximum encoded size accepted by file and remote snapshot adapters.
+	inline constexpr uint64_t MAXIMUM_SHARED_STORE_IMAGE_BYTES = 256ull * 1024ull * 1024ull;
+
+	// The isolated local provider namespace selected for a store image.
+	enum class SharedStoreEnvironment {
+		Mock,
+		Live,
+	};
+
+	// Returns the lowercase directory spelling of an environment.
+	const char *Describe(SharedStoreEnvironment environment);
+
+	// Parses a mock or live environment name.
+	std::optional<SharedStoreEnvironment> SharedStoreEnvironmentOf(std::string_view text);
+
+	// Resolves `<root>/mock|live/datastore.bin` or `memorystore.bin`.
+	std::filesystem::path
+	SharedStorePath(const std::filesystem::path &root, SharedStoreEnvironment environment, BusKind store);
+
+	// The result of reading or writing one shared-store image.
+	enum class SharedStoreFileStatus {
+		Ok,
+		NotFound,
+		IoError,
+		Malformed,
+		WrongStore,
+	};
+
+	// Returns a diagnostic spelling for a file operation result.
+	const char *Describe(SharedStoreFileStatus status);
+
+	// Encodes one complete shared-store image without performing I/O.
+	SharedStoreFileStatus EncodeSharedStoreImage(
+		BusKind store,
+		std::span<const SharedStoreEntry> entries,
+		std::vector<std::byte> &bytes,
+		std::string &error
+	);
+
+	// Decodes one complete shared-store image without performing I/O.
+	SharedStoreFileStatus DecodeSharedStoreImage(
+		std::span<const std::byte> bytes,
+		BusKind expectedStore,
+		std::vector<SharedStoreEntry> &entries,
+		std::string &error
+	);
+
+	// Atomically writes one MemoryStore or DataStore image.
+	SharedStoreFileStatus SaveSharedStoreFile(
+		const std::filesystem::path &path,
+		BusKind store,
+		std::span<const SharedStoreEntry> entries,
+		std::string &error
+	);
+
+	// Reads and validates one complete image, replacing `entries` only on success.
+	SharedStoreFileStatus LoadSharedStoreFile(
+		const std::filesystem::path &path,
+		BusKind expectedStore,
+		std::vector<SharedStoreEntry> &entries,
+		std::string &error
+	);
+}

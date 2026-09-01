@@ -467,8 +467,8 @@ namespace engine::assets {
 			// would make every kind added later a hard break for every client
 			// already deployed.
 			const uint8_t kind = reader.ReadUInt8();
-			asset.Kind = kind <= static_cast<uint8_t>(AssetKind::Data) ? static_cast<AssetKind>(kind)
-																	   : AssetKind::Unknown;
+			asset.Kind = kind <= static_cast<uint8_t>(AssetKind::Animation) ? static_cast<AssetKind>(kind)
+																			: AssetKind::Unknown;
 
 			if (!ReadHash(reader, asset.Root)) {
 				return refuse();

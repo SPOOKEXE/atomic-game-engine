@@ -65,6 +65,22 @@ namespace engine::script {
 			return call.World().Resource<InputState>();
 		}
 
+		const scene::ControllerState *ControllersOf(ScriptCall &call) {
+			return call.World().Resource<scene::ControllerState>();
+		}
+
+		bool ReadGamepadSlot(ScriptCall &call, size_t argument, size_t &slot) {
+			core::Name member;
+			if (!call.ReadEnum(argument, core::Name("UserInputType"), member)) return false;
+			size_t ordinal = 0;
+			if (!ecs::EnumTable::OrdinalOf(core::Name("UserInputType"), member, ordinal) ||
+				ordinal < static_cast<size_t>(scene::InputSource::Gamepad1) ||
+				ordinal > static_cast<size_t>(scene::InputSource::Gamepad8))
+				return false;
+			slot = ordinal - static_cast<size_t>(scene::InputSource::Gamepad1);
+			return true;
+		}
+
 		// `UserInputService:IsKeyDown(Enum.KeyCode.Space)`
 		//
 		// **Takes an `EnumItem` or a string**, which is the same latitude a
@@ -188,6 +204,84 @@ namespace engine::script {
 				down.push_back(ButtonReport(*input, button, true));
 			}
 			call.ReturnInputObjects(down);
+		}
+
+		void GetConnectedGamepads(ScriptCall &call) {
+			std::vector<core::Name> connected;
+			if (const auto *controllers = ControllersOf(call); controllers != nullptr) {
+				for (size_t slot = 0; slot < scene::MAX_CONTROLLERS; slot++) {
+					if (controllers->Slots[slot].Connected) {
+						connected.emplace_back(
+							scene::Describe(
+								static_cast<scene::InputSource>(
+									static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot
+								)
+							)
+						);
+					}
+				}
+			}
+			call.ReturnEnums(core::Name("UserInputType"), connected);
+		}
+
+		void GetSupportedGamepadKeyCodes(ScriptCall &call) {
+			size_t slot = 0;
+			if (!ReadGamepadSlot(call, 0, slot)) {
+				call.Raise(
+					"GetSupportedGamepadKeyCodes expects Enum.UserInputType.Gamepad1 through Gamepad8"
+				);
+			}
+			(void)slot;
+			std::vector<core::Name> keys;
+			for (size_t index = 0; index < static_cast<size_t>(scene::ControllerButton::Count); index++) {
+				keys.emplace_back(scene::Describe(scene::KeyOf(static_cast<scene::ControllerButton>(index))));
+			}
+			keys.emplace_back("Thumbstick1");
+			keys.emplace_back("Thumbstick2");
+			call.ReturnEnums(core::Name("KeyCode"), keys);
+		}
+
+		void IsGamepadButtonDown(ScriptCall &call) {
+			size_t slot = 0;
+			core::Name member;
+			if (!ReadGamepadSlot(call, 0, slot) || !call.ReadEnum(1, core::Name("KeyCode"), member)) {
+				call.Raise("IsGamepadButtonDown expects a gamepad and Enum.KeyCode");
+			}
+			bool down = false;
+			if (const auto *controllers = ControllersOf(call);
+				controllers != nullptr && controllers->Slots[slot].Connected) {
+				for (size_t index = 0; index < static_cast<size_t>(scene::ControllerButton::Count); index++) {
+					const auto button = static_cast<scene::ControllerButton>(index);
+					if (member == core::Name(scene::Describe(scene::KeyOf(button)))) {
+						down = controllers->Slots[slot].IsDown(button);
+						break;
+					}
+				}
+			}
+			call.ReturnBoolean(down);
+		}
+
+		void GetGamepadState(ScriptCall &call) {
+			size_t slot = 0;
+			if (!ReadGamepadSlot(call, 0, slot)) {
+				call.Raise("GetGamepadState expects Enum.UserInputType.Gamepad1 through Gamepad8");
+			}
+			std::vector<InputReport> reports;
+			const auto *controllers = ControllersOf(call);
+			if (controllers == nullptr || !controllers->Slots[slot].Connected) {
+				call.ReturnInputObjects(reports);
+				return;
+			}
+			const scene::ControllerSlot &controller = controllers->Slots[slot];
+			for (size_t index = 0; index < static_cast<size_t>(scene::ControllerButton::Count); index++) {
+				const auto button = static_cast<scene::ControllerButton>(index);
+				if (controller.IsDown(button)) reports.push_back(ControllerButtonReport(slot, button, true));
+			}
+			reports.push_back(ControllerStickReport(slot, controller, false));
+			reports.push_back(ControllerStickReport(slot, controller, true));
+			reports.push_back(ControllerTriggerReport(slot, controller, scene::ControllerAxis::LeftTrigger));
+			reports.push_back(ControllerTriggerReport(slot, controller, scene::ControllerAxis::RightTrigger));
+			call.ReturnInputObjects(reports);
 		}
 
 		// --- the properties ----------------------------------------------------
@@ -347,14 +441,19 @@ namespace engine::script {
 			call.ReturnBoolean(InputOf(call) != nullptr);
 		}
 
-		// `GamepadEnabled`, `TouchEnabled`, `VREnabled`, `AccelerometerEnabled`
-		// and `GyroscopeEnabled`.
+		void GetGamepadPresent(ScriptCall &call) {
+			const auto *controllers = ControllersOf(call);
+			call.ReturnBoolean(controllers != nullptr && controllers->AnyConnected());
+		}
+
+		// `TouchEnabled`, `VREnabled`, `AccelerometerEnabled` and
+		// `GyroscopeEnabled`.
 		//
 		// **Present and false, which is better than absent.** Roblox scripts
 		// branch on these - `if UserInputService.TouchEnabled then` is how a place
 		// picks its control scheme - and a missing property raises where a false
-		// one takes the other branch. There is no gamepad, touch, headset or
-		// sensor anywhere in `input::Translator`, so the answer is a constant and
+		// one takes the other branch. There is no touch, headset or sensor
+		// adapter, so the answer is a constant and
 		// saying so is the honest version of not having one.
 		void GetNoSuchDevice(ScriptCall &call) {
 			call.ReturnBoolean(false);
@@ -372,16 +471,6 @@ namespace engine::script {
 		//
 		// What is missing, and what each would need first:
 		//
-		// - **`GetConnectedGamepads`, `GetGamepadState`, `GetSupportedGamepadKeyCodes`,
-		//   `IsGamepadButtonDown`, `GamepadConnected`, `GamepadDisconnected`.**
-		//   `input::Translator` handles five SDL event types and none of them is a
-		//   gamepad, so there is no device to enumerate - `GetConnectedGamepads`
-		//   would be an empty list forever and `GetGamepadState` a list of nothing.
-		//   Closing it is `SDL_Gamepad` in the translator plus the `Gamepad1..8`
-		//   and `Button*`/`Thumbstick*` members in `scene::InputSource` and
-		//   `scene::KeyCode`, which is a change in those two files rather than
-		//   this one.
-		//
 		// - **`TouchStarted` and its five neighbours.** There is no touch
 		//   surface anywhere in `input::Translator`, so every one of them would
 		//   be a signal that never fires.
@@ -389,7 +478,7 @@ namespace engine::script {
 		// - **`TextBoxFocused` and `TextBoxFocusReleased`**, which are the
 		//   service-wide twins of the pair a `TextBox` now carries. Not absent
 		//   for want of the fact - `gui::EventKind::Focused` is exactly it - but
-		//   because these two are `SignalKind::PropertyChanged` rows fired by
+		//   because these two are `SignalKind::Input` rows fired by
 		//   `PumpInput` from `scene::InputState`, and a focus change arrives at
 		//   the *other* pump, through `DeliverGuiEvents`, carrying the element it
 		//   is about. Firing an instance-subject event from a world-subject row
@@ -413,7 +502,7 @@ namespace engine::script {
 	}
 
 	const ServiceSurface &UserInputServiceSurface() {
-		static constexpr std::array<ServiceMethod, 8> METHODS{{
+		static constexpr std::array<ServiceMethod, 12> METHODS{{
 			{"IsKeyDown", IsKeyDown},
 			{"IsMouseButtonPressed", IsMouseButtonPressed},
 			{"GetMouseLocation", GetMouseLocation},
@@ -422,6 +511,10 @@ namespace engine::script {
 			{"GetMouseButtonsPressed", GetMouseButtonsPressed},
 			{"GetLastInputType", GetLastInputType},
 			{"GetFocusedTextBox", GetFocusedTextBox},
+			{"GetConnectedGamepads", GetConnectedGamepads},
+			{"GetGamepadState", GetGamepadState},
+			{"GetSupportedGamepadKeyCodes", GetSupportedGamepadKeyCodes},
+			{"IsGamepadButtonDown", IsGamepadButtonDown},
 		}};
 
 		// **Ten properties, three of them writable.** The seven read-only rows
@@ -433,7 +526,7 @@ namespace engine::script {
 			{"MouseDeltaSensitivity", GetMouseDeltaSensitivity, SetMouseDeltaSensitivity},
 			{"KeyboardEnabled", GetInputDevicePresent, nullptr},
 			{"MouseEnabled", GetInputDevicePresent, nullptr},
-			{"GamepadEnabled", GetNoSuchDevice, nullptr},
+			{"GamepadEnabled", GetGamepadPresent, nullptr},
 			{"TouchEnabled", GetNoSuchDevice, nullptr},
 			{"VREnabled", GetNoSuchDevice, nullptr},
 			{"AccelerometerEnabled", GetNoSuchDevice, nullptr},
@@ -445,13 +538,15 @@ namespace engine::script {
 		// `ServiceSignal::Property`. The subject is `NULL_ENTITY` because these
 		// are the world's edges and not any instance's, and both pumps fire the
 		// row whose name matches.
-		static constexpr std::array<ServiceSignal, 6> SIGNALS{{
-			{"InputBegan", SignalKind::PropertyChanged, "InputBegan"},
-			{"InputEnded", SignalKind::PropertyChanged, "InputEnded"},
-			{"InputChanged", SignalKind::PropertyChanged, "InputChanged"},
-			{"WindowFocused", SignalKind::PropertyChanged, "WindowFocused"},
-			{"WindowFocusReleased", SignalKind::PropertyChanged, "WindowFocusReleased"},
-			{"LastInputTypeChanged", SignalKind::PropertyChanged, "LastInputTypeChanged"},
+		static constexpr std::array<ServiceSignal, 8> SIGNALS{{
+			{"InputBegan", SignalKind::Input, "InputBegan"},
+			{"InputEnded", SignalKind::Input, "InputEnded"},
+			{"InputChanged", SignalKind::Input, "InputChanged"},
+			{"GamepadConnected", SignalKind::Input, "GamepadConnected"},
+			{"GamepadDisconnected", SignalKind::Input, "GamepadDisconnected"},
+			{"WindowFocused", SignalKind::Input, "WindowFocused"},
+			{"WindowFocusReleased", SignalKind::Input, "WindowFocusReleased"},
+			{"LastInputTypeChanged", SignalKind::Input, "LastInputTypeChanged"},
 		}};
 
 		static const ServiceSurface SURFACE = [] {

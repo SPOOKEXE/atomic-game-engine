@@ -18,6 +18,8 @@
 // `BeginRun` calls `SpawnPlayer` for the clients Play asks for, so there is one
 // path that admits somebody and one place that can be wrong about it.
 
+#include "PlayedInput.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -183,6 +185,22 @@ namespace studio {
 			// share, so jump is now an ordinary key: it goes into `Down` with W,
 			// A, S and D above and leaves through `ReadMoveIntent` with them.
 			input->LatchPresses();
+
+			if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
+				controllers != nullptr) {
+				uint32_t latched[engine::scene::MAX_CONTROLLERS] = {};
+				for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+					latched[index] = controllers->Slots[index].PressedButtons;
+				}
+				*controllers = PlayedInput->Translator.Controllers();
+				if (controllers->HasFrameEvents()) {
+					input->LastSource = PlayedInput->Translator.State().LastSource;
+				}
+				for (size_t index = 0; index < engine::scene::MAX_CONTROLLERS; index++) {
+					controllers->Slots[index].PressedButtons |= latched[index];
+				}
+				controllers->LatchPresses();
+			}
 			drove = true;
 		});
 
@@ -293,6 +311,7 @@ namespace studio {
 		}
 
 		run->Links.push_back(std::move(link));
+		StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 		Say(label + " joined");
 		SyncWorldStates();
 		return true;
@@ -334,6 +353,7 @@ namespace studio {
 			}
 		}
 
+		StopPlaytestPlugins(replica);
 		(*chosen)->Stop(*Universe);
 		run->Links.erase(chosen);
 
@@ -497,6 +517,7 @@ namespace studio {
 							view.Follow = NULL_ENTITY;
 						}
 					}
+					StopPlaytestPlugins(oldReplica);
 					link->Stop(*Universe);
 					link.reset();
 					continue;
@@ -506,6 +527,7 @@ namespace studio {
 				// already gone** - so `PlayLink::Stop`'s own destroy finds
 				// nothing to destroy, which is exactly right: the teleport did
 				// it, in the world that was allowed to.
+				StopPlaytestPlugins(oldReplica);
 				link->Stop(*Universe);
 
 				auto moved = std::make_unique<PlayLink>();
@@ -517,6 +539,7 @@ namespace studio {
 				}
 
 				const WorldId replica = moved->ReplicaWorld();
+				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);
 
 				// The panel that was showing them follows too, or the author
 				// watches an empty room and the player is somewhere off screen.

@@ -22,11 +22,12 @@ namespace client {
 			engine::core::CFrame Frame;
 			engine::scene::Camera Camera;
 			uint32_t Instances = 0;
-			uint32_t Reserved = 0;
+			uint32_t Joints = 0;
 		};
 
-		size_t PayloadFor(size_t instances) {
-			return sizeof(Prefix) + instances * sizeof(engine::scene::DrawInstance);
+		size_t PayloadFor(size_t instances, size_t joints = 0) {
+			return sizeof(Prefix) + instances * sizeof(engine::scene::DrawInstance) +
+				   joints * sizeof(engine::core::CFrame);
 		}
 
 		// How much a channel grows by when a world outgrows it.
@@ -74,14 +75,15 @@ namespace client {
 		const engine::scene::Camera &camera,
 		std::span<const engine::scene::DrawInstance> list,
 		uint64_t tick,
-		float alpha
+		float alpha,
+		std::span<const engine::core::CFrame> joints
 	) {
 		Slot *slot = Find(id);
 		if (slot == nullptr) {
 			return false;
 		}
 
-		const size_t bytes = PayloadFor(list.size());
+		const size_t bytes = PayloadFor(list.size(), joints.size());
 		if (bytes > slot->Channel->MaximumPayload()) {
 			// **Grown rather than refused.** The size passed to `Track` is a
 			// starting guess - on the client it is `--entities`, which is the
@@ -94,8 +96,9 @@ namespace client {
 			// frame with holes in it, and a hole looks like a bug in whatever
 			// was supposed to fill it.
 			const size_t grown = GrownTo(list.size());
-			slot->Channel->Reserve(PayloadFor(grown));
-			slot->Payload.reserve(PayloadFor(grown));
+			const size_t grownBytes = std::max(bytes, PayloadFor(grown, joints.size()));
+			slot->Channel->Reserve(grownBytes);
+			slot->Payload.reserve(grownBytes);
 
 			// Info rather than a warning, and once per growth rather than once
 			// per frame: a world finding its size is ordinary. A line that
@@ -117,10 +120,16 @@ namespace client {
 		prefix.Frame = frame;
 		prefix.Camera = camera;
 		prefix.Instances = static_cast<uint32_t>(list.size());
+		prefix.Joints = static_cast<uint32_t>(joints.size());
 		std::memcpy(Scratch.data(), &prefix, sizeof(Prefix));
 
 		if (!list.empty()) {
-			std::memcpy(Scratch.data() + sizeof(Prefix), list.data(), bytes - sizeof(Prefix));
+			std::memcpy(Scratch.data() + sizeof(Prefix), list.data(), list.size_bytes());
+		}
+		if (!joints.empty()) {
+			std::memcpy(
+				Scratch.data() + sizeof(Prefix) + list.size_bytes(), joints.data(), joints.size_bytes()
+			);
 		}
 
 		engine::world::ViewHeader header;
@@ -137,6 +146,7 @@ namespace client {
 		ENGINE_PROFILE_CAT("Compositor::Compose", engine::core::ProfileCategory::Render);
 
 		Combined.clear();
+		CombinedJoints.clear();
 
 		for (size_t index = 0; index < Slots.size(); index++) {
 			Slot &slot = Slots[index];
@@ -166,9 +176,13 @@ namespace client {
 			// Trusted only as far as the buffer goes. The producer is this
 			// process, but a count read back out of a buffer is still a count
 			// that decides how far a memcpy runs.
-			const size_t available =
+			const size_t availableInstances =
 				(slot.Payload.size() - sizeof(Prefix)) / sizeof(engine::scene::DrawInstance);
-			const size_t count = std::min<size_t>(prefix.Instances, available);
+			const size_t count = std::min<size_t>(prefix.Instances, availableInstances);
+			const size_t instanceBytes = count * sizeof(engine::scene::DrawInstance);
+			const size_t remaining = slot.Payload.size() - sizeof(Prefix) - instanceBytes;
+			const size_t jointCount =
+				std::min<size_t>(prefix.Joints, remaining / sizeof(engine::core::CFrame));
 			slot.State.Instances = count;
 
 			if (index == 0) {
@@ -177,6 +191,7 @@ namespace client {
 			}
 
 			const size_t before = Combined.size();
+			const size_t jointBefore = CombinedJoints.size();
 			Combined.resize(before + count);
 			if (count > 0) {
 				std::memcpy(
@@ -185,9 +200,27 @@ namespace client {
 					count * sizeof(engine::scene::DrawInstance)
 				);
 			}
+			CombinedJoints.resize(jointBefore + jointCount);
+			if (jointCount > 0) {
+				std::memcpy(
+					CombinedJoints.data() + jointBefore,
+					slot.Payload.data() + sizeof(Prefix) + instanceBytes,
+					jointCount * sizeof(engine::core::CFrame)
+				);
+			}
 			for (size_t at = before; at < Combined.size(); at++) {
 				if (!Combined[at].SourceWorld.IsValid()) {
 					Combined[at].SourceWorld = slot.State.World;
+				}
+				if (Combined[at].SkinCount != 0) {
+					const uint64_t end =
+						static_cast<uint64_t>(Combined[at].SkinFirst) + Combined[at].SkinCount;
+					if (end > jointCount) {
+						Combined[at].SkinFirst = 0;
+						Combined[at].SkinCount = 0;
+					} else {
+						Combined[at].SkinFirst += static_cast<uint32_t>(jointBefore);
+					}
 				}
 			}
 

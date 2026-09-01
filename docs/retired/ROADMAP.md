@@ -2531,3 +2531,93 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] determinism mode: detect nondeterministic simulation and optionally enforce deterministic ordering
 - [x] hot-reloadable components/systems
 - [x] parallel::Jobs pool fix: replace the leaked static pool and join worker waiters during teardown
+
+### v0.21
+
+- [x] build out file format even more: save ShaderScripts and universe/world settings; support `.auniverse` manifests with separate `.aworld` files and optional recursive discovery that never walks links.
+- [x] ground every verified catalogue asset into the standalone `.aworld` export's sibling `assets/` store, fetching through the configured delivery sources and optionally including raw authoring folders without following links.
+- [x] in CDN, support persisted trained compression dictionaries, configurable Zstd levels, compressed bundle traffic, and prepared-frame caching.
+- [x] let Luau and JavaScript plugins modify viewport grid colours, step/scale, major spacing, reach/size, strength, alpha, and X/Z offsets through the shared host surface.
+- [x] let plugins enable or disable visible particles without changing emitter state.
+- [x] keep render/debug/transport views native until replacement is useful; migrate the daily editing panels whose declarations benefit from plugin ownership.
+- [x] route native editor behavior through one value-based plugin host surface shared by Luau and JavaScript.
+- [x] move Explorer, Properties, Component Inspector, and Script Editor declarations into the Default Studio plugin while retaining their native ECS adapters.
+- [x] add plugin functions for dropdowns, toolbar layout, viewport creation/options, docked widgets, and script-editor source/open integration.
+- [x] give a universe a shared `assets/` store and mount it automatically as the first local content source when the universe loads.
+- [x] add a universe loading widget that lists declared CDNs and requests permission before enabling HTTP content access.
+- [x] add universe loader tabs: General, Assets, Permissions, CDN, and Misc, with all-world and inherited per-world views.
+- [x] add `.auniverse` export options for verified processed assets and optional raw authoring files under `assets/`.
+- [x] add script-editor customization: a persisted code background override can follow or replace the active theme, and the minimap can be toggled independently.
+- [x] add external editor connections for the system default, Visual Studio Code, Notepad and a custom executable; program and ShaderScript tabs use watched staging files, import external writes, and expose two-sided conflict resolution.
+- [x] add a Script Editor preferences page for the selected external editor, executable override, background and minimap.
+- [x] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
+- [x] add shared DataStore and MemoryStore administration, durable local DataStore images, isolated mock/live folders, server and Studio local-provider settings, and a Default Studio dataset editor plugin.
+- [x] add platform-specific backend tooling where only "admitted keys" can connect to a given server - the client proves a platform-issued Ed25519 play seed without sending it, servers accept repeatable configured public keys, and the loopback control surface can list, allow, revoke or explicitly open admission for future sessions.
+- [x] replace the launcher's raw option wall with discoverable mode cards, searchable Common/All options/Engine settings tabs, typed controls and path pickers generated from each program's declarations, a command preview, retained per-mode forms, and supervised launch/restart/stop status.
+- [x] consolidate CDN deployment configuration into declared `cdn.*` settings with config/environment/CLI precedence, readable serving and publishing options, repeatable named upstreams, explicit local/cache/proxy switches, safe opt-in ingest and forwarding, validation of contradictory setups, and a terminal dashboard for live status.
+- [x] build out live client presentation settings: EditableMesh and EditableImage uploads, particles and post-processing can be disabled by config/CLI and toggled in-game without restarting.
+- [x] add a ESC settings menu to the client and in studio client. add the client settings to it.
+- [x] let client Luau and JavaScript add, relabel, remove and activate named ESC menu actions through SettingsService; the ECS owns the bounded action list and both standalone and Studio Play render it.
+- [x] add gamepad and joystick support: SDL mapped pads and raw joysticks occupy eight stable world slots; normalized buttons, sticks, triggers and hats drive movement, camera, jump and firing in the client and Studio Play; Luau and JavaScript receive matching polling APIs, connection signals, input edges and analog changes.
+- [x] use SDL GPU's Vulkan-convention render path with SPIR-V on Vulkan devices and translated MSL on native Metal devices; choose the device's supported shader format at runtime and keep both built-in and live ShaderScripts on the same path.
+- [x] wire the future scene vocabulary: Skeleton, Bone, AnimationClip, Animator, AnimationTrack, Constraint, LevelOfDetail, Atmosphere, Clouds and Terrain are registered, reflected, persisted where their variable payload requires it, documented, and covered by scene suites.
+- [x] render atmosphere, clouds and textured or procedural skies from each view's `WorldLighting::EnvironmentState`: the environment render-graph pass selects authored or compute modes, keeps signatures and resident targets per presentation slot, and consumes presentation-only scene values without feeding simulation.
+- [x] review v0.21 Studio coverage: ShaderScripts are editable in the shared source editor with GLSL autocomplete, save through their revisioned ECS property, round-trip in world/universe files and compile by name in the renderer; the full headless check covers the authored chain.
+- [x] add the datastore routing seam: `DataStoreRouter` assigns stable datastore names to `DataStoreAdapter` providers owned by `DataStorageServices`; server and Studio persistence use its built-in atomic file adapter, while remote provider choices remain the current-work item above.
+- [x] add remote datastore choices and per-datastore backend assignment: the router assigns each logical store to the atomic file or bounded plain-HTTP snapshot adapter; server flags and Studio preferences select the default route, while TLS and named database protocols remain separate provider work rather than mislabeled HTTP.
+- [x] require SDL GPU's Vulkan backend everywhere, feed it SPIR-V only, and package pinned MoltenVK 1.4.2 beside Apple presentation executables with the upstream artifact checksum enforced.
+- [x] complete the skinning pipeline: `assets::MeshVertex` carries joint indices and weights, bake preserves glTF influences, render uploads and rebases a palette per rig, and fixed-tick animation tracks sample and blend bounded `.aanim` clips into bone poses before palette collection.
+- [x] review world export and world loading so that:
+	1. we can export a full game as a "project zip" which we can load on the server
+	2. we can connect to this server and download assets a we need them
+	3. support connecting cdns and doing a validation pass where we check if the cdns are configured
+	4. add export options in studio to also export cdn configs and such
+Ask user to plan this out further, expand into all domains and areas where we need to investigate before actually implementing.
+- [x] make C++ studio plugins which are separate from studio luau plugins. This way we can move all studio default toolbar stuff to the C++ studio plugins and support custom C++ / luau variants easier (e.g. we have a C++ core library with a luau bindings plugin for custom suites).
+- [x] add dynamic C++ plugin binding system also with dynamic luau bindings support to add/remove on plugin load/unload (and we auto collect these on plugin close).
+- [x] add plugin options such as: runs only in studio, runs only in playtest servers, runs only on playtest clients, etc (within studio).
+- [x] move current plugin system to this new C++/Luau bindings style
+- [x] move current studio plugin converted tools to new style
+- [x] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+- [x] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
+- [x] porting Roblox games: the compatibility widget reports missing classes and property conflicts, maps each missing Roblox class to an insertable engine class, persists those choices, and the headless converter reloads every `.aworld` it writes.
+- [x] review additions and ensure they all work, we benchmark critical ones and test them.
+- [x] the tooltip for "Faces Side" dropdown has "\n" embeded in text instead of actually doing newlines
+- [x] remove the "Remove Active World" button in World dropdown
+- [x] remove the `Reset to Default PBR` button.
+- [x] remove `Demo` tab
+- [x] rename "Datasets" to "DataStore" checkbox in `View` tab.
+- [x] add tooltip for: Play, Run, Pause, Stop, Spawn Player, Remove Player, Insert Object
+- [x] make `Toolbar` and `Dock Widgets` buttons in `Plugins` tab toggle the state of the dock widget, not force true.
+- [x] in `View` dropdown, add a `Hide Every Panel` button below the `Show Every Panel` button.
+- [x] move `View > Sync Rojo` to `Sync` dropdown
+- [x] Move `View > Toolbar Editor, Dock Widgets, Plugin Widgets` to `UI` dropdown
+- [x] move `View > Demo Nodes` to a new dropdown called `Demo` and call it `Demo > Node Graph`
+- [x] in `View` dropdown in studio, separate by categories: General, Script, Render, Engine, Debug & Visual
+- [x] Add a `New Profile` in `Render Pipeline` Profile dropdown above `Save Profile As...` which uses default pbr
+- [x] default widgets: 1. side top: Explorer, Worlds, Live Instances side bottom: Properties, Components
+- [x] check above edits, changes and additions and test them
+- [x] ensure `Render Pipeline` previews do not render if: menu closed, menu is not visible (e.g. different tab open on same lock spot)
+- [x] a bunch of the Render Pipeline nodes have a `Optional` that does not do anything? Check and remove if useless.
+- [x] Pipeline Profile and Bus do not do anything? even when running Rings demo. Does bus need to be swapped to jobs or something or be removed if redundant?
+- [x] Merge `World Lighting` into `Render Pipeline` and remove it
+- [x] For "Root Folder", make it a "folder selector" instead. Also make `~/Documents/atomic-game-engine/studio/stores` the default.
+- [x] create a `View > DataStores` dropdown for the datastore configuration and setup (move preferences - Data to this instead)
+- [x] Make a `View > CDN` dropdown and move all preferences tab content there instead. Add a `Configure CDN` button in Assets dock widget that opens the the CDN dock widget (or focuses it if already open).
+- [x] build out the `Components` dock widget like properties where you can edit the component values
+- [x] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
+  manually - ensure it uses the CollectionService and such.
+- [x] in command bar, add auto complete as well
+- [x] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
+- [x] for live games, universe config for datastore location tells you the folder where its stored
+- [x] for live games, load datastore config from universe data (use a global universe manager not per world)
+- [x] allow shader scripts to be saved and served on CDN.
+- [x] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
+- [x] animation handler foundation: fixed-tick playheads, fade state, priority and weighted clip sampling write deterministic bone poses; character-controller binding and root motion remain character-system work.
+- [x] skinning and animation foundation: bake preserves four quantised influences per vertex, the CPU controller produces joint transforms, and render keeps per-rig joint palettes GPU-resident beside instance rows.
+- [x] fix viewport size glitch
+- [x] fix multi-viewport camera collision fix
+- [x] fix script editor, all text matches background
+- [x] the sideview of the script editor doesn't scroll and is not interactable
+- [x] Q/E camera movement should depend on camera rotation, not global space
+- [x] shaders demo has no shaders loaded

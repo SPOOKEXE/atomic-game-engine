@@ -87,4 +87,9 @@ mono_add_library(game
 		# serving, so the trust boundary stays where it was.
 		Engine::collision
 		Engine::assets
+
+	# MIT-licensed ZIP reader/writer. Private so no archive-library type enters
+	# the project-format API. `Project.cpp` supplies all limits and path policy;
+	# miniz supplies the byte codec and streaming callbacks.
+	VENDOR Vendor::miniz
 )

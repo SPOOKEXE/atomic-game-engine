@@ -2,15 +2,10 @@
 
 // What a rig is, and where the pose it is in gets written.
 //
-// **The storage exists before the skinning does, and that is decision 16 rather
-// than a gap.** `bake` reads a glTF's `skins` array today only to learn that a
-// node is skinned, so that it contributes the identity instead of its own
-// transform - `bake/src/Gltf.cpp`'s `Walk` says so in as many words. Everything
-// else in that array is parsed and dropped: the joint list, the inverse bind
-// matrices, and the `JOINTS_0`/`WEIGHTS_0` vertex streams. `ROADMAP.md` v0.24 is
-// where that stops being dropped, and these two components are where the rig
-// half of it lands. The per-vertex half is `assets::MeshVertex`'s and is stated
-// in `docs/FUTURE_COMPONENTS.md` rather than guessed at here.
+// `assets::MeshVertex` carries four joint indices and weights, `bake` preserves
+// the glTF streams, and the renderer builds one GPU palette per rig from these
+// rows. `AnimationTrack` evaluation writes `Bone::Transform`; `ResolveBones`
+// composes the result before the palette is collected.
 //
 // **A bone is an instance and not a row in a private table**, which is Roblox's
 // arrangement and is also what the roadmap asks for one line later: a character
@@ -37,7 +32,7 @@
 // for the same kind of reason, where the index *is* the bit.
 //
 // arch-waiver public-header: forward API. `Skeleton` and `Bone` are the rig storage `bake`
-// currently discards; `docs/FUTURE_COMPONENTS.md` says what wires them at v0.24.
+// feeds from imported or authored rig data.
 // Decision 16.
 //
 // @tier L7 · shared

@@ -15,6 +15,7 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -38,6 +39,8 @@
 // that genuinely wants the type - `PanelSink` below installs itself into
 // `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
 // `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include "ExternalEditor.hpp"
+#include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
 
 #include <spdlog/logger.h>
@@ -92,6 +95,128 @@ namespace studio {
 		constexpr std::string_view SLIDE_WORLD = "Slide";
 		constexpr std::string_view PORTAL_WORLD = "Portals";
 		constexpr std::string_view TUNNELS_WORLD = "Tunnels";
+
+		std::filesystem::path CreateExportStaging(const std::filesystem::path &destination) {
+			static uint64_t serial = 0;
+			const std::filesystem::path parent =
+				destination.parent_path().empty() ? std::filesystem::path(".") : destination.parent_path();
+			std::error_code failure;
+			std::filesystem::create_directories(parent, failure);
+			if (failure) {
+				return {};
+			}
+			for (size_t attempt = 0; attempt < 64; attempt++) {
+				const std::filesystem::path candidate =
+					parent / (".atomic-export-staging-" + std::to_string(++serial));
+				if (std::filesystem::create_directory(candidate, failure)) {
+					return candidate;
+				}
+				failure.clear();
+			}
+			return {};
+		}
+
+		struct PublishedPath {
+			std::filesystem::path Destination;
+			std::filesystem::path Backup;
+			bool Replaced = false;
+		};
+
+		bool PublishExportTree(
+			const ExportRequest &request,
+			const std::filesystem::path &staging,
+			engine::game::ProjectValidationReport &report
+		) {
+			std::vector<std::pair<std::filesystem::path, std::filesystem::path>> moves;
+			const std::filesystem::path document = staging / request.Destination.filename();
+			if (request.Product == engine::game::ExportProduct::WorldFile) {
+				if (std::filesystem::exists(staging / "assets")) {
+					moves.emplace_back(staging / "assets", request.Destination.parent_path() / "assets");
+				}
+			} else {
+				const std::filesystem::path worlds =
+					staging / (request.Destination.stem().string() + ".worlds");
+				if (std::filesystem::exists(worlds)) {
+					moves.emplace_back(
+						worlds,
+						request.Destination.parent_path() / (request.Destination.stem().string() + ".worlds")
+					);
+				}
+				if (std::filesystem::exists(staging / "assets")) {
+					moves.emplace_back(staging / "assets", request.Destination.parent_path() / "assets");
+				}
+			}
+			moves.emplace_back(document, request.Destination);
+
+			std::vector<PublishedPath> published;
+			std::error_code failure;
+			for (const auto &[source, destination] : moves) {
+				PublishedPath row{
+					.Destination = destination,
+					.Backup = {},
+					.Replaced = false,
+				};
+				if (std::filesystem::exists(destination, failure)) {
+					if (!request.ReplaceExisting) {
+						report.Add(
+							"export.destination.exists",
+							engine::game::ProjectFindingSeverity::Error,
+							"export",
+							destination.string(),
+							"destination or export sidecar exists and replacement was not requested"
+						);
+						failure.clear();
+						break;
+					}
+					row.Backup = destination.string() + ".previous";
+					if (std::filesystem::exists(row.Backup, failure)) {
+						report.Add(
+							"export.destination.backup",
+							engine::game::ProjectFindingSeverity::Error,
+							"export",
+							row.Backup.string(),
+							"recoverable replacement backup already exists"
+						);
+						break;
+					}
+					std::filesystem::rename(destination, row.Backup, failure);
+					if (failure) {
+						break;
+					}
+					row.Replaced = true;
+				}
+				std::filesystem::rename(source, destination, failure);
+				if (failure) {
+					if (row.Replaced) {
+						std::error_code ignored;
+						std::filesystem::rename(row.Backup, destination, ignored);
+					}
+					break;
+				}
+				published.push_back(std::move(row));
+			}
+
+			if (!failure && published.size() == moves.size()) {
+				return true;
+			}
+			for (auto row = published.rbegin(); row != published.rend(); ++row) {
+				std::error_code ignored;
+				std::filesystem::rename(row->Destination, staging / row->Destination.filename(), ignored);
+				if (row->Replaced) {
+					std::filesystem::rename(row->Backup, row->Destination, ignored);
+				}
+			}
+			if (report.Passed()) {
+				report.Add(
+					"export.publish.failed",
+					engine::game::ProjectFindingSeverity::Error,
+					"export",
+					request.Destination.string(),
+					"could not publish the staged export"
+				);
+			}
+			return false;
+		}
 
 		// **The pair, and they are a pair on purpose.** A teleport needs
 		// somewhere to go, and until v0.14 there were five worlds a player could
@@ -330,6 +455,7 @@ namespace studio {
 	// empty until start-up would make every panel lookup in those a bounds check
 	// that returns null rather than the main viewport's neighbour.
 	Editor::Editor() {
+		PlayedInput = std::make_unique<PlayedInputAdapter>();
 		ResizeViewports(DEFAULT_EXTRA_VIEWPORTS);
 	}
 
@@ -462,7 +588,7 @@ namespace studio {
 			ENGINE_INFO("assets from {}", Settings.Assets.string());
 		}
 
-		if (!SDL_Init(SDL_INIT_VIDEO)) {
+		if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
 			ENGINE_ERROR("SDL_Init: {}", SDL_GetError());
 			return false;
 		}
@@ -643,6 +769,11 @@ namespace studio {
 			NewGame();
 		}
 
+		// The provider is external to an authored game, so it is applied after
+		// the game has finished replacing worlds and before any script can run.
+		// A broken image is reported but does not make the editor unusable.
+		(void)ConfigureDataStore();
+
 		// **After the game, because a sync builds *into* a scene.** With no game
 		// named that scene is the empty one `NewGame` just made, which is the
 		// case somebody pointing this at a Rojo repository wants: the project is
@@ -732,6 +863,13 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		// A prepared import owns no universe state, but its result fields belong
+		// to this editor and must outlive the worker writing them.
+		if (WorldImportWorker.joinable()) {
+			WorldImportWorker.join();
+		}
+		WorldImportActive = false;
+
 		// **First, and before the universe goes.** A socket thread parked on a
 		// request the frame loop will never pump again would keep the process
 		// alive; Stop wakes it and joins.
@@ -775,12 +913,17 @@ namespace studio {
 		}
 
 		SaveConfiguration();
+		(void)FlushDataStore();
 
 		// Runtimes hold a `Store &`, and the stores are the universe's. Let go
 		// of every one of them before it goes away.
 		EndAllRuns();
 		Runs.clear();
+		StopAllPlaytestPlugins();
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();
@@ -803,6 +946,12 @@ namespace studio {
 		GameInterface.Shutdown();
 		Interface.Shutdown();
 		Renderer.Shutdown();
+		for (SDL_Gamepad *gamepad : PlayedInput->Gamepads)
+			SDL_CloseGamepad(gamepad);
+		PlayedInput->Gamepads.clear();
+		for (SDL_Joystick *joystick : PlayedInput->Joysticks)
+			SDL_CloseJoystick(joystick);
+		PlayedInput->Joysticks.clear();
 
 		if (Window != nullptr) {
 			SDL_DestroyWindow(Window);
@@ -906,6 +1055,10 @@ namespace studio {
 				PumpPlugins(delta);
 
 				Simulate(delta);
+				if (engine::core::Clock::Seconds() >= NextDataStoreFlush) {
+					(void)FlushDataStore();
+					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
+				}
 				if (renderingActive) {
 					Present(PresentationDeltaSeconds);
 					PresentationDeltaSeconds = 0.0f;
@@ -996,6 +1149,7 @@ namespace studio {
 
 	void Editor::PumpEvents() {
 		ENGINE_PROFILE("pump events");
+		PlayedInput->Translator.BeginFrame();
 
 		// **The clock read once per pump rather than once per event.** Every
 		// input kind below set `LastInputSeconds` from `Clock::Seconds()`, and a
@@ -1012,6 +1166,32 @@ namespace studio {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_JOYSTICK_ADDED) {
+					if (SDL_IsGamepad(event.jdevice.which)) {
+						if (SDL_Gamepad *gamepad = SDL_OpenGamepad(event.jdevice.which); gamepad != nullptr) {
+							PlayedInput->Gamepads.push_back(gamepad);
+							SDL_Event mapped = event;
+							mapped.type = SDL_EVENT_GAMEPAD_ADDED;
+							mapped.gdevice.which = event.jdevice.which;
+							PlayedInput->Translator.HandleEvent(mapped);
+						}
+					} else if (SDL_Joystick *joystick = SDL_OpenJoystick(event.jdevice.which);
+							   joystick != nullptr) {
+						PlayedInput->Joysticks.push_back(joystick);
+					}
+				}
+				if (event.type == SDL_EVENT_JOYSTICK_REMOVED) {
+					std::erase_if(PlayedInput->Gamepads, [&event](SDL_Gamepad *gamepad) {
+						if (SDL_GetGamepadID(gamepad) != event.jdevice.which) return false;
+						SDL_CloseGamepad(gamepad);
+						return true;
+					});
+					std::erase_if(PlayedInput->Joysticks, [&event](SDL_Joystick *joystick) {
+						if (SDL_GetJoystickID(joystick) != event.jdevice.which) return false;
+						SDL_CloseJoystick(joystick);
+						return true;
+					});
+				}
 				// **A span per event kind**, because a pump that is slow says
 				// nothing about why: a window resize is a synchronous round trip to
 				// the window system and a keystroke is not, and one bar covering
@@ -1025,6 +1205,7 @@ namespace studio {
 				// program that filtered first would have a script editor that never
 				// received the letter W because the camera was listening for it.
 				Interface.ProcessEvent(event);
+				PlayedInput->Translator.HandleEvent(event);
 
 				if (PendingControlClick.has_value() && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
 					event.button.windowID == SDL_GetWindowID(Window) &&
@@ -1860,6 +2041,10 @@ namespace studio {
 			drawingWorld ? (drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active)
 						 : WorldId{};
 		const WorldId visual = VisualWorldOf(shown);
+		if (!visual.IsValid() && LastPostProcessShader.IsValid()) {
+			Renderer.ClearPostProcessShader();
+			LastPostProcessShader = {};
+		}
 
 		// **Resolved before anything presents, because `PreRender` reads it.**
 		// It used to be worked out after the present call, which was harmless
@@ -2079,6 +2264,8 @@ namespace studio {
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
+		std::vector<engine::core::CFrame> jointFrames;
+		std::vector<engine::core::CFrame> foreignJointFrames;
 		DrawnInstances.clear();
 		ForeignInstances.clear();
 
@@ -2097,6 +2284,9 @@ namespace studio {
 		uint32_t visualSurfaceBounces = Renderer.SurfaceBounces();
 		uint32_t visualSurfaceLimit = Renderer.SurfaceLimit();
 		const bool particleWorldRunning = visual.IsValid() && IsRunning(visual);
+		const bool clientPresentation = visual.IsValid() && ModeOf(visual) == RunMode::Play;
+		const bool particlesEnabled =
+			ShowParticleEmitters && (!clientPresentation || ClientSettings.EnableParticles);
 		if (visual.IsValid()) {
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
@@ -2112,6 +2302,7 @@ namespace studio {
 					// is inside is a pointer across a boundary that rule 3
 					// exists to keep closed.
 					DrawnInstances = list->Instances;
+					jointFrames = list->JointFrames;
 				}
 
 				// **The surface cameras, which the studio was never asking
@@ -2149,7 +2340,7 @@ namespace studio {
 				{
 					ENGINE_PROFILE_CAT("collect effects", engine::core::ProfileCategory::Render);
 
-					if (ShowParticleEmitters) {
+					if (particlesEnabled) {
 						// Edit worlds run PreRender but no simulation phases. Advance
 						// the same resident system the client uses after attachments
 						// have resolved, then select only enabled emitters placed on a
@@ -2161,7 +2352,7 @@ namespace studio {
 								"preview particles", engine::core::ProfileCategory::Simulation
 							);
 							(void)AdvanceStudioParticlePreview(
-								store, frameSeconds, particleWorldRunning, ShowParticleEmitters
+								store, frameSeconds, particleWorldRunning, particlesEnabled
 							);
 						}
 					}
@@ -2171,7 +2362,7 @@ namespace studio {
 					// and a `ParticleBatch` points at a block the world may reclaim
 					// the moment the tick resumes. Copying the batches alone would
 					// copy the pointers.
-					(void)CollectStudioParticleBatches(store, Particles, ShowParticleEmitters);
+					(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
 					particleFrameCollected = true;
 					Particles.Detach();
 
@@ -2234,12 +2425,20 @@ namespace studio {
 				// world nobody is editing - see `scene::ShaderSource::Revision`.
 				{
 					ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
+					const engine::core::Name wantedPostProcess =
+						!clientPresentation || ClientSettings.EnablePostProcessing
+							? engine::scene::PostProcessShaderOf(store)
+							: engine::core::Name{};
 					if (Shaders.Refresh(store) > 0) {
 						VisualResourceRevision++;
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
 							if (module == nullptr) {
 								(void)Renderer.DropShader(shader);
+								if (shader == wantedPostProcess) {
+									Renderer.ClearPostProcessShader();
+									LastPostProcessShader = {};
+								}
 								continue;
 							}
 
@@ -2252,6 +2451,22 @@ namespace studio {
 							}
 
 							(void)Renderer.AddShader(shader, module->SpirV);
+							if (shader == wantedPostProcess &&
+								Renderer.SetPostProcessShader(shader, module->SpirV)) {
+								LastPostProcessShader = shader;
+							}
+						}
+					}
+
+					if (wantedPostProcess != LastPostProcessShader) {
+						if (!wantedPostProcess.IsValid()) {
+							Renderer.ClearPostProcessShader();
+							LastPostProcessShader = {};
+						} else if (const engine::render::ShaderModule *module =
+									   Shaders.Find(wantedPostProcess);
+								   module != nullptr && module->Error.empty() &&
+								   Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
+							LastPostProcessShader = wantedPostProcess;
 						}
 					}
 				}
@@ -2278,11 +2493,15 @@ namespace studio {
 					ENGINE_PROFILE_CAT("editable upload", engine::core::ProfileCategory::Assets);
 					{
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
-						VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						if (!clientPresentation || ClientSettings.EnableEditableMeshes) {
+							VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						}
 					}
 					{
 						ENGINE_PROFILE_CAT("editable images", engine::core::ProfileCategory::Assets);
-						VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						if (!clientPresentation || ClientSettings.EnableEditableImages) {
+							VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
+						}
 					}
 
 					// **And the collision shapes, which the editor needs on a
@@ -2336,7 +2555,11 @@ namespace studio {
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
 						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
 						AppendReplicaVisualInstances(
-							Universe->NameOf(shown), list->Instances, DrawnInstances
+							Universe->NameOf(shown),
+							list->Instances,
+							DrawnInstances,
+							list->JointFrames,
+							&jointFrames
 						);
 					}
 				}
@@ -2390,7 +2613,13 @@ namespace studio {
 			// of those is what a cross-world portal was missing, and missing it
 			// is what made one draw only from A into B and never back.
 			(void)client::AttachForeignSurfaces(
-				*Universe, visual, DrawnInstances, ForeignInstances, Surfaces
+				*Universe,
+				visual,
+				DrawnInstances,
+				ForeignInstances,
+				Surfaces,
+				&jointFrames,
+				&foreignJointFrames
 			);
 
 			instances = &DrawnInstances;
@@ -2427,6 +2656,7 @@ namespace studio {
 			view.Camera = lens;
 			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 												  : std::span<const engine::scene::DrawInstance>{};
+			view.JointFrames = jointFrames;
 			view.Surfaces = Surfaces;
 			view.Particles = Particles.Batches;
 			view.ParticleSeams = Particles.Seams;
@@ -2445,6 +2675,7 @@ namespace studio {
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
 			view.Slot = DrawingViewport;
 			view.Foreign = ForeignInstances;
+			view.ForeignJointFrames = foreignJointFrames;
 			view.Portals = Portals;
 			view.Pipeline = selectedPipeline;
 			view.World = visual.IsValid() ? visual.Index : 0;
@@ -2486,7 +2717,7 @@ namespace studio {
 					.Resources = VisualResourceRevision,
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
-					.PostProcess = {},
+					.PostProcess = LastPostProcessShader,
 					.Untextured = ShowColliders && ColliderHideTextures,
 				}
 			);
@@ -2858,15 +3089,22 @@ namespace studio {
 			// falls back to the part's bound in silence. `ContentShapes` is the
 			// same argument `ContentMeshFacts` makes, one layer down.
 			engine::game::MergeCollisionShapes(store, ContentShapes);
+			for (const auto &[name, animation] : ContentAnimationFacts) {
+				(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
+			}
 		});
 	}
 
 	void Editor::NewGame() {
 		EndAllRuns();
+		StopAllPlaytestPlugins();
 
 		// Plugin runtimes borrow a Store from the current universe. They must die
 		// before the worlds below, then restart against the new active world.
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 		PendingFrame.clear();
 		Scripts.clear();
 		ActiveScript = -1;
@@ -2881,6 +3119,7 @@ namespace studio {
 		GameName = Name(DEFAULT_GAME);
 		UniverseNameDraft = std::string(GameName.Text());
 		GamePath.clear();
+		UniverseFileSettings = {};
 		DiffLoaded = false;
 		SavedChangesFor.clear();
 		Modified = false;
@@ -3040,11 +3279,15 @@ namespace studio {
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
 		EndAllRuns();
+		StopAllPlaytestPlugins();
 
 		// `LoadGame` replaces worlds. A plugin VM retains a Store reference, so
 		// keeping it alive across this call would leave it pointing into freed
 		// storage even when the replacement succeeds.
+		StudioPluginBindings.OnChanged({});
 		Plugins.clear();
+		ScriptPlugins.clear();
+		StopCppPlugins(CppPlugins);
 
 		engine::game::GameInfo info;
 		std::string error;
@@ -3069,7 +3312,21 @@ namespace studio {
 		Trees.clear();
 
 		GameName = info.Name;
+		UniverseFileSettings.HttpEnabled = info.HttpEnabled;
+		UniverseFileSettings.RecursiveWorldDiscovery = info.RecursiveWorldDiscovery;
+		UniverseFileSettings.PublisherKey = info.PublisherKey;
+		UniverseFileSettings.Cdns = info.Cdns;
+		UniverseFileSettings.DataStore = info.DataStore;
+		if (info.DataStore.Enabled) {
+			Prefs.DataStoreEnabled = true;
+			if (const auto backend = engine::datastore::BackendOf(info.DataStore.Backend)) {
+				Prefs.DataStoreBackend = *backend;
+			}
+		}
+		(void)ConfigureDataStore();
 		RenderingProfiles = std::move(info.RenderingProfiles);
+		Content.SetUniverseAssets(info.Assets);
+		RebuildContentClients();
 		if (RenderingProfiles.Count() == 0) {
 			RenderingProfiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument());
 		}
@@ -3107,6 +3364,56 @@ namespace studio {
 
 		Say("opened " + path.string() + " - " + std::to_string(info.Worlds.size()) + " world(s)");
 		return true;
+	}
+
+	bool Editor::PrepareUniverseOpen(const std::filesystem::path &path) {
+		engine::world::Universe staged;
+		engine::game::GameInfo info;
+		std::string error;
+		if (!engine::game::LoadUniverse(staged, path, info, error)) {
+			Say("open failed: " + error, LogLevel::Error);
+			return false;
+		}
+
+		PendingUniverseOpenPath = path;
+		PendingUniverseOpenInfo = std::move(info);
+		AllowUniverseHttp = false;
+		UniverseLoadScope = 0;
+		AskingUniverseLoadPermissions = true;
+		return true;
+	}
+
+	void Editor::AcceptUniverseOpen() {
+		const std::filesystem::path path = PendingUniverseOpenPath;
+		const std::filesystem::path assets = PendingUniverseOpenInfo.Assets;
+		const std::string publisherKey = PendingUniverseOpenInfo.PublisherKey;
+		const std::vector<engine::game::UniverseCdn> cdns = PendingUniverseOpenInfo.Cdns;
+		const bool allowHttp = AllowUniverseHttp && PendingUniverseOpenInfo.HttpEnabled;
+		AskingUniverseLoadPermissions = false;
+		PendingUniverseOpenPath.clear();
+
+		if (!OpenGame(path)) {
+			return;
+		}
+
+		std::vector<engine::delivery::Source> sources;
+		if (allowHttp) {
+			for (const engine::game::UniverseCdn &cdn : cdns) {
+				sources.push_back(
+					engine::delivery::Source{
+						.Name = cdn.Name,
+						.Kind = engine::delivery::SourceKind::Http,
+						.Location = cdn.Location,
+						.Enabled = true,
+						.Role = engine::delivery::SourceRole::Read,
+					}
+				);
+			}
+		}
+		Content.SetUniverseContent(
+			assets, std::move(sources), (allowHttp || !assets.empty()) ? publisherKey : std::string{}
+		);
+		RebuildContentClients();
 	}
 
 	void Editor::SyncRojo(const std::filesystem::path &project) {
@@ -3279,7 +3586,14 @@ namespace studio {
 		}
 
 		std::string error;
-		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
+		bool saved = false;
+		if (path.extension() == engine::game::UNIVERSE_EXTENSION) {
+			const engine::game::UniverseFileOptions options = UniverseOptions(true);
+			saved = engine::game::SaveUniverse(*Universe, GameName, RenderingProfiles, path, options, error);
+		} else {
+			saved = engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error);
+		}
+		if (!saved) {
 			Say("save failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -3312,24 +3626,29 @@ namespace studio {
 	}
 
 	bool Editor::ExportActiveWorld(const std::filesystem::path &path) {
-		if (!Active.IsValid()) {
+		return ExportWorldFile(Active, path);
+	}
+
+	bool Editor::ExportWorldFile(WorldId world, const std::filesystem::path &path) {
+		if (!world.IsValid()) {
 			Say("no world to export", LogLevel::Warning);
 			return false;
 		}
 
+		FlushExportBuffers();
 		std::string error;
-		if (!engine::game::ExportWorld(*Universe, Active, path, error)) {
+		if (!engine::game::ExportWorld(*Universe, world, path, error)) {
 			Say("export failed: " + error, LogLevel::Error);
 			return false;
 		}
 
-		Say("exported '" + std::string(Label(Universe->NameOf(Active))) + "' to " + path.string());
+		Say("exported '" + std::string(Label(Universe->NameOf(world))) + "' to " + path.string());
 		return true;
 	}
 
 	bool Editor::ExportUniverse(const std::filesystem::path &path) {
-		// **The universe and every world under it, which is what an `.agame`
-		// already is** - so this shares `SaveGame`'s writer and differs from
+		// **The universe and every world under it.** This shares `SaveGame`'s
+		// writer and differs from
 		// Save As in what it does to the editor afterwards, which is nothing.
 		//
 		// That difference is the whole reason it is a separate action rather
@@ -3340,17 +3659,12 @@ namespace studio {
 		// then pressed Ctrl+S expecting to save their own file would have
 		// written over the copy instead. `ExportActiveWorld` has always drawn
 		// the same line one level down.
-		for (OpenScript &tab : Scripts) {
-			// Same order as `SaveGame`, and for the same reason: an export
-			// taken before the buffers were flushed is the game minus whatever
-			// is currently being typed.
-			if (tab.Modified) {
-				SaveScriptTab(tab);
-			}
-		}
+		FlushExportBuffers();
 
 		std::string error;
-		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
+		if (!engine::game::SaveUniverse(
+				*Universe, GameName, RenderingProfiles, path, UniverseOptions(true), error
+			)) {
 			Say("export failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -3360,26 +3674,328 @@ namespace studio {
 		return true;
 	}
 
-	bool Editor::ImportWorldFile(const std::filesystem::path &path) {
-		std::string error;
-
-		// No rename first: a world whose name is free keeps the one the file
-		// gave it, which is what somebody importing into an empty universe
-		// expects. A clash gets a suffix rather than a refusal, because being
-		// told "that name is taken" and having to guess a free one is a worse
-		// answer than being given one.
-		WorldId imported = engine::game::ImportWorld(*Universe, path, Name{}, error);
-
-		if (!imported.IsValid()) {
-			for (int attempt = 2; attempt < 100 && !imported.IsValid(); attempt++) {
-				const std::string candidate = path.stem().string() + " " + std::to_string(attempt);
-				imported = engine::game::ImportWorld(*Universe, path, Name(candidate), error);
+	engine::game::UniverseFileOptions Editor::UniverseOptions(bool includePublicCdns) const {
+		engine::game::UniverseFileOptions options = UniverseFileSettings;
+		options.Cdns.clear();
+		const std::string &publisher =
+			Content.UniversePublisherKey.empty() ? Content.PublisherKey : Content.UniversePublisherKey;
+		if (!publisher.empty()) {
+			options.PublisherKey = publisher;
+		}
+		if (includePublicCdns) {
+			for (const engine::delivery::Source &source : Content.ToSettings().Sources) {
+				if (source.Enabled && source.Readable() &&
+					source.Kind == engine::delivery::SourceKind::Http) {
+					options.Cdns.push_back({source.Name, source.Location});
+				}
+			}
+			if (options.Cdns.empty()) {
+				options.Cdns = UniverseFileSettings.Cdns;
 			}
 		}
+		options.HttpEnabled = includePublicCdns && !options.Cdns.empty();
+		options.DataStore.Enabled = Prefs.DataStoreEnabled;
+		options.DataStore.Backend = engine::datastore::Describe(Prefs.DataStoreBackend);
+		options.DataStore.Root = "stores";
+		return options;
+	}
 
-		if (!imported.IsValid()) {
-			Say("import failed: " + error, LogLevel::Error);
+	void Editor::FlushExportBuffers() {
+		for (OpenScript &tab : Scripts) {
+			if (tab.Modified) {
+				SaveScriptTab(tab);
+			}
+		}
+	}
+
+	bool Editor::ExportInProgress() const {
+		return ActiveExportRequest.has_value();
+	}
+
+	ExportPhase Editor::CurrentExportPhase() const {
+		return ActiveExportPhase;
+	}
+
+	bool Editor::BeginExport(const ExportRequest &request) {
+		if (ExportInProgress()) {
+			Say("another export is already running", LogLevel::Warning);
 			return false;
+		}
+		if (Universe == nullptr ||
+			(request.Product == engine::game::ExportProduct::WorldFile && !Active.IsValid())) {
+			Say("no world to export", LogLevel::Warning);
+			return false;
+		}
+		const ExportPreflight preflight = PreflightExport(request, *Universe, Content, ContentClient.get());
+		if (!preflight.Validation.Passed()) {
+			Say("export preflight has blocking findings", LogLevel::Error);
+			return false;
+		}
+
+		FlushExportBuffers();
+		ExportStagingRoot = CreateExportStaging(request.Destination);
+		if (ExportStagingRoot.empty()) {
+			Say("export failed: could not create staging directory", LogLevel::Error);
+			return false;
+		}
+		ActiveExportRequest = request;
+		ActiveExportPhase = ExportPhase::SerializeWorlds;
+
+		std::string error;
+		std::filesystem::path stagedDocument;
+		bool serialized = false;
+		if (request.Product == engine::game::ExportProduct::WorldFile) {
+			stagedDocument = ExportStagingRoot / request.Destination.filename();
+			serialized = engine::game::ExportWorld(*Universe, Active, stagedDocument, error);
+		} else if (request.Product == engine::game::ExportProduct::UniverseFolder) {
+			stagedDocument = ExportStagingRoot / request.Destination.filename();
+			serialized = engine::game::SaveUniverse(
+				*Universe,
+				GameName,
+				RenderingProfiles,
+				stagedDocument,
+				UniverseOptions(request.IncludePublicCdns),
+				error
+			);
+		} else {
+			stagedDocument = ExportStagingRoot / "game.auniverse";
+			serialized = engine::game::SaveUniverse(
+				*Universe,
+				GameName,
+				RenderingProfiles,
+				stagedDocument,
+				UniverseOptions(request.IncludePublicCdns),
+				error
+			);
+		}
+		if (!serialized) {
+			Say("export failed: " + error, LogLevel::Error);
+			CancelExport();
+			ActiveExportPhase = ExportPhase::Failed;
+			return false;
+		}
+
+		if (!request.IncludeProcessedAssets && !request.IncludeRawAuthoring) {
+			engine::game::ProjectValidationReport report;
+			ActiveExportPhase = ExportPhase::PublishResult;
+			const bool published = PublishExportTree(request, ExportStagingRoot, report);
+			std::error_code ignored;
+			std::filesystem::remove_all(ExportStagingRoot, ignored);
+			ActiveExportRequest.reset();
+			ExportStagingRoot.clear();
+			ActiveExportPhase = published ? ExportPhase::Complete : ExportPhase::Failed;
+			Say(published ? "exported to " + request.Destination.string() : "export publication failed",
+				published ? LogLevel::Info : LogLevel::Error);
+			return published;
+		}
+
+		const std::span<const std::filesystem::path> rawSources =
+			request.IncludeRawAuthoring ? std::span<const std::filesystem::path>(Content.RawFolders)
+										: std::span<const std::filesystem::path>{};
+		const std::filesystem::path rawDestination =
+			request.Product == engine::game::ExportProduct::ProjectZip && request.IncludeRawAuthoring
+				? ExportStagingRoot / "authoring"
+				: std::filesystem::path{};
+		if (!BeginAssetGrounding(
+				ExportAssetGrounding,
+				ExportStagingRoot / "assets",
+				rawSources,
+				rawDestination,
+				request.IncludeProcessedAssets
+			)) {
+			Say("export failed: could not start asset staging", LogLevel::Error);
+			CancelExport();
+			ActiveExportPhase = ExportPhase::Failed;
+			return false;
+		}
+		ActiveExportPhase =
+			request.IncludeProcessedAssets ? ExportPhase::ValidateCatalogue : ExportPhase::CopyRawFiles;
+		Say("export started: " + request.Destination.string());
+		return true;
+	}
+
+	void Editor::CancelExport() {
+		CancelAssetGrounding(ExportAssetGrounding, ContentClient.get());
+		std::error_code ignored;
+		if (!ExportStagingRoot.empty()) {
+			std::filesystem::remove_all(ExportStagingRoot, ignored);
+		}
+		ActiveExportRequest.reset();
+		ExportStagingRoot.clear();
+		ActiveExportPhase = ExportPhase::Cancelled;
+	}
+
+	void Editor::FinishAssetExport() {
+		if (!ActiveExportRequest) {
+			return;
+		}
+		const ExportRequest request = *ActiveExportRequest;
+		engine::game::ProjectValidationReport report;
+		bool published = false;
+		if (request.Product == engine::game::ExportProduct::ProjectZip) {
+			ActiveExportPhase = ExportPhase::BuildArchive;
+			const engine::game::UniverseFileOptions universeOptions =
+				UniverseOptions(request.IncludePublicCdns);
+			engine::game::ProjectPackageOptions packageOptions;
+			packageOptions.PublisherKey = universeOptions.PublisherKey;
+			packageOptions.Delivery = request.Delivery;
+			packageOptions.Cdns = universeOptions.Cdns;
+			packageOptions.CreationProfile = "studio";
+			packageOptions.ReplaceExisting = request.ReplaceExisting;
+			engine::game::ProjectPackageInfo written;
+			published = engine::game::WriteProjectPackage(
+				ExportStagingRoot, request.Destination, packageOptions, written, report
+			);
+			if (published) {
+				ActiveExportPhase = ExportPhase::VerifyArchive;
+			}
+		} else {
+			ActiveExportPhase = ExportPhase::PublishResult;
+			published = PublishExportTree(request, ExportStagingRoot, report);
+		}
+
+		std::error_code ignored;
+		std::filesystem::remove_all(ExportStagingRoot, ignored);
+		ActiveExportRequest.reset();
+		ExportStagingRoot.clear();
+		ExportAssetGrounding = {};
+		ActiveExportPhase = published ? ExportPhase::Complete : ExportPhase::Failed;
+		if (published) {
+			Say("exported to " + request.Destination.string());
+			return;
+		}
+		if (report.Findings.empty()) {
+			Say("export failed", LogLevel::Error);
+		} else {
+			Say("export failed: " + report.Findings.front().Explanation, LogLevel::Error);
+		}
+	}
+
+	void
+	Editor::BeginWorldExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
+		ExportOptions options;
+		options.Product = engine::game::ExportProduct::WorldFile;
+		options.IncludeProcessedAssets = groundAssets;
+		options.IncludeRawAuthoring = includeRawAssets;
+		engine::game::ProjectValidationReport report;
+		const auto request = BuildExportRequest(path, options, report);
+		if (!request || !BeginExport(*request)) {
+			Say("world export could not start", LogLevel::Warning);
+		}
+	}
+
+	void
+	Editor::BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets) {
+		ExportOptions options;
+		options.Product = engine::game::ExportProduct::UniverseFolder;
+		options.IncludeProcessedAssets = groundAssets;
+		options.IncludeRawAuthoring = includeRawAssets;
+		options.IncludePublicCdns = true;
+		engine::game::ProjectValidationReport report;
+		const auto request = BuildExportRequest(path, options, report);
+		if (!request || !BeginExport(*request)) {
+			Say("universe export could not start", LogLevel::Warning);
+		}
+	}
+
+	bool Editor::ImportWorldFile(const std::filesystem::path &path) {
+		if (WorldImportActive) {
+			Say("another world import is already running", LogLevel::Warning);
+			return false;
+		}
+		engine::game::RegisterGameClasses();
+		PreparedWorld = {};
+		WorldImportError.clear();
+		WorldImportSucceeded = false;
+		WorldImportCommitPending = false;
+		WorldImportDestination = {};
+		WorldImportFraction.store(0.0f, std::memory_order_relaxed);
+		ActiveWorldImportPhase.store(engine::game::WorldImportPhase::Read, std::memory_order_relaxed);
+		WorldImportDone.store(false, std::memory_order_relaxed);
+		WorldImportActive = true;
+		WorldImportWorker = std::jthread([this, path] {
+			WorldImportSucceeded = engine::game::PrepareWorldImport(
+				path,
+				PreparedWorld,
+				WorldImportError,
+				[this](engine::game::WorldImportPhase phase, float fraction) {
+					ActiveWorldImportPhase.store(phase, std::memory_order_relaxed);
+					float overall = 0.0f;
+					switch (phase) {
+					case engine::game::WorldImportPhase::Read:
+						overall = 0.25f * fraction;
+						break;
+					case engine::game::WorldImportPhase::Decode:
+						overall = 0.25f;
+						break;
+					case engine::game::WorldImportPhase::Build:
+						overall = 0.50f;
+						break;
+					case engine::game::WorldImportPhase::Encode:
+						overall = 0.80f + 0.15f * fraction;
+						break;
+					case engine::game::WorldImportPhase::Commit:
+						overall = 0.95f;
+						break;
+					}
+					WorldImportFraction.store(overall, std::memory_order_relaxed);
+				}
+			);
+			WorldImportDone.store(true, std::memory_order_release);
+		});
+		Say("import started: " + path.string());
+		return true;
+	}
+
+	bool Editor::WorldImportInProgress() const {
+		return WorldImportActive;
+	}
+
+	void Editor::PumpWorldImport() {
+		if (!WorldImportActive || !WorldImportDone.load(std::memory_order_acquire)) {
+			return;
+		}
+		if (!WorldImportCommitPending) {
+			if (WorldImportWorker.joinable()) {
+				WorldImportWorker.join();
+			}
+			if (!WorldImportSucceeded) {
+				WorldImportActive = false;
+				Say("import failed: " + WorldImportError, LogLevel::Error);
+				return;
+			}
+
+			WorldImportDestination = PreparedWorld.Settings.Name;
+			if (Universe->Find(WorldImportDestination).IsValid()) {
+				const std::string base(WorldImportDestination.Text());
+				WorldImportDestination = {};
+				for (uint32_t suffix = 2; suffix < 1000; suffix++) {
+					const Name candidate(base + " " + std::to_string(suffix));
+					if (!Universe->Find(candidate).IsValid()) {
+						WorldImportDestination = candidate;
+						break;
+					}
+				}
+			}
+			if (!WorldImportDestination.IsValid()) {
+				WorldImportActive = false;
+				Say("import failed: could not find a free world name", LogLevel::Error);
+				return;
+			}
+			WorldImportCommitPending = true;
+			ActiveWorldImportPhase.store(engine::game::WorldImportPhase::Commit, std::memory_order_relaxed);
+			WorldImportFraction.store(0.95f, std::memory_order_relaxed);
+			return;
+		}
+
+		const WorldId imported = engine::game::CommitWorldImport(
+			*Universe, PreparedWorld, WorldImportDestination, WorldImportError
+		);
+		WorldImportActive = false;
+		WorldImportCommitPending = false;
+		if (!imported.IsValid()) {
+			Say("import failed: " + WorldImportError, LogLevel::Error);
+			return;
 		}
 
 		PrepareWorldIn(imported);
@@ -3390,7 +4006,6 @@ namespace studio {
 		MarkModified();
 
 		Say("imported '" + std::string(Label(Universe->NameOf(imported))) + "'");
-		return true;
 	}
 
 	bool Editor::ImportUniverseFile(const std::filesystem::path &path) {
@@ -4017,6 +4632,7 @@ namespace studio {
 		}
 
 		Runs.push_back(std::move(run));
+		StartPlaytestPlugins(world, PluginRunTarget::PlaytestServer);
 
 		// **The client half, and only for Play.** Run is a dedicated server:
 		// there is no client in the process, so there is nothing to replicate to
@@ -4089,6 +4705,7 @@ namespace studio {
 			// leave the panel following the active scene with no way to tell
 			// that it had stopped showing what it was opened for.
 			const WorldId replica = link->ReplicaWorld();
+			StopPlaytestPlugins(replica);
 			for (ViewportState &view : Extras) {
 				if (view.World == replica) {
 					view.World = WorldId{};
@@ -4099,6 +4716,7 @@ namespace studio {
 			link->Stop(*Universe);
 		}
 		record->Links.clear();
+		StopPlaytestPlugins(world);
 
 		// **And every client that is *playing* this world, whoever owns it.**
 		// A `PlayLink` belongs to the run an author pressed Play on and keeps
@@ -4131,6 +4749,7 @@ namespace studio {
 				}
 
 				const WorldId replica = (*link)->ReplicaWorld();
+				StopPlaytestPlugins(replica);
 				for (ViewportState &view : Extras) {
 					if (view.World == replica) {
 						view.World = WorldId{};
@@ -4207,6 +4826,7 @@ namespace studio {
 			ClearSelection();
 			Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
 			SelectionWorld = Active;
+			LoadPlugins();
 			SyncWorldStates();
 			return;
 		}
@@ -4244,6 +4864,12 @@ namespace studio {
 			ClearSelection();
 		}
 		Trees.clear();
+		if (wasActive) {
+			// Studio plugin VMs borrow the active Store. Stop rebuilt that Store,
+			// so every native context and script VM must be rebound before the
+			// next frame can beat it.
+			LoadPlugins();
+		}
 
 		SyncWorldStates();
 	}
@@ -4307,6 +4933,80 @@ namespace studio {
 
 		tab.Modified = false;
 		MarkModified();
+	}
+
+	void Editor::OpenScriptExternally(OpenScript &tab) {
+		std::string error;
+		if (!tab.External.Active()) {
+			std::string documentName = "Source";
+			engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
+			Universe->Enter(tab.World, [&](Store &store) {
+				if (!store.Alive(tab.Instance)) {
+					return;
+				}
+				if (const Name name = store.InstanceNameOf(tab.Instance); name.IsValid()) {
+					documentName = std::string(name.Text());
+				}
+				if (!tab.Shader) {
+					language = engine::script::ActiveLanguageOf(store, tab.Instance);
+				}
+			});
+
+			const Name worldName = Universe->NameOf(tab.World);
+			const std::string_view extension = tab.Shader ? std::string_view("glsl")
+											   : language == engine::script::Language::JavaScript
+												   ? std::string_view("js")
+												   : std::string_view("luau");
+			const std::filesystem::path staged = ExternalDocumentPath(
+				ConfigPath("external-editor"),
+				worldName.IsValid() ? worldName.Text() : std::string_view("World"),
+				tab.Instance.Id,
+				documentName,
+				extension
+			);
+			if (!StageExternalDocument(staged, tab.Text, tab.External, error)) {
+				Say("external editor: " + error, LogLevel::Warning);
+				return;
+			}
+		}
+
+		if (!LaunchExternalEditor(Prefs.SourceEditor, tab.External.Path, error)) {
+			Say("external editor: " + error, LogLevel::Warning);
+			return;
+		}
+		Say("opened " + tab.External.Path.string());
+	}
+
+	void Editor::RefreshExternalScript(OpenScript &tab) {
+		if (!tab.External.Active()) {
+			return;
+		}
+		const double now = engine::core::Clock::Seconds();
+		if (now < tab.ExternalCheckAt) {
+			return;
+		}
+		tab.ExternalCheckAt = now + 0.25;
+
+		const bool wasConflict = tab.External.Conflict;
+		std::string reloaded;
+		std::string error;
+		switch (RefreshExternalDocument(tab.External, tab.Text, reloaded, error)) {
+		case ExternalRefresh::Reloaded:
+			tab.Text = std::move(reloaded);
+			tab.Modified = true;
+			break;
+		case ExternalRefresh::Conflict:
+			if (!wasConflict) {
+				Say("external editor conflict in " + tab.External.Path.string(), LogLevel::Warning);
+			}
+			break;
+		case ExternalRefresh::Failed:
+			Say("external editor disconnected: " + error, LogLevel::Warning);
+			tab.External = ExternalDocument{};
+			break;
+		case ExternalRefresh::Unchanged:
+			break;
+		}
 	}
 
 	void Editor::CloseScriptTab(size_t index) {

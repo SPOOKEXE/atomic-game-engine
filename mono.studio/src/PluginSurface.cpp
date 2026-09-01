@@ -46,6 +46,7 @@
 // file on disk. A plugin cannot read `/etc/passwd` by calling it, which is the
 // property that matters.
 
+#include "PluginSurfaceInternal.hpp"
 #include "SourceEditor.hpp"
 
 #include <engine/core/Log.hpp>
@@ -56,6 +57,7 @@
 #include <algorithm>
 #include <cmath>
 #include <imgui.h>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <studio/Editor.hpp>
@@ -93,6 +95,28 @@ namespace studio {
 			out = static_cast<size_t>(number) - 1;
 			return true;
 		}
+
+		std::string ColourText(const engine::core::Color3 &colour) {
+			const auto channel = [](float value) {
+				return static_cast<unsigned int>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+			};
+			return engine::ui::ColourText(
+				IM_COL32(channel(colour.R), channel(colour.G), channel(colour.B), 255u)
+			);
+		}
+
+		bool ParseColour(const HostValue &value, engine::core::Color3 &out) {
+			const std::optional<unsigned int> packed = engine::ui::ParseColourText(value.AsText());
+			if (!packed) {
+				return false;
+			}
+			out = engine::core::Color3{
+				static_cast<float>((*packed >> IM_COL32_R_SHIFT) & 0xFFu) / 255.0f,
+				static_cast<float>((*packed >> IM_COL32_G_SHIFT) & 0xFFu) / 255.0f,
+				static_cast<float>((*packed >> IM_COL32_B_SHIFT) & 0xFFu) / 255.0f,
+			};
+			return true;
+		}
 	}
 
 	// The editor's half of the seam, one per plugin.
@@ -111,91 +135,35 @@ namespace studio {
 		}
 
 		std::vector<std::string> Names() const override {
-			return {
-				// The editor.
-				"Notify",
-				"GetActiveWorld",
-
-				// **`Selection` is a service, which is Roblox's own shape.**
-				// A dotted name becomes a global table of methods - see
-				// `OpenHost` - so `game:GetService("Selection")` finds it for
-				// free, and `Selection:Get()` is what a Roblox plugin author
-				// already types.
-				"Selection.Get",
-				"Selection.Set",
-				"Selection.Add",
-				"Selection.Remove",
-
-				// **`ChangeHistoryService` is how a plugin tells the editor what
-				// one undo should reverse**, and since v0.13 it is also how a
-				// plugin's edits reach the other people in a team-create
-				// session - a committed recording is the unit that travels.
-				// Roblox's shape, method for method.
-				"ChangeHistoryService.TryBeginRecording",
-				"ChangeHistoryService.FinishRecording",
-				"ChangeHistoryService.IsRecordingInProgress",
-				"ChangeHistoryService.GetCanUndo",
-				"ChangeHistoryService.GetCanRedo",
-				"ChangeHistoryService.Undo",
-				"ChangeHistoryService.Redo",
-				"ChangeHistoryService.SetWaypoint",
-				"ChangeHistoryService.ResetWaypoints",
-				"ChangeHistoryService.SetEnabled",
-				"ChangeHistoryService.OnUndo",
-				"ChangeHistoryService.OnRedo",
-				"ChangeHistoryService.OnRecordingStarted",
-				"ChangeHistoryService.OnRecordingFinished",
-
-				// Scripts in the world being edited.
-				"GetScriptSource",
-				"SetScriptSource",
-				"GetScripts",
-
-				// Toolbars and buttons.
-				"CreateToolbar",
-				"CreateToolbarTab",
-				"CreateToolbarRow",
-				"CreateToolbarColumn",
-				"CreateButton",
-				"CreateToggle",
-				"CreateDropdown",
-				"CreateLabel",
-				"SetToolCell",
-				"SetButtonActive",
-				"SetToolVisible",
-				"SetToolWidth",
-				"SetToolbarVisible",
-				"SetToolbarPlacement",
-
-				// Docked panels, and what may be drawn in one.
-				"CreateWidget",
-				"SetWidgetRender",
-				"SetWidgetOpen",
-				"IsWidgetOpen",
-				"SetWidgetColour",
-				"SetWidgetDock",
-				"SetWidgetSizeConstraints",
-
-				// Viewport and script editor integration.
-				"GetViewportOption",
-				"SetViewportOption",
-				"AddViewport",
-				"OpenScript",
-				"Label",
-				"Button",
-				"Checkbox",
-				"Combo",
-				"Separator",
-				"InputText",
-			};
+			std::vector<std::string> names;
+			if (Plugin.Target == PluginRunTarget::Studio) {
+				names.reserve(std::size(STUDIO_PLUGIN_HOST_NAMES));
+				for (const std::string_view name : STUDIO_PLUGIN_HOST_NAMES) {
+					names.emplace_back(name);
+				}
+			}
+			if (Plugin.Bindings != nullptr) {
+				for (std::string &dynamic : Plugin.Bindings->Names(Plugin.Language)) {
+					if (std::find(names.begin(), names.end(), dynamic) == names.end()) {
+						names.push_back(std::move(dynamic));
+					}
+				}
+			}
+			return names;
 		}
 
 		bool Call(
 			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
 		) override {
-			// A plain chain rather than a table of member pointers: nineteen
-			// names, each a handful of lines, and a dispatch table would be a
-			// second list to keep in step with `Names`.
+			if (Plugin.Target != PluginRunTarget::Studio) {
+				if (Plugin.Bindings != nullptr) {
+					return Plugin.Bindings->Call(Plugin.Language, name, arguments, result, failure);
+				}
+				failure = "no such playtest plugin binding";
+				return false;
+			}
+			// A plain chain rather than a table of member pointers. Each call is a
+			// handful of lines, and a dispatch table would duplicate this list.
 			if (name == "Notify") {
 				Owner.Say("[" + Plugin.Manifest.Name + "] " + std::string(At(arguments, 0).AsText()));
 				return true;
@@ -1054,6 +1022,76 @@ namespace studio {
 			}
 
 			const std::string option(At(arguments, 0).AsText());
+			engine::core::Color3 *colour = nullptr;
+			if (option == "Grid Colour" || option == "Grid Color") {
+				colour = &Owner.GridSettings.Colour;
+			} else if (option == "Grid Axis X Colour" || option == "Grid Axis X Color") {
+				colour = &Owner.GridSettings.AxisX;
+			} else if (option == "Grid Axis Z Colour" || option == "Grid Axis Z Color") {
+				colour = &Owner.GridSettings.AxisZ;
+			}
+			if (colour != nullptr) {
+				if (name == "GetViewportOption") {
+					result = HostValue::Of(ColourText(*colour));
+					return true;
+				}
+				if (!ParseColour(At(arguments, 1), *colour)) {
+					failure = option + " has to be RRGGBB or RRGGBBAA text";
+					return false;
+				}
+				return true;
+			}
+
+			float *number = nullptr;
+			double minimum = 0.0;
+			double maximum = 0.0;
+			bool integer = false;
+			if (option == "Grid Step" || option == "Grid Scale") {
+				number = &Owner.GridSettings.Step;
+				minimum = 0.01;
+				maximum = 1000.0;
+			} else if (option == "Grid Major") {
+				number = &Owner.GridSettings.Major;
+				minimum = 1.0;
+				maximum = 100.0;
+				integer = true;
+			} else if (option == "Grid Reach" || option == "Grid Size") {
+				number = &Owner.GridSettings.Reach;
+				minimum = 1.0;
+				maximum = 100000.0;
+			} else if (option == "Grid Strength") {
+				number = &Owner.GridSettings.Strength;
+				maximum = 1.0;
+			} else if (option == "Grid Alpha") {
+				number = &Owner.GridSettings.Alpha;
+				maximum = 1.0;
+			} else if (option == "Grid Axis Alpha") {
+				number = &Owner.GridSettings.AxisAlpha;
+				maximum = 1.0;
+			} else if (option == "Grid Offset X") {
+				number = &Owner.GridSettings.Offset.X;
+				minimum = -1000000.0;
+				maximum = 1000000.0;
+			} else if (option == "Grid Offset Z") {
+				number = &Owner.GridSettings.Offset.Z;
+				minimum = -1000000.0;
+				maximum = 1000000.0;
+			}
+			if (number != nullptr) {
+				if (name == "GetViewportOption") {
+					result = HostValue::Of(static_cast<double>(*number));
+					return true;
+				}
+				const double value = At(arguments, 1).AsNumber(std::numeric_limits<double>::quiet_NaN());
+				if (!std::isfinite(value) || value < minimum || value > maximum ||
+					(integer && value != std::floor(value))) {
+					failure = option + " is outside its supported range";
+					return false;
+				}
+				*number = static_cast<float>(value);
+				return true;
+			}
+
 			bool *toggle = nullptr;
 			if (option == "Grid") {
 				toggle = &Owner.ShowGrid;
@@ -1225,6 +1263,9 @@ namespace studio {
 				return true;
 			}
 
+			if (Plugin.Bindings != nullptr) {
+				return Plugin.Bindings->Call(Plugin.Language, name, arguments, result, failure);
+			}
 			failure = "no such widget call";
 			return false;
 		}

@@ -165,6 +165,27 @@ TEST_CASE("an asset is reassembled from its chunks", "[assets][chunkstore]") {
 	CHECK(*whole == Bytes("first-second-third"));
 }
 
+TEST_CASE("a complete asset is split into its signed chunk layout", "[assets][chunkstore]") {
+	Tree sourceTree;
+	ChunkStore source = sourceTree.Store();
+	Manifest manifest;
+	const ContentHash root =
+		Publish(source, manifest, "grounded.mesh", AssetKind::Mesh, {"first-", "second"});
+	const AssetEntry *const asset = manifest.FindByRoot(root);
+	REQUIRE(asset != nullptr);
+
+	Tree destinationTree;
+	ChunkStore destination = destinationTree.Store();
+	REQUIRE(destination.WriteAsset(*asset, Bytes("first-second")));
+	CHECK(destination.Count() == 2);
+	CHECK(destination.ReadAsset(*asset) == std::optional(Bytes("first-second")));
+
+	CHECK_FALSE(destination.WriteAsset(*asset, Bytes("wrong bytes!")));
+	AssetEntry wrongShape = *asset;
+	wrongShape.TotalBytes += 1;
+	CHECK_FALSE(destination.WriteAsset(wrongShape, Bytes("first-second!")));
+}
+
 TEST_CASE("an asset with a missing chunk does not half-read", "[assets][chunkstore]") {
 	Tree tree;
 	ChunkStore store = tree.Store();

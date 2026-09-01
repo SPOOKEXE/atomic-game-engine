@@ -334,6 +334,11 @@ TEST_CASE("a client proves an identity over QUIC", "[replication][quic]") {
 		std::make_unique<Connector>(*pair.ClientWire, pair.ServerWire->Local(), pair.Now, connecting);
 
 	pair.Server->RequireClientIdentity(true);
+	// Existing state is published while the identity claim is in flight. The
+	// listener must return those withheld packets to the authority or this
+	// marker's initial snapshot is consumed before the gate opens.
+	const Entity marker = pair.World.Create();
+	pair.World.Set(marker, Spot{5.0f, 6.0f});
 	REQUIRE(pair.Admit());
 	pair.Settle(300, 12);
 
@@ -345,8 +350,6 @@ TEST_CASE("a client proves an identity over QUIC", "[replication][quic]") {
 
 	// The world only reaches an identified client, so the arrival of any of it
 	// is the claim having verified.
-	const Entity marker = pair.World.Create();
-	pair.World.Set(marker, Spot{5.0f, 6.0f});
 	pair.Settle(400, 16);
 
 	CHECK(pair.Replica.Get<Spot>(marker) != nullptr);

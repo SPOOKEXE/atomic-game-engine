@@ -106,7 +106,8 @@ namespace client {
 			const engine::scene::Camera &camera,
 			std::span<const engine::scene::DrawInstance> list,
 			uint64_t tick,
-			float alpha
+			float alpha,
+			std::span<const engine::core::CFrame> joints = {}
 		);
 
 		// Takes the newest frame from every channel and rebuilds the draw list.
@@ -121,6 +122,11 @@ namespace client {
 		// @return The combined instances, valid until the next `Compose`.
 		std::span<const engine::scene::DrawInstance> Instances() const {
 			return Combined;
+		}
+
+		// The flat skinning palette referenced by the combined instances.
+		std::span<const engine::core::CFrame> JointFrames() const {
+			return CombinedJoints;
 		}
 
 		// Where to draw from.
@@ -204,6 +210,7 @@ namespace client {
 		// frame per world.
 		std::vector<std::byte> Scratch;
 		std::vector<engine::scene::DrawInstance> Combined;
+		std::vector<engine::core::CFrame> CombinedJoints;
 		engine::core::CFrame ViewFrame;
 		// arch-waiver ecs-copy: the camera one publish is being built with, beside
 		// the scratch buffers it is built into. Read from the store per view and

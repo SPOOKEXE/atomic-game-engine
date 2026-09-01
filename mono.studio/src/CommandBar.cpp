@@ -44,7 +44,9 @@
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <algorithm>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <string>
 #include <studio/Editor.hpp>
 #include <utility>
@@ -69,6 +71,46 @@ namespace studio {
 		// at a prompt types a great many lines. Deep enough that walking back
 		// to something from an hour ago works.
 		constexpr size_t COMMAND_HISTORY_LIMIT = 200;
+
+		// How many rows stay visible before the completion list scrolls.
+		constexpr int COMMAND_COMPLETION_ROWS = 10;
+	}
+
+	bool Editor::EnsureCommandRuntime(engine::ecs::Store &store, const engine::world::WorldId world) {
+		if (CommandHost.Vm != nullptr && CommandWorld == world) {
+			return true;
+		}
+
+		engine::script::RuntimeLimits limits;
+		limits.Role.Server = false;
+		limits.Role.Client = false;
+		limits.Role.Studio = true;
+		limits.Origin = engine::script::ScriptOrigin::Plugin;
+
+		// The surface goes with the runtime that points at it, and in this
+		// order: a host outliving its VM is a pointer nothing owns.
+		CommandHost.Vm.reset();
+		CommandHost.Surface.reset();
+
+		CommandHost.Manifest.Name = "Command Bar";
+		CommandHost.Running = true;
+		CommandHost.Target = PluginRunTarget::Studio;
+		CommandHost.World = world;
+		CommandHost.Bindings = &StudioPluginBindings;
+		CommandHost.Language = engine::script::Language::Luau;
+		CommandHost.Vm = engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+		if (CommandHost.Vm == nullptr) {
+			return false;
+		}
+
+		// The same surface a plugin gets, so completion and execution see the
+		// same globals and members.
+		CommandHost.Surface = MakePluginSurface(*this, CommandHost);
+		if (CommandHost.Surface != nullptr) {
+			CommandHost.Vm->SetHost(CommandHost.Surface.get());
+		}
+		CommandWorld = world;
+		return true;
 	}
 
 	bool Editor::RunCommand(const std::string &source) {
@@ -102,38 +144,10 @@ namespace studio {
 		bool ok = false;
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
 			// Rebuilt when the scene changed, because a runtime is bound to one
-			// store - and holding one against a world that has gone is the
-			// dangling reference this rebuild exists to avoid.
-			if (CommandHost.Vm == nullptr || !(CommandWorld == world)) {
-				engine::script::RuntimeLimits limits;
-				limits.Role.Server = false;
-				limits.Role.Client = false;
-				limits.Role.Studio = true;
-				limits.Origin = engine::script::ScriptOrigin::Plugin;
-
-				// The surface goes with the runtime that points at it, and in
-				// that order: a host outliving its VM is a pointer nothing
-				// owns.
-				CommandHost.Vm.reset();
-				CommandHost.Surface.reset();
-
-				CommandHost.Manifest.Name = "Command Bar";
-				CommandHost.Running = true;
-				CommandHost.Vm = engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
-				if (CommandHost.Vm == nullptr) {
-					Say("command: could not start a runtime", engine::core::LogLevel::Error);
-					return;
-				}
-
-				// **The same surface a plugin gets**, so `Selection`,
-				// `ChangeHistoryService` and the script readers are all there.
-				// A second, smaller surface for the prompt would be a second
-				// vocabulary to learn for the same editor.
-				CommandHost.Surface = MakePluginSurface(*this, CommandHost);
-				if (CommandHost.Surface != nullptr) {
-					CommandHost.Vm->SetHost(CommandHost.Surface.get());
-				}
-				CommandWorld = world;
+			// store and holding one against a world that has gone would dangle.
+			if (!EnsureCommandRuntime(store, world)) {
+				Say("command: could not start a runtime", engine::core::LogLevel::Error);
+				return;
 			}
 
 			ok = CommandHost.Vm->Run(source, "command");
@@ -181,20 +195,189 @@ namespace studio {
 
 		ImGui::SetNextItemWidth(-1.0f);
 
-		const ImGuiInputTextFlags flags =
-			ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
+		// Claimed before the text widget runs, or Enter submits the command and
+		// Down walks history on the same frame the popup handles them.
+		const ImGuiID popupId = ImGui::GetID("##command-completion");
+		if (CommandPopupOpen) {
+			for (const ImGuiKey key :
+				 {ImGuiKey_UpArrow,
+				  ImGuiKey_DownArrow,
+				  ImGuiKey_Enter,
+				  ImGuiKey_KeypadEnter,
+				  ImGuiKey_Tab,
+				  ImGuiKey_Escape}) {
+				ImGui::SetKeyOwner(key, popupId, ImGuiInputFlags_LockThisFrame);
+			}
+		}
 
-		// The arrows walk back through what has been run, which is what every
-		// prompt does and the reason the history is kept at all.
-		const auto history = [](ImGuiInputTextCallbackData *data) -> int {
+		const ImVec2 fieldMin = ImGui::GetCursorScreenPos();
+
+		const ImGuiInputTextFlags flags =
+			ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory |
+			ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_CallbackEdit;
+
+		const auto edit = [](ImGuiInputTextCallbackData *data) -> int {
 			auto *editor = static_cast<Editor *>(data->UserData);
-			return editor->WalkCommandHistory(data);
+			return editor->EditCommandField(data);
 		};
 
+		const std::string before(CommandField);
+		CommandFieldActive = false;
+		if (CommandRefocus) {
+			ImGui::SetKeyboardFocusHere();
+			CommandRefocus = false;
+		}
 		const bool submitted =
-			ImGui::InputText("##command", CommandField, sizeof(CommandField), flags, history, this);
+			ImGui::InputText("##command", CommandField, sizeof(CommandField), flags, edit, this);
+		CommandFieldActive = ImGui::IsItemActive();
+		const bool textChanged = before != CommandField;
+		if (textChanged) {
+			CommandCursor = -1;
+		}
 
-		if (submitted) {
+		const bool asked = CommandFieldActive && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
+
+		if (!CommandFieldActive) {
+			CommandPopupOpen = false;
+			CommandCompletions.clear();
+		} else {
+			const auto caret = static_cast<size_t>(std::max(0, CommandCaret));
+			const CompletionQuery query = ScanBackwards(CommandField, caret);
+			const bool worthOpening =
+				asked || CommandPopupOpen || query.Separator != '\0' || !query.Prefix.empty();
+
+			if (!worthOpening) {
+				CommandPopupOpen = false;
+				CommandCompletions.clear();
+			} else if (textChanged || asked || CommandPopupCaret != static_cast<int>(caret)) {
+				engine::script::ScriptSurface surface;
+				std::vector<std::string> children;
+				if (Universe != nullptr && Active.IsValid()) {
+					Universe->Enter(Active, [&](engine::ecs::Store &store) {
+						if (EnsureCommandRuntime(store, Active)) {
+							surface = CommandHost.Vm->Surface();
+						}
+						store.EachRoot([&](const engine::ecs::Entity root) {
+							const engine::core::Name name = store.InstanceNameOf(root);
+							if (name.IsValid()) {
+								children.emplace_back(name.Text());
+							}
+						});
+					});
+				}
+
+				std::sort(children.begin(), children.end());
+				children.erase(std::unique(children.begin(), children.end()), children.end());
+
+				CompletionSources sources;
+				sources.Language = engine::script::Language::Luau;
+				sources.Surface = &surface;
+				sources.Children = children;
+				CommandCompletions = CompleteAt(CommandField, caret, sources);
+				CommandPopupAnchor = static_cast<int>(caret - query.Prefix.size());
+				CommandPopupCaret = static_cast<int>(caret);
+				CommandPopupChoice = 0;
+				CommandPopupOpen = !CommandCompletions.empty();
+			}
+		}
+
+		if (CommandPopupOpen && !CommandCompletions.empty()) {
+			const int count = static_cast<int>(CommandCompletions.size());
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape, ImGuiInputFlags_None, popupId)) {
+				CommandPopupOpen = false;
+			} else {
+				if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, ImGuiInputFlags_Repeat, popupId)) {
+					CommandPopupChoice = (CommandPopupChoice + 1) % count;
+				}
+				if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, ImGuiInputFlags_Repeat, popupId)) {
+					CommandPopupChoice = (CommandPopupChoice + count - 1) % count;
+				}
+
+				bool accept = ImGui::IsKeyPressed(ImGuiKey_Enter, ImGuiInputFlags_None, popupId) ||
+							  ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, ImGuiInputFlags_None, popupId) ||
+							  ImGui::IsKeyPressed(ImGuiKey_Tab, ImGuiInputFlags_None, popupId);
+
+				const int rows = std::min(count, COMMAND_COMPLETION_ROWS);
+				const ImVec2 fieldSize = ImGui::GetItemRectSize();
+				const ImVec2 padding = ImGui::GetStyle().FramePadding;
+				const float footer =
+					ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + 1.0f;
+				const ImVec2 popupSize(
+					std::max(fieldSize.x, 320.0f * Settings.Scale),
+					(static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing()) + padding.y * 2.0f +
+						footer
+				);
+
+				const ImGuiViewport *viewport = ImGui::GetMainViewport();
+				const ImVec2 workMin = viewport->WorkPos;
+				const ImVec2 workMax(
+					viewport->WorkPos.x + viewport->WorkSize.x, viewport->WorkPos.y + viewport->WorkSize.y
+				);
+				ImVec2 popupPosition(fieldMin.x, fieldMin.y + fieldSize.y);
+				if (popupPosition.y + popupSize.y > workMax.y && fieldMin.y - popupSize.y >= workMin.y) {
+					popupPosition.y = fieldMin.y - popupSize.y;
+				}
+				popupPosition.x =
+					std::clamp(popupPosition.x, workMin.x, std::max(workMin.x, workMax.x - popupSize.x));
+				popupPosition.y =
+					std::clamp(popupPosition.y, workMin.y, std::max(workMin.y, workMax.y - popupSize.y));
+
+				ImGui::SetNextWindowPos(popupPosition);
+				ImGui::SetNextWindowSize(popupSize);
+				constexpr ImGuiWindowFlags popupFlags =
+					ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+					ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+					ImGuiWindowFlags_NoNavInputs;
+
+				if (ImGui::Begin("##command-completion", nullptr, popupFlags)) {
+					const float listHeight = static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing();
+					ImGui::BeginChild("##rows", ImVec2(0.0f, listHeight), false);
+					for (int index = 0; index < count; index++) {
+						const Completion &entry = CommandCompletions[static_cast<size_t>(index)];
+						ImGui::PushID(index);
+						if (ImGui::Selectable(entry.Text.c_str(), index == CommandPopupChoice)) {
+							CommandPopupChoice = index;
+							accept = true;
+						}
+						if (!entry.Detail.empty()) {
+							ImGui::SameLine();
+							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+							ImGui::TextUnformatted(entry.Detail.c_str());
+							ImGui::PopStyleColor();
+						}
+						if (index == CommandPopupChoice &&
+							(ImGui::IsWindowAppearing() || !ImGui::IsItemVisible())) {
+							ImGui::SetScrollHereY(0.5f);
+						}
+						ImGui::PopID();
+					}
+					ImGui::EndChild();
+
+					const Completion &picked = CommandCompletions[static_cast<size_t>(CommandPopupChoice)];
+					ImGui::Separator();
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+					const std::string_view doc = picked.Kind == CompletionKind::Keyword
+													 ? KeywordDoc(engine::script::Language::Luau, picked.Text)
+													 : std::string_view{};
+					const std::string_view footerText = doc.empty() ? Describe(picked.Kind) : doc;
+					ImGui::TextUnformatted(footerText.data(), footerText.data() + footerText.size());
+					ImGui::PopStyleColor();
+				}
+				ImGui::End();
+
+				if (accept) {
+					const Completion &chosen = CommandCompletions[static_cast<size_t>(CommandPopupChoice)];
+					CommandInsert = chosen.Text;
+					CommandReplaceFrom = CommandPopupAnchor;
+					CommandRefocus = true;
+					CommandPopupOpen = false;
+					CommandPopupChoice = 0;
+					CommandCompletions.clear();
+				}
+			}
+		}
+
+		if (submitted && !CommandPopupOpen && CommandReplaceFrom < 0) {
 			std::string source(CommandField);
 			if (!source.empty()) {
 				// Echoed before it runs, so the log reads as a transcript
@@ -221,6 +404,30 @@ namespace studio {
 		}
 
 		ImGui::End();
+	}
+
+	int Editor::EditCommandField(ImGuiInputTextCallbackData *data) {
+		if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory) {
+			return CommandPopupOpen ? 0 : WalkCommandHistory(data);
+		}
+
+		if (data->EventFlag != ImGuiInputTextFlags_CallbackAlways &&
+			data->EventFlag != ImGuiInputTextFlags_CallbackEdit) {
+			return 0;
+		}
+
+		if (CommandReplaceFrom >= 0 && CommandReplaceFrom <= data->CursorPos &&
+			CommandReplaceFrom <= data->BufTextLen) {
+			data->DeleteChars(CommandReplaceFrom, data->CursorPos - CommandReplaceFrom);
+			if (!CommandInsert.empty()) {
+				data->InsertChars(CommandReplaceFrom, CommandInsert.c_str());
+			}
+			CommandInsert.clear();
+			CommandReplaceFrom = -1;
+		}
+
+		CommandCaret = data->CursorPos;
+		return 0;
 	}
 
 	int Editor::WalkCommandHistory(ImGuiInputTextCallbackData *data) {

@@ -13,6 +13,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -25,6 +26,7 @@
 #include <set>
 #include <string>
 #include <studio/Config.hpp>
+#include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
 #include <vector>
 
@@ -34,27 +36,37 @@ TEST_DEPENDS("engine.scripthost.scripting")
 using engine::core::Name;
 using engine::ecs::Entity;
 using engine::ecs::Store;
+using studio::BeatCppPlugins;
 using studio::BeatPlugins;
+using studio::BuiltinStudioPanel;
 using studio::BuiltinStudioTool;
 using studio::ClampPluginToolWidth;
 using studio::ComposeToolbar;
 using studio::DiscoverPlugins;
+using studio::LoadedCppPlugin;
 using studio::LoadedPlugin;
 using studio::LoadToolbarPreferences;
 using studio::MakeDefaultStudioPlugin;
 using studio::ParsePluginManifest;
 using studio::PLUGIN_FAULT_LIMIT;
+using studio::PluginBindingLanguage;
+using studio::PluginBindingRegistry;
 using studio::PluginButton;
 using studio::PluginControlKind;
+using studio::PluginDock;
 using studio::PluginManifest;
+using studio::PluginRunTarget;
 using studio::PluginToolbar;
 using studio::PluginToolbarPlacement;
 using studio::PluginToolbarTrack;
 using studio::PluginWidget;
+using studio::PluginWidgetLabel;
 using studio::RegisterSelectionComponent;
 using studio::SaveToolbarPreferences;
 using studio::SELECTED_COMPONENT;
+using studio::StartCppPlugins;
 using studio::StartPlugins;
+using studio::StopCppPlugins;
 using studio::ToolbarItemPreference;
 using studio::ToolbarPreferences;
 using studio::ToolbarTabPreference;
@@ -89,6 +101,13 @@ namespace {
 				script << source;
 			}
 		}
+
+		void
+		AddWithMain(const std::string &folder, const char *manifest, const char *main, const char *source) {
+			std::filesystem::create_directories(Root / folder);
+			std::ofstream(Root / folder / "plugin.json") << manifest;
+			std::ofstream(Root / folder / main) << source;
+		}
 	};
 
 	const LoadedPlugin *Named(const std::vector<LoadedPlugin> &plugins, std::string_view name) {
@@ -108,6 +127,19 @@ namespace {
 			}
 		}
 		return items;
+	}
+
+	studio::PluginPresentation DefaultPresentation() {
+		const studio::CppPluginDefinition definition = MakeDefaultStudioPlugin();
+		studio::PluginPresentation plugin;
+		plugin.Manifest = definition.Manifest;
+		plugin.Native = true;
+		studio::CppPluginContext context;
+		context.Presentation = &plugin;
+		std::string error;
+		plugin.Running = definition.Open(context, error);
+		INFO(error);
+		return plugin;
 	}
 }
 
@@ -147,13 +179,301 @@ TEST_CASE("a main that escapes its own folder is refused", "[studio][plugins]") 
 	CHECK(ParsePluginManifest(R"({"name": "Fine", "main": "a/../b/main.luau"})", manifest, error));
 }
 
+TEST_CASE("plugin run targets are explicit and default to Studio", "[studio][plugins]") {
+	PluginManifest manifest;
+	std::string error;
+
+	REQUIRE(ParsePluginManifest(R"({"name":"Old"})", manifest, error));
+	CHECK(studio::RunsIn(manifest.Runs, PluginRunTarget::Studio));
+	CHECK_FALSE(studio::RunsIn(manifest.Runs, PluginRunTarget::PlaytestServer));
+	CHECK_FALSE(studio::RunsIn(manifest.Runs, PluginRunTarget::PlaytestClient));
+
+	REQUIRE(ParsePluginManifest(
+		R"({"name":"Play","runs":["playtest-server","playtest-client"]})", manifest, error
+	));
+	CHECK_FALSE(studio::RunsIn(manifest.Runs, PluginRunTarget::Studio));
+	CHECK(studio::RunsIn(manifest.Runs, PluginRunTarget::PlaytestServer));
+	CHECK(studio::RunsIn(manifest.Runs, PluginRunTarget::PlaytestClient));
+
+	CHECK_FALSE(ParsePluginManifest(R"({"name":"Bad","runs":[]})", manifest, error));
+	CHECK(error.find("at least one") != std::string::npos);
+	CHECK_FALSE(ParsePluginManifest(R"({"name":"Bad","runs":["shipping"]})", manifest, error));
+	CHECK(error.find("unknown") != std::string::npos);
+}
+
+TEST_CASE("dynamic plugin bindings are collected with their owner", "[studio][plugins]") {
+	PluginBindingRegistry registry;
+	size_t changes = 0;
+	registry.OnChanged([&] { changes++; });
+
+	std::string error;
+	auto owner = registry.OpenScope();
+	REQUIRE(owner.Add(
+		"Suite.Version",
+		[](engine::script::HostArguments, engine::script::HostValue &result, std::string &) {
+			result = engine::script::HostValue::Of(21.0);
+			return true;
+		},
+		error
+	));
+	CHECK(changes == 1);
+	CHECK(registry.Names(engine::script::Language::Luau) == std::vector<std::string>{"Suite.Version"});
+	CHECK(registry.Names(engine::script::Language::JavaScript).empty());
+
+	auto duplicate = registry.OpenScope();
+	CHECK_FALSE(duplicate.Add("Suite.Version", [](auto, auto &, auto &) { return true; }, error));
+	CHECK(error.find("already registered") != std::string::npos);
+
+	engine::script::HostValue result;
+	REQUIRE(registry.Call(engine::script::Language::Luau, "Suite.Version", {}, result, error));
+	CHECK(result.AsNumber() == 21.0);
+
+	owner.Close();
+	CHECK(changes == 2);
+	CHECK(registry.Names(engine::script::Language::Luau).empty());
+	CHECK_FALSE(registry.Call(engine::script::Language::Luau, "Suite.Version", {}, result, error));
+}
+
+TEST_CASE("dynamic Studio bindings cannot hide built-in host calls", "[studio][plugins]") {
+	PluginBindingRegistry studioRegistry;
+	auto studioOwner = studioRegistry.OpenScope();
+	std::string error;
+	CHECK_FALSE(studioOwner.Add("Notify", [](auto, auto &, auto &) { return true; }, error));
+	CHECK(error.find("built-in Studio host function") != std::string::npos);
+	CHECK(studioRegistry.Names(engine::script::Language::Luau).empty());
+
+	PluginBindingRegistry serverRegistry(PluginRunTarget::PlaytestServer);
+	auto serverOwner = serverRegistry.OpenScope();
+	REQUIRE(serverOwner.Add("Notify", [](auto, auto &, auto &) { return true; }, error));
+	CHECK(serverRegistry.Names(engine::script::Language::Luau) == std::vector<std::string>{"Notify"});
+	CHECK_FALSE(serverOwner.Add(
+		"Bad.Language", [](auto, auto &, auto &) { return true; }, error, static_cast<uint8_t>(0x80)
+	));
+	CHECK(error.find("unknown script language") != std::string::npos);
+}
+
+TEST_CASE("Luau host tables gain and lose native plugin bindings", "[studio][plugins]") {
+	class BindingSurface final : public engine::script::HostSurface {
+	  public:
+		explicit BindingSurface(PluginBindingRegistry &registry) : Registry(registry) {}
+
+		std::string_view GlobalName() const override {
+			return "plugin";
+		}
+
+		std::vector<std::string> Names() const override {
+			return Registry.Names(engine::script::Language::Luau);
+		}
+
+		bool Call(
+			std::string_view name,
+			engine::script::HostArguments arguments,
+			engine::script::HostValue &result,
+			std::string &failure
+		) override {
+			return Registry.Call(engine::script::Language::Luau, name, arguments, result, failure);
+		}
+
+		PluginBindingRegistry &Registry;
+	};
+
+	engine::scene::EnsureClassTree();
+	Store store("dynamic-luau-binding");
+	PluginBindingRegistry registry;
+	BindingSurface surface(registry);
+	std::string error;
+	auto owner = registry.OpenScope();
+	REQUIRE(owner.Add(
+		"Echo",
+		[](engine::script::HostArguments arguments, engine::script::HostValue &result, std::string &) {
+			result = engine::script::HostValue::Of(arguments[0].AsNumber() + 1.0);
+			return true;
+		},
+		error
+	));
+
+	engine::script::RuntimeLimits limits;
+	limits.Role.Studio = true;
+	limits.Origin = engine::script::ScriptOrigin::Plugin;
+	auto runtime = engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+	REQUIRE(runtime != nullptr);
+	runtime->SetHost(&surface);
+	REQUIRE(runtime->Run("assert(plugin.Echo(41) == 42)", "dynamic-add"));
+
+	owner.Close();
+	runtime->SetHost(&surface);
+	INFO(runtime->LastError());
+	CHECK(runtime->Run("assert(plugin.Echo == nil)", "dynamic-remove"));
+}
+
+TEST_CASE("native plugin close runs before its Luau bindings are collected", "[studio][plugins]") {
+	Store store("native-plugin");
+	PluginBindingRegistry registry;
+	bool opened = false;
+	bool closedWithBinding = false;
+	size_t beats = 0;
+
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Native Suite";
+	definition.Manifest.Id = "test.native-suite";
+	definition.Open = [&](studio::CppPluginContext &context, std::string &error) {
+		opened = true;
+		return context.Bindings->Add("Suite.Ping", [](auto, auto &, auto &) { return true; }, error);
+	};
+	definition.Heartbeat = [&](studio::CppPluginContext &, float, std::string &) {
+		beats++;
+		return true;
+	};
+	definition.Close = [&](studio::CppPluginContext &) {
+		closedWithBinding = !registry.Names(engine::script::Language::Luau).empty();
+	};
+
+	std::vector<LoadedCppPlugin> plugins;
+	StartCppPlugins(plugins, {definition}, store, registry);
+	REQUIRE(plugins.size() == 1);
+	CHECK(opened);
+	CHECK(plugins.front().Native);
+	CHECK(plugins.front().Running);
+	CHECK(BeatCppPlugins(plugins, 1.0f / 60.0f) == 1);
+	CHECK(beats == 1);
+
+	StopCppPlugins(plugins);
+	CHECK(closedWithBinding);
+	CHECK(registry.Names(engine::script::Language::Luau).empty());
+}
+
+TEST_CASE("C++ plugin definitions register and unregister dynamically", "[studio][plugins]") {
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Registered Native";
+	definition.Manifest.Id = "test.registered-native";
+	definition.Open = [](studio::CppPluginContext &, std::string &) { return true; };
+
+	const uint64_t before = studio::CppPluginRegistryRevision();
+	std::string error;
+	studio::CppPluginDefinition invalid = definition;
+	invalid.Manifest.Id = "test.invalid-native";
+	invalid.Manifest.Runs = static_cast<studio::PluginRunTargets>(0x80);
+	auto invalidRegistration = studio::RegisterCppPlugin(invalid, error);
+	CHECK_FALSE(invalidRegistration.IsOpen());
+	CHECK(error.find("unknown run target") != std::string::npos);
+
+	auto registration = studio::RegisterCppPlugin(definition, error);
+	INFO(error);
+	REQUIRE(registration.IsOpen());
+	CHECK(studio::CppPluginRegistryRevision() > before);
+	const auto registered = studio::RegisteredCppPlugins();
+	CHECK(std::any_of(registered.begin(), registered.end(), [](const auto &plugin) {
+		return plugin.Manifest.Id == "test.registered-native";
+	}));
+
+	const uint64_t loaded = studio::CppPluginRegistryRevision();
+	registration.Close();
+	CHECK(studio::CppPluginRegistryRevision() > loaded);
+	const auto removed = studio::RegisteredCppPlugins();
+	CHECK(std::none_of(removed.begin(), removed.end(), [](const auto &plugin) {
+		return plugin.Manifest.Id == "test.registered-native";
+	}));
+}
+
+TEST_CASE("faulted C++ plugins close before losing their bindings", "[studio][plugins]") {
+	Store store("faulted-native-plugin");
+	PluginBindingRegistry registry;
+	bool closed = false;
+
+	studio::CppPluginDefinition definition;
+	definition.Manifest.Name = "Faulted Native";
+	definition.Manifest.Id = "test.faulted-native";
+	definition.Open = [](studio::CppPluginContext &context, std::string &error) {
+		return context.Bindings->Add("Faulted.Ping", [](auto, auto &, auto &) { return true; }, error);
+	};
+	definition.Heartbeat = [](studio::CppPluginContext &, float, std::string &error) {
+		error = "beat failed";
+		return false;
+	};
+	definition.Close = [&](studio::CppPluginContext &) {
+		closed = !registry.Names(engine::script::Language::Luau).empty();
+	};
+
+	std::vector<LoadedCppPlugin> plugins;
+	StartCppPlugins(plugins, {definition}, store, registry);
+	for (size_t fault = 0; fault < PLUGIN_FAULT_LIMIT; fault++) {
+		BeatCppPlugins(plugins, 1.0f / 60.0f);
+	}
+	REQUIRE(plugins.size() == 1);
+	CHECK_FALSE(plugins.front().Running);
+	CHECK(closed);
+	CHECK(registry.Names(engine::script::Language::Luau).empty());
+}
+
+TEST_CASE("C++ plugins start only in their selected playtest role", "[studio][plugins]") {
+	Store store("native-playtest-target");
+	PluginBindingRegistry registry(PluginRunTarget::PlaytestServer);
+	bool studioOpened = false;
+	bool serverOpened = false;
+
+	studio::CppPluginDefinition studioDefinition;
+	studioDefinition.Manifest.Name = "Studio Native";
+	studioDefinition.Manifest.Id = "test.studio-native";
+	studioDefinition.Open = [&](studio::CppPluginContext &, std::string &) {
+		studioOpened = true;
+		return true;
+	};
+
+	studio::CppPluginDefinition serverDefinition;
+	serverDefinition.Manifest.Name = "Server Native";
+	serverDefinition.Manifest.Id = "test.server-native";
+	serverDefinition.Manifest.Runs = studio::PluginTarget(PluginRunTarget::PlaytestServer);
+	serverDefinition.Open = [&](studio::CppPluginContext &context, std::string &) {
+		serverOpened = context.Target == PluginRunTarget::PlaytestServer;
+		return true;
+	};
+
+	std::vector<LoadedCppPlugin> plugins;
+	StartCppPlugins(
+		plugins, {studioDefinition, serverDefinition}, store, registry, PluginRunTarget::PlaytestServer
+	);
+	REQUIRE(plugins.size() == 2);
+	CHECK_FALSE(studioOpened);
+	CHECK_FALSE(plugins[0].Running);
+	CHECK(plugins[0].Error.find("does not run") != std::string::npos);
+	CHECK(serverOpened);
+	CHECK(plugins[1].Running);
+	StopCppPlugins(plugins);
+}
+
 TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugins]") {
-	const LoadedPlugin plugin = MakeDefaultStudioPlugin();
+	const studio::PluginPresentation plugin = DefaultPresentation();
 
 	CHECK(plugin.Builtin);
 	CHECK(plugin.Running);
 	CHECK(plugin.Manifest.Id == "atomic.default-studio");
-	REQUIRE(plugin.Toolbars.size() == 7);
+	REQUIRE(plugin.Toolbars.size() == 6);
+	REQUIRE(plugin.Widgets.size() == 6);
+
+	const std::array expectedWidgets = {
+		std::tuple{"explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left},
+		std::tuple{"properties", "Properties", BuiltinStudioPanel::Properties, PluginDock::Right},
+		std::tuple{
+			"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
+		},
+		std::tuple{"script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre},
+		std::tuple{"dataset-editor", "Dataset Editor", BuiltinStudioPanel::DatasetEditor, PluginDock::Bottom},
+		std::tuple{"roblox-import", "Roblox Import", BuiltinStudioPanel::RobloxImport, PluginDock::Bottom},
+	};
+	for (size_t index = 0; index < expectedWidgets.size(); index++) {
+		const PluginWidget &widget = plugin.Widgets[index];
+		const auto &[id, title, panel, dock] = expectedWidgets[index];
+		CHECK(widget.Id == id);
+		CHECK(widget.Title == title);
+		CHECK(widget.BuiltinPanel == panel);
+		CHECK(widget.Dock == dock);
+		CHECK(
+			widget.Open ==
+			(panel != BuiltinStudioPanel::DatasetEditor && panel != BuiltinStudioPanel::RobloxImport)
+		);
+		CHECK(widget.SynchronizedOpen == widget.Open);
+		CHECK_FALSE(widget.Render.Valid());
+	}
 
 	std::set<std::string> toolbarIds;
 	std::set<std::string> controlIds;
@@ -171,6 +491,9 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Toolbars.front().Id == "transport");
 	CHECK(plugin.Toolbars.front().Placement == PluginToolbarPlacement::Pinned);
 	CHECK(plugin.Toolbars.front().Buttons.size() == 11);
+	CHECK(std::none_of(plugin.Toolbars.begin(), plugin.Toolbars.end(), [](const PluginToolbar &toolbar) {
+		return toolbar.Id == "demo";
+	}));
 
 	const auto view =
 		std::find_if(plugin.Toolbars.begin(), plugin.Toolbars.end(), [](const PluginToolbar &toolbar) {
@@ -191,6 +514,7 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		std::pair{"statistics", BuiltinStudioTool::StatisticsPanel},
 		std::pair{"frame-graph", BuiltinStudioTool::FrameGraphPanel},
 		std::pair{"heap", BuiltinStudioTool::HeapPanel},
+		std::pair{"datasets", BuiltinStudioTool::DatasetEditorPanel},
 		std::pair{"camera", BuiltinStudioTool::CameraSpeed},
 	};
 	REQUIRE(view->Buttons.size() == expected.size());
@@ -201,11 +525,25 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	}
 }
 
+TEST_CASE("plugin widget labels keep matching titles separate", "[studio][plugins]") {
+	studio::PluginPresentation first;
+	first.Root = "plugins/first";
+	studio::PluginPresentation second;
+	second.Manifest.Id = "tools.second";
+
+	PluginWidget widget;
+	widget.Title = "Explorer";
+	widget.Id = "tree";
+
+	CHECK(PluginWidgetLabel(first, widget) == "Explorer###plugin.first.tree");
+	CHECK(PluginWidgetLabel(second, widget) == "Explorer###plugin.tools.second.tree");
+}
+
 TEST_CASE("a disabled Default Studio plugin contributes no toolbar", "[studio][plugins]") {
-	std::vector<LoadedPlugin> plugins;
-	plugins.push_back(MakeDefaultStudioPlugin());
-	plugins.front().Manifest.Enabled = false;
-	plugins.front().Running = false;
+	studio::PluginPresentation plugin = DefaultPresentation();
+	plugin.Manifest.Enabled = false;
+	plugin.Running = false;
+	std::vector<studio::PluginPresentation *> plugins = {&plugin};
 
 	const studio::ToolbarLayoutView layout = ComposeToolbar(plugins, {});
 	CHECK(layout.PinnedRows.empty());
@@ -213,13 +551,13 @@ TEST_CASE("a disabled Default Studio plugin contributes no toolbar", "[studio][p
 }
 
 TEST_CASE("toolbar composition uses stable overrides", "[studio][plugins]") {
-	std::vector<LoadedPlugin> plugins;
-	plugins.push_back(MakeDefaultStudioPlugin());
+	studio::PluginPresentation plugin = DefaultPresentation();
+	std::vector<studio::PluginPresentation *> plugins = {&plugin};
 
 	const std::string moved =
-		studio::PluginToolKey(plugins[0], plugins[0].Toolbars[0], 0, plugins[0].Toolbars[0].Buttons[0], 0);
+		studio::PluginToolKey(plugin, plugin.Toolbars[0], 0, plugin.Toolbars[0].Buttons[0], 0);
 	const std::string hidden =
-		studio::PluginToolKey(plugins[0], plugins[0].Toolbars[0], 0, plugins[0].Toolbars[0].Buttons[1], 1);
+		studio::PluginToolKey(plugin, plugin.Toolbars[0], 0, plugin.Toolbars[0].Buttons[1], 1);
 
 	ToolbarPreferences preferences;
 	preferences.Tabs.push_back(ToolbarTabPreference{"custom", "My Tools", true, true});
@@ -434,6 +772,49 @@ TEST_CASE("duplicate plugin identities remain blocked until rediscovery", "[stud
 }
 
 // --- running -------------------------------------------------------------------
+
+TEST_CASE("script plugins start only in selected Studio playtest roles", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"server",
+		R"({"name":"Server Tool","runs":"playtest-server"})",
+		"assert(game:GetService('RunService'):IsServer())\n"
+	);
+
+	Store studioStore("studio-context");
+	std::vector<LoadedPlugin> studioPlugins = DiscoverPlugins(folder.Root);
+	StartPlugins(studioPlugins, studioStore);
+	REQUIRE(studioPlugins.size() == 1);
+	CHECK_FALSE(studioPlugins.front().Running);
+	CHECK(studioPlugins.front().Error.find("does not run") != std::string::npos);
+
+	Store serverStore("server-context");
+	std::vector<LoadedPlugin> serverPlugins = DiscoverPlugins(folder.Root);
+	StartPlugins(serverPlugins, serverStore, {}, PluginRunTarget::PlaytestServer);
+	REQUIRE(serverPlugins.size() == 1);
+	INFO(serverPlugins.front().Error);
+	REQUIRE(serverPlugins.front().Running);
+	CHECK(serverPlugins.front().Vm->Role().Server);
+	CHECK_FALSE(serverPlugins.front().Vm->Role().Client);
+	CHECK(serverPlugins.front().Vm->Role().Studio);
+
+	Folder clientFolder;
+	clientFolder.Add(
+		"client",
+		R"({"name":"Client Tool","runs":"playtest-client"})",
+		"assert(game:GetService('RunService'):IsClient())\n"
+	);
+	Store clientStore("client-context");
+	std::vector<LoadedPlugin> clientPlugins = DiscoverPlugins(clientFolder.Root);
+	StartPlugins(clientPlugins, clientStore, {}, PluginRunTarget::PlaytestClient);
+	REQUIRE(clientPlugins.size() == 1);
+	INFO(clientPlugins.front().Error);
+	REQUIRE(clientPlugins.front().Running);
+	CHECK_FALSE(clientPlugins.front().Vm->Role().Server);
+	CHECK(clientPlugins.front().Vm->Role().Client);
+	CHECK(clientPlugins.front().Vm->Role().Studio);
+}
 
 TEST_CASE("every plugin gets its own globals", "[studio][plugins]") {
 	engine::scene::EnsureClassTree();
@@ -843,6 +1224,60 @@ TEST_CASE("a plugin creates toolbars and buttons at its top level", "[studio][pl
 	CHECK(plugins.front().Vm->Invoke(click, {}));
 
 	(void)surface;
+}
+
+TEST_CASE("Luau and JavaScript plugins configure the same viewport grid", "[studio][plugins]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.AddWithMain(
+		"grid-luau",
+		R"({"name":"Grid Luau","main":"main.luau"})",
+		"main.luau",
+		"plugin.SetViewportOption('Grid Step', 2.5)\n"
+		"plugin.SetViewportOption('Grid Major', 6)\n"
+		"plugin.SetViewportOption('Grid Offset X', 12)\n"
+		"plugin.SetViewportOption('Grid Colour', '#336699')\n"
+		"plugin.SetViewportOption('Particles', false)\n"
+		"local bar = plugin.CreateToolbar('Grid Controls')\n"
+		"plugin.CreateDropdown(bar, 'Spacing', '', {'Fine', 'Coarse'}, 1, function() end)\n"
+		"assert(plugin.GetViewportOption('Grid Step') == 2.5)\n"
+		"assert(plugin.GetViewportOption('Grid Major') == 6)\n"
+		"assert(plugin.GetViewportOption('Grid Offset X') == 12)\n"
+		"assert(plugin.GetViewportOption('Grid Colour') == '336699FF')\n"
+		"assert(plugin.GetViewportOption('Particles') == false)\n"
+	);
+	folder.AddWithMain(
+		"grid-js",
+		R"({"name":"Grid JavaScript","main":"main.js"})",
+		"main.js",
+		"plugin.SetViewportOption('Grid Scale', 3.5);\n"
+		"plugin.SetViewportOption('Grid Size', 900);\n"
+		"plugin.SetViewportOption('Grid Offset Z', -24);\n"
+		"plugin.SetViewportOption('Grid Axis X Color', '#CC3344');\n"
+		"const bar = plugin.CreateToolbar('Grid Controls JS');\n"
+		"plugin.CreateDropdown(bar, 'Spacing', '', ['Fine', 'Coarse'], 2, function() {});\n"
+		"if (plugin.GetViewportOption('Grid Scale') !== 3.5) throw new Error('step');\n"
+		"if (plugin.GetViewportOption('Grid Size') !== 900) throw new Error('reach');\n"
+		"if (plugin.GetViewportOption('Grid Offset Z') !== -24) throw new Error('offset');\n"
+		"if (plugin.GetViewportOption('Grid Axis X Colour') !== 'CC3344FF') throw new Error('colour');\n"
+	);
+
+	studio::Editor editor;
+	Store store("plugin-grid-options");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin);
+	});
+
+	REQUIRE(plugins.size() == 2);
+	for (const LoadedPlugin &plugin : plugins) {
+		INFO(plugin.Manifest.Name << ": " << plugin.Error);
+		CHECK(plugin.Running);
+		REQUIRE(plugin.Toolbars.size() == 1);
+		REQUIRE(plugin.Toolbars.front().Buttons.size() == 1);
+		CHECK(plugin.Toolbars.front().Buttons.front().Kind == PluginControlKind::Dropdown);
+		CHECK(plugin.Toolbars.front().Buttons.front().Options.size() == 2);
+	}
 }
 
 TEST_CASE("a Luau plugin declares a pinned toolbar grid and label", "[studio][plugins]") {

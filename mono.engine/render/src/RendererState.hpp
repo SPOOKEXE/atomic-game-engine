@@ -563,7 +563,7 @@ namespace engine::render {
 		// live here and the infos point at them.
 		//@{
 		SDL_GPUVertexBufferDescription VariantBuffers[1]{};
-		SDL_GPUVertexAttribute VariantAttributes[3]{};
+		SDL_GPUVertexAttribute VariantAttributes[5]{};
 		SDL_GPUColorTargetDescription VariantOpaqueTarget{};
 		SDL_GPUColorTargetDescription VariantBlendedTarget{};
 		SDL_GPUGraphicsPipelineCreateInfo VariantOpaqueInfo{};
@@ -605,6 +605,7 @@ namespace engine::render {
 		// off screen still shadows, and a mirror shows what is behind the
 		// viewer.
 		std::vector<scene::DrawInstance> SceneInstances;
+		std::vector<core::CFrame> SceneJointFrames;
 
 		// The instances whose geometry has arrived, which is what every pass
 		// below works from. See the filter in `Render` for why an instance
@@ -770,6 +771,10 @@ namespace engine::render {
 		SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
 		uint32_t InstanceIndexCapacity = 0;
+		SDL_GPUBuffer *SkinOffsetBuffer = nullptr;
+		SDL_GPUTransferBuffer *SkinOffsetTransfer = nullptr;
+		SDL_GPUBuffer *JointBuffer = nullptr;
+		SDL_GPUTransferBuffer *JointTransfer = nullptr;
 
 		// Packed rows are world-owned. Several cameras looking at one world share
 		// this pool and upload changed rows once; each target keeps only its own
@@ -1284,6 +1289,14 @@ namespace engine::render {
 			// Visibility and order remain target-owned. The packed rows they index
 			// are shared by every camera carrying the same world key.
 			std::vector<uint32_t> InstanceIndices;
+			std::vector<uint32_t> SkinOffsets;
+			std::vector<uint32_t> JointWords;
+			uint32_t SkinOffsetCapacity = 0;
+			uint32_t JointWordCapacity = 0;
+			SDL_GPUBuffer *SkinOffsetBuffer = nullptr;
+			SDL_GPUTransferBuffer *SkinOffsetTransfer = nullptr;
+			SDL_GPUBuffer *JointBuffer = nullptr;
+			SDL_GPUTransferBuffer *JointTransfer = nullptr;
 
 			// One acknowledged stream per possible in-flight frame. Partial copies
 			// preserve unchanged device bytes, so a buffer cannot be reused until the

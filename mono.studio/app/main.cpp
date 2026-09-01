@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <studio/RobloxImport.hpp>
 
 int main(int argc, char **argv) {
 	if (engine::script::ComputeWorkerRequested(argc, argv)) {
@@ -57,8 +58,10 @@ int main(int argc, char **argv) {
 	arguments.Flag("assets", "Open the assets manager");
 	arguments.Flag("viewport2", "Open the second viewport (same as --viewports 2)");
 
-	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
+	arguments.Value("game", "PATH", "Game file to open at startup (.agame or .auniverse)");
 	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
+	arguments.Value("import-roblox", "PATH", "Convert one Roblox place without opening Studio");
+	arguments.Value("output-world", "PATH", "Write --import-roblox as this .aworld file");
 	arguments.Value("config-root", "DIR", "Keep this run's Studio configuration in DIR");
 	arguments.Value("width", "PX", "Window width (default 1600)");
 	arguments.Value("height", "PX", "Window height (default 900)");
@@ -150,6 +153,45 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 	engine::parallel::ApplyFlags();
+
+	const auto robloxSource = arguments.Get("import-roblox");
+	const auto robloxDestination = arguments.Get("output-world");
+	if (robloxSource.has_value() != robloxDestination.has_value()) {
+		std::fputs("--import-roblox and --output-world must be given together\n", stderr);
+		return 2;
+	}
+	if (robloxSource && robloxDestination) {
+		studio::RobloxAssetMappings assetMappings;
+		studio::RobloxClassMappings classMappings;
+		std::string error;
+		if (!studio::LoadRobloxAssetMappings(assetMappings, error) ||
+			!studio::LoadRobloxClassMappings(classMappings, error)) {
+			std::fprintf(stderr, "%s\n", error.c_str());
+			return 1;
+		}
+
+		studio::RobloxWorldPortResult report;
+		if (!studio::PortRobloxPlace(
+				std::filesystem::path(*robloxSource),
+				std::filesystem::path(*robloxDestination),
+				assetMappings,
+				classMappings,
+				report,
+				error
+			)) {
+			std::fprintf(stderr, "%s\n", error.c_str());
+			return 1;
+		}
+		std::printf(
+			"%zu instances, %zu classes, %zu missing classes, %zu missing properties, %zu type conflicts\n",
+			report.Analysis.Instances,
+			report.Analysis.Classes,
+			report.Analysis.MissingClasses.size(),
+			report.Analysis.MissingProperties.size(),
+			report.Analysis.ConflictingProperties.size()
+		);
+		return 0;
+	}
 
 	// **The configured values first, then the flags over the top.** Only this
 	// function can tell a flag that was given from one that was left at its

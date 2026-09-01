@@ -14,7 +14,8 @@ namespace engine::assets {
 		// added to the struct would change every published mesh's meaning with
 		// nothing to notice. Eight floats, written one at a time by
 		// `ByteWriter`, is the format.
-		constexpr uint64_t VERTEX_BYTES = 8 * sizeof(float);
+		constexpr uint64_t LEGACY_VERTEX_BYTES = 8 * sizeof(float);
+		constexpr uint64_t VERTEX_BYTES = LEGACY_VERTEX_BYTES + 8 * sizeof(uint16_t);
 
 		// Whether every coordinate of a vertex is a real number.
 		//
@@ -38,6 +39,9 @@ namespace engine::assets {
 			return false;
 		}
 		if (Indices.size() % 3 != 0) {
+			return false;
+		}
+		if (JointCount > Mesh::MAXIMUM_JOINTS) {
 			return false;
 		}
 
@@ -78,6 +82,17 @@ namespace engine::assets {
 
 		for (const MeshVertex &vertex : Vertices) {
 			if (!Finite(vertex)) {
+				return false;
+			}
+
+			uint32_t weightTotal = 0;
+			for (size_t influence = 0; influence < 4; influence++) {
+				weightTotal += vertex.Weights[influence];
+				if (vertex.Weights[influence] != 0 && vertex.Joints[influence] >= JointCount) {
+					return false;
+				}
+			}
+			if (weightTotal != 0 && weightTotal != std::numeric_limits<uint16_t>::max()) {
 				return false;
 			}
 		}
@@ -129,6 +144,7 @@ namespace engine::assets {
 		writer.WriteUInt32(static_cast<uint32_t>(data.Vertices.size()));
 		writer.WriteUInt32(static_cast<uint32_t>(data.Indices.size()));
 		writer.WriteUInt32(static_cast<uint32_t>(data.Submeshes.size()));
+		writer.WriteUInt16(data.JointCount);
 
 		for (const MeshVertex &vertex : data.Vertices) {
 			for (int axis = 0; axis < 3; axis++) {
@@ -139,6 +155,12 @@ namespace engine::assets {
 			}
 			writer.WriteFloat(vertex.TexCoord[0]);
 			writer.WriteFloat(vertex.TexCoord[1]);
+			for (const uint16_t joint : vertex.Joints) {
+				writer.WriteUInt16(joint);
+			}
+			for (const uint16_t weight : vertex.Weights) {
+				writer.WriteUInt16(weight);
+			}
 		}
 
 		for (const uint32_t index : data.Indices) {
@@ -165,13 +187,15 @@ namespace engine::assets {
 		if (reader.ReadUInt32() != MAGIC) {
 			return false;
 		}
-		if (reader.ReadUInt16() != VERSION) {
+		const uint16_t version = reader.ReadUInt16();
+		if (version != VERSION && version != LEGACY_VERSION) {
 			return false;
 		}
 
 		const uint32_t vertexCount = reader.ReadUInt32();
 		const uint32_t indexCount = reader.ReadUInt32();
 		const uint32_t submeshCount = reader.ReadUInt32();
+		const uint16_t jointCount = version == VERSION ? reader.ReadUInt16() : 0;
 
 		if (reader.Failed()) {
 			return false;
@@ -185,6 +209,9 @@ namespace engine::assets {
 		if (submeshCount > MAXIMUM_SUBMESHES) {
 			return false;
 		}
+		if (jointCount > MAXIMUM_JOINTS) {
+			return false;
+		}
 
 		// **The three counts are checked against the bytes actually present
 		// before a single element is reserved.** Without this a header claiming
@@ -193,13 +220,15 @@ namespace engine::assets {
 		// terms. The submeshes are not included: each carries a variable-length
 		// name, so they are bounded by their count and their name ceiling
 		// instead, and the reader refuses past the end regardless.
-		const uint64_t fixed = static_cast<uint64_t>(vertexCount) * VERTEX_BYTES +
+		const uint64_t vertexBytes = version == VERSION ? VERTEX_BYTES : LEGACY_VERTEX_BYTES;
+		const uint64_t fixed = static_cast<uint64_t>(vertexCount) * vertexBytes +
 							   static_cast<uint64_t>(indexCount) * sizeof(uint32_t);
 		if (fixed > static_cast<uint64_t>(reader.Remaining())) {
 			return false;
 		}
 
 		MeshData parsed;
+		parsed.JointCount = jointCount;
 		parsed.Vertices.resize(vertexCount);
 		for (MeshVertex &vertex : parsed.Vertices) {
 			for (int axis = 0; axis < 3; axis++) {
@@ -210,6 +239,14 @@ namespace engine::assets {
 			}
 			vertex.TexCoord[0] = reader.ReadFloat();
 			vertex.TexCoord[1] = reader.ReadFloat();
+			if (version == VERSION) {
+				for (uint16_t &joint : vertex.Joints) {
+					joint = reader.ReadUInt16();
+				}
+				for (uint16_t &weight : vertex.Weights) {
+					weight = reader.ReadUInt16();
+				}
+			}
 		}
 
 		parsed.Indices.resize(indexCount);

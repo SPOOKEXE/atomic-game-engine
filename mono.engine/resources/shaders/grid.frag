@@ -40,6 +40,9 @@ layout(set = 3, binding = 0) uniform Grid {
 	// z: studs at which the grid has faded out. w: overall strength.
 	vec4 Params;
 
+	// x/y: the authored X/Z origin for line and axis placement.
+	vec4 Offset;
+
 	// The line colour, with `a` the alpha a heavy line reaches.
 	vec4 Colour;
 
@@ -105,8 +108,9 @@ void main() {
 	}
 
 	const float spacing = max(grid.Params.x, 1e-3);
-	const float heavy = Coverage(ground.xz, spacing * max(grid.Params.y, 1.0));
-	const float thin = Coverage(ground.xz, spacing);
+	const vec2 gridPoint = ground.xz - grid.Offset.xy;
+	const float heavy = Coverage(gridPoint, spacing * max(grid.Params.y, 1.0));
+	const float thin = Coverage(gridPoint, spacing);
 
 	// **Radial from the eye, and squared.** A grid that ended in a hard
 	// rectangle is what a linear fade along one axis gives; the square falls
@@ -126,9 +130,9 @@ void main() {
 	// The two axes, over the top of the grid. Their own spacing is meaningless
 	// - there is one of each - so the coverage is distance to zero over its own
 	// derivative, which is the same line width by the same rule.
-	const vec2 width = max(fwidth(ground.xz), vec2(1e-6));
-	const float onAxisX = 1.0 - min(abs(ground.z) / width.y, 1.0);
-	const float onAxisZ = 1.0 - min(abs(ground.x) / width.x, 1.0);
+	const vec2 width = max(fwidth(gridPoint), vec2(1e-6));
+	const float onAxisX = 1.0 - min(abs(gridPoint.y) / width.y, 1.0);
+	const float onAxisZ = 1.0 - min(abs(gridPoint.x) / width.x, 1.0);
 
 	if (onAxisX > 0.0) {
 		colour = mix(colour, grid.AxisX.rgb, onAxisX);

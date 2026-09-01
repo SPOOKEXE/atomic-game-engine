@@ -16,6 +16,7 @@ mono_add_library(server
 		Engine::parallel
 		Engine::ecs
 		Engine::world
+		Engine::datastore
 
 		# L13, `shared`. The Model Context Protocol surface, opened only when
 		# `--mcp-port` asks for it.

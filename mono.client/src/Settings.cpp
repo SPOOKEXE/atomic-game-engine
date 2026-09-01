@@ -24,6 +24,22 @@ namespace client {
 					"client.view-spacing", defaults.ViewSpacing, "World units between composited views"
 				);
 				built.Number("client.tick-rate", defaults.TickRate, "Simulation ticks per second");
+				built.Boolean(
+					"client.editable-meshes",
+					defaults.EnableEditableMeshes,
+					"Upload live EditableMesh changes"
+				);
+				built.Boolean(
+					"client.editable-images",
+					defaults.EnableEditableImages,
+					"Upload live EditableImage changes"
+				);
+				built.Boolean("client.particles", defaults.EnableParticles, "Draw visible particles");
+				built.Boolean(
+					"client.post-processing",
+					defaults.EnablePostProcessing,
+					"Run the world's post-processing shader"
+				);
 				built.Integer(
 					"client.surface-bounces",
 					defaults.SurfaceBounces,
@@ -85,6 +101,11 @@ namespace client {
 					"64 hex characters - the server identity to pin. Without it a relay in the path can read "
 					"everything"
 				);
+				built.Text(
+					"client.play-key",
+					defaults.PlayKey,
+					"64 hex characters - the platform-issued client identity seed"
+				);
 
 				built.List(
 					"client.content-sources",
@@ -140,6 +161,10 @@ namespace client {
 		options.Worlds = static_cast<uint32_t>(Flag("client.worlds").Integer());
 		options.ViewSpacing = static_cast<float>(Flag("client.view-spacing").Number());
 		options.TickRate = Flag("client.tick-rate").Number();
+		options.EnableEditableMeshes = Flag("client.editable-meshes").Boolean();
+		options.EnableEditableImages = Flag("client.editable-images").Boolean();
+		options.EnableParticles = Flag("client.particles").Boolean();
+		options.EnablePostProcessing = Flag("client.post-processing").Boolean();
 		options.SurfaceBounces = static_cast<int>(Flag("client.surface-bounces").Integer());
 		options.MaximumFrameRate = static_cast<uint32_t>(
 			std::clamp<int64_t>(Flag("client.max-fps").Integer(), 0, std::numeric_limits<uint32_t>::max())
@@ -158,6 +183,7 @@ namespace client {
 		options.SessionSecret = std::string(Flag("client.session-key").Text());
 		options.RendezvousAddress = std::string(Flag("client.rendezvous").Text());
 		options.ServerKey = std::string(Flag("client.server-key").Text());
+		options.PlayKey = std::string(Flag("client.play-key").Text());
 
 		const Flag configured("client.content-sources");
 		const std::span<const std::string> sources = configured.Items();

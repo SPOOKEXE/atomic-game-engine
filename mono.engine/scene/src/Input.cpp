@@ -48,6 +48,13 @@ namespace engine::scene {
 			"F4",		  "F5",			 "F6",
 			"F7",		  "F8",			 "F9",
 			"F10",		  "F11",		 "F12",
+
+			"ButtonA",	  "ButtonB",	 "ButtonX",
+			"ButtonY",	  "ButtonL1",	 "ButtonR1",
+			"ButtonL2",	  "ButtonR2",	 "ButtonL3",
+			"ButtonR3",	  "ButtonStart", "ButtonSelect",
+			"DPadUp",	  "DPadDown",	 "DPadLeft",
+			"DPadRight",  "Thumbstick1", "Thumbstick2",
 		}};
 
 		// The pin. A name list one short or one long is a compile error rather
@@ -70,6 +77,14 @@ namespace engine::scene {
 			"Keyboard",
 			"MouseMovement",
 			"MouseWheel",
+			"Gamepad1",
+			"Gamepad2",
+			"Gamepad3",
+			"Gamepad4",
+			"Gamepad5",
+			"Gamepad6",
+			"Gamepad7",
+			"Gamepad8",
 		}};
 
 		static_assert(
@@ -127,6 +142,29 @@ namespace engine::scene {
 			}
 		}
 		return KeyCode::Unknown;
+	}
+
+	KeyCode KeyOf(ControllerButton button) {
+		constexpr KeyCode KEYS[]{
+			KeyCode::ButtonA,
+			KeyCode::ButtonB,
+			KeyCode::ButtonX,
+			KeyCode::ButtonY,
+			KeyCode::ButtonL1,
+			KeyCode::ButtonR1,
+			KeyCode::ButtonL2,
+			KeyCode::ButtonR2,
+			KeyCode::ButtonL3,
+			KeyCode::ButtonR3,
+			KeyCode::ButtonStart,
+			KeyCode::ButtonSelect,
+			KeyCode::DPadUp,
+			KeyCode::DPadDown,
+			KeyCode::DPadLeft,
+			KeyCode::DPadRight,
+		};
+		const size_t index = static_cast<size_t>(button);
+		return index < std::size(KEYS) ? KEYS[index] : KeyCode::Unknown;
 	}
 
 	const char *Describe(MouseButton button) {

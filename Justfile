@@ -30,6 +30,7 @@ setup: install-hooks
     # third_party/ empty. Without this the client configure stops in
     # MonoVendor.cmake pointing back here.
     python3 mono.vendor/shaderc/utils/git-sync-deps
+    if [ "$(uname -s)" = Darwin ]; then scripts/fetch-moltenvk.sh; fi
     @echo "vendors ready"
 
 # Point git at the hooks this repository carries. Once per clone.

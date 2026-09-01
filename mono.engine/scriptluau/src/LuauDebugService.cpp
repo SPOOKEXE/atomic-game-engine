@@ -91,8 +91,9 @@ namespace engine::script {
 			const ecs::Store &store = *UpvalueContext(state).World;
 
 			// `Source` is the path a `LuaSourceContainer` was loaded from, which
-			// is exactly what the VM reports as the chunk name - so resolving it
-			// here is reading the one fact both ends already agree on.
+			// is exactly what the VM reports as the chunk name. This privileged
+			// debugger path deliberately bypasses `InstanceShim`: ordinary scripts
+			// must not discover this non-scriptable authoring property.
 			Name path;
 			if (!store.GetProperty(instance, Name("Source"), &path, sizeof(path))) {
 				luaL_errorL(state, "that instance is not a script");

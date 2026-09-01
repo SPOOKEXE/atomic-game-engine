@@ -3,13 +3,13 @@
 #include "JsContext.hpp"
 
 #include <engine/core/Log.hpp>
-#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -425,24 +425,6 @@ namespace engine::script {
 
 		// --- instances -------------------------------------------------------
 
-		// Text, not an interned id, for the reason `LuauInstances.cpp`'s twin gives
-		// at length: building the id takes a lock on the process-wide registry,
-		// and this is on the path of every property a script reads or writes.
-		// The two surfaces share rules rather than code, and this is one of the
-		// rules.
-		// **A non-scriptable property is not found here either.** The two
-		// surfaces share rules rather than code - `LuauInstances.cpp`'s twin
-		// carries why the answer is "no such member" rather than a refusal.
-		const PropertyDescriptor *Find(const Store &store, Entity instance, const char *name) {
-			const std::string_view key(name);
-			for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-				if (property.Name.Text() == key) {
-					return property.Scriptable ? &property : nullptr;
-				}
-			}
-			return nullptr;
-		}
-
 		// The accessor pair every property on a prototype is made of. The
 		// property's name travels as closure data, so one function serves all of
 		// them and none of them is written by hand.
@@ -455,7 +437,7 @@ namespace engine::script {
 			}
 
 			const char *name = JS_ToCString(context, data[0]);
-			const PropertyDescriptor *property = Find(*bound.World, instance, name);
+			const PropertyDescriptor *property = ScriptableProperty(*bound.World, instance, name);
 			JS_FreeCString(context, name);
 
 			if (property == nullptr) {
@@ -469,7 +451,7 @@ namespace engine::script {
 			// behaviour rather than a fast path. So it gets a real object.
 			if (property->Type == PropertyType::String) {
 				std::string text;
-				if (!bound.World->GetProperty(instance, *property, &text, sizeof(text))) {
+				if (!ReadInstanceProperty(*bound.World, instance, *property, &text, sizeof(text))) {
 					return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 				}
 				return JS_NewStringLen(context, text.data(), text.size());
@@ -477,7 +459,7 @@ namespace engine::script {
 
 			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property->Size > sizeof(bytes) ||
-				!bound.World->GetProperty(instance, *property, bytes, property->Size)) {
+				!ReadInstanceProperty(*bound.World, instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 			}
 			return ToJsValue(context, property->Type, property->EnumName, bytes);
@@ -493,7 +475,7 @@ namespace engine::script {
 			}
 
 			const char *name = JS_ToCString(context, data[0]);
-			const PropertyDescriptor *property = Find(*bound.World, instance, name);
+			const PropertyDescriptor *property = ScriptableProperty(*bound.World, instance, name);
 			JS_FreeCString(context, name);
 
 			if (property == nullptr) {
@@ -516,7 +498,7 @@ namespace engine::script {
 				const std::string value(text, length);
 				JS_FreeCString(context, text);
 
-				if (!bound.World->SetProperty(instance, *property, &value, sizeof(value))) {
+				if (!WriteInstanceProperty(*bound.World, instance, *property, &value, sizeof(value))) {
 					return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
 				}
 				return JS_UNDEFINED;
@@ -533,7 +515,7 @@ namespace engine::script {
 			// Refused loudly. A replica rejecting the write is the case that
 			// matters: a script author cannot tell "rejected" from "applied and
 			// overwritten by the next delta" without being told.
-			if (!bound.World->SetProperty(instance, *property, bytes, property->Size)) {
+			if (!WriteInstanceProperty(*bound.World, instance, *property, bytes, property->Size)) {
 				return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
 			}
 			return JS_UNDEFINED;
@@ -561,13 +543,13 @@ namespace engine::script {
 				JS_IsObject(methods) ? JS_NewObjectProto(context, methods) : JS_NewObject(context);
 			JS_FreeValue(context, methods);
 
-			for (const PropertyDescriptor &property : bound.World->PropertiesOf(sample)) {
-				JSValue name = JS_NewString(context, property.Name.Text().data());
+			for (const PropertyDescriptor *property : ScriptableProperties(*bound.World, sample)) {
+				JSValue name = JS_NewString(context, property->Name.Text().data());
 
 				JSValue getter = JS_NewCFunctionData(context, PropertyGet, 0, 0, 1, &name);
 				JSValue setter = JS_NewCFunctionData(context, PropertySet, 1, 0, 1, &name);
 
-				const JSAtom atom = JS_NewAtom(context, property.Name.Text().data());
+				const JSAtom atom = JS_NewAtom(context, property->Name.Text().data());
 				JS_DefinePropertyGetSet(context, proto, atom, getter, setter, JS_PROP_C_W_E);
 				JS_FreeAtom(context, atom);
 				JS_FreeValue(context, name);
@@ -717,18 +699,27 @@ namespace engine::script {
 				return JS_EXCEPTION;
 			}
 
-			const ecs::ClassId id = ecs::Classes::Find(Name(className));
-			if (!id.IsValid()) {
+			Entity parent = ecs::NULL_ENTITY;
+			if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+				parent = JsEntityOf(context, argv[1]);
+				if (parent == ecs::NULL_ENTITY) {
+					JS_FreeCString(context, className);
+					return JS_ThrowTypeError(context, "Instance.new parent must be an instance");
+				}
+			}
+			const InstanceCreateResult created = CreateScriptInstance(*bound.World, className, parent);
+			if (created.Failure == InstanceCreateFailure::UnknownClass) {
 				JSValue error = JS_ThrowTypeError(context, "'%s' is not a registered class", className);
 				JS_FreeCString(context, className);
 				return error;
 			}
-
-			const Entity instance = bound.World->CreateInstance(id, className);
 			JS_FreeCString(context, className);
 
-			if (instance == ecs::NULL_ENTITY) {
+			if (created.Failure == InstanceCreateFailure::StoreRefused) {
 				return JS_ThrowTypeError(context, "could not create the instance");
+			}
+			if (created.Failure == InstanceCreateFailure::ParentRefused) {
+				return JS_ThrowTypeError(context, "could not parent the new instance");
 			}
 
 			// **The second argument, which Roblox has and v0.5 did not.**
@@ -740,20 +731,15 @@ namespace engine::script {
 			// Omitting it leaves the instance parented to nothing, which is now
 			// a real state: fully formed, drawn by nothing, reached by no walk
 			// of the tree until a script says where it goes.
-			if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-				if (!bound.World->SetParent(instance, JsEntityOf(context, argv[1]))) {
-					return JS_ThrowTypeError(context, "could not parent the new instance");
-				}
-			}
-
-			JSValue proto = PrototypeFor(context, id, instance);
+			const ecs::ClassId id = InstanceClassOf(*bound.World, created.Instance);
+			JSValue proto = PrototypeFor(context, id, created.Instance);
 			JSValue object = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound.InstanceClass));
 			JS_FreeValue(context, proto);
 
 			if (JS_IsException(object)) {
 				return object;
 			}
-			JS_SetOpaque(object, new Entity(instance));
+			JS_SetOpaque(object, new Entity(created.Instance));
 
 			// Sealed, so a script cannot add a field of its own. An instance is
 			// an entity and its properties are what the class table declares -
@@ -1633,11 +1619,11 @@ namespace engine::script {
 		// properties, so it builds the one prototype carrying the shared methods
 		// and nothing else, and caches it under the invalid id - which is what a
 		// classless entity's members are.
-		if (!bound.World->Alive(instance)) {
+		if (!InstanceAlive(*bound.World, instance)) {
 			return JS_NULL;
 		}
 
-		JSValue proto = PrototypeFor(context, bound.World->ClassOf(instance), instance);
+		JSValue proto = PrototypeFor(context, InstanceClassOf(*bound.World, instance), instance);
 		JSValue object = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound.InstanceClass));
 		JS_FreeValue(context, proto);
 
@@ -1671,7 +1657,8 @@ namespace engine::script {
 			ecs::Store &store = *JsOf(context).World;
 
 			const auto *active = store.Resource<scene::ActiveCamera>();
-			if (active == nullptr || active->Entity == ecs::NULL_ENTITY || !store.Alive(active->Entity)) {
+			if (active == nullptr || active->Entity == ecs::NULL_ENTITY ||
+				!InstanceAlive(store, active->Entity)) {
 				// **Null rather than a camera made on demand**, which is the Luau
 				// side's answer and for its reason: a headless world genuinely has
 				// none, and minting a row so a property has something to point at
@@ -2103,7 +2090,7 @@ namespace engine::script {
 			// every declared property arrive through the chain rather than
 			// being listed again here.
 			JSValue world = JS_NULL;
-			if (const ecs::ClassId id = bound->World->ClassOf(workspace); id.IsValid()) {
+			if (const ecs::ClassId id = InstanceClassOf(*bound->World, workspace); id.IsValid()) {
 				JSValue proto = PrototypeFor(context, id, workspace);
 				world = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound->InstanceClass));
 				JS_FreeValue(context, proto);

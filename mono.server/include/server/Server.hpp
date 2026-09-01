@@ -7,6 +7,9 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/datastore/Backend.hpp>
+#include <engine/datastore/Http.hpp>
+#include <engine/datastore/Provider.hpp>
 #include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -17,6 +20,7 @@
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/DataStore.hpp>
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Lifecycle.hpp>
@@ -47,6 +51,10 @@ namespace engine::assets {
 
 namespace engine::scene {
 	struct CollisionShapes;
+}
+
+namespace engine::game {
+	class OpenedProject;
 }
 
 namespace server {
@@ -177,6 +185,27 @@ namespace server {
 		// the default location. Set once during Initialise, before anything has
 		// resolved a path through it.
 		std::filesystem::path AssetsDirectory;
+
+		// Root holding isolated mock and live files in the selected backend.
+		// Empty keeps the process-local store used before persistence existed.
+		std::filesystem::path DataStoreRoot;
+
+		// The adapter assigned to the default logical datastore.
+		engine::datastore::Provider DataStoreProvider = engine::datastore::Provider::File;
+
+		// The local provider's durable file format. Ignored by HTTP.
+		engine::datastore::Backend DataStoreBackend = engine::datastore::Backend::Binary;
+
+		// Whether an operator or embedding API chose any DataStore field. A
+		// universe manifest fills the defaults only when this is false.
+		bool DataStoreConfigured = false;
+
+		// Mock and live never share a file, even under one configured root.
+		engine::world::SharedStoreEnvironment DataStoreEnvironment =
+			engine::world::SharedStoreEnvironment::Live;
+
+		// Remote provider connection. Used only when DataStoreProvider is HTTP.
+		engine::datastore::HttpDataStoreSettings HttpDataStore;
 
 		// Write a recording of the run here. Empty means record nothing.
 		//
@@ -356,16 +385,30 @@ namespace server {
 		// `ContentStore` is set. Zero binds an ephemeral one.
 		uint16_t ContentPort = 0;
 
+		// Numeric address clients may use to reach the attached origin.
+		//
+		// Empty keeps the wildcard listening address private. Redirect mode needs
+		// an explicit address because `0.0.0.0` is not a client destination.
+		std::string ContentPublicHost;
+
 		// The secret shared with whoever issues grants - which, for an attached
 		// origin, is this same process.
 		//
-		// Empty generates an in-process-only grant key at startup.
+		// Empty disables grants and therefore cannot serve an attached origin.
 		std::string ContentGrantKey;
 
 		// Which way clients are given content.
 		//
 		// @since v0.16
 		ContentMode ContentDelivery = ContentMode::Relay;
+
+		// Whether an operator explicitly selected the mode. False lets a package
+		// supply a weaker public hint after config and environment precedence.
+		bool ContentDeliveryConfigured = false;
+
+		// Whether public HTTP sources declared by a project may be used.
+		// A package never turns this on by itself.
+		bool AllowPackageHttp = false;
 
 		// The origins this server fetches content from, in priority order.
 		//
@@ -454,6 +497,10 @@ namespace server {
 		// `Listener::SetIdentity`. The same key a publisher signs manifests
 		// with, so a deployment distributes one public key and not two.
 		std::string IdentityKey;
+
+		// Client public keys admitted to this server. Empty leaves admission open.
+		// The corresponding seeds stay with the platform and clients.
+		std::vector<std::string> AdmittedKeys;
 	};
 
 	// What the run produced. Returned rather than logged only, so a test can
@@ -739,20 +786,16 @@ namespace server {
 		// @return `false` when a named scene could not be loaded.
 		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
-		// Whether `--game` names a game file rather than a scene script.
-		//
-		// By extension. `--game` has accepted a `.luau` since v0.3 and every
-		// recipe that uses it still passes one, so the new format is added
-		// beside the old rather than in place of it.
-		//
-		// @param path What `--game` was given.
-		// @return `true` for a `.agame`.
-		static bool IsGameFile(const std::string &path);
-
-		// Loads a game file's universe and starts every world's scripts.
+		// Opens a game, universe folder, or Project ZIP and starts its worlds.
 		//
 		// @return `false` when the file would not load or holds no worlds.
-		bool HostGameFile();
+		bool HostProject();
+
+		// Loads the configured driver-owned DataStore before any world ticks.
+		bool LoadDataStore();
+
+		// Writes only when the driver-owned records changed since the last flush.
+		bool FlushDataStore();
 
 		// Builds the worlds a host was granted and announces itself.
 		//
@@ -924,6 +967,15 @@ namespace server {
 
 		Options Settings;
 
+		// Owns temporary package extraction until every world and content user is
+		// destroyed. Declared before the driver so reverse destruction is safe.
+		std::unique_ptr<engine::game::OpenedProject> HostedProject;
+
+		// Public project content considered after operator policy is applied.
+		std::filesystem::path ProjectContentStore;
+		std::vector<engine::delivery::Source> ProjectContentSources;
+		std::string ProjectPublisherKey;
+
 		// The universe this process holds, plus the hosts holding the rest.
 		//
 		// Always a driver, even with no hosts: a `Driver` with an empty
@@ -936,6 +988,12 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+
+		// One route and one snapshot for the universe. Worlds reach the shared
+		// store through `Driver`, so no per-world persistence copy can diverge.
+		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
+		std::vector<engine::world::SharedStoreEntry> PersistedDataStore;
+		bool DataStoreReady = false;
 
 		// How this server is found - the LAN beacon and the rendezvous
 		// registration. Null when `--advertise` and `--rendezvous` were both
@@ -1080,6 +1138,11 @@ namespace server {
 		// move-only and zeroes itself, and a copy would be a second place a
 		// secret lives.
 		std::optional<engine::assets::SigningKey> Identity;
+
+		// The platform admission set. Restriction remains active after the final
+		// key is revoked so an empty live whitelist denies everybody.
+		std::vector<engine::assets::PublicKey> AdmittedClientKeys;
+		bool AdmissionRestricted = false;
 
 		// Where moving things were, for the last `RewindSettings::HistoryTicks`
 		// ticks.

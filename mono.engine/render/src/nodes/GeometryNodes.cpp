@@ -343,6 +343,7 @@ namespace engine::render {
 					glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 0.0f};
 				gridUniforms.Params =
 					glm::vec4{groundGrid.Step, groundGrid.Major, groundGrid.Reach, groundGrid.Strength};
+				gridUniforms.Offset = glm::vec4{groundGrid.Offset.X, groundGrid.Offset.Z, 0.0f, 0.0f};
 				gridUniforms.Colour = glm::vec4{
 					groundGrid.Colour.R, groundGrid.Colour.G, groundGrid.Colour.B, groundGrid.Alpha
 				};

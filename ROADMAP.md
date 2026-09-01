@@ -37,42 +37,6 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.21
-
-- [_] wire future components: scene.Skeleton, scene.Bone, scene.AnimationClip, scene.Animator, scene.AnimationTrack, scene.Constraint, scene.LevelOfDetail, scene.Atmosphere, scene.Clouds, scene.Terrain
-- [_] skinning pipeline: assets::MeshVertex gains joint indices/weights; bake fills them; render builds palette per rig; animation handler samples clips
-- [_] atmosphere/clouds at v0.22: render-graph node reading WorldLighting.Air/Sky; per-world presentation state, no simulation input
-
-- [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
-- [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
-- [_] in cdn, add optinos for compression saving, compressed network traffic, etc.
-- [_] add custom backgrounds and customization to the script editor too
-- [_] add external editor connections like vscode, notepad, etc.
-- [_] add settings for selected external editors
-- [_] plugin modify the viewport grid colors, sizes/scales, offsets, etc
-- [_] plugin enable/disable visible particles
-- [_] ask about the other view widgets and which you actually would change to dockwidgets.
-- [_] build out more plugins layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
-- [_] move a bunch of View > ... widgets into plugins instead. List: explorer, properties, component inspector, script editor
-- [_] build out more plugin functions (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
-- [_] universe shared assets folder and setup easy cdn with it (when you load the universe file, it sets up a cdn with it).
-- [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
-- [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
-- [_] create a universe/world export menu with options to include assets in the export (only processed, also raw), as a folder of a assets/ with name.aworld (or we can do a name.auniverse that loads a bunch of name.aworld and warns on missing ones listed in auniverse)?
-- [_] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
-- [_] setup datastores and memorystores (sqlite, mongo, supabase, etc - make a selection with local and remote setups, server settings and studio settings). add mock options that separate into a mock/ folder vs live/ folder. make a dataset editor plugin too.
-- [_] add platform-specific backend tooling where only "admitted keys" can connect to a given server - i.e. whitelist-based servers (press play on website => generate play key => platform tells server user is connecting with key => send key + server to user => user connects to server using key and info => join)
-- [_] cleanup launcher options and make it far more user friendly
-- [_] cleanup cdn config and make it far more friendly
-- [_] build out client settings for enabling/disabling certain features to help performance (editablemesh, editableimage, etc). make it LIVE so you can change it in-game.
-- [_] add a ESC settings menu to the client and in studio client. add the client settings to it.
-- [_] add a way for scripts to modify the ESC menu.
-
-- [_] gamepad and joystick support
-- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
-- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
-- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
-
 ### v0.22
 
 - [_] default R6 base character (capsule collider)
@@ -80,8 +44,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
 - [_] make humanoid a shim for character controller (so not a black box), loads a default one in
 - [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
-- [_] animation handler
-- [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet - joint palettes are visual transform state and go GPU-resident beside the instance rows; the animation *controller* that produces them stays on the CPU, per the split above
 - [_] add accessories support
 - [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
 - [_] animation + animation track + animator => binds to character controller
@@ -116,20 +78,28 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### FUTURE
 
+- [_] maybe consider converting a bunch of custom tools to plugins and have them built-in to studio, or make a plugin pack as a extra release file you can import to a plugins/ folder in ~/Documents/atomic-game-engine/studio/plugins
+
+- [_] review additions from v0.20 and refine further, was rewriting alot so its experimental
 - [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
 - [_] unity porting tools / unity shop
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
-- [_] embedded whiteboxing tools (planning) for building
+- [_] built-in whiteboxing tools (planning) for building (plugin)
 - [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
-- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?)
+- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?), ai village with daily routines and such
+- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
+- [_] port TornadoSim as a demo scene in the engine.
+- [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well
+- [_] figma import tools
 - [_] import blender files in asset explorer natively (drag .blend files on engine)
 - [_] rpg maker port tool
+- [_] photoshop file reader and import tool
 - [_] docs/MOBILE.md implementation
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] localization support
@@ -141,5 +111,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
-- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] VR support (oculus rift s)
+
+### Open Decision
+
+1. Move "roblox files to atomic game files" to a external program? The port tool.

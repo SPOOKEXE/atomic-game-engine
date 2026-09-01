@@ -78,6 +78,7 @@ scene.CharacterChanges | Resource: the ordered queue of character arrivals and d
 scene.CharacterLimb | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick.
 scene.Collider | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick.
 scene.CollisionShapes | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries.
+scene.ControllerState | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts.
 scene.EditableImage | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture.
 scene.EditableMesh | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
@@ -171,6 +172,7 @@ gui.ScrollState | What the layout worked out about a `ScrollingFrame`: the pixel
 gui.Scrolling | What a `ScrollingFrame` authors: the canvas size and position, which axes scroll, and the bars' thickness, colour, images and inset.
 gui.Selection | Where a gamepad's selection goes from a `GuiObject` in each direction, which object is drawn over it while selected, and its seeding order.
 gui.SelectionOutline | The box a `SelectionBox` or `SelectionSphere` draws: the line thickness, and the filled face's colour and transparency.
+gui.SettingsMenuExtensions | Resource: script-authored actions appended to the local escape menu, with stable ids, labels and the callback token dispatched when a player activates one.
 gui.SizeLimits | `UISizeConstraint`: clamps the parent element's resolved size between a minimum and a maximum, in pixels.
 gui.SpatialCanvas | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance.
 gui.Stroke | `UIStroke`: an outline drawn around the parent outside its own border, with its own colour, thickness, transparency, join and sizing.

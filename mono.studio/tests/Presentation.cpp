@@ -285,6 +285,28 @@ TEST_CASE("a hosted client view appends only client-local rows", "[studio][prese
 	CHECK(merged[1].SourceWorld == replicaWorld);
 }
 
+TEST_CASE("a hosted client view rebases client-local skin palettes", "[studio][presentation][skinning]") {
+	const Name replicaWorld("studio.presentation.replica");
+	engine::scene::DrawInstance local;
+	local.Source = 0x8000'0000ull;
+	local.SkinFirst = 1;
+	local.SkinCount = 1;
+	const std::array replicaJoints{
+		engine::core::CFrame(engine::core::Vector3{1, 0, 0}),
+		engine::core::CFrame(engine::core::Vector3{2, 0, 0}),
+	};
+	std::vector<engine::scene::DrawInstance> merged;
+	std::vector<engine::core::CFrame> mergedJoints{engine::core::CFrame(engine::core::Vector3{9, 0, 0})};
+
+	AppendReplicaVisualInstances(replicaWorld, {&local, 1}, merged, replicaJoints, &mergedJoints);
+
+	REQUIRE(merged.size() == 1);
+	CHECK(merged[0].SkinFirst == 1);
+	CHECK(merged[0].SkinCount == 1);
+	REQUIRE(mergedJoints.size() == 2);
+	CHECK(mergedJoints[1].Position.X == 2.0f);
+}
+
 TEST_CASE("anonymous replica rows cannot duplicate a published authority scene", "[studio][presentation]") {
 	const Name replicaWorld("studio.presentation.replica");
 

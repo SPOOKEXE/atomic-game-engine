@@ -367,6 +367,37 @@ TEST_CASE("a fresh editor can fetch from the store on this machine", "[studio][c
 	CHECK(sources.PublisherKey == engine::assets::DevelopmentPublisher().ToHex());
 }
 
+TEST_CASE("a universe asset store is first and never enters preferences", "[studio][content]") {
+	const std::filesystem::path settingsPath = ScratchFile("atomic-universe-content.ini");
+	std::filesystem::remove(settingsPath);
+
+	ContentSources sources = ContentSources::Default();
+	const size_t preferenceCount = sources.Sources.size();
+	std::vector<Source> remote{Origin("project CDN", "cdn.example.test:9080")};
+	remote.front().Role = SourceRole::Read;
+	sources.SetUniverseContent("/project/assets", std::move(remote), std::string(64, 'b'));
+	REQUIRE(sources.UniverseSources.size() == 2);
+	CHECK(sources.UniverseSources.front().Role == SourceRole::Read);
+
+	const engine::delivery::DeliverySettings settings = sources.ToSettings();
+	REQUIRE(settings.Sources.size() == preferenceCount + 2);
+	CHECK(settings.Sources.front().Name == "universe assets");
+	CHECK(settings.Sources.front().Location == "/project/assets");
+	CHECK(settings.Sources[1].Name == "project CDN");
+	CHECK(settings.Publisher.ToHex() == std::string(64, 'b'));
+
+	REQUIRE(sources.Save(settingsPath));
+	ContentSources loaded;
+	REQUIRE(loaded.Load(settingsPath));
+	CHECK(loaded.UniverseSources.empty());
+	CHECK(loaded.UniversePublisherKey.empty());
+	CHECK(loaded.Sources.size() == preferenceCount);
+
+	sources.SetUniverseAssets({});
+	CHECK(sources.UniverseSources.empty());
+	std::filesystem::remove(settingsPath);
+}
+
 TEST_CASE("the remote row is kept and turned off", "[studio][content]") {
 	// **Kept rather than dropped**, which is `ContentSources.hpp`'s own rule one
 	// row over: a disabled source is one somebody can switch on, and deleting

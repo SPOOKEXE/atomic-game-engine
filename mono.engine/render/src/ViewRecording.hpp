@@ -56,6 +56,7 @@ namespace engine::render {
 		core::CFrame CameraFrame;
 		scene::Camera Camera;
 		std::span<const scene::DrawInstance> Instances;
+		std::span<const core::CFrame> JointFrames;
 		OverlayImage *Overlay = nullptr;
 		std::span<const SurfaceView> Surfaces;
 		FrameOverlayHook *GameInterfaceHook = nullptr;
@@ -68,6 +69,7 @@ namespace engine::render {
 		std::span<const effects::RibbonRun> RibbonRuns;
 		std::span<const SceneLight> Lights;
 		std::span<const scene::DrawInstance> Foreign;
+		std::span<const core::CFrame> ForeignJointFrames;
 		std::span<const PortalView> Portals;
 		bool Present = false;
 		core::Name Pipeline;

@@ -80,6 +80,11 @@ namespace engine::input {
 			return Current;
 		}
 
+		// Connected gamepads and raw joysticks, normalized into stable slots.
+		const scene::ControllerState &Controllers() const {
+			return ControllerCurrent;
+		}
+
 		// What this frame's keystrokes spelled, as UTF-8.
 		//
 		// **A different question from which keys are down, which is why it is a
@@ -128,6 +133,14 @@ namespace engine::input {
 		// this shape; the store's copy is written from here and is the authority
 		// from then on.
 		scene::InputState Current;
+
+		// SDL instance ids stay in this adapter. Worlds only see stable Gamepad1
+		// through Gamepad8 slots, so a platform number never crosses the boundary.
+		// arch-waiver ecs-copy: like `Current` above, this is the frame builder before
+		// the value is copied into each world. The world resource is authoritative
+		// after `Client::WriteInput` or Studio Play writes it.
+		scene::ControllerState ControllerCurrent;
+		uint32_t ControllerIds[scene::MAX_CONTROLLERS] = {};
 
 		// This frame's text, accumulated across however many
 		// `SDL_EVENT_TEXT_INPUT` events arrived.

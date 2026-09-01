@@ -7,6 +7,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -89,6 +90,63 @@ TEST_CASE("fully transparent parts never enter the resident draw list", "[render
 		  }) == 1);
 }
 
+TEST_CASE("a draw list flattens each rig palette beside its instance", "[render][presentation][skinning]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("skinned-presentation");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const engine::ecs::Entity rig = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(store.SetParent(rig, workspace));
+	store.Set(rig, engine::scene::Skeleton{Name("presentation.Rig"), 2, {}});
+
+	for (uint16_t joint = 0; joint < 2; joint++) {
+		const engine::ecs::Entity bone =
+			store.CreateInstance(engine::scene::BoneClass(), joint == 0 ? "Root" : "Child");
+		REQUIRE(store.SetParent(bone, rig));
+		engine::scene::Bone pose;
+		pose.Joint = joint;
+		pose.ParentJoint = engine::scene::NO_JOINT;
+		pose.WorldFrame = engine::core::CFrame(engine::core::Vector3(static_cast<float>(joint + 1), 0, 0));
+		store.Set(bone, pose);
+	}
+
+	REQUIRE(engine::scene::SyncRendered(store) == 1);
+	engine::render::CollectInstances(store);
+	const auto *drawList = store.Resource<engine::render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances[0].SkinFirst == 0);
+	CHECK(drawList->Instances[0].SkinCount == 2);
+	REQUIRE(drawList->JointFrames.size() == 2);
+	CHECK(drawList->JointFrames[0].Position.X == 1.0f);
+	CHECK(drawList->JointFrames[1].Position.X == 2.0f);
+}
+
+TEST_CASE("copied skin palettes are rebased and malformed runs are disabled", "[render][skinning]") {
+	std::array<engine::scene::DrawInstance, 2> instances{};
+	instances[0].SkinFirst = 1;
+	instances[0].SkinCount = 2;
+	instances[1].SkinFirst = 3;
+	instances[1].SkinCount = 2;
+	const std::array source{
+		engine::core::CFrame(engine::core::Vector3{1, 0, 0}),
+		engine::core::CFrame(engine::core::Vector3{2, 0, 0}),
+		engine::core::CFrame(engine::core::Vector3{3, 0, 0}),
+	};
+	std::vector<engine::core::CFrame> destination{engine::core::CFrame(engine::core::Vector3{9, 0, 0})};
+
+	engine::render::RebaseSkinPalettes(instances, source, destination);
+
+	CHECK(instances[0].SkinFirst == 1);
+	CHECK(instances[0].SkinCount == 2);
+	CHECK(instances[1].SkinFirst == 0);
+	CHECK(instances[1].SkinCount == 0);
+	REQUIRE(destination.size() == 3);
+	CHECK(destination[1].Position.X == 2.0f);
+	CHECK(destination[2].Position.X == 3.0f);
+}
+
 TEST_CASE("world pipeline selection is qualified and replaced in one engine cache", "[render][pipeline]") {
 	engine::graph::PipelineSet first;
 	REQUIRE(first.Set(Name("main"), engine::graph::DefaultPbrDocument()));
@@ -143,6 +201,20 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	view.CameraFrame.Position.X = 0.0f;
 	state.Untextured = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+}
+
+TEST_CASE("a changed joint palette invalidates scene pixels", "[render][presentation][skinning]") {
+	engine::scene::DrawInstance instance;
+	instance.SkinCount = 1;
+	const std::array instances{instance};
+	std::array joints{engine::core::CFrame{}};
+	engine::render::View view;
+	view.Instances = instances;
+	view.JointFrames = joints;
+	const uint64_t original = engine::render::ScenePresentationSignature(view, {});
+
+	joints[0].Position.X = 1.0f;
+	CHECK(engine::render::ScenePresentationSignature(view, {}) != original);
 }
 
 TEST_CASE("absent object layer cannot invalidate scene pixels", "[render][presentation][damage]") {

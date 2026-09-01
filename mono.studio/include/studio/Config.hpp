@@ -48,7 +48,10 @@
 
 #include <engine/control/Server.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/datastore/Backend.hpp>
+#include <engine/datastore/Provider.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/SharedStoreFile.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -57,10 +60,33 @@
 #include <functional>
 #include <map>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace studio {
+	// A supported way to open a staged source document.
+	enum class ExternalEditorKind : uint8_t {
+		// The operating system's registered application for the file type.
+		System,
+		// Visual Studio Code's command-line launcher.
+		VisualStudioCode,
+		// The platform Notepad executable.
+		Notepad,
+		// A user-selected executable receiving the document path.
+		Custom,
+	};
+
+	// How many external editor choices the settings page presents.
+	inline constexpr size_t EXTERNAL_EDITOR_KIND_COUNT = 4;
+
+	// The selected editor and an optional executable override.
+	struct ExternalEditorSettings {
+		// Which launch convention to use.
+		ExternalEditorKind Kind = ExternalEditorKind::System;
+		// An executable path or command. Empty uses the selected preset's default.
+		std::string Executable;
+	};
 
 	// The folder every document below lives in.
 	//
@@ -227,6 +253,45 @@ namespace studio {
 		// viewports. This changes only the editor's view, never the saved Enabled
 		// property or a running world's simulation state.
 		bool ShowParticleEmitters = true;
+
+		// Whether Studio loads and saves the durable DataStore through the local
+		// provider. Off by default so opening an authored world cannot write
+		// external state without somebody choosing a location first.
+		//
+		// @since v0.22
+		bool DataStoreEnabled = false;
+
+		// The provider root. An empty path resolves to `stores` under Studio's
+		// configuration folder, keeping the saved document portable between home
+		// directory layouts.
+		std::string DataStoreRoot;
+
+		// Mock and live occupy separate subfolders. Studio defaults to mock so a
+		// play test cannot touch live data through an optimistic default.
+		engine::world::SharedStoreEnvironment DataStoreEnvironment =
+			engine::world::SharedStoreEnvironment::Mock;
+
+		// The provider assigned to Studio's default logical datastore.
+		engine::datastore::Provider DataStoreProvider = engine::datastore::Provider::File;
+
+		// The local provider's durable file format. Ignored by HTTP.
+		engine::datastore::Backend DataStoreBackend = engine::datastore::Backend::Binary;
+
+		// Plain HTTP provider connection. Ignored while the file provider is selected.
+		std::string DataStoreHttpEndpoint = "127.0.0.1:8080";
+		std::string DataStoreHttpHost = "localhost";
+		std::string DataStoreHttpPrefix = "/datastores/";
+		std::string DataStoreHttpAuthorization;
+
+		// The external application used by source tabs and its executable override.
+		ExternalEditorSettings SourceEditor;
+
+		// A code-field background chosen independently of the panel theme. Empty
+		// follows the current theme.
+		std::optional<unsigned int> ScriptBackground;
+
+		// Whether code tabs reserve their right-hand minimap column.
+		bool ScriptMinimap = true;
 
 		// Whether a dragged handle snaps at all.
 		//

@@ -236,6 +236,7 @@ namespace client {
 			engine::core::Metrics::Count(
 				"replica.instances", static_cast<double>(drawList->Instances.size())
 			);
+			engine::render::CollectSkinPalettes(store, *drawList);
 
 			// **A client sees itself in the hole too, and this is where.** The
 			// ghost is built from the list above, which holds interpolated
@@ -319,6 +320,7 @@ namespace client {
 		// to keep this machine's keyboard and this machine's camera in a world
 		// whose every other row is somebody else's answer.
 		store.SetResource(engine::scene::InputState{});
+		store.SetResource(engine::scene::ControllerState{});
 		store.SetResource(engine::scene::CameraController{});
 
 		// **First in the phase, because everything below is derived from it.**

@@ -4,9 +4,8 @@
 //
 // **These are this program's intents and not the engine's**, which is why they
 // live here and not in `Engine::input`. Every member below is a panel this
-// client draws, a snapshot it writes, or the request to stop: ten of the twelve
-// are the profiler and the HUD, `ToggleWireframe` is a renderer debug toggle
-// and `Quit` is the program's own lifecycle. None is a thing a *game* asks for -
+// client draws, a snapshot it writes, the settings overlay, or the request to
+// stop. None is a thing a *game* asks for -
 // a game reads `scene::InputState`, which `input::Translator` writes, and that
 // is the half that genuinely belongs to the engine.
 //
@@ -42,8 +41,16 @@ namespace client {
 	//
 	// @client
 	enum class Action : uint8_t {
-		// Requests that the client stop.
+		// Requests that the client stop. Window close also fires it.
 		Quit,
+		// Opens or closes the in-game settings menu.
+		ToggleSettings,
+		// Moves the settings menu selection up.
+		SettingsUp,
+		// Moves the settings menu selection down.
+		SettingsDown,
+		// Activates the selected settings menu row.
+		SettingsActivate,
 
 		// Toggles the statistics panel.
 		ToggleStatistics,

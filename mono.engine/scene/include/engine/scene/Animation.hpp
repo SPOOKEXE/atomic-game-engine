@@ -19,13 +19,13 @@
 // playing a clip is `Instance.new` rather than a method call, which is the same
 // trade `Sound.Playing` already makes for the same reason.
 //
-// **Nothing in this module evaluates a track.** `scene` is `shared` and holds
-// data and one resolver, exactly as it holds a `Sound` without a mixer. What
-// samples a clip and writes `Bone::Transform` is the animation handler at v0.24;
-// what it needs from here is somewhere to read the play head from, and that is
-// what these are.
+// **Nothing in this module samples clip content.** `scene` is `shared` and holds
+// the rows plus their fixed-tick play-head advance, exactly as it holds a
+// `Sound` without a mixer. `render::EvaluateAnimations` owns the client-side
+// content catalogue, samples clips and writes `Bone::Transform` before the
+// palette is collected.
 //
-// arch-waiver public-header: forward API for the v0.24 animation handler.
+// arch-waiver public-header: scene-side API for the animation handler.
 // `docs/FUTURE_COMPONENTS.md` says what reads these and in what order. Decision
 // 16.
 //
@@ -36,6 +36,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Skinning.hpp>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::ecs {
@@ -242,6 +243,11 @@ namespace engine::scene {
 	// @param skeleton The rig it would be played on.
 	// @return `true` when the clip was authored for that rig or for none.
 	bool ClipFitsRig(const AnimationClip &clip, const Skeleton &skeleton);
+
+	// Advances playing track heads and fade weights by the world's fixed tick.
+	// Clip length is content-owned, so wrapping and clamping happen when sampled.
+	// @return The number of track rows changed.
+	size_t AdvanceAnimationTracks(ecs::Store &store);
 
 	// The `Animator` class id, registering the scene tree on first call.
 	//

@@ -3,6 +3,7 @@
 #include <engine/assets/LocalStore.hpp>
 
 #include <algorithm>
+#include <array>
 #include <assetc/Bake.hpp>
 #include <studio/AssetCatalogue.hpp>
 #include <utility>
@@ -183,46 +184,49 @@ namespace studio {
 			}
 		);
 
-		for (const Source &source : sources.Sources) {
-			// **Disabled and write-only rows are left out, and an invalid one
-			// with them.** A tab for a row nothing fetches from would offer
-			// names that cannot resolve, which is worse than not offering them:
-			// `SourceRole::Write` carries why a write origin is invisible to a
-			// fetch, and it has to be invisible here for the same reason.
-			if (!source.Enabled || !source.Readable() || !source.IsValid()) {
-				continue;
-			}
-
-			CatalogueTab tab;
-			tab.Title = source.Name;
-			tab.Location = source.Location;
-
-			if (source.Kind == SourceKind::Directory) {
-				tab.Origin = CatalogueOrigin::Directory;
-				tab.Entries = DirectoryAssets(std::filesystem::path(source.Location), source.Name);
-				if (tab.Entries.empty()) {
-					tab.Note = "no manifest here yet - publish into it, or check the path";
+		const std::array sourceLists{&sources.UniverseSources, &sources.Sources};
+		for (const std::vector<Source> *sourceList : sourceLists) {
+			for (const Source &source : *sourceList) {
+				// **Disabled and write-only rows are left out, and an invalid one
+				// with them.** A tab for a row nothing fetches from would offer
+				// names that cannot resolve, which is worse than not offering them:
+				// `SourceRole::Write` carries why a write origin is invisible to a
+				// fetch, and it has to be invisible here for the same reason.
+				if (!source.Enabled || !source.Readable() || !source.IsValid()) {
+					continue;
 				}
-			} else {
-				// **Asked, and whatever it says is what the tab shows.** Until
-				// v0.15 no route could answer this at all, so the tab said so;
-				// now `cdn::Service` has one and the honest failure cases moved
-				// from "the protocol cannot" to "this origin will not", each of
-				// which is its own sentence. What has not changed is the rule
-				// that produced both: the panel never draws the delivery
-				// client's catalogue here, because those names came from
-				// whichever source answered first and this tab is a claim about
-				// one origin.
-				tab.Origin = CatalogueOrigin::Http;
 
-				OriginListing listing = origins ? origins->List(source) : OriginListing{};
-				tab.Entries = std::move(listing.Entries);
-				tab.Note = listing.Outcome == ListingOutcome::Listed && tab.Entries.empty()
-							   ? "this origin answered, and has published nothing"
-							   : Describe(listing.Outcome);
+				CatalogueTab tab;
+				tab.Title = source.Name;
+				tab.Location = source.Location;
+
+				if (source.Kind == SourceKind::Directory) {
+					tab.Origin = CatalogueOrigin::Directory;
+					tab.Entries = DirectoryAssets(std::filesystem::path(source.Location), source.Name);
+					if (tab.Entries.empty()) {
+						tab.Note = "no manifest here yet - publish into it, or check the path";
+					}
+				} else {
+					// **Asked, and whatever it says is what the tab shows.** Until
+					// v0.15 no route could answer this at all, so the tab said so;
+					// now `cdn::Service` has one and the honest failure cases moved
+					// from "the protocol cannot" to "this origin will not", each of
+					// which is its own sentence. What has not changed is the rule
+					// that produced both: the panel never draws the delivery
+					// client's catalogue here, because those names came from
+					// whichever source answered first and this tab is a claim about
+					// one origin.
+					tab.Origin = CatalogueOrigin::Http;
+
+					OriginListing listing = origins ? origins->List(source) : OriginListing{};
+					tab.Entries = std::move(listing.Entries);
+					tab.Note = listing.Outcome == ListingOutcome::Listed && tab.Entries.empty()
+								   ? "this origin answered, and has published nothing"
+								   : Describe(listing.Outcome);
+				}
+
+				tabs.push_back(std::move(tab));
 			}
-
-			tabs.push_back(std::move(tab));
 		}
 
 		// **After the origins, because that is the order things resolve in.** A

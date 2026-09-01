@@ -137,6 +137,7 @@ namespace engine::scene {
 			a = MixSignature(a, Pair(instance.OcclusionMap.Id(), instance.HeightMap.Id()));
 			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
 			c = MixSignature(c, Pair(instance.MetalnessMap.Id(), BitsOf(instance.EmissiveStrength)));
+			d = MixSignature(d, Pair(instance.SkinFirst, instance.SkinCount));
 			d = MixSignature(
 				d,
 				Pair(

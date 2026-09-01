@@ -11,6 +11,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -1444,6 +1445,50 @@ TEST_CASE("a world with no input state answers rather than raising", "[scripting
 	)");
 }
 
+TEST_CASE("client scripts add ESC menu actions and receive their activation", "[scripting][settings]") {
+	RegisterClasses();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		SECTION(language == Language::Luau ? "luau" : "javascript") {
+			Store store("settings_menu_script_test");
+			RuntimeLimits limits;
+			limits.Role = HostRole::OfClient();
+			const auto runtime = MakeRuntime(store, language, limits);
+			REQUIRE(runtime != nullptr);
+
+			const char *source = language == Language::Luau ? R"(
+				local activated = SettingsService:SetMenuAction('respawn', 'Respawn Character')
+				activated:Connect(function(name)
+					workspace.Name = name
+				end)
+			)"
+															: R"(
+				const activated = SettingsService.SetMenuAction('respawn', 'Respawn Character');
+				activated.Connect((name) => { workspace.Name = name; });
+			)";
+			MustRun(*runtime, source);
+
+			const auto actions = engine::gui::SettingsMenuActionsOf(store);
+			REQUIRE(actions.size() == 1);
+			CHECK(actions[0].Id == engine::core::Name("respawn"));
+			CHECK(actions[0].Label == "Respawn Character");
+
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+			runtime->DeliverSettingsMenuAction(engine::core::Name("respawn"));
+			REQUIRE(runtime->Heartbeat(0.016f));
+			CHECK(store.InstanceNameOf(workspace) == engine::core::Name("respawn"));
+
+			MustRun(
+				*runtime,
+				language == Language::Luau
+					? "assert(SettingsService:RemoveMenuAction('respawn'))\n"
+					: "if (!SettingsService.RemoveMenuAction('respawn')) throw new Error('remove failed');\n"
+			);
+			CHECK(engine::gui::SettingsMenuActionsOf(store).empty());
+		}
+	}
+}
+
 TEST_CASE("a bound action fires on the edge and the priority decides", "[scripting]") {
 	RegisterClasses();
 	Store store("script_test");
@@ -1689,6 +1734,64 @@ TEST_CASE("InputChanged fires, which it had never done", "[scripting]") {
 		local board = workspace:FindFirstChild('Board')
 		assert(board:GetAttribute('Log') == '', 'a still frame fired something')
 	)");
+}
+
+TEST_CASE("controller events agree in both script languages", "[scripting][gamepad]") {
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store(language == Language::Luau ? "gamepad_luau" : "gamepad_js");
+		store.SetResource(engine::scene::InputState{});
+		store.SetResource(engine::scene::ControllerState{});
+		const auto runtime = MakeRuntime(store, language);
+		const Entity log = MakeLog(store);
+		const bool luau = language == Language::Luau;
+		INFO((luau ? "luau" : "javascript"));
+
+		MustRun(
+			*runtime,
+			luau ? R"(
+			local log = workspace:FindFirstChild('Log')
+			local UIS = game:GetService('UserInputService')
+			UIS.GamepadConnected:Connect(function(gamepad)
+				log.Name = log.Name .. 'connected:' .. gamepad.Name .. ';'
+			end)
+			UIS.InputBegan:Connect(function(input, processed)
+				assert(input ~= nil, 'controller input was nil')
+				local key = input.KeyCode
+				assert(key ~= nil, 'controller key was nil')
+				assert(key.Name ~= nil, 'controller key name was nil')
+				log.Name = log.Name .. 'begin:' .. key.Name .. ':' .. tostring(processed) .. ';'
+			end)
+			UIS.InputChanged:Connect(function(input)
+				log.Name = log.Name .. 'change:' .. input.KeyCode.Name .. ':' .. tostring(input.Position.X) .. ';'
+			end)
+			)"
+				 : R"(
+			const log = workspace.FindFirstChild('Log');
+			const UIS = game.GetService('UserInputService');
+			UIS.GamepadConnected.Connect(gamepad => {
+				log.Name = log.Name + 'connected:' + gamepad.Name + ';';
+			});
+			UIS.InputBegan.Connect((input, processed) => {
+				log.Name = log.Name + 'begin:' + input.KeyCode.Name + ':' + String(processed) + ';';
+			});
+			UIS.InputChanged.Connect(input => {
+				log.Name = log.Name + 'change:' + input.KeyCode.Name + ':' + String(input.Position.X) + ';';
+			});
+			)"
+		);
+
+		auto &slot = store.ResourceMutable<engine::scene::ControllerState>()->Slots[0];
+		slot.Connected = true;
+		slot.Buttons = 1u << static_cast<uint8_t>(engine::scene::ControllerButton::A);
+		slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftX)] = 0.5f;
+		const bool beat = runtime->Heartbeat(0.016f);
+		INFO(runtime->LastError());
+		INFO(Trace(store, log));
+		REQUIRE(beat);
+
+		CHECK(Trace(store, log) == "connected:Gamepad1;begin:ButtonA:false;change:Thumbstick1:0.5;");
+	}
 }
 
 TEST_CASE("a :Once input handler retires after one edge, in both languages", "[scripting]") {
@@ -3213,6 +3316,15 @@ TEST_CASE("a script cannot reach another script's source", "[scripting][instance
 
 		ok = pcall(function() program.JavaScriptSource = 'evil.js' end)
 		assert(not ok, 'a script wrote the JavaScript container directly')
+	)");
+
+	const auto javascript = MakeRuntime(store, Language::JavaScript);
+	MustRun(*javascript, R"(
+		const program = workspace.FindFirstChild('Behaviour');
+		if (program === null) throw new Error('the script is not in the tree');
+		if ('Source' in program || 'LuaSource' in program || 'JavaScriptSource' in program) {
+			throw new Error('a private source property is discoverable');
+		}
 	)");
 
 	// And the author still can, through the same property surface a panel uses.

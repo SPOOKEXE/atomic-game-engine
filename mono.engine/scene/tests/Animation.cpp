@@ -209,3 +209,23 @@ TEST_CASE("a clip's two names cross as text", "[scene][animation]") {
 	CHECK(back->Asset.Text() == "animation_test.WalkAsset");
 	CHECK(back->Rig.Text() == "animation_test.Fox");
 }
+
+TEST_CASE("playing tracks advance and fade on fixed world time", "[scene][animation]") {
+	RegisterSceneClasses();
+	Store store("animation_test.advance");
+	store.AdvanceTick(0.1f);
+	const Entity track = store.CreateInstance(Classes::Find(Name("AnimationTrack")), "Walk");
+	AnimationTrack state;
+	state.Playing = true;
+	state.Speed = 2.0f;
+	state.Weight = 0.0f;
+	state.WeightTarget = 1.0f;
+	state.FadeTime = 0.5f;
+	store.Set(track, state);
+
+	CHECK(engine::scene::AdvanceAnimationTracks(store) == 1);
+	const AnimationTrack *advanced = store.Get<AnimationTrack>(track);
+	REQUIRE(advanced != nullptr);
+	CHECK(advanced->TimePosition == 0.2f);
+	CHECK(advanced->Weight == 0.2f);
+}

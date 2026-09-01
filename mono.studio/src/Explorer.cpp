@@ -877,7 +877,7 @@ namespace studio {
 			}
 			if (ImGui::MenuItem("Import World...", nullptr, false, !AnyRunning())) {
 				AskingImport = true;
-				PathBuffer.clear();
+				PathBuffer = ConfigPath("worlds").string();
 			}
 
 			// Beside the other two ways of getting a scene, because this menu is
@@ -889,9 +889,11 @@ namespace studio {
 			ImGui::Separator();
 
 			if (ImGui::MenuItem("Export Universe...")) {
-				AskingExportUniverse = true;
+				AskingExport = true;
+				ExportChoices = ExportOptions{};
+				ExportChoices.Product = engine::game::ExportProduct::UniverseFolder;
 				PathBuffer = std::string(GameName.IsValid() ? Label(GameName) : "Game") +
-							 std::string(engine::game::GAME_EXTENSION);
+							 std::string(engine::game::UNIVERSE_EXTENSION);
 			}
 			ImGui::EndPopup();
 		}

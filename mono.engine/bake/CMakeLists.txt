@@ -44,5 +44,6 @@ mono_add_library(bake
 	VENDOR
 		Vendor::cryptopp
 		Vendor::json
+		Vendor::roblox_files
 		Vendor::zstd
 )

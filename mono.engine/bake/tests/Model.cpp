@@ -23,6 +23,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -148,6 +149,69 @@ f -4/-4/-1 -2/-2/-1 -3/-3/-1
 		return {reinterpret_cast<const std::byte *>(text.data()), text.size()};
 	}
 
+	void AppendWord(std::vector<uint8_t> &bytes, uint32_t value) {
+		for (uint32_t shift = 0; shift < 32; shift += 8) {
+			bytes.push_back(static_cast<uint8_t>(value >> shift));
+		}
+	}
+
+	void AppendFloat(std::vector<uint8_t> &bytes, float value) {
+		uint32_t word = 0;
+		std::memcpy(&word, &value, sizeof(float));
+		AppendWord(bytes, word);
+	}
+
+	std::vector<uint8_t> SkinnedGlb(bool includeWeights = true, uint8_t firstJoint = 0) {
+		std::vector<uint8_t> binary;
+		for (const float value : std::array<float, 9>{0, 0, 0, 1, 0, 0, 0, 1, 0}) {
+			AppendFloat(binary, value);
+		}
+		for (size_t vertex = 0; vertex < 3; vertex++) {
+			binary.insert(binary.end(), {vertex == 0 ? firstJoint : uint8_t{0}, 1, 0, 0});
+		}
+		for (size_t vertex = 0; vertex < 3; vertex++) {
+			for (const float weight : std::array<float, 4>{0.25f, 0.75f, 0.0f, 0.0f}) {
+				AppendFloat(binary, weight);
+			}
+		}
+		binary.insert(binary.end(), {0, 0, 1, 0, 2, 0});
+		while (binary.size() % 4 != 0) {
+			binary.push_back(0);
+		}
+
+		const std::string weightAttribute = includeWeights ? R"(,"WEIGHTS_0":2)" : "";
+		std::string document = R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],)"
+							   R"("nodes":[{"mesh":0,"skin":0},{},{}],"skins":[{"joints":[1,2]}],)"
+							   R"("meshes":[{"primitives":[{"attributes":{"POSITION":0,"JOINTS_0":1)" +
+							   weightAttribute +
+							   R"(},"indices":3}]}],)"
+							   R"("accessors":[)"
+							   R"({"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},)"
+							   R"({"bufferView":1,"componentType":5121,"count":3,"type":"VEC4"},)"
+							   R"({"bufferView":2,"componentType":5126,"count":3,"type":"VEC4"},)"
+							   R"({"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}],)"
+							   R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},)"
+							   R"({"buffer":0,"byteOffset":36,"byteLength":12},)"
+							   R"({"buffer":0,"byteOffset":48,"byteLength":48},)"
+							   R"({"buffer":0,"byteOffset":96,"byteLength":6}],)"
+							   R"("buffers":[{"byteLength":104}]})";
+		while (document.size() % 4 != 0) {
+			document.push_back(' ');
+		}
+
+		std::vector<uint8_t> glb;
+		AppendWord(glb, 0x46546C67);
+		AppendWord(glb, 2);
+		AppendWord(glb, static_cast<uint32_t>(12 + 8 + document.size() + 8 + binary.size()));
+		AppendWord(glb, static_cast<uint32_t>(document.size()));
+		AppendWord(glb, 0x4E4F534A);
+		glb.insert(glb.end(), document.begin(), document.end());
+		AppendWord(glb, static_cast<uint32_t>(binary.size()));
+		AppendWord(glb, 0x004E4942);
+		glb.insert(glb.end(), binary.begin(), binary.end());
+		return glb;
+	}
+
 	ImportedModel Imported(ModelFormat format, std::span<const std::byte> bytes) {
 		ImportedModel model;
 		std::string failure;
@@ -224,6 +288,36 @@ TEST_CASE("a glb keeps its texture coordinates", "[bake][model]") {
 	const ImportedModel model = Imported(ModelFormat::Gltf, Bytes(GLB_TRIANGLE));
 	CHECK(model.Mesh.Vertices[1].TexCoord[0] == Approx(1.0f));
 	CHECK(model.Mesh.Vertices[2].TexCoord[1] == Approx(1.0f));
+}
+
+TEST_CASE("a glb keeps normalized skin influences", "[bake][model]") {
+	const std::vector<uint8_t> glb = SkinnedGlb();
+	const ImportedModel model = Imported(ModelFormat::Gltf, Bytes(std::span(glb)));
+
+	CHECK(model.Mesh.JointCount == 2);
+	REQUIRE(model.Mesh.Vertices.size() == 3);
+	CHECK(model.Mesh.Vertices[0].Joints[0] == 0);
+	CHECK(model.Mesh.Vertices[0].Joints[1] == 1);
+	CHECK(model.Mesh.Vertices[0].Weights[0] == 16384);
+	CHECK(model.Mesh.Vertices[0].Weights[1] == 49151);
+}
+
+TEST_CASE("malformed glb skin influences are refused", "[bake][model]") {
+	SECTION("the weight attribute is missing") {
+		const std::vector<uint8_t> glb = SkinnedGlb(false);
+		ImportedModel model;
+		std::string failure;
+		CHECK_FALSE(ReadModel(ModelFormat::Gltf, Bytes(std::span(glb)), model, failure));
+		CHECK(failure.find("matching JOINTS_0 and WEIGHTS_0") != std::string::npos);
+	}
+
+	SECTION("a joint is outside the skin palette") {
+		const std::vector<uint8_t> glb = SkinnedGlb(true, 2);
+		ImportedModel model;
+		std::string failure;
+		CHECK_FALSE(ReadModel(ModelFormat::Gltf, Bytes(std::span(glb)), model, failure));
+		CHECK(failure.find("outside the skin palette") != std::string::npos);
+	}
 }
 
 TEST_CASE("a pmx is mirrored into a right-handed space and rewound", "[bake][model]") {

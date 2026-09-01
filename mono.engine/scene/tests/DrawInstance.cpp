@@ -579,12 +579,10 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	//
 	// **It survived `Rig`, which is the first eight-aligned field on the type
 	// and therefore the first that could not.** The hole it opens is
-	// declared as `Reserved` and zeroed rather than left to the compiler, so
-	// the bytes exist and are known. That is the fix this assert asks for, not
-	// an exception to it.
+	// occupied by `SkinFirst`, so the bytes exist and have presentation meaning.
+	// That is the fix this assert asks for, not an exception to it.
 	static_assert(
-		sizeof(DrawInstance) ==
-			offsetof(DrawInstance, IdentityReserved) + sizeof(DrawInstance::IdentityReserved),
+		sizeof(DrawInstance) == offsetof(DrawInstance, SkinReserved) + sizeof(DrawInstance::SkinReserved),
 		"DrawInstance has grown padding. scene::SignatureOf is field-wise and is unaffected, "
 		"but anything reading this type as bytes is now reading uninitialised memory."
 	);
@@ -621,6 +619,8 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.Shader = Name("drawinstance_test.Shader"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SkinFirst = 1; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);
 
 	// A rotation with the same position, because the quaternion is four floats
 	// that a position-only hash would miss entirely - and a mirror on a

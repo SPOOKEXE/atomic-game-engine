@@ -22,6 +22,7 @@
 // it - which is the same decision `Dashboard`'s minute buckets make, at the
 // resolution an interactive panel is read at.
 
+#include <engine/assets/Animation.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/ContentPolicy.hpp>
@@ -37,6 +38,7 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
@@ -155,6 +157,11 @@ namespace studio {
 		// other holding the previous answer.
 		const engine::delivery::DeliverySettings settings = Content.ToSettings();
 
+		if (ExportInProgress()) {
+			CancelExport();
+			Say("asset export cancelled because content sources changed", engine::core::LogLevel::Warning);
+		}
+
 		ContentClient.reset();
 		ContentUploads.reset();
 		ContentSamples = NetworkSamples{};
@@ -206,6 +213,29 @@ namespace studio {
 		ContentUploads = engine::delivery::MakeUploader(settings);
 	}
 
+	void Editor::PumpAssetExport() {
+		if (!ActiveExportRequest) {
+			return;
+		}
+
+		PumpAssetGrounding(ExportAssetGrounding, ContentClient.get());
+		if (ExportAssetGrounding.State == AssetGroundingState::WaitingForCatalogue) {
+			ActiveExportPhase = ExportPhase::ValidateCatalogue;
+		} else if (ExportAssetGrounding.State == AssetGroundingState::Fetching) {
+			ActiveExportPhase = ExportPhase::FetchAssets;
+		} else if (ExportAssetGrounding.State == AssetGroundingState::CopyingRaw) {
+			ActiveExportPhase = ExportPhase::CopyRawFiles;
+		}
+		if (ExportAssetGrounding.State == AssetGroundingState::Complete) {
+			ActiveExportPhase = ExportPhase::ValidateCdnSources;
+			FinishAssetExport();
+		} else if (ExportAssetGrounding.State == AssetGroundingState::Failed) {
+			Say("asset export failed: " + ExportAssetGrounding.Error, engine::core::LogLevel::Error);
+			CancelExport();
+			ActiveExportPhase = ExportPhase::Failed;
+		}
+	}
+
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
@@ -230,6 +260,7 @@ namespace studio {
 			}
 			DrainContent();
 		}
+		PumpAssetExport();
 
 		// **Outside the `ContentClient` guard on purpose.** A part can meet an
 		// already-loaded mesh in a process with no delivery client at all - a
@@ -485,6 +516,16 @@ namespace studio {
 				if (engine::assets::IsRuntimeReadable(asset->Name)) {
 					ContentShaders++;
 				}
+			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
+				engine::assets::AnimationData animation;
+				if (!engine::assets::Animation::Read(reader, animation)) {
+					continue;
+				}
+				EachOpenWorld([&name, &animation](engine::ecs::Store &store) {
+					(void)engine::render::RecordAnimation(store, name, animation);
+				});
+				ContentAnimationFacts[name.Id()] = animation;
+				ContentAnimations++;
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
 				if (!engine::assets::Material::Read(reader, material)) {
@@ -533,14 +574,15 @@ namespace studio {
 		// **Gated on the counts rather than on the queue**, so a pump that drains
 		// nothing new says nothing - otherwise this would be a line per frame for
 		// the life of the editor.
-		const size_t total = ContentMeshes + ContentTextures + ContentMaterials;
+		const size_t total = ContentMeshes + ContentTextures + ContentMaterials + ContentAnimations;
 		if (ContentPending.empty() && total != ContentReportedTotal) {
 			ContentReportedTotal = total;
 			ENGINE_INFO(
-				"assets: {} mesh(es), {} texture(s) and {} material(s) registered",
+				"assets: {} mesh(es), {} texture(s), {} material(s) and {} animation(s) registered",
 				ContentMeshes,
 				ContentTextures,
-				ContentMaterials
+				ContentMaterials,
+				ContentAnimations
 			);
 		}
 	}

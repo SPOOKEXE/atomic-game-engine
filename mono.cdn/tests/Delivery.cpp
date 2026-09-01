@@ -141,13 +141,14 @@ namespace {
 			std::error_code failure;
 			fs::remove_all(Root, failure);
 
-			// A mesh, an image and a sound - the three kinds the task named,
-			// each big enough to be cut into several chunks.
+			// Representative runtime content, each large enough to exercise the
+			// same chunked path used by production assets.
 			Write("meshes/rock.mesh", Structured("vert", 4000));
 			Write("meshes/tree.mesh", Structured("vert", 3000));
 			Write("textures/grass.png", Structured("texel", 3500));
 			Write("textures/bark.png", Structured("texel", 2500));
 			Write("audio/bark.wav", Structured("sample", 2000));
+			Write("shaders/toon.frag.spv", Structured("spirv", 1800));
 
 			REQUIRE(cdn::Publish(Root / "content", Root / "store", Publisher()).has_value());
 
@@ -358,7 +359,23 @@ TEST_CASE("assets can be fetched by kind", "[cdn][delivery][e2e]") {
 
 	CHECK(client->RequestKind(AssetKind::Mesh).size() == 2);
 	CHECK(client->RequestKind(AssetKind::Audio).size() == 1);
+	CHECK(client->RequestKind(AssetKind::Shader).size() == 1);
 	CHECK(client->RequestKind(AssetKind::Font).empty());
+}
+
+TEST_CASE("a saved shader module is served by the CDN", "[cdn][delivery][shader][e2e]") {
+	World world;
+	std::unique_ptr<AssetClient> client = MakeAssetClient(world.Over());
+	REQUIRE(client != nullptr);
+	client->UseGrant(world.Token());
+	world.SettleCatalogue(*client);
+
+	const RequestId request = client->Request("shaders/toon.frag.spv");
+	REQUIRE(world.Settle(*client, request) == RequestState::Ready);
+	const std::optional<Asset> shader = client->Take(request);
+	REQUIRE(shader.has_value());
+	CHECK(shader->Kind == AssetKind::Shader);
+	CHECK(Text(shader->Bytes) == world.Published(shader->Name));
 }
 
 TEST_CASE("a group that lands brings its neighbours with it", "[cdn][delivery][e2e]") {

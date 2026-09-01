@@ -15,6 +15,11 @@ namespace studio {
 		return pose;
 	}
 
+	Vector3
+	CameraRelativeMovement(const CFrame &rotation, const float forward, const float right, const float up) {
+		return rotation.LookVector() * forward + rotation.RightVector() * right + rotation.UpVector() * up;
+	}
+
 	void ViewportCameraMemory::Use(WorldId world, ViewportCameraPose &pose) {
 		if (world == Current) {
 			return;

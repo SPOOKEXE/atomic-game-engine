@@ -3,6 +3,7 @@
 // Client-owned window, renderer, event loop and frame state.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/Signature.hpp>
 #include <engine/audio/Device.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
@@ -41,6 +42,7 @@
 #include <client/ContentLink.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
+#include <client/SettingsMenu.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
 #include <discord/Link.hpp>
@@ -55,6 +57,8 @@
 #include <vector>
 
 struct SDL_Window;
+struct SDL_Gamepad;
+struct SDL_Joystick;
 
 namespace client {
 
@@ -469,6 +473,12 @@ namespace client {
 
 		client::Actions Actions;
 
+		// The shipped client's own settings overlay. It is presentation state,
+		// not a row in any simulated or replicated world.
+		client::SettingsMenu Menu;
+		std::vector<engine::gui::SettingsMenuAction> MenuActions;
+		bool SettingsMenuDrawn = false;
+
 		// This frame's raw input, before any world has been told about it.
 		//
 		// **Beside `Actions` rather than inside it**, because the two answer
@@ -476,6 +486,8 @@ namespace client {
 		// for the frame graph", and this is "is W held". `input/Translate.hpp`
 		// carries the split.
 		engine::input::Translator Input;
+		std::vector<SDL_Gamepad *> Gamepads;
+		std::vector<SDL_Joystick *> Joysticks;
 
 		// What the window was last told about the pointer.
 		//
@@ -616,6 +628,8 @@ namespace client {
 		// `--connect` was given, which is what keeps a single-player run from
 		// opening a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
+		// The connector borrows this move-only secret for the session lifetime.
+		std::optional<engine::assets::SigningKey> ClientIdentity;
 		std::unique_ptr<engine::replication::Connector> Connection;
 
 		// How this client finds a session, when it was not told an address.
@@ -709,6 +723,7 @@ namespace client {
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;
 		size_t ContentMaterials = 0;
+		size_t ContentAnimations = 0;
 		size_t ContentSounds = 0;
 
 		// The decoded audio this client has, by the name the manifest published

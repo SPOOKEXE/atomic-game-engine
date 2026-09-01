@@ -264,6 +264,7 @@ namespace engine::render {
 		entry.Whole.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
 		entry.Whole.VertexOffset = static_cast<int32_t>(vertexAt);
 		entry.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
+		entry.JointCount = mesh.JointCount;
 
 		for (const assets::Submesh &submesh : mesh.Submeshes) {
 			MeshRange run;

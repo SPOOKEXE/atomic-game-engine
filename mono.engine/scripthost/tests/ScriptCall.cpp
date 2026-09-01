@@ -298,6 +298,17 @@ namespace {
 		store.SetResource(input);
 	}
 
+	void ControllerConnected(Store &store) {
+		Windowed(store);
+		engine::scene::ControllerState controllers;
+		auto &slot = controllers.Slots[0];
+		slot.Connected = true;
+		slot.Mapped = true;
+		slot.Buttons = 1u << static_cast<uint8_t>(engine::scene::ControllerButton::A);
+		slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftX)] = 0.75f;
+		store.SetResource(controllers);
+	}
+
 	// A window that has just regained focus, which is a `PreviousFocused` of
 	// false and a `Focused` of true - an edge and not a state.
 	void FocusRegained(Store &store) {
@@ -1532,6 +1543,44 @@ TEST_CASE("the two input surfaces answer the same in both languages", "[scriptin
 		 "12",
 		 0,
 		 OneOfEverything},
+
+		{"GetConnectedGamepads returns stable input types",
+		 [](Language language) {
+			 return AService(language, "UserInputService") +
+					Say(language,
+						First(language, Call(language, "UserInputService", "GetConnectedGamepads()")) +
+							".Name");
+		 },
+		 "Gamepad1",
+		 0,
+		 ControllerConnected},
+
+		{"IsGamepadButtonDown reads standardized buttons",
+		 [](Language language) {
+			 return AService(language, "UserInputService") +
+					Say(language,
+						Call(
+							language,
+							"UserInputService",
+							"IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonA)"
+						));
+		 },
+		 "true",
+		 0,
+		 ControllerConnected},
+
+		{"GetGamepadState carries analog positions",
+		 [](Language language) {
+			 return AService(language, "UserInputService") +
+					Say(language,
+						First(
+							language,
+							Call(language, "UserInputService", "GetGamepadState(Enum.UserInputType.Gamepad1)")
+						) + ".KeyCode.Name");
+		 },
+		 "ButtonA",
+		 0,
+		 ControllerConnected},
 	};
 
 	for (const ParityCase &probe : CASES) {

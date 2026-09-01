@@ -133,6 +133,22 @@ namespace engine::assets {
 		return fs::is_regular_file(PathOf(hash), failure);
 	}
 
+	bool ChunkStore::WriteAsset(const AssetEntry &asset, std::span<const std::byte> bytes) {
+		if (bytes.size() != asset.TotalBytes || !VerifyAssetShape(asset)) {
+			return false;
+		}
+
+		size_t offset = 0;
+		for (const ChunkEntry &chunk : asset.Chunks) {
+			const size_t chunkBytes = chunk.Bytes;
+			if (chunkBytes > bytes.size() - offset || !Write(chunk.Hash, bytes.subspan(offset, chunkBytes))) {
+				return false;
+			}
+			offset += chunkBytes;
+		}
+		return offset == bytes.size();
+	}
+
 	std::optional<std::vector<std::byte>> ChunkStore::ReadAsset(const AssetEntry &asset) const {
 		ENGINE_PROFILE_CAT("ChunkStore::ReadAsset", core::ProfileCategory::Assets);
 

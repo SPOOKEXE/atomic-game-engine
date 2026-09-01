@@ -61,6 +61,19 @@ namespace client {
 		// and the render interpolates between them.
 		double TickRate = 60.0;
 
+		// Live presentation capabilities exposed in the ESC settings menu.
+		// Disabling one stops its per-frame preparation immediately.
+		bool EnableEditableMeshes = true;
+
+		// Whether EditableImage uploads are prepared and presented.
+		bool EnableEditableImages = true;
+
+		// Whether particle simulation and presentation are enabled.
+		bool EnableParticles = true;
+
+		// Whether post-processing render-graph passes are enabled.
+		bool EnablePostProcessing = true;
+
 		// -1 runs until the window is closed. A frame budget is what makes the
 		// client usable from a test or a CI job.
 		int64_t MaximumFrames = -1;
@@ -311,6 +324,13 @@ namespace client {
 		//
 		// Optional server identity pin; encryption alone does not authenticate it.
 		std::string ServerKey;
+
+		// The Ed25519 seed this client proves possession of, as 64 hex
+		// characters, or empty for no platform-issued play identity.
+		//
+		// The seed is never sent. The connector signs the live session
+		// transcript and sends only the public half and signature.
+		std::string PlayKey;
 
 		// Run with no window at all.
 		//

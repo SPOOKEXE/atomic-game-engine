@@ -95,6 +95,8 @@ int main(int argc, char **argv) {
 	arguments.Value("record", "PATH", "Write a recording of this run");
 	arguments.Value("replay", "PATH", "Replay a recording instead of simulating");
 	arguments.Value("override-assets-directory", "DIR", "Read staged data from here");
+	arguments.Value("datastore-root", "DIR", "Persist DataStore under this root");
+	arguments.Value("datastore-environment", "mock|live", "Select the isolated DataStore environment");
 	arguments.Value("host", "NAME", "Run as a supervised host under a driver, with this name");
 	arguments.Value("world", "NAME", "A world this host was granted (repeatable, host mode only)");
 	arguments.Value("remote-world", "NAME", "Place this world in a supervised host process (repeatable)");
@@ -143,6 +145,9 @@ int main(int argc, char **argv) {
 		"HEX",
 		"64 hex characters - the Ed25519 seed this server proves its identity with. Without it a "
 		"relay in the path can read everything"
+	);
+	arguments.Value(
+		"admit-key", "HEX", "Admit a client Ed25519 public key. Repeatable; clients prove the matching secret"
 	);
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -250,11 +255,17 @@ int main(int argc, char **argv) {
 		options.ContentStore = std::filesystem::path(*store);
 	}
 	options.ContentPort = static_cast<uint16_t>(arguments.GetInteger("content-port", options.ContentPort));
+	if (auto host = arguments.Get("content-public-host")) {
+		options.ContentPublicHost = std::string(*host);
+	}
 	if (auto key = arguments.Get("content-grant-key")) {
 		options.ContentGrantKey = std::string(*key);
 	}
 	if (auto key = arguments.Get("identity-key")) {
 		options.IdentityKey = std::string(*key);
+	}
+	for (const std::string_view key : arguments.GetAll("admit-key")) {
+		options.AdmittedKeys.emplace_back(key);
 	}
 	if (auto transport = arguments.Get("transport")) {
 		if (const std::optional<engine::net::WireMode> mode = engine::net::ParseWireMode(*transport)) {
@@ -286,6 +297,21 @@ int main(int argc, char **argv) {
 		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
+	}
+	if (auto root = arguments.Get("datastore-root")) {
+		options.DataStoreRoot = std::filesystem::path(*root);
+	}
+	if (auto environment = arguments.Get("datastore-environment")) {
+		const auto parsed = engine::world::SharedStoreEnvironmentOf(*environment);
+		if (!parsed) {
+			std::fprintf(
+				stderr,
+				"--datastore-environment '%s' is not mock or live\n",
+				std::string(*environment).c_str()
+			);
+			return 2;
+		}
+		options.DataStoreEnvironment = *parsed;
 	}
 	if (auto host = arguments.Get("host")) {
 		options.HostName = std::string(*host);

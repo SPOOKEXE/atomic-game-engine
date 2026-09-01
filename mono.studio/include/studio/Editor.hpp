@@ -27,6 +27,7 @@
 // `world::Universe::Save` and `Load` are exactly that operation and already
 // exist; this program is the first caller with a reason to use them.
 
+#include <engine/assets/Animation.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Texture.hpp>
@@ -49,6 +50,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/SettingsMenu.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/EditableImages.hpp>
@@ -66,10 +68,13 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <array>
+#include <atomic>
+#include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
@@ -87,12 +92,14 @@
 #include <string>
 #include <string_view>
 #include <studio/AssetCatalogue.hpp>
+#include <studio/AssetGrounding.hpp>
 #include <studio/CodeMetrics.hpp>
 #include <studio/Commands.hpp>
 #include <studio/Complete.hpp>
 #include <studio/Config.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Diagnostics.hpp>
+#include <studio/Export.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
@@ -101,9 +108,11 @@
 #include <studio/Presentation.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
+#include <studio/RobloxImport.hpp>
 #include <studio/TeamCreate.hpp>
 #include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -122,6 +131,7 @@ struct ImGuiTableSortSpecs;
 struct ImGuiTableSortSpecs;
 
 namespace studio {
+	struct PlayedInputAdapter;
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
@@ -601,6 +611,23 @@ namespace studio {
 		int SurfaceBounces = 0;
 	};
 
+	// One staged document and the last content shared by Studio and an external editor.
+	struct ExternalDocument {
+		// The file watched for external writes.
+		std::filesystem::path Path;
+		// The last content known to be equal in Studio and on disk.
+		std::string Baseline;
+		// The last observed write stamp.
+		std::filesystem::file_time_type Written{};
+		// Whether both editors changed the baseline differently.
+		bool Conflict = false;
+
+		// Whether this tab currently has a staged external document.
+		bool Active() const {
+			return !Path.empty();
+		}
+	};
+
 	// One open script tab.
 	//
 	// @since v0.7
@@ -627,6 +654,11 @@ namespace studio {
 
 		// Whether the buffer differs from what the world holds.
 		bool Modified = false;
+
+		// The optional live file bridge to a desktop source editor.
+		ExternalDocument External;
+		// The next monotonic time at which the staged file is inspected.
+		double ExternalCheckAt = 0.0;
 
 		// The caret, and the completion this tab has been asked to apply.
 		//
@@ -946,6 +978,10 @@ namespace studio {
 		void DrawWorldProperties(WorldId world);
 		void DrawScripts();
 
+		// Edits copied MemoryStore and DataStore values through the universe's
+		// driver-side administration surface.
+		void DrawDatasets();
+
 		// The breakpoint column beside a script's text.
 		//
 		// **A sibling of the code rather than part of it**, because
@@ -953,23 +989,25 @@ namespace studio {
 		// child - so the column is drawn next to it and told where that child
 		// has scrolled to.
 		//
-		// @param tab The script being edited.
+		// @param tab     The script being edited.
+		// @param fieldId The multiline field's hierarchical imgui id.
 		// @return How wide the column drew, so the caller can lay out beside it.
-		float DrawScriptGutter(const OpenScript &tab);
+		float DrawScriptGutter(const OpenScript &tab, unsigned int fieldId);
 
 		// The minimap column on the code field's right.
 		//
 		// A shrunken impression of the whole file - stripes per text run, not
 		// tiny glyphs - with the visible region marked, and a click or drag
 		// scrolls the code there. The gutter's sibling in every discipline:
-		// its own child window, the same `##text` scroll lookup with the same
+		// its own child window, the same multiline child id with the same
 		// benign fallback, and one `InvisibleButton` so imgui owns the
 		// hit-testing.
 		//
-		// @param tab   The script being edited.
-		// @param width How wide to draw, already scaled.
+		// @param tab     The script being edited.
+		// @param width   How wide to draw, already scaled.
+		// @param fieldId The multiline field's hierarchical imgui id.
 		// @since v0.17
-		void DrawScriptMinimap(const OpenScript &tab, float width);
+		void DrawScriptMinimap(const OpenScript &tab, float width, unsigned int fieldId);
 
 		// The tooltip for whatever word the mouse is resting on.
 		//
@@ -986,8 +1024,9 @@ namespace studio {
 		// @param hovered  Whether the field reported a rested hover this
 		//                 frame, read by the caller right after the field so
 		//                 imgui's hover delay owns the timing.
+		// @param fieldId  The multiline field's hierarchical imgui id.
 		// @since v0.17
-		void DrawScriptHover(OpenScript &tab, ImVec2 fieldMin, bool hovered);
+		void DrawScriptHover(OpenScript &tab, ImVec2 fieldMin, bool hovered, unsigned int fieldId);
 
 		// Rebuilds the completion list when there is a reason to.
 		//
@@ -1011,8 +1050,10 @@ namespace studio {
 		// @param tab      The script being edited.
 		// @param fieldMin The code field's top-left, in screen space.
 		// @param popupId  The id the navigation keys are owned by.
+		// @param fieldId  The multiline field's hierarchical imgui id.
 		// @since v0.14
-		void DrawScriptCompletion(OpenScript &tab, ImVec2 fieldMin, unsigned int popupId);
+		void
+		DrawScriptCompletion(OpenScript &tab, ImVec2 fieldMin, unsigned int popupId, unsigned int fieldId);
 
 		// The names of the instances beside a script in its tree.
 		//
@@ -1167,6 +1208,22 @@ namespace studio {
 		// The Preferences page for how this process spends its cores.
 		void DrawComputeSettings();
 
+		// The docked setup panel for durable script data.
+		void DrawDataStores();
+
+		// The controls inside the DataStores panel.
+		void DrawDataStoreSettings();
+
+		// Switches the local provider to the current preferences. Any active
+		// provider is flushed before its path changes.
+		bool ConfigureDataStore(bool flushActive = true);
+
+		// Writes the durable store when its copied image changed.
+		bool FlushDataStore();
+
+		// The configured root, resolving an empty preference under ConfigRoot.
+		std::filesystem::path DataStoreRoot() const;
+
 		// Applies Ctrl+wheel to a zoom, for the item just drawn.
 		//
 		// Separate from the control because the wheel belongs over the *text*
@@ -1187,6 +1244,9 @@ namespace studio {
 
 		// The theme picker and the interface scale.
 		void DrawAppearanceSettings();
+
+		// Code-field appearance and the selected external source editor.
+		void DrawScriptEditorSettings();
 
 		// The seven colours, chosen over whichever palette is selected.
 		//
@@ -1218,16 +1278,18 @@ namespace studio {
 		// @since v0.17
 		void DrawDiscordSettings();
 
-		// The Preferences page that says where content comes from.
+		// The CDN panel that says where content comes from.
 		//
 		// A reorderable list, because the order *is* the policy: a delivery
 		// client walks it and stops at the first source that answers, so "local
 		// cache first, then the origin next door" is what the list says rather
 		// than something the engine decides.
+		void DrawCdn();
 		void DrawContentSettings();
 
 		void DrawStatusBar();
 		void DrawDialogs();
+		void DrawClientSettings();
 
 		// The View menu, and the only way back to a panel somebody closed.
 		//
@@ -1737,9 +1799,9 @@ namespace studio {
 		void DrawRenderPipelineLibrary();
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
+		void DrawRenderPipelineLighting();
 		void DrawPipelineProfile();
 		void DrawRojoSync();
-		void DrawWorldLighting();
 		void DrawProfileWatch();
 		void
 		DrawProfileImage(engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth);
@@ -2290,6 +2352,14 @@ namespace studio {
 		// @since v0.13
 		bool RunCommand(const std::string &source);
 
+		// Builds the command VM for one world, or keeps the matching live one.
+		//
+		// @param store The active world's store.
+		// @param world The world that owns the store.
+		// @return Whether a runtime is ready.
+		// @since v0.22
+		bool EnsureCommandRuntime(engine::ecs::Store &store, engine::world::WorldId world);
+
 		// Walks the command history for the input's arrow keys.
 		//
 		// **Public because imgui's callback is a free function** and the only
@@ -2299,6 +2369,14 @@ namespace studio {
 		// @return Zero, which is what imgui expects of a history callback.
 		// @since v0.13
 		int WalkCommandHistory(ImGuiInputTextCallbackData *data);
+
+		// Receives the command field's caret and applies a completion through
+		// imgui's public edit callback, keeping its undo state in step.
+		//
+		// @param data The callback data for the command field.
+		// @return Zero, which is what imgui expects of an input callback.
+		// @since v0.22
+		int EditCommandField(ImGuiInputTextCallbackData *data);
 
 		// The control surface: whether it is listening, and what it offers.
 		//
@@ -2322,6 +2400,10 @@ namespace studio {
 		void LoadPlugins();
 		void PumpPlugins(float delta);
 		void DrawPlugins();
+		void DrawRobloxImport();
+		void StartPlaytestPlugins(WorldId world, PluginRunTarget target);
+		void StopPlaytestPlugins(WorldId world);
+		void StopAllPlaytestPlugins();
 
 		// The ribbon's Demo row, and the panel it opens.
 		//
@@ -2707,6 +2789,7 @@ namespace studio {
 			std::vector<engine::core::Name> Sheets;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
+		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;
 
 		// The collision geometry of every mesh this session has taken in.
 		//
@@ -2737,6 +2820,7 @@ namespace studio {
 		// @since v0.11
 		size_t ContentShaders = 0;
 		size_t ContentMaterials = 0;
+		size_t ContentAnimations = 0;
 		//@}
 
 		// Fetches still in flight.
@@ -2898,9 +2982,16 @@ namespace studio {
 
 		// Loads a game file, adopting its path.
 		//
-		// @param path The `.agame` to read.
+		// @param path The `.agame` or `.auniverse` to read.
 		// @return `false` when it could not be read or is not one.
 		bool OpenGame(const std::filesystem::path &path);
+
+		// Reads a multi-file universe into staging and opens its permission
+		// summary without changing the current document.
+		bool PrepareUniverseOpen(const std::filesystem::path &path);
+
+		// Opens the staged path with only the content access explicitly allowed.
+		void AcceptUniverseOpen();
 
 		// Writes the whole game, adopting the path.
 		//
@@ -2918,6 +3009,9 @@ namespace studio {
 		// @return `false` when it could not be written.
 		bool ExportActiveWorld(const std::filesystem::path &path);
 
+		// Writes one captured world alone, without adopting the path.
+		bool ExportWorldFile(engine::world::WorldId world, const std::filesystem::path &path);
+
 		// Writes the universe and every world in it, without adopting the path.
 		//
 		// **Separate from Save As rather than a second name for it.** Save As
@@ -2929,6 +3023,39 @@ namespace studio {
 		// @param path Where to write.
 		// @return `false` when the file would not be written.
 		bool ExportUniverse(const std::filesystem::path &path);
+
+		// Starts an export after applying its optional processed-asset policy.
+		// Asset grounding is pumped across frames and writes the document only
+		// after every verified asset has arrived.
+		//@{
+		void BeginWorldExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets);
+		void BeginUniverseExport(const std::filesystem::path &path, bool groundAssets, bool includeRawAssets);
+		//@}
+
+		// Starts one frozen request after its preflight has passed.
+		bool BeginExport(const ExportRequest &request);
+
+		// Cancels outstanding delivery and removes private staging.
+		void CancelExport();
+
+		// Whether an export owns staging or delivery work.
+		bool ExportInProgress() const;
+
+		// Current named progress phase.
+		ExportPhase CurrentExportPhase() const;
+
+		// Public universe metadata shared by Save As and export.
+		engine::game::UniverseFileOptions UniverseOptions(bool includePublicCdns) const;
+
+		// Flushes every modified Program and ShaderScript editor buffer.
+		void FlushExportBuffers();
+
+		// Advances the optional asset copy and writes its captured document when
+		// the copy completes. The caller pumps `ContentClient` first.
+		void PumpAssetExport();
+
+		// Publishes a fully grounded staging tree.
+		void FinishAssetExport();
 		// Adds one world file to this universe, keeping what is here.
 		//
 		// A world whose name is taken arrives under a suffixed one rather than
@@ -2937,6 +3064,12 @@ namespace studio {
 		// @param path The world file to read.
 		// @return `false` when nothing could be imported.
 		bool ImportWorldFile(const std::filesystem::path &path);
+
+		// Polls the background preparation and commits completed bytes on the
+		// universe's owner thread.
+		void PumpWorldImport();
+
+		bool WorldImportInProgress() const;
 
 		// Adds another game's worlds to this universe, keeping what is here.
 		//
@@ -3088,6 +3221,12 @@ namespace studio {
 		//
 		// @param tab The tab to save.
 		void SaveScriptTab(OpenScript &tab);
+
+		// Stages and opens a tab in the configured desktop editor.
+		void OpenScriptExternally(OpenScript &tab);
+
+		// Pulls a non-conflicting external write into a tab.
+		void RefreshExternalScript(OpenScript &tab);
 
 		// Closes a tab, discarding nothing - the text is already in the
 		// instance if it was saved, and a tab is a view rather than a document.
@@ -3256,6 +3395,18 @@ namespace studio {
 		// rather than out of this - see `SaveConfiguration`.
 		Preferences Prefs;
 
+		// The durable provider route, active location and last written image.
+		// MemoryStore deliberately has no file: it expires with this process.
+		//@{
+		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
+		std::string ActiveDataStoreLocation;
+		std::vector<engine::world::SharedStoreEntry> SavedDataStoreEntries;
+		std::string DataStoreError;
+		std::string DataStoreBrowsePath;
+		double NextDataStoreFlush = 0.0;
+		bool DataStoreReady = false;
+		//@}
+
 		// The connection to Discord, or null when nothing is configured.
 		//
 		// **Held even while it is reporting nothing**, because the Preferences
@@ -3313,6 +3464,7 @@ namespace studio {
 		// renderer before the window it borrowed its device from.
 		//@{
 		SDL_Window *Window = nullptr;
+		std::unique_ptr<PlayedInputAdapter> PlayedInput;
 		engine::render::Renderer Renderer;
 
 		// **What a `Material.Shader` name resolves to in the editor.** One per
@@ -3320,6 +3472,7 @@ namespace studio {
 		// caches over process-wide names, and `Refresh` takes whichever world
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
+		engine::core::Name LastPostProcessShader;
 		engine::render::ShaderCompiler ShaderInspector;
 		engine::render::ShaderCompilation InspectedShader;
 		WorldId InspectedShaderWorld;
@@ -3343,6 +3496,11 @@ namespace studio {
 
 		// The identical ledger, for `EditableImage`.
 		engine::render::EditableImageUploader EditableImages;
+
+		// The embedded Play client's live presentation choices. Edit mode ignores
+		// them so authoring never hides content by accident.
+		client::Options ClientSettings;
+		bool ShowClientSettings = false;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;
@@ -3393,6 +3551,7 @@ namespace studio {
 		std::string UniverseNameDraft;
 		std::filesystem::path GamePath;
 		bool Modified = false;
+		engine::game::UniverseFileOptions UniverseFileSettings;
 		//@}
 
 		// The world the viewport draws and the properties panel edits.
@@ -4687,6 +4846,7 @@ namespace studio {
 		std::string ReplaceText;
 		bool FocusFind = false;
 		std::string ComponentFilter;
+		std::string CollectionTagDraft;
 		//@}
 
 		// What the output panel is showing, and what it is searching for.
@@ -4713,6 +4873,10 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+
+		// Appearance of the depth-tested and drag-overlay copies of the grid.
+		// Plugins edit this one value and both paths read it each frame.
+		engine::render::View::GroundGrid GridSettings;
 		// Direction widget, cursor, orbit mode, direction lock, and config drafts.
 		//@{
 		bool ShowDirectionGizmo = true;
@@ -5043,6 +5207,7 @@ namespace studio {
 		//@{
 		bool AskingSaveAs = false;
 		bool AskingOpen = false;
+		bool AskingUniverseLoadPermissions = false;
 		//@}
 
 		// Whether the Rojo sync dock is open. See `DrawRojoSync`.
@@ -5057,7 +5222,8 @@ namespace studio {
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;
-		bool AskingExportUniverse = false;
+		bool AskingExportDestination = false;
+		bool AskingExportPreflight = false;
 		bool AskingImport = false;
 		bool AskingImportUniverse = false;
 		bool AskingNewWorld = false;
@@ -5070,6 +5236,45 @@ namespace studio {
 		//@{
 		std::string PathBuffer;
 		std::string NameBuffer;
+		//@}
+
+		// Incremental content copy for the active unified export.
+		AssetGrounding ExportAssetGrounding;
+
+		// Unified export dialog, frozen preflight, and active staging lifetime.
+		//@{
+		ExportOptions ExportChoices;
+		std::optional<ExportRequest> PreparedExportRequest;
+		ExportPreflight PreparedExportPreflight;
+		std::optional<ExportRequest> ActiveExportRequest;
+		std::filesystem::path ExportStagingRoot;
+		ExportPhase ActiveExportPhase = ExportPhase::Idle;
+		//@}
+
+		// One world import prepared away from the UI thread. The worker touches
+		// only its result bytes and atomics; `PumpWorldImport` owns the universe.
+		//@{
+		std::jthread WorldImportWorker;
+		engine::game::PreparedWorldImport PreparedWorld;
+		std::string WorldImportError;
+		std::atomic<engine::game::WorldImportPhase> ActiveWorldImportPhase{
+			engine::game::WorldImportPhase::Read
+		};
+		std::atomic<float> WorldImportFraction{0.0f};
+		std::atomic<bool> WorldImportDone{false};
+		bool WorldImportSucceeded = false;
+		bool WorldImportCommitPending = false;
+		engine::core::Name WorldImportDestination;
+		bool WorldImportActive = false;
+		//@}
+
+		// Read-only manifest metadata shown before a multi-file universe is
+		// allowed to add content sources to this editor.
+		//@{
+		std::filesystem::path PendingUniverseOpenPath;
+		engine::game::GameInfo PendingUniverseOpenInfo;
+		bool AllowUniverseHttp = false;
+		size_t UniverseLoadScope = 0;
 		//@}
 
 		// What the explorer's, the properties panel's and the keybind page's
@@ -5189,11 +5394,25 @@ namespace studio {
 		bool ShowProperties = true;
 		bool ShowComponents = true;
 		bool ShowScripts = true;
+		bool ShowDatasets = false;
+		bool ShowDataStores = false;
+		bool ShowCdn = false;
 		bool ShowOutput = true;
 		//@}
 
 		// Closed by default: it is a panel somebody opens to change one thing.
 		bool ShowSettings = false;
+
+		// The dataset editor's selected store, row, filter and typed JSON draft.
+		//@{
+		engine::world::BusKind DatasetStore = engine::world::BusKind::DataStore;
+		std::string DatasetFilter;
+		std::string DatasetSelectedKey;
+		std::string DatasetKeyDraft;
+		std::string DatasetValueDraft;
+		std::string DatasetEditError;
+		bool DatasetCreating = false;
+		//@}
 
 		// The live instances, closed until something is live.
 		//
@@ -5202,7 +5421,7 @@ namespace studio {
 		// somebody has to know about before they lose a view is not a way back.
 		// It stays open afterwards, like every other panel: what closes it is
 		// somebody closing it.
-		bool ShowLiveInstances = false;
+		bool ShowLiveInstances = true;
 
 		// Frames left to keep pulling the instances panel in front. See
 		// `FocusWorlds`, which is the same mechanism and the same reason.
@@ -5230,9 +5449,6 @@ namespace studio {
 		// The frame as a grid rather than as a canvas: every pass across the
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
 		bool ShowPipelineProfile = false;
-
-		// Per-world lighting and rendering profile selection.
-		bool ShowWorldLighting = true;
 
 		// Which resource the profile panel is showing a picture of.
 		//
@@ -5455,6 +5671,26 @@ namespace studio {
 		// line.
 		char CommandField[1024] = {};
 
+		// The caret and focus reported by the field's callback.
+		//@{
+		int CommandCaret = 0;
+		bool CommandFieldActive = false;
+		//@}
+
+		// The command completion popup. The replacement is requested here and
+		// applied by `EditCommandField` on the next field callback, so imgui owns
+		// every edit to its buffer.
+		//@{
+		bool CommandPopupOpen = false;
+		int CommandPopupChoice = 0;
+		int CommandPopupAnchor = 0;
+		int CommandPopupCaret = -1;
+		int CommandReplaceFrom = -1;
+		bool CommandRefocus = false;
+		std::string CommandInsert;
+		std::vector<Completion> CommandCompletions;
+		//@}
+
 		// What has been run, oldest first, so the arrows can walk back through
 		// it.
 		//
@@ -5521,6 +5757,7 @@ namespace studio {
 		//@{
 		bool ShowToolbarEditor = false;
 		bool ShowDockWidgetEditor = false;
+		bool ShowRobloxImport = false;
 		//@}
 
 		// Sparse toolbar overrides and the draft for a user-created tab.
@@ -5533,6 +5770,27 @@ namespace studio {
 		char ToolbarRenameDraft[64] = {};
 		std::string ToolbarRenamingTab;
 		BuiltinStudioTool DrawingBuiltinTool = BuiltinStudioTool::None;
+		//@}
+
+		// Event-driven Roblox analysis and asset mapping state. The place is
+		// decoded only when a path is confirmed, never once per frame.
+		//@{
+		std::string RobloxImportPath;
+		std::optional<engine::bake::RobloxModel> RobloxImportModel;
+		RobloxImportAnalysis RobloxAnalysis;
+		RobloxAssetMappings RobloxMappings;
+		RobloxClassMappings RobloxClassMap;
+		std::vector<RobloxAssetChoice> RobloxChoices;
+		std::vector<RobloxRojoSubject> RobloxRojoScripts;
+		std::string RobloxImportStatus;
+		std::string RobloxMappingIdentifier;
+		std::string RobloxMappingBrowsePath;
+		std::string RobloxRojoBrowsePath;
+		bool RobloxMappingsLoaded = false;
+		bool RobloxImportApplied = false;
+		bool RobloxImportDisableScripts = true;
+		int RobloxSelectedScript = -1;
+		char RobloxImportFilter[256] = {};
 		//@}
 
 		// Enabled overrides by stable plugin id. Missing means the manifest's
@@ -5623,8 +5881,14 @@ namespace studio {
 		//@}
 		//@}
 
-		// What `DiscoverPlugins` found, in folder order.
-		std::vector<LoadedPlugin> Plugins;
+		// Native and script plugins have separate ownership. `Plugins` is only
+		// the stable presentation order consumed by the toolbar and manager.
+		PluginBindingRegistry StudioPluginBindings;
+		std::vector<LoadedCppPlugin> CppPlugins;
+		std::vector<LoadedPlugin> ScriptPlugins;
+		std::vector<PluginPresentation *> Plugins;
+		std::vector<std::unique_ptr<PluginRuntimeSet>> PlaytestPluginSets;
+		uint64_t SeenCppPluginRegistryRevision = 0;
 
 		// What the port field holds while somebody is editing it.
 		//

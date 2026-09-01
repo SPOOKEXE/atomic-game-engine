@@ -619,6 +619,7 @@ namespace engine::render {
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
 		std::span<const scene::DrawInstance> Instances;
+		std::span<const core::CFrame> JointFrames;
 		std::span<const SurfaceView> Surfaces;
 		//@}
 
@@ -703,6 +704,7 @@ namespace engine::render {
 		// Borrowed cross-world geometry and portal descriptions.
 		//@{
 		std::span<const scene::DrawInstance> Foreign;
+		std::span<const core::CFrame> ForeignJointFrames;
 		std::span<const PortalView> Portals;
 		//@}
 
@@ -739,6 +741,10 @@ namespace engine::render {
 			// An overall multiplier on every line's alpha, so a host can dim
 			// the whole grid without restating its colours.
 			float Strength = 1.0f;
+
+			// World-space X/Z origin used for line placement and the two axes.
+			// The ground plane itself remains at Y zero.
+			core::Vector3 Offset{};
 
 			// The line colour, and the alpha a heavy line reaches.
 			//@{

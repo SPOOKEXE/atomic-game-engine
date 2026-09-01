@@ -362,7 +362,7 @@ the one that gets believed.
 
 ## Additional Tips
 
-- Do not verify with browsers or compute unless user explicitly agrees or requests it.
-- Use headless tests where possible, save live studio tests until the end when the user allows it.
+- Prefer headless tests during development. When browser, compute, or live Studio verification would
+  improve confidence, either ask the user before running it or defer it to the final verification stage.
+  At that stage, ask the user for approval. If they decline, report the skipped check clearly.
 - Security is important, but not should be over-indexed on. If you think something should be audited, especially new items, add to ROADMAP.md under current work version.
-

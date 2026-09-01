@@ -816,21 +816,21 @@ namespace studio {
 
 			switch (property.Type) {
 			case PropertyType::Bool:
-				if (value.Kind != Kind::Bool) {
+				if (value.Kind() != Kind::Bool) {
 					return false;
 				}
-				out.Bool = value.Bool;
+				out.Bool = value.As<bool>();
 				return true;
 
 			case PropertyType::Int32:
 			case PropertyType::Int64:
 			case PropertyType::Float:
 			case PropertyType::Double: {
-				if (value.Kind != Kind::Integer && value.Kind != Kind::Number) {
+				if (value.Kind() != Kind::Integer && value.Kind() != Kind::Number) {
 					return false;
 				}
-				const double number =
-					value.Kind == Kind::Integer ? static_cast<double>(value.Integer) : value.Number;
+				const double number = value.Kind() == Kind::Integer ? static_cast<double>(value.As<int64_t>())
+																	: value.As<double>();
 				out.Int32 = static_cast<int32_t>(number);
 				out.Int64 = static_cast<int64_t>(number);
 				out.Float = static_cast<float>(number);
@@ -839,10 +839,10 @@ namespace studio {
 			}
 
 			case PropertyType::String:
-				if (value.Kind != Kind::Text) {
+				if (value.Kind() != Kind::Text) {
 					return false;
 				}
-				out.String = value.Text;
+				out.String = value.As<std::string>();
 				return true;
 
 			case PropertyType::Name:
@@ -853,10 +853,10 @@ namespace studio {
 				// a *string* landing on a property this engine declares as an
 				// enum, and that is checked against `EnumTable` for
 				// `ReadPropertyJson`'s reason.
-				if (value.Kind != Kind::Text) {
+				if (value.Kind() != Kind::Text) {
 					return false;
 				}
-				out.Name = Name(value.Text);
+				out.Name = Name(value.As<std::string>());
 				if (property.Type == PropertyType::Enum &&
 					!engine::ecs::EnumTable::Has(property.EnumName, out.Name)) {
 					return false;
@@ -864,24 +864,24 @@ namespace studio {
 				return true;
 
 			case PropertyType::Vector3:
-				if (value.Kind != Kind::Vector3) {
+				if (value.Kind() != Kind::Vector3) {
 					return false;
 				}
-				out.Vector3 = value.Vector3;
+				out.Vector3 = value.As<engine::core::Vector3>();
 				return true;
 
 			case PropertyType::Vector2:
-				if (value.Kind != Kind::Vector2) {
+				if (value.Kind() != Kind::Vector2) {
 					return false;
 				}
-				out.Vector2 = value.Vector2;
+				out.Vector2 = value.As<engine::core::Vector2>();
 				return true;
 
 			case PropertyType::Color3:
-				if (value.Kind != Kind::Color3) {
+				if (value.Kind() != Kind::Color3) {
 					return false;
 				}
-				out.Color3 = value.Color3;
+				out.Color3 = value.As<engine::core::Color3>();
 				return true;
 
 			case PropertyType::CFrame:
@@ -890,38 +890,38 @@ namespace studio {
 				// module reads only the three of its position; a model file states
 				// an orientation the reader has already turned into a
 				// quaternion, so there is nothing left to approximate.
-				if (value.Kind != Kind::CFrame) {
+				if (value.Kind() != Kind::CFrame) {
 					return false;
 				}
-				out.CFrame = value.CFrame;
+				out.CFrame = value.As<engine::core::CFrame>();
 				return true;
 
 			case PropertyType::UDim:
-				if (value.Kind != Kind::UDim) {
+				if (value.Kind() != Kind::UDim) {
 					return false;
 				}
-				out.UDim = value.UDim;
+				out.UDim = value.As<engine::core::UDim>();
 				return true;
 
 			case PropertyType::UDim2:
-				if (value.Kind != Kind::UDim2) {
+				if (value.Kind() != Kind::UDim2) {
 					return false;
 				}
-				out.UDim2 = value.UDim2;
+				out.UDim2 = value.As<engine::core::UDim2>();
 				return true;
 
 			case PropertyType::Rect:
-				if (value.Kind != Kind::Rect) {
+				if (value.Kind() != Kind::Rect) {
 					return false;
 				}
-				out.Rect = value.Rect;
+				out.Rect = value.As<engine::core::Rect>();
 				return true;
 
 			case PropertyType::NumberRange:
-				if (value.Kind != Kind::NumberRange) {
+				if (value.Kind() != Kind::NumberRange) {
 					return false;
 				}
-				out.NumberRange = value.NumberRange;
+				out.NumberRange = value.As<engine::core::NumberRange>();
 				return true;
 
 			default:
@@ -1005,7 +1005,7 @@ namespace studio {
 			if (script) {
 				for (const engine::bake::RobloxProperty &property : node.Properties) {
 					if (property.Name == "Source" &&
-						property.Value.Kind == engine::bake::RobloxValueKind::Text) {
+						property.Value.Kind() == engine::bake::RobloxValueKind::Text) {
 						source = &property.Value;
 						break;
 					}
@@ -1015,7 +1015,7 @@ namespace studio {
 			Entity instance = NULL_ENTITY;
 			if (script && source != nullptr) {
 				const std::string key = StagedKey(import, path);
-				if (StageProgramSource(store, key, source->Text)) {
+				if (StageProgramSource(store, key, source->As<std::string>())) {
 					instance = module ? engine::script::MakeModule(store, key, name)
 									  : engine::script::MakeScript(store, key, name, local);
 					import.Report.Scripts++;
@@ -1509,6 +1509,44 @@ namespace studio {
 			}
 		}
 
+		// A project generator can name the script instance explicitly and point its
+		// `$path` at the source file. In that shape the file supplies the existing
+		// node's program rather than creating a script beneath the script. Ordinary
+		// `$path` nodes still fall through to `BuildPathInto` unchanged.
+		bool StageScriptPathInto(
+			Store &store,
+			const std::filesystem::path &root,
+			const std::string &path,
+			Entity into,
+			RojoSyncReport &report
+		) {
+			if (path.empty() || into == NULL_ENTITY) {
+				return false;
+			}
+
+			const std::filesystem::path source = root / path;
+			const ScriptFile file = ClassifyFile(source);
+			if (!file.IsScript) {
+				return false;
+			}
+
+			const ClassId expected = file.Module  ? engine::script::ModuleScriptClass()
+									 : file.Local ? engine::script::LocalScriptClass()
+												  : engine::script::ScriptClass();
+			if (!Classes::IsA(store.ClassOf(into), expected)) {
+				return false;
+			}
+			if (!StageProgram(store, source, path)) {
+				report.Missing.push_back(path);
+				return true;
+			}
+
+			engine::script::SetSourcePath(store, into, Name(path));
+			ApplySidecar(store, source, into, report);
+			report.Scripts++;
+			return true;
+		}
+
 		void BuildNode(
 			Store &store,
 			const RojoNode &node,
@@ -1535,7 +1573,9 @@ namespace studio {
 				}
 			}
 
-			BuildPathInto(store, root, node.Path, node_, report);
+			if (!StageScriptPathInto(store, root, node.Path, node_, report)) {
+				BuildPathInto(store, root, node.Path, node_, report);
+			}
 
 			for (const RojoNode &child : node.Children) {
 				BuildNode(store, child, root, node_, report);
@@ -1662,7 +1702,10 @@ namespace studio {
 		}
 
 		(void)FolderClass();
-		engine::script::RegisterScriptComponents();
+		// Explicit script nodes resolve `$className` before their `$path` is
+		// staged. Register the class tree now rather than relying on a directory
+		// file to call `MakeScript` later in the walk.
+		(void)engine::script::ScriptClass();
 
 		// **The tree's own children, not the tree itself.** The root node is the
 		// `DataModel`, which this engine models as the world rather than as an
@@ -1671,7 +1714,7 @@ namespace studio {
 			BuildNode(store, child, root, NULL_ENTITY, report);
 		}
 
-		if (report.Instances == 0) {
+		if (report.Instances == 0 && report.Scripts == 0) {
 			error = "the project named nothing this world could build";
 			return false;
 		}

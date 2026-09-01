@@ -2,6 +2,7 @@
 
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/script/InstanceShim.hpp>
 
 #include <lualib.h>
 
@@ -24,7 +25,8 @@ namespace engine::script {
 		Store &store = *ContextOf(state).World;
 
 		const auto *active = store.Resource<scene::ActiveCamera>();
-		if (active == nullptr || active->Entity == ecs::NULL_ENTITY || !store.Alive(active->Entity)) {
+		if (active == nullptr || active->Entity == ecs::NULL_ENTITY ||
+			!InstanceAlive(store, active->Entity)) {
 			// **Nil rather than a camera made on demand.** Roblox's
 			// `workspace.CurrentCamera` is never nil because the client makes
 			// one; here a headless world genuinely has none, and inventing a row

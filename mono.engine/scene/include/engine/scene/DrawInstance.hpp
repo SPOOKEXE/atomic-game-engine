@@ -267,12 +267,9 @@ namespace engine::scene {
 		// present dependencies. Nothing here dereferences it: it is an identity
 		// to group by and the value is never looked up.
 		//
-		// **Explicit, because an `ecs::Entity` is eight-byte aligned and every
-		// field above this one is four.** The compiler would open a four-byte
-		// hole here on its own. Named and zeroed, it remains a flat payload with
-		// a known object representation, which the module's padding test pins.
-		// `CharacterLimb::Reserved` exists for the same reason.
-		uint32_t Reserved = 0;
+		// First transform in the view's flat skinning palette. Meaningful only
+		// when `SkinCount` is non-zero.
+		uint32_t SkinFirst = 0;
 
 		// @since v0.19
 		uint64_t Rig = 0;
@@ -298,8 +295,11 @@ namespace engine::scene {
 		// per row.
 		core::Name SourceWorld;
 
+		// Number of consecutive transforms this drawable owns in the palette.
+		uint16_t SkinCount = 0;
+
 		// Keeps the flat payload free of implicit tail padding.
-		uint32_t IdentityReserved = 0;
+		uint16_t SkinReserved = 0;
 	};
 
 	// Fills the fields a collector reads straight off the world's components.
@@ -794,10 +794,10 @@ namespace engine::scene {
 	// byte hash would then be folding in whatever the draw list's allocation
 	// last held. The consequence is not a crash: the signature simply never
 	// matches, every surface renders every frame, and the skip quietly stops
-	// working with nothing to notice. `Reserved` is the same argument already
-	// made - it exists so the object representation is deterministic across a
-	// process boundary, and it says nothing about what is drawn, so a signature
-	// that depended on it would be depending on padding by name.
+	// working with nothing to notice. `SkinReserved` is the same argument: it
+	// exists so the object representation is deterministic across a process
+	// boundary, and it says nothing about what is drawn, so a signature that
+	// depended on it would be depending on padding by name.
 	//
 	// **What an instance shows is deliberately not in it.** A pane's index,
 	// placement, size and tint all change what another mirror sees of it and are

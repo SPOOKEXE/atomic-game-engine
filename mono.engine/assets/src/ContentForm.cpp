@@ -105,6 +105,8 @@ namespace engine::assets {
 			{ContentForm::Vert, "vert", AssetKind::Shader, true},
 			{ContentForm::Comp, "comp", AssetKind::Shader, true},
 			{ContentForm::Glsl, "glsl", AssetKind::Shader, true},
+
+			{ContentForm::AAnim, "aanim", AssetKind::Animation, false},
 		};
 
 		const Row *RowOf(ContentForm form) {

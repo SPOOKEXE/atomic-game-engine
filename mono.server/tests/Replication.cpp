@@ -18,6 +18,7 @@
 // without the program is a legal configuration, and a suite that failed on it
 // would be reporting the build rather than the code.
 
+#include <engine/assets/Signature.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
@@ -46,12 +47,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -112,6 +115,14 @@ namespace server_replication_test {
 		return std::filesystem::exists(ServerProgram());
 	}
 
+	engine::assets::SigningKey Identity(uint8_t fill) {
+		std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+		seed.fill(static_cast<std::byte>(fill));
+		std::optional<engine::assets::SigningKey> key = engine::assets::SigningKey::FromSeed(seed);
+		REQUIRE(key.has_value());
+		return std::move(*key);
+	}
+
 	// A port nothing is using, found by binding one and letting it go.
 	//
 	// There is a window between the release and the server's bind, and it is
@@ -147,8 +158,12 @@ namespace server_replication_test {
 		// @param game     A scene to host instead, or empty for the placeholder.
 		// @param extra    Further arguments for the child, for a case that is
 		//                 about a setting rather than about a world.
-		bool
-		Start(uint32_t entities, const std::string &game = {}, const std::vector<std::string> &extra = {}) {
+		bool Start(
+			uint32_t entities,
+			const std::string &game = {},
+			const std::vector<std::string> &extra = {},
+			const engine::assets::SigningKey *identity = nullptr
+		) {
 			RegisterTypes();
 
 			for (int attempt = 0; attempt < 4 && !Child.Started(); attempt++) {
@@ -193,7 +208,9 @@ namespace server_replication_test {
 				}
 
 				Port = port;
-				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
+				engine::replication::ConnectorSettings connecting;
+				connecting.ClientIdentity = identity;
+				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now, connecting);
 				ListenForJoinNotice();
 				return true;
 			}
@@ -492,6 +509,40 @@ namespace server_replication_test {
 			remote.Tick();
 			std::this_thread::sleep_for(std::chrono::milliseconds(4));
 		}
+	}
+}
+
+TEST_CASE("a server admits only clients proving an allowed play identity", "[server][replication]") {
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const engine::assets::SigningKey allowed = Identity(0x71);
+	const engine::assets::SigningKey other = Identity(0x72);
+	const std::vector<std::string> restriction{
+		"--transport", "datagram", "--admit-key", allowed.Public().ToHex()
+	};
+
+	SECTION("the admitted identity joins") {
+		Remote remote;
+		REQUIRE(remote.Start(4, {}, restriction, &allowed));
+		REQUIRE(remote.Join(400));
+	}
+
+	SECTION("a different valid identity is rejected") {
+		Remote remote;
+		REQUIRE(remote.Start(4, {}, restriction, &other));
+		CHECK_FALSE(remote.Join(100));
+		CHECK_FALSE(remote.Link->Joined());
+		CHECK(remote.Entities() == 0);
+	}
+
+	SECTION("an anonymous client is rejected") {
+		Remote remote;
+		REQUIRE(remote.Start(4, {}, restriction));
+		CHECK_FALSE(remote.Join(100));
+		CHECK_FALSE(remote.Link->Joined());
+		CHECK(remote.Entities() == 0);
 	}
 }
 

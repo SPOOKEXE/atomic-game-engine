@@ -52,6 +52,12 @@ namespace engine::script {
 		// property per instance for a surface most scripts never touch.
 		PropertyChanged,
 
+		// `UserInputService` events. One per world and filtered by their public
+		// signal name. Separate from `PropertyChanged` because controller state is
+		// a resource change, not an instance property event, and the generic change
+		// pump supplies a different argument shape.
+		Input,
+
 		// `instance.ChildAdded` and `instance.ChildRemoved`. The subject is the
 		// parent, and the handler is called with the child.
 		ChildAdded,
@@ -235,6 +241,17 @@ namespace engine::script {
 		//
 		// @since v0.15
 		CrossWorldMessage,
+
+		// `SettingsService:SetMenuAction(name, label)` - the named row was
+		// activated in the client's ESC menu. The action name is the connection's
+		// `Property`, so independently-authored rows share one signal kind without
+		// hearing each other.
+		//
+		// No subject, because the menu belongs to the client presentation rather
+		// than to an instance in the world.
+		//
+		// @since v0.21
+		SettingsMenuAction,
 
 		// `tween.Completed` - a tween reached the end of its last pass.
 		//
