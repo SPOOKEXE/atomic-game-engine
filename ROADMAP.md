@@ -89,7 +89,23 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [x] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [x] porting Roblox games: the compatibility widget reports missing classes and property conflicts, maps each missing Roblox class to an insertable engine class, persists those choices, and the headless converter reloads every `.aworld` it writes.
-- [_] review additions and ensure they all work, we benchmark critical ones and test them.
+- [x] review additions and ensure they all work, we benchmark critical ones and test them.
+
+- [_] when you `Import World`, entire thing freezes with no progress bar or such. Add a progress bar showing what its doing, also optimise the code where you can (e.g. push to other threads for parallel work in decoding). Might be worth to optimise the external repository so everyone gets the boost, not just us. Then we can add async handling and polling, etc for it as well.
+- [_] build out the `Components` dock widget like properties where you can edit the component values
+- [_] Add a "Collection Tags" in properties + components where it lets you add collectionservice tags to objects in studio
+  manually - ensure it uses the CollectionService and such.
+- [_] the tooltip for "Faces Side" dropdown has "\n" embeded in text instead of actually doing newlines
+- [_] add tooltip for: Play, Run, Pause, Stop, Spawn Player, Remove Player, Insert Object, 
+- [_] remove the "Remove Active World" button in World dropdown
+- [_] create a `View > DataStores` dropdown for the datastore configuration and setup (move preferences - Data to this instead)
+- [_] For DataStores, add a way to select a DataStore backend (sqlite, sql, etc) which set the file format
+- [_] For "Root Folder", make it a "folder selector" instead. Also make `~/Documents/atomic-game-engine/studio/stores` the default.
+- [_] for live games, load datastore config from universe data (use a global universe manager not per world)
+- [_] for live games, universe config for datastore location tells you the folder where its stored
+- [_] Make a `View > CDN` dropdown and move all preferences tab content there instead. Add a `Configure CDN` button in Assets dock widget that opens the the CDN dock widget (or focuses it if already open).
+- [_] allow shader scripts to be saved and served on CDN.
+- [_] 
 
 ### v0.22
 
