@@ -61,6 +61,9 @@ in StressParticles demo:
 - [_] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
 - [_] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
 
+- [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use 
+- [_] optimise the top-10 world stress test.
+
 ### v0.23
 
 - [_] /docs/future-work/character-system.md
