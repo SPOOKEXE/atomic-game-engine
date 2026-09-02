@@ -75,7 +75,7 @@ All bottleneck issues should then specifically be with mono.studio and we'll nee
 Maybe add flamegraph categories for "engine", "server", "client", "studio" and "all", as part of the engine, then we submit data from studio/client/server to engine layer via binding.
 ```
 
-- [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use Rings demo to test.
+- [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use Rings demo to test. do headless rendering as we want simulation / other performance, not rendering for this.
 - [_] optimise the top-10 world stress test.
 
 ### v0.23
