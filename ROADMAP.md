@@ -40,13 +40,7 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.22
 
 - [x] make animations scriptable with a world-owned `AnimationBuffer` that `Animation` references while `AnimationTrack` keeps its one reference to `Animation`. Luau buffers and JavaScript ArrayBuffers can procedurally build keyframes, bake to the canonical AAN1 format, import or export baked bytes, save and replicate them, and play through a revision-cached render path. The animation demo and both script runtimes cover the full path.
-- [_] default R6 base character (capsule collider)
-- [_] plan out full character system + roblox humanoid shim + full roblox character controller shim (essentially custom instances for exposing the controller stuff)
-- [_] make humanoid a shim for character controller (so not a black box), loads a default one in
-- [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
-- [_] add accessories support
-- [_] animation + animation track + animator => binds to character controller
-- [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
+- [_] /docs/future-work/character-system.md
 
 - [x] build out ArcHandles, BoxHandleAdornments and related handle and selection adornments
 - [x] make the abstract GUI hierarchy virtual and non-creatable while keeping each class as metadata over its inherited component set
@@ -94,7 +88,6 @@ in StressParticles demo:
 
 - [_] /docs/future-work/world-streaming.md
 - [_] /docs/future-work/terrain-system.md
-- [_] /docs/future-work/character-system.md
 - [_] /docs/future-work/navigation-ai-system.md
 - [_] /docs/future-work/physics-expansion.md
 - [_] /docs/future-work/vfx-system.md
