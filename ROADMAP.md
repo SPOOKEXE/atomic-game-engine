@@ -58,11 +58,13 @@ in StressParticles demo:
 - [x] send only independently changed object rows, indices, skin offsets, joint words and occlusion data to the GPU; the warm StressParticles Studio run reused its draw list on all 4,005 captured frames and `upload-instances` rounded to 0.000 ms mean.
 - [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
 
-- [_] /docs/future-work/character-system.md
-- [_] gtlf default character (unreal style)
+- [_] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
+- [_] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
 
 ### v0.23
 
+- [_] /docs/future-work/character-system.md
+- [_] gtlf default character (unreal style)
 - [_] security audit, fuzzy tests, bound tests, etc.
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new instance for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
