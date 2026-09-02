@@ -467,6 +467,7 @@ namespace engine::gui {
 			// arrive, and a tree that had flattened the two would have to grow
 			// the split back at exactly the point somebody is adding a feature.
 			const ClassId guiBase = Classes::Register("GuiBase", instance, {});
+			Classes::SetCreatable(guiBase, false);
 
 			// **A service, so it hangs off `Instance` rather than off
 			// `GuiBase`.** It is not a thing that draws - it is the thing that
@@ -489,12 +490,14 @@ namespace engine::gui {
 			// `Adornment` - so what is registered here is what to outline and
 			// how, and nothing that resolves it into geometry.
 			const ClassId guiBase3d = Classes::Register("GuiBase3d", guiBase, {});
+			Classes::SetCreatable(guiBase3d, false);
 
 			// `PVAdornment` is Roblox's name for "an adornment about a
 			// `BasePart`", and the `Adornee` lives here rather than on
 			// `GuiBase3d` because that is where Roblox puts it.
 			const std::array adornment{Components::Of<Adornment>()};
 			const ClassId pvAdornment = Classes::Register("PVAdornment", guiBase3d, adornment);
+			Classes::SetCreatable(pvAdornment, false);
 
 			const std::array outline{Components::Of<SelectionOutline>()};
 			const ClassId selectionBox = Classes::Register("SelectionBox", pvAdornment, outline);
@@ -505,6 +508,7 @@ namespace engine::gui {
 			// cylinder cannot accidentally expose a box's `Size`.
 			const std::array handle{Components::Of<HandleShape>()};
 			const ClassId handleAdornment = Classes::Register("HandleAdornment", pvAdornment, handle);
+			Classes::SetCreatable(handleAdornment, false);
 
 			const std::array boxShape{Components::Of<BoxHandleShape>()};
 			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, boxShape);
@@ -533,11 +537,13 @@ namespace engine::gui {
 			// does, and the layout pass writes both.
 			const std::array base2d{Components::Of<Resolved>()};
 			const ClassId guiBase2d = Classes::Register("GuiBase2d", guiBase, base2d);
+			Classes::SetCreatable(guiBase2d, false);
 
 			const std::array object{
 				Components::Of<Element>(), Components::Of<Background>(), Components::Of<Selection>()
 			};
 			const ClassId guiObject = Classes::Register("GuiObject", guiBase2d, object);
+			Classes::SetCreatable(guiObject, false);
 
 			const ClassId frame = Classes::Register("Frame", guiObject, {});
 
@@ -549,6 +555,7 @@ namespace engine::gui {
 
 			const std::array button{Components::Of<Button>()};
 			const ClassId guiButton = Classes::Register("GuiButton", guiObject, button);
+			Classes::SetCreatable(guiButton, false);
 
 			const std::array label{Components::Of<Label>()};
 			const std::array picture{Components::Of<Picture>()};
@@ -557,6 +564,7 @@ namespace engine::gui {
 			const ClassId imageButton = Classes::Register("ImageButton", guiButton, picture);
 
 			const ClassId guiLabel = Classes::Register("GuiLabel", guiObject, {});
+			Classes::SetCreatable(guiLabel, false);
 			const ClassId textLabel = Classes::Register("TextLabel", guiLabel, label);
 			const ClassId imageLabel = Classes::Register("ImageLabel", guiLabel, picture);
 
@@ -571,6 +579,7 @@ namespace engine::gui {
 
 			const std::array collector{Components::Of<Layer>(), Components::Of<Canvas>()};
 			const ClassId layerCollector = Classes::Register("LayerCollector", guiBase2d, collector);
+			Classes::SetCreatable(layerCollector, false);
 
 			const ClassId screenGui = Classes::Register("ScreenGui", layerCollector, {});
 
@@ -593,6 +602,7 @@ namespace engine::gui {
 			// `PluginGui` produces no canvas, so nothing under it lays out and
 			// nothing under it is silently discarded.
 			const ClassId pluginGui = Classes::Register("PluginGui", layerCollector, {});
+			Classes::SetCreatable(pluginGui, false);
 			const ClassId dockWidget = Classes::Register("DockWidgetPluginGui", pluginGui, {});
 
 			// --- the modifiers -----------------------------------------------
@@ -600,6 +610,9 @@ namespace engine::gui {
 			const ClassId uiBase = Classes::Register("UIBase", instance, {});
 			const ClassId uiComponent = Classes::Register("UIComponent", uiBase, {});
 			const ClassId uiLayout = Classes::Register("UILayout", uiComponent, {});
+			Classes::SetCreatable(uiBase, false);
+			Classes::SetCreatable(uiComponent, false);
+			Classes::SetCreatable(uiLayout, false);
 
 			const std::array listLayout{Components::Of<ListLayout>()};
 			const ClassId uiListLayout = Classes::Register("UIListLayout", uiLayout, listLayout);
@@ -614,6 +627,7 @@ namespace engine::gui {
 			const ClassId uiPageLayout = Classes::Register("UIPageLayout", uiLayout, pageLayout);
 
 			const ClassId uiConstraint = Classes::Register("UIConstraint", uiComponent, {});
+			Classes::SetCreatable(uiConstraint, false);
 
 			const std::array aspect{Components::Of<AspectRatio>()};
 			const ClassId uiAspect = Classes::Register("UIAspectRatioConstraint", uiConstraint, aspect);

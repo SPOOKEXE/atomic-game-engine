@@ -73,6 +73,7 @@ TEST_CASE("value classes descend from ValueBase and expose exact property types"
 	RegisterSceneClasses();
 	const auto valueBase = Classes::Find(Name("ValueBase"));
 	REQUIRE(valueBase.IsValid());
+	CHECK_FALSE(Classes::Describe(valueBase).Creatable);
 
 	struct Expected {
 		const char *Class;
@@ -94,6 +95,7 @@ TEST_CASE("value classes descend from ValueBase and expose exact property types"
 		const auto klass = Classes::Find(Name(entry.Class));
 		REQUIRE(klass.IsValid());
 		CHECK(Classes::IsA(klass, valueBase));
+		CHECK(Classes::Describe(klass).Creatable);
 		CHECK(ValueType(entry.Class) == entry.Type);
 	}
 }

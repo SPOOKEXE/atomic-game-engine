@@ -56,8 +56,9 @@ TEST_CASE(
 	CHECK_FALSE(unknown);
 	CHECK(unknown.Failure == InstanceCreateFailure::UnknownClass);
 
-	const engine::ecs::ClassId virtualClass =
-		engine::ecs::Classes::Register("VirtualInstanceShim", engine::ecs::Classes::Find(engine::core::Name("Instance")), {});
+	const engine::ecs::ClassId virtualClass = engine::ecs::Classes::Register(
+		"VirtualInstanceShim", engine::ecs::Classes::Find(engine::core::Name("Instance")), {}
+	);
 	engine::ecs::Classes::SetCreatable(virtualClass, false);
 	const auto notCreatable = CreateScriptInstance(store, "VirtualInstanceShim");
 	CHECK_FALSE(notCreatable);
@@ -96,6 +97,10 @@ TEST_CASE("the instance shim is the only scriptable property door", "[script][in
 	CHECK(read == written);
 
 	engine::script::ScriptClass();
+	const auto sourceBase = engine::ecs::Classes::Find(engine::core::Name("LuaSourceContainer"));
+	REQUIRE(sourceBase.IsValid());
+	CHECK_FALSE(engine::ecs::Classes::Describe(sourceBase).Creatable);
+	CHECK(engine::ecs::Classes::Describe(engine::ecs::Classes::Find(engine::core::Name("Script"))).Creatable);
 	const auto script = CreateScriptInstance(store, "Script");
 	REQUIRE(script);
 	CHECK(ScriptableProperty(store, script.Instance, "LuaSource") == nullptr);

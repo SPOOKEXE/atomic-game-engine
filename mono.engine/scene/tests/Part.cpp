@@ -61,6 +61,15 @@ TEST_CASE("the part class inherits the whole set", "[scene][part]") {
 	CHECK(Classes::IsA(part, pvInstance));
 	CHECK(Classes::IsA(part, instance));
 	CHECK_FALSE(Classes::IsA(instance, part));
+
+	CHECK_FALSE(Classes::Describe(instance).Creatable);
+	CHECK_FALSE(Classes::Describe(pvInstance).Creatable);
+	CHECK_FALSE(Classes::Describe(basePart).Creatable);
+	CHECK(Classes::Describe(part).Creatable);
+	const ClassId folder = Classes::Find(Name("Folder"));
+	REQUIRE(folder.IsValid());
+	CHECK(Classes::IsA(folder, instance));
+	CHECK(Classes::Describe(folder).Creatable);
 }
 
 TEST_CASE("a part carries the five components the plan names", "[scene][part]") {

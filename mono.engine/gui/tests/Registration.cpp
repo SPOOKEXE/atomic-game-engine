@@ -233,6 +233,40 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 	}
 	CHECK_FALSE(Classes::Describe(GuiClass("GuiService")).Creatable);
 
+	for (const std::string_view name : {
+			 "GuiBase",
+			 "GuiBase2d",
+			 "GuiObject",
+			 "GuiButton",
+			 "GuiLabel",
+			 "LayerCollector",
+			 "GuiBase3d",
+			 "PVAdornment",
+			 "HandleAdornment",
+			 "UIBase",
+			 "UIComponent",
+			 "UILayout",
+			 "UIConstraint",
+			 "PluginGui",
+		 }) {
+		INFO(name);
+		CHECK_FALSE(Classes::Describe(GuiClass(name)).Creatable);
+	}
+
+	for (const std::string_view name : {
+			 "Frame",
+			 "TextButton",
+			 "TextLabel",
+			 "ScreenGui",
+			 "DockWidgetPluginGui",
+			 "UIListLayout",
+			 "UIAspectRatioConstraint",
+			 "BoxHandleAdornment",
+		 }) {
+		INFO(name);
+		CHECK(Classes::Describe(GuiClass(name)).Creatable);
+	}
+
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//

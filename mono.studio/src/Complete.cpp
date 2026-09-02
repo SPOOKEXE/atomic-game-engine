@@ -574,16 +574,6 @@ namespace studio {
 				continue;
 			}
 
-			// The abstract bases. Roblox does not let you insert an `Instance`
-			// or a `BasePart` either, and the run time *would* mint one -
-			// `LuauInstances.cpp` looks the name up and takes whatever it finds - so
-			// this is the only place that refuses.
-			const std::string_view name = info.Name.Text();
-			if (name == "Instance" || name == "PVInstance" || name == "BasePart" ||
-				name == "LuaSourceContainer") {
-				continue;
-			}
-
 			ids.push_back(id);
 		}
 

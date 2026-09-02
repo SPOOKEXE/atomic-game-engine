@@ -1823,9 +1823,11 @@ namespace engine::scene {
 				}
 				const ecs::Entity workspace = WorkspaceOf(store);
 				const bool active = link->Enabled && link->Part0 != ecs::NULL_ENTITY &&
-					link->Part1 != ecs::NULL_ENTITY && link->Part0 != link->Part1 &&
-					workspace != ecs::NULL_ENTITY && store.IsDescendantOf(instance, workspace) &&
-					store.IsDescendantOf(link->Part0, workspace) && store.IsDescendantOf(link->Part1, workspace);
+									link->Part1 != ecs::NULL_ENTITY && link->Part0 != link->Part1 &&
+									workspace != ecs::NULL_ENTITY &&
+									store.IsDescendantOf(instance, workspace) &&
+									store.IsDescendantOf(link->Part0, workspace) &&
+									store.IsDescendantOf(link->Part1, workspace);
 				*static_cast<bool *>(out) = active;
 				return true;
 			};
@@ -2037,6 +2039,7 @@ namespace engine::scene {
 			// migration nobody asked for.
 			const std::array pv{ecs::Components::Of<Transform>(), ecs::Components::Of<Pivot>()};
 			const ecs::ClassId pvInstance = ecs::Classes::Register("PVInstance", instance, pv);
+			ecs::Classes::SetCreatable(pvInstance, false);
 
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
@@ -2104,6 +2107,7 @@ namespace engine::scene {
 				// scene carried a component to say it was ordinary.
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
+			ecs::Classes::SetCreatable(basePart, false);
 
 			// Part adds nothing of its own: BasePart already holds the full
 			// set, and Part is the concrete leaf a script asks for by name. `Motion` and `Simulated` are the
@@ -2145,8 +2149,8 @@ namespace engine::scene {
 			// Workspace and WorldModel share this ancestry, so `IsA("WorldRoot")`
 			// reaches both without storing a second tag beside the class tree.
 			const ecs::ClassId worldRootClass = ecs::Classes::Register("WorldRoot", modelClass, {});
-			const ecs::ClassId worldModelClass =
-				ecs::Classes::Register("WorldModel", worldRootClass, {});
+			ecs::Classes::SetCreatable(worldRootClass, false);
+			const ecs::ClassId worldModelClass = ecs::Classes::Register("WorldModel", worldRootClass, {});
 			(void)worldModelClass;
 
 			// **A `Tool` is a `Model` a character can be holding**, and holding
@@ -2388,6 +2392,7 @@ namespace engine::scene {
 			// `Value` property, so a `BoolValue` does not pay for a string and an
 			// `ObjectValue` cannot contain a value of the wrong kind.
 			const ecs::ClassId valueBase = ecs::Classes::Register("ValueBase", instance, {});
+			ecs::Classes::SetCreatable(valueBase, false);
 
 			const std::array text{ecs::Components::Of<TextContent>()};
 			const ecs::ClassId stringValue = ecs::Classes::Register("StringValue", valueBase, text);
@@ -2519,6 +2524,7 @@ namespace engine::scene {
 			// expressible.
 			const std::array joined{ecs::Components::Of<Constraint>()};
 			const ecs::ClassId constraintClass = ecs::Classes::Register("Constraint", instance, joined);
+			ecs::Classes::SetCreatable(constraintClass, false);
 			const ecs::ClassId ballClass =
 				ecs::Classes::Register("BallSocketConstraint", constraintClass, {});
 			const ecs::ClassId hingeClass = ecs::Classes::Register("HingeConstraint", constraintClass, {});
@@ -2532,6 +2538,7 @@ namespace engine::scene {
 			const std::array legacyJoint{ecs::Components::Of<JointInstance>()};
 			const ecs::ClassId jointInstanceClass =
 				ecs::Classes::Register("JointInstance", instance, legacyJoint);
+			ecs::Classes::SetCreatable(jointInstanceClass, false);
 			const ecs::ClassId weldClass = ecs::Classes::Register("Weld", jointInstanceClass, {});
 
 			const std::array directWeld{ecs::Components::Of<WeldConstraint>()};
@@ -3133,9 +3140,7 @@ namespace engine::scene {
 			ecs::Classes::Property<&WeldConstraint::Part0>(weldConstraintClass, "Part0");
 			ecs::Classes::Property<&WeldConstraint::Part1>(weldConstraintClass, "Part1");
 			ecs::Classes::Property<&WeldConstraint::Enabled>(weldConstraintClass, "Enabled");
-			ecs::Classes::Computed(
-				weldConstraintClass, RigidLinkActiveProperty<WeldConstraint>()
-			);
+			ecs::Classes::Computed(weldConstraintClass, RigidLinkActiveProperty<WeldConstraint>());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like. The

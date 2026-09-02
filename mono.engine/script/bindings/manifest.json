@@ -19,6 +19,16 @@
 		{
 			"name": "Instance",
 			"parent": null,
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+			]
+		},
+		{
+			"name": "Folder",
+			"parent": "Instance",
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
@@ -29,7 +39,7 @@
 		{
 			"name": "PVInstance",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -43,7 +53,7 @@
 		{
 			"name": "BasePart",
 			"parent": "PVInstance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Bounds", "scene.Collider", "scene.LocalTransparency", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -178,7 +188,7 @@
 		{
 			"name": "WorldRoot",
 			"parent": "Model",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
 			"properties": [
 				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
@@ -520,7 +530,7 @@
 		{
 			"name": "ValueBase",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -847,7 +857,7 @@
 		{
 			"name": "Constraint",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Constraint"],
 			"properties": [
 				{"name": "Attachment0", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Constraint"], "writes": ["scene.Constraint"]},
@@ -1001,7 +1011,7 @@
 		{
 			"name": "JointInstance",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.JointInstance"],
 			"properties": [
 				{"name": "Active", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["ecs.Hierarchy", "scene.JointInstance"], "writes": []},
@@ -1084,7 +1094,7 @@
 		{
 			"name": "LuaSourceContainer",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "script.LuaSourceContainer"],
 			"properties": [
 				{"name": "Disabled", "type": "bool", "kind": "structural", "bytes": 1, "writable": true, "reads": ["script.Disabled"], "writes": ["script.Disabled"]},
@@ -1284,7 +1294,7 @@
 		{
 			"name": "GuiBase",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -1307,7 +1317,7 @@
 		{
 			"name": "GuiBase3d",
 			"parent": "GuiBase",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -1317,7 +1327,7 @@
 		{
 			"name": "PVAdornment",
 			"parent": "GuiBase3d",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -1371,7 +1381,7 @@
 		{
 			"name": "HandleAdornment",
 			"parent": "PVAdornment",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Adornment", "gui.HandleShape"],
 			"properties": [
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
@@ -1524,7 +1534,7 @@
 		{
 			"name": "GuiBase2d",
 			"parent": "GuiBase",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Resolved"],
 			"properties": [
 				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
@@ -1537,7 +1547,7 @@
 		{
 			"name": "GuiObject",
 			"parent": "GuiBase2d",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Element", "gui.Resolved", "gui.Selection"],
 			"properties": [
 				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
@@ -1704,7 +1714,7 @@
 		{
 			"name": "GuiButton",
 			"parent": "GuiObject",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Button", "gui.Element", "gui.Resolved", "gui.Selection"],
 			"properties": [
 				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
@@ -1849,7 +1859,7 @@
 		{
 			"name": "GuiLabel",
 			"parent": "GuiObject",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Element", "gui.Resolved", "gui.Selection"],
 			"properties": [
 				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
@@ -2094,7 +2104,7 @@
 		{
 			"name": "LayerCollector",
 			"parent": "GuiBase2d",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Canvas", "gui.Layer", "gui.Resolved"],
 			"properties": [
 				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
@@ -2191,7 +2201,7 @@
 		{
 			"name": "PluginGui",
 			"parent": "LayerCollector",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Canvas", "gui.Layer", "gui.Resolved"],
 			"properties": [
 				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
@@ -2225,7 +2235,7 @@
 		{
 			"name": "UIBase",
 			"parent": "Instance",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -2235,7 +2245,7 @@
 		{
 			"name": "UIComponent",
 			"parent": "UIBase",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -2245,7 +2255,7 @@
 		{
 			"name": "UILayout",
 			"parent": "UIComponent",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -2328,7 +2338,7 @@
 		{
 			"name": "UIConstraint",
 			"parent": "UIComponent",
-			"constructible": true,
+			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
 			"properties": [
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},

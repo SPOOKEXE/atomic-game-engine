@@ -113,6 +113,7 @@ TEST_CASE("every constraint class descends from the base", "[scene][constraints]
 	RegisterSceneClasses();
 
 	REQUIRE(ConstraintClass().IsValid());
+	CHECK_FALSE(Classes::Describe(ConstraintClass()).Creatable);
 	for (const char *klass :
 		 {"BallSocketConstraint",
 		  "HingeConstraint",
@@ -121,7 +122,9 @@ TEST_CASE("every constraint class descends from the base", "[scene][constraints]
 		  "RopeConstraint",
 		  "SpringConstraint"}) {
 		INFO(klass);
-		CHECK(Classes::IsA(Classes::Find(Name(klass)), ConstraintClass()));
+		const auto concrete = Classes::Find(Name(klass));
+		CHECK(Classes::IsA(concrete, ConstraintClass()));
+		CHECK(Classes::Describe(concrete).Creatable);
 	}
 }
 
@@ -133,6 +136,8 @@ TEST_CASE("Weld and WeldConstraint use their Roblox part-based hierarchies", "[s
 	const auto weldClass = Classes::Find(Name("Weld"));
 	const auto directClass = Classes::Find(Name("WeldConstraint"));
 	REQUIRE(jointBase.IsValid());
+	CHECK_FALSE(Classes::Describe(jointBase).Creatable);
+	CHECK(Classes::Describe(weldClass).Creatable);
 	CHECK(Classes::IsA(weldClass, jointBase));
 	CHECK_FALSE(Classes::IsA(directClass, ConstraintClass()));
 

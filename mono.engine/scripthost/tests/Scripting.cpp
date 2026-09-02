@@ -5605,7 +5605,7 @@ TEST_CASE("an instance with no placement answers a pivot anyway", "[scripting]")
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	MustRun(*runtime, R"(
-		local folder = Instance.new('Instance')
+		local folder = Instance.new('Folder')
 		assert(folder:GetPivot().Position.Magnitude < 1e-4, 'identity pivot')
 
 		-- And moving it does nothing rather than erroring mid-frame.
@@ -5692,7 +5692,7 @@ TEST_CASE("a script cannot hand a body to something that is not a player", "[scr
 	CHECK_FALSE(runtime->Run(R"(
 		local part = Instance.new('Part')
 		part.Anchored = false
-		local folder = Instance.new('Instance')
+		local folder = Instance.new('Folder')
 		part:SetNetworkOwner(folder)
 	)"));
 	CHECK(runtime->LastError().find("SetNetworkOwner") != std::string::npos);

@@ -67,6 +67,8 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 	CHECK(Classes::IsA(store.ClassOf(workspace), Classes::Find(Name("WorldRoot"))));
 	CHECK(Classes::IsA(Classes::Find(Name("WorldRoot")), Classes::Find(Name("Model"))));
 	CHECK(Classes::IsA(Classes::Find(Name("WorldModel")), Classes::Find(Name("WorldRoot"))));
+	CHECK_FALSE(Classes::Describe(Classes::Find(Name("WorldRoot"))).Creatable);
+	CHECK(Classes::Describe(Classes::Find(Name("WorldModel"))).Creatable);
 	CHECK_FALSE(Classes::Describe(store.ClassOf(workspace)).Creatable);
 	CHECK_FALSE(Classes::Describe(Classes::Find(Name("Lighting"))).Creatable);
 
