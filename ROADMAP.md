@@ -58,10 +58,10 @@ in StressParticles demo:
 - [x] send only independently changed object rows, indices, skin offsets, joint words and occlusion data to the GPU; the warm StressParticles Studio run reused its draw list on all 4,005 captured frames and `upload-instances` rounded to 0.000 ms mean.
 - [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
 
-- [_] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
-- [_] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
+- [x] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
+- [x] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
 
-- [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use 
+- [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use Rings demo to test.
 - [_] optimise the top-10 world stress test.
 
 ### v0.23
