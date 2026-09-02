@@ -101,6 +101,18 @@ Development builds and media are in the discord server below.
 
 ---
 
+## Benchmarks
+
+There are `just` jobs for benchmarking.
+
+Do NOT write benchmarks to file.
+
+If you are creating new benchmarks, add a `just` job for that benchmark.
+
+Ensure benchmark outputs are under where the builds are.
+
+---
+
 ## The six rules
 
 ### 1. The layer stack is not negotiable

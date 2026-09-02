@@ -55,14 +55,24 @@ fix:
 - [_] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
 - [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
 right now it just displays the components with byte sizes but they are not editable or anything.
-- [_] edit to studio ui
+- [x] edit to studio ui
 
 ### v0.23
 
+- [_] atomic engine icons?
+- [_] add icon pack to studio?
+- [_] security audit, fuzzy tests, bound tests, etc.
+
 - [_] /docs/future-work/character-system.md
 - [_] gtlf default character (unreal style)
-- [_] security audit, fuzzy tests, bound tests, etc.
-- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new instance for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
+
+- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
+- [_] in World => Create World From Demo, move to under Demo dropdown and separate by simple/advanced categories.
+
+new demos:
+- [_] port TornadoSim as a demo scene in the engine.
+- [_] blackhole simulator (warp space, warp visual, etc)
+- [_] user interface (copy bladeborne's for demo?), luau scripting and such
 
 ### v0.24
 
@@ -99,9 +109,8 @@ right now it just displays the components with byte sizes but they are not edita
 
 ### FUTURE
 
+- [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] maybe consider converting a bunch of custom tools to plugins and have them built-in to studio, or make a plugin pack as a extra release file you can import to a plugins/ folder in ~/Documents/atomic-game-engine/studio/plugins
-
-- [_] review additions from v0.20 and refine further, was rewriting alot so its experimental
 - [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
 - [_] unity porting tools / unity shop
 - [_] consider adding C# as another scripting langauge?
@@ -112,9 +121,8 @@ right now it just displays the components with byte sizes but they are not edita
 - [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
-- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?), ai village with daily routines and such
+- [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
 - [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
-- [_] port TornadoSim as a demo scene in the engine.
 - [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well
 - [_] figma import tools
@@ -125,11 +133,8 @@ right now it just displays the components with byte sizes but they are not edita
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] localization support
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
-- [_] atomic engine icons
-- [_] studio icons
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
-- [_] go through docs/future-work/REVISIT_IDEAS.md for things we can do sooner.
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
