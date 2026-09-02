@@ -384,6 +384,21 @@ function(_mono_keep_spdlog_sources_apart sources)
 	endforeach()
 endfunction()
 
+# Bind profiler scopes to the product that compiled the call site. Engine
+# modules need no definition because Profiling.hpp defaults them to Engine.
+function(_mono_bind_profile_owner target name)
+	if(name STREQUAL "client")
+		target_compile_definitions(${target} PRIVATE
+			ENGINE_PROFILE_OWNER=::engine::core::ProfileOwner::Client)
+	elseif(name STREQUAL "server")
+		target_compile_definitions(${target} PRIVATE
+			ENGINE_PROFILE_OWNER=::engine::core::ProfileOwner::Server)
+	elseif(name STREQUAL "studio")
+		target_compile_definitions(${target} PRIVATE
+			ENGINE_PROFILE_OWNER=::engine::core::ProfileOwner::Studio)
+	endif()
+endfunction()
+
 # ---------------------------------------------------------------------------
 # mono_add_library
 # ---------------------------------------------------------------------------
@@ -480,6 +495,7 @@ function(mono_add_library name)
 		# module's, logging from inside another module's source, is that other
 		# module's line to explain.
 		target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+		_mono_bind_profile_owner(${target} ${name})
 
 		target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 		if(MONO_COMPILE_DEFINITIONS)
@@ -543,6 +559,7 @@ function(mono_add_tests name)
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::testmain Catch2::Catch2)
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_bind_profile_owner(${target} ${name})
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 	if(MONO_COMPILE_DEFINITIONS)
 		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})
@@ -617,6 +634,7 @@ function(mono_add_benchmarks name)
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::benchmain)
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_bind_profile_owner(${target} ${name})
 	_mono_batch_headers(${target} "${sources}" FALSE)
 
 	# Optimised whatever the preset says, because a debug build measures the
@@ -680,6 +698,7 @@ function(mono_add_program name)
 	target_compile_features(${target} PRIVATE cxx_std_20)
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} ${ARG_VENDOR})
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_bind_profile_owner(${target} ${name})
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 	if(MONO_COMPILE_DEFINITIONS)
 		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})

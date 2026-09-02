@@ -6145,12 +6145,16 @@ namespace studio {
 			// The published snapshot - what is drawn.
 			//@{
 			std::vector<DiagnosticSpan> Spans;
+			// Owner-only view of `Spans`, rebuilt without allocations when the
+			// published snapshot or owner selection changes.
+			std::vector<DiagnosticSpan> FilteredSpans;
 			// Display-only copy with synthetic `unaccounted` children. Retained so
 			// an open profiler does not allocate a second tree every repaint.
 			std::vector<DiagnosticSpan> DisplaySpans;
 			std::vector<uint32_t> Rows;
 			uint32_t DisplayRows = 0;
 			bool DisplayDirty = true;
+			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;

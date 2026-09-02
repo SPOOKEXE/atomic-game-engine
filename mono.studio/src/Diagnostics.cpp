@@ -113,6 +113,7 @@ namespace studio {
 		struct SiblingKey {
 			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
 			std::string_view Name;
+			engine::core::ProfileOwner Owner = engine::core::ProfileOwner::Engine;
 
 			bool operator==(const SiblingKey &) const = default;
 		};
@@ -125,7 +126,8 @@ namespace studio {
 		};
 		struct SiblingHash {
 			size_t operator()(const SiblingKey &key) const {
-				return std::hash<std::string_view>{}(key.Name) ^ (static_cast<size_t>(key.Parent) << 1);
+				return std::hash<std::string_view>{}(key.Name) ^ (static_cast<size_t>(key.Parent) << 1) ^
+					   (static_cast<size_t>(key.Owner) << 9);
 			}
 		};
 		struct StructuralHash {
@@ -152,7 +154,7 @@ namespace studio {
 
 		for (size_t index = 0; index < totals.size(); index++) {
 			const DiagnosticSpan &span = totals[index];
-			const SiblingKey sibling{span.Parent, span.Name};
+			const SiblingKey sibling{span.Parent, span.Name, span.Owner};
 			const uint32_t ordinal = ordinals[sibling]++;
 			targetByKey.emplace(
 				StructuralKey{.Sibling = sibling, .Depth = span.Depth, .Ordinal = ordinal},
@@ -169,7 +171,7 @@ namespace studio {
 			// The ordinal is local to one parent. Three worlds can each contain an
 			// `ecs.systems`; they are three children of three different parents, not
 			// the first, second and third occurrence of one global name.
-			const SiblingKey sibling{parent, source.Name};
+			const SiblingKey sibling{parent, source.Name, source.Owner};
 			const uint32_t ordinal = ordinals[sibling]++;
 			const StructuralKey key{.Sibling = sibling, .Depth = source.Depth, .Ordinal = ordinal};
 
@@ -188,6 +190,7 @@ namespace studio {
 						.Depth = source.Depth,
 						.Parent = parent,
 						.Category = source.Category,
+						.Owner = source.Owner,
 						.Reported = source.Reported,
 					}
 				);
@@ -208,6 +211,44 @@ namespace studio {
 		// frames, but never keep those borrowed views after either owner can move.
 		ordinals.clear();
 		targetByKey.clear();
+	}
+
+	void FilterDiagnosticSpans(
+		std::span<const DiagnosticSpan> spans,
+		engine::core::ProfileOwner owner,
+		std::vector<DiagnosticSpan> &filtered
+	) {
+		filtered.clear();
+		filtered.reserve(spans.size());
+		if (owner == engine::core::ProfileOwner::All) {
+			filtered.assign(spans.begin(), spans.end());
+			return;
+		}
+
+		static thread_local std::vector<uint32_t> retained;
+		retained.assign(spans.size(), engine::core::FrameGraph::NO_PARENT);
+
+		for (size_t index = 0; index < spans.size(); index++) {
+			const DiagnosticSpan &source = spans[index];
+			if (source.Owner != owner) {
+				continue;
+			}
+
+			uint32_t parent = source.Parent;
+			while (parent < index && retained[parent] == engine::core::FrameGraph::NO_PARENT) {
+				parent = spans[parent].Parent;
+			}
+			const uint32_t filteredParent =
+				parent < index ? retained[parent] : engine::core::FrameGraph::NO_PARENT;
+
+			DiagnosticSpan copy = source;
+			copy.Parent = filteredParent;
+			copy.Depth = filteredParent == engine::core::FrameGraph::NO_PARENT
+							 ? 0
+							 : filtered[filteredParent].Depth + 1;
+			retained[index] = static_cast<uint32_t>(filtered.size());
+			filtered.push_back(std::move(copy));
+		}
 	}
 
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames) {
@@ -427,6 +468,7 @@ namespace studio {
 						.Milliseconds = measured,
 						.SelfMilliseconds = measured,
 						.Category = engine::core::ProfileCategory::Engine,
+						.Owner = parent.Owner,
 					}
 				);
 			};
@@ -464,6 +506,7 @@ namespace studio {
 		using engine::core::FrameGraph;
 		using engine::core::FrameSpan;
 		using engine::core::ProfileCategory;
+		using engine::core::ProfileOwner;
 
 		// How often the frame graph publishes, in seconds. Index 0 is every
 		// frame, which is what the panel did before it could be told otherwise.
@@ -828,6 +871,7 @@ namespace studio {
 						span.SelfMilliseconds,
 						span.IdleMilliseconds,
 						span.Category,
+						span.Owner,
 						span.Reported,
 					}
 				);
@@ -917,7 +961,6 @@ namespace studio {
 			}
 		}
 
-		const std::vector<DiagnosticSpan> &spans = view.Spans;
 		const float frameMs = view.FrameMilliseconds;
 		const float idleMs = view.IdleMilliseconds;
 		const float busyMs = std::max(frameMs - idleMs, 0.0f);
@@ -925,12 +968,19 @@ namespace studio {
 		std::vector<DiagnosticSpan> &graphSpans = view.DisplaySpans;
 		if (view.DisplayDirty) {
 			ENGINE_PROFILE_CAT("frame graph layout", engine::core::ProfileCategory::Engine);
-			graphSpans = spans;
+			if (view.OwnerFilter != ProfileOwner::All) {
+				FilterDiagnosticSpans(view.Spans, view.OwnerFilter, view.FilteredSpans);
+			}
+			const std::vector<DiagnosticSpan> &selected =
+				view.OwnerFilter == ProfileOwner::All ? view.Spans : view.FilteredSpans;
+			graphSpans = selected;
 			FitReportedDiagnosticTimeline(graphSpans, frameMs);
 			AppendUnaccountedDiagnosticSpans(graphSpans);
 			view.DisplayRows = LayoutDiagnosticRows(graphSpans, view.Rows);
 			view.DisplayDirty = false;
 		}
+		const std::vector<DiagnosticSpan> &spans =
+			view.OwnerFilter == ProfileOwner::All ? view.Spans : view.FilteredSpans;
 
 		const char *millisecondsFormat = frameMs < 1.0f ? "%.3f" : "%.2f";
 		ImGui::Text(frameMs < 1.0f ? "%.3f ms" : "%.2f ms", static_cast<double>(frameMs));
@@ -995,6 +1045,27 @@ namespace studio {
 				}
 			}
 			ImGui::EndCombo();
+		}
+
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
+		const std::string ownerName(engine::core::GetProfileOwnerName(view.OwnerFilter));
+		if (ImGui::BeginCombo("owner", ownerName.c_str())) {
+			for (size_t index = 0; index < static_cast<size_t>(ProfileOwner::Count); index++) {
+				const auto owner = static_cast<ProfileOwner>(index);
+				const std::string name(engine::core::GetProfileOwnerName(owner));
+				if (ImGui::Selectable(name.c_str(), owner == view.OwnerFilter)) {
+					view.OwnerFilter = owner;
+					view.DisplayDirty = true;
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Show all nested application work, or only spans submitted by one product layer."
+			);
 		}
 
 		ImGui::SameLine();
@@ -1355,7 +1426,8 @@ namespace studio {
 				DescribeDiagnosticSpan(hovered->Name, hovered->Category, hovered->Reported);
 			ImGui::TextWrapped("%.*s", static_cast<int>(description.size()), description.data());
 			ImGui::Text(
-				"%s%s",
+				"%s owner   %s%s",
+				GetProfileOwnerName(hovered->Owner).data(),
 				GetCategoryName(hovered->Category).data(),
 				hovered->Reported ? "   (reported from another thread)" : ""
 			);

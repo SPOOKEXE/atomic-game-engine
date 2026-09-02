@@ -51,6 +51,12 @@
 // @param b Right token.
 #define ENGINE_PROFILE_CONCAT(a, b) ENGINE_PROFILE_CONCAT_(a, b)
 
+// The build binds product translation units to their profiler owner. Engine
+// modules and external consumers use the engine owner by default.
+#if !defined(ENGINE_PROFILE_OWNER)
+#define ENGINE_PROFILE_OWNER ::engine::core::ProfileOwner::Engine
+#endif
+
 #if defined(ENGINE_TRACY)
 
 // Opens a Tracy zone and FrameGraph scope until the enclosing C++ scope exits.
@@ -73,7 +79,7 @@
 	ZoneNamedN(ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__), name, true);                             \
 	ENGINE_HEAP_SCOPE(name);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
-		name, category                                                                                       \
+		name, category, ENGINE_PROFILE_OWNER                                                                 \
 	}
 
 // Opens a dynamically named Tracy zone and copied-name FrameGraph scope.
@@ -100,7 +106,7 @@
 	} while (0);                                                                                             \
 	ENGINE_HEAP_SCOPE(fallback);                                                                             \
 	::engine::core::FrameGraph::CopiedScope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {           \
-		fallback, view, category                                                                             \
+		fallback, view, category, ENGINE_PROFILE_OWNER                                                       \
 	}
 
 // Opens a dynamically named Tracy zone and stable-name FrameGraph scope.
@@ -127,7 +133,7 @@
 	} while (0);                                                                                             \
 	ENGINE_HEAP_SCOPE(view);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
-		view, category                                                                                       \
+		view, category, ENGINE_PROFILE_OWNER                                                                 \
 	}
 
 // Profiles producer work on a non-frame thread. The frame owner reports the
@@ -161,7 +167,7 @@
 #define ENGINE_PROFILE_CAT(name, category)                                                                   \
 	ENGINE_HEAP_SCOPE(name);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
-		name, category                                                                                       \
+		name, category, ENGINE_PROFILE_OWNER                                                                 \
 	}
 
 // Opens a copied-name FrameGraph scope until the enclosing C++ scope exits.
@@ -175,7 +181,7 @@
 #define ENGINE_PROFILE_DYNAMIC(fallback, view, category)                                                     \
 	ENGINE_HEAP_SCOPE(fallback);                                                                             \
 	::engine::core::FrameGraph::CopiedScope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {           \
-		fallback, view, category                                                                             \
+		fallback, view, category, ENGINE_PROFILE_OWNER                                                       \
 	}
 
 // Opens a stable-name FrameGraph scope until the enclosing C++ scope exits.
@@ -190,7 +196,7 @@
 #define ENGINE_PROFILE_DYNAMIC_STABLE(fallback, view, category)                                              \
 	ENGINE_HEAP_SCOPE(view);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
-		view, category                                                                                       \
+		view, category, ENGINE_PROFILE_OWNER                                                                 \
 	}
 
 // Keeps heap attribution on producer threads when Tracy is not compiled in.

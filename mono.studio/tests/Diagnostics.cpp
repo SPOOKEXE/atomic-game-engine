@@ -17,9 +17,40 @@ using studio::AccumulateDiagnosticSpans;
 using studio::AppendUnaccountedDiagnosticSpans;
 using studio::DescribeDiagnosticSpan;
 using studio::DiagnosticSpan;
+using studio::FilterDiagnosticSpans;
 using studio::FinishDiagnosticAverage;
 using studio::FitReportedDiagnosticTimeline;
 using studio::LayoutDiagnosticRows;
+
+TEST_CASE("owner filters retain valid product trees", "[studio][diagnostics]") {
+	using engine::core::ProfileOwner;
+
+	const std::array spans{
+		DiagnosticSpan{.Name = "Application", .Owner = ProfileOwner::Studio},
+		DiagnosticSpan{.Name = "presentation", .Depth = 1, .Parent = 0, .Owner = ProfileOwner::Studio},
+		DiagnosticSpan{.Name = "client runtime", .Depth = 2, .Parent = 1, .Owner = ProfileOwner::Client},
+		DiagnosticSpan{.Name = "Universe::Tick", .Depth = 3, .Parent = 2, .Owner = ProfileOwner::Engine},
+		DiagnosticSpan{.Name = "interface", .Depth = 2, .Parent = 1, .Owner = ProfileOwner::Studio},
+	};
+
+	std::vector<DiagnosticSpan> filtered;
+	FilterDiagnosticSpans(spans, ProfileOwner::Studio, filtered);
+	REQUIRE(filtered.size() == 3);
+	CHECK(filtered[0].Name == "Application");
+	CHECK(filtered[1].Parent == 0);
+	CHECK(filtered[2].Parent == 1);
+	CHECK(filtered[2].Depth == 2);
+
+	FilterDiagnosticSpans(spans, ProfileOwner::Engine, filtered);
+	REQUIRE(filtered.size() == 1);
+	CHECK(filtered[0].Name == "Universe::Tick");
+	CHECK(filtered[0].Parent == FrameGraph::NO_PARENT);
+	CHECK(filtered[0].Depth == 0);
+
+	FilterDiagnosticSpans(spans, ProfileOwner::All, filtered);
+	REQUIRE(filtered.size() == spans.size());
+	CHECK(filtered[3].Parent == 2);
+}
 
 TEST_CASE("every diagnostic span has an explanatory tooltip", "[studio][diagnostics]") {
 	CHECK(
