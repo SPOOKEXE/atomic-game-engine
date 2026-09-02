@@ -42,9 +42,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Fix viewport image drag issue
 - [x] Fix dragging floating dock widgets when sub-ui-objects already handle drag operations (e.g. 3d mesh preview in Demo Nodes, when dragging in preview it drags floating dock widget instead of only the image)
 - [x] add 180 degree flip to X/Y/Z gizmo
-- [_] when I run the StressParticle demo, it grows the particle pool. Ensure when i stop running the world, it de-allocates them.
-- [_] add tests for pooled de-allocation for things like particle allocations, texture allocations, etc.
-- [_] fix images rotating opposite way when dragging mouse in preview images (e.g. 3d mesh preview in demo nodes dragging opposite way)
+- [x] when I run the StressParticle demo, it grows the particle pool. Ensure when i stop running the world, it de-allocates them.
+- [x] add tests for pooled de-allocation for things like particle allocations, texture allocations, etc.
+- [x] fix images rotating opposite way when dragging mouse in preview images (e.g. 3d mesh preview in demo nodes dragging opposite way)
+- [_] headless gpu pass tests for checking pooled allocation and deallocation, checking rendered images
 
 fix:
 - [_] in the ECS `Components` inspector, add the ability to edit the component values.
