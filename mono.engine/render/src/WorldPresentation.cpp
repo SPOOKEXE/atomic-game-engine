@@ -274,6 +274,11 @@ namespace engine::render {
 			RENDERED_REVISION,
 		};
 
+		struct DrawSourceChanges {
+			bool Pose = false;
+			bool Full = false;
+		};
+
 		bool DrawableSource(const Store &store, Entity entity) {
 			return store.Has<Transform>(entity) && store.Has<PreviousTransform>(entity) &&
 				   store.Has<Bounds>(entity) && store.Has<Visual>(entity) &&
@@ -305,51 +310,141 @@ namespace engine::render {
 			return changed || !visited;
 		}
 
-		bool DrawSourcesChanged(
+		template <class Component>
+		bool SourceRevisionAdvanced(Store &store, DrawList &drawList, SourceRevision slot) {
+			store.Observe<Component>();
+			const uint64_t revision = store.ComponentChangeVersion<Component>();
+			uint64_t &seen = drawList.SourceRevisions[slot];
+			const bool changed = drawList.SourcesReady && revision != seen;
+			seen = revision;
+			return changed;
+		}
+
+		DrawSourceChanges DrawSourcesChanged(
 			Store &store, DrawList &drawList, size_t matching, size_t skeletons, size_t bones
 		) {
-			bool changed = !drawList.SourcesReady || matching != drawList.SourceEntityCount ||
+			DrawSourceChanges changes;
+			changes.Full = !drawList.SourcesReady || matching != drawList.SourceEntityCount ||
 						   skeletons != drawList.SkeletonCount || bones != drawList.BoneCount;
 			const auto drawable = [&store](Entity entity) { return DrawableSource(store, entity); };
-			const auto drawableOrBone = [&store, skeletons](Entity entity) {
-				return DrawableSource(store, entity) || (skeletons != 0 && store.Has<Bone>(entity));
-			};
 
-			changed |= SourceRevisionChanged<Transform>(store, drawList, TRANSFORM_REVISION, drawableOrBone);
-			changed |= SourceRevisionChanged<PreviousTransform>(
-				store, drawList, PREVIOUS_TRANSFORM_REVISION, drawable
-			);
-			changed |= SourceRevisionChanged<Bounds>(store, drawList, BOUNDS_REVISION, drawable);
-			changed |= SourceRevisionChanged<Visual>(store, drawList, VISUAL_REVISION, drawable);
-			changed |= SourceRevisionChanged<SurfaceAppearance>(store, drawList, SURFACE_REVISION, drawable);
-			changed |= SourceRevisionChanged<Tags>(store, drawList, TAGS_REVISION, drawable);
-			changed |=
+			// Pose columns only affect the interpolated frame or the skin palette.
+			// Their monotonic epoch is enough: walking every changed transform and
+			// asking eight membership questions per row cost more than updating the
+			// packed frame columns it was trying to avoid.
+			changes.Pose |= SourceRevisionAdvanced<Transform>(store, drawList, TRANSFORM_REVISION);
+			changes.Pose |=
+				SourceRevisionAdvanced<PreviousTransform>(store, drawList, PREVIOUS_TRANSFORM_REVISION);
+			changes.Full |= SourceRevisionChanged<Bounds>(store, drawList, BOUNDS_REVISION, drawable);
+			changes.Full |= SourceRevisionChanged<Visual>(store, drawList, VISUAL_REVISION, drawable);
+			changes.Full |=
+				SourceRevisionChanged<SurfaceAppearance>(store, drawList, SURFACE_REVISION, drawable);
+			changes.Full |= SourceRevisionChanged<Tags>(store, drawList, TAGS_REVISION, drawable);
+			changes.Full |=
 				SourceRevisionChanged<LocalTransparency>(store, drawList, TRANSPARENCY_REVISION, drawable);
-			changed |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
-			changed |=
-				SourceRevisionChanged<Skeleton>(store, drawList, SKELETON_REVISION, [&store](Entity entity) {
-					return store.Has<Skeleton>(entity);
-				});
-			changed |= SourceRevisionChanged<Bone>(store, drawList, BONE_REVISION, [&store](Entity entity) {
-				return store.Has<Bone>(entity);
-			});
+			changes.Full |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
+			changes.Pose |= SourceRevisionAdvanced<Skeleton>(store, drawList, SKELETON_REVISION);
+			changes.Pose |= SourceRevisionAdvanced<Bone>(store, drawList, BONE_REVISION);
 
 			store.Observe<Rendered>();
 			const uint64_t renderedRevision = store.ComponentChangeVersion<Rendered>();
-			changed |=
+			changes.Full |=
 				drawList.SourcesReady && renderedRevision != drawList.SourceRevisions[RENDERED_REVISION];
 			drawList.SourceRevisions[RENDERED_REVISION] = renderedRevision;
 			drawList.SourceEntityCount = matching;
 			drawList.SkeletonCount = skeletons;
 			drawList.BoneCount = bones;
 			drawList.SourcesReady = true;
-			return changed;
+			return changes;
 		}
 
 		bool SameFrame(const core::CFrame &left, const core::CFrame &right) {
 			return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
 				   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
 				   left.QuaternionW == right.QuaternionW;
+		}
+
+		size_t UpdateDrawFrames(Store &store, DrawList &drawList, float alpha, size_t grain) {
+			std::atomic_bool hasInterpolation = false;
+			DrawInstance *const out = drawList.Instances.data();
+			const size_t capacity = drawList.Instances.size();
+			const auto write = [out, capacity, alpha, &hasInterpolation](
+								   size_t base,
+								   size_t first,
+								   size_t rows,
+								   const Transform *transforms,
+								   const PreviousTransform *previous
+							   ) {
+				const size_t at = base + first;
+				if (at >= capacity) {
+					return;
+				}
+				rows = std::min(rows, capacity - at);
+				bool foundInterpolation = false;
+				for (size_t row = 0; row < rows; row++) {
+					const bool moving = !SameFrame(previous[row].Frame, transforms[row].Frame);
+					foundInterpolation |= moving;
+					out[at + row].Frame = moving ? previous[row].Frame.NLerp(transforms[row].Frame, alpha)
+												 : transforms[row].Frame;
+				}
+				if (foundInterpolation) {
+					hasInterpolation.store(true, std::memory_order_relaxed);
+				}
+			};
+
+			const size_t loose = store
+									 .Query<
+										 const Transform,
+										 const PreviousTransform,
+										 const Bounds,
+										 const Visual,
+										 const SurfaceAppearance,
+										 const Tags,
+										 const LocalTransparency>()
+									 .With<Rendered>()
+									 .Without<CharacterLimb>()
+									 .EachBatchParallel(
+										 [&write](
+											 size_t first,
+											 size_t rows,
+											 const Transform *transforms,
+											 const PreviousTransform *previous,
+											 const Bounds *,
+											 const Visual *,
+											 const SurfaceAppearance *,
+											 const Tags *,
+											 const LocalTransparency *
+										 ) { write(0, first, rows, transforms, previous); },
+										 grain
+									 );
+			const size_t rigged = store
+									  .Query<
+										  const Transform,
+										  const PreviousTransform,
+										  const Bounds,
+										  const Visual,
+										  const SurfaceAppearance,
+										  const Tags,
+										  const LocalTransparency,
+										  const CharacterLimb>()
+									  .With<Rendered>()
+									  .EachBatchParallel(
+										  [&write, loose](
+											  size_t first,
+											  size_t rows,
+											  const Transform *transforms,
+											  const PreviousTransform *previous,
+											  const Bounds *,
+											  const Visual *,
+											  const SurfaceAppearance *,
+											  const Tags *,
+											  const LocalTransparency *,
+											  const CharacterLimb *
+										  ) { write(loose, first, rows, transforms, previous); },
+										  grain
+									  );
+			drawList.HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
+			return loose + rigged;
 		}
 	}
 
@@ -422,14 +517,39 @@ namespace engine::render {
 		}
 		const size_t skeletons = store.CountMatching<Skeleton>();
 		const size_t bones = skeletons == 0 ? 0 : store.CountMatching<Bone>();
-		const bool sourcesChanged = DrawSourcesChanged(store, *drawList, matching, skeletons, bones);
-		if (!drawList->HasInterpolation && !sourcesChanged) {
+		DrawSourceChanges sourceChanges;
+		{
+			ENGINE_PROFILE_CAT("source changes", engine::core::ProfileCategory::Simulation);
+			sourceChanges = DrawSourcesChanged(store, *drawList, matching, skeletons, bones);
+		}
+		if (!drawList->HasInterpolation && !sourceChanges.Pose && !sourceChanges.Full) {
 			ENGINE_PROFILE_CAT("reuse draw list", engine::core::ProfileCategory::Simulation);
 			drawList->Instances.resize(drawList->BaseInstanceCount);
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 			return;
+		}
+		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
+			ENGINE_PROFILE_CAT("update draw frames", engine::core::ProfileCategory::Simulation);
+			drawList->Instances.resize(drawList->BaseInstanceCount);
+			const size_t written = UpdateDrawFrames(store, *drawList, alpha, DRAW_LIST_GRAIN);
+			if (written == drawList->BaseInstanceCount) {
+				engine::core::Metrics::Count(
+					"render.instances", static_cast<double>(drawList->Instances.size())
+				);
+				if (skeletons == 0) {
+					drawList->JointFrames.clear();
+				} else {
+					CollectSkinPalettes(store, *drawList);
+				}
+				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+				(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
+				return;
+			}
+			// A source query changed shape without a matching component epoch. The
+			// full rebuild below repairs the cache instead of publishing partial rows.
+			sourceChanges.Full = true;
 		}
 
 		{
@@ -521,11 +641,10 @@ namespace engine::render {
 				}
 				rows = std::min(rows, capacity - at);
 				bool foundFullyTransparent = false;
+				bool foundInterpolation = false;
 
 				for (size_t row = 0; row < rows; row++) {
-					if (!SameFrame(previous[row].Frame, transforms[row].Frame)) {
-						hasInterpolation.store(true, std::memory_order_relaxed);
-					}
+					foundInterpolation |= !SameFrame(previous[row].Frame, transforms[row].Frame);
 					// Interpolated, not the tick position. At 300 fps
 					// against a 60 Hz tick, drawing tick positions shows
 					// each one five times and then jumps - which reads as
@@ -561,6 +680,9 @@ namespace engine::render {
 				}
 				if (foundFullyTransparent) {
 					hasFullyTransparent.store(true, std::memory_order_relaxed);
+				}
+				if (foundInterpolation) {
+					hasInterpolation.store(true, std::memory_order_relaxed);
 				}
 			};
 
@@ -657,6 +779,7 @@ namespace engine::render {
 			written = loose + rigged;
 		}
 		drawList->HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
+		drawList->HasFilteredSources = hasFullyTransparent.load(std::memory_order_relaxed);
 
 		{
 			ENGINE_PROFILE_CAT("publish draw list", engine::core::ProfileCategory::Simulation);

@@ -65,6 +65,20 @@ namespace engine::render {
 			const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
 		) const;
 
+		// Probes a caller-retained slot without repeating the stable-key hash.
+		bool ProbeSlot(
+			uint32_t slot, const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh
+		) const;
+
+		// Updates a known slot, falling back to key lookup when its identity changed.
+		uint32_t UpsertSlot(
+			uint32_t slot,
+			const InstanceKey &key,
+			const GpuInstance &row,
+			const scene::DrawInstance &source,
+			const MeshEntry &mesh
+		);
+
 		void Touch(uint32_t slot);
 
 		void EndFrame();
@@ -125,6 +139,11 @@ namespace engine::render {
 			const GpuInstance &row,
 			const scene::DrawInstance *source,
 			const MeshEntry *mesh
+		);
+		bool
+		SourceCurrent(const Entry &entry, const scene::DrawInstance &source, const MeshEntry &mesh) const;
+		uint32_t UpdateSlot(
+			uint32_t slot, const GpuInstance &row, const scene::DrawInstance *source, const MeshEntry *mesh
 		);
 		void MarkDirty(uint32_t slot);
 		void ReleaseUnseen();

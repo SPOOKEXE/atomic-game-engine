@@ -1487,9 +1487,9 @@ namespace engine::render {
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
 		State->SceneSlotOfSource.resize(ownCount);
-		const bool rebuildOwnSources = Request.Damage.Objects || !target.InstanceSourcesReady ||
-									   target.InstanceSources.size() != ownCount;
-		if (rebuildOwnSources) {
+		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
+		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
+		if (!haveOwnSources) {
 			target.InstanceSources.resize(ownCount);
 			target.InstanceSourcesReady = false;
 		}
@@ -1517,7 +1517,10 @@ namespace engine::render {
 				State->SlotSeamLight[drawSlot] =
 					glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 			};
-		const auto probe = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
+		const auto probe = [&](uint32_t drawSlot,
+							   const scene::DrawInstance &instance,
+							   uint32_t fallback,
+							   const Impl::SceneSlot::InstanceSourceRow *cached = nullptr) {
 			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
 			writeMetadata(drawSlot, instance, &mesh);
 
@@ -1529,11 +1532,18 @@ namespace engine::render {
 				instance.Source == 0 ? fallback + 1u : 0u,
 			};
 			uint32_t residentSlot = std::numeric_limits<uint32_t>::max();
-			State->SlotInstanceCurrent[drawSlot] = residency.Probe(key, instance, mesh, residentSlot);
+			State->SlotInstanceCurrent[drawSlot] =
+				cached != nullptr && cached->Key == key
+					? residency.ProbeSlot(cached->ResidentSlot, key, instance, mesh)
+					: residency.Probe(key, instance, mesh, residentSlot);
+			if (cached != nullptr && cached->Key == key) {
+				residentSlot = cached->ResidentSlot;
+			}
 			target.InstanceIndices[drawSlot] = residentSlot;
 		};
 		const auto rememberSource = [&](uint32_t source, uint32_t drawSlot) {
 			target.InstanceSources[source] = {
+				.Key = State->SlotInstanceKey[drawSlot],
 				.Mesh = State->SlotMesh[drawSlot],
 				.ResidentSlot = target.InstanceIndices[drawSlot],
 			};
@@ -1544,8 +1554,13 @@ namespace engine::render {
 					residency.Touch(target.InstanceIndices[drawSlot]);
 					return;
 				}
-				target.InstanceIndices[drawSlot] =
-					residency.Upsert(State->SlotInstanceKey[drawSlot], ToGpu(instance, mesh), instance, mesh);
+				target.InstanceIndices[drawSlot] = residency.UpsertSlot(
+					target.InstanceIndices[drawSlot],
+					State->SlotInstanceKey[drawSlot],
+					ToGpu(instance, mesh),
+					instance,
+					mesh
+				);
 			};
 
 		{
@@ -1572,7 +1587,12 @@ namespace engine::render {
 						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
 							const uint32_t source = State->SceneOrder[index];
 							const scene::DrawInstance &instance = State->SceneInstances[source];
-							probe(index, instance, source);
+							probe(
+								index,
+								instance,
+								source,
+								haveOwnSources ? &target.InstanceSources[source] : nullptr
+							);
 							State->SceneSlotOfSource[source] = index;
 							finishResident(index, instance, *State->SlotMesh[index]);
 							rememberSource(source, index);
@@ -1585,7 +1605,10 @@ namespace engine::render {
 								for (size_t index = begin; index < end; index++) {
 									const uint32_t source = State->SceneOrder[index];
 									probe(
-										static_cast<uint32_t>(index), State->SceneInstances[source], source
+										static_cast<uint32_t>(index),
+										State->SceneInstances[source],
+										source,
+										haveOwnSources ? &target.InstanceSources[source] : nullptr
 									);
 								}
 							},

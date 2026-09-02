@@ -70,3 +70,11 @@ BENCH("CollectInstances · 1,024 static parts, rebuild", 1'000) {
 		engine::render::CollectInstances(bench.World);
 	}
 }
+
+BENCH("CollectInstances · 1,024 static parts, pose epoch", 1'000) {
+	auto &bench = presentation_bench::CachedWorld();
+	for (size_t pass = 0; pass < 1'000; pass++) {
+		bench.World.MarkChanged<engine::scene::Transform>(bench.First);
+		engine::render::CollectInstances(bench.World);
+	}
+}

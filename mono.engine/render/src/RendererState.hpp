@@ -1276,6 +1276,7 @@ namespace engine::render {
 			// Particle-only redraws still fill object draw metadata from the ECS rows,
 			// but do not resolve meshes or probe identical resident rows again.
 			struct InstanceSourceRow {
+				InstanceKey Key;
 				const MeshEntry *Mesh = nullptr;
 				uint32_t ResidentSlot = 0;
 			};

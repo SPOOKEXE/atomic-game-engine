@@ -42,6 +42,7 @@ namespace instance_bench {
 		std::vector<GpuInstance> Packed;
 		std::vector<GpuInstance> Staged;
 		std::vector<InstanceKey> Keys;
+		std::vector<uint32_t> Slots;
 		MeshEntry Mesh;
 		InstanceResidency Residency;
 
@@ -51,6 +52,7 @@ namespace instance_bench {
 			Packed.resize(count);
 			Staged.resize(count);
 			Keys.resize(count);
+			Slots.resize(count);
 			const Name world("bench.world");
 			for (size_t index = 0; index < count; index++) {
 				DrawInstance &instance = Source[index];
@@ -67,7 +69,7 @@ namespace instance_bench {
 
 			Residency.BeginFrame();
 			for (size_t index = 0; index < count; index++) {
-				Residency.Upsert(Keys[index], Packed[index], Source[index], Mesh);
+				Slots[index] = Residency.Upsert(Keys[index], Packed[index], Source[index], Mesh);
 			}
 			Residency.EndFrame();
 			Residency.AcknowledgeDirty();
@@ -159,6 +161,16 @@ BENCH("Reuse · 10,000 unchanged source rows", 10'000) {
 	for (size_t index = 0; index < rows.Source.size(); index++) {
 		uint32_t slot = 0;
 		Consume(rows.Residency.Reuse(rows.Keys[index], rows.Source[index], rows.Mesh, slot));
+	}
+	rows.Residency.EndFrame();
+}
+
+BENCH("Known slot · 10,000 unchanged source rows", 10'000) {
+	Rows &rows = RowsOf(10'000);
+	rows.Residency.BeginFrame();
+	for (size_t index = 0; index < rows.Source.size(); index++) {
+		Consume(rows.Residency.ProbeSlot(rows.Slots[index], rows.Keys[index], rows.Source[index], rows.Mesh));
+		rows.Residency.Touch(rows.Slots[index]);
 	}
 	rows.Residency.EndFrame();
 }

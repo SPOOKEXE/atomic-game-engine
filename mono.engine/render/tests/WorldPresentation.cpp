@@ -135,6 +135,46 @@ TEST_CASE("irrelevant transform writes do not hide visible source changes", "[re
 	CHECK(drawList->Instances.front().Tint.R == 0.25f);
 }
 
+TEST_CASE("pose-only presentation preserves static draw metadata", "[render][presentation][cache]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("pose-presentation");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const engine::ecs::Entity part = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(store.SetParent(part, workspace));
+	auto visual = *store.Get<engine::scene::Visual>(part);
+	visual.Tint = engine::core::Color3{0.25f, 0.5f, 0.75f};
+	store.Set(part, visual);
+	REQUIRE(engine::scene::SyncRendered(store) == 1);
+	engine::render::CollectInstances(store);
+	auto *drawList = store.ResourceMutable<engine::render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 1);
+	const engine::core::Color3 tint = drawList->Instances[0].Tint;
+
+	auto previous = *store.Get<engine::scene::PreviousTransform>(part);
+	auto current = *store.Get<engine::scene::Transform>(part);
+	previous.Frame.Position.X = 2.0f;
+	current.Frame.Position.X = 6.0f;
+	store.Set(part, previous);
+	store.Set(part, current);
+	store.SetFrame(1.0f / 240.0f, 0.5f);
+	engine::render::CollectInstances(store);
+
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances[0].Frame.Position.X == 4.0f);
+	CHECK(drawList->Instances[0].Tint == tint);
+	CHECK(drawList->HasInterpolation);
+
+	previous.Frame = current.Frame;
+	store.Set(part, previous);
+	engine::render::CollectInstances(store);
+	CHECK(drawList->Instances[0].Frame.Position.X == 6.0f);
+	CHECK(drawList->Instances[0].Tint == tint);
+	CHECK_FALSE(drawList->HasInterpolation);
+}
+
 TEST_CASE("a draw list flattens each rig palette beside its instance", "[render][presentation][skinning]") {
 	engine::scene::RegisterSceneClasses();
 	engine::render::RegisterPresentationComponents();

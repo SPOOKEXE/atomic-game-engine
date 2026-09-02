@@ -56,6 +56,7 @@ namespace engine::render {
 		size_t BoneCount = 0;
 		bool SourcesReady = false;
 		bool HasInterpolation = false;
+		bool HasFilteredSources = false;
 	};
 
 	// Renderer settings that affect scene pixels without changing a draw row.
