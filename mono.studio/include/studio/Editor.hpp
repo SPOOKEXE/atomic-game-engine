@@ -373,16 +373,14 @@ namespace studio {
 
 		// How many frames the CPU may queue ahead of the GPU.
 		//
-		// **One by default, and that is a latency decision rather than a
-		// throughput one** - `render::Renderer::Initialise` carries the
-		// argument. It is a flag because the cost of the choice is a thing to
-		// *feel*: at one, `SDL_SubmitGPUCommandBuffer` blocks until the GPU has
-		// finished the previous frame, so a GPU-bound scene shows up as time in
-		// the `submit` span and the frame rate is the GPU's; at two the CPU runs
-		// ahead and the picture is a frame further behind the mouse.
+		// **Two by default, trading one frame of input latency for overlap.**
+		// `render::Renderer::Initialise` carries the argument. At one,
+		// `SDL_SubmitGPUCommandBuffer` blocks until the GPU has finished the
+		// previous frame, so a GPU-bound scene shows up as time in the `submit`
+		// span. At two the CPU can record the next frame while the GPU finishes.
 		//
 		// @since v0.14
-		int FramesInFlight = 1;
+		int FramesInFlight = 2;
 
 		// A Rojo project or universe file to sync once the scene exists.
 		//

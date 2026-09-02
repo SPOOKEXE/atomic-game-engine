@@ -679,7 +679,7 @@ the same panel is what says a world needs it.
 | `--headless` | off | run with no window at all; needs `--frames` |
 | `--run MODE` | `edit` | start in `edit`, `server` or `play` |
 | `--uncapped` | off | draw with no frame rate ceiling |
-| `--frames-in-flight N` | 1 | frames the CPU may queue ahead of the GPU, 1 to 3 |
+| `--frames-in-flight N` | 2 | frames the CPU may queue ahead of the GPU, 1 to 3 |
 | `--stats`, `--graph` | off | open the statistics or frame-graph panel |
 | `--assets` | off | open the assets manager |
 | `--viewports N` | 1 | open N viewport panels; `--viewport2` is the old spelling of `--viewports 2` |
@@ -707,15 +707,13 @@ The count is the check. It should equal the number of `.luau`, `.lua` and
 `default.project.json` maps `lib` contributes `lib`, and nothing else it was
 published with.
 
-**`submit` is where the GPU is paid for, and one frame in flight is why.** The
-passes above it only *record* commands; `SDL_SubmitGPUCommandBuffer` is where the
-driver gets the work, and with `--frames-in-flight 1` - the default - it blocks
-until the GPU has finished the previous frame. So a long `submit` on the frame
-graph means the GPU is the limit, not the code above it. Raising it to 2 lets the
-CPU run ahead and costs a frame of latency between the mouse and the picture,
-which is the trade an editor usually wants the other way round. Measured on the
-four-world demo: p99 6.9 ms at one, 6.1 ms at two, and the same 0.21 ms median
-either way.
+**`submit` is where the GPU is paid for.** The passes above it only *record*
+commands; `SDL_SubmitGPUCommandBuffer` is where the driver gets the work. Studio
+defaults to two frames in flight so the CPU can record the next frame while the
+GPU finishes the previous one. Setting `--frames-in-flight 1` makes submit block
+for the previous frame and removes the extra frame of input latency. Measured on
+the four-world demo: p99 6.9 ms at one, 6.1 ms at two, and the same 0.21 ms
+median either way.
 
 **The editor is not paced by the display.** It starts with vertical sync off and
 a 120 fps ceiling, because sync puts a whole refresh - 16.7 ms on a 60 Hz panel,
