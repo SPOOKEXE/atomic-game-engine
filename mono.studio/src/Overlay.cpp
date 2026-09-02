@@ -862,7 +862,7 @@ namespace studio {
 		// world pick when the overlay pass drains the pending surface action.
 		PendingPick.Wanted = false;
 		const Vector3 direction = axes[nearestAxis] * static_cast<float>(nearestSign);
-		const CFrame snapped = CFrame::LookAt(frame.Position, frame.Position + direction);
+		const CFrame snapped = SnapViewportCameraDirection(frame, direction);
 		const Vector3 angles = snapped.ToAngles();
 		if (view != nullptr) {
 			view->Frame = snapped;

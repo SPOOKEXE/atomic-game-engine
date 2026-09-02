@@ -916,6 +916,23 @@ namespace engine::render {
 	}
 
 	namespace {
+		void SetImageTargetArea(SDL_GPURenderPass *pass, const ViewRecording::Impl::NamedTexture &target) {
+			// A scene target keeps a larger backing texture while a panel shrinks.
+			// Fullscreen triangles must cover the logical image or they stretch it
+			// across that stale allocation until the shrink threshold reallocates.
+			const SDL_GPUViewport viewport{
+				0.0f,
+				0.0f,
+				static_cast<float>(target.Width),
+				static_cast<float>(target.Height),
+				0.0f,
+				1.0f,
+			};
+			const SDL_Rect scissor{0, 0, static_cast<int>(target.Width), static_cast<int>(target.Height)};
+			SDL_SetGPUViewport(pass, &viewport);
+			SDL_SetGPUScissor(pass, &scissor);
+		}
+
 		// Whether a texture holds one channel, which is what the image pipeline
 		// needs to know to spread it across three rather than sampling green
 		// and blue that are not there.
@@ -959,6 +976,7 @@ namespace engine::render {
 		colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
 		State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
+		SetImageTargetArea(pass, target);
 		const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};
 		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 		const ImageUniformMode mode = ImageMode(singleChannel(source), reverseSpectrum);
@@ -985,6 +1003,7 @@ namespace engine::render {
 		colour.store_op = SDL_GPU_STOREOP_STORE;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
 		State->BindPipeline(pass, State->OverlayPipeline, Impl::PipelineFamily::Other);
+		SetImageTargetArea(pass, target);
 		const SDL_GPUTextureSamplerBinding binding{source, State->OverlaySampler};
 		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);

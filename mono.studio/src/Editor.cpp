@@ -2111,17 +2111,16 @@ namespace studio {
 			});
 		}
 
-		const auto clampImageSize = [](uint32_t requested, uint32_t maximum, uint32_t fallback) {
-			const uint32_t limit = maximum == 0 ? fallback : maximum;
-			return std::clamp(requested, 1u, std::max(limit, 1u));
-		};
-		if (lens.ImageWidth > 0 && lens.ImageHeight > 0) {
-			target.Width = clampImageSize(lens.ImageWidth, lens.MaxImageWidth, lens.ImageWidth);
-			target.Height = clampImageSize(lens.ImageHeight, lens.MaxImageHeight, lens.ImageHeight);
-		} else {
-			target.Width = clampImageSize(target.Width, lens.MaxImageWidth, 1920u);
-			target.Height = clampImageSize(target.Height, lens.MaxImageHeight, 1080u);
-		}
+		const ViewportTargetSize targetSize = ResolveViewportTargetSize(
+			target.Width,
+			target.Height,
+			lens.ImageWidth,
+			lens.ImageHeight,
+			lens.MaxImageWidth,
+			lens.MaxImageHeight
+		);
+		target.Width = targetSize.Width;
+		target.Height = targetSize.Height;
 
 		// **Remembered for the overlay, which is drawn on this texture every
 		// frame and not only on the frames that make it.** See

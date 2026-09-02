@@ -72,6 +72,37 @@ namespace studio {
 		//@}
 	};
 
+	// The pixel extent one viewport asks the renderer to allocate.
+	//
+	// @since v0.23
+	struct ViewportTargetSize {
+		uint32_t Width = 1;
+		uint32_t Height = 1;
+	};
+
+	// Resolves one panel's render extent without changing its aspect ratio.
+	// Camera ceilings scale both axes together; clamping them independently
+	// makes a wide or tall panel render through a different-shaped lens and the
+	// resulting image stretches when it fills the panel. A complete explicit
+	// image pair replaces the panel size but follows the same ceiling rule.
+	//
+	// @param panelWidth    Panel width in display pixels.
+	// @param panelHeight   Panel height in display pixels.
+	// @param imageWidth    Explicit camera image width, or zero for the panel.
+	// @param imageHeight   Explicit camera image height, or zero for the panel.
+	// @param maximumWidth  Camera width ceiling, or zero for no ceiling.
+	// @param maximumHeight Camera height ceiling, or zero for no ceiling.
+	// @return A positive pixel extent with the selected source aspect preserved.
+	// @since v0.23
+	ViewportTargetSize ResolveViewportTargetSize(
+		uint32_t panelWidth,
+		uint32_t panelHeight,
+		uint32_t imageWidth,
+		uint32_t imageHeight,
+		uint32_t maximumWidth,
+		uint32_t maximumHeight
+	);
+
 	// The editor-owned pose of one viewport camera.
 	//
 	// @since v0.19
@@ -101,6 +132,18 @@ namespace studio {
 	// @since v0.20
 	engine::core::Vector3
 	CameraRelativeMovement(const engine::core::CFrame &rotation, float forward, float right, float up);
+
+	// Snaps a viewport camera to a signed world axis. Selecting the axis it is
+	// already looking along reverses the view while retaining its screen-up
+	// direction, which makes the coincident positive and negative gizmo handles
+	// act as a toggle.
+	//
+	// @param frame     Current camera frame.
+	// @param direction Unit signed world axis selected by the gizmo.
+	// @return The snapped frame at the same position.
+	// @since v0.23
+	engine::core::CFrame
+	SnapViewportCameraDirection(const engine::core::CFrame &frame, const engine::core::Vector3 &direction);
 
 	// Per-panel, per-world camera memory. This is editor session state only and
 	// never enters a world document, snapshot or replication stream.
