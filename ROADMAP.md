@@ -147,6 +147,8 @@ in StressParticles demo:
 - [_] setup a example plugin for mocap with camera point track
 - [_] breakpoint history list per-script (show each iteration of breakpoint, can see change overtime)
 - [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
+- [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
+- [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
 
 ### Open Decision
 
