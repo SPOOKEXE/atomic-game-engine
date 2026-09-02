@@ -68,11 +68,10 @@ in StressParticles demo:
 - [_] check we are only sending newly updated information to the gpu to render (cascaded cache hit - "objects" and "particles" both update)
 - [_] also why is `objects` updating for the StressParticles? `particles` should be the only one. Check what causes the update.
 
-- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new instance for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
-
 ### v0.23
 
 - [_] security audit, fuzzy tests, bound tests, etc.
+- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new instance for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
 ### v0.24
 
@@ -90,6 +89,23 @@ in StressParticles demo:
 - [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
 - [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
 - [_] different antialiasing choices as render nodes
+
+### v0.25
+
+- [_] /docs/future-work/world-streaming.md
+- [_] /docs/future-work/terrain-system.md
+- [_] /docs/future-work/character-system.md
+- [_] /docs/future-work/navigation-ai-system.md
+- [_] /docs/future-work/physics-expansion.md
+- [_] /docs/future-work/vfx-system.md
+- [_] /docs/future-work/camera-and-cinematics.md
+- [_] /docs/future-work/ui-system.md
+- [_] /docs/future-work/input-system.md
+- [_] /docs/future-work/prefab-package-system.md
+- [_] /docs/future-work/materials-and-shaders.md
+- [_] /docs/future-work/procedural-generation.md
+- [_] /docs/future-work/session-and-social.md
+- [_] /docs/future-work/audio-system.md
 
 ### FUTURE
 
