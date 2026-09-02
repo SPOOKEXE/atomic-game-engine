@@ -604,6 +604,32 @@ function(mono_add_tests name)
 		endforeach()
 	endif()
 
+	# A renderer test that opts into a real device reads the same compiled
+	# resources as a client program. Keep SDL and the shaders out of unrelated
+	# suites, but make `test_render` runnable from its staged directory without a
+	# full client build happening to have populated another tree first.
+	if("Engine::render" IN_LIST _mono_test_deps)
+		get_target_property(_mono_test_shader_dir engine_resources MONO_SHADER_DIR)
+		get_target_property(_mono_test_shader_inputs engine_resources MONO_SHADER_OUTPUTS)
+		set(_mono_test_shader_outputs "")
+		foreach(_mono_test_shader IN LISTS _mono_test_shader_inputs)
+			get_filename_component(_mono_test_shader_name "${_mono_test_shader}" NAME)
+			list(APPEND _mono_test_shader_outputs
+				"${MONO_STAGE_ROOT}/tests/shaders/resources/${_mono_test_shader_name}")
+		endforeach()
+
+		add_custom_command(
+			OUTPUT ${_mono_test_shader_outputs}
+			COMMAND ${CMAKE_COMMAND} -E rm -rf "${MONO_STAGE_ROOT}/tests/shaders/resources"
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				"${_mono_test_shader_dir}" "${MONO_STAGE_ROOT}/tests/shaders/resources"
+			DEPENDS ${_mono_test_shader_inputs}
+			COMMENT "Staging renderer shaders into tests/shaders"
+			VERBATIM)
+		add_custom_target(${target}_stage_shaders DEPENDS ${_mono_test_shader_outputs})
+		add_dependencies(${target} ${target}_stage_shaders)
+	endif()
+
 	add_test(NAME ${name} COMMAND ${target})
 	set_property(GLOBAL APPEND PROPERTY MONO_ALL_TEST_TARGETS ${target})
 endfunction()

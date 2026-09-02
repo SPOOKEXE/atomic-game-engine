@@ -2702,9 +2702,17 @@ recipe is the version of that anybody can see without a graph query.
 ```sh
 just test                                     # only what your change affected
 just test-all                                 # everything
+just test --gpu-tests                         # everything, including headless GPU cases
 just test-list                                # what it would run, and why
 ./.cache/build/dev/tools/testrunner --help
 ```
+
+GPU cases carry the `[gpu]` tag and are excluded from ordinary test runs. Pass
+`--gpu-tests` when a Vulkan device is available. This forces every suite to run,
+including the GPU cases, with `Renderer::Initialise(nullptr)`: a real device,
+shader compiler, pipelines, compute queues, offscreen targets, captures and
+readbacks, but no window or swapchain. A missing or broken device fails the run
+instead of silently skipping coverage.
 
 ```
 --build DIR   A configured build directory
@@ -2712,6 +2720,7 @@ just test-list                                # what it would run, and why
 --report DIR  Where test-output.md/.html go (default .cache)
 --no-report   Write no documents
 --all         Run every suite, cache or not
+--gpu-tests   Run every suite, including headless GPU cases
 --list        List suites and signatures, run nothing
 --verbose     Name every skipped suite
 --jobs N      Suites to run at once (default 2; 1 is one after another)

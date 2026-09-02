@@ -70,4 +70,8 @@ mono_add_library(render
 if(TARGET test_render)
 	target_sources(test_render PRIVATE examples/CustomNode.cpp)
 	target_include_directories(test_render PRIVATE examples)
+	# Headless GPU cases exercise the private backend boundary with real SDL
+	# resources. The render library keeps SDL private for all public consumers;
+	# its own suite is the one deliberate backend-aware caller.
+	target_link_libraries(test_render PRIVATE SDL3::SDL3)
 endif()
