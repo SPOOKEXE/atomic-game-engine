@@ -59,7 +59,7 @@ in StressParticles demo:
 - [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
 - [x] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
 - [x] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
-- [_] try optimise `resolve resident instances (0.15-0.16ms)` and `transparency pass (0.2ms)`
+- [x] try optimise `resolve resident instances (0.15-0.16ms)` and `transparency pass (0.2ms)`
 
 - [_] do: ```
 i noticed the following:
