@@ -195,9 +195,9 @@ namespace client {
 			ViewState State;
 			std::unique_ptr<engine::world::ViewChannel> Channel;
 
-			// Kept between frames so a steady scene stops allocating, and so a
-			// stale view still has something to draw.
-			std::vector<std::byte> Payload;
+			// Borrowed from the channel's consumer-held slot. The third channel
+			// slot keeps a stale view drawable without a fourth payload copy here.
+			std::span<const std::byte> Payload;
 		};
 
 		Slot *Find(engine::world::WorldId id);

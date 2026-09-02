@@ -807,10 +807,10 @@ namespace engine::physics {
 		}
 
 	  private:
-		// The two indexes and the arrays behind them.
+		// The two indexes and their parallel records.
 		//
-		// `Proxy::Id` in these grids is the **index into the matching record and
-		// proxy arrays**, not an `ecs::Entity`. That is what makes resolving a
+		// `Proxy::Id` in these grids is the **index into the matching record
+		// arrays**, not an `ecs::Entity`. That is what makes resolving a
 		// candidate's masks an array subscript rather than a store lookup; the
 		// entity is on the record. A caller reaching one of these grids and
 		// reading `Proxy::Id` as an entity gets a number that is plausible and
@@ -820,7 +820,6 @@ namespace engine::physics {
 
 		std::vector<spatial::Proxy> DynamicProxies;
 		std::vector<ColliderRecord> DynamicRecords;
-		std::vector<spatial::Proxy> StaticProxies;
 		std::vector<ColliderRecord> StaticRecords;
 
 		// The placed shape of every collider, parallel to the records.

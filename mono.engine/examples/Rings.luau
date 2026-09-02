@@ -3,9 +3,9 @@
 --
 -- Written the way a Roblox script is written: `game:GetService`, `Instance.new`,
 -- properties by name, `part.Parent = workspace`, and behaviour on
--- `RunService.Heartbeat`. The motion is **CFrame composition** - an orbit is a
--- rotation times an offset, and a spin is a CFrame multiplied into itself each
--- beat - rather than trigonometry and Euler angles done by hand.
+-- `RunService.Heartbeat`. The spin is **CFrame composition** and the orbit is
+-- its closed-form point. The spin is multiplied into itself each beat; sine and
+-- cosine place that spinning frame without building a throwaway orbit frame.
 --
 -- **The script is the simulation.** There is no `Orbit` component and no engine
 -- system reading one; the engine does not know what an orbit is. What it knows
@@ -119,10 +119,10 @@ for index = 0, COUNT - 1 do
 end
 
 -- **One `BulkMoveTo` at the end rather than a write inside the loop.** The
--- chain above is the point of this demo and is unchanged; what moved is where
--- the result goes. A per-part `CFrame =` crosses the language boundary once per
--- orbiter, and the boundary is most of what a move costs - `scene::BulkMoveTo`
--- carries the measurement.
+-- motion above stays in the script; what moved is where the result goes. A
+-- per-part `CFrame =` crosses the language boundary once per orbiter, and the
+-- boundary is most of what a move costs - `scene::BulkMoveTo` carries the
+-- measurement.
 RunService.Heartbeat:Connect(function(deltaTime: number)
 	for at, orbiter in orbiters do
 		orbiter.Angle += orbiter.Speed * deltaTime
@@ -136,12 +136,13 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 			orbiter.SpinRate.Z * deltaTime
 		)
 
-		-- Turn about the origin, step out along the ring, then apply the spin.
-		-- Reading left to right is reading the transform: this is what a CFrame
-		-- chain is for, and it is why the orbit needs no sine and no cosine.
-		placements[at] = CFrame.Angles(0, orbiter.Angle, 0)
-			* CFrame.new(orbiter.Radius, orbiter.Height, 0)
-			* orbiter.Spin
+		-- A yawed X-axis point is `(cos(a) * r, y, -sin(a) * r)`.
+		-- Building that point directly keeps the exact orbit while avoiding one
+		-- temporary CFrame and one matrix multiply per orbiter per beat. The
+		-- part's local spin still composes onto the translated frame.
+		local x = math.cos(orbiter.Angle) * orbiter.Radius
+		local z = -math.sin(orbiter.Angle) * orbiter.Radius
+		placements[at] = CFrame.new(x, orbiter.Height, z) * orbiter.Spin
 	end
 
 	workspace:BulkMoveTo(parts, placements)

@@ -114,6 +114,25 @@ namespace engine::world {
 		// @return `false` when nothing new has been published.
 		bool Acquire(ViewHeader &header, std::vector<std::byte> &payload);
 
+		// Borrows the newest frame without copying its payload.
+		//
+		// The returned bytes stay valid until this consumer calls `Borrow` again
+		// or destroys the channel. When no newer frame exists, `false` is
+		// returned and both outputs stay unchanged.
+		//
+		// **One consumer, and it must not mix this with `Acquire`.** Borrowing
+		// keeps one of the three slots claimed between calls. That is what the
+		// third slot is for: the producer can still replace the published frame
+		// without touching the frame the consumer is drawing. Calling `Acquire`
+		// from a second consumer would release a slot while the first still holds
+		// a pointer into it.
+		//
+		// @param header  Filled from the newest or retained frame.
+		// @param payload Points at that frame's bytes until the next `Borrow`.
+		// @return `true` when a newer frame was borrowed.
+		// @since v0.22
+		bool Borrow(ViewHeader &header, std::span<const std::byte> &payload);
+
 		// Whether a frame is waiting.
 		//
 		// @return `true` when Acquire would return one.

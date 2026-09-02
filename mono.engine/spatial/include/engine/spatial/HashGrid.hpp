@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace engine::spatial {
@@ -61,10 +62,10 @@ namespace engine::spatial {
 
 	// A uniform grid of cells, hashed into a fixed number of buckets.
 	//
-	// Build one per set of proxies that move together, call `Rebuild` with all
-	// of them, then query it. It holds a copy of the proxies, because every
-	// candidate a bucket produces is re-tested against its own box and the test
-	// needs the box.
+	// Build one per set of proxies that move together, then query it. It owns the
+	// proxies because every candidate a bucket produces is re-tested against its
+	// own box and the test needs the box. `Rebuild` copies a ready span;
+	// `RebuildGenerated` lets a gather write straight into that owned storage.
 	//
 	// @since v0.4
 	class HashGrid {
@@ -144,6 +145,20 @@ namespace engine::spatial {
 		// @param proxies Everything the index should hold, in any order.
 		void Rebuild(std::span<const Proxy> proxies);
 
+		// Rebuilds from proxies written straight into the grid's owned storage.
+		//
+		// This is for a caller that is already gathering rows and would otherwise
+		// keep a second proxy vector only for `Rebuild` to copy it. `fill` is
+		// called once with exactly `proxyCount` owned rows and must overwrite each
+		// one before returning.
+		//
+		// @param proxyCount      How many proxies `fill` writes.
+		// @param fill            Writes every proxy in deterministic order.
+		// @param suggestCellSize Whether to size the grid from those proxies.
+		// @since v0.22
+		template <class Fill>
+		void RebuildGenerated(size_t proxyCount, Fill &&fill, bool suggestCellSize = false);
+
 		// Empties the grid, keeping every allocation for the next rebuild.
 		void Clear();
 
@@ -209,12 +224,13 @@ namespace engine::spatial {
 		// One more than the bucket count: bucket `n` owns the entries in
 		// `[BucketStart[n], BucketStart[n + 1])`.
 		std::vector<uint32_t> BucketStart;
-		std::vector<uint32_t> BucketCursor;
 		std::vector<Entry> Entries;
 
 		// Proxies too large for cells, by index into `Proxies`. Every query
 		// tests all of them.
 		std::vector<uint32_t> Oversized;
+
+		void BuildIndex();
 
 		// The walk, the tests and the benchmark all read the arrays above, and
 		// not one of them is another module. Publishing the storage to reach it
@@ -257,4 +273,20 @@ namespace engine::spatial {
 	//         `HashGrid::DEFAULT_CELL_SIZE` for an empty set.
 	// @since v0.12
 	float SuggestCellSize(std::span<const Proxy> proxies);
+
+	template <class Fill>
+	void HashGrid::RebuildGenerated(size_t proxyCount, Fill &&fill, bool suggestCellSize) {
+		Proxies.resize(proxyCount);
+		std::forward<Fill>(fill)(std::span<Proxy>(Proxies));
+
+		if (suggestCellSize) {
+			const float suggested = SuggestCellSize(Proxies);
+			if (suggested != Spacing) {
+				Spacing = suggested;
+				InverseSpacing = 1.0f / suggested;
+			}
+		}
+
+		BuildIndex();
+	}
 }

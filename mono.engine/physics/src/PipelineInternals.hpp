@@ -60,11 +60,6 @@ namespace engine::physics {
 			return world.DynamicRecords;
 		}
 
-		// The static proxies, parallel to `StaticRecords` by index.
-		static std::vector<spatial::Proxy> &StaticProxies(PhysicsWorld &world) {
-			return world.StaticProxies;
-		}
-
 		// What the broad phase knows about each static collider.
 		static std::vector<ColliderRecord> &StaticRecords(PhysicsWorld &world) {
 			return world.StaticRecords;

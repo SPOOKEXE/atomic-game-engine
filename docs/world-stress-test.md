@@ -73,6 +73,84 @@ anchored transforms moved by the script. Frame-owner work remains visible at
 15.1 ms for composition, 9.4 ms for pre-render, 8.4 ms for the presentation
 signature, and 4.7 ms for content references.
 
+## Compute and presentation follow-up
+
+A second 2 September pass targeted those remaining locations. It kept render
+and composition on main, kept every world isolated in its assigned process,
+and used the same headless Rings workload. The release server runs below were
+unpaced 10-second capacity runs. Main used physical core zero only and held no
+worlds. Eleven child processes were bound to physical cores 1 through 11.
+
+| Worlds | Worlds per child | Mean child tick | Child tick range | Aggregate user CPU | Largest process RSS |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 9 or 10 | 2.496 ms | 2.283 to 2.717 ms | 113.58 s | 27.9 MiB |
+| 250 | 22 or 23 | 8.749 ms | 8.199 to 9.496 ms | 113.79 s | 45.8 MiB |
+| 500 | 45 or 46 | 17.037 ms | 16.320 to 18.160 ms | 114.28 s | 77.1 MiB |
+| 1,000 | 90 or 91 | 35.207 ms | 33.112 to 36.774 ms | 114.86 s | 138.6 MiB |
+
+The 1,000-world log records all eleven child PIDs and singleton bindings on
+cores 1 through 11. One thousand worlds cannot each occupy a different core on
+a 12-core machine. Isolation here means a world belongs to one child process;
+roughly 90 worlds share each pinned child sequentially. Main remains available
+for rendering, presentation, bus routing, and supervision.
+
+The script path now computes the orbit point directly and avoids a redundant
+component lookup in each `BulkMoveTo` row. In a paired 100-world release server
+run this raised total child ticks over 10 seconds from 43,855 to 47,237, a 7.7%
+throughput increase. The final 100-world serial flame tree measured
+`script-heartbeat` at 0.329 ms mean and 1.178 ms maximum for the worst world
+occurrence, down from 0.651 ms mean and 3.761 ms maximum in the baseline tree.
+
+Static broadphase rebuilds now fill the grid-owned proxy array directly and use
+the bucket-offset table itself as the temporary fill cursor. This removes the
+second static proxy vector and one bucket-sized cursor array. The 100-world
+serial tree measured `physics.index-static` at 0.047 ms mean and 0.115 ms
+maximum. The two 1,000-world heap contexts together fell from 178.58 MiB under
+`physics.sync-broadphase` to 143.56 MiB, a 19.6% reduction. The isolated
+grid rebuild improved by 3.9% at 4,000 colliders and by 8.0% at 16,000. The
+whole 4,000-collider sync with a forced static rebuild moved from 159.4 us to
+162.6 us, a 2.0% cost for removing the duplicate proxy storage.
+
+The compositor now borrows the channel's consumer-held frame rather than
+keeping a fourth payload copy per world. Triple-buffer ownership still prevents
+the producer from overwriting the borrowed bytes. A 20,000-frame concurrent
+test found zero torn frames. At 1,000 worlds this removes about 100 MiB of
+presentation capacity. The composited output array remains 100 MiB because the
+main renderer still needs one contiguous, world-offset draw list.
+
+| 1,000-world headless client reading | Previous optimized run | Final run | Change |
+|---|---:|---:|---:|
+| Mean frame | 149.564 ms | 125.694 ms | 16.0% lower |
+| Aggregate worker CPU per tick | 1,181.738 ms | 915.715 ms | 22.5% lower |
+| `Compositor::Compose` mean | 15.101 ms | 10.229 ms | 32.3% lower |
+| `script-heartbeat` mean, 100-world serial | 0.651 ms | 0.329 ms | 49.5% lower |
+| Tracked live heap | 1.15 GiB | 1.02 GiB | about 130 MiB lower |
+| Untagged live heap | 833.87 MiB | 735.59 MiB | 98.28 MiB lower |
+| Static broadphase live heap | 178.58 MiB | 143.56 MiB | 19.6% lower |
+
+The final client capture retained 39 frames over 4.89 seconds. It recorded
+zero draw calls and zero triangles, so the compute comparison excludes raster
+work while retaining main-thread publication, composition, signature, content,
+and renderer orchestration. The 1,000-world client achieved 7.5 simulation Hz
+and used 2.08 GiB peak RSS. Heap hooks tracked 1.02 GiB live and 1.02 GiB peak;
+the difference is allocator and untracked subsystem memory, not a second GPU
+render workload.
+
+The construction peak remains fixed by the earlier lazy particle-pool change:
+the 100-world load-only tracked peak is 109.0 MiB rather than 4.42 GiB. The
+remaining steady memory leaders are 735.59 MiB untagged world/runtime storage,
+143.56 MiB of static broadphase state across owner and worker contexts, and the
+100 MiB contiguous compositor output. The remaining steady compute leaders are
+world script work, the 8.643 ms presentation signature, and the 4.563 ms
+content-reference walk. These are the next measured targets, not regressions in
+the six locations addressed here.
+
+The second-pass captures are under `.cache/world-optim2/`. The four release
+server runs use `100-final`, `250-final`, `500-final`, and `1000-final`. The
+headless client captures are `1000-client-final` and
+`100-client-serial-final`. Each prefix includes the applicable log, GNU time
+report, frame snapshot, or heap report.
+
 ## Multiprocess placement follow-up
 
 ### Baseline rerun before reserving main

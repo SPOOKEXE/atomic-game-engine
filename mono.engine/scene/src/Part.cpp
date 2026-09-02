@@ -92,10 +92,12 @@ namespace engine::scene {
 		// @param store    The world.
 		// @param instance The entity.
 		// @param frame    Where it now is.
-		void PlaceInstance(ecs::Store &store, ecs::Entity instance, const core::CFrame &frame) {
+		bool PlaceInstance(ecs::Store &store, ecs::Entity instance, const core::CFrame &frame) {
 			if (Transform *transform = store.GetMutable<Transform>(instance)) {
 				transform->Frame = frame;
+				return true;
 			}
+			return false;
 		}
 
 		// CFrame: the placement itself.
@@ -121,11 +123,7 @@ namespace engine::scene {
 			};
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				if (store.Get<Transform>(instance) == nullptr) {
-					return false;
-				}
-				PlaceInstance(store, instance, *static_cast<const core::CFrame *>(value));
-				return true;
+				return PlaceInstance(store, instance, *static_cast<const core::CFrame *>(value));
 			};
 
 			return property;
@@ -3168,17 +3166,12 @@ namespace engine::scene {
 	}
 
 	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target) {
-		if (store.Get<Transform>(instance) == nullptr) {
-			return false;
-		}
-
 		const Pivot *pivot = store.Get<Pivot>(instance);
 		const core::CFrame placement = pivot == nullptr ? target : target * pivot->Offset.Inverse();
 
 		// Through the same helper a property write uses, so a script pivoting a
 		// part and an author dragging one leave the world in the same state.
-		PlaceInstance(store, instance, placement);
-		return true;
+		return PlaceInstance(store, instance, placement);
 	}
 
 	size_t BulkMoveTo(
@@ -3192,11 +3185,9 @@ namespace engine::scene {
 			// argues the case: a batch is a cheaper *boundary*, not a cheaper
 			// write, and the moment the two paths differ they can disagree
 			// about what a placement leaves behind.
-			if (store.Get<Transform>(instances[at]) == nullptr) {
-				continue;
+			if (PlaceInstance(store, instances[at], frames[at])) {
+				moved++;
 			}
-			PlaceInstance(store, instances[at], frames[at]);
-			moved++;
 		}
 		return moved;
 	}
