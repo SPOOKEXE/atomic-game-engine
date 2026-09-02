@@ -10,6 +10,8 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/graph/Frustum.hpp>
 
+#include <glm/mat4x4.hpp>
+
 #include <cstdint>
 
 namespace engine::render {
@@ -51,6 +53,26 @@ namespace engine::render {
 		bool Ready(double simulatedSeconds) const {
 			return Cullable && simulatedSeconds >= CullableAfter;
 		}
+	};
+
+	// Names the host inputs that determine particle visibility and folded draw
+	// runs. Device simulation may advance without invalidating this plan because
+	// its host bounds stay conservative until `RebuildAfter`.
+	struct ParticleDrawPlanStamp {
+		glm::mat4 ViewProjection{1.0f};
+		uint64_t LayoutRevision = 0;
+		uint64_t ResidentRevision = 0;
+		double RebuildAfter = 0.0;
+		bool CullingSafe = true;
+		bool Valid = false;
+
+		bool Reusable(
+			const glm::mat4 &viewProjection,
+			uint64_t layoutRevision,
+			uint64_t residentRevision,
+			double simulatedSeconds,
+			bool cullingSafe
+		) const;
 	};
 
 	ParticleDrawBounds BoundsForParticleDraw(

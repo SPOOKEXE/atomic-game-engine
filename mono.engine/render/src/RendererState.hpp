@@ -960,6 +960,12 @@ namespace engine::render {
 			uint32_t Count = 0;
 		};
 
+		struct ParticleDrawGroup {
+			uint32_t FirstRun = 0;
+			uint32_t RunCount = 0;
+			uint32_t Culled = 0;
+		};
+
 		// --- ribbons ----------------------------------------------------------
 		//
 		// **The same two-pipeline shape the particles have**, and for the same
@@ -1013,7 +1019,6 @@ namespace engine::render {
 		// same argument `DrawOrder` makes one screen up.
 		std::vector<ParticleGroup> ParticleGroups;
 		std::vector<ParticleCullSpan> ParticleSpans;
-		std::vector<ParticleDrawRun> ParticleDrawRuns;
 		std::vector<uint32_t> ParticleOrder;
 
 		// --- the device-resident pool -----------------------------------------
@@ -1138,6 +1143,13 @@ namespace engine::render {
 			std::vector<uint32_t> PreparedOrder;
 			bool PreparedCullingSafe = true;
 
+			// Emitter bounds and their folded runs are host facts. Keep the last
+			// camera's plan until one of those facts changes or an old-bound
+			// lifetime expires.
+			ParticleDrawPlanStamp DrawPlanStamp;
+			std::vector<ParticleDrawGroup> DrawGroups;
+			std::vector<ParticleDrawRun> DrawRuns;
+
 			// Time recorded into the command currently owned by the host. A submit
 			// failure carries it into the next device step instead of losing time.
 			//@{
@@ -1260,6 +1272,14 @@ namespace engine::render {
 			static constexpr size_t RETAINED_FRAMES = 3;
 			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
 
+			// Stable mesh and resident identities beside a retained viewport.
+			// Particle-only redraws still fill object draw metadata from the ECS rows,
+			// but do not resolve meshes or probe identical resident rows again.
+			struct InstanceSourceRow {
+				const MeshEntry *Mesh = nullptr;
+				uint32_t ResidentSlot = 0;
+			};
+
 			SDL_GPUTexture *Texture = nullptr;
 
 			// What was allocated, which is the panel's size rounded up to a
@@ -1289,6 +1309,8 @@ namespace engine::render {
 			// Visibility and order remain target-owned. The packed rows they index
 			// are shared by every camera carrying the same world key.
 			std::vector<uint32_t> InstanceIndices;
+			std::vector<InstanceSourceRow> InstanceSources;
+			bool InstanceSourcesReady = false;
 			std::vector<uint32_t> SkinOffsets;
 			std::vector<uint32_t> JointWords;
 			uint64_t SkinOffsetSignature = 0;

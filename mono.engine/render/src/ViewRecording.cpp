@@ -1487,29 +1487,39 @@ namespace engine::render {
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
 		State->SceneSlotOfSource.resize(ownCount);
+		const bool rebuildOwnSources = Request.Damage.Objects || !target.InstanceSourcesReady ||
+									   target.InstanceSources.size() != ownCount;
+		if (rebuildOwnSources) {
+			target.InstanceSources.resize(ownCount);
+			target.InstanceSourcesReady = false;
+		}
 
 		const core::Name viewWorld = Request.Source->WorldName;
+		const auto writeMetadata =
+			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry *mesh) {
+				State->SlotMesh[drawSlot] = mesh;
+				State->SlotTexture[drawSlot] = instance.Texture;
+				State->SlotNormalMap[drawSlot] = instance.NormalMap;
+				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
+				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
+				State->SlotHeightMap[drawSlot] = instance.HeightMap;
+				State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
+				State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+				State->SlotResample[drawSlot] = instance.Resample;
+				State->SlotShader[drawSlot] = instance.Shader;
+				State->SlotTags[drawSlot] = instance.TagMask;
+				State->SlotSeam[drawSlot] = glm::vec4{
+					instance.SeamNormal.X,
+					instance.SeamNormal.Y,
+					instance.SeamNormal.Z,
+					instance.SeamOffset,
+				};
+				State->SlotSeamLight[drawSlot] =
+					glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
+			};
 		const auto probe = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
 			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
-			State->SlotMesh[drawSlot] = &mesh;
-			State->SlotTexture[drawSlot] = instance.Texture;
-			State->SlotNormalMap[drawSlot] = instance.NormalMap;
-			State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
-			State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
-			State->SlotHeightMap[drawSlot] = instance.HeightMap;
-			State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
-			State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
-			State->SlotResample[drawSlot] = instance.Resample;
-			State->SlotShader[drawSlot] = instance.Shader;
-			State->SlotTags[drawSlot] = instance.TagMask;
-			State->SlotSeam[drawSlot] = glm::vec4{
-				instance.SeamNormal.X,
-				instance.SeamNormal.Y,
-				instance.SeamNormal.Z,
-				instance.SeamOffset,
-			};
-			State->SlotSeamLight[drawSlot] =
-				glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
+			writeMetadata(drawSlot, instance, &mesh);
 
 			InstanceKey &key = State->SlotInstanceKey[drawSlot];
 			key = InstanceKey{
@@ -1521,6 +1531,12 @@ namespace engine::render {
 			uint32_t residentSlot = std::numeric_limits<uint32_t>::max();
 			State->SlotInstanceCurrent[drawSlot] = residency.Probe(key, instance, mesh, residentSlot);
 			target.InstanceIndices[drawSlot] = residentSlot;
+		};
+		const auto rememberSource = [&](uint32_t source, uint32_t drawSlot) {
+			target.InstanceSources[source] = {
+				.Mesh = State->SlotMesh[drawSlot],
+				.ResidentSlot = target.InstanceIndices[drawSlot],
+			};
 		};
 		const auto finishResident =
 			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry &mesh) {
@@ -1536,37 +1552,53 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("resolve resident instances", core::ProfileCategory::Render);
 			{
 				ENGINE_PROFILE_CAT("resident.scene", core::ProfileCategory::Render);
-				// At 100,000 resident rows this probe and metadata pass measured 10.9 ms
-				// serial in release. Sixteen thousand rows leaves far more work than the
-				// job system's measured handover. Smaller scenes keep probe and finalize
-				// adjacent so the parallel design adds no second traversal.
-				constexpr size_t RESIDENT_GRAIN = 4096;
-				constexpr size_t RESIDENT_PARALLEL_MINIMUM = 16'384;
-				if (State->SceneOrder.size() < RESIDENT_PARALLEL_MINIMUM) {
+				if (!rebuildOwnSources) {
 					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
 						const uint32_t source = State->SceneOrder[index];
-						const scene::DrawInstance &instance = State->SceneInstances[source];
-						probe(index, instance, source);
+						const Impl::SceneSlot::InstanceSourceRow &cached = target.InstanceSources[source];
+						writeMetadata(index, State->SceneInstances[source], cached.Mesh);
+						target.InstanceIndices[index] = cached.ResidentSlot;
 						State->SceneSlotOfSource[source] = index;
-						finishResident(index, instance, *State->SlotMesh[index]);
+						residency.Touch(target.InstanceIndices[index]);
 					}
 				} else {
-					parallel::Jobs::For(
-						State->SceneOrder.size(),
-						RESIDENT_GRAIN,
-						[&](size_t begin, size_t end) {
-							for (size_t index = begin; index < end; index++) {
-								const uint32_t source = State->SceneOrder[index];
-								probe(static_cast<uint32_t>(index), State->SceneInstances[source], source);
-							}
-						},
-						RESIDENT_PARALLEL_MINIMUM
-					);
-					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-						const uint32_t source = State->SceneOrder[index];
-						State->SceneSlotOfSource[source] = index;
-						finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
+					// At 100,000 resident rows this probe and metadata pass measured 10.9 ms
+					// serial in release. Sixteen thousand rows leaves far more work than the
+					// job system's measured handover. Smaller scenes keep probe and finalize
+					// adjacent so the parallel design adds no second traversal.
+					constexpr size_t RESIDENT_GRAIN = 4096;
+					constexpr size_t RESIDENT_PARALLEL_MINIMUM = 16'384;
+					if (State->SceneOrder.size() < RESIDENT_PARALLEL_MINIMUM) {
+						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+							const uint32_t source = State->SceneOrder[index];
+							const scene::DrawInstance &instance = State->SceneInstances[source];
+							probe(index, instance, source);
+							State->SceneSlotOfSource[source] = index;
+							finishResident(index, instance, *State->SlotMesh[index]);
+							rememberSource(source, index);
+						}
+					} else {
+						parallel::Jobs::For(
+							State->SceneOrder.size(),
+							RESIDENT_GRAIN,
+							[&](size_t begin, size_t end) {
+								for (size_t index = begin; index < end; index++) {
+									const uint32_t source = State->SceneOrder[index];
+									probe(
+										static_cast<uint32_t>(index), State->SceneInstances[source], source
+									);
+								}
+							},
+							RESIDENT_PARALLEL_MINIMUM
+						);
+						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+							const uint32_t source = State->SceneOrder[index];
+							State->SceneSlotOfSource[source] = index;
+							finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
+							rememberSource(source, index);
+						}
 					}
+					target.InstanceSourcesReady = true;
 				}
 			}
 			{
