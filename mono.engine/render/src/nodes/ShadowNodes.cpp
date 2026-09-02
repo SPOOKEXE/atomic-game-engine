@@ -51,26 +51,32 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
 
 				SDL_GPUDepthStencilTargetInfo shadowTarget{};
-				shadowTarget.texture = State->ShadowTexture;
-				shadowTarget.clear_depth = 1.0f;
-				shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+				SDL_GPURenderPass *pass = nullptr;
+				{
+					ENGINE_PROFILE_CAT("shadow setup", core::ProfileCategory::Render);
+					shadowTarget.texture = State->ShadowTexture;
+					shadowTarget.clear_depth = 1.0f;
+					shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 
-				// **Stored, unlike the colour pass's depth.** This one is read by
-				// the next pass, which is the entire point of rendering it.
-				shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
-				shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-				shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-				shadowTarget.cycle = true;
+					// **Stored, unlike the colour pass's depth.** This one is read by
+					// the next pass, which is the entire point of rendering it.
+					shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
+					shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					shadowTarget.cycle = true;
 
-				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
-				State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+					pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
+					State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
 
-				State->BindInstanceBuffers(pass);
+					State->BindInstanceBuffers(pass);
 
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-				SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
+					SDL_PushGPUVertexUniformData(
+						command, 0, &lightViewProjection, sizeof(lightViewProjection)
+					);
+				}
 
 				// **Only the opaque part of the scene casts**, and of that only what
 				// `Visual::CastShadow` left switched on. A transparent pane writing
@@ -86,38 +92,44 @@ namespace engine::render {
 				// let clipped surfaces cast their authored silhouette. The null
 				// lighting pointer selects that path.
 				uint64_t shadowTriangles = 0;
-				if (reflectedCasters > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						0,
-						reflectedCasters,
-						nullptr,
-						nullptr,
-						nullptr,
-						nullptr,
-						nullptr,
-						0,
-						shadowTriangles
-					);
-				}
-				if (surfaceCasters > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						sceneReflected,
-						surfaceCasters,
-						nullptr,
-						nullptr,
-						nullptr,
-						nullptr,
-						nullptr,
-						0,
-						shadowTriangles
-					);
+				{
+					ENGINE_PROFILE_CAT("shadow draws", core::ProfileCategory::Render);
+					if (reflectedCasters > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							0,
+							reflectedCasters,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							0,
+							shadowTriangles
+						);
+					}
+					if (surfaceCasters > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							sceneReflected,
+							surfaceCasters,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							0,
+							shadowTriangles
+						);
+					}
 				}
 
-				SDL_EndGPURenderPass(pass);
+				{
+					ENGINE_PROFILE_CAT("shadow end", core::ProfileCategory::Render);
+					SDL_EndGPURenderPass(pass);
+				}
 			}
 
 			// --- portal beams ----------------------------------------------------

@@ -856,6 +856,7 @@ namespace studio {
 		std::string Key;
 		float Width = 92.0f;
 		size_t Order = 0;
+		std::string ControlLabel;
 		//@}
 	};
 
@@ -889,6 +890,8 @@ namespace studio {
 		std::string Name;
 		std::vector<ToolbarRowView> Rows;
 		bool UserCreated = false;
+		std::string Label;
+		std::string Context;
 		//@}
 	};
 
@@ -899,6 +902,7 @@ namespace studio {
 		//@{
 		std::vector<ToolbarRowView> PinnedRows;
 		std::vector<ToolbarTabView> Tabs;
+		size_t VisualRows = 1;
 		//@}
 	};
 

@@ -284,9 +284,18 @@ namespace studio {
 		// here with the other two and became a side bar in the same change.
 		{
 			ENGINE_PROFILE_CAT("bars", engine::core::ProfileCategory::Render);
-			DrawMenuBar();
-			DrawToolbar();
-			DrawStatusBar();
+			{
+				ENGINE_PROFILE_CAT("menu bar", engine::core::ProfileCategory::Render);
+				DrawMenuBar();
+			}
+			{
+				ENGINE_PROFILE_CAT("toolbar", engine::core::ProfileCategory::Render);
+				DrawToolbar();
+			}
+			{
+				ENGINE_PROFILE_CAT("status bar", engine::core::ProfileCategory::Render);
+				DrawStatusBar();
+			}
 		}
 
 		// **Spanned, because it is not the free line it looks like.** The
@@ -2129,15 +2138,9 @@ namespace studio {
 			ToolbarLayout = ComposeToolbar(Plugins, ToolbarPrefs);
 			ToolbarLayoutDirty = false;
 		}
-		size_t tabRows = 0;
-		for (const ToolbarTabView &tab : ToolbarLayout.Tabs) {
-			tabRows = std::max(tabRows, tab.Rows.size());
-		}
-		const size_t pinnedRows = ToolbarLayout.PinnedRows.empty() ? 0 : ToolbarLayout.PinnedRows.size() - 1;
-		const size_t visualRows = std::max<size_t>(1, 1 + pinnedRows + tabRows);
 		const ImGuiStyle &style = ImGui::GetStyle();
-		const float height = ImGui::GetFrameHeight() * static_cast<float>(visualRows) +
-							 style.ItemSpacing.y * static_cast<float>(visualRows) +
+		const float height = ImGui::GetFrameHeight() * static_cast<float>(ToolbarLayout.VisualRows) +
+							 style.ItemSpacing.y * static_cast<float>(ToolbarLayout.VisualRows) +
 							 style.WindowPadding.y * 2.0f;
 
 		constexpr ImGuiWindowFlags FLAGS = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |

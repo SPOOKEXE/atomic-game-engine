@@ -59,6 +59,7 @@ namespace engine::render {
 			core::Name Name;
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
+			std::vector<graph::NodeId> EntityNodes;
 			graph::ExecutionSchedule Schedule;
 			graph::ResourceAliasPlan Aliases;
 
@@ -735,6 +736,8 @@ namespace engine::render {
 		std::vector<core::Name> SlotMetalnessMap;
 		std::vector<core::Name> SlotEmissiveMap;
 		std::vector<scene::SurfaceResampleMode> SlotResample;
+		// Whether a shadow run needs per-material alpha or seam state.
+		std::vector<uint8_t> SlotShadowDetail;
 
 		// Which shader each slot asks for, or an invalid name for the engine's.
 		//

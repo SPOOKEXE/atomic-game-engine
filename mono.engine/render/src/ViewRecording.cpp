@@ -571,7 +571,7 @@ namespace engine::render {
 		// all, so they read as a blank at the top of `Renderer::RenderView`.
 		{
 			ENGINE_PROFILE_CAT("entity nodes", core::ProfileCategory::Render);
-			for (const graph::NodeId id : selectedPipeline->Compiled.PerView) {
+			for (const graph::NodeId id : selectedPipeline->EntityNodes) {
 				const graph::Node *node = selectedPipeline->Graph.Find(id);
 				if (node == nullptr) {
 					continue;
@@ -1410,7 +1410,6 @@ namespace engine::render {
 			0.0f,
 			0.0f,
 		};
-
 		sceneViewport = SDL_GPUViewport{
 			0.0f,
 			0.0f,
@@ -1480,6 +1479,7 @@ namespace engine::render {
 		State->SlotMetalnessMap.resize(uploadCount);
 		State->SlotEmissiveMap.resize(uploadCount);
 		State->SlotResample.resize(uploadCount);
+		State->SlotShadowDetail.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
@@ -1506,6 +1506,8 @@ namespace engine::render {
 				State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
 				State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
 				State->SlotResample[drawSlot] = instance.Resample;
+				State->SlotShadowDetail[drawSlot] = instance.Alpha != scene::AlphaMode::Opaque ||
+													instance.SeamNormal.MagnitudeSquared() > 0.0f;
 				State->SlotShader[drawSlot] = instance.Shader;
 				State->SlotTags[drawSlot] = instance.TagMask;
 				State->SlotSeam[drawSlot] = glm::vec4{
@@ -1648,6 +1650,7 @@ namespace engine::render {
 						State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
 						State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
+						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
 						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];

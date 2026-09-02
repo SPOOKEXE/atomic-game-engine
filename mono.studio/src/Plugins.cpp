@@ -432,7 +432,11 @@ namespace studio {
 				userCreated = preference.UserCreated;
 				order = preference.Order;
 			}
-			layout.Tabs.push_back(ToolbarTabView{std::move(id), std::move(name), {}, userCreated});
+			ToolbarTabView tab;
+			tab.Id = std::move(id);
+			tab.Name = std::move(name);
+			tab.UserCreated = userCreated;
+			layout.Tabs.push_back(std::move(tab));
 			tabVisible.push_back(shown);
 			tabOrder.push_back(order);
 			return layout.Tabs.size() - 1;
@@ -547,7 +551,15 @@ namespace studio {
 												   ? preference->Column
 												   : defaultTab + "/" + declaredColumn;
 					const size_t order = preference == nullptr ? itemIndex : preference->Order;
-					ToolbarItemLocation location{pluginIndex, toolbarIndex, itemIndex, key, width, order};
+					ToolbarItemLocation location{
+						pluginIndex,
+						toolbarIndex,
+						itemIndex,
+						key,
+						width,
+						order,
+						button.Name + "###control",
+					};
 
 					if (preference != nullptr && !preference->Tab.empty() && preference->Tab != defaultTab) {
 						const auto target = placements.find(preference->Tab);
@@ -627,7 +639,15 @@ namespace studio {
 		sortCells(layout.PinnedRows);
 		for (ToolbarTabView &tab : layout.Tabs) {
 			sortCells(tab.Rows);
+			tab.Label = tab.Name + "###toolbar." + tab.Id;
+			tab.Context = "toolbar-context." + tab.Id;
 		}
+		size_t tabRows = 0;
+		for (const ToolbarTabView &tab : layout.Tabs) {
+			tabRows = std::max(tabRows, tab.Rows.size());
+		}
+		const size_t pinnedRows = layout.PinnedRows.empty() ? 0 : layout.PinnedRows.size() - 1;
+		layout.VisualRows = std::max<size_t>(1, 1 + pinnedRows + tabRows);
 		return layout;
 	}
 
@@ -2218,18 +2238,19 @@ namespace studio {
 				return;
 			}
 			PluginButton &button = toolbar.Buttons[location.Item];
-			const std::string tooltip = button.Tooltip;
+			const std::string &tooltip = button.Tooltip;
 
 			ImGui::PushID(location.Key.c_str());
 			if (button.Kind == PluginControlKind::Builtin) {
 				DrawBuiltinStudioTool(button.Builtin);
 			} else {
-				const std::string label = button.Name + "###control";
 				if (button.Kind == PluginControlKind::Button) {
 					const bool pressed =
 						button.Active
-							? ImGui::Selectable(label.c_str(), true, 0, ImVec2(location.Width, 0.0f))
-							: ImGui::Button(label.c_str(), ImVec2(location.Width, 0.0f));
+							? ImGui::Selectable(
+								  location.ControlLabel.c_str(), true, 0, ImVec2(location.Width, 0.0f)
+							  )
+							: ImGui::Button(location.ControlLabel.c_str(), ImVec2(location.Width, 0.0f));
 					if (pressed) {
 						if (button.NativeOnClick) {
 							button.NativeOnClick({});
@@ -2239,7 +2260,7 @@ namespace studio {
 					}
 				} else if (button.Kind == PluginControlKind::Toggle) {
 					const bool before = button.Active;
-					ImGui::Checkbox(label.c_str(), &button.Active);
+					ImGui::Checkbox(location.ControlLabel.c_str(), &button.Active);
 					if (before != button.Active) {
 						const engine::script::HostValue value = engine::script::HostValue::Of(button.Active);
 						const engine::script::HostArguments arguments(&value, 1);
@@ -2254,7 +2275,7 @@ namespace studio {
 					const char *preview = button.Selected < button.Options.size()
 											  ? button.Options[button.Selected].c_str()
 											  : "(none)";
-					if (ImGui::BeginCombo(label.c_str(), preview)) {
+					if (ImGui::BeginCombo(location.ControlLabel.c_str(), preview)) {
 						for (size_t option = 0; option < button.Options.size(); option++) {
 							if (!ImGui::Selectable(
 									button.Options[option].c_str(), option == button.Selected
@@ -2342,13 +2363,11 @@ namespace studio {
 			ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
 			for (size_t index = 0; index < ToolbarLayout.Tabs.size(); index++) {
 				const ToolbarTabView &tab = ToolbarLayout.Tabs[index];
-				const std::string label = tab.Name + "###toolbar." + tab.Id;
-				if (ImGui::BeginTabItem(label.c_str())) {
+				if (ImGui::BeginTabItem(tab.Label.c_str())) {
 					selected = static_cast<int>(index);
 					ImGui::EndTabItem();
 				}
-				const std::string context = "toolbar-context." + tab.Id;
-				if (ImGui::BeginPopupContextItem(context.c_str())) {
+				if (ImGui::BeginPopupContextItem(tab.Context.c_str())) {
 					for (size_t order = 0; order < ToolbarLayout.Tabs.size(); order++) {
 						ensureTabPreference(ToolbarLayout.Tabs[order], order).Order = order;
 					}

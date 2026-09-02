@@ -686,10 +686,15 @@ TEST_CASE("toolbar grids preserve declared cells and flat plugin compatibility",
 	REQUIRE(layout.PinnedRows[1].Cells.size() == 1);
 	REQUIRE(layout.PinnedRows[1].Cells.front().Items.size() == 1);
 	CHECK(layout.PinnedRows[1].Cells.front().Items.front().Width == 180.0f);
+	CHECK(layout.PinnedRows[1].Cells.front().Items.front().ControlLabel == "A###control");
 	REQUIRE(layout.Tabs.size() == 1);
+	const std::string tabId = studio::PluginToolbarKey(plugins.front(), plugins.front().Toolbars[1], 1);
+	CHECK(layout.Tabs.front().Label == "Legacy###toolbar." + tabId);
+	CHECK(layout.Tabs.front().Context == "toolbar-context." + tabId);
 	REQUIRE(layout.Tabs.front().Rows.size() == 1);
 	REQUIRE(layout.Tabs.front().Rows.front().Cells.size() == 2);
 	CHECK(ItemsOf(layout.Tabs.front()).size() == 2);
+	CHECK(layout.VisualRows == 3);
 
 	ToolbarPreferences hidden;
 	hidden.Tabs.push_back(
