@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
+	arguments.Value("process-index", "N", "Stable child index assigned by a supervising driver");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
@@ -301,6 +302,10 @@ int main(int argc, char **argv) {
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
+	options.ProcessIndex =
+		static_cast<uint32_t>(std::max<int64_t>(0, arguments.GetInteger("process-index", 0)));
+	options.ProfilePath = server::ProcessOutputPath(options.ProfilePath, options.ProcessIndex);
+	options.HeapReport = server::ProcessOutputPath(options.HeapReport, options.ProcessIndex);
 	options.ProfileWindowTicks =
 		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));
 	if (auto assets = arguments.Get("override-assets-directory")) {

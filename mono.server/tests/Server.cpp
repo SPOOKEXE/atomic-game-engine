@@ -44,18 +44,27 @@ using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::WorldBounds;
 
-TEST_CASE("a thousand worlds use all but one physical core", "[server]") {
+TEST_CASE("a thousand worlds leave main for presentation and use every worker core", "[server]") {
 	const server::WorldProcessPlan plan = server::PlanWorldProcesses(1000, 12);
-	REQUIRE(plan.Processes == 11);
-	REQUIRE(plan.LocalWorlds == 91);
-	REQUIRE(plan.RemoteHosts == 10);
+	REQUIRE(plan.Processes == 12);
+	REQUIRE(plan.LocalWorlds == 0);
+	REQUIRE(plan.RemoteHosts == 11);
 }
 
 TEST_CASE("world process placement stays within worlds and cores", "[server]") {
-	CHECK(server::PlanWorldProcesses(2, 12).Processes == 2);
+	CHECK(server::PlanWorldProcesses(1, 12).Processes == 1);
+	CHECK(server::PlanWorldProcesses(2, 12).Processes == 3);
 	CHECK(server::PlanWorldProcesses(1000, 1).Processes == 1);
 	CHECK(server::PlanWorldProcesses(1000, 0).Processes == 1);
 	CHECK(server::PlanWorldProcesses(1000, 12, 4).Processes == 4);
+	CHECK(server::PlanWorldProcesses(1000, 12, 1).LocalWorlds == 1000);
+}
+
+TEST_CASE("diagnostic output paths select main and child processes", "[server]") {
+	const std::filesystem::path main = "/tmp/rings.folded";
+	CHECK(server::ProcessOutputPath(main, 0) == main);
+	CHECK(server::ProcessOutputPath(main, 1) == "/tmp/rings.process1.folded");
+	CHECK(server::ProcessOutputPath(main, 12) == "/tmp/rings.process12.folded");
 }
 
 namespace {

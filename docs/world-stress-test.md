@@ -75,14 +75,39 @@ signature, and 4.7 ms for content references.
 
 ## Multiprocess placement follow-up
 
-The headless server now treats `--worlds N` as an isolated-world deployment.
-It chooses `max(1, physical cores - 1)` processes by default, capped by the
-world count, balances the worlds to within one, and binds every thread in each
-process to its assigned physical core. The existing `Driver`, `Supervisor`,
-`HostLink`, and copied bus envelopes remain the only path between worlds.
+### Baseline rerun before reserving main
 
-The 1,000-world Rings verification used the optimized `release` preset for 20
-seconds with no renderer linked or loaded:
+On 2026-09-02, the four larger Rings cases were rerun headless for 20 seconds
+with the committed 11-process placement. This is the baseline taken before the
+driver was changed to reserve main for presentation and coordination. Each
+entry is the driver process, which held the largest balanced partition. GNU
+time's maximum RSS is a per-process high-water mark, not the sum of all hosts.
+
+| Worlds | Driver worlds | Driver ticks | Mean tick | p50 | p95 | p99 | Slowest | Wall time | Aggregate user CPU | Max process RSS |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 10 | 4,382 | 4.564 ms | 5.109 ms | 6.228 ms | 6.643 ms | 8.208 ms | 20.27 s | 216.33 s | 30,788 KiB |
+| 250 | 23 | 2,063 | 9.695 ms | 9.484 ms | 11.678 ms | 13.997 ms | 18.268 ms | 20.32 s | 216.39 s | 50,580 KiB |
+| 500 | 46 | 997 | 20.080 ms | 20.147 ms | 21.955 ms | 22.952 ms | 30.322 ms | 20.40 s | 216.79 s | 86,808 KiB |
+| 1,000 | 91 | 420 | 47.618 ms | 42.230 ms | 76.465 ms | 99.371 ms | 158.677 ms | 20.56 s | 210.78 s | 157,616 KiB |
+
+All four runs started ten child hosts, balanced world counts to within one,
+and exited successfully. The 1,000-world children reported 90 or 91 worlds
+each. The command shape was:
+
+```sh
+.cache/build/release/server/server --worlds N \
+    --game mono.engine/examples/Rings.luau --seconds 20 --unpaced
+```
+
+The headless server now treats `--worlds N` as an isolated-world deployment.
+Main is pinned to physical core zero for presentation and coordination, owns no
+simulation world when another physical core exists, and starts up to one child
+host on every remaining physical core. Worlds are balanced across those hosts
+to within one. The existing `Driver`, `Supervisor`, `HostLink`, and copied bus
+envelopes remain the only path between worlds.
+
+The earlier 1,000-world Rings verification used the optimized `release` preset
+for 20 seconds with no renderer linked or loaded:
 
 ```sh
 .cache/build/release/server/server --worlds 1000 \
@@ -100,6 +125,34 @@ seconds with no renderer linked or loaded:
 | Whole-process binding | All five threads in every PID reported the same singleton `Cpus_allowed_list` |
 | Live execution | Driver ran 439 ticks over 20.05 seconds; sampled 91-world hosts ran 398 to 409 ticks over about 19.6 seconds |
 | Shutdown | Driver and all 10 children exited cleanly after the requested duration |
+
+After reserving main, a 12-world release smoke test started 12 processes: main
+with zero local worlds and process 1 through process 11 with one or two worlds
+each. All 11 child summaries were written before shutdown. This also proves
+the shutdown grace period lets every process flush its final diagnostics.
+
+### Per-process flame and heap captures
+
+`--profile-out run.folded` and `--heap-report run.heap.txt` keep main at the
+requested path. Child outputs sit beside them as `run.process1.folded`,
+`run.process2.folded`, and corresponding `.processN` heap reports. Window
+snapshots carry both selectors, such as `run.process2.window500.folded`.
+
+List or select a process without reconstructing its filename:
+
+```sh
+python3 scripts/flamegraph.py run.folded --list-workers
+python3 scripts/flamegraph.py run.folded --worker main --svg main.svg
+python3 scripts/flamegraph.py run.folded --worker process2 --svg process2.svg
+python3 scripts/flamegraph.py --average run.window*.folded \
+    --worker process2 --svg process2-average.svg
+```
+
+The selector accepts `main`, `2`, or `process2`. Tick windows now write once
+when the observed primary-world tick crosses the requested interval. This is
+important on main because a remote heartbeat may repeat or jump between driver
+frames. It prevents repeated writes at one tick and prevents a skipped exact
+modulo from losing the next sample.
 
 The kernel check read `/proc/<pid>/task/*/status`, not the engine's own
 placement log. This matters because an earlier probe found that the simulation

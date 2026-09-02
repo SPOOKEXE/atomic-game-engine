@@ -103,6 +103,10 @@ namespace engine::world {
 		// A host that dies deterministically would otherwise respawn forever,
 		// burning the machine while looking alive.
 		uint32_t RestartLimit = 3;
+
+		// Shared grace period for every host to flush and exit during shutdown.
+		// Stragglers are killed after this monotonic deadline.
+		double ShutdownSeconds = 2.0;
 	};
 
 	// What a supervised host is doing.
@@ -183,6 +187,9 @@ namespace engine::world {
 		// The physical-core slot assigned at startup, or UINT32_MAX when hosts
 		// are not pinned.
 		uint32_t PhysicalCore = UINT32_MAX;
+
+		// Stable one-based process selector assigned by the driver.
+		uint32_t ProcessIndex = 0;
 	};
 
 	// Assigns worlds to hosts.
@@ -388,6 +395,7 @@ namespace engine::world {
 			bool EverBeat = false;
 			bool Ready = false;
 			uint32_t PhysicalCore = UINT32_MAX;
+			uint32_t ProcessIndex = 0;
 		};
 
 		bool Launch(Entry &entry);

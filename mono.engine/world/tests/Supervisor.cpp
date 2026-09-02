@@ -177,6 +177,11 @@ TEST_CASE("a supervisor starts one host per plan", "[world]") {
 
 	const auto plans = PlanHosts({Shared("a"), Shared("b"), Dedicated("c")}, 8);
 	REQUIRE(supervisor.Start(plans) == plans.size());
+	const auto hosts = supervisor.Hosts();
+	REQUIRE(hosts.size() == plans.size());
+	for (size_t index = 0; index < hosts.size(); index++) {
+		CHECK(hosts[index].ProcessIndex == index + 1);
+	}
 
 	REQUIRE(supervisor.Count() == plans.size());
 	for (const auto &status : supervisor.Hosts()) {

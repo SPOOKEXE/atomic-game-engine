@@ -259,17 +259,24 @@ namespace server {
 			plan.LocalWorlds = 0;
 			return plan;
 		}
-		if (physicalCores == 0) {
+		if (worlds == 1 || physicalCores <= 1 || requested == 1) {
 			plan.LocalWorlds = worlds;
 			return plan;
 		}
 
-		const uint32_t automatic = std::max(1u, physicalCores - 1u);
-		const uint32_t wanted = requested == 0 ? automatic : requested;
-		plan.Processes = std::min({wanted, physicalCores, worlds});
-		plan.LocalWorlds = worlds / plan.Processes + (worlds % plan.Processes != 0 ? 1u : 0u);
-		plan.RemoteHosts = plan.Processes - 1;
+		const uint32_t wantedProcesses = requested == 0 ? physicalCores : requested;
+		plan.RemoteHosts = std::min({wantedProcesses - 1u, physicalCores - 1u, worlds});
+		plan.Processes = 1u + plan.RemoteHosts;
+		plan.LocalWorlds = 0;
 		return plan;
+	}
+
+	std::filesystem::path ProcessOutputPath(const std::filesystem::path &path, uint32_t index) {
+		if (path.empty() || index == 0) {
+			return path;
+		}
+		return path.parent_path() /
+			   (path.stem().string() + ".process" + std::to_string(index) + path.extension().string());
 	}
 
 	namespace {
@@ -812,6 +819,18 @@ namespace server {
 			driver.Hosts.Arguments.emplace_back("--override-assets-directory");
 			driver.Hosts.Arguments.emplace_back(Settings.AssetsDirectory.string());
 		}
+		if (!Settings.ProfilePath.empty()) {
+			driver.Hosts.Arguments.emplace_back("--profile-out");
+			driver.Hosts.Arguments.emplace_back(Settings.ProfilePath.string());
+		}
+		if (!Settings.HeapReport.empty()) {
+			driver.Hosts.Arguments.emplace_back("--heap-report");
+			driver.Hosts.Arguments.emplace_back(Settings.HeapReport.string());
+		}
+		if (Settings.ProfileWindowTicks > 0) {
+			driver.Hosts.Arguments.emplace_back("--profile-window");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.ProfileWindowTicks));
+		}
 
 		if (Settings.Chatter) {
 			driver.Hosts.Arguments.emplace_back("--chatter");
@@ -915,6 +934,13 @@ namespace server {
 		if (!StartHosts()) {
 			return false;
 		}
+		if (!PrimaryWorld.IsValid()) {
+			PrimaryWorld = Worlds().Find(engine::core::Name(PRIMARY));
+		}
+		if (!PrimaryWorld.IsValid()) {
+			ENGINE_ERROR("the primary world was not registered locally or by a host");
+			return false;
+		}
 
 		if (AutomaticWorldPlacement) {
 			// Hosts inherited the full mask and have already narrowed themselves.
@@ -925,7 +951,8 @@ namespace server {
 			}
 			startJobs();
 			ENGINE_INFO(
-				"distributed {} world(s) across {} process(es): {} local, {} remote host(s)",
+				"distributed {} world(s) across {} process(es): {} local, {} remote host(s); main reserved "
+				"for presentation",
 				Settings.Worlds,
 				Settings.Processes,
 				LocalWorlds,
@@ -2636,7 +2663,7 @@ namespace server {
 		const WorldProcessPlan placement =
 			PlanWorldProcesses(Settings.Worlds, physicalCores, Settings.Processes);
 		Settings.Processes = placement.Processes;
-		const uint32_t wanted = requested == 0 ? std::max(1u, physicalCores - 1u) : requested;
+		const uint32_t wanted = requested == 0 ? physicalCores : requested;
 		if (Settings.Processes != wanted) {
 			ENGINE_WARN(
 				"{} process(es) requested for {} world(s) on {} physical core(s); using {}",
@@ -2647,7 +2674,7 @@ namespace server {
 			);
 		}
 
-		AutomaticWorldPlacement = placement.Processes > 1;
+		AutomaticWorldPlacement = placement.RemoteHosts > 0;
 		RemoteHosts = placement.RemoteHosts;
 		LocalWorlds = placement.LocalWorlds;
 
@@ -2919,15 +2946,28 @@ namespace server {
 		uint64_t nextTickAt = started;
 		double totalTickSeconds = 0.0;
 
-		// Every tick's cost, for the percentiles below. Four bytes a tick, so an
-		// hour at sixty a second is under a megabyte and a run long enough to
-		// matter is bounded by how long somebody left it running.
+		// Every loop iteration's cost, for the percentiles below. This is one
+		// simulation tick for a local world and one coordination frame when main
+		// observes a remote world. Four bytes per reading keeps long runs bounded.
 		std::vector<float> tickMilliseconds;
 		size_t droppedSpans = 0;
 		uint64_t lastMetricsReport = started;
 		uint64_t lastDataStoreFlush = started;
 
-		const auto ticksSoFar = [this] { return Worlds().StatisticsOf(PrimaryWorld).Ticks; };
+		uint64_t lastObservedTick = 0;
+		uint64_t cumulativeObservedTicks = 0;
+		const auto ticksSoFar = [this, &lastObservedTick, &cumulativeObservedTicks] {
+			const uint64_t observed = !Worlds().IsRemote(PrimaryWorld)
+										  ? Worlds().StatisticsOf(PrimaryWorld).Ticks
+										  : Driver_->Hosts().StatusOf(Worlds().HostOf(PrimaryWorld)).Tick;
+			// A restarted host begins again at zero. Keep the run's tick axis
+			// monotonic so a budget still terminates and window filenames never
+			// move backward and overwrite an earlier capture.
+			cumulativeObservedTicks += observed >= lastObservedTick ? observed - lastObservedTick : observed;
+			lastObservedTick = observed;
+			return cumulativeObservedTicks;
+		};
+		uint64_t lastProfileWindowTick = 0;
 
 		// Collection has to be on for there to be a tree to fold, and asking for
 		// the profile is what says so - `--graph` is the other way in and the
@@ -3118,8 +3158,8 @@ namespace server {
 			summary.SlowestTickMilliseconds =
 				std::max(summary.SlowestTickMilliseconds, static_cast<float>(spent * 1000.0));
 
-			// From the world, which counted the tick it just ran. The loop does
-			// not keep its own tally.
+			// From the local world or the primary world's host heartbeat. The loop
+			// does not invent a simulation tick for coordination work on main.
 			const uint64_t ticks = ticksSoFar();
 
 			// **A cumulative sample, not a second collector.** `WriteFolded` reads
@@ -3127,9 +3167,12 @@ namespace server {
 			// shutdown block below makes, just made early and repeatedly. Two
 			// samples N ticks apart subtract into that window's folded stacks -
 			// `scripts/flamegraph.py --average` does the subtracting - so nothing
-			// here has to track a window's spans on its own.
-			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() &&
-				ticks % Settings.ProfileWindowTicks == 0) {
+			// here has to track a window's spans on its own. A remote heartbeat may
+			// repeat or skip a count, so crossing an interval writes once at the
+			// observed tick instead of requiring an exact modulo match.
+			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() && ticks > 0 &&
+				ticks - lastProfileWindowTick >= Settings.ProfileWindowTicks) {
+				lastProfileWindowTick = ticks;
 				const std::filesystem::path window =
 					Settings.ProfilePath.parent_path() /
 					(Settings.ProfilePath.stem().string() + ".window" + std::to_string(ticks) +
@@ -3190,8 +3233,8 @@ namespace server {
 		summary.Ticks = ticksSoFar();
 		summary.Seconds = static_cast<double>(engine::core::Clock::Nanoseconds() - started) / 1e9;
 		summary.MeanTickMilliseconds =
-			summary.Ticks > 0
-				? static_cast<float>(totalTickSeconds / static_cast<double>(summary.Ticks) * 1000.0)
+			!tickMilliseconds.empty()
+				? static_cast<float>(totalTickSeconds / static_cast<double>(tickMilliseconds.size()) * 1000.0)
 				: 0.0f;
 
 		// Nearest-rank on a sorted copy, for `FrameGraph`'s reason: with

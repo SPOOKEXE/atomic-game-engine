@@ -292,7 +292,8 @@ namespace server {
 
 		// Host the world in a universe that permits several. Named worlds are
 		// the unit a supervisor grants and revokes. Above one, a headless server
-		// automatically spreads the worlds across physical-core-bound processes.
+		// keeps the driver process for presentation and coordination, then spreads
+		// every world across physical-core-bound child processes.
 		uint32_t Worlds = 1;
 
 		// Run as a supervised host under a driver, rather than as a driver.
@@ -329,6 +330,10 @@ namespace server {
 		// Physical-core slot assigned by the driver. UINT32_MAX means no binding.
 		// Host children receive this through their private launch protocol.
 		uint32_t PhysicalCore = UINT32_MAX;
+
+		// Stable one-based child index assigned by the driver. Zero is main.
+		// Used to keep per-process diagnostic files distinct.
+		uint32_t ProcessIndex = 0;
 
 		// Whether to serve the primary world to clients at all.
 		//
@@ -504,25 +509,36 @@ namespace server {
 
 	// Balanced placement for duplicated headless worlds.
 	struct WorldProcessPlan {
-		// Total processes, including the driver.
+		// Total processes, including the presentation and driver process.
 		uint32_t Processes = 1;
 
-		// Worlds retained in the driver's process.
+		// Worlds retained in the driver when no worker core is available.
 		uint32_t LocalWorlds = 1;
 
 		// Child host processes to spawn.
 		uint32_t RemoteHosts = 0;
 	};
 
-	// Chooses at most one process per assignable physical core, leaving one
-	// core unused by default for operating-system and background work.
+	// Chooses at most one process per assignable physical core. In a
+	// multiprocess plan the driver occupies the first core for presentation and
+	// coordination, while child hosts occupy the remaining cores and own every
+	// simulation world.
 	//
 	// @param worlds        Total duplicated worlds.
 	// @param physicalCores Assignable physical cores, or zero when unavailable.
 	// @param requested     Explicit process count, or zero for automatic.
-	// @return A process count and the driver's first balanced partition.
+	// @return A process count and the local or remote partition.
 	// @since v0.20
 	WorldProcessPlan PlanWorldProcesses(uint32_t worlds, uint32_t physicalCores, uint32_t requested = 0);
+
+	// Adds a stable process selector before a diagnostic file's extension.
+	// Main, index zero, keeps the path exactly as requested.
+	//
+	// @param path  The main process output path.
+	// @param index Zero for main, or a one-based child process index.
+	// @return `path`, or its `.processN` sibling.
+	// @since v0.20
+	std::filesystem::path ProcessOutputPath(const std::filesystem::path &path, uint32_t index);
 
 	// What the run produced. Returned rather than logged only, so a test can
 	// assert on it.

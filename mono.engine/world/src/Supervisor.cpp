@@ -2,7 +2,9 @@
 #include <engine/world/Supervisor.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
+#include <thread>
 
 namespace engine::world {
 
@@ -139,6 +141,8 @@ namespace engine::world {
 		std::vector<std::string> arguments = Settings_.Arguments;
 		arguments.emplace_back("--host");
 		arguments.emplace_back(std::string(entry.Plan.Name.Text()));
+		arguments.emplace_back("--process-index");
+		arguments.emplace_back(std::to_string(entry.ProcessIndex));
 
 		for (const core::Name world : entry.Plan.Worlds) {
 			arguments.emplace_back("--world");
@@ -308,6 +312,7 @@ namespace engine::world {
 		for (const HostPlan &plan : plans) {
 			Entry entry;
 			entry.Plan = plan;
+			entry.ProcessIndex = static_cast<uint32_t>(Entries.size()) + 1u;
 			if (Settings_.PinToPhysicalCores) {
 				entry.PhysicalCore = Settings_.FirstPhysicalCore + static_cast<uint32_t>(Entries.size());
 			}
@@ -456,9 +461,31 @@ namespace engine::world {
 			}
 		}
 
+		// One deadline for the group, not one wait per host. Every child gets the
+		// same chance to write its profile and heap report, while eleven stuck
+		// children still cost at most one grace period rather than eleven.
 		for (Entry &entry : Entries) {
 			if (entry.Child.Started()) {
 				entry.Child.RequestStop();
+			}
+		}
+		const auto deadline = std::chrono::steady_clock::now() +
+							  std::chrono::duration<double>(std::max(Settings_.ShutdownSeconds, 0.0));
+		bool waiting = true;
+		while (waiting && std::chrono::steady_clock::now() < deadline) {
+			waiting = false;
+			for (Entry &entry : Entries) {
+				if (entry.Child.Started() && entry.Child.Poll().Alive()) {
+					waiting = true;
+				}
+			}
+			if (waiting) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+		}
+
+		for (Entry &entry : Entries) {
+			if (entry.Child.Started()) {
 				entry.Child.Kill();
 				entry.Child.Wait();
 			}
@@ -490,6 +517,7 @@ namespace engine::world {
 			status.Worlds = entry.Plan.Worlds;
 			status.ProcessId = entry.Child.Id();
 			status.PhysicalCore = entry.PhysicalCore;
+			status.ProcessIndex = entry.ProcessIndex;
 			found.push_back(std::move(status));
 		}
 
@@ -515,6 +543,7 @@ namespace engine::world {
 		status.Worlds = entry->Plan.Worlds;
 		status.ProcessId = entry->Child.Id();
 		status.PhysicalCore = entry->PhysicalCore;
+		status.ProcessIndex = entry->ProcessIndex;
 		return status;
 	}
 }
