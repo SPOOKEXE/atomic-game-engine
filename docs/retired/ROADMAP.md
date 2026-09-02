@@ -2660,3 +2660,4 @@ All bottleneck issues should then specifically be with mono.studio and we'll nee
 
 Maybe add flamegraph categories for "engine", "server", "client", "studio" and "all", as part of the engine, then we submit data from studio/client/server to engine layer via binding.
 ```
+- [x] true multi-processed worlds (pinned cores)
