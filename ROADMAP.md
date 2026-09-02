@@ -56,7 +56,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] ensure weld / weld constraints work
 - [_] ensure ViewportFrame and WorldRoot are implemented and work
 
-- [_] fix selection box not being aligned to object
+- [x] fix selection box not being aligned to object
 
 - [_] gtlf default character (unreal style)
 
@@ -66,6 +66,8 @@ in StressParticles demo:
 - [_] `render preperation` takes 0.373ms of which `collect instances` takes 0.277ms of which `interpolate` and `build skin palettes` takes 0.123ms and 0.143ms respectively (these seem weird and should not be here - check batched compute).
 - [_] check we are only sending newly updated information to the gpu to render (cascaded cache hit - "objects" and "particles" both update)
 - [_] also why is `objects` updating for the StressParticles? `particles` should be the only one. Check what causes the update.
+
+- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new instance for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
 ### v0.23
 
