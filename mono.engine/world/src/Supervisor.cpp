@@ -75,6 +75,41 @@ namespace engine::world {
 		return plans;
 	}
 
+	std::vector<HostPlan> PlanHostsAcross(const std::vector<WorldSettings> &worlds, uint32_t hosts) {
+		std::vector<HostPlan> plans;
+		std::vector<core::Name> shared;
+
+		for (const WorldSettings &world : worlds) {
+			if (!world.Name.IsValid()) {
+				continue;
+			}
+			if (world.IsolationLevel == Isolation::Dedicated) {
+				HostPlan plan;
+				plan.Name = core::Name("host." + std::string(world.Name.Text()));
+				plan.Worlds.push_back(world.Name);
+				plan.Dedicated = true;
+				plans.push_back(std::move(plan));
+			} else {
+				shared.push_back(world.Name);
+			}
+		}
+
+		const size_t sharedHosts = std::min<size_t>(hosts, shared.size());
+		const size_t base = sharedHosts == 0 ? 0 : shared.size() / sharedHosts;
+		const size_t remainder = sharedHosts == 0 ? 0 : shared.size() % sharedHosts;
+		size_t next = 0;
+		for (size_t index = 0; index < sharedHosts; index++) {
+			HostPlan plan;
+			plan.Name = core::Name("host.shared." + std::to_string(index));
+			const size_t count = base + (index < remainder ? 1u : 0u);
+			plan.Worlds.insert(plan.Worlds.end(), shared.begin() + next, shared.begin() + next + count);
+			next += count;
+			plans.push_back(std::move(plan));
+		}
+
+		return plans;
+	}
+
 	Supervisor::Supervisor(const SupervisorSettings &settings) : Settings_(settings) {}
 
 	Supervisor::~Supervisor() {
@@ -110,6 +145,11 @@ namespace engine::world {
 			arguments.emplace_back(std::string(world.Text()));
 		}
 
+		if (entry.PhysicalCore != UINT32_MAX) {
+			arguments.emplace_back("--physical-core");
+			arguments.emplace_back(std::to_string(entry.PhysicalCore));
+		}
+
 		// Created before the spawn, because the child has to be holding its end
 		// by the time it runs. A host that had to connect to something would
 		// need an address, a retry and a timeout; an inherited handle needs
@@ -121,6 +161,16 @@ namespace engine::world {
 
 		if (!entry.Child.Start(Settings_.Program, arguments, std::move(pair.Remote))) {
 			return false;
+		}
+		if (entry.PhysicalCore == UINT32_MAX) {
+			ENGINE_INFO("started host '{}' as process {}", entry.Plan.Name.Text(), entry.Child.Id());
+		} else {
+			ENGINE_INFO(
+				"started host '{}' as process {} on physical core {}",
+				entry.Plan.Name.Text(),
+				entry.Child.Id(),
+				entry.PhysicalCore
+			);
 		}
 
 		entry.Link = std::make_unique<HostLink>(std::move(pair.Local), entry.Plan.Name);
@@ -258,6 +308,9 @@ namespace engine::world {
 		for (const HostPlan &plan : plans) {
 			Entry entry;
 			entry.Plan = plan;
+			if (Settings_.PinToPhysicalCores) {
+				entry.PhysicalCore = Settings_.FirstPhysicalCore + static_cast<uint32_t>(Entries.size());
+			}
 
 			if (Launch(entry)) {
 				entry.State = HostState::Running;
@@ -435,6 +488,8 @@ namespace engine::world {
 			status.Linked = entry.Link != nullptr && entry.Link->Connected();
 			status.Ready = entry.Ready;
 			status.Worlds = entry.Plan.Worlds;
+			status.ProcessId = entry.Child.Id();
+			status.PhysicalCore = entry.PhysicalCore;
 			found.push_back(std::move(status));
 		}
 
@@ -458,6 +513,8 @@ namespace engine::world {
 		status.Linked = entry->Link != nullptr && entry->Link->Connected();
 		status.Ready = entry->Ready;
 		status.Worlds = entry->Plan.Worlds;
+		status.ProcessId = entry->Child.Id();
+		status.PhysicalCore = entry->PhysicalCore;
 		return status;
 	}
 }

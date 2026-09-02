@@ -22,6 +22,10 @@ namespace engine::parallel::platform {
 		return false;
 	}
 
+	bool PinCurrentProcess(Processor) {
+		return false;
+	}
+
 	Processor CurrentProcessor() {
 		return {};
 	}

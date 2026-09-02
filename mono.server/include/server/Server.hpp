@@ -291,8 +291,8 @@ namespace server {
 		std::filesystem::path HeapReport;
 
 		// Host the world in a universe that permits several. Named worlds are
-		// the unit a supervisor grants and revokes; one is simply the common
-		// case rather than the only one.
+		// the unit a supervisor grants and revokes. Above one, a headless server
+		// automatically spreads the worlds across physical-core-bound processes.
 		uint32_t Worlds = 1;
 
 		// Run as a supervised host under a driver, rather than as a driver.
@@ -310,14 +310,9 @@ namespace server {
 
 		// Worlds to place into supervised host processes rather than hold here.
 		//
-		// **Processes are for crash isolation, not for speed.** A world here
-		// costs a process and an address space and buys exactly one thing:
-		// a hard fault in it takes that process rather than the server. Two
-		// worlds in two processes are not faster than two in two threads.
-		//
 		// The driver still routes every bus operation, so a world's behaviour
-		// does not change by being moved out - which is what makes this a
-		// deployment decision.
+		// does not change when it moves to another address space. Automatic
+		// multi-world placement fills this list before the driver starts.
 		std::vector<std::string> RemoteWorlds;
 
 		// How many `Shared` worlds may sit in one host.
@@ -330,6 +325,10 @@ namespace server {
 		//
 		// Zero lets the driver size one shared worker budget for all processes.
 		uint32_t Processes = 0;
+
+		// Physical-core slot assigned by the driver. UINT32_MAX means no binding.
+		// Host children receive this through their private launch protocol.
+		uint32_t PhysicalCore = UINT32_MAX;
 
 		// Whether to serve the primary world to clients at all.
 		//
@@ -502,6 +501,28 @@ namespace server {
 		// The corresponding seeds stay with the platform and clients.
 		std::vector<std::string> AdmittedKeys;
 	};
+
+	// Balanced placement for duplicated headless worlds.
+	struct WorldProcessPlan {
+		// Total processes, including the driver.
+		uint32_t Processes = 1;
+
+		// Worlds retained in the driver's process.
+		uint32_t LocalWorlds = 1;
+
+		// Child host processes to spawn.
+		uint32_t RemoteHosts = 0;
+	};
+
+	// Chooses at most one process per assignable physical core, leaving one
+	// core unused by default for operating-system and background work.
+	//
+	// @param worlds        Total duplicated worlds.
+	// @param physicalCores Assignable physical cores, or zero when unavailable.
+	// @param requested     Explicit process count, or zero for automatic.
+	// @return A process count and the driver's first balanced partition.
+	// @since v0.20
+	WorldProcessPlan PlanWorldProcesses(uint32_t worlds, uint32_t physicalCores, uint32_t requested = 0);
 
 	// What the run produced. Returned rather than logged only, so a test can
 	// assert on it.
@@ -786,6 +807,10 @@ namespace server {
 		// @return `false` when a named scene could not be loaded.
 		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
+		// Expands `Worlds` into one balanced local partition and supervised
+		// remote partitions before the job pool or any world exists.
+		bool ConfigureWorldPlacement();
+
 		// Opens a game, universe folder, or Project ZIP and starts its worlds.
 		//
 		// @return `false` when the file would not load or holds no worlds.
@@ -988,6 +1013,12 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		engine::world::WorldId PrimaryWorld;
+
+		// Placement derived once from `Options::Worlds`. The driver keeps the
+		// first partition and each supervised host receives one of the rest.
+		uint32_t LocalWorlds = 1;
+		uint32_t RemoteHosts = 0;
+		bool AutomaticWorldPlacement = false;
 
 		// One route and one snapshot for the universe. Worlds reach the shared
 		// store through `Driver`, so no per-world persistence copy can diverge.

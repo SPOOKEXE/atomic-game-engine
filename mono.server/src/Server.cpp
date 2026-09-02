@@ -253,6 +253,25 @@ namespace server {
 		return std::nullopt;
 	}
 
+	WorldProcessPlan PlanWorldProcesses(uint32_t worlds, uint32_t physicalCores, uint32_t requested) {
+		WorldProcessPlan plan;
+		if (worlds == 0) {
+			plan.LocalWorlds = 0;
+			return plan;
+		}
+		if (physicalCores == 0) {
+			plan.LocalWorlds = worlds;
+			return plan;
+		}
+
+		const uint32_t automatic = std::max(1u, physicalCores - 1u);
+		const uint32_t wanted = requested == 0 ? automatic : requested;
+		plan.Processes = std::min({wanted, physicalCores, worlds});
+		plan.LocalWorlds = worlds / plan.Processes + (worlds % plan.Processes != 0 ? 1u : 0u);
+		plan.RemoteHosts = plan.Processes - 1;
+		return plan;
+	}
+
 	namespace {
 		// Read between ticks by the loop, written by Stop from anywhere.
 		std::atomic<bool> StopRequested{false};
@@ -263,6 +282,10 @@ namespace server {
 		// snapshot and a supervisor all carry. An index means something
 		// different in every process that reads it.
 		constexpr const char *PRIMARY = "server.world";
+
+		std::string WorldName(uint32_t index) {
+			return index == 0 ? std::string(PRIMARY) : std::string(PRIMARY) + "." + std::to_string(index);
+		}
 
 		// The one topic every chattering world uses.
 		constexpr const char *CHATTER_TOPIC = "placeholder.chatter";
@@ -682,6 +705,12 @@ namespace server {
 
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
+		LocalWorlds = 1;
+		RemoteHosts = 0;
+		AutomaticWorldPlacement = false;
+		if (!ConfigureWorldPlacement()) {
+			return false;
+		}
 		if (!Settings.DataStoreConfigured) {
 			const Options defaults;
 			Settings.DataStoreConfigured =
@@ -714,13 +743,27 @@ namespace server {
 
 		const unsigned processes =
 			Settings.Processes > 0 ? Settings.Processes : 1u + static_cast<unsigned>(PlannedHosts());
-
-		// The configured count wins, and zero means work it out from how many
-		// processes are sharing the machine - see `parallel::ConfiguredWorkers`.
 		const unsigned configured = engine::parallel::ConfiguredWorkers();
-		engine::parallel::Jobs::Start(
-			configured != 0 ? configured : engine::parallel::WorkersPerHost(processes)
-		);
+		const auto startJobs = [configured, processes] {
+			engine::parallel::Jobs::Start(
+				configured != 0 ? configured : engine::parallel::WorkersPerHost(processes)
+			);
+		};
+
+		// A child receives a full machine affinity mask from the unbound driver,
+		// narrows it before creating workers, then sees one available processor.
+		if (IsHost() && Settings.PhysicalCore != UINT32_MAX) {
+			if (!engine::parallel::PinCurrentProcessToPhysicalCore(Settings.PhysicalCore)) {
+				ENGINE_ERROR(
+					"could not bind host '{}' to physical core {}", Settings.HostName, Settings.PhysicalCore
+				);
+				return false;
+			}
+			ENGINE_INFO("host '{}' bound to physical core {}", Settings.HostName, Settings.PhysicalCore);
+		}
+		if (IsHost() || !AutomaticWorldPlacement) {
+			startJobs();
+		}
 
 		// Register names before any snapshot or world is built.
 		RegisterPlaceholderComponents();
@@ -736,6 +779,9 @@ namespace server {
 		// Keeping one world in it makes the process, physics state, ECS store,
 		// and listener share the same failure and restart boundary.
 		driver.Hosts.WorldsPerHost = Settings.Listening ? 1u : Settings.WorldsPerHost;
+		driver.Hosts.SharedHosts = RemoteHosts;
+		driver.Hosts.PinToPhysicalCores = AutomaticWorldPlacement && RemoteHosts > 0;
+		driver.Hosts.FirstPhysicalCore = 1;
 
 		driver.Hosts.Program = Settings.HostProgram.empty() ? ThisProgram() : Settings.HostProgram;
 
@@ -758,6 +804,14 @@ namespace server {
 			"--processes",
 			std::to_string(1u + PlannedHosts()),
 		};
+		if (!Settings.GamePath.empty()) {
+			driver.Hosts.Arguments.emplace_back("--game");
+			driver.Hosts.Arguments.emplace_back(Settings.GamePath);
+		}
+		if (!Settings.AssetsDirectory.empty()) {
+			driver.Hosts.Arguments.emplace_back("--override-assets-directory");
+			driver.Hosts.Arguments.emplace_back(Settings.AssetsDirectory.string());
+		}
 
 		if (Settings.Chatter) {
 			driver.Hosts.Arguments.emplace_back("--chatter");
@@ -827,26 +881,31 @@ namespace server {
 				return false;
 			}
 		} else {
-			engine::world::WorldSettings world;
-			world.Name = engine::core::Name(PRIMARY);
-			world.TickRate = Settings.TickRate;
-			world.PhysicsTickRate = Settings.PhysicsTickRate;
-			world.ReplicationTickRate = Settings.ReplicationTickRate;
+			for (uint32_t index = 0; index < LocalWorlds; index++) {
+				engine::world::WorldSettings world;
+				world.Name = engine::core::Name(WorldName(index));
+				world.TickRate = Settings.TickRate;
+				world.PhysicsTickRate = Settings.PhysicsTickRate;
+				world.ReplicationTickRate = Settings.ReplicationTickRate;
 
-			PrimaryWorld = Worlds().Create(world);
-			if (!PrimaryWorld.IsValid()) {
-				ENGINE_ERROR("could not create the primary world");
-				return false;
+				const engine::world::WorldId id = Worlds().Create(world);
+				if (!id.IsValid()) {
+					ENGINE_ERROR("could not create local world '{}'", world.Name.Text());
+					return false;
+				}
+				if (!PrimaryWorld.IsValid()) {
+					PrimaryWorld = id;
+				}
+
+				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					if (!BuildWorld(store, systems)) {
+						return;
+					}
+					if (Settings.Chatter) {
+						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+					}
+				});
 			}
-
-			Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-				if (!BuildWorld(store, systems)) {
-					return;
-				}
-				if (Settings.Chatter) {
-					store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-				}
-			});
 		}
 
 		if (!LoadDataStore()) {
@@ -855,6 +914,23 @@ namespace server {
 
 		if (!StartHosts()) {
 			return false;
+		}
+
+		if (AutomaticWorldPlacement) {
+			// Hosts inherited the full mask and have already narrowed themselves.
+			// The driver narrows last so later children are not born on core zero.
+			if (!engine::parallel::PinCurrentProcessToPhysicalCore(0)) {
+				ENGINE_ERROR("could not bind the world driver to physical core 0");
+				return false;
+			}
+			startJobs();
+			ENGINE_INFO(
+				"distributed {} world(s) across {} process(es): {} local, {} remote host(s)",
+				Settings.Worlds,
+				Settings.Processes,
+				LocalWorlds,
+				RemoteHosts
+			);
 		}
 
 		if (!BeginRecording()) {
@@ -2518,6 +2594,70 @@ namespace server {
 		Replication->Advance(nowSeconds);
 	}
 
+	bool Server::ConfigureWorldPlacement() {
+		if (Settings.Worlds == 0) {
+			ENGINE_ERROR("--worlds must be at least one");
+			return false;
+		}
+		if (IsHost() || Settings.Worlds == 1) {
+			return true;
+		}
+		if (Settings.Listening) {
+			ENGINE_ERROR(
+				"--worlds above one is a headless simulation mode and cannot be combined with --listen"
+			);
+			return false;
+		}
+		if (!Settings.RemoteWorlds.empty()) {
+			ENGINE_ERROR("--worlds and --remote-world cannot describe placement at the same time");
+			return false;
+		}
+
+		const engine::game::ProjectKind kind = engine::game::ClassifyProject(Settings.GamePath);
+		if (kind == engine::game::ProjectKind::GameFile ||
+			kind == engine::game::ProjectKind::UniverseFolder ||
+			kind == engine::game::ProjectKind::ProjectZip) {
+			ENGINE_ERROR("--worlds duplicates a script or placeholder scene, not a multi-world project");
+			return false;
+		}
+
+		const unsigned physicalCores = engine::parallel::PhysicalCoreCount();
+		if (physicalCores == 0) {
+			ENGINE_WARN(
+				"physical-core placement is unavailable on this platform; {} worlds will stay in one process",
+				Settings.Worlds
+			);
+			Settings.Processes = 1;
+			LocalWorlds = Settings.Worlds;
+			return true;
+		}
+
+		const uint32_t requested = Settings.Processes;
+		const WorldProcessPlan placement =
+			PlanWorldProcesses(Settings.Worlds, physicalCores, Settings.Processes);
+		Settings.Processes = placement.Processes;
+		const uint32_t wanted = requested == 0 ? std::max(1u, physicalCores - 1u) : requested;
+		if (Settings.Processes != wanted) {
+			ENGINE_WARN(
+				"{} process(es) requested for {} world(s) on {} physical core(s); using {}",
+				wanted,
+				Settings.Worlds,
+				physicalCores,
+				Settings.Processes
+			);
+		}
+
+		AutomaticWorldPlacement = placement.Processes > 1;
+		RemoteHosts = placement.RemoteHosts;
+		LocalWorlds = placement.LocalWorlds;
+
+		Settings.RemoteWorlds.reserve(Settings.Worlds - LocalWorlds);
+		for (uint32_t index = LocalWorlds; index < Settings.Worlds; index++) {
+			Settings.RemoteWorlds.push_back(WorldName(index));
+		}
+		return true;
+	}
+
 	size_t Server::PlannedHosts() const {
 		if (Settings.RemoteWorlds.empty()) {
 			return 0;
@@ -2534,6 +2674,9 @@ namespace server {
 			remote.push_back(world);
 		}
 
+		if (RemoteHosts > 0) {
+			return engine::world::PlanHostsAcross(remote, RemoteHosts).size();
+		}
 		return engine::world::PlanHosts(remote, Settings.Listening ? 1u : Settings.WorldsPerHost).size();
 	}
 

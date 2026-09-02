@@ -73,6 +73,47 @@ anchored transforms moved by the script. Frame-owner work remains visible at
 15.1 ms for composition, 9.4 ms for pre-render, 8.4 ms for the presentation
 signature, and 4.7 ms for content references.
 
+## Multiprocess placement follow-up
+
+The headless server now treats `--worlds N` as an isolated-world deployment.
+It chooses `max(1, physical cores - 1)` processes by default, capped by the
+world count, balances the worlds to within one, and binds every thread in each
+process to its assigned physical core. The existing `Driver`, `Supervisor`,
+`HostLink`, and copied bus envelopes remain the only path between worlds.
+
+The 1,000-world Rings verification used the optimized `release` preset for 20
+seconds with no renderer linked or loaded:
+
+```sh
+.cache/build/release/server/server --worlds 1000 \
+    --game mono.engine/examples/Rings.luau --seconds 20 --unpaced
+```
+
+| Check | Observed result |
+|---|---|
+| Physical cores available | 12 |
+| Process policy | `max(1, 12 - 1)`, producing 11 processes |
+| World distribution | 91 local, nine remote hosts with 91 each, one remote host with 90 |
+| Total worlds | 91 + 819 + 90 = 1,000 |
+| Operating-system processes | One driver plus 10 child server PIDs |
+| CPU affinity | Driver allowed only CPU 0; children allowed only CPUs 1 through 10 |
+| Whole-process binding | All five threads in every PID reported the same singleton `Cpus_allowed_list` |
+| Live execution | Driver ran 439 ticks over 20.05 seconds; sampled 91-world hosts ran 398 to 409 ticks over about 19.6 seconds |
+| Shutdown | Driver and all 10 children exited cleanly after the requested duration |
+
+The kernel check read `/proc/<pid>/task/*/status`, not the engine's own
+placement log. This matters because an earlier probe found that the simulation
+thread was pinned while four support threads retained a broad mask. The process
+binder was corrected to restrict every existing thread, after which each PID
+reported one and only one allowed CPU. The child command lines were also read
+from `/proc/<pid>/cmdline`: nine held 91 `--world` grants and the last held 90.
+
+Multiprocessing removes the single address-space and shared-worker-lane limit,
+but it does not make the Rings workload fit 60 Hz. About 90 worlds on one core
+still took 46 to 49 ms per unpaced tick in this run. The capacity bottleneck is
+therefore still per-world script and simulation work, consistent with the flame
+and heap findings above.
+
 Several plausible changes failed their parity gate and were discarded:
 
 - Luau compiler optimization level 2 reduced 100-world throughput from 35.6

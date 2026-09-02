@@ -14,7 +14,9 @@ namespace engine::world {
 	}
 
 	size_t Driver::Start(const std::vector<WorldSettings> &remote) {
-		const std::vector<HostPlan> plans = PlanHosts(remote, Settings_.Hosts.WorldsPerHost);
+		const std::vector<HostPlan> plans = Settings_.Hosts.SharedHosts > 0
+												? PlanHostsAcross(remote, Settings_.Hosts.SharedHosts)
+												: PlanHosts(remote, Settings_.Hosts.WorldsPerHost);
 
 		// Registered before anything is spawned, so the buses can address a
 		// remote world from the first barrier rather than from whenever its

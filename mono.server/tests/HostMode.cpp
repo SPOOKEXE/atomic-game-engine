@@ -120,6 +120,7 @@ TEST_CASE("a spawned host comes up, says it is ready, and heartbeats", "[server]
 	const HostStatus status = supervisor.StatusOf(plan.Name);
 	REQUIRE(status.State == HostState::Running);
 	REQUIRE(status.Restarts == 0);
+	REQUIRE(status.ProcessId != 0);
 
 	supervisor.StopAll();
 }

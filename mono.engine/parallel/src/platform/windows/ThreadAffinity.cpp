@@ -123,6 +123,26 @@ namespace engine::parallel::platform {
 		return ::SetThreadGroupAffinity(::GetCurrentThread(), &selected, nullptr) != 0;
 	}
 
+	bool PinCurrentProcess(Processor processor) {
+		if (!processor.Valid() || processor.Number >= sizeof(DWORD_PTR) * 8u) {
+			return false;
+		}
+
+		USHORT count = 0;
+		if (!::GetProcessGroupAffinity(::GetCurrentProcess(), &count, nullptr) &&
+			::GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+			return false;
+		}
+		std::vector<USHORT> groups(count);
+		if (count != 1 || !::GetProcessGroupAffinity(::GetCurrentProcess(), &count, groups.data()) ||
+			groups.front() != processor.Group) {
+			return false;
+		}
+
+		const DWORD_PTR selected = static_cast<DWORD_PTR>(1) << processor.Number;
+		return ::SetProcessAffinityMask(::GetCurrentProcess(), selected) != 0;
+	}
+
 	Processor CurrentProcessor() {
 		PROCESSOR_NUMBER current{};
 		::GetCurrentProcessorNumberEx(&current);

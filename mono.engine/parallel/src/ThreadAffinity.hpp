@@ -35,6 +35,10 @@ namespace engine::parallel::platform {
 	// Restricts the calling thread to one processor.
 	bool PinCurrentThread(Processor processor);
 
+	// Restricts the current process and threads it creates to one processor.
+	// Called during single-threaded startup, before the job pool exists.
+	bool PinCurrentProcess(Processor processor);
+
 	// The processor currently executing this thread, or an invalid value when
 	// the platform cannot report it.
 	Processor CurrentProcessor();

@@ -4,11 +4,11 @@
 //
 // This is the sub-area `parallel/AGENTS.md` reserves for "separate OS
 // processes, supervision, crash isolation". It exists for one reason, and the
-// reason is worth stating because the usual one is wrong: **processes are for
-// crash isolation, not for speed.** A world that aborts on an affinity
-// violation should take down one host rather than the server. Two processes
-// simulating two worlds are not faster than two threads doing the same; they
-// are more survivable.
+// reason is worth stating because it is easy to blur two different jobs:
+// processes isolate hard faults, while affinity decides where their work runs.
+// A world that aborts on an affinity violation should take down one host rather
+// than the server, and a group of isolated hosts should not all contend for the
+// same first core.
 //
 // **What a process boundary can and cannot isolate.** A soft fault - a system
 // throwing, a script erroring, a tick budget overrun - is caught at the
@@ -92,6 +92,27 @@ namespace engine::parallel {
 	// @param reason The reason to name.
 	// @return A view valid for the lifetime of the process.
 	const char *Describe(ExitReason reason);
+
+	// How many physical cores this process can be bound to distinctly.
+	//
+	// Zero means the platform cannot both identify and enforce physical-core
+	// placement. It is not replaced with the logical processor count because a
+	// caller using this answer is promising that two slots do not share a core.
+	//
+	// @return The number of assignable physical cores.
+	// @since v0.20
+	unsigned PhysicalCoreCount();
+
+	// Restricts this process to one physical core.
+	//
+	// Existing threads are rebound and threads created afterwards inherit the
+	// restriction. Call at a quiet startup boundary, since a thread can execute
+	// on its old core until its mask has been updated.
+	//
+	// @param index Stable index in the range reported by `PhysicalCoreCount`.
+	// @return `true` when the restriction was applied.
+	// @since v0.20
+	bool PinCurrentProcessToPhysicalCore(unsigned index);
 
 	// One child process.
 	//

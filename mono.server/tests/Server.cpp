@@ -44,6 +44,20 @@ using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::WorldBounds;
 
+TEST_CASE("a thousand worlds use all but one physical core", "[server]") {
+	const server::WorldProcessPlan plan = server::PlanWorldProcesses(1000, 12);
+	REQUIRE(plan.Processes == 11);
+	REQUIRE(plan.LocalWorlds == 91);
+	REQUIRE(plan.RemoteHosts == 10);
+}
+
+TEST_CASE("world process placement stays within worlds and cores", "[server]") {
+	CHECK(server::PlanWorldProcesses(2, 12).Processes == 2);
+	CHECK(server::PlanWorldProcesses(1000, 1).Processes == 1);
+	CHECK(server::PlanWorldProcesses(1000, 0).Processes == 1);
+	CHECK(server::PlanWorldProcesses(1000, 12, 4).Processes == 4);
+}
+
 namespace {
 	server::Options Headless(uint32_t entities, int64_t ticks) {
 		server::Options options;
