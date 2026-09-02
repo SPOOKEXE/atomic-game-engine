@@ -37,6 +37,23 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
+### v0.22
+
+- [x] Fix viewport image drag issue
+- [x] Fix dragging floating dock widgets when sub-ui-objects already handle drag operations (e.g. 3d mesh preview in Demo Nodes, when dragging in preview it drags floating dock widget instead of only the image)
+- [x] add 180 degree flip to X/Y/Z gizmo
+- [_] when I run the StressParticle demo, it grows the particle pool. Ensure when i stop running the world, it de-allocates them.
+- [_] add tests for pooled de-allocation for things like particle allocations, texture allocations, etc.
+- [_] fix images rotating opposite way when dragging mouse in preview images (e.g. 3d mesh preview in demo nodes dragging opposite way)
+
+fix:
+- [_] in the ECS `Components` inspector, add the ability to edit the component values.
+- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
+- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
+- [_] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
+- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
+right now it just displays the components with byte sizes but they are not editable or anything.
+
 ### v0.23
 
 - [_] /docs/future-work/character-system.md
