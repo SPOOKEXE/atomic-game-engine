@@ -10,8 +10,14 @@
 #include "GpuHeap.hpp"
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Attachments.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <SDL3/SDL.h>
@@ -214,6 +220,133 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	const render::GpuMemoryStatistics worldReleased = renderer.MemoryStatistics();
 	CHECK(worldReleased.Buffers < particleResident.Buffers);
 	CHECK(worldReleased.BufferBytes < particleResident.BufferBytes);
+
+	renderer.Shutdown();
+	CHECK(renderer.MemoryStatistics().LiveBytes == 0);
+}
+
+TEST_CASE("headless Vulkan particle pools grow to the host ceiling and release", "[render][gpu][.]") {
+	using namespace engine;
+
+	VideoSubsystem video;
+	REQUIRE(video.Ready);
+	render::Renderer renderer;
+	INFO(SDL_GetError());
+	REQUIRE(renderer.Initialise(nullptr));
+	REQUIRE(renderer.IsHeadless());
+
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("headless-particle-pool-test");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+
+	ecs::Store store("headless-particle-pool-world");
+	effects::RegisterEffectClasses();
+	effects::InstallParticles(store, 4, 8);
+	store.ResourceMutable<effects::ParticleSystem>()->DeviceStepped = true;
+
+	scene::PartDesc description;
+	description.Simulated = false;
+	const ecs::Entity part = scene::MakePart(store, description);
+	REQUIRE(part != ecs::NULL_ENTITY);
+
+	const auto addEmitter = [&store, part]() {
+		const ecs::Entity emitter =
+			store.CreateInstance(ecs::Classes::Find(core::Name("ParticleEmitter")));
+		REQUIRE(emitter != ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(emitter, part));
+		auto *settings = store.GetMutable<effects::ParticleEmitter>(emitter);
+		REQUIRE(settings != nullptr);
+		// Three particles with a one-second lifetime need four slots. This makes
+		// each claim land exactly on the pool's four-row growth boundary.
+		settings->Rate = 3.0f;
+		settings->Lifetime = core::NumberRange{1.0f, 1.0f};
+		return emitter;
+	};
+
+	const render::SceneTarget target{64, 32};
+	render::View view;
+	view.Target = &target;
+	view.Slot = 0;
+	view.World = 93;
+	view.WorldName = core::Name(store.Name());
+	view.Pipeline = pipelineName;
+	render::OverlayImage overlay;
+	const std::array<render::View, 1> emptyViews{view};
+	renderer.Render(emptyViews, overlay, nullptr, false);
+	const render::GpuMemoryStatistics warm = renderer.MemoryStatistics();
+
+	render::ParticleFrame particles;
+	const auto renderParticles = [&]() {
+		scene::ResolveAttachments(store);
+		effects::RefreshEmitters(store);
+		const effects::ParticleStatistics statistics = effects::StepParticles(store, 1.0f / 60.0f);
+		render::CollectParticleBatches(store, particles);
+		view.Particles = particles.Batches;
+		view.ParticleSeams = particles.Seams;
+		view.ParticleRevision = particles.Revision;
+		view.ParticleLayoutRevision = particles.LayoutRevision;
+		view.ParticleResidentRevision = particles.ResidentRevision;
+		view.ParticleDelta = 1.0f / 60.0f;
+		view.ParticleBlocks = particles.BlockCount;
+		view.ParticlePool = particles.Pool;
+		const std::array<render::View, 1> views{view};
+		return std::pair{statistics, renderer.Render(views, overlay, nullptr, false)};
+	};
+
+	addEmitter();
+	const auto [initialStatistics, initialFrame] = renderParticles();
+	const auto *system = store.Resource<effects::ParticleSystem>();
+	REQUIRE(system != nullptr);
+	CHECK(system->Capacity == 4);
+	CHECK(system->Used == 4);
+	CHECK(initialStatistics.EmittersRefused == 0);
+	CHECK(initialFrame.ComputeDispatches > 0);
+	CHECK(initialFrame.Particles == 4);
+	const render::GpuMemoryStatistics initial = renderer.MemoryStatistics();
+	CHECK(initial.BufferAllocations > warm.BufferAllocations);
+	CHECK(initial.TransferBufferAllocations > warm.TransferBufferAllocations);
+
+	addEmitter();
+	const auto [grownStatistics, grownFrame] = renderParticles();
+	system = store.Resource<effects::ParticleSystem>();
+	REQUIRE(system != nullptr);
+	CHECK(system->Capacity == 8);
+	CHECK(system->MaximumCapacity == 8);
+	CHECK(system->Used == 8);
+	CHECK(grownStatistics.EmittersRefused == 0);
+	CHECK(grownFrame.Particles == 8);
+	const render::GpuMemoryStatistics grown = renderer.MemoryStatistics();
+	CHECK(grown.BufferAllocations == initial.BufferAllocations + 1);
+	CHECK(grown.TransferBufferAllocations == initial.TransferBufferAllocations + 1);
+	CHECK(grown.BufferBytes == initial.BufferBytes + 4 * sizeof(effects::ParticleState));
+	CHECK(grown.TransferBufferBytes == initial.TransferBufferBytes + 4 * sizeof(effects::ParticleState));
+
+	addEmitter();
+	const auto [fullStatistics, fullFrame] = renderParticles();
+	system = store.Resource<effects::ParticleSystem>();
+	REQUIRE(system != nullptr);
+	CHECK(system->Capacity == 8);
+	CHECK(system->Used == 8);
+	CHECK(system->Blocks.size() == 2);
+	CHECK(fullStatistics.EmittersRefused == 1);
+	CHECK(fullStatistics.EmitterClaimAttempts == 1);
+	CHECK(fullFrame.Particles == 8);
+	const render::GpuMemoryStatistics full = renderer.MemoryStatistics();
+	CHECK(full.BufferAllocations == grown.BufferAllocations);
+	CHECK(full.TransferBufferAllocations == grown.TransferBufferAllocations);
+	CHECK(full.BufferBytes == grown.BufferBytes);
+	CHECK(full.TransferBufferBytes == grown.TransferBufferBytes);
+
+	renderer.ForgetWorld(view.World, view.WorldName);
+	const render::GpuMemoryStatistics released = renderer.MemoryStatistics();
+	CHECK(released.Buffers == warm.Buffers);
+	CHECK(released.TransferBuffers == warm.TransferBuffers);
+	CHECK(released.BufferBytes == warm.BufferBytes);
+	CHECK(released.TransferBufferBytes == warm.TransferBufferBytes);
 
 	renderer.Shutdown();
 	CHECK(renderer.MemoryStatistics().LiveBytes == 0);

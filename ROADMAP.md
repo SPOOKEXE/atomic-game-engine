@@ -45,7 +45,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] when I run the StressParticle demo, it grows the particle pool. Ensure when i stop running the world, it de-allocates them.
 - [x] add tests for pooled de-allocation for things like particle allocations, texture allocations, etc.
 - [x] fix images rotating opposite way when dragging mouse in preview images (e.g. 3d mesh preview in demo nodes dragging opposite way)
-- [_] headless gpu pass tests for checking pooled allocation and deallocation, checking rendered images
+- [x] headless gpu pass tests for checking pooled allocation and deallocation, checking rendered images
+- [x] (headless) gpu tests for render pipeline
 
 fix:
 - [_] in the ECS `Components` inspector, add the ability to edit the component values.
