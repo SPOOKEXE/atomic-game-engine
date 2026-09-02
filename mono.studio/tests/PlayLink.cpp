@@ -12,10 +12,13 @@
 // the difference between the two sides.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -307,6 +310,46 @@ TEST_CASE("stopping takes the client view away with it", "[studio][playlink]") {
 	// the editor shutting down, and the third one runs after the first two.
 	link.Stop(fixture.Worlds);
 	CHECK_FALSE(link.IsRunning());
+}
+
+TEST_CASE("world residency releases a particle pool after it grows", "[studio][playlink][particles]") {
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	engine::effects::RegisterEffectClasses();
+
+	WorldSettings settings;
+	settings.Name = Name("particle-stress");
+	const WorldId world = editor.Universe->Create(settings);
+	REQUIRE(world.IsValid());
+
+	editor.Universe->Enter(world, [](Store &store) {
+		engine::effects::InstallParticles(store, 64, 128);
+		engine::scene::PartDesc partDescription;
+		partDescription.Simulated = false;
+		const Entity part = engine::scene::MakePart(store, partDescription);
+		for (int index = 0; index < 7; index++) {
+			const Entity emitter = store.CreateInstance(engine::ecs::Classes::Find(Name("ParticleEmitter")));
+			REQUIRE(store.SetParent(emitter, part));
+			auto *settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+			REQUIRE(settings != nullptr);
+			settings->Rate = 10.0f;
+			settings->Lifetime = engine::core::NumberRange{2.0f, 2.0f};
+		}
+
+		engine::scene::ResolveAttachments(store);
+		engine::effects::RefreshEmitters(store);
+		const auto *particles = store.Resource<engine::effects::ParticleSystem>();
+		REQUIRE(particles != nullptr);
+		REQUIRE(particles->Capacity == 128);
+		REQUIRE(particles->Instances.capacity() >= 128);
+	});
+
+	editor.ReleaseWorldResidency(world);
+	editor.Universe->Enter(world, [](Store &store) {
+		CHECK(store.Resource<engine::effects::ParticleSystem>() == nullptr);
+	});
+	CHECK(editor.Universe->NameOf(world) == Name("particle-stress"));
 }
 
 TEST_CASE("a link refuses to start twice and refuses a world that is not there", "[studio][playlink]") {

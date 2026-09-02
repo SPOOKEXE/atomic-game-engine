@@ -3252,6 +3252,19 @@ namespace studio {
 		//         refusal to start rather than a run that cannot be undone.
 		bool BeginRun(WorldId world, RunMode mode);
 
+		// Releases host and device storage retained for one world.
+		//
+		// Called before the world is destroyed so a grown particle pool returns
+		// its memory when Stop, Remove World, or New Game ends its lifetime.
+		//
+		// @param world The world whose resident storage is no longer needed.
+		void ReleaseWorldResidency(WorldId world);
+
+		// Stops one local play client after releasing its replica's residency.
+		//
+		// @param link The client link to stop. An idle link is ignored.
+		void StopPlayLink(PlayLink &link);
+
 		// Presents every world this one's portals look into.
 		//
 		// **A world builds its draw list when somebody presents it**, and until

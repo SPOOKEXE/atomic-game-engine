@@ -3122,7 +3122,7 @@ namespace studio {
 		Trees.clear();
 
 		for (const WorldId existing : Universe->Worlds()) {
-			Renderer.ForgetWorld(existing.Index, Universe->NameOf(existing));
+			ReleaseWorldResidency(existing);
 			Universe->Destroy(existing);
 		}
 
@@ -4139,7 +4139,7 @@ namespace studio {
 		}
 
 		const std::string name(Label(Universe->NameOf(world)));
-		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
+		ReleaseWorldResidency(world);
 		Universe->Destroy(world);
 
 		if (Active == world) {
@@ -4694,6 +4694,27 @@ namespace studio {
 		return true;
 	}
 
+	void Editor::ReleaseWorldResidency(WorldId world) {
+		if (Universe == nullptr || !world.IsValid()) {
+			return;
+		}
+
+		const Name name = Universe->NameOf(world);
+		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
+		Renderer.ForgetWorld(world.Index, name);
+	}
+
+	void Editor::StopPlayLink(PlayLink &link) {
+		if (!link.IsRunning()) {
+			return;
+		}
+
+		const WorldId replica = link.ReplicaWorld();
+		StopPlaytestPlugins(replica);
+		ReleaseWorldResidency(replica);
+		link.Stop(*Universe);
+	}
+
 	void Editor::EndRun(WorldId world) {
 		WorldRun *record = RunOf(world);
 		if (record == nullptr) {
@@ -4715,7 +4736,6 @@ namespace studio {
 			// leave the panel following the active scene with no way to tell
 			// that it had stopped showing what it was opened for.
 			const WorldId replica = link->ReplicaWorld();
-			StopPlaytestPlugins(replica);
 			for (ViewportState &view : Extras) {
 				if (view.World == replica) {
 					view.World = WorldId{};
@@ -4723,7 +4743,7 @@ namespace studio {
 				}
 			}
 
-			link->Stop(*Universe);
+			StopPlayLink(*link);
 		}
 		record->Links.clear();
 		StopPlaytestPlugins(world);
@@ -4759,7 +4779,6 @@ namespace studio {
 				}
 
 				const WorldId replica = (*link)->ReplicaWorld();
-				StopPlaytestPlugins(replica);
 				for (ViewportState &view : Extras) {
 					if (view.World == replica) {
 						view.World = WorldId{};
@@ -4767,7 +4786,7 @@ namespace studio {
 					}
 				}
 
-				(*link)->Stop(*Universe);
+				StopPlayLink(**link);
 				link = other.Links.erase(link);
 			}
 		}
@@ -4806,7 +4825,7 @@ namespace studio {
 		// Stop destroys the world below, so drop its renderer-owned residency
 		// before the handle disappears. Shared content tables stay alive for
 		// other worlds; only instance and particle buffers are world-local.
-		Renderer.ForgetWorld(world.Index, name);
+		ReleaseWorldResidency(world);
 
 		// **Destroyed and rebuilt, because `ReadWorldDocument` creates a scene
 		// rather than restoring into one.** `Universe::Adopt` reuses the hole a

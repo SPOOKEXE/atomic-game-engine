@@ -353,8 +353,7 @@ namespace studio {
 			}
 		}
 
-		StopPlaytestPlugins(replica);
-		(*chosen)->Stop(*Universe);
+		StopPlayLink(**chosen);
 		run->Links.erase(chosen);
 
 		Say("a client left");
@@ -517,8 +516,7 @@ namespace studio {
 							view.Follow = NULL_ENTITY;
 						}
 					}
-					StopPlaytestPlugins(oldReplica);
-					link->Stop(*Universe);
+					StopPlayLink(*link);
 					link.reset();
 					continue;
 				}
@@ -527,8 +525,7 @@ namespace studio {
 				// already gone** - so `PlayLink::Stop`'s own destroy finds
 				// nothing to destroy, which is exactly right: the teleport did
 				// it, in the world that was allowed to.
-				StopPlaytestPlugins(oldReplica);
-				link->Stop(*Universe);
+				StopPlayLink(*link);
 
 				auto moved = std::make_unique<PlayLink>();
 				std::string error;
