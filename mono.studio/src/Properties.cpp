@@ -93,6 +93,9 @@ namespace studio {
 			case PropertyType::String:
 				value.String = *reinterpret_cast<const std::string *>(source);
 				return true;
+			case PropertyType::Reference:
+				value.Reference = *reinterpret_cast<const Entity *>(source);
+				return true;
 			case PropertyType::Vector3:
 				value.Vector3 = *reinterpret_cast<const engine::core::Vector3 *>(source);
 				return true;
@@ -123,7 +126,6 @@ namespace studio {
 			case PropertyType::ColorSequence:
 				value.ColorSequence = *reinterpret_cast<const engine::core::ColorSequence *>(source);
 				return true;
-			case PropertyType::Reference:
 			case PropertyType::Opaque:
 				return false;
 			}
@@ -148,6 +150,8 @@ namespace studio {
 				return Schemas::WriteField(component, field, &value.Name);
 			case PropertyType::String:
 				return Schemas::WriteField(component, field, &value.String);
+			case PropertyType::Reference:
+				return Schemas::WriteField(component, field, &value.Reference);
 			case PropertyType::Vector3:
 				return Schemas::WriteField(component, field, &value.Vector3);
 			case PropertyType::CFrame:
@@ -168,14 +172,15 @@ namespace studio {
 				return Schemas::WriteField(component, field, &value.NumberSequence);
 			case PropertyType::ColorSequence:
 				return Schemas::WriteField(component, field, &value.ColorSequence);
-			case PropertyType::Reference:
 			case PropertyType::Opaque:
 				return false;
 			}
 			return false;
 		}
 
-		bool DrawSchemaValue(const FieldDescriptor &field, PropertyValue &value, std::string &draft) {
+		bool DrawSchemaValue(
+			const Store &store, const FieldDescriptor &field, PropertyValue &value, std::string &draft
+		) {
 			switch (field.Type) {
 			case PropertyType::Bool:
 				return ImGui::Checkbox("##value", &value.Bool);
@@ -268,7 +273,12 @@ namespace studio {
 				draft.clear();
 				return true;
 			}
-			case PropertyType::Reference:
+			case PropertyType::Reference: {
+				const Name target =
+					value.Reference == NULL_ENTITY ? Name{} : store.InstanceNameOf(value.Reference);
+				ImGui::TextDisabled("%s", target.IsValid() ? Label(target) : "(none)");
+				return false;
+			}
 			case PropertyType::Opaque:
 				ImGui::TextDisabled("read only");
 				return false;
@@ -1527,6 +1537,95 @@ namespace studio {
 				ImGui::TextDisabled("the selection is gone");
 				return;
 			}
+
+			const auto drawFieldRow = [&](ComponentId component,
+										  const TypeDescriptor &componentType,
+										  const FieldDescriptor &field,
+										  const void *componentValue,
+										  bool qualified) {
+				PropertyValue value;
+				if (!ReadSchemaValue(componentValue, field, value)) {
+					return;
+				}
+
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::AlignTextToFramePadding();
+				const std::string label =
+					qualified ? std::string(componentType.Name.Text()) + "." + std::string(field.Spelling)
+							  : std::string(field.Spelling);
+				ImGui::TextUnformatted(label.c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"%s, %s packing, %u bits at %u:%u",
+						engine::ecs::Describe(field.Type),
+						engine::ecs::Describe(field.Packing),
+						field.StorageBits,
+						field.Offset,
+						field.BitOffset
+					);
+				}
+				if (field.Exposed && !qualified) {
+					ImGui::SameLine();
+					ImGui::TextDisabled("[config]");
+				}
+				for (const std::string &tag : field.Tags) {
+					ImGui::SameLine();
+					ImGui::TextDisabled("[%s]", tag.c_str());
+				}
+
+				ImGui::TableSetColumnIndex(1);
+				ImGui::PushID(component.Index);
+				ImGui::PushID(field.Name.Id());
+				ImGui::SetNextItemWidth(-1.0f);
+				const std::string key =
+					std::string(componentType.Name.Text()) + "." + std::string(field.Spelling);
+				if (DrawSchemaValue(store, field, value, ComponentConfigDrafts[key])) {
+					componentEdit = ComponentEdit{component, field.Name, value, true};
+				}
+				ImGui::PopID();
+				ImGui::PopID();
+			};
+
+			bool hasExposedConfigs = false;
+			for (const ComponentId component : store.ComponentsOf(instance)) {
+				if (const Schema *schema = Schemas::Of(component); schema != nullptr) {
+					hasExposedConfigs |= std::any_of(
+						schema->Fields().begin(), schema->Fields().end(), [](const FieldDescriptor &field) {
+							return field.Exposed;
+						}
+					);
+				}
+			}
+			if (hasExposedConfigs) {
+				// Exposed fields stay above the folded component headers. This is the
+				// quick-tuning surface the exposure bit promises rather than another
+				// label on the same field inside the component.
+				ImGui::SeparatorText("Exposed Configs");
+				if (ImGui::BeginTable(
+						"##exposed-component-fields",
+						2,
+						ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+					)) {
+					ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+					ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+					for (const ComponentId component : store.ComponentsOf(instance)) {
+						const Schema *schema = Schemas::Of(component);
+						const void *componentValue = store.GetComponent(instance, component);
+						if (schema == nullptr || componentValue == nullptr) {
+							continue;
+						}
+						for (const FieldDescriptor &field : schema->Fields()) {
+							if (field.Exposed) {
+								drawFieldRow(
+									component, Components::Describe(component), field, componentValue, true
+								);
+							}
+						}
+					}
+					ImGui::EndTable();
+				}
+			}
 			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
 
 			for (const ComponentId component : store.ComponentsOf(instance)) {
@@ -1571,36 +1670,10 @@ namespace studio {
 							ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
 							ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
 							for (const FieldDescriptor &field : schema->Fields()) {
-								if (!field.Exposed || componentValue == nullptr) {
+								if (componentValue == nullptr) {
 									continue;
 								}
-								PropertyValue value;
-								if (!ReadSchemaValue(componentValue, field, value)) {
-									continue;
-								}
-								ImGui::TableNextRow();
-								ImGui::TableSetColumnIndex(0);
-								ImGui::AlignTextToFramePadding();
-								ImGui::TextUnformatted(field.Spelling.data());
-								if (ImGui::IsItemHovered()) {
-									ImGui::SetTooltip(
-										"%s, %s packing, %u bits at %u:%u",
-										engine::ecs::Describe(field.Type),
-										engine::ecs::Describe(field.Packing),
-										field.StorageBits,
-										field.Offset,
-										field.BitOffset
-									);
-								}
-								ImGui::TableSetColumnIndex(1);
-								ImGui::PushID(field.Name.Id());
-								ImGui::SetNextItemWidth(-1.0f);
-								const std::string key =
-									std::string(descriptor.Name.Text()) + "." + std::string(field.Spelling);
-								if (DrawSchemaValue(field, value, ComponentConfigDrafts[key])) {
-									componentEdit = ComponentEdit{component, field.Name, value, true};
-								}
-								ImGui::PopID();
+								drawFieldRow(component, descriptor, field, componentValue, false);
 							}
 							ImGui::EndTable();
 						}

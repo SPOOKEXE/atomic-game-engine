@@ -49,11 +49,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] (headless) gpu tests for render pipeline
 
 fix:
-- [_] in the ECS `Components` inspector, add the ability to edit the component values.
-- [_] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
-- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
-- [_] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
-- [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
+- [x] in the ECS `Components` inspector, add the ability to edit the component values.
+- [x] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
+- [x] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
+- [x] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
+- [x] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
 right now it just displays the components with byte sizes but they are not editable or anything.
 - [x] edit to studio ui
 

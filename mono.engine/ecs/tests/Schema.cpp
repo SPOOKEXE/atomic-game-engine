@@ -90,6 +90,32 @@ TEST_CASE("a described component registers and is reachable by name", "[schema]"
 	REQUIRE(Schemas::Find(Name(name)) == schema);
 }
 
+TEST_CASE("component and field metadata can be changed and read back", "[schema]") {
+	const std::string name = Unique("metadata");
+	const FieldSpec fields[] = {
+		{"Visible", PropertyType::Float},
+		{"Hidden", PropertyType::Int32},
+	};
+	const ComponentId id = Describe(name, fields);
+
+	const std::string_view componentTags[]{"experiment", "deprecated"};
+	const std::string_view fieldTags[]{"constant"};
+	REQUIRE(Schemas::SetTags(id, componentTags));
+	REQUIRE(Schemas::SetFieldTags(id, Name("Visible"), fieldTags));
+	REQUIRE(Schemas::SetFieldExposed(id, Name("Visible"), true));
+
+	CHECK(Schemas::Tags(id) == std::vector<std::string>{"experiment", "deprecated"});
+	CHECK(Schemas::FieldTags(id, Name("Visible")) == std::vector<std::string>{"constant"});
+	REQUIRE(Schemas::Of(id) != nullptr);
+	CHECK(Schemas::Of(id)->Find("Visible")->Exposed);
+	CHECK_FALSE(Schemas::Of(id)->Find("Hidden")->Exposed);
+
+	CHECK(Schemas::SetFieldExposed(id, Name("Visible"), false));
+	CHECK_FALSE(Schemas::Of(id)->Find("Visible")->Exposed);
+	CHECK_FALSE(Schemas::SetFieldTags(id, Name("Missing"), fieldTags));
+	CHECK_FALSE(Schemas::SetFieldExposed(ComponentId{}, Name("Visible"), true));
+}
+
 TEST_CASE("registering the same fields again agrees rather than conflicts", "[schema]") {
 	const std::string name = Unique("agree");
 	const FieldSpec declared[] = {

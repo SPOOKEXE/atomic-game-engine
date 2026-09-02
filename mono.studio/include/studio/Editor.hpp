@@ -131,6 +131,7 @@ struct ImGuiTableSortSpecs;
 struct ImGuiTableSortSpecs;
 
 namespace studio {
+	struct ComponentPanelProbe;
 	struct PlayedInputAdapter;
 
 	using engine::ecs::Entity;
@@ -882,6 +883,8 @@ namespace studio {
 		int Run();
 
 	  private:
+		friend struct ComponentPanelProbe;
+
 		// --- the frame ------------------------------------------------------
 
 		// Which frame `--capture` is taken on. See the body.
