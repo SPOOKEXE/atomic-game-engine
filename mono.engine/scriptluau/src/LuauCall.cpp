@@ -367,9 +367,9 @@ namespace engine::script {
 				return CheckInstanceArgument(State, Slot(index));
 			}
 
-			bool ReadPlacements(
-				size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
-			) override {
+			PlacementBatch ReadPlacements(size_t index) override {
+				std::vector<ecs::Entity> &instances = Context.PlacementInstances;
+				std::vector<core::CFrame> &frames = Context.PlacementFrames;
 				instances.clear();
 				frames.clear();
 
@@ -403,7 +403,7 @@ namespace engine::script {
 					frames.push_back(frame);
 				}
 
-				return count == placed;
+				return {instances, frames, count == placed};
 			}
 
 			void ReadEditableMeshGeometry(size_t index, scene::EditableMeshGeometry &geometry) override {

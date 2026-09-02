@@ -312,9 +312,10 @@ namespace engine::script {
 				return entity;
 			}
 
-			bool ReadPlacements(
-				size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
-			) override {
+			PlacementBatch ReadPlacements(size_t index) override {
+				JsContext &bound = JsOf(Context);
+				std::vector<ecs::Entity> &instances = bound.PlacementInstances;
+				std::vector<core::CFrame> &frames = bound.PlacementFrames;
 				instances.clear();
 				frames.clear();
 
@@ -362,7 +363,7 @@ namespace engine::script {
 					frames.push_back(copied);
 				}
 
-				return count == placed;
+				return {instances, frames, count == placed};
 			}
 
 			void ReadEditableMeshGeometry(size_t index, scene::EditableMeshGeometry &geometry) override {

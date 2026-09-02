@@ -74,6 +74,11 @@ namespace engine::script {
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
 
+		// Reused by the two bulk placement methods. The runtime is single-threaded,
+		// and each call consumes these before another script method can replace them.
+		std::vector<ecs::Entity> PlacementInstances;
+		std::vector<core::CFrame> PlacementFrames;
+
 		// What changed since the last barrier, as property names.
 		ChangeQueue Changes;
 

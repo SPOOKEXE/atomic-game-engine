@@ -413,20 +413,23 @@ TEST_CASE("a neutral method answers the same in both languages", "[scripting][sc
 
 		{"BulkMoveTo places every part in the list",
 		 [](Language language) {
-			 // **Two parts and one call**, which is the whole of what the method
-			 // claims: the sum is read back so a version that placed only the
-			 // first - the shape a length or an off-by-one bug takes - fails
-			 // rather than passing on the one it did move.
+			 // **Two parts and two calls.** The second call proves the runtime's
+			 // retained marshalling buffers are cleared and refilled rather than
+			 // handing the first batch back again. The sum also catches a length
+			 // or off-by-one bug that placed only the first part.
 			 const bool luau = language == Language::Luau;
 			 const std::string parts = luau ? "{part, other}" : "[part, other]";
 			 const std::string frames = luau ? "{CFrame.new(0, 2, 0), CFrame.new(0, 5, 0)}"
 											 : "[CFrame.new(0, 2, 0), CFrame.new(0, 5, 0)]";
+			 const std::string next = luau ? "{CFrame.new(0, 7, 0), CFrame.new(0, 11, 0)}"
+										   : "[CFrame.new(0, 7, 0), CFrame.new(0, 11, 0)]";
 
 			 return APart(language) + Let(language, "other", "Instance.new('Part')") +
 					Send(language, "workspace", "BulkMoveTo(" + parts + ", " + frames + ")") +
+					Send(language, "workspace", "BulkMoveTo(" + parts + ", " + next + ")") +
 					Say(language, "part.Position.Y + other.Position.Y");
 		 },
-		 "7"},
+		 "18"},
 
 		{"BulkPivotTo respects the offset",
 		 [](Language language) {

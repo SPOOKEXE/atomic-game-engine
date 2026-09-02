@@ -28,6 +28,70 @@ calls and zero triangles, while the logical GPU heap stayed at 1.1 MiB live and
 the results include simulation, script, world publication, composition, and
 damage-signature costs without measuring raster work.
 
+## Optimization follow-up
+
+The 2 September follow-up used the same machine, Rings scene, 512 parts per
+world, headless Vulkan path, 640x360 viewport, and 60 Hz simulation. The
+comparison run was 10 seconds rather than 20, so tick rate and time-normalized
+readings are comparable while the raw dropped-tick counts are not.
+
+Three changes survived measurement:
+
+1. Client worlds now begin with an empty host particle pool and retain the same
+   1,048,576-row growth ceiling. Device-stepped worlds previously allocated
+   44 MiB of host arrays each, then released them unread on the first tick.
+2. The fallback camera now records whether a fully authored scene has a spawn
+   when the camera is installed. It keeps the same moving or standing camera
+   behaviour without calling `FindSpawn` across all 512 descendants each tick.
+3. `BulkMoveTo` and `BulkPivotTo` reuse one pair of marshalling buffers per
+   script runtime. The old boundary allocated and freed entity and CFrame
+   vectors on every call.
+
+| Reading | Baseline | Optimized | Change |
+|---|---:|---:|---:|
+| 100-world achieved tick rate | 35.3 Hz | 59.5 Hz | 69% faster, within 1% of 60 Hz |
+| 1,000-world achieved tick rate | 3.4 Hz | 6.3 Hz | 85% faster |
+| 100-world load-only tracked peak | 4.42 GiB | 109.0 MiB | 97.6% lower |
+| 100-world load-only peak RSS | 4.67 GiB | 314 MiB | 93.4% lower |
+| 100-world load-only elapsed time | 2.69 s | 0.73 s | 72.9% lower |
+| 1,000-world tracked peak | 43.95 GiB | 1.15 GiB | 97.4% lower |
+| 1,000-world peak RSS | 45.00 GiB | 2.10 GiB | 95.3% lower |
+| 1,000-world total allocation | 90.37 GiB | 2.18 GiB | 97.6% lower |
+| 1,000-world worker CPU per tick | 2,538.6 ms | 1,181.7 ms | 53.5% lower |
+
+The final 1,000-world run retained 1.15 GiB in 744,728 tracked blocks and
+reported no draw calls or triangles. Reusing bulk-call scratch accounts for
+about 18 MiB of that live total across 1,000 runtimes, but cut transient
+allocation during the run from 3.15 GiB to 2.18 GiB and reduced aggregate
+worker time by about 5% in the paired 10-second capture.
+
+The remaining capacity wall is still world work. In the optimized 1,000-world
+flame graph, pinned workers used 1,181.7 ms of aggregate CPU per tick and the
+frame owner waited 107.1 ms on average. Script heartbeat remains the largest
+reported world leaf, followed by static broadphase maintenance for the 512
+anchored transforms moved by the script. Frame-owner work remains visible at
+15.1 ms for composition, 9.4 ms for pre-render, 8.4 ms for the presentation
+signature, and 4.7 ms for content references.
+
+Several plausible changes failed their parity gate and were discarded:
+
+- Luau compiler optimization level 2 reduced 100-world throughput from 35.6
+  Hz to 35.0 Hz in the pre-camera workload.
+- A full Luau collection after scene load did not change the 4.42 GiB startup
+  peak.
+- Preparing physics before script scene construction did not change that peak.
+- Removing built-in collision-shape registration did not change that peak.
+- Replacing Rings' CFrame reconstruction with a transform recurrence did not
+  improve 1,000-world throughput and made the script span less stable.
+- Native Luau code generation was not enabled. Native instructions do not pay
+  the runtime's interpreter step counter, so enabling it would weaken the
+  deterministic script budget rather than provide a parity-preserving speedup.
+
+The follow-up captures are under `.cache/world-optim/`. The final evidence is
+`100-final` and `1000-final`; `100-reuse-bulk`, `1000-reuse-bulk`, and
+`100-lazy-particles-load` retain the paired and load-only probes. Each prefix
+has the applicable log, frame graph, heap report, or time report.
+
 ## Setup
 
 | Item | Value |
@@ -122,7 +186,7 @@ single occurrence in that frame, not the sum across all worlds.
 | 6 | `mono.client/src/Client.cpp:3440` and `mono.engine/render/src/WorldPresentation.cpp:89`, presentation signature | Mean was 8.473 ms at 1,000 worlds, up from 0.086 ms at 10 worlds. | `ScenePresentationSignaturesOf` hashes the combined instance span each frame. Reuse a source revision or a composited signature when the same packet is seen again. |
 | 7 | `mono.client/src/Client.cpp:629` and `mono.client/src/Client.cpp:1007`, content demand references | Mean was 4.671 ms at 1,000 worlds, up from 0.009 ms at 10 worlds. | `RequestWantedContent` walks every simulated world. Check why `ContentRequested` remains hot and use a changed-world queue if the revision gate is already proving most worlds unchanged. |
 | 8 | `mono.engine/physics/src/SyncBroadphase.cpp:120`, static broadphase synchronization | At 1,000 worlds the path held 141.53 MiB live, including 78.12 MiB self and 62.50 MiB in `physics.index-static`. The serial 100-world maximum was 0.608 ms for one occurrence. | Rings moves anchored parts by transform, so the nominally static set changes. Confirm whether scripted anchored motion should be indexed as dynamic or whether the static rebuild can consume a batched transform revision. |
-| 9 | `mono.client/src/Scene.cpp:83`, default `move-camera` | The serial diagnostic averaged 0.082 ms and reached 0.167 ms for the worst world. Under pinned contention the 100-world mean was 1.799 ms and maximum was 3.825 ms. | The demo camera calls `FindSpawn`, which walks the tree, on every tick in every world. Cache the fact that Rings has no spawn or author a camera in the demo. |
+| 9 | `mono.client/src/Scene.cpp:90`, default `move-camera` | The serial diagnostic averaged 0.082 ms and reached 0.167 ms for the worst world. Under pinned contention the 100-world mean was 1.799 ms and maximum was 3.825 ms. | This bottleneck was removed in the follow-up. The loader now records the spawn result once in world-owned fallback camera state while preserving the moving placeholder camera. |
 | 10 | `mono.client/src/Scene.cpp:1235`, `mono.engine/scene/src/Visibility.cpp:124`, and `mono.client/src/Scene.cpp:1272`, visibility and instance collection | In the serial tree `render preparation` averaged 0.075 ms and reached 0.821 ms; `collect-instances` reached 0.780 ms. `sync rendered.walk` held 8.98 MiB at 1,000 worlds. | The first presentation walks 512 descendants per world and builds a copied draw list. Its steady memo is effective, but construction and first presentation still scale directly with world count. |
 
 ## Smaller measured locations

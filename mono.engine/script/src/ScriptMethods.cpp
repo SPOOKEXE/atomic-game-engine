@@ -140,17 +140,15 @@ namespace engine::script {
 		// two tables of different lengths has made a mistake, and moving half
 		// the parts hides it until somebody notices the other half never left.
 		void BulkMoveTo(ScriptCall &call) {
-			std::vector<ecs::Entity> parts;
-			std::vector<core::CFrame> placements;
-
-			if (!call.ReadPlacements(0, parts, placements)) {
+			const PlacementBatch batch = call.ReadPlacements(0);
+			if (!batch.LengthsMatch) {
 				call.Raise("BulkMoveTo needs as many placements as parts");
 			}
 
 			// The count is dropped: a list naming something with no placement is
 			// the same "did nothing" `PivotTo` above allows for a `Folder`, and
 			// Roblox's returns nothing either.
-			(void)scene::BulkMoveTo(call.World(), parts, placements);
+			(void)scene::BulkMoveTo(call.World(), batch.Instances, batch.Frames);
 		}
 
 		// `workspace:BulkPivotTo(parts, targets)`
@@ -162,14 +160,12 @@ namespace engine::script {
 		// batch for one of them would push every author of a model - the case a
 		// pivot is for - back onto the per-instance path this exists to get off.
 		void BulkPivotTo(ScriptCall &call) {
-			std::vector<ecs::Entity> parts;
-			std::vector<core::CFrame> targets;
-
-			if (!call.ReadPlacements(0, parts, targets)) {
+			const PlacementBatch batch = call.ReadPlacements(0);
+			if (!batch.LengthsMatch) {
 				call.Raise("BulkPivotTo needs as many targets as parts");
 			}
 
-			(void)scene::BulkPivotTo(call.World(), parts, targets);
+			(void)scene::BulkPivotTo(call.World(), batch.Instances, batch.Frames);
 		}
 
 		// `instance:Equals(other)`

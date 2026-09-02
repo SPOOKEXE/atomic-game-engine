@@ -125,6 +125,19 @@
 #include <vector>
 
 namespace engine::script {
+	// Two parallel placement arrays owned by one runtime's marshalling scratch.
+	//
+	// @since v0.22
+	struct PlacementBatch {
+		// Instances to place, in script array order.
+		std::span<const ecs::Entity> Instances;
+
+		// Destinations at the corresponding indices.
+		std::span<const core::CFrame> Frames;
+
+		// Whether the script supplied one destination for every instance.
+		bool LengthsMatch = false;
+	};
 
 	// One method call, in whichever language made it.
 	//
@@ -422,13 +435,13 @@ namespace engine::script {
 		//
 		// @param index      Zero-based, `self` excluded. The instance list; the
 		//                   placements are the argument after it.
-		// @param instances  Cleared and filled.
-		// @param frames     Cleared and filled.
-		// @return `false` when the two arrays are of different lengths, which
-		//         the caller reports; the outputs are filled either way.
-		virtual bool ReadPlacements(
-			size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
-		) = 0;
+		// The returned spans remain valid until this runtime reads another
+		// placement batch. A runtime keeps the marshalling buffers so a steady
+		// `BulkMoveTo` does not allocate two arrays every tick.
+		//
+		// @return Both lists and whether their lengths match. The lists are filled
+		//         either way so the caller can report the mismatch.
+		virtual PlacementBatch ReadPlacements(size_t index) = 0;
 
 		// Two array arguments, read as complete editable-mesh geometry.
 		//
