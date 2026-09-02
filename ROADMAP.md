@@ -60,8 +60,7 @@ in StressParticles demo:
 - [x] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
 - [x] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
 - [x] try optimise `resolve resident instances (0.15-0.16ms)` and `transparency pass (0.2ms)`
-
-- [_] do: ```
+- [x] do: ```
 i noticed the following:
 - when we run with no studio, we're at 2k+ fps
 - when we run in studio, we're at 200-300fps
