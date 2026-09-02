@@ -1378,6 +1378,7 @@ namespace engine::render {
 		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
+		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
 		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
 
 		// The camera's axes, once for the frame rather than once per group: a

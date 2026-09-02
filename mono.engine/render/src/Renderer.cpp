@@ -2071,15 +2071,18 @@ namespace engine::render {
 			return result;
 		}
 
-		// **Every kind the backend knows, defaulted to "did nothing".** A graph
-		// naming a node this build has no runner for is refused by
-		// `NodeTable::Missing` before recording starts rather than half way
-		// through it, and a kind with a runner registered below replaces the
-		// default.
+		// A damaged scene binds every built-in kind directly. Filling the table
+		// with no-op handlers first would build the node catalogue and then replace
+		// every entry on the hot path. An unchanged scene still needs those no-ops
+		// because graph traversal reaches the cached stages before the output nodes.
 		NodeTable frameNodes;
 		{
 			ENGINE_PROFILE_CAT("build node table", core::ProfileCategory::Render);
-			frameNodes = BackendTable([](const graph::RunContext &) { return true; });
+			if (!request.Damage.Scene) {
+				static const NodeTable idleNodes =
+					BackendTable([](const graph::RunContext &) { return true; });
+				frameNodes = idleNodes;
+			}
 			for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
 				frameNodes.Set(installed.Kind, installed.Handler);
 			}
