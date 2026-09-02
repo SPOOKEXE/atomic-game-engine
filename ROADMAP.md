@@ -40,8 +40,6 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.22
 
 - [x] make animations scriptable with a world-owned `AnimationBuffer` that `Animation` references while `AnimationTrack` keeps its one reference to `Animation`. Luau buffers and JavaScript ArrayBuffers can procedurally build keyframes, bake to the canonical AAN1 format, import or export baked bytes, save and replicate them, and play through a revision-cached render path. The animation demo and both script runtimes cover the full path.
-- [_] /docs/future-work/character-system.md
-
 - [x] build out ArcHandles, BoxHandleAdornments and related handle and selection adornments
 - [x] make the abstract GUI hierarchy virtual and non-creatable while keeping each class as metadata over its inherited component set
 - [x] ensure `:IsA()` walks the virtual class hierarchy
@@ -52,17 +50,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] host each plugin dock as a real ECS `DockWidgetPluginGui` tree with cached layout, ImGui painting, input routing and lifecycle cleanup
 - [x] expose live Studio automation through MCP with screenshots, emulated mouse clicks, keyboard keys and text input, plus command-palette discovery and execution by stable command id
 - [x] allow Studio simulation and rendering to run uncapped without display pacing, and verify the StressParticles bottleneck in live uncapped release Studio
-
 - [x] fix selection box not being aligned to object
-
-- [_] gtlf default character (unreal style)
-
 in StressParticles demo:
 - [x] optimise `graph.cull-bound`: the axis-aligned bound path reduced the 1,000-object release benchmark from 17.38 us to 7.90 us; uncapped release Studio measured 0.009 ms mean and 0.013 ms p99.
 - [x] account for the section between `ViewRecording::Begin` and `execute graph`: it is node-table construction, now reported as `build node table`; uncapped release Studio measured 0.051 ms mean and 0.080 ms p99.
 - [x] remove unnecessary render preparation work: static draw lists are reused, no-rig scenes skip skin palettes, and StressParticles measured 0.010 ms mean render preparation with 0.002 ms mean collection in uncapped release Studio.
 - [x] send only independently changed object rows, indices, skin offsets, joint words and occlusion data to the GPU; the warm StressParticles Studio run reused its draw list on all 4,005 captured frames and `upload-instances` rounded to 0.000 ms mean.
 - [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
+
+- [_] /docs/future-work/character-system.md
+- [_] gtlf default character (unreal style)
 
 ### v0.23
 

@@ -43,6 +43,7 @@ namespace {
 		explicit World(std::string_view name) : Data(name) {
 			engine::gui::RegisterGuiClasses();
 			engine::scene::EnsureClassTree();
+			Data.SetFrame(1.0f / 60.0f, 1.0f);
 			Workspace = Data.CreateInstance(
 				engine::ecs::Classes::Find(engine::core::Name("Instance")),
 				std::string(engine::gui::WORKSPACE)
@@ -53,6 +54,7 @@ namespace {
 			const Entity part = Data.CreateInstance(engine::scene::PartClass(), "Rock");
 			Data.SetParent(part, Workspace);
 			Data.Set(part, engine::scene::Transform{CFrame(position)});
+			Data.Set(part, engine::scene::PreviousTransform{CFrame(position)});
 			Data.Set(part, engine::scene::Bounds{halfExtent});
 			return part;
 		}
@@ -125,6 +127,28 @@ TEST_CASE("a rotated part gets a rotated box", "[render][adornmentgeometry]") {
 
 	CHECK(reachZ > 1.9f);
 	CHECK(reachX < 0.6f);
+}
+
+TEST_CASE("a selection box uses the adornee's presented transform", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.interpolated");
+
+	const Entity part = world.Part(Vector3{10.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	world.Data.Set(part, engine::scene::PreviousTransform{CFrame(Vector3::Zero)});
+	world.Data.SetFrame(1.0f / 60.0f, 0.25f);
+	world.Adorn("SelectionBox", part);
+
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	REQUIRE(geometry.Lines().size() == 12);
+
+	// The object renderer draws this part one quarter of the way from its last
+	// tick pose to its current pose. The outline must use the same pose rather
+	// than leading the mesh at the current tick position.
+	for (const AdornmentLine &line : geometry.Lines()) {
+		for (const Vector3 &point : {line.From, line.To}) {
+			CHECK(std::abs(point.X - 2.5f) == Approx(1.0f).margin(0.01f));
+		}
+	}
 }
 
 TEST_CASE("a handle uses its own size and offset", "[render][adornmentgeometry]") {

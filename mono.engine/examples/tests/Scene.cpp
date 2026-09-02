@@ -1322,7 +1322,8 @@ TEST_CASE("the value object demo loads every typed leaf", "[examples][scene][val
 	const Entity target = InScene(store, "ValueTarget");
 	REQUIRE(target != engine::ecs::NULL_ENTITY);
 	const engine::ecs::ClassId valueBase = Classes::Find(Name("ValueBase"));
-	for (const char *name : {"Enabled", "Placement", "Tint", "Score", "Ratio", "Target", "Message", "Direction"}) {
+	for (const char *name :
+		 {"Enabled", "Placement", "Tint", "Score", "Ratio", "Target", "Message", "Direction"}) {
 		const Entity value = store.FindFirstChild(target, name);
 		INFO(name);
 		REQUIRE(value != engine::ecs::NULL_ENTITY);
@@ -1333,8 +1334,10 @@ TEST_CASE("the value object demo loads every typed leaf", "[examples][scene][val
 	REQUIRE(store.Get<engine::scene::ObjectValue>(object) != nullptr);
 	CHECK(store.Get<engine::scene::ObjectValue>(object)->Value == target);
 	CHECK(store.Get<engine::scene::IntValue>(store.FindFirstChild(target, "Score"))->Value == 9000000000ll);
-	CHECK(store.Get<engine::scene::TextContent>(store.FindFirstChild(target, "Message"))->Value ==
-		  "value objects are live");
+	CHECK(
+		store.Get<engine::scene::TextContent>(store.FindFirstChild(target, "Message"))->Value ==
+		"value objects are live"
+	);
 }
 
 TEST_CASE("the adornment demo loads every concrete decoration", "[examples][scene][adornments]") {

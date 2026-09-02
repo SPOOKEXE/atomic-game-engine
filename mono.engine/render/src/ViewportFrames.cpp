@@ -1,3 +1,5 @@
+#include "ViewportFrameScene.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
@@ -5,8 +7,6 @@
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
-
-#include "ViewportFrameScene.hpp"
 
 #include <algorithm>
 #include <cmath>

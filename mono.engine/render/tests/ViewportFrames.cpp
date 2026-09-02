@@ -1,12 +1,12 @@
 #include "ViewportFrameScene.hpp"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
+
+#include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <vector>

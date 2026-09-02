@@ -19,17 +19,17 @@ namespace engine::physics {
 		using ecs::NULL_ENTITY;
 
 		bool ActiveLink(const ecs::Store &store, Entity workspace, Entity owner, Entity part0, Entity part1) {
-			return workspace != NULL_ENTITY && part0 != NULL_ENTITY && part1 != NULL_ENTITY && part0 != part1 &&
-				store.Get<scene::Transform>(part0) != nullptr && store.Get<scene::Transform>(part1) != nullptr &&
-				store.IsDescendantOf(owner, workspace) && store.IsDescendantOf(part0, workspace) &&
-				store.IsDescendantOf(part1, workspace);
+			return workspace != NULL_ENTITY && part0 != NULL_ENTITY && part1 != NULL_ENTITY &&
+				   part0 != part1 && store.Get<scene::Transform>(part0) != nullptr &&
+				   store.Get<scene::Transform>(part1) != nullptr && store.IsDescendantOf(owner, workspace) &&
+				   store.IsDescendantOf(part0, workspace) && store.IsDescendantOf(part1, workspace);
 		}
 
 		RigidNode *NodeOf(std::vector<RigidNode> &nodes, Entity part) {
-			const auto found = std::lower_bound(
-				nodes.begin(), nodes.end(), part,
-				[](const RigidNode &node, Entity wanted) { return node.Part.Id < wanted.Id; }
-			);
+			const auto found =
+				std::lower_bound(nodes.begin(), nodes.end(), part, [](const RigidNode &node, Entity wanted) {
+					return node.Part.Id < wanted.Id;
+				});
 			return found != nodes.end() && found->Part == part ? &*found : nullptr;
 		}
 	}
@@ -63,10 +63,10 @@ namespace engine::physics {
 				return;
 			}
 
-			const auto found = std::lower_bound(
-				poses.begin(), poses.end(), owner,
-				[](const WeldPose &pose, Entity wanted) { return pose.Owner.Id < wanted.Id; }
-			);
+			const auto found =
+				std::lower_bound(poses.begin(), poses.end(), owner, [](const WeldPose &pose, Entity wanted) {
+					return pose.Owner.Id < wanted.Id;
+				});
 			WeldPose pose;
 			if (found != poses.end() && found->Owner == owner && found->Part0 == joint.Part0 &&
 				found->Part1 == joint.Part1) {
@@ -98,9 +98,11 @@ namespace engine::physics {
 			return a.Part.Id < b.Part.Id;
 		});
 		nodes.erase(
-			std::unique(nodes.begin(), nodes.end(), [](const RigidNode &a, const RigidNode &b) {
-				return a.Part == b.Part;
-			}),
+			std::unique(
+				nodes.begin(),
+				nodes.end(),
+				[](const RigidNode &a, const RigidNode &b) { return a.Part == b.Part; }
+			),
 			nodes.end()
 		);
 
@@ -133,7 +135,8 @@ namespace engine::physics {
 				}
 				const bool anchored = !store.Has<scene::Simulated>(node.Part);
 				const bool rootAnchored = root != NULL_ENTITY && !store.Has<scene::Simulated>(root);
-				if (root == NULL_ENTITY || (anchored && !rootAnchored) || (anchored == rootAnchored && node.Part.Id < root.Id)) {
+				if (root == NULL_ENTITY || (anchored && !rootAnchored) ||
+					(anchored == rootAnchored && node.Part.Id < root.Id)) {
 					root = node.Part;
 				}
 			}
