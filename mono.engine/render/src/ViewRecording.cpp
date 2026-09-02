@@ -1570,57 +1570,88 @@ namespace engine::render {
 			{
 				ENGINE_PROFILE_CAT("resident.scene", core::ProfileCategory::Render);
 				if (!rebuildOwnSources) {
-					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-						const uint32_t source = State->SceneOrder[index];
-						const Impl::SceneSlot::InstanceSourceRow &cached = target.InstanceSources[source];
-						writeMetadata(index, State->SceneInstances[source], cached.Mesh);
-						target.InstanceIndices[index] = cached.ResidentSlot;
-						State->SceneSlotOfSource[source] = index;
-						residency.Touch(target.InstanceIndices[index]);
+					// Metadata fans out across the draw-slot arrays while Touch writes the
+					// residency table. Two dense walks keep both costs visible without a
+					// timer per instance.
+					{
+						ENGINE_PROFILE_CAT("resident.scene.reuse copy", core::ProfileCategory::Render);
+						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+							const uint32_t source = State->SceneOrder[index];
+							const Impl::SceneSlot::InstanceSourceRow &cached = target.InstanceSources[source];
+							writeMetadata(index, State->SceneInstances[source], cached.Mesh);
+							target.InstanceIndices[index] = cached.ResidentSlot;
+							State->SceneSlotOfSource[source] = index;
+						}
+					}
+					{
+						ENGINE_PROFILE_CAT("resident.scene.reuse touch", core::ProfileCategory::Render);
+						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+							residency.Touch(target.InstanceIndices[index]);
+						}
 					}
 				} else {
 					// At 100,000 resident rows this probe and metadata pass measured 10.9 ms
 					// serial in release. Sixteen thousand rows leaves far more work than the
-					// job system's measured handover. Smaller scenes keep probe and finalize
-					// adjacent so the parallel design adds no second traversal.
+					// job system's measured handover. Smaller scenes keep the same two phases
+					// visible so a resident rebuild says whether lookup or packing cost it.
 					constexpr size_t RESIDENT_GRAIN = 4096;
 					constexpr size_t RESIDENT_PARALLEL_MINIMUM = 16'384;
 					if (State->SceneOrder.size() < RESIDENT_PARALLEL_MINIMUM) {
-						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-							const uint32_t source = State->SceneOrder[index];
-							const scene::DrawInstance &instance = State->SceneInstances[source];
-							probe(
-								index,
-								instance,
-								source,
-								haveOwnSources ? &target.InstanceSources[source] : nullptr
-							);
-							State->SceneSlotOfSource[source] = index;
-							finishResident(index, instance, *State->SlotMesh[index]);
-							rememberSource(source, index);
+						ENGINE_PROFILE_CAT("resident.scene.rebuild serial", core::ProfileCategory::Render);
+						{
+							ENGINE_PROFILE_CAT("resident.scene.serial probe", core::ProfileCategory::Render);
+							for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+								const uint32_t source = State->SceneOrder[index];
+								probe(
+									index,
+									State->SceneInstances[source],
+									source,
+									haveOwnSources ? &target.InstanceSources[source] : nullptr
+								);
+							}
+						}
+						{
+							ENGINE_PROFILE_CAT("resident.scene.serial finish", core::ProfileCategory::Render);
+							for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+								const uint32_t source = State->SceneOrder[index];
+								const scene::DrawInstance &instance = State->SceneInstances[source];
+								State->SceneSlotOfSource[source] = index;
+								finishResident(index, instance, *State->SlotMesh[index]);
+								rememberSource(source, index);
+							}
 						}
 					} else {
-						parallel::Jobs::For(
-							State->SceneOrder.size(),
-							RESIDENT_GRAIN,
-							[&](size_t begin, size_t end) {
-								for (size_t index = begin; index < end; index++) {
-									const uint32_t source = State->SceneOrder[index];
-									probe(
-										static_cast<uint32_t>(index),
-										State->SceneInstances[source],
-										source,
-										haveOwnSources ? &target.InstanceSources[source] : nullptr
-									);
-								}
-							},
-							RESIDENT_PARALLEL_MINIMUM
-						);
-						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-							const uint32_t source = State->SceneOrder[index];
-							State->SceneSlotOfSource[source] = index;
-							finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
-							rememberSource(source, index);
+						{
+							ENGINE_PROFILE_CAT(
+								"resident.scene.parallel probe", core::ProfileCategory::Render
+							);
+							parallel::Jobs::For(
+								State->SceneOrder.size(),
+								RESIDENT_GRAIN,
+								[&](size_t begin, size_t end) {
+									for (size_t index = begin; index < end; index++) {
+										const uint32_t source = State->SceneOrder[index];
+										probe(
+											static_cast<uint32_t>(index),
+											State->SceneInstances[source],
+											source,
+											haveOwnSources ? &target.InstanceSources[source] : nullptr
+										);
+									}
+								},
+								RESIDENT_PARALLEL_MINIMUM
+							);
+						}
+						{
+							ENGINE_PROFILE_CAT(
+								"resident.scene.parallel finish", core::ProfileCategory::Render
+							);
+							for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+								const uint32_t source = State->SceneOrder[index];
+								State->SceneSlotOfSource[source] = index;
+								finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
+								rememberSource(source, index);
+							}
 						}
 					}
 					target.InstanceSourcesReady = true;

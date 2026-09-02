@@ -1,3 +1,4 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Frustum.hpp>
 #include <engine/graph/Shadow.hpp>
@@ -10,6 +11,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.graph.shadow")
@@ -17,6 +19,7 @@ TEST_SUITE_ID("engine.graph.shadow")
 using Catch::Approx;
 using engine::core::AABB;
 using engine::core::CFrame;
+using engine::core::FrameGraph;
 using engine::core::Vector3;
 using engine::graph::BoundsOfAll;
 using engine::graph::Cull;
@@ -41,6 +44,15 @@ namespace {
 	glm::vec3 Project(const glm::mat4 &lightViewProjection, const Vector3 &point) {
 		const glm::vec4 clip = lightViewProjection * glm::vec4{point.X, point.Y, point.Z, 1.0f};
 		return glm::vec3{clip} / clip.w;
+	}
+
+	bool Recorded(std::string_view name) {
+		for (const engine::core::FrameSpan &span : FrameGraph::Spans()) {
+			if (span.Name == name) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	DrawInstance At(const Vector3 &position, float halfExtent = 0.5f) {
@@ -243,7 +255,12 @@ TEST_CASE("the fused walk answers exactly what the two separate ones did", "[gra
 
 	std::vector<uint32_t> visible;
 	AABB bounds;
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
 	const size_t count = CullAndBound(instances, frustum, visible, bounds);
+	FrameGraph::EndFrame();
+	const bool recordedSerialScan = Recorded("cull-bound.serial scan");
+	FrameGraph::SetEnabled(false);
 
 	// Something has to survive and something has to be rejected, or this passes
 	// against a function that always says one thing.
@@ -257,6 +274,7 @@ TEST_CASE("the fused walk answers exactly what the two separate ones did", "[gra
 	// is where that order comes from.
 	CHECK(visible == expected);
 	CHECK(bounds == expectedBounds);
+	CHECK(recordedSerialScan);
 }
 
 TEST_CASE("the fused walk gives the same unit box for an empty draw list", "[graph][shadow]") {
@@ -288,7 +306,19 @@ TEST_CASE("parallel cull and bound matches the serial contracts across chunks", 
 	std::vector<uint32_t> visible;
 	AABB bounds;
 
-	CHECK(CullAndBound(instances, frustum, visible, bounds) == expectedCount);
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
+	const size_t visibleCount = CullAndBound(instances, frustum, visible, bounds);
+	FrameGraph::EndFrame();
+	const bool recordedSetup = Recorded("cull-bound.parallel setup");
+	const bool recordedScan = Recorded("cull-bound.parallel scan");
+	const bool recordedMerge = Recorded("cull-bound.parallel merge");
+	FrameGraph::SetEnabled(false);
+
+	CHECK(visibleCount == expectedCount);
 	CHECK(visible == expected);
 	CHECK(bounds == expectedBounds);
+	CHECK(recordedSetup);
+	CHECK(recordedScan);
+	CHECK(recordedMerge);
 }

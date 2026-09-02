@@ -65,12 +65,14 @@ namespace engine::graph {
 		ENGINE_PROFILE_CAT("graph.cull-bound", core::ProfileCategory::Render);
 
 		if (instances.empty()) {
+			ENGINE_PROFILE_CAT("cull-bound.empty", core::ProfileCategory::Render);
 			visible.clear();
 			bounds = BoundsOfNothing();
 			return 0;
 		}
 
 		if (instances.size() < detail::FILTER_PARALLEL_MINIMUM) {
+			ENGINE_PROFILE_CAT("cull-bound.serial scan", core::ProfileCategory::Render);
 			visible.clear();
 			visible.reserve(instances.size());
 			core::AABB total = BoundsOf(instances[0]);
@@ -95,46 +97,55 @@ namespace engine::graph {
 		static thread_local std::vector<Chunk> chunks;
 		std::vector<Chunk> &scratch = chunks;
 		const size_t chunkCount = (instances.size() + detail::FILTER_GRAIN - 1) / detail::FILTER_GRAIN;
-		scratch.resize(chunkCount);
-
-		parallel::Jobs::For(
-			chunkCount,
-			1,
-			[&](size_t firstChunk, size_t lastChunk) {
-				for (size_t chunkIndex = firstChunk; chunkIndex < lastChunk; chunkIndex++) {
-					const size_t begin = chunkIndex * detail::FILTER_GRAIN;
-					const size_t end = std::min(begin + detail::FILTER_GRAIN, instances.size());
-					Chunk &chunk = scratch[chunkIndex];
-					chunk.Visible.clear();
-					chunk.Visible.reserve(end - begin);
-					chunk.Bounds = BoundsOf(instances[begin]);
-					if (frustum.Intersects(chunk.Bounds)) {
-						chunk.Visible.push_back(static_cast<uint32_t>(begin));
-					}
-					for (size_t index = begin + 1; index < end; index++) {
-						const core::AABB box = BoundsOf(instances[index]);
-						chunk.Bounds = chunk.Bounds.Union(box);
-						if (frustum.Intersects(box)) {
-							chunk.Visible.push_back(static_cast<uint32_t>(index));
-						}
-					}
-				}
-			},
-			2
-		);
-
-		visible.clear();
-		visible.reserve(instances.size());
-		core::AABB total = scratch[0].Bounds;
-		for (size_t chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
-			const Chunk &chunk = scratch[chunkIndex];
-			if (chunkIndex > 0) {
-				total = total.Union(chunk.Bounds);
-			}
-			visible.insert(visible.end(), chunk.Visible.begin(), chunk.Visible.end());
+		{
+			ENGINE_PROFILE_CAT("cull-bound.parallel setup", core::ProfileCategory::Render);
+			scratch.resize(chunkCount);
 		}
 
-		bounds = total;
+		{
+			ENGINE_PROFILE_CAT("cull-bound.parallel scan", core::ProfileCategory::Render);
+			parallel::Jobs::For(
+				chunkCount,
+				1,
+				[&](size_t firstChunk, size_t lastChunk) {
+					for (size_t chunkIndex = firstChunk; chunkIndex < lastChunk; chunkIndex++) {
+						const size_t begin = chunkIndex * detail::FILTER_GRAIN;
+						const size_t end = std::min(begin + detail::FILTER_GRAIN, instances.size());
+						Chunk &chunk = scratch[chunkIndex];
+						chunk.Visible.clear();
+						chunk.Visible.reserve(end - begin);
+						chunk.Bounds = BoundsOf(instances[begin]);
+						if (frustum.Intersects(chunk.Bounds)) {
+							chunk.Visible.push_back(static_cast<uint32_t>(begin));
+						}
+						for (size_t index = begin + 1; index < end; index++) {
+							const core::AABB box = BoundsOf(instances[index]);
+							chunk.Bounds = chunk.Bounds.Union(box);
+							if (frustum.Intersects(box)) {
+								chunk.Visible.push_back(static_cast<uint32_t>(index));
+							}
+						}
+					}
+				},
+				2
+			);
+		}
+
+		{
+			ENGINE_PROFILE_CAT("cull-bound.parallel merge", core::ProfileCategory::Render);
+			visible.clear();
+			visible.reserve(instances.size());
+			core::AABB total = scratch[0].Bounds;
+			for (size_t chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+				const Chunk &chunk = scratch[chunkIndex];
+				if (chunkIndex > 0) {
+					total = total.Union(chunk.Bounds);
+				}
+				visible.insert(visible.end(), chunk.Visible.begin(), chunk.Visible.end());
+			}
+			bounds = total;
+		}
+
 		return visible.size();
 	}
 

@@ -1200,7 +1200,6 @@ namespace studio {
 			ImGui::TextUnformatted("Preferences > Compute > force serial compute keeps every span");
 			ImGui::PopStyleColor();
 		}
-
 		// --- the event scheduler ---------------------------------------------
 		//
 		// **Rules live here and run in `FrameGraph::EndFrame`.** This panel
@@ -1360,7 +1359,6 @@ namespace studio {
 				FrameGraph::SetTriggers(view.Triggers);
 			}
 		}
-
 		if (spans.empty()) {
 			ImGui::Separator();
 			ImGui::TextDisabled("nothing recorded yet - the next frame fills this in");
@@ -1378,143 +1376,150 @@ namespace studio {
 		// reason nobody wrote down. `StartMilliseconds` and `Depth` are exactly
 		// the two axes.
 
-		const float rowHeight = std::max(std::floor(engine::ui::Scaled(engine::ui::Size::Row) * 0.72f), 1.0f);
-		const ImVec2 origin = ImGui::GetCursorScreenPos();
-		const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
-		const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
-		const float graphHeight = rowHeight * static_cast<float>(view.DisplayRows);
+		{
+			ENGINE_PROFILE_CAT("frame graph flame", engine::core::ProfileCategory::Render);
+			const float rowHeight =
+				std::max(std::floor(engine::ui::Scaled(engine::ui::Size::Row) * 0.72f), 1.0f);
+			const ImVec2 origin = ImGui::GetCursorScreenPos();
+			const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
+			const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
+			const float graphHeight = rowHeight * static_cast<float>(view.DisplayRows);
 
-		ImDrawList *draw = ImGui::GetWindowDrawList();
-		const DiagnosticSpan *hovered = nullptr;
+			ImDrawList *draw = ImGui::GetWindowDrawList();
+			const DiagnosticSpan *hovered = nullptr;
 
-		const auto drawSpan = [&](size_t index) {
-			const DiagnosticSpan &span = graphSpans[index];
-			// **Clamped to the graph, whatever the arithmetic above produced.**
-			// An averaged span can still exceed the averaged frame - a span that
-			// ran in only some of the frames divides by all of them for its
-			// width and by its own count for its start - and a bar drawn past
-			// the right edge lands on top of whatever is beside it. A flamegraph
-			// that lies about a width is worse than one that clips.
-			const float left =
-				origin.x +
-				std::clamp(span.StartMilliseconds * scale, 0.0f, std::max(graphWidth - 1.0f, 0.0f));
-			const float room = std::max(origin.x + graphWidth - left, 1.0f);
-			const float width = std::clamp(span.Milliseconds * scale, 1.0f, room);
-			const float top = origin.y + static_cast<float>(view.Rows[index]) * rowHeight;
+			const auto drawSpan = [&](size_t index) {
+				const DiagnosticSpan &span = graphSpans[index];
+				// **Clamped to the graph, whatever the arithmetic above produced.**
+				// An averaged span can still exceed the averaged frame - a span that
+				// ran in only some of the frames divides by all of them for its
+				// width and by its own count for its start - and a bar drawn past
+				// the right edge lands on top of whatever is beside it. A flamegraph
+				// that lies about a width is worse than one that clips.
+				const float left =
+					origin.x +
+					std::clamp(span.StartMilliseconds * scale, 0.0f, std::max(graphWidth - 1.0f, 0.0f));
+				const float room = std::max(origin.x + graphWidth - left, 1.0f);
+				const float width = std::clamp(span.Milliseconds * scale, 1.0f, room);
+				const float top = origin.y + static_cast<float>(view.Rows[index]) * rowHeight;
 
-			const ImVec2 upper(left, top);
-			const ImVec2 lower(left + width, top + rowHeight);
+				const ImVec2 upper(left, top);
+				const ImVec2 lower(left + width, top + rowHeight);
 
-			const ImU32 colour =
-				span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
-			draw->AddRectFilled(upper, lower, colour);
+				const ImU32 colour =
+					span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
+				draw->AddRectFilled(upper, lower, colour);
 
-			if (ImGui::IsMouseHoveringRect(upper, lower)) {
-				hovered = index < spans.size() ? &spans[index] : &span;
-				draw->AddRect(upper, lower, engine::ui::BrightColour());
+				if (ImGui::IsMouseHoveringRect(upper, lower)) {
+					hovered = index < spans.size() ? &spans[index] : &span;
+					draw->AddRect(upper, lower, engine::ui::BrightColour());
+				}
+
+				// Only where the label fits. Text clipped mid-word is noise, and a
+				// flame graph is read as shape first.
+				if (width > engine::ui::Scaled(34.0f)) {
+					draw->PushClipRect(upper, lower, true);
+					draw->AddText(
+						ImVec2(left + 3.0f, top + 1.0f),
+						IM_COL32(16, 18, 22, 235),
+						span.Name.data(),
+						span.Name.data() + span.Name.size()
+					);
+					draw->PopClipRect();
+				}
+			};
+
+			// Accounting is the background of the timeline. Reported worker work is
+			// deliberately fitted into the measured wall-time gap that waited for it,
+			// so drawing synthetic gaps last would cover the useful worker bars.
+			for (size_t index = spans.size(); index < graphSpans.size(); index++) {
+				drawSpan(index);
+			}
+			for (size_t index = 0; index < spans.size(); index++) {
+				drawSpan(index);
 			}
 
-			// Only where the label fits. Text clipped mid-word is noise, and a
-			// flame graph is read as shape first.
-			if (width > engine::ui::Scaled(34.0f)) {
-				draw->PushClipRect(upper, lower, true);
-				draw->AddText(
-					ImVec2(left + 3.0f, top + 1.0f),
-					IM_COL32(16, 18, 22, 235),
-					span.Name.data(),
-					span.Name.data() + span.Name.size()
+			ImGui::Dummy(ImVec2(graphWidth, graphHeight));
+
+			if (hovered != nullptr) {
+				ImGui::BeginTooltip();
+				ImGui::TextUnformatted(hovered->Name.c_str());
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::Text(
+					"%.3f ms   self %.3f   idle %.3f",
+					static_cast<double>(hovered->Milliseconds),
+					static_cast<double>(hovered->SelfMilliseconds),
+					static_cast<double>(hovered->IdleMilliseconds)
 				);
-				draw->PopClipRect();
+				ImGui::Spacing();
+				const std::string_view description =
+					DescribeDiagnosticSpan(hovered->Name, hovered->Category, hovered->Reported);
+				ImGui::TextWrapped("%.*s", static_cast<int>(description.size()), description.data());
+				ImGui::Text(
+					"%s owner   %s%s",
+					GetProfileOwnerName(hovered->Owner).data(),
+					GetCategoryName(hovered->Category).data(),
+					hovered->Reported ? "   (reported from another thread)" : ""
+				);
+				ImGui::PopStyleColor();
+				ImGui::EndTooltip();
 			}
-		};
 
-		// Accounting is the background of the timeline. Reported worker work is
-		// deliberately fitted into the measured wall-time gap that waited for it,
-		// so drawing synthetic gaps last would cover the useful worker bars.
-		for (size_t index = spans.size(); index < graphSpans.size(); index++) {
-			drawSpan(index);
-		}
-		for (size_t index = 0; index < spans.size(); index++) {
-			drawSpan(index);
-		}
-
-		ImGui::Dummy(ImVec2(graphWidth, graphHeight));
-
-		if (hovered != nullptr) {
-			ImGui::BeginTooltip();
-			ImGui::TextUnformatted(hovered->Name.c_str());
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::Text(
-				"%.3f ms   self %.3f   idle %.3f",
-				static_cast<double>(hovered->Milliseconds),
-				static_cast<double>(hovered->SelfMilliseconds),
-				static_cast<double>(hovered->IdleMilliseconds)
-			);
 			ImGui::Spacing();
-			const std::string_view description =
-				DescribeDiagnosticSpan(hovered->Name, hovered->Category, hovered->Reported);
-			ImGui::TextWrapped("%.*s", static_cast<int>(description.size()), description.data());
-			ImGui::Text(
-				"%s owner   %s%s",
-				GetProfileOwnerName(hovered->Owner).data(),
-				GetCategoryName(hovered->Category).data(),
-				hovered->Reported ? "   (reported from another thread)" : ""
-			);
-			ImGui::PopStyleColor();
-			ImGui::EndTooltip();
 		}
-
-		ImGui::Spacing();
 
 		// --- the table ------------------------------------------------------
 
 		constexpr ImGuiTableFlags FLAGS = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
 										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
 
-		if (ImGui::BeginTable("##spans", 4, FLAGS)) {
-			ImGui::TableSetupColumn("span", ImGuiTableColumnFlags_WidthStretch, 0.52f);
-			ImGui::TableSetupColumn("busy", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-			ImGui::TableSetupColumn("idle", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-			ImGui::TableSetupColumn("share", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-			ImGui::TableSetupScrollFreeze(0, 1);
-			ImGui::TableHeadersRow();
+		{
+			ENGINE_PROFILE_CAT("frame graph table", engine::core::ProfileCategory::Render);
+			if (ImGui::BeginTable("##spans", 4, FLAGS)) {
+				ImGui::TableSetupColumn("span", ImGuiTableColumnFlags_WidthStretch, 0.52f);
+				ImGui::TableSetupColumn("busy", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+				ImGui::TableSetupColumn("idle", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+				ImGui::TableSetupColumn("share", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+				ImGui::TableSetupScrollFreeze(0, 1);
+				ImGui::TableHeadersRow();
 
-			for (const DiagnosticSpan &span : spans) {
-				ImGui::TableNextRow();
+				for (const DiagnosticSpan &span : spans) {
+					ImGui::TableNextRow();
 
-				ImGui::TableSetColumnIndex(0);
-				ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
-				ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
-				ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+					ImGui::TableSetColumnIndex(0);
+					ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+					ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
+					ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
 
-				const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
-				const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
+					const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
+					const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
 
-				ImGui::TableSetColumnIndex(1);
-				ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
+					ImGui::TableSetColumnIndex(1);
+					ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
 
-				ImGui::TableSetColumnIndex(2);
-				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-				if (span.IdleMilliseconds > 0.0001f) {
-					ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
-				} else {
-					ImGui::TextUnformatted("-");
-				}
-				ImGui::PopStyleColor();
-
-				ImGui::TableSetColumnIndex(3);
-				// The expensive rows in the warning colour, so the thing worth
-				// looking at is the thing that catches the eye.
-				if (share >= 25.0f) {
-					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-					ImGui::Text("%.1f%%", static_cast<double>(share));
+					ImGui::TableSetColumnIndex(2);
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+					if (span.IdleMilliseconds > 0.0001f) {
+						ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
+					} else {
+						ImGui::TextUnformatted("-");
+					}
 					ImGui::PopStyleColor();
-				} else {
-					ImGui::Text("%.1f%%", static_cast<double>(share));
-				}
-			}
 
-			ImGui::EndTable();
+					ImGui::TableSetColumnIndex(3);
+					// The expensive rows in the warning colour, so the thing worth
+					// looking at is the thing that catches the eye.
+					if (share >= 25.0f) {
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+						ImGui::Text("%.1f%%", static_cast<double>(share));
+						ImGui::PopStyleColor();
+					} else {
+						ImGui::Text("%.1f%%", static_cast<double>(share));
+					}
+				}
+
+				ImGui::EndTable();
+			}
 		}
 
 		ImGui::End();
