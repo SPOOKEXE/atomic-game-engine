@@ -246,16 +246,112 @@ namespace engine::render {
 	}
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
+	using engine::scene::Bone;
 	using engine::scene::Bounds;
 	using engine::scene::CharacterLimb;
 	using engine::scene::DrawInstance;
 	using engine::scene::LocalTransparency;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
+	using engine::scene::Skeleton;
 	using engine::scene::SurfaceAppearance;
 	using engine::scene::Tags;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
+
+	namespace {
+		enum SourceRevision : size_t {
+			TRANSFORM_REVISION,
+			PREVIOUS_TRANSFORM_REVISION,
+			BOUNDS_REVISION,
+			VISUAL_REVISION,
+			SURFACE_REVISION,
+			TAGS_REVISION,
+			TRANSPARENCY_REVISION,
+			LIMB_REVISION,
+			SKELETON_REVISION,
+			BONE_REVISION,
+			RENDERED_REVISION,
+		};
+
+		bool DrawableSource(const Store &store, Entity entity) {
+			return store.Has<Transform>(entity) && store.Has<PreviousTransform>(entity) &&
+				   store.Has<Bounds>(entity) && store.Has<Visual>(entity) &&
+				   store.Has<SurfaceAppearance>(entity) && store.Has<Tags>(entity) &&
+				   store.Has<LocalTransparency>(entity) && store.Has<Rendered>(entity);
+		}
+
+		template <class Component, class Relevant>
+		bool
+		SourceRevisionChanged(Store &store, DrawList &drawList, SourceRevision slot, Relevant &&relevant) {
+			store.Observe<Component>();
+			const uint64_t revision = store.ComponentChangeVersion<Component>();
+			uint64_t &seen = drawList.SourceRevisions[slot];
+			if (!drawList.SourcesReady || revision == seen) {
+				seen = revision;
+				return false;
+			}
+			seen = revision;
+
+			bool visited = false;
+			bool changed = false;
+			store.EachChanged<Component>([&](Entity entity, Component &) {
+				visited = true;
+				changed |= relevant(entity);
+			});
+			// A world may have ticked while it was not presented. Its monotonic
+			// revision survives, but the row bits do not, so an empty walk is not
+			// proof that the cached list is current.
+			return changed || !visited;
+		}
+
+		bool DrawSourcesChanged(
+			Store &store, DrawList &drawList, size_t matching, size_t skeletons, size_t bones
+		) {
+			bool changed = !drawList.SourcesReady || matching != drawList.SourceEntityCount ||
+						   skeletons != drawList.SkeletonCount || bones != drawList.BoneCount;
+			const auto drawable = [&store](Entity entity) { return DrawableSource(store, entity); };
+			const auto drawableOrBone = [&store, skeletons](Entity entity) {
+				return DrawableSource(store, entity) || (skeletons != 0 && store.Has<Bone>(entity));
+			};
+
+			changed |= SourceRevisionChanged<Transform>(store, drawList, TRANSFORM_REVISION, drawableOrBone);
+			changed |= SourceRevisionChanged<PreviousTransform>(
+				store, drawList, PREVIOUS_TRANSFORM_REVISION, drawable
+			);
+			changed |= SourceRevisionChanged<Bounds>(store, drawList, BOUNDS_REVISION, drawable);
+			changed |= SourceRevisionChanged<Visual>(store, drawList, VISUAL_REVISION, drawable);
+			changed |= SourceRevisionChanged<SurfaceAppearance>(store, drawList, SURFACE_REVISION, drawable);
+			changed |= SourceRevisionChanged<Tags>(store, drawList, TAGS_REVISION, drawable);
+			changed |=
+				SourceRevisionChanged<LocalTransparency>(store, drawList, TRANSPARENCY_REVISION, drawable);
+			changed |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
+			changed |=
+				SourceRevisionChanged<Skeleton>(store, drawList, SKELETON_REVISION, [&store](Entity entity) {
+					return store.Has<Skeleton>(entity);
+				});
+			changed |= SourceRevisionChanged<Bone>(store, drawList, BONE_REVISION, [&store](Entity entity) {
+				return store.Has<Bone>(entity);
+			});
+
+			store.Observe<Rendered>();
+			const uint64_t renderedRevision = store.ComponentChangeVersion<Rendered>();
+			changed |=
+				drawList.SourcesReady && renderedRevision != drawList.SourceRevisions[RENDERED_REVISION];
+			drawList.SourceRevisions[RENDERED_REVISION] = renderedRevision;
+			drawList.SourceEntityCount = matching;
+			drawList.SkeletonCount = skeletons;
+			drawList.BoneCount = bones;
+			drawList.SourcesReady = true;
+			return changed;
+		}
+
+		bool SameFrame(const core::CFrame &left, const core::CFrame &right) {
+			return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
+				   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
+				   left.QuaternionW == right.QuaternionW;
+		}
+	}
 
 	// The smallest run of instances worth handing to another worker.
 	//
@@ -324,6 +420,17 @@ namespace engine::render {
 				LocalTransparency,
 				Rendered>();
 		}
+		const size_t skeletons = store.CountMatching<Skeleton>();
+		const size_t bones = skeletons == 0 ? 0 : store.CountMatching<Bone>();
+		const bool sourcesChanged = DrawSourcesChanged(store, *drawList, matching, skeletons, bones);
+		if (!drawList->HasInterpolation && !sourcesChanged) {
+			ENGINE_PROFILE_CAT("reuse draw list", engine::core::ProfileCategory::Simulation);
+			drawList->Instances.resize(drawList->BaseInstanceCount);
+			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
+			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
+			return;
+		}
 
 		{
 			// Sized once, then written by index. The vector is not cleared
@@ -342,6 +449,7 @@ namespace engine::render {
 
 		size_t written = 0;
 		std::atomic_bool hasFullyTransparent = false;
+		std::atomic_bool hasInterpolation = false;
 		{
 			// Parallel, and this is the loop that earns it. The arithmetic
 			// stopped being the cost once the interpolation lost its
@@ -388,7 +496,7 @@ namespace engine::render {
 			// split on the component instead
 			// and each half is a walk with a required column list. Every
 			// other field is written by the same function in both.
-			const auto write = [out, capacity, alpha, &hasFullyTransparent](
+			const auto write = [out, capacity, alpha, &hasFullyTransparent, &hasInterpolation](
 								   size_t base,
 								   size_t first,
 								   size_t rows,
@@ -415,6 +523,9 @@ namespace engine::render {
 				bool foundFullyTransparent = false;
 
 				for (size_t row = 0; row < rows; row++) {
+					if (!SameFrame(previous[row].Frame, transforms[row].Frame)) {
+						hasInterpolation.store(true, std::memory_order_relaxed);
+					}
 					// Interpolated, not the tick position. At 300 fps
 					// against a 60 Hz tick, drawing tick positions shows
 					// each one five times and then jumps - which reads as
@@ -545,6 +656,7 @@ namespace engine::render {
 
 			written = loose + rigged;
 		}
+		drawList->HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
 
 		{
 			ENGINE_PROFILE_CAT("publish draw list", engine::core::ProfileCategory::Simulation);
@@ -562,7 +674,14 @@ namespace engine::render {
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}
 
-		CollectSkinPalettes(store, *drawList);
+		// Every row above was assigned from a fresh `DrawInstance`, whose skin run
+		// is empty. Avoid an entity lookup per drawable in worlds with no rigs.
+		if (skeletons == 0) {
+			drawList->JointFrames.clear();
+		} else {
+			CollectSkinPalettes(store, *drawList);
+		}
+		drawList->BaseInstanceCount = drawList->Instances.size();
 
 		// **After the metric, deliberately.** `render.instances` answers
 		// "how much scene is there", and a number that moved when somebody
@@ -1019,6 +1138,13 @@ namespace engine::render {
 				for (size_t index = 0; index < count; index++) {
 					lists[index].Instances.clear();
 					lists[index].JointFrames.clear();
+					lists[index].BaseInstanceCount = 0;
+					lists[index].SourceRevisions.fill(0);
+					lists[index].SourceEntityCount = 0;
+					lists[index].SkeletonCount = 0;
+					lists[index].BoneCount = 0;
+					lists[index].SourcesReady = false;
+					lists[index].HasInterpolation = false;
 				}
 			}
 		);

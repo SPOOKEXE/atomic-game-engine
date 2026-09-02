@@ -62,11 +62,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] gtlf default character (unreal style)
 
 in StressParticles demo:
-- [_] graph.cull-bound needs optimisations (0.3ms-0.5ms), see what we can do there.
-- [_] between `ViewRecording` and `execute graph` there is a big unaccounted section
-- [_] `render preperation` takes 0.373ms of which `collect instances` takes 0.277ms of which `interpolate` and `build skin palettes` takes 0.123ms and 0.143ms respectively (these seem weird and should not be here - check batched compute).
-- [_] check we are only sending newly updated information to the gpu to render (cascaded cache hit - "objects" and "particles" both update)
-- [_] also why is `objects` updating for the StressParticles? `particles` should be the only one. Check what causes the update.
+- [x] optimise `graph.cull-bound`: the axis-aligned bound path reduced the 1,000-object release benchmark from 17.38 us to 7.90 us; uncapped release Studio measured 0.009 ms mean and 0.013 ms p99.
+- [x] account for the section between `ViewRecording::Begin` and `execute graph`: it is node-table construction, now reported as `build node table`; uncapped release Studio measured 0.051 ms mean and 0.080 ms p99.
+- [x] remove unnecessary render preparation work: static draw lists are reused, no-rig scenes skip skin palettes, and StressParticles measured 0.010 ms mean render preparation with 0.002 ms mean collection in uncapped release Studio.
+- [x] send only independently changed object rows, indices, skin offsets, joint words and occlusion data to the GPU; the warm StressParticles Studio run reused its draw list on all 4,005 captured frames and `upload-instances` rounded to 0.000 ms mean.
+- [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
 
 ### v0.23
 

@@ -3377,6 +3377,28 @@ namespace studio {
 		// The synthetic click currently crossing the frame boundary.
 		std::optional<ControlClick> PendingControlClick;
 
+		// A key injected through SDL. Like a click, its release waits until a
+		// presented ImGui frame has observed the press.
+		struct ControlKey {
+			// SDL scancode, keycode, modifiers, and press-observation state. Kept
+			// as primitive fields so this public header does not expose SDL types.
+			//@{
+			uint32_t Scancode = 0;
+			uint32_t Key = 0;
+			uint16_t Modifiers = 0;
+			bool DownProcessed = false;
+			//@}
+		};
+		std::optional<ControlKey> PendingControlKey;
+
+		// Text storage must outlive the queued SDL event, whose payload is a
+		// pointer. It is released after the event crosses the frame loop.
+		struct ControlText {
+			std::string Text;
+			bool Processed = false;
+		};
+		std::optional<ControlText> PendingControlText;
+
 		// What this editor was started with.
 		Options Settings;
 

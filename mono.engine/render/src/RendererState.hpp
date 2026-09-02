@@ -1291,6 +1291,12 @@ namespace engine::render {
 			std::vector<uint32_t> InstanceIndices;
 			std::vector<uint32_t> SkinOffsets;
 			std::vector<uint32_t> JointWords;
+			uint64_t SkinOffsetSignature = 0;
+			uint64_t JointWordSignature = 0;
+			bool SkinOffsetsReady = false;
+			bool JointWordsReady = false;
+			bool SkinOffsetsDirty = false;
+			bool JointWordsDirty = false;
 			uint32_t SkinOffsetCapacity = 0;
 			uint32_t JointWordCapacity = 0;
 			SDL_GPUBuffer *SkinOffsetBuffer = nullptr;

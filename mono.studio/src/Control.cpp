@@ -26,6 +26,7 @@
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
@@ -38,6 +39,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <studio/Editor.hpp>
+#include <vector>
 
 namespace studio {
 
@@ -86,6 +88,32 @@ namespace studio {
 				return SDL_BUTTON_RIGHT;
 			}
 			return 0;
+		}
+
+		SDL_Keymod KeyboardModifiers(uint8_t modifiers) {
+			SDL_Keymod translated = SDL_KMOD_NONE;
+			if ((modifiers & automation::KeyboardModifierShift) != 0) {
+				translated |= SDL_KMOD_SHIFT;
+			}
+			if ((modifiers & automation::KeyboardModifierControl) != 0) {
+				translated |= SDL_KMOD_CTRL;
+			}
+			if ((modifiers & automation::KeyboardModifierAlt) != 0) {
+				translated |= SDL_KMOD_ALT;
+			}
+			if ((modifiers & automation::KeyboardModifierGui) != 0) {
+				translated |= SDL_KMOD_GUI;
+			}
+			return translated;
+		}
+
+		const Keybind *BindingFor(Action action) {
+			for (const Keybind &binding : Keybinds::All()) {
+				if (binding.Bound == action) {
+					return &binding;
+				}
+			}
+			return nullptr;
 		}
 
 		// Where `mcpbridge` is, spelled the way somebody would have to type it.
@@ -387,6 +415,97 @@ namespace studio {
 
 		ControlSurface.Add(
 			Tool{
+				"list_command_palette",
+				"Lists Studio command-palette entries from the live operator table, including stable ids, "
+				"shortcuts, availability and refusal reasons.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"query",
+							  json{
+								  {"type", "string"},
+								  {"description", "Optional fuzzy filter, ranked exactly like the palette."}
+							  }}
+						 }},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (arguments.contains("query") && !arguments["query"].is_string()) {
+						failure = "query must be a string";
+						return nullptr;
+					}
+
+					const std::string query = arguments.value("query", std::string());
+					json commands = json::array();
+					for (const Operator *op : editor->Operators.Matching(query)) {
+						const Keybind *binding = BindingFor(op->Id);
+						if (binding == nullptr) {
+							continue;
+						}
+						const Availability state = op->Poll();
+						commands.push_back(
+							json{
+								{"id", binding->Id},
+								{"name", op->Name},
+								{"description", op->Description},
+								{"shortcut", binding->Keys.Text()},
+								{"ready", state.Ready},
+								{"reason", state.Reason},
+							}
+						);
+					}
+					return json{{"commands", std::move(commands)}, {"query", query}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"run_palette_command",
+				"Runs one Studio command-palette entry by the stable id returned by list_command_palette. "
+				"The same live availability poll used by menus and the palette can refuse it.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties", json{{"id", json{{"type", "string"}}}}},
+						{"required", json::array({"id"})},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (!arguments.contains("id") || !arguments["id"].is_string()) {
+						failure = "id must be a string";
+						return nullptr;
+					}
+
+					const std::string id = arguments["id"].get<std::string>();
+					const Keybind *binding = Keybinds::Find(id);
+					if (binding == nullptr) {
+						failure = "no palette command has id '" + id + "'";
+						return nullptr;
+					}
+					const Operator *op = editor->Operators.Find(binding->Bound);
+					if (op == nullptr) {
+						failure = "palette command '" + id + "' has no operator";
+						return nullptr;
+					}
+					const Availability state = op->Poll();
+					if (!state.Ready) {
+						failure = state.Reason;
+						return nullptr;
+					}
+					if (!editor->Operators.Run(binding->Bound)) {
+						failure = "palette command became unavailable before it ran";
+						return nullptr;
+					}
+					return json{{"ran", true}, {"id", id}, {"name", op->Name}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
 				"screenshot",
 				"Queues BMP screenshots under the system temporary directory. `scene` captures visible "
 				"scene views separately, `studio` captures the complete Studio window, and `all` does both.",
@@ -585,6 +704,161 @@ namespace studio {
 
 		ControlSurface.Add(
 			Tool{
+				"emulate_key",
+				"Queues one named keyboard key. Optional modifiers are shift, control, alt and gui. "
+				"The press and release cross rendered frames so ImGui observes a physical key lifecycle.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"key",
+							  json{
+								  {"type", "string"},
+								  {"description", "An SDL key name such as A, Return or Escape."}
+							  }},
+							 {"modifiers",
+							  json{
+								  {"type", "array"},
+								  {"items",
+								   json{
+									   {"type", "string"},
+									   {"enum", json::array({"shift", "control", "alt", "gui"})}
+								   }},
+								  {"uniqueItems", true},
+							  }},
+						 }},
+						{"required", json::array({"key"})},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (editor->Window == nullptr) {
+						failure = "Studio has no window in headless mode";
+						return nullptr;
+					}
+					if (editor->PendingControlKey.has_value()) {
+						failure = "an emulated key is already in progress";
+						return nullptr;
+					}
+					if (!arguments.contains("key") || !arguments["key"].is_string()) {
+						failure = "key must be a string";
+						return nullptr;
+					}
+
+					std::vector<std::string> modifierNames;
+					if (arguments.contains("modifiers")) {
+						if (!arguments["modifiers"].is_array()) {
+							failure = "modifiers must be an array";
+							return nullptr;
+						}
+						for (const json &modifier : arguments["modifiers"]) {
+							if (!modifier.is_string()) {
+								failure = "each modifier must be a string";
+								return nullptr;
+							}
+							modifierNames.push_back(modifier.get<std::string>());
+						}
+					}
+
+					uint8_t modifierBits = automation::KeyboardModifierNone;
+					if (!automation::ParseKeyboardModifiers(modifierNames, modifierBits, failure)) {
+						return nullptr;
+					}
+					const SDL_Keymod modifiers = KeyboardModifiers(modifierBits);
+					const std::string keyName = arguments["key"].get<std::string>();
+					SDL_Keycode key = SDL_GetKeyFromName(keyName.c_str());
+					SDL_Scancode scancode = SDL_GetScancodeFromName(keyName.c_str());
+					if (key == SDLK_UNKNOWN && scancode == SDL_SCANCODE_UNKNOWN) {
+						failure = "key is not a recognized SDL key name";
+						return nullptr;
+					}
+					if (scancode == SDL_SCANCODE_UNKNOWN) {
+						SDL_Keymod derivedModifiers = modifiers;
+						scancode = SDL_GetScancodeFromKey(key, &derivedModifiers);
+					}
+					if (key == SDLK_UNKNOWN) {
+						key = SDL_GetKeyFromScancode(scancode, modifiers, true);
+					}
+
+					SDL_Event press{};
+					press.type = SDL_EVENT_KEY_DOWN;
+					press.key.timestamp = SDL_GetTicksNS();
+					press.key.windowID = SDL_GetWindowID(editor->Window);
+					press.key.scancode = scancode;
+					press.key.key = key;
+					press.key.mod = modifiers;
+					press.key.down = true;
+					press.key.repeat = false;
+					if (!SDL_PushEvent(&press)) {
+						failure = std::string("could not queue key press: ") + SDL_GetError();
+						return nullptr;
+					}
+
+					editor->PendingControlKey = Editor::ControlKey{
+						static_cast<uint32_t>(scancode),
+						static_cast<uint32_t>(key),
+						static_cast<uint16_t>(modifiers),
+						false,
+					};
+					return json{
+						{"queued", true},
+						{"key", keyName},
+						{"modifiers", modifierNames},
+					};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"emulate_text",
+				"Queues UTF-8 text for the focused Studio text field. Use emulate_key for shortcuts and "
+				"non-text keys.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties", json{{"text", json{{"type", "string"}, {"maxLength", 16384}}}}},
+						{"required", json::array({"text"})},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					if (editor->Window == nullptr) {
+						failure = "Studio has no window in headless mode";
+						return nullptr;
+					}
+					if (editor->PendingControlText.has_value()) {
+						failure = "emulated text is already in progress";
+						return nullptr;
+					}
+					if (!arguments.contains("text") || !arguments["text"].is_string()) {
+						failure = "text must be a string";
+						return nullptr;
+					}
+
+					std::string text = arguments["text"].get<std::string>();
+					if (!automation::ValidateTextInput(text, failure)) {
+						return nullptr;
+					}
+					editor->PendingControlText = Editor::ControlText{std::move(text), false};
+
+					SDL_Event input{};
+					input.type = SDL_EVENT_TEXT_INPUT;
+					input.text.timestamp = SDL_GetTicksNS();
+					input.text.windowID = SDL_GetWindowID(editor->Window);
+					input.text.text = editor->PendingControlText->Text.c_str();
+					if (!SDL_PushEvent(&input)) {
+						editor->PendingControlText.reset();
+						failure = std::string("could not queue text input: ") + SDL_GetError();
+						return nullptr;
+					}
+
+					return json{{"queued", true}, {"bytes", editor->PendingControlText->Text.size()}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
 				"open_window",
 				"Shows, restores and raises the Studio window, then reports its client geometry.",
 				[] { return json{{"type", "object"}}; },
@@ -697,25 +971,47 @@ namespace studio {
 			ControlScreenshotIssued = false;
 		}
 
-		if (!PendingControlClick.has_value() || !PendingControlClick->DownProcessed) {
-			return;
+		if (PendingControlClick.has_value() && PendingControlClick->DownProcessed) {
+			SDL_Event release{};
+			release.type = SDL_EVENT_MOUSE_BUTTON_UP;
+			release.button.timestamp = SDL_GetTicksNS();
+			release.button.windowID = SDL_GetWindowID(Window);
+			release.button.button = PendingControlClick->Button;
+			release.button.down = false;
+			release.button.clicks = 1;
+			release.button.x = PendingControlClick->X;
+			release.button.y = PendingControlClick->Y;
+			if (!SDL_PushEvent(&release)) {
+				Say(std::string("control: could not release emulated click: ") + SDL_GetError(),
+					engine::core::LogLevel::Error);
+			} else {
+				PendingControlClick.reset();
+			}
 		}
 
-		SDL_Event release{};
-		release.type = SDL_EVENT_MOUSE_BUTTON_UP;
-		release.button.timestamp = SDL_GetTicksNS();
-		release.button.windowID = SDL_GetWindowID(Window);
-		release.button.button = PendingControlClick->Button;
-		release.button.down = false;
-		release.button.clicks = 1;
-		release.button.x = PendingControlClick->X;
-		release.button.y = PendingControlClick->Y;
-		if (!SDL_PushEvent(&release)) {
-			Say(std::string("control: could not release emulated click: ") + SDL_GetError(),
-				engine::core::LogLevel::Error);
-			return;
+		if (PendingControlKey.has_value() && PendingControlKey->DownProcessed) {
+			SDL_Event release{};
+			release.type = SDL_EVENT_KEY_UP;
+			release.key.timestamp = SDL_GetTicksNS();
+			release.key.windowID = SDL_GetWindowID(Window);
+			release.key.scancode = static_cast<SDL_Scancode>(PendingControlKey->Scancode);
+			release.key.key = static_cast<SDL_Keycode>(PendingControlKey->Key);
+			// Modifiers are released with the key so a shortcut cannot leave ImGui
+			// believing control, shift, alt or gui is still held.
+			release.key.mod = SDL_KMOD_NONE;
+			release.key.down = false;
+			release.key.repeat = false;
+			if (!SDL_PushEvent(&release)) {
+				Say(std::string("control: could not release emulated key: ") + SDL_GetError(),
+					engine::core::LogLevel::Error);
+			} else {
+				PendingControlKey.reset();
+			}
 		}
-		PendingControlClick.reset();
+
+		if (PendingControlText.has_value() && PendingControlText->Processed) {
+			PendingControlText.reset();
+		}
 	}
 
 	WorldId Editor::ControlWorld(const json &arguments, std::string &failure) {

@@ -45,6 +45,44 @@ namespace studio::automation {
 		return false;
 	}
 
+	bool
+	ParseKeyboardModifiers(std::span<const std::string> names, uint8_t &modifiers, std::string &failure) {
+		modifiers = KeyboardModifierNone;
+		failure.clear();
+		for (const std::string &name : names) {
+			if (name == "shift") {
+				modifiers |= KeyboardModifierShift;
+			} else if (name == "control") {
+				modifiers |= KeyboardModifierControl;
+			} else if (name == "alt") {
+				modifiers |= KeyboardModifierAlt;
+			} else if (name == "gui") {
+				modifiers |= KeyboardModifierGui;
+			} else {
+				failure = "modifier must be shift, control, alt or gui";
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool ValidateTextInput(std::string_view text, std::string &failure) {
+		failure.clear();
+		if (text.empty()) {
+			failure = "text must not be empty";
+			return false;
+		}
+		if (text.size() > 16 * 1024) {
+			failure = "text must not exceed 16384 UTF-8 bytes";
+			return false;
+		}
+		if (text.find('\0') != std::string_view::npos) {
+			failure = "text must not contain a null byte";
+			return false;
+		}
+		return true;
+	}
+
 	std::vector<ScreenshotTask> PlanScreenshots(
 		const std::filesystem::path &directory,
 		ScreenshotTarget target,

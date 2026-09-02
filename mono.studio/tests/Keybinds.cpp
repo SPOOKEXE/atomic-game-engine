@@ -86,6 +86,15 @@ TEST_CASE("every action has a unique, non-empty id", "[studio][keybinds]") {
 	}
 }
 
+TEST_CASE("stable command ids resolve without relying on enum order", "[studio][keybinds]") {
+	const Fixture fixture;
+
+	const Keybind *play = Keybinds::Find("run.play");
+	REQUIRE(play != nullptr);
+	CHECK(play->Bound == Action::Play);
+	CHECK(Keybinds::Find("command.that.does.not.exist") == nullptr);
+}
+
 TEST_CASE("a chord belongs to exactly one action", "[studio][keybinds]") {
 	const Fixture fixture;
 

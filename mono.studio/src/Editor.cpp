@@ -1213,6 +1213,17 @@ namespace studio {
 					event.button.x == PendingControlClick->X && event.button.y == PendingControlClick->Y) {
 					PendingControlClick->DownProcessed = true;
 				}
+				if (PendingControlKey.has_value() && event.type == SDL_EVENT_KEY_DOWN &&
+					event.key.windowID == SDL_GetWindowID(Window) &&
+					static_cast<uint32_t>(event.key.scancode) == PendingControlKey->Scancode &&
+					static_cast<uint32_t>(event.key.key) == PendingControlKey->Key) {
+					PendingControlKey->DownProcessed = true;
+				}
+				if (PendingControlText.has_value() && event.type == SDL_EVENT_TEXT_INPUT &&
+					event.text.windowID == SDL_GetWindowID(Window) &&
+					event.text.text == PendingControlText->Text.c_str()) {
+					PendingControlText->Processed = true;
+				}
 
 				if (event.type == SDL_EVENT_QUIT) {
 					Running = false;

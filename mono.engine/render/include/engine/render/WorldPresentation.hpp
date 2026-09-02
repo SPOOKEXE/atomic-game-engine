@@ -15,6 +15,7 @@
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Skinning.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -41,6 +42,20 @@ namespace engine::render {
 
 		// Joint transforms for those instances, flattened into one allocation.
 		std::vector<core::CFrame> JointFrames;
+
+		// The source-built prefix excludes portal clones and face markers. Keeping
+		// it lets a quiet object layer reuse interpolation and palette work while
+		// those view-derived rows are rebuilt independently.
+		size_t BaseInstanceCount = 0;
+
+		// Monotonic source epochs last inspected by CollectInstances. These are
+		// derived cache state and deliberately do not cross snapshots.
+		std::array<uint64_t, 11> SourceRevisions{};
+		size_t SourceEntityCount = 0;
+		size_t SkeletonCount = 0;
+		size_t BoneCount = 0;
+		bool SourcesReady = false;
+		bool HasInterpolation = false;
 	};
 
 	// Renderer settings that affect scene pixels without changing a draw row.

@@ -1742,6 +1742,14 @@ namespace engine::render {
 		for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
 			assignSkin(drawSlot, State->SceneInstances[drawSlot]);
 		}
+		uint64_t skinOffsetSignature = scene::MixSignature(1, target.SkinOffsets.size());
+		for (const uint32_t offset : target.SkinOffsets) {
+			skinOffsetSignature = scene::MixSignature(skinOffsetSignature, offset);
+		}
+		target.SkinOffsetsDirty = target.SkinOffsetsDirty || !target.SkinOffsetsReady ||
+								  target.SkinOffsetSignature != skinOffsetSignature;
+		target.SkinOffsetSignature = skinOffsetSignature;
+		target.SkinOffsetsReady = true;
 
 		target.JointWords.assign(std::max<size_t>(State->SceneJointFrames.size() * 5, 5), 0);
 		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
@@ -1754,12 +1762,21 @@ namespace engine::render {
 			target.JointWords[word + 3] = rotation.Words[0];
 			target.JointWords[word + 4] = rotation.Words[1];
 		}
+		uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
+		for (const uint32_t word : target.JointWords) {
+			jointWordSignature = scene::MixSignature(jointWordSignature, word);
+		}
+		target.JointWordsDirty = target.JointWordsDirty || !target.JointWordsReady ||
+								 target.JointWordSignature != jointWordSignature;
+		target.JointWordSignature = jointWordSignature;
+		target.JointWordsReady = true;
 
 		const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
 										  SDL_GPUTransferBuffer *&transfer,
 										  uint32_t &capacity,
 										  uint32_t words,
-										  const char *label) {
+										  const char *label,
+										  bool &dirty) {
 			if (buffer != nullptr && transfer != nullptr && capacity >= words) {
 				return true;
 			}
@@ -1787,6 +1804,7 @@ namespace engine::render {
 				return false;
 			}
 			capacity = grown;
+			dirty = true;
 			return true;
 		};
 		if (!ensureSkinBuffer(
@@ -1794,34 +1812,38 @@ namespace engine::render {
 				target.SkinOffsetTransfer,
 				target.SkinOffsetCapacity,
 				static_cast<uint32_t>(target.SkinOffsets.size()),
-				"skin offset"
+				"skin offset",
+				target.SkinOffsetsDirty
 			) ||
 			!ensureSkinBuffer(
 				target.JointBuffer,
 				target.JointTransfer,
 				target.JointWordCapacity,
 				static_cast<uint32_t>(target.JointWords.size()),
-				"joint palette"
+				"joint palette",
+				target.JointWordsDirty
 			)) {
 			return;
 		}
 
-		void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
-		void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
-		if (skinMapped == nullptr || jointMapped == nullptr) {
-			ENGINE_ERROR("skin palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-			if (skinMapped != nullptr) {
-				SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+		if (target.SkinOffsetsDirty) {
+			void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
+			if (skinMapped == nullptr) {
+				ENGINE_ERROR("skin offsets: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+				return;
 			}
-			if (jointMapped != nullptr) {
-				SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
-			}
-			return;
+			std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
+			SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
 		}
-		std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
-		std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
-		SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
-		SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+		if (target.JointWordsDirty) {
+			void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
+			if (jointMapped == nullptr) {
+				ENGINE_ERROR("joint palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+				return;
+			}
+			std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
+			SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+		}
 		State->SkinOffsetBuffer = target.SkinOffsetBuffer;
 		State->SkinOffsetTransfer = target.SkinOffsetTransfer;
 		State->JointBuffer = target.JointBuffer;

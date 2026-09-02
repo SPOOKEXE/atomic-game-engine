@@ -8,9 +8,11 @@
 
 TEST_SUITE_ID("studio.controlautomation")
 
+using studio::automation::ParseKeyboardModifiers;
 using studio::automation::ParseScreenshotTarget;
 using studio::automation::PlanScreenshots;
 using studio::automation::ScreenshotTarget;
+using studio::automation::ValidateTextInput;
 using studio::automation::VisibleScene;
 
 TEST_CASE("screenshot targets accept only the public MCP spellings", "[studio][control]") {
@@ -22,6 +24,32 @@ TEST_CASE("screenshot targets accept only the public MCP spellings", "[studio][c
 	CHECK(ParseScreenshotTarget("all", target));
 	CHECK(target == ScreenshotTarget::All);
 	CHECK_FALSE(ParseScreenshotTarget("window", target));
+}
+
+TEST_CASE("keyboard modifiers accept the stable MCP spellings", "[studio][control]") {
+	const std::array names{std::string("control"), std::string("shift"), std::string("control")};
+	uint8_t modifiers = 0;
+	std::string failure;
+	CHECK(ParseKeyboardModifiers(names, modifiers, failure));
+	CHECK(failure.empty());
+	CHECK((modifiers & studio::automation::KeyboardModifierControl) != 0);
+	CHECK((modifiers & studio::automation::KeyboardModifierShift) != 0);
+
+	const std::array unknown{std::string("super")};
+	CHECK_FALSE(ParseKeyboardModifiers(unknown, modifiers, failure));
+	CHECK(failure == "modifier must be shift, control, alt or gui");
+}
+
+TEST_CASE("emulated text is nonempty bounded C-compatible UTF-8", "[studio][control]") {
+	std::string failure;
+	CHECK(ValidateTextInput("hello, Studio", failure));
+	CHECK(failure.empty());
+	CHECK_FALSE(ValidateTextInput({}, failure));
+	CHECK(failure == "text must not be empty");
+	CHECK_FALSE(ValidateTextInput(std::string(16 * 1024 + 1, 'x'), failure));
+	CHECK(failure == "text must not exceed 16384 UTF-8 bytes");
+	CHECK_FALSE(ValidateTextInput(std::string_view("a\0b", 3), failure));
+	CHECK(failure == "text must not contain a null byte");
 }
 
 TEST_CASE("each visible scene gets a safe distinct screenshot path", "[studio][control]") {

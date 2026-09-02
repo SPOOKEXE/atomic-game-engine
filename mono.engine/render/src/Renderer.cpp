@@ -2076,20 +2076,24 @@ namespace engine::render {
 		// `NodeTable::Missing` before recording starts rather than half way
 		// through it, and a kind with a runner registered below replaces the
 		// default.
-		NodeTable frameNodes = BackendTable([](const graph::RunContext &) { return true; });
-		for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
-			frameNodes.Set(installed.Kind, installed.Handler);
+		NodeTable frameNodes;
+		{
+			ENGINE_PROFILE_CAT("build node table", core::ProfileCategory::Render);
+			frameNodes = BackendTable([](const graph::RunContext &) { return true; });
+			for (const InstalledNodeHandler &installed : CustomNodeHandlers) {
+				frameNodes.Set(installed.Kind, installed.Handler);
+			}
+			if (request.Damage.Scene) {
+				recording.RegisterUploadNodes(frameNodes);
+				recording.RegisterShadowNodes(frameNodes);
+				recording.RegisterMirrorNodes(frameNodes);
+				recording.RegisterPortalNodes(frameNodes);
+				recording.RegisterGeometryNodes(frameNodes);
+				recording.RegisterShadingNodes(frameNodes);
+				recording.RegisterAuthoredNodes(frameNodes);
+			}
+			recording.RegisterOutputNodes(frameNodes);
 		}
-		if (request.Damage.Scene) {
-			recording.RegisterUploadNodes(frameNodes);
-			recording.RegisterShadowNodes(frameNodes);
-			recording.RegisterMirrorNodes(frameNodes);
-			recording.RegisterPortalNodes(frameNodes);
-			recording.RegisterGeometryNodes(frameNodes);
-			recording.RegisterShadingNodes(frameNodes);
-			recording.RegisterAuthoredNodes(frameNodes);
-		}
-		recording.RegisterOutputNodes(frameNodes);
 
 		recording.Finish(frameNodes);
 		return result;

@@ -7,6 +7,7 @@
 // here where the Studio suite can exercise collision and refusal cases.
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
@@ -14,6 +15,16 @@
 #include <vector>
 
 namespace studio::automation {
+
+	// Stable MCP spellings, kept separate from SDL's platform-facing modifier
+	// flags so validation is testable without a window or input backend.
+	enum KeyboardModifier : uint8_t {
+		KeyboardModifierNone = 0,
+		KeyboardModifierShift = 1 << 0,
+		KeyboardModifierControl = 1 << 1,
+		KeyboardModifierAlt = 1 << 2,
+		KeyboardModifierGui = 1 << 3,
+	};
 
 	enum class ScreenshotTarget {
 		Scene,
@@ -37,6 +48,13 @@ namespace studio::automation {
 	//
 	// @return `false` for anything other than `scene`, `studio`, or `all`.
 	bool ParseScreenshotTarget(std::string_view spelling, ScreenshotTarget &target);
+
+	// Parses the public MCP modifier list into `KeyboardModifier` bits.
+	// Repeated names are harmless. Unknown names refuse the whole request.
+	bool ParseKeyboardModifiers(std::span<const std::string> names, uint8_t &modifiers, std::string &failure);
+
+	// Bounds text kept alive while an SDL text event crosses the frame loop.
+	bool ValidateTextInput(std::string_view text, std::string &failure);
 
 	// Builds one bounded capture batch from the scene views currently visible.
 	//

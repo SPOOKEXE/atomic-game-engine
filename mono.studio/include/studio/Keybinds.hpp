@@ -25,6 +25,7 @@
 #include <imgui.h>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace studio {
 
@@ -189,6 +190,12 @@ namespace studio {
 		//
 		// @return The table.
 		static std::span<Keybind> All();
+
+		// Finds a command by its stable persisted id.
+		//
+		// @param id The id written to the keybind file and exposed over MCP.
+		// @return Its row, or null when no command has that id.
+		static const Keybind *Find(std::string_view id);
 
 		// What an action is bound to.
 		//

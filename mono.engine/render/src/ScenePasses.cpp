@@ -217,8 +217,12 @@ namespace engine::render {
 		const bool uploadInstances =
 			haveInstances && (State->ActiveInstanceWorld == nullptr ||
 							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
-							  target.ResidentIndices.DirtyCount() > 0 || State->OcclusionFrame.Active);
-		if (!uploadInstances && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
+							  target.ResidentIndices.DirtyCount() > 0);
+		const bool uploadSkinOffsets = haveInstances && target.SkinOffsetsDirty;
+		const bool uploadJointWords = haveInstances && target.JointWordsDirty;
+		const bool uploadOcclusion = haveInstances && State->OcclusionFrame.Active;
+		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords && !uploadOcclusion &&
+			!uploadOverlay && particleCount == 0 && ribbonCount == 0) {
 			uploadsRecorded = true;
 			return true;
 		}
@@ -292,7 +296,9 @@ namespace engine::render {
 				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 				uploadedBytes += destination.size;
 			}
+		}
 
+		if (uploadSkinOffsets) {
 			const SDL_GPUTransferBufferLocation skinSource{State->SkinOffsetTransfer, 0};
 			const SDL_GPUBufferRegion skinDestination{
 				State->SkinOffsetBuffer,
@@ -301,7 +307,9 @@ namespace engine::render {
 			};
 			SDL_UploadToGPUBuffer(copy, &skinSource, &skinDestination, true);
 			uploadedBytes += skinDestination.size;
+		}
 
+		if (uploadJointWords) {
 			const SDL_GPUTransferBufferLocation jointSource{State->JointTransfer, 0};
 			const SDL_GPUBufferRegion jointDestination{
 				State->JointBuffer,
@@ -318,7 +326,7 @@ namespace engine::render {
 		// the previous view's dispatches keep the one they bound. The cull
 		// pass itself must *not* cycle `Counts` again - its atomics count
 		// up from the zeros this copy delivers.
-		if (uploadInstances && State->OcclusionFrame.Active) {
+		if (uploadOcclusion) {
 			const Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
 			uint32_t offset = 0;
 			const auto stage = [&](SDL_GPUBuffer *buffer, uint32_t bytes) {
@@ -386,6 +394,12 @@ namespace engine::render {
 		}
 		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
 			target.ResidentIndices.Acknowledge();
+		}
+		if (uploadSkinOffsets) {
+			target.SkinOffsetsDirty = false;
+		}
+		if (uploadJointWords) {
+			target.JointWordsDirty = false;
 		}
 
 		// The copy is in the frame's main command buffer, before every draw that
