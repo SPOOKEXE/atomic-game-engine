@@ -57,9 +57,9 @@ in StressParticles demo:
 - [x] remove unnecessary render preparation work: static draw lists are reused, no-rig scenes skip skin palettes, and StressParticles measured 0.010 ms mean render preparation with 0.002 ms mean collection in uncapped release Studio.
 - [x] send only independently changed object rows, indices, skin offsets, joint words and occlusion data to the GPU; the warm StressParticles Studio run reused its draw list on all 4,005 captured frames and `upload-instances` rounded to 0.000 ms mean.
 - [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
-
 - [x] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
 - [x] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
+- [_] try optimise `resolve resident instances (0.15-0.16ms)` and `transparency pass (0.2ms)`
 
 - [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use Rings demo to test.
 - [_] optimise the top-10 world stress test.
