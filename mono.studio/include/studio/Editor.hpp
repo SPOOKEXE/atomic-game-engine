@@ -6155,6 +6155,7 @@ namespace studio {
 			uint32_t DisplayRows = 0;
 			bool DisplayDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
+			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;

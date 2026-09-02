@@ -968,6 +968,15 @@ namespace studio {
 		std::vector<DiagnosticSpan> &graphSpans = view.DisplaySpans;
 		if (view.DisplayDirty) {
 			ENGINE_PROFILE_CAT("frame graph layout", engine::core::ProfileCategory::Engine);
+			view.OwnerMilliseconds.fill(0.0f);
+			for (const DiagnosticSpan &span : view.Spans) {
+				view.OwnerMilliseconds[static_cast<size_t>(ProfileOwner::All)] += span.SelfMilliseconds;
+				const auto owner = static_cast<size_t>(span.Owner);
+				if (owner > static_cast<size_t>(ProfileOwner::All) &&
+					owner < static_cast<size_t>(ProfileOwner::Count)) {
+					view.OwnerMilliseconds[owner] += span.SelfMilliseconds;
+				}
+			}
 			if (view.OwnerFilter != ProfileOwner::All) {
 				FilterDiagnosticSpans(view.Spans, view.OwnerFilter, view.FilteredSpans);
 			}
@@ -999,6 +1008,26 @@ namespace studio {
 				static_cast<double>(busyMs),
 				static_cast<double>(idleMs),
 				static_cast<double>(view.UnmarkedMilliseconds)
+			);
+		}
+		ImGui::PopStyleColor();
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextUnformatted("owner self");
+		for (size_t index = static_cast<size_t>(ProfileOwner::Engine);
+			 index < static_cast<size_t>(ProfileOwner::Count);
+			 index++) {
+			const float milliseconds = view.OwnerMilliseconds[index];
+			if (milliseconds <= 0.0f) {
+				continue;
+			}
+			const auto owner = static_cast<ProfileOwner>(index);
+			const std::string_view name = engine::core::GetProfileOwnerName(owner);
+			ImGui::SameLine();
+			ImGui::Text(
+				frameMs < 1.0f ? "%.*s %.3f" : "%.*s %.2f",
+				static_cast<int>(name.size()),
+				name.data(),
+				static_cast<double>(milliseconds)
 			);
 		}
 		ImGui::PopStyleColor();

@@ -1,4 +1,5 @@
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -21,6 +22,18 @@ using studio::FilterDiagnosticSpans;
 using studio::FinishDiagnosticAverage;
 using studio::FitReportedDiagnosticTimeline;
 using studio::LayoutDiagnosticRows;
+
+TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnostics]") {
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("studio binding"); }
+	FrameGraph::EndFrame();
+
+	const bool owned =
+		FrameGraph::Spans().size() == 1 && FrameGraph::Spans()[0].Owner == engine::core::ProfileOwner::Studio;
+	FrameGraph::SetEnabled(false);
+	CHECK(owned);
+}
 
 TEST_CASE("owner filters retain valid product trees", "[studio][diagnostics]") {
 	using engine::core::ProfileOwner;

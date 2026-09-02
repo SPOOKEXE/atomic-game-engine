@@ -77,6 +77,29 @@ TEST_CASE("a scope retains its submitting product owner", "[framegraph]") {
 	CHECK(spans[2].Parent == 1);
 }
 
+TEST_CASE("owner totals use self time without double counting nested products", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope application("Application", ProfileCategory::Engine, ProfileOwner::Studio);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		{
+			FrameGraph::Scope engine("Universe::Tick", ProfileCategory::ECS, ProfileOwner::Engine);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+	FrameGraph::EndFrame();
+
+	const float studio = FrameGraph::OwnerMilliseconds(ProfileOwner::Studio);
+	const float engine = FrameGraph::OwnerMilliseconds(ProfileOwner::Engine);
+	CHECK(studio > 0.0f);
+	CHECK(engine > 0.0f);
+	CHECK(FrameGraph::OwnerMilliseconds(ProfileOwner::All) == studio + engine);
+	CHECK(FrameGraph::OwnerMilliseconds(ProfileOwner::Server) == 0.0f);
+	CHECK(FrameGraph::OwnerMilliseconds(ProfileOwner::Count) == 0.0f);
+}
+
 TEST_CASE("nesting becomes depth", "[framegraph]") {
 	Collecting collecting;
 

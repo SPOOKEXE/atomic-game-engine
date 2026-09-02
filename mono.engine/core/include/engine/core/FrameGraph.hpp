@@ -495,6 +495,18 @@ namespace engine::core {
 		// @return Self time in milliseconds.
 		static float CategoryMilliseconds(ProfileCategory category);
 
+		// Returns the last completed frame's accumulated self time for a product
+		// owner. `All` returns the total for every recorded owner. Invalid owners
+		// return zero.
+		//
+		// Reported work follows category-total arithmetic and can overlap the
+		// frame-owning thread, so `All` is total work rather than wall time.
+		//
+		// @param owner The product owner to total, or `All`.
+		// @return Self time in milliseconds.
+		// @since v0.22
+		static float OwnerMilliseconds(ProfileOwner owner);
+
 		// Returns the scopes dropped from the last completed frame.
 		//
 		// Drops include buffer overflow, scopes past MAXIMUM_DEPTH, and scopes

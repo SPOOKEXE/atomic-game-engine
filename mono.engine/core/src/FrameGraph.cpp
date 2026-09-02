@@ -102,6 +102,7 @@ namespace engine::core {
 			float PublishedMilliseconds = 0.0f;
 			float PublishedUnmarked = 0.0f;
 			float PublishedCategories[static_cast<size_t>(ProfileCategory::Count)] = {};
+			float PublishedOwners[static_cast<size_t>(ProfileOwner::Count)] = {};
 
 			// **Incremented from worker threads**, which is the whole reason
 			// the counter exists - a span opened off the owning thread is
@@ -511,6 +512,9 @@ namespace engine::core {
 			for (auto &total : state.PublishedCategories) {
 				total = 0.0f;
 			}
+			for (auto &total : state.PublishedOwners) {
+				total = 0.0f;
+			}
 		}
 	}
 
@@ -854,8 +858,17 @@ namespace engine::core {
 		for (auto &accumulated : state.PublishedCategories) {
 			accumulated = 0.0f;
 		}
+		for (auto &accumulated : state.PublishedOwners) {
+			accumulated = 0.0f;
+		}
 		for (const auto &span : state.Building) {
 			state.PublishedCategories[static_cast<size_t>(span.Category)] += span.SelfMilliseconds;
+			state.PublishedOwners[static_cast<size_t>(ProfileOwner::All)] += span.SelfMilliseconds;
+			const auto owner = static_cast<size_t>(span.Owner);
+			if (owner > static_cast<size_t>(ProfileOwner::All) &&
+				owner < static_cast<size_t>(ProfileOwner::Count)) {
+				state.PublishedOwners[owner] += span.SelfMilliseconds;
+			}
 		}
 
 		// The frame's own self time: what ran between BeginFrame and EndFrame
@@ -947,6 +960,13 @@ namespace engine::core {
 			return 0.0f;
 		}
 		return Get().PublishedCategories[static_cast<size_t>(category)];
+	}
+
+	float FrameGraph::OwnerMilliseconds(ProfileOwner owner) {
+		if (owner >= ProfileOwner::Count) {
+			return 0.0f;
+		}
+		return Get().PublishedOwners[static_cast<size_t>(owner)];
 	}
 
 	size_t FrameGraph::Dropped() {
