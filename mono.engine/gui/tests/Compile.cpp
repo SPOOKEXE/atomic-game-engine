@@ -179,6 +179,41 @@ namespace {
 	}
 }
 
+TEST_CASE("one hosted collector compiles without admitting other canvases", "[gui][compile][plugin]") {
+	World world("gui_compile.plugin_collector");
+	const Entity dock = world.Make("DockWidgetPluginGui");
+	const Entity retained = world.Make("Frame", dock);
+	const Entity screen = world.Make("ScreenGui");
+	const Entity outside = world.Make("Frame", screen);
+
+	world.Request.Display.Width = 360.0f;
+	world.Request.Display.Height = 240.0f;
+	CHECK(world.List.RebuildCollector(world.Data, dock, world.Request));
+	CHECK_FALSE(world.List.RebuildCollector(world.Data, dock, world.Request));
+	world.Data.GetMutable<Background>(outside)->Color = Color3{0.2f, 0.3f, 0.4f};
+	CHECK_FALSE(world.List.RebuildCollector(world.Data, dock, world.Request));
+	world.Data.GetMutable<Background>(retained)->Color = Color3{0.4f, 0.3f, 0.2f};
+	CHECK(world.List.RebuildCollector(world.Data, dock, world.Request));
+	REQUIRE_FALSE(world.List.Commands().Commands.empty());
+	CHECK(
+		std::all_of(
+			world.List.Commands().Commands.begin(),
+			world.List.Commands().Commands.end(),
+			[&](const DrawCommand &command) {
+				return command.Source == retained && command.Collector == dock;
+			}
+		)
+	);
+	CHECK(world.List.Commands().CanvasSize == Vector2{360.0f, 240.0f});
+	CHECK(
+		std::none_of(
+			world.List.Commands().Commands.begin(),
+			world.List.Commands().Commands.end(),
+			[&](const DrawCommand &command) { return command.Source == outside; }
+		)
+	);
+}
+
 TEST_CASE("a still world compiles once and is then kept", "[gui][compile]") {
 	World world("gui_compile.stable");
 	const Entity screen = world.Make("ScreenGui");

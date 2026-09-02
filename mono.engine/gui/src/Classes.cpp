@@ -589,18 +589,10 @@ namespace engine::gui {
 			const std::array billboard{Components::Of<Billboard>()};
 			const ClassId billboardGui = Classes::Register("BillboardGui", layerCollector, billboard);
 
-			// **Registered and drawn by nothing, and that is not the same as a
-			// shim.** A `PluginGui` is a collector whose canvas is a *host
-			// window*, and this engine's editor is Dear ImGui until the tree
-			// can draw a property grid - so there is no window to be its
-			// canvas yet. It is here because `DockWidgetPluginGui` is the
-			// class the studio's own panels will be authored as, and its place
-			// in the tree is what the last step of the v0.8 plan builds on.
-			//
-			// The distinction the roadmap draws is between a class that
-			// *looks* present and one that is honestly incomplete: a
-			// `PluginGui` produces no canvas, so nothing under it lays out and
-			// nothing under it is silently discarded.
+			// A `PluginGui` gets its canvas from a host window rather than from
+			// world containment. Studio supplies that rectangle through
+			// `LayoutCollector`; ordinary screen and spatial layout deliberately
+			// skip it because neither owns the dock's content area.
 			const ClassId pluginGui = Classes::Register("PluginGui", layerCollector, {});
 			Classes::SetCreatable(pluginGui, false);
 			const ClassId dockWidget = Classes::Register("DockWidgetPluginGui", pluginGui, {});

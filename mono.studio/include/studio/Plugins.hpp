@@ -51,6 +51,11 @@
 //     end)
 //
 //     local panel = plugin.CreateWidget("Align", true)
+//     local root = plugin.GetWidgetGui(panel)
+//     local button = Instance.new("TextButton")
+//     button.Size = UDim2.fromScale(1, 1)
+//     button.Text = "Clear selection"
+//     button.Parent = root
 //     plugin.SetWidgetRender(panel, function()
 //         plugin.Label("Selected: " .. #Selection:Get())
 //         if plugin.Button("Clear") then Selection:Set({}) end
@@ -65,7 +70,7 @@
 // `.CreateToolbarColumn`, `.CreateButton`, `.CreateToggle`, `.CreateDropdown`,
 // `.CreateLabel`, `.SetToolCell`, `.SetToolVisible`, `.SetToolWidth`,
 // `.SetToolbarVisible`, `.SetToolbarPlacement` |
-// | panels | `plugin.CreateWidget`, `.SetWidgetRender`, `.SetWidgetOpen`,
+// | panels | `plugin.CreateWidget`, `.GetWidgetGui`, `.SetWidgetRender`, `.SetWidgetOpen`,
 // `.SetWidgetDock`, `.SetWidgetSizeConstraints` |
 // | viewport | `plugin.GetViewportOption`, `.SetViewportOption`, `.AddViewport` |
 // | script editor | `plugin.OpenScript`, `.GetScriptSource`, `.SetScriptSource` |
@@ -121,10 +126,11 @@
 // shape for yet; a plugin that has to react polls `Selection:Get()` on its
 // heartbeat. Stated rather than left to be discovered.
 //
-// **Ids rather than objects, because the seam carries values.** A `HostValue`
-// has no userdata to hang a toolbar on, so `CreateToolbar` answers a number and
-// `CreateButton` takes it back - the one place this reads differently from
-// Roblox's, and it is stated rather than smoothed over.
+// **Ids for editor objects, entities for world objects.** A `HostValue` has no
+// userdata to hang a toolbar or dock window on, so their configuration calls
+// take numeric handles. `GetWidgetGui` returns an entity because the retained
+// collector is an ordinary world instance and the script already knows how to
+// parent GUI instances to one.
 //
 // **The panel calls are only legal while a panel is drawing.** They are
 // immediate-mode ImGui underneath, which is how every other panel in this editor
@@ -154,6 +160,8 @@
 // @tier client
 
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Compile.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
@@ -487,12 +495,10 @@ namespace studio {
 
 	// A docked panel a plugin asked for.
 	//
-	// **Immediate mode, which is how the rest of this editor works.** The
-	// contents are not a retained tree the plugin builds and the editor walks -
-	// the editor calls `Render` while its window is open and the plugin issues
-	// widget calls from inside it, exactly as `DrawExplorer` and every other panel
-	// here does. A retained tree would be a second widget model beside ImGui,
-	// and the engine already has one of those in `gui` for the *game's* UI.
+	// The dock is ImGui-owned, while its content may use either plugin immediate
+	// calls or the engine's retained GUI tree. `Gui` is the collector at that
+	// seam; the compiled list and router stay here because they are host state,
+	// not replicated world facts.
 	//
 	// @since v0.12
 	struct PluginWidget {
@@ -518,6 +524,14 @@ namespace studio {
 		// changes from either side, including toolbar actions and window closes,
 		// without making two independent owners of the setting.
 		bool SynchronizedOpen = false;
+
+		// The retained content root created with this dock widget, plus the host
+		// caches that turn it into pixels and pointer events.
+		//@{
+		engine::ecs::Entity Gui;
+		engine::gui::Compiled GuiList;
+		engine::gui::Router GuiRouter;
+		//@}
 
 		// What the plugin coloured it, if anything. See `SetWidgetColour`.
 		//
@@ -943,7 +957,8 @@ namespace studio {
 	// @param plugin The plugin asking. Must outlive the surface.
 	// @return The surface, for `Runtime::SetHost`.
 	// @since v0.12
-	std::unique_ptr<engine::script::HostSurface> MakePluginSurface(Editor &editor, LoadedPlugin &plugin);
+	std::unique_ptr<engine::script::HostSurface>
+	MakePluginSurface(Editor &editor, LoadedPlugin &plugin, engine::ecs::Store &store);
 
 	// Opens or closes the gate on the widget calls.
 	//

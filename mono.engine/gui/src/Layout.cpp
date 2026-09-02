@@ -1683,10 +1683,12 @@ namespace engine::gui {
 		//
 		// @param store   The world.
 		// @param seconds The caller's clock. Only differences are read.
-		void AdvanceScrolling(Store &store, double seconds) {
+		void AdvanceScrolling(Store &store, double seconds, Entity collector = ecs::NULL_ENTITY) {
 			std::vector<Entity> frames;
 			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &) {
-				frames.push_back(entity);
+				if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) {
+					frames.push_back(entity);
+				}
 			});
 
 			for (const Entity entity : frames) {
@@ -1741,14 +1743,16 @@ namespace engine::gui {
 		//
 		// @param store   The world.
 		// @param seconds The caller's clock. Only differences are read.
-		void AdvancePages(Store &store, double seconds) {
+		void AdvancePages(Store &store, double seconds, Entity collector = ecs::NULL_ENTITY) {
 			// **Collected before anything is written**, for the reason the
 			// collector walk gives: `store.Set` can move a row between
 			// archetypes, and moving one out from under the query walking it is
 			// what `Store::Each`'s deferral exists to prevent.
 			std::vector<Entity> layouts;
 			store.Each<const PageLayout>([&](Entity entity, const PageLayout &) {
-				layouts.push_back(entity);
+				if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) {
+					layouts.push_back(entity);
+				}
 			});
 
 			for (const Entity entity : layouts) {
@@ -2107,9 +2111,9 @@ namespace engine::gui {
 		//        two rectangles answer different questions and folding them into
 		//        one would make an unclipped surface resolve every `UDim2` scale
 		//        against a million pixels.
-		// @return `false` for a collector that has no canvas - a `PluginGui`
-		//         today - so nothing under it is laid out rather than being laid
-		//         out against a rectangle nobody chose.
+		// @return `false` for a collector that has no world-owned canvas. A
+		//         `PluginGui` instead enters through `LayoutCollector` with the
+		//         rectangle its host chose.
 		bool CanvasFor(const Store &store, Entity collector, const Screen &screen, Rect &out, Rect &clip) {
 			const LayoutIds &ids = LayoutClasses();
 
@@ -2171,6 +2175,51 @@ namespace engine::gui {
 			}
 
 			return false;
+		}
+
+		size_t PlaceCollector(Store &store, Entity collector, const Rect &canvas, const Rect &clip) {
+			store.Set(collector, Canvas{canvas});
+
+			Resolved collectorResolved;
+			collectorResolved.AbsolutePosition = canvas.Min;
+			collectorResolved.AbsoluteSize = canvas.Size();
+			collectorResolved.Clip = clip;
+			collectorResolved.Rendered = true;
+			store.Set(collector, collectorResolved);
+
+			std::vector<Entity> roots;
+			store.EachChild(collector, [&](Entity child) { roots.push_back(child); });
+
+			size_t placed = 0;
+			for (const Entity root : roots) {
+				const Element *element = store.Get<Element>(root);
+				if (element == nullptr) {
+					continue;
+				}
+
+				// The root owns one arena scope. Every recursive placement releases
+				// its own run, so this mark prevents roots accumulating between passes.
+				std::vector<Entity> &arena = ChildArena();
+				const ArenaScope scope(arena);
+
+				Scan scan;
+				const Vector2 size = Measure(store, root, canvas.Size(), 1, scan, arena);
+				const Vector2 anchored = element->Position.Resolve(canvas.Size());
+				const Vector2 corner{
+					canvas.Min.X + anchored.X - element->AnchorPoint.X * size.X,
+					canvas.Min.Y + anchored.Y - element->AnchorPoint.Y * size.Y,
+				};
+				placed += Place(store, root, FromCorner(corner, size), clip, 1, 0.0f, scan);
+			}
+			return placed;
+		}
+
+		void ReportPlaced(size_t placed) {
+			if (placed == 0) {
+				return;
+			}
+			core::Metrics::Count("gui.layout.placed", static_cast<double>(placed));
+			ENGINE_TRACE("laid out {} element(s)", placed);
 		}
 	}
 
@@ -2246,55 +2295,7 @@ namespace engine::gui {
 				continue;
 			}
 
-			store.Set(collector, Canvas{canvas});
-
-			Resolved value;
-			value.AbsolutePosition = canvas.Min;
-			value.AbsoluteSize = canvas.Size();
-
-			// **The clip and not the canvas**, which is the whole of what
-			// `ClipsDescendants` does on a spatial collector: the rectangle the
-			// roots lay out inside is the canvas either way, and what changes is
-			// only what the subtree is cut to. `Compile`'s emit still drops an
-			// element that misses the canvas entirely, so "not clipped" means
-			// "may hang over the edge" rather than "may draw anywhere".
-			value.Clip = clip;
-			value.Rendered = true;
-			store.Set(collector, value);
-
-			std::vector<Entity> roots;
-			store.EachChild(collector, [&](Entity child) { roots.push_back(child); });
-
-			for (const Entity root : roots) {
-				const Element *element = store.Get<Element>(root);
-				if (element == nullptr) {
-					continue;
-				}
-
-				// **The top of the arena's stack discipline.** Every `Place`
-				// below releases what it added, but a root's own child run is
-				// added *here* - so without this mark it would survive the call
-				// and the arena would grow by one run per root per frame, for as
-				// long as the process lived. A leak that is invisible in a test
-				// and unbounded in a session is exactly the shape worth spelling
-				// out at the one place the recursion is entered.
-				std::vector<Entity> &arena = ChildArena();
-				const ArenaScope scope(arena);
-
-				Scan scan;
-				const Vector2 size = Measure(store, root, canvas.Size(), 1, scan, arena);
-				const Vector2 anchored = element->Position.Resolve(canvas.Size());
-				const Vector2 corner{
-					canvas.Min.X + anchored.X - element->AnchorPoint.X * size.X,
-					canvas.Min.Y + anchored.Y - element->AnchorPoint.Y * size.Y,
-				};
-
-				// Handed on, like every other call: measuring a node is what
-				// finds its scan, and there is no path to `Place` that has not
-				// measured first - which is what lets `Place` take a `const
-				// Scan &` rather than a pointer it has to test.
-				placed += Place(store, root, FromCorner(corner, size), clip, 1, 0.0f, scan);
-			}
+			placed += PlaceCollector(store, collector, canvas, clip);
 		}
 
 		// Per layout pass rather than per frame: `Compiled::Rebuild` only calls
@@ -2304,10 +2305,38 @@ namespace engine::gui {
 		// **Nothing at all when nothing was placed**, because a client with no
 		// interface lays out zero elements on every frame and neither the
 		// counter's lock nor the line is worth paying for that.
-		if (placed != 0) {
-			core::Metrics::Count("gui.layout.placed", static_cast<double>(placed));
-			ENGINE_TRACE("laid out {} element(s)", placed);
+		ReportPlaced(placed);
+		return placed;
+	}
+
+	size_t LayoutCollector(Store &store, Entity collector, const Screen &screen, double seconds) {
+		ENGINE_PROFILE_CAT("gui collector layout", engine::core::ProfileCategory::ECS);
+
+		const LayoutIds &ids = LayoutClasses();
+		if (!store.Alive(collector) || !store.IsA(collector, ids.Collector)) {
+			return 0;
 		}
+
+		AdvancePages(store, seconds, collector);
+		AdvanceScrolling(store, seconds, collector);
+
+		if (Resolved *resolved = store.GetMutable<Resolved>(collector); resolved != nullptr) {
+			resolved->Rendered = false;
+		}
+		store.EachDescendant(collector, [&](Entity descendant) {
+			if (Resolved *resolved = store.GetMutable<Resolved>(descendant); resolved != nullptr) {
+				resolved->Rendered = false;
+			}
+		});
+
+		const Layer *layer = store.Get<Layer>(collector);
+		if (layer == nullptr || !layer->Enabled || screen.Width <= 0.0f || screen.Height <= 0.0f) {
+			return 0;
+		}
+
+		const Rect canvas{Vector2::Zero, Vector2{screen.Width, screen.Height}};
+		const size_t placed = PlaceCollector(store, collector, canvas, canvas);
+		ReportPlaced(placed);
 		return placed;
 	}
 }

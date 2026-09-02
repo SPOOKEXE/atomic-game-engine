@@ -2,7 +2,10 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
@@ -1433,7 +1436,7 @@ namespace studio {
 			StartPlugins(
 				runtimeSet->Scripts,
 				store,
-				[this](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin); },
+				[this, &store](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin, store); },
 				target,
 				world,
 				&runtimeSet->Bindings
@@ -1536,7 +1539,7 @@ namespace studio {
 			StartPlugins(
 				ScriptPlugins,
 				store,
-				[this](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin); },
+				[this, &store](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin, store); },
 				PluginRunTarget::Studio,
 				Active,
 				&StudioPluginBindings
@@ -1758,6 +1761,7 @@ namespace studio {
 	}
 
 	void Editor::DrawPluginWidgets() {
+		size_t viewportImageSlot = PreviewSlot() + 1;
 		for (PluginPresentation *pluginPointer : Plugins) {
 			PluginPresentation &plugin = *pluginPointer;
 			if (!plugin.Running) {
@@ -1767,6 +1771,14 @@ namespace studio {
 			const size_t widgetCount = plugin.Widgets.size();
 			for (size_t widgetIndex = 0; widgetIndex < widgetCount; widgetIndex++) {
 				PluginWidget &widget = plugin.Widgets[widgetIndex];
+				LoadedPlugin *script = ScriptOwner(plugin);
+				if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+					Universe->Enter(script->World, [&](Store &store) {
+						if (const engine::gui::Layer *layer = store.Get<engine::gui::Layer>(widget.Gui)) {
+							widget.Open = layer->Enabled;
+						}
+					});
+				}
 				bool *builtinOpen = nullptr;
 				switch (widget.BuiltinPanel) {
 				case BuiltinStudioPanel::Explorer:
@@ -1802,6 +1814,7 @@ namespace studio {
 					widget.SynchronizedOpen = widget.Open;
 				}
 				if (!widget.Open) {
+					widget.GuiRouter.Forget();
 					continue;
 				}
 
@@ -1887,11 +1900,133 @@ namespace studio {
 				if (ImGui::Begin(label.c_str(), &widget.Open)) {
 					if (widget.NativeRender) {
 						widget.NativeRender();
-					} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
-						InvokePlugin(*script, widget.Render, true);
+					} else if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+						Universe->Enter(script->World, [&](Store &store) {
+							InvokePlugin(*script, widget.Render, true);
+
+							if (!store.Alive(widget.Gui)) {
+								widget.GuiRouter.Forget();
+								return;
+							}
+
+							const ImVec2 origin = ImGui::GetCursorScreenPos();
+							const ImVec2 available = ImGui::GetContentRegionAvail();
+							const ImVec2 canvas{std::max(available.x, 1.0f), std::max(available.y, 1.0f)};
+							ImGui::PushID(static_cast<int>(widgetIndex));
+							ImGui::InvisibleButton(
+								"##DockWidgetPluginGui", canvas, ImGuiButtonFlags_MouseButtonLeft
+							);
+							const bool hovered = ImGui::IsItemHovered();
+							ImGui::PopID();
+
+							engine::gui::CompileRequest request;
+							request.Display.Width = canvas.x;
+							request.Display.Height = canvas.y;
+							request.Hovered = widget.GuiRouter.Hovered();
+							request.Pressed = widget.GuiRouter.Pressed();
+							request.Seconds = engine::core::Clock::Seconds();
+							widget.GuiList.RebuildCollector(store, widget.Gui, request);
+
+							const size_t renderedViewports = ViewportImages.Render(
+								Renderer, store, widget.GuiList.Commands(), viewportImageSlot
+							);
+							viewportImageSlot += renderedViewports;
+
+							engine::ui::ImageSource images;
+							images.Resolve = [this](const engine::core::Name &name) {
+								engine::ui::ImageSource::Resolved resolved;
+								resolved.Texture =
+									reinterpret_cast<ImTextureID>(Renderer.TextureHandle(name));
+								uint32_t width = 0;
+								uint32_t height = 0;
+								(void)Renderer.TextureSize(name, width, height);
+								resolved.Size = ImVec2(static_cast<float>(width), static_cast<float>(height));
+								const engine::render::FlipbookCell cell =
+									Renderer.TextureCell(name, AnimationSeconds);
+								resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
+								resolved.CellMax =
+									ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
+								return resolved;
+							};
+							images.ResolveViewport = [this](Entity instance) {
+								const engine::render::InterfaceImage image = ViewportImages.Resolve(instance);
+								engine::ui::ImageSource::Resolved resolved;
+								resolved.Texture = reinterpret_cast<ImTextureID>(image.Texture);
+								resolved.Size =
+									ImVec2(static_cast<float>(image.Width), static_cast<float>(image.Height));
+								resolved.CellMax = ImVec2(image.UVMax.X, image.UVMax.Y);
+								return resolved;
+							};
+							(void)engine::ui::PaintGui(
+								widget.GuiList.Commands(),
+								ImGui::GetWindowDrawList(),
+								engine::ui::PaintTarget{origin, 1.0f},
+								images
+							);
+
+							const ImGuiIO &io = ImGui::GetIO();
+							engine::gui::Pointer pointer;
+							pointer.Position =
+								engine::core::Vector2{io.MousePos.x - origin.x, io.MousePos.y - origin.y};
+							pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+							pointer.Inside = hovered;
+							pointer.Collector = widget.Gui;
+							pointer.Wheel = hovered ? io.MouseWheel : 0.0f;
+							const std::span<const engine::gui::GuiEvent> routed =
+								widget.GuiRouter.Update(store, widget.GuiList.Commands(), pointer);
+							std::vector<engine::gui::GuiEvent> events(routed.begin(), routed.end());
+
+							if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+								!io.WantTextInput) {
+								engine::gui::Typing typing;
+								std::string entered;
+								for (const int character : io.InputQueueCharacters) {
+									if (character > 0 && character < 0x80) {
+										entered.push_back(static_cast<char>(character));
+									} else if (character < 0x800) {
+										entered.push_back(static_cast<char>(0xC0 | (character >> 6)));
+										entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+									} else if (character < 0x10000) {
+										entered.push_back(static_cast<char>(0xE0 | (character >> 12)));
+										entered.push_back(
+											static_cast<char>(0x80 | ((character >> 6) & 0x3F))
+										);
+										entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+									}
+								}
+								typing.Text = entered;
+								typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+								typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+								typing.Extend = io.KeyShift;
+								if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
+									typing.Caret = -1;
+								} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
+									typing.Caret = 1;
+								}
+								const engine::gui::TypeResult typed = engine::gui::Type(store, typing);
+								if (typed.Released) {
+									engine::gui::GuiEvent released;
+									released.Kind = engine::gui::EventKind::FocusReleased;
+									released.Instance = typed.Instance;
+									released.Entered = true;
+									events.push_back(released);
+								}
+							}
+
+							if (!events.empty() && script->Vm != nullptr) {
+								script->Vm->DeliverGuiEvents(events);
+							}
+						});
 					}
 				}
 				ImGui::End();
+				if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+					Universe->Enter(script->World, [&](Store &store) {
+						if (engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(widget.Gui)) {
+							layer->Enabled = widget.Open;
+						}
+					});
+				}
 			}
 		}
 	}

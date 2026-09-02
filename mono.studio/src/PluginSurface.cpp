@@ -17,6 +17,9 @@
 //     end)
 //
 //     local panel = plugin.CreateWidget("Align", true)
+//     local root = plugin.GetWidgetGui(panel)
+//     local button = Instance.new("TextButton")
+//     button.Parent = root
 //     plugin.SetWidgetRender(panel, function()
 //         plugin.Label("Selected: " .. #Selection:Get())
 //         if plugin.Button("Clear") then Selection:Set({}) end
@@ -24,9 +27,10 @@
 //
 // ## Three groups, and the third is the one with a rule
 //
-// **The world half needs no host call at all** and is deliberately absent here:
-// `Instance`, `workspace` and `World` are the engine's own surface, and a plugin
-// gets them because it is a script. What is here is only what an *editor* has.
+// **World objects use the engine's ordinary instance surface.** The one join is
+// `GetWidgetGui`: the editor owns the dock window, so it hands the script the
+// `DockWidgetPluginGui` entity whose children fill that window. Everything
+// below it is created and edited through `Instance` like any other GUI tree.
 //
 // **The widget calls are only legal while a widget is rendering.** They are
 // immediate-mode ImGui underneath, so calling `plugin.Label` from a heartbeat
@@ -51,6 +55,8 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 
@@ -128,7 +134,16 @@ namespace studio {
 	// forge.
 	class PluginSurface final : public engine::script::HostSurface {
 	  public:
-		PluginSurface(Editor &editor, LoadedPlugin &plugin) : Owner(editor), Plugin(plugin) {}
+		PluginSurface(Editor &editor, LoadedPlugin &plugin, Store &store)
+			: Owner(editor), Plugin(plugin), World(store) {}
+
+		~PluginSurface() override {
+			for (PluginWidget &widget : Plugin.Widgets) {
+				if (World.Alive(widget.Gui)) {
+					World.Destroy(widget.Gui);
+				}
+			}
+		}
 
 		std::string_view GlobalName() const override {
 			return "plugin";
@@ -263,12 +278,22 @@ namespace studio {
 					}
 					widget.Dock = *dock;
 				}
+				engine::gui::RegisterGuiClasses();
+				widget.Gui = World.CreateInstance(engine::gui::GuiClass("DockWidgetPluginGui"), widget.Title);
+				if (widget.Gui == engine::ecs::NULL_ENTITY) {
+					failure = "the dock widget GUI could not be created";
+					return false;
+				}
+				if (engine::gui::Layer *layer = World.GetMutable<engine::gui::Layer>(widget.Gui)) {
+					layer->Enabled = widget.Open;
+				}
 				Plugin.Widgets.push_back(std::move(widget));
 				result = HostValue::Of(static_cast<double>(Plugin.Widgets.size()));
 				return true;
 			}
-			if (name == "SetWidgetRender" || name == "SetWidgetOpen" || name == "IsWidgetOpen" ||
-				name == "SetWidgetColour" || name == "SetWidgetDock" || name == "SetWidgetSizeConstraints") {
+			if (name == "GetWidgetGui" || name == "SetWidgetRender" || name == "SetWidgetOpen" ||
+				name == "IsWidgetOpen" || name == "SetWidgetColour" || name == "SetWidgetDock" ||
+				name == "SetWidgetSizeConstraints") {
 				return Widget(name, arguments, result, failure);
 			}
 			if (name == "GetViewportOption" || name == "SetViewportOption" || name == "AddViewport") {
@@ -960,8 +985,16 @@ namespace studio {
 				result = HostValue::Of(Plugin.Widgets[widget].Open);
 				return true;
 			}
+			if (name == "GetWidgetGui") {
+				result = HostValue::Of(Plugin.Widgets[widget].Gui);
+				return true;
+			}
 			if (name == "SetWidgetOpen") {
 				Plugin.Widgets[widget].Open = At(arguments, 1).AsBoolean();
+				if (engine::gui::Layer *layer =
+						World.GetMutable<engine::gui::Layer>(Plugin.Widgets[widget].Gui)) {
+					layer->Enabled = Plugin.Widgets[widget].Open;
+				}
 				return true;
 			}
 			if (name == "SetWidgetColour") {
@@ -1272,10 +1305,12 @@ namespace studio {
 
 		Editor &Owner;
 		LoadedPlugin &Plugin;
+		Store &World;
 	};
 
-	std::unique_ptr<engine::script::HostSurface> MakePluginSurface(Editor &editor, LoadedPlugin &plugin) {
-		return std::make_unique<PluginSurface>(editor, plugin);
+	std::unique_ptr<engine::script::HostSurface>
+	MakePluginSurface(Editor &editor, LoadedPlugin &plugin, Store &store) {
+		return std::make_unique<PluginSurface>(editor, plugin, store);
 	}
 
 	void SetPluginDrawing(engine::script::HostSurface &surface, bool drawing) {

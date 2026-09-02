@@ -46,6 +46,7 @@ namespace studio {
 		"SetToolbarVisible",
 		"SetToolbarPlacement",
 		"CreateWidget",
+		"GetWidgetGui",
 		"SetWidgetRender",
 		"SetWidgetOpen",
 		"IsWidgetOpen",
