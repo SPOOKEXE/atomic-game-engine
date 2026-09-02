@@ -61,6 +61,20 @@ in StressParticles demo:
 - [x] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
 - [_] try optimise `resolve resident instances (0.15-0.16ms)` and `transparency pass (0.2ms)`
 
+- [_] do: ```
+i noticed the following:
+- when we run with no studio, we're at 2k+ fps
+- when we run in studio, we're at 200-300fps
+
+Add flamegraph for studio application that sits on top of the engine flamegraph so we can see whats holding it all.
+
+Also, all the actual client and engine behaviors should sit in mono.engine, mono.studio is just a wrapper for it with ui on top.
+
+All bottleneck issues should then specifically be with mono.studio and we'll need to see that.
+
+Maybe add flamegraph categories for "engine", "server", "client", "studio" and "all", as part of the engine, then we submit data from studio/client/server to engine layer via binding.
+```
+
 - [_] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use Rings demo to test.
 - [_] optimise the top-10 world stress test.
 
