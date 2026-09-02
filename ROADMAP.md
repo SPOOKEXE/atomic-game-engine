@@ -50,6 +50,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] ensure welds, weld constraints and legacy joints work
 - [x] ensure `ViewportFrame`, isolated viewport worlds and `WorldRoot` work
 - [x] host each plugin dock as a real ECS `DockWidgetPluginGui` tree with cached layout, ImGui painting, input routing and lifecycle cleanup
+- [x] expose live Studio automation through MCP with screenshots, emulated mouse clicks, keyboard keys and text input, plus command-palette discovery and execution by stable command id
+- [x] allow Studio simulation and rendering to run uncapped without display pacing, and verify the StressParticles bottleneck in live uncapped release Studio
 
 - [x] fix selection box not being aligned to object
 
