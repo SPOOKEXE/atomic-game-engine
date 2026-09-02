@@ -55,6 +55,7 @@ fix:
 - [_] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
 - [_] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
 right now it just displays the components with byte sizes but they are not editable or anything.
+- [_] edit to studio ui
 
 ### v0.23
 
