@@ -48,13 +48,14 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] animation + animation track + animator => binds to character controller
 - [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
 
-- [_] build out ArcHandles, BoxHandleAdornments (and similar), etc
-- [_] make virtualised Gui2D and such where they are just a set of components instead of an actual class that is accessible (since you normally cannot create them in studio). Ask user which to keep and which to convert to virtual instances. Needs hierarchy too.
-- [_] ensure :IsA() handles virtual instances and does hierarchy.
-- [_] ensure valueobjects work
-- [_] ensure you built out all the UI items and they work (e.g. drag selector)
-- [_] ensure weld / weld constraints work
-- [_] ensure ViewportFrame and WorldRoot are implemented and work
+- [x] build out ArcHandles, BoxHandleAdornments and related handle and selection adornments
+- [x] make the abstract GUI hierarchy virtual and non-creatable while keeping each class as metadata over its inherited component set
+- [x] ensure `:IsA()` walks the virtual class hierarchy
+- [x] ensure value objects work
+- [x] build out the UI items and input paths, including drag detectors
+- [x] ensure welds, weld constraints and legacy joints work
+- [x] ensure `ViewportFrame`, isolated viewport worlds and `WorldRoot` work
+- [x] host each plugin dock as a real ECS `DockWidgetPluginGui` tree with cached layout, ImGui painting, input routing and lifecycle cleanup
 
 - [x] fix selection box not being aligned to object
 
