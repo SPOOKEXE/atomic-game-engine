@@ -18,6 +18,7 @@
 // | Cull 1000, all visible | 7.25 us ± 2% | 7.3 ns |
 // | Cull 1000, all behind | 3.18 us ± 2% | 3.2 ns |
 // | Cull and bound 1000, all visible | 7.90 us ± 2% | 7.9 ns |
+// | Cull and bound 10000, mixed | 79.1 us ± 2% | 7.9 ns |
 // | Cull 10000, mixed | 75.2 us ± 1% | 7.5 ns |
 // | Cull 20000, mixed, pooled | 123 us ± 66% | 6.1 ns |
 // | Cull 100000, mixed, pooled | 263 us ± 30% | 2.6 ns |
@@ -27,6 +28,9 @@
 // benchmark started the worker pool. The 16,384-row handover keeps the small
 // cases unchanged and cuts the large case by about four times. The wide spread
 // is scheduler noise across twenty-three workers, not a stable per-row cost.
+// Forcing the fused 10,000-row walk through that pool measured 98.6 us against
+// 79.1 us inline, so lowering its crossover would make the Studio-sized case
+// about one quarter slower.
 //
 // **Axis-aligned bounds are the common case and cost no quaternion work.** The
 // identity path cut the thousand-row visible case from 17.23 us to 7.25 us and
@@ -155,6 +159,29 @@ BENCH("Cull and bound 1000, all visible", 2000) {
 	std::vector<uint32_t> visible;
 	engine::core::AABB bounds;
 	for (int pass = 0; pass < 2000; pass++) {
+		Consume(engine::graph::CullAndBound(instances, frustum, visible, bounds));
+	}
+}
+
+BENCH("Cull and bound 10000, mixed", 500) {
+	const auto &instances = SceneOf(10000, -0.02f);
+	const Frustum frustum = ViewFrom(Vector3{0.0f, 0.0f, 40.0f});
+
+	std::vector<uint32_t> visible;
+	engine::core::AABB bounds;
+	for (int pass = 0; pass < 500; pass++) {
+		Consume(engine::graph::CullAndBound(instances, frustum, visible, bounds));
+	}
+}
+
+BENCH("Cull and bound 20000, mixed", 300) {
+	StartWorkers();
+	const auto &instances = SceneOf(20000, -0.01f);
+	const Frustum frustum = ViewFrom(Vector3{0.0f, 0.0f, 40.0f});
+
+	std::vector<uint32_t> visible;
+	engine::core::AABB bounds;
+	for (int pass = 0; pass < 300; pass++) {
 		Consume(engine::graph::CullAndBound(instances, frustum, visible, bounds));
 	}
 }

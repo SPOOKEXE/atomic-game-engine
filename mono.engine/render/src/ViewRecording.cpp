@@ -1489,6 +1489,7 @@ namespace engine::render {
 		State->SceneSlotOfSource.resize(ownCount);
 		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
 		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
+		bool sourceOrderRetained = false;
 		if (!haveOwnSources) {
 			target.InstanceSources.resize(ownCount);
 			target.InstanceSourcesReady = false;
@@ -1569,11 +1570,14 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("resolve resident instances", core::ProfileCategory::Render);
 			{
 				ENGINE_PROFILE_CAT("resident.scene", core::ProfileCategory::Render);
+				{
+					ENGINE_PROFILE_CAT("resident.scene.order check", core::ProfileCategory::Render);
+					sourceOrderRetained = target.InstanceSourceOrder == State->SceneOrder;
+				}
 				if (!rebuildOwnSources) {
-					// Metadata fans out across the draw-slot arrays while Touch writes the
-					// residency table. Two dense walks keep both costs visible without a
-					// timer per instance.
-					{
+					const bool metadataRetained =
+						State->PackedMetadataTarget == Request.TargetSlot && sourceOrderRetained;
+					if (!metadataRetained) {
 						ENGINE_PROFILE_CAT("resident.scene.reuse copy", core::ProfileCategory::Render);
 						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
 							const uint32_t source = State->SceneOrder[index];
@@ -1582,6 +1586,10 @@ namespace engine::render {
 							target.InstanceIndices[index] = cached.ResidentSlot;
 							State->SceneSlotOfSource[source] = index;
 						}
+					} else {
+						// Slot metadata, resident indices and the inverse order are all still
+						// the exact prefix this target packed on its previous view.
+						ENGINE_PROFILE_CAT("resident.scene.reuse retained", core::ProfileCategory::Render);
 					}
 					{
 						ENGINE_PROFILE_CAT("resident.scene.reuse touch", core::ProfileCategory::Render);
@@ -1656,6 +1664,11 @@ namespace engine::render {
 					}
 					target.InstanceSourcesReady = true;
 				}
+				if (!sourceOrderRetained) {
+					ENGINE_PROFILE_CAT("resident.scene.order store", core::ProfileCategory::Render);
+					target.InstanceSourceOrder.assign(State->SceneOrder.begin(), State->SceneOrder.end());
+				}
+				State->PackedMetadataTarget = Request.TargetSlot;
 			}
 			{
 				ENGINE_PROFILE_CAT("resident.foreign", core::ProfileCategory::Render);
@@ -2360,7 +2373,12 @@ namespace engine::render {
 			// SDL's one unified queue it is what guarantees every pass has
 			// executed before the later-transfer buffer's downloads read their
 			// textures. The fences below therefore move to that second buffer.
-			if (!State->SubmitSceneCommand(command)) {
+			bool sceneSubmitted = false;
+			{
+				ENGINE_PROFILE_CAT("submit.scene", core::ProfileCategory::Render);
+				sceneSubmitted = State->SubmitSceneCommand(command);
+			}
+			if (!sceneSubmitted) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
 				State->Timestamps.Abandon(timingSlot);
@@ -2373,9 +2391,13 @@ namespace engine::render {
 				State->DropDownloads();
 				return;
 			}
-			State->CompleteResidentUploads(true);
+			{
+				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
+				State->CompleteResidentUploads(true);
+			}
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {
+				ENGINE_PROFILE_CAT("submit.downloads", core::ProfileCategory::Render);
 				State->DownloadCommand = nullptr;
 				result.DownloadCommandBuffers++;
 				if (capture != nullptr) {

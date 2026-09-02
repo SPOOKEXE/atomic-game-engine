@@ -629,6 +629,9 @@ namespace engine::render {
 		// it can reuse their resident slots instead of resolving and packing each
 		// visible instance a second time.
 		std::vector<uint32_t> SceneSlotOfSource;
+		// The target whose own-world metadata still occupies the shared slot
+		// arrays. A repeated single-target view can retain that dense prefix.
+		size_t PackedMetadataTarget = std::numeric_limits<size_t>::max();
 		SDL_GPUGraphicsPipeline *ImagePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
@@ -1314,6 +1317,7 @@ namespace engine::render {
 			// are shared by every camera carrying the same world key.
 			std::vector<uint32_t> InstanceIndices;
 			std::vector<InstanceSourceRow> InstanceSources;
+			std::vector<uint32_t> InstanceSourceOrder;
 			bool InstanceSourcesReady = false;
 			std::vector<uint32_t> SkinOffsets;
 			std::vector<uint32_t> JointWords;
