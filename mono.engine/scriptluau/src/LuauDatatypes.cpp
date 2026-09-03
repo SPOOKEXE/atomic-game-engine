@@ -7,6 +7,7 @@
 #include <engine/script/Datatypes.hpp>
 
 #include <array>
+#include <cmath>
 #include <lualib.h>
 #include <new>
 #include <string_view>
@@ -803,6 +804,29 @@ namespace engine::script {
 			return 1;
 		}
 
+		int RandomNextUnitVector2(lua_State *state) {
+			RandomStream &stream = CheckRandom(state, 1);
+			constexpr float TAU = 6.28318530717958647692f;
+			const float angle = core::Random::Float(stream.Drawn++, stream.Seed) * TAU;
+
+			*Push<Vector2, TAG_VECTOR2>(state, "Vector2") = Vector2{std::cos(angle), std::sin(angle)};
+			return 1;
+		}
+
+		int RandomNextUnitVector3(lua_State *state) {
+			RandomStream &stream = CheckRandom(state, 1);
+			constexpr float TAU = 6.28318530717958647692f;
+			// Uniform height and azimuth avoid pole clustering, while always
+			// consuming two draws preserves the stream's deterministic order.
+			const float z = core::Random::Float(stream.Drawn++, stream.Seed) * 2.0f - 1.0f;
+			const float angle = core::Random::Float(stream.Drawn++, stream.Seed) * TAU;
+			const float radius = std::sqrt(1.0f - z * z);
+
+			*Push<core::Vector3, TAG_VECTOR3>(state, "Vector3") =
+				core::Vector3{radius * std::cos(angle), radius * std::sin(angle), z};
+			return 1;
+		}
+
 		int RandomIndex(lua_State *state) {
 			const std::string_view field = luaL_checkstring(state, 2);
 
@@ -812,6 +836,14 @@ namespace engine::script {
 			}
 			if (field == "NextInteger") {
 				lua_pushcfunction(state, RandomNextInteger, "NextInteger");
+				return 1;
+			}
+			if (field == "NextUnitVector2") {
+				lua_pushcfunction(state, RandomNextUnitVector2, "NextUnitVector2");
+				return 1;
+			}
+			if (field == "NextUnitVector3") {
+				lua_pushcfunction(state, RandomNextUnitVector3, "NextUnitVector3");
 				return 1;
 			}
 

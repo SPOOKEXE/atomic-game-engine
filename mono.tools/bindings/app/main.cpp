@@ -1320,6 +1320,8 @@ declare extern type Random with
 	function NextNumber(self, min: number?, max: number?): number
 	-- Inclusive of both ends, which is Roblox's contract.
 	function NextInteger(self, min: number, max: number): number
+	function NextUnitVector2(self): Vector2
+	function NextUnitVector3(self): Vector3
 end
 
 declare Random: {
@@ -3121,6 +3123,8 @@ declare interface Random {
 	NextNumber(min?: number, max?: number): number;
 	// Inclusive of both ends, which is Roblox's contract.
 	NextInteger(min: number, max: number): number;
+	NextUnitVector2(): Vector2;
+	NextUnitVector3(): Vector3;
 }
 
 declare const Random: {

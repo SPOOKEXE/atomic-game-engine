@@ -34,6 +34,7 @@
 #include <engine/spatial/Query.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -536,6 +537,36 @@ namespace engine::script {
 			const auto offset = static_cast<uint64_t>(static_cast<double>(value) * static_cast<double>(span));
 
 			return JS_NewInt64(context, minimum + static_cast<int64_t>(offset < span ? offset : span - 1));
+		}
+
+		JSValue RandomNextUnitVector2(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			RandomStream *stream = Unwrap<RandomStream>(context, self, JsOf(context).RandomClass);
+			if (stream == nullptr) {
+				return JS_ThrowTypeError(context, "not a Random");
+			}
+
+			constexpr float TAU = 6.28318530717958647692f;
+			const float angle = core::Random::Float(stream->Drawn++, stream->Seed) * TAU;
+			return Wrap(context, JsOf(context).Vector2Class, Vector2{std::cos(angle), std::sin(angle)});
+		}
+
+		JSValue RandomNextUnitVector3(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			RandomStream *stream = Unwrap<RandomStream>(context, self, JsOf(context).RandomClass);
+			if (stream == nullptr) {
+				return JS_ThrowTypeError(context, "not a Random");
+			}
+
+			constexpr float TAU = 6.28318530717958647692f;
+			// Uniform height and azimuth avoid pole clustering, while always
+			// consuming two draws preserves the stream's deterministic order.
+			const float z = core::Random::Float(stream->Drawn++, stream->Seed) * 2.0f - 1.0f;
+			const float angle = core::Random::Float(stream->Drawn++, stream->Seed) * TAU;
+			const float radius = std::sqrt(1.0f - z * z);
+			return Wrap(
+				context,
+				JsOf(context).Vector3Class,
+				core::Vector3{radius * std::cos(angle), radius * std::sin(angle), z}
+			);
 		}
 
 		JSValue RandomNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
@@ -1053,9 +1084,11 @@ namespace engine::script {
 			static const JSCFunctionListEntry members[] = {
 				JS_CFUNC_DEF("NextNumber", 2, RandomNext),
 				JS_CFUNC_DEF("NextInteger", 2, RandomNextInteger),
+				JS_CFUNC_DEF("NextUnitVector2", 0, RandomNextUnitVector2),
+				JS_CFUNC_DEF("NextUnitVector3", 0, RandomNextUnitVector3),
 			};
 			static const JSCFunctionListEntry constructors[] = {JS_CFUNC_DEF("new", 1, RandomNew)};
-			Install<RandomStream>(context, global, bound.RandomClass, "Random", members, 2, constructors, 1);
+			Install<RandomStream>(context, global, bound.RandomClass, "Random", members, 4, constructors, 1);
 		}
 	}
 

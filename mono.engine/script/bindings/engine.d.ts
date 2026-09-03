@@ -1074,6 +1074,8 @@ declare interface Random {
 	NextNumber(min?: number, max?: number): number;
 	// Inclusive of both ends, which is Roblox's contract.
 	NextInteger(min: number, max: number): number;
+	NextUnitVector2(): Vector2;
+	NextUnitVector3(): Vector3;
 }
 
 declare const Random: {

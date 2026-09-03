@@ -2745,6 +2745,12 @@ TEST_CASE("Random is a stream over the indexed generator", "[scripting]") {
 
 			local integer = stream:NextInteger(3, 5)
 			assert(integer >= 3 and integer <= 5, 'NextInteger left its range')
+
+			local unit2 = stream:NextUnitVector2()
+			assert(math.abs(unit2.Magnitude - 1) < 1e-5, 'NextUnitVector2 was not unit length')
+
+			local unit3 = stream:NextUnitVector3()
+			assert(math.abs(unit3.Magnitude - 1) < 1e-5, 'NextUnitVector3 was not unit length')
 		end
 	)");
 }
@@ -3226,6 +3232,15 @@ TEST_CASE("javascript Random matches Luau for one seed", "[scripting][js]") {
 		part.Name = 'LuauDraws'
 		part.Parent = workspace
 		part.Position = Vector3.new(stream:NextNumber(), stream:NextNumber(), stream:NextNumber())
+		local unit2 = stream:NextUnitVector2()
+		local unit2Part = Instance.new('Part')
+		unit2Part.Name = 'LuauUnitVector2'
+		unit2Part.Parent = workspace
+		unit2Part.Position = Vector3.new(unit2.X, unit2.Y, 0)
+		local unit3Part = Instance.new('Part')
+		unit3Part.Name = 'LuauUnitVector3'
+		unit3Part.Parent = workspace
+		unit3Part.Position = stream:NextUnitVector3()
 	)");
 
 	MustRun(*javascript, R"(
@@ -3234,6 +3249,15 @@ TEST_CASE("javascript Random matches Luau for one seed", "[scripting][js]") {
 		part.Name = 'JsDraws';
 		part.Parent = workspace;
 		part.Position = Vector3.new(stream.NextNumber(), stream.NextNumber(), stream.NextNumber());
+		const unit2 = stream.NextUnitVector2();
+		const unit2Part = Instance.new('Part');
+		unit2Part.Name = 'JsUnitVector2';
+		unit2Part.Parent = workspace;
+		unit2Part.Position = Vector3.new(unit2.X, unit2.Y, 0);
+		const unit3Part = Instance.new('Part');
+		unit3Part.Name = 'JsUnitVector3';
+		unit3Part.Parent = workspace;
+		unit3Part.Position = stream.NextUnitVector3();
 	)");
 
 	const auto *left = store.Get<Transform>(InScene(store, "LuauDraws"));
@@ -3244,6 +3268,21 @@ TEST_CASE("javascript Random matches Luau for one seed", "[scripting][js]") {
 	CHECK(left->Frame.Position.X == Approx(right->Frame.Position.X));
 	CHECK(left->Frame.Position.Y == Approx(right->Frame.Position.Y));
 	CHECK(left->Frame.Position.Z == Approx(right->Frame.Position.Z));
+
+	const auto *left2 = store.Get<Transform>(InScene(store, "LuauUnitVector2"));
+	const auto *right2 = store.Get<Transform>(InScene(store, "JsUnitVector2"));
+	REQUIRE(left2 != nullptr);
+	REQUIRE(right2 != nullptr);
+	CHECK(left2->Frame.Position.X == Approx(right2->Frame.Position.X));
+	CHECK(left2->Frame.Position.Y == Approx(right2->Frame.Position.Y));
+
+	const auto *left3 = store.Get<Transform>(InScene(store, "LuauUnitVector3"));
+	const auto *right3 = store.Get<Transform>(InScene(store, "JsUnitVector3"));
+	REQUIRE(left3 != nullptr);
+	REQUIRE(right3 != nullptr);
+	CHECK(left3->Frame.Position.X == Approx(right3->Frame.Position.X));
+	CHECK(left3->Frame.Position.Y == Approx(right3->Frame.Position.Y));
+	CHECK(left3->Frame.Position.Z == Approx(right3->Frame.Position.Z));
 }
 
 TEST_CASE("javascript can ask where it is standing", "[scripting][js]") {
