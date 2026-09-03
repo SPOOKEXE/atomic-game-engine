@@ -51,7 +51,7 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v18";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v19";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -60,7 +60,6 @@ namespace studio {
 		constexpr const char *COMPONENTS = "Components";
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *INSTANCES = "Live Instances";
-		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
 		// **The title reads "Preferences" and the id stays "Studio Settings".**
 		// imgui derives a window's id from its label, and the saved layout keys
@@ -90,7 +89,6 @@ namespace studio {
 			{INSTANCES, PluginDock::Left},
 			{PROPERTIES, PluginDock::Right},
 			{COMPONENTS, PluginDock::Right},
-			{SCRIPTS, PluginDock::Bottom},
 			{OUTPUT, PluginDock::Bottom},
 			{"Command Bar", PluginDock::Bottom},
 			{SETTINGS, PluginDock::Right},
@@ -463,6 +461,9 @@ namespace studio {
 			// Default Studio contributes native panels through this same plugin
 			// path. Installed widgets retain their per-widget script colours.
 			DrawPluginWidgets();
+			// Script documents are independent windows rather than one registered
+			// panel, so they draw outside the plugin panel registry.
+			Skinned("Scripts", [&] { DrawScripts(); });
 
 			Skinned("Bus", [&] { DrawBus(); });
 			Skinned("Script Profile", [&] { DrawScriptProfile(); });
@@ -1342,7 +1343,6 @@ namespace studio {
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
 		ImGui::SeparatorText("Script");
-		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
 		ImGui::MenuItem("Call Stack", nullptr, &ShowCallStack);
@@ -1970,10 +1970,20 @@ namespace studio {
 			const ImGuiWindow *window = ImGui::FindWindowByName(title);
 			return window != nullptr && (window == focused || window == context->NavWindow);
 		};
+		const auto isScriptWindow = [&] {
+			for (const OpenScript &tab : Scripts) {
+				const std::string id =
+					"###" + std::to_string(tab.World.Index) + "-" + std::to_string(tab.Instance.Id);
+				if (isWindow(id.c_str())) {
+					return true;
+				}
+			}
+			return false;
+		};
 
 		if (isWindow(EXPLORER) || isWindow(WORLDS)) {
 			Keybinds::SetScope(Scope::Tree);
-		} else if (isWindow(SCRIPTS)) {
+		} else if (isScriptWindow()) {
 			Keybinds::SetScope(Scope::Script);
 		} else {
 			Keybinds::SetScope(Scope::Viewport);

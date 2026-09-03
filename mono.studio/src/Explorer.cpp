@@ -661,6 +661,10 @@ namespace studio {
 				// **After every consumer of the tree node's last-item state.** The
 				// insertion button submits its own item, so drawing it any earlier makes
 				// clicks, drags and context menus target this button instead of the row.
+				// Its popup id is scoped to the instance. Without that scope, a row
+				// that happened to reuse an ImGui tree id could open the wrong picker
+				// and leave the tree node handling the click as an expand/collapse.
+				ImGui::PushID(static_cast<int>(row.Instance.Id));
 				if (hovered) {
 					ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight());
 					if (ImGui::SmallButton("+##insert-hover")) {
@@ -676,6 +680,7 @@ namespace studio {
 					}
 					ImGui::EndPopup();
 				}
+				ImGui::PopID();
 
 				if (renaming) {
 					ImGui::SameLine();

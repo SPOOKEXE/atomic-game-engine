@@ -4800,14 +4800,24 @@ namespace studio {
 			return;
 		}
 
-		// Script tabs first: their entity handles do not survive the world being
-		// rebuilt, and a tab that saved afterwards would write into storage that
-		// had been freed. Only this world's - another scene's tabs are untouched
-		// by this restore, which is the whole point of running one scene.
-		for (size_t index = Scripts.size(); index > 0; index--) {
-			if (Scripts[index - 1].World == world) {
-				CloseScriptTab(index - 1);
+		// A Stop rebuilds entities, but script tabs are editor state. Keep enough
+		// identity to repoint them into the restored world below, so stopping a
+		// game never closes documents or changes the user's dock selection.
+		struct ScriptTabLocator {
+			size_t Index = 0;
+			Name InstanceName;
+		};
+		std::vector<ScriptTabLocator> scriptTabs;
+		for (size_t index = 0; index < Scripts.size(); index++) {
+			if (Scripts[index].World != world) {
+				continue;
 			}
+			ScriptTabLocator locator;
+			locator.Index = index;
+			Universe->Enter(world, [&](Store &store) {
+				locator.InstanceName = store.InstanceNameOf(Scripts[index].Instance);
+			});
+			scriptTabs.push_back(locator);
 		}
 
 		const Name name = Universe->NameOf(world);
@@ -4860,6 +4870,38 @@ namespace studio {
 		// program where `game:GetService` could fail.
 		PrepareWorldIn(restored);
 
+		// Source paths identify program tabs across a save/restore. Shaders have
+		// no path, so their instance name is the stable authored identity. The
+		// name fallback also keeps an unsaved program tab open before it first
+		// receives a generated path.
+		Universe->Enter(restored, [&](Store &store) {
+			for (const ScriptTabLocator &locator : scriptTabs) {
+				OpenScript &tab = Scripts[locator.Index];
+				Entity replacement = NULL_ENTITY;
+				store.Each<const engine::ecs::InstanceName>(
+					[&](Entity candidate, const engine::ecs::InstanceName &instanceName) {
+						if (replacement != NULL_ENTITY) {
+							return;
+						}
+						const std::optional<SourceDocument> document = ReadSourceDocument(store, candidate);
+						if (!document.has_value() ||
+							document->Kind !=
+								(tab.Shader ? SourceDocumentKind::Shader : SourceDocumentKind::Program)) {
+							return;
+						}
+						if ((!tab.Shader && tab.Path.IsValid() && document->Path == tab.Path) ||
+							(!tab.Path.IsValid() && instanceName.Value == locator.InstanceName)) {
+							replacement = candidate;
+						}
+					}
+				);
+				if (replacement != NULL_ENTITY) {
+					tab.World = restored;
+					tab.Instance = replacement;
+				}
+			}
+		});
+
 		// **Everything that held the old handle, repointed.** `Adopt` normally
 		// hands back the same slot, but nothing promises it - and a viewport
 		// pinned to a stale id draws nothing with no way to say why.
@@ -4907,6 +4949,7 @@ namespace studio {
 		for (size_t index = 0; index < Scripts.size(); index++) {
 			if (Scripts[index].World == world && Scripts[index].Instance == instance) {
 				ActiveScript = static_cast<int>(index);
+				FocusScripts = 4;
 				return;
 			}
 		}
@@ -4930,6 +4973,7 @@ namespace studio {
 
 		Scripts.push_back(std::move(tab));
 		ActiveScript = static_cast<int>(Scripts.size() - 1);
+		FocusScripts = 4;
 	}
 
 	void Editor::SaveScriptTab(OpenScript &tab) {

@@ -667,6 +667,12 @@ namespace studio {
 		//
 		// @since v0.14
 		CodeEdit Edit;
+
+		// The last non-executing Luau check for this document. It remains with the
+		// tab while another document is in front, rather than becoming output for
+		// whichever script happens to be selected next.
+		std::string Diagnostics;
+		bool Checked = false;
 	};
 
 	// What the Find panel was asked for.
@@ -3951,6 +3957,10 @@ namespace studio {
 		//@{
 		std::vector<OpenScript> Scripts;
 		int ActiveScript = -1;
+		// Frames left to bring an explicitly opened script editor to the front.
+		// The count survives a dockspace rebuild, just like the worlds panel's
+		// focus request.
+		int FocusScripts = 0;
 		//@}
 
 		// The completion popup: whether it is up, which row is chosen, and what
@@ -5448,7 +5458,7 @@ namespace studio {
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
 		bool ShowComponents = true;
-		bool ShowScripts = true;
+		bool ShowScripts = false;
 		bool ShowDatasets = false;
 		bool ShowDataStores = false;
 		bool ShowCdn = false;
@@ -6258,6 +6268,14 @@ namespace studio {
 		//
 		// @since v0.18
 		struct HeapView {
+			enum class SortColumn : uint8_t {
+				Tag,
+				Live,
+				Self,
+				Blocks,
+				Growth,
+			};
+
 			// The tag tree flattened for drawing, heaviest child first.
 			std::vector<engine::core::HeapTreeRow> Rows;
 
@@ -6282,6 +6300,8 @@ namespace studio {
 
 			// Seconds the plot and the growth figures cover.
 			double HistorySeconds = 0.0;
+			SortColumn Sort = SortColumn::Live;
+			bool SortAscending = false;
 		};
 
 		// What the heap panel is currently drawing.

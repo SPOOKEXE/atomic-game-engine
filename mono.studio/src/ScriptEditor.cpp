@@ -1,6 +1,7 @@
 #include "ExternalEditor.hpp"
 #include "ScriptFieldWindow.hpp"
 
+#include <engine/control/Surface.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -12,6 +13,7 @@
 #include <cctype>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <studio/CodeMetrics.hpp>
@@ -43,367 +45,387 @@ namespace studio {
 		if (!ShowScripts) {
 			return;
 		}
-
-		if (!ImGui::Begin("Script Editor", &ShowScripts)) {
-			ImGui::End();
-			return;
-		}
-
 		if (Scripts.empty()) {
-			ImGui::TextDisabled("no script open");
-			ImGui::TextDisabled("double-click a Script in the explorer, or insert one");
-			ImGui::End();
+			ShowScripts = false;
 			return;
 		}
 
+		const bool focus = FocusScripts > 0;
+		FocusScripts = 0;
 		size_t closing = Scripts.size();
 
-		if (ImGui::BeginTabBar(
-				"##scripts", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_TabListPopupButton
-			)) {
-			for (size_t index = 0; index < Scripts.size(); index++) {
-				OpenScript &tab = Scripts[index];
+		for (size_t index = 0; index < Scripts.size(); index++) {
+			OpenScript &tab = Scripts[index];
 
-				// The instance's *current* name, read every frame rather than
-				// cached. A cached one is wrong for one frame after a rename,
-				// and one frame is enough to be seen - `ui/AGENTS.md` states
-				// that rule and this is the panel most tempted to break it.
-				std::string label = "(deleted)";
-				bool alive = false;
+			// The instance's *current* name, read every frame rather than
+			// cached. A cached one is wrong for one frame after a rename,
+			// and one frame is enough to be seen - `ui/AGENTS.md` states
+			// that rule and this is the panel most tempted to break it.
+			std::string label = "(deleted)";
+			bool alive = false;
 
-				if (tab.World.IsValid()) {
-					Universe->Enter(tab.World, [&](Store &store) {
-						if (!store.Alive(tab.Instance)) {
-							return;
-						}
-						alive = true;
-						const Name name = store.InstanceNameOf(tab.Instance);
-						label = name.IsValid() ? std::string(Label(name)) : std::string("Script");
-					});
-				}
+			if (tab.World.IsValid()) {
+				Universe->Enter(tab.World, [&](Store &store) {
+					if (!store.Alive(tab.Instance)) {
+						return;
+					}
+					alive = true;
+					const Name name = store.InstanceNameOf(tab.Instance);
+					label = name.IsValid() ? std::string(Label(name)) : std::string("Script");
+				});
+			}
 
-				if (tab.Modified) {
-					label += " *";
-				}
+			if (tab.Modified) {
+				label += " *";
+			}
 
-				// **`###` pins the tab's id to the instance, and this is not a
-				// nicety.** imgui derives a widget's id from its label, so appending
-				// the modified marker made the tab a *different tab* the instant
-				// anybody typed - which closed the old one, rebuilt the field inside
-				// it, and dropped keyboard focus after exactly one character. The
-				// symptom was a script editor that took the first keystroke and
-				// ignored every one after it, and it took a screenshot to see.
-				label += "###";
-				label += std::to_string(tab.Instance.Id);
+			// **`###` pins each dockable editor to its instance.** The title may
+			// gain a modified marker or follow a rename, but neither may make
+			// imgui treat it as a new window and discard its dock placement.
+			label += "###";
+			label += std::to_string(tab.World.Index);
+			label += "-";
+			label += std::to_string(tab.Instance.Id);
 
-				ImGui::PushID(static_cast<int>(index));
+			ImGui::PushID(static_cast<int>(index));
 
-				bool open = true;
-				if (ImGui::BeginTabItem(label.c_str(), &open)) {
+			bool open = true;
+			if (focus && static_cast<int>(index) == ActiveScript) {
+				ImGui::SetNextWindowFocus();
+			}
+			if (ImGui::Begin(label.c_str(), &open)) {
+				if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
 					ActiveScript = static_cast<int>(index);
+				}
 
-					if (!alive) {
-						ImGui::TextDisabled("the script this tab was editing has been deleted");
-					} else {
-						RefreshExternalScript(tab);
-						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-						ImGui::Text(
-							"%s   in %s",
-							tab.Shader ? "GLSL fragment shader"
-									   : (tab.Path.IsValid() ? Label(tab.Path)
-															 : "(unsaved - a path is chosen on save)"),
-							Label(Universe->NameOf(tab.World))
-						);
-						ImGui::PopStyleColor();
+				if (!alive) {
+					ImGui::TextDisabled("the script this tab was editing has been deleted");
+				} else {
+					RefreshExternalScript(tab);
+					ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+					ImGui::Text(
+						"%s   in %s",
+						tab.Shader
+							? "GLSL fragment shader"
+							: (tab.Path.IsValid() ? Label(tab.Path) : "(unsaved - a path is chosen on save)"),
+						Label(Universe->NameOf(tab.World))
+					);
+					ImGui::PopStyleColor();
 
+					ImGui::SameLine();
+					if (ImGui::SmallButton("Save")) {
+						SaveScriptTab(tab);
+					}
+
+					if (!tab.Shader) {
 						ImGui::SameLine();
-						if (ImGui::SmallButton("Save")) {
-							SaveScriptTab(tab);
-						}
-
-						ImGui::SameLine();
-						if (ImGui::SmallButton(tab.External.Active() ? "External Editor" : "Open External")) {
-							OpenScriptExternally(tab);
-						}
-
-						// This tab's own scene: a script in a world being edited is
-						// just text, whatever another scene is doing.
-						if (ModeOf(tab.World) != RunMode::Edit) {
-							ImGui::SameLine();
-							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-							// **Said plainly, because the alternative is a
-							// mystery.** A running game already started its
-							// scripts; editing the text now changes what runs
-							// the *next* time, exactly as it does in Roblox, and
-							// an editor that let somebody type into a live
-							// script without saying so produces "my change did
-							// nothing".
-							ImGui::TextUnformatted("edits apply on the next run");
-							ImGui::PopStyleColor();
-						}
-
-						// **The same control the output panel has**, rather
-						// than a second copy of the step and the clamp - two
-						// panels that disagreed about what a zoom level is
-						// would disagree the first time either was tuned.
-						ImGui::SameLine();
-						DrawZoomControl(ScriptZoom, "code");
-
-						ImGui::SameLine();
-						if (ImGui::SmallButton(ShowFind ? "Hide Find" : "Find")) {
-							ShowFind = !ShowFind;
-						}
-
-						ImGui::Separator();
-
-						// **Find and Replace All, and deliberately not Find
-						// Next.** Jumping the caret to a match means setting the
-						// selection inside `InputTextMultiline`, which imgui
-						// does not expose - reaching into `ImGuiInputTextState`
-						// to do it would tie the script editor to a private
-						// layout that changes between imgui releases. A match
-						// count and a whole-file replace are the two thirds of
-						// this that can be built honestly.
-						if (ShowFind) {
-							ImGui::SetNextItemWidth(180.0f * Settings.Scale);
-							if (FocusFind) {
-								ImGui::SetKeyboardFocusHere();
-								FocusFind = false;
+						if (ImGui::SmallButton("Check")) {
+							if (ControlSurface.Count() == 0) {
+								EnableControlFeatures();
 							}
-							TextField("##find", FindText, "find");
 
-							ImGui::SameLine();
-							ImGui::SetNextItemWidth(180.0f * Settings.Scale);
-							TextField("##replace", ReplaceText, "replace with");
-
-							size_t matches = 0;
-							if (!FindText.empty()) {
-								for (size_t at = tab.Text.find(FindText); at != std::string::npos;
-									 at = tab.Text.find(FindText, at + FindText.size())) {
-									matches++;
+							std::string failure;
+							tab.Checked = true;
+							tab.Diagnostics.clear();
+							for (const engine::control::Tool &tool : ControlSurface.Registered()) {
+								if (tool.Name != "script_check") {
+									continue;
 								}
-							}
-
-							ImGui::SameLine();
-							ImGui::BeginDisabled(matches == 0);
-							if (ImGui::SmallButton("Replace All")) {
-								std::string rebuilt;
-								rebuilt.reserve(tab.Text.size());
-
-								// Built once into a new string rather than
-								// replaced in place: replacing in place while
-								// scanning re-finds the replacement when it
-								// contains the needle, which is an editor that
-								// hangs on "a" -> "aa".
-								size_t at = 0;
-								for (size_t found = tab.Text.find(FindText, at); found != std::string::npos;
-									 found = tab.Text.find(FindText, at)) {
-									rebuilt.append(tab.Text, at, found - at);
-									rebuilt.append(ReplaceText);
-									at = found + FindText.size();
-								}
-								rebuilt.append(tab.Text, at, std::string::npos);
-
-								tab.Text = rebuilt;
-								tab.Modified = true;
-								Say("replaced " + std::to_string(matches) + " occurrence(s) in " +
-									std::string(Label(tab.Path)));
-							}
-							ImGui::EndDisabled();
-
-							ImGui::SameLine();
-							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-							if (FindText.empty()) {
-								ImGui::TextUnformatted("type something to find");
-							} else {
-								ImGui::Text("%zu match(es)", matches);
-							}
-							ImGui::PopStyleColor();
-
-							ImGui::Separator();
-						}
-
-						if (tab.External.Conflict) {
-							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-							ImGui::TextUnformatted("Studio and the external editor changed this file");
-							ImGui::PopStyleColor();
-							ImGui::SameLine();
-							if (ImGui::SmallButton("Use External")) {
-								std::string error;
-								if (AcceptExternalDocument(tab.External, tab.Text, error)) {
-									tab.Modified = true;
+								const nlohmann::json result = tool.Call({{"source", tab.Text}}, failure);
+								if (!failure.empty()) {
+									tab.Diagnostics = failure;
+								} else if (result.value("ok", false)) {
+									tab.Diagnostics = "no type or lint diagnostics";
 								} else {
-									Say("external editor: " + error, engine::core::LogLevel::Warning);
+									tab.Diagnostics =
+										result.value("diagnostics", "checker returned no diagnostics");
 								}
+								break;
 							}
-							ImGui::SameLine();
-							if (ImGui::SmallButton("Keep Studio")) {
-								std::string error;
-								if (!KeepStudioDocument(tab.External, tab.Text, error)) {
-									Say("external editor: " + error, engine::core::LogLevel::Warning);
-								}
+							if (tab.Diagnostics.empty()) {
+								tab.Diagnostics = "script checker is unavailable";
 							}
+						}
+
+						if (tab.Checked) {
 							ImGui::Separator();
-						}
-
-						// **The monospace face, which is what makes this a code
-						// editor rather than a text box.** Columns line up, an
-						// `l` is not an `I`, and indentation is a width rather
-						// than a guess. `mono.studio/AGENTS.md` listed the
-						// absence of one as a deferred gap with the reason being
-						// a font this repository did not have; it has four now.
-						//
-						// **Zoom is the size this is pushed at, rather than a
-						// window scale laid over it.** `Options::Scale` rebuilds
-						// every metric in the editor and needs a restart to
-						// rasterise the faces at the new size; this is one
-						// panel's text, and wanting bigger code is not wanting a
-						// bigger properties panel.
-						//
-						// It has to be the pushed size specifically:
-						// `SetWindowFontScale` scales the window it is called
-						// on, and both the code and the gutter draw into child
-						// windows - which imgui begins at scale 1 whatever their
-						// parent was set to. That zoomed the frame and the row
-						// spacing measured out here, and left every glyph inside
-						// them exactly the size it started at.
-						//
-						// Everything below draws inside this scope, so the
-						// gutter's row height and the field's line height come
-						// from one number and stay in step.
-						const engine::ui::ScopedFont code(
-							engine::ui::Typeface::Monospace, engine::ui::TextSize::Body, ScriptZoom
-						);
-
-						// **The gutter, and it is a sibling of the code rather
-						// than part of it.** `CodeField` is an
-						// `InputTextMultiline`, which owns its own scrolling
-						// child - so a breakpoint column has to be drawn beside
-						// it and told where that child has scrolled to.
-						//
-						// See `DrawScriptGutter` for why reading one window's
-						// scroll is a different kind of reach into imgui from
-						// the one this file refuses two hundred lines up.
-						const ImGuiID fieldId = ImGui::GetID("##text");
-						const float gutter = DrawScriptGutter(tab, fieldId);
-
-						ImGui::SameLine(0.0f, 0.0f);
-
-						// **The navigation keys are claimed before the field is
-						// submitted, not after.** The text widget polls them
-						// during its own submission, so an owner set afterwards
-						// would arrive a frame late - Down would move the caret
-						// a line *and* the highlighted row, and Enter would
-						// insert a newline before accepting. `LockThisFrame` is
-						// what makes the widget's owner-agnostic poll fail
-						// rather than win.
-						// **Tab is on the list, and it can be.** The field
-						// polls Tab through `Shortcut` against its own id -
-						// the `AllowTabInput`/`CallbackCompletion` assert is
-						// about the *flags*, not the key - so the same
-						// `LockThisFrame` that keeps Enter out of the text
-						// keeps Tab out of the indentation, and Tab accepts
-						// exactly while the popup is up.
-						const ImGuiID popupId = ImGui::GetID("##completion");
-						if (ScriptPopupOpen) {
-							for (const ImGuiKey key :
-								 {ImGuiKey_UpArrow,
-								  ImGuiKey_DownArrow,
-								  ImGuiKey_Enter,
-								  ImGuiKey_KeypadEnter,
-								  ImGuiKey_Tab,
-								  ImGuiKey_Escape}) {
-								ImGui::SetKeyOwner(key, popupId, ImGuiInputFlags_LockThisFrame);
-							}
-						}
-
-						const ImVec2 fieldMin = ImGui::GetCursorScreenPos();
-
-						// The minimap's column, taken off the field's width
-						// up front. Fixed rather than zoomed: it is an
-						// overview of the file, not text somebody reads, so
-						// only the interface scale sizes it - and a panel too
-						// narrow to share simply keeps the whole width for
-						// the code.
-						const float minimapWidth = 72.0f * Settings.Scale;
-						const float available = ImGui::GetContentRegionAvail().x;
-						const bool minimapFits = Prefs.ScriptMinimap && available > minimapWidth * 3.0f;
-
-						if (Prefs.ScriptBackground.has_value()) {
-							ImGui::PushStyleColor(ImGuiCol_FrameBg, *Prefs.ScriptBackground);
-						}
-						ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 0));
-						const bool changed = CodeField(
-							"##text",
-							tab.Text,
-							&tab.Edit,
-							minimapFits ? available - minimapWidth : -1.0f,
-							-1.0f
-						);
-						ImGui::PopStyleColor();
-						if (Prefs.ScriptBackground.has_value()) {
-							ImGui::PopStyleColor();
-						}
-						DrawScriptSource(tab.Text, tab.Edit, fieldMin, ImGui::GetItemRectSize(), fieldId);
-
-						// Read here, while the field is still the last item,
-						// so imgui's own rest delay decides when a tooltip is
-						// wanted; the drawing happens after the completion
-						// has had its turn.
-						const bool resting = ImGui::IsItemHovered(
-							ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_Stationary
-						);
-
-						if (changed) {
-							tab.Modified = true;
-						}
-						(void)gutter;
-
-						if (minimapFits) {
-							ImGui::SameLine(0.0f, 0.0f);
-							DrawScriptMinimap(tab, minimapWidth, fieldId);
-						}
-
-						// Ctrl+Space asks for the list whatever is under the
-						// caret, which is the binding every editor has and the
-						// way through when the automatic rules decline.
-						const bool asked =
-							tab.Edit.Active && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
-
-						UpdateScriptCompletion(tab, changed, asked);
-
-						if (ScriptPopupOpen) {
-							DrawScriptCompletion(tab, fieldMin, popupId, fieldId);
-						}
-
-						DrawScriptHover(tab, fieldMin, resting, fieldId);
-
-						// Ctrl+wheel over the text, which is what every editor
-						// binds it to.
-						ApplyZoomWheel(ScriptZoom);
-
-						// Ctrl+S inside the editor saves the *script*, not the
-						// game. The menu bar's shortcut is guarded on
-						// `WantTextInput`, so the two do not both fire.
-						if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
-							ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
-							SaveScriptTab(tab);
+							ImGui::TextUnformatted(tab.Diagnostics.c_str());
 						}
 					}
 
-					ImGui::EndTabItem();
-				}
+					ImGui::SameLine();
+					if (ImGui::SmallButton(tab.External.Active() ? "External Editor" : "Open External")) {
+						OpenScriptExternally(tab);
+					}
 
-				ImGui::PopID();
+					// This tab's own scene: a script in a world being edited is
+					// just text, whatever another scene is doing.
+					if (ModeOf(tab.World) != RunMode::Edit) {
+						ImGui::SameLine();
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+						// **Said plainly, because the alternative is a
+						// mystery.** A running game already started its
+						// scripts; editing the text now changes what runs
+						// the *next* time, exactly as it does in Roblox, and
+						// an editor that let somebody type into a live
+						// script without saying so produces "my change did
+						// nothing".
+						ImGui::TextUnformatted("edits apply on the next run");
+						ImGui::PopStyleColor();
+					}
 
-				if (!open) {
-					closing = index;
+					// **The same control the output panel has**, rather
+					// than a second copy of the step and the clamp - two
+					// panels that disagreed about what a zoom level is
+					// would disagree the first time either was tuned.
+					ImGui::SameLine();
+					DrawZoomControl(ScriptZoom, "code");
+
+					ImGui::SameLine();
+					if (ImGui::SmallButton(ShowFind ? "Hide Find" : "Find")) {
+						ShowFind = !ShowFind;
+					}
+
+					ImGui::Separator();
+
+					// **Find and Replace All, and deliberately not Find
+					// Next.** Jumping the caret to a match means setting the
+					// selection inside `InputTextMultiline`, which imgui
+					// does not expose - reaching into `ImGuiInputTextState`
+					// to do it would tie the script editor to a private
+					// layout that changes between imgui releases. A match
+					// count and a whole-file replace are the two thirds of
+					// this that can be built honestly.
+					if (ShowFind) {
+						ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+						if (FocusFind) {
+							ImGui::SetKeyboardFocusHere();
+							FocusFind = false;
+						}
+						TextField("##find", FindText, "find");
+
+						ImGui::SameLine();
+						ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+						TextField("##replace", ReplaceText, "replace with");
+
+						size_t matches = 0;
+						if (!FindText.empty()) {
+							for (size_t at = tab.Text.find(FindText); at != std::string::npos;
+								 at = tab.Text.find(FindText, at + FindText.size())) {
+								matches++;
+							}
+						}
+
+						ImGui::SameLine();
+						ImGui::BeginDisabled(matches == 0);
+						if (ImGui::SmallButton("Replace All")) {
+							std::string rebuilt;
+							rebuilt.reserve(tab.Text.size());
+
+							// Built once into a new string rather than
+							// replaced in place: replacing in place while
+							// scanning re-finds the replacement when it
+							// contains the needle, which is an editor that
+							// hangs on "a" -> "aa".
+							size_t at = 0;
+							for (size_t found = tab.Text.find(FindText, at); found != std::string::npos;
+								 found = tab.Text.find(FindText, at)) {
+								rebuilt.append(tab.Text, at, found - at);
+								rebuilt.append(ReplaceText);
+								at = found + FindText.size();
+							}
+							rebuilt.append(tab.Text, at, std::string::npos);
+
+							tab.Text = rebuilt;
+							tab.Modified = true;
+							Say("replaced " + std::to_string(matches) + " occurrence(s) in " +
+								std::string(Label(tab.Path)));
+						}
+						ImGui::EndDisabled();
+
+						ImGui::SameLine();
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+						if (FindText.empty()) {
+							ImGui::TextUnformatted("type something to find");
+						} else {
+							ImGui::Text("%zu match(es)", matches);
+						}
+						ImGui::PopStyleColor();
+
+						ImGui::Separator();
+					}
+
+					if (tab.External.Conflict) {
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+						ImGui::TextUnformatted("Studio and the external editor changed this file");
+						ImGui::PopStyleColor();
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Use External")) {
+							std::string error;
+							if (AcceptExternalDocument(tab.External, tab.Text, error)) {
+								tab.Modified = true;
+							} else {
+								Say("external editor: " + error, engine::core::LogLevel::Warning);
+							}
+						}
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Keep Studio")) {
+							std::string error;
+							if (!KeepStudioDocument(tab.External, tab.Text, error)) {
+								Say("external editor: " + error, engine::core::LogLevel::Warning);
+							}
+						}
+						ImGui::Separator();
+					}
+
+					// **The monospace face, which is what makes this a code
+					// editor rather than a text box.** Columns line up, an
+					// `l` is not an `I`, and indentation is a width rather
+					// than a guess. `mono.studio/AGENTS.md` listed the
+					// absence of one as a deferred gap with the reason being
+					// a font this repository did not have; it has four now.
+					//
+					// **Zoom is the size this is pushed at, rather than a
+					// window scale laid over it.** `Options::Scale` rebuilds
+					// every metric in the editor and needs a restart to
+					// rasterise the faces at the new size; this is one
+					// panel's text, and wanting bigger code is not wanting a
+					// bigger properties panel.
+					//
+					// It has to be the pushed size specifically:
+					// `SetWindowFontScale` scales the window it is called
+					// on, and both the code and the gutter draw into child
+					// windows - which imgui begins at scale 1 whatever their
+					// parent was set to. That zoomed the frame and the row
+					// spacing measured out here, and left every glyph inside
+					// them exactly the size it started at.
+					//
+					// Everything below draws inside this scope, so the
+					// gutter's row height and the field's line height come
+					// from one number and stay in step.
+					const engine::ui::ScopedFont code(
+						engine::ui::Typeface::Monospace, engine::ui::TextSize::Body, ScriptZoom
+					);
+
+					// **The gutter, and it is a sibling of the code rather
+					// than part of it.** `CodeField` is an
+					// `InputTextMultiline`, which owns its own scrolling
+					// child - so a breakpoint column has to be drawn beside
+					// it and told where that child has scrolled to.
+					//
+					// See `DrawScriptGutter` for why reading one window's
+					// scroll is a different kind of reach into imgui from
+					// the one this file refuses two hundred lines up.
+					const ImGuiID fieldId = ImGui::GetID("##text");
+					const float gutter = DrawScriptGutter(tab, fieldId);
+
+					ImGui::SameLine(0.0f, 0.0f);
+
+					// **The navigation keys are claimed before the field is
+					// submitted, not after.** The text widget polls them
+					// during its own submission, so an owner set afterwards
+					// would arrive a frame late - Down would move the caret
+					// a line *and* the highlighted row, and Enter would
+					// insert a newline before accepting. `LockThisFrame` is
+					// what makes the widget's owner-agnostic poll fail
+					// rather than win.
+					// **Tab is on the list, and it can be.** The field
+					// polls Tab through `Shortcut` against its own id -
+					// the `AllowTabInput`/`CallbackCompletion` assert is
+					// about the *flags*, not the key - so the same
+					// `LockThisFrame` that keeps Enter out of the text
+					// keeps Tab out of the indentation, and Tab accepts
+					// exactly while the popup is up.
+					const ImGuiID popupId = ImGui::GetID("##completion");
+					if (ScriptPopupOpen) {
+						for (const ImGuiKey key :
+							 {ImGuiKey_UpArrow,
+							  ImGuiKey_DownArrow,
+							  ImGuiKey_Enter,
+							  ImGuiKey_KeypadEnter,
+							  ImGuiKey_Tab,
+							  ImGuiKey_Escape}) {
+							ImGui::SetKeyOwner(key, popupId, ImGuiInputFlags_LockThisFrame);
+						}
+					}
+
+					const ImVec2 fieldMin = ImGui::GetCursorScreenPos();
+
+					// The minimap's column, taken off the field's width
+					// up front. Fixed rather than zoomed: it is an
+					// overview of the file, not text somebody reads, so
+					// only the interface scale sizes it - and a panel too
+					// narrow to share simply keeps the whole width for
+					// the code.
+					const float minimapWidth = 72.0f * Settings.Scale;
+					const float available = ImGui::GetContentRegionAvail().x;
+					const bool minimapFits = Prefs.ScriptMinimap && available > minimapWidth * 3.0f;
+
+					if (Prefs.ScriptBackground.has_value()) {
+						ImGui::PushStyleColor(ImGuiCol_FrameBg, *Prefs.ScriptBackground);
+					}
+					ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 0));
+					const bool changed = CodeField(
+						"##text", tab.Text, &tab.Edit, minimapFits ? available - minimapWidth : -1.0f, -1.0f
+					);
+					ImGui::PopStyleColor();
+					if (Prefs.ScriptBackground.has_value()) {
+						ImGui::PopStyleColor();
+					}
+					DrawScriptSource(tab.Text, tab.Edit, fieldMin, ImGui::GetItemRectSize(), fieldId);
+
+					// Read here, while the field is still the last item,
+					// so imgui's own rest delay decides when a tooltip is
+					// wanted; the drawing happens after the completion
+					// has had its turn.
+					const bool resting =
+						ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_Stationary);
+
+					if (changed) {
+						tab.Modified = true;
+					}
+					(void)gutter;
+
+					if (minimapFits) {
+						ImGui::SameLine(0.0f, 0.0f);
+						DrawScriptMinimap(tab, minimapWidth, fieldId);
+					}
+
+					// Ctrl+Space asks for the list whatever is under the
+					// caret, which is the binding every editor has and the
+					// way through when the automatic rules decline.
+					const bool asked =
+						tab.Edit.Active && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Space);
+
+					UpdateScriptCompletion(tab, changed, asked);
+
+					if (ScriptPopupOpen) {
+						DrawScriptCompletion(tab, fieldMin, popupId, fieldId);
+					}
+
+					DrawScriptHover(tab, fieldMin, resting, fieldId);
+
+					// Ctrl+wheel over the text, which is what every editor
+					// binds it to.
+					ApplyZoomWheel(ScriptZoom);
+
+					// Ctrl+S inside the editor saves the *script*, not the
+					// game. The menu bar's shortcut is guarded on
+					// `WantTextInput`, so the two do not both fire.
+					if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
+						ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+						SaveScriptTab(tab);
+					}
 				}
 			}
-			ImGui::EndTabBar();
-		}
+			ImGui::End();
 
-		ImGui::End();
+			ImGui::PopID();
+
+			if (!open) {
+				closing = index;
+			}
+		}
 
 		if (closing < Scripts.size()) {
 			// Saved on the way out rather than dropped. An editor that lost
@@ -413,6 +435,7 @@ namespace studio {
 				SaveScriptTab(Scripts[closing]);
 			}
 			CloseScriptTab(closing);
+			ShowScripts = !Scripts.empty();
 		}
 	}
 
@@ -528,6 +551,7 @@ namespace studio {
 
 			size_t lineStart = 0;
 			size_t line = 0;
+			std::string_view blockCommentEnd;
 			while (lineStart <= text.size()) {
 				const size_t lineEnd = text.find('\n', lineStart);
 				const size_t end = lineEnd == std::string_view::npos ? text.size() : lineEnd;
@@ -537,8 +561,36 @@ namespace studio {
 					ScriptToken token = ScriptToken::Plain;
 					size_t tokenEnd = at + 1;
 
-					if ((character == '-' && at + 1 < end && text[at + 1] == '-') ||
-						(character == '/' && at + 1 < end && text[at + 1] == '/')) {
+					if (!blockCommentEnd.empty()) {
+						token = ScriptToken::Comment;
+						const size_t close = text.find(blockCommentEnd, at);
+						if (close == std::string_view::npos || close >= end) {
+							tokenEnd = end;
+						} else {
+							tokenEnd = close + blockCommentEnd.size();
+							blockCommentEnd = {};
+						}
+					} else if ((character == '-' && at + 3 < end && text[at + 1] == '-' &&
+								text[at + 2] == '[' && text[at + 3] == '[')) {
+						token = ScriptToken::Comment;
+						const size_t close = text.find("]]", at + 4);
+						if (close == std::string_view::npos || close >= end) {
+							tokenEnd = end;
+							blockCommentEnd = "]]";
+						} else {
+							tokenEnd = close + 2;
+						}
+					} else if ((character == '/' && at + 1 < end && text[at + 1] == '*')) {
+						token = ScriptToken::Comment;
+						const size_t close = text.find("*/", at + 2);
+						if (close == std::string_view::npos || close >= end) {
+							tokenEnd = end;
+							blockCommentEnd = "*/";
+						} else {
+							tokenEnd = close + 2;
+						}
+					} else if ((character == '-' && at + 1 < end && text[at + 1] == '-') ||
+							   (character == '/' && at + 1 < end && text[at + 1] == '/')) {
 						token = ScriptToken::Comment;
 						tokenEnd = end;
 					} else if (character == '\'' || character == '"' || character == '`') {

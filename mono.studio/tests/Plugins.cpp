@@ -449,7 +449,7 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 	CHECK(plugin.Running);
 	CHECK(plugin.Manifest.Id == "atomic.default-studio");
 	REQUIRE(plugin.Toolbars.size() == 6);
-	REQUIRE(plugin.Widgets.size() == 6);
+	REQUIRE(plugin.Widgets.size() == 5);
 
 	const std::array expectedWidgets = {
 		std::tuple{"explorer", "Explorer", BuiltinStudioPanel::Explorer, PluginDock::Left},
@@ -457,7 +457,6 @@ TEST_CASE("the default Studio plugin owns the standard toolbar", "[studio][plugi
 		std::tuple{
 			"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
 		},
-		std::tuple{"script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre},
 		std::tuple{"dataset-editor", "Dataset Editor", BuiltinStudioPanel::DatasetEditor, PluginDock::Bottom},
 		std::tuple{"roblox-import", "Roblox Import", BuiltinStudioPanel::RobloxImport, PluginDock::Bottom},
 	};

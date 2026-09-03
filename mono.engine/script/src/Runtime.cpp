@@ -4,11 +4,36 @@
 #include <engine/script/Runtime.hpp>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace engine::script {
+
+	namespace {
+		// Windows faults raised by a VM extension are structured exceptions, not
+		// C++ exceptions. Keep the SEH block in this destructor-free helper so
+		// MSVC can unwind the caller normally when an ordinary C++ exception
+		// crosses the same boundary.
+		bool RunInstanceIsolated(Runtime &runtime, const ecs::Entity instance, unsigned long &fault) {
+#ifdef _WIN32
+			__try {
+				return runtime.RunInstance(instance);
+			} __except (EXCEPTION_EXECUTE_HANDLER) {
+				fault = static_cast<unsigned long>(GetExceptionCode());
+				return false;
+			}
+#else
+			(void)fault;
+			return runtime.RunInstance(instance);
+#endif
+		}
+	}
 
 	Language LanguageOf(std::string_view path) {
 		const std::filesystem::path file(path);
@@ -73,7 +98,18 @@ namespace engine::script {
 			(void)RememberStarted(instance);
 
 			const uint64_t before = StepsTaken();
-			const bool ok = RunInstance(instance);
+			bool ok = false;
+			unsigned long fault = 0;
+			try {
+				ok = RunInstanceIsolated(*this, instance, fault);
+			} catch (const std::exception &failure) {
+				Error = failure.what();
+			} catch (...) {
+				Error = "script raised an unknown host exception";
+			}
+			if (fault != 0) {
+				Error = "script caused Windows exception " + std::to_string(fault);
+			}
 			const uint64_t after = StepsTaken();
 
 			// Saturating, because the counter resets when a script blows its
@@ -85,6 +121,11 @@ namespace engine::script {
 				ran++;
 				continue;
 			}
+
+			// A failed top-level script must not be considered again by a later
+			// discovery pass. More importantly, keeping the failure on this row
+			// isolates it from the rest of the world's scripts.
+			Store.Set(instance, Disabled{});
 
 			// **Every script runs even when one fails**, for the reason every
 			// heartbeat connection does: a game where half the scripts silently
@@ -126,10 +167,25 @@ namespace engine::script {
 				continue;
 			}
 
-			if (RunInstance(instance)) {
+			bool ok = false;
+			unsigned long fault = 0;
+			try {
+				ok = RunInstanceIsolated(*this, instance, fault);
+			} catch (const std::exception &failure) {
+				Error = failure.what();
+			} catch (...) {
+				Error = "script raised an unknown host exception";
+			}
+			if (fault != 0) {
+				Error = "script caused Windows exception " + std::to_string(fault);
+			}
+
+			if (ok) {
 				started++;
 				continue;
 			}
+
+			Store.Set(instance, Disabled{});
 
 			// Logged per failure and reported once, for the reason
 			// `RunWorldScripts` gives: a world where half the scripts silently

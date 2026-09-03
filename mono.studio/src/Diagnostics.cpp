@@ -1682,8 +1682,35 @@ namespace studio {
 			return 0.0;
 		};
 
+		const auto compareRows =
+			[&view, &rateOf](const engine::core::HeapTreeRow &left, const engine::core::HeapTreeRow &right) {
+				const auto less = [&view, &rateOf](
+									  const engine::core::HeapTreeRow &first,
+									  const engine::core::HeapTreeRow &second
+								  ) {
+					switch (view.Sort) {
+					case HeapView::SortColumn::Tag:
+						return first.Name < second.Name;
+					case HeapView::SortColumn::Live:
+						return first.InclusiveBytes < second.InclusiveBytes;
+					case HeapView::SortColumn::Self:
+						return first.SelfBytes < second.SelfBytes;
+					case HeapView::SortColumn::Blocks:
+						return first.LiveBlocks < second.LiveBlocks;
+					case HeapView::SortColumn::Growth:
+						return rateOf(first.Node) < rateOf(second.Node);
+					}
+					return false;
+				};
+				return view.SortAscending ? less(left, right) : less(right, left);
+			};
+
+		std::vector<engine::core::HeapTreeRow> rows = view.Rows;
+		std::stable_sort(rows.begin(), rows.end(), compareRows);
+
 		constexpr ImGuiTableFlags TABLE = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
-										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
+										  ImGuiTableFlags_Sortable;
 		if (ImGui::BeginTable("heaptags", 5, TABLE)) {
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableSetupColumn("Tag", ImGuiTableColumnFlags_WidthStretch, 3.0f);
@@ -1692,8 +1719,15 @@ namespace studio {
 			ImGui::TableSetupColumn("Blocks", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 			ImGui::TableSetupColumn("Growth", ImGuiTableColumnFlags_WidthStretch, 1.2f);
 			ImGui::TableHeadersRow();
+			if (ImGuiTableSortSpecs *sort = ImGui::TableGetSortSpecs(); sort != nullptr && sort->SpecsDirty) {
+				const ImGuiTableColumnSortSpecs &spec = sort->Specs[0];
+				view.Sort = static_cast<HeapView::SortColumn>(spec.ColumnIndex);
+				view.SortAscending = spec.SortDirection == ImGuiSortDirection_Ascending;
+				std::stable_sort(rows.begin(), rows.end(), compareRows);
+				sort->SpecsDirty = false;
+			}
 
-			for (const engine::core::HeapTreeRow &row : view.Rows) {
+			for (const engine::core::HeapTreeRow &row : rows) {
 				ImGui::TableNextRow();
 
 				ImGui::TableNextColumn();
