@@ -23,6 +23,13 @@ Usage:
 
     scripts/flamegraph.py in.folded --svg out.svg --top out_top.txt
 
+Multiprocess captures keep main at the requested path and write child captures
+beside it as `<label>.processN.folded`. Select one without spelling its derived
+path, or list the captures that exist:
+
+    scripts/flamegraph.py run.folded --worker process2 --svg process2.svg
+    scripts/flamegraph.py run.folded --list-workers
+
 The colour of a frame is a hash of its name, so the same span is the same
 colour in two captures and a diff by eye is possible at all.
 
@@ -267,6 +274,7 @@ def WriteTop(root: Node, path: Path, count: int, title: str) -> None:
 # written at, so two snapshots subtract into the window between them with no
 # window tracking on the server's side.
 WINDOW_PATTERN = re.compile(r"\.window(\d+)\.folded$")
+WORKER_PATTERN = re.compile(r"^(?:process)?(\d+)$")
 
 
 def WindowTicks(path: Path) -> int:
@@ -275,6 +283,44 @@ def WindowTicks(path: Path) -> int:
 	if not match:
 		raise SystemExit(f"{path}: not a '<label>.window<TICKS>.folded' snapshot")
 	return int(match.group(1))
+
+
+def WorkerName(value: str) -> str:
+	"""Normalises a selector to `main` or `processN`."""
+	worker = value.lower().replace(" ", "")
+	if worker == "main":
+		return worker
+	match = WORKER_PATTERN.fullmatch(worker)
+	if not match or int(match.group(1)) <= 0:
+		raise argparse.ArgumentTypeError("worker must be main, N, or processN")
+	return f"process{int(match.group(1))}"
+
+
+def SelectWorker(path: Path, worker: str) -> Path:
+	"""Derives one process capture from the main capture's path."""
+	if worker == "main":
+		return path
+	stem = path.stem
+	window = re.search(r"\.window\d+$", stem)
+	if window:
+		stem = stem[: window.start()] + f".{worker}" + stem[window.start() :]
+	else:
+		stem += f".{worker}"
+	return path.with_name(stem + path.suffix)
+
+
+def AvailableWorkers(path: Path) -> list[str]:
+	"""Lists selectors with a whole-run or window capture beside `path`."""
+	stem = re.sub(r"\.window\d+$", "", path.stem)
+	workers = {"main"} if path.is_file() else set()
+	if not path.parent.is_dir():
+		return sorted(workers)
+	pattern = re.compile(rf"^{re.escape(stem)}\.process(\d+)(?:\.window\d+)?{re.escape(path.suffix)}$")
+	for candidate in path.parent.iterdir():
+		match = pattern.fullmatch(candidate.name)
+		if match:
+			workers.add(f"process{int(match.group(1))}")
+	return sorted(workers, key=lambda name: 0 if name == "main" else int(name.removeprefix("process")))
 
 
 def Mean(values: list[float]) -> float:
@@ -381,9 +427,22 @@ def main() -> int:
 	parser.add_argument("--top", type=Path, help="where to write the text summary")
 	parser.add_argument("--count", type=int, default=20, help="how many rows the summary lists")
 	parser.add_argument("--title", default="", help="the heading drawn on the graph")
+	parser.add_argument(
+		"--worker", type=WorkerName, default="main", help="capture to read: main, N, or processN"
+	)
+	parser.add_argument("--list-workers", action="store_true", help="list available process captures and exit")
 	arguments = parser.parse_args()
 
+	if arguments.list_workers:
+		if arguments.folded is None:
+			print("FOLDED is required with --list-workers", file=sys.stderr)
+			return 2
+		for worker in AvailableWorkers(arguments.folded):
+			print(worker)
+		return 0
+
 	if arguments.average:
+		arguments.average = [SelectWorker(path, arguments.worker) for path in arguments.average]
 		missing = [path for path in arguments.average if not path.is_file()]
 		if missing:
 			print(f"no such window snapshot(s): {', '.join(str(path) for path in missing)}", file=sys.stderr)
@@ -407,6 +466,7 @@ def main() -> int:
 	if arguments.folded is None:
 		print("either FOLDED or --average is required", file=sys.stderr)
 		return 2
+	arguments.folded = SelectWorker(arguments.folded, arguments.worker)
 	if not arguments.folded.is_file():
 		print(f"no such capture: {arguments.folded}", file=sys.stderr)
 		return 2

@@ -4,7 +4,10 @@
 #include <engine/game/Game.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Integrate.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
@@ -313,6 +316,11 @@ namespace client {
 		// Per-world state belongs in the store.
 		store.SetResource(SnapshotBuffer{interpolation});
 
+		// A replica advances no physics, but its local camera still has to query
+		// the walls the authority sent. The broadphase is derived presentation
+		// state here: it indexes received colliders and never moves a body.
+		engine::physics::PreparePhysicsWorld(store);
+
 		// **The two resources that make a replica somewhere a player stands
 		// rather than somewhere they watch.** Both are on
 		// `replication::LocalToTheClient`'s list, so nothing arriving from the
@@ -353,6 +361,7 @@ namespace client {
 		scheduler.Add("replica-camera", Phase::PreRender, [](Store &store) {
 			(void)engine::scene::UpdateCameraControl(store);
 			(void)engine::scene::FollowOwnCharacter(store);
+			(void)engine::physics::UpdatePoppercam(store);
 			(void)engine::scene::PlaceCamera(store);
 		});
 
@@ -487,5 +496,10 @@ namespace client {
 		store.Each<const Transform>([buffer, tick](Entity entity, const Transform &transform) {
 			buffer->Record(tick, entity, transform.Frame);
 		});
+
+		// The rows now hold one complete received tick. Index them once here,
+		// rather than rebuilding moving colliders at the presentation frame rate,
+		// so the local poppercam queries the same geometry the replica draws.
+		engine::physics::SyncBroadphase(store);
 	}
 }

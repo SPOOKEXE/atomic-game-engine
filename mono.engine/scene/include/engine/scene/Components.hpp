@@ -757,18 +757,10 @@ namespace engine::scene {
 
 	// The text a `StringValue` or a `LocalizationTable` carries.
 	//
-	// **One component for both, because both are an instance whose whole content
-	// is a string.** Roblox has a `ValueBase` family - `StringValue`, `IntValue`,
-	// `BoolValue` and the rest - and this engine has the one member of it that
-	// something already needs: Rojo maps `*.txt` onto a `StringValue` and
-	// `*.csv` onto a `LocalizationTable`, and a folder sync that could not build
-	// either is a folder sync that silently drops files.
-	//
-	// **The other value classes are deliberately absent.** A class per primitive
-	// is Roblox's answer to not having attributes; this engine has
-	// `ecs::Attributes`, which holds a typed value under a name on *any*
-	// instance and is strictly better for the job. Adding `IntValue` would be
-	// adding a second way to hang a number off the tree.
+	// One component serves both because both are instances whose whole content
+	// is verbatim text. The other `ValueBase` leaves use typed components below,
+	// which keeps the property type exact without making every leaf carry a
+	// variant large enough for every possible value.
 	//
 	// **A `LocalizationTable` here holds its CSV and does not resolve
 	// anything.** Translation lookup is a service with a locale, a fallback
@@ -785,6 +777,68 @@ namespace engine::scene {
 		// exists for exactly this distinction and `D00020` is the leak that
 		// established it.
 		std::string Value;
+	};
+
+	// A boolean carried by a `BoolValue` instance.
+	//
+	// The padding is named because the generated component writer serialises the
+	// complete object representation.
+	//
+	// @since v0.22
+	struct BoolValue {
+		// The value scripts and authored files read and write.
+		bool Value = false;
+
+		// Named padding, kept zero so snapshots are deterministic.
+		uint8_t Reserved[3] = {};
+	};
+
+	// A coordinate frame carried by a `CFrameValue` instance.
+	//
+	// @since v0.22
+	struct CFrameValue {
+		// The value scripts and authored files read and write.
+		core::CFrame Value;
+	};
+
+	// A colour carried by a `Color3Value` instance.
+	//
+	// @since v0.22
+	struct Color3Value {
+		// The value scripts and authored files read and write.
+		core::Color3 Value;
+	};
+
+	// A signed 64-bit integer carried by an `IntValue` instance.
+	//
+	// @since v0.22
+	struct IntValue {
+		// The value scripts and authored files read and write.
+		int64_t Value = 0;
+	};
+
+	// A double-precision number carried by a `NumberValue` instance.
+	//
+	// @since v0.22
+	struct NumberValue {
+		// The value scripts and authored files read and write.
+		double Value = 0.0;
+	};
+
+	// An instance reference carried by an `ObjectValue` instance.
+	//
+	// @since v0.22
+	struct ObjectValue {
+		// The referenced instance, or `ecs::NULL_ENTITY` when unset.
+		ecs::Entity Value;
+	};
+
+	// A three-dimensional vector carried by a `Vector3Value` instance.
+	//
+	// @since v0.22
+	struct Vector3Value {
+		// The value scripts and authored files read and write.
+		core::Vector3 Value;
 	};
 
 	// The GLSL a `ShaderScript` holds, as the world holds it.
@@ -1188,10 +1242,12 @@ namespace engine::scene {
 		// this one will have several - a stage list that had to be rewritten to
 		// add a second mirror would be a stage list that encoded the count.
 		//
-		// Negative is the scene pass's explicit "do not render": a disabled
-		// portal, an edge-on mirror, or a pane the per-world limit did not have
-		// room for this frame all clear their slot this way.
-		int16_t Surface = 0;
+		// Negative is the scene pass's explicit "do not render": a camera that
+		// has not been aimed yet, a disabled portal, an edge-on mirror, or a pane
+		// the per-world limit did not have room for this frame all carry no slot.
+		// A fresh camera cannot claim zero because several can arrive from the
+		// authority before this viewer's aim pass assigns their local slots.
+		int16_t Surface = -1;
 
 		// What the image is put through before a pane shows it.
 		//

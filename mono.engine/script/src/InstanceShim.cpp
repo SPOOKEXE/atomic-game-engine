@@ -76,6 +76,9 @@ namespace engine::script {
 		if (!id.IsValid()) {
 			return {.Failure = InstanceCreateFailure::UnknownClass};
 		}
+		if (!ecs::Classes::Describe(id).Creatable) {
+			return {.Failure = InstanceCreateFailure::NotCreatable};
+		}
 
 		const ecs::Entity instance = store.CreateInstance(id, className);
 		if (instance == ecs::NULL_ENTITY) {

@@ -10,6 +10,7 @@
 // this module, so the query and the wake both live here.
 
 #include <engine/ecs/Store.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -21,6 +22,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -210,6 +212,33 @@ namespace {
 			return entity;
 		}
 
+		void Portal(float at) {
+			PartDesc pane;
+			pane.Size = Vector3{4.0f, 4.0f, 0.2f};
+			pane.Frame = CFrame(Vector3{0.0f, 0.0f, at});
+			pane.Simulated = false;
+			const Entity nearPane = MakePart(World, pane);
+			World.SetParent(nearPane, engine::scene::WorkspaceOf(World));
+
+			pane.Frame = CFrame(Vector3{100.0f, 0.0f, 0.0f});
+			const Entity farPane = MakePart(World, pane);
+			World.SetParent(farPane, engine::scene::WorkspaceOf(World));
+
+			const auto link = [&](Entity source, Entity destination, const char *name) {
+				const Entity hole = World.CreateInstance(
+					engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), name
+				);
+				World.Set(hole, engine::scene::SurfaceCamera{});
+				World.Set(hole, engine::scene::Portal{destination});
+				World.SetParent(hole, source);
+			};
+
+			link(nearPane, farPane, "NearHole");
+			link(farPane, nearPane, "FarHole");
+			REQUIRE(engine::scene::OpenPortals(World) == 2);
+			Reindex();
+		}
+
 		void Reindex() {
 			engine::physics::SyncBroadphase(World);
 			engine::physics::BroadPhase(World);
@@ -235,6 +264,18 @@ TEST_CASE("a wall between the eye and its subject is pulled in front of and fade
 	// Nothing else in the scene is touched - the fade is exactly the one
 	// blocker, not every part between the eye and the subject.
 	CHECK(LocalTransparencyOf(world.World, world.Subject) == 0.0f);
+}
+
+TEST_CASE("poppercam looks through a portal instead of pulling up to its pane", "[physics][characters]") {
+	// Portal panes keep trigger colliders so contacts still report crossings.
+	// A plain ray sees that glass first and turns a valid camera arm into an
+	// occlusion. The portal-aware query spends the rest of the arm in the far
+	// room and leaves the desired distance alone when nothing there blocks it.
+	Occludable world;
+	world.Portal(5.0f);
+
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0.0f);
 }
 
 TEST_CASE("clearing the wall restores the setting and un-fades it", "[physics][characters]") {

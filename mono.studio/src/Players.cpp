@@ -252,51 +252,33 @@ namespace studio {
 
 		const WorldId replica = link->ReplicaWorld();
 
-		// **A panel to see it from, or the client is a log line.** The first
-		// free one; a viewport somebody has already pointed at another scene is
-		// left alone, because taking it would be the editor rearranging their
-		// layout for them.
-		bool shown = false;
-		for (ViewportState &view : Extras) {
-			if (view.World.IsValid() && view.World != replica) {
-				continue;
-			}
-
-			view.World = replica;
-			view.Open = true;
-
-			// Where the main camera is, so a client view that has not received
-			// its character yet opens looking at the same thing rather than at
-			// the origin.
-			view.Frame = CameraFrame;
-			view.Yaw = CameraYaw;
-			view.Pitch = CameraPitch;
-			shown = true;
-			break;
-		}
-
-		// **Said once per run rather than once per client.** `--run play` starts
-		// every world in a game, so with more clients than panels this fired
-		// once a world at startup - five lines about a layout nobody had chosen
-		// yet. It is worth saying when a run has no client panel at all, because
-		// then the client really is invisible; it is noise when the run already
-		// has one and this is the second.
-		if (!shown) {
-			const bool anyShown = std::any_of(
-				run->Links.begin(), run->Links.end(), [this](const std::unique_ptr<PlayLink> &other) {
-					if (other == nullptr || !other->IsRunning()) {
-						return false;
-					}
-					return std::any_of(Extras.begin(), Extras.end(), [&other](const ViewportState &view) {
-						return view.Open && view.World == other->ReplicaWorld();
-					});
+		// **One generated split per client.** The first opens beside the panel
+		// whose transport started Play. Later clients open beside the previous
+		// client, so increasing the count grows the layout instead of hiding the
+		// extra worlds behind tabs or leaving them without a panel.
+		size_t splitFrom = FocusedViewport;
+		if (!run->Links.empty()) {
+			const WorldId previousReplica = run->Links.back()->ReplicaWorld();
+			for (size_t index = 0; index < Extras.size(); index++) {
+				if (Extras[index].Open && Extras[index].World == previousReplica) {
+					splitFrom = index + 1;
+					break;
 				}
-			);
-
-			if (!anyShown) {
-				Say(label + " has no free viewport - pick it in a panel's scene selector");
 			}
 		}
+
+		const size_t made = AddViewportBeside(splitFrom);
+		ViewportState *view = ExtraAt(made);
+		if (view == nullptr) {
+			StopPlayLink(*link);
+			Say("no client view: could not allocate a viewport", engine::core::LogLevel::Error);
+			return false;
+		}
+
+		view->World = replica;
+		view->CameraMemory.Place(replica, ViewportCameraPose{view->Frame, view->Yaw, view->Pitch});
+		view->SplitBeside = splitFrom + 1;
+		view->DockInto = 0;
 
 		// **The run's recorded mode follows the count, and the log says what
 		// that does not change.** A Server run started its scripts with
@@ -342,19 +324,9 @@ namespace studio {
 
 		const WorldId replica = (*chosen)->ReplicaWorld();
 
-		// **Unpinned before the world under it goes.** A pin naming a destroyed
-		// world leaves the panel following the active scene with no way to tell
-		// that it stopped showing what it was opened for - the same order
-		// `EndRun` takes, for the same reason.
-		for (ViewportState &view : Extras) {
-			if (view.World == replica) {
-				view.World = WorldId{};
-				view.Follow = NULL_ENTITY;
-			}
-		}
+		CloseClientViewports(replica);
 
-		StopPlaytestPlugins(replica);
-		(*chosen)->Stop(*Universe);
+		StopPlayLink(**chosen);
 		run->Links.erase(chosen);
 
 		Say("a client left");
@@ -517,8 +489,7 @@ namespace studio {
 							view.Follow = NULL_ENTITY;
 						}
 					}
-					StopPlaytestPlugins(oldReplica);
-					link->Stop(*Universe);
+					StopPlayLink(*link);
 					link.reset();
 					continue;
 				}
@@ -527,8 +498,7 @@ namespace studio {
 				// already gone** - so `PlayLink::Stop`'s own destroy finds
 				// nothing to destroy, which is exactly right: the teleport did
 				// it, in the world that was allowed to.
-				StopPlaytestPlugins(oldReplica);
-				link->Stop(*Universe);
+				StopPlayLink(*link);
 
 				auto moved = std::make_unique<PlayLink>();
 				std::string error;

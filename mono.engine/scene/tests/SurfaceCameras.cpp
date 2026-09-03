@@ -86,6 +86,9 @@ namespace {
 
 			SurfaceCamera target;
 			target.Face = face;
+			// Low-level seam cases use this fixture without running the aim pass.
+			// Give those cases the slot a local viewer would have assigned.
+			target.Surface = 0;
 			World.Set<SurfaceCamera>(Reflection, target);
 
 			World.SetParent(Reflection, Pane);

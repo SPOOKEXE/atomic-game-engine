@@ -442,6 +442,12 @@ TEST_CASE("insertable classes exclude services and abstract bases", "[studio][co
 	// service, so offering one offers a second that nothing resolves.
 	CHECK(std::find(names.begin(), names.end(), "Workspace") == names.end());
 	CHECK(std::find(names.begin(), names.end(), "Instance") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "PVInstance") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "BasePart") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "WorldRoot") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "ValueBase") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "Constraint") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "JointInstance") == names.end());
 }
 
 TEST_CASE("the list is ranked and stable", "[studio][complete]") {

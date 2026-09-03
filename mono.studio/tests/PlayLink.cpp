@@ -12,10 +12,13 @@
 // the difference between the two sides.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -309,6 +312,46 @@ TEST_CASE("stopping takes the client view away with it", "[studio][playlink]") {
 	CHECK_FALSE(link.IsRunning());
 }
 
+TEST_CASE("world residency releases a particle pool after it grows", "[studio][playlink][particles]") {
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	engine::effects::RegisterEffectClasses();
+
+	WorldSettings settings;
+	settings.Name = Name("particle-stress");
+	const WorldId world = editor.Universe->Create(settings);
+	REQUIRE(world.IsValid());
+
+	editor.Universe->Enter(world, [](Store &store) {
+		engine::effects::InstallParticles(store, 64, 128);
+		engine::scene::PartDesc partDescription;
+		partDescription.Simulated = false;
+		const Entity part = engine::scene::MakePart(store, partDescription);
+		for (int index = 0; index < 7; index++) {
+			const Entity emitter = store.CreateInstance(engine::ecs::Classes::Find(Name("ParticleEmitter")));
+			REQUIRE(store.SetParent(emitter, part));
+			auto *settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+			REQUIRE(settings != nullptr);
+			settings->Rate = 10.0f;
+			settings->Lifetime = engine::core::NumberRange{2.0f, 2.0f};
+		}
+
+		engine::scene::ResolveAttachments(store);
+		engine::effects::RefreshEmitters(store);
+		const auto *particles = store.Resource<engine::effects::ParticleSystem>();
+		REQUIRE(particles != nullptr);
+		REQUIRE(particles->Capacity == 128);
+		REQUIRE(particles->Instances.capacity() >= 128);
+	});
+
+	editor.ReleaseWorldResidency(world);
+	editor.Universe->Enter(world, [](Store &store) {
+		CHECK(store.Resource<engine::effects::ParticleSystem>() == nullptr);
+	});
+	CHECK(editor.Universe->NameOf(world) == Name("particle-stress"));
+}
+
 TEST_CASE("a link refuses to start twice and refuses a world that is not there", "[studio][playlink]") {
 	Fixture fixture;
 	PlayLink link;
@@ -459,6 +502,85 @@ TEST_CASE("two clients get two worlds with two names", "[studio][playlink]") {
 
 	first.Stop(fixture.Worlds);
 	second.Stop(fixture.Worlds);
+}
+
+TEST_CASE("play client panels grow and close independently", "[studio][playlink][viewport]") {
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+
+	engine::parallel::Jobs::Start(1);
+	engine::scene::RegisterSceneComponents();
+
+	WorldSettings settings;
+	settings.Name = Name("Scene");
+	settings.TickRate = TICK_RATE;
+	const WorldId authority = editor.Universe->Create(settings);
+	editor.Active = authority;
+
+	editor.Universe->Enter(authority, [](Store &store, engine::ecs::Scheduler &systems) {
+		engine::scene::RegisterSceneClasses();
+		engine::scene::InstallServices(store);
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(systems);
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(systems);
+		engine::scene::RegisterOwnershipSystem(systems);
+		engine::physics::RegisterCharacterSystems(systems);
+	});
+
+	studio::Editor::WorldRun run;
+	run.World = authority;
+	run.Mode = studio::RunMode::Play;
+
+	auto first = std::make_unique<PlayLink>();
+	auto second = std::make_unique<PlayLink>();
+	std::string error;
+	REQUIRE(first->Start(*editor.Universe, authority, TICK_RATE, error, "client 1"));
+	REQUIRE(second->Start(*editor.Universe, authority, TICK_RATE, error, "client 2"));
+	const WorldId firstReplica = first->ReplicaWorld();
+	const WorldId secondReplica = second->ReplicaWorld();
+	run.Links.push_back(std::move(first));
+	run.Links.push_back(std::move(second));
+	editor.Runs.push_back(std::move(run));
+
+	const size_t firstPanel = editor.AddViewportBeside(0);
+	studio::Editor::ViewportState *firstView = editor.ExtraAt(firstPanel);
+	REQUIRE(firstView != nullptr);
+	firstView->World = firstReplica;
+	firstView->SplitBeside = 1;
+
+	REQUIRE(editor.Extras.size() >= 1);
+	CHECK(editor.Extras[0].Open);
+	CHECK(editor.Extras[0].World == firstReplica);
+	CHECK(editor.Extras[0].SplitBeside == 1);
+
+	// The next client grows from the first client's panel. Its source is kept
+	// as a panel index because imgui has not made either client dock node yet.
+	const size_t secondPanel = editor.AddViewportBeside(firstPanel);
+	studio::Editor::ViewportState *secondView = editor.ExtraAt(secondPanel);
+	REQUIRE(secondView != nullptr);
+	secondView->World = secondReplica;
+	secondView->SplitBeside = firstPanel + 1;
+
+	REQUIRE(editor.Extras.size() >= 2);
+	CHECK(editor.Extras[1].Open);
+	CHECK(editor.Extras[1].World == secondReplica);
+	CHECK(editor.Extras[1].SplitBeside == 2);
+
+	// Removing one client removes its generated split instead of leaving an
+	// empty viewport behind that silently falls back to the server world.
+	editor.CloseClientViewports(secondReplica);
+	CHECK_FALSE(editor.Extras[1].Open);
+	CHECK_FALSE(editor.Extras[1].World.IsValid());
+	CHECK(editor.Extras[1].SplitBeside == 0);
+
+	editor.EndRun(authority);
+	CHECK_FALSE(editor.Extras[0].Open);
+	CHECK_FALSE(editor.Extras[0].World.IsValid());
+	CHECK(editor.Extras[0].SplitBeside == 0);
+
+	editor.Universe.reset();
+	engine::parallel::Jobs::Stop();
 }
 
 TEST_CASE("what the server holds arrives on every client", "[studio][playlink]") {

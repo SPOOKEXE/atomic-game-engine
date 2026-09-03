@@ -150,6 +150,25 @@ namespace engine::render {
 			const AdornmentLine &style,
 			const AdornmentFace *fill
 		);
+		void AddCircle(
+			const core::CFrame &frame,
+			uint32_t axis,
+			float radius,
+			float angleDegrees,
+			const AdornmentLine &style
+		);
+		void AddSphere(const core::CFrame &frame, float radius, const AdornmentLine &style);
+		void AddCylinder(
+			const core::CFrame &frame,
+			float radius,
+			float innerRadius,
+			float height,
+			float angleDegrees,
+			const AdornmentLine &style
+		);
+		void AddCone(
+			const core::CFrame &frame, float radius, float height, bool hollow, const AdornmentLine &style
+		);
 
 		std::vector<AdornmentLine> Segments;
 		std::vector<AdornmentFace> Fills;

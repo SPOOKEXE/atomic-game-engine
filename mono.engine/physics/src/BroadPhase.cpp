@@ -7,12 +7,14 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -21,6 +23,16 @@
 namespace engine::physics {
 
 	namespace {
+		// Enough colliders to make one handover worthwhile without leaving a
+		// dense patch on one worker. The StressPhysics release profile measures
+		// the pair walk at roughly 340 microseconds per thousand moving bodies.
+		constexpr size_t BROADPHASE_BATCH_SIZE = 1024;
+
+		// The common query stays on the stack. A batch that finds a denser cell is
+		// replayed after the join with the world's full retained candidate buffer,
+		// so this bound changes memory traffic and never changes the pair set.
+		constexpr size_t LOCAL_CANDIDATES = 256;
+
 		// The pair, with the smaller entity id first, and its indices swapped to
 		// match.
 		//
@@ -33,6 +45,71 @@ namespace engine::physics {
 				return SourcedPair{CandidatePair{left, right}, CandidateSource{leftAt, rightAt}};
 			}
 			return SourcedPair{CandidatePair{right, left}, CandidateSource{rightAt, leftAt}};
+		}
+
+		// Collects one disjoint range of dynamic proxies into caller-owned output.
+		// Returns false without a partial answer when either overlap query fills
+		// its scratch, so the caller can retry the same range with wider storage.
+		bool CollectPairs(
+			const PhysicsWorld &world,
+			const std::vector<spatial::Proxy> &dynamicProxies,
+			const std::vector<ColliderRecord> &dynamicRecords,
+			const std::vector<ColliderRecord> &staticRecords,
+			const spatial::HashGrid &dynamicIndex,
+			const spatial::HashGrid &staticIndex,
+			size_t begin,
+			size_t end,
+			std::span<uint64_t> candidates,
+			std::vector<SourcedPair> &output
+		) {
+			output.clear();
+			for (size_t index = begin; index < end; index++) {
+				const ColliderRecord &a = dynamicRecords[index];
+				const core::AABB &box = dynamicProxies[index].Bounds;
+
+				const spatial::QueryResult moving = spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
+				if (moving.Overflowed) {
+					output.clear();
+					return false;
+				}
+				for (size_t at = 0; at < moving.Written; at++) {
+					const auto other = static_cast<size_t>(candidates[at]);
+					if (other <= index) {
+						continue;
+					}
+
+					const ColliderRecord &b = dynamicRecords[other];
+					if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner)) {
+						continue;
+					}
+					output.push_back(
+						Ordered(a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other))
+					);
+				}
+
+				const spatial::QueryResult anchored = spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
+				if (anchored.Overflowed) {
+					output.clear();
+					return false;
+				}
+				for (size_t at = 0; at < anchored.Written; at++) {
+					const auto other = static_cast<size_t>(candidates[at]);
+					const ColliderRecord &b = staticRecords[other];
+					if (b.Owner == a.Owner) {
+						continue;
+					}
+					if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner)) {
+						continue;
+					}
+					output.push_back(Ordered(
+						a.Owner,
+						b.Owner,
+						static_cast<uint32_t>(index),
+						static_cast<uint32_t>(other) | CandidateSource::STATIC
+					));
+				}
+			}
+			return true;
 		}
 	}
 
@@ -72,78 +149,95 @@ namespace engine::physics {
 		// index and from the narrow phase that consumes the pairs. This is
 		// the part that scales with how *clustered* a scene is rather than
 		// with how large it is, and the two want different answers.
-		ENGINE_PROFILE_CAT("physics.query", core::ProfileCategory::Physics);
+		{
+			ENGINE_PROFILE_CAT("physics.query", core::ProfileCategory::Physics);
 
-		// Only dynamic colliders are queried. Two anchored parts overlapping is
-		// the level author's business, and a pair the solver could not move
-		// either half of costs a contact for nothing.
-		for (size_t index = 0; index < dynamicRecords.size(); index++) {
-			const ColliderRecord &a = dynamicRecords[index];
-			const core::AABB &box = dynamicProxies[index].Bounds;
+			// Only dynamic colliders are queried. Each batch owns its output,
+			// while every query reads the same immutable indexes. The final sort
+			// below keeps the result independent of which worker finished first.
+			const size_t batchCount =
+				(dynamicRecords.size() + BROADPHASE_BATCH_SIZE - 1) / BROADPHASE_BATCH_SIZE;
+			std::vector<std::vector<SourcedPair>> &batches = PipelineInternals::SourcedPairBatches(*world);
+			std::vector<uint8_t> &overflowed = PipelineInternals::SourcedPairOverflow(*world);
+			batches.resize(batchCount);
+			overflowed.assign(batchCount, 0);
 
-			// The index filters on `a.Mask` against each candidate's own
-			// layers, which is one half of the rule. The other half needs the
-			// candidate's mask, which is why a record exists at all.
-			const spatial::QueryResult moving = spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
-			for (size_t at = 0; at < moving.Written; at++) {
-				const auto other = static_cast<size_t>(candidates[at]);
+			parallel::Jobs::For(
+				batchCount,
+				1,
+				[&](size_t firstBatch, size_t lastBatch) {
+					std::array<uint64_t, LOCAL_CANDIDATES> localCandidates;
+					for (size_t batch = firstBatch; batch < lastBatch; batch++) {
+						const size_t begin = batch * BROADPHASE_BATCH_SIZE;
+						const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
+						overflowed[batch] = CollectPairs(
+							*world,
+							dynamicProxies,
+							dynamicRecords,
+							staticRecords,
+							dynamicIndex,
+							staticIndex,
+							begin,
+							end,
+							localCandidates,
+							batches[batch]
+						)
+							? 0
+							: 1;
+					}
+				},
+				2
+			);
 
-				// Strictly greater, which does three things in one comparison:
-				// it drops the query's own proxy, so nothing is ever paired
-				// with itself; it keeps each unordered pair exactly once, since
-				// the other side's query rejects the mirror; and it does both
-				// without depending on entity ids, so the *set* of pairs is the
-				// same however the rows happened to be laid out.
-				if (other <= index) {
+			// A dense or deliberately adversarial patch may exceed the stack
+			// scratch. Retry only those batches on the caller with storage wide
+			// enough for every proxy, preserving the old no-overflow contract.
+			for (size_t batch = 0; batch < batchCount; batch++) {
+				if (overflowed[batch] == 0) {
 					continue;
 				}
-
-				const ColliderRecord &b = dynamicRecords[other];
-				if (!PairAdmitted(a, b)) {
-					continue;
-				}
-				sourced.push_back(
-					Ordered(a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other))
+				const size_t begin = batch * BROADPHASE_BATCH_SIZE;
+				const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
+				CollectPairs(
+					*world,
+					dynamicProxies,
+					dynamicRecords,
+					staticRecords,
+					dynamicIndex,
+					staticIndex,
+					begin,
+					end,
+					candidates,
+					batches[batch]
 				);
 			}
 
-			const spatial::QueryResult anchored = spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
-			for (size_t at = 0; at < anchored.Written; at++) {
-				const ColliderRecord &b = staticRecords[static_cast<size_t>(candidates[at])];
-
-				// The two indexes are rebuilt on different schedules, so an
-				// entity that has just gained a `Motion` is in the dynamic one
-				// and still in the stale static one. `SyncBroadphase` notices
-				// and rebuilds within the same tick, but a body paired with
-				// itself is a body pushing itself, and one comparison is
-				// cheaper than relying on that ordering staying true.
-				if (b.Owner == a.Owner) {
-					continue;
-				}
-				if (!PairAdmitted(a, b)) {
-					continue;
-				}
-				sourced.push_back(Ordered(
-					a.Owner,
-					b.Owner,
-					static_cast<uint32_t>(index),
-					static_cast<uint32_t>(candidates[at]) | CandidateSource::STATIC
-				));
+			size_t pairCount = 0;
+			for (const std::vector<SourcedPair> &batch : batches) {
+				pairCount += batch.size();
+			}
+			sourced.reserve(pairCount);
+			for (const std::vector<SourcedPair> &batch : batches) {
+				sourced.insert(sourced.end(), batch.begin(), batch.end());
 			}
 		}
 
-		// **The sort is the determinism requirement.** Sequential impulse is
-		// order-dependent, so a solver visiting contacts in grid-walk order
-		// gives one answer on a scene built one way and another on the same
-		// scene built another way - and `just determinism` reports it a long
-		// way from here.
-		std::sort(sourced.begin(), sourced.end());
+		{
+			ENGINE_PROFILE_CAT("physics.pair-order", core::ProfileCategory::Physics);
 
-		// Each pair once. The generation above already reports each one once;
-		// this is what makes "once" a property of the list the solver reads
-		// rather than a property of how it was filled, and applying one contact
-		// twice doubles its impulse.
-		sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+			// **The sort is the determinism requirement.** Sequential impulse is
+			// order-dependent, so a solver visiting contacts in grid-walk order
+			// gives one answer on a scene built one way and another on the same
+			// scene built another way - and `just determinism` reports it a long
+			// way from here.
+			std::sort(sourced.begin(), sourced.end());
+
+			// Each pair once. The generation above already reports each one once;
+			// this is what makes "once" a property of the list the solver reads
+			// rather than a property of how it was filled, and applying one contact
+			// twice doubles its impulse.
+			sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+		}
 
 		// **Split into the public list and the private one, after the sort.**
 		// The pair list is what a manifold, a contact event and every consumer
@@ -151,11 +245,14 @@ namespace engine::physics {
 		// are into `PhysicsWorld`'s own arrays and are nobody else's business -
 		// `CandidateSource` says why publishing one would hand a caller a number
 		// that is plausible and wrong.
-		pairs.reserve(sourced.size());
-		sources.reserve(sourced.size());
-		for (const SourcedPair &row : sourced) {
-			pairs.push_back(row.Pair);
-			sources.push_back(row.Source);
+		{
+			ENGINE_PROFILE_CAT("physics.pair-publish", core::ProfileCategory::Physics);
+			pairs.reserve(sourced.size());
+			sources.reserve(sourced.size());
+			for (const SourcedPair &row : sourced) {
+				pairs.push_back(row.Pair);
+				sources.push_back(row.Source);
+			}
 		}
 	}
 }

@@ -9,6 +9,11 @@
   <b>A 3D game engine for developers looking for more advanced and friendly capabilities.</b>
 </p>
 
+## Version
+
+Current Version: **v0.22.0**
+
+Project Start Date: **1st August 2026**
 
 ## Features
 
@@ -21,6 +26,10 @@
 - **Sandboxed:** You download the engine then play any game.
 - **Multi-Platform:** Windows, Linux, MacOS, Android, IOS and VR.
 - **Permissive License:** You can do a lot of things with this engine, with attribution of course.
+
+## Demos
+
+For demos, refer to [`DEMOS.md`](docs/DEMOS.md) file.
 
 ## Documentation
 
@@ -41,38 +50,6 @@ Each `mono.X` folder also carries its own `AGENTS.md` with the invariants
 specific to it. Those are the ones that catch real mistakes, so read the one for
 whatever you are about to change.
 
-## Releases
-
-Pushing a `vX.Y.Z` tag builds the `release` preset on Linux, Windows and macOS
-and publishes what it built to the GitHub releases page:
-
-- **Linux:** a `.tar.gz` of all four programs, plus an `.AppImage` each for the
-  client and the studio
-- **Windows:** a `.zip` of all four programs
-- **macOS:** a `.tar.gz`, unsigned and untested
-
-Development builds and media are in the discord server below.
-
-## Version
-
-Current Version: **v0.21.1**
-
-Project Start Date: **1st August 2026**
-
-Versions are `v[major].[minor].[patch]`. Everything before `1.0.0` is a
-pre-release with no compatibility promise.
-
-The number lives in one file, [`VERSION`](VERSION), and everything derives from
-it - the build, the artifact names, and `--version` on any program:
-
-```console
-$ client --version
-client 0.18.0
-```
-
-See [`docs/RELEASING.md`](docs/RELEASING.md) for what each number means and how a
-release is cut, and [`ROADMAP.md`](ROADMAP.md) for what is in each one.
-
 ## Development Cycle
 
 Led by [`@SPOOKEXE`](https://github.com/SPOOKEXE)
@@ -82,8 +59,6 @@ Maintained by open-source contributing developers, especially those coming from 
 Heavy usage of AI models for fast development iteration. Refer to `AGENTS.md` and `CONTRIBUTING.md` for more information.
 
 Refer to `ROADMAP.md` for what was done and we plan to do. `docs/retired/ROADMAP.md` are older completed items that have been moved.
-
-More on the discord server in the section below.
 
 ## Links
 

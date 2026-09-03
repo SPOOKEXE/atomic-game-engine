@@ -88,20 +88,25 @@ namespace engine::spatial {
 		Proxies.clear();
 		Ranges.clear();
 		BucketStart.clear();
-		BucketCursor.clear();
 		Entries.clear();
 		Oversized.clear();
 	}
 
 	void HashGrid::Rebuild(std::span<const Proxy> proxies) {
+		Proxies.assign(proxies.begin(), proxies.end());
+		BuildIndex();
+	}
+
+	void HashGrid::BuildIndex() {
 		// **A histogram and not a counter.** This runs once a tick over the whole
 		// scene, and what a stutter needs is the worst rebuild rather than the
 		// mean of sixty of them.
 		const core::ScopedObservation timed("spatial.grid.rebuild");
 
-		Clear();
-
-		Proxies.assign(proxies.begin(), proxies.end());
+		Ranges.clear();
+		BucketStart.clear();
+		Entries.clear();
+		Oversized.clear();
 		Ranges.resize(Proxies.size());
 
 		// Pass one: each proxy's cell range, and how many entries the whole set
@@ -203,11 +208,9 @@ namespace engine::spatial {
 			BucketStart[bucket + 1] += BucketStart[bucket];
 		}
 
-		// Pass three: place. The cursor is a second array rather than
-		// `BucketStart` advanced in place, because the starts are what a query
-		// reads and reconstructing them afterwards is a second chance to be
-		// wrong.
-		BucketCursor.assign(BucketStart.begin(), BucketStart.end() - 1);
+		// Pass three: place. The starts serve as cursors while filling, then the
+		// backward shift below restores them. Keeping a second bucket-sized array
+		// for this one pass costs as much memory as the lookup table itself.
 		Entries.resize(entryCount);
 		for (size_t index = 0; index < Ranges.size(); index++) {
 			const CellRange &range = Ranges[index];
@@ -220,11 +223,18 @@ namespace engine::spatial {
 				range.MaximumZ,
 				[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
 					const size_t bucket = HashCell(cellX, cellY, cellZ) & (buckets - 1);
-					Entries[BucketCursor[bucket]++] =
-						Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
+					Entries[BucketStart[bucket]++] = Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
 				}
 			);
 		}
+
+		// Every cursor now equals the old start of the bucket to its right. Shift
+		// those ends back into place from right to left so no value is overwritten
+		// before it is read. Entry order stays the proxy and cell order above.
+		for (size_t bucket = buckets; bucket > 0; bucket--) {
+			BucketStart[bucket] = BucketStart[bucket - 1];
+		}
+		BucketStart[0] = 0;
 	}
 
 	void HashGrid::SetCellSize(float cellSize) {

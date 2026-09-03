@@ -18,6 +18,7 @@ namespace engine::assets {
 			"engine.CornerWedge",
 			"engine.Sphere",
 			"engine.Cylinder",
+			"engine.SkinnedWedge",
 		};
 
 		// The texture names, indexed by the enum, for `NAMES`' reason.
@@ -375,6 +376,16 @@ namespace engine::assets {
 			}
 			return data;
 		}
+
+		MeshData MakeSkinnedWedge() {
+			MeshData data = MakeWedge();
+			data.JointCount = 1;
+			for (MeshVertex &vertex : data.Vertices) {
+				vertex.Joints[0] = 0;
+				vertex.Weights[0] = 65535;
+			}
+			return data;
+		}
 	}
 
 	std::string_view BuiltinName(BuiltinMesh mesh) {
@@ -427,6 +438,9 @@ namespace engine::assets {
 			break;
 		case BuiltinMesh::Cylinder:
 			data = MakeCylinder();
+			break;
+		case BuiltinMesh::SkinnedWedge:
+			data = MakeSkinnedWedge();
 			break;
 		}
 

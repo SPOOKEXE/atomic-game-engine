@@ -140,6 +140,19 @@ namespace engine::gui {
 		//         the upload on `false`.
 		bool Rebuild(ecs::Store &store, const CompileRequest &request);
 
+		// Brings one host-provided collector up to date.
+		//
+		// Unlike `Rebuild`, this does not discover screen or spatial collectors.
+		// The named collector owns the whole draw list and its canvas is exactly
+		// `request.Display`, which is the bridge a `DockWidgetPluginGui` needs.
+		//
+		// @param store     The world.
+		// @param collector The collector hosted by an external surface.
+		// @param request   The surface size, pointer state, and clock.
+		// @return `true` when the list was rebuilt.
+		// @since v0.22
+		bool RebuildCollector(ecs::Store &store, ecs::Entity collector, const CompileRequest &request);
+
 		// The list, whether or not this frame rebuilt it.
 		const DrawList &Commands() const {
 			return List;

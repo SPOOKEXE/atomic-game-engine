@@ -72,6 +72,11 @@ namespace testrunner {
 	// macro and hoping the pattern holds.
 	std::vector<Suite> ReadSuites(const std::filesystem::path &binary);
 
+	// The exact Catch2 filter for one suite. GPU cases are opt-in because they
+	// require a working device and driver; every ordinary invocation excludes
+	// them even though the suite's file tag would otherwise select them.
+	std::string CatchFilter(const Suite &suite, bool gpuTests);
+
 	// Read back out of Ninja's dependency database. CMake tells the compiler to
 	// write .d files and then hands them to Ninja, which consumes and deletes
 	// them; `ninja -t deps` is the supported way to get the data afterwards.

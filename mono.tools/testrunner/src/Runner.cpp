@@ -204,6 +204,14 @@ namespace testrunner {
 		return suites;
 	}
 
+	std::string CatchFilter(const Suite &suite, bool gpuTests) {
+		std::string filter = "[#" + suite.Source.stem().string() + "]";
+		if (!gpuTests) {
+			filter += "~[gpu]";
+		}
+		return filter;
+	}
+
 	DependencyClosures ReadDependencyClosures(const fs::path &build) {
 		DependencyClosures closures;
 

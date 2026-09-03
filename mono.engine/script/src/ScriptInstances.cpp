@@ -212,6 +212,7 @@ namespace engine::script {
 			// from `BasePart`.
 			const std::array source{ecs::Components::Of<LuaSourceContainer>()};
 			const ecs::ClassId container = ecs::Classes::Register("LuaSourceContainer", instance, source);
+			ecs::Classes::SetCreatable(container, false);
 
 			// **`Disabled` is not in either class's set**, exactly as
 			// `RigidBody` is not in `BasePart`'s: whether a script is disabled

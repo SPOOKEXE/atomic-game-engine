@@ -20,6 +20,15 @@ namespace engine::parallel {
 		return "?";
 	}
 
+	unsigned PhysicalCoreCount() {
+		return static_cast<unsigned>(platform::DistinctCoreProcessors().size());
+	}
+
+	bool PinCurrentProcessToPhysicalCore(unsigned index) {
+		const std::vector<platform::Processor> cores = platform::DistinctCoreProcessors();
+		return index < cores.size() && platform::PinCurrentProcess(cores[index]);
+	}
+
 	unsigned WorkersPerHost(unsigned hosts) {
 		if (hosts == 0) {
 			hosts = 1;

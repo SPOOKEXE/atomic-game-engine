@@ -6,8 +6,25 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace engine::scene {
+
+	bool SetAnimationBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> bytes) {
+		AnimationBuffer *buffer = store.GetMutable<AnimationBuffer>(instance);
+		if (buffer == nullptr || bytes.size() > AnimationBuffer::MAXIMUM_BYTES) {
+			return false;
+		}
+		if (buffer->Data.size() == bytes.size() &&
+			std::equal(buffer->Data.begin(), buffer->Data.end(), bytes.begin())) {
+			return true;
+		}
+
+		buffer->Data.assign(bytes.begin(), bytes.end());
+		buffer->Revision =
+			buffer->Revision == std::numeric_limits<uint32_t>::max() ? 1u : buffer->Revision + 1u;
+		return true;
+	}
 
 	ecs::Entity RigFor(const ecs::Store &store, ecs::Entity animator) {
 		const Animator *driver = store.Get<Animator>(animator);

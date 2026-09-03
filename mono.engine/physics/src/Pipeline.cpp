@@ -14,6 +14,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
+#include <engine/physics/Welds.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
@@ -168,7 +169,7 @@ namespace engine::physics {
 		});
 
 		// One system per phase rather than one per step. `SyncBroadphase`
-		// reading what `IntegrateMotion` just wrote is a tight dependency, so
+		// reading what integration and rigid assembly projection wrote is a tight dependency, so
 		// this pipeline remains one indivisible scheduled operation. Each step opens its own
 		// profiler span, so the overlay still separates them.
 		scheduler.Add("physics.simulation", ecs::Phase::Simulation, [](ecs::Store &store) {
@@ -190,6 +191,7 @@ namespace engine::physics {
 			}
 
 			IntegrateMotion(store);
+			SolveRigidJoints(store);
 
 			// **Between the two, and the order is the whole of why it works.**
 			// After the positions have been stepped, so there is a motion to
@@ -231,15 +233,18 @@ namespace engine::physics {
 			NarrowPhase(store);
 			Solve(store);
 			Publish(store);
+			SolveRigidJoints(store);
 
 			while (BeginPhysicsStep(store)) {
 				IntegrateMotion(store);
+				SolveRigidJoints(store);
 				SweepFastBodies(store);
 				SyncBroadphase(store);
 				BroadPhase(store);
 				NarrowPhase(store);
 				Solve(store);
 				Publish(store);
+				SolveRigidJoints(store);
 			}
 		});
 	}

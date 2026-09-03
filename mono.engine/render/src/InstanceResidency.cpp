@@ -93,7 +93,19 @@ namespace engine::render {
 		}
 
 		slot = found->second;
-		const Entry &entry = Entries[slot];
+		return ProbeSlot(slot, key, source, mesh);
+	}
+
+	bool InstanceResidency::ProbeSlot(
+		uint32_t slot, const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh
+	) const {
+		return slot < Entries.size() && Entries[slot].Occupied && Entries[slot].Key == key &&
+			   SourceCurrent(Entries[slot], source, mesh);
+	}
+
+	bool InstanceResidency::SourceCurrent(
+		const Entry &entry, const scene::DrawInstance &source, const MeshEntry &mesh
+	) const {
 		return entry.SourceKnown && std::memcmp(&entry.Source, &source, sizeof(entry.Source)) == 0 &&
 			   std::memcmp(&entry.Transparency, &source.Transparency, sizeof(float) * 2) == 0 &&
 			   entry.Alpha == source.Alpha && entry.Resample == source.Resample &&
@@ -113,30 +125,7 @@ namespace engine::render {
 	) {
 		const auto found = Slots.find(key);
 		if (found != Slots.end()) {
-			Entry &entry = Entries[found->second];
-			entry.Seen = Frame;
-			if (std::memcmp(&Packed[found->second], &row, sizeof(row)) != 0) {
-				Packed[found->second] = row;
-				MarkDirty(found->second);
-			}
-			entry.SourceKnown = source != nullptr && mesh != nullptr;
-			if (entry.SourceKnown) {
-				entry.Source = PackingSource{
-					source->Frame,
-					source->HalfExtent,
-					source->Tint,
-					source->SurfaceColour,
-					source->EmissiveTint,
-					source->EmissiveStrength,
-				};
-				entry.Transparency = source->Transparency;
-				entry.AlphaCutoff = source->AlphaCutoff;
-				entry.Alpha = source->Alpha;
-				entry.Resample = source->Resample;
-				entry.MeshCentre = mesh->Centre;
-				entry.MeshExtent = mesh->Extent;
-			}
-			return found->second;
+			return UpdateSlot(found->second, row, source, mesh);
 		}
 
 		uint32_t slot = std::numeric_limits<uint32_t>::max();
@@ -179,6 +168,48 @@ namespace engine::render {
 		Slots.emplace(key, slot);
 		Live++;
 		MarkDirty(slot);
+		return slot;
+	}
+
+	uint32_t InstanceResidency::UpsertSlot(
+		uint32_t slot,
+		const InstanceKey &key,
+		const GpuInstance &row,
+		const scene::DrawInstance &source,
+		const MeshEntry &mesh
+	) {
+		if (slot < Entries.size() && Entries[slot].Occupied && Entries[slot].Key == key) {
+			return UpdateSlot(slot, row, &source, &mesh);
+		}
+		return Upsert(key, row, &source, &mesh);
+	}
+
+	uint32_t InstanceResidency::UpdateSlot(
+		uint32_t slot, const GpuInstance &row, const scene::DrawInstance *source, const MeshEntry *mesh
+	) {
+		Entry &entry = Entries[slot];
+		entry.Seen = Frame;
+		if (std::memcmp(&Packed[slot], &row, sizeof(row)) != 0) {
+			Packed[slot] = row;
+			MarkDirty(slot);
+		}
+		entry.SourceKnown = source != nullptr && mesh != nullptr;
+		if (entry.SourceKnown) {
+			entry.Source = PackingSource{
+				source->Frame,
+				source->HalfExtent,
+				source->Tint,
+				source->SurfaceColour,
+				source->EmissiveTint,
+				source->EmissiveStrength,
+			};
+			entry.Transparency = source->Transparency;
+			entry.AlphaCutoff = source->AlphaCutoff;
+			entry.Alpha = source->Alpha;
+			entry.Resample = source->Resample;
+			entry.MeshCentre = mesh->Centre;
+			entry.MeshExtent = mesh->Extent;
+		}
 		return slot;
 	}
 

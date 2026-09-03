@@ -68,6 +68,15 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
 }
 
+TEST_CASE("luau refuses virtual classes and still creates their leaves", "[scriptluau]") {
+	RegisterClasses();
+	Store store("scriptluau_virtual_classes");
+
+	const auto runtime = MakeLuauRuntime(store);
+	CHECK_FALSE(runtime->Run("Instance.new('BasePart')"));
+	CHECK(runtime->Run("assert(Instance.new('Part'):IsA('BasePart'))"));
+}
+
 TEST_CASE("luau creates shader scripts and writes their source", "[scriptluau][shaders]") {
 	RegisterClasses();
 	engine::scene::ShaderScriptClass();

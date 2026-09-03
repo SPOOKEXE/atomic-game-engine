@@ -15,19 +15,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::physics {
 
 	namespace {
-		// Appends one collider's proxy and record, in the order rows are
-		// visited.
+		// Writes one collider's proxy and appends its record, in row order.
 		//
 		// `Proxy::Id` is the index the two arrays share, not the entity - see
 		// `PhysicsWorld`, which explains why. The entity is on the record, so
 		// resolving a candidate is a subscript and never a store lookup.
-		void AppendEntry(
-			std::vector<spatial::Proxy> &proxies,
+		void WriteEntry(
+			spatial::Proxy &proxy,
+			uint64_t index,
 			std::vector<ColliderRecord> &records,
 			std::vector<PlacedCollider> &shapes,
 			const scene::CollisionShapes *baked,
@@ -35,13 +36,7 @@ namespace engine::physics {
 			const scene::Transform &transform,
 			const scene::Collider &collider
 		) {
-			proxies.push_back(
-				spatial::Proxy{
-					static_cast<uint64_t>(proxies.size()),
-					ShapeWorldBounds(collider, transform.Frame),
-					collider.Layer,
-				}
-			);
+			proxy = spatial::Proxy{index, ShapeWorldBounds(collider, transform.Frame), collider.Layer};
 			records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
 
 			// **The placed shape, resolved here because this is where the two
@@ -147,8 +142,16 @@ namespace engine::physics {
 					const scene::Collider &collider,
 					const scene::Motion &
 				) {
-					AppendEntry(
-						dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider
+					dynamicProxies.emplace_back();
+					WriteEntry(
+						dynamicProxies.back(),
+						static_cast<uint64_t>(dynamicProxies.size() - 1),
+						dynamicRecords,
+						dynamicShapes,
+						baked,
+						entity,
+						transform,
+						collider
 					);
 				}
 			);
@@ -202,26 +205,10 @@ namespace engine::physics {
 			return;
 		}
 
-		std::vector<spatial::Proxy> &staticProxies = PipelineInternals::StaticProxies(*world);
 		std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
 		std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
-		staticProxies.clear();
 		staticRecords.clear();
 		staticShapes.clear();
-
-		store.Each<const scene::Transform, const scene::Collider>(
-			[&store, &staticProxies, &staticRecords, &staticShapes, baked](
-				ecs::Entity entity, const scene::Transform &transform, const scene::Collider &collider
-			) {
-				// The per-row question the ECS cannot express as a query term.
-				// It costs a sparse-set lookup per collider, and it is paid when
-				// the static set changes rather than once a tick.
-				if (store.Has<scene::Motion>(entity)) {
-					return;
-				}
-				AppendEntry(staticProxies, staticRecords, staticShapes, baked, entity, transform, collider);
-			}
-		);
 
 		{
 			// Only on a tick where the static set actually changed, which is what
@@ -236,10 +223,36 @@ namespace engine::physics {
 			// the same dynamic proxies, and a query costs what the *index* it
 			// walks costs rather than what the querying box is.
 			spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
-			if (world->CellSizeMeasured()) {
-				index.SetCellSize(spatial::SuggestCellSize(staticProxies));
-			}
-			index.Rebuild(staticProxies);
+			index.RebuildGenerated(
+				staticCount,
+				[&store, &staticRecords, &staticShapes, baked](std::span<spatial::Proxy> proxies) {
+					size_t written = 0;
+					store.Each<const scene::Transform, const scene::Collider>(
+						[&](ecs::Entity entity,
+							const scene::Transform &transform,
+							const scene::Collider &collider) {
+							// The per-row question the ECS cannot express as a query term.
+							// It costs a sparse-set lookup per collider, and it is paid when
+							// the static set changes rather than once a tick.
+							if (store.Has<scene::Motion>(entity)) {
+								return;
+							}
+							WriteEntry(
+								proxies[written],
+								static_cast<uint64_t>(written),
+								staticRecords,
+								staticShapes,
+								baked,
+								entity,
+								transform,
+								collider
+							);
+							written++;
+						}
+					);
+				},
+				world->CellSizeMeasured()
+			);
 		}
 		PipelineInternals::StaticRebuildCount(*world)++;
 		PipelineInternals::StaticStale(*world) = false;

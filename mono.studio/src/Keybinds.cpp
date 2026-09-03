@@ -233,6 +233,15 @@ namespace studio {
 		return Table();
 	}
 
+	const Keybind *Keybinds::Find(std::string_view id) {
+		for (const Keybind &binding : Table()) {
+			if (id == binding.Id) {
+				return &binding;
+			}
+		}
+		return nullptr;
+	}
+
 	Chord Keybinds::Of(Action action) {
 		return Table()[IndexOf(action)].Keys;
 	}

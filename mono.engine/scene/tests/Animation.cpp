@@ -15,6 +15,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstddef>
+#include <vector>
+
 TEST_SUITE_ID("engine.scene.animation")
 
 using engine::core::Name;
@@ -22,6 +26,7 @@ using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
+using engine::scene::AnimationBuffer;
 using engine::scene::AnimationClip;
 using engine::scene::AnimationPriority;
 using engine::scene::AnimationTrack;
@@ -184,7 +189,7 @@ TEST_CASE("a track is a row and survives a snapshot", "[scene][animation]") {
 	CHECK(back->Playing);
 }
 
-TEST_CASE("a clip's two names cross as text", "[scene][animation]") {
+TEST_CASE("a clip's names and buffer reference survive a snapshot", "[scene][animation]") {
 	// `AnimationClip` holds two `core::Name`s, so it is registered with a
 	// hand-written pair. Interning a fresh string between the halves shifts every
 	// id assigned afterwards, which is what makes this case prove anything.
@@ -192,7 +197,14 @@ TEST_CASE("a clip's two names cross as text", "[scene][animation]") {
 	Store source("animation_test.clip.source");
 
 	const Entity clip = source.CreateInstance(Classes::Find(Name("Animation")), "Walk");
-	source.Set(clip, AnimationClip{Name("animation_test.WalkAsset"), Name("animation_test.Fox")});
+	const Entity buffer = source.CreateInstance(Classes::Find(Name("AnimationBuffer")), "WalkData");
+	const std::array data{std::byte{0x41}, std::byte{0x41}, std::byte{0x4e}, std::byte{0x31}};
+	REQUIRE(engine::scene::SetAnimationBuffer(source, buffer, data));
+	AnimationClip authored;
+	authored.Asset = Name("animation_test.WalkAsset");
+	authored.Rig = Name("animation_test.Fox");
+	authored.Buffer = buffer;
+	source.Set(clip, authored);
 
 	engine::core::ByteWriter writer;
 	REQUIRE(source.Save(writer));
@@ -208,6 +220,26 @@ TEST_CASE("a clip's two names cross as text", "[scene][animation]") {
 	REQUIRE(back != nullptr);
 	CHECK(back->Asset.Text() == "animation_test.WalkAsset");
 	CHECK(back->Rig.Text() == "animation_test.Fox");
+	CHECK(back->Buffer == buffer);
+	const AnimationBuffer *restoredBuffer = restored.Get<AnimationBuffer>(buffer);
+	REQUIRE(restoredBuffer != nullptr);
+	CHECK(restoredBuffer->Data == std::vector<std::byte>(data.begin(), data.end()));
+	CHECK(restoredBuffer->Revision == 1);
+}
+
+TEST_CASE("an animation buffer revises only when its bytes change", "[scene][animation]") {
+	RegisterSceneClasses();
+	Store store("animation_test.buffer");
+	const Entity entity = store.CreateInstance(Classes::Find(Name("AnimationBuffer")), "Clip");
+	const std::array first{std::byte{1}, std::byte{2}};
+	const std::array second{std::byte{1}, std::byte{3}};
+
+	REQUIRE(engine::scene::SetAnimationBuffer(store, entity, first));
+	CHECK(store.Get<AnimationBuffer>(entity)->Revision == 1);
+	REQUIRE(engine::scene::SetAnimationBuffer(store, entity, first));
+	CHECK(store.Get<AnimationBuffer>(entity)->Revision == 1);
+	REQUIRE(engine::scene::SetAnimationBuffer(store, entity, second));
+	CHECK(store.Get<AnimationBuffer>(entity)->Revision == 2);
 }
 
 TEST_CASE("playing tracks advance and fade on fixed world time", "[scene][animation]") {

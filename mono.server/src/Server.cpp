@@ -253,6 +253,32 @@ namespace server {
 		return std::nullopt;
 	}
 
+	WorldProcessPlan PlanWorldProcesses(uint32_t worlds, uint32_t physicalCores, uint32_t requested) {
+		WorldProcessPlan plan;
+		if (worlds == 0) {
+			plan.LocalWorlds = 0;
+			return plan;
+		}
+		if (worlds == 1 || physicalCores <= 1 || requested == 1) {
+			plan.LocalWorlds = worlds;
+			return plan;
+		}
+
+		const uint32_t wantedProcesses = requested == 0 ? physicalCores : requested;
+		plan.RemoteHosts = std::min({wantedProcesses - 1u, physicalCores - 1u, worlds});
+		plan.Processes = 1u + plan.RemoteHosts;
+		plan.LocalWorlds = 0;
+		return plan;
+	}
+
+	std::filesystem::path ProcessOutputPath(const std::filesystem::path &path, uint32_t index) {
+		if (path.empty() || index == 0) {
+			return path;
+		}
+		return path.parent_path() /
+			   (path.stem().string() + ".process" + std::to_string(index) + path.extension().string());
+	}
+
 	namespace {
 		// Read between ticks by the loop, written by Stop from anywhere.
 		std::atomic<bool> StopRequested{false};
@@ -263,6 +289,10 @@ namespace server {
 		// snapshot and a supervisor all carry. An index means something
 		// different in every process that reads it.
 		constexpr const char *PRIMARY = "server.world";
+
+		std::string WorldName(uint32_t index) {
+			return index == 0 ? std::string(PRIMARY) : std::string(PRIMARY) + "." + std::to_string(index);
+		}
 
 		// The one topic every chattering world uses.
 		constexpr const char *CHATTER_TOPIC = "placeholder.chatter";
@@ -682,6 +712,12 @@ namespace server {
 
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
+		LocalWorlds = 1;
+		RemoteHosts = 0;
+		AutomaticWorldPlacement = false;
+		if (!ConfigureWorldPlacement()) {
+			return false;
+		}
 		if (!Settings.DataStoreConfigured) {
 			const Options defaults;
 			Settings.DataStoreConfigured =
@@ -714,13 +750,27 @@ namespace server {
 
 		const unsigned processes =
 			Settings.Processes > 0 ? Settings.Processes : 1u + static_cast<unsigned>(PlannedHosts());
-
-		// The configured count wins, and zero means work it out from how many
-		// processes are sharing the machine - see `parallel::ConfiguredWorkers`.
 		const unsigned configured = engine::parallel::ConfiguredWorkers();
-		engine::parallel::Jobs::Start(
-			configured != 0 ? configured : engine::parallel::WorkersPerHost(processes)
-		);
+		const auto startJobs = [configured, processes] {
+			engine::parallel::Jobs::Start(
+				configured != 0 ? configured : engine::parallel::WorkersPerHost(processes)
+			);
+		};
+
+		// A child receives a full machine affinity mask from the unbound driver,
+		// narrows it before creating workers, then sees one available processor.
+		if (IsHost() && Settings.PhysicalCore != UINT32_MAX) {
+			if (!engine::parallel::PinCurrentProcessToPhysicalCore(Settings.PhysicalCore)) {
+				ENGINE_ERROR(
+					"could not bind host '{}' to physical core {}", Settings.HostName, Settings.PhysicalCore
+				);
+				return false;
+			}
+			ENGINE_INFO("host '{}' bound to physical core {}", Settings.HostName, Settings.PhysicalCore);
+		}
+		if (IsHost() || !AutomaticWorldPlacement) {
+			startJobs();
+		}
 
 		// Register names before any snapshot or world is built.
 		RegisterPlaceholderComponents();
@@ -736,6 +786,9 @@ namespace server {
 		// Keeping one world in it makes the process, physics state, ECS store,
 		// and listener share the same failure and restart boundary.
 		driver.Hosts.WorldsPerHost = Settings.Listening ? 1u : Settings.WorldsPerHost;
+		driver.Hosts.SharedHosts = RemoteHosts;
+		driver.Hosts.PinToPhysicalCores = AutomaticWorldPlacement && RemoteHosts > 0;
+		driver.Hosts.FirstPhysicalCore = 1;
 
 		driver.Hosts.Program = Settings.HostProgram.empty() ? ThisProgram() : Settings.HostProgram;
 
@@ -758,6 +811,26 @@ namespace server {
 			"--processes",
 			std::to_string(1u + PlannedHosts()),
 		};
+		if (!Settings.GamePath.empty()) {
+			driver.Hosts.Arguments.emplace_back("--game");
+			driver.Hosts.Arguments.emplace_back(Settings.GamePath);
+		}
+		if (!Settings.AssetsDirectory.empty()) {
+			driver.Hosts.Arguments.emplace_back("--override-assets-directory");
+			driver.Hosts.Arguments.emplace_back(Settings.AssetsDirectory.string());
+		}
+		if (!Settings.ProfilePath.empty()) {
+			driver.Hosts.Arguments.emplace_back("--profile-out");
+			driver.Hosts.Arguments.emplace_back(Settings.ProfilePath.string());
+		}
+		if (!Settings.HeapReport.empty()) {
+			driver.Hosts.Arguments.emplace_back("--heap-report");
+			driver.Hosts.Arguments.emplace_back(Settings.HeapReport.string());
+		}
+		if (Settings.ProfileWindowTicks > 0) {
+			driver.Hosts.Arguments.emplace_back("--profile-window");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.ProfileWindowTicks));
+		}
 
 		if (Settings.Chatter) {
 			driver.Hosts.Arguments.emplace_back("--chatter");
@@ -827,26 +900,31 @@ namespace server {
 				return false;
 			}
 		} else {
-			engine::world::WorldSettings world;
-			world.Name = engine::core::Name(PRIMARY);
-			world.TickRate = Settings.TickRate;
-			world.PhysicsTickRate = Settings.PhysicsTickRate;
-			world.ReplicationTickRate = Settings.ReplicationTickRate;
+			for (uint32_t index = 0; index < LocalWorlds; index++) {
+				engine::world::WorldSettings world;
+				world.Name = engine::core::Name(WorldName(index));
+				world.TickRate = Settings.TickRate;
+				world.PhysicsTickRate = Settings.PhysicsTickRate;
+				world.ReplicationTickRate = Settings.ReplicationTickRate;
 
-			PrimaryWorld = Worlds().Create(world);
-			if (!PrimaryWorld.IsValid()) {
-				ENGINE_ERROR("could not create the primary world");
-				return false;
+				const engine::world::WorldId id = Worlds().Create(world);
+				if (!id.IsValid()) {
+					ENGINE_ERROR("could not create local world '{}'", world.Name.Text());
+					return false;
+				}
+				if (!PrimaryWorld.IsValid()) {
+					PrimaryWorld = id;
+				}
+
+				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					if (!BuildWorld(store, systems)) {
+						return;
+					}
+					if (Settings.Chatter) {
+						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+					}
+				});
 			}
-
-			Worlds().Enter(PrimaryWorld, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-				if (!BuildWorld(store, systems)) {
-					return;
-				}
-				if (Settings.Chatter) {
-					store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-				}
-			});
 		}
 
 		if (!LoadDataStore()) {
@@ -855,6 +933,31 @@ namespace server {
 
 		if (!StartHosts()) {
 			return false;
+		}
+		if (!PrimaryWorld.IsValid()) {
+			PrimaryWorld = Worlds().Find(engine::core::Name(PRIMARY));
+		}
+		if (!PrimaryWorld.IsValid()) {
+			ENGINE_ERROR("the primary world was not registered locally or by a host");
+			return false;
+		}
+
+		if (AutomaticWorldPlacement) {
+			// Hosts inherited the full mask and have already narrowed themselves.
+			// The driver narrows last so later children are not born on core zero.
+			if (!engine::parallel::PinCurrentProcessToPhysicalCore(0)) {
+				ENGINE_ERROR("could not bind the world driver to physical core 0");
+				return false;
+			}
+			startJobs();
+			ENGINE_INFO(
+				"distributed {} world(s) across {} process(es): {} local, {} remote host(s); main reserved "
+				"for presentation",
+				Settings.Worlds,
+				Settings.Processes,
+				LocalWorlds,
+				RemoteHosts
+			);
 		}
 
 		if (!BeginRecording()) {
@@ -2518,6 +2621,70 @@ namespace server {
 		Replication->Advance(nowSeconds);
 	}
 
+	bool Server::ConfigureWorldPlacement() {
+		if (Settings.Worlds == 0) {
+			ENGINE_ERROR("--worlds must be at least one");
+			return false;
+		}
+		if (IsHost() || Settings.Worlds == 1) {
+			return true;
+		}
+		if (Settings.Listening) {
+			ENGINE_ERROR(
+				"--worlds above one is a headless simulation mode and cannot be combined with --listen"
+			);
+			return false;
+		}
+		if (!Settings.RemoteWorlds.empty()) {
+			ENGINE_ERROR("--worlds and --remote-world cannot describe placement at the same time");
+			return false;
+		}
+
+		const engine::game::ProjectKind kind = engine::game::ClassifyProject(Settings.GamePath);
+		if (kind == engine::game::ProjectKind::GameFile ||
+			kind == engine::game::ProjectKind::UniverseFolder ||
+			kind == engine::game::ProjectKind::ProjectZip) {
+			ENGINE_ERROR("--worlds duplicates a script or placeholder scene, not a multi-world project");
+			return false;
+		}
+
+		const unsigned physicalCores = engine::parallel::PhysicalCoreCount();
+		if (physicalCores == 0) {
+			ENGINE_WARN(
+				"physical-core placement is unavailable on this platform; {} worlds will stay in one process",
+				Settings.Worlds
+			);
+			Settings.Processes = 1;
+			LocalWorlds = Settings.Worlds;
+			return true;
+		}
+
+		const uint32_t requested = Settings.Processes;
+		const WorldProcessPlan placement =
+			PlanWorldProcesses(Settings.Worlds, physicalCores, Settings.Processes);
+		Settings.Processes = placement.Processes;
+		const uint32_t wanted = requested == 0 ? physicalCores : requested;
+		if (Settings.Processes != wanted) {
+			ENGINE_WARN(
+				"{} process(es) requested for {} world(s) on {} physical core(s); using {}",
+				wanted,
+				Settings.Worlds,
+				physicalCores,
+				Settings.Processes
+			);
+		}
+
+		AutomaticWorldPlacement = placement.RemoteHosts > 0;
+		RemoteHosts = placement.RemoteHosts;
+		LocalWorlds = placement.LocalWorlds;
+
+		Settings.RemoteWorlds.reserve(Settings.Worlds - LocalWorlds);
+		for (uint32_t index = LocalWorlds; index < Settings.Worlds; index++) {
+			Settings.RemoteWorlds.push_back(WorldName(index));
+		}
+		return true;
+	}
+
 	size_t Server::PlannedHosts() const {
 		if (Settings.RemoteWorlds.empty()) {
 			return 0;
@@ -2534,6 +2701,9 @@ namespace server {
 			remote.push_back(world);
 		}
 
+		if (RemoteHosts > 0) {
+			return engine::world::PlanHostsAcross(remote, RemoteHosts).size();
+		}
 		return engine::world::PlanHosts(remote, Settings.Listening ? 1u : Settings.WorldsPerHost).size();
 	}
 
@@ -2776,15 +2946,28 @@ namespace server {
 		uint64_t nextTickAt = started;
 		double totalTickSeconds = 0.0;
 
-		// Every tick's cost, for the percentiles below. Four bytes a tick, so an
-		// hour at sixty a second is under a megabyte and a run long enough to
-		// matter is bounded by how long somebody left it running.
+		// Every loop iteration's cost, for the percentiles below. This is one
+		// simulation tick for a local world and one coordination frame when main
+		// observes a remote world. Four bytes per reading keeps long runs bounded.
 		std::vector<float> tickMilliseconds;
 		size_t droppedSpans = 0;
 		uint64_t lastMetricsReport = started;
 		uint64_t lastDataStoreFlush = started;
 
-		const auto ticksSoFar = [this] { return Worlds().StatisticsOf(PrimaryWorld).Ticks; };
+		uint64_t lastObservedTick = 0;
+		uint64_t cumulativeObservedTicks = 0;
+		const auto ticksSoFar = [this, &lastObservedTick, &cumulativeObservedTicks] {
+			const uint64_t observed = !Worlds().IsRemote(PrimaryWorld)
+										  ? Worlds().StatisticsOf(PrimaryWorld).Ticks
+										  : Driver_->Hosts().StatusOf(Worlds().HostOf(PrimaryWorld)).Tick;
+			// A restarted host begins again at zero. Keep the run's tick axis
+			// monotonic so a budget still terminates and window filenames never
+			// move backward and overwrite an earlier capture.
+			cumulativeObservedTicks += observed >= lastObservedTick ? observed - lastObservedTick : observed;
+			lastObservedTick = observed;
+			return cumulativeObservedTicks;
+		};
+		uint64_t lastProfileWindowTick = 0;
 
 		// Collection has to be on for there to be a tree to fold, and asking for
 		// the profile is what says so - `--graph` is the other way in and the
@@ -2975,8 +3158,8 @@ namespace server {
 			summary.SlowestTickMilliseconds =
 				std::max(summary.SlowestTickMilliseconds, static_cast<float>(spent * 1000.0));
 
-			// From the world, which counted the tick it just ran. The loop does
-			// not keep its own tally.
+			// From the local world or the primary world's host heartbeat. The loop
+			// does not invent a simulation tick for coordination work on main.
 			const uint64_t ticks = ticksSoFar();
 
 			// **A cumulative sample, not a second collector.** `WriteFolded` reads
@@ -2984,9 +3167,12 @@ namespace server {
 			// shutdown block below makes, just made early and repeatedly. Two
 			// samples N ticks apart subtract into that window's folded stacks -
 			// `scripts/flamegraph.py --average` does the subtracting - so nothing
-			// here has to track a window's spans on its own.
-			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() &&
-				ticks % Settings.ProfileWindowTicks == 0) {
+			// here has to track a window's spans on its own. A remote heartbeat may
+			// repeat or skip a count, so crossing an interval writes once at the
+			// observed tick instead of requiring an exact modulo match.
+			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() && ticks > 0 &&
+				ticks - lastProfileWindowTick >= Settings.ProfileWindowTicks) {
+				lastProfileWindowTick = ticks;
 				const std::filesystem::path window =
 					Settings.ProfilePath.parent_path() /
 					(Settings.ProfilePath.stem().string() + ".window" + std::to_string(ticks) +
@@ -3047,8 +3233,8 @@ namespace server {
 		summary.Ticks = ticksSoFar();
 		summary.Seconds = static_cast<double>(engine::core::Clock::Nanoseconds() - started) / 1e9;
 		summary.MeanTickMilliseconds =
-			summary.Ticks > 0
-				? static_cast<float>(totalTickSeconds / static_cast<double>(summary.Ticks) * 1000.0)
+			!tickMilliseconds.empty()
+				? static_cast<float>(totalTickSeconds / static_cast<double>(tickMilliseconds.size()) * 1000.0)
 				: 0.0f;
 
 		// Nearest-rank on a sorted copy, for `FrameGraph`'s reason: with

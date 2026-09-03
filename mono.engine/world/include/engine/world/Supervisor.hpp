@@ -2,10 +2,10 @@
 
 // Which worlds run in which process, and what happens when one dies.
 //
-// **Processes are for crash isolation, not for speed.** Two processes
-// simulating two worlds are not faster than two threads doing the same; they
-// are more survivable. A world that aborts on an affinity violation takes down
-// one host rather than the server.
+// Processes isolate hard faults. They may also be assigned distinct physical
+// cores when a deployment uses one bounded host process per core. A world that
+// aborts on an affinity violation then takes down one host rather than the
+// server, without every host contending for the same scheduler lane.
 //
 // **Grouping is the whole policy.** Soft faults - a system throwing, a script
 // erroring, a budget overrun - are quarantined per world by `World::Tick` and
@@ -81,6 +81,19 @@ namespace engine::world {
 		// whatever the grouping.
 		uint32_t WorldsPerHost = 8;
 
+		// An exact number of shared hosts, balanced to within one world.
+		//
+		// Zero uses `WorldsPerHost`. Dedicated worlds remain alone and do not
+		// count toward this number.
+		uint32_t SharedHosts = 0;
+
+		// Bind spawned hosts to distinct physical cores. Core zero is normally
+		// reserved for the driver, so a driver sets `FirstPhysicalCore` to one.
+		bool PinToPhysicalCores = false;
+
+		// The physical-core slot assigned to the first host.
+		uint32_t FirstPhysicalCore = 0;
+
 		// How long a host may go without a heartbeat before it is presumed
 		// dead.
 		double HeartbeatSeconds = 5.0;
@@ -90,6 +103,10 @@ namespace engine::world {
 		// A host that dies deterministically would otherwise respawn forever,
 		// burning the machine while looking alive.
 		uint32_t RestartLimit = 3;
+
+		// Shared grace period for every host to flush and exit during shutdown.
+		// Stragglers are killed after this monotonic deadline.
+		double ShutdownSeconds = 2.0;
 	};
 
 	// What a supervised host is doing.
@@ -162,6 +179,17 @@ namespace engine::world {
 
 		// The worlds it was given.
 		std::vector<core::Name> Worlds;
+
+		// The operating-system process holding the worlds, or zero for an
+		// injected launcher that did not spawn one.
+		uint64_t ProcessId = 0;
+
+		// The physical-core slot assigned at startup, or UINT32_MAX when hosts
+		// are not pinned.
+		uint32_t PhysicalCore = UINT32_MAX;
+
+		// Stable one-based process selector assigned by the driver.
+		uint32_t ProcessIndex = 0;
 	};
 
 	// Assigns worlds to hosts.
@@ -175,6 +203,17 @@ namespace engine::world {
 	// @return One plan per host, in the order the hosts should be started.
 	// @since v0.2
 	std::vector<HostPlan> PlanHosts(const std::vector<WorldSettings> &worlds, uint32_t perHost);
+
+	// Assigns shared worlds across an exact number of hosts.
+	//
+	// The first hosts receive one extra world when division is uneven. Dedicated
+	// worlds are still placed alone before them.
+	//
+	// @param worlds The worlds to place.
+	// @param hosts  The requested shared host count. Zero places none.
+	// @return A deterministic plan with at most one world of size difference.
+	// @since v0.20
+	std::vector<HostPlan> PlanHostsAcross(const std::vector<WorldSettings> &worlds, uint32_t hosts);
 
 	// Spawns hosts, watches them, and restarts the ones that die.
 	//
@@ -355,6 +394,8 @@ namespace engine::world {
 			uint16_t Port = 0;
 			bool EverBeat = false;
 			bool Ready = false;
+			uint32_t PhysicalCore = UINT32_MAX;
+			uint32_t ProcessIndex = 0;
 		};
 
 		bool Launch(Entry &entry);

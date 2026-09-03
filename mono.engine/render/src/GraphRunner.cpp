@@ -5,12 +5,27 @@
 #include <utility>
 
 namespace engine::render {
+	namespace {
+		// The catalogue currently has 33 built-in handlers. Three spare slots keep
+		// the common custom-node case in the same allocation.
+		constexpr size_t BUILT_IN_NODE_CAPACITY = 36;
+	}
+
+	NodeTable::NodeTable() {
+		Handlers.reserve(BUILT_IN_NODE_CAPACITY);
+	}
 
 	bool NodeTable::Set(core::Name kind, NodeHandler handler) {
 		if (!kind.IsValid() || !handler) {
 			return false;
 		}
-		Handlers[kind.Id()] = std::move(handler);
+		for (auto &[identifier, registered] : Handlers) {
+			if (identifier == kind.Id()) {
+				registered = std::move(handler);
+				return true;
+			}
+		}
+		Handlers.emplace_back(kind.Id(), std::move(handler));
 		return true;
 	}
 
@@ -19,8 +34,12 @@ namespace engine::render {
 	}
 
 	const NodeHandler *NodeTable::Find(core::Name kind) const {
-		const auto found = Handlers.find(kind.Id());
-		return found == Handlers.end() ? nullptr : &found->second;
+		for (const auto &[identifier, handler] : Handlers) {
+			if (identifier == kind.Id()) {
+				return &handler;
+			}
+		}
+		return nullptr;
 	}
 
 	std::vector<core::Name> NodeTable::Missing(const graph::RenderGraph &graph) const {

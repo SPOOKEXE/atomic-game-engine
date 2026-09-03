@@ -116,6 +116,7 @@
 #include <engine/script/Signals.hpp>
 #include <engine/script/Tweens.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -124,6 +125,19 @@
 #include <vector>
 
 namespace engine::script {
+	// Two parallel placement arrays owned by one runtime's marshalling scratch.
+	//
+	// @since v0.22
+	struct PlacementBatch {
+		// Instances to place, in script array order.
+		std::span<const ecs::Entity> Instances;
+
+		// Destinations at the corresponding indices.
+		std::span<const core::CFrame> Frames;
+
+		// Whether the script supplied one destination for every instance.
+		bool LengthsMatch = false;
+	};
 
 	// One method call, in whichever language made it.
 	//
@@ -246,6 +260,10 @@ namespace engine::script {
 
 		// An argument as a string. Raises when it is not one.
 		virtual std::string AsString(size_t index) = 0;
+
+		// An argument as an owned byte buffer. Luau accepts `buffer`; JavaScript
+		// accepts `ArrayBuffer`. The copy prevents VM memory from escaping the call.
+		virtual std::vector<std::byte> AsBytes(size_t index, size_t maximum) = 0;
 
 		// An argument as a number. Raises when it is not one.
 		virtual double AsNumber(size_t index) = 0;
@@ -417,13 +435,13 @@ namespace engine::script {
 		//
 		// @param index      Zero-based, `self` excluded. The instance list; the
 		//                   placements are the argument after it.
-		// @param instances  Cleared and filled.
-		// @param frames     Cleared and filled.
-		// @return `false` when the two arrays are of different lengths, which
-		//         the caller reports; the outputs are filled either way.
-		virtual bool ReadPlacements(
-			size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
-		) = 0;
+		// The returned spans remain valid until this runtime reads another
+		// placement batch. A runtime keeps the marshalling buffers so a steady
+		// `BulkMoveTo` does not allocate two arrays every tick.
+		//
+		// @return Both lists and whether their lengths match. The lists are filled
+		//         either way so the caller can report the mismatch.
+		virtual PlacementBatch ReadPlacements(size_t index) = 0;
 
 		// Two array arguments, read as complete editable-mesh geometry.
 		//
@@ -562,6 +580,9 @@ namespace engine::script {
 		// encoding, so a length-carrying view is the only form that does not
 		// truncate at the first one.
 		virtual void ReturnString(std::string_view value) = 0;
+
+		// A fresh VM-owned byte buffer, copied from neutral storage.
+		virtual void ReturnBytes(std::span<const std::byte> value) = 0;
 
 		// A list of strings, as the one-based array each language means by one.
 		//

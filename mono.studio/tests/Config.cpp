@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <studio/Config.hpp>
+#include <studio/Editor.hpp>
 
 TEST_SUITE_ID("studio.config")
 
@@ -59,6 +60,10 @@ namespace {
 			out << text;
 		}
 	};
+}
+
+TEST_CASE("studio double buffers frames by default", "[studio][config]") {
+	CHECK(studio::Options{}.FramesInFlight == 2);
 }
 
 TEST_CASE("the root is overridable and every path derives from it", "[studio][config]") {

@@ -56,7 +56,6 @@ namespace client {
 		slot.State.Id = id;
 		slot.State.World = world;
 		slot.Channel = std::make_unique<engine::world::ViewChannel>(PayloadFor(maximumInstances));
-		slot.Payload.reserve(PayloadFor(maximumInstances));
 
 		Slots.push_back(std::move(slot));
 		States.emplace_back(Slots.back().State);
@@ -98,7 +97,6 @@ namespace client {
 			const size_t grown = GrownTo(list.size());
 			const size_t grownBytes = std::max(bytes, PayloadFor(grown, joints.size()));
 			slot->Channel->Reserve(grownBytes);
-			slot->Payload.reserve(grownBytes);
 
 			// Info rather than a warning, and once per growth rather than once
 			// per frame: a world finding its size is ordinary. A line that
@@ -152,7 +150,7 @@ namespace client {
 			Slot &slot = Slots[index];
 
 			engine::world::ViewHeader header;
-			if (slot.Channel->Acquire(header, slot.Payload)) {
+			if (slot.Channel->Borrow(header, slot.Payload)) {
 				slot.State.Header = header;
 				slot.State.Fresh = true;
 				slot.State.Stale = 0;

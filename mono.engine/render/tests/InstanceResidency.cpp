@@ -93,6 +93,45 @@ TEST_CASE("source and mesh packing inputs invalidate exact resident reuse", "[re
 	CHECK(rows.DirtyCount() == 1);
 }
 
+TEST_CASE("a retained slot updates without changing resident identity", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	source.Source = 1;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	const uint32_t slot = rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	source.Frame.Position.X = 3.0f;
+	CHECK_FALSE(rows.ProbeSlot(slot, Key(1), source, mesh));
+	CHECK(rows.UpsertSlot(slot, Key(1), ToGpu(source, mesh), source, mesh) == slot);
+	rows.EndFrame();
+	CHECK(rows.LiveCount() == 1);
+	CHECK(rows.DirtyCount() == 1);
+	CHECK(rows.Row(slot).Position.x == 3.0f);
+}
+
+TEST_CASE("a stale retained slot falls back to stable-key lookup", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	const uint32_t first = rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	const uint32_t second = rows.Upsert(Key(2), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	CHECK_FALSE(rows.ProbeSlot(first, Key(2), source, mesh));
+	CHECK(rows.UpsertSlot(first, Key(2), ToGpu(source, mesh), source, mesh) == second);
+	rows.EndFrame();
+	CHECK(rows.LiveCount() == 1);
+}
+
 TEST_CASE("metadata changes reuse a resident GPU row", "[render][residency]") {
 	InstanceResidency rows;
 	DrawInstance source;

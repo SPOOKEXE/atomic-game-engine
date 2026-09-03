@@ -64,6 +64,19 @@ TEST_CASE("IsA walks the ancestry and stops there", "[ecs]") {
 	REQUIRE_FALSE(Classes::IsA(tree.Part, ClassId{}));
 }
 
+TEST_CASE("creatability does not change virtual class ancestry", "[ecs]") {
+	const Tree &tree = ClassTree();
+	const ClassId virtualBase = Classes::Register("test.VirtualBase", tree.Instance, {});
+	const ClassId concrete = Classes::Register("test.VirtualLeaf", virtualBase, {});
+
+	Classes::SetCreatable(virtualBase, false);
+
+	CHECK_FALSE(Classes::Describe(virtualBase).Creatable);
+	CHECK(Classes::Describe(concrete).Creatable);
+	CHECK(Classes::IsA(concrete, virtualBase));
+	CHECK(Classes::IsA(concrete, tree.Instance));
+}
+
 TEST_CASE("registering the same class name twice returns the same id", "[ecs]") {
 	const Tree &tree = ClassTree();
 	REQUIRE(Classes::Register("test.Part", {}) == tree.Part);

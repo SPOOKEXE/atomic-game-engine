@@ -332,6 +332,37 @@ TEST_CASE("a growable pool expands once before refusing emitter blocks", "[effec
 	CHECK(store.Resource<ParticleSystem>()->Statistics.EmitterClaimAttempts == 0);
 }
 
+TEST_CASE("a device particle pool grows from no host allocation", "[effects]") {
+	Store store("effects_test");
+	engine::effects::RegisterEffectClasses();
+	engine::effects::InstallParticles(store, 0, 128);
+	store.ResourceMutable<ParticleSystem>()->DeviceStepped = true;
+
+	const ParticleSystem *system = store.Resource<ParticleSystem>();
+	REQUIRE(system != nullptr);
+	CHECK(system->Capacity == 0);
+	CHECK(system->Instances.empty());
+	CHECK(system->States.empty());
+
+	engine::scene::PartDesc desc;
+	desc.Simulated = false;
+	const Entity part = engine::scene::MakePart(store, desc);
+	const Entity emitter =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+	store.SetParent(emitter, part);
+	store.GetMutable<ParticleEmitter>(emitter)->Rate = 10.0f;
+	store.GetMutable<ParticleEmitter>(emitter)->Lifetime = NumberRange{2.0f, 2.0f};
+
+	Frame(store, 0.0f);
+
+	system = store.Resource<ParticleSystem>();
+	CHECK(system->Capacity == 32);
+	CHECK(system->MaximumCapacity == 128);
+	CHECK(system->Used == 21);
+	CHECK(system->Instances.empty());
+	CHECK(system->States.empty());
+}
+
 // --- the step ----------------------------------------------------------------
 
 TEST_CASE("particles are born, age and are retired", "[effects]") {

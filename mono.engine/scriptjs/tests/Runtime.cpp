@@ -49,6 +49,15 @@ TEST_CASE("the javascript adapter builds into the world it was handed", "[script
 	REQUIRE(runtime->Run("Instance.new('Part').Name = 'FromJavaScript';"));
 }
 
+TEST_CASE("javascript refuses virtual classes and still creates their leaves", "[scriptjs]") {
+	RegisterClasses();
+	Store store("scriptjs_virtual_classes");
+
+	const auto runtime = MakeJavaScriptRuntime(store);
+	CHECK_FALSE(runtime->Run("Instance.new('BasePart');"));
+	CHECK(runtime->Run("if (!Instance.new('Part').IsA('BasePart')) throw new Error('hierarchy');"));
+}
+
 TEST_CASE("the javascript adapter refuses a non-instance parent before creation", "[scriptjs]") {
 	RegisterClasses();
 	Store store("scriptjs_test");
@@ -57,6 +66,10 @@ TEST_CASE("the javascript adapter refuses a non-instance parent before creation"
 	CHECK_FALSE(runtime->Run("Instance.new('Part', 7);"));
 
 	int parts = 0;
-	store.Each<const engine::scene::Transform>([&](engine::ecs::Entity, const auto &) { ++parts; });
+	store.EachEntity([&](engine::ecs::Entity entity) {
+		if (store.ClassOf(entity) == engine::scene::PartClass()) {
+			++parts;
+		}
+	});
 	CHECK(parts == 0);
 }

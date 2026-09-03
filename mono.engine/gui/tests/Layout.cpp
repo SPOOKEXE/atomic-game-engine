@@ -94,6 +94,32 @@ TEST_CASE("a screen gui's canvas is the screen", "[gui][layout]") {
 	CHECK(world.Where(screen).Rendered);
 }
 
+TEST_CASE("a host lays out one DockWidgetPluginGui against its panel", "[gui][layout][plugin]") {
+	World world("gui_layout.plugin_collector");
+	const Entity dock = world.Make("DockWidgetPluginGui");
+	const Entity frame = world.Make("Frame", dock);
+	Element fill;
+	fill.Size = UDim2{1.0f, 0.0f, 1.0f, 0.0f};
+	world.Data.Set(frame, fill);
+
+	Layout(world.Data, world.Display);
+	CHECK_FALSE(world.Where(frame).Rendered);
+
+	Screen panel;
+	panel.Width = 320.0f;
+	panel.Height = 180.0f;
+	CHECK(LayoutCollector(world.Data, dock, panel) == 1);
+	CHECK(world.Where(dock).Rendered);
+	CHECK(world.Where(frame).Rendered);
+	CHECK(world.Where(frame).AbsoluteSize.X == Approx(320.0f));
+	CHECK(world.Where(frame).AbsoluteSize.Y == Approx(180.0f));
+
+	world.Data.GetMutable<Layer>(dock)->Enabled = false;
+	CHECK(LayoutCollector(world.Data, dock, panel) == 0);
+	CHECK_FALSE(world.Where(dock).Rendered);
+	CHECK_FALSE(world.Where(frame).Rendered);
+}
+
 TEST_CASE("a UDim2 resolves against the parent and the anchor point", "[gui][layout]") {
 	World world("gui_layout.udim2");
 	const Entity screen = world.Make("ScreenGui");

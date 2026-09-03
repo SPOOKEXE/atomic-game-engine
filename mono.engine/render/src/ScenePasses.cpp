@@ -217,8 +217,12 @@ namespace engine::render {
 		const bool uploadInstances =
 			haveInstances && (State->ActiveInstanceWorld == nullptr ||
 							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
-							  target.ResidentIndices.DirtyCount() > 0 || State->OcclusionFrame.Active);
-		if (!uploadInstances && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
+							  target.ResidentIndices.DirtyCount() > 0);
+		const bool uploadSkinOffsets = haveInstances && target.SkinOffsetsDirty;
+		const bool uploadJointWords = haveInstances && target.JointWordsDirty;
+		const bool uploadOcclusion = haveInstances && State->OcclusionFrame.Active;
+		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords && !uploadOcclusion &&
+			!uploadOverlay && particleCount == 0 && ribbonCount == 0) {
 			uploadsRecorded = true;
 			return true;
 		}
@@ -292,7 +296,9 @@ namespace engine::render {
 				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 				uploadedBytes += destination.size;
 			}
+		}
 
+		if (uploadSkinOffsets) {
 			const SDL_GPUTransferBufferLocation skinSource{State->SkinOffsetTransfer, 0};
 			const SDL_GPUBufferRegion skinDestination{
 				State->SkinOffsetBuffer,
@@ -301,7 +307,9 @@ namespace engine::render {
 			};
 			SDL_UploadToGPUBuffer(copy, &skinSource, &skinDestination, true);
 			uploadedBytes += skinDestination.size;
+		}
 
+		if (uploadJointWords) {
 			const SDL_GPUTransferBufferLocation jointSource{State->JointTransfer, 0};
 			const SDL_GPUBufferRegion jointDestination{
 				State->JointBuffer,
@@ -318,7 +326,7 @@ namespace engine::render {
 		// the previous view's dispatches keep the one they bound. The cull
 		// pass itself must *not* cycle `Counts` again - its atomics count
 		// up from the zeros this copy delivers.
-		if (uploadInstances && State->OcclusionFrame.Active) {
+		if (uploadOcclusion) {
 			const Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
 			uint32_t offset = 0;
 			const auto stage = [&](SDL_GPUBuffer *buffer, uint32_t bytes) {
@@ -386,6 +394,12 @@ namespace engine::render {
 		}
 		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
 			target.ResidentIndices.Acknowledge();
+		}
+		if (uploadSkinOffsets) {
+			target.SkinOffsetsDirty = false;
+		}
+		if (uploadJointWords) {
+			target.JointWordsDirty = false;
 		}
 
 		// The copy is in the frame's main command buffer, before every draw that
@@ -902,6 +916,23 @@ namespace engine::render {
 	}
 
 	namespace {
+		void SetImageTargetArea(SDL_GPURenderPass *pass, const ViewRecording::Impl::NamedTexture &target) {
+			// A scene target keeps a larger backing texture while a panel shrinks.
+			// Fullscreen triangles must cover the logical image or they stretch it
+			// across that stale allocation until the shrink threshold reallocates.
+			const SDL_GPUViewport viewport{
+				0.0f,
+				0.0f,
+				static_cast<float>(target.Width),
+				static_cast<float>(target.Height),
+				0.0f,
+				1.0f,
+			};
+			const SDL_Rect scissor{0, 0, static_cast<int>(target.Width), static_cast<int>(target.Height)};
+			SDL_SetGPUViewport(pass, &viewport);
+			SDL_SetGPUScissor(pass, &scissor);
+		}
+
 		// Whether a texture holds one channel, which is what the image pipeline
 		// needs to know to spread it across three rather than sampling green
 		// and blue that are not there.
@@ -945,6 +976,7 @@ namespace engine::render {
 		colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
 		State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
+		SetImageTargetArea(pass, target);
 		const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};
 		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 		const ImageUniformMode mode = ImageMode(singleChannel(source), reverseSpectrum);
@@ -971,6 +1003,7 @@ namespace engine::render {
 		colour.store_op = SDL_GPU_STOREOP_STORE;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
 		State->BindPipeline(pass, State->OverlayPipeline, Impl::PipelineFamily::Other);
+		SetImageTargetArea(pass, target);
 		const SDL_GPUTextureSamplerBinding binding{source, State->OverlaySampler};
 		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);

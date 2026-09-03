@@ -24,12 +24,18 @@ using engine::core::Color3;
 using engine::core::Name;
 using engine::core::Vector3;
 using engine::scene::BodyKind;
+using engine::scene::BoolValue;
 using engine::scene::Bounds;
 using engine::scene::Camera;
+using engine::scene::CFrameValue;
 using engine::scene::Collider;
+using engine::scene::Color3Value;
+using engine::scene::IntValue;
 using engine::scene::MaterialRef;
 using engine::scene::Motion;
 using engine::scene::NormalId;
+using engine::scene::NumberValue;
+using engine::scene::ObjectValue;
 using engine::scene::Portal;
 using engine::scene::PreviousTransform;
 using engine::scene::Rendered;
@@ -40,6 +46,7 @@ using engine::scene::SurfaceCamera;
 using engine::scene::SurfaceEffect;
 using engine::scene::SurfaceLens;
 using engine::scene::Transform;
+using engine::scene::Vector3Value;
 using engine::scene::Visual;
 using engine::scene::WorldBounds;
 using engine::spatial::LayerMask;
@@ -61,6 +68,13 @@ TEST_CASE("every component is trivially copyable", "[scene][components]") {
 	CHECK(std::is_trivially_copyable_v<Camera>);
 	CHECK(std::is_trivially_copyable_v<Portal>);
 	CHECK(std::is_trivially_copyable_v<SurfaceLens>);
+	CHECK(std::is_trivially_copyable_v<BoolValue>);
+	CHECK(std::is_trivially_copyable_v<CFrameValue>);
+	CHECK(std::is_trivially_copyable_v<Color3Value>);
+	CHECK(std::is_trivially_copyable_v<IntValue>);
+	CHECK(std::is_trivially_copyable_v<NumberValue>);
+	CHECK(std::is_trivially_copyable_v<ObjectValue>);
+	CHECK(std::is_trivially_copyable_v<Vector3Value>);
 }
 
 // **The one that catches a real bug rather than a design opinion.** A
@@ -188,6 +202,8 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(offsetof(Collider, Reserved) + sizeof(Collider::Reserved) == sizeof(Collider));
 	CHECK(offsetof(Visual, Reserved) + sizeof(Visual::Reserved) == sizeof(Visual));
 	CHECK(offsetof(Rendered, Reserved) + sizeof(Rendered::Reserved) == sizeof(Rendered));
+	CHECK(sizeof(BoolValue) == sizeof(bool) + sizeof(BoolValue::Reserved));
+	CHECK(offsetof(BoolValue, Reserved) + sizeof(BoolValue::Reserved) == sizeof(BoolValue));
 }
 
 TEST_CASE("a default transform is the identity at the origin", "[scene][components]") {

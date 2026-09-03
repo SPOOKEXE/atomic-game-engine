@@ -197,6 +197,28 @@ namespace engine::render {
 			}
 			return true;
 		}
+
+		std::vector<graph::NodeId>
+		EntityNodesOf(const graph::RenderGraph &pipeline, const graph::CompiledGraph &compiled) {
+			std::vector<graph::NodeId> nodes;
+			nodes.reserve(compiled.PerView.size());
+			for (const graph::NodeId id : compiled.PerView) {
+				const graph::Node *node = pipeline.Find(id);
+				if (node == nullptr) {
+					continue;
+				}
+				const bool producesEntityFlow =
+					std::any_of(node->Writes.begin(), node->Writes.end(), [&](graph::ResourceId resource) {
+						const graph::ResourceDesc *desc = pipeline.FindResource(resource);
+						return desc != nullptr && (desc->Kind == graph::ResourceKind::Entities ||
+												   desc->Kind == graph::ResourceKind::Camera);
+					});
+				if (producesEntityFlow) {
+					nodes.push_back(id);
+				}
+			}
+			return nodes;
+		}
 	}
 
 	SDL_GPUShader *Renderer::Impl::LoadShader(
@@ -1274,6 +1296,7 @@ namespace engine::render {
 			State->ReleaseGraphState(name);
 			installed.Graph = pipeline;
 			installed.Compiled = std::move(compiled);
+			installed.EntityNodes = EntityNodesOf(installed.Graph, installed.Compiled);
 			installed.Aliases = graph::BuildResourceAliases(installed.Graph, installed.Compiled);
 			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
@@ -1282,11 +1305,13 @@ namespace engine::render {
 
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
+		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
 		State->NamedPipelines.push_back(
 			Impl::NamedPipeline{
 				name,
 				pipeline,
 				std::move(compiled),
+				std::move(entityNodes),
 				std::move(schedule),
 				std::move(aliases),
 				std::move(buffers),
@@ -1381,10 +1406,12 @@ namespace engine::render {
 		}
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
+		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
 		State->EngineDefault = Impl::NamedPipeline{
 			core::Name("Engine Default"),
 			pipeline,
 			std::move(compiled),
+			std::move(entityNodes),
 			std::move(schedule),
 			std::move(aliases),
 			std::move(buffers)

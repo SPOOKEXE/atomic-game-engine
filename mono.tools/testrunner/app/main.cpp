@@ -30,8 +30,14 @@ namespace {
 	// @param report  Counts and failing case names, when the binary got far
 	//                enough to write them. Left alone otherwise, so a suite that
 	//                crashed reports zero cases rather than a stale suite's.
-	bool RunSuite(const Suite &suite, const fs::path &scratch, std::string &output, SuiteReport &report) {
-		const std::string filter = "[#" + suite.Source.stem().string() + "]";
+	bool RunSuite(
+		const Suite &suite,
+		const fs::path &scratch,
+		bool gpuTests,
+		std::string &output,
+		SuiteReport &report
+	) {
+		const std::string filter = CatchFilter(suite, gpuTests);
 
 		std::error_code error;
 		fs::remove(scratch, error);
@@ -74,6 +80,7 @@ int main(int argc, char **argv) {
 	arguments.Value("report", "DIR", "Where test-output.md/.html go (default .cache)");
 	arguments.Flag("no-report", "Write no documents");
 	arguments.Flag("all", "Run every suite, cache or not");
+	arguments.Flag("gpu-tests", "Run every suite, including headless GPU cases");
 	arguments.Value("jobs", "N", "Suites to run at once (default: 2; 1 is one after another)");
 	arguments.Flag("list", "List suites and signatures, run nothing");
 	arguments.Flag("verbose", "Name every skipped suite");
@@ -164,7 +171,7 @@ int main(int argc, char **argv) {
 		// Unchanged but red. Re-running it is the only way it goes green.
 		const bool wasFailing = !unseen && !previous->second.Passed;
 
-		if (arguments.Has("all") || unseen || changed || wasFailing) {
+		if (arguments.Has("all") || arguments.Has("gpu-tests") || unseen || changed || wasFailing) {
 			stale.push_back(&suite);
 		} else {
 			skipped.push_back(&suite);
@@ -246,7 +253,8 @@ int main(int argc, char **argv) {
 					Outcome &outcome = outcomes[index];
 					outcome.Report.Id = suite->Id;
 					outcome.Report.Ran = true;
-					outcome.Ok = RunSuite(*suite, mine, outcome.Output, outcome.Report);
+					outcome.Ok =
+						RunSuite(*suite, mine, arguments.Has("gpu-tests"), outcome.Output, outcome.Report);
 					outcome.Report.Passed = outcome.Ok;
 				}
 

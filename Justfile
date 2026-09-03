@@ -94,12 +94,11 @@ studio: (build "studio")
 launcher: (build "launcher")
 
 # Only the suites a change could have affected, by cascading signature hash.
-test: build
-    ./{{build}}/tools/testrunner --build {{build}}
+test *args: build
+    ./{{build}}/tools/testrunner --build {{build}} {{args}}
 
 # Every test, whatever changed.
-test-all: build
-    ./{{build}}/tools/testrunner --build {{build}} --all
+test-all *args: (test "--all" args)
 
 # What the runner would run, and why, without running anything.
 test-list: build

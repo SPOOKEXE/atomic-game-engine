@@ -29,6 +29,10 @@ namespace view_test {
 		return std::string(reinterpret_cast<const char *>(payload.data()), payload.size());
 	}
 
+	std::string Text(std::span<const std::byte> payload) {
+		return std::string(reinterpret_cast<const char *>(payload.data()), payload.size());
+	}
+
 	ViewHeader Frame(uint64_t tick, float alpha = 0.0f) {
 		ViewHeader header;
 		header.World = Name("view.world");
@@ -186,6 +190,30 @@ TEST_CASE("the consumer's buffer keeps its capacity", "[world]") {
 	REQUIRE(payload.data() == address);
 }
 
+TEST_CASE("a borrowed frame stays in the channel and survives later publishes", "[world]") {
+	ViewChannel channel(1024);
+	REQUIRE(channel.Publish(Frame(1), Bytes("held")));
+
+	ViewHeader header;
+	std::span<const std::byte> payload;
+	REQUIRE(channel.Borrow(header, payload));
+	REQUIRE(header.SourceTick == 1);
+	REQUIRE(Text(payload) == "held");
+
+	for (uint64_t tick = 2; tick <= 20; tick++) {
+		REQUIRE(channel.Publish(Frame(tick), Bytes(std::to_string(tick))));
+		REQUIRE(Text(payload) == "held");
+	}
+
+	REQUIRE(channel.Borrow(header, payload));
+	REQUIRE(header.SourceTick == 20);
+	REQUIRE(Text(payload) == "20");
+	const uint32_t serial = header.Serial;
+	REQUIRE_FALSE(channel.Borrow(header, payload));
+	REQUIRE(header.Serial == serial);
+	REQUIRE(Text(payload) == "20");
+}
+
 // --- concurrency ----------------------------------------------------------
 
 TEST_CASE("a producer and a consumer never tear a frame", "[world]") {
@@ -229,6 +257,43 @@ TEST_CASE("a producer and a consumer never tear a frame", "[world]") {
 	producer.join();
 
 	REQUIRE(taken.load() >= 20'000);
+	REQUIRE(torn.load() == 0);
+}
+
+TEST_CASE("a producer cannot overwrite a borrowed frame", "[world]") {
+	ViewChannel channel(512);
+
+	std::atomic<bool> stop{false};
+	std::atomic<size_t> torn{0};
+
+	std::thread producer([&] {
+		for (uint64_t tick = 1; !stop.load(std::memory_order_acquire); tick++) {
+			std::vector<std::byte> payload(256, static_cast<std::byte>(tick & 0xFF));
+			channel.Publish(Frame(tick), payload);
+		}
+	});
+
+	ViewHeader header;
+	std::span<const std::byte> payload;
+	size_t seen = 0;
+	while (seen < 20'000) {
+		if (!channel.Borrow(header, payload)) {
+			continue;
+		}
+		seen++;
+
+		const auto expected = static_cast<std::byte>(header.SourceTick & 0xFF);
+		for (const std::byte value : payload) {
+			if (value != expected) {
+				torn.fetch_add(1, std::memory_order_relaxed);
+				break;
+			}
+		}
+	}
+
+	stop.store(true, std::memory_order_release);
+	producer.join();
+
 	REQUIRE(torn.load() == 0);
 }
 

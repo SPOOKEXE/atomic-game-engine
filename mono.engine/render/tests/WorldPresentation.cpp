@@ -79,7 +79,7 @@ TEST_CASE("fully transparent parts never enter the resident draw list", "[render
 
 	REQUIRE(engine::scene::SyncRendered(store) == 5);
 	engine::render::CollectInstances(store);
-	const auto *drawList = store.Resource<engine::render::DrawList>();
+	auto *drawList = store.ResourceMutable<engine::render::DrawList>();
 	REQUIRE(drawList != nullptr);
 	REQUIRE(drawList->Instances.size() == 2);
 	CHECK(std::count_if(drawList->Instances.begin(), drawList->Instances.end(), [opaque](const auto &row) {
@@ -88,6 +88,91 @@ TEST_CASE("fully transparent parts never enter the resident draw list", "[render
 	CHECK(std::count_if(drawList->Instances.begin(), drawList->Instances.end(), [blended](const auto &row) {
 			  return row.Source == blended.Id;
 		  }) == 1);
+
+	// A reused draw list may hold last frame's palette. Fresh unrigged rows reset
+	// their own offsets, and the no-Skeleton fast path must still clear the pool.
+	drawList->Instances[0].SkinFirst = 4;
+	drawList->Instances[0].SkinCount = 2;
+	drawList->JointFrames.push_back(engine::core::CFrame{});
+	store.Set(opaque, engine::scene::LocalTransparency{});
+	engine::render::CollectInstances(store);
+	CHECK(drawList->Instances[0].SkinFirst == 0);
+	CHECK(drawList->Instances[0].SkinCount == 0);
+	CHECK(drawList->JointFrames.empty());
+}
+
+TEST_CASE("irrelevant transform writes do not hide visible source changes", "[render][presentation][cache]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("cached-presentation");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const engine::ecs::Entity visible = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(store.SetParent(visible, workspace));
+	REQUIRE(engine::scene::SyncRendered(store) == 1);
+
+	engine::render::CollectInstances(store);
+	auto *drawList = store.ResourceMutable<engine::render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	store.ClearChanges();
+
+	// A transform outside Workspace has no Rendered tag. Its motion must leave
+	// the visible result alone without masking the next visible write.
+	const engine::ecs::Entity hidden = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(hidden != engine::ecs::NULL_ENTITY);
+	auto placement = *store.Get<engine::scene::Transform>(hidden);
+	placement.Frame.Position.X = 4.0f;
+	store.Set(hidden, placement);
+	engine::render::CollectInstances(store);
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances.front().Source == visible.Id);
+
+	auto visual = *store.Get<engine::scene::Visual>(visible);
+	visual.Tint.R = 0.25f;
+	store.Set(visible, visual);
+	engine::render::CollectInstances(store);
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances.front().Tint.R == 0.25f);
+}
+
+TEST_CASE("pose-only presentation preserves static draw metadata", "[render][presentation][cache]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("pose-presentation");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+	const engine::ecs::Entity part = engine::scene::MakePart(store, engine::scene::PartDesc{});
+	REQUIRE(store.SetParent(part, workspace));
+	auto visual = *store.Get<engine::scene::Visual>(part);
+	visual.Tint = engine::core::Color3{0.25f, 0.5f, 0.75f};
+	store.Set(part, visual);
+	REQUIRE(engine::scene::SyncRendered(store) == 1);
+	engine::render::CollectInstances(store);
+	auto *drawList = store.ResourceMutable<engine::render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 1);
+	const engine::core::Color3 tint = drawList->Instances[0].Tint;
+
+	auto previous = *store.Get<engine::scene::PreviousTransform>(part);
+	auto current = *store.Get<engine::scene::Transform>(part);
+	previous.Frame.Position.X = 2.0f;
+	current.Frame.Position.X = 6.0f;
+	store.Set(part, previous);
+	store.Set(part, current);
+	store.SetFrame(1.0f / 240.0f, 0.5f);
+	engine::render::CollectInstances(store);
+
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances[0].Frame.Position.X == 4.0f);
+	CHECK(drawList->Instances[0].Tint == tint);
+	CHECK(drawList->HasInterpolation);
+
+	previous.Frame = current.Frame;
+	store.Set(part, previous);
+	engine::render::CollectInstances(store);
+	CHECK(drawList->Instances[0].Frame.Position.X == 6.0f);
+	CHECK(drawList->Instances[0].Tint == tint);
+	CHECK_FALSE(drawList->HasInterpolation);
 }
 
 TEST_CASE("a draw list flattens each rig palette beside its instance", "[render][presentation][skinning]") {

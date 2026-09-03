@@ -402,6 +402,12 @@ namespace engine::core {
 	// @param halfExtent The box's reach from its own centre, in local axes.
 	// @since v0.19
 	inline AABB OrientedBoxBounds(const CFrame &frame, const Vector3 &halfExtent) {
+		// Most authored parts are axis aligned. Avoid constructing and applying the
+		// same identity quaternion three times in every culling and broadphase walk.
+		if (frame.QuaternionX == 0.0f && frame.QuaternionY == 0.0f && frame.QuaternionZ == 0.0f) {
+			return AABB::FromCentre(frame.Position, halfExtent);
+		}
+
 		const Vector3 right = frame.VectorToWorldSpace(Vector3::XAxis);
 		const Vector3 up = frame.VectorToWorldSpace(Vector3::YAxis);
 		const Vector3 forward = frame.VectorToWorldSpace(Vector3::ZAxis);

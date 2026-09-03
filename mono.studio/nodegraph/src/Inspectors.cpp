@@ -400,22 +400,31 @@ namespace nodegraph {
 					return RenderSurface(surface, drape, yaw, pitch, 0.42f, pixels, image);
 				});
 
+				const ImVec2 imageSize(side, side);
+				const ImVec2 imageMinimum = ImGui::GetCursorScreenPos();
 				if (handle != nullptr) {
-					ImGui::Image(reinterpret_cast<ImTextureID>(handle), ImVec2(side, side));
-				} else {
-					ImGui::Dummy(ImVec2(side, side));
+					const ImVec2 imageMaximum(imageMinimum.x + side, imageMinimum.y + side);
+					ImGui::GetWindowDrawList()->AddImage(
+						reinterpret_cast<ImTextureID>(handle), imageMinimum, imageMaximum
+					);
 				}
+
+				// A real item claims the press before the window and dock can treat
+				// the same pointer as empty-space dragging. The active id keeps that
+				// claim when the pointer leaves the image during a fast orbit.
+				ImGui::InvisibleButton("##orbit", imageSize, ImGuiButtonFlags_MouseButtonLeft);
+				const bool orbitActive = ImGui::IsItemActive();
 
 				// Drag anywhere over it to orbit. **On the image rather than on
 				// a pair of sliders**, because the question a 3-D view answers is
 				// "what does that ridge look like from there", and reaching it
 				// through two numbers is not the same gesture.
-				if (ImGui::IsItemHovered()) {
+				if (ImGui::IsItemHovered() || orbitActive) {
 					ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 				}
-				if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+				if (orbitActive && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
 					const ImVec2 moved = ImGui::GetIO().MouseDelta;
-					pin.Yaw += moved.x * 0.010f;
+					pin.Yaw -= moved.x * 0.010f;
 					pin.Pitch = std::clamp(pin.Pitch + moved.y * 0.008f, -1.30f, 1.30f);
 					WritePin(pin);
 				}

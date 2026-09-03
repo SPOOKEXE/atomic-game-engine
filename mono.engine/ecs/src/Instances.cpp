@@ -367,6 +367,12 @@ namespace engine::ecs {
 		RegisterInstanceComponents();
 
 		const ClassId instance = Classes::Register("Instance", {});
+		Classes::SetCreatable(instance, false);
+
+		// The concrete zero-component container. Keeping it beside the root makes
+		// it available to every class tree, including gui-only worlds, while the
+		// virtual `Instance` remains a relationship rather than an insertable row.
+		Classes::Register("Folder", instance, {});
 
 		// **A real property over the hierarchy, not a courtesy.**
 		// `Instance.hpp` states the model: the tree is organisational, exactly

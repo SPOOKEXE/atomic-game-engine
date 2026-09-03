@@ -396,6 +396,7 @@ namespace engine::gui {
 			"SphereHandleAdornment",
 			"CylinderHandleAdornment",
 			"LineHandleAdornment",
+			"ConeHandleAdornment",
 			"Handles",
 			"ArcHandles",
 		};
@@ -466,6 +467,7 @@ namespace engine::gui {
 			// arrive, and a tree that had flattened the two would have to grow
 			// the split back at exactly the point somebody is adding a feature.
 			const ClassId guiBase = Classes::Register("GuiBase", instance, {});
+			Classes::SetCreatable(guiBase, false);
 
 			// **A service, so it hangs off `Instance` rather than off
 			// `GuiBase`.** It is not a thing that draws - it is the thing that
@@ -474,6 +476,7 @@ namespace engine::gui {
 			// root the same way, and `GetService` finds either by name.
 			const std::array guiServiceState{Components::Of<GuiServiceState>()};
 			const ClassId guiService = Classes::Register("GuiService", instance, guiServiceState);
+			Classes::SetCreatable(guiService, false);
 
 			// --- the 3D branch -----------------------------------------------
 			//
@@ -487,46 +490,60 @@ namespace engine::gui {
 			// `Adornment` - so what is registered here is what to outline and
 			// how, and nothing that resolves it into geometry.
 			const ClassId guiBase3d = Classes::Register("GuiBase3d", guiBase, {});
+			Classes::SetCreatable(guiBase3d, false);
 
 			// `PVAdornment` is Roblox's name for "an adornment about a
 			// `BasePart`", and the `Adornee` lives here rather than on
 			// `GuiBase3d` because that is where Roblox puts it.
 			const std::array adornment{Components::Of<Adornment>()};
 			const ClassId pvAdornment = Classes::Register("PVAdornment", guiBase3d, adornment);
+			Classes::SetCreatable(pvAdornment, false);
 
 			const std::array outline{Components::Of<SelectionOutline>()};
 			const ClassId selectionBox = Classes::Register("SelectionBox", pvAdornment, outline);
 			const ClassId selectionSphere = Classes::Register("SelectionSphere", pvAdornment, outline);
 
-			// A handle is an adornment with a shape and an offset. The four
-			// leaves below differ only in what a drawer makes of `HandleShape`,
-			// which is why they add no components of their own - the same shape
-			// `Frame` and `CanvasGroup` have on the 2D side.
+			// A handle is an adornment with a common frame and relative offset.
+			// Each leaf owns the dimensions only that shape understands, so a
+			// cylinder cannot accidentally expose a box's `Size`.
 			const std::array handle{Components::Of<HandleShape>()};
 			const ClassId handleAdornment = Classes::Register("HandleAdornment", pvAdornment, handle);
+			Classes::SetCreatable(handleAdornment, false);
 
-			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, {});
-			const ClassId sphereHandle = Classes::Register("SphereHandleAdornment", handleAdornment, {});
-			const ClassId cylinderHandle = Classes::Register("CylinderHandleAdornment", handleAdornment, {});
-			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, {});
+			const std::array boxShape{Components::Of<BoxHandleShape>()};
+			const ClassId boxHandle = Classes::Register("BoxHandleAdornment", handleAdornment, boxShape);
+			const std::array sphereShape{Components::Of<SphereHandleShape>()};
+			const ClassId sphereHandle =
+				Classes::Register("SphereHandleAdornment", handleAdornment, sphereShape);
+			const std::array cylinderShape{Components::Of<CylinderHandleShape>()};
+			const ClassId cylinderHandle =
+				Classes::Register("CylinderHandleAdornment", handleAdornment, cylinderShape);
+			const std::array lineShape{Components::Of<LineHandleShape>()};
+			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, lineShape);
+			const std::array coneShape{Components::Of<ConeHandleShape>()};
+			const ClassId coneHandle = Classes::Register("ConeHandleAdornment", handleAdornment, coneShape);
 
 			// `Handles` and `ArcHandles` are the draggable ones - the editor's
 			// move and rotate gizmos. They carry the same `Adornment` their
 			// siblings do and differ in what a drawer offers to grab, which is
 			// the drawer's business rather than the tree's.
-			const ClassId handles = Classes::Register("Handles", pvAdornment, {});
-			const ClassId arcHandles = Classes::Register("ArcHandles", pvAdornment, {});
+			const std::array faceHandles{Components::Of<HandlesShape>()};
+			const ClassId handles = Classes::Register("Handles", pvAdornment, faceHandles);
+			const std::array arcShape{Components::Of<ArcHandlesShape>()};
+			const ClassId arcHandles = Classes::Register("ArcHandles", pvAdornment, arcShape);
 
 			// `Resolved` arrives here because both halves below need it: a
 			// `LayerCollector` has an absolute rectangle just as an element
 			// does, and the layout pass writes both.
 			const std::array base2d{Components::Of<Resolved>()};
 			const ClassId guiBase2d = Classes::Register("GuiBase2d", guiBase, base2d);
+			Classes::SetCreatable(guiBase2d, false);
 
 			const std::array object{
 				Components::Of<Element>(), Components::Of<Background>(), Components::Of<Selection>()
 			};
 			const ClassId guiObject = Classes::Register("GuiObject", guiBase2d, object);
+			Classes::SetCreatable(guiObject, false);
 
 			const ClassId frame = Classes::Register("Frame", guiObject, {});
 
@@ -538,6 +555,7 @@ namespace engine::gui {
 
 			const std::array button{Components::Of<Button>()};
 			const ClassId guiButton = Classes::Register("GuiButton", guiObject, button);
+			Classes::SetCreatable(guiButton, false);
 
 			const std::array label{Components::Of<Label>()};
 			const std::array picture{Components::Of<Picture>()};
@@ -546,6 +564,7 @@ namespace engine::gui {
 			const ClassId imageButton = Classes::Register("ImageButton", guiButton, picture);
 
 			const ClassId guiLabel = Classes::Register("GuiLabel", guiObject, {});
+			Classes::SetCreatable(guiLabel, false);
 			const ClassId textLabel = Classes::Register("TextLabel", guiLabel, label);
 			const ClassId imageLabel = Classes::Register("ImageLabel", guiLabel, picture);
 
@@ -560,6 +579,7 @@ namespace engine::gui {
 
 			const std::array collector{Components::Of<Layer>(), Components::Of<Canvas>()};
 			const ClassId layerCollector = Classes::Register("LayerCollector", guiBase2d, collector);
+			Classes::SetCreatable(layerCollector, false);
 
 			const ClassId screenGui = Classes::Register("ScreenGui", layerCollector, {});
 
@@ -569,19 +589,12 @@ namespace engine::gui {
 			const std::array billboard{Components::Of<Billboard>()};
 			const ClassId billboardGui = Classes::Register("BillboardGui", layerCollector, billboard);
 
-			// **Registered and drawn by nothing, and that is not the same as a
-			// shim.** A `PluginGui` is a collector whose canvas is a *host
-			// window*, and this engine's editor is Dear ImGui until the tree
-			// can draw a property grid - so there is no window to be its
-			// canvas yet. It is here because `DockWidgetPluginGui` is the
-			// class the studio's own panels will be authored as, and its place
-			// in the tree is what the last step of the v0.8 plan builds on.
-			//
-			// The distinction the roadmap draws is between a class that
-			// *looks* present and one that is honestly incomplete: a
-			// `PluginGui` produces no canvas, so nothing under it lays out and
-			// nothing under it is silently discarded.
+			// A `PluginGui` gets its canvas from a host window rather than from
+			// world containment. Studio supplies that rectangle through
+			// `LayoutCollector`; ordinary screen and spatial layout deliberately
+			// skip it because neither owns the dock's content area.
 			const ClassId pluginGui = Classes::Register("PluginGui", layerCollector, {});
+			Classes::SetCreatable(pluginGui, false);
 			const ClassId dockWidget = Classes::Register("DockWidgetPluginGui", pluginGui, {});
 
 			// --- the modifiers -----------------------------------------------
@@ -589,6 +602,9 @@ namespace engine::gui {
 			const ClassId uiBase = Classes::Register("UIBase", instance, {});
 			const ClassId uiComponent = Classes::Register("UIComponent", uiBase, {});
 			const ClassId uiLayout = Classes::Register("UILayout", uiComponent, {});
+			Classes::SetCreatable(uiBase, false);
+			Classes::SetCreatable(uiComponent, false);
+			Classes::SetCreatable(uiLayout, false);
 
 			const std::array listLayout{Components::Of<ListLayout>()};
 			const ClassId uiListLayout = Classes::Register("UIListLayout", uiLayout, listLayout);
@@ -603,6 +619,7 @@ namespace engine::gui {
 			const ClassId uiPageLayout = Classes::Register("UIPageLayout", uiLayout, pageLayout);
 
 			const ClassId uiConstraint = Classes::Register("UIConstraint", uiComponent, {});
+			Classes::SetCreatable(uiConstraint, false);
 
 			const std::array aspect{Components::Of<AspectRatio>()};
 			const ClassId uiAspect = Classes::Register("UIAspectRatioConstraint", uiConstraint, aspect);
@@ -931,7 +948,20 @@ namespace engine::gui {
 			Classes::Property<&Adornment::ZIndex>(pvAdornment, "ZIndex");
 
 			Classes::Property<&HandleShape::Offset>(handleAdornment, "CFrame");
-			Classes::Property<&HandleShape::Size>(handleAdornment, "Size");
+			Classes::Property<&HandleShape::SizeRelativeOffset>(handleAdornment, "SizeRelativeOffset");
+			Classes::Property<&BoxHandleShape::Size>(boxHandle, "Size");
+			Classes::Property<&SphereHandleShape::Radius>(sphereHandle, "Radius");
+			Classes::Property<&CylinderHandleShape::Radius>(cylinderHandle, "Radius");
+			Classes::Property<&CylinderHandleShape::InnerRadius>(cylinderHandle, "InnerRadius");
+			Classes::Property<&CylinderHandleShape::Height>(cylinderHandle, "Height");
+			Classes::Property<&CylinderHandleShape::Angle>(cylinderHandle, "Angle");
+			Classes::Property<&LineHandleShape::Length>(lineHandle, "Length");
+			Classes::Property<&LineHandleShape::Thickness>(lineHandle, "Thickness");
+			Classes::Property<&ConeHandleShape::Height>(coneHandle, "Height");
+			Classes::Property<&ConeHandleShape::Radius>(coneHandle, "Radius");
+			Classes::Property<&ConeHandleShape::Hollow>(coneHandle, "Hollow");
+			Classes::Property<&HandlesShape::Faces>(handles, "Faces");
+			Classes::Property<&ArcHandlesShape::Axes>(arcHandles, "Axes");
 
 			Classes::Property<&GuiServiceState::SelectedObject>(guiService, "SelectedObject");
 			Classes::Property<&GuiServiceState::MenuIsOpen>(guiService, "MenuIsOpen");
@@ -964,6 +994,7 @@ namespace engine::gui {
 			(void)sphereHandle;
 			(void)cylinderHandle;
 			(void)lineHandle;
+			(void)coneHandle;
 			(void)handles;
 			(void)arcHandles;
 

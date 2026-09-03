@@ -59,6 +59,13 @@ namespace client {
 	using engine::scene::WorldBounds;
 
 	namespace {
+		// Whether the client's fallback camera should hold its authored view.
+		// The loader derives this once after the script has finished building the
+		// world, so a fallback camera does not walk the instance tree every tick.
+		struct FallbackCameraState {
+			bool Standing = false;
+		};
+
 		// The deterministic sequence used to be an integer mixer written out
 		// here, and the same one again in mono.server/src/Simulation.cpp. It is
 		// engine::core::Random now - same reason, one copy, and a specified
@@ -109,12 +116,11 @@ namespace client {
 			// is identical every run and how far it has turned by the time
 			// anybody looks is not.
 			//
-			// `FindSpawn` returns a default `CFrame` for a world with no pad, so
-			// this is the "has one" test without a second traversal. It walks
-			// the tree once a frame, which is a cost worth naming: this function
-			// runs only for a world that authored no camera of its own, so it is
-			// the demo path and never a game's.
-			const bool standing = engine::scene::FindSpawn(store).Position != Vector3::Zero;
+			// The loader derives this after the script finishes authoring the
+			// scene. Walking the instance tree here made the placeholder camera
+			// cost grow with every part in every headless world.
+			const auto *fallback = store.Resource<FallbackCameraState>();
+			const bool standing = fallback != nullptr && fallback->Standing;
 			const float angle = standing ? 0.6f : now * 0.12f;
 
 			// The height drifts for the same reason the angle does, and is held
@@ -1106,25 +1112,18 @@ namespace client {
 
 		// How many particle rows a world starts with and may grow to.
 		//
-		// **Half a million, because that is the number `ROADMAP.md` v0.10 asks
-		// for by name** - a hundred thousand emitters at five particles each - and
-		// a default below it makes the engine's stated target something every
-		// scene has to opt into.
-		//
-		// The logical pool starts at the roadmap target. A rendered world may double
-		// once when it proves that it needs more, which keeps the common case bounded
-		// while allowing the 102,400-emitter particle example's 614,400 rows.
-		//
-		// That is affordable for one world and is not for twenty. A host that
-		// opens several at once - the studio with more than one place loaded -
-		// should pass its own figure rather than take this one, and
-		// `InstallParticles` takes the capacity for exactly that reason.
+		// **The client starts empty because its particle simulation is device
+		// stepped.** Preallocating the old 524,288-row host pool cost 44 MiB per
+		// world, then the first tick released both arrays without reading them.
+		// `GrowFor` still raises the logical pool geometrically as emitters claim
+		// blocks, so a quiet world costs no particle storage while the roadmap's
+		// half-million-particle target remains below the same hard ceiling.
 		//
 		// **Measured before it was raised**: at 250,000 the stress scene's grid
 		// starved after about 41,000 of its 102,400 emitters, and the symptom was
 		// an effect that simply was not there rather than an error -
 		// `ParticleStatistics::EmittersRefused` is the number that says so.
-		constexpr uint32_t DEFAULT_PARTICLE_POOL = 524288;
+		constexpr uint32_t DEFAULT_PARTICLE_POOL = 0;
 		constexpr uint32_t MAXIMUM_PARTICLE_POOL = 1048576;
 	}
 
@@ -1224,6 +1223,11 @@ namespace client {
 		InstallResources(store, camera, extent, std::max<uint32_t>(reserve, 1));
 
 		if (!scripted) {
+			store.SetResource(
+				FallbackCameraState{
+					engine::scene::FindSpawn(store).Position != Vector3::Zero,
+				}
+			);
 			scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		}
 
@@ -1292,6 +1296,8 @@ namespace client {
 	}
 
 	bool InstallDefaultCamera(Store &store, Scheduler &scheduler) {
+		RegisterClientComponents();
+
 		const auto *existing = store.Resource<ActiveCamera>();
 		if (existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
 			store.Alive(existing->Entity)) {
@@ -1301,6 +1307,11 @@ namespace client {
 		ActiveCamera live;
 		live.Entity = InstallCamera(store);
 		store.SetResource(live);
+		store.SetResource(
+			FallbackCameraState{
+				engine::scene::FindSpawn(store).Position != Vector3::Zero,
+			}
+		);
 
 		scheduler.Add("move-camera", Phase::Simulation, MoveCamera);
 		return true;
@@ -1348,6 +1359,7 @@ namespace client {
 		// save file would be storing an answer that is recomputed before it is
 		// ever used.
 		engine::render::RegisterPresentationComponents();
+		engine::ecs::Components::Register<FallbackCameraState>("client.FallbackCameraState");
 	}
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {

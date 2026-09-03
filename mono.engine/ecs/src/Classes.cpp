@@ -317,6 +317,15 @@ namespace engine::ecs {
 		return found == table.ByName.end() ? ClassId{} : found->second;
 	}
 
+	void Classes::SetCreatable(ClassId id, bool creatable) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+		if (!id.IsValid() || id.Index >= table.Entries.size()) {
+			return;
+		}
+		table.Entries[id.Index].Info.Creatable = creatable;
+	}
+
 	bool Classes::IsA(ClassId derived, ClassId base) {
 		if (!derived.IsValid() || !base.IsValid()) {
 			return false;

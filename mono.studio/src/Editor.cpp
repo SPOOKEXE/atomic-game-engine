@@ -1213,6 +1213,17 @@ namespace studio {
 					event.button.x == PendingControlClick->X && event.button.y == PendingControlClick->Y) {
 					PendingControlClick->DownProcessed = true;
 				}
+				if (PendingControlKey.has_value() && event.type == SDL_EVENT_KEY_DOWN &&
+					event.key.windowID == SDL_GetWindowID(Window) &&
+					static_cast<uint32_t>(event.key.scancode) == PendingControlKey->Scancode &&
+					static_cast<uint32_t>(event.key.key) == PendingControlKey->Key) {
+					PendingControlKey->DownProcessed = true;
+				}
+				if (PendingControlText.has_value() && event.type == SDL_EVENT_TEXT_INPUT &&
+					event.text.windowID == SDL_GetWindowID(Window) &&
+					event.text.text == PendingControlText->Text.c_str()) {
+					PendingControlText->Processed = true;
+				}
 
 				if (event.type == SDL_EVENT_QUIT) {
 					Running = false;
@@ -2100,30 +2111,16 @@ namespace studio {
 			});
 		}
 
-		const auto clampImageSize = [](uint32_t requested, uint32_t maximum, uint32_t fallback) {
-			const uint32_t limit = maximum == 0 ? fallback : maximum;
-			return std::clamp(requested, 1u, std::max(limit, 1u));
-		};
-		if (lens.ImageWidth > 0 && lens.ImageHeight > 0) {
-			target.Width = clampImageSize(lens.ImageWidth, lens.MaxImageWidth, lens.ImageWidth);
-			target.Height = clampImageSize(lens.ImageHeight, lens.MaxImageHeight, lens.ImageHeight);
-		} else {
-			target.Width = clampImageSize(target.Width, lens.MaxImageWidth, 1920u);
-			target.Height = clampImageSize(target.Height, lens.MaxImageHeight, 1080u);
-		}
-
-		// **Remembered for the overlay, which is drawn on this texture every
-		// frame and not only on the frames that make it.** See
-		// `OverlaySlot::PresentedFrame`: the studio round-robins one panel a
-		// frame, so projecting a gizmo from the *live* camera aims it at a
-		// picture that was never taken. Written here, after `eye` and `lens`
-		// have settled and before anything renders with them.
-		if (DrawingViewport < Overlays.size()) {
-			OverlaySlot &slot = Overlays[DrawingViewport];
-			slot.PresentedFrame = eye;
-			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
-			slot.Presented = true;
-		}
+		const ViewportTargetSize targetSize = ResolveViewportTargetSize(
+			target.Width,
+			target.Height,
+			lens.ImageWidth,
+			lens.ImageHeight,
+			lens.MaxImageWidth,
+			lens.MaxImageHeight
+		);
+		target.Width = targetSize.Width;
+		target.Height = targetSize.Height;
 
 		// PreRender runs whether or not the simulation did: it is the phase
 		// that turns state into something to draw, and an edited world's state
@@ -2164,44 +2161,6 @@ namespace studio {
 			});
 		}
 
-		// **The visual world always receives the resolved eye before it presents.**
-		// An authored panel resolves directly into that world. A hosted client
-		// first resolves its local camera above, then mirrors that camera into the
-		// authority whose scene, particles and surface cameras it shares.
-		//
-		// Writing it later gives one viewport last frame's reflection. **With two
-		// it gives one viewport the other viewport's camera**, because the studio
-		// round-robins one panel per frame and the last to run wins: a mirror in
-		// one panel then tracks the camera somebody is flying in the other, and
-		// stops moving when they stop.
-		if (visual.IsValid()) {
-			// A hosted client keeps its camera in the replica, but surface cameras
-			// and every other visual system run in the authority. Install the same
-			// eye there before PreRender so all cameras read one scene.
-			EnsureViewerCamera(DrawingViewport, visual, eye, lens, follow);
-		}
-
-		// **How wide this panel is, which no world can work out for itself.**
-		// `aim-surface-cameras` clamps every mirror's fit against a frustum built
-		// from `ActiveCamera::AspectRatio`, and nothing wrote that field until
-		// this line: every mirror in the editor was fitted to a *square* screen,
-		// so a wide viewport lost the sides of every reflection to a hard
-		// vertical edge that looked like a cull box. See `scene::SetViewportSize`.
-		//
-		// **After both branches above and before `Present`.** Both of them write
-		// a whole `ActiveCamera` out, and `SetResource` replaces rather than
-		// merges, so this landing first would simply be overwritten. `Present` is
-		// what runs `PreRender`, which is where the fit happens.
-		//
-		// `target` is this panel's requested size rather than the block-rounded
-		// allocation behind it, which is the same number `Renderer::Render`
-		// projects with - see `render::SceneExtent` for why the two differ.
-		if (visual.IsValid() && target.IsValid()) {
-			Universe->Enter(visual, [&](Store &store) {
-				(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
-			});
-		}
-
 		// The replica still presents its local camera, predicted rows and UI. The
 		// authority is then presented from that resolved eye and supplies the one
 		// shared visual scene. Presenting is PreRender only, so this does not tick
@@ -2214,9 +2173,41 @@ namespace studio {
 					frameSeconds,
 					PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
 				);
+
+				// `camera-control` runs during the replica's `PreRender`. Read the
+				// result after that phase, not the transform that was left by the
+				// previous frame. At a portal crossing the two transforms are in
+				// different rooms, so one-frame staleness is an empty half-space
+				// rather than a small visual lag.
+				Universe->Enter(shown, [&](Store &store) {
+					const auto *active = store.Resource<engine::scene::ActiveCamera>();
+					if (active == nullptr || !store.Alive(active->Entity)) {
+						return;
+					}
+					if (const auto *placement = store.Get<engine::scene::Transform>(active->Entity)) {
+						eye = placement->Frame;
+					}
+					if (const auto *found = store.Get<engine::scene::Camera>(active->Entity)) {
+						lens = *found;
+					}
+				});
 			}
 
 			if (visual.IsValid()) {
+				// The authority receives the final client eye before its own
+				// `PreRender`, where surface cameras and the draw list are built.
+				// An authored world takes the editor eye through the same path.
+				EnsureViewerCamera(DrawingViewport, visual, eye, lens, follow);
+
+				// The requested panel extent belongs to this camera resource. Write
+				// it after `EnsureViewerCamera`, which replaces the whole resource,
+				// and before portal fitting reads its aspect ratio.
+				if (target.IsValid()) {
+					Universe->Enter(visual, [&](Store &store) {
+						(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
+					});
+				}
+
 				// **The render gate rides along with it**, because
 				// `client::InstallPresentation` registers `sync-rendered` in this
 				// same phase. That is what makes an edited world work at all: it
@@ -2261,6 +2252,16 @@ namespace studio {
 					PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
 				);
 			}
+		}
+
+		// Remember the exact eye the texture below is rendered from. A hosted
+		// client may have moved its camera during `PreRender`; recording the eye
+		// before that phase would project overlays through the previous room.
+		if (DrawingViewport < Overlays.size()) {
+			OverlaySlot &slot = Overlays[DrawingViewport];
+			slot.PresentedFrame = eye;
+			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
+			slot.Presented = true;
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
@@ -3112,7 +3113,7 @@ namespace studio {
 		Trees.clear();
 
 		for (const WorldId existing : Universe->Worlds()) {
-			Renderer.ForgetWorld(existing.Index, Universe->NameOf(existing));
+			ReleaseWorldResidency(existing);
 			Universe->Destroy(existing);
 		}
 
@@ -4129,7 +4130,7 @@ namespace studio {
 		}
 
 		const std::string name(Label(Universe->NameOf(world)));
-		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
+		ReleaseWorldResidency(world);
 		Universe->Destroy(world);
 
 		if (Active == world) {
@@ -4649,10 +4650,10 @@ namespace studio {
 		// way - the snapshot is re-sent until it is acknowledged - but a client
 		// view that opens blank and fills in reads as a bug in the link.
 		//
-		// **Two clients is what Play asks for by default**, because two is what
-		// turns "the replica disagrees with the server" into "these two clients
-		// disagree", which is the bug class a play test exists for and the one a
-		// single replica cannot show. `--play-clients` is the knob.
+		// **One client by default, and an explicit count when comparing clients.**
+		// Each requested client takes a real replica and a viewport split, so the
+		// common Play path stays legible while `--play-clients` can grow the same
+		// run to expose clients that disagree.
 		if (mode == RunMode::Play) {
 			for (int client = 0; client < PlayClients; client++) {
 				if (!SpawnPlayer(world)) {
@@ -4684,6 +4685,40 @@ namespace studio {
 		return true;
 	}
 
+	void Editor::ReleaseWorldResidency(WorldId world) {
+		if (Universe == nullptr || !world.IsValid()) {
+			return;
+		}
+
+		const Name name = Universe->NameOf(world);
+		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
+		Renderer.ForgetWorld(world.Index, name);
+	}
+
+	void Editor::StopPlayLink(PlayLink &link) {
+		if (!link.IsRunning()) {
+			return;
+		}
+
+		const WorldId replica = link.ReplicaWorld();
+		StopPlaytestPlugins(replica);
+		ReleaseWorldResidency(replica);
+		link.Stop(*Universe);
+	}
+
+	void Editor::CloseClientViewports(WorldId replica) {
+		for (ViewportState &view : Extras) {
+			if (view.World != replica) {
+				continue;
+			}
+
+			view.Open = false;
+			view.World = WorldId{};
+			view.Follow = engine::ecs::NULL_ENTITY;
+			view.SplitBeside = 0;
+		}
+	}
+
 	void Editor::EndRun(WorldId world) {
 		WorldRun *record = RunOf(world);
 		if (record == nullptr) {
@@ -4700,20 +4735,12 @@ namespace studio {
 			if (link == nullptr) {
 				continue;
 			}
-			// Any viewport pinned to the client view is unpinned before the
-			// world under it disappears. A pin naming a destroyed world would
-			// leave the panel following the active scene with no way to tell
-			// that it had stopped showing what it was opened for.
+			// Any viewport pinned to the client view closes before the world under
+			// it disappears. Otherwise the generated split would remain open and
+			// silently fall back to the server world.
 			const WorldId replica = link->ReplicaWorld();
-			StopPlaytestPlugins(replica);
-			for (ViewportState &view : Extras) {
-				if (view.World == replica) {
-					view.World = WorldId{};
-					view.Follow = engine::ecs::NULL_ENTITY;
-				}
-			}
-
-			link->Stop(*Universe);
+			CloseClientViewports(replica);
+			StopPlayLink(*link);
 		}
 		record->Links.clear();
 		StopPlaytestPlugins(world);
@@ -4749,15 +4776,8 @@ namespace studio {
 				}
 
 				const WorldId replica = (*link)->ReplicaWorld();
-				StopPlaytestPlugins(replica);
-				for (ViewportState &view : Extras) {
-					if (view.World == replica) {
-						view.World = WorldId{};
-						view.Follow = engine::ecs::NULL_ENTITY;
-					}
-				}
-
-				(*link)->Stop(*Universe);
+				CloseClientViewports(replica);
+				StopPlayLink(**link);
 				link = other.Links.erase(link);
 			}
 		}
@@ -4796,7 +4816,7 @@ namespace studio {
 		// Stop destroys the world below, so drop its renderer-owned residency
 		// before the handle disappears. Shared content tables stay alive for
 		// other worlds; only instance and particle buffers are world-local.
-		Renderer.ForgetWorld(world.Index, name);
+		ReleaseWorldResidency(world);
 
 		// **Destroyed and rebuilt, because `ReadWorldDocument` creates a scene
 		// rather than restoring into one.** `Universe::Adopt` reuses the hole a

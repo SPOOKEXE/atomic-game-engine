@@ -20,6 +20,7 @@ TEST_DEPENDS("engine.core.metrics")
 
 using engine::core::FrameGraph;
 using engine::core::ProfileCategory;
+using engine::core::ProfileOwner;
 
 namespace {
 	// The graph is process-wide state, so each case has to leave it off.
@@ -54,6 +55,49 @@ TEST_CASE("a scope becomes a span", "[framegraph]") {
 	REQUIRE(spans.size() == 1);
 	REQUIRE(spans[0].Name == "outer");
 	REQUIRE(spans[0].Depth == 0);
+	REQUIRE(spans[0].Owner == ProfileOwner::Engine);
+}
+
+TEST_CASE("a scope retains its submitting product owner", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope application("Application", ProfileCategory::Engine, ProfileOwner::Studio);
+		FrameGraph::Scope client("client runtime", ProfileCategory::Simulation, ProfileOwner::Client);
+		FrameGraph::Scope engine("Universe::Tick", ProfileCategory::ECS, ProfileOwner::Engine);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 3);
+	CHECK(spans[0].Owner == ProfileOwner::Studio);
+	CHECK(spans[1].Owner == ProfileOwner::Client);
+	CHECK(spans[2].Owner == ProfileOwner::Engine);
+	CHECK(spans[2].Parent == 1);
+}
+
+TEST_CASE("owner totals use self time without double counting nested products", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope application("Application", ProfileCategory::Engine, ProfileOwner::Studio);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		{
+			FrameGraph::Scope engine("Universe::Tick", ProfileCategory::ECS, ProfileOwner::Engine);
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+	FrameGraph::EndFrame();
+
+	const float studio = FrameGraph::OwnerMilliseconds(ProfileOwner::Studio);
+	const float engine = FrameGraph::OwnerMilliseconds(ProfileOwner::Engine);
+	CHECK(studio > 0.0f);
+	CHECK(engine > 0.0f);
+	CHECK(FrameGraph::OwnerMilliseconds(ProfileOwner::All) == studio + engine);
+	CHECK(FrameGraph::OwnerMilliseconds(ProfileOwner::Server) == 0.0f);
+	CHECK(FrameGraph::OwnerMilliseconds(ProfileOwner::Count) == 0.0f);
 }
 
 TEST_CASE("nesting becomes depth", "[framegraph]") {
@@ -880,6 +924,18 @@ TEST_CASE("every category has a name of its own", "[framegraph]") {
 	// The sentinel is not a category and must not be given a name that reads
 	// like one, or a loop written with `<=` draws a bar for it.
 	REQUIRE(engine::core::GetCategoryName(ProfileCategory::Count) == "?");
+}
+
+TEST_CASE("every profile owner and all filter have distinct names", "[framegraph]") {
+	std::vector<std::string_view> names;
+	for (size_t index = 0; index < static_cast<size_t>(ProfileOwner::Count); index++) {
+		const std::string_view name = engine::core::GetProfileOwnerName(static_cast<ProfileOwner>(index));
+		REQUIRE(name != "?");
+		REQUIRE(std::find(names.begin(), names.end(), name) == names.end());
+		names.push_back(name);
+	}
+
+	CHECK(engine::core::GetProfileOwnerName(ProfileOwner::Count) == "?");
 }
 
 TEST_CASE("the subsystem categories carved out of ECS total separately", "[framegraph]") {

@@ -86,6 +86,7 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(clips[index].Asset);
 				writer.WriteName(clips[index].Rig);
+				writer.WriteUInt64(clips[index].Buffer.Id);
 			}
 		}
 
@@ -94,6 +95,34 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				clips[index].Asset = reader.ReadName();
 				clips[index].Rig = reader.ReadName();
+				clips[index].Buffer = ecs::Entity{reader.ReadUInt64()};
+			}
+		}
+
+		void WriteAnimationBuffers(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *buffers = static_cast<const AnimationBuffer *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const AnimationBuffer &buffer = buffers[index];
+				writer.WriteUInt32(static_cast<uint32_t>(buffer.Data.size()));
+				writer.WriteRaw(buffer.Data.data(), buffer.Data.size());
+				writer.WriteUInt32(buffer.Revision);
+			}
+		}
+
+		void ReadAnimationBuffers(core::ByteReader &reader, void *destination, size_t count) {
+			auto *buffers = static_cast<AnimationBuffer *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				AnimationBuffer &buffer = buffers[index];
+				const uint32_t bytes = reader.ReadUInt32();
+				if (bytes > AnimationBuffer::MAXIMUM_BYTES || reader.Remaining() < sizeof(uint32_t) ||
+					bytes > reader.Remaining() - sizeof(uint32_t)) {
+					reader.Fail();
+					buffer = {};
+					return;
+				}
+				buffer.Data.resize(bytes);
+				reader.ReadRaw(buffer.Data.data(), buffer.Data.size());
+				buffer.Revision = reader.ReadUInt32();
 			}
 		}
 
@@ -1407,9 +1436,12 @@ namespace engine::scene {
 		// character in the wrong place is more visible than the bytes.
 		ecs::Components::Register<Bone>("scene.Bone");
 
-		// **A hand-written pair, because a clip holds two names.**
+		// **A hand-written pair, because a clip holds names and an entity reference.**
 		ecs::Components::Register<AnimationClip>(
 			"scene.AnimationClip", WriteAnimationClips, ReadAnimationClips
+		);
+		ecs::Components::Register<AnimationBuffer>(
+			"scene.AnimationBuffer", WriteAnimationBuffers, ReadAnimationBuffers
 		);
 
 		// **Both generated, because neither holds a name.** An `Animator` is a
@@ -1494,6 +1526,23 @@ namespace engine::scene {
 		ecs::Components::Register<AtmosphereProcedural>(
 			"scene.AtmosphereProcedural", WriteAtmosphereProcedural, ReadAtmosphereProcedural
 		);
+
+		// Appended because component ids are registration order. These are plain
+		// values with no process-local names, so the generated form is the stable
+		// form each one needs.
+		ecs::Components::Register<BoolValue>("scene.BoolValue");
+		ecs::Components::Register<CFrameValue>("scene.CFrameValue");
+		ecs::Components::Register<Color3Value>("scene.Color3Value");
+		ecs::Components::Register<IntValue>("scene.IntValue");
+		ecs::Components::Register<NumberValue>("scene.NumberValue");
+		ecs::Components::Register<ObjectValue>("scene.ObjectValue");
+		ecs::Components::Register<Vector3Value>("scene.Vector3Value");
+
+		// Appended because component ids are registration order. Both are authored
+		// rigid links and use the generated form because they contain only entity
+		// handles, frames, flags and explicit padding.
+		ecs::Components::Register<JointInstance>("scene.JointInstance");
+		ecs::Components::Register<WeldConstraint>("scene.WeldConstraint");
 	}
 
 	void RegisterSceneClasses() {

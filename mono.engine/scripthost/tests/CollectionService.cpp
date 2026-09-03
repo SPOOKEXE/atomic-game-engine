@@ -77,7 +77,7 @@ TEST_CASE("the service and the instance tag one thing", "[scripting][collection]
 		-- rather than raising. That is `Instance:AddTag`'s answer too, and the
 		-- two must not differ: which classes can be tagged is `scene`'s
 		-- decision and this service does not get a vote.
-		local folder = Instance.new('Instance')
+		local folder = Instance.new('Folder')
 		assert(CollectionService:AddTag(folder, 'door') == false, 'a container carries no tags')
 		assert(folder:AddTag('door') == false, 'and says so from the other side too')
 		assert(#CollectionService:GetTags(folder) == 0, 'so it lists none')

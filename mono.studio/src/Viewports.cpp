@@ -1,3 +1,8 @@
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
+
+#include <algorithm>
+#include <cmath>
 #include <studio/Viewports.hpp>
 
 namespace studio {
@@ -5,6 +10,32 @@ namespace studio {
 	using engine::core::CFrame;
 	using engine::core::Vector3;
 	using engine::world::WorldId;
+
+	ViewportTargetSize ResolveViewportTargetSize(
+		uint32_t panelWidth,
+		uint32_t panelHeight,
+		uint32_t imageWidth,
+		uint32_t imageHeight,
+		uint32_t maximumWidth,
+		uint32_t maximumHeight
+	) {
+		const bool explicitImage = imageWidth > 0 && imageHeight > 0;
+		const uint32_t sourceWidth = std::max(explicitImage ? imageWidth : panelWidth, 1u);
+		const uint32_t sourceHeight = std::max(explicitImage ? imageHeight : panelHeight, 1u);
+
+		double scale = 1.0;
+		if (maximumWidth > 0) {
+			scale = std::min(scale, static_cast<double>(maximumWidth) / static_cast<double>(sourceWidth));
+		}
+		if (maximumHeight > 0) {
+			scale = std::min(scale, static_cast<double>(maximumHeight) / static_cast<double>(sourceHeight));
+		}
+
+		return ViewportTargetSize{
+			std::max(static_cast<uint32_t>(std::llround(static_cast<double>(sourceWidth) * scale)), 1u),
+			std::max(static_cast<uint32_t>(std::llround(static_cast<double>(sourceHeight) * scale)), 1u),
+		};
+	}
 
 	ViewportCameraPose DefaultViewportCamera() {
 		ViewportCameraPose pose;
@@ -15,9 +46,41 @@ namespace studio {
 		return pose;
 	}
 
+	bool CarryViewportCamera(engine::ecs::Store &store, const CFrame &previous, ViewportCameraPose &pose) {
+		if (previous.Position == pose.Frame.Position) {
+			return false;
+		}
+
+		engine::scene::SeamTransform through;
+		if (!engine::scene::PortalCrossing(store, previous.Position, pose.Frame.Position, through)) {
+			return false;
+		}
+
+		pose.Frame = through.Place(pose.Frame);
+		Vector3 position = pose.Frame.Position;
+		(void)engine::scene::ClearOfPanes(store, position);
+		pose.Frame.Position = position;
+
+		const Vector3 angles = pose.Frame.ToAngles();
+		pose.Pitch = angles.X;
+		pose.Yaw = angles.Y;
+		return true;
+	}
+
 	Vector3
 	CameraRelativeMovement(const CFrame &rotation, const float forward, const float right, const float up) {
 		return rotation.LookVector() * forward + rotation.RightVector() * right + rotation.UpVector() * up;
+	}
+
+	CFrame SnapViewportCameraDirection(const CFrame &frame, const Vector3 &direction) {
+		const float alignment = frame.LookVector().Dot(direction);
+		constexpr float ALIGNED = 0.9999f;
+		if (alignment > ALIGNED || alignment < -ALIGNED) {
+			const Vector3 inverse = direction * (alignment > 0.0f ? -1.0f : 1.0f);
+			return CFrame::LookAt(frame.Position, frame.Position + inverse, frame.UpVector());
+		}
+
+		return CFrame::LookAt(frame.Position, frame.Position + direction);
 	}
 
 	void ViewportCameraMemory::Use(WorldId world, ViewportCameraPose &pose) {

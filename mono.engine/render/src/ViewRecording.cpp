@@ -571,7 +571,7 @@ namespace engine::render {
 		// all, so they read as a blank at the top of `Renderer::RenderView`.
 		{
 			ENGINE_PROFILE_CAT("entity nodes", core::ProfileCategory::Render);
-			for (const graph::NodeId id : selectedPipeline->Compiled.PerView) {
+			for (const graph::NodeId id : selectedPipeline->EntityNodes) {
 				const graph::Node *node = selectedPipeline->Graph.Find(id);
 				if (node == nullptr) {
 					continue;
@@ -1410,7 +1410,6 @@ namespace engine::render {
 			0.0f,
 			0.0f,
 		};
-
 		sceneViewport = SDL_GPUViewport{
 			0.0f,
 			0.0f,
@@ -1480,6 +1479,7 @@ namespace engine::render {
 		State->SlotMetalnessMap.resize(uploadCount);
 		State->SlotEmissiveMap.resize(uploadCount);
 		State->SlotResample.resize(uploadCount);
+		State->SlotShadowDetail.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
@@ -1487,29 +1487,45 @@ namespace engine::render {
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
 		State->SceneSlotOfSource.resize(ownCount);
+		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
+		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
+		bool sourceOrderRetained = false;
+		if (!haveOwnSources) {
+			target.InstanceSources.resize(ownCount);
+			target.InstanceSourcesReady = false;
+		}
 
 		const core::Name viewWorld = Request.Source->WorldName;
-		const auto probe = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
-			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
-			State->SlotMesh[drawSlot] = &mesh;
-			State->SlotTexture[drawSlot] = instance.Texture;
-			State->SlotNormalMap[drawSlot] = instance.NormalMap;
-			State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
-			State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
-			State->SlotHeightMap[drawSlot] = instance.HeightMap;
-			State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
-			State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
-			State->SlotResample[drawSlot] = instance.Resample;
-			State->SlotShader[drawSlot] = instance.Shader;
-			State->SlotTags[drawSlot] = instance.TagMask;
-			State->SlotSeam[drawSlot] = glm::vec4{
-				instance.SeamNormal.X,
-				instance.SeamNormal.Y,
-				instance.SeamNormal.Z,
-				instance.SeamOffset,
+		const auto writeMetadata =
+			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry *mesh) {
+				State->SlotMesh[drawSlot] = mesh;
+				State->SlotTexture[drawSlot] = instance.Texture;
+				State->SlotNormalMap[drawSlot] = instance.NormalMap;
+				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
+				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
+				State->SlotHeightMap[drawSlot] = instance.HeightMap;
+				State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
+				State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+				State->SlotResample[drawSlot] = instance.Resample;
+				State->SlotShadowDetail[drawSlot] = instance.Alpha != scene::AlphaMode::Opaque ||
+													instance.SeamNormal.MagnitudeSquared() > 0.0f;
+				State->SlotShader[drawSlot] = instance.Shader;
+				State->SlotTags[drawSlot] = instance.TagMask;
+				State->SlotSeam[drawSlot] = glm::vec4{
+					instance.SeamNormal.X,
+					instance.SeamNormal.Y,
+					instance.SeamNormal.Z,
+					instance.SeamOffset,
+				};
+				State->SlotSeamLight[drawSlot] =
+					glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 			};
-			State->SlotSeamLight[drawSlot] =
-				glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
+		const auto probe = [&](uint32_t drawSlot,
+							   const scene::DrawInstance &instance,
+							   uint32_t fallback,
+							   const Impl::SceneSlot::InstanceSourceRow *cached = nullptr) {
+			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+			writeMetadata(drawSlot, instance, &mesh);
 
 			InstanceKey &key = State->SlotInstanceKey[drawSlot];
 			key = InstanceKey{
@@ -1519,8 +1535,21 @@ namespace engine::render {
 				instance.Source == 0 ? fallback + 1u : 0u,
 			};
 			uint32_t residentSlot = std::numeric_limits<uint32_t>::max();
-			State->SlotInstanceCurrent[drawSlot] = residency.Probe(key, instance, mesh, residentSlot);
+			State->SlotInstanceCurrent[drawSlot] =
+				cached != nullptr && cached->Key == key
+					? residency.ProbeSlot(cached->ResidentSlot, key, instance, mesh)
+					: residency.Probe(key, instance, mesh, residentSlot);
+			if (cached != nullptr && cached->Key == key) {
+				residentSlot = cached->ResidentSlot;
+			}
 			target.InstanceIndices[drawSlot] = residentSlot;
+		};
+		const auto rememberSource = [&](uint32_t source, uint32_t drawSlot) {
+			target.InstanceSources[source] = {
+				.Key = State->SlotInstanceKey[drawSlot],
+				.Mesh = State->SlotMesh[drawSlot],
+				.ResidentSlot = target.InstanceIndices[drawSlot],
+			};
 		};
 		const auto finishResident =
 			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry &mesh) {
@@ -1528,46 +1557,118 @@ namespace engine::render {
 					residency.Touch(target.InstanceIndices[drawSlot]);
 					return;
 				}
-				target.InstanceIndices[drawSlot] =
-					residency.Upsert(State->SlotInstanceKey[drawSlot], ToGpu(instance, mesh), instance, mesh);
+				target.InstanceIndices[drawSlot] = residency.UpsertSlot(
+					target.InstanceIndices[drawSlot],
+					State->SlotInstanceKey[drawSlot],
+					ToGpu(instance, mesh),
+					instance,
+					mesh
+				);
 			};
 
 		{
 			ENGINE_PROFILE_CAT("resolve resident instances", core::ProfileCategory::Render);
 			{
 				ENGINE_PROFILE_CAT("resident.scene", core::ProfileCategory::Render);
-				// At 100,000 resident rows this probe and metadata pass measured 10.9 ms
-				// serial in release. Sixteen thousand rows leaves far more work than the
-				// job system's measured handover. Smaller scenes keep probe and finalize
-				// adjacent so the parallel design adds no second traversal.
-				constexpr size_t RESIDENT_GRAIN = 4096;
-				constexpr size_t RESIDENT_PARALLEL_MINIMUM = 16'384;
-				if (State->SceneOrder.size() < RESIDENT_PARALLEL_MINIMUM) {
-					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-						const uint32_t source = State->SceneOrder[index];
-						const scene::DrawInstance &instance = State->SceneInstances[source];
-						probe(index, instance, source);
-						State->SceneSlotOfSource[source] = index;
-						finishResident(index, instance, *State->SlotMesh[index]);
+				{
+					ENGINE_PROFILE_CAT("resident.scene.order check", core::ProfileCategory::Render);
+					sourceOrderRetained = target.InstanceSourceOrder == State->SceneOrder;
+				}
+				if (!rebuildOwnSources) {
+					const bool metadataRetained =
+						State->PackedMetadataTarget == Request.TargetSlot && sourceOrderRetained;
+					if (!metadataRetained) {
+						ENGINE_PROFILE_CAT("resident.scene.reuse copy", core::ProfileCategory::Render);
+						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+							const uint32_t source = State->SceneOrder[index];
+							const Impl::SceneSlot::InstanceSourceRow &cached = target.InstanceSources[source];
+							writeMetadata(index, State->SceneInstances[source], cached.Mesh);
+							target.InstanceIndices[index] = cached.ResidentSlot;
+							State->SceneSlotOfSource[source] = index;
+						}
+					} else {
+						// Slot metadata, resident indices and the inverse order are all still
+						// the exact prefix this target packed on its previous view.
+						ENGINE_PROFILE_CAT("resident.scene.reuse retained", core::ProfileCategory::Render);
+					}
+					{
+						ENGINE_PROFILE_CAT("resident.scene.reuse touch", core::ProfileCategory::Render);
+						for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+							residency.Touch(target.InstanceIndices[index]);
+						}
 					}
 				} else {
-					parallel::Jobs::For(
-						State->SceneOrder.size(),
-						RESIDENT_GRAIN,
-						[&](size_t begin, size_t end) {
-							for (size_t index = begin; index < end; index++) {
+					// At 100,000 resident rows this probe and metadata pass measured 10.9 ms
+					// serial in release. Sixteen thousand rows leaves far more work than the
+					// job system's measured handover. Smaller scenes keep the same two phases
+					// visible so a resident rebuild says whether lookup or packing cost it.
+					constexpr size_t RESIDENT_GRAIN = 4096;
+					constexpr size_t RESIDENT_PARALLEL_MINIMUM = 16'384;
+					if (State->SceneOrder.size() < RESIDENT_PARALLEL_MINIMUM) {
+						ENGINE_PROFILE_CAT("resident.scene.rebuild serial", core::ProfileCategory::Render);
+						{
+							ENGINE_PROFILE_CAT("resident.scene.serial probe", core::ProfileCategory::Render);
+							for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
 								const uint32_t source = State->SceneOrder[index];
-								probe(static_cast<uint32_t>(index), State->SceneInstances[source], source);
+								probe(
+									index,
+									State->SceneInstances[source],
+									source,
+									haveOwnSources ? &target.InstanceSources[source] : nullptr
+								);
 							}
-						},
-						RESIDENT_PARALLEL_MINIMUM
-					);
-					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-						const uint32_t source = State->SceneOrder[index];
-						State->SceneSlotOfSource[source] = index;
-						finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
+						}
+						{
+							ENGINE_PROFILE_CAT("resident.scene.serial finish", core::ProfileCategory::Render);
+							for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+								const uint32_t source = State->SceneOrder[index];
+								const scene::DrawInstance &instance = State->SceneInstances[source];
+								State->SceneSlotOfSource[source] = index;
+								finishResident(index, instance, *State->SlotMesh[index]);
+								rememberSource(source, index);
+							}
+						}
+					} else {
+						{
+							ENGINE_PROFILE_CAT(
+								"resident.scene.parallel probe", core::ProfileCategory::Render
+							);
+							parallel::Jobs::For(
+								State->SceneOrder.size(),
+								RESIDENT_GRAIN,
+								[&](size_t begin, size_t end) {
+									for (size_t index = begin; index < end; index++) {
+										const uint32_t source = State->SceneOrder[index];
+										probe(
+											static_cast<uint32_t>(index),
+											State->SceneInstances[source],
+											source,
+											haveOwnSources ? &target.InstanceSources[source] : nullptr
+										);
+									}
+								},
+								RESIDENT_PARALLEL_MINIMUM
+							);
+						}
+						{
+							ENGINE_PROFILE_CAT(
+								"resident.scene.parallel finish", core::ProfileCategory::Render
+							);
+							for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+								const uint32_t source = State->SceneOrder[index];
+								State->SceneSlotOfSource[source] = index;
+								finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
+								rememberSource(source, index);
+							}
+						}
 					}
+					target.InstanceSourcesReady = true;
 				}
+				if (!sourceOrderRetained) {
+					ENGINE_PROFILE_CAT("resident.scene.order store", core::ProfileCategory::Render);
+					target.InstanceSourceOrder.assign(State->SceneOrder.begin(), State->SceneOrder.end());
+				}
+				State->PackedMetadataTarget = Request.TargetSlot;
 			}
 			{
 				ENGINE_PROFILE_CAT("resident.foreign", core::ProfileCategory::Render);
@@ -1593,6 +1694,7 @@ namespace engine::render {
 						State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
 						State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
+						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
 						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
@@ -1742,6 +1844,14 @@ namespace engine::render {
 		for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
 			assignSkin(drawSlot, State->SceneInstances[drawSlot]);
 		}
+		uint64_t skinOffsetSignature = scene::MixSignature(1, target.SkinOffsets.size());
+		for (const uint32_t offset : target.SkinOffsets) {
+			skinOffsetSignature = scene::MixSignature(skinOffsetSignature, offset);
+		}
+		target.SkinOffsetsDirty = target.SkinOffsetsDirty || !target.SkinOffsetsReady ||
+								  target.SkinOffsetSignature != skinOffsetSignature;
+		target.SkinOffsetSignature = skinOffsetSignature;
+		target.SkinOffsetsReady = true;
 
 		target.JointWords.assign(std::max<size_t>(State->SceneJointFrames.size() * 5, 5), 0);
 		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
@@ -1754,12 +1864,21 @@ namespace engine::render {
 			target.JointWords[word + 3] = rotation.Words[0];
 			target.JointWords[word + 4] = rotation.Words[1];
 		}
+		uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
+		for (const uint32_t word : target.JointWords) {
+			jointWordSignature = scene::MixSignature(jointWordSignature, word);
+		}
+		target.JointWordsDirty = target.JointWordsDirty || !target.JointWordsReady ||
+								 target.JointWordSignature != jointWordSignature;
+		target.JointWordSignature = jointWordSignature;
+		target.JointWordsReady = true;
 
 		const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
 										  SDL_GPUTransferBuffer *&transfer,
 										  uint32_t &capacity,
 										  uint32_t words,
-										  const char *label) {
+										  const char *label,
+										  bool &dirty) {
 			if (buffer != nullptr && transfer != nullptr && capacity >= words) {
 				return true;
 			}
@@ -1787,6 +1906,7 @@ namespace engine::render {
 				return false;
 			}
 			capacity = grown;
+			dirty = true;
 			return true;
 		};
 		if (!ensureSkinBuffer(
@@ -1794,34 +1914,38 @@ namespace engine::render {
 				target.SkinOffsetTransfer,
 				target.SkinOffsetCapacity,
 				static_cast<uint32_t>(target.SkinOffsets.size()),
-				"skin offset"
+				"skin offset",
+				target.SkinOffsetsDirty
 			) ||
 			!ensureSkinBuffer(
 				target.JointBuffer,
 				target.JointTransfer,
 				target.JointWordCapacity,
 				static_cast<uint32_t>(target.JointWords.size()),
-				"joint palette"
+				"joint palette",
+				target.JointWordsDirty
 			)) {
 			return;
 		}
 
-		void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
-		void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
-		if (skinMapped == nullptr || jointMapped == nullptr) {
-			ENGINE_ERROR("skin palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-			if (skinMapped != nullptr) {
-				SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+		if (target.SkinOffsetsDirty) {
+			void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
+			if (skinMapped == nullptr) {
+				ENGINE_ERROR("skin offsets: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+				return;
 			}
-			if (jointMapped != nullptr) {
-				SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
-			}
-			return;
+			std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
+			SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
 		}
-		std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
-		std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
-		SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
-		SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+		if (target.JointWordsDirty) {
+			void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
+			if (jointMapped == nullptr) {
+				ENGINE_ERROR("joint palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+				return;
+			}
+			std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
+			SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+		}
 		State->SkinOffsetBuffer = target.SkinOffsetBuffer;
 		State->SkinOffsetTransfer = target.SkinOffsetTransfer;
 		State->JointBuffer = target.JointBuffer;
@@ -2249,7 +2373,12 @@ namespace engine::render {
 			// SDL's one unified queue it is what guarantees every pass has
 			// executed before the later-transfer buffer's downloads read their
 			// textures. The fences below therefore move to that second buffer.
-			if (!State->SubmitSceneCommand(command)) {
+			bool sceneSubmitted = false;
+			{
+				ENGINE_PROFILE_CAT("submit.scene", core::ProfileCategory::Render);
+				sceneSubmitted = State->SubmitSceneCommand(command);
+			}
+			if (!sceneSubmitted) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
 				State->Timestamps.Abandon(timingSlot);
@@ -2262,9 +2391,13 @@ namespace engine::render {
 				State->DropDownloads();
 				return;
 			}
-			State->CompleteResidentUploads(true);
+			{
+				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
+				State->CompleteResidentUploads(true);
+			}
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {
+				ENGINE_PROFILE_CAT("submit.downloads", core::ProfileCategory::Render);
 				State->DownloadCommand = nullptr;
 				result.DownloadCommandBuffers++;
 				if (capture != nullptr) {

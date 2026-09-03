@@ -209,10 +209,14 @@ viewportStroke.Color = Color3.fromRGB(100, 190, 255)
 viewportStroke.Thickness = 2
 viewportStroke.Parent = viewport
 
+local previewWorld = Instance.new("WorldModel")
+previewWorld.Name = "PreviewWorld"
+previewWorld.Parent = viewport
+
 local previewCamera = Instance.new("Camera")
 previewCamera.Name = "PreviewCamera"
 previewCamera.CFrame = CFrame.lookAt(Vector3.new(7, 5, 9), Vector3.new(0, 0, 0))
-previewCamera.Parent = viewport
+previewCamera.Parent = previewWorld
 viewport.CurrentCamera = previewCamera
 
 local previewFloor = Instance.new("Part")
@@ -221,7 +225,7 @@ previewFloor.Anchored = true
 previewFloor.Size = Vector3.new(9, 0.5, 7)
 previewFloor.CFrame = CFrame.new(Vector3.new(0, -1.5, 0))
 previewFloor.Color = Color3.fromRGB(54, 62, 82)
-previewFloor.Parent = viewport
+previewFloor.Parent = previewWorld
 
 local previewCube = Instance.new("Part")
 previewCube.Name = "PreviewCube"
@@ -229,7 +233,7 @@ previewCube.Anchored = true
 previewCube.Size = Vector3.new(2.5, 2.5, 2.5)
 previewCube.CFrame = CFrame.new(Vector3.new(0, 0, 0))
 previewCube.Color = Color3.fromRGB(96, 190, 238)
-previewCube.Parent = viewport
+previewCube.Parent = previewWorld
 
 local caption = Instance.new("TextLabel")
 caption.Name = "ViewportCaption"

@@ -143,4 +143,22 @@ namespace engine::gui {
 	//        is most tests - says nothing about time and gets a settled one.
 	// @return How many nodes were reached and marked rendered.
 	size_t Layout(ecs::Store &store, const Screen &screen, double seconds = 0.0);
+
+	// Resolves one host-provided collector against its own pixel canvas.
+	//
+	// `PluginGui` has no world or screen canvas by itself. A host such as Studio
+	// supplies the dock content size here, which keeps host geometry out of the
+	// ECS while the retained descendants use the ordinary layout path.
+	//
+	// Only this subtree has its rendered flags cleared. Other collectors may be
+	// compiled by other views of the same world in the same frame.
+	//
+	// @param store     The world.
+	// @param collector The `LayerCollector` whose descendants are laid out.
+	// @param screen    The host-owned pixel rectangle, starting at `(0, 0)`.
+	// @param seconds   The caller's monotonic clock.
+	// @return How many descendant nodes were placed.
+	// @since v0.22
+	size_t
+	LayoutCollector(ecs::Store &store, ecs::Entity collector, const Screen &screen, double seconds = 0.0);
 }

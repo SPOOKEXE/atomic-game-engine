@@ -297,10 +297,13 @@ pulsed.Color = ColorSequence.new(Color3.new(0.5, 1, 0.7))
 -- Get inheritance backwards and the third plume trails the wrong way, which is
 -- unreadable in a still frame and obvious the moment the arm swings.
 local swinger = bay("Motion", Color3.new(0.5, 0.2, 0.4))
+type MovingPoint = { point: Attachment, offset: CFrame }
+local movingPoints: { MovingPoint } = {}
 do
 	local locked = Instance.new("Attachment")
 	locked.CFrame = CFrame.new(Vector3.new(0, 3, 0))
 	locked.Parent = swinger
+	table.insert(movingPoints, { point = locked, offset = locked.CFrame })
 
 	local rigid = baseline(locked, "Locked")
 	rigid.LockedToPart = true
@@ -309,6 +312,7 @@ do
 	local free = Instance.new("Attachment")
 	free.CFrame = CFrame.new(Vector3.new(0, 5, 0))
 	free.Parent = swinger
+	table.insert(movingPoints, { point = free, offset = free.CFrame })
 
 	local trailing = baseline(free, "Free")
 	trailing.VelocityInheritance = 0
@@ -317,6 +321,7 @@ do
 	local carried = Instance.new("Attachment")
 	carried.CFrame = CFrame.new(Vector3.new(0, 7, 0))
 	carried.Parent = swinger
+	table.insert(movingPoints, { point = carried, offset = carried.CFrame })
 
 	local flung = baseline(carried, "Inherited")
 	flung.VelocityInheritance = 1
@@ -385,8 +390,9 @@ burst.Color = ColorSequence.new(Color3.new(1, 0.25, 0.8))
 -- No time rate at all. This emitter can only leave a trail when its parent
 -- moves, which makes RateOverDistance distinguishable from ordinary emission.
 local distanceHost = bay("RateOverDistance", Color3.new(0.2, 0.5, 0.35))
-local distanceOrigin = distanceHost.Position
-local distance = baseline(distanceHost, "DistanceTrail")
+local distancePoint = Instance.new("Attachment")
+distancePoint.Parent = distanceHost
+local distance = baseline(distancePoint, "DistanceTrail")
 distance.Rate = 0
 distance.RateOverDistance = 12
 distance.MaxParticles = 240
@@ -512,20 +518,22 @@ local burstPhase = -1
 RunService.Heartbeat:Connect(function(delta: number)
 	elapsed += delta
 
-	-- The arm the three motion emitters ride. Swept rather than spun, so it
+	-- The three emitter attachments sweep while their visible host stays still.
+	-- Swept rather than spun, so it
 	-- reverses - inheritance that is correct in one direction and wrong in the
 	-- other shows up at the turn.
-	swinger.CFrame = CFrame.new(Vector3.new(swinger.Position.X, 0.5, BAY_ROW_Z))
-		* CFrame.Angles(0, math.sin(elapsed * 1.6) * 1.2, 0)
+	local swing = CFrame.Angles(0, math.sin(elapsed * 1.6) * 1.2, 0)
+	for _, moving in movingPoints do
+		moving.point.CFrame = swing * moving.offset
+	end
 
 	-- A second on, a second off. Slow enough to watch the pool release the
 	-- block and slow enough to see it come back.
 	pulsed.Enabled = (math.floor(elapsed) % 2) == 0
 
-	-- The green host sweeps six metres while its zero-rate emitter leaves a
-	-- distance-sampled trail behind it.
-	distanceHost.CFrame = CFrame.new(Vector3.new(distanceOrigin.X, 0.5, BAY_ROW_Z))
-		* CFrame.new(Vector3.new(math.sin(elapsed * 1.5) * 3, 0, 0))
+	-- The green host stays still while its attachment sweeps six metres and the
+	-- zero-rate emitter leaves a distance-sampled trail behind it.
+	distancePoint.CFrame = CFrame.new(Vector3.new(math.sin(elapsed * 1.5) * 3, 0, 0))
 
 	-- One burst, one clear, then repeat. Calls happen only on phase changes so a
 	-- slow frame cannot queue the same transition twice.

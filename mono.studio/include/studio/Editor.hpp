@@ -131,6 +131,7 @@ struct ImGuiTableSortSpecs;
 struct ImGuiTableSortSpecs;
 
 namespace studio {
+	struct ComponentPanelProbe;
 	struct PlayedInputAdapter;
 
 	using engine::ecs::Entity;
@@ -373,16 +374,14 @@ namespace studio {
 
 		// How many frames the CPU may queue ahead of the GPU.
 		//
-		// **One by default, and that is a latency decision rather than a
-		// throughput one** - `render::Renderer::Initialise` carries the
-		// argument. It is a flag because the cost of the choice is a thing to
-		// *feel*: at one, `SDL_SubmitGPUCommandBuffer` blocks until the GPU has
-		// finished the previous frame, so a GPU-bound scene shows up as time in
-		// the `submit` span and the frame rate is the GPU's; at two the CPU runs
-		// ahead and the picture is a frame further behind the mouse.
+		// **Two by default, trading one frame of input latency for overlap.**
+		// `render::Renderer::Initialise` carries the argument. At one,
+		// `SDL_SubmitGPUCommandBuffer` blocks until the GPU has finished the
+		// previous frame, so a GPU-bound scene shows up as time in the `submit`
+		// span. At two the CPU can record the next frame while the GPU finishes.
 		//
 		// @since v0.14
-		int FramesInFlight = 1;
+		int FramesInFlight = 2;
 
 		// A Rojo project or universe file to sync once the scene exists.
 		//
@@ -884,6 +883,8 @@ namespace studio {
 		int Run();
 
 	  private:
+		friend struct ComponentPanelProbe;
+
 		// --- the frame ------------------------------------------------------
 
 		// Which frame `--capture` is taken on. See the body.
@@ -3254,6 +3255,27 @@ namespace studio {
 		//         refusal to start rather than a run that cannot be undone.
 		bool BeginRun(WorldId world, RunMode mode);
 
+		// Releases host and device storage retained for one world.
+		//
+		// Called before the world is destroyed so a grown particle pool returns
+		// its memory when Stop, Remove World, or New Game ends its lifetime.
+		//
+		// @param world The world whose resident storage is no longer needed.
+		void ReleaseWorldResidency(WorldId world);
+
+		// Stops one local play client after releasing its replica's residency.
+		//
+		// @param link The client link to stop. An idle link is ignored.
+		void StopPlayLink(PlayLink &link);
+
+		// Closes every panel pinned to a local play client's world.
+		//
+		// Called before that replica is destroyed so its generated split folds
+		// away instead of becoming an empty panel following the server world.
+		//
+		// @param replica The client world about to be destroyed.
+		void CloseClientViewports(WorldId replica);
+
 		// Presents every world this one's portals look into.
 		//
 		// **A world builds its draw list when somebody presents it**, and until
@@ -3376,6 +3398,28 @@ namespace studio {
 		};
 		// The synthetic click currently crossing the frame boundary.
 		std::optional<ControlClick> PendingControlClick;
+
+		// A key injected through SDL. Like a click, its release waits until a
+		// presented ImGui frame has observed the press.
+		struct ControlKey {
+			// SDL scancode, keycode, modifiers, and press-observation state. Kept
+			// as primitive fields so this public header does not expose SDL types.
+			//@{
+			uint32_t Scancode = 0;
+			uint32_t Key = 0;
+			uint16_t Modifiers = 0;
+			bool DownProcessed = false;
+			//@}
+		};
+		std::optional<ControlKey> PendingControlKey;
+
+		// Text storage must outlive the queued SDL event, whose payload is a
+		// pointer. It is released after the event crosses the frame loop.
+		struct ControlText {
+			std::string Text;
+			bool Processed = false;
+		};
+		std::optional<ControlText> PendingControlText;
 
 		// What this editor was started with.
 		Options Settings;
@@ -4142,6 +4186,16 @@ namespace studio {
 
 			// Whether the panel exists at all.
 			bool Open = false;
+
+			// The panel this one should split beside on its next `Begin`, plus one,
+			// or zero when no split is pending.
+			//
+			// **The panel index rather than its dock id**, because Play creates all
+			// client panels before imgui draws any of them. The second client's
+			// source dock therefore does not exist until the first client panel has
+			// begun. Keeping the source lets `DrawViewport` resolve that dependency
+			// when the dock node is real.
+			size_t SplitBeside = 0;
 
 			// A dock node this panel should join on its next `Begin`, or zero.
 			//
@@ -6123,12 +6177,17 @@ namespace studio {
 			// The published snapshot - what is drawn.
 			//@{
 			std::vector<DiagnosticSpan> Spans;
+			// Owner-only view of `Spans`, rebuilt without allocations when the
+			// published snapshot or owner selection changes.
+			std::vector<DiagnosticSpan> FilteredSpans;
 			// Display-only copy with synthetic `unaccounted` children. Retained so
 			// an open profiler does not allocate a second tree every repaint.
 			std::vector<DiagnosticSpan> DisplaySpans;
 			std::vector<uint32_t> Rows;
 			uint32_t DisplayRows = 0;
 			bool DisplayDirty = true;
+			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
+			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;

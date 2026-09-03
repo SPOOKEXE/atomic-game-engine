@@ -15,6 +15,7 @@ using Catch::Approx;
 using engine::core::Vector3;
 using engine::render::BoundsForParticleDraw;
 using engine::render::ParticleCullRecord;
+using engine::render::ParticleDrawPlanStamp;
 using engine::render::ParticleDrawVisible;
 using engine::render::ParticleStepDelta;
 using engine::render::ParticleWorkgroups;
@@ -45,6 +46,25 @@ TEST_CASE("an uncapped redraw does not advance a resident particle revision twic
 	CHECK(ParticleStepDelta(40, 41, 1.0f / 60.0f, 0.0f) == 1.0f / 60.0f);
 	CHECK(ParticleStepDelta(41, 41, 1.0f / 60.0f, 0.025f) == 0.025f);
 	CHECK(ParticleStepDelta(40, 41, 1.0f / 60.0f, 0.025f) == 0.025f + 1.0f / 60.0f);
+}
+
+TEST_CASE("particle draw plan survives device steps until its host bound expires", "[render][particles]") {
+	const glm::mat4 camera{1.0f};
+	ParticleDrawPlanStamp stamp{
+		.ViewProjection = camera,
+		.LayoutRevision = 7,
+		.ResidentRevision = 11,
+		.RebuildAfter = 4.0,
+		.CullingSafe = true,
+		.Valid = true,
+	};
+
+	CHECK(stamp.Reusable(camera, 7, 11, 3.999, true));
+	CHECK_FALSE(stamp.Reusable(camera, 7, 11, 4.0, true));
+	CHECK_FALSE(stamp.Reusable(glm::mat4{2.0f}, 7, 11, 3.0, true));
+	CHECK_FALSE(stamp.Reusable(camera, 8, 11, 3.0, true));
+	CHECK_FALSE(stamp.Reusable(camera, 7, 12, 3.0, true));
+	CHECK_FALSE(stamp.Reusable(camera, 7, 11, 3.0, false));
 }
 
 TEST_CASE("particle draw bounds include spawn motion and billboard reach", "[render][particles][culling]") {

@@ -43,6 +43,7 @@ namespace {
 		explicit World(std::string_view name) : Data(name) {
 			engine::gui::RegisterGuiClasses();
 			engine::scene::EnsureClassTree();
+			Data.SetFrame(1.0f / 60.0f, 1.0f);
 			Workspace = Data.CreateInstance(
 				engine::ecs::Classes::Find(engine::core::Name("Instance")),
 				std::string(engine::gui::WORKSPACE)
@@ -53,6 +54,7 @@ namespace {
 			const Entity part = Data.CreateInstance(engine::scene::PartClass(), "Rock");
 			Data.SetParent(part, Workspace);
 			Data.Set(part, engine::scene::Transform{CFrame(position)});
+			Data.Set(part, engine::scene::PreviousTransform{CFrame(position)});
 			Data.Set(part, engine::scene::Bounds{halfExtent});
 			return part;
 		}
@@ -127,6 +129,28 @@ TEST_CASE("a rotated part gets a rotated box", "[render][adornmentgeometry]") {
 	CHECK(reachX < 0.6f);
 }
 
+TEST_CASE("a selection box uses the adornee's presented transform", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.interpolated");
+
+	const Entity part = world.Part(Vector3{10.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	world.Data.Set(part, engine::scene::PreviousTransform{CFrame(Vector3::Zero)});
+	world.Data.SetFrame(1.0f / 60.0f, 0.25f);
+	world.Adorn("SelectionBox", part);
+
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	REQUIRE(geometry.Lines().size() == 12);
+
+	// The object renderer draws this part one quarter of the way from its last
+	// tick pose to its current pose. The outline must use the same pose rather
+	// than leading the mesh at the current tick position.
+	for (const AdornmentLine &line : geometry.Lines()) {
+		for (const Vector3 &point : {line.From, line.To}) {
+			CHECK(std::abs(point.X - 2.5f) == Approx(1.0f).margin(0.01f));
+		}
+	}
+}
+
 TEST_CASE("a handle uses its own size and offset", "[render][adornmentgeometry]") {
 	World world("adornment_geometry.handle");
 
@@ -135,8 +159,8 @@ TEST_CASE("a handle uses its own size and offset", "[render][adornmentgeometry]"
 
 	engine::gui::HandleShape shape;
 	shape.Offset = CFrame(Vector3{0.0f, 10.0f, 0.0f});
-	shape.Size = Vector3{1.0f, 1.0f, 1.0f};
 	world.Data.Set(handle, shape);
+	world.Data.Set(handle, engine::gui::BoxHandleShape{Vector3{1.0f, 1.0f, 1.0f}});
 
 	AdornmentGeometry geometry;
 	geometry.Build(world.Data);
@@ -301,8 +325,8 @@ TEST_CASE("a handle has no surface and no authored thickness", "[render][adornme
 	const Entity handle = world.Adorn("BoxHandleAdornment", part);
 
 	engine::gui::HandleShape shape;
-	shape.Size = Vector3{1.0f, 1.0f, 1.0f};
 	world.Data.Set(handle, shape);
+	world.Data.Set(handle, engine::gui::BoxHandleShape{Vector3{1.0f, 1.0f, 1.0f}});
 
 	AdornmentGeometry geometry;
 	geometry.Build(world.Data);
@@ -310,4 +334,64 @@ TEST_CASE("a handle has no surface and no authored thickness", "[render][adornme
 	REQUIRE(geometry.Lines().size() == 12);
 	CHECK(geometry.Faces().empty());
 	CHECK(geometry.Lines()[0].Thickness == Approx(0.05f));
+}
+
+TEST_CASE("each handle leaf emits its own geometry", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.handle_family");
+	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 2.0f, 2.0f});
+
+	const Entity sphere = world.Adorn("SphereHandleAdornment", part);
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines().size() == 96);
+	world.Data.DestroyInstance(sphere);
+
+	const Entity cylinder = world.Adorn("CylinderHandleAdornment", part);
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines().size() == 68);
+	world.Data.DestroyInstance(cylinder);
+
+	const Entity line = world.Adorn("LineHandleAdornment", part);
+	geometry.Build(world.Data);
+	REQUIRE(geometry.Lines().size() == 1);
+	CHECK(geometry.Lines()[0].Thickness == Approx(1.0f));
+	world.Data.DestroyInstance(line);
+
+	const Entity cone = world.Adorn("ConeHandleAdornment", part);
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines().size() == 41);
+	world.Data.DestroyInstance(cone);
+}
+
+TEST_CASE("face and arc handles honour their masks", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.gizmos");
+	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 3.0f, 4.0f});
+
+	const Entity handles = world.Adorn("Handles", part);
+	world.Data.Set(handles, engine::gui::HandlesShape{(1u << 0) | (1u << 4)});
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines().size() == 2);
+	world.Data.DestroyInstance(handles);
+
+	const Entity arcs = world.Adorn("ArcHandles", part);
+	world.Data.Set(arcs, engine::gui::ArcHandlesShape{1u << 1});
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines().size() == 32);
+	world.Data.DestroyInstance(arcs);
+}
+
+TEST_CASE("a size-relative offset reaches the adornee surface", "[render][adornmentgeometry]") {
+	World world("adornment_geometry.relative_offset");
+	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 4.0f, 6.0f});
+	const Entity handle = world.Adorn("BoxHandleAdornment", part);
+
+	engine::gui::HandleShape placement;
+	placement.SizeRelativeOffset = Vector3{0.0f, 1.0f, 0.0f};
+	world.Data.Set(handle, placement);
+
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	REQUIRE(!geometry.Lines().empty());
+	CHECK(std::abs(geometry.Lines()[0].From.Y - 4.0f) == Approx(0.5f));
 }
