@@ -46,7 +46,21 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] /docs/future-work/character-system.md
 - [_] gtlf default character (unreal style)
 
+- [_] for `just docs`, can you make it export a standalone html file that uses three.js for diagrams? Also properly layout the pages and remove references to ai models. Should be clean.
+- [_] for `just schema-dump`, a new job, its a job that json dumps two classes-components schema and data into json file for models to parse/read. `schema-dump` holds the schema and `schema-dump-full` is with data (class/component information).
+- [_] add documentation searching (for classes) to mcp
+- [_] add typechecking to script editor (shows unused variables, bad expressions, etc)
+- [_] when scripts crash, ensure studio does not crash and it handles it (just disable the script) - linux works fine but on windows it crashes the entire thing
+- [_] when you edit a script (right click edit script or double click), focus on the script editor viewport and open if not open
+- [_] the + button to add new instances just collapses the explorer instead of opening the instance list with search
+- [_] when i stop the game, it closes any open scripts in script editor. should stay open and it should keep all viewports in their current open/closed state (e.g. it keeps swapping back to Live Instances instead of keeping explorer selected)
+- [_] instead of a standalone `script editor` menu, it should be each script has their own editor with the name as the script
+- [_] add a script ticking rate slider for script update hertz
+- [_] add multi-line comment highlighting and such in script editor
+- [_] add CanQuery to PVInstance/BasePart, etc. Same with CastShadow.
 - [_] optimise remaining physics bottlenecks using StressPhysics demo
+- [_] add documentation searching (for classes) to mcp
+- [_] add documentation publish job (json dump of classes/components, standalone html file that has all documentation)
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 - [_] in World => Create World From Demo, move to under Demo dropdown and separate by simple/advanced categories.
 - [_] create a new flamegraph called `Scripting` for luau script bindings (abstract away though for when we add JavaScript and later maybe C# bindings to it).
@@ -68,6 +82,8 @@ new demos:
 - [_] blackhole simulator (warp space, warp visual, etc)
 - [_] user interface (copy bladeborne's for demo?), luau scripting and such
 - [_] update DEMOS.md with GIFs uploaded to repository
+- [_] quadsphere, quadtree planet
+
 
 ### v0.24
 
