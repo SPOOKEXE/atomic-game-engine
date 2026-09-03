@@ -59,6 +59,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add multi-line comment highlighting and such in script editor
 - [_] add CanQuery to PVInstance/BasePart, etc. Same with CastShadow.
 - [_] optimise remaining physics bottlenecks using StressPhysics demo
+- [_] add documentation searching (for classes) to mcp
+- [_] add documentation publish job (json dump of classes/components, standalone html file that has all documentation)
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 - [_] in World => Create World From Demo, move to under Demo dropdown and separate by simple/advanced categories.
 - [_] create a new flamegraph called `Scripting` for luau script bindings (abstract away though for when we add JavaScript and later maybe C# bindings to it).
