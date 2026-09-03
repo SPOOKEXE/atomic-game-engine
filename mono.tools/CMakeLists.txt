@@ -39,6 +39,9 @@ endif()
 # Line counter.
 add_subdirectory(linecount)
 
+# ECS schema dump, generated from the component and class registries.
+add_subdirectory(schemadump)
+
 # Many real replication clients against one server.
 #
 # Unconditional, like `shadercheck` and unlike `contentimport`: it links the

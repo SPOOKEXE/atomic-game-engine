@@ -1248,6 +1248,12 @@ docs-check: (build "docgen") docs
     fi
     cmake --build --preset {{preset}} --target docs-check
 
+# Dump the ECS schema as TOML.
+#
+# Outputs docs/schema.toml and docs/schema-data.toml.
+schema-dump: (build "schemadump")
+    ./{{build}}/tools/schemadump --schema docs/schema.toml --data docs/schema-data.toml
+
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
