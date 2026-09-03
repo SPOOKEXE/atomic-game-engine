@@ -84,6 +84,7 @@ new demos:
 - [_] atomic engine icons?
 - [_] add icon pack to studio?
 - [_] security audit, fuzzy tests, bound tests, etc.
+- [_] deferred.md update, cleanup and work we can do now
 
 ### v0.24
 
