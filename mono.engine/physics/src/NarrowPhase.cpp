@@ -98,58 +98,58 @@ namespace engine::physics {
 				pairs.size(),
 				NARROW_GRAIN,
 				[pairs, sources, &dynamicShapes, &staticShapes, &slots, &touching](size_t begin, size_t end) {
-				for (size_t at = begin; at < end; at++) {
-					const CandidateSource &source = sources[at];
+					for (size_t at = begin; at < end; at++) {
+						const CandidateSource &source = sources[at];
 
-					// **Bounds-checked, because the two index arrays are built
-					// one step apart.** A row destroyed between the sync and the
-					// broad phase leaves an index into an array that has since
-					// been rebuilt shorter - deferred structural changes land at
-					// the end of an `Each`, not at the end of the phase, so this
-					// is an ordinary outcome and not a diagnostic.
-					const std::vector<PlacedCollider> &firstTable =
-						source.FirstIsStatic() ? staticShapes : dynamicShapes;
-					const std::vector<PlacedCollider> &secondTable =
-						source.SecondIsStatic() ? staticShapes : dynamicShapes;
+						// **Bounds-checked, because the two index arrays are built
+						// one step apart.** A row destroyed between the sync and the
+						// broad phase leaves an index into an array that has since
+						// been rebuilt shorter - deferred structural changes land at
+						// the end of an `Each`, not at the end of the phase, so this
+						// is an ordinary outcome and not a diagnostic.
+						const std::vector<PlacedCollider> &firstTable =
+							source.FirstIsStatic() ? staticShapes : dynamicShapes;
+						const std::vector<PlacedCollider> &secondTable =
+							source.SecondIsStatic() ? staticShapes : dynamicShapes;
 
-					const size_t firstAt = source.FirstIndex();
-					const size_t secondAt = source.SecondIndex();
-					if (firstAt >= firstTable.size() || secondAt >= secondTable.size()) {
-						continue;
+						const size_t firstAt = source.FirstIndex();
+						const size_t secondAt = source.SecondIndex();
+						if (firstAt >= firstTable.size() || secondAt >= secondTable.size()) {
+							continue;
+						}
+
+						const PlacedCollider &first = firstTable[firstAt];
+						const PlacedCollider &second = secondTable[secondAt];
+
+						const ContactSolution solution = ContactBetween(first.Shape, second.Shape);
+						if (!solution.Touching) {
+							continue;
+						}
+
+						ContactManifold manifold;
+						manifold.A = pairs[at].A;
+						manifold.B = pairs[at].B;
+						manifold.Normal = solution.Normal;
+						manifold.PointCount = solution.PointCount;
+
+						// Either side being a trigger makes the whole manifold one.
+						// There is no half-solved contact: a trigger reports and
+						// never pushes, and a pair where one side pushed and the
+						// other did not would apply an impulse to one body out of
+						// two.
+						manifold.Trigger = first.Trigger || second.Trigger;
+
+						for (size_t index = 0; index < solution.PointCount; index++) {
+							manifold.Points[index] = ContactPoint{
+								solution.Positions[index],
+								solution.Penetrations[index],
+								solution.Features[index],
+							};
+						}
+
+						slots[at] = manifold;
+						touching[at] = 1;
 					}
-
-					const PlacedCollider &first = firstTable[firstAt];
-					const PlacedCollider &second = secondTable[secondAt];
-
-					const ContactSolution solution = ContactBetween(first.Shape, second.Shape);
-					if (!solution.Touching) {
-						continue;
-					}
-
-					ContactManifold manifold;
-					manifold.A = pairs[at].A;
-					manifold.B = pairs[at].B;
-					manifold.Normal = solution.Normal;
-					manifold.PointCount = solution.PointCount;
-
-					// Either side being a trigger makes the whole manifold one.
-					// There is no half-solved contact: a trigger reports and
-					// never pushes, and a pair where one side pushed and the
-					// other did not would apply an impulse to one body out of
-					// two.
-					manifold.Trigger = first.Trigger || second.Trigger;
-
-					for (size_t index = 0; index < solution.PointCount; index++) {
-						manifold.Points[index] = ContactPoint{
-							solution.Positions[index],
-							solution.Penetrations[index],
-							solution.Features[index],
-						};
-					}
-
-					slots[at] = manifold;
-					touching[at] = 1;
-				}
 				},
 				NARROW_GRAIN
 			);

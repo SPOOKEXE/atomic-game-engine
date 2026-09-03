@@ -9,8 +9,8 @@
 // visible in `scene`, which is why neither had a suite: `scene` may not link
 // this module, so the query and the wake both live here.
 
-#include <engine/ecs/Store.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/PhysicsWorld.hpp>

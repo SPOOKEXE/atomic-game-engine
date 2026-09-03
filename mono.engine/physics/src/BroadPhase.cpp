@@ -67,7 +67,8 @@ namespace engine::physics {
 				const ColliderRecord &a = dynamicRecords[index];
 				const core::AABB &box = dynamicProxies[index].Bounds;
 
-				const spatial::QueryResult moving = spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
+				const spatial::QueryResult moving =
+					spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
 				if (moving.Overflowed) {
 					output.clear();
 					return false;
@@ -87,7 +88,8 @@ namespace engine::physics {
 					);
 				}
 
-				const spatial::QueryResult anchored = spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
+				const spatial::QueryResult anchored =
+					spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
 				if (anchored.Overflowed) {
 					output.clear();
 					return false;
@@ -171,19 +173,19 @@ namespace engine::physics {
 						const size_t begin = batch * BROADPHASE_BATCH_SIZE;
 						const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
 						overflowed[batch] = CollectPairs(
-							*world,
-							dynamicProxies,
-							dynamicRecords,
-							staticRecords,
-							dynamicIndex,
-							staticIndex,
-							begin,
-							end,
-							localCandidates,
-							batches[batch]
-						)
-							? 0
-							: 1;
+												*world,
+												dynamicProxies,
+												dynamicRecords,
+												staticRecords,
+												dynamicIndex,
+												staticIndex,
+												begin,
+												end,
+												localCandidates,
+												batches[batch]
+											)
+												? 0
+												: 1;
 					}
 				},
 				2

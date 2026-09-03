@@ -667,25 +667,25 @@ namespace engine::physics {
 				body.Asleep = body.Movable && world->Sleeping(body.Owner);
 			}
 
-		// --- wake ------------------------------------------------------------
-		//
-		// A sleeping body has no `scene::Motion`, so the broad phase has it in
-		// the static index and only an *awake* neighbour can produce a pair
-		// with it. One pass in pair order, so a stack wakes one layer per tick
-		// - bounded, deterministic, and visibly a settling stack rather than a
-		// whole scene jumping at once.
+			// --- wake ------------------------------------------------------------
+			//
+			// A sleeping body has no `scene::Motion`, so the broad phase has it in
+			// the static index and only an *awake* neighbour can produce a pair
+			// with it. One pass in pair order, so a stack wakes one layer per tick
+			// - bounded, deterministic, and visibly a settling stack rather than a
+			// whole scene jumping at once.
 			for (size_t at = 0; at < manifolds.size(); at++) {
-			SolverBody &first = bodies[located[at].first];
-			SolverBody &second = bodies[located[at].second];
+				SolverBody &first = bodies[located[at].first];
+				SolverBody &second = bodies[located[at].second];
 
-			const float firstSpeed = first.LinearVelocity.Magnitude();
-			const float secondSpeed = second.LinearVelocity.Magnitude();
-			if (first.Asleep && !second.Asleep && secondSpeed > WAKE_SPEED) {
-				first.Asleep = false;
-			}
-			if (second.Asleep && !first.Asleep && firstSpeed > WAKE_SPEED) {
-				second.Asleep = false;
-			}
+				const float firstSpeed = first.LinearVelocity.Magnitude();
+				const float secondSpeed = second.LinearVelocity.Magnitude();
+				if (first.Asleep && !second.Asleep && secondSpeed > WAKE_SPEED) {
+					first.Asleep = false;
+				}
+				if (second.Asleep && !first.Asleep && firstSpeed > WAKE_SPEED) {
+					second.Asleep = false;
+				}
 			}
 
 			for (SolverBody &body : bodies) {
@@ -719,9 +719,9 @@ namespace engine::physics {
 			for (size_t at = 0; at < manifolds.size(); at++) {
 				const ContactManifold &manifold = manifolds[at];
 
-			// A trigger reports and never pushes. Skipping it here rather than
-			// zeroing its impulse keeps it out of the iteration entirely, so a
-			// world made of triggers costs the solver nothing.
+				// A trigger reports and never pushes. Skipping it here rather than
+				// zeroing its impulse keeps it out of the iteration entirely, so a
+				// world made of triggers costs the solver nothing.
 				if (manifold.Trigger) {
 					continue;
 				}
@@ -905,17 +905,17 @@ namespace engine::physics {
 			rowStart.resize(manifolds.size());
 			impulseStart.resize(manifolds.size());
 
-		// **Two offsets per manifold, because the two arrays are ordered
-		// differently and that is the whole point of one of them.** A row's slot
-		// comes from its group, so the row array is grouped by chunk and is in
-		// no entity order at all. The impulse cache has to come out ordered by
-		// the pair, because next tick's warm start binary-searches it - so its
-		// slot is a plain running total in manifold order, and the manifolds are
-		// already sorted on the pair.
-		//
-		// Writing the cache at row indices instead is the mistake that costs
-		// nothing to make and is silent: the cache is still complete, still the
-		// right size, and every lookup into it misses.
+			// **Two offsets per manifold, because the two arrays are ordered
+			// differently and that is the whole point of one of them.** A row's slot
+			// comes from its group, so the row array is grouped by chunk and is in
+			// no entity order at all. The impulse cache has to come out ordered by
+			// the pair, because next tick's warm start binary-searches it - so its
+			// slot is a plain running total in manifold order, and the manifolds are
+			// already sorted on the pair.
+			//
+			// Writing the cache at row indices instead is the mistake that costs
+			// nothing to make and is silent: the cache is still complete, still the
+			// right size, and every lookup into it misses.
 			uint32_t emitted = 0;
 			for (size_t at = 0; at < manifolds.size(); at++) {
 				const uint32_t group = groupOfManifold[at];
@@ -946,78 +946,78 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.solve-setup", core::ProfileCategory::Physics);
 			const auto setUpManifolds = [&](size_t begin, size_t end) {
 				for (size_t at = begin; at < end; at++) {
-				const ContactManifold &manifold = manifolds[at];
-				if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
-					continue;
-				}
-
-				const size_t firstIndex = located[at].first;
-				const size_t secondIndex = located[at].second;
-
-				const SolverBody &first = bodies[firstIndex];
-				const SolverBody &second = bodies[secondIndex];
-
-				// Combined the standard way: friction multiplies because two
-				// slippery surfaces are slipperier than either, restitution takes
-				// the larger because a superball off concrete bounces.
-				const float friction = std::sqrt(first.Friction * second.Friction);
-				const float restitution =
-					first.Restitution > second.Restitution ? first.Restitution : second.Restitution;
-
-				for (size_t point = 0; point < manifold.PointCount; point++) {
-					const ContactPoint &contact = manifold.Points[point];
-
-					// The lever arms are what turn an impulse into a torque, and the
-					// reason a four-point manifold holds a box against rotation.
-					// They stay local: every use of them is here, folded into the
-					// three axes below, and a row the sweeps have to reload is a
-					// row that costs sixteen passes over the cache.
-					const core::Vector3 firstLever = contact.Position - first.Centre;
-					const core::Vector3 secondLever = contact.Position - second.Centre;
-
-					ContactRow row;
-					row.First = firstIndex;
-					row.Second = secondIndex;
-					row.Friction = friction;
-					row.Feature = contact.Feature;
-
-					row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
-					TangentsFor(
-						manifold.Normal,
-						row.Along[ContactRow::TANGENT].Direction,
-						row.Along[ContactRow::TANGENT + 1].Direction
-					);
-					for (ContactAxis &axis : row.Along) {
-						PrepareAxis(first, second, firstLever, secondLever, axis);
+					const ContactManifold &manifold = manifolds[at];
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
+						continue;
 					}
 
-					const float shared = first.InverseMass + second.InverseMass;
-					row.CorrectionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
+					const size_t firstIndex = located[at].first;
+					const size_t secondIndex = located[at].second;
 
-					const float excess = contact.Penetration - PENETRATION_SLOP;
-					const float unwind =
-						delta > 0.0f && excess > 0.0f ? (POSITION_CORRECTION / delta) * excess : 0.0f;
-					row.Bias = unwind > MAXIMUM_CORRECTION_SPEED ? MAXIMUM_CORRECTION_SPEED : unwind;
+					const SolverBody &first = bodies[firstIndex];
+					const SolverBody &second = bodies[secondIndex];
 
-					// Restitution is a function of how fast they were closing
-					// *before* anything was applied, so it is captured here and not
-					// recomputed per iteration - an iteration that recomputed it
-					// would keep finding a smaller closing speed and add energy
-					// chasing it.
-					const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
-					row.Bounce = closing > BOUNCE_THRESHOLD ? restitution * closing : 0.0f;
+					// Combined the standard way: friction multiplies because two
+					// slippery surfaces are slipperier than either, restitution takes
+					// the larger because a superball off concrete bounces.
+					const float friction = std::sqrt(first.Friction * second.Friction);
+					const float restitution =
+						first.Restitution > second.Restitution ? first.Restitution : second.Restitution;
 
-					const ContactImpulse *cached = FindImpulse(
-						PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B, contact.Feature
-					);
-					if (cached != nullptr) {
-						row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
-						row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];
-						row.Along[ContactRow::TANGENT + 1].Impulse = cached->Tangent[1];
+					for (size_t point = 0; point < manifold.PointCount; point++) {
+						const ContactPoint &contact = manifold.Points[point];
+
+						// The lever arms are what turn an impulse into a torque, and the
+						// reason a four-point manifold holds a box against rotation.
+						// They stay local: every use of them is here, folded into the
+						// three axes below, and a row the sweeps have to reload is a
+						// row that costs sixteen passes over the cache.
+						const core::Vector3 firstLever = contact.Position - first.Centre;
+						const core::Vector3 secondLever = contact.Position - second.Centre;
+
+						ContactRow row;
+						row.First = firstIndex;
+						row.Second = secondIndex;
+						row.Friction = friction;
+						row.Feature = contact.Feature;
+
+						row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
+						TangentsFor(
+							manifold.Normal,
+							row.Along[ContactRow::TANGENT].Direction,
+							row.Along[ContactRow::TANGENT + 1].Direction
+						);
+						for (ContactAxis &axis : row.Along) {
+							PrepareAxis(first, second, firstLever, secondLever, axis);
+						}
+
+						const float shared = first.InverseMass + second.InverseMass;
+						row.CorrectionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
+
+						const float excess = contact.Penetration - PENETRATION_SLOP;
+						const float unwind =
+							delta > 0.0f && excess > 0.0f ? (POSITION_CORRECTION / delta) * excess : 0.0f;
+						row.Bias = unwind > MAXIMUM_CORRECTION_SPEED ? MAXIMUM_CORRECTION_SPEED : unwind;
+
+						// Restitution is a function of how fast they were closing
+						// *before* anything was applied, so it is captured here and not
+						// recomputed per iteration - an iteration that recomputed it
+						// would keep finding a smaller closing speed and add energy
+						// chasing it.
+						const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
+						row.Bounce = closing > BOUNCE_THRESHOLD ? restitution * closing : 0.0f;
+
+						const ContactImpulse *cached = FindImpulse(
+							PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B, contact.Feature
+						);
+						if (cached != nullptr) {
+							row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
+							row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];
+							row.Along[ContactRow::TANGENT + 1].Impulse = cached->Tangent[1];
+						}
+
+						rows[rowStart[at] + point] = row;
 					}
-
-					rows[rowStart[at] + point] = row;
-				}
 				}
 			};
 
@@ -1043,29 +1043,29 @@ namespace engine::physics {
 			const auto warmStart = [&bodies, &rows](SolverGroup run) {
 				const size_t last = static_cast<size_t>(run.FirstRow) + run.RowCount;
 				for (size_t at = run.FirstRow; at < last; at++) {
-				const ContactRow &row = rows[at];
-				SolverBody &first = bodies[row.First];
-				SolverBody &second = bodies[row.Second];
-				for (const ContactAxis &axis : row.Along) {
-					ApplyImpulse(first, second, axis, axis.Impulse);
-				}
+					const ContactRow &row = rows[at];
+					SolverBody &first = bodies[row.First];
+					SolverBody &second = bodies[row.Second];
+					for (const ContactAxis &axis : row.Along) {
+						ApplyImpulse(first, second, axis, axis.Impulse);
+					}
 				}
 			};
 
-		if (groups.size() > 1) {
-			parallel::Jobs::For(
-				groups.size(),
-				1,
-				[&groups, &warmStart](size_t begin, size_t end) {
-					for (size_t group = begin; group < end; group++) {
-						warmStart(groups[group]);
-					}
-				},
-				2
-			);
-		} else if (!groups.empty()) {
-			warmStart(groups[0]);
-		}
+			if (groups.size() > 1) {
+				parallel::Jobs::For(
+					groups.size(),
+					1,
+					[&groups, &warmStart](size_t begin, size_t end) {
+						for (size_t group = begin; group < end; group++) {
+							warmStart(groups[group]);
+						}
+					},
+					2
+				);
+			} else if (!groups.empty()) {
+				warmStart(groups[0]);
+			}
 			warmStart(border);
 		}
 
@@ -1116,18 +1116,18 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.solve-sweeps", core::ProfileCategory::Physics);
 			for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
 				if (groups.size() > 1) {
-				parallel::Jobs::For(
-					groups.size(),
-					1,
-					[&bodies, &rows, &groups](size_t begin, size_t end) {
-						for (size_t group = begin; group < end; group++) {
-							for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-								SweepRows(bodies, rows, groups[group]);
+					parallel::Jobs::For(
+						groups.size(),
+						1,
+						[&bodies, &rows, &groups](size_t begin, size_t end) {
+							for (size_t group = begin; group < end; group++) {
+								for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+									SweepRows(bodies, rows, groups[group]);
+								}
 							}
-						}
-					},
-					2
-				);
+						},
+						2
+					);
 				} else if (!groups.empty()) {
 					for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
 						SweepRows(bodies, rows, groups[0]);
@@ -1167,41 +1167,41 @@ namespace engine::physics {
 			}
 
 			parallel::Jobs::For(
-			manifolds.size(),
-			SETUP_GRAIN,
-			[&next, &rows, &bodies, &manifolds, &groupOfManifold, &rowStart, &impulseStart](
-				size_t begin, size_t end
-			) {
-				for (size_t at = begin; at < end; at++) {
-					if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
-						continue;
-					}
+				manifolds.size(),
+				SETUP_GRAIN,
+				[&next, &rows, &bodies, &manifolds, &groupOfManifold, &rowStart, &impulseStart](
+					size_t begin, size_t end
+				) {
+					for (size_t at = begin; at < end; at++) {
+						if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
+							continue;
+						}
 
-					const uint32_t first = impulseStart[at];
-					const uint32_t last = first + manifolds[at].PointCount;
-					for (uint32_t offset = 0; offset < manifolds[at].PointCount; offset++) {
-						const ContactRow &row = rows[rowStart[at] + offset];
-						next[first + offset] = ContactImpulse{
-							bodies[row.First].Owner,
-							bodies[row.Second].Owner,
-							row.Feature,
-							row.Along[ContactRow::NORMAL].Impulse,
-							{
-								row.Along[ContactRow::TANGENT].Impulse,
-								row.Along[ContactRow::TANGENT + 1].Impulse,
-							},
-						};
+						const uint32_t first = impulseStart[at];
+						const uint32_t last = first + manifolds[at].PointCount;
+						for (uint32_t offset = 0; offset < manifolds[at].PointCount; offset++) {
+							const ContactRow &row = rows[rowStart[at] + offset];
+							next[first + offset] = ContactImpulse{
+								bodies[row.First].Owner,
+								bodies[row.Second].Owner,
+								row.Feature,
+								row.Along[ContactRow::NORMAL].Impulse,
+								{
+									row.Along[ContactRow::TANGENT].Impulse,
+									row.Along[ContactRow::TANGENT + 1].Impulse,
+								},
+							};
+						}
+						std::sort(next.begin() + first, next.begin() + last);
 					}
-					std::sort(next.begin() + first, next.begin() + last);
-				}
-			},
-			SETUP_GRAIN
+				},
+				SETUP_GRAIN
 			);
 
-		// The manifolds contributed their runs in order, but the runs of the
-		// ones that contributed nothing were skipped - so the filled slots are
-		// `[0, rowCount)` and the tail beyond it is last tick's, which the
-		// binary search must not see.
+			// The manifolds contributed their runs in order, but the runs of the
+			// ones that contributed nothing were skipped - so the filled slots are
+			// `[0, rowCount)` and the tail beyond it is last tick's, which the
+			// binary search must not see.
 			next.resize(rowCount);
 			std::swap(PipelineInternals::ImpulseCache(*world), next);
 		}
@@ -1213,43 +1213,43 @@ namespace engine::physics {
 			std::vector<RestingBody> &restingNext = PipelineInternals::RestingNext(*world);
 			restingNext.clear();
 
-		size_t carried = 0;
-		const auto carryUntil = [&](uint64_t limit) {
-			while (carried < resting.size() && resting[carried].Owner.Id < limit) {
-				const RestingBody &existing = resting[carried];
-				if (existing.Asleep && store.Alive(existing.Owner)) {
-					restingNext.push_back(existing);
+			size_t carried = 0;
+			const auto carryUntil = [&](uint64_t limit) {
+				while (carried < resting.size() && resting[carried].Owner.Id < limit) {
+					const RestingBody &existing = resting[carried];
+					if (existing.Asleep && store.Alive(existing.Owner)) {
+						restingNext.push_back(existing);
+					}
+					carried++;
 				}
-				carried++;
-			}
-		};
+			};
 
-		for (const SolverBody &body : bodies) {
-			carryUntil(body.Owner.Id);
+			for (const SolverBody &body : bodies) {
+				carryUntil(body.Owner.Id);
 
-			RestingBody entry{body.Owner, 0.0f, false};
-			if (carried < resting.size() && resting[carried].Owner == body.Owner) {
-				entry = resting[carried];
-				carried++;
-			}
+				RestingBody entry{body.Owner, 0.0f, false};
+				if (carried < resting.size() && resting[carried].Owner == body.Owner) {
+					entry = resting[carried];
+					carried++;
+				}
 
-			// Only a dynamic body sleeps. A kinematic one is moved by whoever
-			// owns it, and taking its `scene::Motion` away would stop that
-			// owner's writes from moving anything.
-			if (!body.Movable && !body.Asleep) {
-				continue;
-			}
+				// Only a dynamic body sleeps. A kinematic one is moved by whoever
+				// owns it, and taking its `scene::Motion` away would stop that
+				// owner's writes from moving anything.
+				if (!body.Movable && !body.Asleep) {
+					continue;
+				}
 
-			entry.Asleep = body.Asleep;
-			if (!entry.Asleep) {
-				const bool still = body.LinearVelocity.Magnitude() < SLEEP_LINEAR_SPEED &&
-								   body.AngularVelocity.Magnitude() < SLEEP_ANGULAR_SPEED;
-				entry.RestingSeconds = still ? entry.RestingSeconds + delta : 0.0f;
-				entry.Asleep = entry.RestingSeconds >= SLEEP_SETTLE_SECONDS;
+				entry.Asleep = body.Asleep;
+				if (!entry.Asleep) {
+					const bool still = body.LinearVelocity.Magnitude() < SLEEP_LINEAR_SPEED &&
+									   body.AngularVelocity.Magnitude() < SLEEP_ANGULAR_SPEED;
+					entry.RestingSeconds = still ? entry.RestingSeconds + delta : 0.0f;
+					entry.Asleep = entry.RestingSeconds >= SLEEP_SETTLE_SECONDS;
+				}
+				restingNext.push_back(entry);
 			}
-			restingNext.push_back(entry);
-		}
-		carryUntil(UINT64_MAX);
+			carryUntil(UINT64_MAX);
 
 			std::swap(resting, restingNext);
 		}

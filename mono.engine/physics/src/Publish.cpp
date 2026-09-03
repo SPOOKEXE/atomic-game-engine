@@ -106,30 +106,32 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.publish-velocity", core::ProfileCategory::Physics);
 			for (const SolverBody &body : bodies) {
-			if (world->Sleeping(body.Owner)) {
-				// **The archetype move.** Losing `scene::Motion` takes the row
-				// out of `IntegrateMotion`'s query and out of the dynamic half
-				// of the broad phase - the query never visits it, which a tag
-				// could not deliver without a "without this component" query
-				// term the ECS does not have.
-				if (store.Has<scene::Motion>(body.Owner)) {
-					store.Remove<scene::Motion>(body.Owner);
+				if (world->Sleeping(body.Owner)) {
+					// **The archetype move.** Losing `scene::Motion` takes the row
+					// out of `IntegrateMotion`'s query and out of the dynamic half
+					// of the broad phase - the query never visits it, which a tag
+					// could not deliver without a "without this component" query
+					// term the ECS does not have.
+					if (store.Has<scene::Motion>(body.Owner)) {
+						store.Remove<scene::Motion>(body.Owner);
+					}
+					continue;
 				}
-				continue;
-			}
 
-			// A kinematic body and a piece of static geometry are both in the
-			// body array - they take part in every contact - and neither has a
-			// velocity the solver is allowed to have changed. Writing one back
-			// would overwrite whatever moves the platform.
-			if (!body.Movable) {
-				continue;
-			}
+				// A kinematic body and a piece of static geometry are both in the
+				// body array - they take part in every contact - and neither has a
+				// velocity the solver is allowed to have changed. Writing one back
+				// would overwrite whatever moves the platform.
+				if (!body.Movable) {
+					continue;
+				}
 
-			// `Set` rather than `GetMutable`, because a body that has just
-			// woken has no `scene::Motion` at all and this is the write that
-			// gives it one back.
-			store.Set<scene::Motion>(body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity});
+				// `Set` rather than `GetMutable`, because a body that has just
+				// woken has no `scene::Motion` at all and this is the write that
+				// gives it one back.
+				store.Set<scene::Motion>(
+					body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity}
+				);
 			}
 		}
 
@@ -183,34 +185,34 @@ namespace engine::physics {
 			std::vector<CandidatePair> &now = PipelineInternals::TouchingNow(*world);
 			now.clear();
 
-		size_t previous = 0;
-		const auto retire = [&](const CandidatePair &limit, bool all) {
-			while (previous < last.size() && (all || last[previous] < limit)) {
-				const CandidatePair gone = last[previous];
-				previous++;
+			size_t previous = 0;
+			const auto retire = [&](const CandidatePair &limit, bool all) {
+				while (previous < last.size() && (all || last[previous] < limit)) {
+					const CandidatePair gone = last[previous];
+					previous++;
 
-				if (StillRestingTogether(store, *world, gone)) {
-					now.push_back(gone);
-					events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Persisted});
-					continue;
+					if (StillRestingTogether(store, *world, gone)) {
+						now.push_back(gone);
+						events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Persisted});
+						continue;
+					}
+					events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Ended});
 				}
-				events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Ended});
-			}
-		};
+			};
 
-		for (const ContactManifold &manifold : world->Manifolds()) {
-			const CandidatePair pair{manifold.A, manifold.B};
-			retire(pair, false);
+			for (const ContactManifold &manifold : world->Manifolds()) {
+				const CandidatePair pair{manifold.A, manifold.B};
+				retire(pair, false);
 
-			ContactPhase phase = ContactPhase::Began;
-			if (previous < last.size() && last[previous] == pair) {
-				phase = ContactPhase::Persisted;
-				previous++;
+				ContactPhase phase = ContactPhase::Began;
+				if (previous < last.size() && last[previous] == pair) {
+					phase = ContactPhase::Persisted;
+					previous++;
+				}
+				events.push_back(ContactEvent{pair.A, pair.B, phase});
+				now.push_back(pair);
 			}
-			events.push_back(ContactEvent{pair.A, pair.B, phase});
-			now.push_back(pair);
-		}
-		retire(CandidatePair{}, true);
+			retire(CandidatePair{}, true);
 
 			std::swap(last, now);
 		}
