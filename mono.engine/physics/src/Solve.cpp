@@ -21,6 +21,7 @@
 #include <engine/spatial/LayerMask.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +69,46 @@ namespace engine::physics {
 		// offsets were built from - which would not misplace a row, it would
 		// write one past the end of a group.
 		constexpr uint32_t SKIPPED_MANIFOLD = UINT32_MAX;
+
+		// An entity id has a fixed width, so ordering the compact solver bodies
+		// takes six stable passes instead of comparison-sorting every contact's
+		// two owners. Eleven-bit buckets fit in L1 and avoid an extra full walk
+		// over a large contact set.
+		constexpr size_t OWNER_RADIX_BITS = 11;
+		constexpr size_t OWNER_RADIX_BUCKETS = size_t{1} << OWNER_RADIX_BITS;
+		constexpr size_t OWNER_RADIX_PASSES =
+			(sizeof(uint64_t) * 8 + OWNER_RADIX_BITS - 1) / OWNER_RADIX_BITS;
+
+		void SortOwners(std::vector<ecs::Entity> &owners, std::vector<ecs::Entity> &scratch) {
+			if (owners.size() < 2) {
+				return;
+			}
+
+			scratch.resize(owners.size());
+			for (size_t pass = 0; pass < OWNER_RADIX_PASSES; pass++) {
+				const size_t shift = pass * OWNER_RADIX_BITS;
+				std::array<size_t, OWNER_RADIX_BUCKETS> offsets{};
+				for (ecs::Entity owner : owners) {
+					const size_t bucket =
+						static_cast<size_t>((owner.Id >> shift) & (OWNER_RADIX_BUCKETS - 1));
+					offsets[bucket]++;
+				}
+
+				size_t next = 0;
+				for (size_t &offset : offsets) {
+					const size_t count = offset;
+					offset = next;
+					next += count;
+				}
+
+				for (ecs::Entity owner : owners) {
+					const size_t bucket =
+						static_cast<size_t>((owner.Id >> shift) & (OWNER_RADIX_BUCKETS - 1));
+					scratch[offsets[bucket]++] = owner;
+				}
+				owners.swap(scratch);
+			}
+		}
 
 		// One component of a vector by index, so the three principal axes can
 		// be walked in a loop rather than written out three times.
@@ -515,9 +556,7 @@ namespace engine::physics {
 				owners.push_back(manifold.A);
 				owners.push_back(manifold.B);
 			}
-			std::sort(owners.begin(), owners.end(), [](ecs::Entity left, ecs::Entity right) {
-				return left.Id < right.Id;
-			});
+			SortOwners(owners, PipelineInternals::BodyOwnerSortScratch(*world));
 			owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
 
 			bodies.resize(owners.size());

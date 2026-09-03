@@ -846,6 +846,11 @@ namespace engine::physics {
 		// refilled, never freed, like every other list here.
 		std::vector<SourcedPair> SourcedPairList;
 
+		// The broad phase's retained radix-sort scratch. The pair order is a
+		// solver invariant, so sorting cannot be skipped on a moving world; this
+		// avoids making the required ordering pass also allocate every tick.
+		std::vector<SourcedPair> SourcedPairSortScratch;
+
 		// One retained output list per broad-phase batch, plus the batches whose
 		// fixed candidate scratch overflowed and must be replayed on the caller.
 		// Separate lists let workers append without a shared cursor; concatenating
@@ -894,6 +899,10 @@ namespace engine::physics {
 		//
 		// Cleared and refilled, never freed, like every other list here.
 		std::vector<ecs::Entity> BodyOwners;
+
+		// Stable radix passes order the owners before their compact bodies exist.
+		// Keeping this beside the source avoids an allocation on a steady tick.
+		std::vector<ecs::Entity> BodyOwnerSortScratch;
 		std::vector<std::pair<uint32_t, uint32_t>> ManifoldBodies;
 
 		// The spatial partition the solve is batched by, and the points it is

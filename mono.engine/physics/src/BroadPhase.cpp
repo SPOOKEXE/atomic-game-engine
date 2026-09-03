@@ -47,6 +47,52 @@ namespace engine::physics {
 			return SourcedPair{CandidatePair{right, left}, CandidateSource{rightAt, leftAt}};
 		}
 
+		// A 64-bit entity id needs six eleven-bit passes. Eleven bits leaves the
+		// bucket table in L1 while avoiding the sixteen full-array moves an
+		// eight-bit radix would need. Sorting B first and then A makes the stable
+		// result exactly the CandidatePair ordering the solver requires.
+		constexpr size_t PAIR_RADIX_BITS = 11;
+		constexpr size_t PAIR_RADIX_BUCKETS = size_t{1} << PAIR_RADIX_BITS;
+		constexpr size_t PAIR_RADIX_PASSES = (sizeof(uint64_t) * 8 + PAIR_RADIX_BITS - 1) / PAIR_RADIX_BITS;
+
+		template <typename Key>
+		void
+		RadixSortPairMember(std::vector<SourcedPair> &pairs, std::vector<SourcedPair> &scratch, Key key) {
+			if (pairs.size() < 2) {
+				return;
+			}
+
+			scratch.resize(pairs.size());
+			for (size_t pass = 0; pass < PAIR_RADIX_PASSES; pass++) {
+				const size_t shift = pass * PAIR_RADIX_BITS;
+				std::array<size_t, PAIR_RADIX_BUCKETS> offsets{};
+				for (const SourcedPair &pair : pairs) {
+					const size_t bucket =
+						static_cast<size_t>((key(pair) >> shift) & (PAIR_RADIX_BUCKETS - 1));
+					offsets[bucket]++;
+				}
+
+				size_t next = 0;
+				for (size_t &offset : offsets) {
+					const size_t count = offset;
+					offset = next;
+					next += count;
+				}
+
+				for (const SourcedPair &pair : pairs) {
+					const size_t bucket =
+						static_cast<size_t>((key(pair) >> shift) & (PAIR_RADIX_BUCKETS - 1));
+					scratch[offsets[bucket]++] = pair;
+				}
+				pairs.swap(scratch);
+			}
+		}
+
+		void SortPairs(std::vector<SourcedPair> &pairs, std::vector<SourcedPair> &scratch) {
+			RadixSortPairMember(pairs, scratch, [](const SourcedPair &pair) { return pair.Pair.B.Id; });
+			RadixSortPairMember(pairs, scratch, [](const SourcedPair &pair) { return pair.Pair.A.Id; });
+		}
+
 		// Collects one disjoint range of dynamic proxies into caller-owned output.
 		// Returns false without a partial answer when either overlap query fills
 		// its scratch, so the caller can retry the same range with wider storage.
@@ -232,7 +278,7 @@ namespace engine::physics {
 			// gives one answer on a scene built one way and another on the same
 			// scene built another way - and `just determinism` reports it a long
 			// way from here.
-			std::sort(sourced.begin(), sourced.end());
+			SortPairs(sourced, PipelineInternals::SourcedPairSortScratch(*world));
 
 			// Each pair once. The generation above already reports each one once;
 			// this is what makes "once" a property of the list the solver reads

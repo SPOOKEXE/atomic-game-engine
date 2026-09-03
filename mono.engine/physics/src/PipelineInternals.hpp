@@ -80,6 +80,11 @@ namespace engine::physics {
 			return world.SourcedPairList;
 		}
 
+		// The second array used while ordering pairs by their entity ids.
+		static std::vector<SourcedPair> &SourcedPairSortScratch(PhysicsWorld &world) {
+			return world.SourcedPairSortScratch;
+		}
+
 		// Per-batch pair output and the batches that need a full-size retry.
 		static std::vector<std::vector<SourcedPair>> &SourcedPairBatches(PhysicsWorld &world) {
 			return world.SourcedPairBatches;
@@ -146,6 +151,10 @@ namespace engine::physics {
 		// The gather's sort buffer, and the body indices it resolves.
 		static std::vector<ecs::Entity> &BodyOwners(PhysicsWorld &world) {
 			return world.BodyOwners;
+		}
+
+		static std::vector<ecs::Entity> &BodyOwnerSortScratch(PhysicsWorld &world) {
+			return world.BodyOwnerSortScratch;
 		}
 
 		static std::vector<std::pair<uint32_t, uint32_t>> &ManifoldBodies(PhysicsWorld &world) {
