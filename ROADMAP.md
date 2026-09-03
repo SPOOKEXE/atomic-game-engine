@@ -83,8 +83,9 @@ new demos:
 
 - [_] atomic engine icons?
 - [_] add icon pack to studio?
-- [_] security audit, fuzzy tests, bound tests, etc.
 - [_] deferred.md update, cleanup and work we can do now
+- [_] security audit, fuzzy tests, bound tests, etc.
+- [_] go through each underlying system and check we fully test them. lifecycles, allocations, deallocations, crash handling, error handling, fuzzy, bounds, etc.
 
 ### v0.24
 
