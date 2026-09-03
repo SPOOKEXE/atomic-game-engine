@@ -118,7 +118,7 @@ new demos:
 - [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
 - [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
-- [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well
+- [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well, css as well
 - [_] figma import tools
 - [_] import blender files in asset explorer natively (drag .blend files on engine)
 - [_] rpg maker port tool
