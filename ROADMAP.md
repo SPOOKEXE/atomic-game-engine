@@ -39,10 +39,13 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.23
 
-- [_] add documentation searching (for classes) to mcp
-- [_] add documentation publish job (json dump of classes/components, standalone html file that has all documentation)
-- [_] for `just docs`, can you make it export a standalone html file that uses three.js for diagrams? Also properly layout the pages and remove references to ai models. Should be clean.
-- [_] for `just schema-dump`, a new job, its a job that json dumps two classes-components schema and data into json file for models to parse/read. `schema-dump` holds the schema and `schema-dump-full` is with data (class/component information).
+- [x] for `just schema-dump`:
+1. it toml file dumps
+a. schema for components and classes
+b. components
+c. classes
+2. saves under `docs/`
+3. replace current ones (justfile). check git diff.
 
 - [_] add typechecking to script editor (shows unused variables, bad expressions, etc)
 - [_] when scripts crash, ensure studio does not crash and it handles it (just disable the script) - linux works fine but on windows it crashes the entire thing
@@ -82,10 +85,12 @@ new demos:
 - [_] add icon pack to studio?
 - [_] security audit, fuzzy tests, bound tests, etc.
 
+### v0.24
+
 - [_] /docs/future-work/character-system.md
 - [_] gtlf default character (unreal style)
 
-### v0.24
+### v0.25
 
 - [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
@@ -101,8 +106,14 @@ new demos:
 - [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
 - [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
 - [_] different antialiasing choices as render nodes
+- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 
-### v0.25
+### v0.26
+
+- [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
+- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
+- [_] pathfinding
+- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
 - [_] /docs/future-work/world-streaming.md
 - [_] /docs/future-work/terrain-system.md
@@ -131,9 +142,6 @@ new demos:
 - [_] built-in whiteboxing tools (planning) for building (plugin)
 - [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
-- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
-- [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
-- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well, css as well. "virtual container" that makes/simulates the instances?
 - [_] figma import tools
@@ -144,8 +152,6 @@ new demos:
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] localization support
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
-- [_] pathfinding
-- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
