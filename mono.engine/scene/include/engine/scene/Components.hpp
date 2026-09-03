@@ -1242,10 +1242,12 @@ namespace engine::scene {
 		// this one will have several - a stage list that had to be rewritten to
 		// add a second mirror would be a stage list that encoded the count.
 		//
-		// Negative is the scene pass's explicit "do not render": a disabled
-		// portal, an edge-on mirror, or a pane the per-world limit did not have
-		// room for this frame all clear their slot this way.
-		int16_t Surface = 0;
+		// Negative is the scene pass's explicit "do not render": a camera that
+		// has not been aimed yet, a disabled portal, an edge-on mirror, or a pane
+		// the per-world limit did not have room for this frame all carry no slot.
+		// A fresh camera cannot claim zero because several can arrive from the
+		// authority before this viewer's aim pass assigns their local slots.
+		int16_t Surface = -1;
 
 		// What the image is put through before a pane shows it.
 		//
