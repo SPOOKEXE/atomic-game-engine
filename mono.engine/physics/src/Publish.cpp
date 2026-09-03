@@ -13,9 +13,9 @@
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
 
-#include <algorithm>
 #include <cstddef>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -40,19 +40,18 @@ namespace engine::physics {
 
 		// The body at `entity`, or nothing.
 		//
-		// The array is sorted by entity, so this is a binary search. It is
-		// called from inside an `Each` over the dynamic rows, which is why the
-		// array being sorted was worth a sort in the first place.
-		const SolverBody *BodyOf(std::span<const SolverBody> bodies, ecs::Entity entity) {
-			const auto found = std::lower_bound(
-				bodies.begin(), bodies.end(), entity, [](const SolverBody &body, ecs::Entity target) {
-					return body.Owner.Id < target.Id;
-				}
-			);
-			if (found == bodies.end() || !(found->Owner == entity)) {
+		// The index is lookup-only. Contact and solver order remains the sorted
+		// body array, while publication avoids searching it for every dynamic row.
+		const SolverBody *BodyOf(
+			std::span<const SolverBody> bodies,
+			const std::unordered_map<uint64_t, size_t> &indexByOwner,
+			ecs::Entity entity
+		) {
+			const auto found = indexByOwner.find(entity.Id);
+			if (found == indexByOwner.end() || found->second >= bodies.size() || bodies[found->second].Owner != entity) {
 				return nullptr;
 			}
-			return &*found;
+			return &bodies[found->second];
 		}
 	}
 
@@ -81,12 +80,13 @@ namespace engine::physics {
 		// reference as a direct memory write, which is exactly what is wanted.
 		const float delta = PhysicsStepSeconds(store);
 		const std::span<const SolverBody> bodies = world->Bodies();
+		const std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
 			ENGINE_PROFILE_CAT("physics.publish-correction", core::ProfileCategory::Physics);
 			if (!bodies.empty() && delta > 0.0f) {
 				store.Each<scene::Transform, const scene::Motion>(
-					[bodies, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
-						const SolverBody *body = BodyOf(bodies, entity);
+					[bodies, &bodyIndex, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
+						const SolverBody *body = BodyOf(bodies, bodyIndex, entity);
 						if (body == nullptr || !body->Movable) {
 							return;
 						}
@@ -106,7 +106,7 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.publish-velocity", core::ProfileCategory::Physics);
 			for (const SolverBody &body : bodies) {
-				if (world->Sleeping(body.Owner)) {
+				if (body.Asleep) {
 					// **The archetype move.** Losing `scene::Motion` takes the row
 					// out of `IntegrateMotion`'s query and out of the dynamic half
 					// of the broad phase - the query never visits it, which a tag

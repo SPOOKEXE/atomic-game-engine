@@ -82,22 +82,21 @@ namespace engine::physics {
 		const std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
 		const std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
 
-		std::vector<ContactManifold> &slots = PipelineInternals::ManifoldSlots(*world);
-		std::vector<uint8_t> &touching = PipelineInternals::ManifoldTouching(*world);
-
-		// Grown and never shrunk, for `PhysicsWorld::RowList`'s reason: only the
-		// slots the flags point at are ever read, so the tail is never seen.
-		if (slots.size() < pairs.size()) {
-			slots.resize(pairs.size());
+		std::vector<std::vector<ContactManifold>> &batches = PipelineInternals::ManifoldBatches(*world);
+		const size_t batchCount = (pairs.size() + NARROW_GRAIN - 1) / NARROW_GRAIN;
+		if (batches.size() < batchCount) {
+			batches.resize(batchCount);
 		}
-		touching.assign(pairs.size(), 0);
 
 		{
 			ENGINE_PROFILE_CAT("physics.contact-measure", core::ProfileCategory::Physics);
 			parallel::Jobs::For(
 				pairs.size(),
 				NARROW_GRAIN,
-				[pairs, sources, &dynamicShapes, &staticShapes, &slots, &touching](size_t begin, size_t end) {
+				[pairs, sources, &dynamicShapes, &staticShapes, &batches](size_t begin, size_t end) {
+					std::vector<ContactManifold> &output = batches[begin / NARROW_GRAIN];
+					output.clear();
+					output.reserve(end - begin);
 					for (size_t at = begin; at < end; at++) {
 						const CandidateSource &source = sources[at];
 
@@ -147,26 +146,23 @@ namespace engine::physics {
 							};
 						}
 
-						slots[at] = manifold;
-						touching[at] = 1;
+						output.push_back(manifold);
 					}
 				},
 				NARROW_GRAIN
 			);
 		}
 
-		// **In pair order, on one thread, and that is the whole point of the
-		// flag array.** A worker appending to one manifold list would need a
-		// cursor, and the order the appends landed in would be the order the
-		// workers got there - which is exactly the dependence on the schedule
-		// `AGENTS.md` refuses, because the solver visits contacts in list order.
+		// **In pair-range order, on one thread.** A worker appending to one
+		// manifold list would make solver order depend on when workers finished.
+		// Each batch covers one fixed input range, so concatenation carries the
+		// pair order through while skipping candidates that did not touch.
 		{
 			ENGINE_PROFILE_CAT("physics.contact-compact", core::ProfileCategory::Physics);
 			manifolds.reserve(pairs.size());
-			for (size_t at = 0; at < pairs.size(); at++) {
-				if (touching[at] != 0) {
-					manifolds.push_back(slots[at]);
-				}
+			for (size_t batch = 0; batch < batchCount; batch++) {
+				const std::vector<ContactManifold> &output = batches[batch];
+				manifolds.insert(manifolds.end(), output.begin(), output.end());
 			}
 		}
 	}

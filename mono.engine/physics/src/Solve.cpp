@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -312,15 +313,6 @@ namespace engine::physics {
 			}
 		}
 
-		size_t IndexOf(const std::vector<SolverBody> &bodies, ecs::Entity entity) {
-			const auto found = std::lower_bound(
-				bodies.begin(), bodies.end(), entity, [](const SolverBody &body, ecs::Entity target) {
-					return body.Owner.Id < target.Id;
-				}
-			);
-			return static_cast<size_t>(found - bodies.begin());
-		}
-
 		// Last tick's impulses for one contact, or nothing.
 		//
 		// A binary search over a sorted array rather than a hash lookup. Not
@@ -548,6 +540,7 @@ namespace engine::physics {
 		// eight the comparison reads. At ten thousand bodies that was megabytes
 		// of moves for kilobytes of information.
 		std::vector<ecs::Entity> &owners = PipelineInternals::BodyOwners(*world);
+		std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
 			ENGINE_PROFILE_CAT("physics.solve-gather", core::ProfileCategory::Physics);
 			owners.clear();
@@ -564,16 +557,20 @@ namespace engine::physics {
 				bodies[index] = SolverBody{};
 				bodies[index].Owner = owners[index];
 			}
+
+			bodyIndex.clear();
+			bodyIndex.reserve(bodies.size());
+			for (size_t index = 0; index < bodies.size(); index++) {
+				bodyIndex.emplace(bodies[index].Owner.Id, index);
+			}
 		}
 
 		// **Every manifold's two body indices, resolved once.** Three later
-		// passes want them, and a binary search per pass per side is four
-		// searches per manifold over an array that no longer fits in cache once
-		// a scene is large.
-		// **Dispatched, because a binary search is a read and the answers do not
-		// share a slot.** Two searches per manifold over an array that has
-		// stopped fitting in cache is most of what a large scene's gather costs,
-		// and every one of them is independent of every other.
+		// passes want them, so a retained lookup table saves repeatedly searching
+		// the sorted body array for the same two known owners.
+		// **Dispatched, because the lookups are reads and the answers do not share
+		// a slot.** Each manifold owns one result, and the table is complete
+		// before workers start reading it.
 		std::vector<std::pair<uint32_t, uint32_t>> &located = PipelineInternals::ManifoldBodies(*world);
 		located.resize(manifolds.size());
 		{
@@ -581,11 +578,11 @@ namespace engine::physics {
 			parallel::Jobs::For(
 				manifolds.size(),
 				LOCATE_GRAIN,
-				[&located, &manifolds, &bodies](size_t begin, size_t end) {
+				[&located, &manifolds, &bodyIndex](size_t begin, size_t end) {
 					for (size_t at = begin; at < end; at++) {
 						located[at] = {
-							static_cast<uint32_t>(IndexOf(bodies, manifolds[at].A)),
-							static_cast<uint32_t>(IndexOf(bodies, manifolds[at].B)),
+							static_cast<uint32_t>(bodyIndex.at(manifolds[at].A.Id)),
+							static_cast<uint32_t>(bodyIndex.at(manifolds[at].B.Id)),
 						};
 					}
 				},
@@ -593,9 +590,9 @@ namespace engine::physics {
 			);
 		}
 
-		// Sorted by entity, which makes every lookup below a binary search and
-		// makes the body array a function of the scene rather than of the order
-		// rows happen to sit in their archetypes.
+		// Sorted by entity, which keeps the body array a function of the scene
+		// rather than of the order rows happen to sit in their archetypes. The
+		// lookup table above answers membership without changing that order.
 		// Safe to reach typed, and only because of the guard at the top of this
 		// function. `RegisterPhysicsComponents` registers the `scene` types
 		// before its own, so a store that got past `PreparedWorldMutable` has
@@ -614,11 +611,11 @@ namespace engine::physics {
 		// not the one before it, and twenty-three threads doing that at once
 		// thrash a shared last level cache rather than sharing the work.
 		//
-		// The pass beside it went the other way and is dispatched - see the
-		// binary searches above, which drop from 616 us to 67 us - so this is a
-		// fact about `Store::Get` and not about the gather. Worth retrying if
-		// `ecs` ever grows a locate-once-read-many primitive, which would remove
-		// six of the seven directory walks and change the shape of the problem.
+		// The manifold-index pass beside it is dispatched because it reads only
+		// the retained lookup table. This is a fact about `Store::Get` and not
+		// about the gather. Worth retrying if `ecs` ever grows a locate-once-read-
+		// many primitive, which would remove six of the seven directory walks and
+		// change the shape of the problem.
 		const ecs::Store &reader = store;
 		{
 			ENGINE_PROFILE_CAT("physics.solve-bodies", core::ProfileCategory::Physics);
@@ -636,7 +633,7 @@ namespace engine::physics {
 					const scene::Collider,
 					const scene::RigidBody,
 					const scene::Surface,
-					const scene::PhysicsProperties>([&bodies, &loaded, &owners, &reader, surfaces](
+					const scene::PhysicsProperties>([&bodies, &loaded, &bodyIndex, &reader, surfaces](
 														ecs::Entity entity,
 														const scene::Transform &transform,
 														const scene::Collider &collider,
@@ -644,16 +641,12 @@ namespace engine::physics {
 														const scene::Surface &surface,
 														const scene::PhysicsProperties &physical
 													) {
-					const auto found = std::lower_bound(
-						owners.begin(), owners.end(), entity, [](ecs::Entity left, ecs::Entity right) {
-							return left.Id < right.Id;
-						}
-					);
-					if (found == owners.end() || *found != entity) {
+					const auto found = bodyIndex.find(entity.Id);
+					if (found == bodyIndex.end()) {
 						return;
 					}
 
-					const size_t index = static_cast<size_t>(found - owners.begin());
+					const size_t index = found->second;
 					LoadBody(
 						bodies[index],
 						&transform,
@@ -1263,7 +1256,7 @@ namespace engine::physics {
 				}
 			};
 
-			for (const SolverBody &body : bodies) {
+			for (SolverBody &body : bodies) {
 				carryUntil(body.Owner.Id);
 
 				RestingBody entry{body.Owner, 0.0f, false};
@@ -1286,6 +1279,10 @@ namespace engine::physics {
 					entry.RestingSeconds = still ? entry.RestingSeconds + delta : 0.0f;
 					entry.Asleep = entry.RestingSeconds >= SLEEP_SETTLE_SECONDS;
 				}
+				// Publish runs after this merge. Keep the gathered body in sync with
+				// the authoritative entry so it can remove Motion without searching
+				// the resting list again.
+				body.Asleep = entry.Asleep;
 				restingNext.push_back(entry);
 			}
 			carryUntil(UINT64_MAX);

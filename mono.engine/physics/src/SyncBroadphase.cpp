@@ -122,10 +122,10 @@ namespace engine::physics {
 		// Rebuilt whole, every tick. `spatial::HashGrid` is count-then-fill and
 		// has no `Insert`; "only re-insert what moved" is therefore a decision
 		// about which set to hand to `Rebuild`, and this is the set that moved.
-		std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
+		std::vector<core::AABB> &dynamicBounds = PipelineInternals::DynamicBounds(*world);
 		std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
 		std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
-		dynamicProxies.clear();
+		dynamicBounds.clear();
 		dynamicRecords.clear();
 		dynamicShapes.clear();
 
@@ -134,35 +134,10 @@ namespace engine::physics {
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
 		{
-			ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
-			store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
-				[&dynamicProxies, &dynamicRecords, &dynamicShapes, baked](
-					ecs::Entity entity,
-					const scene::Transform &transform,
-					const scene::Collider &collider,
-					const scene::Motion &
-				) {
-					dynamicProxies.emplace_back();
-					WriteEntry(
-						dynamicProxies.back(),
-						static_cast<uint64_t>(dynamicProxies.size() - 1),
-						dynamicRecords,
-						dynamicShapes,
-						baked,
-						entity,
-						transform,
-						collider
-					);
-				}
-			);
-		}
-
-		{
-			// The rebuild on its own, separate from gathering the proxies that
-			// feed it. Both scale with the moving set and they scale
-			// differently - the gather is a store walk and this is a count-then-
-			// fill over cells - so one number covering both says a broadphase is
-			// expensive without saying which half to go and look at.
+			// The generated rebuild owns its proxy rows, so its fill callback also
+			// gathers them. The nested timings keep the store walk distinct from the
+			// count-then-fill index work: the two scale differently and need separate
+			// numbers before either one is changed.
 			ENGINE_PROFILE_CAT("physics.index-dynamic", core::ProfileCategory::Physics);
 
 			// **The grid is sized from the scene rather than left at the
@@ -182,11 +157,37 @@ namespace engine::physics {
 			// `SetCellSize` returns without touching anything when the size did
 			// not move. A scene has to change scale by a factor of two before
 			// this costs a rebuild that was not already happening.
+			const size_t dynamicCount = store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
+				.Count();
+			dynamicBounds.resize(dynamicCount);
 			spatial::HashGrid &index = PipelineInternals::DynamicIndex(*world);
-			if (world->CellSizeMeasured()) {
-				index.SetCellSize(spatial::SuggestCellSize(dynamicProxies));
-			}
-			index.Rebuild(dynamicProxies);
+			index.RebuildGenerated(
+				dynamicCount,
+				[&store, &dynamicBounds, &dynamicRecords, &dynamicShapes, baked](std::span<spatial::Proxy> proxies) {
+					ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
+					size_t written = 0;
+					store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+						[&](ecs::Entity entity,
+							const scene::Transform &transform,
+							const scene::Collider &collider,
+							const scene::Motion &) {
+							WriteEntry(
+								proxies[written],
+								static_cast<uint64_t>(written),
+								dynamicRecords,
+								dynamicShapes,
+								baked,
+								entity,
+								transform,
+								collider
+							);
+							dynamicBounds[written] = proxies[written].Bounds;
+							written++;
+						}
+					);
+				},
+				world->CellSizeMeasured()
+			);
 		}
 		PipelineInternals::DynamicRebuildCount(*world)++;
 

@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -818,7 +819,10 @@ namespace engine::physics {
 		spatial::HashGrid DynamicIndex;
 		spatial::HashGrid StaticIndex;
 
-		std::vector<spatial::Proxy> DynamicProxies;
+		// The pair walk needs each moving collider's box after the grid has
+		// consumed its proxy. Keeping boxes rather than a second full proxy list
+		// leaves the grid as the only owner of its proxies.
+		std::vector<core::AABB> DynamicBounds;
 		std::vector<ColliderRecord> DynamicRecords;
 		std::vector<ColliderRecord> StaticRecords;
 
@@ -860,19 +864,11 @@ namespace engine::physics {
 		std::vector<ContactManifold> ManifoldList;
 		std::vector<ContactEvent> EventList;
 
-		// One slot per candidate pair, and whether that pair turned out to touch.
-		//
-		// **What lets the narrow phase be dispatched without a shared cursor.**
-		// Workers write the slot their own pair owns and nothing else, and the
-		// compaction that follows walks the flags in pair order - so the
-		// manifold list is a function of the pair list rather than of which
-		// worker finished first, which is what the solver's order-dependence
-		// requires.
-		//
-		// `ManifoldSlots.size()` is a high-water mark, like `RowList`'s: only
-		// the slots a flag points at are ever read.
-		std::vector<ContactManifold> ManifoldSlots;
-		std::vector<uint8_t> ManifoldTouching;
+		// One retained output list per fixed narrow-phase range. Workers append
+		// only to their own list, then the owner concatenates the lists in input
+		// range order. That keeps the manifold list a function of the pair list
+		// without a shared cursor or a serial scan of every candidate pair.
+		std::vector<std::vector<ContactManifold>> ManifoldBatches;
 
 		// What the solver works on, refilled every tick from the manifolds.
 		//
@@ -884,6 +880,10 @@ namespace engine::physics {
 		// `size()` instead is a walk over last tick's tail, and a stale row is a
 		// contact between two bodies that are no longer touching.
 		std::vector<SolverBody> BodyList;
+		// Lookup-only index over `BodyList`, rebuilt with it. No system walks this
+		// table: body and contact order stay in their sorted arrays, while passes
+		// that need one known entity avoid repeating binary searches.
+		std::unordered_map<uint64_t, size_t> BodyIndexByOwner;
 		// A retained membership list for Solve's dense BasePart load pass.
 		std::vector<uint8_t> SolverBodyLoaded;
 		std::vector<ContactRow> RowList;

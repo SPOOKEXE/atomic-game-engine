@@ -50,9 +50,10 @@ namespace engine::physics {
 			return world.StaticRecords;
 		}
 
-		// The dynamic proxies, parallel to `DynamicRecords` by index.
-		static std::vector<spatial::Proxy> &DynamicProxies(PhysicsWorld &world) {
-			return world.DynamicProxies;
+		// The dynamic bounds, parallel to `DynamicRecords` by index. The grid
+		// owns its proxy rows, so this keeps only the data the pair walk needs.
+		static std::vector<core::AABB> &DynamicBounds(PhysicsWorld &world) {
+			return world.DynamicBounds;
 		}
 
 		// What the broad phase knows about each dynamic collider.
@@ -110,16 +111,10 @@ namespace engine::physics {
 			return world.ManifoldList;
 		}
 
-		// One slot per candidate pair, and the flags that say which were filled.
-		//@{
-		static std::vector<ContactManifold> &ManifoldSlots(PhysicsWorld &world) {
-			return world.ManifoldSlots;
+		// One retained output list per fixed narrow-phase range.
+		static std::vector<std::vector<ContactManifold>> &ManifoldBatches(PhysicsWorld &world) {
+			return world.ManifoldBatches;
 		}
-
-		static std::vector<uint8_t> &ManifoldTouching(PhysicsWorld &world) {
-			return world.ManifoldTouching;
-		}
-		//@}
 
 		// The event list, cleared by `NarrowPhase` and filled by `Publish`.
 		static std::vector<ContactEvent> &Events(PhysicsWorld &world) {
@@ -155,6 +150,11 @@ namespace engine::physics {
 
 		static std::vector<ecs::Entity> &BodyOwnerSortScratch(PhysicsWorld &world) {
 			return world.BodyOwnerSortScratch;
+		}
+
+		// Lookup only. Iteration stays on `Bodies`, whose entity order is explicit.
+		static std::unordered_map<uint64_t, size_t> &BodyIndexByOwner(PhysicsWorld &world) {
+			return world.BodyIndexByOwner;
 		}
 
 		static std::vector<std::pair<uint32_t, uint32_t>> &ManifoldBodies(PhysicsWorld &world) {

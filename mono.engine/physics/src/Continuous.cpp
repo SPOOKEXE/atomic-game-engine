@@ -82,10 +82,6 @@ namespace engine::physics {
 			candidates.resize(records.size());
 		}
 
-		// **The reader is the same store, taken `const` so the reads below say
-		// so.** Every candidate's shape is resolved through it while an `Each`
-		// is running, which the ECS allows: a read is not a structural change.
-		const ecs::Store &reader = store;
 		uint64_t swept = 0;
 
 		// The baked table, once for the walk. Every *candidate*'s shape is
@@ -94,22 +90,11 @@ namespace engine::physics {
 		// one the sync placed.
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
-		store.Each<scene::Transform, const scene::Motion, const scene::Collider>(
+		store.Query<scene::Transform, const scene::Motion, const scene::Collider>().With<scene::Simulated>().Each(
 			[&](ecs::Entity entity,
 				scene::Transform &transform,
 				const scene::Motion &motion,
 				const scene::Collider &collider) {
-				// **Static bodies are not swept.** Whatever moves one is not the
-				// integrator, so the motion this step would reconstruct did not
-				// happen.
-				//
-				// A sleeping body has no `scene::Motion` and so never reaches
-				// here at all; this is asking the other question, and it is the
-				// one a row with a `Motion` it should not have had would fail.
-				if (!reader.Has<scene::Simulated>(entity)) {
-					return;
-				}
-
 				// **The step the integrator just took, reconstructed rather than
 				// remembered.** `scene::PreviousTransform` exists and is the
 				// obvious thing to read, but nothing in this module writes it -

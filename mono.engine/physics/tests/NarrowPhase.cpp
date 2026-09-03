@@ -50,6 +50,7 @@ using engine::physics::ContactManifold;
 using engine::physics::ContactSolution;
 using engine::physics::CylinderCylinder;
 using engine::physics::NarrowPhase;
+using engine::physics::NARROW_GRAIN;
 using engine::physics::PhysicsWorld;
 using engine::physics::PipelineInternals;
 using engine::physics::PreparePhysicsWorld;
@@ -522,6 +523,40 @@ TEST_CASE("manifolds come out in pair order", "[physics][narrowphase]") {
 	}
 	for (const ContactManifold &manifold : manifolds) {
 		CHECK(manifold.A.Id < manifold.B.Id);
+	}
+}
+
+TEST_CASE("manifolds remain ordered across fixed worker ranges", "[physics][narrowphase]") {
+	// One more pair than a narrow-phase range. Each pair is isolated so this
+	// checks the concatenation boundary rather than making a dense all-to-all
+	// contact scene that hides it behind unrelated work.
+	Store store("narrowphase.range-order");
+	PreparePhysicsWorld(store, 1.0f);
+
+	for (size_t index = 0; index <= NARROW_GRAIN; index++) {
+		const float x = static_cast<float>(index) * 4.0f;
+		Place(
+			store,
+			Vector3{x, 0.0f, 0.0f},
+			Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+			true
+		);
+		Place(
+			store,
+			Vector3{x + 0.6f, 0.0f, 0.0f},
+			Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+			true
+		);
+	}
+
+	Step(store);
+
+	const auto manifolds = store.Resource<PhysicsWorld>()->Manifolds();
+	REQUIRE(manifolds.size() == NARROW_GRAIN + 1);
+	for (size_t index = 1; index < manifolds.size(); index++) {
+		const ContactManifold &previous = manifolds[index - 1];
+		const ContactManifold &current = manifolds[index];
+		CHECK((previous.A.Id < current.A.Id || (previous.A.Id == current.A.Id && previous.B.Id < current.B.Id)));
 	}
 }
 

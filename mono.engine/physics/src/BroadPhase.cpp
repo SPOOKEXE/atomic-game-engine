@@ -98,7 +98,7 @@ namespace engine::physics {
 		// its scratch, so the caller can retry the same range with wider storage.
 		bool CollectPairs(
 			const PhysicsWorld &world,
-			const std::vector<spatial::Proxy> &dynamicProxies,
+			const std::vector<core::AABB> &dynamicBounds,
 			const std::vector<ColliderRecord> &dynamicRecords,
 			const std::vector<ColliderRecord> &staticRecords,
 			const spatial::HashGrid &dynamicIndex,
@@ -111,7 +111,7 @@ namespace engine::physics {
 			output.clear();
 			for (size_t index = begin; index < end; index++) {
 				const ColliderRecord &a = dynamicRecords[index];
-				const core::AABB &box = dynamicProxies[index].Bounds;
+				const core::AABB &box = dynamicBounds[index];
 
 				const spatial::QueryResult moving =
 					spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
@@ -178,7 +178,7 @@ namespace engine::physics {
 		sources.clear();
 		sourced.clear();
 
-		const std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
+		const std::vector<core::AABB> &dynamicBounds = PipelineInternals::DynamicBounds(*world);
 		const std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
 		const std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
 		const spatial::HashGrid &dynamicIndex = PipelineInternals::DynamicIndex(*world);
@@ -220,7 +220,7 @@ namespace engine::physics {
 						const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
 						overflowed[batch] = CollectPairs(
 												*world,
-												dynamicProxies,
+												dynamicBounds,
 												dynamicRecords,
 												staticRecords,
 												dynamicIndex,
@@ -248,7 +248,7 @@ namespace engine::physics {
 				const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
 				CollectPairs(
 					*world,
-					dynamicProxies,
+					dynamicBounds,
 					dynamicRecords,
 					staticRecords,
 					dynamicIndex,
