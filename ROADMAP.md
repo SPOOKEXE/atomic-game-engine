@@ -71,8 +71,14 @@ c. classes
 * Separate per-scripting-bindings into sub-bars as well so if one specific script binding has yielded the luau loop, we can obviously see that.
 - [x] optimise remaining physics bottlenecks using StressPhysics demo
 - [x] ensure chunked physics world implementation is correct and optimised (world is split into chunks, all physics computations happen in the chunks on separate threads in parallel, all computations are also batch computed, chunk borders - edges and corners - are computed separately or handled post center).
+- [_] persistent contact manifolds
 
 ### v0.23.1
+
+- [_] next best physics clubs are speculative contacts, per-mesh
+  triangle bvhs, and true rotational or dynamic-dynamic ccd. physx documents pcm contact reuse,
+  while box2d documents speculative contacts and stale-subtree bvh rebuilding. physx pcm, box2d
+  simulation, box2d dynamic tree.
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
