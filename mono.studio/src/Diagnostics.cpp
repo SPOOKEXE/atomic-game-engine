@@ -251,6 +251,45 @@ namespace studio {
 		}
 	}
 
+	void FocusDiagnosticSpans(
+		std::span<const DiagnosticSpan> spans,
+		uint32_t root,
+		std::vector<DiagnosticSpan> &focused,
+		std::vector<uint32_t> &sourceIndices
+	) {
+		focused.clear();
+		sourceIndices.clear();
+		if (root >= spans.size()) {
+			return;
+		}
+
+		std::vector<uint32_t> retained(spans.size(), engine::core::FrameGraph::NO_PARENT);
+		focused.reserve(spans.size());
+		sourceIndices.reserve(spans.size());
+
+		for (size_t index = 0; index < spans.size(); index++) {
+			uint32_t ancestor = static_cast<uint32_t>(index);
+			bool isDescendant = false;
+			for (size_t depth = 0; depth < spans.size() && ancestor < spans.size(); depth++) {
+				if (ancestor == root) {
+					isDescendant = true;
+					break;
+				}
+				ancestor = spans[ancestor].Parent;
+			}
+			if (!isDescendant) {
+				continue;
+			}
+
+			DiagnosticSpan copy = spans[index];
+			copy.Parent = index == root ? engine::core::FrameGraph::NO_PARENT : retained[spans[index].Parent];
+			copy.Depth = copy.Parent == engine::core::FrameGraph::NO_PARENT ? 0 : focused[copy.Parent].Depth + 1;
+			retained[index] = static_cast<uint32_t>(focused.size());
+			focused.push_back(std::move(copy));
+			sourceIndices.push_back(static_cast<uint32_t>(index));
+		}
+	}
+
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames) {
 		if (frames == 0) {
 			return;
@@ -986,6 +1025,11 @@ namespace studio {
 			FitReportedDiagnosticTimeline(graphSpans, frameMs);
 			AppendUnaccountedDiagnosticSpans(graphSpans);
 			view.DisplayRows = LayoutDiagnosticRows(graphSpans, view.Rows);
+			view.FocusRoot = FrameGraph::NO_PARENT;
+			view.FocusedSpans.clear();
+			view.FocusedRows.clear();
+			view.FocusedSourceIndices.clear();
+			view.FocusedDisplayRows = 0;
 			view.DisplayDirty = false;
 		}
 		const std::vector<DiagnosticSpan> &spans =
@@ -1378,18 +1422,35 @@ namespace studio {
 
 		{
 			ENGINE_PROFILE_CAT("frame graph flame", engine::core::ProfileCategory::Render);
+			const auto focus = [&](uint32_t root) {
+				view.FocusRoot = root;
+				if (root == FrameGraph::NO_PARENT) {
+					view.FocusedSpans.clear();
+					view.FocusedRows.clear();
+					view.FocusedSourceIndices.clear();
+					view.FocusedDisplayRows = 0;
+					return;
+				}
+				FocusDiagnosticSpans(graphSpans, root, view.FocusedSpans, view.FocusedSourceIndices);
+				view.FocusedDisplayRows = LayoutDiagnosticRows(view.FocusedSpans, view.FocusedRows);
+			};
+			const bool focused = view.FocusRoot != FrameGraph::NO_PARENT;
+			const std::vector<DiagnosticSpan> &visibleSpans = focused ? view.FocusedSpans : graphSpans;
+			const std::vector<uint32_t> &visibleRows = focused ? view.FocusedRows : view.Rows;
+			const uint32_t visibleRowCount = focused ? view.FocusedDisplayRows : view.DisplayRows;
 			const float rowHeight =
 				std::max(std::floor(engine::ui::Scaled(engine::ui::Size::Row) * 0.72f), 1.0f);
 			const ImVec2 origin = ImGui::GetCursorScreenPos();
 			const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 			const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
-			const float graphHeight = rowHeight * static_cast<float>(view.DisplayRows);
+			const float graphHeight = rowHeight * static_cast<float>(visibleRowCount);
 
 			ImDrawList *draw = ImGui::GetWindowDrawList();
 			const DiagnosticSpan *hovered = nullptr;
+			uint32_t clickedSource = FrameGraph::NO_PARENT;
 
 			const auto drawSpan = [&](size_t index) {
-				const DiagnosticSpan &span = graphSpans[index];
+				const DiagnosticSpan &span = visibleSpans[index];
 				// **Clamped to the graph, whatever the arithmetic above produced.**
 				// An averaged span can still exceed the averaged frame - a span that
 				// ran in only some of the frames divides by all of them for its
@@ -1401,7 +1462,7 @@ namespace studio {
 					std::clamp(span.StartMilliseconds * scale, 0.0f, std::max(graphWidth - 1.0f, 0.0f));
 				const float room = std::max(origin.x + graphWidth - left, 1.0f);
 				const float width = std::clamp(span.Milliseconds * scale, 1.0f, room);
-				const float top = origin.y + static_cast<float>(view.Rows[index]) * rowHeight;
+				const float top = origin.y + static_cast<float>(visibleRows[index]) * rowHeight;
 
 				const ImVec2 upper(left, top);
 				const ImVec2 lower(left + width, top + rowHeight);
@@ -1411,7 +1472,10 @@ namespace studio {
 				draw->AddRectFilled(upper, lower, colour);
 
 				if (ImGui::IsMouseHoveringRect(upper, lower)) {
-					hovered = index < spans.size() ? &spans[index] : &span;
+					hovered = &span;
+					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+						clickedSource = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+					}
 					draw->AddRect(upper, lower, engine::ui::BrightColour());
 				}
 
@@ -1432,14 +1496,33 @@ namespace studio {
 			// Accounting is the background of the timeline. Reported worker work is
 			// deliberately fitted into the measured wall-time gap that waited for it,
 			// so drawing synthetic gaps last would cover the useful worker bars.
-			for (size_t index = spans.size(); index < graphSpans.size(); index++) {
-				drawSpan(index);
+			const auto isAccounting = [&](size_t index) {
+				const uint32_t source = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+				return source >= spans.size();
+			};
+			for (size_t index = 0; index < visibleSpans.size(); index++) {
+				if (isAccounting(index)) {
+					drawSpan(index);
+				}
 			}
-			for (size_t index = 0; index < spans.size(); index++) {
-				drawSpan(index);
+			for (size_t index = 0; index < visibleSpans.size(); index++) {
+				if (!isAccounting(index)) {
+					drawSpan(index);
+				}
 			}
 
 			ImGui::Dummy(ImVec2(graphWidth, graphHeight));
+			if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+				view.FocusRoot != FrameGraph::NO_PARENT) {
+				focus(graphSpans[view.FocusRoot].Parent);
+			} else if (clickedSource != FrameGraph::NO_PARENT) {
+				// Keep the selected frame stable while its subtree is inspected.
+				view.Paused = true;
+				view.PausedByRule = false;
+				focus(clickedSource);
+			} else if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				focus(FrameGraph::NO_PARENT);
+			}
 
 			if (hovered != nullptr) {
 				ImGui::BeginTooltip();

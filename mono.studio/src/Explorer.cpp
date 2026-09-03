@@ -885,12 +885,6 @@ namespace studio {
 				PathBuffer = ConfigPath("worlds").string();
 			}
 
-			// Beside the other two ways of getting a scene, because this menu is
-			// already the universe's own answer to "add a world" and a person who
-			// found New World here should not have to go to the menu bar for the
-			// shipped ones. Same function as the menu bar and the Worlds panel.
-			DrawExampleSceneMenu();
-
 			ImGui::Separator();
 
 			if (ImGui::MenuItem("Export Universe...")) {

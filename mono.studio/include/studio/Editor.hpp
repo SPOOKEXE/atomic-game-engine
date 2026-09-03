@@ -6195,6 +6195,12 @@ namespace studio {
 			std::vector<DiagnosticSpan> DisplaySpans;
 			std::vector<uint32_t> Rows;
 			uint32_t DisplayRows = 0;
+			// Re-rooted copy drawn after a flame-graph bar is selected.
+			std::vector<DiagnosticSpan> FocusedSpans;
+			std::vector<uint32_t> FocusedRows;
+			std::vector<uint32_t> FocusedSourceIndices;
+			uint32_t FocusRoot = engine::core::FrameGraph::NO_PARENT;
+			uint32_t FocusedDisplayRows = 0;
 			bool DisplayDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};

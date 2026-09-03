@@ -78,6 +78,16 @@ namespace studio {
 		std::vector<DiagnosticSpan> &filtered
 	);
 
+	// Copies one span and every descendant into a standalone display tree.
+	// `sourceIndices` maps each copied span to the source index so a focused
+	// graph can navigate back to its parent in the full display tree.
+	void FocusDiagnosticSpans(
+		std::span<const DiagnosticSpan> spans,
+		uint32_t root,
+		std::vector<DiagnosticSpan> &focused,
+		std::vector<uint32_t> &sourceIndices
+	);
+
 	// Fits reported worker work into the measured timeline used for drawing.
 	//
 	// Reported durations are CPU work totals and may exceed wall time when

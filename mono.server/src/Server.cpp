@@ -1280,11 +1280,12 @@ namespace server {
 			// Read before the borrow, so the settings lookup is not made from
 			// inside the world it is asking about.
 			const double physicsTickRate = Worlds().SettingsOf(id).PhysicsTickRate;
+			const double scriptTickRate = Worlds().SettingsOf(id).ScriptTickRate;
 
 			std::string failure;
 			Worlds().Enter(
 				id,
-				[this, &limits, &failure, id, physicsTickRate](
+				[this, &limits, &failure, id, physicsTickRate, scriptTickRate](
 					engine::ecs::Store &store, engine::ecs::Scheduler &systems
 				) {
 					// **Before the scripts, because a script may create a
@@ -1302,7 +1303,11 @@ namespace server {
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
 					// first thing to drift is the heartbeat's delta.
-					Runtimes.push_back(engine::game::StartWorldScripts(store, systems, limits, failure));
+					Runtimes.push_back(
+						engine::game::StartWorldScripts(
+							store, systems, limits, failure, nullptr, scriptTickRate
+						)
+					);
 
 					if (id == PrimaryWorld && Settings.Chatter) {
 						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});

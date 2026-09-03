@@ -84,6 +84,7 @@ namespace {
 		CFrame Rotation{};
 		bool Moving = true;
 		LayerMask Layer = LayerMask::Only(0);
+		bool CanQuery = true;
 	};
 
 	Entity Place(Store &store, const Placed &placed) {
@@ -94,6 +95,7 @@ namespace {
 		collider.Shape = placed.Shape;
 		collider.Extent = placed.Extent;
 		collider.Layer = placed.Layer;
+		collider.CanQuery = placed.CanQuery;
 		store.Set<Collider>(entity, collider);
 
 		if (placed.Moving) {
@@ -153,6 +155,19 @@ TEST_CASE("a raycast against a rotated box uses the box's own axes", "[physics][
 	const AABB bound = ShapeWorldBounds(*store.Get<Collider>(slab), store.Get<Transform>(slab)->Frame);
 	CHECK(bound.Maximum.X == Approx(2.5f * root).margin(1e-3));
 	CHECK(hit->Distance > 5.0f - bound.Maximum.X);
+}
+
+TEST_CASE("a collider that disables queries remains in physics but is not returned", "[physics][query]") {
+	Store store("query.disabled");
+	PreparePhysicsWorld(store, 4.0f);
+	Place(store, Placed{.Position = Vector3{2.0f, 0.0f, 0.0f}, .CanQuery = false});
+	const Entity visible = Place(store, Placed{.Position = Vector3{4.0f, 0.0f, 0.0f}});
+	Index(store);
+
+	const std::optional<ColliderHit> hit =
+		Raycast(store, Ray{Vector3{8.0f, 0.0f, 0.0f}, -Vector3::XAxis}, 10.0f);
+	REQUIRE(hit.has_value());
+	CHECK(hit->Owner == visible);
 }
 
 TEST_CASE("a raycast hits a sphere and a cylinder where they are", "[physics][query]") {

@@ -464,8 +464,13 @@ namespace engine::scene {
 		// produces events and no impulse.
 		bool Trigger = false;
 
+		// Whether raycasts, overlaps and shape casts may report this collider.
+		// A query-only switch leaves contact generation unchanged, so an object
+		// can still block bodies while being invisible to a gameplay probe.
+		bool CanQuery = true;
+
 		// Explicit padding, for the reason `RigidBody::Reserved` gives.
-		uint16_t Reserved = 0;
+		uint8_t Reserved = 0;
 	};
 
 	// What one part overrides about the physics of its own material.

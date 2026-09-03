@@ -148,6 +148,7 @@ TEST_CASE("a multi-file universe restores authored settings and shader scripts",
 	worldSettings.TickRate = 30.0;
 	worldSettings.IdleTickRate = 3.0;
 	worldSettings.PhysicsTickRate = 15.0;
+	worldSettings.ScriptTickRate = 20.0;
 	worldSettings.ReplicationTickRate = 10.0;
 	worldSettings.GlobalSimulatedNetworkLatency = 12.5;
 	worldSettings.IsolationLevel = engine::world::Isolation::Dedicated;
@@ -216,6 +217,7 @@ TEST_CASE("a multi-file universe restores authored settings and shader scripts",
 	CHECK(restoredSettings.TickRate == 30.0);
 	CHECK(restoredSettings.IdleTickRate == 3.0);
 	CHECK(restoredSettings.PhysicsTickRate == 15.0);
+	CHECK(restoredSettings.ScriptTickRate == 20.0);
 	CHECK(restoredSettings.ReplicationTickRate == 10.0);
 	CHECK(restoredSettings.GlobalSimulatedNetworkLatency == 12.5);
 	CHECK(restoredSettings.IsolationLevel == engine::world::Isolation::Dedicated);
@@ -439,7 +441,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	CHECK(
 		exported.find(
 			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" "
-			"physicsTickRate=\"0\" replicationTickRate=\"0\" "
+			"physicsTickRate=\"0\" scriptTickRate=\"0\" replicationTickRate=\"0\" "
 			"globalSimulatedNetworkLatency=\"0\" faultLimit=\"3\" "
 			"isolation=\"Shared\" "
 			"renderingProfile=\"Default PBR\" />"

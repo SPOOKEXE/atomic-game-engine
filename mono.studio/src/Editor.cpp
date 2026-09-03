@@ -28,6 +28,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -2902,6 +2903,7 @@ namespace studio {
 		// editor, exactly as it is in `PrepareWorldIn`.
 		Universe->Enter(world, [&settings](Store &store) {
 			engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
+			engine::script::SetScriptTickRate(store, settings.ScriptTickRate);
 		});
 
 		MarkModified();
@@ -3075,13 +3077,15 @@ namespace studio {
 		// Read outside the borrow, because the settings belong to the universe
 		// and the store being prepared cannot answer for them.
 		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
+		const double scriptTickRate = Universe->SettingsOf(id).ScriptTickRate;
 
-		Universe->Enter(id, [this, physicsTickRate](Store &store, Scheduler &systems) {
+		Universe->Enter(id, [this, physicsTickRate, scriptTickRate](Store &store, Scheduler &systems) {
 			PrepareWorld(store, systems);
 
 			// After `PrepareWorld`, because that is what gives the world the
 			// clock this writes to.
 			engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+			engine::script::SetScriptTickRate(store, scriptTickRate);
 
 			// **The meshes this session has already taken in.** Content arrives
 			// into the worlds that are open at the time, so a world created or
@@ -4624,8 +4628,11 @@ namespace studio {
 		// dedicated server makes.** What "running a game" means has to be one
 		// function or the studio's Play and the server's hosting drift - and the
 		// first thing to drift would be the heartbeat's delta.
+		const double scriptTickRate = Universe->SettingsOf(world).ScriptTickRate;
 		Universe->Enter(world, [&](Store &store, Scheduler &systems) {
-			run.Runtime = engine::game::StartWorldScripts(store, systems, limits, failure, &Breakpoints);
+			run.Runtime = engine::game::StartWorldScripts(
+				store, systems, limits, failure, &Breakpoints, scriptTickRate
+			);
 		});
 
 		if (!failure.empty()) {

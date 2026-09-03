@@ -59,6 +59,9 @@ namespace engine::physics {
 			if (transform == nullptr || collider == nullptr) {
 				return QueryCandidate{};
 			}
+			if (!collider->CanQuery) {
+				return QueryCandidate{};
+			}
 
 			// **The baked geometry, resolved here as well as in the narrow
 			// phase.** A query and a contact are two different switches on

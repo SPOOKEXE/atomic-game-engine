@@ -2637,6 +2637,7 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
+			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 
 			// The plain fields. `Color` is a rename rather than a conversion -

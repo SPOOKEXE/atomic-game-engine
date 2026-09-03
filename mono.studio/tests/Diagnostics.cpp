@@ -20,6 +20,7 @@ using studio::DescribeDiagnosticSpan;
 using studio::DiagnosticSpan;
 using studio::FilterDiagnosticSpans;
 using studio::FinishDiagnosticAverage;
+using studio::FocusDiagnosticSpans;
 using studio::FitReportedDiagnosticTimeline;
 using studio::LayoutDiagnosticRows;
 
@@ -63,6 +64,32 @@ TEST_CASE("owner filters retain valid product trees", "[studio][diagnostics]") {
 	FilterDiagnosticSpans(spans, ProfileOwner::All, filtered);
 	REQUIRE(filtered.size() == spans.size());
 	CHECK(filtered[3].Parent == 2);
+}
+
+TEST_CASE("flame graph focus retains one selected subtree", "[studio][diagnostics]") {
+	const std::array spans{
+		DiagnosticSpan{.Name = "frame"},
+		DiagnosticSpan{.Name = "renderer", .Depth = 1, .Parent = 0},
+		DiagnosticSpan{.Name = "cull", .Depth = 2, .Parent = 1},
+		DiagnosticSpan{.Name = "present", .Depth = 1, .Parent = 0},
+	};
+
+	std::vector<DiagnosticSpan> focused;
+	std::vector<uint32_t> sourceIndices;
+	FocusDiagnosticSpans(spans, 1, focused, sourceIndices);
+
+	REQUIRE(focused.size() == 2);
+	CHECK(sourceIndices == std::vector<uint32_t>{1, 2});
+	CHECK(focused[0].Name == "renderer");
+	CHECK(focused[0].Parent == FrameGraph::NO_PARENT);
+	CHECK(focused[0].Depth == 0);
+	CHECK(focused[1].Name == "cull");
+	CHECK(focused[1].Parent == 0);
+	CHECK(focused[1].Depth == 1);
+
+	FocusDiagnosticSpans(spans, 99, focused, sourceIndices);
+	CHECK(focused.empty());
+	CHECK(sourceIndices.empty());
 }
 
 TEST_CASE("every diagnostic span has an explanatory tooltip", "[studio][diagnostics]") {

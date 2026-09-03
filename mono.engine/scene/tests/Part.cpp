@@ -423,6 +423,15 @@ TEST_CASE("CanCollide is the inverse of the trigger flag", "[scene][part]") {
 	CHECK(store.Get<Collider>(part)->Mask == engine::spatial::LayerMask::All());
 }
 
+TEST_CASE("CanQuery controls participation in spatial queries", "[scene][part]") {
+	Store store("property_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	CHECK(Read<bool>(store, part, "CanQuery"));
+	REQUIRE(Write(store, part, "CanQuery", false));
+	CHECK_FALSE(store.Get<Collider>(part)->CanQuery);
+}
+
 TEST_CASE("a replica refuses a property write", "[scene][part]") {
 	Store store("property_test");
 	const Entity part = MakePart(store, PartDesc{});
