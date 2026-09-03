@@ -114,127 +114,137 @@ namespace engine::spatial {
 		// passes below and every later query all want them, and six floors per
 		// proxy repeated three times costs more than the bytes.
 		size_t entryCount = 0;
-		for (size_t index = 0; index < Proxies.size(); index++) {
-			const core::AABB &bounds = Proxies[index].Bounds;
-			CellRange &range = Ranges[index];
+		{
+			const core::ScopedObservation rangeTimed("spatial.grid.ranges");
+			for (size_t index = 0; index < Proxies.size(); index++) {
+				const core::AABB &bounds = Proxies[index].Bounds;
+				CellRange &range = Ranges[index];
 
-			range.MinimumX = CellCoordinateOf(bounds.Minimum.X, InverseSpacing);
-			range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, InverseSpacing);
-			range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, InverseSpacing);
-			range.MaximumX = CellCoordinateOf(bounds.Maximum.X, InverseSpacing);
-			range.MaximumY = CellCoordinateOf(bounds.Maximum.Y, InverseSpacing);
-			range.MaximumZ = CellCoordinateOf(bounds.Maximum.Z, InverseSpacing);
+				range.MinimumX = CellCoordinateOf(bounds.Minimum.X, InverseSpacing);
+				range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, InverseSpacing);
+				range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, InverseSpacing);
+				range.MaximumX = CellCoordinateOf(bounds.Maximum.X, InverseSpacing);
+				range.MaximumY = CellCoordinateOf(bounds.Maximum.Y, InverseSpacing);
+				range.MaximumZ = CellCoordinateOf(bounds.Maximum.Z, InverseSpacing);
 
-			const int64_t spanX = static_cast<int64_t>(range.MaximumX) - range.MinimumX + 1;
-			const int64_t spanY = static_cast<int64_t>(range.MaximumY) - range.MinimumY + 1;
-			const int64_t spanZ = static_cast<int64_t>(range.MaximumZ) - range.MinimumZ + 1;
+				const int64_t spanX = static_cast<int64_t>(range.MaximumX) - range.MinimumX + 1;
+				const int64_t spanY = static_cast<int64_t>(range.MaximumY) - range.MinimumY + 1;
+				const int64_t spanZ = static_cast<int64_t>(range.MaximumZ) - range.MinimumZ + 1;
 
-			// A box built the wrong way round covers no cells and can still
-			// satisfy AABB::Overlaps against a large enough box, so it joins
-			// the oversized list where the exact test answers it - rather than
-			// being dropped here, which would make the index disagree with the
-			// type.
-			const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
-			const int64_t cells = inverted ? 0 : spanX * spanY * spanZ;
+				// A box built the wrong way round covers no cells and can still
+				// satisfy AABB::Overlaps against a large enough box, so it joins
+				// the oversized list where the exact test answers it - rather than
+				// being dropped here, which would make the index disagree with the
+				// type.
+				const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
+				const int64_t cells = inverted ? 0 : spanX * spanY * spanZ;
 
-			if (inverted || cells > static_cast<int64_t>(MAXIMUM_CELLS_PER_PROXY)) {
-				Oversized.push_back(static_cast<uint32_t>(index));
+				if (inverted || cells > static_cast<int64_t>(MAXIMUM_CELLS_PER_PROXY)) {
+					Oversized.push_back(static_cast<uint32_t>(index));
 
-				// Emptied so that both build passes skip it without consulting
-				// the list, and so that nothing later mistakes a huge range for
-				// one somebody meant.
-				range.MaximumX = range.MinimumX - 1;
-				continue;
+					// Emptied so that both build passes skip it without consulting
+					// the list, and so that nothing later mistakes a huge range for
+					// one somebody meant.
+					range.MaximumX = range.MinimumX - 1;
+					continue;
+				}
+				entryCount += static_cast<size_t>(cells);
 			}
-			entryCount += static_cast<size_t>(cells);
 		}
 
 		const size_t buckets = ChooseBucketCount(entryCount);
-		BucketStart.assign(buckets + 1, 0);
+		{
+			const core::ScopedObservation histogramTimed("spatial.grid.histogram");
+			BucketStart.assign(buckets + 1, 0);
 
-		core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
+			core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
 
-		// **Every oversized proxy is tested exactly against every query**, so a
-		// scene that accumulates them loses the acceleration one proxy at a
-		// time with nothing reporting it.
-		if (!Oversized.empty()) {
-			core::Metrics::Count("spatial.grid.oversized", static_cast<double>(Oversized.size()));
-			ENGINE_DEBUG_EVERY(
-				5.0,
-				"{} of {} proxies span more than {} cells at spacing {} and are tested exactly by every "
-				"query",
-				Oversized.size(),
+			// **Every oversized proxy is tested exactly against every query**, so a
+			// scene that accumulates them loses the acceleration one proxy at a
+			// time with nothing reporting it.
+			if (!Oversized.empty()) {
+				core::Metrics::Count("spatial.grid.oversized", static_cast<double>(Oversized.size()));
+				ENGINE_DEBUG_EVERY(
+					5.0,
+					"{} of {} proxies span more than {} cells at spacing {} and are tested exactly by every "
+					"query",
+					Oversized.size(),
+					Proxies.size(),
+					MAXIMUM_CELLS_PER_PROXY,
+					Spacing
+				);
+			}
+
+			// At the cap the table is no longer one bucket per entry, so a query
+			// walks somebody else's cell contents on every lookup.
+			if (buckets == MAXIMUM_BUCKET_COUNT && entryCount > buckets) {
+				ENGINE_WARN_EVERY(
+					10.0,
+					"{} cell entries over the {} bucket cap; every query now scans a shared bucket",
+					entryCount,
+					MAXIMUM_BUCKET_COUNT
+				);
+			}
+
+			ENGINE_TRACE(
+				"rebuilt: {} proxies, {} cell entries, {} buckets, {} oversized",
 				Proxies.size(),
-				MAXIMUM_CELLS_PER_PROXY,
-				Spacing
-			);
-		}
-
-		// At the cap the table is no longer one bucket per entry, so a query
-		// walks somebody else's cell contents on every lookup.
-		if (buckets == MAXIMUM_BUCKET_COUNT && entryCount > buckets) {
-			ENGINE_WARN_EVERY(
-				10.0,
-				"{} cell entries over the {} bucket cap; every query now scans a shared bucket",
 				entryCount,
-				MAXIMUM_BUCKET_COUNT
+				buckets,
+				Oversized.size()
 			);
+
+			// Pass two: how many entries each bucket owns, counted one slot to the
+			// right so the prefix sum turns the counts into starts in place.
+			for (const CellRange &range : Ranges) {
+				ForEachCell(
+					range.MinimumX,
+					range.MinimumY,
+					range.MinimumZ,
+					range.MaximumX,
+					range.MaximumY,
+					range.MaximumZ,
+					[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+						BucketStart[(HashCell(cellX, cellY, cellZ) & (buckets - 1)) + 1]++;
+					}
+				);
+			}
+			for (size_t bucket = 0; bucket < buckets; bucket++) {
+				BucketStart[bucket + 1] += BucketStart[bucket];
+			}
 		}
 
-		ENGINE_TRACE(
-			"rebuilt: {} proxies, {} cell entries, {} buckets, {} oversized",
-			Proxies.size(),
-			entryCount,
-			buckets,
-			Oversized.size()
-		);
+		{
+			const core::ScopedObservation fillTimed("spatial.grid.fill");
 
-		// Pass two: how many entries each bucket owns, counted one slot to the
-		// right so the prefix sum turns the counts into starts in place.
-		for (const CellRange &range : Ranges) {
-			ForEachCell(
-				range.MinimumX,
-				range.MinimumY,
-				range.MinimumZ,
-				range.MaximumX,
-				range.MaximumY,
-				range.MaximumZ,
-				[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
-					BucketStart[(HashCell(cellX, cellY, cellZ) & (buckets - 1)) + 1]++;
-				}
-			);
-		}
-		for (size_t bucket = 0; bucket < buckets; bucket++) {
-			BucketStart[bucket + 1] += BucketStart[bucket];
-		}
+			// Pass three: place. The starts serve as cursors while filling, then the
+			// backward shift below restores them. Keeping a second bucket-sized array
+			// for this one pass costs as much memory as the lookup table itself.
+			Entries.resize(entryCount);
+			for (size_t index = 0; index < Ranges.size(); index++) {
+				const CellRange &range = Ranges[index];
+				ForEachCell(
+					range.MinimumX,
+					range.MinimumY,
+					range.MinimumZ,
+					range.MaximumX,
+					range.MaximumY,
+					range.MaximumZ,
+					[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+						const size_t bucket = HashCell(cellX, cellY, cellZ) & (buckets - 1);
+						Entries[BucketStart[bucket]++] = Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
+					}
+				);
+			}
 
-		// Pass three: place. The starts serve as cursors while filling, then the
-		// backward shift below restores them. Keeping a second bucket-sized array
-		// for this one pass costs as much memory as the lookup table itself.
-		Entries.resize(entryCount);
-		for (size_t index = 0; index < Ranges.size(); index++) {
-			const CellRange &range = Ranges[index];
-			ForEachCell(
-				range.MinimumX,
-				range.MinimumY,
-				range.MinimumZ,
-				range.MaximumX,
-				range.MaximumY,
-				range.MaximumZ,
-				[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
-					const size_t bucket = HashCell(cellX, cellY, cellZ) & (buckets - 1);
-					Entries[BucketStart[bucket]++] = Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
-				}
-			);
+			// Every cursor now equals the old start of the bucket to its right. Shift
+			// those ends back into place from right to left so no value is overwritten
+			// before it is read. Entry order stays the proxy and cell order above.
+			for (size_t bucket = buckets; bucket > 0; bucket--) {
+				BucketStart[bucket] = BucketStart[bucket - 1];
+			}
+			BucketStart[0] = 0;
 		}
-
-		// Every cursor now equals the old start of the bucket to its right. Shift
-		// those ends back into place from right to left so no value is overwritten
-		// before it is read. Entry order stays the proxy and cell order above.
-		for (size_t bucket = buckets; bucket > 0; bucket--) {
-			BucketStart[bucket] = BucketStart[bucket - 1];
-		}
-		BucketStart[0] = 0;
 	}
 
 	void HashGrid::SetCellSize(float cellSize) {

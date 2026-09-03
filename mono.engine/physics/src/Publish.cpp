@@ -82,7 +82,7 @@ namespace engine::physics {
 		const std::span<const SolverBody> bodies = world->Bodies();
 		const std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
-			ENGINE_PROFILE_CAT("physics.publish-correction", core::ProfileCategory::Physics);
+			ENGINE_PROFILE_CAT("physics.publish-transform", core::ProfileCategory::Physics);
 			if (!bodies.empty() && delta > 0.0f) {
 				store.Each<scene::Transform, const scene::Motion>(
 					[bodies, &bodyIndex, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
@@ -165,7 +165,7 @@ namespace engine::physics {
 		// `SyncBroadphase`'s inner gate - "was a changed row one without a
 		// `Motion`" - still answers no for every row this touches.
 		{
-			ENGINE_PROFILE_CAT("physics.publish-changes", core::ProfileCategory::Physics);
+			ENGINE_PROFILE_CAT("physics.publish-structural", core::ProfileCategory::Physics);
 			store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
 				store.MarkChanged<scene::Transform>(entity);
 			});

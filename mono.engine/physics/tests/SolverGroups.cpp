@@ -1,3 +1,5 @@
+#include <engine/core/FrameGraph.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -39,6 +41,8 @@ TEST_DEPENDS("engine.physics.solver")
 TEST_DEPENDS("engine.parallel.jobs")
 
 using engine::core::CFrame;
+using engine::core::FrameGraph;
+using engine::core::Metrics;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -170,6 +174,46 @@ TEST_CASE("a scene below the threshold is one run in manifold order", "[solvergr
 
 	const SolverGroup only = PipelineInternals::SolverGroups(world)[0];
 	CHECK(only.FirstRow == 0);
+}
+
+TEST_CASE("the solver reports each round's interior, border and group shape", "[solvergroups]") {
+	std::unique_ptr<Store> owned = Spread(2, 3);
+	Store &store = *owned;
+
+	Metrics::Clear();
+	const bool frameGraphWasEnabled = FrameGraph::IsEnabled();
+	FrameGraph::SetEnabled(true);
+	FrameGraph::BeginFrame();
+	StepOnce(store);
+	FrameGraph::EndFrame();
+	const std::vector<engine::core::FrameSpan> spans(FrameGraph::Spans().begin(), FrameGraph::Spans().end());
+	FrameGraph::SetEnabled(frameGraphWasEnabled);
+
+	const auto gauge = [](std::string_view name) {
+		const auto found = Metrics::GetGauge(name);
+		REQUIRE(found.has_value());
+		return found->Value;
+	};
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	CHECK(gauge("physics.solve.groups") == 1.0);
+	CHECK(gauge("physics.solve.group-rows.min") == static_cast<double>(world.RowCount()));
+	CHECK(gauge("physics.solve.group-rows.median") == static_cast<double>(world.RowCount()));
+	CHECK(gauge("physics.solve.group-rows.max") == static_cast<double>(world.RowCount()));
+	CHECK(gauge("physics.solve.interior-rows") == static_cast<double>(world.RowCount()));
+	CHECK(gauge("physics.solve.border-rows") == 0.0);
+
+	const auto spansNamed = [&spans](std::string_view name) {
+		return std::count_if(spans.begin(), spans.end(), [name](const engine::core::FrameSpan &span) {
+			return span.Name == name;
+		});
+	};
+	constexpr size_t rounds = engine::physics::SOLVER_ITERATIONS / engine::physics::SOLVE_SWEEPS_PER_BATCH;
+	CHECK(spansNamed("physics.solve-round") == rounds);
+	CHECK(spansNamed("physics.solve-interior") == rounds);
+	CHECK(spansNamed("physics.solve-border") == rounds);
+
+	Metrics::Clear();
 }
 
 TEST_CASE("a scene above the threshold is cut into several groups", "[solvergroups]") {

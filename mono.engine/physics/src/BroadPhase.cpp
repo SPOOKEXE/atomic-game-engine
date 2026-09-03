@@ -88,11 +88,6 @@ namespace engine::physics {
 			}
 		}
 
-		void SortPairs(std::vector<SourcedPair> &pairs, std::vector<SourcedPair> &scratch) {
-			RadixSortPairMember(pairs, scratch, [](const SourcedPair &pair) { return pair.Pair.B.Id; });
-			RadixSortPairMember(pairs, scratch, [](const SourcedPair &pair) { return pair.Pair.A.Id; });
-		}
-
 		// Collects one disjoint range of dynamic proxies into caller-owned output.
 		// Returns false without a partial answer when either overlap query fills
 		// its scratch, so the caller can retry the same range with wider storage.
@@ -278,13 +273,24 @@ namespace engine::physics {
 			// gives one answer on a scene built one way and another on the same
 			// scene built another way - and `just determinism` reports it a long
 			// way from here.
-			SortPairs(sourced, PipelineInternals::SourcedPairSortScratch(*world));
+			std::vector<SourcedPair> &sortScratch = PipelineInternals::SourcedPairSortScratch(*world);
+			{
+				ENGINE_PROFILE_CAT("physics.pair-sort-b", core::ProfileCategory::Physics);
+				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) { return pair.Pair.B.Id; });
+			}
+			{
+				ENGINE_PROFILE_CAT("physics.pair-sort-a", core::ProfileCategory::Physics);
+				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) { return pair.Pair.A.Id; });
+			}
 
 			// Each pair once. The generation above already reports each one once;
 			// this is what makes "once" a property of the list the solver reads
 			// rather than a property of how it was filled, and applying one contact
 			// twice doubles its impulse.
-			sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+			{
+				ENGINE_PROFILE_CAT("physics.pair-deduplicate", core::ProfileCategory::Physics);
+				sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+			}
 		}
 
 		// **Split into the public list and the private one, after the sort.**

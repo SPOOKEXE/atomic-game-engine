@@ -3,6 +3,7 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -70,6 +71,26 @@ namespace engine::physics {
 		// offsets were built from - which would not misplace a row, it would
 		// write one past the end of a group.
 		constexpr uint32_t SKIPPED_MANIFOLD = UINT32_MAX;
+
+		// Reports the shape the scheduling pass produced. `groups` is longest
+		// first, so its ends and middle give the exact min, max and nearest-rank
+		// median without allocating or changing the scheduler's dispatch order.
+		// These are gauges because they describe the latest solve, not a rate.
+		void ReportSolverGroupShape(
+			const std::vector<SolverGroup> &groups, SolverGroup border, size_t interiorRowCount
+		) {
+			const double groupCount = static_cast<double>(groups.size());
+			const double minimum = groups.empty() ? 0.0 : static_cast<double>(groups.back().RowCount);
+			const double median = groups.empty() ? 0.0 : static_cast<double>(groups[groups.size() / 2].RowCount);
+			const double maximum = groups.empty() ? 0.0 : static_cast<double>(groups.front().RowCount);
+
+			core::Metrics::SetGauge("physics.solve.groups", groupCount);
+			core::Metrics::SetGauge("physics.solve.group-rows.min", minimum);
+			core::Metrics::SetGauge("physics.solve.group-rows.median", median);
+			core::Metrics::SetGauge("physics.solve.group-rows.max", maximum);
+			core::Metrics::SetGauge("physics.solve.interior-rows", static_cast<double>(interiorRowCount));
+			core::Metrics::SetGauge("physics.solve.border-rows", static_cast<double>(border.RowCount));
+		}
 
 		// An entity id has a fixed width, so ordering the compact solver bodies
 		// takes six stable passes instead of comparison-sorting every contact's
@@ -543,14 +564,20 @@ namespace engine::physics {
 		std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
 			ENGINE_PROFILE_CAT("physics.solve-gather", core::ProfileCategory::Physics);
-			owners.clear();
-			owners.reserve(manifolds.size() * 2);
-			for (const ContactManifold &manifold : manifolds) {
-				owners.push_back(manifold.A);
-				owners.push_back(manifold.B);
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-owners", core::ProfileCategory::Physics);
+				owners.clear();
+				owners.reserve(manifolds.size() * 2);
+				for (const ContactManifold &manifold : manifolds) {
+					owners.push_back(manifold.A);
+					owners.push_back(manifold.B);
+				}
 			}
-			SortOwners(owners, PipelineInternals::BodyOwnerSortScratch(*world));
-			owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-sort", core::ProfileCategory::Physics);
+				SortOwners(owners, PipelineInternals::BodyOwnerSortScratch(*world));
+				owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
+			}
 
 			bodies.resize(owners.size());
 			for (size_t index = 0; index < owners.size(); index++) {
@@ -558,10 +585,13 @@ namespace engine::physics {
 				bodies[index].Owner = owners[index];
 			}
 
-			bodyIndex.clear();
-			bodyIndex.reserve(bodies.size());
-			for (size_t index = 0; index < bodies.size(); index++) {
-				bodyIndex.emplace(bodies[index].Owner.Id, index);
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-index", core::ProfileCategory::Physics);
+				bodyIndex.clear();
+				bodyIndex.reserve(bodies.size());
+				for (size_t index = 0; index < bodies.size(); index++) {
+					bodyIndex.emplace(bodies[index].Owner.Id, index);
+				}
 			}
 		}
 
@@ -621,19 +651,21 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.solve-bodies", core::ProfileCategory::Physics);
 			std::vector<uint8_t> &loaded = PipelineInternals::BodyLoaded(*world);
 			loaded.assign(bodies.size(), 0);
-			const size_t baseParts = store.CountMatching<
-				scene::Transform,
-				scene::Collider,
-				scene::RigidBody,
-				scene::Surface,
-				scene::PhysicsProperties>();
-			if (bodies.size() >= (baseParts + 1) / 2) {
-				store.Each<
-					const scene::Transform,
-					const scene::Collider,
-					const scene::RigidBody,
-					const scene::Surface,
-					const scene::PhysicsProperties>([&bodies, &loaded, &bodyIndex, &reader, surfaces](
+			{
+				ENGINE_PROFILE_CAT("physics.solve-bodies-archetype", core::ProfileCategory::Physics);
+				const size_t baseParts = store.CountMatching<
+					scene::Transform,
+					scene::Collider,
+					scene::RigidBody,
+					scene::Surface,
+					scene::PhysicsProperties>();
+				if (bodies.size() >= (baseParts + 1) / 2) {
+					store.Each<
+						const scene::Transform,
+						const scene::Collider,
+						const scene::RigidBody,
+						const scene::Surface,
+						const scene::PhysicsProperties>([&bodies, &loaded, &bodyIndex, &reader, surfaces](
 														ecs::Entity entity,
 														const scene::Transform &transform,
 														const scene::Collider &collider,
@@ -641,50 +673,54 @@ namespace engine::physics {
 														const scene::Surface &surface,
 														const scene::PhysicsProperties &physical
 													) {
-					const auto found = bodyIndex.find(entity.Id);
-					if (found == bodyIndex.end()) {
-						return;
-					}
+						const auto found = bodyIndex.find(entity.Id);
+						if (found == bodyIndex.end()) {
+							return;
+						}
 
-					const size_t index = found->second;
-					LoadBody(
-						bodies[index],
-						&transform,
-						reader.Get<scene::Motion>(entity),
-						&collider,
-						&rigid,
-						&surface,
-						&physical,
-						reader.Has<scene::Simulated>(entity),
-						surfaces
-					);
-					loaded[index] = true;
-				});
+						const size_t index = found->second;
+						LoadBody(
+							bodies[index],
+							&transform,
+							reader.Get<scene::Motion>(entity),
+							&collider,
+							&rigid,
+							&surface,
+							&physical,
+							reader.Has<scene::Simulated>(entity),
+							surfaces
+						);
+						loaded[index] = true;
+					});
+				}
 			}
 
-			for (size_t index = 0; index < bodies.size(); index++) {
-				if (loaded[index]) {
-					continue;
-				}
-				SolverBody &body = bodies[index];
-				const scene::Transform *transform = reader.Get<scene::Transform>(body.Owner);
-				const scene::Motion *motion = reader.Get<scene::Motion>(body.Owner);
-				const scene::Collider *collider = reader.Get<scene::Collider>(body.Owner);
-				const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
+			{
+				ENGINE_PROFILE_CAT("physics.solve-bodies-fallback", core::ProfileCategory::Physics);
+				for (size_t index = 0; index < bodies.size(); index++) {
+					if (loaded[index]) {
+						continue;
+					}
+					SolverBody &body = bodies[index];
+					const scene::Transform *transform = reader.Get<scene::Transform>(body.Owner);
+					const scene::Motion *motion = reader.Get<scene::Motion>(body.Owner);
+					const scene::Collider *collider = reader.Get<scene::Collider>(body.Owner);
+					const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
 
-				const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
-				const scene::PhysicsProperties *physical = reader.Get<scene::PhysicsProperties>(body.Owner);
-				LoadBody(
-					body,
-					transform,
-					motion,
-					collider,
-					rigid,
-					surface,
-					physical,
-					reader.Has<scene::Simulated>(body.Owner),
-					surfaces
-				);
+					const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
+					const scene::PhysicsProperties *physical = reader.Get<scene::PhysicsProperties>(body.Owner);
+					LoadBody(
+						body,
+						transform,
+						motion,
+						collider,
+						rigid,
+						surface,
+						physical,
+						reader.Has<scene::Simulated>(body.Owner),
+						surfaces
+					);
+				}
 			}
 		}
 
@@ -903,6 +939,8 @@ namespace engine::physics {
 		if (partitioned) {
 			border = SolverGroup{groupStart[chunkCount], groupStart[chunkCount + 1] - groupStart[chunkCount]};
 		}
+
+		ReportSolverGroupShape(groups, border, rowCount - static_cast<size_t>(border.RowCount));
 
 		// --- place -----------------------------------------------------------
 		//
@@ -1147,27 +1185,37 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.solve-sweeps", core::ProfileCategory::Physics);
 			for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
-				if (groups.size() > 1) {
-					parallel::Jobs::For(
-						groups.size(),
-						1,
-						[&bodies, &rows, &groups](size_t begin, size_t end) {
-							for (size_t group = begin; group < end; group++) {
-								for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-									SweepRows(bodies, rows, groups[group]);
+				ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
+				{
+					// `jobs.drain` is the nested span when this dispatch reaches the
+					// pool. Keeping it inside an explicit interior span separates queue
+					// drain and group work from the serial border that follows.
+					ENGINE_PROFILE_CAT("physics.solve-interior", core::ProfileCategory::Physics);
+					if (groups.size() > 1) {
+						parallel::Jobs::For(
+							groups.size(),
+							1,
+							[&bodies, &rows, &groups](size_t begin, size_t end) {
+								for (size_t group = begin; group < end; group++) {
+									for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+										SweepRows(bodies, rows, groups[group]);
+									}
 								}
-							}
-						},
-						2
-					);
-				} else if (!groups.empty()) {
-					for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-						SweepRows(bodies, rows, groups[0]);
+							},
+							2
+						);
+					} else if (!groups.empty()) {
+						for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+							SweepRows(bodies, rows, groups[0]);
+						}
 					}
 				}
 
-				for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-					SweepRows(bodies, rows, border);
+				{
+					ENGINE_PROFILE_CAT("physics.solve-border", core::ProfileCategory::Physics);
+					for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+						SweepRows(bodies, rows, border);
+					}
 				}
 			}
 		}

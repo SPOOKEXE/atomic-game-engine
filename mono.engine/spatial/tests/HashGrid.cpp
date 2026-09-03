@@ -1,3 +1,4 @@
+#include <engine/core/Metrics.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
@@ -24,6 +25,7 @@ TEST_DEPENDS("engine.core.types.aabb")
 TEST_DEPENDS("engine.spatial.layermask")
 
 using engine::core::AABB;
+using engine::core::Metrics;
 using engine::core::Vector3;
 using engine::spatial::CellCoordinateOf;
 using engine::spatial::GridInternals;
@@ -74,6 +76,36 @@ TEST_CASE("a cell coordinate floors rather than truncating", "[hashgrid]") {
 	REQUIRE(CellCoordinateOf(-4.0f, 1.0f / 8.0f) == -1);
 	REQUIRE(CellCoordinateOf(-8.0f, 1.0f / 8.0f) == -1);
 	REQUIRE(CellCoordinateOf(-9.0f, 1.0f / 8.0f) == -2);
+}
+
+TEST_CASE("a rebuild observes each index phase", "[hashgrid]") {
+	Metrics::Clear();
+
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Box(1, Vector3{0.1f, 0.1f, 0.1f}, Vector3{0.9f, 0.9f, 0.9f})};
+	grid.Rebuild(proxies);
+
+	// The aggregate remains the dashboard's broad rebuild number. The three
+	// phases say which deterministic pass owns it when that number regresses.
+	const auto rebuild = Metrics::GetHistogram("spatial.grid.rebuild");
+	const auto ranges = Metrics::GetHistogram("spatial.grid.ranges");
+	const auto histogram = Metrics::GetHistogram("spatial.grid.histogram");
+	const auto fill = Metrics::GetHistogram("spatial.grid.fill");
+
+	REQUIRE(rebuild.has_value());
+	REQUIRE(ranges.has_value());
+	REQUIRE(histogram.has_value());
+	REQUIRE(fill.has_value());
+	CHECK(rebuild->Samples == 1);
+	CHECK(ranges->Samples == 1);
+	CHECK(histogram->Samples == 1);
+	CHECK(fill->Samples == 1);
+	CHECK(rebuild->IsTime);
+	CHECK(ranges->IsTime);
+	CHECK(histogram->IsTime);
+	CHECK(fill->IsTime);
+
+	Metrics::Clear();
 }
 
 TEST_CASE("cells left of the origin are their own cells", "[hashgrid]") {
