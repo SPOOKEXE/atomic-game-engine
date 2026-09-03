@@ -37,26 +37,6 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.22
-
-- [x] Fix viewport image drag issue
-- [x] Fix dragging floating dock widgets when sub-ui-objects already handle drag operations (e.g. 3d mesh preview in Demo Nodes, when dragging in preview it drags floating dock widget instead of only the image)
-- [x] add 180 degree flip to X/Y/Z gizmo
-- [x] when I run the StressParticle demo, it grows the particle pool. Ensure when i stop running the world, it de-allocates them.
-- [x] add tests for pooled de-allocation for things like particle allocations, texture allocations, etc.
-- [x] fix images rotating opposite way when dragging mouse in preview images (e.g. 3d mesh preview in demo nodes dragging opposite way)
-- [x] headless gpu pass tests for checking pooled allocation and deallocation, checking rendered images
-- [x] (headless) gpu tests for render pipeline
-
-fix:
-- [x] in the ECS `Components` inspector, add the ability to edit the component values.
-- [x] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
-- [x] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
-- [x] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
-- [x] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
-right now it just displays the components with byte sizes but they are not editable or anything.
-- [x] edit to studio ui
-
 ### v0.23
 
 - [_] atomic engine icons?
@@ -86,6 +66,7 @@ new demos:
 - [_] port TornadoSim as a demo scene in the engine.
 - [_] blackhole simulator (warp space, warp visual, etc)
 - [_] user interface (copy bladeborne's for demo?), luau scripting and such
+- [_] update DEMOS.md with GIFs uploaded to repository
 
 ### v0.24
 

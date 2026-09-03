@@ -1,7 +1,9 @@
-#include <studio/Viewports.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <studio/Viewports.hpp>
 
 namespace studio {
 
@@ -42,6 +44,23 @@ namespace studio {
 		pose.Pitch = angles.X;
 		pose.Yaw = angles.Y;
 		return pose;
+	}
+
+	bool CarryViewportCamera(engine::ecs::Store &store, const CFrame &previous, ViewportCameraPose &pose) {
+		engine::scene::SeamTransform through;
+		if (!engine::scene::PortalCrossing(store, previous.Position, pose.Frame.Position, through)) {
+			return false;
+		}
+
+		pose.Frame = through.Place(pose.Frame);
+		Vector3 position = pose.Frame.Position;
+		(void)engine::scene::ClearOfPanes(store, position);
+		pose.Frame.Position = position;
+
+		const Vector3 angles = pose.Frame.ToAngles();
+		pose.Pitch = angles.X;
+		pose.Yaw = angles.Y;
+		return true;
 	}
 
 	Vector3

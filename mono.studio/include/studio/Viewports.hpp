@@ -27,6 +27,10 @@
 #include <span>
 #include <unordered_map>
 
+namespace engine::ecs {
+	class Store;
+}
+
 namespace studio {
 
 	// No panel. Also what `ChooseViewportFor` says when one has to be made.
@@ -119,6 +123,21 @@ namespace studio {
 	//
 	// @since v0.19
 	ViewportCameraPose DefaultViewportCamera();
+
+	// Carries a free viewport camera through the first portal crossed by its
+	// movement. A free camera is editor state rather than a simulated body, so
+	// `scene::CrossPortals` cannot move it for us. The returned pose is also
+	// kept clear of the destination pane so a viewpoint on its clip plane does
+	// not collapse the portal projection to a slit.
+	//
+	// @param store    The world whose same-world portals may be crossed.
+	// @param previous Camera position before this input step.
+	// @param pose     Camera pose after input, carried in place when it crossed.
+	// @return Whether a portal carried the camera.
+	// @since v0.23
+	bool CarryViewportCamera(
+		engine::ecs::Store &store, const engine::core::CFrame &previous, ViewportCameraPose &pose
+	);
 
 	// Combines fly-camera input in the camera's own basis. Q and E belong to
 	// the same basis as WASD, so pitching the camera also pitches its vertical

@@ -692,6 +692,7 @@ namespace studio {
 			return;
 		}
 
+		const CFrame previous = view != nullptr ? view->Frame : CameraFrame;
 		if (view == nullptr) {
 			DriveCameraFor(
 				CameraFrame,
@@ -703,6 +704,17 @@ namespace studio {
 				ViewportPanning,
 				focused
 			);
+
+			const WorldId visual = VisualWorldOf(ViewportWorld(target));
+			if (visual.IsValid()) {
+				ViewportCameraPose pose{CameraFrame, CameraYaw, CameraPitch};
+				Universe->Enter(visual, [&](Store &store) {
+					(void)CarryViewportCamera(store, previous, pose);
+				});
+				CameraFrame = pose.Frame;
+				CameraYaw = pose.Yaw;
+				CameraPitch = pose.Pitch;
+			}
 			return;
 		}
 
@@ -716,6 +728,15 @@ namespace studio {
 			view->Panning,
 			focused
 		);
+
+		const WorldId visual = VisualWorldOf(ViewportWorld(target));
+		if (visual.IsValid()) {
+			ViewportCameraPose pose{view->Frame, view->Yaw, view->Pitch};
+			Universe->Enter(visual, [&](Store &store) { (void)CarryViewportCamera(store, previous, pose); });
+			view->Frame = pose.Frame;
+			view->Yaw = pose.Yaw;
+			view->Pitch = pose.Pitch;
+		}
 	}
 
 	void Editor::DriveCameraFor(

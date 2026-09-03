@@ -12,11 +12,18 @@
 // a panel minted while a free one sat there is a `SceneTarget` and a turn in the
 // rotation nobody asked to pay.
 
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <numbers>
 #include <studio/Viewports.hpp>
 
 TEST_SUITE_ID("studio.viewports")
@@ -24,6 +31,7 @@ TEST_SUITE_ID("studio.viewports")
 using engine::world::WorldId;
 using studio::CameraRelativeMovement;
 using studio::CanvasForViewport;
+using studio::CarryViewportCamera;
 using studio::ChooseViewportFor;
 using studio::DefaultViewportCamera;
 using studio::NO_VIEWPORT;
@@ -87,8 +95,7 @@ TEST_CASE("explicit camera image sizes remain one bounded pair", "[studio][viewp
 	CHECK(capture.Height == 480);
 
 	// An incomplete override is ignored as a pair, matching Camera's contract.
-	const studio::ViewportTargetSize incomplete =
-		ResolveViewportTargetSize(800, 600, 4000, 0, 1920, 1080);
+	const studio::ViewportTargetSize incomplete = ResolveViewportTargetSize(800, 600, 4000, 0, 1920, 1080);
 	CHECK(incomplete.Width == 800);
 	CHECK(incomplete.Height == 600);
 }
@@ -170,6 +177,52 @@ TEST_CASE("fly movement uses the camera's full basis", "[studio][viewports][came
 
 	const engine::core::Vector3 combined = CameraRelativeMovement(rotation, 1.0f, -1.0f, 1.0f);
 	CHECK(combined == rotation.LookVector() - rotation.RightVector() + rotation.UpVector());
+}
+
+TEST_CASE("a free viewport camera is carried through a portal", "[studio][viewports][camera][portal]") {
+	using engine::core::CFrame;
+	using engine::core::Name;
+	using engine::core::Vector3;
+	using engine::ecs::Entity;
+	using engine::ecs::Store;
+
+	engine::scene::RegisterSceneClasses();
+	Store store("viewport-portal");
+
+	engine::scene::PartDesc nearDesc;
+	nearDesc.Size = Vector3{8.0f, 8.0f, 0.4f};
+	nearDesc.Frame = CFrame(Vector3::Zero);
+	nearDesc.Simulated = false;
+	const Entity nearPane = engine::scene::MakePart(store, nearDesc);
+
+	engine::scene::PartDesc farDesc = nearDesc;
+	farDesc.Frame =
+		CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(0.0f, std::numbers::pi_v<float> / 2.0f, 0.0f);
+	const Entity farPane = engine::scene::MakePart(store, farDesc);
+
+	const Entity hole = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+	engine::scene::SurfaceCamera surface;
+	surface.Face = engine::scene::NormalId::Back;
+	surface.Surface = 0;
+	store.Set(hole, surface);
+	store.Set(hole, engine::scene::Portal{farPane});
+	REQUIRE(store.SetParent(hole, nearPane));
+
+	const CFrame previous = CFrame::LookAt(Vector3{0.0f, 0.0f, 1.0f}, Vector3{0.0f, 0.0f, 0.0f});
+	ViewportCameraPose pose;
+	pose.Frame = CFrame::LookAt(Vector3{0.0f, 0.0f, 0.1f}, Vector3{0.0f, 0.0f, -1.0f});
+
+	engine::scene::SeamTransform through;
+	REQUIRE(engine::scene::PortalCrossing(store, previous.Position, pose.Frame.Position, through));
+	const CFrame mapped = through.Place(pose.Frame);
+
+	REQUIRE(CarryViewportCamera(store, previous, pose));
+	CHECK((pose.Frame.Position - mapped.Position).Magnitude() < 0.05f);
+	CHECK(pose.Frame.LookVector().Dot(mapped.LookVector()) > 0.9999f);
+	CHECK(pose.Frame.Position.X > 90.0f);
+
+	const CFrame rebuilt = CFrame::Angles(pose.Pitch, pose.Yaw, 0.0f);
+	CHECK(rebuilt.LookVector().Dot(pose.Frame.LookVector()) > 0.9999f);
 }
 
 TEST_CASE("selecting the current direction gizmo axis flips the view", "[studio][viewports][camera]") {
