@@ -845,6 +845,13 @@ namespace engine::physics {
 		// Where the two are sorted together before being split. Cleared and
 		// refilled, never freed, like every other list here.
 		std::vector<SourcedPair> SourcedPairList;
+
+		// One retained output list per broad-phase batch, plus the batches whose
+		// fixed candidate scratch overflowed and must be replayed on the caller.
+		// Separate lists let workers append without a shared cursor; concatenating
+		// them in batch order before the required sort makes scheduling invisible.
+		std::vector<std::vector<SourcedPair>> SourcedPairBatches;
+		std::vector<uint8_t> SourcedPairOverflow;
 		std::vector<ContactManifold> ManifoldList;
 		std::vector<ContactEvent> EventList;
 
@@ -872,6 +879,8 @@ namespace engine::physics {
 		// `size()` instead is a walk over last tick's tail, and a stale row is a
 		// contact between two bodies that are no longer touching.
 		std::vector<SolverBody> BodyList;
+		// A retained membership list for Solve's dense BasePart load pass.
+		std::vector<uint8_t> SolverBodyLoaded;
 		std::vector<ContactRow> RowList;
 		size_t SolverRowCount = 0;
 

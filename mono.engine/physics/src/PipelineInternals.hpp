@@ -80,6 +80,15 @@ namespace engine::physics {
 			return world.SourcedPairList;
 		}
 
+		// Per-batch pair output and the batches that need a full-size retry.
+		static std::vector<std::vector<SourcedPair>> &SourcedPairBatches(PhysicsWorld &world) {
+			return world.SourcedPairBatches;
+		}
+
+		static std::vector<uint8_t> &SourcedPairOverflow(PhysicsWorld &world) {
+			return world.SourcedPairOverflow;
+		}
+
 		// The placed shape of every collider, parallel to the records.
 		//@{
 		static std::vector<PlacedCollider> &DynamicShapes(PhysicsWorld &world) {
@@ -115,6 +124,11 @@ namespace engine::physics {
 		// The solver's compact body array, refilled by `Solve`.
 		static std::vector<SolverBody> &Bodies(PhysicsWorld &world) {
 			return world.BodyList;
+		}
+
+		// Which compact bodies the dense BasePart walk has already loaded.
+		static std::vector<uint8_t> &BodyLoaded(PhysicsWorld &world) {
+			return world.SolverBodyLoaded;
 		}
 
 		// The per-point constraint rows, refilled by `Solve`.
