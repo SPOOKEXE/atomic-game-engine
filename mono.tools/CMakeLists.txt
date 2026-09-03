@@ -42,6 +42,9 @@ add_subdirectory(linecount)
 # ECS schema dump, generated from the component and class registries.
 add_subdirectory(schemadump)
 
+# Documentation search MCP server.
+add_subdirectory(docsearch)
+
 # Many real replication clients against one server.
 #
 # Unconditional, like `shadercheck` and unlike `contentimport`: it links the
