@@ -1301,6 +1301,21 @@ declare Random: {
 	new: (seed: number?) -> Random,
 }
 
+declare extern type Scope with
+	function Add(self, resource: any): Scope
+	function AddBulk(self, resources: {any}): Scope
+	function Remove(self, resource: any): boolean
+	function Clean(self): boolean
+	function Destroy(self): boolean
+	function IsAlive(self): boolean
+	function Count(self): number
+	function SetErrorHandler(self, handler: (message: string) -> ()): Scope
+end
+
+declare Scope: {
+	new: () -> Scope,
+}
+
 -- A plain table rather than a userdata: it is a value over a number and
 -- nothing more.
 type DateTime = {

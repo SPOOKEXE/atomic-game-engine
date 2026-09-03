@@ -1328,6 +1328,21 @@ declare Random: {
 	new: (seed: number?) -> Random,
 }
 
+declare extern type Scope with
+	function Add(self, resource: any): Scope
+	function AddBulk(self, resources: {any}): Scope
+	function Remove(self, resource: any): boolean
+	function Clean(self): boolean
+	function Destroy(self): boolean
+	function IsAlive(self): boolean
+	function Count(self): number
+	function SetErrorHandler(self, handler: (message: string) -> ()): Scope
+end
+
+declare Scope: {
+	new: () -> Scope,
+}
+
 -- A plain table rather than a userdata: it is a value over a number and
 -- nothing more.
 type DateTime = {
@@ -3129,6 +3144,21 @@ declare interface Random {
 
 declare const Random: {
 	new: (seed?: number) => Random;
+};
+
+declare interface Scope {
+	Add(resource: unknown): this;
+	AddBulk(resources: unknown[]): this;
+	Remove(resource: unknown): boolean;
+	Clean(): boolean;
+	Destroy(): boolean;
+	IsAlive(): boolean;
+	Count(): number;
+	SetErrorHandler(handler: (message: string) => void): this;
+}
+
+declare const Scope: {
+	new: () => Scope;
 };
 
 declare interface DateTime {

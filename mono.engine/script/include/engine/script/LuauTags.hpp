@@ -127,5 +127,9 @@ namespace engine::script {
 		// Carries the tween's entity, which is the key to `TweenTable` and the
 		// subject of its `Completed`.
 		TAG_TWEEN = 26,
+
+		// A runtime-owned cleanup scope. The payload is a generation-bearing
+		// handle into ScopeTable, never a pointer to another world.
+		TAG_SCOPE = 27,
 	};
 }

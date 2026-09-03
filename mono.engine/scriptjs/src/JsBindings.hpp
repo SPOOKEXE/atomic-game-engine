@@ -71,6 +71,7 @@ namespace engine::script {
 	// are reviewed differently - one is the property surface and the other is
 	// everything an author reaches for after it.
 	void OpenJsSurface(JSContext *context);
+	void OpenJsScopes(JSContext *context);
 
 	// Releases what the two `Open` calls attached. Before the context is freed.
 	void CloseJsBindings(JSContext *context);

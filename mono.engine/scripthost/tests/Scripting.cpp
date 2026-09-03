@@ -121,6 +121,46 @@ namespace {
 	}
 }
 
+TEST_CASE("Scope cleans callbacks in reverse order and contains errors", "[scripting][scope]") {
+	RegisterClasses();
+	Store store("scope_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local scope = Scope.new()
+		local order = {}
+		local handled = false
+		scope:SetErrorHandler(function(message)
+			handled = string.find(message, 'expected cleanup failure') ~= nil
+		end)
+		scope:Add(function() table.insert(order, 1) end)
+		scope:Add(function() error('expected cleanup failure') end)
+		scope:Add(function() table.insert(order, 3) end)
+		assert(scope:Count() == 3)
+		assert(scope:Clean())
+		assert(order[1] == 3 and order[2] == 1)
+		assert(handled)
+		assert(scope:Count() == 0 and scope:IsAlive())
+		assert(scope:Destroy() and not scope:IsAlive())
+	)");
+}
+
+TEST_CASE("JavaScript Scope cleans callbacks in reverse order", "[scripting][scope]") {
+	RegisterClasses();
+	Store store("scope_test_js");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const scope = Scope.new();
+		const order = [];
+		scope.Add(() => order.push(1));
+		scope.Add(() => order.push(2));
+		if (scope.Count() !== 2 || !scope.Clean() || order[0] !== 2 || order[1] !== 1) {
+			throw new Error('Scope cleanup failed');
+		}
+	)");
+}
+
 // --- signals ----------------------------------------------------------------
 
 TEST_CASE("Connect hands back a connection that can disconnect", "[scripting]") {

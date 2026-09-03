@@ -1082,6 +1082,21 @@ declare const Random: {
 	new: (seed?: number) => Random;
 };
 
+declare interface Scope {
+	Add(resource: unknown): this;
+	AddBulk(resources: unknown[]): this;
+	Remove(resource: unknown): boolean;
+	Clean(): boolean;
+	Destroy(): boolean;
+	IsAlive(): boolean;
+	Count(): number;
+	SetErrorHandler(handler: (message: string) => void): this;
+}
+
+declare const Scope: {
+	new: () => Scope;
+};
+
 declare interface DateTime {
 	readonly UnixTimestamp: number;
 	readonly UnixTimestampMillis: number;

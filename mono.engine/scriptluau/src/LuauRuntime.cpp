@@ -464,6 +464,7 @@ namespace engine::script {
 		OpenDatatypes(State);
 		OpenEnums(State);
 		OpenSignals(State);
+		OpenScopes(State);
 		OpenInstances(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);

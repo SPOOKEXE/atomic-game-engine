@@ -36,6 +36,7 @@
 #include <engine/script/LuauTags.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/ScriptCall.hpp>
+#include <engine/script/Scope.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
 #include <engine/script/ServiceSurface.hpp>
 #include <engine/script/Signals.hpp>
@@ -94,6 +95,9 @@ namespace engine::script {
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
+
+		// Cleanup scopes own their shared lifecycle here; Luau owns the refs.
+		ScopeTable Scopes;
 
 		// Reused by the two bulk placement methods. The runtime is single-threaded,
 		// and each call consumes these before another script method can replace them.
@@ -529,6 +533,7 @@ namespace engine::script {
 	//
 	// @param state The VM.
 	void OpenSignals(lua_State *state);
+	void OpenScopes(lua_State *state);
 
 	// Calls everything connected to one signal, with the arguments already on
 	// the stack.
