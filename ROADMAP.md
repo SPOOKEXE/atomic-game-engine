@@ -73,6 +73,7 @@ c. classes
 * Separate per-scripting-bindings into sub-bars as well so if one specific script binding has yielded the luau loop, we can obviously see that.
 
 - [_] optimise remaining physics bottlenecks using StressPhysics demo
+- [_] ensure chunked physics world implementation is correct and optimised (world is split into chunks, all physics computations happen in the chunks on separate threads in parallel, all computations are also batch computed, chunk borders - edges and corners - are computed separately or handled post center).
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
