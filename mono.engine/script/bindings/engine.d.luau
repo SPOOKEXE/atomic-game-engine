@@ -1304,6 +1304,7 @@ declare Random: {
 declare extern type Scope with
 	function Add(self, resource: any): Scope
 	function AddBulk(self, resources: {any}): Scope
+	function AddBulk(self, ...: any): Scope
 	function Remove(self, resource: any): boolean
 	function Clean(self): boolean
 	function Destroy(self): boolean

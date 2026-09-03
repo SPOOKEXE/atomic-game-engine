@@ -133,9 +133,11 @@ TEST_CASE("Scope cleans callbacks in reverse order and contains errors", "[scrip
 		scope:SetErrorHandler(function(message)
 			handled = string.find(message, 'expected cleanup failure') ~= nil
 		end)
-		scope:Add(function() table.insert(order, 1) end)
-		scope:Add(function() error('expected cleanup failure') end)
-		scope:Add(function() table.insert(order, 3) end)
+		scope:AddBulk(
+			function() table.insert(order, 1) end,
+			function() error('expected cleanup failure') end,
+			function() table.insert(order, 3) end
+		)
 		assert(scope:Count() == 3)
 		assert(scope:Clean())
 		assert(order[1] == 3 and order[2] == 1)
@@ -153,8 +155,7 @@ TEST_CASE("JavaScript Scope cleans callbacks in reverse order", "[scripting][sco
 	MustRun(*runtime, R"(
 		const scope = Scope.new();
 		const order = [];
-		scope.Add(() => order.push(1));
-		scope.Add(() => order.push(2));
+		scope.AddBulk(() => order.push(1), () => order.push(2));
 		if (scope.Count() !== 2 || !scope.Clean() || order[0] !== 2 || order[1] !== 1) {
 			throw new Error('Scope cleanup failed');
 		}

@@ -150,10 +150,14 @@ namespace engine::script {
 				luaL_errorL(state, "Scope is destroyed");
 				return 0;
 			}
-			luaL_checktype(state, 2, LUA_TTABLE);
-			const int count = lua_objlen(state, 2);
-			for (int index = 1; index <= count; index++) {
-				lua_rawgeti(state, 2, index);
+			const int first = lua_istable(state, 2) ? 2 : 1;
+			const int last = lua_istable(state, 2) ? lua_objlen(state, 2) : lua_gettop(state) - 1;
+			for (int index = 1; index <= last; index++) {
+				if (first == 2) {
+					lua_rawgeti(state, 2, index);
+				} else {
+					lua_pushvalue(state, index + 1);
+				}
 				const ScopeItem item = RetainItem(state, -1);
 				lua_pop(state, 1);
 				ContextOf(state).Scopes.Add(scope.Handle, item);

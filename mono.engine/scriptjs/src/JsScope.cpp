@@ -103,7 +103,15 @@ namespace engine::script {
 		}
 
 		JSValue ScopeAddBulk(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
-			if (argc < 1 || !JS_IsArray(argv[0])) return JS_ThrowTypeError(context, "Scope.AddBulk expects an array");
+			if (argc < 1) return JS_ThrowTypeError(context, "Scope.AddBulk expects resources");
+			if (!JS_IsArray(argv[0])) {
+				for (int index = 0; index < argc; index++) {
+					JSValue result = ScopeAdd(context, self, 1, &argv[index]);
+					if (JS_IsException(result)) return result;
+					JS_FreeValue(context, result);
+				}
+				return JS_DupValue(context, self);
+			}
 			uint32_t count = 0;
 			JSValue length = JS_GetPropertyStr(context, argv[0], "length");
 			const int converted = JS_ToUint32(context, &count, length);

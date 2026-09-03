@@ -1085,6 +1085,7 @@ declare const Random: {
 declare interface Scope {
 	Add(resource: unknown): this;
 	AddBulk(resources: unknown[]): this;
+	AddBulk(...resources: unknown[]): this;
 	Remove(resource: unknown): boolean;
 	Clean(): boolean;
 	Destroy(): boolean;
