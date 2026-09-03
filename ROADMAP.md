@@ -71,7 +71,7 @@ c. classes
 * Separate per-scripting-bindings into sub-bars as well so if one specific script binding has yielded the luau loop, we can obviously see that.
 - [x] optimise remaining physics bottlenecks using StressPhysics demo
 - [x] ensure chunked physics world implementation is correct and optimised (world is split into chunks, all physics computations happen in the chunks on separate threads in parallel, all computations are also batch computed, chunk borders - edges and corners - are computed separately or handled post center).
-- [_] persistent contact manifolds
+- [x] persistent contact manifolds
 
 ### v0.23.1
 

@@ -1,12 +1,15 @@
+#include <engine/core/Metrics.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -45,6 +48,7 @@ TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.ecs.changechannel")
 
 using engine::core::CFrame;
+using engine::core::Metrics;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -60,6 +64,7 @@ using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::ShapeKind;
 using engine::scene::Transform;
+using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
 
 namespace {
@@ -133,6 +138,61 @@ namespace {
 		std::sort(named.begin(), named.end());
 		return named;
 	}
+
+	struct GridFallbackResult {
+		std::vector<std::pair<uint64_t, uint64_t>> Pairs;
+		bool TreeActive = true;
+		bool ParallelUsed = false;
+	};
+
+	class ScopedJobs {
+	  public:
+		explicit ScopedJobs(unsigned workers) : PreviousWorkers(engine::parallel::Jobs::WorkerCount()) {
+			engine::parallel::Jobs::Stop();
+			if (workers != 0) {
+				engine::parallel::Jobs::Start(workers);
+			}
+		}
+
+		~ScopedJobs() {
+			engine::parallel::Jobs::Stop();
+			if (PreviousWorkers != 0) {
+				engine::parallel::Jobs::Start(PreviousWorkers);
+			}
+		}
+
+	  private:
+		unsigned PreviousWorkers = 0;
+	};
+
+	GridFallbackResult PairsAfterGridFallback(unsigned workers) {
+		ScopedJobs jobs{workers};
+
+		Store store("broadphase.parallel-grid");
+		PreparePhysicsWorld(store, UNIT_CELL);
+		for (size_t index = 0; index < HashGrid::PARALLEL_MINIMUM_PROXIES / 2; index++) {
+			const float x = static_cast<float>(index) * 3.0f;
+			Place(store, Placed{"", Vector3{x, 0.0f, 0.0f}});
+			Place(store, Placed{"", Vector3{x + 0.2f, 0.0f, 0.0f}});
+		}
+
+		// The first synchronisation builds the dynamic tree. The second has no
+		// compatible prior recovery stream, so it deliberately exercises the
+		// large dynamic grid fallback and its dispatcher adapter.
+		Step(store);
+		Place(store, Placed{"", Vector3{100000.0f, 0.0f, 0.0f}});
+		Metrics::Clear();
+		Step(store);
+
+		GridFallbackResult result;
+		result.TreeActive = PipelineInternals::DynamicTreeActive(WorldOf(store));
+		const auto parallelUsed = Metrics::GetGauge("spatial.grid.parallel.used");
+		result.ParallelUsed = parallelUsed.has_value() && parallelUsed->Value == 1.0;
+		for (const CandidatePair &pair : WorldOf(store).Pairs()) {
+			result.Pairs.emplace_back(pair.A.Id, pair.B.Id);
+		}
+		return result;
+	}
 }
 
 TEST_CASE("two overlapping colliders are one candidate pair", "[physics][broadphase]") {
@@ -149,6 +209,66 @@ TEST_CASE("two overlapping colliders are one candidate pair", "[physics][broadph
 	REQUIRE(pairs.size() == 1);
 	CHECK(pairs[0].A.Id == std::min(left.Id, right.Id));
 	CHECK(pairs[0].B.Id == std::max(left.Id, right.Id));
+}
+
+TEST_CASE(
+	"large dynamic grid fallback is deterministic with and without workers", "[physics][broadphase][parallel]"
+) {
+	const GridFallbackResult inlineResult = PairsAfterGridFallback(0);
+	const GridFallbackResult pooledResult = PairsAfterGridFallback(2);
+
+	REQUIRE_FALSE(inlineResult.TreeActive);
+	REQUIRE_FALSE(pooledResult.TreeActive);
+	REQUIRE_FALSE(inlineResult.ParallelUsed);
+	REQUIRE(pooledResult.ParallelUsed);
+	REQUIRE(inlineResult.Pairs.size() == HashGrid::PARALLEL_MINIMUM_PROXIES / 2);
+	REQUIRE(pooledResult.Pairs == inlineResult.Pairs);
+}
+
+TEST_CASE(
+	"broadphase memory shrinks live rows and bounds retained batch storage", "[physics][broadphase][memory]"
+) {
+	ScopedJobs jobs{2};
+	Store store("broadphase.memory");
+	PreparePhysicsWorld(store, 2.0f);
+	std::vector<Entity> bodies;
+	const auto grow = [&] {
+		bodies.clear();
+		bodies.reserve(2048);
+		for (size_t pair = 0; pair < 1024; pair++) {
+			const float x = static_cast<float>(pair) * 4.0f;
+			bodies.push_back(Place(store, Placed{"", Vector3{x, 0.0f, 0.0f}}));
+			bodies.push_back(Place(store, Placed{"", Vector3{x + 0.2f, 0.0f, 0.0f}}));
+		}
+	};
+	const auto forceGrid = [&] {
+		Step(store);
+		bodies.push_back(Place(store, Placed{"", Vector3{100000.0f, 0.0f, 0.0f}}));
+		Step(store);
+	};
+
+	grow();
+	forceGrid();
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	const auto warmed = world.MemoryStats();
+	REQUIRE(world.Pairs().size() == 1024);
+	const auto &batches = PipelineInternals::SourcedPairBatches(world);
+	REQUIRE(batches.size() >= 2);
+	REQUIRE(std::any_of(batches.begin(), batches.end(), [](const auto &batch) { return !batch.empty(); }));
+
+	for (Entity entity : bodies) {
+		store.Destroy(entity);
+	}
+	Step(store);
+	const auto shrunk = world.MemoryStats();
+	REQUIRE(world.Pairs().empty());
+	REQUIRE(shrunk.Broadphase().LiveBytes < warmed.Broadphase().LiveBytes);
+
+	grow();
+	forceGrid();
+	const auto regrown = world.MemoryStats();
+	REQUIRE(world.Pairs().size() == 1024);
+	REQUIRE(regrown.Broadphase().RetainedBytes <= warmed.Broadphase().RetainedBytes);
 }
 
 TEST_CASE("a body is never paired with itself", "[physics][broadphase]") {
@@ -520,4 +640,57 @@ TEST_CASE("an empty world produces no pairs and no candidates", "[physics][broad
 	CHECK(WorldOf(store).DynamicColliders() == 0);
 	CHECK(WorldOf(store).StaticColliders() == 0);
 	CHECK(WorldOf(store).Pairs().empty());
+	CHECK_FALSE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	Step(store);
+	CHECK(WorldOf(store).Pairs().empty());
+	CHECK_FALSE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+}
+
+TEST_CASE("the dynamic index falls back to the grid then recovers the tree", "[physics][broadphase]") {
+	Store store("broadphase.dynamicindexrecovery");
+	PreparePhysicsWorld(store, UNIT_CELL);
+	const Entity first = Place(store, Placed{"first", Vector3::Zero});
+	const Entity second = Place(store, Placed{"second", Vector3{0.5f, 0.0f, 0.0f}});
+	Step(store);
+	REQUIRE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	REQUIRE(WorldOf(store).Pairs().size() == 1);
+
+	store.Set<Transform>(first, Transform{CFrame{Vector3{10.0f, 0.0f, 0.0f}}});
+	store.Set<Transform>(second, Transform{CFrame{Vector3{10.5f, 0.0f, 0.0f}}});
+	Step(store);
+	REQUIRE_FALSE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	REQUIRE(WorldOf(store).Pairs().size() == 1);
+
+	for (size_t tick = 0; tick < 32; tick++) {
+		Step(store);
+	}
+	CHECK(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	CHECK(WorldOf(store).Pairs().size() == 1);
+}
+
+TEST_CASE("size-only motion delays dynamic tree recovery", "[physics][broadphase]") {
+	Store store("broadphase.dynamicindexsize");
+	PreparePhysicsWorld(store, UNIT_CELL);
+	const Entity first = Place(store, Placed{"first", Vector3::Zero});
+	const Entity second = Place(store, Placed{"second", Vector3{0.5f, 0.0f, 0.0f}});
+	Step(store);
+	REQUIRE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+
+	Collider firstCollider = *store.Get<Collider>(first);
+	Collider secondCollider = *store.Get<Collider>(second);
+	firstCollider.Extent = Vector3{2.0f, 2.0f, 2.0f};
+	secondCollider.Extent = Vector3{2.0f, 2.0f, 2.0f};
+	store.Set<Collider>(first, firstCollider);
+	store.Set<Collider>(second, secondCollider);
+	Step(store);
+	REQUIRE_FALSE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	REQUIRE(WorldOf(store).Pairs().size() == 1);
+
+	for (size_t tick = 0; tick < 31; tick++) {
+		Step(store);
+	}
+	CHECK_FALSE(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	Step(store);
+	CHECK(PipelineInternals::DynamicTreeActive(WorldOf(store)));
+	CHECK(WorldOf(store).Pairs().size() == 1);
 }

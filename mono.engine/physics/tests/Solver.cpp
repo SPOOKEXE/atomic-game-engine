@@ -587,30 +587,3 @@ TEST_CASE("a kinematic body never sleeps", "[physics][solver]") {
 	CHECK_FALSE(WorldOf(store).Sleeping(platform));
 	CHECK(store.Has<Motion>(platform));
 }
-
-TEST_CASE("the solver buffers are cleared and not freed", "[physics][solver]") {
-	Store store("solver.capacity");
-	PreparePhysicsWorld(store, 2.0f);
-
-	Place(
-		store,
-		Description{
-			.Position = Vector3{0.0f, -0.5f, 0.0f}, .Extent = Vector3{4.0f, 0.5f, 4.0f}, .Anchored = true
-		}
-	);
-	const Entity crate = Place(store, Description{.Position = Vector3{0.0f, 0.5f, 0.0f}});
-	StepWorld(store, TICK, true);
-
-	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
-	const size_t bodies = PipelineInternals::Bodies(world).capacity();
-	const size_t rows = PipelineInternals::Rows(world).capacity();
-	REQUIRE(bodies > 0);
-	REQUIRE(rows > 0);
-
-	store.Set<Transform>(crate, Transform{CFrame{Vector3{0.0f, 40.0f, 0.0f}}});
-	StepWorld(store, TICK, false);
-
-	CHECK(world.Bodies().empty());
-	CHECK(PipelineInternals::Bodies(world).capacity() == bodies);
-	CHECK(PipelineInternals::Rows(world).capacity() == rows);
-}

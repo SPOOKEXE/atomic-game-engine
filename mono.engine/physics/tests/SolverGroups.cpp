@@ -48,6 +48,7 @@ using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::physics::BroadPhase;
 using engine::physics::ContactImpulse;
+using engine::physics::ContactManifold;
 using engine::physics::ContactRow;
 using engine::physics::IntegrateMotion;
 using engine::physics::NarrowPhase;
@@ -58,6 +59,7 @@ using engine::physics::PreparePhysicsWorld;
 using engine::physics::Publish;
 using engine::physics::Solve;
 using engine::physics::SolverBody;
+using engine::physics::SolverColor;
 using engine::physics::SolverGroup;
 using engine::physics::SyncBroadphase;
 using engine::scene::BodyKind;
@@ -77,7 +79,46 @@ namespace {
 	//
 	// Every box is a metre cube, unanchored and dynamic, so every contact in the
 	// scene has two movable bodies and the border set is not trivially empty.
-	std::unique_ptr<Store> Spread(size_t columns, size_t height) {
+	void
+	AddSpreadBodies(Store &store, size_t columns, size_t height, std::vector<Entity> *created = nullptr) {
+		if (created != nullptr) {
+			created->reserve(created->size() + columns * height);
+		}
+		for (size_t column = 0; column < columns; column++) {
+			// A lattice rather than random placement, so the case is the same
+			// scene every run and a failure can be looked at.
+			const auto x = static_cast<float>(column % 16) * 6.0f - 48.0f;
+			const auto z = static_cast<float>(column / 16) * 6.0f - 48.0f;
+
+			for (size_t level = 0; level < height; level++) {
+				const Entity box = store.Create();
+				const auto y = static_cast<float>(level) * 0.98f + 0.49f;
+				store.Set<Transform>(box, Transform{CFrame{Vector3{x, y, z}}});
+
+				// **Both, and the tag is not optional.** `FactsFor` asks whether
+				// the world may move this and hands back an infinite mass when
+				// the answer is no - so a row with a `Motion` and no tag solves
+				// as a wall, every contact resolves to nothing, and the group
+				// count this file measures comes back zero.
+				store.Set<Simulated>(box, Simulated{});
+				store.Set<Motion>(box, Motion{});
+
+				RigidBody body;
+				body.Kind = BodyKind::Dynamic;
+				body.Mass = 1.0f;
+				store.Set<RigidBody>(box, body);
+
+				Collider shape;
+				shape.Extent = Vector3{0.5f, 0.5f, 0.5f};
+				store.Set<Collider>(box, shape);
+				if (created != nullptr) {
+					created->push_back(box);
+				}
+			}
+		}
+	}
+
+	std::unique_ptr<Store> Spread(size_t columns, size_t height, std::vector<Entity> *created = nullptr) {
 		auto owned = std::make_unique<Store>("physics.solvergroups");
 		Store *store = owned.get();
 		PreparePhysicsWorld(*store, 1.0f);
@@ -92,36 +133,67 @@ namespace {
 		ground.Extent = Vector3{128.0f, 1.0f, 128.0f};
 		store->Set<Collider>(floor, ground);
 
-		for (size_t column = 0; column < columns; column++) {
-			// A lattice rather than random placement, so the case is the same
-			// scene every run and a failure can be looked at.
-			const auto x = static_cast<float>(column % 16) * 6.0f - 48.0f;
-			const auto z = static_cast<float>(column / 16) * 6.0f - 48.0f;
+		AddSpreadBodies(*store, columns, height, created);
 
-			for (size_t level = 0; level < height; level++) {
-				const Entity box = store->Create();
-				const auto y = static_cast<float>(level) * 0.98f + 0.49f;
-				store->Set<Transform>(box, Transform{CFrame{Vector3{x, y, z}}});
+		return owned;
+	}
 
-				// **Both, and the tag is not optional.** `FactsFor` asks whether
-				// the world may move this and hands back an infinite mass when
-				// the answer is no - so a row with a `Motion` and no tag solves
-				// as a wall, every contact resolves to nothing, and the group
-				// count this file measures comes back zero.
-				store->Set<Simulated>(box, Simulated{});
-				store->Set<Motion>(box, Motion{});
+	Entity AddMovableBox(Store &store, Vector3 position) {
+		const Entity box = store.Create();
+		store.Set<Transform>(box, Transform{CFrame{position}});
+		store.Set<Simulated>(box, Simulated{});
+		store.Set<Motion>(box, Motion{});
+		RigidBody body;
+		body.Kind = BodyKind::Dynamic;
+		body.Mass = 1.0f;
+		store.Set<RigidBody>(box, body);
+		Collider shape;
+		shape.Extent = Vector3{0.5f, 0.5f, 0.5f};
+		store.Set<Collider>(box, shape);
+		return box;
+	}
 
-				RigidBody body;
-				body.Kind = BodyKind::Dynamic;
-				body.Mass = 1.0f;
-				store->Set<RigidBody>(box, body);
+	std::unique_ptr<Store> DenseConnected(size_t count) {
+		auto owned = std::make_unique<Store>("physics.solvergroups.dense");
+		Store &store = *owned;
+		PreparePhysicsWorld(store, 1.0f);
+		for (size_t at = 0; at < count; at++) {
+			const Entity body = store.Create();
+			store.Set<Transform>(body, Transform{CFrame{Vector3::Zero}});
+			store.Set<Simulated>(body, Simulated{});
+			store.Set<Motion>(body, Motion{});
+			store.Set<RigidBody>(body, RigidBody{});
+			Collider collider;
+			collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+			store.Set<Collider>(body, collider);
+		}
+		return owned;
+	}
 
-				Collider shape;
-				shape.Extent = Vector3{0.5f, 0.5f, 0.5f};
-				store->Set<Collider>(box, shape);
+	std::unique_ptr<Store> ConnectedLattice(size_t side, Entity *firstBody = nullptr) {
+		auto owned = std::make_unique<Store>("physics.solvergroups.lattice");
+		Store &store = *owned;
+		PreparePhysicsWorld(store, 1.0f);
+		for (size_t z = 0; z < side; z++) {
+			for (size_t x = 0; x < side; x++) {
+				const Entity body = store.Create();
+				if (x == 0 && z == 0 && firstBody != nullptr) {
+					*firstBody = body;
+				}
+				store.Set<Transform>(
+					body,
+					Transform{
+						CFrame{Vector3{static_cast<float>(x) * 0.98f, 0.0f, static_cast<float>(z) * 0.98f}}
+					}
+				);
+				store.Set<Simulated>(body, Simulated{});
+				store.Set<Motion>(body, Motion{});
+				store.Set<RigidBody>(body, RigidBody{});
+				Collider collider;
+				collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+				store.Set<Collider>(body, collider);
 			}
 		}
-
 		return owned;
 	}
 
@@ -221,25 +293,189 @@ TEST_CASE("a scene above the threshold is cut into several groups", "[solvergrou
 	// function of `SOLVE_GROUP_TARGET` and of the scene - only that a wide scene
 	// produces more than one run, because one run is a solve that cannot use the
 	// machine however many workers it is handed.
-	std::unique_ptr<Store> owned = Spread(96, 8);
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
 	Store &store = *owned;
 	StepOnce(store);
 
 	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
 	REQUIRE(world.RowCount() >= PARALLEL_SOLVE_ROWS);
 
-	CHECK(world.SolverGroupCount() > 1);
-	CHECK(world.SolverChunkSize() > 0.0f);
+	CHECK(PipelineInternals::SolverColors(world).size() > 1);
+	CHECK(world.SolverChunkSize() == 0.0f);
 }
 
-TEST_CASE("no two groups name one movable body", "[solvergroups]") {
+TEST_CASE("independent tall stacks share a floor without joining islands", "[solvergroups]") {
+	// One component per column even when a column is tall. The shared floor is
+	// read-only, so it must not turn those independent dynamic islands into a
+	// colour candidate.
+	std::unique_ptr<Store> owned = Spread(256, 16);
+	Store &store = *owned;
+	Metrics::Clear();
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	CHECK(world.RowCount() >= PARALLEL_SOLVE_ROWS);
+	CHECK(PipelineInternals::SolverColors(world).empty());
+	CHECK(world.UsesIslandSchedule());
+	CHECK(world.ConstraintIslandCount() == 256);
+	CHECK(world.SolverChunkSize() == 0.0f);
+
+	StepOnce(store);
+	const auto reuse = Metrics::Get("physics.solve.island.topology-reuse");
+	REQUIRE(reuse.has_value());
+	CHECK(reuse->Value == 1.0);
+	Metrics::Clear();
+}
+
+TEST_CASE("solver memory shrinks live topology and bounds retained regrowth", "[solvergroups][memory]") {
+	std::vector<Entity> bodies;
+	std::unique_ptr<Store> owned = Spread(256, 16, &bodies);
+	Store &store = *owned;
+
+	Metrics::Clear();
+	StepOnce(store);
+	Publish(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	const auto warmed = world.MemoryStats();
+	REQUIRE(world.RowCount() >= PARALLEL_SOLVE_ROWS);
+	REQUIRE(world.UsesIslandSchedule());
+	REQUIRE(world.ConstraintIslandCount() == 256);
+	REQUIRE(world.SolverIslandRetainedBytes() > 0);
+	const auto totalRetained = Metrics::GetGauge("physics.memory.total.retained-bytes");
+	REQUIRE(totalRetained.has_value());
+	REQUIRE(totalRetained->Value == static_cast<double>(warmed.Total().RetainedBytes));
+
+	for (Entity body : bodies) {
+		store.Destroy(body);
+	}
+	StepOnce(store);
+	Publish(store);
+	const auto shrunk = world.MemoryStats();
+	CHECK(world.RowCount() == 0);
+	CHECK_FALSE(world.UsesIslandSchedule());
+	CHECK(shrunk.Solver.LiveBytes < warmed.Solver.LiveBytes);
+
+	bodies.clear();
+	AddSpreadBodies(store, 256, 16, &bodies);
+	StepOnce(store);
+	Publish(store);
+	const auto regrown = world.MemoryStats();
+	CHECK(world.RowCount() >= PARALLEL_SOLVE_ROWS);
+	CHECK(world.UsesIslandSchedule());
+	CHECK(world.ConstraintIslandCount() == 256);
+	CHECK(regrown.Solver.RetainedBytes <= warmed.Solver.RetainedBytes);
+	Metrics::Clear();
+}
+
+TEST_CASE("island groups cover every row once and never share a movable body", "[solvergroups]") {
+	std::unique_ptr<Store> owned = Spread(256, 16);
+	Store &store = *owned;
+	StepOnce(store);
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(world.UsesIslandSchedule());
+	REQUIRE(world.BorderRowCount() == 0);
+	const std::vector<ContactRow> &rows = PipelineInternals::Rows(world);
+	const std::vector<SolverGroup> &groups = PipelineInternals::SolverGroups(world);
+	const std::vector<SolverBody> &bodies = PipelineInternals::Bodies(world);
+	std::vector<uint8_t> covered(world.RowCount(), 0);
+	std::vector<uint32_t> claimedBy(bodies.size(), UINT32_MAX);
+
+	for (size_t group = 0; group < groups.size(); group++) {
+		const SolverGroup run = groups[group];
+		for (uint32_t at = run.FirstRow; at < run.FirstRow + run.RowCount; at++) {
+			REQUIRE(at < world.RowCount());
+			covered[at]++;
+			for (uint32_t body : {rows[at].First, rows[at].Second}) {
+				if (!bodies[body].Movable) {
+					continue;
+				}
+				if (claimedBy[body] == UINT32_MAX) {
+					claimedBy[body] = static_cast<uint32_t>(group);
+				}
+				CHECK(claimedBy[body] == group);
+			}
+		}
+	}
+
+	CHECK(std::all_of(covered.begin(), covered.end(), [](uint8_t count) { return count == 1; }));
+	const auto selected = Metrics::GetGauge("physics.solve.island.selected");
+	const auto count = Metrics::GetGauge("physics.solve.islands");
+	const auto retained = Metrics::GetGauge("physics.solve.island.retained-bytes");
+	REQUIRE(selected.has_value());
+	REQUIRE(count.has_value());
+	REQUIRE(retained.has_value());
+	CHECK(selected->Value == 1.0);
+	CHECK(count->Value == static_cast<double>(world.ConstraintIslandCount()));
+	CHECK(retained->Value == static_cast<double>(world.SolverIslandRetainedBytes()));
+}
+
+TEST_CASE("a movable bridge merges and removing it splits cached islands", "[solvergroups]") {
+	std::unique_ptr<Store> owned = Spread(256, 16);
+	Store &store = *owned;
+	StepOnce(store);
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(world.UsesIslandSchedule());
+	REQUIRE(world.ConstraintIslandCount() == 256);
+	const std::vector<SolverBody> &bodies = PipelineInternals::Bodies(world);
+	REQUIRE(bodies.size() > 17);
+	REQUIRE(bodies[1].Movable);
+	REQUIRE(bodies[17].Movable);
+
+	std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(world);
+	const auto source = std::find_if(manifolds.begin(), manifolds.end(), [](const ContactManifold &manifold) {
+		return !manifold.Trigger && manifold.PointCount != 0;
+	});
+	REQUIRE(source != manifolds.end());
+	ContactManifold bridge = *source;
+	bridge.A = bodies[1].Owner;
+	bridge.B = bodies[17].Owner;
+	const auto lessPair = [](const ContactManifold &left, const ContactManifold &right) {
+		return left.A.Id != right.A.Id ? left.A.Id < right.A.Id : left.B.Id < right.B.Id;
+	};
+	const size_t bridgeIndex = static_cast<size_t>(
+		std::lower_bound(manifolds.begin(), manifolds.end(), bridge, lessPair) - manifolds.begin()
+	);
+
+	Metrics::Clear();
+	manifolds.insert(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex), bridge);
+	Solve(store);
+	CHECK(world.UsesIslandSchedule());
+	CHECK(world.ConstraintIslandCount() == 255);
+	const auto merged = Metrics::Get("physics.solve.island.topology-rebuild");
+	REQUIRE(merged.has_value());
+	CHECK(merged->Value == 1.0);
+	const size_t highWaterBytes = world.SolverIslandRetainedBytes();
+
+	Metrics::Clear();
+	manifolds.erase(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex));
+	Solve(store);
+	CHECK(world.UsesIslandSchedule());
+	CHECK(world.ConstraintIslandCount() == 256);
+	const auto split = Metrics::Get("physics.solve.island.topology-rebuild");
+	REQUIRE(split.has_value());
+	CHECK(split->Value == 1.0);
+
+	for (size_t cycle = 0; cycle < 3; cycle++) {
+		manifolds.insert(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex), bridge);
+		Solve(store);
+		CHECK(world.SolverIslandRetainedBytes() <= highWaterBytes);
+
+		manifolds.erase(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex));
+		Solve(store);
+		CHECK(world.SolverIslandRetainedBytes() <= highWaterBytes);
+	}
+	Metrics::Clear();
+}
+
+TEST_CASE("no two manifold blocks in a colour name one movable body", "[solvergroups]") {
 	// **The whole correctness argument, asserted directly.** Two runs sweeping
 	// at once write the bodies they name, so a body in two runs is a race and a
 	// result that depends on which worker got there first. An immovable body is
-	// exempt because a sweep never writes one - see `ApplyImpulse` - and the
-	// floor below is in every stack's lowest contact, so a rule about all bodies
-	// rather than movable ones would put this scene in one group.
-	std::unique_ptr<Store> owned = Spread(96, 8);
+	// exempt because a sweep never writes one - see `ApplyImpulse`. This lattice
+	// has only movable contacts, so its multi-wave plan exercises the
+	// actual write-disjointness rule directly.
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
 	Store &store = *owned;
 	StepOnce(store);
 
@@ -247,30 +483,338 @@ TEST_CASE("no two groups name one movable body", "[solvergroups]") {
 	const std::vector<ContactRow> &rows = PipelineInternals::Rows(world);
 	const std::vector<SolverBody> &bodies = PipelineInternals::Bodies(world);
 	const std::vector<SolverGroup> &groups = PipelineInternals::SolverGroups(world);
-	REQUIRE(groups.size() > 1);
+	const std::vector<SolverColor> &colors = PipelineInternals::SolverColors(world);
+	REQUIRE(colors.size() > 1);
 
 	// Which group first claimed each movable body. A second claim by a different
 	// group is the failure.
 	std::vector<size_t> claimedBy(bodies.size(), SIZE_MAX);
 	size_t movableClaims = 0;
 
-	for (size_t group = 0; group < groups.size(); group++) {
-		for (uint32_t body : BodiesIn(rows, groups[group])) {
-			if (!bodies[body].Movable) {
-				continue;
+	for (size_t color = 0; color < colors.size(); color++) {
+		const SolverColor wave = colors[color];
+		for (size_t group = wave.FirstGroup; group < wave.FirstGroup + wave.GroupCount; group++) {
+			for (uint32_t body : BodiesIn(rows, groups[group])) {
+				if (!bodies[body].Movable) {
+					continue;
+				}
+				movableClaims++;
+				if (claimedBy[body] == SIZE_MAX) {
+					claimedBy[body] = color;
+					continue;
+				}
+				CHECK(claimedBy[body] != color);
 			}
-			movableClaims++;
-			if (claimedBy[body] == SIZE_MAX) {
-				claimedBy[body] = group;
-				continue;
-			}
-			CHECK(claimedBy[body] == group);
 		}
 	}
 
 	// A scene where nothing was movable would pass the loop above without
 	// testing anything.
 	CHECK(movableClaims > 0);
+}
+
+TEST_CASE("a colour keeps every manifold point block in one worker group", "[solvergroups]") {
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
+	Store &store = *owned;
+	StepOnce(store);
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	const std::vector<SolverColor> &colors = PipelineInternals::SolverColors(world);
+	const std::vector<SolverGroup> &groups = PipelineInternals::SolverGroups(world);
+	const std::vector<uint32_t> &colorOf = PipelineInternals::SolverColorOfManifold(world);
+	const std::vector<uint32_t> &starts = PipelineInternals::RowStartOfManifold(world);
+	const auto manifolds = world.Manifolds();
+	REQUIRE(!colors.empty());
+	REQUIRE(colorOf.size() == manifolds.size());
+
+	for (size_t manifold = 0; manifold < manifolds.size(); manifold++) {
+		if (colorOf[manifold] == UINT32_MAX || manifolds[manifold].PointCount == 0) {
+			continue;
+		}
+		const SolverColor wave = colors[colorOf[manifold]];
+		const auto found = std::find_if(
+			groups.begin() + wave.FirstGroup,
+			groups.begin() + wave.FirstGroup + wave.GroupCount,
+			[&starts, &manifolds, manifold](const SolverGroup &group) {
+				return group.FirstRow == starts[manifold] && group.RowCount == manifolds[manifold].PointCount;
+			}
+		);
+		CHECK(found != groups.begin() + wave.FirstGroup + wave.GroupCount);
+	}
+}
+
+TEST_CASE("a coloured solve propagates impulses across several wave boundaries", "[solvergroups]") {
+	// The first box closes into the chain. A later box cannot acquire that
+	// velocity unless successive colour waves exchange the previous wave's
+	// result during the same solve, which guards against batching all sweeps of
+	// one colour ahead of its neighbours.
+	Entity first;
+	std::unique_ptr<Store> owned = ConnectedLattice(64, &first);
+	Store &store = *owned;
+	store.GetMutable<Motion>(first)->Linear.X = 10.0f;
+	StepOnce(store);
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(PipelineInternals::SolverColors(world).size() > 1);
+	const auto retained = Metrics::GetGauge("physics.solve.color.retained-bytes");
+	REQUIRE(retained.has_value());
+	CHECK(retained->Value > 0.0);
+	const std::vector<SolverBody> &bodies = PipelineInternals::Bodies(world);
+	REQUIRE(bodies.size() > 4);
+	CHECK(bodies[4].LinearVelocity.X > 0.001f);
+}
+
+TEST_CASE("an unchanged contact topology reuses its deterministic colours", "[solvergroups]") {
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
+	Store &store = *owned;
+	Metrics::Clear();
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	const std::vector<uint32_t> first = PipelineInternals::SolverColorOfManifold(world);
+	REQUIRE(!first.empty());
+
+	StepOnce(store);
+	CHECK(PipelineInternals::SolverColorOfManifold(world) == first);
+	const auto reuse = Metrics::Get("physics.solve.color.topology-reuse");
+	REQUIRE(reuse.has_value());
+	CHECK(reuse->Value == 1.0);
+	Metrics::Clear();
+}
+
+TEST_CASE("a point-count change retains colours and recomputes manifold placement", "[solvergroups]") {
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
+	Store &store = *owned;
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	const std::vector<uint32_t> colours = PipelineInternals::SolverColorOfManifold(world);
+	const size_t rows = world.RowCount();
+
+	std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(world);
+	auto changed = std::find_if(manifolds.begin(), manifolds.end(), [](const ContactManifold &manifold) {
+		return !manifold.Trigger && manifold.PointCount > 1;
+	});
+	REQUIRE(changed != manifolds.end());
+	changed->PointCount--;
+
+	Metrics::Clear();
+	Solve(store);
+	CHECK(PipelineInternals::SolverColorOfManifold(world) == colours);
+	CHECK(world.RowCount() == rows - 1);
+	const auto reuse = Metrics::Get("physics.solve.color.topology-reuse");
+	REQUIRE(reuse.has_value());
+	CHECK(reuse->Value == 1.0);
+
+	std::vector<uint32_t> groupRows;
+	for (const SolverGroup &group : PipelineInternals::SolverGroups(world)) {
+		groupRows.push_back(group.RowCount);
+	}
+	REQUIRE(!groupRows.empty());
+	std::sort(groupRows.begin(), groupRows.end());
+	const auto groupMinimum = Metrics::GetGauge("physics.solve.group-rows.min");
+	const auto groupMedian = Metrics::GetGauge("physics.solve.group-rows.median");
+	const auto groupMaximum = Metrics::GetGauge("physics.solve.group-rows.max");
+	REQUIRE(groupMinimum.has_value());
+	REQUIRE(groupMedian.has_value());
+	REQUIRE(groupMaximum.has_value());
+	CHECK(groupMinimum->Value == groupRows.front());
+	CHECK(groupMedian->Value == groupRows[groupRows.size() / 2]);
+	CHECK(groupMaximum->Value == groupRows.back());
+
+	std::vector<uint32_t> colorRows;
+	for (const SolverColor &color : PipelineInternals::SolverColors(world)) {
+		colorRows.push_back(color.RowCount);
+	}
+	REQUIRE(!colorRows.empty());
+	std::sort(colorRows.begin(), colorRows.end());
+	const auto colorMedian = Metrics::GetGauge("physics.solve.color-rows.median");
+	REQUIRE(colorMedian.has_value());
+	CHECK(colorMedian->Value == colorRows[colorRows.size() / 2]);
+	Metrics::Clear();
+}
+
+TEST_CASE("the colour threshold is re-evaluated when point counts cross it", "[solvergroups]") {
+	// The manifold owners never change. Only the number of rows they contribute
+	// crosses the fixed activation threshold, first entering and then leaving the
+	// coloured path.
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
+	Store &store = *owned;
+	SyncBroadphase(store);
+	BroadPhase(store);
+	NarrowPhase(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(world);
+	std::vector<uint32_t> pointCounts;
+	pointCounts.reserve(manifolds.size());
+	for (size_t at = 0; at < manifolds.size(); at++) {
+		pointCounts.push_back(manifolds[at].PointCount);
+		manifolds[at].PointCount = at % 2 == 0 ? 0 : 1;
+	}
+
+	Solve(store);
+	CHECK(world.RowCount() >= PARALLEL_SOLVE_ROWS);
+	CHECK(world.RowCount() < engine::physics::SOLVER_COLOR_MIN_ROWS);
+	CHECK(PipelineInternals::SolverColors(world).empty());
+	CHECK(!PipelineInternals::SolverTopology(world).empty());
+	CHECK(world.SolverChunkSize() > 0.0f);
+
+	for (size_t at = 0; at < manifolds.size(); at++) {
+		manifolds[at].PointCount = pointCounts[at];
+	}
+	Metrics::Clear();
+	Solve(store);
+	CHECK(world.RowCount() >= engine::physics::SOLVER_COLOR_MIN_ROWS);
+	CHECK(PipelineInternals::SolverColors(world).size() > 1);
+	const auto activated = Metrics::Get("physics.solve.color.topology-rebuild");
+	REQUIRE(activated.has_value());
+	CHECK(activated->Value == 1.0);
+
+	for (size_t at = 0; at < manifolds.size(); at++) {
+		manifolds[at].PointCount = at % 2 == 0 ? 0 : 1;
+	}
+	Solve(store);
+	CHECK(world.RowCount() < engine::physics::SOLVER_COLOR_MIN_ROWS);
+	CHECK(PipelineInternals::SolverColors(world).empty());
+	CHECK(world.SolverChunkSize() > 0.0f);
+	Metrics::Clear();
+}
+
+TEST_CASE("trigger and eligibility changes rebuild the exact topology key", "[solvergroups]") {
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
+	Store &store = *owned;
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(world);
+	REQUIRE(!manifolds.empty());
+
+	Metrics::Clear();
+	manifolds.front().Trigger = true;
+	Solve(store);
+	const auto triggerRebuild = Metrics::Get("physics.solve.color.topology-rebuild");
+	REQUIRE(triggerRebuild.has_value());
+	CHECK(triggerRebuild->Value == 1.0);
+
+	Metrics::Clear();
+	const Entity changed = manifolds.back().A;
+	store.Remove<Simulated>(changed);
+	Solve(store);
+	const auto eligibilityRebuild = Metrics::Get("physics.solve.color.topology-rebuild");
+	REQUIRE(eligibilityRebuild.has_value());
+	CHECK(eligibilityRebuild->Value == 1.0);
+	Metrics::Clear();
+}
+
+TEST_CASE("a replacement entity invalidates a retained colour key", "[solvergroups]") {
+	std::unique_ptr<Store> owned = ConnectedLattice(64);
+	Store &store = *owned;
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	const Entity previous = world.Manifolds().back().A;
+	const Transform placement = *store.Get<Transform>(previous);
+	store.Destroy(previous);
+
+	const Entity replacement = store.Create();
+	CHECK(replacement.Id != previous.Id);
+	store.Set<Transform>(replacement, placement);
+	store.Set<Simulated>(replacement, Simulated{});
+	store.Set<Motion>(replacement, Motion{});
+	store.Set<RigidBody>(replacement, RigidBody{});
+	Collider collider;
+	collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+	store.Set<Collider>(replacement, collider);
+
+	Metrics::Clear();
+	SyncBroadphase(store);
+	BroadPhase(store);
+	NarrowPhase(store);
+	Solve(store);
+	const auto rebuilt = Metrics::Get("physics.solve.color.topology-rebuild");
+	REQUIRE(rebuilt.has_value());
+	CHECK(rebuilt->Value == 1.0);
+	Metrics::Clear();
+}
+
+TEST_CASE("a replacement entity invalidates a retained island key", "[solvergroups]") {
+	std::unique_ptr<Store> owned = Spread(256, 16);
+	Store &store = *owned;
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(world.UsesIslandSchedule());
+	const auto changed = std::find_if(
+		world.Manifolds().begin(), world.Manifolds().end(), [&store](const ContactManifold &manifold) {
+			return store.Has<Motion>(manifold.A) && store.Has<Motion>(manifold.B);
+		}
+	);
+	REQUIRE(changed != world.Manifolds().end());
+	const Entity previous = changed->A;
+	const Transform placement = *store.Get<Transform>(previous);
+	store.Destroy(previous);
+
+	const Entity replacement = store.Create();
+	CHECK(replacement.Id != previous.Id);
+	store.Set<Transform>(replacement, placement);
+	store.Set<Simulated>(replacement, Simulated{});
+	store.Set<Motion>(replacement, Motion{});
+	store.Set<RigidBody>(replacement, RigidBody{});
+	Collider collider;
+	collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+	store.Set<Collider>(replacement, collider);
+
+	Metrics::Clear();
+	SyncBroadphase(store);
+	BroadPhase(store);
+	NarrowPhase(store);
+	Solve(store);
+	const auto rebuilt = Metrics::Get("physics.solve.island.topology-rebuild");
+	REQUIRE(rebuilt.has_value());
+	CHECK(rebuilt->Value == 1.0);
+	Metrics::Clear();
+}
+
+TEST_CASE("a high-degree graph retains the chunk fallback", "[solvergroups]") {
+	std::unique_ptr<Store> owned = DenseConnected(80);
+	Store &store = *owned;
+	StepOnce(store);
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(world.RowCount() >= PARALLEL_SOLVE_ROWS);
+	CHECK(PipelineInternals::SolverColors(world).empty());
+	CHECK(world.SolverChunkSize() > 0.0f);
+	const auto retained = Metrics::GetGauge("physics.solve.color.retained-bytes");
+	REQUIRE(retained.has_value());
+	CHECK(retained->Value > 0.0);
+
+	Metrics::Clear();
+	StepOnce(store);
+	const auto reuse = Metrics::Get("physics.solve.color.topology-reuse");
+	REQUIRE(reuse.has_value());
+	CHECK(reuse->Value == 1.0);
+	Metrics::Clear();
+}
+
+TEST_CASE("an over-ceiling world clears cached island and colour routes", "[solvergroups]") {
+	std::unique_ptr<Store> owned = Spread(256, 16);
+	Store &store = *owned;
+	StepOnce(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(world.UsesIslandSchedule());
+
+	for (size_t column = 256; column < 513; column++) {
+		const float x = static_cast<float>(column % 16) * 6.0f - 48.0f;
+		const float z = static_cast<float>(column / 16) * 6.0f - 48.0f;
+		for (size_t level = 0; level < 16; level++) {
+			AddMovableBox(store, Vector3{x, static_cast<float>(level) * 0.98f + 0.49f, z});
+		}
+	}
+
+	SyncBroadphase(store);
+	BroadPhase(store);
+	NarrowPhase(store);
+	Solve(store);
+	CHECK(world.RowCount() >= PARALLEL_SOLVE_ROWS);
+	CHECK(!world.UsesIslandSchedule());
+	CHECK(world.ConstraintIslandCount() == 0);
+	CHECK(PipelineInternals::SolverColors(world).empty());
+	CHECK(world.SolverChunkSize() > 0.0f);
 }
 
 TEST_CASE("every row is in exactly one run", "[solvergroups]") {

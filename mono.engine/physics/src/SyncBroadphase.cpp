@@ -3,9 +3,11 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
@@ -13,6 +15,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/spatial/HashGrid.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -21,6 +24,23 @@
 namespace engine::physics {
 
 	namespace {
+		// A world that had to fall back to the grid re-enters the tree after
+		// several low-motion gathers. One frame is often the pause between two
+		// bursts; three keeps the recovery deterministic without rebuilding both
+		// indexes on every grid frame.
+		// A fallback grid probes after at most 32 ticks, about half a second at
+		// the usual 60 Hz. The interval keeps high-motion fallback shaped like
+		// the pre-tree generated rebuild path rather than paying a second copy.
+		constexpr size_t DYNAMIC_TREE_SETTLED_FRAMES = 32;
+		void DispatchGridRanges(
+			void *, size_t count, spatial::HashGrid::RangeDispatcher::Body body, void *bodyContext
+		) {
+			parallel::Jobs::For(
+				count, 1, [body, bodyContext](size_t begin, size_t end) { body(bodyContext, begin, end); }, 1
+			);
+		}
+
+		const spatial::HashGrid::RangeDispatcher GRID_DISPATCHER{nullptr, &DispatchGridRanges};
 		// Writes one collider's proxy and appends its record, in row order.
 		//
 		// `Proxy::Id` is the index the two arrays share, not the entity - see
@@ -119,13 +139,18 @@ namespace engine::physics {
 			return;
 		}
 
-		// Rebuilt whole, every tick. `spatial::HashGrid` is count-then-fill and
-		// has no `Insert`; "only re-insert what moved" is therefore a decision
-		// about which set to hand to `Rebuild`, and this is the set that moved.
+		// Gather once into retained rows, then choose exactly one dynamic index.
+		// The grid remains rebuild-only; a tree may synchronise a stable row order
+		// by reinserting only leaves that escaped their fat bounds.
 		std::vector<core::AABB> &dynamicBounds = PipelineInternals::DynamicBounds(*world);
+		std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
 		std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
 		std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
+		std::vector<core::AABB> &previous = PipelineInternals::PreviousDynamicBounds(*world);
+		std::vector<ecs::Entity> &previousOwners = PipelineInternals::PreviousDynamicOwners(*world);
+		const bool treeWasActive = PipelineInternals::DynamicTreeActive(*world);
 		dynamicBounds.clear();
+		dynamicProxies.clear();
 		dynamicRecords.clear();
 		dynamicShapes.clear();
 
@@ -134,10 +159,8 @@ namespace engine::physics {
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
 		{
-			// The generated rebuild owns its proxy rows, so its fill callback also
-			// gathers them. The nested timings keep the store walk distinct from the
-			// count-then-fill index work: the two scale differently and need separate
-			// numbers before either one is changed.
+			// Gathering has one deterministic stream. That keeps the records, tight
+			// bounds and either index on the same positional identity.
 			ENGINE_PROFILE_CAT("physics.index-dynamic", core::ProfileCategory::Physics);
 
 			// **The grid is sized from the scene rather than left at the
@@ -157,14 +180,26 @@ namespace engine::physics {
 			// `SetCellSize` returns without touching anything when the size did
 			// not move. A scene has to change scale by a factor of two before
 			// this costs a rebuild that was not already happening.
-			const size_t dynamicCount = store.Query<const scene::Transform, const scene::Collider, const scene::Motion>()
-				.Count();
+			spatial::DynamicBvh &tree = PipelineInternals::DynamicTree(*world);
+			const size_t dynamicCount =
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count();
+			const bool recoveryProbe =
+				!treeWasActive && PipelineInternals::DynamicTreeSettledFrames(*world) <= 1;
+			const bool gatherProxies = treeWasActive || tree.ProxyCount() == 0;
 			dynamicBounds.resize(dynamicCount);
-			spatial::HashGrid &index = PipelineInternals::DynamicIndex(*world);
-			index.RebuildGenerated(
-				dynamicCount,
-				[&store, &dynamicBounds, &dynamicRecords, &dynamicShapes, baked](std::span<spatial::Proxy> proxies) {
-					ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
+			dynamicProxies.resize(gatherProxies ? dynamicCount : 0);
+			const bool compareRecovery = treeWasActive || recoveryProbe;
+			const bool previousCompatible = compareRecovery && previous.size() == dynamicCount;
+			const bool previousOwnersCompatible = compareRecovery && previousOwners.size() == dynamicCount;
+			size_t recoveryChanges = previousCompatible ? 0 : dynamicCount;
+			bool topologyChanged = compareRecovery && !previousOwnersCompatible;
+			if (compareRecovery) {
+				previousOwners.resize(dynamicCount);
+			}
+			const bool directGridGather = !gatherProxies && !recoveryProbe && dynamicCount != 0;
+			if (directGridGather) {
+				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
+				const auto fillGrid = [&](std::span<spatial::Proxy> proxies) {
 					size_t written = 0;
 					store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
 						[&](ecs::Entity entity,
@@ -185,9 +220,186 @@ namespace engine::physics {
 							written++;
 						}
 					);
-				},
-				world->CellSizeMeasured()
-			);
+				};
+				if (parallel::Jobs::WorkerCount() != 0) {
+					grid.RebuildGeneratedParallel(
+						dynamicCount, fillGrid, GRID_DISPATCHER, world->CellSizeMeasured()
+					);
+				} else {
+					grid.RebuildGenerated(dynamicCount, fillGrid, world->CellSizeMeasured());
+				}
+			}
+			const auto gather = [&](auto &&writeProxy) {
+				ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
+				size_t written = 0;
+				store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+					[&](ecs::Entity entity,
+						const scene::Transform &transform,
+						const scene::Collider &collider,
+						const scene::Motion &) {
+						if (compareRecovery) {
+							topologyChanged = topologyChanged ||
+											  (previousOwnersCompatible && previousOwners[written] != entity);
+							previousOwners[written] = entity;
+						}
+						spatial::Proxy proxy;
+						WriteEntry(
+							proxy,
+							static_cast<uint64_t>(written),
+							dynamicRecords,
+							dynamicShapes,
+							baked,
+							entity,
+							transform,
+							collider
+						);
+						dynamicBounds[written] = proxy.Bounds;
+						if (recoveryProbe && previousCompatible) {
+							const core::AABB &before = previous[written];
+							const core::AABB &current = dynamicBounds[written];
+							const float margin = spatial::DynamicBvh::FAT_MARGIN;
+							recoveryChanges +=
+								std::abs(current.Minimum.X - before.Minimum.X) <= margin &&
+										std::abs(current.Minimum.Y - before.Minimum.Y) <= margin &&
+										std::abs(current.Minimum.Z - before.Minimum.Z) <= margin &&
+										std::abs(current.Maximum.X - before.Maximum.X) <= margin &&
+										std::abs(current.Maximum.Y - before.Maximum.Y) <= margin &&
+										std::abs(current.Maximum.Z - before.Maximum.Z) <= margin
+									? 0
+									: 1;
+						}
+						writeProxy(proxy, written++);
+					}
+				);
+			};
+			if (directGridGather) {
+			} else if (gatherProxies) {
+				gather([&dynamicProxies](const spatial::Proxy &proxy, size_t index) {
+					dynamicProxies[index] = proxy;
+				});
+			} else {
+				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
+				bool recovered = false;
+				grid.RebuildGenerated(
+					dynamicCount,
+					[&](std::span<spatial::Proxy> proxies) {
+						gather([proxies](const spatial::Proxy &proxy, size_t index) {
+							proxies[index] = proxy;
+						});
+						if (recoveryProbe && !topologyChanged &&
+							recoveryChanges * spatial::DynamicBvh::MAXIMUM_INCREMENTAL_DENOMINATOR <=
+								dynamicBounds.size()) {
+							tree.Rebuild(proxies);
+							recovered = true;
+						}
+					},
+					world->CellSizeMeasured()
+				);
+				if (recovered) {
+					PipelineInternals::DynamicTreeActive(*world) = true;
+					PipelineInternals::DynamicTreeSettledFrames(*world) = 0;
+				}
+			}
+
+			spatial::DynamicBvhPreflight preflight{};
+			bool preflightSampled = false;
+			bool useTree = PipelineInternals::DynamicTreeActive(*world) && !treeWasActive;
+			if (directGridGather) {
+				PipelineInternals::DynamicTreeSettledFrames(*world)--;
+			} else if (!gatherProxies) {
+				if (!useTree && recoveryProbe) {
+					PipelineInternals::DynamicTreeSettledFrames(*world) = DYNAMIC_TREE_SETTLED_FRAMES;
+				} else if (!useTree) {
+					PipelineInternals::DynamicTreeSettledFrames(*world)--;
+				}
+			} else if (dynamicProxies.empty()) {
+				if (tree.ProxyCount() != 0) {
+					tree.Clear();
+				}
+				if (PipelineInternals::DynamicIndex(*world).ProxyCount() != 0) {
+					PipelineInternals::DynamicIndex(*world).Clear();
+				}
+				PipelineInternals::DynamicTreeSettledFrames(*world) = 0;
+			} else if (tree.ProxyCount() == 0) {
+				tree.Rebuild(dynamicProxies);
+				useTree = true;
+			} else if (treeWasActive && !topologyChanged) {
+				preflight = tree.Preflight(dynamicProxies);
+				preflightSampled = true;
+				const bool incremental =
+					preflight.Compatible &&
+					preflight.EscapedLeaves * spatial::DynamicBvh::MAXIMUM_INCREMENTAL_DENOMINATOR <
+						dynamicProxies.size();
+				if (incremental) {
+					useTree = tree.Sync(dynamicProxies, preflight);
+				}
+				if (!useTree) {
+					PipelineInternals::DynamicTreeSettledFrames(*world) = DYNAMIC_TREE_SETTLED_FRAMES;
+				}
+			} else if (treeWasActive) {
+				PipelineInternals::DynamicTreeSettledFrames(*world) = DYNAMIC_TREE_SETTLED_FRAMES;
+			} else if (!topologyChanged &&
+					   recoveryChanges * spatial::DynamicBvh::MAXIMUM_INCREMENTAL_DENOMINATOR <=
+						   dynamicBounds.size()) {
+				tree.Rebuild(dynamicProxies);
+				useTree = true;
+				PipelineInternals::DynamicTreeSettledFrames(*world) = 0;
+			} else {
+				PipelineInternals::DynamicTreeSettledFrames(*world) = DYNAMIC_TREE_SETTLED_FRAMES;
+			}
+			if (useTree && !tree.Stats().PairCacheAvailable) {
+				useTree = false;
+				PipelineInternals::DynamicTreeSettledFrames(*world) = DYNAMIC_TREE_SETTLED_FRAMES;
+			}
+
+			if (!useTree && !dynamicProxies.empty()) {
+				if (world->CellSizeMeasured()) {
+					PipelineInternals::DynamicIndex(*world).SetCellSize(
+						spatial::SuggestCellSize(dynamicProxies)
+					);
+				}
+				spatial::HashGrid &grid = PipelineInternals::DynamicIndex(*world);
+				if (parallel::Jobs::WorkerCount() != 0) {
+					grid.RebuildParallel(dynamicProxies, GRID_DISPATCHER);
+				} else {
+					grid.Rebuild(dynamicProxies);
+				}
+			}
+			PipelineInternals::DynamicTreeActive(*world) = useTree;
+			if (compareRecovery) {
+				previous = dynamicBounds;
+			}
+			if (treeWasActive != useTree) {
+				core::Metrics::SetGauge("physics.dynamic_index.mode", useTree ? 1.0 : 0.0);
+			}
+			if (treeWasActive || recoveryProbe || useTree) {
+				const spatial::DynamicBvhStats treeStats = tree.Stats();
+				core::Metrics::SetGauge(
+					"physics.dynamic_bvh.preflight_escaped", static_cast<double>(preflight.EscapedLeaves)
+				);
+				core::Metrics::SetGauge(
+					"physics.dynamic_bvh.preflight_sampled", preflightSampled ? 1.0 : 0.0
+				);
+				core::Metrics::SetGauge(
+					"physics.dynamic_bvh.refitted",
+					preflightSampled && useTree ? static_cast<double>(treeStats.RefittedLeaves) : 0.0
+				);
+				core::Metrics::SetGauge(
+					"physics.dynamic_bvh.reinserted",
+					preflightSampled && useTree ? static_cast<double>(treeStats.ReinsertedLeaves) : 0.0
+				);
+				core::Metrics::SetGauge(
+					"physics.dynamic_bvh.full_rebuilds", static_cast<double>(treeStats.Rebuilds)
+				);
+				core::Metrics::SetGauge(
+					"physics.dynamic_bvh.support_retained_bytes",
+					static_cast<double>(
+						treeStats.RetainedBytes + dynamicProxies.capacity() * sizeof(spatial::Proxy) +
+						previous.capacity() * sizeof(core::AABB) +
+						previousOwners.capacity() * sizeof(ecs::Entity)
+					)
+				);
+			}
 		}
 		PipelineInternals::DynamicRebuildCount(*world)++;
 

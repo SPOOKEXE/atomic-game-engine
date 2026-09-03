@@ -48,6 +48,7 @@ using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::CollisionShapes;
 using engine::scene::Motion;
+using engine::scene::PreviousTransform;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Simulated;
@@ -107,6 +108,13 @@ namespace {
 		return body;
 	}
 
+	Entity RotatingThinBullet(Store &store) {
+		const Entity body = Bullet(store, 300.0f);
+		store.GetMutable<Collider>(body)->Extent = Vector3{0.05f, 2.0f, 0.05f};
+		store.GetMutable<Motion>(body)->Angular = Vector3{0.0f, 0.0f, 120.0f};
+		return body;
+	}
+
 	// One tick of the two steps that matter here, in the order the pipeline runs
 	// them. The static index has to exist before the sweep can ask it anything,
 	// which is why the sync comes first on the setup tick.
@@ -139,6 +147,44 @@ TEST_CASE("a body that would cross a thin wall is stopped at it", "[continuous]"
 	// where the integrator alone would have left it.
 	CHECK(placed->Frame.Position.X < 3.47f);
 	CHECK(placed->Frame.Position.X > 3.44f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+}
+
+TEST_CASE("a rotating thin box is swept from its physical start pose", "[continuous]") {
+	// Integration turns the tall box side-on during this tick. Starting the
+	// sweep from that final rotation makes its two-metre x extent stop it far
+	// from the wall; reconstructing the physical start pose leaves its 5 cm
+	// thickness on the path into the wall.
+	std::unique_ptr<Store> owned = WorldWithWall();
+	Store &store = *owned;
+	SyncBroadphase(store);
+
+	const Entity bullet = RotatingThinBullet(store);
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(bullet);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Frame.Position.X > 3.89f);
+	CHECK(placed->Frame.Position.X < 3.92f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+}
+
+TEST_CASE("continuous collision ignores presentation transform history", "[continuous]") {
+	// A render-side history can be arbitrarily stale. CCD has to produce the
+	// same physical stop without it, rather than turning an interpolation row
+	// into an input of the simulation.
+	std::unique_ptr<Store> owned = WorldWithWall();
+	Store &store = *owned;
+	SyncBroadphase(store);
+
+	const Entity bullet = RotatingThinBullet(store);
+	store.Set<PreviousTransform>(bullet, PreviousTransform{CFrame{Vector3{-1000.0f, 0.0f, 0.0f}}});
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(bullet);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Frame.Position.X > 3.89f);
+	CHECK(placed->Frame.Position.X < 3.92f);
 	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
 }
 

@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <numeric>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -81,7 +82,8 @@ namespace engine::physics {
 		) {
 			const double groupCount = static_cast<double>(groups.size());
 			const double minimum = groups.empty() ? 0.0 : static_cast<double>(groups.back().RowCount);
-			const double median = groups.empty() ? 0.0 : static_cast<double>(groups[groups.size() / 2].RowCount);
+			const double median =
+				groups.empty() ? 0.0 : static_cast<double>(groups[groups.size() / 2].RowCount);
 			const double maximum = groups.empty() ? 0.0 : static_cast<double>(groups.front().RowCount);
 
 			core::Metrics::SetGauge("physics.solve.groups", groupCount);
@@ -90,6 +92,127 @@ namespace engine::physics {
 			core::Metrics::SetGauge("physics.solve.group-rows.max", maximum);
 			core::Metrics::SetGauge("physics.solve.interior-rows", static_cast<double>(interiorRowCount));
 			core::Metrics::SetGauge("physics.solve.border-rows", static_cast<double>(border.RowCount));
+		}
+
+		// Colour metrics describe the exact wave plan rather than the worker pool.
+		// A scene therefore reports the same plan on a one-thread replay and on a
+		// wide machine, which is the determinism boundary this solver needs.
+		void ReportSolverColorShape(const std::vector<SolverColor> &colors, size_t retainedBytes) {
+			double minimum = 0.0;
+			double median = 0.0;
+			double maximum = 0.0;
+			if (!colors.empty()) {
+				std::array<uint32_t, SOLVER_COLOR_MAX_WAVES> rowCounts{};
+				for (size_t color = 0; color < colors.size(); color++) {
+					rowCounts[color] = colors[color].RowCount;
+				}
+				std::sort(rowCounts.begin(), rowCounts.begin() + colors.size());
+				minimum = static_cast<double>(rowCounts.front());
+				median = static_cast<double>(rowCounts[colors.size() / 2]);
+				maximum = static_cast<double>(rowCounts[colors.size() - 1]);
+			}
+			core::Metrics::SetGauge("physics.solve.colors", static_cast<double>(colors.size()));
+			core::Metrics::SetGauge("physics.solve.color-rows.min", minimum);
+			core::Metrics::SetGauge("physics.solve.color-rows.median", median);
+			core::Metrics::SetGauge("physics.solve.color-rows.max", maximum);
+			core::Metrics::SetGauge("physics.solve.color.retained-bytes", static_cast<double>(retainedBytes));
+		}
+
+		// A coloured group is one manifold and therefore has at most four rows.
+		// A fixed histogram reports its actual distribution without sorting the
+		// wave-owned dispatch ranges or allocating measurement scratch.
+		void ReportColoredGroupShape(const std::vector<SolverGroup> &groups, size_t rowCount) {
+			std::array<size_t, ContactManifold::MAXIMUM_POINTS + 1> counts{};
+			for (const SolverGroup &group : groups) {
+				counts[group.RowCount]++;
+			}
+
+			size_t minimum = 0;
+			size_t median = 0;
+			size_t maximum = 0;
+			size_t seen = 0;
+			for (size_t rows = 1; rows < counts.size(); rows++) {
+				if (counts[rows] == 0) {
+					continue;
+				}
+				if (minimum == 0) {
+					minimum = rows;
+				}
+				seen += counts[rows];
+				if (median == 0 && seen > groups.size() / 2) {
+					median = rows;
+				}
+				maximum = rows;
+			}
+
+			core::Metrics::SetGauge("physics.solve.groups", static_cast<double>(groups.size()));
+			core::Metrics::SetGauge("physics.solve.group-rows.min", static_cast<double>(minimum));
+			core::Metrics::SetGauge("physics.solve.group-rows.median", static_cast<double>(median));
+			core::Metrics::SetGauge("physics.solve.group-rows.max", static_cast<double>(maximum));
+			core::Metrics::SetGauge("physics.solve.interior-rows", static_cast<double>(rowCount));
+			core::Metrics::SetGauge("physics.solve.border-rows", 0.0);
+		}
+
+		// Island metrics are bounded by one retained scratch array. The row list is
+		// canonical-root ordered, so sorting its copy only affects measurement.
+		void ReportSolverIslandShape(
+			const std::vector<uint32_t> &rows,
+			std::vector<uint32_t> &orderScratch,
+			bool reused,
+			bool selected,
+			size_t retainedBytes
+		) {
+			double minimum = 0.0;
+			double median = 0.0;
+			double maximum = 0.0;
+			double largestShare = 0.0;
+			if (!rows.empty()) {
+				orderScratch = rows;
+				std::sort(orderScratch.begin(), orderScratch.end());
+				minimum = static_cast<double>(orderScratch.front());
+				median = static_cast<double>(orderScratch[orderScratch.size() / 2]);
+				maximum = static_cast<double>(orderScratch.back());
+				const size_t total = std::accumulate(rows.begin(), rows.end(), size_t{0});
+				largestShare = total == 0 ? 0.0 : maximum / static_cast<double>(total);
+			}
+
+			core::Metrics::SetGauge("physics.solve.islands", static_cast<double>(rows.size()));
+			core::Metrics::SetGauge("physics.solve.island-rows.min", minimum);
+			core::Metrics::SetGauge("physics.solve.island-rows.median", median);
+			core::Metrics::SetGauge("physics.solve.island-rows.max", maximum);
+			core::Metrics::SetGauge("physics.solve.island-largest-share", largestShare);
+			core::Metrics::SetGauge("physics.solve.island.selected", selected ? 1.0 : 0.0);
+			core::Metrics::SetGauge("physics.solve.island.reused", reused ? 1.0 : 0.0);
+			core::Metrics::SetGauge(
+				"physics.solve.island.retained-bytes", static_cast<double>(retainedBytes)
+			);
+		}
+
+		size_t SolverColorRetainedBytes(PhysicsWorld &world) {
+			return PipelineInternals::SolverColorOfManifold(world).capacity() * sizeof(uint32_t) +
+				   PipelineInternals::SolverColorClaims(world).capacity() * sizeof(uint64_t) +
+				   PipelineInternals::SolverColors(world).capacity() * sizeof(SolverColor);
+		}
+
+		uint32_t FindSolverComponent(std::vector<uint32_t> &parents, uint32_t body) {
+			uint32_t root = body;
+			while (parents[root] != root) {
+				root = parents[root];
+			}
+			while (parents[body] != body) {
+				const uint32_t next = parents[body];
+				parents[body] = root;
+				body = next;
+			}
+			return root;
+		}
+
+		void JoinSolverComponents(std::vector<uint32_t> &parents, uint32_t first, uint32_t second) {
+			first = FindSolverComponent(parents, first);
+			second = FindSolverComponent(parents, second);
+			if (first != second) {
+				parents[std::max(first, second)] = std::min(first, second);
+			}
 		}
 
 		// An entity id has a fixed width, so ordering the compact solver bodies
@@ -666,13 +789,13 @@ namespace engine::physics {
 						const scene::RigidBody,
 						const scene::Surface,
 						const scene::PhysicsProperties>([&bodies, &loaded, &bodyIndex, &reader, surfaces](
-														ecs::Entity entity,
-														const scene::Transform &transform,
-														const scene::Collider &collider,
-														const scene::RigidBody &rigid,
-														const scene::Surface &surface,
-														const scene::PhysicsProperties &physical
-													) {
+															ecs::Entity entity,
+															const scene::Transform &transform,
+															const scene::Collider &collider,
+															const scene::RigidBody &rigid,
+															const scene::Surface &surface,
+															const scene::PhysicsProperties &physical
+														) {
 						const auto found = bodyIndex.find(entity.Id);
 						if (found == bodyIndex.end()) {
 							return;
@@ -708,7 +831,8 @@ namespace engine::physics {
 					const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
 
 					const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
-					const scene::PhysicsProperties *physical = reader.Get<scene::PhysicsProperties>(body.Owner);
+					const scene::PhysicsProperties *physical =
+						reader.Get<scene::PhysicsProperties>(body.Owner);
 					LoadBody(
 						body,
 						transform,
@@ -810,11 +934,268 @@ namespace engine::physics {
 		groups.clear();
 		border = SolverGroup{};
 
-		const bool partitioned = rowCount >= PARALLEL_SOLVE_ROWS;
+		bool partitioned = rowCount >= PARALLEL_SOLVE_ROWS;
+		bool usingColoring = false;
+		bool usingIslands = false;
 		size_t chunkCount = 0;
 		PipelineInternals::SolverChunkEdge(*world) = 0.0f;
+		std::vector<SolverColor> &colors = PipelineInternals::SolverColors(*world);
+		colors.clear();
+		PipelineInternals::SolverUsesColoring(*world) = false;
+		PipelineInternals::SolverUsesIslands(*world) = false;
+		PipelineInternals::SolverIslandCount(*world) = 0;
+		bool solverTopologyChanged = false;
+		const bool persistentScheduleEligible =
+			partitioned && bodies.size() <= SOLVER_ISLAND_DISCOVERY_MAXIMUM_BODIES;
 
-		if (partitioned) {
+		// Islands are connected through movable endpoints only. A static floor is
+		// read by every task but never written, so treating it as an edge would
+		// turn unrelated stacks into one serial component.
+		if (persistentScheduleEligible) {
+			std::vector<SolverTopologyEntry> &topology = PipelineInternals::SolverTopology(*world);
+			std::vector<SolverTopologyEntry> &topologyScratch =
+				PipelineInternals::SolverTopologyScratch(*world);
+			topologyScratch.resize(manifolds.size());
+			for (size_t at = 0; at < manifolds.size(); at++) {
+				const SolverBody &first = bodies[located[at].first];
+				const SolverBody &second = bodies[located[at].second];
+				topologyScratch[at] = SolverTopologyEntry{
+					manifolds[at].A.Id,
+					manifolds[at].B.Id,
+					static_cast<uint8_t>(
+						(manifolds[at].Trigger ? 1U : 0U) | (first.Movable ? 2U : 0U) |
+						(second.Movable ? 4U : 0U) | (manifolds[at].PointCount != 0 ? 8U : 0U)
+					),
+				};
+			}
+			solverTopologyChanged = topology != topologyScratch;
+			if (solverTopologyChanged) {
+				topology = topologyScratch;
+				PipelineInternals::SolverColorOfManifold(*world).clear();
+				PipelineInternals::SolverColorTopologyAccepted(*world) = false;
+				PipelineInternals::SolverColorTopologyKnown(*world) = false;
+				PipelineInternals::SolverIslandTopologyKnown(*world) = false;
+			}
+
+			std::vector<uint32_t> &islandOfManifold = PipelineInternals::SolverIslandOfManifold(*world);
+			std::vector<uint32_t> &islandOfBody = PipelineInternals::SolverIslandOfBody(*world);
+			const bool reusedIslands = PipelineInternals::SolverIslandTopologyKnown(*world) &&
+									   islandOfManifold.size() == manifolds.size() &&
+									   islandOfBody.size() == bodies.size();
+			if (!reusedIslands) {
+				std::vector<uint32_t> &parents = PipelineInternals::SolverComponentParents(*world);
+				parents.resize(bodies.size());
+				for (size_t body = 0; body < bodies.size(); body++) {
+					parents[body] = static_cast<uint32_t>(body);
+				}
+
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					const uint32_t first = located[at].first;
+					const uint32_t second = located[at].second;
+					if (bodies[first].Movable && bodies[second].Movable) {
+						JoinSolverComponents(parents, first, second);
+					}
+				}
+
+				islandOfBody.assign(bodies.size(), SKIPPED_MANIFOLD);
+				size_t islandCount = 0;
+				for (size_t body = 0; body < bodies.size(); body++) {
+					if (!bodies[body].Movable) {
+						continue;
+					}
+					const uint32_t root = FindSolverComponent(parents, static_cast<uint32_t>(body));
+					if (islandOfBody[root] == SKIPPED_MANIFOLD) {
+						islandOfBody[root] = static_cast<uint32_t>(islandCount++);
+					}
+					islandOfBody[body] = islandOfBody[root];
+				}
+
+				islandOfManifold.assign(manifolds.size(), SKIPPED_MANIFOLD);
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					const uint32_t first = located[at].first;
+					const uint32_t second = located[at].second;
+					const uint32_t movable = bodies[first].Movable ? first : second;
+					islandOfManifold[at] = islandOfBody[movable];
+				}
+				PipelineInternals::SolverIslandTopologyKnown(*world) = true;
+				core::Metrics::Count("physics.solve.island.topology-rebuild", 1.0);
+			} else {
+				core::Metrics::Count("physics.solve.island.topology-reuse", 1.0);
+			}
+
+			std::vector<uint32_t> &islandRows = PipelineInternals::SolverIslandRows(*world);
+			size_t islandCount = 0;
+			for (uint32_t island : islandOfManifold) {
+				if (island != SKIPPED_MANIFOLD) {
+					islandCount = std::max(islandCount, static_cast<size_t>(island) + 1);
+				}
+			}
+			islandRows.assign(islandCount, 0);
+			for (size_t at = 0; at < manifolds.size(); at++) {
+				const uint32_t island = islandOfManifold[at];
+				if (island != SKIPPED_MANIFOLD) {
+					islandRows[island] += manifolds[at].PointCount;
+				}
+			}
+			const size_t largestRows =
+				islandRows.empty() ? 0 : *std::max_element(islandRows.begin(), islandRows.end());
+			usingIslands = islandCount >= SOLVER_ISLAND_MINIMUM && islandCount <= SOLVER_ISLAND_MAXIMUM &&
+						   largestRows * SOLVER_ISLAND_LARGEST_SHARE_DENOMINATOR <=
+							   rowCount * SOLVER_ISLAND_LARGEST_SHARE_NUMERATOR;
+			PipelineInternals::SolverIslandCount(*world) = islandCount;
+			PipelineInternals::SolverUsesIslands(*world) = usingIslands;
+			std::vector<uint32_t> &islandOrderScratch =
+				PipelineInternals::SolverIslandRowOrderScratch(*world);
+			islandOrderScratch.reserve(islandRows.size());
+			ReportSolverIslandShape(
+				islandRows,
+				islandOrderScratch,
+				reusedIslands,
+				usingIslands,
+				world->SolverIslandRetainedBytes()
+			);
+			if (usingIslands) {
+				groupOfManifold = islandOfManifold;
+				partitioned = false;
+			}
+		} else {
+			ReportSolverIslandShape(
+				{},
+				PipelineInternals::SolverIslandRowOrderScratch(*world),
+				false,
+				false,
+				world->SolverIslandRetainedBytes()
+			);
+		}
+
+		// A colour is assigned to a whole manifold before its points become rows.
+		// The exact key excludes a positive point-count change because it cannot
+		// change conflicts, and the placement pass recomputes every row offset.
+		// Zero is included because a manifold with no rows must not claim a colour.
+		if (persistentScheduleEligible && rowCount >= SOLVER_COLOR_MIN_ROWS) {
+			std::vector<SolverTopologyEntry> &topology = PipelineInternals::SolverTopology(*world);
+			std::vector<uint32_t> &colourOfManifold = PipelineInternals::SolverColorOfManifold(*world);
+			const std::vector<SolverTopologyEntry> &topologyScratch =
+				PipelineInternals::SolverTopologyScratch(*world);
+
+			bool reused = !solverTopologyChanged && PipelineInternals::SolverColorTopologyKnown(*world) &&
+						  topology == topologyScratch &&
+						  (PipelineInternals::SolverColorTopologyAccepted(*world)
+							   ? colourOfManifold.size() == manifolds.size()
+							   : colourOfManifold.empty());
+			if (!reused) {
+				colourOfManifold.assign(manifolds.size(), SKIPPED_MANIFOLD);
+				std::vector<uint64_t> &claims = PipelineInternals::SolverColorClaims(*world);
+				claims.assign(bodies.size(), 0);
+				size_t colourCount = 0;
+				bool exceeded = false;
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					const size_t first = located[at].first;
+					const size_t second = located[at].second;
+					const uint64_t unavailable = (bodies[first].Movable ? claims[first] : 0) |
+												 (bodies[second].Movable ? claims[second] : 0);
+					size_t colour = 0;
+					while (colour < SOLVER_COLOR_MAX_WAVES && (unavailable & (uint64_t{1} << colour)) != 0) {
+						colour++;
+					}
+					if (colour == SOLVER_COLOR_MAX_WAVES) {
+						exceeded = true;
+						break;
+					}
+					colourOfManifold[at] = static_cast<uint32_t>(colour);
+					if (bodies[first].Movable) {
+						claims[first] |= uint64_t{1} << colour;
+					}
+					if (bodies[second].Movable) {
+						claims[second] |= uint64_t{1} << colour;
+					}
+					colourCount = std::max(colourCount, colour + 1);
+				}
+
+				// A fixed barrier for one or two tiny blocks costs more than it can
+				// save. More importantly, the colour path is for one large connected
+				// dynamic island, not many independent stacks which only share a floor.
+				// Island discovery already assigned each movable component, so reuse that
+				// canonical map rather than building a second union-find forest.
+				size_t blocks = 0;
+				size_t dynamicBlocks = 0;
+				const std::vector<uint32_t> &islandOfManifold =
+					PipelineInternals::SolverIslandOfManifold(*world);
+				std::vector<uint32_t> &componentBlocks = PipelineInternals::SolverComponentParents(*world);
+				componentBlocks.assign(PipelineInternals::SolverIslandCount(*world), 0);
+				for (size_t at = 0; at < colourOfManifold.size(); at++) {
+					if (colourOfManifold[at] == SKIPPED_MANIFOLD) {
+						continue;
+					}
+					blocks++;
+					const uint32_t first = located[at].first;
+					const uint32_t second = located[at].second;
+					if (bodies[first].Movable && bodies[second].Movable) {
+						dynamicBlocks++;
+						componentBlocks[islandOfManifold[at]]++;
+					}
+				}
+				size_t largestComponentBlocks = 0;
+				if (dynamicBlocks != 0) {
+					largestComponentBlocks =
+						*std::max_element(componentBlocks.begin(), componentBlocks.end());
+				}
+				if (exceeded || colourCount < SOLVER_COLOR_MIN_WAVES ||
+					blocks < colourCount * SOLVER_COLOR_MIN_BLOCKS_PER_WAVE || dynamicBlocks == 0 ||
+					largestComponentBlocks * SOLVER_COLOR_MIN_COMPONENT_BLOCK_FRACTION_DENOMINATOR <
+						dynamicBlocks) {
+					colourOfManifold.clear();
+				}
+				PipelineInternals::SolverColorTopologyAccepted(*world) = !colourOfManifold.empty();
+				PipelineInternals::SolverColorTopologyKnown(*world) = true;
+				topology = topologyScratch;
+				core::Metrics::Count("physics.solve.color.topology-rebuild", 1.0);
+			} else {
+				core::Metrics::Count("physics.solve.color.topology-reuse", 1.0);
+			}
+
+			if (!colourOfManifold.empty()) {
+				size_t colourCount = 0;
+				for (uint32_t colour : colourOfManifold) {
+					if (colour != SKIPPED_MANIFOLD) {
+						colourCount = std::max(colourCount, static_cast<size_t>(colour) + 1);
+					}
+				}
+				if (colourCount != 0) {
+					usingColoring = true;
+					groupOfManifold = colourOfManifold;
+					partitioned = false;
+					colors.resize(colourCount);
+					for (size_t at = 0; at < manifolds.size(); at++) {
+						if (groupOfManifold[at] != SKIPPED_MANIFOLD) {
+							colors[groupOfManifold[at]].RowCount += manifolds[at].PointCount;
+						}
+					}
+				}
+			}
+		}
+
+		if (usingColoring) {
+			groupStart.assign(colors.size() + 1, 0);
+			for (size_t colour = 0; colour < colors.size(); colour++) {
+				groupStart[colour + 1] = colors[colour].RowCount;
+			}
+		} else if (usingIslands) {
+			const std::vector<uint32_t> &islandRows = PipelineInternals::SolverIslandRows(*world);
+			groupStart.assign(islandRows.size() + 1, 0);
+			for (size_t island = 0; island < islandRows.size(); island++) {
+				groupStart[island + 1] = islandRows[island];
+			}
+		} else if (partitioned) {
 			ENGINE_PROFILE_CAT("physics.solve-partition", core::ProfileCategory::Physics);
 
 			// **A point per body, and every body rather than only the movable
@@ -908,13 +1289,16 @@ namespace engine::physics {
 		// The dispatch list: the interior groups that ended up with rows, and
 		// the border's run. An empty group is dropped rather than dispatched,
 		// because a worker handed nothing still costs a range claim.
-		const size_t interiorSlots = partitioned ? chunkCount : 1;
-		groups.reserve(interiorSlots);
-		for (size_t slot = 0; slot < interiorSlots; slot++) {
-			const uint32_t first = groupStart[slot];
-			const uint32_t last = groupStart[slot + 1];
-			if (last > first) {
-				groups.push_back(SolverGroup{first, last - first});
+		if (!usingColoring) {
+			const size_t interiorSlots =
+				usingIslands ? PipelineInternals::SolverIslandCount(*world) : (partitioned ? chunkCount : 1);
+			groups.reserve(interiorSlots);
+			for (size_t slot = 0; slot < interiorSlots; slot++) {
+				const uint32_t first = groupStart[slot];
+				const uint32_t last = groupStart[slot + 1];
+				if (last > first) {
+					groups.push_back(SolverGroup{first, last - first});
+				}
 			}
 		}
 
@@ -940,7 +1324,9 @@ namespace engine::physics {
 			border = SolverGroup{groupStart[chunkCount], groupStart[chunkCount + 1] - groupStart[chunkCount]};
 		}
 
-		ReportSolverGroupShape(groups, border, rowCount - static_cast<size_t>(border.RowCount));
+		if (!usingColoring) {
+			ReportSolverGroupShape(groups, border, rowCount - static_cast<size_t>(border.RowCount));
+		}
 
 		// --- place -----------------------------------------------------------
 		//
@@ -998,6 +1384,30 @@ namespace engine::physics {
 				impulseStart[at] = emitted;
 				emitted += manifolds[at].PointCount;
 			}
+		}
+
+		if (usingColoring) {
+			// The prefix sums put each colour in one row range. Within that range
+			// manifold order is retained, and each group is precisely one manifold
+			// block so a multi-point contact is never divided between jobs.
+			groups.clear();
+			for (size_t colour = 0; colour < colors.size(); colour++) {
+				SolverColor &wave = colors[colour];
+				wave.FirstGroup = static_cast<uint32_t>(groups.size());
+				wave.GroupCount = 0;
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] != colour || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					groups.push_back(SolverGroup{rowStart[at], manifolds[at].PointCount});
+					wave.GroupCount++;
+				}
+			}
+			ReportSolverColorShape(colors, SolverColorRetainedBytes(*world));
+			ReportColoredGroupShape(groups, rowCount);
+			PipelineInternals::SolverUsesColoring(*world) = true;
+		} else {
+			ReportSolverColorShape({}, SolverColorRetainedBytes(*world));
 		}
 
 		// --- set up ----------------------------------------------------------
@@ -1122,7 +1532,29 @@ namespace engine::physics {
 				}
 			};
 
-			if (groups.size() > 1) {
+			if (usingColoring) {
+				for (const SolverColor &wave : colors) {
+					const size_t tasks =
+						(wave.GroupCount + SOLVER_COLOR_BLOCKS_PER_TASK - 1) / SOLVER_COLOR_BLOCKS_PER_TASK;
+					parallel::Jobs::For(
+						tasks,
+						1,
+						[&groups, &warmStart, wave](size_t begin, size_t end) {
+							for (size_t task = begin; task < end; task++) {
+								const size_t first = wave.FirstGroup + task * SOLVER_COLOR_BLOCKS_PER_TASK;
+								const size_t last = std::min(
+									first + SOLVER_COLOR_BLOCKS_PER_TASK,
+									static_cast<size_t>(wave.FirstGroup + wave.GroupCount)
+								);
+								for (size_t group = first; group < last; group++) {
+									warmStart(groups[group]);
+								}
+							}
+						},
+						1
+					);
+				}
+			} else if (groups.size() > 1) {
 				parallel::Jobs::For(
 					groups.size(),
 					1,
@@ -1136,7 +1568,9 @@ namespace engine::physics {
 			} else if (!groups.empty()) {
 				warmStart(groups[0]);
 			}
-			warmStart(border);
+			if (!usingColoring) {
+				warmStart(border);
+			}
 		}
 
 		// --- iterate ---------------------------------------------------------
@@ -1184,37 +1618,84 @@ namespace engine::physics {
 
 		{
 			ENGINE_PROFILE_CAT("physics.solve-sweeps", core::ProfileCategory::Physics);
-			for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
-				ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
-				{
-					// `jobs.drain` is the nested span when this dispatch reaches the
-					// pool. Keeping it inside an explicit interior span separates queue
-					// drain and group work from the serial border that follows.
-					ENGINE_PROFILE_CAT("physics.solve-interior", core::ProfileCategory::Physics);
-					if (groups.size() > 1) {
+			if (usingIslands) {
+				// Island tasks own every movable body they touch, so there is no border
+				// and no information to exchange between sweeps. One blocking dispatch
+				// therefore performs all sixteen local sweeps without queue handovers.
+				parallel::Jobs::For(
+					groups.size(),
+					1,
+					[&bodies, &rows, &groups](size_t begin, size_t end) {
+						for (size_t group = begin; group < end; group++) {
+							for (size_t sweep = 0; sweep < SOLVER_ITERATIONS; sweep++) {
+								SweepRows(bodies, rows, groups[group]);
+							}
+						}
+					},
+					2
+				);
+			} else if (usingColoring) {
+				// Each Jobs call completes before the next colour begins. That barrier
+				// is the graph-colouring contract: every task in one wave is disjoint,
+				// while a later wave may read the impulses it left behind.
+				for (size_t round = 0; round < SOLVER_ITERATIONS; round++) {
+					ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
+					for (const SolverColor &wave : colors) {
+						ENGINE_PROFILE_CAT("physics.solve-colour", core::ProfileCategory::Physics);
+						const size_t tasks = (wave.GroupCount + SOLVER_COLOR_BLOCKS_PER_TASK - 1) /
+											 SOLVER_COLOR_BLOCKS_PER_TASK;
 						parallel::Jobs::For(
-							groups.size(),
+							tasks,
 							1,
-							[&bodies, &rows, &groups](size_t begin, size_t end) {
-								for (size_t group = begin; group < end; group++) {
-									for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+							[&bodies, &rows, &groups, wave](size_t begin, size_t end) {
+								for (size_t task = begin; task < end; task++) {
+									const size_t first =
+										wave.FirstGroup + task * SOLVER_COLOR_BLOCKS_PER_TASK;
+									const size_t last = std::min(
+										first + SOLVER_COLOR_BLOCKS_PER_TASK,
+										static_cast<size_t>(wave.FirstGroup + wave.GroupCount)
+									);
+									for (size_t group = first; group < last; group++) {
 										SweepRows(bodies, rows, groups[group]);
 									}
 								}
 							},
-							2
+							1
 						);
-					} else if (!groups.empty()) {
-						for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-							SweepRows(bodies, rows, groups[0]);
-						}
 					}
 				}
-
-				{
-					ENGINE_PROFILE_CAT("physics.solve-border", core::ProfileCategory::Physics);
-					for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-						SweepRows(bodies, rows, border);
+			} else {
+				for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
+					ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
+					{
+						// `jobs.drain` is the nested span when this dispatch reaches the
+						// pool. Keeping it inside an explicit interior span separates queue
+						// drain and group work from the serial border that follows.
+						ENGINE_PROFILE_CAT("physics.solve-interior", core::ProfileCategory::Physics);
+						if (groups.size() > 1) {
+							parallel::Jobs::For(
+								groups.size(),
+								1,
+								[&bodies, &rows, &groups](size_t begin, size_t end) {
+									for (size_t group = begin; group < end; group++) {
+										for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+											SweepRows(bodies, rows, groups[group]);
+										}
+									}
+								},
+								2
+							);
+						} else if (!groups.empty()) {
+							for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+								SweepRows(bodies, rows, groups[0]);
+							}
+						}
+					}
+					{
+						ENGINE_PROFILE_CAT("physics.solve-border", core::ProfileCategory::Physics);
+						for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+							SweepRows(bodies, rows, border);
+						}
 					}
 				}
 			}

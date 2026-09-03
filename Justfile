@@ -136,6 +136,41 @@ script-binding-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_scriptluau
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
 
+# The spatial hierarchy rows, including promoted and mixed scenes. Kept
+# separate because an index change needs its own release measurement cycle.
+spatial-hashgrid-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_spatial
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.hashgrid --all --samples {{samples}}
+
+# Serial and deterministic parallel grid rebuild rows, plus the physics
+# broadphase that owns the Jobs adapter. Output stays on the terminal so a
+# release comparison is attributable to the run that produced it.
+parallel-grid-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_spatial bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.hashgrid --all --samples {{samples}}
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.broadphase --all --samples {{samples}}
+
+# Constraint graph scheduling rows: independent active stacks, sparse sleeping
+# worlds, bridge churn, and the connected shapes that must keep their fallback.
+persistent-island-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.solver --all --samples {{samples}}
+
+# Warm persistent-contact refresh beside a forced exact rebuild of the same
+# stable scene. Output remains on the terminal and no benchmark file is made.
+persistent-manifold-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.narrowphase --all --samples {{samples}}
+
+dynamic-bvh-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_spatial
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.dynamicbvh --all --samples {{samples}}
+
 # Make what was just measured the numbers everything is compared against.
 #
 # Do this on a quiet machine and say so in the commit. A baseline taken while

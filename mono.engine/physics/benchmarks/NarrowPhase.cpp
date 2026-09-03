@@ -40,11 +40,11 @@
 // axes inside that question made box-box rotate the same six vectors ninety
 // times per pair. It was a third of the cost of every row that clips.
 //
-// In a world, over colliders every third one of which is a different shape:
-// 187 us ± 57 for 2000 and 3140 us ± 516 for 8000. That climbs faster than the
-// count because the scene volume is fixed, so density rises with it and the
-// pair count is quadratic in density - the same reason the broad-phase suite
-// beside this one climbs.
+// In a stable world, over colliders every third one of which is a different
+// shape: 35 us for 2000 and 219 us for 8000. Forcing all 8000 contacts through
+// exact reconstruction costs 290 us. The persistent path admits a pair only
+// after two exact observations, so the stable rows measure local-anchor refresh
+// while the forced row includes compact first-hit admission.
 
 #include <engine/core/Random.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -62,6 +62,7 @@
 // Private: the point of this suite is the pair functions themselves, and they
 // are `src/`'s. Measuring them through the store would measure the store.
 #include "ContactPairs.hpp"
+#include "PipelineInternals.hpp"
 #include "ShapeSupport.hpp"
 
 #include <cstddef>
@@ -81,6 +82,7 @@ using engine::physics::BroadPhase;
 using engine::physics::ContactBetween;
 using engine::physics::NarrowPhase;
 using engine::physics::PhysicsWorld;
+using engine::physics::PipelineInternals;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::ShapeInstance;
 using engine::physics::SyncBroadphase;
@@ -243,5 +245,16 @@ BENCH("Narrow phase · 8000 mixed colliders", 30) {
 	for (int pass = 0; pass < 30; pass++) {
 		NarrowPhase(store);
 		Consume(store.Resource<PhysicsWorld>()->Manifolds().size());
+	}
+}
+
+BENCH("Narrow phase · 8000 mixed colliders, forced rebuild", 30) {
+	Store &store = WorldOf(8000);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	for (int pass = 0; pass < 30; pass++) {
+		PipelineInternals::PersistentManifolds(world).clear();
+		PipelineInternals::PersistentCandidates(world).clear();
+		NarrowPhase(store);
+		Consume(world.Manifolds().size());
 	}
 }

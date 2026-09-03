@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 
 namespace engine::spatial {
 
@@ -33,6 +34,24 @@ namespace engine::spatial {
 		if (!(chunkSize > 0.0f)) {
 			ENGINE_WARN("chunk size {} is not positive; using the default {}", chunkSize, DEFAULT_CHUNK_SIZE);
 		}
+	}
+
+	ChunkMapStats ChunkMap::Stats() const {
+		auto bytes = [](const auto &values) {
+			using Value = typename std::remove_reference_t<decltype(values)>::value_type;
+			return ChunkMapStats{values.size() * sizeof(Value), values.capacity() * sizeof(Value)};
+		};
+		auto add = [](ChunkMapStats &total, ChunkMapStats part) {
+			total.LiveBytes += part.LiveBytes;
+			total.RetainedBytes += part.RetainedBytes;
+		};
+		ChunkMapStats total{};
+		add(total, bytes(Placements));
+		add(total, bytes(Coordinates));
+		add(total, bytes(Starts));
+		add(total, bytes(Members));
+		add(total, bytes(Owners));
+		return total;
 	}
 
 	void ChunkMap::Clear() {

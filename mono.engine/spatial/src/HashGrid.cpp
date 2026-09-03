@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <numeric>
+#include <type_traits>
 
 namespace engine::spatial {
 
@@ -22,6 +25,26 @@ namespace engine::spatial {
 		// where a wider table stops paying for itself against the cost of
 		// touching it.
 		constexpr size_t MAXIMUM_BUCKET_COUNT = size_t{1} << 20;
+
+		// A promoted level only pays when its cells separate candidates. The
+		// distributed promoted benchmark stays sparse at this limit, while the
+		// identical-overlap benchmark otherwise builds a large table that every
+		// query has to scan anyway.
+		constexpr uint32_t MAXIMUM_COARSE_BUCKET_POPULATION = 256;
+
+		// Logical shards come from the proxy count alone. A machine with more
+		// workers receives the same cells in the same order as one that runs the
+		// dispatcher inline; workers only change how quickly the fixed shards end.
+		constexpr size_t PARALLEL_PROXY_GRAIN = 2048;
+
+		// The stable radix workspace holds one temporary entry stream, two key
+		// streams and 1024 counters per shard. Eight MiB bounds its retained
+		// capacity; a larger scene stays on the exact serial representation.
+		constexpr size_t MAXIMUM_PARALLEL_SCRATCH_BYTES = size_t{8} << 20;
+
+		size_t ShardBegin(size_t shard, size_t shardCount, size_t proxyCount) {
+			return proxyCount * shard / shardCount;
+		}
 
 		// A power of two at least as large as the entry count.
 		//
@@ -82,6 +105,33 @@ namespace engine::spatial {
 		}
 	}
 
+	HashGridStats HashGrid::Stats() const {
+		auto bytes = [](const auto &values, size_t live) {
+			using Value = typename std::remove_reference_t<decltype(values)>::value_type;
+			return HashGridStats{live * sizeof(Value), values.capacity() * sizeof(Value)};
+		};
+		auto add = [](HashGridStats &total, HashGridStats part) {
+			total.LiveBytes += part.LiveBytes;
+			total.RetainedBytes += part.RetainedBytes;
+		};
+
+		HashGridStats total{};
+		add(total, bytes(Proxies, Proxies.size()));
+		add(total, bytes(Ranges, Ranges.size()));
+		add(total, bytes(BucketStart, BucketStart.size()));
+		add(total, bytes(Entries, Entries.size()));
+		add(total, bytes(Oversized, Oversized.size()));
+		add(total, bytes(ParallelBucketScratch, ParallelBucketScratch.size()));
+		add(total, bytes(ParallelEntryScratch, ParallelEntryScratch.size()));
+		add(total, bytes(ParallelKeys, ParallelKeys.size()));
+		add(total, bytes(ParallelKeyScratch, ParallelKeyScratch.size()));
+		for (const LevelStorage &level : CoarseLevels) {
+			add(total, bytes(level.BucketStart, level.BucketStart.size()));
+			add(total, bytes(level.Entries, level.Entries.size()));
+		}
+		return total;
+	}
+
 	void HashGrid::Clear() {
 		// Cleared, not freed. A grid rebuilt every tick over a steady scene
 		// allocates on the first tick and never again.
@@ -89,7 +139,16 @@ namespace engine::spatial {
 		Ranges.clear();
 		BucketStart.clear();
 		Entries.clear();
+		for (LevelStorage &level : CoarseLevels) {
+			level.BucketStart.clear();
+			level.Entries.clear();
+		}
 		Oversized.clear();
+		ParallelBucketScratch.clear();
+		ParallelEntryScratch.clear();
+		ParallelKeys.clear();
+		ParallelKeyScratch.clear();
+		HasHierarchy = false;
 	}
 
 	void HashGrid::Rebuild(std::span<const Proxy> proxies) {
@@ -97,15 +156,348 @@ namespace engine::spatial {
 		BuildIndex();
 	}
 
+	void HashGrid::RebuildParallel(std::span<const Proxy> proxies, const RangeDispatcher &dispatcher) {
+		Proxies.assign(proxies.begin(), proxies.end());
+		BuildIndexParallel(dispatcher);
+	}
+
+	void HashGrid::BuildIndexParallel(const RangeDispatcher &dispatcher) {
+		const auto scratchLiveBytes = [this]() {
+			return ParallelBucketScratch.size() * sizeof(uint32_t) +
+				   ParallelEntryScratch.size() * sizeof(Entry) + ParallelKeys.size() * sizeof(uint32_t) +
+				   ParallelKeyScratch.size() * sizeof(uint32_t);
+		};
+		const auto scratchRetainedBytes = [this]() {
+			return ParallelBucketScratch.capacity() * sizeof(uint32_t) +
+				   ParallelEntryScratch.capacity() * sizeof(Entry) +
+				   ParallelKeys.capacity() * sizeof(uint32_t) +
+				   ParallelKeyScratch.capacity() * sizeof(uint32_t);
+		};
+		const auto publishSelection = [this,
+									   &scratchLiveBytes,
+									   &scratchRetainedBytes](size_t logicalShards, bool parallel) {
+			core::Metrics::Count("spatial.grid.parallel.rebuilds", 1.0);
+			core::Metrics::SetGauge(
+				"spatial.grid.parallel.logical_shards", static_cast<double>(logicalShards)
+			);
+			core::Metrics::SetGauge("spatial.grid.parallel.used", parallel ? 1.0 : 0.0);
+			core::Metrics::SetGauge(
+				"spatial.grid.parallel.scratch_live_bytes", static_cast<double>(scratchLiveBytes())
+			);
+			core::Metrics::SetGauge(
+				"spatial.grid.parallel.scratch_retained_bytes", static_cast<double>(scratchRetainedBytes())
+			);
+		};
+		const auto serial = [&]() {
+			ParallelBucketScratch.clear();
+			ParallelEntryScratch.clear();
+			ParallelKeys.clear();
+			ParallelKeyScratch.clear();
+			publishSelection(1, false);
+			BuildIndex();
+		};
+		const auto releaseScratch = [this]() {
+			std::vector<uint32_t>{}.swap(ParallelBucketScratch);
+			std::vector<Entry>{}.swap(ParallelEntryScratch);
+			std::vector<uint32_t>{}.swap(ParallelKeys);
+			std::vector<uint32_t>{}.swap(ParallelKeyScratch);
+		};
+
+		if (dispatcher.Run == nullptr || Proxies.size() < PARALLEL_MINIMUM_PROXIES) {
+			serial();
+			return;
+		}
+		if (HasHierarchy) {
+			// Repeated promoted scenes are the common hierarchy case. Their prior
+			// layout proves the radix workspace cannot be used, so skip a second
+			// classification pass before the exact serial hierarchy builder.
+			core::Metrics::Count("spatial.grid.parallel.hierarchy_cached_serial_fallbacks", 1.0);
+			serial();
+			return;
+		}
+
+		const size_t candidateShards = std::min(
+			MAXIMUM_PARALLEL_SHARDS, (Proxies.size() + PARALLEL_PROXY_GRAIN - 1) / PARALLEL_PROXY_GRAIN
+		);
+		if (candidateShards < 2) {
+			serial();
+			return;
+		}
+
+		const core::ScopedObservation timed("spatial.grid.rebuild.parallel");
+		Ranges.clear();
+		BucketStart.clear();
+		Entries.clear();
+		for (LevelStorage &level : CoarseLevels) {
+			level.BucketStart.clear();
+			level.Entries.clear();
+		}
+		Oversized.clear();
+		HasHierarchy = false;
+		Ranges.resize(Proxies.size());
+
+		struct ClassifyContext {
+			HashGrid *Grid;
+			std::array<size_t, MAXIMUM_PARALLEL_SHARDS> *ShardEntries;
+			std::array<uint8_t, MAXIMUM_PARALLEL_SHARDS> *BaseOnly;
+			size_t Shards;
+
+			static void Run(void *bodyContext, size_t beginShard, size_t endShard) {
+				auto &context = *static_cast<ClassifyContext *>(bodyContext);
+				for (size_t shard = beginShard; shard < endShard; shard++) {
+					const size_t begin = ShardBegin(shard, context.Shards, context.Grid->Proxies.size());
+					const size_t end = ShardBegin(shard + 1, context.Shards, context.Grid->Proxies.size());
+					size_t entries = 0;
+					bool baseOnly = true;
+					for (size_t index = begin; index < end; index++) {
+						const core::AABB &bounds = context.Grid->Proxies[index].Bounds;
+						HashGrid::CellRange &range = context.Grid->Ranges[index];
+						range.Level = 0;
+						range.MinimumX = CellCoordinateOf(bounds.Minimum.X, context.Grid->InverseSpacing);
+						range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, context.Grid->InverseSpacing);
+						range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, context.Grid->InverseSpacing);
+						range.MaximumX = CellCoordinateOf(bounds.Maximum.X, context.Grid->InverseSpacing);
+						range.MaximumY = CellCoordinateOf(bounds.Maximum.Y, context.Grid->InverseSpacing);
+						range.MaximumZ = CellCoordinateOf(bounds.Maximum.Z, context.Grid->InverseSpacing);
+						const int64_t spanX = static_cast<int64_t>(range.MaximumX) - range.MinimumX + 1;
+						const int64_t spanY = static_cast<int64_t>(range.MaximumY) - range.MinimumY + 1;
+						const int64_t spanZ = static_cast<int64_t>(range.MaximumZ) - range.MinimumZ + 1;
+						const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
+						const int64_t cells = inverted ? 0 : spanX * spanY * spanZ;
+						if (inverted || cells > static_cast<int64_t>(HashGrid::MAXIMUM_CELLS_PER_PROXY)) {
+							baseOnly = false;
+							continue;
+						}
+						entries += static_cast<size_t>(cells);
+					}
+					(*context.ShardEntries)[shard] = entries;
+					(*context.BaseOnly)[shard] = baseOnly ? 1 : 0;
+				}
+			}
+		} classify{this, &ParallelShardEntries, &ParallelShardBaseOnly, candidateShards};
+		{
+			const core::ScopedObservation rangeTimed("spatial.grid.ranges.parallel");
+			dispatcher.Run(dispatcher.Context, candidateShards, &ClassifyContext::Run, &classify);
+		}
+		core::Metrics::Count("spatial.grid.parallel.range_proxies", static_cast<double>(Proxies.size()));
+
+		if (std::any_of(
+				ParallelShardBaseOnly.begin(),
+				ParallelShardBaseOnly.begin() + candidateShards,
+				[](uint8_t value) { return value == 0; }
+			)) {
+			// The hierarchy is an exact extension of the serial builder. Falling
+			// through here preserves its promotion and residual order until its own
+			// multi-level count tables can share the same bounded scratch shape.
+			core::Metrics::Count("spatial.grid.parallel.hierarchy_serial_fallbacks", 1.0);
+			serial();
+			return;
+		}
+
+		const size_t entryCount = std::accumulate(
+			ParallelShardEntries.begin(), ParallelShardEntries.begin() + candidateShards, size_t{0}
+		);
+		const size_t buckets = ChooseBucketCount(entryCount);
+		const size_t histogramBytes = candidateShards * 1024 * sizeof(uint32_t);
+		const size_t entryScratchBytes = sizeof(Entry) + 2 * sizeof(uint32_t);
+		const size_t maximumEntries =
+			histogramBytes >= MAXIMUM_PARALLEL_SCRATCH_BYTES
+				? 0
+				: (MAXIMUM_PARALLEL_SCRATCH_BYTES - histogramBytes) / entryScratchBytes;
+		const size_t logicalShards = entryCount <= maximumEntries ? candidateShards : 0;
+		if (logicalShards < 2) {
+			serial();
+			return;
+		}
+
+		for (size_t shard = 0, offset = 0; shard < logicalShards; shard++) {
+			ParallelShardEntryStarts[shard] = offset;
+			offset += ParallelShardEntries[shard];
+		}
+		ParallelBucketScratch.assign(logicalShards * 1024, 0);
+		Entries.resize(entryCount);
+		ParallelEntryScratch.resize(entryCount);
+		ParallelKeys.resize(entryCount);
+		ParallelKeyScratch.resize(entryCount);
+		if (scratchRetainedBytes() > MAXIMUM_PARALLEL_SCRATCH_BYTES) {
+			releaseScratch();
+			serial();
+			return;
+		}
+
+		struct EnumerateContext {
+			HashGrid *Grid;
+			size_t Shards;
+			size_t Buckets;
+
+			static void Run(void *bodyContext, size_t beginShard, size_t endShard) {
+				auto &context = *static_cast<EnumerateContext *>(bodyContext);
+				for (size_t shard = beginShard; shard < endShard; shard++) {
+					uint32_t *histogram = context.Grid->ParallelBucketScratch.data() + shard * 1024;
+					const size_t begin = ShardBegin(shard, context.Shards, context.Grid->Proxies.size());
+					const size_t end = ShardBegin(shard + 1, context.Shards, context.Grid->Proxies.size());
+					size_t write = context.Grid->ParallelShardEntryStarts[shard];
+					for (size_t index = begin; index < end; index++) {
+						const HashGrid::CellRange &range = context.Grid->Ranges[index];
+						ForEachCell(
+							range.MinimumX,
+							range.MinimumY,
+							range.MinimumZ,
+							range.MaximumX,
+							range.MaximumY,
+							range.MaximumZ,
+							[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+								context.Grid->Entries[write] = {
+									cellX, cellY, cellZ, static_cast<uint32_t>(index)
+								};
+								const uint32_t key = HashCell(cellX, cellY, cellZ) & (context.Buckets - 1);
+								context.Grid->ParallelKeys[write] = key;
+								histogram[(key >> 10) & 1023]++;
+								write++;
+							}
+						);
+					}
+				}
+			}
+		} enumerate{this, logicalShards, buckets};
+		{
+			const core::ScopedObservation enumerateTimed("spatial.grid.enumerate.parallel");
+			dispatcher.Run(dispatcher.Context, logicalShards, &EnumerateContext::Run, &enumerate);
+		}
+
+		const auto prepareCursors = [this, logicalShards]() {
+			std::array<uint32_t, 1025> starts{};
+			for (size_t bin = 0; bin < 1024; bin++) {
+				for (size_t shard = 0; shard < logicalShards; shard++) {
+					starts[bin + 1] += this->ParallelBucketScratch[shard * 1024 + bin];
+				}
+				starts[bin + 1] += starts[bin];
+			}
+			for (size_t bin = 0; bin < 1024; bin++) {
+				uint32_t cursor = starts[bin];
+				for (size_t shard = 0; shard < logicalShards; shard++) {
+					uint32_t &shardCursor = this->ParallelBucketScratch[shard * 1024 + bin];
+					const uint32_t count = shardCursor;
+					shardCursor = cursor;
+					cursor += count;
+				}
+			}
+		};
+		prepareCursors();
+		std::array<uint32_t, 1025> highStarts{};
+		for (size_t bin = 1; bin < 1024; bin++) {
+			highStarts[bin] = ParallelBucketScratch[bin];
+		}
+		highStarts[1024] = static_cast<uint32_t>(entryCount);
+		struct HighScatterContext {
+			HashGrid *Grid;
+			size_t Shards;
+
+			static void Run(void *bodyContext, size_t beginShard, size_t endShard) {
+				auto &context = *static_cast<HighScatterContext *>(bodyContext);
+				for (size_t shard = beginShard; shard < endShard; shard++) {
+					uint32_t *cursors = context.Grid->ParallelBucketScratch.data() + shard * 1024;
+					const size_t begin = context.Grid->ParallelShardEntryStarts[shard];
+					const size_t end = begin + context.Grid->ParallelShardEntries[shard];
+					for (size_t index = begin; index < end; index++) {
+						const uint32_t key = context.Grid->ParallelKeys[index];
+						const size_t output = cursors[(key >> 10) & 1023]++;
+						context.Grid->ParallelEntryScratch[output] = context.Grid->Entries[index];
+						context.Grid->ParallelKeyScratch[output] = key;
+					}
+				}
+			}
+		} highScatter{this, logicalShards};
+		{
+			const core::ScopedObservation highScatterTimed("spatial.grid.radix.high.scatter.parallel");
+			dispatcher.Run(dispatcher.Context, logicalShards, &HighScatterContext::Run, &highScatter);
+		}
+		size_t highBinCount = 0;
+		for (size_t bin = 0; bin < 1024; bin++) {
+			if (highStarts[bin] != highStarts[bin + 1]) {
+				ParallelHighBins[highBinCount++] = static_cast<uint16_t>(bin);
+			}
+		}
+		BucketStart.assign(buckets + 1, 0);
+		for (size_t high = 0; high < 1024; high++) {
+			const size_t beginBucket = high * 1024;
+			const size_t endBucket = std::min(buckets, beginBucket + 1024);
+			for (size_t bucket = beginBucket; bucket < endBucket; bucket++) {
+				BucketStart[bucket] = highStarts[high];
+			}
+		}
+		BucketStart[buckets] = static_cast<uint32_t>(entryCount);
+		struct LowSortContext {
+			HashGrid *Grid;
+			std::array<uint16_t, 1024> *HighBins;
+			std::array<uint32_t, 1025> *HighStarts;
+			size_t BinCount;
+			size_t Buckets;
+
+			static void Run(void *bodyContext, size_t beginBin, size_t endBin) {
+				auto &context = *static_cast<LowSortContext *>(bodyContext);
+				for (size_t binIndex = beginBin; binIndex < endBin; binIndex++) {
+					const size_t high = (*context.HighBins)[binIndex];
+					const size_t begin = (*context.HighStarts)[high];
+					const size_t end = (*context.HighStarts)[high + 1];
+					std::array<uint32_t, 1024> cursors{};
+					for (size_t index = begin; index < end; index++) {
+						const uint32_t key = context.Grid->ParallelKeyScratch[index];
+						cursors[key & 1023]++;
+					}
+					uint32_t cursor = static_cast<uint32_t>(begin);
+					for (size_t low = 0; low < 1024; low++) {
+						const size_t bucket = high * 1024 + low;
+						if (bucket < context.Buckets) {
+							context.Grid->BucketStart[bucket] = cursor;
+						}
+						const uint32_t count = cursors[low];
+						cursors[low] = cursor;
+						cursor += count;
+					}
+					for (size_t index = begin; index < end; index++) {
+						const uint32_t key = context.Grid->ParallelKeyScratch[index];
+						const size_t output = cursors[key & 1023]++;
+						context.Grid->Entries[output] = context.Grid->ParallelEntryScratch[index];
+					}
+				}
+			}
+		} lowSort{this, &ParallelHighBins, &highStarts, highBinCount, buckets};
+		{
+			const core::ScopedObservation lowSortTimed("spatial.grid.radix.low.sort.parallel");
+			dispatcher.Run(dispatcher.Context, highBinCount, &LowSortContext::Run, &lowSort);
+		}
+
+		PublishedHierarchy = false;
+		core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
+		core::Metrics::Count("spatial.grid.parallel.fill_entries", static_cast<double>(entryCount));
+		publishSelection(logicalShards, true);
+		ENGINE_TRACE(
+			"rebuilt in parallel: {} proxies, {} cell entries, {} buckets, {} logical shards",
+			Proxies.size(),
+			entryCount,
+			buckets,
+			logicalShards
+		);
+	}
+
 	void HashGrid::BuildIndex() {
 		// **A histogram and not a counter.** This runs once a tick over the whole
 		// scene, and what a stutter needs is the worst rebuild rather than the
 		// mean of sixty of them.
 		const core::ScopedObservation timed("spatial.grid.rebuild");
+		ParallelBucketScratch.clear();
+		ParallelEntryScratch.clear();
+		ParallelKeys.clear();
+		ParallelKeyScratch.clear();
 
 		Ranges.clear();
 		BucketStart.clear();
 		Entries.clear();
+		for (LevelStorage &level : CoarseLevels) {
+			level.BucketStart.clear();
+			level.Entries.clear();
+		}
 		Oversized.clear();
 		Ranges.resize(Proxies.size());
 
@@ -113,90 +505,194 @@ namespace engine::spatial {
 		// needs. The ranges are kept rather than recomputed, because the two
 		// passes below and every later query all want them, and six floors per
 		// proxy repeated three times costs more than the bytes.
-		size_t entryCount = 0;
+		std::array<size_t, HIERARCHY_LEVEL_COUNT> entryCounts{};
+		std::array<size_t, HIERARCHY_LEVEL_COUNT> proxyCounts{};
 		{
 			const core::ScopedObservation rangeTimed("spatial.grid.ranges");
 			for (size_t index = 0; index < Proxies.size(); index++) {
 				const core::AABB &bounds = Proxies[index].Bounds;
 				CellRange &range = Ranges[index];
 
+				// The usual case is deliberately the old six-coordinate path. It
+				// avoids validating every ordinary proxy and avoids entering the
+				// hierarchy loop until the base placement actually fails.
 				range.MinimumX = CellCoordinateOf(bounds.Minimum.X, InverseSpacing);
 				range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, InverseSpacing);
 				range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, InverseSpacing);
 				range.MaximumX = CellCoordinateOf(bounds.Maximum.X, InverseSpacing);
 				range.MaximumY = CellCoordinateOf(bounds.Maximum.Y, InverseSpacing);
 				range.MaximumZ = CellCoordinateOf(bounds.Maximum.Z, InverseSpacing);
-
 				const int64_t spanX = static_cast<int64_t>(range.MaximumX) - range.MinimumX + 1;
 				const int64_t spanY = static_cast<int64_t>(range.MaximumY) - range.MinimumY + 1;
 				const int64_t spanZ = static_cast<int64_t>(range.MaximumZ) - range.MinimumZ + 1;
-
-				// A box built the wrong way round covers no cells and can still
-				// satisfy AABB::Overlaps against a large enough box, so it joins
-				// the oversized list where the exact test answers it - rather than
-				// being dropped here, which would make the index disagree with the
-				// type.
 				const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
 				const int64_t cells = inverted ? 0 : spanX * spanY * spanZ;
-
-				if (inverted || cells > static_cast<int64_t>(MAXIMUM_CELLS_PER_PROXY)) {
-					Oversized.push_back(static_cast<uint32_t>(index));
-
-					// Emptied so that both build passes skip it without consulting
-					// the list, and so that nothing later mistakes a huge range for
-					// one somebody meant.
-					range.MaximumX = range.MinimumX - 1;
+				if (!inverted && cells <= static_cast<int64_t>(MAXIMUM_CELLS_PER_PROXY)) {
+					entryCounts[0] += static_cast<size_t>(cells);
 					continue;
 				}
-				entryCount += static_cast<size_t>(cells);
+
+				const bool valid = std::isfinite(bounds.Minimum.X) && std::isfinite(bounds.Minimum.Y) &&
+								   std::isfinite(bounds.Minimum.Z) && std::isfinite(bounds.Maximum.X) &&
+								   std::isfinite(bounds.Maximum.Y) && std::isfinite(bounds.Maximum.Z) &&
+								   bounds.Minimum.X <= bounds.Maximum.X &&
+								   bounds.Minimum.Y <= bounds.Maximum.Y &&
+								   bounds.Minimum.Z <= bounds.Maximum.Z;
+				bool placed = false;
+				float levelInverse = InverseSpacing / HIERARCHY_SCALE;
+				for (size_t level = 1; valid && level < HIERARCHY_LEVEL_COUNT; level++) {
+					range.MinimumX = CellCoordinateOf(bounds.Minimum.X, levelInverse);
+					range.MinimumY = CellCoordinateOf(bounds.Minimum.Y, levelInverse);
+					range.MinimumZ = CellCoordinateOf(bounds.Minimum.Z, levelInverse);
+					range.MaximumX = CellCoordinateOf(bounds.Maximum.X, levelInverse);
+					range.MaximumY = CellCoordinateOf(bounds.Maximum.Y, levelInverse);
+					range.MaximumZ = CellCoordinateOf(bounds.Maximum.Z, levelInverse);
+
+					const uint64_t coarseSpanX =
+						static_cast<uint64_t>(static_cast<int64_t>(range.MaximumX) - range.MinimumX + 1);
+					const uint64_t coarseSpanY =
+						static_cast<uint64_t>(static_cast<int64_t>(range.MaximumY) - range.MinimumY + 1);
+					const uint64_t coarseSpanZ =
+						static_cast<uint64_t>(static_cast<int64_t>(range.MaximumZ) - range.MinimumZ + 1);
+					const bool fits =
+						coarseSpanX != 0 && coarseSpanY != 0 && coarseSpanZ != 0 &&
+						coarseSpanX <= MAXIMUM_CELLS_PER_PROMOTED_PROXY &&
+						coarseSpanY <= MAXIMUM_CELLS_PER_PROMOTED_PROXY / coarseSpanX &&
+						coarseSpanZ <= MAXIMUM_CELLS_PER_PROMOTED_PROXY / (coarseSpanX * coarseSpanY);
+					if (!fits) {
+						levelInverse /= HIERARCHY_SCALE;
+						continue;
+					}
+					range.Level = static_cast<uint8_t>(level);
+					entryCounts[level] += static_cast<size_t>(coarseSpanX * coarseSpanY * coarseSpanZ);
+					proxyCounts[level]++;
+					placed = true;
+					break;
+				}
+
+				if (!placed) {
+					Oversized.push_back(static_cast<uint32_t>(index));
+					range.MaximumX = range.MinimumX - 1;
+				}
 			}
 		}
+		const bool hasPromotedCandidates =
+			std::any_of(entryCounts.begin() + 1, entryCounts.end(), [](size_t count) { return count != 0; });
+		if (!hasPromotedCandidates && Oversized.empty() && !PublishedHierarchy) {
+			// Preserve the ordinary rebuild's original histogram and fill shape. A
+			// grid that has never needed the hierarchy does not need its metrics or
+			// retained-byte accounting on every tick.
+			const size_t entryCount = entryCounts[0];
+			const size_t buckets = ChooseBucketCount(entryCount);
+			{
+				const core::ScopedObservation histogramTimed("spatial.grid.histogram");
+				BucketStart.assign(buckets + 1, 0);
 
-		const size_t buckets = ChooseBucketCount(entryCount);
+				core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
+
+				if (buckets == MAXIMUM_BUCKET_COUNT && entryCount > buckets) {
+					ENGINE_WARN_EVERY(
+						10.0,
+						"{} cell entries over the {} bucket cap; every query now scans a shared bucket",
+						entryCount,
+						MAXIMUM_BUCKET_COUNT
+					);
+				}
+				ENGINE_TRACE(
+					"rebuilt: {} proxies, {} cell entries, {} buckets, {} oversized",
+					Proxies.size(),
+					entryCount,
+					buckets,
+					Oversized.size()
+				);
+
+				for (const CellRange &range : Ranges) {
+					ForEachCell(
+						range.MinimumX,
+						range.MinimumY,
+						range.MinimumZ,
+						range.MaximumX,
+						range.MaximumY,
+						range.MaximumZ,
+						[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+							BucketStart[(HashCell(cellX, cellY, cellZ) & (buckets - 1)) + 1]++;
+						}
+					);
+				}
+				for (size_t bucket = 0; bucket < buckets; bucket++) {
+					BucketStart[bucket + 1] += BucketStart[bucket];
+				}
+			}
+
+			{
+				const core::ScopedObservation fillTimed("spatial.grid.fill");
+				Entries.resize(entryCount);
+				for (size_t index = 0; index < Ranges.size(); index++) {
+					const CellRange &range = Ranges[index];
+					ForEachCell(
+						range.MinimumX,
+						range.MinimumY,
+						range.MinimumZ,
+						range.MaximumX,
+						range.MaximumY,
+						range.MaximumZ,
+						[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
+							const size_t bucket = HashCell(cellX, cellY, cellZ) & (buckets - 1);
+							Entries[BucketStart[bucket]++] =
+								Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
+						}
+					);
+				}
+				for (size_t bucket = buckets; bucket > 0; bucket--) {
+					BucketStart[bucket] = BucketStart[bucket - 1];
+				}
+				BucketStart[0] = 0;
+			}
+
+			HasHierarchy = false;
+			return;
+		}
+
 		{
 			const core::ScopedObservation histogramTimed("spatial.grid.histogram");
-			BucketStart.assign(buckets + 1, 0);
-
-			core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
-
-			// **Every oversized proxy is tested exactly against every query**, so a
-			// scene that accumulates them loses the acceleration one proxy at a
-			// time with nothing reporting it.
-			if (!Oversized.empty()) {
-				core::Metrics::Count("spatial.grid.oversized", static_cast<double>(Oversized.size()));
-				ENGINE_DEBUG_EVERY(
-					5.0,
-					"{} of {} proxies span more than {} cells at spacing {} and are tested exactly by every "
-					"query",
-					Oversized.size(),
-					Proxies.size(),
-					MAXIMUM_CELLS_PER_PROXY,
-					Spacing
-				);
+			if (hasPromotedCandidates) {
+				float levelSpacing = Spacing * HIERARCHY_SCALE;
+				for (LevelStorage &storage : CoarseLevels) {
+					storage.Spacing = levelSpacing;
+					storage.InverseSpacing = 1.0f / levelSpacing;
+					levelSpacing *= HIERARCHY_SCALE;
+				}
 			}
-
-			// At the cap the table is no longer one bucket per entry, so a query
-			// walks somebody else's cell contents on every lookup.
-			if (buckets == MAXIMUM_BUCKET_COUNT && entryCount > buckets) {
-				ENGINE_WARN_EVERY(
-					10.0,
-					"{} cell entries over the {} bucket cap; every query now scans a shared bucket",
-					entryCount,
-					MAXIMUM_BUCKET_COUNT
-				);
+			std::array<std::vector<uint32_t> *, HIERARCHY_LEVEL_COUNT> bucketStarts{&BucketStart};
+			for (size_t level = 1; level < HIERARCHY_LEVEL_COUNT; level++) {
+				bucketStarts[level] = &CoarseLevels[level - 1].BucketStart;
 			}
-
-			ENGINE_TRACE(
-				"rebuilt: {} proxies, {} cell entries, {} buckets, {} oversized",
-				Proxies.size(),
-				entryCount,
-				buckets,
-				Oversized.size()
-			);
-
-			// Pass two: how many entries each bucket owns, counted one slot to the
-			// right so the prefix sum turns the counts into starts in place.
+			if (!hasPromotedCandidates) {
+				BucketStart.assign(ChooseBucketCount(entryCounts[0]) + 1, 0);
+			} else {
+				for (size_t level = 0; level < HIERARCHY_LEVEL_COUNT; level++) {
+					if (entryCounts[level] == 0) {
+						continue;
+					}
+					const size_t buckets = ChooseBucketCount(entryCounts[level]);
+					bucketStarts[level]->assign(buckets + 1, 0);
+					if (buckets == MAXIMUM_BUCKET_COUNT && entryCounts[level] > buckets) {
+						ENGINE_WARN_EVERY(
+							10.0,
+							"{} cell entries over the {} bucket cap at hierarchy level {}",
+							entryCounts[level],
+							MAXIMUM_BUCKET_COUNT,
+							level
+						);
+					}
+				}
+			}
 			for (const CellRange &range : Ranges) {
+				if (range.MaximumX < range.MinimumX) {
+					continue;
+				}
+				std::vector<uint32_t> &bucketStart = *bucketStarts[range.Level];
+				const size_t buckets = bucketStart.size() - 1;
 				ForEachCell(
 					range.MinimumX,
 					range.MinimumY,
@@ -205,24 +701,117 @@ namespace engine::spatial {
 					range.MaximumY,
 					range.MaximumZ,
 					[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
-						BucketStart[(HashCell(cellX, cellY, cellZ) & (buckets - 1)) + 1]++;
+						bucketStart[(HashCell(cellX, cellY, cellZ) & (buckets - 1)) + 1]++;
 					}
 				);
 			}
-			for (size_t bucket = 0; bucket < buckets; bucket++) {
-				BucketStart[bucket + 1] += BucketStart[bucket];
+			if (hasPromotedCandidates) {
+				std::array<bool, HIERARCHY_LEVEL_COUNT> rejected{};
+				for (size_t level = 1; level < HIERARCHY_LEVEL_COUNT; level++) {
+					std::vector<uint32_t> &bucketStart = *bucketStarts[level];
+					if (bucketStart.empty()) {
+						continue;
+					}
+					const uint32_t maximumPopulation =
+						*std::max_element(bucketStart.begin() + 1, bucketStart.end());
+					if (maximumPopulation <= MAXIMUM_COARSE_BUCKET_POPULATION) {
+						continue;
+					}
+
+					rejected[level] = true;
+					entryCounts[level] = 0;
+					proxyCounts[level] = 0;
+					bucketStart.clear();
+				}
+				if (std::any_of(rejected.begin(), rejected.end(), [](bool value) { return value; })) {
+					// Rebuild this in source order. Appending rejected ranges after the
+					// prior residual list would make fallback traversal history-dependent.
+					Oversized.clear();
+					for (size_t index = 0; index < Ranges.size(); index++) {
+						CellRange &range = Ranges[index];
+						if (range.MaximumX < range.MinimumX || rejected[range.Level]) {
+							range.MaximumX = range.MinimumX - 1;
+							Oversized.push_back(static_cast<uint32_t>(index));
+						}
+					}
+				}
 			}
+			for (std::vector<uint32_t> *bucketStart : bucketStarts) {
+				if (bucketStart->empty()) {
+					continue;
+				}
+				for (size_t bucket = 0; bucket + 1 < bucketStart->size(); bucket++) {
+					(*bucketStart)[bucket + 1] += (*bucketStart)[bucket];
+				}
+			}
+		}
+		const size_t promotedProxyCount =
+			std::accumulate(proxyCounts.begin() + 1, proxyCounts.end(), size_t{0});
+		proxyCounts[0] = Proxies.size() - Oversized.size() - promotedProxyCount;
+
+		core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
+		HasHierarchy =
+			!Oversized.empty() ||
+			std::any_of(proxyCounts.begin() + 1, proxyCounts.end(), [](size_t count) { return count != 0; });
+		const bool publishHierarchy = HasHierarchy || PublishedHierarchy;
+		const char *const proxyMetrics[] = {
+			"spatial.grid.level0.proxies",
+			"spatial.grid.level1.proxies",
+			"spatial.grid.level2.proxies",
+			"spatial.grid.level3.proxies",
+			"spatial.grid.level4.proxies",
+		};
+		const char *const entryMetrics[] = {
+			"spatial.grid.level0.entries",
+			"spatial.grid.level1.entries",
+			"spatial.grid.level2.entries",
+			"spatial.grid.level3.entries",
+			"spatial.grid.level4.entries",
+		};
+		if (publishHierarchy) {
+			core::Metrics::SetGauge(
+				"spatial.grid.hierarchy.levels",
+				static_cast<double>(std::count_if(proxyCounts.begin(), proxyCounts.end(), [](size_t count) {
+					return count != 0;
+				}))
+			);
+			for (size_t level = 0; level < HIERARCHY_LEVEL_COUNT; level++) {
+				core::Metrics::SetGauge(proxyMetrics[level], static_cast<double>(proxyCounts[level]));
+				core::Metrics::SetGauge(entryMetrics[level], static_cast<double>(entryCounts[level]));
+			}
+			core::Metrics::SetGauge("spatial.grid.oversized", static_cast<double>(Oversized.size()));
+		}
+		PublishedHierarchy = HasHierarchy;
+		if (!Oversized.empty()) {
+			ENGINE_DEBUG_EVERY(
+				5.0,
+				"{} of {} proxies use exact residual traversal after hierarchy placement",
+				Oversized.size(),
+				Proxies.size()
+			);
 		}
 
 		{
 			const core::ScopedObservation fillTimed("spatial.grid.fill");
-
-			// Pass three: place. The starts serve as cursors while filling, then the
-			// backward shift below restores them. Keeping a second bucket-sized array
-			// for this one pass costs as much memory as the lookup table itself.
-			Entries.resize(entryCount);
+			std::array<std::vector<uint32_t> *, HIERARCHY_LEVEL_COUNT> bucketStarts{&BucketStart};
+			std::array<std::vector<Entry> *, HIERARCHY_LEVEL_COUNT> entries{&Entries};
+			for (size_t level = 1; level < HIERARCHY_LEVEL_COUNT; level++) {
+				bucketStarts[level] = &CoarseLevels[level - 1].BucketStart;
+				entries[level] = &CoarseLevels[level - 1].Entries;
+			}
+			for (size_t level = 0; level < HIERARCHY_LEVEL_COUNT; level++) {
+				if (entryCounts[level] != 0) {
+					entries[level]->resize(entryCounts[level]);
+				}
+			}
 			for (size_t index = 0; index < Ranges.size(); index++) {
 				const CellRange &range = Ranges[index];
+				if (range.MaximumX < range.MinimumX) {
+					continue;
+				}
+				std::vector<uint32_t> &bucketStart = *bucketStarts[range.Level];
+				std::vector<Entry> &levelEntries = *entries[range.Level];
+				const size_t buckets = bucketStart.size() - 1;
 				ForEachCell(
 					range.MinimumX,
 					range.MinimumY,
@@ -232,18 +821,43 @@ namespace engine::spatial {
 					range.MaximumZ,
 					[&](int32_t cellX, int32_t cellY, int32_t cellZ) {
 						const size_t bucket = HashCell(cellX, cellY, cellZ) & (buckets - 1);
-						Entries[BucketStart[bucket]++] = Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
+						levelEntries[bucketStart[bucket]++] =
+							Entry{cellX, cellY, cellZ, static_cast<uint32_t>(index)};
 					}
 				);
 			}
-
-			// Every cursor now equals the old start of the bucket to its right. Shift
-			// those ends back into place from right to left so no value is overwritten
-			// before it is read. Entry order stays the proxy and cell order above.
-			for (size_t bucket = buckets; bucket > 0; bucket--) {
-				BucketStart[bucket] = BucketStart[bucket - 1];
+			for (std::vector<uint32_t> *bucketStart : bucketStarts) {
+				if (bucketStart->empty()) {
+					continue;
+				}
+				for (size_t bucket = bucketStart->size() - 1; bucket > 0; bucket--) {
+					(*bucketStart)[bucket] = (*bucketStart)[bucket - 1];
+				}
+				(*bucketStart)[0] = 0;
 			}
-			BucketStart[0] = 0;
+
+			ENGINE_TRACE(
+				"rebuilt: {} proxies, {} base entries, {} hierarchy levels, {} residual",
+				Proxies.size(),
+				entryCounts[0],
+				std::count_if(
+					proxyCounts.begin(), proxyCounts.end(), [](size_t count) { return count != 0; }
+				),
+				Oversized.size()
+			);
+		}
+
+		size_t retainedBytes = Proxies.capacity() * sizeof(Proxy) + Ranges.capacity() * sizeof(CellRange) +
+							   BucketStart.capacity() * sizeof(uint32_t) +
+							   Entries.capacity() * sizeof(Entry) + Oversized.capacity() * sizeof(uint32_t);
+		for (const LevelStorage &level : CoarseLevels) {
+			retainedBytes +=
+				level.BucketStart.capacity() * sizeof(uint32_t) + level.Entries.capacity() * sizeof(Entry);
+		}
+		if (publishHierarchy) {
+			core::Metrics::SetGauge(
+				"spatial.grid.hierarchy.retained_bytes", static_cast<double>(retainedBytes)
+			);
 		}
 	}
 

@@ -78,16 +78,141 @@ using engine::physics::PhysicsWorld;
 using engine::physics::PipelineInternals;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::Publish;
+using engine::physics::RestingBody;
 using engine::physics::Solve;
 using engine::physics::SyncBroadphase;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 using engine::testing::Consume;
 
 namespace solver_bench {
+	struct SolverScene {
+		std::unique_ptr<Store> World;
+		std::vector<Entity> Bodies;
+	};
+
+	Entity AddDynamicBox(Store &store, Vector3 position, Vector3 extent = Vector3{0.5f, 0.5f, 0.5f}) {
+		const Entity entity = store.Create();
+		store.Set<Transform>(entity, Transform{CFrame{position}});
+		Collider collider;
+		collider.Extent = extent;
+		store.Set<Collider>(entity, collider);
+		store.Set<Simulated>(entity, Simulated{});
+		store.Set<Motion>(entity, Motion{});
+		store.Set<RigidBody>(entity, RigidBody{});
+		return entity;
+	}
+
+	void BuildContacts(Store &store) {
+		SyncBroadphase(store);
+		BroadPhase(store);
+		NarrowPhase(store);
+		Solve(store);
+	}
+
+	SolverScene DenseConnected(size_t count) {
+		SolverScene scene;
+		scene.World = std::make_unique<Store>("physics.bench.solver.dense");
+		PreparePhysicsWorld(*scene.World, 1.0f);
+		for (size_t at = 0; at < count; at++) {
+			scene.Bodies.push_back(AddDynamicBox(*scene.World, Vector3::Zero));
+		}
+		BuildContacts(*scene.World);
+		return scene;
+	}
+
+	SolverScene HighDegreeStar(size_t leaves) {
+		SolverScene scene;
+		scene.World = std::make_unique<Store>("physics.bench.solver.star");
+		PreparePhysicsWorld(*scene.World, 1.0f);
+		size_t side = 1;
+		while (side * side < leaves) {
+			side++;
+		}
+		const float half = static_cast<float>(side) * 0.6f;
+		scene.Bodies.push_back(AddDynamicBox(*scene.World, Vector3::Zero, Vector3{half, half, half}));
+		for (size_t leaf = 0; leaf < leaves; leaf++) {
+			const float y = static_cast<float>(leaf % side) * 1.1f - half + 0.5f;
+			const float z = static_cast<float>(leaf / side) * 1.1f - half + 0.5f;
+			scene.Bodies.push_back(AddDynamicBox(*scene.World, Vector3{half + 0.49f, y, z}));
+		}
+		BuildContacts(*scene.World);
+		return scene;
+	}
+
+	// One connected, low-degree graph. Every box touches its two neighbours, so
+	// greedy colouring produces two broad waves instead of the dense graph's
+	// ever-growing number. This is the shape the retained colouring is meant to
+	// win, not the independent stacks that happen to share only an immovable floor.
+	SolverScene ConnectedChain(size_t count) {
+		SolverScene scene;
+		scene.World = std::make_unique<Store>("physics.bench.solver.chain");
+		PreparePhysicsWorld(*scene.World, 1.0f);
+		for (size_t at = 0; at < count; at++) {
+			scene.Bodies.push_back(
+				AddDynamicBox(*scene.World, Vector3{static_cast<float>(at) * 0.98f, 0.0f, 0.0f})
+			);
+		}
+		BuildContacts(*scene.World);
+		return scene;
+	}
+
+	SolverScene ConnectedLattice(size_t side) {
+		SolverScene scene;
+		scene.World = std::make_unique<Store>("physics.bench.solver.lattice");
+		PreparePhysicsWorld(*scene.World, 1.0f);
+		for (size_t z = 0; z < side; z++) {
+			for (size_t x = 0; x < side; x++) {
+				scene.Bodies.push_back(AddDynamicBox(
+					*scene.World, Vector3{static_cast<float>(x) * 0.98f, 0.0f, static_cast<float>(z) * 0.98f}
+				));
+			}
+		}
+		BuildContacts(*scene.World);
+		return scene;
+	}
+
+	SolverScene IndependentStacks(size_t columns, size_t height, size_t sleepingColumns = 0) {
+		SolverScene scene;
+		scene.World = std::make_unique<Store>("physics.bench.solver.independent");
+		PreparePhysicsWorld(*scene.World, 1.0f);
+
+		const Entity floor = scene.World->Create();
+		scene.World->Set<Transform>(floor, Transform{CFrame{Vector3{0.0f, -1.0f, 0.0f}}});
+		Collider ground;
+		ground.Extent = Vector3{256.0f, 1.0f, 256.0f};
+		scene.World->Set<Collider>(floor, ground);
+
+		for (size_t column = 0; column < columns; column++) {
+			const float x = static_cast<float>(column % 32) * 4.0f - 64.0f;
+			const float z = static_cast<float>(column / 32) * 4.0f - 64.0f;
+			for (size_t level = 0; level < height; level++) {
+				const Entity box =
+					AddDynamicBox(*scene.World, Vector3{x, 0.49f + static_cast<float>(level) * 0.98f, z});
+				scene.Bodies.push_back(box);
+				if (column < sleepingColumns) {
+					scene.World->Remove<Motion>(box);
+					PipelineInternals::Resting(*scene.World->ResourceMutable<PhysicsWorld>())
+						.push_back(RestingBody{box, 0.5f, true});
+				}
+			}
+		}
+		BuildContacts(*scene.World);
+		return scene;
+	}
+
+	void ConsumeTopology(const Store &store) {
+		const PhysicsWorld &world = *store.Resource<PhysicsWorld>();
+		Consume(world.RowCount());
+		Consume(world.SolverGroupCount());
+		Consume(world.UsesIslandSchedule());
+		Consume(world.ConstraintIslandCount());
+	}
+
 	// How many contacts one row of the table is divided by.
 	size_t PointCount(const Store &store) {
 		size_t points = 0;
@@ -291,5 +416,149 @@ BENCH("Publish · 200 stacks of 4", 200) {
 	for (int pass = 0; pass < 200; pass++) {
 		Publish(store);
 		Consume(store.Resource<PhysicsWorld>()->Events().size());
+	}
+}
+
+// --- connected-solver shapes ------------------------------------------------
+
+BENCH("Solve · low-degree connected chain, 1024 bodies", 64) {
+	static SolverScene scene = ConnectedChain(1024);
+	for (int pass = 0; pass < 64; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · low-degree connected chain, 4096 bodies", 16) {
+	static SolverScene scene = ConnectedChain(4096);
+	for (int pass = 0; pass < 16; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · low-degree connected lattice, 64 by 64", 8) {
+	static SolverScene scene = ConnectedLattice(64);
+	for (int pass = 0; pass < 8; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · dense connected contacts, 40 bodies", 8) {
+	static SolverScene scene = DenseConnected(40);
+	for (int pass = 0; pass < 8; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · high-degree star, 600 leaves", 4) {
+	static SolverScene scene = HighDegreeStar(600);
+	for (int pass = 0; pass < 4; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · stable topology, dense contacts", 16) {
+	static SolverScene scene = DenseConnected(40);
+	for (int pass = 0; pass < 16; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · 256 independent stacks of 4", 1024) {
+	static SolverScene scene = IndependentStacks(256, 4);
+	for (int pass = 0; pass < 1024; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · 256 independent stacks of 16", 256) {
+	static SolverScene scene = IndependentStacks(256, 16);
+	for (int pass = 0; pass < 256; pass++) {
+		KeepAwake(*scene.World);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · 224 sleeping stacks plus 32 active stacks of 16", 4096) {
+	static SolverScene scene = IndependentStacks(256, 16, 224);
+	for (int pass = 0; pass < 4096; pass++) {
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Solve · independent stacks with bridge churn", 128) {
+	static SolverScene scene = IndependentStacks(256, 16);
+	PhysicsWorld &world = *scene.World->ResourceMutable<PhysicsWorld>();
+	std::vector<engine::physics::ContactManifold> &manifolds = PipelineInternals::Manifolds(world);
+	const engine::physics::ContactManifold bridgeSource = manifolds.front();
+	const auto lessPair = [](const engine::physics::ContactManifold &left,
+							 const engine::physics::ContactManifold &right) {
+		return left.A.Id != right.A.Id ? left.A.Id < right.A.Id : left.B.Id < right.B.Id;
+	};
+	for (int pass = 0; pass < 128; pass++) {
+		engine::physics::ContactManifold bridge = bridgeSource;
+		bridge.A = scene.Bodies[0];
+		bridge.B = scene.Bodies[16];
+		const size_t bridgeIndex = static_cast<size_t>(
+			std::lower_bound(manifolds.begin(), manifolds.end(), bridge, lessPair) - manifolds.begin()
+		);
+		manifolds.insert(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex), bridge);
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+		manifolds.erase(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex));
+		Solve(*scene.World);
+		ConsumeTopology(*scene.World);
+	}
+}
+
+BENCH("Pipeline · topology churn, 128-body add remove cycle", 128) {
+	static SolverScene scene = DenseConnected(128);
+	for (int cycle = 0; cycle < 128; cycle++) {
+		// A full cycle restores both the Store and broadphase index to the same
+		// 128-body topology before the next addition. The bounded batch makes the
+		// reported unit a cycle rather than a timer sample.
+		const Entity added = AddDynamicBox(*scene.World, Vector3::Zero);
+		BuildContacts(*scene.World);
+		ConsumeTopology(*scene.World);
+		scene.World->Destroy(added);
+		BuildContacts(*scene.World);
+		ConsumeTopology(*scene.World);
+		Consume(scene.World->Resource<PhysicsWorld>()->MemoryStats().Solver.RetainedBytes);
+	}
+}
+
+BENCH("Pipeline · grow shrink, 16 to 64 bodies", 16) {
+	static SolverScene scene = DenseConnected(16);
+	for (int cycle = 0; cycle < 16; cycle++) {
+		// Every measured cycle returns to this scene's original sixteen bodies.
+		// Sixteen cycles make the topology rebuilds, not clock granularity,
+		// determine the reported per-cycle spread.
+		while (scene.Bodies.size() < 64) {
+			scene.Bodies.push_back(AddDynamicBox(*scene.World, Vector3::Zero));
+		}
+		BuildContacts(*scene.World);
+		ConsumeTopology(*scene.World);
+
+		while (scene.Bodies.size() > 16) {
+			scene.World->Destroy(scene.Bodies.back());
+			scene.Bodies.pop_back();
+		}
+		BuildContacts(*scene.World);
+		ConsumeTopology(*scene.World);
 	}
 }

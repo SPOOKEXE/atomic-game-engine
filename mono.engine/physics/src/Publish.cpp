@@ -3,6 +3,7 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -22,6 +23,41 @@
 namespace engine::physics {
 
 	namespace {
+		void ReportMemory(const PhysicsWorld &world) {
+			const PhysicsMemoryStats stats = world.MemoryStats();
+			const PhysicsMemoryBytes broadphase = stats.Broadphase();
+			const PhysicsMemoryBytes total = stats.Total();
+			const auto report = [](const char *liveName, const char *retainedName, PhysicsMemoryBytes bytes) {
+				core::Metrics::SetGauge(liveName, static_cast<double>(bytes.LiveBytes));
+				core::Metrics::SetGauge(retainedName, static_cast<double>(bytes.RetainedBytes));
+			};
+			report(
+				"physics.memory.broadphase.live-bytes", "physics.memory.broadphase.retained-bytes", broadphase
+			);
+			report(
+				"physics.memory.dynamic-grid.live-bytes",
+				"physics.memory.dynamic-grid.retained-bytes",
+				stats.DynamicGrid
+			);
+			report(
+				"physics.memory.static-grid.live-bytes",
+				"physics.memory.static-grid.retained-bytes",
+				stats.StaticGrid
+			);
+			report(
+				"physics.memory.dynamic-tree.live-bytes",
+				"physics.memory.dynamic-tree.retained-bytes",
+				stats.DynamicTree
+			);
+			report("physics.memory.solver.live-bytes", "physics.memory.solver.retained-bytes", stats.Solver);
+			report(
+				"physics.memory.persistent.live-bytes",
+				"physics.memory.persistent.retained-bytes",
+				stats.Persistent
+			);
+			report("physics.memory.total.live-bytes", "physics.memory.total.retained-bytes", total);
+		}
+
 		// Whether a pair that has left the manifold list is still really
 		// touching.
 		//
@@ -48,7 +84,8 @@ namespace engine::physics {
 			ecs::Entity entity
 		) {
 			const auto found = indexByOwner.find(entity.Id);
-			if (found == indexByOwner.end() || found->second >= bodies.size() || bodies[found->second].Owner != entity) {
+			if (found == indexByOwner.end() || found->second >= bodies.size() ||
+				bodies[found->second].Owner != entity) {
 				return nullptr;
 			}
 			return &bodies[found->second];
@@ -85,7 +122,9 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.publish-transform", core::ProfileCategory::Physics);
 			if (!bodies.empty() && delta > 0.0f) {
 				store.Each<scene::Transform, const scene::Motion>(
-					[bodies, &bodyIndex, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
+					[bodies,
+					 &bodyIndex,
+					 delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
 						const SolverBody *body = BodyOf(bodies, bodyIndex, entity);
 						if (body == nullptr || !body->Movable) {
 							return;
@@ -216,5 +255,9 @@ namespace engine::physics {
 
 			std::swap(last, now);
 		}
+
+		// Publishing is the end of the full pipeline: pairs, manifolds, rows,
+		// persistent contact state, and both indexes now describe one tick.
+		ReportMemory(*world);
 	}
 }

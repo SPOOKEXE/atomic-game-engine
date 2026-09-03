@@ -25,8 +25,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 
 namespace engine::spatial {
 
@@ -120,14 +122,61 @@ namespace engine::spatial {
 			return grid.BucketStart.empty() ? 0 : grid.BucketStart.size() - 1;
 		}
 
+		// The exact bucket prefix array. Tests compare this and `EntryBytes` to
+		// prove a dispatched rebuild preserved the serial layout, not merely the
+		// query set it happens to produce.
+		static std::span<const uint32_t> BucketStarts(const HashGrid &grid) {
+			return grid.BucketStart;
+		}
+
+		static std::span<const std::byte> EntryBytes(const HashGrid &grid) {
+			return std::as_bytes(std::span<const HashGrid::Entry>(grid.Entries));
+		}
+
+		static size_t ParallelScratchCapacity(const HashGrid &grid) {
+			return grid.ParallelBucketScratch.capacity() * sizeof(uint32_t) +
+				   grid.ParallelEntryScratch.capacity() * sizeof(HashGrid::Entry) +
+				   grid.ParallelKeys.capacity() * sizeof(uint32_t) +
+				   grid.ParallelKeyScratch.capacity() * sizeof(uint32_t);
+		}
+
+		static size_t ParallelScratchBytes(const HashGrid &grid) {
+			return grid.ParallelBucketScratch.size() * sizeof(uint32_t) +
+				   grid.ParallelEntryScratch.size() * sizeof(HashGrid::Entry) +
+				   grid.ParallelKeys.size() * sizeof(uint32_t) +
+				   grid.ParallelKeyScratch.size() * sizeof(uint32_t);
+		}
+
 		// Which bucket a cell lands in, for a test that needs to force a collision.
 		static size_t BucketOf(const HashGrid &grid, int32_t cellX, int32_t cellY, int32_t cellZ) {
 			return HashCell(cellX, cellY, cellZ) & (BucketCount(grid) - 1);
 		}
 
-		// How many proxies were too large for cells.
+		// How many inverted, hierarchy-exhausting, or density-rejected proxies need
+		// the residual scan.
 		static size_t OversizedCount(const HashGrid &grid) {
 			return grid.Oversized.size();
+		}
+
+		static size_t LevelProxyCount(const HashGrid &grid, size_t level) {
+			return static_cast<size_t>(std::count_if(
+				grid.Ranges.begin(), grid.Ranges.end(), [level](const HashGrid::CellRange &range) {
+					return range.MaximumX >= range.MinimumX && range.Level == level;
+				}
+			));
+		}
+
+		static size_t RetainedHierarchyBytes(const HashGrid &grid) {
+			size_t bytes = grid.Proxies.capacity() * sizeof(Proxy) +
+						   grid.Ranges.capacity() * sizeof(HashGrid::CellRange) +
+						   grid.BucketStart.capacity() * sizeof(uint32_t) +
+						   grid.Entries.capacity() * sizeof(HashGrid::Entry) +
+						   grid.Oversized.capacity() * sizeof(uint32_t) + ParallelScratchCapacity(grid);
+			for (const HashGrid::LevelStorage &level : grid.CoarseLevels) {
+				bytes += level.BucketStart.capacity() * sizeof(uint32_t) +
+						 level.Entries.capacity() * sizeof(HashGrid::Entry);
+			}
+			return bytes;
 		}
 
 		// Calls `visit` once for each proxy whose box overlaps `volume` and
@@ -149,61 +198,135 @@ namespace engine::spatial {
 		template <class Visit>
 		static bool
 		ForEachCandidate(const HashGrid &grid, const core::AABB &volume, LayerMask mask, Visit &&visit) {
-			const int32_t minimumX = CellCoordinateOf(volume.Minimum.X, grid.InverseSpacing);
-			const int32_t minimumY = CellCoordinateOf(volume.Minimum.Y, grid.InverseSpacing);
-			const int32_t minimumZ = CellCoordinateOf(volume.Minimum.Z, grid.InverseSpacing);
-			const int32_t maximumX = CellCoordinateOf(volume.Maximum.X, grid.InverseSpacing);
-			const int32_t maximumY = CellCoordinateOf(volume.Maximum.Y, grid.InverseSpacing);
-			const int32_t maximumZ = CellCoordinateOf(volume.Maximum.Z, grid.InverseSpacing);
+			if (!grid.HasHierarchy) {
+				const int32_t minimumX = CellCoordinateOf(volume.Minimum.X, grid.InverseSpacing);
+				const int32_t minimumY = CellCoordinateOf(volume.Minimum.Y, grid.InverseSpacing);
+				const int32_t minimumZ = CellCoordinateOf(volume.Minimum.Z, grid.InverseSpacing);
+				const int32_t maximumX = CellCoordinateOf(volume.Maximum.X, grid.InverseSpacing);
+				const int32_t maximumY = CellCoordinateOf(volume.Maximum.Y, grid.InverseSpacing);
+				const int32_t maximumZ = CellCoordinateOf(volume.Maximum.Z, grid.InverseSpacing);
+				const bool inverted = maximumX < minimumX || maximumY < minimumY || maximumZ < minimumZ;
+				const int64_t cells =
+					CellsInRange(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
+				if (inverted || grid.Entries.empty() ||
+					cells > static_cast<int64_t>(grid.Entries.size()) + WALK_CELL_ALLOWANCE) {
+					return ScanEveryProxy(grid, volume, mask, visit);
+				}
 
-			// A volume built the wrong way round covers no cells. It can still
-			// satisfy AABB::Overlaps against a large enough box, so the scan
-			// below is what answers it rather than an empty walk.
-			const bool inverted = maximumX < minimumX || maximumY < minimumY || maximumZ < minimumZ;
-
-			const int64_t cells = CellsInRange(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
-
-			// An empty grid has no buckets to mask against, so it takes the
-			// scan - which still has to run, because a proxy too large for
-			// cells produces no entries and is found nowhere else.
-			if (inverted || grid.Entries.empty() ||
-				cells > static_cast<int64_t>(grid.Entries.size()) + WALK_CELL_ALLOWANCE) {
-				return ScanEveryProxy(grid, volume, mask, visit);
-			}
-
-			for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
-				for (int32_t cellY = minimumY; cellY <= maximumY; cellY++) {
-					for (int32_t cellX = minimumX; cellX <= maximumX; cellX++) {
-						const size_t bucket = HashCell(cellX, cellY, cellZ) & (BucketCount(grid) - 1);
-						const uint32_t last = grid.BucketStart[bucket + 1];
-
-						for (uint32_t slot = grid.BucketStart[bucket]; slot < last; slot++) {
-							const HashGrid::Entry &entry = grid.Entries[slot];
-
-							// A bucket holds every cell that hashed to it, so
-							// this is where a collision is rejected. Cheaper
-							// than the box test below and it does a different
-							// job: this one says "not this cell", the box test
-							// says "not this volume".
-							if (entry.CellX != cellX || entry.CellY != cellY || entry.CellZ != cellZ) {
-								continue;
-							}
-
-							const HashGrid::CellRange &range = grid.Ranges[entry.ProxyIndex];
-							if (cellX != std::max(range.MinimumX, minimumX) ||
-								cellY != std::max(range.MinimumY, minimumY) ||
-								cellZ != std::max(range.MinimumZ, minimumZ)) {
-								continue;
-							}
-
-							const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
-							if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
-								continue;
-							}
-							if (!visit(proxy)) {
-								return false;
+				for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
+					for (int32_t cellY = minimumY; cellY <= maximumY; cellY++) {
+						for (int32_t cellX = minimumX; cellX <= maximumX; cellX++) {
+							const size_t bucket = HashCell(cellX, cellY, cellZ) & (BucketCount(grid) - 1);
+							for (uint32_t slot = grid.BucketStart[bucket];
+								 slot < grid.BucketStart[bucket + 1];
+								 slot++) {
+								const HashGrid::Entry &entry = grid.Entries[slot];
+								if (entry.CellX != cellX || entry.CellY != cellY || entry.CellZ != cellZ) {
+									continue;
+								}
+								const HashGrid::CellRange &range = grid.Ranges[entry.ProxyIndex];
+								if (cellX != std::max(range.MinimumX, minimumX) ||
+									cellY != std::max(range.MinimumY, minimumY) ||
+									cellZ != std::max(range.MinimumZ, minimumZ)) {
+									continue;
+								}
+								const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
+								if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
+									continue;
+								}
+								if (!visit(proxy)) {
+									return false;
+								}
 							}
 						}
+					}
+				}
+				return true;
+			}
+
+			auto needsScan = [&](float inverseSpacing, const std::vector<HashGrid::Entry> &entries) {
+				if (entries.empty()) {
+					return false;
+				}
+				const int32_t minimumX = CellCoordinateOf(volume.Minimum.X, inverseSpacing);
+				const int32_t minimumY = CellCoordinateOf(volume.Minimum.Y, inverseSpacing);
+				const int32_t minimumZ = CellCoordinateOf(volume.Minimum.Z, inverseSpacing);
+				const int32_t maximumX = CellCoordinateOf(volume.Maximum.X, inverseSpacing);
+				const int32_t maximumY = CellCoordinateOf(volume.Maximum.Y, inverseSpacing);
+				const int32_t maximumZ = CellCoordinateOf(volume.Maximum.Z, inverseSpacing);
+				const int64_t cells =
+					CellsInRange(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
+				return maximumX < minimumX || maximumY < minimumY || maximumZ < minimumZ ||
+					   cells > static_cast<int64_t>(entries.size()) + WALK_CELL_ALLOWANCE;
+			};
+
+			if (needsScan(grid.InverseSpacing, grid.Entries)) {
+				return ScanEveryProxy(grid, volume, mask, visit);
+			}
+			if (grid.HasHierarchy) {
+				for (const HashGrid::LevelStorage &level : grid.CoarseLevels) {
+					if (needsScan(level.InverseSpacing, level.Entries)) {
+						return ScanEveryProxy(grid, volume, mask, visit);
+					}
+				}
+			}
+
+			auto walkLevel = [&](size_t levelIndex,
+								 float inverseSpacing,
+								 const std::vector<uint32_t> &bucketStart,
+								 const std::vector<HashGrid::Entry> &entries) {
+				if (entries.empty()) {
+					return true;
+				}
+				const int32_t minimumX = CellCoordinateOf(volume.Minimum.X, inverseSpacing);
+				const int32_t minimumY = CellCoordinateOf(volume.Minimum.Y, inverseSpacing);
+				const int32_t minimumZ = CellCoordinateOf(volume.Minimum.Z, inverseSpacing);
+				const int32_t maximumX = CellCoordinateOf(volume.Maximum.X, inverseSpacing);
+				const int32_t maximumY = CellCoordinateOf(volume.Maximum.Y, inverseSpacing);
+				const int32_t maximumZ = CellCoordinateOf(volume.Maximum.Z, inverseSpacing);
+				const size_t bucketCount = bucketStart.size() - 1;
+
+				for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
+					for (int32_t cellY = minimumY; cellY <= maximumY; cellY++) {
+						for (int32_t cellX = minimumX; cellX <= maximumX; cellX++) {
+							const size_t bucket = HashCell(cellX, cellY, cellZ) & (bucketCount - 1);
+							for (uint32_t slot = bucketStart[bucket]; slot < bucketStart[bucket + 1];
+								 slot++) {
+								const HashGrid::Entry &entry = entries[slot];
+								if (entry.CellX != cellX || entry.CellY != cellY || entry.CellZ != cellZ) {
+									continue;
+								}
+
+								const HashGrid::CellRange &range = grid.Ranges[entry.ProxyIndex];
+								if (range.Level != levelIndex ||
+									cellX != std::max(range.MinimumX, minimumX) ||
+									cellY != std::max(range.MinimumY, minimumY) ||
+									cellZ != std::max(range.MinimumZ, minimumZ)) {
+									continue;
+								}
+
+								const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
+								if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
+									continue;
+								}
+								if (!visit(proxy)) {
+									return false;
+								}
+							}
+						}
+					}
+				}
+				return true;
+			};
+
+			if (!walkLevel(0, grid.InverseSpacing, grid.BucketStart, grid.Entries)) {
+				return false;
+			}
+			if (grid.HasHierarchy) {
+				for (size_t level = 1; level < HashGrid::HIERARCHY_LEVEL_COUNT; level++) {
+					const HashGrid::LevelStorage &storage = grid.CoarseLevels[level - 1];
+					if (!walkLevel(level, storage.InverseSpacing, storage.BucketStart, storage.Entries)) {
+						return false;
 					}
 				}
 			}
@@ -276,9 +399,9 @@ namespace engine::spatial {
 		//                    the cell just visited, before stepping to the next.
 		//                    Returning false stops the cell walk, which is how a
 		//                    nearest-hit query stops once nothing further along
-		//                    can beat what it holds. The oversized pass still
-		//                    runs, because a proxy too large for cells is in no
-		//                    cell and the walk never reached it.
+		//                    can beat what it holds. The residual pass still
+		//                    runs, because a hierarchy-exhausting proxy is in no
+		//                    level and the walks never reached it.
 		// @return False if the visitor stopped the walk.
 		template <class Visit, class KeepWalking>
 		static bool ForEachCandidateAlongRay(
@@ -292,6 +415,57 @@ namespace engine::spatial {
 		) {
 			const float origin[3] = {ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
 			const float direction[3] = {ray.Direction.X, ray.Direction.Y, ray.Direction.Z};
+			if (!grid.HasHierarchy) {
+				const int32_t cell[3] = {
+					CellCoordinateOf(origin[0], grid.InverseSpacing),
+					CellCoordinateOf(origin[1], grid.InverseSpacing),
+					CellCoordinateOf(origin[2], grid.InverseSpacing),
+				};
+				double crossings = 3.0;
+				for (int axis = 0; axis < 3; axis++) {
+					crossings += static_cast<double>(std::abs(direction[axis])) *
+									 static_cast<double>(maxDistance) *
+									 static_cast<double>(grid.InverseSpacing) +
+								 1.0;
+				}
+				const bool clamped = std::abs(cell[0]) >= CELL_LIMIT || std::abs(cell[1]) >= CELL_LIMIT ||
+									 std::abs(cell[2]) >= CELL_LIMIT;
+				if (grid.Entries.empty() || clamped ||
+					!(crossings <= static_cast<double>(grid.Entries.size()) + WALK_CELL_ALLOWANCE)) {
+					return ScanEveryProxy(grid, SegmentBounds(ray, maxDistance), mask, visit);
+				}
+				return ForEachCellAlongRay(
+					grid.Spacing,
+					grid.InverseSpacing,
+					ray,
+					reciprocal,
+					maxDistance,
+					[&](const int32_t (&current)[3], const int32_t (&previous)[3], bool stepped) {
+						const size_t bucket =
+							HashCell(current[0], current[1], current[2]) & (BucketCount(grid) - 1);
+						for (uint32_t slot = grid.BucketStart[bucket]; slot < grid.BucketStart[bucket + 1];
+							 slot++) {
+							const HashGrid::Entry &entry = grid.Entries[slot];
+							if (entry.CellX != current[0] || entry.CellY != current[1] ||
+								entry.CellZ != current[2]) {
+								continue;
+							}
+							if (stepped && WithinCellRange(grid.Ranges[entry.ProxyIndex], previous)) {
+								continue;
+							}
+							const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
+							if (!proxy.Layers.Overlaps(mask)) {
+								continue;
+							}
+							if (!visit(proxy)) {
+								return false;
+							}
+						}
+						return true;
+					},
+					keepWalking
+				);
+			}
 
 			int32_t cell[3] = {
 				CellCoordinateOf(origin[0], grid.InverseSpacing),
@@ -316,13 +490,39 @@ namespace engine::spatial {
 			const bool clamped = std::abs(cell[0]) >= CELL_LIMIT || std::abs(cell[1]) >= CELL_LIMIT ||
 								 std::abs(cell[2]) >= CELL_LIMIT;
 
-			if (grid.Entries.empty() || clamped ||
-				!(crossings <= static_cast<double>(grid.Entries.size()) + WALK_CELL_ALLOWANCE)) {
+			if (clamped || (!grid.Entries.empty() &&
+							!(crossings <= static_cast<double>(grid.Entries.size()) + WALK_CELL_ALLOWANCE))) {
 				return ScanEveryProxy(grid, SegmentBounds(ray, maxDistance), mask, visit);
 			}
+			for (const HashGrid::LevelStorage &storage : grid.CoarseLevels) {
+				if (storage.Entries.empty()) {
+					continue;
+				}
+				const int32_t coarseCell[3] = {
+					CellCoordinateOf(origin[0], storage.InverseSpacing),
+					CellCoordinateOf(origin[1], storage.InverseSpacing),
+					CellCoordinateOf(origin[2], storage.InverseSpacing),
+				};
+				double coarseCrossings = 3.0;
+				for (int axis = 0; axis < 3; axis++) {
+					coarseCrossings += static_cast<double>(std::abs(direction[axis])) *
+										   static_cast<double>(maxDistance) *
+										   static_cast<double>(storage.InverseSpacing) +
+									   1.0;
+				}
+				const bool coarseClamped = std::abs(coarseCell[0]) >= CELL_LIMIT ||
+										   std::abs(coarseCell[1]) >= CELL_LIMIT ||
+										   std::abs(coarseCell[2]) >= CELL_LIMIT;
+				if (coarseClamped ||
+					!(coarseCrossings <= static_cast<double>(storage.Entries.size()) + WALK_CELL_ALLOWANCE)) {
+					return ScanEveryProxy(grid, SegmentBounds(ray, maxDistance), mask, visit);
+				}
+			}
 
-			if (!ForEachCellAlongRay(
-					grid,
+			if (!grid.Entries.empty() &&
+				!ForEachCellAlongRay(
+					grid.Spacing,
+					grid.InverseSpacing,
 					ray,
 					reciprocal,
 					maxDistance,
@@ -357,9 +557,48 @@ namespace engine::spatial {
 				return false;
 			}
 
-			// After the cells and in proxy order, matching the box walk. A proxy
-			// too large for cells is in none of them, so no early stop above may
-			// skip this.
+			for (size_t level = 1; level < HashGrid::HIERARCHY_LEVEL_COUNT; level++) {
+				const HashGrid::LevelStorage &storage = grid.CoarseLevels[level - 1];
+				if (storage.Entries.empty()) {
+					continue;
+				}
+
+				if (!ForEachCellAlongRay(
+						storage.Spacing,
+						storage.InverseSpacing,
+						ray,
+						reciprocal,
+						maxDistance,
+						[&](const int32_t (&current)[3], const int32_t (&previous)[3], bool stepped) {
+							const size_t bucket = HashCell(current[0], current[1], current[2]) &
+												  (storage.BucketStart.size() - 2);
+							for (uint32_t slot = storage.BucketStart[bucket];
+								 slot < storage.BucketStart[bucket + 1];
+								 slot++) {
+								const HashGrid::Entry &entry = storage.Entries[slot];
+								if (entry.CellX != current[0] || entry.CellY != current[1] ||
+									entry.CellZ != current[2]) {
+									continue;
+								}
+								const HashGrid::CellRange &range = grid.Ranges[entry.ProxyIndex];
+								if (range.Level != level || (stepped && WithinCellRange(range, previous))) {
+									continue;
+								}
+								const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
+								if (proxy.Layers.Overlaps(mask) && !visit(proxy)) {
+									return false;
+								}
+							}
+							return true;
+						},
+						keepWalking
+					)) {
+					return false;
+				}
+			}
+
+			// After every populated level and in proxy order. A final residual is in
+			// no level, so no early stop above may skip it.
 			for (uint32_t index : grid.Oversized) {
 				const Proxy &proxy = grid.Proxies[index];
 				if (!proxy.Layers.Overlaps(mask)) {
@@ -416,57 +655,117 @@ namespace engine::spatial {
 			Visit &&visit
 		) {
 			const float extent[3] = {halfExtent.X, halfExtent.Y, halfExtent.Z};
-			int32_t radius[3] = {0, 0, 0};
-			double neighbourhoodCells = 1.0;
-			bool validRadius = true;
-
-			for (int axis = 0; axis < 3; axis++) {
-				const float cells = std::ceil(extent[axis] * grid.InverseSpacing);
-				if (!(cells >= 0.0f) || cells > static_cast<float>(CELL_LIMIT)) {
-					validRadius = false;
-					break;
-				}
-				radius[axis] = static_cast<int32_t>(cells);
-				neighbourhoodCells *= static_cast<double>(radius[axis]) * 2.0 + 1.0;
-			}
-
 			const float origin[3] = {ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
 			const float direction[3] = {ray.Direction.X, ray.Direction.Y, ray.Direction.Z};
-			int32_t startCell[3] = {
-				CellCoordinateOf(origin[0], grid.InverseSpacing),
-				CellCoordinateOf(origin[1], grid.InverseSpacing),
-				CellCoordinateOf(origin[2], grid.InverseSpacing),
+			auto estimateThickCells = [&](float inverseSpacing) {
+				double neighbourhood = 1.0;
+				for (int axis = 0; axis < 3; axis++) {
+					const float radius = std::ceil(extent[axis] * inverseSpacing);
+					if (!(radius >= 0.0f) || radius > static_cast<float>(CELL_LIMIT)) {
+						return std::numeric_limits<double>::infinity();
+					}
+					neighbourhood *= static_cast<double>(radius) * 2.0 + 1.0;
+				}
+				double centre = 3.0;
+				for (int axis = 0; axis < 3; axis++) {
+					centre += static_cast<double>(std::abs(direction[axis])) *
+								  static_cast<double>(maxDistance) * static_cast<double>(inverseSpacing) +
+							  1.0;
+				}
+				return centre * neighbourhood;
 			};
-
-			double centreCells = 3.0;
-			for (int axis = 0; axis < 3; axis++) {
-				centreCells += static_cast<double>(std::abs(direction[axis])) *
-								   static_cast<double>(maxDistance) *
-								   static_cast<double>(grid.InverseSpacing) +
-							   1.0;
+			auto volumeCells = [&](float inverseSpacing) {
+				return CellsInRange(
+					CellCoordinateOf(sweptBounds.Minimum.X, inverseSpacing),
+					CellCoordinateOf(sweptBounds.Minimum.Y, inverseSpacing),
+					CellCoordinateOf(sweptBounds.Minimum.Z, inverseSpacing),
+					CellCoordinateOf(sweptBounds.Maximum.X, inverseSpacing),
+					CellCoordinateOf(sweptBounds.Maximum.Y, inverseSpacing),
+					CellCoordinateOf(sweptBounds.Maximum.Z, inverseSpacing)
+				);
+			};
+			double aggregateVolume = 0.0;
+			double aggregateThick = 0.0;
+			auto addEstimate = [&](float inverseSpacing, const std::vector<HashGrid::Entry> &entries) {
+				if (!entries.empty()) {
+					aggregateVolume += static_cast<double>(volumeCells(inverseSpacing));
+					aggregateThick += estimateThickCells(inverseSpacing);
+				}
+			};
+			if (!grid.HasHierarchy) {
+				// The ordinary scene keeps the original single-grid choice. The
+				// hierarchy estimates and walks below are only for promoted storage.
+				addEstimate(grid.InverseSpacing, grid.Entries);
+			} else {
+				addEstimate(grid.InverseSpacing, grid.Entries);
+				for (const HashGrid::LevelStorage &storage : grid.CoarseLevels) {
+					addEstimate(storage.InverseSpacing, storage.Entries);
+				}
 			}
-
-			const bool clamped = std::abs(startCell[0]) >= CELL_LIMIT ||
-								 std::abs(startCell[1]) >= CELL_LIMIT || std::abs(startCell[2]) >= CELL_LIMIT;
-			const double walkedCells = centreCells * neighbourhoodCells;
-			const int64_t volumeCells = CellsInRange(
-				CellCoordinateOf(sweptBounds.Minimum.X, grid.InverseSpacing),
-				CellCoordinateOf(sweptBounds.Minimum.Y, grid.InverseSpacing),
-				CellCoordinateOf(sweptBounds.Minimum.Z, grid.InverseSpacing),
-				CellCoordinateOf(sweptBounds.Maximum.X, grid.InverseSpacing),
-				CellCoordinateOf(sweptBounds.Maximum.Y, grid.InverseSpacing),
-				CellCoordinateOf(sweptBounds.Maximum.Z, grid.InverseSpacing)
-			);
-			if (validRadius && static_cast<double>(volumeCells) <= walkedCells) {
+			if (aggregateVolume <= aggregateThick) {
 				return ForEachCandidate(grid, sweptBounds, mask, visit);
 			}
-			if (!validRadius || grid.Entries.empty() || clamped ||
-				!(walkedCells <= static_cast<double>(grid.Entries.size()) + WALK_CELL_ALLOWANCE)) {
+
+			auto canWalk = [&](float inverseSpacing, const std::vector<HashGrid::Entry> &entries) {
+				if (entries.empty()) {
+					return true;
+				}
+				int32_t radius[3] = {0, 0, 0};
+				double neighbourhoodCells = 1.0;
+				for (int axis = 0; axis < 3; axis++) {
+					const float cells = std::ceil(extent[axis] * inverseSpacing);
+					if (!(cells >= 0.0f) || cells > static_cast<float>(CELL_LIMIT)) {
+						return false;
+					}
+					radius[axis] = static_cast<int32_t>(cells);
+					neighbourhoodCells *= static_cast<double>(radius[axis]) * 2.0 + 1.0;
+				}
+				const int32_t startCell[3] = {
+					CellCoordinateOf(origin[0], inverseSpacing),
+					CellCoordinateOf(origin[1], inverseSpacing),
+					CellCoordinateOf(origin[2], inverseSpacing),
+				};
+				if (std::abs(startCell[0]) >= CELL_LIMIT || std::abs(startCell[1]) >= CELL_LIMIT ||
+					std::abs(startCell[2]) >= CELL_LIMIT) {
+					return false;
+				}
+				double centreCells = 3.0;
+				for (int axis = 0; axis < 3; axis++) {
+					centreCells += static_cast<double>(std::abs(direction[axis])) *
+									   static_cast<double>(maxDistance) *
+									   static_cast<double>(inverseSpacing) +
+								   1.0;
+				}
+				return centreCells * neighbourhoodCells <=
+					   static_cast<double>(entries.size()) + WALK_CELL_ALLOWANCE;
+			};
+
+			if (!canWalk(grid.InverseSpacing, grid.Entries)) {
 				return ScanEveryProxy(grid, sweptBounds, mask, visit);
 			}
+			if (grid.HasHierarchy) {
+				for (const HashGrid::LevelStorage &storage : grid.CoarseLevels) {
+					if (!canWalk(storage.InverseSpacing, storage.Entries)) {
+						return ScanEveryProxy(grid, sweptBounds, mask, visit);
+					}
+				}
+			}
 
-			if (!ForEachCellAlongRay(
-					grid,
+			auto walkLevel = [&](size_t levelIndex,
+								 float spacing,
+								 float inverseSpacing,
+								 const std::vector<uint32_t> &bucketStart,
+								 const std::vector<HashGrid::Entry> &entries) {
+				if (entries.empty()) {
+					return true;
+				}
+				int32_t radius[3] = {0, 0, 0};
+				for (int axis = 0; axis < 3; axis++) {
+					radius[axis] = static_cast<int32_t>(std::ceil(extent[axis] * inverseSpacing));
+				}
+				return ForEachCellAlongRay(
+					spacing,
+					inverseSpacing,
 					ray,
 					reciprocal,
 					maxDistance,
@@ -486,18 +785,18 @@ namespace engine::spatial {
 							for (int32_t cellY = minimum[1]; cellY <= maximum[1]; cellY++) {
 								for (int32_t cellX = minimum[0]; cellX <= maximum[0]; cellX++) {
 									const size_t bucket =
-										HashCell(cellX, cellY, cellZ) & (BucketCount(grid) - 1);
-									const uint32_t last = grid.BucketStart[bucket + 1];
-
-									for (uint32_t slot = grid.BucketStart[bucket]; slot < last; slot++) {
-										const HashGrid::Entry &entry = grid.Entries[slot];
+										HashCell(cellX, cellY, cellZ) & (bucketStart.size() - 2);
+									for (uint32_t slot = bucketStart[bucket]; slot < bucketStart[bucket + 1];
+										 slot++) {
+										const HashGrid::Entry &entry = entries[slot];
 										if (entry.CellX != cellX || entry.CellY != cellY ||
 											entry.CellZ != cellZ) {
 											continue;
 										}
 
 										const HashGrid::CellRange &range = grid.Ranges[entry.ProxyIndex];
-										if (cellX != std::max(range.MinimumX, minimum[0]) ||
+										if (range.Level != levelIndex ||
+											cellX != std::max(range.MinimumX, minimum[0]) ||
 											cellY != std::max(range.MinimumY, minimum[1]) ||
 											cellZ != std::max(range.MinimumZ, minimum[2])) {
 											continue;
@@ -520,8 +819,25 @@ namespace engine::spatial {
 						return true;
 					},
 					[](float) { return true; }
-				)) {
+				);
+			};
+
+			if (!walkLevel(0, grid.Spacing, grid.InverseSpacing, grid.BucketStart, grid.Entries)) {
 				return false;
+			}
+			if (grid.HasHierarchy) {
+				for (size_t level = 1; level < HashGrid::HIERARCHY_LEVEL_COUNT; level++) {
+					const HashGrid::LevelStorage &storage = grid.CoarseLevels[level - 1];
+					if (!walkLevel(
+							level,
+							storage.Spacing,
+							storage.InverseSpacing,
+							storage.BucketStart,
+							storage.Entries
+						)) {
+						return false;
+					}
+				}
 			}
 
 			for (uint32_t index : grid.Oversized) {
@@ -566,7 +882,8 @@ namespace engine::spatial {
 		// the walk whose shape defines them.
 		template <class VisitCell, class KeepWalking>
 		static bool ForEachCellAlongRay(
-			const HashGrid &grid,
+			float spacing,
+			float inverseSpacing,
 			const core::Ray &ray,
 			const RayReciprocal &reciprocal,
 			float maxDistance,
@@ -576,9 +893,9 @@ namespace engine::spatial {
 			const float origin[3] = {ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
 			const float direction[3] = {ray.Direction.X, ray.Direction.Y, ray.Direction.Z};
 			int32_t cell[3] = {
-				CellCoordinateOf(origin[0], grid.InverseSpacing),
-				CellCoordinateOf(origin[1], grid.InverseSpacing),
-				CellCoordinateOf(origin[2], grid.InverseSpacing),
+				CellCoordinateOf(origin[0], inverseSpacing),
+				CellCoordinateOf(origin[1], inverseSpacing),
+				CellCoordinateOf(origin[2], inverseSpacing),
 			};
 			int32_t step[3] = {0, 0, 0};
 			float leaving[3] = {0.0f, 0.0f, 0.0f};
@@ -594,12 +911,12 @@ namespace engine::spatial {
 
 				step[axis] = direction[axis] > 0.0f ? 1 : -1;
 				const float plane =
-					static_cast<float>(step[axis] > 0 ? cell[axis] + 1 : cell[axis]) * grid.Spacing;
+					static_cast<float>(step[axis] > 0 ? cell[axis] + 1 : cell[axis]) * spacing;
 
 				// Never behind the origin. A boundary can produce a small negative
 				// through rounding, which would step before the query starts.
 				leaving[axis] = std::max((plane - origin[axis]) * reciprocal.Inverse[axis], 0.0f);
-				crossing[axis] = grid.Spacing * std::abs(reciprocal.Inverse[axis]);
+				crossing[axis] = spacing * std::abs(reciprocal.Inverse[axis]);
 			}
 
 			bool stepped = false;

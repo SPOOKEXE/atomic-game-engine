@@ -17,6 +17,7 @@
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
@@ -36,8 +37,39 @@ namespace engine::physics {
 		// are one loop rather than two copies of it.
 		struct Index {
 			const spatial::HashGrid *Grid = nullptr;
+			const spatial::DynamicBvh *Tree = nullptr;
+			bool TreeActive = false;
 			const std::vector<ColliderRecord> *Records = nullptr;
 		};
+
+		spatial::QueryResult QueryOverlap(
+			const Index &index, const core::AABB &box, spatial::LayerMask mask, std::span<uint64_t> candidates
+		) {
+			return index.TreeActive ? spatial::OverlapBox(*index.Tree, box, mask, candidates)
+									: spatial::OverlapBox(*index.Grid, box, mask, candidates);
+		}
+
+		spatial::QueryResult QueryRaycastAll(
+			const Index &index,
+			const core::Ray &ray,
+			float maxDistance,
+			spatial::LayerMask mask,
+			std::span<core::RayHit> candidates
+		) {
+			return index.TreeActive ? spatial::RaycastAll(*index.Tree, ray, maxDistance, mask, candidates)
+									: spatial::RaycastAll(*index.Grid, ray, maxDistance, mask, candidates);
+		}
+
+		spatial::QueryResult QueryShapeCast(
+			const Index &index,
+			const core::AABB &box,
+			const core::Vector3 &motion,
+			spatial::LayerMask mask,
+			std::span<uint64_t> candidates
+		) {
+			return index.TreeActive ? spatial::ShapeCast(*index.Tree, box, motion, mask, candidates)
+									: spatial::ShapeCast(*index.Grid, box, motion, mask, candidates);
+		}
 
 		// One collider, resolved from a candidate id.
 		struct QueryCandidate {
@@ -190,9 +222,17 @@ namespace engine::physics {
 			return Indexes{
 				{
 					Index{
-						&PipelineInternals::DynamicIndex(*world), &PipelineInternals::DynamicRecords(*world)
+						&PipelineInternals::DynamicIndex(*world),
+						&PipelineInternals::DynamicTree(*world),
+						PipelineInternals::DynamicTreeActive(*world),
+						&PipelineInternals::DynamicRecords(*world)
 					},
-					Index{&PipelineInternals::StaticIndex(*world), &PipelineInternals::StaticRecords(*world)},
+					Index{
+						&PipelineInternals::StaticIndex(*world),
+						nullptr,
+						false,
+						&PipelineInternals::StaticRecords(*world)
+					},
 				},
 				true,
 			};
@@ -219,7 +259,7 @@ namespace engine::physics {
 			uint64_t candidates[QUERY_CANDIDATE_LIMIT];
 			for (const Index &index : indexes.Entry) {
 				const spatial::QueryResult found_ =
-					spatial::OverlapBox(*index.Grid, bound, mask, std::span<uint64_t>{candidates});
+					QueryOverlap(index, bound, mask, std::span<uint64_t>{candidates});
 
 				// The grid found more than the stack scratch holds. Saying so
 				// beats answering from a prefix: a truncated overlap read as
@@ -264,7 +304,7 @@ namespace engine::physics {
 			// own bounding box, so once an exact hit is in hand every box
 			// starting beyond it is settled without being tested.
 			const spatial::QueryResult found =
-				spatial::RaycastAll(*index.Grid, ray, maxDistance, mask, std::span<core::RayHit>{candidates});
+				QueryRaycastAll(index, ray, maxDistance, mask, std::span<core::RayHit>{candidates});
 
 			for (size_t at = 0; at < found.Written; at++) {
 				if (nearest && candidates[at].Distance >= nearest->Distance) {
@@ -466,7 +506,7 @@ namespace engine::physics {
 		uint64_t candidates[QUERY_CANDIDATE_LIMIT];
 		for (const Index &index : indexes.Entry) {
 			const spatial::QueryResult found_ =
-				spatial::ShapeCast(*index.Grid, start, motion, mask, std::span<uint64_t>{candidates});
+				QueryShapeCast(index, start, motion, mask, std::span<uint64_t>{candidates});
 			result.Overflowed = result.Overflowed || found_.Overflowed;
 
 			for (size_t at = 0; at < found_.Written; at++) {

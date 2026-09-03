@@ -29,6 +29,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
@@ -74,6 +75,10 @@ namespace engine::spatial {
 	std::optional<core::RayHit>
 	Raycast(const HashGrid &grid, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All());
 
+	std::optional<core::RayHit> Raycast(
+		const DynamicBvh &tree, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All()
+	);
+
 	// Finds every proxy box a ray meets, nearest first.
 	//
 	// When the span cannot hold them all it keeps the **nearest**, which is the
@@ -93,6 +98,13 @@ namespace engine::spatial {
 		LayerMask mask,
 		std::span<core::RayHit> hits
 	);
+	QueryResult RaycastAll(
+		const DynamicBvh &tree,
+		const core::Ray &ray,
+		float maxDistance,
+		LayerMask mask,
+		std::span<core::RayHit> hits
+	);
 
 	// Finds every proxy whose box overlaps `box`, touching included.
 	//
@@ -103,6 +115,8 @@ namespace engine::spatial {
 	// @threadsafe
 	QueryResult
 	OverlapBox(const HashGrid &grid, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
+	QueryResult
+	OverlapBox(const DynamicBvh &tree, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
 
 	// Finds every proxy whose box comes within `radius` of `centre`.
 	//
@@ -117,6 +131,13 @@ namespace engine::spatial {
 	// @threadsafe
 	QueryResult OverlapSphere(
 		const HashGrid &grid,
+		const core::Vector3 &centre,
+		float radius,
+		LayerMask mask,
+		std::span<uint64_t> found
+	);
+	QueryResult OverlapSphere(
+		const DynamicBvh &tree,
 		const core::Vector3 &centre,
 		float radius,
 		LayerMask mask,
@@ -141,6 +162,13 @@ namespace engine::spatial {
 	// @threadsafe
 	QueryResult ShapeCast(
 		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		std::span<uint64_t> found
+	);
+	QueryResult ShapeCast(
+		const DynamicBvh &tree,
 		const core::AABB &box,
 		const core::Vector3 &motion,
 		LayerMask mask,

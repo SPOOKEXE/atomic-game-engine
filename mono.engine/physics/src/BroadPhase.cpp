@@ -10,6 +10,7 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
+#include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 
@@ -97,6 +98,7 @@ namespace engine::physics {
 			const std::vector<ColliderRecord> &dynamicRecords,
 			const std::vector<ColliderRecord> &staticRecords,
 			const spatial::HashGrid &dynamicIndex,
+			bool dynamicTreeActive,
 			const spatial::HashGrid &staticIndex,
 			size_t begin,
 			size_t end,
@@ -108,25 +110,27 @@ namespace engine::physics {
 				const ColliderRecord &a = dynamicRecords[index];
 				const core::AABB &box = dynamicBounds[index];
 
-				const spatial::QueryResult moving =
-					spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
-				if (moving.Overflowed) {
-					output.clear();
-					return false;
-				}
-				for (size_t at = 0; at < moving.Written; at++) {
-					const auto other = static_cast<size_t>(candidates[at]);
-					if (other <= index) {
-						continue;
+				if (!dynamicTreeActive) {
+					const spatial::QueryResult moving =
+						spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
+					if (moving.Overflowed) {
+						output.clear();
+						return false;
 					}
+					for (size_t at = 0; at < moving.Written; at++) {
+						const auto other = static_cast<size_t>(candidates[at]);
+						if (other <= index) {
+							continue;
+						}
 
-					const ColliderRecord &b = dynamicRecords[other];
-					if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner)) {
-						continue;
+						const ColliderRecord &b = dynamicRecords[other];
+						if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner)) {
+							continue;
+						}
+						output.push_back(Ordered(
+							a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other)
+						));
 					}
-					output.push_back(
-						Ordered(a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other))
-					);
 				}
 
 				const spatial::QueryResult anchored =
@@ -177,6 +181,8 @@ namespace engine::physics {
 		const std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
 		const std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
 		const spatial::HashGrid &dynamicIndex = PipelineInternals::DynamicIndex(*world);
+		const spatial::DynamicBvh &dynamicTree = PipelineInternals::DynamicTree(*world);
+		const bool dynamicTreeActive = PipelineInternals::DynamicTreeActive(*world);
 		const spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
 
 		// Sized to the widest possible answer, which is every proxy in one
@@ -194,6 +200,21 @@ namespace engine::physics {
 		// with how large it is, and the two want different answers.
 		{
 			ENGINE_PROFILE_CAT("physics.query", core::ProfileCategory::Physics);
+			if (dynamicTreeActive) {
+				dynamicTree.ForEachOverlappingPair([&](const spatial::Proxy &first,
+													   const spatial::Proxy &second) {
+					const size_t left = static_cast<size_t>(first.Id);
+					const size_t right = static_cast<size_t>(second.Id);
+					const ColliderRecord &a = dynamicRecords[left];
+					const ColliderRecord &b = dynamicRecords[right];
+					if (PairAdmitted(a, b) && !world->RigidlyConnected(a.Owner, b.Owner)) {
+						sourced.push_back(Ordered(
+							a.Owner, b.Owner, static_cast<uint32_t>(left), static_cast<uint32_t>(right)
+						));
+					}
+					return true;
+				});
+			}
 
 			// Only dynamic colliders are queried. Each batch owns its output,
 			// while every query reads the same immutable indexes. The final sort
@@ -219,6 +240,7 @@ namespace engine::physics {
 												dynamicRecords,
 												staticRecords,
 												dynamicIndex,
+												dynamicTreeActive,
 												staticIndex,
 												begin,
 												end,
@@ -247,6 +269,7 @@ namespace engine::physics {
 					dynamicRecords,
 					staticRecords,
 					dynamicIndex,
+					dynamicTreeActive,
 					staticIndex,
 					begin,
 					end,
@@ -255,7 +278,7 @@ namespace engine::physics {
 				);
 			}
 
-			size_t pairCount = 0;
+			size_t pairCount = sourced.size();
 			for (const std::vector<SourcedPair> &batch : batches) {
 				pairCount += batch.size();
 			}
@@ -276,11 +299,15 @@ namespace engine::physics {
 			std::vector<SourcedPair> &sortScratch = PipelineInternals::SourcedPairSortScratch(*world);
 			{
 				ENGINE_PROFILE_CAT("physics.pair-sort-b", core::ProfileCategory::Physics);
-				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) { return pair.Pair.B.Id; });
+				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) {
+					return pair.Pair.B.Id;
+				});
 			}
 			{
 				ENGINE_PROFILE_CAT("physics.pair-sort-a", core::ProfileCategory::Physics);
-				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) { return pair.Pair.A.Id; });
+				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) {
+					return pair.Pair.A.Id;
+				});
 			}
 
 			// Each pair once. The generation above already reports each one once;

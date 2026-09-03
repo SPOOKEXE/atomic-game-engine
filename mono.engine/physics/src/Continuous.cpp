@@ -8,6 +8,7 @@
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Continuous.hpp>
+#include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -90,19 +91,20 @@ namespace engine::physics {
 		// one the sync placed.
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
-		store.Query<scene::Transform, const scene::Motion, const scene::Collider>().With<scene::Simulated>().Each(
-			[&](ecs::Entity entity,
-				scene::Transform &transform,
-				const scene::Motion &motion,
-				const scene::Collider &collider) {
+		store.Query<scene::Transform, const scene::Motion, const scene::Collider>()
+			.With<scene::Simulated>()
+			.Each([&](ecs::Entity entity,
+					  scene::Transform &transform,
+					  const scene::Motion &motion,
+					  const scene::Collider &collider) {
 				// **The step the integrator just took, reconstructed rather than
 				// remembered.** `scene::PreviousTransform` exists and is the
 				// obvious thing to read, but nothing in this module writes it -
 				// it belongs to whoever is interpolating for a renderer, and a
 				// physics step that depended on a presentation component would
-				// be the layer inversion `AGENTS.md` refuses. The integrator
-				// added exactly `Linear * delta`, so this is that value and not
-				// an approximation of it.
+				// be the layer inversion `AGENTS.md` refuses. Reversing the same
+				// `Advanced` rule with both velocities reconstructs the integrator's
+				// linear and angular start pose without presentation history.
 				const core::Vector3 travelled = motion.Linear * delta;
 				const float distance = travelled.Magnitude();
 
@@ -111,8 +113,7 @@ namespace engine::physics {
 					return;
 				}
 
-				core::CFrame from = transform.Frame;
-				from.Position = transform.Frame.Position - travelled;
+				const core::CFrame from = Advanced(transform.Frame, -motion.Linear, -motion.Angular, delta);
 
 				// The volume the shape passes through, which is what the index
 				// is asked for. Loose - it is the union of the two end bounds
@@ -197,8 +198,7 @@ namespace engine::physics {
 				const float stop = std::clamp(earliest + bite, 0.0f, 1.0f);
 				transform.Frame.Position = from.Position + travelled * stop;
 				swept++;
-			}
-		);
+			});
 
 		PipelineInternals::SweptBodyCount(*world) += swept;
 	}
