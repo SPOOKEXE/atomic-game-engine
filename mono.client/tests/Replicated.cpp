@@ -6,8 +6,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -31,6 +33,7 @@ TEST_DEPENDS("engine.replication.snapshotbuffer")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.attachments")
+TEST_DEPENDS("engine.physics.characters")
 
 using Catch::Approx;
 using engine::core::CFrame;
@@ -145,6 +148,45 @@ TEST_CASE("a replicated world is built with a draw list and a snapshot buffer", 
 	// And nothing that simulates. Everything in this world arrived.
 	replica.Systems.RunPhases(replica.World, Phase::PreSimulation, Phase::PostSimulation);
 	REQUIRE(replica.World.Resource<DrawList>()->Instances.empty());
+}
+
+TEST_CASE("a replica keeps its third-person camera inside received walls", "[client][replication][camera]") {
+	// The authority sends the wall and the character, but camera placement is
+	// local presentation. A replica therefore needs a query index of its own for
+	// poppercam even though it never advances physics. Without that index and
+	// pass, a small orbit inside a corridor puts the eye through its wall while
+	// the character continues to render correctly.
+	Replica replica;
+
+	const Entity subject = replica.Spawn();
+	replica.World.GetMutable<Transform>(subject)->Frame = CFrame(Vector3{0.0f, 0.0f, 0.0f});
+
+	const Entity wall = replica.Spawn();
+	replica.World.GetMutable<Transform>(wall)->Frame = CFrame(Vector3{0.0f, 1.5f, 6.0f});
+	replica.World.GetMutable<Bounds>(wall)->HalfExtent = Vector3{5.0f, 5.0f, 0.25f};
+	engine::scene::Collider wallCollider;
+	wallCollider.Extent = Vector3{5.0f, 5.0f, 0.25f};
+	replica.World.Set(wall, wallCollider);
+
+	const Entity camera = client::AimReplicaViewer(replica.World, CFrame{}, engine::scene::Camera{});
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+
+	auto *controller = replica.World.ResourceMutable<engine::scene::CameraController>();
+	REQUIRE(controller != nullptr);
+	controller->Subject = subject;
+	controller->Angles = engine::core::Vector2{0.0f, 0.0f};
+	controller->Distance = 12.0f;
+
+	client::RecordReplicatedTick(replica.World, 1);
+	replica.Draw();
+
+	controller = replica.World.ResourceMutable<engine::scene::CameraController>();
+	REQUIRE(controller != nullptr);
+	REQUIRE(controller->OccludedDistance >= 0.0f);
+	const auto *placed = replica.World.Get<Transform>(camera);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Frame.Position.Z < 5.75f);
+	CHECK(placed->Frame.Position.Z > 0.0f);
 }
 
 TEST_CASE("what is drawn is interpolated between two received ticks", "[client][replication]") {
