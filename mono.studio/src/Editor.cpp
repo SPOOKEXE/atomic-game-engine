@@ -4650,10 +4650,10 @@ namespace studio {
 		// way - the snapshot is re-sent until it is acknowledged - but a client
 		// view that opens blank and fills in reads as a bug in the link.
 		//
-		// **Two clients is what Play asks for by default**, because two is what
-		// turns "the replica disagrees with the server" into "these two clients
-		// disagree", which is the bug class a play test exists for and the one a
-		// single replica cannot show. `--play-clients` is the knob.
+		// **One client by default, and an explicit count when comparing clients.**
+		// Each requested client takes a real replica and a viewport split, so the
+		// common Play path stays legible while `--play-clients` can grow the same
+		// run to expose clients that disagree.
 		if (mode == RunMode::Play) {
 			for (int client = 0; client < PlayClients; client++) {
 				if (!SpawnPlayer(world)) {
@@ -4706,6 +4706,19 @@ namespace studio {
 		link.Stop(*Universe);
 	}
 
+	void Editor::CloseClientViewports(WorldId replica) {
+		for (ViewportState &view : Extras) {
+			if (view.World != replica) {
+				continue;
+			}
+
+			view.Open = false;
+			view.World = WorldId{};
+			view.Follow = engine::ecs::NULL_ENTITY;
+			view.SplitBeside = 0;
+		}
+	}
+
 	void Editor::EndRun(WorldId world) {
 		WorldRun *record = RunOf(world);
 		if (record == nullptr) {
@@ -4722,18 +4735,11 @@ namespace studio {
 			if (link == nullptr) {
 				continue;
 			}
-			// Any viewport pinned to the client view is unpinned before the
-			// world under it disappears. A pin naming a destroyed world would
-			// leave the panel following the active scene with no way to tell
-			// that it had stopped showing what it was opened for.
+			// Any viewport pinned to the client view closes before the world under
+			// it disappears. Otherwise the generated split would remain open and
+			// silently fall back to the server world.
 			const WorldId replica = link->ReplicaWorld();
-			for (ViewportState &view : Extras) {
-				if (view.World == replica) {
-					view.World = WorldId{};
-					view.Follow = engine::ecs::NULL_ENTITY;
-				}
-			}
-
+			CloseClientViewports(replica);
 			StopPlayLink(*link);
 		}
 		record->Links.clear();
@@ -4770,13 +4776,7 @@ namespace studio {
 				}
 
 				const WorldId replica = (*link)->ReplicaWorld();
-				for (ViewportState &view : Extras) {
-					if (view.World == replica) {
-						view.World = WorldId{};
-						view.Follow = engine::ecs::NULL_ENTITY;
-					}
-				}
-
+				CloseClientViewports(replica);
 				StopPlayLink(**link);
 				link = other.Links.erase(link);
 			}

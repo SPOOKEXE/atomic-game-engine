@@ -995,6 +995,21 @@ namespace studio {
 			extra->Undocked = false;
 		}
 
+		// A Play client owns a split rather than borrowing a tab. Resolve the
+		// source here because several client panels may have been created before
+		// imgui has drawn any of them, so a later client's source dock can become
+		// real only earlier in this same viewport pass.
+		if (extra != nullptr && extra->SplitBeside != 0) {
+			const size_t sourceIndex = extra->SplitBeside - 1;
+			if (const ImGuiWindow *source = ImGui::FindWindowByName(ViewportIdentity(sourceIndex));
+				source != nullptr && source->DockId != 0) {
+				const ImGuiID clientDock =
+					ImGui::DockBuilderSplitNode(source->DockId, ImGuiDir_Right, 0.5f, nullptr, nullptr);
+				ImGui::SetNextWindowDockID(clientDock, ImGuiCond_Always);
+				extra->SplitBeside = 0;
+			}
+		}
+
 		// A panel opened from another's tab strip joins that strip, once. See
 		// `ViewportState::DockInto`.
 		if (extra != nullptr && extra->DockInto != 0) {

@@ -3268,6 +3268,14 @@ namespace studio {
 		// @param link The client link to stop. An idle link is ignored.
 		void StopPlayLink(PlayLink &link);
 
+		// Closes every panel pinned to a local play client's world.
+		//
+		// Called before that replica is destroyed so its generated split folds
+		// away instead of becoming an empty panel following the server world.
+		//
+		// @param replica The client world about to be destroyed.
+		void CloseClientViewports(WorldId replica);
+
 		// Presents every world this one's portals look into.
 		//
 		// **A world builds its draw list when somebody presents it**, and until
@@ -4178,6 +4186,16 @@ namespace studio {
 
 			// Whether the panel exists at all.
 			bool Open = false;
+
+			// The panel this one should split beside on its next `Begin`, plus one,
+			// or zero when no split is pending.
+			//
+			// **The panel index rather than its dock id**, because Play creates all
+			// client panels before imgui draws any of them. The second client's
+			// source dock therefore does not exist until the first client panel has
+			// begun. Keeping the source lets `DrawViewport` resolve that dependency
+			// when the dock node is real.
+			size_t SplitBeside = 0;
 
 			// A dock node this panel should join on its next `Begin`, or zero.
 			//
