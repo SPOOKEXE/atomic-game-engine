@@ -47,6 +47,10 @@ namespace studio {
 	}
 
 	bool CarryViewportCamera(engine::ecs::Store &store, const CFrame &previous, ViewportCameraPose &pose) {
+		if (previous.Position == pose.Frame.Position) {
+			return false;
+		}
+
 		engine::scene::SeamTransform through;
 		if (!engine::scene::PortalCrossing(store, previous.Position, pose.Frame.Position, through)) {
 			return false;
