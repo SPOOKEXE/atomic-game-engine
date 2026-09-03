@@ -588,6 +588,28 @@ namespace engine::core {
 			ProfileOwner owner = ProfileOwner::Engine
 		);
 
+		// Records synchronous work after it completed normally.
+		//
+		// This is for an adapter whose callee can leave through foreign control
+		// flow, such as a VM error or a coroutine yield. A C++ Scope cannot cross
+		// that boundary because its destructor would not run. The caller measures
+		// the completed call and records it here instead. Unlike ReportNamed(),
+		// the work happened on this frame's owner thread, so it is an ordinary
+		// child whose duration contributes to its parent's self-time arithmetic.
+		//
+		// @param fallback Stable name used when `name` is empty.
+		// @param name Runtime name copied into frame-owned storage.
+		// @param category Broad work kind used for category totals.
+		// @param milliseconds Measured synchronous duration.
+		// @param owner Product layer that submitted the record.
+		static void RecordNamed(
+			std::string_view fallback,
+			std::string_view name,
+			ProfileCategory category,
+			float milliseconds,
+			ProfileOwner owner = ProfileOwner::Engine
+		);
+
 		// --- history ---------------------------------------------------------
 
 		// Maximum number of completed frames searched by RecentMaximum().

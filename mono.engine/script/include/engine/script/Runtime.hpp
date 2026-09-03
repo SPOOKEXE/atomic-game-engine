@@ -278,6 +278,101 @@ namespace engine::script {
 		bool Completed = true;
 	};
 
+	// One source location in a script stack sample.
+	//
+	// A VM reports these as views during its instruction callback. The profiler
+	// copies text only when a new bounded node is needed, so sampling a hot loop
+	// does not allocate per instruction.
+	//
+	// @since v0.22
+	struct ScriptProfileFrame {
+		std::string_view Source;
+		std::string_view Function;
+		int Line = 0;
+	};
+
+	// One node in a sampled script call tree.
+	//
+	// `Line` is nonzero only for a leaf. Parents identify a function regardless
+	// of which line was executing beneath it, which keeps a loop from becoming a
+	// new hierarchy for every instruction it reaches.
+	//
+	// @since v0.22
+	struct ScriptProfileNode {
+		uint32_t Parent = UINT32_MAX;
+		std::string Source;
+		std::string Function;
+		int Line = 0;
+		uint64_t Calls = 0;
+		uint64_t Samples = 0;
+		uint64_t SelfNanoseconds = 0;
+		uint64_t AllocatedBytes = 0;
+		uint64_t Yields = 0;
+
+		// Native calls made while this source leaf was current. A binding that
+		// returned a coroutine yield is kept apart here so the folds view can
+		// show what parked the script without guessing from a later resume.
+		struct Binding {
+			std::string Name;
+			uint64_t Calls = 0;
+			uint64_t Nanoseconds = 0;
+			uint64_t Yields = 0;
+		};
+		std::vector<Binding> Bindings;
+	};
+
+	// A bounded, opt-in source profiler shared by scripting adapters.
+	//
+	// The host owns this rather than a VM. A future JavaScript or C# adapter can
+	// submit the same frames without making Studio learn a second profile shape.
+	// Time is charged to the previous sampled leaf, and allocation deltas are
+	// charged to the currently running leaf.
+	//
+	// @since v0.22
+	class ScriptProfiler {
+	  public:
+		static constexpr size_t MAXIMUM_NODES = 4096;
+
+		void SetEnabled(bool enabled);
+		bool Enabled() const {
+			return Collecting;
+		}
+
+		void Begin(const void *thread, uint64_t nanoseconds, const void *parentThread = nullptr);
+		void Sample(const void *thread, std::span<const ScriptProfileFrame> stack, uint64_t nanoseconds);
+		void End(const void *thread, uint64_t nanoseconds, bool yielded);
+		void RecordAllocation(size_t bytes);
+		void RecordBinding(const void *thread, std::string_view name, uint64_t nanoseconds, bool yielded);
+		void Clear();
+
+		std::span<const ScriptProfileNode> Nodes() const {
+			return Tree;
+		}
+
+		size_t DroppedNodes() const {
+			return Dropped;
+		}
+
+	  private:
+		struct ActiveExecution {
+			const void *Thread = nullptr;
+			uint32_t Parent = UINT32_MAX;
+			uint32_t Leaf = UINT32_MAX;
+			uint64_t LastNanoseconds = 0;
+		};
+
+		uint32_t FindOrAdd(uint32_t parent, std::string_view source, std::string_view function, int line);
+		uint32_t FindLeaf(uint32_t parent, std::span<const ScriptProfileFrame> stack);
+		ActiveExecution *FindActive(const void *thread);
+		void Charge(ActiveExecution &execution, uint64_t nanoseconds);
+
+		bool Collecting = false;
+		std::vector<ScriptProfileNode> Tree;
+		std::vector<ActiveExecution> Active;
+		std::vector<const void *> Running;
+		size_t Dropped = 0;
+	};
+
 	// One VM, bound to one world.
 	//
 	// @since v0.5
@@ -636,6 +731,21 @@ namespace engine::script {
 			return ScriptCosts;
 		}
 
+		// Enables source-level profiling for this runtime. Disabled runtimes do
+		// not ask their VM to single-step, so the ordinary script tick is free of
+		// the profiler's instruction callback.
+		void SetScriptProfiling(bool enabled) {
+			ScriptProfile.SetEnabled(enabled);
+		}
+
+		ScriptProfiler &Profile() {
+			return ScriptProfile;
+		}
+
+		const ScriptProfiler &Profile() const {
+			return ScriptProfile;
+		}
+
 		// This runtime's breakpoints, and what they caught.
 		//
 		// **One per runtime rather than a global**, for the reason the store is:
@@ -687,6 +797,10 @@ namespace engine::script {
 		// What each script cost, rebuilt by every `RunWorldScripts`. Read
 		// through `Costs`.
 		std::vector<ScriptCost> ScriptCosts;
+
+		// Source-level profile data. The concrete VM records samples into this
+		// neutral tree only while the editor asks for it.
+		ScriptProfiler ScriptProfile;
 
 		// Gui events waiting for the next beat, in the order the router
 		// produced them.

@@ -128,6 +128,14 @@ bench *args:
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
 
+# The Luau boundary rows, including the complete async compute lifecycle. Keep
+# this explicit because a binding benchmark is useful while working on the VM
+# without running every benchmark in the repository.
+script-binding-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scriptluau
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
+
 # Make what was just measured the numbers everything is compared against.
 #
 # Do this on a quiet machine and say so in the commit. A baseline taken while

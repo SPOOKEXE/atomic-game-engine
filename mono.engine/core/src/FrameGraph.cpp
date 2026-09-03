@@ -1434,4 +1434,39 @@ namespace engine::core {
 
 		Report(Intern(state, name), category, milliseconds, owner);
 	}
+
+	void FrameGraph::RecordNamed(
+		std::string_view fallback,
+		std::string_view name,
+		ProfileCategory category,
+		float milliseconds,
+		ProfileOwner owner
+	) {
+		auto &state = Get();
+		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
+			return;
+		}
+
+		if (!(milliseconds >= 0.0f)) {
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+
+		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+
+		const std::string_view label = name.empty() ? fallback : Intern(state, name);
+		const size_t index = Push(label, category, owner);
+		if (index == NOT_RECORDING || index == DEPTH_ONLY) {
+			Pop(index);
+			return;
+		}
+
+		Pop(index);
+		FrameSpan &span = state.Building[index];
+		span.Milliseconds = milliseconds;
+		span.StartMilliseconds = std::max(0.0f, span.StartMilliseconds - milliseconds);
+	}
 }

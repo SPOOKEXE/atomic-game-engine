@@ -866,7 +866,7 @@ namespace engine::script {
 			lua_pop(state, 1);
 
 			lua_newtable(state);
-			luaL_register(state, nullptr, type.Constructors);
+			RegisterProfiledFunctions(state, type.Constructors);
 			lua_setglobal(state, type.Name);
 		}
 	}

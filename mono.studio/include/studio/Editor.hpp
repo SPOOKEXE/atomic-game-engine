@@ -2890,6 +2890,17 @@ namespace studio {
 		// number is one the VM was counting anyway.
 		void DrawScriptProfile();
 
+		// Per-source aggregation of sampled function and line leaves. Opened from
+		// the Script Profiler rather than registered as another unrelated tool.
+		void DrawScriptFolds();
+
+		// Native calls made by scripts, as a frame-graph flame view.
+		//
+		// The data is language-neutral: adapters submit the Script category and
+		// retain their own prefix, so adding JavaScript or C# does not need a
+		// second profiler window.
+		void DrawScripting();
+
 		// What has changed since the file on disk was written.
 		void DrawDiff();
 
@@ -6028,6 +6039,23 @@ namespace studio {
 
 		// Which script is spending the tick. See `DrawScriptProfile`.
 		bool ShowScriptProfile = false;
+
+		// Narrows the Script Profiler's top-level script list. This is editor
+		// state, not runtime profiling state, so stopping a run leaves a useful
+		// query ready for the next one.
+		std::array<char, 128> ScriptProfileFilter{};
+
+		// Whether source samples are shown as their call hierarchy rather than a
+		// sortable flat table, and which source the folds window narrows to.
+		bool ScriptProfileHierarchy = false;
+		bool ShowScriptFolds = false;
+		std::array<char, 256> ScriptProfileSource{};
+
+		// Which native bindings a script called in the last completed frame.
+		bool ShowScripting = false;
+
+		// Narrows the native binding rows in the Scripting frame graph.
+		std::array<char, 128> ScriptingFilter{};
 
 		// What has changed since the file was written. See `DrawDiff`.
 		bool ShowDiff = false;

@@ -44,6 +44,8 @@
 
 #include <algorithm>
 #include <lua.h>
+#include <lualib.h>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -62,11 +64,30 @@ namespace engine::script {
 	//
 	// @since v0.6
 	struct LuauContext {
+		// One C closure the runtime owns and names for binding profiling.
+		//
+		// A Luau function pointer has no portable conversion to data, so the
+		// closure holds one pointer to this record instead of trying to smuggle a
+		// function pointer through light userdata. `Bindings` owns the records,
+		// which keeps the closure's upvalue valid for the VM's lifetime.
+		struct Binding {
+			lua_CFunction Function = nullptr;
+			std::string Name;
+		};
+
+		// Every profiled C closure this VM installed.
+		std::vector<std::unique_ptr<Binding>> Bindings;
+
 		// The world this VM builds into.
 		ecs::Store *World = nullptr;
 
 		// What the host is, for `RunService:IsServer()` and friends.
 		HostRole Role;
+
+		// The runtime-owned, VM-neutral source profiler. The adapter samples this
+		// only while Studio enables it, so a normal script tick never enters the
+		// VM's instruction callback.
+		ScriptProfiler *Profiler = nullptr;
 
 		// The services and host seams this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
@@ -276,6 +297,64 @@ namespace engine::script {
 	// @param state The VM inside a bound C function.
 	// @return The context.
 	LuauContext &UpvalueContext(lua_State *state);
+
+	// Calls a binding after its profiler closure recovered the original function.
+	//
+	// The wrapper records only normal returns. Luau errors and coroutine yields
+	// leave through non-local control flow, so a C++ scope would not be closed
+	// safely on those paths.
+	int InvokeProfiledBinding(lua_State *state);
+
+	// Enables a VM step callback for one resume when either the debugger or the
+	// source profiler needs it, then closes the profile interval afterwards.
+	void PrepareProfiledResume(lua_State *state, lua_State *from);
+	void FinishProfiledResume(lua_State *state, int status);
+
+	// The raw Luau resume call is kept above the macro below. Every adapter
+	// resume goes through the two hooks, including a coroutine resumed by a
+	// task, signal, delivery or compute completion.
+	inline int ResumeProfiledLua(lua_State *state, lua_State *from, int arguments) {
+		PrepareProfiledResume(state, from);
+		const int status = lua_resume(state, from, arguments);
+		FinishProfiledResume(state, status);
+		return status;
+	}
+
+	// Pushes a profiler wrapper around `function` while preserving its existing
+	// upvalues after the wrapper's record at index one.
+	inline void
+	PushProfiledClosure(lua_State *state, lua_CFunction function, const char *name, int upvalues) {
+		LuauContext &context = ContextOf(state);
+		auto binding = std::make_unique<LuauContext::Binding>();
+		binding->Function = function;
+		// The shared prefix keeps the bindings flame graph independent of a VM.
+		// JavaScript and C# adapters can use `binding.<language>.<member>` too.
+		binding->Name = "binding.luau.";
+		binding->Name += name != nullptr ? name : "binding";
+		LuauContext::Binding *held = binding.get();
+		context.Bindings.push_back(std::move(binding));
+
+		lua_pushlightuserdata(state, held);
+		if (upvalues > 0) {
+			lua_insert(state, -upvalues - 1);
+		}
+		lua_pushcclosure(state, InvokeProfiledBinding, name, upvalues + 1);
+	}
+
+	// Pushes a profiler wrapper around a binding with no existing upvalues.
+	inline void PushProfiledFunction(lua_State *state, lua_CFunction function, const char *name) {
+		PushProfiledClosure(state, function, name, 0);
+	}
+
+	// Installs a `luaL_Reg` array through the profiler rather than
+	// `luaL_register`, whose implementation creates raw closures inside the VM.
+	// The caller has already pushed the target table.
+	inline void RegisterProfiledFunctions(lua_State *state, const luaL_Reg *functions) {
+		for (const luaL_Reg *entry = functions; entry->name != nullptr; entry++) {
+			PushProfiledFunction(state, entry->func, entry->name);
+			lua_setfield(state, -2, entry->name);
+		}
+	}
 
 	// --- values ---------------------------------------------------------------
 
@@ -976,3 +1055,16 @@ namespace engine::script {
 	// @param state The VM.
 	void OpenBaseExtras(lua_State *state);
 }
+
+// Every C closure installed by this adapter passes through the binding profiler.
+// The wrapper owns upvalue one, so existing adapter upvalues shift by one. The
+// few direct reads of `lua_upvalueindex` are kept beside this definition and
+// deliberately use the shifted indexes.
+#undef lua_pushcclosure
+#undef lua_pushcfunction
+#undef lua_resume
+#define lua_pushcclosure(state, function, name, upvalues)                                                    \
+	::engine::script::PushProfiledClosure((state), (function), (name), (upvalues))
+#define lua_pushcfunction(state, function, name)                                                             \
+	::engine::script::PushProfiledFunction((state), (function), (name))
+#define lua_resume(state, from, arguments) ::engine::script::ResumeProfiledLua((state), (from), (arguments))

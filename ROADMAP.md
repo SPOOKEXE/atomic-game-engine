@@ -60,12 +60,12 @@ c. classes
 - [x] in World => Create World From Demo, move to under Demo dropdown and separate by simple/advanced categories.
 - [x] in the flamegraph, add the ability to click on a bar to focus only on that bar and subitems, then LEFT clicking in empty space returns to root, and RIGHT clicking goes UP A PARENT for the bar (so if we're inspecting scene culling and right click, it goes up a parent to the renderer bar or whatever). This will show the parent bar with its stuff underneath.
 
-- [_] check all luau library bindings are async-compute (start operation, poll operation, end operation, a underlying c++ operation manager that uses parallel/async job management and such). Ensure we add to flamegraph / profilers as well.
-- [_] create a new flamegraph called `Scripting` for luau script bindings (abstract away though for when we add JavaScript and later maybe C# bindings to it).
+- [x] check all luau library bindings are async-compute (start operation, poll operation, end operation, a underlying c++ operation manager that uses parallel/async job management and such). Ensure we add to flamegraph / profilers as well.
+- [x] create a new flamegraph called `Scripting` for luau script bindings (abstract away though for when we add JavaScript and later maybe C# bindings to it).
 * allows us to see per-binding flamegraph and active usage
 * setup benchmark tests for each C++ to script binding so we can find bottlenecking ones and optimise them
 * does not show script stuff (which fits in `Script Profiler` below), specifically targets the bindings
-- [_] `Script Profiler`;
+- [x] `Script Profiler`;
 * shows a flamegraph of all the scripts and scripts that requrie other scripts and operations they call.
 * Breaks apart by function name (or anonymous with line number), any library calls, etc.
 * can view a hierarchy view or per-script view with search and filters and sorting columns (bytes allocated, per-function-milliseconds-compute, yielding sections of code, etc.

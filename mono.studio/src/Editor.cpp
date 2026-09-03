@@ -1829,8 +1829,18 @@ namespace studio {
 		// which is exactly what `profile_frame` did until it had a flag of its
 		// own to set.
 		engine::core::FrameGraph::SetEnabled(
-			ShowFrameGraph || ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+			ShowFrameGraph || ShowScriptProfile || ShowScripting || ControlWantsProfile ||
+			!Settings.ProfileSnapshot.empty()
 		);
+
+		// The source profiler is opt-in at the VM boundary. It uses Luau's step
+		// callback while visible, so enabling it anywhere else would make an
+		// ordinary game tick pay for a panel nobody is reading.
+		for (WorldRun &run : Runs) {
+			if (run.Runtime != nullptr) {
+				run.Runtime->SetScriptProfiling(ShowScriptProfile);
+			}
+		}
 
 		// **Not turned off with the panel when a report was asked for.** Closing
 		// F5 mid-run would otherwise throw away the window the report is fitted

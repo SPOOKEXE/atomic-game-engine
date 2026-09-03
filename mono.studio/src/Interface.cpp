@@ -112,7 +112,7 @@ namespace studio {
 			{"CDN", PluginDock::Right},
 			{"Roblox Import", PluginDock::Bottom},
 			{"Bus", PluginDock::Bottom},
-			{"Script Profile", PluginDock::Bottom},
+			{"Script Profiler", PluginDock::Bottom},
 			{"Changes", PluginDock::Bottom},
 			{"Debugger", PluginDock::Bottom},
 			{"Call Stack", PluginDock::Bottom},
@@ -466,7 +466,8 @@ namespace studio {
 			Skinned("Scripts", [&] { DrawScripts(); });
 
 			Skinned("Bus", [&] { DrawBus(); });
-			Skinned("Script Profile", [&] { DrawScriptProfile(); });
+			Skinned("Script Profiler", [&] { DrawScriptProfile(); });
+			Skinned("Scripting", [&] { DrawScripting(); });
 			Skinned("Changes", [&] { DrawDiff(); });
 			Skinned("Debugger", [&] { DrawDebugger(); });
 			Skinned("Call Stack", [&] { DrawCallStack(); });
@@ -1344,7 +1345,8 @@ namespace studio {
 
 		ImGui::SeparatorText("Script");
 		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
-		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
+		ImGui::MenuItem("Script Profiler", nullptr, &ShowScriptProfile);
+		ImGui::MenuItem("Scripting", nullptr, &ShowScripting);
 		ImGui::MenuItem("Call Stack", nullptr, &ShowCallStack);
 		ImGui::MenuItem("Breakpoints", nullptr, &ShowBreakpointsWatch);
 		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
@@ -1426,7 +1428,7 @@ namespace studio {
 			ShowRenderPipeline = ShowPipelineProfile = open;
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
-			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowDiff = ShowDebugger = open;
+			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
 			ShowStatistics = ShowFrameGraph = ShowHeap = ShowCallStack = ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
 			for (PluginPresentation *plugin : Plugins) {

@@ -297,7 +297,7 @@ namespace engine::script {
 		// `host.<Name>(...)`, for whichever name this closure was built with.
 		int HostCall(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
-			const char *name = lua_tostring(state, lua_upvalueindex(2));
+			const char *name = lua_tostring(state, lua_upvalueindex(3));
 
 			if (context.Host == nullptr) {
 				luaL_errorL(state, "this program offers no host surface");
@@ -316,8 +316,8 @@ namespace engine::script {
 			// real argument *is* a table - `Selection:Set({part})` - must not
 			// lose it.
 			int first = 1;
-			if (count >= 1 && lua_type(state, lua_upvalueindex(3)) == LUA_TTABLE &&
-				lua_rawequal(state, 1, lua_upvalueindex(3)) != 0) {
+			if (count >= 1 && lua_type(state, lua_upvalueindex(4)) == LUA_TTABLE &&
+				lua_rawequal(state, 1, lua_upvalueindex(4)) != 0) {
 				first = 2;
 			}
 

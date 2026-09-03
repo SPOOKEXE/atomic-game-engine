@@ -113,7 +113,7 @@ namespace engine::script {
 				// tree, and a plain `lua_pushcfunction` would give it no
 				// upvalue to read one from - which is a garbage pointer rather
 				// than a compile error.
-				lua_pushvalue(state, lua_upvalueindex(1));
+				lua_pushvalue(state, lua_upvalueindex(2));
 				lua_pushcclosure(state, GetService, "GetService", 1);
 				return 1;
 			}
@@ -139,7 +139,7 @@ namespace engine::script {
 			// problem, and this one is already the key everything else uses.
 			if (field == "JobId") {
 				const auto &context =
-					*static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(1)));
+					*static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(2)));
 				const std::string_view name = context.World->Name();
 				lua_pushlstring(state, name.data(), name.size());
 				return 1;
