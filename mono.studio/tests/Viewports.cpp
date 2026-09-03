@@ -12,11 +12,18 @@
 // a panel minted while a free one sat there is a `SceneTarget` and a turn in the
 // rotation nobody asked to pay.
 
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <numbers>
 #include <studio/Viewports.hpp>
 
 TEST_SUITE_ID("studio.viewports")
@@ -24,10 +31,13 @@ TEST_SUITE_ID("studio.viewports")
 using engine::world::WorldId;
 using studio::CameraRelativeMovement;
 using studio::CanvasForViewport;
+using studio::CarryViewportCamera;
 using studio::ChooseViewportFor;
 using studio::DefaultViewportCamera;
 using studio::NO_VIEWPORT;
 using studio::PanelView;
+using studio::ResolveViewportTargetSize;
+using studio::SnapViewportCameraDirection;
 using studio::ViewportCameraMemory;
 using studio::ViewportCameraPose;
 
@@ -52,6 +62,52 @@ TEST_CASE(
 	CHECK(right.Height == 674.0f);
 	CHECK(right.PointerX == 364.5f);
 	CHECK(right.PointerY == 337.0f);
+}
+
+TEST_CASE("viewport target ceilings preserve the panel aspect", "[studio][viewports][render]") {
+	const studio::ViewportTargetSize wide = ResolveViewportTargetSize(3200, 1200, 0, 0, 1920, 1080);
+	CHECK(wide.Width == 1920);
+	CHECK(wide.Height == 720);
+
+	const studio::ViewportTargetSize tall = ResolveViewportTargetSize(900, 2400, 0, 0, 1920, 1080);
+	CHECK(tall.Width == 405);
+	CHECK(tall.Height == 1080);
+
+	const studio::ViewportTargetSize unbounded =
+		ResolveViewportTargetSize(UINT32_MAX, UINT32_MAX, 0, 0, 0, 0);
+	CHECK(unbounded.Width == UINT32_MAX);
+	CHECK(unbounded.Height == UINT32_MAX);
+}
+
+TEST_CASE("crossing either viewport ceiling scales both axes together", "[studio][viewports][render]") {
+	const studio::ViewportTargetSize horizontal = ResolveViewportTargetSize(2400, 720, 0, 0, 1920, 1080);
+	CHECK(horizontal.Width == 1920);
+	CHECK(horizontal.Height == 576);
+
+	const studio::ViewportTargetSize vertical = ResolveViewportTargetSize(720, 1350, 0, 0, 1920, 1080);
+	CHECK(vertical.Width == 576);
+	CHECK(vertical.Height == 1080);
+}
+
+TEST_CASE("explicit camera image sizes remain one bounded pair", "[studio][viewports][render]") {
+	const studio::ViewportTargetSize capture = ResolveViewportTargetSize(800, 600, 4000, 1000, 1920, 1080);
+	CHECK(capture.Width == 1920);
+	CHECK(capture.Height == 480);
+
+	// An incomplete override is ignored as a pair, matching Camera's contract.
+	const studio::ViewportTargetSize incomplete = ResolveViewportTargetSize(800, 600, 4000, 0, 1920, 1080);
+	CHECK(incomplete.Width == 800);
+	CHECK(incomplete.Height == 600);
+}
+
+TEST_CASE("each viewport resolves its own target extent", "[studio][viewports][render]") {
+	const studio::ViewportTargetSize left = ResolveViewportTargetSize(1050, 507, 0, 0, 1920, 1080);
+	const studio::ViewportTargetSize right = ResolveViewportTargetSize(729, 674, 0, 0, 1920, 1080);
+
+	CHECK(left.Width == 1050);
+	CHECK(left.Height == 507);
+	CHECK(right.Width == 729);
+	CHECK(right.Height == 674);
 }
 
 TEST_CASE("a world already on screen is found rather than opened twice", "[studio][viewports]") {
@@ -121,6 +177,74 @@ TEST_CASE("fly movement uses the camera's full basis", "[studio][viewports][came
 
 	const engine::core::Vector3 combined = CameraRelativeMovement(rotation, 1.0f, -1.0f, 1.0f);
 	CHECK(combined == rotation.LookVector() - rotation.RightVector() + rotation.UpVector());
+}
+
+TEST_CASE("a free viewport camera is carried through a portal", "[studio][viewports][camera][portal]") {
+	using engine::core::CFrame;
+	using engine::core::Name;
+	using engine::core::Vector3;
+	using engine::ecs::Entity;
+	using engine::ecs::Store;
+
+	engine::scene::RegisterSceneClasses();
+	Store store("viewport-portal");
+
+	engine::scene::PartDesc nearDesc;
+	nearDesc.Size = Vector3{8.0f, 8.0f, 0.4f};
+	nearDesc.Frame = CFrame(Vector3::Zero);
+	nearDesc.Simulated = false;
+	const Entity nearPane = engine::scene::MakePart(store, nearDesc);
+
+	engine::scene::PartDesc farDesc = nearDesc;
+	farDesc.Frame =
+		CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(0.0f, std::numbers::pi_v<float> / 2.0f, 0.0f);
+	const Entity farPane = engine::scene::MakePart(store, farDesc);
+
+	const Entity hole = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+	engine::scene::SurfaceCamera surface;
+	surface.Face = engine::scene::NormalId::Back;
+	surface.Surface = 0;
+	store.Set(hole, surface);
+	store.Set(hole, engine::scene::Portal{farPane});
+	REQUIRE(store.SetParent(hole, nearPane));
+
+	const CFrame previous = CFrame::LookAt(Vector3{0.0f, 0.0f, 1.0f}, Vector3{0.0f, 0.0f, 0.0f});
+	ViewportCameraPose pose;
+	pose.Frame = CFrame::LookAt(Vector3{0.0f, 0.0f, 0.1f}, Vector3{0.0f, 0.0f, -1.0f});
+
+	engine::scene::SeamTransform through;
+	REQUIRE(engine::scene::PortalCrossing(store, previous.Position, pose.Frame.Position, through));
+	const CFrame mapped = through.Place(pose.Frame);
+
+	REQUIRE(CarryViewportCamera(store, previous, pose));
+	CHECK((pose.Frame.Position - mapped.Position).Magnitude() < 0.05f);
+	CHECK(pose.Frame.LookVector().Dot(mapped.LookVector()) > 0.9999f);
+	CHECK(pose.Frame.Position.X > 90.0f);
+
+	const CFrame rebuilt = CFrame::Angles(pose.Pitch, pose.Yaw, 0.0f);
+	CHECK(rebuilt.LookVector().Dot(pose.Frame.LookVector()) > 0.9999f);
+}
+
+TEST_CASE("selecting the current direction gizmo axis flips the view", "[studio][viewports][camera]") {
+	using engine::core::CFrame;
+	using engine::core::Vector3;
+
+	const Vector3 position{4.0f, 5.0f, 6.0f};
+	const std::array<Vector3, 3> axes{Vector3::XAxis, Vector3::YAxis, Vector3::ZAxis};
+	const std::array<Vector3, 3> upDirections{Vector3::YAxis, Vector3::ZAxis, Vector3::YAxis};
+
+	for (size_t index = 0; index < axes.size(); index++) {
+		const CFrame positive = CFrame::LookAt(position, position + axes[index], upDirections[index]);
+		const CFrame negative = SnapViewportCameraDirection(positive, axes[index]);
+		CHECK(negative.Position == position);
+		CHECK(negative.LookVector().Dot(-axes[index]) > 0.9999f);
+		CHECK(negative.UpVector().Dot(positive.UpVector()) > 0.9999f);
+
+		const CFrame positiveAgain = SnapViewportCameraDirection(negative, axes[index]);
+		CHECK(positiveAgain.Position == position);
+		CHECK(positiveAgain.LookVector().Dot(axes[index]) > 0.9999f);
+		CHECK(positiveAgain.UpVector().Dot(negative.UpVector()) > 0.9999f);
+	}
 }
 
 TEST_CASE("each viewport remembers an independent camera per world", "[studio][viewports][camera]") {

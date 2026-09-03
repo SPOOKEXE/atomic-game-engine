@@ -69,6 +69,50 @@ passes, and is wrong.
 
 ---
 
+## Versioning
+
+Versions are `v[major].[minor].[patch]`. Everything before `1.0.0` is a
+pre-release with no compatibility promise.
+
+The number lives in one file, [`VERSION`](VERSION), and everything derives from
+it - the build, the artifact names, and `--version` on any program:
+
+```console
+$ client --version
+client 0.22.0
+```
+
+See [`docs/RELEASING.md`](docs/RELEASING.md) for what each number means and how a
+release is cut, and [`ROADMAP.md`](ROADMAP.md) for what is in each one.
+
+---
+
+## Releases
+
+Pushing a `vX.Y.Z` tag builds the `release` preset on Linux, Windows and macOS
+and publishes what it built to the GitHub releases page:
+
+- **Linux:** a `.tar.gz` of all four programs, plus an `.AppImage` each for the
+  client and the studio
+- **Windows:** a `.zip` of all four programs as executables.
+- **macOS:** a `.tar.gz`, unsigned and untested
+
+Development builds and media are in the discord server below.
+
+---
+
+## Benchmarks
+
+There are `just` jobs for benchmarking.
+
+Do NOT write benchmarks to file.
+
+If you are creating new benchmarks, add a `just` job for that benchmark.
+
+Ensure benchmark outputs are under where the builds are.
+
+---
+
 ## The six rules
 
 ### 1. The layer stack is not negotiable

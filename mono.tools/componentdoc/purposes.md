@@ -58,7 +58,8 @@ world.Replica | Marks a world as a mirror of one the server owns, naming the wor
 ## `scene`
 
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.
-scene.AnimationClip | On an `Animation` instance: which clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
+scene.AnimationBuffer | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit.
+scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
 scene.AnimationTrack | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler.
 scene.Animator | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance.
 scene.Atmosphere | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only.
@@ -72,6 +73,8 @@ scene.Camera | The lens: vertical field of view, near plane and far plane. It de
 scene.Clouds | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only.
 scene.CloudCompute | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture.
 scene.Constraint | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row.
+scene.JointInstance | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld.
+scene.WeldConstraint | A direct rigid link between two parts whose initial relative frame is captured by the physics world.
 scene.CameraController | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override.
 scene.Character | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here.
 scene.CharacterChanges | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals.
@@ -132,6 +135,13 @@ scene.TagTable | Resource: the registered tag names, at most thirty-two, whose i
 scene.Tags | One bit per registered tag, named by the world's `TagTable`. Read by tag-filtered surface cameras and by every `CollectionService:GetTagged` call.
 scene.Team | On a `Team` instance: the side's colour, which is the thing spawn pads are matched against. Deliberately nothing else.
 scene.TextContent | The text a `StringValue` or `LocalizationTable` holds, verbatim and not interned. Written through the `Value` property and by Rojo `.txt`/`.csv` sync.
+scene.BoolValue | The boolean stored by a `BoolValue` instance.
+scene.CFrameValue | The coordinate frame stored by a `CFrameValue` instance.
+scene.Color3Value | The colour stored by a `Color3Value` instance.
+scene.IntValue | The signed 64-bit integer stored by an `IntValue` instance.
+scene.NumberValue | The double-precision number stored by a `NumberValue` instance.
+scene.ObjectValue | The entity reference stored by an `ObjectValue` instance.
+scene.Vector3Value | The vector stored by a `Vector3Value` instance.
 scene.Terrain | Resource: how a world's ground is generated - the node graph, the seed, chunk extent and resolution, vertical extent and how far chunks are kept. The recipe is stored and the ground it makes never is.
 scene.TextureCatalogue | Resource: the flipbook facts - grid, frame count and rate - the content pump learned about each loaded texture.
 scene.Tool | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn.
@@ -157,7 +167,14 @@ gui.Gradient | `UIGradient`: a colour and transparency ramp multiplied into what
 gui.GridLayout | `UIGridLayout`: places the parent's children in equal cells on a grid, with a cell size, cell padding, fill direction and start corner.
 gui.Group | What a `CanvasGroup` composites its subtree with: one colour and one transparency applied to the whole group rather than to each child.
 gui.GuiServiceState | `GuiService`'s own state: the selected element, the focused `TextBox`, whether a platform menu covers the game, and whether selection may seed itself.
-gui.HandleShape | Where a `HandleAdornment` sits relative to its adornee and how big it is, as an offset `CFrame` and a stud extent.
+gui.HandleShape | Where a `HandleAdornment` sits relative to its adornee, as a local `CFrame` and size-relative offset.
+gui.BoxHandleShape | The three-dimensional size of a `BoxHandleAdornment`.
+gui.SphereHandleShape | The radius of a `SphereHandleAdornment`.
+gui.CylinderHandleShape | The outer radius, inner radius, height and arc angle of a `CylinderHandleAdornment`.
+gui.LineHandleShape | The length and overlay thickness of a `LineHandleAdornment`.
+gui.ConeHandleShape | The height, radius and hollow-base choice of a `ConeHandleAdornment`.
+gui.HandlesShape | The face mask drawn by a `Handles` instance.
+gui.ArcHandlesShape | The axis mask drawn by an `ArcHandles` instance.
 gui.Label | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags.
 gui.Layer | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset.
 gui.ListLayout | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping.

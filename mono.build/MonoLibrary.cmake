@@ -384,6 +384,21 @@ function(_mono_keep_spdlog_sources_apart sources)
 	endforeach()
 endfunction()
 
+# Bind profiler scopes to the product that compiled the call site. Engine
+# modules need no definition because Profiling.hpp defaults them to Engine.
+function(_mono_bind_profile_owner target name)
+	if(name STREQUAL "client")
+		target_compile_definitions(${target} PRIVATE
+			ENGINE_PROFILE_OWNER=::engine::core::ProfileOwner::Client)
+	elseif(name STREQUAL "server")
+		target_compile_definitions(${target} PRIVATE
+			ENGINE_PROFILE_OWNER=::engine::core::ProfileOwner::Server)
+	elseif(name STREQUAL "studio")
+		target_compile_definitions(${target} PRIVATE
+			ENGINE_PROFILE_OWNER=::engine::core::ProfileOwner::Studio)
+	endif()
+endfunction()
+
 # ---------------------------------------------------------------------------
 # mono_add_library
 # ---------------------------------------------------------------------------
@@ -480,6 +495,7 @@ function(mono_add_library name)
 		# module's, logging from inside another module's source, is that other
 		# module's line to explain.
 		target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+		_mono_bind_profile_owner(${target} ${name})
 
 		target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 		if(MONO_COMPILE_DEFINITIONS)
@@ -543,6 +559,7 @@ function(mono_add_tests name)
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::testmain Catch2::Catch2)
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_bind_profile_owner(${target} ${name})
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 	if(MONO_COMPILE_DEFINITIONS)
 		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})
@@ -587,6 +604,32 @@ function(mono_add_tests name)
 		endforeach()
 	endif()
 
+	# A renderer test that opts into a real device reads the same compiled
+	# resources as a client program. Keep SDL and the shaders out of unrelated
+	# suites, but make `test_render` runnable from its staged directory without a
+	# full client build happening to have populated another tree first.
+	if("Engine::render" IN_LIST _mono_test_deps)
+		get_target_property(_mono_test_shader_dir engine_resources MONO_SHADER_DIR)
+		get_target_property(_mono_test_shader_inputs engine_resources MONO_SHADER_OUTPUTS)
+		set(_mono_test_shader_outputs "")
+		foreach(_mono_test_shader IN LISTS _mono_test_shader_inputs)
+			get_filename_component(_mono_test_shader_name "${_mono_test_shader}" NAME)
+			list(APPEND _mono_test_shader_outputs
+				"${MONO_STAGE_ROOT}/tests/shaders/resources/${_mono_test_shader_name}")
+		endforeach()
+
+		add_custom_command(
+			OUTPUT ${_mono_test_shader_outputs}
+			COMMAND ${CMAKE_COMMAND} -E rm -rf "${MONO_STAGE_ROOT}/tests/shaders/resources"
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				"${_mono_test_shader_dir}" "${MONO_STAGE_ROOT}/tests/shaders/resources"
+			DEPENDS ${_mono_test_shader_inputs}
+			COMMENT "Staging renderer shaders into tests/shaders"
+			VERBATIM)
+		add_custom_target(${target}_stage_shaders DEPENDS ${_mono_test_shader_outputs})
+		add_dependencies(${target} ${target}_stage_shaders)
+	endif()
+
 	add_test(NAME ${name} COMMAND ${target})
 	set_property(GLOBAL APPEND PROPERTY MONO_ALL_TEST_TARGETS ${target})
 endfunction()
@@ -617,6 +660,7 @@ function(mono_add_benchmarks name)
 	add_executable(${target} ${sources})
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} Engine::benchmain)
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_bind_profile_owner(${target} ${name})
 	_mono_batch_headers(${target} "${sources}" FALSE)
 
 	# Optimised whatever the preset says, because a debug build measures the
@@ -680,6 +724,7 @@ function(mono_add_program name)
 	target_compile_features(${target} PRIVATE cxx_std_20)
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} ${ARG_VENDOR})
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")
+	_mono_bind_profile_owner(${target} ${name})
 	target_compile_options(${target} PRIVATE ${MONO_COMPILE_OPTIONS})
 	if(MONO_COMPILE_DEFINITIONS)
 		target_compile_definitions(${target} PRIVATE ${MONO_COMPILE_DEFINITIONS})

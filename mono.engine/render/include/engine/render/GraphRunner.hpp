@@ -8,7 +8,6 @@
 #include <engine/graph/RenderGraph.hpp>
 
 #include <functional>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -62,6 +61,11 @@ namespace engine::render {
 	// is, and this decides what a device does and never learns the order.
 	class NodeTable {
 	  public:
+		// Keeps the built-in catalogue in one allocation. A renderer builds and
+		// replaces this small table per view, so node-based map storage would pay
+		// for an allocation per kind before command recording began.
+		NodeTable();
+
 		// Registers, or replaces, the handler for one node kind.
 		//
 		// @param kind    The authored node kind.
@@ -102,9 +106,10 @@ namespace engine::render {
 		void Clear();
 
 	  private:
-		// Handlers by interned name id. The id rather than the `core::Name`,
-		// because that is what the hash would reduce to anyway.
-		std::unordered_map<uint32_t, NodeHandler> Handlers;
+		// A short flat table beats hashing here: the built-in catalogue has only a
+		// few dozen entries and a frame visits each kind at most a handful of
+		// times. The id keeps both replacement and lookup to integer compares.
+		std::vector<std::pair<uint32_t, NodeHandler>> Handlers;
 	};
 
 	// Walks a compiled graph and records each node through the table.

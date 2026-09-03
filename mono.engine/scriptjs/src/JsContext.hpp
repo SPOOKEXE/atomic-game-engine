@@ -82,6 +82,12 @@ namespace engine::script {
 
 		// The shared machinery.
 		SignalTable Signals;
+
+		// Reused by the two bulk placement methods. The runtime is single-threaded,
+		// and each call consumes these before another script method can replace them.
+		std::vector<ecs::Entity> PlacementInstances;
+		std::vector<core::CFrame> PlacementFrames;
+
 		ChangeQueue Changes;
 		TaskQueue Tasks;
 

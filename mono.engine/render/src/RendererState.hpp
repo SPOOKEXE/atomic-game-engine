@@ -59,6 +59,7 @@ namespace engine::render {
 			core::Name Name;
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
+			std::vector<graph::NodeId> EntityNodes;
 			graph::ExecutionSchedule Schedule;
 			graph::ResourceAliasPlan Aliases;
 
@@ -628,6 +629,9 @@ namespace engine::render {
 		// it can reuse their resident slots instead of resolving and packing each
 		// visible instance a second time.
 		std::vector<uint32_t> SceneSlotOfSource;
+		// The target whose own-world metadata still occupies the shared slot
+		// arrays. A repeated single-target view can retain that dense prefix.
+		size_t PackedMetadataTarget = std::numeric_limits<size_t>::max();
 		SDL_GPUGraphicsPipeline *ImagePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
@@ -735,6 +739,8 @@ namespace engine::render {
 		std::vector<core::Name> SlotMetalnessMap;
 		std::vector<core::Name> SlotEmissiveMap;
 		std::vector<scene::SurfaceResampleMode> SlotResample;
+		// Whether a shadow run needs per-material alpha or seam state.
+		std::vector<uint8_t> SlotShadowDetail;
 
 		// Which shader each slot asks for, or an invalid name for the engine's.
 		//
@@ -960,6 +966,12 @@ namespace engine::render {
 			uint32_t Count = 0;
 		};
 
+		struct ParticleDrawGroup {
+			uint32_t FirstRun = 0;
+			uint32_t RunCount = 0;
+			uint32_t Culled = 0;
+		};
+
 		// --- ribbons ----------------------------------------------------------
 		//
 		// **The same two-pipeline shape the particles have**, and for the same
@@ -1013,7 +1025,6 @@ namespace engine::render {
 		// same argument `DrawOrder` makes one screen up.
 		std::vector<ParticleGroup> ParticleGroups;
 		std::vector<ParticleCullSpan> ParticleSpans;
-		std::vector<ParticleDrawRun> ParticleDrawRuns;
 		std::vector<uint32_t> ParticleOrder;
 
 		// --- the device-resident pool -----------------------------------------
@@ -1138,6 +1149,13 @@ namespace engine::render {
 			std::vector<uint32_t> PreparedOrder;
 			bool PreparedCullingSafe = true;
 
+			// Emitter bounds and their folded runs are host facts. Keep the last
+			// camera's plan until one of those facts changes or an old-bound
+			// lifetime expires.
+			ParticleDrawPlanStamp DrawPlanStamp;
+			std::vector<ParticleDrawGroup> DrawGroups;
+			std::vector<ParticleDrawRun> DrawRuns;
+
 			// Time recorded into the command currently owned by the host. A submit
 			// failure carries it into the next device step instead of losing time.
 			//@{
@@ -1260,6 +1278,15 @@ namespace engine::render {
 			static constexpr size_t RETAINED_FRAMES = 3;
 			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
 
+			// Stable mesh and resident identities beside a retained viewport.
+			// Particle-only redraws still fill object draw metadata from the ECS rows,
+			// but do not resolve meshes or probe identical resident rows again.
+			struct InstanceSourceRow {
+				InstanceKey Key;
+				const MeshEntry *Mesh = nullptr;
+				uint32_t ResidentSlot = 0;
+			};
+
 			SDL_GPUTexture *Texture = nullptr;
 
 			// What was allocated, which is the panel's size rounded up to a
@@ -1289,8 +1316,17 @@ namespace engine::render {
 			// Visibility and order remain target-owned. The packed rows they index
 			// are shared by every camera carrying the same world key.
 			std::vector<uint32_t> InstanceIndices;
+			std::vector<InstanceSourceRow> InstanceSources;
+			std::vector<uint32_t> InstanceSourceOrder;
+			bool InstanceSourcesReady = false;
 			std::vector<uint32_t> SkinOffsets;
 			std::vector<uint32_t> JointWords;
+			uint64_t SkinOffsetSignature = 0;
+			uint64_t JointWordSignature = 0;
+			bool SkinOffsetsReady = false;
+			bool JointWordsReady = false;
+			bool SkinOffsetsDirty = false;
+			bool JointWordsDirty = false;
 			uint32_t SkinOffsetCapacity = 0;
 			uint32_t JointWordCapacity = 0;
 			SDL_GPUBuffer *SkinOffsetBuffer = nullptr;

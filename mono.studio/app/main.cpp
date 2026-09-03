@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
 	);
-	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
+	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 to 3 (default 2)");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
 	arguments.Value(

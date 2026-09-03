@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,18 @@ namespace engine::render {
 		bool Finite(const core::Vector3 &value) {
 			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
 		}
+	}
+
+	bool ParticleDrawPlanStamp::Reusable(
+		const glm::mat4 &viewProjection,
+		uint64_t layoutRevision,
+		uint64_t residentRevision,
+		double simulatedSeconds,
+		bool cullingSafe
+	) const {
+		return Valid && LayoutRevision == layoutRevision && ResidentRevision == residentRevision &&
+			   CullingSafe == cullingSafe && simulatedSeconds < RebuildAfter &&
+			   std::memcmp(&ViewProjection, &viewProjection, sizeof(viewProjection)) == 0;
 	}
 
 	ParticleDrawBounds BoundsForParticleDraw(
@@ -1017,6 +1030,7 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedSpans.clear();
 			ActiveParticleWorld->PreparedOrder.clear();
 			ActiveParticleWorld->PreparedCullingSafe = true;
+			ActiveParticleWorld->DrawPlanStamp.Valid = false;
 			return {};
 		}
 
@@ -1362,6 +1376,12 @@ namespace engine::render {
 		ActiveParticleWorld->PreparedGroups = ParticleGroups;
 		ActiveParticleWorld->PreparedSpans = ParticleSpans;
 		ActiveParticleWorld->PreparedCullingSafe = view.ParticleSeams.empty();
+		if (rebuildLayout || refreshResident) {
+			// An incomplete resident refresh can change the prepared groups before
+			// its public resident revision advances. Invalidate directly so a partial
+			// plan is never reused for the larger prepared list.
+			ActiveParticleWorld->DrawPlanStamp.Valid = false;
+		}
 
 		return {written, dispatched.Count};
 	}
@@ -1378,6 +1398,7 @@ namespace engine::render {
 		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
+		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
 		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
 
 		// The camera's axes, once for the frame rather than once per group: a
@@ -1407,58 +1428,95 @@ namespace engine::render {
 		uint32_t draws = 0;
 		bool additiveBound = false;
 		bool blendedBound = false;
-		const graph::Frustum frustum = graph::Frustum::FromViewProjection(viewProjection);
+		ParticleWorld &particleWorld = *ActiveParticleWorld;
+		if (particleWorld.DrawGroups.size() != ParticleGroups.size() ||
+			!particleWorld.DrawPlanStamp.Reusable(
+				viewProjection,
+				particleWorld.PreparedLayoutRevision,
+				particleWorld.PreparedResidentRevision,
+				particleWorld.Pool.SimulatedSeconds,
+				particleWorld.PreparedCullingSafe
+			)) {
+			ENGINE_PROFILE_CAT("particles.draw plan", core::ProfileCategory::Render);
+			const graph::Frustum frustum = graph::Frustum::FromViewProjection(viewProjection);
+			const double simulatedSeconds = particleWorld.Pool.SimulatedSeconds;
+			double rebuildAfter = std::numeric_limits<double>::infinity();
+			particleWorld.DrawGroups.clear();
+			particleWorld.DrawGroups.resize(ParticleGroups.size());
+			particleWorld.DrawRuns.clear();
 
-		for (const ParticleGroup &group : ParticleGroups) {
-			if (group.HasBounds &&
-				!ParticleDrawVisible(
-					group.Bounds,
-					group.Cullable && ActiveParticleWorld->Pool.SimulatedSeconds >= group.CullableAfter,
-					ActiveParticleWorld->PreparedCullingSafe,
-					frustum
-				)) {
-				culled += group.Count;
-				continue;
-			}
-
-			// The material-wide box is a cheap reject, but it can surround the eye in
-			// a large field while every emitter is behind the camera. Refine that case
-			// at emitter granularity and fold adjacent survivors back into draw runs.
-			// This is host work over emitter bounds, never over resident particles.
-			ParticleDrawRuns.clear();
-			uint32_t runFirst = 0;
-			uint32_t runCount = 0;
-			const auto flushRun = [&]() {
-				if (runCount != 0) {
-					ParticleDrawRuns.push_back({runFirst, runCount});
-					runCount = 0;
+			for (size_t groupIndex = 0; groupIndex < ParticleGroups.size(); groupIndex++) {
+				const ParticleGroup &group = ParticleGroups[groupIndex];
+				ParticleDrawGroup &plan = particleWorld.DrawGroups[groupIndex];
+				plan.FirstRun = static_cast<uint32_t>(particleWorld.DrawRuns.size());
+				if (group.Cullable && simulatedSeconds < group.CullableAfter) {
+					rebuildAfter = std::min(rebuildAfter, group.CullableAfter);
 				}
-			};
-			for (uint32_t offset = 0; offset < group.SpanCount; offset++) {
-				const ParticleCullSpan &span = ParticleSpans[group.FirstSpan + offset];
-				if (!ParticleDrawVisible(
-						span.Bounds,
-						span.Cullable && ActiveParticleWorld->Pool.SimulatedSeconds >= span.CullableAfter,
-						ActiveParticleWorld->PreparedCullingSafe,
-						frustum
-					)) {
-					flushRun();
-					culled += span.Count;
+				if (group.HasBounds && !ParticleDrawVisible(
+										   group.Bounds,
+										   group.Cullable && simulatedSeconds >= group.CullableAfter,
+										   particleWorld.PreparedCullingSafe,
+										   frustum
+									   )) {
+					plan.Culled = group.Count;
 					continue;
 				}
-				if (runCount == 0) {
-					runFirst = span.First;
-				} else if (runFirst + runCount != span.First) {
-					flushRun();
-					runFirst = span.First;
+
+				// The material box is a cheap reject. When it intersects, refine once at
+				// emitter granularity and retain the folded runs until a host input changes.
+				uint32_t runFirst = 0;
+				uint32_t runCount = 0;
+				const auto flushRun = [&]() {
+					if (runCount != 0) {
+						particleWorld.DrawRuns.push_back({runFirst, runCount});
+						runCount = 0;
+					}
+				};
+				for (uint32_t offset = 0; offset < group.SpanCount; offset++) {
+					const ParticleCullSpan &span = ParticleSpans[group.FirstSpan + offset];
+					if (span.Cullable && simulatedSeconds < span.CullableAfter) {
+						rebuildAfter = std::min(rebuildAfter, span.CullableAfter);
+					}
+					if (!ParticleDrawVisible(
+							span.Bounds,
+							span.Cullable && simulatedSeconds >= span.CullableAfter,
+							particleWorld.PreparedCullingSafe,
+							frustum
+						)) {
+						flushRun();
+						plan.Culled += span.Count;
+						continue;
+					}
+					if (runCount == 0) {
+						runFirst = span.First;
+					} else if (runFirst + runCount != span.First) {
+						flushRun();
+						runFirst = span.First;
+					}
+					runCount += span.Count;
 				}
-				runCount += span.Count;
+				flushRun();
+				if (group.SpanCount == 0) {
+					particleWorld.DrawRuns.push_back({group.First, group.Count});
+				}
+				plan.RunCount = static_cast<uint32_t>(particleWorld.DrawRuns.size()) - plan.FirstRun;
 			}
-			flushRun();
-			if (group.SpanCount == 0) {
-				ParticleDrawRuns.push_back({group.First, group.Count});
-			}
-			if (ParticleDrawRuns.empty()) {
+
+			particleWorld.DrawPlanStamp = {
+				.ViewProjection = viewProjection,
+				.LayoutRevision = particleWorld.PreparedLayoutRevision,
+				.ResidentRevision = particleWorld.PreparedResidentRevision,
+				.RebuildAfter = rebuildAfter,
+				.CullingSafe = particleWorld.PreparedCullingSafe,
+				.Valid = true,
+			};
+		}
+
+		for (size_t groupIndex = 0; groupIndex < ParticleGroups.size(); groupIndex++) {
+			const ParticleGroup &group = ParticleGroups[groupIndex];
+			const ParticleDrawGroup &plan = particleWorld.DrawGroups[groupIndex];
+			culled += plan.Culled;
+			if (plan.RunCount == 0) {
 				continue;
 			}
 			const render::ParticleBatch &state = batches[group.Batch];
@@ -1515,7 +1573,8 @@ namespace engine::render {
 
 			// Four vertices a particle, as a strip. `first_instance` selects each
 			// surviving contiguous slice of the shared buffer.
-			for (const ParticleDrawRun &run : ParticleDrawRuns) {
+			for (uint32_t offset = 0; offset < plan.RunCount; offset++) {
+				const ParticleDrawRun &run = particleWorld.DrawRuns[plan.FirstRun + offset];
 				SDL_DrawGPUPrimitives(pass, 4, run.Count, 0, run.First);
 				draws++;
 				triangles += static_cast<uint64_t>(run.Count) * 2;

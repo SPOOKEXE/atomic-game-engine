@@ -299,6 +299,25 @@ TEST_CASE("two rebuilds of the same proxies visit in the same order", "[hashgrid
 	REQUIRE(Visited(other, everything) == first);
 }
 
+TEST_CASE("a generated rebuild writes into owned proxy storage", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	grid.RebuildGenerated(
+		2,
+		[](std::span<Proxy> proxies) {
+			proxies[0] = Box(7, Vector3{0.0f, 0.0f, 0.0f}, Vector3{3.0f, 3.0f, 3.0f});
+			proxies[1] = Box(9, Vector3{8.0f, 0.0f, 0.0f}, Vector3{11.0f, 3.0f, 3.0f});
+		},
+		true
+	);
+
+	REQUIRE(grid.ProxyCount() == 2);
+	REQUIRE(grid.CellSize() == 8.0f);
+	REQUIRE(
+		Visited(grid, AABB{Vector3{-1.0f, -1.0f, -1.0f}, Vector3{4.0f, 4.0f, 4.0f}}) ==
+		std::vector<uint64_t>{7}
+	);
+}
+
 TEST_CASE("the second rebuild reuses the first's storage", "[hashgrid]") {
 	HashGrid grid{UNIT_CELL};
 

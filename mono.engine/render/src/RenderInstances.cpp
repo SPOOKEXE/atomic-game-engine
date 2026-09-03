@@ -83,13 +83,23 @@ namespace engine::render {
 		// call somebody else's fragment shader.
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
+		if (lighting == nullptr) {
+			const SDL_GPUTextureSamplerBinding defaultSampler{
+				Textures.Default() != nullptr ? Textures.Default() : FallbackTexture,
+				Textures.Sampler(),
+			};
+			SDL_BindGPUFragmentSamplers(pass, 0, &defaultSampler, 1);
+			const ShadowUniforms defaultUniforms;
+			SDL_PushGPUFragmentUniformData(command, 0, &defaultUniforms, sizeof(defaultUniforms));
+		}
 
 		// One draw for one range of one mesh, over `run` consecutive instances.
 		const auto emit = [&](const MeshRange &range,
 							  const core::Name &texture,
 							  const std::array<float, 4> &colour,
 							  uint32_t slot,
-							  uint32_t run) {
+							  uint32_t run,
+							  bool simpleShadow) {
 			if (range.IndexCount == 0) {
 				return;
 			}
@@ -252,7 +262,7 @@ namespace engine::render {
 				}
 
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
-			} else {
+			} else if (!simpleShadow) {
 				// **Depth only, and it still has to know where the body is cut.** A
 				// half drawn whole into the shadow map casts a whole body's shadow,
 				// so the near half of somebody in a doorway would darken the floor as
@@ -331,8 +341,10 @@ namespace engine::render {
 			const core::Name shader = SlotShader[slot];
 
 			uint32_t run = 1;
+			bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
 			while (slot + run < first + count && SlotsShareRun(slot, slot + run) &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
+				simpleShadow = simpleShadow && SlotShadowDetail[slot + run] == 0;
 				run++;
 			}
 
@@ -363,7 +375,7 @@ namespace engine::render {
 
 			if (mesh->Runs.empty()) {
 				// A mesh with no materials of its own - every built-in.
-				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, phaseInstances);
+				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, phaseInstances, simpleShadow);
 			} else {
 				for (size_t index = 0; index < mesh->Runs.size(); index++) {
 					// **The instance's texture wins when it has one.** That is
@@ -375,7 +387,8 @@ namespace engine::render {
 						texture.IsValid() ? texture : mesh->Textures[index],
 						mesh->Colours[index],
 						slot,
-						phaseInstances
+						phaseInstances,
+						simpleShadow
 					);
 				}
 			}

@@ -803,6 +803,7 @@ namespace engine::scene {
 			ecs::EnumTable::Register("ServiceScope", SCOPES);
 
 			const ClassId instance = Classes::Find(core::Name("Instance"));
+			const ClassId worldRoot = Classes::Find(core::Name("WorldRoot"));
 
 			// **Abstract, and the class picker knows it by this rather than by
 			// a list of names.** `Explorer.cpp` filters the palette to
@@ -813,6 +814,7 @@ namespace engine::scene {
 			// it there.
 			const std::array serviceSet{ecs::Components::Of<ServiceComponent>()};
 			const ClassId service = Classes::Register("Service", instance, serviceSet);
+			Classes::SetCreatable(service, false);
 
 			const std::array lightingSet{
 				ecs::Components::Of<ServiceComponent>(),
@@ -826,13 +828,19 @@ namespace engine::scene {
 
 			for (const ServiceDesc &desc : SERVICES) {
 				ClassId registered;
-				if (desc.Name == "Lighting") {
+				if (desc.Name == "Workspace") {
+					// Workspace is the process's WorldRoot fixture, not a generic
+					// Service. It still carries ServiceComponent because fixture
+					// lifetime and scope are component facts rather than ancestry.
+					registered = Classes::Register(desc.Name, worldRoot, serviceSet);
+				} else if (desc.Name == "Lighting") {
 					registered = Classes::Register(desc.Name, service, lightingSet);
 				} else if (desc.Name == "Players") {
 					registered = Classes::Register(desc.Name, service, playersSet);
 				} else {
 					registered = Classes::Register(desc.Name, service, {});
 				}
+				Classes::SetCreatable(registered, false);
 
 				// The class default, not a repair after creation. This makes an
 				// authored `Shared` on `ServerStorage` differ from its Server
@@ -1040,13 +1048,11 @@ namespace engine::scene {
 	}
 
 	bool VisibleToClients(const Store &store, Entity instance) {
-		const ClassId service = Classes::Find(core::Name("Service"));
-		if (!service.IsValid()) {
-			return true;
-		}
-
 		Entity at = instance;
-		while (at != NULL_ENTITY && !store.IsA(at, service)) {
+		// ServiceComponent is the fixture fact. Workspace is a WorldRoot in the
+		// class tree, so using `IsA("Service")` here would make its entire scene
+		// disappear from replication even though it carries the same scope row.
+		while (at != NULL_ENTITY && store.Get<ServiceComponent>(at) == nullptr) {
 			at = store.ParentOf(at);
 		}
 		if (at == NULL_ENTITY) {

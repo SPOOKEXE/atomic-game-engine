@@ -284,14 +284,23 @@ TEST_CASE("every value type crosses and comes back", "[script-ecs]") {
 			"', {\n"
 			"  Flag = 'boolean',\n"
 			"  Count = 'int32',\n"
+			"  WideCount = 'int64',\n"
 			"  Ratio = 'float',\n"
 			"  Exact = 'number',\n"
 			"  Label = 'string',\n"
 			"  Kind = 'Name',\n"
+			"  Mode = 'Enum.AlphaMode',\n"
 			"  Where = 'Vector3',\n"
 			"  Tint = 'Color3',\n"
 			"  Placement = 'CFrame',\n"
 			"  Target = 'Instance',\n"
+			"  Point = 'Vector2',\n"
+			"  Axis = 'UDim',\n"
+			"  Box = 'UDim2',\n"
+			"  Crop = 'Rect',\n"
+			"  Range = 'NumberRange',\n"
+			"  Curve = 'NumberSequence',\n"
+			"  Gradient = 'ColorSequence',\n"
 			"})\n"
 			"local part = Instance.new('Part')\n"
 			"local entity = World:CreateEntity()\n"
@@ -300,28 +309,86 @@ TEST_CASE("every value type crosses and comes back", "[script-ecs]") {
 			"', {\n"
 			"  Flag = true,\n"
 			"  Count = 7,\n"
+			"  WideCount = 9007199254740991,\n"
 			"  Ratio = 0.5,\n"
 			"  Exact = 1.25,\n"
 			"  Label = 'a score that changes',\n"
 			"  Kind = 'Counter',\n"
+			"  Mode = Enum.AlphaMode.Transparency,\n"
 			"  Where = Vector3.new(1, 2, 3),\n"
 			"  Tint = Color3.new(1, 0, 0),\n"
 			"  Placement = CFrame.new(4, 5, 6),\n"
 			"  Target = part,\n"
+			"  Point = Vector2.new(8, 9),\n"
+			"  Axis = UDim.new(0.5, -8),\n"
+			"  Box = UDim2.new(0.5, -8, 1, 4),\n"
+			"  Crop = Rect.new(1, 2, 10, 20),\n"
+			"  Range = NumberRange.new(2, 8),\n"
+			"  Curve = NumberSequence.new(0, 10),\n"
+			"  Gradient = ColorSequence.new(Color3.new(1, 0, 0), Color3.new(0, 0, 1)),\n"
 			"})\n"
 			"local held = entity:GetComponent('" +
 			name +
 			"')\n"
 			"assert(held.Flag == true, 'boolean')\n"
 			"assert(held.Count == 7, 'int32')\n"
+			"assert(held.WideCount == 9007199254740991, 'int64')\n"
 			"assert(math.abs(held.Ratio - 0.5) < 1e-6, 'float')\n"
 			"assert(held.Exact == 1.25, 'double')\n"
 			"assert(held.Label == 'a score that changes', 'string, got ' .. tostring(held.Label))\n"
 			"assert(held.Kind == 'Counter', 'Name')\n"
+			"assert(held.Mode == Enum.AlphaMode.Transparency, 'Enum')\n"
 			"assert(held.Where == Vector3.new(1, 2, 3), 'Vector3')\n"
 			"assert(held.Tint.R == 1, 'Color3')\n"
 			"assert(held.Placement.Position == Vector3.new(4, 5, 6), 'CFrame')\n"
 			"assert(held.Target == part, 'Instance reference')\n"
+			"assert(held.Point == Vector2.new(8, 9), 'Vector2')\n"
+			"assert(held.Axis.Scale == 0.5 and held.Axis.Offset == -8, 'UDim')\n"
+			"assert(held.Box.X.Offset == -8 and held.Box.Y.Offset == 4, 'UDim2')\n"
+			"assert(held.Crop.Width == 9 and held.Crop.Height == 18, 'Rect')\n"
+			"assert(held.Range.Min == 2 and held.Range.Max == 8, 'NumberRange')\n"
+			"assert(held.Curve:Evaluate(0.5) == 5, 'NumberSequence')\n"
+			"assert(math.abs(held.Gradient:Evaluate(0.5).R - 0.5) < 1e-5, 'ColorSequence')\n"
+	);
+
+	const auto javascript = MakeRuntime(store, Language::JavaScript);
+	MustRun(
+		*javascript,
+		"if (World.DefineComponent('" + name + "', World.GetComponentSchema('" + name +
+			"'))) throw new Error('the shared schema should already exist');\n"
+			"const part = Instance.new('Part');\n"
+			"const entity = World.CreateEntity();\n"
+			"entity.SetComponent('" +
+			name +
+			"', {\n"
+			"  Flag: true, Count: 7, WideCount: 9007199254740991, Ratio: 0.5, Exact: 1.25,\n"
+			"  Label: 'text', Kind: 'Counter', Mode: Enum.AlphaMode.Transparency,\n"
+			"  Where: Vector3.new(1, 2, 3), Tint: Color3.new(1, 0, 0),\n"
+			"  Placement: CFrame.new(4, 5, 6), Target: part, Point: Vector2.new(8, 9),\n"
+			"  Axis: UDim.new(0.5, -8), Box: UDim2.new(0.5, -8, 1, 4),\n"
+			"  Crop: Rect.new(1, 2, 10, 20), Range: NumberRange.new(2, 8),\n"
+			"  Curve: NumberSequence.new(0, 10),\n"
+			"  Gradient: ColorSequence.new(Color3.new(1, 0, 0), Color3.new(0, 0, 1))\n"
+			"});\n"
+			"const held = entity.GetComponent('" +
+			name +
+			"');\n"
+			"if (!held.Flag || held.Count !== 7 || held.WideCount !== 9007199254740991) throw new "
+			"Error('numbers');\n"
+			"if (held.Ratio !== 0.5 || held.Exact !== 1.25 || held.Label !== 'text' || held.Kind !== "
+			"'Counter') throw new Error('scalars');\n"
+			"if (!held.Mode.Equals(Enum.AlphaMode.Transparency)) throw new Error('Enum');\n"
+			"if (!held.Where.Equals(Vector3.new(1, 2, 3)) || held.Tint.R !== 1) throw new Error('3D "
+			"values');\n"
+			"if (!held.Placement.Position.Equals(Vector3.new(4, 5, 6)) || held.Target.Name !== part.Name) "
+			"throw new Error('CFrame or Instance');\n"
+			"if (!held.Point.Equals(Vector2.new(8, 9))) throw new Error('Vector2');\n"
+			"if (held.Axis.Scale !== 0.5 || held.Axis.Offset !== -8 || held.Box.Y.Offset !== 4) throw new "
+			"Error('UDim values');\n"
+			"if (held.Crop.Width !== 9 || held.Crop.Height !== 18) throw new Error('Rect');\n"
+			"if (held.Range.Min !== 2 || held.Range.Max !== 8) throw new Error('NumberRange');\n"
+			"if (held.Curve.Evaluate(0.5) !== 5 || Math.abs(held.Gradient.Evaluate(0.5).R - 0.5) > 1e-5) "
+			"throw new Error('sequences');\n"
 	);
 }
 
@@ -510,7 +577,9 @@ TEST_CASE("component metadata and filtered queries agree across both languages",
 	engine::scene::EnsureClassTree();
 	Store store("script_ecs");
 	const std::string included = Unique("filtered");
+	const std::string includedSecond = Unique("filtered-second");
 	const std::string excluded = Unique("filtered-tag");
+	const std::string excludedSecond = Unique("filtered-tag-second");
 
 	{
 		const auto luau = MakeRuntime(store, Language::Luau);
@@ -519,7 +588,13 @@ TEST_CASE("component metadata and filtered queries agree across both languages",
 			"World:DefineComponent('" + included +
 				"', { Value = 'int32', Mode = 'Enum.AlphaMode' })\n"
 				"World:DefineComponent('" +
+				includedSecond +
+				"', {})\n"
+				"World:DefineComponent('" +
 				excluded +
+				"', {})\n"
+				"World:DefineComponent('" +
+				excludedSecond +
 				"', {})\n"
 				"assert(World:SetComponentTags('" +
 				included +
@@ -541,15 +616,25 @@ TEST_CASE("component metadata and filtered queries agree across both languages",
 				"keep:SetComponent('" +
 				included +
 				"', { Value = 1 })\n"
+				"keep:SetComponent('" +
+				includedSecond +
+				"')\n"
 				"local drop = World:CreateEntity('luau-excluded')\n"
 				"drop:SetComponent('" +
 				included +
 				"', { Value = 2 })\n"
 				"drop:SetComponent('" +
+				includedSecond +
+				"')\n"
+				"drop:SetComponent('" +
 				excluded +
 				"')\n"
+				"drop:SetComponent('" +
+				excludedSecond +
+				"')\n"
 				"assert(#World:QueryFiltered({ '" +
-				included + "' }, { '" + excluded + "' }) == 1)\n"
+				included + "', '" + includedSecond + "' }, { '" + excluded + "', '" + excludedSecond +
+				"' }) == 1)\n"
 		);
 	}
 
@@ -575,15 +660,24 @@ TEST_CASE("component metadata and filtered queries agree across both languages",
 			"keep.SetComponent('" +
 			included +
 			"', { Value: 3 });\n"
+			"keep.SetComponent('" +
+			includedSecond +
+			"');\n"
 			"const drop = World.CreateEntity('js-excluded');\n"
 			"drop.SetComponent('" +
 			included +
 			"', { Value: 4 });\n"
 			"drop.SetComponent('" +
+			includedSecond +
+			"');\n"
+			"drop.SetComponent('" +
 			excluded +
 			"');\n"
+			"drop.SetComponent('" +
+			excludedSecond +
+			"');\n"
 			"const found = World.QueryFiltered(['" +
-			included + "'], ['" + excluded +
+			included + "', '" + includedSecond + "'], ['" + excluded + "', '" + excludedSecond +
 			"']);\n"
 			"if (found.length !== 2) throw new Error('include/exclude query');\n"
 	);

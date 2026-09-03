@@ -228,12 +228,11 @@ namespace engine::physics {
 		// The same arithmetic `PlaceCamera` uses to find where the eye wants
 		// to be, repeated here rather than shared - that function is `scene`
 		// and takes no query, and duplicating four lines of trigonometry is
-		// cheaper than a callback for what the query decides. Portal seams
-		// are deliberately not accounted for: a poppercam correcting for a
-		// wall on the far side of a hole it has not been told about is a
-		// sharper edge than one that is a frame late clearing a wall that
-		// was, and the ordinary case - no portal in the shot - pays nothing
-		// extra either way.
+		// cheaper than a callback for what the query decides. The ray query
+		// follows one portal seam when the camera arm crosses its pane, so a
+		// trigger collider that keeps crossings observable does not become an
+		// invisible camera wall. The ordinary case pays only the failed seam
+		// lookup.
 		const core::Vector3 head =
 			subject->Frame.Position + core::Vector3{0.0f, controller->HeadHeight, 0.0f};
 		const float pitch = controller->Angles.X;
@@ -268,8 +267,9 @@ namespace engine::physics {
 		std::optional<ColliderHit> blocking;
 		for (int pass = 0; pass < POPPERCAM_IGNORE_LIMIT && travelled < wanted; pass++) {
 			const core::Ray ray{head + direction * travelled, direction};
-			const auto hit =
-				Raycast(store, ray, wanted - travelled, spatial::LayerMask::All(), controller->Subject);
+			const auto hit = RaycastThroughPortals(
+				store, ray, wanted - travelled, spatial::LayerMask::All(), controller->Subject
+			);
 			if (!hit.has_value()) {
 				break;
 			}

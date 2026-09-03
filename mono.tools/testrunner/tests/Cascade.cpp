@@ -11,6 +11,7 @@ TEST_DEPENDS("tools.testrunner.sha256")
 
 namespace fs = std::filesystem;
 using testrunner::CacheEntry;
+using testrunner::CatchFilter;
 using testrunner::ComputeSignatures;
 using testrunner::DependencyClosures;
 using testrunner::Suite;
@@ -54,6 +55,14 @@ namespace {
 		std::vector<std::string> warnings;
 		return ComputeSignatures(suites, closures, warnings);
 	}
+}
+
+TEST_CASE("GPU cases are absent from ordinary suite filters", "[cascade][gpu-filter]") {
+	Suite suite;
+	suite.Source = "/source/mono.engine/render/tests/SceneCapture.cpp";
+
+	CHECK(CatchFilter(suite, false) == "[#SceneCapture]~[gpu]");
+	CHECK(CatchFilter(suite, true) == "[#SceneCapture]");
 }
 
 TEST_CASE("a signature changes when the source does", "[cascade]") {

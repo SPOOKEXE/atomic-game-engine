@@ -28,6 +28,7 @@ namespace engine::script {
 	enum class InstanceCreateFailure {
 		None,
 		UnknownClass,
+		NotCreatable,
 		StoreRefused,
 		ParentRefused,
 	};

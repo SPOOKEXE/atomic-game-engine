@@ -27,6 +27,7 @@
 mono_add_library(script
 	TIER shared
 	DEPS
+		Engine::assets
 		Engine::core
 		Engine::ecs
 		Engine::effects

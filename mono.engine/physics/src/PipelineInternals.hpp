@@ -60,11 +60,6 @@ namespace engine::physics {
 			return world.DynamicRecords;
 		}
 
-		// The static proxies, parallel to `StaticRecords` by index.
-		static std::vector<spatial::Proxy> &StaticProxies(PhysicsWorld &world) {
-			return world.StaticProxies;
-		}
-
 		// What the broad phase knows about each static collider.
 		static std::vector<ColliderRecord> &StaticRecords(PhysicsWorld &world) {
 			return world.StaticRecords;
@@ -83,6 +78,15 @@ namespace engine::physics {
 		// Where the broad phase sorts the two together before splitting them.
 		static std::vector<SourcedPair> &SourcedPairs(PhysicsWorld &world) {
 			return world.SourcedPairList;
+		}
+
+		// Per-batch pair output and the batches that need a full-size retry.
+		static std::vector<std::vector<SourcedPair>> &SourcedPairBatches(PhysicsWorld &world) {
+			return world.SourcedPairBatches;
+		}
+
+		static std::vector<uint8_t> &SourcedPairOverflow(PhysicsWorld &world) {
+			return world.SourcedPairOverflow;
 		}
 
 		// The placed shape of every collider, parallel to the records.
@@ -120,6 +124,11 @@ namespace engine::physics {
 		// The solver's compact body array, refilled by `Solve`.
 		static std::vector<SolverBody> &Bodies(PhysicsWorld &world) {
 			return world.BodyList;
+		}
+
+		// Which compact bodies the dense BasePart walk has already loaded.
+		static std::vector<uint8_t> &BodyLoaded(PhysicsWorld &world) {
+			return world.SolverBodyLoaded;
 		}
 
 		// The per-point constraint rows, refilled by `Solve`.
@@ -161,6 +170,22 @@ namespace engine::physics {
 		// Where the next tick's resting list is merged before the two swap.
 		static std::vector<RestingBody> &RestingNext(PhysicsWorld &world) {
 			return world.RestingNext;
+		}
+
+		static std::vector<WeldPose> &WeldPoses(PhysicsWorld &world) {
+			return world.WeldPoses;
+		}
+
+		static std::vector<WeldPose> &WeldPosesNext(PhysicsWorld &world) {
+			return world.WeldPosesNext;
+		}
+
+		static std::vector<RigidEdge> &RigidEdges(PhysicsWorld &world) {
+			return world.RigidEdges;
+		}
+
+		static std::vector<RigidNode> &RigidNodes(PhysicsWorld &world) {
+			return world.RigidNodes;
 		}
 
 		// The pairs that were touching at the end of the previous tick.

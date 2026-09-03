@@ -34,6 +34,7 @@
 #include <imgui.h>
 #include <nodegraph/Evaluate.hpp>
 #include <nodegraph/Graph.hpp>
+#include <nodegraph/Inspect.hpp>
 #include <nodegraph/Preview.hpp>
 #include <nodegraph/Registry.hpp>
 #include <nodegraph/Types.hpp>
@@ -187,6 +188,76 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 		}
 	}
 	CHECK(submitted);
+}
+
+TEST_CASE("the Combine mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {
+	Context context;
+	studio::RegisterDemoNodes();
+
+	nodegraph::Graph graph;
+	const nodegraph::NodeId source = graph.Add("field.perlin", 0.0f, 0.0f);
+	const nodegraph::NodeId combine = graph.Add("field.combine", 300.0f, 0.0f);
+	REQUIRE(graph.Connect(source, "Out", combine, "A") == nodegraph::LinkResult::Made);
+	REQUIRE(graph.Connect(source, "Out", combine, "B") == nodegraph::LinkResult::Made);
+
+	nodegraph::Evaluator evaluator;
+	evaluator.RunToCompletion(graph);
+	const nodegraph::Node *node = graph.Find(combine);
+	const nodegraph::NodeType *type = nodegraph::NodeTypes::Find("field.combine");
+	REQUIRE(node != nullptr);
+	REQUIRE(type != nullptr);
+
+	void *const previewTexture = reinterpret_cast<void *>(uintptr_t{0x1234});
+	nodegraph::Inspection inspection;
+	inspection.Node = node;
+	inspection.Type = type;
+	inspection.Graph = &graph;
+	inspection.Runner = &evaluator;
+	inspection.Images = [previewTexture](uint64_t, const auto &) { return previewTexture; };
+	inspection.Orbit = [previewTexture](uint64_t, const auto &) { return previewTexture; };
+	const nodegraph::InspectorFn *draw = nodegraph::Inspectors::For(inspection);
+	REQUIRE(draw != nullptr);
+
+	struct PreviewFrame {
+		ImVec2 Position;
+		float Yaw = 0.0f;
+	};
+	const auto frame = [&](ImVec2 mouse, bool down, bool place) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		if (place) {
+			ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f));
+			ImGui::SetNextWindowSize(ImVec2(420.0f, 620.0f));
+		}
+		ImGui::Begin(
+			"Combine inspector",
+			nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+				ImGuiWindowFlags_NoScrollbar
+		);
+		ImGuiStorage *state = ImGui::GetStateStorage();
+		state->SetBool(ImGui::GetID("nodegraph.pin.three"), true);
+		(*draw)(inspection);
+		const PreviewFrame result{
+			ImGui::GetWindowPos(), state->GetFloat(ImGui::GetID("nodegraph.pin.yaw"), 0.6f)
+		};
+		ImGui::End();
+		ImGui::Render();
+		return result;
+	};
+
+	const ImVec2 overPreview(200.0f, 200.0f);
+	const PreviewFrame before = frame(overPreview, false, true);
+	(void)frame(overPreview, false, false);
+	(void)frame(overPreview, true, false);
+	const PreviewFrame after = frame(ImVec2(140.0f, 200.0f), true, false);
+	(void)frame(ImVec2(140.0f, 200.0f), false, false);
+
+	CHECK(after.Position.x == before.Position.x);
+	CHECK(after.Position.y == before.Position.y);
+	CHECK(after.Yaw > before.Yaw);
 }
 
 // --- pixels -------------------------------------------------------------------

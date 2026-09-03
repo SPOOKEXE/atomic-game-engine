@@ -20,10 +20,12 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -106,6 +108,10 @@ namespace {
 		const std::vector<DrawInstance> &Drawn() const {
 			return World.Resource<engine::render::DrawList>()->Instances;
 		}
+
+		const std::vector<engine::core::CFrame> &Joints() const {
+			return World.Resource<engine::render::DrawList>()->JointFrames;
+		}
 	};
 
 	engine::ecs::Entity InWorkspace(Store &store, std::string_view name) {
@@ -180,6 +186,33 @@ TEST_CASE("entities actually move", "[demo]") {
 
 	const bool moved = before.X != after.X || before.Z != after.Z;
 	REQUIRE(moved);
+}
+
+TEST_CASE("the animation demo advances a real track into a bone pose", "[demo][animation]") {
+	Session session("Animation.luau");
+	const engine::ecs::Entity rig = InWorkspace(session.World, "AnimatedRig");
+	REQUIRE(rig != engine::ecs::NULL_ENTITY);
+	REQUIRE(session.World.Get<engine::scene::Skeleton>(rig) != nullptr);
+
+	const engine::ecs::Entity root = session.World.FindFirstChild(rig, "Root");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+	session.Tick(1);
+	REQUIRE(session.Joints().size() == 3);
+	const engine::core::CFrame before = session.World.Get<engine::scene::Bone>(root)->Transform;
+	const engine::core::CFrame paletteBefore = session.Joints()[0];
+
+	session.Tick(30);
+
+	const engine::scene::Bone *posed = session.World.Get<engine::scene::Bone>(root);
+	REQUIRE(posed != nullptr);
+	CHECK(posed->Transform.QuaternionY != Approx(before.QuaternionY));
+	CHECK(session.Joints()[0].QuaternionY != Approx(paletteBefore.QuaternionY));
+	const engine::scene::AnimationClip *animation = nullptr;
+	session.World.Each<const engine::scene::AnimationClip>(
+		[&](engine::ecs::Entity, const engine::scene::AnimationClip &candidate) { animation = &candidate; }
+	);
+	REQUIRE(animation != nullptr);
+	CHECK(animation->Buffer != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("a scripted NPC is integrated and crosses a portal in a standalone client", "[demo][portal]") {

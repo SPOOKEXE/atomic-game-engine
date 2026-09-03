@@ -37,9 +37,11 @@ namespace studio {
 		float IdleMilliseconds = 0.0f;
 		//@}
 
-		// Profiling category and whether producer work reported the span.
+		// Work category, submitting product, and whether producer work reported
+		// the span.
 		//@{
 		engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
+		engine::core::ProfileOwner Owner = engine::core::ProfileOwner::Engine;
 		bool Reported = false;
 		//@}
 
@@ -64,6 +66,17 @@ namespace studio {
 	// when it ran. Starts divide by occurrences because an absent span has no
 	// meaningful start position.
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames);
+
+	// Copies one owner view while retaining a valid tree. A matching span whose
+	// recorded parent belongs to another owner is reparented to its nearest
+	// matching ancestor, or becomes a root. `All` copies the complete tree.
+	//
+	// @since v0.22
+	void FilterDiagnosticSpans(
+		std::span<const DiagnosticSpan> spans,
+		engine::core::ProfileOwner owner,
+		std::vector<DiagnosticSpan> &filtered
+	);
 
 	// Fits reported worker work into the measured timeline used for drawing.
 	//

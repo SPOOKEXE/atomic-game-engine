@@ -1376,6 +1376,11 @@ declare extern type Instance with
 	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
 	function SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean
 	function Clear(self): boolean
+	-- Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, time f32 at 4, position xyz at 8, and quaternion xyzw at 20.
+	function BakeAnimation(self, duration: number, keyframes: buffer): boolean
+	function SetAnimationData(self, data: buffer): boolean
+	function GetAnimationData(self): buffer
+	function ClearAnimationData(self): boolean
 	function Resize(self, width: number, height: number): boolean
 	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean
 	function DrawLine(self, from: Vector2, to: Vector2, colour: Color3, transparency: number?): boolean
@@ -1405,6 +1410,9 @@ declare extern type Instance with
 	function TweenPosition(self, endPosition: UDim2 | Vector3, easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, time: number?, override: boolean?, callback: (() -> ())?): boolean
 	function TweenSize(self, endSize: UDim2 | Vector3, easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, time: number?, override: boolean?, callback: (() -> ())?): boolean
 	function TweenSizeAndPosition(self, endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, time: number?, override: boolean?, callback: (() -> ())?): boolean
+end
+
+declare extern type Folder extends Instance with
 end
 
 declare extern type PVInstance extends Instance with
@@ -1455,6 +1463,12 @@ end
 declare extern type Model extends PVInstance with
 end
 
+declare extern type WorldRoot extends Model with
+end
+
+declare extern type WorldModel extends WorldRoot with
+end
+
 declare extern type Tool extends Model with
 	Grip: CFrame
 end
@@ -1469,6 +1483,11 @@ declare extern type MeshPart extends BasePart with
 	RoughnessMap: string
 	TextureID: string
 	read TrianglesCount: number
+end
+
+declare extern type SkinnedMeshPart extends MeshPart with
+	JointCount: number
+	RigId: string
 end
 
 declare extern type Camera extends PVInstance with
@@ -1551,13 +1570,42 @@ declare extern type SurfaceLight extends Light with
 end
 
 declare extern type ValueBase extends Instance with
-	Value: string
 end
 
 declare extern type StringValue extends ValueBase with
+	Value: string
 end
 
 declare extern type LocalizationTable extends ValueBase with
+	Value: string
+end
+
+declare extern type BoolValue extends ValueBase with
+	Value: boolean
+end
+
+declare extern type CFrameValue extends ValueBase with
+	Value: CFrame
+end
+
+declare extern type Color3Value extends ValueBase with
+	Value: Color3
+end
+
+declare extern type IntValue extends ValueBase with
+	Value: number
+end
+
+declare extern type NumberValue extends ValueBase with
+	Value: number
+end
+
+declare extern type ObjectValue extends ValueBase with
+	Value: Instance
+end
+
+declare extern type Vector3Value extends ValueBase with
+	Value: Vector3
 end
 
 declare extern type Bone extends Instance with
@@ -1567,7 +1615,13 @@ declare extern type Bone extends Instance with
 	read TransformedWorldCFrame: CFrame
 end
 
+declare extern type AnimationBuffer extends Instance with
+	read DataSize: number
+	read KeyframeBytes: number
+end
+
 declare extern type Animation extends Instance with
+	AnimationBuffer: Instance
 	AnimationId: string
 	RigId: string
 end
@@ -1672,9 +1726,6 @@ declare extern type Constraint extends Instance with
 	UpperLimit: number
 end
 
-declare extern type WeldConstraint extends Constraint with
-end
-
 declare extern type BallSocketConstraint extends Constraint with
 end
 
@@ -1691,6 +1742,25 @@ declare extern type RopeConstraint extends Constraint with
 end
 
 declare extern type SpringConstraint extends Constraint with
+end
+
+declare extern type JointInstance extends Instance with
+	read Active: boolean
+	C0: CFrame
+	C1: CFrame
+	Enabled: boolean
+	Part0: Instance
+	Part1: Instance
+end
+
+declare extern type Weld extends JointInstance with
+end
+
+declare extern type WeldConstraint extends Instance with
+	read Active: boolean
+	Enabled: boolean
+	Part0: Instance
+	Part1: Instance
 end
 
 declare extern type ShaderScript extends Instance with
@@ -1856,25 +1926,41 @@ end
 
 declare extern type HandleAdornment extends PVAdornment with
 	CFrame: CFrame
-	Size: Vector3
+	SizeRelativeOffset: Vector3
 end
 
 declare extern type BoxHandleAdornment extends HandleAdornment with
+	Size: Vector3
 end
 
 declare extern type SphereHandleAdornment extends HandleAdornment with
+	Radius: number
 end
 
 declare extern type CylinderHandleAdornment extends HandleAdornment with
+	Angle: number
+	Height: number
+	InnerRadius: number
+	Radius: number
 end
 
 declare extern type LineHandleAdornment extends HandleAdornment with
+	Length: number
+	Thickness: number
+end
+
+declare extern type ConeHandleAdornment extends HandleAdornment with
+	Height: number
+	Hollow: boolean
+	Radius: number
 end
 
 declare extern type Handles extends PVAdornment with
+	Faces: number
 end
 
 declare extern type ArcHandles extends PVAdornment with
+	Axes: number
 end
 
 declare extern type GuiBase2d extends GuiBase with
@@ -2233,7 +2319,7 @@ declare extern type Service extends Instance with
 	Scope: Enum_ServiceScope
 end
 
-declare extern type Workspace extends Service with
+declare extern type Workspace extends WorldRoot with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
@@ -2826,14 +2912,14 @@ type Services = {
 }
 
 type CreatableInstances = {
-	Instance: Instance,
-	PVInstance: PVInstance,
-	BasePart: BasePart,
+	Folder: Folder,
 	Part: Part,
 	SpawnLocation: SpawnLocation,
 	Model: Model,
+	WorldModel: WorldModel,
 	Tool: Tool,
 	MeshPart: MeshPart,
+	SkinnedMeshPart: SkinnedMeshPart,
 	Camera: Camera,
 	SurfaceCamera: SurfaceCamera,
 	Portal: Portal,
@@ -2845,10 +2931,17 @@ type CreatableInstances = {
 	PointLight: PointLight,
 	SpotLight: SpotLight,
 	SurfaceLight: SurfaceLight,
-	ValueBase: ValueBase,
 	StringValue: StringValue,
 	LocalizationTable: LocalizationTable,
+	BoolValue: BoolValue,
+	CFrameValue: CFrameValue,
+	Color3Value: Color3Value,
+	IntValue: IntValue,
+	NumberValue: NumberValue,
+	ObjectValue: ObjectValue,
+	Vector3Value: Vector3Value,
 	Bone: Bone,
+	AnimationBuffer: AnimationBuffer,
 	Animation: Animation,
 	Animator: Animator,
 	AnimationTrack: AnimationTrack,
@@ -2860,18 +2953,17 @@ type CreatableInstances = {
 	CloudCompute: CloudCompute,
 	SkyboxTextures: SkyboxTextures,
 	SkyboxCompute: SkyboxCompute,
-	Constraint: Constraint,
-	WeldConstraint: WeldConstraint,
 	BallSocketConstraint: BallSocketConstraint,
 	HingeConstraint: HingeConstraint,
 	PrismaticConstraint: PrismaticConstraint,
 	CylindricalConstraint: CylindricalConstraint,
 	RopeConstraint: RopeConstraint,
 	SpringConstraint: SpringConstraint,
+	Weld: Weld,
+	WeldConstraint: WeldConstraint,
 	ShaderScript: ShaderScript,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,
-	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,
@@ -2881,46 +2973,32 @@ type CreatableInstances = {
 	FaceInstance: FaceInstance,
 	Decal: Decal,
 	Texture: Texture,
-	GuiBase: GuiBase,
-	GuiService: GuiService,
-	GuiBase3d: GuiBase3d,
-	PVAdornment: PVAdornment,
 	SelectionBox: SelectionBox,
 	SelectionSphere: SelectionSphere,
-	HandleAdornment: HandleAdornment,
 	BoxHandleAdornment: BoxHandleAdornment,
 	SphereHandleAdornment: SphereHandleAdornment,
 	CylinderHandleAdornment: CylinderHandleAdornment,
 	LineHandleAdornment: LineHandleAdornment,
+	ConeHandleAdornment: ConeHandleAdornment,
 	Handles: Handles,
 	ArcHandles: ArcHandles,
-	GuiBase2d: GuiBase2d,
-	GuiObject: GuiObject,
 	Frame: Frame,
 	CanvasGroup: CanvasGroup,
 	ScrollingFrame: ScrollingFrame,
-	GuiButton: GuiButton,
 	TextButton: TextButton,
 	ImageButton: ImageButton,
-	GuiLabel: GuiLabel,
 	TextLabel: TextLabel,
 	ImageLabel: ImageLabel,
 	TextBox: TextBox,
 	ViewportFrame: ViewportFrame,
-	LayerCollector: LayerCollector,
 	ScreenGui: ScreenGui,
 	SurfaceGui: SurfaceGui,
 	BillboardGui: BillboardGui,
-	PluginGui: PluginGui,
 	DockWidgetPluginGui: DockWidgetPluginGui,
-	UIBase: UIBase,
-	UIComponent: UIComponent,
-	UILayout: UILayout,
 	UIListLayout: UIListLayout,
 	UIGridLayout: UIGridLayout,
 	UITableLayout: UITableLayout,
 	UIPageLayout: UIPageLayout,
-	UIConstraint: UIConstraint,
 	UIAspectRatioConstraint: UIAspectRatioConstraint,
 	UISizeConstraint: UISizeConstraint,
 	UITextSizeConstraint: UITextSizeConstraint,

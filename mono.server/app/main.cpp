@@ -84,6 +84,7 @@ int main(int argc, char **argv) {
 	arguments.Value("physics-tick-rate", "HZ", "Physics steps per second (default: the tick rate)");
 	arguments.Value("replication-tick-rate", "HZ", "Snapshots per second (default: every tick)");
 	arguments.Value("entities", "N", "Entities in the placeholder world (default 4096)");
+	arguments.Value("worlds", "N", "Isolated worlds to distribute across physical-core processes");
 	arguments.Value("ticks", "N", "Exit after N ticks");
 	arguments.Value("seconds", "N", "Exit after N seconds");
 	arguments.Value(
@@ -103,6 +104,8 @@ int main(int argc, char **argv) {
 	arguments.Value("worlds-per-host", "N", "Shared worlds per host process (default 8)");
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
+	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
+	arguments.Value("process-index", "N", "Stable child index assigned by a supervising driver");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
@@ -198,6 +201,12 @@ int main(int argc, char **argv) {
 	options.PhysicsTickRate = arguments.GetNumber("physics-tick-rate", options.PhysicsTickRate);
 	options.ReplicationTickRate = arguments.GetNumber("replication-tick-rate", options.ReplicationTickRate);
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
+	const int64_t worlds = arguments.GetInteger("worlds", options.Worlds);
+	if (worlds < 1 || worlds > UINT32_MAX) {
+		std::fprintf(stderr, "--worlds must be between 1 and %u.\n", UINT32_MAX);
+		return 2;
+	}
+	options.Worlds = static_cast<uint32_t>(worlds);
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
 	options.Seconds = arguments.GetNumber("seconds", 0.0);
 	options.MetricsReportSeconds =
@@ -293,6 +302,10 @@ int main(int argc, char **argv) {
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
+	options.ProcessIndex =
+		static_cast<uint32_t>(std::max<int64_t>(0, arguments.GetInteger("process-index", 0)));
+	options.ProfilePath = server::ProcessOutputPath(options.ProfilePath, options.ProcessIndex);
+	options.HeapReport = server::ProcessOutputPath(options.HeapReport, options.ProcessIndex);
 	options.ProfileWindowTicks =
 		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));
 	if (auto assets = arguments.Get("override-assets-directory")) {
@@ -332,6 +345,10 @@ int main(int argc, char **argv) {
 		options.HostProgram = std::filesystem::path(*program);
 	}
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
+	if (arguments.Has("physical-core")) {
+		options.PhysicalCore =
+			static_cast<uint32_t>(arguments.GetInteger("physical-core", options.PhysicalCore));
+	}
 
 	if (arguments.Has("listen")) {
 		const int64_t port = arguments.GetInteger("listen", 0);
@@ -365,6 +382,10 @@ int main(int argc, char **argv) {
 		// A host that spawned hosts of its own would build a tree nobody
 		// planned and nothing supervises above the first level.
 		std::fprintf(stderr, "--host and --remote-world are for opposite ends of a link.\n");
+		return 2;
+	}
+	if (options.HostName.empty() && options.PhysicalCore != UINT32_MAX) {
+		std::fprintf(stderr, "--physical-core is assigned by a supervising driver and needs --host.\n");
 		return 2;
 	}
 

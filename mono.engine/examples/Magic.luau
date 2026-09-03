@@ -139,7 +139,7 @@ local STRAY_CEILING = 60
 local edits = Terrain.Edits.new()
 local field = Terrain.HeightField.new({ seed = SEED }, edits)
 
-local terrainRoot = Instance.new("Instance")
+local terrainRoot = Instance.new("Folder")
 terrainRoot.Name = "Terrain"
 terrainRoot.Parent = workspace
 
@@ -280,7 +280,7 @@ for index, entry in LANES do
 	local muzzle = Vector3.new(padX, groundAt(padX, padZ) + 7, padZ)
 	local target = Vector3.new(originX, groundAt(originX, originZ) + 6, originZ)
 
-	local container = Instance.new("Instance")
+	local container = Instance.new("Folder")
 	container.Name = entry.preset
 	container.Parent = workspace
 

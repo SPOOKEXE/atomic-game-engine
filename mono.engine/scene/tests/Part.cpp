@@ -7,6 +7,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -60,6 +61,15 @@ TEST_CASE("the part class inherits the whole set", "[scene][part]") {
 	CHECK(Classes::IsA(part, pvInstance));
 	CHECK(Classes::IsA(part, instance));
 	CHECK_FALSE(Classes::IsA(instance, part));
+
+	CHECK_FALSE(Classes::Describe(instance).Creatable);
+	CHECK_FALSE(Classes::Describe(pvInstance).Creatable);
+	CHECK_FALSE(Classes::Describe(basePart).Creatable);
+	CHECK(Classes::Describe(part).Creatable);
+	const ClassId folder = Classes::Find(Name("Folder"));
+	REQUIRE(folder.IsValid());
+	CHECK(Classes::IsA(folder, instance));
+	CHECK(Classes::Describe(folder).Creatable);
 }
 
 TEST_CASE("a part carries the five components the plan names", "[scene][part]") {
@@ -632,6 +642,26 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	Name unused;
 	CHECK_FALSE(store.GetProperty(part, Name("Mesh"), &unused, sizeof(unused)));
 	CHECK_FALSE(store.GetProperty(part, Name("ColorMap"), &unused, sizeof(unused)));
+}
+
+TEST_CASE("a SkinnedMeshPart exposes the skeleton it always carries", "[scene][part]") {
+	Store store("skinned_mesh_part_test");
+	RegisterSceneClasses();
+
+	const ClassId skinned = engine::ecs::Classes::Find(Name("SkinnedMeshPart"));
+	REQUIRE(skinned.IsValid());
+	CHECK(engine::ecs::Classes::IsA(skinned, engine::ecs::Classes::Find(Name("MeshPart"))));
+
+	const Entity rig = store.CreateInstance(skinned, "Rig");
+	REQUIRE(rig != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::scene::Skeleton>(rig) != nullptr);
+
+	REQUIRE(Write(store, rig, "RigId", Name("examples.SwingRig")));
+	REQUIRE(Write(store, rig, "JointCount", int32_t{1}));
+	CHECK(Read<Name>(store, rig, "RigId") == Name("examples.SwingRig"));
+	CHECK(Read<int32_t>(store, rig, "JointCount") == 1);
+	CHECK_FALSE(Write(store, rig, "JointCount", int32_t{-1}));
+	CHECK_FALSE(Write(store, rig, "JointCount", int32_t{engine::scene::MAX_JOINTS + 1}));
 }
 
 TEST_CASE("a plain Part names no mesh and no texture", "[scene][part]") {

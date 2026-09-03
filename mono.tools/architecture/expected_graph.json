@@ -233,6 +233,7 @@
       "tier": "shared",
       "layer": 12,
       "links": [
+        "assets",
         "collision",
         "core",
         "ecs",
@@ -458,6 +459,7 @@
       "tier": "shared",
       "layer": 9,
       "links": [
+        "assets",
         "collision",
         "core",
         "ecs",
@@ -474,6 +476,7 @@
       "tier": "shared",
       "layer": 11,
       "links": [
+        "assets",
         "collision",
         "core",
         "ecs",
@@ -493,6 +496,7 @@
       "tier": "shared",
       "layer": 10,
       "links": [
+        "assets",
         "collision",
         "core",
         "ecs",
@@ -510,6 +514,7 @@
       "tier": "shared",
       "layer": 10,
       "links": [
+        "assets",
         "collision",
         "core",
         "ecs",

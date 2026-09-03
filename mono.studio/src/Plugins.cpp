@@ -2,7 +2,10 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
@@ -429,7 +432,11 @@ namespace studio {
 				userCreated = preference.UserCreated;
 				order = preference.Order;
 			}
-			layout.Tabs.push_back(ToolbarTabView{std::move(id), std::move(name), {}, userCreated});
+			ToolbarTabView tab;
+			tab.Id = std::move(id);
+			tab.Name = std::move(name);
+			tab.UserCreated = userCreated;
+			layout.Tabs.push_back(std::move(tab));
 			tabVisible.push_back(shown);
 			tabOrder.push_back(order);
 			return layout.Tabs.size() - 1;
@@ -544,7 +551,15 @@ namespace studio {
 												   ? preference->Column
 												   : defaultTab + "/" + declaredColumn;
 					const size_t order = preference == nullptr ? itemIndex : preference->Order;
-					ToolbarItemLocation location{pluginIndex, toolbarIndex, itemIndex, key, width, order};
+					ToolbarItemLocation location{
+						pluginIndex,
+						toolbarIndex,
+						itemIndex,
+						key,
+						width,
+						order,
+						button.Name + "###control",
+					};
 
 					if (preference != nullptr && !preference->Tab.empty() && preference->Tab != defaultTab) {
 						const auto target = placements.find(preference->Tab);
@@ -624,7 +639,15 @@ namespace studio {
 		sortCells(layout.PinnedRows);
 		for (ToolbarTabView &tab : layout.Tabs) {
 			sortCells(tab.Rows);
+			tab.Label = tab.Name + "###toolbar." + tab.Id;
+			tab.Context = "toolbar-context." + tab.Id;
 		}
+		size_t tabRows = 0;
+		for (const ToolbarTabView &tab : layout.Tabs) {
+			tabRows = std::max(tabRows, tab.Rows.size());
+		}
+		const size_t pinnedRows = layout.PinnedRows.empty() ? 0 : layout.PinnedRows.size() - 1;
+		layout.VisualRows = std::max<size_t>(1, 1 + pinnedRows + tabRows);
 		return layout;
 	}
 
@@ -1433,7 +1456,7 @@ namespace studio {
 			StartPlugins(
 				runtimeSet->Scripts,
 				store,
-				[this](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin); },
+				[this, &store](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin, store); },
 				target,
 				world,
 				&runtimeSet->Bindings
@@ -1536,7 +1559,7 @@ namespace studio {
 			StartPlugins(
 				ScriptPlugins,
 				store,
-				[this](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin); },
+				[this, &store](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin, store); },
 				PluginRunTarget::Studio,
 				Active,
 				&StudioPluginBindings
@@ -1758,6 +1781,7 @@ namespace studio {
 	}
 
 	void Editor::DrawPluginWidgets() {
+		size_t viewportImageSlot = PreviewSlot() + 1;
 		for (PluginPresentation *pluginPointer : Plugins) {
 			PluginPresentation &plugin = *pluginPointer;
 			if (!plugin.Running) {
@@ -1767,6 +1791,14 @@ namespace studio {
 			const size_t widgetCount = plugin.Widgets.size();
 			for (size_t widgetIndex = 0; widgetIndex < widgetCount; widgetIndex++) {
 				PluginWidget &widget = plugin.Widgets[widgetIndex];
+				LoadedPlugin *script = ScriptOwner(plugin);
+				if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+					Universe->Enter(script->World, [&](Store &store) {
+						if (const engine::gui::Layer *layer = store.Get<engine::gui::Layer>(widget.Gui)) {
+							widget.Open = layer->Enabled;
+						}
+					});
+				}
 				bool *builtinOpen = nullptr;
 				switch (widget.BuiltinPanel) {
 				case BuiltinStudioPanel::Explorer:
@@ -1802,6 +1834,7 @@ namespace studio {
 					widget.SynchronizedOpen = widget.Open;
 				}
 				if (!widget.Open) {
+					widget.GuiRouter.Forget();
 					continue;
 				}
 
@@ -1887,11 +1920,133 @@ namespace studio {
 				if (ImGui::Begin(label.c_str(), &widget.Open)) {
 					if (widget.NativeRender) {
 						widget.NativeRender();
-					} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
-						InvokePlugin(*script, widget.Render, true);
+					} else if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+						Universe->Enter(script->World, [&](Store &store) {
+							InvokePlugin(*script, widget.Render, true);
+
+							if (!store.Alive(widget.Gui)) {
+								widget.GuiRouter.Forget();
+								return;
+							}
+
+							const ImVec2 origin = ImGui::GetCursorScreenPos();
+							const ImVec2 available = ImGui::GetContentRegionAvail();
+							const ImVec2 canvas{std::max(available.x, 1.0f), std::max(available.y, 1.0f)};
+							ImGui::PushID(static_cast<int>(widgetIndex));
+							ImGui::InvisibleButton(
+								"##DockWidgetPluginGui", canvas, ImGuiButtonFlags_MouseButtonLeft
+							);
+							const bool hovered = ImGui::IsItemHovered();
+							ImGui::PopID();
+
+							engine::gui::CompileRequest request;
+							request.Display.Width = canvas.x;
+							request.Display.Height = canvas.y;
+							request.Hovered = widget.GuiRouter.Hovered();
+							request.Pressed = widget.GuiRouter.Pressed();
+							request.Seconds = engine::core::Clock::Seconds();
+							widget.GuiList.RebuildCollector(store, widget.Gui, request);
+
+							const size_t renderedViewports = ViewportImages.Render(
+								Renderer, store, widget.GuiList.Commands(), viewportImageSlot
+							);
+							viewportImageSlot += renderedViewports;
+
+							engine::ui::ImageSource images;
+							images.Resolve = [this](const engine::core::Name &name) {
+								engine::ui::ImageSource::Resolved resolved;
+								resolved.Texture =
+									reinterpret_cast<ImTextureID>(Renderer.TextureHandle(name));
+								uint32_t width = 0;
+								uint32_t height = 0;
+								(void)Renderer.TextureSize(name, width, height);
+								resolved.Size = ImVec2(static_cast<float>(width), static_cast<float>(height));
+								const engine::render::FlipbookCell cell =
+									Renderer.TextureCell(name, AnimationSeconds);
+								resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
+								resolved.CellMax =
+									ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
+								return resolved;
+							};
+							images.ResolveViewport = [this](Entity instance) {
+								const engine::render::InterfaceImage image = ViewportImages.Resolve(instance);
+								engine::ui::ImageSource::Resolved resolved;
+								resolved.Texture = reinterpret_cast<ImTextureID>(image.Texture);
+								resolved.Size =
+									ImVec2(static_cast<float>(image.Width), static_cast<float>(image.Height));
+								resolved.CellMax = ImVec2(image.UVMax.X, image.UVMax.Y);
+								return resolved;
+							};
+							(void)engine::ui::PaintGui(
+								widget.GuiList.Commands(),
+								ImGui::GetWindowDrawList(),
+								engine::ui::PaintTarget{origin, 1.0f},
+								images
+							);
+
+							const ImGuiIO &io = ImGui::GetIO();
+							engine::gui::Pointer pointer;
+							pointer.Position =
+								engine::core::Vector2{io.MousePos.x - origin.x, io.MousePos.y - origin.y};
+							pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+							pointer.Inside = hovered;
+							pointer.Collector = widget.Gui;
+							pointer.Wheel = hovered ? io.MouseWheel : 0.0f;
+							const std::span<const engine::gui::GuiEvent> routed =
+								widget.GuiRouter.Update(store, widget.GuiList.Commands(), pointer);
+							std::vector<engine::gui::GuiEvent> events(routed.begin(), routed.end());
+
+							if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+								!io.WantTextInput) {
+								engine::gui::Typing typing;
+								std::string entered;
+								for (const int character : io.InputQueueCharacters) {
+									if (character > 0 && character < 0x80) {
+										entered.push_back(static_cast<char>(character));
+									} else if (character < 0x800) {
+										entered.push_back(static_cast<char>(0xC0 | (character >> 6)));
+										entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+									} else if (character < 0x10000) {
+										entered.push_back(static_cast<char>(0xE0 | (character >> 12)));
+										entered.push_back(
+											static_cast<char>(0x80 | ((character >> 6) & 0x3F))
+										);
+										entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+									}
+								}
+								typing.Text = entered;
+								typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+								typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+								typing.Extend = io.KeyShift;
+								if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
+									typing.Caret = -1;
+								} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
+									typing.Caret = 1;
+								}
+								const engine::gui::TypeResult typed = engine::gui::Type(store, typing);
+								if (typed.Released) {
+									engine::gui::GuiEvent released;
+									released.Kind = engine::gui::EventKind::FocusReleased;
+									released.Instance = typed.Instance;
+									released.Entered = true;
+									events.push_back(released);
+								}
+							}
+
+							if (!events.empty() && script->Vm != nullptr) {
+								script->Vm->DeliverGuiEvents(events);
+							}
+						});
 					}
 				}
 				ImGui::End();
+				if (script != nullptr && Universe != nullptr && script->World.IsValid()) {
+					Universe->Enter(script->World, [&](Store &store) {
+						if (engine::gui::Layer *layer = store.GetMutable<engine::gui::Layer>(widget.Gui)) {
+							layer->Enabled = widget.Open;
+						}
+					});
+				}
 			}
 		}
 	}
@@ -2083,18 +2238,19 @@ namespace studio {
 				return;
 			}
 			PluginButton &button = toolbar.Buttons[location.Item];
-			const std::string tooltip = button.Tooltip;
+			const std::string &tooltip = button.Tooltip;
 
 			ImGui::PushID(location.Key.c_str());
 			if (button.Kind == PluginControlKind::Builtin) {
 				DrawBuiltinStudioTool(button.Builtin);
 			} else {
-				const std::string label = button.Name + "###control";
 				if (button.Kind == PluginControlKind::Button) {
 					const bool pressed =
 						button.Active
-							? ImGui::Selectable(label.c_str(), true, 0, ImVec2(location.Width, 0.0f))
-							: ImGui::Button(label.c_str(), ImVec2(location.Width, 0.0f));
+							? ImGui::Selectable(
+								  location.ControlLabel.c_str(), true, 0, ImVec2(location.Width, 0.0f)
+							  )
+							: ImGui::Button(location.ControlLabel.c_str(), ImVec2(location.Width, 0.0f));
 					if (pressed) {
 						if (button.NativeOnClick) {
 							button.NativeOnClick({});
@@ -2104,7 +2260,7 @@ namespace studio {
 					}
 				} else if (button.Kind == PluginControlKind::Toggle) {
 					const bool before = button.Active;
-					ImGui::Checkbox(label.c_str(), &button.Active);
+					ImGui::Checkbox(location.ControlLabel.c_str(), &button.Active);
 					if (before != button.Active) {
 						const engine::script::HostValue value = engine::script::HostValue::Of(button.Active);
 						const engine::script::HostArguments arguments(&value, 1);
@@ -2119,7 +2275,7 @@ namespace studio {
 					const char *preview = button.Selected < button.Options.size()
 											  ? button.Options[button.Selected].c_str()
 											  : "(none)";
-					if (ImGui::BeginCombo(label.c_str(), preview)) {
+					if (ImGui::BeginCombo(location.ControlLabel.c_str(), preview)) {
 						for (size_t option = 0; option < button.Options.size(); option++) {
 							if (!ImGui::Selectable(
 									button.Options[option].c_str(), option == button.Selected
@@ -2207,13 +2363,11 @@ namespace studio {
 			ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
 			for (size_t index = 0; index < ToolbarLayout.Tabs.size(); index++) {
 				const ToolbarTabView &tab = ToolbarLayout.Tabs[index];
-				const std::string label = tab.Name + "###toolbar." + tab.Id;
-				if (ImGui::BeginTabItem(label.c_str())) {
+				if (ImGui::BeginTabItem(tab.Label.c_str())) {
 					selected = static_cast<int>(index);
 					ImGui::EndTabItem();
 				}
-				const std::string context = "toolbar-context." + tab.Id;
-				if (ImGui::BeginPopupContextItem(context.c_str())) {
+				if (ImGui::BeginPopupContextItem(tab.Context.c_str())) {
 					for (size_t order = 0; order < ToolbarLayout.Tabs.size(); order++) {
 						ensureTabPreference(ToolbarLayout.Tabs[order], order).Order = order;
 					}

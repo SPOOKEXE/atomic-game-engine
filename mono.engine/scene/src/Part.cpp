@@ -17,6 +17,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
@@ -91,10 +92,12 @@ namespace engine::scene {
 		// @param store    The world.
 		// @param instance The entity.
 		// @param frame    Where it now is.
-		void PlaceInstance(ecs::Store &store, ecs::Entity instance, const core::CFrame &frame) {
+		bool PlaceInstance(ecs::Store &store, ecs::Entity instance, const core::CFrame &frame) {
 			if (Transform *transform = store.GetMutable<Transform>(instance)) {
 				transform->Frame = frame;
+				return true;
 			}
+			return false;
 		}
 
 		// CFrame: the placement itself.
@@ -120,11 +123,7 @@ namespace engine::scene {
 			};
 
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
-				if (store.Get<Transform>(instance) == nullptr) {
-					return false;
-				}
-				PlaceInstance(store, instance, *static_cast<const core::CFrame *>(value));
-				return true;
+				return PlaceInstance(store, instance, *static_cast<const core::CFrame *>(value));
 			};
 
 			return property;
@@ -1600,6 +1599,81 @@ namespace engine::scene {
 			return property;
 		}
 
+		// The palette count is stored compactly and authored as an ordinary script
+		// integer. The conversion also keeps a malformed rig from sizing a palette
+		// beyond the limit the renderer and mesh format share.
+		PropertyDescriptor SkeletonJointCountProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("JointCount");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Skeleton>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Skeleton *skeleton = store.Get<Skeleton>(instance);
+				if (skeleton == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(skeleton->JointCount);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t count = *static_cast<const int32_t *>(value);
+				if (count < 0 || count > static_cast<int32_t>(MAX_JOINTS)) {
+					return false;
+				}
+				Skeleton *skeleton = store.GetMutable<Skeleton>(instance);
+				if (skeleton == nullptr) {
+					return false;
+				}
+				skeleton->JointCount = static_cast<uint16_t>(count);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor AnimationBufferSizeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("DataSize");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AnimationBuffer>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Writable = false;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const AnimationBuffer *buffer = store.Get<AnimationBuffer>(instance);
+				if (buffer == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(buffer->Data.size());
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor AnimationBufferKeyframeBytesProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("KeyframeBytes");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AnimationBuffer>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Writable = false;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<AnimationBuffer>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = static_cast<int32_t>(AnimationBuffer::KEYFRAME_BYTES);
+				return true;
+			};
+			return property;
+		}
+
 		// Interned once, for `SurfaceEffectEnum`'s reason: a `core::Name`
 		// constructed from a literal inside a getter is a registry lookup per
 		// property read.
@@ -1724,6 +1798,35 @@ namespace engine::scene {
 					return false;
 				}
 				joint->Attachment1 = anchor;
+				return true;
+			};
+			return property;
+		}
+
+		template <class Link> PropertyDescriptor RigidLinkActiveProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Active");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern(
+				{ecs::Components::Of<Link>(), ecs::Components::Of<ecs::Hierarchy>()}
+			);
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Writable = false;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Link *link = store.Get<Link>(instance);
+				if (link == nullptr) {
+					return false;
+				}
+				const ecs::Entity workspace = WorkspaceOf(store);
+				const bool active = link->Enabled && link->Part0 != ecs::NULL_ENTITY &&
+									link->Part1 != ecs::NULL_ENTITY && link->Part0 != link->Part1 &&
+									workspace != ecs::NULL_ENTITY &&
+									store.IsDescendantOf(instance, workspace) &&
+									store.IsDescendantOf(link->Part0, workspace) &&
+									store.IsDescendantOf(link->Part1, workspace);
+				*static_cast<bool *>(out) = active;
 				return true;
 			};
 			return property;
@@ -1934,6 +2037,7 @@ namespace engine::scene {
 			// migration nobody asked for.
 			const std::array pv{ecs::Components::Of<Transform>(), ecs::Components::Of<Pivot>()};
 			const ecs::ClassId pvInstance = ecs::Classes::Register("PVInstance", instance, pv);
+			ecs::Classes::SetCreatable(pvInstance, false);
 
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
@@ -2001,6 +2105,7 @@ namespace engine::scene {
 				// scene carried a component to say it was ordinary.
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
+			ecs::Classes::SetCreatable(basePart, false);
 
 			// Part adds nothing of its own: BasePart already holds the full
 			// set, and Part is the concrete leaf a script asks for by name. `Motion` and `Simulated` are the
@@ -2038,6 +2143,14 @@ namespace engine::scene {
 			// under Workspace. `scene::MakeCharacter` is its first caller.
 			const ecs::ClassId modelClass = ecs::Classes::Register("Model", pvInstance, {});
 
+			// A WorldRoot is a Model whose descendants form a self-contained scene.
+			// Workspace and WorldModel share this ancestry, so `IsA("WorldRoot")`
+			// reaches both without storing a second tag beside the class tree.
+			const ecs::ClassId worldRootClass = ecs::Classes::Register("WorldRoot", modelClass, {});
+			ecs::Classes::SetCreatable(worldRootClass, false);
+			const ecs::ClassId worldModelClass = ecs::Classes::Register("WorldModel", worldRootClass, {});
+			(void)worldModelClass;
+
 			// **A `Tool` is a `Model` a character can be holding**, and holding
 			// it is a reparent rather than a flag - `scene/Tools.hpp` carries the
 			// whole decision, including why the handle is a `CharacterLimb` and
@@ -2070,6 +2183,12 @@ namespace engine::scene {
 			// `scene/AGENTS.md`'s argument for keeping the tree Roblox's,
 			// applied to the class v0.9 exists to add.
 			const ecs::ClassId meshPart = ecs::Classes::Register("MeshPart", basePart, {});
+
+			// A script-authored rig needs a class whose component set includes the
+			// optional skeleton. Imported meshes remain ordinary `MeshPart`s with the
+			// same component added by their importer.
+			const std::array skinned{ecs::Components::Of<Skeleton>()};
+			const ecs::ClassId skinnedMeshPart = ecs::Classes::Register("SkinnedMeshPart", meshPart, skinned);
 
 			// **A camera is an instance, because a camera is a row.**
 			// `scene::Camera` has been a component since v0.4 precisely so a
@@ -2266,20 +2385,38 @@ namespace engine::scene {
 			surfaceLight.Kind = LightKind::Surface;
 			ecs::Classes::Default(surfaceLightClass, surfaceLight);
 
-			// **The two instances whose whole content is a string**, and the
-			// only members of Roblox's `ValueBase` family this engine has. Rojo
-			// maps `*.txt` onto the first and `*.csv` onto the second, and a
-			// folder sync that could not build either would silently drop files
-			// - see `scene::TextContent` for why the rest of the family is
-			// deliberately absent.
-			//
-			// `ValueBase` is registered as the base so `:IsA("ValueBase")`
-			// answers the question a script would actually ask, exactly as
-			// `LuaSourceContainer` does one module over.
+			// `ValueBase` is the shared type relationship and carries no storage
+			// itself. Each concrete leaf owns exactly the component matching its
+			// `Value` property, so a `BoolValue` does not pay for a string and an
+			// `ObjectValue` cannot contain a value of the wrong kind.
+			const ecs::ClassId valueBase = ecs::Classes::Register("ValueBase", instance, {});
+			ecs::Classes::SetCreatable(valueBase, false);
+
 			const std::array text{ecs::Components::Of<TextContent>()};
-			const ecs::ClassId valueBase = ecs::Classes::Register("ValueBase", instance, text);
-			ecs::Classes::Register("StringValue", valueBase, {});
-			ecs::Classes::Register("LocalizationTable", valueBase, {});
+			const ecs::ClassId stringValue = ecs::Classes::Register("StringValue", valueBase, text);
+			const ecs::ClassId localizationTable =
+				ecs::Classes::Register("LocalizationTable", valueBase, text);
+
+			const std::array boolean{ecs::Components::Of<BoolValue>()};
+			const ecs::ClassId boolValue = ecs::Classes::Register("BoolValue", valueBase, boolean);
+
+			const std::array frameValue{ecs::Components::Of<CFrameValue>()};
+			const ecs::ClassId cframeValue = ecs::Classes::Register("CFrameValue", valueBase, frameValue);
+
+			const std::array colourValue{ecs::Components::Of<Color3Value>()};
+			const ecs::ClassId color3Value = ecs::Classes::Register("Color3Value", valueBase, colourValue);
+
+			const std::array integer{ecs::Components::Of<IntValue>()};
+			const ecs::ClassId intValue = ecs::Classes::Register("IntValue", valueBase, integer);
+
+			const std::array number{ecs::Components::Of<NumberValue>()};
+			const ecs::ClassId numberValue = ecs::Classes::Register("NumberValue", valueBase, number);
+
+			const std::array object{ecs::Components::Of<ObjectValue>()};
+			const ecs::ClassId objectValue = ecs::Classes::Register("ObjectValue", valueBase, object);
+
+			const std::array vectorValue{ecs::Components::Of<Vector3Value>()};
+			const ecs::ClassId vector3Value = ecs::Classes::Register("Vector3Value", valueBase, vectorValue);
 
 			// --- the forward-declared classes --------------------------------
 			//
@@ -2308,11 +2445,15 @@ namespace engine::scene {
 			// than under the thing they deform, and `SkeletonOf` walks up from a
 			// bone expecting to reach it. Roblox has no `Skeleton` class either.
 
-			// **Three animation classes, and a track is one of them.** Roblox's
+			// **Four animation classes, and a track is one of them.** Roblox's
 			// `AnimationTrack` is a userdata because its `Animator` is a black
 			// box; `ROADMAP.md` v0.24 says this engine's is not going to be one,
 			// and a row in the store is what that means here - it saves, it
 			// replicates and a script can read it.
+			const std::array animationBytes{ecs::Components::Of<AnimationBuffer>()};
+			const ecs::ClassId animationBufferClass =
+				ecs::Classes::Register("AnimationBuffer", instance, animationBytes);
+
 			const std::array clip{ecs::Components::Of<AnimationClip>()};
 			const ecs::ClassId animationClass = ecs::Classes::Register("Animation", instance, clip);
 
@@ -2372,7 +2513,7 @@ namespace engine::scene {
 			const ecs::ClassId skyboxComputeClass =
 				ecs::Classes::Register("SkyboxCompute", instance, skyboxCompute);
 
-			// **One component, seven classes**, which is `Light`'s trade at
+			// **One component, six classes**, which is `Light`'s trade at
 			// greater width and is the whole argument in `Constraints.hpp`: a
 			// generic six-degree-of-freedom joint covers the family, and each
 			// class says which member of it by setting the six motion modes as a
@@ -2381,7 +2522,7 @@ namespace engine::scene {
 			// expressible.
 			const std::array joined{ecs::Components::Of<Constraint>()};
 			const ecs::ClassId constraintClass = ecs::Classes::Register("Constraint", instance, joined);
-			const ecs::ClassId weldClass = ecs::Classes::Register("WeldConstraint", constraintClass, {});
+			ecs::Classes::SetCreatable(constraintClass, false);
 			const ecs::ClassId ballClass =
 				ecs::Classes::Register("BallSocketConstraint", constraintClass, {});
 			const ecs::ClassId hingeClass = ecs::Classes::Register("HingeConstraint", constraintClass, {});
@@ -2391,6 +2532,16 @@ namespace engine::scene {
 				ecs::Classes::Register("CylindricalConstraint", constraintClass, {});
 			const ecs::ClassId ropeClass = ecs::Classes::Register("RopeConstraint", constraintClass, {});
 			const ecs::ClassId springClass = ecs::Classes::Register("SpringConstraint", constraintClass, {});
+
+			const std::array legacyJoint{ecs::Components::Of<JointInstance>()};
+			const ecs::ClassId jointInstanceClass =
+				ecs::Classes::Register("JointInstance", instance, legacyJoint);
+			ecs::Classes::SetCreatable(jointInstanceClass, false);
+			const ecs::ClassId weldClass = ecs::Classes::Register("Weld", jointInstanceClass, {});
+
+			const std::array directWeld{ecs::Components::Of<WeldConstraint>()};
+			const ecs::ClassId weldConstraintClass =
+				ecs::Classes::Register("WeldConstraint", instance, directWeld);
 
 			ecs::EnumTable::Register(
 				"ConstraintMotion", std::array<std::string_view, 3>{"Locked", "Limited", "Free"}
@@ -2402,9 +2553,6 @@ namespace engine::scene {
 			// the module, so an author who has aimed one attachment has aimed all
 			// of them.
 			{
-				// A weld is the default row, so `WeldConstraint` sets nothing.
-				(void)weldClass;
-
 				Constraint ball;
 				ball.Angular[0] = ConstraintMotion::Free;
 				ball.Angular[1] = ConstraintMotion::Free;
@@ -2444,6 +2592,7 @@ namespace engine::scene {
 				spring.Damping = 50.0f;
 				ecs::Classes::Default(springClass, spring);
 			}
+			(void)weldClass;
 
 			// --- properties, declared where the component arrives ------------
 			//
@@ -2617,11 +2766,19 @@ namespace engine::scene {
 			// save, which an editor-side set could not.
 			ecs::Classes::Property<&Visual::Locked>(basePart, "Locked");
 
-			// **`Value` on the base, so both classes have it once.** A
-			// `LocalizationTable` holds its CSV here and resolves nothing -
-			// translation lookup is a service with a locale and a fallback
-			// chain, and none of that is a file mapping.
-			ecs::Classes::Property<&TextContent::Value>(valueBase, "Value");
+			// Every leaf spells the member `Value`, while the class table keeps
+			// its script type exact. The two text leaves share one component
+			// because both carry verbatim, non-interned text.
+			for (const ecs::ClassId owner : {stringValue, localizationTable}) {
+				ecs::Classes::Property<&TextContent::Value>(owner, "Value");
+			}
+			ecs::Classes::Property<&BoolValue::Value>(boolValue, "Value");
+			ecs::Classes::Property<&CFrameValue::Value>(cframeValue, "Value");
+			ecs::Classes::Property<&Color3Value::Value>(color3Value, "Value");
+			ecs::Classes::Property<&IntValue::Value>(intValue, "Value");
+			ecs::Classes::Property<&NumberValue::Value>(numberValue, "Value");
+			ecs::Classes::Property<&ObjectValue::Value>(objectValue, "Value");
+			ecs::Classes::Property<&Vector3Value::Value>(vector3Value, "Value");
 
 			// Which surface texture this part shows, or -1 for none. An `int32`
 			// rather than a reference to the camera: the renderer indexes a
@@ -2830,12 +2987,21 @@ namespace engine::scene {
 			ecs::Classes::Property<&Bone::InverseBind>(boneClass, "InverseBindCFrame");
 			ecs::Classes::Computed(boneClass, BoneWorldProperty());
 
-			// The clip's two names. **`RigId` beside `AnimationId`**, because a
+			// The skeleton is guaranteed by this class's component set, unlike the
+			// optional component on an imported ordinary `MeshPart`.
+			ecs::Classes::Property<&Skeleton::Rig>(skinnedMeshPart, "RigId");
+			ecs::Classes::Computed(skinnedMeshPart, SkeletonJointCountProperty());
+
+			ecs::Classes::Computed(animationBufferClass, AnimationBufferSizeProperty());
+			ecs::Classes::Computed(animationBufferClass, AnimationBufferKeyframeBytesProperty());
+
+			// The clip source and rig. **`RigId` beside `AnimationId`**, because a
 			// clip authored against one skeleton means nothing on another and
 			// `ClipFitsRig` is what refuses it - an author who cannot set the
 			// second cannot make that refusal work.
 			ecs::Classes::Property<&AnimationClip::Asset>(animationClass, "AnimationId");
 			ecs::Classes::Property<&AnimationClip::Rig>(animationClass, "RigId");
+			ecs::Classes::Property<&AnimationClip::Buffer>(animationClass, "AnimationBuffer");
 
 			ecs::Classes::Property<&Animator::Rig>(animatorClass, "Rig");
 			ecs::Classes::Property<&Animator::RootMotion>(animatorClass, "RootMotion");
@@ -2940,7 +3106,7 @@ namespace engine::scene {
 			);
 
 			// **Every constraint property is on the base class**, which is the
-			// other half of the one-component design: the seven classes differ by
+			// other half of the one-component design: the six classes differ by
 			// a prototype row and nothing else, so declaring a property per class
 			// would be the same declaration seven times.
 			//
@@ -2961,6 +3127,18 @@ namespace engine::scene {
 			ecs::Classes::Computed(constraintClass, LinearLimitProperty(true));
 			ecs::Classes::Computed(constraintClass, AngularLimitProperty(false));
 			ecs::Classes::Computed(constraintClass, AngularLimitProperty(true));
+
+			ecs::Classes::Property<&JointInstance::Part0>(jointInstanceClass, "Part0");
+			ecs::Classes::Property<&JointInstance::Part1>(jointInstanceClass, "Part1");
+			ecs::Classes::Property<&JointInstance::C0>(jointInstanceClass, "C0");
+			ecs::Classes::Property<&JointInstance::C1>(jointInstanceClass, "C1");
+			ecs::Classes::Property<&JointInstance::Enabled>(jointInstanceClass, "Enabled");
+			ecs::Classes::Computed(jointInstanceClass, RigidLinkActiveProperty<JointInstance>());
+
+			ecs::Classes::Property<&WeldConstraint::Part0>(weldConstraintClass, "Part0");
+			ecs::Classes::Property<&WeldConstraint::Part1>(weldConstraintClass, "Part1");
+			ecs::Classes::Property<&WeldConstraint::Enabled>(weldConstraintClass, "Enabled");
+			ecs::Classes::Computed(weldConstraintClass, RigidLinkActiveProperty<WeldConstraint>());
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like. The
@@ -2988,17 +3166,12 @@ namespace engine::scene {
 	}
 
 	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target) {
-		if (store.Get<Transform>(instance) == nullptr) {
-			return false;
-		}
-
 		const Pivot *pivot = store.Get<Pivot>(instance);
 		const core::CFrame placement = pivot == nullptr ? target : target * pivot->Offset.Inverse();
 
 		// Through the same helper a property write uses, so a script pivoting a
 		// part and an author dragging one leave the world in the same state.
-		PlaceInstance(store, instance, placement);
-		return true;
+		return PlaceInstance(store, instance, placement);
 	}
 
 	size_t BulkMoveTo(
@@ -3012,11 +3185,9 @@ namespace engine::scene {
 			// argues the case: a batch is a cheaper *boundary*, not a cheaper
 			// write, and the moment the two paths differ they can disagree
 			// about what a placement leaves behind.
-			if (store.Get<Transform>(instances[at]) == nullptr) {
-				continue;
+			if (PlaceInstance(store, instances[at], frames[at])) {
+				moved++;
 			}
-			PlaceInstance(store, instances[at], frames[at]);
-			moved++;
 		}
 		return moved;
 	}

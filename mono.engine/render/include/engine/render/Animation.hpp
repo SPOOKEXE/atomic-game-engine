@@ -5,9 +5,11 @@
 
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Entity.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
 
 namespace engine::ecs {
@@ -16,7 +18,14 @@ namespace engine::ecs {
 
 namespace engine::render {
 	struct AnimationCatalogue {
+		struct BufferedClip {
+			uint32_t Revision = 0;
+			bool Loaded = false;
+			std::optional<assets::AnimationData> Clip;
+		};
+
 		std::unordered_map<uint32_t, assets::AnimationData> Clips;
+		std::unordered_map<ecs::Entity, BufferedClip> Buffers;
 	};
 
 	bool RecordAnimation(ecs::Store &store, const core::Name &name, const assets::AnimationData &clip);

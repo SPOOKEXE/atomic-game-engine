@@ -370,15 +370,16 @@ namespace client {
 
 	// Registers this module's own types under explicit names.
 	//
-	// **One type, and it had no registration at all until v0.7.** `DrawList` is
+	// **`DrawList` had no registration at all until v0.7.** It is
 	// a resource, a resource is keyed by a component id, and
 	// `Store::SetResource` was minting one under the compiler's spelling of the
 	// type - which is rule 4's exact failure and sat unnoticed because nothing
 	// had ever snapshotted a world that had one. The studio's Stop does.
 	//
-	// Idempotent, and called by both entry points above. Call it before
-	// anything touches a `DrawList`: `Components::Of<T>` caches its answer per
-	// type per process, so an explicit registration arriving second aborts
+	// The client-private fallback camera state is registered here for the same
+	// reason. Idempotent, and called by both entry points above. Call it before
+	// anything touches either resource: `Components::Of<T>` caches its answer
+	// per type per process, so an explicit registration arriving second aborts
 	// rather than leaving two names for one thing.
 	void RegisterClientComponents();
 }

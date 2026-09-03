@@ -491,9 +491,14 @@ namespace engine::gui {
 		// multiply per row against having to remember a separate hierarchy pass
 		// restricted to exactly the right set of rows - and a pass that covered
 		// *every* instance would rebuild the UI whenever a part moved.
-		template <class T> uint64_t FoldRows(Store &store, uint64_t running) {
+		template <class T>
+		uint64_t FoldRows(Store &store, uint64_t running, Entity collector = ecs::NULL_ENTITY) {
 			store.Each<const T, const Hierarchy>(
 				[&](Entity entity, const T &component, const Hierarchy &node) {
+					if (collector != ecs::NULL_ENTITY && entity != collector &&
+						!store.IsDescendantOf(entity, collector)) {
+						return;
+					}
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -1164,6 +1169,76 @@ namespace engine::gui {
 			// the subtree keeps that paint order without a renderer special case.
 			EmitScrollbars(store, instance, collector, *resolved, tint, opacity, out);
 		}
+
+		uint64_t ScanSignature(Store &store, const CompileRequest &request, Entity collector, bool &moving) {
+			uint64_t stamp = Fold(0, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&store)));
+			stamp = Fold(stamp, collector);
+			stamp = Fold(stamp, request.Display.Width);
+			stamp = Fold(stamp, request.Display.Height);
+			stamp = Fold(stamp, request.Display.TopInset);
+			stamp = Fold(stamp, request.Hovered);
+			stamp = Fold(stamp, request.Pressed);
+			stamp = Fold(stamp, request.Viewer);
+			stamp = Fold(stamp, request.ScreenGuis);
+
+			store.Each<const Element, const InstanceName>(
+				[&](Entity entity, const Element &, const InstanceName &label) {
+					if (collector != ecs::NULL_ENTITY && !store.IsDescendantOf(entity, collector)) {
+						return;
+					}
+					stamp = Fold(stamp, entity);
+					stamp = Fold(stamp, label.Value);
+				}
+			);
+
+			stamp = FoldRows<Element>(store, stamp, collector);
+			stamp = FoldRows<Background>(store, stamp, collector);
+			stamp = FoldRows<Label>(store, stamp, collector);
+			stamp = FoldRows<Picture>(store, stamp, collector);
+			stamp = FoldRows<Button>(store, stamp, collector);
+			stamp = FoldRows<Scrolling>(store, stamp, collector);
+			stamp = FoldRows<Entry>(store, stamp, collector);
+			stamp = FoldRows<Layer>(store, stamp, collector);
+			stamp = FoldRows<Surface>(store, stamp, collector);
+			stamp = FoldRows<Billboard>(store, stamp, collector);
+			stamp = FoldRows<Group>(store, stamp, collector);
+			stamp = FoldRows<Viewport>(store, stamp, collector);
+			stamp = FoldRows<Padding>(store, stamp, collector);
+			stamp = FoldRows<ListLayout>(store, stamp, collector);
+			stamp = FoldRows<GridLayout>(store, stamp, collector);
+			stamp = FoldRows<TableLayout>(store, stamp, collector);
+			stamp = FoldRows<PageLayout>(store, stamp, collector);
+			stamp = FoldRows<PageMotion>(store, stamp, collector);
+			stamp = FoldRows<ScrollMotion>(store, stamp, collector);
+
+			moving = false;
+			store.Each<const PageMotion>([&](Entity entity, const PageMotion &motion) {
+				moving =
+					moving || ((collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) &&
+							   motion.From != motion.To);
+			});
+			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &motion) {
+				const bool included =
+					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
+				moving = moving || (included && (motion.Held || motion.ReleasedAt >= 0.0));
+			});
+			if (moving) {
+				stamp = Fold(stamp, static_cast<float>(request.Seconds));
+			}
+
+			stamp = FoldRows<DragDetector>(store, stamp, collector);
+			stamp = FoldRows<AspectRatio>(store, stamp, collector);
+			stamp = FoldRows<SizeLimits>(store, stamp, collector);
+			stamp = FoldRows<TextSizeLimits>(store, stamp, collector);
+			stamp = FoldRows<Corner>(store, stamp, collector);
+			stamp = FoldRows<Stroke>(store, stamp, collector);
+			stamp = FoldRows<Scale>(store, stamp, collector);
+			stamp = FoldRows<FlexItem>(store, stamp, collector);
+			stamp = FoldRows<Gradient>(store, stamp, collector);
+			stamp = FoldRows<Selection>(store, stamp, collector);
+			stamp = FoldRows<GuiServiceState>(store, stamp, collector);
+			return stamp;
+		}
 	}
 
 	bool Compiled::Rebuild(Store &store, const CompileRequest &request) {
@@ -1177,89 +1252,8 @@ namespace engine::gui {
 		// over packed columns. What it produces is a number to compare against
 		// the last one.
 
-		// **Which world, before what is in it.** Two worlds built the same way
-		// allocate the same entity ids and hold the same components, so their
-		// contents hash identically - correct arithmetic and the wrong answer
-		// for a list that has been pointed at the other one.
-		uint64_t stamp = Fold(0, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&store)));
-
-		stamp = Fold(stamp, request.Display.Width);
-		stamp = Fold(stamp, request.Display.Height);
-		stamp = Fold(stamp, request.Display.TopInset);
-		stamp = Fold(stamp, request.Hovered);
-		stamp = Fold(stamp, request.Pressed);
-		stamp = Fold(stamp, request.Viewer);
-		stamp = Fold(stamp, request.ScreenGuis);
-
-		// Names, for `SortOrder::Name`. Restricted to rows that have an
-		// `Element`, so renaming a part does not rebuild the UI.
-		store.Each<const Element, const InstanceName>(
-			[&](Entity entity, const Element &, const InstanceName &label) {
-				stamp = Fold(stamp, entity);
-				stamp = Fold(stamp, label.Value);
-			}
-		);
-
-		stamp = FoldRows<Element>(store, stamp);
-		stamp = FoldRows<Background>(store, stamp);
-		stamp = FoldRows<Label>(store, stamp);
-		stamp = FoldRows<Picture>(store, stamp);
-		stamp = FoldRows<Button>(store, stamp);
-		stamp = FoldRows<Scrolling>(store, stamp);
-		stamp = FoldRows<Entry>(store, stamp);
-		stamp = FoldRows<Layer>(store, stamp);
-		stamp = FoldRows<Surface>(store, stamp);
-		stamp = FoldRows<Billboard>(store, stamp);
-		stamp = FoldRows<Group>(store, stamp);
-		stamp = FoldRows<Viewport>(store, stamp);
-		stamp = FoldRows<Padding>(store, stamp);
-		stamp = FoldRows<ListLayout>(store, stamp);
-		stamp = FoldRows<GridLayout>(store, stamp);
-		stamp = FoldRows<TableLayout>(store, stamp);
-		stamp = FoldRows<PageLayout>(store, stamp);
-		stamp = FoldRows<PageMotion>(store, stamp);
-		stamp = FoldRows<ScrollMotion>(store, stamp);
-
-		// **The clock is folded while something is moving and only then, and
-		// without this an animation runs for exactly one frame.** The signature
-		// is what decides whether `Rebuild` lays out at all, and the layout is
-		// what advances a slide or a spring - so folding only the *resolved*
-		// numbers is circular: they cannot change until the layout runs, and
-		// the layout does not run until they change.
-		//
-		// Folding `Seconds` unconditionally would be the other failure, and a
-		// worse one: every still interface in the engine would rebuild its
-		// whole draw list every frame forever.
-		//
-		// So the question asked is whether anything is *in flight*, which is a
-		// property of the rows rather than of the clock. It stops being true
-		// the moment a page lands or a spring settles, and the signature goes
-		// back to standing still with it.
 		bool moving = false;
-		store.Each<const PageMotion>([&](Entity, const PageMotion &motion) {
-			moving = moving || motion.From != motion.To;
-		});
-		store.Each<const ScrollMotion>([&](Entity, const ScrollMotion &motion) {
-			moving = moving || motion.Held || motion.ReleasedAt >= 0.0;
-		});
-		if (moving) {
-			// As a `float`, which is what every other real number here folds
-			// as. A `double` is ambiguous against the integer overload, and
-			// picking it would be folding more precision than an animation
-			// running at a frame rate can express anyway.
-			stamp = Fold(stamp, static_cast<float>(request.Seconds));
-		}
-		stamp = FoldRows<DragDetector>(store, stamp);
-		stamp = FoldRows<AspectRatio>(store, stamp);
-		stamp = FoldRows<SizeLimits>(store, stamp);
-		stamp = FoldRows<TextSizeLimits>(store, stamp);
-		stamp = FoldRows<Corner>(store, stamp);
-		stamp = FoldRows<Stroke>(store, stamp);
-		stamp = FoldRows<Scale>(store, stamp);
-		stamp = FoldRows<FlexItem>(store, stamp);
-		stamp = FoldRows<Gradient>(store, stamp);
-		stamp = FoldRows<Selection>(store, stamp);
-		stamp = FoldRows<GuiServiceState>(store, stamp);
+		const uint64_t stamp = ScanSignature(store, request, ecs::NULL_ENTITY, moving);
 
 		core::Metrics::Count("gui.compile.asked", 1.0);
 
@@ -1462,6 +1456,77 @@ namespace engine::gui {
 			Asked
 		);
 
+		return true;
+	}
+
+	bool Compiled::RebuildCollector(Store &store, Entity collector, const CompileRequest &request) {
+		ENGINE_PROFILE_CAT("gui collector compile", engine::core::ProfileCategory::ECS);
+		Asked++;
+
+		bool moving = false;
+		const uint64_t stamp = ScanSignature(store, request, collector, moving);
+		core::Metrics::Count("gui.compile.asked", 1.0);
+		if (Fresh && stamp == Stamp) {
+			return false;
+		}
+
+		Stamp = stamp;
+		Fresh = true;
+		Built++;
+		core::Metrics::Count(moving ? "gui.compile.built.moving" : "gui.compile.built.changed", 1.0);
+
+		List.Commands.clear();
+		List.Gradients.clear();
+		List.Elements = 0;
+		List.CanvasSize = Vector2{request.Display.Width, request.Display.Height};
+
+		if (!store.Alive(collector)) {
+			return true;
+		}
+
+		LayoutCollector(store, collector, request.Display, request.Seconds);
+		const Resolved *collectorResolved = store.Get<Resolved>(collector);
+		if (collectorResolved == nullptr || !collectorResolved->Rendered) {
+			return true;
+		}
+
+		const Ids &ids = Classes();
+		std::vector<Entity> roots;
+		store.EachChild(collector, [&](Entity child) {
+			if (store.IsA(child, ids.Object)) {
+				roots.push_back(child);
+			}
+		});
+		std::stable_sort(roots.begin(), roots.end(), [&](Entity left, Entity right) {
+			const Element *a = store.Get<Element>(left);
+			const Element *b = store.Get<Element>(right);
+			return (a != nullptr ? a->ZIndex : 0) < (b != nullptr ? b->ZIndex : 0);
+		});
+
+		for (const Entity root : roots) {
+			Walk(store, root, collector, request, 1, Color3{1.0f, 1.0f, 1.0f}, 1.0f, List);
+		}
+
+		if (const Layer *layer = store.Get<Layer>(collector);
+			layer != nullptr && layer->Behavior == ZIndexBehavior::Global) {
+			std::stable_sort(
+				List.Commands.begin(),
+				List.Commands.end(),
+				[&](const DrawCommand &left, const DrawCommand &right) {
+					const Element *a = store.Get<Element>(left.Source);
+					const Element *b = store.Get<Element>(right.Source);
+					return (a != nullptr ? a->ZIndex : 0) < (b != nullptr ? b->ZIndex : 0);
+				}
+			);
+		}
+
+		for (size_t index = 0; index < List.Commands.size(); index++) {
+			if (Resolved *value = store.GetMutable<Resolved>(List.Commands[index].Source)) {
+				value->Order = static_cast<int32_t>(index);
+			}
+		}
+		core::Metrics::Count("gui.compile.commands", static_cast<double>(List.Commands.size()));
+		core::Metrics::Count("gui.compile.elements", static_cast<double>(List.Elements));
 		return true;
 	}
 

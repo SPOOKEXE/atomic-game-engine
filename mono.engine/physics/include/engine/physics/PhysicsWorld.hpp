@@ -23,6 +23,7 @@
 // @tier L8 · shared
 
 #include <engine/core/types/AABB.hpp>
+#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/physics/Contacts.hpp>
@@ -38,6 +39,29 @@
 #include <vector>
 
 namespace engine::physics {
+
+	// A direct WeldConstraint's captured relative frame.
+	struct WeldPose {
+		ecs::Entity Owner;
+		ecs::Entity Part0;
+		ecs::Entity Part1;
+		core::CFrame Part0ToPart1;
+	};
+
+	// One active rigid edge and one part in the resolved assembly graph.
+	struct RigidEdge {
+		ecs::Entity Owner;
+		ecs::Entity Part0;
+		ecs::Entity Part1;
+		core::CFrame Part0ToPart1;
+	};
+
+	struct RigidNode {
+		ecs::Entity Part;
+		ecs::Entity Root;
+		core::CFrame Frame;
+		bool Placed = false;
+	};
 
 	// What the broad phase remembers about one collider, beside its box.
 	//
@@ -678,6 +702,9 @@ namespace engine::physics {
 			return StaticStale;
 		}
 
+		// Whether two parts belong to the same active rigid assembly.
+		bool RigidlyConnected(ecs::Entity first, ecs::Entity second) const;
+
 		// How many colliders the dynamic index held after the last sync.
 		//
 		// @return The dynamic collider count.
@@ -780,10 +807,10 @@ namespace engine::physics {
 		}
 
 	  private:
-		// The two indexes and the arrays behind them.
+		// The two indexes and their parallel records.
 		//
-		// `Proxy::Id` in these grids is the **index into the matching record and
-		// proxy arrays**, not an `ecs::Entity`. That is what makes resolving a
+		// `Proxy::Id` in these grids is the **index into the matching record
+		// arrays**, not an `ecs::Entity`. That is what makes resolving a
 		// candidate's masks an array subscript rather than a store lookup; the
 		// entity is on the record. A caller reaching one of these grids and
 		// reading `Proxy::Id` as an entity gets a number that is plausible and
@@ -793,7 +820,6 @@ namespace engine::physics {
 
 		std::vector<spatial::Proxy> DynamicProxies;
 		std::vector<ColliderRecord> DynamicRecords;
-		std::vector<spatial::Proxy> StaticProxies;
 		std::vector<ColliderRecord> StaticRecords;
 
 		// The placed shape of every collider, parallel to the records.
@@ -819,6 +845,13 @@ namespace engine::physics {
 		// Where the two are sorted together before being split. Cleared and
 		// refilled, never freed, like every other list here.
 		std::vector<SourcedPair> SourcedPairList;
+
+		// One retained output list per broad-phase batch, plus the batches whose
+		// fixed candidate scratch overflowed and must be replayed on the caller.
+		// Separate lists let workers append without a shared cursor; concatenating
+		// them in batch order before the required sort makes scheduling invisible.
+		std::vector<std::vector<SourcedPair>> SourcedPairBatches;
+		std::vector<uint8_t> SourcedPairOverflow;
 		std::vector<ContactManifold> ManifoldList;
 		std::vector<ContactEvent> EventList;
 
@@ -846,6 +879,8 @@ namespace engine::physics {
 		// `size()` instead is a walk over last tick's tail, and a stale row is a
 		// contact between two bodies that are no longer touching.
 		std::vector<SolverBody> BodyList;
+		// A retained membership list for Solve's dense BasePart load pass.
+		std::vector<uint8_t> SolverBodyLoaded;
 		std::vector<ContactRow> RowList;
 		size_t SolverRowCount = 0;
 
@@ -942,6 +977,13 @@ namespace engine::physics {
 		// not, because a body in mid-air is not resting.
 		std::vector<RestingBody> RestingList;
 		std::vector<RestingBody> RestingNext;
+
+		// Rigid-link state and scratch, all retained so a steady assembly stops
+		// allocating. Weld poses outlive a tick; edges and nodes are rebuilt.
+		std::vector<WeldPose> WeldPoses;
+		std::vector<WeldPose> WeldPosesNext;
+		std::vector<RigidEdge> RigidEdges;
+		std::vector<RigidNode> RigidNodes;
 
 		// The pairs that were touching last tick, sorted, so `Publish` can say
 		// which began, which persisted and which ended without holding a set.

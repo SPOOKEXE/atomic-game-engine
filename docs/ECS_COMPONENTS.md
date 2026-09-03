@@ -68,12 +68,16 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `gui.Adornment` | 32 | 8 | yes | yes | . | . | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws. |
+| `gui.ArcHandlesShape` | 4 | 4 | yes | yes | . | . | The axis mask drawn by an `ArcHandles` instance. |
 | `gui.AspectRatio` | 8 | 4 | yes | yes | . | . | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates. |
 | `gui.Background` | 36 | 4 | yes | yes | . | . | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode. |
 | `gui.Billboard` | 112 | 8 | yes | yes | . | . | What a `BillboardGui` adds: the adornee it hangs off, its stud and extents offsets, lighting, and the distance past which it stops drawing. |
+| `gui.BoxHandleShape` | 12 | 4 | yes | yes | . | . | The three-dimensional size of a `BoxHandleAdornment`. |
 | `gui.Button` | 3 | 1 | yes | yes | . | . | What makes a `GuiButton` a button: whether the fill shifts under the pointer and further on press, plus two reserved flags. |
 | `gui.Canvas` | 16 | 4 | yes | yes | . | . | The screen-sized rectangle a `ScreenGui` collects onto, in pixels. Derived, because a screen gui authors no canvas: its canvas is the viewport. |
+| `gui.ConeHandleShape` | 12 | 4 | yes | yes | . | . | The height, radius and hollow-base choice of a `ConeHandleAdornment`. |
 | `gui.Corner` | 8 | 4 | yes | yes | . | . | `UICorner`: the radius the parent element's corners are rounded by, resolved against the parent's smaller axis. |
+| `gui.CylinderHandleShape` | 16 | 4 | yes | yes | . | . | The outer radius, inner radius, height and arc angle of a `CylinderHandleAdornment`. |
 | `gui.DragDetector` | 40 | 8 | yes | yes | . | . | `UIDragDetector`: makes the parent element draggable, deciding what a pointer drag does to `Element::Position` and how far it may move. |
 | `gui.Element` | 60 | 4 | yes | yes | . | . | The base row every `GuiObject` has: position, size, anchor, rotation, draw order and the visibility, clipping and input flags the layout pass reads. |
 | `gui.Entry` | 56 | 8 | yes | . | . | . | What makes a `TextBox` editable: the placeholder text and colour, the multi-line and editable flags, and the caret and selection offsets. |
@@ -82,9 +86,11 @@ state until v0.19.
 | `gui.GridLayout` | 44 | 4 | yes | yes | . | . | `UIGridLayout`: places the parent's children in equal cells on a grid, with a cell size, cell padding, fill direction and start corner. |
 | `gui.Group` | 16 | 4 | yes | yes | . | . | What a `CanvasGroup` composites its subtree with: one colour and one transparency applied to the whole group rather than to each child. |
 | `gui.GuiServiceState` | 24 | 8 | yes | yes | . | . | `GuiService`'s own state: the selected element, the focused `TextBox`, whether a platform menu covers the game, and whether selection may seed itself. |
-| `gui.HandleShape` | 40 | 4 | yes | yes | . | . | Where a `HandleAdornment` sits relative to its adornee and how big it is, as an offset `CFrame` and a stud extent. |
+| `gui.HandleShape` | 40 | 4 | yes | yes | . | . | Where a `HandleAdornment` sits relative to its adornee, as a local `CFrame` and size-relative offset. |
+| `gui.HandlesShape` | 4 | 4 | yes | yes | . | . | The face mask drawn by a `Handles` instance. |
 | `gui.Label` | 88 | 8 | yes | . | . | . | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags. |
 | `gui.Layer` | 8 | 4 | yes | yes | . | . | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset. |
+| `gui.LineHandleShape` | 8 | 4 | yes | yes | . | . | The length and overlay thickness of a `LineHandleAdornment`. |
 | `gui.ListLayout` | 16 | 4 | yes | yes | . | . | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping. |
 | `gui.Padding` | 32 | 4 | yes | yes | . | . | `UIPadding`: space held back inside the parent element on each of its four edges before its children are placed. |
 | `gui.PageLayout` | 32 | 8 | yes | yes | . | . | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap. |
@@ -100,6 +106,7 @@ state until v0.19.
 | `gui.SettingsMenuExtensions` | 24 | 8 | . | . | . | . | Resource: script-authored actions appended to the local escape menu, with stable ids, labels and the callback token dispatched when a player activates one. |
 | `gui.SizeLimits` | 16 | 4 | yes | yes | . | . | `UISizeConstraint`: clamps the parent element's resolved size between a minimum and a maximum, in pixels. |
 | `gui.SpatialCanvas` | 104 | 4 | yes | yes | . | . | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance. |
+| `gui.SphereHandleShape` | 4 | 4 | yes | yes | . | . | The radius of a `SphereHandleAdornment`. |
 | `gui.Stroke` | 24 | 4 | yes | yes | . | . | `UIStroke`: an outline drawn around the parent outside its own border, with its own colour, thickness, transparency, join and sizing. |
 | `gui.Surface` | 48 | 8 | yes | yes | . | . | What a `SurfaceGui` adds: the adornee part and which face, how the pixel canvas is sized, its lighting, z-offset and draw distance. |
 | `gui.TableLayout` | 24 | 4 | yes | yes | . | . | `UITableLayout`: lays the parent's children out as rows and their children as cells, so one column is the same width in every row. |
@@ -111,7 +118,7 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `physics.PhysicsClock` | 48 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
-| `physics.PhysicsWorld` | 1240 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
+| `physics.PhysicsWorld` | 1336 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
 | `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
 
 ## `replication`
@@ -125,7 +132,8 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `scene.ActiveCamera` | 16 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`. |
-| `scene.AnimationClip` | 8 | 4 | yes | . | . | . | On an `Animation` instance: which clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
+| `scene.AnimationBuffer` | 32 | 8 | yes | . | . | . | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit. |
+| `scene.AnimationClip` | 16 | 8 | yes | . | . | . | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
 | `scene.AnimationTrack` | 32 | 8 | yes | yes | . | . | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler. |
 | `scene.Animator` | 16 | 8 | yes | yes | . | . | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance. |
 | `scene.Atmosphere` | 40 | 4 | yes | yes | . | . | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only. |
@@ -134,7 +142,9 @@ state until v0.19.
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
+| `scene.BoolValue` | 4 | 1 | yes | yes | . | . | The boolean stored by a `BoolValue` instance. |
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
+| `scene.CFrameValue` | 28 | 4 | yes | yes | . | . | The coordinate frame stored by a `CFrameValue` instance. |
 | `scene.Camera` | 28 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
 | `scene.CameraController` | 64 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override. |
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
@@ -144,6 +154,7 @@ state until v0.19.
 | `scene.Clouds` | 36 | 4 | yes | yes | . | . | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only. |
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
+| `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
 | `scene.EditableImage` | 40 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture. |
@@ -151,6 +162,8 @@ state until v0.19.
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
+| `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
+| `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
 | `scene.LevelOfDetail` | 32 | 4 | yes | . | . | . | The coarser versions of a part's geometry: up to three extra mesh names, the triangle fraction each keeps, how the levels were produced, and the projected area per triangle `SelectLevel` targets. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
 | `scene.LightingService` | 56 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
@@ -161,6 +174,8 @@ state until v0.19.
 | `scene.MeshCatalogue` | 112 | 8 | yes | . | . | . | Resource: what the content pump learned about each loaded mesh - triangle count and the texture sheets its submeshes name. It backs `MeshPart.TrianglesCount`. |
 | `scene.Motion` | 24 | 4 | yes | yes | . | 12 | Linear and angular velocity in world space. Physics integrates it every tick for every body carrying `Simulated`; gravity and the control pass write it. |
 | `scene.NetworkOwner` | 8 | 8 | yes | yes | . | . | Which `Player` simulates this body; a null handle means the server does. `ReclaimAbandonedOwnership` scans it every tick and clears owners that have gone. |
+| `scene.NumberValue` | 8 | 8 | yes | yes | . | . | The double-precision number stored by a `NumberValue` instance. |
+| `scene.ObjectValue` | 8 | 8 | yes | yes | . | . | The entity reference stored by an `ObjectValue` instance. |
 | `scene.PhysicsProperties` | 16 | 4 | yes | yes | . | . | Per-part density, friction and elasticity overrides, used by the narrow phase and by the mass computation only when the `Custom` flag is set. |
 | `scene.Pivot` | 28 | 4 | yes | yes | . | . | The handle an instance is posed about, stored in its own frame and composed as `Transform::Frame * Offset`. `PivotOf`, `PivotTo` and the editor gizmo read it. |
 | `scene.PlayerCharacter` | 8 | 8 | yes | yes | . | . | On a `Player`: the character `Model` it currently owns, or null between death and respawn. It backs the `Player.Character` property. |
@@ -204,7 +219,9 @@ state until v0.19.
 | `scene.Tool` | 28 | 4 | yes | yes | . | . | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn. |
 | `scene.Transform` | 28 | 4 | yes | yes | . | 10 | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads. |
 | `scene.Transient` | 0 | 1 | . | . | . | . | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`. |
+| `scene.Vector3Value` | 12 | 4 | yes | yes | . | . | The vector stored by a `Vector3Value` instance. |
 | `scene.Visual` | 32 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
+| `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
 
 ## `script`
@@ -229,4 +246,4 @@ state until v0.19.
 
 ---
 
-152 components registered by the engine, 0 without a purpose line.
+169 components registered by the engine, 0 without a purpose line.

@@ -275,7 +275,7 @@ end
 function TerrainRuntime.new(field: any, size: number, container: Instance?): Builder
 	local parent = container
 	if parent == nil then
-		parent = Instance.new("Instance")
+		parent = Instance.new("Folder")
 		parent.Name = "Terrain"
 		parent.Parent = workspace
 	end

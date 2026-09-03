@@ -81,16 +81,19 @@ namespace engine::physics {
 		// reference as a direct memory write, which is exactly what is wanted.
 		const float delta = PhysicsStepSeconds(store);
 		const std::span<const SolverBody> bodies = world->Bodies();
-		if (!bodies.empty() && delta > 0.0f) {
-			store.Each<scene::Transform, const scene::Motion>(
-				[bodies, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
-					const SolverBody *body = BodyOf(bodies, entity);
-					if (body == nullptr || !body->Movable) {
-						return;
+		{
+			ENGINE_PROFILE_CAT("physics.publish-correction", core::ProfileCategory::Physics);
+			if (!bodies.empty() && delta > 0.0f) {
+				store.Each<scene::Transform, const scene::Motion>(
+					[bodies, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
+						const SolverBody *body = BodyOf(bodies, entity);
+						if (body == nullptr || !body->Movable) {
+							return;
+						}
+						transform.Frame.Position = transform.Frame.Position + body->CorrectionLinear * delta;
 					}
-					transform.Frame.Position = transform.Frame.Position + body->CorrectionLinear * delta;
-				}
-			);
+				);
+			}
 		}
 
 		// --- velocities ------------------------------------------------------
@@ -100,7 +103,9 @@ namespace engine::physics {
 		// the solver's iteration. Eight sweeps writing through `Store::Set`
 		// would be eight sparse-set lookups per body per contact for a value
 		// only the last one is true.
-		for (const SolverBody &body : bodies) {
+		{
+			ENGINE_PROFILE_CAT("physics.publish-velocity", core::ProfileCategory::Physics);
+			for (const SolverBody &body : bodies) {
 			if (world->Sleeping(body.Owner)) {
 				// **The archetype move.** Losing `scene::Motion` takes the row
 				// out of `IntegrateMotion`'s query and out of the dynamic half
@@ -125,6 +130,7 @@ namespace engine::physics {
 			// woken has no `scene::Motion` at all and this is the write that
 			// gives it one back.
 			store.Set<scene::Motion>(body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity});
+			}
 		}
 
 		// --- what moved ------------------------------------------------------
@@ -156,9 +162,12 @@ namespace engine::physics {
 		// is excluded by construction rather than by a second test, and
 		// `SyncBroadphase`'s inner gate - "was a changed row one without a
 		// `Motion`" - still answers no for every row this touches.
-		store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
-			store.MarkChanged<scene::Transform>(entity);
-		});
+		{
+			ENGINE_PROFILE_CAT("physics.publish-changes", core::ProfileCategory::Physics);
+			store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
+				store.MarkChanged<scene::Transform>(entity);
+			});
+		}
 
 		// --- events ----------------------------------------------------------
 		//
@@ -167,10 +176,12 @@ namespace engine::physics {
 		// pair because the two lists are already in the same order, and because
 		// a set would be an unordered container in the middle of the one path
 		// §2.4 says must not hold one.
-		std::vector<ContactEvent> &events = PipelineInternals::Events(*world);
-		std::vector<CandidatePair> &last = PipelineInternals::TouchingLast(*world);
-		std::vector<CandidatePair> &now = PipelineInternals::TouchingNow(*world);
-		now.clear();
+		{
+			ENGINE_PROFILE_CAT("physics.publish-events", core::ProfileCategory::Physics);
+			std::vector<ContactEvent> &events = PipelineInternals::Events(*world);
+			std::vector<CandidatePair> &last = PipelineInternals::TouchingLast(*world);
+			std::vector<CandidatePair> &now = PipelineInternals::TouchingNow(*world);
+			now.clear();
 
 		size_t previous = 0;
 		const auto retire = [&](const CandidatePair &limit, bool all) {
@@ -201,6 +212,7 @@ namespace engine::physics {
 		}
 		retire(CandidatePair{}, true);
 
-		std::swap(last, now);
+			std::swap(last, now);
+		}
 	}
 }

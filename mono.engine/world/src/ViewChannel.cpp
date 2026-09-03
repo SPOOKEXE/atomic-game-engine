@@ -97,4 +97,31 @@ namespace engine::world {
 			Holding.store(NONE, std::memory_order_release);
 		}
 	}
+
+	bool ViewChannel::Borrow(ViewHeader &header, std::span<const std::byte> &payload) {
+		for (;;) {
+			const uint32_t ready = Published_.load(std::memory_order_acquire);
+			if (ready == NONE) {
+				return false;
+			}
+
+			// Claim the new slot before clearing it from Published_. The previous
+			// borrowed slot is released by this store, but the caller promised not
+			// to use its old span after entering this call.
+			Holding.store(ready, std::memory_order_release);
+
+			uint32_t expected = ready;
+			if (Published_.compare_exchange_strong(
+					expected, NONE, std::memory_order_acq_rel, std::memory_order_acquire
+				)) {
+				const Slot &slot = Slots[ready];
+				header = slot.Header;
+				payload = slot.Payload;
+				return true;
+			}
+
+			// A newer publish won the race. The old ready slot is protected by
+			// Holding until the next loop claims the newer one.
+		}
+	}
 }

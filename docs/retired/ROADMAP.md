@@ -2477,7 +2477,6 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] properly build out team create menu
 - [x] team create build out options properly
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
-
 - [x] consolidate render pipeline to a easy-to-find location for future work.
 - [x] ensure when you read the render pipeline, its obvious what it does and in what order
 - [x] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
@@ -2489,7 +2488,6 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] implement and test `Beam`, `Trail`, `Decal` and `Texture` as saved, replicated and script-bound classes whose content is demanded and whose visible geometry reaches the ribbon renderer.
 - [x] complete collider components for `Box`, `Sphere`, `Cylinder`, `Capsule`, `Hull` and exact `Mesh` geometry. Bounds, support, contacts, rays, inertia and Studio previews cover the analytic shapes; baked hulls and triangle soups cover mesh-backed shapes. `MeshPart` exposes mesh, seven surface maps and triangle metadata through the shared property surface.
 - [x] enforce script access levels, capabilities and sandbox profiles for plugin, game, server and client contexts. Both VMs derive or accept explicit grants, refuse unavailable services with the required capability named, keep plugin host access separate from server services, and retain memory, step, job, global and host-surface sandbox limits.
-
 - [x] plan out and implement the base plugin system with stable manifests, isolated runtimes, persisted enable state, a built-in Default Studio plugin, and safe teardown before world replacement.
 - [x] add a toolbar editor where tabs can be created, hidden and removed, tools can be moved or hidden, and script controls can declare and change bounded widths.
 - [x] add plugin dock widgets with stable identities, first-use dock targets, size constraints, an editor panel, and a generated View menu for reopening them.
@@ -2500,16 +2498,13 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] convert viewport indicator gizmo and 3d cursor / camera orbit around it to plugin with buttons in toolbar
 - [x] compose plugin toolbars as cached pinned or tabbed row, column and cell grids, with persisted tab creation, renaming, ordering, hiding and deletion from the tab context menu.
 - [x] make Default Studio disable-able, expose matching Luau and JavaScript toolbar tab, row, column, cell and label functions, and hot-reload changed plugin source trees with debounced targeted restarts and structural rescans.
-
 - [x] benchmark the job system and add explicit `Serial`, `Threaded` and `Processed` contexts. `Jobs::For` selects serial or blocking fork-join execution without changing its insertion-order contract, while processed work is restricted to typed, serializable requests instead of pretending a captured callback can cross an OS-process boundary. In the optimized benchmark on this host, explicit serial dispatch costs 39 ns, threaded dispatch below the floor costs 58 ns, eight empty dispatched ranges cost 8.12 us, and spawning and reaping the benchmark worker process costs 301.50 ms, so process jobs remain a coarse-work option.
 - [x] add heartbeat-driven asynchronous compute for noise terrain generation. `ComputeService:NoiseGridAsync` returns a Luau yield or JavaScript promise backed by bounded serial, threaded or real child-process work. Each heartbeat polls without blocking, publishes tickets in submission order, copies flat row-major results on the world thread and advances a bounded 4,096-sample fallback so completion timing depends on request size instead of worker speed. The shared implementation matches Luau `math.noise`, caps a request at 1,048,576 samples and the queue at eight jobs, and cleans up threads, channels and children with the runtime.
-
 - [x] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
 - [x] add better memory packing for components by adding a DataQuantization component or something similar. Runtime-described component schemas now choose resident field formats directly, since a marker component could not change a compiled row layout. `float16`, `ufloat16`, `float8`, `ufloat8`, `int16`, `uint16`, `int8`, `uint8`, `int4`, `uint4` and bit-packed bool fields quantise and saturate through one ECS accessor shared by save/load, Luau, JavaScript, Studio and the control surface. Four-bit values and flags share bytes, schema identity includes the packing choice, and the Components dock reports logical versus resident bytes plus each field's format and bit offset. A representative mixed schema stores 46 logical payload bytes in a 20-byte row, a 56.5% reduction.
 - [x] expand ShaderCapabilities into two truthful layers: probed `DeviceCaps` gate graph node requirements before install, while reflected per-module `ShaderCapabilities` records stage, SPIR-V requirements, bindings, minimum declared buffer bytes, workgroup size, module size and a static arithmetic, texture, memory and control-flow instruction estimate. Selecting a `ShaderScript` compiles its current revision once and shows the report, resources and optimizer results in Properties.
 - [x] expand compilation with explicit SPIRV-Tools constant folding and common-subexpression elimination passes, command-buffer node fusion across adjacent compatible dependency waves, and runtime resource aliasing for exact-match transient targets with non-overlapping closed lifetimes. Shader and Pipeline Profile surfaces report before and after instruction counts, fused submission boundaries, physical target allocation and saved targets without reordering authored node semantics.
 - [x] reconcile `RENDER_PIPELINE.md` with the current pipeline and modular compiler. It now distinguishes implemented registration, native nodes, capability checks, shader reflection and optimization, submission fusion, resource aliasing, profiling and tiered defaults from the remaining backend-neutral pass API, permutation cache, typed shader contracts, demo pipelines and measured optimization candidates.
-
 - [x] create `ShaderScript` instances from Luau and write their `Source`, with revision tracking preserved through the computed property. `Shaders.luau` demonstrates the two real fragment contracts: `Material.Shader` selects the opaque shader for a `MeshPart` and for the pane displaying a `SurfaceCamera`, while `Lighting.PostProcessShader` selects the tonemap shader for the active `Camera`. The Luau adapter, scene, example and render suites cover creation, selection, compilation and refresh, and the headless Vulkan client runs the example without a shader or pipeline error.
 
 [Engine Graph + ECS Improvements + parallel::Jobs Storage (v0.20)]
@@ -2621,3 +2616,54 @@ Ask user to plan this out further, expand into all domains and areas where we ne
 - [x] the sideview of the script editor doesn't scroll and is not interactable
 - [x] Q/E camera movement should depend on camera rotation, not global space
 - [x] shaders demo has no shaders loaded
+
+### v0.22
+
+- [x] make animations scriptable with a world-owned `AnimationBuffer` that `Animation` references while `AnimationTrack` keeps its one reference to `Animation`. Luau buffers and JavaScript ArrayBuffers can procedurally build keyframes, bake to the canonical AAN1 format, import or export baked bytes, save and replicate them, and play through a revision-cached render path. The animation demo and both script runtimes cover the full path.
+- [x] build out ArcHandles, BoxHandleAdornments and related handle and selection adornments
+- [x] make the abstract GUI hierarchy virtual and non-creatable while keeping each class as metadata over its inherited component set
+- [x] ensure `:IsA()` walks the virtual class hierarchy
+- [x] ensure value objects work
+- [x] build out the UI items and input paths, including drag detectors
+- [x] ensure welds, weld constraints and legacy joints work
+- [x] ensure `ViewportFrame`, isolated viewport worlds and `WorldRoot` work
+- [x] host each plugin dock as a real ECS `DockWidgetPluginGui` tree with cached layout, ImGui painting, input routing and lifecycle cleanup
+- [x] expose live Studio automation through MCP with screenshots, emulated mouse clicks, keyboard keys and text input, plus command-palette discovery and execution by stable command id
+- [x] allow Studio simulation and rendering to run uncapped without display pacing, and verify the StressParticles bottleneck in live uncapped release Studio
+- [x] fix selection box not being aligned to object
+in StressParticles demo:
+- [x] optimise `graph.cull-bound`: the axis-aligned bound path reduced the 1,000-object release benchmark from 17.38 us to 7.90 us; uncapped release Studio measured 0.009 ms mean and 0.013 ms p99.
+- [x] account for the section between `ViewRecording::Begin` and `execute graph`: it is node-table construction, now reported as `build node table`; uncapped release Studio measured 0.051 ms mean and 0.080 ms p99.
+- [x] remove unnecessary render preparation work: static draw lists are reused, no-rig scenes skip skin palettes, and StressParticles measured 0.010 ms mean render preparation with 0.002 ms mean collection in uncapped release Studio.
+- [x] send only independently changed object rows, indices, skin offsets, joint words and occlusion data to the GPU; the warm StressParticles Studio run reused its draw list on all 4,005 captured frames and `upload-instances` rounded to 0.000 ms mean.
+- [x] stop object updates in StressParticles: the moving host Parts caused them, so the demo now animates child Attachments while host Parts remain static and only particle state changes.
+- [x] optimise `build-node-table` in `Renderer::RendererView` 0.365ms in StressParticles demo.
+- [x] see if we can optimise `transparent pass` in `transarent` in `execute graph` in `Renderer::RendererView`
+- [x] try optimise `resolve resident instances (0.15-0.16ms)` and `transparency pass (0.2ms)`
+- [x] do: ```
+- [x] do a 10, 100, 250, 500 and 1000 world stress test and list all the bottleneck locations. create a table of the top-10 items. write to docs/world-stress-test.md. use flamegraph and heap to help. Use Rings demo to test. do headless rendering as we want simulation / other performance, not rendering for this.
+- [x] optimise the top-10 world stress test.
+i noticed the following:
+* when we run with no studio, we're at 2k+ fps
+* when we run in studio, we're at 200-300fps
+Add flamegraph for studio application that sits on top of the engine flamegraph so we can see whats holding it all.
+Also, all the actual client and engine behaviors should sit in mono.engine, mono.studio is just a wrapper for it with ui on top.
+All bottleneck issues should then specifically be with mono.studio and we'll need to see that.
+Maybe add flamegraph categories for "engine", "server", "client", "studio" and "all", as part of the engine, then we submit data from studio/client/server to engine layer via binding.
+- [x] true multi-processed worlds (pinned cores)
+- [x] Fix viewport image drag issue
+- [x] Fix dragging floating dock widgets when sub-ui-objects already handle drag operations (e.g. 3d mesh preview in Demo Nodes, when dragging in preview it drags floating dock widget instead of only the image)
+- [x] add 180 degree flip to X/Y/Z gizmo
+- [x] when I run the StressParticle demo, it grows the particle pool. Ensure when i stop running the world, it de-allocates them.
+- [x] add tests for pooled de-allocation for things like particle allocations, texture allocations, etc.
+- [x] fix images rotating opposite way when dragging mouse in preview images (e.g. 3d mesh preview in demo nodes dragging opposite way)
+- [x] headless gpu pass tests for checking pooled allocation and deallocation, checking rendered images
+- [x] (headless) gpu tests for render pipeline
+fix ecs inspector:
+- [x] in the ECS `Components` inspector, add the ability to edit the component values.
+- [x] add a components view (inspector in unity) where you can see components - roblox instances too should show it.
+- [x] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it. do for all roblox values.
+- [x] ensure we have the ability to create custom components in scripting, and also to query them, etc. Batched with multi-filtering (whitelist/blacklist - include/exclude).
+- [x] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
+right now it just displays the components with byte sizes but they are not editable or anything.
+- [x] edit to studio ui

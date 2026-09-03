@@ -300,23 +300,12 @@ namespace {
 
 	// Whether `Instance.new` should offer this class.
 	//
-	// **A service is not constructible, and the table can now say so.** This
-	// field shipped hard-coded `true` with a note that nothing in the class
-	// table could express a service - one instance per world, reached by name,
-	// never minted by a script. `scene::ServiceClass()` is that expression:
-	// `Workspace` and `Lighting` derive from `Service`, so the question is an
-	// `IsA` rather than a list of names, and a tenth service never touches this
-	// function.
-	//
-	// The abstract bases - `Instance`, `BasePart`, `LuaSourceContainer` - stay
-	// constructible here, because the *run time* still accepts them:
-	// `LuauInstances.cpp` looks the name up in the class table and mints whatever it
-	// finds. `Explorer.cpp` filters them out of the class picker by name, which
-	// is a decision about a palette rather than about the binding, and copying
-	// that list into a second place is how the two would disagree later.
+	// The class table owns this answer. Runtime creation, generated overloads
+	// and Studio all read the same exact-class flag, while `IsA` keeps using the
+	// ancestry regardless of whether the named base can be created itself.
 	bool Constructible(ClassId id) {
-		const ClassId service = Classes::Find(engine::core::Name("Service"));
-		return !service.IsValid() || !Classes::IsA(id, service);
+		const ClassInfo &info = Classes::Describe(id);
+		return info.Name.IsValid() && info.Creatable;
 	}
 
 	// The classes a script reaches through `GetService`.
@@ -335,16 +324,15 @@ namespace {
 	//
 	// The bus services are *not* here - they are globals installed by the
 	// bindings rather than instances in the tree - so they are appended by the
-	// caller. Everything derived from `Service` is.
+	// caller. Every class carrying `ServiceComponent` is.
 	std::vector<ClassId> ServiceClasses() {
 		const ClassId service = Classes::Find(engine::core::Name("Service"));
-		if (!service.IsValid()) {
-			return {};
-		}
 
 		std::vector<ClassId> ids;
 		for (const ClassId id : AllClasses()) {
-			if (id != service && Classes::IsA(id, service)) {
+			const ClassInfo &info = Classes::Describe(id);
+			if (id != service && info.Set != nullptr &&
+				info.Set->Contains(engine::ecs::Components::Of<engine::scene::ServiceComponent>())) {
 				ids.push_back(id);
 			}
 		}
@@ -497,10 +485,8 @@ namespace {
 			out << ",\n";
 
 			// **Answered from the tree rather than asserted.** This shipped
-			// hard-coded `true` against the day a service arrived; services are
-			// here now, so `Constructible` asks whether the class derives from
-			// `Service` and both declaration files build their `Instance.new`
-			// overloads from the same answer.
+			// hard-coded `true` against the day a service arrived. Both declaration
+			// files now use the class table's creatable flag.
 			out << "\t\t\t\"constructible\": " << (Constructible(ids[index]) ? "true" : "false") << ",\n";
 
 			out << "\t\t\t\"components\": ";
@@ -2210,6 +2196,15 @@ declare task: {
 					   "UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean\n";
 				out << "\tfunction Clear(self): boolean\n";
 
+				// AnimationBuffer stores canonical AAN1 bytes. BakeAnimation accepts
+				// fixed little-endian keyframe records described by KeyframeBytes.
+				out << "\t-- Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, "
+					   "time f32 at 4, position xyz at 8, and quaternion xyzw at 20.\n";
+				out << "\tfunction BakeAnimation(self, duration: number, keyframes: buffer): boolean\n";
+				out << "\tfunction SetAnimationData(self, data: buffer): boolean\n";
+				out << "\tfunction GetAnimationData(self): buffer\n";
+				out << "\tfunction ClearAnimationData(self): boolean\n";
+
 				// The `EditableImage` core, declared the same way.
 				out << "\tfunction Resize(self, width: number, height: number): boolean\n";
 				out << "\tfunction DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, "
@@ -3730,6 +3725,15 @@ declare const task: {
 				out << "\tSetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; "
 					   "Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;\n";
 				out << "\tClear(): boolean;\n";
+
+				// AnimationBuffer uses ArrayBuffer here for the same owned byte block
+				// Luau exposes as buffer.
+				out << "\t/** Each keyframe is little-endian: joint u16 at 0, reserved u16 at 2, "
+					   "time f32 at 4, position xyz at 8, and quaternion xyzw at 20. */\n";
+				out << "\tBakeAnimation(duration: number, keyframes: ArrayBuffer): boolean;\n";
+				out << "\tSetAnimationData(data: ArrayBuffer): boolean;\n";
+				out << "\tGetAnimationData(): ArrayBuffer;\n";
+				out << "\tClearAnimationData(): boolean;\n";
 
 				// The `EditableImage` core, matching the Luau half.
 				out << "\tResize(width: number, height: number): boolean;\n";

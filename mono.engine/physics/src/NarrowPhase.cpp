@@ -92,10 +92,12 @@ namespace engine::physics {
 		}
 		touching.assign(pairs.size(), 0);
 
-		parallel::Jobs::For(
-			pairs.size(),
-			NARROW_GRAIN,
-			[pairs, sources, &dynamicShapes, &staticShapes, &slots, &touching](size_t begin, size_t end) {
+		{
+			ENGINE_PROFILE_CAT("physics.contact-measure", core::ProfileCategory::Physics);
+			parallel::Jobs::For(
+				pairs.size(),
+				NARROW_GRAIN,
+				[pairs, sources, &dynamicShapes, &staticShapes, &slots, &touching](size_t begin, size_t end) {
 				for (size_t at = begin; at < end; at++) {
 					const CandidateSource &source = sources[at];
 
@@ -148,19 +150,23 @@ namespace engine::physics {
 					slots[at] = manifold;
 					touching[at] = 1;
 				}
-			},
-			NARROW_GRAIN
-		);
+				},
+				NARROW_GRAIN
+			);
+		}
 
 		// **In pair order, on one thread, and that is the whole point of the
 		// flag array.** A worker appending to one manifold list would need a
 		// cursor, and the order the appends landed in would be the order the
 		// workers got there - which is exactly the dependence on the schedule
 		// `AGENTS.md` refuses, because the solver visits contacts in list order.
-		manifolds.reserve(pairs.size());
-		for (size_t at = 0; at < pairs.size(); at++) {
-			if (touching[at] != 0) {
-				manifolds.push_back(slots[at]);
+		{
+			ENGINE_PROFILE_CAT("physics.contact-compact", core::ProfileCategory::Physics);
+			manifolds.reserve(pairs.size());
+			for (size_t at = 0; at < pairs.size(); at++) {
+				if (touching[at] != 0) {
+					manifolds.push_back(slots[at]);
+				}
 			}
 		}
 	}

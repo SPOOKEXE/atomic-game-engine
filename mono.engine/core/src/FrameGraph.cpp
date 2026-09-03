@@ -102,6 +102,7 @@ namespace engine::core {
 			float PublishedMilliseconds = 0.0f;
 			float PublishedUnmarked = 0.0f;
 			float PublishedCategories[static_cast<size_t>(ProfileCategory::Count)] = {};
+			float PublishedOwners[static_cast<size_t>(ProfileOwner::Count)] = {};
 
 			// **Incremented from worker threads**, which is the whole reason
 			// the counter exists - a span opened off the owning thread is
@@ -448,6 +449,24 @@ namespace engine::core {
 		return "?";
 	}
 
+	std::string_view GetProfileOwnerName(ProfileOwner owner) {
+		switch (owner) {
+		case ProfileOwner::All:
+			return "all";
+		case ProfileOwner::Engine:
+			return "engine";
+		case ProfileOwner::Server:
+			return "server";
+		case ProfileOwner::Client:
+			return "client";
+		case ProfileOwner::Studio:
+			return "studio";
+		case ProfileOwner::Count:
+			break;
+		}
+		return "?";
+	}
+
 	void FrameGraph::SetEnabled(bool enabled) {
 		auto &state = Get();
 		if (state.Enabled == enabled) {
@@ -491,6 +510,9 @@ namespace engine::core {
 			state.PublishedUnmarked = 0.0f;
 			state.PublishedDropped = 0;
 			for (auto &total : state.PublishedCategories) {
+				total = 0.0f;
+			}
+			for (auto &total : state.PublishedOwners) {
 				total = 0.0f;
 			}
 		}
@@ -836,8 +858,17 @@ namespace engine::core {
 		for (auto &accumulated : state.PublishedCategories) {
 			accumulated = 0.0f;
 		}
+		for (auto &accumulated : state.PublishedOwners) {
+			accumulated = 0.0f;
+		}
 		for (const auto &span : state.Building) {
 			state.PublishedCategories[static_cast<size_t>(span.Category)] += span.SelfMilliseconds;
+			state.PublishedOwners[static_cast<size_t>(ProfileOwner::All)] += span.SelfMilliseconds;
+			const auto owner = static_cast<size_t>(span.Owner);
+			if (owner > static_cast<size_t>(ProfileOwner::All) &&
+				owner < static_cast<size_t>(ProfileOwner::Count)) {
+				state.PublishedOwners[owner] += span.SelfMilliseconds;
+			}
 		}
 
 		// The frame's own self time: what ran between BeginFrame and EndFrame
@@ -929,6 +960,13 @@ namespace engine::core {
 			return 0.0f;
 		}
 		return Get().PublishedCategories[static_cast<size_t>(category)];
+	}
+
+	float FrameGraph::OwnerMilliseconds(ProfileOwner owner) {
+		if (owner >= ProfileOwner::Count) {
+			return 0.0f;
+		}
+		return Get().PublishedOwners[static_cast<size_t>(owner)];
 	}
 
 	size_t FrameGraph::Dropped() {
@@ -1177,7 +1215,7 @@ namespace engine::core {
 
 	// Shared by both scope kinds. Returns the index of the span it opened, or a
 	// sentinel; the depth moves either way, so the matching Pop stays balanced.
-	size_t FrameGraph::Push(std::string_view name, ProfileCategory category) {
+	size_t FrameGraph::Push(std::string_view name, ProfileCategory category, ProfileOwner owner) {
 		auto &state = Get();
 		if (!state.Recording) {
 			return NOT_RECORDING;
@@ -1223,6 +1261,7 @@ namespace engine::core {
 				.SelfMilliseconds = 0.0f,
 				.IdleMilliseconds = 0.0f,
 				.Category = category,
+				.Owner = owner,
 			}
 		);
 		state.Open.push_back(index);
@@ -1259,8 +1298,8 @@ namespace engine::core {
 		state.Open.pop_back();
 	}
 
-	FrameGraph::Scope::Scope(std::string_view name, ProfileCategory category) {
-		Index = Push(name, category);
+	FrameGraph::Scope::Scope(std::string_view name, ProfileCategory category, ProfileOwner owner) {
+		Index = Push(name, category, owner);
 	}
 
 	FrameGraph::Scope::~Scope() {
@@ -1268,33 +1307,33 @@ namespace engine::core {
 	}
 
 	FrameGraph::CopiedScope::CopiedScope(
-		std::string_view fallback, std::string_view name, ProfileCategory category
+		std::string_view fallback, std::string_view name, ProfileCategory category, ProfileOwner owner
 	) {
 		auto &state = Get();
 		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
-			Index = Push(name, category);
+			Index = Push(name, category, owner);
 			return;
 		}
 
 		// Nothing to say yet - the caller looks a name up only when something is
 		// listening, and that is decided one frame and acted on the next.
 		if (name.empty()) {
-			Index = Push(fallback, category);
+			Index = Push(fallback, category, owner);
 			return;
 		}
 
 		// Checked before interning rather than after: a name is only worth
 		// copying when the span that keeps it is going to exist.
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
-			Index = Push(name, category);
+			Index = Push(name, category, owner);
 			return;
 		}
 
-		Index = Push(Intern(state, name), category);
+		Index = Push(Intern(state, name), category, owner);
 	}
 
 	FrameGraph::ReportedScope::ReportedScope(
-		std::string_view name, ProfileCategory category, float milliseconds
+		std::string_view name, ProfileCategory category, float milliseconds, ProfileOwner owner
 	)
 		: Milliseconds(milliseconds) {
 		auto &state = Get();
@@ -1305,7 +1344,7 @@ namespace engine::core {
 			}
 			return;
 		}
-		Index = Push(name, category);
+		Index = Push(name, category, owner);
 	}
 
 	FrameGraph::ReportedScope::~ReportedScope() {
@@ -1322,7 +1361,9 @@ namespace engine::core {
 		span.Summary = true;
 	}
 
-	void FrameGraph::Report(std::string_view name, ProfileCategory category, float milliseconds) {
+	void FrameGraph::Report(
+		std::string_view name, ProfileCategory category, float milliseconds, ProfileOwner owner
+	) {
 		auto &state = Get();
 		if (!state.Recording) {
 			return;
@@ -1354,7 +1395,7 @@ namespace engine::core {
 		// open. It never becomes anybody's parent: the work it describes
 		// happened elsewhere, and nothing recorded on this thread was inside
 		// it.
-		const size_t index = Push(name, category);
+		const size_t index = Push(name, category, owner);
 		if (index == NOT_RECORDING || index == DEPTH_ONLY) {
 			Pop(index);
 			return;
@@ -1373,20 +1414,24 @@ namespace engine::core {
 	}
 
 	void FrameGraph::ReportNamed(
-		std::string_view fallback, std::string_view name, ProfileCategory category, float milliseconds
+		std::string_view fallback,
+		std::string_view name,
+		ProfileCategory category,
+		float milliseconds,
+		ProfileOwner owner
 	) {
 		auto &state = Get();
 		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed) ||
 			name.empty()) {
-			Report(fallback, category, milliseconds);
+			Report(fallback, category, milliseconds, owner);
 			return;
 		}
 
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
-			Report(fallback, category, milliseconds);
+			Report(fallback, category, milliseconds, owner);
 			return;
 		}
 
-		Report(Intern(state, name), category, milliseconds);
+		Report(Intern(state, name), category, milliseconds, owner);
 	}
 }

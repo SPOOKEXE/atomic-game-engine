@@ -105,7 +105,7 @@ namespace studio {
 
 		// The same surface a plugin gets, so completion and execution see the
 		// same globals and members.
-		CommandHost.Surface = MakePluginSurface(*this, CommandHost);
+		CommandHost.Surface = MakePluginSurface(*this, CommandHost, store);
 		if (CommandHost.Surface != nullptr) {
 			CommandHost.Vm->SetHost(CommandHost.Surface.get());
 		}

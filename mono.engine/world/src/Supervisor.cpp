@@ -2,7 +2,9 @@
 #include <engine/world/Supervisor.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
+#include <thread>
 
 namespace engine::world {
 
@@ -75,6 +77,41 @@ namespace engine::world {
 		return plans;
 	}
 
+	std::vector<HostPlan> PlanHostsAcross(const std::vector<WorldSettings> &worlds, uint32_t hosts) {
+		std::vector<HostPlan> plans;
+		std::vector<core::Name> shared;
+
+		for (const WorldSettings &world : worlds) {
+			if (!world.Name.IsValid()) {
+				continue;
+			}
+			if (world.IsolationLevel == Isolation::Dedicated) {
+				HostPlan plan;
+				plan.Name = core::Name("host." + std::string(world.Name.Text()));
+				plan.Worlds.push_back(world.Name);
+				plan.Dedicated = true;
+				plans.push_back(std::move(plan));
+			} else {
+				shared.push_back(world.Name);
+			}
+		}
+
+		const size_t sharedHosts = std::min<size_t>(hosts, shared.size());
+		const size_t base = sharedHosts == 0 ? 0 : shared.size() / sharedHosts;
+		const size_t remainder = sharedHosts == 0 ? 0 : shared.size() % sharedHosts;
+		size_t next = 0;
+		for (size_t index = 0; index < sharedHosts; index++) {
+			HostPlan plan;
+			plan.Name = core::Name("host.shared." + std::to_string(index));
+			const size_t count = base + (index < remainder ? 1u : 0u);
+			plan.Worlds.insert(plan.Worlds.end(), shared.begin() + next, shared.begin() + next + count);
+			next += count;
+			plans.push_back(std::move(plan));
+		}
+
+		return plans;
+	}
+
 	Supervisor::Supervisor(const SupervisorSettings &settings) : Settings_(settings) {}
 
 	Supervisor::~Supervisor() {
@@ -104,10 +141,17 @@ namespace engine::world {
 		std::vector<std::string> arguments = Settings_.Arguments;
 		arguments.emplace_back("--host");
 		arguments.emplace_back(std::string(entry.Plan.Name.Text()));
+		arguments.emplace_back("--process-index");
+		arguments.emplace_back(std::to_string(entry.ProcessIndex));
 
 		for (const core::Name world : entry.Plan.Worlds) {
 			arguments.emplace_back("--world");
 			arguments.emplace_back(std::string(world.Text()));
+		}
+
+		if (entry.PhysicalCore != UINT32_MAX) {
+			arguments.emplace_back("--physical-core");
+			arguments.emplace_back(std::to_string(entry.PhysicalCore));
 		}
 
 		// Created before the spawn, because the child has to be holding its end
@@ -121,6 +165,16 @@ namespace engine::world {
 
 		if (!entry.Child.Start(Settings_.Program, arguments, std::move(pair.Remote))) {
 			return false;
+		}
+		if (entry.PhysicalCore == UINT32_MAX) {
+			ENGINE_INFO("started host '{}' as process {}", entry.Plan.Name.Text(), entry.Child.Id());
+		} else {
+			ENGINE_INFO(
+				"started host '{}' as process {} on physical core {}",
+				entry.Plan.Name.Text(),
+				entry.Child.Id(),
+				entry.PhysicalCore
+			);
 		}
 
 		entry.Link = std::make_unique<HostLink>(std::move(pair.Local), entry.Plan.Name);
@@ -258,6 +312,10 @@ namespace engine::world {
 		for (const HostPlan &plan : plans) {
 			Entry entry;
 			entry.Plan = plan;
+			entry.ProcessIndex = static_cast<uint32_t>(Entries.size()) + 1u;
+			if (Settings_.PinToPhysicalCores) {
+				entry.PhysicalCore = Settings_.FirstPhysicalCore + static_cast<uint32_t>(Entries.size());
+			}
 
 			if (Launch(entry)) {
 				entry.State = HostState::Running;
@@ -403,9 +461,31 @@ namespace engine::world {
 			}
 		}
 
+		// One deadline for the group, not one wait per host. Every child gets the
+		// same chance to write its profile and heap report, while eleven stuck
+		// children still cost at most one grace period rather than eleven.
 		for (Entry &entry : Entries) {
 			if (entry.Child.Started()) {
 				entry.Child.RequestStop();
+			}
+		}
+		const auto deadline = std::chrono::steady_clock::now() +
+							  std::chrono::duration<double>(std::max(Settings_.ShutdownSeconds, 0.0));
+		bool waiting = true;
+		while (waiting && std::chrono::steady_clock::now() < deadline) {
+			waiting = false;
+			for (Entry &entry : Entries) {
+				if (entry.Child.Started() && entry.Child.Poll().Alive()) {
+					waiting = true;
+				}
+			}
+			if (waiting) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+		}
+
+		for (Entry &entry : Entries) {
+			if (entry.Child.Started()) {
 				entry.Child.Kill();
 				entry.Child.Wait();
 			}
@@ -435,6 +515,9 @@ namespace engine::world {
 			status.Linked = entry.Link != nullptr && entry.Link->Connected();
 			status.Ready = entry.Ready;
 			status.Worlds = entry.Plan.Worlds;
+			status.ProcessId = entry.Child.Id();
+			status.PhysicalCore = entry.PhysicalCore;
+			status.ProcessIndex = entry.ProcessIndex;
 			found.push_back(std::move(status));
 		}
 
@@ -458,6 +541,9 @@ namespace engine::world {
 		status.Linked = entry->Link != nullptr && entry->Link->Connected();
 		status.Ready = entry->Ready;
 		status.Worlds = entry->Plan.Worlds;
+		status.ProcessId = entry->Child.Id();
+		status.PhysicalCore = entry->PhysicalCore;
+		status.ProcessIndex = entry->ProcessIndex;
 		return status;
 	}
 }

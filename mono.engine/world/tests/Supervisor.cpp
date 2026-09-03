@@ -15,6 +15,7 @@ using engine::world::HostPlan;
 using engine::world::HostState;
 using engine::world::Isolation;
 using engine::world::PlanHosts;
+using engine::world::PlanHostsAcross;
 using engine::world::Supervisor;
 using engine::world::SupervisorSettings;
 using engine::world::WorldSettings;
@@ -149,6 +150,24 @@ TEST_CASE("a world with no name is not placed", "[world]") {
 	REQUIRE(plans[0].Worlds.size() == 1);
 }
 
+TEST_CASE("shared worlds are balanced across an exact host count", "[world]") {
+	const auto plans = PlanHostsAcross(
+		{Shared("a"), Shared("b"), Shared("c"), Shared("d"), Shared("e"), Shared("f"), Shared("g")}, 3
+	);
+
+	REQUIRE(plans.size() == 3);
+	REQUIRE(plans[0].Worlds.size() == 3);
+	REQUIRE(plans[1].Worlds.size() == 2);
+	REQUIRE(plans[2].Worlds.size() == 2);
+}
+
+TEST_CASE("exact host planning never creates an empty host", "[world]") {
+	const auto plans = PlanHostsAcross({Shared("a"), Shared("b")}, 8);
+	REQUIRE(plans.size() == 2);
+	REQUIRE(plans[0].Worlds.size() == 1);
+	REQUIRE(plans[1].Worlds.size() == 1);
+}
+
 // --- starting -------------------------------------------------------------
 
 TEST_CASE("a supervisor starts one host per plan", "[world]") {
@@ -158,12 +177,33 @@ TEST_CASE("a supervisor starts one host per plan", "[world]") {
 
 	const auto plans = PlanHosts({Shared("a"), Shared("b"), Dedicated("c")}, 8);
 	REQUIRE(supervisor.Start(plans) == plans.size());
+	const auto hosts = supervisor.Hosts();
+	REQUIRE(hosts.size() == plans.size());
+	for (size_t index = 0; index < hosts.size(); index++) {
+		CHECK(hosts[index].ProcessIndex == index + 1);
+	}
 
 	REQUIRE(supervisor.Count() == plans.size());
 	for (const auto &status : supervisor.Hosts()) {
 		REQUIRE(status.State == HostState::Running);
 		REQUIRE(status.Restarts == 0);
 	}
+}
+
+TEST_CASE("a supervisor assigns distinct physical-core slots", "[world]") {
+	SupervisorSettings settings;
+	settings.PinToPhysicalCores = true;
+	settings.FirstPhysicalCore = 1;
+
+	FakeLauncher launcher;
+	Supervisor supervisor(settings);
+	supervisor.SetLauncher(launcher.Bind());
+	supervisor.Start(PlanHosts({Shared("a"), Shared("b")}, 1));
+
+	const auto hosts = supervisor.Hosts();
+	REQUIRE(hosts.size() == 2);
+	REQUIRE(hosts[0].PhysicalCore == 1);
+	REQUIRE(hosts[1].PhysicalCore == 2);
 }
 
 TEST_CASE("a host that will not start is marked failed rather than pretended", "[world]") {

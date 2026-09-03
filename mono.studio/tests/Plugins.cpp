@@ -11,6 +11,7 @@
 
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -685,10 +686,15 @@ TEST_CASE("toolbar grids preserve declared cells and flat plugin compatibility",
 	REQUIRE(layout.PinnedRows[1].Cells.size() == 1);
 	REQUIRE(layout.PinnedRows[1].Cells.front().Items.size() == 1);
 	CHECK(layout.PinnedRows[1].Cells.front().Items.front().Width == 180.0f);
+	CHECK(layout.PinnedRows[1].Cells.front().Items.front().ControlLabel == "A###control");
 	REQUIRE(layout.Tabs.size() == 1);
+	const std::string tabId = studio::PluginToolbarKey(plugins.front(), plugins.front().Toolbars[1], 1);
+	CHECK(layout.Tabs.front().Label == "Legacy###toolbar." + tabId);
+	CHECK(layout.Tabs.front().Context == "toolbar-context." + tabId);
 	REQUIRE(layout.Tabs.front().Rows.size() == 1);
 	REQUIRE(layout.Tabs.front().Rows.front().Cells.size() == 2);
 	CHECK(ItemsOf(layout.Tabs.front()).size() == 2);
+	CHECK(layout.VisualRows == 3);
 
 	ToolbarPreferences hidden;
 	hidden.Tabs.push_back(
@@ -1265,8 +1271,8 @@ TEST_CASE("Luau and JavaScript plugins configure the same viewport grid", "[stud
 	studio::Editor editor;
 	Store store("plugin-grid-options");
 	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
-	StartPlugins(plugins, store, [&editor](LoadedPlugin &plugin) {
-		return studio::MakePluginSurface(editor, plugin);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
 	});
 
 	REQUIRE(plugins.size() == 2);
@@ -1313,6 +1319,43 @@ TEST_CASE("a Luau plugin declares a pinned toolbar grid and label", "[studio][pl
 	CHECK(toolbar.Columns[1].Width == 240.0f);
 	CHECK(toolbar.Buttons[1].Kind == PluginControlKind::Label);
 	CHECK(toolbar.Buttons[1].Column == "right");
+}
+
+TEST_CASE("a dock widget exposes its retained DockWidgetPluginGui", "[studio][plugins][gui]") {
+	engine::scene::EnsureClassTree();
+	Folder folder;
+	folder.Add(
+		"retained-panel",
+		R"({"name": "Retained Panel"})",
+		"local widget = plugin.CreateWidget('Retained', true)\n"
+		"local root = plugin.GetWidgetGui(widget)\n"
+		"assert(root:IsA('PluginGui'))\n"
+		"local button = Instance.new('TextButton')\n"
+		"button.Name = 'Action'\n"
+		"button.Size = UDim2.fromScale(1, 1)\n"
+		"button.Parent = root\n"
+	);
+
+	studio::Editor editor;
+	Store store("plugin-retained-widget");
+	std::vector<LoadedPlugin> plugins = DiscoverPlugins(folder.Root);
+	StartPlugins(plugins, store, [&editor, &store](LoadedPlugin &plugin) {
+		return studio::MakePluginSurface(editor, plugin, store);
+	});
+
+	REQUIRE(plugins.size() == 1);
+	INFO(plugins.front().Error);
+	REQUIRE(plugins.front().Running);
+	REQUIRE(plugins.front().Widgets.size() == 1);
+	const Entity root = plugins.front().Widgets.front().Gui;
+	REQUIRE(store.Alive(root));
+	CHECK(store.IsA(root, engine::gui::GuiClass("DockWidgetPluginGui")));
+	std::vector<Entity> children;
+	store.EachChild(root, [&](Entity child) { children.push_back(child); });
+	REQUIRE(children.size() == 1);
+	CHECK(store.IsA(children.front(), engine::gui::GuiClass("TextButton")));
+	plugins.clear();
+	CHECK_FALSE(store.Alive(root));
 }
 
 TEST_CASE("a widget renders through its callback and only then", "[studio][plugins]") {

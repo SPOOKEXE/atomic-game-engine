@@ -1,5 +1,8 @@
 #include "ThreadAffinity.hpp"
 
+#include <cerrno>
+#include <cstdlib>
+#include <dirent.h>
 #include <fstream>
 #include <sched.h>
 #include <set>
@@ -50,6 +53,35 @@ namespace engine::parallel::platform {
 		CPU_ZERO(&selected);
 		CPU_SET(static_cast<int>(processor.Number), &selected);
 		return ::sched_setaffinity(0, sizeof(selected), &selected) == 0;
+	}
+
+	bool PinCurrentProcess(Processor processor) {
+		if (!processor.Valid() || processor.Group != 0 || processor.Number >= CPU_SETSIZE) {
+			return false;
+		}
+
+		cpu_set_t selected;
+		CPU_ZERO(&selected);
+		CPU_SET(static_cast<int>(processor.Number), &selected);
+		DIR *tasks = ::opendir("/proc/self/task");
+		if (tasks == nullptr) {
+			return false;
+		}
+
+		bool pinned = true;
+		while (const dirent *entry = ::readdir(tasks)) {
+			char *end = nullptr;
+			const long thread = std::strtol(entry->d_name, &end, 10);
+			if (end == entry->d_name || *end != '\0') {
+				continue;
+			}
+			if (::sched_setaffinity(static_cast<pid_t>(thread), sizeof(selected), &selected) != 0 &&
+				errno != ESRCH) {
+				pinned = false;
+			}
+		}
+		::closedir(tasks);
+		return pinned;
 	}
 
 	Processor CurrentProcessor() {

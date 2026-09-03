@@ -32,8 +32,28 @@
 #include <vector>
 
 namespace engine::core {
+	// Which product layer submitted a span. This stays separate from
+	// `ProfileCategory`: Studio can submit render work, and engine code can run
+	// beneath a Studio application scope. `All` is a view filter and is never
+	// stored on a span.
+	//
+	// @since v0.22
+	enum class ProfileOwner : uint8_t {
+		All,
+		Engine,
+		Server,
+		Client,
+		Studio,
+		Count,
+	};
 
-	// A broad owner used to group a span's self time in the frame overlay.
+	// Returns the stable display name for a profile owner, or `?` for `Count`
+	// and values outside the enum.
+	//
+	// @since v0.22
+	std::string_view GetProfileOwnerName(ProfileOwner owner);
+
+	// A broad work kind used to group a span's self time in the frame overlay.
 	enum class ProfileCategory : uint8_t {
 		Engine, // General engine work.
 		Render, // Rendering work: culling, ordering, and recording commands.
@@ -190,8 +210,11 @@ namespace engine::core {
 		// @since v0.6
 		float IdleMilliseconds = 0.0f;
 
-		// Broad owner used when accumulating category self time.
+		// Broad work kind used when accumulating category self time.
 		ProfileCategory Category = ProfileCategory::Engine;
+
+		// Product layer whose translation unit submitted this span.
+		ProfileOwner Owner = ProfileOwner::Engine;
 
 		// Whether this duration was measured somewhere else and handed over.
 		//
@@ -472,6 +495,18 @@ namespace engine::core {
 		// @return Self time in milliseconds.
 		static float CategoryMilliseconds(ProfileCategory category);
 
+		// Returns the last completed frame's accumulated self time for a product
+		// owner. `All` returns the total for every recorded owner. Invalid owners
+		// return zero.
+		//
+		// Reported work follows category-total arithmetic and can overlap the
+		// frame-owning thread, so `All` is total work rather than wall time.
+		//
+		// @param owner The product owner to total, or `All`.
+		// @return Self time in milliseconds.
+		// @since v0.22
+		static float OwnerMilliseconds(ProfileOwner owner);
+
 		// Returns the scopes dropped from the last completed frame.
 		//
 		// Drops include buffer overflow, scopes past MAXIMUM_DEPTH, and scopes
@@ -521,12 +556,18 @@ namespace engine::core {
 		//
 		// @param name         What ran. Same lifetime rule as `Scope`: a
 		//                     literal, or text outliving the frame.
-		// @param category     Broad owner used for category totals.
+		// @param category     Broad work kind used for category totals.
 		// @param milliseconds What the producer said it took. A negative value
 		//                     is ignored rather than clamped - it means the
 		//                     producer measured wrongly, and turning it into
 		//                     zero would hide that.
-		static void Report(std::string_view name, ProfileCategory category, float milliseconds);
+		// @param owner        Product layer that submitted the report.
+		static void Report(
+			std::string_view name,
+			ProfileCategory category,
+			float milliseconds,
+			ProfileOwner owner = ProfileOwner::Engine
+		);
 
 		// Records a reported span whose name is only known at runtime.
 		//
@@ -536,10 +577,15 @@ namespace engine::core {
 		//
 		// @param fallback     Stable name used when `name` is empty.
 		// @param name         Runtime name to copy.
-		// @param category     Broad owner used for category totals.
+		// @param category     Broad work kind used for category totals.
 		// @param milliseconds What the producer said it took.
+		// @param owner        Product layer that submitted the report.
 		static void ReportNamed(
-			std::string_view fallback, std::string_view name, ProfileCategory category, float milliseconds
+			std::string_view fallback,
+			std::string_view name,
+			ProfileCategory category,
+			float milliseconds,
+			ProfileOwner owner = ProfileOwner::Engine
 		);
 
 		// --- history ---------------------------------------------------------
@@ -712,8 +758,9 @@ namespace engine::core {
 			// Opens a span when a frame is being collected on this thread.
 			//
 			// @param name Stable span name storage; the text is not copied.
-			// @param category Broad owner used for category totals.
-			Scope(std::string_view name, ProfileCategory category);
+			// @param category Broad work kind used for category totals.
+			// @param owner Product layer that submitted the scope.
+			Scope(std::string_view name, ProfileCategory category, ProfileOwner owner = ProfileOwner::Engine);
 
 			// Closes the span opened by this object.
 			~Scope();
@@ -758,8 +805,14 @@ namespace engine::core {
 			//
 			// @param fallback Stable name used when `name` is empty.
 			// @param name Runtime name to copy into frame-owned storage.
-			// @param category Broad owner used for category totals.
-			CopiedScope(std::string_view fallback, std::string_view name, ProfileCategory category);
+			// @param category Broad work kind used for category totals.
+			// @param owner Product layer that submitted the scope.
+			CopiedScope(
+				std::string_view fallback,
+				std::string_view name,
+				ProfileCategory category,
+				ProfileOwner owner = ProfileOwner::Engine
+			);
 
 			// Closes the copied-name span through Scope's RAII destructor.
 			~CopiedScope() = default;
@@ -776,9 +829,15 @@ namespace engine::core {
 			// Opens a structural reported span at the current depth.
 			//
 			// @param name Stable span name storage; the text is not copied.
-			// @param category Broad owner used for category totals.
+			// @param category Broad work kind used for category totals.
 			// @param milliseconds Inclusive duration measured by the producer.
-			ReportedScope(std::string_view name, ProfileCategory category, float milliseconds);
+			// @param owner Product layer that submitted the report.
+			ReportedScope(
+				std::string_view name,
+				ProfileCategory category,
+				float milliseconds,
+				ProfileOwner owner = ProfileOwner::Engine
+			);
 
 			// Closes the span and publishes the producer's duration.
 			~ReportedScope();
@@ -803,7 +862,7 @@ namespace engine::core {
 		static constexpr size_t DEPTH_ONLY = static_cast<size_t>(-2);
 
 		// Nested classes reach these; nothing outside the header can.
-		static size_t Push(std::string_view name, ProfileCategory category);
+		static size_t Push(std::string_view name, ProfileCategory category, ProfileOwner owner);
 		static void Pop(size_t index);
 	};
 }

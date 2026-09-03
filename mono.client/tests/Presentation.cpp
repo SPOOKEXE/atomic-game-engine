@@ -946,9 +946,10 @@ namespace {
 	//
 	// @param store  The world.
 	// @param apart  How far the second pane is down +X from the first.
-	// @param second Whether to make the far pane a portal back, which is what
-	//               gives the first one a partner.
-	void MakePortalPair(Store &store, float apart, bool second) {
+	// @param second      Whether to make the far pane a portal back, which is what
+	//                    gives the first one a partner.
+	// @param assignSlots Whether the fixture stands in for the local aim pass.
+	void MakePortalPair(Store &store, float apart, bool second, bool assignSlots = true) {
 		const Entity services = engine::scene::InstallServices(store);
 
 		const auto pane = [&](std::string_view name, const Vector3 &at) {
@@ -966,7 +967,9 @@ namespace {
 			const Entity camera =
 				store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), name);
 			engine::scene::SurfaceCamera target;
-			target.Surface = slot;
+			if (assignSlots) {
+				target.Surface = slot;
+			}
 			store.Set(camera, target);
 
 			engine::scene::Portal portal;
@@ -981,6 +984,22 @@ namespace {
 			hole("FarHole", far, near, 1);
 		}
 	}
+}
+
+TEST_CASE("new portals claim no render slot before the local aim pass", "[client][presentation]") {
+	Universe universe;
+	const WorldId here = AddWorld(universe, "here");
+
+	universe.Enter(here, [](Store &store) { MakePortalPair(store, 100.0f, true, false); });
+
+	// A server snapshot can deliver several authored portals before this
+	// client's viewer exists. Their slots are derived from that local viewer,
+	// so none may masquerade as slot zero while the aim pass has no answer.
+	std::vector<engine::render::PortalView> portals;
+	universe.Enter(here, [&portals](Store &store) {
+		CHECK(client::CollectPortalViews(store, portals) == 0);
+	});
+	CHECK(portals.empty());
 }
 
 TEST_CASE("a same-world hole leaves the surface path for the recursive one", "[client][presentation]") {
@@ -1140,7 +1159,9 @@ TEST_CASE("a cross-world pane keeps its surface camera", "[client][presentation]
 		store.SetParent(stand, services);
 
 		const Entity camera = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
-		store.Set(camera, engine::scene::SurfaceCamera{});
+		engine::scene::SurfaceCamera surface;
+		surface.Surface = 0;
+		store.Set(camera, surface);
 
 		engine::scene::Portal portal;
 		portal.Destination = stand;

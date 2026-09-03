@@ -418,6 +418,12 @@ namespace engine::ecs {
 
 		// The properties this class exposes, including inherited ones.
 		std::span<const PropertyDescriptor> Properties;
+
+		// Whether authored code may create this exact class.
+		//
+		// This flag is not inherited. A virtual base such as `BasePart` is not
+		// creatable while its concrete `Part` child is.
+		bool Creatable = true;
 	};
 
 	// Registers classes and answers questions about them.
@@ -566,6 +572,15 @@ namespace engine::ecs {
 		// @param name The registered name.
 		// @return The id, or an invalid id when nothing is registered under it.
 		static ClassId Find(core::Name name);
+
+		// Changes whether authored code may create one exact class.
+		//
+		// Class registration defaults to creatable. Abstract bases and fixtures
+		// opt out during their owning module's registration.
+		//
+		// @param id        The registered class.
+		// @param creatable Whether creation is allowed.
+		static void SetCreatable(ClassId id, bool creatable);
 
 		// Reports whether `derived` is `base` or descends from it.
 		//

@@ -369,5 +369,15 @@ namespace engine::gui {
 		// Local presentation policy authored by client scripts. The vector and
 		// process-local names deliberately have no file or wire form.
 		ecs::Components::Register<SettingsMenuExtensions>("gui.SettingsMenuExtensions", nullptr, nullptr);
+
+		// Appended because component ids are registration order. Each concrete
+		// handle leaf owns only the dimensions its geometry consumes.
+		ecs::Components::Register<BoxHandleShape>("gui.BoxHandleShape");
+		ecs::Components::Register<SphereHandleShape>("gui.SphereHandleShape");
+		ecs::Components::Register<CylinderHandleShape>("gui.CylinderHandleShape");
+		ecs::Components::Register<LineHandleShape>("gui.LineHandleShape");
+		ecs::Components::Register<ConeHandleShape>("gui.ConeHandleShape");
+		ecs::Components::Register<HandlesShape>("gui.HandlesShape");
+		ecs::Components::Register<ArcHandlesShape>("gui.ArcHandlesShape");
 	}
 }

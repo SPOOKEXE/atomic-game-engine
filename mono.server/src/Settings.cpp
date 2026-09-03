@@ -168,6 +168,9 @@ namespace server {
 				);
 
 				built.Integer(
+					"server.worlds", defaults.Worlds, "Isolated worlds to distribute across processes"
+				);
+				built.Integer(
 					"server.worlds-per-host",
 					defaults.WorldsPerHost,
 					"Shared worlds per supervised host process"
@@ -325,6 +328,7 @@ namespace server {
 		options.ContentPublisherKey = std::string(Flag("server.content-publisher-key").Text());
 		options.AllowPackageHttp = Flag("server.allow-package-http").Boolean();
 
+		options.Worlds = static_cast<uint32_t>(Flag("server.worlds").Integer());
 		options.WorldsPerHost = static_cast<uint32_t>(Flag("server.worlds-per-host").Integer());
 		options.HostProgram = std::filesystem::path(Flag("server.host-program").Text());
 		options.Processes = static_cast<uint32_t>(Flag("server.processes").Integer());

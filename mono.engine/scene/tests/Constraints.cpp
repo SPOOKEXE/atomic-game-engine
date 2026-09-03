@@ -35,6 +35,7 @@ using engine::scene::ConstraintMotion;
 using engine::scene::IsDrivenJoint;
 using engine::scene::IsRigidJoint;
 using engine::scene::JointBodies;
+using engine::scene::JointInstance;
 using engine::scene::RegisterSceneClasses;
 using engine::scene::Transform;
 
@@ -58,13 +59,13 @@ namespace {
 	}
 }
 
-TEST_CASE("a weld is every axis locked and that is the default row", "[scene][constraints]") {
+TEST_CASE("the generic constraint default is every axis locked", "[scene][constraints]") {
 	RegisterSceneClasses();
 	Store store("constraints_test.weld");
 
-	const Constraint &weld = Prototype(store, "WeldConstraint");
-	CHECK(IsRigidJoint(weld));
-	CHECK_FALSE(IsDrivenJoint(weld));
+	const Constraint &joint = Prototype(store, "Constraint");
+	CHECK(IsRigidJoint(joint));
+	CHECK_FALSE(IsDrivenJoint(joint));
 }
 
 TEST_CASE("each class's prototype is the joint that class names", "[scene][constraints]") {
@@ -112,17 +113,38 @@ TEST_CASE("every constraint class descends from the base", "[scene][constraints]
 	RegisterSceneClasses();
 
 	REQUIRE(ConstraintClass().IsValid());
+	CHECK_FALSE(Classes::Describe(ConstraintClass()).Creatable);
 	for (const char *klass :
-		 {"WeldConstraint",
-		  "BallSocketConstraint",
+		 {"BallSocketConstraint",
 		  "HingeConstraint",
 		  "PrismaticConstraint",
 		  "CylindricalConstraint",
 		  "RopeConstraint",
 		  "SpringConstraint"}) {
 		INFO(klass);
-		CHECK(Classes::IsA(Classes::Find(Name(klass)), ConstraintClass()));
+		const auto concrete = Classes::Find(Name(klass));
+		CHECK(Classes::IsA(concrete, ConstraintClass()));
+		CHECK(Classes::Describe(concrete).Creatable);
 	}
+}
+
+TEST_CASE("Weld and WeldConstraint use their Roblox part-based hierarchies", "[scene][constraints]") {
+	RegisterSceneClasses();
+	Store store("constraints_test.rigid_classes");
+
+	const auto jointBase = Classes::Find(Name("JointInstance"));
+	const auto weldClass = Classes::Find(Name("Weld"));
+	const auto directClass = Classes::Find(Name("WeldConstraint"));
+	REQUIRE(jointBase.IsValid());
+	CHECK_FALSE(Classes::Describe(jointBase).Creatable);
+	CHECK(Classes::Describe(weldClass).Creatable);
+	CHECK(Classes::IsA(weldClass, jointBase));
+	CHECK_FALSE(Classes::IsA(directClass, ConstraintClass()));
+
+	const Entity weld = store.CreateInstance(weldClass, "Weld");
+	const Entity direct = store.CreateInstance(directClass, "WeldConstraint");
+	CHECK(store.Get<JointInstance>(weld) != nullptr);
+	CHECK(store.Get<engine::scene::WeldConstraint>(direct) != nullptr);
 }
 
 TEST_CASE("a stiffness with nothing free to move is still a weld", "[scene][constraints]") {
