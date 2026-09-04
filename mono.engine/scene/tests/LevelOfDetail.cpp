@@ -12,6 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
+
 TEST_SUITE_ID("engine.scene.levelofdetail")
 
 using engine::core::Name;
@@ -136,8 +138,7 @@ TEST_CASE("an area that is not a number stays at level zero", "[scene][lod]") {
 	// select the coarsest level, which is a part that quietly turns into a blob
 	// on whichever machine produced the NaN. `IsDead`'s rule.
 	const MeshCatalogue catalogue = CatalogueWith(10000);
-	const float nothing = 0.0f;
-	CHECK(SelectLevel(DecimatedLadder(), catalogue, BaseMesh(), nothing / nothing) == 0);
+	CHECK(SelectLevel(DecimatedLadder(), catalogue, BaseMesh(), std::numeric_limits<float>::quiet_NaN()) == 0);
 	CHECK(SelectLevel(DecimatedLadder(), catalogue, BaseMesh(), -5.0f) == 0);
 }
 

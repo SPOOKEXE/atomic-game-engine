@@ -20,6 +20,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -1528,6 +1529,50 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 }
 
 namespace {
+	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_";
+	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_";
+	constexpr size_t PLANET_PATCH_RESOLUTION = 17;
+	constexpr size_t PLANET_PATCH_VERTICES =
+		PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION + 4 * (PLANET_PATCH_RESOLUTION - 1);
+	constexpr size_t PLANET_PATCH_INDICES =
+		(PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6 +
+		4 * (PLANET_PATCH_RESOLUTION - 1) * 6;
+
+	size_t PlanetChunks(Store &store) {
+		size_t chunks = 0;
+		store.Each<const Visual>([&](Entity entity, const Visual &) {
+			if (store.InstanceNameOf(entity).Text().starts_with(PLANET_CHUNK_PREFIX)) {
+				chunks++;
+			}
+		});
+		return chunks;
+	}
+
+	size_t PlanetChunksAtDepth(Store &store, size_t depth) {
+		const std::string marker = "_D" + std::to_string(depth) + "_";
+		size_t chunks = 0;
+		store.Each<const Visual>([&](Entity entity, const Visual &) {
+			const std::string_view name = store.InstanceNameOf(entity).Text();
+			if (name.starts_with(PLANET_CHUNK_PREFIX) && name.find(marker) != std::string_view::npos) {
+				chunks++;
+			}
+		});
+		return chunks;
+	}
+
+	std::vector<std::array<float, 3>> PlanetVertices(Store &store) {
+		std::vector<std::array<float, 3>> points;
+		store.Each<const engine::scene::EditableMesh>([&](Entity entity, const engine::scene::EditableMesh &mesh) {
+			if (!store.InstanceNameOf(entity).Text().starts_with(PLANET_MESH_PREFIX)) {
+				return;
+			}
+			for (const engine::core::Vector3 &at : mesh.Positions) {
+				points.push_back({at.X, at.Y, at.Z});
+			}
+		});
+		std::sort(points.begin(), points.end());
+		return points;
+	}
 
 	// Every terrain chunk the scene built, as a canonical sorted list of
 	// vertex positions.
@@ -1574,6 +1619,165 @@ namespace {
 			systems.Tick(store, 1.0f / 60.0f);
 		}
 	}
+}
+
+TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", "[examples][scene][planet]") {
+	const StagedAssets assets;
+
+	Store store("planet");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Planet.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The coarse six-face globe exists before the first tick. Refinement is one
+	// transactional patch per barrier, so this bound lets the first camera
+	// selection finish without making completion depend on worker speed.
+	for (size_t tick = 0; tick < 220; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	const size_t chunks = PlanetChunks(store);
+	CHECK(chunks > 6);
+	CHECK(chunks <= 6 * 64);
+	CHECK(PlanetChunksAtDepth(store, 2) > 0);
+	CHECK(PlanetChunksAtDepth(store, 3) > 0);
+
+	const Entity lutEntity = InScene(store, "PlanetColourLUT");
+	REQUIRE(lutEntity != engine::ecs::NULL_ENTITY);
+	const auto *lut = store.Get<engine::scene::EditableImage>(lutEntity);
+	REQUIRE(lut != nullptr);
+	CHECK(lut->Width == 128);
+	CHECK(lut->Height == 4);
+
+	const engine::scene::ShaderText shader = engine::scene::ShaderTextOf(store, Name("PlanetSurface"));
+	REQUIRE(shader.Found);
+	CHECK(shader.Code.find("colourMap") != std::string::npos);
+	CHECK(shader.Code.find("oceanGlint") != std::string::npos);
+
+	size_t meshes = 0;
+	bool foundOcean = false;
+	bool foundLand = false;
+	store.Each<const engine::scene::EditableMesh>([&](Entity entity, const engine::scene::EditableMesh &mesh) {
+		const std::string_view meshName = store.InstanceNameOf(entity).Text();
+		if (!meshName.starts_with(PLANET_MESH_PREFIX)) {
+			return;
+		}
+
+		meshes++;
+		REQUIRE(mesh.Positions.size() == PLANET_PATCH_VERTICES);
+		REQUIRE(mesh.Normals.size() == PLANET_PATCH_VERTICES);
+		REQUIRE(mesh.UVs.size() == PLANET_PATCH_VERTICES);
+		REQUIRE(mesh.Indices.size() == PLANET_PATCH_INDICES);
+		for (size_t vertex = 0; vertex < PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION; vertex++) {
+			foundOcean |= mesh.UVs[vertex].Y < 0.5f;
+			foundLand |= mesh.UVs[vertex].Y > 0.5f;
+		}
+
+		const std::string partName =
+			std::string(PLANET_CHUNK_PREFIX) + std::string(meshName.substr(PLANET_MESH_PREFIX.size()));
+		const Entity part = InScene(store, partName);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *visual = store.Get<Visual>(part);
+		const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(part);
+		const auto *transform = store.Get<engine::scene::Transform>(part);
+		REQUIRE(visual != nullptr);
+		REQUIRE(appearance != nullptr);
+		REQUIRE(transform != nullptr);
+		CHECK(visual->Mesh == engine::scene::EditableMeshContentName(store, entity));
+		CHECK(appearance->ColourMap == engine::scene::EditableImageContentName(store, lutEntity));
+
+		const Entity material = store.FindFirstChild(part, "PlanetMaterial");
+		REQUIRE(material != engine::ecs::NULL_ENTITY);
+		const auto *selection = store.Get<engine::scene::MaterialRef>(material);
+		REQUIRE(selection != nullptr);
+		CHECK(selection->Shader == Name("PlanetSurface"));
+
+		// The skirt vertices follow the 17 by 17 surface grid. The surface stays
+		// outside the base radius and every cell faces away from the origin.
+		const engine::core::Vector3 centre = transform->Frame.Position;
+		for (size_t vertex = 0; vertex < PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION; vertex++) {
+			const float radius = (mesh.Positions[vertex] + centre).Magnitude();
+			CHECK(radius >= 69.99f);
+			CHECK(radius < 110.0f);
+		}
+
+		const size_t surfaceIndices =
+			(PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6;
+		for (size_t index = 0; index < surfaceIndices; index += 3) {
+			const engine::core::Vector3 a = mesh.Positions[mesh.Indices[index]] + centre;
+			const engine::core::Vector3 b = mesh.Positions[mesh.Indices[index + 1]] + centre;
+			const engine::core::Vector3 c = mesh.Positions[mesh.Indices[index + 2]] + centre;
+			CHECK((b - a).Cross(c - a).Dot(a) > 0.0f);
+		}
+	});
+	CHECK(meshes == chunks);
+	CHECK(foundOcean);
+	CHECK(foundLand);
+}
+
+TEST_CASE("the planet quadtree follows the active camera", "[examples][scene][planet]") {
+	const StagedAssets assets;
+
+	Store store("planet.active_camera");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Planet.luau"), error));
+
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "PlanetTestCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 20.0f, -150.0f})}
+	);
+	REQUIRE(store.SetParent(camera, engine::scene::WorkspaceOf(store)));
+	store.SetResource(ActiveCamera{camera});
+	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
+	CHECK(store.Resource<ActiveCamera>()->Entity == camera);
+
+	for (size_t tick = 0; tick < 260; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+	CHECK(store.Resource<ActiveCamera>()->Entity == camera);
+
+	size_t nearNegativeZ = 0;
+	size_t farPositiveZ = 0;
+	store.Each<const Visual>([&](Entity entity, const Visual &) {
+		const std::string_view name = store.InstanceNameOf(entity).Text();
+		if (name.starts_with("PlanetChunk_NZ_D3_")) {
+			nearNegativeZ++;
+		}
+		if (name.starts_with("PlanetChunk_PZ_D3_")) {
+			farPositiveZ++;
+		}
+	});
+
+	CHECK(nearNegativeZ > 0);
+	CHECK(farPositiveZ == 0);
+}
+
+TEST_CASE("the planet is a pure function of its seed and tick", "[examples][scene][planet]") {
+	const StagedAssets assets;
+	std::vector<std::array<float, 3>> first;
+	std::vector<std::array<float, 3>> second;
+
+	for (std::vector<std::array<float, 3>> *vertices : {&first, &second}) {
+		Store store("planet.determinism");
+		Scheduler systems;
+		std::string error;
+		REQUIRE(LoadScene(store, systems, ExamplePath("Planet.luau"), error));
+
+		for (size_t tick = 0; tick < 24; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
+		*vertices = PlanetVertices(store);
+	}
+
+	REQUIRE(!first.empty());
+	REQUIRE(first.size() == second.size());
+	CHECK(first == second);
 }
 
 TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][scene]") {
