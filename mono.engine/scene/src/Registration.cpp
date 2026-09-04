@@ -20,6 +20,7 @@
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -30,7 +31,9 @@
 #include <engine/scene/Terrain.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/Tools.hpp>
+#include <engine/scene/VectorField.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/scene/Wire.hpp>
 
 #include <cstddef>
@@ -57,6 +60,41 @@ namespace engine::scene {
 			auto *surfaces = static_cast<Surface *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				surfaces[index].Material = reader.ReadName();
+			}
+		}
+
+		void WriteShaderLenses(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *lenses = static_cast<const ShaderLens *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const ShaderLens &lens = lenses[index];
+				writer.WriteName(lens.Shader);
+				writer.WriteFloat(lens.Radius);
+				writer.WriteFloat(lens.InnerRadius);
+				writer.WriteFloat(lens.Falloff);
+				writer.WriteFloat(lens.Strength);
+				writer.WriteFloat(lens.Spin);
+				writer.WriteInt32(lens.Priority);
+				writer.WriteUInt8(static_cast<uint8_t>(lens.Shape));
+				writer.WriteBool(lens.Enabled);
+			}
+		}
+
+		void ReadShaderLenses(core::ByteReader &reader, void *destination, size_t count) {
+			auto *lenses = static_cast<ShaderLens *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				ShaderLens &lens = lenses[index];
+				lens.Shader = reader.ReadName();
+				lens.Radius = reader.ReadFloat();
+				lens.InnerRadius = reader.ReadFloat();
+				lens.Falloff = reader.ReadFloat();
+				lens.Strength = reader.ReadFloat();
+				lens.Spin = reader.ReadFloat();
+				lens.Priority = reader.ReadInt32();
+				reader.ReadUInt8();
+				lens.Shape = LensShape::Sphere;
+				lens.Enabled = reader.ReadBool();
+				lens.Reserved[0] = 0;
+				lens.Reserved[1] = 0;
 			}
 		}
 
@@ -1497,6 +1535,7 @@ namespace engine::scene {
 		// component at all.
 		ecs::Components::Register<Atmosphere>("scene.Atmosphere");
 		ecs::Components::Register<Clouds>("scene.Clouds");
+		ecs::Components::Register<Volume>("scene.Volume");
 
 		// **A resource, and a hand-written pair because it holds the generator's
 		// name.**
@@ -1543,6 +1582,16 @@ namespace engine::scene {
 		// handles, frames, flags and explicit padding.
 		ecs::Components::Register<JointInstance>("scene.JointInstance");
 		ecs::Components::Register<WeldConstraint>("scene.WeldConstraint");
+
+		// Authored field descriptions. The generated wire form is correct: both
+		// rows hold only vectors, scalars and explicit padding, and the transform
+		// on their `PVInstance` says where their local origin is.
+		ecs::Components::Register<VectorField2D>("scene.VectorField2D");
+		ecs::Components::Register<VectorField3D>("scene.VectorField3D");
+
+		// The shader name crosses as text. A process-local Name id in a scene
+		// file would resolve to an unrelated shader after a different load order.
+		ecs::Components::Register<ShaderLens>("scene.ShaderLens", WriteShaderLenses, ReadShaderLenses);
 	}
 
 	void RegisterSceneClasses() {
@@ -1566,6 +1615,7 @@ namespace engine::scene {
 		// built by walking everything registered under `Instance`, so a class
 		// nothing registered is a class nobody can create.
 		(void)ShaderScriptClass();
+		(void)LensShaderClass();
 		(void)EditableMeshClass();
 		(void)EditableImageClass();
 	}

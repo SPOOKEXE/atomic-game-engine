@@ -85,6 +85,8 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "ssao@0",
 				   "deferred-lighting@0",
 				   "sky@0",
+				   "volumetrics@0",
+				   "shader-lenses@0",
 				   "tonemap@0",
 				   "portal-overlay@0",
 				   "mirror-overlay@0",
@@ -95,7 +97,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 24);
+	CHECK(runner.Submitted() == 26);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -194,7 +196,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
-	CHECK(opened == 23);
+	CHECK(opened == 25);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

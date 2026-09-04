@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward load-test API. `Harness.hpp` returns this
+// run summary, whose report inputs are part of the same public contract.
+
 // Turning a pile of per-session reports into the dozen numbers an operator
 // compares between two runs.
 //

@@ -300,11 +300,23 @@ TEST_CASE("an input node cannot be given an input", "[bake][graph]") {
 
 	CHECK_FALSE(graph.Connect(builtin, source));
 	CHECK_FALSE(graph.Connect(source, builtin));
+}
 
-	// And an input kind cannot be added through the plain overload, because it
-	// would carry none of the data that makes it an input.
+TEST_CASE("only bare kinds may use the generic add path", "[bake][graph]") {
+	Graph graph;
+
+	// Only the four kinds with no configuration belong on this overload. The
+	// other kinds would silently inherit a default parameter or an invalid tag.
 	CHECK_FALSE(graph.Add(NodeKind::Source).IsValid());
 	CHECK_FALSE(graph.Add(NodeKind::Builtin).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Fit).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Scale).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Resize).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Rasterize).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Retime).IsValid());
+	CHECK_FALSE(graph.Add(NodeKind::Write).IsValid());
+	CHECK_FALSE(graph.Add(static_cast<NodeKind>(255)).IsValid());
+	CHECK(graph.NodeCount() == 0);
 }
 
 TEST_CASE("a node with no input fails the run rather than producing nothing", "[bake][graph]") {
@@ -345,6 +357,45 @@ TEST_CASE("running twice re-evaluates from the sources", "[bake][graph]") {
 	REQUIRE(Ran(graph).empty());
 	REQUIRE(graph.Baked().size() == 1);
 	CHECK(graph.Baked()[0].Bytes == first);
+}
+
+TEST_CASE("a failed run withdraws exports produced before the failure", "[bake][graph]") {
+	Graph graph;
+	const NodeId builtin = graph.AddBuiltin("engine.Cube");
+	const NodeId write = graph.AddWrite("engine.Cube");
+	graph.Add(NodeKind::Smooth);
+	REQUIRE(graph.Connect(builtin, write));
+
+	// Independent chains share one run. A later failure must not leave an
+	// earlier export available for a caller that only checks Baked().
+	CHECK_FALSE(Ran(graph).empty());
+	CHECK(graph.Baked().empty());
+	CHECK(graph.Output(write).Kind == PayloadKind::Mesh);
+}
+
+TEST_CASE("a source owns its bytes after the caller releases them", "[bake][graph]") {
+	Graph graph;
+	NodeId source;
+	{
+		std::vector<std::byte> bytes(Bytes(BMP).begin(), Bytes(BMP).end());
+		source = graph.AddSource("textures/floor.bmp", bytes);
+	}
+	const NodeId import = graph.Add(NodeKind::Import);
+	REQUIRE(graph.Connect(source, import));
+	REQUIRE(Ran(graph).empty());
+	CHECK(graph.Output(import).Texture.Width == 2);
+	CHECK(graph.Output(import).Texture.Height == 2);
+}
+
+TEST_CASE("the graph refuses one node past its allocation cap", "[bake][graph]") {
+	Graph graph;
+	for (uint32_t index = 0; index < Graph::MAXIMUM_NODES; index++) {
+		REQUIRE(graph.Add(NodeKind::Smooth).IsValid());
+	}
+
+	CHECK(graph.NodeCount() == Graph::MAXIMUM_NODES);
+	CHECK_FALSE(graph.Add(NodeKind::Smooth).IsValid());
+	CHECK(graph.NodeCount() == Graph::MAXIMUM_NODES);
 }
 
 TEST_CASE("an unknown node is not connectable", "[bake][graph]") {

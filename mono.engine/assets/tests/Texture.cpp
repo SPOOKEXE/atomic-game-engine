@@ -218,6 +218,23 @@ TEST_CASE("a truncated file is refused rather than half read", "[assets][texture
 	CHECK(read.Pixels.empty());
 }
 
+TEST_CASE("a late texture truncation leaves the destination alone", "[assets][texture]") {
+	TextureData held = Made(2, 2, TextureFormat::R8);
+	held.Pixels[0] = std::byte{0x5A};
+
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, Made(8, 8)));
+	const std::span<const std::byte> complete = writer.Bytes();
+	const std::span<const std::byte> truncated(complete.data(), complete.size() - 1);
+	ByteReader reader(truncated);
+	CHECK_FALSE(Texture::Read(reader, held));
+
+	CHECK(held.Width == 2);
+	CHECK(held.Height == 2);
+	CHECK(held.Format == TextureFormat::R8);
+	CHECK(held.Pixels[0] == std::byte{0x5A});
+}
+
 // --- flipbook layout, added at v0.10 ------------------------------------------
 
 TEST_CASE("a flipbook's grid, frame count and rate round-trip", "[assets][texture]") {

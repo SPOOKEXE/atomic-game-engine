@@ -16,7 +16,9 @@
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/VectorField.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -25,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <set>
 
 TEST_SUITE_ID("engine.effects.particles")
 
@@ -536,6 +539,62 @@ TEST_CASE("acceleration moves a particle and drag slows it", "[effects]") {
 	REQUIRE(fallen.Y < born.Y);
 }
 
+TEST_CASE("a particle samples the nearest vector field without an ECS lookup per particle", "[effects]") {
+	Store store("effects_field");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+
+	engine::scene::RegisterSceneClasses();
+	const Entity field =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("VectorField3D")));
+	store.SetParent(part, field);
+	engine::scene::VectorField3D *description = store.GetMutable<engine::scene::VectorField3D>(field);
+	REQUIRE(description != nullptr);
+	description->Vector = Vector3{8.0f, 0.0f, 0.0f};
+	description->LocalSpace = false;
+
+	Settings(store, emitter).Rate = 1.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Shape = ParticleShape::Box;
+
+	Frame(store, 0.1f);
+	Frame(store, 0.1f);
+
+	const ParticleSystem *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Statistics.Live > 0);
+	CHECK(system->States[0].Velocity.X == Catch::Approx(0.8f));
+	CHECK(system->States[0].Velocity.Y == 0.0f);
+	CHECK(system->States[0].Velocity.Z == 0.0f);
+}
+
+TEST_CASE("adding a field to an emitter ancestor refreshes retained particle blocks", "[effects]") {
+	Store store("effects_field_refresh");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Shape = ParticleShape::Box;
+
+	Frame(store, 0.1f);
+	ParticleSystem *system = store.ResourceMutable<ParticleSystem>();
+	REQUIRE(system != nullptr);
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	REQUIRE(system->Blocks[slot].ForceField.Source == engine::ecs::NULL_ENTITY);
+
+	engine::scene::VectorField3D field;
+	field.Vector = Vector3{8.0f, 0.0f, 0.0f};
+	field.LocalSpace = false;
+	store.SetComponent(part, engine::ecs::Components::Of<engine::scene::VectorField3D>(), &field);
+
+	Frame(store, 0.1f);
+	REQUIRE(system->Blocks[slot].ForceField.Source == part);
+	CHECK(system->States[0].Velocity.X == Catch::Approx(0.8f));
+}
+
 TEST_CASE("distance emission follows parent travel rather than frame time", "[effects]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -761,6 +820,40 @@ TEST_CASE("a flipbook runs over the particle's own life under OneShot", "[effect
 	const uint32_t cell = cellOf(system->Instances[0].RotationAndCell);
 	REQUIRE(cell > 0);
 	REQUIRE(cell < cells);
+}
+
+TEST_CASE("a flipbook can start every particle at a deterministic random phase", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Rate = 120.0f;
+	Settings(store, emitter).Lifetime = NumberRange{5.0f, 5.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid4x4;
+	Settings(store, emitter).FlipbookFrames = 16;
+	Settings(store, emitter).FlipbookStartRandom = true;
+
+	// The first-step cells are the test. A later animation can hide a failed
+	// start phase because ordinary playback has already moved every particle.
+	Frame(store, 0.1f);
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Statistics.Live > 8);
+
+	std::set<uint32_t> cells;
+	for (uint32_t index = 0; index < system->Statistics.Live; index++) {
+		cells.insert(system->Instances[index].RotationAndCell >> 16);
+	}
+	CHECK(cells.size() > 1);
+	const uint32_t initial = system->Instances[0].RotationAndCell >> 16;
+
+	// A randomized start is a phase, not the Random playback mode: each Loop
+	// particle still advances after birth.
+	Settings(store, emitter).FlipbookPlayback = FlipbookMode::Loop;
+	Settings(store, emitter).FlipbookFramerate = NumberRange{4.0f, 4.0f};
+	Frame(store, 0.25f);
+
+	const uint32_t advanced = system->Instances[0].RotationAndCell >> 16;
+	CHECK(advanced == (initial + 1) % 16);
 }
 
 // --- the roadmap's number ----------------------------------------------------

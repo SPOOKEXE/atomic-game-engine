@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Asset hosts retain this
+// complete texture residency contract.
+
 // Renderer textures are named device resources with one shared sampler.
 // Mipmaps are not represented by the current asset format.
 //

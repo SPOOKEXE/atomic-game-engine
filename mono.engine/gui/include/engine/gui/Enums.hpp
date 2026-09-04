@@ -208,6 +208,61 @@ namespace engine::gui {
 		XY = 3,
 	};
 
+	// Which end of a node wire a port owns. A connection always starts at an
+	// output and ends at an input, so one enum makes invalid directions a
+	// refusal at the graph boundary instead of a renderer special case.
+	//
+	// @since v0.23
+	enum class NodePortDirection : uint8_t {
+		Input = 0,
+		Output = 1,
+	};
+
+	// How a node behaves when its evaluator is not used. `Enabled` is separate:
+	// disabling a node is execution policy, while `Bypass` names the compatible
+	// input and output the graph runtime should pass through.
+	//
+	// @since v0.23
+	enum class NodeBypassMode : uint8_t {
+		None = 0,
+		Bypass = 1,
+	};
+
+	// Which edge an automatically-positioned terminal occupies. Connection role
+	// remains `NodePortDirection`; an edge is presentation only and must never
+	// change whether a port may be linked.
+	//
+	// @since v0.23
+	enum class NodePortEdge : uint8_t {
+		Top = 0,
+		Bottom = 1,
+		Corner = 2,
+	};
+
+	// How a node places its input ports that do not have manually-authored
+	// positions. `Separate` spreads ports across their requested edge, while
+	// `Squash` packs them from that edge's first corner.
+	//
+	// @since v0.23
+	enum class InputPortLayout : uint8_t {
+		Manual = 0,
+		Separate = 1,
+		Squash = 2,
+	};
+
+	// How a group derives its rectangle from the nodes it directly contains.
+	//
+	// `AroundEdge` preserves an authored margin around the outermost nodes.
+	// `SmallestSpace` removes that margin, which is useful when a graph editor
+	// is compacting an automatically-made group.
+	//
+	// @since v0.23
+	enum class NodeGroupLayout : uint8_t {
+		Manual = 0,
+		AroundEdge = 1,
+		SmallestSpace = 2,
+	};
+
 	// Whether a scrolling frame lets a drag pull the canvas past its end.
 	//
 	// All three members are consumed by the input router and spring motion.
@@ -440,6 +495,11 @@ namespace engine::gui {
 	const char *Describe(AspectType value);
 	const char *Describe(DominantAxis value);
 	const char *Describe(ScrollingDirection value);
+	const char *Describe(NodePortDirection value);
+	const char *Describe(NodeBypassMode value);
+	const char *Describe(NodePortEdge value);
+	const char *Describe(InputPortLayout value);
+	const char *Describe(NodeGroupLayout value);
 	const char *Describe(StrokeMode value);
 
 	// **No nested `//@{` here, and that is not a style choice.** Doxygen's member

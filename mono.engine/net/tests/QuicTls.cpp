@@ -1,3 +1,4 @@
+#include <engine/core/Random.hpp>
 #include <engine/net/quic/Tls.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -12,7 +13,9 @@
 
 TEST_SUITE_ID("engine.net.quic.tls")
 TEST_DEPENDS("engine.net.quic.crypto")
+TEST_DEPENDS("engine.core.random")
 
+using engine::core::Random;
 using engine::net::quic::Level;
 using engine::net::quic::Tls;
 using engine::net::quic::TlsSettings;
@@ -241,6 +244,24 @@ TEST_CASE("a flight split byte by byte still completes", "[net][quic][tls]") {
 	);
 }
 
+TEST_CASE("moving a live handshake transfers its queued flight", "[net][quic][tls]") {
+	auto [client, server] = Pair();
+	REQUIRE(client.Stack->Begin());
+
+	// A connection may move when its owner reallocates. The opening flight and
+	// ephemeral state must follow it, while the source remains permanently
+	// unusable after its secrets were wiped.
+	Tls first(std::move(*client.Stack));
+	CHECK(client.Stack->Failed());
+	client.Stack = std::move(first);
+	CHECK(first.Failed());
+
+	client.Drain();
+	REQUIRE(Exchange(client, server));
+	CHECK(client.Stack->Complete());
+	CHECK(server.Stack->Complete());
+}
+
 TEST_CASE("two handshakes with one identity share no keys", "[net][quic][tls]") {
 	// The identity is long-lived and the agreement is not. If a second
 	// connection derived the same traffic secrets, recording one and replaying it
@@ -362,6 +383,57 @@ TEST_CASE("a truncated ClientHello is refused rather than half-read", "[net][qui
 	// has not all arrived looks like. Nothing has been acted on.
 	CHECK_FALSE(server.Stack->Complete());
 	CHECK(server.Stack->Pending().empty());
+}
+
+TEST_CASE("incomplete CRYPTO input has a bounded retained size", "[net][quic][tls]") {
+	TlsSettings settings;
+	settings.Seed = Seed(1);
+	settings.HasSeed = true;
+	Tls stack(Tls::Role::Server, settings);
+
+	// The header claims a record too large for the parser's retained-input
+	// budget. Exactly one budget's worth can be incomplete, but the next byte
+	// must refuse before vector growth can continue.
+	std::vector<std::byte> incomplete(Tls::MAXIMUM_INCOMING_BYTES, std::byte{0});
+	incomplete[0] = std::byte{1};
+	incomplete[1] = std::byte{0x0f};
+	incomplete[2] = std::byte{0xff};
+	incomplete[3] = std::byte{0xff};
+	CHECK(stack.Receive(Level::Initial, incomplete));
+	CHECK_FALSE(stack.Failed());
+
+	const std::array<std::byte, 1> extra{std::byte{0}};
+	CHECK_FALSE(stack.Receive(Level::Initial, extra));
+	CHECK(stack.Failed());
+	CHECK(stack.Alert() == 50); // decode_error, RFC 8446 section 6.2.
+}
+
+TEST_CASE("arbitrary TLS CRYPTO input refuses safely", "[.][sandbox][fuzz]") {
+	// A TLS record has nested variable-length fields, so targeted cases do not
+	// cover the combinations a hostile peer can form. Each seed starts from a
+	// fresh server and makes any decoder failure reproducible.
+	constexpr uint32_t ITERATIONS = 2'000;
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+
+		TlsSettings settings;
+		settings.Seed = Seed(1);
+		settings.HasSeed = true;
+		Tls stack(Tls::Role::Server, settings);
+
+		const size_t size = Random::Bits(iteration, 1) % 4096;
+		std::vector<std::byte> data(size);
+		for (size_t index = 0; index < data.size(); index++) {
+			data[index] = static_cast<std::byte>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		const Level level = static_cast<Level>(Random::Bits(iteration, 7) % 3);
+		const bool accepted = stack.Receive(level, data);
+		if (!accepted) {
+			CHECK(stack.Failed());
+			CHECK_FALSE(stack.Receive(level, {}));
+		}
+	}
 }
 
 TEST_CASE("a ClientHello with a broken extension block is refused", "[net][quic][tls]") {

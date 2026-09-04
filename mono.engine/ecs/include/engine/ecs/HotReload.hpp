@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. Reload tooling consumes this
+// complete contract without reimplementing storage migration policy.
+
 // In-place component data migration for a running world.
 //
 // Native layouts remain fixed for the loaded binary. A reload migrates values

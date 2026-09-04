@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Plugin hosts consume this
+// complete extension contract.
+
 // Native C++ plugins and isolated script plugins hosted by Studio.
 //
 // Native definitions own editor adapters and may publish value-shaped bindings.

@@ -1,7 +1,9 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Broadphase.hpp>
@@ -15,6 +17,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 
@@ -48,6 +51,63 @@ namespace client {
 	using engine::scene::Visual;
 
 	namespace {
+		// Local prediction is transient client state. A saved replica must
+		// restart from an authority tick instead of resuming a stale input run.
+		void WriteLocalPlayerPredictions(engine::core::ByteWriter &, const void *, size_t) {}
+
+		void ReadLocalPlayerPredictions(engine::core::ByteReader &, void *destination, size_t count) {
+			auto *predictions = static_cast<LocalPlayerPrediction *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				predictions[index] = {};
+			}
+		}
+
+		void AdvanceLocalPlayerPrediction(
+			LocalPlayerPrediction &prediction, const engine::game::MoveInput &move, float delta
+		) {
+			prediction.Humanoid.MoveDirection = move.Direction;
+			prediction.Linear.X = move.Direction.X * prediction.Humanoid.WalkSpeed;
+			prediction.Linear.Z = move.Direction.Z * prediction.Humanoid.WalkSpeed;
+
+			if (move.Jump && prediction.Humanoid.Grounded) {
+				prediction.Linear.Y = prediction.Humanoid.JumpSpeed;
+				prediction.Humanoid.Grounded = false;
+			}
+
+			prediction.Frame =
+				engine::physics::Advanced(prediction.Frame, prediction.Linear, prediction.Angular, delta);
+		}
+
+		std::optional<CFrame> PredictedFrame(const Store &store, Entity entity) {
+			const auto *prediction = store.Resource<LocalPlayerPrediction>();
+			if (prediction == nullptr || !prediction->Active) {
+				return std::nullopt;
+			}
+			if (entity == prediction->Root) {
+				return prediction->Frame;
+			}
+			const auto *limb = store.Get<engine::scene::CharacterLimb>(entity);
+			if (limb != nullptr && limb->Root == prediction->Root) {
+				return prediction->Frame * limb->Offset;
+			}
+			return std::nullopt;
+		}
+
+		void OffsetReplicaCameraForPrediction(Store &store) {
+			const auto *prediction = store.Resource<LocalPlayerPrediction>();
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			if (prediction == nullptr || !prediction->Active || active == nullptr) {
+				return;
+			}
+			const auto *authoritative = store.Get<Transform>(prediction->Root);
+			auto *camera = store.GetMutable<Transform>(active->Entity);
+			if (authoritative == nullptr || camera == nullptr) {
+				return;
+			}
+			const engine::core::Vector3 offset = prediction->Frame.Position - authoritative->Frame.Position;
+			camera->Frame = CFrame{camera->Frame.Position + offset, camera->Frame.Rotation()};
+		}
+
 		// Derives render poses from received ticks; interpolated poses never enter ECS.
 		// Surface cameras are aimed from this client's viewer.
 		void AimReplicatedSurfaces(Store &store) {
@@ -189,13 +249,17 @@ namespace client {
 					}
 
 					std::optional<CFrame> interpolated = buffer->Sample(entity);
+					const std::optional<CFrame> predicted = PredictedFrame(store, entity);
+					if (predicted.has_value()) {
+						interpolated = predicted;
+					}
 
 					// **Only a pose the buffer produced is guessed forward.**
 					// Falling back to the live row already means this client has
 					// no history for the entity - a row that arrived this frame,
 					// or the predicted range - and neither is something to
 					// extrapolate.
-					if (reckonSeconds > 0.0 && interpolated.has_value()) {
+					if (reckonSeconds > 0.0 && !predicted.has_value() && interpolated.has_value()) {
 						interpolated = DeadReckon(store, entity, *interpolated, bounds, reckonSeconds);
 					}
 
@@ -302,6 +366,9 @@ namespace client {
 
 		// Register client resources before their component ids are minted.
 		RegisterClientComponents();
+		engine::ecs::Components::Register<LocalPlayerPrediction>(
+			"client.LocalPlayerPrediction", WriteLocalPlayerPredictions, ReadLocalPlayerPredictions
+		);
 
 		// **And the replication module's own, which nothing was doing.** A
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
@@ -363,6 +430,7 @@ namespace client {
 			(void)engine::scene::FollowOwnCharacter(store);
 			(void)engine::physics::UpdatePoppercam(store);
 			(void)engine::scene::PlaceCamera(store);
+			OffsetReplicaCameraForPrediction(store);
 		});
 
 		// **Posed here and never stepped here.** A character's limbs hang off a
@@ -501,5 +569,76 @@ namespace client {
 		// rather than rebuilding moving colliders at the presentation frame rate,
 		// so the local poppercam queries the same geometry the replica draws.
 		engine::physics::SyncBroadphase(store);
+	}
+
+	void ReconcileLocalPlayerPrediction(
+		Store &store, uint64_t tick, std::span<const engine::replication::Input> unconfirmed
+	) {
+		if (tick == 0) {
+			return;
+		}
+
+		if (!store.HasResource<LocalPlayerPrediction>()) {
+			store.SetResource(LocalPlayerPrediction{});
+		}
+		LocalPlayerPrediction &prediction = *store.ResourceMutable<LocalPlayerPrediction>();
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		if (local == nullptr) {
+			prediction = {};
+			return;
+		}
+
+		const Entity character = engine::scene::CharacterOf(store, local->Instance);
+		const auto *rig = store.Get<engine::scene::Character>(character);
+		if (rig == nullptr) {
+			prediction = {};
+			return;
+		}
+		const auto *frame = store.Get<Transform>(rig->Root);
+		const auto *humanoid = store.Get<engine::scene::Humanoid>(rig->Humanoid);
+		if (frame == nullptr || humanoid == nullptr) {
+			prediction = {};
+			return;
+		}
+
+		if (prediction.Active && prediction.AuthorityTick == tick && prediction.Player == local->Instance &&
+			prediction.Root == rig->Root) {
+			return;
+		}
+
+		prediction = {};
+		prediction.Player = local->Instance;
+		prediction.Root = rig->Root;
+		prediction.Frame = frame->Frame;
+		prediction.Humanoid = *humanoid;
+		prediction.AuthorityTick = tick;
+		prediction.Active = true;
+		if (const auto *motion = store.Get<engine::scene::Motion>(rig->Root); motion != nullptr) {
+			prediction.Linear = motion->Linear;
+			prediction.Angular = motion->Angular;
+		}
+
+		if (auto *buffer = store.ResourceMutable<SnapshotBuffer>(); buffer != nullptr) {
+			buffer->Predict(prediction.Root);
+		}
+
+		const float delta = store.Time().Delta;
+		for (const engine::replication::Input &input : unconfirmed) {
+			if (input.Tick <= tick) {
+				continue;
+			}
+			engine::game::MoveInput move;
+			if (engine::game::DecodeMoveInput(input.Bytes, move)) {
+				AdvanceLocalPlayerPrediction(prediction, move, delta);
+			}
+		}
+	}
+
+	void PredictLocalPlayerMove(Store &store, const engine::game::MoveInput &move, float delta) {
+		auto *prediction = store.ResourceMutable<LocalPlayerPrediction>();
+		if (prediction == nullptr || !prediction->Active) {
+			return;
+		}
+		AdvanceLocalPlayerPrediction(*prediction, move, delta);
 	}
 }

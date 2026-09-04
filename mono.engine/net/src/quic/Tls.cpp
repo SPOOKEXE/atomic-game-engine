@@ -600,6 +600,9 @@ namespace engine::net::quic {
 			return false;
 		}
 		auto &buffer = Incoming[static_cast<size_t>(level)];
+		if (data.size() > MAXIMUM_INCOMING_BYTES - buffer.size()) {
+			return Refuse(ALERT_DECODE_ERROR, "incomplete handshake input exceeds the retention limit");
+		}
 		buffer.insert(buffer.end(), data.begin(), data.end());
 		return ConsumeMessages(level);
 	}

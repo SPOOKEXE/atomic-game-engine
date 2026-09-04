@@ -414,7 +414,11 @@ namespace engine::script {
 	}
 
 	bool CallJsHostCallback(
-		JSContext *context, HostCallback callback, HostArguments arguments, std::string &error
+		JSContext *context,
+		HostCallback callback,
+		HostArguments arguments,
+		std::string &error,
+		HostValue *output
 	) {
 		JsContext &bound = JsOf(context);
 		if (!callback.Valid()) {
@@ -463,6 +467,11 @@ namespace engine::script {
 			error = ExceptionMessage(context);
 			ENGINE_ERROR("host callback failed: {}", error);
 			JS_FreeValue(context, result);
+			return false;
+		}
+		if (output != nullptr && !ReadHostValue(context, result, *output, 0)) {
+			JS_FreeValue(context, result);
+			error = "host callback returned a value with no host representation";
 			return false;
 		}
 		JS_FreeValue(context, result);

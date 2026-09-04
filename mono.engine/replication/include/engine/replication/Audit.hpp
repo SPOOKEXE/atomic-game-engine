@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward replication API. Replication hosts retain
+// this complete audit contract for diagnostics and tooling.
+
 // Anti-entropy over the replicated world: what the two ends hash, and how much
 // of it they hash at a time.
 //

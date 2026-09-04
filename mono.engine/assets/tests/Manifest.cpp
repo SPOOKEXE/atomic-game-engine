@@ -386,6 +386,77 @@ TEST_CASE("a truncated manifest is refused", "[assets][manifest]") {
 	}
 }
 
+TEST_CASE("short manifest rows are refused before their counts reserve", "[assets][manifest]") {
+	// These are each within the parser's explicit numeric ceiling. Their only
+	// contradiction is that the buffer cannot contain even the shortest rows,
+	// so accepting the count long enough to reserve turns a tiny hostile file
+	// into a large allocation.
+	constexpr uint32_t COUNT = 1'000'000;
+
+	SECTION("assets") {
+		ByteWriter writer;
+		writer.WriteUInt32(Manifest::MAGIC);
+		writer.WriteUInt16(Manifest::VERSION);
+		writer.WriteUInt32(COUNT);
+
+		ByteReader reader(writer.Bytes());
+		CHECK_FALSE(Manifest::Read(reader).has_value());
+		CHECK(reader.Failed());
+	}
+
+	SECTION("chunks") {
+		ByteWriter writer;
+		writer.WriteUInt32(Manifest::MAGIC);
+		writer.WriteUInt16(Manifest::VERSION);
+		writer.WriteUInt32(1);
+		writer.WriteString("a");
+		writer.WriteUInt8(static_cast<uint8_t>(AssetKind::Data));
+		writer.WriteRaw(ContentHash{}.Digest.data(), ContentHash::BYTES);
+		writer.WriteUInt64(0);
+		writer.WriteUInt32(COUNT);
+
+		ByteReader reader(writer.Bytes());
+		CHECK_FALSE(Manifest::Read(reader).has_value());
+		CHECK(reader.Failed());
+	}
+
+	SECTION("bundles") {
+		ByteWriter writer;
+		writer.WriteUInt32(Manifest::MAGIC);
+		writer.WriteUInt16(Manifest::VERSION);
+		writer.WriteUInt32(0);
+		writer.WriteUInt32(COUNT);
+
+		ByteReader reader(writer.Bytes());
+		CHECK_FALSE(Manifest::Read(reader).has_value());
+		CHECK(reader.Failed());
+	}
+
+	SECTION("bundle members") {
+		Manifest source;
+		const ContentHash empty = source.AddAsset("a", AssetKind::Data, {});
+
+		ByteWriter writer;
+		writer.WriteUInt32(Manifest::MAGIC);
+		writer.WriteUInt16(Manifest::VERSION);
+		writer.WriteUInt32(1);
+		writer.WriteString("a");
+		writer.WriteUInt8(static_cast<uint8_t>(AssetKind::Data));
+		writer.WriteRaw(empty.Digest.data(), ContentHash::BYTES);
+		writer.WriteUInt64(0);
+		writer.WriteUInt32(0);
+		writer.WriteUInt32(1);
+		writer.WriteRaw(ContentHash{}.Digest.data(), ContentHash::BYTES);
+		writer.WriteUInt64(0);
+		writer.WriteUInt32(COUNT);
+		writer.WriteRaw(ContentHash{}.Digest.data(), ContentHash::BYTES);
+
+		ByteReader reader(writer.Bytes());
+		CHECK_FALSE(Manifest::Read(reader).has_value());
+		CHECK(reader.Failed());
+	}
+}
+
 TEST_CASE("a manifest whose root does not match its chunks is refused", "[assets][manifest]") {
 	Manifest manifest;
 	manifest.AddAsset("a", AssetKind::Data, {Chunk("one"), Chunk("two")});

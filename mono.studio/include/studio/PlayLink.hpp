@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Play-mode integrations use
+// this complete local session contract.
+
 // The client half of a Play run, in the editor's own process.
 //
 // **`RunMode::Play` has claimed since v0.7 to be "both halves in one process,

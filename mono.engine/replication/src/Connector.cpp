@@ -550,8 +550,6 @@ namespace engine::replication {
 	}
 
 	bool Connector::Submit(uint64_t tick, std::span<const std::byte> bytes, double nowSeconds) {
-		Prediction_.Record(tick, bytes);
-
 		if (Port == nullptr) {
 			return false;
 		}
@@ -562,7 +560,15 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		WriteMessage(writer, input);
-		return Port->Send(writer.Bytes(), nowSeconds);
+		if (!Port->Send(writer.Bytes(), nowSeconds)) {
+			return false;
+		}
+
+		// Reconciliation may replay only inputs the authority could have
+		// received. Recording a budget-refused packet would advance the local
+		// prediction through an action the server never had the chance to apply.
+		Prediction_.Record(tick, bytes);
+		return true;
 	}
 
 	bool Connector::SubmitState(const Delta &delta, double nowSeconds) {

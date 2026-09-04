@@ -75,14 +75,14 @@ const uint INSTANCE_SLOT = 6u;
 // when layout or material grouping changes. Staging all of it every frame is
 // thirty-nine megabytes at the roadmap's hundred thousand emitters, which is
 // more than the whole particle pool used to cost. See `particle-scatter.comp`.
-const uint PARAM_WORDS = 50u;
+const uint PARAM_WORDS = 70u;
 const uint PARAM_ROTATION = 0u;  // xyzw, the emitter frame's turn
 const uint PARAM_POSITION = 4u;  // xyz
 const uint PARAM_ACCELERATION = 7u;  // xyz
 const uint PARAM_DRAG = 10u;
 const uint PARAM_FIRST = 11u;  // this block's first slot in the state pool
 const uint PARAM_CAPACITY = 12u;
-const uint PARAM_FLAGS = 13u;  // bit 0 locked, bit 1 the cell is fixed at spawn
+const uint PARAM_FLAGS = 13u;  // bit 0 locked, bit 1 fixed cell, bit 2 random playback phase
 const uint PARAM_CELLS = 14u;
 const uint PARAM_PLAYBACK = 15u;  // 0 loop, 1 one-shot, 2 ping-pong
 const uint PARAM_RATE = 16u;  // flipbook frames a second
@@ -93,6 +93,15 @@ const uint PARAM_NOISE_FREQUENCY = 20u;
 const uint PARAM_NOISE_SCROLL = 21u;
 const uint PARAM_RADIAL = 22u;
 const uint PARAM_TANGENTIAL = 23u;
+const uint PARAM_FIELD_ROTATION = 50u;
+const uint PARAM_FIELD_POSITION = 54u;
+const uint PARAM_FIELD_VECTOR = 57u;
+const uint PARAM_FIELD_HALF = 60u;
+const uint PARAM_FIELD_AXIS = 63u;
+const uint PARAM_FIELD_RADIAL = 66u;
+const uint PARAM_FIELD_TANGENTIAL = 67u;
+const uint PARAM_FIELD_FALLOFF = 68u;
+const uint PARAM_FIELD_FLAGS = 69u;
 
 // The four sixteen-sample curves, in a table indexed by block. Declared as
 // words rather than floats because the colour curve is packed RGB and the other
@@ -178,6 +187,64 @@ vec3 ProceduralForce(uint base, vec3 position, float age, vec3 origin, vec4 turn
 	return force;
 }
 
+float FieldAxisWeight(float coordinate, float halfExtent, float falloff) {
+	if (!(halfExtent > 0.0)) {
+		return 1.0;
+	}
+	float distance = halfExtent - abs(coordinate);
+	if (!(distance >= 0.0)) {
+		return 0.0;
+	}
+	return falloff > 0.0 ? clamp(distance / falloff, 0.0, 1.0) : 1.0;
+}
+
+vec3 FieldUnit(vec3 value) {
+	float squared = dot(value, value);
+	return squared > 0.0 ? value * inversesqrt(squared) : vec3(0.0);
+}
+
+vec3 FieldForce(uint base, vec3 worldPosition) {
+	uint flags = BlockUint(base, PARAM_FIELD_FLAGS);
+	if ((flags & 1u) == 0u) {
+		return vec3(0.0);
+	}
+
+	bool localSpace = (flags & 2u) != 0u;
+	bool twoDimensional = (flags & 4u) != 0u;
+	vec4 turn = vec4(
+		BlockFloat(base, PARAM_FIELD_ROTATION),
+		BlockFloat(base, PARAM_FIELD_ROTATION + 1u),
+		BlockFloat(base, PARAM_FIELD_ROTATION + 2u),
+		BlockFloat(base, PARAM_FIELD_ROTATION + 3u)
+	);
+	vec3 offset = worldPosition - BlockVector(base, PARAM_FIELD_POSITION);
+	vec3 point = localSpace ? TurnedBy(vec4(-turn.xyz, turn.w), offset) : offset;
+	vec3 halfExtent = BlockVector(base, PARAM_FIELD_HALF);
+	float falloff = BlockFloat(base, PARAM_FIELD_FALLOFF);
+	float weight = min(
+		FieldAxisWeight(point.x, halfExtent.x, falloff),
+		FieldAxisWeight(point.z, halfExtent.z, falloff)
+	);
+	if (!twoDimensional) {
+		weight = min(weight, FieldAxisWeight(point.y, halfExtent.y, falloff));
+	}
+	if (!(weight > 0.0)) {
+		return vec3(0.0);
+	}
+
+	vec3 direction = point;
+	if (twoDimensional) {
+		direction.y = 0.0;
+	}
+	vec3 radial = FieldUnit(direction);
+	vec3 axis = twoDimensional ? vec3(0.0, 1.0, 0.0) : FieldUnit(BlockVector(base, PARAM_FIELD_AXIS));
+	vec3 force = BlockVector(base, PARAM_FIELD_VECTOR) + radial * BlockFloat(base, PARAM_FIELD_RADIAL);
+	if (dot(axis, axis) > 0.0 && BlockFloat(base, PARAM_FIELD_TANGENTIAL) != 0.0) {
+		force += FieldUnit(cross(axis, radial)) * BlockFloat(base, PARAM_FIELD_TANGENTIAL);
+	}
+	return (localSpace ? TurnedBy(turn, force) : force) * weight;
+}
+
 // Where one age falls in a sixteen-sample curve. One cursor serves all four,
 // which is the same saving the host-side step takes: resolving the pair of
 // samples and the fraction is most of what asking a curve costs.
@@ -226,12 +293,9 @@ uint PackSize(float width, float height) {
 	return w | (h << 16u);
 }
 
-// Loop, one-shot and ping-pong. **Random is absent on purpose**: that mode picks
-// a cell once and keeps it for the particle's whole life, so the host writes it
-// at spawn and this pass leaves the cell alone - which is what the fixed-cell
-// flag says. It is also what keeps a sixty-four-bit hash out of a shader that
-// has no sixty-four-bit integers.
-uint FlipbookCell(uint base, float age, float lifetime, uint cells) {
+// Loop, one-shot and ping-pong. Random playback keeps the phase selected at
+// spawn as its cell. The other modes consume the same phase as their offset.
+uint FlipbookCell(uint base, float age, float lifetime, uint cells, uint start) {
 	if (cells <= 1u) {
 		return 0u;
 	}
@@ -239,16 +303,16 @@ uint FlipbookCell(uint base, float age, float lifetime, uint cells) {
 	uint playback = BlockUint(base, PARAM_PLAYBACK);
 	if (playback == 1u) {
 		float fraction = lifetime > 0.0 ? age / lifetime : 0.0;
-		return min(uint(fraction * float(cells)), cells - 1u);
+		return min(start + uint(fraction * float(cells)), cells - 1u);
 	}
 
 	uint stepped = uint(age * BlockFloat(base, PARAM_RATE));
 	if (playback == 2u) {
 		uint span = cells * 2u - 2u;
-		uint at = span == 0u ? 0u : stepped % span;
+		uint at = span == 0u ? 0u : (start + stepped) % span;
 		return at < cells ? at : span - at;
 	}
-	return stepped % cells;
+	return (start + stepped) % cells;
 }
 
 // Whether a point is past this pane and inside its rectangle, which is what
@@ -346,6 +410,7 @@ void main() {
 	vec3 push = BlockVector(base, PARAM_ACCELERATION) * delta;
 	bool locked = (flags & 1u) != 0u;
 	bool fixedCell = (flags & 2u) != 0u;
+	bool randomStart = (flags & 4u) != 0u;
 
 	uint stateAt = stateRow * STATE_WORDS;
 	uint instanceAt = destination * INSTANCE_WORDS;
@@ -390,7 +455,9 @@ void main() {
 		uintBitsToFloat(states.words[stateAt + STATE_POSITION + 1u]),
 		uintBitsToFloat(states.words[stateAt + STATE_POSITION + 2u])
 	);
-	velocity = velocity * damping + push + ProceduralForce(base, rememberedPosition, age, origin, turn) * delta;
+	velocity = velocity * damping +
+		push +
+		(ProceduralForce(base, rememberedPosition, age, origin, turn) + FieldForce(base, rememberedPosition)) * delta;
 	float maximum = BlockFloat(base, PARAM_MAX_SPEED);
 	if (maximum > 0.0 && dot(velocity, velocity) > maximum * maximum) {
 		velocity = normalize(velocity) * maximum;
@@ -462,7 +529,8 @@ void main() {
 	uint turned = uint(int(remembered & 0xFFFFu) + int(spin * delta * 65536.0)) & 0xFFFFu;
 	states.words[stateAt + STATE_ROTATION] = turned | (remembered & 0xFFFF0000u);
 
-	uint cell = fixedCell ? (remembered >> 16u) : FlipbookCell(base, age, lifetime, cells);
+	uint start = randomStart ? (remembered >> 16u) : 0u;
+	uint cell = fixedCell ? (remembered >> 16u) : FlipbookCell(base, age, lifetime, cells, start);
 	instances.words[instanceAt + INSTANCE_ROTATION] = turned | (cell << 16u);
 
 	uint colour = SampleColour(curveAt, cursor);

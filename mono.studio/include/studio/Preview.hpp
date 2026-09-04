@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Authoring integrations use
+// this complete preview contract.
+
 // What an asset looks like, and why it sometimes does not.
 //
 // **Three outcomes, not two, and that is the correction this file exists for.**

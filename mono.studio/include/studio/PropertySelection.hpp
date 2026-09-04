@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Property tools exchange this
+// complete selection contract.
+
 // The data model behind Studio's multi-selection property grid.
 //
 // Kept free of Dear ImGui so the important decisions can be tested without a

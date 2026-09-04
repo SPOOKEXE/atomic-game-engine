@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward origin API. `Origin.hpp` owns this cache
+// type as part of the complete content-serving contract.
+
 // Groups that have already been compressed, so they are built once and streamed
 // many times.
 //

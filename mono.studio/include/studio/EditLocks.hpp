@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Collaborative editors share
+// this complete edit-lock contract.
+
 // The turn-taking that keeps two editors off one model, and loses neither edit.
 //
 // ## Ask, hold, edit, give back

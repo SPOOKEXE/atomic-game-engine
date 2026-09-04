@@ -18,10 +18,13 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/Tools.hpp>
+#include <engine/scene/VectorField.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -502,6 +505,15 @@ namespace engine::scene {
 				collider->Mask = spatial::CollisionGroups::MaskFor(index);
 				return true;
 			};
+
+			// A world document is authored content, so it must carry the group name
+			// rather than the process-local bit. Recreate that name before this
+			// property's strict setter runs, including for a port opened in a new
+			// Studio process. Script writes still use the strict setter above.
+			property.PrepareDocument = [](const void *value) -> bool {
+				const auto name = *static_cast<const core::Name *>(value);
+				return name.IsValid() && spatial::CollisionGroups::Register(name.Text()) != spatial::NO_GROUP;
+			};
 			return property;
 		}
 
@@ -624,6 +636,16 @@ namespace engine::scene {
 
 		const core::Name &AtmosphereProceduralShaderEnum() {
 			static const core::Name name("AtmosphereProceduralShader");
+			return name;
+		}
+
+		const core::Name &VolumeShapeEnum() {
+			static const core::Name name("VolumeShape");
+			return name;
+		}
+
+		const core::Name &LensShapeEnum() {
+			static const core::Name name("LensShape");
 			return name;
 		}
 
@@ -2039,6 +2061,16 @@ namespace engine::scene {
 			const ecs::ClassId pvInstance = ecs::Classes::Register("PVInstance", instance, pv);
 			ecs::Classes::SetCreatable(pvInstance, false);
 
+			// Fields are placed content, not a particle feature. A consumer selects
+			// the nearest ancestor field, so the hierarchy owns the source origin
+			// and no process-local entity handle has to be serialised on it.
+			const std::array vectorField2DSet{ecs::Components::Of<VectorField2D>()};
+			const ecs::ClassId vectorField2D =
+				ecs::Classes::Register("VectorField2D", pvInstance, vectorField2DSet);
+			const std::array vectorField3DSet{ecs::Components::Of<VectorField3D>()};
+			const ecs::ClassId vectorField3D =
+				ecs::Classes::Register("VectorField3D", pvInstance, vectorField3DSet);
+
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
 				ecs::Components::Of<Visual>(),
@@ -2142,6 +2174,12 @@ namespace engine::scene {
 			// answers, and a character is a thing rather than six loose parts
 			// under Workspace. `scene::MakeCharacter` is its first caller.
 			const ecs::ClassId modelClass = ecs::Classes::Register("Model", pvInstance, {});
+
+			// A semantic container for structural destruction. It intentionally adds
+			// no component: the hierarchy is the group membership, and a second list
+			// would become stale as soon as an author reparents one piece.
+			const ecs::ClassId breakGroupClass = ecs::Classes::Register("BreakGroup", modelClass, {});
+			(void)breakGroupClass;
 
 			// A WorldRoot is a Model whose descendants form a self-contained scene.
 			// Workspace and WorldModel share this ancestry, so `IsA("WorldRoot")`
@@ -2257,6 +2295,12 @@ namespace engine::scene {
 			// against the renderer.
 			const std::array emitter{ecs::Components::Of<Sound>()};
 			const ecs::ClassId soundClass = ecs::Classes::Register("Sound", instance, emitter);
+
+			// A group is a named parent for sounds. Its mixer controls deliberately
+			// do not exist until the client mixer can consume them: exposing Volume
+			// or playback controls first would accept authored state that changes no
+			// audio. Keeping the instance class now preserves imported UI trees.
+			ecs::Classes::Register("SoundGroup", instance, {});
 
 			// **An `Attachment` is an `Instance` and not a `PVInstance`**, which
 			// is `Sound`'s omission for a related reason. A `PVInstance` carries a
@@ -2485,6 +2529,10 @@ namespace engine::scene {
 				atmosphereShaders[index] = Describe(static_cast<AtmosphereProceduralShader>(index));
 			}
 			ecs::EnumTable::Register(AtmosphereProceduralShaderEnum().Text(), atmosphereShaders);
+			ecs::EnumTable::Register(
+				VolumeShapeEnum().Text(), std::array<std::string_view, 2>{"Box", "Ellipsoid"}
+			);
+			ecs::EnumTable::Register(LensShapeEnum().Text(), std::array<std::string_view, 1>{"Sphere"});
 
 			// **The sky, both halves of it under `Lighting`.** Neither is a
 			// `PVInstance`, which is `Sound`'s and `Attachment`'s omission for
@@ -2505,6 +2553,20 @@ namespace engine::scene {
 			const std::array cloudVolume{ecs::Components::Of<CloudCompute>()};
 			const ecs::ClassId cloudComputeClass =
 				ecs::Classes::Register("CloudCompute", cloudProceduralClass, cloudVolume);
+
+			const std::array volume{ecs::Components::Of<Volume>()};
+			const ecs::ClassId volumeClass = ecs::Classes::Register("Volume", pvInstance, volume);
+			const std::array shaderLens{ecs::Components::Of<ShaderLens>()};
+			const ecs::ClassId shaderLensClass = ecs::Classes::Register("ShaderLens", pvInstance, shaderLens);
+			const ecs::ClassId gravitationalLensClass =
+				ecs::Classes::Register("GravitationalLens", shaderLensClass, {});
+			ShaderLens gravitationalLens;
+			gravitationalLens.Shader = core::Name("gravitational-lens");
+			gravitationalLens.Radius = 25.0f;
+			gravitationalLens.InnerRadius = 6.0f;
+			gravitationalLens.Strength = 0.8f;
+			gravitationalLens.Spin = 0.25f;
+			ecs::Classes::Default(gravitationalLensClass, gravitationalLens);
 
 			const std::array skyboxTextures{ecs::Components::Of<SkyboxTextures>()};
 			const ecs::ClassId skyboxTexturesClass =
@@ -2689,6 +2751,24 @@ namespace engine::scene {
 			ecs::Classes::Property<&RigidBody::AngularDamping>(basePart, "AngularDamping");
 
 			ecs::Classes::Computed(basePart, MassProperty());
+
+			// A zero bound axis is intentionally unbounded. The shared sampler
+			// clamps outside a positive extent and turns `Falloff` into a fade
+			// distance only when it is positive, keeping an authored hard edge exact.
+			ecs::Classes::Property<&VectorField2D::Vector>(vectorField2D, "Vector");
+			ecs::Classes::Property<&VectorField2D::HalfExtent>(vectorField2D, "Bounds");
+			ecs::Classes::Property<&VectorField2D::Radial>(vectorField2D, "Radial");
+			ecs::Classes::Property<&VectorField2D::Tangential>(vectorField2D, "Tangential");
+			ecs::Classes::ClampedProperty<&VectorField2D::Falloff, 0.0f, 100000.0f>(vectorField2D, "Falloff");
+			ecs::Classes::Property<&VectorField2D::LocalSpace>(vectorField2D, "LocalSpace");
+
+			ecs::Classes::Property<&VectorField3D::Vector>(vectorField3D, "Vector");
+			ecs::Classes::Property<&VectorField3D::HalfExtent>(vectorField3D, "Bounds");
+			ecs::Classes::Property<&VectorField3D::Axis>(vectorField3D, "Axis");
+			ecs::Classes::Property<&VectorField3D::Radial>(vectorField3D, "Radial");
+			ecs::Classes::Property<&VectorField3D::Tangential>(vectorField3D, "Tangential");
+			ecs::Classes::ClampedProperty<&VectorField3D::Falloff, 0.0f, 100000.0f>(vectorField3D, "Falloff");
+			ecs::Classes::Property<&VectorField3D::LocalSpace>(vectorField3D, "LocalSpace");
 
 			// **`Mesh` and `ColorMap` are not here, and that is v0.10's
 			// correction.** `BasePart` is what `Part`, `MeshPart` and a future
@@ -3085,6 +3165,37 @@ namespace engine::scene {
 				EnumFieldProperty<CloudCompute, &CloudCompute::Shader, CloudComputeShaderEnum>("Shader")
 			);
 			ecs::Classes::Property<&CloudCompute::Enabled>(cloudComputeClass, "ComputeEnabled");
+
+			ecs::Classes::Property<&Volume::Colour>(volumeClass, "Color");
+			ecs::Classes::Property<&Volume::HalfExtent>(volumeClass, "Bounds");
+			ecs::Classes::Property<&Volume::Density>(volumeClass, "Density");
+			ecs::Classes::Property<&Volume::Extinction>(volumeClass, "Extinction");
+			ecs::Classes::ClampedProperty<&Volume::Falloff, 0.0f, 1.0f>(volumeClass, "Falloff");
+			ecs::Classes::Property<&Volume::NoiseScale>(volumeClass, "NoiseScale");
+			ecs::Classes::ClampedProperty<&Volume::NoiseStrength, 0.0f, 1.0f>(volumeClass, "NoiseStrength");
+			ecs::Classes::Property<&Volume::Steps>(volumeClass, "Steps");
+			ecs::Classes::Property<&Volume::ShadowSteps>(volumeClass, "ShadowSteps");
+			ecs::Classes::Property<&Volume::Seed>(volumeClass, "Seed");
+			ecs::Classes::Computed(
+				volumeClass, EnumFieldProperty<Volume, &Volume::Shape, VolumeShapeEnum>("Shape")
+			);
+			ecs::Classes::Property<&Volume::Enabled>(volumeClass, "Enabled");
+
+			ecs::Classes::Property<&ShaderLens::Shader>(shaderLensClass, "Shader");
+			ecs::Classes::ClampedProperty<&ShaderLens::Radius, 0.001f, 1000000.0f>(shaderLensClass, "Radius");
+			ecs::Classes::ClampedProperty<&ShaderLens::InnerRadius, 0.0f, 1000000.0f>(
+				shaderLensClass, "InnerRadius"
+			);
+			ecs::Classes::ClampedProperty<&ShaderLens::Falloff, 0.0f, 1.0f>(shaderLensClass, "Falloff");
+			ecs::Classes::Property<&ShaderLens::Strength>(shaderLensClass, "Strength");
+			ecs::Classes::Property<&ShaderLens::Spin>(shaderLensClass, "Spin");
+			ecs::Classes::Property<&ShaderLens::Priority>(shaderLensClass, "Priority");
+			ecs::Classes::Computed(
+				shaderLensClass, EnumFieldProperty<ShaderLens, &ShaderLens::Shape, LensShapeEnum>("Shape")
+			);
+			ecs::Classes::Property<&ShaderLens::Enabled>(shaderLensClass, "Enabled");
+			ecs::Classes::Property<&ShaderLens::InnerRadius>(gravitationalLensClass, "HorizonRadius");
+			ecs::Classes::Property<&ShaderLens::Radius>(gravitationalLensClass, "WarpRadius");
 
 			ecs::Classes::Property<&AtmosphereProcedural::PlanetRadius>(
 				atmosphereProceduralClass, "PlanetRadius"

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Viewport integrations share
+// this complete projection contract.
+
 // How a viewport panel maps between the world, the texture, and the panel.
 //
 // **This is the piece `docs/retired/v07v08.md` §4.2 names as most likely to be got

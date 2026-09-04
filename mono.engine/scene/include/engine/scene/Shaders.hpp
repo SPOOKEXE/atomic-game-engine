@@ -92,6 +92,16 @@ namespace engine::scene {
 	// @return The class id.
 	ecs::ClassId ShaderScriptClass();
 
+	// The `LensShader` class id, registering the tree if nobody has yet.
+	//
+	// Lens programs deliberately have their own class even though their source
+	// text shares `ShaderSource` storage with material programs. The renderer
+	// compiles them against a different fixed binding contract, so one instance
+	// cannot accidentally be selected as both kinds of program.
+	//
+	// @return The class id.
+	ecs::ClassId LensShaderClass();
+
 	// The shader script in this world with that instance name.
 	//
 	// **Names are not unique in an instance tree**, so the first one found in
@@ -103,6 +113,15 @@ namespace engine::scene {
 	// @param name  The script's instance name.
 	// @return The instance, or `ecs::NULL_ENTITY`.
 	ecs::Entity ShaderScriptNamed(ecs::Store &store, const core::Name &name);
+
+	// The lens shader in this world with that instance name. It follows
+	// `ShaderScriptNamed`'s lowest-entity-id rule when an author creates a
+	// duplicate name.
+	//
+	// @param store The world.
+	// @param name  The lens shader's instance name.
+	// @return The lens shader instance, or `ecs::NULL_ENTITY`.
+	ecs::Entity LensShaderNamed(ecs::Store &store, const core::Name &name);
 
 	// The GLSL a world holds under a name, and its revision.
 	//
@@ -118,6 +137,13 @@ namespace engine::scene {
 	// @param name  The script's instance name.
 	// @return The text, with `Found` false when this world holds no such script.
 	ShaderText ShaderTextOf(ecs::Store &store, const core::Name &name);
+
+	// The GLSL a world holds on a `LensShader` under a name, and its revision.
+	//
+	// @param store The world.
+	// @param name  The lens shader's instance name.
+	// @return The text, with `Found` false when this world holds no such shader.
+	ShaderText LensShaderTextOf(ecs::Store &store, const core::Name &name);
 
 	// Writes GLSL onto a shader script and bumps its revision.
 	//

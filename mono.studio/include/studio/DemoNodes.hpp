@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Node-editor integrations use
+// this complete demonstration graph contract.
+
 // The node set the Demo Nodes panel runs, and a graph wired out of it.
 //
 // **Content, and not part of `Mono::nodegraph`, said out loud.** This is the

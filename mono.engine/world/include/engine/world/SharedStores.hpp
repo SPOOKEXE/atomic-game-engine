@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward world API. Multi-world hosts use this
+// complete shared-store contract rather than copying world ownership state.
+
 // Driver-side administration of MemoryStore and DataStore values.
 //
 // Worlds still reach these stores only through `Postbox`. This is the copied,

@@ -21,6 +21,7 @@
 // fixtures would quietly stop describing the same model.
 
 #include <engine/bake/RobloxModel.hpp>
+#include <engine/core/Random.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -35,6 +36,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.bake.robloxmodel")
+TEST_DEPENDS("engine.core.random")
 
 using Catch::Approx;
 using engine::bake::ReadRobloxFile;
@@ -44,6 +46,7 @@ using engine::bake::RobloxInstance;
 using engine::bake::RobloxModel;
 using engine::bake::RobloxValue;
 using engine::bake::RobloxValueKind;
+using engine::core::Random;
 
 namespace {
 	// The tag that ends a file, whose fourth byte is a NUL - so it is spelled
@@ -200,7 +203,7 @@ namespace {
 	// the property it holds is a type this reader refuses: a refusal that
 	// consumed the wrong number of bytes would take everything after it with it,
 	// and a case that put the refused chunk last could not see that.
-	Blob Fixture() {
+	Blob Fixture(bool robloxStorageNames = false) {
 		Blob file;
 		Header(file, 3, 3);
 
@@ -242,8 +245,8 @@ namespace {
 			return prop;
 		}());
 
-		Chunk(file, "PROP", [] {
-			Blob prop = Property(1, "Size", 0x0E);
+		Chunk(file, "PROP", [robloxStorageNames] {
+			Blob prop = Property(1, robloxStorageNames ? "size" : "Size", 0x0E);
 			prop.Reals({4.0f});
 			prop.Reals({1.0f});
 			prop.Reals({2.0f});
@@ -257,8 +260,8 @@ namespace {
 		}());
 
 		// Red, as three byte planes rather than three float ones.
-		Chunk(file, "PROP", [] {
-			Blob prop = Property(1, "Color", 0x1A);
+		Chunk(file, "PROP", [robloxStorageNames] {
+			Blob prop = Property(1, robloxStorageNames ? "Color3uint8" : "Color", 0x1A);
 			prop.U8(255);
 			prop.U8(0);
 			prop.U8(0);
@@ -513,6 +516,48 @@ TEST_CASE("a truncated rbxm is refused at every length", "[bake][rbxm]") {
 		CHECK_FALSE(ReadRobloxModel(Bytes(file.Bytes, length), model, failure));
 		CHECK(model.Roots.empty());
 		CHECK_FALSE(failure.empty());
+	}
+}
+
+TEST_CASE("hostile Roblox container bytes preserve a prior model", "[.][sandbox][fuzz][rbxm][rbxmx]") {
+	// File recognisers sit in front of both foreign-format readers. Exercise
+	// random bytes, a binary-looking prefix, and XML-looking input without
+	// retaining an open-ended corpus. The iteration is captured for a direct
+	// reproducer if a parser crashes or replaces output while refusing.
+	constexpr uint32_t ITERATIONS = 2'000;
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+
+		const size_t randomBytes = Random::Bits(iteration, 1) % 4096;
+		std::vector<uint8_t> bytes(randomBytes);
+		for (size_t index = 0; index < bytes.size(); index++) {
+			bytes[index] = static_cast<uint8_t>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		if (iteration % 3 == 1) {
+			Blob header;
+			Header(header, 0, 0);
+			header.Bytes.insert(header.Bytes.end(), bytes.begin(), bytes.end());
+			bytes = std::move(header.Bytes);
+		} else if (iteration % 3 == 2) {
+			constexpr std::string_view XML = "<roblox version=\"4\">";
+			bytes.insert(bytes.begin(), XML.begin(), XML.end());
+		}
+
+		RobloxModel model;
+		model.Notes.push_back("keep this model");
+		std::string failure = "unchanged on success";
+
+		if (ReadRobloxFile(Bytes(bytes), model, failure)) {
+			CHECK(failure == "unchanged on success");
+		} else {
+			CHECK(model.Roots.empty());
+			CHECK(model.Notes == std::vector<std::string>{"keep this model"});
+			CHECK(model.Assets.empty());
+			CHECK(model.Scripts.empty());
+			CHECK(model.LostProperties.empty());
+			CHECK_FALSE(failure.empty());
+		}
 	}
 }
 
@@ -1272,4 +1317,23 @@ TEST_CASE("the complete roblox reader sniffs binary and leaves output alone on f
 	REQUIRE(sentinel.Notes.size() == 1);
 	CHECK(sentinel.Notes[0] == "unchanged");
 	CHECK_FALSE(failure.empty());
+}
+
+TEST_CASE("the complete roblox reader exposes public part property names", "[bake][rbxl]") {
+	// Real binary places call these columns `size` and `Color3uint8`, while
+	// `.rbxmx` and scripts call the same properties `Size` and `Color`. The
+	// shared RobloxModel must not make downstream imports depend on the container.
+	const Blob binary = Fixture(true);
+	RobloxModel model;
+	std::string failure;
+	REQUIRE(ReadRobloxFile(Bytes(binary.Bytes), model, failure));
+	CHECK(failure.empty());
+	REQUIRE(model.Roots.size() == 1);
+	REQUIRE(model.Roots[0].Children.size() == 2);
+	const RobloxInstance &part = model.Roots[0].Children[0];
+
+	CHECK(Find(part, "size") == nullptr);
+	CHECK(Find(part, "Color3uint8") == nullptr);
+	CHECK(Find(part, "Size") != nullptr);
+	CHECK(Find(part, "Color") != nullptr);
 }

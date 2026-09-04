@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Script tooling uses this
+// complete completion contract.
+
 // What to offer somebody typing in the script editor.
 //
 // **Free functions over text, because this is the half that can be silently

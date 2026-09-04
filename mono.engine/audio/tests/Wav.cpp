@@ -202,6 +202,18 @@ TEST_CASE("32-bit float passes through", "[audio][wav]") {
 	CHECK(decoded->Data()[2] == -0.25f);
 }
 
+TEST_CASE("non-finite float samples are refused", "[audio][wav]") {
+	for (const uint32_t raw : {0x7FC00000u, 0x7F800000u, 0xFF800000u}) {
+		WavBuilder builder;
+		builder.Encoding = 3;
+		builder.Bits = 32;
+		WavBuilder::PutU32(builder.Payload, raw);
+
+		INFO("raw sample " << raw);
+		CHECK_FALSE(DecodeWav(builder.Build()).has_value());
+	}
+}
+
 // --- the refusals ----------------------------------------------------------
 
 TEST_CASE("something that is not a wav is refused", "[audio][wav]") {

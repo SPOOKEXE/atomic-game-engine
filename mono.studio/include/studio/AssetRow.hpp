@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Asset tooling exchanges this
+// complete row representation without a second catalogue model.
+
 // One row of a content list: a picture, a name, and a single thing to click.
 //
 // **This exists because the row it replaces aborted the editor.** The picker

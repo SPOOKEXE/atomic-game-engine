@@ -46,6 +46,13 @@ namespace engine::bake {
 		// would turn a usable asset into a failed import.
 		constexpr uint32_t MAX_SIDE = 8;
 
+		// The largest canvas or output sheet this decoder will allocate.
+		//
+		// The sheet has a grid cap below, but the compositing canvas is allocated
+		// before that grid exists. It needs the same bound before a hostile header
+		// can turn two 16-bit dimensions into a multi-gigabyte allocation.
+		constexpr uint64_t MAXIMUM_PIXELS = 64ull * 1024 * 1024;
+
 		// What a delay of 0 or 1 is taken to mean, in hundredths of a second.
 		//
 		// **The de-facto rule and not the specification's.** GIF says zero is
@@ -307,6 +314,12 @@ namespace engine::bake {
 			failure = "a GIF with no canvas";
 			return false;
 		}
+		if (canvasWidth > assets::Texture::MAXIMUM_DIMENSION ||
+			canvasHeight > assets::Texture::MAXIMUM_DIMENSION ||
+			static_cast<uint64_t>(canvasWidth) * canvasHeight > MAXIMUM_PIXELS) {
+			failure = "a GIF canvas past the texture ceiling";
+			return false;
+		}
 
 		const uint8_t packed = reader.Byte();
 		reader.Skip(2); // Background index and pixel aspect ratio; neither is used.
@@ -528,8 +541,7 @@ namespace engine::bake {
 
 		// The same ceiling every other decoder here uses, so a hostile GIF cannot
 		// ask for a gigabyte by claiming a large canvas and sixty-four frames.
-		constexpr uint64_t MAX_PIXELS = 64ull * 1024 * 1024;
-		if (static_cast<uint64_t>(sheetWidth) * sheetHeight > MAX_PIXELS) {
+		if (static_cast<uint64_t>(sheetWidth) * sheetHeight > MAXIMUM_PIXELS) {
 			failure = "a GIF whose flipbook would be larger than the pixel ceiling";
 			return false;
 		}

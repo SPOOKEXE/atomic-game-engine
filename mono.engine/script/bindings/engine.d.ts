@@ -472,11 +472,17 @@ declare namespace Enum {
 	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
+	interface InputPortLayout extends EnumItem { readonly __enum: "InputPortLayout"; }
 	interface ItemLineAlignment extends EnumItem { readonly __enum: "ItemLineAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface LensShape extends EnumItem { readonly __enum: "LensShape"; }
 	interface LineJoinMode extends EnumItem { readonly __enum: "LineJoinMode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
+	interface NodeBypassMode extends EnumItem { readonly __enum: "NodeBypassMode"; }
+	interface NodeGroupLayout extends EnumItem { readonly __enum: "NodeGroupLayout"; }
+	interface NodePortDirection extends EnumItem { readonly __enum: "NodePortDirection"; }
+	interface NodePortEdge extends EnumItem { readonly __enum: "NodePortEdge"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
 	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
 	interface ParticleEmitterShapeInOut extends EnumItem { readonly __enum: "ParticleEmitterShapeInOut"; }
@@ -498,6 +504,7 @@ declare namespace Enum {
 	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
 	interface SurfaceEffect extends EnumItem { readonly __enum: "SurfaceEffect"; }
 	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
+	interface TeleportRequestDecision extends EnumItem { readonly __enum: "TeleportRequestDecision"; }
 	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
 	interface TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
 	interface TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
@@ -509,6 +516,7 @@ declare namespace Enum {
 	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
+	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
@@ -617,6 +625,11 @@ declare namespace Enum {
 		readonly Center: HorizontalAlignment;
 		readonly Right: HorizontalAlignment;
 	};
+	const InputPortLayout: {
+		readonly Manual: InputPortLayout;
+		readonly Separate: InputPortLayout;
+		readonly Squash: InputPortLayout;
+	};
 	const ItemLineAlignment: {
 		readonly Automatic: ItemLineAlignment;
 		readonly Start: ItemLineAlignment;
@@ -708,6 +721,9 @@ declare namespace Enum {
 		readonly Thumbstick1: KeyCode;
 		readonly Thumbstick2: KeyCode;
 	};
+	const LensShape: {
+		readonly Sphere: LensShape;
+	};
 	const LineJoinMode: {
 		readonly Round: LineJoinMode;
 		readonly Bevel: LineJoinMode;
@@ -721,6 +737,24 @@ declare namespace Enum {
 		readonly Default: MouseBehavior;
 		readonly LockCenter: MouseBehavior;
 		readonly LockCurrentPosition: MouseBehavior;
+	};
+	const NodeBypassMode: {
+		readonly None: NodeBypassMode;
+		readonly Bypass: NodeBypassMode;
+	};
+	const NodeGroupLayout: {
+		readonly Manual: NodeGroupLayout;
+		readonly AroundEdge: NodeGroupLayout;
+		readonly SmallestSpace: NodeGroupLayout;
+	};
+	const NodePortDirection: {
+		readonly Input: NodePortDirection;
+		readonly Output: NodePortDirection;
+	};
+	const NodePortEdge: {
+		readonly Top: NodePortEdge;
+		readonly Bottom: NodePortEdge;
+		readonly Corner: NodePortEdge;
 	};
 	const NormalId: {
 		readonly Right: NormalId;
@@ -839,6 +873,11 @@ declare namespace Enum {
 		readonly FixedSize: SurfaceSizingMode;
 		readonly PixelsPerStud: SurfaceSizingMode;
 	};
+	const TeleportRequestDecision: {
+		readonly NotProcessed: TeleportRequestDecision;
+		readonly Denied: TeleportRequestDecision;
+		readonly Processed: TeleportRequestDecision;
+	};
 	const TextTruncate: {
 		readonly None: TextTruncate;
 		readonly AtEnd: TextTruncate;
@@ -909,6 +948,10 @@ declare namespace Enum {
 	const VerticalScrollBarPosition: {
 		readonly Right: VerticalScrollBarPosition;
 		readonly Left: VerticalScrollBarPosition;
+	};
+	const VolumeShape: {
+		readonly Box: VolumeShape;
+		readonly Ellipsoid: VolumeShape;
 	};
 	const ZIndexBehavior: {
 		readonly Global: ZIndexBehavior;
@@ -1163,6 +1206,12 @@ declare interface Instance {
 	IsKeepingWorldAwake(): boolean;
 	SetNetworkOwner(player?: Instance | null): void;
 	GetNetworkOwner(): Instance | null;
+	GetLinearVelocity(): Vector3;
+	GetAngularVelocity(): Vector3;
+	SetLinearVelocity(velocity: Vector3): void;
+	SetAngularVelocity(velocity: Vector3): void;
+	ApplyImpulse(impulse: Vector3): void;
+	Break(): number;
 	SetLocalTransparency(value: number): void;
 	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;
 	AddTriangle(a: number, b: number, c: number): number | undefined;
@@ -1193,6 +1242,11 @@ declare interface Instance {
 	GetComponents(): string[];
 	readonly Activated: GuiSignal;
 	readonly MouseButton1Click: GuiSignal;
+	readonly MouseButton1Down: GuiSignal;
+	readonly MouseButton1Up: GuiSignal;
+	readonly MouseButton2Click: GuiSignal;
+	readonly MouseButton2Down: GuiSignal;
+	readonly MouseButton2Up: GuiSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
 	readonly MouseEnter: PointerSignal;
@@ -1217,6 +1271,25 @@ declare interface PVInstance extends Instance {
 	Orientation: Vector3;
 	PivotOffset: CFrame;
 	Position: Vector3;
+}
+
+declare interface VectorField2D extends PVInstance {
+	Bounds: Vector2;
+	Falloff: number;
+	LocalSpace: boolean;
+	Radial: number;
+	Tangential: number;
+	Vector: Vector2;
+}
+
+declare interface VectorField3D extends PVInstance {
+	Axis: Vector3;
+	Bounds: Vector3;
+	Falloff: number;
+	LocalSpace: boolean;
+	Radial: number;
+	Tangential: number;
+	Vector: Vector3;
 }
 
 declare interface BasePart extends PVInstance {
@@ -1259,6 +1332,9 @@ declare interface SpawnLocation extends Part {
 }
 
 declare interface Model extends PVInstance {
+}
+
+declare interface BreakGroup extends Model {
 }
 
 declare interface WorldRoot extends Model {
@@ -1321,6 +1397,9 @@ declare interface Sound extends Instance {
 	RollOffMinDistance: number;
 	SoundId: string;
 	Volume: number;
+}
+
+declare interface SoundGroup extends Instance {
 }
 
 declare interface Attachment extends Instance {
@@ -1488,6 +1567,38 @@ declare interface CloudCompute extends CloudProcedural {
 	Thickness: number;
 }
 
+declare interface Volume extends PVInstance {
+	Bounds: Vector3;
+	Color: Color3;
+	Density: number;
+	Enabled: boolean;
+	Extinction: number;
+	Falloff: number;
+	NoiseScale: number;
+	NoiseStrength: number;
+	Seed: number;
+	ShadowSteps: number;
+	Shape: Enum.VolumeShape;
+	Steps: number;
+}
+
+declare interface ShaderLens extends PVInstance {
+	Enabled: boolean;
+	Falloff: number;
+	InnerRadius: number;
+	Priority: number;
+	Radius: number;
+	Shader: string;
+	Shape: Enum.LensShape;
+	Spin: number;
+	Strength: number;
+}
+
+declare interface GravitationalLens extends ShaderLens {
+	HorizonRadius: number;
+	WarpRadius: number;
+}
+
 declare interface SkyboxTextures extends Instance {
 	Back: string;
 	Down: string;
@@ -1566,6 +1677,11 @@ declare interface ShaderScript extends Instance {
 	Source: string;
 }
 
+declare interface LensShader extends Instance {
+	readonly Revision: number;
+	Source: string;
+}
+
 declare interface EditableMesh extends Instance {
 	readonly ContentId: string;
 	readonly TriangleCount: number;
@@ -1589,6 +1705,12 @@ declare interface LocalScript extends LuaSourceContainer {
 }
 
 declare interface ModuleScript extends LuaSourceContainer {
+}
+
+declare interface RemoteEvent extends Instance {
+}
+
+declare interface BindableEvent extends Instance {
 }
 
 declare interface ParticleEmitter extends Instance {
@@ -1624,6 +1746,7 @@ declare interface ParticleEmitter extends Instance {
 	ShapePartial: number;
 	ShapeStyle: Enum.ParticleEmitterShapeStyle;
 	Size: NumberSequence;
+	SoftParticles: boolean;
 	Speed: NumberRange;
 	SpreadAngle: Vector2;
 	Squash: NumberSequence;
@@ -1792,6 +1915,9 @@ declare interface GuiObject extends GuiBase2d {
 	SizeConstraint: Enum.SizeConstraint;
 	Visible: boolean;
 	ZIndex: number;
+	VirtualHover(): void;
+	VirtualUnhover(): void;
+	VirtualMove(x: number, y: number): void;
 }
 
 declare interface Frame extends GuiObject {
@@ -1820,10 +1946,70 @@ declare interface ScrollingFrame extends Frame {
 	TopImage: string;
 	VerticalScrollBarInset: Enum.ScrollBarInset;
 	VerticalScrollBarPosition: Enum.VerticalScrollBarPosition;
+	VirtualScroll(notches: number): void;
+}
+
+declare interface NodeCanvas extends Frame {
+	CanvasPosition: Vector2;
+	GridSize: number;
+	GridVisible: boolean;
+	MaximumZoom: number;
+	MinimumZoom: number;
+	Zoom: number;
+	Connect(output: NodeCanvasPort, input: NodeCanvasPort): NodeCanvasLink;
+	Disconnect(input: NodeCanvasPort): boolean;
+	RefreshGroups(): number;
+}
+
+declare interface NodeCanvasNode extends Frame {
+	BypassInput: string;
+	BypassMode: Enum.NodeBypassMode;
+	BypassOutput: string;
+	Enabled: boolean;
+	InputPortLayout: Enum.InputPortLayout;
+	MinimumSize: Vector2;
+	NodeId: string;
+	NodeType: string;
+	Resizable: boolean;
+	Title: string;
+}
+
+declare interface NodeCanvasGroup extends Frame {
+	GroupId: string;
+	Layout: Enum.NodeGroupLayout;
+	Padding: Vector2;
+	Title: string;
+}
+
+declare interface NodeCanvasPort extends GuiObject {
+	Direction: Enum.NodePortDirection;
+	Edge: Enum.NodePortEdge;
+	MaxConnections: number;
+	PortId: string;
+	ValueType: string;
+}
+
+declare interface NodeCanvasLink extends Instance {
+	FromDirection: Enum.NodePortDirection;
+	FromNode: string;
+	FromPort: string;
+	LineColor3: Color3;
+	LineThickness: number;
+	LineTransparency: number;
+	ToDirection: Enum.NodePortDirection;
+	ToNode: string;
+	ToPort: string;
 }
 
 declare interface GuiButton extends GuiObject {
 	AutoButtonColor: boolean;
+	EmulateClick(): void;
+	VirtualLeftClick(): void;
+	VirtualLeftHold(): void;
+	VirtualLeftRelease(): void;
+	VirtualRightClick(): void;
+	VirtualRightHold(): void;
+	VirtualRightRelease(): void;
 }
 
 declare interface TextButton extends GuiButton {
@@ -1927,6 +2113,10 @@ declare interface TextBox extends GuiObject {
 	TextWrapped: boolean;
 	TextXAlignment: Enum.TextXAlignment;
 	TextYAlignment: Enum.TextYAlignment;
+	VirtualFocus(): void;
+	VirtualUnfocus(): void;
+	VirtualText(text: string): void;
+	VirtualSubmit(): void;
 }
 
 declare interface ViewportFrame extends GuiObject {
@@ -2110,6 +2300,9 @@ declare interface UIDragDetector extends UIComponent {
 	MaxDragTranslation: Vector2;
 	MinDragTranslation: Vector2;
 	ResponseStyle: Enum.UIDragDetectorDragStyleResponse;
+	VirtualDragBegin(x: number, y: number): void;
+	VirtualDragContinue(x: number, y: number, dx: number, dy: number): void;
+	VirtualDragEnd(x: number, y: number, dx: number, dy: number): void;
 }
 
 declare interface Service extends Instance {
@@ -2159,6 +2352,9 @@ declare interface ServerStorage extends Service {
 }
 
 declare interface StarterGui extends Service {
+}
+
+declare interface ChangeHistoryService extends Service {
 }
 
 declare interface StarterPack extends Service {
@@ -2232,11 +2428,30 @@ declare interface MessagingService {
 }
 
 declare interface TeleportService {
+	/** A correlated authority result, delivered at the next client script beat. */
+	readonly TeleportResult: TeleportResultSignal;
+
+	// The ProcessReceipt-style authority hook. Only `Processed` permits the
+	// server to move the assigned player; `Message` travels back to the client.
+	TeleportRequested: ((request: {
+		Player: Instance;
+		Place: string;
+		Data: unknown;
+	}) => {
+		Decision: Enum.TeleportRequestDecision;
+		Message?: string;
+	}) | null;
+
 	Teleport(placeName: string, player: Instance, data?: unknown): void;
 	GetLocalPlayerTeleportData(): unknown;
 
 	/** What arrived with this player, or nil for one that walked in the front door. */
 	GetTeleportData(player: Instance): unknown;
+}
+
+declare interface TeleportResultSignal {
+	Connect(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
+	Once(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
 }
 
 declare interface MemoryStoreService {
@@ -2591,6 +2806,7 @@ declare const game: {
 		(service: "ServerScriptService"): ServerScriptService;
 		(service: "ServerStorage"): ServerStorage;
 		(service: "StarterGui"): StarterGui;
+		(service: "ChangeHistoryService"): ChangeHistoryService;
 		(service: "StarterPack"): StarterPack;
 		(service: "StarterPlayer"): StarterPlayer;
 		(service: "StarterPlayerScripts"): StarterPlayerScripts;
@@ -2600,6 +2816,7 @@ declare const game: {
 		(service: "RunService"): RunService;
 		(service: "ComputeService"): ComputeService;
 		(service: "MessagingService"): MessagingService;
+		(service: "TeleportService"): TeleportService;
 		(service: "MemoryStoreService"): MemoryStoreService;
 		(service: "DataStoreService"): DataStoreService;
 		(service: "TweenService"): TweenService;
@@ -2617,9 +2834,12 @@ declare const game: {
 declare const Instance: {
 	new: {
 		(className: "Folder", parent?: Instance): Folder;
+		(className: "VectorField2D", parent?: Instance): VectorField2D;
+		(className: "VectorField3D", parent?: Instance): VectorField3D;
 		(className: "Part", parent?: Instance): Part;
 		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
+		(className: "BreakGroup", parent?: Instance): BreakGroup;
 		(className: "WorldModel", parent?: Instance): WorldModel;
 		(className: "Tool", parent?: Instance): Tool;
 		(className: "MeshPart", parent?: Instance): MeshPart;
@@ -2628,6 +2848,7 @@ declare const Instance: {
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
 		(className: "Portal", parent?: Instance): Portal;
 		(className: "Sound", parent?: Instance): Sound;
+		(className: "SoundGroup", parent?: Instance): SoundGroup;
 		(className: "Attachment", parent?: Instance): Attachment;
 		(className: "Material", parent?: Instance): Material;
 		(className: "Humanoid", parent?: Instance): Humanoid;
@@ -2655,6 +2876,9 @@ declare const Instance: {
 		(className: "Clouds", parent?: Instance): Clouds;
 		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
 		(className: "CloudCompute", parent?: Instance): CloudCompute;
+		(className: "Volume", parent?: Instance): Volume;
+		(className: "ShaderLens", parent?: Instance): ShaderLens;
+		(className: "GravitationalLens", parent?: Instance): GravitationalLens;
 		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;
 		(className: "SkyboxCompute", parent?: Instance): SkyboxCompute;
 		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;
@@ -2666,11 +2890,14 @@ declare const Instance: {
 		(className: "Weld", parent?: Instance): Weld;
 		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
+		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;
 		(className: "ModuleScript", parent?: Instance): ModuleScript;
+		(className: "RemoteEvent", parent?: Instance): RemoteEvent;
+		(className: "BindableEvent", parent?: Instance): BindableEvent;
 		(className: "ParticleEmitter", parent?: Instance): ParticleEmitter;
 		(className: "Beam", parent?: Instance): Beam;
 		(className: "Trail", parent?: Instance): Trail;
@@ -2689,6 +2916,11 @@ declare const Instance: {
 		(className: "Frame", parent?: Instance): Frame;
 		(className: "CanvasGroup", parent?: Instance): CanvasGroup;
 		(className: "ScrollingFrame", parent?: Instance): ScrollingFrame;
+		(className: "NodeCanvas", parent?: Instance): NodeCanvas;
+		(className: "NodeCanvasNode", parent?: Instance): NodeCanvasNode;
+		(className: "NodeCanvasGroup", parent?: Instance): NodeCanvasGroup;
+		(className: "NodeCanvasPort", parent?: Instance): NodeCanvasPort;
+		(className: "NodeCanvasLink", parent?: Instance): NodeCanvasLink;
 		(className: "TextButton", parent?: Instance): TextButton;
 		(className: "ImageButton", parent?: Instance): ImageButton;
 		(className: "TextLabel", parent?: Instance): TextLabel;

@@ -73,7 +73,7 @@ namespace engine::script {
 	// the recursive walk cannot exhaust a stack. A refusal names the limit.
 	inline constexpr uint32_t CODEC_MAX_DEPTH = 16;
 
-	// The largest payload one publish may produce, in bytes.
+	// The largest payload one publish may produce or accept, in bytes.
 	//
 	// Sixty-four kilobytes, which is well inside a bus datagram and far past
 	// what a message ought to be carrying. A script sending more than this is

@@ -70,7 +70,7 @@
 // to let anybody forget.
 //
 // Every member is here because exactly one service asked. `ReturnVector2`,
-// `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
+// `ReturnVector3`, `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
 // `UserInputService`'s seven methods; `Role`, `Tweens`, `Debris`, `Subscriptions`,
 // `AsTweenInfo`, the two record readers, `ReturnTween`, `ForgetSubject` and
 // `Await` arrived with the seven services that stopped being written twice at
@@ -101,6 +101,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/TweenInfo.hpp>
 #include <engine/core/types/Vector2.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
@@ -476,6 +477,14 @@ namespace engine::script {
 		// @param callback What `RetainCallback` handed back.
 		virtual void ReleaseCallback(CallbackRef callback) = 0;
 
+		// Retains a function for an authority request handler. Unlike an ordinary
+		// callback ref this identifier crosses from a service resource back to its
+		// runtime, where `Runtime::Invoke` can call it and read its result.
+		virtual HostCallback RetainHostCallback(size_t index) = 0;
+
+		// Releases what `RetainHostCallback` returned when a handler is replaced.
+		virtual void ReleaseHostCallback(HostCallback callback) = 0;
+
 		// Puts a retained callable on a signal, to be called once and dropped.
 		//
 		// **`RetainCallback`'s other half, and the three tween methods are what
@@ -497,6 +506,37 @@ namespace engine::script {
 		//        from here on.
 		virtual void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) = 0;
 
+		// Delivers one argument-less signal before the current method returns.
+		//
+		// **A delivery request rather than the signal table itself**, because the
+		// table stores VM-owned callback references and only an adapter can invoke
+		// one. `GuiButton:EmulateClick` is the caller: it needs the exact
+		// `GuiActivated` route a physical click reaches without fabricating pointer
+		// input, hover state, or a second callback mechanism.
+		//
+		// @return A handler error, or empty when every handler completed.
+		virtual std::string DispatchSignal(SignalKind kind, ecs::Entity subject) = 0;
+
+		// Delivers a pointer signal at one virtual canvas position before the
+		// current method returns.
+		//
+		// `GuiObject:VirtualHover` and `VirtualUnhover` use the resolved centre
+		// when layout has one. No host pointer is moved or captured: this is the
+		// authored event route for scripted tutorials and tests.
+		virtual std::string DispatchPointerSignal(SignalKind kind, ecs::Entity subject, float x, float y) = 0;
+
+		// Delivers a drag signal with its canvas position and total displacement.
+		// Virtual drag methods use this route so handlers receive the same four
+		// values as a detector driven by the pointer router.
+		virtual std::string
+		DispatchDragSignal(SignalKind kind, ecs::Entity subject, float x, float y, float dx, float dy) = 0;
+
+		// Delivers `TextBox.FocusLost` before the current method returns.
+		//
+		// The boolean is Roblox's `enterPressed` argument. `VirtualUnfocus` and a
+		// virtual focus transfer both release with false.
+		virtual std::string DispatchFocusLost(ecs::Entity subject, bool entered) = 0;
+
 		// Returning. A method calls one of these, none for a method that answers
 		// nothing, or **several for a method that answers several things**.
 		//
@@ -516,6 +556,10 @@ namespace engine::script {
 		virtual void ReturnNumber(double value) = 0;
 
 		virtual void ReturnCFrame(const core::CFrame &value) = 0;
+
+		// One `Vector3`, used by the body velocity methods. It stays a direct
+		// return because the value is VM-local and never crosses a world boundary.
+		virtual void ReturnVector3(const core::Vector3 &value) = 0;
 
 		// One `Vector2`, which is what a pointer position is.
 		//

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations use this
+// complete asset authoring contract.
+
 // Which properties name content, and what a picker should therefore offer.
 //
 // **A table in the editor rather than a field on `PropertyDescriptor`, and that

@@ -11,6 +11,7 @@
 
 include_guard(GLOBAL)
 
+set(MONO_LIBRARY_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(MONO_KNOWN_TIERS shared client server)
 
 # What each tier is allowed to link. One table, so the rule reads in one place.
@@ -721,6 +722,18 @@ function(mono_add_program name)
 
 	set(target ${name})
 	add_executable(${target} "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_SOURCE}")
+	# Windows reads an executable's icon from its resource table. Keep the
+	# resource beside each program's generated build files so one source icon
+	# remains the asset for every shipped application.
+	if(WIN32)
+		set(MONO_PROGRAM_ICON "${CMAKE_SOURCE_DIR}/assets/small-icon.ico")
+		set(MONO_PROGRAM_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/${target}.rc")
+		configure_file(
+			"${MONO_LIBRARY_DIR}/ProgramIcon.rc.in"
+			"${MONO_PROGRAM_RESOURCE}"
+			@ONLY)
+		target_sources(${target} PRIVATE "${MONO_PROGRAM_RESOURCE}")
+	endif()
 	target_compile_features(${target} PRIVATE cxx_std_20)
 	target_link_libraries(${target} PRIVATE ${ARG_DEPS} ${ARG_VENDOR})
 	target_compile_definitions(${target} PRIVATE ENGINE_LOG_CATEGORY="${name}")

@@ -594,10 +594,16 @@ end
 declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
+declare extern type Enum_InputPortLayout extends EnumItem with
+end
+
 declare extern type Enum_ItemLineAlignment extends EnumItem with
 end
 
 declare extern type Enum_KeyCode extends EnumItem with
+end
+
+declare extern type Enum_LensShape extends EnumItem with
 end
 
 declare extern type Enum_LineJoinMode extends EnumItem with
@@ -607,6 +613,18 @@ declare extern type Enum_ListenerType extends EnumItem with
 end
 
 declare extern type Enum_MouseBehavior extends EnumItem with
+end
+
+declare extern type Enum_NodeBypassMode extends EnumItem with
+end
+
+declare extern type Enum_NodeGroupLayout extends EnumItem with
+end
+
+declare extern type Enum_NodePortDirection extends EnumItem with
+end
+
+declare extern type Enum_NodePortEdge extends EnumItem with
 end
 
 declare extern type Enum_NormalId extends EnumItem with
@@ -672,6 +690,9 @@ end
 declare extern type Enum_SurfaceSizingMode extends EnumItem with
 end
 
+declare extern type Enum_TeleportRequestDecision extends EnumItem with
+end
+
 declare extern type Enum_TextTruncate extends EnumItem with
 end
 
@@ -703,6 +724,9 @@ declare extern type Enum_VerticalAlignment extends EnumItem with
 end
 
 declare extern type Enum_VerticalScrollBarPosition extends EnumItem with
+end
+
+declare extern type Enum_VolumeShape extends EnumItem with
 end
 
 declare extern type Enum_ZIndexBehavior extends EnumItem with
@@ -815,6 +839,11 @@ declare Enum: {
 		Center: Enum_HorizontalAlignment,
 		Right: Enum_HorizontalAlignment,
 	},
+	InputPortLayout: {
+		Manual: Enum_InputPortLayout,
+		Separate: Enum_InputPortLayout,
+		Squash: Enum_InputPortLayout,
+	},
 	ItemLineAlignment: {
 		Automatic: Enum_ItemLineAlignment,
 		Start: Enum_ItemLineAlignment,
@@ -906,6 +935,9 @@ declare Enum: {
 		Thumbstick1: Enum_KeyCode,
 		Thumbstick2: Enum_KeyCode,
 	},
+	LensShape: {
+		Sphere: Enum_LensShape,
+	},
 	LineJoinMode: {
 		Round: Enum_LineJoinMode,
 		Bevel: Enum_LineJoinMode,
@@ -919,6 +951,24 @@ declare Enum: {
 		Default: Enum_MouseBehavior,
 		LockCenter: Enum_MouseBehavior,
 		LockCurrentPosition: Enum_MouseBehavior,
+	},
+	NodeBypassMode: {
+		None: Enum_NodeBypassMode,
+		Bypass: Enum_NodeBypassMode,
+	},
+	NodeGroupLayout: {
+		Manual: Enum_NodeGroupLayout,
+		AroundEdge: Enum_NodeGroupLayout,
+		SmallestSpace: Enum_NodeGroupLayout,
+	},
+	NodePortDirection: {
+		Input: Enum_NodePortDirection,
+		Output: Enum_NodePortDirection,
+	},
+	NodePortEdge: {
+		Top: Enum_NodePortEdge,
+		Bottom: Enum_NodePortEdge,
+		Corner: Enum_NodePortEdge,
 	},
 	NormalId: {
 		Right: Enum_NormalId,
@@ -1037,6 +1087,11 @@ declare Enum: {
 		FixedSize: Enum_SurfaceSizingMode,
 		PixelsPerStud: Enum_SurfaceSizingMode,
 	},
+	TeleportRequestDecision: {
+		NotProcessed: Enum_TeleportRequestDecision,
+		Denied: Enum_TeleportRequestDecision,
+		Processed: Enum_TeleportRequestDecision,
+	},
 	TextTruncate: {
 		None: Enum_TextTruncate,
 		AtEnd: Enum_TextTruncate,
@@ -1107,6 +1162,10 @@ declare Enum: {
 	VerticalScrollBarPosition: {
 		Right: Enum_VerticalScrollBarPosition,
 		Left: Enum_VerticalScrollBarPosition,
+	},
+	VolumeShape: {
+		Box: Enum_VolumeShape,
+		Ellipsoid: Enum_VolumeShape,
 	},
 	ZIndexBehavior: {
 		Global: Enum_ZIndexBehavior,
@@ -1384,6 +1443,12 @@ declare extern type Instance with
 	function IsKeepingWorldAwake(self): boolean
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
+	function GetLinearVelocity(self): Vector3
+	function GetAngularVelocity(self): Vector3
+	function SetLinearVelocity(self, velocity: Vector3): ()
+	function SetAngularVelocity(self, velocity: Vector3): ()
+	function ApplyImpulse(self, impulse: Vector3): ()
+	function Break(self): number
 	function SetLocalTransparency(self, value: number): ()
 	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
 	function AddTriangle(self, a: number, b: number, c: number): number?
@@ -1414,6 +1479,11 @@ declare extern type Instance with
 	function GetComponents(self): { string }
 	Activated: GuiSignal
 	MouseButton1Click: GuiSignal
+	MouseButton1Down: GuiSignal
+	MouseButton1Up: GuiSignal
+	MouseButton2Click: GuiSignal
+	MouseButton2Down: GuiSignal
+	MouseButton2Up: GuiSignal
 	InputBegan: GuiSignal
 	InputEnded: GuiSignal
 	MouseEnter: PointerSignal
@@ -1438,6 +1508,25 @@ declare extern type PVInstance extends Instance with
 	Orientation: Vector3
 	PivotOffset: CFrame
 	Position: Vector3
+end
+
+declare extern type VectorField2D extends PVInstance with
+	Bounds: Vector2
+	Falloff: number
+	LocalSpace: boolean
+	Radial: number
+	Tangential: number
+	Vector: Vector2
+end
+
+declare extern type VectorField3D extends PVInstance with
+	Axis: Vector3
+	Bounds: Vector3
+	Falloff: number
+	LocalSpace: boolean
+	Radial: number
+	Tangential: number
+	Vector: Vector3
 end
 
 declare extern type BasePart extends PVInstance with
@@ -1480,6 +1569,9 @@ declare extern type SpawnLocation extends Part with
 end
 
 declare extern type Model extends PVInstance with
+end
+
+declare extern type BreakGroup extends Model with
 end
 
 declare extern type WorldRoot extends Model with
@@ -1542,6 +1634,9 @@ declare extern type Sound extends Instance with
 	RollOffMinDistance: number
 	SoundId: string
 	Volume: number
+end
+
+declare extern type SoundGroup extends Instance with
 end
 
 declare extern type Attachment extends Instance with
@@ -1709,6 +1804,38 @@ declare extern type CloudCompute extends CloudProcedural with
 	Thickness: number
 end
 
+declare extern type Volume extends PVInstance with
+	Bounds: Vector3
+	Color: Color3
+	Density: number
+	Enabled: boolean
+	Extinction: number
+	Falloff: number
+	NoiseScale: number
+	NoiseStrength: number
+	Seed: number
+	ShadowSteps: number
+	Shape: Enum_VolumeShape
+	Steps: number
+end
+
+declare extern type ShaderLens extends PVInstance with
+	Enabled: boolean
+	Falloff: number
+	InnerRadius: number
+	Priority: number
+	Radius: number
+	Shader: string
+	Shape: Enum_LensShape
+	Spin: number
+	Strength: number
+end
+
+declare extern type GravitationalLens extends ShaderLens with
+	HorizonRadius: number
+	WarpRadius: number
+end
+
 declare extern type SkyboxTextures extends Instance with
 	Back: string
 	Down: string
@@ -1787,6 +1914,11 @@ declare extern type ShaderScript extends Instance with
 	Source: string
 end
 
+declare extern type LensShader extends Instance with
+	read Revision: number
+	Source: string
+end
+
 declare extern type EditableMesh extends Instance with
 	read ContentId: string
 	read TriangleCount: number
@@ -1810,6 +1942,12 @@ declare extern type LocalScript extends LuaSourceContainer with
 end
 
 declare extern type ModuleScript extends LuaSourceContainer with
+end
+
+declare extern type RemoteEvent extends Instance with
+end
+
+declare extern type BindableEvent extends Instance with
 end
 
 declare extern type ParticleEmitter extends Instance with
@@ -1845,6 +1983,7 @@ declare extern type ParticleEmitter extends Instance with
 	ShapePartial: number
 	ShapeStyle: Enum_ParticleEmitterShapeStyle
 	Size: NumberSequence
+	SoftParticles: boolean
 	Speed: NumberRange
 	SpreadAngle: Vector2
 	Squash: NumberSequence
@@ -2013,6 +2152,9 @@ declare extern type GuiObject extends GuiBase2d with
 	SizeConstraint: Enum_SizeConstraint
 	Visible: boolean
 	ZIndex: number
+	function VirtualHover(self): ()
+	function VirtualUnhover(self): ()
+	function VirtualMove(self, x: number, y: number): ()
 end
 
 declare extern type Frame extends GuiObject with
@@ -2041,10 +2183,73 @@ declare extern type ScrollingFrame extends Frame with
 	TopImage: string
 	VerticalScrollBarInset: Enum_ScrollBarInset
 	VerticalScrollBarPosition: Enum_VerticalScrollBarPosition
+	function VirtualScroll(self, notches: number): ()
+end
+
+-- Connect validates the typed graph immediately. The callback that reacts to
+-- a graph edit belongs on Changed, so no VM closure is retained by the graph.
+-- RefreshGroups applies group fitting and each node's InputPortLayout.
+declare extern type NodeCanvas extends Frame with
+	CanvasPosition: Vector2
+	GridSize: number
+	GridVisible: boolean
+	MaximumZoom: number
+	MinimumZoom: number
+	Zoom: number
+	function Connect(self, output: NodeCanvasPort, input: NodeCanvasPort): NodeCanvasLink
+	function Disconnect(self, input: NodeCanvasPort): boolean
+	function RefreshGroups(self): number
+end
+
+declare extern type NodeCanvasNode extends Frame with
+	BypassInput: string
+	BypassMode: Enum_NodeBypassMode
+	BypassOutput: string
+	Enabled: boolean
+	InputPortLayout: Enum_InputPortLayout
+	MinimumSize: Vector2
+	NodeId: string
+	NodeType: string
+	Resizable: boolean
+	Title: string
+end
+
+declare extern type NodeCanvasGroup extends Frame with
+	GroupId: string
+	Layout: Enum_NodeGroupLayout
+	Padding: Vector2
+	Title: string
+end
+
+declare extern type NodeCanvasPort extends GuiObject with
+	Direction: Enum_NodePortDirection
+	Edge: Enum_NodePortEdge
+	MaxConnections: number
+	PortId: string
+	ValueType: string
+end
+
+declare extern type NodeCanvasLink extends Instance with
+	FromDirection: Enum_NodePortDirection
+	FromNode: string
+	FromPort: string
+	LineColor3: Color3
+	LineThickness: number
+	LineTransparency: number
+	ToDirection: Enum_NodePortDirection
+	ToNode: string
+	ToPort: string
 end
 
 declare extern type GuiButton extends GuiObject with
 	AutoButtonColor: boolean
+	function EmulateClick(self): ()
+	function VirtualLeftClick(self): ()
+	function VirtualLeftHold(self): ()
+	function VirtualLeftRelease(self): ()
+	function VirtualRightClick(self): ()
+	function VirtualRightHold(self): ()
+	function VirtualRightRelease(self): ()
 end
 
 declare extern type TextButton extends GuiButton with
@@ -2148,6 +2353,10 @@ declare extern type TextBox extends GuiObject with
 	TextWrapped: boolean
 	TextXAlignment: Enum_TextXAlignment
 	TextYAlignment: Enum_TextYAlignment
+	function VirtualFocus(self): ()
+	function VirtualUnfocus(self): ()
+	function VirtualText(self, text: string): ()
+	function VirtualSubmit(self): ()
 end
 
 declare extern type ViewportFrame extends GuiObject with
@@ -2331,6 +2540,9 @@ declare extern type UIDragDetector extends UIComponent with
 	MaxDragTranslation: Vector2
 	MinDragTranslation: Vector2
 	ResponseStyle: Enum_UIDragDetectorDragStyleResponse
+	function VirtualDragBegin(self, x: number, y: number): ()
+	function VirtualDragContinue(self, x: number, y: number, dx: number, dy: number): ()
+	function VirtualDragEnd(self, x: number, y: number, dx: number, dy: number): ()
 end
 
 declare extern type Service extends Instance with
@@ -2392,6 +2604,9 @@ declare extern type ServerStorage extends Service with
 end
 
 declare extern type StarterGui extends Service with
+end
+
+declare extern type ChangeHistoryService extends Service with
 end
 
 declare extern type StarterPack extends Service with
@@ -2460,6 +2675,20 @@ declare extern type MessagingService with
 end
 
 declare extern type TeleportService with
+	-- A correlated authority result, delivered at the next client script beat.
+	TeleportResult: TeleportResultSignal
+
+	-- The authority request a client made. The server chooses whether it was
+	-- handled, and only `Processed` makes the player leave this world.
+	TeleportRequested: ((request: {
+		Player: Instance,
+		Place: string,
+		Data: any,
+	}) -> {
+		Decision: Enum_TeleportRequestDecision,
+		Message: string?,
+	})?
+
 	-- Sends a player to another world in this universe, with an optional
 	-- payload. The player is removed from *this* world by the call: nothing
 	-- crosses but a name and the data, and the destination rebuilds them.
@@ -2473,6 +2702,15 @@ declare extern type TeleportService with
 	-- door. The server's half of the call above: the authority decides where an
 	-- arriving character stands and needs to see what the sender wrote.
 	function GetTeleportData(self, player: Instance): any
+end
+
+declare extern type TeleportResultSignal with
+	function Connect(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
+	function Once(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two
@@ -2906,6 +3144,7 @@ type Services = {
 	ServerScriptService: ServerScriptService,
 	ServerStorage: ServerStorage,
 	StarterGui: StarterGui,
+	ChangeHistoryService: ChangeHistoryService,
 	StarterPack: StarterPack,
 	StarterPlayer: StarterPlayer,
 	StarterPlayerScripts: StarterPlayerScripts,
@@ -2932,9 +3171,12 @@ type Services = {
 
 type CreatableInstances = {
 	Folder: Folder,
+	VectorField2D: VectorField2D,
+	VectorField3D: VectorField3D,
 	Part: Part,
 	SpawnLocation: SpawnLocation,
 	Model: Model,
+	BreakGroup: BreakGroup,
 	WorldModel: WorldModel,
 	Tool: Tool,
 	MeshPart: MeshPart,
@@ -2943,6 +3185,7 @@ type CreatableInstances = {
 	SurfaceCamera: SurfaceCamera,
 	Portal: Portal,
 	Sound: Sound,
+	SoundGroup: SoundGroup,
 	Attachment: Attachment,
 	Material: Material,
 	Humanoid: Humanoid,
@@ -2970,6 +3213,9 @@ type CreatableInstances = {
 	Clouds: Clouds,
 	CloudProcedural: CloudProcedural,
 	CloudCompute: CloudCompute,
+	Volume: Volume,
+	ShaderLens: ShaderLens,
+	GravitationalLens: GravitationalLens,
 	SkyboxTextures: SkyboxTextures,
 	SkyboxCompute: SkyboxCompute,
 	BallSocketConstraint: BallSocketConstraint,
@@ -2981,11 +3227,14 @@ type CreatableInstances = {
 	Weld: Weld,
 	WeldConstraint: WeldConstraint,
 	ShaderScript: ShaderScript,
+	LensShader: LensShader,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,
 	Script: Script,
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,
+	RemoteEvent: RemoteEvent,
+	BindableEvent: BindableEvent,
 	ParticleEmitter: ParticleEmitter,
 	Beam: Beam,
 	Trail: Trail,
@@ -3004,6 +3253,11 @@ type CreatableInstances = {
 	Frame: Frame,
 	CanvasGroup: CanvasGroup,
 	ScrollingFrame: ScrollingFrame,
+	NodeCanvas: NodeCanvas,
+	NodeCanvasNode: NodeCanvasNode,
+	NodeCanvasGroup: NodeCanvasGroup,
+	NodeCanvasPort: NodeCanvasPort,
+	NodeCanvasLink: NodeCanvasLink,
 	TextButton: TextButton,
 	ImageButton: ImageButton,
 	TextLabel: TextLabel,

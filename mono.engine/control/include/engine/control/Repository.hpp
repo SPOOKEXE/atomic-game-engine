@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward control API. Repository hosts keep this
+// complete content-control contract available to their adapters.
+
 // Where a control feature's program was built from, when it was built from a checkout.
 //
 // **Two of the tools this module registers only exist inside a repository.** A

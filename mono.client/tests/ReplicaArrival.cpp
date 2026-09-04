@@ -340,11 +340,16 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// a reading of this process's cadence, in `gui.PageMotion`'s sense
 		// rather than a fact about the world. The replica runs its own
 		// scripts on its own clock.
+		// **The teleport callback and its outbox are local for different reasons.**
+		// The handler is a retained VM callback that a replica cannot reconstruct;
+		// the outbox is unsent client traffic that the authority must never echo
+		// into another client.
 		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
 							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
 							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
 							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache" ||
-							  name == "script.ScriptClock";
+							  name == "script.ScriptClock" || name == "script.TeleportRequestHandler" ||
+							  name == "script.TeleportRequestOutbox";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

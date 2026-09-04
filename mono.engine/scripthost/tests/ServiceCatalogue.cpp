@@ -126,8 +126,10 @@ TEST_CASE("runtime profiles gate host-sensitive services", "[scripting][services
 			const auto client = MakeRuntime(clientStore, language, clientLimits);
 			REQUIRE(client != nullptr);
 			CHECK(client->Can(ScriptCapabilities::Input));
+			CHECK(client->Can(ScriptCapabilities::Teleport));
 			CHECK_FALSE(client->Can(ScriptCapabilities::Persistence));
 			CHECK(client->Run(Fetch(language, "ContextActionService").c_str()));
+			CHECK(client->Run(Fetch(language, "TeleportService").c_str()));
 			CHECK_FALSE(client->Run(Fetch(language, "DataStoreService").c_str()));
 			CHECK(client->LastError().find("'persistence' script capability") != std::string::npos);
 
@@ -142,6 +144,7 @@ TEST_CASE("runtime profiles gate host-sensitive services", "[scripting][services
 			CHECK(plugin->Can(ScriptCapabilities::PluginHost));
 			CHECK(plugin->Can(ScriptCapabilities::StudioDebug));
 			CHECK_FALSE(plugin->Can(ScriptCapabilities::Messaging));
+			CHECK_FALSE(plugin->Can(ScriptCapabilities::Teleport));
 			CHECK_FALSE(plugin->Run(Fetch(language, "CrossWorldService").c_str()));
 			CHECK(plugin->LastError().find("'messaging' script capability") != std::string::npos);
 		}
@@ -264,11 +267,18 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 
 		// Signals and live properties: reachable and not functions.
 		std::vector<const char *> Values;
+
+		// A write-only property still has to be installed. Its getter may answer
+		// nil, so reach it by assigning the shape its setter accepts.
+		std::vector<const char *> WritableValues = {};
 	};
 
 	const std::vector<Surface> SURFACES = {
 		{"MessagingService", {"PublishAsync", "SubscribeAsync"}, {}},
-		{"TeleportService", {"Teleport", "GetLocalPlayerTeleportData", "GetTeleportData"}, {}},
+		{"TeleportService",
+		 {"Teleport", "GetLocalPlayerTeleportData", "GetTeleportData"},
+		 {"TeleportResult"},
+		 {"TeleportRequested"}},
 		{"MemoryStoreService", {"GetAsync", "SetAsync", "UpdateAsync", "RemoveAsync"}, {}},
 		{"DataStoreService", {"GetAsync", "SetAsync", "RemoveAsync"}, {}},
 		{"CrossWorldService", {"OpenChannel", "CloseChannel", "SendAsync"}, {}},
@@ -386,6 +396,25 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 					language == Language::Luau
 						? "assert(" + reached + " ~= nil, 'missing')"
 						: "if (" + reached + " === undefined) { throw new Error('missing'); }";
+
+				INFO(source);
+				const bool ok = runtime->Run(source.c_str());
+				INFO(runtime->LastError());
+				CHECK(ok);
+			}
+
+			for (const char *member : surface.WritableValues) {
+				const std::string reached =
+					std::string(language == Language::Luau ? "game:GetService('" : "game.GetService('") +
+					surface.Service + "')." + member;
+				const std::string source =
+					language == Language::Luau
+						? reached +
+							  " = function() return { Decision = Enum.TeleportRequestDecision.Denied } "
+							  "end\n" +
+							  reached + " = nil"
+						: reached + " = () => ({ Decision: Enum.TeleportRequestDecision.Denied });\n" +
+							  reached + " = null;";
 
 				INFO(source);
 				const bool ok = runtime->Run(source.c_str());

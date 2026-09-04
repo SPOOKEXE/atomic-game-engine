@@ -44,6 +44,20 @@ namespace {
 	}
 }
 
+TEST_CASE("a sound group preserves imported sound hierarchy", "[scene][sound]") {
+	RegisterSceneClasses();
+	Store store("sound.group");
+
+	const ClassId groupClass = Classes::Find(Name("SoundGroup"));
+	REQUIRE(groupClass.IsValid());
+	const Entity group = store.CreateInstance(groupClass, "Interface");
+	REQUIRE(group != NULL_ENTITY);
+
+	const Entity sound = NewSound(store);
+	REQUIRE(store.SetParent(sound, group));
+	CHECK(store.ParentOf(sound) == group);
+}
+
 TEST_CASE("a sound is an instance and not a PVInstance", "[scene][sound]") {
 	RegisterSceneClasses();
 

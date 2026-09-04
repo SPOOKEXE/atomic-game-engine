@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward replication API. Client simulation hosts
+// share this complete prediction contract.
+
 // The client's run-ahead, and what happens when the server disagrees.
 //
 // **The local player and nothing else.** Everything else is interpolated

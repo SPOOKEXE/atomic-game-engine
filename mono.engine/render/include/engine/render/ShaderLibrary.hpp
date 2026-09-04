@@ -89,6 +89,11 @@ namespace engine::render {
 		// script in the world.
 		bool BuiltIn = false;
 
+		// Whether a world-local source supplied this module. This remains true
+		// for a source compilation error so removing that source can replace its
+		// old result with the built-in fallback or a missing-source diagnostic.
+		bool Authored = false;
+
 		// Static requirements and cost indicators reflected from the compiled
 		// module. Present for authored and built-in shaders alike.
 		ShaderCapabilities Capabilities;
@@ -116,6 +121,18 @@ namespace engine::render {
 	// @param name The name a material selects.
 	// @return `true` when `BuiltInShaderNames` contains it.
 	bool IsBuiltInShader(std::string_view name);
+
+	// The lens shaders this engine ships. These use the lens-pass binding contract,
+	// which is intentionally distinct from material shaders.
+	//
+	// @return The names, in declaration order.
+	std::span<const std::string_view> BuiltInLensShaderNames();
+
+	// Whether the engine ships a lens shader under this name.
+	//
+	// @param name The name a `ShaderLens` selects.
+	// @return `true` when `BuiltInLensShaderNames` contains it.
+	bool IsBuiltInLensShader(std::string_view name);
 
 	// Every shader a world's materials name, resolved and kept.
 	//
@@ -154,6 +171,14 @@ namespace engine::render {
 		//         handing anything to a device.
 		size_t Refresh(ecs::Store &store);
 
+		// Resolves every lens program named by an enabled `ShaderLens`. Lens
+		// modules live in a separate cache because their fragment interface has
+		// depth and fixed pass data rather than the material interface.
+		//
+		// @param store The world.
+		// @return How many lens modules changed, compiled, loaded or dropped.
+		size_t RefreshLenses(ecs::Store &store);
+
 		// The module a name resolved to, or null.
 		//
 		// **Null means "nothing has asked for it"**, which is not the same as a
@@ -163,6 +188,10 @@ namespace engine::render {
 		// @param name The shader's name.
 		// @return The module, valid until the next `Refresh`.
 		const ShaderModule *Find(const core::Name &name) const;
+
+		// The lens module a name resolved to, or null when no enabled lens asks
+		// for it.
+		const ShaderModule *FindLens(const core::Name &name) const;
 
 		// The names whose modules changed during the last `Refresh`.
 		//
@@ -176,10 +205,16 @@ namespace engine::render {
 		// @return The names, valid until the next `Refresh`.
 		std::span<const core::Name> Changed() const;
 
+		// The lens modules whose state changed during the last `RefreshLenses`.
+		std::span<const core::Name> ChangedLenses() const;
+
 		// How many modules the library holds.
 		//
 		// @return The count.
 		size_t Size() const;
+
+		// How many lens modules the library holds.
+		size_t LensSize() const;
 
 	  private:
 		struct Impl;

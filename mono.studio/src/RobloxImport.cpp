@@ -6,6 +6,7 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -119,6 +120,8 @@ namespace studio {
 		}
 
 		using GapKey = std::tuple<std::string, std::string, std::string, std::string>;
+		using SkipKey = std::tuple<std::string, std::string, std::string>;
+		using ClassCounts = std::map<std::string, size_t, std::less<>>;
 
 		void AddGap(std::map<GapKey, size_t> &gaps, const GapKey &key) {
 			const auto [found, inserted] = gaps.try_emplace(key, 0);
@@ -131,6 +134,25 @@ namespace studio {
 			for (const auto &[key, count] : gaps) {
 				const auto &[className, propertyName, sourceType, expectedType] = key;
 				out.push_back({className, propertyName, sourceType, expectedType, count});
+			}
+			return out;
+		}
+
+		std::vector<RobloxClassGap> FinishClassCounts(const ClassCounts &counts) {
+			std::vector<RobloxClassGap> out;
+			out.reserve(counts.size());
+			for (const auto &[className, count] : counts) {
+				out.push_back({className, count});
+			}
+			return out;
+		}
+
+		std::vector<RobloxPropertySkip> FinishSkippedProperties(const std::map<SkipKey, size_t> &skips) {
+			std::vector<RobloxPropertySkip> out;
+			out.reserve(skips.size());
+			for (const auto &[key, count] : skips) {
+				const auto &[className, propertyName, reason] = key;
+				out.push_back({className, propertyName, reason, count});
 			}
 			return out;
 		}
@@ -203,6 +225,12 @@ namespace studio {
 			}
 			const auto mapped = mappings.find(std::string(source));
 			return mapped == mappings.end() ? FolderClass() : mapped->second;
+		}
+
+		bool UsesFolderFallback(const ClassTable &mappings, std::string_view source) {
+			const engine::ecs::ClassId native =
+				engine::ecs::Classes::Find(engine::core::Name(std::string(source)));
+			return !native.IsValid() && !mappings.contains(std::string(source));
 		}
 
 		std::string ReplacementKey(std::string_view path, std::string_view property) {
@@ -320,8 +348,19 @@ namespace studio {
 			RobloxImportResult &Report;
 			const RobloxImportOptions &Options;
 			std::unordered_set<std::string> SourceKeys;
+			ClassCounts FolderFallbackClasses;
+			std::map<SkipKey, size_t> SkippedProperties;
 			std::string Error;
 		};
+
+		void SkipProperty(
+			BuildState &state,
+			const engine::bake::RobloxInstance &instance,
+			const engine::bake::RobloxProperty &property,
+			std::string_view reason
+		) {
+			state.SkippedProperties[{instance.ClassName, property.Name, std::string(reason)}]++;
+		}
 
 		std::string UniqueSourceKey(BuildState &state, const std::string &path) {
 			if (state.SourceKeys.insert(path).second) {
@@ -389,8 +428,12 @@ namespace studio {
 			}
 
 			if (instance == NULL_ENTITY) {
+				const bool fallback = UsesFolderFallback(state.Classes, node.ClassName);
 				const engine::ecs::ClassId classId = ResolveClass(state.Classes, node.ClassName);
 				instance = state.Store.CreateInstance(classId, node.Name);
+				if (instance != NULL_ENTITY && fallback) {
+					state.FolderFallbackClasses[node.ClassName]++;
+				}
 			}
 			if (instance == NULL_ENTITY) {
 				state.Error = "the world refused instance " + path;
@@ -405,7 +448,7 @@ namespace studio {
 				const engine::ecs::PropertyDescriptor *descriptor =
 					RobloxPropertyNamed(state.Store, instance, property.Name);
 				if (descriptor == nullptr) {
-					state.Report.SkippedProperties++;
+					SkipProperty(state, node, property, "no matching engine property");
 					continue;
 				}
 
@@ -423,14 +466,24 @@ namespace studio {
 					const std::string &group = mapped.As<std::string>();
 					if (group.empty() ||
 						engine::spatial::CollisionGroups::Register(group) == engine::spatial::NO_GROUP) {
-						state.Report.SkippedProperties++;
+						SkipProperty(state, node, property, "collision group is empty or unavailable");
 						continue;
 					}
 				}
 				engine::game::PropertyValue value;
-				if (!ToGameValue(*descriptor, mapped, value) ||
-					!engine::game::WriteAuthoredProperty(state.Store, instance, *descriptor, value)) {
-					state.Report.SkippedProperties++;
+				if (!Compatible(descriptor->Type, mapped.Kind())) {
+					SkipProperty(state, node, property, "source value type is incompatible");
+					continue;
+				}
+				if (!ToGameValue(*descriptor, mapped, value)) {
+					const char *reason = descriptor->Type == PropertyType::Enum
+											 ? "engine enum does not contain value"
+											 : "source value cannot be represented";
+					SkipProperty(state, node, property, reason);
+					continue;
+				}
+				if (!engine::game::WriteAuthoredProperty(state.Store, instance, *descriptor, value)) {
+					SkipProperty(state, node, property, "engine property rejected value");
 					continue;
 				}
 				state.Report.Properties++;
@@ -722,7 +775,7 @@ namespace studio {
 		engine::effects::RegisterEffectClasses();
 		(void)FolderClass();
 		const ClassTable mappedClasses = ResolveClassMappings(classMappings);
-		std::map<std::string, size_t, std::less<>> classCounts;
+		ClassCounts classCounts;
 		std::map<GapKey, size_t> missingProperties;
 		std::map<GapKey, size_t> conflictingProperties;
 
@@ -766,7 +819,8 @@ namespace studio {
 		analysis.Classes = classCounts.size();
 		for (const auto &[className, count] : classCounts) {
 			analysis.Instances += count;
-			if (!engine::ecs::Classes::Find(engine::core::Name(className)).IsValid()) {
+			if (!engine::ecs::Classes::Find(engine::core::Name(className)).IsValid() &&
+				!mappedClasses.contains(className)) {
 				analysis.MissingClasses.push_back({className, count});
 			}
 		}
@@ -930,6 +984,11 @@ namespace studio {
 		engine::script::RegisterScriptComponents();
 		engine::game::RegisterGameClasses();
 		engine::effects::RegisterEffectClasses();
+		// Service roots are non-creatable fixtures. Install them before walking
+		// source roots so a Roblox `GuiService` or `ChangeHistoryService` is
+		// reused instead of being refused as a new instance.
+		(void)engine::scene::InstallServices(store);
+		(void)engine::gui::InstallGuiServices(store);
 		(void)FolderClass();
 		RobloxImportResult candidate;
 		const ClassTable mappedClasses = ResolveClassMappings(classMappings, &candidate.Notes);
@@ -945,7 +1004,7 @@ namespace studio {
 			);
 		}
 
-		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}};
+		BuildState state{store, replacements, mappedClasses, candidate, options, {}, {}, {}, {}};
 		for (const engine::bake::RobloxInstance &root : model.Roots) {
 			const engine::ecs::Entity existing = store.FindFirstRoot(root.Name);
 			if (existing != engine::ecs::NULL_ENTITY) {
@@ -964,6 +1023,8 @@ namespace studio {
 				return false;
 			}
 		}
+		candidate.FolderFallbackClasses = FinishClassCounts(state.FolderFallbackClasses);
+		candidate.SkippedProperties = FinishSkippedProperties(state.SkippedProperties);
 
 		out = std::move(candidate);
 		error.clear();
@@ -1231,10 +1292,13 @@ namespace studio {
 			} else {
 				RobloxImportApplied = true;
 				MarkModified();
-				RobloxImportStatus = std::to_string(report.Instances) + " instances imported, " +
-									 std::to_string(report.Scripts) + " scripts staged, " +
-									 std::to_string(report.DisabledScripts) + " scripts disabled, " +
-									 std::to_string(report.Properties) + " properties applied";
+				RobloxImportStatus =
+					std::to_string(report.Instances) + " instances imported, " +
+					std::to_string(report.Scripts) + " scripts staged, " +
+					std::to_string(report.DisabledScripts) + " scripts disabled, " +
+					std::to_string(report.Properties) + " properties applied, " +
+					std::to_string(report.FolderFallbackClasses.size()) + " fallback class groups, " +
+					std::to_string(report.SkippedProperties.size()) + " skipped property groups";
 			}
 		}
 		ImGui::EndDisabled();

@@ -42,6 +42,7 @@
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <numbers>
 #include <optional>
 #include <studio/Editor.hpp>
@@ -970,6 +971,7 @@ namespace {
 	// there is no backend here.
 	struct Frame {
 		ImGuiContext *Context = nullptr;
+		bool Open = false;
 
 		Frame() {
 			Context = ImGui::CreateContext();
@@ -986,6 +988,12 @@ namespace {
 
 		~Frame() {
 			if (Context != nullptr) {
+				ImGui::SetCurrentContext(Context);
+				if (Open && GImGui->WithinFrameScope) {
+					// `HoldKey` deliberately leaves the input frame open for
+					// `DrivePlayer`. Close it before another suite reuses ImGui.
+					ImGui::EndFrame();
+				}
 				ImGui::DestroyContext(Context);
 			}
 		}
@@ -1002,6 +1010,7 @@ namespace {
 			// A second frame, so the event queued above is in `KeysData` while
 			// the frame is open - which is the state `DrivePlayer` reads.
 			ImGui::NewFrame();
+			Open = true;
 		}
 	};
 }

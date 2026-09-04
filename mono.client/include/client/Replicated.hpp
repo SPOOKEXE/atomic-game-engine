@@ -73,14 +73,35 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Play.hpp>
+#include <engine/replication/Protocol.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/script/Runtime.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <span>
 
 namespace client {
+
+	// Client-local state for the one character a connection may predict.
+	//
+	// The authority overwrites this from each applied snapshot, then this state
+	// replays only the input submissions the connector has not acknowledged.
+	// It is a render overlay, not a second entity or a replica physics pass.
+	struct LocalPlayerPrediction {
+		engine::ecs::Entity Player;
+		engine::ecs::Entity Root;
+		engine::core::CFrame Frame;
+		engine::core::Vector3 Linear;
+		engine::core::Vector3 Angular;
+		engine::scene::Humanoid Humanoid;
+		uint64_t AuthorityTick = 0;
+		bool Active = false;
+	};
 
 	// Installs the presentation half of a replicated world, and opens its VM.
 	//
@@ -137,6 +158,17 @@ namespace client {
 	//        `engine::replication::Connector::Applied`. Zero does nothing:
 	//        the snapshot has not landed and there is no state to record.
 	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick);
+
+	// Replaces the local prediction with the just-applied authoritative player
+	// state, then replays every still-unacknowledged movement input.
+	void ReconcileLocalPlayerPrediction(
+		engine::ecs::Store &store, uint64_t tick, std::span<const engine::replication::Input> unconfirmed
+	);
+
+	// Advances the local overlay as soon as a move submission was accepted by
+	// the transport. Inputs refused before reaching the connector are not
+	// predicted because the authority cannot consume them.
+	void PredictLocalPlayerMove(engine::ecs::Store &store, const engine::game::MoveInput &move, float delta);
 
 	// Points the replica's own camera at wherever this client is looking.
 	//

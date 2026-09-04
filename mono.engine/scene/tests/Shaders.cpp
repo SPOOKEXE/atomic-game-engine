@@ -36,6 +36,9 @@ using engine::ecs::NULL_ENTITY;
 using engine::ecs::PropertyDescriptor;
 using engine::ecs::Store;
 using engine::scene::DemandedShaders;
+using engine::scene::LensShaderClass;
+using engine::scene::LensShaderNamed;
+using engine::scene::LensShaderTextOf;
 using engine::scene::MaterialClass;
 using engine::scene::MaterialRef;
 using engine::scene::ResolveMaterials;
@@ -55,6 +58,7 @@ namespace {
 		engine::scene::RegisterSceneComponents();
 		engine::scene::RegisterSceneClasses();
 		ShaderScriptClass();
+		LensShaderClass();
 		return Store(name);
 	}
 
@@ -98,6 +102,18 @@ TEST_CASE("a world can hold a shader script and find it by name", "[scene][shade
 	REQUIRE(held.Found);
 	REQUIRE(held.Code == "void main() {}");
 	REQUIRE_FALSE(ShaderTextOf(store, Name("Unlit")).Found);
+}
+
+TEST_CASE("a lens shader is selected independently from a material shader", "[scene][shaders]") {
+	Store store = Fresh("shaders.lens");
+	const Entity material = Author(store, "Shared", "material");
+	const Entity lens = store.CreateInstance(LensShaderClass(), "Shared");
+	REQUIRE(lens != NULL_ENTITY);
+	REQUIRE(SetShaderSource(store, lens, "lens"));
+
+	REQUIRE(LensShaderNamed(store, Name("Shared")) == lens);
+	REQUIRE(LensShaderTextOf(store, Name("Shared")).Code == "lens");
+	CHECK(ShaderScriptNamed(store, Name("Shared")) == material);
 }
 
 TEST_CASE("editing a shader script moves its revision", "[scene][shaders]") {

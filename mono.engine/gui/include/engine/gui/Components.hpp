@@ -478,6 +478,109 @@ namespace engine::gui {
 		uint8_t Reserved[1] = {};
 	};
 
+	// The viewport state shared by every node graph beneath this object.
+	//
+	// The graph's nodes remain ordinary child instances. Their positions and
+	// ports are data a script can save or replicate, while this component owns
+	// only the view a person is currently working in.
+	//
+	// @since v0.23
+	struct NodeCanvas {
+		// Canvas-space coordinate shown at this object's top-left corner.
+		core::Vector2 Pan;
+
+		// Canvas pixels per screen pixel. The router keeps this in range.
+		float Zoom = 1.0f;
+		float MinimumZoom = 0.25f;
+		float MaximumZoom = 2.0f;
+
+		// Distance between optional background grid lines in canvas pixels.
+		float GridSize = 32.0f;
+		bool GridVisible = true;
+		uint8_t Reserved[3] = {};
+	};
+
+	// The stable identity and presentation data of one graph node.
+	//
+	// `Id` is a name rather than an entity handle because a link survives a
+	// snapshot and finds its endpoint again after the destination assigns new
+	// local entity numbers.
+	//
+	// @since v0.23
+	struct NodeCanvasNode {
+		core::Name Id;
+		core::Name Type;
+		std::string Title;
+
+		// A disabled node is execution policy. Bypass has a declared local input
+		// and output so a runtime can preserve a graph's data flow deliberately.
+		bool Enabled = true;
+		NodeBypassMode BypassMode = NodeBypassMode::None;
+		uint8_t Reserved[2] = {};
+		core::Name BypassInput;
+		core::Name BypassOutput;
+
+		core::Vector2 MinimumSize{80.0f, 48.0f};
+		bool Resizable = true;
+		InputPortLayout InputLayout = InputPortLayout::Manual;
+		uint8_t LayoutReserved[2] = {};
+	};
+
+	// A named frame that owns graph nodes as direct children.
+	//
+	// Its ordinary `BackgroundColor3` and `BackgroundTransparency` properties
+	// provide the group colour. `Layout` is opt-in because an author moving one
+	// node should not unexpectedly move every group that contains it.
+	//
+	// @since v0.23
+	struct NodeCanvasGroup {
+		core::Name Id;
+		std::string Title;
+		core::Vector2 Padding{16.0f, 16.0f};
+		NodeGroupLayout Layout = NodeGroupLayout::Manual;
+		uint8_t Reserved[3] = {};
+	};
+
+	// One typed terminal on a node. The port itself is an instance child of its
+	// node, which lets a UI author style it with the normal GUI properties.
+	//
+	// @since v0.23
+	struct NodeCanvasPort {
+		core::Name Id;
+		core::Name ValueType;
+		NodePortDirection Direction = NodePortDirection::Input;
+		NodePortEdge Edge = NodePortEdge::Top;
+
+		// Zero permits every wire; one retains the usual socket replacement
+		// behaviour, and larger values retain that many independent inputs.
+		// Negative values are invalid and `ConnectNodePorts` refuses them.
+		int32_t MaxConnections = 1;
+	};
+
+	// A wire between two stable node and port identifiers.
+	//
+	// Nothing here is an entity pointer. Links cross snapshots and replication
+	// as names, then `ConnectNodePorts` resolves their local instances when it
+	// validates an edit. A port name is unique only within one direction, so the
+	// saved endpoint also retains its direction instead of relying on child order.
+	//
+	// @since v0.23
+	struct NodeCanvasLink {
+		core::Name FromNode;
+		core::Name FromPort;
+		NodePortDirection FromDirection = NodePortDirection::Output;
+		uint8_t FromReserved[3] = {};
+		core::Name ToNode;
+		core::Name ToPort;
+		NodePortDirection ToDirection = NodePortDirection::Input;
+		uint8_t ToReserved[3] = {};
+
+		// The renderer uses this for every segment that makes up the wire.
+		core::Color3 LineColor{0.75f, 0.75f, 0.75f};
+		float LineTransparency = 0.0f;
+		float LineThickness = 2.0f;
+	};
+
 	// What the layout worked out about a scrolling frame.
 	//
 	// **Derived, like `Resolved`, and written by the same pass.** Three

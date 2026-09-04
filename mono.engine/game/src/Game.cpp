@@ -5,6 +5,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -909,6 +910,12 @@ namespace engine::game {
 		// would refuse a perfectly good file with "no class named ScreenGui",
 		// which reads as a corrupt save rather than as a missing registration.
 		gui::RegisterGuiClasses();
+
+		// `Decal` and `Texture` are authored face images, not renderer state. A
+		// world document may name either, so their class tree belongs beside the
+		// other document-wide registrations rather than behind a client setup
+		// path that happens to draw ribbons.
+		effects::RegisterEffectClasses();
 
 		script::ScriptClass();
 

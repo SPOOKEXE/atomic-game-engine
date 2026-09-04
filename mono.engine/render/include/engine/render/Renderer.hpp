@@ -556,8 +556,11 @@ namespace engine::render {
 		// stops a column of smoke rolling when the camera does.
 		bool WorldUp = false;
 
+		// Whether an untextured quad receives the analytic soft-disc mask.
+		bool SoftParticles = false;
+
 		// Explicit padding, for the reason every `Reserved` in the engine exists.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved = 0;
 	};
 
 	// An offscreen colour target the world is drawn into instead of the window.
@@ -1131,6 +1134,16 @@ namespace engine::render {
 		uint64_t TransferBufferAllocations = 0;
 		uint64_t TextureAllocations = 0;
 		//@}
+	};
+
+	// One content mesh's live instance rows and the latest staged GPU delta.
+	// A row is one `GpuInstance`, so `StagedBytes` is exact transfer payload.
+	// @client
+	struct AssetResidencyStatistics {
+		core::Name Name;
+		uint32_t ResidentInstances = 0;
+		uint32_t StagedInstances = 0;
+		uint64_t StagedBytes = 0;
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
@@ -1789,6 +1802,21 @@ namespace engine::render {
 		// @since v0.15
 		bool HasShader(const core::Name &name) const;
 
+		// Registers one `LensShader` fragment module. Lens programs have exactly
+		// two sampler slots, HDR scene colour then linear depth, and one pushed
+		// `LensPassUniforms` block. They cannot choose targets or graph order.
+		//
+		// @param name  What a `ShaderLens` names.
+		// @param spirv The compiled fragment module.
+		// @return `false` when the module cannot form the constrained pipeline.
+		bool AddLensShader(const core::Name &name, std::span<const uint32_t> spirv);
+
+		// Forgets a registered lens pipeline.
+		bool DropLensShader(const core::Name &name);
+
+		// Whether a lens pipeline is registered under this name.
+		bool HasLensShader(const core::Name &name) const;
+
 		// Replaces the engine's own tonemap with this shader, for every
 		// frame drawn until the next call.
 		//
@@ -1880,6 +1908,10 @@ namespace engine::render {
 		// The snapshot is cheap enough for the heap profiler's one-second sample,
 		// but it takes the tracker's lock and is not a per-draw counter.
 		GpuMemoryStatistics MemoryStatistics() const;
+
+		// Reports resident rows and the latest staged delta for each mesh the
+		// renderer has seen. The snapshot is for diagnostics, not a draw path.
+		std::vector<AssetResidencyStatistics> AssetResidencies() const;
 
 		// Appends the logical GPU section to an existing process heap report.
 		//

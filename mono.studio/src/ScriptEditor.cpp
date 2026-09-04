@@ -35,12 +35,6 @@ namespace studio {
 		return nullptr;
 	}
 
-	namespace {
-		void DrawScriptSource(
-			std::string_view text, const CodeEdit &edit, ImVec2 fieldMin, ImVec2 fieldSize, ImGuiID fieldId
-		);
-	}
-
 	void Editor::DrawScripts() {
 		if (!ShowScripts) {
 			return;
@@ -90,6 +84,17 @@ namespace studio {
 			ImGui::PushID(static_cast<int>(index));
 
 			bool open = true;
+			if (DockFirstScript > 0 && static_cast<int>(index) == ActiveScript) {
+				if (const ImGuiWindow *viewport = ImGui::FindWindowByName(ViewportIdentity(0));
+					viewport != nullptr && viewport->DockId != 0) {
+					// The first document replaces the main viewport as a tab. Later
+					// documents keep that editor's tab strip rather than redocking it.
+					ImGui::SetNextWindowDockID(viewport->DockId, ImGuiCond_Always);
+					DockFirstScript = 0;
+				} else {
+					DockFirstScript--;
+				}
+			}
 			if (focus && static_cast<int>(index) == ActiveScript) {
 				ImGui::SetNextWindowFocus();
 			}
@@ -440,6 +445,12 @@ namespace studio {
 	}
 
 	namespace {
+		float CodeGlyphAdvance() {
+			// CalcTextSize rounds up. Multiplying that width makes each column drift
+			// from the fractional advances used by text drawing and input hit tests.
+			ImFontBaked *font = ImGui::GetFontBaked();
+			return font->GetCharAdvance('0') * (ImGui::GetFontSize() / font->Size);
+		}
 
 		// What a VM of one language installs, walked once.
 		//
@@ -525,137 +536,135 @@ namespace studio {
 			return engine::ui::ColourOf(engine::ui::ThemeColour::Text);
 		}
 
-		void DrawScriptSource(
-			const std::string_view text,
-			const CodeEdit &edit,
-			const ImVec2 fieldMin,
-			const ImVec2 fieldSize,
-			const ImGuiID fieldId
-		) {
-			ImGuiWindow *code = FindCodeField(fieldId);
-			if (code == nullptr) {
-				return;
-			}
+	}
 
-			const float rowHeight = ImGui::GetTextLineHeight();
-			const float glyph = ImGui::CalcTextSize("0").x;
-			const ImVec2 padding = ImGui::GetStyle().FramePadding;
-			const ImVec2 origin(
-				fieldMin.x + padding.x - code->Scroll.x, fieldMin.y + padding.y - code->Scroll.y
-			);
-			// Append to the multiline field's child window. Drawing on the parent
-			// puts the child background over the syntax layer when ImGui submits
-			// its windows.
-			ImDrawList *draw = code->DrawList;
-			draw->PushClipRect(fieldMin, ImVec2(fieldMin.x + fieldSize.x, fieldMin.y + fieldSize.y), true);
-
-			size_t lineStart = 0;
-			size_t line = 0;
-			std::string_view blockCommentEnd;
-			while (lineStart <= text.size()) {
-				const size_t lineEnd = text.find('\n', lineStart);
-				const size_t end = lineEnd == std::string_view::npos ? text.size() : lineEnd;
-				size_t at = lineStart;
-				while (at < end) {
-					const char character = text[at];
-					ScriptToken token = ScriptToken::Plain;
-					size_t tokenEnd = at + 1;
-
-					if (!blockCommentEnd.empty()) {
-						token = ScriptToken::Comment;
-						const size_t close = text.find(blockCommentEnd, at);
-						if (close == std::string_view::npos || close >= end) {
-							tokenEnd = end;
-						} else {
-							tokenEnd = close + blockCommentEnd.size();
-							blockCommentEnd = {};
-						}
-					} else if ((character == '-' && at + 3 < end && text[at + 1] == '-' &&
-								text[at + 2] == '[' && text[at + 3] == '[')) {
-						token = ScriptToken::Comment;
-						const size_t close = text.find("]]", at + 4);
-						if (close == std::string_view::npos || close >= end) {
-							tokenEnd = end;
-							blockCommentEnd = "]]";
-						} else {
-							tokenEnd = close + 2;
-						}
-					} else if ((character == '/' && at + 1 < end && text[at + 1] == '*')) {
-						token = ScriptToken::Comment;
-						const size_t close = text.find("*/", at + 2);
-						if (close == std::string_view::npos || close >= end) {
-							tokenEnd = end;
-							blockCommentEnd = "*/";
-						} else {
-							tokenEnd = close + 2;
-						}
-					} else if ((character == '-' && at + 1 < end && text[at + 1] == '-') ||
-							   (character == '/' && at + 1 < end && text[at + 1] == '/')) {
-						token = ScriptToken::Comment;
-						tokenEnd = end;
-					} else if (character == '\'' || character == '"' || character == '`') {
-						token = ScriptToken::String;
-						const char quote = character;
-						while (tokenEnd < end) {
-							if (text[tokenEnd] == '\\') {
-								tokenEnd = std::min(end, tokenEnd + 2);
-								continue;
-							}
-							if (text[tokenEnd++] == quote) {
-								break;
-							}
-						}
-					} else if (std::isdigit(static_cast<unsigned char>(character))) {
-						token = ScriptToken::Number;
-						while (tokenEnd < end && (std::isalnum(static_cast<unsigned char>(text[tokenEnd])) ||
-												  text[tokenEnd] == '.')) {
-							tokenEnd++;
-						}
-					} else if (std::isalpha(static_cast<unsigned char>(character)) || character == '_') {
-						while (tokenEnd < end && (std::isalnum(static_cast<unsigned char>(text[tokenEnd])) ||
-												  text[tokenEnd] == '_')) {
-							tokenEnd++;
-						}
-						token = TokenFor(text.substr(at, tokenEnd - at));
-					}
-
-					const size_t column = ColumnAt(text, at);
-					const ImVec2 position(
-						origin.x + static_cast<float>(column) * glyph,
-						origin.y + static_cast<float>(line) * rowHeight
-					);
-					draw->AddText(
-						ImGui::GetFont(),
-						ImGui::GetFontSize(),
-						position,
-						ColourFor(token),
-						text.data() + at,
-						text.data() + tokenEnd
-					);
-					at = tokenEnd;
-				}
-
-				if (lineEnd == std::string_view::npos) {
-					break;
-				}
-				lineStart = lineEnd + 1;
-				line++;
-			}
-
-			if (edit.Active && edit.SelectionStart == edit.SelectionEnd) {
-				const size_t caret =
-					static_cast<size_t>(std::clamp(edit.Caret, 0, static_cast<int>(text.size())));
-				const std::string_view before = text.substr(0, caret);
-				const float caretLine = static_cast<float>(std::count(before.begin(), before.end(), '\n'));
-				const float caretColumn = static_cast<float>(ColumnAt(text, caret));
-				const float x = origin.x + caretColumn * glyph;
-				const float y = origin.y + caretLine * rowHeight;
-				draw->AddLine(ImVec2(x, y), ImVec2(x, y + rowHeight), ColourFor(ScriptToken::Plain), 1.0f);
-			}
-
-			draw->PopClipRect();
+	void DrawScriptSource(
+		const std::string_view text,
+		const CodeEdit &edit,
+		const ImVec2 fieldMin,
+		const ImVec2 fieldSize,
+		const ImGuiID fieldId
+	) {
+		ImGuiWindow *code = FindCodeField(fieldId);
+		if (code == nullptr) {
+			return;
 		}
 
+		const float rowHeight = ImGui::GetTextLineHeight();
+		const float glyph = CodeGlyphAdvance();
+		const ImVec2 padding = ImGui::GetStyle().FramePadding;
+		const ImVec2 origin(fieldMin.x + padding.x - code->Scroll.x, fieldMin.y + padding.y - code->Scroll.y);
+		// Append to the multiline field's child window. Drawing on the parent
+		// puts the child background over the syntax layer when ImGui submits
+		// its windows.
+		ImDrawList *draw = code->DrawList;
+		draw->PushClipRect(fieldMin, ImVec2(fieldMin.x + fieldSize.x, fieldMin.y + fieldSize.y), true);
+
+		size_t lineStart = 0;
+		size_t line = 0;
+		std::string_view blockCommentEnd;
+		while (lineStart <= text.size()) {
+			const size_t lineEnd = text.find('\n', lineStart);
+			const size_t end = lineEnd == std::string_view::npos ? text.size() : lineEnd;
+			size_t at = lineStart;
+			while (at < end) {
+				const char character = text[at];
+				ScriptToken token = ScriptToken::Plain;
+				size_t tokenEnd = at + 1;
+
+				if (!blockCommentEnd.empty()) {
+					token = ScriptToken::Comment;
+					const size_t close = text.find(blockCommentEnd, at);
+					if (close == std::string_view::npos || close >= end) {
+						tokenEnd = end;
+					} else {
+						tokenEnd = close + blockCommentEnd.size();
+						blockCommentEnd = {};
+					}
+				} else if ((character == '-' && at + 3 < end && text[at + 1] == '-' && text[at + 2] == '[' &&
+							text[at + 3] == '[')) {
+					token = ScriptToken::Comment;
+					const size_t close = text.find("]]", at + 4);
+					if (close == std::string_view::npos || close >= end) {
+						tokenEnd = end;
+						blockCommentEnd = "]]";
+					} else {
+						tokenEnd = close + 2;
+					}
+				} else if ((character == '/' && at + 1 < end && text[at + 1] == '*')) {
+					token = ScriptToken::Comment;
+					const size_t close = text.find("*/", at + 2);
+					if (close == std::string_view::npos || close >= end) {
+						tokenEnd = end;
+						blockCommentEnd = "*/";
+					} else {
+						tokenEnd = close + 2;
+					}
+				} else if ((character == '-' && at + 1 < end && text[at + 1] == '-') ||
+						   (character == '/' && at + 1 < end && text[at + 1] == '/')) {
+					token = ScriptToken::Comment;
+					tokenEnd = end;
+				} else if (character == '\'' || character == '"' || character == '`') {
+					token = ScriptToken::String;
+					const char quote = character;
+					while (tokenEnd < end) {
+						if (text[tokenEnd] == '\\') {
+							tokenEnd = std::min(end, tokenEnd + 2);
+							continue;
+						}
+						if (text[tokenEnd++] == quote) {
+							break;
+						}
+					}
+				} else if (std::isdigit(static_cast<unsigned char>(character))) {
+					token = ScriptToken::Number;
+					while (tokenEnd < end && (std::isalnum(static_cast<unsigned char>(text[tokenEnd])) ||
+											  text[tokenEnd] == '.')) {
+						tokenEnd++;
+					}
+				} else if (std::isalpha(static_cast<unsigned char>(character)) || character == '_') {
+					while (tokenEnd < end && (std::isalnum(static_cast<unsigned char>(text[tokenEnd])) ||
+											  text[tokenEnd] == '_')) {
+						tokenEnd++;
+					}
+					token = TokenFor(text.substr(at, tokenEnd - at));
+				}
+
+				const size_t column = ColumnAt(text, at);
+				const ImVec2 position(
+					origin.x + static_cast<float>(column) * glyph,
+					origin.y + static_cast<float>(line) * rowHeight
+				);
+				draw->AddText(
+					ImGui::GetFont(),
+					ImGui::GetFontSize(),
+					position,
+					ColourFor(token),
+					text.data() + at,
+					text.data() + tokenEnd
+				);
+				at = tokenEnd;
+			}
+
+			if (lineEnd == std::string_view::npos) {
+				break;
+			}
+			lineStart = lineEnd + 1;
+			line++;
+		}
+
+		if (edit.Active && edit.SelectionStart == edit.SelectionEnd) {
+			const size_t caret =
+				static_cast<size_t>(std::clamp(edit.Caret, 0, static_cast<int>(text.size())));
+			const std::string_view before = text.substr(0, caret);
+			const float caretLine = static_cast<float>(std::count(before.begin(), before.end(), '\n'));
+			const float caretColumn = static_cast<float>(ColumnAt(text, caret));
+			const float x = origin.x + caretColumn * glyph;
+			const float y = origin.y + caretLine * rowHeight;
+			draw->AddLine(ImVec2(x, y), ImVec2(x, y + rowHeight), ColourFor(ScriptToken::Plain), 1.0f);
+		}
+
+		draw->PopClipRect();
 	}
 
 	std::vector<std::string> Editor::ScriptSiblings(const OpenScript &tab) {
@@ -832,7 +841,7 @@ namespace studio {
 		const auto column = static_cast<float>(ColumnAt(tab.Text, caret));
 
 		const float rowHeight = ImGui::GetTextLineHeight();
-		const float glyph = ImGui::CalcTextSize("0").x;
+		const float glyph = CodeGlyphAdvance();
 
 		// The field's own scroll, from the window it made - the same lookup and
 		// the same justification `DrawScriptGutter` gives above.
@@ -1233,7 +1242,7 @@ namespace studio {
 		}
 
 		const float rowHeight = ImGui::GetTextLineHeight();
-		const float glyph = ImGui::CalcTextSize("0").x;
+		const float glyph = CodeGlyphAdvance();
 		if (rowHeight <= 0.0f || glyph <= 0.0f) {
 			return;
 		}

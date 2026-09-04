@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations use this
+// complete multi-viewport contract.
+
 // Which panel shows a world, when somebody asks to see one.
 //
 // **The half of "View" that can be silently wrong, in a header for

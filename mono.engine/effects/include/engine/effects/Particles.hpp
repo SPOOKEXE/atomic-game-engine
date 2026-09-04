@@ -420,6 +420,13 @@ namespace engine::effects {
 		// a sort and no sort, and it is far too large a difference to leave
 		// implied by a float.
 		bool Additive = false;
+
+		// Whether an untextured quad uses an analytic soft-disc alpha mask.
+		//
+		// Texture-backed emitters keep their own alpha exactly. This gives smoke,
+		// dust and fog a resource-free soft sprite without changing the visible
+		// square fallback used to diagnose a missing texture.
+		bool SoftParticles = false;
 	};
 
 	// One particle, in the layout a vertex shader reads.

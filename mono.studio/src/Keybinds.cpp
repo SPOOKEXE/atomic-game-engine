@@ -14,10 +14,11 @@ namespace studio {
 		// is the order somebody scans a shortcut list in: the file, then
 		// running, then editing, then the panels. The page sorts by name on
 		// request; this is what it sorts *from*.
-		// **Only explicit text and play-surface actions ship bound.** Search is a
-		// text-editor convention and Escape is the settings door the client and
-		// Studio Play share. Other editor commands remain reachable from menus
-		// and are bound deliberately through the Keybinds page.
+		// **Only established editor conventions ship bound.** Undo, redo and
+		// search are commands people reach for without visiting preferences;
+		// Escape is the settings door the client and Studio Play share. Other
+		// editor commands remain reachable from menus and are bound deliberately
+		// through the Keybinds page.
 		//
 		// Shipping a key nobody asked for is how F5 came to mean Play in one
 		// place and Stop in another, spelled out in three files. A central table
@@ -47,18 +48,22 @@ namespace studio {
 			 Scope::Viewport,
 			 {ImGuiKey_Escape, false, false, false}},
 
-			// **`Tree`, not `Global`, and the script editor is why.** A plain
-			// multiline field has imgui's own text undo on the same chord, and a
-			// world undo that fired while somebody was typing would reverse the
-			// last thing they built instead of the last thing they typed. The
-			// same argument `Delete` is scoped by, which is a character in a
-			// field and an action in the tree.
-			//
-			// §4.6 of `docs/retired/v07v08.md` gives the viewport its own editing, and
-			// this wants a second home there when it does - scopes are one per
-			// binding today, so that is a decision rather than a line.
-			{Action::Undo, "edit.undo", "Undo", "Reverse the last edit", Scope::Tree, {}},
-			{Action::Redo, "edit.redo", "Redo", "Reapply the last undone edit", Scope::Tree, {}},
+			// **Every non-text editor panel, but not a focused text field.** A
+			// script owns Ctrl+Z for its own text undo, while world history should
+			// work whether the author was using the tree, a viewport or a property
+			// panel. `DrawShortcuts` leaves when imgui says text input owns keys.
+			{Action::Undo,
+			 "edit.undo",
+			 "Undo",
+			 "Reverse the last edit",
+			 Scope::Editor,
+			 {ImGuiKey_Z, true, false, false}},
+			{Action::Redo,
+			 "edit.redo",
+			 "Redo",
+			 "Reapply the last undone edit",
+			 Scope::Editor,
+			 {ImGuiKey_Z, true, true, false}},
 
 			{Action::Duplicate,
 			 "edit.duplicate",
@@ -134,7 +139,7 @@ namespace studio {
 			 "Search-All-Replace-All",
 			 "Open script search and replace across the active script",
 			 Scope::Script,
-			 {ImGuiKey_F, true, true, false}},
+			 {ImGuiKey_F, true, false, false}},
 		}};
 
 		// The live table. A copy of the defaults until something rebinds.
@@ -320,11 +325,13 @@ namespace studio {
 		}
 
 		// **Scoped, so a key can mean different things in different panels.**
-		// A global binding fires wherever the editor has focus; anything else
-		// fires only in the panel it belongs to. Without this a plain `Delete`
-		// bound for the tree would delete the selection while somebody was
-		// typing in a script. See `Scope`.
-		if (binding.Where != Scope::Global && binding.Where != ActiveScope()) {
+		// A global binding fires wherever the editor has focus. Editor history
+		// runs in any non-script panel, and all other bindings fire only in the
+		// panel they belong to. Without this a plain `Delete` bound for the tree
+		// would delete the selection while somebody was typing in a script.
+		const bool active = binding.Where == ActiveScope();
+		const bool editor = binding.Where == Scope::Editor && ActiveScope() != Scope::Script;
+		if (binding.Where != Scope::Global && !active && !editor) {
 			return false;
 		}
 

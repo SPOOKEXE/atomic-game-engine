@@ -187,6 +187,12 @@ namespace engine::game {
 			}
 
 			const auto set = [&](const void *data, size_t bytes) {
+				// A document may name process-wide state that must exist before the
+				// property's ordinary setter validates it. Authored editor actions
+				// and scripts stay strict: they must declare that state themselves.
+				if (!authored && descriptor.PrepareDocument != nullptr && !descriptor.PrepareDocument(data)) {
+					return false;
+				}
 				return authored ? store.SetPropertyAuthored(instance, descriptor, data, bytes)
 								: store.SetProperty(instance, descriptor, data, bytes);
 			};

@@ -45,6 +45,7 @@ namespace engine::script {
 
 		void SetHost(HostSurface *host) override;
 		bool Invoke(HostCallback callback, HostArguments arguments) override;
+		bool Invoke(HostCallback callback, HostArguments arguments, HostValue &result) override;
 		void Release(HostCallback callback) override;
 
 	  private:

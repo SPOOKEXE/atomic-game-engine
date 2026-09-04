@@ -43,7 +43,11 @@
 // @tier L9 · shared
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/NodeCanvas.hpp>
+#include <engine/gui/Services.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/script/ScriptCall.hpp>
 
 #include <algorithm>
@@ -79,6 +83,257 @@ namespace engine::script {
 			std::vector<Entity> found;
 			gui::ElementsAt(call.World(), call.Subject(), point, found);
 			call.ReturnInstances(found);
+		}
+
+		// `nodeCanvas:Connect(outputPort, inputPort)`
+		//
+		// The graph operation is shared with native callers. A script only names
+		// the two local instances and receives the persisted link, while type and
+		// cycle checks remain where a headless host can make the same decision.
+		void ConnectNodePorts(ScriptCall &call) {
+			ecs::Entity link = ecs::NULL_ENTITY;
+			const gui::NodeLinkResult result = gui::ConnectNodePorts(
+				call.World(), call.Subject(), call.AsInstance(0), call.AsInstance(1), link
+			);
+			if (result != gui::NodeLinkResult::Made) {
+				call.Raise(gui::Describe(result));
+			}
+			call.ReturnInstance(link);
+		}
+
+		// `nodeCanvas:Disconnect(inputPort)`
+		void DisconnectNodeInput(ScriptCall &call) {
+			call.ReturnBoolean(gui::DisconnectNodeInput(call.World(), call.Subject(), call.AsInstance(0)));
+		}
+
+		// `nodeCanvas:RefreshGroups()`
+		void RefreshNodeCanvasGroups(ScriptCall &call) {
+			const size_t groups = gui::LayoutNodeCanvasGroups(call.World(), call.Subject());
+			const size_t ports = gui::LayoutNodeCanvasPorts(call.World(), call.Subject());
+			call.ReturnNumber(static_cast<double>(groups + ports));
+		}
+
+		// `guiButton:EmulateClick()`
+		//
+		// **A signal delivery and not pointer injection.** A test or a scripted
+		// tutorial wants to activate the button's authored behaviour without
+		// changing the pointer capture, hover state, or focus that belongs to a
+		// physical device event. The router and this method therefore meet at the
+		// same `GuiActivated` signal, which keeps `Activated` and
+		// `MouseButton1Click` aliases in one route.
+		void EmulateClick(ScriptCall &call) {
+			const ecs::ClassId button = ecs::Classes::Find(Name("GuiButton"));
+			if (!button.IsValid() || !call.World().IsA(call.Subject(), button)) {
+				call.Raise("EmulateClick needs a GuiButton");
+			}
+
+			const std::string error = call.DispatchSignal(SignalKind::GuiActivated, call.Subject());
+			if (!error.empty()) {
+				call.Raise(error.c_str());
+			}
+		}
+
+		void RequireGuiObject(ScriptCall &call, const char *method) {
+			if (call.World().Get<gui::Element>(call.Subject()) == nullptr) {
+				call.Raise((std::string(method) + " needs a GuiObject").c_str());
+			}
+		}
+
+		void RequireTextBox(ScriptCall &call, const char *method) {
+			if (call.World().Get<gui::Entry>(call.Subject()) == nullptr) {
+				call.Raise((std::string(method) + " needs a TextBox").c_str());
+			}
+		}
+
+		void RequireFocusedTextBox(ScriptCall &call, const char *method) {
+			RequireTextBox(call, method);
+			if (gui::FocusedTextBox(call.World()) != call.Subject()) {
+				call.Raise((std::string(method) + " needs a focused TextBox").c_str());
+			}
+		}
+
+		void RequireScrollingFrame(ScriptCall &call, const char *method) {
+			if (call.World().Get<gui::Scrolling>(call.Subject()) == nullptr) {
+				call.Raise((std::string(method) + " needs a ScrollingFrame").c_str());
+			}
+		}
+
+		void RequireDragDetector(ScriptCall &call, const char *method) {
+			if (call.World().Get<gui::DragDetector>(call.Subject()) == nullptr) {
+				call.Raise((std::string(method) + " needs a UIDragDetector").c_str());
+			}
+		}
+
+		void RaiseIfHandlerFailed(ScriptCall &call, const std::string &error) {
+			if (!error.empty()) {
+				call.Raise(error.c_str());
+			}
+		}
+
+		core::Vector2 VirtualPointerPosition(const ecs::Store &store, Entity instance) {
+			const gui::Resolved *resolved = store.Get<gui::Resolved>(instance);
+			if (resolved == nullptr) {
+				return {};
+			}
+			return resolved->AbsolutePosition + resolved->AbsoluteSize * 0.5f;
+		}
+
+		core::Vector2 VirtualPosition(ScriptCall &call) {
+			return core::Vector2{
+				static_cast<float>(call.AsNumber(0)),
+				static_cast<float>(call.AsNumber(1)),
+			};
+		}
+
+		core::Vector2 VirtualDelta(ScriptCall &call) {
+			return core::Vector2{
+				static_cast<float>(call.AsNumber(2)),
+				static_cast<float>(call.AsNumber(3)),
+			};
+		}
+
+		// `guiObject:VirtualHover()`
+		//
+		// A virtual event has no device position. The laid-out centre is the one
+		// stable canvas point to offer handlers, with `(0, 0)` for an unlaid item.
+		void VirtualHover(ScriptCall &call) {
+			RequireGuiObject(call, "VirtualHover");
+			const core::Vector2 point = VirtualPointerPosition(call.World(), call.Subject());
+			RaiseIfHandlerFailed(
+				call, call.DispatchPointerSignal(SignalKind::GuiMouseEnter, call.Subject(), point.X, point.Y)
+			);
+		}
+
+		// `guiObject:VirtualUnhover()`
+		void VirtualUnhover(ScriptCall &call) {
+			RequireGuiObject(call, "VirtualUnhover");
+			const core::Vector2 point = VirtualPointerPosition(call.World(), call.Subject());
+			RaiseIfHandlerFailed(
+				call, call.DispatchPointerSignal(SignalKind::GuiMouseLeave, call.Subject(), point.X, point.Y)
+			);
+		}
+
+		// `guiObject:VirtualMove(x, y)`
+		void VirtualMove(ScriptCall &call) {
+			RequireGuiObject(call, "VirtualMove");
+			const core::Vector2 point = VirtualPosition(call);
+			RaiseIfHandlerFailed(
+				call, call.DispatchPointerSignal(SignalKind::GuiMouseMoved, call.Subject(), point.X, point.Y)
+			);
+		}
+
+		// `textBox:VirtualFocus()`
+		void VirtualFocus(ScriptCall &call) {
+			RequireTextBox(call, "VirtualFocus");
+			const Entity previous = gui::FocusedTextBox(call.World());
+			if (!gui::Focus(call.World(), call.Subject())) {
+				return;
+			}
+			if (previous != ecs::NULL_ENTITY) {
+				RaiseIfHandlerFailed(call, call.DispatchFocusLost(previous, false));
+			}
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiFocused, call.Subject()));
+		}
+
+		// `textBox:VirtualUnfocus()`
+		void VirtualUnfocus(ScriptCall &call) {
+			RequireTextBox(call, "VirtualUnfocus");
+			if (gui::FocusedTextBox(call.World()) != call.Subject() ||
+				!gui::Focus(call.World(), ecs::NULL_ENTITY)) {
+				return;
+			}
+			RaiseIfHandlerFailed(call, call.DispatchFocusLost(call.Subject(), false));
+		}
+
+		// `textBox:VirtualText(text)`
+		//
+		// The focused-box guard keeps a receiver from typing into some other box
+		// through the shared keyboard route.
+		void VirtualText(ScriptCall &call) {
+			RequireFocusedTextBox(call, "VirtualText");
+			const std::string text = call.AsString(0);
+			(void)gui::Type(call.World(), gui::Typing{.Text = text});
+		}
+
+		// `textBox:VirtualSubmit()`
+		void VirtualSubmit(ScriptCall &call) {
+			RequireFocusedTextBox(call, "VirtualSubmit");
+			const gui::TypeResult result = gui::Type(call.World(), gui::Typing{.Text = {}, .Submit = true});
+			if (result.Released) {
+				RaiseIfHandlerFailed(call, call.DispatchFocusLost(call.Subject(), true));
+			}
+		}
+
+		// `scrollingFrame:VirtualScroll(notches)`
+		void VirtualScroll(ScriptCall &call) {
+			RequireScrollingFrame(call, "VirtualScroll");
+			(void)gui::Scroll(call.World(), call.Subject(), static_cast<float>(call.AsNumber(0)));
+		}
+
+		void VirtualDrag(ScriptCall &call, SignalKind kind, const char *method, bool hasDelta) {
+			RequireDragDetector(call, method);
+			const core::Vector2 point = VirtualPosition(call);
+			const core::Vector2 delta = hasDelta ? VirtualDelta(call) : core::Vector2{};
+			RaiseIfHandlerFailed(
+				call, call.DispatchDragSignal(kind, call.Subject(), point.X, point.Y, delta.X, delta.Y)
+			);
+		}
+
+		void VirtualDragBegin(ScriptCall &call) {
+			VirtualDrag(call, SignalKind::GuiDragBegan, "VirtualDragBegin", false);
+		}
+
+		void VirtualDragContinue(ScriptCall &call) {
+			VirtualDrag(call, SignalKind::GuiDragContinue, "VirtualDragContinue", true);
+		}
+
+		void VirtualDragEnd(ScriptCall &call) {
+			VirtualDrag(call, SignalKind::GuiDragEnded, "VirtualDragEnd", true);
+		}
+
+		void RequireGuiButton(ScriptCall &call, const char *method) {
+			const ecs::ClassId button = ecs::Classes::Find(Name("GuiButton"));
+			if (!button.IsValid() || !call.World().IsA(call.Subject(), button)) {
+				call.Raise((std::string(method) + " needs a GuiButton").c_str());
+			}
+		}
+
+		void VirtualLeftHold(ScriptCall &call) {
+			RequireGuiButton(call, "VirtualLeftHold");
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiInputBegan, call.Subject()));
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiMouseButton1Down, call.Subject()));
+		}
+
+		void VirtualLeftRelease(ScriptCall &call) {
+			RequireGuiButton(call, "VirtualLeftRelease");
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiInputEnded, call.Subject()));
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiMouseButton1Up, call.Subject()));
+		}
+
+		// `guiButton:VirtualLeftClick()`
+		//
+		// Match the primary router sequence: down, up, then activation. The final
+		// signal also carries Roblox's `MouseButton1Click` alias.
+		void VirtualLeftClick(ScriptCall &call) {
+			VirtualLeftHold(call);
+			VirtualLeftRelease(call);
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiActivated, call.Subject()));
+		}
+
+		void VirtualRightHold(ScriptCall &call) {
+			RequireGuiButton(call, "VirtualRightHold");
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiMouseButton2Down, call.Subject()));
+		}
+
+		void VirtualRightRelease(ScriptCall &call) {
+			RequireGuiButton(call, "VirtualRightRelease");
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiMouseButton2Up, call.Subject()));
+		}
+
+		void VirtualRightClick(ScriptCall &call) {
+			VirtualRightHold(call);
+			VirtualRightRelease(call);
+			RaiseIfHandlerFailed(call, call.DispatchSignal(SignalKind::GuiMouseButton2Click, call.Subject()));
 		}
 
 		// --- the three tweens ---------------------------------------------------
@@ -277,8 +532,29 @@ namespace engine::script {
 		// nothing. What closing it needs is a topbar: a non-zero `TopInset` that
 		// something paints, and then this pair is the transparency of that paint.
 
-		constexpr std::array<InstanceMethod, 4> GUI_METHODS{{
+		constexpr std::array<InstanceMethod, 25> GUI_METHODS{{
 			{"GetGuiObjectsAtPosition", GetGuiObjectsAtPosition},
+			{"Connect", ConnectNodePorts},
+			{"Disconnect", DisconnectNodeInput},
+			{"RefreshGroups", RefreshNodeCanvasGroups},
+			{"EmulateClick", EmulateClick},
+			{"VirtualHover", VirtualHover},
+			{"VirtualUnhover", VirtualUnhover},
+			{"VirtualMove", VirtualMove},
+			{"VirtualFocus", VirtualFocus},
+			{"VirtualUnfocus", VirtualUnfocus},
+			{"VirtualText", VirtualText},
+			{"VirtualSubmit", VirtualSubmit},
+			{"VirtualScroll", VirtualScroll},
+			{"VirtualDragBegin", VirtualDragBegin},
+			{"VirtualDragContinue", VirtualDragContinue},
+			{"VirtualDragEnd", VirtualDragEnd},
+			{"VirtualLeftClick", VirtualLeftClick},
+			{"VirtualLeftHold", VirtualLeftHold},
+			{"VirtualLeftRelease", VirtualLeftRelease},
+			{"VirtualRightClick", VirtualRightClick},
+			{"VirtualRightHold", VirtualRightHold},
+			{"VirtualRightRelease", VirtualRightRelease},
 
 			{"TweenPosition", TweenPosition},
 			{"TweenSize", TweenSize},

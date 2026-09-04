@@ -2011,7 +2011,14 @@ namespace studio {
 			}
 		}
 
-		if (Candidates.empty()) {
+		if (PendingSceneCaptureViewport.has_value() &&
+			std::find(Candidates.begin(), Candidates.end(), *PendingSceneCaptureViewport) !=
+				Candidates.end()) {
+			// A capture is consumed by the panel that renders it. Keep its panel
+			// selected until the renderer writes the file instead of letting a
+			// preview take the last bounded frame.
+			DrawingViewport = *PendingSceneCaptureViewport;
+		} else if (Candidates.empty()) {
 			// Nothing to draw into. The frame still runs - the chrome is drawn
 			// and presented - so the editor does not freeze when every viewport
 			// is closed.
@@ -2483,6 +2490,22 @@ namespace studio {
 					}
 				}
 
+				if (Shaders.RefreshLenses(store) > 0) {
+					for (const engine::core::Name &shader : Shaders.ChangedLenses()) {
+						const engine::render::ShaderModule *module = Shaders.FindLens(shader);
+						if (module == nullptr) {
+							(void)Renderer.DropLensShader(shader);
+							continue;
+						}
+						if (!module->Error.empty()) {
+							(void)Renderer.DropLensShader(shader);
+							ENGINE_WARN("lens shader '{}': {}", shader.Text(), module->Error);
+							continue;
+						}
+						(void)Renderer.AddLensShader(shader, module->SpirV);
+					}
+				}
+
 				// **The geometry and the pictures a script built, uploaded
 				// before the frame that draws them.** The same pair
 				// `client::Client` runs, beside the shader refresh above and
@@ -2833,6 +2856,10 @@ namespace studio {
 				}
 
 				Renderer.RequestSceneCapture(Settings.Capture, slot);
+				PendingSceneCaptureViewport = slot;
+			}
+			if (PendingSceneCaptureViewport.has_value() && !Renderer.CapturePending()) {
+				PendingSceneCaptureViewport.reset();
 			}
 		}
 	}
@@ -2974,6 +3001,11 @@ namespace studio {
 	// --- the game ----------------------------------------------------------
 
 	void Editor::PrepareWorld(Store &store, Scheduler &systems) {
+		// `FitPendingParts` reads these stamps instead of walking every visual in
+		// every frame. Observe while the world is being prepared, before later
+		// writes would otherwise make enabling observation reshape its rows.
+		store.Observe<engine::scene::Visual>();
+
 		// The client's half. A world with no draw list renders as an empty
 		// frame, which reads as a broken renderer rather than as a missing
 		// system.
@@ -3084,6 +3116,10 @@ namespace studio {
 	}
 
 	void Editor::PrepareWorldIn(WorldId id) {
+		// `WorldId` reuses its index. A new world in this slot must scan once,
+		// rather than inherit the old world's content-fit watermark.
+		ContentFitScans.erase(id.Index);
+
 		// Read outside the borrow, because the settings belong to the universe
 		// and the store being prepared cannot answer for them.
 		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
@@ -4988,9 +5024,11 @@ namespace studio {
 			return;
 		}
 
+		const bool first = Scripts.empty();
 		Scripts.push_back(std::move(tab));
 		ActiveScript = static_cast<int>(Scripts.size() - 1);
 		FocusScripts = 4;
+		DockFirstScript = first ? 4 : 0;
 	}
 
 	void Editor::SaveScriptTab(OpenScript &tab) {

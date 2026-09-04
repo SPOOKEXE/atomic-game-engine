@@ -1425,6 +1425,20 @@ declare DateTime: {
 end
 
 declare extern type TeleportService with
+	-- A correlated authority result, delivered at the next client script beat.
+	TeleportResult: TeleportResultSignal
+
+	-- The authority request a client made. The server chooses whether it was
+	-- handled, and only `Processed` makes the player leave this world.
+	TeleportRequested: ((request: {
+		Player: Instance,
+		Place: string,
+		Data: any,
+	}) -> {
+		Decision: Enum_TeleportRequestDecision,
+		Message: string?,
+	})?
+
 	-- Sends a player to another world in this universe, with an optional
 	-- payload. The player is removed from *this* world by the call: nothing
 	-- crosses but a name and the data, and the destination rebuilds them.
@@ -1438,6 +1452,15 @@ declare extern type TeleportService with
 	-- door. The server's half of the call above: the authority decides where an
 	-- arriving character stands and needs to see what the sender wrote.
 	function GetTeleportData(self, player: Instance): any
+end
+
+declare extern type TeleportResultSignal with
+	function Connect(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
+	function Once(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two
@@ -1954,6 +1977,11 @@ declare task: {
 					   "-- four containers a join makes, and every one of them is private to\n"
 					   "-- this player on the wire.\n";
 			}
+			if (name == "NodeCanvas") {
+				out << "-- Connect validates the typed graph immediately. The callback that reacts to\n"
+					   "-- a graph edit belongs on Changed, so no VM closure is retained by the graph.\n"
+					   "-- RefreshGroups applies group fitting and each node's InputPortLayout.\n";
+			}
 
 			out << "declare extern type " << name;
 			if (info.Parent.IsValid()) {
@@ -2169,6 +2197,12 @@ declare task: {
 				out << "\tfunction IsKeepingWorldAwake(self): boolean\n";
 				out << "\tfunction SetNetworkOwner(self, player: Instance?): ()\n";
 				out << "\tfunction GetNetworkOwner(self): Instance?\n";
+				out << "\tfunction GetLinearVelocity(self): Vector3\n";
+				out << "\tfunction GetAngularVelocity(self): Vector3\n";
+				out << "\tfunction SetLinearVelocity(self, velocity: Vector3): ()\n";
+				out << "\tfunction SetAngularVelocity(self, velocity: Vector3): ()\n";
+				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
+				out << "\tfunction Break(self): number\n";
 
 				// **The one door onto `LocalTransparency`, for the same reason
 				// `SetAttribute` is a method rather than a property write.**
@@ -2280,6 +2314,11 @@ declare task: {
 				// produces motion only, and `MouseMoved` already carries it with
 				// the position an argument-less signal could not.
 				out << "\tMouseButton1Click: GuiSignal\n";
+				out << "\tMouseButton1Down: GuiSignal\n";
+				out << "\tMouseButton1Up: GuiSignal\n";
+				out << "\tMouseButton2Click: GuiSignal\n";
+				out << "\tMouseButton2Down: GuiSignal\n";
+				out << "\tMouseButton2Up: GuiSignal\n";
 
 				out << "\tInputBegan: GuiSignal\n";
 				out << "\tInputEnded: GuiSignal\n";
@@ -2334,6 +2373,44 @@ declare task: {
 				out << "\tfunction TweenSizeAndPosition(self, endSize: UDim2 | Vector3, "
 					   "endPosition: UDim2 | Vector3, "
 					<< tweenTail;
+			}
+			if (name == "NodeCanvas") {
+				out << "\tfunction Connect(self, output: NodeCanvasPort, input: NodeCanvasPort): "
+					   "NodeCanvasLink\n";
+				out << "\tfunction Disconnect(self, input: NodeCanvasPort): boolean\n";
+				out << "\tfunction RefreshGroups(self): number\n";
+			}
+			if (name == "GuiButton") {
+				// This is narrower than the shared method table on purpose. The
+				// runtime refuses a non-button receiver, so declaring it on
+				// `Instance` would type-check a call that cannot succeed.
+				out << "\tfunction EmulateClick(self): ()\n";
+				out << "\tfunction VirtualLeftClick(self): ()\n";
+				out << "\tfunction VirtualLeftHold(self): ()\n";
+				out << "\tfunction VirtualLeftRelease(self): ()\n";
+				out << "\tfunction VirtualRightClick(self): ()\n";
+				out << "\tfunction VirtualRightHold(self): ()\n";
+				out << "\tfunction VirtualRightRelease(self): ()\n";
+			}
+			if (name == "GuiObject") {
+				out << "\tfunction VirtualHover(self): ()\n";
+				out << "\tfunction VirtualUnhover(self): ()\n";
+				out << "\tfunction VirtualMove(self, x: number, y: number): ()\n";
+			}
+			if (name == "ScrollingFrame") {
+				out << "\tfunction VirtualScroll(self, notches: number): ()\n";
+			}
+			if (name == "UIDragDetector") {
+				out << "\tfunction VirtualDragBegin(self, x: number, y: number): ()\n";
+				out << "\tfunction VirtualDragContinue(self, x: number, y: number, dx: number, dy: number): "
+					   "()\n";
+				out << "\tfunction VirtualDragEnd(self, x: number, y: number, dx: number, dy: number): ()\n";
+			}
+			if (name == "TextBox") {
+				out << "\tfunction VirtualFocus(self): ()\n";
+				out << "\tfunction VirtualUnfocus(self): ()\n";
+				out << "\tfunction VirtualText(self, text: string): ()\n";
+				out << "\tfunction VirtualSubmit(self): ()\n";
 			}
 
 			// The member only the Workspace answers, for the reason
@@ -3203,11 +3280,30 @@ declare interface MessagingService {
 }
 
 declare interface TeleportService {
+	/** A correlated authority result, delivered at the next client script beat. */
+	readonly TeleportResult: TeleportResultSignal;
+
+	// The ProcessReceipt-style authority hook. Only `Processed` permits the
+	// server to move the assigned player; `Message` travels back to the client.
+	TeleportRequested: ((request: {
+		Player: Instance;
+		Place: string;
+		Data: unknown;
+	}) => {
+		Decision: Enum.TeleportRequestDecision;
+		Message?: string;
+	}) | null;
+
 	Teleport(placeName: string, player: Instance, data?: unknown): void;
 	GetLocalPlayerTeleportData(): unknown;
 
 	/** What arrived with this player, or nil for one that walked in the front door. */
 	GetTeleportData(player: Instance): unknown;
+}
+
+declare interface TeleportResultSignal {
+	Connect(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
+	Once(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
 }
 
 declare interface MemoryStoreService {
@@ -3744,6 +3840,12 @@ declare const task: {
 				out << "\tIsKeepingWorldAwake(): boolean;\n";
 				out << "\tSetNetworkOwner(player?: Instance | null): void;\n";
 				out << "\tGetNetworkOwner(): Instance | null;\n";
+				out << "\tGetLinearVelocity(): Vector3;\n";
+				out << "\tGetAngularVelocity(): Vector3;\n";
+				out << "\tSetLinearVelocity(velocity: Vector3): void;\n";
+				out << "\tSetAngularVelocity(velocity: Vector3): void;\n";
+				out << "\tApplyImpulse(impulse: Vector3): void;\n";
+				out << "\tBreak(): number;\n";
 
 				// The one door onto `LocalTransparency`, matching the Luau half
 				// and for the same reason declared there.
@@ -3806,6 +3908,11 @@ declare const task: {
 				// Roblox's second name for the one event, matching the Luau half
 				// - and `InputChanged` is absent here for the reason given there.
 				out << "\treadonly MouseButton1Click: GuiSignal;\n";
+				out << "\treadonly MouseButton1Down: GuiSignal;\n";
+				out << "\treadonly MouseButton1Up: GuiSignal;\n";
+				out << "\treadonly MouseButton2Click: GuiSignal;\n";
+				out << "\treadonly MouseButton2Down: GuiSignal;\n";
+				out << "\treadonly MouseButton2Up: GuiSignal;\n";
 
 				out << "\treadonly InputBegan: GuiSignal;\n";
 				out << "\treadonly InputEnded: GuiSignal;\n";
@@ -3841,6 +3948,42 @@ declare const task: {
 				out << "\tTweenSize(endSize: UDim2 | Vector3, " << tweenTail;
 				out << "\tTweenSizeAndPosition(endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, "
 					<< tweenTail;
+			}
+			if (name == "NodeCanvas") {
+				out << "\tConnect(output: NodeCanvasPort, input: NodeCanvasPort): NodeCanvasLink;\n";
+				out << "\tDisconnect(input: NodeCanvasPort): boolean;\n";
+				out << "\tRefreshGroups(): number;\n";
+			}
+			if (name == "GuiButton") {
+				// This is narrower than the shared method table on purpose. The
+				// runtime refuses a non-button receiver, so declaring it on
+				// `Instance` would type-check a call that cannot succeed.
+				out << "\tEmulateClick(): void;\n";
+				out << "\tVirtualLeftClick(): void;\n";
+				out << "\tVirtualLeftHold(): void;\n";
+				out << "\tVirtualLeftRelease(): void;\n";
+				out << "\tVirtualRightClick(): void;\n";
+				out << "\tVirtualRightHold(): void;\n";
+				out << "\tVirtualRightRelease(): void;\n";
+			}
+			if (name == "GuiObject") {
+				out << "\tVirtualHover(): void;\n";
+				out << "\tVirtualUnhover(): void;\n";
+				out << "\tVirtualMove(x: number, y: number): void;\n";
+			}
+			if (name == "ScrollingFrame") {
+				out << "\tVirtualScroll(notches: number): void;\n";
+			}
+			if (name == "UIDragDetector") {
+				out << "\tVirtualDragBegin(x: number, y: number): void;\n";
+				out << "\tVirtualDragContinue(x: number, y: number, dx: number, dy: number): void;\n";
+				out << "\tVirtualDragEnd(x: number, y: number, dx: number, dy: number): void;\n";
+			}
+			if (name == "TextBox") {
+				out << "\tVirtualFocus(): void;\n";
+				out << "\tVirtualUnfocus(): void;\n";
+				out << "\tVirtualText(text: string): void;\n";
+				out << "\tVirtualSubmit(): void;\n";
 			}
 
 			// The member only the Workspace answers, matching the Luau half.
@@ -3901,6 +4044,7 @@ declare const task: {
 		out << "\t\t(service: \"RunService\"): RunService;\n";
 		out << "\t\t(service: \"ComputeService\"): ComputeService;\n";
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
+		out << "\t\t(service: \"TeleportService\"): TeleportService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
 		out << "\t\t(service: \"DataStoreService\"): DataStoreService;\n";
 
@@ -4007,6 +4151,7 @@ int main(int argc, char **argv) {
 	// at runtime, and an author reached for `.VertexCount` with no
 	// completion and no type error to say the property was real.
 	(void)engine::scene::ShaderScriptClass();
+	(void)engine::scene::LensShaderClass();
 	(void)engine::scene::EditableMeshClass();
 	(void)engine::scene::EditableImageClass();
 

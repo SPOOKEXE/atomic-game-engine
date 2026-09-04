@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward launcher API. `Launcher.hpp` owns this
+// complete child lifecycle type for consumers that construct a launcher.
+
 // One child, started and watched.
 //
 // **A process and not a linked library, which is the decision this whole

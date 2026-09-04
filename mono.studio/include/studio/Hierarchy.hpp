@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Explorer and authoring tools
+// share this complete hierarchy contract.
+
 // The Explorer's tree, compiled from the store and kept until the store moves.
 //
 // **One archetype scan, not a tree walk.** The tree is `ecs::Hierarchy`, a

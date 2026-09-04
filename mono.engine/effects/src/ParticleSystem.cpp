@@ -7,6 +7,7 @@
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/VectorField.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -355,8 +356,9 @@ namespace engine::effects {
 				 block.NoiseScrollSpeed == emitter.NoiseScrollSpeed &&
 				 block.RadialAcceleration == emitter.RadialAcceleration &&
 				 block.TangentialAcceleration == emitter.TangentialAcceleration &&
-				 block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
-				 block.FlipbookPlayback == emitter.FlipbookPlayback);
+				 block.Locked == emitter.LockedToPart &&
+				 block.FlipbookStartRandom == emitter.FlipbookStartRandom &&
+				 block.Flipbook == emitter.Flipbook && block.FlipbookPlayback == emitter.FlipbookPlayback);
 			if (authoredSame && block.FlipbookRate == rate && block.Frames == frames) {
 				return false;
 			}
@@ -371,6 +373,7 @@ namespace engine::effects {
 				block.RadialAcceleration = emitter.RadialAcceleration;
 				block.TangentialAcceleration = emitter.TangentialAcceleration;
 				block.Locked = emitter.LockedToPart;
+				block.FlipbookStartRandom = emitter.FlipbookStartRandom;
 				block.Flipbook = emitter.Flipbook;
 				block.FlipbookPlayback = emitter.FlipbookPlayback;
 			}
@@ -392,7 +395,18 @@ namespace engine::effects {
 				   left.QuaternionW == right.QuaternionW;
 		}
 
-		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t seed) {
+		uint32_t FlipbookPhase(const EmitterBlock &block, uint32_t cells, uint64_t seed) {
+			const bool fixed = block.FlipbookPlayback == FlipbookMode::Random;
+			if (!fixed && !block.FlipbookStartRandom) {
+				return 0;
+			}
+			const uint32_t span = block.FlipbookPlayback == FlipbookMode::PingPong ? cells * 2 - 2 : cells;
+			return span == 0
+					   ? 0
+					   : std::min(static_cast<uint32_t>(Unit(seed) * static_cast<float>(span)), span - 1);
+		}
+
+		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t start) {
 			// **What the *sheet* holds, not what the grid could.** A GIF has
 			// whatever number of frames the animation has and the grid is the next
 			// square power of two that fits, so playing every cell would spend the
@@ -404,7 +418,7 @@ namespace engine::effects {
 
 			switch (block.FlipbookPlayback) {
 			case FlipbookMode::Random:
-				return Mix(seed) % cells;
+				return start;
 			case FlipbookMode::OneShot: {
 				// Stretched over the whole life, which is what a one-shot sheet is
 				// drawn for. Clamped to the last cell rather than wrapping, so a
@@ -412,18 +426,18 @@ namespace engine::effects {
 				// instead of snapping back to the first.
 				const float fraction = lifetime > 0.0f ? age / lifetime : 0.0f;
 				const auto cell = static_cast<uint32_t>(fraction * static_cast<float>(cells));
-				return std::min(cell, cells - 1);
+				return std::min(start + cell, cells - 1);
 			}
 			case FlipbookMode::PingPong: {
 				const auto step = static_cast<uint32_t>(age * block.FlipbookRate);
 				const uint32_t span = cells * 2 - 2;
-				const uint32_t at = span == 0 ? 0 : step % span;
+				const uint32_t at = span == 0 ? 0 : (start + step) % span;
 				return at < cells ? at : span - at;
 			}
 			case FlipbookMode::Loop:
 				break;
 			}
-			return static_cast<uint32_t>(age * block.FlipbookRate) % cells;
+			return (start + static_cast<uint32_t>(age * block.FlipbookRate)) % cells;
 		}
 	}
 
@@ -643,6 +657,8 @@ namespace engine::effects {
 		store.Observe<scene::Attachment>();
 		store.Observe<scene::Bounds>();
 		store.Observe<scene::Motion>();
+		store.Observe<scene::VectorField2D>();
+		store.Observe<scene::VectorField3D>();
 		store.Observe<ecs::Hierarchy>();
 	}
 
@@ -794,7 +810,10 @@ namespace engine::effects {
 		// A sorted id list stays cheap both for the ordinary empty case and for a
 		// world moving many parents at once.
 		static thread_local std::vector<uint64_t> movedParents;
+		static thread_local std::vector<uint64_t> changedFields;
 		movedParents.clear();
+		changedFields.clear();
+		bool fieldComponentsChanged = false;
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-parents", core::ProfileCategory::Simulation);
 			const uint64_t transformVersion = store.ComponentChangeVersion<scene::Transform>();
@@ -832,6 +851,23 @@ namespace engine::effects {
 				});
 				system->MotionChangeVersion = motionVersion;
 			}
+
+			const uint64_t field2DVersion = store.ComponentChangeVersion<scene::VectorField2D>();
+			if (system->VectorField2DChangeVersion != field2DVersion) {
+				fieldComponentsChanged = true;
+				store.EachChanged<scene::VectorField2D>([](ecs::Entity entity, scene::VectorField2D &) {
+					changedFields.push_back(entity.Id);
+				});
+				system->VectorField2DChangeVersion = field2DVersion;
+			}
+			const uint64_t field3DVersion = store.ComponentChangeVersion<scene::VectorField3D>();
+			if (system->VectorField3DChangeVersion != field3DVersion) {
+				fieldComponentsChanged = true;
+				store.EachChanged<scene::VectorField3D>([](ecs::Entity entity, scene::VectorField3D &) {
+					changedFields.push_back(entity.Id);
+				});
+				system->VectorField3DChangeVersion = field3DVersion;
+			}
 			std::sort(movedParents.begin(), movedParents.end());
 			movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
 		}
@@ -844,10 +880,16 @@ namespace engine::effects {
 				store.EachChanged<ecs::Hierarchy>([&](ecs::Entity entity, ecs::Hierarchy &) {
 					emitterHierarchyChanged =
 						emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
+					if (store.Get<scene::VectorField2D>(entity) != nullptr ||
+						store.Get<scene::VectorField3D>(entity) != nullptr) {
+						changedFields.push_back(entity.Id);
+					}
 				});
 				system->HierarchyChangeVersion = hierarchyVersion;
 			}
 		}
+		std::sort(changedFields.begin(), changedFields.end());
+		changedFields.erase(std::unique(changedFields.begin(), changedFields.end()), changedFields.end());
 
 		// **The block index lives on the emitter's own row**, as a component, so
 		// finding an emitter's block is a column read rather than a search. That
@@ -964,9 +1006,9 @@ namespace engine::effects {
 			emitterRows = store.CountMatching<EmitterSlot>();
 		}
 		const bool explicitlyRequested = std::exchange(system->RefreshRequested, false);
-		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() && !catalogueChanged &&
-			!activationChanged && !retryRefused && !explicitlyRequested &&
-			emitterRows == system->EmitterRows) {
+		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() &&
+			changedFields.empty() && !catalogueChanged && !activationChanged && !retryRefused &&
+			!explicitlyRequested && emitterRows == system->EmitterRows) {
 			return system->Statistics.Blocks;
 		}
 		system->Statistics.EmittersRefused = 0;
@@ -1096,6 +1138,34 @@ namespace engine::effects {
 						residentChanged = true;
 						system->FrameParents[slot.Index] = parent;
 					}
+
+					const ecs::Entity field = block.ForceField.Source;
+					const bool fieldMoved =
+						std::binary_search(movedParents.begin(), movedParents.end(), field.Id);
+					const bool fieldChanged =
+						std::binary_search(changedFields.begin(), changedFields.end(), field.Id);
+					// A new, nearer field is not in the retained sample yet. Walk only
+					// on a field edit so quiet emitters still take the cached fast path.
+					bool changedFieldAncestor = false;
+					for (ecs::Entity ancestor = entity;
+						 !changedFields.empty() && ancestor != ecs::NULL_ENTITY;
+						 ancestor = store.ParentOf(ancestor)) {
+						changedFieldAncestor =
+							std::binary_search(changedFields.begin(), changedFields.end(), ancestor.Id);
+						if (changedFieldAncestor) {
+							break;
+						}
+					}
+					const bool fieldRemoved =
+						fieldComponentsChanged && field != ecs::NULL_ENTITY &&
+						(block.ForceField.TwoDimensional ? store.Get<scene::VectorField2D>(field) == nullptr
+														 : store.Get<scene::VectorField3D>(field) == nullptr);
+					if (emitterHierarchyChanged || parentChanged || fieldMoved || fieldChanged ||
+						changedFieldAncestor || fieldRemoved) {
+						block.ForceField = scene::ResolveVectorField(store, entity);
+						block.Revision++;
+						residentChanged = true;
+					}
 					return;
 				}
 
@@ -1145,6 +1215,7 @@ namespace engine::effects {
 				block.ClaimedAt = claimGeneration;
 				block.ParticleLimit = emitter->MaxParticles;
 				block.RateOverDistance = emitter->RateOverDistance;
+				block.ForceField = scene::ResolveVectorField(store, entity);
 
 				EmitterRuntime runtime;
 				runtime.Requested = std::exchange(slot.Requested, 0u);
@@ -1321,6 +1392,7 @@ namespace engine::effects {
 
 		Vector3 ProceduralForce(const EmitterBlock &block, const ParticleState &state) {
 			Vector3 force;
+			force = force + scene::SampleVectorField(block.ForceField, state.Position);
 			const Vector3 radial = (state.Position - block.Frame.Position).Unit();
 			if (block.RadialAcceleration != 0.0f) {
 				force = force + radial * block.RadialAcceleration;
@@ -1543,9 +1615,10 @@ namespace engine::effects {
 								)) &
 								0xFFFFu;
 
+							const uint32_t phase = state.Rotation >> 16;
 							const uint32_t cell =
-								animated ? FlipbookCell(block, state.Age, state.Lifetime, state.Seed) : 0u;
-							state.Rotation = rotation;
+								animated ? FlipbookCell(block, state.Age, state.Lifetime, phase) : 0u;
+							state.Rotation = rotation | (phase << 16);
 							instance.RotationAndCell = rotation | (cell << 16);
 							instance.Colour = WithAlpha(
 								SampleColourCurve(block.Curves.Colour, cursor),
@@ -1733,14 +1806,20 @@ namespace engine::effects {
 							const auto turns = static_cast<uint32_t>(
 								std::fmod(degrees * TURNS_PER_DEGREE + 1.0f, 1.0f) * 65535.0f
 							);
-							state.Rotation = turns & 0xFFFFu;
+							const uint32_t cells =
+								std::min<uint32_t>(block.Frames, FlipbookCells(block.Flipbook));
+							const uint32_t phase =
+								cells > 1 ? FlipbookPhase(block, cells, SeedOf(id, index, 15)) : 0u;
+							state.Rotation = (turns & 0xFFFFu) | (phase << 16);
 
 							// The ageing pass has not seen this particle yet, so
 							// its first frame is written here.
 							ParticleInstance &instance = instances[row];
 							instance.Position = state.Position;
 							instance.Slot = bornSlot;
-							instance.RotationAndCell = state.Rotation;
+							const uint32_t cell =
+								cells > 1 ? FlipbookCell(block, 0.0f, state.Lifetime, phase) : 0u;
+							instance.RotationAndCell = state.Rotation | (cell << 16);
 							instance.Size = bornSize;
 							instance.Colour = bornColour;
 

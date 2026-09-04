@@ -234,6 +234,21 @@ namespace engine::net::http {
 			end = found;
 			return ParseResult::Ok;
 		}
+
+		// The first line has its own ceiling. Check it before waiting for a whole
+		// header block, so a peer cannot turn the header allowance into extra
+		// request-target or response-reason storage by withholding the blank line.
+		ParseResult FindFirstLineEnd(std::string_view text, size_t ceiling, size_t &end) {
+			const size_t found = text.find(CRLF);
+			if (found == std::string_view::npos) {
+				return text.size() > ceiling ? ParseResult::TooLarge : ParseResult::Incomplete;
+			}
+			if (found > ceiling) {
+				return ParseResult::TooLarge;
+			}
+			end = found;
+			return ParseResult::Ok;
+		}
 	}
 
 	const char *Describe(Method method) {
@@ -345,6 +360,12 @@ namespace engine::net::http {
 	) {
 		const std::string_view text = Text(buffer);
 
+		size_t lineEnd = 0;
+		const ParseResult firstLine = FindFirstLineEnd(text, limits.RequestLineBytes, lineEnd);
+		if (firstLine != ParseResult::Ok) {
+			return firstLine;
+		}
+
 		size_t headerEnd = 0;
 		const ParseResult found =
 			FindHeaderEnd(text, limits.RequestLineBytes + limits.HeaderBytes, headerEnd);
@@ -352,12 +373,8 @@ namespace engine::net::http {
 			return found;
 		}
 
-		const size_t lineEnd = text.find(CRLF);
-		if (lineEnd == std::string_view::npos || lineEnd > headerEnd) {
+		if (lineEnd > headerEnd) {
 			return ParseResult::Malformed;
-		}
-		if (lineEnd > limits.RequestLineBytes) {
-			return ParseResult::TooLarge;
 		}
 
 		// METHOD SP TARGET SP VERSION, with exactly one space at each break.
@@ -480,6 +497,12 @@ namespace engine::net::http {
 	) {
 		const std::string_view text = Text(buffer);
 
+		size_t lineEnd = 0;
+		const ParseResult firstLine = FindFirstLineEnd(text, limits.RequestLineBytes, lineEnd);
+		if (firstLine != ParseResult::Ok) {
+			return firstLine;
+		}
+
 		size_t headerEnd = 0;
 		const ParseResult found =
 			FindHeaderEnd(text, limits.RequestLineBytes + limits.HeaderBytes, headerEnd);
@@ -487,8 +510,7 @@ namespace engine::net::http {
 			return found;
 		}
 
-		const size_t lineEnd = text.find(CRLF);
-		if (lineEnd == std::string_view::npos || lineEnd > headerEnd) {
+		if (lineEnd > headerEnd) {
 			return ParseResult::Malformed;
 		}
 

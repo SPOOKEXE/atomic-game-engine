@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward replication API. Session hosts share this
+// complete admission protocol contract.
+
 // @tier L12 · shared
 
 #include <engine/assets/Signature.hpp>

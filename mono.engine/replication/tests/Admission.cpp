@@ -650,6 +650,7 @@ TEST_CASE("a connector sends nothing of the world before it is admitted", "[repl
 
 	Store scratch("client");
 	CHECK_FALSE(dialogue.Client->Submit(1, {}, dialogue.Now));
+	CHECK(dialogue.Client->Unconfirmed().empty());
 	CHECK_FALSE(dialogue.Client->Joined());
 }
 

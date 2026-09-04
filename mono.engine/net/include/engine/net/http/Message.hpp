@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward net API. HTTP adapters exchange this
+// complete message contract without a second wire representation.
+
 // HTTP/1.1 requests and responses as values, with no socket anywhere near them.
 //
 // This module owns an `http/` sub-area for userland networking and the
@@ -198,7 +201,7 @@ namespace engine::net::http {
 	//
 	// @since v0.9
 	struct MessageLimits {
-		// The longest request line - verb, target and version.
+		// The longest request or response start line.
 		size_t RequestLineBytes = 8u * 1024u;
 
 		// The largest header block, all fields together.

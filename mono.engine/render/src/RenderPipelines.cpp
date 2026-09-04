@@ -330,11 +330,12 @@ namespace engine::render {
 		SDL_GPUShader *deferredLightingFragment =
 			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
+		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
 			!imageFragment || !overlayFragment || !gbufferFragment || !depthLinearFragment || !ssaoFragment ||
-			!deferredLightingFragment || !skyFragment || !tonemapFragment) {
+			!deferredLightingFragment || !skyFragment || !volumeFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -495,9 +496,11 @@ namespace engine::render {
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
-				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || TonemapPipeline == nullptr) {
+				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
+				TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
 		}
@@ -887,9 +890,10 @@ namespace engine::render {
 		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
-			   (!pbrSupported || (GBufferPipeline != nullptr && DepthLinearPipeline != nullptr &&
-								  SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr &&
-								  SkyPipeline != nullptr && TonemapPipeline != nullptr)) &&
+			   (!pbrSupported ||
+				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
+				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
+				 TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || EnvironmentCompute != nullptr);
 	}
 

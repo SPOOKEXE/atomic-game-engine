@@ -189,7 +189,8 @@ set(scene_libraries
 	MagicTests/MagicTests
 	MagicTests/TerrainCore
 	Libraries/MagicCore
-	Libraries/TerrainCore)
+	Libraries/TerrainCore
+	BladeborneDemo/BladeborneDemo)
 
 foreach(pair IN LISTS scene_libraries)
 	string(REPLACE "/" ";" parts "${pair}")

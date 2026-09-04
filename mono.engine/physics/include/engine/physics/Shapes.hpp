@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. Bodies and authoring hosts
+// exchange this complete collision-shape contract.
+
 // What a `scene::Collider` is, geometrically.
 //
 // `scene` owns the *data* - `ShapeKind` names the three shapes and `Collider`

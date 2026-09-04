@@ -63,6 +63,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/effects/Particles.hpp>
+#include <engine/scene/VectorField.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -250,6 +251,11 @@ namespace engine::effects {
 		// A constant push, in metres per second squared.
 		core::Vector3 Acceleration;
 
+		// The field selected by this emitter's nearest ancestor. Resolved on the
+		// hierarchy and field change paths, so the per-particle step never reads a
+		// component or walks a parent chain.
+		scene::VectorFieldSample ForceField;
+
 		// Where this block's particles start in the pool.
 		uint32_t First = 0;
 
@@ -335,6 +341,10 @@ namespace engine::effects {
 		// **Resolved here rather than left as the emitter's zero-means-all**, so
 		// the step never has to ask which meaning it is looking at.
 		uint8_t Frames = 1;
+
+		// A deterministic per-particle flipbook phase for Loop, OneShot and
+		// PingPong. Random playback already keeps one random cell by definition.
+		bool FlipbookStartRandom = false;
 
 		// Whether particles are recomputed from the parent's frame each step.
 		bool Locked = false;
@@ -505,12 +515,11 @@ namespace engine::effects {
 		// empty.** See `EmitterBlock::Generation`; a mismatch is death.
 		uint32_t Generation = 0;
 
-		// The accumulated turn, over 65,536, and the cell a fixed flipbook drew.
+		// The accumulated turn, over 65,536, and the flipbook phase picked at spawn.
 		//
 		// Laid out as `ParticleInstance::RotationAndCell` is, because that is
-		// where it is going. The cell half is only meaningful for the random
-		// flipbook mode, which picks once at spawn and keeps it - every other
-		// mode is a function of age and the step works it out.
+		// where it is going. Random playback keeps that cell, while a randomized
+		// start uses it as the phase of an otherwise age-driven playback mode.
 		uint32_t Rotation = 0;
 	};
 
@@ -603,6 +612,8 @@ namespace engine::effects {
 		uint64_t AttachmentChangeVersion = 0;
 		uint64_t BoundsChangeVersion = 0;
 		uint64_t MotionChangeVersion = 0;
+		uint64_t VectorField2DChangeVersion = 0;
+		uint64_t VectorField3DChangeVersion = 0;
 		uint64_t HierarchyChangeVersion = 0;
 		//@}
 

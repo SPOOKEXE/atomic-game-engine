@@ -21,12 +21,21 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/ShaderLens.hpp>
+#include <engine/scene/Volume.hpp>
+
+#include <array>
 
 namespace engine::ecs {
 	class Store;
 }
 
 namespace engine::scene {
+
+	// A pixel samples every active entry, so the cap is renderer work rather
+	// than an arbitrary hierarchy restriction. Additional authored volumes stay
+	// valid scene data and are simply not selected for this presentation frame.
+	inline constexpr size_t MAX_SCENE_VOLUMES = 4;
 
 	// Where the sun shines *towards*, as a unit vector.
 	//
@@ -92,6 +101,17 @@ namespace engine::scene {
 		//
 		// @since v0.19
 		Environment EnvironmentState;
+
+		// The bounded participating-media snapshot. The values were resolved from
+		// placed `Volume` instances while the world was entered and are safe to
+		// retain across the renderer boundary.
+		std::array<VolumeState, MAX_SCENE_VOLUMES> Volumes{};
+		size_t VolumeCount = 0;
+
+		// World-space screen effects selected while the world is entered. As with
+		// volumes, this remains authored data until it is copied for presentation.
+		std::array<ShaderLensState, MAX_SCENE_SHADER_LENSES> ShaderLenses{};
+		size_t ShaderLensCount = 0;
 	};
 
 	// Resolves the `Lighting` service into the values a renderer consumes.

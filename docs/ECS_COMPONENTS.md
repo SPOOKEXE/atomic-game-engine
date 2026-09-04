@@ -44,8 +44,8 @@ state until v0.19.
 | `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
 | `effects.Decal` | 28 | 4 | yes | . | . | . | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
-| `effects.ParticleEmitter` | 1296 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
-| `effects.ParticleSystem` | 376 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
+| `effects.ParticleEmitter` | 1300 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
+| `effects.ParticleSystem` | 392 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Texture` | 44 | 4 | yes | . | . | . | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
@@ -92,6 +92,11 @@ state until v0.19.
 | `gui.Layer` | 8 | 4 | yes | yes | . | . | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset. |
 | `gui.LineHandleShape` | 8 | 4 | yes | yes | . | . | The length and overlay thickness of a `LineHandleAdornment`. |
 | `gui.ListLayout` | 16 | 4 | yes | yes | . | . | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping. |
+| `gui.NodeCanvas` | 28 | 4 | yes | yes | . | . | The view state of a typed graph editor: its pan, zoom and background grid policy, while graph nodes and links remain ordinary instances beneath it. |
+| `gui.NodeCanvasGroup` | 56 | 8 | yes | . | . | . | A named visual grouping of direct graph-node children, with optional edge-fitting or tight-fitting layout and ordinary Frame background colour. |
+| `gui.NodeCanvasLink` | 44 | 4 | yes | . | . | . | A persistent, colourable wire between named node ports in one graph, stored with endpoint names rather than entity handles. |
+| `gui.NodeCanvasNode` | 64 | 8 | yes | . | . | . | The stable id, node kind, bypass state, title, resize policy and input-port layout of one graph node; links refer to its id rather than its local entity handle. |
+| `gui.NodeCanvasPort` | 16 | 4 | yes | . | yes | . | A stable typed input or output terminal beneath a graph node, with a connection limit, checked before a wire is made and positioned on a requested graph-node edge. |
 | `gui.Padding` | 32 | 4 | yes | yes | . | . | `UIPadding`: space held back inside the parent element on each of its four edges before its children are placed. |
 | `gui.PageLayout` | 32 | 8 | yes | yes | . | . | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap. |
 | `gui.PageMotion` | 32 | 8 | yes | yes | . | . | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is. |
@@ -195,6 +200,7 @@ state until v0.19.
 | `scene.RenderedSignature` | 16 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
 | `scene.RigidBody` | 16 | 4 | yes | yes | . | . | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact. |
 | `scene.Service` | 4 | 1 | yes | yes | . | . | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup. |
+| `scene.ShaderLens` | 32 | 4 | yes | . | . | . | A placed spherical HDR image-warp region. Its lens shader name and numeric controls are authored world data; the renderer resolves a bounded value snapshot before presentation. |
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
 | `scene.Skeleton` | 8 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
@@ -220,7 +226,10 @@ state until v0.19.
 | `scene.Transform` | 28 | 4 | yes | yes | . | 10 | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads. |
 | `scene.Transient` | 0 | 1 | . | . | . | . | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`. |
 | `scene.Vector3Value` | 12 | 4 | yes | yes | . | . | The vector stored by a `Vector3Value` instance. |
+| `scene.VectorField2D` | 32 | 4 | yes | yes | . | . | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
+| `scene.VectorField3D` | 52 | 4 | yes | yes | . | . | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
 | `scene.Visual` | 32 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
+| `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
 
@@ -235,6 +244,8 @@ state until v0.19.
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
 | `script.SourceCache` | 32 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
+| `script.TeleportRequestHandler` | 8 | 8 | yes | . | . | . | Per-world singleton holding the `TeleportService.TeleportRequested` callback that decides whether the server processes a requested teleport. Transient, because a restored world must not revive a host callback. |
+| `script.TeleportRequestOutbox` | 56 | 8 | yes | . | . | . | Per-world singleton FIFO of local teleport requests waiting for the client to send, with the next monotonic request id. Transient, because an old request must not send after a world is restored. |
 
 ## `world`
 
@@ -247,4 +258,4 @@ state until v0.19.
 
 ---
 
-170 components registered by the engine, 0 without a purpose line.
+181 components registered by the engine, 0 without a purpose line.

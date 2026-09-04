@@ -26,6 +26,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
@@ -1969,6 +1970,61 @@ TEST_CASE("the migrated tree methods answer the same in both languages", "[scrip
 	for (const ParityCase &probe : CASES) {
 		Both(probe);
 	}
+}
+
+TEST_CASE("body velocity and impulse methods share one physics surface", "[scripting][scriptcall]") {
+	const ParityCase probe{
+		"a dynamic body exposes velocity and receives an impulse",
+		[](Language language) {
+			return APart(language) +
+				   "part.Anchored = false\n"
+				   "part.Parent = workspace\n" +
+				   Send(language, "part", "SetLinearVelocity(Vector3.new(1, 2, 3))") +
+				   Send(language, "part", "SetAngularVelocity(Vector3.new(0, 4, 0))") +
+				   Send(language, "part", "ApplyImpulse(Vector3.new(2, 0, 0))") +
+				   Say(language,
+					   Cat(language,
+						   {Text(language, Call(language, "part", "GetLinearVelocity()") + ".X"),
+							"'/'",
+							Text(language, Call(language, "part", "GetLinearVelocity()") + ".Y"),
+							"'/'",
+							Text(language, Call(language, "part", "GetLinearVelocity()") + ".Z"),
+							"'/'",
+							Text(language, Call(language, "part", "GetAngularVelocity()") + ".Y")}));
+		},
+		"3/2/3/4",
+		0,
+		[](Store &store) { engine::physics::PreparePhysicsWorld(store); },
+	};
+
+	Both(probe);
+}
+
+TEST_CASE("a break group releases its anchored descendants in both languages", "[scripting][scriptcall]") {
+	const ParityCase probe{
+		"a break group reports newly released pieces and leaves them dynamic",
+		[](Language language) {
+			return Let(language, "group", "Instance.new('BreakGroup')") +
+				   Let(language, "first", "Instance.new('Part')") +
+				   Let(language, "second", "Instance.new('Part')") +
+				   "first.Parent = group\n"
+				   "second.Parent = group\n"
+				   "group.Parent = workspace\n" +
+				   Let(language, "released", Call(language, "group", "Break()")) +
+				   Say(language,
+					   Cat(language,
+						   {Text(language, "released"),
+							"'/'",
+							Text(language, "first.Anchored"),
+							"'/'",
+							Text(language, "second.Anchored"),
+							"'/'",
+							Text(language, Call(language, "group", "Break()"))}));
+		},
+		"2/false/false/0",
+	};
+
+	Both(probe);
 }
 
 TEST_CASE("invalid shared calls are refused in both languages", "[scripting][scriptcall]") {

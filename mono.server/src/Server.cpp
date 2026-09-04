@@ -35,6 +35,8 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Codec.hpp>
+#include <engine/script/TeleportRequest.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
 
@@ -1303,7 +1305,8 @@ namespace server {
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
 					// first thing to drift is the heartbeat's delta.
-					Runtimes.push_back(
+					Runtimes.emplace_back(
+						id,
 						engine::game::StartWorldScripts(
 							store, systems, limits, failure, nullptr, scriptTickRate
 						)
@@ -1638,6 +1641,71 @@ namespace server {
 		// untrusted and every one of those has to be held on this side.
 		Replication->OnUserMessage(
 			[this](engine::replication::ClientId client, std::span<const std::byte> payload) {
+				engine::game::TeleportRequest request;
+				if (engine::game::DecodeTeleportRequest(payload, request)) {
+					engine::game::TeleportRequestResult result;
+					result.Id = request.Id;
+
+					const auto player = Players.find(client.Index);
+					if (player == Players.end() || player->second.Generation != client.Generation) {
+						result.Decision = engine::game::TeleportRequestDecision::Denied;
+						result.Message = "teleport request arrived without an assigned player";
+					} else if (request.Place.empty()) {
+						result.Decision = engine::game::TeleportRequestDecision::Denied;
+						result.Message = "teleport request has no destination";
+					} else {
+						const engine::world::WorldStatus status = Worlds().Enter(
+							PrimaryWorld,
+							[this, &request, &result, assigned = player->second.Instance](
+								engine::ecs::Store &store
+							) {
+								engine::script::Runtime *runtime = RuntimeOf(PrimaryWorld);
+								if (runtime == nullptr) {
+									result.Decision = engine::game::TeleportRequestDecision::NotProcessed;
+									result.Message = "TeleportService.TeleportRequested has no runtime";
+									return;
+								}
+
+								engine::script::ScriptValue data;
+								if (engine::script::Decode(request.Data, data) !=
+									engine::script::CodecStatus::Ok) {
+									result.Decision = engine::game::TeleportRequestDecision::Denied;
+									result.Message = "teleport request data is malformed";
+									return;
+								}
+
+								const engine::script::TeleportRequestResult decision =
+									engine::script::DispatchTeleportRequest(
+										*runtime, store, {assigned, request.Place, data}
+									);
+								result.Decision =
+									static_cast<engine::game::TeleportRequestDecision>(decision.Decision);
+								result.Message = decision.Message;
+								if (decision.Decision != engine::script::TeleportRequestDecision::Processed) {
+									return;
+								}
+
+								std::string failure;
+								if (!engine::script::TeleportPlayer(
+										store, request.Place, assigned, &data, failure
+									)) {
+									result.Decision = engine::game::TeleportRequestDecision::Denied;
+									if (result.Message.empty()) {
+										result.Message = std::move(failure);
+									}
+								}
+							}
+						);
+						if (status != engine::world::WorldStatus::Ok) {
+							result.Decision = engine::game::TeleportRequestDecision::Denied;
+							result.Message = "teleport request world is unavailable";
+						}
+					}
+					const std::vector<std::byte> response = engine::game::EncodeTeleportResult(result);
+					(void)Replication->SendTo(client, response, PollNow);
+					return;
+				}
+
 				if (ContentLink != nullptr) {
 					ContentLink->Receive(client, payload, PollNow);
 				}
@@ -1915,6 +1983,15 @@ namespace server {
 			engine::net::Describe(streaming.Wire)
 		);
 		return true;
+	}
+
+	engine::script::Runtime *Server::RuntimeOf(engine::world::WorldId world) {
+		for (const auto &[id, runtime] : Runtimes) {
+			if (id == world) {
+				return runtime.get();
+			}
+		}
+		return nullptr;
 	}
 
 	void Server::SurveyVisibility(engine::ecs::Store &store) {

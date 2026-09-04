@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. World hosts own this complete
+// simulation contract at their public integration boundary.
+
 // One world's physics state: the two indexes, the pair list, and the buffers
 // the pipeline reuses instead of reallocating.
 //
@@ -1007,6 +1010,22 @@ namespace engine::physics {
 		// @since v0.22
 		bool UsesIslandSchedule() const {
 			return SolverUsesIslands;
+		}
+
+		// Whether the last solve dispatched independent contact-colour waves.
+		//
+		// @return `true` when colour scheduling, rather than chunks or islands, ran.
+		// @since v0.23
+		bool UsesColourSchedule() const {
+			return SolverUsesColoring;
+		}
+
+		// How many colour waves the last coloured solve constructed.
+		//
+		// @return Colour waves as of the last `Solve`, or zero on another path.
+		// @since v0.23
+		size_t SolverColourCount() const {
+			return SolverColors.size();
 		}
 
 		// Retained bytes used by the island plan, including the exact topology and

@@ -37,8 +37,10 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/LuauTags.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceSurface.hpp>
+#include <engine/script/TeleportRequest.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <array>
@@ -56,6 +58,8 @@ namespace engine::script {
 		using world::Delivery;
 		using world::Postbox;
 		using world::Ticket;
+
+		constexpr const char *TELEPORT_METHODS_KEY = "engine.teleportservice.methods";
 
 		// Whether this world's writes belong to somebody else.
 		//
@@ -278,7 +282,6 @@ namespace engine::script {
 		// `TeleportService:Teleport(placeName, player, data?)`
 		void Teleport(ScriptCall &call) {
 			Store &store = call.World();
-			Postbox box(store);
 
 			const std::string place = call.AsString(0);
 			const ecs::Entity player = call.AsInstance(1);
@@ -287,62 +290,57 @@ namespace engine::script {
 				call.Raise("Teleport: the second argument must be a Player");
 			}
 
-			if (WritesBelongElsewhere(box, store)) {
-				// **A replica may not move anybody.** A client asking a server
-				// to teleport somebody is a request, not an act - and there is
-				// no request channel for it yet, so the honest answer is a
-				// refusal a script can see rather than a silent no-op.
-				call.Raise("Teleport: this world is a replica and does not decide who is in it");
-			}
-
-			// The player's *name* and nothing else about them: the destination
-			// has its own `Players` service, its own class table and its own
-			// spawn.
-			ScriptValue label{ValueTag::String};
-			const core::Name name = store.InstanceNameOf(player);
-			label.Text = name.IsValid() ? std::string(name.Text()) : std::string("Player");
-
-			ScriptValue envelope{ValueTag::Map};
-			envelope.Entries.emplace_back("Player", std::move(label));
-
+			ScriptValue data;
+			const ScriptValue *carried = nullptr;
 			if (!call.IsNil(2)) {
-				ScriptValue data;
 				CodecStatus why = CodecStatus::Ok;
 				if (!call.ReadValue(2, data, why)) {
 					call.Raise((std::string("Teleport: the data cannot cross a world boundary: ") +
 								Describe(why))
 								   .c_str());
 				}
-				envelope.Entries.emplace_back("Data", std::move(data));
+				carried = &data;
 			}
 
-			std::vector<std::byte> payload;
-			if (const CodecStatus status = Encode(envelope, payload); status != CodecStatus::Ok) {
-				call.Raise((std::string("Teleport: the data cannot cross a world boundary: ") +
-							Describe(status))
-							   .c_str());
+			Postbox box(store);
+			if (WritesBelongElsewhere(box, store)) {
+				const auto *local = store.Resource<scene::LocalPlayer>();
+				if (local == nullptr || local->Instance != player) {
+					call.Raise("Teleport: a replica may request a teleport only for its local Player");
+				}
+				std::string failure;
+				if (!QueueTeleportRequest(store, place, data, failure)) {
+					call.Raise(failure.c_str());
+				}
+				return;
 			}
 
-			// **A ticket rather than a bool, and the reply is deliberately not
-			// awaited.** `NONE` means the world spent its allowance this tick;
-			// anything else means the envelope is queued, and the only thing a
-			// reply could say is that the destination does not exist - which is
-			// a delivery this world will never see the far side of anyway.
-			if (box.Teleport(place.c_str(), payload).Value == Ticket::NONE) {
-				call.Raise(("Teleport: over this world's budget for '" + place + "'").c_str());
+			std::string failure;
+			if (!TeleportPlayer(store, place, player, carried, failure)) {
+				call.Raise(failure.c_str());
+			}
+		}
+
+		// `TeleportService.TeleportRequested = function(request) -> result`
+		//
+		// The handler is write-only: only the authority invokes it, and handing a
+		// script another script's closure would violate the VM boundary.
+		void GetTeleportRequested(ScriptCall &call) {
+			call.ReturnNil();
+		}
+
+		void SetTeleportRequested(ScriptCall &call) {
+			Store &store = call.World();
+			if (auto *previous = store.ResourceMutable<TeleportRequestHandler>();
+				previous != nullptr && previous->Callback.Valid()) {
+				call.ReleaseHostCallback(previous->Callback);
 			}
 
-			// **Removed here rather than when the arrival lands**, because the
-			// two happen in different worlds and only this one can do it. A
-			// player left behind would be in both places at once - and the
-			// destination has no way to reach back and tidy up, which is
-			// exactly the cross-world reference rule 3 forbids.
-			//
-			// **The router has already taken a copy.** `Postbox::Teleport`
-			// queues an envelope holding the bytes, so destroying the instance
-			// on the next line cannot lose the message.
-			(void)scene::RemoveCharacter(store, player);
-			store.DestroyInstance(player);
+			if (call.IsNil(0)) {
+				store.RemoveResource<TeleportRequestHandler>();
+				return;
+			}
+			store.SetResource(TeleportRequestHandler{call.RetainHostCallback(0)});
 		}
 
 		// `TeleportService:GetLocalPlayerTeleportData()`
@@ -389,6 +387,14 @@ namespace engine::script {
 			{"GetLocalPlayerTeleportData", GetLocalPlayerTeleportData},
 			{"GetTeleportData", GetTeleportData},
 		}};
+
+		constexpr std::array<ServiceProperty, 1> TELEPORT_PROPERTIES{{
+			{"TeleportRequested", GetTeleportRequested, SetTeleportRequested},
+		}};
+
+		constexpr std::array<ServiceSignal, 1> TELEPORT_SIGNALS{{
+			{"TeleportResult", SignalKind::TeleportResult},
+		}};
 	}
 
 	const ServiceSurface &MessagingServiceSurface() {
@@ -406,6 +412,10 @@ namespace engine::script {
 			ServiceSurface surface;
 			surface.Name = "TeleportService";
 			surface.Methods = TELEPORT;
+			surface.Properties = TELEPORT_PROPERTIES;
+			surface.Signals = TELEPORT_SIGNALS;
+			surface.Tag = TAG_TELEPORT_SERVICE;
+			surface.MethodsKey = TELEPORT_METHODS_KEY;
 			return surface;
 		}();
 		return SURFACE;

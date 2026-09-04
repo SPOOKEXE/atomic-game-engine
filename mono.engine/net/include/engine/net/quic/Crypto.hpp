@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward net API. QUIC adapters share this complete
+// cryptographic wire contract at their boundary.
+
 // QUIC packet protection, and why it is beside `net::Cipher` rather than inside
 // it.
 //

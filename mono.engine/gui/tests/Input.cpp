@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -678,6 +679,36 @@ TEST_CASE("a wheel scrolls the nearest frame that can take it", "[gui][input]") 
 	pointer.Wheel = -5.0f;
 	Send(world, pointer);
 	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(10.0f));
+}
+
+TEST_CASE("a wheel zooms a node canvas inside its bounds", "[gui][input]") {
+	World world("gui_input.node_canvas_zoom");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity canvas = world.Make("NodeCanvas", screen);
+	world.Box(canvas, 20.0f, 20.0f, 200.0f, 160.0f);
+
+	NodeCanvas state;
+	state.Zoom = 1.0f;
+	state.MinimumZoom = 0.5f;
+	state.MaximumZoom = 1.5f;
+	world.Data.Set(canvas, state);
+
+	Pointer pointer;
+	pointer.Position = Vector2{80.0f, 60.0f};
+	pointer.Wheel = 1.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Zoom == Approx(1.1f));
+
+	pointer.Wheel = 100.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Zoom == Approx(1.5f));
+
+	state = *world.Data.Get<NodeCanvas>(canvas);
+	state.MinimumZoom = std::numeric_limits<float>::quiet_NaN();
+	world.Data.Set(canvas, state);
+	pointer.Wheel = 1.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<NodeCanvas>(canvas)->Zoom == Approx(1.5f));
 }
 
 TEST_CASE("dragging a scroll bar moves the canvas and presses nothing", "[gui][input]") {

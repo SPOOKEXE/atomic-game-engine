@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward launcher API. `Launcher.hpp` uses these
+// staged-program paths as part of its complete application contract.
+
 // Where the programs this launcher can start actually are.
 //
 // **The staged tree is the discovery rule, and there is deliberately no

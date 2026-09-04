@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <functional>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <nodegraph/Evaluate.hpp>
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Inspect.hpp>
@@ -77,6 +78,11 @@ namespace {
 		void Reset() {
 			// Clear any state that persists between cases.
 			ImGui::SetCurrentContext(Handle);
+			// A case that aborts its own drawing path must not make the next case
+			// fail at `NewFrame` with an unrelated frame-lifetime assertion.
+			if (GImGui->WithinFrameScope) {
+				ImGui::EndFrame();
+			}
 		}
 
 	  private:

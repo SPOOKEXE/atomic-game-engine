@@ -1037,10 +1037,12 @@ namespace engine::script {
 
 			case gui::EventKind::InputBegan:
 				note(FireJsSignal(context, SignalKind::GuiInputBegan, event.Instance, 0, nullptr));
+				note(FireJsSignal(context, SignalKind::GuiMouseButton1Down, event.Instance, 0, nullptr));
 				break;
 
 			case gui::EventKind::InputEnded:
 				note(FireJsSignal(context, SignalKind::GuiInputEnded, event.Instance, 0, nullptr));
+				note(FireJsSignal(context, SignalKind::GuiMouseButton1Up, event.Instance, 0, nullptr));
 				break;
 
 			case gui::EventKind::Activated:
@@ -1187,14 +1189,17 @@ namespace engine::script {
 			JS_CGETSET_DEF("Activated", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
 
 			// **Roblox's second name for the same event, and one kind under
-			// both.** `MouseButton1Click` is what a `GuiButton` carries there
-			// and what most scripts connect to; this router produces exactly one
-			// primary button, so the two questions have one answer. A second
-			// `SignalKind` would be a second list for one event and whichever
-			// name the pump did not know would never fire. `LuauInstances.cpp` says
-			// the same from the Luau side, including why `InputChanged` is not
-			// here.
+			// both.** The primary router and `VirtualLeftClick` both produce one
+			// activation, so `Activated` and `MouseButton1Click` share a list.
+			// `LuauInstances.cpp` says the same from the Luau side.
 			JS_CGETSET_DEF("MouseButton1Click", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
+			JS_CGETSET_DEF("MouseButton1Down", InstanceTreeSignal<SignalKind::GuiMouseButton1Down>, nullptr),
+			JS_CGETSET_DEF("MouseButton1Up", InstanceTreeSignal<SignalKind::GuiMouseButton1Up>, nullptr),
+			JS_CGETSET_DEF(
+				"MouseButton2Click", InstanceTreeSignal<SignalKind::GuiMouseButton2Click>, nullptr
+			),
+			JS_CGETSET_DEF("MouseButton2Down", InstanceTreeSignal<SignalKind::GuiMouseButton2Down>, nullptr),
+			JS_CGETSET_DEF("MouseButton2Up", InstanceTreeSignal<SignalKind::GuiMouseButton2Up>, nullptr),
 
 			JS_CGETSET_DEF("InputBegan", InstanceTreeSignal<SignalKind::GuiInputBegan>, nullptr),
 			JS_CGETSET_DEF("InputEnded", InstanceTreeSignal<SignalKind::GuiInputEnded>, nullptr),

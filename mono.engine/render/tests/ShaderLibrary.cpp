@@ -22,6 +22,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -39,12 +40,14 @@ namespace fs = std::filesystem;
 
 using engine::core::Name;
 using engine::core::Paths;
+using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 using engine::render::BuiltInShaderNames;
 using engine::render::ShaderLibrary;
 using engine::render::ShaderModule;
+using engine::scene::LensShaderClass;
 using engine::scene::MaterialClass;
 using engine::scene::MaterialRef;
 using engine::scene::SetShaderSource;
@@ -97,6 +100,7 @@ void main() { outColour = vec4(1.0); }
 		engine::scene::RegisterSceneClasses();
 		engine::gui::RegisterGuiClasses();
 		ShaderScriptClass();
+		LensShaderClass();
 		return Store(name);
 	}
 
@@ -337,4 +341,36 @@ TEST_CASE("the library holds what the world asks for and nothing else", "[render
 	REQUIRE(library.Refresh(store) == 1);
 	REQUIRE(library.Size() == 0);
 	REQUIRE(library.Find(Name("Toon")) == nullptr);
+}
+
+TEST_CASE("lens shaders use a separate demand and source namespace", "[render][shaders]") {
+	Store store = Fresh("library.lens");
+	const Entity lens = store.CreateInstance(Classes::Find(Name("ShaderLens")), "Lens");
+	REQUIRE(lens != NULL_ENTITY);
+	store.GetMutable<engine::scene::ShaderLens>(lens)->Shader = Name("Warp");
+
+	const Entity source = store.CreateInstance(LensShaderClass(), "Warp");
+	REQUIRE(source != NULL_ENTITY);
+	REQUIRE(SetShaderSource(store, source, VALID));
+
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(store) == 0);
+	REQUIRE(library.RefreshLenses(store) == 1);
+	const ShaderModule *module = library.FindLens(Name("Warp"));
+	REQUIRE(module != nullptr);
+	CHECK(module->Error.empty());
+	CHECK_FALSE(module->BuiltIn);
+	CHECK(module->Authored);
+
+	store.Destroy(source);
+	REQUIRE(library.RefreshLenses(store) == 1);
+	module = library.FindLens(Name("Warp"));
+	REQUIRE(module != nullptr);
+	CHECK_FALSE(module->Error.empty());
+	CHECK_FALSE(module->Authored);
+	CHECK(library.RefreshLenses(store) == 0);
+
+	store.GetMutable<engine::scene::ShaderLens>(lens)->Enabled = false;
+	REQUIRE(library.RefreshLenses(store) == 1);
+	CHECK(library.FindLens(Name("Warp")) == nullptr);
 }

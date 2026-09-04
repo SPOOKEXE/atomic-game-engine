@@ -79,6 +79,12 @@ namespace {
 		return store.FindFirstChild(parent, name);
 	}
 
+	template <class Value> Value PropertyOf(const Store &store, Entity instance, std::string_view name) {
+		Value value{};
+		REQUIRE(store.GetProperty(instance, Name(name), &value, sizeof(value)));
+		return value;
+	}
+
 	void AddPart(Universe &universe, WorldId world, std::string_view name) {
 		universe.Enter(world, [name](Store &store) {
 			store.CreateInstance(engine::scene::PartClass(), name);
@@ -932,9 +938,37 @@ TEST_CASE("defaults are not written and are restored anyway", "[game][roundtrip]
 TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	RegisterEverything();
 
+	const Vector3 size{8.0f, 3.0f, 2.0f};
+	const Vector3 position{12.0f, 4.0f, -7.0f};
+	const Color3 tint{0.25f, 0.5f, 0.75f};
+	const float transparency = 0.625f;
 	Universe source;
 	const WorldId world = AddWorld(source, "Start");
-	source.Enter(world, [](Store &store) { store.CreateInstance(engine::scene::PartClass(), "Exported"); });
+	source.Enter(world, [&](Store &store) {
+		const Entity part = store.CreateInstance(engine::scene::PartClass(), "Exported");
+		REQUIRE(store.SetProperty(part, Name("Size"), &size, sizeof(size)));
+		REQUIRE(store.SetProperty(part, Name("Position"), &position, sizeof(position)));
+		REQUIRE(store.SetProperty(part, Name("Color"), &tint, sizeof(tint)));
+		REQUIRE(store.SetProperty(part, Name("Transparency"), &transparency, sizeof(transparency)));
+	});
+
+	const auto checkComponents = [&](Store &store) {
+		const Entity part = store.FindFirstRoot("Exported");
+		REQUIRE(part != NULL_ENTITY);
+		const auto *bounds = store.Get<engine::scene::Bounds>(part);
+		const auto *collider = store.Get<engine::scene::Collider>(part);
+		const auto *visual = store.Get<engine::scene::Visual>(part);
+		const auto *transform = store.Get<engine::scene::Transform>(part);
+		REQUIRE(bounds != nullptr);
+		REQUIRE(collider != nullptr);
+		REQUIRE(visual != nullptr);
+		REQUIRE(transform != nullptr);
+		CHECK(bounds->HalfExtent == size * 0.5f);
+		CHECK(collider->Extent == size * 0.5f);
+		CHECK(visual->Tint == tint);
+		CHECK(visual->Transparency == transparency);
+		CHECK(transform->Frame.Position == position);
+	};
 
 	const auto path = ScratchFile("engine-game-world.aworld");
 	std::string error;
@@ -947,7 +981,7 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	REQUIRE(copy.IsValid());
 	CHECK(error.empty());
 
-	source.Enter(copy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
+	source.Enter(copy, checkComponents);
 
 	engine::game::PreparedWorldImport prepared;
 	std::vector<engine::game::WorldImportPhase> phases;
@@ -965,12 +999,79 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	const WorldId preparedCopy =
 		engine::game::CommitWorldImport(source, prepared, Name("StartPrepared"), error);
 	REQUIRE(preparedCopy.IsValid());
-	source.Enter(preparedCopy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
+	source.Enter(preparedCopy, checkComponents);
 
 	// And refused without one, because the name is taken.
 	const WorldId clash = engine::game::ImportWorld(source, path, Name{}, error);
 	CHECK_FALSE(clash.IsValid());
 	CHECK_FALSE(error.empty());
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("a standalone world imports Roblox face images", "[game][roundtrip]") {
+	// The porting boundary is the document loader. `Texture` and `Decal` have
+	// already registered rendering semantics in `effects`; this proves the
+	// loader registers that tree itself rather than relying on a client to have
+	// done so before importing a `.aworld` file.
+	const auto path = ScratchFile("engine-game-face-images.aworld");
+	{
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		file << R"(<?xml version="1.0" encoding="UTF-8"?>
+			<World format="3" name="Face images">
+				<Item class="Part" name="Wall" id="1">
+					<Item class="Texture" name="Tiles" id="2">
+						<Property name="Color3" type="Color3">0.25, 0.5, 0.75</Property>
+						<Property name="Texture" type="string">rbxassetid://tiles</Property>
+						<Property name="Transparency" type="float">0.25</Property>
+						<Property name="StudsPerTileU" type="float">4</Property>
+						<Property name="StudsPerTileV" type="float">6</Property>
+						<Property name="OffsetStudsU" type="float">1.5</Property>
+						<Property name="OffsetStudsV" type="float">-2</Property>
+						<Property name="Face" type="enum">Top</Property>
+					</Item>
+					<Item class="Decal" name="Sign" id="3">
+						<Property name="Color3" type="Color3">1, 0.5, 0.25</Property>
+						<Property name="Texture" type="string">rbxassetid://sign</Property>
+						<Property name="Transparency" type="float">0.5</Property>
+						<Property name="ZIndex" type="int">3</Property>
+						<Property name="Face" type="enum">Front</Property>
+					</Item>
+				</Item>
+			</World>)";
+	}
+
+	Universe universe;
+	std::string error;
+	const WorldId imported = engine::game::ImportWorld(universe, path, Name{}, error);
+	REQUIRE(imported.IsValid());
+	CHECK(error.empty());
+
+	universe.Enter(imported, [](Store &store) {
+		const Entity wall = store.FindFirstRoot("Wall");
+		REQUIRE(wall != NULL_ENTITY);
+
+		const Entity tiles = ChildNamed(store, wall, "Tiles");
+		REQUIRE(tiles != NULL_ENTITY);
+		CHECK(store.IsA(tiles, engine::ecs::Classes::Find(Name("Texture"))));
+		CHECK((PropertyOf<Color3>(store, tiles, "Color3") == Color3{0.25f, 0.5f, 0.75f}));
+		CHECK(PropertyOf<Name>(store, tiles, "Texture") == Name("rbxassetid://tiles"));
+		CHECK(PropertyOf<float>(store, tiles, "Transparency") == 0.25f);
+		CHECK(PropertyOf<float>(store, tiles, "StudsPerTileU") == 4.0f);
+		CHECK(PropertyOf<float>(store, tiles, "StudsPerTileV") == 6.0f);
+		CHECK(PropertyOf<float>(store, tiles, "OffsetStudsU") == 1.5f);
+		CHECK(PropertyOf<float>(store, tiles, "OffsetStudsV") == -2.0f);
+		CHECK(PropertyOf<Name>(store, tiles, "Face") == Name("Top"));
+
+		const Entity sign = ChildNamed(store, wall, "Sign");
+		REQUIRE(sign != NULL_ENTITY);
+		CHECK(store.IsA(sign, engine::ecs::Classes::Find(Name("Decal"))));
+		CHECK((PropertyOf<Color3>(store, sign, "Color3") == Color3{1.0f, 0.5f, 0.25f}));
+		CHECK(PropertyOf<Name>(store, sign, "Texture") == Name("rbxassetid://sign"));
+		CHECK(PropertyOf<float>(store, sign, "Transparency") == 0.5f);
+		CHECK(PropertyOf<int32_t>(store, sign, "ZIndex") == 3);
+		CHECK(PropertyOf<Name>(store, sign, "Face") == Name("Front"));
+	});
 
 	std::filesystem::remove(path);
 }

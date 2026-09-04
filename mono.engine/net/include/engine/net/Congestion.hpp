@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward net API. Transport hosts share this
+// complete congestion-control contract.
+
 // The send rate as a function of what the path is doing.
 //
 // `LinkSettings::BytesPerTick` is a fixed cap, and a fixed cap is not congestion

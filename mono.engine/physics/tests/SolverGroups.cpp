@@ -301,6 +301,9 @@ TEST_CASE("a scene above the threshold is cut into several groups", "[solvergrou
 	REQUIRE(world.RowCount() >= PARALLEL_SOLVE_ROWS);
 
 	CHECK(PipelineInternals::SolverColors(world).size() > 1);
+	CHECK(world.UsesColourSchedule());
+	CHECK(world.SolverColourCount() == PipelineInternals::SolverColors(world).size());
+	CHECK_FALSE(world.UsesIslandSchedule());
 	CHECK(world.SolverChunkSize() == 0.0f);
 }
 
@@ -321,6 +324,8 @@ TEST_CASE("independent tall stacks share a floor without joining islands", "[sol
 	CHECK(world.RowCount() >= PARALLEL_SOLVE_ROWS);
 	CHECK(PipelineInternals::SolverColors(world).empty());
 	CHECK(world.UsesIslandSchedule());
+	CHECK_FALSE(world.UsesColourSchedule());
+	CHECK(world.SolverColourCount() == 0);
 	CHECK(world.ConstraintIslandCount() == 64);
 	CHECK(world.SolverChunkSize() == 0.0f);
 

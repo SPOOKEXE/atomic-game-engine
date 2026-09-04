@@ -455,7 +455,8 @@ namespace engine::script {
 		lua_pop(state, 1);
 	}
 
-	bool CallHostCallback(lua_State *state, HostCallback callback, HostArguments arguments) {
+	bool
+	CallHostCallback(lua_State *state, HostCallback callback, HostArguments arguments, HostValue *result) {
 		LuauContext &context = ContextOf(state);
 
 		const auto found = context.HostCallbacks.find(callback.Id);
@@ -468,11 +469,20 @@ namespace engine::script {
 			PushHostValue(state, argument);
 		}
 
-		if (lua_pcall(state, static_cast<int>(arguments.size()), 0, 0) != LUA_OK) {
+		const int results = result != nullptr ? 1 : 0;
+		if (lua_pcall(state, static_cast<int>(arguments.size()), results, 0) != LUA_OK) {
 			const char *message = lua_tostring(state, -1);
 			ENGINE_ERROR("host callback failed: {}", message != nullptr ? message : "unknown");
 			lua_pop(state, 1);
 			return false;
+		}
+		if (result != nullptr) {
+			const bool read = ReadHostValue(state, -1, *result, 0);
+			lua_pop(state, 1);
+			if (!read) {
+				ENGINE_ERROR("host callback returned a value with no host representation");
+				return false;
+			}
 		}
 		return true;
 	}

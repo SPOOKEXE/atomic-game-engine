@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. Component registration and
+// inspection use this complete set contract across future consumers.
+
 // An interned, sorted, immutable set of component ids.
 //
 // Two things are the same object here, and that is the point rather than a

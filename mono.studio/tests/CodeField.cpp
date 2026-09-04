@@ -21,10 +21,14 @@
 
 #include "ScriptFieldWindow.hpp"
 
+#include <engine/core/Paths.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <string>
@@ -37,15 +41,18 @@ using studio::CodeField;
 using studio::FindCodeField;
 
 namespace {
+	ImGuiContext *TestContext = nullptr;
 
 	// A bare imgui context, per case for the reason `tests/AssetRow.cpp` gives:
 	// a case that fails mid-frame leaves a window on the stack, and the next
 	// case would inherit it and fail for a reason that is not its own.
 	class Context {
 	  public:
-		Context() {
+		explicit Context(const bool scriptFont = false) {
 			IMGUI_CHECKVERSION();
 			Handle = ImGui::CreateContext();
+			ImGui::SetCurrentContext(Handle);
+			TestContext = Handle;
 
 			ImGuiIO &io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(1280.0f, 720.0f);
@@ -55,12 +62,19 @@ namespace {
 			io.LogFilename = nullptr;
 			io.ConfigErrorRecoveryEnableTooltip = false;
 
-			io.Fonts->AddFontDefault();
+			if (scriptFont) {
+				const auto font = engine::core::Paths::Fonts() / "JetBrainsMono.ttf";
+				io.Fonts->AddFontFromFileTTF(font.string().c_str(), 13.0f);
+			} else {
+				io.Fonts->AddFontDefault();
+			}
 			io.Fonts->Build();
 		}
 
 		~Context() {
+			ImGui::SetCurrentContext(Handle);
 			ImGui::DestroyContext(Handle);
+			TestContext = nullptr;
 		}
 
 		Context(const Context &) = delete;
@@ -75,6 +89,9 @@ namespace {
 	// is the behaviour the popup depends on and therefore the behaviour worth
 	// pinning.
 	void Frame(std::string &text, CodeEdit &edit, const bool focus) {
+		// Other suites own their own ImGui contexts. Rebind this case's context so
+		// an unfinished external frame cannot receive this case's input events.
+		ImGui::SetCurrentContext(TestContext);
 		ImGui::NewFrame();
 
 		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
@@ -228,4 +245,81 @@ TEST_CASE("a code field child is found through its hierarchical id", "[studio][c
 	REQUIRE(child != nullptr);
 	CHECK(child->ChildId == fieldId);
 	CHECK(std::string_view(child->Name) != "##text");
+}
+
+TEST_CASE("syntax highlighting preserves glyph positions at fractional zoom", "[studio][codefield]") {
+	const Context context(true);
+	std::string text = "local ReplicatedStorage = game:GetService('ReplicatedStorage')\n"
+					   "\trequire(ReplicatedStorage:WaitForChild('Modules'))";
+	CodeEdit edit;
+
+	for (const float zoom : {1.0f, 1.25f, 1.5f, 2.0f}) {
+		CAPTURE(zoom);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(1250.0f, 600.0f));
+		ImGui::Begin("syntax", nullptr, ImGuiWindowFlags_NoSavedSettings);
+		ImGui::PushFont(nullptr, 13.0f * zoom);
+		const ImVec2 fieldMin = ImGui::GetCursorScreenPos();
+		const ImGuiID fieldId = ImGui::GetID("##text");
+		CodeField("##text", text, &edit, 1200.0f, 400.0f);
+		const ImVec2 fieldSize = ImGui::GetItemRectSize();
+		ImGuiWindow *child = FindCodeField(fieldId);
+		REQUIRE(child != nullptr);
+		ImDrawList *draw = child->DrawList;
+		const int syntaxStart = draw->VtxBuffer.Size;
+		studio::DrawScriptSource(text, edit, fieldMin, fieldSize, fieldId);
+		const int syntaxEnd = draw->VtxBuffer.Size;
+		const ImVec2 padding = ImGui::GetStyle().FramePadding;
+		const ImVec2 origin(
+			fieldMin.x + padding.x - child->Scroll.x, fieldMin.y + padding.y - child->Scroll.y
+		);
+		draw->PushClipRect(fieldMin, ImVec2(fieldMin.x + fieldSize.x, fieldMin.y + fieldSize.y), true);
+		draw->AddText(
+			ImGui::GetFont(),
+			ImGui::GetFontSize(),
+			origin,
+			IM_COL32_WHITE,
+			text.data(),
+			text.data() + text.size()
+		);
+		draw->PopClipRect();
+		REQUIRE(draw->VtxBuffer.Size - syntaxEnd == syntaxEnd - syntaxStart);
+		float maximumDrift = 0.0f;
+		for (int vertex = 0; vertex < syntaxEnd - syntaxStart; vertex++) {
+			const ImVec2 highlighted = draw->VtxBuffer[syntaxStart + vertex].pos;
+			const ImVec2 plain = draw->VtxBuffer[syntaxEnd + vertex].pos;
+			maximumDrift = std::max(maximumDrift, std::abs(highlighted.x - plain.x));
+			maximumDrift = std::max(maximumDrift, std::abs(highlighted.y - plain.y));
+		}
+		// Separate text calls snap their origins to pixels. Drift must stay below one pixel.
+		CHECK(maximumDrift < 1.0f);
+
+		edit.Active = true;
+		edit.Caret = static_cast<int>(text.size());
+		const int caretStart = draw->VtxBuffer.Size + syntaxEnd - syntaxStart;
+		studio::DrawScriptSource(text, edit, fieldMin, fieldSize, fieldId);
+		const int caretEnd = draw->VtxBuffer.Size;
+		const char *lastLine = text.data() + text.rfind('\n') + 1;
+		const float lineWidth =
+			ImGui::GetFont()
+				->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, lastLine, text.data() + text.size())
+				.x;
+		const float caretX = origin.x + lineWidth;
+		const float caretY = origin.y + ImGui::GetTextLineHeight();
+		draw->AddLine(
+			ImVec2(caretX, caretY), ImVec2(caretX, caretY + ImGui::GetTextLineHeight()), IM_COL32_WHITE, 1.0f
+		);
+		REQUIRE(draw->VtxBuffer.Size - caretEnd == caretEnd - caretStart);
+		for (int vertex = 0; vertex < caretEnd - caretStart; vertex++) {
+			CHECK(
+				std::abs(
+					draw->VtxBuffer[caretStart + vertex].pos.x - draw->VtxBuffer[caretEnd + vertex].pos.x
+				) < 0.01f
+			);
+		}
+		ImGui::PopFont();
+		ImGui::End();
+		ImGui::Render();
+	}
 }

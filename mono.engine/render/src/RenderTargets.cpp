@@ -396,7 +396,9 @@ namespace engine::render {
 			  slot.LinearDepth,
 			  slot.Occlusion,
 			  slot.Lit,
-			  slot.SkyLit}) {
+			  slot.SkyLit,
+			  slot.LensA,
+			  slot.LensB}) {
 			if (texture != nullptr) {
 				gpu::ReleaseTexture(Device, texture);
 			}
@@ -449,10 +451,14 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 		made.SkyLit =
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
+		made.LensA =
+			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
+		made.LensB =
+			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
 			made.Emissive == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
-			made.Lit == nullptr || made.SkyLit == nullptr) {
+			made.Lit == nullptr || made.SkyLit == nullptr || made.LensA == nullptr || made.LensB == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,

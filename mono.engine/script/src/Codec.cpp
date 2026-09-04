@@ -177,6 +177,7 @@ namespace engine::script {
 						return status;
 					}
 				}
+
 				return CodecStatus::Ok;
 			}
 
@@ -308,7 +309,11 @@ namespace engine::script {
 						return status;
 					}
 				}
-				return CodecStatus::Ok;
+
+				// The wire does not get a second map ordering. Normalising here gives
+				// every receiver the same tree and refuses duplicate keys before one
+				// can become a later encode failure.
+				return SortEntries(out.Entries);
 			}
 
 			case ValueTag::Vector3:
@@ -427,6 +432,11 @@ namespace engine::script {
 	}
 
 	CodecStatus Decode(std::span<const std::byte> bytes, ScriptValue &out) {
+		if (bytes.size() > CODEC_MAX_BYTES) {
+			out = ScriptValue{};
+			return CodecStatus::TooLarge;
+		}
+
 		Cursor cursor{bytes, 0};
 
 		const CodecStatus status = Read(cursor, out, 0);

@@ -158,11 +158,11 @@ TEST_CASE("every output can land somewhere", "[graph][catalogue]") {
 TEST_CASE("the default PBR frame's kinds and material ports are registered", "[graph][catalogue]") {
 	Kinds();
 	for (const char *name :
-		 {"world",			"shadow",		  "camera",			  "last-frame",		"entities",
-		  "cull-frustum",	"order-draw",	  "upload-instances", "mirror-capture", "portal-capture",
-		  "portal-tonemap", "gbuffer",		  "depth-linearise",  "ssao",			"deferred-lighting",
-		  "tonemap",		"portal-overlay", "mirror-overlay",	  "transparent",	"present",
-		  "overlay",		"interface",	  "output-image"}) {
+		 {"world",			"shadow",	  "camera",			  "last-frame",		"entities",
+		  "cull-frustum",	"order-draw", "upload-instances", "mirror-capture", "portal-capture",
+		  "portal-tonemap", "gbuffer",	  "depth-linearise",  "ssao",			"deferred-lighting",
+		  "shader-lenses",	"tonemap",	  "portal-overlay",	  "mirror-overlay", "transparent",
+		  "present",		"overlay",	  "interface",		  "output-image"}) {
 		INFO("kind: " << name);
 		CHECK(NodeCatalogue::Find(Name(name)) != nullptr);
 	}

@@ -20,13 +20,14 @@ const uint STATE_ROTATION = 14u;
 
 const uint WORK_WORDS = 2u;
 
-const uint PARAM_WORDS = 50u;
+const uint PARAM_WORDS = 70u;
 const uint PARAM_ROTATION = 0u;
 const uint PARAM_POSITION = 4u;
 const uint PARAM_FIRST = 11u;
 const uint PARAM_CAPACITY = 12u;
 const uint PARAM_FLAGS = 13u;
 const uint PARAM_CELLS = 14u;
+const uint PARAM_PLAYBACK = 15u;
 const uint PARAM_GENERATION = 17u;
 const uint PARAM_OWNER = 24u;
 const uint PARAM_CONTINUOUS_RATE = 25u;
@@ -244,10 +245,15 @@ void Spawn(uint base, uint row, uint emitter, uint particle, uint generation) {
 
 	float degrees = Between(base, PARAM_ROTATION_RANGE, emitter, particle, 12u);
 	uint rotation = uint(fract(degrees / 360.0 + 1.0) * 65535.0) & 0xFFFFu;
-	if ((ParamUint(base, PARAM_FLAGS) & 2u) != 0u) {
+	uint flags = ParamUint(base, PARAM_FLAGS);
+	if ((flags & 6u) != 0u) {
 		uint cells = ParamUint(base, PARAM_CELLS);
-		uint cell = cells > 1u ? min(uint(Unit(emitter, particle, 15u) * float(cells)), cells - 1u) : 0u;
-		rotation |= cell << 16u;
+		uint phase = 0u;
+		if (cells > 1u) {
+			uint span = ParamUint(base, PARAM_PLAYBACK) == 2u ? cells * 2u - 2u : cells;
+			phase = min(uint(Unit(emitter, particle, 15u) * float(span)), span - 1u);
+		}
+		rotation |= phase << 16u;
 	}
 	states.words[stateAt + STATE_ROTATION] = rotation;
 }

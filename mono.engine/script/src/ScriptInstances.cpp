@@ -229,6 +229,14 @@ namespace engine::script {
 			// the opposite of what a module is for.
 			ecs::Classes::Register("ModuleScript", container, {});
 
+			// These endpoints carry no state until their delivery models exist.
+			// Registering the classes still preserves imported UI hierarchy and lets
+			// a port identify the unsupported event call at its source, rather than
+			// replacing the instance with a Folder. A networking or callback method
+			// here would be a misleading no-op, so neither is exposed yet.
+			ecs::Classes::Register("RemoteEvent", instance, {});
+			ecs::Classes::Register("BindableEvent", instance, {});
+
 			// --- the two containers, and the switch between them --------------
 			//
 			// **`Source` is the active one and is what every tool already asks

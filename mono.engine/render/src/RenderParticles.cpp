@@ -154,7 +154,7 @@ namespace engine::render {
 
 		// The block's parameters, in a table indexed by block. Forces and spawn
 		// configuration live here without widening a particle row.
-		constexpr uint32_t PARTICLE_PARAM_WORDS = 50;
+		constexpr uint32_t PARTICLE_PARAM_WORDS = 70;
 		constexpr uint32_t PARTICLE_PARAM_ROTATION = 0;
 		constexpr uint32_t PARTICLE_PARAM_POSITION = 4;
 		constexpr uint32_t PARTICLE_PARAM_ACCELERATION = 7;
@@ -187,6 +187,15 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_PARAM_SHAPE = 47;
 		constexpr uint32_t PARTICLE_PARAM_SHAPE_STYLE = 48;
 		constexpr uint32_t PARTICLE_PARAM_SHAPE_DIRECTION = 49;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_ROTATION = 50;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_POSITION = 54;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_VECTOR = 57;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_HALF = 60;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_AXIS = 63;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_RADIAL = 66;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_TANGENTIAL = 67;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_FALLOFF = 68;
+		constexpr uint32_t PARTICLE_PARAM_FIELD_FLAGS = 69;
 
 		// The four curves, in a second table indexed by block. Words rather than
 		// floats because the colour curve is packed RGB and the other three are
@@ -281,15 +290,13 @@ namespace engine::render {
 			words[PARTICLE_PARAM_CAPACITY] = block.Capacity;
 			words[PARTICLE_PARAM_GENERATION] = block.Generation;
 
-			// **The random flipbook mode is decided at spawn and not here**, and
-			// that is what keeps a sixty-four-bit hash out of a shader with no
-			// sixty-four-bit integers: the mode picks a cell once and keeps it for
-			// the particle's whole life, so the host writes it into the state's
-			// rotation word and the step is told to leave the cell alone. Every
-			// other mode is a function of age and the shader works it out.
+			// **The random flipbook phase is decided at spawn and not here**, which
+			// keeps a sixty-four-bit hash out of the step shader. Random playback
+			// keeps its phase as a cell; the other modes use it as an initial offset.
 			const uint32_t cells = std::min<uint32_t>(block.Frames, effects::FlipbookCells(block.Flipbook));
 			const bool fixed = block.FlipbookPlayback == effects::FlipbookMode::Random;
-			words[PARTICLE_PARAM_FLAGS] = (block.Locked ? 1u : 0u) | (fixed ? 2u : 0u);
+			words[PARTICLE_PARAM_FLAGS] =
+				(block.Locked ? 1u : 0u) | (fixed ? 2u : 0u) | (block.FlipbookStartRandom ? 4u : 0u);
 			words[PARTICLE_PARAM_CELLS] = cells;
 			words[PARTICLE_PARAM_PLAYBACK] = static_cast<uint32_t>(block.FlipbookPlayback);
 			PutFloat(words, PARTICLE_PARAM_RATE, block.FlipbookRate);
@@ -316,6 +323,26 @@ namespace engine::render {
 			words[PARTICLE_PARAM_SHAPE] = static_cast<uint32_t>(spawn.Shape);
 			words[PARTICLE_PARAM_SHAPE_STYLE] = static_cast<uint32_t>(spawn.ShapeStyle);
 			words[PARTICLE_PARAM_SHAPE_DIRECTION] = static_cast<uint32_t>(spawn.ShapeDirection);
+
+			// The device owns live particles, so the retained field sample has to
+			// cross with the block. Keeping this as block data preserves the CPU
+			// path's hierarchy lookup once-per-refresh rule.
+			const scene::VectorFieldSample &field = block.ForceField;
+			const glm::quat fieldTurn = field.Frame.Rotation();
+			PutFloat(words, PARTICLE_PARAM_FIELD_ROTATION, fieldTurn.x);
+			PutFloat(words, PARTICLE_PARAM_FIELD_ROTATION + 1, fieldTurn.y);
+			PutFloat(words, PARTICLE_PARAM_FIELD_ROTATION + 2, fieldTurn.z);
+			PutFloat(words, PARTICLE_PARAM_FIELD_ROTATION + 3, fieldTurn.w);
+			PutVector(words, PARTICLE_PARAM_FIELD_POSITION, field.Frame.Position);
+			PutVector(words, PARTICLE_PARAM_FIELD_VECTOR, field.Vector);
+			PutVector(words, PARTICLE_PARAM_FIELD_HALF, field.HalfExtent);
+			PutVector(words, PARTICLE_PARAM_FIELD_AXIS, field.Axis);
+			PutFloat(words, PARTICLE_PARAM_FIELD_RADIAL, field.Radial);
+			PutFloat(words, PARTICLE_PARAM_FIELD_TANGENTIAL, field.Tangential);
+			PutFloat(words, PARTICLE_PARAM_FIELD_FALLOFF, field.Falloff);
+			words[PARTICLE_PARAM_FIELD_FLAGS] = (field.Source != ecs::NULL_ENTITY ? 1u : 0u) |
+												(field.LocalSpace ? 2u : 0u) |
+												(field.TwoDimensional ? 4u : 0u);
 		}
 
 		// Fills one row of the curve table.
@@ -993,9 +1020,9 @@ namespace engine::render {
 		// extra draw calls. The draw calls are cheaper.
 		bool SameParticleState(const render::ParticleBatch &left, const render::ParticleBatch &right) {
 			return left.Additive == right.Additive && left.WorldUp == right.WorldUp &&
-				   left.Texture == right.Texture && left.FlipbookSide == right.FlipbookSide &&
-				   left.ZOffset == right.ZOffset && left.LightEmission == right.LightEmission &&
-				   left.LightInfluence == right.LightInfluence;
+				   left.SoftParticles == right.SoftParticles && left.Texture == right.Texture &&
+				   left.FlipbookSide == right.FlipbookSide && left.ZOffset == right.ZOffset &&
+				   left.LightEmission == right.LightEmission && left.LightInfluence == right.LightInfluence;
 		}
 	}
 
@@ -1553,7 +1580,7 @@ namespace engine::render {
 				texture != nullptr ? 1.0f : 0.0f,
 				state.Additive ? 1.0f : std::clamp(state.LightEmission, 0.0f, 1.0f),
 				std::clamp(state.LightInfluence, 0.0f, 1.0f),
-				0.0f,
+				state.SoftParticles ? 1.0f : 0.0f,
 			};
 			material.Illumination = Ambient + OutdoorAmbient * 0.5f + Direct * 0.5f;
 			material.FogColour = FogColour;

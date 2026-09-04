@@ -538,6 +538,7 @@ namespace studio {
 			if (engine::assets::Mesh::Read(reader, mesh)) {
 				if (Renderer.AddMesh(interned, mesh)) {
 					VisualResourceRevision++;
+					ContentMeshRevision++;
 				}
 			}
 		}

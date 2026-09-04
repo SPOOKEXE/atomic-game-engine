@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations configure
+// this complete shortcut contract.
+
 // What every key in the editor does, in one table.
 //
 // **The same shape `input::Actions` gives the client, and for the same
@@ -102,6 +105,10 @@ namespace studio {
 	enum class Scope : uint8_t {
 		// Fires wherever the editor has focus. The file and transport commands.
 		Global,
+
+		// Fires in every editor panel except a text field. Editor history uses
+		// this so a viewport and tree share undo without stealing text undo.
+		Editor,
 
 		// Only while a viewport is the panel being worked in.
 		Viewport,

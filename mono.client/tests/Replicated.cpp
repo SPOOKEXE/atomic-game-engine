@@ -4,15 +4,19 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Play.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/replication/Protocol.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -135,6 +139,23 @@ namespace {
 			return World.Resource<DrawList>()->Instances[index].Frame.Position.X;
 		}
 
+		Entity SpawnLocalCharacter() {
+			const Entity player = World.Create();
+			const Entity character = World.Create();
+			const Entity root = Spawn();
+			const Entity humanoid = World.Create();
+
+			engine::scene::Humanoid control;
+			control.RootPart = root;
+			control.Grounded = true;
+			World.Set(player, engine::scene::PlayerCharacter{character});
+			World.Set(character, engine::scene::Character{root, humanoid, player});
+			World.Set(humanoid, control);
+			World.Set(root, engine::scene::Motion{});
+			World.SetResource(engine::scene::LocalPlayer{player});
+			return root;
+		}
+
 		Store World{"client.replica.test"};
 		Scheduler Systems;
 	};
@@ -148,6 +169,55 @@ TEST_CASE("a replicated world is built with a draw list and a snapshot buffer", 
 	// And nothing that simulates. Everything in this world arrived.
 	replica.Systems.RunPhases(replica.World, Phase::PreSimulation, Phase::PostSimulation);
 	REQUIRE(replica.World.Resource<DrawList>()->Instances.empty());
+}
+
+TEST_CASE(
+	"a local player is reset from authority and replays only unconfirmed moves",
+	"[client][replication][prediction]"
+) {
+	Replica replica;
+	const Entity root = replica.SpawnLocalCharacter();
+	replica.World.SetFrame(static_cast<float>(1.0 / TICK_RATE), 0.0f);
+
+	engine::game::MoveInput move;
+	move.Direction = Vector3{1.0f, 0.0f, 0.0f};
+	std::vector<engine::replication::Input> pending;
+	pending.push_back({2, engine::game::EncodeMoveInput(move)});
+
+	client::ReconcileLocalPlayerPrediction(replica.World, 1, pending);
+	const auto *prediction = replica.World.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction != nullptr);
+	CHECK(prediction->Active);
+	CHECK(prediction->Root == root);
+	CHECK(prediction->Frame.Position.X == Approx(16.0f / static_cast<float>(TICK_RATE)));
+	CHECK(replica.World.Resource<SnapshotBuffer>()->Predicted() == root);
+	CHECK(replica.World.Get<Transform>(root)->Frame.Position.X == 0.0f);
+
+	// The overlay, rather than a transform write into the authority's replica,
+	// is what the draw collector sees.
+	replica.Draw();
+	CHECK(replica.Drawn() == Approx(16.0f / static_cast<float>(TICK_RATE)));
+
+	// A prediction has already integrated its move. The stalled-snapshot
+	// dead-reckoner applies only to ordinary replicated bodies, otherwise a
+	// still-present authority velocity would advance this overlay again every
+	// rendered frame.
+	replica.Receive(1, root, 0.0f);
+	replica.World.GetMutable<engine::scene::Motion>(root)->Linear = Vector3{60.0f, 0.0f, 0.0f};
+	replica.DrawFrames(120);
+	CHECK(replica.Drawn() == Approx(16.0f / static_cast<float>(TICK_RATE)));
+
+	// A new authority tick owns the baseline. With no surviving inputs the old
+	// local movement disappears instead of accumulating indefinitely.
+	replica.World.GetMutable<Transform>(root)->Frame = CFrame(Vector3{4.0f, 0.0f, 0.0f});
+	client::ReconcileLocalPlayerPrediction(replica.World, 2, {});
+	prediction = replica.World.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction != nullptr);
+	CHECK(prediction->Frame.Position.X == 4.0f);
+
+	client::PredictLocalPlayerMove(replica.World, move, static_cast<float>(1.0 / TICK_RATE));
+	CHECK(prediction->Frame.Position.X == Approx(4.0f + 16.0f / static_cast<float>(TICK_RATE)));
+	CHECK(replica.World.Get<Transform>(root)->Frame.Position.X == 4.0f);
 }
 
 TEST_CASE("a replica keeps its third-person camera inside received walls", "[client][replication][camera]") {

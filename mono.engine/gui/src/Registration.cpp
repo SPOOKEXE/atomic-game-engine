@@ -268,6 +268,126 @@ namespace engine::gui {
 				entry.SelectionStart = reader.ReadInt32();
 			}
 		}
+
+		void WriteNodeCanvasNodes(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *nodes = static_cast<const NodeCanvasNode *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const NodeCanvasNode &node = nodes[index];
+				writer.WriteName(node.Id);
+				writer.WriteName(node.Type);
+				writer.WriteString(node.Title);
+				writer.WriteBool(node.Enabled);
+				writer.WriteInt8(static_cast<int8_t>(node.BypassMode));
+				writer.WriteName(node.BypassInput);
+				writer.WriteName(node.BypassOutput);
+				writer.WriteFloat(node.MinimumSize.X);
+				writer.WriteFloat(node.MinimumSize.Y);
+				writer.WriteBool(node.Resizable);
+				writer.WriteInt8(static_cast<int8_t>(node.InputLayout));
+			}
+		}
+
+		void ReadNodeCanvasNodes(core::ByteReader &reader, void *destination, size_t count) {
+			auto *nodes = static_cast<NodeCanvasNode *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				NodeCanvasNode &node = nodes[index];
+				node.Id = reader.ReadName();
+				node.Type = reader.ReadName();
+				node.Title = std::string(reader.ReadString());
+				node.Enabled = reader.ReadBool();
+				node.BypassMode = static_cast<NodeBypassMode>(reader.ReadInt8());
+				node.BypassInput = reader.ReadName();
+				node.BypassOutput = reader.ReadName();
+				node.MinimumSize.X = reader.ReadFloat();
+				node.MinimumSize.Y = reader.ReadFloat();
+				node.Resizable = reader.ReadBool();
+				node.InputLayout = static_cast<InputPortLayout>(reader.ReadInt8());
+			}
+		}
+
+		void WriteNodeCanvasGroups(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *groups = static_cast<const NodeCanvasGroup *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const NodeCanvasGroup &group = groups[index];
+				writer.WriteName(group.Id);
+				writer.WriteString(group.Title);
+				writer.WriteFloat(group.Padding.X);
+				writer.WriteFloat(group.Padding.Y);
+				writer.WriteInt8(static_cast<int8_t>(group.Layout));
+			}
+		}
+
+		void ReadNodeCanvasGroups(core::ByteReader &reader, void *destination, size_t count) {
+			auto *groups = static_cast<NodeCanvasGroup *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				NodeCanvasGroup &group = groups[index];
+				group.Id = reader.ReadName();
+				group.Title = std::string(reader.ReadString());
+				group.Padding.X = reader.ReadFloat();
+				group.Padding.Y = reader.ReadFloat();
+				group.Layout = static_cast<NodeGroupLayout>(reader.ReadInt8());
+			}
+		}
+
+		void WriteNodeCanvasPorts(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *ports = static_cast<const NodeCanvasPort *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const NodeCanvasPort &port = ports[index];
+				writer.WriteName(port.Id);
+				writer.WriteName(port.ValueType);
+				writer.WriteInt8(static_cast<int8_t>(port.Direction));
+				writer.WriteInt8(static_cast<int8_t>(port.Edge));
+				writer.WriteInt32(port.MaxConnections);
+			}
+		}
+
+		void ReadNodeCanvasPorts(core::ByteReader &reader, void *destination, size_t count) {
+			auto *ports = static_cast<NodeCanvasPort *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				NodeCanvasPort &port = ports[index];
+				port.Id = reader.ReadName();
+				port.ValueType = reader.ReadName();
+				port.Direction = static_cast<NodePortDirection>(reader.ReadInt8());
+				port.Edge = static_cast<NodePortEdge>(reader.ReadInt8());
+				port.MaxConnections = reader.ReadInt32();
+			}
+		}
+
+		void WriteNodeCanvasLinks(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *links = static_cast<const NodeCanvasLink *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const NodeCanvasLink &link = links[index];
+				writer.WriteName(link.FromNode);
+				writer.WriteName(link.FromPort);
+				writer.WriteInt8(static_cast<int8_t>(link.FromDirection));
+				writer.WriteName(link.ToNode);
+				writer.WriteName(link.ToPort);
+				writer.WriteInt8(static_cast<int8_t>(link.ToDirection));
+				writer.WriteFloat(link.LineColor.R);
+				writer.WriteFloat(link.LineColor.G);
+				writer.WriteFloat(link.LineColor.B);
+				writer.WriteFloat(link.LineTransparency);
+				writer.WriteFloat(link.LineThickness);
+			}
+		}
+
+		void ReadNodeCanvasLinks(core::ByteReader &reader, void *destination, size_t count) {
+			auto *links = static_cast<NodeCanvasLink *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				NodeCanvasLink &link = links[index];
+				link.FromNode = reader.ReadName();
+				link.FromPort = reader.ReadName();
+				link.FromDirection = static_cast<NodePortDirection>(reader.ReadInt8());
+				link.ToNode = reader.ReadName();
+				link.ToPort = reader.ReadName();
+				link.ToDirection = static_cast<NodePortDirection>(reader.ReadInt8());
+				link.LineColor.R = reader.ReadFloat();
+				link.LineColor.G = reader.ReadFloat();
+				link.LineColor.B = reader.ReadFloat();
+				link.LineTransparency = reader.ReadFloat();
+				link.LineThickness = reader.ReadFloat();
+			}
+		}
 	}
 
 	void RegisterGuiComponents() {
@@ -379,5 +499,22 @@ namespace engine::gui {
 		ecs::Components::Register<ConeHandleShape>("gui.ConeHandleShape");
 		ecs::Components::Register<HandlesShape>("gui.HandlesShape");
 		ecs::Components::Register<ArcHandlesShape>("gui.ArcHandlesShape");
+
+		// The graph model is authored and crosses a save or replica. Its names
+		// must be written as text rather than process-local ids, so the explicit
+		// serializers live beside the other name-bearing GUI components.
+		ecs::Components::Register<NodeCanvas>("gui.NodeCanvas");
+		ecs::Components::Register<NodeCanvasNode>(
+			"gui.NodeCanvasNode", WriteNodeCanvasNodes, ReadNodeCanvasNodes
+		);
+		ecs::Components::Register<NodeCanvasGroup>(
+			"gui.NodeCanvasGroup", WriteNodeCanvasGroups, ReadNodeCanvasGroups
+		);
+		ecs::Components::Register<NodeCanvasPort>(
+			"gui.NodeCanvasPort", WriteNodeCanvasPorts, ReadNodeCanvasPorts
+		);
+		ecs::Components::Register<NodeCanvasLink>(
+			"gui.NodeCanvasLink", WriteNodeCanvasLinks, ReadNodeCanvasLinks
+		);
 	}
 }

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Content integrations exchange
+// this complete source configuration contract.
+
 // The studio's list of content origins, and the order they are tried in.
 //
 // **The order is the whole feature.** "Fetch from the local cache first,

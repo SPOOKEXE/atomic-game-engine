@@ -154,6 +154,7 @@ namespace engine::effects {
 				writer.WriteBool(emitter.LockedToPart);
 				writer.WriteBool(emitter.Enabled);
 				writer.WriteBool(emitter.Additive);
+				writer.WriteBool(emitter.SoftParticles);
 			}
 		}
 
@@ -211,6 +212,7 @@ namespace engine::effects {
 				emitter.LockedToPart = reader.ReadBool();
 				emitter.Enabled = reader.ReadBool();
 				emitter.Additive = reader.ReadBool();
+				emitter.SoftParticles = reader.ReadBool();
 			}
 		}
 
@@ -256,38 +258,53 @@ namespace engine::effects {
 		}
 	}
 
-	void RegisterEffectComponents() {
-		scene::RegisterSceneComponents();
+	namespace {
+		void RegisterEffectComponentsOnce() {
+			scene::RegisterSceneComponents();
 
-		ecs::Components::Register<ParticleEmitter>("effects.ParticleEmitter", WriteEmitters, ReadEmitters);
-		ecs::Components::Register<EmitterSlot>("effects.EmitterSlot", WriteSlots, ReadSlots);
-		ecs::Components::Register<Beam>("effects.Beam", WriteBeams, ReadBeams);
-		ecs::Components::Register<Trail>("effects.Trail", WriteTrails, ReadTrails);
-		ecs::Components::Register<Decal>("effects.Decal", WriteDecals, ReadDecals);
-		ecs::Components::Register<Texture>("effects.Texture", WriteTextures, ReadTextures);
-		ecs::Components::Register<ParticleSystem>("effects.ParticleSystem", WriteSystems, ReadSystems);
+			ecs::Components::Register<ParticleEmitter>(
+				"effects.ParticleEmitter", WriteEmitters, ReadEmitters
+			);
+			ecs::Components::Register<EmitterSlot>("effects.EmitterSlot", WriteSlots, ReadSlots);
+			ecs::Components::Register<Beam>("effects.Beam", WriteBeams, ReadBeams);
+			ecs::Components::Register<Trail>("effects.Trail", WriteTrails, ReadTrails);
+			ecs::Components::Register<Decal>("effects.Decal", WriteDecals, ReadDecals);
+			ecs::Components::Register<Texture>("effects.Texture", WriteTextures, ReadTextures);
+			ecs::Components::Register<ParticleSystem>("effects.ParticleSystem", WriteSystems, ReadSystems);
 
-		// **The ribbon buffer, and forgetting it was caught by a snapshot test
-		// rather than by a compiler.** `Store::Save` refuses a resource with no
-		// serialisation instead of writing bytes it cannot read back, so a world
-		// with a `RibbonBuffer` in it simply would not save - which is what
-		// `client/tests/Presentation.cpp` reported, in exactly the words
-		// `engine::render::DrawList`'s own comment predicts for this mistake.
-		//
-		// Nothing is written, for `DrawList`'s reason: the vertices are rebuilt by
-		// `BuildRibbons` in `PreRender` every frame before anything looks at them,
-		// so writing a frame's worth of them into every save file would be storing
-		// an answer that is recomputed before it is used.
-		ecs::Components::Register<RibbonBuffer>(
-			"effects.RibbonBuffer",
-			[](core::ByteWriter &, const void *, size_t) {},
-			[](core::ByteReader &, void *destination, size_t count) {
-				auto *buffers = static_cast<RibbonBuffer *>(destination);
-				for (size_t index = 0; index < count; index++) {
-					buffers[index].Vertices.clear();
-					buffers[index].Runs.clear();
+			// **The ribbon buffer, and forgetting it was caught by a snapshot test
+			// rather than by a compiler.** `Store::Save` refuses a resource with no
+			// serialisation instead of writing bytes it cannot read back, so a world
+			// with a `RibbonBuffer` in it simply would not save - which is what
+			// `client/tests/Presentation.cpp` reported, in exactly the words
+			// `engine::render::DrawList`'s own comment predicts for this mistake.
+			//
+			// Nothing is written, for `DrawList`'s reason: the vertices are rebuilt by
+			// `BuildRibbons` in `PreRender` every frame before anything looks at them,
+			// so writing a frame's worth of them into every save file would be storing
+			// an answer that is recomputed before it is used.
+			ecs::Components::Register<RibbonBuffer>(
+				"effects.RibbonBuffer",
+				[](core::ByteWriter &, const void *, size_t) {},
+				[](core::ByteReader &, void *destination, size_t count) {
+					auto *buffers = static_cast<RibbonBuffer *>(destination);
+					for (size_t index = 0; index < count; index++) {
+						buffers[index].Vertices.clear();
+						buffers[index].Runs.clear();
+					}
 				}
-			}
-		);
+			);
+		}
+	}
+
+	void RegisterEffectComponents() {
+		// Script runtimes need neutral particle methods before they construct an
+		// effect class. Component registration therefore has more than one valid
+		// entry path and must preserve the public idempotence contract.
+		static const bool registered = [] {
+			RegisterEffectComponentsOnce();
+			return true;
+		}();
+		(void)registered;
 	}
 }

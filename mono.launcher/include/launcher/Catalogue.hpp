@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward launcher API. `Launcher.hpp` stores and
+// exposes modes through this complete value contract.
+
 // The modes this launcher offers, and what each one is on top of a program.
 //
 // **A mode is not a program.** Play and Join are both the client, and the only

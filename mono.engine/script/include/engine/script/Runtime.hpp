@@ -42,6 +42,7 @@
 #include <engine/script/Host.hpp>
 #include <engine/script/Language.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/script/TeleportRequest.hpp>
 #include <engine/script/Vocabulary.hpp>
 
 #include <cstddef>
@@ -182,10 +183,12 @@ namespace engine::script {
 		// sets can still remove either surface from a narrower sandbox.
 		ScriptCapabilities granted =
 			ScriptCapabilities::World | ScriptCapabilities::Input | ScriptCapabilities::Audio;
+		if (role.Server || role.Client) {
+			granted |= ScriptCapabilities::Teleport;
+		}
 		if (role.Server) {
 			granted |= ScriptCapabilities::Messaging;
 			granted |= ScriptCapabilities::Persistence;
-			granted |= ScriptCapabilities::Teleport;
 		}
 		if (role.Studio) {
 			granted |= ScriptCapabilities::StudioDebug;
@@ -504,6 +507,10 @@ namespace engine::script {
 		// boundary.
 		void DeliverSettingsMenuAction(core::Name action);
 
+		// Queues one correlated authority reply for the next script barrier. The
+		// client calls this only after matching the id to a request it sent.
+		void DeliverTeleportResult(TeleportResult result);
+
 		// How many gui events are waiting for the next beat.
 		//
 		// For a test and for a panel. A number that only grows is a host
@@ -677,6 +684,14 @@ namespace engine::script {
 			return false;
 		}
 
+		// Calls a script callback and keeps its one return value in the shared
+		// host-value tree. A request handler needs an authority decision, unlike
+		// a button callback whose return is intentionally ignored.
+		virtual bool Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
+			(void)result;
+			return Invoke(callback, arguments);
+		}
+
 		// Lets go of a function a script handed the host.
 		//
 		// **Called when whatever held it goes away** - a button removed, a panel
@@ -817,6 +832,10 @@ namespace engine::script {
 
 		// Host menu presses waiting for the next script barrier, in input order.
 		std::vector<core::Name> PendingSettingsMenuActions;
+
+		// Authority answers waiting for the next script barrier, in network order.
+		// The client admits only ids in its bounded outbox before adding one here.
+		std::vector<TeleportResult> PendingTeleportResults;
 
 		// Where execution should be reported from. Read through `Debug`.
 		Debugger Breakpoints;

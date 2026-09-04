@@ -1,5 +1,6 @@
 // Roblox place analysis without an ImGui window.
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Part.hpp>
@@ -21,6 +22,7 @@
 #include <studio/RojoSync.hpp>
 
 TEST_SUITE_ID("studio.robloximport")
+TEST_DEPENDS("engine.bake.robloxmodel")
 TEST_DEPENDS("engine.scene.part")
 
 namespace {
@@ -282,7 +284,7 @@ TEST_CASE("a missing roblox class can map to an engine class", "[studio][robloxi
 
 	const studio::RobloxClassMappings classMappings{{"FuturePart", "Part"}};
 	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model, classMappings);
-	REQUIRE(analysis.MissingClasses.size() == 1);
+	CHECK(analysis.MissingClasses.empty());
 	CHECK(analysis.MissingProperties.empty());
 	CHECK(analysis.ConflictingProperties.empty());
 
@@ -296,6 +298,91 @@ TEST_CASE("a missing roblox class can map to an engine class", "[studio][robloxi
 	REQUIRE(mapped != engine::ecs::NULL_ENTITY);
 	CHECK(store.ClassOf(mapped) == engine::scene::PartClass());
 	CHECK(report.Properties == 1);
+	CHECK(report.FolderFallbackClasses.empty());
+}
+
+TEST_CASE("roblox UI endpoints import without a folder fallback", "[studio][robloximport]") {
+	engine::bake::RobloxModel model;
+	for (const std::string_view className :
+		 {"RemoteEvent", "BindableEvent", "SoundGroup", "GuiService", "ChangeHistoryService"}) {
+		engine::bake::RobloxInstance instance;
+		instance.ClassName = std::string(className);
+		instance.Name = std::string(className);
+		model.Roots.push_back(std::move(instance));
+	}
+
+	engine::game::RegisterGameClasses();
+	const studio::RobloxImportAnalysis analysis = studio::AnalyzeRobloxImport(model);
+	CHECK(analysis.MissingClasses.empty());
+
+	engine::ecs::Store store("roblox-import-ui-endpoints");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(
+		studio::ImportRobloxPlace(
+			store, model, studio::RobloxAssetMappings{}, studio::RobloxClassMappings{}, report, error
+		)
+	);
+	CHECK(error.empty());
+	CHECK(report.FolderFallbackClasses.empty());
+	CHECK(report.ReusedRoots == 2);
+}
+
+TEST_CASE("roblox import groups fallback classes and skipped properties", "[studio][robloximport]") {
+	engine::scene::EnsureClassTree();
+
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance root;
+	root.ClassName = "Folder";
+	root.Name = "Root";
+
+	engine::bake::RobloxValue sourceText;
+	sourceText.Set(std::string("unsupported"));
+	engine::bake::RobloxInstance second;
+	second.ClassName = "UnmappedContainer";
+	second.Name = "Second";
+	second.Properties.push_back({"RobloxOnly", sourceText});
+	root.Children.push_back(std::move(second));
+
+	engine::bake::RobloxInstance first;
+	first.ClassName = "UnmappedContainer";
+	first.Name = "First";
+	first.Properties.push_back({"RobloxOnly", sourceText});
+	root.Children.push_back(std::move(first));
+
+	engine::bake::RobloxInstance mapped;
+	mapped.ClassName = "MappedPart";
+	mapped.Name = "Mapped";
+	mapped.Properties.push_back({"Size", sourceText});
+	root.Children.push_back(std::move(mapped));
+	model.Roots.push_back(std::move(root));
+
+	engine::ecs::Store store("roblox-import-report");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(
+		studio::ImportRobloxPlace(
+			store,
+			model,
+			studio::RobloxAssetMappings{},
+			studio::RobloxClassMappings{{"MappedPart", "Part"}},
+			report,
+			error
+		)
+	);
+	CHECK(error.empty());
+	REQUIRE(report.FolderFallbackClasses.size() == 1);
+	CHECK(report.FolderFallbackClasses[0].ClassName == "UnmappedContainer");
+	CHECK(report.FolderFallbackClasses[0].Instances == 2);
+	REQUIRE(report.SkippedProperties.size() == 2);
+	CHECK(report.SkippedProperties[0].ClassName == "MappedPart");
+	CHECK(report.SkippedProperties[0].PropertyName == "Size");
+	CHECK(report.SkippedProperties[0].Reason == "source value type is incompatible");
+	CHECK(report.SkippedProperties[0].Occurrences == 1);
+	CHECK(report.SkippedProperties[1].ClassName == "UnmappedContainer");
+	CHECK(report.SkippedProperties[1].PropertyName == "RobloxOnly");
+	CHECK(report.SkippedProperties[1].Reason == "no matching engine property");
+	CHECK(report.SkippedProperties[1].Occurrences == 2);
 }
 
 TEST_CASE("a roblox collision group is registered before the part uses it", "[studio][robloximport]") {
@@ -348,6 +435,12 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	engine::bake::RobloxValue size;
 	size.Set(engine::core::Vector3{20.0f, 1.0f, 20.0f});
 	part.Properties.push_back({"Size", size});
+	engine::bake::RobloxValue colour;
+	colour.Set(engine::core::Color3{0.2f, 0.4f, 0.8f});
+	part.Properties.push_back({"Color", colour});
+	engine::bake::RobloxValue transparency;
+	transparency.Set(0.375f);
+	part.Properties.push_back({"Transparency", transparency});
 	root.Children.push_back(std::move(part));
 
 	engine::bake::RobloxInstance script;
@@ -394,17 +487,59 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	const engine::ecs::Entity driver = store.FindFirstChild(workspace, "Driver");
 	REQUIRE(driver != engine::ecs::NULL_ENTITY);
 	CHECK(store.Has<engine::script::Disabled>(driver));
+
+	// The import must apply the values, not merely count the recognized
+	// properties. `Size` writes both the render bounds and collision extent,
+	// while `Color` and `Transparency` populate the part visual.
+	const engine::ecs::Entity floor = store.FindFirstChild(workspace, "Floor");
+	REQUIRE(floor != engine::ecs::NULL_ENTITY);
+	const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(floor);
+	REQUIRE(bounds != nullptr);
+	CHECK(bounds->HalfExtent == engine::core::Vector3{10.0f, 0.5f, 10.0f});
+	const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(floor);
+	REQUIRE(visual != nullptr);
+	CHECK(visual->Tint == engine::core::Color3{0.2f, 0.4f, 0.8f});
+	CHECK(visual->Transparency == 0.375f);
 }
 
 TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloximport]") {
 	ScratchConfig scratch;
+	CollisionGroupScope collisionGroups;
 	std::filesystem::create_directories(scratch.Root);
 	const std::filesystem::path source = scratch.Root / "source.rbxlx";
 	const std::filesystem::path destination = scratch.Root / "Ported.aworld";
 	std::ofstream(source) << R"xml(
 		<roblox version="4">
 			<Item class="Part" referent="RBX0">
-				<Properties><string name="Name">Block</string></Properties>
+				<Properties>
+					<string name="Name">Block</string>
+					<Vector3 name="Size"><X>8</X><Y>3</Y><Z>2</Z></Vector3>
+					<Color3uint8 name="Color">4294901760</Color3uint8>
+					<float name="Transparency">0.375</float>
+					<string name="CollisionGroup">Ground</string>
+				</Properties>
+			</Item>
+			<Item class="Part" referent="RBX6">
+				<Properties>
+					<string name="Name">TintedBlock</string>
+					<Vector3 name="Size"><X>3.5</X><Y>7</Y><Z>1.25</Z></Vector3>
+					<Color3 name="Color"><R>0.25</R><G>0.5</G><B>0.75</B></Color3>
+				</Properties>
+			</Item>
+			<Item class="RemoteEvent" referent="RBX1">
+				<Properties><string name="Name">InterfaceRemote</string></Properties>
+			</Item>
+			<Item class="BindableEvent" referent="RBX2">
+				<Properties><string name="Name">InterfaceBindable</string></Properties>
+			</Item>
+			<Item class="SoundGroup" referent="RBX3">
+				<Properties><string name="Name">InterfaceAudio</string></Properties>
+			</Item>
+			<Item class="GuiService" referent="RBX4">
+				<Properties><string name="Name">GuiService</string></Properties>
+			</Item>
+			<Item class="ChangeHistoryService" referent="RBX5">
+				<Properties><string name="Name">ChangeHistoryService</string></Properties>
 			</Item>
 		</roblox>
 	)xml";
@@ -417,16 +552,65 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 		)
 	);
 	CHECK(error.empty());
-	CHECK(report.Analysis.Instances == 1);
-	CHECK(report.Import.Instances == 1);
+	CHECK(report.Analysis.Instances == 7);
+	CHECK(report.Import.Instances == 7);
 	CHECK(std::filesystem::file_size(destination) > 0);
 
+	// PortRobloxPlace has already registered Ground while building the source
+	// world. A fresh Studio process has not, which is the load path the emitted
+	// .aworld must support on its own.
+	engine::spatial::CollisionGroups::Reset();
 	engine::world::Universe loaded;
 	const engine::world::WorldId world =
 		engine::game::ImportWorld(loaded, destination, engine::core::Name{}, error);
 	REQUIRE(world.IsValid());
 	CHECK(error.empty());
 	loaded.Enter(world, [](engine::ecs::Store &store) {
-		CHECK(store.FindFirstRoot("Block") != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity block = store.FindFirstRoot("Block");
+		REQUIRE(block != engine::ecs::NULL_ENTITY);
+		const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(block);
+		REQUIRE(bounds != nullptr);
+		CHECK(bounds->HalfExtent == engine::core::Vector3{4.0f, 1.5f, 1.0f});
+		const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(block);
+		REQUIRE(visual != nullptr);
+		CHECK(visual->Tint == engine::core::Color3{1.0f, 0.0f, 0.0f});
+		CHECK(visual->Transparency == 0.375f);
+		const uint32_t group = engine::spatial::CollisionGroups::IndexOf(engine::core::Name("Ground"));
+		REQUIRE(group != engine::spatial::NO_GROUP);
+		const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(block);
+		REQUIRE(collider != nullptr);
+		CHECK(collider->Layer.Bits == engine::spatial::LayerMask::Only(group).Bits);
+		CHECK(collider->Mask.Bits == engine::spatial::CollisionGroups::MaskFor(group).Bits);
+
+		const engine::ecs::Entity tinted = store.FindFirstRoot("TintedBlock");
+		REQUIRE(tinted != engine::ecs::NULL_ENTITY);
+		const engine::scene::Bounds *tintedBounds = store.Get<engine::scene::Bounds>(tinted);
+		const engine::scene::Visual *tintedVisual = store.Get<engine::scene::Visual>(tinted);
+		REQUIRE(tintedBounds != nullptr);
+		REQUIRE(tintedVisual != nullptr);
+		CHECK(tintedBounds->HalfExtent == engine::core::Vector3{1.75f, 3.5f, 0.625f});
+		CHECK(tintedVisual->Tint == engine::core::Color3{0.25f, 0.5f, 0.75f});
+
+		for (const std::string_view name :
+			 {"InterfaceRemote",
+			  "InterfaceBindable",
+			  "InterfaceAudio",
+			  "GuiService",
+			  "ChangeHistoryService"}) {
+			const engine::ecs::Entity instance = store.FindFirstRoot(name);
+			REQUIRE(instance != engine::ecs::NULL_ENTITY);
+		}
+		CHECK(
+			store.ClassOf(store.FindFirstRoot("InterfaceRemote")) ==
+			engine::ecs::Classes::Find(engine::core::Name("RemoteEvent"))
+		);
+		CHECK(
+			store.ClassOf(store.FindFirstRoot("InterfaceBindable")) ==
+			engine::ecs::Classes::Find(engine::core::Name("BindableEvent"))
+		);
+		CHECK(
+			store.ClassOf(store.FindFirstRoot("InterfaceAudio")) ==
+			engine::ecs::Classes::Find(engine::core::Name("SoundGroup"))
+		);
 	});
 }

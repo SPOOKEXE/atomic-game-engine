@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward client API. Presentation consumers use
+// this complete scene-to-audio collection contract.
+
 // Where a delivered audio asset becomes a voice in the mixer.
 //
 // **The client is where this belongs and nowhere else.** `scene::Sound` says

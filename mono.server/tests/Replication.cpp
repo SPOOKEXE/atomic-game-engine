@@ -141,7 +141,7 @@ namespace server_replication_test {
 		std::unique_ptr<Transport> Socket;
 		std::unique_ptr<Connector> Link;
 		Store World{"replica"};
-		double Now = 0.0;
+		double Now = engine::core::Clock::Seconds();
 
 		// The port the child bound, so a second client can be pointed at the
 		// same server rather than starting one of its own.
@@ -210,6 +210,7 @@ namespace server_replication_test {
 				Port = port;
 				engine::replication::ConnectorSettings connecting;
 				connecting.ClientIdentity = identity;
+				Now = engine::core::Clock::Seconds();
 				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now, connecting);
 				ListenForJoinNotice();
 				return true;
@@ -227,6 +228,7 @@ namespace server_replication_test {
 				return false;
 			}
 			Port = port;
+			Now = engine::core::Clock::Seconds();
 			Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
 			ListenForJoinNotice();
 			return true;
@@ -427,7 +429,9 @@ namespace server_replication_test {
 		// One client tick: say something so the server knows where to send, then
 		// take whatever came back.
 		void Tick() {
-			Now += 1.0 / 60.0;
+			// Network deadlines follow the real server process. A fixed step per
+			// millisecond poll expires handshakes before a busy server can answer.
+			Now = engine::core::Clock::Seconds();
 
 			// **Deliberately nothing but `Poll`.** A server on a datagram socket
 			// cannot stream to an address it has never heard from, so the client
@@ -696,9 +700,7 @@ TEST_CASE("a client announces itself without being told to", "[server][replicati
 	REQUIRE(remote.Start(16));
 
 	for (int attempt = 0; attempt < 400 && !remote.Link->Joined(); attempt++) {
-		remote.Link->Poll(remote.World, remote.Now);
-		remote.Link->Advance(remote.Now);
-		remote.Now += 1.0 / 60.0;
+		remote.Tick();
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
 	}
 

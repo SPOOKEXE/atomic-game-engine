@@ -51,17 +51,23 @@ namespace {
 	}
 }
 
-TEST_CASE("only explicit editor text and play shortcuts have built-in bindings", "[studio][keybinds]") {
+TEST_CASE("established editor shortcuts have built-in bindings", "[studio][keybinds]") {
 	const Fixture fixture;
 
-	// **The decision this suite exists to hold still.** Search owns its text
-	// convention and Studio Play owns the same Escape settings door as the
-	// shipped client. A build that adds another default without deciding to
-	// will fail here.
+	// **The decision this suite exists to hold still.** Undo, redo and search
+	// own their editor conventions, and Studio Play owns the same Escape
+	// settings door as the shipped client. A build that adds another default
+	// without deciding to will fail here.
 	for (const Keybind &binding : Keybinds::All()) {
 		INFO(binding.Id);
-		if (binding.Bound == Action::SearchAllReplaceAll) {
-			CHECK(binding.Keys == Chord{ImGuiKey_F, true, true, false});
+		if (binding.Bound == Action::Undo) {
+			CHECK(binding.Keys == Chord{ImGuiKey_Z, true, false, false});
+			CHECK(binding.Where == Scope::Editor);
+		} else if (binding.Bound == Action::Redo) {
+			CHECK(binding.Keys == Chord{ImGuiKey_Z, true, true, false});
+			CHECK(binding.Where == Scope::Editor);
+		} else if (binding.Bound == Action::SearchAllReplaceAll) {
+			CHECK(binding.Keys == Chord{ImGuiKey_F, true, false, false});
 		} else if (binding.Bound == Action::ClientSettings) {
 			CHECK(binding.Keys == Chord{ImGuiKey_Escape, false, false, false});
 		} else {
@@ -250,10 +256,10 @@ TEST_CASE("the scope a binding claims survives being read back", "[studio][keybi
 	// actually assigns one, and that editing keys never moves it.
 	for (const Keybind &binding : Keybinds::All()) {
 		INFO(binding.Id);
-		CHECK(
-			(binding.Where == Scope::Global || binding.Where == Scope::Viewport ||
-			 binding.Where == Scope::Tree || binding.Where == Scope::Script)
-		);
+		CHECK((
+			binding.Where == Scope::Global || binding.Where == Scope::Editor ||
+			binding.Where == Scope::Viewport || binding.Where == Scope::Tree || binding.Where == Scope::Script
+		));
 	}
 
 	Keybinds::Set(Action::Delete, Chord{ImGuiKey_Delete});

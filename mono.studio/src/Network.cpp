@@ -22,6 +22,8 @@
 // it - which is the same decision `Dashboard`'s minute buckets make, at the
 // resolution an interactive panel is read at.
 
+#include "AssetProfiler.hpp"
+
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentForm.hpp>
@@ -52,6 +54,7 @@
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 #include <system_error>
+#include <unordered_map>
 
 namespace studio {
 
@@ -64,6 +67,46 @@ namespace studio {
 		// five hundred assets has to become five hundred assets arriving over a
 		// second, not one frame that never returns.
 		constexpr size_t REQUESTS_PER_PUMP = 4;
+
+		// Fits one part to resident mesh proportions. Callers choose the mesh
+		// lookup strategy, so a burst can scan a world once instead of once per
+		// mesh that happened to arrive in the same frame.
+		void FitPartToMesh(
+			engine::ecs::Store &store,
+			engine::ecs::Entity entity,
+			const engine::scene::Visual &visual,
+			const engine::scene::Bounds &bounds,
+			const engine::core::Name &mesh,
+			const engine::core::Vector3 &extent
+		) {
+			const float longest = std::max({extent.X, extent.Y, extent.Z});
+			if (visual.Mesh != mesh || visual.Fitted == mesh || longest <= 1e-6f) {
+				return;
+			}
+
+			// The part keeps the size it has along its longest axis. The mesh supplies
+			// its proportions, so replacing geometry cannot unexpectedly rescale a scene.
+			const float span = std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
+			if (span <= 1e-6f) {
+				return;
+			}
+
+			const float unit = span / longest;
+			// `Each` exposes columns directly. Take tracked rows only after every
+			// guard, so the renderer and retained presentation see a real change.
+			engine::scene::Bounds *fittedBounds = store.GetMutable<engine::scene::Bounds>(entity);
+			engine::scene::Visual *fittedVisual = store.GetMutable<engine::scene::Visual>(entity);
+			if (fittedBounds == nullptr || fittedVisual == nullptr) {
+				return;
+			}
+
+			fittedBounds->HalfExtent = engine::core::Vector3{
+				extent.X * unit,
+				extent.Y * unit,
+				extent.Z * unit,
+			};
+			fittedVisual->Fitted = mesh;
+		}
 	}
 
 	namespace {
@@ -166,7 +209,7 @@ namespace studio {
 		ContentUploads.reset();
 		ContentSamples = NetworkSamples{};
 
-		// **Everything the old client's answers were recorded in goes with it.**
+		// **Everything the old client's answers and measurements were recorded in goes with it.**
 		// `ContentAsked` is what stops a name being requested twice, and it was
 		// keyed to a client that no longer exists - so saving the Content page
 		// mid-session left every asset already named permanently unfetchable
@@ -178,6 +221,7 @@ namespace studio {
 		ContentScannedAtRevision.clear();
 		ContentPending.clear();
 		ContentIssued.clear();
+		ContentAssetProfiles.clear();
 		ContentRequested = false;
 		ContentReportedTotal = 0;
 
@@ -420,14 +464,18 @@ namespace studio {
 				continue;
 			}
 
-			ContentBudget.Spend(asset->Bytes.size());
-
 			const engine::core::Name name(asset->Name);
+			RecordContentAssetPull(name, asset->Kind, asset->Bytes.size());
+			if (ContentResident.Contains(name, asset->Kind, asset->Root)) {
+				continue;
+			}
+			ContentBudget.Spend(asset->Bytes.size());
 			engine::core::ByteReader reader(asset->Bytes);
 
 			if (asset->Kind == engine::assets::AssetKind::Mesh) {
 				engine::assets::MeshData mesh;
 				if (!engine::assets::Mesh::Read(reader, mesh)) {
+					RecordContentAssetFailure(name);
 					continue;
 				}
 
@@ -441,14 +489,18 @@ namespace studio {
 				}
 
 				if (Renderer.AddMesh(name, mesh)) {
+					const AssetFootprint footprint = MeshFootprint(mesh);
+					RecordContentAssetFootprint(
+						name, footprint.DecodedBytes, footprint.CpuResidentBytes, footprint.GpuResidentBytes
+					);
 					VisualResourceRevision++;
+					ContentMeshRevision++;
 					ContentMeshes++;
+					ContentResident.Remember(name, asset->Kind, asset->Root);
 
-					// **Every part naming it, now that its shape is known.** A
-					// `MeshId` can be set long before the geometry arrives - that
-					// is the ordinary case, since naming it is what fetches it -
-					// so the fit cannot happen at assignment alone.
-					FitPartsToMesh(name, engine::core::Vector3{(mesh.Maximum - mesh.Minimum) * 0.5f});
+					// `FitPendingParts` consumes this arrival after intake completes. A
+					// batch can contain many meshes, so fitting here would rescan every
+					// world once per mesh before the batch's one revision-gated scan.
 
 					// **The sheets its submeshes name, recorded where they are
 					// readable.** They live inside the mesh file, so this is the
@@ -492,12 +544,21 @@ namespace studio {
 					// catalogue that has never heard of it. `FitPendingParts`
 					// is what tells it, out of this.
 					ContentMeshFacts[name.Id()] = RegisteredMesh{triangles, sheets};
+				} else {
+					RecordContentAssetFailure(name);
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
+					const AssetFootprint footprint = TextureFootprint(image);
+					RecordContentAssetFootprint(
+						name, footprint.DecodedBytes, footprint.CpuResidentBytes, footprint.GpuResidentBytes
+					);
 					VisualResourceRevision++;
 					ContentTextures++;
+					ContentResident.Remember(name, asset->Kind, asset->Root);
+				} else {
+					RecordContentAssetFailure(name);
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
 				// **Handed over whole, not decoded.** A shader asset is a SPIR-V
@@ -516,9 +577,12 @@ namespace studio {
 				if (engine::assets::IsRuntimeReadable(asset->Name)) {
 					ContentShaders++;
 				}
+				RecordContentAssetFootprint(name, asset->Bytes.size(), 0, 0);
+				ContentResident.Remember(name, asset->Kind, asset->Root);
 			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
 				engine::assets::AnimationData animation;
 				if (!engine::assets::Animation::Read(reader, animation)) {
+					RecordContentAssetFailure(name);
 					continue;
 				}
 				EachOpenWorld([&name, &animation](engine::ecs::Store &store) {
@@ -526,9 +590,12 @@ namespace studio {
 				});
 				ContentAnimationFacts[name.Id()] = animation;
 				ContentAnimations++;
+				RecordContentAssetFootprint(name, asset->Bytes.size(), 0, 0);
+				ContentResident.Remember(name, asset->Kind, asset->Root);
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
 				if (!engine::assets::Material::Read(reader, material)) {
+					RecordContentAssetFailure(name);
 					continue;
 				}
 				// **All seven, built once and recorded together.** A material is
@@ -548,6 +615,8 @@ namespace studio {
 					engine::scene::RecordMaterial(store, name, maps);
 				});
 				ContentMaterials++;
+				RecordContentAssetFootprint(name, asset->Bytes.size(), 0, 0);
+				ContentResident.Remember(name, asset->Kind, asset->Root);
 			}
 		}
 		ContentPending.resize(kept);
@@ -588,58 +657,18 @@ namespace studio {
 	}
 
 	void Editor::FitPartsToMesh(const engine::core::Name &mesh, const engine::core::Vector3 &extent) {
-		// The mesh's proportions, normalised so the longest axis is one.
-		const float longest = std::max({extent.X, extent.Y, extent.Z});
-		if (!mesh.IsValid() || longest <= 1e-6f) {
+		if (!mesh.IsValid()) {
 			return;
 		}
 
-		EachOpenWorld([&mesh, &extent, longest](engine::ecs::Store &store) {
-			store.Each<engine::scene::Visual, engine::scene::Bounds>([&](engine::ecs::Entity,
-																		 engine::scene::Visual &visual,
-																		 engine::scene::Bounds &bounds) {
-				// **Only when the mesh changed, which is what `Visual::Fitted`
-				// records.** This runs whenever geometry arrives - a republish,
-				// a reopened place, another part pulling the same mesh in - and
-				// without the guard every one of those would reshape a box
-				// somebody had deliberately squashed. A scene that rearranges
-				// itself on load is the worst kind of surprise, because nothing
-				// visibly did it.
-				if (visual.Mesh != mesh || visual.Fitted == mesh) {
-					return;
+		EachOpenWorld([&mesh, &extent](engine::ecs::Store &store) {
+			store.Each<const engine::scene::Visual, const engine::scene::Bounds>(
+				[&](engine::ecs::Entity entity,
+					const engine::scene::Visual &visual,
+					const engine::scene::Bounds &bounds) {
+					FitPartToMesh(store, entity, visual, bounds, mesh, extent);
 				}
-
-				// **The part keeps the size it has along its longest axis and
-				// gets the mesh's shape on the other two.** That is the whole
-				// rule, and both halves are load-bearing:
-				//
-				//   * the shape has to come from the mesh, because `Size` is a
-				//     box the mesh is *stretched* into - a character in a cubic
-				//     box is a character squashed into a cube;
-				//   * the scale has to come from the part, because somebody
-				//     swapping a bad mesh for a fixed one wants the thing to
-				//     stay the size they made it. Taking the mesh's own metres
-				//     would resize their scene every time they corrected an
-				//     asset.
-				//
-				// **Idempotent**, which is what lets this run whenever a mesh
-				// arrives rather than only on assignment: a part whose
-				// proportions already match is written the value it has.
-				const float span = std::max({bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z});
-				if (span <= 1e-6f) {
-					return;
-				}
-
-				const float unit = span / longest;
-				bounds.HalfExtent = engine::core::Vector3{
-					extent.X * unit,
-					extent.Y * unit,
-					extent.Z * unit,
-				};
-
-				// Claimed, so nothing fits this part to this mesh again.
-				visual.Fitted = mesh;
-			});
+			);
 		});
 	}
 
@@ -655,32 +684,51 @@ namespace studio {
 		// are what decide whether anything is written at all.
 		std::vector<engine::core::Name> waiting;
 
-		EachOpenWorld([&waiting](engine::ecs::Store &store) {
-			store.Each<const engine::scene::Visual>(
-				[&waiting, &store](engine::ecs::Entity, const engine::scene::Visual &visual) {
-					if (!visual.Mesh.IsValid()) {
-						return;
-					}
-
-					// **Two reasons a mesh is pending, and the second is not the
-					// first.** A part that has never been fitted needs the shape; a
-					// world whose catalogue has never heard of the mesh needs the
-					// facts. They come apart when a world is loaded from a file -
-					// `Visual::Fitted` is saved with the part, so a reopened place
-					// is fully fitted and knows no triangle counts at all.
-					const bool unfitted = visual.Fitted != visual.Mesh;
-					const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
-					if (!unfitted && !unknown) {
-						return;
-					}
-
-					if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
-						waiting.push_back(visual.Mesh);
-					}
+		Universe->EachWorld([this, &waiting](engine::world::WorldId world) {
+			Universe->Enter(world, [this, world, &waiting](engine::ecs::Store &store) {
+				const ContentFitScanState state{
+					.VisualVersion = store.ComponentChangeVersion<engine::scene::Visual>(),
+					.VisualCount = store.CountMatching<engine::scene::Visual>(),
+					.MeshVersion = ContentMeshRevision,
+				};
+				const auto scanned = ContentFitScans.find(world.Index);
+				if (scanned != ContentFitScans.end() && scanned->second == state) {
+					return;
 				}
-			);
+				ContentFitScans[world.Index] = state;
+
+				store.Each<const engine::scene::Visual>(
+					[&waiting, &store](engine::ecs::Entity, const engine::scene::Visual &visual) {
+						if (!visual.Mesh.IsValid()) {
+							return;
+						}
+
+						// **Two reasons a mesh is pending, and the second is not the
+						// first.** A part that has never been fitted needs the shape; a
+						// world whose catalogue has never heard of the mesh needs the
+						// facts. They come apart when a world is loaded from a file -
+						// `Visual::Fitted` is saved with the part, so a reopened place
+						// is fully fitted and knows no triangle counts at all.
+						const bool unfitted = visual.Fitted != visual.Mesh;
+						const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
+						if (!unfitted && !unknown) {
+							return;
+						}
+
+						if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
+							waiting.push_back(visual.Mesh);
+						}
+					}
+				);
+			});
 		});
 
+		struct ResidentMesh {
+			engine::core::Name Name;
+			engine::core::Vector3 Extent;
+		};
+		std::unordered_map<uint32_t, ResidentMesh> resident;
+		resident.reserve(waiting.size());
 		for (const engine::core::Name &mesh : waiting) {
 			// **Only a mesh the renderer holds.** A part naming one that has not
 			// arrived - or never will - is left alone rather than fitted to
@@ -690,8 +738,34 @@ namespace studio {
 			if (!Renderer.MeshExtentOf(mesh, extent)) {
 				continue;
 			}
+			resident.emplace(mesh.Id(), ResidentMesh{mesh, extent});
+		}
 
-			FitPartsToMesh(mesh, extent);
+		// A delivered bundle commonly contains a whole character or prop set. Walk
+		// each affected world once for that batch, rather than once for every mesh.
+		if (!resident.empty()) {
+			Universe->EachWorld([this, &resident](engine::world::WorldId world) {
+				Universe->Enter(world, [&resident](engine::ecs::Store &store) {
+					store.Each<const engine::scene::Visual, const engine::scene::Bounds>(
+						[&store, &resident](
+							engine::ecs::Entity entity,
+							const engine::scene::Visual &visual,
+							const engine::scene::Bounds &bounds
+						) {
+							const auto found = resident.find(visual.Mesh.Id());
+							if (found != resident.end()) {
+								FitPartToMesh(
+									store, entity, visual, bounds, found->second.Name, found->second.Extent
+								);
+							}
+						}
+					);
+				});
+			});
+		}
+
+		for (const auto &entry : resident) {
+			const engine::core::Name &mesh = entry.second.Name;
 
 			// **And tell any world that has not heard of it.** The catalogue is
 			// written at intake into the worlds that were open then, so a world

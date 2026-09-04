@@ -319,6 +319,20 @@ TEST_CASE("a refused mesh leaves the destination alone", "[assets][mesh]") {
 	CHECK(held.Vertices.size() == 3);
 }
 
+TEST_CASE("a late mesh truncation leaves the destination alone", "[assets][mesh]") {
+	MeshData held = Triangle();
+	held.Submeshes.push_back(Submesh{0, 3, "kept", ""});
+
+	const std::vector<std::byte> complete = Written(Triangle());
+	const std::span<const std::byte> truncated(complete.data(), complete.size() - 1);
+	ByteReader reader(truncated);
+	CHECK_FALSE(Mesh::Read(reader, held));
+
+	REQUIRE(held.Submeshes.size() == 1);
+	CHECK(held.Submeshes[0].Material == "kept");
+	CHECK(held.Vertices.size() == 3);
+}
+
 TEST_CASE("an over-long material name is refused", "[assets][mesh]") {
 	MeshData data = Triangle();
 	data.Submeshes.push_back(Submesh{0, 3, std::string(Mesh::MAXIMUM_MATERIAL_BYTES + 1, 'x'), ""});

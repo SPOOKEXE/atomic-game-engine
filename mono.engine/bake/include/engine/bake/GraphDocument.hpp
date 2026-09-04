@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward bake API. Authoring tools exchange this
+// complete graph document contract without a parallel file model.
+
 // Where a document meets a graph.
 //
 // **The one function that needs both halves, which is why it is the only thing

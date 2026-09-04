@@ -14,9 +14,9 @@ layout(set = 2, binding = 0) uniform sampler2D particleTexture;
 
 layout(set = 3, binding = 0) uniform Material {
 	// x: whether `particleTexture` holds this emitter's texture. An untextured
-	// emitter draws its colour as a flat quad, which is a visible square rather
-	// than nothing - the missing-texture rule the mesh path already follows.
-	// y: the blend from alpha to additive. z: lighting influence.
+	// emitter draws its colour as a flat quad unless the emitter requests the
+	// analytic soft-disc mask. y: the blend from alpha to additive. z: lighting
+	// influence. w: requested analytic soft-disc mask for an untextured quad.
 	vec4 Flags;
 	vec4 Illumination;
 	vec4 FogColour;
@@ -29,6 +29,10 @@ layout(location = 0) out vec4 outColour;
 void main() {
 	vec4 texel = material.Flags.x > 0.5 ? texture(particleTexture, inTexCoord) : vec4(1.0);
 	vec4 result = texel * inColour;
+	if (material.Flags.x < 0.5 && material.Flags.w > 0.5) {
+		float radius = length(inTexCoord - vec2(0.5)) * 2.0;
+		result.a *= 1.0 - smoothstep(0.42, 1.0, radius);
+	}
 	result.rgb *= mix(vec3(1.0), material.Illumination.rgb, material.Flags.z);
 
 	float fogInterval = max(material.Fog.y - material.Fog.x, 0.0001);

@@ -36,6 +36,7 @@
 #include <network/Presence.hpp>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 // The content attachment is held by pointer and named nowhere else in this
@@ -810,6 +811,8 @@ namespace server {
 		engine::net::Endpoint ListeningOn() const;
 
 	  private:
+		// The VM that owns one world's script callbacks, or null when it has no scripts.
+		engine::script::Runtime *RuntimeOf(engine::world::WorldId world);
 		// Builds one world, from a scene file when `--game` names one and from
 		// the placeholder otherwise.
 		//
@@ -1133,7 +1136,7 @@ namespace server {
 		// it. A server that dropped its own would still work and would be one
 		// refactor away from not, which is the kind of lifetime nobody wants to
 		// re-derive.
-		std::vector<std::shared_ptr<engine::script::Runtime>> Runtimes;
+		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>> Runtimes;
 
 		std::unique_ptr<engine::world::Recorder> Recorder_;
 		std::unique_ptr<engine::world::Replayer> Replayer_;

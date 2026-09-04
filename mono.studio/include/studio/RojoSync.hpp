@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Import and sync integrations
+// share this complete Rojo contract.
+
 // Reading a Rojo project, and building the tree it describes.
 //
 // **The format is somebody else's and that is the point.** `default.project.json`

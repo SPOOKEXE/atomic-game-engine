@@ -15,12 +15,15 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/NodeCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -1263,6 +1266,172 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	CHECK_FALSE(store.Get<engine::gui::Resolved>(hint)->Rendered);
 }
 
+TEST_CASE("the node canvas scene builds a typed grouped graph", "[examples][scene][gui][nodecanvas]") {
+	const StagedAssets assets;
+	Store store("node_canvas");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("NodeCanvas.luau"), error));
+
+	const Entity canvas = FirstElement(store, "ComputeGraph");
+	REQUIRE(canvas != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::gui::NodeCanvas>(canvas) != nullptr);
+
+	const Entity group = store.FindFirstChild(canvas, "NoisePipeline");
+	REQUIRE(group != engine::ecs::NULL_ENTITY);
+	const engine::gui::NodeCanvasGroup *groupState = store.Get<engine::gui::NodeCanvasGroup>(group);
+	REQUIRE(groupState != nullptr);
+	CHECK(groupState->Layout == engine::gui::NodeGroupLayout::AroundEdge);
+
+	const Entity source = store.FindFirstChild(group, "Noise");
+	const Entity remap = store.FindFirstChild(group, "Remap");
+	const Entity preview = store.FindFirstChild(group, "Preview");
+	REQUIRE(source != engine::ecs::NULL_ENTITY);
+	REQUIRE(remap != engine::ecs::NULL_ENTITY);
+	REQUIRE(preview != engine::ecs::NULL_ENTITY);
+
+	std::vector<Entity> links;
+	REQUIRE(engine::gui::NodeCanvasLinks(store, canvas, links) == 2);
+	const engine::gui::NodeCanvasLink *first = store.Get<engine::gui::NodeCanvasLink>(links.front());
+	REQUIRE(first != nullptr);
+	CHECK(first->FromNode == Name("noise"));
+	CHECK(first->ToNode == Name("remap"));
+	CHECK(first->LineColor.R == Approx(110.0f / 255.0f));
+}
+
+TEST_CASE("the fantasy HUD scene mounts Fusion and builds its local player state", "[examples][scene][gui]") {
+	const StagedAssets assets;
+
+	Store store("bladeborne_demo");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("BladeborneDemo.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The scene owns both modules. No global library is required for an authored
+	// game interface to use the declarative builder or replace its fixture data.
+	const Entity holder = InScene(store, "BladeborneDemo");
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
+	const Entity modules = store.FindFirstChild(holder, "BladeborneDemo");
+	REQUIRE(modules != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(modules) == engine::script::ModuleScriptClass());
+	CHECK(store.ClassOf(store.FindFirstChild(modules, "Fusion")) == engine::script::ModuleScriptClass());
+	CHECK(store.ClassOf(store.FindFirstChild(modules, "DemoData")) == engine::script::ModuleScriptClass());
+	CHECK(store.ClassOf(store.FindFirstChild(modules, "HUDCommon")) == engine::script::ModuleScriptClass());
+	const Entity widgets = store.FindFirstChild(modules, "Widgets");
+	REQUIRE(widgets != engine::ecs::NULL_ENTITY);
+	CHECK(
+		store.ClassOf(store.FindFirstChild(widgets, "OnscreenWidget")) == engine::script::ModuleScriptClass()
+	);
+	CHECK(
+		store.ClassOf(store.FindFirstChild(widgets, "OnscreenButtons")) == engine::script::ModuleScriptClass()
+	);
+	CHECK(
+		store.ClassOf(store.FindFirstChild(widgets, "MinimapWidget")) == engine::script::ModuleScriptClass()
+	);
+	CHECK(
+		store.ClassOf(store.FindFirstChild(widgets, "TopRightQuestsWidget")) ==
+		engine::script::ModuleScriptClass()
+	);
+	CHECK(
+		store.ClassOf(store.FindFirstChild(widgets, "HotbarWidget")) == engine::script::ModuleScriptClass()
+	);
+	CHECK(store.ClassOf(store.FindFirstChild(widgets, "MusicWidget")) == engine::script::ModuleScriptClass());
+	CHECK(store.ClassOf(store.FindFirstChild(widgets, "TabWidget")) == engine::script::ModuleScriptClass());
+
+	Entity hud = engine::ecs::NULL_ENTITY;
+	store.Each<const engine::gui::Layer>([&](Entity entity, const engine::gui::Layer &) {
+		if (hud == engine::ecs::NULL_ENTITY && store.InstanceNameOf(entity) == Name("BladeborneHUD")) {
+			hud = entity;
+		}
+	});
+	REQUIRE(hud != engine::ecs::NULL_ENTITY);
+	CHECK(CountElements(store, "Ability1") == 1);
+	CHECK(CountElements(store, "Ability2") == 1);
+	CHECK(CountElements(store, "Ability3") == 1);
+	CHECK(CountElements(store, "Ability4") == 1);
+	CHECK(CountElements(store, "Ability5") == 1);
+	CHECK(CountElements(store, "Ability6") == 1);
+	CHECK(CountElements(store, "Minimap") == 1);
+	CHECK(CountElements(store, "QuestCard") == 1);
+	CHECK(CountElements(store, "HotbarSlot1") == 2);
+	CHECK(CountElements(store, "HotbarSlot12") == 2);
+
+	const Entity playerName = FirstElement(store, "PlayerName");
+	REQUIRE(playerName != engine::ecs::NULL_ENTITY);
+	const engine::gui::Label *name = store.Get<engine::gui::Label>(playerName);
+	REQUIRE(name != nullptr);
+	CHECK(name->Text.find("SPOOK") != std::string::npos);
+
+	engine::gui::Screen display;
+	display.Width = 1920.0f;
+	display.Height = 1080.0f;
+	CHECK(engine::gui::Layout(store, display) > 0);
+
+	const Entity ability = FirstElement(store, "Ability1");
+	REQUIRE(ability != engine::ecs::NULL_ENTITY);
+	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(ability);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Rendered);
+}
+
+TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons", "[examples][scene][gui]") {
+	const StagedAssets assets;
+
+	Store store("gui_interaction");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("GuiInteraction.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const Entity panel = FirstElement(store, "InteractionPanel");
+	const Entity textLabel = FirstElement(store, "TextLabel");
+	const Entity imageLabel = FirstElement(store, "ImageLabel");
+	const Entity textButton = FirstElement(store, "TextButton");
+	const Entity imageButton = FirstElement(store, "ImageButton");
+	const Entity textBox = FirstElement(store, "TextBox");
+	const Entity status = FirstElement(store, "InteractionStatus");
+	REQUIRE(panel != engine::ecs::NULL_ENTITY);
+	REQUIRE(textLabel != engine::ecs::NULL_ENTITY);
+	REQUIRE(imageLabel != engine::ecs::NULL_ENTITY);
+	REQUIRE(textButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(imageButton != engine::ecs::NULL_ENTITY);
+	REQUIRE(textBox != engine::ecs::NULL_ENTITY);
+	REQUIRE(status != engine::ecs::NULL_ENTITY);
+
+	const engine::gui::Label *title = store.Get<engine::gui::Label>(textLabel);
+	const engine::gui::Picture *picture = store.Get<engine::gui::Picture>(imageLabel);
+	const engine::gui::Label *buttonText = store.Get<engine::gui::Label>(textButton);
+	const engine::gui::Picture *buttonImage = store.Get<engine::gui::Picture>(imageButton);
+	const engine::gui::Label *entryText = store.Get<engine::gui::Label>(textBox);
+	const engine::gui::Label *result = store.Get<engine::gui::Label>(status);
+	REQUIRE(title != nullptr);
+	REQUIRE(picture != nullptr);
+	REQUIRE(buttonText != nullptr);
+	REQUIRE(buttonImage != nullptr);
+	REQUIRE(entryText != nullptr);
+	REQUIRE(result != nullptr);
+	CHECK(title->Text == "GUI INTERACTION CHECK");
+	CHECK(picture->Image == Name("engine.Checker"));
+	CHECK(buttonText->Text == "TEXT BUTTON");
+	CHECK(buttonImage->Image == Name("engine.Checker"));
+	CHECK(entryText->Text == "TextBox component");
+	CHECK(result->Text == "PASS  TextButton 1   ImageButton 1");
+
+	engine::gui::Screen display;
+	display.Width = 1280.0f;
+	display.Height = 720.0f;
+	CHECK(engine::gui::Layout(store, display) > 0);
+	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(panel);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Rendered);
+}
+
 TEST_CASE("the world interface scene contains every collector and a nested scene", "[examples][scene][gui]") {
 	const StagedAssets assets;
 	Store store("interface_world");
@@ -1528,6 +1697,51 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 }
 
 namespace {
+	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_";
+	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_";
+	constexpr size_t PLANET_PATCH_RESOLUTION = 17;
+	constexpr size_t PLANET_PATCH_VERTICES =
+		PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION + 4 * (PLANET_PATCH_RESOLUTION - 1);
+	constexpr size_t PLANET_PATCH_INDICES =
+		(PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6 +
+		4 * (PLANET_PATCH_RESOLUTION - 1) * 6;
+
+	size_t PlanetChunks(Store &store) {
+		size_t chunks = 0;
+		store.Each<const Visual>([&](Entity entity, const Visual &) {
+			if (store.InstanceNameOf(entity).Text().starts_with(PLANET_CHUNK_PREFIX)) {
+				chunks++;
+			}
+		});
+		return chunks;
+	}
+
+	size_t PlanetChunksAtDepth(Store &store, size_t depth) {
+		const std::string marker = "_D" + std::to_string(depth) + "_";
+		size_t chunks = 0;
+		store.Each<const Visual>([&](Entity entity, const Visual &) {
+			const std::string_view name = store.InstanceNameOf(entity).Text();
+			if (name.starts_with(PLANET_CHUNK_PREFIX) && name.find(marker) != std::string_view::npos) {
+				chunks++;
+			}
+		});
+		return chunks;
+	}
+
+	std::vector<std::array<float, 3>> PlanetVertices(Store &store) {
+		std::vector<std::array<float, 3>> points;
+		store.Each<const engine::scene::EditableMesh>([&](Entity entity,
+														  const engine::scene::EditableMesh &mesh) {
+			if (!store.InstanceNameOf(entity).Text().starts_with(PLANET_MESH_PREFIX)) {
+				return;
+			}
+			for (const engine::core::Vector3 &at : mesh.Positions) {
+				points.push_back({at.X, at.Y, at.Z});
+			}
+		});
+		std::sort(points.begin(), points.end());
+		return points;
+	}
 
 	// Every terrain chunk the scene built, as a canonical sorted list of
 	// vertex positions.
@@ -1573,6 +1787,276 @@ namespace {
 		for (int tick = 0; tick < 400 && TerrainChunks(store) < expected; tick++) {
 			systems.Tick(store, 1.0f / 60.0f);
 		}
+	}
+}
+
+TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", "[examples][scene][planet]") {
+	const StagedAssets assets;
+
+	Store store("planet");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Planet.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The coarse six-face globe exists before the first tick. Refinement is one
+	// transactional patch per barrier, so this bound lets the first camera
+	// selection finish without making completion depend on worker speed.
+	for (size_t tick = 0; tick < 220; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	const size_t chunks = PlanetChunks(store);
+	CHECK(chunks > 6);
+	CHECK(chunks <= 6 * 64);
+	CHECK(PlanetChunksAtDepth(store, 2) > 0);
+	CHECK(PlanetChunksAtDepth(store, 3) > 0);
+
+	const Entity lutEntity = InScene(store, "PlanetColourLUT");
+	REQUIRE(lutEntity != engine::ecs::NULL_ENTITY);
+	const auto *lut = store.Get<engine::scene::EditableImage>(lutEntity);
+	REQUIRE(lut != nullptr);
+	CHECK(lut->Width == 128);
+	CHECK(lut->Height == 4);
+
+	const engine::scene::ShaderText shader = engine::scene::ShaderTextOf(store, Name("PlanetSurface"));
+	REQUIRE(shader.Found);
+	CHECK(shader.Code.find("colourMap") != std::string::npos);
+	CHECK(shader.Code.find("oceanGlint") != std::string::npos);
+
+	size_t meshes = 0;
+	bool foundOcean = false;
+	bool foundLand = false;
+	store.Each<const engine::scene::EditableMesh>([&](Entity entity,
+													  const engine::scene::EditableMesh &mesh) {
+		const std::string_view meshName = store.InstanceNameOf(entity).Text();
+		if (!meshName.starts_with(PLANET_MESH_PREFIX)) {
+			return;
+		}
+
+		meshes++;
+		REQUIRE(mesh.Positions.size() == PLANET_PATCH_VERTICES);
+		REQUIRE(mesh.Normals.size() == PLANET_PATCH_VERTICES);
+		REQUIRE(mesh.UVs.size() == PLANET_PATCH_VERTICES);
+		REQUIRE(mesh.Indices.size() == PLANET_PATCH_INDICES);
+		for (size_t vertex = 0; vertex < PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION; vertex++) {
+			foundOcean |= mesh.UVs[vertex].Y < 0.5f;
+			foundLand |= mesh.UVs[vertex].Y > 0.5f;
+		}
+
+		const std::string partName =
+			std::string(PLANET_CHUNK_PREFIX) + std::string(meshName.substr(PLANET_MESH_PREFIX.size()));
+		const Entity part = InScene(store, partName);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *visual = store.Get<Visual>(part);
+		const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(part);
+		const auto *transform = store.Get<engine::scene::Transform>(part);
+		REQUIRE(visual != nullptr);
+		REQUIRE(appearance != nullptr);
+		REQUIRE(transform != nullptr);
+		CHECK(visual->Mesh == engine::scene::EditableMeshContentName(store, entity));
+		CHECK(appearance->ColourMap == engine::scene::EditableImageContentName(store, lutEntity));
+
+		const Entity material = store.FindFirstChild(part, "PlanetMaterial");
+		REQUIRE(material != engine::ecs::NULL_ENTITY);
+		const auto *selection = store.Get<engine::scene::MaterialRef>(material);
+		REQUIRE(selection != nullptr);
+		CHECK(selection->Shader == Name("PlanetSurface"));
+
+		// The skirt vertices follow the 17 by 17 surface grid. The surface stays
+		// outside the base radius and every cell faces away from the origin.
+		const engine::core::Vector3 centre = transform->Frame.Position;
+		for (size_t vertex = 0; vertex < PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION; vertex++) {
+			const float radius = (mesh.Positions[vertex] + centre).Magnitude();
+			CHECK(radius >= 69.99f);
+			CHECK(radius < 110.0f);
+		}
+
+		const size_t surfaceIndices = (PLANET_PATCH_RESOLUTION - 1) * (PLANET_PATCH_RESOLUTION - 1) * 6;
+		for (size_t index = 0; index < surfaceIndices; index += 3) {
+			const engine::core::Vector3 a = mesh.Positions[mesh.Indices[index]] + centre;
+			const engine::core::Vector3 b = mesh.Positions[mesh.Indices[index + 1]] + centre;
+			const engine::core::Vector3 c = mesh.Positions[mesh.Indices[index + 2]] + centre;
+			CHECK((b - a).Cross(c - a).Dot(a) > 0.0f);
+		}
+	});
+	CHECK(meshes == chunks);
+	CHECK(foundOcean);
+	CHECK(foundLand);
+}
+
+TEST_CASE("the planet quadtree follows the active camera", "[examples][scene][planet]") {
+	const StagedAssets assets;
+
+	Store store("planet.active_camera");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Planet.luau"), error));
+
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "PlanetTestCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 20.0f, -150.0f})}
+	);
+	REQUIRE(store.SetParent(camera, engine::scene::WorkspaceOf(store)));
+	store.SetResource(ActiveCamera{camera});
+	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
+	CHECK(store.Resource<ActiveCamera>()->Entity == camera);
+
+	for (size_t tick = 0; tick < 260; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+	CHECK(store.Resource<ActiveCamera>()->Entity == camera);
+
+	size_t nearNegativeZ = 0;
+	size_t farPositiveZ = 0;
+	store.Each<const Visual>([&](Entity entity, const Visual &) {
+		const std::string_view name = store.InstanceNameOf(entity).Text();
+		if (name.starts_with("PlanetChunk_NZ_D3_")) {
+			nearNegativeZ++;
+		}
+		if (name.starts_with("PlanetChunk_PZ_D3_")) {
+			farPositiveZ++;
+		}
+	});
+
+	CHECK(nearNegativeZ > 0);
+	CHECK(farPositiveZ == 0);
+}
+
+TEST_CASE("the planet is a pure function of its seed and tick", "[examples][scene][planet]") {
+	const StagedAssets assets;
+	std::vector<std::array<float, 3>> first;
+	std::vector<std::array<float, 3>> second;
+
+	for (std::vector<std::array<float, 3>> *vertices : {&first, &second}) {
+		Store store("planet.determinism");
+		Scheduler systems;
+		std::string error;
+		REQUIRE(LoadScene(store, systems, ExamplePath("Planet.luau"), error));
+
+		for (size_t tick = 0; tick < 24; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
+		*vertices = PlanetVertices(store);
+	}
+
+	REQUIRE(!first.empty());
+	REQUIRE(first.size() == second.size());
+	CHECK(first == second);
+}
+
+TEST_CASE(
+	"the PBR shader material demo binds every map to every mesh shader route", "[examples][scene][pbr]"
+) {
+	const StagedAssets assets;
+
+	Store store("pbr.shader.material");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("PbrShaderMaterialDemo.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// The renderer owns material resolution, so the generic scene loader leaves
+	// it unscheduled. Resolve once here to inspect the same derived draw inputs
+	// the client's pre-render phase consumes.
+	REQUIRE(engine::scene::ResolveMaterials(store) == 3);
+
+	// Light transforms happen in the normal tick path, so let the other scene
+	// systems settle before checking the authored light rows.
+	for (size_t tick = 0; tick < 4; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	const std::array maps{
+		"PbrDemo_Colour",
+		"PbrDemo_Normal",
+		"PbrDemo_Roughness",
+		"PbrDemo_Occlusion",
+		"PbrDemo_Height",
+		"PbrDemo_Metalness",
+		"PbrDemo_Emissive",
+	};
+	std::array<engine::core::Name, std::tuple_size_v<decltype(maps)>> contentIds{};
+	for (size_t index = 0; index < maps.size(); index++) {
+		const Entity image = InScene(store, maps[index]);
+		REQUIRE(image != engine::ecs::NULL_ENTITY);
+		const auto *editable = store.Get<engine::scene::EditableImage>(image);
+		REQUIRE(editable != nullptr);
+		CHECK(editable->Width == 64);
+		CHECK(editable->Height == 64);
+		CHECK(editable->Revision > 0);
+		contentIds[index] = engine::scene::EditableImageContentName(store, image);
+	}
+
+	const auto mapsOf = [&](const char *partName) {
+		const Entity part = InScene(store, partName);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(part);
+		REQUIRE(appearance != nullptr);
+		CHECK(appearance->ColourMap == contentIds[0]);
+		CHECK(appearance->NormalMap == contentIds[1]);
+		CHECK(appearance->RoughnessMap == contentIds[2]);
+		CHECK(appearance->OcclusionMap == contentIds[3]);
+		CHECK(appearance->HeightMap == contentIds[4]);
+		CHECK(appearance->MetalnessMap == contentIds[5]);
+		CHECK(appearance->EmissiveMap == contentIds[6]);
+		CHECK(appearance->EmissiveStrength == Approx(2.2f));
+		return part;
+	};
+
+	const Entity defaultPbr = mapsOf("DefaultPbr");
+	const auto *defaultAppearance = store.Get<engine::scene::SurfaceAppearance>(defaultPbr);
+	REQUIRE(defaultAppearance != nullptr);
+	CHECK(!defaultAppearance->Shader.IsValid());
+
+	for (const auto &[partName, shader] : std::array{
+			 std::pair{"ToonPbrTexture", "toon"},
+			 std::pair{"UnlitPbrTexture", "unlit"},
+			 std::pair{"RuntimeShaderMaps", "PbrMapSampler"},
+		 }) {
+		const Entity part = mapsOf(partName);
+		const auto *appearance = store.Get<engine::scene::SurfaceAppearance>(part);
+		REQUIRE(appearance != nullptr);
+		CHECK(appearance->Shader == Name(shader));
+	}
+
+	const engine::scene::ShaderText sampler = engine::scene::ShaderTextOf(store, Name("PbrMapSampler"));
+	REQUIRE(sampler.Found);
+	for (const char *samplerName :
+		 {"colourMap",
+		  "normalMap",
+		  "roughnessMap",
+		  "occlusionMap",
+		  "heightMap",
+		  "metalnessMap",
+		  "emissiveMap"}) {
+		CHECK(sampler.Code.find(samplerName) != std::string::npos);
+	}
+
+	for (const auto &[lampName, kind, brightness] : std::array{
+			 std::tuple{"CoolPointLamp", engine::scene::LightKind::Point, 280.0f},
+			 std::tuple{"WarmSpotLamp", engine::scene::LightKind::Spot, 520.0f},
+		 }) {
+		const Entity lamp = InScene(store, lampName);
+		REQUIRE(lamp != engine::ecs::NULL_ENTITY);
+		bool found = false;
+		store.EachChild(lamp, [&](Entity child) {
+			const auto *light = store.Get<engine::scene::Light>(child);
+			if (light == nullptr) {
+				return;
+			}
+			found = true;
+			CHECK(light->Kind == kind);
+			CHECK(light->Brightness == Approx(brightness));
+			CHECK(light->Enabled);
+		});
+		CHECK(found);
 	}
 }
 
@@ -1955,6 +2439,32 @@ TEST_CASE("the magic scene draws the effects its presets author", "[examples][sc
 	// centre for the emitters and the beam, two a body apart for the trail,
 	// plus one per lane on the muzzle post.
 	CHECK(CountOfClass(store, "Attachment") > 5);
+}
+
+TEST_CASE("the tornado scene builds a field-driven funnel", "[examples][scene][tornado]") {
+	// This cannot prove the GPU cloud's final pixels, but it proves the scene
+	// supplied the complete reusable inputs the renderer needs and survives its
+	// first ticks without a script error.
+	const StagedAssets assets;
+	Store store("tornado");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("TornadoSim.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	for (int tick = 0; tick < 12; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	CHECK(CountOfClass(store, "VectorField3D") == 1);
+	CHECK(CountOfClass(store, "ParticleEmitter") == 35);
+	CHECK(CountOfClass(store, "Volume") == 4);
+	CHECK(CountOfClass(store, "Camera") == 1);
+	CHECK(CountOfClass(store, "ScreenGui") == 1);
+	CHECK(CountOfClass(store, "TextButton") == 3);
+	CHECK(CountNamed(store, "Storm Debris") == 144);
 }
 
 TEST_CASE("the player list names everybody in the world", "[examples][scene][players]") {

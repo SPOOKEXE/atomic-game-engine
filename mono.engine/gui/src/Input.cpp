@@ -339,7 +339,77 @@ namespace engine::gui {
 		}
 	}
 
+	bool Scroll(Store &store, Entity frame, float notches) {
+		const ScrollState *state = store.Get<ScrollState>(frame);
+		Scrolling *scrolling = store.GetMutable<Scrolling>(frame);
+		if (state == nullptr || scrolling == nullptr) {
+			return false;
+		}
+
+		// **Vertical first, because a frame that scrolls both is a page and a
+		// wheel on a page means down.** A horizontal-only frame takes the same
+		// turn sideways, which is the only reading that leaves the wheel useful
+		// on one.
+		if (Scrolls(*scrolling, *state, true)) {
+			Move(*scrolling, *state, 0.0f, -notches * WHEEL_PIXELS);
+			return true;
+		}
+		if (Scrolls(*scrolling, *state, false)) {
+			Move(*scrolling, *state, -notches * WHEEL_PIXELS, 0.0f);
+			return true;
+		}
+		return false;
+	}
+
 	Entity Router::Wheel(Store &store, const Vector2 &point, float notches) {
+		// A node canvas owns wheel input before a scrolling frame below it. A
+		// graph wheel gesture means zoom, and treating it as a page wheel first
+		// would make a canvas embedded in an inspector impossible to use.
+		Entity graph;
+		int32_t graphOrder = 0;
+		int32_t graphDepth = 0;
+		store.Each<const NodeCanvas, const Resolved>(
+			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
+				if (!resolved.Rendered) {
+					return;
+				}
+				const core::Rect bounds{
+					resolved.AbsolutePosition,
+					Vector2{
+						resolved.AbsolutePosition.X + resolved.AbsoluteSize.X,
+						resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
+					},
+				};
+				if (!bounds.Contains(Unrotated(resolved.AbsoluteRotation, bounds, point)) ||
+					!resolved.Clip.Contains(point)) {
+					return;
+				}
+				if (graph == NULL_ENTITY || resolved.Order > graphOrder ||
+					(resolved.Order == graphOrder && resolved.Depth > graphDepth)) {
+					graph = node;
+					graphOrder = resolved.Order;
+					graphDepth = resolved.Depth;
+				}
+			}
+		);
+
+		if (NodeCanvas *canvas = store.GetMutable<NodeCanvas>(graph)) {
+			// Multiplicative steps keep the same feel at every scale. The bounds
+			// remain authored properties, so a script can deliberately restrict a
+			// graph further than this normal interaction permits.
+			if (!std::isfinite(notches) || !std::isfinite(canvas->Zoom) ||
+				!std::isfinite(canvas->MinimumZoom) || !std::isfinite(canvas->MaximumZoom)) {
+				return graph;
+			}
+			const float low = std::min(canvas->MinimumZoom, canvas->MaximumZoom);
+			const float high = std::max(canvas->MinimumZoom, canvas->MaximumZoom);
+			if (!(low > 0.0f) || !(high > 0.0f)) {
+				return graph;
+			}
+			canvas->Zoom = std::clamp(canvas->Zoom * std::pow(1.1f, notches), low, high);
+			return graph;
+		}
+
 		// **The frames are asked directly rather than through `Pick`.** A
 		// `ScrollingFrame` is not `Active` and usually holds nothing that is, so
 		// the pick walks straight past it and answers null - and a wheel that
@@ -392,25 +462,7 @@ namespace engine::gui {
 			return NULL_ENTITY;
 		}
 
-		const ScrollState *state = store.Get<ScrollState>(best);
-		Scrolling *writable = store.GetMutable<Scrolling>(best);
-		if (state == nullptr || writable == nullptr) {
-			return NULL_ENTITY;
-		}
-
-		// **Vertical first, because a frame that scrolls both is a page and a
-		// wheel on a page means down.** A horizontal-only frame takes the same
-		// turn sideways, which is the only reading that leaves the wheel useful
-		// on one.
-		//
-		// Negated, because a turn away from the person moves the canvas back
-		// towards its start - `Pointer::Wheel` carries the argument.
-		if (Scrolls(*writable, *state, true)) {
-			Move(*writable, *state, 0.0f, -notches * WHEEL_PIXELS);
-		} else {
-			Move(*writable, *state, -notches * WHEEL_PIXELS, 0.0f);
-		}
-		return best;
+		return Scroll(store, best, notches) ? best : NULL_ENTITY;
 	}
 
 	bool Router::BeginDrag(Store &store, const DrawList &list, const Vector2 &point) {

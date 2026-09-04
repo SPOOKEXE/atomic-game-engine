@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Authoring tools exchange this
+// complete instance-path contract.
+
 // The one name for an instance that two editors can both read.
 //
 // **An `EditId` is one log's own name and cannot cross.** Two `CommandLog`s

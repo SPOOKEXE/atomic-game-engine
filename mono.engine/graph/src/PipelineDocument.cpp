@@ -847,6 +847,8 @@ namespace engine::graph {
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -953,8 +955,18 @@ namespace engine::graph {
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "sky-lit", "colour");
 
-		node("tonemap", NodeScope::View);
+		node("volumetrics", NodeScope::View);
 		touches(EditKind::Reads, "sky-lit", "colour");
+		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Writes, "volume-lit", "colour");
+
+		node("shader-lenses", NodeScope::View);
+		touches(EditKind::Reads, "volume-lit", "colour");
+		touches(EditKind::Reads, "linear-depth", "depth");
+		touches(EditKind::Writes, "lens-b", "colour");
+
+		node("tonemap", NodeScope::View);
+		touches(EditKind::Reads, "lens-b", "colour");
 		touches(EditKind::Writes, "tonemapped", "colour");
 
 		node("portal-overlay", NodeScope::View);

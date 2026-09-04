@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Authoring integrations share
+// this complete property-operator contract.
+
 // Every command the editor offers, as data rather than as call sites.
 //
 // **An operator and an agent tool are one shape, so one table serves both.**

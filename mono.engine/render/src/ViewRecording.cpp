@@ -1351,7 +1351,8 @@ namespace engine::render {
 		const bool needsPbrTargets =
 			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-linearise")) ||
 			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
-			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
+			graphEnabled(core::Name("volumetrics")) || graphEnabled(core::Name("tonemap")) ||
+			graphEnabled(core::Name("transparent"));
 		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
 		if (!graphTargetsReady) {
 			closePass();
@@ -1410,6 +1411,79 @@ namespace engine::render {
 			0.0f,
 			0.0f,
 		};
+		uniforms.VolumeCount = glm::vec4{static_cast<float>(currentLighting.VolumeCount), 0.0f, 0.0f, 0.0f};
+		for (size_t index = 0; index < currentLighting.VolumeCount; index++) {
+			const scene::VolumeState &volume = currentLighting.Volumes[index];
+			PbrUniforms::VolumeUniform &out = uniforms.Volumes[index];
+			const core::Vector3 x = volume.Frame.RightVector();
+			const core::Vector3 y = volume.Frame.UpVector();
+			const core::Vector3 z = volume.Frame.ZVector();
+			out.Origin = glm::vec4{
+				volume.Frame.Position.X,
+				volume.Frame.Position.Y,
+				volume.Frame.Position.Z,
+				volume.Falloff,
+			};
+			out.AxisX = glm::vec4{
+				x.X,
+				x.Y,
+				x.Z,
+				volume.Shape == scene::VolumeShape::Ellipsoid ? 1.0f : 0.0f,
+			};
+			out.AxisY = glm::vec4{y.X, y.Y, y.Z, 0.0f};
+			out.AxisZ = glm::vec4{z.X, z.Y, z.Z, volume.HalfExtent.Z};
+			out.ColourDensity = glm::vec4{volume.Colour.R, volume.Colour.G, volume.Colour.B, volume.Density};
+			out.ExtinctionNoise = glm::vec4{
+				volume.Extinction,
+				volume.NoiseScale,
+				volume.NoiseStrength,
+				static_cast<float>(volume.Seed),
+			};
+			out.Steps = glm::vec4{
+				static_cast<float>(volume.Steps),
+				static_cast<float>(volume.ShadowSteps),
+				volume.HalfExtent.X,
+				volume.HalfExtent.Y,
+			};
+		}
+
+		LensGroupCount = 0;
+		size_t lensCount = 0;
+		LensPassData = {};
+		LensPassData.ViewProjection = matrices.ViewProjection;
+		LensPassData.InverseViewProjection = uniforms.InverseViewProjection;
+		LensPassData.Target = uniforms.Target;
+		LensPassData.Eye = uniforms.Eye;
+		LensPassData.TimeCount.x = static_cast<float>(frameSeconds);
+		const graph::Frustum lensFrustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
+		for (size_t index = 0; index < currentLighting.ShaderLensCount; index++) {
+			const scene::ShaderLensState &lens = currentLighting.ShaderLenses[index];
+			if (!lensFrustum.Intersects(lens.Frame.Position, lens.Radius)) {
+				continue;
+			}
+
+			const bool startsRun =
+				LensGroupCount == 0 || LensGroups[LensGroupCount - 1].Shader != lens.Shader;
+			LensGroup *group = nullptr;
+			if (startsRun) {
+				group = &LensGroups[LensGroupCount++];
+				*group = LensGroup{.Shader = lens.Shader, .First = lensCount};
+			} else {
+				group = &LensGroups[LensGroupCount - 1];
+			}
+
+			LensPassUniforms::LensUniform &out = LensEntries[lensCount++];
+			group->Count++;
+			const core::Vector3 x = lens.Frame.RightVector();
+			const core::Vector3 y = lens.Frame.UpVector();
+			const core::Vector3 z = lens.Frame.ZVector();
+			out.CentreRadius =
+				glm::vec4{lens.Frame.Position.X, lens.Frame.Position.Y, lens.Frame.Position.Z, lens.Radius};
+			out.AxisXInner = glm::vec4{x.X, x.Y, x.Z, lens.InnerRadius};
+			out.AxisYFalloff = glm::vec4{y.X, y.Y, y.Z, lens.Falloff};
+			out.AxisZStrength = glm::vec4{z.X, z.Y, z.Z, lens.Strength};
+			out.SpinPriority = glm::vec4{lens.Spin, static_cast<float>(lens.Priority), 0.0f, 0.0f};
+		}
 		sceneViewport = SDL_GPUViewport{
 			0.0f,
 			0.0f,

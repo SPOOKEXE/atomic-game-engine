@@ -316,6 +316,11 @@ namespace engine::bake {
 			};
 		}
 
+		bool IsFinite(const Transform &transform) {
+			return std::isfinite(transform.ScaleX) && std::isfinite(transform.ScaleY) &&
+				   std::isfinite(transform.OffsetX) && std::isfinite(transform.OffsetY);
+		}
+
 		// One run of points. Filling closes it whatever `Closed` says; stroking
 		// is what the flag is for.
 		struct SubPath {
@@ -676,6 +681,11 @@ namespace engine::bake {
 				}
 
 				combined = Compose(combined, local);
+				if (!IsFinite(combined)) {
+					failure = "svg: transform '" + std::string(name) +
+							  "' produces coordinates this rasteriser cannot represent";
+					return false;
+				}
 			}
 
 			out = combined;
@@ -867,6 +877,7 @@ namespace engine::bake {
 			Point current;
 			Point start;
 			char command = 0;
+			bool hasCurrent = false;
 			uint32_t commands = 0;
 
 			const auto flush = [&out, &subPath]() {
@@ -918,6 +929,11 @@ namespace engine::bake {
 				};
 
 				if (upper == 'Z') {
+					if (!hasCurrent || subPath.Points.empty()) {
+						failure =
+							"svg: path command '" + std::string(1, command) + "' occurs before a moveto";
+						return false;
+					}
 					if (subPath.Points.size() >= 2) {
 						subPath.Closed = true;
 						out.push_back(subPath);
@@ -927,7 +943,15 @@ namespace engine::bake {
 					current = start;
 					// A subpath after a close starts where the closed one did.
 					subPath.Points.push_back(current);
+					// A close carries no repeated coordinate form. Leaving it active
+					// would retry the next non-command byte forever.
+					command = 0;
 					continue;
+				}
+
+				if (upper != 'M' && !hasCurrent) {
+					failure = "svg: path command '" + std::string(1, command) + "' occurs before a moveto";
+					return false;
 				}
 
 				if (upper == 'M' || upper == 'L') {
@@ -945,6 +969,7 @@ namespace engine::bake {
 					if (upper == 'M') {
 						flush();
 						start = point;
+						hasCurrent = true;
 					}
 					if (!budget.Take(1, failure)) {
 						return false;
@@ -1208,9 +1233,11 @@ namespace engine::bake {
 				return true;
 			}
 
-			const int firstRow = std::max(0, static_cast<int>(std::floor(minimumY)));
-			const int lastRow =
-				std::min(static_cast<int>(canvas.Height) - 1, static_cast<int>(std::ceil(maximumY)));
+			// Edges can be finite yet far past an `int` when a document uses a
+			// large scale. Clip in floating point before converting to an index.
+			const double lastCanvasRow = static_cast<double>(canvas.Height - 1);
+			const int firstRow = static_cast<int>(std::clamp(std::floor(minimumY), 0.0, lastCanvasRow));
+			const int lastRow = static_cast<int>(std::clamp(std::ceil(maximumY), 0.0, lastCanvasRow));
 			if (lastRow < firstRow) {
 				return true;
 			}
@@ -1220,9 +1247,9 @@ namespace engine::bake {
 			// a drawing of many small shapes into canvas-area work per shape -
 			// and it is what would make the budget below fire on files that are
 			// perfectly reasonable.
-			const int firstColumn = std::max(0, static_cast<int>(std::floor(minimumX)));
-			const int lastColumn =
-				std::min(static_cast<int>(canvas.Width) - 1, static_cast<int>(std::ceil(maximumX)));
+			const double lastCanvasColumn = static_cast<double>(canvas.Width - 1);
+			const int firstColumn = static_cast<int>(std::clamp(std::floor(minimumX), 0.0, lastCanvasColumn));
+			const int lastColumn = static_cast<int>(std::clamp(std::ceil(maximumX), 0.0, lastCanvasColumn));
 			if (lastColumn < firstColumn) {
 				return true;
 			}
@@ -1399,6 +1426,7 @@ namespace engine::bake {
 
 		// One entry per element that is still open.
 		struct Frame {
+			std::string_view Name;
 			Transform Space;
 			Paint Ink;
 		};
@@ -1410,28 +1438,45 @@ namespace engine::bake {
 		}
 
 		// Walks past an element's whole subtree, tags included.
-		bool SkipSubtree(std::string_view &text, std::string_view name, std::string &failure) {
-			int depth = 1;
-			uint32_t steps = 0;
+		bool SkipSubtree(
+			std::string_view &text,
+			std::string_view name,
+			uint32_t outerDepth,
+			uint32_t &elements,
+			std::string &failure
+		) {
+			std::vector<std::string_view> stack{name};
 
-			while (depth > 0) {
+			while (!stack.empty()) {
 				Tag tag;
 				const Scan scan = NextSvgTag(text, tag, failure);
 				if (scan == Scan::Error) {
 					return false;
 				}
 				if (scan == Scan::End) {
-					failure = "svg: <" + std::string(name) + "> is never closed";
+					failure = "svg: <" + std::string(stack.back()) + "> is never closed";
 					return false;
 				}
-				if (++steps > MAXIMUM_ELEMENTS) {
+				if (tag.Closing) {
+					if (tag.Name != stack.back()) {
+						failure = "svg: </" + std::string(tag.Name) + "> closes <" +
+								  std::string(stack.back()) + ">";
+						return false;
+					}
+					stack.pop_back();
+					continue;
+				}
+				if (++elements > MAXIMUM_ELEMENTS) {
 					failure = "svg: more than " + std::to_string(MAXIMUM_ELEMENTS) + " elements";
 					return false;
 				}
-				if (tag.SelfClosing) {
-					continue;
+				if (!tag.SelfClosing) {
+					if (outerDepth + stack.size() >= MAXIMUM_DEPTH) {
+						failure = "svg: elements nested more than " + std::to_string(MAXIMUM_DEPTH) + " deep";
+						return false;
+					}
+					stack.push_back(tag.Name);
 				}
-				depth += tag.Closing ? -1 : 1;
 			}
 			return true;
 		}
@@ -1590,6 +1635,12 @@ namespace engine::bake {
 				failure = "svg: the document's own size is under a pixel, so a raster size has to be given";
 				return false;
 			}
+			if (intrinsicWidth > static_cast<double>(assets::Texture::MAXIMUM_DIMENSION) + 0.5 ||
+				intrinsicHeight > static_cast<double>(assets::Texture::MAXIMUM_DIMENSION) + 0.5) {
+				failure = "svg: a raster target past " + std::to_string(assets::Texture::MAXIMUM_DIMENSION) +
+						  " pixels on an axis";
+				return false;
+			}
 			canvasWidth = static_cast<uint32_t>(std::lround(intrinsicWidth));
 			canvasHeight = static_cast<uint32_t>(std::lround(intrinsicHeight));
 		}
@@ -1619,6 +1670,10 @@ namespace engine::bake {
 		space.ScaleY = fit;
 		space.OffsetX = (canvasWidth - boxWidth * fit) * 0.5 - boxX * fit;
 		space.OffsetY = (canvasHeight - boxHeight * fit) * 0.5 - boxY * fit;
+		if (!IsFinite(space)) {
+			failure = "svg: the document's coordinates cannot fit the raster target";
+			return false;
+		}
 
 		Canvas canvas;
 		canvas.Width = canvasWidth;
@@ -1631,7 +1686,7 @@ namespace engine::bake {
 		}
 
 		std::vector<Frame> stack;
-		stack.push_back({space, ink});
+		stack.push_back({"svg", space, ink});
 
 		Budget budget;
 		uint32_t elements = 1;
@@ -1643,15 +1698,17 @@ namespace engine::bake {
 				return false;
 			}
 			if (scan == Scan::End) {
-				// A document that stops without closing its root still drew
-				// everything it named, and refusing it would refuse a file that
-				// is merely impolite - the rule `ReadImage`'s truncation case
-				// already follows.
-				break;
+				failure = "svg: <" + std::string(stack.back().Name) + "> is never closed";
+				return false;
 			}
 
 			if (tag.Closing) {
-				if (stack.size() <= 1) {
+				if (tag.Name != stack.back().Name) {
+					failure = "svg: </" + std::string(tag.Name) + "> closes <" +
+							  std::string(stack.back().Name) + ">";
+					return false;
+				}
+				if (stack.size() == 1) {
 					break;
 				}
 				stack.pop_back();
@@ -1664,7 +1721,8 @@ namespace engine::bake {
 			}
 
 			if (IsIgnoredElement(tag.Name)) {
-				if (!tag.SelfClosing && !SkipSubtree(text, tag.Name, failure)) {
+				if (!tag.SelfClosing &&
+					!SkipSubtree(text, tag.Name, static_cast<uint32_t>(stack.size()), elements, failure)) {
 					return false;
 				}
 				continue;
@@ -1697,6 +1755,10 @@ namespace engine::bake {
 					return false;
 				}
 				frame.Space = Compose(frame.Space, local);
+				if (!IsFinite(frame.Space)) {
+					failure = "svg: transform produces coordinates this rasteriser cannot represent";
+					return false;
+				}
 			}
 			if (!ReadPaint(attributes, frame.Ink, failure)) {
 				return false;
@@ -1808,6 +1870,7 @@ namespace engine::bake {
 					failure = "svg: elements nested more than " + std::to_string(MAXIMUM_DEPTH) + " deep";
 					return false;
 				}
+				frame.Name = tag.Name;
 				stack.push_back(frame);
 			}
 		}

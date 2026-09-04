@@ -1063,6 +1063,7 @@ namespace engine::render {
 				batch.LightInfluence = emitter.LightInfluence;
 				batch.Additive = emitter.Additive;
 				batch.WorldUp = emitter.Orientation == effects::ParticleOrientation::FacingCameraWorldUp;
+				batch.SoftParticles = emitter.SoftParticles;
 				frame.Batches.push_back(batch);
 			}
 		);

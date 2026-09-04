@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. Simulation hosts retain this
+// complete continuous-collision contract.
+
 // Stopping a body at the wall it would otherwise have gone through.
 //
 // **The gap `AGENTS.md` recorded as deliberately absent until v0.17.** A body

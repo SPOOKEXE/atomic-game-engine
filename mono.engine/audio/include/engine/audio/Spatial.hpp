@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward audio API. Mixers and client-tier hosts
+// share this complete spatialisation contract.
+
 // Turning "where is this sound and where am I" into two numbers.
 //
 // **Two numbers, because the mixer is stereo.** Everything spatialisation does

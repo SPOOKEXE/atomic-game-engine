@@ -62,6 +62,8 @@ namespace engine::scene {
 		// instance tree from inside a render pass would have to find the same
 		// `Atmosphere` twice and could disagree about which one.
 		lighting.EnvironmentState = EnvironmentOf(store);
+		lighting.VolumeCount = ResolveVolumes(store, lighting.Volumes);
+		lighting.ShaderLensCount = ResolveShaderLenses(store, lighting.ShaderLenses);
 
 		if (const Sun *override = store.Resource<Sun>()) {
 			lighting.Direction = Normalised(override->Direction);

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations retain
+// this complete diagnostics contract.
+
 // Data shaping for Studio's frame-graph panel.
 //
 // The panel itself needs imgui, but averaging a recorded tree and assigning

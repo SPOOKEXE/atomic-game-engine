@@ -230,6 +230,42 @@ namespace engine::render {
 		glm::vec4 SeamFirst[MAX_SEAM_LIGHTS]{};
 		glm::vec4 SeamSecond[MAX_SEAM_LIGHTS]{};
 		//@}
+
+		// The local participating media selected from the scene. Each entry is
+		// seven vec4 values so the CPU and GLSL layouts remain explicit and the
+		// volume node can sample an oriented box without reading scene state.
+		struct VolumeUniform {
+			glm::vec4 Origin{};
+			glm::vec4 AxisX{};
+			glm::vec4 AxisY{};
+			glm::vec4 AxisZ{};
+			glm::vec4 ColourDensity{};
+			glm::vec4 ExtinctionNoise{};
+			glm::vec4 Steps{};
+		};
+		VolumeUniform Volumes[scene::MAX_SCENE_VOLUMES]{};
+		glm::vec4 VolumeCount{};
+	};
+
+	// Fixed fragment data for one bounded group of world-space image lenses.
+	// Scene colour and linear depth are always the first two sampler slots; a
+	// lens program gets no route to any other resource or render target.
+	struct LensPassUniforms {
+		glm::mat4 ViewProjection{1.0f};
+		glm::mat4 InverseViewProjection{1.0f};
+		glm::vec4 Target{};
+		glm::vec4 Eye{};
+		// x: seconds, y: lens count.
+		glm::vec4 TimeCount{};
+
+		struct LensUniform {
+			glm::vec4 CentreRadius{};
+			glm::vec4 AxisXInner{};
+			glm::vec4 AxisYFalloff{};
+			glm::vec4 AxisZStrength{};
+			glm::vec4 SpinPriority{};
+		};
+		LensUniform Lenses[scene::MAX_SCENE_SHADER_LENSES]{};
 	};
 
 	// Slot zero for an authored fullscreen fragment shader. The contract is

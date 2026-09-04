@@ -17,11 +17,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 24);
+	CHECK(canvas.Nodes().size() == 26);
 
 	// The final two links carry the lit colour and depth into the sky pass. Pin
 	// them by name below so this count reads as a checksum rather than a mystery.
-	CHECK(canvas.Links().size() == 50);
+	CHECK(canvas.Links().size() == 54);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -34,6 +34,13 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
+	const auto shaderLenses =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.shader-lenses";
+		});
+	REQUIRE(shaderLenses != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(shaderLenses->Id, "colour") != nullptr);
+	CHECK(canvas.LinkInto(shaderLenses->Id, "depth") != nullptr);
 	const auto mirrorCapture =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.mirror-capture";

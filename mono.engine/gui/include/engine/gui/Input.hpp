@@ -188,6 +188,15 @@ namespace engine::gui {
 		bool Entered = false;
 	};
 
+	// Applies one wheel gesture directly to one scrolling frame.
+	//
+	// `Router::Wheel` chooses the frontmost eligible frame, while a scripted
+	// gesture already names its target. Keeping the actual move here means both
+	// paths use the same enabled, axis and bounds rules.
+	//
+	// @return `true` when the frame accepted a scroll gesture.
+	bool Scroll(ecs::Store &store, ecs::Entity frame, float notches);
+
 	// The element under a point, or null.
 	//
 	// Walks `list` from the end, which is front to back, and returns the first

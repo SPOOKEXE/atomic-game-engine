@@ -539,8 +539,54 @@ namespace engine::script {
 				lua_unref(State, callback);
 			}
 
+			HostCallback RetainHostCallback(size_t index) override {
+				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
+
+				lua_pushvalue(State, Slot(index));
+				const int reference = lua_ref(State, -1);
+				lua_pop(State, 1);
+				const HostCallback callback{++Context.NextHostCallback};
+				Context.HostCallbacks.emplace(callback.Id, reference);
+				return callback;
+			}
+
+			void ReleaseHostCallback(HostCallback callback) override {
+				const auto found = Context.HostCallbacks.find(callback.Id);
+				if (found == Context.HostCallbacks.end()) {
+					return;
+				}
+				lua_unref(State, found->second);
+				Context.HostCallbacks.erase(found);
+			}
+
 			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
 				Context.Signals.MarkOnce(Context.Signals.Connect(kind, subject, callback));
+			}
+
+			std::string DispatchSignal(SignalKind kind, ecs::Entity subject) override {
+				return FireSignal(State, kind, subject, 0);
+			}
+
+			std::string
+			DispatchPointerSignal(SignalKind kind, ecs::Entity subject, float x, float y) override {
+				lua_pushnumber(State, x);
+				lua_pushnumber(State, y);
+				return FireSignal(State, kind, subject, 2);
+			}
+
+			std::string DispatchDragSignal(
+				SignalKind kind, ecs::Entity subject, float x, float y, float dx, float dy
+			) override {
+				lua_pushnumber(State, x);
+				lua_pushnumber(State, y);
+				lua_pushnumber(State, dx);
+				lua_pushnumber(State, dy);
+				return FireSignal(State, kind, subject, 4);
+			}
+
+			std::string DispatchFocusLost(ecs::Entity subject, bool entered) override {
+				lua_pushboolean(State, entered ? 1 : 0);
+				return FireSignal(State, SignalKind::GuiFocusLost, subject, 1);
 			}
 
 			void ReturnNil() override {
@@ -604,6 +650,11 @@ namespace engine::script {
 
 			void ReturnCFrame(const core::CFrame &value) override {
 				*PushCFrame(State) = value;
+				Pushed++;
+			}
+
+			void ReturnVector3(const core::Vector3 &value) override {
+				*PushVector3(State) = value;
 				Pushed++;
 			}
 

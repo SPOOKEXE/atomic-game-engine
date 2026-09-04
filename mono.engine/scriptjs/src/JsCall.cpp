@@ -606,9 +606,60 @@ namespace engine::script {
 				Release(Context, callback);
 			}
 
+			HostCallback RetainHostCallback(size_t index) override {
+				if (index >= Argc || !JS_IsFunction(Context, Argv[index])) {
+					Raise("expected a function");
+				}
+				JsContext &bound = JsOf(Context);
+				const HostCallback callback{++bound.NextHostCallback};
+				bound.HostCallbacks.emplace(callback.Id, Retain(Context, Argv[index]));
+				return callback;
+			}
+
+			void ReleaseHostCallback(HostCallback callback) override {
+				ReleaseJsHostCallback(Context, callback);
+			}
+
 			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
 				SignalTable &signals = JsOf(Context).Signals;
 				signals.MarkOnce(signals.Connect(kind, subject, callback));
+			}
+
+			std::string DispatchSignal(SignalKind kind, ecs::Entity subject) override {
+				return FireJsSignal(Context, kind, subject, 0, nullptr);
+			}
+
+			std::string
+			DispatchPointerSignal(SignalKind kind, ecs::Entity subject, float x, float y) override {
+				JSValue arguments[2] = {JS_NewFloat64(Context, x), JS_NewFloat64(Context, y)};
+				const std::string error = FireJsSignal(Context, kind, subject, 2, arguments);
+				JS_FreeValue(Context, arguments[0]);
+				JS_FreeValue(Context, arguments[1]);
+				return error;
+			}
+
+			std::string DispatchDragSignal(
+				SignalKind kind, ecs::Entity subject, float x, float y, float dx, float dy
+			) override {
+				JSValue arguments[4] = {
+					JS_NewFloat64(Context, x),
+					JS_NewFloat64(Context, y),
+					JS_NewFloat64(Context, dx),
+					JS_NewFloat64(Context, dy),
+				};
+				const std::string error = FireJsSignal(Context, kind, subject, 4, arguments);
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(Context, argument);
+				}
+				return error;
+			}
+
+			std::string DispatchFocusLost(ecs::Entity subject, bool entered) override {
+				JSValue argument = JS_NewBool(Context, entered ? 1 : 0);
+				const std::string error =
+					FireJsSignal(Context, SignalKind::GuiFocusLost, subject, 1, &argument);
+				JS_FreeValue(Context, argument);
+				return error;
 			}
 
 			void ReturnNil() override {
@@ -669,6 +720,10 @@ namespace engine::script {
 
 			void ReturnCFrame(const core::CFrame &value) override {
 				Set(MakeCFrame(Context, value));
+			}
+
+			void ReturnVector3(const core::Vector3 &value) override {
+				Set(MakeVector3(Context, value));
 			}
 
 			void ReturnVector2(const core::Vector2 &value) override {

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward origin API. `Origin.hpp` keeps admission
+// state as this complete contract for callers configuring a content origin.
+
 // The only decision the origin makes about who may have what.
 //
 // It is a small decision on purpose. **The server decides; the origin checks

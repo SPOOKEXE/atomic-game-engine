@@ -616,6 +616,9 @@ namespace studio {
 				case Scope::Global:
 					ImGui::TextUnformatted("anywhere");
 					break;
+				case Scope::Editor:
+					ImGui::TextUnformatted("editor");
+					break;
 				case Scope::Viewport:
 					ImGui::TextUnformatted("viewport");
 					break;

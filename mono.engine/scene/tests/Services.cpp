@@ -80,6 +80,7 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 		  "ServerScriptService",
 		  "ServerStorage",
 		  "StarterGui",
+		  "ChangeHistoryService",
 		  "StarterPack",
 		  "StarterPlayer"}) {
 		CHECK(services_test::RootsNamed(store, name) == 1);
@@ -154,6 +155,10 @@ TEST_CASE("a service carries its scope and Lighting carries more", "[scene][serv
 	CHECK(store.Get<ServiceComponent>(replicated)->Scope == ServiceScope::Shared);
 
 	CHECK(store.Get<ServiceComponent>(store.FindFirstRoot("StarterGui"))->Scope == ServiceScope::Client);
+	CHECK(
+		store.Get<ServiceComponent>(store.FindFirstRoot("ChangeHistoryService"))->Scope ==
+		ServiceScope::Client
+	);
 
 	// Lighting alone has the second component. Eight unused floats on the other
 	// eight services is eight floats in every snapshot of every world.

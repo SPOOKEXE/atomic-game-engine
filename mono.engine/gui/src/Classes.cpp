@@ -63,6 +63,11 @@ namespace engine::gui {
 		GUI_ENUM_NAME(AspectType, "AspectType")
 		GUI_ENUM_NAME(DominantAxis, "DominantAxis")
 		GUI_ENUM_NAME(ScrollingDirection, "ScrollingDirection")
+		GUI_ENUM_NAME(NodePortDirection, "NodePortDirection")
+		GUI_ENUM_NAME(NodeBypassMode, "NodeBypassMode")
+		GUI_ENUM_NAME(NodePortEdge, "NodePortEdge")
+		GUI_ENUM_NAME(InputPortLayout, "InputPortLayout")
+		GUI_ENUM_NAME(NodeGroupLayout, "NodeGroupLayout")
 		GUI_ENUM_NAME(StrokeMode, "ApplyStrokeMode")
 		GUI_ENUM_NAME(LineJoin, "LineJoinMode")
 		GUI_ENUM_NAME(StrokeSizing, "StrokeSizingMode")
@@ -124,6 +129,11 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(AspectType, 2)
 		GUI_ENUM_COUNT(DominantAxis, 2)
 		GUI_ENUM_COUNT(ScrollingDirection, 3)
+		GUI_ENUM_COUNT(NodePortDirection, 2)
+		GUI_ENUM_COUNT(NodeBypassMode, 2)
+		GUI_ENUM_COUNT(NodePortEdge, 3)
+		GUI_ENUM_COUNT(InputPortLayout, 3)
+		GUI_ENUM_COUNT(NodeGroupLayout, 3)
 		GUI_ENUM_COUNT(StrokeMode, 2)
 		GUI_ENUM_COUNT(LineJoin, 3)
 		GUI_ENUM_COUNT(StrokeSizing, 2)
@@ -351,6 +361,11 @@ namespace engine::gui {
 			"Frame",
 			"CanvasGroup",
 			"ScrollingFrame",
+			"NodeCanvas",
+			"NodeCanvasNode",
+			"NodeCanvasGroup",
+			"NodeCanvasPort",
+			"NodeCanvasLink",
 			"GuiButton",
 			"TextButton",
 			"ImageButton",
@@ -426,6 +441,11 @@ namespace engine::gui {
 			RegisterEnum<AspectType>();
 			RegisterEnum<DominantAxis>();
 			RegisterEnum<ScrollingDirection>();
+			RegisterEnum<NodePortDirection>();
+			RegisterEnum<NodeBypassMode>();
+			RegisterEnum<NodePortEdge>();
+			RegisterEnum<InputPortLayout>();
+			RegisterEnum<NodeGroupLayout>();
 			RegisterEnum<StrokeMode>();
 			RegisterEnum<LineJoin>();
 			RegisterEnum<StrokeSizing>();
@@ -552,6 +572,17 @@ namespace engine::gui {
 
 			const std::array scrolling{Components::Of<Scrolling>()};
 			const ClassId scrollingFrame = Classes::Register("ScrollingFrame", frame, scrolling);
+
+			const std::array nodeCanvas{Components::Of<NodeCanvas>()};
+			const ClassId nodeCanvasClass = Classes::Register("NodeCanvas", frame, nodeCanvas);
+			const std::array node{Components::Of<NodeCanvasNode>()};
+			const ClassId nodeCanvasNode = Classes::Register("NodeCanvasNode", frame, node);
+			const std::array nodeGroup{Components::Of<NodeCanvasGroup>()};
+			const ClassId nodeCanvasGroup = Classes::Register("NodeCanvasGroup", frame, nodeGroup);
+			const std::array port{Components::Of<NodeCanvasPort>()};
+			const ClassId nodeCanvasPort = Classes::Register("NodeCanvasPort", guiObject, port);
+			const std::array link{Components::Of<NodeCanvasLink>()};
+			const ClassId nodeCanvasLink = Classes::Register("NodeCanvasLink", instance, link);
 
 			const std::array button{Components::Of<Button>()};
 			const ClassId guiButton = Classes::Register("GuiButton", guiObject, button);
@@ -792,6 +823,45 @@ namespace engine::gui {
 			// script assigning either would be overwritten by the next pass.
 			Classes::Computed(scrollingFrame, DerivedField<&ScrollState::CanvasSize>("AbsoluteCanvasSize"));
 			Classes::Computed(scrollingFrame, DerivedField<&ScrollState::WindowSize>("AbsoluteWindowSize"));
+
+			Classes::Property<&NodeCanvas::Pan>(nodeCanvasClass, "CanvasPosition");
+			Classes::Property<&NodeCanvas::Zoom>(nodeCanvasClass, "Zoom");
+			Classes::Property<&NodeCanvas::MinimumZoom>(nodeCanvasClass, "MinimumZoom");
+			Classes::Property<&NodeCanvas::MaximumZoom>(nodeCanvasClass, "MaximumZoom");
+			Classes::Property<&NodeCanvas::GridSize>(nodeCanvasClass, "GridSize");
+			Classes::Property<&NodeCanvas::GridVisible>(nodeCanvasClass, "GridVisible");
+
+			Classes::Property<&NodeCanvasNode::Id>(nodeCanvasNode, "NodeId");
+			Classes::Property<&NodeCanvasNode::Type>(nodeCanvasNode, "NodeType");
+			Classes::Property<&NodeCanvasNode::Title>(nodeCanvasNode, "Title");
+			Classes::Property<&NodeCanvasNode::Enabled>(nodeCanvasNode, "Enabled");
+			Classes::Computed(nodeCanvasNode, EnumField<&NodeCanvasNode::BypassMode>("BypassMode"));
+			Classes::Property<&NodeCanvasNode::BypassInput>(nodeCanvasNode, "BypassInput");
+			Classes::Property<&NodeCanvasNode::BypassOutput>(nodeCanvasNode, "BypassOutput");
+			Classes::Property<&NodeCanvasNode::MinimumSize>(nodeCanvasNode, "MinimumSize");
+			Classes::Property<&NodeCanvasNode::Resizable>(nodeCanvasNode, "Resizable");
+			Classes::Computed(nodeCanvasNode, EnumField<&NodeCanvasNode::InputLayout>("InputPortLayout"));
+
+			Classes::Property<&NodeCanvasGroup::Id>(nodeCanvasGroup, "GroupId");
+			Classes::Property<&NodeCanvasGroup::Title>(nodeCanvasGroup, "Title");
+			Classes::Property<&NodeCanvasGroup::Padding>(nodeCanvasGroup, "Padding");
+			Classes::Computed(nodeCanvasGroup, EnumField<&NodeCanvasGroup::Layout>("Layout"));
+
+			Classes::Property<&NodeCanvasPort::Id>(nodeCanvasPort, "PortId");
+			Classes::Property<&NodeCanvasPort::ValueType>(nodeCanvasPort, "ValueType");
+			Classes::Computed(nodeCanvasPort, EnumField<&NodeCanvasPort::Direction>("Direction"));
+			Classes::Computed(nodeCanvasPort, EnumField<&NodeCanvasPort::Edge>("Edge"));
+			Classes::Property<&NodeCanvasPort::MaxConnections>(nodeCanvasPort, "MaxConnections");
+
+			Classes::Property<&NodeCanvasLink::FromNode>(nodeCanvasLink, "FromNode");
+			Classes::Property<&NodeCanvasLink::FromPort>(nodeCanvasLink, "FromPort");
+			Classes::Computed(nodeCanvasLink, EnumField<&NodeCanvasLink::FromDirection>("FromDirection"));
+			Classes::Property<&NodeCanvasLink::ToNode>(nodeCanvasLink, "ToNode");
+			Classes::Property<&NodeCanvasLink::ToPort>(nodeCanvasLink, "ToPort");
+			Classes::Computed(nodeCanvasLink, EnumField<&NodeCanvasLink::ToDirection>("ToDirection"));
+			Classes::Property<&NodeCanvasLink::LineColor>(nodeCanvasLink, "LineColor3");
+			Classes::Property<&NodeCanvasLink::LineTransparency>(nodeCanvasLink, "LineTransparency");
+			Classes::Property<&NodeCanvasLink::LineThickness>(nodeCanvasLink, "LineThickness");
 
 			Classes::Property<&Entry::PlaceholderText>(textBox, "PlaceholderText");
 			Classes::Property<&Entry::PlaceholderColor>(textBox, "PlaceholderColor3");

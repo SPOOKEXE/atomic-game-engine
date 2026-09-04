@@ -5,6 +5,7 @@
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/script/TeleportRequest.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -189,6 +190,7 @@ namespace engine::script {
 		// end**.
 		ecs::Components::Register<Program>("script.Program", WritePrograms, ReadPrograms);
 		ecs::Components::Register<ScriptClock>("script.ScriptClock");
+		RegisterTeleportRequestComponents();
 	}
 
 	void MirrorSourcePrograms(ecs::Store &store, SourceMirror &mirror) {

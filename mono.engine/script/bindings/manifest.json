@@ -51,6 +51,47 @@
 			]
 		},
 		{
+			"name": "VectorField2D",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.VectorField2D"],
+			"properties": [
+				{"name": "Bounds", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "LocalSpace", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Radial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Tangential", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Vector", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]}
+			]
+		},
+		{
+			"name": "VectorField3D",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.VectorField3D"],
+			"properties": [
+				{"name": "Axis", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "LocalSpace", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Radial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Tangential", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Vector", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]}
+			]
+		},
+		{
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": false,
@@ -177,6 +218,20 @@
 		{
 			"name": "Model",
 			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+			]
+		},
+		{
+			"name": "BreakGroup",
+			"parent": "Model",
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
 			"properties": [
@@ -425,6 +480,16 @@
 				{"name": "RollOffMinDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "SoundId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]},
 				{"name": "Volume", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Sound"], "writes": ["scene.Sound"]}
+			]
+		},
+		{
+			"name": "SoundGroup",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
 			]
 		},
 		{
@@ -825,6 +890,80 @@
 			]
 		},
 		{
+			"name": "Volume",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.Volume"],
+			"properties": [
+				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Extinction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NoiseScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "NoiseStrength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "ShadowSteps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "VolumeShape", "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]}
+			]
+		},
+		{
+			"name": "ShaderLens",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.ShaderLens", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "InnerRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Priority", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "LensShape", "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Spin", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Strength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]}
+			]
+		},
+		{
+			"name": "GravitationalLens",
+			"parent": "ShaderLens",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.ShaderLens", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "HorizonRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "InnerRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Priority", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "LensShape", "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Spin", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "Strength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]},
+				{"name": "WarpRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.ShaderLens"], "writes": ["scene.ShaderLens"]}
+			]
+		},
+		{
 			"name": "SkyboxTextures",
 			"parent": "Instance",
 			"constructible": true,
@@ -1072,6 +1211,18 @@
 			]
 		},
 		{
+			"name": "LensShader",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ShaderSource"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Revision", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.ShaderSource"], "writes": []},
+				{"name": "Source", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.ShaderSource"], "writes": ["scene.ShaderSource"]}
+			]
+		},
+		{
 			"name": "EditableMesh",
 			"parent": "Instance",
 			"constructible": true,
@@ -1157,6 +1308,26 @@
 			]
 		},
 		{
+			"name": "RemoteEvent",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+			]
+		},
+		{
+			"name": "BindableEvent",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+			]
+		},
+		{
 			"name": "ParticleEmitter",
 			"parent": "Instance",
 			"constructible": true,
@@ -1196,6 +1367,7 @@
 				{"name": "ShapePartial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "ShapeStyle", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ParticleEmitterShapeStyle", "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Size", "type": "NumberSequence", "kind": "field", "bytes": 248, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
+				{"name": "SoftParticles", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Speed", "type": "NumberRange", "kind": "field", "bytes": 8, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "SpreadAngle", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Squash", "type": "NumberSequence", "kind": "field", "bytes": 248, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
@@ -1714,6 +1886,198 @@
 				{"name": "VerticalScrollBarPosition", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "VerticalScrollBarPosition", "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]}
+			]
+		},
+		{
+			"name": "NodeCanvas",
+			"parent": "Frame",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Element", "gui.NodeCanvas", "gui.Resolved", "gui.Selection"],
+			"properties": [
+				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteRotation", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteSize", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "Active", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AnchorPoint", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AutomaticSize", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AutomaticSize", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "BackgroundColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BackgroundTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "BorderMode", "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderSizePixel", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "CanvasPosition", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.NodeCanvas"], "writes": ["gui.NodeCanvas"]},
+				{"name": "ClipsDescendants", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "GridSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvas"], "writes": ["gui.NodeCanvas"]},
+				{"name": "GridVisible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.NodeCanvas"], "writes": ["gui.NodeCanvas"]},
+				{"name": "Interactable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "MaximumZoom", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvas"], "writes": ["gui.NodeCanvas"]},
+				{"name": "MinimumZoom", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvas"], "writes": ["gui.NodeCanvas"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NextSelectionDown", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionLeft", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionRight", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "SelectionOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Zoom", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvas"], "writes": ["gui.NodeCanvas"]}
+			]
+		},
+		{
+			"name": "NodeCanvasNode",
+			"parent": "Frame",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Element", "gui.NodeCanvasNode", "gui.Resolved", "gui.Selection"],
+			"properties": [
+				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteRotation", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteSize", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "Active", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AnchorPoint", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AutomaticSize", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AutomaticSize", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "BackgroundColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BackgroundTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "BorderMode", "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderSizePixel", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BypassInput", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "BypassMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NodeBypassMode", "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "BypassOutput", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "ClipsDescendants", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "InputPortLayout", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "InputPortLayout", "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "Interactable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "MinimumSize", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NextSelectionDown", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionLeft", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionRight", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NodeId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "NodeType", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Resizable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "SelectionOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Title", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["gui.NodeCanvasNode"], "writes": ["gui.NodeCanvasNode"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]}
+			]
+		},
+		{
+			"name": "NodeCanvasGroup",
+			"parent": "Frame",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Element", "gui.NodeCanvasGroup", "gui.Resolved", "gui.Selection"],
+			"properties": [
+				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteRotation", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteSize", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "Active", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AnchorPoint", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AutomaticSize", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AutomaticSize", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "BackgroundColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BackgroundTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "BorderMode", "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderSizePixel", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "ClipsDescendants", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "GroupId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasGroup"], "writes": ["gui.NodeCanvasGroup"]},
+				{"name": "Interactable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Layout", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NodeGroupLayout", "reads": ["gui.NodeCanvasGroup"], "writes": ["gui.NodeCanvasGroup"]},
+				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NextSelectionDown", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionLeft", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionRight", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Padding", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.NodeCanvasGroup"], "writes": ["gui.NodeCanvasGroup"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "SelectionOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Title", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["gui.NodeCanvasGroup"], "writes": ["gui.NodeCanvasGroup"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]}
+			]
+		},
+		{
+			"name": "NodeCanvasPort",
+			"parent": "GuiObject",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Background", "gui.Element", "gui.NodeCanvasPort", "gui.Resolved", "gui.Selection"],
+			"properties": [
+				{"name": "AbsolutePosition", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteRotation", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "AbsoluteSize", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
+				{"name": "Active", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AnchorPoint", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "AutomaticSize", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AutomaticSize", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "BackgroundColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BackgroundTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "BorderMode", "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "BorderSizePixel", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
+				{"name": "ClipsDescendants", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Direction", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NodePortDirection", "reads": ["gui.NodeCanvasPort"], "writes": ["gui.NodeCanvasPort"]},
+				{"name": "Edge", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NodePortEdge", "reads": ["gui.NodeCanvasPort"], "writes": ["gui.NodeCanvasPort"]},
+				{"name": "Interactable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "MaxConnections", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasPort"], "writes": ["gui.NodeCanvasPort"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NextSelectionDown", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionLeft", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionRight", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "NextSelectionUp", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PortId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasPort"], "writes": ["gui.NodeCanvasPort"]},
+				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SelectionImageObject", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "SelectionOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Selection"], "writes": ["gui.Selection"]},
+				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "ValueType", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasPort"], "writes": ["gui.NodeCanvasPort"]},
+				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]}
+			]
+		},
+		{
+			"name": "NodeCanvasLink",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.NodeCanvasLink"],
+			"properties": [
+				{"name": "FromDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NodePortDirection", "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "FromNode", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "FromPort", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "LineColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "LineThickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "LineTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "ToDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NodePortDirection", "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "ToNode", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]},
+				{"name": "ToPort", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.NodeCanvasLink"], "writes": ["gui.NodeCanvasLink"]}
 			]
 		},
 		{
@@ -2602,6 +2966,18 @@
 			]
 		},
 		{
+			"name": "ChangeHistoryService",
+			"parent": "Service",
+			"constructible": false,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
+			"properties": [
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
+			]
+		},
+		{
 			"name": "StarterPack",
 			"parent": "Service",
 			"constructible": false,
@@ -2730,11 +3106,17 @@
 		{"name": "FillDirection", "members": ["Horizontal", "Vertical"]},
 		{"name": "Font", "members": ["Regular", "Bold", "Italic", "Code"]},
 		{"name": "HorizontalAlignment", "members": ["Left", "Center", "Right"]},
+		{"name": "InputPortLayout", "members": ["Manual", "Separate", "Squash"]},
 		{"name": "ItemLineAlignment", "members": ["Automatic", "Start", "Center", "End", "Stretch"]},
 		{"name": "KeyCode", "members": ["Unknown", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Space", "Return", "Escape", "Backspace", "Tab", "LeftShift", "RightShift", "LeftControl", "RightControl", "LeftAlt", "RightAlt", "Up", "Down", "Left", "Right", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "ButtonA", "ButtonB", "ButtonX", "ButtonY", "ButtonL1", "ButtonR1", "ButtonL2", "ButtonR2", "ButtonL3", "ButtonR3", "ButtonStart", "ButtonSelect", "DPadUp", "DPadDown", "DPadLeft", "DPadRight", "Thumbstick1", "Thumbstick2"]},
+		{"name": "LensShape", "members": ["Sphere"]},
 		{"name": "LineJoinMode", "members": ["Round", "Bevel", "Miter"]},
 		{"name": "ListenerType", "members": ["Camera", "ObjectPosition"]},
 		{"name": "MouseBehavior", "members": ["Default", "LockCenter", "LockCurrentPosition"]},
+		{"name": "NodeBypassMode", "members": ["None", "Bypass"]},
+		{"name": "NodeGroupLayout", "members": ["Manual", "AroundEdge", "SmallestSpace"]},
+		{"name": "NodePortDirection", "members": ["Input", "Output"]},
+		{"name": "NodePortEdge", "members": ["Top", "Bottom", "Corner"]},
 		{"name": "NormalId", "members": ["Right", "Top", "Back", "Left", "Bottom", "Front"]},
 		{"name": "ParticleEmitterShape", "members": ["Box", "Sphere", "Cylinder", "Disc"]},
 		{"name": "ParticleEmitterShapeInOut", "members": ["Outward", "Inward", "InAndOut"]},
@@ -2756,6 +3138,7 @@
 		{"name": "StrokeSizingMode", "members": ["FixedSize", "ScaledSize"]},
 		{"name": "SurfaceEffect", "members": ["None", "NightVision", "Thermal", "Cctv", "Swirl"]},
 		{"name": "SurfaceSizingMode", "members": ["FixedSize", "PixelsPerStud"]},
+		{"name": "TeleportRequestDecision", "members": ["NotProcessed", "Denied", "Processed"]},
 		{"name": "TextTruncate", "members": ["None", "AtEnd"]},
 		{"name": "TextXAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "TextYAlignment", "members": ["Top", "Center", "Bottom"]},
@@ -2767,6 +3150,7 @@
 		{"name": "UserInputType", "members": ["MouseButton1", "MouseButton2", "MouseButton3", "Keyboard", "MouseMovement", "MouseWheel", "Gamepad1", "Gamepad2", "Gamepad3", "Gamepad4", "Gamepad5", "Gamepad6", "Gamepad7", "Gamepad8"]},
 		{"name": "VerticalAlignment", "members": ["Top", "Center", "Bottom"]},
 		{"name": "VerticalScrollBarPosition", "members": ["Right", "Left"]},
+		{"name": "VolumeShape", "members": ["Box", "Ellipsoid"]},
 		{"name": "ZIndexBehavior", "members": ["Global", "Sibling"]}
 	]
 }

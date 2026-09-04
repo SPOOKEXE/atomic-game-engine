@@ -106,11 +106,30 @@ namespace engine::scene {
 			ecs::Classes::Computed(script, RevisionProperty());
 			return script;
 		}
+
+		ecs::ClassId RegisterLensShaderClass() {
+			EnsureClassTree();
+
+			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
+			const std::array source{ecs::Components::Of<ShaderSource>()};
+			const ecs::ClassId lens = ecs::Classes::Register("LensShader", instance, source);
+
+			// The source surface is intentionally shared. The class determines the
+			// shader contract, while the revision-on-write rule remains one rule.
+			ecs::Classes::Computed(lens, SourceProperty());
+			ecs::Classes::Computed(lens, RevisionProperty());
+			return lens;
+		}
 	}
 
 	ecs::ClassId ShaderScriptClass() {
 		static const ecs::ClassId script = RegisterShaderScriptClass();
 		return script;
+	}
+
+	ecs::ClassId LensShaderClass() {
+		static const ecs::ClassId lens = RegisterLensShaderClass();
+		return lens;
 	}
 
 	ecs::Entity ShaderScriptNamed(ecs::Store &store, const core::Name &name) {
@@ -123,8 +142,27 @@ namespace engine::scene {
 		// the same reason: an archetype walk reorders itself the first time an
 		// unrelated component is added to one of the rows.
 		ecs::Entity found = ecs::NULL_ENTITY;
+		const ecs::ClassId scriptClass = ShaderScriptClass();
 		store.Each<const ShaderSource>([&](ecs::Entity entity, const ShaderSource &) {
-			if (store.InstanceNameOf(entity) != name) {
+			if (!store.IsA(entity, scriptClass) || store.InstanceNameOf(entity) != name) {
+				return;
+			}
+			if (found == ecs::NULL_ENTITY || entity.Id < found.Id) {
+				found = entity;
+			}
+		});
+		return found;
+	}
+
+	ecs::Entity LensShaderNamed(ecs::Store &store, const core::Name &name) {
+		if (!name.IsValid()) {
+			return ecs::NULL_ENTITY;
+		}
+
+		const ecs::ClassId lensClass = LensShaderClass();
+		ecs::Entity found = ecs::NULL_ENTITY;
+		store.Each<const ShaderSource>([&](ecs::Entity entity, const ShaderSource &) {
+			if (!store.IsA(entity, lensClass) || store.InstanceNameOf(entity) != name) {
 				return;
 			}
 			if (found == ecs::NULL_ENTITY || entity.Id < found.Id) {
@@ -141,6 +179,19 @@ namespace engine::scene {
 		}
 
 		const ShaderSource *held = store.Get<ShaderSource>(script);
+		if (held == nullptr) {
+			return {};
+		}
+		return ShaderText{.Code = held->Code, .Revision = held->Revision, .Found = true};
+	}
+
+	ShaderText LensShaderTextOf(ecs::Store &store, const core::Name &name) {
+		const ecs::Entity shader = LensShaderNamed(store, name);
+		if (shader == ecs::NULL_ENTITY) {
+			return {};
+		}
+
+		const ShaderSource *held = store.Get<ShaderSource>(shader);
 		if (held == nullptr) {
 			return {};
 		}

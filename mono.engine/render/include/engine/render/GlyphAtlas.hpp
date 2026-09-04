@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Text-rendering hosts share
+// this complete glyph-atlas contract.
+
 // The four faces, rasterised once, in one place.
 //
 // **This is the decision the roadmap named and left open**: "the atlas is the

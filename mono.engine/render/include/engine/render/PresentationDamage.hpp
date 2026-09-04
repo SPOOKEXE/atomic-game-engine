@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Presentation hosts share
+// this complete image-damage contract.
+
 // Independent invalidation for the images composed into one presentation.
 //
 // A scene texture, the game's interface, and the host interface do not share a
