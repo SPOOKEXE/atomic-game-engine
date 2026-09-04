@@ -611,6 +611,43 @@ namespace engine::script {
 				signals.MarkOnce(signals.Connect(kind, subject, callback));
 			}
 
+			std::string DispatchSignal(SignalKind kind, ecs::Entity subject) override {
+				return FireJsSignal(Context, kind, subject, 0, nullptr);
+			}
+
+			std::string
+			DispatchPointerSignal(SignalKind kind, ecs::Entity subject, float x, float y) override {
+				JSValue arguments[2] = {JS_NewFloat64(Context, x), JS_NewFloat64(Context, y)};
+				const std::string error = FireJsSignal(Context, kind, subject, 2, arguments);
+				JS_FreeValue(Context, arguments[0]);
+				JS_FreeValue(Context, arguments[1]);
+				return error;
+			}
+
+			std::string DispatchDragSignal(
+				SignalKind kind, ecs::Entity subject, float x, float y, float dx, float dy
+			) override {
+				JSValue arguments[4] = {
+					JS_NewFloat64(Context, x),
+					JS_NewFloat64(Context, y),
+					JS_NewFloat64(Context, dx),
+					JS_NewFloat64(Context, dy),
+				};
+				const std::string error = FireJsSignal(Context, kind, subject, 4, arguments);
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(Context, argument);
+				}
+				return error;
+			}
+
+			std::string DispatchFocusLost(ecs::Entity subject, bool entered) override {
+				JSValue argument = JS_NewBool(Context, entered ? 1 : 0);
+				const std::string error =
+					FireJsSignal(Context, SignalKind::GuiFocusLost, subject, 1, &argument);
+				JS_FreeValue(Context, argument);
+				return error;
+			}
+
 			void ReturnNil() override {
 				// **`null` rather than `undefined`**, matching every other
 				// JavaScript instance method: `FindFirstChild` answers `null` for

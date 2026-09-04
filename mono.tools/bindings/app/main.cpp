@@ -2286,6 +2286,11 @@ declare task: {
 				// produces motion only, and `MouseMoved` already carries it with
 				// the position an argument-less signal could not.
 				out << "\tMouseButton1Click: GuiSignal\n";
+				out << "\tMouseButton1Down: GuiSignal\n";
+				out << "\tMouseButton1Up: GuiSignal\n";
+				out << "\tMouseButton2Click: GuiSignal\n";
+				out << "\tMouseButton2Down: GuiSignal\n";
+				out << "\tMouseButton2Up: GuiSignal\n";
 
 				out << "\tInputBegan: GuiSignal\n";
 				out << "\tInputEnded: GuiSignal\n";
@@ -3818,6 +3823,11 @@ declare const task: {
 				// Roblox's second name for the one event, matching the Luau half
 				// - and `InputChanged` is absent here for the reason given there.
 				out << "\treadonly MouseButton1Click: GuiSignal;\n";
+				out << "\treadonly MouseButton1Down: GuiSignal;\n";
+				out << "\treadonly MouseButton1Up: GuiSignal;\n";
+				out << "\treadonly MouseButton2Click: GuiSignal;\n";
+				out << "\treadonly MouseButton2Down: GuiSignal;\n";
+				out << "\treadonly MouseButton2Up: GuiSignal;\n";
 
 				out << "\treadonly InputBegan: GuiSignal;\n";
 				out << "\treadonly InputEnded: GuiSignal;\n";

@@ -139,7 +139,7 @@ namespace engine::script {
 
 		// --- the 2D tree's input, from `gui::Router` ------------------------
 		//
-		// **The six below are one mechanism and it is not the tree's.** Every
+		// **The gui signals below are one mechanism and not the tree's.** Every
 		// signal above is recorded by the store and fanned out at the barrier;
 		// these arrive from outside the world entirely - a host polls a pointer,
 		// `gui::Router` decides what that means, and the events are handed to
@@ -166,6 +166,21 @@ namespace engine::script {
 		// press *began* on, which is `gui::Router`'s rule and is what makes a
 		// drag off a button and back one interaction rather than two.
 		GuiInputEnded,
+
+		// The explicit primary-button edges. Both the pointer router and the
+		// virtual controls fire these beside the generic input pair.
+		//@{
+		GuiMouseButton1Down,
+		GuiMouseButton1Up,
+		//@}
+
+		// The virtual secondary-button route. The physical router currently owns
+		// one primary pointer, so only virtual controls can produce these.
+		//@{
+		GuiMouseButton2Click,
+		GuiMouseButton2Down,
+		GuiMouseButton2Up,
+		//@}
 
 		// `guiObject.MouseEnter` - the pointer entered its rectangle.
 		GuiMouseEnter,

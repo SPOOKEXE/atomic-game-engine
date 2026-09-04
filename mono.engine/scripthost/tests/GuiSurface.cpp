@@ -213,8 +213,8 @@ namespace {
 }
 
 TEST_CASE("every gui signal a button has actually fires, in both languages", "[scripting][guisurface]") {
-	// **The audit, made a check.** Six signals are offered on every instance and
-	// one of them - `MouseButton1Click` - is new; what this asserts is that each
+	// **The audit, made a check.** Nine signals are offered on every instance and
+	// three of them name a primary button edge; what this asserts is that each
 	// of them reaches a handler when a pointer does the thing it is named for,
 	// rather than that it can be connected to.
 	//
@@ -240,7 +240,9 @@ TEST_CASE("every gui signal a button has actually fires, in both languages", "[s
 					  "button.MouseEnter:Connect(function() note('enter ') end)\n"
 					  "button.MouseMoved:Connect(function() note('moved ') end)\n"
 					  "button.InputBegan:Connect(function() note('began ') end)\n"
+					  "button.MouseButton1Down:Connect(function() note('down ') end)\n"
 					  "button.InputEnded:Connect(function() note('ended ') end)\n"
+					  "button.MouseButton1Up:Connect(function() note('up ') end)\n"
 					  "button.Activated:Connect(function() note('activated ') end)\n"
 					  "button.MouseButton1Click:Connect(function() note('clicked ') end)\n"
 					  "button.MouseLeave:Connect(function() note('leave ') end)\n"
@@ -249,7 +251,9 @@ TEST_CASE("every gui signal a button has actually fires, in both languages", "[s
 					  "button.MouseEnter.Connect(function () { note('enter ') })\n"
 					  "button.MouseMoved.Connect(function () { note('moved ') })\n"
 					  "button.InputBegan.Connect(function () { note('began ') })\n"
+					  "button.MouseButton1Down.Connect(function () { note('down ') })\n"
 					  "button.InputEnded.Connect(function () { note('ended ') })\n"
+					  "button.MouseButton1Up.Connect(function () { note('up ') })\n"
 					  "button.Activated.Connect(function () { note('activated ') })\n"
 					  "button.MouseButton1Click.Connect(function () { note('clicked ') })\n"
 					  "button.MouseLeave.Connect(function () { note('leave ') })\n";
@@ -268,7 +272,7 @@ TEST_CASE("every gui signal a button has actually fires, in both languages", "[s
 		// **`activated` and `clicked` both**, which is what makes
 		// `MouseButton1Click` a second name for one event rather than a member
 		// that exists and never fires - the failure this suite is named after.
-		CHECK(world.Log() == "enter moved began ended activated clicked leave ");
+		CHECK(world.Log() == "enter moved began down ended up activated clicked leave ");
 	}
 }
 

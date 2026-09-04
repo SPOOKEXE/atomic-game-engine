@@ -1427,6 +1427,11 @@ declare extern type Instance with
 	function GetComponents(self): { string }
 	Activated: GuiSignal
 	MouseButton1Click: GuiSignal
+	MouseButton1Down: GuiSignal
+	MouseButton1Up: GuiSignal
+	MouseButton2Click: GuiSignal
+	MouseButton2Down: GuiSignal
+	MouseButton2Up: GuiSignal
 	InputBegan: GuiSignal
 	InputEnded: GuiSignal
 	MouseEnter: PointerSignal

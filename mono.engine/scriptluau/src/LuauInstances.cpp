@@ -124,6 +124,11 @@ namespace engine::script {
 			// short strings into a grid nobody can add to without reflowing it.
 			"Activated",
 			"MouseButton1Click",
+			"MouseButton1Down",
+			"MouseButton1Up",
+			"MouseButton2Click",
+			"MouseButton2Down",
+			"MouseButton2Up",
 			"InputBegan",
 			"InputEnded",
 			"MouseEnter",
@@ -213,12 +218,9 @@ namespace engine::script {
 			// on a `Part` is inert by construction, which is the same answer at
 			// none of the cost.
 			// **`MouseButton1Click` beside `Activated`, and they are one signal
-			// under two names rather than two lists.** Roblox has both - the
-			// second on `GuiButton` - and this engine's router produces exactly
-			// one primary button, so the two questions have one answer here. A
-			// second `SignalKind` would be a second list to fan the same event
-			// out to, and the first handler an author wrote against the name
-			// this file did not know would never fire.
+			// under two names rather than two lists.** The primary router and
+			// `VirtualLeftClick` both produce one activation, so either spelling
+			// must reach the same handlers.
 			//
 			// **Not `InputChanged`, which stays absent.** Roblox's fires for
 			// pointer motion *and* the wheel over an element; `gui::Router`
@@ -228,6 +230,26 @@ namespace engine::script {
 			// list of.
 			if (name == "Activated" || name == "MouseButton1Click") {
 				PushSignal(state, SignalKind::GuiActivated, instance);
+				return 1;
+			}
+			if (name == "MouseButton1Down") {
+				PushSignal(state, SignalKind::GuiMouseButton1Down, instance);
+				return 1;
+			}
+			if (name == "MouseButton1Up") {
+				PushSignal(state, SignalKind::GuiMouseButton1Up, instance);
+				return 1;
+			}
+			if (name == "MouseButton2Click") {
+				PushSignal(state, SignalKind::GuiMouseButton2Click, instance);
+				return 1;
+			}
+			if (name == "MouseButton2Down") {
+				PushSignal(state, SignalKind::GuiMouseButton2Down, instance);
+				return 1;
+			}
+			if (name == "MouseButton2Up") {
+				PushSignal(state, SignalKind::GuiMouseButton2Up, instance);
 				return 1;
 			}
 			if (name == "InputBegan") {
@@ -1014,10 +1036,12 @@ namespace engine::script {
 
 			case gui::EventKind::InputBegan:
 				note(FireSignal(state, SignalKind::GuiInputBegan, event.Instance, 0));
+				note(FireSignal(state, SignalKind::GuiMouseButton1Down, event.Instance, 0));
 				break;
 
 			case gui::EventKind::InputEnded:
 				note(FireSignal(state, SignalKind::GuiInputEnded, event.Instance, 0));
+				note(FireSignal(state, SignalKind::GuiMouseButton1Up, event.Instance, 0));
 				break;
 
 			case gui::EventKind::Activated:

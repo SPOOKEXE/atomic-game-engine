@@ -498,6 +498,37 @@ namespace engine::script {
 		//        from here on.
 		virtual void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) = 0;
 
+		// Delivers one argument-less signal before the current method returns.
+		//
+		// **A delivery request rather than the signal table itself**, because the
+		// table stores VM-owned callback references and only an adapter can invoke
+		// one. `GuiButton:EmulateClick` is the caller: it needs the exact
+		// `GuiActivated` route a physical click reaches without fabricating pointer
+		// input, hover state, or a second callback mechanism.
+		//
+		// @return A handler error, or empty when every handler completed.
+		virtual std::string DispatchSignal(SignalKind kind, ecs::Entity subject) = 0;
+
+		// Delivers a pointer signal at one virtual canvas position before the
+		// current method returns.
+		//
+		// `GuiObject:VirtualHover` and `VirtualUnhover` use the resolved centre
+		// when layout has one. No host pointer is moved or captured: this is the
+		// authored event route for scripted tutorials and tests.
+		virtual std::string DispatchPointerSignal(SignalKind kind, ecs::Entity subject, float x, float y) = 0;
+
+		// Delivers a drag signal with its canvas position and total displacement.
+		// Virtual drag methods use this route so handlers receive the same four
+		// values as a detector driven by the pointer router.
+		virtual std::string
+		DispatchDragSignal(SignalKind kind, ecs::Entity subject, float x, float y, float dx, float dy) = 0;
+
+		// Delivers `TextBox.FocusLost` before the current method returns.
+		//
+		// The boolean is Roblox's `enterPressed` argument. `VirtualUnfocus` and a
+		// virtual focus transfer both release with false.
+		virtual std::string DispatchFocusLost(ecs::Entity subject, bool entered) = 0;
+
 		// Returning. A method calls one of these, none for a method that answers
 		// nothing, or **several for a method that answers several things**.
 		//

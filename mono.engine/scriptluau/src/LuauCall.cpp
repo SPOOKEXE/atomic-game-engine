@@ -543,6 +543,32 @@ namespace engine::script {
 				Context.Signals.MarkOnce(Context.Signals.Connect(kind, subject, callback));
 			}
 
+			std::string DispatchSignal(SignalKind kind, ecs::Entity subject) override {
+				return FireSignal(State, kind, subject, 0);
+			}
+
+			std::string
+			DispatchPointerSignal(SignalKind kind, ecs::Entity subject, float x, float y) override {
+				lua_pushnumber(State, x);
+				lua_pushnumber(State, y);
+				return FireSignal(State, kind, subject, 2);
+			}
+
+			std::string DispatchDragSignal(
+				SignalKind kind, ecs::Entity subject, float x, float y, float dx, float dy
+			) override {
+				lua_pushnumber(State, x);
+				lua_pushnumber(State, y);
+				lua_pushnumber(State, dx);
+				lua_pushnumber(State, dy);
+				return FireSignal(State, kind, subject, 4);
+			}
+
+			std::string DispatchFocusLost(ecs::Entity subject, bool entered) override {
+				lua_pushboolean(State, entered ? 1 : 0);
+				return FireSignal(State, SignalKind::GuiFocusLost, subject, 1);
+			}
+
 			void ReturnNil() override {
 				lua_pushnil(State);
 				Pushed++;

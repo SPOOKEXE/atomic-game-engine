@@ -1204,6 +1204,11 @@ declare interface Instance {
 	GetComponents(): string[];
 	readonly Activated: GuiSignal;
 	readonly MouseButton1Click: GuiSignal;
+	readonly MouseButton1Down: GuiSignal;
+	readonly MouseButton1Up: GuiSignal;
+	readonly MouseButton2Click: GuiSignal;
+	readonly MouseButton2Down: GuiSignal;
+	readonly MouseButton2Up: GuiSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
 	readonly MouseEnter: PointerSignal;
