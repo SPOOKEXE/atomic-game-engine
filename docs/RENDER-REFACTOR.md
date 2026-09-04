@@ -35,6 +35,24 @@ of `RENDER_PIPELINE.md` in policy, old roadmap entries and source comments refer
 to the predecessor of this document. Implementation phase P0 must reconcile
 those references and outdated policy statements through the approved exception.
 
+### optimization order and decision rules
+
+Optimize in this order: avoid undemanded work; reuse valid results; update only
+changed ranges; reduce representation and intermediate bytes; batch remaining
+work; then tune kernels and overlap. GPU placement is a decision about data and
+consumers, not a rule that every small operation deserves a dispatch.
+
+Every optimization below must name its owner, inputs, reuse key, invalidators,
+resident and scratch bytes, update frequency, fallback and proof. Classify it as
+exact reuse, equivalent execution, bounded approximation or quality reduction.
+The last two need an authored error/quality policy and cannot silently count as
+the same image at lower cost.
+
+Retention trades recomputation for memory and invalidation cost. Keep a result
+only when its expected reuse repays lookup, storage, maintenance and eventual
+retirement. Fast-changing low-cost intermediates should remain transient; no
+requirement here means caching every node output or retaining every world forever.
+
 ## 1. requirements and proof map
 
 | ID | Requested result | Detailed plan | Required proof |
@@ -55,6 +73,22 @@ those references and outdated policy statements through the approved exception.
 | R14 | Four authored LOD meshes, automatic decimation, projected-triangle/meshlet path | §13 | GPU view-specific selection, seam/error tests, stream fallback and no CPU round trip |
 | R15 | Port all material/shader contracts | §7, §15 | Author, save, script, cook, publish, load, reload, fallback and retire |
 | R16 | Preserve all optimization research and TornadoSim needs | §9 to §18, §22 | Every old subsection maps to an owned phase or measured candidate |
+| R17 | Optimize every section without reducing the requested result | Optimization refinements throughout §0 to §22 | Per-phase ablations, bounded residency, correct invalidation and full-frame cost evidence |
+
+### cost coverage across requirements
+
+| Requirements | Main costs to attack | Required negative control |
+|---|---|---|
+| R01 | Device setup, readback and fixture cooking | Optimization-disabled images and CPU comparison still catch faulty output |
+| R02 | Recursive views, repeated geometry/light work and seam candidates | Camera/light/body movement invalidates exactly the relevant results |
+| R03/R07 | Per-item policy merging, dispatch count and shader variants | Empty effect mask launches no image work; distinct effect order is preserved |
+| R04/R11 | Full-world scans, packing, uploads and per-camera duplication | More cameras do not multiply unchanged world extraction or uploads |
+| R05/R06 | Traversal, ray divergence, queues and accumulation | Same sample budget and estimator when comparing exact execution changes |
+| R08/R13 | Attachment bandwidth, overdraw and temporal history | Motion, disocclusion and exposure changes reveal unsafe reuse |
+| R09/R10 | Graph recompilation, hidden previews and intermediate images | Moving nodes in the editor causes no shader or runtime rebuild |
+| R12/R14 | Mesh/texture fetch, packing churn and streaming amplification | Fine-detail/seam quality stays inside its declared error at fixed budget |
+| R15 | Repeated parsing, whole-material rebuilds and pipeline creation | One texture edit creates no shader; one uniform edit changes no descriptors |
+| R16/R17 | Duplicate machinery and unmeasured optimization complexity | Each candidate is removable or falls back through the same graph contracts |
 
 ## 2. current foundation and gaps
 
@@ -102,7 +136,26 @@ Lights/cameras upload small structured values; ribbons upload compact geometry.
 
 No normal frame uploads a CPU-composed GUI or scene image. Full pixel uploads
 are source textures or explicit editable images. Readback is for requested
-captures, tests and completed timing queries, not per-frame visual decisions.
+captures, tests, completed timing queries and bounded asynchronous streaming
+feedback. Same-frame visual decisions do not wait for CPU readback.
+
+### optimization evidence to gather first
+
+At `ed588cbf`, `WorldPresentation.cpp::ScenePresentationSignaturesOf` still signs
+the instance span and folds joint-frame and light spans for a view. Its helper
+walks each value's bytes. This is a concrete candidate for avoiding repeated
+CPU work; it is not a measured bottleneck or proof that upstream extraction is free.
+
+Before changing it, count entities/bytes visited, rows packed, allocations and
+signature calls per world and camera. Distinguish initial discovery, changed-world
+preparation and unchanged presentation. Profile grouping, content lookup and
+resident row comparison independently so a zero-upload report cannot hide a
+whole-world scan.
+
+Use existing counters and narrow temporary instrumentation first. P0 records a
+baseline for one still world, one moving entity, camera-only motion and many
+cameras. These expose different causes and avoid treating a single large stress
+scene as evidence for every proposed cache.
 
 ## 3. one graph from authoring to frame
 
@@ -205,6 +258,48 @@ Every node keeps its name, resource effects and timing attribution. SDL's unifie
 queue can serialize transfer, compute and graphics; scheduling eligibility does
 not prove actual GPU overlap.
 
+### compiler, schedule and allocation optimizations
+
+Split document change classes: layout/labels, uniform values, binding references,
+resource descriptors, topology and shader interfaces. Cache compiled topology
+by semantic graph/interface/capability key; layout edits touch no runtime state,
+uniform edits replace parameter data, and descriptor changes rebuild only affected
+allocation/binding plans. Initially retain full compilation as the correctness
+oracle; incremental rebuild must produce the same accepted plan.
+
+At install, resolve stable names to dense local IDs and build contiguous arrays
+for nodes, edges, resource versions and handler calls. Parse text parameters once.
+Do not perform registry lookup, string parsing or callback-map construction for
+every node invocation. Bound cached plans across graph and device generations.
+
+Keep pure world preparation separate from pipeline-specific work: two pipelines
+reading the same world can share extraction/uploads while owning distinct
+view resources. Deduplicate identical pure producers only when scope, inputs,
+parameters and effects match; differently ordered writes or history cannot merge.
+
+Resource liveness drives attachment creation, initialization and final stores.
+Clear or discard only when coverage proves previous contents unnecessary; retain
+depth used by HZB/soft particles and any output read by capture. Prefer legal
+same-attachment pass batching over extra stores/loads, with backend support
+checked. [Khronos attachment guidance](https://docs.vulkan.org/samples/latest/samples/performance/render_passes/README.html).
+
+For real concurrent queues, disjoint positions in a linear node list do not
+prove safe aliasing. Require a happens-before path from the old resource's last
+access to the new resource's first access; otherwise allocate separately or add
+an explicitly costed synchronization edge. Captures and previews extend lifetimes
+and must participate in this same plan.
+
+Minimize barriers to declared subresources and real hazards; merge compatible
+read transitions and remove redundant state binds through a command-context
+cache reset at every required backend boundary. Never cache raw command buffers
+across changing swapchain/frame resources unless the backend explicitly permits
+it; reusable CPU execution plans are the portable baseline.
+
+Async compute is an optional schedule: compare serial and overlapped full frames,
+including extra memory, queue transfers and contention. Compute and raster that
+both saturate memory may become slower together. Select measured presets, with
+the same resource/ordering validation, instead of enabling async universally.
+
 ## 4. resident worlds and parallel frame preparation
 
 ### execution chain
@@ -292,6 +387,73 @@ Tests cover scene reorder, entity deletion/reuse, empty lists, failed submit,
 world unload/reload, camera create/remove, same-world many-view reuse and foreign
 portal views. Check exact transfer ranges and traffic, not only a hit counter.
 
+### change-proportional preparation and bounded reuse
+
+Track topology/membership, transform, material, geometry, lights, environment and
+simulation time separately through existing ECS mutation boundaries. Maintain
+derived per-chunk/page revisions and changed-page lists; world summaries update
+when those pages change, not by hashing every row for every camera. If current
+write paths cannot guarantee notification, retain a conservative scan until the
+mutation contract is covered, rather than trusting a new dirty bit prematurely.
+
+Publish immutable pages from the owning world, with leases/reference lifetimes;
+reuse unchanged pages and copy changed pages only when concurrent readers require
+it. Snapshot pages are a derived transport view, not another editable world.
+Bound outstanding snapshots and recover from missed delta windows with one
+explicit full refresh; do not accumulate a permanent revision history.
+
+Extract one world payload per published revision, then produce lightweight view
+requests and GPU-selected lists. SIMD hot data should be contiguous bounds,
+transforms and masks; cold authoring metadata stays outside these loops. Keep
+task-local scratch and output ranges disjoint to avoid false sharing. A serial
+path handles small inputs without queue overhead.
+
+GPU transform/bounds/material columns may have different update rates. Compare
+48-byte interleaved rows against aligned hot/cold sidecars using bytes actually
+fetched and dispatch cost; smaller source structs do not automatically mean
+fewer device transactions. Keep previous transform/deformation only for demanded
+motion consumers, preserving the previous presented sample rather than blindly
+using the previous simulation tick.
+
+Per-view storage needs its own budget. A uint32 list for one million slots is
+about 3.81 MiB before versions; duplicating several lists for every camera can
+dominate world storage. Use compact candidate lists, visibility bitsets and
+transient per-view scratch when lifetimes allow; retain only useful history,
+never an unbounded camera-by-world matrix of full rows.
+
+Coalesce dirty transfers with a bounded gap threshold: extra copied bytes may
+repay fewer copy commands. Compare exact spans, chunk uploads and a deliberate
+full update at high dirty density. Report amplification, avoid reading dead
+padding, and keep each in-flight destination version's acknowledgement distinct.
+
+Exact image reuse requires matching all relevant inputs. Reprojection, stale
+shadow refresh and lower update rates are approximations with their own policy.
+Do not hash floating-point camera matrices approximately and call it an exact
+hit. A cached source can still need a final composite/present; attribute that
+work to the consumer instead of declaring the whole frame cost zero.
+
+Separate upload acceptance, GPU completion and presentation success. An upload
+submitted successfully can be acknowledged for that destination version while
+presentation damage remains pending; storage cannot retire before completion.
+This avoids reuploading valid data after an unrelated swapchain failure.
+
+| Change cause | Resident update | Recompute or invalidate | Keep reusable |
+|---|---|---|---|
+| Camera pose | View constants | View cull/LOD, shading, compatible temporal reprojection | World geometry/material rows and static asset acceleration |
+| One rigid transform | Changed transform/bounds and required previous state | Affected visibility, shadows, instance acceleration and pixels | Mesh vertices, shader modules, unchanged materials |
+| Material numeric override | Changed uniform range | Affected shading; alpha/displacement changes also invalidate geometry-related consumers | Unchanged descriptors/modules/pipelines |
+| Pixels in an existing texture allocation | Dirty blocks/mips | Sampling-dependent pixels; alpha/displacement/shadow/trace consumers as declared | Binding descriptor and unrelated uniform data |
+| Texture allocation or mip view replaced | New allocation plus descriptor generation | Consumers of that texture view | Module and compatible pipeline objects |
+| Light change | Changed light data | Relevant clusters, shadows and radiance; conservative GI/path-history reset | Geometry/BVH and unchanged material bindings |
+| Exposure or display grade | Small post parameter block | Display-domain post/composite output | Valid scene-linear HDR and geometry |
+| Mesh topology | Affected packed geometry and bounds | Mesh acceleration, relevant shadows/culling/history | Other meshes and unrelated shader modules |
+| Graph label/position | Authoring data only | Canvas region | All runtime plans, GPU objects and scene images |
+| Shader interface/topology | New validated plan/module/bindings as required | Its dependent resources and pixels | Independently keyed compatible assets |
+
+This is an invalidation minimum, not permission to ignore hidden dependencies.
+Custom nodes declare their reads and effects; unknown dependency scope falls back
+to conservative invalidation until its narrower contract is proved.
+
 ## 5. render correctness harness
 
 ### fixtures and oracles
@@ -364,6 +526,26 @@ During implementation, headless math tests run first. At final verification ask
 for live Studio/browser/compute approval as the repository instructions require;
 record any declined GPU/interactive checks. This document-only task runs none.
 
+### optimize verification without losing the oracle
+
+Reuse a device and immutable cooked fixture assets across ordinary cases; reset
+world/view/history state between cases. Keep dedicated fresh-device tests for
+initialization, loss and retirement so reuse cannot conceal lifecycle bugs.
+Batch readback into a bounded fence-driven ring and compare/encode completed
+captures off the render owner thread.
+
+Run routine probes on small fixtures, but retain full-size cases for odd extents,
+packing, atlas bleed and allocation pressure. Optional GPU image reductions can
+locate errors cheaply; they cannot be the sole oracle for shaders that may share
+the same defect. Periodic CPU comparison and full failure artifacts remain.
+
+For each optimized path, compare against the unfused, uncached or conservative
+path at identical scene state and declared quality. Stress invalidation by
+changing one dependency and by removing/recreating its owner. Run captures with
+and without aliasing so debug retention cannot accidentally hide a lifetime bug.
+Measure performance in separate capture-free windows; readback and image encoding
+must not pollute shipped-frame conclusions.
+
 ## 6. capabilities and attached effects
 
 ### separate support, policy and state
@@ -430,6 +612,31 @@ Active demand drives shader, texture, sampler and pipeline residency. Hidden
 attachments produce no preview work and no new loads; in-flight resources retire
 safely and caches may retain bounded reusable entries. Activation is deterministic
 from scene/view policy, never from profiling counters.
+
+### compile policy once, dispatch by useful work
+
+Resolve world/camera policy generations once, retain per-instance authored masks
+in GPU rows and combine them with the active view policy in a small GPU operation.
+A camera shadow toggle must not rewrite all world instances. Precompute compatible
+technique/feature families at admission; specialize only when resource layout or
+measured divergence justifies a variant, not for every bit combination.
+
+An attachment selector may produce a tile list, screen rectangle or instance list.
+Run selected post effects only over covered tiles plus the filter's declared halo;
+use conservative full-view work for unknown/global footprints. Overlapping
+attachments with different order/parameters cannot merge merely because they
+name the same shader. Keep sequential blending semantics within each batch.
+
+Compact active effect work on GPU, group compatible kernels and use indirect
+dispatch when supported. Subgroup aggregation can reduce append-counter atomics,
+but group size/subgroup width are probed and a portable prefix-sum path remains.
+Use a fixed bounded launch with early exit where indirect dispatch is unavailable.
+Do not read work counts back to decide whether the next GPU node runs.
+
+Conservative demand includes offscreen shadow casters, reflected objects and
+portal/tracing consumers. Main-camera invisibility alone cannot unload their
+shaders or stop required deformation. Classify memory as active, in-flight or
+warm cached, and trim the last class under §14's device-wide budget.
 
 ## 7. materials and shader publication
 
@@ -571,7 +778,8 @@ GPU keys include definition/parent roots, canonical overrides, technique/feature
 layout/interface signatures, texture roots/editable revisions, sampler descriptors,
 device identity/backend and packing ABI.
 
-Shader keys add module root, stage/entry and variant; graphics pipelines add vertex
+Shader keys use module root, stage/entry, variant, device/backend and shader ABI;
+graphics pipelines additionally include vertex
 layout, formats, depth/blend/raster state, sample count and specializations;
 compute keys include valid local sizes. Test each key field by varying it alone.
 Do not rebuild shader objects merely because a texture-dependent material key changed.
@@ -605,6 +813,39 @@ Studio/trusted authoring may edit ShaderScript source and request cook tickets.
 Packaged games select published modules and bounded feature values; they cannot
 submit source, arbitrary SPIR-V/MSL, includes or descriptor layouts. Studio saves
 may preserve source; package cooking must resolve every runtime demand first.
+
+### split cache dependencies and admission work
+
+Treat the complete material key above as a resolved-view identity, then cache its
+parts independently. Uniform packing depends on layout and canonical values;
+texture descriptors depend on texture allocation generation/mip view and sampler;
+shader modules depend on cooked code; pipelines depend on immutable render state.
+A texture pixel update in the same allocation changes content without forcing
+new descriptors, uniform packing or pipeline creation.
+
+Intern immutable resolved parameter blocks by canonical content, not merely a
+monotonic edit revision, so repeated equal overrides share device data. Keep
+per-instance identity/revision separately for save/notification semantics.
+Upload changed uniform ranges into aligned slabs; avoid one buffer allocation
+per material. Direct uniform bindings remain preferable at small scale if
+slab indirection costs more than it saves.
+
+Share one in-flight parse/cook/load request per complete content key. Batch
+variant work by common preprocessed source where the compiler safely supports
+it; cap compiler processes by memory as well as core count. Dependency-root
+changes invalidate only their downstream variants; unsuccessful identical edits
+reuse bounded diagnostics instead of retrying every frame.
+
+Prewarm demanded pipelines during load/authoring admission in a bounded queue.
+If device pipeline creation must occur on the owner thread, time-budget it there;
+a worker cooking shader bytes does not remove driver pipeline-creation hitches.
+Use backend pipeline-cache persistence only where exposed, with device/driver/
+ABI keys and safe cache-miss behavior. Warm and cold timings are separate gates.
+
+Keep fast-preview and final optimized cook profiles explicitly keyed and visible
+if a fast profile is introduced. Both validate interfaces; packaging never ships
+an attempted preview artifact by accident. LRU retirement batches resources by
+completed frame generation and bounds warm caches after editors close.
 
 ## 8. compositor and visual shader workbench
 
@@ -655,6 +896,31 @@ Report missing writes, dead resources/nodes, wasted writes, disconnected nodes,
 out-of-order effects, overspent formats, unused alpha and feedback. Pixel-dependent
 constant-channel/uniform-target/shading-count diagnoses require explicit readback
 or instrumentation; do not infer them from graph topology.
+
+### incremental authoring and selective materialization
+
+Cache canvas layout, text measurements and wire geometry by affected nodes and
+viewport transform; virtualize offscreen nodes and large property lists. A
+selected thumbnail consumes an existing GPU image directly when possible.
+Do not read pixels back merely to display them in Studio.
+
+Separate the authored graph from its execution representation. Constant-fold
+pure value expressions and share identical pure shader expressions; lower a
+compatible chain of pointwise material/image operations into one cooked kernel
+only after measuring bandwidth savings against register pressure. This is
+compiler-generated fusion, not arbitrary source-string concatenation.
+
+Do not fuse across incompatible dimensions, colour/alpha conversion semantics,
+history, side effects or neighbourhood dependencies without a proved transform.
+Preserve rounding/error policy; a removed intermediate format conversion can
+change the result. A debug viewer pins a logical intermediate and can request
+an unfused or explicitly materialized variant with its extra cost labelled.
+
+Use GPU tile-local/shared-memory kernels for suitable separable filters after
+comparison with ordinary raster passes. Full-screen compute is not automatically
+faster on tile GPUs. Cache static subgraph outputs only when their update rate
+and memory cost justify it; moving a graph node or opening help creates no new
+render work. Profile the editor's own idle cost as well as preview GPU time.
 
 ## 9. lighting, shadows and visibility
 
@@ -744,6 +1010,48 @@ experiment), interleaved queries and disjoint screen-region jobs. It belongs in
 a graph CPU preparation node and must match the safe visibility direction.
 Use only where CPU headroom and scene structure justify it.
 
+### spend lighting and visibility work where it pays
+
+Demand-drive G-buffer channels and lighting inputs. Reconstruct position from
+depth where the projection contract permits, rather than always storing world
+position; compact normals and material channels only within measured error.
+Compare deferred and forward/clustered graphs for bandwidth, light count and
+transparency. An optimized default can select a different supported graph by
+measured device/workload profile without maintaining a second material system.
+
+Cache environment convolution, BRDF lookup data and static probe inputs by
+environment/material model versions. Light clusters depend on light buffers,
+camera, grid and optional depth occupancy; share only equal dependencies.
+Use count -> prefix sum -> fill for bounded compact cluster lists where this
+beats fixed-capacity arrays. Depth-occupied clusters for opaque shading cannot
+exclude transparent surfaces in otherwise empty depth slices.
+
+Maintain conservative spatial summaries for shadow invalidation. A moving caster
+invalidates its old and new footprints; alpha/material/deformation edits also
+invalidate shadow content. Consider static/dynamic caster separation only when
+depth composition reproduces the correct nearest occluder and moving/static
+transitions cannot leave stale shadows. Fewer rendered tiles must show lower
+full-frame cost, including tracking and composition.
+
+For AO/GI, retain only history with valid depth/normal/material evidence; use
+half-resolution or checkerboard updates as explicitly approximate modes with
+disocclusion fallbacks. Probe/irradiance caches separate visibility, geometry and
+radiance epochs so a light edit can relight without rebuilding geometry. Local
+GI invalidation needs conservative transport influence; indirect light can travel
+beyond the changed object's screen rectangle, so global reset remains fallback.
+
+Culling has a cost crossover. On an empty/low-occlusion scene, HZB construction,
+testing and compaction may cost more than the draws removed. Compare enabled and
+disabled graphs at fixed quality; select a deterministic configured policy, not
+live profiler counters. Cheap frustum/distance rejection precedes HZB, while
+large reliable occluders earn early-depth work by projected area and cost.
+
+Separate small primitive tests from expensive fine culling. Reuse hierarchy bounds
+and update affected ancestors; compact survivors with workgroup-local prefixes
+before global reservation. Do not run shadow fine culling from an eye-depth
+pyramid. Keep order-independent opaque batching separate from transparency,
+where material sorting cannot override the required compositing order.
+
 ## 10. colour, post and antialiasing
 
 ### one colour and temporal contract
@@ -803,6 +1111,45 @@ Half/quarter-resolution AO, fog and bloom use depth-aware or appropriate
 upsampling. Every enabled node has a complete shader, input contract and image
 test; a placeholder catalogue default is a failed implementation gate.
 
+### minimize full-image traffic and history churn
+
+Construct only the attachment set demanded by the selected post/AA graph. No
+motion blur/TAA/temporal upscale consumer means no velocity target or retained
+velocity history solely for those features. No alpha consumer can permit a
+compact HDR format, but a resource shared with transparency must retain alpha.
+Channel liveness is a compiler fact checked against actual shader reflection.
+
+Keep bloom reductions, exposure and other compatible reductions on shared
+intermediates only when their colour domain/filter semantics agree. Fuse
+pointwise grade/tonemap/output operations under §8's rules; preserve nonlinear
+ordering and explicit conversions. Reuse pooled target size classes with bounded
+hysteresis instead of reallocating on every viewport pixel change.
+
+Prefer inline MSAA resolve and avoid storing multisample attachments whose only
+consumer is the resolve, when the backend supports that path. A later depth or
+sample-frequency consumer changes this decision. Treat memoryless attachments
+and subpass features as backend options, not portable SDL guarantees.
+[Khronos MSAA sample](https://github.com/KhronosGroup/Vulkan-Samples/blob/main/samples/performance/msaa/README.adoc).
+
+Temporal history validity is finer than resetting on every ordinary camera move:
+TAA reprojects expected camera/object motion, rejects disoccluded pixels and
+resets on cuts or incompatible contracts. Exact offline path accumulation in
+§11 instead restarts when its sampled scene/camera changes. Keep both policies
+explicit; a universal global history epoch would either smear images or destroy
+temporal reuse.
+
+Cache source layers separately from post state. Exposure/grade edits can reuse
+valid scene HDR but still change all display pixels; neighbourhood filters expand
+damage by their support, and global reductions invalidate their global dependents.
+Partial redraw is enabled only with conservative damage and known full coverage;
+otherwise recompute the affected full-view stages.
+
+Dynamic resolution is an optional declared controller with bounded scales,
+hysteresis and frame-boundary decisions, not a timing-driven branch inside
+shaders. Because current metrics are reporting-only, default plans use configured
+quality; any adaptive control needs its own reviewed policy/input rather than
+reading profiler counters. Record resolution in every comparison.
+
 ## 11. tracing and global illumination nodes
 
 ### port boundary
@@ -860,8 +1207,55 @@ technique fallback instead of silently disappearing.
 
 Proof includes ray-box/triangle degeneracies, BVH versus brute-force intersections,
 offscreen reflection, shadow visibility, mirror/diffuse/emissive scenes, fixed-seed
-repeatability, monotonic statistical convergence and invalidation after one edit.
+repeatability, statistical convergence across increasing sample budgets and
+invalidation after one edit. Individual stochastic estimates need not improve
+monotonically; compare error distributions against the reference.
 CPU references test tiny scenes; real GPU output proves shader traversal and packing.
+
+### resident acceleration and efficient ray work
+
+Separate mesh geometry acceleration from world instance acceleration. Rigid
+instances share one mesh BVH; transform edits refit/update only instance bounds.
+Topology edits rebuild that mesh, and deformation refits or rebuilds according
+to measured traversal quality. Retain a conservative build/refit fallback when
+refit quality degrades; double-buffer replacement structures only under a bounded
+memory allowance, not a second permanent copy of every world.
+
+Store traversal bounds/child references in contiguous compact arrays; geometry,
+material payload and textures are fetched on demand after a hit. Quantized BVH
+bounds round outward and are tested against brute-force visibility. Share cooked
+static geometry across worlds at the device asset layer while keeping world
+instances and temporal history separate.
+
+Compare a simple kernel with a wavefront implementation: resident SoA queues for
+intersection, material/light evaluation, shadow rays and continuation. Queue
+compaction and grouping can improve coherence but add dispatches and memory
+traffic; keep the simple path for workloads where they lose.
+[GPU path-tracing tradeoffs](https://www.pbr-book.org/4ed/Wavefront_Rendering_on_GPUs/Mapping_Path_Tracing_to_the_GPU).
+
+Chunk ray work into bounded tiles/sample batches; use indirect counts or bounded
+launches without per-bounce CPU count readback. One sample's continuation/emission
+ownership is explicit, so batching and overflow handling cannot double-count or
+drop radiance. Flush/retry smaller batches on capacity limits; shading order must
+not change sample seeds or silently change PDFs.
+
+Cache light sampling distributions and environment importance maps by content and
+light epochs. Classify hybrid tiles by roughness/material/ray mask before launching
+expensive rays. Ray-length/sample reductions and denoise reuse are quality modes,
+not equivalent-execution speedups. Adaptive sampling uses minimum samples and
+variance/confidence policy; raw equal-sample comparisons remain the baseline.
+
+Accumulate in GPU memory with sufficient radiance/moment precision, and allocate
+history only for active views. Stable completed preview tiles may sleep under an
+explicit convergence target; changes wake/reset affected state conservatively.
+Geometry/material/light changes default to full radiance reset because transport
+can affect remote pixels. Reservoir reuse or radiance-cache research may follow
+only with estimator/visibility validation, not as an assumed free improvement.
+
+Tune workgroup shape/register/shared-memory footprint per supported backend
+profile; fewer instructions or higher occupancy alone is not the objective.
+Measure queue bytes, active ray counts, traversal cost and full-frame latency at
+equal sample quality, including BVH maintenance and denoising.
 
 ## 12. portals with one seam contract
 
@@ -946,6 +1340,39 @@ single-step and direct-versus-portal split view for agent inspection.
 
 Gate is inspected image sequences plus numeric ownership/contact tests. A single
 still image cannot prove seamless motion, physics or temporal history.
+
+### bound portal views before shading them
+
+Traverse a conservative portal adjacency graph from each demanded camera;
+intersect projected apertures with the parent clip region before allocating a
+capture. Use existing spatial data for candidate portals. Reject only proved
+invisible/empty apertures; temporal visibility is not enough after camera motion.
+Recursion limits remain explicit approximation boundaries.
+
+Scale capture resolution from projected aperture footprint plus filter/temporal
+margin, with quantized size classes and hysteresis. Allocate portal targets from
+the common pool and budget total recursive pixels, not just recursion depth.
+Small portals can use lower resolution only within declared image-quality limits;
+test near-plane approach and rapid aperture growth to avoid a blurry threshold pop.
+
+Share destination world geometry, acceleration and compatible lighting inputs
+across portal views. Reuse capture pixels only for equal effective camera/clip/
+lighting/content keys; identical destination names do not make two entrance
+viewpoints equivalent. Cache seam transforms by portal revisions and child-view
+plans by lineage, with bounded eviction when no parent demands them.
+
+Intersect swept body bounds with portal spatial bounds before expensive far-side
+contacts. Share original mesh/skin data between clipped draw proxies and encode
+the seam transform/plane in compact per-view references. Render visibility must
+never gate physical crossing checks. Moving portals require relative surface
+velocity at the crossing point, including angular motion; rotating a body's
+velocity alone is insufficient. Test moving entrances/exits explicitly.
+
+Invalidate cached portal shadows/captures from both endpoints, transported light
+paths and destination revisions. Approximate low-rate far captures must show age
+and quality policy; do not hide stale physics or light discontinuity behind them.
+Profile recursive pixel count, unique worlds versus views, proxy draw amplification,
+capture reuse and physical seam candidates separately.
 
 ## 13. editable packing, quantization and geometry detail
 
@@ -1046,6 +1473,46 @@ alpha edges, topology edits, LOD oscillation, cameras choosing different levels,
 portal views, streaming pressure and conservative bounds. Report source/packed
 bytes, triangle/vertex fetch counts and decode cost, not a guessed percentage win.
 
+### optimize packed bytes across the whole path
+
+Choose attribute layouts by consumer. Depth/shadow/culling paths need position,
+indices and alpha where masked, not all normal/UV/colour streams. Compare split
+position and shading streams against interleaving; preserve cache-friendly index
+order. Do not force every pass to decode an expanded common vertex structure.
+
+Measure CPU authored bytes, packed upload bytes, resident bytes and temporary
+conversion peaks separately. Keeping editable float32 source plus a packed GPU
+copy reduces device cost, not CPU authoring memory. If compact canonical editable
+storage is enabled, setters/readers decode or quantize through the declared
+component policy and undo uses bounded page deltas, not whole-mesh snapshots.
+
+Quantize directly into staging for CPU-authored data when this removes a temporary
+copy. For GPU-generated geometry, keep generation/packing on device and avoid
+round trips. GPU-packing float32 uploads only saves resident/fetch bytes, not
+host-device bandwidth; reports must distinguish these cases. Update packed words
+at their real write granularity so adjacent nibble/bit edits cannot race.
+
+Retain local quantization pages/ranges where mesh-wide bounds changes otherwise
+force complete repacks. Bounds expand conservatively; shrinking/requantizing
+happens only under an explicit edit/cook operation or measured maintenance policy.
+Check page-edge seams and include per-page headers in compression ratios.
+
+Reuse meshlet hierarchy and topology across cameras; store only each view's
+selection. Compact active selected clusters before raster work, and use material
+bins only where sorting cost is recovered by coherent shading. A changed camera
+may recompute selection while unchanged geometry stays entirely resident.
+
+Cache bounded tessellation topology templates and draw-instance-independent
+displacement data by source/policy key. View-dependent factors and time-varying
+deformation cannot reuse an incompatible template/output. Share edges across
+neighbouring patches and update displacement-derived bounds, velocity and tracing
+once for compatible consumers, not once per shadow/camera pass.
+
+Defragment mesh slabs only when fragmentation prevents useful allocations or a
+measured maintenance window justifies it. Relocate on device, patch stable
+indirection at a safe boundary and retain old ranges until completion. A routine
+arrival must not trigger a full-buffer compaction disguised as a delta upload.
+
 ## 14. textures, mip streaming and atlas proof
 
 Keep source, cooked, compressed and device representations distinct. Evaluate
@@ -1071,7 +1538,7 @@ missing upper levels are never sampled. Optional GPU feedback is asynchronous
 streaming demand; LOD visibility decisions remain GPU-resident without a blocking
 CPU readback. A conservative CPU footprint fallback may overrequest content.
 
-Staging uses bounded persistent rings, aligned ranges and completion fences.
+Staging uses bounded reusable buffer rings, aligned ranges and completion fences.
 Recycle only retired ranges; cap bytes per frame and defer finer mips. Critical
 base data and diagnostic markers have explicit priority; no unconditional full
 buffer cycling/reupload on each arrival. Track queue age and refusal reasons.
@@ -1105,6 +1572,49 @@ Tests include all tiles visible, mostly hidden, repeated materials, camera motio
 wrap/anisotropy, distant mips, alpha borders, shader sampling, one-pixel edits,
 odd packed dimensions, repack, eviction and device recreation. Flat steady live
 bytes plus bounded churn and correct images are the gate.
+
+### one device budget and bounded streaming pressure
+
+Coordinate texture, mesh, graph transient, history, portal, particle, tracing and
+staging budgets through one render-owned budget view. Existing module counters
+remain owners of their allocations; the budget view aggregates them rather than
+duplicating storage. Reserve headroom for frame-critical and replacement resources;
+each subsystem cannot independently assume it owns all available memory.
+
+Pin in-flight and required coarse data. Warm-cache eviction, deferred promotions,
+history release and declared quality fallback precede refusal. Maintain demand
+across all active cameras, portals, shadows and traces; main-camera texel density
+alone misses reflections. Cap GPU feedback entries, deduplicate page requests
+and process them asynchronously with conservative fallback after overflow.
+
+Avoid cache pollution from one-time captures or fast camera sweeps: keep probationary
+entries separate from repeatedly used residents, with bounded retention and
+promotion/demotion cooldown. Priority incorporates visual demand, request age and
+bytes; starvation prevention ensures a large valid request eventually progresses.
+Admission uses configured budgets and demand state, not profiler metrics.
+
+Partial updates follow compressed-block and mip-filter footprints. Batch texture
+edits by destination and align dirty regions; uploading slightly more data can
+be cheaper than many tiny copies. Do not transcode an unchanged whole 4K image
+for a one-pixel edit unless that format forces it; surface that amplification
+and offer an editable-friendly representation.
+
+SDL transfer buffers must be unmapped before encoding uploads. Reuse their
+allocations with map/write/unmap batches and fence retirement; do not hold mapped
+pointers across reuse or describe the SDL baseline as persistently mapped.
+Cycling and changed destination storage require preserving all still-needed
+contents. [SDL transfer-buffer contract](https://wiki.libsdl.org/SDL3/SDL_MapGPUTransferBuffer).
+
+On unified-memory systems, still measure CPU copies, coherency and allocation
+churn. On discrete GPUs, track transfer payload separately from device-local
+traffic. Neither memory model makes unnecessary work free, and SDL may abstract
+away placement choices that a lower-level backend could expose.
+
+Atlas packing reduces binds only when the shader/batching path uses it; it does
+not inherently compress texture bytes. Compare arrays, atlas and individual
+textures at equal visible quality, including padding, fragmentation, descriptor
+cost and mip residency. Prefer page-stable incremental placement to frequent
+global repacks; bound the overlap cost of every relocation.
 
 ## 15. save, replication, safety and migration
 
@@ -1151,6 +1661,30 @@ needed legacy readers for the declared support window, but remove duplicate
 resolvers, hand-written parameter tables and old shader binding conventions.
 Release target/staging checks prove no shaderc front end, source includes or
 source-only runtime demands ship after the migration gate.
+
+### cheap stable validation and compact change delivery
+
+Validate immutable cooked structure once per verified content root, reader/policy
+version and required device admission key. A reused cache entry must retain the
+trust context; cache hits cannot bypass a changed allow-list or manifest binding.
+Keep packet/override authority and revision checks on every mutable request.
+
+Coalesce repeated render-data writes within an authored transaction when only the
+final value is observable. Script signals, undo boundaries, tick ordering and
+replication base/next revisions still follow their public semantics; never merge
+observable intermediate events merely to reduce uploads. One accepted transaction
+can feed a compact dirty-page list to render and bounded deltas to replication.
+
+Intern stable names once at admission; use dense local slots thereafter. If the
+existing wire protocol permits a session dictionary, transmit string definitions
+before compact references and validate its generation; saves/manifests remain
+string-identified and raw `Name::Id()` never becomes a protocol identifier.
+Prefer existing protocol facilities to adding a second dictionary system.
+
+Bound serialization scratch, compression jobs and result queues. Cache immutable
+serialized material/schema records and snapshot changed overrides rather than
+walking all materials each tick. Track bytes encoded, verified and copied beside
+CPU cost so deduplication is proved end to end, including rejected inputs.
 
 ## 16. particles, environment and TornadoSim
 
@@ -1226,6 +1760,44 @@ Proof: both VM metadata where relevant, Luau typecheck, headless script advance,
 inspected funnel/rain/debris/tree/lightning motion, correct hazard at camera and
 release profile stating debris, emitters, live particles and volume work.
 
+### reduce simulation, fill and volume work separately
+
+Maintain GPU lists of live emitter blocks and live particle ranges; dead capacity
+does not deserve full integration work. Batch compatible emitters into dispatches,
+share immutable curve/field tables and update only changed parameters. Alive
+particle integration must remain defined while offscreen; visibility can skip
+drawing, while paused/analytic catch-up simulation needs an explicit effect policy.
+
+Large smoke often needs fill-rate work more than a larger particle pool. Compare
+tight quad bounds, depth rejection, half-resolution colour/transmittance targets,
+depth-aware upsample and reduced screen footprint at declared quality. Opaque
+depth must remain available for soft intersections. Small high-frequency sparks
+can stay native resolution rather than sharing smoke's blur.
+
+Global transparency ordering cannot be guaranteed by sorting only within each
+emitter. Test intersecting emitters, ribbons and glass; use shared depth buckets
+or an explicitly approximate order-independent mode where appropriate. Keep
+additive effects out of sorting. Order-independent transparency needs its own
+alpha/energy/error test, not a silent substitute for correct blending.
+
+Separate weather density generation from lighting and view integration. Cache
+static noise/shape and atmosphere lookup tables by physical parameters; sun
+changes can relight without regenerating density. Compare bounded world-space
+bricks/clipmaps against dense volumes, with conservative empty-space summaries
+and coarse coverage before a page becomes visible.
+
+Volume rays skip provably empty bricks and may terminate below a declared
+transmittance error threshold. World density/lighting may be shared; froxel
+projection and temporal history remain view-specific. Reprojection rejects
+disocclusion and lightning changes promptly; staggered updates cannot leave a
+bright flash trapped in old cloud lighting.
+
+Evaluate the Luau storm field once per required gameplay consumer at its bounded
+tick, and send compact storm parameters to GPU visual consumers. Field sampling
+for many visual particles stays on device. Cache common field terms/noise tables
+only where equivalent semantics or an explicit visual approximation allow it;
+do not create a second authoritative wind model to make a benchmark faster.
+
 ## 17. chunked-world render input candidates
 
 These requirements from the optimization notes remain owned work, with scene,
@@ -1245,6 +1817,29 @@ They must not become private renderer terrain state.
 Greedy merge preserves material/alpha/AO seams. Border edits invalidate adjacent
 derived meshes; LOD borders stitch or use justified skirts. No claim of a
 hundredfold speedup or fixed performance factor survives without local evidence.
+
+### share generated artifacts, invalidate changed borders
+
+Deduplicate generation and mesh artifacts by content/seed/coordinate/LOD and all
+relevant neighbour-border revisions. Reuse immutable interior data; copy only
+required halo slabs into pooled job scratch. A neighbour's unrelated interior
+edit should not remesh this chunk, while a border edit must invalidate both sides.
+
+Keep derived readiness event-driven through existing mutation feeds with bounded
+reconciliation. Walk active ranges and changed chunks first, rather than sorting
+every resident chunk on every tick. Cache phase order/conflict data by graph
+version; workers produce isolated artifacts committed in deterministic order.
+
+Batch small meshing/generation tasks by measured grain and output size; maintain
+per-worker pools with hard ceilings so parallelism cannot multiply scratch beyond
+the scene budget. Track obsolete work discarded after camera/edit changes.
+GPU-only visual meshing is an option only when physical consumers retain their
+authoritative generation path and no readback is needed to unblock simulation.
+
+Incremental region-file writes reuse unchanged compressed records and group
+adjacent I/O while preserving transactional recovery. Page-cache, compression and
+staging budgets belong in total memory reports. Predictive visual prefetch must
+not make asynchronous arrival affect collision or gameplay tick results.
 
 ## 18. profiling and optimization gates
 
@@ -1306,6 +1901,50 @@ material slab/slot in GPU data, dummy bindings, normalized samplers and limited
 variants. Probe descriptor indexing/update behavior and actual limits; retain
 bounded per-material binds on unsupported backends.
 
+### optimization acceptance and experiment protocol
+
+Each experiment names a bottleneck hypothesis, baseline, single changed factor,
+quality/error policy and expected counter movement. Warm both variants, alternate
+their run order, hold clocks/settings where practical, and report median/p95/p99
+plus worst relevant spikes. Add interaction runs after individual ablations:
+two independent speedups may fight over bandwidth or residency when combined.
+
+Compare full-frame critical-path time and input-to-visible latency, not the sum
+of overlapping GPU spans. An extra in-flight frame can raise throughput while
+making controls feel slower. Bound frames in flight and record them with both
+versions. Present waits and CPU/GPU idle stay visible instead of being removed
+from results to make the optimized path look faster.
+
+| Gate | Exact or bounded condition | Evidence |
+|---|---|---|
+| Still scene, warmed versions | No unchanged instance/mesh/texture/material uploads or repacks; no compile or target creation for those layers | Traffic, rows/bytes visited, allocations and pipeline counters |
+| Camera-only move | No unchanged shared-world uploads/extraction; view culling/history/shading may run | Fixed entity count with 1/2/8/32 active cameras |
+| One entity/material edit | Work follows changed pages and declared dependents; upload amplification bounded | Dirty elements versus staged bytes/copy commands, per-view redraw reasons |
+| Shared asset across worlds | One immutable device asset per compatible content key, separate world state | Resident roots/allocations and reference-retirement checks |
+| Hidden UI/preview | No preview cook/render/readback; bounded warm state may remain | Owner activity counters and steady memory after close |
+| Empty GPU workload | No unnecessary full-resource clear/sort/copy; only necessary count/reset/control work | Dispatch sizes, indirect counts and bytes touched |
+| Small workload fallback | Optimization overhead does not force the large-scene algorithm | Serial/simple-path crossover measurements |
+| Burst or pressure | Allocation + staging + in-flight replacement remain within configured ceilings | High-water/queue-age/refusal metrics and no corrupted images |
+| Approximate mode | Declared error/quality and temporal lag satisfied at the reported settings | Image/temporal fixtures, raw tracer samples and quality-matched timing |
+| Device portability | Selected implementation is supported and faster or uses its documented fallback | Per-backend exact-path captures and timing, not only capability metadata |
+
+Set numerical time/regression budgets from the P0 baseline and project frame
+target during implementation. Exact zero-work gates above do not need a guessed
+millisecond limit. For nonzero cost, keep acceptance thresholds and measurement
+variance in the artifact; no unspecified claim that an optimization is faster.
+
+Tune compute with measured workgroup shape, register spills, shared-memory use,
+occupancy and memory transactions where tools expose them. Higher occupancy is
+not itself a speedup; avoid specialization per device model unless stable wins
+justify extra variants. Keep a small validated profile set and portable fallback.
+[Occupancy tradeoffs](https://gpuopen.com/learn/occupancy-explained/).
+
+Estimate attachment and queue bytes from actual formats/extents/counts before
+testing, then distinguish estimates from measured device traffic and logical
+allocation. Unified-memory and discrete devices need separate comparisons.
+Sampling/profiling overhead gets an instrumented versus uninstrumented check;
+never add readbacks or per-entity logging to the hot path just to count savings.
+
 ## 19. example pipelines and review scenes
 
 Every example is an authored, saved PipelineDocument/PipelineSet plus a runnable
@@ -1335,6 +1974,26 @@ something. Assert the selected fallback graph and reason. New `palette`, `edges`
 and `hatch` kinds require actual shaders; paper, ink and letterbox operations use
 ordinary typed composite nodes rather than abusing diagnostic overlay state.
 
+### matched workload controls for the examples
+
+Each demo exposes a fixed reference configuration and separately named optimized
+configurations, with the exact changed setting recorded. Keep content, camera
+path, seed and quality equal for exact optimizations. Approximate modes report
+their resolution/sample/error differences alongside speed and bytes.
+
+Add scripted phases to the camera wall and packing lab: warm still, camera move,
+single entity edit, content arrival, many simultaneous edits, hide/show, world
+unload and pressure recovery. PortalSeams adds tiny-to-full-screen aperture growth;
+tracers add static accumulation and scene changes; TornadoSim adds low/high
+particle fill and lightning invalidation. The same scene drives correctness and
+cost checks, with readbacks disabled in timed windows.
+
+Prewarm only resources the active demonstration demands. Loading the demo browser
+must not allocate every example's 4K images, BVHs and histories. Shared fixtures
+reuse immutable assets; each scene's resident state retires when it closes.
+The demo selector shows active tier and approximation mode so a fallback cannot
+masquerade as the optimized feature being reviewed.
+
 ## 20. implementation order and deletion gates
 
 Phase names are proposed work units, not version promises. Implement all requested
@@ -1362,6 +2021,30 @@ changes while preserving their gates. Shader cook work must not delay fixing
 existing image defects that P1 can reproduce safely; temporary compatibility
 adapters have named removal in P12, not permanent second owners.
 
+### optimization work travels with each phase
+
+| Phase | Optimization deliverable added to its functional gate |
+|---|---|
+| P0 | Measure bytes visited, update causes, camera amplification and total memory; classify exact versus approximate modes |
+| P1 | Reusable fixtures and bounded async captures; differential cached/uncached and aliased/unaliased image checks |
+| P2 | Revision/page-driven preparation, dense execution plans, world sharing, safe acknowledgements and small-input serial fallback |
+| P3 | Content-keyed single-flight cooking, narrow invalidation and bounded pipeline prewarm; cold/warm evidence |
+| P4 | Split uniform/descriptor/module keys, shared packed values, GPU policy masks and active effect worklists |
+| P5 | Layout-only edits free of runtime rebuilds; hidden previews idle; legal expression/kernel fusion with debug materialization |
+| P6 | Demand-driven attachments, clustered lists, conservative shadow/AO/GI cache invalidation and quality-matched post/AA ablations |
+| P7 | Consumer-specific mesh streams, honest CPU/upload/device packing costs, all-consumer streaming demand and bounded relocation |
+| P8 | Aperture-first traversal, pixel budgets, shared destination inputs and correct moving-seam physics |
+| P9 | Shared mesh acceleration, bounded GPU ray queues, equal-sample kernel comparisons and radiance-history policy |
+| P10 | Active-block dispatch, particle fill controls, density/lighting split and border-aware producer invalidation |
+| P11 | Integrated multi-feature contention tests across supported devices; latency and memory alongside throughput |
+| P12 | Remove losing experimental implementations or retain only justified capability/scale fallbacks; no abandoned alternate owner |
+
+Build the common change/residency contracts before tuning each feature's kernel.
+Prototype kernel fusion, bindless, wavefront queues, sparse volume layouts and
+async overlap behind the same node interfaces; use the measured winner for each
+supported class. Rejecting a losing optimization does not cancel its feature:
+retain the correct simpler implementation and its full functional gate.
+
 ### deletion ledger
 
 | Existing path | Replacement | Delete when |
@@ -1378,7 +2061,7 @@ adapters have named removal in P12, not permanent second owners.
 
 ## 21. final implementation acceptance
 
-Completion requires evidence for every R01 to R16 item and each phase gate.
+Completion requires evidence for every R01 to R17 item and each phase gate.
 Documentation, catalogue entries, green unrelated tests and screenshots of one
 frame cannot substitute for behavior across the named scope.
 
@@ -1410,6 +2093,23 @@ frame cannot substitute for behavior across the named scope.
   regression comparisons; caches and retirement remain bounded after churn ends.
 - Replaced paths are deleted under the ledger; docs/policy and generated metadata
   match the final code. No unrelated roadmap items get marked done.
+
+### optimization completion proof
+
+Every implemented cache has tested reuse and invalidation, an owner/lifetime,
+bounded storage and a failure retry. Every GPU migration accounts for host copies,
+staging, resident output and per-view scratch. Every batching/fusion change keeps
+authored order, projection, colour and resource hazards correct.
+
+P0/P11 evidence must show both small and large workloads, cold/warm behavior,
+steady-state and edit bursts, device pressure and supported fallback paths.
+Report regressions explicitly; do not exchange longer latency, stale pixels or
+lower quality for a faster counter without a named accepted mode.
+
+The §18 gate table and §20 optimization phase table are required alongside the
+original functional proof. A source-level argument, a zero-upload counter or a
+single faster kernel is insufficient evidence for a complete optimized renderer.
+This refinement remains a plan; no optimization measurements are claimed yet.
 
 This planning deliverable is complete when the source migration map below covers
 every old section, all attached checklist items have implementation and proof
@@ -1489,3 +2189,34 @@ All TornadoSim source-scope rows, existing engine doors, first demo slice,
 first-pass exclusions, proof gates and evidence-triggered engine doors are in
 §16. Its gameplay plan remains linked rather than deleted. R01 to R14 correspond
 in order to the fourteen attached checklist lines; R15/R16 cover consolidation.
+
+### section-by-section optimization traceability
+
+The additional optimization review is R17. Its coverage stays local to each
+section so future implementation does not need a competing optimization backlog.
+Use this index when reviewing completeness; update the owning section and gate
+together when an experiment changes the chosen implementation.
+
+| Sections reviewed | Optimization refinement |
+|---|---|
+| §0, §1 | Optimization order, exact/approximate classification and cost/proof mapping |
+| §2 | Current full-span signature work and targeted baseline measurements |
+| §3 | Incremental semantic compilation, dense execution, liveness, safe concurrent aliasing and measured async schedules |
+| §4 | Mutation pages, shared snapshots, hot/cold GPU fields, bounded view storage and granular acknowledgements |
+| §5 | Reused fixtures, bounded capture work and independent differential oracles |
+| §6 | GPU policy composition, masked tile work, dispatch batching and conservative demand |
+| §7 | Split material caches, shared values, single-flight cook/load and pipeline prewarm |
+| §8 | Incremental canvas, selective previews, legal shader/kernel fusion and intermediate materialization |
+| §9 | Lighting attachment demand, shadow footprints, compact clusters, transport-aware caches and culling crossovers |
+| §10 | Full-image bandwidth, MSAA stores/resolves, correct temporal reuse and bounded partial damage |
+| §11 | Shared acceleration, coherent bounded ray queues, sampling-distribution reuse and honest convergence |
+| §12 | Aperture/pixel budgets, destination sharing, exact capture keys and moving-seam constraints |
+| §13 | Consumer-specific streams, end-to-end packing cost, local quantization and bounded defragmentation |
+| §14 | Device-wide pressure arbitration, staging contract, request deduplication and atlas tradeoffs |
+| §15 | Cached immutable validation, semantic-preserving delta coalescing and serialization work |
+| §16 | Active simulation work, particle fill/ordering, volume caching and one storm authority |
+| §17 | Shared artifacts, precise border invalidation, bounded scratch and incremental I/O |
+| §18 | Ablations, full-frame/latency gates, occupancy tuning and exact zero-work requirements |
+| §19 | Matched demo workloads, edit/pressure phases and demand-driven loading |
+| §20, §21 | Phase ownership, removal of losing paths and end-to-end acceptance |
+| §22 | This traceability index, keeping refinements attached to the source requirements |
