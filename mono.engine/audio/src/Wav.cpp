@@ -1,6 +1,7 @@
 #include <engine/audio/Wav.hpp>
 #include <engine/core/Metrics.hpp>
 
+#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -106,6 +107,9 @@ namespace engine::audio {
 					// latter is undefined and the former compiles to
 					// nothing.
 					std::memcpy(&value, &raw, sizeof(value));
+					if (!std::isfinite(value)) {
+						return std::nullopt;
+					}
 					samples[index] = value;
 					break;
 				}
