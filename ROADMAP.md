@@ -182,6 +182,7 @@ new demos:
 - [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
 - [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 - [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
+- [_] ECS driven RL agent environments
 
 ### Open Decision
 
