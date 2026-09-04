@@ -28,6 +28,19 @@ namespace engine::assets {
 		constexpr uint32_t MAXIMUM_CHUNKS_PER_ASSET = 1'000'000;
 		constexpr size_t MAXIMUM_NAME_BYTES = 1024;
 
+		// The shortest legal wire representation of each row. Counts are checked
+		// against these before reserve: a ceiling bounds the worst case, but it
+		// still lets a short hostile buffer ask for that whole worst-case allocation.
+		constexpr size_t MINIMUM_ASSET_BYTES =
+			sizeof(uint32_t) + sizeof(uint8_t) + ContentHash::BYTES + sizeof(uint64_t) + sizeof(uint32_t);
+		constexpr size_t MINIMUM_CHUNK_BYTES = ContentHash::BYTES + sizeof(uint32_t);
+		constexpr size_t MINIMUM_BUNDLE_BYTES =
+			ContentHash::BYTES + sizeof(uint64_t) + sizeof(uint32_t) + ContentHash::BYTES;
+
+		bool FitsInRemaining(uint32_t count, size_t bytesPerEntry, size_t remaining) {
+			return static_cast<uint64_t>(count) <= static_cast<uint64_t>(remaining / bytesPerEntry);
+		}
+
 		void WriteHash(core::ByteWriter &writer, const ContentHash &hash) {
 			writer.WriteRaw(hash.Digest.data(), ContentHash::BYTES);
 		}
@@ -445,7 +458,8 @@ namespace engine::assets {
 		Manifest manifest;
 
 		const uint32_t assetCount = reader.ReadUInt32();
-		if (assetCount > MAXIMUM_ASSETS) {
+		if (assetCount > MAXIMUM_ASSETS ||
+			!FitsInRemaining(assetCount, MINIMUM_ASSET_BYTES, reader.Remaining())) {
 			return refuse();
 		}
 		manifest.AssetsByName.reserve(assetCount);
@@ -476,7 +490,8 @@ namespace engine::assets {
 			asset.TotalBytes = reader.ReadUInt64();
 
 			const uint32_t chunkCount = reader.ReadUInt32();
-			if (chunkCount > MAXIMUM_CHUNKS_PER_ASSET) {
+			if (chunkCount > MAXIMUM_CHUNKS_PER_ASSET ||
+				!FitsInRemaining(chunkCount, MINIMUM_CHUNK_BYTES, reader.Remaining())) {
 				return refuse();
 			}
 			asset.Chunks.reserve(chunkCount);
@@ -526,7 +541,8 @@ namespace engine::assets {
 		manifest.IndexAll();
 
 		const uint32_t bundleCount = reader.ReadUInt32();
-		if (bundleCount > MAXIMUM_MANIFEST_BUNDLES) {
+		if (bundleCount > MAXIMUM_MANIFEST_BUNDLES ||
+			!FitsInRemaining(bundleCount, MINIMUM_BUNDLE_BYTES, reader.Remaining())) {
 			return refuse();
 		}
 		manifest.BundlesByRoot.reserve(bundleCount);
@@ -539,7 +555,8 @@ namespace engine::assets {
 			bundle.TotalBytes = reader.ReadUInt64();
 
 			const uint32_t memberCount = reader.ReadUInt32();
-			if (memberCount == 0 || memberCount > MAXIMUM_ASSETS) {
+			if (memberCount == 0 || memberCount > MAXIMUM_ASSETS ||
+				!FitsInRemaining(memberCount, ContentHash::BYTES, reader.Remaining())) {
 				return refuse();
 			}
 			bundle.Assets.reserve(memberCount);
