@@ -11,7 +11,7 @@
 
 ## Version
 
-Current Version: **v0.23.0**
+Current Version: **v0.23.1**
 
 Project Start Date: **1st August 2026**
 
