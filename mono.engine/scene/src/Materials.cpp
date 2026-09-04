@@ -85,17 +85,24 @@ namespace engine::scene {
 			// last pointed at. That is the case `MaterialRef::Asset` calls the
 			// honest default, and a pass that skipped it would make "None" mean
 			// "keep the previous one".
-			// **All seven together**, because a part half-updated from a material
-			// is worse than one not updated at all: it would draw this
-			// material's colour with the last one's normals.
-			const MaterialMaps maps = ColourMapOf(store, material.Asset);
-			appearance->ColourMap = maps.Colour;
-			appearance->NormalMap = maps.Normal;
-			appearance->RoughnessMap = maps.Roughness;
-			appearance->OcclusionMap = maps.Occlusion;
-			appearance->HeightMap = maps.Height;
-			appearance->MetalnessMap = maps.Metalness;
-			appearance->EmissiveMap = maps.Emissive;
+			//
+			// A shader-only material is different: it selects a pipeline but
+			// carries no replacement maps, so direct maps on the part remain the
+			// authored answer. This lets a procedural mesh use a live texture and
+			// a `ShaderScript` together without inventing an empty `.amat` asset.
+			if (material.Asset.IsValid() || !material.Shader.IsValid()) {
+				// **All seven together**, because a part half-updated from a material
+				// is worse than one not updated at all: it would draw this
+				// material's colour with the last one's normals.
+				const MaterialMaps maps = ColourMapOf(store, material.Asset);
+				appearance->ColourMap = maps.Colour;
+				appearance->NormalMap = maps.Normal;
+				appearance->RoughnessMap = maps.Roughness;
+				appearance->OcclusionMap = maps.Occlusion;
+				appearance->HeightMap = maps.Height;
+				appearance->MetalnessMap = maps.Metalness;
+				appearance->EmissiveMap = maps.Emissive;
+			}
 
 			// **From the material instance and not from the catalogue**, which
 			// is the one field here that does not come out of a published

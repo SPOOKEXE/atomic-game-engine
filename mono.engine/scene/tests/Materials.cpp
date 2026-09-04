@@ -187,6 +187,27 @@ TEST_CASE("a part with no material instance is left alone", "[scene][materials]"
 	CHECK(store.Get<SurfaceAppearance>(part)->ColourMap == authored);
 }
 
+TEST_CASE("a shader-only material preserves maps authored on its part", "[scene][materials]") {
+	Store store = Fresh("materials.shader_only");
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Terrain");
+	REQUIRE(part != NULL_ENTITY);
+	SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(part);
+	REQUIRE(appearance != nullptr);
+	appearance->ColourMap = Name("textures/procedural_lut.atex");
+	appearance->NormalMap = Name("textures/procedural_normal.atex");
+
+	const Entity material = Dress(store, part, Name{});
+	MaterialRef *reference = store.GetMutable<MaterialRef>(material);
+	REQUIRE(reference != nullptr);
+	reference->Shader = Name("PlanetSurface");
+
+	REQUIRE(ResolveMaterials(store) == 1);
+	CHECK(appearance->ColourMap == Name("textures/procedural_lut.atex"));
+	CHECK(appearance->NormalMap == Name("textures/procedural_normal.atex"));
+	CHECK(appearance->Shader == Name("PlanetSurface"));
+}
+
 TEST_CASE("a material parented to nothing resolves onto nothing", "[scene][materials]") {
 	Store store = Fresh("materials.orphan");
 
