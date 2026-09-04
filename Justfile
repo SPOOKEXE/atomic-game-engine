@@ -166,6 +166,13 @@ persistent-manifold-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.narrowphase --all --samples {{samples}}
 
+# Separated closing pairs through speculative generation, with and without the
+# broad-phase sync and query. Output remains on the terminal.
+speculative-contact-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.speculative-contacts --all --samples {{samples}}
+
 dynamic-bvh-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_spatial

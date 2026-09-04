@@ -35,6 +35,15 @@ namespace engine::physics {
 		constexpr float PERSISTENT_NORMAL_DOT = 0.999999f;
 		constexpr float PERSISTENT_TANGENT_DISTANCE = CONTACT_TOLERANCE * 0.1f;
 
+		core::Vector3 VelocityAt(const PlacedCollider &collider, const core::Vector3 &point) {
+			return collider.LinearVelocity +
+				   collider.AngularVelocity.Cross(point - collider.Shape.Frame.Position);
+		}
+
+		bool Before(const ContactManifold &left, const ContactManifold &right) {
+			return left.A.Id < right.A.Id || (left.A.Id == right.A.Id && left.B.Id < right.B.Id);
+		}
+
 		bool Before(const PersistentContactManifold &cached, const CandidatePair &pair) {
 			return cached.A.Id < pair.A.Id || (cached.A.Id == pair.A.Id && cached.B.Id < pair.B.Id);
 		}
@@ -289,14 +298,22 @@ namespace engine::physics {
 			PipelineInternals::PersistentNext(*world).clear();
 			PipelineInternals::PersistentCandidates(*world).clear();
 			PipelineInternals::PersistentCandidateNext(*world).clear();
+			PipelineInternals::SpeculativeManifolds(*world).clear();
+			PipelineInternals::SolverManifoldOrder(*world).clear();
 			ReportPersistentStats(0, 0, 0, 0, 0, PersistentRetainedBytes(*world));
+			core::Metrics::SetGauge("physics.narrowphase.speculative.generated", 0.0);
+			core::Metrics::SetGauge("physics.narrowphase.speculative.tested", 0.0);
+			core::Metrics::SetGauge("physics.narrowphase.speculative.within-skin", 0.0);
 			return;
 		}
+		const float deltaSeconds = PhysicsStepSeconds(store);
 
 		const std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
 		const std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
 
 		std::vector<std::vector<ContactManifold>> &batches = PipelineInternals::ManifoldBatches(*world);
+		std::vector<std::vector<ContactManifold>> &speculativeBatches =
+			PipelineInternals::SpeculativeManifoldBatches(*world);
 		const std::vector<PersistentContactManifold> &persistent =
 			PipelineInternals::PersistentManifolds(*world);
 		const std::vector<PersistentContactCandidate> &candidates =
@@ -310,6 +327,9 @@ namespace engine::physics {
 		const size_t batchCount = (pairs.size() + NARROW_GRAIN - 1) / NARROW_GRAIN;
 		if (batches.size() < batchCount) {
 			batches.resize(batchCount);
+		}
+		if (speculativeBatches.size() < batchCount) {
+			speculativeBatches.resize(batchCount);
 		}
 		if (persistentBatches.size() < batchCount) {
 			persistentBatches.resize(batchCount);
@@ -330,23 +350,29 @@ namespace engine::physics {
 				 sources,
 				 &dynamicShapes,
 				 &staticShapes,
+				 deltaSeconds,
 				 &persistent,
 				 &candidates,
 				 &batches,
+				 &speculativeBatches,
 				 &persistentBatches,
 				 &candidateBatches,
 				 &batchStats](size_t begin, size_t end) {
 					std::vector<ContactManifold> &output = batches[begin / NARROW_GRAIN];
+					std::vector<ContactManifold> &speculativeOutput =
+						speculativeBatches[begin / NARROW_GRAIN];
 					std::vector<PersistentContactManifold> &cacheOutput =
 						persistentBatches[begin / NARROW_GRAIN];
 					std::vector<PersistentContactCandidate> &candidateOutput =
 						candidateBatches[begin / NARROW_GRAIN];
 					PersistentContactBatchStats &stats = batchStats[begin / NARROW_GRAIN];
 					output.clear();
+					speculativeOutput.clear();
 					cacheOutput.clear();
 					candidateOutput.clear();
 					stats = {};
 					output.reserve(end - begin);
+					speculativeOutput.reserve((end - begin) / 4);
 
 					size_t cacheAt = 0;
 					if (!persistent.empty()) {
@@ -421,6 +447,38 @@ namespace engine::physics {
 
 						const ContactSolution solution = ContactBetween(first.Shape, second.Shape);
 						if (!solution.Touching) {
+							if (first.Trigger || second.Trigger || !(deltaSeconds > 0.0f)) {
+								continue;
+							}
+
+							stats.SpeculativeTested++;
+							const SeparatedContact separated =
+								SeparatedBetween(first.Shape, second.Shape, SPECULATIVE_DISTANCE);
+							if (!separated.Found) {
+								continue;
+							}
+							stats.SpeculativeWithinSkin++;
+
+							const float separatingSpeed = (VelocityAt(second, separated.OnSecond) -
+														   VelocityAt(first, separated.OnFirst))
+															  .Dot(separated.Normal);
+							const float reachable = -separatingSpeed * deltaSeconds + SPECULATIVE_DISTANCE;
+							if (!(separatingSpeed < 0.0f) || separated.Distance > reachable) {
+								continue;
+							}
+
+							ContactManifold speculative;
+							speculative.A = pair.A;
+							speculative.B = pair.B;
+							speculative.Normal = separated.Normal;
+							speculative.PointCount = 1;
+							speculative.Points[0] = ContactPoint{
+								separated.OnSecond,
+								0.0f,
+								separated.Feature,
+								separated.Distance,
+							};
+							speculativeOutput.push_back(speculative);
 							continue;
 						}
 
@@ -473,6 +531,8 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.contact-compact", core::ProfileCategory::Physics);
 			manifolds.reserve(pairs.size());
+			std::vector<ContactManifold> &speculative = PipelineInternals::SpeculativeManifolds(*world);
+			speculative.clear();
 			std::vector<PersistentContactManifold> &next = PipelineInternals::PersistentNext(*world);
 			next.clear();
 			next.reserve(persistent.size());
@@ -483,9 +543,13 @@ namespace engine::physics {
 			size_t reused = 0;
 			size_t rebuilt = 0;
 			size_t rejected = 0;
+			size_t speculativeTested = 0;
+			size_t speculativeWithinSkin = 0;
 			for (size_t batch = 0; batch < batchCount; batch++) {
 				const std::vector<ContactManifold> &output = batches[batch];
 				manifolds.insert(manifolds.end(), output.begin(), output.end());
+				const std::vector<ContactManifold> &speculativeOutput = speculativeBatches[batch];
+				speculative.insert(speculative.end(), speculativeOutput.begin(), speculativeOutput.end());
 				const std::vector<PersistentContactManifold> &cacheOutput = persistentBatches[batch];
 				next.insert(next.end(), cacheOutput.begin(), cacheOutput.end());
 				const std::vector<PersistentContactCandidate> &candidateOutput = candidateBatches[batch];
@@ -493,6 +557,24 @@ namespace engine::physics {
 				reused += batchStats[batch].Reused;
 				rebuilt += batchStats[batch].Rebuilt;
 				rejected += batchStats[batch].Rejected;
+				speculativeTested += batchStats[batch].SpeculativeTested;
+				speculativeWithinSkin += batchStats[batch].SpeculativeWithinSkin;
+			}
+
+			std::vector<SolverManifoldIndex> &order = PipelineInternals::SolverManifoldOrder(*world);
+			order.clear();
+			order.reserve(manifolds.size() + speculative.size());
+			size_t realAt = 0;
+			size_t speculativeAt = 0;
+			while (realAt < manifolds.size() || speculativeAt < speculative.size()) {
+				const bool takeSpeculative =
+					realAt == manifolds.size() || (speculativeAt < speculative.size() &&
+												   Before(speculative[speculativeAt], manifolds[realAt]));
+				if (takeSpeculative) {
+					order.push_back(SolverManifoldIndex{speculativeAt++, true});
+				} else {
+					order.push_back(SolverManifoldIndex{realAt++, false});
+				}
 			}
 			PipelineInternals::PersistentManifolds(*world).swap(next);
 			PipelineInternals::PersistentCandidates(*world).swap(candidateNext);
@@ -503,6 +585,15 @@ namespace engine::physics {
 				PipelineInternals::PersistentManifolds(*world).size(),
 				PipelineInternals::PersistentCandidates(*world).size(),
 				PersistentRetainedBytes(*world)
+			);
+			core::Metrics::SetGauge(
+				"physics.narrowphase.speculative.generated", static_cast<double>(speculative.size())
+			);
+			core::Metrics::SetGauge(
+				"physics.narrowphase.speculative.tested", static_cast<double>(speculativeTested)
+			);
+			core::Metrics::SetGauge(
+				"physics.narrowphase.speculative.within-skin", static_cast<double>(speculativeWithinSkin)
 			);
 		}
 	}

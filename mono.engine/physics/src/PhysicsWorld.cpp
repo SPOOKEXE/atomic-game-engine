@@ -68,6 +68,7 @@ namespace engine::physics {
 		stats.DynamicTree = {dynamicTree.LiveBytes, dynamicTree.RetainedBytes};
 
 		Add(stats.BroadphaseBuffers, VectorBytes(DynamicBounds));
+		Add(stats.BroadphaseBuffers, VectorBytes(SpeculativeBounds));
 		Add(stats.BroadphaseBuffers, VectorBytes(PreviousDynamicBounds));
 		Add(stats.BroadphaseBuffers, VectorBytes(PreviousDynamicOwners));
 		Add(stats.BroadphaseBuffers, VectorBytes(DynamicProxies));
@@ -85,6 +86,9 @@ namespace engine::physics {
 
 		Add(stats.Solver, VectorBytes(ManifoldList));
 		Add(stats.Solver, NestedVectorBytes(ManifoldBatches));
+		Add(stats.Solver, VectorBytes(SpeculativeManifolds));
+		Add(stats.Solver, NestedVectorBytes(SpeculativeManifoldBatches));
+		Add(stats.Solver, VectorBytes(SolverManifoldOrder));
 		Add(stats.Solver, VectorBytes(BodyList));
 		Add(stats.Solver, UnorderedMapBytes(BodyIndexByOwner));
 		Add(stats.Solver, VectorBytes(SolverBodyLoaded));

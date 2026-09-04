@@ -76,6 +76,10 @@ namespace engine::physics {
 			return world.DynamicBounds;
 		}
 
+		static std::vector<core::AABB> &SpeculativeBounds(PhysicsWorld &world) {
+			return world.SpeculativeBounds;
+		}
+
 		static std::vector<core::AABB> &PreviousDynamicBounds(PhysicsWorld &world) {
 			return world.PreviousDynamicBounds;
 		}
@@ -146,6 +150,18 @@ namespace engine::physics {
 		// One retained output list per fixed narrow-phase range.
 		static std::vector<std::vector<ContactManifold>> &ManifoldBatches(PhysicsWorld &world) {
 			return world.ManifoldBatches;
+		}
+
+		static std::vector<ContactManifold> &SpeculativeManifolds(PhysicsWorld &world) {
+			return world.SpeculativeManifolds;
+		}
+
+		static std::vector<std::vector<ContactManifold>> &SpeculativeManifoldBatches(PhysicsWorld &world) {
+			return world.SpeculativeManifoldBatches;
+		}
+
+		static std::vector<SolverManifoldIndex> &SolverManifoldOrder(PhysicsWorld &world) {
+			return world.SolverManifoldOrder;
 		}
 
 		static std::vector<PersistentContactManifold> &PersistentManifolds(PhysicsWorld &world) {

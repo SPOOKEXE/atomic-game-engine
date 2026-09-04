@@ -75,10 +75,13 @@ c. classes
 
 ### v0.23.1
 
-- [_] next best physics clubs are speculative contacts, per-mesh
-  triangle bvhs, and true rotational or dynamic-dynamic ccd. physx documents pcm contact reuse,
-  while box2d documents speculative contacts and stale-subtree bvh rebuilding. physx pcm, box2d
-  simulation, box2d dynamic tree.
+- [x] speculative contacts within a two millimetre skin, kept private until the
+  shapes touch, with no early friction, restitution, warm start, or contact event.
+  box2d simulation and the continuous collision gdc 2013 notes describe the
+  positive-separation velocity constraint.
+- [_] next best physics clubs are per-mesh triangle bvhs and true rotational or
+  dynamic-dynamic ccd. box2d documents stale-subtree bvh rebuilding, while its
+  time-of-impact path provides the conservative-advancement baseline.
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 

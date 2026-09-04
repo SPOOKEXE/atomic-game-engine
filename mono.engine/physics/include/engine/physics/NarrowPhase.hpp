@@ -51,6 +51,14 @@ namespace engine::physics {
 	// @since v0.17
 	inline constexpr size_t NARROW_GRAIN = 256;
 
+	// Extra separation retained around a predicted contact.
+	//
+	// Two millimetres, four times the solver's penetration slop. This is a
+	// numerical skin rather than long-distance prediction, which belongs to the
+	// continuous collision pass. A larger margin creates more exact distance
+	// work and more chances for a body to feel a surface it never reaches.
+	inline constexpr float SPECULATIVE_DISTANCE = 0.002f;
+
 	// Intersects every candidate pair and writes the manifolds.
 	//
 	// `Phase::PostSimulation`, after `BroadPhase` and before `Solve`. Clears

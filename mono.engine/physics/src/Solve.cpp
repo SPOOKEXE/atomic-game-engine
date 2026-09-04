@@ -40,6 +40,26 @@
 namespace engine::physics {
 
 	namespace {
+		// A pair-sorted read over the public touching manifolds and the private
+		// speculative ones. The order vector is four words per pair rather than a
+		// second copy of every four-point manifold.
+		struct SolverManifoldView {
+			const std::vector<ContactManifold> &Touching;
+			const std::vector<ContactManifold> &Speculative;
+			const std::vector<SolverManifoldIndex> &Order;
+
+			size_t size() const {
+				return Order.empty() ? Touching.size() : Order.size();
+			}
+
+			const ContactManifold &operator[](size_t index) const {
+				if (Order.empty()) {
+					return Touching[index];
+				}
+				const SolverManifoldIndex entry = Order[index];
+				return entry.Speculative ? Speculative[entry.Index] : Touching[entry.Index];
+			}
+		};
 
 		// One cache line asked for early. **A hint and nothing else** - it changes
 		// no result, so a toolchain with no way to spell it does nothing and the
@@ -473,6 +493,19 @@ namespace engine::physics {
 			return &*found;
 		}
 
+		float FindSpeculativeClosingSpeed(
+			const std::vector<ContactImpulse> &cache, ecs::Entity first, ecs::Entity second
+		) {
+			const ContactImpulse key{first, second, 0, 0.0f, {0.0f, 0.0f}};
+			auto found = std::lower_bound(cache.begin(), cache.end(), key);
+			float speed = 0.0f;
+			while (found != cache.end() && found->A == first && found->B == second) {
+				speed = std::max(speed, found->SpeculativeClosingSpeed);
+				found++;
+			}
+			return speed;
+		}
+
 		// Everything a body's row contributes, resolved once.
 		struct BodyFacts {
 			float InverseMass = 0.0f;
@@ -666,7 +699,11 @@ namespace engine::physics {
 		}
 
 		const float delta = PhysicsStepSeconds(store);
-		const std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(*world);
+		const SolverManifoldView manifolds{
+			PipelineInternals::Manifolds(*world),
+			PipelineInternals::SpeculativeManifolds(*world),
+			PipelineInternals::SolverManifoldOrder(*world),
+		};
 		std::vector<SolverBody> &bodies = PipelineInternals::Bodies(*world);
 		std::vector<ContactRow> &rows = PipelineInternals::Rows(*world);
 		bodies.clear();
@@ -691,7 +728,8 @@ namespace engine::physics {
 				ENGINE_PROFILE_CAT("physics.solve-gather-owners", core::ProfileCategory::Physics);
 				owners.clear();
 				owners.reserve(manifolds.size() * 2);
-				for (const ContactManifold &manifold : manifolds) {
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					const ContactManifold &manifold = manifolds[at];
 					owners.push_back(manifold.A);
 					owners.push_back(manifold.B);
 				}
@@ -1446,6 +1484,7 @@ namespace engine::physics {
 
 					for (size_t point = 0; point < manifold.PointCount; point++) {
 						const ContactPoint &contact = manifold.Points[point];
+						const bool speculative = contact.Separation > 0.0f;
 
 						// The lever arms are what turn an impulse into a torque, and the
 						// reason a four-point manifold holds a box against rotation.
@@ -1458,8 +1497,9 @@ namespace engine::physics {
 						ContactRow row;
 						row.First = firstIndex;
 						row.Second = secondIndex;
-						row.Friction = friction;
+						row.Friction = speculative ? 0.0f : friction;
 						row.Feature = contact.Feature;
+						row.Speculative = speculative;
 
 						row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
 						TangentsFor(
@@ -1485,11 +1525,28 @@ namespace engine::physics {
 						// would keep finding a smaller closing speed and add energy
 						// chasing it.
 						const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
-						row.Bounce = closing > BOUNCE_THRESHOLD ? restitution * closing : 0.0f;
+						row.SpeculativeClosingSpeed =
+							speculative ? closing
+										: FindSpeculativeClosingSpeed(
+											  PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B
+										  );
+						// A speculative row permits exactly the speed needed to reach
+						// the surface next tick. One slop of bite avoids a float-rounded
+						// gap that would otherwise hold the body just outside forever.
+						row.Bounce = speculative
+										 ? -(contact.Separation + PENETRATION_SLOP) / delta
+										 : (std::max(closing, row.SpeculativeClosingSpeed) > BOUNCE_THRESHOLD
+												? restitution * std::max(closing, row.SpeculativeClosingSpeed)
+												: 0.0f);
 
-						const ContactImpulse *cached = FindImpulse(
-							PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B, contact.Feature
-						);
+						const ContactImpulse *cached = speculative
+														   ? nullptr
+														   : FindImpulse(
+																 PipelineInternals::ImpulseCache(*world),
+																 manifold.A,
+																 manifold.B,
+																 contact.Feature
+															 );
 						if (cached != nullptr) {
 							row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
 							row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];
@@ -1722,6 +1779,15 @@ namespace engine::physics {
 		// nobody else writes to, and the sort is inside one of those slots.
 		{
 			ENGINE_PROFILE_CAT("physics.solve-remember", core::ProfileCategory::Physics);
+			size_t confirmedSpeculative = 0;
+			for (size_t at = 0; at < rowCount; at++) {
+				const ContactRow &row = rows[at];
+				confirmedSpeculative +=
+					row.Speculative && row.Along[ContactRow::NORMAL].Impulse > 0.0f ? 1 : 0;
+			}
+			core::Metrics::SetGauge(
+				"physics.solve.speculative.confirmed", static_cast<double>(confirmedSpeculative)
+			);
 			std::vector<ContactImpulse> &next = PipelineInternals::ImpulseNext(*world);
 			if (next.size() < rowCount) {
 				next.resize(rowCount);
@@ -1742,15 +1808,18 @@ namespace engine::physics {
 						const uint32_t last = first + manifolds[at].PointCount;
 						for (uint32_t offset = 0; offset < manifolds[at].PointCount; offset++) {
 							const ContactRow &row = rows[rowStart[at] + offset];
+							const float normalImpulse =
+								row.Speculative ? 0.0f : row.Along[ContactRow::NORMAL].Impulse;
 							next[first + offset] = ContactImpulse{
 								bodies[row.First].Owner,
 								bodies[row.Second].Owner,
 								row.Feature,
-								row.Along[ContactRow::NORMAL].Impulse,
+								normalImpulse,
 								{
-									row.Along[ContactRow::TANGENT].Impulse,
-									row.Along[ContactRow::TANGENT + 1].Impulse,
+									row.Speculative ? 0.0f : row.Along[ContactRow::TANGENT].Impulse,
+									row.Speculative ? 0.0f : row.Along[ContactRow::TANGENT + 1].Impulse,
 								},
+								row.Speculative ? row.SpeculativeClosingSpeed : 0.0f,
 							};
 						}
 						std::sort(next.begin() + first, next.begin() + last);

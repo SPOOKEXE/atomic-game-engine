@@ -139,6 +139,19 @@ namespace engine::physics {
 		// Here rather than looked up again, because it is one byte the sync had
 		// in hand and a lookup the narrow phase would otherwise have to make.
 		bool Trigger = false;
+
+		// Point velocities used by speculative contacts and continuous collision.
+		// Static colliders keep both at zero. Carrying them from the broad-phase
+		// gather avoids returning to the ECS once per candidate pair.
+		//@{
+		core::Vector3 LinearVelocity = core::Vector3::Zero;
+		core::Vector3 AngularVelocity = core::Vector3::Zero;
+		//@}
+
+		// Farthest point from the body's origin, resolved once during sync.
+		// Angular speculative reach reads this once per candidate pair, so keeping
+		// it beside the shape avoids rebuilding an AABB for every neighbour.
+		float MaximumRadius = 0.0f;
 	};
 
 	// The local half-extent of the smallest axis-aligned box containing a shape.

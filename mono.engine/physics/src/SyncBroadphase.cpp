@@ -1,4 +1,5 @@
 #include "PipelineInternals.hpp"
+#include "ShapeSupport.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -9,6 +10,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
+#include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -46,7 +48,7 @@ namespace engine::physics {
 		// `Proxy::Id` is the index the two arrays share, not the entity - see
 		// `PhysicsWorld`, which explains why. The entity is on the record, so
 		// resolving a candidate is a subscript and never a store lookup.
-		void WriteEntry(
+		core::AABB WriteEntry(
 			spatial::Proxy &proxy,
 			uint64_t index,
 			std::vector<ColliderRecord> &records,
@@ -54,9 +56,10 @@ namespace engine::physics {
 			const scene::CollisionShapes *baked,
 			ecs::Entity entity,
 			const scene::Transform &transform,
-			const scene::Collider &collider
+			const scene::Collider &collider,
+			const scene::Motion *motion,
+			float deltaSeconds
 		) {
-			proxy = spatial::Proxy{index, ShapeWorldBounds(collider, transform.Frame), collider.Layer};
 			records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
 
 			// **The placed shape, resolved here because this is where the two
@@ -78,12 +81,30 @@ namespace engine::physics {
 				}
 			}
 
-			shapes.push_back(
-				PlacedCollider{
-					ShapeInstance{transform.Frame, collider.Extent, collider.Shape, hull, mesh},
-					collider.Trigger,
+			PlacedCollider placed{
+				ShapeInstance{transform.Frame, collider.Extent, collider.Shape, hull, mesh},
+				collider.Trigger,
+				core::Vector3::Zero,
+				core::Vector3::Zero,
+			};
+			const core::AABB bounds = ShapeReach(placed.Shape);
+			core::AABB queryBounds = bounds;
+			placed.MaximumRadius = bounds.Size().Magnitude() * 0.5f;
+			if (motion != nullptr && deltaSeconds > 0.0f) {
+				placed.LinearVelocity = motion->Linear;
+				placed.AngularVelocity = motion->Angular;
+
+				if (motion->Linear.MagnitudeSquared() > 0.0f || motion->Angular.MagnitudeSquared() > 0.0f) {
+					const core::Vector3 margin{
+						SPECULATIVE_DISTANCE, SPECULATIVE_DISTANCE, SPECULATIVE_DISTANCE
+					};
+					queryBounds = core::AABB{queryBounds.Minimum - margin, queryBounds.Maximum + margin};
 				}
-			);
+			}
+
+			proxy = spatial::Proxy{index, bounds, collider.Layer};
+			shapes.push_back(placed);
+			return queryBounds;
 		}
 
 		// Whether a collider that cannot move has been created, destroyed or
@@ -138,11 +159,13 @@ namespace engine::physics {
 		if (world == nullptr) {
 			return;
 		}
+		const float deltaSeconds = PhysicsStepSeconds(store);
 
 		// Gather once into retained rows, then choose exactly one dynamic index.
 		// The grid remains rebuild-only; a tree may synchronise a stable row order
 		// by reinserting only leaves that escaped their fat bounds.
 		std::vector<core::AABB> &dynamicBounds = PipelineInternals::DynamicBounds(*world);
+		std::vector<core::AABB> &speculativeBounds = PipelineInternals::SpeculativeBounds(*world);
 		std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
 		std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
 		std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
@@ -150,6 +173,7 @@ namespace engine::physics {
 		std::vector<ecs::Entity> &previousOwners = PipelineInternals::PreviousDynamicOwners(*world);
 		const bool treeWasActive = PipelineInternals::DynamicTreeActive(*world);
 		dynamicBounds.clear();
+		speculativeBounds.clear();
 		dynamicProxies.clear();
 		dynamicRecords.clear();
 		dynamicShapes.clear();
@@ -187,6 +211,7 @@ namespace engine::physics {
 				!treeWasActive && PipelineInternals::DynamicTreeSettledFrames(*world) <= 1;
 			const bool gatherProxies = treeWasActive || tree.ProxyCount() == 0;
 			dynamicBounds.resize(dynamicCount);
+			speculativeBounds.resize(dynamicCount);
 			dynamicProxies.resize(gatherProxies ? dynamicCount : 0);
 			const bool compareRecovery = treeWasActive || recoveryProbe;
 			const bool previousCompatible = compareRecovery && previous.size() == dynamicCount;
@@ -205,8 +230,8 @@ namespace engine::physics {
 						[&](ecs::Entity entity,
 							const scene::Transform &transform,
 							const scene::Collider &collider,
-							const scene::Motion &) {
-							WriteEntry(
+							const scene::Motion &motion) {
+							speculativeBounds[written] = WriteEntry(
 								proxies[written],
 								static_cast<uint64_t>(written),
 								dynamicRecords,
@@ -214,7 +239,9 @@ namespace engine::physics {
 								baked,
 								entity,
 								transform,
-								collider
+								collider,
+								&motion,
+								deltaSeconds
 							);
 							dynamicBounds[written] = proxies[written].Bounds;
 							written++;
@@ -236,14 +263,14 @@ namespace engine::physics {
 					[&](ecs::Entity entity,
 						const scene::Transform &transform,
 						const scene::Collider &collider,
-						const scene::Motion &) {
+						const scene::Motion &motion) {
 						if (compareRecovery) {
 							topologyChanged = topologyChanged ||
 											  (previousOwnersCompatible && previousOwners[written] != entity);
 							previousOwners[written] = entity;
 						}
 						spatial::Proxy proxy;
-						WriteEntry(
+						speculativeBounds[written] = WriteEntry(
 							proxy,
 							static_cast<uint64_t>(written),
 							dynamicRecords,
@@ -251,7 +278,9 @@ namespace engine::physics {
 							baked,
 							entity,
 							transform,
-							collider
+							collider,
+							&motion,
+							deltaSeconds
 						);
 						dynamicBounds[written] = proxy.Bounds;
 						if (recoveryProbe && previousCompatible) {
@@ -450,7 +479,7 @@ namespace engine::physics {
 							if (store.Has<scene::Motion>(entity)) {
 								return;
 							}
-							WriteEntry(
+							(void)WriteEntry(
 								proxies[written],
 								static_cast<uint64_t>(written),
 								staticRecords,
@@ -458,7 +487,9 @@ namespace engine::physics {
 								baked,
 								entity,
 								transform,
-								collider
+								collider,
+								nullptr,
+								0.0f
 							);
 							written++;
 						}

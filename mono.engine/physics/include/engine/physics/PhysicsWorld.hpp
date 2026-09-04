@@ -357,6 +357,10 @@ namespace engine::physics {
 		// The accumulated impulses along the two friction directions.
 		float Tangent[2] = {0.0f, 0.0f};
 
+		// Closing speed captured before a speculative impulse slowed the pair.
+		// Consumed by restitution on the first real contact, then cleared.
+		float SpeculativeClosingSpeed = 0.0f;
+
 		// Orders by the two entities and then the feature, so the cache is a
 		// sorted array a binary search answers rather than a hash map whose
 		// walk order is the allocator's.
@@ -478,6 +482,14 @@ namespace engine::physics {
 		// is about a penetration that has already been unwound.
 		float CorrectionImpulse = 0.0f;
 
+		// Pre-solve speed retained across the speculative-to-real transition.
+		float SpeculativeClosingSpeed = 0.0f;
+
+		// Whether this row predicts a contact that has not happened yet.
+		// Speculative rows constrain only normal closing speed. They do not warm
+		// start, apply friction, correct position, or become contact events.
+		bool Speculative = false;
+
 		// The contact's cache key, carried so the tick's answer can be stored
 		// under the same key it was warm-started from.
 		uint32_t Feature = 0;
@@ -488,6 +500,12 @@ namespace engine::physics {
 		static constexpr size_t NORMAL = 0;
 		static constexpr size_t TANGENT = 1;
 		//@}
+	};
+
+	// One entry in the pair-sorted merge the solver consumes.
+	struct SolverManifoldIndex {
+		size_t Index = 0;
+		bool Speculative = false;
 	};
 
 	// A contiguous solver task. Chunk-fallback groups share no movable body;
@@ -641,6 +659,12 @@ namespace engine::physics {
 		size_t Reused = 0;
 		size_t Rebuilt = 0;
 		size_t Rejected = 0;
+		//@}
+
+		// Separated pairs measured and pairs found inside the speculative skin.
+		//@{
+		size_t SpeculativeTested = 0;
+		size_t SpeculativeWithinSkin = 0;
 		//@}
 	};
 
@@ -1030,10 +1054,11 @@ namespace engine::physics {
 		bool DynamicTreeActive = false;
 		size_t DynamicTreeSettledFrames = 0;
 
-		// The pair walk needs each moving collider's box after the grid has
-		// consumed its proxy. Keeping boxes rather than a second full proxy list
-		// leaves the grid as the only owner of its proxies.
+		// The pair walk needs each moving collider's tight and speculative boxes
+		// after the grid has consumed its proxy. The index remains tight, while
+		// `SpeculativeBounds` adds only the contact skin used by its queries.
 		std::vector<core::AABB> DynamicBounds;
+		std::vector<core::AABB> SpeculativeBounds;
 		std::vector<core::AABB> PreviousDynamicBounds;
 		std::vector<ecs::Entity> PreviousDynamicOwners;
 		std::vector<spatial::Proxy> DynamicProxies;
@@ -1083,6 +1108,14 @@ namespace engine::physics {
 		// range order. That keeps the manifold list a function of the pair list
 		// without a shared cursor or a serial scan of every candidate pair.
 		std::vector<std::vector<ContactManifold>> ManifoldBatches;
+
+		// Separated, approaching pairs for the solver only. They stay apart from
+		// `ManifoldList` so game code never receives a touch before one occurs.
+		std::vector<ContactManifold> SpeculativeManifolds;
+		std::vector<std::vector<ContactManifold>> SpeculativeManifoldBatches;
+
+		// Pair-sorted merge of real and speculative manifolds.
+		std::vector<SolverManifoldIndex> SolverManifoldOrder;
 
 		// Exact manifolds converted to local anchors and double-buffered between
 		// ticks. Workers read `PersistentManifolds` and write only their own batch;

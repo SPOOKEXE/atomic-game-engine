@@ -3,12 +3,15 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Clock.hpp>
+#include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -46,6 +49,32 @@ namespace engine::physics {
 				return SourcedPair{CandidatePair{left, right}, CandidateSource{leftAt, rightAt}};
 			}
 			return SourcedPair{CandidatePair{right, left}, CandidateSource{rightAt, leftAt}};
+		}
+
+		bool PotentiallyClosing(
+			const core::AABB &firstBounds,
+			const core::AABB &secondBounds,
+			const PlacedCollider &first,
+			const PlacedCollider &second,
+			float deltaSeconds
+		) {
+			if (firstBounds.Overlaps(secondBounds)) {
+				return true;
+			}
+
+			const core::Vector3 relativeTravel =
+				(first.LinearVelocity - second.LinearVelocity) * deltaSeconds;
+			const core::AABB travelled{
+				firstBounds.Minimum + relativeTravel,
+				firstBounds.Maximum + relativeTravel,
+			};
+			const core::AABB swept = firstBounds.Union(travelled);
+			const float angularReach = (first.AngularVelocity.Magnitude() * first.MaximumRadius +
+										second.AngularVelocity.Magnitude() * second.MaximumRadius) *
+									   deltaSeconds;
+			const float marginMetres = SPECULATIVE_DISTANCE + angularReach;
+			const core::Vector3 margin{marginMetres, marginMetres, marginMetres};
+			return swept.Overlaps(core::AABB{secondBounds.Minimum - margin, secondBounds.Maximum + margin});
 		}
 
 		// A 64-bit entity id needs six eleven-bit passes. Eleven bits leaves the
@@ -95,36 +124,51 @@ namespace engine::physics {
 		bool CollectPairs(
 			const PhysicsWorld &world,
 			const std::vector<core::AABB> &dynamicBounds,
+			const std::vector<core::AABB> &queryBounds,
 			const std::vector<ColliderRecord> &dynamicRecords,
 			const std::vector<ColliderRecord> &staticRecords,
+			const std::vector<PlacedCollider> &dynamicShapes,
 			const spatial::HashGrid &dynamicIndex,
+			const spatial::DynamicBvh &dynamicTree,
 			bool dynamicTreeActive,
 			const spatial::HashGrid &staticIndex,
 			size_t begin,
 			size_t end,
 			std::span<uint64_t> candidates,
-			std::vector<SourcedPair> &output
+			std::vector<SourcedPair> &output,
+			float deltaSeconds
 		) {
 			output.clear();
 			for (size_t index = begin; index < end; index++) {
 				const ColliderRecord &a = dynamicRecords[index];
-				const core::AABB &box = dynamicBounds[index];
+				const core::AABB &box = queryBounds[index];
 
-				if (!dynamicTreeActive) {
+				const core::AABB &tight = dynamicBounds[index];
+				const bool hasSpeculativeReach = box.Minimum != tight.Minimum || box.Maximum != tight.Maximum;
+				if (!dynamicTreeActive || hasSpeculativeReach) {
 					const spatial::QueryResult moving =
-						spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
+						dynamicTreeActive ? spatial::OverlapBox(dynamicTree, box, a.Mask, candidates)
+										  : spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
 					if (moving.Overflowed) {
 						output.clear();
 						return false;
 					}
 					for (size_t at = 0; at < moving.Written; at++) {
 						const auto other = static_cast<size_t>(candidates[at]);
-						if (other <= index) {
+						const bool tightOverlap = dynamicBounds[index].Overlaps(dynamicBounds[other]);
+						if (other == index || (tightOverlap && other < index)) {
 							continue;
 						}
 
 						const ColliderRecord &b = dynamicRecords[other];
-						if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner)) {
+						if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner) ||
+							!PotentiallyClosing(
+								dynamicBounds[index],
+								dynamicBounds[other],
+								dynamicShapes[index],
+								dynamicShapes[other],
+								deltaSeconds
+							)) {
 							continue;
 						}
 						output.push_back(Ordered(
@@ -178,12 +222,15 @@ namespace engine::physics {
 		sourced.clear();
 
 		const std::vector<core::AABB> &dynamicBounds = PipelineInternals::DynamicBounds(*world);
+		const std::vector<core::AABB> &speculativeBounds = PipelineInternals::SpeculativeBounds(*world);
 		const std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
+		const std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
 		const std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
 		const spatial::HashGrid &dynamicIndex = PipelineInternals::DynamicIndex(*world);
 		const spatial::DynamicBvh &dynamicTree = PipelineInternals::DynamicTree(*world);
 		const bool dynamicTreeActive = PipelineInternals::DynamicTreeActive(*world);
 		const spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
+		const float deltaSeconds = PhysicsStepSeconds(store);
 
 		// Sized to the widest possible answer, which is every proxy in one
 		// index, so no query can overflow and no query has to be retried. One
@@ -237,15 +284,19 @@ namespace engine::physics {
 						overflowed[batch] = CollectPairs(
 												*world,
 												dynamicBounds,
+												speculativeBounds,
 												dynamicRecords,
 												staticRecords,
+												dynamicShapes,
 												dynamicIndex,
+												dynamicTree,
 												dynamicTreeActive,
 												staticIndex,
 												begin,
 												end,
 												localCandidates,
-												batches[batch]
+												batches[batch],
+												deltaSeconds
 											)
 												? 0
 												: 1;
@@ -266,15 +317,19 @@ namespace engine::physics {
 				CollectPairs(
 					*world,
 					dynamicBounds,
+					speculativeBounds,
 					dynamicRecords,
 					staticRecords,
+					dynamicShapes,
 					dynamicIndex,
+					dynamicTree,
 					dynamicTreeActive,
 					staticIndex,
 					begin,
 					end,
 					candidates,
-					batches[batch]
+					batches[batch],
+					deltaSeconds
 				);
 			}
 
@@ -334,6 +389,7 @@ namespace engine::physics {
 				pairs.push_back(row.Pair);
 				sources.push_back(row.Source);
 			}
+			core::Metrics::SetGauge("physics.broadphase.pairs", static_cast<double>(pairs.size()));
 		}
 	}
 }

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -39,6 +40,80 @@ namespace engine::physics {
 			// answering with a single point there would make a hull go from
 			// resting to rocking as it settled.
 			return ManifoldBetween(first, second, hit.Normal, hit.Depth);
+		}
+
+		// A separated box pair is admitted only when every separating direction
+		// is parallel to one face normal. Two independent gaps are an edge or
+		// corner distance, where the largest SAT gap is not the Euclidean distance.
+		// Those ambiguous cases stay discrete instead of manufacturing a witness
+		// outside either box.
+		SeparatedContact
+		SeparatedBoxFacePair(const ShapeInstance &first, const ShapeInstance &second, float maximumDistance) {
+			core::Vector3 axes[15];
+			size_t count = 0;
+			for (size_t axis = 0; axis < 3; axis++) {
+				axes[count++] = first.Axis[axis];
+				axes[count++] = second.Axis[axis];
+			}
+			for (size_t left = 0; left < 3; left++) {
+				for (size_t right = 0; right < 3; right++) {
+					axes[count++] = first.Axis[left].Cross(second.Axis[right]);
+				}
+			}
+
+			const core::Vector3 offset = second.Frame.Position - first.Frame.Position;
+			float gapDistance = 0.0f;
+			core::Vector3 normal;
+			for (size_t at = 0; at < count; at++) {
+				const float lengthSquared = axes[at].MagnitudeSquared();
+				if (lengthSquared < CONVEX_EPSILON * CONVEX_EPSILON) {
+					continue;
+				}
+				const core::Vector3 axis = axes[at] * (1.0f / std::sqrt(lengthSquared));
+				const float projected = offset.Dot(axis);
+				const float gap =
+					std::abs(projected) - ProjectionRadius(first, axis) - ProjectionRadius(second, axis);
+				if (gap > maximumDistance) {
+					return {};
+				}
+				if (!(gap > CONVEX_EPSILON)) {
+					continue;
+				}
+				const core::Vector3 oriented = projected >= 0.0f ? axis : -axis;
+				if (gapDistance > 0.0f && std::abs(oriented.Dot(normal)) < 0.9999f) {
+					return {};
+				}
+				if (gap > gapDistance) {
+					gapDistance = gap;
+					normal = oriented;
+				}
+			}
+			if (!(gapDistance > 0.0f)) {
+				return {};
+			}
+
+			const auto faceCentre = [](const ShapeInstance &box, const core::Vector3 &direction) {
+				core::Vector3 point = box.Frame.Position;
+				const float extent[3] = {box.Extent.X, box.Extent.Y, box.Extent.Z};
+				for (size_t axis = 0; axis < 3; axis++) {
+					const float along = box.Axis[axis].Dot(direction);
+					if (std::abs(along) > CONVEX_EPSILON) {
+						point = point + box.Axis[axis] * (along > 0.0f ? extent[axis] : -extent[axis]);
+					}
+				}
+				return point;
+			};
+			const core::Vector3 firstSupport = faceCentre(first, normal);
+			const core::Vector3 secondSupport = faceCentre(second, -normal);
+			const core::Vector3 tangent = (secondSupport - firstSupport) - normal * gapDistance;
+			return SeparatedContact{
+				normal,
+				firstSupport + tangent * 0.5f,
+				secondSupport - tangent * 0.5f,
+				gapDistance,
+				0,
+				true,
+			};
 		}
 
 		// The contact between a mesh and something convex.
@@ -174,5 +249,34 @@ namespace engine::physics {
 			return MeshPair(second, first, false);
 		}
 		return ConvexPair(first, second);
+	}
+
+	SeparatedContact
+	SeparatedBetween(const ShapeInstance &first, const ShapeInstance &second, float maximumDistance) {
+		SeparatedContact answer;
+		if (!(maximumDistance > 0.0f)) {
+			return answer;
+		}
+
+		const bool firstIsMesh = first.Shape == scene::ShapeKind::Mesh;
+		const bool secondIsMesh = second.Shape == scene::ShapeKind::Mesh;
+		if (firstIsMesh || secondIsMesh) {
+			return answer;
+		}
+		if (first.Shape == scene::ShapeKind::Box && second.Shape == scene::ShapeKind::Box) {
+			return SeparatedBoxFacePair(first, second, maximumDistance);
+		}
+
+		const ConvexSeparation gap = ClosestPoints(first, second);
+		if (gap.Overlapping || !(gap.Distance > CONVEX_EPSILON) || gap.Distance > maximumDistance) {
+			return answer;
+		}
+
+		answer.Normal = (gap.OnSecond - gap.OnFirst).Unit();
+		answer.OnFirst = gap.OnFirst;
+		answer.OnSecond = gap.OnSecond;
+		answer.Distance = gap.Distance;
+		answer.Found = answer.Normal.MagnitudeSquared() > 0.0f;
+		return answer;
 	}
 }
