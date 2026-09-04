@@ -1861,6 +1861,10 @@ namespace client {
 		// after a dropped release - an input channel is unreliable by design,
 		// and "still walking" is the failure a state-change protocol produces.
 		if (Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
+			Universe_->Enter(Replicated, [&move](engine::ecs::Store &store) {
+				PredictLocalPlayerMove(store, move, store.Time().Delta);
+			});
+
 			// **Cleared once the tap is actually on the wire**, and not when it
 			// was read. A submission that failed has not told the server
 			// anything, and forgetting the jump there is the dropped press this
@@ -1897,7 +1901,9 @@ namespace client {
 			// ran when a frame was drawn would miss a received tick whenever
 			// the frame rate dipped below the tick rate, and the buffer would
 			// then be interpolating across gaps the network never produced.
-			RecordReplicatedTick(store, Connection->Applied());
+			const uint64_t applied = Connection->Applied();
+			RecordReplicatedTick(store, applied);
+			ReconcileLocalPlayerPrediction(store, applied, Connection->Unconfirmed());
 		});
 
 		// The exchange, before the world. A client that sat there with an empty
