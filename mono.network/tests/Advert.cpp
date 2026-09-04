@@ -5,6 +5,7 @@
 // an open UDP port from an address anybody can write, and the only thing
 // standing between that and a listing is this decoder.
 
+#include <engine/core/Random.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/testing/Suite.hpp>
@@ -22,7 +23,9 @@
 TEST_SUITE_ID("network.advert")
 TEST_DEPENDS("network.sessionkey")
 TEST_DEPENDS("engine.core.bytes")
+TEST_DEPENDS("engine.core.random")
 
+using engine::core::Random;
 using engine::net::Endpoint;
 using network::Access;
 using network::Advert;
@@ -299,4 +302,27 @@ TEST_CASE("a stated limit is what full means", "[network][advert]") {
 	advert.PeerLimit = 0;
 	advert.Peers = 900;
 	CHECK_FALSE(advert.IsFull());
+}
+
+TEST_CASE("arbitrary discovery datagrams either refuse or remain valid", "[network][advert][fuzz]") {
+	// Discovery listens on an open UDP port. `core::Random` makes a bad seed
+	// reproducible instead of depending on a platform generator's stream.
+	constexpr uint32_t ITERATIONS = 2'000;
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+		const size_t size = Random::Bits(iteration, 1) % 256;
+		std::vector<std::byte> datagram(size);
+		for (size_t index = 0; index < datagram.size(); index++) {
+			datagram[index] =
+				static_cast<std::byte>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		const std::optional<DecodedAdvert> decoded = network::Decode(datagram, {});
+		if (decoded) {
+			CHECK(decoded->Session.IsValid());
+			CHECK(decoded->Session.Name.size() <= Advert::MAXIMUM_TEXT_BYTES);
+			CHECK(decoded->Session.Detail.size() <= Advert::MAXIMUM_TEXT_BYTES);
+			CHECK_FALSE(decoded->Authenticated);
+		}
+	}
 }
