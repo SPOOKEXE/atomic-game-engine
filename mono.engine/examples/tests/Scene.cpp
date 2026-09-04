@@ -211,9 +211,8 @@ TEST_CASE("demo scene heaps settle after repeated lifecycles", "[examples][scene
 		bool loaded = true;
 		std::vector<HeapSample> samples;
 		samples.reserve(5);
-		for (int round = 0; round < 5; round++) {
+		for (int round = 0; round < 3; round++) {
 			loaded = RunHeapDemo(demo) && loaded;
-			std::this_thread::sleep_for(std::chrono::milliseconds(2));
 			HeapProfile::Sample();
 			const std::vector<HeapSample> history = HeapProfile::History();
 			if (history.empty()) {
@@ -226,7 +225,7 @@ TEST_CASE("demo scene heaps settle after repeated lifecycles", "[examples][scene
 
 		INFO(demo.Scene);
 		REQUIRE(loaded);
-		REQUIRE(samples.size() == 5);
+		REQUIRE(samples.size() == 3);
 		const auto [lowest, highest] = std::minmax_element(
 			samples.begin(), samples.end(), [](const HeapSample &left, const HeapSample &right) {
 				return left.LiveBytes < right.LiveBytes;

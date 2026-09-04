@@ -12,11 +12,12 @@
 // the bytes are the contract. A test that parsed first would pass on a frame
 // whose key was `Cmd`.
 
+#include "Frame.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <discord/Frame.hpp>
 #include <discord/Link.hpp>
 #include <memory>
 #include <string>

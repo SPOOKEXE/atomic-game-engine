@@ -1,9 +1,10 @@
+#include "Sha256.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
-#include <testrunner/Sha256.hpp>
 
 TEST_SUITE_ID("tools.testrunner.sha256")
 

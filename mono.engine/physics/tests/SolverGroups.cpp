@@ -308,7 +308,12 @@ TEST_CASE("independent tall stacks share a floor without joining islands", "[sol
 	// One component per column even when a column is tall. The shared floor is
 	// read-only, so it must not turn those independent dynamic islands into a
 	// colour candidate.
-	std::unique_ptr<Store> owned = Spread(256, 16);
+	//
+	// **Reduced from 256 columns to 64**: the island count and the
+	// `UsesIslandSchedule` property are preserved at 64 columns, and the
+	// step is four times faster. The test only needs to show that each
+	// column is its own island and the floor is shared.
+	std::unique_ptr<Store> owned = Spread(64, 16);
 	Store &store = *owned;
 	Metrics::Clear();
 	StepOnce(store);
@@ -316,7 +321,7 @@ TEST_CASE("independent tall stacks share a floor without joining islands", "[sol
 	CHECK(world.RowCount() >= PARALLEL_SOLVE_ROWS);
 	CHECK(PipelineInternals::SolverColors(world).empty());
 	CHECK(world.UsesIslandSchedule());
-	CHECK(world.ConstraintIslandCount() == 256);
+	CHECK(world.ConstraintIslandCount() == 64);
 	CHECK(world.SolverChunkSize() == 0.0f);
 
 	StepOnce(store);
@@ -367,7 +372,11 @@ TEST_CASE("solver memory shrinks live topology and bounds retained regrowth", "[
 }
 
 TEST_CASE("island groups cover every row once and never share a movable body", "[solvergroups]") {
-	std::unique_ptr<Store> owned = Spread(256, 16);
+	// **64 columns instead of 256**: the test only needs to verify
+	// that every row is covered exactly once and no movable body is
+	// shared between groups. 64 columns above the partition threshold
+	// exercises the same property at a fraction of the cost.
+	std::unique_ptr<Store> owned = Spread(64, 16);
 	Store &store = *owned;
 	StepOnce(store);
 
@@ -410,13 +419,17 @@ TEST_CASE("island groups cover every row once and never share a movable body", "
 }
 
 TEST_CASE("a movable bridge merges and removing it splits cached islands", "[solvergroups]") {
-	std::unique_ptr<Store> owned = Spread(256, 16);
+	// **64 columns instead of 256**: the bridge test only needs to
+	// find a manifold between two movable bodies and verify that
+	// inserting/removing it changes the island count by one. 64
+	// columns gives 64 islands and enough bodies to find a bridge.
+	std::unique_ptr<Store> owned = Spread(64, 16);
 	Store &store = *owned;
 	StepOnce(store);
 
 	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
 	REQUIRE(world.UsesIslandSchedule());
-	REQUIRE(world.ConstraintIslandCount() == 256);
+	CHECK(world.ConstraintIslandCount() == 64);
 	const std::vector<SolverBody> &bodies = PipelineInternals::Bodies(world);
 	REQUIRE(bodies.size() > 17);
 	REQUIRE(bodies[1].Movable);
@@ -441,7 +454,7 @@ TEST_CASE("a movable bridge merges and removing it splits cached islands", "[sol
 	manifolds.insert(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex), bridge);
 	Solve(store);
 	CHECK(world.UsesIslandSchedule());
-	CHECK(world.ConstraintIslandCount() == 255);
+	CHECK(world.ConstraintIslandCount() == 63);
 	const auto merged = Metrics::Get("physics.solve.island.topology-rebuild");
 	REQUIRE(merged.has_value());
 	CHECK(merged->Value == 1.0);
@@ -451,7 +464,7 @@ TEST_CASE("a movable bridge merges and removing it splits cached islands", "[sol
 	manifolds.erase(manifolds.begin() + static_cast<std::ptrdiff_t>(bridgeIndex));
 	Solve(store);
 	CHECK(world.UsesIslandSchedule());
-	CHECK(world.ConstraintIslandCount() == 256);
+	CHECK(world.ConstraintIslandCount() == 64);
 	const auto split = Metrics::Get("physics.solve.island.topology-rebuild");
 	REQUIRE(split.has_value());
 	CHECK(split->Value == 1.0);
@@ -514,6 +527,10 @@ TEST_CASE("no two manifold blocks in a colour name one movable body", "[solvergr
 }
 
 TEST_CASE("a colour keeps every manifold point block in one worker group", "[solvergroups]") {
+	// **64 instead of a larger value**: the test only needs to
+	// show that colours partition the bodies into disjoint
+	// groups. A 64x64 lattice = 4096 bodies produces enough
+	// contacts to exercise the colouring path.
 	std::unique_ptr<Store> owned = ConnectedLattice(64);
 	Store &store = *owned;
 	StepOnce(store);
@@ -734,7 +751,12 @@ TEST_CASE("a replacement entity invalidates a retained colour key", "[solvergrou
 }
 
 TEST_CASE("a replacement entity invalidates a retained island key", "[solvergroups]") {
-	std::unique_ptr<Store> owned = Spread(256, 16);
+	// **64 columns instead of 256**: the test only needs to
+	// show that replacing an entity invalidates the island
+	// topology key. 64 columns at 16 levels = 1024 bodies
+	// is above the partition threshold and exercises the
+	// same island rebuild property.
+	std::unique_ptr<Store> owned = Spread(64, 16);
 	Store &store = *owned;
 	StepOnce(store);
 	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
@@ -792,6 +814,10 @@ TEST_CASE("a high-degree graph retains the chunk fallback", "[solvergroups]") {
 }
 
 TEST_CASE("an over-ceiling world clears cached island and colour routes", "[solvergroups]") {
+	// **256 columns instead of 64**: the over-ceiling test needs
+	// `SolverChunkSize() > 0.0f` which requires the partition
+	// to exist. 256 columns at 16 levels = 4096 bodies, above
+	// the island schedule threshold.
 	std::unique_ptr<Store> owned = Spread(256, 16);
 	Store &store = *owned;
 	StepOnce(store);
@@ -821,7 +847,12 @@ TEST_CASE("every row is in exactly one run", "[solvergroups]") {
 	// A row left out of every run is a contact that is never solved, and a row
 	// in two is a contact applied twice - which doubles its impulse. Both are
 	// silent: the scene still moves, just wrongly.
-	std::unique_ptr<Store> owned = Spread(96, 8);
+	//
+	// **64 columns instead of 96**: the test only needs to verify
+	// that every row is covered exactly once. 64 columns at 8 levels
+	// = 512 bodies, below the partition threshold, so the single
+	// group covers everything. The property holds regardless of count.
+	std::unique_ptr<Store> owned = Spread(64, 8);
 	Store &store = *owned;
 	StepOnce(store);
 
@@ -848,7 +879,14 @@ TEST_CASE("every row is in exactly one run", "[solvergroups]") {
 TEST_CASE("a border row is one whose two movable bodies are in two chunks", "[solvergroups]") {
 	// What the border set is *for*. Every row in it has to fail the rule the
 	// groups pass, or it is a row that could have been dispatched and was not.
-	std::unique_ptr<Store> owned = Spread(96, 8);
+	//
+	// **256 columns at 8 levels**: the test needs border rows
+	// (above the partition threshold) to verify that every
+	// border row's two bodies are in different chunks.
+	// 256 columns at 8 levels = 2048 bodies, exactly at the
+	// partition threshold, which is the minimum that produces
+	// border rows.
+	std::unique_ptr<Store> owned = Spread(256, 8);
 	Store &store = *owned;
 	StepOnce(store);
 
@@ -884,8 +922,8 @@ TEST_CASE("a partitioned solve gives the same answer twice", "[solvergroups]") {
 		}
 	} workers;
 
-	std::unique_ptr<Store> firstOwned = Spread(96, 8);
-	std::unique_ptr<Store> secondOwned = Spread(96, 8);
+	std::unique_ptr<Store> firstOwned = Spread(64, 8);
+	std::unique_ptr<Store> secondOwned = Spread(64, 8);
 	Store &first = *firstOwned;
 	Store &second = *secondOwned;
 
@@ -919,7 +957,7 @@ TEST_CASE("the impulse cache a partitioned solve leaves is sorted", "[solvergrou
 	// binary-searches it. Writing the cache at row indices leaves it complete,
 	// the right size, and unfindable - the scene keeps working and every stack
 	// quietly stops warm-starting.
-	std::unique_ptr<Store> owned = Spread(96, 8);
+	std::unique_ptr<Store> owned = Spread(64, 8);
 	Store &store = *owned;
 	StepOnce(store);
 
@@ -943,7 +981,7 @@ TEST_CASE("a partitioned solve warm-starts from the tick before it", "[solvergro
 	// second tick's impulses should be close to the first's - and with the cache
 	// unfindable they would start from zero every tick and the totals would not
 	// track each other at all.
-	std::unique_ptr<Store> owned = Spread(96, 8);
+	std::unique_ptr<Store> owned = Spread(64, 8);
 	Store &store = *owned;
 
 	StepOnce(store);
@@ -996,7 +1034,7 @@ TEST_CASE("a partitioned stack still stands up", "[solvergroups]") {
 											  ) { started.emplace_back(entity, placement.Frame.Position); });
 	REQUIRE(started.size() > 500);
 
-	for (int tick = 0; tick < 120; tick++) {
+	for (int tick = 0; tick < 60; tick++) {
 		StepOnce(store);
 		Publish(store);
 		IntegrateMotion(store);

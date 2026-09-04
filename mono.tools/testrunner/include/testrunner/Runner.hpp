@@ -70,7 +70,13 @@ namespace testrunner {
 
 	// Asks a binary what it contains, rather than scanning sources for the
 	// macro and hoping the pattern holds.
-	std::vector<Suite> ReadSuites(const std::filesystem::path &binary);
+	//
+	// @param binary The test executable to ask.
+	// @param build  A configured build directory. The sources a binary names
+	//               are relative to it - `__FILE__` as the compiler saw it -
+	//               so they are resolved against it rather than against
+	//               wherever the runner was invoked from.
+	std::vector<Suite> ReadSuites(const std::filesystem::path &binary, const std::filesystem::path &build);
 
 	// The exact Catch2 filter for one suite. GPU cases are opt-in because they
 	// require a working device and driver; every ordinary invocation excludes

@@ -1,7 +1,8 @@
+#include "Sha256.hpp"
+
 #include <cryptopp/filters.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/sha.h>
-#include <testrunner/Sha256.hpp>
 
 namespace testrunner {
 

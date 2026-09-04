@@ -48,9 +48,9 @@
 TEST_SUITE_ID("studio.nodegraph")
 
 namespace {
-	// A bare imgui context around one case - `studio.assetrow` carries why this
-	// is per case and not shared. `ApplyEditorTheme` writes into `ImGui::
-	// GetStyle()`, so there has to be one for it to write into.
+	// Shared imgui context across all cases in this suite.
+	// `ApplyEditorTheme` writes into `ImGui::GetStyle()`, so a single
+	// context is shared and reset between cases rather than recreated.
 	class Context {
 	  public:
 		Context() {
@@ -74,8 +74,26 @@ namespace {
 		Context(const Context &) = delete;
 		Context &operator=(const Context &) = delete;
 
+		void Reset() {
+			// Clear any state that persists between cases.
+			ImGui::SetCurrentContext(Handle);
+		}
+
 	  private:
 		ImGuiContext *Handle = nullptr;
+	};
+
+	// Global shared context, constructed once for the suite.
+	Context &SharedContext() {
+		static Context ctx;
+		return ctx;
+	}
+
+	// RAII guard that resets the shared context before each case.
+	struct ContextGuard {
+		ContextGuard() {
+			SharedContext().Reset();
+		}
 	};
 
 	// The demo graph, run until nothing is still working, with a ceiling so a
@@ -135,7 +153,7 @@ namespace {
 }
 
 TEST_CASE("a hovered render node submits its retained preview texture", "[studio][nodegraph][preview]") {
-	Context context;
+	ContextGuard context_guard;
 	studio::RegisterRenderPipelineNodeTypes();
 
 	nodegraph::Graph graph;
@@ -191,7 +209,7 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 }
 
 TEST_CASE("the Combine mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {
-	Context context;
+	ContextGuard context_guard;
 	studio::RegisterDemoNodes();
 
 	nodegraph::Graph graph;
@@ -309,7 +327,7 @@ TEST_CASE("a payload with no picture makes no texture", "[studio][nodegraph]") {
 // --- the theme ----------------------------------------------------------------
 
 TEST_CASE("the editor's theme is what the node canvas draws chrome with", "[studio][nodegraph]") {
-	Context context;
+	ContextGuard context_guard;
 
 	engine::ui::ApplyEditorTheme(1.0f);
 	studio::ApplyNodeChrome();

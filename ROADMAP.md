@@ -39,6 +39,27 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.23.1
 
+- [_] CTRL+Z to undo, CTRL+SHIFT+Z to redo, add keybind options
+- [_] when i double click on a world, it should open a viewport if no existing viewports are open
+- [_] fix roblox importer, parts have no size, color is not kept, etc (bladeborne and furry rng demo aworld)
+- [_] bladeborne demo shows content.fit under content is 20+ms alone. fix issue
+- [_] also check how signatures handle content.fit items because that grows to 10ms in scenes that have heavy custom assets (e.g. invalid assets => should not spam signature)
+- [_] [studio] import failed: 'MeshPart.CollisionGroup' refused the value 'Ground'  (Editor.cpp:5116)
+- [_] add a per-asset profiler called `Asset Profiler` for cdn items so we can see who takes up the most memory and that allows us to debug why. hooks into pulling the data on CPU, storing it in memory, checking for item updates for GPU, and pushing to GPU for render (resident instances, sending delta updates to resident, etc)
+- [_] when i select a script in the explorer, it deselects and collapses the entire explorer
+- [_] CTRL+F script search
+- [_] when script opens (from double click or such) and no script editor is open, open it over the first viewport in full screen as a full tab
+
+- [_] Triage launcher/net/loadtest headers
+- [_] Triage cdn/client headers
+- [_] Triage ecs/graph/gui/bake headers
+- [_] Triage net/audio/ui/misc headers
+- [_] Triage physics headers
+- [_] Triage render headers
+- [_] Triage studio headers
+
+- [_] add a set of `physics solver simulation` visualisations for each set of solver capabilities. this way we can see whats going on.
+
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
 new demos:

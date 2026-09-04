@@ -241,7 +241,7 @@ int main(int argc, char **argv) {
 	// the note at the top of this file on why that is one function and not two.
 	std::vector<Suite> suites;
 	for (const auto &binary : FindBinaries(buildDirectory, "bench")) {
-		for (auto &suite : ReadSuites(binary)) {
+		for (auto &suite : ReadSuites(binary, buildDirectory)) {
 			if (filter.empty() || suite.Id.find(filter) != std::string::npos) {
 				suites.push_back(std::move(suite));
 			}

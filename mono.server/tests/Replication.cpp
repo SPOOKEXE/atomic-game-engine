@@ -459,7 +459,7 @@ namespace server_replication_test {
 		//        them.
 		// @return Whatever `ready` says at the end.
 		bool Wait(const std::function<bool()> &ready, int ticks) {
-			constexpr int STEP_MILLISECONDS = 4;
+			constexpr int STEP_MILLISECONDS = 1;
 			constexpr int SLACK = 4;
 
 			const auto deadline = std::chrono::steady_clock::now() +
@@ -507,7 +507,7 @@ namespace server_replication_test {
 	void Settle(Remote &remote) {
 		for (int tick = 0; tick < 200; tick++) {
 			remote.Tick();
-			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 	}
 }

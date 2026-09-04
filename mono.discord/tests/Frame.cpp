@@ -6,11 +6,12 @@
 // decoder that assumes it will passes every run on the machine it was written
 // on. That case is written down here rather than waited for.
 
+#include "Frame.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <discord/Frame.hpp>
 #include <string>
 #include <vector>
 

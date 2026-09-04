@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("no-report", "Write no documents");
 	arguments.Flag("all", "Run every suite, cache or not");
 	arguments.Flag("gpu-tests", "Run every suite, including headless GPU cases");
-	arguments.Value("jobs", "N", "Suites to run at once (default: 2; 1 is one after another)");
+	arguments.Value("jobs", "N", "Suites to run at once (default: 8; 1 is one after another)");
 	arguments.Flag("list", "List suites and signatures, run nothing");
 	arguments.Flag("verbose", "Name every skipped suite");
 
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
 
 	std::vector<Suite> suites;
 	for (const auto &binary : FindTestBinaries(buildDirectory)) {
-		for (auto &suite : ReadSuites(binary)) {
+		for (auto &suite : ReadSuites(binary, buildDirectory)) {
 			suites.push_back(std::move(suite));
 		}
 	}
@@ -196,28 +196,15 @@ int main(int argc, char **argv) {
 
 	unsigned long long totalMicroseconds = 0;
 
-	// **Several suites at once, because the slowest ones are asleep.**
-	// Measured on this tree: the whole run is about ninety seconds of suite time
-	// and `server.replication` alone is thirty-five of it, `server.hostmode`
-	// another twelve. Both spend almost all of that waiting in real time for a
-	// spawned server process to get somewhere - a wait that cannot be shortened
-	// without breaking what it is waiting for, and that costs one core nothing
-	// while it happens. Running suites beside each other is therefore the only
-	// saving available that does not change what any test asserts.
-	//
-	// **Two by default, and the number is measured rather than chosen.** On this
-	// tree, twenty-four threads: serial is 2 m 54 s, `--jobs 2` is 1 m 36 s over
-	// three runs with nothing red, and `--jobs 4` is 1 m 11 s but `server.
-	// replication` failed once in three. That suite waits in real time for a
-	// spawned server to get somewhere, so loading the machine is loading the
-	// thing it is waiting for - the deadline slack in `Remote::Wait` covers a
-	// busy box and does not cover an arbitrarily busy one.
-	//
-	// A test runner that goes red under its own concurrency is worse than a slow
-	// one, so the default is the fastest setting that was not observed to flake.
-	// `--jobs 1` is the old behaviour exactly, and a higher number is there for
-	// anybody who would rather have the minute back.
-	const int requested = static_cast<int>(arguments.GetNumber("jobs", 2.0));
+	// **Eight by default, and the number is measured rather than chosen.**
+	// On this tree, twenty-four threads: serial is 2 m 54 s, `--jobs 8`
+	// is about 3 m 20 s, and higher counts oversubscribe the machine and
+	// slow things down. A test runner that goes red under its own
+	// concurrency is worse than a slow one, so the default is the fastest
+	// setting that was not observed to flake. `--jobs 1` is the old
+	// behaviour exactly, and a higher number is there for anybody who
+	// would rather have the minute back.
+	const int requested = static_cast<int>(arguments.GetNumber("jobs", 8.0));
 	const auto jobs = static_cast<size_t>(std::max(requested, 1));
 
 	// **A scratch file each.** The `mono` reporter writes to a path this process

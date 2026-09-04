@@ -18,6 +18,10 @@
 //
 // @tier shared
 // @since v0.17
+//
+// arch-waiver public-header: part of the published surface through
+// `discord/Link.hpp`, which includes this header. A `Link` owns its byte
+// pipe, so the channel type travels with the connection type.
 
 #include <cstddef>
 #include <memory>

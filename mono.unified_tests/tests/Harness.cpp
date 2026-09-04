@@ -9,6 +9,8 @@
 //
 // Headless, and one worker, so a run of this agrees with the run before it.
 
+#include "Harness.hpp"
+
 #include <engine/core/types/Color3.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -22,7 +24,6 @@
 #include <client/Scene.hpp>
 #include <cmath>
 #include <cstdint>
-#include <unified/Harness.hpp>
 #include <vector>
 
 TEST_SUITE_ID("unified.harness")

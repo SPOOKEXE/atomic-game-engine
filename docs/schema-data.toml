@@ -1190,7 +1190,7 @@ serialisable = true
 [[components]]
 name = "physics.PhysicsWorld"
 kind = "Data"
-size = 1336
+size = 10632
 alignment = 8
 trivial = false
 serialisable = true
@@ -1329,6 +1329,14 @@ kind = "Data"
 size = 40
 alignment = 8
 trivial = false
+serialisable = true
+
+[[components]]
+name = "script.ScriptClock"
+kind = "Data"
+size = 24
+alignment = 8
+trivial = true
 serialisable = true
 
 [[components]]
@@ -1501,6 +1509,13 @@ scriptable = true
 name = "CanCollide"
 type = "Bool"
 kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CanQuery"
+type = "Bool"
+kind = "Field"
 writable = true
 scriptable = true
 
@@ -1731,6 +1746,13 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "CanQuery"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -1953,6 +1975,13 @@ scriptable = true
 name = "CanCollide"
 type = "Bool"
 kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CanQuery"
+type = "Bool"
+kind = "Field"
 writable = true
 scriptable = true
 
@@ -2410,6 +2439,13 @@ writable = true
 scriptable = true
 
 [[classes.properties]]
+name = "CanQuery"
+type = "Bool"
+kind = "Field"
+writable = true
+scriptable = true
+
+[[classes.properties]]
 name = "Anchored"
 type = "Bool"
 kind = "Structural"
@@ -2695,6 +2731,13 @@ scriptable = true
 name = "CanCollide"
 type = "Bool"
 kind = "Computed"
+writable = true
+scriptable = true
+
+[[classes.properties]]
+name = "CanQuery"
+type = "Bool"
+kind = "Field"
 writable = true
 scriptable = true
 

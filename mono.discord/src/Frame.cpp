@@ -1,5 +1,6 @@
+#include "Frame.hpp"
+
 #include <cstring>
-#include <discord/Frame.hpp>
 
 namespace discord {
 

@@ -378,6 +378,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       # Whatever the platforms managed to produce. `build` is allowed to fail on
       # Windows and macOS, so this runs on their partial results rather than
       # waiting for a green that a two-platform-unproven engine cannot give yet.
@@ -386,6 +388,13 @@ jobs:
           path: dist
           pattern: dist-*
           merge-multiple: true
+
+      # These are platform-independent API dumps. Add them once at the publish
+      # boundary rather than making all six matrix jobs upload colliding copies.
+      - name: Include API schema dumps
+        run: |
+          cp docs/schema.toml dist/schema.toml
+          cp docs/schema-data.toml dist/schema-data.toml
 
       - name: Publish
         env:

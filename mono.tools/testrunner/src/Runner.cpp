@@ -1,10 +1,11 @@
+#include "Sha256.hpp"
+
 #include <algorithm>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <testrunner/Process.hpp>
 #include <testrunner/Runner.hpp>
-#include <testrunner/Sha256.hpp>
 
 namespace testrunner {
 
@@ -164,7 +165,7 @@ namespace testrunner {
 		return binaries;
 	}
 
-	std::vector<Suite> ReadSuites(const fs::path &binary) {
+	std::vector<Suite> ReadSuites(const fs::path &binary, const fs::path &build) {
 		std::vector<Suite> suites;
 
 		const auto listed = Run({binary.string(), "--mono-suites"});
@@ -187,7 +188,11 @@ namespace testrunner {
 
 			Suite suite;
 			suite.Id = fields[0];
-			suite.Source = Normalise(fields[1]);
+			// Against the build directory, which is the base both this path
+			// and Ninja's dependency paths are relative to. Resolving against
+			// the runner's working directory escapes the tree - every suite
+			// then misses its closure and signs over its source alone.
+			suite.Source = Normalise(build / fields[1]);
 			suite.Binary = binary;
 
 			if (fields.size() > 2 && !fields[2].empty()) {
