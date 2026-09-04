@@ -1957,6 +1957,32 @@ TEST_CASE("the magic scene draws the effects its presets author", "[examples][sc
 	CHECK(CountOfClass(store, "Attachment") > 5);
 }
 
+TEST_CASE("the tornado scene builds a field-driven funnel", "[examples][scene][tornado]") {
+	// This cannot prove the GPU cloud's final pixels, but it proves the scene
+	// supplied the complete reusable inputs the renderer needs and survives its
+	// first ticks without a script error.
+	const StagedAssets assets;
+	Store store("tornado");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("TornadoSim.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	for (int tick = 0; tick < 12; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	CHECK(CountOfClass(store, "VectorField3D") == 1);
+	CHECK(CountOfClass(store, "ParticleEmitter") == 35);
+	CHECK(CountOfClass(store, "Volume") == 4);
+	CHECK(CountOfClass(store, "Camera") == 1);
+	CHECK(CountOfClass(store, "ScreenGui") == 1);
+	CHECK(CountOfClass(store, "TextButton") == 3);
+	CHECK(CountNamed(store, "Storm Debris") == 144);
+}
+
 TEST_CASE("the player list names everybody in the world", "[examples][scene][players]") {
 	// **The first scene that reads `Players` at all**, and the assertion is that
 	// it reads it *per player*. The panel is built into each player's own
