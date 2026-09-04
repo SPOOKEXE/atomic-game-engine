@@ -148,6 +148,20 @@ namespace engine::spatial {
 		return result;
 	}
 
+	QueryResult OverlapBoxAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	) {
+		QueryResult result;
+		GridInternals::ForEachCandidateAfterId(grid, box, mask, minimumExclusive, [&](const Proxy &proxy) {
+			return Append(found, proxy.Id, result);
+		});
+		return result;
+	}
+
 	QueryResult OverlapSphere(
 		const HashGrid &grid,
 		const core::Vector3 &centre,

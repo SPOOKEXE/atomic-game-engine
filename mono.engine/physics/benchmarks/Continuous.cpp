@@ -11,7 +11,13 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Shapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/spatial/HashGrid.hpp>
+#include <engine/spatial/Query.hpp>
 #include <engine/testing/Bench.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
 TEST_SUITE_ID("engine.physics.bench.continuous")
 
@@ -74,6 +80,31 @@ namespace continuous_bench {
 			World.GetMutable<Motion>(Second)->Linear = Vector3{-300.0f, 0.0f, 0.0f};
 		}
 	};
+
+	struct SweptGrid {
+		static constexpr size_t BODY_COUNT = 8192;
+
+		std::vector<engine::spatial::Proxy> Proxies;
+		std::vector<uint64_t> Candidates = std::vector<uint64_t>(BODY_COUNT);
+		engine::spatial::HashGrid Index{2.0f};
+
+		SweptGrid() {
+			Proxies.reserve(BODY_COUNT);
+			for (size_t body = 0; body < BODY_COUNT; body++) {
+				const float x = static_cast<float>(body % 32) * 0.75f;
+				const float y = static_cast<float>((body / 32) % 16) * 0.75f;
+				const float z = static_cast<float>(body / (32 * 16)) * 0.75f;
+				Proxies.push_back(
+					engine::spatial::Proxy{
+						static_cast<uint64_t>(body),
+						engine::core::AABB::FromCentre(Vector3{x, y, z}, Vector3{0.5f, 0.5f, 0.5f}),
+						engine::spatial::LayerMask::All(),
+					}
+				);
+			}
+			Index.Rebuild(Proxies);
+		}
+	};
 }
 
 using namespace continuous_bench;
@@ -109,4 +140,37 @@ BENCH("8192 still bodies and one fast pair", 4) {
 		SweepFastBodies(sparse.World);
 		Consume(sparse.World.Resource<PhysicsWorld>()->SweptBodies());
 	}
+}
+
+BENCH("duplicate swept-grid gather", 4) {
+	static SweptGrid grid;
+	size_t gathered = 0;
+	for (size_t pass = 0; pass < 8; pass++) {
+		for (size_t body = 0; body < grid.Proxies.size(); body++) {
+			gathered +=
+				engine::spatial::OverlapBox(
+					grid.Index, grid.Proxies[body].Bounds, engine::spatial::LayerMask::All(), grid.Candidates
+				)
+					.Written;
+		}
+	}
+	Consume(gathered);
+}
+
+BENCH("ordered swept-grid gather", 4) {
+	static SweptGrid grid;
+	size_t gathered = 0;
+	for (size_t pass = 0; pass < 8; pass++) {
+		for (size_t body = 0; body < grid.Proxies.size(); body++) {
+			gathered += engine::spatial::OverlapBoxAfterId(
+							grid.Index,
+							grid.Proxies[body].Bounds,
+							engine::spatial::LayerMask::All(),
+							static_cast<uint64_t>(body),
+							grid.Candidates
+			)
+							.Written;
+		}
+	}
+	Consume(gathered);
 }

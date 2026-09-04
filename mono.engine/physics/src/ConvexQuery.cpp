@@ -775,7 +775,7 @@ namespace engine::physics {
 			ShapeInstance advanced = moving;
 			float covered = 0.0f;
 
-			for (size_t advance = 0; advance < MOTION_SWEEP_ADVANCES; advance++) {
+			for (size_t advance = 0; advance < SWEEP_ADVANCES; advance++) {
 				// **The position moves and the rotation does not**, which is the
 				// stated limit of this sweep. Built by copying the frame and
 				// replacing its position rather than by composing two frames,
@@ -842,15 +842,17 @@ namespace engine::physics {
 				return SweepConvexOnly(first, core::Vector3::Zero, second);
 			}
 
-			const float angularBound = firstAngular.Magnitude() * MaximumRadius(first) +
-									   secondAngular.Magnitude() * MaximumRadius(second);
+			const float firstRadius = MaximumRadius(first);
+			const float secondRadius = MaximumRadius(second);
+			const float angularBound =
+				firstAngular.Magnitude() * firstRadius + secondAngular.Magnitude() * secondRadius;
 			const core::Vector3 relativeLinear = firstLinear - secondLinear;
 			float elapsed = 0.0f;
 			core::Vector3 lastNormal = core::Vector3::YAxis;
 			core::Vector3 lastPosition;
 			float lastClosing = 0.0f;
 
-			for (size_t advance = 0; advance < SWEEP_ADVANCES; advance++) {
+			for (size_t advance = 0; advance < MOTION_SWEEP_ADVANCES; advance++) {
 				const core::CFrame firstFrame = Advanced(first.Frame, firstLinear, firstAngular, elapsed);
 				const core::CFrame secondFrame = Advanced(second.Frame, secondLinear, secondAngular, elapsed);
 				const ShapeInstance placedFirst{

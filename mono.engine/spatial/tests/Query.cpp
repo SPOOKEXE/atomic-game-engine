@@ -35,6 +35,7 @@ using engine::spatial::GridInternals;
 using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
 using engine::spatial::OverlapBox;
+using engine::spatial::OverlapBoxAfterId;
 using engine::spatial::OverlapSphere;
 using engine::spatial::Proxy;
 using engine::spatial::QueryResult;
@@ -60,6 +61,29 @@ namespace {
 		storage.resize(result.Written);
 		return storage;
 	}
+}
+
+TEST_CASE("an ordered overlap writes each pair from its lower id only", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(9, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(2, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(7, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 1> found{};
+	const QueryResult result = OverlapBoxAfterId(
+		grid,
+		AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f}),
+		LayerMask::All(),
+		7,
+		found
+	);
+
+	CHECK_FALSE(result.Overflowed);
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == 9);
 }
 
 TEST_CASE("a raycast finds the box in its way", "[query]") {

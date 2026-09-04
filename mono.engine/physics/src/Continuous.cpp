@@ -206,15 +206,25 @@ namespace engine::physics {
 					addEvent(hit, hit.Fraction, first, fixedIndex, false);
 				}
 			}
+		}
 
+		uint64_t dynamicCandidates = 0;
+		for (size_t first = 0; first < bodyCount; first++) {
 			if (!dynamicSweep || !(reaches[first] > 0.0f)) {
 				continue;
 			}
-			const spatial::QueryResult found =
-				spatial::OverlapBox(movingIndex, proxies[first].Bounds, records[first].Mask, candidates);
+			const PlacedCollider &moving = shapes[first];
+			const spatial::QueryResult found = spatial::OverlapBoxAfterId(
+				movingIndex,
+				proxies[first].Bounds,
+				records[first].Mask,
+				static_cast<uint64_t>(first),
+				candidates
+			);
 			for (size_t at = 0; at < found.Written; at++) {
 				const size_t second = static_cast<size_t>(candidates[at]);
-				if (second <= first || shapes[first].Trigger || shapes[second].Trigger ||
+				dynamicCandidates++;
+				if (moving.Trigger || shapes[second].Trigger ||
 					!PairAdmitted(records[first], records[second]) ||
 					world->RigidlyConnected(records[first].Owner, records[second].Owner)) {
 					continue;
@@ -403,6 +413,7 @@ namespace engine::physics {
 
 		PipelineInternals::SweptBodyCount(*world) += swept;
 		core::Metrics::Count("physics.continuous.advance-fallback", static_cast<double>(advanceFallbacks));
+		core::Metrics::Count("physics.continuous.dynamic-candidates", static_cast<double>(dynamicCandidates));
 		core::Metrics::Count("physics.continuous.initial-events", static_cast<double>(initialEvents));
 		core::Metrics::Count("physics.continuous.resweeps", static_cast<double>(resweeps));
 		core::Metrics::Count("physics.continuous.swept-bodies", static_cast<double>(swept));

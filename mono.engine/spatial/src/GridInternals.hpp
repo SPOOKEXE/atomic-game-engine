@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <utility>
 
 namespace engine::spatial {
 
@@ -195,9 +196,10 @@ namespace engine::spatial {
 		// @param visit Called with each candidate. Returning false stops the
 		//              walk, which is what a full output span wants.
 		// @return False if the visitor stopped the walk.
-		template <class Visit>
-		static bool
-		ForEachCandidate(const HashGrid &grid, const core::AABB &volume, LayerMask mask, Visit &&visit) {
+		template <class Accept, class Visit>
+		static bool ForEachCandidateAccepted(
+			const HashGrid &grid, const core::AABB &volume, LayerMask mask, Accept &&accept, Visit &&visit
+		) {
 			if (!grid.HasHierarchy) {
 				const int32_t minimumX = CellCoordinateOf(volume.Minimum.X, grid.InverseSpacing);
 				const int32_t minimumY = CellCoordinateOf(volume.Minimum.Y, grid.InverseSpacing);
@@ -210,7 +212,7 @@ namespace engine::spatial {
 					CellsInRange(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
 				if (inverted || grid.Entries.empty() ||
 					cells > static_cast<int64_t>(grid.Entries.size()) + WALK_CELL_ALLOWANCE) {
-					return ScanEveryProxy(grid, volume, mask, visit);
+					return ScanEveryProxyAccepted(grid, volume, mask, accept, visit);
 				}
 
 				for (int32_t cellZ = minimumZ; cellZ <= maximumZ; cellZ++) {
@@ -231,7 +233,8 @@ namespace engine::spatial {
 									continue;
 								}
 								const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
-								if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
+								if (!accept(proxy) || !proxy.Layers.Overlaps(mask) ||
+									!proxy.Bounds.Overlaps(volume)) {
 									continue;
 								}
 								if (!visit(proxy)) {
@@ -261,12 +264,12 @@ namespace engine::spatial {
 			};
 
 			if (needsScan(grid.InverseSpacing, grid.Entries)) {
-				return ScanEveryProxy(grid, volume, mask, visit);
+				return ScanEveryProxyAccepted(grid, volume, mask, accept, visit);
 			}
 			if (grid.HasHierarchy) {
 				for (const HashGrid::LevelStorage &level : grid.CoarseLevels) {
 					if (needsScan(level.InverseSpacing, level.Entries)) {
-						return ScanEveryProxy(grid, volume, mask, visit);
+						return ScanEveryProxyAccepted(grid, volume, mask, accept, visit);
 					}
 				}
 			}
@@ -306,7 +309,8 @@ namespace engine::spatial {
 								}
 
 								const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
-								if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
+								if (!accept(proxy) || !proxy.Layers.Overlaps(mask) ||
+									!proxy.Bounds.Overlaps(volume)) {
 									continue;
 								}
 								if (!visit(proxy)) {
@@ -335,7 +339,7 @@ namespace engine::spatial {
 			// fixed sequence for one input.
 			for (uint32_t index : grid.Oversized) {
 				const Proxy &proxy = grid.Proxies[index];
-				if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
+				if (!accept(proxy) || !proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
 					continue;
 				}
 				if (!visit(proxy)) {
@@ -343,6 +347,31 @@ namespace engine::spatial {
 				}
 			}
 			return true;
+		}
+
+		template <class Visit>
+		static bool
+		ForEachCandidate(const HashGrid &grid, const core::AABB &volume, LayerMask mask, Visit &&visit) {
+			return ForEachCandidateAccepted(
+				grid, volume, mask, [](const Proxy &) { return true; }, std::forward<Visit>(visit)
+			);
+		}
+
+		template <class Visit>
+		static bool ForEachCandidateAfterId(
+			const HashGrid &grid,
+			const core::AABB &volume,
+			LayerMask mask,
+			uint64_t minimumExclusive,
+			Visit &&visit
+		) {
+			return ForEachCandidateAccepted(
+				grid,
+				volume,
+				mask,
+				[minimumExclusive](const Proxy &proxy) { return proxy.Id > minimumExclusive; },
+				std::forward<Visit>(visit)
+			);
 		}
 
 		// Calls `visit` once for each proxy in a cell the ray actually pierces,
@@ -974,11 +1003,12 @@ namespace engine::spatial {
 
 		// Every proxy, in order, with no cells involved. The answer for a query
 		// so large that the walk would cost more than the scan.
-		template <class Visit>
-		static bool
-		ScanEveryProxy(const HashGrid &grid, const core::AABB &volume, LayerMask mask, Visit &&visit) {
+		template <class Accept, class Visit>
+		static bool ScanEveryProxyAccepted(
+			const HashGrid &grid, const core::AABB &volume, LayerMask mask, Accept &&accept, Visit &&visit
+		) {
 			for (const Proxy &proxy : grid.Proxies) {
-				if (!proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
+				if (!accept(proxy) || !proxy.Layers.Overlaps(mask) || !proxy.Bounds.Overlaps(volume)) {
 					continue;
 				}
 				if (!visit(proxy)) {
@@ -986,6 +1016,14 @@ namespace engine::spatial {
 				}
 			}
 			return true;
+		}
+
+		template <class Visit>
+		static bool
+		ScanEveryProxy(const HashGrid &grid, const core::AABB &volume, LayerMask mask, Visit &&visit) {
+			return ScanEveryProxyAccepted(
+				grid, volume, mask, [](const Proxy &) { return true; }, std::forward<Visit>(visit)
+			);
 		}
 	};
 }

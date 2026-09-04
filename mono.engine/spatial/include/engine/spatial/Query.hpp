@@ -118,6 +118,29 @@ namespace engine::spatial {
 	QueryResult
 	OverlapBox(const DynamicBvh &tree, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
 
+	// Finds overlapping proxy boxes whose opaque id is greater than a cutoff.
+	//
+	// This is the allocation-free half of an unordered pair walk. A caller whose
+	// proxy ids are dense row indices queries row N with cutoff N, so each pair
+	// is written once instead of gathered once from each endpoint. Filtering is
+	// done before the output span is filled, so skipped ids cannot cause a false
+	// overflow.
+	//
+	// @param grid             The index to ask.
+	// @param box              The volume to test, in world space.
+	// @param mask             Which layers to consider.
+	// @param minimumExclusive Only ids greater than this are written.
+	// @param found            Where to write the ids, owned by the caller.
+	// @threadsafe
+	// @since v0.22
+	QueryResult OverlapBoxAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	);
+
 	// Finds every proxy whose box comes within `radius` of `centre`.
 	//
 	// The test is against the box, so this is the distance to the nearest point

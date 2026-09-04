@@ -85,6 +85,9 @@ c. classes
   a deterministic time heap with bounded resweeps, and a retained grid of full
   swept bounds. the focused benchmark covers linear, rotational, and sparse
   scene costs.
+- [x] remove duplicate dynamic swept-grid candidate writes and restore the full
+  rotational conservative-advance budget, with ordered overlap tests, fallback
+  metrics, and focused benchmarks.
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 

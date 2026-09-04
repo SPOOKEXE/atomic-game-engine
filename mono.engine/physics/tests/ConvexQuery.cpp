@@ -310,6 +310,17 @@ TEST_CASE("a motion sweep finds a hit caused only by rotation", "[convexquery]")
 	CHECK(hit.Fraction < 1.0f);
 }
 
+TEST_CASE("a rotational grazing hit converges without the conservative fallback", "[convexquery]") {
+	const ShapeInstance bar = Box(Vector3::Zero, Vector3{0.05f, 2.0f, 0.05f});
+	const ShapeInstance target = Box(Vector3{-2.1f, 0.0f, 0.0f}, Vector3{0.1f, 0.1f, 0.1f});
+	const ConvexSweep hit = SweepConvexMotion(
+		bar, Vector3::Zero, Vector3{0.0f, 0.0f, 2.0f}, target, Vector3::Zero, Vector3::Zero, 1.0f
+	);
+
+	REQUIRE(hit.Hit);
+	CHECK_FALSE(hit.ConservativeFallback);
+}
+
 TEST_CASE("a sweep that misses reports no hit", "[convexquery]") {
 	// Past the wall's edge, and moving parallel to it. Both are the answers a
 	// caller acts on by leaving the body where the integrator put it.
