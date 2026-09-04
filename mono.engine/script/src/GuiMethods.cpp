@@ -45,6 +45,8 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/NodeCanvas.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/script/ScriptCall.hpp>
 
@@ -81,6 +83,34 @@ namespace engine::script {
 			std::vector<Entity> found;
 			gui::ElementsAt(call.World(), call.Subject(), point, found);
 			call.ReturnInstances(found);
+		}
+
+		// `nodeCanvas:Connect(outputPort, inputPort)`
+		//
+		// The graph operation is shared with native callers. A script only names
+		// the two local instances and receives the persisted link, while type and
+		// cycle checks remain where a headless host can make the same decision.
+		void ConnectNodePorts(ScriptCall &call) {
+			ecs::Entity link = ecs::NULL_ENTITY;
+			const gui::NodeLinkResult result = gui::ConnectNodePorts(
+				call.World(), call.Subject(), call.AsInstance(0), call.AsInstance(1), link
+			);
+			if (result != gui::NodeLinkResult::Made) {
+				call.Raise(gui::Describe(result));
+			}
+			call.ReturnInstance(link);
+		}
+
+		// `nodeCanvas:Disconnect(inputPort)`
+		void DisconnectNodeInput(ScriptCall &call) {
+			call.ReturnBoolean(gui::DisconnectNodeInput(call.World(), call.Subject(), call.AsInstance(0)));
+		}
+
+		// `nodeCanvas:RefreshGroups()`
+		void RefreshNodeCanvasGroups(ScriptCall &call) {
+			const size_t groups = gui::LayoutNodeCanvasGroups(call.World(), call.Subject());
+			const size_t ports = gui::LayoutNodeCanvasPorts(call.World(), call.Subject());
+			call.ReturnNumber(static_cast<double>(groups + ports));
 		}
 
 		// `guiButton:EmulateClick()`
@@ -228,7 +258,7 @@ namespace engine::script {
 		// `textBox:VirtualSubmit()`
 		void VirtualSubmit(ScriptCall &call) {
 			RequireFocusedTextBox(call, "VirtualSubmit");
-			const gui::TypeResult result = gui::Type(call.World(), gui::Typing{.Submit = true});
+			const gui::TypeResult result = gui::Type(call.World(), gui::Typing{.Text = {}, .Submit = true});
 			if (result.Released) {
 				RaiseIfHandlerFailed(call, call.DispatchFocusLost(call.Subject(), true));
 			}
@@ -502,8 +532,11 @@ namespace engine::script {
 		// nothing. What closing it needs is a topbar: a non-zero `TopInset` that
 		// something paints, and then this pair is the transparency of that paint.
 
-		constexpr std::array<InstanceMethod, 22> GUI_METHODS{{
+		constexpr std::array<InstanceMethod, 25> GUI_METHODS{{
 			{"GetGuiObjectsAtPosition", GetGuiObjectsAtPosition},
+			{"Connect", ConnectNodePorts},
+			{"Disconnect", DisconnectNodeInput},
+			{"RefreshGroups", RefreshNodeCanvasGroups},
 			{"EmulateClick", EmulateClick},
 			{"VirtualHover", VirtualHover},
 			{"VirtualUnhover", VirtualUnhover},

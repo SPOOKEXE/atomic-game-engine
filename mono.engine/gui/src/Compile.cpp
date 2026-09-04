@@ -262,6 +262,50 @@ namespace engine::gui {
 			return Fold(running, value.VerticalBar);
 		}
 
+		uint64_t Fold(uint64_t running, const NodeCanvas &value) {
+			running = Fold(running, value.Pan);
+			running = Fold(running, value.Zoom);
+			running = Fold(running, value.MinimumZoom);
+			running = Fold(running, value.MaximumZoom);
+			running = Fold(running, value.GridSize);
+			return Fold(running, value.GridVisible);
+		}
+
+		uint64_t Fold(uint64_t running, const NodeCanvasNode &value) {
+			running = Fold(running, value.Id);
+			running = Fold(running, value.Type);
+			running = Fold(running, value.Title);
+			running = Fold(running, value.MinimumSize);
+			running = Fold(running, value.Resizable);
+			return Fold(running, value.InputLayout);
+		}
+
+		uint64_t Fold(uint64_t running, const NodeCanvasGroup &value) {
+			running = Fold(running, value.Id);
+			running = Fold(running, value.Title);
+			running = Fold(running, value.Padding);
+			return Fold(running, value.Layout);
+		}
+
+		uint64_t Fold(uint64_t running, const NodeCanvasPort &value) {
+			running = Fold(running, value.Id);
+			running = Fold(running, value.ValueType);
+			running = Fold(running, value.Direction);
+			return Fold(running, value.Edge);
+		}
+
+		uint64_t Fold(uint64_t running, const NodeCanvasLink &value) {
+			running = Fold(running, value.FromNode);
+			running = Fold(running, value.FromPort);
+			running = Fold(running, value.FromDirection);
+			running = Fold(running, value.ToNode);
+			running = Fold(running, value.ToPort);
+			running = Fold(running, value.ToDirection);
+			running = Fold(running, value.LineColor);
+			running = Fold(running, value.LineTransparency);
+			return Fold(running, value.LineThickness);
+		}
+
 		uint64_t Fold(uint64_t running, const Entry &value) {
 			running = Fold(running, value.PlaceholderText);
 			running = Fold(running, value.PlaceholderColor);
@@ -1101,6 +1145,236 @@ namespace engine::gui {
 			}
 		}
 
+		struct NodeCanvasViewport {
+			Rect Bounds;
+			Rect Clip;
+			Vector2 Pan;
+			float Zoom = 1.0f;
+		};
+
+		bool
+		NodeCanvasViewportOf(const NodeCanvas &canvas, const Resolved &resolved, NodeCanvasViewport &out) {
+			if (!std::isfinite(canvas.Pan.X) || !std::isfinite(canvas.Pan.Y) || !std::isfinite(canvas.Zoom) ||
+				!std::isfinite(canvas.MinimumZoom) || !std::isfinite(canvas.MaximumZoom) ||
+				!(canvas.Zoom > 0.0f)) {
+				return false;
+			}
+
+			out.Bounds = Rect{
+				resolved.AbsolutePosition,
+				Vector2{
+					resolved.AbsolutePosition.X + resolved.AbsoluteSize.X,
+					resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
+				},
+			};
+			out.Clip = resolved.Clip.Intersection(out.Bounds);
+			out.Pan = canvas.Pan;
+			out.Zoom = canvas.Zoom;
+			return !out.Clip.Empty();
+		}
+
+		Vector2 NodeCanvasPoint(const NodeCanvasViewport &view, Vector2 point) {
+			return Vector2{
+				view.Bounds.Min.X + (point.X - view.Bounds.Min.X - view.Pan.X) * view.Zoom,
+				view.Bounds.Min.Y + (point.Y - view.Bounds.Min.Y - view.Pan.Y) * view.Zoom,
+			};
+		}
+
+		Rect NodeCanvasRect(const NodeCanvasViewport &view, const Rect &rect) {
+			return Rect{NodeCanvasPoint(view, rect.Min), NodeCanvasPoint(view, rect.Max)};
+		}
+
+		void EmitNodeCanvasGrid(
+			const NodeCanvas &canvas,
+			const NodeCanvasViewport &view,
+			Entity source,
+			Entity collector,
+			bool spatial,
+			DrawList &out
+		) {
+			if (!canvas.GridVisible || !std::isfinite(canvas.GridSize) || !(canvas.GridSize > 0.0f)) {
+				return;
+			}
+			const float spacing = canvas.GridSize * view.Zoom;
+			if (!std::isfinite(spacing) || spacing < 2.0f) {
+				return;
+			}
+
+			DrawCommand line;
+			line.Kind = DrawKind::Rectangle;
+			line.Source = source;
+			line.Collector = collector;
+			line.Spatial = spatial;
+			line.Clip = view.Clip;
+			line.Tint = Color3{0.18f, 0.18f, 0.18f};
+			line.Transparency = 0.5f;
+
+			constexpr size_t MAXIMUM_GRID_LINES = 4096;
+			const float startX =
+				std::floor(
+					(view.Pan.X + (view.Clip.Min.X - view.Bounds.Min.X) / view.Zoom) / canvas.GridSize
+				) *
+				canvas.GridSize;
+			for (float x = view.Bounds.Min.X + (startX - view.Pan.X) * view.Zoom;
+				 x <= view.Clip.Max.X && out.Commands.size() < MAXIMUM_GRID_LINES;
+				 x += spacing) {
+				line.Bounds = Rect{Vector2{x, view.Clip.Min.Y}, Vector2{x + 1.0f, view.Clip.Max.Y}};
+				out.Commands.push_back(line);
+			}
+
+			const float startY =
+				std::floor(
+					(view.Pan.Y + (view.Clip.Min.Y - view.Bounds.Min.Y) / view.Zoom) / canvas.GridSize
+				) *
+				canvas.GridSize;
+			for (float y = view.Bounds.Min.Y + (startY - view.Pan.Y) * view.Zoom;
+				 y <= view.Clip.Max.Y && out.Commands.size() < MAXIMUM_GRID_LINES * 2;
+				 y += spacing) {
+				line.Bounds = Rect{Vector2{view.Clip.Min.X, y}, Vector2{view.Clip.Max.X, y + 1.0f}};
+				out.Commands.push_back(line);
+			}
+		}
+
+		void TransformNodeCanvasContent(
+			DrawList &out, size_t commandStart, size_t gradientStart, const NodeCanvasViewport &view
+		) {
+			for (size_t index = commandStart; index < out.Commands.size(); index++) {
+				DrawCommand &command = out.Commands[index];
+				command.Bounds = NodeCanvasRect(view, command.Bounds);
+				command.Clip = command.Clip.Intersection(view.Clip);
+				command.Thickness *= view.Zoom;
+				command.CornerRadius *= view.Zoom;
+				command.Tile = command.Tile * view.Zoom;
+				if (command.TextSize > 0) {
+					command.TextSize =
+						std::max(1, static_cast<int32_t>(std::lround(command.TextSize * view.Zoom)));
+				}
+			}
+			std::erase_if(out.Commands, [&](const DrawCommand &command) {
+				return &command - out.Commands.data() >= static_cast<ptrdiff_t>(commandStart) &&
+					   command.Clip.Empty();
+			});
+
+			for (size_t index = gradientStart; index < out.Gradients.size(); index++) {
+				DrawGradient &gradient = out.Gradients[index];
+				gradient.Origin = NodeCanvasPoint(view, gradient.Origin);
+				gradient.Axis = gradient.Axis * view.Zoom;
+			}
+		}
+
+		bool FindNodeCanvasPort(
+			const Store &store,
+			Entity canvas,
+			core::Name nodeId,
+			core::Name portId,
+			NodePortDirection direction,
+			Vector2 &centre
+		) {
+			Entity node = ecs::NULL_ENTITY;
+			std::vector<Entity> pending{canvas};
+			while (!pending.empty() && node == ecs::NULL_ENTITY) {
+				const Entity current = pending.back();
+				pending.pop_back();
+				store.EachChild(current, [&](Entity child) {
+					if (node != ecs::NULL_ENTITY) {
+						return;
+					}
+					const NodeCanvasNode *candidate = store.Get<NodeCanvasNode>(child);
+					if (candidate != nullptr && candidate->Id == nodeId) {
+						node = child;
+						return;
+					}
+					pending.push_back(child);
+				});
+			}
+			if (node == ecs::NULL_ENTITY) {
+				return false;
+			}
+
+			bool found = false;
+			store.EachChild(node, [&](Entity child) {
+				const NodeCanvasPort *port = store.Get<NodeCanvasPort>(child);
+				const Resolved *resolved = store.Get<Resolved>(child);
+				if (!found && port != nullptr && port->Id == portId && port->Direction == direction &&
+					resolved != nullptr && resolved->Rendered) {
+					centre = {
+						resolved->AbsolutePosition.X + resolved->AbsoluteSize.X * 0.5f,
+						resolved->AbsolutePosition.Y + resolved->AbsoluteSize.Y * 0.5f,
+					};
+					found = true;
+				}
+			});
+			return found;
+		}
+
+		// Emits each graph wire before the canvas's GUI descendants. A segment is
+		// a rotated rectangle, so the existing shared draw list and backend draw
+		// it without a client-only line primitive.
+		void EmitNodeCanvasLinks(
+			const Store &store,
+			Entity canvas,
+			Entity collector,
+			const Resolved &resolved,
+			const Color3 &groupTint,
+			float groupOpacity,
+			DrawList &out
+		) {
+			const Rect canvasBounds{
+				resolved.AbsolutePosition,
+				Vector2{
+					resolved.AbsolutePosition.X + resolved.AbsoluteSize.X,
+					resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
+				},
+			};
+			const Rect clip = resolved.Clip.Intersection(canvasBounds);
+			if (clip.Empty()) {
+				return;
+			}
+
+			store.EachChild(canvas, [&](Entity linkEntity) {
+				const NodeCanvasLink *link = store.Get<NodeCanvasLink>(linkEntity);
+				if (link == nullptr || link->LineTransparency >= 1.0f || !(link->LineThickness > 0.0f)) {
+					return;
+				}
+				Vector2 from;
+				Vector2 to;
+				if (!FindNodeCanvasPort(
+						store, canvas, link->FromNode, link->FromPort, link->FromDirection, from
+					) ||
+					!FindNodeCanvasPort(store, canvas, link->ToNode, link->ToPort, link->ToDirection, to)) {
+					return;
+				}
+
+				const Vector2 delta{to.X - from.X, to.Y - from.Y};
+				const float length = std::hypot(delta.X, delta.Y);
+				if (!(length > 0.0f)) {
+					return;
+				}
+				const float halfThickness = link->LineThickness * 0.5f;
+				const Vector2 midpoint{(from.X + to.X) * 0.5f, (from.Y + to.Y) * 0.5f};
+
+				DrawCommand segment;
+				segment.Kind = DrawKind::Rectangle;
+				segment.Source = linkEntity;
+				segment.Collector = collector;
+				segment.Spatial = store.Get<SpatialCanvas>(collector) != nullptr;
+				segment.Bounds = Rect{
+					Vector2{midpoint.X - length * 0.5f, midpoint.Y - halfThickness},
+					Vector2{midpoint.X + length * 0.5f, midpoint.Y + halfThickness},
+				};
+				segment.Clip = clip;
+				segment.Rotation = std::atan2(delta.Y, delta.X) * 57.2957795f;
+				segment.Tint = Color3{
+					link->LineColor.R * groupTint.R,
+					link->LineColor.G * groupTint.G,
+					link->LineColor.B * groupTint.B,
+				};
+				segment.Transparency =
+					1.0f - (1.0f - std::clamp(link->LineTransparency, 0.0f, 1.0f)) * groupOpacity;
+				out.Commands.push_back(segment);
+			});
+		}
+
 		// Walks one subtree in paint order.
 		//
 		// Parent first, then children sorted by `ZIndex`. **A child is drawn
@@ -1144,6 +1418,25 @@ namespace engine::gui {
 			}
 
 			Emit(store, instance, collector, *resolved, request, tint, opacity, out);
+			NodeCanvasViewport nodeCanvasView;
+			const NodeCanvas *nodeCanvas = store.Get<NodeCanvas>(instance);
+			const bool transformsNodeCanvasContent =
+				nodeCanvas != nullptr && NodeCanvasViewportOf(*nodeCanvas, *resolved, nodeCanvasView);
+			size_t nodeCanvasCommandStart = out.Commands.size();
+			size_t nodeCanvasGradientStart = out.Gradients.size();
+			if (transformsNodeCanvasContent) {
+				EmitNodeCanvasGrid(
+					*nodeCanvas,
+					nodeCanvasView,
+					instance,
+					collector,
+					store.Get<SpatialCanvas>(collector) != nullptr,
+					out
+				);
+				nodeCanvasCommandStart = out.Commands.size();
+				nodeCanvasGradientStart = out.Gradients.size();
+				EmitNodeCanvasLinks(store, instance, collector, *resolved, tint, opacity, out);
+			}
 
 			std::vector<Entity> children;
 			store.EachChild(instance, [&](Entity child) {
@@ -1168,6 +1461,11 @@ namespace engine::gui {
 			// Scrollbars belong over the scrolled children. Emitting them after
 			// the subtree keeps that paint order without a renderer special case.
 			EmitScrollbars(store, instance, collector, *resolved, tint, opacity, out);
+			if (transformsNodeCanvasContent) {
+				TransformNodeCanvasContent(
+					out, nodeCanvasCommandStart, nodeCanvasGradientStart, nodeCanvasView
+				);
+			}
 		}
 
 		uint64_t ScanSignature(Store &store, const CompileRequest &request, Entity collector, bool &moving) {
@@ -1197,6 +1495,11 @@ namespace engine::gui {
 			stamp = FoldRows<Picture>(store, stamp, collector);
 			stamp = FoldRows<Button>(store, stamp, collector);
 			stamp = FoldRows<Scrolling>(store, stamp, collector);
+			stamp = FoldRows<NodeCanvas>(store, stamp, collector);
+			stamp = FoldRows<NodeCanvasNode>(store, stamp, collector);
+			stamp = FoldRows<NodeCanvasGroup>(store, stamp, collector);
+			stamp = FoldRows<NodeCanvasPort>(store, stamp, collector);
+			stamp = FoldRows<NodeCanvasLink>(store, stamp, collector);
 			stamp = FoldRows<Entry>(store, stamp, collector);
 			stamp = FoldRows<Layer>(store, stamp, collector);
 			stamp = FoldRows<Surface>(store, stamp, collector);

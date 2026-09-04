@@ -646,6 +646,82 @@ TEST_CASE("a canvas group multiplies colour and opacity through its subtree", "[
 	CHECK(found->Transparency == Approx(0.625f));
 }
 
+TEST_CASE("a node link compiles as a coloured segment behind its nodes", "[gui][compile][nodecanvas]") {
+	World world("gui_compile.node_canvas");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity canvas = world.Make("NodeCanvas", screen);
+	const Entity source = world.Make("NodeCanvasNode", canvas);
+	const Entity destination = world.Make("NodeCanvasNode", canvas);
+	const Entity output = world.Make("NodeCanvasPort", source);
+	const Entity destinationOutput = world.Make("NodeCanvasPort", destination);
+	const Entity input = world.Make("NodeCanvasPort", destination);
+	const Entity link = world.Make("NodeCanvasLink", canvas);
+
+	NodeCanvasNode sourceState;
+	sourceState.Id = Name("source");
+	world.Data.Set(source, sourceState);
+	NodeCanvasNode destinationState;
+	destinationState.Id = Name("destination");
+	world.Data.Set(destination, destinationState);
+	world.Data.Set(output, NodeCanvasPort{Name("value"), Name("number"), NodePortDirection::Output});
+	world.Data.Set(
+		destinationOutput, NodeCanvasPort{Name("value"), Name("number"), NodePortDirection::Output}
+	);
+	world.Data.Set(input, NodeCanvasPort{Name("value"), Name("number"), NodePortDirection::Input});
+
+	Element sourceElement = *world.Data.Get<Element>(source);
+	sourceElement.Position = {0.0f, 20.0f, 0.0f, 20.0f};
+	sourceElement.Size = {0.0f, 100.0f, 0.0f, 80.0f};
+	world.Data.Set(source, sourceElement);
+	Element destinationElement = *world.Data.Get<Element>(destination);
+	destinationElement.Position = {0.0f, 280.0f, 0.0f, 120.0f};
+	destinationElement.Size = {0.0f, 100.0f, 0.0f, 80.0f};
+	world.Data.Set(destination, destinationElement);
+	Element outputElement = *world.Data.Get<Element>(output);
+	outputElement.Position = {0.0f, 90.0f, 0.0f, 30.0f};
+	outputElement.Size = {0.0f, 10.0f, 0.0f, 10.0f};
+	world.Data.Set(output, outputElement);
+	Element destinationOutputElement = *world.Data.Get<Element>(destinationOutput);
+	destinationOutputElement.Position = {0.0f, 90.0f, 0.0f, 0.0f};
+	destinationOutputElement.Size = {0.0f, 10.0f, 0.0f, 10.0f};
+	world.Data.Set(destinationOutput, destinationOutputElement);
+	Element inputElement = *world.Data.Get<Element>(input);
+	inputElement.Position = {0.0f, 0.0f, 0.0f, 30.0f};
+	inputElement.Size = {0.0f, 10.0f, 0.0f, 10.0f};
+	world.Data.Set(input, inputElement);
+
+	NodeCanvasLink linkState;
+	linkState.FromNode = Name("source");
+	linkState.FromPort = Name("value");
+	linkState.FromDirection = NodePortDirection::Output;
+	linkState.ToNode = Name("destination");
+	linkState.ToPort = Name("value");
+	linkState.ToDirection = NodePortDirection::Input;
+	linkState.LineColor = {0.2f, 0.6f, 0.9f};
+	linkState.LineThickness = 4.0f;
+	world.Data.Set(link, linkState);
+
+	REQUIRE(world.Rebuild());
+	const auto segment = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[&](const DrawCommand &command) { return command.Source == link; }
+	);
+	REQUIRE(segment != world.List.Commands().Commands.end());
+	CHECK(segment->Kind == DrawKind::Rectangle);
+	CHECK(segment->Tint == linkState.LineColor);
+	CHECK(segment->Bounds.Height() == Approx(4.0f));
+	CHECK(segment->Rotation == Approx(30.4655f));
+
+	const auto sourceFill = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[&](const DrawCommand &command) { return command.Source == source; }
+	);
+	REQUIRE(sourceFill != world.List.Commands().Commands.end());
+	CHECK(segment < sourceFill);
+}
+
 TEST_CASE("a viewport frame emits its camera image with authored tint", "[gui][compile]") {
 	World world("gui_compile.viewport");
 	const Entity screen = world.Make("ScreenGui");

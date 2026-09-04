@@ -83,6 +83,11 @@ TEST_CASE("the collector sets keep Roblox's order", "[gui][enums]") {
 	// directions, and this is the assertion that says why it has to.
 	Expect<ScrollingDirection, 3>({"X", "Y", "XY"}, 1);
 	CHECK(static_cast<int>(ScrollingDirection::X) == 1);
+	Expect<NodePortDirection, 2>({"Input", "Output"});
+	Expect<NodeBypassMode, 2>({"None", "Bypass"});
+	Expect<NodePortEdge, 3>({"Top", "Bottom", "Corner"});
+	Expect<InputPortLayout, 3>({"Manual", "Separate", "Squash"});
+	Expect<NodeGroupLayout, 3>({"Manual", "AroundEdge", "SmallestSpace"});
 }
 
 TEST_CASE("gui::Face agrees with scene::NormalId", "[gui][enums]") {

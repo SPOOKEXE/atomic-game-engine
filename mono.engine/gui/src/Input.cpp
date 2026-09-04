@@ -362,6 +362,54 @@ namespace engine::gui {
 	}
 
 	Entity Router::Wheel(Store &store, const Vector2 &point, float notches) {
+		// A node canvas owns wheel input before a scrolling frame below it. A
+		// graph wheel gesture means zoom, and treating it as a page wheel first
+		// would make a canvas embedded in an inspector impossible to use.
+		Entity graph;
+		int32_t graphOrder = 0;
+		int32_t graphDepth = 0;
+		store.Each<const NodeCanvas, const Resolved>(
+			[&](Entity node, const NodeCanvas &, const Resolved &resolved) {
+				if (!resolved.Rendered) {
+					return;
+				}
+				const core::Rect bounds{
+					resolved.AbsolutePosition,
+					Vector2{
+						resolved.AbsolutePosition.X + resolved.AbsoluteSize.X,
+						resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y,
+					},
+				};
+				if (!bounds.Contains(Unrotated(resolved.AbsoluteRotation, bounds, point)) ||
+					!resolved.Clip.Contains(point)) {
+					return;
+				}
+				if (graph == NULL_ENTITY || resolved.Order > graphOrder ||
+					(resolved.Order == graphOrder && resolved.Depth > graphDepth)) {
+					graph = node;
+					graphOrder = resolved.Order;
+					graphDepth = resolved.Depth;
+				}
+			}
+		);
+
+		if (NodeCanvas *canvas = store.GetMutable<NodeCanvas>(graph)) {
+			// Multiplicative steps keep the same feel at every scale. The bounds
+			// remain authored properties, so a script can deliberately restrict a
+			// graph further than this normal interaction permits.
+			if (!std::isfinite(notches) || !std::isfinite(canvas->Zoom) ||
+				!std::isfinite(canvas->MinimumZoom) || !std::isfinite(canvas->MaximumZoom)) {
+				return graph;
+			}
+			const float low = std::min(canvas->MinimumZoom, canvas->MaximumZoom);
+			const float high = std::max(canvas->MinimumZoom, canvas->MaximumZoom);
+			if (!(low > 0.0f) || !(high > 0.0f)) {
+				return graph;
+			}
+			canvas->Zoom = std::clamp(canvas->Zoom * std::pow(1.1f, notches), low, high);
+			return graph;
+		}
+
 		// **The frames are asked directly rather than through `Pick`.** A
 		// `ScrollingFrame` is not `Active` and usually holds nothing that is, so
 		// the pick walks straight past it and answers null - and a wheel that

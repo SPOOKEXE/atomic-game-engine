@@ -214,6 +214,62 @@ namespace engine::gui {
 		return "Y";
 	}
 
+	const char *Describe(NodePortDirection value) {
+		switch (value) {
+		case NodePortDirection::Input:
+			return "Input";
+		case NodePortDirection::Output:
+			return "Output";
+		}
+		return "Input";
+	}
+
+	const char *Describe(NodeBypassMode value) {
+		switch (value) {
+		case NodeBypassMode::None:
+			return "None";
+		case NodeBypassMode::Bypass:
+			return "Bypass";
+		}
+		return "None";
+	}
+
+	const char *Describe(NodePortEdge value) {
+		switch (value) {
+		case NodePortEdge::Top:
+			return "Top";
+		case NodePortEdge::Bottom:
+			return "Bottom";
+		case NodePortEdge::Corner:
+			return "Corner";
+		}
+		return "Top";
+	}
+
+	const char *Describe(InputPortLayout value) {
+		switch (value) {
+		case InputPortLayout::Manual:
+			return "Manual";
+		case InputPortLayout::Separate:
+			return "Separate";
+		case InputPortLayout::Squash:
+			return "Squash";
+		}
+		return "Manual";
+	}
+
+	const char *Describe(NodeGroupLayout value) {
+		switch (value) {
+		case NodeGroupLayout::Manual:
+			return "Manual";
+		case NodeGroupLayout::AroundEdge:
+			return "AroundEdge";
+		case NodeGroupLayout::SmallestSpace:
+			return "SmallestSpace";
+		}
+		return "Manual";
+	}
+
 	const char *Describe(StrokeMode value) {
 		switch (value) {
 		case StrokeMode::Contextual:

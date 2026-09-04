@@ -84,6 +84,11 @@ namespace {
 		"gui.ConeHandleShape",
 		"gui.HandlesShape",
 		"gui.ArcHandlesShape",
+		"gui.NodeCanvas",
+		"gui.NodeCanvasNode",
+		"gui.NodeCanvasGroup",
+		"gui.NodeCanvasPort",
+		"gui.NodeCanvasLink",
 	};
 
 	struct ExpectedProperty {
@@ -270,12 +275,12 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//
-	// **Fifty-one**: the thirty-eight of the 2D tree, `GuiService`, and the twelve
-	// of the 3D branch. The service is in this list rather than in
+	// **Fifty-six**: the forty-two of the 2D tree including the five node graph
+	// objects, `GuiService`, and the twelve of the 3D branch. The service is in
 	// `scene`'s because it is a `gui` class - the two modules may not link each
 	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
-	CHECK(GuiClassNames().size() == 51);
+	CHECK(GuiClassNames().size() == 56);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {
@@ -467,6 +472,82 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	CHECK(read.HoverImage == written.HoverImage);
 	CHECK(read.PressedImage == written.PressedImage);
 	CHECK(read.Resample == written.Resample);
+}
+
+TEST_CASE("node canvas execution settings and port limits survive a save", "[gui][registration]") {
+	RegisterGuiComponents();
+
+	NodeCanvasNode writtenNode;
+	writtenNode.Id = Name("passthrough");
+	writtenNode.Type = Name("logic.Reroute");
+	writtenNode.Title = "Pass through";
+	writtenNode.Enabled = false;
+	writtenNode.BypassMode = NodeBypassMode::Bypass;
+	writtenNode.BypassInput = Name("value");
+	writtenNode.BypassOutput = Name("result");
+	writtenNode.MinimumSize = {112.0f, 56.0f};
+	writtenNode.Resizable = false;
+	writtenNode.InputLayout = InputPortLayout::Squash;
+
+	const TypeDescriptor &nodeType = Components::Describe(Components::Of<NodeCanvasNode>());
+	ByteWriter nodeWriter;
+	nodeType.Write(nodeWriter, &writtenNode, 1);
+	NodeCanvasNode readNode;
+	ByteReader nodeReader(nodeWriter.Bytes());
+	nodeType.Read(nodeReader, &readNode, 1);
+
+	CHECK(readNode.Id == writtenNode.Id);
+	CHECK(readNode.Type == writtenNode.Type);
+	CHECK(readNode.Title == writtenNode.Title);
+	CHECK(readNode.Enabled == writtenNode.Enabled);
+	CHECK(readNode.BypassMode == writtenNode.BypassMode);
+	CHECK(readNode.BypassInput == writtenNode.BypassInput);
+	CHECK(readNode.BypassOutput == writtenNode.BypassOutput);
+	CHECK(readNode.MinimumSize == writtenNode.MinimumSize);
+	CHECK(readNode.Resizable == writtenNode.Resizable);
+	CHECK(readNode.InputLayout == writtenNode.InputLayout);
+
+	NodeCanvasPort writtenPort;
+	writtenPort.Id = Name("values");
+	writtenPort.ValueType = Name("any");
+	writtenPort.Direction = NodePortDirection::Input;
+	writtenPort.Edge = NodePortEdge::Corner;
+	writtenPort.MaxConnections = 3;
+
+	const TypeDescriptor &portType = Components::Describe(Components::Of<NodeCanvasPort>());
+	ByteWriter portWriter;
+	portType.Write(portWriter, &writtenPort, 1);
+	NodeCanvasPort readPort;
+	ByteReader portReader(portWriter.Bytes());
+	portType.Read(portReader, &readPort, 1);
+
+	CHECK(readPort.Id == writtenPort.Id);
+	CHECK(readPort.ValueType == writtenPort.ValueType);
+	CHECK(readPort.Direction == writtenPort.Direction);
+	CHECK(readPort.Edge == writtenPort.Edge);
+	CHECK(readPort.MaxConnections == writtenPort.MaxConnections);
+
+	NodeCanvasLink writtenLink;
+	writtenLink.FromNode = Name("remap");
+	writtenLink.FromPort = Name("value");
+	writtenLink.FromDirection = NodePortDirection::Output;
+	writtenLink.ToNode = Name("display");
+	writtenLink.ToPort = Name("value");
+	writtenLink.ToDirection = NodePortDirection::Input;
+
+	const TypeDescriptor &linkType = Components::Describe(Components::Of<NodeCanvasLink>());
+	ByteWriter linkWriter;
+	linkType.Write(linkWriter, &writtenLink, 1);
+	NodeCanvasLink readLink;
+	ByteReader linkReader(linkWriter.Bytes());
+	linkType.Read(linkReader, &readLink, 1);
+
+	CHECK(readLink.FromNode == writtenLink.FromNode);
+	CHECK(readLink.FromPort == writtenLink.FromPort);
+	CHECK(readLink.FromDirection == writtenLink.FromDirection);
+	CHECK(readLink.ToNode == writtenLink.ToNode);
+	CHECK(readLink.ToPort == writtenLink.ToPort);
+	CHECK(readLink.ToDirection == writtenLink.ToDirection);
 }
 
 TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {
