@@ -719,6 +719,22 @@ TEST_CASE("a truncated GIF is refused rather than clamped", "[bake]") {
 	}
 }
 
+TEST_CASE("an oversized GIF canvas is refused before it is allocated", "[bake][image]") {
+	std::vector<std::byte> oversized = TinyGif();
+	// Logical-screen width and height. They are 16-bit, so this is the largest
+	// canvas a GIF header can claim and must cost only the header comparison.
+	oversized[6] = std::byte{0xff};
+	oversized[7] = std::byte{0xff};
+	oversized[8] = std::byte{0xff};
+	oversized[9] = std::byte{0xff};
+
+	TextureData image;
+	std::string failure;
+	CHECK_FALSE(ReadImage(oversized, image, failure));
+	CHECK(failure.find("canvas") != std::string::npos);
+	CHECK(image.Pixels.empty());
+}
+
 // --- flipbook layout and frame rate, added at v0.10 ---------------------------
 //
 // **The three fields that turn a sheet of pixels into an animation.** A 4x4
