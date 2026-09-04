@@ -36,10 +36,12 @@ namespace engine::script {
 			return message;
 		}
 
-		void Report(JSContext *context, ScopePayload &scope, const char *operation, const std::string &message) {
+		void
+		Report(JSContext *context, ScopePayload &scope, const char *operation, const std::string &message) {
 			if (scope.ErrorHandler != 0) {
 				JSValue argument = JS_NewStringLen(context, message.data(), message.size());
-				JSValue result = JS_Call(context, Held(context, scope.ErrorHandler), JS_UNDEFINED, 1, &argument);
+				JSValue result =
+					JS_Call(context, Held(context, scope.ErrorHandler), JS_UNDEFINED, 1, &argument);
 				JS_FreeValue(context, argument);
 				if (JS_IsException(result)) {
 					ENGINE_WARN("[script] Scope error handler failed: {}", Exception(context));
@@ -81,7 +83,9 @@ namespace engine::script {
 						break;
 					}
 					if (!invoked) {
-						ENGINE_WARN("[script] Scope ignored an object without Destroy, Disconnect, or Cancel");
+						ENGINE_WARN(
+							"[script] Scope ignored an object without Destroy, Disconnect, or Cancel"
+						);
 					}
 				}
 				Release(context, static_cast<CallbackRef>(item->Value));
@@ -93,10 +97,13 @@ namespace engine::script {
 			ScopePayload *scope = ScopeOf(context, self);
 			if (scope == nullptr) return JS_EXCEPTION;
 			if (argc < 1) return JS_ThrowTypeError(context, "Scope.Add expects a resource");
-			if (!JsOf(context).Scopes.IsAlive(scope->Handle)) return JS_ThrowTypeError(context, "Scope is destroyed");
+			if (!JsOf(context).Scopes.IsAlive(scope->Handle))
+				return JS_ThrowTypeError(context, "Scope is destroyed");
 			const CallbackRef reference = Retain(context, argv[0]);
-			const ScopeItem item{JS_IsFunction(context, argv[0]) ? ScopeItemKind::Callback : ScopeItemKind::Custom,
-			                     static_cast<uint64_t>(reference)};
+			const ScopeItem item{
+				JS_IsFunction(context, argv[0]) ? ScopeItemKind::Callback : ScopeItemKind::Custom,
+				static_cast<uint64_t>(reference)
+			};
 			JsOf(context).Scopes.Add(scope->Handle, item);
 			scope->Items.push_back(item);
 			return JS_DupValue(context, self);
@@ -132,7 +139,9 @@ namespace engine::script {
 			if (scope == nullptr) return JS_EXCEPTION;
 			if (argc < 1) return JS_FALSE;
 			for (auto item = scope->Items.begin(); item != scope->Items.end(); ++item) {
-				if (JS_IsStrictEqual(context, Held(context, static_cast<CallbackRef>(item->Value)), argv[0])) {
+				if (JS_IsStrictEqual(
+						context, Held(context, static_cast<CallbackRef>(item->Value)), argv[0]
+					)) {
 					JsOf(context).Scopes.Remove(scope->Handle, *item);
 					Release(context, static_cast<CallbackRef>(item->Value));
 					scope->Items.erase(item);
@@ -160,18 +169,21 @@ namespace engine::script {
 
 		JSValue ScopeCount(JSContext *context, JSValueConst self, int, JSValueConst *) {
 			ScopePayload *scope = ScopeOf(context, self);
-			return scope == nullptr ? JS_EXCEPTION : JS_NewInt64(context, JsOf(context).Scopes.Count(scope->Handle));
+			return scope == nullptr ? JS_EXCEPTION
+									: JS_NewInt64(context, JsOf(context).Scopes.Count(scope->Handle));
 		}
 
 		JSValue ScopeIsAlive(JSContext *context, JSValueConst self, int, JSValueConst *) {
 			ScopePayload *scope = ScopeOf(context, self);
-			return scope == nullptr ? JS_EXCEPTION : JS_NewBool(context, JsOf(context).Scopes.IsAlive(scope->Handle));
+			return scope == nullptr ? JS_EXCEPTION
+									: JS_NewBool(context, JsOf(context).Scopes.IsAlive(scope->Handle));
 		}
 
 		JSValue ScopeSetErrorHandler(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
 			ScopePayload *scope = ScopeOf(context, self);
 			if (scope == nullptr) return JS_EXCEPTION;
-			if (argc < 1 || !JS_IsFunction(context, argv[0])) return JS_ThrowTypeError(context, "Scope.SetErrorHandler expects a function");
+			if (argc < 1 || !JS_IsFunction(context, argv[0]))
+				return JS_ThrowTypeError(context, "Scope.SetErrorHandler expects a function");
 			if (scope->ErrorHandler != 0) Release(context, scope->ErrorHandler);
 			scope->ErrorHandler = Retain(context, argv[0]);
 			return JS_DupValue(context, self);
@@ -195,8 +207,14 @@ namespace engine::script {
 		JS_NewClass(JS_GetRuntime(context), bound.ScopeClass, &definition);
 		JSValue prototype = JS_NewObject(context);
 		static const JSCFunctionListEntry methods[] = {
-			JS_CFUNC_DEF("Add", 1, ScopeAdd), JS_CFUNC_DEF("AddBulk", 1, ScopeAddBulk), JS_CFUNC_DEF("Remove", 1, ScopeRemove), JS_CFUNC_DEF("Clean", 0, ScopeClean), JS_CFUNC_DEF("Destroy", 0, ScopeDestroy),
-			JS_CFUNC_DEF("Count", 0, ScopeCount), JS_CFUNC_DEF("IsAlive", 0, ScopeIsAlive), JS_CFUNC_DEF("SetErrorHandler", 1, ScopeSetErrorHandler),
+			JS_CFUNC_DEF("Add", 1, ScopeAdd),
+			JS_CFUNC_DEF("AddBulk", 1, ScopeAddBulk),
+			JS_CFUNC_DEF("Remove", 1, ScopeRemove),
+			JS_CFUNC_DEF("Clean", 0, ScopeClean),
+			JS_CFUNC_DEF("Destroy", 0, ScopeDestroy),
+			JS_CFUNC_DEF("Count", 0, ScopeCount),
+			JS_CFUNC_DEF("IsAlive", 0, ScopeIsAlive),
+			JS_CFUNC_DEF("SetErrorHandler", 1, ScopeSetErrorHandler),
 		};
 		JS_SetPropertyFunctionList(context, prototype, methods, 8);
 		JS_SetClassProto(context, bound.ScopeClass, prototype);

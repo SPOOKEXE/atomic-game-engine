@@ -28,7 +28,8 @@ namespace engine::script {
 			return *static_cast<ScopePayload *>(memory);
 		}
 
-		void ReportFailure(lua_State *state, ScopePayload &scope, const char *operation, std::string message) {
+		void
+		ReportFailure(lua_State *state, ScopePayload &scope, const char *operation, std::string message) {
 			if (scope.ErrorHandler != 0) {
 				lua_getref(state, scope.ErrorHandler);
 				lua_pushlstring(state, message.data(), message.size());
@@ -50,7 +51,9 @@ namespace engine::script {
 			lua_getref(state, reference);
 			if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
 				const char *message = lua_tostring(state, -1);
-				ReportFailure(state, scope, "callback cleanup", message != nullptr ? message : "non-string error");
+				ReportFailure(
+					state, scope, "callback cleanup", message != nullptr ? message : "non-string error"
+				);
 				lua_pop(state, 1);
 			}
 			lua_unref(state, reference);
@@ -260,8 +263,14 @@ namespace engine::script {
 	void OpenScopes(lua_State *state) {
 		LuauContext &context = ContextOf(state);
 		static constexpr LuauServiceMethod METHODS[] = {
-			{"Add", ScopeAdd}, {"AddBulk", ScopeAddBulk}, {"Remove", ScopeRemove}, {"Clean", ScopeClean}, {"Destroy", ScopeDestroy},
-			{"IsAlive", ScopeIsAlive}, {"Count", ScopeCount}, {"SetErrorHandler", ScopeSetErrorHandler},
+			{"Add", ScopeAdd},
+			{"AddBulk", ScopeAddBulk},
+			{"Remove", ScopeRemove},
+			{"Clean", ScopeClean},
+			{"Destroy", ScopeDestroy},
+			{"IsAlive", ScopeIsAlive},
+			{"Count", ScopeCount},
+			{"SetErrorHandler", ScopeSetErrorHandler},
 		};
 
 		lua_newtable(state);
@@ -274,12 +283,17 @@ namespace engine::script {
 
 		luaL_newmetatable(state, "Scope");
 		lua_pushlightuserdata(state, &context);
-		lua_pushcclosure(state, [](lua_State *inner) {
-			lua_getfield(inner, LUA_REGISTRYINDEX, "engine.scope.methods");
-			lua_pushvalue(inner, 2);
-			lua_rawget(inner, -2);
-			return 1;
-		}, "__index", 1);
+		lua_pushcclosure(
+			state,
+			[](lua_State *inner) {
+				lua_getfield(inner, LUA_REGISTRYINDEX, "engine.scope.methods");
+				lua_pushvalue(inner, 2);
+				lua_rawget(inner, -2);
+				return 1;
+			},
+			"__index",
+			1
+		);
 		lua_setfield(state, -2, "__index");
 		lua_pushcfunction(state, ScopeGc, "__gc");
 		lua_setfield(state, -2, "__gc");

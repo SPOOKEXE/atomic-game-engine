@@ -283,7 +283,8 @@ namespace studio {
 
 			DiagnosticSpan copy = spans[index];
 			copy.Parent = index == root ? engine::core::FrameGraph::NO_PARENT : retained[spans[index].Parent];
-			copy.Depth = copy.Parent == engine::core::FrameGraph::NO_PARENT ? 0 : focused[copy.Parent].Depth + 1;
+			copy.Depth =
+				copy.Parent == engine::core::FrameGraph::NO_PARENT ? 0 : focused[copy.Parent].Depth + 1;
 			retained[index] = static_cast<uint32_t>(focused.size());
 			focused.push_back(std::move(copy));
 			sourceIndices.push_back(static_cast<uint32_t>(index));
@@ -1474,7 +1475,8 @@ namespace studio {
 				if (ImGui::IsMouseHoveringRect(upper, lower)) {
 					hovered = &span;
 					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-						clickedSource = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+						clickedSource =
+							focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
 					}
 					draw->AddRect(upper, lower, engine::ui::BrightColour());
 				}
@@ -1497,7 +1499,8 @@ namespace studio {
 			// deliberately fitted into the measured wall-time gap that waited for it,
 			// so drawing synthetic gaps last would cover the useful worker bars.
 			const auto isAccounting = [&](size_t index) {
-				const uint32_t source = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+				const uint32_t source =
+					focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
 				return source >= spans.size();
 			};
 			for (size_t index = 0; index < visibleSpans.size(); index++) {

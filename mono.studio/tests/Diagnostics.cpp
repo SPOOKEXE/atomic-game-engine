@@ -20,8 +20,8 @@ using studio::DescribeDiagnosticSpan;
 using studio::DiagnosticSpan;
 using studio::FilterDiagnosticSpans;
 using studio::FinishDiagnosticAverage;
-using studio::FocusDiagnosticSpans;
 using studio::FitReportedDiagnosticTimeline;
+using studio::FocusDiagnosticSpans;
 using studio::LayoutDiagnosticRows;
 
 TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnostics]") {

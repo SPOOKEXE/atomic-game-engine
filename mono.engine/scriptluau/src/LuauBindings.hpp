@@ -35,8 +35,8 @@
 #include <engine/script/Host.hpp>
 #include <engine/script/LuauTags.hpp>
 #include <engine/script/Runtime.hpp>
-#include <engine/script/ScriptCall.hpp>
 #include <engine/script/Scope.hpp>
+#include <engine/script/ScriptCall.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
 #include <engine/script/ServiceSurface.hpp>
 #include <engine/script/Signals.hpp>
