@@ -6,22 +6,28 @@
 # splitting it means either duplicating sixty lines or reaching for a reusable
 # workflow to avoid duplicating them. See docs/RELEASING.md.
 #
-# Deliberately not on pull_request. A full build from a cold clone is close to
-# an hour on a hosted runner - shaderc, SDL, Luau, QuickJS and Crypto++ all
-# compile from source - and `.githooks/pre-push` already builds the `ci` preset
-# before anything leaves a contributor's machine. Cheap checks belong in a
-# separate workflow that does not configure a client.
+# Deliberately not on branch pushes and not on pull_request. A full build from
+# a cold clone is close to an hour on a hosted runner - shaderc, SDL, Luau,
+# QuickJS and Crypto++ all compile from source - and `.githooks/pre-push`
+# already runs the whole of `just preset=ci check` before anything leaves a
+# contributor's machine. A branch push would rebuild, remotely and slowly, what
+# the hook just verified locally. Tags publish releases, and
+# `workflow_dispatch` is the dry run that builds and uploads artifacts without
+# publishing anything. Cheap checks belong in a separate workflow that does not
+# configure a client.
+#
+# So the only refs that start this are a `v*.*.*` tag and a human pressing the
+# button. Pushing a commit, to any branch, builds nothing anywhere but here.
 
 name: build
 
 on:
   push:
-    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
 
-# A tag and the branch push that preceded it are different refs, so a tag build
-# is never cancelled by this.
+# One run per ref, so a re-run cancels the attempt it replaces rather than
+# racing it.
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
@@ -82,14 +88,14 @@ jobs:
 
           # **The build matrix is decided here, because a job cannot decide it
           # for itself.** `jobs.<id>.if` cannot see the `matrix` context - only
-          # a step can - so "build the dev flavour on a tag and not on a branch
-          # push" has to be a matrix that is shorter on a branch push. It is
+          # a step can - so "build the dev flavour on a tag and not on a manual
+          # run" has to be a matrix that is shorter on a manual run. It is
           # written out rather than filtered, because a two-entry list twice is
           # shorter than the expression that would trim one.
           #
           # `dev` is the same tree from the `dist-dev` preset: -O1, heap
           # profiler compiled in. It doubles an hour-long matrix, which is why
-          # it runs for a tag only - nothing publishes it otherwise.
+          # it runs for a tag only - a manual run publishes nothing.
           shipped='
             {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"release","preset":"release"},
             {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"release","preset":"release"},

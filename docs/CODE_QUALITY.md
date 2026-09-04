@@ -191,7 +191,7 @@ cmake --preset ci && cmake --build .cache/build/ci -j
 - [ ] **Are `TEST_DEPENDS` declared?** They are what makes the cascade
       re-run this suite when something under it changes.
 - [ ] **Does it need a GPU, a network or a clock?** If so, can the part that
-      does not be separated out so CI still covers it?
+      does not be separated out so it is still covered where there is none?
 
 ## 7 · Security
 

@@ -131,6 +131,7 @@ new demos:
 - [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 - [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
 - [_] ECS driven RL agent environments
+- [_] use a spatial walk (octree) to find hallways and such and use that baked information for things like the LOD, unrendering objects, etc. full node based logic for customisation.
 
 ### Open Decision
 

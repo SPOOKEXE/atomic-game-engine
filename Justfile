@@ -45,7 +45,7 @@ setup: install-hooks
 # somebody else set - a hook you did not install running on your push is worse
 # than no hook.
 #
-# Installs `.githooks/pre-push`, which builds `preset=ci` before a push.
+# Installs `.githooks/pre-push`, which runs `just preset=ci check` before a push.
 install-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -57,8 +57,23 @@ install-hooks:
     fi
     git config --local core.hooksPath .githooks
     chmod +x .githooks/*
-    echo "hooks installed - .githooks/pre-push builds preset=ci before a push."
+    echo "hooks installed - .githooks/pre-push runs 'just preset=ci check' before a push."
     echo "Escape one deliberately with: git push --no-verify"
+
+# Compiler cache status, and its size. The build uses ccache or sccache when
+# one is on PATH, shared across every preset - and the ccache default 5 GB cap
+# is too small for this tree, so size it once per machine: `just ccache 20G`.
+# Bare `just ccache` only reports. Absence is not an error, same as in the
+# build itself: it says how to install one and stops.
+ccache size="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v ccache > /dev/null; then
+        echo "ccache: none found. sudo apt install ccache (or brew install ccache), then \`just ccache 20G\`."
+        exit 0
+    fi
+    if [ -n "{{size}}" ]; then ccache --max-size "{{size}}"; fi
+    ccache -s | grep -E "Cache size|Hits:|Misses:|Cleanups" | awk '!seen[$0]++'
 
 # Configure one preset. Safe to re-run; CMake reuses the cache.
 configure:
@@ -771,23 +786,19 @@ luau-lsp:
 
 # Every check there is, in the order to run them, against one preset.
 #
-# **The whole guarantee, and it is local.** No machine other than this one runs
-# any of it: there is no workflow on GitHub and there will not be one - the
-# repository's owner decided that, and `docs/retired/DEFERRED.md` D00005 carries
-# the decision and what it costs. So this recipe is not "what CI runs". It is
-# what a person runs before a push.
+# **The whole guarantee, and it is local.** No workflow runs any of it: the one
+# workflow on GitHub builds release artefacts from tags and publishes them, and
+# that is a decision - `docs/retired/DEFERRED.md` D00005 carries it. So this
+# recipe is not "what CI runs". It is what a person runs before a push, and
+# what `.githooks/pre-push` runs for them on the way out.
 #
 # The order is cheapest and most likely to fail first, so a misformatted file
 # does not wait behind a compile.
 #
 # Not `preset=ci` by default, because that makes every warning fatal and the
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
-# strictest configuration this repository has.
-#
-# **The one part of it that is not manual is the `ci` build**, which
-# `.githooks/pre-push` does for you - because that is the half that has gone
-# uncompilable three times while being described as the standard, twice inside
-# v0.15 alone, and a check nobody runs stops being true.
+# strictest configuration this repository has - which is also what the hook
+# runs, so a push is held to the strictest configuration by default.
 check: format-check em-dash-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
     @echo "check ok - format, em dashes, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 

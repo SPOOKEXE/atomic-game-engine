@@ -25,6 +25,13 @@ Needs CMake 3.24+, Ninja and a C++20 compiler - nothing else. `glslc` is built
 from the vendored shaderc, so it is not a prerequisite. Everything derived lands
 in `.cache/`.
 
+A compiler cache is optional and strongly worth having: the build uses ccache
+or sccache when one is on PATH, across every preset out of one shared cache.
+The ccache default cap is 5 GB, which this tree outgrows - a full cache
+silently evicts and the hit rate falls over. On a machine with room, raise it
+once with `just ccache 20G` and check the reported lines to confirm the
+pressure is gone (`Cleanups` stops climbing).
+
 On Windows the compiler has to be in the shell's environment rather than merely
 installed on the machine, which is a requirement no other platform has and no
 error message names. [On Windows](#on-windows) is what it looks like when it is
@@ -69,7 +76,11 @@ just install-hooks    # once per clone; `just setup` already does it
 ```
 
 which points `core.hooksPath` at the checked-in `.githooks/`, and
-`.githooks/pre-push` builds the `ci` preset before a push leaves the machine.
+`.githooks/pre-push` runs `just preset=ci check` before a push leaves the
+machine. No branch push starts anything on GitHub - the one workflow there
+builds release artefacts from tags - so the push is the last moment anything
+verifies the tree, and the hook verifies all of it rather than only the
+compile.
 
 **It exists because this preset went uncompilable three times while being
 described as the standard.** At v0.4 - a `-Wmissing-field-initializers` in
@@ -81,22 +92,29 @@ as it took somebody to think of typing `preset=ci`. A check nobody runs stops
 being read and then stops being true, which is the same thing this repository
 already learnt from `just docs-check` at v0.2.
 
-**The hook builds and does not test**, which is the whole of its design. The
-failure class is a warning going fatal, and that is a compile-time property; the
-suites are `just check`'s job, cost about a minute and a half, and go red for
-whoever else's half-finished module is in the tree. A gate that fails for work
-that is not yours is a gate that gets skipped every time.
+**The hook runs the whole chain, not just the build.** It used to build and not
+test, on the argument that the suites were `just check`'s job and a gate that
+failed for somebody else's half-finished module would get skipped every time.
+That argument assumed a remote build was still coming; with branch pushes
+building nothing anywhere, a tree that compiles but fails its suites would
+otherwise be caught by nobody. So the hook holds a push to the same
+`just preset=ci check` a person runs by hand - format, build, tests,
+architecture, source rules, shaders, bindings, typecheck, determinism, replay,
+client smoke, orphans - and the escape for a shared tree with live warnings in
+it is `git push --no-verify`, said out loud.
 
 | What | Cost, measured on this machine |
 |---|---|
 | `just preset=ci build`, nothing changed | ~1 s |
 | `just preset=ci build`, a day of another preset's drift | ~1 min |
 | `just preset=ci build`, from an empty `.cache/build/ci/` | ~3 min, once - 1,998 targets, vendors included |
-| `just preset=ci check`, warm | ~2 min, and `test-all` is 1.5 of them |
+| `just preset=ci check`, warm | ~3 min, and `test-all` is most of it - plus determinism, replay and client smoke |
 
 `ci` builds into `.cache/build/ci/`, a tree of its own, so the first push after
 working in `dev` recompiles what changed since the last push rather than
-nothing. That is the cost, and it is why the hook is a build and not the chain.
+nothing. That is part of the cost; the rest is the chain actually running.
+Warm, the hook costs minutes, and it is expensive exactly when a lot has
+changed, which is exactly when it should run.
 
 Skip one deliberately with `git push --no-verify`. There is no way to skip one
 accidentally, and that asymmetry is the point.

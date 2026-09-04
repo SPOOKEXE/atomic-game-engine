@@ -371,6 +371,28 @@ endif()
 # this repository, first-party or in the vendored sources of the two targets
 # that carry a PCH. There is no timestamp to go stale.
 #
+# `CCACHE_BASEDIR` is the source directory, so that one preset's objects are
+# another's cache hits. ccache hashes the working directory by default, and
+# every preset builds in a directory of its own - without this, six presets
+# store the same vendor translation unit six times and a capped cache spends
+# itself evicting entries another preset is about to ask for again.
+# Relativised paths are rewritten to the asking directory on a hit, which is
+# what keeps debug information and depfiles correct across preset boundaries.
+# A different machine checks out elsewhere and hashes differently, so entries
+# are shared between presets and never between machines.
+#
+# `CCACHE_NOHASHDIR=true` beside it, because relativising is not the same as
+# ignoring: the working directory still enters the hash as a relative path,
+# and every preset builds in a directory of its own. Without this, the base
+# directory only shares a cache with a checkout in the same place, and two
+# presets in one checkout still miss each other on every translation unit.
+# Sources and include lines are absolute and identical between presets here,
+# so the directory a build was launched from carries no information the hash
+# would miss. The two exceptions keep missing honestly: a preset-specific
+# generated `-I` dir names a different directory, and GCC writes
+# nondeterministic bytes into every `.gch`, so precompiled-header users never
+# share across presets whatever is set here.
+#
 # Two calls per build still report as errors, and they are the two PCH
 # *generation* steps - ccache cannot parse a header as a source, so it passes
 # them to the compiler untouched. Correct, and 0.11% of the build.
@@ -401,10 +423,12 @@ if(MONO_CCACHE)
 	find_program(MONO_COMPILER_CACHE NAMES ccache sccache NO_CACHE)
 	if(MONO_COMPILER_CACHE)
 		if(MONO_COMPILER_CACHE MATCHES "ccache")
-			set(MONO_CACHE_LAUNCHER
-				"${CMAKE_COMMAND}" -E env
-				"CCACHE_SLOPPINESS=pch_defines,time_macros"
-				"${MONO_COMPILER_CACHE}")
+		set(MONO_CACHE_LAUNCHER
+			"${CMAKE_COMMAND}" -E env
+			"CCACHE_SLOPPINESS=pch_defines,time_macros"
+			"CCACHE_BASEDIR=${CMAKE_SOURCE_DIR}"
+			"CCACHE_NOHASHDIR=true"
+			"${MONO_COMPILER_CACHE}")
 		else()
 			set(MONO_CACHE_LAUNCHER "${MONO_COMPILER_CACHE}")
 		endif()

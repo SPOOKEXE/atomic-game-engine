@@ -240,6 +240,14 @@ set(TRACY_ON_DEMAND      ON  CACHE BOOL "" FORCE)
 set(TRACY_ONLY_LOCALHOST ON  CACHE BOOL "" FORCE)
 set(TRACY_NO_BROADCAST   ON  CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
+mono_vendor_system(TracyClient)
+# `pipe()` and `fscanf()` carry `warn_unused_result` on Linux, and Tracy's
+# `.cpp` files (included by TracyClient.cpp) do not check the return values.
+# MONO_WERROR governs first-party targets only; this is the same "their code,
+# our compiler" rule as shaderc and spirv-cross above.
+if(NOT MSVC)
+	target_compile_options(TracyClient PRIVATE -Wno-unused-result)
+endif()
 
 # --- asio ---------------------------------------------------------------------
 # Standalone asio, not Boost.Asio: the same author, the same code, without

@@ -49,6 +49,7 @@ script.Disabled | A tag: the host must not run this script. Presence moves it to
 script.JavaScriptSourceContainer | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column.
 script.LuaSourceContainer | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference.
 script.Program | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass.
+script.ScriptClock | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed.
 script.SourceCache | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap.
 world.BusBudget | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier.
 world.Inbox | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to.

@@ -75,7 +75,7 @@ programs share one version and a pasted line has to say which one wrote it.
 echo 0.18.1 > VERSION
 #    and README.md:  Current Version: **v0.18.1**
 
-# 2. Check it the way CI will, from a clean tree.
+# 2. Check it the way the pre-push hook will, from a clean tree.
 #    `bun install` (or npm install) first: without node_modules/.bin/tsc the
 #    build skips the two TypeScript example scenes and says so in one STATUS
 #    line nobody reads.
@@ -88,8 +88,9 @@ git tag v0.18.1
 git push origin <branch> --follow-tags
 ```
 
-The tag is what triggers the build. Pushing the commit alone builds nothing
-unless the branch is `main`.
+The tag is what triggers the build. Pushing the commit alone builds nothing,
+on any branch - branch pushes start no workflow, so the `just check` above and
+the pre-push hook are the only verification a release tree gets before the tag.
 
 To see what the workflow produces without publishing anything, run it from the
 Actions tab - a `workflow_dispatch` run builds and uploads artifacts and never
@@ -264,11 +265,11 @@ pre-v0.15 fallback files it still *reads* live beside the binary.
 
 - **It does not run the tests.** The `release` preset sets
   `MONO_BUILD_TESTS=OFF`, and a second full configure of the `ci` preset would
-  roughly double an already hour-long job. `.githooks/pre-push` builds `ci`
-  before anything is pushed, and `just check` is the gate named in
+  roughly double an already hour-long job. `.githooks/pre-push` runs
+  `just preset=ci check` before anything is pushed, and `just check` is the gate named in
   `docs/CODE_QUALITY.md`. Run it before tagging.
-- **It does not build on pull requests.** Same reason: a cold clone compiles
-  shaderc, SDL, Luau, QuickJS and Crypto++ from source. Cheap per-pull-request
+- **It does not build on pull requests, or on branch pushes at all.** Same reason: a cold clone compiles
+  shaderc, SDL, Luau, QuickJS and Crypto++ from source. Cheap per-push
   checks belong in a workflow that does not configure a client.
 - **It does not cache.** Nothing is reused between runs, so every build is from
   scratch and every build is reproducible from the tag alone. If release builds

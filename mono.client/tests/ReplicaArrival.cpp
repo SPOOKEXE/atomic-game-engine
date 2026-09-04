@@ -334,10 +334,17 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// next layout pass. This case is what would have caught it and did not,
 		// because the list it compares against was written from the same
 		// oversight.
+		// **`script.ScriptClock` joined at v0.23 and it is `script.SourceCache`'s
+		// case for scheduling state.** A world resource holding this world's
+		// script rate, its unspent accumulator and the tick last observed -
+		// a reading of this process's cadence, in `gui.PageMotion`'s sense
+		// rather than a fact about the world. The replica runs its own
+		// scripts on its own clock.
 		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
 							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
 							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
-							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache";
+							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache" ||
+							  name == "script.ScriptClock";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

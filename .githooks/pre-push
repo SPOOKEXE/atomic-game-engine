@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
 #
-# **The one thing nobody runs, run automatically: `preset=ci`.**
+# **The whole guarantee, run automatically: `just preset=ci check`.**
 #
-# `docs/retired/DEFERRED.md` D00005 records this preset going uncompilable three
-# times while being named as the standard - `-Wmissing-field-initializers` at
-# v0.4, then twice inside v0.15, the second a `-Wdangling-reference` in
+# `docs/retired/DEFERRED.md` D00005 records the `ci` preset going uncompilable
+# three times while being named as the standard - `-Wmissing-field-initializers`
+# at v0.4, then twice inside v0.15, the second a `-Wdangling-reference` in
 # `mono.cdn` that was live while a roadmap line said the preset exited 0. Each
 # lasted for however long it took somebody to think of typing `preset=ci`.
 # There is no machine other than this one and there is not going to be, so the
 # only thing that can run the strict preset is the push.
 #
-# **It builds and does not test, and that is the whole design.** The failure
-# class this exists for is a warning going fatal - the `ci` preset compiling at
-# all - and that is a compile-time property. Tests are already run by
-# `just check`, cost two and a half minutes, and are red in this tree whenever
-# somebody else's half-finished module is. A gate that goes red for work that is
-# not yours is a gate that gets `--no-verify`'d every time, which is the entry
-# recurring with extra steps.
+# **It used to build and not test.** The failure class then was a warning going
+# fatal - the `ci` preset compiling at all - and that is a compile-time
+# property, so a build was the whole gate. That changed when branch pushes
+# stopped starting anything on GitHub: with no remote build left, the push is
+# the last moment anything verifies the tree, and a tree that compiles but
+# fails its suites is exactly what used to be caught an hour later by a runner.
+# So the hook runs the same chain `just check` names - format, build, tests,
+# architecture, source rules, shaders, bindings, typecheck, determinism,
+# replay, client smoke, orphans - against the strict preset, where every
+# warning is fatal.
 #
-# Warm it costs about a second. It is expensive exactly when a lot has changed,
-# which is exactly when it should run.
+# Warm it costs minutes, not seconds, and it is expensive exactly when a lot
+# has changed, which is exactly when it should run. The cost table in RUNNING.md
+# says how many.
 #
-# Deliberately escapable, and only deliberately: `git push --no-verify`.
+# Deliberately escapable, and only deliberately: `git push --no-verify`. A gate
+# that fails for somebody else's half-finished work in a shared tree is a gate
+# that gets escaped, which is why the escape is loud rather than absent.
 #
 # Installed by `just install-hooks`, which `just setup` also runs - the hook has
 # to be checked in rather than left in one clone's `.git/hooks`, or it is a rule
@@ -31,8 +37,8 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# A push that only deletes refs compiles nothing. Everything else, including a
-# tag, is somebody publishing a tree and gets built.
+# A push that only deletes refs verifies nothing. Everything else, including a
+# tag, is somebody publishing a tree and gets checked.
 only_deletions=1
 while read -r _local_ref local_sha _remote_ref _remote_sha; do
 	if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
@@ -47,18 +53,18 @@ fi
 # length and it is the same argument: a gate that exits 0 having run nothing is
 # worse than no gate, because the push looks checked.
 if ! command -v just > /dev/null; then
-	echo "pre-push: no 'just' on PATH, so the ci preset was not built." >&2
+	echo "pre-push: no 'just' on PATH, so the tree was not checked." >&2
 	echo "  Install just, or push with --no-verify and say so." >&2
 	exit 1
 fi
 
-echo "pre-push: building the ci preset - every warning fatal." >&2
-if ! just preset=ci build; then
+echo "pre-push: running just preset=ci check - every warning fatal." >&2
+if ! just preset=ci check; then
 	echo "" >&2
-	echo "pre-push: the ci preset does not compile, so the push is refused." >&2
-	echo "  Fix the warning. Relaxing the preset is not the fix - being strict" >&2
+	echo "pre-push: the check failed, so the push is refused." >&2
+	echo "  Fix what it names. Relaxing the preset is not the fix - being strict" >&2
 	echo "  is the entire content of the preset." >&2
 	echo "  Deliberately anyway:  git push --no-verify" >&2
 	exit 1
 fi
-echo "pre-push: ci preset ok." >&2
+echo "pre-push: check ok." >&2

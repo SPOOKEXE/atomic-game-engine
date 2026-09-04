@@ -1446,6 +1446,7 @@ declare extern type BasePart extends PVInstance with
 	Anchored: boolean
 	AngularDamping: number
 	CanCollide: boolean
+	CanQuery: boolean
 	CastShadow: boolean
 	CollisionGeometry: string
 	CollisionGroup: string
