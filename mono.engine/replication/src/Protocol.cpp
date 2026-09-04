@@ -327,7 +327,9 @@ namespace engine::replication {
 		}
 		}
 
-		if (reader.Failed()) {
+		// A replication packet carries exactly one message. Leaving a suffix for a
+		// hypothetical second parser would give the same bytes two meanings.
+		if (reader.Failed() || !reader.AtEnd()) {
 			return false;
 		}
 

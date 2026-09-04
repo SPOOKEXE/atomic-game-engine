@@ -213,19 +213,16 @@ namespace engine::replication {
 		//
 		// **`scene.TextContent` and `scene.ShaderSource` were dropped for eight
 		// versions and nothing said so, which is the failure this list is the
-		// cure for rather than an instance of.** Both carry hand-written
-		// `Write`/`Read` pairs in `scene/Registration.cpp`, written expressly so
-		// the text could cross; both hold a `std::string`; and the `Trivial`
-		// gate in `DefaultReplicatedComponents` therefore removed them from the
-		// table without a word. A `StringValue` a server authored arrived on
-		// every client holding an empty string, and a `ShaderScript`'s GLSL
-		// never arrived at all - so a client drew the default tonemap while the
-		// server believed the world had been re-graded.
+		// cure for rather than an instance of.** The node-canvas records have the
+		// same shape: hand-written `Write`/`Read` pairs expressly so authored
+		// text can cross, but a `Trivial` gate cannot distinguish it from an
+		// opaque allocation. Observation is the declared safe path.
 		//
 		// They are the same shape as `script.Program` one row up: an author
 		// writes the text and then leaves it alone for the life of the world, so
 		// the dirty bit is set on the tick somebody wrote and never again.
-		return component == "gui.Label" || component == "gui.Entry" || component == "script.Program" ||
+		return component == "gui.Label" || component == "gui.Entry" || component == "gui.NodeCanvasNode" ||
+			   component == "gui.NodeCanvasGroup" || component == "script.Program" ||
 			   component == "scene.EditableMesh" || component == "scene.EditableImage" ||
 			   component == "scene.TextContent" || component == "scene.ShaderSource";
 	}
@@ -425,6 +422,13 @@ namespace engine::replication {
 			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
 			component == "gui.PageMotion" || component == "gui.ScrollMotion" ||
 			component == "gui.SettingsMenuExtensions") {
+			return true;
+		}
+
+		// A retained host callback belongs to one VM and may only run on the
+		// authority. A replica cannot reconstruct it from bytes, nor should it
+		// receive the server's teleport policy.
+		if (component == "script.TeleportRequestHandler") {
 			return true;
 		}
 

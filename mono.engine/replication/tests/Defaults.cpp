@@ -289,11 +289,13 @@ TEST_CASE("a serialiser is not enough to cross, and the two that say so", "[repl
 	// **Which is exactly what happened to two real components.**
 	// `scene.TextContent` is what a `StringValue` holds and `scene.ShaderSource`
 	// is the GLSL a `ShaderScript` holds; both carry hand-written pairs in
-	// `scene/Registration.cpp` for the express purpose of crossing, and both
-	// were dropped by the line above without a word. Declaring them here is the
-	// whole of the wiring - `Authority::Survey` turns the observation on.
+	// `scene/Registration.cpp` for the express purpose of crossing. The two GUI
+	// node-canvas records have the same contract for authored titles. Declaring
+	// them here is the whole of the wiring - `Authority::Survey` observes them.
 	CHECK(engine::replication::CannotBeSigned("scene.TextContent"));
 	CHECK(engine::replication::CannotBeSigned("scene.ShaderSource"));
+	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasNode"));
+	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasGroup"));
 
 	// And the ordinary case, so this is a rule rather than a list: a component
 	// whose bytes *can* be hashed is signed, and declaring it here would buy a
@@ -525,12 +527,12 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 	//
 	// **And the third reason, which is not about how often a value is written.**
 	// A signature hashes the object representation, and a `std::string`'s object
-	// representation is a pointer - so `gui.Label`, `gui.Entry` and
-	// `script.Program` cannot be signed at all and are observed instead. That is
-	// the mechanism `Authority::Resign` already names when it declines a
-	// non-trivial component rather than a fourth detector.
+	// representation is a pointer - so `gui.Label`, `gui.Entry`, the two
+	// node-canvas records and `script.Program` cannot be signed at all and are
+	// observed instead. That is the mechanism `Authority::Resign` already names
+	// when it declines a non-trivial component rather than another detector.
 	//
-	// Asserted as "no fifth one" rather than as a list, because the list depends
+	// Asserted as a closed set rather than as a count, because the list depends
 	// on what this process registered and the *rule* does not.
 	for (const auto &component : DefaultReplicatedComponents()) {
 		if (component.Detection != ChangeDetection::Observed) {
@@ -540,6 +542,7 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 		CHECK(
 			(component.Name == "scene.Transform" || component.Name == "scene.Motion" ||
 			 component.Name == "gui.Label" || component.Name == "gui.Entry" ||
+			 component.Name == "gui.NodeCanvasNode" || component.Name == "gui.NodeCanvasGroup" ||
 			 component.Name == "script.Program")
 		);
 	}
