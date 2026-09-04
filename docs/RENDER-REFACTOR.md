@@ -2,8 +2,9 @@
 
 ## 0. scope and review status
 
-Full plan for review. Engine implementation starts after review. Nothing marked
-planned below is a claim that the feature ships. Baseline inspected at
+Implementation requested against this full plan. Progress and evidence live in
+[RENDER-REFACTOR-TASKS.md](RENDER-REFACTOR-TASKS.md). Nothing marked planned below
+is a claim that the feature ships. Baseline inspected at
 `b61c564c`; future implementation must recheck the relevant code and tests.
 
 This document consolidates `RENDER_PIPELINE.md`,
@@ -483,7 +484,7 @@ assertions, so a tiny missing portal is not hidden by a mostly black image.
 | PBR | Roughness/metalness grid, each map, normal orientation, fixed light and environment | Broken BRDF, channel packing, missing map or inconsistent techniques |
 | Selection | Per-object mask, per-camera feature override, multiple worlds | State leakage, widened cull set or incorrect capability merge |
 | Temporal | Fixed seeded sequence, moving object/camera, resize/cut/portal crossing | Ghosting, stale history, wrong velocity or jitter reuse |
-| Portals | Matched direct-view/through-portal geometry and scripted crossing | Seam holes, double body, clipping/light discontinuity |
+| Portals | Matched direct-view/through-portal geometry, lighting and scripted object/player crossing; angle sweeps and bus-delivered cross-world frames | Seam holes, wrong-side views, stale destination pixels, doubled bodies, camera-subject loss and clipping/light discontinuity |
 | Lifetime | Repeated edit/reinstall/unload, failed admission, held frame | Leaks, invalid handles, loss of last valid image |
 
 Pin the existing zero-to-one clip depth and Y-up convention. Derive frusta from
@@ -1273,6 +1274,16 @@ clip the entrance aperture using a common polygon/mask. Test edge-on views,
 camera on the plane, near-plane crossings, nested panes, backfaces and mirrored
 winding. The surface must not show geometry from behind its exit wall.
 
+The aperture behaves like an opening into the destination from every supported
+viewpoint. Sweep azimuth, elevation and roll on both sides, at grazing angles,
+from off-centre positions and across the plane. Include portals larger than the
+near plane and entrances partially outside the viewport. Match the unfolded
+direct-view reference inside the aperture and the local scene outside it; a
+centred, front-facing screenshot cannot satisfy this gate. A two-sided portal
+must resolve the correct destination side rather than mirror, blank or reuse
+the front-side camera. Any intentionally one-sided authored portal declares
+that behavior separately and cannot stand in for the seamless two-sided demo.
+
 A body straddling the seam draws clipped source and transformed destination
 proxies from the same stable entity identity and authoritative transform.
 Both halves share material/skinning/deformation, normal basis, lighting inputs,
@@ -1329,6 +1340,41 @@ not render. GPU-only visual displacement changes neither collision nor transit
 authority. Multiplayer tests cover ownership transfer, rollback/replay inputs,
 stale destination, simultaneous bodies and high-speed tunnelling.
 
+### player cameras and cross-world images
+
+Exercise the actual player character path with `CameraSubject` set to its
+`Humanoid`. Move the complete character through the aperture, including body,
+attachments, animation and locally controlled ownership. Preserve the subject
+relationship by stable identity when the destination creates new ECS handles.
+Transform camera pose, look direction, follow/orbit offset and remaining camera
+motion at the same accepted crossing boundary. First-person and third-person
+cameras must not snap to an old world, detach from the subject or interpolate
+through the space between worlds. Camera obstruction queries must follow the
+same seam and use the correct world's collision space. A free camera crossing
+alone does not prove the player-camera behavior.
+
+Destination worlds receive named, versioned view requests through the world bus.
+Bounded jobs prepare their immutable render inputs; the destination renders its
+own lighting and scene state. Return an owned image payload or serialized image
+artifact through the bus, with world generation, request identity, seam/camera
+revision, extent, format, capture tick and completion status. Raw ECS or GPU
+pointers never cross this boundary. A same-process optimization may resolve a
+local image slot on the render owner from the receipt, but must also pass the
+copied-message/process-isolated path and retain the image until consumers retire.
+
+Use bounded queues and byte/pixel budgets. Coalesce superseded view requests,
+discard stale replies, and accept completed images at explicit presentation
+boundaries. Delayed jobs must not change deterministic world tick outcomes.
+Test moved portals/cameras/lights, resize, world unload/reload, failed captures
+and out-of-order replies. Expose destination-image age and missing-frame status;
+the seam cannot quietly display a cached picture of a different camera or world.
+
+Cross-world walking sequences must prove both sides together: the player sees
+the destination before entry, both clipped character halves agree while
+straddling, one body owns collision at each barrier, and its humanoid camera
+continues smoothly after acknowledgement. Repeat in reverse and through a loop,
+with destination failure and high-speed traversal as separate cases.
+
 ### visible proof scene
 
 Build `PortalSeams` example: contrasting lit rooms, matching floor grid, an oblique
@@ -1340,6 +1386,14 @@ single-step and direct-versus-portal split view for agent inspection.
 
 Gate is inspected image sequences plus numeric ownership/contact tests. A single
 still image cannot prove seamless motion, physics or temporal history.
+
+Repair the existing non-Euclidean portal demonstration through these same engine
+paths. Preserve its spatial illusion while checking corridors/rooms reached from
+multiple directions, repeated loops, look-back after crossing, moving lights,
+objects and humanoid-following player cameras. The example must expose a fixed
+scripted all-angle route and an interactive walking route. Record per-frame
+aperture/depth probes and ownership/camera continuity alongside the captures;
+renaming the demo or adding a disconnected showcase does not close its defects.
 
 ### bound portal views before shading them
 
@@ -1961,7 +2015,7 @@ capture inputs, expected tier behavior and a release profiling recipe.
 | Anime screencap | HDR lighting -> soft bloom -> grade -> light sharpen -> letterbox/vignette -> output conversion | Retained static composition; explicit tonemap placement prevents double conversion |
 | Hybrid raytrace | Raster primary -> resident acceleration -> secondary ray reflection/shadow/GI -> denoise/composite -> output | Offscreen object reflected and occluding; comparison with raster/SSR fallback |
 | Progressive path trace | Acceleration -> camera rays -> path integration -> accumulate/moments -> optional denoise -> tonemap | Diffuse/specular/emissive transport, sample count, convergence and immediate reset after edit |
-| PortalSeams | Linked captures, portal-light transport, split geometry, physical crossing, recursive composition | The full sequence in §12, including cross-world ownership |
+| PortalSeams and existing non-Euclidean demo | Linked captures, portal-light transport, split geometry, physical crossing, recursive composition, bus-delivered destination images | The full sequence in §12: all-angle seams, actual humanoid-subject player cameras, cross-world walking and ownership |
 | AA comparison | Same scene/camera, selectable None/MSAA/FXAA/SMAA/TAA/upscale graph | Thin edges, foliage, moving emissive geometry, cuts and native UI |
 | Multi-world camera wall | Distinct worlds and repeated cameras per world, asset preview and portal views | All active cameras update in one frame; shared rows uploaded once |
 | Editable packing lab | Quantization policy -> pack/upload -> atlas/mips -> draw/inspect | Error heatmaps, real byte counts, one-pixel edits and pressure fallback |
@@ -2010,7 +2064,7 @@ criteria. A failed prerequisite does not justify marking the rest complete.
 | P5: compositor and Studio authoring | P3, P4 | Typed palette/groups/material graph lowering, inspectors, async cook previews, undo/redo and hidden-work gates | Save/load/cook/run round trip; stale/failed cook cannot replace valid preview; no UI-thread compile hitch |
 | P6: lighting/colour/post/AA | P1 to P4 | PBR contracts, HDR order, dynamic AO/GI baseline, stable shadows/clusters, post shaders, velocity/history and AA subgraphs | Numeric energy/colour and motion fixtures pass; every mode has actual backend or explicit tier fallback |
 | P7: packing/streaming/geometry | P2 to P4 | Quantization components/codecs, editable dirty updates, mip/texture pressure/atlas, four LOD modes, decimation, meshlets, tessellation/displacement | Bounded memory and error; no culling holes; per-camera GPU LOD; physical mesh unaffected by visual state |
-| P8: portal completion | P1, P2, P4, P6; physics/world work | Shared seam math, clipping/proxies, light transport, HDR captures, physical overlap and world transfer | Numeric ownership/contact and inspected crossing sequence; no missing geometry or doubled lighting/body |
+| P8: portal completion | P1, P2, P4, P6; physics/world work | Shared seam math, all-angle clipping/proxies, light transport, HDR captures, bus/job image exchange, physical overlap, world transfer and humanoid-subject camera continuity | Numeric ownership/contact, direct-view image comparisons and inspected player/object crossing sequences; existing non-Euclidean demo fixed; no missing geometry, stale other-side image or doubled lighting/body |
 | P9: tracing | P3, P4, P6, geometry contract; P8 for portal rays | Port/build acceleration and hybrid/path nodes, accumulation/reset, denoise and capability fallback | Offscreen intersection and statistical convergence; no fake tracer label; portal-ray behavior consistent |
 | P10: weather/effects and scene producers | P2, P4, P6 | Explicit particle/environment nodes, generic field/volume work proven by TornadoSim; retained chunk render-input candidates | Script and visual gates pass; bounded particle/volume cost; no duplicate CPU simulation |
 | P11: examples and portability | Relevant feature phases | All §19 documents/scenes, native handler command adapter, all backend/tier image runs, active-camera and pressure profiling | Actual SPIR-V/MSL images, documented limits, no implicit unsupported features |
