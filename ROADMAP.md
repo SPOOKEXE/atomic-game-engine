@@ -72,9 +72,6 @@ c. classes
 - [x] optimise remaining physics bottlenecks using StressPhysics demo
 - [x] ensure chunked physics world implementation is correct and optimised (world is split into chunks, all physics computations happen in the chunks on separate threads in parallel, all computations are also batch computed, chunk borders - edges and corners - are computed separately or handled post center).
 - [x] persistent contact manifolds
-
-### v0.23.1
-
 - [x] speculative contacts within a two millimetre skin, kept private until the
   shapes touch, with no early friction, restitution, warm start, or contact event.
   box2d simulation and the continuous collision gdc 2013 notes describe the
@@ -88,6 +85,11 @@ c. classes
 - [x] remove duplicate dynamic swept-grid candidate writes and restore the full
   rotational conservative-advance budget, with ordered overlap tests, fallback
   metrics, and focused benchmarks.
+- [x] remove stale continuous-impact resweeps and fold speculative-contact
+  confirmation into the solver cache pass, with bounded profiling scopes,
+  focused regressions, and a cascading-impact benchmark.
+
+### v0.23.1
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 
