@@ -5270,7 +5270,7 @@ TEST_CASE("GuiButton EmulateClick activates both button classes in both language
 			image:EmulateClick()
 			assert(record.Name == 'Recordtatmiaim', record.Name)
 		)"
-			: R"(
+														: R"(
 				const record = Instance.new('Part');
 				record.Name = 'Record';
 				const text = Instance.new('TextButton');
@@ -5285,8 +5285,10 @@ TEST_CASE("GuiButton EmulateClick activates both button classes in both language
 			)";
 
 		MustRun(*runtime, source);
-		CHECK_FALSE(runtime->Run(language == Language::Luau ? "Instance.new('Frame'):EmulateClick()"
-																 : "Instance.new('Frame').EmulateClick()"));
+		CHECK_FALSE(runtime->Run(
+			language == Language::Luau ? "Instance.new('Frame'):EmulateClick()"
+									   : "Instance.new('Frame').EmulateClick()"
+		));
 		CHECK(runtime->LastError().find("GuiButton") != std::string::npos);
 	}
 }

@@ -158,7 +158,7 @@ namespace engine::gui {
 		// @return How many bytes of `source` the entity took, or zero when it is
 		//         not one - in which case the caller writes the `&` literally,
 		//         because an ampersand in ordinary prose is not an error.
-		size_t Entity(std::string_view source, std::string &out) {
+		size_t DecodeEntity(std::string_view source, std::string &out) {
 			struct Named {
 				std::string_view Text;
 				char Replacement;
@@ -273,7 +273,7 @@ namespace engine::gui {
 			const char here = source[at];
 
 			if (here == '&') {
-				if (const size_t taken = Entity(source.substr(at), plain); taken > 0) {
+				if (const size_t taken = DecodeEntity(source.substr(at), plain); taken > 0) {
 					at += taken;
 					continue;
 				}

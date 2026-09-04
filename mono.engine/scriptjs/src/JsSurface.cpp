@@ -1195,7 +1195,9 @@ namespace engine::script {
 			JS_CGETSET_DEF("MouseButton1Click", InstanceTreeSignal<SignalKind::GuiActivated>, nullptr),
 			JS_CGETSET_DEF("MouseButton1Down", InstanceTreeSignal<SignalKind::GuiMouseButton1Down>, nullptr),
 			JS_CGETSET_DEF("MouseButton1Up", InstanceTreeSignal<SignalKind::GuiMouseButton1Up>, nullptr),
-			JS_CGETSET_DEF("MouseButton2Click", InstanceTreeSignal<SignalKind::GuiMouseButton2Click>, nullptr),
+			JS_CGETSET_DEF(
+				"MouseButton2Click", InstanceTreeSignal<SignalKind::GuiMouseButton2Click>, nullptr
+			),
 			JS_CGETSET_DEF("MouseButton2Down", InstanceTreeSignal<SignalKind::GuiMouseButton2Down>, nullptr),
 			JS_CGETSET_DEF("MouseButton2Up", InstanceTreeSignal<SignalKind::GuiMouseButton2Up>, nullptr),
 
