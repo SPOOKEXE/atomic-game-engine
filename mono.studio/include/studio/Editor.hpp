@@ -97,6 +97,7 @@
 #include <studio/Commands.hpp>
 #include <studio/Complete.hpp>
 #include <studio/Config.hpp>
+#include <studio/ContentResidency.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Diagnostics.hpp>
 #include <studio/Export.hpp>
@@ -2719,11 +2720,10 @@ namespace studio {
 		// paste, an undo, a duplicate and a world opened after the content had
 		// landed.
 		//
-		// **`Visual::Fitted` is what makes this a per-frame pass rather than a
-		// per-frame walk of the scene.** A part that has been fitted to the mesh
-		// it names is skipped, so the steady state is one comparison per part
-		// and nothing is written - which is the same guard that already let the
-		// arrival path run on every republish.
+		// **A component-and-mesh revision gate keeps the steady state out of the
+		// scene entirely.** On a changed batch it gathers resident meshes, then
+		// walks each affected world once to fit them together. `Visual::Fitted`
+		// keeps that write pass idempotent.
 		//
 		// @since v0.13
 		void FitPendingParts();
@@ -2876,6 +2876,10 @@ namespace studio {
 
 		// Which texture names have been asked for, by `core::Name::Id`.
 		std::unordered_set<uint32_t> ContentAsked;
+
+		// A retry with an already resident verified root must not decode, upload or
+		// invalidate the scene again.
+		ContentResidency ContentResident;
 
 		// Last content-reference revision scanned per open world. This is a
 		// reader watermark, not a second copy of the world's asset references.
