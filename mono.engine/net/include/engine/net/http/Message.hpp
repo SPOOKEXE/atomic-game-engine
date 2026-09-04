@@ -201,7 +201,7 @@ namespace engine::net::http {
 	//
 	// @since v0.9
 	struct MessageLimits {
-		// The longest request line - verb, target and version.
+		// The longest request or response start line.
 		size_t RequestLineBytes = 8u * 1024u;
 
 		// The largest header block, all fields together.

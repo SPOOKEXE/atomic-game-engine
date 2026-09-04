@@ -305,6 +305,21 @@ TEST_CASE("a peer that never sends a blank line is bounded by what it sent", "[h
 	CHECK(Parse(flood, request, tight) == ParseResult::TooLarge);
 }
 
+TEST_CASE("first lines are bounded before a header block arrives", "[http]") {
+	MessageLimits tight;
+	tight.RequestLineBytes = 16;
+	tight.HeaderBytes = 1024;
+
+	Request request;
+	const std::string longRequestLine = "GET /" + std::string(32, 'x');
+	CHECK(Parse(longRequestLine, request, tight) == ParseResult::TooLarge);
+
+	Response response;
+	size_t consumed = 0;
+	const std::vector<std::byte> longResponseLine = Raw("HTTP/1.1 200 " + std::string(32, 'x'));
+	CHECK(ParseResponse(longResponseLine, tight, false, response, consumed) == ParseResult::TooLarge);
+}
+
 // --- ranges ---------------------------------------------------------------
 
 TEST_CASE("a byte range parses and resolves against an entity", "[http]") {
