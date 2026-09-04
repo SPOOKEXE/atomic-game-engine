@@ -567,6 +567,33 @@ TEST_CASE("a particle samples the nearest vector field without an ECS lookup per
 	CHECK(system->States[0].Velocity.Z == 0.0f);
 }
 
+TEST_CASE("adding a field to an emitter ancestor refreshes retained particle blocks", "[effects]") {
+	Store store("effects_field_refresh");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Shape = ParticleShape::Box;
+
+	Frame(store, 0.1f);
+	ParticleSystem *system = store.ResourceMutable<ParticleSystem>();
+	REQUIRE(system != nullptr);
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	REQUIRE(system->Blocks[slot].ForceField.Source == engine::ecs::NULL_ENTITY);
+
+	engine::scene::VectorField3D field;
+	field.Vector = Vector3{8.0f, 0.0f, 0.0f};
+	field.LocalSpace = false;
+	store.SetComponent(part, engine::ecs::Components::Of<engine::scene::VectorField3D>(), &field);
+
+	Frame(store, 0.1f);
+	REQUIRE(system->Blocks[slot].ForceField.Source == part);
+	CHECK(system->States[0].Velocity.X == Catch::Approx(0.8f));
+}
+
 TEST_CASE("distance emission follows parent travel rather than frame time", "[effects]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);

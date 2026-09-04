@@ -800,6 +800,7 @@ namespace engine::effects {
 		static thread_local std::vector<uint64_t> changedFields;
 		movedParents.clear();
 		changedFields.clear();
+		bool fieldComponentsChanged = false;
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-parents", core::ProfileCategory::Simulation);
 			const uint64_t transformVersion = store.ComponentChangeVersion<scene::Transform>();
@@ -840,6 +841,7 @@ namespace engine::effects {
 
 			const uint64_t field2DVersion = store.ComponentChangeVersion<scene::VectorField2D>();
 			if (system->VectorField2DChangeVersion != field2DVersion) {
+				fieldComponentsChanged = true;
 				store.EachChanged<scene::VectorField2D>([](ecs::Entity entity, scene::VectorField2D &) {
 					changedFields.push_back(entity.Id);
 				});
@@ -847,6 +849,7 @@ namespace engine::effects {
 			}
 			const uint64_t field3DVersion = store.ComponentChangeVersion<scene::VectorField3D>();
 			if (system->VectorField3DChangeVersion != field3DVersion) {
+				fieldComponentsChanged = true;
 				store.EachChanged<scene::VectorField3D>([](ecs::Entity entity, scene::VectorField3D &) {
 					changedFields.push_back(entity.Id);
 				});
@@ -854,8 +857,6 @@ namespace engine::effects {
 			}
 			std::sort(movedParents.begin(), movedParents.end());
 			movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
-			std::sort(changedFields.begin(), changedFields.end());
-			changedFields.erase(std::unique(changedFields.begin(), changedFields.end()), changedFields.end());
 		}
 
 		bool emitterHierarchyChanged = false;
@@ -866,10 +867,16 @@ namespace engine::effects {
 				store.EachChanged<ecs::Hierarchy>([&](ecs::Entity entity, ecs::Hierarchy &) {
 					emitterHierarchyChanged =
 						emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
+					if (store.Get<scene::VectorField2D>(entity) != nullptr ||
+						store.Get<scene::VectorField3D>(entity) != nullptr) {
+						changedFields.push_back(entity.Id);
+					}
 				});
 				system->HierarchyChangeVersion = hierarchyVersion;
 			}
 		}
+		std::sort(changedFields.begin(), changedFields.end());
+		changedFields.erase(std::unique(changedFields.begin(), changedFields.end()), changedFields.end());
 
 		// **The block index lives on the emitter's own row**, as a component, so
 		// finding an emitter's block is a column read rather than a search. That
@@ -1124,7 +1131,24 @@ namespace engine::effects {
 						std::binary_search(movedParents.begin(), movedParents.end(), field.Id);
 					const bool fieldChanged =
 						std::binary_search(changedFields.begin(), changedFields.end(), field.Id);
-					if (emitterHierarchyChanged || parentChanged || fieldMoved || fieldChanged) {
+					// A new, nearer field is not in the retained sample yet. Walk only
+					// on a field edit so quiet emitters still take the cached fast path.
+					bool changedFieldAncestor = false;
+					for (ecs::Entity ancestor = entity;
+						 !changedFields.empty() && ancestor != ecs::NULL_ENTITY;
+						 ancestor = store.ParentOf(ancestor)) {
+						changedFieldAncestor =
+							std::binary_search(changedFields.begin(), changedFields.end(), ancestor.Id);
+						if (changedFieldAncestor) {
+							break;
+						}
+					}
+					const bool fieldRemoved =
+						fieldComponentsChanged && field != ecs::NULL_ENTITY &&
+						(block.ForceField.TwoDimensional ? store.Get<scene::VectorField2D>(field) == nullptr
+														 : store.Get<scene::VectorField3D>(field) == nullptr);
+					if (emitterHierarchyChanged || parentChanged || fieldMoved || fieldChanged ||
+						changedFieldAncestor || fieldRemoved) {
 						block.ForceField = scene::ResolveVectorField(store, entity);
 						block.Revision++;
 						residentChanged = true;
