@@ -203,7 +203,7 @@ namespace {
 	// the property it holds is a type this reader refuses: a refusal that
 	// consumed the wrong number of bytes would take everything after it with it,
 	// and a case that put the refused chunk last could not see that.
-	Blob Fixture() {
+	Blob Fixture(bool robloxStorageNames = false) {
 		Blob file;
 		Header(file, 3, 3);
 
@@ -245,8 +245,8 @@ namespace {
 			return prop;
 		}());
 
-		Chunk(file, "PROP", [] {
-			Blob prop = Property(1, "Size", 0x0E);
+		Chunk(file, "PROP", [robloxStorageNames] {
+			Blob prop = Property(1, robloxStorageNames ? "size" : "Size", 0x0E);
 			prop.Reals({4.0f});
 			prop.Reals({1.0f});
 			prop.Reals({2.0f});
@@ -260,8 +260,8 @@ namespace {
 		}());
 
 		// Red, as three byte planes rather than three float ones.
-		Chunk(file, "PROP", [] {
-			Blob prop = Property(1, "Color", 0x1A);
+		Chunk(file, "PROP", [robloxStorageNames] {
+			Blob prop = Property(1, robloxStorageNames ? "Color3uint8" : "Color", 0x1A);
 			prop.U8(255);
 			prop.U8(0);
 			prop.U8(0);
@@ -1317,4 +1317,23 @@ TEST_CASE("the complete roblox reader sniffs binary and leaves output alone on f
 	REQUIRE(sentinel.Notes.size() == 1);
 	CHECK(sentinel.Notes[0] == "unchanged");
 	CHECK_FALSE(failure.empty());
+}
+
+TEST_CASE("the complete roblox reader exposes public part property names", "[bake][rbxl]") {
+	// Real binary places call these columns `size` and `Color3uint8`, while
+	// `.rbxmx` and scripts call the same properties `Size` and `Color`. The
+	// shared RobloxModel must not make downstream imports depend on the container.
+	const Blob binary = Fixture(true);
+	RobloxModel model;
+	std::string failure;
+	REQUIRE(ReadRobloxFile(Bytes(binary.Bytes), model, failure));
+	CHECK(failure.empty());
+	REQUIRE(model.Roots.size() == 1);
+	REQUIRE(model.Roots[0].Children.size() == 2);
+	const RobloxInstance &part = model.Roots[0].Children[0];
+
+	CHECK(Find(part, "size") == nullptr);
+	CHECK(Find(part, "Color3uint8") == nullptr);
+	CHECK(Find(part, "Size") != nullptr);
+	CHECK(Find(part, "Color") != nullptr);
 }

@@ -938,9 +938,37 @@ TEST_CASE("defaults are not written and are restored anyway", "[game][roundtrip]
 TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	RegisterEverything();
 
+	const Vector3 size{8.0f, 3.0f, 2.0f};
+	const Vector3 position{12.0f, 4.0f, -7.0f};
+	const Color3 tint{0.25f, 0.5f, 0.75f};
+	const float transparency = 0.625f;
 	Universe source;
 	const WorldId world = AddWorld(source, "Start");
-	source.Enter(world, [](Store &store) { store.CreateInstance(engine::scene::PartClass(), "Exported"); });
+	source.Enter(world, [&](Store &store) {
+		const Entity part = store.CreateInstance(engine::scene::PartClass(), "Exported");
+		REQUIRE(store.SetProperty(part, Name("Size"), &size, sizeof(size)));
+		REQUIRE(store.SetProperty(part, Name("Position"), &position, sizeof(position)));
+		REQUIRE(store.SetProperty(part, Name("Color"), &tint, sizeof(tint)));
+		REQUIRE(store.SetProperty(part, Name("Transparency"), &transparency, sizeof(transparency)));
+	});
+
+	const auto checkComponents = [&](Store &store) {
+		const Entity part = store.FindFirstRoot("Exported");
+		REQUIRE(part != NULL_ENTITY);
+		const auto *bounds = store.Get<engine::scene::Bounds>(part);
+		const auto *collider = store.Get<engine::scene::Collider>(part);
+		const auto *visual = store.Get<engine::scene::Visual>(part);
+		const auto *transform = store.Get<engine::scene::Transform>(part);
+		REQUIRE(bounds != nullptr);
+		REQUIRE(collider != nullptr);
+		REQUIRE(visual != nullptr);
+		REQUIRE(transform != nullptr);
+		CHECK(bounds->HalfExtent == size * 0.5f);
+		CHECK(collider->Extent == size * 0.5f);
+		CHECK(visual->Tint == tint);
+		CHECK(visual->Transparency == transparency);
+		CHECK(transform->Frame.Position == position);
+	};
 
 	const auto path = ScratchFile("engine-game-world.aworld");
 	std::string error;
@@ -953,7 +981,7 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	REQUIRE(copy.IsValid());
 	CHECK(error.empty());
 
-	source.Enter(copy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
+	source.Enter(copy, checkComponents);
 
 	engine::game::PreparedWorldImport prepared;
 	std::vector<engine::game::WorldImportPhase> phases;
@@ -971,7 +999,7 @@ TEST_CASE("a world exports and imports on its own", "[game][roundtrip]") {
 	const WorldId preparedCopy =
 		engine::game::CommitWorldImport(source, prepared, Name("StartPrepared"), error);
 	REQUIRE(preparedCopy.IsValid());
-	source.Enter(preparedCopy, [](Store &store) { CHECK(store.FindFirstRoot("Exported") != NULL_ENTITY); });
+	source.Enter(preparedCopy, checkComponents);
 
 	// And refused without one, because the name is taken.
 	const WorldId clash = engine::game::ImportWorld(source, path, Name{}, error);

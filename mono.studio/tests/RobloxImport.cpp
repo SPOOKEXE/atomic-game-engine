@@ -22,6 +22,7 @@
 #include <studio/RojoSync.hpp>
 
 TEST_SUITE_ID("studio.robloximport")
+TEST_DEPENDS("engine.bake.robloxmodel")
 TEST_DEPENDS("engine.scene.part")
 
 namespace {
@@ -437,6 +438,9 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	engine::bake::RobloxValue colour;
 	colour.Set(engine::core::Color3{0.2f, 0.4f, 0.8f});
 	part.Properties.push_back({"Color", colour});
+	engine::bake::RobloxValue transparency;
+	transparency.Set(0.375f);
+	part.Properties.push_back({"Transparency", transparency});
 	root.Children.push_back(std::move(part));
 
 	engine::bake::RobloxInstance script;
@@ -486,7 +490,7 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 
 	// The import must apply the values, not merely count the recognized
 	// properties. `Size` writes both the render bounds and collision extent,
-	// while `Color` maps Roblox's spelling to the part visual tint.
+	// while `Color` and `Transparency` populate the part visual.
 	const engine::ecs::Entity floor = store.FindFirstChild(workspace, "Floor");
 	REQUIRE(floor != engine::ecs::NULL_ENTITY);
 	const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(floor);
@@ -495,6 +499,7 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(floor);
 	REQUIRE(visual != nullptr);
 	CHECK(visual->Tint == engine::core::Color3{0.2f, 0.4f, 0.8f});
+	CHECK(visual->Transparency == 0.375f);
 }
 
 TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloximport]") {
@@ -510,6 +515,7 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 					<string name="Name">Block</string>
 					<Vector3 name="Size"><X>8</X><Y>3</Y><Z>2</Z></Vector3>
 					<Color3uint8 name="Color">4294901760</Color3uint8>
+					<float name="Transparency">0.375</float>
 					<string name="CollisionGroup">Ground</string>
 				</Properties>
 			</Item>
@@ -568,6 +574,7 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 		const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(block);
 		REQUIRE(visual != nullptr);
 		CHECK(visual->Tint == engine::core::Color3{1.0f, 0.0f, 0.0f});
+		CHECK(visual->Transparency == 0.375f);
 		const uint32_t group = engine::spatial::CollisionGroups::IndexOf(engine::core::Name("Ground"));
 		REQUIRE(group != engine::spatial::NO_GROUP);
 		const engine::scene::Collider *collider = store.Get<engine::scene::Collider>(block);
