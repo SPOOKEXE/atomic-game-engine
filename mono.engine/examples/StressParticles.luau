@@ -243,6 +243,18 @@ do
 	emitter.Size = NumberSequence.new(1.2)
 end
 
+-- The untextured particle path has an analytic soft disc. This bay is kept
+-- apart from the image bays because a texture's alpha is authored coverage and
+-- must never be blurred by this fallback mask.
+do
+	local emitter = baseline(bay("SoftParticles", Color3.new(0.35, 0.5, 0.65)), "SoftDisc")
+	emitter.Speed = NumberRange.new(0, 0)
+	emitter.Size = NumberSequence.new(2.4)
+	emitter.Transparency = NumberSequence.new(0.15, 0.8)
+	emitter.SoftParticles = true
+	emitter.Color = ColorSequence.new(Color3.new(0.55, 0.85, 1))
+end
+
 -- **`Orientation`, all four of them, because the default is the only one any
 -- other scene ever sets.** Four emitters on one pedestal at four heights: a
 -- reader looking along the row sees the same particle held four ways, which is

@@ -243,10 +243,7 @@ end
 --
 -- ## Why the numbers are these numbers
 --
--- **The frame count is not written here at all, and that is a fix.** It used to
--- say 24; the GIF has 48. Half the dance never played, and nothing looked broken
--- - a flipbook that stops early is just a shorter animation, which is the whole
--- reason the number should never have been copied. The bake puts it on the
+-- **The frame count is not written here at all, and that is a fix.** The bake puts it on the
 -- texture, the client records it into the world, and an emitter that leaves
 -- `FlipbookFrames` at zero adopts it.
 --
@@ -284,10 +281,8 @@ do
 	emitter.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid8x8
 	emitter.FlipbookMode = Enum.ParticleFlipbookMode.OneShot
 
-	-- **The frame count is not stated here, and that is the fix.** It used to say
-	-- 24 and the GIF has 48, so half the dance never played and nothing looked
-	-- broken - a flipbook that stops early is just a shorter animation. The
-	-- number is in the baked texture, the client records it into the world, and
+	-- **The frame count is not stated here, and that is the fix.** The number is
+	-- in the baked texture, the client records it into the world, and
 	-- an emitter that leaves `FlipbookFrames` at zero adopts it. Writing it down
 	-- here would be a second copy of a fact, which is the thing that was wrong.
 
