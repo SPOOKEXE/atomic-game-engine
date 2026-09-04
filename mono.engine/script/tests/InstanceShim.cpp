@@ -46,6 +46,17 @@ TEST_CASE("the instance shim creates and parents ECS instances", "[script][insta
 	CHECK(FindInstanceChild(store, root.Instance, "Part") == child.Instance);
 }
 
+TEST_CASE("the instance shim preserves event endpoints from a port", "[script][instance-shim]") {
+	engine::script::ScriptClass();
+	Store store("instance_shim_events");
+
+	for (const std::string_view name : {"RemoteEvent", "BindableEvent"}) {
+		const auto event = CreateScriptInstance(store, name);
+		REQUIRE(event);
+		CHECK(InstanceIsA(store, event.Instance, engine::ecs::Classes::Find(engine::core::Name("Instance"))));
+	}
+}
+
 TEST_CASE(
 	"the instance shim reports creation failures without leaving an orphan", "[script][instance-shim]"
 ) {
