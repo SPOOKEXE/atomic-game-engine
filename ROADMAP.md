@@ -37,52 +37,7 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.23.1
-
-- [x] CTRL+Z to undo, CTRL+SHIFT+Z to redo, add keybind options
-- [x] when i double click on a world, it should open a viewport if no existing viewports are open
-- [x] fix roblox importer, parts have no size, color is not kept, etc (bladeborne and furry rng demo aworld)
-- [x] bladeborne demo shows content.fit under content is 20+ms alone. fix issue
-- [x] also check how signatures handle content.fit items because that grows to 10ms in scenes that have heavy custom assets (e.g. invalid assets => should not spam signature)
-- [x] [studio] import failed: 'MeshPart.CollisionGroup' refused the value 'Ground'  (Editor.cpp:5116)
-- [x] add a per-asset profiler called `Asset Profiler` for cdn items so we can see who takes up the most memory and that allows us to debug why. hooks into pulling the data on CPU, storing it in memory, checking for item updates for GPU, and pushing to GPU for render (resident instances, sending delta updates to resident, etc)
-- [x] when i select a script in the explorer, it deselects and collapses the entire explorer
-- [x] CTRL+F script search
-- [x] when script opens (from double click or such) and no script editor is open, open it over the first viewport in full screen as a full tab
-- [x] Triage launcher/net/loadtest headers
-- [x] Triage cdn/client headers
-- [x] Triage ecs/graph/gui/bake headers
-- [x] Triage net/audio/ui/misc headers
-- [x] Triage physics headers
-- [x] Triage render headers
-- [x] Triage studio headers
-- [x] add a set of `physics solver simulation` visualisations for each set of solver capabilities. this way we can see whats going on.
-- [x] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
-- [x] deferred.md update, cleanup and work we can do now
-- [x] security audit, fuzzy tests, bound tests, etc.
-- [x] go through each underlying system and check we fully test them. lifecycles, allocations, deallocations, crash handling, error handling, fuzzy, bounds, etc.
-- [x] atomic engine icon
-
-new demos:
-- [x] port TornadoSim as a demo scene in the engine (/home/declan/Documents/GitHub/TornadoSim). Do a run of what features we need and what we can use in the engine, we want to try make this demo PURE LUAU! We can create new libraries, components, etc, but make a list first and prioritise pure-scripting over specific engine features for tornado stuff.
-| Kinematic debris is not enough | Expose velocity and impulse through existing physics bodies. |
-| Particle emitters cannot follow the field shape | Add a generic field-sampling particle force, not a tornado-specific renderer. |
-| The scene needs dense cloud self-shadowing | Add a generic volume resource and render node. |
-| The scene needs large destruction | Build reusable script-facing break groups before a damage system. |
-as datatypes? we can do a 3D and 2D vector field and particles can read directly from it based on their position or local position from a select position, add auto clamp to bounds or falloff, etc. Can expose velocity/impuse as well.
-- [x] blackhole simulator (warp space, warp visual, etc)
-- [x] user interface (copy bladeborne's for demo?), luau scripting and such. pure code that creates all the ui (using Fusion.luau, setup a modulescrpt that the code requires for example, can rewrite with fake player data).
-- [x] update DEMOS.md with GIFs uploaded to repository
-- [x] quadsphere, quadtree planet
-
-- [_] add icon pack to studio?
-
 ### v0.24
-
-- [_] /docs/future-work/character-system.md
-- [_] gtlf default character (unreal style)
-
-### v0.25
 
 - [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
@@ -99,6 +54,11 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 - [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
 - [_] different antialiasing choices as render nodes
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
+
+### v0.25
+
+- [_] /docs/future-work/character-system.md
+- [_] gtlf default character (unreal style)
 
 ### v0.26
 
