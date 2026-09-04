@@ -472,11 +472,17 @@ declare namespace Enum {
 	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
+	interface InputPortLayout extends EnumItem { readonly __enum: "InputPortLayout"; }
 	interface ItemLineAlignment extends EnumItem { readonly __enum: "ItemLineAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface LensShape extends EnumItem { readonly __enum: "LensShape"; }
 	interface LineJoinMode extends EnumItem { readonly __enum: "LineJoinMode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
+	interface NodeBypassMode extends EnumItem { readonly __enum: "NodeBypassMode"; }
+	interface NodeGroupLayout extends EnumItem { readonly __enum: "NodeGroupLayout"; }
+	interface NodePortDirection extends EnumItem { readonly __enum: "NodePortDirection"; }
+	interface NodePortEdge extends EnumItem { readonly __enum: "NodePortEdge"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
 	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
 	interface ParticleEmitterShapeInOut extends EnumItem { readonly __enum: "ParticleEmitterShapeInOut"; }
@@ -619,6 +625,11 @@ declare namespace Enum {
 		readonly Center: HorizontalAlignment;
 		readonly Right: HorizontalAlignment;
 	};
+	const InputPortLayout: {
+		readonly Manual: InputPortLayout;
+		readonly Separate: InputPortLayout;
+		readonly Squash: InputPortLayout;
+	};
 	const ItemLineAlignment: {
 		readonly Automatic: ItemLineAlignment;
 		readonly Start: ItemLineAlignment;
@@ -726,6 +737,24 @@ declare namespace Enum {
 		readonly Default: MouseBehavior;
 		readonly LockCenter: MouseBehavior;
 		readonly LockCurrentPosition: MouseBehavior;
+	};
+	const NodeBypassMode: {
+		readonly None: NodeBypassMode;
+		readonly Bypass: NodeBypassMode;
+	};
+	const NodeGroupLayout: {
+		readonly Manual: NodeGroupLayout;
+		readonly AroundEdge: NodeGroupLayout;
+		readonly SmallestSpace: NodeGroupLayout;
+	};
+	const NodePortDirection: {
+		readonly Input: NodePortDirection;
+		readonly Output: NodePortDirection;
+	};
+	const NodePortEdge: {
+		readonly Top: NodePortEdge;
+		readonly Bottom: NodePortEdge;
+		readonly Corner: NodePortEdge;
 	};
 	const NormalId: {
 		readonly Right: NormalId;
@@ -1370,6 +1399,9 @@ declare interface Sound extends Instance {
 	Volume: number;
 }
 
+declare interface SoundGroup extends Instance {
+}
+
 declare interface Attachment extends Instance {
 	CFrame: CFrame;
 	Position: Vector3;
@@ -1550,6 +1582,23 @@ declare interface Volume extends PVInstance {
 	Steps: number;
 }
 
+declare interface ShaderLens extends PVInstance {
+	Enabled: boolean;
+	Falloff: number;
+	InnerRadius: number;
+	Priority: number;
+	Radius: number;
+	Shader: string;
+	Shape: Enum.LensShape;
+	Spin: number;
+	Strength: number;
+}
+
+declare interface GravitationalLens extends ShaderLens {
+	HorizonRadius: number;
+	WarpRadius: number;
+}
+
 declare interface SkyboxTextures extends Instance {
 	Back: string;
 	Down: string;
@@ -1628,6 +1677,11 @@ declare interface ShaderScript extends Instance {
 	Source: string;
 }
 
+declare interface LensShader extends Instance {
+	readonly Revision: number;
+	Source: string;
+}
+
 declare interface EditableMesh extends Instance {
 	readonly ContentId: string;
 	readonly TriangleCount: number;
@@ -1651,6 +1705,12 @@ declare interface LocalScript extends LuaSourceContainer {
 }
 
 declare interface ModuleScript extends LuaSourceContainer {
+}
+
+declare interface RemoteEvent extends Instance {
+}
+
+declare interface BindableEvent extends Instance {
 }
 
 declare interface ParticleEmitter extends Instance {
@@ -2294,6 +2354,9 @@ declare interface ServerStorage extends Service {
 declare interface StarterGui extends Service {
 }
 
+declare interface ChangeHistoryService extends Service {
+}
+
 declare interface StarterPack extends Service {
 }
 
@@ -2743,6 +2806,7 @@ declare const game: {
 		(service: "ServerScriptService"): ServerScriptService;
 		(service: "ServerStorage"): ServerStorage;
 		(service: "StarterGui"): StarterGui;
+		(service: "ChangeHistoryService"): ChangeHistoryService;
 		(service: "StarterPack"): StarterPack;
 		(service: "StarterPlayer"): StarterPlayer;
 		(service: "StarterPlayerScripts"): StarterPlayerScripts;
@@ -2784,6 +2848,7 @@ declare const Instance: {
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
 		(className: "Portal", parent?: Instance): Portal;
 		(className: "Sound", parent?: Instance): Sound;
+		(className: "SoundGroup", parent?: Instance): SoundGroup;
 		(className: "Attachment", parent?: Instance): Attachment;
 		(className: "Material", parent?: Instance): Material;
 		(className: "Humanoid", parent?: Instance): Humanoid;
@@ -2812,6 +2877,8 @@ declare const Instance: {
 		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
 		(className: "CloudCompute", parent?: Instance): CloudCompute;
 		(className: "Volume", parent?: Instance): Volume;
+		(className: "ShaderLens", parent?: Instance): ShaderLens;
+		(className: "GravitationalLens", parent?: Instance): GravitationalLens;
 		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;
 		(className: "SkyboxCompute", parent?: Instance): SkyboxCompute;
 		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;
@@ -2823,11 +2890,14 @@ declare const Instance: {
 		(className: "Weld", parent?: Instance): Weld;
 		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
+		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;
 		(className: "ModuleScript", parent?: Instance): ModuleScript;
+		(className: "RemoteEvent", parent?: Instance): RemoteEvent;
+		(className: "BindableEvent", parent?: Instance): BindableEvent;
 		(className: "ParticleEmitter", parent?: Instance): ParticleEmitter;
 		(className: "Beam", parent?: Instance): Beam;
 		(className: "Trail", parent?: Instance): Trail;
@@ -2846,6 +2916,11 @@ declare const Instance: {
 		(className: "Frame", parent?: Instance): Frame;
 		(className: "CanvasGroup", parent?: Instance): CanvasGroup;
 		(className: "ScrollingFrame", parent?: Instance): ScrollingFrame;
+		(className: "NodeCanvas", parent?: Instance): NodeCanvas;
+		(className: "NodeCanvasNode", parent?: Instance): NodeCanvasNode;
+		(className: "NodeCanvasGroup", parent?: Instance): NodeCanvasGroup;
+		(className: "NodeCanvasPort", parent?: Instance): NodeCanvasPort;
+		(className: "NodeCanvasLink", parent?: Instance): NodeCanvasLink;
 		(className: "TextButton", parent?: Instance): TextButton;
 		(className: "ImageButton", parent?: Instance): ImageButton;
 		(className: "TextLabel", parent?: Instance): TextLabel;

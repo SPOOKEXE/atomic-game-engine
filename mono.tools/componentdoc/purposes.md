@@ -51,6 +51,8 @@ script.LuaSourceContainer | Where a script's Luau program is read from, as an as
 script.Program | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass.
 script.ScriptClock | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed.
 script.SourceCache | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap.
+script.TeleportRequestHandler | Per-world singleton holding the `TeleportService.TeleportRequested` callback that decides whether the server processes a requested teleport. Transient, because a restored world must not revive a host callback.
+script.TeleportRequestOutbox | Per-world singleton FIFO of local teleport requests waiting for the client to send, with the next monotonic request id. Transient, because an old request must not send after a world is restored.
 world.BusBudget | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier.
 world.Inbox | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to.
 world.Outbox | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them.
@@ -118,6 +120,7 @@ scene.RenderedSignature | Resource: a rolling hash of the instance tree `SyncRen
 scene.RigidBody | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact.
 scene.Service | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup.
 scene.ShaderSource | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild.
+scene.ShaderLens | A placed spherical HDR image-warp region. Its lens shader name and numeric controls are authored world data; the renderer resolves a bounded value snapshot before presentation.
 scene.Simulated | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence.
 scene.SkyboxCompute | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture.
 scene.SkyboxTextures | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded.
@@ -148,7 +151,10 @@ scene.TextureCatalogue | Resource: the flipbook facts - grid, frame count and ra
 scene.Tool | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn.
 scene.Transform | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads.
 scene.Transient | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`.
+scene.VectorField2D | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
+scene.VectorField3D | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.Visual | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame.
+scene.Volume | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer.
 scene.WorldBounds | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it.
 
 ## `gui`
@@ -179,6 +185,11 @@ gui.ArcHandlesShape | The axis mask drawn by an `ArcHandles` instance.
 gui.Label | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags.
 gui.Layer | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset.
 gui.ListLayout | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping.
+gui.NodeCanvas | The view state of a typed graph editor: its pan, zoom and background grid policy, while graph nodes and links remain ordinary instances beneath it.
+gui.NodeCanvasNode | The stable id, node kind, bypass state, title, resize policy and input-port layout of one graph node; links refer to its id rather than its local entity handle.
+gui.NodeCanvasGroup | A named visual grouping of direct graph-node children, with optional edge-fitting or tight-fitting layout and ordinary Frame background colour.
+gui.NodeCanvasPort | A stable typed input or output terminal beneath a graph node, with a connection limit, checked before a wire is made and positioned on a requested graph-node edge.
+gui.NodeCanvasLink | A persistent, colourable wire between named node ports in one graph, stored with endpoint names rather than entity handles.
 gui.Padding | `UIPadding`: space held back inside the parent element on each of its four edges before its children are placed.
 gui.PageLayout | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap.
 gui.PageMotion | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is.

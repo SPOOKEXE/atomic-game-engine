@@ -594,10 +594,16 @@ end
 declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
+declare extern type Enum_InputPortLayout extends EnumItem with
+end
+
 declare extern type Enum_ItemLineAlignment extends EnumItem with
 end
 
 declare extern type Enum_KeyCode extends EnumItem with
+end
+
+declare extern type Enum_LensShape extends EnumItem with
 end
 
 declare extern type Enum_LineJoinMode extends EnumItem with
@@ -607,6 +613,18 @@ declare extern type Enum_ListenerType extends EnumItem with
 end
 
 declare extern type Enum_MouseBehavior extends EnumItem with
+end
+
+declare extern type Enum_NodeBypassMode extends EnumItem with
+end
+
+declare extern type Enum_NodeGroupLayout extends EnumItem with
+end
+
+declare extern type Enum_NodePortDirection extends EnumItem with
+end
+
+declare extern type Enum_NodePortEdge extends EnumItem with
 end
 
 declare extern type Enum_NormalId extends EnumItem with
@@ -917,6 +935,9 @@ declare Enum: {
 		Thumbstick1: Enum_KeyCode,
 		Thumbstick2: Enum_KeyCode,
 	},
+	LensShape: {
+		Sphere: Enum_LensShape,
+	},
 	LineJoinMode: {
 		Round: Enum_LineJoinMode,
 		Bevel: Enum_LineJoinMode,
@@ -930,6 +951,24 @@ declare Enum: {
 		Default: Enum_MouseBehavior,
 		LockCenter: Enum_MouseBehavior,
 		LockCurrentPosition: Enum_MouseBehavior,
+	},
+	NodeBypassMode: {
+		None: Enum_NodeBypassMode,
+		Bypass: Enum_NodeBypassMode,
+	},
+	NodeGroupLayout: {
+		Manual: Enum_NodeGroupLayout,
+		AroundEdge: Enum_NodeGroupLayout,
+		SmallestSpace: Enum_NodeGroupLayout,
+	},
+	NodePortDirection: {
+		Input: Enum_NodePortDirection,
+		Output: Enum_NodePortDirection,
+	},
+	NodePortEdge: {
+		Top: Enum_NodePortEdge,
+		Bottom: Enum_NodePortEdge,
+		Corner: Enum_NodePortEdge,
 	},
 	NormalId: {
 		Right: Enum_NormalId,
@@ -1597,6 +1636,9 @@ declare extern type Sound extends Instance with
 	Volume: number
 end
 
+declare extern type SoundGroup extends Instance with
+end
+
 declare extern type Attachment extends Instance with
 	CFrame: CFrame
 	Position: Vector3
@@ -1777,6 +1819,23 @@ declare extern type Volume extends PVInstance with
 	Steps: number
 end
 
+declare extern type ShaderLens extends PVInstance with
+	Enabled: boolean
+	Falloff: number
+	InnerRadius: number
+	Priority: number
+	Radius: number
+	Shader: string
+	Shape: Enum_LensShape
+	Spin: number
+	Strength: number
+end
+
+declare extern type GravitationalLens extends ShaderLens with
+	HorizonRadius: number
+	WarpRadius: number
+end
+
 declare extern type SkyboxTextures extends Instance with
 	Back: string
 	Down: string
@@ -1851,6 +1910,11 @@ declare extern type WeldConstraint extends Instance with
 end
 
 declare extern type ShaderScript extends Instance with
+	read Revision: number
+	Source: string
+end
+
+declare extern type LensShader extends Instance with
 	read Revision: number
 	Source: string
 end
@@ -2120,6 +2184,61 @@ declare extern type ScrollingFrame extends Frame with
 	VerticalScrollBarInset: Enum_ScrollBarInset
 	VerticalScrollBarPosition: Enum_VerticalScrollBarPosition
 	function VirtualScroll(self, notches: number): ()
+end
+
+-- Connect validates the typed graph immediately. The callback that reacts to
+-- a graph edit belongs on Changed, so no VM closure is retained by the graph.
+-- RefreshGroups applies group fitting and each node's InputPortLayout.
+declare extern type NodeCanvas extends Frame with
+	CanvasPosition: Vector2
+	GridSize: number
+	GridVisible: boolean
+	MaximumZoom: number
+	MinimumZoom: number
+	Zoom: number
+	function Connect(self, output: NodeCanvasPort, input: NodeCanvasPort): NodeCanvasLink
+	function Disconnect(self, input: NodeCanvasPort): boolean
+	function RefreshGroups(self): number
+end
+
+declare extern type NodeCanvasNode extends Frame with
+	BypassInput: string
+	BypassMode: Enum_NodeBypassMode
+	BypassOutput: string
+	Enabled: boolean
+	InputPortLayout: Enum_InputPortLayout
+	MinimumSize: Vector2
+	NodeId: string
+	NodeType: string
+	Resizable: boolean
+	Title: string
+end
+
+declare extern type NodeCanvasGroup extends Frame with
+	GroupId: string
+	Layout: Enum_NodeGroupLayout
+	Padding: Vector2
+	Title: string
+end
+
+declare extern type NodeCanvasPort extends GuiObject with
+	Direction: Enum_NodePortDirection
+	Edge: Enum_NodePortEdge
+	MaxConnections: number
+	PortId: string
+	ValueType: string
+end
+
+declare extern type NodeCanvasLink extends Instance with
+	FromDirection: Enum_NodePortDirection
+	FromNode: string
+	FromPort: string
+	LineColor3: Color3
+	LineThickness: number
+	LineTransparency: number
+	ToDirection: Enum_NodePortDirection
+	ToNode: string
+	ToPort: string
 end
 
 declare extern type GuiButton extends GuiObject with
@@ -2485,6 +2604,9 @@ declare extern type ServerStorage extends Service with
 end
 
 declare extern type StarterGui extends Service with
+end
+
+declare extern type ChangeHistoryService extends Service with
 end
 
 declare extern type StarterPack extends Service with
@@ -3022,6 +3144,7 @@ type Services = {
 	ServerScriptService: ServerScriptService,
 	ServerStorage: ServerStorage,
 	StarterGui: StarterGui,
+	ChangeHistoryService: ChangeHistoryService,
 	StarterPack: StarterPack,
 	StarterPlayer: StarterPlayer,
 	StarterPlayerScripts: StarterPlayerScripts,
@@ -3062,6 +3185,7 @@ type CreatableInstances = {
 	SurfaceCamera: SurfaceCamera,
 	Portal: Portal,
 	Sound: Sound,
+	SoundGroup: SoundGroup,
 	Attachment: Attachment,
 	Material: Material,
 	Humanoid: Humanoid,
@@ -3090,6 +3214,8 @@ type CreatableInstances = {
 	CloudProcedural: CloudProcedural,
 	CloudCompute: CloudCompute,
 	Volume: Volume,
+	ShaderLens: ShaderLens,
+	GravitationalLens: GravitationalLens,
 	SkyboxTextures: SkyboxTextures,
 	SkyboxCompute: SkyboxCompute,
 	BallSocketConstraint: BallSocketConstraint,
@@ -3101,11 +3227,14 @@ type CreatableInstances = {
 	Weld: Weld,
 	WeldConstraint: WeldConstraint,
 	ShaderScript: ShaderScript,
+	LensShader: LensShader,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,
 	Script: Script,
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,
+	RemoteEvent: RemoteEvent,
+	BindableEvent: BindableEvent,
 	ParticleEmitter: ParticleEmitter,
 	Beam: Beam,
 	Trail: Trail,
@@ -3124,6 +3253,11 @@ type CreatableInstances = {
 	Frame: Frame,
 	CanvasGroup: CanvasGroup,
 	ScrollingFrame: ScrollingFrame,
+	NodeCanvas: NodeCanvas,
+	NodeCanvasNode: NodeCanvasNode,
+	NodeCanvasGroup: NodeCanvasGroup,
+	NodeCanvasPort: NodeCanvasPort,
+	NodeCanvasLink: NodeCanvasLink,
 	TextButton: TextButton,
 	ImageButton: ImageButton,
 	TextLabel: TextLabel,

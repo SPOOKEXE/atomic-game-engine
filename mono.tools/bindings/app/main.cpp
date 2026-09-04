@@ -1977,6 +1977,11 @@ declare task: {
 					   "-- four containers a join makes, and every one of them is private to\n"
 					   "-- this player on the wire.\n";
 			}
+			if (name == "NodeCanvas") {
+				out << "-- Connect validates the typed graph immediately. The callback that reacts to\n"
+					   "-- a graph edit belongs on Changed, so no VM closure is retained by the graph.\n"
+					   "-- RefreshGroups applies group fitting and each node's InputPortLayout.\n";
+			}
 
 			out << "declare extern type " << name;
 			if (info.Parent.IsValid()) {
