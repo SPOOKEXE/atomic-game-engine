@@ -1,30 +1,17 @@
-
 # DEFERRED
 
-Retired deferred items are in atomic-game-engine/docs/retired/DEFERRED.md.
+Retired deferred items are in `docs/retired/DEFERRED.md`.
 
 ## Format
 
 Each section has the header `[_] D00000`.
 
-The numerical is a counter that increments every item.
+The numerical is a counter that increments every item. Insert the newest items
+at the front of `## Deferred Items`; the highest number in this file and the
+retired register determines the next number. Do not reuse a retired number.
 
-Insert the NEWEST items at the front **of `## Deferred Items`**, so older ones
-are towards the back. The section is named because "the front" on its own is the
-front of this *format example*, which is where D00025 through D00032 spent v0.9
-and v0.10 - eight real entries, the newest of them, rendering as a code sample.
-Nothing checks this: a fenced block is valid Markdown whatever is inside it.
-
-**It happened again, and D00102 spent v0.11 to v0.13 in there.** Sixty lines of a
-live decision, invisible as a sample. The example below is one dummy entry and
-nothing else; anything with real content in it is in the wrong place.
-
-**An item that is closed or no longer exists is removed, not marked.** It used to
-be flagged `[DELETED]` and left in place, which grew a register where most of the
-entries were about code that is not there - so the open ones, which are the point
-of the file, were the minority. What a closed item decided belongs in
-`ROADMAP.md` and in the commit that closed it, both of which survive; retired
-entries are in `docs/retired/DEFERRED.md`.
+An item that is closed or no longer exists is removed, not marked. Its decision
+belongs in the closing commit and, when it affects scope, in `ROADMAP.md`.
 
 ```
 ### [_] D00101
@@ -38,575 +25,125 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ### [_] D00129
 
-**Filed as `D00120` and renumbered at v0.17, because that number was already
-taken.** `docs/retired/DEFERRED.md` carries a `D00120` closed at v0.15 -
-`Player.Backpack` and the `Tool` class - and the counter increments past retired
-entries rather than reusing them. This is the second time it has happened;
-`D00109` records the first, and the cause is identical both times: the number
-was picked by reading the front of the live file, which is exactly the half of
-the register that does not hold the used ones. **The highest number in either
-file is what the next entry follows, and at v0.17 that is `D00128`.**
+The remaining 2D interface gaps need capabilities the engine does not have.
+Do not expose a property that can only answer a default.
+Completed interface work is archived as D00130.
 
-Both numbers were live at once for two versions, and the collision was doing
-real damage rather than sitting there: four comments under `mono.engine/scene`
-cite "`docs/DEFERRED.md` D00120" meaning the *Tool* entry, which by then was a
-different entry in that file and the right one in the retired file. Those
-citations now name the retired file. `ROADMAP.md` cites this entry and follows
-the rename.
+- **`VideoFrame`.** Needs a video decoder and `assets::VideoData` beside
+  `TextureData`. `Playing`, `TimePosition`, `Looped`, and `Volume` are facts
+  about a stream that does not exist.
+- **`ImageLabel.IsLoaded` and `ImageButton.IsLoaded`.** Need a shared,
+  per-content state table filled by the client texture cache. `gui` is shared
+  and cannot depend on the client cache.
+- **`TextLabel.OpenTypeFeatures` and `.TextDirection`.** Need HarfBuzz or an
+  equivalent shaping layer behind `GlyphAtlas`.
+- **`GuiObject.GuiState`.** Router hover and press state is local to one client
+  and deliberately is not replicated. Exposing it as a component would make
+  several clients write the same instance.
+- **`UIStroke.ZIndex`.** Needs a keyed draw-list ordering, rather than the
+  compiler's current paint sequence, so a stroke can sort independently of its
+  element.
+- **`SurfaceGui.ToolPunchThroughDistance`.** Needs a tool interaction ray that
+  can cross the world and click a surface GUI.
+- **Depth-tested `SelectionBox` adornments.** `AlwaysOnTop` is supported by
+  the Studio overlay. The depth-tested case needs a world-space adornment pass.
 
-**The interface members that are absent because the thing behind them is.** The
-2D tree is otherwise complete against Roblox's as of v0.18; what follows is
-every member left out, each with what it would need first. The rule they are all
-filed under is `SoundService.cpp`'s and `gui/tests/Registration.cpp`'s: **a
-property with nothing behind it reads as decided**, so each of these is named
-here rather than declared and left answering a default.
-
-- **`VideoFrame`.** The class needs a video decoder; this engine has one image
-  path and a GIF flipbook, which is `render::Flipbook`. `Playing`,
-  `TimePosition`, `Looped` and `Volume` are all facts about a stream nothing can
-  produce. **Reopen trigger: a decoder in `mono.vendor` and a
-  `assets::VideoData` beside `TextureData`.**
-
-- ~~**`SelectionBox.LineThickness`, `.SurfaceColor3` and
-  `.SurfaceTransparency`.**~~ **Shipped at v0.17, and the reason they were
-  deferred was wrong in a way worth recording.**
-
-  This entry said they needed "a triangle path for adornments". What was
-  actually missing was *any* path: `render::AdornmentGeometry::Build` and
-  `Lines()` had no caller anywhere in the repository - not in `mono.client`, not
-  in `mono.studio`, not elsewhere in `render` - and no pass drew a world-space
-  line. A `SelectionBox` therefore drew nothing whatever its properties said,
-  and three absent members sat on a class whose *implemented* members were
-  equally unreachable. The entry named the second obstacle and missed the first.
-
-  **The consumer is an overlay, not a render pass**, which is the arrangement
-  `Editor::DrawColliderOutlines` already had and argues for in full: the studio
-  projects world points into a panel and hands imgui segments, so
-  `Editor::DrawAdornments` is a list of lines and no pipeline, no shader and no
-  target. It also gets from imgui the two things a pass would have had to build
-  - a line width that is a real number rather than a device setting with no
-  portable guarantee, and a filled convex polygon.
-
-  `LineThickness` is carried in **studs** and converted per segment against how
-  far away that segment is, because a box outlined in pixels keeps its weight as
-  it recedes and ends up a solid blob. The surface is six wound quads and is
-  emitted only when `SurfaceTransparency` moves off 1 - a drawer handed six
-  invisible quads still projects and rasterises them, which is the whole cost of
-  the feature paid by everybody who did not ask for it.
-
-  **What is still absent is depth**, and it is stated rather than implied.
-  `AlwaysOnTop` is honoured in its `true` sense only, because an overlay is
-  drawn after the world and has no depth buffer to test against. That is the
-  right way round for the default. **Reopen trigger for the `false` sense: a
-  world-space pass that draws these with a depth test** - which is also what a
-  *client* would need, since this consumer is the studio's.
-
-- **`ImageLabel.IsLoaded` and `ImageButton.IsLoaded`.** Whether a texture has
-  staged is the client's texture cache's answer, and `gui` is L7 `shared` - the
-  same wall `D00022` describes for a `SurfaceGui`'s canvas. Unlike that one, the
-  fact does not fit `SpatialCanvas`'s shape: it is per *content name* rather than
-  per instance, so the slot would be a table rather than a component. **Reopen
-  trigger: a `shared` content-state table something above L12 fills.**
-
-- **`TextLabel.OpenTypeFeatures` and `.TextDirection`.** Both need a shaping
-  engine. `GlyphAtlas` is stb_truetype at one instance per family with no
-  substitution, no kerning table and no bidi pass, so ligatures and
-  right-to-left runs are not a property away. **Reopen trigger: HarfBuzz or
-  equivalent behind the atlas.**
-
-- ~~**The animated halves: `UIPageLayout.Animated`, `.TweenTime`, `.EasingStyle`,
-  `.EasingDirection`, and `ScrollingFrame.ElasticBehavior`'s spring.**~~ **All
-  five shipped at v0.17, and the objection they were filed under was the wrong
-  shape of answer.**
-
-  The entry said a tween needs a clock and `gui` is L7 with none. Every other
-  module in this engine that needs a clock is *handed* one:
-  `render::FlipbookFrameAt` takes `seconds` and answers which frame is showing,
-  `assets::Grant::HasExpired` takes `nowSeconds`, `net` reads no clock at all.
-  So the answer was never "give `gui` a tick" or "put an animator above it" -
-  it was `CompileRequest::Seconds`, and this module still reads no clock.
-
-  **Both are pure functions of elapsed time rather than states a tick
-  advances**, which is what `Flipbook` buys and buys the same things here: a
-  carousel halfway through a slide is a value a suite *states* rather than one
-  it steps a hundred frames to reach, and a rubber band recovers at the same
-  rate whatever the frame rate. `core::TweenInfo::Ease` already existed and is
-  the whole of the easing, so no curve was written for this.
-
-  **The clock touches two functions and neither is in the walk.**
-  `AdvancePages` and `AdvanceScrolling` run once before `gui::Layout`'s
-  recursion and turn seconds into a number - a page's `Alpha`, a canvas's
-  `Overshoot`. `Place` is recursive and reached from five run functions;
-  threading a time argument through all of them to serve one caller would have
-  put a clock on every layout in the module.
-
-  **`ElasticBehavior` had a second blocker the entry did not know about, and it
-  was the larger one: nothing dragged a canvas at all.** The only caller of the
-  scroll mover was the wheel, and a wheel does not overscroll in Roblox either -
-  so the property was authored, replicated and describing a pull nothing could
-  produce. `Router::BeginCanvasDrag` is the gesture, gated on the pick finding
-  nothing active so a button inside a list stays clickable.
-
-  **Two findings worth keeping, both caught by tests rather than by review.**
-  The first is that the signature has to fold the clock *while something is
-  moving and only then*: folding the resolved numbers alone is circular, since
-  they cannot change until the layout runs and the layout does not run until
-  they change - so an animation ran for exactly one frame. Folding `Seconds`
-  unconditionally is the other failure and a worse one, because every still
-  interface in the engine would rebuild its draw list every frame forever. The
-  second is that the first sight of a layout must *adopt* its page rather than
-  slide to it: a `UIPageLayout` authored with `CurrentPage` set is saying where
-  it starts, and animating that made every interface swing into place when it
-  opened.
-
-  `gui.PageMotion` and `gui.ScrollMotion` are local and never replicated, on a
-  sharper ground than the four rows already on that list: they hold a reading of
-  *this* process's monotonic clock, which means nothing on another one. What
-  crosses is the destination, and each end animates to it on its own clock.
-
-- **`GuiObject.GuiState` and `.InputSink`.** `GuiState` is Idle/Hover/Press and
-  those live on `gui::Router`, which is deliberately not a component - nobody
-  replicates where a mouse is, and `gui/AGENTS.md` says so. Exposing it would
-  mean a per-element row two clients write. `InputSink` is `Active` under a
-  second name and is not worth a second property. **Reopen trigger: none
-  expected for `InputSink`.**
-
-- ~~**`UIStroke.LineJoinMode`, `.BorderOffset`, `.StrokeSizingMode` and
-  `.ZIndex`.**~~ **Two shipped at v0.17, one was never a Roblox property, and
-  `ZIndex` is the only half still deferred.**
-
-  `LineJoinMode` and `StrokeSizingMode` are implemented. The join needed no
-  outline builder in the end, which is the part worth recording: the reopen
-  trigger asked for "an outline builder that takes a join rule" and
-  `PushRoundedOutline` already separated *where the ring's points are* from
-  *how they are stitched*, so all three modes are the same ring with its corner
-  points moved. `Round` walks the arc, `Bevel` cuts the chord, `Miter` runs out
-  to the corner the arc was hiding and back - identical vertex count, identical
-  index loop, no second path. **A trigger asking for a mechanism, answered by a
-  seam that already existed.** `StrokeSizingMode` is resolved in the compile
-  rather than carried to a backend, because a draw list has no element to
-  measure a fraction against; the reference is the smaller side, and the text
-  size when the glyphs took the stroke.
-
-  **`BorderOffset` is not a Roblox property and this entry invented it.** The
-  API dump has `ApplyStrokeMode`, `Color`, `Enabled`, `LineJoinMode`,
-  `StrokeSizingMode`, `Thickness`, `Transparency` and `ZIndex`. There is a
-  `BorderStrokePosition` enum documented against `UIStroke`, but it appears in
-  no version of the class this engine has seen, so there is nothing to
-  implement and nothing to defer. Recorded rather than deleted because a
-  deferred property that does not exist is a reopen trigger that can never fire.
-
-  **`ZIndex` stays, unchanged.** It needs the stroke sortable independently of
-  the element it is on, which the compile's paint order does not express.
-  **Reopen trigger: a draw list whose ordering is a key rather than a
-  sequence.**
-
-- **`SurfaceGui.ToolPunchThroughDistance`.** ~~There is no `Tool` class, so
-  there is nothing the distance is about.~~ **That reason went stale and this is
-  the collision above costing something.** `Tool` derives from `Model` and is
-  registered in `scene/src/Part.cpp`; the entry that held it back is the *other*
-  `D00120`, closed at v0.15, and this bullet was written as though it had not
-  been. What the property actually needs is unchanged and is worth stating
-  properly: a distance at which a tool's interaction ray stops being blocked by
-  a `SurfaceGui`, which needs a tool interaction ray. Nothing casts one.
-  **Reopen trigger: a tool that reaches through the world to click something.**
-
-- **`BillboardGui.DistanceLowerLimit` and `.DistanceUpperLimit`.** Deprecated in
-  Roblox and superseded by `DistanceStep`, which is implemented. Not worth
-  carrying a deprecation forward into a new engine.
+`InputSink` duplicates `Active`. `BillboardGui` distance limits are deprecated
+by the implemented `DistanceStep`. They are not deferred work.
 
 ### [_] D00119
 
-**`Player.CharacterAppearanceId` is absent, and it is absent because the thing
-behind it is.** An appearance id is a content reference to an avatar the engine
-has no notion of: `CharacterDesc` is three colours and six boxes, and there is no
-catalogue, no bundle format and no loader that could resolve a number to a body.
+`Player.CharacterAppearanceId` needs an avatar format, catalogue, and loader.
+The current `CharacterDesc` is only colours and boxes, so an id would name
+nothing. Reopen this when `MakeCharacter` can consume an authored avatar
+description.
+Completed team and spawn work is archived as D00131.
 
-**A property with nothing behind it reads as decided**, which is
-`SoundService.cpp`'s rule and the reason it is named here rather than declared
-and left returning zero. The same paragraph in that file lists eleven Roblox
-members it does not have and what each would need first; this is the same
-statement one class along.
-
-**Reopen trigger: an avatar format** - the moment `MakeCharacter` can be handed
-something other than three colours, the id is what names it.
-
-**`Player.Team` shipped at v0.15 and is no longer part of this entry.** It was
-held back on the stated ground that a team whose only effect is a coloured name
-is a field rather than a feature, and the named reopen trigger was a
-`SpawnLocation` class. That is what was built, in the order the parts depend on
-each other:
-
-- **`SpawnLocation` is a class**, deriving from `Part`, carrying `TeamColor`,
-  `Neutral` and `Enabled`. `scene::FindSpawn` was a lookup for a part *named*
-  `SpawnLocation` - the deliberate stop `Characters.hpp` recorded - and it now
-  resolves the class **and** the name, because every scene in
-  `mono.engine/examples` builds its pad as a block called `SpawnLocation` and a
-  plain part wearing the name is read as an enabled, neutral spawn.
-  `PartDesc::Class` is what keeps `MakePart` the only constructor for it.
-- **`Teams` is a service and `Team` is an instance in it**, following
-  `InstallServices` and the `ServiceComponent`/`ServiceScope` pattern.
-  `Shared`, for `Players`' reason: a server decides who is on which side and a
-  client asks which side it is on, so both halves need the list.
-  `store.Protect()` covers it like every other fixture.
-- **`Player.Team` decides where you appear.** `LoadCharacter` hands the player
-  to `FindSpawn`, which prefers a pad of that team's colour, falls back to a
-  neutral one, and never uses another team's - the first in tree order rather
-  than a random one, because a respawn drawn from a random number is a recording
-  that does not replay.
-
-What is *still* absent is the `TeamCreate`-style permission rule the original
-entry also named. Nothing in the engine asks who may edit what, so there is
-nothing for it to attach to; it belongs with whatever brings collaborative
-editing permissions rather than here.
+Team-creation permissions also wait for a collaborative-editing permission
+model. There is no engine consumer to attach such a rule to today.
 
 ### [_] D00116
 
-**A client cannot ask its server to teleport it, so `TeleportService` is
-server-only and says so.** The binding refuses on a replica - `Postbox::Teleport`
-is an authority operation and `world/Postbox.hpp` has said so since v0.2 - and
-that refusal is currently the whole of the story: there is no request channel a
-`LocalScript` could use to ask for one.
+Clients cannot request a teleport. `TeleportService` remains server-only,
+because moving a player is an authority decision and not a property write.
 
-**The shape it would take is already in the tree and is deliberately not
-generalised yet.** `replication::MessageKind::User` carries `game::JoinNotice`
-down and `Connector::Submit` carries `game::MoveInput` up; a client-initiated
-teleport is a third message on the same two channels. What stops it being written
-now is that a request is not an act - the host has to decide whether to honour
-it, and "who may ask to be moved where" is a game's policy rather than an
-engine's. A binding that queued the request and left the policy unwritten would
-be an engine deciding it by default.
-
-**The half that said "nobody can ask" shipped at v0.15, so what is left is one
-half rather than three.** `client::BuildReplicatedWorld` opens a VM through
-`game::StartWorldScripts` with `script::HostRole::OfClient`,
-`script::ClientScriptsIn` decides which scripts it runs - a `LocalScript` under
-this viewer's own `Player` or under `ReplicatedFirst`, which is Roblox's rule -
-and `Runtime::RunNewScripts` starts each arrival exactly once, because a
-replica is empty when its runtime opens and fills from the wire. The button
-that was silent is fixed with it: `Client::InterfaceWorld` compiles, routes and
-delivers into the world the local player is standing in, which is the replica
-once the join has completed. `client.replica.scripts` drives a press through a
-real `gui::Router` into a script.
-
-**What a client script may write is what `ecs::Store` already allows, and that
-is the trust boundary.** A property write is refused by
-`Store::SetProperty`'s adopt-only check and a mint by `MayMintAuthoritative`,
-both raise in the binding rather than failing silently, and a client sees only
-what `Authority::SetInterest` sent it. So the request half of a teleport is a
-message and not a write, which is the shape this entry always described.
-
-**Still open, and it is the up direction.** `Listener::OnUserMessage` has no
-caller outside `mono.studio`'s edit stream and the module's own tests, and
-`Server::ApplyInputs` decodes a `game::MoveInput`, then an `examples::Shot`, and
-counts everything else as `Dropped` - so a third message on the input channel
-arrives as a refusal statistic. A dedicated server also publishes `PrimaryWorld`
-and only that, so "which world is this client in" is not yet a question one
-server answers differently for two connections. And the policy seam is still
-unwritten: who may ask to be moved where is a game's answer.
-
-**What a client following a teleport looks like is already written down once**,
-in `studio::Editor::FollowTeleports`, and whatever the shipped client eventually
-does has to be that rather than a second copy of it: the destination is
-*searched for by the player's name* rather than carried, because a handle may not
-leave the world that minted it; `PlayLink::Stop` is the teardown and there is not
-a second one; and `PlayLink::Missing` against `LOST_FRAMES` is the answer to the
-frames where the player is in neither world, which is at least one because the
-arrival is admitted at the destination's next barrier. The half both hosts would
-share belongs in `game` beside `ApplyMoveInput`, for that function's stated
-reason.
-
-**Reopen trigger: a game that wants a client to start a teleport, and a host
-that reads the request.** The script half is no longer what blocks it. Every
-teleport this engine has a use for is still decided by a server script - a pad, a
-round ending, a matchmaker - and all of those work; what a client cannot do is
-ask. The two things to build are `Server::ApplyInputs` learning a third message
-and a policy seam beside `SetAdmission` that answers whether this player may go
-there.
-
-**The separate gap this half uncovered is closed, and it never was a
-teleport's.** No `script.` or `gui.` component crossed, so a script instance
-arrived as a name and a class with no program on it and a `ScreenGui` arrived
-with no `gui.Element` - a client ran the scripts its own host had put in the
-replica rather than the ones the authority authored.
-`replication::DefaultReplicatedComponents` now takes the whole `gui.` prefix less
-`gui.Resolved`, `gui.SpatialCanvas` and `gui.GuiServiceState`, and names five
-`script.` rows - a path per language, the selector, `script.Disabled` and
-`script.Program`, which is the text itself, mirrored onto the instance from the
-world's `SourceCache` because a resource cannot be filtered by interest and would
-have put `ServerScriptService`'s programs on every client. `gui.Label`,
-`gui.Entry` and `script.Program` are `Observed` because a signature hashes an
-object representation and all three hold a `std::string`, and `Authority::Survey`
-is what turns the observation on - so a host cannot declare the detector and
-forget the store. `client.replica.arrival` drives the whole of it over a real
-`Listener` and `Connector`: a `LocalScript` whose text exists only in the
-authority's `SourceCache` runs on the client, and a `ScreenGui` authored there
-compiles to a draw command here.
+The transport shape exists, but the missing part is game policy: a host must
+decide which player may request which destination. Reopen this for a game that
+needs client-initiated travel and supplies that policy. The shared client
+follow behaviour belongs beside `game::ApplyMoveInput`, not in a second host
+implementation.
+Completed replica script and GUI arrival work is archived as D00132.
 
 ### [_] D00109
 
-**Filed as `D00108` and renumbered, because that number was already taken.**
-`docs/retired/DEFERRED.md` carries a `D00108` closed at v0.13 by
-`studio::EditStream` - team create's shared-document model - and the counter is
-supposed to increment past retired entries rather than reuse them. The number
-was picked by reading the front of the live file, which is exactly the half of
-the register that does not contain the used numbers. `ROADMAP.md`'s ownership
-entry cited the wrong one for a version and now cites this.
+`replication::Prediction` records and reconciles opaque inputs, but no client
+simulation replays `Connector::Unconfirmed()`. That is deliberate: the current
+character controller sends intent to the server and does not run a local physics
+step, so it has no state to reconcile.
 
-**`replication::Prediction` holds inputs as of v0.15 and still has nothing that
-replays them, and ownership was not the caller it was waiting for.** The plan
-that produced v0.13's ownership work assumed the two would meet - build the
-upward state path, and prediction gets its consumer on the way past. They do not
-meet, and the reason is worth writing down because it looks like they should.
-
-`Prediction.hpp` says what it is for in its first line: "the local player and
-nothing else. Everything else is interpolated authoritative state." An entity a
-client *owns* is neither of those. It is simulated by that client and never
-corrected - there is no authoritative state arriving for it to reconcile
-against, because the client is the authority for it. So ownership does not give
-prediction a caller; it describes a third category that prediction deliberately
-does not cover, which is exactly Roblox's arrangement.
-
-**What is actually unwired is larger than prediction**, and finding it was the
-useful part of this entry. **Two of the three bullets closed at v0.15 and the
-third turned out to be a different thing**, so they are kept with what actually
-happened written against each rather than deleted:
-
-- ~~**Nothing calls `Connector::Submit`.**~~ **Closed.** `client::Client::
-  SubmitMove` sends a `game::MoveInput` every tick and an `examples::Shot` on a
-  click. No client in this repository had ever sent an input; two now do, from
-  one function.
-- ~~**So `Prediction` never holds anything.**~~ **Closed, and by construction
-  rather than by a second change.** `Connector::Submit` records into
-  `Prediction_` on the way past, so the buffer fills the moment anything
-  submits, and `Reconcile(Replica_.Applied())` is finally running against
-  something.
-- ~~**And the server's whole input path has no sender.**~~ **Closed.**
-  `examples::EncodeShot` has a caller. `mono.server/tests/Replication.cpp`
-  stands two clients on a real socket, fires from the first, and asserts the
-  colour arrives at the second - the shooter never says what it struck.
-
-**What closing them found is the part worth keeping.** Three defects, none of
-them in the code being connected, and every one invisible from either side:
-
-- **`scene::InputState::LatchPresses` latched keys and not buttons**, so a click
-  that began and ended between two ticks was lost about two times in three. The
-  frame/tick argument was written out in full above `InputState::Pressed` and
-  applied to one of the two input devices, because jump was the only thing a
-  simulation had ever acted on.
-- **The rewind history walked `Transform` *and* `Motion`**, and `physics` takes
-  a row's `Motion` away when it puts the body to sleep. A player standing still
-  was therefore unhittable, and it presented as an ordinary miss. It walks
-  `RigidBody` now, which is the question that was meant.
-- **A client's input tick goes stale in a quiet world.** A tick reaches a client
-  only when something changed, so in a still scene its idea of the server's
-  clock stops while the server's does not, and the rewind targeted a tick that
-  had fallen out of the ring. Resolved at the present now, with the argument in
-  `Server::ApplyInputs`.
-
-**What is left is one call, and it is the one this entry was named for.**
-Nothing reads `Connector::Unconfirmed()`. The buffer fills, it is acknowledged
-and drained, and no caller ever replays what is in it.
-
-**Replay is the caller's job and that is correct rather than missing.**
-`Prediction::Pending()` hands back what to replay and `Connector` does not
-replay it, because replaying an input means knowing what an input *means* - the
-same line every other opaque payload in this module sits on. A caller has to
-apply them. What that means is that the first consumer writes the whole third
-step of the loop, and a consumer that forgets it gets the rubber-band the header
-warns about with nothing reporting why.
-
-**The trigger fired at v0.15 and only half of what this entry predicted
-followed, which is the correction worth recording.** It said the input encoding
-and prediction's caller would arrive together with the first client that
-controls something. The client arrived; the encoding arrived; prediction's
-caller did not - and the reason is a decision taken deliberately one module
-along rather than an oversight here.
-
-**`game/Play.hpp` is why, and it says so in its own second paragraph.** A client
-sends the *intent* and never the result: "the alternative was for a client to
-simulate its own character and submit the resulting `Transform` … it puts a
-physics step on both ends, makes every disagreement a reconciliation problem,
-and hands a client the ability to state where its body is." A client that does
-not simulate its own character has nothing to reconcile - it has latency, which
-is a different thing and is not what `Prediction` reduces. So the consumer this
-entry is waiting for is not "a character controller"; it is **a client that
-simulates its own character locally**, which is a design this engine has
-considered and refused for the local player's movement.
-
-**Reopen trigger, restated: a client that runs a simulation step of its own.**
-Not a character controller - there is one, and it did not need this. What would
-is something whose latency is intolerable at the tick rate and which the client
-can therefore be allowed to run ahead on. Until then `Prediction` is a mechanism
-whose design premise this engine does not currently share, and that is a better
-description of it than "unwired".
+Reopen this only for an interaction whose latency requires a client simulation
+step. The consumer must apply the remaining opaque inputs after reconciliation;
+`Connector` cannot do that without knowing what each input means.
+Completed input-path wiring is archived as D00133.
 
 ### [_] D00106
 
-**JavaScript and TypeScript have no breakpoints, and the obstacle is the VM
-rather than this engine.**
+JavaScript and TypeScript breakpoints require a QuickJS debugger API. The
+vendored QuickJS exposes an interrupt handler, but no file, line, frame, or
+debugger interface. Source instrumentation would alter the program being
+debugged and needs a complete JavaScript lexer, so it is not a small fallback.
 
-The Luau half of `script::Debugger` works through `lua_callbacks(L)->debugstep`,
-which Luau calls after every instruction while single-step mode is on - so a
-breakpoint is a line comparison in a hook that only exists while one is armed.
-QuickJS as vendored offers no equivalent:
-
-- **`JS_SetInterruptHandler` is the whole of it**, and its callback takes a
-  runtime and an opaque pointer. No line, no file, no frame - it exists to let a
-  host abort a long-running script, which is what `RuntimeLimits::StepBudget`
-  already uses it for.
-- **There is no debugger API at all.** `js_debugger` appears zero times in
-  `mono.vendor/quickjs`. Some quickjs forks carry one - the Ladybird and
-  quickjs-debugger trees both add `js_debugger_*` with breakpoint and stack
-  support - and this vendored quickjs-ng does not.
-- **`JS_GetScriptOrModuleName` is not a substitute.** It answers which module a
-  frame belongs to and nothing about where in it, so it cannot tell a line from
-  the next one.
-
-**Three ways out, and none is a small change.**
-
-- **A vendor bump or a fork.** `mono.vendor/AGENTS.md` says a patch goes
-  upstream or into a fork whose remote is recorded in `.gitmodules`, never into
-  a file in this tree - so this is a submodule decision with a maintenance cost
-  against a moving target, which is the same trade `D00019` records for Luau.
-- **Source instrumentation.** Rewriting a plugin's JavaScript to call a hook at
-  each statement would work in any VM and changes what runs, which makes every
-  line number in a stack trace a translation and every measurement a lie about
-  the program the author wrote.
-- **A second VM for tooling.** Out of proportion to the feature.
-
-**What exists in the meantime is stated rather than implied, and asking for the
-missing thing is refused rather than ignored.** `BreakpointService` is installed
-by the Luau binding alone, so a JavaScript plugin gets `undefined` from
-`game.GetService("BreakpointService")` rather than an object that refuses
-everything - and `Debugger::Add` answers `false` for a `.js`, `.mjs`, `.cjs`,
-`.ts` or `.tsx` chunk whoever asked, naming this entry in the reason.
-
-That refusal is the part worth keeping if the rest of this is ever built
-differently. A breakpoint that sits in a list looking armed and never fires
-reads as the debugger being broken rather than as the language not being
-supported, and a person cannot tell those apart from the outside.
-
-**The instrumentation option was considered and set aside**, and is recorded
-here so it is not rediscovered as a new idea. Prefixing each statement line with
-a hook call - without adding newlines, so every line number survives - would
-give line breakpoints in any VM and needs no vendored change. What it costs is a
-JavaScript lexer good enough to know which line boundaries are safe (not inside
-a template literal, a string, a comment, or a regex, where regex-versus-division
-is the hard case), and it changes what runs. It is the cheapest path that
-touches no submodule, and it is more work than it first looks.
-
-**TypeScript needed a second thing regardless of the first, and that half
-shipped at v0.15.** It is the only part of this entry that was never blocked on
-the VM, which is why it could go first.
-
-- **The entry named the wrong file, and the correction is the useful part.** It said "the studio's `tsc` invocation". There is no studio `tsc`: the transpile is `mono.engine/examples/CMakeLists.txt`, at build time, `--isolatedModules` over each `.ts` scene, and `tsconfig.json` is `noEmit` for the editor and `just typecheck` alone. A reader following this entry would have gone looking in `mono.studio` and found nothing.
-- **`--sourceMap` is emitted and `script::SourceMap` reads it.** Source Map v3, base64 VLQ, decoded for one question - which source line did this generated line come from. `JavaScriptRuntime`'s exception text rewrites every frame it has a map for and leaves the rest exactly as the VM printed them, so hand-written JavaScript and a chunk named after an instance fall through untouched.
-- **The consumer is a stack trace, not a breakpoint, and that is why this was worth building alone.** The entry framed the mapper as debugger plumbing, which made it look like dead code until QuickJS grows an API. It is not: a `.ts` scene that throws named a line in generated JavaScript the author had never opened. Measured on a probe whose type annotations strip out, the throw sits at `.ts:13` and `.js:9` - four lines of drift on a fifteen-line file, and it grows with the annotations.
-- **The column is dropped on a rewrite rather than carried.** It is a column in the generated file, so `scene.ts:13:15` would point at a character somewhere else - precision that is wrong, which this entry's own argument about a silently-armed breakpoint says is worse than nothing. A frame that is *not* rewritten keeps its column, because nothing about it moved.
-- **What it still does not do**, so nobody reads more into it: no column recovery, no `names`, no `sourcesContent`, and no index maps with `sections`. One source per map, because `--isolatedModules` emits one and naming the wrong file is worse than naming none.
-
-**So a VM debugger would now land on the right lines.** That was the second
-thing this entry said TypeScript needed; what is left is the first, and it is
-unchanged.
-
-**Reopen trigger: a vendored QuickJS with a debugger API**, or the first
-TypeScript plugin big enough that its author asks for one.
+Breakpoint requests for JavaScript-family chunks are refused with this reason.
+TypeScript source maps already make stack traces name source lines correctly.
+Reopen this for a vendored QuickJS debugger API, or a TypeScript plugin large
+enough to make maintaining an alternative worthwhile.
+Completed TypeScript source-map support is archived as D00134.
 
 ### [_] D00046
 
-**SDL still has no portable GPU timestamp-query API. Vulkan is measured through
-the backend-specific bridge; Metal and Direct3D 12 remain deliberately
-unmeasured rather than displaying CPU submission time as GPU cost.**
+SDL has no portable GPU timestamp-query API. Vulkan timings use its native
+bridge; Metal and Direct3D 12 remain unmeasured rather than displaying CPU
+submission time as GPU cost.
 
-The graph executor, per-node profile rows, upload counters and Vulkan timestamps
-are live. `render/src/VulkanTimestamps.{hpp,cpp}` creates rotating query pools,
-writes bottom-of-pipe marks around the command buffer that records each node and
-collects completed slots without waiting. Dedicated compute-prefix command
-buffers rebase onto a query slot whose reset travels with the earlier
-submission, so their timings are not erased by the main command buffer.
-
-The remaining question is portability. SDL exposes fences only at whole-command
-granularity and no query pool, timestamp write or native device handle. A native
-bridge therefore has to mirror each backend's private command-buffer layout,
-just as the Vulkan implementation does. Until those bridges can be built and
-tested on their native platforms, Studio shows those GPU timings as unmeasured
-while retaining CPU wall time, graph traffic and operation counts.
-
-**Reopen trigger:** access to Metal and Direct3D 12 test machines, or an SDL GPU
-timestamp API that makes the backend bridges unnecessary.
+Reopen this with Metal and Direct3D 12 test machines, or an SDL GPU timestamp
+API that removes the backend bridges.
 
 ### [_] D00030
 
-**A mutable property on a script *global* reads once and never again, because `luaL_sandbox` enables Luau's `safeenv`.**
+A mutable property on a Luau service global can be cached by `safeenv` when it
+is read through a bare global. The idiomatic
+`game:GetService("UserInputService")` local is not cached and is what the
+engine's bindings, tests, and examples use.
 
-- `UserInputService.MouseBehavior` is the first property in the engine that lives on a global rather than on an instance, and it does not work when it is read that way. `local UIS = game:GetService("UserInputService")` works; `UserInputService.MouseBehavior` returns whatever it was the first time any closure asked.
-- **The mechanism, because it is not obvious and cost an hour.** `luaL_sandbox` freezes the global table and turns on `safeenv`, which lets the compiler emit `GETIMPORT` for a constant global followed by constant fields. `GETIMPORT` resolves the chain once per closure and caches the **value**. It does this whether the intermediate is a table or a userdata, so making the service a userdata does not fix it - that was tried, and the observation that settled it is that `__index` fires for the first read of a field and never for the second, with no raw key on the object to explain it.
-- **The userdata is still right and is kept.** It is what makes every read *through a local* go to `__index`; a plain table would have been cached there too.
-- **In practice it does not bite, which is why this is filed rather than fixed.** Every Roblox script begins `local UIS = game:GetService("UserInputService")`, and `game:GetService` is a method call that cannot be an import. The engine's own declaration files describe the property, the test uses the idiomatic form, and the comment in `UserInputService.cpp` says so.
-- **What closing it would take.** Either not sandboxing - which is not on the table, `LuauRuntime` freezes the globals so one script cannot change the language the next one runs in - or making the service a *function call* rather than a global, which changes the surface away from Roblox's. Neither is worth it for a property nobody reaches the broken way.
-- **This is Luau's alone, and v0.16 proved it rather than assumed it.** `UserInputService` and `SoundService` are bound by both languages now, and the JavaScript half is a plain object with a `JS_DefinePropertyGetSet` accessor per name - an accessor is not an import, so there is no chain to cache and nothing to defeat. `engine.script.scriptcall` reads, writes and reads again in *both* VMs and asserts the second read moved, which is what turns "JavaScript does not have this problem" into something the build holds.
-- **The reopen trigger fired at v0.16 and the answer is still globals.** The count went from one mutable global property to three - `MouseBehavior`, `MouseDeltaSensitivity` and `SoundService.Volume` - with seven read-only ones beside them, so this is a pattern rather than an oddity. What the trigger asked was whether the surface should stop being globals; it should not, because the shape it would move to is not Roblox's and every script already writes `local UIS = game:GetService(...)`. What the growth *did* buy is that the workaround is no longer a comment in one file: `ServiceProperty` is a list both VMs walk, so the rule lives on the type and a tenth property costs a row.
-- **Reopen trigger: a property somebody reaches the broken way in real code.** The count is no longer the question - three did not change the answer and ten will not either. What would is an authored script, an example or a panel that reads one off the bare global and gets a stale value, because that is the only form of this bug anybody can be bitten by.
+Do not drop sandboxing or change the surface away from Roblox compatibility for
+an access pattern no authored code uses. Reopen this if an authored script,
+example, or panel demonstrates a stale bare-global read.
 
 ### [_] D00019
 
-**The engine's Luau is held at the revision the editor tool can consume so that
-the editor and the type check agree. The trigger fired at v0.15 and both
-submodules moved together: 0.731 to `fd83819b`, one commit before the 0.734
-tag.** The entry stays open because the constraint is permanent - it is a policy
-about how this submodule is bumped, not a version waiting to be reached.
+The engine's Luau revision must stay aligned with the revision consumed by
+`luau-lsp`, so runtime behaviour and editor diagnostics agree. `just luau-lsp`
+checks both pins and refuses drift.
 
-- `mono.vendor/luau` is pinned to `fd83819b`, which is what luau-lsp `d5df9af` - "Sync to upstream Luau 0.733" - pins as its own nested Luau. `mono.vendor/luau-lsp/luau` must be pinned to the same commit when that optional submodule is checked out. `mono.tools/scriptcheck` links the first and gates `just typecheck`; the language server in an editor uses the second. Two Luaus would mean an author reading diagnostics from a language the engine does not run, which is worse than no editor support because it looks authoritative.
-- **The 0.732 ceiling this entry was built on is gone rather than raised, and upstream is what removed it.** 0.732 deleted the `ConstraintSolver::reportError` overloads `src/platform/roblox/RobloxLuauExt.cpp` called - sixteen call sites - and that was the whole reason 0.731 was the newest revision both trees could build. luau-lsp did that work itself. So the fork-versus-patch argument three bullets down was never exercised: the cost it was weighing was upstream's to pay, and upstream paid it.
-- **A flag came off with the bump, and it came off after being tested rather than assumed.** `just luau-lsp` passed `-include cstdint` because the old pin's `Ast/src/StringUtils.cpp` named `uint8_t` without including it. Built without the flag at the new pin: clean. `-Wno-error=maybe-uninitialized` is still needed and is now needed somewhere else - `src/operations/CallHierarchy.cpp` rather than nlohmann's `NLOHMANN_DEFINE_TYPE_*` macros - which is why the recipe's comment names the file instead of the library.
-- **The exact upstream ceiling belongs to luau-lsp.** Its nested Luau must remain buildable against the language-server sources. Do not bump the engine submodule alone: the sync check is the contract, and a failed `just luau-lsp` is preferable to silently giving authors diagnostics for another language revision.
-- **Checked, not written down.** `just luau-lsp` compares the two `HEAD`s and refuses to build when they differ, naming both. Verified by mutation: bumping `mono.vendor/luau` alone makes the recipe fail with the two SHAs printed. Without that, the drift is invisible - the engine keeps passing every check it has, and only an editor is wrong.
-- **What the choice actually costs, so a later reader can weigh it.** The engine follows the editor's compatible revision rather than independently following upstream. The trade is only defensible while the gap stays small; a long-lived gap would invert it, and the answer then is the fork below rather than a wider gap.
-- **The fork is the way out and was declined at v0.7 on purpose.** Pointing luau-lsp at `mono.vendor/luau` needs sixteen mechanical call-site changes, and `mono.vendor/AGENTS.md` says a patch goes upstream or into a fork whose remote is recorded in `.gitmodules` - never into a file in this tree. That is a fork to maintain against a moving target, for a developer tool.
-- **The third option arrived at v0.15 and this entry did not take it.** `docs/retired/DEFERRED.md` D00031 needed a change inside luau-lsp too, and what it used is a `.patch` under `mono.vendor/patches/` that `just luau-lsp` applies after cloning - no fork, no remote, no push. So "a patch goes upstream or into a fork" is no longer the whole of the rule, and the sixteen call sites above are now *mechanically* available at that price. They are still not worth it: D00031's patch is one hunk in a function that has not moved in two years, where sixteen hunks across a file upstream edits every release is a rebase every bump - which is a fork's cost with a fork's ceremony removed rather than a cheaper thing. The reopen trigger below is unchanged; what changed is that the way out is now measured in hunks rather than in whether a mechanism exists.
-- **Checked at v0.13 and it had not fired; fired at v0.15 and was answered the same day.** The v0.13 check found upstream luau-lsp at `53f4238` pinning the same Luau `mono.vendor/luau` was on, so there was no gap. By v0.15 upstream had moved to `d5df9af` and Luau `fd83819b` - twelve commits ahead of ours and none behind. Both were bumped together, `just check` passed, and the engine is again at the editor's revision rather than lagging behind it.
-- **What the bump cost is worth recording, because the answer is nothing.** The engine compiled against 0.734 with no source change; `scriptcheck` reads the same 38 enums and 32 scripts; `dotted-enum-types.patch` applied to the new luau-lsp unchanged; determinism and replay are byte-identical. Three releases of a language the engine embeds, and the only edit was two submodule pointers and a compiler flag removed.
-- **One defect was found by the bump rather than by the code**, and it belonged to the machinery underneath. `scripts/vendor-tree.sh` extracts a vendor with `git archive`, and `tar` takes its mtimes from the archive - which is the *commit's* date, months older than the object files already in the build tree. So the first build after the bump rebuilt three files and linked a 0.733 language server against 0.731 objects, reporting success. The extraction now stamps the tree to now, which forces the full rebuild a changed pin actually needs. **A vendor bump that appears to cost six seconds is the symptom to remember.**
-- **Reopen trigger: luau-lsp syncs to a later Luau revision.** Bump both submodules together, run `just luau-lsp` - which refuses if only one moved - then run `just check`. The refusal was exercised at v0.15: moving `mono.vendor/luau` while the superproject still recorded the old luau-lsp gitlink stopped the recipe with both SHAs printed.
+Reopen this when upstream `luau-lsp` moves its Luau revision. Bump both
+submodules together, run `just luau-lsp`, then run the normal validation suite.
+The completed v0.15 synchronisation is archived as D00137.
 
 ### [PARTIAL] D00017
 
-**The hosting half of L12 - orchestration - has been a `TODO(v0.2+)` in `mono.engine/CMakeLists.txt` since v0.0 and is not scheduled by any version.** Converted from a marker to an entry at v0.6, because a `TODO` naming a version that shipped three releases ago is the exact failure `docs/retired/v05.md` already records once.
-
-- L12 is the tier that touches a device. `input` and `render` are its client half and are guarded by `MONO_BUILD_CLIENT`, so a headless build configures neither - which is what `just check-server-is-headless` proves by linking. **Orchestration is the mirror image**: a `[server]` module about processes, placement and lifetime, behind a `MONO_BUILD_SERVER` guard, and the comment in `CMakeLists.txt` says so in one line already.
-- **What it does not have is a caller.** `mono.server` hosts one world in one process. `--worlds N` runs several in `parallel/process`, which is a *harness* rather than a hosting layer - it starts what a benchmark asked for and answers nothing about who starts a world in production, where it goes, or what happens when it dies. Building the module before something asks those questions produces a guess with a `MONO_BUILD_SERVER` guard on it.
-- **Why this is not simply deleted.** The guard structure is the load-bearing part and it is already correct: the client half proves the pattern works, and the symmetry is what stops somebody putting a server-tier device module inside the `MONO_BUILD_CLIENT` block because that is where the other L12 modules live. The line is worth keeping; the version on it was not.
-- **v0.7 changed what this entry is about, and it is no longer "nobody asks the questions".** The prediction above was right in the letter and wrong in the consequence: the studio does host its worlds in its own process, which is indeed the case orchestration is least needed for - and then it **answered two of the questions anyway**. `Editor::UpdateWorldLifecycle` decides when a world stops (idle at `IdleCloseSeconds`, 300 s by default), when it starts again (something is sitting in its inbox, which is reliable precisely because a suspended world is the one world whose inbox nothing drains), and three exceptions that are not obvious and were each arrived at by being wrong first: never the last world, never a world outside a scoped run, and being *looked at* counts as occupancy.
-- **`mono.server` has none of it.** `--game FILE.agame` loads every world in the file and ticks all of them forever; there is no `SetState` and no `Suspended` anywhere under `mono.server/src`. So the lifecycle policy exists exactly once in this repository, and it is in the editor.
-- **That makes the risk a second copy rather than a missing module, which is a different and cheaper thing to act on.** This repository's most expensive recurring bug is one policy written twice - `CapturePreviousTransforms` was five lines in `examples` that the studio needed too, `ReadSource` exists so a source cache cannot be consulted from one entry point and not another, and there is deliberately **one** bus router so a world's behaviour does not change by being hosted elsewhere. A server that grows its own idle policy makes a world that closes on one host and not the other, with nothing reporting it.
-- ~~**So the narrow action is available before the module is**~~ **- done at v0.10, and only that half.** `engine::world::DecideLifecycle` is the policy, in `mono.engine/world` at L4 `server`, which both programs already link. `mono.studio` calls it; placement, which genuinely has no caller, is untouched and still waits for a deployment.
-- **The split that made it hoistable is decision versus gathering.** Whether somebody is *looking* at a world is a question only an editor can answer, and whether a world is inside a scoped run is a `WorldRun` concept meaning nothing to a server - so those stay in `mono.studio` and arrive as facts in `LifecycleInputs`. What moved is the part that must not differ between hosts: the thresholds, the order the tests are applied in, and the three refusals.
-- **The dividend that arrived first was not the one this entry argues for.** The case against a second copy is right, and `mono.server` still has no caller - so nothing has been de-duplicated yet. What changed immediately is that the policy became **testable**: every branch of it was previously reachable only by opening the studio and waiting five minutes, and there are now eight cases, including the two that were pure comment before - a `Faulted` world belongs to the supervisor, and occupancy cannot wake a suspended world because nothing can occupy a world that is not running.
-- **One real ordering bug came out of the move.** Routing the studio through the shared decision put the idle-clock lookup ahead of the suspended-world case, so a suspended world with a teleport waiting would have been delayed a frame while an entry it has no use for was created for it. The clock is now looked up only for an `Active` world, which is also the honest statement of what an idle clock is for.
-- ~~**`mono.server` is deliberately not wired up.**~~ **Wired at v0.13, and the decision this bullet describes is what shaped how.** `--idle-close` turns lifetime management on and its absence is the behaviour this program had before - so the two byte-comparing recipes are unaffected *by construction* rather than by their runs happening to be shorter than five minutes. Both still pass byte-identical. None of the policy is repeated: what the server supplies is occupancy, which for it is a player standing in the world, where the studio also counts the active scene and a viewport looking at it.
-- **Two things came out of the wiring that were not this entry's and are worth recording here anyway, because a second caller is what found them.** The first is that **`LastWorld` could not do its job**: the refusal is "a universe with every world suspended is a game that has stopped without saying so", and the only caller derived it from `Universe::Count()`, which that function documents as including suspended worlds. The count never drops, so N idle worlds suspend one after another, each the last only after the others had gone. `Universe::CountInState` is the fact the refusal is about and both hosts now use it. **That is this entry's own argument arriving from the other direction** - it warns about one policy written twice, and what actually happened is one policy read wrongly by its only reader, with nothing to compare it against until there were two.
-- **The second is that an empty world is not always an idle one.** NPCs on a route, a shop restocking, a round counting down. So the timeout became one of three answers - `world::IdleSleep` - with `Never` for a 24/7 world spelled as an enum member rather than as a very large number, and a ten-minute ceiling the decision clamps to rather than trusting a host to remember. And `scene::AwakeWorld` is the half a host cannot work out for itself: a script attaches a claim to the entity that needs the world running, so the claim dies with the entity instead of outliving whatever set it.
-- **Reopen trigger. *Lifetime* is closed at v0.13** - the policy is hoisted, both hosts call it, and the server's caller is behind a flag whose absence is the old behaviour. *Placement* - which host a world runs on, and what happens when it dies - is unchanged and is the whole of what this entry is now: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
-
+World lifetime is implemented in `world::DecideLifecycle` and shared by Studio
+and the server. Placement remains open: deciding which host runs a world, and
+what happens when that host dies, needs a deployment with more than one real
+host. The `--worlds` harness and Studio's single-process host do not provide
+that caller.
+Completed lifetime work is archived as D00135.
 
 ### [_] D00001
 
-- ~~`--script PATH` is accepted and warns.~~ **Closed at v0.5**, and it was the oldest thing in this entry - accepted and ignored since v0.1. Two VMs are vendored and linked, the file extension picks between them, and the flag loads a scene: `--script` on the client, `--game` on the server (ignored since v0.3), `--scene` on the unified harness. `mono.engine/examples/Rings.luau` and `Rings.js` build the same world through the same bindings, and the unified harness reads 512 entities on the server and 512 on the client from either.
-- ~~`core/types` has `Vector3`, `Color3` and `CFrame` only.~~ **Closed at v0.4.** `AABB`, `Ray` and `RayHit` landed with the consumers this bullet was waiting for - `spatial`'s queries and `physics`'s narrow phase. Nothing else was added, deliberately: `Vector2` was considered and refused because §3.4 gates it on "the overlay or editor needs it" and neither does, and the culling operations an `AABB` invites (`Inverted`, `Grown`, `Contains(AABB)`) have no caller until v0.6's frustum cull.
-- ~~`Column`, `ComponentSet`, `SparseSet` and `ChangeChannel` are not in `ecs` yet.~~ **Closed at v0.2** by the storage rewrite, and reopened and closed again at v0.4 by chunking. Recorded here rather than deleted because this bullet is why the entry was still `[_]` after the other half of it had shipped.
-- ~~macOS builds compile SPIR-V but not MSL; the cross-compile step is wired in CMake and untested.~~ **Examined at v0.15, and the half of that sentence that mattered was false.** There is no cross-compile step. Nothing in the root `CMakeLists.txt`, `mono.build/MonoLibrary.cmake` or any module's CMake names MSL, SPIRV-Cross or `shadercross`, and `mono.vendor/` holds no translator: `shaderc` pins glslang, SPIRV-Tools and SPIRV-Headers in its `DEPS` and carries no `spvc`. "Wired and untested" is a worse state to record than "absent", because it reads as a step somebody has only to run. This is what the entry meant by the least examined line in the file, and it is why the correction is the first thing here rather than the last.
-- **The second thing the examination found is that the item is in two places rather than one.** `mono.engine/render` links `shaderc` into the shipped client and `render::ShaderCompiler` compiles runtime-authored GLSL to SPIR-V while the engine runs, for every `ShaderScript` a `graph` pass names. So a build-time translation would cover the built-in modules and leave every user-authored shader broken on the platform. macOS needs SPIR-V to MSL *in the binary*, which is a vendored library and a runtime code path, not a CMake line.
-- **What runs and is checked on Linux now, and it is no longer only a check.** The build translates. `mono.tools/shadercross` runs `Engine::msl` over every `.spv` `glslc` produces and writes an `.msl` beside it, in the same staging directory and staged into the same `<program>/shaders/resources/`. `just shader-check` then reads both: every `.spv` against the resource contract `SDL_CreateGPUShader` documents - one entry point, at the stage the filename claims, every resource explicitly decorated, in the descriptor set SDL names for its stage, contiguous within that set, and no SPIR-V capability outside an allowlist of what MSL can express - and every `.msl` against the module it came from. **14 shaders, translated and checked - and the 49 this entry reported a day earlier was a defect rather than a count.** The shader stage was written to and never reconciled, so the 35 `.spv` left behind when the built-in GLSL moved from `render` to `resources` were still on disk and still being checked. `_mono_add_shaders` and `mono_add_program` now prune what they stage against what they were asked for, and `mono_prune_shader_stage` removes the directory of a module that stopped owning shaders at all - which is the case neither of the other two can see.
-- **What the MSL half of the check asks, and what it caught.** One entry point, named `main0` because MSL reserves `main`, qualified for the stage the SPIR-V runs at; the file structurally well-formed and prefaced with `metal_stdlib`; and every `[[texture]]`, `[[buffer]]` and `[[sampler]]` index in the entry point's signature the one SDL's documented order derives. That last one is not decoration. **SPIRV-Cross left to itself numbers resources in the order it walks the module's ids**, which for `opaque.frag` put `beamMap` - the *last* texture in descriptor set 2 - at `[[texture(0)]]`, and `shadowMap` at 3. Every surface would have sampled its neighbour's map, on macOS only, with nothing on Linux to say so. `Engine::msl` now tells SPIRV-Cross every index instead of reading back what it chose.
-- **A missing `.msl` is a failure and not a skip**, which is the whole reason the check and the translator are two programs. The tool that emits does not grade what it emitted: `shadercheck` links no translator, derives its expectations from the SPIR-V, and fails on a shader that has no translation beside it. "Wired and untested" arrived once from a step nobody read the output of; it cannot arrive that way twice.
-- **What it still deliberately does not claim.** There is no Metal compiler on Linux and no Metal device, so "the MSL is valid" means balanced, prefaced and bound where SDL will look, and no more. A type error inside a function body passes. Nothing here has been run on a Mac and nothing here says it has.
-- **The runtime half is built rather than refused, and that was the decision to argue.** A `ShaderScript` does not exist at build time, so a build-time-only translation leaves every user-authored shader dark on the platform - which is what this entry's second bullet says the item is *about*. It was built because the translation is verifiable from Linux even though its execution is not: the same `Engine::msl::Translate` runs over the built-in shaders in the build, where `just shader-check` reads the result, and over a `ShaderScript` in `Renderer::AddShaderVariant`, where a failure is a diagnostic and a refused variant rather than a fatal. **One implementation, two callers, and that is the load-bearing part** - two would disagree about which texture is `[[texture(0)]]` the first time somebody edited one, invisibly. The cost is SPIRV-Cross on `render`'s link line: Apache-2.0, the same licence as shaderc, three of its eight libraries built, and reaching a shipped client on exactly the condition shaderc already does.
-- **The shader format now follows what was built.** `SDL_CreateGPUDevice` is asked for SPIR-V *and* MSL, because the build produces both; `render/src/ShaderBinary.hpp` then asks `SDL_GetGPUShaderFormats` which one the device took and answers three questions at once - the format enumerator, which of the two staged files to open, and whether the entry point is `main` or `main0`. The four literals are gone. SPIR-V wins where a device offers both, so MoltenVK stays on the path that has actually run.
-- **A macOS client is warned rather than refused.** The `FATAL_ERROR` was right while there was nothing to give Metal and is wrong now: it would guarantee that the one thing left - somebody running this - can never happen. The block in the root `CMakeLists.txt` is a `WARNING` that says no client has been built or run on macOS, that every shader is translated and checked but no Metal compiler has seen one, and which three things to look at first.
-- **What still needs a Mac, and it is now a short list.** Whether `metal` compiles the emitted MSL at all. Whether the argument-buffer default matches what SDL's Metal backend binds - the emitted signatures are discrete `[[texture]]`/`[[buffer]]` parameters, which is what SDL binds, but that is read from the text and not from a device. The depth range, which is the classic difference and is silent. And the runtime translator end to end, which needs a `ShaderScript` on a Metal device and is the one path nothing on Linux exercises past the string it produces.
-- **Reopen trigger, unchanged in substance and now able to produce an answer: anybody configures a client preset on Darwin.** It was a `FATAL_ERROR` and is a `WARNING`, which is the same trigger pointed the other way - it fires for the first person who tries rather than for the first person who owns the hardware, it cannot fire on Linux, and it now leaves them with a build to run instead of a wall.
-- **The v0.15 guess, graded, and the grading is worth more than the guess.** It said the first thing to break would be `SDL_CreateGPUDevice` returning null on a literal format request; that was right and it was fixed before any Mac saw it, so it can never be observed. It said the second would be `main` against `main0`; also right, also closed. It said the third would be the runtime compiler; still open, still the last thing anybody will find. What it did not name at all is the one that was actually found from Linux - the Metal indices SPIRV-Cross chooses on its own - and that is the useful correction: the guesses were all about *plumbing that fails loudly*, and the defect that was there was a translation that succeeds and binds the wrong texture. **The new guess, in the same spirit: nothing fails. It builds, it runs, and something looks subtly wrong** - most likely the depth range, because it is the one difference on the list that produces a picture rather than an error.
-- **Correction at v0.6, to the second bullet's reasoning rather than to its verdict.** "`Vector2` was considered and refused because §3.4 gates it on 'the overlay or editor needs it' and neither does" - **`Vector2` shipped at v0.6, and for neither of those reasons.** `UDim2` and `Rect` are made of it, and both arrived with the datatype vocabulary a script surface owes an author. The gate was right and the list of things that could open it was short by one, which is the useful half: a gate phrased as "who needs it" only names the consumers somebody had thought of. The other half of that sentence closed exactly as written - the `AABB` operations got their caller in `graph::Cull`, and `Frustum::Intersects` is the positive-vertex test that wanted an `AABB` rather than eight points.
+The remaining macOS work requires a Mac: compile the generated MSL with
+`metal`, run a client, verify SDL's Metal bindings and depth behaviour, and run
+a runtime `ShaderScript` end to end. Linux validates the translation structure
+and resource bindings but cannot make those platform claims.
 
-**Three of four bullets are now closed and the entry stays `[_]` for macOS alone.** The paragraph that used to stand here said "two of four", which was true when it was written at v0.4 and stopped being true at v0.5 when `--script` closed - recorded rather than silently re-counted, for the reason D00004's drifting figure is recorded. **The count is still of the original four**, which is why it did not move at v0.15 when the macOS bullet grew from one line to eight: the eight are one item examined, not seven new ones, and the item is still open.
+Reopen this when somebody configures a client preset on Darwin.
+Completed runtime, ECS, and shader-translation work is archived as D00136.

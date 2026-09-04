@@ -1,6 +1,70 @@
 
 # DEFERRED
 
+### [x] D00137
+
+**Archived at v0.23 from D00019.** The v0.15 Luau and luau-lsp bump moved both
+submodules together, removed the obsolete `-include cstdint` workaround, and
+kept determinism and replay byte-identical. `just luau-lsp` now compares the
+two nested Luau revisions and refuses a one-sided bump.
+
+The live entry remains the standing policy for the next upstream synchronisation.
+
+### [x] D00136
+
+**Archived at v0.23 from D00001.** `--script` loads both supported VMs, the ECS
+storage vocabulary shipped with its consumers, and the shader build translates
+SPIR-V to MSL, stages both forms, and validates the Linux-visible binding
+contract. The macOS device verification remains live in D00001.
+
+### [x] D00135
+
+**Archived at v0.23 from D00017.** `world::DecideLifecycle` is the one lifetime
+policy used by Studio and the server. The server opt-in is `--idle-close`; its
+absence preserves the former behaviour. The remaining placement question stays
+live in D00017 because it needs a multi-host deployment.
+
+### [x] D00134
+
+**Archived at v0.23 from D00106.** TypeScript scenes emit Source Map v3 data and
+`script::SourceMap` remaps generated JavaScript stack frames to source lines.
+The mapper deliberately drops generated-file columns rather than reporting a
+source column that would be wrong. JavaScript-family breakpoints remain live in
+D00106 because QuickJS lacks a debugger API.
+
+### [x] D00133
+
+**Archived at v0.23 from D00109.** `Client::SubmitMove` sends inputs,
+`Connector::Submit` records them for reconciliation, and the server input path
+has real senders and socket coverage. The wiring also fixed button latching,
+rewind history for sleeping bodies, and stale input ticks in quiet worlds.
+Replaying unconfirmed inputs remains live in D00109 because no current client
+simulation needs it.
+
+### [x] D00132
+
+**Archived at v0.23 from D00116.** Default replication includes the required
+`gui.` and `script.` rows, with source programs mirrored from the authority's
+`SourceCache` onto script instances. The replica-arrival suite proves that an
+authority-authored local script runs and its `ScreenGui` compiles on the client.
+Client-initiated teleport policy remains live in D00116.
+
+### [x] D00131
+
+**Archived at v0.23 from D00119.** `SpawnLocation`, `Teams`, and `Player.Team`
+ship together. Spawn selection prefers a matching team colour, then an enabled
+neutral pad, and remains deterministic. Avatar appearances and editing
+permissions remain live in D00119.
+
+### [x] D00130
+
+**Archived at v0.23 from D00129.** Selection-box line and surface rendering,
+page tweening, elastic scrolling, `UIStroke.LineJoinMode`, and
+`UIStroke.StrokeSizingMode` shipped. `BorderOffset` was removed from the
+register because it is not a Roblox `UIStroke` property. `InputSink` duplicates
+`Active`, while `BillboardGui` distance limits are superseded by `DistanceStep`.
+The remaining interface capability gaps stay live in D00129.
+
 ### [x] D00103
 
 **Closed at v0.17 by restoring Vulkan query-pool timestamps around authored
