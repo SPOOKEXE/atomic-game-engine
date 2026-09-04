@@ -39,6 +39,9 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.24
 
+Full render plan: [docs/RENDER-REFACTOR.md](docs/RENDER-REFACTOR.md), including
+the consolidated materials, shaders and rendering optimization work.
+
 - [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
 - [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc. - per-mesh capability flags are per-instance visual state and belong in the GPU-resident row, so a compute pass can branch on them without a CPU readback
@@ -76,7 +79,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] /docs/future-work/ui-system.md
 - [_] /docs/future-work/input-system.md
 - [_] /docs/future-work/prefab-package-system.md
-- [_] /docs/future-work/materials-and-shaders.md
 - [_] /docs/future-work/procedural-generation.md
 - [_] /docs/future-work/session-and-social.md
 - [_] /docs/future-work/audio-system.md

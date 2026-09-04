@@ -4,6 +4,10 @@ This demo ports TornadoSim's arcade result, not its C++ implementation. One
 analytical wind field drives every moving thing. It is cheap, deterministic and
 good enough for a game scene without a fluid solver.
 
+The [render refactor plan](RENDER-REFACTOR.md#16-particles-environment-and-tornadosim)
+owns the generic particle, field, cloud, lighting and render-test work this demo
+can prove necessary. This document keeps the gameplay slice and its proof gates.
+
 ## Source scope
 
 The source lab has one useful core and several costly presentation systems.
