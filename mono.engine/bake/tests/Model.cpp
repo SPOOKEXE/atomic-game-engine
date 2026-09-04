@@ -412,6 +412,37 @@ TEST_CASE("a truncated model is refused at every length", "[bake][model]") {
 	}
 }
 
+TEST_CASE("a refused model leaves a prior import untouched", "[bake][model]") {
+	// A publisher can reuse one result while trying several formats. A failed
+	// candidate must not replace the last usable mesh with half-decoded data.
+	for (const ModelFormat format : {ModelFormat::Gltf, ModelFormat::Obj, ModelFormat::Pmx}) {
+		ImportedModel model = Imported(ModelFormat::Pmx, Bytes(PMX_TRIANGLE));
+		model.Embedded.push_back({"keep.png", {std::byte{0x4B}}});
+
+		const uint16_t jointCount = model.Mesh.JointCount;
+		const size_t vertexCount = model.Mesh.Vertices.size();
+		const size_t indexCount = model.Mesh.Indices.size();
+		const size_t submeshCount = model.Mesh.Submeshes.size();
+		const MeshVertex firstVertex = model.Mesh.Vertices.front();
+		const std::vector<std::string> textures = model.Textures;
+		const std::string materialLibrary = model.MaterialLibrary;
+
+		std::string failure;
+		CHECK_FALSE(ReadModel(format, Bytes("not a model"), model, failure));
+		CHECK_FALSE(failure.empty());
+		CHECK(model.Mesh.JointCount == jointCount);
+		CHECK(model.Mesh.Vertices.size() == vertexCount);
+		CHECK(model.Mesh.Indices.size() == indexCount);
+		CHECK(model.Mesh.Submeshes.size() == submeshCount);
+		CHECK(model.Mesh.Vertices.front().Position[0] == firstVertex.Position[0]);
+		CHECK(model.Textures == textures);
+		CHECK(model.MaterialLibrary == materialLibrary);
+		REQUIRE(model.Embedded.size() == 1);
+		CHECK(model.Embedded[0].Name == "keep.png");
+		CHECK(model.Embedded[0].Bytes == std::vector<std::byte>{std::byte{0x4B}});
+	}
+}
+
 TEST_CASE("an external glTF buffer is refused rather than ignored", "[bake][model]") {
 	// Following a uri would mean this module reading a file, and it has no
 	// filesystem by design. Ignoring one instead would import a mesh with no
