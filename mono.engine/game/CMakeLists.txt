@@ -31,6 +31,12 @@ mono_add_library(game
 		# fail with "no class named Part" on a perfectly good file.
 		Engine::scene
 
+		# L8, `shared`. `Decal` and `Texture` are effect classes a world document
+		# can name. The game loader registers every class it accepts itself, so a
+		# ported Roblox world does not depend on a client having happened to set up
+		# the ribbon system first.
+		Engine::effects
+
 		# L7, `shared`. The 2D class tree, for the same reason `scene` is here:
 		# a game file names its classes and this module resolves the names, so
 		# a tree a file can carry is a tree this target has to know about.
