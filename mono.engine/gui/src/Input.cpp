@@ -339,6 +339,28 @@ namespace engine::gui {
 		}
 	}
 
+	bool Scroll(Store &store, Entity frame, float notches) {
+		const ScrollState *state = store.Get<ScrollState>(frame);
+		Scrolling *scrolling = store.GetMutable<Scrolling>(frame);
+		if (state == nullptr || scrolling == nullptr) {
+			return false;
+		}
+
+		// **Vertical first, because a frame that scrolls both is a page and a
+		// wheel on a page means down.** A horizontal-only frame takes the same
+		// turn sideways, which is the only reading that leaves the wheel useful
+		// on one.
+		if (Scrolls(*scrolling, *state, true)) {
+			Move(*scrolling, *state, 0.0f, -notches * WHEEL_PIXELS);
+			return true;
+		}
+		if (Scrolls(*scrolling, *state, false)) {
+			Move(*scrolling, *state, -notches * WHEEL_PIXELS, 0.0f);
+			return true;
+		}
+		return false;
+	}
+
 	Entity Router::Wheel(Store &store, const Vector2 &point, float notches) {
 		// **The frames are asked directly rather than through `Pick`.** A
 		// `ScrollingFrame` is not `Active` and usually holds nothing that is, so
@@ -392,25 +414,7 @@ namespace engine::gui {
 			return NULL_ENTITY;
 		}
 
-		const ScrollState *state = store.Get<ScrollState>(best);
-		Scrolling *writable = store.GetMutable<Scrolling>(best);
-		if (state == nullptr || writable == nullptr) {
-			return NULL_ENTITY;
-		}
-
-		// **Vertical first, because a frame that scrolls both is a page and a
-		// wheel on a page means down.** A horizontal-only frame takes the same
-		// turn sideways, which is the only reading that leaves the wheel useful
-		// on one.
-		//
-		// Negated, because a turn away from the person moves the canvas back
-		// towards its start - `Pointer::Wheel` carries the argument.
-		if (Scrolls(*writable, *state, true)) {
-			Move(*writable, *state, 0.0f, -notches * WHEEL_PIXELS);
-		} else {
-			Move(*writable, *state, -notches * WHEEL_PIXELS, 0.0f);
-		}
-		return best;
+		return Scroll(store, best, notches) ? best : NULL_ENTITY;
 	}
 
 	bool Router::BeginDrag(Store &store, const DrawList &list, const Vector2 &point) {

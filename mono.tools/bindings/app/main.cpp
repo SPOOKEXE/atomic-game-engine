@@ -2346,6 +2346,38 @@ declare task: {
 					   "endPosition: UDim2 | Vector3, "
 					<< tweenTail;
 			}
+			if (name == "GuiButton") {
+				// This is narrower than the shared method table on purpose. The
+				// runtime refuses a non-button receiver, so declaring it on
+				// `Instance` would type-check a call that cannot succeed.
+				out << "\tfunction EmulateClick(self): ()\n";
+				out << "\tfunction VirtualLeftClick(self): ()\n";
+				out << "\tfunction VirtualLeftHold(self): ()\n";
+				out << "\tfunction VirtualLeftRelease(self): ()\n";
+				out << "\tfunction VirtualRightClick(self): ()\n";
+				out << "\tfunction VirtualRightHold(self): ()\n";
+				out << "\tfunction VirtualRightRelease(self): ()\n";
+			}
+			if (name == "GuiObject") {
+				out << "\tfunction VirtualHover(self): ()\n";
+				out << "\tfunction VirtualUnhover(self): ()\n";
+				out << "\tfunction VirtualMove(self, x: number, y: number): ()\n";
+			}
+			if (name == "ScrollingFrame") {
+				out << "\tfunction VirtualScroll(self, notches: number): ()\n";
+			}
+			if (name == "UIDragDetector") {
+				out << "\tfunction VirtualDragBegin(self, x: number, y: number): ()\n";
+				out << "\tfunction VirtualDragContinue(self, x: number, y: number, dx: number, dy: number): "
+					   "()\n";
+				out << "\tfunction VirtualDragEnd(self, x: number, y: number, dx: number, dy: number): ()\n";
+			}
+			if (name == "TextBox") {
+				out << "\tfunction VirtualFocus(self): ()\n";
+				out << "\tfunction VirtualUnfocus(self): ()\n";
+				out << "\tfunction VirtualText(self, text: string): ()\n";
+				out << "\tfunction VirtualSubmit(self): ()\n";
+			}
 
 			// The member only the Workspace answers, for the reason
 			// `LuauInstances.cpp` keeps it in a table of its own: a `Raycast` on a
@@ -3863,6 +3895,37 @@ declare const task: {
 				out << "\tTweenSize(endSize: UDim2 | Vector3, " << tweenTail;
 				out << "\tTweenSizeAndPosition(endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, "
 					<< tweenTail;
+			}
+			if (name == "GuiButton") {
+				// This is narrower than the shared method table on purpose. The
+				// runtime refuses a non-button receiver, so declaring it on
+				// `Instance` would type-check a call that cannot succeed.
+				out << "\tEmulateClick(): void;\n";
+				out << "\tVirtualLeftClick(): void;\n";
+				out << "\tVirtualLeftHold(): void;\n";
+				out << "\tVirtualLeftRelease(): void;\n";
+				out << "\tVirtualRightClick(): void;\n";
+				out << "\tVirtualRightHold(): void;\n";
+				out << "\tVirtualRightRelease(): void;\n";
+			}
+			if (name == "GuiObject") {
+				out << "\tVirtualHover(): void;\n";
+				out << "\tVirtualUnhover(): void;\n";
+				out << "\tVirtualMove(x: number, y: number): void;\n";
+			}
+			if (name == "ScrollingFrame") {
+				out << "\tVirtualScroll(notches: number): void;\n";
+			}
+			if (name == "UIDragDetector") {
+				out << "\tVirtualDragBegin(x: number, y: number): void;\n";
+				out << "\tVirtualDragContinue(x: number, y: number, dx: number, dy: number): void;\n";
+				out << "\tVirtualDragEnd(x: number, y: number, dx: number, dy: number): void;\n";
+			}
+			if (name == "TextBox") {
+				out << "\tVirtualFocus(): void;\n";
+				out << "\tVirtualUnfocus(): void;\n";
+				out << "\tVirtualText(text: string): void;\n";
+				out << "\tVirtualSubmit(): void;\n";
 			}
 
 			// The member only the Workspace answers, matching the Luau half.

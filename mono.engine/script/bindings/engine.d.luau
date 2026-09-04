@@ -2069,6 +2069,9 @@ declare extern type GuiObject extends GuiBase2d with
 	SizeConstraint: Enum_SizeConstraint
 	Visible: boolean
 	ZIndex: number
+	function VirtualHover(self): ()
+	function VirtualUnhover(self): ()
+	function VirtualMove(self, x: number, y: number): ()
 end
 
 declare extern type Frame extends GuiObject with
@@ -2097,10 +2100,18 @@ declare extern type ScrollingFrame extends Frame with
 	TopImage: string
 	VerticalScrollBarInset: Enum_ScrollBarInset
 	VerticalScrollBarPosition: Enum_VerticalScrollBarPosition
+	function VirtualScroll(self, notches: number): ()
 end
 
 declare extern type GuiButton extends GuiObject with
 	AutoButtonColor: boolean
+	function EmulateClick(self): ()
+	function VirtualLeftClick(self): ()
+	function VirtualLeftHold(self): ()
+	function VirtualLeftRelease(self): ()
+	function VirtualRightClick(self): ()
+	function VirtualRightHold(self): ()
+	function VirtualRightRelease(self): ()
 end
 
 declare extern type TextButton extends GuiButton with
@@ -2204,6 +2215,10 @@ declare extern type TextBox extends GuiObject with
 	TextWrapped: boolean
 	TextXAlignment: Enum_TextXAlignment
 	TextYAlignment: Enum_TextYAlignment
+	function VirtualFocus(self): ()
+	function VirtualUnfocus(self): ()
+	function VirtualText(self, text: string): ()
+	function VirtualSubmit(self): ()
 end
 
 declare extern type ViewportFrame extends GuiObject with
@@ -2387,6 +2402,9 @@ declare extern type UIDragDetector extends UIComponent with
 	MaxDragTranslation: Vector2
 	MinDragTranslation: Vector2
 	ResponseStyle: Enum_UIDragDetectorDragStyleResponse
+	function VirtualDragBegin(self, x: number, y: number): ()
+	function VirtualDragContinue(self, x: number, y: number, dx: number, dy: number): ()
+	function VirtualDragEnd(self, x: number, y: number, dx: number, dy: number): ()
 end
 
 declare extern type Service extends Instance with

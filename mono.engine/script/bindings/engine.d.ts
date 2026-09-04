@@ -1846,6 +1846,9 @@ declare interface GuiObject extends GuiBase2d {
 	SizeConstraint: Enum.SizeConstraint;
 	Visible: boolean;
 	ZIndex: number;
+	VirtualHover(): void;
+	VirtualUnhover(): void;
+	VirtualMove(x: number, y: number): void;
 }
 
 declare interface Frame extends GuiObject {
@@ -1874,10 +1877,18 @@ declare interface ScrollingFrame extends Frame {
 	TopImage: string;
 	VerticalScrollBarInset: Enum.ScrollBarInset;
 	VerticalScrollBarPosition: Enum.VerticalScrollBarPosition;
+	VirtualScroll(notches: number): void;
 }
 
 declare interface GuiButton extends GuiObject {
 	AutoButtonColor: boolean;
+	EmulateClick(): void;
+	VirtualLeftClick(): void;
+	VirtualLeftHold(): void;
+	VirtualLeftRelease(): void;
+	VirtualRightClick(): void;
+	VirtualRightHold(): void;
+	VirtualRightRelease(): void;
 }
 
 declare interface TextButton extends GuiButton {
@@ -1981,6 +1992,10 @@ declare interface TextBox extends GuiObject {
 	TextWrapped: boolean;
 	TextXAlignment: Enum.TextXAlignment;
 	TextYAlignment: Enum.TextYAlignment;
+	VirtualFocus(): void;
+	VirtualUnfocus(): void;
+	VirtualText(text: string): void;
+	VirtualSubmit(): void;
 }
 
 declare interface ViewportFrame extends GuiObject {
@@ -2164,6 +2179,9 @@ declare interface UIDragDetector extends UIComponent {
 	MaxDragTranslation: Vector2;
 	MinDragTranslation: Vector2;
 	ResponseStyle: Enum.UIDragDetectorDragStyleResponse;
+	VirtualDragBegin(x: number, y: number): void;
+	VirtualDragContinue(x: number, y: number, dx: number, dy: number): void;
+	VirtualDragEnd(x: number, y: number, dx: number, dy: number): void;
 }
 
 declare interface Service extends Instance {

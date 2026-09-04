@@ -10,6 +10,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -5243,6 +5244,254 @@ TEST_CASE("a gui event reaches a script's Activated", "[scripting][gui]") {
 	// And it fires once rather than every beat - the queue is drained, not read.
 	Beat(store, *runtime);
 	CHECK(Trace(store, log) == "c");
+}
+
+TEST_CASE("GuiButton EmulateClick activates both button classes in both languages", "[scripting][gui]") {
+	// **The method meets the router at `GuiActivated`, rather than pretending to
+	// be a pointer.** Both aliases must therefore run once for each concrete
+	// button type, and a non-button must refuse instead of making a familiar
+	// method silently inert.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		engine::gui::RegisterGuiClasses();
+		Store store(language == Language::Luau ? "emulate_click_luau" : "emulate_click_js");
+		const auto runtime = MakeRuntime(store, language);
+
+		const char *source = language == Language::Luau ? R"(
+			local record = Instance.new('Part')
+			record.Name = 'Record'
+			local text = Instance.new('TextButton')
+			local image = Instance.new('ImageButton')
+			text.Activated:Connect(function() record.Name = record.Name .. 'ta' end)
+			text.MouseButton1Click:Connect(function() record.Name = record.Name .. 'tm' end)
+			image.Activated:Connect(function() record.Name = record.Name .. 'ia' end)
+			image.MouseButton1Click:Connect(function() record.Name = record.Name .. 'im' end)
+			text:EmulateClick()
+			image:EmulateClick()
+			assert(record.Name == 'Recordtatmiaim', record.Name)
+		)"
+			: R"(
+				const record = Instance.new('Part');
+				record.Name = 'Record';
+				const text = Instance.new('TextButton');
+				const image = Instance.new('ImageButton');
+				text.Activated.Connect(() => { record.Name += 'ta'; });
+				text.MouseButton1Click.Connect(() => { record.Name += 'tm'; });
+				image.Activated.Connect(() => { record.Name += 'ia'; });
+				image.MouseButton1Click.Connect(() => { record.Name += 'im'; });
+				text.EmulateClick();
+				image.EmulateClick();
+				if (record.Name !== 'Recordtatmiaim') throw new Error(record.Name);
+			)";
+
+		MustRun(*runtime, source);
+		CHECK_FALSE(runtime->Run(language == Language::Luau ? "Instance.new('Frame'):EmulateClick()"
+																 : "Instance.new('Frame').EmulateClick()"));
+		CHECK(runtime->LastError().find("GuiButton") != std::string::npos);
+	}
+}
+
+TEST_CASE(
+	"virtual gui methods deliver signals and change textbox focus in both languages", "[scripting][gui]"
+) {
+	// **Virtual methods meet the script signal route directly.** They do not
+	// fabricate a host pointer, but focus still changes the one GuiService row
+	// before its events run, so handlers see the same focus state a real press
+	// leaves behind.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		engine::gui::RegisterGuiClasses();
+		Store store(language == Language::Luau ? "virtual_gui_luau" : "virtual_gui_js");
+		REQUIRE(engine::gui::InstallGuiServices(store) != engine::ecs::NULL_ENTITY);
+		const auto runtime = MakeRuntime(store, language);
+		const Entity scroll = store.CreateInstance(engine::gui::GuiClass("ScrollingFrame"), "VirtualScroll");
+		REQUIRE(scroll != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(scroll, engine::scene::WorkspaceOf(store)));
+		engine::gui::ScrollState scrollState;
+		scrollState.CanvasSize = engine::core::Vector2{100.0f, 300.0f};
+		scrollState.WindowSize = engine::core::Vector2{100.0f, 100.0f};
+		store.Set(scroll, scrollState);
+
+		const char *source = language == Language::Luau ? R"(
+			local record = Instance.new('Part')
+			record.Name = 'Record'
+			local button = Instance.new('TextButton')
+			local detector = Instance.new('UIDragDetector')
+			local first = Instance.new('TextBox')
+			local second = Instance.new('TextBox')
+			local typed = Instance.new('TextBox')
+			local scroll = game:GetService('Workspace'):FindFirstChild('VirtualScroll')
+			assert(scroll)
+			button.MouseEnter:Connect(function(x, y)
+				assert(x == 0 and y == 0)
+				record.Name = record.Name .. 'H'
+			end)
+			button.MouseLeave:Connect(function(x, y)
+				assert(x == 0 and y == 0)
+				record.Name = record.Name .. 'U'
+			end)
+			button.MouseMoved:Connect(function(x, y)
+				assert(x == 7 and y == 9)
+				record.Name = record.Name .. 'V'
+			end)
+			button.Activated:Connect(function() record.Name = record.Name .. 'A' end)
+			button.MouseButton1Click:Connect(function() record.Name = record.Name .. 'M' end)
+			button.InputBegan:Connect(function() record.Name = record.Name .. 'B' end)
+			button.MouseButton1Down:Connect(function() record.Name = record.Name .. '1' end)
+			button.InputEnded:Connect(function() record.Name = record.Name .. 'E' end)
+			button.MouseButton1Up:Connect(function() record.Name = record.Name .. 'U' end)
+			button.MouseButton2Click:Connect(function() record.Name = record.Name .. 'C' end)
+			button.MouseButton2Down:Connect(function() record.Name = record.Name .. '2' end)
+			button.MouseButton2Up:Connect(function() record.Name = record.Name .. 'R' end)
+			detector.DragStart:Connect(function(x, y, dx, dy)
+				assert(x == 1 and y == 2 and dx == 0 and dy == 0)
+				record.Name = record.Name .. 'B'
+			end)
+			detector.DragContinue:Connect(function(x, y, dx, dy)
+				assert(x == 3 and y == 4 and dx == 2 and dy == 2)
+				record.Name = record.Name .. 'C'
+			end)
+			detector.DragEnd:Connect(function(x, y, dx, dy)
+				assert(x == 5 and y == 6 and dx == 4 and dy == 4)
+				record.Name = record.Name .. 'E'
+			end)
+			first.Focused:Connect(function() record.Name = record.Name .. 'F' end)
+			first.FocusLost:Connect(function(entered)
+				assert(entered == false)
+				record.Name = record.Name .. 'L'
+			end)
+			second.Focused:Connect(function() record.Name = record.Name .. 'S' end)
+			second.FocusLost:Connect(function(entered)
+				assert(entered == false)
+				record.Name = record.Name .. 'X'
+			end)
+			typed.Focused:Connect(function() record.Name = record.Name .. 'T' end)
+			typed.FocusLost:Connect(function(entered)
+				assert(entered == true)
+				record.Name = record.Name .. 'Q'
+			end)
+			button:VirtualHover()
+			button:VirtualUnhover()
+			button:VirtualMove(7, 9)
+			button:VirtualLeftHold()
+			button:VirtualLeftRelease()
+			button:VirtualLeftClick()
+			button:VirtualRightHold()
+			button:VirtualRightRelease()
+			button:VirtualRightClick()
+			detector:VirtualDragBegin(1, 2)
+			detector:VirtualDragContinue(3, 4, 2, 2)
+			detector:VirtualDragEnd(5, 6, 4, 4)
+			first:VirtualFocus()
+			second:VirtualFocus()
+			second:VirtualUnfocus()
+			typed:VirtualFocus()
+			typed:VirtualText('hello')
+			assert(typed.Text == 'hello')
+			typed:VirtualSubmit()
+			scroll:VirtualScroll(-1)
+			assert(scroll.CanvasPosition.Y == 60)
+			assert(record.Name == 'RecordHUVB1EUB1EUAM2R2RCBCEFLSXTQ', record.Name)
+		)"
+														: R"(
+				const record = Instance.new('Part');
+				record.Name = 'Record';
+				const button = Instance.new('TextButton');
+				const detector = Instance.new('UIDragDetector');
+				const first = Instance.new('TextBox');
+				const second = Instance.new('TextBox');
+				const typed = Instance.new('TextBox');
+				const scroll = game.GetService('Workspace').FindFirstChild('VirtualScroll');
+				if (!scroll) throw new Error('missing scroll frame');
+				button.MouseEnter.Connect((x, y) => {
+					if (x !== 0 || y !== 0) throw new Error('bad hover position');
+					record.Name += 'H';
+				});
+				button.MouseLeave.Connect((x, y) => {
+					if (x !== 0 || y !== 0) throw new Error('bad unhover position');
+					record.Name += 'U';
+				});
+				button.MouseMoved.Connect((x, y) => {
+					if (x !== 7 || y !== 9) throw new Error('bad move position');
+					record.Name += 'V';
+				});
+				button.Activated.Connect(() => { record.Name += 'A'; });
+				button.MouseButton1Click.Connect(() => { record.Name += 'M'; });
+				button.InputBegan.Connect(() => { record.Name += 'B'; });
+				button.MouseButton1Down.Connect(() => { record.Name += '1'; });
+				button.InputEnded.Connect(() => { record.Name += 'E'; });
+				button.MouseButton1Up.Connect(() => { record.Name += 'U'; });
+				button.MouseButton2Click.Connect(() => { record.Name += 'C'; });
+				button.MouseButton2Down.Connect(() => { record.Name += '2'; });
+				button.MouseButton2Up.Connect(() => { record.Name += 'R'; });
+				detector.DragStart.Connect((x, y, dx, dy) => {
+					if (x !== 1 || y !== 2 || dx !== 0 || dy !== 0) throw new Error('bad drag start');
+					record.Name += 'B';
+				});
+				detector.DragContinue.Connect((x, y, dx, dy) => {
+					if (x !== 3 || y !== 4 || dx !== 2 || dy !== 2) throw new Error('bad drag continue');
+					record.Name += 'C';
+				});
+				detector.DragEnd.Connect((x, y, dx, dy) => {
+					if (x !== 5 || y !== 6 || dx !== 4 || dy !== 4) throw new Error('bad drag end');
+					record.Name += 'E';
+				});
+				first.Focused.Connect(() => { record.Name += 'F'; });
+				first.FocusLost.Connect((entered) => {
+					if (entered !== false) throw new Error('bad first focus loss');
+					record.Name += 'L';
+				});
+				second.Focused.Connect(() => { record.Name += 'S'; });
+				second.FocusLost.Connect((entered) => {
+					if (entered !== false) throw new Error('bad second focus loss');
+					record.Name += 'X';
+				});
+				typed.Focused.Connect(() => { record.Name += 'T'; });
+				typed.FocusLost.Connect((entered) => {
+					if (entered !== true) throw new Error('bad virtual submit');
+					record.Name += 'Q';
+				});
+				button.VirtualHover();
+				button.VirtualUnhover();
+				button.VirtualMove(7, 9);
+				button.VirtualLeftHold();
+				button.VirtualLeftRelease();
+				button.VirtualLeftClick();
+				button.VirtualRightHold();
+				button.VirtualRightRelease();
+				button.VirtualRightClick();
+				detector.VirtualDragBegin(1, 2);
+				detector.VirtualDragContinue(3, 4, 2, 2);
+				detector.VirtualDragEnd(5, 6, 4, 4);
+				first.VirtualFocus();
+				second.VirtualFocus();
+				second.VirtualUnfocus();
+				typed.VirtualFocus();
+				typed.VirtualText('hello');
+				if (typed.Text !== 'hello') throw new Error(typed.Text);
+				typed.VirtualSubmit();
+				scroll.VirtualScroll(-1);
+				if (scroll.CanvasPosition.Y !== 60) throw new Error('bad virtual scroll');
+				if (record.Name !== 'RecordHUVB1EUB1EUAM2R2RCBCEFLSXTQ') throw new Error(record.Name);
+			)";
+
+		MustRun(*runtime, source);
+		CHECK_FALSE(runtime->Run(
+			language == Language::Luau ? "Instance.new('Part'):VirtualHover()"
+									   : "Instance.new('Part').VirtualHover()"
+		));
+		CHECK(runtime->LastError().find("GuiObject") != std::string::npos);
+		CHECK_FALSE(runtime->Run(
+			language == Language::Luau ? "Instance.new('Frame'):VirtualFocus()"
+									   : "Instance.new('Frame').VirtualFocus()"
+		));
+		CHECK(runtime->LastError().find("TextBox") != std::string::npos);
+		CHECK_FALSE(runtime->Run(
+			language == Language::Luau ? "Instance.new('Frame'):VirtualLeftClick()"
+									   : "Instance.new('Frame').VirtualLeftClick()"
+		));
+		CHECK(runtime->LastError().find("GuiButton") != std::string::npos);
+	}
 }
 
 TEST_CASE("gui events keep the router's order across the queue", "[scripting][gui]") {
