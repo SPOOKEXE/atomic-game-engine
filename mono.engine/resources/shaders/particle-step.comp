@@ -82,7 +82,7 @@ const uint PARAM_ACCELERATION = 7u;  // xyz
 const uint PARAM_DRAG = 10u;
 const uint PARAM_FIRST = 11u;  // this block's first slot in the state pool
 const uint PARAM_CAPACITY = 12u;
-const uint PARAM_FLAGS = 13u;  // bit 0 locked, bit 1 the cell is fixed at spawn
+const uint PARAM_FLAGS = 13u;  // bit 0 locked, bit 1 fixed cell, bit 2 random playback phase
 const uint PARAM_CELLS = 14u;
 const uint PARAM_PLAYBACK = 15u;  // 0 loop, 1 one-shot, 2 ping-pong
 const uint PARAM_RATE = 16u;  // flipbook frames a second
@@ -293,12 +293,9 @@ uint PackSize(float width, float height) {
 	return w | (h << 16u);
 }
 
-// Loop, one-shot and ping-pong. **Random is absent on purpose**: that mode picks
-// a cell once and keeps it for the particle's whole life, so the host writes it
-// at spawn and this pass leaves the cell alone - which is what the fixed-cell
-// flag says. It is also what keeps a sixty-four-bit hash out of a shader that
-// has no sixty-four-bit integers.
-uint FlipbookCell(uint base, float age, float lifetime, uint cells) {
+// Loop, one-shot and ping-pong. Random playback keeps the phase selected at
+// spawn as its cell. The other modes consume the same phase as their offset.
+uint FlipbookCell(uint base, float age, float lifetime, uint cells, uint start) {
 	if (cells <= 1u) {
 		return 0u;
 	}
@@ -306,16 +303,16 @@ uint FlipbookCell(uint base, float age, float lifetime, uint cells) {
 	uint playback = BlockUint(base, PARAM_PLAYBACK);
 	if (playback == 1u) {
 		float fraction = lifetime > 0.0 ? age / lifetime : 0.0;
-		return min(uint(fraction * float(cells)), cells - 1u);
+		return min(start + uint(fraction * float(cells)), cells - 1u);
 	}
 
 	uint stepped = uint(age * BlockFloat(base, PARAM_RATE));
 	if (playback == 2u) {
 		uint span = cells * 2u - 2u;
-		uint at = span == 0u ? 0u : stepped % span;
+		uint at = span == 0u ? 0u : (start + stepped) % span;
 		return at < cells ? at : span - at;
 	}
-	return stepped % cells;
+	return (start + stepped) % cells;
 }
 
 // Whether a point is past this pane and inside its rectangle, which is what
@@ -413,6 +410,7 @@ void main() {
 	vec3 push = BlockVector(base, PARAM_ACCELERATION) * delta;
 	bool locked = (flags & 1u) != 0u;
 	bool fixedCell = (flags & 2u) != 0u;
+	bool randomStart = (flags & 4u) != 0u;
 
 	uint stateAt = stateRow * STATE_WORDS;
 	uint instanceAt = destination * INSTANCE_WORDS;
@@ -531,7 +529,8 @@ void main() {
 	uint turned = uint(int(remembered & 0xFFFFu) + int(spin * delta * 65536.0)) & 0xFFFFu;
 	states.words[stateAt + STATE_ROTATION] = turned | (remembered & 0xFFFF0000u);
 
-	uint cell = fixedCell ? (remembered >> 16u) : FlipbookCell(base, age, lifetime, cells);
+	uint start = randomStart ? (remembered >> 16u) : 0u;
+	uint cell = fixedCell ? (remembered >> 16u) : FlipbookCell(base, age, lifetime, cells, start);
 	instances.words[instanceAt + INSTANCE_ROTATION] = turned | (cell << 16u);
 
 	uint colour = SampleColour(curveAt, cursor);

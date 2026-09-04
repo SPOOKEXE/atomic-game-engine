@@ -290,15 +290,13 @@ namespace engine::render {
 			words[PARTICLE_PARAM_CAPACITY] = block.Capacity;
 			words[PARTICLE_PARAM_GENERATION] = block.Generation;
 
-			// **The random flipbook mode is decided at spawn and not here**, and
-			// that is what keeps a sixty-four-bit hash out of a shader with no
-			// sixty-four-bit integers: the mode picks a cell once and keeps it for
-			// the particle's whole life, so the host writes it into the state's
-			// rotation word and the step is told to leave the cell alone. Every
-			// other mode is a function of age and the shader works it out.
+			// **The random flipbook phase is decided at spawn and not here**, which
+			// keeps a sixty-four-bit hash out of the step shader. Random playback
+			// keeps its phase as a cell; the other modes use it as an initial offset.
 			const uint32_t cells = std::min<uint32_t>(block.Frames, effects::FlipbookCells(block.Flipbook));
 			const bool fixed = block.FlipbookPlayback == effects::FlipbookMode::Random;
-			words[PARTICLE_PARAM_FLAGS] = (block.Locked ? 1u : 0u) | (fixed ? 2u : 0u);
+			words[PARTICLE_PARAM_FLAGS] =
+				(block.Locked ? 1u : 0u) | (fixed ? 2u : 0u) | (block.FlipbookStartRandom ? 4u : 0u);
 			words[PARTICLE_PARAM_CELLS] = cells;
 			words[PARTICLE_PARAM_PLAYBACK] = static_cast<uint32_t>(block.FlipbookPlayback);
 			PutFloat(words, PARTICLE_PARAM_RATE, block.FlipbookRate);

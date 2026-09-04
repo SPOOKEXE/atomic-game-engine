@@ -709,6 +709,9 @@ declare namespace Enum {
 		readonly Thumbstick1: KeyCode;
 		readonly Thumbstick2: KeyCode;
 	};
+	const LensShape: {
+		readonly Sphere: LensShape;
+	};
 	const LineJoinMode: {
 		readonly Round: LineJoinMode;
 		readonly Bevel: LineJoinMode;
@@ -1878,6 +1881,58 @@ declare interface ScrollingFrame extends Frame {
 	VerticalScrollBarInset: Enum.ScrollBarInset;
 	VerticalScrollBarPosition: Enum.VerticalScrollBarPosition;
 	VirtualScroll(notches: number): void;
+}
+
+declare interface NodeCanvas extends Frame {
+	CanvasPosition: Vector2;
+	GridSize: number;
+	GridVisible: boolean;
+	MaximumZoom: number;
+	MinimumZoom: number;
+	Zoom: number;
+	Connect(output: NodeCanvasPort, input: NodeCanvasPort): NodeCanvasLink;
+	Disconnect(input: NodeCanvasPort): boolean;
+	RefreshGroups(): number;
+}
+
+declare interface NodeCanvasNode extends Frame {
+	BypassInput: string;
+	BypassMode: Enum.NodeBypassMode;
+	BypassOutput: string;
+	Enabled: boolean;
+	InputPortLayout: Enum.InputPortLayout;
+	MinimumSize: Vector2;
+	NodeId: string;
+	NodeType: string;
+	Resizable: boolean;
+	Title: string;
+}
+
+declare interface NodeCanvasGroup extends Frame {
+	GroupId: string;
+	Layout: Enum.NodeGroupLayout;
+	Padding: Vector2;
+	Title: string;
+}
+
+declare interface NodeCanvasPort extends GuiObject {
+	Direction: Enum.NodePortDirection;
+	Edge: Enum.NodePortEdge;
+	MaxConnections: number;
+	PortId: string;
+	ValueType: string;
+}
+
+declare interface NodeCanvasLink extends Instance {
+	FromDirection: Enum.NodePortDirection;
+	FromNode: string;
+	FromPort: string;
+	LineColor3: Color3;
+	LineThickness: number;
+	LineTransparency: number;
+	ToDirection: Enum.NodePortDirection;
+	ToNode: string;
+	ToPort: string;
 }
 
 declare interface GuiButton extends GuiObject {

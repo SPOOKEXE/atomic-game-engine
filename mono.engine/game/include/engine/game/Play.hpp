@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace engine::ecs {
@@ -81,6 +82,53 @@ namespace engine::game {
 		//
 		// @since v0.16
 		ContentRefusal = 6,
+
+		// Client to host: ask the authority to move this client's player.
+		//
+		// @since v0.23
+		TeleportRequest = 7,
+
+		// Host to client: the authority's answer to `TeleportRequest`.
+		//
+		// @since v0.23
+		TeleportResult = 8,
+	};
+
+	// The decision a server-side `TeleportService.TeleportRequested` handler
+	// returns. Only `Processed` permits the server to perform the teleport.
+	//
+	// @since v0.23
+	enum class TeleportRequestDecision : uint8_t {
+		// No handler accepted the request. The server treats this as denied.
+		NotProcessed,
+
+		// A handler explicitly declined the request.
+		Denied,
+
+		// A handler accepted the request and the server performed it.
+		Processed,
+	};
+
+	// One client request for a server-authoritative teleport.
+	//
+	// `Data` is encoded `script::ScriptValue` bytes. The wire format deliberately
+	// carries bytes rather than an entity or a VM value, because this crosses a
+	// process boundary and the destination may be another world.
+	//
+	// @since v0.23
+	struct TeleportRequest {
+		uint64_t Id = 0;
+		std::string Place;
+		std::vector<std::byte> Data;
+	};
+
+	// The server's answer to one teleport request.
+	//
+	// @since v0.23
+	struct TeleportRequestResult {
+		uint64_t Id = 0;
+		TeleportRequestDecision Decision = TeleportRequestDecision::NotProcessed;
+		std::string Message;
 	};
 
 	// Which player a client is looking through.
@@ -180,4 +228,17 @@ namespace engine::game {
 	// @param out   Filled on success.
 	// @return `false` when the payload is not a move input.
 	bool DecodeMoveInput(std::span<const std::byte> bytes, MoveInput &out);
+
+	// Packs and unpacks the server-authoritative teleport request pair.
+	//
+	// Both decoders reject an unknown tag, a malformed length, and any oversized
+	// field before allocating from peer-controlled input.
+	//
+	// @since v0.23
+	//@{
+	std::vector<std::byte> EncodeTeleportRequest(const TeleportRequest &request);
+	bool DecodeTeleportRequest(std::span<const std::byte> bytes, TeleportRequest &out);
+	std::vector<std::byte> EncodeTeleportResult(const TeleportRequestResult &result);
+	bool DecodeTeleportResult(std::span<const std::byte> bytes, TeleportRequestResult &out);
+	//@}
 }

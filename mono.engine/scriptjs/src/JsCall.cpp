@@ -606,6 +606,20 @@ namespace engine::script {
 				Release(Context, callback);
 			}
 
+			HostCallback RetainHostCallback(size_t index) override {
+				if (index >= Argc || !JS_IsFunction(Context, Argv[index])) {
+					Raise("expected a function");
+				}
+				JsContext &bound = JsOf(Context);
+				const HostCallback callback{++bound.NextHostCallback};
+				bound.HostCallbacks.emplace(callback.Id, Retain(Context, Argv[index]));
+				return callback;
+			}
+
+			void ReleaseHostCallback(HostCallback callback) override {
+				ReleaseJsHostCallback(Context, callback);
+			}
+
 			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
 				SignalTable &signals = JsOf(Context).Signals;
 				signals.MarkOnce(signals.Connect(kind, subject, callback));

@@ -818,6 +818,11 @@ declare Enum: {
 		Center: Enum_HorizontalAlignment,
 		Right: Enum_HorizontalAlignment,
 	},
+	InputPortLayout: {
+		Manual: Enum_InputPortLayout,
+		Separate: Enum_InputPortLayout,
+		Squash: Enum_InputPortLayout,
+	},
 	ItemLineAlignment: {
 		Automatic: Enum_ItemLineAlignment,
 		Start: Enum_ItemLineAlignment,
@@ -1865,6 +1870,12 @@ declare extern type LocalScript extends LuaSourceContainer with
 end
 
 declare extern type ModuleScript extends LuaSourceContainer with
+end
+
+declare extern type RemoteEvent extends Instance with
+end
+
+declare extern type BindableEvent extends Instance with
 end
 
 declare extern type ParticleEmitter extends Instance with

@@ -257,6 +257,13 @@ namespace engine::script {
 		// @since v0.15
 		CrossWorldMessage,
 
+		// `TeleportService.TeleportResult` - an authority's answer to a client
+		// request. The client matches the request id before this queue sees it,
+		// so a signal handler never observes an unsolicited network message.
+		//
+		// @since v0.23
+		TeleportResult,
+
 		// `SettingsService:SetMenuAction(name, label)` - the named row was
 		// activated in the client's ESC menu. The action name is the connection's
 		// `Property`, so independently-authored rows share one signal kind without

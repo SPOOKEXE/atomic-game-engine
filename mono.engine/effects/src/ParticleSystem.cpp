@@ -356,8 +356,9 @@ namespace engine::effects {
 				 block.NoiseScrollSpeed == emitter.NoiseScrollSpeed &&
 				 block.RadialAcceleration == emitter.RadialAcceleration &&
 				 block.TangentialAcceleration == emitter.TangentialAcceleration &&
-				 block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
-				 block.FlipbookPlayback == emitter.FlipbookPlayback);
+				 block.Locked == emitter.LockedToPart &&
+				 block.FlipbookStartRandom == emitter.FlipbookStartRandom &&
+				 block.Flipbook == emitter.Flipbook && block.FlipbookPlayback == emitter.FlipbookPlayback);
 			if (authoredSame && block.FlipbookRate == rate && block.Frames == frames) {
 				return false;
 			}
@@ -372,6 +373,7 @@ namespace engine::effects {
 				block.RadialAcceleration = emitter.RadialAcceleration;
 				block.TangentialAcceleration = emitter.TangentialAcceleration;
 				block.Locked = emitter.LockedToPart;
+				block.FlipbookStartRandom = emitter.FlipbookStartRandom;
 				block.Flipbook = emitter.Flipbook;
 				block.FlipbookPlayback = emitter.FlipbookPlayback;
 			}
@@ -393,7 +395,18 @@ namespace engine::effects {
 				   left.QuaternionW == right.QuaternionW;
 		}
 
-		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t seed) {
+		uint32_t FlipbookPhase(const EmitterBlock &block, uint32_t cells, uint64_t seed) {
+			const bool fixed = block.FlipbookPlayback == FlipbookMode::Random;
+			if (!fixed && !block.FlipbookStartRandom) {
+				return 0;
+			}
+			const uint32_t span = block.FlipbookPlayback == FlipbookMode::PingPong ? cells * 2 - 2 : cells;
+			return span == 0
+					   ? 0
+					   : std::min(static_cast<uint32_t>(Unit(seed) * static_cast<float>(span)), span - 1);
+		}
+
+		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t start) {
 			// **What the *sheet* holds, not what the grid could.** A GIF has
 			// whatever number of frames the animation has and the grid is the next
 			// square power of two that fits, so playing every cell would spend the
@@ -405,7 +418,7 @@ namespace engine::effects {
 
 			switch (block.FlipbookPlayback) {
 			case FlipbookMode::Random:
-				return Mix(seed) % cells;
+				return start;
 			case FlipbookMode::OneShot: {
 				// Stretched over the whole life, which is what a one-shot sheet is
 				// drawn for. Clamped to the last cell rather than wrapping, so a
@@ -413,18 +426,18 @@ namespace engine::effects {
 				// instead of snapping back to the first.
 				const float fraction = lifetime > 0.0f ? age / lifetime : 0.0f;
 				const auto cell = static_cast<uint32_t>(fraction * static_cast<float>(cells));
-				return std::min(cell, cells - 1);
+				return std::min(start + cell, cells - 1);
 			}
 			case FlipbookMode::PingPong: {
 				const auto step = static_cast<uint32_t>(age * block.FlipbookRate);
 				const uint32_t span = cells * 2 - 2;
-				const uint32_t at = span == 0 ? 0 : step % span;
+				const uint32_t at = span == 0 ? 0 : (start + step) % span;
 				return at < cells ? at : span - at;
 			}
 			case FlipbookMode::Loop:
 				break;
 			}
-			return static_cast<uint32_t>(age * block.FlipbookRate) % cells;
+			return (start + static_cast<uint32_t>(age * block.FlipbookRate)) % cells;
 		}
 	}
 
@@ -1602,9 +1615,10 @@ namespace engine::effects {
 								)) &
 								0xFFFFu;
 
+							const uint32_t phase = state.Rotation >> 16;
 							const uint32_t cell =
-								animated ? FlipbookCell(block, state.Age, state.Lifetime, state.Seed) : 0u;
-							state.Rotation = rotation;
+								animated ? FlipbookCell(block, state.Age, state.Lifetime, phase) : 0u;
+							state.Rotation = rotation | (phase << 16);
 							instance.RotationAndCell = rotation | (cell << 16);
 							instance.Colour = WithAlpha(
 								SampleColourCurve(block.Curves.Colour, cursor),
@@ -1792,14 +1806,20 @@ namespace engine::effects {
 							const auto turns = static_cast<uint32_t>(
 								std::fmod(degrees * TURNS_PER_DEGREE + 1.0f, 1.0f) * 65535.0f
 							);
-							state.Rotation = turns & 0xFFFFu;
+							const uint32_t cells =
+								std::min<uint32_t>(block.Frames, FlipbookCells(block.Flipbook));
+							const uint32_t phase =
+								cells > 1 ? FlipbookPhase(block, cells, SeedOf(id, index, 15)) : 0u;
+							state.Rotation = (turns & 0xFFFFu) | (phase << 16);
 
 							// The ageing pass has not seen this particle yet, so
 							// its first frame is written here.
 							ParticleInstance &instance = instances[row];
 							instance.Position = state.Position;
 							instance.Slot = bornSlot;
-							instance.RotationAndCell = state.Rotation;
+							const uint32_t cell =
+								cells > 1 ? FlipbookCell(block, 0.0f, state.Lifetime, phase) : 0u;
+							instance.RotationAndCell = state.Rotation | (cell << 16);
 							instance.Size = bornSize;
 							instance.Colour = bornColour;
 

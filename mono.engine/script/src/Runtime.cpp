@@ -9,7 +9,7 @@
 #include <fstream>
 #include <sstream>
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 #include <windows.h>
 #endif
 
@@ -21,7 +21,7 @@ namespace engine::script {
 		// MSVC can unwind the caller normally when an ordinary C++ exception
 		// crosses the same boundary.
 		bool RunInstanceIsolated(Runtime &runtime, const ecs::Entity instance, unsigned long &fault) {
-#ifdef _WIN32
+#ifdef _MSC_VER
 			__try {
 				return runtime.RunInstance(instance);
 			} __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -247,6 +247,12 @@ namespace engine::script {
 	void Runtime::DeliverSettingsMenuAction(core::Name action) {
 		if (action.IsValid()) {
 			PendingSettingsMenuActions.push_back(action);
+		}
+	}
+
+	void Runtime::DeliverTeleportResult(TeleportResult result) {
+		if (result.Id != 0) {
+			PendingTeleportResults.push_back(std::move(result));
 		}
 	}
 

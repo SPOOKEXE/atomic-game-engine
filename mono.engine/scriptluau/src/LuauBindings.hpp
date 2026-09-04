@@ -796,7 +796,9 @@ namespace engine::script {
 	// @param arguments What to pass.
 	// @return `false` when the callback is unknown or the handler raised.
 	// @since v0.12
-	bool CallHostCallback(lua_State *state, HostCallback callback, HostArguments arguments);
+	bool CallHostCallback(
+		lua_State *state, HostCallback callback, HostArguments arguments, HostValue *result = nullptr
+	);
 
 	// Lets go of one, so its closure can be collected.
 	//

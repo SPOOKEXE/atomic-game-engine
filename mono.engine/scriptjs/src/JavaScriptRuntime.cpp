@@ -301,6 +301,11 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments) {
+		HostValue ignored;
+		return Invoke(callback, arguments, ignored);
+	}
+
+	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -311,7 +316,7 @@ namespace engine::script {
 			budget->Base = budget->Taken;
 		}
 
-		if (!CallJsHostCallback(Context, callback, arguments, Error)) {
+		if (!CallJsHostCallback(Context, callback, arguments, Error, &result)) {
 			return false;
 		}
 		return DrainJobs();
@@ -462,6 +467,25 @@ namespace engine::script {
 			}
 		};
 		note(PumpJsDeliveries(Context, Store));
+
+		{
+			std::vector<TeleportResult> results;
+			results.swap(PendingTeleportResults);
+			for (const TeleportResult &result : results) {
+				JSValue arguments[3];
+				arguments[0] = JS_NewFloat64(Context, static_cast<double>(result.Id));
+				arguments[1] = MakeJsEnumItem(
+					Context,
+					core::Name("TeleportRequestDecision"),
+					core::Name(TeleportRequestDecisionName(result.Decision))
+				);
+				arguments[2] = JS_NewStringLen(Context, result.Message.data(), result.Message.size());
+				note(FireJsSignal(Context, SignalKind::TeleportResult, ecs::NULL_ENTITY, 3, arguments));
+				for (JSValue &argument : arguments) {
+					JS_FreeValue(Context, argument);
+				}
+			}
+		}
 
 		// **The world's own timed work first, exactly where the Luau side puts
 		// it** - see `LuauRuntime::Heartbeat`, which carries the whole argument:

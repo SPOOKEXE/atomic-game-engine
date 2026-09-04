@@ -342,6 +342,10 @@ namespace engine::effects {
 		// the step never has to ask which meaning it is looking at.
 		uint8_t Frames = 1;
 
+		// A deterministic per-particle flipbook phase for Loop, OneShot and
+		// PingPong. Random playback already keeps one random cell by definition.
+		bool FlipbookStartRandom = false;
+
 		// Whether particles are recomputed from the parent's frame each step.
 		bool Locked = false;
 
@@ -511,12 +515,11 @@ namespace engine::effects {
 		// empty.** See `EmitterBlock::Generation`; a mismatch is death.
 		uint32_t Generation = 0;
 
-		// The accumulated turn, over 65,536, and the cell a fixed flipbook drew.
+		// The accumulated turn, over 65,536, and the flipbook phase picked at spawn.
 		//
 		// Laid out as `ParticleInstance::RotationAndCell` is, because that is
-		// where it is going. The cell half is only meaningful for the random
-		// flipbook mode, which picks once at spawn and keeps it - every other
-		// mode is a function of age and the step works it out.
+		// where it is going. Random playback keeps that cell, while a randomized
+		// start uses it as the phase of an otherwise age-driven playback mode.
 		uint32_t Rotation = 0;
 	};
 

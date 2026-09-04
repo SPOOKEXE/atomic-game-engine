@@ -38,6 +38,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/TeleportRequest.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
@@ -1629,6 +1630,43 @@ namespace client {
 				return;
 			}
 
+			engine::game::TeleportRequestResult teleport;
+			if (engine::game::DecodeTeleportResult(message, teleport)) {
+				bool accepted = false;
+				Universe_->Enter(Replicated, [&accepted, &teleport](engine::ecs::Store &store) {
+					accepted = engine::script::AcceptTeleportResult(store, teleport.Id);
+				});
+				if (!accepted) {
+					return;
+				}
+
+				engine::script::TeleportRequestDecision decision =
+					engine::script::TeleportRequestDecision::NotProcessed;
+				switch (teleport.Decision) {
+				case engine::game::TeleportRequestDecision::NotProcessed:
+					break;
+				case engine::game::TeleportRequestDecision::Denied:
+					decision = engine::script::TeleportRequestDecision::Denied;
+					break;
+				case engine::game::TeleportRequestDecision::Processed:
+					decision = engine::script::TeleportRequestDecision::Processed;
+					break;
+				}
+				if (engine::script::Runtime *runtime = RuntimeOf(Replicated); runtime != nullptr) {
+					runtime->DeliverTeleportResult({teleport.Id, decision, teleport.Message});
+				}
+
+				ENGINE_INFO(
+					"teleport request {}: {}{}",
+					teleport.Id,
+					teleport.Decision == engine::game::TeleportRequestDecision::Processed ? "processed"
+					: teleport.Decision == engine::game::TeleportRequestDecision::Denied  ? "denied"
+																						  : "not processed",
+					teleport.Message.empty() ? "" : std::string(" (" + teleport.Message + ")")
+				);
+				return;
+			}
+
 			// **Where content is, said once at admission.** It cannot be
 			// replicated for `LocalPlayer`'s reason and one more: the grant in it
 			// names this session, so it is per client by construction.
@@ -1899,6 +1937,30 @@ namespace client {
 		}
 
 		Connection->Advance(nowSeconds);
+	}
+
+	void Client::SubmitTeleportRequests(double nowSeconds) {
+		if (Connection == nullptr || !ReportedJoin) {
+			return;
+		}
+
+		Universe_->Enter(Replicated, [this, nowSeconds](engine::ecs::Store &store) {
+			while (true) {
+				const std::span<const engine::script::PendingTeleportRequest> pending =
+					engine::script::PendingTeleportRequests(store);
+				if (pending.empty()) {
+					return;
+				}
+
+				const engine::script::PendingTeleportRequest &request = pending.front();
+				const std::vector<std::byte> message =
+					engine::game::EncodeTeleportRequest({request.Id, request.Place, request.Data});
+				if (!Connection->SendUser(message, nowSeconds)) {
+					return;
+				}
+				engine::script::MarkTeleportRequestSent(store);
+			}
+		});
 	}
 
 	void Client::PumpEvents() {
@@ -2386,6 +2448,7 @@ namespace client {
 			// has just finished receiving** - a submission tagged with a tick
 			// the server has not reached is one it rewinds against nothing.
 			SubmitMove(engine::core::Clock::Seconds());
+			SubmitTeleportRequests(engine::core::Clock::Seconds());
 		}
 
 		// After the tick and the replica's apply, so what a script set this

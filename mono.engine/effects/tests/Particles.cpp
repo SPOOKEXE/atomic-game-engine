@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <set>
 
 TEST_SUITE_ID("engine.effects.particles")
 
@@ -819,6 +820,40 @@ TEST_CASE("a flipbook runs over the particle's own life under OneShot", "[effect
 	const uint32_t cell = cellOf(system->Instances[0].RotationAndCell);
 	REQUIRE(cell > 0);
 	REQUIRE(cell < cells);
+}
+
+TEST_CASE("a flipbook can start every particle at a deterministic random phase", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Rate = 120.0f;
+	Settings(store, emitter).Lifetime = NumberRange{5.0f, 5.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid4x4;
+	Settings(store, emitter).FlipbookFrames = 16;
+	Settings(store, emitter).FlipbookStartRandom = true;
+
+	// The first-step cells are the test. A later animation can hide a failed
+	// start phase because ordinary playback has already moved every particle.
+	Frame(store, 0.1f);
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Statistics.Live > 8);
+
+	std::set<uint32_t> cells;
+	for (uint32_t index = 0; index < system->Statistics.Live; index++) {
+		cells.insert(system->Instances[index].RotationAndCell >> 16);
+	}
+	CHECK(cells.size() > 1);
+	const uint32_t initial = system->Instances[0].RotationAndCell >> 16;
+
+	// A randomized start is a phase, not the Random playback mode: each Loop
+	// particle still advances after birth.
+	Settings(store, emitter).FlipbookPlayback = FlipbookMode::Loop;
+	Settings(store, emitter).FlipbookFramerate = NumberRange{4.0f, 4.0f};
+	Frame(store, 0.25f);
+
+	const uint32_t advanced = system->Instances[0].RotationAndCell >> 16;
+	CHECK(advanced == (initial + 1) % 16);
 }
 
 // --- the roadmap's number ----------------------------------------------------

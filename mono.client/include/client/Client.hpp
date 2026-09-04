@@ -128,6 +128,7 @@ namespace client {
 
 		void PumpEvents();
 		void Step();
+		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
 		// asked to check and could not.
 		//

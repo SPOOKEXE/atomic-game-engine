@@ -956,6 +956,23 @@ namespace engine::script {
 				firstError = std::move(message);
 			}
 		};
+		{
+			// The client matched these replies to requests it sent. Deliver them at
+			// the barrier so a handler observes one settled world and may safely
+			// write properties like every other script signal.
+			std::vector<TeleportResult> results;
+			results.swap(PendingTeleportResults);
+			for (const TeleportResult &result : results) {
+				lua_pushnumber(State, static_cast<double>(result.Id));
+				PushEnumItem(
+					State,
+					core::Name("TeleportRequestDecision"),
+					core::Name(TeleportRequestDecisionName(result.Decision))
+				);
+				lua_pushlstring(State, result.Message.data(), result.Message.size());
+				note(FireSignal(State, SignalKind::TeleportResult, ecs::NULL_ENTITY, 3));
+			}
+		}
 
 		{
 			// **The world's own timed work, before anything that reacts to it.**
@@ -1126,6 +1143,11 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments) {
+		HostValue ignored;
+		return Invoke(callback, arguments, ignored);
+	}
+
+	bool LuauRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -1135,7 +1157,7 @@ namespace engine::script {
 		// tick, so it gets its own budget - the same grant `Run` and `Heartbeat`
 		// make, and for the same reason: the mark moves, the counter does not.
 		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
-		return CallHostCallback(State, callback, arguments);
+		return CallHostCallback(State, callback, arguments, &result);
 	}
 
 	void LuauRuntime::Release(HostCallback callback) {

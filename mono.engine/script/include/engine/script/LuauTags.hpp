@@ -131,5 +131,9 @@ namespace engine::script {
 		// A runtime-owned cleanup scope. The payload is a generation-bearing
 		// handle into ScopeTable, never a pointer to another world.
 		TAG_SCOPE = 27,
+
+		// `TeleportService` is a userdata because `TeleportRequested` is a live
+		// callback property. It has no payload, like the other service tags.
+		TAG_TELEPORT_SERVICE = 28,
 	};
 }

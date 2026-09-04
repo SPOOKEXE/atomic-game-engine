@@ -477,6 +477,14 @@ namespace engine::script {
 		// @param callback What `RetainCallback` handed back.
 		virtual void ReleaseCallback(CallbackRef callback) = 0;
 
+		// Retains a function for an authority request handler. Unlike an ordinary
+		// callback ref this identifier crosses from a service resource back to its
+		// runtime, where `Runtime::Invoke` can call it and read its result.
+		virtual HostCallback RetainHostCallback(size_t index) = 0;
+
+		// Releases what `RetainHostCallback` returned when a handler is replaced.
+		virtual void ReleaseHostCallback(HostCallback callback) = 0;
+
 		// Puts a retained callable on a signal, to be called once and dropped.
 		//
 		// **`RetainCallback`'s other half, and the three tween methods are what

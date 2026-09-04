@@ -82,7 +82,11 @@ namespace engine::script {
 
 	// Calls and releases functions a script handed to its program host.
 	bool CallJsHostCallback(
-		JSContext *context, HostCallback callback, HostArguments arguments, std::string &error
+		JSContext *context,
+		HostCallback callback,
+		HostArguments arguments,
+		std::string &error,
+		HostValue *result = nullptr
 	);
 	void ReleaseJsHostCallback(JSContext *context, HostCallback callback);
 

@@ -1425,6 +1425,20 @@ declare DateTime: {
 end
 
 declare extern type TeleportService with
+	-- A correlated authority result, delivered at the next client script beat.
+	TeleportResult: TeleportResultSignal
+
+	-- The authority request a client made. The server chooses whether it was
+	-- handled, and only `Processed` makes the player leave this world.
+	TeleportRequested: ((request: {
+		Player: Instance,
+		Place: string,
+		Data: any,
+	}) -> {
+		Decision: Enum_TeleportRequestDecision,
+		Message: string?,
+	})?
+
 	-- Sends a player to another world in this universe, with an optional
 	-- payload. The player is removed from *this* world by the call: nothing
 	-- crosses but a name and the data, and the destination rebuilds them.
@@ -1438,6 +1452,15 @@ declare extern type TeleportService with
 	-- door. The server's half of the call above: the authority decides where an
 	-- arriving character stands and needs to see what the sender wrote.
 	function GetTeleportData(self, player: Instance): any
+end
+
+declare extern type TeleportResultSignal with
+	function Connect(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
+	function Once(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two
@@ -2346,6 +2369,12 @@ declare task: {
 					   "endPosition: UDim2 | Vector3, "
 					<< tweenTail;
 			}
+			if (name == "NodeCanvas") {
+				out << "\tfunction Connect(self, output: NodeCanvasPort, input: NodeCanvasPort): "
+					   "NodeCanvasLink\n";
+				out << "\tfunction Disconnect(self, input: NodeCanvasPort): boolean\n";
+				out << "\tfunction RefreshGroups(self): number\n";
+			}
 			if (name == "GuiButton") {
 				// This is narrower than the shared method table on purpose. The
 				// runtime refuses a non-button receiver, so declaring it on
@@ -3246,6 +3275,20 @@ declare interface MessagingService {
 }
 
 declare interface TeleportService {
+	/** A correlated authority result, delivered at the next client script beat. */
+	readonly TeleportResult: TeleportResultSignal;
+
+	// The ProcessReceipt-style authority hook. Only `Processed` permits the
+	// server to move the assigned player; `Message` travels back to the client.
+	TeleportRequested: ((request: {
+		Player: Instance;
+		Place: string;
+		Data: unknown;
+	}) => {
+		Decision: Enum.TeleportRequestDecision;
+		Message?: string;
+	}) | null;
+
 	Teleport(placeName: string, player: Instance, data?: unknown): void;
 	GetLocalPlayerTeleportData(): unknown;
 
@@ -3895,6 +3938,11 @@ declare const task: {
 				out << "\tTweenSize(endSize: UDim2 | Vector3, " << tweenTail;
 				out << "\tTweenSizeAndPosition(endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, "
 					<< tweenTail;
+			}
+			if (name == "NodeCanvas") {
+				out << "\tConnect(output: NodeCanvasPort, input: NodeCanvasPort): NodeCanvasLink;\n";
+				out << "\tDisconnect(input: NodeCanvasPort): boolean;\n";
+				out << "\tRefreshGroups(): number;\n";
 			}
 			if (name == "GuiButton") {
 				// This is narrower than the shared method table on purpose. The

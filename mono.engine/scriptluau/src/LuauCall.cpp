@@ -539,6 +539,26 @@ namespace engine::script {
 				lua_unref(State, callback);
 			}
 
+			HostCallback RetainHostCallback(size_t index) override {
+				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
+
+				lua_pushvalue(State, Slot(index));
+				const int reference = lua_ref(State, -1);
+				lua_pop(State, 1);
+				const HostCallback callback{++Context.NextHostCallback};
+				Context.HostCallbacks.emplace(callback.Id, reference);
+				return callback;
+			}
+
+			void ReleaseHostCallback(HostCallback callback) override {
+				const auto found = Context.HostCallbacks.find(callback.Id);
+				if (found == Context.HostCallbacks.end()) {
+					return;
+				}
+				lua_unref(State, found->second);
+				Context.HostCallbacks.erase(found);
+			}
+
 			void ConnectOnce(SignalKind kind, ecs::Entity subject, CallbackRef callback) override {
 				Context.Signals.MarkOnce(Context.Signals.Connect(kind, subject, callback));
 			}
