@@ -105,6 +105,34 @@ namespace continuous_bench {
 			Index.Rebuild(Proxies);
 		}
 	};
+
+	struct CascadeWorld {
+		Store World{"physics.bench.continuous.cascade"};
+		Entity Late;
+		Entity Middle;
+		Entity Early;
+
+		CascadeWorld() {
+			PreparePhysicsWorld(World, 4.0f);
+			Collider collider;
+			collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+			for (Entity *body : {&Late, &Middle, &Early}) {
+				*body = World.Create();
+				World.Set<Motion>(*body, Motion{});
+				World.Set<Collider>(*body, collider);
+				World.Set<Simulated>(*body, Simulated{});
+			}
+		}
+
+		void Reset() {
+			World.Set<Transform>(Late, Transform{CFrame{Vector3{10.0f, 0.0f, 0.0f}}});
+			World.Set<Transform>(Middle, Transform{CFrame{Vector3{10.0f, 0.0f, 0.0f}}});
+			World.Set<Transform>(Early, Transform{CFrame{Vector3{3.0f, 0.0f, 0.0f}}});
+			World.GetMutable<Motion>(Late)->Linear = Vector3{1200.0f, 0.0f, 0.0f};
+			World.GetMutable<Motion>(Middle)->Linear = Vector3{600.0f, 0.0f, 0.0f};
+			World.GetMutable<Motion>(Early)->Linear = Vector3::Zero;
+		}
+	};
 }
 
 using namespace continuous_bench;
@@ -142,6 +170,15 @@ BENCH("8192 still bodies and one fast pair", 4) {
 	}
 }
 
+BENCH("frozen cascade resweeps", 4) {
+	static CascadeWorld cascade;
+	for (int pass = 0; pass < 64; pass++) {
+		cascade.Reset();
+		SweepFastBodies(cascade.World);
+		Consume(cascade.World.Resource<PhysicsWorld>()->SweptBodies());
+	}
+}
+
 BENCH("duplicate swept-grid gather", 4) {
 	static SweptGrid grid;
 	size_t gathered = 0;
@@ -165,6 +202,25 @@ BENCH("ordered swept-grid gather", 4) {
 			gathered += engine::spatial::OverlapBoxAfterId(
 							grid.Index,
 							grid.Proxies[body].Bounds,
+							engine::spatial::LayerMask::All(),
+							static_cast<uint64_t>(body),
+							grid.Candidates
+			)
+							.Written;
+		}
+	}
+	Consume(gathered);
+}
+
+BENCH("ordered swept-grid shape gather", 4) {
+	static SweptGrid grid;
+	size_t gathered = 0;
+	for (size_t pass = 0; pass < 8; pass++) {
+		for (size_t body = 0; body < grid.Proxies.size(); body++) {
+			gathered += engine::spatial::ShapeCastAfterId(
+							grid.Index,
+							grid.Proxies[body].Bounds,
+							Vector3{1.5f, 1.5f, 0.0f},
 							engine::spatial::LayerMask::All(),
 							static_cast<uint64_t>(body),
 							grid.Candidates

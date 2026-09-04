@@ -168,6 +168,24 @@ TEST_CASE("a rotating thin box is swept from its physical start pose", "[continu
 	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
 }
 
+TEST_CASE("a lower-id still simulated body emits a fast higher-id pair", "[continuous]") {
+	Store store{"physics.continuous.ordered-dynamic"};
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity still = Bullet(store, 0.0f);
+	store.GetMutable<Transform>(still)->Frame.Position = Vector3{4.0f, 0.0f, 0.0f};
+	const Entity bullet = Bullet(store, 300.0f);
+
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(bullet);
+	REQUIRE(placed != nullptr);
+	// The still body is a unit cube spanning [3.5, 4.5], not the thin wall of
+	// the case above, so contact puts the bullet centre at 3.5 - 0.5 = 3.0.
+	CHECK(placed->Frame.Position.X > 2.99f);
+	CHECK(placed->Frame.Position.X < 3.02f);
+}
+
 TEST_CASE("continuous collision ignores presentation transform history", "[continuous]") {
 	// A render-side history can be arbitrarily stale. CCD has to produce the
 	// same physical stop without it, rather than turning an interpolation row
@@ -291,6 +309,28 @@ TEST_CASE("an early pair does not rewind a body that arrives later", "[continuou
 	CHECK(store.Get<Transform>(early)->Frame.Position.X > 2.9f);
 	CHECK(store.Get<Transform>(late)->Frame.Position.X > 0.8f);
 	CHECK(store.Get<Transform>(late)->Frame.Position.X < 1.2f);
+}
+
+TEST_CASE("a frozen cascade supersedes its stale initial pair", "[continuous]") {
+	auto owned = std::make_unique<Store>("physics.continuous.frozen-cascade");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity late = Bullet(store, 1200.0f);
+	store.GetMutable<Transform>(late)->Frame.Position = Vector3{-10.0f, 0.0f, 0.0f};
+	const Entity middle = Bullet(store, 600.0f);
+	const Entity early = Bullet(store, 0.0f);
+	store.GetMutable<Transform>(early)->Frame.Position = Vector3{3.0f, 0.0f, 0.0f};
+
+	Tick(store);
+
+	// Middle first freezes against early. Its old event with late was made
+	// while middle still moved, so the fresh frozen-body sweep must replace it.
+	CHECK(store.Get<Transform>(middle)->Frame.Position.X > 1.9f);
+	CHECK(store.Get<Transform>(early)->Frame.Position.X > 2.9f);
+	CHECK(store.Get<Transform>(late)->Frame.Position.X > 0.8f);
+	CHECK(store.Get<Transform>(late)->Frame.Position.X < 1.2f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 3);
 }
 
 TEST_CASE("an off-centre hull uses its reach from the body origin", "[continuous]") {

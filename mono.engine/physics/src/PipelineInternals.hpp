@@ -169,6 +169,10 @@ namespace engine::physics {
 			return world.ContinuousReaches;
 		}
 
+		static std::vector<float> &ContinuousAngularLinearSpeeds(PhysicsWorld &world) {
+			return world.ContinuousAngularLinearSpeeds;
+		}
+
 		static std::vector<ContinuousImpactEvent> &ContinuousEvents(PhysicsWorld &world) {
 			return world.ContinuousEvents;
 		}
@@ -390,6 +394,10 @@ namespace engine::physics {
 		// the starts are what the sweeps read.
 		static std::vector<uint32_t> &GroupRowCursor(PhysicsWorld &world) {
 			return world.GroupRowCursor;
+		}
+
+		static std::vector<uint32_t> &SolverRememberConfirmed(PhysicsWorld &world) {
+			return world.SolverRememberConfirmed;
 		}
 
 		// Where each manifold's rows begin. What the dispatched set-up pass

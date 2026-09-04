@@ -190,6 +190,29 @@ namespace engine::spatial {
 		LayerMask mask,
 		std::span<uint64_t> found
 	);
+
+	// Sweeps an axis-aligned box and reports only proxy ids above a cutoff.
+	//
+	// This is the allocation-free half of an ordered swept-pair walk. It has
+	// the same exact swept-box filter as `ShapeCast`, while ensuring each dense
+	// id pair is emitted from its lower id only. Zero motion is
+	// `OverlapBoxAfterId`.
+	//
+	// @param grid             The index to ask.
+	// @param box              Where the swept box starts, in world space.
+	// @param motion           How far and which way it travels, in metres.
+	// @param mask             Which layers to consider.
+	// @param minimumExclusive Only ids greater than this are written.
+	// @param found            Where to write the ids, owned by the caller.
+	// @threadsafe
+	QueryResult ShapeCastAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	);
 	QueryResult ShapeCast(
 		const DynamicBvh &tree,
 		const core::AABB &box,

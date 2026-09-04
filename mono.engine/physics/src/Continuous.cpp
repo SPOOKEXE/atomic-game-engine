@@ -68,6 +68,7 @@ namespace engine::physics {
 		std::vector<float> &fractions = PipelineInternals::ContinuousFractions(*world);
 		std::vector<float> &thresholds = PipelineInternals::ContinuousThresholds(*world);
 		std::vector<float> &reaches = PipelineInternals::ContinuousReaches(*world);
+		std::vector<float> &angularLinearSpeeds = PipelineInternals::ContinuousAngularLinearSpeeds(*world);
 		const size_t bodyCount =
 			store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
 				.With<scene::Simulated>()
@@ -80,6 +81,7 @@ namespace engine::physics {
 		fractions.assign(bodyCount, 1.0f);
 		thresholds.resize(bodyCount);
 		reaches.resize(bodyCount);
+		angularLinearSpeeds.resize(bodyCount);
 
 		size_t written = 0;
 		store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
@@ -102,7 +104,8 @@ namespace engine::physics {
 				const core::Vector3 low = startBounds.Minimum - from.Position;
 				const core::Vector3 high = startBounds.Maximum - from.Position;
 				const float radius = std::max(low.Magnitude(), high.Magnitude());
-				const float angularReach = motion.Angular.Magnitude() * radius * delta;
+				const float angularLinearSpeed = motion.Angular.Magnitude() * radius;
+				const float angularReach = angularLinearSpeed * delta;
 				const core::Vector3 margin{angularReach, angularReach, angularReach};
 				const core::AABB envelope = startBounds.Union(endBounds);
 				proxies[written] = spatial::Proxy{
@@ -115,7 +118,8 @@ namespace engine::physics {
 					PlacedCollider{moving, collider.Trigger, motion.Linear, motion.Angular, radius}
 				);
 				thresholds[written] = ThinnestHalfExtent(collider) * CONTINUOUS_MOTION_RATIO;
-				reaches[written] = (motion.Linear.Magnitude() + motion.Angular.Magnitude() * radius) * delta;
+				reaches[written] = (motion.Linear.Magnitude() + angularLinearSpeed) * delta;
+				angularLinearSpeeds[written] = angularLinearSpeed;
 				written++;
 			});
 
@@ -183,70 +187,95 @@ namespace engine::physics {
 			);
 		};
 
-		for (size_t first = 0; first < bodyCount; first++) {
-			const PlacedCollider &moving = shapes[first];
-			if (staticSweep && reaches[first] > thresholds[first]) {
-				const spatial::QueryResult found =
-					spatial::OverlapBox(staticIndex, proxies[first].Bounds, records[first].Mask, candidates);
-				for (size_t at = 0; at < found.Written; at++) {
-					const size_t fixedIndex = static_cast<size_t>(candidates[at]);
-					const PlacedCollider &fixed = staticShapes[fixedIndex];
-					if (fixed.Trigger || !PairAdmitted(records[first], staticRecords[fixedIndex])) {
-						continue;
-					}
-					const ConvexSweep hit = SweepConvexMotion(
-						moving.Shape,
-						moving.LinearVelocity,
-						moving.AngularVelocity,
-						fixed.Shape,
-						core::Vector3::Zero,
-						core::Vector3::Zero,
-						delta
+		{
+			ENGINE_PROFILE_CAT("physics.continuous.static-gather", core::ProfileCategory::Physics);
+			for (size_t first = 0; first < bodyCount; first++) {
+				const PlacedCollider &moving = shapes[first];
+				if (staticSweep && reaches[first] > thresholds[first]) {
+					const spatial::QueryResult found = spatial::OverlapBox(
+						staticIndex, proxies[first].Bounds, records[first].Mask, candidates
 					);
-					addEvent(hit, hit.Fraction, first, fixedIndex, false);
+					for (size_t at = 0; at < found.Written; at++) {
+						const size_t fixedIndex = static_cast<size_t>(candidates[at]);
+						const PlacedCollider &fixed = staticShapes[fixedIndex];
+						if (fixed.Trigger || !PairAdmitted(records[first], staticRecords[fixedIndex])) {
+							continue;
+						}
+						const ConvexSweep hit = SweepConvexMotion(
+							moving.Shape,
+							moving.LinearVelocity,
+							moving.AngularVelocity,
+							fixed.Shape,
+							core::Vector3::Zero,
+							core::Vector3::Zero,
+							delta
+						);
+						addEvent(hit, hit.Fraction, first, fixedIndex, false);
+					}
 				}
 			}
 		}
 
 		uint64_t dynamicCandidates = 0;
-		for (size_t first = 0; first < bodyCount; first++) {
-			if (!dynamicSweep || !(reaches[first] > 0.0f)) {
-				continue;
-			}
-			const PlacedCollider &moving = shapes[first];
-			const spatial::QueryResult found = spatial::OverlapBoxAfterId(
-				movingIndex,
-				proxies[first].Bounds,
-				records[first].Mask,
-				static_cast<uint64_t>(first),
-				candidates
-			);
-			for (size_t at = 0; at < found.Written; at++) {
-				const size_t second = static_cast<size_t>(candidates[at]);
-				dynamicCandidates++;
-				if (moving.Trigger || shapes[second].Trigger ||
-					!PairAdmitted(records[first], records[second]) ||
-					world->RigidlyConnected(records[first].Owner, records[second].Owner)) {
+		{
+			ENGINE_PROFILE_CAT("physics.continuous.dynamic-gather", core::ProfileCategory::Physics);
+			for (size_t first = 0; first < bodyCount; first++) {
+				if (!dynamicSweep || reaches[first] <= 0.0f) {
 					continue;
 				}
-				const PlacedCollider &other = shapes[second];
-				const float relativeReach = ((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
-											 moving.AngularVelocity.Magnitude() * moving.MaximumRadius +
-											 other.AngularVelocity.Magnitude() * other.MaximumRadius) *
-											delta;
-				if (relativeReach <= std::min(thresholds[first], thresholds[second])) {
-					continue;
-				}
-				const ConvexSweep hit = SweepConvexMotion(
-					moving.Shape,
-					moving.LinearVelocity,
-					moving.AngularVelocity,
-					other.Shape,
-					other.LinearVelocity,
-					other.AngularVelocity,
-					delta
+				// Only bodies that move query. A still body never needs to: every
+				// pair it forms names a moving partner, and that partner's own
+				// query reports the pair - which is also what keeps a still lower
+				// id covered against a fast higher one, without walking every
+				// settled body in the scene to get there.
+				const PlacedCollider &moving = shapes[first];
+				const float angularReach = angularLinearSpeeds[first] * delta;
+				const core::Vector3 angularMargin{angularReach, angularReach, angularReach};
+				const core::AABB startBounds = ShapeReach(moving.Shape);
+				const spatial::QueryResult found = spatial::ShapeCast(
+					movingIndex,
+					core::AABB{startBounds.Minimum - angularMargin, startBounds.Maximum + angularMargin},
+					moving.LinearVelocity * delta,
+					records[first].Mask,
+					candidates
 				);
-				addEvent(hit, hit.Fraction, first, second, true);
+				for (size_t at = 0; at < found.Written; at++) {
+					const size_t second = static_cast<size_t>(candidates[at]);
+					if (second == first) {
+						continue;
+					}
+					dynamicCandidates++;
+					// A lower body that moves reports this pair from its own query.
+					if (second < first && !(reaches[second] <= 0.0f)) {
+						continue;
+					}
+					if (moving.Trigger || shapes[second].Trigger ||
+						!PairAdmitted(records[first], records[second]) ||
+						world->RigidlyConnected(records[first].Owner, records[second].Owner)) {
+						continue;
+					}
+					// Canonical pair order, so the sweep below sees the same
+					// argument order whoever reported it.
+					const size_t low = first < second ? first : second;
+					const size_t high = first < second ? second : first;
+					const PlacedCollider &other = shapes[second];
+					const float relativeReach = ((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
+												 angularLinearSpeeds[first] + angularLinearSpeeds[second]) *
+												delta;
+					if (relativeReach <= std::min(thresholds[first], thresholds[second])) {
+						continue;
+					}
+					const ConvexSweep hit = SweepConvexMotion(
+						shapes[low].Shape,
+						shapes[low].LinearVelocity,
+						shapes[low].AngularVelocity,
+						shapes[high].Shape,
+						shapes[high].LinearVelocity,
+						shapes[high].AngularVelocity,
+						delta
+					);
+					addEvent(hit, hit.Fraction, low, high, true);
+				}
 			}
 		}
 
@@ -325,73 +354,46 @@ namespace engine::physics {
 			}
 		};
 
-		while (!events.empty()) {
-			std::pop_heap(events.begin(), events.end(), laterEvent);
-			const ContinuousImpactEvent event = events.back();
-			events.pop_back();
+		{
+			ENGINE_PROFILE_CAT("physics.continuous.events", core::ProfileCategory::Physics);
+			while (!events.empty()) {
+				std::pop_heap(events.begin(), events.end(), laterEvent);
+				const ContinuousImpactEvent event = events.back();
+				events.pop_back();
 
-			const size_t first = event.First;
-			if (!event.Dynamic) {
-				if (fractions[first] >= 1.0f) {
-					fractions[first] = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
-					scheduleAgainstFrozen(first);
+				const size_t first = event.First;
+				if (!event.Dynamic) {
+					if (fractions[first] >= 1.0f) {
+						fractions[first] = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
+						scheduleAgainstFrozen(first);
+					}
+					continue;
 				}
-				continue;
-			}
 
-			const size_t second = event.Second;
-			const bool firstMoving = fractions[first] >= 1.0f;
-			const bool secondMoving = fractions[second] >= 1.0f;
-			if (!firstMoving && !secondMoving) {
-				continue;
-			}
-			if (firstMoving && secondMoving) {
-				const float stop = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
-				fractions[first] = stop;
-				fractions[second] = stop;
-				scheduleAgainstFrozen(first);
-				scheduleAgainstFrozen(second);
-				continue;
-			}
+				const size_t second = event.Second;
+				const bool firstMoving = fractions[first] >= 1.0f;
+				const bool secondMoving = fractions[second] >= 1.0f;
+				if (!firstMoving && !secondMoving) {
+					continue;
+				}
+				if (firstMoving && secondMoving) {
+					const float stop = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
+					fractions[first] = stop;
+					fractions[second] = stop;
+					scheduleAgainstFrozen(first);
+					scheduleAgainstFrozen(second);
+					continue;
+				}
 
-			const size_t movingIndexValue = firstMoving ? first : second;
-			const size_t fixedIndex = firstMoving ? second : first;
-			if (event.Reswept) {
+				if (!event.Reswept) {
+					// A fraction transition always schedules a fresh event against every
+					// moving neighbour. This initial event was made from two moving paths
+					// and is now stale.
+					continue;
+				}
+				const size_t movingIndexValue = firstMoving ? first : second;
 				fractions[movingIndexValue] = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
 				scheduleAgainstFrozen(movingIndexValue);
-				continue;
-			}
-			const float start = fractions[fixedIndex];
-			const PlacedCollider &moving = shapes[movingIndexValue];
-			const PlacedCollider &fixed = shapes[fixedIndex];
-			const ShapeInstance movingAt{
-				Advanced(moving.Shape.Frame, moving.LinearVelocity, moving.AngularVelocity, delta * start),
-				moving.Shape.Extent,
-				moving.Shape.Shape,
-				moving.Shape.Hull,
-				moving.Shape.Mesh,
-			};
-			const ShapeInstance fixedAt{
-				Advanced(fixed.Shape.Frame, fixed.LinearVelocity, fixed.AngularVelocity, delta * start),
-				fixed.Shape.Extent,
-				fixed.Shape.Shape,
-				fixed.Shape.Hull,
-				fixed.Shape.Mesh,
-			};
-			const float remaining = delta * (1.0f - start);
-			const ConvexSweep hit = SweepConvexMotion(
-				movingAt,
-				moving.LinearVelocity,
-				moving.AngularVelocity,
-				fixedAt,
-				core::Vector3::Zero,
-				core::Vector3::Zero,
-				remaining
-			);
-			const size_t oldSize = events.size();
-			addEvent(hit, start + hit.Fraction * (1.0f - start), movingIndexValue, fixedIndex, true, true);
-			if (events.size() != oldSize) {
-				std::push_heap(events.begin(), events.end(), laterEvent);
 			}
 		}
 		uint64_t swept = 0;

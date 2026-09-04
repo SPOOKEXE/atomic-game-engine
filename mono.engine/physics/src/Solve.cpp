@@ -1779,26 +1779,23 @@ namespace engine::physics {
 		// nobody else writes to, and the sort is inside one of those slots.
 		{
 			ENGINE_PROFILE_CAT("physics.solve-remember", core::ProfileCategory::Physics);
-			size_t confirmedSpeculative = 0;
-			for (size_t at = 0; at < rowCount; at++) {
-				const ContactRow &row = rows[at];
-				confirmedSpeculative +=
-					row.Speculative && row.Along[ContactRow::NORMAL].Impulse > 0.0f ? 1 : 0;
-			}
-			core::Metrics::SetGauge(
-				"physics.solve.speculative.confirmed", static_cast<double>(confirmedSpeculative)
-			);
 			std::vector<ContactImpulse> &next = PipelineInternals::ImpulseNext(*world);
 			if (next.size() < rowCount) {
 				next.resize(rowCount);
 			}
+			const size_t rememberRanges = (manifolds.size() + SETUP_GRAIN - 1) / SETUP_GRAIN;
+			std::vector<uint32_t> &confirmed = PipelineInternals::SolverRememberConfirmed(*world);
+			// Jobs::For with zero manifolds returns without running the body, so an
+			// empty assign here is safe and the serial sum below stays zero.
+			confirmed.assign(rememberRanges, 0);
 
 			parallel::Jobs::For(
 				manifolds.size(),
 				SETUP_GRAIN,
-				[&next, &rows, &bodies, &manifolds, &groupOfManifold, &rowStart, &impulseStart](
+				[&next, &rows, &bodies, &manifolds, &groupOfManifold, &rowStart, &impulseStart, &confirmed](
 					size_t begin, size_t end
 				) {
+					uint32_t confirmedInRange = 0;
 					for (size_t at = begin; at < end; at++) {
 						if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
 							continue;
@@ -1808,6 +1805,8 @@ namespace engine::physics {
 						const uint32_t last = first + manifolds[at].PointCount;
 						for (uint32_t offset = 0; offset < manifolds[at].PointCount; offset++) {
 							const ContactRow &row = rows[rowStart[at] + offset];
+							confirmedInRange +=
+								row.Speculative && row.Along[ContactRow::NORMAL].Impulse > 0.0f ? 1U : 0U;
 							const float normalImpulse =
 								row.Speculative ? 0.0f : row.Along[ContactRow::NORMAL].Impulse;
 							next[first + offset] = ContactImpulse{
@@ -1824,8 +1823,16 @@ namespace engine::physics {
 						}
 						std::sort(next.begin() + first, next.begin() + last);
 					}
+					confirmed[begin / SETUP_GRAIN] = confirmedInRange;
 				},
 				SETUP_GRAIN
+			);
+			size_t confirmedSpeculative = 0;
+			for (uint32_t count : confirmed) {
+				confirmedSpeculative += count;
+			}
+			core::Metrics::SetGauge(
+				"physics.solve.speculative.confirmed", static_cast<double>(confirmedSpeculative)
 			);
 
 			// The manifolds contributed their runs in order, but the runs of the

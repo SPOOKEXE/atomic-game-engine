@@ -1,3 +1,4 @@
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -42,6 +43,7 @@ TEST_DEPENDS("engine.ecs.archetype")
 
 using Catch::Approx;
 using engine::core::CFrame;
+using engine::core::Metrics;
 using engine::core::Name;
 using engine::core::Vector3;
 using engine::ecs::Entity;
@@ -208,6 +210,9 @@ TEST_CASE("a speculative contact limits closing speed without reporting a touch"
 	REQUIRE(PipelineInternals::SpeculativeManifolds(world).size() == 1);
 	CHECK(world.Manifolds().empty());
 	CHECK(world.Events().empty());
+	const auto confirmed = Metrics::GetGauge("physics.solve.speculative.confirmed");
+	REQUIRE(confirmed.has_value());
+	CHECK(confirmed->Value == Approx(1.0));
 	CHECK(VelocityOf(store, mover).X < 0.2f);
 	CHECK(VelocityOf(store, mover).X >= 0.0f);
 

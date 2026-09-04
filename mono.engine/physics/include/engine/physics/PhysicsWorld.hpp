@@ -1096,6 +1096,7 @@ namespace engine::physics {
 		std::vector<float> ContinuousFractions;
 		std::vector<float> ContinuousThresholds;
 		std::vector<float> ContinuousReaches;
+		std::vector<float> ContinuousAngularLinearSpeeds;
 		std::vector<ContinuousImpactEvent> ContinuousEvents;
 
 		std::vector<CandidatePair> PairList;
@@ -1214,6 +1215,11 @@ namespace engine::physics {
 		std::vector<uint32_t> GroupOfManifold;
 		std::vector<uint32_t> GroupRowStart;
 		std::vector<uint32_t> GroupRowCursor;
+
+		// One total per dispatched cache-emission range. The owner reduces these
+		// after the join, so confirming speculative rows does not need a second
+		// pass over every solver row or a shared counter between workers.
+		std::vector<uint32_t> SolverRememberConfirmed;
 
 		// Where each manifold's rows begin, as an index into `RowList`.
 		//

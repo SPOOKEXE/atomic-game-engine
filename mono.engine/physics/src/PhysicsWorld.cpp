@@ -92,6 +92,7 @@ namespace engine::physics {
 		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousFractions));
 		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousThresholds));
 		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousReaches));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousAngularLinearSpeeds));
 		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousEvents));
 
 		Add(stats.Solver, VectorBytes(ManifoldList));
@@ -112,6 +113,7 @@ namespace engine::physics {
 		Add(stats.Solver, VectorBytes(GroupOfManifold));
 		Add(stats.Solver, VectorBytes(GroupRowStart));
 		Add(stats.Solver, VectorBytes(GroupRowCursor));
+		Add(stats.Solver, VectorBytes(SolverRememberConfirmed));
 		Add(stats.Solver, VectorBytes(RowStartOfManifold));
 		Add(stats.Solver, VectorBytes(ImpulseStartOfManifold));
 		Add(stats.Solver, VectorBytes(SolverGroups));

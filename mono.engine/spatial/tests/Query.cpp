@@ -484,6 +484,46 @@ TEST_CASE("a shape cast rejects the corner its swept bounds cover", "[query]") {
 	REQUIRE(found[0] == 1u);
 }
 
+TEST_CASE("an ordered shape cast filters ids and layers without losing its path test", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{5.5f, 0.5f, 0.5f}, 0.4f, LayerMask::Only(0)),
+		Cube(2, Vector3{9.5f, 9.5f, 0.5f}, 0.4f, LayerMask::Only(0)),
+		Cube(3, Vector3{5.5f, 0.5f, 0.5f}, 0.4f, LayerMask::Only(1)),
+		Cube(4, Vector3{5.5f, 0.5f, 0.5f}, 0.4f, LayerMask::Only(0)),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 4> found{};
+	const AABB start = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.25f, 0.25f, 0.25f});
+	const QueryResult result =
+		ShapeCastAfterId(grid, start, Vector3{9.0f, 0.0f, 0.0f}, LayerMask::Only(0), 1, found);
+
+	REQUIRE_FALSE(result.Overflowed);
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == 4u);
+}
+
+TEST_CASE("an ordered still shape cast is its ordered overlap", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(2, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(3, Vector3{6.5f, 0.5f, 0.5f}, 0.5f),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 4> swept{};
+	std::array<uint64_t, 4> overlapped{};
+	const AABB box = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.25f, 0.25f, 0.25f});
+	const QueryResult castResult = ShapeCastAfterId(grid, box, Vector3::Zero, LayerMask::All(), 1, swept);
+	const QueryResult overlapResult = OverlapBoxAfterId(grid, box, LayerMask::All(), 1, overlapped);
+
+	REQUIRE(castResult.Written == overlapResult.Written);
+	REQUIRE(castResult.Written == 1);
+	CHECK(swept[0] == overlapped[0]);
+}
+
 TEST_CASE("the swept-box walk visits the thick line and not its bounding corners", "[query]") {
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
