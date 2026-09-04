@@ -18,6 +18,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
@@ -504,6 +505,15 @@ namespace engine::scene {
 				collider->Mask = spatial::CollisionGroups::MaskFor(index);
 				return true;
 			};
+
+			// A world document is authored content, so it must carry the group name
+			// rather than the process-local bit. Recreate that name before this
+			// property's strict setter runs, including for a port opened in a new
+			// Studio process. Script writes still use the strict setter above.
+			property.PrepareDocument = [](const void *value) -> bool {
+				const auto name = *static_cast<const core::Name *>(value);
+				return name.IsValid() && spatial::CollisionGroups::Register(name.Text()) != spatial::NO_GROUP;
+			};
 			return property;
 		}
 
@@ -631,6 +641,11 @@ namespace engine::scene {
 
 		const core::Name &VolumeShapeEnum() {
 			static const core::Name name("VolumeShape");
+			return name;
+		}
+
+		const core::Name &LensShapeEnum() {
+			static const core::Name name("LensShape");
 			return name;
 		}
 
@@ -2281,6 +2296,12 @@ namespace engine::scene {
 			const std::array emitter{ecs::Components::Of<Sound>()};
 			const ecs::ClassId soundClass = ecs::Classes::Register("Sound", instance, emitter);
 
+			// A group is a named parent for sounds. Its mixer controls deliberately
+			// do not exist until the client mixer can consume them: exposing Volume
+			// or playback controls first would accept authored state that changes no
+			// audio. Keeping the instance class now preserves imported UI trees.
+			ecs::Classes::Register("SoundGroup", instance, {});
+
 			// **An `Attachment` is an `Instance` and not a `PVInstance`**, which
 			// is `Sound`'s omission for a related reason. A `PVInstance` carries a
 			// `Transform` - a world-space placement - and an attachment already
@@ -2511,6 +2532,7 @@ namespace engine::scene {
 			ecs::EnumTable::Register(
 				VolumeShapeEnum().Text(), std::array<std::string_view, 2>{"Box", "Ellipsoid"}
 			);
+			ecs::EnumTable::Register(LensShapeEnum().Text(), std::array<std::string_view, 1>{"Sphere"});
 
 			// **The sky, both halves of it under `Lighting`.** Neither is a
 			// `PVInstance`, which is `Sound`'s and `Attachment`'s omission for
@@ -2534,6 +2556,17 @@ namespace engine::scene {
 
 			const std::array volume{ecs::Components::Of<Volume>()};
 			const ecs::ClassId volumeClass = ecs::Classes::Register("Volume", pvInstance, volume);
+			const std::array shaderLens{ecs::Components::Of<ShaderLens>()};
+			const ecs::ClassId shaderLensClass = ecs::Classes::Register("ShaderLens", pvInstance, shaderLens);
+			const ecs::ClassId gravitationalLensClass =
+				ecs::Classes::Register("GravitationalLens", shaderLensClass, {});
+			ShaderLens gravitationalLens;
+			gravitationalLens.Shader = core::Name("gravitational-lens");
+			gravitationalLens.Radius = 25.0f;
+			gravitationalLens.InnerRadius = 6.0f;
+			gravitationalLens.Strength = 0.8f;
+			gravitationalLens.Spin = 0.25f;
+			ecs::Classes::Default(gravitationalLensClass, gravitationalLens);
 
 			const std::array skyboxTextures{ecs::Components::Of<SkyboxTextures>()};
 			const ecs::ClassId skyboxTexturesClass =
@@ -3147,6 +3180,22 @@ namespace engine::scene {
 				volumeClass, EnumFieldProperty<Volume, &Volume::Shape, VolumeShapeEnum>("Shape")
 			);
 			ecs::Classes::Property<&Volume::Enabled>(volumeClass, "Enabled");
+
+			ecs::Classes::Property<&ShaderLens::Shader>(shaderLensClass, "Shader");
+			ecs::Classes::ClampedProperty<&ShaderLens::Radius, 0.001f, 1000000.0f>(shaderLensClass, "Radius");
+			ecs::Classes::ClampedProperty<&ShaderLens::InnerRadius, 0.0f, 1000000.0f>(
+				shaderLensClass, "InnerRadius"
+			);
+			ecs::Classes::ClampedProperty<&ShaderLens::Falloff, 0.0f, 1.0f>(shaderLensClass, "Falloff");
+			ecs::Classes::Property<&ShaderLens::Strength>(shaderLensClass, "Strength");
+			ecs::Classes::Property<&ShaderLens::Spin>(shaderLensClass, "Spin");
+			ecs::Classes::Property<&ShaderLens::Priority>(shaderLensClass, "Priority");
+			ecs::Classes::Computed(
+				shaderLensClass, EnumFieldProperty<ShaderLens, &ShaderLens::Shape, LensShapeEnum>("Shape")
+			);
+			ecs::Classes::Property<&ShaderLens::Enabled>(shaderLensClass, "Enabled");
+			ecs::Classes::Property<&ShaderLens::InnerRadius>(gravitationalLensClass, "HorizonRadius");
+			ecs::Classes::Property<&ShaderLens::Radius>(gravitationalLensClass, "WarpRadius");
 
 			ecs::Classes::Property<&AtmosphereProcedural::PlanetRadius>(
 				atmosphereProceduralClass, "PlanetRadius"

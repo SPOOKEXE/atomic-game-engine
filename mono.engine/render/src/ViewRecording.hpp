@@ -26,6 +26,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/graph/EntityFlow.hpp>
+#include <engine/graph/Frustum.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/GraphRunner.hpp>
@@ -272,6 +273,22 @@ namespace engine::render {
 		FrameUniforms Frame;
 		PbrUniforms Uniforms;
 
+		// Lenses arrive ordered by priority. A run only combines consecutive
+		// entries with one shader, because combining the same shader across an
+		// intervening program would change the authored composition order. There
+		// can be at most one run per selected lens, so this has the exact bound of
+		// the scene snapshot and never silently drops a program.
+		inline static constexpr size_t MAX_LENS_SHADER_RUNS = scene::MAX_SCENE_SHADER_LENSES;
+		struct LensGroup {
+			core::Name Shader;
+			size_t First = 0;
+			size_t Count = 0;
+		};
+		std::array<LensPassUniforms::LensUniform, scene::MAX_SCENE_SHADER_LENSES> LensEntries{};
+		LensPassUniforms LensPassData;
+		std::array<LensGroup, MAX_LENS_SHADER_RUNS> LensGroups{};
+		size_t LensGroupCount = 0;
+
 		// The material head's targets and how big each of its images is.
 		Impl::PbrDimensions PbrDimensions;
 		Impl::PbrSlot *Pbr = nullptr;
@@ -479,7 +496,9 @@ namespace engine::render {
 			std::span<const SDL_GPUTextureSamplerBinding> bindings,
 			const PbrUniforms *passUniforms,
 			const LightUniforms *passLights,
-			SDL_FColor clear
+			SDL_FColor clear,
+			const void *rawUniforms = nullptr,
+			size_t rawUniformBytes = 0
 		);
 
 		// The renderer-owned texture a named resource role resolves to.

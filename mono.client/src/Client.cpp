@@ -3386,6 +3386,23 @@ namespace client {
 					}
 				}
 			}
+
+			if (Shaders.RefreshLenses(shaded) > 0) {
+				for (const engine::core::Name &name : Shaders.ChangedLenses()) {
+					const engine::render::ShaderModule *module = Shaders.FindLens(name);
+					if (module == nullptr) {
+						VisualResourcesChanged = Renderer.DropLensShader(name) || VisualResourcesChanged;
+						continue;
+					}
+					if (!module->Error.empty()) {
+						VisualResourcesChanged = Renderer.DropLensShader(name) || VisualResourcesChanged;
+						ENGINE_WARN("lens shader '{}': {}", name.Text(), module->Error);
+						continue;
+					}
+					VisualResourcesChanged =
+						Renderer.AddLensShader(name, module->SpirV) || VisualResourcesChanged;
+				}
+			}
 		});
 
 		// **The other half of a world's content that only exists once the

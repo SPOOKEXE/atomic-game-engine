@@ -104,6 +104,8 @@ namespace engine::render {
 			Lit,
 			SkyLit,
 			VolumeLit,
+			LensA,
+			LensB,
 		};
 
 		ResourceRole RoleFor(core::Name resource) const {
@@ -165,6 +167,9 @@ namespace engine::render {
 					}
 					if (node->Kind == core::Name("volumetrics")) {
 						return ResourceRole::VolumeLit;
+					}
+					if (node->Kind == core::Name("shader-lenses")) {
+						return ResourceRole::LensB;
 					}
 				}
 			}
@@ -368,6 +373,11 @@ namespace engine::render {
 			SDL_GPUTexture *Occlusion = nullptr;
 			SDL_GPUTexture *Lit = nullptr;
 			SDL_GPUTexture *SkyLit = nullptr;
+			// Allocated with the PBR targets because a lens group may be enabled on
+			// any frame. The bypass path still writes LensB, because the graph
+			// declares it as the node output and a later node may sample it.
+			SDL_GPUTexture *LensA = nullptr;
+			SDL_GPUTexture *LensB = nullptr;
 			PbrDimensions Dimensions;
 		};
 
@@ -550,6 +560,10 @@ namespace engine::render {
 		// Keyed by `core::Name::Id`, matching `MeshTable::Entries`.
 		std::unordered_map<uint32_t, ShaderVariant> ShaderVariants;
 
+		// Lens pipelines are separate from material variants because their fixed
+		// fragment interface samples scene images rather than material textures.
+		std::unordered_map<uint32_t, SDL_GPUGraphicsPipeline *> LensPipelines;
+
 		// The opaque vertex shader, kept rather than released.
 		//
 		// **Every other shader object is released once its pipeline holds it**,
@@ -730,6 +744,8 @@ namespace engine::render {
 		scene::Environment EnvironmentState;
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		size_t VolumeCount = 0;
+		std::array<scene::ShaderLensState, scene::MAX_SCENE_SHADER_LENSES> ShaderLenses{};
+		size_t ShaderLensCount = 0;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.

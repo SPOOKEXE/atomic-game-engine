@@ -626,7 +626,9 @@ namespace engine::render {
 		std::span<const SDL_GPUTextureSamplerBinding> bindings,
 		const PbrUniforms *passUniforms,
 		const LightUniforms *passLights,
-		SDL_FColor clear
+		SDL_FColor clear,
+		const void *rawUniforms,
+		size_t rawUniformBytes
 	) {
 		FrameResult &result = Result;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -643,7 +645,9 @@ namespace engine::render {
 		if (!bindings.empty()) {
 			SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
 		}
-		if (passUniforms != nullptr) {
+		if (rawUniforms != nullptr && rawUniformBytes > 0) {
+			SDL_PushGPUFragmentUniformData(command, 0, rawUniforms, static_cast<uint32_t>(rawUniformBytes));
+		} else if (passUniforms != nullptr) {
 			SDL_PushGPUFragmentUniformData(command, 0, passUniforms, sizeof(*passUniforms));
 		}
 		if (passLights != nullptr) {
@@ -835,6 +839,22 @@ namespace engine::render {
 		if (role == Impl::ResourceRole::VolumeLit) {
 			return Impl::NamedTexture{
 				slotPbr.Lit,
+				slotPbr.Dimensions.LitWidth,
+				slotPbr.Dimensions.LitHeight,
+				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::LensA) {
+			return Impl::NamedTexture{
+				slotPbr.LensA,
+				slotPbr.Dimensions.LitWidth,
+				slotPbr.Dimensions.LitHeight,
+				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+			};
+		}
+		if (role == Impl::ResourceRole::LensB) {
+			return Impl::NamedTexture{
+				slotPbr.LensB,
 				slotPbr.Dimensions.LitWidth,
 				slotPbr.Dimensions.LitHeight,
 				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,

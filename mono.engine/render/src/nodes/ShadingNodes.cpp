@@ -336,6 +336,65 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("shader-lenses"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			Impl::PbrSlot &pbr = *recording.Pbr;
+			SDL_GPUTexture *source = pbr.Lit;
+			SDL_GPUTexture *target = pbr.LensA;
+
+			for (size_t index = 0; index < recording.LensGroupCount; index++) {
+				const ViewRecording::LensGroup &group = recording.LensGroups[index];
+				const auto pipeline = State->LensPipelines.find(group.Shader.Id());
+				if (pipeline == State->LensPipelines.end() || group.Count == 0) {
+					continue;
+				}
+				LensPassUniforms &uniforms = recording.LensPassData;
+				std::copy_n(recording.LensEntries.begin() + group.First, group.Count, uniforms.Lenses);
+				uniforms.TimeCount.y = static_cast<float>(group.Count);
+				const std::array bindings{
+					SDL_GPUTextureSamplerBinding{source, recording.Sampler},
+					SDL_GPUTextureSamplerBinding{pbr.LinearDepth, recording.Sampler},
+				};
+				recording.Fullscreen(
+					context.Name,
+					pipeline->second,
+					target,
+					recording.PbrDimensions.LitWidth,
+					recording.PbrDimensions.LitHeight,
+					bindings,
+					nullptr,
+					nullptr,
+					SDL_FColor{},
+					&uniforms,
+					sizeof(uniforms)
+				);
+				source = target;
+				target = target == pbr.LensA ? pbr.LensB : pbr.LensA;
+			}
+
+			if (source != pbr.LensB) {
+				// The graph declares lens-b as this node's output. A zero-length or
+				// odd chain ends in another texture, so copy the completed scene into
+				// the declared resource instead of letting the next node sample stale
+				// pixels from a previous frame.
+				recording.EnterNamedPass(context.Name);
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = source;
+				blit.source.w = recording.PbrDimensions.LitWidth;
+				blit.source.h = recording.PbrDimensions.LitHeight;
+				blit.destination.texture = pbr.LensB;
+				blit.destination.w = recording.PbrDimensions.LitWidth;
+				blit.destination.h = recording.PbrDimensions.LitHeight;
+				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				blit.filter = SDL_GPU_FILTER_NEAREST;
+				blit.cycle = true;
+				SDL_BlitGPUTexture(recording.Command, &blit);
+			}
+			recording.TonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.LensB, recording.Sampler}};
+			return true;
+		});
+
 		frameNodes.Set(core::Name("tonemap"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;

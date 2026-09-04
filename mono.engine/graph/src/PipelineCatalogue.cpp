@@ -296,6 +296,7 @@ namespace engine::graph {
 				 "deferred-lighting",
 				 "sky",
 				 "volumetrics",
+				 "shader-lenses",
 				 "tonemap",
 				 "portal-overlay",
 				 "mirror-overlay",
@@ -714,6 +715,15 @@ namespace engine::graph {
 			 {{"colour", K::Colour, RGBA16, true, "The frame with fog in it."}},
 			 "Froxel fog, composited over the frame. Use blue noise, not an "
 			 "interleaved gradient, or the pattern shows."},
+
+			{"shader-lenses",
+			 "Shader lenses",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, RGBA16, true, "The HDR scene behind every lens."},
+			  {"depth", K::Texture, R32, true, "Linear depth for spatial occlusion."}},
+			 {{"colour", K::Colour, RGBA16, true, "The lensed HDR scene."}},
+			 "Composes bounded world-space lens shader runs in priority order before tone mapping."},
 
 			// --- composite -------------------------------------------------------
 			{"temporal-reconstruct",

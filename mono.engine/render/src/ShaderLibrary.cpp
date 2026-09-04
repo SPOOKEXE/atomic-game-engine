@@ -3,6 +3,7 @@
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
 
 #include <algorithm>
@@ -23,6 +24,11 @@ namespace engine::render {
 		// test and be loaded by nothing. A name here is what loads one, so the
 		// list and the directory are added to in one change or neither.
 		constexpr std::array<std::string_view, 2> BUILT_IN{"unlit", "toon"};
+
+		// Lens programs are only useful through ShaderLens. Keeping this list
+		// separate from material programs makes an incompatible shader fail at
+		// the library boundary instead of reaching a device pipeline by accident.
+		constexpr std::array<std::string_view, 1> BUILT_IN_LENSES{"gravitational-lens"};
 
 		// The staged SPIR-V for a built-in, as words.
 		//
@@ -62,6 +68,14 @@ namespace engine::render {
 		return std::find(BUILT_IN.begin(), BUILT_IN.end(), name) != BUILT_IN.end();
 	}
 
+	std::span<const std::string_view> BuiltInLensShaderNames() {
+		return BUILT_IN_LENSES;
+	}
+
+	bool IsBuiltInLensShader(std::string_view name) {
+		return std::find(BUILT_IN_LENSES.begin(), BUILT_IN_LENSES.end(), name) != BUILT_IN_LENSES.end();
+	}
+
 	struct ShaderLibrary::Impl {
 		// **One compiler for the library rather than one per compile.** Building
 		// a `shaderc` instance acquires its options and its include resolver;
@@ -87,6 +101,10 @@ namespace engine::render {
 		// the contract "cleared first, sorted, deduplicated" and a second
 		// caller into the same buffer would have to know not to violate it.
 		std::vector<core::Name> GuiDemanded;
+
+		std::unordered_map<uint32_t, ShaderModule> LensModules;
+		std::vector<core::Name> LensChanged;
+		std::vector<core::Name> LensDemanded;
 
 		Impl() {
 			Compiler.SetOptimise(true);
@@ -209,6 +227,80 @@ namespace engine::render {
 		return State->Changed.size();
 	}
 
+	size_t ShaderLibrary::RefreshLenses(ecs::Store &store) {
+		State->LensChanged.clear();
+		scene::DemandedLensShaders(store, State->LensDemanded);
+
+		for (auto entry = State->LensModules.begin(); entry != State->LensModules.end();) {
+			const core::Name name = core::Name::FromId(entry->first);
+			const bool wanted = std::find(State->LensDemanded.begin(), State->LensDemanded.end(), name) !=
+								State->LensDemanded.end();
+			if (wanted) {
+				++entry;
+				continue;
+			}
+			State->LensChanged.push_back(name);
+			entry = State->LensModules.erase(entry);
+		}
+
+		for (const core::Name &name : State->LensDemanded) {
+			const scene::ShaderText text = scene::LensShaderTextOf(store, name);
+			const auto found = State->LensModules.find(name.Id());
+			const bool held = found != State->LensModules.end();
+
+			if (text.Found) {
+				if (held && !found->second.BuiltIn && found->second.Revision == text.Revision) {
+					continue;
+				}
+
+				ShaderCompilation result =
+					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
+				ShaderModule module;
+				module.Authored = true;
+				module.Revision = text.Revision;
+				if (result.Failed) {
+					module.Error = std::move(result.Error);
+				} else {
+					module.SpirV = std::move(result.SpirV);
+					module.Capabilities = std::move(result.Capabilities);
+					module.Optimizations = std::move(result.Optimizations);
+				}
+
+				State->LensModules[name.Id()] = std::move(module);
+				State->LensChanged.push_back(name);
+				continue;
+			}
+
+			// A built-in or a missing name is stable until the world changes. An
+			// authored module is not: its LensShader can be deleted while a live
+			// ShaderLens still names it, so resolve the fallback rather than
+			// retaining the removed source's old GPU pipeline.
+			if (held && !found->second.Authored) {
+				continue;
+			}
+
+			ShaderModule module;
+			if (IsBuiltInLensShader(name.Text())) {
+				module.BuiltIn = true;
+				module.SpirV = ReadWords(
+					resources::Shader(std::string(name.Text()) + ".frag", resources::ShaderForm::SpirV),
+					module.Error
+				);
+				if (module.Error.empty()) {
+					module.Capabilities = InspectShaderCapabilities(module.SpirV);
+				}
+			} else {
+				module.Error = "no LensShader named '" + std::string(name.Text()) +
+							   "' and the engine ships no lens shader of that name";
+			}
+
+			State->LensModules[name.Id()] = std::move(module);
+			State->LensChanged.push_back(name);
+		}
+
+		return State->LensChanged.size();
+	}
+
 	const ShaderModule *ShaderLibrary::Find(const core::Name &name) const {
 		if (!name.IsValid()) {
 			return nullptr;
@@ -217,11 +309,27 @@ namespace engine::render {
 		return found == State->Modules.end() ? nullptr : &found->second;
 	}
 
+	const ShaderModule *ShaderLibrary::FindLens(const core::Name &name) const {
+		if (!name.IsValid()) {
+			return nullptr;
+		}
+		const auto found = State->LensModules.find(name.Id());
+		return found == State->LensModules.end() ? nullptr : &found->second;
+	}
+
 	std::span<const core::Name> ShaderLibrary::Changed() const {
 		return State->Changed;
 	}
 
+	std::span<const core::Name> ShaderLibrary::ChangedLenses() const {
+		return State->LensChanged;
+	}
+
 	size_t ShaderLibrary::Size() const {
 		return State->Modules.size();
+	}
+
+	size_t ShaderLibrary::LensSize() const {
+		return State->LensModules.size();
 	}
 }

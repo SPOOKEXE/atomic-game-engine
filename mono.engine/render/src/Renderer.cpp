@@ -790,6 +790,13 @@ namespace engine::render {
 		}
 		State->PostProcessPipeline = nullptr;
 		State->PostProcessShaderName = core::Name{};
+		for (const auto &[name, pipeline] : State->LensPipelines) {
+			(void)name;
+			if (pipeline != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+			}
+		}
+		State->LensPipelines.clear();
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
 		}
@@ -1210,6 +1217,8 @@ namespace engine::render {
 		State->EnvironmentState = lighting.EnvironmentState;
 		State->Volumes = lighting.Volumes;
 		State->VolumeCount = std::min(lighting.VolumeCount, State->Volumes.size());
+		State->ShaderLenses = lighting.ShaderLenses;
+		State->ShaderLensCount = std::min(lighting.ShaderLensCount, State->ShaderLenses.size());
 	}
 
 	scene::WorldLighting Renderer::CurrentLighting() const {
@@ -1232,6 +1241,8 @@ namespace engine::render {
 		lighting.EnvironmentState = State->EnvironmentState;
 		lighting.Volumes = State->Volumes;
 		lighting.VolumeCount = State->VolumeCount;
+		lighting.ShaderLenses = State->ShaderLenses;
+		lighting.ShaderLensCount = State->ShaderLensCount;
 		return lighting;
 	}
 
@@ -1319,6 +1330,90 @@ namespace engine::render {
 
 	bool Renderer::HasShader(const core::Name &name) const {
 		return State != nullptr && name.IsValid() && State->ShaderVariants.contains(name.Id());
+	}
+
+	bool Renderer::AddLensShader(const core::Name &name, std::span<const uint32_t> spirv) {
+		if (State == nullptr || State->Device == nullptr || !name.IsValid() || spirv.empty()) {
+			return false;
+		}
+
+		const bool toMsl = State->Binary.Form == resources::ShaderForm::Msl;
+		std::string translated;
+		if (toMsl) {
+			msl::Translation result = msl::Translate(spirv);
+			if (result.Failed) {
+				ENGINE_ERROR("lens shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				return false;
+			}
+			translated = std::move(result.Source);
+		}
+
+		SDL_GPUShaderCreateInfo fragmentInfo{};
+		fragmentInfo.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
+								  : reinterpret_cast<const Uint8 *>(spirv.data());
+		fragmentInfo.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
+		fragmentInfo.entrypoint = State->Binary.EntryPoint;
+		fragmentInfo.format = State->Binary.Format;
+		fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+		fragmentInfo.num_samplers = 2;
+		fragmentInfo.num_uniform_buffers = 1;
+
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(State->Device, &fragmentInfo);
+		if (fragment == nullptr) {
+			ENGINE_ERROR("lens shader '{}': {}", name.Text(), SDL_GetError());
+			return false;
+		}
+		SDL_GPUShader *vertex = State->LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		if (vertex == nullptr) {
+			SDL_ReleaseGPUShader(State->Device, fragment);
+			return false;
+		}
+
+		SDL_GPUColorTargetDescription target{};
+		target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		SDL_GPUGraphicsPipelineCreateInfo info{};
+		info.vertex_shader = vertex;
+		info.fragment_shader = fragment;
+		info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+		info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		info.target_info.color_target_descriptions = &target;
+		info.target_info.num_color_targets = 1;
+		SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(State->Device, &info);
+		SDL_ReleaseGPUShader(State->Device, vertex);
+		SDL_ReleaseGPUShader(State->Device, fragment);
+		if (pipeline == nullptr) {
+			ENGINE_ERROR("lens shader '{}' pipeline: {}", name.Text(), SDL_GetError());
+			return false;
+		}
+
+		const auto previous = State->LensPipelines.find(name.Id());
+		if (previous != State->LensPipelines.end()) {
+			(void)WaitForFrame();
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, previous->second);
+			previous->second = pipeline;
+		} else {
+			State->LensPipelines.emplace(name.Id(), pipeline);
+		}
+		return true;
+	}
+
+	bool Renderer::DropLensShader(const core::Name &name) {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+		const auto found = State->LensPipelines.find(name.Id());
+		if (found == State->LensPipelines.end()) {
+			return false;
+		}
+		(void)WaitForFrame();
+		SDL_ReleaseGPUGraphicsPipeline(State->Device, found->second);
+		State->LensPipelines.erase(found);
+		return true;
+	}
+
+	bool Renderer::HasLensShader(const core::Name &name) const {
+		return State != nullptr && name.IsValid() && State->LensPipelines.contains(name.Id());
 	}
 
 	bool Renderer::SetPostProcessShader(const core::Name &name, std::span<const uint32_t> spirv) {
@@ -1607,6 +1702,12 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::VolumeLit) {
 			return pbr.Lit;
+		}
+		if (role == Impl::ResourceRole::LensA) {
+			return pbr.LensA;
+		}
+		if (role == Impl::ResourceRole::LensB) {
+			return pbr.LensB;
 		}
 		return nullptr;
 	}

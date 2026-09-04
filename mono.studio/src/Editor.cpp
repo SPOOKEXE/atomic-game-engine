@@ -2490,6 +2490,22 @@ namespace studio {
 					}
 				}
 
+				if (Shaders.RefreshLenses(store) > 0) {
+					for (const engine::core::Name &shader : Shaders.ChangedLenses()) {
+						const engine::render::ShaderModule *module = Shaders.FindLens(shader);
+						if (module == nullptr) {
+							(void)Renderer.DropLensShader(shader);
+							continue;
+						}
+						if (!module->Error.empty()) {
+							(void)Renderer.DropLensShader(shader);
+							ENGINE_WARN("lens shader '{}': {}", shader.Text(), module->Error);
+							continue;
+						}
+						(void)Renderer.AddLensShader(shader, module->SpirV);
+					}
+				}
+
 				// **The geometry and the pictures a script built, uploaded
 				// before the frame that draws them.** The same pair
 				// `client::Client` runs, beside the shader refresh above and

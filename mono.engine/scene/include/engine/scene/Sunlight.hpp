@@ -21,6 +21,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Volume.hpp>
 
 #include <array>
@@ -106,6 +107,11 @@ namespace engine::scene {
 		// retain across the renderer boundary.
 		std::array<VolumeState, MAX_SCENE_VOLUMES> Volumes{};
 		size_t VolumeCount = 0;
+
+		// World-space screen effects selected while the world is entered. As with
+		// volumes, this remains authored data until it is copied for presentation.
+		std::array<ShaderLensState, MAX_SCENE_SHADER_LENSES> ShaderLenses{};
+		size_t ShaderLensCount = 0;
 	};
 
 	// Resolves the `Lighting` service into the values a renderer consumes.

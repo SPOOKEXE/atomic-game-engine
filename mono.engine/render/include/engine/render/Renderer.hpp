@@ -1802,6 +1802,21 @@ namespace engine::render {
 		// @since v0.15
 		bool HasShader(const core::Name &name) const;
 
+		// Registers one `LensShader` fragment module. Lens programs have exactly
+		// two sampler slots, HDR scene colour then linear depth, and one pushed
+		// `LensPassUniforms` block. They cannot choose targets or graph order.
+		//
+		// @param name  What a `ShaderLens` names.
+		// @param spirv The compiled fragment module.
+		// @return `false` when the module cannot form the constrained pipeline.
+		bool AddLensShader(const core::Name &name, std::span<const uint32_t> spirv);
+
+		// Forgets a registered lens pipeline.
+		bool DropLensShader(const core::Name &name);
+
+		// Whether a lens pipeline is registered under this name.
+		bool HasLensShader(const core::Name &name) const;
+
 		// Replaces the engine's own tonemap with this shader, for every
 		// frame drawn until the next call.
 		//

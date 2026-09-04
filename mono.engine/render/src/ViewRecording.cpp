@@ -1446,6 +1446,44 @@ namespace engine::render {
 				volume.HalfExtent.Y,
 			};
 		}
+
+		LensGroupCount = 0;
+		size_t lensCount = 0;
+		LensPassData = {};
+		LensPassData.ViewProjection = matrices.ViewProjection;
+		LensPassData.InverseViewProjection = uniforms.InverseViewProjection;
+		LensPassData.Target = uniforms.Target;
+		LensPassData.Eye = uniforms.Eye;
+		LensPassData.TimeCount.x = static_cast<float>(frameSeconds);
+		const graph::Frustum lensFrustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
+		for (size_t index = 0; index < currentLighting.ShaderLensCount; index++) {
+			const scene::ShaderLensState &lens = currentLighting.ShaderLenses[index];
+			if (!lensFrustum.Intersects(lens.Frame.Position, lens.Radius)) {
+				continue;
+			}
+
+			const bool startsRun =
+				LensGroupCount == 0 || LensGroups[LensGroupCount - 1].Shader != lens.Shader;
+			LensGroup *group = nullptr;
+			if (startsRun) {
+				group = &LensGroups[LensGroupCount++];
+				*group = LensGroup{.Shader = lens.Shader, .First = lensCount};
+			} else {
+				group = &LensGroups[LensGroupCount - 1];
+			}
+
+			LensPassUniforms::LensUniform &out = LensEntries[lensCount++];
+			group->Count++;
+			const core::Vector3 x = lens.Frame.RightVector();
+			const core::Vector3 y = lens.Frame.UpVector();
+			const core::Vector3 z = lens.Frame.ZVector();
+			out.CentreRadius =
+				glm::vec4{lens.Frame.Position.X, lens.Frame.Position.Y, lens.Frame.Position.Z, lens.Radius};
+			out.AxisXInner = glm::vec4{x.X, x.Y, x.Z, lens.InnerRadius};
+			out.AxisYFalloff = glm::vec4{y.X, y.Y, y.Z, lens.Falloff};
+			out.AxisZStrength = glm::vec4{z.X, z.Y, z.Z, lens.Strength};
+			out.SpinPriority = glm::vec4{lens.Spin, static_cast<float>(lens.Priority), 0.0f, 0.0f};
+		}
 		sceneViewport = SDL_GPUViewport{
 			0.0f,
 			0.0f,
