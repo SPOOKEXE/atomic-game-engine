@@ -84,26 +84,35 @@
 // 4.0f)` is configured and never re-measured - which is what the fixed rows
 // above still are, and why they are still here to be compared against.
 
+#include "PipelineInternals.hpp"
+
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.physics.bench.broadphase")
 
+using engine::core::AABB;
 using engine::core::CFrame;
 using engine::core::Random;
 using engine::core::Vector3;
@@ -111,12 +120,15 @@ using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::physics::BroadPhase;
 using engine::physics::PhysicsWorld;
+using engine::physics::PipelineInternals;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::SyncBroadphase;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::Transform;
+using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
+using engine::spatial::Proxy;
 using engine::testing::Consume;
 
 namespace broadphase_bench {
@@ -133,6 +145,93 @@ namespace broadphase_bench {
 
 	// One in five colliders can move. The rest are the world.
 	constexpr size_t DYNAMIC_IN = 5;
+
+	// Start once, outside every measured body. The grid dispatcher is only
+	// meaningfully parallel with a pool, and timing pool construction would
+	// answer a different question from a rebuild inside an already-running game.
+	struct Pool {
+		Pool() {
+			engine::parallel::Jobs::Start(0);
+		}
+		~Pool() {
+			engine::parallel::Jobs::Stop();
+		}
+	};
+	const Pool Workers;
+
+	void DispatchGridRanges(void *, size_t count, HashGrid::RangeDispatcher::Body body, void *bodyContext) {
+		engine::parallel::Jobs::For(
+			count, 1, [body, bodyContext](size_t begin, size_t end) { body(bodyContext, begin, end); }, 1
+		);
+	}
+
+	const HashGrid::RangeDispatcher GRID_DISPATCHER{nullptr, &DispatchGridRanges};
+
+	// These are the same sparse moving boxes the forced fallback world uses.
+	// Keeping the serial and pooled controls in this physics suite makes the
+	// dispatcher handover and the count-prefix-fill cost directly comparable.
+	const std::vector<Proxy> &GridFallbackProxies(size_t count) {
+		static std::vector<std::pair<size_t, std::vector<Proxy>>> built;
+		for (const auto &[builtCount, proxies] : built) {
+			if (builtCount == count) {
+				return proxies;
+			}
+		}
+
+		std::vector<Proxy> proxies;
+		proxies.reserve(count);
+		for (size_t index = 0; index < count; index++) {
+			const float x = static_cast<float>(index % 512) * 3.0f;
+			const float z = static_cast<float>(index / 512) * 3.0f;
+			constexpr float halfExtent = 0.5f;
+			proxies.push_back(
+				Proxy{
+					static_cast<uint64_t>(index),
+					AABB{
+						Vector3{x - halfExtent, -halfExtent, z - halfExtent},
+						Vector3{x + halfExtent, halfExtent, z + halfExtent}
+					},
+					LayerMask::Only(0),
+				}
+			);
+		}
+		built.emplace_back(count, std::move(proxies));
+		return built.back().second;
+	}
+
+	HashGrid &GridFallbackControl(size_t count, bool parallel) {
+		struct Control {
+			size_t Count = 0;
+			bool Parallel = false;
+			std::unique_ptr<HashGrid> Grid;
+		};
+		static std::vector<Control> controls;
+		for (Control &control : controls) {
+			if (control.Count == count && control.Parallel == parallel) {
+				return *control.Grid;
+			}
+		}
+
+		Control control;
+		control.Count = count;
+		control.Parallel = parallel;
+		control.Grid = std::make_unique<HashGrid>(4.0f);
+		const std::vector<Proxy> &proxies = GridFallbackProxies(count);
+		if (parallel) {
+			engine::core::Metrics::Clear();
+			control.Grid->RebuildParallel(proxies, GRID_DISPATCHER);
+			const auto used = engine::core::Metrics::GetGauge("spatial.grid.parallel.used");
+			const bool expected = count >= HashGrid::PARALLEL_MINIMUM_PROXIES;
+			if (!used.has_value() || (used->Value == 1.0) != expected ||
+				(expected && engine::parallel::Jobs::LastBatch().Participants < 2)) {
+				throw std::logic_error("pooled fallback control did not use parallel grid rebuild");
+			}
+		} else {
+			control.Grid->Rebuild(proxies);
+		}
+		controls.push_back(std::move(control));
+		return *controls.back().Grid;
+	}
 
 	// A world of `count` colliders, built once and reused.
 	//
@@ -190,9 +289,289 @@ namespace broadphase_bench {
 	size_t PairCount(const Store &store) {
 		return store.Resource<PhysicsWorld>()->Pairs().size();
 	}
+
+	Store &GridFallbackWorld(size_t count) {
+		static std::vector<std::pair<size_t, std::unique_ptr<Store>>> built;
+		for (auto &[builtCount, store] : built) {
+			if (builtCount == count) {
+				return *store;
+			}
+		}
+
+		auto store = std::make_unique<Store>("physics.bench.parallel-grid-fallback");
+		PreparePhysicsWorld(*store, 4.0f);
+		for (size_t index = 0; index < count; index++) {
+			const Entity entity = store->Create();
+			const float x = static_cast<float>(index % 512) * 3.0f;
+			const float z = static_cast<float>(index / 512) * 3.0f;
+			store->Set<Transform>(entity, Transform{CFrame{Vector3{x, 0.0f, z}}});
+			Collider collider;
+			collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+			collider.Layer = LayerMask::Only(0);
+			collider.Mask = LayerMask::All();
+			store->Set<Collider>(entity, collider);
+			store->Set<Motion>(entity, Motion{});
+		}
+
+		// The initial sync makes the tree. Its first recovery comparison has no
+		// compatible prior row stream. Add one dynamic collider before the next
+		// sync to make that row stream incompatible and force the exact grid
+		// fallback used by a topology-changing StressPhysics tick.
+		SyncBroadphase(*store);
+		const Entity added = store->Create();
+		store->Set<Transform>(added, Transform{CFrame{Vector3{100000.0f, 0.0f, 0.0f}}});
+		Collider collider;
+		collider.Extent = Vector3{0.5f, 0.5f, 0.5f};
+		collider.Layer = LayerMask::Only(0);
+		collider.Mask = LayerMask::All();
+		store->Set<Collider>(added, collider);
+		store->Set<Motion>(added, Motion{});
+		SyncBroadphase(*store);
+		const auto parallelUsed = engine::core::Metrics::GetGauge("spatial.grid.parallel.used");
+		if (PipelineInternals::DynamicTreeActive(*store->Resource<PhysicsWorld>()) ||
+			!parallelUsed.has_value() || parallelUsed->Value != 1.0) {
+			throw std::logic_error("parallel grid fallback setup did not select the grid route");
+		}
+		built.emplace_back(count, std::move(store));
+		return *built.back().second;
+	}
+
+	struct MovingWorld {
+		std::unique_ptr<Store> Storage;
+		std::vector<Entity> Bodies;
+		std::vector<Vector3> Bases;
+		bool Shifted = false;
+	};
+
+	// This deliberately creates bodies in a spatially shuffled order. The rows
+	// below compare the complete public pipeline against clean HEAD at fixed
+	// escape fractions, rather than timing a tree traversal in isolation.
+	MovingWorld &EscapingWorld(size_t scenario) {
+		static std::array<std::unique_ptr<MovingWorld>, 6> worlds;
+		if (worlds[scenario] != nullptr) {
+			return *worlds[scenario];
+		}
+
+		std::unique_ptr<MovingWorld> world = std::make_unique<MovingWorld>();
+		world->Storage = std::make_unique<Store>("physics.bench.dynamic-index");
+		PreparePhysicsWorld(*world->Storage, 4.0f);
+		world->Bodies.reserve(4096);
+		world->Bases.reserve(4096);
+		for (size_t index = 0; index < 4096; index++) {
+			const uint32_t seed = static_cast<uint32_t>(index);
+			const Entity entity = world->Storage->Create();
+			const Vector3 centre{
+				Random::Range(seed, 3, -1024.0f, 1024.0f),
+				Random::Range(seed, 5, -16.0f, 16.0f),
+				Random::Range(seed, 7, -1024.0f, 1024.0f),
+			};
+			world->Storage->Set<Transform>(entity, Transform{CFrame{centre}});
+			Collider collider;
+			collider.Extent = Vector3{0.25f, 0.25f, 0.25f};
+			collider.Layer = LayerMask::Only(static_cast<uint32_t>(index % 4));
+			collider.Mask = LayerMask::All();
+			world->Storage->Set<Collider>(entity, collider);
+			world->Storage->Set<Motion>(entity, Motion{});
+			world->Bodies.push_back(entity);
+			world->Bases.push_back(centre);
+		}
+		SyncBroadphase(*world->Storage);
+		BroadPhase(*world->Storage);
+		worlds[scenario] = std::move(world);
+		return *worlds[scenario];
+	}
+
+	void Escape(MovingWorld &world, size_t count) {
+		world.Shifted = !world.Shifted;
+		for (size_t index = 0; index < count; index++) {
+			// Integration writes an existing transform row in place. Replacing the
+			// component here would mix ECS change delivery into a broadphase row.
+			Transform *transform = world.Storage->GetMutable<Transform>(world.Bodies[index]);
+			transform->Frame.Position = world.Bases[index] + (world.Shifted ? Vector3::XAxis : Vector3::Zero);
+		}
+	}
+
+	void Churn(MovingWorld &world, size_t count) {
+		for (size_t index = 0; index < count; index++) {
+			world.Storage->Destroy(world.Bodies[index]);
+			const Entity entity = world.Storage->Create();
+			world.Storage->Set<Transform>(
+				entity, Transform{CFrame{Vector3{static_cast<float>(index), 0.0f, 0.0f}}}
+			);
+			Collider collider;
+			collider.Extent = Vector3{0.25f, 0.25f, 0.25f};
+			collider.Layer = LayerMask::Only(static_cast<uint32_t>(index % 4));
+			collider.Mask = LayerMask::All();
+			world.Storage->Set<Collider>(entity, collider);
+			world.Storage->Set<Motion>(entity, Motion{});
+			world.Bodies[index] = entity;
+		}
+	}
 }
 
 using namespace broadphase_bench;
+
+// --- adaptive index comparison matrix ---------------------------------------
+
+BENCH("Dynamic grid fallback rebuild · serial · 4096 proxies", 100) {
+	HashGrid &grid = GridFallbackControl(4096, false);
+	for (int pass = 0; pass < 100; pass++) {
+		grid.Rebuild(GridFallbackProxies(4096));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · pooled · 4096 proxies", 100) {
+	HashGrid &grid = GridFallbackControl(4096, true);
+	for (int pass = 0; pass < 100; pass++) {
+		grid.RebuildParallel(GridFallbackProxies(4096), GRID_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · serial · 8000 proxies", 50) {
+	HashGrid &grid = GridFallbackControl(8000, false);
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(GridFallbackProxies(8000));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · pooled · 8000 proxies", 50) {
+	HashGrid &grid = GridFallbackControl(8000, true);
+	for (int pass = 0; pass < 50; pass++) {
+		grid.RebuildParallel(GridFallbackProxies(8000), GRID_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · serial · 16000 proxies", 20) {
+	HashGrid &grid = GridFallbackControl(16000, false);
+	for (int pass = 0; pass < 20; pass++) {
+		grid.Rebuild(GridFallbackProxies(16000));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · pooled · 16000 proxies", 20) {
+	HashGrid &grid = GridFallbackControl(16000, true);
+	for (int pass = 0; pass < 20; pass++) {
+		grid.RebuildParallel(GridFallbackProxies(16000), GRID_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · serial · 32000 proxies", 10) {
+	HashGrid &grid = GridFallbackControl(32000, false);
+	for (int pass = 0; pass < 10; pass++) {
+		grid.Rebuild(GridFallbackProxies(32000));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · pooled · 32000 proxies", 10) {
+	HashGrid &grid = GridFallbackControl(32000, true);
+	for (int pass = 0; pass < 10; pass++) {
+		grid.RebuildParallel(GridFallbackProxies(32000), GRID_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · serial · 64000 proxies", 5) {
+	HashGrid &grid = GridFallbackControl(64000, false);
+	for (int pass = 0; pass < 5; pass++) {
+		grid.Rebuild(GridFallbackProxies(64000));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Dynamic grid fallback rebuild · pooled · 64000 proxies", 5) {
+	HashGrid &grid = GridFallbackControl(64000, true);
+	for (int pass = 0; pass < 5; pass++) {
+		grid.RebuildParallel(GridFallbackProxies(64000), GRID_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel grid fallback · sync + pairs · 32000 dynamic colliders", 10) {
+	Store &store = GridFallbackWorld(32000);
+	for (int pass = 0; pass < 10; pass++) {
+		SyncBroadphase(store);
+		Consume(!PipelineInternals::DynamicTreeActive(*store.Resource<PhysicsWorld>()));
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Parallel grid fallback · sync + pairs · 64000 dynamic colliders", 5) {
+	Store &store = GridFallbackWorld(64000);
+	for (int pass = 0; pass < 5; pass++) {
+		SyncBroadphase(store);
+		Consume(!PipelineInternals::DynamicTreeActive(*store.Resource<PhysicsWorld>()));
+		BroadPhase(store);
+		Consume(PairCount(store));
+	}
+}
+
+BENCH("Dynamic index · sync + pairs · shuffled 0 percent escape", 20) {
+	MovingWorld &world = EscapingWorld(0);
+	for (int pass = 0; pass < 20; pass++) {
+		SyncBroadphase(*world.Storage);
+		BroadPhase(*world.Storage);
+		Consume(PairCount(*world.Storage));
+		Consume(world.Storage->Resource<PhysicsWorld>()->MemoryStats().Broadphase().RetainedBytes);
+	}
+}
+
+BENCH("Dynamic index · sync + pairs · shuffled 0.1 percent escape", 20) {
+	MovingWorld &world = EscapingWorld(1);
+	for (int pass = 0; pass < 20; pass++) {
+		Escape(world, 4);
+		SyncBroadphase(*world.Storage);
+		BroadPhase(*world.Storage);
+		Consume(PairCount(*world.Storage));
+	}
+}
+
+BENCH("Dynamic index · sync + pairs · shuffled 1 percent escape", 20) {
+	MovingWorld &world = EscapingWorld(2);
+	for (int pass = 0; pass < 20; pass++) {
+		Escape(world, 40);
+		SyncBroadphase(*world.Storage);
+		BroadPhase(*world.Storage);
+		Consume(PairCount(*world.Storage));
+	}
+}
+
+BENCH("Dynamic index · sync + pairs · shuffled 12.5 percent escape", 20) {
+	MovingWorld &world = EscapingWorld(3);
+	for (int pass = 0; pass < 20; pass++) {
+		Escape(world, 512);
+		SyncBroadphase(*world.Storage);
+		BroadPhase(*world.Storage);
+		Consume(PairCount(*world.Storage));
+	}
+}
+
+BENCH("Dynamic index · sync + pairs · shuffled 100 percent escape", 20) {
+	MovingWorld &world = EscapingWorld(4);
+	for (int pass = 0; pass < 20; pass++) {
+		Escape(world, 4096);
+		SyncBroadphase(*world.Storage);
+		BroadPhase(*world.Storage);
+		Consume(PairCount(*world.Storage));
+	}
+}
+
+BENCH("Dynamic index · sync + pairs · topology churn", 20) {
+	MovingWorld &world = EscapingWorld(5);
+	for (int pass = 0; pass < 20; pass++) {
+		Churn(world, 16);
+		SyncBroadphase(*world.Storage);
+		BroadPhase(*world.Storage);
+		Consume(PairCount(*world.Storage));
+	}
+}
 
 // --- the whole per-tick cost, at three sizes ---------------------------------
 //

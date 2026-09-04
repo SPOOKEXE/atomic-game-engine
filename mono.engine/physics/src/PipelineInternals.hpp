@@ -26,6 +26,26 @@ namespace engine::physics {
 			return world.DynamicIndex;
 		}
 
+		static spatial::DynamicBvh &DynamicTree(PhysicsWorld &world) {
+			return world.DynamicTree;
+		}
+
+		static const spatial::DynamicBvh &DynamicTree(const PhysicsWorld &world) {
+			return world.DynamicTree;
+		}
+
+		static bool &DynamicTreeActive(PhysicsWorld &world) {
+			return world.DynamicTreeActive;
+		}
+
+		static bool DynamicTreeActive(const PhysicsWorld &world) {
+			return world.DynamicTreeActive;
+		}
+
+		static size_t &DynamicTreeSettledFrames(PhysicsWorld &world) {
+			return world.DynamicTreeSettledFrames;
+		}
+
 		// The index over colliders that cannot, rebuilt when the set changes.
 		static spatial::HashGrid &StaticIndex(PhysicsWorld &world) {
 			return world.StaticIndex;
@@ -42,6 +62,10 @@ namespace engine::physics {
 			return world.StaticIndex;
 		}
 
+		static spatial::HashGrid &ContinuousIndex(PhysicsWorld &world) {
+			return world.ContinuousIndex;
+		}
+
 		static const std::vector<ColliderRecord> &DynamicRecords(const PhysicsWorld &world) {
 			return world.DynamicRecords;
 		}
@@ -50,7 +74,24 @@ namespace engine::physics {
 			return world.StaticRecords;
 		}
 
-		// The dynamic proxies, parallel to `DynamicRecords` by index.
+		// The dynamic bounds, parallel to `DynamicRecords` by index. The grid
+		// owns its proxy rows, so this keeps only the data the pair walk needs.
+		static std::vector<core::AABB> &DynamicBounds(PhysicsWorld &world) {
+			return world.DynamicBounds;
+		}
+
+		static std::vector<core::AABB> &SpeculativeBounds(PhysicsWorld &world) {
+			return world.SpeculativeBounds;
+		}
+
+		static std::vector<core::AABB> &PreviousDynamicBounds(PhysicsWorld &world) {
+			return world.PreviousDynamicBounds;
+		}
+
+		static std::vector<ecs::Entity> &PreviousDynamicOwners(PhysicsWorld &world) {
+			return world.PreviousDynamicOwners;
+		}
+
 		static std::vector<spatial::Proxy> &DynamicProxies(PhysicsWorld &world) {
 			return world.DynamicProxies;
 		}
@@ -80,6 +121,11 @@ namespace engine::physics {
 			return world.SourcedPairList;
 		}
 
+		// The second array used while ordering pairs by their entity ids.
+		static std::vector<SourcedPair> &SourcedPairSortScratch(PhysicsWorld &world) {
+			return world.SourcedPairSortScratch;
+		}
+
 		// Per-batch pair output and the batches that need a full-size retry.
 		static std::vector<std::vector<SourcedPair>> &SourcedPairBatches(PhysicsWorld &world) {
 			return world.SourcedPairBatches;
@@ -98,6 +144,39 @@ namespace engine::physics {
 		static std::vector<PlacedCollider> &StaticShapes(PhysicsWorld &world) {
 			return world.StaticShapes;
 		}
+
+		static std::vector<spatial::Proxy> &ContinuousProxies(PhysicsWorld &world) {
+			return world.ContinuousProxies;
+		}
+
+		static std::vector<ColliderRecord> &ContinuousRecords(PhysicsWorld &world) {
+			return world.ContinuousRecords;
+		}
+
+		static std::vector<PlacedCollider> &ContinuousShapes(PhysicsWorld &world) {
+			return world.ContinuousShapes;
+		}
+
+		static std::vector<float> &ContinuousFractions(PhysicsWorld &world) {
+			return world.ContinuousFractions;
+		}
+
+		static std::vector<float> &ContinuousThresholds(PhysicsWorld &world) {
+			return world.ContinuousThresholds;
+		}
+
+		static std::vector<float> &ContinuousReaches(PhysicsWorld &world) {
+			return world.ContinuousReaches;
+		}
+
+		static std::vector<float> &ContinuousAngularLinearSpeeds(PhysicsWorld &world) {
+			return world.ContinuousAngularLinearSpeeds;
+		}
+
+		static std::vector<ContinuousImpactEvent> &ContinuousEvents(PhysicsWorld &world) {
+			return world.ContinuousEvents;
+		}
+
 		//@}
 
 		// The manifold list, cleared and refilled by `NarrowPhase`.
@@ -105,16 +184,52 @@ namespace engine::physics {
 			return world.ManifoldList;
 		}
 
-		// One slot per candidate pair, and the flags that say which were filled.
-		//@{
-		static std::vector<ContactManifold> &ManifoldSlots(PhysicsWorld &world) {
-			return world.ManifoldSlots;
+		// One retained output list per fixed narrow-phase range.
+		static std::vector<std::vector<ContactManifold>> &ManifoldBatches(PhysicsWorld &world) {
+			return world.ManifoldBatches;
 		}
 
-		static std::vector<uint8_t> &ManifoldTouching(PhysicsWorld &world) {
-			return world.ManifoldTouching;
+		static std::vector<ContactManifold> &SpeculativeManifolds(PhysicsWorld &world) {
+			return world.SpeculativeManifolds;
 		}
-		//@}
+
+		static std::vector<std::vector<ContactManifold>> &SpeculativeManifoldBatches(PhysicsWorld &world) {
+			return world.SpeculativeManifoldBatches;
+		}
+
+		static std::vector<SolverManifoldIndex> &SolverManifoldOrder(PhysicsWorld &world) {
+			return world.SolverManifoldOrder;
+		}
+
+		static std::vector<PersistentContactManifold> &PersistentManifolds(PhysicsWorld &world) {
+			return world.PersistentManifolds;
+		}
+
+		static std::vector<PersistentContactManifold> &PersistentNext(PhysicsWorld &world) {
+			return world.PersistentNext;
+		}
+
+		static std::vector<std::vector<PersistentContactManifold>> &
+		PersistentManifoldBatches(PhysicsWorld &world) {
+			return world.PersistentManifoldBatches;
+		}
+
+		static std::vector<PersistentContactCandidate> &PersistentCandidates(PhysicsWorld &world) {
+			return world.PersistentCandidates;
+		}
+
+		static std::vector<PersistentContactCandidate> &PersistentCandidateNext(PhysicsWorld &world) {
+			return world.PersistentCandidateNext;
+		}
+
+		static std::vector<std::vector<PersistentContactCandidate>> &
+		PersistentCandidateBatches(PhysicsWorld &world) {
+			return world.PersistentCandidateBatches;
+		}
+
+		static std::vector<PersistentContactBatchStats> &PersistentManifoldBatchStatsOf(PhysicsWorld &world) {
+			return world.PersistentManifoldBatchStats;
+		}
 
 		// The event list, cleared by `NarrowPhase` and filled by `Publish`.
 		static std::vector<ContactEvent> &Events(PhysicsWorld &world) {
@@ -146,6 +261,15 @@ namespace engine::physics {
 		// The gather's sort buffer, and the body indices it resolves.
 		static std::vector<ecs::Entity> &BodyOwners(PhysicsWorld &world) {
 			return world.BodyOwners;
+		}
+
+		static std::vector<ecs::Entity> &BodyOwnerSortScratch(PhysicsWorld &world) {
+			return world.BodyOwnerSortScratch;
+		}
+
+		// Lookup only. Iteration stays on `Bodies`, whose entity order is explicit.
+		static std::unordered_map<uint64_t, size_t> &BodyIndexByOwner(PhysicsWorld &world) {
+			return world.BodyIndexByOwner;
 		}
 
 		static std::vector<std::pair<uint32_t, uint32_t>> &ManifoldBodies(PhysicsWorld &world) {
@@ -272,6 +396,10 @@ namespace engine::physics {
 			return world.GroupRowCursor;
 		}
 
+		static std::vector<uint32_t> &SolverRememberConfirmed(PhysicsWorld &world) {
+			return world.SolverRememberConfirmed;
+		}
+
 		// Where each manifold's rows begin. What the dispatched set-up pass
 		// writes against instead of a shared cursor.
 		static std::vector<uint32_t> &RowStartOfManifold(PhysicsWorld &world) {
@@ -288,6 +416,82 @@ namespace engine::physics {
 		//@{
 		static std::vector<SolverGroup> &SolverGroups(PhysicsWorld &world) {
 			return world.SolverGroups;
+		}
+
+		static std::vector<SolverColor> &SolverColors(PhysicsWorld &world) {
+			return world.SolverColors;
+		}
+
+		static const std::vector<SolverColor> &SolverColors(const PhysicsWorld &world) {
+			return world.SolverColors;
+		}
+
+		static std::vector<SolverTopologyEntry> &SolverTopology(PhysicsWorld &world) {
+			return world.SolverTopology;
+		}
+
+		static std::vector<SolverTopologyEntry> &SolverTopologyScratch(PhysicsWorld &world) {
+			return world.SolverTopologyScratch;
+		}
+
+		static std::vector<uint32_t> &SolverColorOfManifold(PhysicsWorld &world) {
+			return world.SolverColorOfManifold;
+		}
+
+		static const std::vector<uint32_t> &SolverColorOfManifold(const PhysicsWorld &world) {
+			return world.SolverColorOfManifold;
+		}
+
+		static std::vector<uint64_t> &SolverColorClaims(PhysicsWorld &world) {
+			return world.SolverColorClaims;
+		}
+
+		static std::vector<uint32_t> &SolverComponentParents(PhysicsWorld &world) {
+			return world.SolverComponentParents;
+		}
+
+		static std::vector<uint32_t> &SolverIslandOfManifold(PhysicsWorld &world) {
+			return world.SolverIslandOfManifold;
+		}
+
+		static const std::vector<uint32_t> &SolverIslandOfManifold(const PhysicsWorld &world) {
+			return world.SolverIslandOfManifold;
+		}
+
+		static std::vector<uint32_t> &SolverIslandOfBody(PhysicsWorld &world) {
+			return world.SolverIslandOfBody;
+		}
+
+		static std::vector<uint32_t> &SolverIslandRows(PhysicsWorld &world) {
+			return world.SolverIslandRows;
+		}
+
+		static std::vector<uint32_t> &SolverIslandRowOrderScratch(PhysicsWorld &world) {
+			return world.SolverIslandRowOrderScratch;
+		}
+
+		static bool &SolverIslandTopologyKnown(PhysicsWorld &world) {
+			return world.SolverIslandTopologyKnown;
+		}
+
+		static bool &SolverUsesIslands(PhysicsWorld &world) {
+			return world.SolverUsesIslands;
+		}
+
+		static size_t &SolverIslandCount(PhysicsWorld &world) {
+			return world.SolverIslandCount;
+		}
+
+		static bool &SolverColorTopologyAccepted(PhysicsWorld &world) {
+			return world.SolverColorTopologyAccepted;
+		}
+
+		static bool &SolverColorTopologyKnown(PhysicsWorld &world) {
+			return world.SolverColorTopologyKnown;
+		}
+
+		static bool &SolverUsesColoring(PhysicsWorld &world) {
+			return world.SolverUsesColoring;
 		}
 
 		static SolverGroup &BorderRows(PhysicsWorld &world) {

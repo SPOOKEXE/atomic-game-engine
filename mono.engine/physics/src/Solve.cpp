@@ -3,6 +3,7 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -21,10 +22,13 @@
 #include <engine/spatial/LayerMask.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <numeric>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -36,6 +40,26 @@
 namespace engine::physics {
 
 	namespace {
+		// A pair-sorted read over the public touching manifolds and the private
+		// speculative ones. The order vector is four words per pair rather than a
+		// second copy of every four-point manifold.
+		struct SolverManifoldView {
+			const std::vector<ContactManifold> &Touching;
+			const std::vector<ContactManifold> &Speculative;
+			const std::vector<SolverManifoldIndex> &Order;
+
+			size_t size() const {
+				return Order.empty() ? Touching.size() : Order.size();
+			}
+
+			const ContactManifold &operator[](size_t index) const {
+				if (Order.empty()) {
+					return Touching[index];
+				}
+				const SolverManifoldIndex entry = Order[index];
+				return entry.Speculative ? Speculative[entry.Index] : Touching[entry.Index];
+			}
+		};
 
 		// One cache line asked for early. **A hint and nothing else** - it changes
 		// no result, so a toolchain with no way to spell it does nothing and the
@@ -68,6 +92,188 @@ namespace engine::physics {
 		// offsets were built from - which would not misplace a row, it would
 		// write one past the end of a group.
 		constexpr uint32_t SKIPPED_MANIFOLD = UINT32_MAX;
+
+		// Reports the shape the scheduling pass produced. `groups` is longest
+		// first, so its ends and middle give the exact min, max and nearest-rank
+		// median without allocating or changing the scheduler's dispatch order.
+		// These are gauges because they describe the latest solve, not a rate.
+		void ReportSolverGroupShape(
+			const std::vector<SolverGroup> &groups, SolverGroup border, size_t interiorRowCount
+		) {
+			const double groupCount = static_cast<double>(groups.size());
+			const double minimum = groups.empty() ? 0.0 : static_cast<double>(groups.back().RowCount);
+			const double median =
+				groups.empty() ? 0.0 : static_cast<double>(groups[groups.size() / 2].RowCount);
+			const double maximum = groups.empty() ? 0.0 : static_cast<double>(groups.front().RowCount);
+
+			core::Metrics::SetGauge("physics.solve.groups", groupCount);
+			core::Metrics::SetGauge("physics.solve.group-rows.min", minimum);
+			core::Metrics::SetGauge("physics.solve.group-rows.median", median);
+			core::Metrics::SetGauge("physics.solve.group-rows.max", maximum);
+			core::Metrics::SetGauge("physics.solve.interior-rows", static_cast<double>(interiorRowCount));
+			core::Metrics::SetGauge("physics.solve.border-rows", static_cast<double>(border.RowCount));
+		}
+
+		// Colour metrics describe the exact wave plan rather than the worker pool.
+		// A scene therefore reports the same plan on a one-thread replay and on a
+		// wide machine, which is the determinism boundary this solver needs.
+		void ReportSolverColorShape(const std::vector<SolverColor> &colors, size_t retainedBytes) {
+			double minimum = 0.0;
+			double median = 0.0;
+			double maximum = 0.0;
+			if (!colors.empty()) {
+				std::array<uint32_t, SOLVER_COLOR_MAX_WAVES> rowCounts{};
+				for (size_t color = 0; color < colors.size(); color++) {
+					rowCounts[color] = colors[color].RowCount;
+				}
+				std::sort(rowCounts.begin(), rowCounts.begin() + colors.size());
+				minimum = static_cast<double>(rowCounts.front());
+				median = static_cast<double>(rowCounts[colors.size() / 2]);
+				maximum = static_cast<double>(rowCounts[colors.size() - 1]);
+			}
+			core::Metrics::SetGauge("physics.solve.colors", static_cast<double>(colors.size()));
+			core::Metrics::SetGauge("physics.solve.color-rows.min", minimum);
+			core::Metrics::SetGauge("physics.solve.color-rows.median", median);
+			core::Metrics::SetGauge("physics.solve.color-rows.max", maximum);
+			core::Metrics::SetGauge("physics.solve.color.retained-bytes", static_cast<double>(retainedBytes));
+		}
+
+		// A coloured group is one manifold and therefore has at most four rows.
+		// A fixed histogram reports its actual distribution without sorting the
+		// wave-owned dispatch ranges or allocating measurement scratch.
+		void ReportColoredGroupShape(const std::vector<SolverGroup> &groups, size_t rowCount) {
+			std::array<size_t, ContactManifold::MAXIMUM_POINTS + 1> counts{};
+			for (const SolverGroup &group : groups) {
+				counts[group.RowCount]++;
+			}
+
+			size_t minimum = 0;
+			size_t median = 0;
+			size_t maximum = 0;
+			size_t seen = 0;
+			for (size_t rows = 1; rows < counts.size(); rows++) {
+				if (counts[rows] == 0) {
+					continue;
+				}
+				if (minimum == 0) {
+					minimum = rows;
+				}
+				seen += counts[rows];
+				if (median == 0 && seen > groups.size() / 2) {
+					median = rows;
+				}
+				maximum = rows;
+			}
+
+			core::Metrics::SetGauge("physics.solve.groups", static_cast<double>(groups.size()));
+			core::Metrics::SetGauge("physics.solve.group-rows.min", static_cast<double>(minimum));
+			core::Metrics::SetGauge("physics.solve.group-rows.median", static_cast<double>(median));
+			core::Metrics::SetGauge("physics.solve.group-rows.max", static_cast<double>(maximum));
+			core::Metrics::SetGauge("physics.solve.interior-rows", static_cast<double>(rowCount));
+			core::Metrics::SetGauge("physics.solve.border-rows", 0.0);
+		}
+
+		// Island metrics are bounded by one retained scratch array. The row list is
+		// canonical-root ordered, so sorting its copy only affects measurement.
+		void ReportSolverIslandShape(
+			const std::vector<uint32_t> &rows,
+			std::vector<uint32_t> &orderScratch,
+			bool reused,
+			bool selected,
+			size_t retainedBytes
+		) {
+			double minimum = 0.0;
+			double median = 0.0;
+			double maximum = 0.0;
+			double largestShare = 0.0;
+			if (!rows.empty()) {
+				orderScratch = rows;
+				std::sort(orderScratch.begin(), orderScratch.end());
+				minimum = static_cast<double>(orderScratch.front());
+				median = static_cast<double>(orderScratch[orderScratch.size() / 2]);
+				maximum = static_cast<double>(orderScratch.back());
+				const size_t total = std::accumulate(rows.begin(), rows.end(), size_t{0});
+				largestShare = total == 0 ? 0.0 : maximum / static_cast<double>(total);
+			}
+
+			core::Metrics::SetGauge("physics.solve.islands", static_cast<double>(rows.size()));
+			core::Metrics::SetGauge("physics.solve.island-rows.min", minimum);
+			core::Metrics::SetGauge("physics.solve.island-rows.median", median);
+			core::Metrics::SetGauge("physics.solve.island-rows.max", maximum);
+			core::Metrics::SetGauge("physics.solve.island-largest-share", largestShare);
+			core::Metrics::SetGauge("physics.solve.island.selected", selected ? 1.0 : 0.0);
+			core::Metrics::SetGauge("physics.solve.island.reused", reused ? 1.0 : 0.0);
+			core::Metrics::SetGauge(
+				"physics.solve.island.retained-bytes", static_cast<double>(retainedBytes)
+			);
+		}
+
+		size_t SolverColorRetainedBytes(PhysicsWorld &world) {
+			return PipelineInternals::SolverColorOfManifold(world).capacity() * sizeof(uint32_t) +
+				   PipelineInternals::SolverColorClaims(world).capacity() * sizeof(uint64_t) +
+				   PipelineInternals::SolverColors(world).capacity() * sizeof(SolverColor);
+		}
+
+		uint32_t FindSolverComponent(std::vector<uint32_t> &parents, uint32_t body) {
+			uint32_t root = body;
+			while (parents[root] != root) {
+				root = parents[root];
+			}
+			while (parents[body] != body) {
+				const uint32_t next = parents[body];
+				parents[body] = root;
+				body = next;
+			}
+			return root;
+		}
+
+		void JoinSolverComponents(std::vector<uint32_t> &parents, uint32_t first, uint32_t second) {
+			first = FindSolverComponent(parents, first);
+			second = FindSolverComponent(parents, second);
+			if (first != second) {
+				parents[std::max(first, second)] = std::min(first, second);
+			}
+		}
+
+		// An entity id has a fixed width, so ordering the compact solver bodies
+		// takes six stable passes instead of comparison-sorting every contact's
+		// two owners. Eleven-bit buckets fit in L1 and avoid an extra full walk
+		// over a large contact set.
+		constexpr size_t OWNER_RADIX_BITS = 11;
+		constexpr size_t OWNER_RADIX_BUCKETS = size_t{1} << OWNER_RADIX_BITS;
+		constexpr size_t OWNER_RADIX_PASSES =
+			(sizeof(uint64_t) * 8 + OWNER_RADIX_BITS - 1) / OWNER_RADIX_BITS;
+
+		void SortOwners(std::vector<ecs::Entity> &owners, std::vector<ecs::Entity> &scratch) {
+			if (owners.size() < 2) {
+				return;
+			}
+
+			scratch.resize(owners.size());
+			for (size_t pass = 0; pass < OWNER_RADIX_PASSES; pass++) {
+				const size_t shift = pass * OWNER_RADIX_BITS;
+				std::array<size_t, OWNER_RADIX_BUCKETS> offsets{};
+				for (ecs::Entity owner : owners) {
+					const size_t bucket =
+						static_cast<size_t>((owner.Id >> shift) & (OWNER_RADIX_BUCKETS - 1));
+					offsets[bucket]++;
+				}
+
+				size_t next = 0;
+				for (size_t &offset : offsets) {
+					const size_t count = offset;
+					offset = next;
+					next += count;
+				}
+
+				for (ecs::Entity owner : owners) {
+					const size_t bucket =
+						static_cast<size_t>((owner.Id >> shift) & (OWNER_RADIX_BUCKETS - 1));
+					scratch[offsets[bucket]++] = owner;
+				}
+				owners.swap(scratch);
+			}
+		}
 
 		// One component of a vector by index, so the three principal axes can
 		// be walked in a loop rather than written out three times.
@@ -271,15 +477,6 @@ namespace engine::physics {
 			}
 		}
 
-		size_t IndexOf(const std::vector<SolverBody> &bodies, ecs::Entity entity) {
-			const auto found = std::lower_bound(
-				bodies.begin(), bodies.end(), entity, [](const SolverBody &body, ecs::Entity target) {
-					return body.Owner.Id < target.Id;
-				}
-			);
-			return static_cast<size_t>(found - bodies.begin());
-		}
-
 		// Last tick's impulses for one contact, or nothing.
 		//
 		// A binary search over a sorted array rather than a hash lookup. Not
@@ -294,6 +491,19 @@ namespace engine::physics {
 				return nullptr;
 			}
 			return &*found;
+		}
+
+		float FindSpeculativeClosingSpeed(
+			const std::vector<ContactImpulse> &cache, ecs::Entity first, ecs::Entity second
+		) {
+			const ContactImpulse key{first, second, 0, 0.0f, {0.0f, 0.0f}};
+			auto found = std::lower_bound(cache.begin(), cache.end(), key);
+			float speed = 0.0f;
+			while (found != cache.end() && found->A == first && found->B == second) {
+				speed = std::max(speed, found->SpeculativeClosingSpeed);
+				found++;
+			}
+			return speed;
 		}
 
 		// Everything a body's row contributes, resolved once.
@@ -489,7 +699,11 @@ namespace engine::physics {
 		}
 
 		const float delta = PhysicsStepSeconds(store);
-		const std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(*world);
+		const SolverManifoldView manifolds{
+			PipelineInternals::Manifolds(*world),
+			PipelineInternals::SpeculativeManifolds(*world),
+			PipelineInternals::SolverManifoldOrder(*world),
+		};
 		std::vector<SolverBody> &bodies = PipelineInternals::Bodies(*world);
 		std::vector<ContactRow> &rows = PipelineInternals::Rows(*world);
 		bodies.clear();
@@ -507,34 +721,47 @@ namespace engine::physics {
 		// eight the comparison reads. At ten thousand bodies that was megabytes
 		// of moves for kilobytes of information.
 		std::vector<ecs::Entity> &owners = PipelineInternals::BodyOwners(*world);
+		std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
 			ENGINE_PROFILE_CAT("physics.solve-gather", core::ProfileCategory::Physics);
-			owners.clear();
-			owners.reserve(manifolds.size() * 2);
-			for (const ContactManifold &manifold : manifolds) {
-				owners.push_back(manifold.A);
-				owners.push_back(manifold.B);
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-owners", core::ProfileCategory::Physics);
+				owners.clear();
+				owners.reserve(manifolds.size() * 2);
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					const ContactManifold &manifold = manifolds[at];
+					owners.push_back(manifold.A);
+					owners.push_back(manifold.B);
+				}
 			}
-			std::sort(owners.begin(), owners.end(), [](ecs::Entity left, ecs::Entity right) {
-				return left.Id < right.Id;
-			});
-			owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-sort", core::ProfileCategory::Physics);
+				SortOwners(owners, PipelineInternals::BodyOwnerSortScratch(*world));
+				owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
+			}
 
 			bodies.resize(owners.size());
 			for (size_t index = 0; index < owners.size(); index++) {
 				bodies[index] = SolverBody{};
 				bodies[index].Owner = owners[index];
 			}
+
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-index", core::ProfileCategory::Physics);
+				bodyIndex.clear();
+				bodyIndex.reserve(bodies.size());
+				for (size_t index = 0; index < bodies.size(); index++) {
+					bodyIndex.emplace(bodies[index].Owner.Id, index);
+				}
+			}
 		}
 
 		// **Every manifold's two body indices, resolved once.** Three later
-		// passes want them, and a binary search per pass per side is four
-		// searches per manifold over an array that no longer fits in cache once
-		// a scene is large.
-		// **Dispatched, because a binary search is a read and the answers do not
-		// share a slot.** Two searches per manifold over an array that has
-		// stopped fitting in cache is most of what a large scene's gather costs,
-		// and every one of them is independent of every other.
+		// passes want them, so a retained lookup table saves repeatedly searching
+		// the sorted body array for the same two known owners.
+		// **Dispatched, because the lookups are reads and the answers do not share
+		// a slot.** Each manifold owns one result, and the table is complete
+		// before workers start reading it.
 		std::vector<std::pair<uint32_t, uint32_t>> &located = PipelineInternals::ManifoldBodies(*world);
 		located.resize(manifolds.size());
 		{
@@ -542,11 +769,11 @@ namespace engine::physics {
 			parallel::Jobs::For(
 				manifolds.size(),
 				LOCATE_GRAIN,
-				[&located, &manifolds, &bodies](size_t begin, size_t end) {
+				[&located, &manifolds, &bodyIndex](size_t begin, size_t end) {
 					for (size_t at = begin; at < end; at++) {
 						located[at] = {
-							static_cast<uint32_t>(IndexOf(bodies, manifolds[at].A)),
-							static_cast<uint32_t>(IndexOf(bodies, manifolds[at].B)),
+							static_cast<uint32_t>(bodyIndex.at(manifolds[at].A.Id)),
+							static_cast<uint32_t>(bodyIndex.at(manifolds[at].B.Id)),
 						};
 					}
 				},
@@ -554,9 +781,9 @@ namespace engine::physics {
 			);
 		}
 
-		// Sorted by entity, which makes every lookup below a binary search and
-		// makes the body array a function of the scene rather than of the order
-		// rows happen to sit in their archetypes.
+		// Sorted by entity, which keeps the body array a function of the scene
+		// rather than of the order rows happen to sit in their archetypes. The
+		// lookup table above answers membership without changing that order.
 		// Safe to reach typed, and only because of the guard at the top of this
 		// function. `RegisterPhysicsComponents` registers the `scene` types
 		// before its own, so a store that got past `PreparedWorldMutable` has
@@ -575,84 +802,87 @@ namespace engine::physics {
 		// not the one before it, and twenty-three threads doing that at once
 		// thrash a shared last level cache rather than sharing the work.
 		//
-		// The pass beside it went the other way and is dispatched - see the
-		// binary searches above, which drop from 616 us to 67 us - so this is a
-		// fact about `Store::Get` and not about the gather. Worth retrying if
-		// `ecs` ever grows a locate-once-read-many primitive, which would remove
-		// six of the seven directory walks and change the shape of the problem.
+		// The manifold-index pass beside it is dispatched because it reads only
+		// the retained lookup table. This is a fact about `Store::Get` and not
+		// about the gather. Worth retrying if `ecs` ever grows a locate-once-read-
+		// many primitive, which would remove six of the seven directory walks and
+		// change the shape of the problem.
 		const ecs::Store &reader = store;
 		{
 			ENGINE_PROFILE_CAT("physics.solve-bodies", core::ProfileCategory::Physics);
 			std::vector<uint8_t> &loaded = PipelineInternals::BodyLoaded(*world);
 			loaded.assign(bodies.size(), 0);
-			const size_t baseParts = store.CountMatching<
-				scene::Transform,
-				scene::Collider,
-				scene::RigidBody,
-				scene::Surface,
-				scene::PhysicsProperties>();
-			if (bodies.size() >= (baseParts + 1) / 2) {
-				store.Each<
-					const scene::Transform,
-					const scene::Collider,
-					const scene::RigidBody,
-					const scene::Surface,
-					const scene::PhysicsProperties>([&bodies, &loaded, &owners, &reader, surfaces](
-														ecs::Entity entity,
-														const scene::Transform &transform,
-														const scene::Collider &collider,
-														const scene::RigidBody &rigid,
-														const scene::Surface &surface,
-														const scene::PhysicsProperties &physical
-													) {
-					const auto found = std::lower_bound(
-						owners.begin(), owners.end(), entity, [](ecs::Entity left, ecs::Entity right) {
-							return left.Id < right.Id;
+			{
+				ENGINE_PROFILE_CAT("physics.solve-bodies-archetype", core::ProfileCategory::Physics);
+				const size_t baseParts = store.CountMatching<
+					scene::Transform,
+					scene::Collider,
+					scene::RigidBody,
+					scene::Surface,
+					scene::PhysicsProperties>();
+				if (bodies.size() >= (baseParts + 1) / 2) {
+					store.Each<
+						const scene::Transform,
+						const scene::Collider,
+						const scene::RigidBody,
+						const scene::Surface,
+						const scene::PhysicsProperties>([&bodies, &loaded, &bodyIndex, &reader, surfaces](
+															ecs::Entity entity,
+															const scene::Transform &transform,
+															const scene::Collider &collider,
+															const scene::RigidBody &rigid,
+															const scene::Surface &surface,
+															const scene::PhysicsProperties &physical
+														) {
+						const auto found = bodyIndex.find(entity.Id);
+						if (found == bodyIndex.end()) {
+							return;
 						}
-					);
-					if (found == owners.end() || *found != entity) {
-						return;
-					}
 
-					const size_t index = static_cast<size_t>(found - owners.begin());
-					LoadBody(
-						bodies[index],
-						&transform,
-						reader.Get<scene::Motion>(entity),
-						&collider,
-						&rigid,
-						&surface,
-						&physical,
-						reader.Has<scene::Simulated>(entity),
-						surfaces
-					);
-					loaded[index] = true;
-				});
+						const size_t index = found->second;
+						LoadBody(
+							bodies[index],
+							&transform,
+							reader.Get<scene::Motion>(entity),
+							&collider,
+							&rigid,
+							&surface,
+							&physical,
+							reader.Has<scene::Simulated>(entity),
+							surfaces
+						);
+						loaded[index] = true;
+					});
+				}
 			}
 
-			for (size_t index = 0; index < bodies.size(); index++) {
-				if (loaded[index]) {
-					continue;
-				}
-				SolverBody &body = bodies[index];
-				const scene::Transform *transform = reader.Get<scene::Transform>(body.Owner);
-				const scene::Motion *motion = reader.Get<scene::Motion>(body.Owner);
-				const scene::Collider *collider = reader.Get<scene::Collider>(body.Owner);
-				const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
+			{
+				ENGINE_PROFILE_CAT("physics.solve-bodies-fallback", core::ProfileCategory::Physics);
+				for (size_t index = 0; index < bodies.size(); index++) {
+					if (loaded[index]) {
+						continue;
+					}
+					SolverBody &body = bodies[index];
+					const scene::Transform *transform = reader.Get<scene::Transform>(body.Owner);
+					const scene::Motion *motion = reader.Get<scene::Motion>(body.Owner);
+					const scene::Collider *collider = reader.Get<scene::Collider>(body.Owner);
+					const scene::RigidBody *rigid = reader.Get<scene::RigidBody>(body.Owner);
 
-				const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
-				const scene::PhysicsProperties *physical = reader.Get<scene::PhysicsProperties>(body.Owner);
-				LoadBody(
-					body,
-					transform,
-					motion,
-					collider,
-					rigid,
-					surface,
-					physical,
-					reader.Has<scene::Simulated>(body.Owner),
-					surfaces
-				);
+					const scene::Surface *surface = reader.Get<scene::Surface>(body.Owner);
+					const scene::PhysicsProperties *physical =
+						reader.Get<scene::PhysicsProperties>(body.Owner);
+					LoadBody(
+						body,
+						transform,
+						motion,
+						collider,
+						rigid,
+						surface,
+						physical,
+						reader.Has<scene::Simulated>(body.Owner),
+						surfaces
+					);
+				}
 			}
 		}
 
@@ -667,25 +897,25 @@ namespace engine::physics {
 				body.Asleep = body.Movable && world->Sleeping(body.Owner);
 			}
 
-		// --- wake ------------------------------------------------------------
-		//
-		// A sleeping body has no `scene::Motion`, so the broad phase has it in
-		// the static index and only an *awake* neighbour can produce a pair
-		// with it. One pass in pair order, so a stack wakes one layer per tick
-		// - bounded, deterministic, and visibly a settling stack rather than a
-		// whole scene jumping at once.
+			// --- wake ------------------------------------------------------------
+			//
+			// A sleeping body has no `scene::Motion`, so the broad phase has it in
+			// the static index and only an *awake* neighbour can produce a pair
+			// with it. One pass in pair order, so a stack wakes one layer per tick
+			// - bounded, deterministic, and visibly a settling stack rather than a
+			// whole scene jumping at once.
 			for (size_t at = 0; at < manifolds.size(); at++) {
-			SolverBody &first = bodies[located[at].first];
-			SolverBody &second = bodies[located[at].second];
+				SolverBody &first = bodies[located[at].first];
+				SolverBody &second = bodies[located[at].second];
 
-			const float firstSpeed = first.LinearVelocity.Magnitude();
-			const float secondSpeed = second.LinearVelocity.Magnitude();
-			if (first.Asleep && !second.Asleep && secondSpeed > WAKE_SPEED) {
-				first.Asleep = false;
-			}
-			if (second.Asleep && !first.Asleep && firstSpeed > WAKE_SPEED) {
-				second.Asleep = false;
-			}
+				const float firstSpeed = first.LinearVelocity.Magnitude();
+				const float secondSpeed = second.LinearVelocity.Magnitude();
+				if (first.Asleep && !second.Asleep && secondSpeed > WAKE_SPEED) {
+					first.Asleep = false;
+				}
+				if (second.Asleep && !first.Asleep && firstSpeed > WAKE_SPEED) {
+					second.Asleep = false;
+				}
 			}
 
 			for (SolverBody &body : bodies) {
@@ -719,9 +949,9 @@ namespace engine::physics {
 			for (size_t at = 0; at < manifolds.size(); at++) {
 				const ContactManifold &manifold = manifolds[at];
 
-			// A trigger reports and never pushes. Skipping it here rather than
-			// zeroing its impulse keeps it out of the iteration entirely, so a
-			// world made of triggers costs the solver nothing.
+				// A trigger reports and never pushes. Skipping it here rather than
+				// zeroing its impulse keeps it out of the iteration entirely, so a
+				// world made of triggers costs the solver nothing.
 				if (manifold.Trigger) {
 					continue;
 				}
@@ -742,11 +972,268 @@ namespace engine::physics {
 		groups.clear();
 		border = SolverGroup{};
 
-		const bool partitioned = rowCount >= PARALLEL_SOLVE_ROWS;
+		bool partitioned = rowCount >= PARALLEL_SOLVE_ROWS;
+		bool usingColoring = false;
+		bool usingIslands = false;
 		size_t chunkCount = 0;
 		PipelineInternals::SolverChunkEdge(*world) = 0.0f;
+		std::vector<SolverColor> &colors = PipelineInternals::SolverColors(*world);
+		colors.clear();
+		PipelineInternals::SolverUsesColoring(*world) = false;
+		PipelineInternals::SolverUsesIslands(*world) = false;
+		PipelineInternals::SolverIslandCount(*world) = 0;
+		bool solverTopologyChanged = false;
+		const bool persistentScheduleEligible =
+			partitioned && bodies.size() <= SOLVER_ISLAND_DISCOVERY_MAXIMUM_BODIES;
 
-		if (partitioned) {
+		// Islands are connected through movable endpoints only. A static floor is
+		// read by every task but never written, so treating it as an edge would
+		// turn unrelated stacks into one serial component.
+		if (persistentScheduleEligible) {
+			std::vector<SolverTopologyEntry> &topology = PipelineInternals::SolverTopology(*world);
+			std::vector<SolverTopologyEntry> &topologyScratch =
+				PipelineInternals::SolverTopologyScratch(*world);
+			topologyScratch.resize(manifolds.size());
+			for (size_t at = 0; at < manifolds.size(); at++) {
+				const SolverBody &first = bodies[located[at].first];
+				const SolverBody &second = bodies[located[at].second];
+				topologyScratch[at] = SolverTopologyEntry{
+					manifolds[at].A.Id,
+					manifolds[at].B.Id,
+					static_cast<uint8_t>(
+						(manifolds[at].Trigger ? 1U : 0U) | (first.Movable ? 2U : 0U) |
+						(second.Movable ? 4U : 0U) | (manifolds[at].PointCount != 0 ? 8U : 0U)
+					),
+				};
+			}
+			solverTopologyChanged = topology != topologyScratch;
+			if (solverTopologyChanged) {
+				topology = topologyScratch;
+				PipelineInternals::SolverColorOfManifold(*world).clear();
+				PipelineInternals::SolverColorTopologyAccepted(*world) = false;
+				PipelineInternals::SolverColorTopologyKnown(*world) = false;
+				PipelineInternals::SolverIslandTopologyKnown(*world) = false;
+			}
+
+			std::vector<uint32_t> &islandOfManifold = PipelineInternals::SolverIslandOfManifold(*world);
+			std::vector<uint32_t> &islandOfBody = PipelineInternals::SolverIslandOfBody(*world);
+			const bool reusedIslands = PipelineInternals::SolverIslandTopologyKnown(*world) &&
+									   islandOfManifold.size() == manifolds.size() &&
+									   islandOfBody.size() == bodies.size();
+			if (!reusedIslands) {
+				std::vector<uint32_t> &parents = PipelineInternals::SolverComponentParents(*world);
+				parents.resize(bodies.size());
+				for (size_t body = 0; body < bodies.size(); body++) {
+					parents[body] = static_cast<uint32_t>(body);
+				}
+
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					const uint32_t first = located[at].first;
+					const uint32_t second = located[at].second;
+					if (bodies[first].Movable && bodies[second].Movable) {
+						JoinSolverComponents(parents, first, second);
+					}
+				}
+
+				islandOfBody.assign(bodies.size(), SKIPPED_MANIFOLD);
+				size_t islandCount = 0;
+				for (size_t body = 0; body < bodies.size(); body++) {
+					if (!bodies[body].Movable) {
+						continue;
+					}
+					const uint32_t root = FindSolverComponent(parents, static_cast<uint32_t>(body));
+					if (islandOfBody[root] == SKIPPED_MANIFOLD) {
+						islandOfBody[root] = static_cast<uint32_t>(islandCount++);
+					}
+					islandOfBody[body] = islandOfBody[root];
+				}
+
+				islandOfManifold.assign(manifolds.size(), SKIPPED_MANIFOLD);
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					const uint32_t first = located[at].first;
+					const uint32_t second = located[at].second;
+					const uint32_t movable = bodies[first].Movable ? first : second;
+					islandOfManifold[at] = islandOfBody[movable];
+				}
+				PipelineInternals::SolverIslandTopologyKnown(*world) = true;
+				core::Metrics::Count("physics.solve.island.topology-rebuild", 1.0);
+			} else {
+				core::Metrics::Count("physics.solve.island.topology-reuse", 1.0);
+			}
+
+			std::vector<uint32_t> &islandRows = PipelineInternals::SolverIslandRows(*world);
+			size_t islandCount = 0;
+			for (uint32_t island : islandOfManifold) {
+				if (island != SKIPPED_MANIFOLD) {
+					islandCount = std::max(islandCount, static_cast<size_t>(island) + 1);
+				}
+			}
+			islandRows.assign(islandCount, 0);
+			for (size_t at = 0; at < manifolds.size(); at++) {
+				const uint32_t island = islandOfManifold[at];
+				if (island != SKIPPED_MANIFOLD) {
+					islandRows[island] += manifolds[at].PointCount;
+				}
+			}
+			const size_t largestRows =
+				islandRows.empty() ? 0 : *std::max_element(islandRows.begin(), islandRows.end());
+			usingIslands = islandCount >= SOLVER_ISLAND_MINIMUM && islandCount <= SOLVER_ISLAND_MAXIMUM &&
+						   largestRows * SOLVER_ISLAND_LARGEST_SHARE_DENOMINATOR <=
+							   rowCount * SOLVER_ISLAND_LARGEST_SHARE_NUMERATOR;
+			PipelineInternals::SolverIslandCount(*world) = islandCount;
+			PipelineInternals::SolverUsesIslands(*world) = usingIslands;
+			std::vector<uint32_t> &islandOrderScratch =
+				PipelineInternals::SolverIslandRowOrderScratch(*world);
+			islandOrderScratch.reserve(islandRows.size());
+			ReportSolverIslandShape(
+				islandRows,
+				islandOrderScratch,
+				reusedIslands,
+				usingIslands,
+				world->SolverIslandRetainedBytes()
+			);
+			if (usingIslands) {
+				groupOfManifold = islandOfManifold;
+				partitioned = false;
+			}
+		} else {
+			ReportSolverIslandShape(
+				{},
+				PipelineInternals::SolverIslandRowOrderScratch(*world),
+				false,
+				false,
+				world->SolverIslandRetainedBytes()
+			);
+		}
+
+		// A colour is assigned to a whole manifold before its points become rows.
+		// The exact key excludes a positive point-count change because it cannot
+		// change conflicts, and the placement pass recomputes every row offset.
+		// Zero is included because a manifold with no rows must not claim a colour.
+		if (persistentScheduleEligible && rowCount >= SOLVER_COLOR_MIN_ROWS) {
+			std::vector<SolverTopologyEntry> &topology = PipelineInternals::SolverTopology(*world);
+			std::vector<uint32_t> &colourOfManifold = PipelineInternals::SolverColorOfManifold(*world);
+			const std::vector<SolverTopologyEntry> &topologyScratch =
+				PipelineInternals::SolverTopologyScratch(*world);
+
+			bool reused = !solverTopologyChanged && PipelineInternals::SolverColorTopologyKnown(*world) &&
+						  topology == topologyScratch &&
+						  (PipelineInternals::SolverColorTopologyAccepted(*world)
+							   ? colourOfManifold.size() == manifolds.size()
+							   : colourOfManifold.empty());
+			if (!reused) {
+				colourOfManifold.assign(manifolds.size(), SKIPPED_MANIFOLD);
+				std::vector<uint64_t> &claims = PipelineInternals::SolverColorClaims(*world);
+				claims.assign(bodies.size(), 0);
+				size_t colourCount = 0;
+				bool exceeded = false;
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					const size_t first = located[at].first;
+					const size_t second = located[at].second;
+					const uint64_t unavailable = (bodies[first].Movable ? claims[first] : 0) |
+												 (bodies[second].Movable ? claims[second] : 0);
+					size_t colour = 0;
+					while (colour < SOLVER_COLOR_MAX_WAVES && (unavailable & (uint64_t{1} << colour)) != 0) {
+						colour++;
+					}
+					if (colour == SOLVER_COLOR_MAX_WAVES) {
+						exceeded = true;
+						break;
+					}
+					colourOfManifold[at] = static_cast<uint32_t>(colour);
+					if (bodies[first].Movable) {
+						claims[first] |= uint64_t{1} << colour;
+					}
+					if (bodies[second].Movable) {
+						claims[second] |= uint64_t{1} << colour;
+					}
+					colourCount = std::max(colourCount, colour + 1);
+				}
+
+				// A fixed barrier for one or two tiny blocks costs more than it can
+				// save. More importantly, the colour path is for one large connected
+				// dynamic island, not many independent stacks which only share a floor.
+				// Island discovery already assigned each movable component, so reuse that
+				// canonical map rather than building a second union-find forest.
+				size_t blocks = 0;
+				size_t dynamicBlocks = 0;
+				const std::vector<uint32_t> &islandOfManifold =
+					PipelineInternals::SolverIslandOfManifold(*world);
+				std::vector<uint32_t> &componentBlocks = PipelineInternals::SolverComponentParents(*world);
+				componentBlocks.assign(PipelineInternals::SolverIslandCount(*world), 0);
+				for (size_t at = 0; at < colourOfManifold.size(); at++) {
+					if (colourOfManifold[at] == SKIPPED_MANIFOLD) {
+						continue;
+					}
+					blocks++;
+					const uint32_t first = located[at].first;
+					const uint32_t second = located[at].second;
+					if (bodies[first].Movable && bodies[second].Movable) {
+						dynamicBlocks++;
+						componentBlocks[islandOfManifold[at]]++;
+					}
+				}
+				size_t largestComponentBlocks = 0;
+				if (dynamicBlocks != 0) {
+					largestComponentBlocks =
+						*std::max_element(componentBlocks.begin(), componentBlocks.end());
+				}
+				if (exceeded || colourCount < SOLVER_COLOR_MIN_WAVES ||
+					blocks < colourCount * SOLVER_COLOR_MIN_BLOCKS_PER_WAVE || dynamicBlocks == 0 ||
+					largestComponentBlocks * SOLVER_COLOR_MIN_COMPONENT_BLOCK_FRACTION_DENOMINATOR <
+						dynamicBlocks) {
+					colourOfManifold.clear();
+				}
+				PipelineInternals::SolverColorTopologyAccepted(*world) = !colourOfManifold.empty();
+				PipelineInternals::SolverColorTopologyKnown(*world) = true;
+				topology = topologyScratch;
+				core::Metrics::Count("physics.solve.color.topology-rebuild", 1.0);
+			} else {
+				core::Metrics::Count("physics.solve.color.topology-reuse", 1.0);
+			}
+
+			if (!colourOfManifold.empty()) {
+				size_t colourCount = 0;
+				for (uint32_t colour : colourOfManifold) {
+					if (colour != SKIPPED_MANIFOLD) {
+						colourCount = std::max(colourCount, static_cast<size_t>(colour) + 1);
+					}
+				}
+				if (colourCount != 0) {
+					usingColoring = true;
+					groupOfManifold = colourOfManifold;
+					partitioned = false;
+					colors.resize(colourCount);
+					for (size_t at = 0; at < manifolds.size(); at++) {
+						if (groupOfManifold[at] != SKIPPED_MANIFOLD) {
+							colors[groupOfManifold[at]].RowCount += manifolds[at].PointCount;
+						}
+					}
+				}
+			}
+		}
+
+		if (usingColoring) {
+			groupStart.assign(colors.size() + 1, 0);
+			for (size_t colour = 0; colour < colors.size(); colour++) {
+				groupStart[colour + 1] = colors[colour].RowCount;
+			}
+		} else if (usingIslands) {
+			const std::vector<uint32_t> &islandRows = PipelineInternals::SolverIslandRows(*world);
+			groupStart.assign(islandRows.size() + 1, 0);
+			for (size_t island = 0; island < islandRows.size(); island++) {
+				groupStart[island + 1] = islandRows[island];
+			}
+		} else if (partitioned) {
 			ENGINE_PROFILE_CAT("physics.solve-partition", core::ProfileCategory::Physics);
 
 			// **A point per body, and every body rather than only the movable
@@ -840,13 +1327,16 @@ namespace engine::physics {
 		// The dispatch list: the interior groups that ended up with rows, and
 		// the border's run. An empty group is dropped rather than dispatched,
 		// because a worker handed nothing still costs a range claim.
-		const size_t interiorSlots = partitioned ? chunkCount : 1;
-		groups.reserve(interiorSlots);
-		for (size_t slot = 0; slot < interiorSlots; slot++) {
-			const uint32_t first = groupStart[slot];
-			const uint32_t last = groupStart[slot + 1];
-			if (last > first) {
-				groups.push_back(SolverGroup{first, last - first});
+		if (!usingColoring) {
+			const size_t interiorSlots =
+				usingIslands ? PipelineInternals::SolverIslandCount(*world) : (partitioned ? chunkCount : 1);
+			groups.reserve(interiorSlots);
+			for (size_t slot = 0; slot < interiorSlots; slot++) {
+				const uint32_t first = groupStart[slot];
+				const uint32_t last = groupStart[slot + 1];
+				if (last > first) {
+					groups.push_back(SolverGroup{first, last - first});
+				}
 			}
 		}
 
@@ -870,6 +1360,10 @@ namespace engine::physics {
 		});
 		if (partitioned) {
 			border = SolverGroup{groupStart[chunkCount], groupStart[chunkCount + 1] - groupStart[chunkCount]};
+		}
+
+		if (!usingColoring) {
+			ReportSolverGroupShape(groups, border, rowCount - static_cast<size_t>(border.RowCount));
 		}
 
 		// --- place -----------------------------------------------------------
@@ -905,17 +1399,17 @@ namespace engine::physics {
 			rowStart.resize(manifolds.size());
 			impulseStart.resize(manifolds.size());
 
-		// **Two offsets per manifold, because the two arrays are ordered
-		// differently and that is the whole point of one of them.** A row's slot
-		// comes from its group, so the row array is grouped by chunk and is in
-		// no entity order at all. The impulse cache has to come out ordered by
-		// the pair, because next tick's warm start binary-searches it - so its
-		// slot is a plain running total in manifold order, and the manifolds are
-		// already sorted on the pair.
-		//
-		// Writing the cache at row indices instead is the mistake that costs
-		// nothing to make and is silent: the cache is still complete, still the
-		// right size, and every lookup into it misses.
+			// **Two offsets per manifold, because the two arrays are ordered
+			// differently and that is the whole point of one of them.** A row's slot
+			// comes from its group, so the row array is grouped by chunk and is in
+			// no entity order at all. The impulse cache has to come out ordered by
+			// the pair, because next tick's warm start binary-searches it - so its
+			// slot is a plain running total in manifold order, and the manifolds are
+			// already sorted on the pair.
+			//
+			// Writing the cache at row indices instead is the mistake that costs
+			// nothing to make and is silent: the cache is still complete, still the
+			// right size, and every lookup into it misses.
 			uint32_t emitted = 0;
 			for (size_t at = 0; at < manifolds.size(); at++) {
 				const uint32_t group = groupOfManifold[at];
@@ -928,6 +1422,30 @@ namespace engine::physics {
 				impulseStart[at] = emitted;
 				emitted += manifolds[at].PointCount;
 			}
+		}
+
+		if (usingColoring) {
+			// The prefix sums put each colour in one row range. Within that range
+			// manifold order is retained, and each group is precisely one manifold
+			// block so a multi-point contact is never divided between jobs.
+			groups.clear();
+			for (size_t colour = 0; colour < colors.size(); colour++) {
+				SolverColor &wave = colors[colour];
+				wave.FirstGroup = static_cast<uint32_t>(groups.size());
+				wave.GroupCount = 0;
+				for (size_t at = 0; at < manifolds.size(); at++) {
+					if (groupOfManifold[at] != colour || manifolds[at].PointCount == 0) {
+						continue;
+					}
+					groups.push_back(SolverGroup{rowStart[at], manifolds[at].PointCount});
+					wave.GroupCount++;
+				}
+			}
+			ReportSolverColorShape(colors, SolverColorRetainedBytes(*world));
+			ReportColoredGroupShape(groups, rowCount);
+			PipelineInternals::SolverUsesColoring(*world) = true;
+		} else {
+			ReportSolverColorShape({}, SolverColorRetainedBytes(*world));
 		}
 
 		// --- set up ----------------------------------------------------------
@@ -946,78 +1464,97 @@ namespace engine::physics {
 			ENGINE_PROFILE_CAT("physics.solve-setup", core::ProfileCategory::Physics);
 			const auto setUpManifolds = [&](size_t begin, size_t end) {
 				for (size_t at = begin; at < end; at++) {
-				const ContactManifold &manifold = manifolds[at];
-				if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
-					continue;
-				}
-
-				const size_t firstIndex = located[at].first;
-				const size_t secondIndex = located[at].second;
-
-				const SolverBody &first = bodies[firstIndex];
-				const SolverBody &second = bodies[secondIndex];
-
-				// Combined the standard way: friction multiplies because two
-				// slippery surfaces are slipperier than either, restitution takes
-				// the larger because a superball off concrete bounces.
-				const float friction = std::sqrt(first.Friction * second.Friction);
-				const float restitution =
-					first.Restitution > second.Restitution ? first.Restitution : second.Restitution;
-
-				for (size_t point = 0; point < manifold.PointCount; point++) {
-					const ContactPoint &contact = manifold.Points[point];
-
-					// The lever arms are what turn an impulse into a torque, and the
-					// reason a four-point manifold holds a box against rotation.
-					// They stay local: every use of them is here, folded into the
-					// three axes below, and a row the sweeps have to reload is a
-					// row that costs sixteen passes over the cache.
-					const core::Vector3 firstLever = contact.Position - first.Centre;
-					const core::Vector3 secondLever = contact.Position - second.Centre;
-
-					ContactRow row;
-					row.First = firstIndex;
-					row.Second = secondIndex;
-					row.Friction = friction;
-					row.Feature = contact.Feature;
-
-					row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
-					TangentsFor(
-						manifold.Normal,
-						row.Along[ContactRow::TANGENT].Direction,
-						row.Along[ContactRow::TANGENT + 1].Direction
-					);
-					for (ContactAxis &axis : row.Along) {
-						PrepareAxis(first, second, firstLever, secondLever, axis);
+					const ContactManifold &manifold = manifolds[at];
+					if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
+						continue;
 					}
 
-					const float shared = first.InverseMass + second.InverseMass;
-					row.CorrectionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
+					const size_t firstIndex = located[at].first;
+					const size_t secondIndex = located[at].second;
 
-					const float excess = contact.Penetration - PENETRATION_SLOP;
-					const float unwind =
-						delta > 0.0f && excess > 0.0f ? (POSITION_CORRECTION / delta) * excess : 0.0f;
-					row.Bias = unwind > MAXIMUM_CORRECTION_SPEED ? MAXIMUM_CORRECTION_SPEED : unwind;
+					const SolverBody &first = bodies[firstIndex];
+					const SolverBody &second = bodies[secondIndex];
 
-					// Restitution is a function of how fast they were closing
-					// *before* anything was applied, so it is captured here and not
-					// recomputed per iteration - an iteration that recomputed it
-					// would keep finding a smaller closing speed and add energy
-					// chasing it.
-					const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
-					row.Bounce = closing > BOUNCE_THRESHOLD ? restitution * closing : 0.0f;
+					// Combined the standard way: friction multiplies because two
+					// slippery surfaces are slipperier than either, restitution takes
+					// the larger because a superball off concrete bounces.
+					const float friction = std::sqrt(first.Friction * second.Friction);
+					const float restitution =
+						first.Restitution > second.Restitution ? first.Restitution : second.Restitution;
 
-					const ContactImpulse *cached = FindImpulse(
-						PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B, contact.Feature
-					);
-					if (cached != nullptr) {
-						row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
-						row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];
-						row.Along[ContactRow::TANGENT + 1].Impulse = cached->Tangent[1];
+					for (size_t point = 0; point < manifold.PointCount; point++) {
+						const ContactPoint &contact = manifold.Points[point];
+						const bool speculative = contact.Separation > 0.0f;
+
+						// The lever arms are what turn an impulse into a torque, and the
+						// reason a four-point manifold holds a box against rotation.
+						// They stay local: every use of them is here, folded into the
+						// three axes below, and a row the sweeps have to reload is a
+						// row that costs sixteen passes over the cache.
+						const core::Vector3 firstLever = contact.Position - first.Centre;
+						const core::Vector3 secondLever = contact.Position - second.Centre;
+
+						ContactRow row;
+						row.First = firstIndex;
+						row.Second = secondIndex;
+						row.Friction = speculative ? 0.0f : friction;
+						row.Feature = contact.Feature;
+						row.Speculative = speculative;
+
+						row.Along[ContactRow::NORMAL].Direction = manifold.Normal;
+						TangentsFor(
+							manifold.Normal,
+							row.Along[ContactRow::TANGENT].Direction,
+							row.Along[ContactRow::TANGENT + 1].Direction
+						);
+						for (ContactAxis &axis : row.Along) {
+							PrepareAxis(first, second, firstLever, secondLever, axis);
+						}
+
+						const float shared = first.InverseMass + second.InverseMass;
+						row.CorrectionMass = shared > 0.0f ? 1.0f / shared : 0.0f;
+
+						const float excess = contact.Penetration - PENETRATION_SLOP;
+						const float unwind =
+							delta > 0.0f && excess > 0.0f ? (POSITION_CORRECTION / delta) * excess : 0.0f;
+						row.Bias = unwind > MAXIMUM_CORRECTION_SPEED ? MAXIMUM_CORRECTION_SPEED : unwind;
+
+						// Restitution is a function of how fast they were closing
+						// *before* anything was applied, so it is captured here and not
+						// recomputed per iteration - an iteration that recomputed it
+						// would keep finding a smaller closing speed and add energy
+						// chasing it.
+						const float closing = -ClosingSpeed(first, second, row.Along[ContactRow::NORMAL]);
+						row.SpeculativeClosingSpeed =
+							speculative ? closing
+										: FindSpeculativeClosingSpeed(
+											  PipelineInternals::ImpulseCache(*world), manifold.A, manifold.B
+										  );
+						// A speculative row permits exactly the speed needed to reach
+						// the surface next tick. One slop of bite avoids a float-rounded
+						// gap that would otherwise hold the body just outside forever.
+						row.Bounce = speculative
+										 ? -(contact.Separation + PENETRATION_SLOP) / delta
+										 : (std::max(closing, row.SpeculativeClosingSpeed) > BOUNCE_THRESHOLD
+												? restitution * std::max(closing, row.SpeculativeClosingSpeed)
+												: 0.0f);
+
+						const ContactImpulse *cached = speculative
+														   ? nullptr
+														   : FindImpulse(
+																 PipelineInternals::ImpulseCache(*world),
+																 manifold.A,
+																 manifold.B,
+																 contact.Feature
+															 );
+						if (cached != nullptr) {
+							row.Along[ContactRow::NORMAL].Impulse = cached->Normal;
+							row.Along[ContactRow::TANGENT].Impulse = cached->Tangent[0];
+							row.Along[ContactRow::TANGENT + 1].Impulse = cached->Tangent[1];
+						}
+
+						rows[rowStart[at] + point] = row;
 					}
-
-					rows[rowStart[at] + point] = row;
-				}
 				}
 			};
 
@@ -1043,30 +1580,54 @@ namespace engine::physics {
 			const auto warmStart = [&bodies, &rows](SolverGroup run) {
 				const size_t last = static_cast<size_t>(run.FirstRow) + run.RowCount;
 				for (size_t at = run.FirstRow; at < last; at++) {
-				const ContactRow &row = rows[at];
-				SolverBody &first = bodies[row.First];
-				SolverBody &second = bodies[row.Second];
-				for (const ContactAxis &axis : row.Along) {
-					ApplyImpulse(first, second, axis, axis.Impulse);
-				}
+					const ContactRow &row = rows[at];
+					SolverBody &first = bodies[row.First];
+					SolverBody &second = bodies[row.Second];
+					for (const ContactAxis &axis : row.Along) {
+						ApplyImpulse(first, second, axis, axis.Impulse);
+					}
 				}
 			};
 
-		if (groups.size() > 1) {
-			parallel::Jobs::For(
-				groups.size(),
-				1,
-				[&groups, &warmStart](size_t begin, size_t end) {
-					for (size_t group = begin; group < end; group++) {
-						warmStart(groups[group]);
-					}
-				},
-				2
-			);
-		} else if (!groups.empty()) {
-			warmStart(groups[0]);
-		}
-			warmStart(border);
+			if (usingColoring) {
+				for (const SolverColor &wave : colors) {
+					const size_t tasks =
+						(wave.GroupCount + SOLVER_COLOR_BLOCKS_PER_TASK - 1) / SOLVER_COLOR_BLOCKS_PER_TASK;
+					parallel::Jobs::For(
+						tasks,
+						1,
+						[&groups, &warmStart, wave](size_t begin, size_t end) {
+							for (size_t task = begin; task < end; task++) {
+								const size_t first = wave.FirstGroup + task * SOLVER_COLOR_BLOCKS_PER_TASK;
+								const size_t last = std::min(
+									first + SOLVER_COLOR_BLOCKS_PER_TASK,
+									static_cast<size_t>(wave.FirstGroup + wave.GroupCount)
+								);
+								for (size_t group = first; group < last; group++) {
+									warmStart(groups[group]);
+								}
+							}
+						},
+						1
+					);
+				}
+			} else if (groups.size() > 1) {
+				parallel::Jobs::For(
+					groups.size(),
+					1,
+					[&groups, &warmStart](size_t begin, size_t end) {
+						for (size_t group = begin; group < end; group++) {
+							warmStart(groups[group]);
+						}
+					},
+					2
+				);
+			} else if (!groups.empty()) {
+				warmStart(groups[0]);
+			}
+			if (!usingColoring) {
+				warmStart(border);
+			}
 		}
 
 		// --- iterate ---------------------------------------------------------
@@ -1114,28 +1675,85 @@ namespace engine::physics {
 
 		{
 			ENGINE_PROFILE_CAT("physics.solve-sweeps", core::ProfileCategory::Physics);
-			for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
-				if (groups.size() > 1) {
+			if (usingIslands) {
+				// Island tasks own every movable body they touch, so there is no border
+				// and no information to exchange between sweeps. One blocking dispatch
+				// therefore performs all sixteen local sweeps without queue handovers.
 				parallel::Jobs::For(
 					groups.size(),
 					1,
 					[&bodies, &rows, &groups](size_t begin, size_t end) {
 						for (size_t group = begin; group < end; group++) {
-							for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+							for (size_t sweep = 0; sweep < SOLVER_ITERATIONS; sweep++) {
 								SweepRows(bodies, rows, groups[group]);
 							}
 						}
 					},
 					2
 				);
-				} else if (!groups.empty()) {
-					for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-						SweepRows(bodies, rows, groups[0]);
+			} else if (usingColoring) {
+				// Each Jobs call completes before the next colour begins. That barrier
+				// is the graph-colouring contract: every task in one wave is disjoint,
+				// while a later wave may read the impulses it left behind.
+				for (size_t round = 0; round < SOLVER_ITERATIONS; round++) {
+					ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
+					for (const SolverColor &wave : colors) {
+						ENGINE_PROFILE_CAT("physics.solve-colour", core::ProfileCategory::Physics);
+						const size_t tasks = (wave.GroupCount + SOLVER_COLOR_BLOCKS_PER_TASK - 1) /
+											 SOLVER_COLOR_BLOCKS_PER_TASK;
+						parallel::Jobs::For(
+							tasks,
+							1,
+							[&bodies, &rows, &groups, wave](size_t begin, size_t end) {
+								for (size_t task = begin; task < end; task++) {
+									const size_t first =
+										wave.FirstGroup + task * SOLVER_COLOR_BLOCKS_PER_TASK;
+									const size_t last = std::min(
+										first + SOLVER_COLOR_BLOCKS_PER_TASK,
+										static_cast<size_t>(wave.FirstGroup + wave.GroupCount)
+									);
+									for (size_t group = first; group < last; group++) {
+										SweepRows(bodies, rows, groups[group]);
+									}
+								}
+							},
+							1
+						);
 					}
 				}
-
-				for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
-					SweepRows(bodies, rows, border);
+			} else {
+				for (size_t round = 0; round < SOLVER_ITERATIONS / SOLVE_SWEEPS_PER_BATCH; round++) {
+					ENGINE_PROFILE_CAT("physics.solve-round", core::ProfileCategory::Physics);
+					{
+						// `jobs.drain` is the nested span when this dispatch reaches the
+						// pool. Keeping it inside an explicit interior span separates queue
+						// drain and group work from the serial border that follows.
+						ENGINE_PROFILE_CAT("physics.solve-interior", core::ProfileCategory::Physics);
+						if (groups.size() > 1) {
+							parallel::Jobs::For(
+								groups.size(),
+								1,
+								[&bodies, &rows, &groups](size_t begin, size_t end) {
+									for (size_t group = begin; group < end; group++) {
+										for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+											SweepRows(bodies, rows, groups[group]);
+										}
+									}
+								},
+								2
+							);
+						} else if (!groups.empty()) {
+							for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+								SweepRows(bodies, rows, groups[0]);
+							}
+						}
+					}
+					{
+						ENGINE_PROFILE_CAT("physics.solve-border", core::ProfileCategory::Physics);
+						for (size_t sweep = 0; sweep < SOLVE_SWEEPS_PER_BATCH; sweep++) {
+							SweepRows(bodies, rows, border);
+						}
+					}
 				}
 			}
 		}
@@ -1165,43 +1783,62 @@ namespace engine::physics {
 			if (next.size() < rowCount) {
 				next.resize(rowCount);
 			}
+			const size_t rememberRanges = (manifolds.size() + SETUP_GRAIN - 1) / SETUP_GRAIN;
+			std::vector<uint32_t> &confirmed = PipelineInternals::SolverRememberConfirmed(*world);
+			// Jobs::For with zero manifolds returns without running the body, so an
+			// empty assign here is safe and the serial sum below stays zero.
+			confirmed.assign(rememberRanges, 0);
 
 			parallel::Jobs::For(
-			manifolds.size(),
-			SETUP_GRAIN,
-			[&next, &rows, &bodies, &manifolds, &groupOfManifold, &rowStart, &impulseStart](
-				size_t begin, size_t end
-			) {
-				for (size_t at = begin; at < end; at++) {
-					if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
-						continue;
-					}
+				manifolds.size(),
+				SETUP_GRAIN,
+				[&next, &rows, &bodies, &manifolds, &groupOfManifold, &rowStart, &impulseStart, &confirmed](
+					size_t begin, size_t end
+				) {
+					uint32_t confirmedInRange = 0;
+					for (size_t at = begin; at < end; at++) {
+						if (groupOfManifold[at] == SKIPPED_MANIFOLD) {
+							continue;
+						}
 
-					const uint32_t first = impulseStart[at];
-					const uint32_t last = first + manifolds[at].PointCount;
-					for (uint32_t offset = 0; offset < manifolds[at].PointCount; offset++) {
-						const ContactRow &row = rows[rowStart[at] + offset];
-						next[first + offset] = ContactImpulse{
-							bodies[row.First].Owner,
-							bodies[row.Second].Owner,
-							row.Feature,
-							row.Along[ContactRow::NORMAL].Impulse,
-							{
-								row.Along[ContactRow::TANGENT].Impulse,
-								row.Along[ContactRow::TANGENT + 1].Impulse,
-							},
-						};
+						const uint32_t first = impulseStart[at];
+						const uint32_t last = first + manifolds[at].PointCount;
+						for (uint32_t offset = 0; offset < manifolds[at].PointCount; offset++) {
+							const ContactRow &row = rows[rowStart[at] + offset];
+							confirmedInRange +=
+								row.Speculative && row.Along[ContactRow::NORMAL].Impulse > 0.0f ? 1U : 0U;
+							const float normalImpulse =
+								row.Speculative ? 0.0f : row.Along[ContactRow::NORMAL].Impulse;
+							next[first + offset] = ContactImpulse{
+								bodies[row.First].Owner,
+								bodies[row.Second].Owner,
+								row.Feature,
+								normalImpulse,
+								{
+									row.Speculative ? 0.0f : row.Along[ContactRow::TANGENT].Impulse,
+									row.Speculative ? 0.0f : row.Along[ContactRow::TANGENT + 1].Impulse,
+								},
+								row.Speculative ? row.SpeculativeClosingSpeed : 0.0f,
+							};
+						}
+						std::sort(next.begin() + first, next.begin() + last);
 					}
-					std::sort(next.begin() + first, next.begin() + last);
-				}
-			},
-			SETUP_GRAIN
+					confirmed[begin / SETUP_GRAIN] = confirmedInRange;
+				},
+				SETUP_GRAIN
+			);
+			size_t confirmedSpeculative = 0;
+			for (uint32_t count : confirmed) {
+				confirmedSpeculative += count;
+			}
+			core::Metrics::SetGauge(
+				"physics.solve.speculative.confirmed", static_cast<double>(confirmedSpeculative)
 			);
 
-		// The manifolds contributed their runs in order, but the runs of the
-		// ones that contributed nothing were skipped - so the filled slots are
-		// `[0, rowCount)` and the tail beyond it is last tick's, which the
-		// binary search must not see.
+			// The manifolds contributed their runs in order, but the runs of the
+			// ones that contributed nothing were skipped - so the filled slots are
+			// `[0, rowCount)` and the tail beyond it is last tick's, which the
+			// binary search must not see.
 			next.resize(rowCount);
 			std::swap(PipelineInternals::ImpulseCache(*world), next);
 		}
@@ -1213,43 +1850,47 @@ namespace engine::physics {
 			std::vector<RestingBody> &restingNext = PipelineInternals::RestingNext(*world);
 			restingNext.clear();
 
-		size_t carried = 0;
-		const auto carryUntil = [&](uint64_t limit) {
-			while (carried < resting.size() && resting[carried].Owner.Id < limit) {
-				const RestingBody &existing = resting[carried];
-				if (existing.Asleep && store.Alive(existing.Owner)) {
-					restingNext.push_back(existing);
+			size_t carried = 0;
+			const auto carryUntil = [&](uint64_t limit) {
+				while (carried < resting.size() && resting[carried].Owner.Id < limit) {
+					const RestingBody &existing = resting[carried];
+					if (existing.Asleep && store.Alive(existing.Owner)) {
+						restingNext.push_back(existing);
+					}
+					carried++;
 				}
-				carried++;
-			}
-		};
+			};
 
-		for (const SolverBody &body : bodies) {
-			carryUntil(body.Owner.Id);
+			for (SolverBody &body : bodies) {
+				carryUntil(body.Owner.Id);
 
-			RestingBody entry{body.Owner, 0.0f, false};
-			if (carried < resting.size() && resting[carried].Owner == body.Owner) {
-				entry = resting[carried];
-				carried++;
-			}
+				RestingBody entry{body.Owner, 0.0f, false};
+				if (carried < resting.size() && resting[carried].Owner == body.Owner) {
+					entry = resting[carried];
+					carried++;
+				}
 
-			// Only a dynamic body sleeps. A kinematic one is moved by whoever
-			// owns it, and taking its `scene::Motion` away would stop that
-			// owner's writes from moving anything.
-			if (!body.Movable && !body.Asleep) {
-				continue;
-			}
+				// Only a dynamic body sleeps. A kinematic one is moved by whoever
+				// owns it, and taking its `scene::Motion` away would stop that
+				// owner's writes from moving anything.
+				if (!body.Movable && !body.Asleep) {
+					continue;
+				}
 
-			entry.Asleep = body.Asleep;
-			if (!entry.Asleep) {
-				const bool still = body.LinearVelocity.Magnitude() < SLEEP_LINEAR_SPEED &&
-								   body.AngularVelocity.Magnitude() < SLEEP_ANGULAR_SPEED;
-				entry.RestingSeconds = still ? entry.RestingSeconds + delta : 0.0f;
-				entry.Asleep = entry.RestingSeconds >= SLEEP_SETTLE_SECONDS;
+				entry.Asleep = body.Asleep;
+				if (!entry.Asleep) {
+					const bool still = body.LinearVelocity.Magnitude() < SLEEP_LINEAR_SPEED &&
+									   body.AngularVelocity.Magnitude() < SLEEP_ANGULAR_SPEED;
+					entry.RestingSeconds = still ? entry.RestingSeconds + delta : 0.0f;
+					entry.Asleep = entry.RestingSeconds >= SLEEP_SETTLE_SECONDS;
+				}
+				// Publish runs after this merge. Keep the gathered body in sync with
+				// the authoritative entry so it can remove Motion without searching
+				// the resting list again.
+				body.Asleep = entry.Asleep;
+				restingNext.push_back(entry);
 			}
-			restingNext.push_back(entry);
-		}
-		carryUntil(UINT64_MAX);
+			carryUntil(UINT64_MAX);
 
 			std::swap(resting, restingNext);
 		}

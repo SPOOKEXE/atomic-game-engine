@@ -29,6 +29,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
@@ -74,6 +75,10 @@ namespace engine::spatial {
 	std::optional<core::RayHit>
 	Raycast(const HashGrid &grid, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All());
 
+	std::optional<core::RayHit> Raycast(
+		const DynamicBvh &tree, const core::Ray &ray, float maxDistance, LayerMask mask = LayerMask::All()
+	);
+
 	// Finds every proxy box a ray meets, nearest first.
 	//
 	// When the span cannot hold them all it keeps the **nearest**, which is the
@@ -93,6 +98,13 @@ namespace engine::spatial {
 		LayerMask mask,
 		std::span<core::RayHit> hits
 	);
+	QueryResult RaycastAll(
+		const DynamicBvh &tree,
+		const core::Ray &ray,
+		float maxDistance,
+		LayerMask mask,
+		std::span<core::RayHit> hits
+	);
 
 	// Finds every proxy whose box overlaps `box`, touching included.
 	//
@@ -103,6 +115,31 @@ namespace engine::spatial {
 	// @threadsafe
 	QueryResult
 	OverlapBox(const HashGrid &grid, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
+	QueryResult
+	OverlapBox(const DynamicBvh &tree, const core::AABB &box, LayerMask mask, std::span<uint64_t> found);
+
+	// Finds overlapping proxy boxes whose opaque id is greater than a cutoff.
+	//
+	// This is the allocation-free half of an unordered pair walk. A caller whose
+	// proxy ids are dense row indices queries row N with cutoff N, so each pair
+	// is written once instead of gathered once from each endpoint. Filtering is
+	// done before the output span is filled, so skipped ids cannot cause a false
+	// overflow.
+	//
+	// @param grid             The index to ask.
+	// @param box              The volume to test, in world space.
+	// @param mask             Which layers to consider.
+	// @param minimumExclusive Only ids greater than this are written.
+	// @param found            Where to write the ids, owned by the caller.
+	// @threadsafe
+	// @since v0.22
+	QueryResult OverlapBoxAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	);
 
 	// Finds every proxy whose box comes within `radius` of `centre`.
 	//
@@ -117,6 +154,13 @@ namespace engine::spatial {
 	// @threadsafe
 	QueryResult OverlapSphere(
 		const HashGrid &grid,
+		const core::Vector3 &centre,
+		float radius,
+		LayerMask mask,
+		std::span<uint64_t> found
+	);
+	QueryResult OverlapSphere(
+		const DynamicBvh &tree,
 		const core::Vector3 &centre,
 		float radius,
 		LayerMask mask,
@@ -141,6 +185,36 @@ namespace engine::spatial {
 	// @threadsafe
 	QueryResult ShapeCast(
 		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		std::span<uint64_t> found
+	);
+
+	// Sweeps an axis-aligned box and reports only proxy ids above a cutoff.
+	//
+	// This is the allocation-free half of an ordered swept-pair walk. It has
+	// the same exact swept-box filter as `ShapeCast`, while ensuring each dense
+	// id pair is emitted from its lower id only. Zero motion is
+	// `OverlapBoxAfterId`.
+	//
+	// @param grid             The index to ask.
+	// @param box              Where the swept box starts, in world space.
+	// @param motion           How far and which way it travels, in metres.
+	// @param mask             Which layers to consider.
+	// @param minimumExclusive Only ids greater than this are written.
+	// @param found            Where to write the ids, owned by the caller.
+	// @threadsafe
+	QueryResult ShapeCastAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	);
+	QueryResult ShapeCast(
+		const DynamicBvh &tree,
 		const core::AABB &box,
 		const core::Vector3 &motion,
 		LayerMask mask,

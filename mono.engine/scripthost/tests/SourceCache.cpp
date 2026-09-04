@@ -141,6 +141,32 @@ TEST_CASE("a script instance runs from the cache", "[script][sourcecache]") {
 	CHECK(found);
 }
 
+TEST_CASE("a failed top-level script is disabled without stopping its world", "[script][sourcecache]") {
+	Store store = MakeWorld();
+
+	SourceCache cache;
+	cache.Set(Name("Broken.luau"), "error('intentional failure')");
+	cache.Set(Name("Healthy.luau"), "Instance.new('Part', workspace).Name = 'StillRunning'");
+	store.SetResource(cache);
+
+	const engine::ecs::Entity broken = engine::script::MakeScript(store, "Broken.luau", "Broken");
+	engine::script::MakeScript(store, "Healthy.luau", "Healthy");
+
+	RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfServer();
+	const auto runtime = MakeRuntime(store, Language::Luau, limits);
+
+	CHECK(runtime->RunWorldScripts() == 1);
+	CHECK_FALSE(runtime->LastError().empty());
+	CHECK(store.Has<engine::script::Disabled>(broken));
+
+	bool healthyRan = false;
+	store.EachEntity([&](engine::ecs::Entity entity) {
+		healthyRan = healthyRan || store.InstanceNameOf(entity) == Name("StillRunning");
+	});
+	CHECK(healthyRan);
+}
+
 TEST_CASE("the mirror fills a client-runnable script and nothing else", "[script][sourcecache]") {
 	Store store = MakeWorld();
 

@@ -53,10 +53,11 @@ namespace {
 
 	// Samples run before any are kept.
 	//
-	// The first run of anything pays for cold caches, lazy page faults and a
-	// branch predictor that has never seen the code. Including that would be
-	// reporting the allocator rather than the algorithm.
-	constexpr int WARMUP_SAMPLES = 2;
+	// Two samples did not settle the physics broadphase after a low-work row:
+	// its first seven measured samples varied by 34 percent while later samples
+	// stayed within 3 percent. Eight warms the code, data and CPU frequency before
+	// the usual seven-sample minimum is allowed to describe the algorithm.
+	constexpr int WARMUP_SAMPLES = 8;
 
 	// A record is one line and its free-text field is last, so a name carrying
 	// a tab would otherwise end the record early.

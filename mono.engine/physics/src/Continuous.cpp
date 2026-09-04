@@ -2,12 +2,15 @@
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Continuous.hpp>
+#include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -23,6 +26,16 @@
 namespace engine::physics {
 
 	namespace {
+		void DispatchGridRanges(
+			void *, size_t count, spatial::HashGrid::RangeDispatcher::Body body, void *bodyContext
+		) {
+			parallel::Jobs::For(
+				count, 1, [body, bodyContext](size_t begin, size_t end) { body(bodyContext, begin, end); }, 1
+			);
+		}
+
+		const spatial::HashGrid::RangeDispatcher GRID_DISPATCHER{nullptr, &DispatchGridRanges};
+
 		// The smallest half-extent a shape actually has, in its own axes.
 		//
 		// `ShapeHalfExtent` reads `Collider::Extent` according to the shape kind,
@@ -43,178 +56,368 @@ namespace engine::physics {
 			return;
 		}
 
-		const spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
-		const std::vector<ColliderRecord> &records = PipelineInternals::StaticRecords(*world);
-		if (records.empty()) {
-			return;
-		}
-
-		// **The shapes the sync already resolved, by the same subscript as the
-		// records.** This walk used to build its own `ShapeInstance` out of a
-		// `Store::Get` pair per candidate, through the three-argument
-		// constructor - which has nowhere to put a hull or a soup, so every
-		// baked collider it swept against was demoted to the part's bound.
-		//
-		// What that cost was a character stuck in mid-air. A terrain chunk is
-		// sixty-four studs of heightfield in a box the height of its tallest
-		// point, so the bound's roof is the mountain top laid flat over the
-		// whole chunk. A body falling fast enough to be admitted here was
-		// clamped just short of that roof, ten studs above anything anybody can
-		// see, and stayed: nothing was actually touching, so no contact
-		// resolved it and no impulse cancelled its fall, gravity kept adding to
-		// a velocity that never moved anything, and the next tick clamped it
-		// against the same roof a fraction sooner.
-		//
-		// See `PlacedCollider`, which carries the measurement for why the
-		// resolution is done once in the sync rather than per candidate here.
-		const std::vector<PlacedCollider> &shapes = PipelineInternals::StaticShapes(*world);
-		if (shapes.size() != records.size()) {
-			return;
-		}
-
 		const float delta = PhysicsStepSeconds(store);
 		if (!(delta > 0.0f)) {
 			return;
 		}
 
-		std::vector<uint64_t> &candidates = PipelineInternals::CandidateBuffer(*world);
-		if (candidates.size() < records.size()) {
-			candidates.resize(records.size());
-		}
-
-		// **The reader is the same store, taken `const` so the reads below say
-		// so.** Every candidate's shape is resolved through it while an `Each`
-		// is running, which the ECS allows: a read is not a structural change.
-		const ecs::Store &reader = store;
-		uint64_t swept = 0;
-
-		// The baked table, once for the walk. Every *candidate*'s shape is
-		// already resolved above; this is only for the moving body, whose frame
-		// has to be wound back to where the step started and so cannot be the
-		// one the sync placed.
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
+		std::vector<spatial::Proxy> &proxies = PipelineInternals::ContinuousProxies(*world);
+		std::vector<ColliderRecord> &records = PipelineInternals::ContinuousRecords(*world);
+		std::vector<PlacedCollider> &shapes = PipelineInternals::ContinuousShapes(*world);
+		std::vector<float> &fractions = PipelineInternals::ContinuousFractions(*world);
+		std::vector<float> &thresholds = PipelineInternals::ContinuousThresholds(*world);
+		std::vector<float> &reaches = PipelineInternals::ContinuousReaches(*world);
+		std::vector<float> &angularLinearSpeeds = PipelineInternals::ContinuousAngularLinearSpeeds(*world);
+		const size_t bodyCount =
+			store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
+				.With<scene::Simulated>()
+				.Count();
+		proxies.resize(bodyCount);
+		records.clear();
+		shapes.clear();
+		records.reserve(bodyCount);
+		shapes.reserve(bodyCount);
+		fractions.assign(bodyCount, 1.0f);
+		thresholds.resize(bodyCount);
+		reaches.resize(bodyCount);
+		angularLinearSpeeds.resize(bodyCount);
 
-		store.Each<scene::Transform, const scene::Motion, const scene::Collider>(
-			[&](ecs::Entity entity,
-				scene::Transform &transform,
-				const scene::Motion &motion,
-				const scene::Collider &collider) {
-				// **Static bodies are not swept.** Whatever moves one is not the
-				// integrator, so the motion this step would reconstruct did not
-				// happen.
-				//
-				// A sleeping body has no `scene::Motion` and so never reaches
-				// here at all; this is asking the other question, and it is the
-				// one a row with a `Motion` it should not have had would fail.
-				if (!reader.Has<scene::Simulated>(entity)) {
-					return;
-				}
-
-				// **The step the integrator just took, reconstructed rather than
-				// remembered.** `scene::PreviousTransform` exists and is the
-				// obvious thing to read, but nothing in this module writes it -
-				// it belongs to whoever is interpolating for a renderer, and a
-				// physics step that depended on a presentation component would
-				// be the layer inversion `AGENTS.md` refuses. The integrator
-				// added exactly `Linear * delta`, so this is that value and not
-				// an approximation of it.
-				const core::Vector3 travelled = motion.Linear * delta;
-				const float distance = travelled.Magnitude();
-
-				const float thinnest = ThinnestHalfExtent(collider);
-				if (!(thinnest > 0.0f) || distance <= thinnest * CONTINUOUS_MOTION_RATIO) {
-					return;
-				}
-
-				core::CFrame from = transform.Frame;
-				from.Position = transform.Frame.Position - travelled;
-
-				// The volume the shape passes through, which is what the index
-				// is asked for. Loose - it is the union of the two end bounds
-				// rather than the swept hull - and loose is the safe direction:
-				// a candidate too many costs a sweep that misses.
-				const core::AABB envelope =
-					ShapeWorldBounds(collider, from).Union(ShapeWorldBounds(collider, transform.Frame));
-
-				const spatial::QueryResult found =
-					spatial::OverlapBox(index, envelope, collider.Mask, candidates);
-				if (found.Written == 0) {
-					return;
-				}
-
-				// **The mover's own hull, and deliberately not its soup.** A
-				// hull has a support function and sweeps exactly; a triangle
-				// soup has none, so a moving mesh left unresolved falls back to
-				// the part's bound - which is the conservative direction for
-				// the body whose tunnelling this pass exists to stop.
+		size_t written = 0;
+		store.Query<const scene::Transform, const scene::Motion, const scene::Collider>()
+			.With<scene::Simulated>()
+			.Each([&](ecs::Entity entity,
+					  const scene::Transform &transform,
+					  const scene::Motion &motion,
+					  const scene::Collider &collider) {
+				const core::CFrame from = Advanced(transform.Frame, -motion.Linear, -motion.Angular, delta);
 				const collision::ConvexHull *movingHull =
 					baked != nullptr && collider.Shape == scene::ShapeKind::Hull
 						? baked->FindHull(collider.Geometry)
 						: nullptr;
-
 				const ShapeInstance moving{from, collider.Extent, collider.Shape, movingHull, nullptr};
+				const core::AABB startBounds = ShapeReach(moving);
+				const ShapeInstance ended{
+					transform.Frame, collider.Extent, collider.Shape, movingHull, nullptr
+				};
+				const core::AABB endBounds = ShapeReach(ended);
+				const core::Vector3 low = startBounds.Minimum - from.Position;
+				const core::Vector3 high = startBounds.Maximum - from.Position;
+				const float radius = std::max(low.Magnitude(), high.Magnitude());
+				const float angularLinearSpeed = motion.Angular.Magnitude() * radius;
+				const float angularReach = angularLinearSpeed * delta;
+				const core::Vector3 margin{angularReach, angularReach, angularReach};
+				const core::AABB envelope = startBounds.Union(endBounds);
+				proxies[written] = spatial::Proxy{
+					static_cast<uint64_t>(written),
+					core::AABB{envelope.Minimum - margin, envelope.Maximum + margin},
+					collider.Layer,
+				};
+				records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
+				shapes.push_back(
+					PlacedCollider{moving, collider.Trigger, motion.Linear, motion.Angular, radius}
+				);
+				thresholds[written] = ThinnestHalfExtent(collider) * CONTINUOUS_MOTION_RATIO;
+				reaches[written] = (motion.Linear.Magnitude() + angularLinearSpeed) * delta;
+				angularLinearSpeeds[written] = angularLinearSpeed;
+				written++;
+			});
 
-				// **The earliest hit, with the entity id breaking a tie.** The
-				// grid walk's order is a function of the index rather than of
-				// the scene, so two surfaces reached at the same moment have to
-				// be separated by something the scene decides - otherwise a body
-				// wedged into a corner is clamped against whichever wall the walk
-				// happened to reach first, and that changes when anything else
-				// in the world is added.
-				float earliest = 1.0f;
-				bool clamped = false;
-				ecs::Entity against;
-
-				// The querying body's own record, built once outside the walk -
-				// the index filters on its mask and `PairAdmitted` is what
-				// applies the other half of the rule, exactly as `BroadPhase`
-				// does.
-				const ColliderRecord self{entity, collider.Layer, collider.Mask};
-
-				for (size_t at = 0; at < found.Written; at++) {
-					const auto which = static_cast<size_t>(candidates[at]);
-					const ColliderRecord &other = records[which];
-					if (other.Owner == entity || !PairAdmitted(self, other)) {
-						continue;
-					}
-
-					const PlacedCollider &fixed = shapes[which];
-					if (fixed.Trigger) {
-						// **A trigger is never swept against.** It reports and
-						// never pushes, so stopping a body at one would be a
-						// wall made of something that is not there.
-						continue;
-					}
-
-					const ConvexSweep hit = SweepConvex(moving, travelled, fixed.Shape);
-					if (!hit.Hit) {
-						continue;
-					}
-
-					if (!clamped || hit.Fraction < earliest ||
-						(hit.Fraction == earliest && other.Owner.Id < against.Id)) {
-						earliest = hit.Fraction;
-						against = other.Owner;
-						clamped = true;
-					}
-				}
-
-				if (!clamped) {
-					return;
-				}
-
-				// **Just past the moment of contact, not short of it** - see
-				// `CONTINUOUS_BITE`, which carries the argument. Expressed as a
-				// fraction of this body's own travel, so the same millimetre is
-				// the same millimetre however fast it was going, and never past
-				// where the integrator had already put it.
-				const float bite = CONTINUOUS_BITE / std::max(distance, 1e-6f);
-				const float stop = std::clamp(earliest + bite, 0.0f, 1.0f);
-				transform.Frame.Position = from.Position + travelled * stop;
-				swept++;
+		float widestReach = 0.0f;
+		float nextReach = 0.0f;
+		float narrowestThreshold = bodyCount == 0 ? 0.0f : thresholds[0];
+		bool staticSweep = false;
+		for (size_t body = 0; body < bodyCount; body++) {
+			if (reaches[body] > widestReach) {
+				nextReach = widestReach;
+				widestReach = reaches[body];
+			} else if (reaches[body] > nextReach) {
+				nextReach = reaches[body];
 			}
-		);
+			narrowestThreshold = std::min(narrowestThreshold, thresholds[body]);
+			staticSweep = staticSweep || reaches[body] > thresholds[body];
+		}
+		const bool dynamicSweep = bodyCount > 1 && widestReach + nextReach > narrowestThreshold;
+		const std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
+		const std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
+		staticSweep = staticSweep && !staticRecords.empty() && staticShapes.size() == staticRecords.size();
+		if (!staticSweep && !dynamicSweep) {
+			return;
+		}
+
+		spatial::HashGrid &movingIndex = PipelineInternals::ContinuousIndex(*world);
+		if (dynamicSweep) {
+			movingIndex.RebuildParallel(proxies, GRID_DISPATCHER);
+		}
+		const spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
+		std::vector<uint64_t> &candidates = PipelineInternals::CandidateBuffer(*world);
+		const size_t widest = std::max(bodyCount, staticRecords.size());
+		if (candidates.size() < widest) {
+			candidates.resize(widest);
+		}
+
+		std::vector<ContinuousImpactEvent> &events = PipelineInternals::ContinuousEvents(*world);
+		events.clear();
+		events.reserve(bodyCount);
+		uint64_t advanceFallbacks = 0;
+		uint64_t resweeps = 0;
+
+		const auto addEvent = [&](const ConvexSweep &hit,
+								  float fraction,
+								  size_t first,
+								  size_t second,
+								  bool dynamic,
+								  bool reswept = false) {
+			advanceFallbacks += hit.ConservativeFallback ? 1 : 0;
+			if (!hit.Hit) {
+				return;
+			}
+			const float bite = hit.ConservativeFallback
+								   ? 0.0f
+								   : CONTINUOUS_BITE / std::max(hit.ClosingSpeed * delta, CONTINUOUS_BITE);
+			events.push_back(
+				ContinuousImpactEvent{
+					fraction,
+					bite,
+					static_cast<uint32_t>(first),
+					static_cast<uint32_t>(second),
+					dynamic,
+					reswept,
+				}
+			);
+		};
+
+		{
+			ENGINE_PROFILE_CAT("physics.continuous.static-gather", core::ProfileCategory::Physics);
+			for (size_t first = 0; first < bodyCount; first++) {
+				const PlacedCollider &moving = shapes[first];
+				if (staticSweep && reaches[first] > thresholds[first]) {
+					const spatial::QueryResult found = spatial::OverlapBox(
+						staticIndex, proxies[first].Bounds, records[first].Mask, candidates
+					);
+					for (size_t at = 0; at < found.Written; at++) {
+						const size_t fixedIndex = static_cast<size_t>(candidates[at]);
+						const PlacedCollider &fixed = staticShapes[fixedIndex];
+						if (fixed.Trigger || !PairAdmitted(records[first], staticRecords[fixedIndex])) {
+							continue;
+						}
+						const ConvexSweep hit = SweepConvexMotion(
+							moving.Shape,
+							moving.LinearVelocity,
+							moving.AngularVelocity,
+							fixed.Shape,
+							core::Vector3::Zero,
+							core::Vector3::Zero,
+							delta
+						);
+						addEvent(hit, hit.Fraction, first, fixedIndex, false);
+					}
+				}
+			}
+		}
+
+		uint64_t dynamicCandidates = 0;
+		{
+			ENGINE_PROFILE_CAT("physics.continuous.dynamic-gather", core::ProfileCategory::Physics);
+			for (size_t first = 0; first < bodyCount; first++) {
+				if (!dynamicSweep || reaches[first] <= 0.0f) {
+					continue;
+				}
+				// Only bodies that move query. A still body never needs to: every
+				// pair it forms names a moving partner, and that partner's own
+				// query reports the pair - which is also what keeps a still lower
+				// id covered against a fast higher one, without walking every
+				// settled body in the scene to get there.
+				const PlacedCollider &moving = shapes[first];
+				const float angularReach = angularLinearSpeeds[first] * delta;
+				const core::Vector3 angularMargin{angularReach, angularReach, angularReach};
+				const core::AABB startBounds = ShapeReach(moving.Shape);
+				const spatial::QueryResult found = spatial::ShapeCast(
+					movingIndex,
+					core::AABB{startBounds.Minimum - angularMargin, startBounds.Maximum + angularMargin},
+					moving.LinearVelocity * delta,
+					records[first].Mask,
+					candidates
+				);
+				for (size_t at = 0; at < found.Written; at++) {
+					const size_t second = static_cast<size_t>(candidates[at]);
+					if (second == first) {
+						continue;
+					}
+					dynamicCandidates++;
+					// A lower body that moves reports this pair from its own query.
+					if (second < first && !(reaches[second] <= 0.0f)) {
+						continue;
+					}
+					if (moving.Trigger || shapes[second].Trigger ||
+						!PairAdmitted(records[first], records[second]) ||
+						world->RigidlyConnected(records[first].Owner, records[second].Owner)) {
+						continue;
+					}
+					// Canonical pair order, so the sweep below sees the same
+					// argument order whoever reported it.
+					const size_t low = first < second ? first : second;
+					const size_t high = first < second ? second : first;
+					const PlacedCollider &other = shapes[second];
+					const float relativeReach = ((moving.LinearVelocity - other.LinearVelocity).Magnitude() +
+												 angularLinearSpeeds[first] + angularLinearSpeeds[second]) *
+												delta;
+					if (relativeReach <= std::min(thresholds[first], thresholds[second])) {
+						continue;
+					}
+					const ConvexSweep hit = SweepConvexMotion(
+						shapes[low].Shape,
+						shapes[low].LinearVelocity,
+						shapes[low].AngularVelocity,
+						shapes[high].Shape,
+						shapes[high].LinearVelocity,
+						shapes[high].AngularVelocity,
+						delta
+					);
+					addEvent(hit, hit.Fraction, low, high, true);
+				}
+			}
+		}
+
+		const auto beforeEvent = [&](const ContinuousImpactEvent &first,
+									 const ContinuousImpactEvent &second) {
+			if (first.Fraction != second.Fraction) {
+				return first.Fraction < second.Fraction;
+			}
+			const uint64_t firstA = records[first.First].Owner.Id;
+			const uint64_t firstB =
+				first.Dynamic ? records[first.Second].Owner.Id : staticRecords[first.Second].Owner.Id;
+			const uint64_t secondA = records[second.First].Owner.Id;
+			const uint64_t secondB =
+				second.Dynamic ? records[second.Second].Owner.Id : staticRecords[second.Second].Owner.Id;
+			return std::pair{std::min(firstA, firstB), std::max(firstA, firstB)} <
+				   std::pair{std::min(secondA, secondB), std::max(secondA, secondB)};
+		};
+		const auto laterEvent = [&](const ContinuousImpactEvent &first, const ContinuousImpactEvent &second) {
+			return beforeEvent(second, first);
+		};
+		const size_t initialEvents = events.size();
+		std::make_heap(events.begin(), events.end(), laterEvent);
+		const auto scheduleAgainstFrozen = [&](size_t fixedIndex) {
+			if (!dynamicSweep || fractions[fixedIndex] >= 1.0f) {
+				return;
+			}
+			const spatial::QueryResult found = spatial::OverlapBox(
+				movingIndex, proxies[fixedIndex].Bounds, records[fixedIndex].Mask, candidates
+			);
+			for (size_t at = 0; at < found.Written; at++) {
+				const size_t movingIndexValue = static_cast<size_t>(candidates[at]);
+				if (movingIndexValue == fixedIndex || fractions[movingIndexValue] < 1.0f ||
+					!(reaches[movingIndexValue] > 0.0f) || shapes[movingIndexValue].Trigger ||
+					!PairAdmitted(records[movingIndexValue], records[fixedIndex]) ||
+					world->RigidlyConnected(records[movingIndexValue].Owner, records[fixedIndex].Owner)) {
+					continue;
+				}
+
+				const float start = fractions[fixedIndex];
+				const PlacedCollider &moving = shapes[movingIndexValue];
+				const PlacedCollider &fixed = shapes[fixedIndex];
+				const ShapeInstance movingAt{
+					Advanced(
+						moving.Shape.Frame, moving.LinearVelocity, moving.AngularVelocity, delta * start
+					),
+					moving.Shape.Extent,
+					moving.Shape.Shape,
+					moving.Shape.Hull,
+					moving.Shape.Mesh,
+				};
+				const ShapeInstance fixedAt{
+					Advanced(fixed.Shape.Frame, fixed.LinearVelocity, fixed.AngularVelocity, delta * start),
+					fixed.Shape.Extent,
+					fixed.Shape.Shape,
+					fixed.Shape.Hull,
+					fixed.Shape.Mesh,
+				};
+				const float remaining = delta * (1.0f - start);
+				const ConvexSweep hit = SweepConvexMotion(
+					movingAt,
+					moving.LinearVelocity,
+					moving.AngularVelocity,
+					fixedAt,
+					core::Vector3::Zero,
+					core::Vector3::Zero,
+					remaining
+				);
+				resweeps++;
+				const size_t oldSize = events.size();
+				addEvent(
+					hit, start + hit.Fraction * (1.0f - start), movingIndexValue, fixedIndex, true, true
+				);
+				if (events.size() != oldSize) {
+					std::push_heap(events.begin(), events.end(), laterEvent);
+				}
+			}
+		};
+
+		{
+			ENGINE_PROFILE_CAT("physics.continuous.events", core::ProfileCategory::Physics);
+			while (!events.empty()) {
+				std::pop_heap(events.begin(), events.end(), laterEvent);
+				const ContinuousImpactEvent event = events.back();
+				events.pop_back();
+
+				const size_t first = event.First;
+				if (!event.Dynamic) {
+					if (fractions[first] >= 1.0f) {
+						fractions[first] = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
+						scheduleAgainstFrozen(first);
+					}
+					continue;
+				}
+
+				const size_t second = event.Second;
+				const bool firstMoving = fractions[first] >= 1.0f;
+				const bool secondMoving = fractions[second] >= 1.0f;
+				if (!firstMoving && !secondMoving) {
+					continue;
+				}
+				if (firstMoving && secondMoving) {
+					const float stop = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
+					fractions[first] = stop;
+					fractions[second] = stop;
+					scheduleAgainstFrozen(first);
+					scheduleAgainstFrozen(second);
+					continue;
+				}
+
+				if (!event.Reswept) {
+					// A fraction transition always schedules a fresh event against every
+					// moving neighbour. This initial event was made from two moving paths
+					// and is now stale.
+					continue;
+				}
+				const size_t movingIndexValue = firstMoving ? first : second;
+				fractions[movingIndexValue] = std::clamp(event.Fraction + event.BiteFraction, 0.0f, 1.0f);
+				scheduleAgainstFrozen(movingIndexValue);
+			}
+		}
+		uint64_t swept = 0;
+		size_t body = 0;
+		store.Query<scene::Transform, const scene::Motion, const scene::Collider>()
+			.With<scene::Simulated>()
+			.Each([&](ecs::Entity entity,
+					  scene::Transform &transform,
+					  const scene::Motion &motion,
+					  const scene::Collider &) {
+				if (body < records.size() && records[body].Owner == entity && fractions[body] < 1.0f) {
+					transform.Frame = Advanced(
+						shapes[body].Shape.Frame, motion.Linear, motion.Angular, delta * fractions[body]
+					);
+					swept++;
+				}
+				body++;
+			});
 
 		PipelineInternals::SweptBodyCount(*world) += swept;
+		core::Metrics::Count("physics.continuous.advance-fallback", static_cast<double>(advanceFallbacks));
+		core::Metrics::Count("physics.continuous.dynamic-candidates", static_cast<double>(dynamicCandidates));
+		core::Metrics::Count("physics.continuous.initial-events", static_cast<double>(initialEvents));
+		core::Metrics::Count("physics.continuous.resweeps", static_cast<double>(resweeps));
+		core::Metrics::Count("physics.continuous.swept-bodies", static_cast<double>(swept));
 	}
 }

@@ -89,11 +89,16 @@ TEST_CASE("the instance shim is the only scriptable property door", "[script][in
 	REQUIRE(part);
 	const auto *canCollide = ScriptableProperty(store, part.Instance, "CanCollide");
 	REQUIRE(canCollide != nullptr);
+	const auto *canQuery = ScriptableProperty(store, part.Instance, "CanQuery");
+	REQUIRE(canQuery != nullptr);
 
 	const bool written = false;
 	REQUIRE(WriteInstanceProperty(store, part.Instance, *canCollide, &written, sizeof(written)));
 	bool read = true;
 	REQUIRE(ReadInstanceProperty(store, part.Instance, *canCollide, &read, sizeof(read)));
+	CHECK(read == written);
+	REQUIRE(WriteInstanceProperty(store, part.Instance, *canQuery, &written, sizeof(written)));
+	REQUIRE(ReadInstanceProperty(store, part.Instance, *canQuery, &read, sizeof(read)));
 	CHECK(read == written);
 
 	engine::script::ScriptClass();

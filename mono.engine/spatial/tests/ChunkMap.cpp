@@ -265,6 +265,27 @@ TEST_CASE("a suggested size cuts a flat scene into at least the wanted groups", 
 	CHECK(map.ChunkCount() >= 32);
 }
 
+TEST_CASE("chunk coordinates and the suggestion treat every axis symmetrically", "[chunkmap]") {
+	ChunkMap map{4.0f};
+	const Proxy proxies[] = {
+		At(1, 0.0f, 0.0f, 0.0f),
+		At(2, 4.0f, 0.0f, 0.0f),
+		At(3, 0.0f, 4.0f, 0.0f),
+		At(4, 0.0f, 0.0f, 4.0f),
+	};
+	map.Rebuild(proxies);
+
+	REQUIRE(map.ChunkOfProxy(0) != map.ChunkOfProxy(1));
+	REQUIRE(map.ChunkOfProxy(0) != map.ChunkOfProxy(2));
+	REQUIRE(map.ChunkOfProxy(0) != map.ChunkOfProxy(3));
+
+	const std::vector<Proxy> wideY = {
+		At(1, 0.0f, 0.0f, 0.0f),
+		At(2, 100.0f, 400.0f, 300.0f),
+	};
+	REQUIRE(SuggestChunkSize(wideY, 100) == 32.0f);
+}
+
 TEST_CASE("a suggested size is quantised so it stops moving", "[chunkmap]") {
 	// The hysteresis, and it is `SuggestCellSize`'s argument unchanged: a size
 	// computed exactly would differ every time a body was added and each
@@ -322,4 +343,18 @@ TEST_CASE("a centre that is not a number is left out of the extent", "[chunkmap]
 	ChunkMap map(size);
 	map.Rebuild(proxies);
 	CHECK(map.ProxyCount() == 3);
+}
+
+TEST_CASE("chunk map stats distinguish live rows from retained capacity", "[chunkmap]") {
+	ChunkMap map;
+	const std::vector<Proxy> proxies{At(0, 0.0f, 0.0f, 0.0f), At(1, 64.0f, 0.0f, 0.0f)};
+	map.Rebuild(proxies);
+	const engine::spatial::ChunkMapStats warm = map.Stats();
+	REQUIRE(warm.LiveBytes > 0);
+	REQUIRE(warm.RetainedBytes >= warm.LiveBytes);
+
+	map.Clear();
+	const engine::spatial::ChunkMapStats cleared = map.Stats();
+	CHECK(cleared.LiveBytes == 0);
+	CHECK(cleared.RetainedBytes == warm.RetainedBytes);
 }

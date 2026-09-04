@@ -10,13 +10,10 @@
 // That is the standing difference between this and `ConvexHull`, and it is why a
 // mesh collider is for static geometry. A dynamic body wants a hull.
 //
-// **No index over the triangles, deliberately.** The obvious thing to want here
-// is a grid or a tree so a query does not scan, and `spatial::HashGrid` at L6 is
-// exactly that structure - which is why this module sits underneath it. An index
-// is an acceleration decision with a measurement attached, and it belongs to the
-// consumer that has the measurement. What this offers instead is the exact
-// answer and a bound to reject against, which is the correct thing to be slow
-// at rather than the wrong thing to be fast at.
+// **One immutable local-space hierarchy per mesh.** Every placed instance shares
+// it, so build cost and storage follow geometry rather than collider count. The
+// hierarchy lives here because it indexes triangle data only and has no world,
+// layer, or physics policy.
 //
 // @tier L5 · shared
 // @since v0.17
@@ -49,6 +46,18 @@ namespace engine::collision {
 		//@}
 	};
 
+	struct TriangleBvhNode {
+		core::AABB Bounds;
+		uint32_t First = 0;
+		uint32_t Count = 0;
+		uint32_t Left = 0;
+		uint32_t Right = 0;
+
+		bool Leaf() const {
+			return Count != 0;
+		}
+	};
+
 	// A triangle mesh in its own object space.
 	//
 	// @since v0.17
@@ -61,13 +70,16 @@ namespace engine::collision {
 
 		// Each triangle's own bound, parallel to the triangle list.
 		//
-		// **Stored rather than derived per query, and it is the whole reason a
-		// scan is affordable.** Rejecting a triangle against a query box is
-		// three comparisons against six floats that are already in the cache
-		// line the scan is walking; deriving the bound first is three vertex
-		// lookups into an array the scan is not walking in order. Measured on
-		// terrain that is most of the difference between a scan and an index.
+		// **Stored rather than derived per query.** A reached leaf rejects its
+		// triangles against six floats already in order; deriving each bound there
+		// would add three scattered vertex lookups to the narrowest part of the
+		// query.
 		std::vector<core::AABB> TriangleBounds;
+
+		// Median-split hierarchy and its leaf triangle order. Leaves hold at most
+		// four triangles, while public triangle ids remain the original ids.
+		std::vector<TriangleBvhNode> Hierarchy;
+		std::vector<uint32_t> HierarchyTriangles;
 
 		// The object-space bound of the whole mesh, derived by `BuildTriangleMesh`.
 		core::AABB Bounds;
@@ -113,10 +125,8 @@ namespace engine::collision {
 
 	// Every triangle whose own bound overlaps `box`, by index.
 	//
-	// **A scan, and the header says why there is no index here.** It is exact
-	// and it is bounded by the triangle count; a caller for whom that is too
-	// slow builds an index over `TriangleBounds` in its own layer, which is
-	// what `physics` does.
+	// Traverses the mesh's immutable local hierarchy. Results are sorted by
+	// original triangle id, independent of hierarchy shape.
 	//
 	// @param mesh The mesh, in the same space as `box`.
 	// @param box  The query volume, in the mesh's own space.

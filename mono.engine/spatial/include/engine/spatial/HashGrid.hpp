@@ -1,13 +1,13 @@
 #pragma once
 
-// A uniform hash grid over boxes, rebuilt from scratch every time.
+// A fixed hierarchy of uniform hash grids over boxes, rebuilt from scratch.
 //
 // **The grid is rebuilt, never edited.** There is no `Insert`, no `Move` and no
 // `Remove`, and adding one would not be an extension - it would be a different
 // data structure. This one is count-then-fill: one pass to measure, a prefix
-// sum, one pass to place every proxy into a single flat array, with no per-cell
-// vector and no allocation once the arrays have reached their size. An editable
-// grid needs a per-cell list with holes in it, which allocates, fragments, and
+// sum, one pass to place every proxy into one flat array at its exclusive level,
+// with no per-cell vector and no allocation once the arrays have reached their
+// size. An editable grid needs a per-cell list with holes in it, which allocates, fragments, and
 // iterates in an order that depends on the history of the edits rather than on
 // the contents. Both designs were weighed when this was chosen; the
 // rebuild-only grid is the one written as a standing rule, so this is that one.
@@ -29,6 +29,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -60,16 +61,52 @@ namespace engine::spatial {
 		LayerMask Layers;
 	};
 
-	// A uniform grid of cells, hashed into a fixed number of buckets.
+	// Logical storage owned by one grid. Live bytes describe the current index;
+	// retained bytes describe its reusable high-water capacity.
+	// @since v0.22
+	struct HashGridStats {
+		size_t LiveBytes = 0;
+		size_t RetainedBytes = 0;
+	};
+
+	// Fixed uniform grids of cells, each hashed into its own fixed bucket table.
 	//
 	// Build one per set of proxies that move together, then query it. It owns the
 	// proxies because every candidate a bucket produces is re-tested against its
-	// own box and the test needs the box. `Rebuild` copies a ready span;
+	// own box and the test needs the box. A proxy belongs to the finest level
+	// where it fits the entry bound. Coordinate clamping keeps non-finite bounds
+	// in bounded cells. Only inverted, hierarchy-exhausting, or density-rejected
+	// ranges use the exact residual list instead. `Rebuild` copies a ready span;
 	// `RebuildGenerated` lets a gather write straight into that owned storage.
 	//
 	// @since v0.4
 	class HashGrid {
 	  public:
+		// A caller-owned blocking range dispatcher.
+		//
+		// Spatial deliberately knows nothing about the job system. The caller may
+		// run this inline, hand it to `parallel::Jobs`, or use a test dispatcher
+		// that permutes ranges. `Run` must not return until every body range has
+		// completed. The pointers are non-owning and valid only for that call,
+		// which keeps the adapter smaller than a nested `std::function` and makes
+		// the fork-join contract explicit at this module boundary.
+		// @since v0.22
+		struct RangeDispatcher {
+			using Body = void (*)(void *bodyContext, size_t begin, size_t end);
+			using Dispatch = void (*)(void *context, size_t count, Body body, void *bodyContext);
+
+			void *Context = nullptr;
+			Dispatch Run = nullptr;
+		};
+
+		// The smallest ordinary grid rebuild where the retained radix workspace
+		// and a blocking range dispatcher are considered. Pinned release samples
+		// put 4096 through 16000 at serial parity or worse, while 32000 was 31%
+		// faster and 64000 was 46% faster. Smaller rebuilds keep the serial path,
+		// even when a dispatcher is supplied.
+		// @since v0.22
+		static constexpr size_t PARALLEL_MINIMUM_PROXIES = 32000;
+
 		// Cell edge length, in metres.
 		//
 		// **Measured, in the `bench` preset**, over 4000 colliders whose median
@@ -117,11 +154,28 @@ namespace engine::spatial {
 		// A baseplate two kilometres across covers a quarter of a million cells
 		// at the default spacing, and would cost a quarter of a million entries
 		// and as many loop iterations every tick, for one object. Past this cap
-		// a proxy goes on a short list that every query examines directly,
-		// which is bounded, exact, and cheaper than either alternative. It is
-		// also what keeps an infinite or NaN box from asking for an unbounded
-		// allocation.
+		// a finite proxy promotes through the fixed hierarchy until it fits. The
+		// coordinate clamp bounds every span before it is measured, so non-finite
+		// input remains in bounded cells. Only inverted, hierarchy-exhausting, or
+		// density-rejected ranges join the exact residual list.
 		static constexpr size_t MAXIMUM_CELLS_PER_PROXY = 512;
+		// Promoted proxies need to be materially cheaper than the base cap. The
+		// hierarchy benchmark remeasures this bound against distributed terrain.
+		static constexpr size_t MAXIMUM_CELLS_PER_PROMOTED_PROXY = 16;
+
+		// Oversized finite boxes promote through five fixed grids, each eight times
+		// wider than the last. The fixed shape keeps rebuild order and retained
+		// storage independent of scene history. A coarse level whose busiest bucket
+		// cannot separate candidates is rejected to the exact residual list.
+		//
+		// The valid CPU-0 bench comparison used five interleaved 15-sample pairs.
+		// Normal rebuild changed +0.97%, overlap +2.86%, and short ShapeCast
+		// -3.57%. The distributed rebuild plus 4000 local overlaps pipeline improved
+		// -96.34%; coarse ray and ShapeCast improved -91.90% and -60.30%. Identical
+		// oversized rebuild was +255.0% and grow/shrink was +71.10%, admitted costs
+		// when the hierarchy cannot prune or retained storage must be reconstructed.
+		static constexpr size_t HIERARCHY_LEVEL_COUNT = 5;
+		static constexpr float HIERARCHY_SCALE = 8.0f;
 
 		// Constructs an empty grid.
 		//
@@ -145,6 +199,18 @@ namespace engine::spatial {
 		// @param proxies Everything the index should hold, in any order.
 		void Rebuild(std::span<const Proxy> proxies);
 
+		// Replaces the contents through deterministic parallel classification and
+		// stable bucket radix passes when the scene is large enough for it to pay.
+		//
+		// The result is byte-for-byte equivalent to `Rebuild`: task order cannot
+		// change a bucket's proxy or cell order. A hierarchy or scratch-cap route
+		// that cannot use several logical shards rebuilds serially instead.
+		//
+		// @param proxies    Everything the index should hold, in any order.
+		// @param dispatcher Blocking range execution supplied by the caller.
+		// @since v0.22
+		void RebuildParallel(std::span<const Proxy> proxies, const RangeDispatcher &dispatcher);
+
 		// Rebuilds from proxies written straight into the grid's owned storage.
 		//
 		// This is for a caller that is already gathering rows and would otherwise
@@ -158,6 +224,18 @@ namespace engine::spatial {
 		// @since v0.22
 		template <class Fill>
 		void RebuildGenerated(size_t proxyCount, Fill &&fill, bool suggestCellSize = false);
+
+		// Rebuilds generated proxies through the deterministic parallel route.
+		//
+		// @param proxyCount      How many proxies `fill` writes.
+		// @param fill            Writes every proxy in deterministic order.
+		// @param dispatcher      Blocking range execution supplied by the caller.
+		// @param suggestCellSize Whether to size the grid from those proxies.
+		// @since v0.22
+		template <class Fill>
+		void RebuildGeneratedParallel(
+			size_t proxyCount, Fill &&fill, const RangeDispatcher &dispatcher, bool suggestCellSize = false
+		);
 
 		// Empties the grid, keeping every allocation for the next rebuild.
 		void Clear();
@@ -189,6 +267,10 @@ namespace engine::spatial {
 			return Proxies.size();
 		}
 
+		// Logical storage owned by this grid.
+		// @since v0.22
+		HashGridStats Stats() const;
+
 	  private:
 		// The cells one proxy covers, inclusive at both ends.
 		struct CellRange {
@@ -198,6 +280,7 @@ namespace engine::spatial {
 			int32_t MaximumX = 0;
 			int32_t MaximumY = 0;
 			int32_t MaximumZ = 0;
+			uint8_t Level = 0;
 		};
 
 		// One proxy's membership of one cell.
@@ -215,6 +298,13 @@ namespace engine::spatial {
 			uint32_t ProxyIndex = 0;
 		};
 
+		struct LevelStorage {
+			float Spacing = DEFAULT_CELL_SIZE;
+			float InverseSpacing = 1.0f / DEFAULT_CELL_SIZE;
+			std::vector<uint32_t> BucketStart;
+			std::vector<Entry> Entries;
+		};
+
 		float Spacing = DEFAULT_CELL_SIZE;
 		float InverseSpacing = 1.0f / DEFAULT_CELL_SIZE;
 
@@ -226,11 +316,33 @@ namespace engine::spatial {
 		std::vector<uint32_t> BucketStart;
 		std::vector<Entry> Entries;
 
-		// Proxies too large for cells, by index into `Proxies`. Every query
-		// tests all of them.
+		// Base storage stays separate because it is the ordinary scene fast path.
+		// A proxy belongs to exactly one level, and these coarse arrays retain the
+		// same count-prefix-fill representation without per-cell allocation.
+		std::array<LevelStorage, HIERARCHY_LEVEL_COUNT - 1> CoarseLevels;
+		bool HasHierarchy = false;
+		bool PublishedHierarchy = false;
+
+		// Inverted, hierarchy-exhausting, or density-rejected coarse proxies, by
+		// index into `Proxies`. Every query tests all of them exactly once.
 		std::vector<uint32_t> Oversized;
 
+		// The radix path retains one temporary entry array, two key arrays, and
+		// 1024 counters per logical shard. The cap is checked against retained
+		// capacity before use, so a large grid falls back rather than keeping an
+		// unbounded rebuild workspace.
+		static constexpr size_t MAXIMUM_PARALLEL_SHARDS = 16;
+		std::vector<uint32_t> ParallelBucketScratch;
+		std::vector<Entry> ParallelEntryScratch;
+		std::vector<uint32_t> ParallelKeys;
+		std::vector<uint32_t> ParallelKeyScratch;
+		std::array<size_t, MAXIMUM_PARALLEL_SHARDS> ParallelShardEntries{};
+		std::array<size_t, MAXIMUM_PARALLEL_SHARDS> ParallelShardEntryStarts{};
+		std::array<uint8_t, MAXIMUM_PARALLEL_SHARDS> ParallelShardBaseOnly{};
+		std::array<uint16_t, 1024> ParallelHighBins{};
+
 		void BuildIndex();
+		void BuildIndexParallel(const RangeDispatcher &dispatcher);
 
 		// The walk, the tests and the benchmark all read the arrays above, and
 		// not one of them is another module. Publishing the storage to reach it
@@ -288,5 +400,23 @@ namespace engine::spatial {
 		}
 
 		BuildIndex();
+	}
+
+	template <class Fill>
+	void HashGrid::RebuildGeneratedParallel(
+		size_t proxyCount, Fill &&fill, const RangeDispatcher &dispatcher, bool suggestCellSize
+	) {
+		Proxies.resize(proxyCount);
+		std::forward<Fill>(fill)(std::span<Proxy>(Proxies));
+
+		if (suggestCellSize) {
+			const float suggested = SuggestCellSize(Proxies);
+			if (suggested != Spacing) {
+				Spacing = suggested;
+				InverseSpacing = 1.0f / suggested;
+			}
+		}
+
+		BuildIndexParallel(dispatcher);
 	}
 }

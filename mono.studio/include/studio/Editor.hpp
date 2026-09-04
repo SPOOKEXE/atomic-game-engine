@@ -667,6 +667,12 @@ namespace studio {
 		//
 		// @since v0.14
 		CodeEdit Edit;
+
+		// The last non-executing Luau check for this document. It remains with the
+		// tab while another document is in front, rather than becoming output for
+		// whichever script happens to be selected next.
+		std::string Diagnostics;
+		bool Checked = false;
 	};
 
 	// What the Find panel was asked for.
@@ -2884,6 +2890,17 @@ namespace studio {
 		// number is one the VM was counting anyway.
 		void DrawScriptProfile();
 
+		// Per-source aggregation of sampled function and line leaves. Opened from
+		// the Script Profiler rather than registered as another unrelated tool.
+		void DrawScriptFolds();
+
+		// Native calls made by scripts, as a frame-graph flame view.
+		//
+		// The data is language-neutral: adapters submit the Script category and
+		// retain their own prefix, so adding JavaScript or C# does not need a
+		// second profiler window.
+		void DrawScripting();
+
 		// What has changed since the file on disk was written.
 		void DrawDiff();
 
@@ -3951,6 +3968,10 @@ namespace studio {
 		//@{
 		std::vector<OpenScript> Scripts;
 		int ActiveScript = -1;
+		// Frames left to bring an explicitly opened script editor to the front.
+		// The count survives a dockspace rebuild, just like the worlds panel's
+		// focus request.
+		int FocusScripts = 0;
 		//@}
 
 		// The completion popup: whether it is up, which row is chosen, and what
@@ -5448,7 +5469,7 @@ namespace studio {
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
 		bool ShowComponents = true;
-		bool ShowScripts = true;
+		bool ShowScripts = false;
 		bool ShowDatasets = false;
 		bool ShowDataStores = false;
 		bool ShowCdn = false;
@@ -6019,6 +6040,23 @@ namespace studio {
 		// Which script is spending the tick. See `DrawScriptProfile`.
 		bool ShowScriptProfile = false;
 
+		// Narrows the Script Profiler's top-level script list. This is editor
+		// state, not runtime profiling state, so stopping a run leaves a useful
+		// query ready for the next one.
+		std::array<char, 128> ScriptProfileFilter{};
+
+		// Whether source samples are shown as their call hierarchy rather than a
+		// sortable flat table, and which source the folds window narrows to.
+		bool ScriptProfileHierarchy = false;
+		bool ShowScriptFolds = false;
+		std::array<char, 256> ScriptProfileSource{};
+
+		// Which native bindings a script called in the last completed frame.
+		bool ShowScripting = false;
+
+		// Narrows the native binding rows in the Scripting frame graph.
+		std::array<char, 128> ScriptingFilter{};
+
 		// What has changed since the file was written. See `DrawDiff`.
 		bool ShowDiff = false;
 
@@ -6185,6 +6223,12 @@ namespace studio {
 			std::vector<DiagnosticSpan> DisplaySpans;
 			std::vector<uint32_t> Rows;
 			uint32_t DisplayRows = 0;
+			// Re-rooted copy drawn after a flame-graph bar is selected.
+			std::vector<DiagnosticSpan> FocusedSpans;
+			std::vector<uint32_t> FocusedRows;
+			std::vector<uint32_t> FocusedSourceIndices;
+			uint32_t FocusRoot = engine::core::FrameGraph::NO_PARENT;
+			uint32_t FocusedDisplayRows = 0;
 			bool DisplayDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
@@ -6258,6 +6302,14 @@ namespace studio {
 		//
 		// @since v0.18
 		struct HeapView {
+			enum class SortColumn : uint8_t {
+				Tag,
+				Live,
+				Self,
+				Blocks,
+				Growth,
+			};
+
 			// The tag tree flattened for drawing, heaviest child first.
 			std::vector<engine::core::HeapTreeRow> Rows;
 
@@ -6282,6 +6334,8 @@ namespace studio {
 
 			// Seconds the plot and the growth figures cover.
 			double HistorySeconds = 0.0;
+			SortColumn Sort = SortColumn::Live;
+			bool SortAscending = false;
 		};
 
 		// What the heap panel is currently drawing.

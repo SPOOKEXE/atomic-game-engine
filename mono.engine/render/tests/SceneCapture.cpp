@@ -22,7 +22,6 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
-
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -254,8 +253,7 @@ TEST_CASE("headless Vulkan particle pools grow to the host ceiling and release",
 	REQUIRE(part != ecs::NULL_ENTITY);
 
 	const auto addEmitter = [&store, part]() {
-		const ecs::Entity emitter =
-			store.CreateInstance(ecs::Classes::Find(core::Name("ParticleEmitter")));
+		const ecs::Entity emitter = store.CreateInstance(ecs::Classes::Find(core::Name("ParticleEmitter")));
 		REQUIRE(emitter != ecs::NULL_ENTITY);
 		REQUIRE(store.SetParent(emitter, part));
 		auto *settings = store.GetMutable<effects::ParticleEmitter>(emitter);

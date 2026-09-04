@@ -128,6 +128,69 @@ bench *args:
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
 
+# The Luau boundary rows, including the complete async compute lifecycle. Keep
+# this explicit because a binding benchmark is useful while working on the VM
+# without running every benchmark in the repository.
+script-binding-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scriptluau
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
+
+# The spatial hierarchy rows, including promoted and mixed scenes. Kept
+# separate because an index change needs its own release measurement cycle.
+spatial-hashgrid-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_spatial
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.hashgrid --all --samples {{samples}}
+
+# Serial and deterministic parallel grid rebuild rows, plus the physics
+# broadphase that owns the Jobs adapter. Output stays on the terminal so a
+# release comparison is attributable to the run that produced it.
+parallel-grid-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_spatial bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.hashgrid --all --samples {{samples}}
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.broadphase --all --samples {{samples}}
+
+# Constraint graph scheduling rows: independent active stacks, sparse sleeping
+# worlds, bridge churn, and the connected shapes that must keep their fallback.
+persistent-island-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.solver --all --samples {{samples}}
+
+# Warm persistent-contact refresh beside a forced exact rebuild of the same
+# stable scene. Output remains on the terminal and no benchmark file is made.
+persistent-manifold-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.narrowphase --all --samples {{samples}}
+
+# Separated closing pairs through speculative generation, with and without the
+# broad-phase sync and query. Output remains on the terminal.
+speculative-contact-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.speculative-contacts --all --samples {{samples}}
+
+# Local triangle bounds scan against the immutable per-mesh hierarchy.
+triangle-bvh-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_collision
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.collision.bench.triangle-bvh --all --samples {{samples}}
+
+# Rotational and dynamic-pair time-of-impact walks. Output remains on the
+# terminal and no benchmark file is made.
+continuous-collision-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.continuous --all --samples {{samples}}
+
+dynamic-bvh-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_spatial
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.spatial.bench.dynamicbvh --all --samples {{samples}}
+
 # Make what was just measured the numbers everything is compared against.
 #
 # Do this on a quiet machine and say so in the commit. A baseline taken while
@@ -1247,6 +1310,12 @@ docs-check: (build "docgen") docs
         exit 1
     fi
     cmake --build --preset {{preset}} --target docs-check
+
+# Dump the ECS schema as TOML.
+#
+# Outputs docs/schema.toml and docs/schema-data.toml.
+schema-dump: (build "schemadump")
+    ./{{build}}/tools/schemadump --schema docs/schema.toml --data docs/schema-data.toml
 
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule

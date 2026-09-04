@@ -51,7 +51,7 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v18";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v19";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -60,7 +60,6 @@ namespace studio {
 		constexpr const char *COMPONENTS = "Components";
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *INSTANCES = "Live Instances";
-		constexpr const char *SCRIPTS = "Script Editor";
 		constexpr const char *OUTPUT = "Output";
 		// **The title reads "Preferences" and the id stays "Studio Settings".**
 		// imgui derives a window's id from its label, and the saved layout keys
@@ -90,7 +89,6 @@ namespace studio {
 			{INSTANCES, PluginDock::Left},
 			{PROPERTIES, PluginDock::Right},
 			{COMPONENTS, PluginDock::Right},
-			{SCRIPTS, PluginDock::Bottom},
 			{OUTPUT, PluginDock::Bottom},
 			{"Command Bar", PluginDock::Bottom},
 			{SETTINGS, PluginDock::Right},
@@ -114,7 +112,7 @@ namespace studio {
 			{"CDN", PluginDock::Right},
 			{"Roblox Import", PluginDock::Bottom},
 			{"Bus", PluginDock::Bottom},
-			{"Script Profile", PluginDock::Bottom},
+			{"Script Profiler", PluginDock::Bottom},
 			{"Changes", PluginDock::Bottom},
 			{"Debugger", PluginDock::Bottom},
 			{"Call Stack", PluginDock::Bottom},
@@ -463,9 +461,13 @@ namespace studio {
 			// Default Studio contributes native panels through this same plugin
 			// path. Installed widgets retain their per-widget script colours.
 			DrawPluginWidgets();
+			// Script documents are independent windows rather than one registered
+			// panel, so they draw outside the plugin panel registry.
+			Skinned("Scripts", [&] { DrawScripts(); });
 
 			Skinned("Bus", [&] { DrawBus(); });
-			Skinned("Script Profile", [&] { DrawScriptProfile(); });
+			Skinned("Script Profiler", [&] { DrawScriptProfile(); });
+			Skinned("Scripting", [&] { DrawScripting(); });
 			Skinned("Changes", [&] { DrawDiff(); });
 			Skinned("Debugger", [&] { DrawDebugger(); });
 			Skinned("Call Stack", [&] { DrawCallStack(); });
@@ -1342,9 +1344,9 @@ namespace studio {
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
 		ImGui::SeparatorText("Script");
-		ImGui::MenuItem("Script Editor", nullptr, &ShowScripts);
 		ImGui::MenuItem("Command Bar", nullptr, &ShowCommandBar);
-		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
+		ImGui::MenuItem("Script Profiler", nullptr, &ShowScriptProfile);
+		ImGui::MenuItem("Scripting", nullptr, &ShowScripting);
 		ImGui::MenuItem("Call Stack", nullptr, &ShowCallStack);
 		ImGui::MenuItem("Breakpoints", nullptr, &ShowBreakpointsWatch);
 		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
@@ -1426,7 +1428,7 @@ namespace studio {
 			ShowRenderPipeline = ShowPipelineProfile = open;
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
-			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowDiff = ShowDebugger = open;
+			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
 			ShowStatistics = ShowFrameGraph = ShowHeap = ShowCallStack = ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
 			for (PluginPresentation *plugin : Plugins) {
@@ -1660,16 +1662,6 @@ namespace studio {
 				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
 			}
 
-			// **Every shipped scene, read off the staging directory rather than
-			// listed here.** Ten of them are named by hand in
-			// `RecreateDefaultWorlds` because a new place opens with them; the
-			// rest - the stress scenes, the portal probes, the mirror
-			// measurements - existed only behind `client --script` and could not
-			// be opened in the editor at all. A hardcoded menu would be a second
-			// list to keep in step with the directory, so
-			// `examples::ExampleScenes` walks it.
-			DrawExampleSceneMenu();
-
 			ImGui::Separator();
 			ImGui::TextDisabled("scenes");
 
@@ -1713,6 +1705,8 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenu("Demo")) {
+			DrawExampleSceneMenu();
+			ImGui::Separator();
 			ImGui::MenuItem("Node Graph", nullptr, &ShowNodeDemo);
 			ImGui::EndMenu();
 		}
@@ -1970,10 +1964,20 @@ namespace studio {
 			const ImGuiWindow *window = ImGui::FindWindowByName(title);
 			return window != nullptr && (window == focused || window == context->NavWindow);
 		};
+		const auto isScriptWindow = [&] {
+			for (const OpenScript &tab : Scripts) {
+				const std::string id =
+					"###" + std::to_string(tab.World.Index) + "-" + std::to_string(tab.Instance.Id);
+				if (isWindow(id.c_str())) {
+					return true;
+				}
+			}
+			return false;
+		};
 
 		if (isWindow(EXPLORER) || isWindow(WORLDS)) {
 			Keybinds::SetScope(Scope::Tree);
-		} else if (isWindow(SCRIPTS)) {
+		} else if (isScriptWindow()) {
 			Keybinds::SetScope(Scope::Script);
 		} else {
 			Keybinds::SetScope(Scope::Viewport);

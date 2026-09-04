@@ -717,6 +717,25 @@ namespace studio {
 			}
 		}
 
+		if (visible("Script Update Rate")) {
+			row("Script Update Rate");
+			double rate = settings.ScriptTickRate;
+			const double minimum = 0.0;
+			const double maximum = 240.0;
+			if (ImGui::SliderScalar("##v", ImGuiDataType_Double, &rate, &minimum, &maximum, "%.1f Hz")) {
+				settings.ScriptTickRate = std::max(rate, 0.0);
+				edited = true;
+			}
+			ImGui::PopID();
+
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Script updates per second. 0 follows the world tick rate.\n"
+					"Lower it for authored behaviour that does not need every simulation tick."
+				);
+			}
+		}
+
 		if (visible("Replication Tick Rate")) {
 			row("Replication Tick Rate");
 			double rate = settings.ReplicationTickRate;

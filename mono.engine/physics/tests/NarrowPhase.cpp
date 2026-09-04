@@ -49,6 +49,7 @@ using engine::physics::ContactBetween;
 using engine::physics::ContactManifold;
 using engine::physics::ContactSolution;
 using engine::physics::CylinderCylinder;
+using engine::physics::NARROW_GRAIN;
 using engine::physics::NarrowPhase;
 using engine::physics::PhysicsWorld;
 using engine::physics::PipelineInternals;
@@ -126,6 +127,16 @@ namespace {
 		SyncBroadphase(store);
 		BroadPhase(store);
 		NarrowPhase(store);
+	}
+
+	engine::physics::PersistentContactBatchStats PersistentStats(PhysicsWorld &world) {
+		engine::physics::PersistentContactBatchStats total;
+		for (const auto &batch : PipelineInternals::PersistentManifoldBatchStatsOf(world)) {
+			total.Reused += batch.Reused;
+			total.Rebuilt += batch.Rebuilt;
+			total.Rejected += batch.Rejected;
+		}
+		return total;
 	}
 }
 
@@ -459,6 +470,10 @@ TEST_CASE("the narrow phase names its bodies the way the pair did", "[physics][n
 
 	// From A toward B, which is from the sphere toward the box: +X.
 	CheckNormal(manifolds[0].Normal, Vector3::XAxis);
+	// This analytic pair is cheaper to rebuild than to refresh and retain.
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	CHECK(PipelineInternals::PersistentManifolds(world).empty());
+	CHECK(PipelineInternals::PersistentCandidates(world).empty());
 }
 
 TEST_CASE("a candidate pair that does not really touch produces no manifold", "[physics][narrowphase]") {
@@ -490,6 +505,132 @@ TEST_CASE("a trigger produces a manifold marked as one", "[physics][narrowphase]
 	const auto manifolds = store.Resource<PhysicsWorld>()->Manifolds();
 	REQUIRE(manifolds.size() == 1);
 	CHECK(manifolds[0].Trigger);
+	CHECK(PipelineInternals::PersistentManifolds(*store.ResourceMutable<PhysicsWorld>()).empty());
+}
+
+TEST_CASE("persistent manifolds refresh local anchors under common motion", "[physics][narrowphase]") {
+	Store store("narrowphase.persistent-refresh");
+	PreparePhysicsWorld(store, 1.0f);
+
+	const Collider box = Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f});
+	const Entity first = Place(store, Vector3::Zero, box, true);
+	const Entity second = Place(store, Vector3{0.9f, 0.0f, 0.0f}, box, true);
+	Step(store);
+
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(PipelineInternals::PersistentCandidates(world).size() == 1);
+	CHECK(PersistentStats(world).Rebuilt == 0);
+	const Vector3 admissionShift{0.02f, 0.01f, -0.01f};
+	store.Set<Transform>(first, Transform{CFrame{admissionShift}});
+	store.Set<Transform>(second, Transform{CFrame{Vector3{0.9f, 0.0f, 0.0f} + admissionShift}});
+	Step(store);
+	REQUIRE(PipelineInternals::PersistentManifolds(world).size() == 1);
+	CHECK(PersistentStats(world).Rebuilt == 1);
+	const ContactManifold before = world.Manifolds()[0];
+
+	const Vector3 shift{0.01f, -0.02f, 0.015f};
+	store.Set<Transform>(first, Transform{CFrame{admissionShift + shift}});
+	store.Set<Transform>(second, Transform{CFrame{Vector3{0.9f, 0.0f, 0.0f} + admissionShift + shift}});
+	Step(store);
+
+	const auto stats = PersistentStats(world);
+	CHECK(stats.Reused == 1);
+	CHECK(stats.Rebuilt == 0);
+	CHECK(stats.Rejected == 0);
+	REQUIRE(world.Manifolds().size() == 1);
+	const ContactManifold &after = world.Manifolds()[0];
+	CHECK(after.PointCount == before.PointCount);
+	for (size_t index = 0; index < after.PointCount; index++) {
+		CHECK(after.Points[index].Feature == before.Points[index].Feature);
+		CHECK(after.Points[index].Penetration == Approx(before.Points[index].Penetration).margin(1e-5));
+		CHECK((after.Points[index].Position - before.Points[index].Position).FuzzyEq(shift, 1e-5f));
+	}
+
+	const Vector3 firstPosition = admissionShift + shift;
+	const Vector3 secondPosition = Vector3{0.9f, 0.0f, 0.0f} + firstPosition + Vector3{-0.00005f, 0.0f, 0.0f};
+	store.Set<Transform>(second, Transform{CFrame{secondPosition}});
+	const ContactSolution exact = ContactBetween(
+		Box(firstPosition, Vector3{0.5f, 0.5f, 0.5f}), Box(secondPosition, Vector3{0.5f, 0.5f, 0.5f})
+	);
+	Step(store);
+
+	CHECK(PersistentStats(world).Reused == 1);
+	REQUIRE(world.Manifolds().size() == 1);
+	REQUIRE(world.Manifolds()[0].PointCount == exact.PointCount);
+	for (size_t index = 0; index < exact.PointCount; index++) {
+		CHECK(
+			world.Manifolds()[0].Points[index].Penetration == Approx(exact.Penetrations[index]).margin(1e-5)
+		);
+	}
+}
+
+TEST_CASE("persistent manifolds reject drift before trusting old geometry", "[physics][narrowphase]") {
+	Store store("narrowphase.persistent-reject");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Collider cylinder = Shaped(ShapeKind::Cylinder, Vector3{0.5f, 0.5f, 0.0f});
+	Place(store, Vector3::Zero, cylinder, true);
+	const Entity second = Place(store, Vector3{0.9f, 0.0f, 0.0f}, cylinder, true);
+	Step(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	Step(store);
+	REQUIRE(PipelineInternals::PersistentManifolds(world).size() == 1);
+
+	store.Set<Transform>(second, Transform{CFrame{Vector3{0.9f, 0.0f, 0.9f}}});
+	Step(store);
+
+	const auto stats = PersistentStats(world);
+	CHECK(stats.Reused == 0);
+	CHECK(stats.Rejected == 1);
+	CHECK(stats.Rebuilt == 0);
+	CHECK(world.Pairs().size() == 1);
+	CHECK(world.Manifolds().empty());
+	CHECK(PipelineInternals::PersistentManifolds(world).empty());
+}
+
+TEST_CASE(
+	"persistent manifold keys reject changed frames geometry and generations", "[physics][narrowphase]"
+) {
+	Store store("narrowphase.persistent-identity");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Collider box = Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f});
+	Place(store, Vector3::Zero, box, true);
+	Entity second = Place(store, Vector3{0.9f, 0.0f, 0.0f}, box, true);
+	Step(store);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	Step(store);
+	REQUIRE(PipelineInternals::PersistentManifolds(world).size() == 1);
+
+	store.Set<Transform>(
+		second, Transform{CFrame{Vector3{0.9f, 0.0f, 0.0f}, CFrame::Angles(0.0f, 0.2f, 0.0f).Rotation()}}
+	);
+	Step(store);
+	CHECK(PersistentStats(world).Rejected == 1);
+	CHECK(PersistentStats(world).Rebuilt == 0);
+	REQUIRE(world.Manifolds().size() == 1);
+	CHECK(PipelineInternals::PersistentManifolds(world).empty());
+	REQUIRE(PipelineInternals::PersistentCandidates(world).size() == 1);
+	Step(store);
+	CHECK(PersistentStats(world).Rebuilt == 1);
+	REQUIRE(PipelineInternals::PersistentManifolds(world).size() == 1);
+
+	store.Set<Collider>(second, Shaped(ShapeKind::Cylinder, Vector3{0.6f, 0.5f, 0.0f}));
+	Step(store);
+	CHECK(PersistentStats(world).Rejected == 1);
+	CHECK(PersistentStats(world).Rebuilt == 0);
+	REQUIRE(world.Manifolds().size() == 1);
+
+	const uint64_t oldId = second.Id;
+	store.Destroy(second);
+	second = Place(store, Vector3{0.9f, 0.0f, 0.0f}, box, true);
+	REQUIRE(second.Id != oldId);
+	Step(store);
+	CHECK(PersistentStats(world).Reused == 0);
+	CHECK(PersistentStats(world).Rejected == 0);
+	CHECK(PersistentStats(world).Rebuilt == 0);
+	REQUIRE(world.Manifolds().size() == 1);
+	CHECK(world.Manifolds()[0].B == second);
 }
 
 TEST_CASE("manifolds come out in pair order", "[physics][narrowphase]") {
@@ -525,6 +666,32 @@ TEST_CASE("manifolds come out in pair order", "[physics][narrowphase]") {
 	}
 }
 
+TEST_CASE("manifolds remain ordered across fixed worker ranges", "[physics][narrowphase]") {
+	// One more pair than a narrow-phase range. Each pair is isolated so this
+	// checks the concatenation boundary rather than making a dense all-to-all
+	// contact scene that hides it behind unrelated work.
+	Store store("narrowphase.range-order");
+	PreparePhysicsWorld(store, 1.0f);
+
+	for (size_t index = 0; index <= NARROW_GRAIN; index++) {
+		const float x = static_cast<float>(index) * 4.0f;
+		Place(store, Vector3{x, 0.0f, 0.0f}, Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}), true);
+		Place(store, Vector3{x + 0.6f, 0.0f, 0.0f}, Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}), true);
+	}
+
+	Step(store);
+
+	const auto manifolds = store.Resource<PhysicsWorld>()->Manifolds();
+	REQUIRE(manifolds.size() == NARROW_GRAIN + 1);
+	for (size_t index = 1; index < manifolds.size(); index++) {
+		const ContactManifold &previous = manifolds[index - 1];
+		const ContactManifold &current = manifolds[index];
+		CHECK(
+			(previous.A.Id < current.A.Id || (previous.A.Id == current.A.Id && previous.B.Id < current.B.Id))
+		);
+	}
+}
+
 TEST_CASE("the manifold list is cleared and not freed", "[physics][narrowphase]") {
 	Store store("narrowphase.capacity");
 	PreparePhysicsWorld(store, 1.0f);
@@ -538,10 +705,14 @@ TEST_CASE("the manifold list is cleared and not freed", "[physics][narrowphase]"
 		);
 	}
 	Step(store);
+	Step(store);
 
 	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
 	const size_t capacity = PipelineInternals::Manifolds(world).capacity();
+	const size_t persistentCapacity = PipelineInternals::PersistentManifolds(world).capacity();
+	const size_t persistentRetained = world.MemoryStats().Persistent.RetainedBytes;
 	REQUIRE(capacity > 0);
+	REQUIRE(persistentCapacity > 0);
 
 	store.Each<Transform>([](Entity, Transform &transform) {
 		transform.Frame.Position = transform.Frame.Position * 100.0f;
@@ -551,4 +722,7 @@ TEST_CASE("the manifold list is cleared and not freed", "[physics][narrowphase]"
 
 	CHECK(world.Manifolds().empty());
 	CHECK(PipelineInternals::Manifolds(world).capacity() == capacity);
+	CHECK(PipelineInternals::PersistentManifolds(world).empty());
+	CHECK(PipelineInternals::PersistentManifolds(world).capacity() == persistentCapacity);
+	CHECK(world.MemoryStats().Persistent.RetainedBytes >= persistentRetained);
 }

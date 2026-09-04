@@ -158,11 +158,14 @@ namespace engine::physics {
 	//
 	// Conservative advancement converges geometrically for shapes approaching
 	// head on and slowly for a grazing pass, which is exactly the case where the
-	// answer matters least. Past this the sweep reports no hit, which is the
-	// conservative half of a wrong answer for a *grazing* contact and would not
-	// be for a head-on one - and a head-on approach is the case that converges
-	// in a handful of steps.
+	// answer matters least. The translating sweep reports no hit at the cap. The
+	// full-motion sweep below has its own conservative fallback.
 	inline constexpr size_t SWEEP_ADVANCES = 32;
+
+	// Full rotational sweeps use a looser angular speed bound than translation.
+	// If this cap is spent, the last safe fraction is returned as a conservative
+	// hit and marked on `ConvexSweep`.
+	inline constexpr size_t MOTION_SWEEP_ADVANCES = 128;
 
 	// How close counts as touching, when a sweep is looking for the moment of
 	// contact.
@@ -191,6 +194,13 @@ namespace engine::physics {
 
 		// Whether they meet at all along the motion.
 		bool Hit = false;
+
+		// The advance cap was spent, so `Fraction` is a safe stop rather than a
+		// converged contact.
+		bool ConservativeFallback = false;
+
+		// Witness-point closing speed at the hit, in metres per second.
+		float ClosingSpeed = 0.0f;
 	};
 
 	// The first moment a translating convex shape touches another.
@@ -219,4 +229,19 @@ namespace engine::physics {
 	// @return When they first touch, or `Hit` false.
 	ConvexSweep
 	SweepConvex(const ShapeInstance &moving, const core::Vector3 &motion, const ShapeInstance &fixed);
+
+	// The first moment two convex shapes meet while both translate and rotate.
+	//
+	// Angular reach is bounded by each shape's farthest point from its origin.
+	// This makes every advance a lower bound on the time of impact even when the
+	// nearest features change while the shapes turn.
+	ConvexSweep SweepConvexMotion(
+		const ShapeInstance &first,
+		const core::Vector3 &firstLinear,
+		const core::Vector3 &firstAngular,
+		const ShapeInstance &second,
+		const core::Vector3 &secondLinear,
+		const core::Vector3 &secondAngular,
+		float seconds
+	);
 }

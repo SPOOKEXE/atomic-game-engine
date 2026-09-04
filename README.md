@@ -63,6 +63,7 @@ Refer to `ROADMAP.md` for what was done and we plan to do. `docs/retired/ROADMAP
 ## Links
 
 ![https://discord.gg/vdfCp27uxB](https://img.shields.io/badge/JOIN-DISCORD-blue?style=for-the-badge)
+![https://www.patreon.com/cw/rblxspookexe/membership](https://img.shields.io/badge/SUPPORT-PATREON-red?style=for-the-badge)
 
 ## License
 

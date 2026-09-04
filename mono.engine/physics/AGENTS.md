@@ -668,21 +668,32 @@ What is still absent:
   game - should not have to switch one off. A host applies weight in its own
   `PreSimulation` system, which is what `tests/Behaviour.cpp` does. Adding a
   gravity term here is a change to the design note first.
-- **Speculative contacts.** The distance function they would be built on
-  arrived at v0.17 - see below - and the rest did not: a speculative contact is
-  a solver *row* for a pair that is not touching yet, with a bias that stops it
-  before it does, and that is a change to the row type and to the set-up pass
-  rather than to the narrow phase.
+- **Speculative contacts.** Pairs separated by up to `SPECULATIVE_DISTANCE`
+  (two millimetres, `NarrowPhase.hpp`) get a single-point solver *row* with a
+  bias that stops them at the surface, and nothing else: no friction, no
+  restitution, no warm start, no contact event. Confirmation is counted where
+  the impulse cache is written (`SolverRememberConfirmed`, one total per
+  dispatched cache-emission range), not in a second pass over the rows. Refuse
+  a change that lets a speculative row carry friction or report a touch: a
+  private row that pushes sideways is a contact wearing a hat.
 - **Joints and constraints of any other kind.** The solver's row is a contact:
   a normal, two friction directions and a correction. A distance joint or a
   motor is a different row type and a different setup pass, and half of one is
   worse than none.
 - **Continuous collision between two *moving* bodies.** `SweepFastBodies`
-  closed the case that matters at v0.17 - a fast body against static geometry -
-  and deliberately stopped there. Two bodies both moving fast enough to pass
-  through each other have a relative motion that is not a straight line in
-  either's frame, so sweeping one against the other's start pose is not
-  conservative and would miss exactly the cases it was added for.
+  pairs each moving body against the full dynamic index through
+  `spatial::ShapeCast`, in canonical index order. A still body never queries:
+  every pair it forms names a moving partner, and that partner's query reports
+  it - which keeps a still lower id covered against a fast higher one without
+  walking every settled body in the scene. A pair naming two moving bodies is
+  reported once, from the lower id. Candidates are filtered by relative reach
+  including the cached angular term, both motions go through
+  `SweepConvexMotion`, and events run through a deterministic time heap: a
+  fraction transition schedules a fresh event against frozen neighbours and
+  the stale initial event is dropped (`Reswept`), never reswept. Refuse a
+  change that sweeps one body against the other's start pose and calls it
+  conservative: relative motion is not a straight line in either frame, so
+  that sweep misses exactly the cases it was added for.
 - **Island-based sleeping.** Waking propagates one contact layer per tick
   rather than flooding an island at once. That is bounded and deterministic;
   what it is not is instant, and a tall stack takes as many ticks to wake as it

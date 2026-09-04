@@ -73,6 +73,7 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/Scope.hpp>
 #include <engine/script/Signals.hpp>
 #include <engine/script/Tasks.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -93,6 +94,8 @@ using engine::script::Connection;
 using engine::script::Encode;
 using engine::script::Language;
 using engine::script::MakeRuntime;
+using engine::script::ScopeItemKind;
+using engine::script::ScopeTable;
 using engine::script::ScriptValue;
 using engine::script::SignalKind;
 using engine::script::SignalTable;
@@ -327,6 +330,19 @@ BENCH("Task · 1000 waits scheduled and resumed", 200) {
 		size_t resumed = 0;
 		queue.Advance(8, [&](CallbackRef) { resumed++; });
 		Consume(resumed);
+	}
+}
+
+BENCH("Scope · add and clean 1000 callbacks", 500) {
+	for (int pass = 0; pass < 500; pass++) {
+		ScopeTable scopes;
+		const auto scope = scopes.Create();
+		for (uint64_t callback = 0; callback < 1000; callback++) {
+			scopes.Add(scope, {ScopeItemKind::Callback, callback});
+		}
+		std::vector<engine::script::ScopeItem> items;
+		scopes.Clean(scope, items);
+		Consume(items.size());
 	}
 }
 

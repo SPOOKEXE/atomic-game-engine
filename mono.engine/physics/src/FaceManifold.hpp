@@ -54,6 +54,16 @@ namespace engine::physics {
 		bool Touching = false;
 	};
 
+	// The nearest still-separated point pair used to build a speculative row.
+	struct SeparatedContact {
+		core::Vector3 Normal;
+		core::Vector3 OnFirst;
+		core::Vector3 OnSecond;
+		float Distance = 0.0f;
+		uint32_t Feature = 0;
+		bool Found = false;
+	};
+
 	// How far apart two surfaces may be and still be called a contact.
 	//
 	// A clipped point sitting a fraction of a millimetre outside is a corner of

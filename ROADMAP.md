@@ -37,45 +37,9 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.23
+### v0.23.1
 
-- [_] atomic engine icons?
-- [_] add icon pack to studio?
-- [_] security audit, fuzzy tests, bound tests, etc.
-
-- [_] /docs/future-work/character-system.md
-- [_] gtlf default character (unreal style)
-
-- [_] for `just docs`, can you make it export a standalone html file that uses three.js for diagrams? Also properly layout the pages and remove references to ai models. Should be clean.
-- [_] for `just schema-dump`, a new job, its a job that json dumps two classes-components schema and data into json file for models to parse/read. `schema-dump` holds the schema and `schema-dump-full` is with data (class/component information).
-- [_] add documentation searching (for classes) to mcp
-- [_] add typechecking to script editor (shows unused variables, bad expressions, etc)
-- [_] when scripts crash, ensure studio does not crash and it handles it (just disable the script) - linux works fine but on windows it crashes the entire thing
-- [_] when you edit a script (right click edit script or double click), focus on the script editor viewport and open if not open
-- [_] the + button to add new instances just collapses the explorer instead of opening the instance list with search
-- [_] when i stop the game, it closes any open scripts in script editor. should stay open and it should keep all viewports in their current open/closed state (e.g. it keeps swapping back to Live Instances instead of keeping explorer selected)
-- [_] instead of a standalone `script editor` menu, it should be each script has their own editor with the name as the script
-- [_] add a script ticking rate slider for script update hertz
-- [_] add multi-line comment highlighting and such in script editor
-- [_] add CanQuery to PVInstance/BasePart, etc. Same with CastShadow.
-- [_] optimise remaining physics bottlenecks using StressPhysics demo
-- [_] add documentation searching (for classes) to mcp
-- [_] add documentation publish job (json dump of classes/components, standalone html file that has all documentation)
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
-- [_] in World => Create World From Demo, move to under Demo dropdown and separate by simple/advanced categories.
-- [_] create a new flamegraph called `Scripting` for luau script bindings (abstract away though for when we add JavaScript and later maybe C# bindings to it).
-* allows us to see per-binding flamegraph and active usage
-* setup benchmark tests for each C++ to script binding so we can find bottlenecking ones and optimise them
-* does not show script stuff (which fits in `Script Profiler` below), specifically targets the bindings
-- [_] `Script Profiler`;
-* shows a flamegraph of all the scripts and scripts that requrie other scripts and operations they call.
-* Breaks apart by function name (or anonymous with line number), any library calls, etc.
-* can view a hierarchy view or per-script view with search and filters and sorting columns (bytes allocated, per-function-milliseconds-compute, yielding sections of code, etc.
-* Also add a "folds" view for each script, where you can click on a script to open a `Script Folds Profiler` for it where it shows you per-fold computation (i.e. for loops, functions, event callbacks, anonymous functions, what line, how much time spent, yielding libraries, etc)
-* Separate per-scripting-bindings into sub-bars as well so if one specific script binding has yielded the luau loop, we can obviously see that.
-- [_] check all luau library bindings are async-compute (start operation, poll operation, end operation, a underlying c++ operation manager that uses parallel/async job management and such). Ensure we add to flamegraph / profilers as well.
-- [_] in the heap profiler, add the ability to click columns to sort by that.
-- [_] in the flamegraph, add the ability to click on a bar to focus only on that bar and subitems, then LEFT clicking in empty space returns to root, and RIGHT clicking goes UP A PARENT for the bar (so if we're inspecting scene culling and right click, it goes up a parent to the renderer bar or whatever). This will show the parent bar with its stuff underneath.
 
 new demos:
 - [_] port TornadoSim as a demo scene in the engine.
@@ -84,8 +48,18 @@ new demos:
 - [_] update DEMOS.md with GIFs uploaded to repository
 - [_] quadsphere, quadtree planet
 
+- [_] atomic engine icons?
+- [_] add icon pack to studio?
+- [_] deferred.md update, cleanup and work we can do now
+- [_] security audit, fuzzy tests, bound tests, etc.
+- [_] go through each underlying system and check we fully test them. lifecycles, allocations, deallocations, crash handling, error handling, fuzzy, bounds, etc.
 
 ### v0.24
+
+- [_] /docs/future-work/character-system.md
+- [_] gtlf default character (unreal style)
+
+### v0.25
 
 - [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
@@ -101,8 +75,14 @@ new demos:
 - [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
 - [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
 - [_] different antialiasing choices as render nodes
+- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 
-### v0.25
+### v0.26
+
+- [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
+- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
+- [_] pathfinding
+- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
 - [_] /docs/future-work/world-streaming.md
 - [_] /docs/future-work/terrain-system.md
@@ -131,9 +111,6 @@ new demos:
 - [_] built-in whiteboxing tools (planning) for building (plugin)
 - [_] full procedural terrain studio tools
 - [_] full ui feature buildout + custom
-- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
-- [_] project demos: space engineers asteroids + planets full demo, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, ai village with daily routines and such
-- [_] create another demo of a ai npc village where they have daily tasks and things like that (dwarf fortress style - personality, occupation, etc).
 - [_] ui creation tool, full aspect ratio scaling, select how it scales, how panels scale, etc. easier version of tooling than manually building them out
 - [_] html-based ui creation (html-script?) => auto handles aspect constraints and whatnot as well, css as well. "virtual container" that makes/simulates the instances?
 - [_] figma import tools
@@ -144,8 +121,6 @@ new demos:
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] localization support
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
-- [_] pathfinding
-- [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] add model providers (e.g. npcs in a game and can chat with you)
 - [_] VR support (oculus rift s)
@@ -155,6 +130,7 @@ new demos:
 - [_] expand breakpoint system to also include profilers like the heap allocation and timed flamegraph, you can see bottlenecks per iteration then (e.g. we can setup a "total compute", "total memory alloc", "total memory release", etc)
 - [_] expose automation tools like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 - [_] expose a AutomationService that does this for you (need to enable it for it to be useable).
+- [_] ECS driven RL agent environments
 
 ### Open Decision
 

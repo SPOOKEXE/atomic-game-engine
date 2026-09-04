@@ -31,11 +31,7 @@ namespace {
 	//                enough to write them. Left alone otherwise, so a suite that
 	//                crashed reports zero cases rather than a stale suite's.
 	bool RunSuite(
-		const Suite &suite,
-		const fs::path &scratch,
-		bool gpuTests,
-		std::string &output,
-		SuiteReport &report
+		const Suite &suite, const fs::path &scratch, bool gpuTests, std::string &output, SuiteReport &report
 	) {
 		const std::string filter = CatchFilter(suite, gpuTests);
 

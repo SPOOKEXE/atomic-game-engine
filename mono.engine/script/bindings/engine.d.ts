@@ -1074,10 +1074,28 @@ declare interface Random {
 	NextNumber(min?: number, max?: number): number;
 	// Inclusive of both ends, which is Roblox's contract.
 	NextInteger(min: number, max: number): number;
+	NextUnitVector2(): Vector2;
+	NextUnitVector3(): Vector3;
 }
 
 declare const Random: {
 	new: (seed?: number) => Random;
+};
+
+declare interface Scope {
+	Add(resource: unknown): this;
+	AddBulk(resources: unknown[]): this;
+	AddBulk(...resources: unknown[]): this;
+	Remove(resource: unknown): boolean;
+	Clean(): boolean;
+	Destroy(): boolean;
+	IsAlive(): boolean;
+	Count(): number;
+	SetErrorHandler(handler: (message: string) => void): this;
+}
+
+declare const Scope: {
+	new: () => Scope;
 };
 
 declare interface DateTime {
@@ -1207,6 +1225,7 @@ declare interface BasePart extends PVInstance {
 	Anchored: boolean;
 	AngularDamping: number;
 	CanCollide: boolean;
+	CanQuery: boolean;
 	CastShadow: boolean;
 	CollisionGeometry: string;
 	CollisionGroup: string;

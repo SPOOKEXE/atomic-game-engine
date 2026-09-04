@@ -130,6 +130,11 @@ namespace engine::physics {
 	// @since v0.17
 	ContactSolution ConvexContact(const ShapeInstance &first, const ShapeInstance &second);
 
+	// Finds the nearest surfaces of a separated pair, including a convex shape
+	// against a triangle soup. The distance cap bounds the mesh triangle walk.
+	SeparatedContact
+	SeparatedBetween(const ShapeInstance &first, const ShapeInstance &second, float maximumDistance);
+
 	ContactSolution ContactBetween(const ShapeInstance &first, const ShapeInstance &second);
 
 	// The six, in `scene::ShapeKind` order. Each obeys the convention above.

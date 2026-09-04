@@ -318,6 +318,7 @@ namespace client {
 		limits.Role = engine::script::HostRole::OfBoth();
 
 		for (const engine::world::WorldId id : worlds) {
+			const double scriptTickRate = Universe_->SettingsOf(id).ScriptTickRate;
 			std::string failure;
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
@@ -330,7 +331,10 @@ namespace client {
 
 				// The scripts before the camera, so a scene that aimed one of
 				// its own keeps it - see `InstallDefaultCamera`.
-				Runtimes.emplace_back(id, engine::game::StartWorldScripts(store, systems, limits, failure));
+				Runtimes.emplace_back(
+					id,
+					engine::game::StartWorldScripts(store, systems, limits, failure, nullptr, scriptTickRate)
+				);
 				(void)engine::gui::ResetPlayerGui(store, localPlayer);
 				InstallDefaultCamera(store, systems);
 			});

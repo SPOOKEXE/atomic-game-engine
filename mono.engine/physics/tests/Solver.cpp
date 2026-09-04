@@ -1,3 +1,4 @@
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -24,6 +25,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <utility>
 
 TEST_SUITE_ID("engine.physics.solver")
 // The manifolds it consumes, and the normal convention every impulse is applied
@@ -41,6 +43,7 @@ TEST_DEPENDS("engine.ecs.archetype")
 
 using Catch::Approx;
 using engine::core::CFrame;
+using engine::core::Metrics;
 using engine::core::Name;
 using engine::core::Vector3;
 using engine::ecs::Entity;
@@ -180,6 +183,185 @@ TEST_CASE("a contact removes the closing velocity", "[physics][solver]") {
 	CHECK(closing >= 0.0f);
 	CHECK(VelocityOf(store, left).X <= 0.0f);
 	CHECK(VelocityOf(store, right).X >= 0.0f);
+}
+
+TEST_CASE("a speculative contact limits closing speed without reporting a touch", "[physics][solver]") {
+	Store store("solver.speculative");
+	PreparePhysicsWorld(store, 1.0f);
+
+	const Entity wall = Place(
+		store,
+		Description{
+			.Position = Vector3{0.1f, 0.0f, 0.0f},
+			.Extent = Vector3{0.05f, 2.0f, 2.0f},
+			.Anchored = true,
+		}
+	);
+	const Entity mover = Place(
+		store,
+		Description{
+			.Position = Vector3{-0.6515f, 0.0f, 0.0f},
+			.Velocity = Vector3{12.0f, 0.0f, 0.0f},
+		}
+	);
+
+	StepWorld(store, TICK, false);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(PipelineInternals::SpeculativeManifolds(world).size() == 1);
+	CHECK(world.Manifolds().empty());
+	CHECK(world.Events().empty());
+	const auto confirmed = Metrics::GetGauge("physics.solve.speculative.confirmed");
+	REQUIRE(confirmed.has_value());
+	CHECK(confirmed->Value == Approx(1.0));
+	CHECK(VelocityOf(store, mover).X < 0.2f);
+	CHECK(VelocityOf(store, mover).X >= 0.0f);
+
+	// The permitted speed closes exactly the remaining gap on the next step.
+	// Only that real touch becomes public and begins an event.
+	StepWorld(store, TICK, false);
+	CHECK_FALSE(world.Manifolds().empty());
+	REQUIRE(world.Events().size() == 1);
+	CHECK(world.Events()[0].Phase == ContactPhase::Began);
+	CHECK(store.Get<Transform>(mover)->Frame.Position.X <= -0.449f);
+	CHECK_FALSE(store.Has<Motion>(wall));
+}
+
+TEST_CASE("speculative contacts do not brake separating or trigger pairs", "[physics][solver]") {
+	const auto speculativeCount = [](const char *name, bool trigger) {
+		Store store(name);
+		PreparePhysicsWorld(store, 1.0f);
+		Place(
+			store,
+			Description{
+				.Position = Vector3{0.1f, 0.0f, 0.0f},
+				.Extent = Vector3{0.05f, 2.0f, 2.0f},
+				.Anchored = true,
+				.Trigger = trigger,
+			}
+		);
+		const Entity mover = Place(
+			store,
+			Description{
+				.Position = Vector3{-0.6515f, 0.0f, 0.0f},
+				.Velocity = trigger ? Vector3{12.0f, 0.0f, 0.0f} : Vector3{-12.0f, 0.0f, 0.0f},
+			}
+		);
+		StepWorld(store, TICK, false);
+		return std::pair{
+			PipelineInternals::SpeculativeManifolds(*store.ResourceMutable<PhysicsWorld>()).size(),
+			VelocityOf(store, mover).X,
+		};
+	};
+
+	const auto separating = speculativeCount("solver.speculative.separating", false);
+	CHECK(separating.first == 0);
+	CHECK(separating.second == Approx(-12.0f));
+
+	const auto trigger = speculativeCount("solver.speculative.trigger", true);
+	CHECK(trigger.first == 0);
+	CHECK(trigger.second == Approx(12.0f));
+}
+
+TEST_CASE("a speculative contact constrains two dynamic bodies", "[physics][solver]") {
+	Store store("solver.speculative.dynamic-pair");
+	PreparePhysicsWorld(store, 1.0f);
+
+	const Entity left = Place(
+		store,
+		Description{
+			.Position = Vector3{-0.5174f, 0.0f, 0.0f},
+			.Velocity = Vector3{1.0f, 0.0f, 0.0f},
+		}
+	);
+	const Entity right = Place(
+		store,
+		Description{
+			.Position = Vector3{0.5174f, 0.0f, 0.0f},
+			.Velocity = Vector3{-1.0f, 0.0f, 0.0f},
+		}
+	);
+
+	StepWorld(store, TICK, false);
+	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(PipelineInternals::SpeculativeManifolds(world).size() == 1);
+	CHECK(world.Manifolds().empty());
+	CHECK(world.Events().empty());
+	const float closing = (VelocityOf(store, right) - VelocityOf(store, left)).X;
+	CHECK(closing > -1.8f);
+}
+
+TEST_CASE("dynamic speculative discovery does not depend on creation order", "[physics][solver]") {
+	const auto count = [](const char *name, bool stationaryFirst) {
+		Store store(name);
+		PreparePhysicsWorld(store, 1.0f);
+		const Description stationary{.Position = Vector3{0.0f, 0.0f, 0.0f}};
+		const Description moving{
+			.Position = Vector3{-1.0177f, 0.0f, 0.0f},
+			.Velocity = Vector3{1.0f, 0.0f, 0.0f},
+		};
+		if (stationaryFirst) {
+			Place(store, stationary);
+			Place(store, moving);
+		} else {
+			Place(store, moving);
+			Place(store, stationary);
+		}
+		StepWorld(store, TICK, false);
+		return PipelineInternals::SpeculativeManifolds(*store.ResourceMutable<PhysicsWorld>()).size();
+	};
+
+	CHECK(count("solver.speculative.order.stationary-first", true) == 1);
+	CHECK(count("solver.speculative.order.moving-first", false) == 1);
+}
+
+TEST_CASE("the speculative skin uses true diagonal distance", "[physics][solver]") {
+	Store store("solver.speculative.diagonal");
+	PreparePhysicsWorld(store, 1.0f);
+	Place(store, Description{});
+	const Entity mover = Place(
+		store,
+		Description{
+			.Position = Vector3{1.0016667f, 1.0015f, 0.0f},
+			.Velocity = Vector3{-0.01f, 0.0f, 0.0f},
+		}
+	);
+
+	StepWorld(store, TICK, false);
+	CHECK(PipelineInternals::SpeculativeManifolds(*store.ResourceMutable<PhysicsWorld>()).empty());
+	CHECK(VelocityOf(store, mover).X == Approx(-0.01f));
+}
+
+TEST_CASE("restitution keeps speed captured before speculative braking", "[physics][solver]") {
+	Store store("solver.speculative.restitution");
+	PreparePhysicsWorld(store, 1.0f);
+	SurfaceTable table;
+	table.Set(Name("elastic"), SurfaceProperties{0.0f, 1.0f});
+	store.SetResource(table);
+	Place(
+		store,
+		Description{
+			.Position = Vector3{0.0f, -0.5f, 0.0f},
+			.Extent = Vector3{4.0f, 0.5f, 4.0f},
+			.Anchored = true,
+			.Material = "elastic",
+		}
+	);
+	const Entity ball = Place(
+		store,
+		Description{
+			.Position = Vector3{0.0f, 0.56817f, 0.0f},
+			.Extent = Vector3{0.5f, 0.0f, 0.0f},
+			.Shape = ShapeKind::Sphere,
+			.Velocity = Vector3{0.0f, -4.0f, 0.0f},
+			.Material = "elastic",
+		}
+	);
+
+	StepWorld(store, TICK, false);
+	REQUIRE(PipelineInternals::SpeculativeManifolds(*store.ResourceMutable<PhysicsWorld>()).size() == 1);
+	CHECK(VelocityOf(store, ball).Y > -0.2f);
+	StepWorld(store, TICK, false);
+	CHECK(VelocityOf(store, ball).Y > 3.5f);
 }
 
 TEST_CASE("an anchored body is not moved by a contact", "[physics][solver]") {
@@ -586,31 +768,4 @@ TEST_CASE("a kinematic body never sleeps", "[physics][solver]") {
 
 	CHECK_FALSE(WorldOf(store).Sleeping(platform));
 	CHECK(store.Has<Motion>(platform));
-}
-
-TEST_CASE("the solver buffers are cleared and not freed", "[physics][solver]") {
-	Store store("solver.capacity");
-	PreparePhysicsWorld(store, 2.0f);
-
-	Place(
-		store,
-		Description{
-			.Position = Vector3{0.0f, -0.5f, 0.0f}, .Extent = Vector3{4.0f, 0.5f, 4.0f}, .Anchored = true
-		}
-	);
-	const Entity crate = Place(store, Description{.Position = Vector3{0.0f, 0.5f, 0.0f}});
-	StepWorld(store, TICK, true);
-
-	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
-	const size_t bodies = PipelineInternals::Bodies(world).capacity();
-	const size_t rows = PipelineInternals::Rows(world).capacity();
-	REQUIRE(bodies > 0);
-	REQUIRE(rows > 0);
-
-	store.Set<Transform>(crate, Transform{CFrame{Vector3{0.0f, 40.0f, 0.0f}}});
-	StepWorld(store, TICK, false);
-
-	CHECK(world.Bodies().empty());
-	CHECK(PipelineInternals::Bodies(world).capacity() == bodies);
-	CHECK(PipelineInternals::Rows(world).capacity() == rows);
 }

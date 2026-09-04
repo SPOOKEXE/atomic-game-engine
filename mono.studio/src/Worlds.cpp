@@ -23,11 +23,6 @@ namespace studio {
 	using engine::world::WorldId;
 
 	namespace {
-		// The popup the Worlds panel's button opens. A plain string because
-		// `OpenPopup` and `BeginPopup` have to agree on it and two spellings of
-		// one id is a button that does nothing.
-		constexpr const char *EXAMPLE_POPUP = "##example-scenes";
-
 		// How tall the list is allowed to get before it scrolls.
 		//
 		// **There are more than forty staged scenes**, which at a menu row each
@@ -49,20 +44,31 @@ namespace studio {
 			return;
 		}
 
+		const auto advanced = [](std::string_view scene) {
+			return scene.starts_with("Magic") || scene.starts_with("Mirror") || scene.starts_with("Portal") ||
+				   scene.starts_with("Recursive") || scene.starts_with("Stress") ||
+				   scene.starts_with("Terrain") || scene.starts_with("Tunnels");
+		};
+
 		ImGui::BeginChild("##example-list", ImVec2(EXAMPLE_LIST_WIDTH, EXAMPLE_LIST_HEIGHT));
-		for (const std::string &scene : scenes) {
-			if (ImGui::MenuItem(scene.c_str())) {
-				AddExampleWorld(scene);
+		for (const bool isAdvanced : {false, true}) {
+			ImGui::SeparatorText(isAdvanced ? "Advanced" : "Simple");
+			for (const std::string &scene : scenes) {
+				if (advanced(scene) != isAdvanced) {
+					continue;
+				}
+				if (ImGui::MenuItem(scene.c_str())) {
+					AddExampleWorld(scene);
+				}
 			}
 		}
 		ImGui::EndChild();
 	}
 
 	void Editor::DrawExampleSceneMenu() {
-		// **Enabled while a scene runs**, for the reason `DrawWorlds` gives:
-		// Stop restores one world from its own document and cannot reach a
-		// scene created after the run began.
-		if (ImGui::BeginMenu("New Scene from Example")) {
+		// Enabled while a scene runs. Stop restores one world from its own
+		// document and cannot reach a scene created after the run began.
+		if (ImGui::BeginMenu("Create World From Demo")) {
 			DrawExampleSceneItems();
 			ImGui::EndMenu();
 		}
@@ -124,22 +130,6 @@ namespace studio {
 		if (ImGui::Button("Import...")) {
 			AskingImport = true;
 			PathBuffer = ConfigPath("worlds").string();
-		}
-
-		// **The third way in, beside the two that were already here.** `World ->
-		// New Scene from Example` in the menu bar and the universe's own context
-		// menu in the explorer offer the same list; this panel is the one an
-		// author is looking at when they want another scene, so leaving it out
-		// would mean knowing to go somewhere else. One function behind all
-		// three - see `DrawExampleSceneItems`.
-		ImGui::SameLine();
-		if (ImGui::Button("Example...")) {
-			ImGui::OpenPopup(EXAMPLE_POPUP);
-		}
-
-		if (ImGui::BeginPopup(EXAMPLE_POPUP)) {
-			DrawExampleSceneItems();
-			ImGui::EndPopup();
 		}
 
 		ImGui::Separator();

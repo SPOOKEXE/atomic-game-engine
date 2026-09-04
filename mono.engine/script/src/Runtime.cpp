@@ -4,11 +4,221 @@
 #include <engine/script/Runtime.hpp>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace engine::script {
+
+	namespace {
+		// Windows faults raised by a VM extension are structured exceptions, not
+		// C++ exceptions. Keep the SEH block in this destructor-free helper so
+		// MSVC can unwind the caller normally when an ordinary C++ exception
+		// crosses the same boundary.
+		bool RunInstanceIsolated(Runtime &runtime, const ecs::Entity instance, unsigned long &fault) {
+#ifdef _WIN32
+			__try {
+				return runtime.RunInstance(instance);
+			} __except (EXCEPTION_EXECUTE_HANDLER) {
+				fault = static_cast<unsigned long>(GetExceptionCode());
+				return false;
+			}
+#else
+			(void)fault;
+			return runtime.RunInstance(instance);
+#endif
+		}
+	}
+
+	void ScriptProfiler::SetEnabled(bool enabled) {
+		Collecting = enabled;
+		if (!Collecting) {
+			Active.clear();
+			Running.clear();
+		}
+	}
+
+	ScriptProfiler::ActiveExecution *ScriptProfiler::FindActive(const void *thread) {
+		const auto found =
+			std::find_if(Active.begin(), Active.end(), [thread](const ActiveExecution &execution) {
+				return execution.Thread == thread;
+			});
+		return found == Active.end() ? nullptr : &*found;
+	}
+
+	void ScriptProfiler::Begin(const void *thread, uint64_t nanoseconds, const void *parentThread) {
+		if (!Collecting || thread == nullptr) {
+			return;
+		}
+
+		if (ActiveExecution *existing = FindActive(thread); existing != nullptr) {
+			existing->Leaf = UINT32_MAX;
+			existing->LastNanoseconds = nanoseconds;
+			std::erase(Running, thread);
+			Running.push_back(thread);
+			return;
+		}
+		uint32_t parent = UINT32_MAX;
+		if (const ActiveExecution *caller = FindActive(parentThread); caller != nullptr) {
+			parent = caller->Leaf;
+		}
+		Active.push_back(ActiveExecution{thread, parent, UINT32_MAX, nanoseconds});
+		Running.push_back(thread);
+	}
+
+	uint32_t
+	ScriptProfiler::FindOrAdd(uint32_t parent, std::string_view source, std::string_view function, int line) {
+		const std::string_view namedSource = source.empty() ? "(native)" : source;
+		const std::string_view namedFunction = function.empty() ? "(anonymous)" : function;
+		for (size_t index = 0; index < Tree.size(); index++) {
+			const ScriptProfileNode &node = Tree[index];
+			if (node.Parent == parent && node.Line == line && node.Source == namedSource &&
+				node.Function == namedFunction) {
+				return static_cast<uint32_t>(index);
+			}
+		}
+
+		if (Tree.size() >= MAXIMUM_NODES) {
+			Dropped++;
+			return UINT32_MAX;
+		}
+
+		Tree.push_back(
+			ScriptProfileNode{
+				.Parent = parent,
+				.Source = std::string(namedSource),
+				.Function = std::string(namedFunction),
+				.Line = line,
+				.Bindings = {},
+			}
+		);
+		return static_cast<uint32_t>(Tree.size() - 1);
+	}
+
+	uint32_t ScriptProfiler::FindLeaf(uint32_t parent, std::span<const ScriptProfileFrame> stack) {
+		for (size_t index = 0; index < stack.size(); index++) {
+			const ScriptProfileFrame &frame = stack[index];
+			const int line = index + 1 == stack.size() ? frame.Line : 0;
+			parent = FindOrAdd(parent, frame.Source, frame.Function, line);
+			if (parent == UINT32_MAX) {
+				return UINT32_MAX;
+			}
+		}
+		return parent;
+	}
+
+	void ScriptProfiler::Charge(ActiveExecution &execution, uint64_t nanoseconds) {
+		if (execution.Leaf != UINT32_MAX && execution.Leaf < Tree.size() &&
+			nanoseconds > execution.LastNanoseconds) {
+			Tree[execution.Leaf].SelfNanoseconds += nanoseconds - execution.LastNanoseconds;
+		}
+		execution.LastNanoseconds = nanoseconds;
+	}
+
+	void ScriptProfiler::Sample(
+		const void *thread, std::span<const ScriptProfileFrame> stack, uint64_t nanoseconds
+	) {
+		if (!Collecting || thread == nullptr || stack.empty()) {
+			return;
+		}
+
+		if (FindActive(thread) == nullptr) {
+			Begin(thread, nanoseconds);
+		}
+		ActiveExecution *execution = FindActive(thread);
+		if (execution == nullptr) {
+			return;
+		}
+
+		Charge(*execution, nanoseconds);
+		const uint32_t leaf = FindLeaf(execution->Parent, stack);
+		if (leaf == UINT32_MAX) {
+			return;
+		}
+		ScriptProfileNode &node = Tree[leaf];
+		if (execution->Leaf != leaf) {
+			node.Calls++;
+		}
+		node.Samples++;
+		execution->Leaf = leaf;
+	}
+
+	void ScriptProfiler::End(const void *thread, uint64_t nanoseconds, bool yielded) {
+		ActiveExecution *execution = FindActive(thread);
+		if (execution == nullptr) {
+			return;
+		}
+
+		Charge(*execution, nanoseconds);
+		if (yielded && execution->Leaf != UINT32_MAX && execution->Leaf < Tree.size()) {
+			Tree[execution->Leaf].Yields++;
+		}
+		std::erase(Running, thread);
+		if (yielded) {
+			// The next resume belongs beneath the same call tree. Keep the
+			// lightweight lineage record, but remove it from the active VM stack.
+			return;
+		}
+		const auto found =
+			std::find_if(Active.begin(), Active.end(), [thread](const ActiveExecution &active) {
+				return active.Thread == thread;
+			});
+		if (found != Active.end()) {
+			Active.erase(found);
+		}
+	}
+
+	void ScriptProfiler::RecordAllocation(size_t bytes) {
+		if (!Collecting || Running.empty()) {
+			return;
+		}
+		if (const ActiveExecution *execution = FindActive(Running.back());
+			execution != nullptr && execution->Leaf != UINT32_MAX && execution->Leaf < Tree.size()) {
+			Tree[execution->Leaf].AllocatedBytes += bytes;
+		}
+	}
+
+	void ScriptProfiler::RecordBinding(
+		const void *thread, std::string_view name, uint64_t nanoseconds, bool yielded
+	) {
+		if (!Collecting || name.empty()) {
+			return;
+		}
+		const ActiveExecution *execution = FindActive(thread);
+		if (execution == nullptr || execution->Leaf == UINT32_MAX || execution->Leaf >= Tree.size()) {
+			return;
+		}
+
+		std::vector<ScriptProfileNode::Binding> &bindings = Tree[execution->Leaf].Bindings;
+		auto found =
+			std::find_if(bindings.begin(), bindings.end(), [name](const ScriptProfileNode::Binding &binding) {
+				return binding.Name == name;
+			});
+		if (found == bindings.end()) {
+			bindings.push_back(
+				ScriptProfileNode::Binding{std::string(name), 1, nanoseconds, yielded ? 1u : 0u}
+			);
+			return;
+		}
+		found->Calls++;
+		found->Nanoseconds += nanoseconds;
+		if (yielded) {
+			found->Yields++;
+		}
+	}
+
+	void ScriptProfiler::Clear() {
+		Tree.clear();
+		Dropped = 0;
+		for (ActiveExecution &execution : Active) {
+			execution.Leaf = UINT32_MAX;
+		}
+	}
 
 	Language LanguageOf(std::string_view path) {
 		const std::filesystem::path file(path);
@@ -73,7 +283,18 @@ namespace engine::script {
 			(void)RememberStarted(instance);
 
 			const uint64_t before = StepsTaken();
-			const bool ok = RunInstance(instance);
+			bool ok = false;
+			unsigned long fault = 0;
+			try {
+				ok = RunInstanceIsolated(*this, instance, fault);
+			} catch (const std::exception &failure) {
+				Error = failure.what();
+			} catch (...) {
+				Error = "script raised an unknown host exception";
+			}
+			if (fault != 0) {
+				Error = "script caused Windows exception " + std::to_string(fault);
+			}
 			const uint64_t after = StepsTaken();
 
 			// Saturating, because the counter resets when a script blows its
@@ -85,6 +306,11 @@ namespace engine::script {
 				ran++;
 				continue;
 			}
+
+			// A failed top-level script must not be considered again by a later
+			// discovery pass. More importantly, keeping the failure on this row
+			// isolates it from the rest of the world's scripts.
+			Store.Set(instance, Disabled{});
 
 			// **Every script runs even when one fails**, for the reason every
 			// heartbeat connection does: a game where half the scripts silently
@@ -126,10 +352,25 @@ namespace engine::script {
 				continue;
 			}
 
-			if (RunInstance(instance)) {
+			bool ok = false;
+			unsigned long fault = 0;
+			try {
+				ok = RunInstanceIsolated(*this, instance, fault);
+			} catch (const std::exception &failure) {
+				Error = failure.what();
+			} catch (...) {
+				Error = "script raised an unknown host exception";
+			}
+			if (fault != 0) {
+				Error = "script caused Windows exception " + std::to_string(fault);
+			}
+
+			if (ok) {
 				started++;
 				continue;
 			}
+
+			Store.Set(instance, Disabled{});
 
 			// Logged per failure and reported once, for the reason
 			// `RunWorldScripts` gives: a world where half the scripts silently

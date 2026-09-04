@@ -29,6 +29,56 @@ namespace engine::spatial {
 			return true;
 		}
 
+		// Runs the common swept-box walk after the caller decides which proxy ids
+		// may enter the result.
+		template <class Accept>
+		QueryResult ShapeCastAccepted(
+			const HashGrid &grid,
+			const core::AABB &box,
+			const core::Vector3 &motion,
+			LayerMask mask,
+			std::span<uint64_t> found,
+			Accept &&accept
+		) {
+			QueryResult result;
+			const core::Vector3 halfExtent = box.Size() * 0.5f;
+			const float distance = motion.Magnitude();
+			if (!(distance > 0.0f)) {
+				// Zero motion is routed to an overlap before this runs, so only a
+				// non-finite motion lands here. Fall back to the start volume
+				// rather than carrying NaN into the slab test, keeping the
+				// caller's id filter through the shared accept predicate.
+				GridInternals::ForEachCandidate(grid, box, mask, [&](const Proxy &proxy) {
+					if (!accept(proxy)) {
+						return true;
+					}
+					return Append(found, proxy.Id, result);
+				});
+				return result;
+			}
+			const core::Ray ray{box.Centre(), motion / distance};
+			const RayReciprocal reciprocal{ray.Direction};
+			const core::AABB swept = box.Union(core::AABB{box.Minimum + motion, box.Maximum + motion});
+
+			GridInternals::ForEachCandidateAlongSweptBox(
+				grid, ray, reciprocal, distance, halfExtent, swept, mask, [&](const Proxy &proxy) {
+					if (!accept(proxy)) {
+						return true;
+					}
+					// A moving box against a still box is a moving point against the
+					// still box grown by the moving half-extent.
+					const core::AABB expanded = core::AABB::FromCentre(
+						proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent
+					);
+					if (!IntersectRayBox(ray, reciprocal, expanded, distance).Touched) {
+						return true;
+					}
+					return Append(found, proxy.Id, result);
+				}
+			);
+			return result;
+		}
+
 		// Inserts a hit into a span held in increasing distance, dropping the
 		// furthest when there is no room.
 		//
@@ -148,6 +198,20 @@ namespace engine::spatial {
 		return result;
 	}
 
+	QueryResult OverlapBoxAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	) {
+		QueryResult result;
+		GridInternals::ForEachCandidateAfterId(grid, box, mask, minimumExclusive, [&](const Proxy &proxy) {
+			return Append(found, proxy.Id, result);
+		});
+		return result;
+	}
+
 	QueryResult OverlapSphere(
 		const HashGrid &grid,
 		const core::Vector3 &centre,
@@ -191,31 +255,22 @@ namespace engine::spatial {
 		if (motion == core::Vector3::Zero) {
 			return OverlapBox(grid, box, mask, found);
 		}
+		return ShapeCastAccepted(grid, box, motion, mask, found, [](const Proxy &) { return true; });
+	}
 
-		QueryResult result;
-
-		const core::Vector3 halfExtent = box.Size() * 0.5f;
-		const float distance = motion.Magnitude();
-		const core::Ray ray{box.Centre(), motion / distance};
-		const RayReciprocal reciprocal{ray.Direction};
-
-		const core::AABB swept = box.Union(core::AABB{box.Minimum + motion, box.Maximum + motion});
-
-		GridInternals::ForEachCandidateAlongSweptBox(
-			grid, ray, reciprocal, distance, halfExtent, swept, mask, [&](const Proxy &proxy) {
-				// A moving box against a still box is a moving *point* against the
-				// still box grown by the moving one's half-extent - so the swept
-				// test is the slab test already written, with no second algorithm
-				// to keep correct.
-				const core::AABB expanded =
-					core::AABB::FromCentre(proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent);
-				if (!IntersectRayBox(ray, reciprocal, expanded, distance).Touched) {
-					return true;
-				}
-				return Append(found, proxy.Id, result);
-			}
-		);
-
-		return result;
+	QueryResult ShapeCastAfterId(
+		const HashGrid &grid,
+		const core::AABB &box,
+		const core::Vector3 &motion,
+		LayerMask mask,
+		uint64_t minimumExclusive,
+		std::span<uint64_t> found
+	) {
+		if (motion == core::Vector3::Zero) {
+			return OverlapBoxAfterId(grid, box, mask, minimumExclusive, found);
+		}
+		return ShapeCastAccepted(grid, box, motion, mask, found, [minimumExclusive](const Proxy &proxy) {
+			return proxy.Id > minimumExclusive;
+		});
 	}
 }

@@ -1320,10 +1320,28 @@ declare extern type Random with
 	function NextNumber(self, min: number?, max: number?): number
 	-- Inclusive of both ends, which is Roblox's contract.
 	function NextInteger(self, min: number, max: number): number
+	function NextUnitVector2(self): Vector2
+	function NextUnitVector3(self): Vector3
 end
 
 declare Random: {
 	new: (seed: number?) -> Random,
+}
+
+declare extern type Scope with
+	function Add(self, resource: any): Scope
+	function AddBulk(self, resources: {any}): Scope
+	function AddBulk(self, ...: any): Scope
+	function Remove(self, resource: any): boolean
+	function Clean(self): boolean
+	function Destroy(self): boolean
+	function IsAlive(self): boolean
+	function Count(self): number
+	function SetErrorHandler(self, handler: (message: string) -> ()): Scope
+end
+
+declare Scope: {
+	new: () -> Scope,
 }
 
 -- A plain table rather than a userdata: it is a value over a number and
@@ -3121,10 +3139,28 @@ declare interface Random {
 	NextNumber(min?: number, max?: number): number;
 	// Inclusive of both ends, which is Roblox's contract.
 	NextInteger(min: number, max: number): number;
+	NextUnitVector2(): Vector2;
+	NextUnitVector3(): Vector3;
 }
 
 declare const Random: {
 	new: (seed?: number) => Random;
+};
+
+declare interface Scope {
+	Add(resource: unknown): this;
+	AddBulk(resources: unknown[]): this;
+	AddBulk(...resources: unknown[]): this;
+	Remove(resource: unknown): boolean;
+	Clean(): boolean;
+	Destroy(): boolean;
+	IsAlive(): boolean;
+	Count(): number;
+	SetErrorHandler(handler: (message: string) => void): this;
+}
+
+declare const Scope: {
+	new: () => Scope;
 };
 
 declare interface DateTime {

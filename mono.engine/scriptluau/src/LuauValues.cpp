@@ -870,7 +870,7 @@ namespace engine::script {
 			lua_pop(state, 1);
 
 			lua_newtable(state);
-			luaL_register(state, nullptr, constructors);
+			RegisterProfiledFunctions(state, constructors);
 			lua_setglobal(state, name);
 		}
 	}

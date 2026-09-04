@@ -11,6 +11,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <charconv>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <system_error>
 #include <unordered_map>
@@ -774,6 +776,7 @@ namespace engine::game {
 			writer.Attribute("tickRate", FormatNumber(settings.TickRate));
 			writer.Attribute("idleTickRate", FormatNumber(settings.IdleTickRate));
 			writer.Attribute("physicsTickRate", FormatNumber(settings.PhysicsTickRate));
+			writer.Attribute("scriptTickRate", FormatNumber(settings.ScriptTickRate));
 			writer.Attribute("replicationTickRate", FormatNumber(settings.ReplicationTickRate));
 			writer.Attribute(
 				"globalSimulatedNetworkLatency", FormatNumber(settings.GlobalSimulatedNetworkLatency)
@@ -812,6 +815,7 @@ namespace engine::game {
 			// Zero for a file that predates them, which is the same "follow the
 			// tick rate" every world in this repository already means.
 			settings.PhysicsTickRate = NumberOf(source, "physicsTickRate", 0.0);
+			settings.ScriptTickRate = NumberOf(source, "scriptTickRate", 0.0);
 			settings.ReplicationTickRate = NumberOf(source, "replicationTickRate", 0.0);
 
 			settings.GlobalSimulatedNetworkLatency = NumberOf(source, "globalSimulatedNetworkLatency", 0.0);
@@ -1016,7 +1020,8 @@ namespace engine::game {
 		ecs::Scheduler &scheduler,
 		const script::RuntimeLimits &limits,
 		std::string &error,
-		const script::Debugger *breakpoints
+		const script::Debugger *breakpoints,
+		double scriptTickRate
 	) {
 		error.clear();
 
@@ -1031,6 +1036,7 @@ namespace engine::game {
 		}
 
 		const size_t ran = runtime->RunWorldScripts();
+		script::SetScriptTickRate(store, scriptTickRate);
 		if (!runtime->LastError().empty()) {
 			error = runtime->LastError();
 		}
@@ -1040,10 +1046,21 @@ namespace engine::game {
 		// machine, and the recording stops replaying - the desync rule 5 names,
 		// arriving through the call a script uses most.
 		scheduler.Add("script-heartbeat", ecs::Phase::Simulation, [runtime](Store &world) {
-			if (!runtime->Heartbeat(world.Time().Delta)) {
-				// Logged per tick rather than swallowed. A world that silently
-				// stopped animating is a bug report with nothing in it.
-				ENGINE_ERROR("heartbeat: {}", runtime->LastError());
+			std::optional<float> delta = script::TakeScriptUpdate(world);
+			while (delta) {
+				if (!runtime->Heartbeat(*delta)) {
+					// Logged per tick rather than swallowed. A world that silently
+					// stopped animating is a bug report with nothing in it.
+					ENGINE_ERROR("heartbeat: {}", runtime->LastError());
+					return;
+				}
+
+				// A rate above the world clock may need several barriers this tick.
+				// Zero returns the world delta and deliberately stops at one barrier.
+				if (*delta >= world.Time().Delta) {
+					return;
+				}
+				delta = script::TakeScriptUpdate(world);
 			}
 		});
 

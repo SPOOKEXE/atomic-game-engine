@@ -3,13 +3,17 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Clock.hpp>
+#include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
+#include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 
@@ -47,47 +51,134 @@ namespace engine::physics {
 			return SourcedPair{CandidatePair{right, left}, CandidateSource{rightAt, leftAt}};
 		}
 
+		bool PotentiallyClosing(
+			const core::AABB &firstBounds,
+			const core::AABB &secondBounds,
+			const PlacedCollider &first,
+			const PlacedCollider &second,
+			float deltaSeconds
+		) {
+			if (firstBounds.Overlaps(secondBounds)) {
+				return true;
+			}
+
+			const core::Vector3 relativeTravel =
+				(first.LinearVelocity - second.LinearVelocity) * deltaSeconds;
+			const core::AABB travelled{
+				firstBounds.Minimum + relativeTravel,
+				firstBounds.Maximum + relativeTravel,
+			};
+			const core::AABB swept = firstBounds.Union(travelled);
+			const float angularReach = (first.AngularVelocity.Magnitude() * first.MaximumRadius +
+										second.AngularVelocity.Magnitude() * second.MaximumRadius) *
+									   deltaSeconds;
+			const float marginMetres = SPECULATIVE_DISTANCE + angularReach;
+			const core::Vector3 margin{marginMetres, marginMetres, marginMetres};
+			return swept.Overlaps(core::AABB{secondBounds.Minimum - margin, secondBounds.Maximum + margin});
+		}
+
+		// A 64-bit entity id needs six eleven-bit passes. Eleven bits leaves the
+		// bucket table in L1 while avoiding the sixteen full-array moves an
+		// eight-bit radix would need. Sorting B first and then A makes the stable
+		// result exactly the CandidatePair ordering the solver requires.
+		constexpr size_t PAIR_RADIX_BITS = 11;
+		constexpr size_t PAIR_RADIX_BUCKETS = size_t{1} << PAIR_RADIX_BITS;
+		constexpr size_t PAIR_RADIX_PASSES = (sizeof(uint64_t) * 8 + PAIR_RADIX_BITS - 1) / PAIR_RADIX_BITS;
+
+		template <typename Key>
+		void
+		RadixSortPairMember(std::vector<SourcedPair> &pairs, std::vector<SourcedPair> &scratch, Key key) {
+			if (pairs.size() < 2) {
+				return;
+			}
+
+			scratch.resize(pairs.size());
+			for (size_t pass = 0; pass < PAIR_RADIX_PASSES; pass++) {
+				const size_t shift = pass * PAIR_RADIX_BITS;
+				std::array<size_t, PAIR_RADIX_BUCKETS> offsets{};
+				for (const SourcedPair &pair : pairs) {
+					const size_t bucket =
+						static_cast<size_t>((key(pair) >> shift) & (PAIR_RADIX_BUCKETS - 1));
+					offsets[bucket]++;
+				}
+
+				size_t next = 0;
+				for (size_t &offset : offsets) {
+					const size_t count = offset;
+					offset = next;
+					next += count;
+				}
+
+				for (const SourcedPair &pair : pairs) {
+					const size_t bucket =
+						static_cast<size_t>((key(pair) >> shift) & (PAIR_RADIX_BUCKETS - 1));
+					scratch[offsets[bucket]++] = pair;
+				}
+				pairs.swap(scratch);
+			}
+		}
+
 		// Collects one disjoint range of dynamic proxies into caller-owned output.
 		// Returns false without a partial answer when either overlap query fills
 		// its scratch, so the caller can retry the same range with wider storage.
 		bool CollectPairs(
 			const PhysicsWorld &world,
-			const std::vector<spatial::Proxy> &dynamicProxies,
+			const std::vector<core::AABB> &dynamicBounds,
+			const std::vector<core::AABB> &queryBounds,
 			const std::vector<ColliderRecord> &dynamicRecords,
 			const std::vector<ColliderRecord> &staticRecords,
+			const std::vector<PlacedCollider> &dynamicShapes,
 			const spatial::HashGrid &dynamicIndex,
+			const spatial::DynamicBvh &dynamicTree,
+			bool dynamicTreeActive,
 			const spatial::HashGrid &staticIndex,
 			size_t begin,
 			size_t end,
 			std::span<uint64_t> candidates,
-			std::vector<SourcedPair> &output
+			std::vector<SourcedPair> &output,
+			float deltaSeconds
 		) {
 			output.clear();
 			for (size_t index = begin; index < end; index++) {
 				const ColliderRecord &a = dynamicRecords[index];
-				const core::AABB &box = dynamicProxies[index].Bounds;
+				const core::AABB &box = queryBounds[index];
 
-				const spatial::QueryResult moving = spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
-				if (moving.Overflowed) {
-					output.clear();
-					return false;
-				}
-				for (size_t at = 0; at < moving.Written; at++) {
-					const auto other = static_cast<size_t>(candidates[at]);
-					if (other <= index) {
-						continue;
+				const core::AABB &tight = dynamicBounds[index];
+				const bool hasSpeculativeReach = box.Minimum != tight.Minimum || box.Maximum != tight.Maximum;
+				if (!dynamicTreeActive || hasSpeculativeReach) {
+					const spatial::QueryResult moving =
+						dynamicTreeActive ? spatial::OverlapBox(dynamicTree, box, a.Mask, candidates)
+										  : spatial::OverlapBox(dynamicIndex, box, a.Mask, candidates);
+					if (moving.Overflowed) {
+						output.clear();
+						return false;
 					}
+					for (size_t at = 0; at < moving.Written; at++) {
+						const auto other = static_cast<size_t>(candidates[at]);
+						const bool tightOverlap = dynamicBounds[index].Overlaps(dynamicBounds[other]);
+						if (other == index || (tightOverlap && other < index)) {
+							continue;
+						}
 
-					const ColliderRecord &b = dynamicRecords[other];
-					if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner)) {
-						continue;
+						const ColliderRecord &b = dynamicRecords[other];
+						if (!PairAdmitted(a, b) || world.RigidlyConnected(a.Owner, b.Owner) ||
+							!PotentiallyClosing(
+								dynamicBounds[index],
+								dynamicBounds[other],
+								dynamicShapes[index],
+								dynamicShapes[other],
+								deltaSeconds
+							)) {
+							continue;
+						}
+						output.push_back(Ordered(
+							a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other)
+						));
 					}
-					output.push_back(
-						Ordered(a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other))
-					);
 				}
 
-				const spatial::QueryResult anchored = spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
+				const spatial::QueryResult anchored =
+					spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
 				if (anchored.Overflowed) {
 					output.clear();
 					return false;
@@ -130,11 +221,16 @@ namespace engine::physics {
 		sources.clear();
 		sourced.clear();
 
-		const std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
+		const std::vector<core::AABB> &dynamicBounds = PipelineInternals::DynamicBounds(*world);
+		const std::vector<core::AABB> &speculativeBounds = PipelineInternals::SpeculativeBounds(*world);
 		const std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
+		const std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
 		const std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
 		const spatial::HashGrid &dynamicIndex = PipelineInternals::DynamicIndex(*world);
+		const spatial::DynamicBvh &dynamicTree = PipelineInternals::DynamicTree(*world);
+		const bool dynamicTreeActive = PipelineInternals::DynamicTreeActive(*world);
 		const spatial::HashGrid &staticIndex = PipelineInternals::StaticIndex(*world);
+		const float deltaSeconds = PhysicsStepSeconds(store);
 
 		// Sized to the widest possible answer, which is every proxy in one
 		// index, so no query can overflow and no query has to be retried. One
@@ -151,6 +247,21 @@ namespace engine::physics {
 		// with how large it is, and the two want different answers.
 		{
 			ENGINE_PROFILE_CAT("physics.query", core::ProfileCategory::Physics);
+			if (dynamicTreeActive) {
+				dynamicTree.ForEachOverlappingPair([&](const spatial::Proxy &first,
+													   const spatial::Proxy &second) {
+					const size_t left = static_cast<size_t>(first.Id);
+					const size_t right = static_cast<size_t>(second.Id);
+					const ColliderRecord &a = dynamicRecords[left];
+					const ColliderRecord &b = dynamicRecords[right];
+					if (PairAdmitted(a, b) && !world->RigidlyConnected(a.Owner, b.Owner)) {
+						sourced.push_back(Ordered(
+							a.Owner, b.Owner, static_cast<uint32_t>(left), static_cast<uint32_t>(right)
+						));
+					}
+					return true;
+				});
+			}
 
 			// Only dynamic colliders are queried. Each batch owns its output,
 			// while every query reads the same immutable indexes. The final sort
@@ -171,19 +282,24 @@ namespace engine::physics {
 						const size_t begin = batch * BROADPHASE_BATCH_SIZE;
 						const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
 						overflowed[batch] = CollectPairs(
-							*world,
-							dynamicProxies,
-							dynamicRecords,
-							staticRecords,
-							dynamicIndex,
-							staticIndex,
-							begin,
-							end,
-							localCandidates,
-							batches[batch]
-						)
-							? 0
-							: 1;
+												*world,
+												dynamicBounds,
+												speculativeBounds,
+												dynamicRecords,
+												staticRecords,
+												dynamicShapes,
+												dynamicIndex,
+												dynamicTree,
+												dynamicTreeActive,
+												staticIndex,
+												begin,
+												end,
+												localCandidates,
+												batches[batch],
+												deltaSeconds
+											)
+												? 0
+												: 1;
 					}
 				},
 				2
@@ -200,19 +316,24 @@ namespace engine::physics {
 				const size_t end = std::min(begin + BROADPHASE_BATCH_SIZE, dynamicRecords.size());
 				CollectPairs(
 					*world,
-					dynamicProxies,
+					dynamicBounds,
+					speculativeBounds,
 					dynamicRecords,
 					staticRecords,
+					dynamicShapes,
 					dynamicIndex,
+					dynamicTree,
+					dynamicTreeActive,
 					staticIndex,
 					begin,
 					end,
 					candidates,
-					batches[batch]
+					batches[batch],
+					deltaSeconds
 				);
 			}
 
-			size_t pairCount = 0;
+			size_t pairCount = sourced.size();
 			for (const std::vector<SourcedPair> &batch : batches) {
 				pairCount += batch.size();
 			}
@@ -230,13 +351,28 @@ namespace engine::physics {
 			// gives one answer on a scene built one way and another on the same
 			// scene built another way - and `just determinism` reports it a long
 			// way from here.
-			std::sort(sourced.begin(), sourced.end());
+			std::vector<SourcedPair> &sortScratch = PipelineInternals::SourcedPairSortScratch(*world);
+			{
+				ENGINE_PROFILE_CAT("physics.pair-sort-b", core::ProfileCategory::Physics);
+				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) {
+					return pair.Pair.B.Id;
+				});
+			}
+			{
+				ENGINE_PROFILE_CAT("physics.pair-sort-a", core::ProfileCategory::Physics);
+				RadixSortPairMember(sourced, sortScratch, [](const SourcedPair &pair) {
+					return pair.Pair.A.Id;
+				});
+			}
 
 			// Each pair once. The generation above already reports each one once;
 			// this is what makes "once" a property of the list the solver reads
 			// rather than a property of how it was filled, and applying one contact
 			// twice doubles its impulse.
-			sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+			{
+				ENGINE_PROFILE_CAT("physics.pair-deduplicate", core::ProfileCategory::Physics);
+				sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+			}
 		}
 
 		// **Split into the public list and the private one, after the sort.**
@@ -253,6 +389,7 @@ namespace engine::physics {
 				pairs.push_back(row.Pair);
 				sources.push_back(row.Source);
 			}
+			core::Metrics::SetGauge("physics.broadphase.pairs", static_cast<double>(pairs.size()));
 		}
 	}
 }

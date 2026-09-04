@@ -2,6 +2,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 
@@ -187,6 +188,7 @@ namespace engine::script {
 		// rule every registration list in this engine follows is **add at the
 		// end**.
 		ecs::Components::Register<Program>("script.Program", WritePrograms, ReadPrograms);
+		ecs::Components::Register<ScriptClock>("script.ScriptClock");
 	}
 
 	void MirrorSourcePrograms(ecs::Store &store, SourceMirror &mirror) {

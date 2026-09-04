@@ -1,3 +1,4 @@
+#include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -48,6 +49,7 @@ using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::CollisionShapes;
 using engine::scene::Motion;
+using engine::scene::PreviousTransform;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Simulated;
@@ -107,6 +109,13 @@ namespace {
 		return body;
 	}
 
+	Entity RotatingThinBullet(Store &store) {
+		const Entity body = Bullet(store, 300.0f);
+		store.GetMutable<Collider>(body)->Extent = Vector3{0.05f, 2.0f, 0.05f};
+		store.GetMutable<Motion>(body)->Angular = Vector3{0.0f, 0.0f, 120.0f};
+		return body;
+	}
+
 	// One tick of the two steps that matter here, in the order the pipeline runs
 	// them. The static index has to exist before the sweep can ask it anything,
 	// which is why the sync comes first on the setup tick.
@@ -139,6 +148,60 @@ TEST_CASE("a body that would cross a thin wall is stopped at it", "[continuous]"
 	// where the integrator alone would have left it.
 	CHECK(placed->Frame.Position.X < 3.47f);
 	CHECK(placed->Frame.Position.X > 3.44f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+}
+
+TEST_CASE("a rotating thin box is swept from its physical start pose", "[continuous]") {
+	// The bar turns broadside while it travels. The rotational sweep finds the
+	// tip reaching the wall before its thin leading face would arrive.
+	std::unique_ptr<Store> owned = WorldWithWall();
+	Store &store = *owned;
+	SyncBroadphase(store);
+
+	const Entity bullet = RotatingThinBullet(store);
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(bullet);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Frame.Position.X > 2.3f);
+	CHECK(placed->Frame.Position.X < 2.5f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+}
+
+TEST_CASE("a lower-id still simulated body emits a fast higher-id pair", "[continuous]") {
+	Store store{"physics.continuous.ordered-dynamic"};
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity still = Bullet(store, 0.0f);
+	store.GetMutable<Transform>(still)->Frame.Position = Vector3{4.0f, 0.0f, 0.0f};
+	const Entity bullet = Bullet(store, 300.0f);
+
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(bullet);
+	REQUIRE(placed != nullptr);
+	// The still body is a unit cube spanning [3.5, 4.5], not the thin wall of
+	// the case above, so contact puts the bullet centre at 3.5 - 0.5 = 3.0.
+	CHECK(placed->Frame.Position.X > 2.99f);
+	CHECK(placed->Frame.Position.X < 3.02f);
+}
+
+TEST_CASE("continuous collision ignores presentation transform history", "[continuous]") {
+	// A render-side history can be arbitrarily stale. CCD has to produce the
+	// same physical stop without it, rather than turning an interpolation row
+	// into an input of the simulation.
+	std::unique_ptr<Store> owned = WorldWithWall();
+	Store &store = *owned;
+	SyncBroadphase(store);
+
+	const Entity bullet = RotatingThinBullet(store);
+	store.Set<PreviousTransform>(bullet, PreviousTransform{CFrame{Vector3{-1000.0f, 0.0f, 0.0f}}});
+	Tick(store);
+
+	const Transform *placed = store.Get<Transform>(bullet);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Frame.Position.X > 2.3f);
+	CHECK(placed->Frame.Position.X < 2.5f);
 	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
 }
 
@@ -181,6 +244,131 @@ TEST_CASE("a body moving slowly is not swept", "[continuous]") {
 	// left it.
 	CHECK(store.Get<Transform>(crate)->Frame.Position.X == Approx(2.0f * TICK).margin(1e-5f));
 	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 0);
+}
+
+TEST_CASE("two fast bodies are stopped before they exchange sides", "[continuous]") {
+	auto owned = std::make_unique<Store>("physics.continuous.dynamic-pair");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity first = Bullet(store, 300.0f);
+	store.GetMutable<Transform>(first)->Frame.Position = Vector3{-3.0f, 0.0f, 0.0f};
+	const Entity second = Bullet(store, -300.0f);
+	store.GetMutable<Transform>(second)->Frame.Position = Vector3{3.0f, 0.0f, 0.0f};
+
+	Tick(store);
+
+	const float firstX = store.Get<Transform>(first)->Frame.Position.X;
+	const float secondX = store.Get<Transform>(second)->Frame.Position.X;
+	CHECK(firstX < 0.0f);
+	CHECK(secondX > 0.0f);
+	CHECK(firstX == Approx(-secondX).margin(1e-4f));
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 2);
+}
+
+TEST_CASE("pure rotation is clamped before a thin bar crosses a block", "[continuous]") {
+	auto owned = std::make_unique<Store>("physics.continuous.rotation");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity block = store.Create();
+	store.Set<Transform>(block, Transform{CFrame{Vector3{-1.5f, 0.0f, 0.0f}}});
+	Collider target;
+	target.Extent = Vector3{0.1f, 0.1f, 0.1f};
+	store.Set<Collider>(block, target);
+	SyncBroadphase(store);
+
+	const Entity bar = Bullet(store, 0.0f);
+	store.GetMutable<Collider>(bar)->Extent = Vector3{0.05f, 2.0f, 0.05f};
+	store.GetMutable<Motion>(bar)->Angular = Vector3{0.0f, 0.0f, 120.0f};
+	Tick(store);
+
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+	const Vector3 up = store.Get<Transform>(bar)->Frame.UpVector();
+	CHECK(up.X < -0.6f);
+	CHECK(up.Y > 0.05f);
+	BroadPhase(store);
+	NarrowPhase(store);
+	CHECK_FALSE(store.Resource<PhysicsWorld>()->Manifolds().empty());
+}
+
+TEST_CASE("an early pair does not rewind a body that arrives later", "[continuous]") {
+	auto owned = std::make_unique<Store>("physics.continuous.ordered-events");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity late = Bullet(store, 1200.0f);
+	store.GetMutable<Transform>(late)->Frame.Position = Vector3{-10.0f, 0.0f, 0.0f};
+	const Entity middle = Bullet(store, 600.0f);
+	const Entity early = Bullet(store, 0.0f);
+	store.GetMutable<Transform>(early)->Frame.Position = Vector3{3.0f, 0.0f, 0.0f};
+
+	Tick(store);
+
+	CHECK(store.Get<Transform>(middle)->Frame.Position.X > 1.9f);
+	CHECK(store.Get<Transform>(early)->Frame.Position.X > 2.9f);
+	CHECK(store.Get<Transform>(late)->Frame.Position.X > 0.8f);
+	CHECK(store.Get<Transform>(late)->Frame.Position.X < 1.2f);
+}
+
+TEST_CASE("a frozen cascade supersedes its stale initial pair", "[continuous]") {
+	auto owned = std::make_unique<Store>("physics.continuous.frozen-cascade");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Entity late = Bullet(store, 1200.0f);
+	store.GetMutable<Transform>(late)->Frame.Position = Vector3{-10.0f, 0.0f, 0.0f};
+	const Entity middle = Bullet(store, 600.0f);
+	const Entity early = Bullet(store, 0.0f);
+	store.GetMutable<Transform>(early)->Frame.Position = Vector3{3.0f, 0.0f, 0.0f};
+
+	Tick(store);
+
+	// Middle first freezes against early. Its old event with late was made
+	// while middle still moved, so the fresh frozen-body sweep must replace it.
+	CHECK(store.Get<Transform>(middle)->Frame.Position.X > 1.9f);
+	CHECK(store.Get<Transform>(early)->Frame.Position.X > 2.9f);
+	CHECK(store.Get<Transform>(late)->Frame.Position.X > 0.8f);
+	CHECK(store.Get<Transform>(late)->Frame.Position.X < 1.2f);
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 3);
+}
+
+TEST_CASE("an off-centre hull uses its reach from the body origin", "[continuous]") {
+	auto owned = std::make_unique<Store>("physics.continuous.offset-hull");
+	Store &store = *owned;
+	PreparePhysicsWorld(store, 4.0f);
+
+	const Name geometry("offset-hull");
+	const Vector3 points[8] = {
+		{-0.1f, 3.9f, -0.1f},
+		{0.1f, 3.9f, -0.1f},
+		{-0.1f, 4.1f, -0.1f},
+		{0.1f, 4.1f, -0.1f},
+		{-0.1f, 3.9f, 0.1f},
+		{0.1f, 3.9f, 0.1f},
+		{-0.1f, 4.1f, 0.1f},
+		{0.1f, 4.1f, 0.1f},
+	};
+	CollisionShapes baked;
+	baked.SetHull(geometry, engine::collision::BuildConvexHull(points));
+	store.SetResource(std::move(baked));
+
+	const Entity block = store.Create();
+	store.Set<Transform>(block, Transform{CFrame{Vector3{-4.0f, 0.0f, 0.0f}}});
+	Collider target;
+	target.Extent = Vector3{0.1f, 0.1f, 0.1f};
+	store.Set<Collider>(block, target);
+	SyncBroadphase(store);
+
+	const Entity hull = Bullet(store, 0.0f);
+	Collider &collider = *store.GetMutable<Collider>(hull);
+	collider.Shape = ShapeKind::Hull;
+	collider.Geometry = geometry;
+	store.GetMutable<Motion>(hull)->Angular = Vector3{0.0f, 0.0f, 120.0f};
+	Tick(store);
+
+	CHECK(store.Resource<PhysicsWorld>()->SweptBodies() == 1);
+	CHECK(store.Get<Transform>(hull)->Frame.UpVector().Y > 0.0f);
 }
 
 TEST_CASE("a body with nothing in its way is left alone", "[continuous]") {

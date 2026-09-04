@@ -55,6 +55,15 @@ namespace engine::physics {
 		// find last tick's impulse and warm-start from it. Nothing reads it as
 		// geometry, and its encoding is the narrow phase's to choose.
 		uint32_t Feature = 0;
+
+		// How far apart the two surfaces still are, in metres.
+		//
+		// Zero on every contact exposed by `PhysicsWorld::Manifolds`. A positive
+		// value is used only by the solver's private speculative rows, where it
+		// limits closing speed before the surfaces meet. Keeping it beside the
+		// point makes the constraint's geometry explicit without turning a gap
+		// into a negative penetration.
+		float Separation = 0.0f;
 	};
 
 	// Every point at which one pair of colliders touches, with the one normal

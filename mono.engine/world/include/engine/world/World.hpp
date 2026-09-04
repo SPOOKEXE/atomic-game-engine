@@ -111,6 +111,13 @@ namespace engine::world {
 		// physics cell size already has.
 		double PhysicsTickRate = 0.0;
 
+		// Script updates per second. Zero follows the world's tick rate.
+		//
+		// A script beat is deliberately separate from simulation: a world can
+		// keep collision and replication responsive while infrequent authored
+		// behaviours cost less. Hosts apply this to their scripting scheduler.
+		double ScriptTickRate = 0.0;
+
 		// Snapshots published per second. Zero publishes on every tick.
 		//
 		// Measured in *simulated* seconds, so a world suspended for an hour

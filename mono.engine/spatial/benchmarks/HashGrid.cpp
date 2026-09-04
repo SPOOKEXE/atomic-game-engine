@@ -96,6 +96,87 @@ namespace hashgrid_bench {
 		return built.back().second;
 	}
 
+	// Every proxy exceeds the cell-entry cap. This records the bounded fallback
+	// rather than letting a large box turn a rebuild benchmark into unbounded
+	// cell enumeration.
+	const std::vector<Proxy> &OversizedScene() {
+		static const std::vector<Proxy> proxies = [] {
+			std::vector<Proxy> made;
+			made.reserve(4000);
+			for (size_t index = 0; index < 4000; index++) {
+				made.push_back(
+					Proxy{
+						static_cast<uint64_t>(index),
+						AABB{Vector3{-100.0f, -100.0f, -100.0f}, Vector3{100.0f, 100.0f, 100.0f}},
+						LayerMask::All(),
+					}
+				);
+			}
+			return made;
+		}();
+		return proxies;
+	}
+
+	const std::vector<Proxy> &DistributedOversizedScene() {
+		static const std::vector<Proxy> proxies = [] {
+			std::vector<Proxy> made;
+			made.reserve(4000);
+			for (size_t index = 0; index < 4000; index++) {
+				const float x = static_cast<float>(index % 64) * 512.0f;
+				const float z = static_cast<float>(index / 64) * 512.0f;
+				made.push_back(
+					Proxy{
+						static_cast<uint64_t>(index),
+						AABB{Vector3{x, -2.0f, z}, Vector3{x + 192.0f, 2.0f, z + 192.0f}},
+						LayerMask::All(),
+					}
+				);
+			}
+			return made;
+		}();
+		return proxies;
+	}
+
+	const std::vector<Proxy> &ParallelDistributedOversizedScene() {
+		static const std::vector<Proxy> proxies = [] {
+			std::vector<Proxy> made;
+			made.reserve(HashGrid::PARALLEL_MINIMUM_PROXIES);
+			for (size_t index = 0; index < HashGrid::PARALLEL_MINIMUM_PROXIES; index++) {
+				const float x = static_cast<float>(index % 256) * 512.0f;
+				const float z = static_cast<float>(index / 256) * 512.0f;
+				made.push_back(
+					Proxy{
+						static_cast<uint64_t>(index),
+						AABB{Vector3{x, -2.0f, z}, Vector3{x + 192.0f, 2.0f, z + 192.0f}},
+						LayerMask::All(),
+					}
+				);
+			}
+			return made;
+		}();
+		return proxies;
+	}
+
+	const std::vector<Proxy> &MixedScene() {
+		static const std::vector<Proxy> proxies = [] {
+			std::vector<Proxy> made = SceneOf(4000);
+			const std::vector<Proxy> &large = DistributedOversizedScene();
+			made.insert(made.end(), large.begin(), large.begin() + 256);
+			return made;
+		}();
+		return proxies;
+	}
+
+	// Spatial has no job-system dependency. This measures the deterministic
+	// parallel count-prefix-fill route against the serial baseline without
+	// smuggling `Engine::parallel` into the module; physics owns the real jobs
+	// adapter in its end-to-end rows.
+	void InlineDispatch(void *, size_t count, HashGrid::RangeDispatcher::Body body, void *bodyContext) {
+		body(bodyContext, 0, count);
+	}
+
+	const HashGrid::RangeDispatcher INLINE_DISPATCHER{nullptr, &InlineDispatch};
+
 	// A grid over `count` colliders at `cellSize`, built once.
 	//
 	// Lazily rather than at static-initialisation time, so the measured body
@@ -170,6 +251,88 @@ BENCH("Rebuild · 16000 colliders, 4m cells", 20) {
 	HashGrid grid{4.0f};
 	for (int pass = 0; pass < 20; pass++) {
 		grid.Rebuild(SceneOf(16000));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Rebuild · 100000 colliders, 4m cells", 5) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 5; pass++) {
+		grid.Rebuild(SceneOf(100000));
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel rebuild · 1000 colliders, 4m cells", 200) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 200; pass++) {
+		grid.RebuildParallel(SceneOf(1000), INLINE_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel rebuild · 4000 colliders, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 50; pass++) {
+		grid.RebuildParallel(SceneOf(4000), INLINE_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel rebuild · 16000 colliders, 4m cells", 20) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 20; pass++) {
+		grid.RebuildParallel(SceneOf(16000), INLINE_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel rebuild · 32000 colliders, 4m cells", 10) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 10; pass++) {
+		grid.RebuildParallel(SceneOf(32000), INLINE_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel rebuild · 64000 colliders, 4m cells", 5) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 5; pass++) {
+		grid.RebuildParallel(SceneOf(64000), INLINE_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Rebuild · 32000 distributed promoted colliders", 10) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 10; pass++) {
+		grid.Rebuild(ParallelDistributedOversizedScene());
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Parallel request · 32000 distributed promoted colliders", 10) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 10; pass++) {
+		grid.RebuildParallel(ParallelDistributedOversizedScene(), INLINE_DISPATCHER);
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Rebuild · 4000 oversized colliders, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(OversizedScene());
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Rebuild grow then shrink · 4000 colliders, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	grid.Rebuild(SceneOf(4000));
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(SceneOf(1000));
+		grid.Rebuild(SceneOf(4000));
 		Consume(grid.ProxyCount());
 	}
 }
@@ -474,5 +637,81 @@ BENCH("OverlapBox · one layer in four, 4000 colliders, 4m cells", 2000) {
 		const float offset = static_cast<float>(pass % 64) - 32.0f;
 		const AABB box = AABB::FromCentre(Vector3{offset, 0.0f, offset}, Vector3{2.0f, 2.0f, 2.0f});
 		Consume(OverlapBox(grid, box, LayerMask::Only(1), found).Written);
+	}
+}
+
+BENCH("Rebuild · 4000 distributed promoted colliders, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(DistributedOversizedScene());
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("OverlapBox · local distributed promoted colliders, 4m cells", 2000) {
+	HashGrid grid{4.0f};
+	grid.Rebuild(DistributedOversizedScene());
+	std::array<uint64_t, 64> found{};
+	for (int pass = 0; pass < 2000; pass++) {
+		const float offset = static_cast<float>(pass % 64) * 512.0f;
+		Consume(OverlapBox(
+					grid,
+					AABB::FromCentre(Vector3{offset, 0.0f, 0.0f}, Vector3{8.0f, 8.0f, 8.0f}),
+					LayerMask::All(),
+					found
+		)
+					.Written);
+	}
+}
+
+BENCH("Pipeline · rebuild and 4000 local distributed overlaps, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	std::array<uint64_t, 64> found{};
+	const AABB box = AABB::FromCentre(Vector3::Zero, Vector3{8.0f, 8.0f, 8.0f});
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(DistributedOversizedScene());
+		size_t written = 0;
+		for (int query = 0; query < 4000; query++) {
+			written += OverlapBox(grid, box, LayerMask::All(), found).Written;
+		}
+		Consume(written);
+	}
+}
+
+BENCH("Rebuild · mixed normal and promoted colliders, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(MixedScene());
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Rebuild grow then shrink · normal and distributed promoted colliders, 4m cells", 50) {
+	HashGrid grid{4.0f};
+	grid.Rebuild(DistributedOversizedScene());
+	for (int pass = 0; pass < 50; pass++) {
+		grid.Rebuild(SceneOf(4000));
+		grid.Rebuild(DistributedOversizedScene());
+		Consume(grid.ProxyCount());
+	}
+}
+
+BENCH("Raycast · coarse-only scene, 4m cells", 200) {
+	HashGrid grid{4.0f};
+	grid.Rebuild(DistributedOversizedScene());
+	for (int pass = 0; pass < 200; pass++) {
+		for (const Ray &ray : Rays()) {
+			Consume(Raycast(grid, ray, 4096.0f).has_value());
+		}
+	}
+}
+
+BENCH("ShapeCast · coarse-only scene, 4m cells", 200) {
+	HashGrid grid{4.0f};
+	grid.Rebuild(DistributedOversizedScene());
+	std::array<uint64_t, 64> found{};
+	const AABB box = AABB::FromCentre(Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f});
+	for (int pass = 0; pass < 200; pass++) {
+		Consume(ShapeCast(grid, box, Vector3{1024.0f, 0.0f, 1024.0f}, LayerMask::All(), found).Written);
 	}
 }

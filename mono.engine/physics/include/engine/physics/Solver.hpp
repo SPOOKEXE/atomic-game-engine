@@ -6,15 +6,12 @@
 // because they are the two halves of one job: `Solve` decides what every
 // velocity should become and `Publish` is the pass that makes it so.
 //
-// **The solver is serial, and that is a determinism requirement rather than a
-// performance oversight.** Sequential impulse works by visiting contacts one
-// after another and letting each one see the velocities the previous ones left
-// behind - that is the whole method. Two threads visiting the same contact set
-// in whatever order they got to it produce a different answer every run, and
-// the run that differs is the one somebody recorded. **Do not "fix" this with a
-// `Jobs::For`.** If contact solving ever has to be parallel, the change is
-// graph colouring into independent batches with a fixed batch order, which is a
-// different algorithm and needs its own measurement.
+// **Sequential impulse remains ordered where contacts conflict.** A persistent
+// greedy colouring assigns whole manifolds to fixed waves. Tasks in one wave
+// write disjoint movable bodies, and the barrier before the next wave preserves
+// a deterministic order for contacts that share one. Independent components
+// run as persistent islands. Dense, high-degree, oversized and below-threshold
+// shapes retain the measured chunk fallback.
 //
 // **Sleeping lives here, and `scene::RigidBody` no longer carries a flag for
 // it.** A body that has been still long enough loses its `scene::Motion`, which
@@ -171,6 +168,42 @@ namespace engine::physics {
 	//
 	// @since v0.17
 	inline constexpr size_t SOLVE_GROUP_TARGET = 64;
+
+	// A low-degree contact graph has only a few waves, so every wave has enough
+	// independent manifold blocks to pay for its fixed barrier. Dense and star
+	// graphs exceed this bound and retain the measured chunk fallback below.
+	inline constexpr size_t SOLVER_COLOR_MAX_WAVES = 16;
+	// Two-wave chains are faster through the chunk path on the release benchmark.
+	// A lattice needs at least three waves before its eliminated border work pays
+	// for the fixed colour barriers.
+	inline constexpr size_t SOLVER_COLOR_MIN_WAVES = 3;
+	inline constexpr size_t SOLVER_COLOR_MIN_BLOCKS_PER_WAVE = 4;
+	// Below this many rows, the fixed colour-wave barriers do not repay their
+	// setup. The rejected decision is still cached by the exact topology key.
+	inline constexpr size_t SOLVER_COLOR_MIN_ROWS = 8192;
+	// Colouring is for a large connected island. Many separate stacks produce
+	// valid colours but too many barriers, so one movable component must own at
+	// least this fraction of dynamic-dynamic manifold blocks before it is used.
+	inline constexpr size_t SOLVER_COLOR_MIN_COMPONENT_BLOCK_FRACTION_DENOMINATOR = 2;
+	// One task keeps several independent manifold blocks together. The unit is
+	// still a block, never a point row, while amortising queue claims on chains
+	// and lattices whose individual contacts are deliberately tiny.
+	inline constexpr size_t SOLVER_COLOR_BLOCKS_PER_TASK = 64;
+
+	// Several independent islands avoid both chunk-border work and colour-wave
+	// barriers. These fixed scene-shape gates were measured in the release solver
+	// rows: fewer than four tasks loses to one chunk dispatch, while a dominant
+	// island is better served by persistent colouring or the chunk fallback.
+	//
+	// @since v0.22
+	inline constexpr size_t SOLVER_ISLAND_MINIMUM = 4;
+	inline constexpr size_t SOLVER_ISLAND_MAXIMUM = 1024;
+	// A huge active world already has enough chunk work. Its full exact graph is
+	// expensive to rebuild while contact pairs churn, so it retains the proven
+	// chunk path before allocating or walking island state.
+	inline constexpr size_t SOLVER_ISLAND_DISCOVERY_MAXIMUM_BODIES = 8192;
+	inline constexpr size_t SOLVER_ISLAND_LARGEST_SHARE_NUMERATOR = 1;
+	inline constexpr size_t SOLVER_ISLAND_LARGEST_SHARE_DENOMINATOR = 2;
 
 	// How many sweeps a worker does over its own group before rejoining.
 	//

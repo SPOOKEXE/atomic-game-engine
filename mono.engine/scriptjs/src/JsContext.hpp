@@ -25,6 +25,7 @@
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/Scope.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Signals.hpp>
 #include <engine/script/Tasks.hpp>
@@ -82,6 +83,7 @@ namespace engine::script {
 
 		// The shared machinery.
 		SignalTable Signals;
+		ScopeTable Scopes;
 
 		// Reused by the two bulk placement methods. The runtime is single-threaded,
 		// and each call consumes these before another script method can replace them.
@@ -172,6 +174,7 @@ namespace engine::script {
 		JSClassID RandomClass = 0;
 		JSClassID SignalClass = 0;
 		JSClassID ConnectionClass = 0;
+		JSClassID ScopeClass = 0;
 		JSClassID RaycastParamsClass = 0;
 
 		// What `TweenService.Create` hands back. A class of its own rather than

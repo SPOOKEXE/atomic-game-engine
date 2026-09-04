@@ -3,6 +3,7 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -13,15 +14,50 @@
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
 
-#include <algorithm>
 #include <cstddef>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace engine::physics {
 
 	namespace {
+		void ReportMemory(const PhysicsWorld &world) {
+			const PhysicsMemoryStats stats = world.MemoryStats();
+			const PhysicsMemoryBytes broadphase = stats.Broadphase();
+			const PhysicsMemoryBytes total = stats.Total();
+			const auto report = [](const char *liveName, const char *retainedName, PhysicsMemoryBytes bytes) {
+				core::Metrics::SetGauge(liveName, static_cast<double>(bytes.LiveBytes));
+				core::Metrics::SetGauge(retainedName, static_cast<double>(bytes.RetainedBytes));
+			};
+			report(
+				"physics.memory.broadphase.live-bytes", "physics.memory.broadphase.retained-bytes", broadphase
+			);
+			report(
+				"physics.memory.dynamic-grid.live-bytes",
+				"physics.memory.dynamic-grid.retained-bytes",
+				stats.DynamicGrid
+			);
+			report(
+				"physics.memory.static-grid.live-bytes",
+				"physics.memory.static-grid.retained-bytes",
+				stats.StaticGrid
+			);
+			report(
+				"physics.memory.dynamic-tree.live-bytes",
+				"physics.memory.dynamic-tree.retained-bytes",
+				stats.DynamicTree
+			);
+			report("physics.memory.solver.live-bytes", "physics.memory.solver.retained-bytes", stats.Solver);
+			report(
+				"physics.memory.persistent.live-bytes",
+				"physics.memory.persistent.retained-bytes",
+				stats.Persistent
+			);
+			report("physics.memory.total.live-bytes", "physics.memory.total.retained-bytes", total);
+		}
+
 		// Whether a pair that has left the manifold list is still really
 		// touching.
 		//
@@ -40,19 +76,19 @@ namespace engine::physics {
 
 		// The body at `entity`, or nothing.
 		//
-		// The array is sorted by entity, so this is a binary search. It is
-		// called from inside an `Each` over the dynamic rows, which is why the
-		// array being sorted was worth a sort in the first place.
-		const SolverBody *BodyOf(std::span<const SolverBody> bodies, ecs::Entity entity) {
-			const auto found = std::lower_bound(
-				bodies.begin(), bodies.end(), entity, [](const SolverBody &body, ecs::Entity target) {
-					return body.Owner.Id < target.Id;
-				}
-			);
-			if (found == bodies.end() || !(found->Owner == entity)) {
+		// The index is lookup-only. Contact and solver order remains the sorted
+		// body array, while publication avoids searching it for every dynamic row.
+		const SolverBody *BodyOf(
+			std::span<const SolverBody> bodies,
+			const std::unordered_map<uint64_t, size_t> &indexByOwner,
+			ecs::Entity entity
+		) {
+			const auto found = indexByOwner.find(entity.Id);
+			if (found == indexByOwner.end() || found->second >= bodies.size() ||
+				bodies[found->second].Owner != entity) {
 				return nullptr;
 			}
-			return &*found;
+			return &bodies[found->second];
 		}
 	}
 
@@ -81,12 +117,15 @@ namespace engine::physics {
 		// reference as a direct memory write, which is exactly what is wanted.
 		const float delta = PhysicsStepSeconds(store);
 		const std::span<const SolverBody> bodies = world->Bodies();
+		const std::unordered_map<uint64_t, size_t> &bodyIndex = PipelineInternals::BodyIndexByOwner(*world);
 		{
-			ENGINE_PROFILE_CAT("physics.publish-correction", core::ProfileCategory::Physics);
+			ENGINE_PROFILE_CAT("physics.publish-transform", core::ProfileCategory::Physics);
 			if (!bodies.empty() && delta > 0.0f) {
 				store.Each<scene::Transform, const scene::Motion>(
-					[bodies, delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
-						const SolverBody *body = BodyOf(bodies, entity);
+					[bodies,
+					 &bodyIndex,
+					 delta](ecs::Entity entity, scene::Transform &transform, const scene::Motion &) {
+						const SolverBody *body = BodyOf(bodies, bodyIndex, entity);
 						if (body == nullptr || !body->Movable) {
 							return;
 						}
@@ -106,30 +145,32 @@ namespace engine::physics {
 		{
 			ENGINE_PROFILE_CAT("physics.publish-velocity", core::ProfileCategory::Physics);
 			for (const SolverBody &body : bodies) {
-			if (world->Sleeping(body.Owner)) {
-				// **The archetype move.** Losing `scene::Motion` takes the row
-				// out of `IntegrateMotion`'s query and out of the dynamic half
-				// of the broad phase - the query never visits it, which a tag
-				// could not deliver without a "without this component" query
-				// term the ECS does not have.
-				if (store.Has<scene::Motion>(body.Owner)) {
-					store.Remove<scene::Motion>(body.Owner);
+				if (body.Asleep) {
+					// **The archetype move.** Losing `scene::Motion` takes the row
+					// out of `IntegrateMotion`'s query and out of the dynamic half
+					// of the broad phase - the query never visits it, which a tag
+					// could not deliver without a "without this component" query
+					// term the ECS does not have.
+					if (store.Has<scene::Motion>(body.Owner)) {
+						store.Remove<scene::Motion>(body.Owner);
+					}
+					continue;
 				}
-				continue;
-			}
 
-			// A kinematic body and a piece of static geometry are both in the
-			// body array - they take part in every contact - and neither has a
-			// velocity the solver is allowed to have changed. Writing one back
-			// would overwrite whatever moves the platform.
-			if (!body.Movable) {
-				continue;
-			}
+				// A kinematic body and a piece of static geometry are both in the
+				// body array - they take part in every contact - and neither has a
+				// velocity the solver is allowed to have changed. Writing one back
+				// would overwrite whatever moves the platform.
+				if (!body.Movable) {
+					continue;
+				}
 
-			// `Set` rather than `GetMutable`, because a body that has just
-			// woken has no `scene::Motion` at all and this is the write that
-			// gives it one back.
-			store.Set<scene::Motion>(body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity});
+				// `Set` rather than `GetMutable`, because a body that has just
+				// woken has no `scene::Motion` at all and this is the write that
+				// gives it one back.
+				store.Set<scene::Motion>(
+					body.Owner, scene::Motion{body.LinearVelocity, body.AngularVelocity}
+				);
 			}
 		}
 
@@ -163,7 +204,7 @@ namespace engine::physics {
 		// `SyncBroadphase`'s inner gate - "was a changed row one without a
 		// `Motion`" - still answers no for every row this touches.
 		{
-			ENGINE_PROFILE_CAT("physics.publish-changes", core::ProfileCategory::Physics);
+			ENGINE_PROFILE_CAT("physics.publish-structural", core::ProfileCategory::Physics);
 			store.Each<const scene::Motion>([&store](ecs::Entity entity, const scene::Motion &) {
 				store.MarkChanged<scene::Transform>(entity);
 			});
@@ -183,36 +224,40 @@ namespace engine::physics {
 			std::vector<CandidatePair> &now = PipelineInternals::TouchingNow(*world);
 			now.clear();
 
-		size_t previous = 0;
-		const auto retire = [&](const CandidatePair &limit, bool all) {
-			while (previous < last.size() && (all || last[previous] < limit)) {
-				const CandidatePair gone = last[previous];
-				previous++;
+			size_t previous = 0;
+			const auto retire = [&](const CandidatePair &limit, bool all) {
+				while (previous < last.size() && (all || last[previous] < limit)) {
+					const CandidatePair gone = last[previous];
+					previous++;
 
-				if (StillRestingTogether(store, *world, gone)) {
-					now.push_back(gone);
-					events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Persisted});
-					continue;
+					if (StillRestingTogether(store, *world, gone)) {
+						now.push_back(gone);
+						events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Persisted});
+						continue;
+					}
+					events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Ended});
 				}
-				events.push_back(ContactEvent{gone.A, gone.B, ContactPhase::Ended});
-			}
-		};
+			};
 
-		for (const ContactManifold &manifold : world->Manifolds()) {
-			const CandidatePair pair{manifold.A, manifold.B};
-			retire(pair, false);
+			for (const ContactManifold &manifold : world->Manifolds()) {
+				const CandidatePair pair{manifold.A, manifold.B};
+				retire(pair, false);
 
-			ContactPhase phase = ContactPhase::Began;
-			if (previous < last.size() && last[previous] == pair) {
-				phase = ContactPhase::Persisted;
-				previous++;
+				ContactPhase phase = ContactPhase::Began;
+				if (previous < last.size() && last[previous] == pair) {
+					phase = ContactPhase::Persisted;
+					previous++;
+				}
+				events.push_back(ContactEvent{pair.A, pair.B, phase});
+				now.push_back(pair);
 			}
-			events.push_back(ContactEvent{pair.A, pair.B, phase});
-			now.push_back(pair);
-		}
-		retire(CandidatePair{}, true);
+			retire(CandidatePair{}, true);
 
 			std::swap(last, now);
 		}
+
+		// Publishing is the end of the full pipeline: pairs, manifolds, rows,
+		// persistent contact state, and both indexes now describe one tick.
+		ReportMemory(*world);
 	}
 }

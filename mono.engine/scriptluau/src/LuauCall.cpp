@@ -823,7 +823,7 @@ namespace engine::script {
 		// Upvalue 1 is the context, which is what `UpvalueContext` reads and what
 		// every other bound function in this module carries. Upvalue 2 is the row.
 		int NeutralLuauMethod(lua_State *state) {
-			const int row = static_cast<int>(lua_tointeger(state, lua_upvalueindex(2)));
+			const int row = static_cast<int>(lua_tointeger(state, lua_upvalueindex(3)));
 
 			LuauCall call(state);
 			NeutralInstanceMethods()[static_cast<size_t>(row)].Function(call);
@@ -850,7 +850,7 @@ namespace engine::script {
 		// userdata pointing at one is a pointer that cannot dangle.
 		int NeutralLuauServiceMethod(lua_State *state) {
 			const auto *row =
-				static_cast<const ServiceMethod *>(lua_tolightuserdata(state, lua_upvalueindex(2)));
+				static_cast<const ServiceMethod *>(lua_tolightuserdata(state, lua_upvalueindex(3)));
 
 			LuauCall call(state, LuauCall::OnService{});
 			row->Function(call);
@@ -873,7 +873,7 @@ namespace engine::script {
 		// `ServiceSurface` handed to `InstallService` has static storage duration,
 		// so its address is a pointer that cannot dangle.
 		const ServiceSurface &UpvalueSurface(lua_State *state) {
-			return *static_cast<const ServiceSurface *>(lua_tolightuserdata(state, lua_upvalueindex(2)));
+			return *static_cast<const ServiceSurface *>(lua_tolightuserdata(state, lua_upvalueindex(3)));
 		}
 
 		// The row one field names, or null.

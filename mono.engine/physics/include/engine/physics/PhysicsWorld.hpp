@@ -29,12 +29,14 @@
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/Shapes.hpp>
 #include <engine/spatial/ChunkMap.hpp>
+#include <engine/spatial/DynamicBvh.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -86,6 +88,17 @@ namespace engine::physics {
 
 		// Which layers it is tested against.
 		spatial::LayerMask Mask;
+	};
+
+	// One continuous-collision candidate ordered by its absolute tick fraction.
+	// @since v0.23
+	struct ContinuousImpactEvent {
+		float Fraction = 1.0f;
+		float BiteFraction = 0.0f;
+		uint32_t First = 0;
+		uint32_t Second = 0;
+		bool Dynamic = false;
+		bool Reswept = false;
 	};
 
 	// Two colliders whose world boxes overlap, and which the layer masks admit.
@@ -355,6 +368,10 @@ namespace engine::physics {
 		// The accumulated impulses along the two friction directions.
 		float Tangent[2] = {0.0f, 0.0f};
 
+		// Closing speed captured before a speculative impulse slowed the pair.
+		// Consumed by restitution on the first real contact, then cleared.
+		float SpeculativeClosingSpeed = 0.0f;
+
 		// Orders by the two entities and then the feature, so the cache is a
 		// sorted array a binary search answers rather than a hash map whose
 		// walk order is the allocator's.
@@ -476,6 +493,14 @@ namespace engine::physics {
 		// is about a penetration that has already been unwound.
 		float CorrectionImpulse = 0.0f;
 
+		// Pre-solve speed retained across the speculative-to-real transition.
+		float SpeculativeClosingSpeed = 0.0f;
+
+		// Whether this row predicts a contact that has not happened yet.
+		// Speculative rows constrain only normal closing speed. They do not warm
+		// start, apply friction, correct position, or become contact events.
+		bool Speculative = false;
+
 		// The contact's cache key, carried so the tick's answer can be stored
 		// under the same key it was warm-started from.
 		uint32_t Feature = 0;
@@ -488,15 +513,23 @@ namespace engine::physics {
 		//@}
 	};
 
-	// A run of contact rows no other run shares a movable body with.
+	// One entry in the pair-sorted merge the solver consumes.
+	struct SolverManifoldIndex {
+		size_t Index = 0;
+		bool Speculative = false;
+	};
+
+	// A contiguous solver task. Chunk-fallback groups share no movable body;
+	// colour groups are one complete manifold block and are disjoint only from
+	// the other groups in their `SolverColor` wave.
 	//
 	// **This is what makes a sequential-impulse solve parallel without making it
 	// approximate.** Two groups name disjoint sets of bodies the solver may
 	// write, so a worker sweeping one group and a worker sweeping another cannot
 	// see each other's arithmetic - and the answer is therefore the same however
 	// the two were scheduled, which is the property `Solver.hpp` says a parallel
-	// solve would have to have. It is the graph colouring that file names, with
-	// the colours read off a spatial partition rather than searched for.
+	// solve needs. The persistent colour path assigns the lowest available wave
+	// in manifold order; the chunk partition remains the fallback.
 	//
 	// **Disjoint in *movable* bodies and not in all of them**, which is the
 	// distinction that makes the scheme work at all. Every contact in a scene
@@ -515,6 +548,175 @@ namespace engine::physics {
 		// sweep over a group is a walk rather than a filtered pass over the
 		// whole list.
 		uint32_t RowCount = 0;
+	};
+
+	// One deterministic barrier wave in the contact-constraint colouring.
+	// `SolverGroups[FirstGroup, FirstGroup + GroupCount)` are whole manifold
+	// blocks that may run together. Their rows remain contiguous so no point
+	// in a manifold can migrate to another worker.
+	//
+	// @since v0.22
+	struct SolverColor {
+		// The first manifold block in this wave.
+		uint32_t FirstGroup = 0;
+
+		// How many consecutive blocks belong to the wave.
+		uint32_t GroupCount = 0;
+
+		// The total contact rows across those blocks.
+		uint32_t RowCount = 0;
+	};
+
+	// The exact conflict identity retained between solver ticks.
+	//
+	// Full entity ids carry their generations. `State` carries the flags that
+	// decide whether the manifold claims a colour, so equality is enough to
+	// decide whether the prior assignment remains safe.
+	//
+	// @since v0.22
+	struct SolverTopologyEntry {
+		// The manifold's canonical entity pair.
+		//@{
+		uint64_t First = 0;
+		uint64_t Second = 0;
+		//@}
+
+		// Trigger, movable-side and nonempty-manifold bits.
+		uint8_t State = 0;
+
+		// Whether both entries describe the same solver conflict.
+		//
+		// @param other The entry to compare.
+		// @return `true` when its pair and eligibility flags match.
+		constexpr bool operator==(const SolverTopologyEntry &other) const {
+			return First == other.First && Second == other.Second && State == other.State;
+		}
+	};
+
+	// One contact point retained in both colliders' local spaces.
+	//
+	// The two anchors move with their own bodies. Reconstructing them next tick
+	// exposes separation and sideways drift without rerunning the pair's exact
+	// geometry algorithm.
+	//
+	// @since v0.22
+	struct PersistentContactPoint {
+		// The same surface point expressed in each collider's frame.
+		//@{
+		core::Vector3 LocalFirst;
+		core::Vector3 LocalSecond;
+		//@}
+
+		// The exact manifold's stable solver key.
+		uint32_t Feature = 0;
+	};
+
+	// The geometry identity and local-space contact data retained for one pair.
+	//
+	// Full entity ids prevent a recycled ECS slot inheriting the old body's
+	// contacts. Shape and extent are part of the key so authored collider edits
+	// take the exact path immediately.
+	//
+	// @since v0.22
+	struct PersistentContactManifold {
+		// The generation-bearing canonical pair.
+		//@{
+		ecs::Entity A;
+		ecs::Entity B;
+		//@}
+
+		// The exact normal expressed in both collider frames.
+		//@{
+		core::Vector3 LocalNormalFirst;
+		core::Vector3 LocalNormalSecond;
+		//@}
+
+		// Geometry values which invalidate local anchors when authored again.
+		//@{
+		core::Vector3 FirstExtent;
+		core::Vector3 SecondExtent;
+		scene::ShapeKind FirstShape = scene::ShapeKind::Box;
+		scene::ShapeKind SecondShape = scene::ShapeKind::Box;
+		//@}
+
+		// Retained anchors, of which the first `PointCount` are live.
+		PersistentContactPoint Points[ContactManifold::MAXIMUM_POINTS];
+		uint8_t PointCount = 0;
+	};
+
+	// Compact first-hit admission record for a possible persistent manifold.
+	// A pair must repeat with the same geometry signature before the narrow
+	// phase pays for local anchors and their much larger retained row.
+	//
+	// @since v0.22
+	struct PersistentContactCandidate {
+		// The generation-bearing canonical pair.
+		//@{
+		ecs::Entity A;
+		ecs::Entity B;
+		//@}
+
+		// Hash of the pair's relative frames, extents, and shape kinds.
+		uint64_t Signature = 0;
+	};
+
+	// Per-range counters written by one narrow-phase worker and reduced after
+	// the join. Keeping these outside metrics avoids a shared lock per pair.
+	//
+	// @since v0.22
+	struct PersistentContactBatchStats {
+		// Accepted caches, exact replacements, and rejected cached geometry.
+		//@{
+		size_t Reused = 0;
+		size_t Rebuilt = 0;
+		size_t Rejected = 0;
+		//@}
+
+		// Separated pairs measured and pairs found inside the speculative skin.
+		//@{
+		size_t SpeculativeTested = 0;
+		size_t SpeculativeWithinSkin = 0;
+		//@}
+	};
+
+	// Logical container payload for one independently-owned physics subsystem.
+	// Live bytes are current useful rows; retained bytes are reusable capacity.
+	// @since v0.22
+	struct PhysicsMemoryBytes {
+		size_t LiveBytes = 0;
+		size_t RetainedBytes = 0;
+	};
+
+	// Logical storage retained by a physics world, grouped by ownership.
+	//
+	// Grid and hierarchy values are separate so their buffers cannot be counted
+	// again in broad-phase support storage. `BroadphaseBuffers` owns only the
+	// records, pair workspaces, and query scratch around those indexes.
+	// @since v0.22
+	struct PhysicsMemoryStats {
+		PhysicsMemoryBytes BroadphaseBuffers;
+		PhysicsMemoryBytes DynamicGrid;
+		PhysicsMemoryBytes StaticGrid;
+		PhysicsMemoryBytes DynamicTree;
+		PhysicsMemoryBytes Solver;
+		PhysicsMemoryBytes Persistent;
+
+		PhysicsMemoryBytes Broadphase() const {
+			return {
+				BroadphaseBuffers.LiveBytes + DynamicGrid.LiveBytes + StaticGrid.LiveBytes +
+					DynamicTree.LiveBytes,
+				BroadphaseBuffers.RetainedBytes + DynamicGrid.RetainedBytes + StaticGrid.RetainedBytes +
+					DynamicTree.RetainedBytes,
+			};
+		}
+
+		PhysicsMemoryBytes Total() const {
+			const PhysicsMemoryBytes broadphase = Broadphase();
+			return {
+				broadphase.LiveBytes + Solver.LiveBytes + Persistent.LiveBytes,
+				broadphase.RetainedBytes + Solver.RetainedBytes + Persistent.RetainedBytes,
+			};
+		}
 	};
 
 	// How long one body has been still, and whether it has been put to sleep.
@@ -640,6 +842,14 @@ namespace engine::physics {
 		std::span<const SolverBody> Bodies() const {
 			return BodyList;
 		}
+
+		// Logical storage owned by this world's physics pipeline.
+		//
+		// `BodyIndexByOwner` contributes its bucket pointers and live key-value
+		// payload. Standard containers do not expose node allocation overhead, so
+		// heap profiling remains the source for allocator overhead.
+		// @since v0.22
+		PhysicsMemoryStats MemoryStats() const;
 
 		// Whether a body is asleep, and therefore out of the dynamic set.
 		//
@@ -780,6 +990,40 @@ namespace engine::physics {
 			return SolverGroups.size();
 		}
 
+		// How many independent movable-body constraint islands the last solve found.
+		//
+		// Static geometry is deliberately absent from this count: one floor is
+		// read-only in every solve task and cannot couple two stacks.
+		//
+		// @return The canonical island count, or zero when the serial path ran.
+		// @since v0.22
+		size_t ConstraintIslandCount() const {
+			return SolverIslandCount;
+		}
+
+		// Whether the last solve dispatched independent constraint islands.
+		//
+		// @return `true` when island scheduling, rather than colouring or chunks, ran.
+		// @since v0.22
+		bool UsesIslandSchedule() const {
+			return SolverUsesIslands;
+		}
+
+		// Retained bytes used by the island plan, including the exact topology and
+		// union-find storage it shares with colouring.
+		//
+		// @return The current high-water capacity in bytes.
+		// @since v0.22
+		size_t SolverIslandRetainedBytes() const {
+			return SolverTopology.capacity() * sizeof(SolverTopologyEntry) +
+				   SolverTopologyScratch.capacity() * sizeof(SolverTopologyEntry) +
+				   SolverComponentParents.capacity() * sizeof(uint32_t) +
+				   SolverIslandOfManifold.capacity() * sizeof(uint32_t) +
+				   SolverIslandOfBody.capacity() * sizeof(uint32_t) +
+				   SolverIslandRows.capacity() * sizeof(uint32_t) +
+				   SolverIslandRowOrderScratch.capacity() * sizeof(uint32_t);
+		}
+
 		// How many contact rows the last solve could not put in a group.
 		//
 		// **The Amdahl term, and the reason it is worth publishing.** These are
@@ -816,8 +1060,19 @@ namespace engine::physics {
 		// reading `Proxy::Id` as an entity gets a number that is plausible and
 		// wrong, which is why neither grid is reachable from outside.
 		spatial::HashGrid DynamicIndex;
+		spatial::DynamicBvh DynamicTree;
 		spatial::HashGrid StaticIndex;
+		spatial::HashGrid ContinuousIndex;
+		bool DynamicTreeActive = false;
+		size_t DynamicTreeSettledFrames = 0;
 
+		// The pair walk needs each moving collider's tight and speculative boxes
+		// after the grid has consumed its proxy. The index remains tight, while
+		// `SpeculativeBounds` adds only the contact skin used by its queries.
+		std::vector<core::AABB> DynamicBounds;
+		std::vector<core::AABB> SpeculativeBounds;
+		std::vector<core::AABB> PreviousDynamicBounds;
+		std::vector<ecs::Entity> PreviousDynamicOwners;
 		std::vector<spatial::Proxy> DynamicProxies;
 		std::vector<ColliderRecord> DynamicRecords;
 		std::vector<ColliderRecord> StaticRecords;
@@ -835,6 +1090,14 @@ namespace engine::physics {
 		// where a wall is disagreeing inside one step.
 		std::vector<PlacedCollider> DynamicShapes;
 		std::vector<PlacedCollider> StaticShapes;
+		std::vector<spatial::Proxy> ContinuousProxies;
+		std::vector<ColliderRecord> ContinuousRecords;
+		std::vector<PlacedCollider> ContinuousShapes;
+		std::vector<float> ContinuousFractions;
+		std::vector<float> ContinuousThresholds;
+		std::vector<float> ContinuousReaches;
+		std::vector<float> ContinuousAngularLinearSpeeds;
+		std::vector<ContinuousImpactEvent> ContinuousEvents;
 
 		std::vector<CandidatePair> PairList;
 
@@ -846,6 +1109,11 @@ namespace engine::physics {
 		// refilled, never freed, like every other list here.
 		std::vector<SourcedPair> SourcedPairList;
 
+		// The broad phase's retained radix-sort scratch. The pair order is a
+		// solver invariant, so sorting cannot be skipped on a moving world; this
+		// avoids making the required ordering pass also allocate every tick.
+		std::vector<SourcedPair> SourcedPairSortScratch;
+
 		// One retained output list per broad-phase batch, plus the batches whose
 		// fixed candidate scratch overflowed and must be replayed on the caller.
 		// Separate lists let workers append without a shared cursor; concatenating
@@ -855,19 +1123,30 @@ namespace engine::physics {
 		std::vector<ContactManifold> ManifoldList;
 		std::vector<ContactEvent> EventList;
 
-		// One slot per candidate pair, and whether that pair turned out to touch.
-		//
-		// **What lets the narrow phase be dispatched without a shared cursor.**
-		// Workers write the slot their own pair owns and nothing else, and the
-		// compaction that follows walks the flags in pair order - so the
-		// manifold list is a function of the pair list rather than of which
-		// worker finished first, which is what the solver's order-dependence
-		// requires.
-		//
-		// `ManifoldSlots.size()` is a high-water mark, like `RowList`'s: only
-		// the slots a flag points at are ever read.
-		std::vector<ContactManifold> ManifoldSlots;
-		std::vector<uint8_t> ManifoldTouching;
+		// One retained output list per fixed narrow-phase range. Workers append
+		// only to their own list, then the owner concatenates the lists in input
+		// range order. That keeps the manifold list a function of the pair list
+		// without a shared cursor or a serial scan of every candidate pair.
+		std::vector<std::vector<ContactManifold>> ManifoldBatches;
+
+		// Separated, approaching pairs for the solver only. They stay apart from
+		// `ManifoldList` so game code never receives a touch before one occurs.
+		std::vector<ContactManifold> SpeculativeManifolds;
+		std::vector<std::vector<ContactManifold>> SpeculativeManifoldBatches;
+
+		// Pair-sorted merge of real and speculative manifolds.
+		std::vector<SolverManifoldIndex> SolverManifoldOrder;
+
+		// Exact manifolds converted to local anchors and double-buffered between
+		// ticks. Workers read `PersistentManifolds` and write only their own batch;
+		// the owner compacts those batches in pair order into `PersistentNext`.
+		std::vector<PersistentContactManifold> PersistentManifolds;
+		std::vector<PersistentContactManifold> PersistentNext;
+		std::vector<std::vector<PersistentContactManifold>> PersistentManifoldBatches;
+		std::vector<PersistentContactCandidate> PersistentCandidates;
+		std::vector<PersistentContactCandidate> PersistentCandidateNext;
+		std::vector<std::vector<PersistentContactCandidate>> PersistentCandidateBatches;
+		std::vector<PersistentContactBatchStats> PersistentManifoldBatchStats;
 
 		// What the solver works on, refilled every tick from the manifolds.
 		//
@@ -879,6 +1158,10 @@ namespace engine::physics {
 		// `size()` instead is a walk over last tick's tail, and a stale row is a
 		// contact between two bodies that are no longer touching.
 		std::vector<SolverBody> BodyList;
+		// Lookup-only index over `BodyList`, rebuilt with it. No system walks this
+		// table: body and contact order stay in their sorted arrays, while passes
+		// that need one known entity avoid repeating binary searches.
+		std::unordered_map<uint64_t, size_t> BodyIndexByOwner;
 		// A retained membership list for Solve's dense BasePart load pass.
 		std::vector<uint8_t> SolverBodyLoaded;
 		std::vector<ContactRow> RowList;
@@ -894,6 +1177,10 @@ namespace engine::physics {
 		//
 		// Cleared and refilled, never freed, like every other list here.
 		std::vector<ecs::Entity> BodyOwners;
+
+		// Stable radix passes order the owners before their compact bodies exist.
+		// Keeping this beside the source avoids an allocation on a steady tick.
+		std::vector<ecs::Entity> BodyOwnerSortScratch;
 		std::vector<std::pair<uint32_t, uint32_t>> ManifoldBodies;
 
 		// The spatial partition the solve is batched by, and the points it is
@@ -929,6 +1216,11 @@ namespace engine::physics {
 		std::vector<uint32_t> GroupRowStart;
 		std::vector<uint32_t> GroupRowCursor;
 
+		// One total per dispatched cache-emission range. The owner reduces these
+		// after the join, so confirming speculative rows does not need a second
+		// pass over every solver row or a shared counter between workers.
+		std::vector<uint32_t> SolverRememberConfirmed;
+
 		// Where each manifold's rows begin, as an index into `RowList`.
 		//
 		// **Handed out before any row is built, which is what lets the set-up
@@ -947,6 +1239,29 @@ namespace engine::physics {
 		// already sorted on the pair, so this is a running total over them.
 		std::vector<uint32_t> ImpulseStartOfManifold;
 		std::vector<SolverGroup> SolverGroups;
+		std::vector<SolverColor> SolverColors;
+
+		// The exact contact topology which made the retained colouring. The
+		// entity id contains its generation, so destroying a body and reusing its
+		// slot cannot inherit a colour that belonged to the old entity.
+		std::vector<SolverTopologyEntry> SolverTopology;
+		std::vector<SolverTopologyEntry> SolverTopologyScratch;
+		std::vector<uint32_t> SolverColorOfManifold;
+		std::vector<uint64_t> SolverColorClaims;
+		std::vector<uint32_t> SolverComponentParents;
+		// The topology key above is shared with colouring. The island assignment is
+		// a canonical movable-root id per manifold, retained for both accepted and
+		// rejected plans so unchanged contact graphs skip union-find work.
+		std::vector<uint32_t> SolverIslandOfManifold;
+		std::vector<uint32_t> SolverIslandOfBody;
+		std::vector<uint32_t> SolverIslandRows;
+		std::vector<uint32_t> SolverIslandRowOrderScratch;
+		bool SolverColorTopologyAccepted = false;
+		bool SolverColorTopologyKnown = false;
+		bool SolverIslandTopologyKnown = false;
+		bool SolverUsesColoring = false;
+		bool SolverUsesIslands = false;
+		size_t SolverIslandCount = 0;
 
 		// The rows whose two movable bodies landed in different chunks.
 		//

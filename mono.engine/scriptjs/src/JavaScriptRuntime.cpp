@@ -189,6 +189,7 @@ namespace engine::script {
 
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
 		OpenJsSurface(Context);
+		OpenJsScopes(Context);
 
 		// `eval` removed after the fact, because the intrinsic that provides
 		// `JS_Eval` provides the global too and they cannot be separated at

@@ -1,3 +1,5 @@
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Random.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
@@ -13,7 +15,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <span>
 #include <vector>
 
 TEST_SUITE_ID("engine.spatial.hashgrid")
@@ -24,6 +29,8 @@ TEST_DEPENDS("engine.core.types.aabb")
 TEST_DEPENDS("engine.spatial.layermask")
 
 using engine::core::AABB;
+using engine::core::Metrics;
+using engine::core::Random;
 using engine::core::Vector3;
 using engine::spatial::CellCoordinateOf;
 using engine::spatial::GridInternals;
@@ -56,6 +63,64 @@ namespace {
 	size_t CountOf(const std::vector<uint64_t> &found, uint64_t id) {
 		return static_cast<size_t>(std::count(found.begin(), found.end(), id));
 	}
+
+	std::vector<uint64_t> BruteOverlap(std::span<const Proxy> proxies, const AABB &volume, LayerMask mask) {
+		std::vector<uint64_t> found;
+		for (const Proxy &proxy : proxies) {
+			if (proxy.Layers.Overlaps(mask) && proxy.Bounds.Overlaps(volume)) {
+				found.push_back(proxy.Id);
+			}
+		}
+		std::sort(found.begin(), found.end());
+		return found;
+	}
+
+	void CheckOverlapOracle(
+		const HashGrid &grid, std::span<const Proxy> proxies, const AABB &volume, LayerMask mask
+	) {
+		std::vector<uint64_t> found = Visited(grid, volume, mask);
+		std::sort(found.begin(), found.end());
+		REQUIRE(std::adjacent_find(found.begin(), found.end()) == found.end());
+		REQUIRE(found == BruteOverlap(proxies, volume, mask));
+	}
+
+	struct DispatchSchedule {
+		bool Reverse = false;
+	};
+
+	void
+	DispatchRanges(void *context, size_t count, HashGrid::RangeDispatcher::Body body, void *bodyContext) {
+		const auto &schedule = *static_cast<const DispatchSchedule *>(context);
+		if (schedule.Reverse) {
+			for (size_t index = count; index > 0; index--) {
+				body(bodyContext, index - 1, index);
+			}
+			return;
+		}
+
+		// Odds before evens is a fixed permutation, not a merely reversed loop.
+		for (size_t index = 1; index < count; index += 2) {
+			body(bodyContext, index, index + 1);
+		}
+		for (size_t index = 0; index < count; index += 2) {
+			body(bodyContext, index, index + 1);
+		}
+	}
+
+	HashGrid::RangeDispatcher Dispatcher(DispatchSchedule &schedule) {
+		return HashGrid::RangeDispatcher{&schedule, &DispatchRanges};
+	}
+
+	void CheckExactLayout(const HashGrid &serial, const HashGrid &parallel) {
+		const std::span<const uint32_t> serialBuckets = GridInternals::BucketStarts(serial);
+		const std::span<const uint32_t> parallelBuckets = GridInternals::BucketStarts(parallel);
+		REQUIRE(serialBuckets.size() == parallelBuckets.size());
+		REQUIRE(std::equal(serialBuckets.begin(), serialBuckets.end(), parallelBuckets.begin()));
+		const std::span<const std::byte> serialEntries = GridInternals::EntryBytes(serial);
+		const std::span<const std::byte> parallelEntries = GridInternals::EntryBytes(parallel);
+		REQUIRE(serialEntries.size() == parallelEntries.size());
+		REQUIRE(std::equal(serialEntries.begin(), serialEntries.end(), parallelEntries.begin()));
+	}
 }
 
 TEST_CASE("a cell coordinate floors rather than truncating", "[hashgrid]") {
@@ -74,6 +139,36 @@ TEST_CASE("a cell coordinate floors rather than truncating", "[hashgrid]") {
 	REQUIRE(CellCoordinateOf(-4.0f, 1.0f / 8.0f) == -1);
 	REQUIRE(CellCoordinateOf(-8.0f, 1.0f / 8.0f) == -1);
 	REQUIRE(CellCoordinateOf(-9.0f, 1.0f / 8.0f) == -2);
+}
+
+TEST_CASE("a rebuild observes each index phase", "[hashgrid]") {
+	Metrics::Clear();
+
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Box(1, Vector3{0.1f, 0.1f, 0.1f}, Vector3{0.9f, 0.9f, 0.9f})};
+	grid.Rebuild(proxies);
+
+	// The aggregate remains the dashboard's broad rebuild number. The three
+	// phases say which deterministic pass owns it when that number regresses.
+	const auto rebuild = Metrics::GetHistogram("spatial.grid.rebuild");
+	const auto ranges = Metrics::GetHistogram("spatial.grid.ranges");
+	const auto histogram = Metrics::GetHistogram("spatial.grid.histogram");
+	const auto fill = Metrics::GetHistogram("spatial.grid.fill");
+
+	REQUIRE(rebuild.has_value());
+	REQUIRE(ranges.has_value());
+	REQUIRE(histogram.has_value());
+	REQUIRE(fill.has_value());
+	CHECK(rebuild->Samples == 1);
+	CHECK(ranges->Samples == 1);
+	CHECK(histogram->Samples == 1);
+	CHECK(fill->Samples == 1);
+	CHECK(rebuild->IsTime);
+	CHECK(ranges->IsTime);
+	CHECK(histogram->IsTime);
+	CHECK(fill->IsTime);
+
+	Metrics::Clear();
 }
 
 TEST_CASE("cells left of the origin are their own cells", "[hashgrid]") {
@@ -153,10 +248,9 @@ TEST_CASE("a proxy far larger than the query volume is still found", "[hashgrid]
 	REQUIRE(found == std::vector<uint64_t>{3});
 }
 
-TEST_CASE("a proxy too large for cells is found through the oversized list", "[hashgrid]") {
-	// A baseplate. Past the cap it stops producing entries and every query
-	// tests it directly instead - the path that keeps one enormous object from
-	// costing tens of thousands of entries per rebuild.
+TEST_CASE("a large proxy promotes to a coarse level", "[hashgrid]") {
+	// A baseplate belongs in one coarser grid, avoiding tens of thousands of
+	// base entries while preserving the normal cell walk for small bodies.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
 		Box(4, Vector3{-50.0f, -1.0f, -50.0f}, Vector3{50.0f, 0.0f, 50.0f}),
@@ -164,7 +258,8 @@ TEST_CASE("a proxy too large for cells is found through the oversized list", "[h
 	};
 	grid.Rebuild(proxies);
 
-	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+	REQUIRE(GridInternals::OversizedCount(grid) == 0);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 2) == 1);
 
 	// Found exactly once, from a query nowhere near where its cells would have
 	// started.
@@ -172,8 +267,7 @@ TEST_CASE("a proxy too large for cells is found through the oversized list", "[h
 		Visited(grid, AABB{Vector3{20.0f, -0.5f, 20.0f}, Vector3{20.5f, -0.4f, 20.5f}});
 	REQUIRE(onTop == std::vector<uint64_t>{4});
 
-	// And not found where it is not, which is what says the exact box test
-	// still runs on the oversized path.
+	// And not found where it is not, which says the exact box test still runs.
 	const std::vector<uint64_t> above =
 		Visited(grid, AABB{Vector3{20.0f, 5.0f, 20.0f}, Vector3{20.5f, 5.5f, 20.5f}});
 	REQUIRE(above.empty());
@@ -183,6 +277,30 @@ TEST_CASE("a proxy too large for cells is found through the oversized list", "[h
 		Visited(grid, AABB{Vector3{0.0f, -0.5f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f}});
 	REQUIRE(CountOf(both, 4) == 1);
 	REQUIRE(CountOf(both, 5) == 1);
+}
+
+TEST_CASE("clamped, inverted, and nonfinite bounds stay bounded", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	const float beyondBaseLimit = static_cast<float>(engine::spatial::CELL_LIMIT + 32);
+	const Proxy proxies[] = {
+		Box(1, Vector3{beyondBaseLimit, 0.0f, 0.0f}, Vector3{beyondBaseLimit + 0.5f, 0.5f, 0.5f}),
+		Box(2, Vector3{2.0f, 0.0f, 0.0f}, Vector3{1.0f, 0.5f, 0.5f}),
+		Box(3,
+			Vector3{std::numeric_limits<float>::infinity(), 0.0f, 0.0f},
+			Vector3{std::numeric_limits<float>::infinity(), 0.5f, 0.5f}),
+	};
+	grid.Rebuild(proxies);
+
+	// `CellCoordinateOf` bounds every coordinate before the span is measured,
+	// so the finite clamped box and the nonfinite pair are both bounded base
+	// ranges. The inverted box cannot be represented and remains residual.
+	REQUIRE(GridInternals::LevelProxyCount(grid, 0) == 2);
+	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+	REQUIRE(
+		Visited(
+			grid, AABB{Vector3{beyondBaseLimit, 0.0f, 0.0f}, Vector3{beyondBaseLimit + 0.5f, 0.5f, 0.5f}}
+		) == std::vector<uint64_t>{1}
+	);
 }
 
 TEST_CASE("a bucket collision is a false positive and never a miss", "[hashgrid]") {
@@ -318,6 +436,162 @@ TEST_CASE("a generated rebuild writes into owned proxy storage", "[hashgrid]") {
 	);
 }
 
+TEST_CASE("parallel rebuild preserves exact serial cells under permuted dispatch", "[hashgrid][parallel]") {
+	std::vector<Proxy> proxies;
+	proxies.reserve(HashGrid::PARALLEL_MINIMUM_PROXIES);
+	for (uint64_t index = 0; index < HashGrid::PARALLEL_MINIMUM_PROXIES; index++) {
+		const float x = static_cast<float>(index % 128) * 2.0f;
+		const float y = static_cast<float>((index / 128) % 8) * 3.0f;
+		const float z = static_cast<float>(index / 1024) * 2.0f;
+		proxies.push_back(Box(index + 1, Vector3{x, y, z}, Vector3{x + 1.5f, y + 1.5f, z + 1.5f}));
+	}
+
+	HashGrid serial{UNIT_CELL};
+	serial.Rebuild(proxies);
+	DispatchSchedule permuted;
+	HashGrid parallel{UNIT_CELL};
+	Metrics::Clear();
+	parallel.RebuildParallel(proxies, Dispatcher(permuted));
+	CheckExactLayout(serial, parallel);
+	const auto parallelUsed = Metrics::GetGauge("spatial.grid.parallel.used");
+	REQUIRE(parallelUsed.has_value());
+	REQUIRE(parallelUsed->Value == 1.0);
+
+	DispatchSchedule reverse{true};
+	parallel.RebuildParallel(proxies, Dispatcher(reverse));
+	CheckExactLayout(serial, parallel);
+	const size_t warmScratch = GridInternals::ParallelScratchCapacity(parallel);
+	REQUIRE(warmScratch != 0);
+	REQUIRE(warmScratch <= (size_t{8} << 20));
+	parallel.RebuildParallel(proxies, Dispatcher(permuted));
+	REQUIRE(GridInternals::ParallelScratchCapacity(parallel) == warmScratch);
+
+	for (uint32_t index = 0; index < 64; index++) {
+		const Vector3 centre{
+			Random::Range(index, 3, -8.0f, 264.0f),
+			Random::Range(index, 5, -4.0f, 28.0f),
+			Random::Range(index, 7, -4.0f, 20.0f),
+		};
+		const float extent = Random::Range(index, 11, 0.2f, 8.0f);
+		const AABB query = AABB::FromCentre(centre, Vector3{extent, extent, extent});
+		REQUIRE(Visited(serial, query) == Visited(parallel, query));
+		CheckOverlapOracle(parallel, proxies, query, LayerMask::All());
+	}
+}
+
+TEST_CASE("parallel radix preserves uneven shard boundaries", "[hashgrid][parallel]") {
+	std::vector<Proxy> proxies;
+	proxies.reserve(HashGrid::PARALLEL_MINIMUM_PROXIES);
+	for (uint64_t index = 0; index < HashGrid::PARALLEL_MINIMUM_PROXIES; index++) {
+		const float x = static_cast<float>(index) * 4.0f;
+		if (index < HashGrid::PARALLEL_MINIMUM_PROXIES / 2) {
+			proxies.push_back(Box(index, Vector3{x, 0.0f, 0.0f}, Vector3{x + 1.5f, 1.5f, 1.5f}));
+		} else {
+			proxies.push_back(Box(index, Vector3{x, 0.0f, 0.0f}, Vector3{x + 0.5f, 0.5f, 0.5f}));
+		}
+	}
+
+	HashGrid serial{UNIT_CELL};
+	serial.Rebuild(proxies);
+	DispatchSchedule reverse{true};
+	HashGrid parallel{UNIT_CELL};
+	Metrics::Clear();
+	parallel.RebuildParallel(proxies, Dispatcher(reverse));
+	CheckExactLayout(serial, parallel);
+	const auto parallelUsed = Metrics::GetGauge("spatial.grid.parallel.used");
+	REQUIRE(parallelUsed.has_value());
+	REQUIRE(parallelUsed->Value == 1.0);
+}
+
+TEST_CASE(
+	"parallel rebuild falls back without changing hierarchy or residual layout", "[hashgrid][parallel]"
+) {
+	std::vector<Proxy> proxies;
+	proxies.reserve(HashGrid::PARALLEL_MINIMUM_PROXIES + 259);
+	for (uint64_t index = 0; index < HashGrid::PARALLEL_MINIMUM_PROXIES; index++) {
+		const float x = static_cast<float>(index % 128) * 2.0f;
+		const float y = static_cast<float>((index / 128) % 8) * 2.0f;
+		proxies.push_back(Box(index + 1, Vector3{x, y, 0.0f}, Vector3{x + 0.5f, y + 0.5f, 0.5f}));
+	}
+	for (uint64_t index = 0; index < 257; index++) {
+		proxies.push_back(
+			Box(HashGrid::PARALLEL_MINIMUM_PROXIES + index + 1,
+				Vector3{-100.0f, -100.0f, -100.0f},
+				Vector3{100.0f, 100.0f, 100.0f})
+		);
+	}
+	proxies.push_back(
+		Box(HashGrid::PARALLEL_MINIMUM_PROXIES + 300,
+			Vector3{-1000000.0f, 10.0f, -1000000.0f},
+			Vector3{1000000.0f, 12.0f, 1000000.0f})
+	);
+
+	HashGrid serial{UNIT_CELL};
+	serial.Rebuild(proxies);
+	DispatchSchedule reverse{true};
+	HashGrid parallel{UNIT_CELL};
+	Metrics::Clear();
+	parallel.RebuildParallel(proxies, Dispatcher(reverse));
+	CheckExactLayout(serial, parallel);
+	REQUIRE(GridInternals::OversizedCount(parallel) == GridInternals::OversizedCount(serial));
+	const auto hierarchyFallback = Metrics::Get("spatial.grid.parallel.hierarchy_serial_fallbacks");
+	const auto parallelUsed = Metrics::GetGauge("spatial.grid.parallel.used");
+	REQUIRE(hierarchyFallback.has_value());
+	REQUIRE(hierarchyFallback->Value == 1.0);
+	REQUIRE(parallelUsed.has_value());
+	REQUIRE(parallelUsed->Value == 0.0);
+
+	const AABB centre{Vector3{-0.5f, -0.5f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}};
+	REQUIRE(Visited(serial, centre) == Visited(parallel, centre));
+	CheckOverlapOracle(parallel, proxies, centre, LayerMask::All());
+
+	Metrics::Clear();
+	parallel.RebuildParallel(proxies, Dispatcher(reverse));
+	CheckExactLayout(serial, parallel);
+	const auto cachedFallback = Metrics::Get("spatial.grid.parallel.hierarchy_cached_serial_fallbacks");
+	REQUIRE(cachedFallback.has_value());
+	REQUIRE(cachedFallback->Value == 1.0);
+
+	std::vector<Proxy> ordinary = proxies;
+	ordinary.resize(HashGrid::PARALLEL_MINIMUM_PROXIES);
+	serial.Rebuild(ordinary);
+	Metrics::Clear();
+	parallel.RebuildParallel(ordinary, Dispatcher(reverse));
+	CheckExactLayout(serial, parallel);
+	const auto transitionFallback = Metrics::Get("spatial.grid.parallel.hierarchy_cached_serial_fallbacks");
+	REQUIRE(transitionFallback.has_value());
+	REQUIRE(transitionFallback->Value == 1.0);
+	Metrics::Clear();
+	parallel.RebuildParallel(ordinary, Dispatcher(reverse));
+	CheckExactLayout(serial, parallel);
+	const auto transitionParallel = Metrics::GetGauge("spatial.grid.parallel.used");
+	REQUIRE(transitionParallel.has_value());
+	REQUIRE(transitionParallel->Value == 1.0);
+}
+
+TEST_CASE("parallel rebuild handles empty grow and shrink without scratch growth", "[hashgrid][parallel]") {
+	DispatchSchedule schedule;
+	HashGrid grid{UNIT_CELL};
+	grid.RebuildParallel({}, Dispatcher(schedule));
+	REQUIRE(grid.ProxyCount() == 0);
+
+	std::vector<Proxy> large;
+	for (uint64_t index = 0; index < HashGrid::PARALLEL_MINIMUM_PROXIES; index++) {
+		const float x = static_cast<float>(index) * 2.0f;
+		large.push_back(Box(index, Vector3{x, 0.0f, 0.0f}, Vector3{x + 0.5f, 0.5f, 0.5f}));
+	}
+	grid.RebuildParallel(large, Dispatcher(schedule));
+	const size_t scratch = GridInternals::ParallelScratchCapacity(grid);
+	const auto parallelUsed = Metrics::GetGauge("spatial.grid.parallel.used");
+	REQUIRE(parallelUsed.has_value());
+	REQUIRE(parallelUsed->Value == 1.0);
+	const std::vector<Proxy> small(8, large.front());
+	grid.RebuildParallel(small, Dispatcher(schedule));
+	grid.RebuildParallel(large, Dispatcher(schedule));
+	REQUIRE(GridInternals::ParallelScratchCapacity(grid) == scratch);
+	REQUIRE(GridInternals::ParallelScratchCapacity(grid) <= (size_t{8} << 20));
+}
+
 TEST_CASE("the second rebuild reuses the first's storage", "[hashgrid]") {
 	HashGrid grid{UNIT_CELL};
 
@@ -345,6 +619,245 @@ TEST_CASE("the second rebuild reuses the first's storage", "[hashgrid]") {
 	grid.Clear();
 	REQUIRE(grid.ProxyCount() == 0);
 	REQUIRE(GridInternals::EntryCapacity(grid) == capacity);
+}
+
+TEST_CASE("exclusive hierarchy levels and the residual preserve exact candidates", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Box(1, Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f}, LayerMask::Only(0)),
+		Box(2, Vector3{-25.0f, 0.0f, -5.0f}, Vector3{25.0f, 0.5f, 6.0f}, LayerMask::Only(0)),
+		Box(3, Vector3{-75.0f, 0.0f, -5.0f}, Vector3{75.0f, 0.5f, 6.0f}, LayerMask::Only(1)),
+		Box(4, Vector3{-600.0f, 0.0f, -5.0f}, Vector3{600.0f, 0.5f, 6.0f}, LayerMask::Only(1)),
+		Box(5, Vector3{-4800.0f, 0.0f, -5.0f}, Vector3{4800.0f, 0.5f, 6.0f}, LayerMask::Only(0)),
+		Box(6,
+			Vector3{-1000000.0f, 0.0f, -1000000.0f},
+			Vector3{1000000.0f, 0.5f, 1000000.0f},
+			LayerMask::Only(0)),
+	};
+	grid.Rebuild(proxies);
+
+	for (size_t level = 0; level < HashGrid::HIERARCHY_LEVEL_COUNT; level++) {
+		REQUIRE(GridInternals::LevelProxyCount(grid, level) == 1);
+	}
+	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+
+	const AABB centre{Vector3{-0.1f, -0.1f, -0.1f}, Vector3{0.1f, 0.1f, 0.1f}};
+	const std::vector<uint64_t> first = Visited(grid, centre, LayerMask::All());
+	REQUIRE(first == std::vector<uint64_t>{1, 2, 3, 4, 5, 6});
+	REQUIRE(Visited(grid, centre, LayerMask::Only(1)) == std::vector<uint64_t>{3, 4});
+
+	grid.Rebuild(proxies);
+	REQUIRE(Visited(grid, centre, LayerMask::All()) == first);
+}
+
+TEST_CASE("equally long axes promote symmetrically", "[hashgrid]") {
+	// Promotion measures all three cell spans. A long wall on Y or Z must not
+	// take a different route from the equivalent wall on X.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Box(1, Vector3{-300.0f, 0.0f, 0.0f}, Vector3{300.0f, 0.5f, 0.5f}),
+		Box(2, Vector3{0.0f, -300.0f, 10.0f}, Vector3{0.5f, 300.0f, 10.5f}),
+		Box(3, Vector3{10.0f, 0.0f, -300.0f}, Vector3{10.5f, 0.5f, 300.0f}),
+	};
+	grid.Rebuild(proxies);
+
+	const size_t level = 2;
+	REQUIRE(GridInternals::LevelProxyCount(grid, level) == 3);
+	REQUIRE(
+		Visited(grid, AABB{Vector3{250.0f, 0.0f, 0.0f}, Vector3{251.0f, 0.5f, 0.5f}}) ==
+		std::vector<uint64_t>{1}
+	);
+	REQUIRE(
+		Visited(grid, AABB{Vector3{0.0f, 250.0f, 10.0f}, Vector3{0.5f, 251.0f, 10.5f}}) ==
+		std::vector<uint64_t>{2}
+	);
+	REQUIRE(
+		Visited(grid, AABB{Vector3{10.0f, 0.0f, 250.0f}, Vector3{10.5f, 0.5f, 251.0f}}) ==
+		std::vector<uint64_t>{3}
+	);
+}
+
+TEST_CASE("dense coarse levels join the residual in input order", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	std::vector<Proxy> proxies;
+	proxies.push_back(
+		Box(1, Vector3{-1000000.0f, -1.0f, -1000000.0f}, Vector3{1000000.0f, 1.0f, 1000000.0f})
+	);
+	for (uint64_t index = 0; index < 257; index++) {
+		proxies.push_back(
+			Box(index + 2, Vector3{-100.0f, -100.0f, -100.0f}, Vector3{100.0f, 100.0f, 100.0f})
+		);
+	}
+	proxies.push_back(
+		Box(259, Vector3{-1000000.0f, 10.0f, -1000000.0f}, Vector3{1000000.0f, 12.0f, 1000000.0f})
+	);
+	grid.Rebuild(proxies);
+
+	// The 257 identical promoted ranges land in one level-three bucket. That
+	// level cannot cull, so all its proxies become ordered residual candidates.
+	REQUIRE(GridInternals::LevelProxyCount(grid, 3) == 0);
+	REQUIRE(GridInternals::OversizedCount(grid) == proxies.size());
+	const std::vector<uint64_t> found =
+		Visited(grid, AABB{Vector3{-0.5f, -0.5f, -0.5f}, Vector3{0.5f, 0.5f, 0.5f}});
+	REQUIRE(found.size() == 258);
+	for (uint64_t index = 0; index < found.size(); index++) {
+		REQUIRE(found[index] == index + 1);
+	}
+}
+
+TEST_CASE("hierarchy capacity stabilises after its first high-water rebuild", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	std::vector<Proxy> high;
+	high.push_back(Box(999, Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f}));
+	for (uint64_t index = 0; index < 64; index++) {
+		const float offset = static_cast<float>(index) * 2048.0f;
+		high.push_back(
+			Box(index, Vector3{offset, 0.0f, offset}, Vector3{offset + 1200.0f, 1.0f, offset + 1200.0f})
+		);
+	}
+	const std::vector<Proxy> low{Box(1, Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f})};
+
+	grid.Rebuild(high);
+	const size_t highWater = GridInternals::RetainedHierarchyBytes(grid);
+	for (int cycle = 0; cycle < 3; cycle++) {
+		grid.Rebuild(low);
+		REQUIRE(GridInternals::RetainedHierarchyBytes(grid) == highWater);
+		grid.Rebuild(high);
+		REQUIRE(GridInternals::RetainedHierarchyBytes(grid) == highWater);
+	}
+}
+
+TEST_CASE("a hierarchy to normal transition restores the base-only rebuild", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	const std::vector<Proxy> hierarchy{
+		Box(1, Vector3{0.1f, 0.1f, 0.1f}, Vector3{0.9f, 0.9f, 0.9f}),
+		Box(2, Vector3{-300.0f, 0.1f, 0.1f}, Vector3{300.0f, 0.9f, 0.9f}),
+	};
+	std::vector<Proxy> normal;
+	for (uint64_t index = 0; index < 64; index++) {
+		const float offset = static_cast<float>(index) * 2.0f;
+		normal.push_back(Box(index + 10, Vector3{offset, 0.1f, 0.1f}, Vector3{offset + 0.9f, 0.9f, 0.9f}));
+	}
+
+	grid.Rebuild(hierarchy);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 2) == 1);
+
+	grid.Rebuild(normal);
+	REQUIRE(GridInternals::OversizedCount(grid) == 0);
+	for (size_t level = 1; level < HashGrid::HIERARCHY_LEVEL_COUNT; level++) {
+		REQUIRE(GridInternals::LevelProxyCount(grid, level) == 0);
+	}
+	REQUIRE(
+		Visited(grid, AABB{Vector3{19.9f, 0.0f, 0.0f}, Vector3{20.1f, 1.0f, 1.0f}}) ==
+		std::vector<uint64_t>{20}
+	);
+	const size_t capacity = GridInternals::EntryCapacity(grid);
+	const void *storage = GridInternals::EntryData(grid);
+
+	grid.Rebuild(normal);
+	REQUIRE(GridInternals::EntryCapacity(grid) == capacity);
+	REQUIRE(GridInternals::EntryData(grid) == storage);
+	REQUIRE(
+		Visited(grid, AABB{Vector3{19.9f, 0.0f, 0.0f}, Vector3{20.1f, 1.0f, 1.0f}}) ==
+		std::vector<uint64_t>{20}
+	);
+}
+
+TEST_CASE("hierarchy overlap agrees with a deterministic exact oracle through rebuild cycles", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	std::vector<Proxy> proxies;
+	proxies.reserve(24 + 4 + 257 + 1);
+	for (uint32_t index = 0; index < 24; index++) {
+		Vector3 centre{
+			Random::Range(index, 3, -256.0f, 256.0f),
+			Random::Range(index, 5, -96.0f, 96.0f),
+			Random::Range(index, 7, -256.0f, 256.0f),
+		};
+		if (index == 0) {
+			centre = Vector3{768.0f, 0.0f, 768.0f};
+		} else if (index == 1) {
+			centre = Vector3{768.0f, 48.0f, 768.0f};
+		}
+		const float extent = Random::Range(index, 11, 0.2f, 0.9f);
+		proxies.push_back(
+			Box(index + 1,
+				centre - Vector3{extent, extent, extent},
+				centre + Vector3{extent, extent, extent},
+				LayerMask::Only(index % 2))
+		);
+	}
+
+	// The first, second, third, and fourth coarse levels each receive one
+	// otherwise sparse proxy. The third one is later rejected with its dense group.
+	proxies.push_back(
+		Box(25, Vector3{-25.0f, 80.0f, -5.0f}, Vector3{25.0f, 80.5f, 6.0f}, LayerMask::Only(0))
+	);
+	proxies.push_back(
+		Box(26, Vector3{-75.0f, -40.0f, -5.0f}, Vector3{75.0f, -39.5f, 6.0f}, LayerMask::Only(1))
+	);
+	proxies.push_back(
+		Box(27, Vector3{-600.0f, 40.0f, -5.0f}, Vector3{600.0f, 40.5f, 6.0f}, LayerMask::Only(0))
+	);
+	proxies.push_back(
+		Box(28, Vector3{-4800.0f, -80.0f, -5.0f}, Vector3{4800.0f, -79.5f, 6.0f}, LayerMask::Only(1))
+	);
+	for (uint32_t index = 0; index < 257; index++) {
+		proxies.push_back(
+			Box(index + 29,
+				Vector3{-100.0f, -100.0f, -100.0f},
+				Vector3{100.0f, 100.0f, 100.0f},
+				LayerMask::Only(index % 2))
+		);
+	}
+	proxies.push_back(
+		Box(286,
+			Vector3{-1000000.0f, -1000.0f, -1000000.0f},
+			Vector3{1000000.0f, 1000.0f, 1000000.0f},
+			LayerMask::Only(0))
+	);
+	const std::vector<Proxy> base(proxies.begin(), proxies.begin() + 24);
+	const std::array<LayerMask, 3> masks{LayerMask::All(), LayerMask::Only(0), LayerMask::Only(1)};
+
+	auto check = [&](std::span<const Proxy> scene, uint32_t salt) {
+		for (uint32_t index = 0; index < 32; index++) {
+			const Vector3 centre{
+				Random::Range(index + salt, 13, -512.0f, 512.0f),
+				Random::Range(index + salt, 17, -128.0f, 128.0f),
+				Random::Range(index + salt, 19, -512.0f, 512.0f),
+			};
+			const float extent = Random::Range(index + salt, 23, 1.0f, 24.0f);
+			CheckOverlapOracle(
+				grid,
+				scene,
+				AABB::FromCentre(centre, Vector3{extent, extent, extent}),
+				masks[index % masks.size()]
+			);
+		}
+	};
+
+	grid.Rebuild(proxies);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 1) == 1);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 2) == 1);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 3) == 0);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 4) == 1);
+	REQUIRE(GridInternals::OversizedCount(grid) == 259);
+	const size_t highWater = GridInternals::RetainedHierarchyBytes(grid);
+	// IDs one and two differ only on Y. The elevated query must not lose ID two
+	// by treating the XZ placement as a complete three-dimensional cell key.
+	REQUIRE(
+		Visited(
+			grid, AABB{Vector3{767.0f, 47.0f, 767.0f}, Vector3{769.0f, 49.0f, 769.0f}}, LayerMask::Only(1)
+		) == std::vector<uint64_t>{2}
+	);
+	check(proxies, 0);
+
+	for (uint32_t cycle = 0; cycle < 3; cycle++) {
+		grid.Rebuild(base);
+		check(base, 100 + cycle * 32);
+		grid.Rebuild(proxies);
+		REQUIRE(GridInternals::RetainedHierarchyBytes(grid) == highWater);
+		check(proxies, 200 + cycle * 32);
+	}
 }
 
 TEST_CASE("an empty grid answers every query with nothing", "[hashgrid]") {
@@ -525,4 +1038,18 @@ TEST_CASE("changing the cell size empties the grid and answers the same", "[spat
 	// A size at or below zero is refused in favour of the default.
 	grid.SetCellSize(-1.0f);
 	CHECK(grid.CellSize() == HashGrid::DEFAULT_CELL_SIZE);
+}
+
+TEST_CASE("grid stats distinguish live rows from retained capacity", "[hashgrid]") {
+	HashGrid grid{UNIT_CELL};
+	const std::vector<Proxy> proxies{Box(1, Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f})};
+	grid.Rebuild(proxies);
+	const engine::spatial::HashGridStats warm = grid.Stats();
+	REQUIRE(warm.LiveBytes > 0);
+	REQUIRE(warm.RetainedBytes >= warm.LiveBytes);
+
+	grid.Clear();
+	const engine::spatial::HashGridStats cleared = grid.Stats();
+	CHECK(cleared.LiveBytes == 0);
+	CHECK(cleared.RetainedBytes == warm.RetainedBytes);
 }

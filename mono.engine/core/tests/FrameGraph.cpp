@@ -682,6 +682,27 @@ TEST_CASE("a reported span carries the duration it was given", "[framegraph]") {
 	REQUIRE(spans[0].Category == ProfileCategory::ECS);
 }
 
+TEST_CASE("a completed synchronous record stays part of its parent", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope script("script beat", ProfileCategory::Script);
+		std::this_thread::sleep_for(std::chrono::milliseconds(3));
+		FrameGraph::RecordNamed("binding", "luau.Workspace.Raycast", ProfileCategory::Script, 2.5f);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 2);
+	CHECK(spans[1].Name == "luau.Workspace.Raycast");
+	CHECK(spans[1].Parent == 0);
+	CHECK_FALSE(spans[1].Reported);
+	CHECK(spans[1].Milliseconds == 2.5f);
+	CHECK(spans[0].SelfMilliseconds >= 0.0f);
+	CHECK(spans[0].SelfMilliseconds < spans[0].Milliseconds);
+}
+
 TEST_CASE("a reported child does not make its parent's self time negative", "[framegraph]") {
 	// The case the whole `Reported` flag exists for. Eight workers each
 	// reporting five milliseconds under a batch that took almost none is

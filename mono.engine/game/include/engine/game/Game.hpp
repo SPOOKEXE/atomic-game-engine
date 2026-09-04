@@ -402,7 +402,8 @@ namespace engine::game {
 		ecs::Scheduler &scheduler,
 		const script::RuntimeLimits &limits,
 		std::string &error,
-		const script::Debugger *breakpoints = nullptr
+		const script::Debugger *breakpoints = nullptr,
+		double scriptTickRate = 0.0
 	);
 
 	// --- the whole game ----------------------------------------------------

@@ -621,12 +621,8 @@ namespace studio {
 			Divider();
 		}
 
-		// **The script panels, here rather than under View.** Somebody on this
-		// tab is writing a program, and the editor and the debugger are the two
-		// windows that job needs open.
-		if (all || DrawingBuiltinTool == BuiltinStudioTool::ScriptEditorPanel) {
-			ImGui::Checkbox("Script Editor", &ShowScripts);
-		}
+		// The script editor opens from a script instance. It is not a global
+		// panel, because every document owns its own dockable editor window.
 		if (all || DrawingBuiltinTool == BuiltinStudioTool::DebuggerPanel) {
 			if (all) {
 				ImGui::SameLine();

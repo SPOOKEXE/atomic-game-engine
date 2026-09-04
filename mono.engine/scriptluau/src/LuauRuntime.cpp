@@ -2,6 +2,7 @@
 
 #include "LuauBindings.hpp"
 
+#include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -11,6 +12,7 @@
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -78,6 +80,9 @@ namespace engine::script {
 			}
 
 			bounds->MemoryHeld = held;
+			if (newSize > oldSize && bounds->Context.Profiler != nullptr) {
+				bounds->Context.Profiler->RecordAllocation(newSize - oldSize);
+			}
 			return resized;
 		}
 
@@ -208,8 +213,32 @@ namespace engine::script {
 		// **Only ever on while a breakpoint is armed.** `LuauRuntime::Run`
 		// switches it on and off around each chunk, so a runtime nobody is
 		// debugging never reaches this function.
+		void SampleProfileStack(lua_State *state, ScriptProfiler &profiler) {
+			std::array<ScriptProfileFrame, 64> stack;
+			const int depth = std::min(lua_stackdepth(state), static_cast<int>(stack.size()));
+			size_t count = 0;
+			for (int level = depth - 1; level >= 0; level--) {
+				lua_Debug info;
+				if (lua_getinfo(state, level, "sln", &info) == 0) {
+					continue;
+				}
+				stack[count++] = ScriptProfileFrame{
+					.Source = info.short_src != nullptr ? info.short_src : "",
+					.Function = info.name != nullptr ? info.name : "",
+					.Line = info.currentline,
+				};
+			}
+			profiler.Sample(
+				state, std::span<const ScriptProfileFrame>(stack.data(), count), core::Clock::Nanoseconds()
+			);
+		}
+
 		void DebugStep(lua_State *state, lua_Debug *) {
 			Bounds &bounds = BoundsOf(state);
+			if (ScriptProfiler *profiler = bounds.Context.Profiler;
+				profiler != nullptr && profiler->Enabled()) {
+				SampleProfileStack(state, *profiler);
+			}
 			Debugger *debug = bounds.Context.Breakpoints;
 			if (debug == nullptr) {
 				return;
@@ -340,7 +369,71 @@ namespace engine::script {
 	}
 
 	LuauContext &UpvalueContext(lua_State *state) {
-		return *static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(1)));
+		return *static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(2)));
+	}
+
+	void PrepareProfiledResume(lua_State *state, lua_State *from) {
+		LuauContext &context = ContextOf(state);
+		const bool debugging = context.Breakpoints != nullptr && context.Breakpoints->Armed();
+		const bool profiling = context.Profiler != nullptr && context.Profiler->Enabled();
+		if (!debugging && !profiling) {
+			return;
+		}
+
+		if (debugging) {
+			Bounds &bounds = BoundsOf(state);
+			bounds.LastBreakLine = 0;
+			bounds.LastBreakSource.clear();
+		}
+		if (profiling) {
+			context.Profiler->Begin(state, core::Clock::Nanoseconds(), from);
+		}
+		lua_singlestep(state, 1);
+	}
+
+	void FinishProfiledResume(lua_State *state, int status) {
+		LuauContext &context = ContextOf(state);
+		const bool debugging = context.Breakpoints != nullptr && context.Breakpoints->Armed();
+		const bool profiling = context.Profiler != nullptr && context.Profiler->Enabled();
+		if (!debugging && !profiling) {
+			return;
+		}
+
+		lua_singlestep(state, 0);
+		if (profiling) {
+			context.Profiler->End(state, core::Clock::Nanoseconds(), status == LUA_YIELD);
+		}
+	}
+
+	int InvokeProfiledBinding(lua_State *state) {
+		auto *binding = static_cast<LuauContext::Binding *>(lua_tolightuserdata(state, lua_upvalueindex(1)));
+		if (binding == nullptr || binding->Function == nullptr) {
+			luaL_errorL(state, "script binding is unavailable");
+			return 0;
+		}
+
+		LuauContext &context = ContextOf(state);
+		const bool frameGraph = core::FrameGraph::IsEnabled();
+		const bool sourceProfile = context.Profiler != nullptr && context.Profiler->Enabled();
+		const bool collecting = frameGraph || sourceProfile;
+		const uint64_t started = collecting ? core::Clock::Nanoseconds() : 0;
+		const int results = binding->Function(state);
+		if (collecting) {
+			const uint64_t finished = core::Clock::Nanoseconds();
+			const uint64_t elapsed = finished - started;
+			const float milliseconds = static_cast<float>(elapsed) / 1'000'000.0f;
+			if (frameGraph) {
+				core::FrameGraph::RecordNamed(
+					"luau binding", binding->Name, core::ProfileCategory::Script, milliseconds
+				);
+			}
+			if (sourceProfile) {
+				context.Profiler->RecordBinding(
+					state, binding->Name, elapsed, lua_status(state) == LUA_YIELD
+				);
+			}
+		}
+		return results;
 	}
 
 	LuauRuntime::LuauRuntime(ecs::Store &store, const RuntimeLimits &limits) : Runtime(store, limits) {
@@ -350,6 +443,7 @@ namespace engine::script {
 		bounds->Context.World = &Store;
 		bounds->Context.Role = limits.Role;
 		bounds->Context.Access = limits.EffectiveCapabilities();
+		bounds->Context.Profiler = &ScriptProfile;
 
 		State = lua_newstate(Allocate, bounds);
 		lua_setthreaddata(State, bounds);
@@ -370,6 +464,7 @@ namespace engine::script {
 		OpenDatatypes(State);
 		OpenEnums(State);
 		OpenSignals(State);
+		OpenScopes(State);
 		OpenInstances(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
@@ -491,7 +586,7 @@ namespace engine::script {
 		// same trade `dev` already makes for C++ - the code does what it says
 		// rather than what it was rewritten into. It applies only while a
 		// breakpoint is armed, so nothing else in the world pays for it.
-		if (Breakpoints.Armed()) {
+		if (Breakpoints.Armed() || ScriptProfile.Enabled()) {
 			options.optimizationLevel = 0;
 			options.debugLevel = 2;
 		}
@@ -543,18 +638,7 @@ namespace engine::script {
 		// unused is one that gets switched off and then rots.
 		//
 		// On the thread rather than the state, because that is what runs.
-		const bool stepping = Breakpoints.Armed();
-		if (stepping) {
-			BoundsOf(State).LastBreakLine = 0;
-			BoundsOf(State).LastBreakSource.clear();
-			lua_singlestep(thread, 1);
-		}
-
 		const int status = lua_resume(thread, nullptr, 0);
-
-		if (stepping) {
-			lua_singlestep(thread, 0);
-		}
 
 		// **A yield is legal now, and only from `task`.**
 		//
@@ -658,6 +742,10 @@ namespace engine::script {
 			lua_CompileOptions options = {};
 			options.optimizationLevel = 1;
 			options.debugLevel = 1;
+			if (context.Profiler != nullptr && context.Profiler->Enabled()) {
+				options.optimizationLevel = 0;
+				options.debugLevel = 2;
+			}
 
 			size_t bytecodeSize = 0;
 			char *bytecode = luau_compile(program.data(), program.size(), &options, &bytecodeSize);
@@ -683,6 +771,11 @@ namespace engine::script {
 			}
 
 			context.Loading.push_back(module);
+			if (context.Profiler != nullptr && context.Profiler->Enabled()) {
+				// A required module runs on its own Luau thread, but it is still
+				// child work of the source leaf that called require.
+				context.Profiler->Begin(thread, core::Clock::Nanoseconds(), state);
+			}
 			const int status = lua_resume(thread, nullptr, 0);
 			context.Loading.pop_back();
 

@@ -35,6 +35,7 @@ using engine::spatial::GridInternals;
 using engine::spatial::HashGrid;
 using engine::spatial::LayerMask;
 using engine::spatial::OverlapBox;
+using engine::spatial::OverlapBoxAfterId;
 using engine::spatial::OverlapSphere;
 using engine::spatial::Proxy;
 using engine::spatial::QueryResult;
@@ -60,6 +61,29 @@ namespace {
 		storage.resize(result.Written);
 		return storage;
 	}
+}
+
+TEST_CASE("an ordered overlap writes each pair from its lower id only", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(9, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(2, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(7, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 1> found{};
+	const QueryResult result = OverlapBoxAfterId(
+		grid,
+		AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f}),
+		LayerMask::All(),
+		7,
+		found
+	);
+
+	CHECK_FALSE(result.Overflowed);
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == 9);
 }
 
 TEST_CASE("a raycast finds the box in its way", "[query]") {
@@ -460,6 +484,46 @@ TEST_CASE("a shape cast rejects the corner its swept bounds cover", "[query]") {
 	REQUIRE(found[0] == 1u);
 }
 
+TEST_CASE("an ordered shape cast filters ids and layers without losing its path test", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{5.5f, 0.5f, 0.5f}, 0.4f, LayerMask::Only(0)),
+		Cube(2, Vector3{9.5f, 9.5f, 0.5f}, 0.4f, LayerMask::Only(0)),
+		Cube(3, Vector3{5.5f, 0.5f, 0.5f}, 0.4f, LayerMask::Only(1)),
+		Cube(4, Vector3{5.5f, 0.5f, 0.5f}, 0.4f, LayerMask::Only(0)),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 4> found{};
+	const AABB start = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.25f, 0.25f, 0.25f});
+	const QueryResult result =
+		ShapeCastAfterId(grid, start, Vector3{9.0f, 0.0f, 0.0f}, LayerMask::Only(0), 1, found);
+
+	REQUIRE_FALSE(result.Overflowed);
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == 4u);
+}
+
+TEST_CASE("an ordered still shape cast is its ordered overlap", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(2, Vector3{0.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(3, Vector3{6.5f, 0.5f, 0.5f}, 0.5f),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 4> swept{};
+	std::array<uint64_t, 4> overlapped{};
+	const AABB box = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.25f, 0.25f, 0.25f});
+	const QueryResult castResult = ShapeCastAfterId(grid, box, Vector3::Zero, LayerMask::All(), 1, swept);
+	const QueryResult overlapResult = OverlapBoxAfterId(grid, box, LayerMask::All(), 1, overlapped);
+
+	REQUIRE(castResult.Written == overlapResult.Written);
+	REQUIRE(castResult.Written == 1);
+	CHECK(swept[0] == overlapped[0]);
+}
+
 TEST_CASE("the swept-box walk visits the thick line and not its bounding corners", "[query]") {
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
@@ -621,15 +685,16 @@ TEST_CASE("every query answers an empty grid with nothing", "[query]") {
 	REQUIRE(ShapeCast(grid, anywhere, Vector3{1.0f, 0.0f, 0.0f}, LayerMask::All(), ids).Written == 0);
 }
 
-TEST_CASE("a proxy too large for cells is found by every query", "[query]") {
-	// The oversized path is a second route through the walk, and a query that
+TEST_CASE("a coarse proxy is found by every query", "[query]") {
+	// The hierarchy is a second route through every walk, and a query that
 	// forgot it would miss the floor of every world.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
 		Proxy{1, AABB{Vector3{-60.0f, -1.0f, -60.0f}, Vector3{60.0f, 0.0f, 60.0f}}, LayerMask::All()}
 	};
 	grid.Rebuild(proxies);
-	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+	REQUIRE(GridInternals::OversizedCount(grid) == 0);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 2) == 1);
 
 	std::array<uint64_t, 4> ids{};
 	std::array<RayHit, 4> hits{};
@@ -659,6 +724,51 @@ TEST_CASE("a proxy too large for cells is found by every query", "[query]") {
 		)
 			.Written == 1
 	);
+}
+
+TEST_CASE("a residual proxy is found exactly once by every query", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Proxy{
+			1,
+			AABB{Vector3{-1000000.0f, -3.0f, -1000000.0f}, Vector3{1000000.0f, -2.0f, 1000000.0f}},
+			LayerMask::Only(1),
+		},
+		Cube(2, Vector3{0.5f, -8.0f, 0.5f}, 0.4f, LayerMask::Only(1)),
+	};
+	grid.Rebuild(proxies);
+	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+
+	const Ray down{Vector3{0.5f, 0.5f, 0.5f}, -Vector3::YAxis};
+	const std::optional<RayHit> nearest = Raycast(grid, down, 20.0f, LayerMask::Only(1));
+	REQUIRE(nearest.has_value());
+	REQUIRE(nearest->Id == 1u);
+	REQUIRE(nearest->Distance == Approx(2.5f));
+	REQUIRE_FALSE(Raycast(grid, down, 20.0f, LayerMask::Only(0)).has_value());
+
+	std::array<RayHit, 4> hits{};
+	const QueryResult all = RaycastAll(grid, down, 20.0f, LayerMask::Only(1), hits);
+	REQUIRE(all.Written == 2);
+	REQUIRE(hits[0].Id == 1u);
+	REQUIRE(hits[1].Id == 2u);
+
+	std::array<uint64_t, 4> ids{};
+	const AABB floorBox = AABB::FromCentre(Vector3{0.5f, -2.5f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f});
+	REQUIRE(OverlapBox(grid, floorBox, LayerMask::Only(1), ids).Written == 1);
+	REQUIRE(ids[0] == 1u);
+	REQUIRE(OverlapSphere(grid, Vector3{0.5f, -1.5f, 0.5f}, 1.0f, LayerMask::Only(1), ids).Written == 1);
+	REQUIRE(ids[0] == 1u);
+	REQUIRE(
+		ShapeCast(
+			grid,
+			AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f}),
+			Vector3{0.0f, -5.0f, 0.0f},
+			LayerMask::Only(1),
+			ids
+		)
+			.Written == 1
+	);
+	REQUIRE(ids[0] == 1u);
 }
 
 TEST_CASE("a proxy spanning cells the ray crosses is reported once", "[query]") {
@@ -722,9 +832,9 @@ TEST_CASE("a diagonal ray finds what is on the line and not what is beside it", 
 	REQUIRE(hits[0].Id == 1u);
 }
 
-TEST_CASE("the nearest-hit stop does not skip a proxy too large for cells", "[query]") {
+TEST_CASE("the nearest hit includes a coarse proxy", "[query]") {
 	// `Raycast` stops walking once it holds a hit no later cell can beat, and
-	// an oversized proxy is in no cell at all - so the stop must not take the
+	// a coarse proxy is in a different cell walk, so the stop must not take the
 	// pass that finds one with it. The floor here is nearer than the cube, and
 	// the cube is what the walk finds first.
 	HashGrid grid{UNIT_CELL};
@@ -733,7 +843,8 @@ TEST_CASE("the nearest-hit stop does not skip a proxy too large for cells", "[qu
 		Proxy{2, AABB{Vector3{-60.0f, -3.0f, -60.0f}, Vector3{60.0f, -2.0f, 60.0f}}, LayerMask::All()},
 	};
 	grid.Rebuild(proxies);
-	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+	REQUIRE(GridInternals::OversizedCount(grid) == 0);
+	REQUIRE(GridInternals::LevelProxyCount(grid, 2) == 1);
 
 	const std::optional<RayHit> hit = Raycast(grid, Ray{Vector3{0.5f, 0.5f, 0.5f}, -Vector3::YAxis}, 20.0f);
 

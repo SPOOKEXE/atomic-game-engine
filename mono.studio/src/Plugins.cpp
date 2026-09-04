@@ -896,7 +896,6 @@ namespace studio {
 					{"create-local-script", "LocalScript", BuiltinStudioTool::CreateLocalScript},
 					{"create-module-script", "ModuleScript", BuiltinStudioTool::CreateModuleScript},
 					{"destination", "Script Destination", BuiltinStudioTool::ScriptDestination},
-					{"script-editor", "Script Editor", BuiltinStudioTool::ScriptEditorPanel},
 					{"debugger", "Debugger", BuiltinStudioTool::DebuggerPanel},
 					{"command-bar", "Command Bar", BuiltinStudioTool::CommandBarPanel},
 				}
@@ -954,7 +953,6 @@ namespace studio {
 			addPanel(
 				"component-inspector", "Components", BuiltinStudioPanel::ComponentInspector, PluginDock::Right
 			);
-			addPanel("script-editor", "Script Editor", BuiltinStudioPanel::ScriptEditor, PluginDock::Centre);
 			addPanel(
 				"dataset-editor",
 				"Dataset Editor",

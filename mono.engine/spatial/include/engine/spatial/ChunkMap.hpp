@@ -42,6 +42,13 @@
 
 namespace engine::spatial {
 
+	// Logical storage owned by one chunk partition.
+	// @since v0.22
+	struct ChunkMapStats {
+		size_t LiveBytes = 0;
+		size_t RetainedBytes = 0;
+	};
+
 	// Which chunk of the lattice, in chunk units from the origin.
 	//
 	// Signed, and `std::floor` is what produces it, for the reason
@@ -171,6 +178,10 @@ namespace engine::spatial {
 		size_t ProxyCount() const {
 			return Owners.size();
 		}
+
+		// Logical storage owned by this partition.
+		// @since v0.22
+		ChunkMapStats Stats() const;
 
 		// Where one chunk sits in the lattice.
 		//
