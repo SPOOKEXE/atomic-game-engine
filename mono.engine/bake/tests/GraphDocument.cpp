@@ -227,6 +227,16 @@ TEST_CASE("a document with no source builds without a resolver", "[bake]") {
 	CHECK(Build(Simple(), graph, nullptr, offender) == DocumentStatus::Ok);
 }
 
+TEST_CASE("a document refuses to replay into an existing graph", "[bake]") {
+	Graph graph;
+	REQUIRE(graph.AddBuiltin("engine.Cube").IsValid());
+	std::string offender;
+
+	CHECK(Build(Simple(), graph, nullptr, offender) == DocumentStatus::Refused);
+	CHECK(offender == "graph");
+	CHECK(graph.NodeCount() == 1);
+}
+
 // --- the text format ---------------------------------------------------------
 
 TEST_CASE("a rasterize operation replays with its size", "[bake]") {

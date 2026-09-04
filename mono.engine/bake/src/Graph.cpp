@@ -56,10 +56,10 @@ namespace engine::bake {
 	}
 
 	NodeId Graph::Add(NodeKind kind) {
-		if (IsInput(kind)) {
-			// The input kinds carry data the other overloads take, and one
-			// added through here would evaluate to nothing with no way to say
-			// what it was meant to hold.
+		if (!IsBareNode(kind)) {
+			// Parameterised kinds need their own overload so a default cannot
+			// become an authored value. The closed list also refuses an unknown
+			// tag before it can pass through evaluation as an identity node.
 			return {};
 		}
 		Node node;
@@ -435,6 +435,9 @@ namespace engine::bake {
 					continue;
 				}
 				if (!Evaluate(index, failure)) {
+					// A caller cannot publish an incomplete bake. Earlier write nodes
+					// may have produced bytes before a later chain refused its input.
+					Exports.clear();
 					return false;
 				}
 				done[index] = true;
@@ -450,6 +453,7 @@ namespace engine::bake {
 				// bug in the wiring check rather than in the document.
 				ENGINE_ERROR("a cycle survived the wiring check with {} node(s) unevaluated", remaining);
 				failure = "graph: a cycle survived the wiring check";
+				Exports.clear();
 				return false;
 			}
 		}

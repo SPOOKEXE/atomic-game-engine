@@ -123,8 +123,8 @@ namespace engine::bake {
 
 		// Adds a processing or export node.
 		//
-		// @param kind Which. `Source` and `Builtin` are refused: they carry
-		//             data the other overloads take.
+		// @param kind Which bare node. Input and parameterised kinds are refused:
+		//             they carry data the other overloads take.
 		// @return The node, or an invalid id.
 		NodeId Add(NodeKind kind);
 

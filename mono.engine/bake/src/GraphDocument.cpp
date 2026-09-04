@@ -6,6 +6,11 @@ namespace engine::bake {
 
 	DocumentStatus
 	Build(const Document &document, Graph &graph, const SourceResolver &sources, std::string &offender) {
+		if (graph.NodeCount() != 0) {
+			offender = "graph";
+			return DocumentStatus::Refused;
+		}
+
 		// **Counted before anything is built**, so a generated document cannot
 		// walk a graph up to its limit and fail on the last node with several
 		// thousand allocations already made.
