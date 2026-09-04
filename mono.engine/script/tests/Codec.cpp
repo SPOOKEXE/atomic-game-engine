@@ -1,3 +1,4 @@
+#include <engine/core/Random.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -5,10 +6,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.script.codec")
+TEST_DEPENDS("engine.core.random")
 
 using Catch::Approx;
+using engine::core::Random;
 using engine::script::CODEC_MAX_BYTES;
 using engine::script::CODEC_MAX_DEPTH;
 using engine::script::CodecStatus;
@@ -34,6 +38,12 @@ namespace {
 		std::vector<std::byte> out;
 		REQUIRE(Encode(value, out) == CodecStatus::Ok);
 		return out;
+	}
+
+	void AppendU32(std::vector<std::byte> &bytes, uint32_t value) {
+		for (uint32_t shift = 0; shift < 32; shift += 8) {
+			bytes.push_back(static_cast<std::byte>((value >> shift) & 0xFFu));
+		}
 	}
 }
 
@@ -276,6 +286,73 @@ TEST_CASE("a lying length is refused before anything is reserved", "[codec]") {
 
 	ScriptValue back;
 	CHECK(Decode(bytes, back) == CodecStatus::Malformed);
+}
+
+TEST_CASE("a decoder refuses values past its depth and byte limits", "[codec]") {
+	SECTION("nesting") {
+		std::vector<std::byte> bytes;
+		for (uint32_t level = 0; level <= CODEC_MAX_DEPTH; level++) {
+			bytes.push_back(static_cast<std::byte>(ValueTag::Array));
+			AppendU32(bytes, 1);
+		}
+		bytes.push_back(static_cast<std::byte>(ValueTag::Nil));
+
+		ScriptValue back = Number(42.0);
+		CHECK(Decode(bytes, back) == CodecStatus::TooDeep);
+		CHECK(back.Tag == ValueTag::Nil);
+	}
+
+	SECTION("bytes") {
+		std::vector<std::byte> bytes(CODEC_MAX_BYTES + 1, std::byte{0});
+		ScriptValue back = Number(42.0);
+		CHECK(Decode(bytes, back) == CodecStatus::TooLarge);
+		CHECK(back.Tag == ValueTag::Nil);
+	}
+}
+
+TEST_CASE("decoded maps are canonical and duplicate-free", "[codec]") {
+	std::vector<std::byte> bytes;
+	bytes.push_back(static_cast<std::byte>(ValueTag::Map));
+	AppendU32(bytes, 2);
+	AppendU32(bytes, 1);
+	bytes.push_back(std::byte{'z'});
+	bytes.push_back(static_cast<std::byte>(ValueTag::Nil));
+	AppendU32(bytes, 1);
+	bytes.push_back(std::byte{'a'});
+	bytes.push_back(static_cast<std::byte>(ValueTag::Nil));
+
+	ScriptValue sorted;
+	REQUIRE(Decode(bytes, sorted) == CodecStatus::Ok);
+	REQUIRE(sorted.Entries.size() == 2);
+	CHECK(sorted.Entries[0].first == "a");
+	CHECK(sorted.Entries[1].first == "z");
+
+	bytes[9] = std::byte{'a'};
+	ScriptValue duplicate = Number(42.0);
+	CHECK(Decode(bytes, duplicate) == CodecStatus::DuplicateKey);
+	CHECK(duplicate.Tag == ValueTag::Nil);
+}
+
+TEST_CASE("hostile codec payloads leave a defined result", "[.][sandbox][fuzz]") {
+	constexpr uint32_t ITERATIONS = 2'000;
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+
+		const size_t byteCount = Random::Bits(iteration, 1) % 4096;
+		std::vector<std::byte> bytes(byteCount);
+		for (size_t index = 0; index < bytes.size(); index++) {
+			bytes[index] = static_cast<std::byte>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		ScriptValue value = Number(42.0);
+		const CodecStatus status = Decode(bytes, value);
+		if (status == CodecStatus::Ok) {
+			std::vector<std::byte> canonical;
+			CHECK(Encode(value, canonical) == CodecStatus::Ok);
+		} else {
+			CHECK(value.Tag == ValueTag::Nil);
+		}
+	}
 }
 
 TEST_CASE("trailing bytes are refused", "[codec]") {

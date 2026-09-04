@@ -534,6 +534,67 @@ TEST_CASE("a truncated image is refused or whole, never half", "[bake][image]") 
 	}
 }
 
+TEST_CASE("hostile image bytes leave a prior result untouched", "[.][sandbox][fuzz]") {
+	// The dispatcher is the one entry point that exposes four foreign decoders.
+	// Fixed seeds exercise each signature and make a bad parser result
+	// reproducible without retaining an unbounded corpus in the tree.
+	constexpr uint32_t ITERATIONS = 2'000;
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+
+		const size_t size = 4 + Random::Bits(iteration, 1) % 4096;
+		std::vector<std::byte> bytes(size);
+		for (size_t index = 0; index < bytes.size(); index++) {
+			bytes[index] = static_cast<std::byte>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		switch (iteration % 5) {
+		case 0:
+			break;
+		case 1:
+			bytes[0] = std::byte{0x89};
+			bytes[1] = std::byte{0x50};
+			bytes[2] = std::byte{0x4e};
+			bytes[3] = std::byte{0x47};
+			break;
+		case 2:
+			bytes[0] = std::byte{'B'};
+			bytes[1] = std::byte{'M'};
+			break;
+		case 3:
+			bytes[0] = std::byte{0xff};
+			bytes[1] = std::byte{0xd8};
+			bytes[2] = std::byte{0xff};
+			break;
+		default:
+			bytes[0] = std::byte{'G'};
+			bytes[1] = std::byte{'I'};
+			bytes[2] = std::byte{'F'};
+			bytes[3] = std::byte{'8'};
+			break;
+		}
+
+		TextureData image;
+		image.Width = 1;
+		image.Height = 1;
+		image.Pixels = {std::byte{0x11}, std::byte{0x22}, std::byte{0x33}, std::byte{0x44}};
+		const TextureData before = image;
+		std::string failure = "unchanged on success";
+
+		if (ReadImage(bytes, image, failure)) {
+			CHECK(image.IsValid());
+			CHECK(failure == "unchanged on success");
+		} else {
+			CHECK(image.Width == before.Width);
+			CHECK(image.Height == before.Height);
+			CHECK(image.Format == before.Format);
+			CHECK(image.Pixels == before.Pixels);
+			CHECK(image.Mips == before.Mips);
+			CHECK_FALSE(failure.empty());
+		}
+	}
+}
+
 TEST_CASE("a bottom-up bitmap comes out the right way up", "[bake][image]") {
 	// The classic BMP bug, and it is invisible in a symmetrical test image.
 	const TextureData image = Decoded(BMP_BOTTOM_UP);
@@ -1144,7 +1205,7 @@ TEST_CASE("large finite svg coordinates are clipped before raster indexing", "[b
 	CHECK(At(image, 0, 0) == Pixel{0, 0, 0, 0});
 }
 
-TEST_CASE("hostile svg bytes preserve a prior raster result", "[bake][image][fuzz]") {
+TEST_CASE("hostile svg bytes preserve a prior raster result", "[.][sandbox][fuzz]") {
 	constexpr uint32_t ITERATIONS = 2'000;
 	const TextureData prior =
 		Drawn(R"(<svg width="2" height="2"><rect width="2" height="2" fill="blue"/></svg>)", 0, 0);

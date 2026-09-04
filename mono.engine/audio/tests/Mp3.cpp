@@ -1,4 +1,5 @@
 #include <engine/audio/Mp3.hpp>
+#include <engine/core/Random.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -11,10 +12,12 @@
 
 TEST_SUITE_ID("engine.audio.mp3")
 TEST_DEPENDS("engine.audio.sample")
+TEST_DEPENDS("engine.core.random")
 
 using engine::audio::DecodeMp3;
 using engine::audio::IsMp3;
 using engine::audio::SampleBuffer;
+using engine::core::Random;
 
 namespace {
 	// 0.15 s of a 440 Hz sine, 44.1 kHz stereo, 32 kbps, no Xing header and no
@@ -227,4 +230,25 @@ TEST_CASE("a file larger than the backstop is refused unread", "[engine][audio][
 	// therefore bounds nothing.
 	const std::vector<uint8_t> huge(engine::audio::MAXIMUM_MP3_BYTES + 1, 0x00);
 	CHECK_FALSE(DecodeMp3(Bytes(huge)).has_value());
+}
+
+TEST_CASE("arbitrary MP3 input either refuses or stays within its result bound", "[.][sandbox][fuzz]") {
+	// The codec is vendored but the allocation limit and accepted result shape
+	// are ours. Fixed seeds make a decoder crash or bad result reproducible.
+	constexpr uint32_t ITERATIONS = 2'000;
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+		const size_t size = Random::Bits(iteration, 1) % 4096;
+		std::vector<uint8_t> bytes(size);
+		for (size_t index = 0; index < bytes.size(); index++) {
+			bytes[index] = static_cast<uint8_t>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		const auto decoded = DecodeMp3(Bytes(bytes));
+		if (decoded) {
+			CHECK(decoded->Format().IsValid());
+			CHECK_FALSE(decoded->Data().empty());
+			CHECK(decoded->Data().size() <= engine::audio::MAXIMUM_MP3_SAMPLES);
+		}
+	}
 }

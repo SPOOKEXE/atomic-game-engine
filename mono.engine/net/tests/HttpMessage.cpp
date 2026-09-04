@@ -1,3 +1,4 @@
+#include <engine/core/Random.hpp>
 #include <engine/net/http/Message.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -10,7 +11,9 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.net.http.message")
+TEST_DEPENDS("engine.core.random")
 
+using engine::core::Random;
 using engine::net::http::ByteRange;
 using engine::net::http::Header;
 using engine::net::http::MessageLimits;
@@ -46,6 +49,45 @@ namespace {
 		const std::vector<std::byte> bytes = Raw(wire);
 		size_t consumed = 0;
 		return ParseRequest(bytes, limits, request, consumed);
+	}
+
+	Request SentinelRequest() {
+		Request request;
+		request.Verb = Method::Put;
+		request.Target = "/must-not-change";
+		request.Headers.push_back(Header{.Name = "x-sentinel", .Value = "request"});
+		request.Range = ByteRange{.First = 3, .Last = 7, .Suffix = false};
+		request.Body = Raw("sentinel body");
+		return request;
+	}
+
+	void CheckRequestSentinel(const Request &request) {
+		CHECK(request.Verb == Method::Put);
+		CHECK(request.Target == "/must-not-change");
+		REQUIRE(request.Headers.size() == 1);
+		CHECK(request.Headers[0].Name == "x-sentinel");
+		CHECK(request.Headers[0].Value == "request");
+		REQUIRE(request.Range.has_value());
+		CHECK(request.Range->First == 3);
+		CHECK(request.Range->Last == 7);
+		CHECK_FALSE(request.Range->Suffix);
+		CHECK(Text(request.Body) == "sentinel body");
+	}
+
+	Response SentinelResponse() {
+		Response response;
+		response.Code = Status::Forbidden;
+		response.Headers.push_back(Header{.Name = "x-sentinel", .Value = "response"});
+		response.Body = Raw("sentinel body");
+		return response;
+	}
+
+	void CheckResponseSentinel(const Response &response) {
+		CHECK(response.Code == Status::Forbidden);
+		REQUIRE(response.Headers.size() == 1);
+		CHECK(response.Headers[0].Name == "x-sentinel");
+		CHECK(response.Headers[0].Value == "response");
+		CHECK(Text(response.Body) == "sentinel body");
 	}
 }
 
@@ -495,4 +537,44 @@ TEST_CASE("setting a header twice replaces it", "[http]") {
 	CHECK(response.Headers.size() == 1);
 	REQUIRE(response.Find("content-type").has_value());
 	CHECK(*response.Find("content-type") == "text/plain");
+}
+
+TEST_CASE("arbitrary HTTP input cannot change a failed parse output", "[.][sandbox][fuzz]") {
+	// A parser sitting on a public port gets arbitrary bytes, not merely nearly
+	// valid HTTP. The seed and iteration reproduce every generated packet.
+	constexpr uint32_t ITERATIONS = 2'000;
+	MessageLimits tight;
+	tight.RequestLineBytes = 24;
+	tight.HeaderBytes = 48;
+	tight.HeaderCount = 4;
+	tight.BodyBytes = 16;
+
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+		const size_t size = Random::Bits(iteration, 1) % 128;
+		std::vector<std::byte> wire(size);
+		for (size_t index = 0; index < wire.size(); index++) {
+			wire[index] = static_cast<std::byte>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		Request request = SentinelRequest();
+		size_t requestConsumed = 917;
+		const ParseResult requestResult = ParseRequest(wire, tight, request, requestConsumed);
+		if (requestResult == ParseResult::Ok) {
+			CHECK(requestConsumed <= wire.size());
+		} else {
+			CHECK(requestConsumed == 917);
+			CheckRequestSentinel(request);
+		}
+
+		Response response = SentinelResponse();
+		size_t responseConsumed = 919;
+		const ParseResult responseResult = ParseResponse(wire, tight, false, response, responseConsumed);
+		if (responseResult == ParseResult::Ok) {
+			CHECK(responseConsumed <= wire.size());
+		} else {
+			CHECK(responseConsumed == 919);
+			CheckResponseSentinel(response);
+		}
+	}
 }
