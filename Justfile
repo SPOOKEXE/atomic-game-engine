@@ -173,6 +173,12 @@ speculative-contact-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.speculative-contacts --all --samples {{samples}}
 
+# Local triangle bounds scan against the immutable per-mesh hierarchy.
+triangle-bvh-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_collision
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.collision.bench.triangle-bvh --all --samples {{samples}}
+
 dynamic-bvh-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_spatial

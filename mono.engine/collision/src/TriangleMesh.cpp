@@ -3,7 +3,10 @@
 #include <engine/core/Metrics.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <functional>
+#include <numeric>
 
 namespace engine::collision {
 
@@ -39,6 +42,10 @@ namespace engine::collision {
 					std::max({a.Z, b.Z, c.Z}),
 				},
 			};
+		}
+
+		float Component(const core::Vector3 &value, size_t axis) {
+			return axis == 0 ? value.X : (axis == 1 ? value.Y : value.Z);
 		}
 	}
 
@@ -112,6 +119,56 @@ namespace engine::collision {
 			for (const core::AABB &bound : mesh.TriangleBounds) {
 				mesh.Bounds = mesh.Bounds.Union(bound);
 			}
+
+			constexpr size_t LEAF_TRIANGLES = 4;
+			mesh.HierarchyTriangles.resize(mesh.TriangleBounds.size());
+			std::iota(mesh.HierarchyTriangles.begin(), mesh.HierarchyTriangles.end(), uint32_t{0});
+			mesh.Hierarchy.reserve(mesh.TriangleBounds.size() * 2);
+			const std::function<uint32_t(size_t, size_t)> build = [&](size_t begin, size_t end) {
+				const uint32_t nodeIndex = static_cast<uint32_t>(mesh.Hierarchy.size());
+				mesh.Hierarchy.emplace_back();
+				core::AABB bounds = mesh.TriangleBounds[mesh.HierarchyTriangles[begin]];
+				core::AABB centroidBounds{
+					(bounds.Minimum + bounds.Maximum) * 0.5f,
+					(bounds.Minimum + bounds.Maximum) * 0.5f,
+				};
+				for (size_t at = begin + 1; at < end; at++) {
+					const core::AABB &triangle = mesh.TriangleBounds[mesh.HierarchyTriangles[at]];
+					bounds = bounds.Union(triangle);
+					const core::Vector3 centroid = (triangle.Minimum + triangle.Maximum) * 0.5f;
+					centroidBounds = centroidBounds.Union(core::AABB{centroid, centroid});
+				}
+
+				TriangleBvhNode &node = mesh.Hierarchy[nodeIndex];
+				node.Bounds = bounds;
+				if (end - begin <= LEAF_TRIANGLES) {
+					node.First = static_cast<uint32_t>(begin);
+					node.Count = static_cast<uint32_t>(end - begin);
+					return nodeIndex;
+				}
+
+				const core::Vector3 extent = centroidBounds.Size();
+				const size_t axis =
+					extent.X >= extent.Y && extent.X >= extent.Z ? 0 : (extent.Y >= extent.Z ? 1 : 2);
+				const size_t middle = begin + (end - begin) / 2;
+				std::stable_sort(
+					mesh.HierarchyTriangles.begin() + static_cast<long>(begin),
+					mesh.HierarchyTriangles.begin() + static_cast<long>(end),
+					[&](uint32_t left, uint32_t right) {
+						const core::AABB &a = mesh.TriangleBounds[left];
+						const core::AABB &b = mesh.TriangleBounds[right];
+						const float aCentre = Component((a.Minimum + a.Maximum) * 0.5f, axis);
+						const float bCentre = Component((b.Minimum + b.Maximum) * 0.5f, axis);
+						return aCentre != bCentre ? aCentre < bCentre : left < right;
+					}
+				);
+				const uint32_t left = build(begin, middle);
+				const uint32_t right = build(middle, end);
+				mesh.Hierarchy[nodeIndex].Left = left;
+				mesh.Hierarchy[nodeIndex].Right = right;
+				return nodeIndex;
+			};
+			build(0, mesh.TriangleBounds.size());
 		}
 
 		// A corrupt index buffer is a warning because it is a bug upstream. A
@@ -139,33 +196,52 @@ namespace engine::collision {
 	size_t OverlapTriangles(const TriangleMesh &mesh, const core::AABB &box, std::span<uint32_t> out) {
 		// The whole-mesh bound first, so a query nowhere near the terrain costs
 		// one box test rather than one per triangle.
-		if (mesh.TriangleBounds.empty() || !mesh.Bounds.Overlaps(box)) {
+		if (mesh.Hierarchy.empty() || !mesh.Bounds.Overlaps(box)) {
 			return 0;
 		}
 
 		size_t written = 0;
-		for (size_t triangle = 0; triangle < mesh.TriangleBounds.size(); triangle++) {
-			if (!mesh.TriangleBounds[triangle].Overlaps(box)) {
+		bool overflowed = false;
+		std::array<uint32_t, 64> stack{};
+		size_t stackSize = 1;
+		stack[0] = 0;
+		while (stackSize != 0) {
+			const TriangleBvhNode &node = mesh.Hierarchy[stack[--stackSize]];
+			if (!node.Bounds.Overlaps(box)) {
 				continue;
 			}
-			if (written >= out.size()) {
-				// **The caller gets a partial answer and cannot tell.** Every
-				// triangle past this point is a contact that will not be
-				// generated, so a body rests on the first `out.size()` of them
-				// and passes through the rest. Rate-limited because a narrow
-				// phase asks this thousands of times a frame, and counted so a
-				// headless run reports it with no overlay open.
-				core::Metrics::Count("collision.mesh.overlap.truncated", 1.0);
-				ENGINE_WARN_EVERY(
-					1.0,
-					"overlap buffer of {} filled at triangle {} of {}; contacts past it are lost",
-					out.size(),
-					triangle,
-					mesh.TriangleBounds.size()
-				);
-				break;
+			if (!node.Leaf()) {
+				stack[stackSize++] = node.Right;
+				stack[stackSize++] = node.Left;
+				continue;
 			}
-			out[written++] = static_cast<uint32_t>(triangle);
+			for (size_t offset = 0; offset < node.Count; offset++) {
+				const uint32_t triangle = mesh.HierarchyTriangles[node.First + offset];
+				if (!mesh.TriangleBounds[triangle].Overlaps(box)) {
+					continue;
+				}
+				if (written < out.size()) {
+					out[written++] = triangle;
+				} else {
+					overflowed = true;
+					if (!out.empty()) {
+						auto greatest = std::max_element(out.begin(), out.end());
+						if (triangle < *greatest) {
+							*greatest = triangle;
+						}
+					}
+				}
+			}
+		}
+		std::sort(out.begin(), out.begin() + static_cast<long>(written));
+		if (overflowed) {
+			core::Metrics::Count("collision.mesh.overlap.truncated", 1.0);
+			ENGINE_WARN_EVERY(
+				1.0,
+				"overlap buffer of {} filled while querying {} triangles",
+				out.size(),
+				mesh.TriangleBounds.size()
+			);
 		}
 		return written;
 	}

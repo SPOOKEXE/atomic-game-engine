@@ -79,8 +79,9 @@ c. classes
   shapes touch, with no early friction, restitution, warm start, or contact event.
   box2d simulation and the continuous collision gdc 2013 notes describe the
   positive-separation velocity constraint.
-- [_] next best physics clubs are per-mesh triangle bvhs and true rotational or
-  dynamic-dynamic ccd. box2d documents stale-subtree bvh rebuilding, while its
+- [x] immutable local-space triangle bvhs built once per mesh and shared by all
+  collider instances, with deterministic original triangle ids in query output.
+- [_] next best physics club is true rotational and dynamic-dynamic ccd. box2d's
   time-of-impact path provides the conservative-advancement baseline.
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.

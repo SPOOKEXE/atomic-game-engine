@@ -60,6 +60,8 @@ TEST_CASE("a mesh keeps its triangles and derives its bound", "[trianglemesh]") 
 	const TriangleMesh mesh = Ground(4);
 	CHECK(mesh.TriangleCount() == 32);
 	CHECK(mesh.TriangleBounds.size() == 32);
+	CHECK_FALSE(mesh.Hierarchy.empty());
+	CHECK(mesh.HierarchyTriangles.size() == 32);
 	CHECK(mesh.Bounds.Minimum == Vector3::Zero);
 	CHECK(mesh.Bounds.Maximum == Vector3{4.0f, 0.0f, 4.0f});
 }
@@ -162,6 +164,24 @@ TEST_CASE("an overlap stops at the span it was given", "[trianglemesh]") {
 
 	uint32_t found[3] = {};
 	CHECK(OverlapTriangles(mesh, mesh.Bounds, found) == 3);
+	CHECK(found[0] == 0);
+	CHECK(found[1] == 1);
+	CHECK(found[2] == 2);
+}
+
+TEST_CASE("hierarchy overlap matches a complete bounds scan", "[trianglemesh]") {
+	const TriangleMesh mesh = Ground(32);
+	const AABB query = Around(Vector3{17.25f, 0.0f, 11.75f}, 3.4f);
+	std::vector<uint32_t> expected;
+	for (size_t triangle = 0; triangle < mesh.TriangleBounds.size(); triangle++) {
+		if (mesh.TriangleBounds[triangle].Overlaps(query)) {
+			expected.push_back(static_cast<uint32_t>(triangle));
+		}
+	}
+	std::vector<uint32_t> found(expected.size());
+	const size_t written = OverlapTriangles(mesh, query, found);
+	found.resize(written);
+	CHECK(found == expected);
 }
 
 TEST_CASE("an empty mesh answers nothing rather than reading past its arrays", "[trianglemesh]") {
