@@ -8,11 +8,19 @@
 // completion popup, hover lookup and the minimap.
 
 #include <imgui.h>
+#include <string_view>
 
 struct ImGuiWindow;
 
 namespace studio {
 
+	struct CodeEdit;
+
 	ImGuiWindow *FindCodeField(ImGuiID fieldId);
+
+	// Paints syntax and the caret into the multiline field child.
+	void DrawScriptSource(
+		std::string_view text, const CodeEdit &edit, ImVec2 fieldMin, ImVec2 fieldSize, ImGuiID fieldId
+	);
 
 }
