@@ -2838,6 +2838,7 @@
 		{"name": "StrokeSizingMode", "members": ["FixedSize", "ScaledSize"]},
 		{"name": "SurfaceEffect", "members": ["None", "NightVision", "Thermal", "Cctv", "Swirl"]},
 		{"name": "SurfaceSizingMode", "members": ["FixedSize", "PixelsPerStud"]},
+		{"name": "TeleportRequestDecision", "members": ["NotProcessed", "Denied", "Processed"]},
 		{"name": "TextTruncate", "members": ["None", "AtEnd"]},
 		{"name": "TextXAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "TextYAlignment", "members": ["Top", "Center", "Bottom"]},

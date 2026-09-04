@@ -3296,6 +3296,11 @@ declare interface TeleportService {
 	GetTeleportData(player: Instance): unknown;
 }
 
+declare interface TeleportResultSignal {
+	Connect(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
+	Once(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
+}
+
 declare interface MemoryStoreService {
 	GetAsync(key: string): Promise<StoreReply>;
 	SetAsync(key: string, value: unknown): Promise<StoreReply>;
@@ -4034,6 +4039,7 @@ declare const task: {
 		out << "\t\t(service: \"RunService\"): RunService;\n";
 		out << "\t\t(service: \"ComputeService\"): ComputeService;\n";
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
+		out << "\t\t(service: \"TeleportService\"): TeleportService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
 		out << "\t\t(service: \"DataStoreService\"): DataStoreService;\n";
 

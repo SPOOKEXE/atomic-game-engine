@@ -498,6 +498,7 @@ declare namespace Enum {
 	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
 	interface SurfaceEffect extends EnumItem { readonly __enum: "SurfaceEffect"; }
 	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
+	interface TeleportRequestDecision extends EnumItem { readonly __enum: "TeleportRequestDecision"; }
 	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
 	interface TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
 	interface TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
@@ -842,6 +843,11 @@ declare namespace Enum {
 	const SurfaceSizingMode: {
 		readonly FixedSize: SurfaceSizingMode;
 		readonly PixelsPerStud: SurfaceSizingMode;
+	};
+	const TeleportRequestDecision: {
+		readonly NotProcessed: TeleportRequestDecision;
+		readonly Denied: TeleportRequestDecision;
+		readonly Processed: TeleportRequestDecision;
 	};
 	const TextTruncate: {
 		readonly None: TextTruncate;
@@ -2359,11 +2365,30 @@ declare interface MessagingService {
 }
 
 declare interface TeleportService {
+	/** A correlated authority result, delivered at the next client script beat. */
+	readonly TeleportResult: TeleportResultSignal;
+
+	// The ProcessReceipt-style authority hook. Only `Processed` permits the
+	// server to move the assigned player; `Message` travels back to the client.
+	TeleportRequested: ((request: {
+		Player: Instance;
+		Place: string;
+		Data: unknown;
+	}) => {
+		Decision: Enum.TeleportRequestDecision;
+		Message?: string;
+	}) | null;
+
 	Teleport(placeName: string, player: Instance, data?: unknown): void;
 	GetLocalPlayerTeleportData(): unknown;
 
 	/** What arrived with this player, or nil for one that walked in the front door. */
 	GetTeleportData(player: Instance): unknown;
+}
+
+declare interface TeleportResultSignal {
+	Connect(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
+	Once(handler: (id: number, decision: Enum.TeleportRequestDecision, message: string) => void): RBXScriptConnection;
 }
 
 declare interface MemoryStoreService {
@@ -2727,6 +2752,7 @@ declare const game: {
 		(service: "RunService"): RunService;
 		(service: "ComputeService"): ComputeService;
 		(service: "MessagingService"): MessagingService;
+		(service: "TeleportService"): TeleportService;
 		(service: "MemoryStoreService"): MemoryStoreService;
 		(service: "DataStoreService"): DataStoreService;
 		(service: "TweenService"): TweenService;

@@ -672,6 +672,9 @@ end
 declare extern type Enum_SurfaceSizingMode extends EnumItem with
 end
 
+declare extern type Enum_TeleportRequestDecision extends EnumItem with
+end
+
 declare extern type Enum_TextTruncate extends EnumItem with
 end
 
@@ -1044,6 +1047,11 @@ declare Enum: {
 	SurfaceSizingMode: {
 		FixedSize: Enum_SurfaceSizingMode,
 		PixelsPerStud: Enum_SurfaceSizingMode,
+	},
+	TeleportRequestDecision: {
+		NotProcessed: Enum_TeleportRequestDecision,
+		Denied: Enum_TeleportRequestDecision,
+		Processed: Enum_TeleportRequestDecision,
 	},
 	TextTruncate: {
 		None: Enum_TextTruncate,
@@ -2545,6 +2553,20 @@ declare extern type MessagingService with
 end
 
 declare extern type TeleportService with
+	-- A correlated authority result, delivered at the next client script beat.
+	TeleportResult: TeleportResultSignal
+
+	-- The authority request a client made. The server chooses whether it was
+	-- handled, and only `Processed` makes the player leave this world.
+	TeleportRequested: ((request: {
+		Player: Instance,
+		Place: string,
+		Data: any,
+	}) -> {
+		Decision: Enum_TeleportRequestDecision,
+		Message: string?,
+	})?
+
 	-- Sends a player to another world in this universe, with an optional
 	-- payload. The player is removed from *this* world by the call: nothing
 	-- crosses but a name and the data, and the destination rebuilds them.
@@ -2558,6 +2580,15 @@ declare extern type TeleportService with
 	-- door. The server's half of the call above: the authority decides where an
 	-- arriving character stands and needs to see what the sender wrote.
 	function GetTeleportData(self, player: Instance): any
+end
+
+declare extern type TeleportResultSignal with
+	function Connect(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
+	function Once(
+		self, handler: (id: number, decision: Enum_TeleportRequestDecision, message: string) -> ()
+	): RBXScriptConnection
 end
 
 -- One channel's arrivals. `OpenChannel` hands one back per channel, so two
