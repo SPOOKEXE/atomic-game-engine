@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Authoring integrations use
+// this complete asset grounding contract.
+
 // Incrementally grounds a verified delivery catalogue into a local processed
 // store. It fetches no raw authoring inputs and never blocks a frame waiting
 // for a source.

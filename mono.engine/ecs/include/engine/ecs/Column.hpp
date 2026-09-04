@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. This complete column contract is
+// retained for storage tooling and future store consumers.
+
 // A run of fixed-size chunks holding component values whose type is known only
 // at runtime.
 //

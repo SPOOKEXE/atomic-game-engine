@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor views use this complete
+// presentation contract.
+
 // How far between two ticks the editor draws a world.
 //
 // **One line of arithmetic, in a header, because the version of it that lived

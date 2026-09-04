@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Animation and rendering
+// hosts use this complete flipbook contract.
+
 // Which cell of an animation sheet is showing, and where it is.
 //
 // **A GIF has been an ordinary texture since v0.10 and nothing played it.**

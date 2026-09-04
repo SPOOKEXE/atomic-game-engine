@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations share this
+// complete asset catalogue contract.
+
 // What the assets panel can list, and where each row came from.
 //
 // **One tab per place content lives, because "where is it" is the question the

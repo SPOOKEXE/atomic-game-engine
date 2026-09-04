@@ -39,38 +39,39 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.23.1
 
-- [_] CTRL+Z to undo, CTRL+SHIFT+Z to redo, add keybind options
-- [_] when i double click on a world, it should open a viewport if no existing viewports are open
-- [_] fix roblox importer, parts have no size, color is not kept, etc (bladeborne and furry rng demo aworld)
-- [_] bladeborne demo shows content.fit under content is 20+ms alone. fix issue
-- [_] also check how signatures handle content.fit items because that grows to 10ms in scenes that have heavy custom assets (e.g. invalid assets => should not spam signature)
-- [_] [studio] import failed: 'MeshPart.CollisionGroup' refused the value 'Ground'  (Editor.cpp:5116)
-- [_] add a per-asset profiler called `Asset Profiler` for cdn items so we can see who takes up the most memory and that allows us to debug why. hooks into pulling the data on CPU, storing it in memory, checking for item updates for GPU, and pushing to GPU for render (resident instances, sending delta updates to resident, etc)
-- [_] when i select a script in the explorer, it deselects and collapses the entire explorer
-- [_] CTRL+F script search
-- [_] when script opens (from double click or such) and no script editor is open, open it over the first viewport in full screen as a full tab
+- [x] CTRL+Z to undo, CTRL+SHIFT+Z to redo, add keybind options
+- [x] when i double click on a world, it should open a viewport if no existing viewports are open
+- [x] fix roblox importer, parts have no size, color is not kept, etc (bladeborne and furry rng demo aworld)
+- [x] bladeborne demo shows content.fit under content is 20+ms alone. fix issue
+- [x] also check how signatures handle content.fit items because that grows to 10ms in scenes that have heavy custom assets (e.g. invalid assets => should not spam signature)
+- [x] [studio] import failed: 'MeshPart.CollisionGroup' refused the value 'Ground'  (Editor.cpp:5116)
+- [x] add a per-asset profiler called `Asset Profiler` for cdn items so we can see who takes up the most memory and that allows us to debug why. hooks into pulling the data on CPU, storing it in memory, checking for item updates for GPU, and pushing to GPU for render (resident instances, sending delta updates to resident, etc)
+- [x] when i select a script in the explorer, it deselects and collapses the entire explorer
+- [x] CTRL+F script search
+- [x] when script opens (from double click or such) and no script editor is open, open it over the first viewport in full screen as a full tab
 
-- [_] Triage launcher/net/loadtest headers
-- [_] Triage cdn/client headers
-- [_] Triage ecs/graph/gui/bake headers
-- [_] Triage net/audio/ui/misc headers
-- [_] Triage physics headers
-- [_] Triage render headers
-- [_] Triage studio headers
+- [x] Triage launcher/net/loadtest headers
+- [x] Triage cdn/client headers
+- [x] Triage ecs/graph/gui/bake headers
+- [x] Triage net/audio/ui/misc headers
+- [x] Triage physics headers
+- [x] Triage render headers
+- [x] Triage studio headers
 
-- [_] add a set of `physics solver simulation` visualisations for each set of solver capabilities. this way we can see whats going on.
+- [x] add a set of `physics solver simulation` visualisations for each set of solver capabilities. this way we can see whats going on.
 
-- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
+
 
 new demos:
 - [_] port TornadoSim as a demo scene in the engine.
 - [_] blackhole simulator (warp space, warp visual, etc)
-- [_] user interface (copy bladeborne's for demo?), luau scripting and such
+- [_] user interface (copy bladeborne's for demo?), luau scripting and such. pure code that creates all the ui (using Fusion.luau, setup a modulescrpt that the code requires for example, can rewrite with fake player data).
 - [_] update DEMOS.md with GIFs uploaded to repository
 - [_] quadsphere, quadtree planet
 
 - [_] atomic engine icons?
 - [_] add icon pack to studio?
+- [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 - [_] deferred.md update, cleanup and work we can do now
 - [_] security audit, fuzzy tests, bound tests, etc.
 - [_] go through each underlying system and check we fully test them. lifecycles, allocations, deallocations, crash handling, error handling, fuzzy, bounds, etc.

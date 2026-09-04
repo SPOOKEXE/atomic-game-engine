@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Asset hosts retain this
+// complete mesh residency contract.
+
 // Renderer meshes share one vertex buffer and one index buffer.
 // Growth rebuilds both buffers; mesh eviction is not supported.
 //

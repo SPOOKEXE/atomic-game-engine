@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Interface hosts exchange
+// this complete mesh construction contract.
+
 // A compiled interface, as triangles.
 //
 // **The half of the interface pass that has logic in it, and the half a device

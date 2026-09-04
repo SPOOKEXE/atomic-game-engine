@@ -348,6 +348,9 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	engine::bake::RobloxValue size;
 	size.Set(engine::core::Vector3{20.0f, 1.0f, 20.0f});
 	part.Properties.push_back({"Size", size});
+	engine::bake::RobloxValue colour;
+	colour.Set(engine::core::Color3{0.2f, 0.4f, 0.8f});
+	part.Properties.push_back({"Color", colour});
 	root.Children.push_back(std::move(part));
 
 	engine::bake::RobloxInstance script;
@@ -394,6 +397,18 @@ TEST_CASE("a roblox place merges service roots and stages mapped script source",
 	const engine::ecs::Entity driver = store.FindFirstChild(workspace, "Driver");
 	REQUIRE(driver != engine::ecs::NULL_ENTITY);
 	CHECK(store.Has<engine::script::Disabled>(driver));
+
+	// The import must apply the values, not merely count the recognized
+	// properties. `Size` writes both the render bounds and collision extent,
+	// while `Color` maps Roblox's spelling to the part visual tint.
+	const engine::ecs::Entity floor = store.FindFirstChild(workspace, "Floor");
+	REQUIRE(floor != engine::ecs::NULL_ENTITY);
+	const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(floor);
+	REQUIRE(bounds != nullptr);
+	CHECK(bounds->HalfExtent == engine::core::Vector3{10.0f, 0.5f, 10.0f});
+	const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(floor);
+	REQUIRE(visual != nullptr);
+	CHECK(visual->Tint == engine::core::Color3{0.2f, 0.4f, 0.8f});
 }
 
 TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloximport]") {
@@ -404,7 +419,11 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 	std::ofstream(source) << R"xml(
 		<roblox version="4">
 			<Item class="Part" referent="RBX0">
-				<Properties><string name="Name">Block</string></Properties>
+				<Properties>
+					<string name="Name">Block</string>
+					<Vector3 name="Size"><X>8</X><Y>3</Y><Z>2</Z></Vector3>
+					<Color3uint8 name="Color">4294901760</Color3uint8>
+				</Properties>
 			</Item>
 		</roblox>
 	)xml";
@@ -427,6 +446,13 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 	REQUIRE(world.IsValid());
 	CHECK(error.empty());
 	loaded.Enter(world, [](engine::ecs::Store &store) {
-		CHECK(store.FindFirstRoot("Block") != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity block = store.FindFirstRoot("Block");
+		REQUIRE(block != engine::ecs::NULL_ENTITY);
+		const engine::scene::Bounds *bounds = store.Get<engine::scene::Bounds>(block);
+		REQUIRE(bounds != nullptr);
+		CHECK(bounds->HalfExtent == engine::core::Vector3{4.0f, 1.5f, 1.0f});
+		const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(block);
+		REQUIRE(visual != nullptr);
+		CHECK(visual->Tint == engine::core::Color3{1.0f, 0.0f, 0.0f});
 	});
 }

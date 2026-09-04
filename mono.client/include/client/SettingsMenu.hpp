@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward client API. The settings panel remains a
+// complete reusable presentation contract for client-tier consumers.
+
 // The shipped client's keyboard-driven ESC settings menu.
 // @tier L13 · client
 

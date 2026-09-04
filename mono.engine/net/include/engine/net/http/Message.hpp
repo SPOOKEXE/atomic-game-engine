@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward net API. HTTP adapters exchange this
+// complete message contract without a second wire representation.
+
 // HTTP/1.1 requests and responses as values, with no socket anywhere near them.
 //
 // This module owns an `http/` sub-area for userland networking and the

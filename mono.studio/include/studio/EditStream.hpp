@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Collaborative editors share
+// this complete edit-stream contract.
+
 // One editor's change, arriving in everybody else's.
 //
 // Team create's replication layer, and it is the third of three pieces rather

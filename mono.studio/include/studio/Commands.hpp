@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations share
+// this complete command contract.
+
 // Undo and redo, as a log of what the author asked for.
 //
 // **The editor applied every action straight to the store until v0.7**, which

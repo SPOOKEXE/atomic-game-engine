@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward graph API. This complete diagnostics
+// contract is kept for pipeline hosts and inspection tooling.
+
 // What is wrong with a pipeline, worked out from the pipeline alone.
 //
 // **This is the cheapest useful half of the fault taxonomy this file

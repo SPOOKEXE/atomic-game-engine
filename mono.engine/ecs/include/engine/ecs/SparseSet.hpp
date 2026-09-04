@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. This complete sparse storage
+// contract remains available to ECS tooling and future store consumers.
+
 // The entity directory: which archetype and row an entity lives in, and whether
 // it is still the entity somebody is holding a handle to.
 //

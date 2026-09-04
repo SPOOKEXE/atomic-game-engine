@@ -114,6 +114,43 @@ TEST_CASE("a retained slot updates without changing resident identity", "[render
 	CHECK(rows.Row(slot).Position.x == 3.0f);
 }
 
+TEST_CASE("residency records mesh rows and staged deltas separately", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance firstSource;
+	firstSource.Source = 1;
+	firstSource.Mesh = Name("content/first.amesh");
+	DrawInstance secondSource;
+	secondSource.Source = 2;
+	secondSource.Mesh = Name("content/second.amesh");
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	rows.Upsert(Key(1), ToGpu(firstSource, mesh), firstSource, mesh);
+	rows.Upsert(Key(2), ToGpu(secondSource, mesh), secondSource, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	const std::vector<engine::render::AssetInstanceRows> staged = rows.AssetRows();
+	REQUIRE(staged.size() == 2);
+	for (const engine::render::AssetInstanceRows &entry : staged) {
+		CHECK(entry.Resident == 1);
+		CHECK(entry.Staged == 1);
+	}
+
+	rows.BeginFrame();
+	rows.Upsert(Key(1), ToGpu(firstSource, mesh), firstSource, mesh);
+	rows.Upsert(Key(2), ToGpu(secondSource, mesh), secondSource, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	const std::vector<engine::render::AssetInstanceRows> steady = rows.AssetRows();
+	REQUIRE(steady.size() == 2);
+	for (const engine::render::AssetInstanceRows &entry : steady) {
+		CHECK(entry.Resident == 1);
+		CHECK(entry.Staged == 0);
+	}
+}
+
 TEST_CASE("a stale retained slot falls back to stable-key lookup", "[render][residency]") {
 	InstanceResidency rows;
 	DrawInstance source;

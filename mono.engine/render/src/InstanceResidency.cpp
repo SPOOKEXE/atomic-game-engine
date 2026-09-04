@@ -22,6 +22,7 @@ namespace engine::render {
 
 	void InstanceResidency::BeginFrame() {
 		TokenMode = false;
+		StagedByMesh.clear();
 		Frame++;
 		if (Frame == 0) {
 			for (Entry &entry : Entries) {
@@ -45,6 +46,7 @@ namespace engine::render {
 		}
 		TokenMode = true;
 		Token = token;
+		StagedByMesh.clear();
 		Frame++;
 		if (Frame == 0) {
 			for (Entry &entry : Entries) {
@@ -149,6 +151,7 @@ namespace engine::render {
 		entry.Seen = Frame;
 		entry.Occupied = true;
 		entry.SourceKnown = source != nullptr && mesh != nullptr;
+		entry.Mesh = entry.SourceKnown ? source->Mesh : core::Name{};
 		if (entry.SourceKnown) {
 			entry.Source = PackingSource{
 				source->Frame,
@@ -194,6 +197,7 @@ namespace engine::render {
 			MarkDirty(slot);
 		}
 		entry.SourceKnown = source != nullptr && mesh != nullptr;
+		entry.Mesh = entry.SourceKnown ? source->Mesh : core::Name{};
 		if (entry.SourceKnown) {
 			entry.Source = PackingSource{
 				source->Frame,
@@ -253,6 +257,10 @@ namespace engine::render {
 	void InstanceResidency::AcknowledgeDirty() {
 		for (const uint32_t slot : Dirty) {
 			if (slot < Entries.size()) {
+				const Entry &entry = Entries[slot];
+				if (entry.Occupied && entry.Mesh.IsValid()) {
+					StagedByMesh[entry.Mesh.Id()]++;
+				}
 				Entries[slot].Dirty = false;
 			}
 		}
@@ -286,6 +294,35 @@ namespace engine::render {
 
 	const GpuInstance &InstanceResidency::Row(uint32_t slot) const {
 		return Packed[slot];
+	}
+
+	std::vector<AssetInstanceRows> InstanceResidency::AssetRows() const {
+		std::unordered_map<uint32_t, AssetInstanceRows> rows;
+		for (const Entry &entry : Entries) {
+			if (!entry.Occupied || !entry.Mesh.IsValid()) {
+				continue;
+			}
+			auto [found, inserted] = rows.try_emplace(entry.Mesh.Id());
+			if (inserted) {
+				found->second.Mesh = entry.Mesh;
+			}
+			found->second.Resident++;
+		}
+		for (const auto &[id, staged] : StagedByMesh) {
+			auto [found, inserted] = rows.try_emplace(id);
+			if (inserted) {
+				found->second.Mesh = core::Name::FromId(id);
+			}
+			found->second.Staged += staged;
+		}
+
+		std::vector<AssetInstanceRows> result;
+		result.reserve(rows.size());
+		for (const auto &[id, row] : rows) {
+			(void)id;
+			result.push_back(row);
+		}
+		return result;
 	}
 
 	void InstanceResidency::MarkDirty(uint32_t slot) {

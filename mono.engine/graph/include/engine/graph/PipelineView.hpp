@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward graph API. Pipeline hosts use this
+// complete view contract without reproducing graph traversal rules.
+
 // Where a render graph's nodes sit on a canvas, and what joins them.
 //
 // **The half of a node editor that is arithmetic.** A Render Pipeline widget

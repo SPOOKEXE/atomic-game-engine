@@ -37,6 +37,7 @@ using studio::CodeField;
 using studio::FindCodeField;
 
 namespace {
+	ImGuiContext *TestContext = nullptr;
 
 	// A bare imgui context, per case for the reason `tests/AssetRow.cpp` gives:
 	// a case that fails mid-frame leaves a window on the stack, and the next
@@ -46,6 +47,8 @@ namespace {
 		Context() {
 			IMGUI_CHECKVERSION();
 			Handle = ImGui::CreateContext();
+			ImGui::SetCurrentContext(Handle);
+			TestContext = Handle;
 
 			ImGuiIO &io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(1280.0f, 720.0f);
@@ -60,7 +63,9 @@ namespace {
 		}
 
 		~Context() {
+			ImGui::SetCurrentContext(Handle);
 			ImGui::DestroyContext(Handle);
+			TestContext = nullptr;
 		}
 
 		Context(const Context &) = delete;
@@ -75,6 +80,9 @@ namespace {
 	// is the behaviour the popup depends on and therefore the behaviour worth
 	// pinning.
 	void Frame(std::string &text, CodeEdit &edit, const bool focus) {
+		// Other suites own their own ImGui contexts. Rebind this case's context so
+		// an unfinished external frame cannot receive this case's input events.
+		ImGui::SetCurrentContext(TestContext);
 		ImGui::NewFrame();
 
 		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));

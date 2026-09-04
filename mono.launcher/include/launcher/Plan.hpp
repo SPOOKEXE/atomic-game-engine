@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward launcher API. `Launcher.hpp` owns forms
+// and its caller-facing command-line construction uses these value types.
+
 // The form a mode is filled in on, and the command line it turns into.
 //
 // **Everything here is a value, and none of it draws.** The whole of what the

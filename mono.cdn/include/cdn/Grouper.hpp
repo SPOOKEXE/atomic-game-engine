@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward origin API. Content publication keeps this
+// deterministic group planner available as a complete configuration contract.
+
 // How assets are gathered into the groups that get streamed.
 //
 // A group is the unit that is compressed, streamed, prioritised and cancelled,

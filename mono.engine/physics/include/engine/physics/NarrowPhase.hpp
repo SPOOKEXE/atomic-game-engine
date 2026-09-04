@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. Collision hosts use this
+// complete narrow-phase contract without duplicating pair policy.
+
 // Deciding which candidate pairs are really touching, and where.
 //
 // `Phase::PostSimulation`, after `BroadPhase`. Every pair the broad phase

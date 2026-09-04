@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward network API. `Advert.hpp`, `Directory.hpp`
+// and `Presence.hpp` carry these wire-stable values in their public contracts.
+
 // The three axes a session is described along, and the port announcements use.
 //
 // Every one of these crosses a boundary. A row in a browser says how it was

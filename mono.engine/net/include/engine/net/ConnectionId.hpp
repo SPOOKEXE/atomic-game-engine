@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward net API. Wire-facing hosts need this
+// complete stable connection identifier contract.
+
 // A handle to one connection, and never a pointer to one.
 //
 // AGENTS.md rule 3: nothing crossing a world boundary is a pointer. A connection

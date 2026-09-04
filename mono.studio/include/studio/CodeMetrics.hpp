@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Script tooling shares this
+// complete code-metrics contract.
+
 // The script panel's monospace arithmetic: bytes to rendered cells and back,
 // and the scaling the minimap draws with.
 //

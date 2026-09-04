@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward launcher API. `Launcher.hpp` builds forms
+// from these complete program descriptions.
+
 // What a program says it accepts, read back from `--describe`.
 //
 // **This is the whole reason the launcher does not carry flag tables of its

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Renderer hosts share this
+// complete default-texture contract.
+
 // The texture a drawable gets when nothing has said what it is made of.
 //
 // **The gap this closes is that "no texture" had no picture.** A part with no

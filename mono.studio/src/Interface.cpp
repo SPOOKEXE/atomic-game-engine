@@ -4,6 +4,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -444,6 +445,8 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
+			Skinned("Asset Profiler", [&] { DrawAssetProfiler(); });
+			Skinned("Physics Solver", [&] { DrawPhysicsSolver(); });
 			Skinned("DataStores", [&] { DrawDataStores(); });
 			Skinned("CDN", [&] { DrawCdn(); });
 			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
@@ -1340,6 +1343,8 @@ namespace studio {
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem("Asset Profiler", nullptr, &ShowAssetProfiler);
+		ImGui::MenuItem("Physics Solver", nullptr, &ShowPhysicsSolver);
 		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
@@ -1424,7 +1429,8 @@ namespace studio {
 			ShowViewport = ShowExplorer = ShowWorlds = ShowLiveInstances = open;
 			ShowProperties = ShowComponents = ShowScripts = ShowDatasets = ShowDataStores = open;
 			ShowCdn = open;
-			ShowOutput = ShowSettings = ShowHistory = ShowAssets = open;
+			ShowOutput = ShowSettings = ShowHistory = ShowAssets = ShowAssetProfiler = ShowPhysicsSolver =
+				open;
 			ShowRenderPipeline = ShowPipelineProfile = open;
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;

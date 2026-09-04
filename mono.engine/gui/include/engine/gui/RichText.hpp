@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward GUI API. Interface compilers need this
+// complete rich-text value contract at their public boundary.
+
 // Markup in a `TextLabel`, turned into plain text and the styles over it.
 //
 // **The parse produces spans and never geometry.** A rich-text run reaches a

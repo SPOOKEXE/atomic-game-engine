@@ -530,9 +530,9 @@ namespace studio {
 					ImGui::Indent(static_cast<float>(row.Depth) * step);
 				}
 
-				ImGuiTreeNodeFlags flags =
-					ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
-					ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+										   ImGuiTreeNodeFlags_SpanAvailWidth |
+										   ImGuiTreeNodeFlags_NoTreePushOnOpen;
 				if (!row.HasChildren) {
 					flags |= ImGuiTreeNodeFlags_Leaf;
 				}
@@ -952,6 +952,19 @@ namespace studio {
 					ClearSelection();
 					SelectionWorld = {};
 					SelectedWorldRow = world;
+				}
+
+				// A double-click is an explicit request to look at this world. The
+				// main viewport is retained while closed, so reopening it restores its
+				// dock and makes this work even after every viewport was closed.
+				if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+					!ShowViewport &&
+					std::none_of(Extras.begin(), Extras.end(), [](const ViewportState &view) {
+						return view.Open;
+					})) {
+					ShowViewport = true;
+					FocusedViewport = 0;
+					RetargetEditingViewport(FocusedViewport, world);
 				}
 
 				// **A world row takes a drop too**, and it means "a root of

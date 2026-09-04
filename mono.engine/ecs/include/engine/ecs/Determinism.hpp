@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. Replay and diagnostics need this
+// complete deterministic comparison contract outside store internals.
+
 // Snapshot fingerprints for detecting replay divergence at exact ticks.
 //
 // The first observation records a baseline. Later observations of the same

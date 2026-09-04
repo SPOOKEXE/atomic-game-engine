@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Rendering hosts use this
+// complete compiled-graph execution contract.
+
 // The device-free dispatch seam between a compiled render graph and its GPU
 // backend. The table is assembled by the renderer, then RenderGraph owns the
 // traversal. A missing implementation is rejected before recording starts.

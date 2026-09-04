@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward client API. Presentation consumers use
+// these action values without duplicating input-to-world policy.
+
 // The client's own diagnostic bindings, and the table that names their keys.
 //
 // **These are this program's intents and not the engine's**, which is why they

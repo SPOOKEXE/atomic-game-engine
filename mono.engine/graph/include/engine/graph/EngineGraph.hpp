@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward graph API. Pipeline hosts consume this
+// complete graph description contract.
+
 // Device-free orchestration across the complete engine frame.
 //
 // Input, AI, world, physics, animation, and rendering use one resource

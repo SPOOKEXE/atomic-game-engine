@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. World hosts use this complete
+// portal traversal contract with the physics simulation.
+
 // The contact half of a hole: what a body standing in one is standing on.
 //
 // **A picture and a contact have nothing to share but the seam**, which is why

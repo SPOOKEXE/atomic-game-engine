@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Collaborative editors use
+// this complete team-create contract.
+
 // Team create's session: discovery, invitation, and the ordered edit stream
 // shared by the editors in it.
 //

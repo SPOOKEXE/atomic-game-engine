@@ -40,6 +40,7 @@ using studio::DrawAssetRow;
 using studio::RowAction;
 
 namespace {
+	ImGuiContext *TestContext = nullptr;
 	// How tall every row in these cases is.
 	constexpr float SIDE = 48.0f;
 
@@ -68,6 +69,8 @@ namespace {
 		explicit Context(bool assertOnError = true) {
 			IMGUI_CHECKVERSION();
 			Handle = ImGui::CreateContext();
+			ImGui::SetCurrentContext(Handle);
+			TestContext = Handle;
 
 			ImGuiIO &io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(1280.0f, 720.0f);
@@ -88,7 +91,9 @@ namespace {
 		}
 
 		~Context() {
+			ImGui::SetCurrentContext(Handle);
 			ImGui::DestroyContext(Handle);
+			TestContext = nullptr;
 		}
 
 		Context(const Context &) = delete;
@@ -111,6 +116,9 @@ namespace {
 	// the window's plus the padding, which is what lets a case click a row by
 	// arithmetic rather than by guessing.
 	template <class Body> void Frame(const Mouse &mouse, Body &&body) {
+		// Other suites own their own ImGui contexts. Rebind this case's context so
+		// an unfinished external frame cannot receive this case's input events.
+		ImGui::SetCurrentContext(TestContext);
 		ImGuiIO &io = ImGui::GetIO();
 		io.AddMousePosEvent(mouse.X, mouse.Y);
 		io.AddMouseButtonEvent(ImGuiMouseButton_Left, mouse.Down);

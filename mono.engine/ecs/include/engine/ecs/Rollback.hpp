@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. Simulation hosts keep rollback
+// policy available as one complete, reusable contract.
+
 // Bounded whole-world history for prediction and deterministic resimulation.
 //
 // Each entry is an owned snapshot. Restoring one cannot alias the live world,

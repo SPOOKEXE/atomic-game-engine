@@ -1792,6 +1792,22 @@ namespace studio {
 		// upload is a typed path rather than a file dialog.
 		void DrawAssets();
 
+		// Per-content-item pull, decode, residency, and GPU delta facts.
+		void DrawAssetProfiler();
+
+		// Last-tick solver topology, scheduling route, and continuous-collision work.
+		void DrawPhysicsSolver();
+		void RecordContentAssetPull(
+			const engine::core::Name &name, engine::assets::AssetKind kind, uint64_t bytes
+		);
+		void RecordContentAssetFootprint(
+			const engine::core::Name &name,
+			uint64_t decodedBytes,
+			uint64_t cpuResidentBytes,
+			uint64_t gpuResidentBytes
+		);
+		void RecordContentAssetFailure(const engine::core::Name &name);
+
 		// The Render Pipeline and Assets Pipeline node editors.
 		//
 		// **Drawn with an ImGui draw list rather than as a `gui` tree**, which is
@@ -2797,6 +2813,22 @@ namespace studio {
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
 		std::unordered_map<uint32_t, engine::assets::AnimationData> ContentAnimationFacts;
+
+		// The last state that made one world's pending mesh fit scan necessary.
+		// This is a reader watermark, not a copy of the parts or their meshes.
+		struct ContentFitScanState {
+			uint64_t VisualVersion = 0;
+			size_t VisualCount = 0;
+			uint64_t MeshVersion = 0;
+
+			bool operator==(const ContentFitScanState &) const = default;
+		};
+		std::unordered_map<uint32_t, ContentFitScanState> ContentFitScans;
+
+		// Mesh admission is the only renderer event that can make an unfitted
+		// part fit. Keep it apart from the presentation revision, so texture and
+		// shader churn does not restart a full world scan.
+		uint64_t ContentMeshRevision = 0;
 
 		// The collision geometry of every mesh this session has taken in.
 		//
@@ -3972,6 +4004,9 @@ namespace studio {
 		// The count survives a dockspace rebuild, just like the worlds panel's
 		// focus request.
 		int FocusScripts = 0;
+		// Frames left to dock the first script as a full tab over viewport one.
+		// The viewport may not own a dock node on the frame the script opens.
+		int DockFirstScript = 0;
 		//@}
 
 		// The completion popup: whether it is up, which row is chosen, and what
@@ -5260,6 +5295,10 @@ namespace studio {
 		// all of them.
 		size_t RoundRobin = 0;
 
+		// A requested scene capture has to receive a frame from its named panel,
+		// even when the last frames of a bounded headless run fall on previews.
+		std::optional<size_t> PendingSceneCaptureViewport;
+
 		// This frame's rotation, rebuilt at the top of `PresentWorld`.
 		//
 		// A member rather than a local so its storage survives the frame: the
@@ -5514,6 +5553,26 @@ namespace studio {
 
 		// The local content store. See `DrawAssets`.
 		bool ShowAssets = false;
+
+		// Per-CDN-item CPU, GPU, and residency accounting. See `DrawAssetProfiler`.
+		bool ShowAssetProfiler = false;
+
+		// Last-tick solver topology and scheduling route. See `DrawPhysicsSolver`.
+		bool ShowPhysicsSolver = false;
+		struct ContentAssetProfile {
+			engine::core::Name Name;
+			engine::assets::AssetKind Kind = engine::assets::AssetKind::Unknown;
+			uint64_t PulledBytes = 0;
+			uint64_t DecodedBytes = 0;
+			uint64_t CpuResidentBytes = 0;
+			uint64_t GpuResidentBytes = 0;
+			uint32_t Updates = 0;
+			uint32_t Failures = 0;
+			uint32_t ResidentInstances = 0;
+			uint32_t StagedInstances = 0;
+			uint64_t StagedBytes = 0;
+		};
+		std::unordered_map<uint32_t, ContentAssetProfile> ContentAssetProfiles;
 
 		// Whether each node editor is open. Closed by default: they are for
 		// somebody editing a pipeline, and every other session should not pay a

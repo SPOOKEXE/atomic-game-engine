@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward delivery API. Content clients and origins
+// use this complete cache policy contract at their shared boundary.
+
 // Content this client has already fetched and verified, kept between runs.
 //
 // **This is what "local cache first" means**, and it is the difference between

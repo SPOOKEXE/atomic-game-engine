@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Publishing integrations use
+// this complete export contract.
+
 // Frozen Studio export requests and their read-only preflight.
 
 #include <engine/delivery/Client.hpp>

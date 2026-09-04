@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward UI API. Interface hosts use this complete
+// browse-dialog contract without owning platform selection policy.
+
 // Listing a directory, for the file dialogs.
 //
 // **Here rather than in `mono.studio`, since v0.18.** The editor wrote this and

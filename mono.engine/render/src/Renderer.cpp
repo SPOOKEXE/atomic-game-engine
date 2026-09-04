@@ -420,6 +420,40 @@ namespace engine::render {
 		return State != nullptr ? gpu::MemoryStatistics(State->Device) : GpuMemoryStatistics{};
 	}
 
+	std::vector<AssetResidencyStatistics> Renderer::AssetResidencies() const {
+		std::unordered_map<uint32_t, AssetResidencyStatistics> merged;
+		if (State == nullptr) {
+			return {};
+		}
+
+		for (const Impl::InstanceWorld &world : State->InstanceWorlds) {
+			for (const AssetInstanceRows &rows : world.Instances.AssetRows()) {
+				auto [found, inserted] = merged.try_emplace(rows.Mesh.Id());
+				if (inserted) {
+					found->second.Name = rows.Mesh;
+				}
+				found->second.ResidentInstances += rows.Resident;
+				found->second.StagedInstances += rows.Staged;
+			}
+		}
+
+		std::vector<AssetResidencyStatistics> result;
+		result.reserve(merged.size());
+		for (auto &[id, row] : merged) {
+			(void)id;
+			row.StagedBytes = static_cast<uint64_t>(row.StagedInstances) * sizeof(GpuInstance);
+			result.push_back(row);
+		}
+		std::sort(
+			result.begin(),
+			result.end(),
+			[](const AssetResidencyStatistics &left, const AssetResidencyStatistics &right) {
+				return left.Name.Text() < right.Name.Text();
+			}
+		);
+		return result;
+	}
+
 	bool Renderer::AppendMemoryReport(const std::filesystem::path &path) const {
 		std::ofstream file(path, std::ios::app);
 		if (!file) {

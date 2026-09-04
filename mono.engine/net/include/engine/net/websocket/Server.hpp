@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward net API. WebSocket hosts construct this
+// complete server contract from their transport adapter.
+
 // Asynchronous WebSocket server for userland tools and content services.
 //
 // The implementation owns its Asio context and invokes handlers from its

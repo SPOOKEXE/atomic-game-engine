@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Viewport tools share this
+// complete viewer-lens contract.
+
 // Whether the editor may write its viewport camera's lens this frame.
 //
 // **A viewport panel's camera is an instance, so an author can select it and

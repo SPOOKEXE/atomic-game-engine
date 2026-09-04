@@ -1133,6 +1133,16 @@ namespace engine::render {
 		//@}
 	};
 
+	// One content mesh's live instance rows and the latest staged GPU delta.
+	// A row is one `GpuInstance`, so `StagedBytes` is exact transfer payload.
+	// @client
+	struct AssetResidencyStatistics {
+		core::Name Name;
+		uint32_t ResidentInstances = 0;
+		uint32_t StagedInstances = 0;
+		uint64_t StagedBytes = 0;
+	};
+
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
 	//
 	// @client
@@ -1880,6 +1890,10 @@ namespace engine::render {
 		// The snapshot is cheap enough for the heap profiler's one-second sample,
 		// but it takes the tracker's lock and is not a per-draw counter.
 		GpuMemoryStatistics MemoryStatistics() const;
+
+		// Reports resident rows and the latest staged delta for each mesh the
+		// renderer has seen. The snapshot is for diagnostics, not a draw path.
+		std::vector<AssetResidencyStatistics> AssetResidencies() const;
 
 		// Appends the logical GPU section to an existing process heap report.
 		//

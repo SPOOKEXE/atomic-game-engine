@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. Simulation hosts share this
+// complete constraint-solver contract.
+
 // Resolving the contacts, and telling the world what happened.
 //
 // Two steps of the `Phase::PostSimulation` chain, and they are here together

@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Asset hosts use this
+// complete missing-texture fallback contract.
+
 // The picture a drawable gets when it names a texture that is not here.
 //
 // **A different question from the one `DefaultTexture` answers, and keeping

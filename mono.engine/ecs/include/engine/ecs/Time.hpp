@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. Simulation hosts share this
+// complete tick-time contract rather than creating local clocks.
+
 // The world's clock, as a resource.
 //
 // Time is world state rather than an argument. A system handed a delta can be

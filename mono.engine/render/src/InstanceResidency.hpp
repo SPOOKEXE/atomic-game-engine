@@ -37,6 +37,14 @@ namespace engine::render {
 		uint32_t Count = 0;
 	};
 
+	// Per-mesh residency and the rows staged in the current renderer frame.
+	// The renderer merges one of these from each world for the asset profiler.
+	struct AssetInstanceRows {
+		core::Name Mesh;
+		uint32_t Resident = 0;
+		uint32_t Staged = 0;
+	};
+
 	class InstanceResidency {
 	  public:
 		void BeginFrame();
@@ -107,6 +115,8 @@ namespace engine::render {
 			return static_cast<uint32_t>(Dirty.size());
 		}
 
+		std::vector<AssetInstanceRows> AssetRows() const;
+
 	  private:
 		// The contiguous prefix of DrawInstance consumed by ToGpu. The layout
 		// assertion in InstanceResidency.cpp keeps the bulk comparison honest.
@@ -132,6 +142,7 @@ namespace engine::render {
 			bool Occupied = false;
 			bool Dirty = false;
 			bool SourceKnown = false;
+			core::Name Mesh;
 		};
 
 		uint32_t Upsert(
@@ -154,6 +165,7 @@ namespace engine::render {
 		std::vector<uint32_t> Free;
 		std::vector<uint32_t> Dirty;
 		std::vector<InstanceUploadRange> Ranges;
+		std::unordered_map<uint32_t, uint32_t> StagedByMesh;
 		uint64_t Frame = 0;
 		uint64_t Token = 0;
 		uint32_t Live = 0;

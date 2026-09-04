@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward physics API. Simulation hosts exchange
+// this complete contact manifold contract.
+
 // What a touch is.
 //
 // **These types were written before the narrow phase that fills them in**, for

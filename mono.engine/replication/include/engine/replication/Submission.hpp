@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward replication API. Input hosts use this
+// complete submission protocol contract.
+
 // Writing a delta's values into a world, in either direction.
 //
 // **One function, because a delta going up is the same bytes as a delta coming

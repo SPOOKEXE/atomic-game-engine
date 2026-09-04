@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward renderer API. Rendering hosts expose this
+// complete asynchronous readback contract to their consumers.
+
 // Device-free policy and image analysis for render resource previews.
 //
 // The renderer owns transfer buffers and fences. This owns the nonblocking

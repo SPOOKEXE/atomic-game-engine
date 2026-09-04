@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward load-test API. `Harness.hpp` owns
+// sessions and returns their reports as its complete run contract.
+
 // One virtual client, and the rule that says what it is doing.
 //
 // **A genuine session and not a traffic generator.** Everything below the

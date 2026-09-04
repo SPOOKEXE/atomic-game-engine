@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Editor integrations share
+// this complete reusable widget contract.
+
 // The handful of widgets imgui does not ship and this editor needs twice.
 //
 // **Twice is the bar.** A wrapper around one call used in one place is a layer

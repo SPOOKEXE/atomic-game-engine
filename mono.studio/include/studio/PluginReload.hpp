@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Plugin hosts share this
+// complete reload lifecycle contract.
+
 // Headless plugin source change tracking and debounce.
 //
 // The tracker reads filesystem metadata only when a caller-supplied monotonic

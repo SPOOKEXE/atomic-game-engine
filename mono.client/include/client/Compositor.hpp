@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward client API. This is the complete
+// presentation compositor contract for client-tier consumers.
+
 // The client's side of `world::ViewChannel`: N views in, one frame out.
 //
 // **A view is produced somewhere and drawn somewhere else.** Reading a world's

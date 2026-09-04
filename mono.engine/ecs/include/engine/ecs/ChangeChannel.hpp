@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward ECS API. Systems use this complete change
+// stream contract to observe store mutations without a second event model.
+
 // Which components changed this tick, per entity.
 //
 // Three things need the same answer and would otherwise each invent it:

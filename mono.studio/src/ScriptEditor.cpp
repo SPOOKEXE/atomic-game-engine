@@ -90,6 +90,17 @@ namespace studio {
 			ImGui::PushID(static_cast<int>(index));
 
 			bool open = true;
+			if (DockFirstScript > 0 && static_cast<int>(index) == ActiveScript) {
+				if (const ImGuiWindow *viewport = ImGui::FindWindowByName(ViewportIdentity(0));
+					viewport != nullptr && viewport->DockId != 0) {
+					// The first document replaces the main viewport as a tab. Later
+					// documents keep that editor's tab strip rather than redocking it.
+					ImGui::SetNextWindowDockID(viewport->DockId, ImGuiCond_Always);
+					DockFirstScript = 0;
+				} else {
+					DockFirstScript--;
+				}
+			}
 			if (focus && static_cast<int>(index) == ActiveScript) {
 				ImGui::SetNextWindowFocus();
 			}

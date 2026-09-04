@@ -1,5 +1,8 @@
 #pragma once
 
+// arch-waiver public-header: forward studio API. Render-pipeline tooling uses
+// this complete graph contract.
+
 // The adapter between the engine's render-pipeline document and the generic
 // nodegraph canvas. The canvas owns editing gestures; this owns what its typed
 // sockets mean to a render graph.
