@@ -33,6 +33,15 @@ namespace studio {
 		size_t Occurrences = 0;
 	};
 
+	// A source property that reached the importer but could not be represented
+	// by the selected engine class. Entries are sorted by their full source key.
+	struct RobloxPropertySkip {
+		std::string ClassName;
+		std::string PropertyName;
+		std::string Reason;
+		size_t Occurrences = 0;
+	};
+
 	struct RobloxImportAnalysis {
 		size_t Instances = 0;
 		size_t Classes = 0;
@@ -64,7 +73,8 @@ namespace studio {
 		size_t Scripts = 0;
 		size_t DisabledScripts = 0;
 		size_t Properties = 0;
-		size_t SkippedProperties = 0;
+		std::vector<RobloxClassGap> FolderFallbackClasses;
+		std::vector<RobloxPropertySkip> SkippedProperties;
 		std::vector<std::string> Notes;
 	};
 
@@ -124,7 +134,8 @@ namespace studio {
 	// Builds a decoded place into one edit-mode world. Matching service roots
 	// are reused, missing classes use the selected engine class or a Folder
 	// fallback, script source is staged in the world's source cache, and selected
-	// asset URIs are rewritten before values cross into ECS storage.
+	// asset URIs are rewritten before values cross into ECS storage. The result
+	// groups every fallback class and skipped property by its source spelling.
 	bool ImportRobloxPlace(
 		engine::ecs::Store &store,
 		const engine::bake::RobloxModel &model,

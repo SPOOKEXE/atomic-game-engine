@@ -375,7 +375,7 @@ namespace engine::scene {
 			std::string_view Parent;
 		};
 
-		constexpr std::array<ServiceDesc, 13> SERVICES{{
+		constexpr std::array<ServiceDesc, 14> SERVICES{{
 			// **Workspace first, and the order matters.** These are created in
 			// this order and the explorer draws roots in creation order, so
 			// this is the order an author sees - Workspace at the top, exactly
@@ -387,6 +387,12 @@ namespace engine::scene {
 			{"ServerScriptService", ServiceScope::Server, {}},
 			{"ServerStorage", ServiceScope::Server, {}},
 			{"StarterGui", ServiceScope::Client, {}},
+
+			// Studio owns the history implementation, but the service belongs to
+			// the client-side editing surface. The editor's plugin host supplies
+			// its methods; this fixture preserves `game:GetService` identity in an
+			// imported world without inventing a game-side undo stack.
+			{"ChangeHistoryService", ServiceScope::Client, {}},
 
 			// **The gear template, and it is copied on the join rather than on
 			// the spawn.** Roblox clones this into `Player.StarterGear` once,

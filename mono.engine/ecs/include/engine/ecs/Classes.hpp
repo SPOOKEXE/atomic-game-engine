@@ -393,6 +393,21 @@ namespace engine::ecs {
 		//
 		// @return `false` when the entity cannot take it.
 		bool (*Set)(Store &store, Entity instance, const void *value) = nullptr;
+
+		// Resolves a prerequisite named by a value arriving from a document.
+		//
+		// Most properties are self-contained, so this remains null. A property
+		// whose value names process-wide state can provide it to make a document
+		// portable: the document reader calls it after parsing and before the
+		// ordinary setter. The callback receives exactly `Size` bytes and must
+		// leave an existing prerequisite unchanged when it is already present.
+		//
+		// This is deliberately not part of `Store::SetProperty`: a script's
+		// misspelled group should still be refused instead of silently changing
+		// global configuration. It is only for authored-document dependencies.
+		//
+		// @return `false` when the prerequisite cannot be prepared.
+		bool (*PrepareDocument)(const void *value) = nullptr;
 	};
 
 	// Everything registered about one class.
