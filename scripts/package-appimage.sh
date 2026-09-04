@@ -82,8 +82,8 @@ done
 # Icon= key gives, and again as .DirIcon for file managers that show one before
 # anything is mounted. appimagetool warns about a missing .DirIcon and then
 # produces an image nothing displays an icon for, which is easy to not notice.
-cp "$root/assets/icon.png" "$appdir/atomic-$program.png"
-cp "$root/assets/icon.png" "$appdir/.DirIcon"
+cp "$root/assets/small-icon.png" "$appdir/atomic-$program.png"
+cp "$root/assets/small-icon.png" "$appdir/.DirIcon"
 
 case $program in
 	studio)   display="Atomic Studio";   categories="Development;IDE;" ;;
