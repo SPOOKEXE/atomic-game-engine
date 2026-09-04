@@ -81,8 +81,10 @@ c. classes
   positive-separation velocity constraint.
 - [x] immutable local-space triangle bvhs built once per mesh and shared by all
   collider instances, with deterministic original triangle ids in query output.
-- [_] next best physics club is true rotational and dynamic-dynamic ccd. box2d's
-  time-of-impact path provides the conservative-advancement baseline.
+- [x] true rotational and dynamic-dynamic ccd using conservative advancement,
+  a deterministic time heap with bounded resweeps, and a retained grid of full
+  swept bounds. the focused benchmark covers linear, rotational, and sparse
+  scene costs.
 
 - [_] node graph editor built-in library for canvas + nodes + async compute + etc? can create a new gui object instances for it called NodeCanvas or such that is a ui object. zooming, moving around, resize nodes, etc. think of comfyui. setup output typed ids so filtered node connections, add callback functions to process as well, etc.
 

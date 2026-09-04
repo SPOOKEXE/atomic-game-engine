@@ -50,6 +50,7 @@ namespace engine::physics {
 
 	PhysicsWorld::PhysicsWorld(float cellSize)
 		: DynamicIndex(InitialGridCellSize(cellSize)), StaticIndex(InitialGridCellSize(cellSize)),
+		  ContinuousIndex(InitialGridCellSize(cellSize)),
 		  // **A size at or below zero means "measure it"**, which is what
 		  // `PreparePhysicsWorld`'s default already passed. Resolve that sentinel
 		  // before the grids, where zero is invalid and correctly diagnostic. An
@@ -64,6 +65,8 @@ namespace engine::physics {
 		stats.DynamicGrid = {dynamicGrid.LiveBytes, dynamicGrid.RetainedBytes};
 		const spatial::HashGridStats staticGrid = StaticIndex.Stats();
 		stats.StaticGrid = {staticGrid.LiveBytes, staticGrid.RetainedBytes};
+		const spatial::HashGridStats continuousGrid = ContinuousIndex.Stats();
+		Add(stats.DynamicGrid, {continuousGrid.LiveBytes, continuousGrid.RetainedBytes});
 		const spatial::DynamicBvhStats dynamicTree = DynamicTree.Stats();
 		stats.DynamicTree = {dynamicTree.LiveBytes, dynamicTree.RetainedBytes};
 
@@ -83,6 +86,13 @@ namespace engine::physics {
 		Add(stats.BroadphaseBuffers, NestedVectorBytes(SourcedPairBatches));
 		Add(stats.BroadphaseBuffers, VectorBytes(SourcedPairOverflow));
 		Add(stats.BroadphaseBuffers, VectorBytes(CandidateBuffer));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousProxies));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousRecords));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousShapes));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousFractions));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousThresholds));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousReaches));
+		Add(stats.BroadphaseBuffers, VectorBytes(ContinuousEvents));
 
 		Add(stats.Solver, VectorBytes(ManifoldList));
 		Add(stats.Solver, NestedVectorBytes(ManifoldBatches));

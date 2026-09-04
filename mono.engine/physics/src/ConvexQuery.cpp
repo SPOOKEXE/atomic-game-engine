@@ -1,16 +1,27 @@
 #include "ConvexQuery.hpp"
 
+#include "ContactPairs.hpp"
+
 #include <engine/collision/TriangleMesh.hpp>
+#include <engine/physics/Integrate.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace engine::physics {
 
 	namespace {
+		float MaximumRadius(const ShapeInstance &shape) {
+			const core::AABB bounds = ShapeReach(shape);
+			const core::Vector3 low = bounds.Minimum - shape.Frame.Position;
+			const core::Vector3 high = bounds.Maximum - shape.Frame.Position;
+			return std::max(low.Magnitude(), high.Magnitude());
+		}
+
 		// One vertex of the Minkowski difference, with the two surface points it
 		// came from.
 		//
@@ -764,7 +775,7 @@ namespace engine::physics {
 			ShapeInstance advanced = moving;
 			float covered = 0.0f;
 
-			for (size_t advance = 0; advance < SWEEP_ADVANCES; advance++) {
+			for (size_t advance = 0; advance < MOTION_SWEEP_ADVANCES; advance++) {
 				// **The position moves and the rotation does not**, which is the
 				// stated limit of this sweep. Built by copying the frame and
 				// replacing its position rather than by composing two frames,
@@ -772,7 +783,7 @@ namespace engine::physics {
 				// the shape along a line that is not the motion.
 				core::CFrame placed = moving.Frame;
 				placed.Position = moving.Frame.Position + direction * covered;
-				advanced = ShapeInstance{placed, moving.Extent, moving.Shape};
+				advanced = ShapeInstance{placed, moving.Extent, moving.Shape, moving.Hull, moving.Mesh};
 
 				const ConvexSeparation gap = ClosestPoints(advanced, fixed);
 				if (gap.Overlapping || gap.Distance <= SWEEP_SKIN) {
@@ -814,6 +825,102 @@ namespace engine::physics {
 			// The advance budget, which a grazing approach reaches. See
 			// `SWEEP_ADVANCES` for why answering "no hit" is the conservative half
 			// there and would not be for a head-on approach.
+			return answer;
+		}
+
+		ConvexSweep SweepConvexMotionOnly(
+			const ShapeInstance &first,
+			const core::Vector3 &firstLinear,
+			const core::Vector3 &firstAngular,
+			const ShapeInstance &second,
+			const core::Vector3 &secondLinear,
+			const core::Vector3 &secondAngular,
+			float seconds
+		) {
+			ConvexSweep answer;
+			if (!(seconds > 0.0f)) {
+				return SweepConvexOnly(first, core::Vector3::Zero, second);
+			}
+
+			const float angularBound = firstAngular.Magnitude() * MaximumRadius(first) +
+									   secondAngular.Magnitude() * MaximumRadius(second);
+			const core::Vector3 relativeLinear = firstLinear - secondLinear;
+			float elapsed = 0.0f;
+			core::Vector3 lastNormal = core::Vector3::YAxis;
+			core::Vector3 lastPosition;
+			float lastClosing = 0.0f;
+
+			for (size_t advance = 0; advance < SWEEP_ADVANCES; advance++) {
+				const core::CFrame firstFrame = Advanced(first.Frame, firstLinear, firstAngular, elapsed);
+				const core::CFrame secondFrame = Advanced(second.Frame, secondLinear, secondAngular, elapsed);
+				const ShapeInstance placedFirst{
+					firstFrame, first.Extent, first.Shape, first.Hull, first.Mesh
+				};
+				const ShapeInstance placedSecond{
+					secondFrame, second.Extent, second.Shape, second.Hull, second.Mesh
+				};
+
+				ConvexSeparation gap = ClosestPoints(placedFirst, placedSecond);
+				if (gap.Overlapping && placedFirst.Shape == scene::ShapeKind::Box &&
+					placedSecond.Shape == scene::ShapeKind::Box &&
+					!ContactBetween(placedFirst, placedSecond).Touching) {
+					const SeparatedContact exact =
+						SeparatedBetween(placedFirst, placedSecond, std::numeric_limits<float>::max());
+					if (exact.Found) {
+						gap.OnFirst = exact.OnFirst;
+						gap.OnSecond = exact.OnSecond;
+						gap.Distance = exact.Distance;
+						gap.Overlapping = false;
+					}
+				}
+				if (gap.Overlapping) {
+					answer.Hit = true;
+					answer.Fraction = std::clamp(elapsed / seconds, 0.0f, 1.0f);
+					answer.Position = gap.OnSecond;
+					answer.Normal = lastNormal;
+					answer.ClosingSpeed = lastClosing;
+					return answer;
+				}
+
+				lastNormal = (gap.OnFirst - gap.OnSecond).Unit();
+				lastPosition = gap.OnSecond;
+				const core::Vector3 toward = (gap.OnSecond - gap.OnFirst).Unit();
+				const core::Vector3 firstPointVelocity =
+					firstLinear + firstAngular.Cross(gap.OnFirst - firstFrame.Position);
+				const core::Vector3 secondPointVelocity =
+					secondLinear + secondAngular.Cross(gap.OnSecond - secondFrame.Position);
+				lastClosing = std::max((firstPointVelocity - secondPointVelocity).Dot(toward), 0.0f);
+				if (gap.Distance <= SWEEP_SKIN) {
+					if (lastClosing > CONVEX_EPSILON) {
+						elapsed += (gap.Distance + SWEEP_SKIN) / lastClosing;
+						if (elapsed <= seconds) {
+							continue;
+						}
+					}
+					answer.Hit = true;
+					answer.Fraction = std::clamp(elapsed / seconds, 0.0f, 1.0f);
+					answer.Position = gap.OnSecond;
+					answer.Normal = lastNormal;
+					answer.ClosingSpeed = lastClosing;
+					return answer;
+				}
+				const float closingBound = relativeLinear.Dot(toward) + angularBound;
+				if (closingBound <= CONVEX_EPSILON) {
+					return answer;
+				}
+
+				elapsed += gap.Distance / closingBound;
+				if (elapsed > seconds) {
+					return answer;
+				}
+			}
+
+			answer.Hit = true;
+			answer.Fraction = std::clamp(elapsed / seconds, 0.0f, 1.0f);
+			answer.Position = lastPosition;
+			answer.Normal = lastNormal;
+			answer.ConservativeFallback = true;
+			answer.ClosingSpeed = lastClosing;
 			return answer;
 		}
 
@@ -951,5 +1058,71 @@ namespace engine::physics {
 		}
 
 		return SweepConvexOnly(moving, motion, fixed);
+	}
+
+	ConvexSweep SweepConvexMotion(
+		const ShapeInstance &first,
+		const core::Vector3 &firstLinear,
+		const core::Vector3 &firstAngular,
+		const ShapeInstance &second,
+		const core::Vector3 &secondLinear,
+		const core::Vector3 &secondAngular,
+		float seconds
+	) {
+		if (second.Shape != scene::ShapeKind::Mesh) {
+			return SweepConvexMotionOnly(
+				first, firstLinear, firstAngular, second, secondLinear, secondAngular, seconds
+			);
+		}
+
+		ConvexSweep answer;
+		if (second.Mesh == nullptr || secondLinear.MagnitudeSquared() > CONVEX_EPSILON ||
+			secondAngular.MagnitudeSquared() > CONVEX_EPSILON) {
+			return answer;
+		}
+
+		const core::CFrame ended = Advanced(first.Frame, firstLinear, firstAngular, seconds);
+		const ShapeInstance arrived{ended, first.Extent, first.Shape, first.Hull, first.Mesh};
+		core::AABB world = ShapeReach(first).Union(ShapeReach(arrived));
+		const float angularReach = firstAngular.Magnitude() * MaximumRadius(first) * seconds;
+		const core::Vector3 margin{angularReach, angularReach, angularReach};
+		world = core::AABB{world.Minimum - margin, world.Maximum + margin};
+
+		const core::Vector3 corners[8] = {
+			{world.Minimum.X, world.Minimum.Y, world.Minimum.Z},
+			{world.Maximum.X, world.Minimum.Y, world.Minimum.Z},
+			{world.Minimum.X, world.Maximum.Y, world.Minimum.Z},
+			{world.Maximum.X, world.Maximum.Y, world.Minimum.Z},
+			{world.Minimum.X, world.Minimum.Y, world.Maximum.Z},
+			{world.Maximum.X, world.Minimum.Y, world.Maximum.Z},
+			{world.Minimum.X, world.Maximum.Y, world.Maximum.Z},
+			{world.Maximum.X, world.Maximum.Y, world.Maximum.Z},
+		};
+		core::AABB local;
+		for (size_t index = 0; index < 8; index++) {
+			const core::Vector3 point = ToLocalPoint(second.Frame, corners[index]);
+			const core::AABB one{point, point};
+			local = index == 0 ? one : local.Union(one);
+		}
+
+		std::array<uint32_t, MAXIMUM_MESH_TRIANGLES> reached{};
+		const size_t count = collision::OverlapTriangles(*second.Mesh, local, reached);
+		collision::ConvexHull triangle;
+		uint32_t nearest = 0;
+		for (size_t at = 0; at < count; at++) {
+			FillTriangleHull(*second.Mesh, reached[at], triangle);
+			const ShapeInstance placed{
+				second.Frame, core::Vector3::Zero, scene::ShapeKind::Hull, &triangle, nullptr
+			};
+			const ConvexSweep hit = SweepConvexMotionOnly(
+				first, firstLinear, firstAngular, placed, core::Vector3::Zero, core::Vector3::Zero, seconds
+			);
+			if (hit.Hit && (!answer.Hit || hit.Fraction < answer.Fraction ||
+							(hit.Fraction == answer.Fraction && reached[at] < nearest))) {
+				answer = hit;
+				nearest = reached[at];
+			}
+		}
+		return answer;
 	}
 }

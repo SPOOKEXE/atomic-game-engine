@@ -179,6 +179,13 @@ triangle-bvh-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_collision
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.collision.bench.triangle-bvh --all --samples {{samples}}
 
+# Rotational and dynamic-pair time-of-impact walks. Output remains on the
+# terminal and no benchmark file is made.
+continuous-collision-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_physics
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.continuous --all --samples {{samples}}
+
 dynamic-bvh-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_spatial

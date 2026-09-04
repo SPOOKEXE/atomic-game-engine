@@ -34,6 +34,7 @@ using engine::physics::ConvexSweep;
 using engine::physics::PenetrationBetween;
 using engine::physics::ShapeInstance;
 using engine::physics::SweepConvex;
+using engine::physics::SweepConvexMotion;
 using engine::scene::ShapeKind;
 
 namespace {
@@ -261,6 +262,52 @@ TEST_CASE("a sweep stops at the surface rather than in it", "[convexquery]") {
 
 	// And the normal pushes it back the way it came.
 	CHECK(hit.Normal.X == Approx(-1.0f).margin(1e-2f));
+}
+
+TEST_CASE("a motion sweep finds two bodies crossing between poses", "[convexquery]") {
+	const ShapeInstance first = Box(Vector3{-3.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const ShapeInstance second = Box(Vector3{3.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+
+	const ConvexSweep hit = SweepConvexMotion(
+		first,
+		Vector3{5.0f, 0.0f, 0.0f},
+		Vector3::Zero,
+		second,
+		Vector3{-5.0f, 0.0f, 0.0f},
+		Vector3::Zero,
+		1.0f
+	);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Fraction == Approx(0.5f).margin(2e-3f));
+}
+
+TEST_CASE("a motion sweep finds a moving body against a stopped body", "[convexquery]") {
+	const ShapeInstance moving = Box(Vector3{-6.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const ShapeInstance stopped = Box(Vector3{2.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const ConvexSweep hit = SweepConvexMotion(
+		moving,
+		Vector3{1200.0f, 0.0f, 0.0f},
+		Vector3::Zero,
+		stopped,
+		Vector3::Zero,
+		Vector3::Zero,
+		0.8f / 60.0f
+	);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Fraction == Approx(7.0f / 16.0f).margin(2e-3f));
+}
+
+TEST_CASE("a motion sweep finds a hit caused only by rotation", "[convexquery]") {
+	const ShapeInstance bar = Box(Vector3::Zero, Vector3{0.05f, 2.0f, 0.05f});
+	const ShapeInstance target = Box(Vector3{-1.5f, 0.0f, 0.0f}, Vector3{0.1f, 0.1f, 0.1f});
+
+	const ConvexSweep hit = SweepConvexMotion(
+		bar, Vector3::Zero, Vector3{0.0f, 0.0f, 2.0f}, target, Vector3::Zero, Vector3::Zero, 1.0f
+	);
+	REQUIRE(hit.Hit);
+	CHECK_FALSE(hit.ConservativeFallback);
+	CHECK(hit.Fraction > 0.0f);
+	CHECK(hit.Fraction < 1.0f);
 }
 
 TEST_CASE("a sweep that misses reports no hit", "[convexquery]") {

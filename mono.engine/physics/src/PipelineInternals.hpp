@@ -62,6 +62,10 @@ namespace engine::physics {
 			return world.StaticIndex;
 		}
 
+		static spatial::HashGrid &ContinuousIndex(PhysicsWorld &world) {
+			return world.ContinuousIndex;
+		}
+
 		static const std::vector<ColliderRecord> &DynamicRecords(const PhysicsWorld &world) {
 			return world.DynamicRecords;
 		}
@@ -140,6 +144,35 @@ namespace engine::physics {
 		static std::vector<PlacedCollider> &StaticShapes(PhysicsWorld &world) {
 			return world.StaticShapes;
 		}
+
+		static std::vector<spatial::Proxy> &ContinuousProxies(PhysicsWorld &world) {
+			return world.ContinuousProxies;
+		}
+
+		static std::vector<ColliderRecord> &ContinuousRecords(PhysicsWorld &world) {
+			return world.ContinuousRecords;
+		}
+
+		static std::vector<PlacedCollider> &ContinuousShapes(PhysicsWorld &world) {
+			return world.ContinuousShapes;
+		}
+
+		static std::vector<float> &ContinuousFractions(PhysicsWorld &world) {
+			return world.ContinuousFractions;
+		}
+
+		static std::vector<float> &ContinuousThresholds(PhysicsWorld &world) {
+			return world.ContinuousThresholds;
+		}
+
+		static std::vector<float> &ContinuousReaches(PhysicsWorld &world) {
+			return world.ContinuousReaches;
+		}
+
+		static std::vector<ContinuousImpactEvent> &ContinuousEvents(PhysicsWorld &world) {
+			return world.ContinuousEvents;
+		}
+
 		//@}
 
 		// The manifold list, cleared and refilled by `NarrowPhase`.

@@ -90,6 +90,17 @@ namespace engine::physics {
 		spatial::LayerMask Mask;
 	};
 
+	// One continuous-collision candidate ordered by its absolute tick fraction.
+	// @since v0.23
+	struct ContinuousImpactEvent {
+		float Fraction = 1.0f;
+		float BiteFraction = 0.0f;
+		uint32_t First = 0;
+		uint32_t Second = 0;
+		bool Dynamic = false;
+		bool Reswept = false;
+	};
+
 	// Two colliders whose world boxes overlap, and which the layer masks admit.
 	//
 	// A *candidate*, not a contact. The boxes touch; the shapes inside them very
@@ -1051,6 +1062,7 @@ namespace engine::physics {
 		spatial::HashGrid DynamicIndex;
 		spatial::DynamicBvh DynamicTree;
 		spatial::HashGrid StaticIndex;
+		spatial::HashGrid ContinuousIndex;
 		bool DynamicTreeActive = false;
 		size_t DynamicTreeSettledFrames = 0;
 
@@ -1078,6 +1090,13 @@ namespace engine::physics {
 		// where a wall is disagreeing inside one step.
 		std::vector<PlacedCollider> DynamicShapes;
 		std::vector<PlacedCollider> StaticShapes;
+		std::vector<spatial::Proxy> ContinuousProxies;
+		std::vector<ColliderRecord> ContinuousRecords;
+		std::vector<PlacedCollider> ContinuousShapes;
+		std::vector<float> ContinuousFractions;
+		std::vector<float> ContinuousThresholds;
+		std::vector<float> ContinuousReaches;
+		std::vector<ContinuousImpactEvent> ContinuousEvents;
 
 		std::vector<CandidatePair> PairList;
 

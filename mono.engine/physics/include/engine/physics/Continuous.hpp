@@ -12,14 +12,10 @@
 // What closes it is a distance function between two convex shapes, which is what
 // `src/ConvexQuery.hpp` now is. This step is the consumer.
 //
-// **Against static geometry, and that is the case rather than a first cut.** The
-// bug is a bullet through a wall, a dropped crate through a floor, a character
-// through a door frame - one fast thing and one thing that was not going
-// anywhere. Two bodies both moving fast enough to pass through each other is a
-// different and much harder problem: their relative motion is not a straight
-// line in either's frame, so a sweep of one against the other's *start* pose is
-// not conservative. Doing the easy half honestly is better than doing the hard
-// half approximately.
+// Both bodies may translate and rotate. A retained grid indexes conservative
+// swept bounds, then conservative advancement finds the first shared time of
+// impact for each candidate pair. Static geometry uses the same walk with zero
+// velocity on its side.
 //
 // @tier L8 · shared
 
@@ -79,13 +75,10 @@ namespace engine::physics {
 	//
 	// `Phase::Simulation`, between `IntegrateMotion` and `SyncBroadphase`: after
 	// the positions have been stepped, so there is a motion to sweep, and before
-	// the index is rebuilt, so the index describes where the bodies ended up.
+	// the ordinary broad-phase index is rebuilt.
 	//
-	// **It reads the static index that the previous tick built**, which is
-	// correct because that index holds the things that do not move -
-	// `SyncBroadphase` only rebuilds it when the static set actually changes. A
-	// world on its very first tick has no index yet and sweeps nothing, which is
-	// one tick of the old behaviour and is stated rather than worked around.
+	// It reads the static index that the previous sync built. Dynamic swept bounds
+	// are rebuilt here because both endpoints and the path between them move.
 	//
 	// **It writes `scene::Transform` through the reference `Each` hands out**,
 	// never through `Store::Set`, for the reason `AGENTS.md` gives at length: a
