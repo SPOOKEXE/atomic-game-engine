@@ -63,6 +63,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/effects/Particles.hpp>
+#include <engine/scene/VectorField.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -249,6 +250,11 @@ namespace engine::effects {
 
 		// A constant push, in metres per second squared.
 		core::Vector3 Acceleration;
+
+		// The field selected by this emitter's nearest ancestor. Resolved on the
+		// hierarchy and field change paths, so the per-particle step never reads a
+		// component or walks a parent chain.
+		scene::VectorFieldSample ForceField;
 
 		// Where this block's particles start in the pool.
 		uint32_t First = 0;
@@ -603,6 +609,8 @@ namespace engine::effects {
 		uint64_t AttachmentChangeVersion = 0;
 		uint64_t BoundsChangeVersion = 0;
 		uint64_t MotionChangeVersion = 0;
+		uint64_t VectorField2DChangeVersion = 0;
+		uint64_t VectorField3DChangeVersion = 0;
 		uint64_t HierarchyChangeVersion = 0;
 		//@}
 

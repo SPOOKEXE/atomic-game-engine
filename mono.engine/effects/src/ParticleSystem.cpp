@@ -7,6 +7,7 @@
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/VectorField.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -643,6 +644,8 @@ namespace engine::effects {
 		store.Observe<scene::Attachment>();
 		store.Observe<scene::Bounds>();
 		store.Observe<scene::Motion>();
+		store.Observe<scene::VectorField2D>();
+		store.Observe<scene::VectorField3D>();
 		store.Observe<ecs::Hierarchy>();
 	}
 
@@ -794,7 +797,9 @@ namespace engine::effects {
 		// A sorted id list stays cheap both for the ordinary empty case and for a
 		// world moving many parents at once.
 		static thread_local std::vector<uint64_t> movedParents;
+		static thread_local std::vector<uint64_t> changedFields;
 		movedParents.clear();
+		changedFields.clear();
 		{
 			ENGINE_PROFILE_CAT("emitters.changed-parents", core::ProfileCategory::Simulation);
 			const uint64_t transformVersion = store.ComponentChangeVersion<scene::Transform>();
@@ -832,8 +837,25 @@ namespace engine::effects {
 				});
 				system->MotionChangeVersion = motionVersion;
 			}
+
+			const uint64_t field2DVersion = store.ComponentChangeVersion<scene::VectorField2D>();
+			if (system->VectorField2DChangeVersion != field2DVersion) {
+				store.EachChanged<scene::VectorField2D>([](ecs::Entity entity, scene::VectorField2D &) {
+					changedFields.push_back(entity.Id);
+				});
+				system->VectorField2DChangeVersion = field2DVersion;
+			}
+			const uint64_t field3DVersion = store.ComponentChangeVersion<scene::VectorField3D>();
+			if (system->VectorField3DChangeVersion != field3DVersion) {
+				store.EachChanged<scene::VectorField3D>([](ecs::Entity entity, scene::VectorField3D &) {
+					changedFields.push_back(entity.Id);
+				});
+				system->VectorField3DChangeVersion = field3DVersion;
+			}
 			std::sort(movedParents.begin(), movedParents.end());
 			movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
+			std::sort(changedFields.begin(), changedFields.end());
+			changedFields.erase(std::unique(changedFields.begin(), changedFields.end()), changedFields.end());
 		}
 
 		bool emitterHierarchyChanged = false;
@@ -964,9 +986,9 @@ namespace engine::effects {
 			emitterRows = store.CountMatching<EmitterSlot>();
 		}
 		const bool explicitlyRequested = std::exchange(system->RefreshRequested, false);
-		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() && !catalogueChanged &&
-			!activationChanged && !retryRefused && !explicitlyRequested &&
-			emitterRows == system->EmitterRows) {
+		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() &&
+			changedFields.empty() && !catalogueChanged && !activationChanged && !retryRefused &&
+			!explicitlyRequested && emitterRows == system->EmitterRows) {
 			return system->Statistics.Blocks;
 		}
 		system->Statistics.EmittersRefused = 0;
@@ -1096,6 +1118,17 @@ namespace engine::effects {
 						residentChanged = true;
 						system->FrameParents[slot.Index] = parent;
 					}
+
+					const ecs::Entity field = block.ForceField.Source;
+					const bool fieldMoved =
+						std::binary_search(movedParents.begin(), movedParents.end(), field.Id);
+					const bool fieldChanged =
+						std::binary_search(changedFields.begin(), changedFields.end(), field.Id);
+					if (emitterHierarchyChanged || parentChanged || fieldMoved || fieldChanged) {
+						block.ForceField = scene::ResolveVectorField(store, entity);
+						block.Revision++;
+						residentChanged = true;
+					}
 					return;
 				}
 
@@ -1145,6 +1178,7 @@ namespace engine::effects {
 				block.ClaimedAt = claimGeneration;
 				block.ParticleLimit = emitter->MaxParticles;
 				block.RateOverDistance = emitter->RateOverDistance;
+				block.ForceField = scene::ResolveVectorField(store, entity);
 
 				EmitterRuntime runtime;
 				runtime.Requested = std::exchange(slot.Requested, 0u);
@@ -1321,6 +1355,7 @@ namespace engine::effects {
 
 		Vector3 ProceduralForce(const EmitterBlock &block, const ParticleState &state) {
 			Vector3 force;
+			force = force + scene::SampleVectorField(block.ForceField, state.Position);
 			const Vector3 radial = (state.Position - block.Frame.Position).Unit();
 			if (block.RadialAcceleration != 0.0f) {
 				force = force + radial * block.RadialAcceleration;

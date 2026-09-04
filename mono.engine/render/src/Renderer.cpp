@@ -781,6 +781,7 @@ namespace engine::render {
 			  State->SsaoPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
+			  State->VolumePipeline,
 			  State->TonemapPipeline,
 			  State->PostProcessPipeline}) {
 			if (pipeline != nullptr) {
@@ -1207,6 +1208,8 @@ namespace engine::render {
 		State->FogStart = std::max(lighting.FogStart, 0.0f);
 		State->FogEnd = std::max(lighting.FogEnd, State->FogStart);
 		State->EnvironmentState = lighting.EnvironmentState;
+		State->Volumes = lighting.Volumes;
+		State->VolumeCount = std::min(lighting.VolumeCount, State->Volumes.size());
 	}
 
 	scene::WorldLighting Renderer::CurrentLighting() const {
@@ -1227,6 +1230,8 @@ namespace engine::render {
 		lighting.FogStart = State->FogStart;
 		lighting.FogEnd = State->FogEnd;
 		lighting.EnvironmentState = State->EnvironmentState;
+		lighting.Volumes = State->Volumes;
+		lighting.VolumeCount = State->VolumeCount;
 		return lighting;
 	}
 
@@ -1599,6 +1604,9 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::SkyLit) {
 			return pbr.SkyLit;
+		}
+		if (role == Impl::ResourceRole::VolumeLit) {
+			return pbr.Lit;
 		}
 		return nullptr;
 	}

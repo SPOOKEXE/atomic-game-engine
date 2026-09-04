@@ -60,10 +60,14 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [x] add a set of `physics solver simulation` visualisations for each set of solver capabilities. this way we can see whats going on.
 
-
+- [_] port TornadoSim as a demo scene in the engine (/home/declan/Documents/GitHub/TornadoSim). Do a run of what features we need and what we can use in the engine, we want to try make this demo PURE LUAU! We can create new libraries, components, etc, but make a list first and prioritise pure-scripting over specific engine features for tornado stuff.
+| Kinematic debris is not enough | Expose velocity and impulse through existing physics bodies. |
+| Particle emitters cannot follow the field shape | Add a generic field-sampling particle force, not a tornado-specific renderer. |
+| The scene needs dense cloud self-shadowing | Add a generic volume resource and render node. |
+| The scene needs large destruction | Build reusable script-facing break groups before a damage system. |
+as datatypes? we can do a 3D and 2D vector field and particles can read directly from it based on their position or local position from a select position, add auto clamp to bounds or falloff, etc. Can expose velocity/impuse as well.
 
 new demos:
-- [_] port TornadoSim as a demo scene in the engine.
 - [_] blackhole simulator (warp space, warp visual, etc)
 - [_] user interface (copy bladeborne's for demo?), luau scripting and such. pure code that creates all the ui (using Fusion.luau, setup a modulescrpt that the code requires for example, can rewrite with fake player data).
 - [_] update DEMOS.md with GIFs uploaded to repository

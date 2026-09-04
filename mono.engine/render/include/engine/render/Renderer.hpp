@@ -556,8 +556,11 @@ namespace engine::render {
 		// stops a column of smoke rolling when the camera does.
 		bool WorldUp = false;
 
+		// Whether an untextured quad receives the analytic soft-disc mask.
+		bool SoftParticles = false;
+
 		// Explicit padding, for the reason every `Reserved` in the engine exists.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved = 0;
 	};
 
 	// An offscreen colour target the world is drawn into instead of the window.

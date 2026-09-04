@@ -22,6 +22,8 @@
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/Tools.hpp>
+#include <engine/scene/VectorField.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
 
 #include <algorithm>
@@ -624,6 +626,11 @@ namespace engine::scene {
 
 		const core::Name &AtmosphereProceduralShaderEnum() {
 			static const core::Name name("AtmosphereProceduralShader");
+			return name;
+		}
+
+		const core::Name &VolumeShapeEnum() {
+			static const core::Name name("VolumeShape");
 			return name;
 		}
 
@@ -2039,6 +2046,16 @@ namespace engine::scene {
 			const ecs::ClassId pvInstance = ecs::Classes::Register("PVInstance", instance, pv);
 			ecs::Classes::SetCreatable(pvInstance, false);
 
+			// Fields are placed content, not a particle feature. A consumer selects
+			// the nearest ancestor field, so the hierarchy owns the source origin
+			// and no process-local entity handle has to be serialised on it.
+			const std::array vectorField2DSet{ecs::Components::Of<VectorField2D>()};
+			const ecs::ClassId vectorField2D =
+				ecs::Classes::Register("VectorField2D", pvInstance, vectorField2DSet);
+			const std::array vectorField3DSet{ecs::Components::Of<VectorField3D>()};
+			const ecs::ClassId vectorField3D =
+				ecs::Classes::Register("VectorField3D", pvInstance, vectorField3DSet);
+
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
 				ecs::Components::Of<Visual>(),
@@ -2142,6 +2159,12 @@ namespace engine::scene {
 			// answers, and a character is a thing rather than six loose parts
 			// under Workspace. `scene::MakeCharacter` is its first caller.
 			const ecs::ClassId modelClass = ecs::Classes::Register("Model", pvInstance, {});
+
+			// A semantic container for structural destruction. It intentionally adds
+			// no component: the hierarchy is the group membership, and a second list
+			// would become stale as soon as an author reparents one piece.
+			const ecs::ClassId breakGroupClass = ecs::Classes::Register("BreakGroup", modelClass, {});
+			(void)breakGroupClass;
 
 			// A WorldRoot is a Model whose descendants form a self-contained scene.
 			// Workspace and WorldModel share this ancestry, so `IsA("WorldRoot")`
@@ -2485,6 +2508,9 @@ namespace engine::scene {
 				atmosphereShaders[index] = Describe(static_cast<AtmosphereProceduralShader>(index));
 			}
 			ecs::EnumTable::Register(AtmosphereProceduralShaderEnum().Text(), atmosphereShaders);
+			ecs::EnumTable::Register(
+				VolumeShapeEnum().Text(), std::array<std::string_view, 2>{"Box", "Ellipsoid"}
+			);
 
 			// **The sky, both halves of it under `Lighting`.** Neither is a
 			// `PVInstance`, which is `Sound`'s and `Attachment`'s omission for
@@ -2505,6 +2531,9 @@ namespace engine::scene {
 			const std::array cloudVolume{ecs::Components::Of<CloudCompute>()};
 			const ecs::ClassId cloudComputeClass =
 				ecs::Classes::Register("CloudCompute", cloudProceduralClass, cloudVolume);
+
+			const std::array volume{ecs::Components::Of<Volume>()};
+			const ecs::ClassId volumeClass = ecs::Classes::Register("Volume", pvInstance, volume);
 
 			const std::array skyboxTextures{ecs::Components::Of<SkyboxTextures>()};
 			const ecs::ClassId skyboxTexturesClass =
@@ -2689,6 +2718,24 @@ namespace engine::scene {
 			ecs::Classes::Property<&RigidBody::AngularDamping>(basePart, "AngularDamping");
 
 			ecs::Classes::Computed(basePart, MassProperty());
+
+			// A zero bound axis is intentionally unbounded. The shared sampler
+			// clamps outside a positive extent and turns `Falloff` into a fade
+			// distance only when it is positive, keeping an authored hard edge exact.
+			ecs::Classes::Property<&VectorField2D::Vector>(vectorField2D, "Vector");
+			ecs::Classes::Property<&VectorField2D::HalfExtent>(vectorField2D, "Bounds");
+			ecs::Classes::Property<&VectorField2D::Radial>(vectorField2D, "Radial");
+			ecs::Classes::Property<&VectorField2D::Tangential>(vectorField2D, "Tangential");
+			ecs::Classes::ClampedProperty<&VectorField2D::Falloff, 0.0f, 100000.0f>(vectorField2D, "Falloff");
+			ecs::Classes::Property<&VectorField2D::LocalSpace>(vectorField2D, "LocalSpace");
+
+			ecs::Classes::Property<&VectorField3D::Vector>(vectorField3D, "Vector");
+			ecs::Classes::Property<&VectorField3D::HalfExtent>(vectorField3D, "Bounds");
+			ecs::Classes::Property<&VectorField3D::Axis>(vectorField3D, "Axis");
+			ecs::Classes::Property<&VectorField3D::Radial>(vectorField3D, "Radial");
+			ecs::Classes::Property<&VectorField3D::Tangential>(vectorField3D, "Tangential");
+			ecs::Classes::ClampedProperty<&VectorField3D::Falloff, 0.0f, 100000.0f>(vectorField3D, "Falloff");
+			ecs::Classes::Property<&VectorField3D::LocalSpace>(vectorField3D, "LocalSpace");
 
 			// **`Mesh` and `ColorMap` are not here, and that is v0.10's
 			// correction.** `BasePart` is what `Part`, `MeshPart` and a future
@@ -3085,6 +3132,21 @@ namespace engine::scene {
 				EnumFieldProperty<CloudCompute, &CloudCompute::Shader, CloudComputeShaderEnum>("Shader")
 			);
 			ecs::Classes::Property<&CloudCompute::Enabled>(cloudComputeClass, "ComputeEnabled");
+
+			ecs::Classes::Property<&Volume::Colour>(volumeClass, "Color");
+			ecs::Classes::Property<&Volume::HalfExtent>(volumeClass, "Bounds");
+			ecs::Classes::Property<&Volume::Density>(volumeClass, "Density");
+			ecs::Classes::Property<&Volume::Extinction>(volumeClass, "Extinction");
+			ecs::Classes::ClampedProperty<&Volume::Falloff, 0.0f, 1.0f>(volumeClass, "Falloff");
+			ecs::Classes::Property<&Volume::NoiseScale>(volumeClass, "NoiseScale");
+			ecs::Classes::ClampedProperty<&Volume::NoiseStrength, 0.0f, 1.0f>(volumeClass, "NoiseStrength");
+			ecs::Classes::Property<&Volume::Steps>(volumeClass, "Steps");
+			ecs::Classes::Property<&Volume::ShadowSteps>(volumeClass, "ShadowSteps");
+			ecs::Classes::Property<&Volume::Seed>(volumeClass, "Seed");
+			ecs::Classes::Computed(
+				volumeClass, EnumFieldProperty<Volume, &Volume::Shape, VolumeShapeEnum>("Shape")
+			);
+			ecs::Classes::Property<&Volume::Enabled>(volumeClass, "Enabled");
 
 			ecs::Classes::Property<&AtmosphereProcedural::PlanetRadius>(
 				atmosphereProceduralClass, "PlanetRadius"

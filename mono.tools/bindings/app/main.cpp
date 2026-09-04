@@ -2169,6 +2169,12 @@ declare task: {
 				out << "\tfunction IsKeepingWorldAwake(self): boolean\n";
 				out << "\tfunction SetNetworkOwner(self, player: Instance?): ()\n";
 				out << "\tfunction GetNetworkOwner(self): Instance?\n";
+				out << "\tfunction GetLinearVelocity(self): Vector3\n";
+				out << "\tfunction GetAngularVelocity(self): Vector3\n";
+				out << "\tfunction SetLinearVelocity(self, velocity: Vector3): ()\n";
+				out << "\tfunction SetAngularVelocity(self, velocity: Vector3): ()\n";
+				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
+				out << "\tfunction Break(self): number\n";
 
 				// **The one door onto `LocalTransparency`, for the same reason
 				// `SetAttribute` is a method rather than a property write.**
@@ -3744,6 +3750,12 @@ declare const task: {
 				out << "\tIsKeepingWorldAwake(): boolean;\n";
 				out << "\tSetNetworkOwner(player?: Instance | null): void;\n";
 				out << "\tGetNetworkOwner(): Instance | null;\n";
+				out << "\tGetLinearVelocity(): Vector3;\n";
+				out << "\tGetAngularVelocity(): Vector3;\n";
+				out << "\tSetLinearVelocity(velocity: Vector3): void;\n";
+				out << "\tSetAngularVelocity(velocity: Vector3): void;\n";
+				out << "\tApplyImpulse(impulse: Vector3): void;\n";
+				out << "\tBreak(): number;\n";
 
 				// The one door onto `LocalTransparency`, matching the Luau half
 				// and for the same reason declared there.

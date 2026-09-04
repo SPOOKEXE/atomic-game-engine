@@ -230,6 +230,21 @@ namespace engine::render {
 		glm::vec4 SeamFirst[MAX_SEAM_LIGHTS]{};
 		glm::vec4 SeamSecond[MAX_SEAM_LIGHTS]{};
 		//@}
+
+		// The local participating media selected from the scene. Each entry is
+		// seven vec4 values so the CPU and GLSL layouts remain explicit and the
+		// volume node can sample an oriented box without reading scene state.
+		struct VolumeUniform {
+			glm::vec4 Origin{};
+			glm::vec4 AxisX{};
+			glm::vec4 AxisY{};
+			glm::vec4 AxisZ{};
+			glm::vec4 ColourDensity{};
+			glm::vec4 ExtinctionNoise{};
+			glm::vec4 Steps{};
+		};
+		VolumeUniform Volumes[scene::MAX_SCENE_VOLUMES]{};
+		glm::vec4 VolumeCount{};
 	};
 
 	// Slot zero for an authored fullscreen fragment shader. The contract is

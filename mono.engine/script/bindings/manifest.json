@@ -51,6 +51,47 @@
 			]
 		},
 		{
+			"name": "VectorField2D",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.VectorField2D"],
+			"properties": [
+				{"name": "Bounds", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "LocalSpace", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Radial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Tangential", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]},
+				{"name": "Vector", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.VectorField2D"], "writes": ["scene.VectorField2D"]}
+			]
+		},
+		{
+			"name": "VectorField3D",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.VectorField3D"],
+			"properties": [
+				{"name": "Axis", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "LocalSpace", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Radial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Tangential", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]},
+				{"name": "Vector", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.VectorField3D"], "writes": ["scene.VectorField3D"]}
+			]
+		},
+		{
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": false,
@@ -177,6 +218,20 @@
 		{
 			"name": "Model",
 			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
+			"properties": [
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]}
+			]
+		},
+		{
+			"name": "BreakGroup",
+			"parent": "Model",
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform"],
 			"properties": [
@@ -825,6 +880,32 @@
 			]
 		},
 		{
+			"name": "Volume",
+			"parent": "PVInstance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Pivot", "scene.Transform", "scene.Volume"],
+			"properties": [
+				{"name": "Bounds", "type": "Vector3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "CFrame", "type": "CFrame", "kind": "computed", "bytes": 28, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Extinction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Falloff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "NoiseScale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "NoiseStrength", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Orientation", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PivotOffset", "type": "CFrame", "kind": "field", "bytes": 28, "writable": true, "reads": ["scene.Pivot"], "writes": ["scene.Pivot"]},
+				{"name": "Position", "type": "Vector3", "kind": "computed", "bytes": 12, "writable": true, "reads": ["scene.Transform"], "writes": ["scene.Transform"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "ShadowSteps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Shape", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "VolumeShape", "reads": ["scene.Volume"], "writes": ["scene.Volume"]},
+				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Volume"], "writes": ["scene.Volume"]}
+			]
+		},
+		{
 			"name": "SkyboxTextures",
 			"parent": "Instance",
 			"constructible": true,
@@ -1196,6 +1277,7 @@
 				{"name": "ShapePartial", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "ShapeStyle", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ParticleEmitterShapeStyle", "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Size", "type": "NumberSequence", "kind": "field", "bytes": 248, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
+				{"name": "SoftParticles", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Speed", "type": "NumberRange", "kind": "field", "bytes": 8, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "SpreadAngle", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
 				{"name": "Squash", "type": "NumberSequence", "kind": "field", "bytes": 248, "writable": true, "reads": ["effects.ParticleEmitter"], "writes": ["effects.ParticleEmitter"]},
@@ -2767,6 +2849,7 @@
 		{"name": "UserInputType", "members": ["MouseButton1", "MouseButton2", "MouseButton3", "Keyboard", "MouseMovement", "MouseWheel", "Gamepad1", "Gamepad2", "Gamepad3", "Gamepad4", "Gamepad5", "Gamepad6", "Gamepad7", "Gamepad8"]},
 		{"name": "VerticalAlignment", "members": ["Top", "Center", "Bottom"]},
 		{"name": "VerticalScrollBarPosition", "members": ["Right", "Left"]},
+		{"name": "VolumeShape", "members": ["Box", "Ellipsoid"]},
 		{"name": "ZIndexBehavior", "members": ["Global", "Sibling"]}
 	]
 }

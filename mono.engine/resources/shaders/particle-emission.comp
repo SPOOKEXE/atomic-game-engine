@@ -20,7 +20,7 @@ const uint STATE_ROTATION = 14u;
 
 const uint WORK_WORDS = 2u;
 
-const uint PARAM_WORDS = 50u;
+const uint PARAM_WORDS = 70u;
 const uint PARAM_ROTATION = 0u;
 const uint PARAM_POSITION = 4u;
 const uint PARAM_FIRST = 11u;

@@ -607,6 +607,11 @@ namespace engine::script {
 				Pushed++;
 			}
 
+			void ReturnVector3(const core::Vector3 &value) override {
+				*PushVector3(State) = value;
+				Pushed++;
+			}
+
 			void ReturnVector2(const core::Vector2 &value) override {
 				*PushVector2(State) = value;
 				Pushed++;

@@ -314,6 +314,28 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("volumetrics"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl::PbrSlot &pbr = *recording.Pbr;
+			const std::array bindings{
+				SDL_GPUTextureSamplerBinding{pbr.SkyLit, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
+			};
+			recording.Fullscreen(
+				context.Name,
+				recording.State->VolumePipeline,
+				pbr.Lit,
+				recording.PbrDimensions.LitWidth,
+				recording.PbrDimensions.LitHeight,
+				bindings,
+				&recording.Uniforms,
+				nullptr,
+				SDL_FColor{}
+			);
+			recording.TonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler}};
+			return true;
+		});
+
 		frameNodes.Set(core::Name("tonemap"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;

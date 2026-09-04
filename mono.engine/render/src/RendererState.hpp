@@ -103,6 +103,7 @@ namespace engine::render {
 			Occlusion,
 			Lit,
 			SkyLit,
+			VolumeLit,
 		};
 
 		ResourceRole RoleFor(core::Name resource) const {
@@ -161,6 +162,9 @@ namespace engine::render {
 					}
 					if (node->Kind == core::Name("sky")) {
 						return ResourceRole::SkyLit;
+					}
+					if (node->Kind == core::Name("volumetrics")) {
+						return ResourceRole::VolumeLit;
 					}
 				}
 			}
@@ -325,6 +329,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCompute = nullptr;
 
@@ -723,6 +728,8 @@ namespace engine::render {
 		float FogStart = 100000.0f;
 		float FogEnd = 100001.0f;
 		scene::Environment EnvironmentState;
+		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
+		size_t VolumeCount = 0;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.

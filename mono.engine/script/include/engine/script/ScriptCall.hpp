@@ -70,7 +70,7 @@
 // to let anybody forget.
 //
 // Every member is here because exactly one service asked. `ReturnVector2`,
-// `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
+// `ReturnVector3`, `ReturnEnum`, `ReturnEnums` and `ReturnInputObjects` arrived with
 // `UserInputService`'s seven methods; `Role`, `Tweens`, `Debris`, `Subscriptions`,
 // `AsTweenInfo`, the two record readers, `ReturnTween`, `ForgetSubject` and
 // `Await` arrived with the seven services that stopped being written twice at
@@ -101,6 +101,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/TweenInfo.hpp>
 #include <engine/core/types/Vector2.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
@@ -516,6 +517,10 @@ namespace engine::script {
 		virtual void ReturnNumber(double value) = 0;
 
 		virtual void ReturnCFrame(const core::CFrame &value) = 0;
+
+		// One `Vector3`, used by the body velocity methods. It stays a direct
+		// return because the value is VM-local and never crosses a world boundary.
+		virtual void ReturnVector3(const core::Vector3 &value) = 0;
 
 		// One `Vector2`, which is what a pointer position is.
 		//

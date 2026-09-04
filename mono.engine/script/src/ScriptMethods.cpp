@@ -56,8 +56,10 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/physics/BodyMotion.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Awake.hpp>
+#include <engine/scene/BreakGroup.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -1100,18 +1102,67 @@ namespace engine::script {
 			}
 		}
 
+		// A body that is sleeping has no `Motion` row. The physics accessors answer
+		// zero in that state, which gives scripts a stable velocity type without
+		// exposing solver storage.
+		void GetLinearVelocity(ScriptCall &call) {
+			call.ReturnVector3(physics::LinearVelocity(call.World(), call.Subject()));
+		}
+
+		void GetAngularVelocity(ScriptCall &call) {
+			call.ReturnVector3(physics::AngularVelocity(call.World(), call.Subject()));
+		}
+
+		void SetLinearVelocity(ScriptCall &call) {
+			if (!physics::SetLinearVelocity(
+					call.World(), call.Subject(), AsVector3(call, 0, "SetLinearVelocity")
+				)) {
+				call.Raise("SetLinearVelocity needs a simulated non-static BasePart and a physics world");
+			}
+		}
+
+		void SetAngularVelocity(ScriptCall &call) {
+			if (!physics::SetAngularVelocity(
+					call.World(), call.Subject(), AsVector3(call, 0, "SetAngularVelocity")
+				)) {
+				call.Raise("SetAngularVelocity needs a simulated non-static BasePart and a physics world");
+			}
+		}
+
+		void ApplyImpulse(ScriptCall &call) {
+			if (!physics::ApplyImpulse(call.World(), call.Subject(), AsVector3(call, 0, "ApplyImpulse"))) {
+				call.Raise("ApplyImpulse needs a simulated dynamic BasePart and a physics world");
+			}
+		}
+
+		// `breakGroup:Break()` releases its authored pieces. Damage, health and
+		// debris policy remain outside this low-level structural operation.
+		void Break(ScriptCall &call) {
+			const ecs::ClassId breakGroup = ecs::Classes::Find(Name("BreakGroup"));
+			if (!breakGroup.IsValid() || !call.World().IsA(call.Subject(), breakGroup)) {
+				call.Raise("Break needs a BreakGroup");
+			}
+			call.ReturnNumber(static_cast<double>(scene::ReleaseBreakGroup(call.World(), call.Subject())));
+		}
+
 		// The table both VMs install.
 		//
 		// **Order is install order and nothing depends on it**, unlike the service
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 58> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 64> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
 			{"BulkPivotTo", BulkPivotTo},
 			{"SetLocalTransparency", SetLocalTransparency},
+			{"GetLinearVelocity", GetLinearVelocity},
+			{"GetAngularVelocity", GetAngularVelocity},
+			{"SetLinearVelocity", SetLinearVelocity},
+			{"SetAngularVelocity", SetAngularVelocity},
+			{"ApplyImpulse", ApplyImpulse},
+			{"Break", Break},
 
 			{"AddVertex", EditableMeshAddVertex},
 			{"AddTriangle", EditableMeshAddTriangle},

@@ -705,6 +705,9 @@ end
 declare extern type Enum_VerticalScrollBarPosition extends EnumItem with
 end
 
+declare extern type Enum_VolumeShape extends EnumItem with
+end
+
 declare extern type Enum_ZIndexBehavior extends EnumItem with
 end
 
@@ -1108,6 +1111,10 @@ declare Enum: {
 		Right: Enum_VerticalScrollBarPosition,
 		Left: Enum_VerticalScrollBarPosition,
 	},
+	VolumeShape: {
+		Box: Enum_VolumeShape,
+		Ellipsoid: Enum_VolumeShape,
+	},
 	ZIndexBehavior: {
 		Global: Enum_ZIndexBehavior,
 		Sibling: Enum_ZIndexBehavior,
@@ -1384,6 +1391,12 @@ declare extern type Instance with
 	function IsKeepingWorldAwake(self): boolean
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
+	function GetLinearVelocity(self): Vector3
+	function GetAngularVelocity(self): Vector3
+	function SetLinearVelocity(self, velocity: Vector3): ()
+	function SetAngularVelocity(self, velocity: Vector3): ()
+	function ApplyImpulse(self, impulse: Vector3): ()
+	function Break(self): number
 	function SetLocalTransparency(self, value: number): ()
 	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
 	function AddTriangle(self, a: number, b: number, c: number): number?
@@ -1440,6 +1453,25 @@ declare extern type PVInstance extends Instance with
 	Position: Vector3
 end
 
+declare extern type VectorField2D extends PVInstance with
+	Bounds: Vector2
+	Falloff: number
+	LocalSpace: boolean
+	Radial: number
+	Tangential: number
+	Vector: Vector2
+end
+
+declare extern type VectorField3D extends PVInstance with
+	Axis: Vector3
+	Bounds: Vector3
+	Falloff: number
+	LocalSpace: boolean
+	Radial: number
+	Tangential: number
+	Vector: Vector3
+end
+
 declare extern type BasePart extends PVInstance with
 	AlphaCutoff: number
 	AlphaMode: Enum_AlphaMode
@@ -1480,6 +1512,9 @@ declare extern type SpawnLocation extends Part with
 end
 
 declare extern type Model extends PVInstance with
+end
+
+declare extern type BreakGroup extends Model with
 end
 
 declare extern type WorldRoot extends Model with
@@ -1709,6 +1744,21 @@ declare extern type CloudCompute extends CloudProcedural with
 	Thickness: number
 end
 
+declare extern type Volume extends PVInstance with
+	Bounds: Vector3
+	Color: Color3
+	Density: number
+	Enabled: boolean
+	Extinction: number
+	Falloff: number
+	NoiseScale: number
+	NoiseStrength: number
+	Seed: number
+	ShadowSteps: number
+	Shape: Enum_VolumeShape
+	Steps: number
+end
+
 declare extern type SkyboxTextures extends Instance with
 	Back: string
 	Down: string
@@ -1845,6 +1895,7 @@ declare extern type ParticleEmitter extends Instance with
 	ShapePartial: number
 	ShapeStyle: Enum_ParticleEmitterShapeStyle
 	Size: NumberSequence
+	SoftParticles: boolean
 	Speed: NumberRange
 	SpreadAngle: Vector2
 	Squash: NumberSequence
@@ -2932,9 +2983,12 @@ type Services = {
 
 type CreatableInstances = {
 	Folder: Folder,
+	VectorField2D: VectorField2D,
+	VectorField3D: VectorField3D,
 	Part: Part,
 	SpawnLocation: SpawnLocation,
 	Model: Model,
+	BreakGroup: BreakGroup,
 	WorldModel: WorldModel,
 	Tool: Tool,
 	MeshPart: MeshPart,
@@ -2970,6 +3024,7 @@ type CreatableInstances = {
 	Clouds: Clouds,
 	CloudProcedural: CloudProcedural,
 	CloudCompute: CloudCompute,
+	Volume: Volume,
 	SkyboxTextures: SkyboxTextures,
 	SkyboxCompute: SkyboxCompute,
 	BallSocketConstraint: BallSocketConstraint,

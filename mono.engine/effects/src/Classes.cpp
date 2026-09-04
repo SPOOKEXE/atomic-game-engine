@@ -342,6 +342,7 @@ namespace engine::effects {
 			ecs::Classes::Property<&ParticleEmitter::LockedToPart>(emitter, "LockedToPart");
 			ecs::Classes::Property<&ParticleEmitter::Enabled>(emitter, "Enabled");
 			ecs::Classes::Property<&ParticleEmitter::Additive>(emitter, "Additive");
+			ecs::Classes::Property<&ParticleEmitter::SoftParticles>(emitter, "SoftParticles");
 
 			ecs::Classes::Computed(
 				emitter,

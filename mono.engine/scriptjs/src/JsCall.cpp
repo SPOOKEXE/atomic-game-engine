@@ -671,6 +671,10 @@ namespace engine::script {
 				Set(MakeCFrame(Context, value));
 			}
 
+			void ReturnVector3(const core::Vector3 &value) override {
+				Set(MakeVector3(Context, value));
+			}
+
 			void ReturnVector2(const core::Vector2 &value) override {
 				Set(MakeVector2(Context, value));
 			}

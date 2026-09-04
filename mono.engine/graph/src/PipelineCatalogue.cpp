@@ -295,6 +295,7 @@ namespace engine::graph {
 				 "ssao",
 				 "deferred-lighting",
 				 "sky",
+				 "volumetrics",
 				 "tonemap",
 				 "portal-overlay",
 				 "mirror-overlay",

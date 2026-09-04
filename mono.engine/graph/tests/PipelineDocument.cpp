@@ -89,7 +89,7 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 2);
-	REQUIRE(fromDocument.PerView.size() == 18);
+	REQUIRE(fromDocument.PerView.size() == 19);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
@@ -133,7 +133,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 2);
-	REQUIRE(compiled.PerView.size() == 18);
+	REQUIRE(compiled.PerView.size() == 19);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
@@ -151,10 +151,11 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("ssao"));
 	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("deferred-lighting"));
 	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("sky"));
-	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("tonemap"));
-	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("portal-overlay"));
-	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("mirror-overlay"));
-	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("transparent"));
+	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("volumetrics"));
+	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("tonemap"));
+	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("portal-overlay"));
+	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("mirror-overlay"));
+	CHECK(graph.Find(compiled.PerView[18])->Kind == Name("transparent"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
@@ -337,7 +338,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 17);
+	CHECK(compiled.PerView.size() == 18);
 }
 
 TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {

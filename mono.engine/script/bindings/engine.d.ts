@@ -509,6 +509,7 @@ declare namespace Enum {
 	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
+	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
@@ -910,6 +911,10 @@ declare namespace Enum {
 		readonly Right: VerticalScrollBarPosition;
 		readonly Left: VerticalScrollBarPosition;
 	};
+	const VolumeShape: {
+		readonly Box: VolumeShape;
+		readonly Ellipsoid: VolumeShape;
+	};
 	const ZIndexBehavior: {
 		readonly Global: ZIndexBehavior;
 		readonly Sibling: ZIndexBehavior;
@@ -1163,6 +1168,12 @@ declare interface Instance {
 	IsKeepingWorldAwake(): boolean;
 	SetNetworkOwner(player?: Instance | null): void;
 	GetNetworkOwner(): Instance | null;
+	GetLinearVelocity(): Vector3;
+	GetAngularVelocity(): Vector3;
+	SetLinearVelocity(velocity: Vector3): void;
+	SetAngularVelocity(velocity: Vector3): void;
+	ApplyImpulse(impulse: Vector3): void;
+	Break(): number;
 	SetLocalTransparency(value: number): void;
 	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;
 	AddTriangle(a: number, b: number, c: number): number | undefined;
@@ -1219,6 +1230,25 @@ declare interface PVInstance extends Instance {
 	Position: Vector3;
 }
 
+declare interface VectorField2D extends PVInstance {
+	Bounds: Vector2;
+	Falloff: number;
+	LocalSpace: boolean;
+	Radial: number;
+	Tangential: number;
+	Vector: Vector2;
+}
+
+declare interface VectorField3D extends PVInstance {
+	Axis: Vector3;
+	Bounds: Vector3;
+	Falloff: number;
+	LocalSpace: boolean;
+	Radial: number;
+	Tangential: number;
+	Vector: Vector3;
+}
+
 declare interface BasePart extends PVInstance {
 	AlphaCutoff: number;
 	AlphaMode: Enum.AlphaMode;
@@ -1259,6 +1289,9 @@ declare interface SpawnLocation extends Part {
 }
 
 declare interface Model extends PVInstance {
+}
+
+declare interface BreakGroup extends Model {
 }
 
 declare interface WorldRoot extends Model {
@@ -1488,6 +1521,21 @@ declare interface CloudCompute extends CloudProcedural {
 	Thickness: number;
 }
 
+declare interface Volume extends PVInstance {
+	Bounds: Vector3;
+	Color: Color3;
+	Density: number;
+	Enabled: boolean;
+	Extinction: number;
+	Falloff: number;
+	NoiseScale: number;
+	NoiseStrength: number;
+	Seed: number;
+	ShadowSteps: number;
+	Shape: Enum.VolumeShape;
+	Steps: number;
+}
+
 declare interface SkyboxTextures extends Instance {
 	Back: string;
 	Down: string;
@@ -1624,6 +1672,7 @@ declare interface ParticleEmitter extends Instance {
 	ShapePartial: number;
 	ShapeStyle: Enum.ParticleEmitterShapeStyle;
 	Size: NumberSequence;
+	SoftParticles: boolean;
 	Speed: NumberRange;
 	SpreadAngle: Vector2;
 	Squash: NumberSequence;
@@ -2617,9 +2666,12 @@ declare const game: {
 declare const Instance: {
 	new: {
 		(className: "Folder", parent?: Instance): Folder;
+		(className: "VectorField2D", parent?: Instance): VectorField2D;
+		(className: "VectorField3D", parent?: Instance): VectorField3D;
 		(className: "Part", parent?: Instance): Part;
 		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
+		(className: "BreakGroup", parent?: Instance): BreakGroup;
 		(className: "WorldModel", parent?: Instance): WorldModel;
 		(className: "Tool", parent?: Instance): Tool;
 		(className: "MeshPart", parent?: Instance): MeshPart;
@@ -2655,6 +2707,7 @@ declare const Instance: {
 		(className: "Clouds", parent?: Instance): Clouds;
 		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
 		(className: "CloudCompute", parent?: Instance): CloudCompute;
+		(className: "Volume", parent?: Instance): Volume;
 		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;
 		(className: "SkyboxCompute", parent?: Instance): SkyboxCompute;
 		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;

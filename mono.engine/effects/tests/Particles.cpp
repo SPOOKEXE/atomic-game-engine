@@ -16,7 +16,9 @@
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/VectorField.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -534,6 +536,35 @@ TEST_CASE("acceleration moves a particle and drag slows it", "[effects]") {
 	// Semi-implicit Euler, so it has fallen - the exact distance is the
 	// integrator's and is not what this pins.
 	REQUIRE(fallen.Y < born.Y);
+}
+
+TEST_CASE("a particle samples the nearest vector field without an ECS lookup per particle", "[effects]") {
+	Store store("effects_field");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+
+	engine::scene::RegisterSceneClasses();
+	const Entity field =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("VectorField3D")));
+	store.SetParent(part, field);
+	engine::scene::VectorField3D *description = store.GetMutable<engine::scene::VectorField3D>(field);
+	REQUIRE(description != nullptr);
+	description->Vector = Vector3{8.0f, 0.0f, 0.0f};
+	description->LocalSpace = false;
+
+	Settings(store, emitter).Rate = 1.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Shape = ParticleShape::Box;
+
+	Frame(store, 0.1f);
+	Frame(store, 0.1f);
+
+	const ParticleSystem *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Statistics.Live > 0);
+	CHECK(system->States[0].Velocity.X == Catch::Approx(0.8f));
+	CHECK(system->States[0].Velocity.Y == 0.0f);
+	CHECK(system->States[0].Velocity.Z == 0.0f);
 }
 
 TEST_CASE("distance emission follows parent travel rather than frame time", "[effects]") {

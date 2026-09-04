@@ -1351,7 +1351,8 @@ namespace engine::render {
 		const bool needsPbrTargets =
 			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-linearise")) ||
 			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
-			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
+			graphEnabled(core::Name("volumetrics")) || graphEnabled(core::Name("tonemap")) ||
+			graphEnabled(core::Name("transparent"));
 		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
 		if (!graphTargetsReady) {
 			closePass();
@@ -1410,6 +1411,41 @@ namespace engine::render {
 			0.0f,
 			0.0f,
 		};
+		uniforms.VolumeCount = glm::vec4{static_cast<float>(currentLighting.VolumeCount), 0.0f, 0.0f, 0.0f};
+		for (size_t index = 0; index < currentLighting.VolumeCount; index++) {
+			const scene::VolumeState &volume = currentLighting.Volumes[index];
+			PbrUniforms::VolumeUniform &out = uniforms.Volumes[index];
+			const core::Vector3 x = volume.Frame.RightVector();
+			const core::Vector3 y = volume.Frame.UpVector();
+			const core::Vector3 z = volume.Frame.ZVector();
+			out.Origin = glm::vec4{
+				volume.Frame.Position.X,
+				volume.Frame.Position.Y,
+				volume.Frame.Position.Z,
+				volume.Falloff,
+			};
+			out.AxisX = glm::vec4{
+				x.X,
+				x.Y,
+				x.Z,
+				volume.Shape == scene::VolumeShape::Ellipsoid ? 1.0f : 0.0f,
+			};
+			out.AxisY = glm::vec4{y.X, y.Y, y.Z, 0.0f};
+			out.AxisZ = glm::vec4{z.X, z.Y, z.Z, volume.HalfExtent.Z};
+			out.ColourDensity = glm::vec4{volume.Colour.R, volume.Colour.G, volume.Colour.B, volume.Density};
+			out.ExtinctionNoise = glm::vec4{
+				volume.Extinction,
+				volume.NoiseScale,
+				volume.NoiseStrength,
+				static_cast<float>(volume.Seed),
+			};
+			out.Steps = glm::vec4{
+				static_cast<float>(volume.Steps),
+				static_cast<float>(volume.ShadowSteps),
+				volume.HalfExtent.X,
+				volume.HalfExtent.Y,
+			};
+		}
 		sceneViewport = SDL_GPUViewport{
 			0.0f,
 			0.0f,
