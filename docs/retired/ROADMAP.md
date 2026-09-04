@@ -2667,3 +2667,55 @@ fix ecs inspector:
 - [x] add a way to set a tag for a given component AND per-component-value. like [deprecated], [experiment], [constant], etc.
 right now it just displays the components with byte sizes but they are not editable or anything.
 - [x] edit to studio ui
+
+### v0.23
+
+- [x] for `just schema-dump`:
+1. it toml file dumps
+a. schema for components and classes
+b. components
+c. classes
+2. saves under `docs/`
+3. replace current ones (justfile). check git diff.
+- [x] add typechecking to script editor (shows unused variables, bad expressions, etc)
+- [x] when scripts crash, ensure studio does not crash and it handles it (just disable the script) - linux works fine but on windows it crashes the entire thing
+- [x] when you edit a script (right click edit script or double click), focus on the script editor viewport and open if not open
+- [x] the + button to add new instances just collapses the explorer instead of opening the instance list with search
+- [x] when i stop the game, it closes any open scripts in script editor. should stay open and it should keep all viewports in their current open/closed state (e.g. it keeps swapping back to Live Instances instead of keeping explorer selected)
+- [x] instead of a standalone `script editor` menu, it should be each script has their own editor with the name as the script
+- [x] add multi-line comment highlighting and support and such in script editor
+- [x] in the heap profiler, add the ability to click columns to sort by that.
+- [x] add a script ticking rate slider for script update hertz
+- [x] add CanQuery to PVInstance/BasePart, etc. Same with CastShadow.
+- [x] in World => Create World From Demo, move to under Demo dropdown and separate by simple/advanced categories.
+- [x] in the flamegraph, add the ability to click on a bar to focus only on that bar and subitems, then LEFT clicking in empty space returns to root, and RIGHT clicking goes UP A PARENT for the bar (so if we're inspecting scene culling and right click, it goes up a parent to the renderer bar or whatever). This will show the parent bar with its stuff underneath.
+- [x] check all luau library bindings are async-compute (start operation, poll operation, end operation, a underlying c++ operation manager that uses parallel/async job management and such). Ensure we add to flamegraph / profilers as well.
+- [x] create a new flamegraph called `Scripting` for luau script bindings (abstract away though for when we add JavaScript and later maybe C# bindings to it).
+* allows us to see per-binding flamegraph and active usage
+* setup benchmark tests for each C++ to script binding so we can find bottlenecking ones and optimise them
+* does not show script stuff (which fits in `Script Profiler` below), specifically targets the bindings
+- [x] `Script Profiler`;
+* shows a flamegraph of all the scripts and scripts that requrie other scripts and operations they call.
+* Breaks apart by function name (or anonymous with line number), any library calls, etc.
+* can view a hierarchy view or per-script view with search and filters and sorting columns (bytes allocated, per-function-milliseconds-compute, yielding sections of code, etc.
+* Also add a "folds" view for each script, where you can click on a script to open a `Script Folds Profiler` for it where it shows you per-fold computation (i.e. for loops, functions, event callbacks, anonymous functions, what line, how much time spent, yielding libraries, etc)
+* Separate per-scripting-bindings into sub-bars as well so if one specific script binding has yielded the luau loop, we can obviously see that.
+- [x] optimise remaining physics bottlenecks using StressPhysics demo
+- [x] ensure chunked physics world implementation is correct and optimised (world is split into chunks, all physics computations happen in the chunks on separate threads in parallel, all computations are also batch computed, chunk borders - edges and corners - are computed separately or handled post center).
+- [x] persistent contact manifolds
+- [x] speculative contacts within a two millimetre skin, kept private until the
+  shapes touch, with no early friction, restitution, warm start, or contact event.
+  box2d simulation and the continuous collision gdc 2013 notes describe the
+  positive-separation velocity constraint.
+- [x] immutable local-space triangle bvhs built once per mesh and shared by all
+  collider instances, with deterministic original triangle ids in query output.
+- [x] true rotational and dynamic-dynamic ccd using conservative advancement,
+  a deterministic time heap with bounded resweeps, and a retained grid of full
+  swept bounds. the focused benchmark covers linear, rotational, and sparse
+  scene costs.
+- [x] remove duplicate dynamic swept-grid candidate writes and restore the full
+  rotational conservative-advance budget, with ordered overlap tests, fallback
+  metrics, and focused benchmarks.
+- [x] remove stale continuous-impact resweeps and fold speculative-contact
+  confirmation into the solver cache pass, with bounded profiling scopes,
+  focused regressions, and a cascading-impact benchmark.
