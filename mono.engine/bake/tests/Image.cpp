@@ -12,6 +12,7 @@
 // than in bytes, and doing it in bytes wraps silently.
 
 #include <engine/bake/Image.hpp>
+#include <engine/core/Random.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -24,12 +25,14 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.bake.image")
+TEST_DEPENDS("engine.core.random")
 
 using engine::assets::TextureData;
 using engine::assets::TextureFormat;
 using engine::bake::ImageFormat;
 using engine::bake::ImageFormatOfBytes;
 using engine::bake::ReadImage;
+using engine::core::Random;
 
 namespace {
 	constexpr std::array<uint8_t, 77> PNG_RGB{
@@ -1000,6 +1003,7 @@ TEST_CASE("everything outside the svg subset is refused by name", "[bake][image]
 	// are not a translate or a scale.
 	CHECK(Mentions(refusal("<path d='M0 0 A4 4 0 0 1 8 8'/>"), "'A'"));
 	CHECK(Mentions(refusal("<path d='M0 0 Q4 4 8 0'/>"), "'Q'"));
+	CHECK(Mentions(refusal("<path d='Z0'/>"), "moveto"));
 	CHECK(Mentions(refusal("<g transform='rotate(45)'><rect width='8' height='8'/></g>"), "rotate"));
 	CHECK(Mentions(refusal("<g transform='matrix(1 0 0 1 0 0)'/>"), "matrix"));
 
@@ -1074,4 +1078,85 @@ TEST_CASE("every count an svg states is bounded before it is used", "[bake][imag
 	// is a real answer, and it is transparent rather than black.
 	const TextureData empty = Drawn(R"(<svg width="2" height="2"><title>nothing</title></svg>)", 0, 0);
 	CHECK(At(empty, 0, 0) == Pixel{0, 0, 0, 0});
+}
+
+TEST_CASE(
+	"malformed svg structure and hostile numeric values leave a prior image untouched", "[bake][image]"
+) {
+	const TextureData prior =
+		Drawn(R"(<svg width="2" height="2"><rect width="2" height="2" fill="blue"/></svg>)", 0, 0);
+	const auto refused = [&prior](std::string_view markup) {
+		TextureData image = prior;
+		std::string failure = "set on failure";
+		CHECK_FALSE(engine::bake::RasterizeSvg(Markup(markup), 0, 0, image, failure));
+		CHECK(image.Width == prior.Width);
+		CHECK(image.Height == prior.Height);
+		CHECK(image.Format == prior.Format);
+		CHECK(image.Pixels == prior.Pixels);
+		CHECK_FALSE(failure.empty());
+	};
+
+	// XML is a tree, not a stream of independently useful tags. A missing or
+	// mismatched close must not bake the prefix it happened to contain.
+	refused(R"(<svg width="2" height="2"><g><rect width="2" height="2" fill="red"/>)");
+	refused(R"(<svg width="2" height="2"><g><rect width="2" height="2"/></svg>)");
+	std::string hiddenNesting = R"(<svg width="2" height="2"><title>)";
+	for (int depth = 0; depth < 64; depth++) {
+		hiddenNesting += "<g>";
+	}
+	refused(hiddenNesting);
+
+	// The intrinsic target is caller-visible allocation, so it is rejected in
+	// document space before conversion to an unsigned raster dimension.
+	refused(R"(<svg width="1e100" height="2"/>)");
+
+	// Composed transforms may overflow even though each source number is finite.
+	refused(
+		R"svg(<svg width="2" height="2"><g transform="scale(1e308) scale(1e308)"><rect width="2" height="2"/></g></svg>)svg"
+	);
+}
+
+TEST_CASE("large finite svg coordinates are clipped before raster indexing", "[bake][image]") {
+	// The translate itself is finite, but the rectangle's device-space
+	// coordinates are far outside an `int`. It is a valid off-canvas shape, not
+	// permission to convert a huge float to an index.
+	const TextureData image = Drawn(
+		R"svg(<svg width="2" height="2"><g transform="translate(1e307,0)"><rect width="2" height="2"/></g></svg>)svg",
+		0,
+		0
+	);
+	CHECK(At(image, 0, 0) == Pixel{0, 0, 0, 0});
+}
+
+TEST_CASE("hostile svg bytes preserve a prior raster result", "[bake][image][fuzz]") {
+	constexpr uint32_t ITERATIONS = 2'000;
+	const TextureData prior =
+		Drawn(R"(<svg width="2" height="2"><rect width="2" height="2" fill="blue"/></svg>)", 0, 0);
+
+	for (uint32_t iteration = 0; iteration < ITERATIONS; iteration++) {
+		CAPTURE(iteration);
+		std::string markup(Random::Bits(iteration, 1) % 512, '\0');
+		for (size_t index = 0; index < markup.size(); index++) {
+			markup[index] = static_cast<char>(Random::Bits(iteration, static_cast<uint32_t>(index) + 2));
+		}
+
+		// Keep part of the corpus inside the SVG dispatch and number/path parsers.
+		if (iteration % 3 == 1) {
+			markup = R"(<svg width="2" height="2"><path d=")" + markup + R"("/></svg>)";
+		} else if (iteration % 3 == 2) {
+			markup = R"(<svg width="2" height="2" transform=")" + markup + R"("></svg>)";
+		}
+		TextureData image = prior;
+		std::string failure = "unchanged on success";
+		if (engine::bake::RasterizeSvg(Markup(markup), 16, 16, image, failure)) {
+			CHECK(image.IsValid());
+			CHECK(failure == "unchanged on success");
+		} else {
+			CHECK(image.Width == prior.Width);
+			CHECK(image.Height == prior.Height);
+			CHECK(image.Format == prior.Format);
+			CHECK(image.Pixels == prior.Pixels);
+			CHECK_FALSE(failure.empty());
+		}
+	}
 }
