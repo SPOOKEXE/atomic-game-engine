@@ -181,6 +181,14 @@ namespace engine::net::quic {
 	// @since v0.19
 	class Tls {
 	  public:
+		// The most incomplete CRYPTO data retained at one encryption level.
+		//
+		// TLS carries a 24-bit message length, but retaining every byte a peer
+		// claims it will send turns one incomplete record into unbounded memory
+		// growth. A MiB leaves room for certificates and transport parameters
+		// while making that refusal bounded.
+		static constexpr size_t MAXIMUM_INCOMING_BYTES = 1024 * 1024;
+
 		// Which end of the handshake this is.
 		//
 		// @since v0.19

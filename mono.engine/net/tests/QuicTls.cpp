@@ -364,6 +364,29 @@ TEST_CASE("a truncated ClientHello is refused rather than half-read", "[net][qui
 	CHECK(server.Stack->Pending().empty());
 }
 
+TEST_CASE("incomplete CRYPTO input has a bounded retained size", "[net][quic][tls]") {
+	TlsSettings settings;
+	settings.Seed = Seed(1);
+	settings.HasSeed = true;
+	Tls stack(Tls::Role::Server, settings);
+
+	// The header claims a record too large for the parser's retained-input
+	// budget. Exactly one budget's worth can be incomplete, but the next byte
+	// must refuse before vector growth can continue.
+	std::vector<std::byte> incomplete(Tls::MAXIMUM_INCOMING_BYTES, std::byte{0});
+	incomplete[0] = std::byte{1};
+	incomplete[1] = std::byte{0x0f};
+	incomplete[2] = std::byte{0xff};
+	incomplete[3] = std::byte{0xff};
+	CHECK(stack.Receive(Level::Initial, incomplete));
+	CHECK_FALSE(stack.Failed());
+
+	const std::array<std::byte, 1> extra{std::byte{0}};
+	CHECK_FALSE(stack.Receive(Level::Initial, extra));
+	CHECK(stack.Failed());
+	CHECK(stack.Alert() == 50); // decode_error, RFC 8446 section 6.2.
+}
+
 TEST_CASE("a ClientHello with a broken extension block is refused", "[net][quic][tls]") {
 	auto [client, server] = Pair();
 	REQUIRE(client.Stack->Begin());
