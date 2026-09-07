@@ -385,6 +385,10 @@ namespace studio {
 				if (link == nullptr || !link->IsRunning() || link->PlayerName().empty()) {
 					continue;
 				}
+				link->ObservePortalTransfer(*Universe);
+				const bool portalTransfer =
+					link->PortalTransfer().has_value() &&
+					link->PortalTransfer()->Stage != engine::script::PortalTransferStage::Refused;
 
 				// **Still here is the ordinary answer and it costs one lookup.**
 				// A teleport is rare and this runs every frame per client, so
@@ -397,7 +401,7 @@ namespace studio {
 
 				bool gone = false;
 				Universe->Enter(living, [&](Store &store) { gone = !store.Alive(link->Player()); });
-				if (!gone) {
+				if (!gone && !portalTransfer) {
 					link->Missing() = 0;
 					continue;
 				}
@@ -421,7 +425,22 @@ namespace studio {
 				// the same name.
 				WorldId destination;
 				Entity landed;
-				for (const WorldId candidate : Universe->Worlds()) {
+				std::unique_ptr<PlayLink> moved;
+				std::string error;
+				if (portalTransfer) {
+					// A receipt identifies one arrival even when several players have
+					// the same label. Commit retries may outlive the legacy frame limit.
+					moved = link->AdvancePortalArrival(*Universe, Settings.TickRate, error);
+					if (!moved) {
+						if (!error.empty()) {
+							Say("could not follow " + name + ": " + error, engine::core::LogLevel::Error);
+						}
+						continue;
+					}
+					destination = moved->AuthorityWorld();
+					landed = moved->Player();
+				}
+				for (const WorldId candidate : portalTransfer ? std::vector<WorldId>{} : Universe->Worlds()) {
 					if (candidate == living || IsReplicaWorld(candidate) || Universe->IsRemote(candidate)) {
 						continue;
 					}
@@ -494,19 +513,20 @@ namespace studio {
 					continue;
 				}
 
-				// **Stopped before the new one starts, and the old player is
-				// already gone** - so `PlayLink::Stop`'s own destroy finds
-				// nothing to destroy, which is exactly right: the teleport did
-				// it, in the world that was allowed to.
-				StopPlayLink(*link);
-
-				auto moved = std::make_unique<PlayLink>();
-				std::string error;
-				if (!moved->Start(*Universe, destination, Settings.TickRate, error, name, landed)) {
-					Say("could not follow " + name + ": " + error, engine::core::LogLevel::Error);
-					link.reset();
+				if (!portalTransfer) {
+					moved = std::make_unique<PlayLink>();
+					if (!moved->Start(*Universe, destination, Settings.TickRate, error, name, landed)) {
+						moved.reset();
+					}
+				}
+				if (!moved) {
+					if (!error.empty()) {
+						Say("could not follow " + name + ": " + error, engine::core::LogLevel::Error);
+					}
 					continue;
 				}
+				// The new portal replica already holds its initial snapshot and camera.
+				StopPlayLink(*link);
 
 				const WorldId replica = moved->ReplicaWorld();
 				StartPlaytestPlugins(replica, PluginRunTarget::PlaytestClient);

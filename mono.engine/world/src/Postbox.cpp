@@ -1,5 +1,6 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/world/Postbox.hpp>
+#include <engine/world/TickExchange.hpp>
 
 #include <utility>
 
@@ -110,6 +111,7 @@ namespace engine::world {
 	}
 
 	void RegisterMailboxTypes() {
+		RegisterTickExchangeComponents();
 		ecs::Components::Register<Outbox>("world.Outbox", WriteEnvelopes, ReadEnvelopes);
 		ecs::Components::Register<Inbox>("world.Inbox", WriteDeliveries, ReadDeliveries);
 		ecs::Components::Register<BusBudget>("world.BusBudget");

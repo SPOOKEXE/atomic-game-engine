@@ -236,6 +236,15 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::DropStagedSceneFrames() {
+		FinishPortalImports(nullptr, false);
+		for (ResourceImageSlot &slot : ResourceImages) {
+			if (slot.Phase == ResourceImagePhase::Recorded) {
+				ReleaseResidentImage(slot);
+				slot.Image.Status = ResourceImageStatus::Failed;
+				slot.Image.Width = slot.Image.Height = slot.Image.RowStride = 0;
+				slot.Phase = slot.Cancelled ? ResourceImagePhase::Free : ResourceImagePhase::Ready;
+			}
+		}
 		for (const StagedSceneFrame &staged : StagedSceneFrames) {
 			if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
 				continue;
@@ -249,8 +258,16 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
-		if (StagedSceneFrames.empty()) {
-			return SDL_SubmitGPUCommandBuffer(command);
+		PendingSceneSubmission submission;
+		for (uint32_t index = 0; index < ResourceImages.size(); index++) {
+			if (ResourceImages[index].Phase == ResourceImagePhase::Recorded) {
+				submission.Images[submission.ImageCount++] = index;
+			}
+		}
+		if (StagedSceneFrames.empty() && submission.ImageCount == 0) {
+			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
+			FinishPortalImports(command, submitted);
+			return submitted;
 		}
 
 		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
@@ -259,7 +276,13 @@ namespace engine::render {
 			return false;
 		}
 
-		PendingSceneSubmissions.push_back({fence, std::move(StagedSceneFrames)});
+		FinishPortalImports(command, true);
+		submission.Fence = fence;
+		submission.Frames = std::move(StagedSceneFrames);
+		for (uint32_t index = 0; index < submission.ImageCount; index++) {
+			ResourceImages[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+		}
+		PendingSceneSubmissions.push_back(std::move(submission));
 		StagedSceneFrames.clear();
 		return true;
 	}
@@ -302,6 +325,9 @@ namespace engine::render {
 			}
 
 			SDL_ReleaseGPUFence(Device, submission.Fence);
+			for (uint32_t image = 0; image < submission.ImageCount; image++) {
+				CollectResourceImage(submission.Images[image]);
+			}
 			submission = std::move(PendingSceneSubmissions.back());
 			PendingSceneSubmissions.pop_back();
 		}
@@ -706,14 +732,17 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureSurface(size_t viewport, size_t index, uint32_t width, uint32_t height) {
+	bool Renderer::Impl::EnsureSurface(
+		size_t viewport, size_t index, uint32_t width, uint32_t height, SDL_GPUTextureFormat format
+	) {
 		if (index >= scene::MAX_SURFACES) {
 			return false;
 		}
 
 		SurfaceSlotState &state = SurfacesAt(viewport).Surfaces[index];
 
-		if (state.Texture[0] != nullptr && width == state.Width && height == state.Height) {
+		if (state.Texture[0] != nullptr && width == state.Width && height == state.Height &&
+			format == state.Format) {
 			return true;
 		}
 
@@ -730,7 +759,7 @@ namespace engine::render {
 		// happen, and the picture the slot has is still a picture.
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		colour.format = format;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -762,7 +791,7 @@ namespace engine::render {
 			}
 			// **True when the slot still has its old pair**, because the caller's
 			// question is "may this surface be rendered", not "was it resized".
-			return state.Texture[0] != nullptr;
+			return state.Texture[0] != nullptr && state.Format == format;
 		};
 
 		for (SDL_GPUTexture *&texture : made) {
@@ -807,6 +836,7 @@ namespace engine::render {
 		// showed its own tint.
 		state.Drawn = -1.0;
 
+		state.Format = format;
 		state.Width = width;
 		state.Height = height;
 		return true;
@@ -847,7 +877,9 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		// Recursive levels exchange radiance. Quantizing before the one final
+		// tonemap loses dim light and clips values above one.
+		colour.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -868,6 +900,7 @@ namespace engine::render {
 			);
 			return nullptr;
 		}
+		colour.format = ColourFormat();
 		target.Display = gpu::CreateTexture(Device, &colour);
 		if (target.Display == nullptr) {
 			ENGINE_ERROR(
@@ -931,7 +964,12 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::MirrorTarget *Renderer::Impl::EnsureMirror(
-		size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height
+		size_t viewport,
+		uint32_t level,
+		size_t index,
+		uint32_t width,
+		uint32_t height,
+		SDL_GPUTextureFormat format
 	) {
 		if (index >= scene::MAX_SURFACES || level >= MAX_SURFACE_DEPTH || width == 0 || height == 0) {
 			return nullptr;
@@ -943,7 +981,8 @@ namespace engine::render {
 		}
 
 		MirrorTarget &target = bank.Mirrors[level].Targets[index];
-		if (target.Colour != nullptr && width == target.Width && height == target.Height) {
+		if (target.Colour != nullptr && width == target.Width && height == target.Height &&
+			format == target.Format) {
 			return &target;
 		}
 
@@ -960,7 +999,7 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		colour.format = format;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = width;
 		colour.height = height;
@@ -1015,24 +1054,37 @@ namespace engine::render {
 			return nullptr;
 		}
 
+		target.Format = format;
 		target.Width = width;
 		target.Height = height;
 		return &target;
 	}
 
-	Renderer::Impl::SeamLightTarget *Renderer::Impl::EnsureSeamLight(size_t viewport, size_t index) {
+	Renderer::Impl::SeamLightTarget *
+	Renderer::Impl::EnsureSeamLight(size_t viewport, size_t index, SDL_GPUTextureFormat format) {
 		if (index >= scene::MAX_SURFACES) {
 			return nullptr;
 		}
 
+		if (format == SDL_GPU_TEXTUREFORMAT_INVALID) {
+			format = ColourFormat();
+		}
 		SeamLightTarget &target = SurfacesAt(viewport).SeamLights[index];
-		if (target.Colour != nullptr && target.Depth != nullptr) {
+		if (target.Colour != nullptr && target.Depth != nullptr && target.Format == format) {
 			return &target;
 		}
 
+		if (target.Colour) {
+			gpu::ReleaseTexture(Device, target.Colour);
+		}
+		if (target.Depth) {
+			gpu::ReleaseTexture(Device, target.Depth);
+		}
+		target = {};
+		target.Format = format;
 		SDL_GPUTextureCreateInfo colour{};
 		colour.type = SDL_GPU_TEXTURETYPE_2D;
-		colour.format = ColourFormat();
+		colour.format = format;
 		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		colour.width = SEAM_LIGHT_RESOLUTION;
 		colour.height = SEAM_LIGHT_RESOLUTION;

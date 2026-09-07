@@ -15,6 +15,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -148,6 +149,7 @@ namespace engine::script {
 	}
 
 	void RegisterTeleportAdmission(ecs::Scheduler &scheduler) {
+		RegisterPortalTransferSystems(scheduler);
 		if (scheduler.HasSystem("teleport.admit", ecs::Phase::PreSimulation)) {
 			return;
 		}

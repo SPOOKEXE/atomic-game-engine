@@ -494,3 +494,155 @@ TEST_CASE("a host that has never reported a cost reports zero, not a guess", "[w
 
 	REQUIRE(pair.Driver->StatusOf(Name("host.one")).Milliseconds == 0.0f);
 }
+
+TEST_CASE("host phase frames preserve codec bounds and direction", "[world][host-exchange]") {
+	for (bool command : {true, false}) {
+		HostFrame frame;
+		frame.Signal = command ? HostSignal::TickExchangeCommand : HostSignal::TickExchangeResult;
+		frame.ExchangeCommand.Frame = 3;
+		frame.ExchangeCommand.FrameSeconds = 1.0f / 60;
+		frame.ExchangeResult.Frame = 3;
+		frame.ExchangeResult.Success = true;
+		frame.ExchangeResult.Rounds = 1;
+		ByteWriter writer;
+		WriteHostFrame(writer, frame);
+		REQUIRE_FALSE(writer.Empty());
+		ByteReader reader(writer.Bytes());
+		HostFrame read;
+		REQUIRE(ReadHostFrame(reader, read));
+		CHECK(read.Signal == frame.Signal);
+		CHECK((command ? read.ExchangeCommand.Frame : read.ExchangeResult.Frame) == 3);
+		for (size_t count = 0; count < writer.Size(); count++) {
+			ByteReader truncated(writer.Bytes().first(count));
+			HostFrame sentinel;
+			sentinel.Tick = 97;
+			CHECK_FALSE(ReadHostFrame(truncated, sentinel));
+			CHECK(sentinel.Tick == 97);
+		}
+		std::vector<std::byte> confused(writer.Bytes().begin(), writer.Bytes().end());
+		confused[4] = static_cast<std::byte>(
+			command ? HostSignal::TickExchangeResult : HostSignal::TickExchangeCommand
+		);
+		ByteReader wrongDirection(confused);
+		CHECK_FALSE(ReadHostFrame(wrongDirection, read));
+		const auto size = writer.Size();
+		frame.ExchangeCommand.Frame = frame.ExchangeResult.Frame = 0;
+		WriteHostFrame(writer, frame);
+		CHECK(writer.Size() == size);
+	}
+}
+
+TEST_CASE(
+	"supervisor phase replies belong to the pending command and connected host", "[world][host-exchange]"
+) {
+	using namespace engine::world;
+	Supervised pair;
+	const Name host("host.one");
+	TickExchangeCommand command;
+	command.Operation = TickExchangeOperation::Collect;
+	command.Frame = 7;
+	REQUIRE_FALSE(pair.Driver->SendTickExchange(Name("missing"), command));
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	REQUIRE_FALSE(pair.Driver->SendTickExchange(host, command));
+	std::vector<HostFrame> received;
+	REQUIRE(pair.Host->Receive(received) == 1);
+	CHECK(received.front().ExchangeCommand.Frame == 7);
+	CHECK(received.front().Signal == HostSignal::TickExchangeCommand);
+	HostFrame response;
+	response.Signal = HostSignal::TickExchangeResult;
+	response.Host = Name("somebody.else");
+	auto &result = response.ExchangeResult;
+	result.Operation = command.Operation;
+	result.Frame = command.Frame;
+	result.Success = true;
+	result.Requests.push_back({{"not.owned", "elsewhere", "contacts", 1, 2, 3}, {}});
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE_FALSE(pair.Driver->TakeTickExchange(host));
+	result.Requests.front().Stamp.SourceWorld = "lobby";
+	result.Round = 1;
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE_FALSE(pair.Driver->TakeTickExchange(host));
+	result.Round = 0;
+	REQUIRE(pair.Host->Send(response));
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE_FALSE(pair.Driver->TakeTickExchange(Name("somebody.else")));
+	const auto accepted = pair.Driver->TakeTickExchange(host);
+	REQUIRE(accepted);
+	REQUIRE(accepted->Requests.size() == 1);
+	CHECK(accepted->Requests.front().Stamp.SourceWorld == "lobby");
+	CHECK(pair.Driver->TickExchangeDropped() == 3);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+
+	command.Operation = TickExchangeOperation::Serve;
+	command.Requests.push_back({{"elsewhere", "not.owned", "contacts", 1, 2, 3}, {}});
+	REQUIRE_FALSE(pair.Driver->SendTickExchange(host, command));
+	command.Requests.front().Stamp.DestinationWorld = "arena";
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	result.Operation = command.Operation;
+	result.Requests.clear();
+	result.Replies.push_back({command.Requests.front().Stamp, 2, 3, TickExchangeStatus::Complete, {}});
+	result.Replies.front().Stamp.Sequence++;
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	result.Replies.front().Stamp = command.Requests.front().Stamp;
+	REQUIRE(pair.Host->Send(response));
+	pair.Driver->Pump(1.0);
+	REQUIRE(pair.Driver->TakeTickExchange(host));
+	CHECK(pair.Driver->TickExchangeDropped() == 4);
+	command.Operation = TickExchangeOperation::Apply;
+	command.Requests.clear();
+	command.Replies = result.Replies;
+	CHECK_FALSE(pair.Driver->SendTickExchange(host, command));
+}
+
+TEST_CASE(
+	"phase cancellation supersedes lost replies and link replacement discards old state",
+	"[world][host-exchange]"
+) {
+	using namespace engine::world;
+	Supervised pair;
+	const Name host("host.one");
+	TickExchangeCommand command;
+	command.Frame = 11;
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	HostFrame old;
+	old.Signal = HostSignal::TickExchangeResult;
+	old.ExchangeResult.Frame = 11;
+	old.ExchangeResult.Success = true;
+	command.Operation = TickExchangeOperation::Cancel;
+	command.Frame = 12;
+	CHECK_FALSE(pair.Driver->SendTickExchange(host, command));
+	command.Frame = 11;
+	command.Round = 9;
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	REQUIRE(pair.Host->Send(old));
+	pair.Driver->Pump(1.0);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	HostFrame cancelled;
+	cancelled.Signal = HostSignal::TickExchangeResult;
+	cancelled.ExchangeResult.Operation = TickExchangeOperation::Cancel;
+	cancelled.ExchangeResult.Frame = 11;
+	cancelled.ExchangeResult.Round = 9;
+	cancelled.ExchangeResult.Success = true;
+	REQUIRE(pair.Host->Send(cancelled));
+	pair.Driver->Pump(1.0);
+	auto [driverEnd, hostEnd] = MakeLocalChannel();
+	REQUIRE(pair.Driver->Attach(host, std::move(driverEnd)));
+	pair.Host = std::make_unique<HostLink>(std::move(hostEnd), host);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	REQUIRE(pair.Host->Send(cancelled));
+	pair.Driver->Pump(1.0);
+	CHECK_FALSE(pair.Driver->TakeTickExchange(host));
+	command = {};
+	command.Frame = 1;
+	REQUIRE(pair.Driver->SendTickExchange(host, command));
+	old.ExchangeResult.Frame = 1;
+	REQUIRE(pair.Host->Send(old));
+	pair.Driver->Pump(1.0);
+	REQUIRE(pair.Driver->TakeTickExchange(host));
+	CHECK(pair.Driver->TickExchangeDropped() == 2);
+}

@@ -189,12 +189,27 @@ namespace engine::render {
 
 		spatialInfo.depth_stencil_state.enable_depth_test = false;
 		SpatialTopPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
+		const bool hdrSupported = SDL_GPUTextureSupportsFormat(
+			gpu,
+			SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+			SDL_GPU_TEXTURETYPE_2D,
+			SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER
+		);
+		if (hdrSupported) {
+			SDL_GPUColorTargetDescription hdrTarget = target;
+			hdrTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			spatialInfo.target_info.color_target_descriptions = &hdrTarget;
+			HdrSpatialTopPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
+			spatialInfo.depth_stencil_state.enable_depth_test = true;
+			HdrSpatialPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
+		}
 
 		SDL_ReleaseGPUShader(gpu, vertex);
 		SDL_ReleaseGPUShader(gpu, spatialVertex);
 		SDL_ReleaseGPUShader(gpu, fragment);
 
-		if (Pipeline == nullptr || SpatialPipeline == nullptr || SpatialTopPipeline == nullptr) {
+		if (Pipeline == nullptr || SpatialPipeline == nullptr || SpatialTopPipeline == nullptr ||
+			(hdrSupported && (HdrSpatialPipeline == nullptr || HdrSpatialTopPipeline == nullptr))) {
 			ENGINE_ERROR("interface pass: pipeline: {}", SDL_GetError());
 			return false;
 		}
@@ -314,6 +329,14 @@ namespace engine::render {
 		if (SpatialTopPipeline != nullptr) {
 			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(SpatialTopPipeline));
 		}
+		if (HdrSpatialPipeline != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(HdrSpatialPipeline));
+		}
+		if (HdrSpatialTopPipeline != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(
+				gpu, static_cast<SDL_GPUGraphicsPipeline *>(HdrSpatialTopPipeline)
+			);
+		}
 		for (const auto &[id, pipeline] : ShaderVariants) {
 			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(pipeline));
 		}
@@ -329,6 +352,8 @@ namespace engine::render {
 		Pipeline = nullptr;
 		SpatialPipeline = nullptr;
 		SpatialTopPipeline = nullptr;
+		HdrSpatialPipeline = nullptr;
+		HdrSpatialTopPipeline = nullptr;
 		Device = nullptr;
 		SwapchainFormat = 0;
 
@@ -885,12 +910,16 @@ namespace engine::render {
 		const core::Vector3 &sun,
 		uint32_t width,
 		uint32_t height,
-		bool alwaysOnTop
+		bool alwaysOnTop,
+		WorldColourTarget target
 	) {
 		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
 		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
-		if (command == nullptr || pass == nullptr || SpatialPipeline == nullptr ||
-			SpatialTopPipeline == nullptr || SpatialCollectors.empty()) {
+		void *spatialPipeline = target == WorldColourTarget::Hdr ? HdrSpatialPipeline : SpatialPipeline;
+		void *spatialTopPipeline =
+			target == WorldColourTarget::Hdr ? HdrSpatialTopPipeline : SpatialTopPipeline;
+		if (command == nullptr || pass == nullptr || spatialPipeline == nullptr ||
+			spatialTopPipeline == nullptr || SpatialCollectors.empty()) {
 			return 0;
 		}
 
@@ -964,7 +993,7 @@ namespace engine::render {
 				normal = quad.Normal;
 			}
 
-			const void *wantedPipeline = spatial.AlwaysOnTop ? SpatialTopPipeline : SpatialPipeline;
+			const void *wantedPipeline = spatial.AlwaysOnTop ? spatialTopPipeline : spatialPipeline;
 			if (boundPipeline != wantedPipeline) {
 				SDL_BindGPUGraphicsPipeline(
 					pass, static_cast<SDL_GPUGraphicsPipeline *>(const_cast<void *>(wantedPipeline))

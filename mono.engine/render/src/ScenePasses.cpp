@@ -27,6 +27,21 @@
 
 namespace engine::render {
 
+	bool ViewRecording::AdmitSurfaceCapture(uint32_t width, uint32_t height, uint32_t depth) {
+		if (Request.Source == nullptr || !Request.Source->SurfaceBudget) {
+			return true;
+		}
+		const auto &budget = *Request.Source->SurfaceBudget;
+		const uint64_t pixels = uint64_t(width) * height;
+		if (depth > budget.Depth || SurfacePixelsUsed > budget.Pixels ||
+			pixels > budget.Pixels - SurfacePixelsUsed) {
+			Result.SurfaceBudgetExceeded = true;
+			return false;
+		}
+		SurfacePixelsUsed += pixels;
+		return true;
+	}
+
 	namespace {
 		std::optional<InstanceUploadRange> BulkRange(std::span<const InstanceUploadRange> ranges) {
 			if (ranges.empty()) {
@@ -51,6 +66,9 @@ namespace engine::render {
 			if (node != nullptr && node->Enabled && node->Kind == kind) {
 				return node;
 			}
+		}
+		if (kind == core::Name("mirror-capture") || kind == core::Name("portal-capture")) {
+			return GraphNode(core::Name("surface-capture"));
 		}
 		return nullptr;
 	}
@@ -486,7 +504,8 @@ namespace engine::render {
 		bool cycle,
 		const SDL_GPUViewport *viewport,
 		const LightUniforms &passLights,
-		const SDL_FColor *clearColour
+		const SDL_FColor *clearColour,
+		WorldColourTarget target
 	) {
 		Impl *const State = this->State;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -540,7 +559,11 @@ namespace engine::render {
 		// there are none, because a stale block from a previous frame would
 		// shadow through a hole that is no longer there.
 		SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
-		State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+		State->BindPipeline(
+			pass,
+			target == WorldColourTarget::Hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
+			target == WorldColourTarget::Hdr ? Impl::PipelineFamily::HdrOpaque : Impl::PipelineFamily::Opaque
+		);
 
 		State->BindInstanceBuffers(pass);
 
@@ -581,7 +604,8 @@ namespace engine::render {
 		const FrameUniforms &frame,
 		const LightingUniforms &plainLighting,
 		uint32_t filter,
-		bool panesFollow
+		bool panesFollow,
+		WorldColourTarget target
 	) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -592,7 +616,12 @@ namespace engine::render {
 
 		const uint32_t blendedPlain = sceneTransparent - plan.TransparentSurfaces;
 		if (blendedPlain > 0 || (panesFollow && plan.TransparentSurfaces > 0)) {
-			State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
+			State->BindPipeline(
+				pass,
+				target == WorldColourTarget::Hdr ? State->HdrTransparentPipeline : State->TransparentPipeline,
+				target == WorldColourTarget::Hdr ? Impl::PipelineFamily::HdrTransparent
+												 : Impl::PipelineFamily::Transparent
+			);
 		}
 
 		if (blendedPlain == 0) {
@@ -720,7 +749,7 @@ namespace engine::render {
 				surface.Ready ? surface.Texture[surface.Slot] : nullptr,
 				surface.Width,
 				surface.Height,
-				State->ColourFormat(),
+				surface.Format,
 			};
 		}
 		if (role == Impl::ResourceRole::PortalImage && slot < State->SurfaceBanks.size()) {
@@ -735,7 +764,7 @@ namespace engine::render {
 						texture,
 						portal.Width,
 						portal.Height,
-						State->ColourFormat(),
+						SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 					};
 				}
 			}
@@ -763,7 +792,7 @@ namespace engine::render {
 						seamLight.Colour,
 						seamLight.Width,
 						seamLight.Height,
-						State->ColourFormat(),
+						seamLight.Format,
 					};
 				}
 			}

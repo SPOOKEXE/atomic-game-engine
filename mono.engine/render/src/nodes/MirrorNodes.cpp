@@ -91,7 +91,10 @@ namespace engine::render {
 										const core::Vector3 &eye, float surfaceMode, float imageOpacity
 									) { return recording.LightingAt(eye, surfaceMode, imageOpacity); };
 			const auto shadowBinding = [&recording] { return recording.ShadowBindings(); };
-			const auto openScenePass = [&recording](
+			const bool captureHdr = recording.MirrorFormat == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			const auto captureTarget = captureHdr ? WorldColourTarget::Hdr : WorldColourTarget::Display;
+
+			const auto openScenePass = [&recording, captureTarget](
 										   SDL_GPUTexture *colour,
 										   SDL_GPUTexture *depth,
 										   bool cycle,
@@ -99,22 +102,51 @@ namespace engine::render {
 										   const LightUniforms &passLights,
 										   const SDL_FColor *clearColour = nullptr
 									   ) {
-				return recording.OpenScenePass(colour, depth, cycle, viewport, passLights, clearColour);
+				return recording.OpenScenePass(
+					colour, depth, cycle, viewport, passLights, clearColour, captureTarget
+				);
 			};
 			const auto drawWorldInto =
 				[&recording](
 					SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter
 				) { recording.DrawWorldInto(pass, plainLighting, filter); };
-			const auto drawBlendedInto = [&recording](
+			const auto drawBlendedInto = [&recording, captureTarget](
 											 SDL_GPURenderPass *pass,
 											 const FrameUniforms &frame,
 											 const LightingUniforms &plainLighting,
 											 uint32_t filter,
 											 bool panesFollow
 										 ) {
-				recording.DrawBlendedInto(pass, frame, plainLighting, filter, panesFollow);
+				recording.DrawBlendedInto(pass, frame, plainLighting, filter, panesFollow, captureTarget);
 			};
 			const bool drawInterface = recording.DrawInterface;
+
+			const auto drawEffects =
+				[&](SDL_GPURenderPass *pass, const glm::mat4 &projection, const core::CFrame &eye) {
+					if (recording.ParticleCount > 0) {
+						result.DrawCalls += State->DrawParticles(
+							command,
+							pass,
+							projection,
+							eye,
+							result.Triangles,
+							result.ParticlesDrawn,
+							result.Culled,
+							captureTarget
+						);
+					}
+					if (recording.RibbonCount > 0) {
+						result.DrawCalls += State->DrawRibbons(
+							command,
+							pass,
+							projection,
+							eye,
+							recording.Request.RibbonRuns,
+							result.Triangles,
+							captureTarget
+						);
+					}
+				};
 
 			// Whether one more level of the recursion would have drawn anything.
 			//
@@ -199,6 +231,12 @@ namespace engine::render {
 					const scene::CameraMatrices matrices =
 						scene::ResolveSurfaceCamera(eye.Frame, scene::SurfaceProjection(eye.Lens, eye.Frame));
 
+					if (!recording.AdmitSurfaceCapture(
+							paneWidth[slot], paneHeight[slot], mirrorLevels + 1u - level
+						)) {
+						continue;
+					}
+
 					// **Deeper first**, so this level's own draws can sample what the
 					// level below just wrote. The pool is per level, so the targets
 					// filled here survive exactly until this loop has finished with
@@ -223,8 +261,9 @@ namespace engine::render {
 					// pane covers a fraction of a fraction. Scaling them by the top
 					// pane's coverage would allocate the deepest, smallest images at
 					// the highest resolution in the frame.
-					Impl::MirrorTarget *target =
-						State->EnsureMirror(targetSlot, level, slot, paneWidth[slot], paneHeight[slot]);
+					Impl::MirrorTarget *target = State->EnsureMirror(
+						targetSlot, level, slot, paneWidth[slot], paneHeight[slot], recording.MirrorFormat
+					);
 					if (target == nullptr) {
 						continue;
 					}
@@ -331,11 +370,13 @@ namespace engine::render {
 							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 							paneWidth[slot],
 							paneHeight[slot],
-							false
+							false,
+							captureTarget
 						);
 					}
 
 					drawBlendedInto(pass, levelFrame, levelLighting, pane.TagFilter, false);
+					drawEffects(pass, matrices.ViewProjection, eye.Frame);
 
 					if (drawInterface) {
 						result.DrawCalls += gameInterfaceHook->RecordWorld(
@@ -347,7 +388,8 @@ namespace engine::render {
 							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 							paneWidth[slot],
 							paneHeight[slot],
-							true
+							true,
+							captureTarget
 						);
 					}
 
@@ -433,6 +475,14 @@ namespace engine::render {
 							continue;
 						}
 
+						if (bounce > 0) {
+							const auto &held = bank.Surfaces[accepted[index].Index];
+							if (!recording.AdmitSurfaceCapture(held.Width, held.Height, bounce + 1)) {
+								accepted[index].Refresh = false;
+								continue;
+							}
+						}
+
 						Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
 						state.PreviousViewProjection = state.ViewProjection;
 						state.PreviousSampling = state.Sampling;
@@ -515,13 +565,10 @@ namespace engine::render {
 						// the near-plane hack, and moved when the camera was re-aimed but
 						// not when the floor was.
 						const core::Vector3 surfaceEye = capturedView.Frame.Position;
-						// **Every draw in this pass leaves display-encoded**, because
-						// every one of them lands in the surface texture and the pane
-						// reads that back as a display colour. See `Encode` in
-						// `opaque.frag` for the round trip and the measurement.
+						// HDR captures retain radiance; display captures encode at their producer.
 						LightingUniforms surfaceLighting =
 							lightingFrom(surfaceWorldLighting, surfaceEye, 0.0f, 1.0f);
-						surfaceLighting.Mirror.z = 1.0f;
+						surfaceLighting.Mirror.z = captureHdr ? 0.0f : 1.0f;
 
 						const ShadowBinding shadow = shadowBinding();
 
@@ -644,7 +691,7 @@ namespace engine::render {
 									LightingUniforms levelLighting =
 										lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
 									levelLighting.Mirror.x = static_cast<float>(shown.Effect);
-									levelLighting.Mirror.z = 1.0f;
+									levelLighting.Mirror.z = captureHdr ? 0.0f : 1.0f;
 
 									SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
 									bindSurface(level->Colour);
@@ -697,16 +744,8 @@ namespace engine::render {
 								// costs no redraw of the texture.
 								mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
 
-								// **This capture is sampled, not presented, so it has to
-								// leave here display-encoded.** The pane reads the surface
-								// texture as a display colour and the frame's own tonemap
-								// encodes the result again; a linear capture through that
-								// round trip measured 0.0588 against 0.2843 for the same
-								// floor seen directly. `portal-capture` gets the same
-								// treatment from a `portal-tonemap` node instead, which is
-								// why this is a flag rather than something the shader does
-								// unconditionally. See `Encode` in `opaque.frag`.
-								mirrorLighting.Mirror.z = 1.0f;
+								// Match the containing capture target.
+								mirrorLighting.Mirror.z = captureHdr ? 0.0f : 1.0f;
 
 								SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
 								bindSurface(shown.Texture[shown.Slot ^ 1u]);
@@ -739,7 +778,8 @@ namespace engine::render {
 								surfaceWorldLighting.Direction,
 								state.Width,
 								state.Height,
-								false
+								false,
+								captureTarget
 							);
 						}
 
@@ -753,6 +793,7 @@ namespace engine::render {
 						if (plan.TransparentSurfaces > 0) {
 							drawMirrors(true);
 						}
+						drawEffects(pass, state.ViewProjection, capturedView.Frame);
 
 						if (drawInterface && accepted[index].View->InstanceCount == 0) {
 							result.DrawCalls += gameInterfaceHook->RecordWorld(
@@ -764,7 +805,8 @@ namespace engine::render {
 								surfaceWorldLighting.Direction,
 								state.Width,
 								state.Height,
-								true
+								true,
+								captureTarget
 							);
 						}
 
@@ -830,9 +872,6 @@ namespace engine::render {
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
-			const scene::Camera &drawCamera = recording.DrawCamera;
-			const uint32_t sceneWidth = recording.SceneWidth;
-			const uint32_t sceneHeight = recording.SceneHeight;
 			const bool haveInstances = recording.HaveInstances;
 			const auto &claimed = recording.Claimed;
 			Impl::SurfaceBank &bank = *recording.Bank;
@@ -889,6 +928,7 @@ namespace engine::render {
 				return true;
 			}
 
+			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			colourTarget.texture = target.Texture;
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -904,14 +944,16 @@ namespace engine::render {
 			SDL_SetGPUScissor(pass, &sceneScissor);
 
 			if (haveInstances && (surfaceInCamera > 0 || transparentSurfaces > 0)) {
-				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+				State->BindPipeline(
+					pass,
+					hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
+					hdr ? Impl::PipelineFamily::HdrOpaque : Impl::PipelineFamily::Opaque
+				);
 				State->BindInstanceBuffers(pass);
 				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-				const glm::mat4 viewProjection =
-					scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
+				const glm::mat4 &viewProjection = recording.Matrices.ViewProjection;
 				const FrameUniforms frameUniforms{
 					viewProjection,
 					lightViewProjection,
@@ -959,6 +1001,9 @@ namespace engine::render {
 							};
 							mirroredUniforms = lightingAt(cameraFrame.Position, 1.0f, shown.ImageOpacity);
 							mirroredUniforms.Mirror.x = static_cast<float>(shown.Effect);
+							mirroredUniforms.Mirror.z =
+								!hdr && shown.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ? 1.0f
+																								 : 0.0f;
 							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
 							paneLighting = &mirroredUniforms;
 							image = shown.Texture[shown.Slot];
@@ -986,7 +1031,11 @@ namespace engine::render {
 					drawMirrors(false);
 				}
 				if (transparentSurfaces > 0) {
-					State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
+					State->BindPipeline(
+						pass,
+						hdr ? State->HdrTransparentPipeline : State->TransparentPipeline,
+						hdr ? Impl::PipelineFamily::HdrTransparent : Impl::PipelineFamily::Transparent
+					);
 					drawMirrors(true);
 				}
 			}

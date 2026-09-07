@@ -26,6 +26,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <cstddef>
@@ -91,11 +92,17 @@ namespace {
 		std::unique_ptr<Transport> ClientWire;
 		Store World{"server"};
 		Store Replica{"client"};
+		std::optional<engine::assets::SigningKey> DatagramIdentity;
 		std::unique_ptr<Listener> Server;
 		std::unique_ptr<Connector> Client;
 		double Now = 0.0;
 
-		explicit Pair(const LossSettings &serverLoss = {}, const LossSettings &clientLoss = {}) {
+		explicit Pair(
+			const LossSettings &serverLoss = {},
+			const LossSettings &clientLoss = {},
+			WireMode mode = WireMode::Quic,
+			uint32_t inputBudget = 64 * 1024
+		) {
 			RegisterTypes();
 			Ends = MakeLoopbackTransport(2);
 			REQUIRE(Ends.size() == 2);
@@ -107,13 +114,20 @@ namespace {
 			ClientWire = std::make_unique<LossyTransport>(std::move(Ends[1]), clientLoss);
 
 			ListenerSettings serving;
-			serving.Wire = WireMode::Quic;
+			serving.Wire = mode;
 			serving.Quic.Connection.Tls.Seed = Seed();
 			serving.Quic.Connection.Tls.HasSeed = true;
 			Server = std::make_unique<Listener>(*ServerWire, serving);
+			if (mode == WireMode::Datagram) {
+				DatagramIdentity = engine::assets::SigningKey::FromSeed(Seed());
+				REQUIRE(DatagramIdentity.has_value());
+				Server->SetIdentity(&*DatagramIdentity);
+			}
 			Server->Authority().Replicate(Name("endtoend_test.Spot"));
 
 			ConnectorSettings connecting;
+			connecting.Quic.BytesPerTick = inputBudget;
+			connecting.Session.Link.BytesPerTick = inputBudget;
 			// The pin is stated once and lands wherever the wire needs it. Under
 			// QUIC it becomes the raw public key TLS checks.
 			engine::assets::PublicKey identity;
@@ -376,6 +390,21 @@ TEST_CASE("a world replicates over QUIC across a lossy link", "[replication][qui
 
 // --- lifecycle ---------------------------------------------------------------
 
+TEST_CASE("an admitted QUIC connector reports a later transport timeout", "[replication][quic]") {
+	Pair pair;
+	REQUIRE(pair.Admit());
+	REQUIRE(pair.Client->Live());
+	pair.Server.reset();
+	for (size_t tick = 0; tick < 4000 && pair.Client->Live(); ++tick) {
+		pair.Now += 1.0 / 60.0;
+		pair.Client->Poll(pair.Replica, pair.Now);
+		pair.Client->Advance(pair.Now);
+	}
+	CHECK(pair.Client->Admitted());
+	CHECK_FALSE(pair.Client->Live());
+	CHECK_FALSE(pair.Client->SendUser(Bytes("after timeout"), pair.Now));
+}
+
 TEST_CASE("a client that goes away is dropped over QUIC", "[replication][quic]") {
 	Pair pair;
 	REQUIRE(pair.Admit());
@@ -396,4 +425,85 @@ TEST_CASE("a client that goes away is dropped over QUIC", "[replication][quic]")
 
 	CHECK(pair.Server->Count() == 0);
 	CHECK(gone.size() == 1);
+}
+
+TEST_CASE(
+	"a connector retires consumed inputs independently of world ticks on both wires",
+	"[replication][input-clock]"
+) {
+	const auto mode = GENERATE(WireMode::Quic, WireMode::Datagram);
+	const bool poseAcknowledgements = GENERATE(false, true);
+	Pair pair({}, {}, mode);
+	REQUIRE(pair.Admit());
+	pair.Settle(203);
+	REQUIRE(pair.Client->Joined());
+	if (poseAcknowledgements) pair.Client->UsePoseAcknowledgements();
+	for (const auto inputTick : {uint64_t(1), uint64_t(9000)}) {
+		CAPTURE(mode, inputTick);
+		REQUIRE(pair.Client->Submit(inputTick, Bytes("move"), pair.Now));
+		const uint64_t worldTick = inputTick == 1 ? 300 : 400;
+		pair.Settle(worldTick);
+		REQUIRE_FALSE(pair.Server->Inputs().empty());
+		REQUIRE(pair.Client->Unconfirmed().size() == 1);
+		CHECK(pair.Client->Unconfirmed().front().Tick == inputTick);
+		pair.Server->ClearInputs();
+		pair.Settle(worldTick + 10);
+		if (poseAcknowledgements) {
+			CHECK(pair.Client->Unconfirmed().size() == 1);
+			CHECK_FALSE(pair.Client->AcknowledgePrediction(inputTick + 1));
+			REQUIRE(pair.Client->AcknowledgePrediction(inputTick));
+			CHECK(pair.Client->PredictionCoverage() == inputTick);
+			CHECK_FALSE(pair.Client->AcknowledgePrediction(inputTick - 1));
+		}
+		CHECK(pair.Client->Unconfirmed().empty());
+	}
+}
+
+TEST_CASE(
+	"continued inputs precede newer submissions through budget refusal", "[replication][input-continuation]"
+) {
+	const auto mode = GENERATE(WireMode::Quic, WireMode::Datagram);
+	const bool tightBudget = GENERATE(false, true);
+	const bool sourceAlreadyApplied = GENERATE(false, true);
+	Pair pair({}, {}, mode, tightBudget ? 4096 : 64 * 1024);
+	REQUIRE(pair.Admit());
+	pair.Settle(203);
+	std::vector<engine::replication::Input> carried;
+	for (uint64_t tick = 101; tick <= 116; ++tick)
+		carried.push_back({tick, std::vector<std::byte>(512, static_cast<std::byte>(tick))});
+	CHECK_FALSE(pair.Client->ContinueInputs(carried, 100));
+	pair.Client->UsePoseAcknowledgements();
+	auto malformed = carried;
+	malformed.back().Tick = 101;
+	CHECK_FALSE(pair.Client->ContinueInputs(malformed, 100));
+	CHECK(pair.Client->Unconfirmed().empty());
+	REQUIRE(pair.Client->ContinueInputs(carried, 100));
+	CHECK_FALSE(pair.Client->ContinueInputs(carried, 100));
+	CHECK(pair.Client->PredictionCoverage() == 100);
+	CHECK(pair.Client->Unconfirmed().size() == 16);
+	if (sourceAlreadyApplied) REQUIRE(pair.Client->AcknowledgePrediction(108));
+	bool submitted = pair.Client->Submit(117, Bytes("new"), pair.Now);
+	CHECK(submitted == !tightBudget);
+	for (int tick = 0; tick < 16; ++tick) {
+		pair.Tick(300 + tick);
+		if (!submitted) submitted = pair.Client->Submit(117, Bytes("new"), pair.Now);
+	}
+	REQUIRE(submitted);
+	std::vector<uint64_t> received;
+	for (const auto &submission : pair.Server->Inputs())
+		for (const auto &input : submission.Inputs) {
+			received.push_back(input.Tick);
+			REQUIRE(input.Tick >= 101);
+			REQUIRE(input.Tick <= 117);
+			if (input.Tick <= 116)
+				CHECK(input.Bytes == carried[input.Tick - 101].Bytes);
+			else
+				CHECK(input.Bytes == Bytes("new"));
+		}
+	REQUIRE(received.size() == (sourceAlreadyApplied ? 9 : 17));
+	for (size_t index = 0; index < received.size(); ++index)
+		CHECK(received[index] == (sourceAlreadyApplied ? 109 : 101) + index);
+	REQUIRE(pair.Client->AcknowledgePrediction(116));
+	REQUIRE(pair.Client->Unconfirmed().size() == 1);
+	CHECK(pair.Client->Unconfirmed().front().Tick == 117);
 }

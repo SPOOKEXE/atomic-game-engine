@@ -73,6 +73,10 @@ int main(int argc, char **argv) {
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
+	arguments.Value(
+		"presentation-world", "NAME", "Serve one game world's portal images on an inherited driver link"
+	);
+	arguments.Value("presentation-session", "N", "Fresh driver-assigned session for the presentation host");
 	arguments.Value("max-fps", "N", "Cap presentation FPS. Needs --uncapped; 0 presents every update");
 	arguments.Flag("verbose", "Log at trace level");
 	// Value-taking and absent by default. The conventional number remains in
@@ -166,6 +170,10 @@ int main(int argc, char **argv) {
 		"Write a BMP of the scene near the end of the run. Needs --frames; renders offscreen"
 	);
 
+	arguments.Value(
+		"capture-sequence", "DIR", "Write each rendered frame as BMP and camera-state JSON. Needs --frames"
+	);
+
 	const auto parsed = arguments.Parse(argc, argv);
 	if (!parsed.Ok) {
 		std::fprintf(stderr, "%s\n\n%s", parsed.Error.c_str(), arguments.Help().c_str());
@@ -224,6 +232,15 @@ int main(int argc, char **argv) {
 	options.EnableParticles = options.EnableParticles && !arguments.Has("disable-particles");
 	options.EnablePostProcessing = options.EnablePostProcessing && !arguments.Has("disable-post-processing");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	if (auto world = arguments.Get("presentation-world")) options.PresentationWorld = *world;
+	if (arguments.Has("presentation-session")) {
+		const auto session = arguments.GetInteger("presentation-session", 0);
+		if (session <= 0) {
+			std::fprintf(stderr, "--presentation-session must be positive.\n");
+			return 2;
+		}
+		options.PresentationSession = static_cast<uint64_t>(session);
+	}
 	if (arguments.Has("mcp-port")) {
 		options.ControlPort =
 			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_CLIENT_PORT));
@@ -242,11 +259,9 @@ int main(int argc, char **argv) {
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.Headless = arguments.Has("headless");
 
-	// **Refused rather than run**, because a headless client has no window to
-	// close: without a frame budget it would render forever with nothing on
-	// screen to say so, on a machine somebody has probably walked away from.
-	// The studio's `--headless` carries the same requirement.
-	if (options.Headless && options.MaximumFrames < 0) {
+	// Ordinary headless runs need a frame budget. A presentation host instead
+	// ends with its inherited driver link, which startup requires before running.
+	if (options.Headless && options.MaximumFrames < 0 && options.PresentationSession == 0) {
 		std::fprintf(stderr, "--headless needs --frames N: there is no window to close.\n");
 		return 2;
 	}
@@ -359,6 +374,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
+	}
+	if (auto sequence = arguments.Get("capture-sequence")) {
+		options.CaptureSequence = std::filesystem::path(*sequence);
 	}
 	if (auto sound = arguments.Get("sound")) {
 		options.SoundPath = std::filesystem::path(*sound);

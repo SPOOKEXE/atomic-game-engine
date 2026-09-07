@@ -15,6 +15,7 @@
 #include <engine/game/CollisionContent.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
@@ -23,8 +24,10 @@
 #include <engine/input/Translate.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/Animation.hpp>
+#include <engine/render/DebugText.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -39,6 +42,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/TeleportRequest.hpp>
+#include <engine/world/HostLink.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <SDL3/SDL.h>
@@ -52,6 +56,7 @@
 #include <client/Replicated.hpp>
 #include <cstddef>
 #include <fstream>
+#include <network/SessionKey.hpp>
 #include <thread>
 #include <type_traits>
 
@@ -162,7 +167,32 @@ namespace client {
 
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
-		Presentations.SetRate(Settings.Uncapped ? Settings.MaximumFrameRate : 0);
+		SubmittedMoveTick = 0;
+		InputLocalEpoch = InputSequenceEpoch = 0;
+		if (!Settings.CaptureSequence.empty()) {
+			if (Settings.MaximumFrames <= 0 || !Settings.Capture.empty()) {
+				ENGINE_ERROR(
+					"capture-sequence needs a positive frame budget and cannot be combined with capture"
+				);
+				return false;
+			}
+			std::error_code error;
+			std::filesystem::create_directories(Settings.CaptureSequence, error);
+			if (error) {
+				ENGINE_ERROR(
+					"cannot create capture directory '{}': {}",
+					Settings.CaptureSequence.string(),
+					error.message()
+				);
+				return false;
+			}
+		}
+		// A capture producer has no swapchain wait to pace its service frames.
+		Presentations.SetRate(
+			Settings.PresentationSession != 0
+				? (Settings.MaximumFrameRate != 0 ? Settings.MaximumFrameRate : 60)
+				: (Settings.Uncapped ? Settings.MaximumFrameRate : 0)
+		);
 
 		// **Said at startup rather than at the first refusal**, so "my texture
 		// never arrives" and "this client was told not to fetch GIFs" are one
@@ -250,23 +280,33 @@ namespace client {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		if (!Universe_->ConfigurePresentation(
+				Settings.PresentationSession == 0 ? 1 : Settings.PresentationSession
+			)) {
+			ENGINE_ERROR("could not configure portal image transport");
+			return false;
+		}
+		PortalImages = std::make_unique<engine::render::PortalImageHost>(*Universe_, Renderer);
 
-		if (!Settings.GameFile.empty()) {
-			if (!LoadGameFile()) {
+		const bool replicaProducer = Settings.PresentationSession != 0 && !Settings.ConnectAddress.empty();
+		// A live producer owns only its received replica, without a local demo.
+		if (!replicaProducer) {
+			if (!Settings.GameFile.empty()) {
+				if (!LoadGameFile()) return false;
+			} else if (!BuildDemoWorlds()) {
 				return false;
 			}
-		} else if (!BuildDemoWorlds()) {
-			return false;
 		}
 
 		// The first is the one the panels report on and the one the composed
 		// camera comes from. A client draws one world's worth of camera however
 		// many it composites.
-		Rendered = Simulated.front();
+		if (!Simulated.empty()) Rendered = Simulated.front();
 
 		if (!BeginConnecting()) {
 			return false;
 		}
+		if (replicaProducer) Rendered = Replicated;
 
 		if (Simulated.size() > 1) {
 			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", Simulated.size(), Settings.ViewSpacing);
@@ -292,7 +332,46 @@ namespace client {
 				"MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
 			);
 		}
-		return FinishStartup();
+		return FinishStartup() && InitialisePresentationHost();
+	}
+
+	bool Client::InitialisePresentationHost() {
+		if (Settings.PresentationSession == 0 && Settings.PresentationWorld.empty()) return true;
+		const bool replica = !Settings.ConnectAddress.empty();
+		if (Settings.PresentationSession == 0 || Settings.PresentationWorld.empty() || !Settings.Headless ||
+			(replica ? !Settings.GameFile.empty() || Settings.ServerKey.empty()
+					 : Settings.GameFile.empty())) {
+			ENGINE_ERROR(
+				"presentation hosting requires a session, world and --headless with either --game "
+				"or a pinned --connect and --server-key"
+			);
+			return false;
+		}
+		auto channel = engine::parallel::AdoptInheritedChannel();
+		if (!channel) {
+			ENGINE_ERROR("presentation hosting requires an inherited driver channel");
+			return false;
+		}
+		PresentationLink = std::make_unique<engine::world::HostLink>(std::move(channel));
+		PresentationHostReady = false;
+		return true;
+	}
+
+	bool Client::PumpPresentationHost() {
+		if (!PresentationLink) return true;
+		if (Connection && (Connection->Rejected() || (Connection->Admitted() && !Connection->Live()))) {
+			PortalImages->Clear();
+			(void)PresentationLink->PublishPresentationDirectory(Universe_->LocalPresentationDirectory());
+			return false;
+		}
+		if (!PresentationHostReady && (!Connection || Connection->Joined())) {
+			const auto world = Universe_->Find(engine::core::Name(Settings.PresentationWorld));
+			if (PortalImages->Serve(world).Session == 0) return false;
+			engine::world::HostFrame ready;
+			ready.Signal = engine::world::HostSignal::Ready;
+			PresentationHostReady = PresentationLink->Send(ready);
+		}
+		return PortalImages->PumpDriverLink(*PresentationLink);
 	}
 
 	bool Client::LoadGameFile() {
@@ -305,10 +384,25 @@ namespace client {
 		}
 		RenderingProfiles = std::move(info.RenderingProfiles);
 
-		const auto worlds = Universe_->Worlds();
+		auto worlds = Universe_->Worlds();
 		if (worlds.empty()) {
 			ENGINE_ERROR("--game '{}' holds no worlds", Settings.GameFile.string());
 			return false;
+		}
+		if (!Settings.PresentationWorld.empty()) {
+			const auto selected = Universe_->Find(engine::core::Name(Settings.PresentationWorld));
+			if (!selected.IsValid()) {
+				ENGINE_ERROR("presentation world '{}' is absent from the game", Settings.PresentationWorld);
+				return false;
+			}
+			for (const auto id : worlds) {
+				if (id == selected) continue;
+				const auto settings = Universe_->SettingsOf(id);
+				Universe_->Destroy(id);
+				if (!Universe_->CreateRemote(settings, engine::core::Name("presentation-driver")).IsValid())
+					return false;
+			}
+			worlds = {selected};
 		}
 
 		// **Both halves, in one process.** A single-player run is a server and
@@ -1157,6 +1251,14 @@ namespace client {
 		if (Sound == nullptr) {
 			return;
 		}
+		std::erase_if(Stages, [&](auto &entry) {
+			const engine::world::WorldId world{entry.first};
+			if (world == Replicated ||
+				std::find(Simulated.begin(), Simulated.end(), world) != Simulated.end())
+				return false;
+			entry.second.Clear(Sound->Mixer());
+			return entry.second.PendingCloses() == 0;
+		});
 
 		// The listener is the composed camera's position, which is **last
 		// frame's**. One frame of latency on an ear is inaudible; reading a live
@@ -1190,6 +1292,8 @@ namespace client {
 	}
 
 	bool Client::BeginAudio() {
+		// Image producers have no audio consumer or player mixer.
+		if (Settings.PresentationSession != 0) return true;
 		// Validate before opening the device so headless runs report file errors.
 		std::shared_ptr<const engine::audio::SampleBuffer> decoded;
 		if (!Settings.SoundPath.empty()) {
@@ -1297,6 +1401,7 @@ namespace client {
 		Sound.reset();
 		Content.reset();
 
+		PortalNext.reset();
 		Connection.reset();
 		if (Socket != nullptr) {
 			Socket->Close();
@@ -1311,6 +1416,12 @@ namespace client {
 		// crash but a lock taken on a mutex that no longer exists, and the
 		// process hangs having already run, reported and returned 0.
 		Interface.Shutdown();
+		if (PresentationLink && PortalImages) {
+			PortalImages->Clear();
+			(void)PresentationLink->PublishPresentationDirectory(Universe_->LocalPresentationDirectory());
+		}
+		PresentationLink.reset();
+		PortalImages.reset();
 
 		// **Not guarded by the window, and that guard was the reason nothing
 		// caught the above.** Tearing the renderer down only when there was a
@@ -1478,6 +1589,7 @@ namespace client {
 	}
 
 	bool Client::BeginConnecting() {
+		InitialPortalViewsReady = false;
 		const bool searching =
 			Settings.ConnectAddress.empty() && (Settings.Browse || !Settings.RendezvousAddress.empty());
 		if (Settings.ConnectAddress.empty() && !searching) {
@@ -1507,7 +1619,9 @@ namespace client {
 		}
 
 		engine::world::WorldSettings world;
-		world.Name = engine::core::Name("client.replica");
+		world.Name = engine::core::Name(
+			Settings.PresentationSession != 0 ? Settings.PresentationWorld : "client.replica"
+		);
 		world.TickRate = Settings.TickRate;
 
 		Replicated = Universe_->Create(world);
@@ -1580,10 +1694,13 @@ namespace client {
 		engine::replication::ConnectorSettings connector;
 		connector.Advertised = Advertised;
 		connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
-		ClientIdentity.reset();
-		if (!Settings.PlayKey.empty()) {
+		if (!ClientIdentity) {
 			std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
-			if (!ParseHex(Settings.PlayKey, seed)) {
+			if (Settings.PlayKey.empty()) {
+				const auto ephemeral = network::SessionKey::Draw();
+				if (!ephemeral) return false;
+				seed = ephemeral->Tag({});
+			} else if (!ParseHex(Settings.PlayKey, seed)) {
 				ENGINE_ERROR("client: --play-key is not {} hex characters", seed.size() * 2);
 				return false;
 			}
@@ -1592,9 +1709,9 @@ namespace client {
 				ENGINE_ERROR("client: --play-key is not a usable Ed25519 seed");
 				return false;
 			}
-			connector.ClientIdentity = &*ClientIdentity;
 			ENGINE_INFO("client play identity {}", ClientIdentity->Public().ToHex());
 		}
+		connector.ClientIdentity = &*ClientIdentity;
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {
@@ -1606,6 +1723,7 @@ namespace client {
 		Connection = std::make_unique<engine::replication::Connector>(
 			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
+		ResetPlayPresentation();
 
 		// **Which player is this client's, which nothing else can tell it.**
 		// `scene::LocalPlayer` cannot be replicated - a resource is one row and
@@ -1619,70 +1737,9 @@ namespace client {
 			return Connection != nullptr && Connection->SendUser(payload, engine::core::Clock::Seconds());
 		});
 
+		ConnectedServer = *server;
 		Connection->OnUserMessage([this](std::span<const std::byte> message) {
-			engine::game::JoinNotice notice;
-			if (engine::game::DecodeJoinNotice(message, notice)) {
-				Universe_->Enter(Replicated, [notice](engine::ecs::Store &store) {
-					store.SetResource(engine::scene::LocalPlayer{notice.Player});
-				});
-
-				ENGINE_INFO("client: this is player {}", notice.Player.Id);
-				return;
-			}
-
-			engine::game::TeleportRequestResult teleport;
-			if (engine::game::DecodeTeleportResult(message, teleport)) {
-				bool accepted = false;
-				Universe_->Enter(Replicated, [&accepted, &teleport](engine::ecs::Store &store) {
-					accepted = engine::script::AcceptTeleportResult(store, teleport.Id);
-				});
-				if (!accepted) {
-					return;
-				}
-
-				engine::script::TeleportRequestDecision decision =
-					engine::script::TeleportRequestDecision::NotProcessed;
-				switch (teleport.Decision) {
-				case engine::game::TeleportRequestDecision::NotProcessed:
-					break;
-				case engine::game::TeleportRequestDecision::Denied:
-					decision = engine::script::TeleportRequestDecision::Denied;
-					break;
-				case engine::game::TeleportRequestDecision::Processed:
-					decision = engine::script::TeleportRequestDecision::Processed;
-					break;
-				}
-				if (engine::script::Runtime *runtime = RuntimeOf(Replicated); runtime != nullptr) {
-					runtime->DeliverTeleportResult({teleport.Id, decision, teleport.Message});
-				}
-
-				ENGINE_INFO(
-					"teleport request {}: {}{}",
-					teleport.Id,
-					teleport.Decision == engine::game::TeleportRequestDecision::Processed ? "processed"
-					: teleport.Decision == engine::game::TeleportRequestDecision::Denied  ? "denied"
-																						  : "not processed",
-					teleport.Message.empty() ? "" : std::string(" (" + teleport.Message + ")")
-				);
-				return;
-			}
-
-			// **Where content is, said once at admission.** It cannot be
-			// replicated for `LocalPlayer`'s reason and one more: the grant in it
-			// names this session, so it is per client by construction.
-			engine::game::ContentDirectory directory;
-			if (engine::game::DecodeContentDirectory(message, directory)) {
-				AdoptContentDirectory(directory);
-				return;
-			}
-
-			// A relayed route, or somebody else's message on a shared channel.
-			// Either way this is the last reader, so an unrecognised payload is
-			// ignored rather than counted: the tag exists so that it is a
-			// non-event.
-			if (ContentRelay != nullptr) {
-				(void)ContentRelay->Receive(message);
-			}
+			ReceiveServerMessage(message);
 		});
 
 		if (Discovery != nullptr) {
@@ -1699,6 +1756,94 @@ namespace client {
 
 		ENGINE_INFO("connecting to {} from {}", server->Text(), Socket->Local().Text());
 		return true;
+	}
+
+	void Client::ReceiveServerMessage(std::span<const std::byte> message) {
+		if (ReceivePlayPresentation(message)) return;
+		engine::game::PlayerMotion motion;
+		if (engine::game::DecodePlayerMotion(message, motion)) {
+			Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
+				(void)AcceptNativePlayerMotion(store, motion, SubmittedMoveTick);
+			});
+			return;
+		}
+		engine::game::PortalSessionMessage admission;
+		if (engine::game::DecodePortalSession(message, admission) &&
+			(Settings.PresentationSession != 0 || ReceivePortalSession(admission)))
+			return;
+		const bool fresh = FreshAdmissionSent && engine::game::DecodePortalSession(message, admission) &&
+						   admission.Kind == engine::game::PortalSessionKind::Ready && admission.Attempt == 1;
+		engine::game::JoinNotice notice;
+		if (fresh) notice.Player = admission.Player;
+		if (fresh || engine::game::DecodeJoinNotice(message, notice)) {
+			Universe_->Enter(Replicated, [notice, fresh, &admission](engine::ecs::Store &store) {
+				store.SetResource(engine::scene::LocalPlayer{notice.Player});
+				if (fresh) {
+					if (const auto *replica = store.Resource<engine::world::Replica>()) {
+						auto identity = *replica;
+						identity.Of = engine::core::Name(admission.World);
+						store.SetResource(identity);
+					}
+				}
+			});
+
+			ENGINE_INFO("client: this is player {}", notice.Player.Id);
+			return;
+		}
+
+		engine::game::TeleportRequestResult teleport;
+		if (engine::game::DecodeTeleportResult(message, teleport)) {
+			bool accepted = false;
+			Universe_->Enter(Replicated, [&accepted, &teleport](engine::ecs::Store &store) {
+				accepted = engine::script::AcceptTeleportResult(store, teleport.Id);
+			});
+			if (!accepted) {
+				return;
+			}
+
+			engine::script::TeleportRequestDecision decision =
+				engine::script::TeleportRequestDecision::NotProcessed;
+			switch (teleport.Decision) {
+			case engine::game::TeleportRequestDecision::NotProcessed:
+				break;
+			case engine::game::TeleportRequestDecision::Denied:
+				decision = engine::script::TeleportRequestDecision::Denied;
+				break;
+			case engine::game::TeleportRequestDecision::Processed:
+				decision = engine::script::TeleportRequestDecision::Processed;
+				break;
+			}
+			if (engine::script::Runtime *runtime = RuntimeOf(Replicated); runtime != nullptr) {
+				runtime->DeliverTeleportResult({teleport.Id, decision, teleport.Message});
+			}
+
+			ENGINE_INFO(
+				"teleport request {}: {}{}",
+				teleport.Id,
+				teleport.Decision == engine::game::TeleportRequestDecision::Processed ? "processed"
+				: teleport.Decision == engine::game::TeleportRequestDecision::Denied  ? "denied"
+																					  : "not processed",
+				teleport.Message.empty() ? "" : std::string(" (" + teleport.Message + ")")
+			);
+			return;
+		}
+
+		// **Where content is, said once at admission.** It cannot be
+		// replicated for `LocalPlayer`'s reason and one more: the grant in it
+		// names this session, so it is per client by construction.
+		engine::game::ContentDirectory directory;
+		if (engine::game::DecodeContentDirectory(message, directory)) {
+			AdoptContentDirectory(directory);
+			return;
+		}
+
+		// A relayed route, or somebody else's message on a shared channel.
+		// Either way this is the last reader, so an unrecognised payload is
+		// ignored rather than counted: the tag exists so that it is a
+		// non-event.
+		if (ContentRelay != nullptr) {
+			(void)ContentRelay->Receive(message);
+		}
 	}
 
 	engine::world::WorldId Client::InterfaceWorld() const {
@@ -1766,6 +1911,7 @@ namespace client {
 		// `scene::InputState`. `LatchPresses` is that latch for every key, in
 		// the state both the client and the studio already share.
 		state->LatchPresses();
+		engine::scene::LatchCameraInput(store);
 
 		if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>();
 			controllers != nullptr) {
@@ -1779,9 +1925,41 @@ namespace client {
 			}
 			controllers->LatchPresses();
 		}
+		if (WaitingForPortalViews() && store.Resource<engine::world::Replica>()) {
+			// Both prediction and network input read this state. Camera look and zoom remain live.
+			using engine::scene::KeyCode;
+			for (const auto key :
+				 {KeyCode::W,
+				  KeyCode::A,
+				  KeyCode::S,
+				  KeyCode::D,
+				  KeyCode::Up,
+				  KeyCode::Down,
+				  KeyCode::Left,
+				  KeyCode::Right,
+				  KeyCode::Space}) {
+				state->Down.Set(key, false);
+				state->Pressed.Set(key, false);
+			}
+			if (auto *controllers = store.ResourceMutable<engine::scene::ControllerState>()) {
+				for (auto &slot : controllers->Slots) {
+					slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftX)] = 0;
+					slot.Axes[static_cast<size_t>(engine::scene::ControllerAxis::LeftY)] = 0;
+					slot.PressedButtons &= ~(1u << static_cast<uint8_t>(engine::scene::ControllerButton::A));
+				}
+			}
+		}
+	}
+
+	std::optional<uint64_t> Client::InputTickAt(uint64_t localTick) const {
+		if (localTick < InputLocalEpoch) return {};
+		const uint64_t elapsedTicks = localTick - InputLocalEpoch;
+		if (elapsedTicks > std::numeric_limits<uint64_t>::max() - InputSequenceEpoch) return {};
+		return InputSequenceEpoch + elapsedTicks;
 	}
 
 	void Client::SubmitMove(double nowSeconds) {
+		if (Settings.PresentationSession != 0) return;
 		if (Connection == nullptr || !Connection->Admitted()) {
 			return;
 		}
@@ -1789,17 +1967,17 @@ namespace client {
 		engine::game::MoveInput move;
 		engine::scene::AimIntent aim;
 		uint64_t tick = 0;
+		double viewTick = 0;
 
-		Universe_->Enter(Replicated, [&move, &aim, &tick](engine::ecs::Store &store) {
-			// **Only once there is a body**, because until the join notice
-			// arrives and the character replicates there is nothing for a move
-			// to mean - and a host that received one would look up a player,
-			// find no character, and do the work of deciding that every tick.
-			if (const auto *local = store.Resource<engine::scene::LocalPlayer>();
-				local == nullptr ||
-				engine::scene::CharacterOf(store, local->Instance) == engine::ecs::NULL_ENTITY) {
+		Universe_->Enter(Replicated, [this, &move, &aim, &tick, &viewTick](engine::ecs::Store &store) {
+			// The authenticated source host forwards movement by transfer receipt
+			// after its Player has retired, until native destination input takes over.
+			const auto *local = store.Resource<engine::scene::LocalPlayer>();
+			if (local == nullptr) return;
+			const bool transferring = PortalNext && PortalNext->ProceedSent && !PortalNext->Refused;
+			if (!transferring &&
+				engine::scene::CharacterOf(store, local->Instance) == engine::ecs::NULL_ENTITY)
 				return;
-			}
 
 			// The same arithmetic a single-player character uses, which is what
 			// `scene::ReadMoveIntent` was split out for: W has to mean "away
@@ -1808,6 +1986,7 @@ namespace client {
 			const engine::scene::MoveIntent intent = engine::scene::ReadMoveIntent(store);
 			move.Direction = intent.Direction;
 			move.Jump = intent.Jump;
+			move.StepSeconds = store.Time().Delta;
 
 			// **Read in the same scope as the move, from the same tick.** Two
 			// entries would sample the camera on one tick and the keys on
@@ -1815,13 +1994,16 @@ namespace client {
 			// behind where the player was looking - which on a fast flick is
 			// several degrees and reads as the server cheating.
 			aim = engine::scene::ReadAimIntent(store);
+			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>())
+				viewTick = buffer->RenderTick();
 
 			tick = store.Time().Tick;
 		});
 
-		if (tick == 0) {
-			return;
-		}
+		if (tick == 0) return;
+		const auto inputTick = InputTickAt(tick);
+		if (!inputTick) return;
+		tick = *inputTick;
 
 		// **The aim, and never the result.** `Server::ApplyInputs` states the
 		// division and this is the half that had no caller: `examples::
@@ -1835,6 +2017,7 @@ namespace client {
 		if (aim.Aimed && aim.Fired) {
 			engine::examples::Shot shot;
 			shot.Aim = aim.Ray;
+			shot.ViewTick = viewTick;
 
 			// **The engine's ceiling and not a game's choice.** A client picks
 			// its own range on the wire and `DecodeShot` refuses anything past
@@ -1856,12 +2039,16 @@ namespace client {
 			}
 		}
 
-		// **Sent every tick, including the still ones.** A client that only
-		// spoke when its keys changed would leave a character walking for ever
+		// Send once per observed simulation tick, including still states. A client
+		// that only spoke when its keys changed would leave a character walking for ever
 		// after a dropped release - an input channel is unreliable by design,
 		// and "still walking" is the failure a state-change protocol produces.
-		if (Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
-			Universe_->Enter(Replicated, [&move](engine::ecs::Store &store) {
+		if (tick != SubmittedMoveTick &&
+			Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
+			SubmittedMoveTick = tick;
+			ENGINE_TRACE("move submitted at tick {}", tick);
+			Universe_->Enter(Replicated, [&move, tick](engine::ecs::Store &store) {
+				(void)RecordPortalPredictionInput(store, tick, move, store.Time().Delta);
 				PredictLocalPlayerMove(store, move, store.Time().Delta);
 			});
 
@@ -1881,7 +2068,7 @@ namespace client {
 		}
 	}
 
-	void Client::PollServer(double nowSeconds) {
+	void Client::PollServer(double nowSeconds, bool presentationReady) {
 		if (Discovery != nullptr) {
 			// Before the connector's drain, so a rendezvous message routed out
 			// of it is stamped with this tick rather than the previous one.
@@ -1894,7 +2081,24 @@ namespace client {
 		}
 
 		Universe_->Enter(Replicated, [this, nowSeconds](engine::ecs::Store &store) {
+			std::optional<LocalPlayerPrediction> retainedPrediction;
+			if (PortalNext && PortalNext->ProceedSent && !PortalNext->Refused) {
+				const auto *local = store.Resource<engine::scene::LocalPlayer>();
+				const auto *prediction = store.Resource<LocalPlayerPrediction>();
+				if (local && prediction && prediction->Active &&
+					engine::scene::PrepareCameraCharacterHold(store, local->Instance, prediction->Frame))
+					retainedPrediction = *prediction;
+			}
 			Connection->Poll(store, nowSeconds);
+			if (PortalNext && PortalNext->ProceedSent && !PortalNext->Refused && retainedPrediction &&
+				engine::scene::ActivateCameraCharacterHold(store)) {
+				const auto &held = *store.Resource<engine::scene::CameraCharacterHold>();
+				retainedPrediction->Player = held.Player;
+				retainedPrediction->Root = held.Root;
+				store.SetResource(*retainedPrediction);
+				if (auto *buffer = store.ResourceMutable<engine::replication::SnapshotBuffer>())
+					buffer->Predict(held.Root);
+			}
 
 			// **Here, not in the render pass.** This instant is the one where
 			// the store holds the tick the server described; a pass that only
@@ -1903,8 +2107,23 @@ namespace client {
 			// then be interpolating across gaps the network never produced.
 			const uint64_t applied = Connection->Applied();
 			RecordReplicatedTick(store, applied);
-			ReconcileLocalPlayerPrediction(store, applied, Connection->Unconfirmed());
+			if (const auto *native = store.Resource<NativePlayerPrediction>();
+				native && native->Incarnation != 0) {
+				if (const auto inputTick = ReconcileNativePlayerPrediction(
+						store, Connection->Unconfirmed(), Connection->PredictionCoverage()
+					))
+					(void)Connection->AcknowledgePrediction(*inputTick);
+			} else {
+				ReconcileLocalPlayerPrediction(store, applied, Connection->Unconfirmed());
+			}
 		});
+
+		if (Settings.PresentationSession == 0 && !FreshAdmissionSent && Connection->Admitted()) {
+			engine::game::PortalSessionMessage fresh;
+			fresh.Kind = engine::game::PortalSessionKind::Fresh;
+			fresh.Attempt = 1;
+			FreshAdmissionSent = Connection->SendUser(engine::game::EncodePortalSession(fresh), nowSeconds);
+		}
 
 		// The exchange, before the world. A client that sat there with an empty
 		// scene used to have one explanation; it now has two, and the log has to
@@ -1943,9 +2162,11 @@ namespace client {
 		}
 
 		Connection->Advance(nowSeconds);
+		PumpPortalSuccessor(nowSeconds, presentationReady);
 	}
 
 	void Client::SubmitTeleportRequests(double nowSeconds) {
+		if (Settings.PresentationSession != 0) return;
 		if (Connection == nullptr || !ReportedJoin) {
 			return;
 		}
@@ -2406,6 +2627,7 @@ namespace client {
 		// Input belongs to the update clock. Presentation used to write it just
 		// before PreRender, which made an independently paced client leave every
 		// intervening simulation tick reading the last presented state.
+		const engine::world::WorldId inputReplica = ReportedJoin ? Replicated : engine::world::WorldId{};
 		for (const engine::world::WorldId id : Simulated) {
 			Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
 		}
@@ -2448,7 +2670,9 @@ namespace client {
 			// writes to a store, which put the link's cost in the same bar as
 			// the systems and made a bad connection read as a slow game.
 			ENGINE_PROFILE_CAT("replication", engine::core::ProfileCategory::Network);
-			PollServer(engine::core::Clock::Seconds());
+			PollServer(engine::core::Clock::Seconds(), renderingActive && presentationDue);
+			if (ReportedJoin && Replicated != inputReplica)
+				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) { WriteInput(store); });
 
 			// **After the poll, so a move is stamped with the tick this client
 			// has just finished receiving** - a submission tagged with a tick
@@ -2479,7 +2703,8 @@ namespace client {
 		// Headless rendering still returns true so captures and bounded runs keep
 		// their existing behaviour.
 		if (!renderingActive || !presentationDue) {
-			if (renderingActive && !presentationDue && Settings.Uncapped && Presentations.Rate() > 0) {
+			if (renderingActive && !presentationDue && (Settings.Uncapped || PresentationLink) &&
+				Presentations.Rate() > 0) {
 				// Keep simulation and services independent from a lower presentation
 				// rate, but do not poll a future image deadline millions of times a
 				// second. The short ceiling preserves sub-frame input and network
@@ -2554,6 +2779,8 @@ namespace client {
 			// previous frame's mirrors in the list, and the surface pass would
 			// go on rendering a camera that is no longer in the scene.
 			Surfaces.clear();
+			Portals.clear();
+			Windowed = false;
 
 			// Collection keys the snapshot by world and simulation revision. Keep
 			// it until the rendered world either replaces it or fails to publish,
@@ -2595,13 +2822,70 @@ namespace client {
 			// the renderer sees it.
 			(void)Universe_->PresentMany(presentationDemand);
 
+			const auto collectPresentation =
+				[&](engine::world::WorldId id, engine::ecs::Store &store, const engine::core::Vector3 &eye) {
+					const auto selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
+					// **The surface cameras, read from the world that owns
+					// them.** All of them: the pipeline renders one offscreen
+					// view per surface index since v0.8, so a room of
+					// mirrored walls gets a working mirror per wall rather
+					// than one wall's image projected across all four.
+					// **The holes first, because they claim slots the
+					// surfaces then leave alone.** A same-world portal is
+					// drawn by the recursive pass from a camera derived from
+					// this one; a surface camera aimed at the same pane
+					// would be a second answer taken from the eye.
+					(void)CollectPortalViews(store, Portals);
+					(void)CollectSurfaceViews(store, Surfaces, Portals);
+
+					// **Whether any pane here names another world**, asked
+					// while the world is open because that is the only place
+					// it is cheap. What it gates is a whole copy of the draw
+					// list, and a scene with no window in it must not pay
+					// for one.
+					Windowed = false;
+					store.Each<const engine::scene::Portal>(
+						[this](engine::ecs::Entity, const engine::scene::Portal &portal) {
+							Windowed = Windowed || portal.DestinationWorld.IsValid();
+						}
+					);
+
+					if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
+						ProfilesInstalledFor = id;
+						ProfileInstalledSelection = selectedProfile;
+						PipelineSelected = engine::render::InstallWorldPipeline(
+							RenderingProfiles, Renderer, id.Index, selectedProfile
+						);
+					}
+
+					// **The particles, from the world being drawn and only
+					// that one.** A batch is a span into this world's pool;
+					// see `Client.hpp` for why a second world's cannot be
+					// appended to the same list.
+					(void)engine::render::CollectParticleBatches(store, Particles);
+					particleFrameCollected = true;
+
+					// **The ribbons are taken as spans rather than copied**,
+					// which is safe for the frame and only for the frame:
+					// `BuildRibbons` clears and refills the buffer in the next
+					// `PreRender`, and `Render` is called before that.
+					RibbonVertices = engine::effects::RibbonStream(store);
+					RibbonRuns = engine::effects::RibbonRuns(store);
+
+					// **Ordered from the eye, which is why this needs the
+					// camera and the two above do not.** The renderer takes
+					// sixteen lights and a world may hold any number; which
+					// sixteen is a scene question and distance is the answer
+					// that is right more often than it is wrong.
+					(void)engine::render::CollectLights(store, eye, Lights);
+				};
+
 			for (const engine::world::WorldId id : Simulated) {
-				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
 				// Published from inside the world, straight after its PreRender
 				// phase filled the draw list. The camera and the list stay
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
-				Universe_->Enter(id, [&, id, selectedProfile](engine::ecs::Store &store) {
+				Universe_->Enter(id, [&, id](engine::ecs::Store &store) {
 					const auto *active = store.Resource<engine::scene::ActiveCamera>();
 					const auto *list = store.Resource<engine::render::DrawList>();
 					if (active == nullptr || list == nullptr) {
@@ -2623,59 +2907,7 @@ namespace client {
 						ComposedFrame = placement->Frame;
 						ComposedCamera = *lens;
 
-						// **The surface cameras, read from the world that owns
-						// them.** All of them: the pipeline renders one offscreen
-						// view per surface index since v0.8, so a room of
-						// mirrored walls gets a working mirror per wall rather
-						// than one wall's image projected across all four.
-						// **The holes first, because they claim slots the
-						// surfaces then leave alone.** A same-world portal is
-						// drawn by the recursive pass from a camera derived from
-						// this one; a surface camera aimed at the same pane
-						// would be a second answer taken from the eye.
-						(void)CollectPortalViews(store, Portals);
-						(void)CollectSurfaceViews(store, Surfaces, Portals);
-
-						// **Whether any pane here names another world**, asked
-						// while the world is open because that is the only place
-						// it is cheap. What it gates is a whole copy of the draw
-						// list, and a scene with no window in it must not pay
-						// for one.
-						Windowed = false;
-						store.Each<const engine::scene::Portal>(
-							[this](engine::ecs::Entity, const engine::scene::Portal &portal) {
-								Windowed = Windowed || portal.DestinationWorld.IsValid();
-							}
-						);
-
-						if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
-							ProfilesInstalledFor = id;
-							ProfileInstalledSelection = selectedProfile;
-							PipelineSelected = engine::render::InstallWorldPipeline(
-								RenderingProfiles, Renderer, id.Index, selectedProfile
-							);
-						}
-
-						// **The particles, from the world being drawn and only
-						// that one.** A batch is a span into this world's pool;
-						// see `Client.hpp` for why a second world's cannot be
-						// appended to the same list.
-						(void)engine::render::CollectParticleBatches(store, Particles);
-						particleFrameCollected = true;
-
-						// **The ribbons are taken as spans rather than copied**,
-						// which is safe for the frame and only for the frame:
-						// `BuildRibbons` clears and refills the buffer in the next
-						// `PreRender`, and `Render` is called before that.
-						RibbonVertices = engine::effects::RibbonStream(store);
-						RibbonRuns = engine::effects::RibbonRuns(store);
-
-						// **Ordered from the eye, which is why this needs the
-						// camera and the two above do not.** The renderer takes
-						// sixteen lights and a world may hold any number; which
-						// sixteen is a scene question and distance is the answer
-						// that is right more often than it is wrong.
-						(void)engine::render::CollectLights(store, placement->Frame.Position, Lights);
+						if (!ReportedJoin) collectPresentation(id, store, placement->Frame.Position);
 					}
 
 					Views.Publish(
@@ -2712,13 +2944,12 @@ namespace client {
 			// at where the client stood last frame.
 			if (ReportedJoin) {
 				Universe_->Enter(Replicated, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					// A join may have completed after the update-clock input pass
-					// above, so the replica's first presentation still needs the
-					// current state. Later updates write it beside the simulated
-					// worlds, without pretending this replicated world is stepped.
-					WriteInput(store);
-
-					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
+					// The source rig can retire before destination admission finishes.
+					// Keep its last eye in that gap instead of borrowing the local demo's.
+					if (!PortalNext || !PortalNext->Camera)
+						// The local demo fits its far plane to its own bounds. That lens
+						// must not become the network character's persistent camera lens.
+						(void)AimReplicaViewer(store, ComposedFrame, engine::scene::Camera{});
 
 					// **After `AimReplicaViewer` and not before it**, because
 					// that call writes a whole `ActiveCamera` out when it mints
@@ -2731,7 +2962,7 @@ namespace client {
 
 				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
 
-				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
+				Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
 					const auto *list = store.Resource<engine::render::DrawList>();
 					if (list == nullptr) {
 						return;
@@ -2756,6 +2987,7 @@ namespace client {
 						}
 					}
 
+					collectPresentation(Replicated, store, frame.Position);
 					Views.Publish(
 						Replicated,
 						frame,
@@ -2767,6 +2999,22 @@ namespace client {
 					);
 				});
 			}
+		}
+
+		if (PresentationLink && Particles.Batches.empty()) {
+			// Captures consume the prepared world directly. GPU particles still need their normal step.
+			Renderer.SetAnimationTime(AnimationSeconds);
+			const auto progress = PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
+			Metrics::Count("render.portal-producer.captures", progress.Rendered);
+			Metrics::Count("render.portal-producer.replies", progress.Sent);
+			Statistics.Record(Clock.Now(), presentationDelta);
+			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
+			ParticleDeltaSeconds = 0.0f;
+			FramesDrawn++;
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			if (HeapProfile::SampleIfDue()) RefreshHeapReport();
+			return;
 		}
 
 		// Ticks actually achieved, over a one-second window. It matches the
@@ -2918,6 +3166,10 @@ namespace client {
 				// they still have to be drained.
 				Metrics::Clear();
 			}
+			if (redraw && WaitingForPortalViews()) {
+				Overlay.Fill(0, 0, pixelWidth, 16, 0, 0, 0, 255);
+				engine::render::DebugText::Draw(Overlay, 4, 4, "Loading portals", 255, 255, 255, 1);
+			}
 		}
 
 		// Drawn from what the compositor took off the view channels, not from a
@@ -2932,7 +3184,10 @@ namespace client {
 		// other is two scenes inside one, which reads as a rendering fault.
 		{
 			ENGINE_HEAP_SCOPE("client.compose");
-			Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
+			Views.Compose(
+				Views.Count() > 1 ? Settings.ViewSpacing : 0.0f,
+				ReportedJoin ? Replicated : engine::world::WorldId{}
+			);
 		}
 		// **The world's own interface, compiled here.** The studio does this
 		// per viewport panel because a panel *is* a canvas; a client has one
@@ -3242,7 +3497,7 @@ namespace client {
 		// a feature.
 		engine::render::SceneTarget target{};
 		const engine::render::SceneTarget *sceneTarget = nullptr;
-		if (!Settings.Capture.empty()) {
+		if (!Settings.Capture.empty() || !Settings.CaptureSequence.empty()) {
 			// The window's real size rather than the one it was asked for, so a
 			// capture taken after a resize is the picture on screen.
 			target.Width = static_cast<uint32_t>(pixelWidth);
@@ -3256,37 +3511,20 @@ namespace client {
 		// `Renderer::SetAnimationTime` carries the rule.
 		Renderer.SetAnimationTime(AnimationSeconds);
 
-		// **The worlds a pane looks into, and the bodies standing in both mouths
-		// of it.** This is the step the standalone client never had: the studio
-		// has called `AttachForeignSurfaces` since cross-world panes existed and
-		// this loop handed the renderer an empty foreign span, so a
-		// `DestinationWorld` pane fell back to showing its own world - a mirror
-		// where a window was authored.
-		//
-		// **Outside every `Enter`, because it enters other worlds** and
-		// `Universe::Enter` is not re-entrant. The studio's own call carries the
-		// same note for the same reason.
-		//
-		// **And no `PresentPortalDestinations` beside it, unlike the studio.**
-		// That step exists there because a panel presents only the world it
-		// shows, so a far world's draw list was whatever it held last time
-		// somebody looked at it. This loop presents *every* simulated world
-		// already - a world the player is not looking at still ticks - so the
-		// far list is this frame's by the time we get here.
+		const auto presentationWorld = InterfaceWorld();
+		// Destination-side straddlers join the local draw list after presentation.
+		// Background images arrive separately through the portal image host.
+		// Enter other worlds only after leaving the source store.
 		ENGINE_HEAP_SCOPE("client.draw list");
 
-		Foreign.clear();
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
 		std::vector<engine::core::CFrame> drawnJoints(Views.JointFrames().begin(), Views.JointFrames().end());
-		std::vector<engine::core::CFrame> foreignJoints;
 
 		if (Windowed) {
 			// The copy `Drawn`'s comment argues for: the published list is
 			// `const` and the return leg has to go somewhere.
 			Drawn.assign(drawn.begin(), drawn.end());
-			(void)AttachForeignSurfaces(
-				*Universe_, Rendered, Drawn, Foreign, Surfaces, &drawnJoints, &foreignJoints
-			);
+			(void)AppendForeignPortalClones(*Universe_, presentationWorld, Drawn, &drawnJoints);
 			drawn = Drawn;
 		}
 
@@ -3313,7 +3551,7 @@ namespace client {
 		uint32_t visualSurfaceBounces = 0;
 		uint32_t visualSurfaceLimit = 0;
 		Universe_->Enter(
-			Rendered,
+			presentationWorld,
 			[this, &visualLighting, &visualSurfaceBounces, &visualSurfaceLimit](
 				engine::ecs::Store &lit, engine::ecs::Scheduler &
 			) {
@@ -3353,7 +3591,7 @@ namespace client {
 		// pipeline built for a world nothing is presenting is video memory held
 		// for a frame that is not being rendered.
 		ENGINE_HEAP_SCOPE("client.shaders");
-		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
+		Universe_->Enter(presentationWorld, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
 			const size_t changed = Shaders.Refresh(shaded);
 			const engine::core::Name wantedPostProcess = Settings.EnablePostProcessing
 															 ? engine::scene::PostProcessShaderOf(shaded)
@@ -3383,28 +3621,19 @@ namespace client {
 						std::find(guiShaders.begin(), guiShaders.end(), name) != guiShaders.end();
 					const bool wantedByPostProcess = wantedPostProcess.IsValid() && name == wantedPostProcess;
 
-					// Null is a name nothing asks for any more, so whatever
-					// was built for it is released. The instances that named
-					// it are already gone or already name something else.
-					if (module == nullptr) {
+					// No accepted module means every consumer must release it.
+					// Failed edits retain accepted words and never enter this branch.
+					if (module == nullptr || !module->Error.empty()) {
 						VisualResourcesChanged = Renderer.DropShader(name) || VisualResourcesChanged;
-						if (wantedByGui) {
-							(void)Interface.DropShaderVariant(name);
-						}
-						if (wantedByPostProcess) {
+						VisualResourcesChanged = Interface.DropShaderVariant(name) || VisualResourcesChanged;
+						if (name == LastPostProcessShader) {
 							Renderer.ClearPostProcessShader();
 							VisualResourcesChanged = true;
 							LastPostProcessShader = {};
 						}
-						continue;
-					}
-
-					// **A warning and not a fatal, and the part goes on drawing with
-					// the engine's own shader.** `render/AGENTS.md` is explicit that
-					// a user shader failing is a diagnostic string - the built-in
-					// ones fail the build instead, which is where that belongs.
-					if (!module->Error.empty()) {
-						ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
+						if (module != nullptr) {
+							ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
+						}
 						continue;
 					}
 
@@ -3481,7 +3710,7 @@ namespace client {
 		// an integer compare per `EditableMesh`.
 		{
 			ENGINE_HEAP_SCOPE("client.editable");
-			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
+			Universe_->Enter(presentationWorld, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
 				const size_t meshes =
 					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(shaded, Renderer) : 0;
 				const size_t images =
@@ -3495,7 +3724,6 @@ namespace client {
 		view.Camera = Views.Camera();
 		view.Instances = drawn;
 		view.JointFrames = drawnJoints;
-		view.ForeignJointFrames = foreignJoints;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
 		if (Settings.EnableParticles) {
@@ -3515,14 +3743,42 @@ namespace client {
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
-		view.Foreign = Foreign;
 		view.Portals = Portals;
 		view.Pipeline = PipelineSelected;
-		view.World = Rendered.IsValid() ? Rendered.Index : 0;
-		view.WorldName = Rendered.IsValid() ? Universe_->NameOf(Rendered) : engine::core::Name{};
+		view.World = presentationWorld.IsValid() ? presentationWorld.Index : 0;
+		view.WorldName =
+			presentationWorld.IsValid() ? Universe_->NameOf(presentationWorld) : engine::core::Name{};
 
 		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
+		// Delegated producers answer requested cameras and own no viewer endpoints.
+		if (!PresentationLink && PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
+			Renderer.SetAnimationTime(AnimationSeconds);
+		} else if (!PresentationLink && PortalImages && Windowed) {
+			if (!ReportedJoin) {
+				auto sourceView = view;
+				sourceView.Instances = Views.Instances();
+				sourceView.JointFrames = Views.JointFrames();
+				UpdatePortalImages(
+					*Universe_,
+					*PortalImages,
+					presentationWorld,
+					sourceView,
+					{.Width = targetWidth, .Height = targetHeight},
+					Portals,
+					Surfaces,
+					Universe_->AlphaOf(presentationWorld),
+					std::chrono::steady_clock::now(),
+					Rendered
+				);
+			}
+			Renderer.SetAnimationTime(AnimationSeconds);
+			view.Portals = Portals;
+			view.Surfaces = Surfaces;
+		} else if (PortalImages) {
+			PortalImages->RemoveViewport(view.Slot);
+		}
+
 		const uint64_t viewportSignature =
 			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
@@ -3558,7 +3814,10 @@ namespace client {
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
 		damage.Objects = damage.Objects || VisualResourcesChanged;
-		damage.Scene = damage.Scene || damage.Objects || diagnosticFrame || PresentedImages < 2;
+		const bool portalUploadsPending = PortalImages && PortalImages->HasPendingUploads();
+		damage.Portals = damage.Portals || portalUploadsPending;
+		damage.Scene =
+			damage.Scene || damage.Objects || portalUploadsPending || diagnosticFrame || PresentedImages < 2;
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();
@@ -3601,7 +3860,9 @@ namespace client {
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
+			CaptureFrame(view, presentationWorld);
 			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
+			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.statistics");
@@ -3716,7 +3977,10 @@ namespace client {
 		StartDiscord();
 
 		while (Running) {
+			if (!PumpPresentationHost()) break;
 			Step();
+			PumpPlayPresentation();
+			if (PresentationLink && !PumpPresentationHost()) break;
 
 			if (Settings.MaximumFrames >= 0 && FramesDrawn >= Settings.MaximumFrames) {
 				ENGINE_INFO("frame budget of {} reached", Settings.MaximumFrames);
@@ -3731,17 +3995,22 @@ namespace client {
 				// and refuses a mock renderer to close it. The last frame's
 				// draw calls are the cheapest honest evidence that the passes
 				// are being submitted at all.
-				ENGINE_INFO(
-					"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
-					"{} surface pass(es), {} portal pass(es)",
-					Clock.Now(),
-					FramesDrawn,
-					LastFrame.DrawCalls,
-					LastFrame.Culled,
-					LastFrame.SurfaceInstances,
-					LastFrame.SurfacePasses,
-					LastFrame.PortalPasses
-				);
+				if (PresentationLink)
+					ENGINE_INFO(
+						"profiled producer for {:.1f}s over {} service frames", Clock.Now(), FramesDrawn
+					);
+				else
+					ENGINE_INFO(
+						"profiled for {:.1f}s over {} frames · {} draw call(s), {} culled, {} surfaced, "
+						"{} surface pass(es), {} portal pass(es)",
+						Clock.Now(),
+						FramesDrawn,
+						LastFrame.DrawCalls,
+						LastFrame.Culled,
+						LastFrame.SurfaceInstances,
+						LastFrame.SurfacePasses,
+						LastFrame.PortalPasses
+					);
 				break;
 			}
 		}
@@ -3769,9 +4038,10 @@ namespace client {
 			// thousands. A run whose triangle count did not move from the first
 			// is one where every `MeshId` resolved to the fallback, and that is
 			// the only cheap way to tell from a log.
-			ENGINE_INFO(
-				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
-			);
+			if (!PresentationLink)
+				ENGINE_INFO(
+					"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
+				);
 
 			// What the resident-row delta actually rewrote. The draw-order index
 			// stream is uploaded separately and is not counted here.
@@ -3977,18 +4247,5 @@ namespace client {
 			held,
 			rate
 		);
-
-		// **Drawn and never seen is the third case, and it is a framing
-		// problem rather than a replication one.** The composited camera is the
-		// demo world's: it is placed from *that* world's bounds and its far
-		// plane follows the same distance, so a replicated world larger than
-		// the demo is drawn outside a frustum sized for something else.
-		// `mono.client/AGENTS.md` records the camera of its own that fixes it.
-		if (drawn > 0) {
-			ENGINE_INFO(
-				"replica: drawn through the demo world's camera - `--view-spacing 0` overlays the two if the "
-				"replicated world is not on screen"
-			);
-		}
 	}
 }

@@ -65,7 +65,7 @@ namespace engine::scene {
 	// One shader script's text and how many times it has been written.
 	//
 	// **A revision beside the code rather than a hash of it.** A library
-	// deciding whether to recompile compares an integer per script per frame;
+	// deciding whether to recompile compares identity and revision per script;
 	// hashing the source would read every byte of every shader in the world to
 	// answer the same question, and the answer is one nobody disputes - the
 	// setter is the only thing that writes either field.
@@ -74,6 +74,11 @@ namespace engine::scene {
 	struct ShaderText {
 		// The GLSL, or empty when nothing in this world holds that name.
 		std::string Code;
+
+		// Store incarnation and generation-bearing entity, local to this process.
+		// Replacing a source or restoring a snapshot can reuse its revision.
+		uint64_t StoreIdentity = 0;
+		ecs::Entity Source = ecs::NULL_ENTITY;
 
 		// The script's revision, or zero when there is no script.
 		uint32_t Revision = 0;

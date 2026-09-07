@@ -12,10 +12,12 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -25,6 +27,7 @@
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -62,6 +65,19 @@ namespace client {
 			}
 		}
 
+		void WritePortalInputHistories(engine::core::ByteWriter &, const void *, size_t) {}
+		void WriteNativePredictions(engine::core::ByteWriter &, const void *, size_t) {}
+		void ReadNativePredictions(engine::core::ByteReader &, void *destination, size_t count) {
+			auto *predictions = static_cast<NativePlayerPrediction *>(destination);
+			for (size_t index = 0; index < count; ++index)
+				predictions[index] = {};
+		}
+		void ReadPortalInputHistories(engine::core::ByteReader &, void *destination, size_t count) {
+			auto *histories = static_cast<PortalInputHistory *>(destination);
+			for (size_t index = 0; index < count; ++index)
+				histories[index] = {};
+		}
+
 		void AdvanceLocalPlayerPrediction(
 			LocalPlayerPrediction &prediction, const engine::game::MoveInput &move, float delta
 		) {
@@ -78,17 +94,119 @@ namespace client {
 				engine::physics::Advanced(prediction.Frame, prediction.Linear, prediction.Angular, delta);
 		}
 
-		std::optional<CFrame> PredictedFrame(const Store &store, Entity entity) {
+		bool ReplayLocalPlayerInput(
+			LocalPlayerPrediction &prediction, const engine::game::MoveInput &move, float fallbackStep
+		) {
+			if (move.StepSeconds > std::numeric_limits<float>::max()) return false;
+			// Timed input retains its source clock when replay moves to another world.
+			const float step = move.StepSeconds > 0 ? static_cast<float>(move.StepSeconds) : fallbackStep;
+			AdvanceLocalPlayerPrediction(prediction, move, step);
+			return true;
+		}
+
+		std::optional<PredictionReplayClock> ReplayClock(
+			PredictionReplayClock previous,
+			const engine::script::PortalTransferMotion &motion,
+			double acknowledgedSeconds,
+			uint64_t acknowledgedThrough
+		) {
+			if (motion.SimulationSeconds == 0) {
+				if (previous.SimulationSeconds != 0) return {};
+				return PredictionReplayClock{};
+			}
+			if (previous.SimulationSeconds == 0)
+				return PredictionReplayClock{motion.SimulationSeconds, 0, motion.InputTick};
+			if (motion.SimulationSeconds <= previous.SimulationSeconds ||
+				motion.InputTick < previous.InputTick || acknowledgedThrough != motion.InputTick)
+				return {};
+			const double lead = previous.InputLeadSeconds + acknowledgedSeconds -
+								(motion.SimulationSeconds - previous.SimulationSeconds);
+			if (!std::isfinite(lead) || std::abs(lead) > std::numeric_limits<float>::max()) return {};
+			return PredictionReplayClock{motion.SimulationSeconds, lead, motion.InputTick};
+		}
+
+		void BeginTimedReplay(LocalPlayerPrediction &prediction, double lead) {
+			// The pose can cover less time than its consumed input numbers suggest.
+			// Preserve that elapsed interval with the completed motion, without
+			// triggering an acknowledged jump or changing its held direction.
+			if (lead > 0)
+				prediction.Frame = engine::physics::Advanced(
+					prediction.Frame, prediction.Linear, prediction.Angular, static_cast<float>(lead)
+				);
+		}
+
+		void ReplayTimedInput(
+			LocalPlayerPrediction &prediction, engine::game::MoveInput move, float delta, double &skip
+		) {
+			const double skipped = std::min(skip, static_cast<double>(delta));
+			skip -= skipped;
+			// Unacknowledged control edges still apply when their elapsed interval
+			// overlaps the completed pose. Only the integration time is skipped.
+			AdvanceLocalPlayerPrediction(prediction, move, static_cast<float>(delta - skipped));
+		}
+
+		constexpr float MAX_POSITION_CORRECTION_SECONDS = 1.f;
+
+		void RetainPositionCorrection(const LocalPlayerPrediction &previous, LocalPlayerPrediction &next) {
+			if (!previous.Active || previous.Player != next.Player || previous.Root != next.Root) return;
+			const auto difference = previous.Frame.Position - next.Frame.Position;
+			next.PositionCorrection = difference + previous.PositionCorrection;
+			const float distance = next.PositionCorrection.Magnitude();
+			if (!std::isfinite(distance) || distance == 0) {
+				next.PositionCorrection = {};
+				next.CorrectionSeconds = 0;
+				return;
+			}
+			if (difference.Magnitude() == 0) {
+				next.CorrectionSeconds = previous.CorrectionSeconds;
+				return;
+			}
+			// Fixed-duration large corrections can cancel walking for the whole blend.
+			// Limit their speed to half walking speed; snap corrections beyond one second.
+			const float speed = std::max(.01f, next.Humanoid.WalkSpeed * .5f);
+			next.CorrectionSeconds = std::max(.1f, distance / speed);
+			if (next.CorrectionSeconds > MAX_POSITION_CORRECTION_SECONDS) {
+				next.PositionCorrection = {};
+				next.CorrectionSeconds = 0;
+			}
+		}
+
+		void AdvancePositionCorrection(Store &store) {
+			auto *prediction = store.ResourceMutable<LocalPlayerPrediction>();
+			if (!prediction || prediction->CorrectionSeconds <= 0) return;
+			const float delta = store.Time().FrameDelta;
+			if (!std::isfinite(delta) || delta <= 0) return;
+			const float remaining = std::max(0.f, prediction->CorrectionSeconds - delta);
+			prediction->PositionCorrection =
+				prediction->PositionCorrection * (remaining / prediction->CorrectionSeconds);
+			prediction->CorrectionSeconds = remaining;
+		}
+
+		CFrame PredictionPresentationFrame(const Store &store, const LocalPlayerPrediction &prediction) {
+			const auto time = store.Time();
+			const double seconds =
+				prediction.PresentationOffsetSeconds + static_cast<double>(time.Alpha) * time.Delta;
+			auto frame = prediction.Frame;
+			if (seconds != 0 && std::isfinite(seconds) &&
+				std::abs(seconds) <= std::numeric_limits<float>::max())
+				frame = engine::physics::Advanced(
+					frame, prediction.Linear, prediction.Angular, static_cast<float>(seconds)
+				);
+			frame.Position = frame.Position + prediction.PositionCorrection;
+			return frame;
+		}
+
+		std::optional<CFrame> PredictedFrame(const Store &store, Entity entity, const CFrame &presented) {
 			const auto *prediction = store.Resource<LocalPlayerPrediction>();
 			if (prediction == nullptr || !prediction->Active) {
 				return std::nullopt;
 			}
 			if (entity == prediction->Root) {
-				return prediction->Frame;
+				return presented;
 			}
 			const auto *limb = store.Get<engine::scene::CharacterLimb>(entity);
 			if (limb != nullptr && limb->Root == prediction->Root) {
-				return prediction->Frame * limb->Offset;
+				return presented * limb->Offset;
 			}
 			return std::nullopt;
 		}
@@ -96,15 +214,18 @@ namespace client {
 		void OffsetReplicaCameraForPrediction(Store &store) {
 			const auto *prediction = store.Resource<LocalPlayerPrediction>();
 			const auto *active = store.Resource<engine::scene::ActiveCamera>();
-			if (prediction == nullptr || !prediction->Active || active == nullptr) {
+			const auto *control = store.Resource<engine::scene::CameraController>();
+			if (!prediction || !prediction->Active || !active || !control ||
+				control->Mode == engine::scene::CameraMode::Scriptable)
 				return;
-			}
-			const auto *authoritative = store.Get<Transform>(prediction->Root);
+			const Entity subject = engine::scene::CameraSubjectRoot(store, active->Entity);
+			const auto presented =
+				PredictedFrame(store, subject, PredictionPresentationFrame(store, *prediction));
+			if (!presented) return;
+			const auto *authoritative = store.Get<Transform>(subject);
 			auto *camera = store.GetMutable<Transform>(active->Entity);
-			if (authoritative == nullptr || camera == nullptr) {
-				return;
-			}
-			const engine::core::Vector3 offset = prediction->Frame.Position - authoritative->Frame.Position;
+			if (!authoritative || !camera) return;
+			const engine::core::Vector3 offset = presented->Position - authoritative->Frame.Position;
 			camera->Frame = CFrame{camera->Frame.Position + offset, camera->Frame.Rotation()};
 		}
 
@@ -240,8 +361,11 @@ namespace client {
 			// the win is real and it is bought with a change to `replication`'s
 			// public contract and a new system in the replica. Neither belongs
 			// in a loop rewrite.
+			const auto *prediction = store.Resource<LocalPlayerPrediction>();
+			const CFrame presented =
+				prediction && prediction->Active ? PredictionPresentationFrame(store, *prediction) : CFrame{};
 			store.Each<const Transform, const Bounds, const Visual>(
-				[drawList, buffer, &store, reckonSeconds](
+				[drawList, buffer, &store, reckonSeconds, &presented](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
 				) {
 					if (!visual.Visible) {
@@ -249,7 +373,7 @@ namespace client {
 					}
 
 					std::optional<CFrame> interpolated = buffer->Sample(entity);
-					const std::optional<CFrame> predicted = PredictedFrame(store, entity);
+					const std::optional<CFrame> predicted = PredictedFrame(store, entity, presented);
 					if (predicted.has_value()) {
 						interpolated = predicted;
 					}
@@ -300,10 +424,23 @@ namespace client {
 				}
 			);
 
+			engine::render::CollectSkinPalettes(store, *drawList);
+			if (!engine::scene::ContinueCameraBodyPose(
+					store, presented, drawList->Instances, drawList->JointFrames
+				))
+				engine::core::Metrics::Count("replica.body-pose.refused", 1);
+			const auto *heldBody = store.Resource<engine::scene::CameraCharacterHold>();
+			engine::scene::UpdatePortalBodyView(
+				store,
+				heldBody && heldBody->Active	   ? heldBody->SourceRoot
+				: prediction && prediction->Active ? prediction->Root
+												   : engine::ecs::NULL_ENTITY,
+				presented.Position,
+				drawList->Instances
+			);
 			engine::core::Metrics::Count(
 				"replica.instances", static_cast<double>(drawList->Instances.size())
 			);
-			engine::render::CollectSkinPalettes(store, *drawList);
 
 			// **A client sees itself in the hole too, and this is where.** The
 			// ghost is built from the list above, which holds interpolated
@@ -370,6 +507,13 @@ namespace client {
 			"client.LocalPlayerPrediction", WriteLocalPlayerPredictions, ReadLocalPlayerPredictions
 		);
 
+		engine::ecs::Components::Register<PortalInputHistory>(
+			"client.PortalInputHistory", WritePortalInputHistories, ReadPortalInputHistories
+		);
+		engine::ecs::Components::Register<NativePlayerPrediction>(
+			"client.NativePlayerPrediction", WriteNativePredictions, ReadNativePredictions
+		);
+
 		// **And the replication module's own, which nothing was doing.** A
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
 		// and one minted from the compiler's spelling is a world `Store::Save`
@@ -426,6 +570,7 @@ namespace client {
 		// the body that arrived over the wire - a client never calls
 		// `LoadCharacter`, so there is no spawn moment for it to hook.
 		scheduler.Add("replica-camera", Phase::PreRender, [](Store &store) {
+			AdvancePositionCorrection(store);
 			(void)engine::scene::UpdateCameraControl(store);
 			(void)engine::scene::FollowOwnCharacter(store);
 			(void)engine::physics::UpdatePoppercam(store);
@@ -511,7 +656,7 @@ namespace client {
 			// **Predicted, not authoritative.** The high range is the client's
 			// own and the authority never allocates from it, so this camera
 			// cannot become the same entity as something the server made.
-			camera = store.CreatePredicted("ReplicaViewer");
+			camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "ReplicaViewer");
 			if (camera == engine::ecs::NULL_ENTITY) {
 				return camera;
 			}
@@ -525,17 +670,14 @@ namespace client {
 			return camera;
 		}
 
-		// **A replica with a body of its own places its own camera**, and this
-		// must not fight it. `BuildReplicatedWorld` installs `replica-camera`,
-		// which turns with the mouse and sits behind the character the server
-		// gave this client; the frame passed in is where the *local* world is
-		// looking, which is the right answer only while there is nothing here to
-		// look at. Two writers and the last one wins, so the condition is stated
-		// rather than left to phase order.
-		if (const auto *controller = store.Resource<engine::scene::CameraController>();
-			controller != nullptr && store.Alive(controller->Subject)) {
+		// The local world's pose is only a fallback while automatic follow waits
+		// for a subject. Explicit selections and scripted cameras own their pose.
+		const auto *selection = store.Get<engine::scene::CameraSubject>(camera);
+		const auto *control = store.Resource<engine::scene::CameraController>();
+		if ((selection && !selection->Automatic) ||
+			(control && control->Mode == engine::scene::CameraMode::Scriptable) ||
+			engine::scene::CameraSubjectRoot(store, camera) != engine::ecs::NULL_ENTITY)
 			return camera;
-		}
 
 		// Guarded on the value differing, for `AimSurfaceCameras`' reason: a
 		// `Set` marks the row dirty, and a viewer that has not moved is not a
@@ -560,6 +702,7 @@ namespace client {
 		if (buffer == nullptr || tick == 0 || buffer->Holds(tick)) {
 			return;
 		}
+		buffer->RecordTick(tick);
 
 		store.Each<const Transform>([buffer, tick](Entity entity, const Transform &transform) {
 			buffer->Record(tick, entity, transform.Frame);
@@ -568,6 +711,8 @@ namespace client {
 		// The rows now hold one complete received tick. Index them once here,
 		// rather than rebuilding moving colliders at the presentation frame rate,
 		// so the local poppercam queries the same geometry the replica draws.
+		// Portal openings derive from the received links before camera queries use them.
+		(void)engine::scene::OpenPortals(store);
 		engine::physics::SyncBroadphase(store);
 	}
 
@@ -594,6 +739,9 @@ namespace client {
 			prediction = {};
 			return;
 		}
+		if (const auto *held = store.Resource<engine::scene::CameraCharacterHold>();
+			held && held->Active && local->Instance == held->Player && rig->Root == held->Root)
+			return;
 		const auto *frame = store.Get<Transform>(rig->Root);
 		const auto *humanoid = store.Get<engine::scene::Humanoid>(rig->Humanoid);
 		if (frame == nullptr || humanoid == nullptr) {
@@ -601,12 +749,18 @@ namespace client {
 			return;
 		}
 
-		if (prediction.Active && prediction.AuthorityTick == tick && prediction.Player == local->Instance &&
+		if (prediction.Active && prediction.AuthorityTick >= tick && prediction.Player == local->Instance &&
 			prediction.Root == rig->Root) {
 			return;
 		}
 
+		const auto previousPrediction = prediction;
+		const double presentationOffset =
+			prediction.Active && prediction.Player == local->Instance && prediction.Root == rig->Root
+				? prediction.PresentationOffsetSeconds
+				: 0;
 		prediction = {};
+		prediction.PresentationOffsetSeconds = presentationOffset;
 		prediction.Player = local->Instance;
 		prediction.Root = rig->Root;
 		prediction.Frame = frame->Frame;
@@ -624,14 +778,18 @@ namespace client {
 
 		const float delta = store.Time().Delta;
 		for (const engine::replication::Input &input : unconfirmed) {
-			if (input.Tick <= tick) {
-				continue;
-			}
 			engine::game::MoveInput move;
 			if (engine::game::DecodeMoveInput(input.Bytes, move)) {
-				AdvanceLocalPlayerPrediction(prediction, move, delta);
+				(void)ReplayLocalPlayerInput(prediction, move, delta);
 			}
 		}
+		RetainPositionCorrection(previousPrediction, prediction);
+	}
+
+	std::optional<CFrame> PresentedPlayerPrediction(const Store &store) {
+		const auto *prediction = store.Resource<LocalPlayerPrediction>();
+		if (!prediction || !prediction->Active) return {};
+		return PredictionPresentationFrame(store, *prediction);
 	}
 
 	void PredictLocalPlayerMove(Store &store, const engine::game::MoveInput &move, float delta) {
@@ -641,4 +799,317 @@ namespace client {
 		}
 		AdvanceLocalPlayerPrediction(*prediction, move, delta);
 	}
+	bool BeginPortalInputHistory(
+		Store &store,
+		const engine::game::PortalResume &claim,
+		const engine::scene::SeamTransform &through,
+		uint64_t submittedTick
+	) {
+		const auto finite = [](const engine::core::Vector3 &v) {
+			return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z);
+		};
+		const auto q = through.Frame.Rotation();
+		if (claim.Transfer.SourceIncarnation == 0 || claim.Transfer.Sequence == 0 ||
+			claim.DestinationIncarnation == 0 || claim.Destination.empty() || !std::isfinite(through.Scale) ||
+			through.Scale <= 0 || !finite(through.Origin) || !finite(through.Frame.Position) ||
+			!std::isfinite(glm::dot(q, q)) || std::abs(glm::dot(q, q) - 1) > .001f)
+			return false;
+		if (const auto *history = store.Resource<PortalInputHistory>(); history && history->Claim == claim)
+			return true;
+		ENGINE_PROFILE("portal input history begin");
+		PortalInputHistory history;
+		history.Claim = claim;
+		history.Through = through;
+		history.CoveredThrough = submittedTick;
+		history.LastRecordedTick = submittedTick;
+		store.SetResource(history);
+		return true;
+	}
+
+	std::optional<PortalPredictionContinuation>
+	CapturePortalPrediction(const Store &store, const engine::game::PortalResume &claim, float alpha) {
+		if (!std::isfinite(alpha) || alpha < 0 || alpha > 1) return {};
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		const auto *history = store.Resource<PortalInputHistory>();
+		const auto *prediction = store.Resource<LocalPlayerPrediction>();
+		const auto *held = store.Resource<engine::scene::CameraCharacterHold>();
+		if (!local || !history || history->Claim != claim || history->AppliedDestinationTick == 0 ||
+			!prediction || !prediction->Active || !held || !held->Active ||
+			prediction->Player != held->Player || prediction->Root != held->Root ||
+			local->Instance != held->Player)
+			return {};
+		PortalPredictionContinuation continuation;
+		continuation.CoveredThrough = history->CoveredThrough;
+		continuation.Clock = history->Clock;
+		continuation.PositionCorrection = history->Through.Carry(prediction->PositionCorrection);
+		continuation.CorrectionSeconds = prediction->CorrectionSeconds;
+		continuation.PresentationSeconds =
+			prediction->PresentationOffsetSeconds + static_cast<double>(alpha) * store.Time().Delta;
+		continuation.Inputs.reserve(history->Count);
+		for (size_t offset = 0; offset < history->Count; ++offset) {
+			const auto &input = history->Inputs[(history->Begin + offset) % PortalInputHistory::CAPACITY];
+			auto move = input.Move;
+			move.Direction = history->Through.Rotate(move.Direction);
+			move.StepSeconds = input.Delta;
+			continuation.Inputs.push_back({input.Tick, engine::game::EncodeMoveInput(move)});
+		}
+		auto &motion = continuation.Motion;
+		motion.DestinationIncarnation = claim.DestinationIncarnation;
+		motion.DestinationTick = history->AppliedDestinationTick;
+		motion.InputTick = history->LastRecordedTick;
+		motion.Frame = history->Through.Place(prediction->Frame).Orthonormalize();
+		motion.Linear = history->Through.Carry(prediction->Linear);
+		motion.Angular = history->Through.Rotate(prediction->Angular);
+		motion.WalkSpeed = history->Through.Length(prediction->Humanoid.WalkSpeed);
+		motion.JumpSpeed = history->Through.Length(prediction->Humanoid.JumpSpeed);
+		motion.Grounded = prediction->Humanoid.Grounded;
+		continuation.MoveDirection = history->Through.Rotate(prediction->Humanoid.MoveDirection);
+		if (!engine::script::ValidPortalTransferMotion(motion) ||
+			!std::isfinite(continuation.MoveDirection.Magnitude()))
+			return {};
+		return continuation;
+	}
+
+	bool AdoptPortalPrediction(
+		Store &store, Entity player, const PortalPredictionContinuation &continuation, float alpha
+	) {
+		if (!std::isfinite(alpha) || alpha < 0 || alpha > 1 ||
+			!std::isfinite(continuation.PositionCorrection.Magnitude()) ||
+			!std::isfinite(continuation.CorrectionSeconds) || continuation.CorrectionSeconds < 0 ||
+			continuation.CorrectionSeconds > MAX_POSITION_CORRECTION_SECONDS ||
+			!std::isfinite(continuation.PresentationSeconds) ||
+			!std::isfinite(continuation.Clock.SimulationSeconds) ||
+			continuation.Clock.SimulationSeconds < 0 || !std::isfinite(continuation.Clock.InputLeadSeconds) ||
+			continuation.Clock.InputTick > continuation.CoveredThrough)
+			return false;
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		const auto *rig = store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+		if (!store.AdoptOnly() || !local || local->Instance != player || !rig ||
+			!store.Has<Transform>(rig->Root) ||
+			!engine::script::ValidPortalTransferMotion(continuation.Motion) ||
+			!std::isfinite(continuation.MoveDirection.Magnitude()))
+			return false;
+		const auto *humanoid = store.Get<engine::scene::Humanoid>(rig->Humanoid);
+		if (!humanoid) return false;
+		ENGINE_PROFILE("portal prediction adopt");
+		LocalPlayerPrediction prediction;
+		prediction.Player = player;
+		prediction.Root = rig->Root;
+		prediction.Frame = continuation.Motion.Frame;
+		prediction.PositionCorrection = continuation.PositionCorrection;
+		prediction.CorrectionSeconds = continuation.CorrectionSeconds;
+		prediction.PresentationOffsetSeconds =
+			continuation.PresentationSeconds - static_cast<double>(alpha) * store.Time().Delta;
+		prediction.Linear = continuation.Motion.Linear;
+		prediction.Angular = continuation.Motion.Angular;
+		prediction.AuthorityTick = continuation.Motion.DestinationTick;
+		prediction.Humanoid = *humanoid;
+		prediction.Humanoid.MoveDirection = continuation.MoveDirection;
+		prediction.Humanoid.WalkSpeed = continuation.Motion.WalkSpeed;
+		prediction.Humanoid.JumpSpeed = continuation.Motion.JumpSpeed;
+		prediction.Humanoid.Grounded = continuation.Motion.Grounded;
+		prediction.Active = true;
+		store.SetResource(prediction);
+		if (auto *buffer = store.ResourceMutable<SnapshotBuffer>()) buffer->Predict(prediction.Root);
+		store.SetResource(
+			NativePlayerPrediction{
+				.Incarnation = continuation.Motion.DestinationIncarnation, .Clock = continuation.Clock
+			}
+		);
+		return true;
+	}
+
+	bool
+	AcceptNativePlayerMotion(Store &store, const engine::game::PlayerMotion &sample, uint64_t submittedTick) {
+		auto *native = store.ResourceMutable<NativePlayerPrediction>();
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		if (!native || !local || local->Instance != sample.Player ||
+			sample.Root == engine::ecs::NULL_ENTITY || sample.Root == sample.Player ||
+			sample.Motion.DestinationIncarnation != native->Incarnation || sample.Motion.InputTick == 0 ||
+			sample.Motion.InputTick > submittedTick ||
+			!engine::script::ValidPortalTransferMotion(sample.Motion))
+			return false;
+		if (native->Sample && (sample.Motion.DestinationTick <= native->Sample->Motion.DestinationTick ||
+							   sample.Motion.InputTick < native->Sample->Motion.InputTick))
+			return false;
+		native->Sample = sample;
+		return true;
+	}
+
+	std::optional<uint64_t> ReconcileNativePlayerPrediction(
+		Store &store, std::span<const engine::replication::Input> inputs, uint64_t coveredThrough
+	) {
+		auto *native = store.ResourceMutable<NativePlayerPrediction>();
+		if (!native || !native->Sample) return {};
+		const auto &sample = *native->Sample;
+		const auto *local = store.Resource<engine::scene::LocalPlayer>();
+		const auto *rig =
+			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, sample.Player));
+		if (!local || local->Instance != sample.Player || !rig || rig->Root != sample.Root ||
+			!store.Has<Transform>(sample.Root) || sample.Motion.InputTick < coveredThrough ||
+			sample.Motion.DestinationTick <= native->AppliedPoseTick)
+			return {};
+		const auto *humanoid = store.Get<engine::scene::Humanoid>(rig->Humanoid);
+		if (!humanoid) return {};
+		if (const auto *current = store.Resource<LocalPlayerPrediction>();
+			current && current->Active && current->Player == sample.Player && current->Root == sample.Root &&
+			current->AuthorityTick > sample.Motion.DestinationTick)
+			return {};
+		ENGINE_PROFILE("native player prediction replay");
+		LocalPlayerPrediction prediction;
+		if (const auto *current = store.Resource<LocalPlayerPrediction>();
+			current && current->Active && current->Player == sample.Player && current->Root == sample.Root)
+			prediction.PresentationOffsetSeconds = current->PresentationOffsetSeconds;
+		prediction.Player = sample.Player;
+		prediction.Root = sample.Root;
+		prediction.Frame = sample.Motion.Frame;
+		prediction.Linear = sample.Motion.Linear;
+		prediction.Angular = sample.Motion.Angular;
+		prediction.Humanoid = *humanoid;
+		prediction.Humanoid.WalkSpeed = sample.Motion.WalkSpeed;
+		prediction.Humanoid.JumpSpeed = sample.Motion.JumpSpeed;
+		prediction.Humanoid.Grounded = sample.Motion.Grounded;
+		prediction.AuthorityTick = sample.Motion.DestinationTick;
+		prediction.Active = true;
+		double acknowledgedSeconds = 0;
+		uint64_t acknowledgedThrough = native->Clock.InputTick;
+		for (const auto &input : inputs) {
+			if (input.Tick <= native->Clock.InputTick || input.Tick > sample.Motion.InputTick) continue;
+			engine::game::MoveInput move;
+			if (!engine::game::DecodeMoveInput(input.Bytes, move)) continue;
+			acknowledgedSeconds += move.StepSeconds > 0 ? move.StepSeconds : store.Time().Delta;
+			acknowledgedThrough = input.Tick;
+		}
+		auto clock = ReplayClock(native->Clock, sample.Motion, acknowledgedSeconds, acknowledgedThrough);
+		if (!clock) return {};
+		BeginTimedReplay(prediction, clock->InputLeadSeconds);
+		double skip = std::max(0.0, -clock->InputLeadSeconds);
+		for (const auto &input : inputs) {
+			if (input.Tick <= sample.Motion.InputTick) continue;
+			engine::game::MoveInput move;
+			if (!engine::game::DecodeMoveInput(input.Bytes, move)) continue;
+			if (move.StepSeconds > std::numeric_limits<float>::max()) return {};
+			const float delta =
+				move.StepSeconds > 0 ? static_cast<float>(move.StepSeconds) : store.Time().Delta;
+			ReplayTimedInput(prediction, move, delta, skip);
+		}
+		// A slow client can remain behind authority indefinitely. Rebase the
+		// uncovered time onto this completed pose after preserving pending controls.
+		clock->InputLeadSeconds += skip;
+		auto validated = sample.Motion;
+		validated.Frame = prediction.Frame;
+		validated.Linear = prediction.Linear;
+		if (!engine::script::ValidPortalTransferMotion(validated)) return {};
+		if (const auto *previous = store.Resource<LocalPlayerPrediction>())
+			RetainPositionCorrection(*previous, prediction);
+		store.SetResource(prediction);
+		if (auto *buffer = store.ResourceMutable<SnapshotBuffer>()) buffer->Predict(prediction.Root);
+		native->AppliedPoseTick = sample.Motion.DestinationTick;
+		native->AppliedInputTick = sample.Motion.InputTick;
+		native->Clock = *clock;
+		return sample.Motion.InputTick;
+	}
+
+	bool RecordPortalPredictionInput(
+		Store &store, uint64_t tick, const engine::game::MoveInput &move, float delta
+	) {
+		auto *history = store.ResourceMutable<PortalInputHistory>();
+		if (!history || history->Claim.Destination.empty() || tick <= history->LastRecordedTick ||
+			!std::isfinite(delta) || delta < 0 || !std::isfinite(move.Direction.Magnitude()) ||
+			move.Direction.Magnitude() > 1.001f)
+			return false;
+		if (history->Count == PortalInputHistory::CAPACITY) {
+			history->CoveredThrough = history->Inputs[history->Begin].Tick;
+			history->Begin = (history->Begin + 1) % PortalInputHistory::CAPACITY;
+			--history->Count;
+			++history->DiscardedInputs;
+		}
+		const auto at = (history->Begin + history->Count) % PortalInputHistory::CAPACITY;
+		history->Inputs[at] = {tick, move, delta};
+		++history->Count;
+		history->LastRecordedTick = tick;
+		engine::core::Metrics::Count("client.portal.input.copied.bytes", sizeof(PortalPredictionInput));
+		return true;
+	}
+
+	bool ReconcilePortalInputHistory(
+		Store &store,
+		const engine::game::PortalResume &claim,
+		const engine::script::PortalTransferMotion &motion
+	) {
+		auto *history = store.ResourceMutable<PortalInputHistory>();
+		auto *prediction = store.ResourceMutable<LocalPlayerPrediction>();
+		const auto *held = store.Resource<engine::scene::CameraCharacterHold>();
+		if (!history || history->Claim != claim || !prediction || !prediction->Active || !held ||
+			!held->Active || prediction->Root != held->Root || prediction->Player != held->Player ||
+			!engine::script::ValidPortalTransferMotion(motion) ||
+			motion.DestinationIncarnation != claim.DestinationIncarnation ||
+			motion.DestinationTick <= history->AppliedDestinationTick ||
+			motion.InputTick < history->CoveredThrough || motion.InputTick > history->LastRecordedTick)
+			return false;
+		ENGINE_PROFILE("portal input replay");
+		auto replayed = *prediction;
+		replayed.Frame = motion.Frame;
+		replayed.AuthorityTick = motion.DestinationTick;
+		replayed.Linear = motion.Linear;
+		replayed.Angular = motion.Angular;
+		// With no remaining inputs, the held direction still needs the same
+		// coordinate round trip as the state that replay would otherwise replace.
+		replayed.Humanoid.MoveDirection = history->Through.Rotate(replayed.Humanoid.MoveDirection);
+		replayed.Humanoid.WalkSpeed = motion.WalkSpeed;
+		replayed.Humanoid.JumpSpeed = motion.JumpSpeed;
+		replayed.Humanoid.Grounded = motion.Grounded;
+		double acknowledgedSeconds = 0;
+		uint64_t acknowledgedThrough = history->Clock.InputTick;
+		for (size_t index = 0; index < history->Count; ++index) {
+			const auto &entry = history->Inputs[(history->Begin + index) % PortalInputHistory::CAPACITY];
+			if (entry.Tick <= history->Clock.InputTick || entry.Tick > motion.InputTick) continue;
+			acknowledgedSeconds += entry.Delta;
+			acknowledgedThrough = entry.Tick;
+		}
+		auto clock = ReplayClock(history->Clock, motion, acknowledgedSeconds, acknowledgedThrough);
+		if (!clock) return false;
+		BeginTimedReplay(replayed, clock->InputLeadSeconds);
+		double skip = std::max(0.0, -clock->InputLeadSeconds);
+		for (size_t index = 0; index < history->Count; ++index) {
+			const auto &entry = history->Inputs[(history->Begin + index) % PortalInputHistory::CAPACITY];
+			if (entry.Tick <= motion.InputTick) continue;
+			auto move = entry.Move;
+			move.Direction = history->Through.Rotate(move.Direction);
+			ReplayTimedInput(replayed, move, entry.Delta, skip);
+		}
+		// A slow client can remain behind authority indefinitely. Rebase the
+		// uncovered time onto this completed pose after preserving pending controls.
+		clock->InputLeadSeconds += skip;
+		const engine::scene::SeamTransform reverse{
+			history->Through.Frame.Inverse(),
+			history->Through.Point(history->Through.Origin),
+			1 / history->Through.Scale
+		};
+		replayed.Frame = reverse.Place(replayed.Frame).Orthonormalize();
+		replayed.Linear = reverse.Carry(replayed.Linear);
+		replayed.Angular = reverse.Rotate(replayed.Angular);
+		replayed.Humanoid.MoveDirection = reverse.Rotate(replayed.Humanoid.MoveDirection);
+		replayed.Humanoid.WalkSpeed = reverse.Length(replayed.Humanoid.WalkSpeed);
+		replayed.Humanoid.JumpSpeed = reverse.Length(replayed.Humanoid.JumpSpeed);
+		auto validation = motion;
+		validation.Frame = replayed.Frame;
+		validation.Linear = replayed.Linear;
+		validation.Angular = replayed.Angular;
+		validation.WalkSpeed = replayed.Humanoid.WalkSpeed;
+		validation.JumpSpeed = replayed.Humanoid.JumpSpeed;
+		if (!engine::script::ValidPortalTransferMotion(validation)) return false;
+		RetainPositionCorrection(*prediction, replayed);
+		*prediction = replayed;
+		while (history->Count && history->Inputs[history->Begin].Tick <= motion.InputTick) {
+			history->Begin = (history->Begin + 1) % PortalInputHistory::CAPACITY;
+			--history->Count;
+		}
+		history->CoveredThrough = motion.InputTick;
+		history->AppliedInputTick = motion.InputTick;
+		history->AppliedDestinationTick = motion.DestinationTick;
+		history->Clock = *clock;
+		return true;
+	}
+
 }

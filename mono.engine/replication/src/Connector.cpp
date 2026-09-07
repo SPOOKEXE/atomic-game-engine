@@ -46,6 +46,8 @@ namespace engine::replication {
 		Phase = Stage::Greeting;
 		Turned = false;
 		Spoken = false;
+		IdentitySent = false;
+		PendingIdentity.clear();
 		Cookie_ = {};
 		Mine = {};
 		Exchange.reset();
@@ -164,27 +166,26 @@ namespace engine::replication {
 		Phase = Stage::Admitted;
 		Landed();
 
-		if (Settings.ClientIdentity == nullptr) {
-			return;
-		}
+		(void)SendIdentity(nowSeconds);
+	}
 
-		// The claim is signed over a value derived from this connection and no
-		// other, so a signature captured here proves nothing anywhere else.
-		std::array<std::byte, 2 * net::Handshake::MESSAGE_BYTES + net::Cookie::COOKIE_BYTES> binding{};
-		if (!Port->Binding(binding)) {
-			ENGINE_WARN("replication: no binding to sign an identity over - not claiming one.");
-			return;
+	bool Connector::SendIdentity(double nowSeconds) {
+		if (Phase != Stage::Admitted || !Port) return false;
+		if (!Settings.ClientIdentity || IdentitySent) return true;
+		if (PendingIdentity.empty()) {
+			std::array<std::byte, 2 * net::Handshake::MESSAGE_BYTES + net::Cookie::COOKIE_BYTES> binding{};
+			if (!Port->Binding(binding)) return false;
+			Identify claim;
+			claim.Key = Settings.ClientIdentity->Public();
+			claim.Signature = Settings.ClientIdentity->SignSessionTranscript(binding);
+			core::ByteWriter writer;
+			WriteMessage(writer, claim);
+			PendingIdentity.assign(writer.Bytes().begin(), writer.Bytes().end());
 		}
-
-		Identify claim;
-		claim.Key = Settings.ClientIdentity->Public();
-		claim.Signature = Settings.ClientIdentity->SignSessionTranscript(binding);
-
-		core::ByteWriter writer;
-		WriteMessage(writer, claim);
-		if (!Port->Send(writer.Bytes(), nowSeconds)) {
-			ENGINE_WARN("replication: the identity claim did not fit - the server may refuse us.");
-		}
+		if (!Port->Send(PendingIdentity, nowSeconds)) return false;
+		IdentitySent = true;
+		PendingIdentity.clear();
+		return true;
 	}
 
 	void
@@ -197,10 +198,9 @@ namespace engine::replication {
 	}
 
 	bool Connector::SendUser(std::span<const std::byte> message, double nowSeconds) {
-		if (Phase != Stage::Admitted) {
-			// No session to carry it on. Refused rather than queued: an outbox
-			// here would hold payloads whose meaning this module is not allowed
-			// to understand, which is the same reason `net` keeps none.
+		if (!SendIdentity(nowSeconds)) {
+			// Identity proof must enter the reliable stream before application data.
+			// The caller retains its payload while admission or send room is pending.
 			return false;
 		}
 
@@ -353,17 +353,7 @@ namespace engine::replication {
 			static_cast<Session *>(Port.get())->Link().CompleteHandshake(nowSeconds);
 			Landed();
 
-			if (Settings.ClientIdentity != nullptr) {
-				Identify claim;
-				claim.Key = Settings.ClientIdentity->Public();
-				claim.Signature = Settings.ClientIdentity->SignSessionTranscript(transcript);
-
-				core::ByteWriter writer;
-				WriteMessage(writer, claim);
-				if (!Port->Send(writer.Bytes(), nowSeconds)) {
-					ENGINE_WARN("replication: the identity claim did not fit - the server may refuse us.");
-				}
-			}
+			(void)SendIdentity(nowSeconds);
 			return;
 		}
 
@@ -486,6 +476,10 @@ namespace engine::replication {
 			}
 		}
 		Port->ClearInbound();
+		if (!SendIdentity(nowSeconds)) {
+			Port->Flush(nowSeconds);
+			return;
+		}
 
 		std::vector<std::byte> acknowledgement = Replica_.Acknowledge();
 
@@ -503,7 +497,7 @@ namespace engine::replication {
 			Port->Send(dispute, nowSeconds);
 		}
 
-		Prediction_.Reconcile(Replica_.Applied());
+		if (!PoseAcknowledgements) Prediction_.Reconcile(Replica_.ConsumedInput());
 
 		Port->Flush(nowSeconds);
 	}
@@ -547,10 +541,46 @@ namespace engine::replication {
 			// because its last flight is driven by its own timers.
 			Settle(nowSeconds);
 		}
+		(void)SendIdentity(nowSeconds);
+		(void)FlushContinuedInputs(nowSeconds);
+	}
+
+	bool Connector::ContinueInputs(std::span<const Input> inputs, uint64_t coveredThrough) {
+		if (!PoseAcknowledgements || Prediction_.RecordedThrough() != 0 || ContinuedThrough != 0 ||
+			inputs.size() > Settings.Prediction.MaximumPending)
+			return false;
+		uint64_t previous = coveredThrough;
+		for (const auto &input : inputs) {
+			if (input.Tick <= previous || input.Bytes.empty()) return false;
+			previous = input.Tick;
+		}
+		for (const auto &input : inputs)
+			Prediction_.Record(input.Tick, input.Bytes);
+		Prediction_.Reconcile(coveredThrough);
+		ContinuedThrough = previous;
+		ContinuedSentThrough = coveredThrough;
+		return true;
+	}
+
+	bool Connector::FlushContinuedInputs(double nowSeconds) {
+		if (ContinuedSentThrough >= ContinuedThrough) return true;
+		if (!SendIdentity(nowSeconds)) return false;
+		for (const auto &input : Prediction_.Pending()) {
+			if (input.Tick <= ContinuedSentThrough) continue;
+			if (input.Tick > ContinuedThrough) break;
+			core::ByteWriter writer;
+			WriteMessage(writer, input);
+			if (!Port->Send(writer.Bytes(), nowSeconds)) return false;
+			ContinuedSentThrough = input.Tick;
+		}
+		// A completed pose may already have retired inputs applied by the prior route.
+		ContinuedSentThrough = ContinuedThrough;
+		return true;
 	}
 
 	bool Connector::Submit(uint64_t tick, std::span<const std::byte> bytes, double nowSeconds) {
-		if (Port == nullptr) {
+		if (!FlushContinuedInputs(nowSeconds)) return false;
+		if (!SendIdentity(nowSeconds)) {
 			return false;
 		}
 
@@ -578,7 +608,7 @@ namespace engine::replication {
 		// format. What differs is that the server checks the sender's right to
 		// say it - see `Authority::SetOwnership` - and the client does not,
 		// because the server has no right to check.
-		if (Port == nullptr) {
+		if (!SendIdentity(nowSeconds)) {
 			return false;
 		}
 

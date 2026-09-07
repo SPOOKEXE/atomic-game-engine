@@ -99,10 +99,16 @@ int main(int argc, char **argv) {
 	arguments.Value("datastore-root", "DIR", "Persist DataStore under this root");
 	arguments.Value("datastore-environment", "mock|live", "Select the isolated DataStore environment");
 	arguments.Value("host", "NAME", "Run as a supervised host under a driver, with this name");
+	arguments.Flag("host-tick-exchange", "Use driver-controlled tick phases for a supervised host");
 	arguments.Value("world", "NAME", "A world this host was granted (repeatable, host mode only)");
 	arguments.Value("remote-world", "NAME", "Place this world in a supervised host process (repeatable)");
 	arguments.Value("worlds-per-host", "N", "Shared worlds per host process (default 8)");
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
+	arguments.Value(
+		"presentation-program",
+		"PATH",
+		"Client executable to launch for live portal images on each listening host"
+	);
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
 	arguments.Value("process-index", "N", "Stable child index assigned by a supervising driver");
@@ -328,6 +334,7 @@ int main(int argc, char **argv) {
 	}
 	if (auto host = arguments.Get("host")) {
 		options.HostName = std::string(*host);
+		options.HostTickExchange = arguments.Has("host-tick-exchange");
 		for (const std::string_view world : arguments.GetAll("world")) {
 			options.HostWorlds.emplace_back(world);
 		}
@@ -343,6 +350,9 @@ int main(int argc, char **argv) {
 		static_cast<uint32_t>(arguments.GetInteger("worlds-per-host", options.WorldsPerHost));
 	if (auto program = arguments.Get("host-program")) {
 		options.HostProgram = std::filesystem::path(*program);
+	}
+	if (auto program = arguments.Get("presentation-program")) {
+		options.PresentationProgram = std::filesystem::absolute(std::filesystem::path(*program));
 	}
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
 	if (arguments.Has("physical-core")) {

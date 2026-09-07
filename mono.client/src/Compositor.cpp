@@ -61,6 +61,13 @@ namespace client {
 		States.emplace_back(Slots.back().State);
 	}
 
+	bool Compositor::Untrack(engine::world::WorldId id) {
+		const auto removed = std::erase_if(Slots, [id](const Slot &slot) { return slot.State.Id == id; });
+		if (removed == 0) return false;
+		std::erase_if(States, [id](const ViewState &state) { return state.Id == id; });
+		return true;
+	}
+
 	Compositor::Slot *Compositor::Find(engine::world::WorldId id) {
 		const auto found = std::find_if(Slots.begin(), Slots.end(), [id](const Slot &slot) {
 			return slot.State.Id.Index == id.Index;
@@ -140,11 +147,16 @@ namespace client {
 		return slot->Channel->Publish(header, Scratch);
 	}
 
-	void Compositor::Compose(float spacing) {
+	void Compositor::Compose(float spacing, engine::world::WorldId selected) {
 		ENGINE_PROFILE_CAT("Compositor::Compose", engine::core::ProfileCategory::Render);
 
 		Combined.clear();
 		CombinedJoints.clear();
+		if (selected.IsValid()) {
+			spacing = 0;
+			ViewFrame = {};
+			ViewCamera = {};
+		}
 
 		for (size_t index = 0; index < Slots.size(); index++) {
 			Slot &slot = Slots[index];
@@ -182,8 +194,9 @@ namespace client {
 			const size_t jointCount =
 				std::min<size_t>(prefix.Joints, remaining / sizeof(engine::core::CFrame));
 			slot.State.Instances = count;
+			if (selected.IsValid() && slot.State.Id != selected) continue;
 
-			if (index == 0) {
+			if (index == 0 || selected.IsValid()) {
 				ViewFrame = prefix.Frame;
 				ViewCamera = prefix.Camera;
 			}

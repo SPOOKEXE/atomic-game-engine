@@ -181,6 +181,8 @@ namespace engine::graph {
 			bool Written = false;
 			bool ByShared = false;
 			bool ByPerView = false;
+			bool ByWorld = false;
+			bool ByFrame = false;
 		};
 	}
 
@@ -202,6 +204,10 @@ namespace engine::graph {
 			return "a shared node sits between two per-view nodes";
 		case GraphStatus::SharedWriteConflict:
 			return "a per-view node writes what a shared node writes";
+		case GraphStatus::FrameReadsWorld:
+			return "frame setup reads a resource written per world";
+		case GraphStatus::FrameWorldWriteConflict:
+			return "frame and world nodes write the same resource";
 		}
 		return "unknown";
 	}
@@ -351,15 +357,41 @@ namespace engine::graph {
 			for (const ResourceId resource : node.Writes) {
 				Producer &producer = producers[resource.Value];
 				producer.Written = true;
+				producer.ByWorld = producer.ByWorld || node.Scope == NodeScope::World;
+				producer.ByFrame = producer.ByFrame || node.Scope == NodeScope::Frame;
 				(RunsPerView(node.Scope) ? producer.ByPerView : producer.ByShared) = true;
 			}
 		}
 
 		for (const auto &[value, producer] : producers) {
+			if (producer.ByWorld && producer.ByFrame) {
+				const ResourceDesc *desc = FindResource(ResourceId{value});
+				offender = desc != nullptr ? desc->Name : core::Name{};
+				return GraphStatus::FrameWorldWriteConflict;
+			}
 			if (producer.ByShared && producer.ByPerView) {
 				const ResourceDesc *desc = FindResource(ResourceId{value});
 				offender = desc != nullptr ? desc->Name : core::Name{};
 				return GraphStatus::SharedWriteConflict;
+			}
+		}
+
+		for (const Node &node : Nodes) {
+			if (!node.Enabled) {
+				continue;
+			}
+			if (node.Scope == NodeScope::View) {
+				break;
+			}
+			if (node.Scope != NodeScope::Frame) {
+				continue;
+			}
+			for (const ResourceId resource : node.Reads) {
+				const auto producer = producers.find(resource.Value);
+				if (producer != producers.end() && producer->second.ByWorld) {
+					offender = node.Name;
+					return GraphStatus::FrameReadsWorld;
+				}
 			}
 		}
 
@@ -513,7 +545,7 @@ namespace engine::graph {
 				if (worlds[view] != distinct[world]) {
 					continue;
 				}
-				if (!ExecuteView(compiled, runner, view, world, shared)) {
+				if (!ExecuteView(compiled, runner, view, world, shared, shared && world == 0)) {
 					return false;
 				}
 				shared = false;
@@ -521,7 +553,7 @@ namespace engine::graph {
 
 			// A world with no views still runs its shared work: a headless host
 			// presenting nothing still has a world to light.
-			if (shared && !ExecuteView(compiled, runner, RunContext::WHOLE_FRAME, world, true)) {
+			if (shared && !ExecuteView(compiled, runner, RunContext::WHOLE_FRAME, world, true, world == 0)) {
 				return false;
 			}
 		}
@@ -543,13 +575,16 @@ namespace engine::graph {
 	}
 
 	bool RenderGraph::ExecuteView(
-		const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared
+		const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared, bool frame
 	) const {
+		if (frame && !shared) {
+			return false;
+		}
 		// **Shared first, and that ordering is the whole partition.** Every
 		// shared node produces something the per-view nodes may read - a shadow
 		// map is the case this was built for - so running them after would have
 		// each view sampling a target written for the frame after it.
-		if (shared && !RunBlock(compiled.Shared, runner, RunContext::WHOLE_FRAME, world)) {
+		if (shared && !RunBlock(compiled.Shared, runner, RunContext::WHOLE_FRAME, world, frame)) {
 			return false;
 		}
 
@@ -567,7 +602,7 @@ namespace engine::graph {
 	}
 
 	bool RenderGraph::RunBlock(
-		const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world
+		const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world, bool frame
 	) const {
 		for (const NodeId id : block) {
 			const Node *node = Find(id);
@@ -580,13 +615,16 @@ namespace engine::graph {
 				);
 				continue;
 			}
+			if (node->Scope == NodeScope::Frame && !frame) {
+				continue;
+			}
 
 			RunContext context;
 			context.Node = id;
 			context.Name = node->Name;
 			context.Kind = node->Kind;
 			context.View = view;
-			context.World = world;
+			context.World = node->Scope == NodeScope::Frame ? RunContext::WHOLE_FRAME : world;
 			context.Reads = node->Reads;
 			context.Writes = node->Writes;
 

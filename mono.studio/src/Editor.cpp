@@ -30,6 +30,7 @@
 #include <engine/scene/Teams.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/ui/Theme.hpp>
@@ -55,6 +56,7 @@
 #include <fstream>
 #include <imgui.h>
 #include <mutex>
+#include <network/Advert.hpp>
 #include <sstream>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
@@ -466,6 +468,11 @@ namespace studio {
 
 	void Editor::ResizeViewports(size_t extras) {
 		const size_t previous = Extras.size();
+		if (PortalImages && previous != extras) {
+			for (size_t slot = std::min(previous, extras) + 1; slot <= previous + 1; ++slot) {
+				PortalImages->RemoveViewport(slot);
+			}
+		}
 
 		Extras.resize(extras);
 		Viewers.resize(1 + extras);
@@ -753,6 +760,11 @@ namespace studio {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		if (!Universe->ConfigurePresentation(1)) {
+			Say("could not configure portal image transport", LogLevel::Error);
+			return false;
+		}
+		PortalImages = std::make_unique<engine::render::PortalImageHost>(*Universe, Renderer);
 		Commands = std::make_unique<CommandLog>(*Universe);
 		Team = std::make_unique<TeamCreate>(*Commands, *Universe);
 		InstallHistoryWatcher();
@@ -928,6 +940,7 @@ namespace studio {
 
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();
+		PortalImages.reset();
 		Universe.reset();
 
 		// Detached before the sink is dropped. The logger is process-wide and
@@ -1631,6 +1644,9 @@ namespace studio {
 	}
 
 	void Editor::ReleaseViewerCamera(size_t viewport) {
+		if (PortalImages) {
+			PortalImages->RemoveViewport(viewport);
+		}
 		if (viewport >= Viewers.size()) {
 			return;
 		}
@@ -1885,7 +1901,7 @@ namespace studio {
 		}
 
 		// **Resolved through the survey rather than by comparing names**, and it
-		// is the same correction `client::AttachForeignSurfaces` needed: a
+		// is the same correction `client::AppendForeignPortalClones` needs: a
 		// replica is registered as `"<world> (client 1)"` while the pane in it
 		// still names `"<world>"`, so a straight name comparison presented
 		// nothing and the attach that follows read a draw list nobody had built
@@ -2069,7 +2085,7 @@ namespace studio {
 		const WorldId shown =
 			drawingWorld ? (drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active)
 						 : WorldId{};
-		const WorldId visual = VisualWorldOf(shown);
+		WorldId visual = VisualWorldOf(shown);
 		if (!visual.IsValid() && LastPostProcessShader.IsValid()) {
 			Renderer.ClearPostProcessShader();
 			LastPostProcessShader = {};
@@ -2211,7 +2227,13 @@ namespace studio {
 				});
 			}
 
-			if (visual.IsValid()) {
+			if (shown.IsValid() && IsReplicaWorld(shown)) {
+				visual =
+					client::ResolveCameraPortalWorld(*Universe, shown, visual, eye, lens, PortalImages.get());
+			}
+			if (visual.IsValid() && Universe->IsRemote(visual)) {
+				ReleaseViewerCamera(DrawingViewport);
+			} else if (visual.IsValid()) {
 				// The authority receives the final client eye before its own
 				// `PreRender`, where surface cameras and the draw list are built.
 				// An authored world takes the editor eye through the same path.
@@ -2272,6 +2294,7 @@ namespace studio {
 			}
 		}
 
+		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);
 		// Remember the exact eye the texture below is rendered from. A hosted
 		// client may have moved its camera during `PreRender`; recording the eye
 		// before that phase would project overlays through the previous room.
@@ -2284,9 +2307,7 @@ namespace studio {
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
 		std::vector<engine::core::CFrame> jointFrames;
-		std::vector<engine::core::CFrame> foreignJointFrames;
 		DrawnInstances.clear();
-		ForeignInstances.clear();
 
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
@@ -2306,7 +2327,7 @@ namespace studio {
 		const bool clientPresentation = visual.IsValid() && ModeOf(visual) == RunMode::Play;
 		const bool particlesEnabled =
 			ShowParticleEmitters && (!clientPresentation || ClientSettings.EnableParticles);
-		if (visual.IsValid()) {
+		if (visual.IsValid() && !remoteEye) {
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
 				// Lighting is authored per world and Studio presents worlds without
@@ -2452,20 +2473,17 @@ namespace studio {
 						VisualResourceRevision++;
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
-							if (module == nullptr) {
+							// A removed source has no accepted module. Drop its device
+							// state; failed edits keep accepted words in ShaderLibrary.
+							if (module == nullptr || !module->Error.empty()) {
 								(void)Renderer.DropShader(shader);
-								if (shader == wantedPostProcess) {
+								if (shader == LastPostProcessShader) {
 									Renderer.ClearPostProcessShader();
 									LastPostProcessShader = {};
 								}
-								continue;
-							}
-
-							// A diagnostic and not a fatal, which is
-							// `render/AGENTS.md`'s rule for a shader somebody is
-							// writing. The part goes on drawing with the engine's.
-							if (!module->Error.empty()) {
-								ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
+								if (module != nullptr) {
+									ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
+								}
 								continue;
 							}
 
@@ -2586,7 +2604,7 @@ namespace studio {
 					);
 				}
 
-				if (shown != visual) {
+				if (shown != visual && !remoteEye) {
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
 						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
 						AppendReplicaVisualInstances(
@@ -2601,61 +2619,12 @@ namespace studio {
 			});
 		}
 
-		if (visual.IsValid()) {
-
-			// **The far world draws itself first, and this is the step that was
-			// missing.** `Universe::Present` is what runs `PreRender`, and
-			// `PreRender` is where `collect-instances` builds a world's
-			// `render::DrawList` - so a world builds a draw list exactly when
-			// somebody presents it, and until now the only world presented for a
-			// panel was the one the panel shows.
-			//
-			// A cross-world portal names a scene that is usually *not* on
-			// screen. Its list was therefore whatever it held the last time it
-			// was looked at directly: empty for a world nobody had opened, which
-			// `AttachForeignSurfaces` reads as "nothing published yet" and skips
-			// - leaving the pane showing this world, which is a mirror and is
-			// exactly the "the other side does not render" report. Or, worse,
-			// stale: a still photograph of the far world taken whenever it was
-			// last in a panel, which is the one thing `ImmersivePortals.luau`
-			// holds both worlds awake to avoid.
-			//
-			// **So the destination is presented, and it is presented here.** The
-			// far world renders itself, in its own pass, from its own camera -
-			// and what crosses to this panel is the result rather than the
-			// responsibility. `Present` runs no simulation, so this neither
-			// ticks the far world nor decides anything about it; it asks it for
-			// this frame's picture.
-			//
-			// Immediately before the attach, because the attach reads exactly
-			// what this produces - and outside the `Enter` above, for the reason
-			// the attach gives.
+		const size_t portalSourceRows = DrawnInstances.size();
+		if (visual.IsValid() && !remoteEye) {
+			// Foreground clones need destination presentation before they join this
+			// world's rows. The image host reuses those completed presentations.
 			PresentPortalDestinations(visual, frameSeconds);
-
-			// **Outside the `Enter`, because it enters other worlds.** A portal
-			// naming another scene needs that scene's draw list, and
-			// `Universe::Enter` is not re-entrant - so this is the one step that
-			// has to happen once the source store has been let go of. It fills
-			// `foreign` with the far world's instances and points the surface at
-			// a range of it; a frame with no cross-world portal in it clears
-			// `foreign` and touches nothing else.
-			//
-			// **`drawn` goes in beside it, because a hole has two mouths.** The
-			// far side of anybody standing in *this* world's pane belongs in the
-			// picture the pane shows; the near side of anybody standing in the
-			// *far* world's pane back to here belongs in this room, in front of
-			// the pane, and so on the end of this world's own rows. The second
-			// of those is what a cross-world portal was missing, and missing it
-			// is what made one draw only from A into B and never back.
-			(void)client::AttachForeignSurfaces(
-				*Universe,
-				visual,
-				DrawnInstances,
-				ForeignInstances,
-				Surfaces,
-				&jointFrames,
-				&foreignJointFrames
-			);
+			(void)client::AppendForeignPortalClones(*Universe, visual, DrawnInstances, &jointFrames);
 
 			instances = &DrawnInstances;
 		}
@@ -2709,8 +2678,6 @@ namespace studio {
 			view.Lights = Lights;
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
 			view.Slot = DrawingViewport;
-			view.Foreign = ForeignInstances;
-			view.ForeignJointFrames = foreignJointFrames;
 			view.Portals = Portals;
 			view.Pipeline = selectedPipeline;
 			view.World = visual.IsValid() ? visual.Index : 0;
@@ -2732,6 +2699,49 @@ namespace studio {
 			// renderer's state and the renderer is shared: a preview render or
 			// another panel would otherwise inherit whatever the last click left.
 			Renderer.SetUntextured(ShowColliders && ColliderHideTextures);
+		}
+
+		if (PortalImages && drawingWorld && remoteEye && shown.IsValid() && target.IsValid()) {
+			engine::render::View remote;
+			remote.CameraFrame = eye;
+			remote.Camera = lens;
+			remote.Target = view.Target;
+			remote.Slot = view.Slot;
+			const auto now = std::chrono::steady_clock::now();
+			(void)PortalImages->SubmitEye(
+				shown,
+				{Universe->NameOf(visual), visual},
+				remote,
+				{.Width = static_cast<uint32_t>(target.Width),
+				 .Height = static_cast<uint32_t>(target.Height)},
+				now
+			);
+			PortalImages->Pump(frameSeconds, 1, now);
+			remote.EyeImage = PortalImages->Image(remote.Slot, remote.EyeImageKey);
+			view = std::move(remote);
+			Renderer.SetAnimationTime(AnimationSeconds);
+		} else if (PortalImages && drawingWorld && visual.IsValid() && target.IsValid()) {
+			auto sourceView = view;
+			sourceView.Instances = std::span(DrawnInstances).first(portalSourceRows);
+			client::UpdatePortalImages(
+				*Universe,
+				*PortalImages,
+				visual,
+				sourceView,
+				{.Width = static_cast<uint32_t>(target.Width),
+				 .Height = static_cast<uint32_t>(target.Height)},
+				Portals,
+				Surfaces,
+				PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual)),
+				std::chrono::steady_clock::now()
+			);
+			Renderer.SetAnimationTime(AnimationSeconds);
+			view.Portals = Portals;
+			view.Surfaces = Surfaces;
+		} else if (PortalImages) {
+			PortalImages->RemoveViewport(DrawingViewport);
+			PortalImages->Pump(frameSeconds, 1, std::chrono::steady_clock::now());
+			Renderer.SetAnimationTime(AnimationSeconds);
 		}
 
 		const uint64_t animationSignature = Renderer.TextureAnimationSignature(AnimationSeconds);
@@ -2777,7 +2787,7 @@ namespace studio {
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
 			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
 			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
-			.Portals = !view.Portals.empty() || !view.Surfaces.empty(),
+			.Portals = view.EyeImageKey.IsValid() || !view.Portals.empty() || !view.Surfaces.empty(),
 			.GameInterface = gameInterfacePresent,
 			.HostInterface = true,
 			.ViewportGeometry = drawingWorld && target.IsValid(),
@@ -3124,26 +3134,46 @@ namespace studio {
 		// and the store being prepared cannot answer for them.
 		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
 		const double scriptTickRate = Universe->SettingsOf(id).ScriptTickRate;
-
-		Universe->Enter(id, [this, physicsTickRate, scriptTickRate](Store &store, Scheduler &systems) {
-			PrepareWorld(store, systems);
-
-			// After `PrepareWorld`, because that is what gives the world the
-			// clock this writes to.
-			engine::physics::SetPhysicsTickRate(store, physicsTickRate);
-			engine::script::SetScriptTickRate(store, scriptTickRate);
-
-			// **The meshes this session has already taken in.** Content arrives
-			// into the worlds that are open at the time, so a world created or
-			// opened afterwards holds parts naming a mesh whose shape it has
-			// never heard of - and a collider that cannot resolve its geometry
-			// falls back to the part's bound in silence. `ContentShapes` is the
-			// same argument `ContentMeshFacts` makes, one layer down.
-			engine::game::MergeCollisionShapes(store, ContentShapes);
-			for (const auto &[name, animation] : ContentAnimationFacts) {
-				(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
-			}
+		uint64_t portalIncarnation = 0;
+		Universe->Enter(id, [&](const Store &store) {
+			portalIncarnation = engine::script::PortalTransferIncarnation(store);
 		});
+		if (portalIncarnation == 0) {
+			// Host setup supplies entropy once. Snapshots retain this token, while
+			// a recreated world receives a new one even when its name/index is reused.
+			const auto session = network::SessionId::Draw();
+			engine::core::ByteReader bytes(session.Value);
+			portalIncarnation = bytes.ReadUInt64();
+			if (portalIncarnation == 0) {
+				Say("could not assign a portal world incarnation", LogLevel::Error);
+			}
+		}
+
+		Universe->Enter(
+			id, [this, physicsTickRate, scriptTickRate, portalIncarnation](Store &store, Scheduler &systems) {
+				PrepareWorld(store, systems);
+				if (portalIncarnation != 0 &&
+					!engine::script::ConfigurePortalTransfers(store, portalIncarnation)) {
+					ENGINE_ERROR("could not configure portal transfers for '{}'", store.Name());
+				}
+
+				// After `PrepareWorld`, because that is what gives the world the
+				// clock this writes to.
+				engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+				engine::script::SetScriptTickRate(store, scriptTickRate);
+
+				// **The meshes this session has already taken in.** Content arrives
+				// into the worlds that are open at the time, so a world created or
+				// opened afterwards holds parts naming a mesh whose shape it has
+				// never heard of - and a collider that cannot resolve its geometry
+				// falls back to the part's bound in silence. `ContentShapes` is the
+				// same argument `ContentMeshFacts` makes, one layer down.
+				engine::game::MergeCollisionShapes(store, ContentShapes);
+				for (const auto &[name, animation] : ContentAnimationFacts) {
+					(void)engine::render::RecordAnimation(store, engine::core::Name::FromId(name), animation);
+				}
+			}
+		);
 	}
 
 	void Editor::NewGame() {
@@ -3343,6 +3373,9 @@ namespace studio {
 		engine::game::GameInfo info;
 		std::string error;
 
+		if (PortalImages) {
+			PortalImages->Clear();
+		}
 		if (!engine::game::LoadGame(*Universe, path, info, error)) {
 			const std::vector<WorldId> remaining = Universe->Worlds();
 			if (std::find(remaining.begin(), remaining.end(), Active) == remaining.end()) {
@@ -4739,6 +4772,9 @@ namespace studio {
 	}
 
 	void Editor::ReleaseWorldResidency(WorldId world) {
+		if (PortalImages) {
+			PortalImages->RemoveWorld(world);
+		}
 		if (Universe == nullptr || !world.IsValid()) {
 			return;
 		}

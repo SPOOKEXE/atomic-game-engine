@@ -182,7 +182,13 @@ namespace engine::scene {
 		if (held == nullptr) {
 			return {};
 		}
-		return ShaderText{.Code = held->Code, .Revision = held->Revision, .Found = true};
+		return ShaderText{
+			.Code = held->Code,
+			.StoreIdentity = store.Identity(),
+			.Source = script,
+			.Revision = held->Revision,
+			.Found = true
+		};
 	}
 
 	ShaderText LensShaderTextOf(ecs::Store &store, const core::Name &name) {
@@ -195,7 +201,13 @@ namespace engine::scene {
 		if (held == nullptr) {
 			return {};
 		}
-		return ShaderText{.Code = held->Code, .Revision = held->Revision, .Found = true};
+		return ShaderText{
+			.Code = held->Code,
+			.StoreIdentity = store.Identity(),
+			.Source = shader,
+			.Revision = held->Revision,
+			.Found = true
+		};
 	}
 
 	bool SetShaderSource(ecs::Store &store, ecs::Entity script, std::string_view code) {

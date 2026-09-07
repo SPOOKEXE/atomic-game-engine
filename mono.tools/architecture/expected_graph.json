@@ -323,7 +323,8 @@
         "resources",
         "scene",
         "spatial",
-        "ui"
+        "ui",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -420,7 +421,8 @@
         "parallel",
         "resources",
         "scene",
-        "spatial"
+        "spatial",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -645,7 +647,8 @@
         "render",
         "resources",
         "scene",
-        "spatial"
+        "spatial",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
@@ -766,7 +769,8 @@
         "resources",
         "scene",
         "spatial",
-        "ui"
+        "ui",
+        "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },

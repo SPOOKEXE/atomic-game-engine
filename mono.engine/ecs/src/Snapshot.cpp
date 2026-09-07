@@ -157,6 +157,7 @@ namespace engine::ecs {
 			writer.WriteBool(state.Directory.Live(index));
 		}
 
+		state.Directory.WriteAllocationState(writer);
 		writer.WriteRaw(body.Bytes().data(), body.Size());
 		return true;
 	}
@@ -245,6 +246,11 @@ namespace engine::ecs {
 			return false;
 		}
 		state.Directory.FinishRestore(static_cast<size_t>(issued), static_cast<size_t>(predicted));
+		if (!state.Directory.ReadAllocationState(reader)) {
+			ENGINE_ERROR("store '{}': snapshot has invalid allocation state.", name);
+			ClearWorld(state);
+			return false;
+		}
 
 		const uint32_t tableCount = reader.ReadUInt32();
 		for (uint32_t index = 0; index < tableCount && !reader.Failed(); index++) {
@@ -333,7 +339,7 @@ namespace engine::ecs {
 		return true;
 	}
 
-	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode) {
+	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode, ApplyClock clock) {
 		// Read into a scratch world first, so a corrupt snapshot cannot leave
 		// the live one half-merged. The live world is only touched once the
 		// whole thing has parsed.
@@ -448,7 +454,9 @@ namespace engine::ecs {
 		}
 
 		// --- resources and the clock ---
+		const ComponentId time = Components::Of<WorldTime>();
 		for (const auto &entry : scratch.Resources.Entries()) {
+			if (clock == ApplyClock::PreserveLocal && entry.Index == time.Index) continue;
 			SetResourceValue(state, ComponentId{entry.Index}, entry.Storage.At(0));
 		}
 

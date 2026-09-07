@@ -122,7 +122,7 @@ mono_add_library(client
 	# signature is the same fact `input/CMakeLists.txt` states for `Translate.hpp`.
 	# If `Engine::input` ever stops being public about SDL, this line becomes
 	# `VENDOR_PUBLIC` in the same commit.
-	VENDOR SDL3::SDL3
+	VENDOR SDL3::SDL3 Vendor::json
 )
 
 mono_add_program(client
@@ -149,3 +149,7 @@ mono_add_program(client
 	# because nothing here hosts a server - and an escape that is not currently
 	# needed is an escape somebody will eventually use for something else.
 )
+
+if(TARGET test_client)
+	add_dependencies(test_client client)
+endif()

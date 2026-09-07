@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "projection.glsl"
 
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outLinear;
@@ -15,6 +18,7 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 OutdoorAmbient;
 	vec4 Direct;
 	vec4 Eye;
+	vec4 CameraDepth;
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Shadow;
@@ -22,10 +26,9 @@ layout(set = 3, binding = 0) uniform Pass {
 
 void main() {
 	float raw = texture(depthImage, inUv * pass.Target.zw).r;
-	float nearPlane = pass.Planes.x;
 	float farPlane = pass.Planes.y;
 	float linear = raw >= 1.0
-		? farPlane
-		: (nearPlane * farPlane) / max(farPlane - raw * (farPlane - nearPlane), 1e-6);
+		? (pass.Direction.w > 0.5 ? 0.0 : farPlane)
+		: dot(pass.CameraDepth, vec4(WorldAtHardwareDepth(pass.InverseViewProjection, inUv, raw), 1.0));
 	outLinear = vec4(linear);
 }

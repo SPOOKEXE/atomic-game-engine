@@ -126,6 +126,14 @@ namespace engine::ecs {
 			return StoreName;
 		}
 
+		// Process-local storage incarnation for caches holding entity identities.
+		// Changes on construction, Clear, Load, LoadContents and successful Apply.
+		// Load clears storage even on failure, so every load attempt invalidates it.
+		// Ordinary component writes preserve it. Never serialize it as a world name.
+		uint64_t Identity() const {
+			return Incarnation;
+		}
+
 		// --- affinity ------------------------------------------------------
 
 		// Hands the store to the calling thread. Called by whatever ticks it.
@@ -1209,9 +1217,16 @@ namespace engine::ecs {
 		// @param value    The value to write.
 		// @param bytes    The size of `value`, which must match the descriptor.
 		// @return `false` when there is no such property, the size disagrees,
-		//         the property is read-only, this store is adopt-only, or the
+		//         the property is read-only, replica authority refuses the write, or the
 		//         instance does not carry what the conversion writes.
+		//         In replicas, only PredictedWritable properties on live predicted
+		//         instances accept runtime writes.
 		bool SetProperty(Entity instance, core::Name property, const void *value, size_t bytes);
+
+		// Restores a document reference using its optional restoration callback.
+		// Ordinary property type, writability and store authority checks apply.
+		// @return false when lookup or target validation refuses the reference.
+		bool RestoreReference(Entity instance, core::Name property, Entity target);
 
 		// The named form of `SetPropertyAuthored`.
 		//
@@ -1269,7 +1284,7 @@ namespace engine::ecs {
 		// @param value      The value to write.
 		// @param bytes      The size of `value`, which must match the descriptor.
 		// @return `false` when the size disagrees, the property is read-only,
-		//         this store is adopt-only, the value is not a member of the
+		//         replica authority refuses the write, the value is not a member of the
 		//         named enum, or the instance does not carry what the conversion
 		//         writes.
 		// @since v0.8
@@ -2073,8 +2088,9 @@ namespace engine::ecs {
 		//
 		// @param reader The snapshot to apply.
 		// @param mode   What to do with entities the snapshot does not mention.
+		// @param clock  Restore saved time, or preserve this world's clock for replicated state.
 		// @return `false` when the snapshot could not be read.
-		bool Apply(core::ByteReader &reader, ApplyMode mode);
+		bool Apply(core::ByteReader &reader, ApplyMode mode, ApplyClock clock = ApplyClock::RestoreSnapshot);
 
 		// Empties the world: every entity, table, resource and name.
 		//
@@ -2121,7 +2137,7 @@ namespace engine::ecs {
 		// loads cleanly and runs the wrong programs. Same shape as 3, one type
 		// along, and refused for the same reason: a length prefix read as a
 		// four-byte id consumes the values behind it.
-		static constexpr uint32_t SNAPSHOT_VERSION = 6;
+		static constexpr uint32_t SNAPSHOT_VERSION = 7;
 
 		// The number of tables this world holds.
 		//
@@ -2420,7 +2436,8 @@ namespace engine::ecs {
 			const PropertyDescriptor &descriptor,
 			const void *value,
 			size_t bytes,
-			bool authored
+			bool authored,
+			bool restoreReference = false
 		);
 
 		// The body of both named-create paths.
@@ -2464,6 +2481,7 @@ namespace engine::ecs {
 		// would have needed anyway.
 		StoreState *State = nullptr;
 		std::string StoreName;
+		uint64_t Incarnation = 0;
 		std::atomic<uintptr_t> Owner;
 	};
 }

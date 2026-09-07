@@ -1438,6 +1438,8 @@ declare extern type Instance with
 	function Equals(self, other: Instance): boolean
 	function GetPlayerFromCharacter(self, character: Instance): Instance?
 	function LoadCharacter(self): Instance?
+	function AddAccessory(self, accessory: Instance): boolean
+	function CutTo(self, frame: CFrame): boolean
 	function KeepWorldAwake(self, reason: string): ()
 	function LetWorldSleep(self): ()
 	function IsKeepingWorldAwake(self): boolean
@@ -1584,6 +1586,9 @@ declare extern type Tool extends Model with
 	Grip: CFrame
 end
 
+declare extern type Accessory extends Model with
+end
+
 declare extern type MeshPart extends BasePart with
 	EmissiveMap: string
 	HeightMap: string
@@ -1602,6 +1607,8 @@ declare extern type SkinnedMeshPart extends MeshPart with
 end
 
 declare extern type Camera extends PVInstance with
+	CameraSubject: Instance
+	CameraSubjectAutomatic: boolean
 	FarPlaneZ: number
 	FieldOfView: number
 	ImageHeight: number
@@ -1660,6 +1667,7 @@ declare extern type Humanoid extends Instance with
 	JumpPower: number
 	MaxHealth: number
 	MoveDirection: Vector3
+	RootPart: Instance
 	WalkSpeed: number
 end
 
@@ -3179,6 +3187,7 @@ type CreatableInstances = {
 	BreakGroup: BreakGroup,
 	WorldModel: WorldModel,
 	Tool: Tool,
+	Accessory: Accessory,
 	MeshPart: MeshPart,
 	SkinnedMeshPart: SkinnedMeshPart,
 	Camera: Camera,

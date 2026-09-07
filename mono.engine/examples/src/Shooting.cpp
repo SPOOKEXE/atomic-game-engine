@@ -22,6 +22,7 @@ namespace engine::examples {
 		writer.WriteFloat(shot.Aim.Direction.Y);
 		writer.WriteFloat(shot.Aim.Direction.Z);
 		writer.WriteFloat(shot.Range);
+		writer.WriteDouble(shot.ViewTick);
 
 		const std::span<const std::byte> bytes = writer.Bytes();
 		return {bytes.begin(), bytes.end()};
@@ -38,12 +39,14 @@ namespace engine::examples {
 		shot.Aim.Direction.Y = reader.ReadFloat();
 		shot.Aim.Direction.Z = reader.ReadFloat();
 		shot.Range = reader.ReadFloat();
+		shot.ViewTick = reader.ReadDouble();
 
 		if (reader.Failed() || reader.Remaining() != 0) {
 			// The payload must contain exactly one shot.
 			return false;
 		}
-		if (!Finite(shot.Aim.Origin) || !Finite(shot.Aim.Direction) || !std::isfinite(shot.Range)) {
+		if (!Finite(shot.Aim.Origin) || !Finite(shot.Aim.Direction) || !std::isfinite(shot.Range) ||
+			!std::isfinite(shot.ViewTick) || shot.ViewTick < 0) {
 			return false;
 		}
 		if (shot.Range <= 0.0f || shot.Range > MAXIMUM_SHOT_RANGE) {

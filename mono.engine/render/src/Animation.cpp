@@ -171,7 +171,7 @@ namespace engine::render {
 		store.Each<const scene::Animator>([&](ecs::Entity animator, const scene::Animator &) {
 			const ecs::Entity rig = scene::RigFor(store, animator);
 			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(rig);
-			if (skeleton == nullptr) {
+			if (skeleton == nullptr || !std::isfinite(skeleton->PoseScale) || skeleton->PoseScale <= 0) {
 				return;
 			}
 
@@ -198,7 +198,8 @@ namespace engine::render {
 				if (bone == nullptr || bone->Joint >= skeleton->JointCount) {
 					return;
 				}
-				const core::CFrame pose = PoseOf(bone->Joint, tracks);
+				core::CFrame pose = PoseOf(bone->Joint, tracks);
+				pose.Position = pose.Position * skeleton->PoseScale;
 				if (!Same(pose, bone->Transform)) {
 					store.GetMutable<scene::Bone>(entity)->Transform = pose;
 					written++;

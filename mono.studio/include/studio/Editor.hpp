@@ -57,6 +57,7 @@
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
@@ -3610,6 +3611,7 @@ namespace studio {
 		// wherever this object was declared. Same reason `client::Client` holds
 		// its own that way.
 		std::unique_ptr<engine::world::Universe> Universe;
+		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
 
 		// Undo and redo. Held the same way and for a narrower version of the
 		// same reason: it binds to the universe above, so it cannot exist before
@@ -3762,30 +3764,12 @@ namespace studio {
 		// `client::CollectPortalViews`.
 		std::vector<engine::render::PortalView> Portals;
 
-		// The rest of what a frame is made of, and the editor was handing the
-		// renderer none of it.
-		//
-		// **`render::View` has eight spans and this program filled four.** The
-		// instances, the surface cameras, the foreign rows and the portals were
-		// there; the particles, the beams and trails, and the *lights* were not,
-		// and an omitted span is an empty span rather than an error. So every
-		// `ParticleEmitter` in the editor emitted into nothing, every `Beam` and
-		// `Trail` drew nothing, and any scene lit by `PointLight`s alone
-		// rendered black - each of which reads as a broken feature rather than
-		// as a caller that never asked. `client::Client` collects all of them
-		// and this class is a second, thinner copy of the same frame; these are
-		// the rows that were missing from the copy.
-		//
-		// Rebuilt per frame from the world being drawn, for `Surfaces`' reason:
-		// a script can create or destroy any of them at any point in a run, and
-		// a list assembled from what is in the world is also what makes a
-		// deleted emitter stop being drawn.
+		// Effects and lights collected from the presented world for this viewport.
 		//@{
 		// Boundary copies retained between frames. The stores own the source
 		// rows; Studio owns only these one-frame snapshots, whose capacity stays
 		// warm when a million-row scene is presented repeatedly.
 		std::vector<engine::scene::DrawInstance> DrawnInstances;
-		std::vector<engine::scene::DrawInstance> ForeignInstances;
 		engine::render::ParticleFrame Particles;
 
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;

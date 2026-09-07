@@ -97,6 +97,45 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
 }
 
+TEST_CASE("depth exports preserve the lighting depth singleton", "[render][graph][depth-export]") {
+	using namespace engine::graph;
+	for (const bool zeroBackground : {false, true}) {
+		const auto base = DefaultPbrDocument();
+		PipelineDocument document;
+		for (const auto &edit : base.Edits()) {
+			if (edit.Kind == EditKind::AddNode && edit.Name == Name("present")) {
+				document.Record(
+					{.Kind = EditKind::AddResource,
+					 .Name = Name("export-depth"),
+					 .Resource = ResourceKind::Colour,
+					 .Format = ResourceFormat::R32F}
+				);
+				document.Record(
+					{.Kind = EditKind::AddNode,
+					 .Name = Name("export-linearise"),
+					 .NodeKind = Name("depth-linearise"),
+					 .Scope = NodeScope::View}
+				);
+				document.Record({.Kind = EditKind::Reads, .Target = Name("depth"), .Key = Name("depth")});
+				document.Record(
+					{.Kind = EditKind::Writes, .Target = Name("export-depth"), .Key = Name("linear")}
+				);
+				document.Record(
+					{.Kind = EditKind::Set,
+					 .Key = Name("background"),
+					 .Value = zeroBackground ? "zero" : "far"}
+				);
+			}
+			document.Record(edit);
+		}
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+		Renderer renderer;
+		CHECK(renderer.SetPipeline(Name("export#1"), graph) == zeroBackground);
+	}
+}
+
 TEST_CASE("built-in capability fallbacks compile into the graph backend", "[render][graph]") {
 	Renderer renderer;
 	for (const auto &[name, document] : {
@@ -192,6 +231,35 @@ TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
 
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
+}
+
+TEST_CASE("frame setup can feed a view before final frame inspection", "[render][graph][frame-prefix]") {
+	RenderGraph graph;
+	const auto resident =
+		graph.AddResource({.Name = Name("resident"), .Kind = engine::graph::ResourceKind::Storage});
+	const auto visible =
+		graph.AddResource({.Name = Name("visible"), .Kind = engine::graph::ResourceKind::Storage});
+	graph.AddNode({
+		.Name = Name("setup"),
+		.Kind = Name("dispatch"),
+		.Writes = {resident},
+		.Scope = engine::graph::NodeScope::Frame,
+	});
+	graph.AddNode({
+		.Name = Name("view"),
+		.Kind = Name("dispatch"),
+		.Reads = {resident},
+		.Writes = {visible},
+		.Scope = engine::graph::NodeScope::View,
+	});
+	graph.AddNode({
+		.Name = Name("inspection"),
+		.Kind = Name("viewer"),
+		.Reads = {visible},
+		.Scope = engine::graph::NodeScope::Frame,
+	});
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("frame-setup#1"), graph));
 }
 
 TEST_CASE("blit owns its target format at the installation boundary", "[render][graph]") {

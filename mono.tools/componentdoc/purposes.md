@@ -40,10 +40,12 @@ effects.Texture | A tiled image projected onto one face of its parent BasePart, 
 examples.Orbit | Demo-only component that carries an entity round a fixed centre at a set radius, height, starting phase and angular speed.
 examples.Spin | Demo-only component that turns an entity at a fixed rate about its local X, Y and Z axes.
 graph.PipelineSet | Per-world singleton holding the named render pipeline documents a game file carried. A legacy load path: `game` reads it once and then removes it.
+physics.CopiedContactCache | Per-tick copied contact geometry and pre-step body poses used for portal collision correction.
 physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
+script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
 script.CodeSourceContainerSelector | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau.
 script.Disabled | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all.
 script.JavaScriptSourceContainer | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column.
@@ -53,6 +55,7 @@ script.ScriptClock | Per-world singleton script clock: the update rate, simulate
 script.SourceCache | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap.
 script.TeleportRequestHandler | Per-world singleton holding the `TeleportService.TeleportRequested` callback that decides whether the server processes a requested teleport. Transient, because a restored world must not revive a host callback.
 script.TeleportRequestOutbox | Per-world singleton FIFO of local teleport requests waiting for the client to send, with the next monotonic request id. Transient, because an old request must not send after a world is restored.
+world.TickExchangeEndpoints | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries.
 world.BusBudget | Per-world singleton capping bus traffic: how many requests this world may make per tick, and how many it has spent since the last barrier.
 world.Inbox | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to.
 world.Outbox | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them.
@@ -60,6 +63,8 @@ world.Replica | Marks a world as a mirror of one the server owns, naming the wor
 
 ## `scene`
 
+scene.CameraPortalView | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses.
+scene.CameraCharacterHold | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending.
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.
 scene.AnimationBuffer | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit.
 scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
@@ -73,12 +78,13 @@ scene.AwakeWorld | Held by an entity that wants the world to keep ticking, with 
 scene.Bounds | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it.
 scene.Bone | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot.
 scene.Camera | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world.
+scene.CameraSubject | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current.
 scene.Clouds | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only.
 scene.CloudCompute | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture.
 scene.Constraint | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row.
 scene.JointInstance | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld.
 scene.WeldConstraint | A direct rigid link between two parts whose initial relative frame is captured by the physics world.
-scene.CameraController | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override.
+scene.CameraController | Resource: how this viewer's own eye is driven - orbit angles and distance, zoom and sensitivity limits, camera mode, the poppercam distance override, and the resolved subject's observed portal transit.
 scene.Character | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here.
 scene.CharacterChanges | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals.
 scene.CharacterLimb | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick.
@@ -149,6 +155,7 @@ scene.Vector3Value | The vector stored by a `Vector3Value` instance.
 scene.Terrain | Resource: how a world's ground is generated - the node graph, the seed, chunk extent and resolution, vertical extent and how far chunks are kept. The recipe is stored and the ground it makes never is.
 scene.TextureCatalogue | Resource: the flipbook facts - grid, frame count and rate - the content pump learned about each loaded texture.
 scene.Tool | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn.
+scene.Accessory | On an accessory: the matching handle and character attachment references. The hierarchy determines equip state; the pose pass carries its handle as one CharacterLimb.
 scene.Transform | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads.
 scene.Transient | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`.
 scene.VectorField2D | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
@@ -209,3 +216,6 @@ gui.Surface | What a `SurfaceGui` adds: the adornee part and which face, how the
 gui.TableLayout | `UITableLayout`: lays the parent's children out as rows and their children as cells, so one column is the same width in every row.
 gui.TextSizeLimits | `UITextSizeConstraint`: clamps the pixel size a scaled label may pick between a floor and a ceiling.
 gui.Viewport | What a `ViewportFrame` renders into itself: the camera to render from, the frame's own ambient and directional light, and a tint over the result.
+
+script.PortalPlayerInput | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue.
+script.PortalTransfers | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages.

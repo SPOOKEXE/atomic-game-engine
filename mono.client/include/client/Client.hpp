@@ -14,6 +14,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Content.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
@@ -25,6 +26,7 @@
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
@@ -32,9 +34,12 @@
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/HostLink.hpp>
+#include <engine/world/PresentationStream.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <client/Actions.hpp>
@@ -125,9 +130,16 @@ namespace client {
 		//
 		// @return `true` when the client is ready to run.
 		bool FinishStartup();
+		bool InitialisePresentationHost();
+		bool PumpPresentationHost();
+		void ResetPlayPresentation();
+		void PumpPlayPresentation();
+		bool ReceivePlayPresentation(std::span<const std::byte> message);
+		void ClearPlayPresentationRoutes();
 
 		void PumpEvents();
 		void Step();
+		void CaptureFrame(const engine::render::View &view, engine::world::WorldId inputWorld);
 		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
 		// asked to check and could not.
@@ -315,7 +327,20 @@ namespace client {
 		// Takes one tick's worth of what the server sent.
 		//
 		// @param nowSeconds The current time.
-		void PollServer(double nowSeconds);
+		void PollServer(double nowSeconds, bool presentationReady);
+		void ReceiveServerMessage(std::span<const std::byte> message);
+		bool ReceivePortalSession(const engine::game::PortalSessionMessage &message);
+		void PumpPortalSuccessor(double nowSeconds, bool presentationReady);
+		bool PortalSuccessorDrawable();
+		bool WaitingForPortalViews() const;
+		bool PreparePortalEye(
+			engine::render::View &view,
+			engine::world::WorldId inputWorld,
+			uint32_t width,
+			uint32_t height,
+			bool prepareNative = false
+		);
+		void DropPortalReplica(engine::world::WorldId world);
 
 		// Copies this frame's keyboard and pointer onto a world's `InputState`.
 		//
@@ -340,6 +365,7 @@ namespace client {
 		//
 		// @param nowSeconds The current time.
 		void SubmitMove(double nowSeconds);
+		std::optional<uint64_t> InputTickAt(uint64_t localTick) const;
 
 		// Gathers what the F4 panel shows, and moves the rate window on.
 		//
@@ -541,6 +567,12 @@ namespace client {
 		// construction, and that thread is decided in Initialise rather than
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
+		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
+		std::unique_ptr<engine::world::HostLink> PresentationLink;
+		bool PresentationHostReady = false;
+		std::unique_ptr<engine::world::PresentationStream> PlayPresentation;
+		uint64_t PlayDirectorySession = 0, PlayDirectoryRevision = 0;
+		uint64_t PlayRoutesRevision = 0;
 
 		// The loopback MCP surface. It registers nothing and opens no socket when
 		// `Options::ControlPort` is negative.
@@ -632,6 +664,43 @@ namespace client {
 		// The connector borrows this move-only secret for the session lifetime.
 		std::optional<engine::assets::SigningKey> ClientIdentity;
 		std::unique_ptr<engine::replication::Connector> Connection;
+		engine::net::Endpoint ConnectedServer;
+		struct PortalSuccessor {
+			engine::game::PortalSessionMessage Offer;
+			std::optional<engine::game::PortalSessionMessage> Following;
+			engine::net::Endpoint Endpoint;
+			engine::world::WorldId World;
+			std::unique_ptr<engine::net::Transport> Socket;
+			std::unique_ptr<engine::replication::Connector> Connection;
+			std::optional<engine::scene::CameraContinuation> Camera;
+			std::optional<engine::script::PortalTransferMotion> Motion;
+			// Source-world provenance for the copied camera, never sent to the successor.
+			engine::ecs::Entity SourceCamera;
+			engine::ecs::Entity SourceSubject;
+			std::optional<engine::game::ContentDirectory> Directory;
+			std::unique_ptr<engine::world::PresentationStream> Presentation;
+			std::optional<engine::world::PresentationDirectory> PresentationRoutes;
+			bool PresentationAnnounced = false;
+			engine::ecs::Entity Player;
+			double Deadline = 0;
+			double AdmissionRetryAt = 0;
+			double CancellationRetryAt = 0;
+			double ReconnectAt = 0;
+			bool DrawingArrivedPlayer = false;
+			bool ProceedSent = false;
+			bool Crossed = false;
+			bool ResumeSent = false;
+			bool Ready = false;
+			bool CommitSent = false;
+			bool Committed = false;
+			bool Refused = false;
+			std::string Failure;
+		};
+		std::unique_ptr<PortalSuccessor> PortalNext;
+		uint64_t NextPortalReplica = 1;
+		engine::core::Name PortalEyeDestinations[2];
+		// Initial entry waits once; body-world adoption preserves this viewport lifetime.
+		bool InitialPortalViewsReady = false;
 
 		// How this client finds a session, when it was not told an address.
 		// Null unless `--browse` or `--rendezvous` was given.
@@ -806,6 +875,13 @@ namespace client {
 		// arriving both look like "nothing happened" from outside, and they want
 		// completely different investigations.
 		bool ReportedAdmission = false;
+		bool FreshAdmissionSent = false;
+
+		// One input timeline survives replica replacement. The epochs map the
+		// current replica's clock without changing that world's simulation time.
+		uint64_t SubmittedMoveTick = 0;
+		uint64_t InputLocalEpoch = 0;
+		uint64_t InputSequenceEpoch = 0;
 
 		// Whether F4 has already said there is no network to show. Once, not
 		// once per press.
@@ -843,15 +919,6 @@ namespace client {
 		// leave alone, or the pane would be drawn twice from two different
 		// viewpoints. See `render::PortalView`.
 		std::vector<engine::render::PortalView> Portals;
-
-		// Another world's rows, for a pane that shows one.
-		//
-		// **The standalone client did not assemble these at all until v0.15**,
-		// which meant a `Portal::DestinationWorld` pane worked in the studio and
-		// showed its own world here - a mirror where a window was authored, with
-		// nothing in any log to say so. `client::AttachForeignSurfaces` fills it
-		// and points the pane's `SurfaceView` at a range of it.
-		std::vector<engine::scene::DrawInstance> Foreign;
 
 		// This world's rows with the far side of anybody standing in one of its
 		// cross-world panes appended.

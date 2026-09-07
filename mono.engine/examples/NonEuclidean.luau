@@ -1,52 +1,13 @@
 --!strict
--- Six impossible spaces, side by side, each one a different trick.
---
--- `Portals-1-world.luau` shows *that* a hole can lead somewhere the wall does
--- not. This shows what that is good for: a tunnel shorter inside than out, one
--- longer inside than out, a house with a room that is not there, a pillar you
--- can walk around for ever, a hill you climb by going down, and a room holding
--- four times its own volume.
---
--- **Every one of them is the same feature and none costs more than the others.**
--- A `Portal` is a `SurfaceCamera` with a `Destination`; its camera is placed at
--- `destination · half-turn · source⁻¹`, and that is the whole of it.
--- `NON-EUCLIDEAN.md` is the investigation and `Portals-1-world.luau` is the
--- minimal case. What differs below is *geometry*, not engine.
---
--- ## The one authoring rule, and it has two halves
---
--- `Face` is resolved on the destination as well as on the source, so a hole
--- shows whatever that face points at on the part it leads to. Every gate here
--- uses `Back` - local +Z - and the two ends mean the same thing by it:
---
--- * **the source's `Back` faces whoever is looking**, because that is the face
---   the image is drawn on;
--- * **the destination's `Back` faces the space to be shown**, because that is
---   the direction you would come out travelling.
---
--- They are one statement about which way you go through. Get the second wrong
--- and nothing complains - the pane renders, the camera is placed, the frustum
--- fits, and the picture is the back of a wall. `mouth()` and `throat()` below
--- exist so that neither end can be built by hand.
---
--- ## What these cannot do yet, said plainly
---
--- **You can look through them and not walk through them.** Traversal is
--- `ROADMAP.md` v0.15's character controller - `docs/DEFERRED.md` D00112 - so
--- every exhibit is arranged to make its point from outside, which is also how
--- they read in a video.
---
--- **And none of them changes scale.** The map is rigid, so the shrinking tunnel
--- - round once and you are smaller, round again and you fit - is the one trick
--- on that list this engine cannot currently express. It needs a similarity
--- rather than a rigid transform, in the placement and in the traversal that does
--- not exist yet. Filed with the rest of `D00112`.
+-- Six impossible spaces: shorter and longer tunnels, four doors to three
+-- rooms, a pillar with hidden rooms, an uphill shortcut and an expanded cell.
+-- Each opening has an explicit return portal and a clear physical doorway.
+-- Both ends use Back (+Z locally), with the far face aimed into its room.
+-- The engine applies the same seam transform to views, bodies and cameras.
 
 local RunService = game:GetService("RunService")
 
--- **Sixteen surfaces a world, shared with every mirror in it.** See
--- `scene::MAX_SURFACES`. Twelve holes below, so the budget is a decision rather
--- than an accident: a seventh exhibit takes its holes from another.
+-- Twenty-six directed surfaces fit the default budget of thirty-two.
 local GATE_SIZE = Vector3.new(768, 768)
 
 -- The exhibits stand in a row, and what each opens onto is built a long way off
@@ -109,20 +70,65 @@ local function throat(name: string, at: Vector3, width: number, height: number):
 end
 
 local holes = 0
+local entrances: { Part } = {}
 
-local function link(from: Part, to: Part, name: string)
+local function surface(from: Part, to: Part, name: string)
 	local portal = Instance.new("Portal")
 	portal.Name = name
 	portal.SurfaceSize = GATE_SIZE
 	portal.Face = Enum.NormalId.Back
 	portal.Destination = to
-
-	-- Solid. A hole with an image transparency is a window with glass in, which
-	-- is a different thing and also expressible.
 	portal.ImageTransparency = 0
 	portal.Parent = from
-
 	holes += 1
+	table.insert(entrances, from)
+end
+
+local function link(from: Part, to: Part, name: string)
+	surface(from, to, name)
+	surface(to, from, name .. "Return")
+end
+
+type DoorOpening = { Across: number, Width: number, Height: number }
+
+-- Solid posts and lintels leave the whole walking aperture clear.
+local function wallWithDoors(
+	name: string,
+	frame: CFrame,
+	width: number,
+	height: number,
+	doors: { DoorOpening }
+)
+	local left = -width / 2
+	for index, door in doors do
+		local begin = door.Across - door.Width / 2
+		local finish = door.Across + door.Width / 2
+		if begin > left then
+			block(
+				name .. "Post" .. index,
+				frame * CFrame.new((left + begin) / 2, 0, 0),
+				Vector3.new(begin - left, height, 0.5),
+				FLOOR
+			)
+		end
+		if door.Height < height then
+			block(
+				name .. "Lintel" .. index,
+				frame * CFrame.new(door.Across, door.Height / 2, 0),
+				Vector3.new(door.Width, height - door.Height, 0.5),
+				FLOOR
+			)
+		end
+		left = finish
+	end
+	if left < width / 2 then
+		block(
+			name .. "PostEnd",
+			frame * CFrame.new((left + width / 2) / 2, 0, 0),
+			Vector3.new(width / 2 - left, height, 0.5),
+			FLOOR
+		)
+	end
 end
 
 -- A box with its +Z side left out, so a hole can open onto it. Returns the
@@ -132,7 +138,8 @@ local function chamber(
 	origin: Vector3,
 	span: number,
 	height: number,
-	colour: Color3
+	colour: Color3,
+	rearOpening: DoorOpening?
 ): Vector3
 	local half = span / 2
 	local mid = Vector3.new(0, height / 2, 0)
@@ -144,7 +151,12 @@ local function chamber(
 		colour
 	)
 	block(name .. "Ceiling", CFrame.new(origin + Vector3.new(0, height, 0)), Vector3.new(span, 0.5, span), colour)
-	block(name .. "Far", CFrame.new(origin + mid - Vector3.new(0, 0, half)), Vector3.new(span, height, 0.5), WHITE)
+	local rear = CFrame.new(origin + mid - Vector3.new(0, 0, half))
+	if rearOpening then
+		wallWithDoors(name .. "Far", rear, span, height, { rearOpening })
+	else
+		block(name .. "Far", rear, Vector3.new(span, height, 0.5), WHITE)
+	end
 	block(name .. "Left", CFrame.new(origin + mid - Vector3.new(half, 0, 0)), Vector3.new(0.5, height, span), WHITE)
 	block(name .. "Right", CFrame.new(origin + mid + Vector3.new(half, 0, 0)), Vector3.new(0.5, height, span), WHITE)
 
@@ -256,23 +268,29 @@ do
 		Color3.fromRGB(90, 130, 220),
 	}
 
-	local rooms: { Part } = {}
+	local rooms: { Vector3 } = {}
 	for index = 1, 3 do
 		local origin = at + Vector3.new((index - 2) * 30, 0, -away(3))
 		local opening = chamber("House" .. index, origin, 18, 8, tints[index])
 		marker("HouseMarker" .. index, origin, tints[index])
-		rooms[index] = throat("HouseWay" .. index, opening + Vector3.new(0, 0, 0.3), 5, 7)
+		rooms[index] = opening + Vector3.new(0, 0, 0.3)
 	end
 
-	block("HouseFacade", CFrame.new(at + Vector3.new(0, 4, 0)), Vector3.new(30, 8, 0.5), FLOOR)
+	wallWithDoors("HouseFacade", CFrame.new(at + Vector3.new(0, 4, 0)), 30, 8, {
+		{ Across = -9.75, Width = 5, Height = 8 },
+		{ Across = -3.25, Width = 5, Height = 8 },
+		{ Across = 3.25, Width = 5, Height = 8 },
+		{ Across = 9.75, Width = 5, Height = 8 },
+	})
 
 	for index = 1, 4 do
-		-- **The fourth door is the first room again**, which is where the count
-		-- stops adding up. Nothing anywhere says a room may be behind only one
-		-- door.
+		-- Doors one and four share a room but have distinct return entrances.
+		-- Coincident return panes would make the exit depend on iteration order.
+		local room = ((index - 1) % 3) + 1
+		local across = if index == 1 then -4.5 elseif index == 4 then 4.5 else 0
 		link(
-			mouth("HouseDoor" .. index, at + Vector3.new((index - 2.5) * 6.5, 4, 0.4), 5, 7),
-			rooms[((index - 1) % 3) + 1],
+			mouth("HouseDoor" .. index, at + Vector3.new((index - 2.5) * 6.5, 4, 0.4), 5, 8),
+			throat("HouseWay" .. index, rooms[room] + Vector3.new(across, 0, 0), 5, 8),
 			"HouseDoor" .. index .. "Way"
 		)
 	end
@@ -280,29 +298,40 @@ end
 
 -- --- 4. The pillar with no end --------------------------------------------
 --
--- **Two objects in the frame at once that are in different spaces.** The pillar
--- has a hole down each side; the left opens onto one room and the right onto
--- another, and both are visible together. Walking round it does not bring you
--- back where you started - the cycle is longer than the pillar is.
+-- Each side leads into a different room. Their rear openings connect, so a
+-- walk around the shaft includes both hidden rooms on every lap.
 do
 	local at = Vector3.new(STAGE_STEP * 3, 0, 0)
 
 	block("PillarFloor", CFrame.new(at + Vector3.new(0, -0.25 + GROUND_LIFT, -6)), Vector3.new(24, 0.5, 16), FLOOR)
 	block("PillarShaft", CFrame.new(at + Vector3.new(0, 5, -8)), Vector3.new(4, 10, 4), Color3.fromRGB(150, 140, 120))
-	block("PillarBack", CFrame.new(at + Vector3.new(0, 4, -13)), Vector3.new(24, 8, 0.5), FLOOR)
+	wallWithDoors("PillarBack", CFrame.new(at + Vector3.new(0, 4, -13)), 24, 8, {
+		{ Across = -6, Width = 6, Height = 8 },
+		{ Across = 6, Width = 6, Height = 8 },
+	})
 
 	local hues = {Color3.fromRGB(230, 150, 60), Color3.fromRGB(70, 200, 190)}
+	local loops: { Part } = {}
 	for index = 1, 2 do
 		local origin = at + Vector3.new((index - 1.5) * 44, 0, -away(4))
-		local opening = chamber("Turn" .. index, origin, 16, 9, hues[index])
-		marker("TurnMarker" .. index, origin, hues[index])
+		local opening = chamber(
+			"Turn" .. index,
+			origin,
+			16,
+			9,
+			hues[index],
+			{ Across = 0, Width = 6, Height = 8 }
+		)
+		marker("TurnMarker" .. index, origin + Vector3.new(4, 0, 0), hues[index])
+		loops[index] = mouth("TurnLoop" .. index, origin + Vector3.new(0, 4, -7.7), 6, 8)
 
 		link(
 			mouth("PillarWay" .. index, at + Vector3.new((index - 1.5) * 12, 4, -12.6), 6, 8),
-			throat("TurnWay" .. index, opening + Vector3.new(0, 0, 0.3), 6, 8),
+			throat("TurnWay" .. index, opening + Vector3.new(0, -0.5, 0.3), 6, 8),
 			"AroundThePillar" .. index
 		)
 	end
+	link(loops[1], loops[2], "PillarLoop")
 end
 
 -- --- 5. Uphill both ways --------------------------------------------------
@@ -324,7 +353,9 @@ do
 		)
 	end
 
-	block("HillMouthWall", CFrame.new(at + Vector3.new(0, 3, -4)), Vector3.new(16, 6, 0.5), FLOOR)
+	wallWithDoors("HillMouthWall", CFrame.new(at + Vector3.new(0, 3, -4)), 16, 6, {
+		{ Across = 0, Width = 5, Height = 6 },
+	})
 
 	local top = at + Vector3.new(0, 14.4, -away(5))
 	block(
@@ -337,8 +368,8 @@ do
 	marker("HillTopMarker", top + Vector3.new(0, 0, -10), Color3.fromRGB(240, 230, 140))
 
 	link(
-		mouth("HillMouth", at + Vector3.new(0, 2.5, -3.6), 5, 5),
-		throat("HillTopMouth", top + Vector3.new(0, 2.5, 0), 5, 5),
+		mouth("HillMouth", at + Vector3.new(0, 3, -3.6), 5, 6),
+		throat("HillTopMouth", top + Vector3.new(0, 3, 0), 5, 6),
 		"UphillBothWays"
 	)
 end
@@ -361,20 +392,26 @@ do
 	-- The fourth side is left out to look in through, which is this exhibit's
 	-- compromise: somebody who could walk in would have four of them.
 	local sides = {
-		{Name = "Far", At = Vector3.new(0, 4, -19.8), Wall = Vector3.new(0, 4, -20.2), Size = Vector3.new(20, 8, 0.5), Yaw = 0},
-		{Name = "Left", At = Vector3.new(-9.8, 4, -10), Wall = Vector3.new(-10.2, 4, -10), Size = Vector3.new(0.5, 8, 20), Yaw = math.pi / 2},
-		{Name = "Right", At = Vector3.new(9.8, 4, -10), Wall = Vector3.new(10.2, 4, -10), Size = Vector3.new(0.5, 8, 20), Yaw = -math.pi / 2},
+		{Name = "Far", At = Vector3.new(0, 4, -19.8), Wall = Vector3.new(0, 4, -20.2), Yaw = 0},
+		{Name = "Left", At = Vector3.new(-9.8, 4, -10), Wall = Vector3.new(-10.2, 4, -10), Yaw = math.pi / 2},
+		{Name = "Right", At = Vector3.new(9.8, 4, -10), Wall = Vector3.new(10.2, 4, -10), Yaw = -math.pi / 2},
 	}
 
 	local part = 0
 	for _, side in sides do
-		block("Cell" .. side.Name, CFrame.new(at + side.Wall), side.Size, FLOOR)
+		wallWithDoors(
+			"Cell" .. side.Name,
+			CFrame.new(at + side.Wall) * CFrame.Angles(0, side.Yaw, 0),
+			20,
+			8,
+			{ { Across = 0, Width = 18, Height = 8 } }
+		)
 		part += 1
 
 		-- **Turned to face into the room.** `Back` is the side an image is drawn
 		-- on, so a panel in the left-hand wall needs a quarter turn to be seen
 		-- from inside at all.
-		local looked = mouth("CellWay" .. side.Name, at + side.At, 18, 7, side.Yaw)
+		local looked = mouth("CellWay" .. side.Name, at + side.At, 18, 8, side.Yaw)
 
 		local origin = at + Vector3.new((part - 2) * 50, 0, -away(6))
 		local opening = chamber("Quarter" .. part, origin, 40, 10, Color3.fromRGB(60 + part * 25, 90, 150))
@@ -386,7 +423,7 @@ do
 			)
 		end
 
-		link(looked, throat("QuarterWay" .. part, opening + Vector3.new(0, 0, 0.3), 18, 7), "Quarter" .. part)
+		link(looked, throat("QuarterWay" .. part, opening + Vector3.new(0, -1, 0.3), 18, 8), "Quarter" .. part)
 	end
 end
 
@@ -421,9 +458,88 @@ workspace.CurrentCamera = view
 local LAST = STAGE_STEP * 5
 local PACE = 7
 local elapsed = 0
+local lastMode = "overview"
+
+type TourShot = { Direction: Vector3, Near: boolean?, Away: boolean?, Roll: number? }
+local shots: { TourShot } = {}
+for _, elevation in { -30, 0, 30 } do
+	for _, azimuth in { -175, -135, -95, -85, -45, -5, 5, 45, 85, 95, 135, 175 } do
+		local yaw = math.rad(azimuth)
+		local pitch = math.rad(elevation)
+		table.insert(shots, {
+			Direction = Vector3.new(
+				math.sin(yaw) * math.cos(pitch), math.sin(pitch), math.cos(yaw) * math.cos(pitch)
+			),
+		})
+	end
+end
+for _, shot: TourShot in {
+	{ Direction = Vector3.new(0, 0, 1) },
+	{ Direction = Vector3.new(0, 0, -1) },
+	{ Direction = Vector3.new(1, 0.25, 2).Unit, Roll = 0.4 },
+	{ Direction = Vector3.new(0.35, 0.1, 0.02), Near = true },
+	{ Direction = Vector3.new(0.35, 0.1, -0.02), Near = true },
+	{ Direction = Vector3.new(0.6, 0.2, 1).Unit },
+	{ Direction = Vector3.new(0.6, 0.2, -1).Unit },
+	{ Direction = Vector3.new(0, 0, 1), Away = true },
+	{ Direction = Vector3.new(0, 0, -1), Away = true },
+} do
+	table.insert(shots, shot)
+end
+
+-- These attributes are editable in the inspector. A nonnegative sample seeks
+-- one fixed shot; pause holds automatic playback and step advances one shot.
+view:SetAttribute("TourMode", "overview")
+view:SetAttribute("TourSample", -1)
+view:SetAttribute("TourPaused", false)
+view:SetAttribute("TourStep", 0)
+view:SetAttribute("TourCount", #shots * #entrances)
+
+local function angleShot(sample: number)
+	local index = sample % (#shots * #entrances)
+	local pane = entrances[math.floor(index / #shots) + 1]
+	local shot = shots[index % #shots + 1]
+	local size = pane.Size
+	local frame = pane.CFrame
+	local centre = frame:PointToWorldSpace(Vector3.new(0, 0, size.Z / 2))
+	local offset = if shot.Near
+		then Vector3.new(shot.Direction.X * size.X, shot.Direction.Y * size.Y, shot.Direction.Z)
+		else shot.Direction * math.max(size.X, size.Y)
+	local eye = frame:PointToWorldSpace(Vector3.new(0, 0, size.Z / 2) + offset)
+	local toward = if shot.Away then eye + (eye - centre) else centre
+	local pose = CFrame.lookAt(eye, toward) * CFrame.Angles(0, 0, shot.Roll or 0)
+	if not view.CFrame:FuzzyEq(pose, 1e-6) then
+		-- A seek is a camera cut. It cannot masquerade as a walk through every
+		-- portal between two independently authored shots.
+		view:CutTo(pose)
+	end
+	if view:GetAttribute("TourPane") ~= pane.Name then
+		view:SetAttribute("TourPane", pane.Name)
+	end
+end
 
 RunService.Heartbeat:Connect(function(deltaTime: number)
-	elapsed += deltaTime * PACE
+	-- Play owns its humanoid camera. The preview tour never takes it back.
+	local current = workspace.CurrentCamera
+	if current == nil or not current:Equals(view) then
+		return
+	end
+	if view:GetAttribute("TourPaused") ~= true then
+		elapsed += deltaTime
+	end
+	if view:GetAttribute("TourMode") == "angles" then
+		local count = #shots * #entrances
+		local selected = view:GetAttribute("TourSample")
+		local sample = if typeof(selected) == "number" and selected >= 0 and selected < math.huge
+			then math.floor(selected) % count else math.floor(elapsed * 2) % count
+		local step = view:GetAttribute("TourStep")
+		if typeof(step) == "number" and step == step and math.abs(step) < math.huge then
+			sample += math.floor(step) % count
+		end
+		angleShot(sample)
+		lastMode = "angles"
+		return
+	end
 
 	-- A sweep along the row and back, seen from three-quarters on.
 	--
@@ -432,14 +548,21 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	-- camera staring straight down the mouth cannot show - it sees the hole and
 	-- none of the shell. Standing off to one side puts the outside and the
 	-- inside in one frame, which is the comparison every one of them is making.
-	local lap = elapsed % (LAST * 2)
+	local travelled = elapsed * PACE
+	local lap = travelled % (LAST * 2)
 	local along = if lap > LAST then LAST * 2 - lap else lap
-	local sway = math.sin(elapsed * 0.05) * 6
+	local sway = math.sin(travelled * 0.05) * 6
 
-	view.CFrame = CFrame.lookAt(
-		Vector3.new(along + 15 + sway, 8 + math.sin(elapsed * 0.031) * 2, 21),
+	local pose = CFrame.lookAt(
+		Vector3.new(along + 15 + sway, 8 + math.sin(travelled * 0.031) * 2, 21),
 		Vector3.new(along, 3.5, -7)
 	)
+	if lastMode == "angles" then
+		view:CutTo(pose)
+	else
+		view.CFrame = pose
+	end
+	lastMode = "overview"
 end)
 
 print(

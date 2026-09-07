@@ -23,7 +23,8 @@
 // **A script overrides a built-in rather than sitting beside it**, which is
 // what makes the engine's own shaders defaults instead of a second mechanism: a
 // world naming `toon` and holding no script draws the built-in, and the same
-// world with a `ShaderScript` called `toon` draws that. Nothing else changes.
+// world with a valid `ShaderScript` called `toon` draws that. A failed override
+// keeps the accepted built-in and reports its attempted-source diagnostic.
 //
 // **The third row is a diagnostic and not silence**, for `MissingTexture`'s
 // reason one layer along: a misspelled shader and a part somebody deliberately
@@ -44,6 +45,7 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Entity.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 
 #include <cstddef>
@@ -65,19 +67,25 @@ namespace engine::render {
 	//
 	// @since v0.15
 	struct ShaderModule {
-		// The SPIR-V words, or empty when the resolution failed.
-		//
-		// **Check `Error` rather than this**, which is `ShaderCompilation`'s
-		// rule for the same reason: relying on emptiness is how a stub gets
-		// mistaken for a compiler.
+		// Accepted SPIR-V, retained when a later edit fails. Error describes
+		// whether an accepted module exists; AttemptError describes the last edit.
 		std::vector<uint32_t> SpirV;
 
-		// The compiler's diagnostic, or empty on success.
-		//
-		// Non-empty for a shader that failed to compile *and* for a name
-		// nothing in the world or the engine holds - both are things an author
-		// wants to read, and both leave `SpirV` empty.
+		// Resolution failure when no accepted module is available. A failed edit
+		// of a working shader reports AttemptError while this remains empty.
 		std::string Error;
+
+		// Diagnostic from the latest source attempt, cleared by a successful edit.
+		std::string AttemptError;
+
+		// Resolution owner and last attempted entity, including its generation.
+		// Same-name sources can share a revision across entities or stores.
+		uint64_t StoreIdentity = 0;
+		ecs::Entity AttemptSource = ecs::NULL_ENTITY;
+
+		// Last attempted source revision, including a failure. Gates retries so
+		// an unchanged bad edit does not compile again every frame.
+		uint32_t AttemptRevision = 0;
 
 		// The `ShaderSource::Revision` these words were built from.
 		//
@@ -89,9 +97,9 @@ namespace engine::render {
 		// script in the world.
 		bool BuiltIn = false;
 
-		// Whether a world-local source supplied this module. This remains true
-		// for a source compilation error so removing that source can replace its
-		// old result with the built-in fallback or a missing-source diagnostic.
+		// Whether the latest resolution attempted a world-local source. This can
+		// coexist with a retained built-in after an unsuccessful override. Source
+		// removal restores the built-in or a missing-source diagnostic.
 		bool Authored = false;
 
 		// Static requirements and cost indicators reflected from the compiled
@@ -158,9 +166,9 @@ namespace engine::render {
 		// Resolves everything this world's materials name.
 		//
 		// **Idempotent, and that is the property the frame loop depends on.** A
-		// script whose revision has not moved is not recompiled and a built-in
+		// source whose identity and revision have not moved is not recompiled and a built-in
 		// is never reloaded, so a steady world costs one walk over its
-		// materials and an integer compare per distinct shader.
+		// materials and identity/revision comparisons per distinct shader.
 		//
 		// Names nothing asks for any more are dropped, so this holds a picture
 		// of what the world wants rather than of everything it ever wanted.

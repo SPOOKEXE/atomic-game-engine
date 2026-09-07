@@ -205,6 +205,7 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("order-draw", 2, 1);
 	ports("upload-instances", 1, 1);
 	ports("mirror-capture", 5, 1);
+	ports("surface-capture", 4, 3);
 	ports("portal-capture", 3, 2);
 	ports("portal-tonemap", 1, 1);
 	ports("gbuffer", 3, 5);

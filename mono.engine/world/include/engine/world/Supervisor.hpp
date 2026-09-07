@@ -42,6 +42,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -215,6 +216,16 @@ namespace engine::world {
 	// @since v0.20
 	std::vector<HostPlan> PlanHostsAcross(const std::vector<WorldSettings> &worlds, uint32_t hosts);
 
+	// A presentation message attributed to the connection that supplied it.
+	struct HostPresentationDirectory {
+		core::Name Host;
+		PresentationDirectory Directory;
+	};
+	struct HostPresentation {
+		core::Name Host;
+		PresentationMessage Message;
+	};
+
 	// Spawns hosts, watches them, and restarts the ones that die.
 	//
 	// @since v0.2
@@ -294,6 +305,29 @@ namespace engine::world {
 		//
 		// @return The traffic, in arrival order.
 		std::vector<HostTraffic> TakeTraffic();
+
+		// Presentation has separate byte and message bounds and is never taken
+		// by the simulation traffic drain. Refused messages are counted.
+		std::vector<HostPresentation> TakePresentationTraffic();
+		std::vector<HostPresentationDirectory> TakePresentationDirectories();
+		std::vector<core::Name> TakeReplacedPresentationHosts();
+		bool WantsPresentationRoutes(core::Name host) const;
+		bool PublishPresentationRoutes(core::Name host, const PresentationDirectory &directory);
+		bool SendPresentation(core::Name host, const PresentationMessage &message);
+		uint64_t PresentationDropped() const {
+			return PresentationRefused;
+		}
+
+		// One outstanding command and result per connected host. Cancel may replace
+		// a pending command for the same frame. Replies are checked against this
+		// link's world ownership and exact pending phase before they become visible.
+		bool SendTickExchange(core::Name host, const TickExchangeCommand &command);
+		std::optional<TickExchangeResult> TakeTickExchange(core::Name host);
+		// Retires an unresponsive phase participant. Poll owns restart policy.
+		void CloseLink(core::Name host);
+		uint64_t TickExchangeDropped() const {
+			return ExchangeRefused;
+		}
 
 		// Hands envelopes to one host.
 		//
@@ -394,12 +428,16 @@ namespace engine::world {
 			uint16_t Port = 0;
 			bool EverBeat = false;
 			bool Ready = false;
+			bool PresentationSubscriber = false;
+			std::optional<TickExchangeCommand> ExchangePending;
+			std::optional<TickExchangeResult> ExchangeReceived;
 			uint32_t PhysicalCore = UINT32_MAX;
 			uint32_t ProcessIndex = 0;
 		};
 
 		bool Launch(Entry &entry);
 		Entry *Find(core::Name host);
+		void RetireLink(core::Name host);
 		const Entry *Find(core::Name host) const;
 
 		SupervisorSettings Settings_;
@@ -408,6 +446,12 @@ namespace engine::world {
 
 		// What hosts have handed over, awaiting the driver's barrier.
 		std::vector<HostTraffic> Inbound;
+		std::vector<HostPresentation> PresentationInbound;
+		std::vector<HostPresentationDirectory> DirectoryInbound;
+		std::vector<core::Name> ReplacedPresentationHosts;
+		uint64_t PresentationBytes = 0;
+		uint64_t PresentationRefused = 0;
+		uint64_t ExchangeRefused = 0;
 
 		// Worlds reported past their own crash-loop cutoff.
 		std::vector<core::Name> Downed;

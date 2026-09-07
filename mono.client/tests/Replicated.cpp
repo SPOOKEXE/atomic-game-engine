@@ -10,6 +10,7 @@
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -22,12 +23,14 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("client.replicated")
@@ -181,6 +184,9 @@ TEST_CASE(
 
 	engine::game::MoveInput move;
 	move.Direction = Vector3{1.0f, 0.0f, 0.0f};
+	move.StepSeconds = GENERATE(0.0, 0.01, 0.03);
+	const float replayStep =
+		move.StepSeconds > 0 ? static_cast<float>(move.StepSeconds) : 1.0f / static_cast<float>(TICK_RATE);
 	std::vector<engine::replication::Input> pending;
 	pending.push_back({2, engine::game::EncodeMoveInput(move)});
 
@@ -189,14 +195,14 @@ TEST_CASE(
 	REQUIRE(prediction != nullptr);
 	CHECK(prediction->Active);
 	CHECK(prediction->Root == root);
-	CHECK(prediction->Frame.Position.X == Approx(16.0f / static_cast<float>(TICK_RATE)));
+	CHECK(prediction->Frame.Position.X == Approx(16.0f * replayStep));
 	CHECK(replica.World.Resource<SnapshotBuffer>()->Predicted() == root);
 	CHECK(replica.World.Get<Transform>(root)->Frame.Position.X == 0.0f);
 
 	// The overlay, rather than a transform write into the authority's replica,
 	// is what the draw collector sees.
 	replica.Draw();
-	CHECK(replica.Drawn() == Approx(16.0f / static_cast<float>(TICK_RATE)));
+	CHECK(replica.Drawn() == Approx(16.0f * replayStep));
 
 	// A prediction has already integrated its move. The stalled-snapshot
 	// dead-reckoner applies only to ordinary replicated bodies, otherwise a
@@ -205,7 +211,7 @@ TEST_CASE(
 	replica.Receive(1, root, 0.0f);
 	replica.World.GetMutable<engine::scene::Motion>(root)->Linear = Vector3{60.0f, 0.0f, 0.0f};
 	replica.DrawFrames(120);
-	CHECK(replica.Drawn() == Approx(16.0f / static_cast<float>(TICK_RATE)));
+	CHECK(replica.Drawn() == Approx(16.0f * replayStep));
 
 	// A new authority tick owns the baseline. With no surviving inputs the old
 	// local movement disappears instead of accumulating indefinitely.
@@ -218,6 +224,135 @@ TEST_CASE(
 	client::PredictLocalPlayerMove(replica.World, move, static_cast<float>(1.0 / TICK_RATE));
 	CHECK(prediction->Frame.Position.X == Approx(4.0f + 16.0f / static_cast<float>(TICK_RATE)));
 	CHECK(replica.World.Get<Transform>(root)->Frame.Position.X == 4.0f);
+}
+
+TEST_CASE(
+	"predicted body and humanoid camera share fractional tick movement", "[client][prediction][camera]"
+) {
+	Replica replica;
+	auto &store = replica.World;
+	const Entity root = replica.SpawnLocalCharacter();
+	const auto player = store.Resource<engine::scene::LocalPlayer>()->Instance;
+	const auto model = engine::scene::CharacterOf(store, player);
+	const auto rig = *store.Get<engine::scene::Character>(model);
+	const auto camera = client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{});
+	const auto limb = replica.Spawn();
+	store.Set(limb, engine::scene::CharacterLimb{.Root = root, .Offset = CFrame(Vector3{0, 2, 0})});
+	store.Set(limb, Transform{CFrame(Vector3{0, 2, 0})});
+	const int selection = GENERATE(0, 1, 2);
+	const auto target = selection == 0 ? rig.Humanoid : selection == 1 ? root : limb;
+	store.Set(camera, engine::scene::CameraSubject{.Target = target, .Automatic = false});
+	client::ReconcileLocalPlayerPrediction(store, 1, {});
+	const float tickSeconds = GENERATE(1.0f / 30, 1.0f / 60, 1.0f / 120);
+	store.AdvanceTick(tickSeconds);
+	auto *prediction = store.ResourceMutable<client::LocalPlayerPrediction>();
+	prediction->Linear = {GENERATE(-16.0f, 0.0f, 16.0f), 0, 0};
+	const auto baseline = prediction->Frame;
+	const auto authority = store.Get<Transform>(root)->Frame;
+	store.SetFrame(tickSeconds / 4, .25f);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	const float bodyQuarter = replica.Drawn();
+	const auto eyeQuarter = store.Get<Transform>(camera)->Frame.Position;
+	store.SetFrame(tickSeconds / 2, .75f);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	const float expectedStep = prediction->Linear.X * tickSeconds * .5f;
+	CHECK(replica.Drawn() - bodyQuarter == Approx(expectedStep).margin(.00001));
+	CHECK(
+		store.Get<Transform>(camera)->Frame.Position.X - eyeQuarter.X == Approx(expectedStep).margin(.00001)
+	);
+	CHECK(prediction->Frame.Position == baseline.Position);
+	CHECK(prediction->AuthorityTick == 1);
+	CHECK(store.Get<Transform>(root)->Frame.Position == authority.Position);
+}
+
+TEST_CASE("prediction correction shares one bounded body and camera pose", "[client][prediction][camera]") {
+	Replica replica;
+	auto &store = replica.World;
+	CHECK_FALSE(client::PresentedPlayerPrediction(store));
+	const Entity root = replica.SpawnLocalCharacter();
+	const auto player = store.Resource<engine::scene::LocalPlayer>()->Instance;
+	const auto rig = *store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+	const auto camera = client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{});
+	store.Set(camera, engine::scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	constexpr float step = 1.f / 60;
+	client::ReconcileLocalPlayerPrediction(store, 1, {});
+	const int initialSteps = GENERATE(1, 6);
+	for (int tick = 0; tick < initialSteps; ++tick)
+		client::PredictLocalPlayerMove(store, {{1, 0, 0}, false}, step);
+	store.SetFrame(step, 0);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	const float before = replica.Drawn();
+	const float eye = store.Get<Transform>(camera)->Frame.Position.X;
+	client::ReconcileLocalPlayerPrediction(store, 2, {});
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->Frame.Position.X == Approx(0));
+	CHECK(client::PresentedPlayerPrediction(store)->Position.X == Approx(before));
+	client::PredictLocalPlayerMove(store, {{1, 0, 0}, false}, step);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	const float movement = replica.Drawn() - before;
+	CHECK(movement >= 16 * step * .49f);
+	CHECK(store.Get<Transform>(camera)->Frame.Position.X - eye == Approx(movement));
+	CHECK(replica.Drawn() == Approx(client::PresentedPlayerPrediction(store)->Position.X));
+	CHECK(store.Get<Transform>(root)->Frame.Position.X == Approx(0));
+
+	const float priorCorrection = client::PresentedPlayerPrediction(store)->Position.X;
+	store.Set(root, Transform{CFrame(Vector3{-.1f, 0, 0})});
+	client::ReconcileLocalPlayerPrediction(store, 3, {});
+	CHECK(client::PresentedPlayerPrediction(store)->Position.X == Approx(priorCorrection));
+	client::PredictLocalPlayerMove(store, {{}, false}, step);
+	store.SetFrame(store.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds * .5f, 0);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	const float remaining = store.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds;
+	client::ReconcileLocalPlayerPrediction(store, 4, {});
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds == remaining);
+	store.SetFrame(remaining + .01f, 0);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	CHECK(replica.Drawn() == Approx(-.1f));
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds == 0);
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->PositionCorrection == Vector3::Zero);
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->AuthorityTick == 4);
+	store.ResourceMutable<client::LocalPlayerPrediction>()->Frame.Position.X = 1000;
+	client::ReconcileLocalPlayerPrediction(store, 5, {});
+	CHECK(client::PresentedPlayerPrediction(store)->Position.X == Approx(-.1f));
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds == 0);
+}
+
+TEST_CASE(
+	"local prediction respects scripted and unrelated camera subjects", "[client][prediction][camera]"
+) {
+	Replica replica;
+	auto &store = replica.World;
+	const auto root = replica.SpawnLocalCharacter();
+	const auto player = store.Resource<engine::scene::LocalPlayer>()->Instance;
+	const auto rig = *store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
+	const auto other = replica.Spawn();
+	store.Set(other, Transform{CFrame(Vector3{20, 0, 0})});
+	const auto camera = client::AimReplicaViewer(store, CFrame(Vector3{10, 15, 25}), engine::scene::Camera{});
+	const int selection = GENERATE(0, 1, 2, 3);
+	INFO("camera selection " << selection);
+	const auto target = selection == 0 ? rig.Humanoid : selection == 2 ? other : engine::ecs::NULL_ENTITY;
+	store.Set(camera, engine::scene::CameraSubject{.Target = target, .Automatic = selection == 3});
+	if (selection == 0 || selection == 3)
+		store.ResourceMutable<engine::scene::CameraController>()->Mode =
+			engine::scene::CameraMode::Scriptable;
+	client::ReconcileLocalPlayerPrediction(store, 1, {});
+	auto *prediction = store.ResourceMutable<client::LocalPlayerPrediction>();
+	prediction->Frame = CFrame(Vector3{4, 0, 0});
+	prediction->Linear = {16, 0, 0};
+	prediction->Active = false;
+	store.SetFrame(FRAME_SECONDS, .75f);
+	replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+	const auto expected = store.Get<Transform>(camera)->Frame;
+	prediction->Active = true;
+	for (int frame = 0; frame < 2; ++frame) {
+		engine::scene::Camera fallbackLens;
+		fallbackLens.FarPlane = 100;
+		CHECK(client::AimReplicaViewer(store, CFrame(Vector3{99, 99, 99}), fallbackLens) == camera);
+		CHECK(store.Get<engine::scene::Camera>(camera)->FarPlane == engine::scene::Camera{}.FarPlane);
+		replica.Systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		CHECK(store.Get<Transform>(camera)->Frame.Position == expected.Position);
+		CHECK(store.Get<engine::scene::CameraSubject>(camera)->Target == target);
+	}
+	CHECK(store.Get<Transform>(root)->Frame.Position.X == 0);
 }
 
 TEST_CASE("a replica keeps its third-person camera inside received walls", "[client][replication][camera]") {
@@ -240,10 +375,11 @@ TEST_CASE("a replica keeps its third-person camera inside received walls", "[cli
 
 	const Entity camera = client::AimReplicaViewer(replica.World, CFrame{}, engine::scene::Camera{});
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(replica.World.ClassOf(camera) == engine::ecs::Classes::Find(engine::core::Name("Camera")));
 
 	auto *controller = replica.World.ResourceMutable<engine::scene::CameraController>();
 	REQUIRE(controller != nullptr);
-	controller->Subject = subject;
+	replica.World.Set(camera, engine::scene::CameraSubject{.Target = subject, .Automatic = false});
 	controller->Angles = engine::core::Vector2{0.0f, 0.0f};
 	controller->Distance = 12.0f;
 
@@ -757,4 +893,455 @@ TEST_CASE("a replica resolves the attachments that arrived", "[client][replicati
 	REQUIRE(resolved != nullptr);
 	CHECK(resolved->WorldFrame.Position.X == Approx(7.0f));
 	CHECK(resolved->WorldFrame.Position.Y == Approx(2.0f));
+}
+
+TEST_CASE(
+	"prediction replays unconfirmed input from a younger client clock", "[client][replication][prediction]"
+) {
+	Replica replica;
+	const Entity root = replica.SpawnLocalCharacter();
+	engine::game::MoveInput move;
+	move.Direction = Vector3{1, 0, 0};
+	const std::vector<engine::replication::Input> pending{{2, engine::game::EncodeMoveInput(move)}};
+	client::ReconcileLocalPlayerPrediction(replica.World, 900, pending);
+	const auto *prediction = replica.World.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction != nullptr);
+	CHECK(prediction->Root == root);
+	CHECK(prediction->Frame.Position.X == Approx(16.0f / static_cast<float>(TICK_RATE)));
+}
+
+TEST_CASE(
+	"retained character prediction advances across unrelated authority updates",
+	"[client][replication][prediction][camera-hold]"
+) {
+	namespace scene = engine::scene;
+	Replica replica;
+	auto &store = replica.World;
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "viewer", false, 91);
+	const auto model = scene::LoadCharacter(store, player);
+	const auto rig = *store.Get<scene::Character>(model);
+	const auto camera = store.CreatePredictedInstance(scene::CameraClass(), "local camera");
+	store.Set(camera, scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	store.SetResource(scene::ActiveCamera{camera});
+	store.SetResource(scene::LocalPlayer{player});
+	store.SetAdoptOnly(true);
+	client::ReconcileLocalPlayerPrediction(store, 100, {});
+	auto prediction = *store.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(prediction.Active);
+	REQUIRE(scene::PrepareCameraCharacterHold(store, player, prediction.Frame));
+	store.DestroyInstance(rig.Root);
+	REQUIRE(scene::ActivateCameraCharacterHold(store));
+	const auto held = *store.Resource<scene::CameraCharacterHold>();
+	prediction.Player = held.Player;
+	prediction.Root = held.Root;
+	store.SetResource(prediction);
+	const float start = prediction.Frame.Position.X;
+	engine::game::MoveInput move;
+	move.Direction = Vector3{1, 0, 0};
+	for (uint64_t tick = 101; tick < 111; ++tick) {
+		client::PredictLocalPlayerMove(store, move, 1.0f / 60.0f);
+		client::ReconcileLocalPlayerPrediction(store, tick, {});
+		const auto &current = *store.Resource<client::LocalPlayerPrediction>();
+		CHECK(current.Active);
+		CHECK(current.Root == held.Root);
+		CHECK(
+			current.Frame.Position.X == Approx(start + (tick - 100) * prediction.Humanoid.WalkSpeed / 60.0f)
+		);
+		CHECK(store.Get<Transform>(held.Root)->Frame.Position.X == start);
+	}
+	scene::ReleaseCameraCharacterHold(store);
+	client::ReconcileLocalPlayerPrediction(store, 111, {});
+	CHECK_FALSE(store.Resource<client::LocalPlayerPrediction>()->Active);
+}
+
+TEST_CASE(
+	"portal replay retains submitted durations and maps through a scaled seam",
+	"[client][prediction][portal-input-history]"
+) {
+	namespace scene = engine::scene;
+	Replica replica;
+	auto &store = replica.World;
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "viewer", false, 91);
+	const auto model = scene::LoadCharacter(store, player);
+	const auto rig = *store.Get<scene::Character>(model);
+	const auto camera = store.CreatePredictedInstance(scene::CameraClass(), "camera");
+	store.Set(camera, scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	store.SetResource(scene::ActiveCamera{camera});
+	store.SetResource(scene::LocalPlayer{player});
+	store.SetAdoptOnly(true);
+	client::ReconcileLocalPlayerPrediction(store, 100, {});
+	auto prediction = *store.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(scene::PrepareCameraCharacterHold(store, player, prediction.Frame));
+	store.DestroyInstance(rig.Root);
+	REQUIRE(scene::ActivateCameraCharacterHold(store));
+	const auto held = *store.Resource<scene::CameraCharacterHold>();
+	prediction.Player = held.Player;
+	prediction.Root = held.Root;
+	store.SetResource(prediction);
+	engine::game::PortalResume claim;
+	claim.Transfer = {"source", 1, 1};
+	claim.Destination = "destination";
+	claim.DestinationIncarnation = 2;
+	claim.SourceSession = 3;
+	claim.Capability.fill(std::byte{42});
+	const scene::SeamTransform through{CFrame(Vector3{10, 20, 30}) * CFrame::Angles(0, .7f, 0), {2, 3, 4}, 2};
+	REQUIRE(client::BeginPortalInputHistory(store, claim, through, 100));
+	REQUIRE(client::RecordPortalPredictionInput(store, 101, {{1, 0, 0}, true}, .01f));
+	REQUIRE(client::RecordPortalPredictionInput(store, 102, {{0, 0, -1}, false}, .03f));
+	CHECK_FALSE(client::RecordPortalPredictionInput(store, 102, {{}, true}, .1f));
+	client::ReconcileLocalPlayerPrediction(store, 40000, {});
+	CHECK(store.Resource<client::PortalInputHistory>()->Count == 2);
+	engine::script::PortalTransferMotion motion;
+	motion.DestinationIncarnation = 2;
+	motion.DestinationTick = 50;
+	motion.InputTick = 100;
+	motion.Frame = through.Place(prediction.Frame);
+	motion.WalkSpeed = 32;
+	motion.JumpSpeed = 14;
+	motion.Grounded = true;
+	REQUIRE(client::ReconcilePortalInputHistory(store, claim, motion));
+	const auto &replayed = *store.Resource<client::LocalPlayerPrediction>();
+	const auto x = through.Rotate({1, 0, 0});
+	const auto z = through.Rotate({0, 0, -1});
+	const auto expected = motion.Frame.Position + Vector3{x.X, 0, x.Z} * .32f + Vector3{z.X, 0, z.Z} * .96f +
+						  Vector3{0, .56f, 0};
+	const auto mapped = through.Place(replayed.Frame);
+	CHECK(mapped.Position.X == Approx(expected.X));
+	CHECK(mapped.Position.Y == Approx(expected.Y));
+	CHECK(mapped.Position.Z == Approx(expected.Z));
+	CHECK(replayed.Humanoid.WalkSpeed == Approx(16));
+	CHECK(replayed.Humanoid.JumpSpeed == Approx(7));
+	CHECK(replayed.Humanoid.MoveDirection.X == Approx(0).margin(.00001));
+	CHECK(replayed.Humanoid.MoveDirection.Z == Approx(-1));
+	CHECK_FALSE(replayed.Humanoid.Grounded);
+	CHECK(store.Get<Transform>(held.Root)->Frame.Position == prediction.Frame.Position);
+	CHECK_FALSE(client::ReconcilePortalInputHistory(store, claim, motion));
+	CHECK(store.Resource<client::PortalInputHistory>()->Count == 2);
+	const auto carried = client::CapturePortalPrediction(store, claim);
+	REQUIRE(carried);
+	REQUIRE(carried->Inputs.size() == 2);
+	CHECK(carried->CoveredThrough == motion.InputTick);
+	const auto correction = through.Carry(replayed.PositionCorrection);
+	CHECK(carried->PositionCorrection.X == Approx(correction.X));
+	CHECK(carried->PositionCorrection.Y == Approx(correction.Y));
+	CHECK(carried->PositionCorrection.Z == Approx(correction.Z));
+	CHECK(carried->CorrectionSeconds == replayed.CorrectionSeconds);
+	for (size_t index = 0; index < carried->Inputs.size(); ++index) {
+		const auto *history = store.Resource<client::PortalInputHistory>();
+		const auto &source = history->Inputs[(history->Begin + index) % client::PortalInputHistory::CAPACITY];
+		engine::game::MoveInput decoded;
+		REQUIRE(engine::game::DecodeMoveInput(carried->Inputs[index].Bytes, decoded));
+		CHECK(carried->Inputs[index].Tick == source.Tick);
+		CHECK(decoded.StepSeconds == source.Delta);
+		CHECK(decoded.Jump == source.Move.Jump);
+		const auto mappedMove = through.Rotate(source.Move.Direction);
+		CHECK(decoded.Direction.X == Approx(mappedMove.X));
+		CHECK(decoded.Direction.Z == Approx(mappedMove.Z));
+	}
+
+	motion.DestinationTick = 51;
+	motion.InputTick = 102;
+	motion.Frame = mapped;
+	motion.Grounded = false;
+	REQUIRE(client::ReconcilePortalInputHistory(store, claim, motion));
+	CHECK(
+		store.Resource<client::LocalPlayerPrediction>()->Humanoid.MoveDirection.X == Approx(0).margin(.00001)
+	);
+	CHECK(store.Resource<client::LocalPlayerPrediction>()->Humanoid.MoveDirection.Z == Approx(-1));
+	CHECK(store.Resource<client::PortalInputHistory>()->Count == 0);
+	bool recorded = true;
+	const float sourceAlpha = .75f;
+	const auto continuation = client::CapturePortalPrediction(store, claim, sourceAlpha);
+	REQUIRE(continuation);
+	CHECK(continuation->Motion.Frame.Position.X == Approx(mapped.Position.X));
+	CHECK(continuation->Motion.WalkSpeed == Approx(32));
+	CHECK(continuation->MoveDirection.X == Approx(z.X));
+	Replica destination;
+	auto &arrived = destination.World;
+	scene::InstallServices(arrived);
+	const auto arrivedPlayer = scene::AddPlayer(arrived, "arrived", false, 92);
+	const auto arrivedModel = scene::LoadCharacter(arrived, arrivedPlayer);
+	const auto arrivedRig = *arrived.Get<scene::Character>(arrivedModel);
+	const auto authorityFrame = arrived.Get<Transform>(arrivedRig.Root)->Frame;
+	arrived.SetResource(scene::LocalPlayer{arrivedPlayer});
+	arrived.SetAdoptOnly(true);
+	arrived.AdvanceTick(.02f);
+	const float destinationAlpha = .25f;
+	REQUIRE(client::AdoptPortalPrediction(arrived, arrivedPlayer, *continuation, destinationAlpha));
+	const double phaseOffset = sourceAlpha * static_cast<double>(store.Time().Delta) -
+							   destinationAlpha * static_cast<double>(arrived.Time().Delta);
+	CHECK(
+		arrived.Resource<client::LocalPlayerPrediction>()->PresentationOffsetSeconds == Approx(phaseOffset)
+	);
+
+	const auto &adopted = *arrived.Resource<client::LocalPlayerPrediction>();
+	CHECK(adopted.Player == arrivedPlayer);
+	CHECK(adopted.Root == arrivedRig.Root);
+	CHECK(adopted.Humanoid.RootPart == arrived.Get<scene::Humanoid>(arrivedRig.Humanoid)->RootPart);
+	CHECK(adopted.Frame.Position.X == Approx(mapped.Position.X));
+	const auto drawnRoot = [](Replica &replica, Entity root, float alpha) {
+		replica.World.Set(root, Bounds{Vector3{.5f, .5f, .5f}});
+		replica.World.Set(root, Visual{});
+		replica.World.SetFrame(0, alpha);
+		replica.Systems.RunPhases(replica.World, Phase::PreRender, Phase::PreRender);
+		const auto &instances = replica.Instances();
+		const auto found = std::find_if(instances.begin(), instances.end(), [root](const auto &instance) {
+			return instance.Source == root.Id;
+		});
+		REQUIRE(found != instances.end());
+		return found->Frame;
+	};
+	const auto sourcePresented = through.Place(drawnRoot(replica, held.Root, sourceAlpha));
+	const auto arrivedPresented = drawnRoot(destination, arrivedRig.Root, destinationAlpha);
+	CHECK(arrivedPresented.Position.X == Approx(sourcePresented.Position.X).margin(.00001));
+	CHECK(arrivedPresented.Position.Y == Approx(sourcePresented.Position.Y).margin(.00001));
+	CHECK(arrivedPresented.Position.Z == Approx(sourcePresented.Position.Z).margin(.00001));
+
+	CHECK(arrived.Get<Transform>(arrivedRig.Root)->Frame.Position == authorityFrame.Position);
+	client::ReconcileLocalPlayerPrediction(arrived, 50, {});
+	CHECK(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.X == Approx(mapped.Position.X));
+	client::ReconcileLocalPlayerPrediction(arrived, 52, {});
+	CHECK(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position == authorityFrame.Position);
+	CHECK_FALSE(client::AdoptPortalPrediction(arrived, engine::ecs::NULL_ENTITY, *continuation));
+	engine::game::PlayerMotion native{arrivedPlayer, arrivedRig.Root, continuation->Motion};
+	native.Motion.DestinationTick = 53;
+	native.Motion.InputTick = 2;
+	native.Motion.Frame = CFrame(Vector3{40, 20, 10});
+	native.Motion.WalkSpeed = 16;
+	CHECK_FALSE(client::AcceptNativePlayerMotion(arrived, native, 1));
+	REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 3));
+	const double inputStep = GENERATE(0.0, 0.01, 0.03);
+	const float replayStep = inputStep > 0 ? static_cast<float>(inputStep) : arrived.Time().Delta;
+	const std::array<engine::replication::Input, 2> pending{
+		{{2, engine::game::EncodeMoveInput({{0, 0, -1}, false, inputStep})},
+		 {3, engine::game::EncodeMoveInput({{1, 0, 0}, false, inputStep})}}
+	};
+	CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, pending, 3));
+	const auto acknowledged = client::ReconcileNativePlayerPrediction(arrived, pending, 2);
+	REQUIRE(acknowledged);
+	CHECK(*acknowledged == 2);
+	CHECK(
+		arrived.Resource<client::LocalPlayerPrediction>()->PresentationOffsetSeconds == Approx(phaseOffset)
+	);
+	CHECK(
+		arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.X == Approx(40 + 16 * replayStep)
+	);
+	CHECK(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.Z == Approx(10));
+	CHECK(arrived.Get<Transform>(arrivedRig.Root)->Frame.Position == authorityFrame.Position);
+	CHECK_FALSE(client::AcceptNativePlayerMotion(arrived, native, 3));
+	CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, pending, 2));
+	native.Motion.DestinationTick++;
+	native.Motion.InputTick = 1;
+	CHECK_FALSE(client::AcceptNativePlayerMotion(arrived, native, 3));
+	native.Motion.InputTick = 3;
+	native.Motion.DestinationIncarnation++;
+	CHECK_FALSE(client::AcceptNativePlayerMotion(arrived, native, 3));
+	--native.Motion.DestinationIncarnation;
+	arrived.Remove<Transform>(arrivedRig.Root);
+	REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 3));
+	CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, pending, 2));
+	CHECK(arrived.Resource<client::NativePlayerPrediction>()->AppliedPoseTick == 53);
+	arrived.Set(arrivedRig.Root, Transform{authorityFrame});
+	CHECK(client::ReconcileNativePlayerPrediction(arrived, pending, 2) == 3);
+	native.Motion.DestinationTick++;
+	native.Motion.Frame.Position.Y = std::numeric_limits<float>::max();
+	native.Motion.Linear.Y = std::numeric_limits<float>::max();
+	REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 4));
+	const std::array<engine::replication::Input, 1> overflowInput{
+		{{4, engine::game::EncodeMoveInput({{1, 0, 0}, false})}}
+	};
+	CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, overflowInput, 3));
+	CHECK(arrived.Resource<client::NativePlayerPrediction>()->AppliedPoseTick == 54);
+	CHECK(std::isfinite(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.Y));
+	++native.Motion.DestinationTick;
+	native.Motion.Frame.Position.Y = 0;
+	native.Motion.Linear.Y = 0;
+	REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 4));
+	const std::array<engine::replication::Input, 1> overflowDuration{
+		{{4, engine::game::EncodeMoveInput({{1, 0, 0}, false, std::numeric_limits<double>::max()})}}
+	};
+	CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, overflowDuration, 3));
+	CHECK(arrived.Resource<client::NativePlayerPrediction>()->AppliedPoseTick == 54);
+	for (uint64_t tick = 103; tick <= 1127; ++tick)
+		recorded &= client::RecordPortalPredictionInput(store, tick, {{1, 0, 0}, false}, .01f);
+	REQUIRE(recorded);
+	const auto *history = store.Resource<client::PortalInputHistory>();
+	CHECK(history->Count == client::PortalInputHistory::CAPACITY);
+	CHECK(history->DiscardedInputs == 1);
+	CHECK(history->CoveredThrough == 103);
+	motion.DestinationTick = 52;
+	CHECK_FALSE(client::ReconcilePortalInputHistory(store, claim, motion));
+	motion.InputTick = 1127;
+	auto wrong = claim;
+	wrong.Capability[0] ^= std::byte{1};
+	CHECK_FALSE(client::ReconcilePortalInputHistory(store, wrong, motion));
+	REQUIRE(client::ReconcilePortalInputHistory(store, claim, motion));
+	CHECK(store.Resource<client::PortalInputHistory>()->Count == 0);
+	Store authority{"portal-history-authority"};
+	scene::InstallServices(authority);
+	engine::core::ByteWriter replacement;
+	REQUIRE(authority.Save(replacement));
+	engine::core::ByteReader replacing(replacement.Bytes());
+	REQUIRE(store.Apply(replacing, engine::ecs::ApplyMode::Authoritative));
+	REQUIRE(store.Resource<client::PortalInputHistory>());
+	CHECK(store.Resource<client::PortalInputHistory>()->Claim == claim);
+	CHECK(store.Resource<client::PortalInputHistory>()->LastRecordedTick == 1127);
+	engine::core::ByteWriter saved;
+	REQUIRE(store.Save(saved));
+	Store restored{"portal-history-restored"};
+	engine::core::ByteReader reader(saved.Bytes());
+	REQUIRE(restored.Apply(reader, engine::ecs::ApplyMode::Authoritative));
+	REQUIRE(restored.Resource<client::PortalInputHistory>());
+	CHECK(restored.Resource<client::PortalInputHistory>()->Claim.Destination.empty());
+	CHECK(restored.Resource<client::PortalInputHistory>()->LastRecordedTick == 0);
+	CHECK_FALSE(client::RecordPortalPredictionInput(restored, 1, {{1, 0, 0}, false}, .01f));
+}
+
+TEST_CASE(
+	"portal replay keeps simulation time through coalesced input and adoption",
+	"[client][prediction][portal-input-history]"
+) {
+	namespace scene = engine::scene;
+	Replica replica;
+	auto &store = replica.World;
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "viewer", false, 91);
+	const auto model = scene::LoadCharacter(store, player);
+	const auto rig = *store.Get<scene::Character>(model);
+	const auto camera = store.CreatePredictedInstance(scene::CameraClass(), "camera");
+	store.Set(camera, scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	store.SetResource(scene::ActiveCamera{camera});
+	store.SetResource(scene::LocalPlayer{player});
+	store.SetAdoptOnly(true);
+	client::ReconcileLocalPlayerPrediction(store, 100, {});
+	auto prediction = *store.Resource<client::LocalPlayerPrediction>();
+	REQUIRE(scene::PrepareCameraCharacterHold(store, player, prediction.Frame));
+	store.DestroyInstance(rig.Root);
+	REQUIRE(scene::ActivateCameraCharacterHold(store));
+	const auto held = *store.Resource<scene::CameraCharacterHold>();
+	prediction.Player = held.Player;
+	prediction.Root = held.Root;
+	store.SetResource(prediction);
+	engine::game::PortalResume claim;
+	claim.Transfer = {"source", 1, 1};
+	claim.Destination = "destination";
+	claim.DestinationIncarnation = 2;
+	claim.SourceSession = 3;
+	claim.Capability.fill(std::byte{42});
+	REQUIRE(client::BeginPortalInputHistory(store, claim, {}, 100));
+	constexpr float inputStep = 1.0f / 60;
+	const engine::game::MoveInput move{{1, 0, 0}, false, inputStep};
+	for (uint64_t tick = 101; tick <= 104; ++tick)
+		REQUIRE(client::RecordPortalPredictionInput(store, tick, move, inputStep));
+	engine::script::PortalTransferMotion motion;
+	motion.DestinationIncarnation = 2;
+	motion.DestinationTick = 50;
+	motion.InputTick = 100;
+	motion.Linear = {16, 0, 0};
+	motion.WalkSpeed = 16;
+	motion.JumpSpeed = 7;
+	motion.Grounded = true;
+	motion.SimulationSeconds = 1;
+	REQUIRE(client::ReconcilePortalInputHistory(store, claim, motion));
+	const float before = store.Resource<client::LocalPlayerPrediction>()->Frame.Position.X;
+	CHECK(before == Approx(16 * inputStep * 4));
+	REQUIRE(client::RecordPortalPredictionInput(store, 105, move, inputStep));
+	motion.DestinationTick++;
+	motion.InputTick = 103;
+	motion.SimulationSeconds += inputStep * 2;
+	motion.Frame.Position.X = 16 * inputStep * 2;
+	REQUIRE(client::ReconcilePortalInputHistory(store, claim, motion));
+	const float after = store.Resource<client::LocalPlayerPrediction>()->Frame.Position.X;
+	CHECK(after - before == Approx(16 * inputStep));
+	CHECK(store.Resource<client::PortalInputHistory>()->CoveredThrough == 103);
+	CHECK(store.Resource<client::PortalInputHistory>()->Clock.InputLeadSeconds == Approx(inputStep));
+
+	const auto continuation = client::CapturePortalPrediction(store, claim);
+	REQUIRE(continuation);
+	Replica destination;
+	auto &arrived = destination.World;
+	scene::InstallServices(arrived);
+	const auto arrivedPlayer = scene::AddPlayer(arrived, "arrived", false, 92);
+	const auto arrivedModel = scene::LoadCharacter(arrived, arrivedPlayer);
+	const auto arrivedRig = *arrived.Get<scene::Character>(arrivedModel);
+	arrived.SetResource(scene::LocalPlayer{arrivedPlayer});
+	arrived.SetAdoptOnly(true);
+	REQUIRE(client::AdoptPortalPrediction(arrived, arrivedPlayer, *continuation));
+	CHECK(
+		arrived.Resource<client::LocalPlayerPrediction>()->PositionCorrection ==
+		continuation->PositionCorrection
+	);
+	CHECK(
+		arrived.Resource<client::LocalPlayerPrediction>()->CorrectionSeconds ==
+		continuation->CorrectionSeconds
+	);
+	engine::game::PlayerMotion native{arrivedPlayer, arrivedRig.Root, motion};
+	native.Motion.DestinationTick++;
+	native.Motion.InputTick = 105;
+	native.Motion.SimulationSeconds += inputStep * 2;
+	native.Motion.Frame.Position.X += 16 * inputStep * 2;
+	auto inputs = continuation->Inputs;
+	inputs.push_back({106, engine::game::EncodeMoveInput(move)});
+	REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 106));
+	REQUIRE(client::ReconcileNativePlayerPrediction(arrived, inputs, 103) == 105);
+	CHECK(
+		arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.X - after == Approx(16 * inputStep)
+	);
+
+	SECTION("completed time overtakes input acknowledgement") {
+		native.Motion.DestinationTick += 2;
+		native.Motion.SimulationSeconds += inputStep * 4;
+		native.Motion.Frame.Position.X += 16 * inputStep * 4;
+		REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 106));
+		for (uint64_t tick = 107; tick <= 109; ++tick) {
+			auto pendingMove = move;
+			pendingMove.Jump = tick == 107;
+			inputs.push_back({tick, engine::game::EncodeMoveInput(pendingMove)});
+		}
+		REQUIRE(client::ReconcileNativePlayerPrediction(arrived, inputs, 105) == 105);
+		CHECK_FALSE(arrived.Resource<client::LocalPlayerPrediction>()->Humanoid.Grounded);
+		CHECK(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.Y == Approx(7 * inputStep));
+		CHECK(
+			arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position.X == Approx(16 * inputStep * 9)
+		);
+	}
+	SECTION("slow client accepts authority beyond its entire input horizon") {
+		for (uint64_t tick = 106; tick <= 108; ++tick) {
+			native.Motion.DestinationTick += 4;
+			native.Motion.SimulationSeconds += inputStep * 4;
+			native.Motion.InputTick = tick;
+			native.Motion.Frame.Position.X += 16 * inputStep * 4;
+			auto pendingMove = move;
+			pendingMove.Jump = true;
+			inputs.push_back({tick + 1, engine::game::EncodeMoveInput(pendingMove)});
+			REQUIRE(client::AcceptNativePlayerMotion(arrived, native, tick + 1));
+			REQUIRE(client::ReconcileNativePlayerPrediction(arrived, inputs, tick - 1) == tick);
+			const auto *replayed = arrived.Resource<client::LocalPlayerPrediction>();
+			CHECK(replayed->Frame.Position == native.Motion.Frame.Position);
+			CHECK_FALSE(replayed->Humanoid.Grounded);
+			CHECK(replayed->Linear.Y == Approx(7));
+			const auto *applied = arrived.Resource<client::NativePlayerPrediction>();
+			CHECK(applied->AppliedPoseTick == native.Motion.DestinationTick);
+			CHECK(applied->Clock.InputLeadSeconds == Approx(-inputStep));
+		}
+	}
+	SECTION("held authority advances beyond the recorded input horizon") {
+		motion.DestinationTick += 4;
+		motion.SimulationSeconds += inputStep * 4;
+		motion.InputTick = 105;
+		motion.Frame.Position.X += 16 * inputStep * 4;
+		REQUIRE(client::ReconcilePortalInputHistory(store, claim, motion));
+		CHECK(store.Resource<client::LocalPlayerPrediction>()->Frame.Position == motion.Frame.Position);
+		CHECK(store.Resource<client::PortalInputHistory>()->CoveredThrough == 105);
+		CHECK(store.Resource<client::PortalInputHistory>()->Clock.InputLeadSeconds == Approx(0));
+	}
+	SECTION("stale simulation clock does not replace prediction") {
+		native.Motion.DestinationTick++;
+		REQUIRE(client::AcceptNativePlayerMotion(arrived, native, 106));
+		const auto previous = arrived.Resource<client::LocalPlayerPrediction>()->Frame;
+		CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, inputs, 105));
+		CHECK(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position == previous.Position);
+	}
 }

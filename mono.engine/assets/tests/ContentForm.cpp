@@ -46,6 +46,7 @@ namespace {
 		{"fbx", ContentForm::Fbx, AssetKind::Mesh, true},
 		{"pmx", ContentForm::Pmx, AssetKind::Mesh, true},
 		{"aanim", ContentForm::AAnim, AssetKind::Animation, false},
+		{"ashader", ContentForm::AShader, AssetKind::Shader, false},
 
 		{"atex", ContentForm::ATex, AssetKind::Texture, false},
 		{"png", ContentForm::Png, AssetKind::Texture, true},

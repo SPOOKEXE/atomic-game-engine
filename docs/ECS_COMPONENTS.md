@@ -122,6 +122,7 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
+| `physics.CopiedContactCache` | 32 | 8 | yes | . | . | . | Per-tick copied contact geometry and pre-step body poses used for portal collision correction. |
 | `physics.PhysicsClock` | 48 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
 | `physics.PhysicsWorld` | 10632 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
 | `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
@@ -136,6 +137,7 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
+| `scene.Accessory` | 16 | 8 | yes | yes | . | . | On an accessory: the matching handle and character attachment references. The hierarchy determines equip state; the pose pass carries its handle as one CharacterLimb. |
 | `scene.ActiveCamera` | 16 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`. |
 | `scene.AnimationBuffer` | 32 | 8 | yes | . | . | . | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit. |
 | `scene.AnimationClip` | 16 | 8 | yes | . | . | . | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
@@ -151,7 +153,10 @@ state until v0.19.
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
 | `scene.CFrameValue` | 28 | 4 | yes | yes | . | . | The coordinate frame stored by a `CFrameValue` instance. |
 | `scene.Camera` | 28 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
-| `scene.CameraController` | 64 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override. |
+| `scene.CameraCharacterHold` | 88 | 8 | yes | yes | . | . | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending. |
+| `scene.CameraController` | 144 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - orbit angles and distance, zoom and sensitivity limits, camera mode, the poppercam distance override, and the resolved subject's observed portal transit. |
+| `scene.CameraPortalView` | 176 | 8 | yes | . | . | . | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses. |
+| `scene.CameraSubject` | 16 | 8 | yes | yes | . | . | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current. |
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
 | `scene.CharacterLimb` | 40 | 8 | yes | yes | . | . | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick. |
@@ -189,9 +194,9 @@ state until v0.19.
 | `scene.PlayerRespawn` | 8 | 8 | yes | yes | . | . | Present only between losing a character and gaining the next, and holds the tick `UpdateRespawns` will spawn the replacement on. |
 | `scene.PlayerTeam` | 8 | 8 | yes | yes | . | . | On a `Player`: which `Team` instance it belongs to. A player on no team simply has no row. |
 | `scene.PlayersService` | 24 | 8 | yes | yes | . | . | On the single `Players` service instance: the admission cap, the next auto-assigned user id, the default respawn delay, and whether characters load automatically. |
-| `scene.Portal` | 16 | 8 | yes | yes | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
+| `scene.Portal` | 16 | 8 | yes | . | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
 | `scene.PortalProxy` | 8 | 8 | yes | yes | . | . | A piece of the far room, made and unmade inside a single tick, so a body standing in a portal has the other side's floor under it. Never replicated. |
-| `scene.PortalTransit` | 8 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
+| `scene.PortalTransit` | 36 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
 | `scene.PortalTransitSeen` | 4 | 4 | yes | yes | . | . | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice. |
 | `scene.PostProcessing` | 4 | 4 | yes | . | . | . | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place. |
 | `scene.PreviousTransform` | 28 | 4 | yes | yes | . | . | Where `Transform::Frame` stood when the current tick began. The presentation pass blends between the two so drawing stays smooth between ticks. |
@@ -203,7 +208,7 @@ state until v0.19.
 | `scene.ShaderLens` | 32 | 4 | yes | . | . | . | A placed spherical HDR image-warp region. Its lens shader name and numeric controls are authored world data; the renderer resolves a bounded value snapshot before presentation. |
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
-| `scene.Skeleton` | 8 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
+| `scene.Skeleton` | 12 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
 | `scene.SkyboxCompute` | 52 | 4 | yes | . | . | . | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture. |
 | `scene.SkyboxTextures` | 28 | 4 | yes | . | . | . | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded. |
 | `scene.Sound` | 20 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
@@ -241,6 +246,9 @@ state until v0.19.
 | `script.Disabled` | 0 | 1 | . | . | . | . | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all. |
 | `script.JavaScriptSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column. |
 | `script.LuaSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference. |
+| `script.PortalContactRequests` | 32 | 8 | yes | . | . | . | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts. |
+| `script.PortalPlayerInput` | 2136 | 8 | yes | . | yes | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
+| `script.PortalTransfers` | 104 | 8 | yes | . | . | . | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
 | `script.SourceCache` | 32 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
@@ -255,7 +263,8 @@ state until v0.19.
 | `world.Inbox` | 24 | 8 | yes | . | . | . | Per-world singleton holding what reached this world at the last barrier, sorted by sender and sequence, and replaced wholesale each barrier rather than appended to. |
 | `world.Outbox` | 40 | 8 | yes | . | . | . | Per-world singleton holding bus requests this world has made and not yet handed to the driver, in order, with the ticket and sequence counters that number them. |
 | `world.Replica` | 12 | 4 | yes | . | yes | . | Marks a world as a mirror of one the server owns, naming the world it mirrors and whose copy it is. A replica may read its inbox but must never write to a bus. |
+| `world.TickExchangeEndpoints` | 24 | 8 | yes | . | . | . | Named tick-exchange channels opened by this world, with incarnations retained across snapshots to reject stale deliveries. |
 
 ---
 
-181 components registered by the engine, 0 without a purpose line.
+190 components registered by the engine, 0 without a purpose line.

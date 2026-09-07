@@ -391,6 +391,20 @@ namespace engine::graph {
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
 
+	// Complete spatial scene composition in linear HDR before tone mapping.
+	// Host and screen interfaces remain after the world image boundary.
+	PipelineDocument DefaultWorldHdrDocument();
+
+	// Imported whole-eye HDR, one tone map, then local screen interface and output.
+	PipelineDocument DefaultEyeDocument();
+
+	// Intermediate opaque body composition. Uses the accepted room's camera and
+	// lighting, reads an OpaqueLighting image/depth pair, and captures the composed
+	// pair at "export". Later world layers and presentation remain the caller's job.
+	// Ordered layers require two paired eye-image imports, nearest first; an
+	// absent layer must be represented by a captured empty image.
+	PipelineDocument DefaultPortalBodyDocument(bool seamProjection = false, bool orderedLayers = false);
+
 	// The deferred fallback for devices without compute or storage images.
 	PipelineDocument DefaultPbrTierBDocument();
 

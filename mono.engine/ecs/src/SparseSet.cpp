@@ -1,6 +1,8 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/SparseSet.hpp>
 
 #include <algorithm>
+#include <array>
 
 namespace engine::ecs {
 
@@ -233,7 +235,7 @@ namespace engine::ecs {
 		}
 
 		Slot &slot = Reach(index);
-		slot.Generation = generation == 0 ? FIRST_GENERATION : generation;
+		slot.Generation = live && generation == 0 ? FIRST_GENERATION : generation;
 		slot.Live = live;
 		slot.Location = EntityLocation{};
 	}
@@ -290,6 +292,84 @@ namespace engine::ecs {
 	void SparseSet::FinishRestore(size_t issued, size_t predictedIssued) {
 		Live_ = RebuildFreeList(EntityRange::Authoritative, issued) +
 				RebuildFreeList(EntityRange::Predicted, predictedIssued);
+	}
+
+	void SparseSet::WriteAllocationState(core::ByteWriter &writer) const {
+		for (const Region *region : {&Authority, &Predicted}) {
+			writer.WriteUInt32(static_cast<uint32_t>(region->Epoch.size()));
+			for (uint32_t epoch : region->Epoch) {
+				writer.WriteUInt32(epoch);
+			}
+			// Released-page entries cannot affect the next allocation. Keep only the
+			// reusable entries, in their original stack order.
+			const auto reusable = [region](uint32_t index) { return LocalOf(index) < region->Issued; };
+			writer.WriteUInt32(
+				static_cast<uint32_t>(
+					std::count_if(region->FreeList.begin(), region->FreeList.end(), reusable)
+				)
+			);
+			for (uint32_t index : region->FreeList) {
+				if (reusable(index)) {
+					writer.WriteUInt32(index);
+				}
+			}
+		}
+	}
+
+	bool SparseSet::ReadAllocationState(core::ByteReader &reader) {
+		struct AllocationState {
+			std::vector<uint32_t> Epoch;
+			std::vector<uint32_t> FreeList;
+		};
+		std::array<AllocationState, 2> restored;
+		const std::array<Region *, 2> regions{&Authority, &Predicted};
+		for (size_t regionIndex = 0; regionIndex < regions.size(); ++regionIndex) {
+			const Region &region = *regions[regionIndex];
+			AllocationState &allocation = restored[regionIndex];
+			const uint32_t owned = regionIndex == 0 ? AUTHORITATIVE_INDICES : PREDICTED_INDICES;
+			const uint32_t epochCount = reader.ReadUInt32();
+			if (reader.Failed() || epochCount > SeatOf(owned - 1).Page + 1 ||
+				epochCount < region.Pages.size() || epochCount > reader.Remaining() / sizeof(uint32_t)) {
+				return false;
+			}
+			allocation.Epoch.reserve(epochCount);
+			for (uint32_t page = 0; page < epochCount; ++page) {
+				allocation.Epoch.push_back(reader.ReadUInt32());
+			}
+
+			const uint32_t freeCount = reader.ReadUInt32();
+			if (reader.Failed() || freeCount != region.FreeList.size() ||
+				freeCount > reader.Remaining() / sizeof(uint32_t)) {
+				return false;
+			}
+			allocation.FreeList.reserve(freeCount);
+			for (uint32_t free = 0; free < freeCount; ++free) {
+				const uint32_t index = reader.ReadUInt32();
+				if (IsPredicted(index) != (regionIndex == 1) || LocalOf(index) >= region.Issued ||
+					Live(index)) {
+					return false;
+				}
+				allocation.FreeList.push_back(index);
+			}
+			std::vector<uint32_t> ordered = allocation.FreeList;
+			std::sort(ordered.begin(), ordered.end());
+			if (std::adjacent_find(ordered.begin(), ordered.end()) != ordered.end()) {
+				return false;
+			}
+		}
+		for (size_t regionIndex = 0; regionIndex < regions.size(); ++regionIndex) {
+			Region &region = *regions[regionIndex];
+			region.Epoch = std::move(restored[regionIndex].Epoch);
+			region.FreeList = std::move(restored[regionIndex].FreeList);
+			// Loading replaces this world's allocation history. The unwritten tail
+			// must inherit the saved page epoch, not the receiver's previous world.
+			const size_t resident = CoveredSlots(region);
+			for (size_t local = region.Issued; local < resident; ++local) {
+				const Seat seat = SeatOf(static_cast<uint32_t>(local));
+				(*region.Pages[seat.Page])[seat.Offset] = Slot{region.Epoch[seat.Page]};
+			}
+		}
+		return true;
 	}
 
 	void SparseSet::Adopt(uint32_t index, uint32_t generation) {

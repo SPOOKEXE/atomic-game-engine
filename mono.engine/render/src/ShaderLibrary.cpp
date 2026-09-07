@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/render/ShaderCompiler.hpp>
@@ -16,6 +17,42 @@
 namespace engine::render {
 
 	namespace {
+		// Accept only successful bytes. Failed attempts keep prior words and
+		// their reflection together; device consumers see no replacement event.
+		bool ApplySourceCompilation(
+			ShaderModule &module, ShaderCompilation result, const scene::ShaderText &text, core::Name name
+		) {
+			if (module.StoreIdentity != text.StoreIdentity) {
+				module = {};
+			}
+			module.StoreIdentity = text.StoreIdentity;
+			module.AttemptSource = text.Source;
+			module.Authored = true;
+			module.AttemptRevision = text.Revision;
+			module.AttemptError = std::move(result.Error);
+			if (result.Failed) {
+				if (module.Error.empty() && !module.SpirV.empty()) {
+					ENGINE_WARN(
+						"shader '{}': keeping accepted revision {} after failed edit: {}",
+						name.Text(),
+						module.Revision,
+						module.AttemptError
+					);
+					return false;
+				}
+				module.Error = module.AttemptError;
+				return true;
+			}
+			module.Error.clear();
+			module.AttemptError.clear();
+			module.Revision = text.Revision;
+			module.BuiltIn = false;
+			module.SpirV = std::move(result.SpirV);
+			module.Capabilities = std::move(result.Capabilities);
+			module.Optimizations = std::move(result.Optimizations);
+			return true;
+		}
+
 		// The shaders this engine ships.
 		//
 		// **Two, and adding a third is a decision rather than a file drop.**
@@ -156,36 +193,20 @@ namespace engine::render {
 			const bool held = found != State->Modules.end();
 
 			if (text.Found) {
-				// **The integer compare that keeps a GLSL front end out of the
-				// frame loop.** A script whose revision has not moved since it
-				// was compiled is the steady state of every world that is not
-				// being edited. A module that came from a built-in is
-				// recompiled whatever the revision says, because a script
-				// appearing under a built-in's name is an override arriving.
-				if (held && !found->second.BuiltIn && found->second.Revision == text.Revision) {
+				// Failed overrides also record the attempt, so a retained built-in
+				// does not trigger another compile until the selected source changes.
+				if (held && found->second.Authored && found->second.StoreIdentity == text.StoreIdentity &&
+					found->second.AttemptSource == text.Source &&
+					found->second.AttemptRevision == text.Revision) {
 					continue;
 				}
 
 				ShaderCompilation result =
 					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
 
-				ShaderModule module;
-				module.Revision = text.Revision;
-				if (result.Failed) {
-					// **A diagnostic and not a fatal**, which is
-					// `render/AGENTS.md`'s split between the two compilers: a
-					// built-in that fails to compile fails the build, and a
-					// shader somebody is writing fails with a line number and
-					// the engine keeps running.
-					module.Error = std::move(result.Error);
-				} else {
-					module.SpirV = std::move(result.SpirV);
-					module.Capabilities = std::move(result.Capabilities);
-					module.Optimizations = std::move(result.Optimizations);
+				if (ApplySourceCompilation(State->Modules[name.Id()], std::move(result), text, name)) {
+					State->Changed.push_back(name);
 				}
-
-				State->Modules[name.Id()] = std::move(module);
-				State->Changed.push_back(name);
 				continue;
 			}
 
@@ -193,11 +214,13 @@ namespace engine::render {
 			// engine runs**, so a held module of either kind is left alone. That
 			// is what stops a typo being re-reported once a frame for the life
 			// of a session.
-			if (held) {
+			if (held && !found->second.Authored) {
+				found->second.StoreIdentity = store.Identity();
 				continue;
 			}
 
 			ShaderModule module;
+			module.StoreIdentity = store.Identity();
 			if (IsBuiltInShader(name.Text())) {
 				module.BuiltIn = true;
 				// SPIR-V, whatever the device takes. This library's output is
@@ -249,25 +272,17 @@ namespace engine::render {
 			const bool held = found != State->LensModules.end();
 
 			if (text.Found) {
-				if (held && !found->second.BuiltIn && found->second.Revision == text.Revision) {
+				if (held && found->second.Authored && found->second.StoreIdentity == text.StoreIdentity &&
+					found->second.AttemptSource == text.Source &&
+					found->second.AttemptRevision == text.Revision) {
 					continue;
 				}
 
 				ShaderCompilation result =
 					State->Compiler.Compile(text.Code, ShaderStage::Fragment, name.Text());
-				ShaderModule module;
-				module.Authored = true;
-				module.Revision = text.Revision;
-				if (result.Failed) {
-					module.Error = std::move(result.Error);
-				} else {
-					module.SpirV = std::move(result.SpirV);
-					module.Capabilities = std::move(result.Capabilities);
-					module.Optimizations = std::move(result.Optimizations);
+				if (ApplySourceCompilation(State->LensModules[name.Id()], std::move(result), text, name)) {
+					State->LensChanged.push_back(name);
 				}
-
-				State->LensModules[name.Id()] = std::move(module);
-				State->LensChanged.push_back(name);
 				continue;
 			}
 
@@ -276,10 +291,12 @@ namespace engine::render {
 			// ShaderLens still names it, so resolve the fallback rather than
 			// retaining the removed source's old GPU pipeline.
 			if (held && !found->second.Authored) {
+				found->second.StoreIdentity = store.Identity();
 				continue;
 			}
 
 			ShaderModule module;
+			module.StoreIdentity = store.Identity();
 			if (IsBuiltInLensShader(name.Text())) {
 				module.BuiltIn = true;
 				module.SpirV = ReadWords(

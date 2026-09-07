@@ -12,10 +12,14 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Animation.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Interpolation.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
@@ -33,6 +37,45 @@
 #include <type_traits>
 
 namespace engine::render {
+	void SelectFirstPersonBody(const ecs::Store &store, View &view) {
+		view.EyeRig = 0;
+		view.EyePlayer.reset();
+		const auto *active = store.Resource<scene::ActiveCamera>();
+		const auto *controller = store.Resource<scene::CameraController>();
+		if (!active || !controller || controller->Mode != scene::CameraMode::LockFirstPerson) return;
+		const auto *subject = store.Get<scene::CameraSubject>(active->Entity);
+		if (!subject || !store.Has<scene::Humanoid>(subject->Target)) return;
+		const auto root = scene::CameraSubjectRoot(store, active->Entity);
+		if (root == ecs::NULL_ENTITY) return;
+		view.EyeRig = root.Id;
+		const auto player = scene::PlayerOf(store, store.ParentOf(root));
+		if (const auto *identity = store.Get<scene::PlayerIdentity>(player))
+			view.EyePlayer = identity->UserId;
+		const auto *held = store.Resource<scene::CameraCharacterHold>();
+		const auto *body = store.Resource<scene::CameraBodyPose>();
+		if (held && held->Active && held->Root == root &&
+			(store.Alive(held->SourceRoot) || (body && body->SourceRoot == held->SourceRoot)))
+			view.EyeRig = held->SourceRoot.Id;
+	}
+
+	void ResolveEyeBody(ecs::Store &store, View &view) {
+		view.EyeRig = 0;
+		if (!view.EyePlayer) return;
+		ENGINE_PROFILE_CAT("eye body resolve", core::ProfileCategory::Render);
+		const auto *held = store.Resource<scene::CameraCharacterHold>();
+		bool ambiguous = false;
+		store.Each<const scene::PlayerIdentity, const scene::PlayerCharacter>(
+			[&](ecs::Entity player, const scene::PlayerIdentity &identity, const scene::PlayerCharacter &) {
+				if (identity.UserId != *view.EyePlayer || (held && player == held->Player)) return;
+				const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
+				if (!rig || rig->Owner != player || !store.Alive(rig->Root)) return;
+				ambiguous = ambiguous || view.EyeRig != 0;
+				view.EyeRig = rig->Root.Id;
+			}
+		);
+		if (ambiguous) view.EyeRig = 0;
+	}
+
 	namespace {
 		uint64_t FoldPresentation(uint64_t signature, uint64_t word) {
 			return scene::MixSignature(signature, word);
@@ -46,6 +89,24 @@ namespace engine::render {
 				word = (word ^ std::to_integer<uint8_t>(byte)) * 1099511628211ull;
 			}
 			return FoldPresentation(signature, word);
+		}
+
+		uint64_t ProjectionSignature(const View &view) {
+			uint64_t signature = FoldPresentation(0, view.Projection.has_value() ? 1u : 0u);
+			signature = FoldPresentation(signature, view.SurfaceBudget.has_value());
+			if (view.SurfaceBudget) {
+				signature = FoldPresentation(signature, view.SurfaceBudget->Depth);
+				signature = FoldPresentation(signature, view.SurfaceBudget->Pixels);
+			}
+			if (view.Projection) {
+				for (int column = 0; column < 4; column++) {
+					for (int row = 0; row < 4; row++) {
+						const float value = (*view.Projection)[column][row];
+						signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+					}
+				}
+			}
+			return signature;
 		}
 
 		template <typename Value>
@@ -76,6 +137,7 @@ namespace engine::render {
 
 		uint64_t signature = FoldPresentationObject(0, view.CameraFrame);
 		signature = FoldPresentationObject(signature, view.Camera);
+		signature = FoldPresentation(signature, ProjectionSignature(view));
 		signature = FoldPresentation(signature, view.World);
 		signature = FoldPresentation(signature, view.WorldName.Id());
 		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
@@ -88,6 +150,7 @@ namespace engine::render {
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state) {
 		ScenePresentationSignatures signatures;
+		const uint64_t projection = ProjectionSignature(view);
 		uint64_t &objects = signatures.Objects;
 		const bool objectLayer = !view.Instances.empty() || view.Grid.Enabled || state.PostProcess.IsValid();
 		if (objectLayer) {
@@ -95,8 +158,11 @@ namespace engine::render {
 			objects = FoldPresentationSpan(objects, view.JointFrames);
 			objects = FoldPresentationObject(objects, view.CameraFrame);
 			objects = FoldPresentationObject(objects, view.Camera);
+			objects = FoldPresentation(objects, projection);
 			objects = FoldPresentation(objects, view.World);
 			objects = FoldPresentation(objects, view.WorldName.Id());
+			objects = FoldPresentation(objects, view.EyeRig);
+			objects = FoldPresentationSpan(objects, view.EyeHiddenRows);
 			objects = FoldPresentation(objects, view.Pipeline.Id());
 			objects = FoldPresentationObject(objects, view.Grid);
 			objects = FoldPresentation(objects, state.Animation);
@@ -126,6 +192,7 @@ namespace engine::render {
 		if (!EnvironmentLayerPresent(state.Lighting)) {
 			environmentSignature = 0;
 		} else {
+			environmentSignature = FoldPresentation(environmentSignature, projection);
 			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direction);
 			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Ambient);
 			environmentSignature =
@@ -178,6 +245,7 @@ namespace engine::render {
 		uint64_t &particles = signatures.Particles;
 		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty();
 		if (particleLayer) {
+			particles = FoldPresentation(particles, projection);
 			particles = FoldPresentation(particles, view.ParticleRevision);
 			particles = FoldPresentation(particles, view.ParticleLayoutRevision);
 			particles = FoldPresentation(particles, view.ParticleResidentRevision);
@@ -186,8 +254,25 @@ namespace engine::render {
 		}
 
 		uint64_t &portals = signatures.Portals;
-		const bool portalLayer = !view.Portals.empty() || !view.Surfaces.empty() || !view.Foreign.empty();
+		const bool eyeLayer = view.EyeImage != 0 || view.EyeImageKey.IsValid() ||
+							  std::any_of(
+								  view.EyeTransparentImages.begin(),
+								  view.EyeTransparentImages.end(),
+								  [](uint64_t image) { return image != 0; }
+							  );
+		const bool portalLayer =
+			eyeLayer || !view.Portals.empty() || !view.Surfaces.empty() || !view.Foreign.empty();
 		if (portalLayer) {
+			if (eyeLayer) {
+				portals = FoldPresentation(portals, view.EyeImage);
+				for (const auto image : view.EyeTransparentImages)
+					portals = FoldPresentation(portals, image);
+				portals = FoldPresentation(portals, view.EyeImageKey.Id());
+				portals = FoldPresentation(portals, view.World);
+				portals = FoldPresentation(portals, view.WorldName.Id());
+				portals = FoldPresentation(portals, view.Slot);
+			}
+			portals = FoldPresentation(portals, projection);
 			portals = FoldPresentation(portals, state.SurfaceBounces);
 			portals = FoldPresentation(portals, state.SurfaceLimit);
 			portals = FoldPresentation(portals, scene::SignatureOf(view.Foreign));
@@ -203,6 +288,9 @@ namespace engine::render {
 				portals = FoldPresentationObject(portals, portal.Second);
 				portals = FoldPresentationObject(portals, portal.Warp);
 				portals = FoldPresentationObject(portals, portal.TagFilter);
+				portals = FoldPresentationObject(portals, portal.ExternalImage);
+				portals = FoldPresentationObject(portals, portal.ImportedImage);
+				portals = FoldPresentation(portals, portal.ImagePortal.Id());
 			}
 
 			portals = FoldPresentation(portals, view.Surfaces.size());
@@ -527,7 +615,6 @@ namespace engine::render {
 			drawList->Instances.resize(drawList->BaseInstanceCount);
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 			return;
 		}
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
@@ -544,7 +631,6 @@ namespace engine::render {
 					CollectSkinPalettes(store, *drawList);
 				}
 				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-				(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 				return;
 			}
 			// A source query changed shape without a matching component epoch. The
@@ -806,21 +892,8 @@ namespace engine::render {
 		}
 		drawList->BaseInstanceCount = drawList->Instances.size();
 
-		// **After the metric, deliberately.** `render.instances` answers
-		// "how much scene is there", and a number that moved when somebody
-		// turned a debugging aid on would stop being comparable across the
-		// runs it exists to compare.
-		//
-		// The markers are appended rather than written by the loop above
-		// because they are not entities: nothing in the world matches the
-		// query, so there is no row to size the list against. `push_back`
-		// past the shrink costs one reallocation on the frame a mirror is
-		// created and nothing after it - the capacity stays.
-		// **Before the markers, so a marker is never cloned.** A face bar is
-		// a debugging aid lying on a pane, which means it straddles that
-		// pane by construction - and a bar cloned onto the far side would
-		// mark a face nothing projects off.
-		//
+		// Seam clones belong to scene presentation; diagnostic face markers
+		// are appended only by callers explicitly requesting inspection geometry.
 		// **One far-side copy and not two, which is what this used to
 		// draw.** There were two passes producing it - one walked the world
 		// for things that can move, the other walked the draw list - and
@@ -837,8 +910,6 @@ namespace engine::render {
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
 		(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-
-		(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
 	}
 
 	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {
@@ -851,7 +922,8 @@ namespace engine::render {
 			const ecs::Entity source(instance.Source);
 			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(source);
 			if (skeleton == nullptr || skeleton->JointCount == 0 ||
-				skeleton->JointCount > scene::MAX_JOINTS) {
+				skeleton->JointCount > scene::MAX_JOINTS || !std::isfinite(skeleton->PoseScale) ||
+				skeleton->PoseScale <= 0) {
 				continue;
 			}
 
@@ -861,8 +933,9 @@ namespace engine::render {
 			store.EachDescendant(source, [&](ecs::Entity descendant) {
 				const scene::Bone *bone = store.Get<scene::Bone>(descendant);
 				if (bone != nullptr && bone->Joint < skeleton->JointCount) {
-					drawList.JointFrames[instance.SkinFirst + bone->Joint] =
-						instance.Frame.Inverse() * scene::SkinningFrameOf(*bone);
+					auto frame = instance.Frame.Inverse() * scene::SkinningFrameOf(*bone);
+					frame.Position = frame.Position * (1.0f / skeleton->PoseScale);
+					drawList.JointFrames[instance.SkinFirst + bone->Joint] = frame;
 				}
 			});
 		}
@@ -1284,4 +1357,307 @@ namespace engine::render {
 			}
 		);
 	}
+	namespace {
+		using OrderedView = std::pair<uint32_t, SurfaceView>;
+		std::vector<OrderedView> &OrderedSurfaceViews() {
+			static thread_local std::vector<OrderedView> ordered;
+			return ordered;
+		}
+	}
+	void ApplySurfaceSlots(
+		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+	) {
+		static thread_local std::vector<scene::SurfaceSlot> parts;
+		parts.assign(slots.begin(), slots.end());
+		// Multiple cameras on one part follow AimSurfaceCameras' last-camera
+		// ownership. The highest camera retains that decision without a sort allocation.
+		std::sort(parts.begin(), parts.end(), [](const auto &left, const auto &right) {
+			return left.Part.Id == right.Part.Id ? left.Camera.Id < right.Camera.Id
+												 : left.Part.Id < right.Part.Id;
+		});
+		for (auto &instance : instances) {
+			if (instance.SourceWorld.IsValid() && instance.SourceWorld != world) {
+				continue;
+			}
+			const auto found = std::upper_bound(
+				parts.begin(), parts.end(), instance.Source, [](uint64_t source, const auto &part) {
+					return source < part.Part.Id;
+				}
+			);
+			if (found != parts.begin() && (found - 1)->Part.Id == instance.Source) {
+				instance.Surface = (found - 1)->Index;
+			}
+		}
+	}
+
+	size_t CollectPortalViews(
+		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots
+	) {
+		portals.clear();
+
+		// **`GatherPortalSeams`, and never a second measurement of the same
+		// hole.** The rectangle and the map are what `CrossPortals` moves a body
+		// through; a picture that derived them its own way would be a picture
+		// that disagrees with where somebody comes out, which is the exact class
+		// of bug that made the camera and the body pick different panes.
+		static thread_local std::vector<scene::PortalSeam> seams;
+		if (scene::GatherPortalSeams(store, seams) == 0) {
+			return 0;
+		}
+
+		for (auto &seam : seams) {
+			for (const auto &slot : slots) {
+				if (slot.Camera == seam.Camera) {
+					seam.Surface = slot.Index;
+					break;
+				}
+			}
+		}
+
+		for (const scene::PortalSeam &seam : seams) {
+			// **A cross-world pane stays on the surface path**, because a warp
+			// into another world's coordinate space is a stated frame rather than
+			// a derived one - `Portal::DestinationWorld` and
+			// `AttachForeignSurfaces` are the whole of that arrangement, and it
+			// does not recurse.
+			if (seam.Crosses || seam.Surface < 0) {
+				continue;
+			}
+
+			PortalView portal;
+			portal.Index = seam.Surface;
+			portal.Centre = seam.Centre;
+			portal.Normal = seam.Normal;
+			portal.First = seam.First;
+			portal.Second = seam.Second;
+
+			// **The same one map a body is carried by.** `SeamMapping` states it
+			// once for the pane rather than once per side, so what the hole shows
+			// and where walking into it puts you are the same arithmetic.
+			portal.Warp = scene::SeamMapping(seam);
+			portal.TagFilter = seam.TagFilter;
+
+			// The hole at the far end, so the level this one opens can skip it.
+			// A pair is two seams whose `Far` and `Pane` cross over, which is the
+			// only place that pairing is written down.
+			for (const scene::PortalSeam &other : seams) {
+				if (other.Pane == seam.Far && !other.Crosses) {
+					portal.Partner = other.Surface;
+					break;
+				}
+			}
+
+			portals.push_back(portal);
+		}
+
+		return portals.size();
+	}
+
+	size_t CollectSurfaceViews(
+		ecs::Store &store,
+		std::vector<SurfaceView> &views,
+		std::span<const PortalView> portals,
+		const View *viewer,
+		std::span<const scene::SurfaceSlot> slots
+	) {
+		views.clear();
+		OrderedSurfaceViews().clear();
+		static thread_local std::vector<scene::SurfaceSlot> requestSlots;
+		if (viewer != nullptr && slots.empty()) {
+			scene::GatherSurfaceSlots(store, requestSlots);
+			slots = requestSlots;
+		}
+
+		// **The panes, measured once for the whole walk.** A mirror's camera is a
+		// function of its pane and whoever is looking at it, so the renderer needs
+		// the rectangle in order to place that camera for a viewer deeper than the
+		// eye - see `render::SurfaceView::PaneNormal`. Measuring a face is
+		// `GatherSurfacePanes`' business and not this file's: `ReachOf` and the
+		// face's two axes were re-derived in three places once, and a marker drawn
+		// on a face the camera was not projecting off is a debugging aid that lies.
+		//
+		// **Only the mirrors are in here.** A linked portal is a warp rather than a
+		// reflection and the gatherer leaves it out, so a hole cannot pick up a
+		// rectangle that would tell the pass to reflect through it.
+		static thread_local std::vector<scene::SurfacePane> panes;
+		(void)scene::GatherSurfacePanes(store, panes);
+
+		store.Each<const scene::SurfaceCamera, const scene::Camera, const scene::Transform>(
+			// `panes` needs no capture: it has static storage duration, for the
+			// reason every other scratch buffer in this file does - a per-frame
+			// allocation in a walk that runs once per world per frame.
+			[&store, portals, viewer, slots](
+				ecs::Entity entity,
+				const scene::SurfaceCamera &target,
+				const scene::Camera &lens,
+				const scene::Transform &placement
+			) {
+				if (const scene::Portal *portal = store.template Get<scene::Portal>(entity);
+					portal != nullptr && !portal->Enabled) {
+					return;
+				}
+
+				// **A slot the recursive pass owns gets no surface camera.** Both
+				// would draw the same pane - one from a camera derived from this
+				// level and one from a camera placed off the eye - and the second
+				// is the viewpoint error the pass exists to remove. Skipped here
+				// rather than refused in the renderer so the cost of aiming it is
+				// the only thing wasted.
+				const auto claimed = [&](int16_t slot) {
+					for (const PortalView &portal : portals) {
+						if (portal.Index == slot) {
+							return true;
+						}
+					}
+					return false;
+				};
+
+				int16_t index = target.Surface;
+				if (viewer != nullptr) {
+					for (const auto &slot : slots) {
+						if (slot.Camera == entity) {
+							index = slot.Index;
+							break;
+						}
+					}
+				}
+				if (index < 0 || claimed(index)) {
+					return;
+				}
+
+				SurfaceView view;
+				view.Index = index;
+				view.Frame = placement.Frame;
+				view.Width = target.Width;
+				view.Height = target.Height;
+
+				// **The rectangle, when this camera is a mirror on a part.** Left
+				// zero otherwise, which is what tells the pass it may not descend
+				// into this pane: a camera parented to the world has no face to
+				// reflect through, and one showing a second world has no local
+				// geometry behind the glass. Both keep the one eye-derived image
+				// they have always had, which is the arrangement that works today.
+				//
+				// **Matched by entity and not by slot.** Two cameras naming one
+				// index is a scene mistake the renderer resolves by keeping the
+				// first, and matching on the number here would hand the survivor
+				// the loser's rectangle - a camera reflecting through a pane it is
+				// not on, which reads as a mirror showing the wrong room.
+				for (const scene::SurfacePane &pane : panes) {
+					if (pane.Camera != entity) {
+						continue;
+					}
+
+					view.PaneCentre = pane.Centre;
+					view.PaneNormal = pane.Normal;
+					view.PaneFirst = pane.First;
+					view.PaneSecond = pane.Second;
+					view.PaneNear = pane.NearPlane;
+					view.PaneFar = pane.FarPlane;
+					if (viewer != nullptr) {
+						const auto reflected = scene::ReflectCamera(pane, viewer->CameraFrame, {});
+						if (!reflected.Renders) {
+							return;
+						}
+						view.Frame = reflected.Frame;
+						view.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+						view.Mapping = scene::SurfaceMapping(reflected.Lens);
+					}
+
+					break;
+				}
+
+				// **The fitted frustum when there is one, and the plain camera
+				// when there is not.** `AimSurfaceCameras` writes a
+				// `SurfaceLens` for every camera it places - which is every one
+				// parented to a part - and that lens is off-axis and possibly
+				// obliquely clipped, neither of which a field of view can say.
+				//
+				// A surface camera parented to the *world* is placed by whoever
+				// authored it and gets no lens, so it keeps the ordinary
+				// perspective build from its `Camera`. `SurfaceCameras.hpp`
+				// promises that arrangement still works, and this is where the
+				// promise is kept.
+				if (viewer != nullptr && view.PaneNormal.Dot(view.PaneNormal) > 0) {
+					// The explicit viewer already resolved this mirror above.
+				} else if (const scene::SurfaceLens *fitted = store.template Get<scene::SurfaceLens>(entity);
+						   fitted != nullptr) {
+					view.Projection = scene::SurfaceProjection(*fitted, placement.Frame);
+
+					// **And what took the pane to where that frustum was
+					// fitted**, which for a portal is not nothing. The image is
+					// read back by projecting the pane's own world position, so
+					// a camera fitted three hundred units away needs the pane
+					// carried there too - see `scene::SurfaceLens::Mapping`. A
+					// mirror's is the identity and this line is free.
+					//
+					// **Composed by `SurfaceMapping` rather than here**, because
+					// the lens holds a rotation, a centre and a scale and the
+					// order those go in is the sort of thing that is wrong once
+					// and then wrong everywhere.
+					view.Mapping = scene::SurfaceMapping(*fitted);
+				} else {
+					const float aspect = static_cast<float>(target.Width) /
+										 static_cast<float>(std::max<uint16_t>(target.Height, 1));
+					view.Projection = scene::ResolveCamera(placement.Frame, lens, aspect).Projection;
+				}
+
+				// **Opacity here, transparency in the component**, and the flip
+				// happens once. `scene::SurfaceCamera::ImageTransparency` is
+				// authored the way a script thinks - 0 is solid, like every
+				// other transparency in this engine - and the shader multiplies
+				// by the opposite, so converting at the boundary beats one
+				// subtraction in a shader nobody can put a breakpoint in.
+				// **Not clamped here.** The property setter is the authored gate
+				// and `Renderer` clamps again at its own boundary because
+				// `SurfaceView` is a public struct any host fills - a third copy
+				// in between makes none of the three read as the authority, and
+				// a future widening of the range has to find all of them.
+				view.ImageOpacity = 1.0f - target.ImageTransparency;
+
+				// Copied straight across: the renderer applies it and nothing
+				// between here and there has an opinion about it.
+				view.Effect = target.Effect;
+
+				// **And how often it may redraw**, which is the same kind of
+				// pass-through. A surface is a whole scene render and there is
+				// no reason it should keep the screen's rate - see
+				// `scene::SurfaceCamera::FPS` for why the default is a rate
+				// rather than "every frame".
+				view.FPS = target.FPS;
+
+				// **Copied rather than resolved.** The filter is already a mask
+				// on the component, because a name would be a lookup per
+				// instance per pass; whatever authored the camera did the
+				// registration once.
+				view.TagFilter = target.TagFilter;
+
+				// **Kept beside its entity id, because `SurfaceView` does not
+				// carry one and should not.** It is what the renderer takes, and
+				// an entity handle in it would be a world's identifier in a type
+				// the device layer reads.
+				//
+				// The order matters: two cameras claiming one index is a scene
+				// mistake the renderer refuses by keeping the *first*, and
+				// without a stable order there is no first. `Each` walks
+				// archetypes in an order that moves whenever anything changes a
+				// component set.
+				OrderedSurfaceViews().push_back({entity.Id, view});
+			}
+		);
+
+		std::sort(
+			OrderedSurfaceViews().begin(),
+			OrderedSurfaceViews().end(),
+			[](const OrderedView &left, const OrderedView &right) { return left.first < right.first; }
+		);
+
+		views.reserve(OrderedSurfaceViews().size());
+		for (const OrderedView &ordered : OrderedSurfaceViews()) {
+			views.push_back(ordered.second);
+		}
+
+		return views.size();
+	}
+
 }

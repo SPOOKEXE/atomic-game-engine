@@ -344,12 +344,14 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// The handler is a retained VM callback that a replica cannot reconstruct;
 		// the outbox is unsent client traffic that the authority must never echo
 		// into another client.
+		// Portal contact requests and native input queues belong to the authority's tick exchange.
 		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
 							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
 							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
 							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache" ||
 							  name == "script.ScriptClock" || name == "script.TeleportRequestHandler" ||
-							  name == "script.TeleportRequestOutbox";
+							  name == "script.TeleportRequestOutbox" || name == "script.PortalTransfers" ||
+							  name == "script.PortalContactRequests" || name == "script.PortalPlayerInput";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

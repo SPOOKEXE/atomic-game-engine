@@ -122,6 +122,9 @@ namespace engine::replication {
 		// @param nowSeconds The current time.
 		// @return `false` when the link refused it.
 		bool Submit(uint64_t tick, std::span<const std::byte> bytes, double nowSeconds);
+		// Carries an authenticated prior authority's unconfirmed input into a fresh connection.
+		// Resubmission drains before newer input; local budget refusal retains the unsent suffix.
+		bool ContinueInputs(std::span<const Input> inputs, uint64_t coveredThrough);
 
 		// Sends state for the entities this client owns.
 		//
@@ -148,6 +151,12 @@ namespace engine::replication {
 		// @return `true` once admitted.
 		bool Admitted() const {
 			return Phase == Stage::Admitted;
+		}
+
+		// Whether the current transport session can still progress. Admission
+		// remains historical; callers use this to detect a later disconnect.
+		bool Live() const {
+			return Port != nullptr && Port->Live();
 		}
 
 		// Sends a message this module does not read.
@@ -231,11 +240,29 @@ namespace engine::replication {
 			return Replica_.Applied();
 		}
 
-		// The inputs the server has not yet confirmed consuming.
+		// Inputs awaiting the selected delta or application-pose acknowledgement.
 		//
 		// @return The unacknowledged inputs, oldest first.
 		std::span<const Input> Unconfirmed() const {
 			return Prediction_.Pending();
+		}
+
+		// Select before submitting on a new connection when an application pose,
+		// rather than a component delta, supplies the prediction baseline.
+		void UsePoseAcknowledgements() {
+			PoseAcknowledgements = true;
+		}
+		uint64_t PredictionCoverage() const {
+			return Prediction_.CoveredThrough();
+		}
+		// Call only after applying the matching pose. Future or uncovered prefixes
+		// cannot retire the retained inputs.
+		bool AcknowledgePrediction(uint64_t inputTick) {
+			if (!PoseAcknowledgements || inputTick < Prediction_.CoveredThrough() ||
+				inputTick > Prediction_.RecordedThrough())
+				return false;
+			Prediction_.Reconcile(inputTick);
+			return true;
 		}
 
 		// Entities the server said to stop drawing.
@@ -348,6 +375,8 @@ namespace engine::replication {
 		void Landed();
 
 		void Settle(double nowSeconds);
+		bool SendIdentity(double nowSeconds);
+		bool FlushContinuedInputs(double nowSeconds);
 
 		net::Transport *Transport_;
 
@@ -367,6 +396,9 @@ namespace engine::replication {
 
 		Replica Replica_;
 		Prediction Prediction_;
+		bool PoseAcknowledgements = false;
+		uint64_t ContinuedThrough = 0;
+		uint64_t ContinuedSentThrough = 0;
 
 		ConnectorSettings Settings;
 
@@ -391,6 +423,8 @@ namespace engine::replication {
 
 		double SpokeAt = 0.0;
 		bool Spoken = false;
+		bool IdentitySent = false;
+		std::vector<std::byte> PendingIdentity;
 
 		std::vector<std::byte> Datagram;
 

@@ -11,6 +11,7 @@
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
@@ -20,6 +21,112 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterOutputNodes(NodeTable &frameNodes) {
+		frameNodes.Set(core::Name("eye-image"), [this](const graph::RunContext &context) {
+			EnterNamedPass(context.Name);
+			if (Request.Source == nullptr || context.Writes.empty() || context.Writes.size() > 2)
+				return false;
+			const auto &view = *Request.Source;
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (node == nullptr) return false;
+			const auto *layer = node->Parameter(core::Name("layer"));
+			const uint8_t layerIndex = layer && *layer == "transparent-0"	? 1
+									   : layer && *layer == "transparent-1" ? 2
+																			: 0;
+			static_assert(
+				std::tuple_size_v<decltype(view.EyeTransparentImages)> == MAX_PORTAL_TRANSPARENT_LAYERS
+			);
+			const auto handle = layerIndex == 0 ? view.EyeImage : view.EyeTransparentImages[layerIndex - 1];
+			const auto *scope = node->Parameter(core::Name("scope"));
+			const auto expectedScope = scope && *scope == "opaque-lighting" ? PortalImageScope::OpaqueLighting
+																			: PortalImageScope::CompleteWorld;
+			const auto *projection = node->Parameter(core::Name("projection"));
+			const auto expectedProjection = projection && *projection == "seam" ? PortalImageProjection::Seam
+																				: PortalImageProjection::Eye;
+			graph::ResourceId colourId = context.Writes.front(), depthId{};
+			for (size_t i = 0; i < node->WritePorts.size(); ++i) {
+				if (node->WritePorts[i] == core::Name("depth"))
+					depthId = context.Writes[i];
+				else
+					colourId = context.Writes[i];
+			}
+			const auto target = GraphTexture(colourId, context, true);
+			if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
+			const bool paired = context.Writes.size() == 2;
+			if (layerIndex != 0 && !paired) return false;
+			const auto depth = paired ? GraphTexture(depthId, context, true) : Impl::NamedTexture{};
+			if (paired && (!depth.IsValid() || depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+						   depth.Width != target.Width || depth.Height != target.Height))
+				return false;
+			State->RecordPortalImports(Command, view, Request.TargetSlot);
+			for (const auto &image : State->ImportedPortals) {
+				const auto &owner = image.Binding;
+				if (handle == 0 || image.Handle != handle || owner.Layer != layerIndex ||
+					owner.World != view.World || owner.WorldName != view.WorldName ||
+					owner.ViewSlot != Request.TargetSlot || owner.Portal != view.EyeImageKey ||
+					owner.ExpectedProjection != expectedProjection || owner.ExpectedScope != expectedScope ||
+					image.Texture == nullptr || (!image.Ready && image.Recorded != Command))
+					continue;
+				if (layerIndex != 0) {
+					const auto base = std::find_if(
+						State->ImportedPortals.begin(),
+						State->ImportedPortals.end(),
+						[&](const auto &candidate) {
+							return candidate.Handle != 0 && candidate.Handle == view.EyeImage;
+						}
+					);
+					if (base == State->ImportedPortals.end() || base->Binding.Layer != 0 ||
+						base->Binding.World != owner.World || base->Binding.WorldName != owner.WorldName ||
+						base->Binding.ViewSlot != owner.ViewSlot || base->Binding.Portal != owner.Portal ||
+						base->Binding.Index != owner.Index || base->LayerSet != image.LayerSet ||
+						base->Binding.Expected != owner.Expected ||
+						base->Binding.ExpectedScope != owner.ExpectedScope ||
+						base->Binding.ExpectedProjection != owner.ExpectedProjection ||
+						base->Binding.Sampling != owner.Sampling || base->Width != image.Width ||
+						base->Height != image.Height || base->ContentRevision != image.ContentRevision ||
+						base->LightingRevision != image.LightingRevision ||
+						(!base->Ready && base->Recorded != Command))
+						return false;
+				}
+				if (paired && image.DepthTexture == nullptr) return false;
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = image.Texture;
+				blit.source.w = image.Width;
+				blit.source.h = image.Height;
+				blit.destination.texture = target.Texture;
+				blit.destination.w = target.Width;
+				blit.destination.h = target.Height;
+				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				// Paired samples describe one surface; color filtering across depths breaks occlusion.
+				blit.filter = paired ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+				blit.cycle = true;
+				SDL_BlitGPUTexture(Command, &blit);
+				if (paired) {
+					blit.source.texture = image.DepthTexture;
+					blit.destination.texture = depth.Texture;
+					blit.filter = SDL_GPU_FILTER_NEAREST;
+					SDL_BlitGPUTexture(Command, &blit);
+				}
+				core::Metrics::Count("render.eye_image.blits", paired ? 2 : 1);
+				core::Metrics::Count(
+					"render.eye_image.output_bytes",
+					uint64_t(target.Width) * target.Height * (paired ? 12 : 8)
+				);
+				return true;
+			}
+			if (paired) return false;
+			// A stale or wrong-owner image must not leave the last room visible.
+			SDL_GPUColorTargetInfo clear{};
+			clear.texture = target.Texture;
+			clear.clear_color = {0, 0, 0, 1};
+			clear.load_op = SDL_GPU_LOADOP_CLEAR;
+			clear.store_op = SDL_GPU_STOREOP_STORE;
+			clear.cycle = true;
+			auto *pass = SDL_BeginGPURenderPass(Command, &clear, 1, nullptr);
+			if (pass == nullptr) return false;
+			SDL_EndGPURenderPass(pass);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("interface"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			if (!recording.Request.Damage.GameInterface) {
@@ -226,6 +333,33 @@ namespace engine::render {
 			enterNamedPass(context.Name);
 			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 			const std::string *path = node != nullptr ? node->Parameter(core::Name("path")) : nullptr;
+			if (node != nullptr && !context.Reads.empty() && context.Reads.size() <= 2) {
+				const size_t slot = context.View == graph::RunContext::WHOLE_FRAME
+										? node->Integer(core::Name("view"), 0)
+										: recording.Request.TargetSlot;
+				graph::ResourceId colorId = context.Reads[0], depthId{};
+				for (size_t i = 0; i < node->ReadPorts.size(); ++i) {
+					if (node->ReadPorts[i] == core::Name("depth"))
+						depthId = context.Reads[i];
+					else
+						colorId = context.Reads[i];
+				}
+				const auto *desc = selectedPipeline->Graph.FindResource(colorId);
+				const auto *depthDesc = selectedPipeline->Graph.FindResource(depthId);
+				const auto source = recording.ResourceTexture(colorId, slot, false);
+				const auto depth =
+					depthDesc ? recording.ResourceTexture(depthId, slot, false) : Impl::NamedTexture{};
+				State->RecordResourceImages(
+					recording.Command,
+					selectedPipeline->Name,
+					context.Name,
+					slot,
+					desc != nullptr ? desc->Name : core::Name{},
+					source,
+					depthDesc != nullptr ? depthDesc->Name : core::Name{},
+					depth
+				);
+			}
 			if (node == nullptr || path == nullptr || path->empty() || authoredCapture.IsValid()) {
 				return true;
 			}
@@ -252,7 +386,9 @@ namespace engine::render {
 				}
 				State->GraphCaptureFrames[*path] = State->FrameCounter;
 			}
-			for (const graph::ResourceId resource : context.Reads) {
+			for (size_t read = 0; read < context.Reads.size(); ++read) {
+				if (read < node->ReadPorts.size() && node->ReadPorts[read] == core::Name("depth")) continue;
+				const auto resource = context.Reads[read];
 				const Impl::NamedTexture source = graphTexture(resource, context, false);
 				if (!source.IsValid()) {
 					continue;

@@ -323,6 +323,7 @@ namespace engine::render {
 		SurfaceInstances += view.SurfaceInstances;
 		SurfacePasses += view.SurfacePasses;
 		PortalPasses += view.PortalPasses;
+		SurfaceBudgetExceeded = SurfaceBudgetExceeded || view.SurfaceBudgetExceeded;
 		RibbonVertices += view.RibbonVertices;
 		InstanceChunks += view.InstanceChunks;
 		InstanceChunksDirty += view.InstanceChunksDirty;
@@ -559,6 +560,7 @@ namespace engine::render {
 		// was right while an offscreen target did not exist and stopped being
 		// right at v0.7.
 		State->Window = window;
+		State->StageProbe.Configure();
 
 		// One backend on every platform. Apple packages MoltenVK beside the
 		// executable, so it follows this same Vulkan and SPIR-V path.
@@ -724,6 +726,7 @@ namespace engine::render {
 		if (!device) {
 			return;
 		}
+		State->StageProbe.Clear(device);
 		const BackendHandles handles = Backend();
 		for (auto installed = CustomNodeHandlers.rbegin(); installed != CustomNodeHandlers.rend();
 			 installed++) {
@@ -744,6 +747,19 @@ namespace engine::render {
 		}
 		State->PendingSceneSubmissions.clear();
 		State->DropStagedSceneFrames();
+		for (Impl::ResourceImageSlot &slot : State->ResourceImages) {
+			State->ReleaseResidentImage(slot);
+			gpu::ReleaseTransferBuffer(device, slot.Transfer);
+			slot = {};
+		}
+		for (auto &image : State->ImportedPortals) {
+			State->ReleasePortalImport(image);
+		}
+		State->ReleaseResidentImageCache();
+		gpu::ReleaseTransferBuffer(device, State->PortalImportStaging);
+		State->PortalImportStaging = nullptr;
+		State->PortalImportUsage.StagingBytes = 0;
+		State->ReportPortalImportUsage();
 		State->Timestamps.Shutdown();
 		if (State->Preview.Fence != nullptr) {
 			SDL_ReleaseGPUFence(device, State->Preview.Fence);
@@ -776,8 +792,19 @@ namespace engine::render {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeTransparentPipeline);
 		}
 		for (SDL_GPUGraphicsPipeline *pipeline :
-			 {State->GBufferPipeline,
+			 {State->HdrParticlePipeline,
+			  State->HdrAdditiveParticlePipeline,
+			  State->HdrRibbonPipeline,
+			  State->HdrAdditiveRibbonPipeline,
+			  State->HdrOpaquePipeline,
+			  State->HdrTransparentPipeline,
+			  State->HdrWireframeOpaquePipeline,
+			  State->HdrWireframeTransparentPipeline,
+			  State->GBufferPipeline,
 			  State->DepthLinearPipeline,
+			  State->DepthComposePipeline,
+			  State->TransparentLayerPipeline,
+			  State->TransparentLayerColourPipeline,
 			  State->SsaoPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
@@ -982,6 +1009,11 @@ namespace engine::render {
 		}
 		RequireOwningThread("ForgetWorld");
 		SDL_WaitForGPUIdle(State->Device);
+		for (auto &image : State->ImportedPortals) {
+			if (image.Binding.World == world && image.Binding.WorldName == name) {
+				State->ReleasePortalImport(image);
+			}
+		}
 
 		const auto sameWorld = [world, name](const auto &resident) {
 			return resident.Id == world && resident.Name == name;
@@ -1074,7 +1106,9 @@ namespace engine::render {
 		// A caller that needs the geometry resident before the next `Render` -
 		// a readback, a preview taken outside the frame loop - calls
 		// `FlushMeshes` itself.
-		return State->Meshes.Add(name, mesh);
+		if (!State->Meshes.Add(name, mesh)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
 	bool Renderer::FlushMeshes() {
@@ -1088,18 +1122,22 @@ namespace engine::render {
 		if (State == nullptr || State->Device == nullptr) {
 			return false;
 		}
-		return State->Textures.Add(name, image);
+		if (!State->Textures.Add(name, image)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
 	void Renderer::ExpectTexture(const core::Name &name) {
-		if (State != nullptr) {
+		if (State != nullptr && name.IsValid() && !State->Textures.Expecting(name)) {
 			State->Textures.Expect(name);
+			++State->ResourceEpoch;
 		}
 	}
 
 	void Renderer::StopExpectingTexture(const core::Name &name) {
-		if (State != nullptr) {
+		if (State != nullptr && State->Textures.Expecting(name)) {
 			State->Textures.StopExpecting(name);
+			++State->ResourceEpoch;
 		}
 	}
 
@@ -1273,6 +1311,10 @@ namespace engine::render {
 		return State == nullptr ? 0 : State->Textures.AnimationSignature(seconds);
 	}
 
+	uint64_t Renderer::ResourceRevision() const {
+		return State == nullptr ? 0 : State->ResourceEpoch;
+	}
+
 	void *Renderer::TextureHandle(const core::Name &name) const {
 		if (State == nullptr) {
 			return nullptr;
@@ -1291,7 +1333,9 @@ namespace engine::render {
 		if (State == nullptr) {
 			return false;
 		}
-		return State->Textures.Drop(name);
+		if (!State->Textures.Drop(name)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
 	bool Renderer::AddShader(const core::Name &name, std::span<const uint32_t> spirv) {
@@ -1312,7 +1356,9 @@ namespace engine::render {
 		if (State->ShaderVariants.contains(name.Id())) {
 			(void)WaitForFrame();
 		}
-		return State->AddShaderVariant(name, spirv);
+		if (!State->AddShaderVariant(name, spirv)) return false;
+		++State->ResourceEpoch;
+		return true;
 	}
 
 	bool Renderer::DropShader(const core::Name &name) {
@@ -1325,6 +1371,7 @@ namespace engine::render {
 
 		(void)WaitForFrame();
 		State->DropShaderVariant(name);
+		++State->ResourceEpoch;
 		return true;
 	}
 
@@ -1395,6 +1442,7 @@ namespace engine::render {
 		} else {
 			State->LensPipelines.emplace(name.Id(), pipeline);
 		}
+		++State->ResourceEpoch;
 		return true;
 	}
 
@@ -1409,6 +1457,7 @@ namespace engine::render {
 		(void)WaitForFrame();
 		SDL_ReleaseGPUGraphicsPipeline(State->Device, found->second);
 		State->LensPipelines.erase(found);
+		++State->ResourceEpoch;
 		return true;
 	}
 
@@ -1495,6 +1544,7 @@ namespace engine::render {
 		}
 		State->PostProcessPipeline = pipeline;
 		State->PostProcessShaderName = name;
+		++State->ResourceEpoch;
 		return true;
 	}
 
@@ -1508,6 +1558,7 @@ namespace engine::render {
 		}
 		State->PostProcessPipeline = nullptr;
 		State->PostProcessShaderName = core::Name{};
+		++State->ResourceEpoch;
 	}
 
 	core::Name Renderer::PostProcessShaderName() const {
@@ -1618,8 +1669,9 @@ namespace engine::render {
 		}
 		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphTargets) {
-				if (target.Pipeline != pipeline->Name || target.Resource != resource ||
+				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
 					target.Texture == nullptr) {
 					continue;
 				}
@@ -1839,6 +1891,7 @@ namespace engine::render {
 			return false;
 		}
 
+		++State->ResourceEpoch;
 		return true;
 	}
 
@@ -1875,13 +1928,14 @@ namespace engine::render {
 		}
 		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphTargets) {
-				if (target.Pipeline != pipeline->Name || target.Resource != resource ||
+				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
 					target.Texture == nullptr ||
 					(target.Scope == graph::NodeScope::View && target.Owner != slot)) {
 					continue;
 				}
-				return SceneExtent{1.0f, 1.0f};
+				return SceneExtent{1.0f, 1.0f, target.Width, target.Height};
 			}
 		}
 		const Impl::ResourceRole role = State->RoleFor(resource);
@@ -1944,40 +1998,16 @@ namespace engine::render {
 		// once per arriving mesh. Free when nothing arrived.
 		State->Meshes.Flush();
 
-		struct ViewGroup {
-			uint64_t World = 0;
-			core::Name Pipeline;
-			std::vector<size_t> Views;
-		};
-		std::vector<ViewGroup> groups;
-		groups.reserve(views.size());
-		for (size_t index = 0; index < views.size(); index++) {
-			const View &view = views[index];
-			auto found = std::find_if(groups.begin(), groups.end(), [&](const ViewGroup &group) {
-				return group.World == view.World && group.Pipeline == view.Pipeline;
-			});
-			if (found == groups.end()) {
-				groups.push_back({view.World, view.Pipeline, {index}});
-			} else {
-				found->Views.push_back(index);
-			}
+		std::vector<FrameViewIdentity> identities;
+		identities.reserve(views.size());
+		for (const View &view : views) {
+			identities.push_back({view.World, State->PipelineFor(view.Pipeline)});
 		}
-
-		// Presentation belongs to the caller's last view. Keep that group last so
-		// another world's shared targets cannot overwrite it before its view runs.
-		if (present) {
-			const size_t finalView = views.size() - 1;
-			const auto finalGroup = std::find_if(groups.begin(), groups.end(), [&](const ViewGroup &group) {
-				return std::find(group.Views.begin(), group.Views.end(), finalView) != group.Views.end();
-			});
-			if (finalGroup != groups.end() && std::next(finalGroup) != groups.end()) {
-				std::rotate(finalGroup, std::next(finalGroup), groups.end());
-			}
-		}
+		const std::vector<FrameViewGroup> groups = GroupFrameViews(identities, present);
 
 		std::vector<size_t> order;
 		order.reserve(views.size());
-		for (const ViewGroup &group : groups) {
+		for (const FrameViewGroup &group : groups) {
 			order.insert(order.end(), group.Views.begin(), group.Views.end());
 		}
 		for (size_t position = 0; position + 1 < order.size(); position++) {
@@ -2019,6 +2049,7 @@ namespace engine::render {
 
 		const scene::WorldLighting previousLighting = CurrentLighting();
 		State->BatchActive = true;
+		State->PreparedScopes.Clear();
 		State->BatchFailed = false;
 		State->BatchCommand = command;
 		State->BatchSwapchain = swapchain;
@@ -2028,7 +2059,7 @@ namespace engine::render {
 
 		size_t position = 0;
 		for (size_t groupIndex = 0; groupIndex < groups.size() && !State->BatchFailed; groupIndex++) {
-			const ViewGroup &group = groups[groupIndex];
+			const FrameViewGroup &group = groups[groupIndex];
 			for (size_t member = 0; member < group.Views.size(); member++, position++) {
 				const size_t viewIndex = group.Views[member];
 				const View &view = views[viewIndex];
@@ -2067,17 +2098,23 @@ namespace engine::render {
 			}
 		}
 
-		for (const ViewGroup &group : groups) {
-			const Impl::NamedPipeline *named = State->PipelineFor(group.Pipeline);
-			if (named == nullptr) {
+		std::vector<const Impl::NamedPipeline *> plannedPipelines;
+		plannedPipelines.reserve(groups.size());
+		for (const FrameViewGroup &group : groups) {
+			const auto *named = static_cast<const Impl::NamedPipeline *>(group.Identity.Pipeline);
+			if (named == nullptr || std::find(plannedPipelines.begin(), plannedPipelines.end(), named) !=
+										plannedPipelines.end()) {
 				continue;
 			}
+			plannedPipelines.push_back(named);
 			uint32_t planWidth = width;
 			uint32_t planHeight = height;
 			std::vector<uint64_t> worlds;
-			worlds.reserve(group.Views.size());
-			for (const size_t viewIndex : group.Views) {
-				const View &view = views[viewIndex];
+			worlds.reserve(views.size());
+			for (const View &view : views) {
+				if (State->PipelineFor(view.Pipeline) != named) {
+					continue;
+				}
 				worlds.push_back(view.World);
 				if (view.Target != nullptr && view.Target->IsValid()) {
 					planWidth = std::max(planWidth, view.Target->Width);
@@ -2106,12 +2143,30 @@ namespace engine::render {
 
 		SetLighting(previousLighting);
 		if (State->BatchCommand != nullptr) {
+			// The partial command still submits to release its device ownership.
+			// Its images retain their fences but cannot certify a completed graph.
+			for (Impl::ResourceImageSlot &image : State->ResourceImages) {
+				if (image.Phase == Impl::ResourceImagePhase::Recorded) {
+					image.Image.Status = ResourceImageStatus::Failed;
+				} else if (image.Phase == Impl::ResourceImagePhase::Queued &&
+						   std::any_of(views.begin(), views.end(), [&](const View &view) {
+							   const auto *pipeline = State->PipelineFor(view.Pipeline);
+							   return pipeline && pipeline->Name == image.Image.Request.Pipeline &&
+									  view.Slot == image.Image.Request.ViewSlot;
+						   })) {
+					// A failed earlier node may prevent capture from recording at all.
+					// No device work owns this slot, so its failure is ready immediately.
+					image.Image.Status = ResourceImageStatus::Failed;
+					image.Phase = Impl::ResourceImagePhase::Ready;
+				}
+			}
 			State->Timestamps.Abandon(State->BatchTimingSlot);
 			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[State->BatchTimingSlot].clear();
 			}
 			const bool submitted = State->SubmitSceneCommand(State->BatchCommand);
 			if (!submitted) {
+				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
 			}
 			State->CompleteResidentUploads(submitted);
@@ -2121,10 +2176,12 @@ namespace engine::render {
 			// downloads an earlier view recorded still hold their buffer.
 			State->DropDownloads();
 		}
+		State->StageProbe.Flush(State->Device);
 		State->BatchActive = false;
 		State->BatchFirst = false;
 		State->BatchFinal = false;
 		State->BatchShared = false;
+		State->PreparedScopes.Clear();
 		State->BatchFailed = false;
 		State->BatchSwapchain = nullptr;
 		State->BatchWidth = 0;
@@ -2234,6 +2291,7 @@ namespace engine::render {
 				recording.RegisterShadowNodes(frameNodes);
 				recording.RegisterMirrorNodes(frameNodes);
 				recording.RegisterPortalNodes(frameNodes);
+				recording.RegisterSurfaceNodes(frameNodes);
 				recording.RegisterGeometryNodes(frameNodes);
 				recording.RegisterShadingNodes(frameNodes);
 				recording.RegisterAuthoredNodes(frameNodes);

@@ -532,16 +532,32 @@ namespace engine::scene {
 	// @param resident  Called as `resident(const core::Name &)` for each named
 	//                  mesh. `true` when the renderer holds it.
 	// @param out       Cleared, then filled with what may be drawn.
+	// @param marked    Sorted original indices whose filtered positions are needed.
+	// @param retained Cleared and filled with marked indices into out, when supplied.
 	// @since v0.12
 	template <class Resident>
-	void
-	KeepLoaded(std::span<const DrawInstance> instances, Resident resident, std::vector<DrawInstance> &out) {
+	void KeepLoaded(
+		std::span<const DrawInstance> instances,
+		Resident resident,
+		std::vector<DrawInstance> &out,
+		std::span<const uint32_t> marked = {},
+		std::vector<uint32_t> *retained = nullptr
+	) {
 		out.clear();
 		out.reserve(instances.size());
-
-		for (const DrawInstance &instance : instances) {
-			if (instance.Mesh.IsValid() && !resident(instance.Mesh)) {
-				continue;
+		if (retained) {
+			retained->clear();
+			retained->reserve(marked.size());
+		}
+		size_t nextMark = 0;
+		for (size_t index = 0; index < instances.size(); ++index) {
+			const DrawInstance &instance = instances[index];
+			if (instance.Mesh.IsValid() && !resident(instance.Mesh)) continue;
+			if (retained) {
+				while (nextMark < marked.size() && marked[nextMark] < index)
+					++nextMark;
+				if (nextMark < marked.size() && marked[nextMark] == index)
+					retained->push_back(static_cast<uint32_t>(out.size()));
 			}
 			out.push_back(instance);
 		}

@@ -1,6 +1,8 @@
 #include "BusRouter.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -63,6 +65,38 @@ namespace engine::world {
 			return false;
 		}
 		Fanout[id.Index].push_back(std::move(delivery));
+		return true;
+	}
+
+	void BusRouter::DiscardPendingDeliveries(WorldId id) {
+		std::erase_if(PendingDeliveries, [&](const auto &pending) {
+			if (pending.World != id) return false;
+			PendingDeliveryBytes -= pending.EncodedBytes;
+			return true;
+		});
+		if (id.Index < PendingDeliveryCounts.size()) PendingDeliveryCounts[id.Index] = 0;
+	}
+
+	bool BusRouter::QueueDelivery(
+		WorldId id,
+		const Delivery &delivery,
+		const WorldDirectory &directory,
+		const UniverseSettings &settings
+	) {
+		if (directory.Reach(id) == nullptr || PendingDeliveries.size() == MAXIMUM_PENDING_DELIVERIES)
+			return false;
+		PendingDeliveryCounts.resize(directory.Registry.size());
+		if (PendingDeliveryCounts[id.Index] >= settings.ChannelQueueLimit) return false;
+		if (delivery.Payload.size() > MAXIMUM_PENDING_DELIVERY_BYTES - PendingDeliveryBytes) return false;
+		core::ByteWriter encoded;
+		WriteDelivery(encoded, delivery);
+		if (encoded.Size() > MAXIMUM_PENDING_DELIVERY_BYTES - PendingDeliveryBytes) return false;
+		ENGINE_HEAP_SCOPE("world queued delivery");
+		PendingDeliveries.push_back({id, delivery, encoded.Size()});
+		core::Metrics::Count("world.delivery.staged.messages", 1);
+		core::Metrics::Count("world.delivery.staged.bytes", encoded.Size());
+		PendingDeliveryBytes += encoded.Size();
+		PendingDeliveryCounts[id.Index]++;
 		return true;
 	}
 
@@ -378,6 +412,15 @@ namespace engine::world {
 		// Reset with the fanout, which is what makes `ChannelQueueLimit` a
 		// per-barrier bound rather than a lifetime one.
 		ChannelQueued.assign(directory.Registry.size(), 0);
+		for (auto &pending : PendingDeliveries) {
+			if (directory.Reach(pending.World) == nullptr) continue;
+			if (pending.Message.Bus == BusKind::Channel && !pending.Message.Reply.Expected())
+				ChannelQueued[pending.World.Index]++;
+			Deliver(pending.World, std::move(pending.Message));
+		}
+		PendingDeliveries.clear();
+		std::fill(PendingDeliveryCounts.begin(), PendingDeliveryCounts.end(), 0);
+		PendingDeliveryBytes = 0;
 
 		// Every pending envelope from every world, stamped with its sender and
 		// sorted by `(From.Text(), Sequence)` - see `Earlier`.
@@ -754,6 +797,9 @@ namespace engine::world {
 	}
 
 	void BusRouter::Reset() {
+		PendingDeliveries.clear();
+		PendingDeliveryCounts.clear();
+		PendingDeliveryBytes = 0;
 		Backends = Buses{};
 		Applied.clear();
 		Injected.clear();
@@ -887,6 +933,20 @@ namespace engine::world {
 		// its channels again - which for a world whose open ran once at startup is
 		// never.
 		WriteListeners(writer, Backends.Channels.Open, directory);
+		const auto pendingCount =
+			std::count_if(PendingDeliveries.begin(), PendingDeliveries.end(), [&](const auto &entry) {
+				return directory.Reach(entry.World) != nullptr;
+			});
+		writer.WriteUInt32(static_cast<uint32_t>(pendingCount));
+		for (const auto &entry : PendingDeliveries) {
+			const auto *world = directory.Reach(entry.World);
+			if (world == nullptr) continue;
+			writer.WriteName(world->Name());
+			core::ByteWriter encoded;
+			WriteDelivery(encoded, entry.Message);
+			writer.WriteUInt32(static_cast<uint32_t>(encoded.Size()));
+			writer.WriteRaw(encoded.Bytes().data(), encoded.Size());
+		}
 	}
 
 	void BusRouter::ReadBuses(core::ByteReader &reader, const WorldDirectory &directory) {
@@ -923,5 +983,32 @@ namespace engine::world {
 		// landed. Without this a restored world could open the cap again on top of
 		// the channels it came back holding.
 		Backends.Channels.Recount();
+		const uint32_t pending = reader.ReadUInt32();
+		if (pending > MAXIMUM_PENDING_DELIVERIES) {
+			reader.Fail();
+			return;
+		}
+		PendingDeliveries.clear();
+		PendingDeliveryCounts.assign(directory.Registry.size(), 0);
+		PendingDeliveryBytes = 0;
+		for (uint32_t index = 0; index < pending; ++index) {
+			const auto name = reader.ReadName();
+			const auto world = directory.Find(name);
+			const uint32_t bytes = reader.ReadUInt32();
+			if (!world.IsValid() || bytes > reader.Remaining() ||
+				bytes > MAXIMUM_PENDING_DELIVERY_BYTES - PendingDeliveryBytes) {
+				reader.Fail();
+				return;
+			}
+			core::ByteReader encoded(reader.ReadRawView(bytes));
+			auto message = ReadDelivery(encoded);
+			if (encoded.Failed() || !encoded.AtEnd()) {
+				reader.Fail();
+				return;
+			}
+			PendingDeliveries.push_back({world, std::move(message), bytes});
+			PendingDeliveryCounts[world.Index]++;
+			PendingDeliveryBytes += bytes;
+		}
 	}
 }

@@ -210,6 +210,11 @@ namespace engine::replication {
 		// @return `true` when nothing new would be recorded for it.
 		bool Holds(uint64_t tick) const;
 
+		// Records a fully applied tick even when it contains no pose rows.
+		// Zero means the joining snapshot has not landed. Duplicate/older ticks
+		// leave the clock unchanged; Record also calls this for ordinary poses.
+		void RecordTick(uint64_t tick);
+
 		// Records where one entity was at one tick.
 		//
 		// **A pose per entity per tick, taken from the world after the tick was

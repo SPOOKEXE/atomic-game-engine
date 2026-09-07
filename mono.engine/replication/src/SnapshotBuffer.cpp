@@ -58,22 +58,8 @@ namespace engine::replication {
 		}
 	}
 
-	void SnapshotBuffer::Record(uint64_t tick, ecs::Entity entity, const core::CFrame &frame) {
-		if (tick == 0) {
-			// Zero is what `Replica::Applied` reads before the joining snapshot
-			// has landed, so it names no state at all.
-			return;
-		}
-
-		// **The two exclusions, and they are the same rule stated twice.** An
-		// entity in the predicted range was minted by this client and the server
-		// has never heard of it; the nominated one is the local player, which is
-		// run ahead precisely so the input does not feel delayed. Delaying either
-		// is the lag prediction exists to remove, put straight back.
-		if (entity == Predicted_ || ecs::Store::IsPredicted(entity)) {
-			return;
-		}
-
+	void SnapshotBuffer::RecordTick(uint64_t tick) {
+		if (tick == 0) return;
 		if (!Started || tick > Newest_) {
 			if (!Started) {
 				// The clock starts a full delay behind, rather than at the tick
@@ -110,6 +96,25 @@ namespace engine::replication {
 			Stats_.Ticks++;
 			Prune();
 		}
+	}
+
+	void SnapshotBuffer::Record(uint64_t tick, ecs::Entity entity, const core::CFrame &frame) {
+		if (tick == 0) {
+			// Zero is what `Replica::Applied` reads before the joining snapshot
+			// has landed, so it names no state at all.
+			return;
+		}
+
+		// **The two exclusions, and they are the same rule stated twice.** An
+		// entity in the predicted range was minted by this client and the server
+		// has never heard of it; the nominated one is the local player, which is
+		// run ahead precisely so the input does not feel delayed. Delaying either
+		// is the lag prediction exists to remove, put straight back.
+		if (entity == Predicted_ || ecs::Store::IsPredicted(entity)) {
+			return;
+		}
+
+		if (!Started || tick > Newest_) RecordTick(tick);
 
 		Track &track = Tracks[entity];
 		if (track.Ring.empty()) {

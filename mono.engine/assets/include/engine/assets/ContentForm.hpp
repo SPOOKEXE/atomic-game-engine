@@ -125,6 +125,9 @@ namespace engine::assets {
 
 		// Baked joint animation channels.
 		AAnim,
+
+		// Bounded cooked shader bundle with backend payloads and reflection metadata.
+		AShader,
 	};
 
 	// The lowercase name for a form, which is also its canonical extension.

@@ -195,7 +195,8 @@ namespace engine::render {
 			const core::Vector3 &sun,
 			uint32_t width,
 			uint32_t height,
-			bool alwaysOnTop
+			bool alwaysOnTop,
+			WorldColourTarget target = WorldColourTarget::Display
 		) override;
 
 		bool AffectsScene() const override {
@@ -263,6 +264,8 @@ namespace engine::render {
 		void *Pipeline = nullptr;
 		void *SpatialPipeline = nullptr;
 		void *SpatialTopPipeline = nullptr;
+		void *HdrSpatialPipeline = nullptr;
+		void *HdrSpatialTopPipeline = nullptr;
 		void *Sampler = nullptr;
 
 		// The nearest-filter twin, for `gui::ResampleMode::Pixelated`. See

@@ -4,7 +4,7 @@ Updated 2026-09-07. User requested a commit and handoff only; no further code wo
 
 - Objective remains product endpoint discovery and continuous, seamless player crossing.
 - Concise status: [ROADMAP](../ROADMAP.md). Detailed design and evidence: [render plan](RENDER-REFACTOR.md) and [task list](RENDER-REFACTOR-TASKS.md).
-- The worktree contains substantial earlier changes of uncertain ownership. Do not bulk-stage it or discard it. The isolated Terrain BVH change, its benchmark job and this handoff can be committed independently.
+- The Terrain BVH change, benchmark job and initial handoff were committed as `cbe7a6ed`. The user subsequently explicitly requested committing all remaining working-tree changes together, including earlier changes of uncertain ownership.
 
 ## Verified work
 
@@ -12,7 +12,7 @@ Updated 2026-09-07. User requested a commit and handoff only; no further code wo
 - Topology recovery accepts an authenticated current renewal after cache expiry, while retaining request deadlines. Ready topology replies are consumed before camera route selection.
 - Product camera matrix passes all 16 variants: 30/60 Hz, first/third person, explicit/automatic Humanoid subject, held/released movement. `topology-ready-camera-matrix.log`: 136,117 assertions.
 - Opt-in render-stage probe copies images before later stages overwrite them. Raw pixels, BMPs, metadata and an HTML index are saved. `render-stage-probe-final-gpu.log`: 756 assertions in two cases.
-- Probe and topology changes remain in the working tree with their wider renderer/client dependencies. They are not an independently verified commit on the current HEAD.
+- Probe and topology changes are included with their wider renderer/client dependencies in the full checkpoint. No fresh full-suite validation was run for that checkpoint.
 
 ## Remaining, in dependency order
 

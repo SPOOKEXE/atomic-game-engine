@@ -792,6 +792,7 @@ namespace studio {
 		}
 
 		const bool wasActive = world == Active;
+		ReleaseWorldResidency(world);
 		Universe->Destroy(world);
 
 		const WorldId renamed = engine::game::ReadWorldDocument(*Universe, document, wanted, error);

@@ -125,13 +125,15 @@ namespace engine::physics {
 	//                    this, and a span would put an allocation and a loop on
 	//                    the inner test for a case nobody has.
 	// @return The nearest hit, or nothing. There is no "invalid hit".
+	// @param includeTriggers False for solid obstruction queries such as camera arms.
 	// @threadsafe
 	std::optional<ColliderHit> Raycast(
 		const ecs::Store &store,
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask = spatial::LayerMask::All(),
-		ecs::Entity ignore = ecs::Entity{}
+		ecs::Entity ignore = ecs::Entity{},
+		bool includeTriggers = true
 	);
 
 	// The same, carrying on out of the far side of any portal in the way.
@@ -172,6 +174,7 @@ namespace engine::physics {
 	// @param ignore      The caster, skipped on the near side only. Whatever it
 	//                    is, it is not on the far side of the hole.
 	// @return The nearest hit either side, or nothing.
+	// @param includeTriggers Whether trigger colliders can obstruct either ray segment.
 	// @threadsafe
 	// @since v0.15
 	std::optional<ColliderHit> RaycastThroughPortals(
@@ -179,7 +182,8 @@ namespace engine::physics {
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask = spatial::LayerMask::All(),
-		ecs::Entity ignore = ecs::Entity{}
+		ecs::Entity ignore = ecs::Entity{},
+		bool includeTriggers = true
 	);
 
 	// Finds every collider whose exact shape overlaps an axis-aligned box.
@@ -253,4 +257,27 @@ namespace engine::physics {
 		spatial::LayerMask mask,
 		std::span<ecs::Entity> found
 	);
+	struct PlacementSweep {
+		bool Complete = false;
+		bool Hit = false;
+		bool ConservativeFallback = false;
+		float Fraction = 1;
+		ecs::Entity Owner;
+		core::Vector3 Normal;
+	};
+
+	// Sweeps one collider against the destination's current indexed poses.
+	// Uses collision masks and triggers, including solid non-queryable colliders.
+	// A missing index or exhausted candidate bound is incomplete, never a clear path.
+	// blockingOnly skips separating/tangent translation contacts when sliding.
+	PlacementSweep SweepPlacement(
+		const ecs::Store &store,
+		const scene::Collider &collider,
+		const core::CFrame &from,
+		const core::Vector3 &displacement,
+		const core::Vector3 &angularDisplacement,
+		ecs::Entity ignore = ecs::NULL_ENTITY,
+		bool blockingOnly = false
+	);
+
 }

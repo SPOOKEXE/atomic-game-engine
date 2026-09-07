@@ -309,12 +309,13 @@ namespace engine::effects {
 	}
 
 	size_t BuildRibbons(ecs::Store &store, const Vector3 &eye, float elapsed) {
-		ENGINE_PROFILE_CAT("build ribbons", core::ProfileCategory::Simulation);
-
 		auto *buffer = store.ResourceMutable<RibbonBuffer>();
-		if (buffer == nullptr) {
-			return 0;
-		}
+		return buffer == nullptr ? 0 : BuildRibbons(store, eye, elapsed, *buffer);
+	}
+
+	size_t BuildRibbons(ecs::Store &store, const Vector3 &eye, float elapsed, RibbonBuffer &output) {
+		ENGINE_PROFILE_CAT("build ribbons", core::ProfileCategory::Simulation);
+		auto *buffer = &output;
 
 		// Cleared rather than resized, because the vertex count is a function of
 		// how many ribbons doubled back this frame and no count is known ahead of
@@ -338,6 +339,7 @@ namespace engine::effects {
 			run.Texture = beam.Texture;
 			run.ZOffset = beam.ZOffset;
 			run.Additive = beam.Additive;
+			run.FaceCamera = beam.FaceCamera;
 			if (run.Count >= 4) {
 				buffer->Runs.push_back(run);
 			} else {
@@ -419,6 +421,46 @@ namespace engine::effects {
 		core::Metrics::SetGauge("effects.ribbon.runs", static_cast<double>(buffer->Runs.size()));
 		core::Metrics::SetGauge("effects.ribbon.vertices", static_cast<double>(buffer->Vertices.size()));
 		return buffer->Runs.size();
+	}
+
+	bool FaceRibbonVertices(
+		std::span<const RibbonVertex> source,
+		std::span<const RibbonRun> runs,
+		const Vector3 &eye,
+		std::vector<RibbonVertex> &output
+	) {
+		ENGINE_PROFILE("face ribbon vertices");
+		for (const auto &run : runs) {
+			if (uint64_t(run.First) + run.Count > source.size() ||
+				(run.FaceCamera && (run.Count < 4 || run.Count % 2 != 0))) {
+				return false;
+			}
+		}
+		if (source.data() == output.data() && source.size() != output.size()) {
+			return false;
+		}
+		if (source.data() != output.data()) {
+			output.assign(source.begin(), source.end());
+		}
+		for (const auto &run : runs) {
+			if (!run.FaceCamera) {
+				continue;
+			}
+			Vector3 previous;
+			for (uint32_t index = 0; index < run.Count; index += 2) {
+				const uint32_t at = run.First + index;
+				const Vector3 centre = (source[at].Position + source[at + 1].Position) * .5f;
+				const Vector3 along = index == 0
+										  ? (source[at + 2].Position + source[at + 3].Position) * .5f - centre
+										  : centre - previous;
+				previous = centre;
+				const float halfWidth = (source[at].Position - source[at + 1].Position).Magnitude() * .5f;
+				const Vector3 offset = SideVector(along, (eye - centre).Unit()) * halfWidth;
+				output[at].Position = centre + offset;
+				output[at + 1].Position = centre - offset;
+			}
+		}
+		return true;
 	}
 
 	std::span<const RibbonVertex> RibbonStream(const ecs::Store &store) {

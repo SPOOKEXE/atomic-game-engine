@@ -1,6 +1,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -87,35 +88,96 @@ namespace engine::scene {
 		}
 	}
 
+	bool CutCamera(ecs::Store &store, ecs::Entity camera, const core::CFrame &frame) {
+		const auto &rotation = frame.Rotation();
+		const float norm = glm::dot(rotation, rotation);
+		if (!std::isfinite(frame.Position.X) || !std::isfinite(frame.Position.Y) ||
+			!std::isfinite(frame.Position.Z) || !std::isfinite(norm) || std::abs(norm - 1.0f) > .001f)
+			return false;
+		if (!store.Has<Camera>(camera) || !store.Has<Transform>(camera) ||
+			!store.Has<PreviousTransform>(camera))
+			return false;
+
+		store.GetMutable<Transform>(camera)->Frame = frame;
+		store.GetMutable<PreviousTransform>(camera)->Frame = frame;
+		if (auto *view = store.GetMutable<CameraPortalView>(camera)) *view = {};
+		return true;
+	}
+
+	ecs::Entity CameraSubjectRoot(const ecs::Store &store, ecs::Entity camera) {
+		const CameraSubject *selection = store.Get<CameraSubject>(camera);
+		if (selection == nullptr) {
+			return ecs::NULL_ENTITY;
+		}
+		ecs::Entity root = selection->Target;
+		if (const Humanoid *humanoid = store.Get<Humanoid>(root); humanoid != nullptr) {
+			// Single-part characters carry Humanoid on the body itself. A Humanoid
+			// instance instead requires its explicit root, even if it has a transform.
+			if (humanoid->RootPart != ecs::NULL_ENTITY || store.IsA(root, HumanoidClass())) {
+				root = humanoid->RootPart;
+			}
+		}
+		return store.Has<Transform>(root) ? root : ecs::NULL_ENTITY;
+	}
+
 	bool FollowPortalTransit(ecs::Store &store) {
 		auto *controller = store.ResourceMutable<CameraController>();
-		if (controller == nullptr || controller->Subject == ecs::NULL_ENTITY) {
+		const auto *active = store.Resource<ActiveCamera>();
+		if (controller == nullptr || active == nullptr) {
 			return false;
 		}
-
-		const PortalTransit *went = store.Get<PortalTransit>(controller->Subject);
+		const ecs::Entity subject = CameraSubjectRoot(store, active->Entity);
+		const PortalTransit *went = store.Get<PortalTransit>(subject);
+		if (controller->TransitSubject != subject) {
+			controller->TransitSubject = subject;
+			controller->SeenTransit = went == nullptr ? 0 : went->Serial;
+			controller->TransitFrame = went == nullptr ? CFrame{} : went->Frame;
+			controller->TransitScale = went == nullptr ? 1.0f : went->Scale;
+			controller->OccludedDistance = -1.0f;
+			return false;
+		}
 		if (went == nullptr || went->Serial == controller->SeenTransit) {
 			return false;
 		}
 
-		// **The counter is taken whether or not the angle is used**, so a
-		// crossing is never applied twice and a viewer that arrives late does
-		// not owe a turn for every crossing since the world began.
-		controller->SeenTransit = went->Serial;
-
-		// **Added, not assigned.** A portal turns the world under the player
-		// rather than deciding where they are looking: whatever they were
-		// aiming at, they are now aiming at the same thing through the hole. Two
-		// rotations about the same axis add, so for the pairs a floor and a
-		// ceiling allow this is exact.
-		controller->Angles.Y += went->Turn;
+		// Cumulative maps retain every crossing since this viewer last presented.
+		// Resolve their relative affine map before replacing the consumer baseline.
+		if (!(controller->TransitScale > 0.0f)) return false;
+		SeamTransform through;
+		through.Scale = went->Scale / controller->TransitScale;
+		through.Frame = CFrame(
+			Vector3::Zero,
+			glm::normalize(went->Frame.Rotation() * glm::conjugate(controller->TransitFrame.Rotation()))
+		);
+		through.Frame.Position = went->Frame.Position - through.Carry(controller->TransitFrame.Position);
+		auto continuation = CaptureCameraContinuation(store);
+		if (!continuation || !MapCameraContinuation(*continuation, through)) return false;
+		const auto *selection = store.Get<CameraSubject>(active->Entity);
+		if (selection == nullptr ||
+			!ApplyCameraContinuation(store, active->Entity, selection->Target, *continuation))
+			return false;
 		return true;
+	}
+
+	void LatchCameraInput(ecs::Store &store) {
+		auto *controller = store.ResourceMutable<CameraController>();
+		const auto *input = store.Resource<InputState>();
+		if (controller == nullptr || input == nullptr) return;
+		controller->BufferedPointer = true;
+		if (!input->Focused || !controller->Enabled || controller->Mode == CameraMode::Scriptable) {
+			controller->PendingTurn = {};
+			controller->PendingWheel = 0.0f;
+			return;
+		}
+		if (input->Behaviour != MouseBehavior::Default || input->IsButtonDown(MouseButton::Right))
+			controller->PendingTurn = controller->PendingTurn + input->MouseDelta;
+		controller->PendingWheel += input->WheelDelta;
 	}
 
 	bool UpdateCameraControl(ecs::Store &store) {
 		// **Before the guards below, and that is deliberate.** A camera that is
 		// disabled or scriptable still belongs to a body that may have just gone
-		// through a hole, and its yaw is still what `ReadMoveIntent` steers by.
+		// through a hole, and its carried basis still directs `ReadMoveIntent`.
 		// Turning it is not "camera control" in the sense the guards are about -
 		// it is keeping the eye pointing at the thing it was already pointing at.
 		const bool turned = FollowPortalTransit(store);
@@ -126,6 +188,14 @@ namespace engine::scene {
 		if (controller == nullptr || input == nullptr) {
 			return turned;
 		}
+		const bool turning =
+			input->Behaviour != MouseBehavior::Default || input->IsButtonDown(MouseButton::Right);
+		const core::Vector2 pointerTurn = controller->BufferedPointer ? controller->PendingTurn
+										  : turning					  ? input->MouseDelta
+																	  : core::Vector2{};
+		const float pointerWheel = controller->BufferedPointer ? controller->PendingWheel : input->WheelDelta;
+		controller->PendingTurn = {};
+		controller->PendingWheel = 0.0f;
 
 		// **`Scriptable` is checked before `Enabled`**, because they mean
 		// different things and a script that took the camera should keep it even
@@ -141,14 +211,11 @@ namespace engine::scene {
 		// else: a camera that turned on every pixel of motion would make clicking
 		// a button impossible. A locked pointer has nothing else to do, so it
 		// turns freely.
-		const bool turning =
-			input->Behaviour != MouseBehavior::Default || input->IsButtonDown(MouseButton::Right);
-
-		if (turning && (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f)) {
+		if (pointerTurn.X != 0.0f || pointerTurn.Y != 0.0f) {
 			// **The delta and not the position**, which is what makes a locked
 			// pointer work at all - see `InputState::MouseDelta`.
-			controller->Angles.Y -= input->MouseDelta.X * controller->Sensitivity;
-			controller->Angles.X -= input->MouseDelta.Y * controller->Sensitivity;
+			controller->Angles.Y -= pointerTurn.X * controller->Sensitivity;
+			controller->Angles.X -= pointerTurn.Y * controller->Sensitivity;
 			controller->Angles.X = std::clamp(controller->Angles.X, -PITCH_LIMIT, PITCH_LIMIT);
 			moved = true;
 		}
@@ -168,9 +235,9 @@ namespace engine::scene {
 			}
 		}
 
-		if (input->WheelDelta != 0.0f) {
+		if (pointerWheel != 0.0f) {
 			controller->Distance = std::clamp(
-				controller->Distance - input->WheelDelta * controller->ZoomStep,
+				controller->Distance - pointerWheel * controller->ZoomStep,
 				controller->MinimumDistance,
 				controller->MaximumDistance
 			);
@@ -212,9 +279,10 @@ namespace engine::scene {
 		// chooses, and letting the wheel drop out of it would make the shoulder
 		// camera impossible to zoom.
 		if (controller->Mode != CameraMode::ShiftLock) {
-			const CameraMode wanted = controller->Distance <= controller->MinimumDistance + 0.01f
-										  ? CameraMode::LockFirstPerson
-										  : CameraMode::Classic;
+			const CameraMode wanted =
+				controller->Distance <= controller->MinimumDistance + controller->FirstPersonTolerance
+					? CameraMode::LockFirstPerson
+					: CameraMode::Classic;
 			if (controller->Mode != wanted) {
 				controller->Mode = wanted;
 				moved = true;
@@ -222,6 +290,29 @@ namespace engine::scene {
 		}
 
 		return moved;
+	}
+
+	core::Vector3 CameraHeading(const CameraController &controller) {
+		return controller.Basis.VectorToWorldSpace(
+			Vector3{-std::sin(controller.Angles.Y), 0.0f, -std::cos(controller.Angles.Y)}
+		);
+	}
+
+	core::CFrame
+	CameraOrbit(const CameraController &controller, const Vector3 &subjectPosition, float distance) {
+		const CFrame orientation =
+			controller.Basis * CFrame::Angles(controller.Angles.X, controller.Angles.Y, 0);
+		Vector3 eye = subjectPosition + controller.Basis.UpVector() * controller.HeadHeight;
+		if (controller.Mode != CameraMode::LockFirstPerson) {
+			eye = eye - orientation.LookVector() * distance;
+			if (controller.Mode == CameraMode::ShiftLock) {
+				const Vector3 side = controller.Basis.VectorToWorldSpace(
+					Vector3{std::cos(controller.Angles.Y), 0.0f, -std::sin(controller.Angles.Y)}
+				);
+				eye = eye + side * controller.ShoulderOffset;
+			}
+		}
+		return CFrame(eye, orientation.Rotation());
 	}
 
 	bool PlaceCamera(ecs::Store &store) {
@@ -234,45 +325,17 @@ namespace engine::scene {
 			return false;
 		}
 
-		const Transform *subject = store.Get<Transform>(controller->Subject);
+		const Transform *subject = store.Get<Transform>(CameraSubjectRoot(store, active->Entity));
 		if (subject == nullptr || !store.Alive(active->Entity)) {
 			// No subject is a free camera, which is what an editor has. Left
 			// where it is rather than moved to the origin.
 			return false;
 		}
 
-		// Where the eyes are. Everything below is relative to this.
-		const Vector3 head = subject->Frame.Position + Vector3{0.0f, controller->HeadHeight, 0.0f};
-
-		// The look direction, from the two angles. **Built here rather than
-		// carried**, because the angles are the authority - `CameraController::
-		// Angles` says why.
-		const float pitch = controller->Angles.X;
-		const float yaw = controller->Angles.Y;
-		Vector3 forward{
-			-std::sin(yaw) * std::cos(pitch),
-			std::sin(pitch),
-			-std::cos(yaw) * std::cos(pitch),
-		};
-
-		// **The occluded distance wins when a poppercam has set one.** See
-		// `CameraController::OccludedDistance` for why this is a second field
-		// rather than a write to `Distance` itself.
+		const Vector3 head = subject->Frame.Position + controller->Basis.UpVector() * controller->HeadHeight;
 		const float distance =
 			controller->OccludedDistance >= 0.0f ? controller->OccludedDistance : controller->Distance;
-
-		Vector3 eye = head;
-		if (controller->Mode != CameraMode::LockFirstPerson) {
-			eye = head - forward * distance;
-
-			if (controller->Mode == CameraMode::ShiftLock) {
-				// Over the shoulder. The side vector is the forward turned a
-				// quarter turn about world up, which is exact rather than a cross
-				// product because the yaw is already known.
-				const Vector3 side{std::cos(yaw), 0.0f, -std::sin(yaw)};
-				eye = eye + side * controller->ShoulderOffset;
-			}
-		}
+		CFrame pose = CameraOrbit(*controller, subject->Frame.Position, distance);
 
 		// **The arm goes through a portal if one is in the way of it**, and
 		// leaving that out is what makes a hole somebody can walk through look
@@ -287,16 +350,11 @@ namespace engine::scene {
 		// the character, on the far side, looking back through the hole. First
 		// person has no arm and therefore no crossing, which is why this is
 		// after the branch above rather than inside it.
-		// **`Point` for the eye and `Rotate` for the aim**, because a hole may
-		// change size as well as place: the arm's far end is a position and
-		// scales with the room it lands in, and the look direction is a unit
-		// vector that must stay one. Scaling the aim would give `LookAt` a
-		// longer forward, which is not wrong so much as it is one edit away from
-		// being wrong.
+		// Place carries the position with scale and rotates every camera axis,
+		// preserving roll when the arm passes through a tilted seam.
 		SeamTransform carried;
-		if (engine::scene::PortalCrossing(store, head, eye, carried)) {
-			eye = carried.Point(eye);
-			forward = carried.Rotate(forward);
+		if (engine::scene::PortalCrossing(store, head, pose.Position, carried)) {
+			pose = carried.Place(pose);
 		}
 
 		// **And never left standing in the glass.** The crossing above answers
@@ -310,13 +368,9 @@ namespace engine::scene {
 		// **After the crossing rather than before it**, because it is the eye's
 		// final resting place that has to be out of the seam - pushing it clear
 		// first and then mapping it through a hole would put it back in.
-		(void)engine::scene::ClearOfPanes(store, eye);
+		(void)engine::scene::ClearOfPanes(store, pose.Position);
 
-		// **`LookAt` towards a point along the forward rather than at the head**,
-		// which matters in first person and in shift-lock: aiming at the head from
-		// the head is a zero-length direction, and aiming at the head from over a
-		// shoulder points the camera *at the character* rather than past it.
-		store.Set(active->Entity, Transform{CFrame::LookAt(eye, eye + forward)});
+		store.Set(active->Entity, Transform{pose});
 		return true;
 	}
 
@@ -328,13 +382,10 @@ namespace engine::scene {
 			return {};
 		}
 
-		// **Relative to the camera's yaw**, which is why this reads the
-		// controller. W is "away from the camera", not "along -Z" - a game whose
-		// forward key stopped meaning forward when the camera turned is the one
-		// thing every player notices immediately.
 		const float yaw = controller == nullptr ? 0.0f : controller->Angles.Y;
-		const Vector3 forward{-std::sin(yaw), 0.0f, -std::cos(yaw)};
-		const Vector3 side{std::cos(yaw), 0.0f, -std::sin(yaw)};
+		const CFrame basis = controller == nullptr ? CFrame{} : controller->Basis;
+		const Vector3 forward = basis.VectorToWorldSpace(Vector3{-std::sin(yaw), 0.0f, -std::cos(yaw)});
+		const Vector3 side = basis.VectorToWorldSpace(Vector3{std::cos(yaw), 0.0f, -std::sin(yaw)});
 
 		Vector3 wanted;
 		if (input->Focused) {
@@ -516,6 +567,9 @@ namespace engine::scene {
 		// still turns to face its own movement, so this is consulted rather
 		// than branched on up front.
 		const CameraController *camera = store.Resource<CameraController>();
+		const ActiveCamera *active = store.Resource<ActiveCamera>();
+		const ecs::Entity cameraRoot =
+			active == nullptr ? ecs::NULL_ENTITY : CameraSubjectRoot(store, active->Entity);
 
 		size_t moved = 0;
 		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
@@ -576,8 +630,8 @@ namespace engine::scene {
 			// exists, faces where it was told to walk.
 			bool haveTarget = false;
 			float targetYaw = 0.0f;
-			if (camera != nullptr && camera->Mode == CameraMode::ShiftLock && camera->Subject == body) {
-				targetYaw = camera->Angles.Y;
+			if (camera != nullptr && camera->Mode == CameraMode::ShiftLock && cameraRoot == body) {
+				targetYaw = YawOf(CameraHeading(*camera));
 				haveTarget = true;
 			} else if (humanoid.MoveDirection.Magnitude() > 0.0f) {
 				targetYaw = YawOf(humanoid.MoveDirection);

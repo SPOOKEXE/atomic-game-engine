@@ -1,18 +1,25 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/script/PortalTransfer.hpp>
 
 #include <cmath>
 
 namespace engine::game {
 
 	namespace {
-		// A tag, three floats and a flag. Stated as a constant because
+		bool ValidPlayerMotion(const PlayerMotion &sample) {
+			return sample.Player != ecs::NULL_ENTITY && sample.Root != ecs::NULL_ENTITY &&
+				   sample.Player != sample.Root && sample.Motion.InputTick != 0 &&
+				   script::ValidPortalTransferMotion(sample.Motion);
+		}
+		// A tag, three floats, a flag and input step duration. Stated as a constant because
 		// `DecodeMoveInput` refuses anything else - see the header for why the
 		// length and not the tag alone is what separates this from a shot.
-		constexpr size_t MOVE_BYTES = 1 + 3 * sizeof(float) + 1;
+		constexpr size_t MOVE_BYTES = 1 + 3 * sizeof(float) + 1 + sizeof(double);
 
 		constexpr size_t MAXIMUM_TELEPORT_PLACE_BYTES = 256;
 		constexpr size_t MAXIMUM_TELEPORT_DATA_BYTES = 64u * 1024u;
@@ -67,6 +74,7 @@ namespace engine::game {
 		writer.WriteFloat(input.Direction.Y);
 		writer.WriteFloat(input.Direction.Z);
 		writer.WriteUInt8(input.Jump ? 1 : 0);
+		writer.WriteDouble(input.StepSeconds);
 		return FinishedBytes(writer);
 	}
 
@@ -85,6 +93,7 @@ namespace engine::game {
 		input.Direction.Y = reader.ReadFloat();
 		input.Direction.Z = reader.ReadFloat();
 		input.Jump = reader.ReadUInt8() != 0;
+		input.StepSeconds = reader.ReadDouble();
 
 		if (reader.Failed()) {
 			return false;
@@ -95,7 +104,7 @@ namespace engine::game {
 		// arrives from a peer is checked here rather than where it is used,
 		// because there is one decoder and several readers.
 		if (!std::isfinite(input.Direction.X) || !std::isfinite(input.Direction.Y) ||
-			!std::isfinite(input.Direction.Z)) {
+			!std::isfinite(input.Direction.Z) || !std::isfinite(input.StepSeconds) || input.StepSeconds < 0) {
 			return false;
 		}
 
@@ -103,26 +112,108 @@ namespace engine::game {
 		// sent a direction of length ten would otherwise walk ten times as
 		// fast, which is the oldest cheat there is.
 		const float length = input.Direction.Magnitude();
-		out.Direction = length > 0.0f ? input.Direction * (1.0f / length) : core::Vector3{};
-		out.Jump = input.Jump;
+		input.Direction = length > 0.0f ? input.Direction * (1.0f / length) : core::Vector3{};
+		out = input;
 		return true;
 	}
 
-	bool ApplyMoveInput(ecs::Store &store, ecs::Entity player, const MoveInput &move) {
+	std::vector<std::byte> EncodePlayerMotion(const PlayerMotion &sample) {
+		if (!ValidPlayerMotion(sample)) return {};
+		core::ByteWriter writer;
+		writer.WriteUInt8(static_cast<uint8_t>(PlayMessage::PlayerMotion));
+		writer.WriteUInt64(sample.Player.Id);
+		writer.WriteUInt64(sample.Root.Id);
+		if (!script::WritePortalTransferMotion(writer, sample.Motion)) return {};
+		return {writer.Bytes().begin(), writer.Bytes().end()};
+	}
+
+	bool DecodePlayerMotion(std::span<const std::byte> bytes, PlayerMotion &out) {
+		core::ByteReader reader(bytes);
+		if (reader.ReadUInt8() != static_cast<uint8_t>(PlayMessage::PlayerMotion)) return false;
+		PlayerMotion sample;
+		sample.Player = ecs::Entity(reader.ReadUInt64());
+		sample.Root = ecs::Entity(reader.ReadUInt64());
+		if (!script::ReadPortalTransferMotion(reader, sample.Motion) || reader.Remaining() != 0 ||
+			!ValidPlayerMotion(sample))
+			return false;
+		out = sample;
+		return true;
+	}
+
+	std::optional<PlayerMotion>
+	CapturePlayerMotion(const ecs::Store &store, ecs::Entity player, uint64_t consumedInput) {
+		if (store.AdoptOnly() || consumedInput == 0) return {};
+		if (const auto applied = script::AppliedPortalPlayerInput(store, player)) consumedInput = *applied;
+		const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
+		if (!rig) return {};
+		const auto *root = store.Get<scene::Transform>(rig->Root);
+		const auto *velocity = store.Get<scene::Motion>(rig->Root);
+		const auto *humanoid = store.Get<scene::Humanoid>(rig->Humanoid);
+		if (!root || !velocity || !humanoid) return {};
+		PlayerMotion sample{
+			player,
+			rig->Root,
+			{script::PortalTransferIncarnation(store),
+			 store.Time().Tick,
+			 consumedInput,
+			 root->Frame,
+			 velocity->Linear,
+			 velocity->Angular,
+			 humanoid->WalkSpeed,
+			 humanoid->JumpSpeed,
+			 humanoid->Grounded,
+			 store.Time().Elapsed}
+		};
+		if (!ValidPlayerMotion(sample)) return {};
+		return sample;
+	}
+
+	bool ApplyMoveInput(ecs::Store &store, ecs::Entity player, const MoveInput &move, uint64_t inputTick) {
+		const bool forwarded = script::ForwardPortalPlayerMove(
+			store, player, move.Direction, move.Jump, inputTick, move.StepSeconds
+		);
 		const ecs::Entity character = scene::CharacterOf(store, player);
 
 		const auto *rig = store.Get<scene::Character>(character);
 		if (rig == nullptr) {
-			return false;
+			return forwarded;
 		}
 
 		auto *humanoid = store.GetMutable<scene::Humanoid>(rig->Humanoid);
 		if (humanoid == nullptr) {
-			return false;
+			return forwarded;
 		}
 
+		const auto disposition = script::SchedulePortalPlayerMove(
+			store, player, move.Direction, move.Jump, inputTick, move.StepSeconds
+		);
+		if (disposition != script::PortalInputDisposition::Immediate)
+			return disposition == script::PortalInputDisposition::Queued;
+		script::ClosePortalPlayerMoveForwarding(store, player);
 		humanoid->MoveDirection = move.Direction;
 		humanoid->JumpRequested = humanoid->JumpRequested || move.Jump;
+		static const core::LogCategory controlTrace("portal-input");
+		if (controlTrace.Enabled(core::LogLevel::Trace)) {
+			const auto *root = store.Get<scene::Transform>(rig->Root);
+			ENGINE_LOG(
+				core::LogLevel::Trace,
+				"portal-input",
+				"route=native incarnation={} player={} world_tick={} input_tick={} delta={} input_step={} "
+				"direction={},{},{} position={},{},{}",
+				script::PortalTransferIncarnation(store),
+				player.Id,
+				store.Time().Tick,
+				inputTick,
+				store.Time().Delta,
+				move.StepSeconds,
+				move.Direction.X,
+				move.Direction.Y,
+				move.Direction.Z,
+				root ? root->Frame.Position.X : 0,
+				root ? root->Frame.Position.Y : 0,
+				root ? root->Frame.Position.Z : 0
+			);
+		}
 		return true;
 	}
 

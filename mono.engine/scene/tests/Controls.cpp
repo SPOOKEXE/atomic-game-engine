@@ -7,6 +7,7 @@
 // the zoom that becomes first person, the diagonal that must not be faster, and
 // the jump that must not fire twice.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -15,12 +16,14 @@
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 TEST_SUITE_ID("engine.scene.controls")
@@ -77,6 +80,125 @@ namespace {
 	}
 
 	constexpr float PITCH_LIMIT = std::numbers::pi_v<float> * 0.5f - 0.01f;
+}
+
+TEST_CASE("camera retains pointer work between presentations", "[scene][controls][camera-input-clock]") {
+	World world;
+	auto &input = world.Input();
+	auto &camera = world.Camera();
+	input.Focused = true;
+	HoldTurn(input);
+	input.MouseDelta = {4, 2};
+	input.WheelDelta = 1;
+	engine::scene::LatchCameraInput(world.Store_);
+	input.MouseDelta = {6, -1};
+	input.WheelDelta = 2;
+	engine::scene::LatchCameraInput(world.Store_);
+	// Releasing the button before presentation must retain the earlier drag.
+	input.Buttons = 0;
+	input.MouseDelta = {100, 100};
+	input.WheelDelta = 0;
+	engine::scene::LatchCameraInput(world.Store_);
+	const float distance = camera.Distance;
+	CHECK(UpdateCameraControl(world.Store_));
+	CHECK(camera.Angles.Y == Catch::Approx(-10 * camera.Sensitivity));
+	CHECK(camera.Angles.X == Catch::Approx(-camera.Sensitivity));
+	CHECK(camera.Distance == Catch::Approx(distance - 3 * camera.ZoomStep));
+	CHECK(input.MouseDelta.X == 100);
+	CHECK_FALSE(UpdateCameraControl(world.Store_));
+	CHECK(camera.Angles.Y == Catch::Approx(-10 * camera.Sensitivity));
+	CHECK(camera.Distance == Catch::Approx(distance - 3 * camera.ZoomStep));
+}
+
+TEST_CASE("camera drops pending pointer work when control is lost", "[scene][controls][camera-input-clock]") {
+	World world;
+	auto &input = world.Input();
+	input.Focused = true;
+	HoldTurn(input);
+	input.MouseDelta = {4, 2};
+	input.WheelDelta = 1;
+	engine::scene::LatchCameraInput(world.Store_);
+	SECTION("focus lost before presentation") {
+		input.Focused = false;
+		engine::scene::LatchCameraInput(world.Store_);
+		input.Focused = true;
+	}
+	SECTION("script takes the camera before presentation") {
+		world.Camera().Mode = engine::scene::CameraMode::Scriptable;
+		CHECK_FALSE(UpdateCameraControl(world.Store_));
+		world.Camera().Mode = engine::scene::CameraMode::Classic;
+	}
+	SECTION("disabled while collecting input") {
+		world.Camera().Enabled = false;
+		engine::scene::LatchCameraInput(world.Store_);
+		world.Camera().Enabled = true;
+	}
+	CHECK_FALSE(UpdateCameraControl(world.Store_));
+	CHECK(world.Camera().Angles.X == 0);
+	CHECK(world.Camera().Angles.Y == 0);
+}
+
+TEST_CASE(
+	"camera cuts retire old swept paths while movement crosses seams", "[scene][controls][camera-cut]"
+) {
+	World world;
+	auto &store = world.Store_;
+	const auto near = store.CreateInstance(engine::scene::PartClass(), "Near");
+	const auto far = store.CreateInstance(engine::scene::PartClass(), "Far");
+	store.Set(near, Transform{CFrame({0, 3, 0})});
+	store.Set(far, Transform{CFrame({20, 3, -20}) * CFrame::Angles(0, .7f, 0)});
+	store.Set(near, engine::scene::Bounds{{3, 4, .2f}});
+	store.Set(far, engine::scene::Bounds{{3, 4, .2f}});
+	const auto portal =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Portal")), "Portal");
+	store.SetParent(portal, near);
+	store.Set(portal, engine::scene::Portal{.Destination = far});
+	store.GetMutable<engine::scene::SurfaceCamera>(portal)->Face = engine::scene::NormalId::Back;
+	const auto eye = store.CreateInstance(engine::scene::CameraClass(), "Eye");
+	const CFrame before({0, 3, 2});
+	const CFrame target = CFrame({0, 3, -2}) * CFrame::Angles(.2f, .4f, -.3f);
+	store.Set(eye, Transform{before});
+	store.Set(eye, engine::scene::PreviousTransform{before});
+	store.SetResource(ActiveCamera{eye});
+	world.Camera().Mode = CameraMode::Scriptable;
+
+	SECTION("ordinary pose writes retain continuous camera crossing") {
+		engine::scene::SeamTransform through;
+		REQUIRE(engine::scene::PortalCrossing(store, before.Position, target.Position, through));
+		store.Set(eye, Transform{target});
+		CHECK(engine::scene::CrossPortals(store) == 1);
+		CHECK(
+			(store.Get<Transform>(eye)->Frame.Position - through.Point(target.Position)).Magnitude() < .001f
+		);
+	}
+	SECTION("an explicit cut keeps the authored shot on its own side") {
+		REQUIRE(engine::scene::CutCamera(store, eye, target));
+		CHECK(engine::scene::CrossPortals(store) == 0);
+		CHECK(store.Get<Transform>(eye)->Frame.FuzzyEq(target, 1e-6f));
+		CHECK(store.Get<engine::scene::PreviousTransform>(eye)->Frame.FuzzyEq(target, 1e-6f));
+		CHECK(world.Camera().Mode == CameraMode::Scriptable);
+	}
+	SECTION("a cut preserves the humanoid subject and follow settings") {
+		const auto humanoid = store.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+		REQUIRE(store.SetProperty(eye, engine::core::Name("CameraSubject"), &humanoid, sizeof(humanoid)));
+		world.Camera().Mode = CameraMode::ShiftLock;
+		world.Camera().Distance = 7;
+		REQUIRE(engine::scene::CutCamera(store, eye, target));
+		CHECK(store.Get<engine::scene::CameraSubject>(eye)->Target == humanoid);
+		CHECK_FALSE(store.Get<engine::scene::CameraSubject>(eye)->Automatic);
+		CHECK(world.Camera().Mode == CameraMode::ShiftLock);
+		CHECK(world.Camera().Distance == 7);
+	}
+	SECTION("invalid cuts leave both poses intact") {
+		auto invalid = target;
+		invalid.Position.X = std::numeric_limits<float>::infinity();
+		CHECK_FALSE(engine::scene::CutCamera(store, eye, invalid));
+		CHECK_FALSE(engine::scene::CutCamera(store, eye, CFrame({}, glm::quat{0, 0, 0, 0})));
+		CHECK_FALSE(engine::scene::CutCamera(store, near, target));
+		CHECK_FALSE(engine::scene::CutCamera(store, engine::ecs::NULL_ENTITY, target));
+		CHECK(store.Get<Transform>(eye)->Frame.FuzzyEq(before, 1e-6f));
+		CHECK(store.Get<engine::scene::PreviousTransform>(eye)->Frame.FuzzyEq(before, 1e-6f));
+	}
 }
 
 TEST_CASE("the mouse turns the camera only while the button is held", "[scene][controls]") {
@@ -239,7 +361,7 @@ TEST_CASE("first person puts the eye at the head and third person behind it", "[
 	world.Store_.Set(eye, Transform{});
 	world.Store_.SetResource(ActiveCamera{eye});
 
-	world.Camera().Subject = subject;
+	world.Store_.Set(eye, engine::scene::CameraSubject{.Target = subject});
 	world.Camera().Mode = CameraMode::LockFirstPerson;
 	world.Camera().HeadHeight = 1.5f;
 
@@ -255,6 +377,76 @@ TEST_CASE("first person puts the eye at the head and third person behind it", "[
 	CHECK((third - Vector3{0.0f, 1.5f, 0.0f}).Magnitude() == Approx(10.0f));
 }
 
+TEST_CASE(
+	"an inactive camera can select a humanoid before becoming current", "[scene][controls][humanoid-camera]"
+) {
+	World world;
+	const Entity root = world.Store_.CreateInstance(engine::scene::PartClass(), "Root");
+	world.Store_.Set(root, Transform{CFrame(Vector3{3.0f, 2.0f, 1.0f})});
+	const Entity humanoid = world.Store_.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+	REQUIRE(world.Store_.SetProperty(humanoid, engine::core::Name("RootPart"), &root, sizeof(root)));
+	REQUIRE_FALSE(world.Store_.Has<Transform>(humanoid));
+	const Entity eye = world.Store_.CreateInstance(engine::scene::CameraClass(), "Eye");
+	REQUIRE(world.Store_.SetProperty(eye, engine::core::Name("CameraSubject"), &humanoid, sizeof(humanoid)));
+	Entity selected;
+	REQUIRE(world.Store_.GetProperty(eye, engine::core::Name("CameraSubject"), &selected, sizeof(selected)));
+	CHECK(selected == humanoid);
+	world.Store_.SetResource(ActiveCamera{eye});
+	world.Camera().Mode = CameraMode::LockFirstPerson;
+	REQUIRE(PlaceCamera(world.Store_));
+	CHECK(world.Store_.Get<Transform>(eye)->Frame.Position.Y == Approx(3.5f));
+
+	// Selecting another camera keeps both authored targets intact.
+	const Entity alternate = world.Store_.CreateInstance(engine::scene::CameraClass(), "Alternate");
+	REQUIRE(world.Store_.SetProperty(alternate, engine::core::Name("CameraSubject"), &root, sizeof(root)));
+	world.Store_.SetResource(ActiveCamera{alternate});
+	CHECK(engine::scene::CameraSubjectRoot(world.Store_, alternate) == root);
+	REQUIRE(world.Store_.GetProperty(eye, engine::core::Name("CameraSubject"), &selected, sizeof(selected)));
+	CHECK(selected == humanoid);
+	engine::core::ByteWriter snapshot;
+	REQUIRE(world.Store_.Save(snapshot));
+	Store restored("restored-camera");
+	engine::core::ByteReader reader(snapshot.Bytes());
+	REQUIRE(restored.Load(reader));
+	CHECK(engine::scene::CameraSubjectRoot(restored, eye) == root);
+	CHECK_FALSE(restored.Get<engine::scene::CameraSubject>(eye)->Automatic);
+
+	const Entity invalidTarget = world.Store_.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("Instance")), "InvalidTarget"
+	);
+	CHECK_FALSE(world.Store_.SetProperty(
+		eye, engine::core::Name("CameraSubject"), &invalidTarget, sizeof(invalidTarget)
+	));
+	CHECK_FALSE(world.Store_.RestoreReference(eye, engine::core::Name("CameraSubject"), invalidTarget));
+	CHECK_FALSE(world.Store_.RestoreReference(humanoid, engine::core::Name("RootPart"), invalidTarget));
+	CHECK(engine::scene::CameraSubjectRoot(world.Store_, eye) == root);
+	CHECK_FALSE(world.Store_.Get<engine::scene::CameraSubject>(eye)->Automatic);
+
+	// A Humanoid's own transform never substitutes for its explicit root.
+	world.Store_.Set(humanoid, Transform{});
+	const Entity noRoot;
+	REQUIRE(world.Store_.SetProperty(humanoid, engine::core::Name("RootPart"), &noRoot, sizeof(noRoot)));
+	CHECK(engine::scene::CameraSubjectRoot(world.Store_, eye) == engine::ecs::NULL_ENTITY);
+	REQUIRE(world.Store_.SetProperty(humanoid, engine::core::Name("RootPart"), &root, sizeof(root)));
+
+	world.Store_.Destroy(root);
+	CHECK_FALSE(world.Store_.SetProperty(humanoid, engine::core::Name("RootPart"), &root, sizeof(root)));
+	Entity missingRoot;
+	REQUIRE(
+		world.Store_.GetProperty(humanoid, engine::core::Name("RootPart"), &missingRoot, sizeof(missingRoot))
+	);
+	CHECK(missingRoot == engine::ecs::NULL_ENTITY);
+
+	CHECK(engine::scene::CameraSubjectRoot(world.Store_, eye) == engine::ecs::NULL_ENTITY);
+	const CFrame previous = world.Store_.Get<Transform>(alternate)->Frame;
+	CHECK_FALSE(PlaceCamera(world.Store_));
+	CHECK(world.Store_.Get<Transform>(alternate)->Frame.Position == previous.Position);
+	const Entity cleared;
+	REQUIRE(world.Store_.SetProperty(eye, engine::core::Name("CameraSubject"), &cleared, sizeof(cleared)));
+	REQUIRE(world.Store_.GetProperty(eye, engine::core::Name("CameraSubject"), &selected, sizeof(selected)));
+	CHECK(selected == engine::ecs::NULL_ENTITY);
+}
+
 TEST_CASE("a poppercam's occluded distance wins without touching the setting", "[scene][controls]") {
 	World world;
 	const Entity subject = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
@@ -264,7 +456,7 @@ TEST_CASE("a poppercam's occluded distance wins without touching the setting", "
 	world.Store_.Set(eye, Transform{});
 	world.Store_.SetResource(ActiveCamera{eye});
 
-	world.Camera().Subject = subject;
+	world.Store_.Set(eye, engine::scene::CameraSubject{.Target = subject});
 	world.Camera().Distance = 10.0f;
 	world.Camera().OccludedDistance = 3.0f;
 	world.Camera().HeadHeight = 0.0f;
@@ -480,7 +672,10 @@ TEST_CASE("a shift-locked viewer's own body faces the camera, not its stride", "
 
 	CameraController camera;
 	camera.Mode = CameraMode::ShiftLock;
-	camera.Subject = character;
+	const Entity eye = world.Store_.CreateInstance(engine::scene::CameraClass(), "Eye");
+	world.Store_.SetResource(ActiveCamera{eye});
+	world.Store_.Set(eye, engine::scene::CameraSubject{.Target = character});
+	REQUIRE(engine::scene::CameraSubjectRoot(world.Store_, eye) == character);
 	camera.Angles.Y = std::numbers::pi_v<float>; // Facing +Z, not +X.
 	world.Store_.SetResource(camera);
 

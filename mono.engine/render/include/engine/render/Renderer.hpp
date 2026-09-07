@@ -18,6 +18,7 @@
 #include <engine/render/Overlay.hpp>
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
+#include <engine/render/ResourceImage.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -33,6 +34,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -46,6 +48,12 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	struct PortalImageBinding;
+	struct PortalImageReply;
+	struct PortalImageLayerSet;
+	struct PortalImageCapture;
+	struct PortalImageImportUsage;
+
 	struct SceneLight;
 
 	// A second view, rendered into a texture instead of the swapchain.
@@ -285,9 +293,9 @@ namespace engine::render {
 	// `NON-EUCLIDEAN.md`'s Part III is the whole argument for the hole, and
 	// CodeParade's `Portal.cpp` is the model.
 	//
-	// **Same-world only.** A `scene::Portal` naming a `DestinationWorld` is a
-	// window onto a second simulation rather than a hole in one space: it keeps
-	// its `SurfaceView`, draws a foreign instance range, and does not recurse.
+	// Local portals derive recursive views. External portals sample an owned
+	// image reply using its fitted capture mapping and never render local geometry
+	// as a substitute for an unavailable destination.
 	//
 	// @since v0.15
 	struct PortalView {
@@ -300,6 +308,12 @@ namespace engine::render {
 		// so there is no second mesh, no vertex buffer, and nothing coplanar with
 		// the pane to fight it for depth.
 		int16_t Index = 0;
+
+		// ImportedImage is a renderer-local generation handle. ImagePortal names
+		// the authored entrance. ExternalImage stays true while an image is absent.
+		bool ExternalImage = false;
+		uint64_t ImportedImage = 0;
+		core::Name ImagePortal;
 
 		// The slot of the hole at the far end of this one, or -1 for none.
 		//
@@ -608,16 +622,46 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// An HDR image owned by this world and viewport. The eye-image node defaults
+		// to whole-eye projection; seam intermediates require its explicit projection option.
+		// Zero denotes an unavailable image.
+		uint64_t EyeImage = 0;
+		// Nearest first, sharing EyeImageKey and the base image's capture identity.
+		std::array<uint64_t, 2> EyeTransparentImages{};
+		core::Name EyeImageKey;
+
+		// Primary-eye body selection. Rig is a local root handle; Player is the
+		// stable account identity used to resolve that root in another world.
+		// Secondary views and shadow casters retain these rows.
+		uint64_t EyeRig = 0;
+		std::optional<int64_t> EyePlayer;
+		// Sorted indices into Instances. Import selection has no local ECS handle.
+		std::span<const uint32_t> EyeHiddenRows;
 		// Which retained parts of this view differ from the last completed
 		// presentation. The conservative default preserves callers that do not
 		// yet provide independent signatures.
-		PresentationDamage Damage{true, true, true, true};
+		PresentationDamage Damage{
+			.Scene = true,
+			.GameInterface = true,
+			.HostInterface = true,
+			.Viewport = true,
+			.Overlay = true,
+			.Objects = true,
+			.Particles = true,
+			.Environment = true,
+			.Portals = true,
+		};
 
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
 		scene::Camera Camera;
 		//@}
+
+		// Explicit clip-space projection for a fitted or portal capture. Uses
+		// right-handed, Y-up, 0..1 depth coordinates for both culling and drawing.
+		// Camera still supplies image limits and the background depth distance.
+		std::optional<glm::mat4> Projection = {};
 
 		// Borrowed world data consumed by view-scoped nodes.
 		//@{
@@ -642,6 +686,14 @@ namespace engine::render {
 
 		// A graph installed through `Renderer::SetPipeline`, or invalid for the default.
 		core::Name Pipeline;
+
+		// Optional request-owned limits for recursive image work. Pixels excludes
+		// the primary view and is shared by portal and mirror captures.
+		struct SurfaceCaptureBudget {
+			uint32_t Depth = 0;
+			uint64_t Pixels = 0;
+		};
+		std::optional<SurfaceCaptureBudget> SurfaceBudget;
 
 		// Borrowed transparent and lighting work for this view.
 		//@{
@@ -843,6 +895,10 @@ namespace engine::render {
 		std::function<void(BackendHandles)> Release;
 	};
 
+	// The attachment contract for world-space UI. Display uses Backend().ColourFormat;
+	// Hdr uses RGBA16F and preserves radiance until the portal's display conversion.
+	enum class WorldColourTarget : uint8_t { Display, Hdr };
+
 	// A layer that records into this renderer's frame.
 	//
 	// **This exists so that Dear ImGui is not in the engine.** An editor needs
@@ -896,7 +952,8 @@ namespace engine::render {
 			const core::Vector3 &,
 			uint32_t,
 			uint32_t,
-			bool
+			bool,
+			WorldColourTarget = WorldColourTarget::Display
 		) {
 			return 0;
 		}
@@ -964,6 +1021,9 @@ namespace engine::render {
 		//
 		// @since v0.15
 		uint32_t PortalPasses = 0;
+
+		// A requested visible subcapture could not fit its depth or pixel limit.
+		bool SurfaceBudgetExceeded = false;
 
 		// How many ribbon vertices were submitted this frame.
 		//
@@ -1055,9 +1115,10 @@ namespace engine::render {
 		//@}
 
 		// Later-transfer command buffers submitted after the main buffer:
-		// resource previews and captures download through them, so on SDL's
+		// resource previews and file captures download through them, so on SDL's
 		// one unified queue they read the frame's finished images without a
-		// copy pass inside the graphics stream.
+		// copy pass inside the graphics stream. Owned HDR exports instead copy
+		// at their graph read and share the scene fence to preserve alias lifetimes.
 		//
 		// @since v0.17
 		uint32_t DownloadCommandBuffers = 0;
@@ -1207,6 +1268,32 @@ namespace engine::render {
 		//
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
+
+		// Queues owned, authenticated linear RGBA16F pixels for the portal-capture
+		// node. Returns zero on refusal. Changed pixels or fitted-view revisions
+		// invalidate the previous handle; identical radiance avoids another upload.
+		uint64_t QueuePortalImage(const PortalImageBinding &binding, PortalImageReply &&reply);
+
+		// Queue a complete copied set into new slots, retaining previous imports.
+		// Handles are base first, then ordered transparent layers. Refusal preserves
+		// input and handles; optional resident cache entries may be evicted for allocation.
+		bool QueuePortalImageLayerSet(
+			const PortalImageBinding &binding, PortalImageLayerSet &&layers, std::span<uint64_t> handles
+		);
+		// True only after every member of this exact base handle's set was submitted.
+		// Dropping any member with DropPortalImage retires the entire set.
+		bool PortalImageLayerSetReady(uint64_t base) const;
+
+		// Compose destination-space opaque body rows against an accepted room group.
+		// The view supplies only body geometry, its palettes and a caller-owned target;
+		// camera and lighting come from the capture. World and slot must match its owner.
+		// Returns an owned resident image for aperture sampling, or zero on refusal.
+		// Reuses the preceding composed image for this binding; DropPortalImage retires it.
+		uint64_t ComposePortalBodyImage(const PortalImageCapture &capture, const View &body);
+
+		// Invalidates one owned image at an owning-thread frame boundary.
+		bool DropPortalImage(uint64_t handle);
+		PortalImageImportUsage PortalImageUsage() const;
 
 		// Releases GPU residency owned by one world while keeping shared content
 		// such as meshes and images available to the remaining worlds.
@@ -1393,6 +1480,66 @@ namespace engine::render {
 
 		// Returns the last completed preview without waiting for the GPU.
 		ReadbackImage Readback() const;
+
+		// Queue one image from an enabled capture node, without waiting for the
+		// device. Four requests/results may be held; each image is at most
+		// 512x512 RGBA16F. A full queue refuses before allocating or recording.
+		// The node must run before a result exists. File captures remain independent.
+		bool RequestResourceImage(const ResourceImageRequest &request);
+
+		// Admit one to four captures together, or leave the queue unchanged. All
+		// requests must use one pipeline, view and delivery mode, with distinct tokens.
+		// This reserves queue slots only; publication must still validate every result.
+		bool RequestResourceImages(std::span<const ResourceImageRequest> requests);
+
+		// Assign a renderer-local token and queue atomically. Zero means refusal.
+		uint64_t QueueResourceImage(
+			core::Name pipeline,
+			core::Name node,
+			size_t viewSlot = 0,
+			ResourceImageDelivery delivery = ResourceImageDelivery::CopiedPixels
+		);
+
+		// Generate tokens and admit the whole capture group. Refusal preserves outputs.
+		bool QueueResourceImages(
+			core::Name pipeline,
+			std::span<const core::Name> nodes,
+			size_t viewSlot,
+			ResourceImageDelivery delivery,
+			std::span<uint64_t> tokens
+		);
+
+		// Check successful resident submission and exact extent before publishing a
+		// receipt. This neither waits for the GPU nor transfers capture ownership.
+		bool CanPublishResourceImage(uint64_t token, uint32_t width, uint32_t height) const;
+
+		// Move a submitted resident capture into this renderer's portal ownership.
+		// Ordered GPU submissions make it usable without a CPU readback or wait.
+		// Zero refuses without consuming the capture. No device handle crosses hosts.
+		uint64_t AdoptResourceImage(uint64_t token, const PortalImageBinding &binding);
+
+		// Adopt one capture frame as a group, preserving captures, previous imports
+		// and output handles on refusal. Tokens and destination owners must be
+		// distinct; all captures must share pipeline, view, frame and extent.
+		bool AdoptResourceImages(
+			std::span<const uint64_t> tokens,
+			std::span<const PortalImageBinding> bindings,
+			std::span<uint64_t> handles
+		);
+
+		// Take only this caller's completed request when several producers share a renderer.
+		std::optional<ResourceImage> TakeResourceImage(uint64_t token);
+
+		// Take a bounded copied group in token order only when every result is ready.
+		// Missing, duplicate, resident or pending tokens consume nothing. Failed
+		// captures are returned too, so callers can retire a refused layer set.
+		std::optional<std::vector<ResourceImage>> TakeResourceImages(std::span<const uint64_t> tokens);
+
+		// Poll completed scene fences and move out owned image bytes exactly once.
+		std::vector<ResourceImage> TakeResourceImages();
+
+		// Suppress delivery. A submitted copy keeps its slot until its fence signals.
+		bool CancelResourceImage(uint64_t token);
 
 		// GPU execution time and CPU command-recording wall time for each
 		// physical pass, in microseconds and keyed by Name::Id. GPU results lag
@@ -1720,6 +1867,10 @@ namespace engine::render {
 		//
 		// @since v0.19
 		uint64_t TextureAnimationSignature(double seconds) const;
+
+		// Changes when registered render resources are admitted, replaced or removed.
+		// Scoped to this renderer lifetime; callers also track their world/endpoint identity.
+		uint64_t ResourceRevision() const;
 
 		// How big a registered texture is, in source pixels.
 		//

@@ -1,9 +1,14 @@
 // Device-free checks for the shared world-to-renderer presentation boundary.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/Characters.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -22,6 +27,157 @@ TEST_DEPENDS("engine.render.passes")
 TEST_DEPENDS("engine.scene.services")
 
 using engine::core::Name;
+
+TEST_CASE(
+	"first-person body selection follows player identity across held and native rigs", "[render][eye-body]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store authority{"body-authority"};
+	scene::InstallServices(authority);
+	const auto player = scene::AddPlayer(authority, "viewer", false, 91);
+	const auto model = scene::LoadCharacter(authority, player);
+	const auto rig = *authority.Get<scene::Character>(model);
+	core::ByteWriter snapshot;
+	REQUIRE(authority.Save(snapshot));
+	ecs::Store replica{"body-replica"};
+	core::ByteReader reader(snapshot.Bytes());
+	REQUIRE(replica.Apply(reader, ecs::ApplyMode::Authoritative));
+	replica.SetAdoptOnly(true);
+	const auto camera = replica.CreatePredictedInstance(scene::CameraClass(), "Eye");
+	replica.Set(camera, scene::CameraSubject{.Target = rig.Humanoid, .Automatic = false});
+	replica.SetResource(scene::ActiveCamera{camera});
+	replica.SetResource(scene::LocalPlayer{player});
+	scene::CameraController controller;
+	controller.Mode = scene::CameraMode::LockFirstPerson;
+	replica.SetResource(controller);
+	render::View view;
+	render::SelectFirstPersonBody(replica, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+	REQUIRE(view.EyePlayer == 91);
+	REQUIRE(scene::PrepareCameraCharacterHold(replica, player, core::CFrame{}));
+	render::ResolveEyeBody(replica, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+	replica.DestroyInstance(rig.Humanoid);
+	REQUIRE(scene::ActivateCameraCharacterHold(replica));
+	const auto held = *replica.Resource<scene::CameraCharacterHold>();
+	CHECK(replica.GetFullName(held.Root) != replica.GetFullName(rig.Root));
+	render::SelectFirstPersonBody(replica, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+	CHECK(view.EyePlayer == 91);
+	render::ResolveEyeBody(authority, view);
+	CHECK(view.EyeRig == rig.Root.Id);
+
+	SECTION("retired source root preserves identity") {
+		replica.DestroyInstance(rig.Root);
+		render::SelectFirstPersonBody(replica, view);
+		CHECK(view.EyeRig == held.Root.Id);
+		CHECK(view.EyePlayer == 91);
+		scene::CameraBodyPose retainedPose;
+		retainedPose.SourceRoot = held.SourceRoot;
+		replica.SetResource(std::move(retainedPose));
+		render::SelectFirstPersonBody(replica, view);
+		CHECK(view.EyeRig == held.SourceRoot.Id);
+		CHECK(view.EyePlayer == 91);
+		render::ResolveEyeBody(authority, view);
+		CHECK(view.EyeRig == rig.Root.Id);
+	}
+	SECTION("duplicate account cannot select an arbitrary rig") {
+		const auto second = scene::AddPlayer(authority, "other", false, 91);
+		REQUIRE(scene::LoadCharacter(authority, second) != ecs::NULL_ENTITY);
+		render::ResolveEyeBody(authority, view);
+		CHECK(view.EyeRig == 0);
+	}
+	SECTION("changed subject clears the player identity") {
+		replica.Set(camera, scene::CameraSubject{});
+		render::SelectFirstPersonBody(replica, view);
+		CHECK(view.EyeRig == 0);
+		CHECK_FALSE(view.EyePlayer);
+	}
+	SECTION("third-person and scriptable cameras show the body") {
+		for (const auto mode : {scene::CameraMode::Classic, scene::CameraMode::Scriptable}) {
+			replica.ResourceMutable<scene::CameraController>()->Mode = mode;
+			render::SelectFirstPersonBody(replica, view);
+			CHECK(view.EyeRig == 0);
+			CHECK_FALSE(view.EyePlayer);
+		}
+	}
+	SECTION("unavailable player clears a previous resolution") {
+		view.EyePlayer = 92;
+		render::ResolveEyeBody(authority, view);
+		CHECK(view.EyeRig == 0);
+	}
+}
+
+TEST_CASE("eye body selection invalidates objects without changing the environment", "[render][eye-body]") {
+	using namespace engine;
+	std::array<scene::DrawInstance, 1> rows{};
+	render::View view;
+	view.Instances = rows;
+	render::ScenePresentationState state;
+	state.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::Textures;
+	state.Lighting.EnvironmentState.Textures.Enabled = true;
+	state.Lighting.EnvironmentState.Textures.Front = Name("eye-body.sky");
+	const auto before = render::ScenePresentationSignaturesOf(view, state);
+	REQUIRE(before.Environment != 0);
+	view.EyeRig = 123;
+	const auto hidden = render::ScenePresentationSignaturesOf(view, state);
+	CHECK(hidden.Objects != before.Objects);
+	CHECK(hidden.Environment == before.Environment);
+	view.EyeRig = 456;
+	CHECK(render::ScenePresentationSignaturesOf(view, state).Objects != hidden.Objects);
+	view.EyeRig = 0;
+	const std::array<uint32_t, 1> importedHidden{0};
+	view.EyeHiddenRows = importedHidden;
+	const auto imported = render::ScenePresentationSignaturesOf(view, state);
+	CHECK(imported.Objects != before.Objects);
+	CHECK(imported.Environment == before.Environment);
+}
+
+TEST_CASE("whole-eye images invalidate retained viewport composition", "[render][eye-presentation]") {
+	engine::render::View view;
+	view.EyeImageKey = Name("viewport-eye");
+	view.WorldName = Name("viewer");
+	view.World = 3;
+	view.Slot = 2;
+	const auto pending = engine::render::ScenePresentationSignaturesOf(view, {}).Portals;
+	view.EyeImage = 7;
+	view.EyeTransparentImages = {11, 13};
+	const auto accepted = engine::render::ScenePresentationSignaturesOf(view, {}).Portals;
+	REQUIRE(accepted != pending);
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals == accepted);
+	SECTION("near transparent layer changed") {
+		view.EyeTransparentImages[0] = 12;
+	}
+	SECTION("far transparent layer changed") {
+		view.EyeTransparentImages[1] = 14;
+	}
+	SECTION("transparent layer withdrawn") {
+		view.EyeTransparentImages[0] = 0;
+	}
+	SECTION("transparent layer order changed") {
+		std::swap(view.EyeTransparentImages[0], view.EyeTransparentImages[1]);
+	}
+	SECTION("changed image") {
+		view.EyeImage = 8;
+	}
+	SECTION("withdrawal") {
+		view.EyeImage = 0;
+	}
+	SECTION("different key") {
+		view.EyeImageKey = Name("other-eye");
+	}
+	SECTION("different world") {
+		view.World = 4;
+	}
+	SECTION("different world name") {
+		view.WorldName = Name("other-viewer");
+	}
+	SECTION("different viewport") {
+		view.Slot = 4;
+	}
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals != accepted);
+}
 
 TEST_CASE("presentation resources keep their stable saved identity", "[render][presentation]") {
 	engine::render::RegisterPresentationComponents();
@@ -451,4 +607,159 @@ TEST_CASE(
 	view.CameraFrame.Position.X = 0.0f;
 	view.ParticleResidentRevision++;
 	CHECK(engine::render::ParticleVisibilitySignature(view) != original);
+}
+
+TEST_CASE("fitted projection changes invalidate every present image cause", "[render][presentation][cache]") {
+	engine::render::View view;
+	engine::scene::DrawInstance instance;
+	view.Instances = std::span(&instance, 1);
+	engine::render::PortalView portal;
+	view.Portals = std::span(&portal, 1);
+	engine::effects::EmitterBlock block;
+	engine::render::ParticleBatch particle;
+	particle.Block = &block;
+	view.Particles = std::span(&particle, 1);
+	engine::render::ScenePresentationState state;
+	state.Lighting.EnvironmentState.HasAtmosphere = true;
+	const auto absent = engine::render::ScenePresentationSignaturesOf(view, state);
+	view.Projection = glm::mat4{1};
+	const auto fitted = engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(fitted.Objects != absent.Objects);
+	CHECK(fitted.Environment != absent.Environment);
+	CHECK(fitted.Particles != absent.Particles);
+	CHECK(fitted.Portals != absent.Portals);
+	const auto visibility = engine::render::ParticleVisibilitySignature(view);
+	for (int column = 0; column < 4; column++) {
+		for (int row = 0; row < 4; row++) {
+			view.Projection = glm::mat4{1};
+			(*view.Projection)[column][row] += .125f;
+			const auto changed = engine::render::ScenePresentationSignaturesOf(view, state);
+			CHECK(changed.Objects != fitted.Objects);
+			CHECK(changed.Environment != fitted.Environment);
+			CHECK(changed.Particles != fitted.Particles);
+			CHECK(changed.Portals != fitted.Portals);
+			CHECK(engine::render::ParticleVisibilitySignature(view) != visibility);
+		}
+	}
+	view.Projection = glm::mat4{1};
+	(*view.Projection)[2][1] = -0.0f;
+	const auto equivalent = engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(equivalent.Objects == fitted.Objects);
+	CHECK(equivalent.Environment == fitted.Environment);
+	CHECK(equivalent.Particles == fitted.Particles);
+	CHECK(equivalent.Portals == fitted.Portals);
+	CHECK(engine::render::ParticleVisibilitySignature(view) == visibility);
+}
+
+TEST_CASE(
+	"imported portal generations and entrance bindings invalidate the retained portal image",
+	"[render][presentation][cache]"
+) {
+	engine::render::View view;
+	engine::render::PortalView portal;
+	view.Portals = std::span(&portal, 1);
+	const auto local = engine::render::ScenePresentationSignaturesOf(view, {});
+	portal.ExternalImage = true;
+	const auto unavailable = engine::render::ScenePresentationSignaturesOf(view, {});
+	CHECK(unavailable.Portals != local.Portals);
+	portal.ImportedImage = 123;
+	portal.ImagePortal = Name("import.entrance");
+	const auto accepted = engine::render::ScenePresentationSignaturesOf(view, {});
+	CHECK(accepted.Portals != unavailable.Portals);
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals == accepted.Portals);
+	portal.ImportedImage++;
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals != accepted.Portals);
+	portal.ImportedImage--;
+	portal.ImagePortal = Name("import.replaced-entrance");
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, {}).Portals != accepted.Portals);
+	CHECK(accepted.Objects == 0);
+	CHECK(accepted.Environment == 0);
+	CHECK(accepted.Particles == 0);
+}
+
+TEST_CASE(
+	"request mirrors derive slots without an active camera or authored camera mutations",
+	"[render][presentation][surface-slots]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("request-mirrors");
+	const auto workspace = scene::InstallServices(store);
+	std::array<ecs::Entity, 2> cameras, panes;
+	for (size_t index = 0; index < cameras.size(); ++index) {
+		scene::PartDesc part;
+		part.Frame.Position = {float(index) * 4, 0, -4};
+		part.Size = {2, 2, .1f};
+		panes[index] = scene::MakePart(store, part);
+		REQUIRE(store.SetParent(panes[index], workspace));
+		cameras[index] = store.CreateInstance(ecs::Classes::Find(Name("SurfaceCamera")), "Mirror");
+		REQUIRE(store.SetParent(cameras[index], panes[index]));
+		auto surface = *store.Get<scene::SurfaceCamera>(cameras[index]);
+		surface.Surface = -1;
+		store.Set(cameras[index], surface);
+	}
+	render::View viewer;
+	viewer.CameraFrame.Position = {0, 0, 2};
+	std::vector<render::SurfaceView> surfaces;
+	REQUIRE(render::CollectSurfaceViews(store, surfaces, {}, &viewer) == 2);
+	CHECK(surfaces[0].Index == 0);
+	CHECK(surfaces[1].Index == 1);
+	for (size_t index = 0; index < cameras.size(); ++index) {
+		CHECK(store.Get<scene::SurfaceCamera>(cameras[index])->Surface == -1);
+		CHECK(store.Get<scene::Transform>(cameras[index])->Frame.Position == core::Vector3{});
+		CHECK(surfaces[index].Frame.Position.Z < -4);
+	}
+	CHECK(store.Resource<scene::ActiveCamera>() == nullptr);
+}
+
+TEST_CASE(
+	"request surface slots share scene ordering and preserve foreign rows",
+	"[render][presentation][surface-slots]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("request-slot-map");
+	const auto workspace = scene::InstallServices(store);
+	scene::PartDesc part;
+	part.Frame.Position = {0, 0, -4};
+	const auto pane = scene::MakePart(store, part);
+	part.Frame.Position = {0, 0, -12};
+	const auto destination = scene::MakePart(store, part);
+	REQUIRE(store.SetParent(pane, workspace));
+	REQUIRE(store.SetParent(destination, workspace));
+	const auto cameraClass = ecs::Classes::Find(core::Name("SurfaceCamera"));
+	const auto first = store.CreateInstance(cameraClass, "First");
+	const auto second = store.CreateInstance(cameraClass, "Second");
+	REQUIRE(store.SetParent(first, pane));
+	REQUIRE(store.SetParent(second, pane));
+	for (const auto camera : {first, second}) {
+		auto surface = *store.Get<scene::SurfaceCamera>(camera);
+		surface.Surface = -1;
+		store.Set(camera, surface);
+		scene::Portal portal;
+		portal.Destination = destination;
+		store.Set(camera, portal);
+	}
+	std::vector<scene::SurfaceSlot> slots;
+	REQUIRE(scene::GatherSurfaceSlots(store, slots) == 2);
+	REQUIRE(slots[0].Camera == first);
+	REQUIRE(slots[1].Camera == second);
+	std::vector<render::PortalView> portals;
+	REQUIRE(render::CollectPortalViews(store, portals, slots) == 2);
+	CHECK(portals[0].Index != portals[1].Index);
+	CHECK(portals[0].Index >= 0);
+	CHECK(portals[1].Index >= 0);
+	std::array<scene::DrawInstance, 3> instances{};
+	for (auto &instance : instances) {
+		instance.Source = pane.Id;
+		instance.Surface = -1;
+	}
+	instances[1].SourceWorld = core::Name("foreign-owner");
+	instances[2].SourceWorld = core::Name("request-slot-map");
+	render::ApplySurfaceSlots(instances, slots, core::Name("request-slot-map"));
+	CHECK(instances[0].Surface == 1);
+	CHECK(instances[1].Surface == -1);
+	CHECK(instances[2].Surface == 1);
+	CHECK(store.Get<scene::SurfaceCamera>(first)->Surface == -1);
+	CHECK(store.Get<scene::SurfaceCamera>(second)->Surface == -1);
 }

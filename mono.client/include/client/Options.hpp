@@ -233,6 +233,9 @@ namespace client {
 		// A game file is single-player content, not a hosted server, and takes
 		// precedence over `--script`.
 		std::filesystem::path GameFile;
+		// Supervised rendering of one game world over an inherited control channel.
+		std::string PresentationWorld;
+		uint64_t PresentationSession = 0;
 
 		// `host:port` of a server to replicate from. Empty means run the local
 		// demo alone.
@@ -411,5 +414,8 @@ namespace client {
 		// puts the scene into a texture and presents the window from it. A game
 		// pays nothing for it because the flag is off.
 		std::filesystem::path Capture;
+
+		// One BMP and camera-state JSON per rendered frame. Requires a positive frame budget.
+		std::filesystem::path CaptureSequence;
 	};
 }

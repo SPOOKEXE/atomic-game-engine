@@ -523,3 +523,30 @@ TEST_CASE("a billboard steps its distance and offsets its anchor", "[render][can
 	CHECK(shifted->Origin.X == Approx(centred.X - shifted->WorldSize.X * 0.5f).margin(0.001f));
 	CHECK(shifted->Origin.Y == Approx(centred.Y + shifted->WorldSize.Y * 0.5f).margin(0.001f));
 }
+
+TEST_CASE(
+	"an explicit offscreen camera resolves billboards without replacing the player camera", "[render][canvas]"
+) {
+	World world("render_canvas.explicit");
+	const auto part = world.Part({0, 0, -10}, {1, 1, 1});
+	const auto collector = world.Collector("BillboardGui", part);
+	engine::gui::Billboard billboard;
+	billboard.Size = {2, 0, 1, 0};
+	world.Data.Set(collector, billboard);
+	world.Camera({100, 0, 0}, .5f);
+	const auto active = *world.Data.Resource<engine::scene::ActiveCamera>();
+	const auto original = *world.Data.Get<engine::scene::Transform>(active.Entity);
+	engine::scene::Camera camera;
+	camera.FieldOfViewRadians = 1.57079632679f;
+	const CFrame frame;
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display, &camera, &frame) == 1);
+	const auto *canvas = world.Resolved(collector);
+	REQUIRE(canvas != nullptr);
+	CHECK(canvas->Size.X == Approx(90));
+	CHECK(canvas->Size.Y == Approx(45));
+	CHECK(world.Data.Resource<engine::scene::ActiveCamera>()->Entity == active.Entity);
+	CHECK(world.Data.Get<engine::scene::Transform>(active.Entity)->Frame.Position == original.Frame.Position);
+	world.Data.SetResource(engine::scene::ActiveCamera{});
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display, &camera, &frame) == 1);
+	CHECK(world.Resolved(collector)->Size == canvas->Size);
+}

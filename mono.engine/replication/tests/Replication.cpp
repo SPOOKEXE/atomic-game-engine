@@ -46,6 +46,7 @@ namespace replication_test {
 		float X = 0.0f;
 		float Y = 0.0f;
 	};
+	struct Tag {};
 	struct Secret {
 		int Value = 0;
 	};
@@ -59,6 +60,7 @@ namespace replication_test {
 	void RegisterTypes() {
 		static bool once = [] {
 			engine::ecs::Components::Register<Spot>("replication_test.Spot");
+			engine::ecs::Components::Register<Tag>("replication_test.Tag");
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
 
@@ -154,6 +156,44 @@ namespace replication_test {
 }
 
 using namespace replication_test;
+
+TEST_CASE("replica snapshots preserve the local simulation clock", "[replication][replica-clock]") {
+	Pair pair;
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{3.0f, 0.0f});
+	for (int tick = 0; tick < 11; ++tick)
+		pair.Client.AdvanceTick(0.25f);
+	pair.Client.SetFrame(0.125f, 0.5f);
+	const auto before = pair.Client.Time();
+	REQUIRE(pair.Join());
+	CHECK(pair.Client.Time().Tick == before.Tick);
+	CHECK(pair.Client.Time().Elapsed == before.Elapsed);
+	CHECK(pair.Client.Time().Delta == before.Delta);
+	CHECK(pair.Client.Time().FrameDelta == before.FrameDelta);
+	CHECK(pair.Client.Time().Alpha == before.Alpha);
+
+	engine::core::ByteWriter snapshot;
+	pair.Server.Save(snapshot);
+	for (const auto stage :
+		 {engine::replication::SnapshotStage::Preface, engine::replication::SnapshotStage::World}) {
+		pair.Client.AdvanceTick(0.25f);
+		const auto local = pair.Client.Time();
+		engine::replication::SnapshotChunk chunk;
+		chunk.Tick = ++pair.Now;
+		chunk.Stage = stage;
+		chunk.TotalBytes = static_cast<uint32_t>(snapshot.Bytes().size());
+		chunk.Bytes.assign(snapshot.Bytes().begin(), snapshot.Bytes().end());
+		engine::core::ByteWriter message;
+		WriteMessage(message, chunk);
+		REQUIRE(pair.Replica_.Receive(pair.Client, message.Bytes()) == ApplyStatus::Ok);
+		CHECK(pair.Client.Time().Tick == local.Tick);
+		CHECK(pair.Client.Time().Elapsed == local.Elapsed);
+		CHECK(pair.Client.Time().Delta == local.Delta);
+		CHECK(pair.Client.Time().FrameDelta == local.FrameDelta);
+		CHECK(pair.Client.Time().Alpha == local.Alpha);
+		CHECK(pair.Client.Get<Spot>(entity)->X == 3.0f);
+	}
+}
 
 // --- joining -----------------------------------------------------------------
 
@@ -1296,11 +1336,16 @@ TEST_CASE("the prediction buffer is bounded and says when it overflowed", "[repl
 
 	REQUIRE(prediction.Ahead() == 4);
 	REQUIRE(prediction.Dropped() == 6);
+	CHECK(prediction.CoveredThrough() == 6);
+	CHECK(prediction.RecordedThrough() == 10);
 
 	// The oldest went, not the newest - the newest is the input the player just
 	// made, and it is the one they can see not happening.
 	REQUIRE(prediction.Pending().front().Tick == 7);
 	REQUIRE(prediction.Pending().back().Tick == 10);
+	prediction.Clear();
+	CHECK(prediction.CoveredThrough() == 0);
+	CHECK(prediction.RecordedThrough() == 0);
 }
 
 TEST_CASE("input reaches the server and is handed over once", "[replication]") {
@@ -1413,6 +1458,117 @@ TEST_CASE("a value lost in transit is resent until it is confirmed", "[replicati
 
 	REQUIRE(pair.Client.Get<Spot>(entity)->X == 9.0f);
 	REQUIRE(pair.Client.Get<Spot>(entity)->Y == 9.0f);
+}
+
+TEST_CASE(
+	"a received part waits until its entity exists before acknowledgement", "[replication][applied-order]"
+) {
+	Pair pair;
+	REQUIRE(pair.Join());
+	const uint64_t before = pair.Replica_.Applied();
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set<Spot>(entity, Spot{42.0f, 7.0f});
+	pair.Authority_.Publish(pair.Server, ++pair.Now);
+	pair.Server.ClearChanges();
+
+	std::vector<std::byte> structure;
+	engine::replication::Delta early;
+	for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle)) {
+		engine::core::ByteReader reader(bytes);
+		engine::replication::Message message;
+		REQUIRE(ReadMessage(reader, message));
+		if (message.Kind == engine::replication::MessageKind::Structure) {
+			structure = bytes;
+		} else if (message.Kind == engine::replication::MessageKind::Delta) {
+			early = message.Delta;
+		}
+	}
+	REQUIRE_FALSE(structure.empty());
+	REQUIRE_FALSE(early.Components.empty());
+	early.Part = 0;
+	early.Final = false;
+	engine::core::ByteWriter first;
+	WriteMessage(first, early);
+	REQUIRE(pair.Replica_.Receive(pair.Client, first.Bytes()) == ApplyStatus::Ok);
+	REQUIRE_FALSE(pair.Client.Alive(entity));
+	REQUIRE(pair.Replica_.Receive(pair.Client, structure) == ApplyStatus::Ok);
+
+	engine::replication::Delta final;
+	final.Tick = early.Tick;
+	final.Baseline = early.Baseline;
+	final.Part = 1;
+	final.Final = true;
+	engine::core::ByteWriter last;
+	WriteMessage(last, final);
+	REQUIRE(pair.Replica_.Receive(pair.Client, last.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.Applied() == before);
+	REQUIRE_FALSE(pair.Client.Has<Spot>(entity));
+
+	REQUIRE(pair.Replica_.Receive(pair.Client, first.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.Applied() == pair.Now);
+	REQUIRE(pair.Client.Has<Spot>(entity));
+	CHECK(pair.Client.Get<Spot>(entity)->X == 42.0f);
+}
+
+TEST_CASE(
+	"a tag cannot acknowledge an entity whose structure has not arrived", "[replication][applied-order]"
+) {
+	Pair pair;
+	REQUIRE(pair.Join());
+	const uint64_t before = pair.Replica_.Applied();
+	const Entity entity = pair.Server.Create();
+	engine::replication::Delta delta;
+	delta.Tick = ++pair.Now;
+	delta.Baseline = before;
+	delta.Final = true;
+	engine::replication::ComponentDelta tag;
+	tag.Component = Name("replication_test.Tag");
+	tag.Entities.push_back(entity);
+	delta.Components.push_back(std::move(tag));
+	engine::core::ByteWriter values;
+	WriteMessage(values, delta);
+	REQUIRE(pair.Replica_.Receive(pair.Client, values.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.Applied() == before);
+	REQUIRE_FALSE(pair.Client.Alive(entity));
+
+	engine::replication::Structure created;
+	created.Tick = pair.Now;
+	created.Created.push_back(entity);
+	engine::core::ByteWriter structure;
+	WriteMessage(structure, created);
+	REQUIRE(pair.Replica_.Receive(pair.Client, structure.Bytes()) == ApplyStatus::Ok);
+	REQUIRE(pair.Replica_.Receive(pair.Client, values.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Client.Has<Tag>(entity));
+	CHECK(pair.Replica_.Applied() == pair.Now);
+}
+
+TEST_CASE(
+	"a newer acknowledgement retains older rows outside the recovery budget", "[replication][applied-order]"
+) {
+	Pair pair;
+	AuthoritySettings settings;
+	settings.RecoveryRowsPerTick = 1;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	std::vector<Entity> entities;
+	for (int index = 0; index < 8; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{});
+		entities.push_back(entity);
+	}
+	REQUIRE(pair.Join());
+	for (const Entity entity : entities) {
+		pair.Server.Set<Spot>(entity, Spot{17.0f, 0.0f});
+	}
+	pair.Tick([](size_t) { return true; });
+	for (size_t tick = 0; tick < entities.size() + 1; tick++) {
+		pair.Tick();
+	}
+	for (const Entity entity : entities) {
+		CHECK(pair.Client.Get<Spot>(entity)->X == 17.0f);
+	}
+	CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
 }
 
 TEST_CASE("a confirmed value stops being resent", "[replication]") {
@@ -1711,4 +1867,60 @@ TEST_CASE("an entity held too long is shown anyway", "[replication]") {
 	}
 
 	CHECK(pair.Client.ParentOf(child) == room);
+}
+
+TEST_CASE(
+	"input consumption uses the client clock and is carried by complete updates", "[replication][input-clock]"
+) {
+	Pair pair;
+	const Entity entity = pair.Server.Create();
+	pair.Server.Set(entity, Spot{1, 0});
+	REQUIRE(pair.Join());
+	engine::core::ByteWriter input;
+	WriteMessage(input, engine::replication::Input{900, {std::byte{1}}});
+	REQUIRE(pair.Authority_.Receive(pair.Handle, input.Bytes()));
+	pair.Tick();
+	CHECK(pair.Replica_.ConsumedInput() == 0);
+	pair.Authority_.ClearInputs(pair.Handle);
+	CHECK(pair.Authority_.StatusOf(pair.Handle).ConsumedInput == 900);
+	pair.Tick([](size_t) { return true; });
+	CHECK(pair.Replica_.ConsumedInput() == 0);
+	engine::core::ByteWriter snapshot;
+	REQUIRE(pair.Server.Save(snapshot));
+	engine::replication::SnapshotChunk chunk;
+	chunk.Tick = ++pair.Now;
+	chunk.TotalBytes = static_cast<uint32_t>(snapshot.Size());
+	chunk.Bytes.assign(snapshot.Bytes().begin(), snapshot.Bytes().end());
+	engine::core::ByteWriter replacement;
+	WriteMessage(replacement, chunk);
+	REQUIRE(pair.Replica_.Receive(pair.Client, replacement.Bytes()) == ApplyStatus::Ok);
+	REQUIRE(pair.Authority_.Receive(pair.Handle, pair.Replica_.Acknowledge()));
+	CHECK(pair.Replica_.ConsumedInput() == 0);
+	pair.Tick();
+	CHECK(pair.Replica_.ConsumedInput() == 900);
+	CHECK(pair.Replica_.Applied() < 900);
+	pair.Tick();
+	CHECK(pair.Authority_.Outgoing(pair.Handle).empty());
+
+	engine::replication::Delta first;
+	first.Tick = pair.Now + 10;
+	first.ConsumedInput = 905;
+	first.Final = false;
+	engine::core::ByteWriter message;
+	WriteMessage(message, first);
+	CHECK(pair.Replica_.Receive(pair.Client, message.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.ConsumedInput() == 900);
+	auto final = first;
+	final.Final = true;
+	final.Part = 1;
+	final.ConsumedInput = 999;
+	engine::core::ByteWriter wrong;
+	WriteMessage(wrong, final);
+	CHECK(pair.Replica_.Receive(pair.Client, wrong.Bytes()) == ApplyStatus::Malformed);
+	CHECK(pair.Replica_.ConsumedInput() == 900);
+	final.ConsumedInput = 905;
+	engine::core::ByteWriter last;
+	WriteMessage(last, final);
+	CHECK(pair.Replica_.Receive(pair.Client, last.Bytes()) == ApplyStatus::Ok);
+	CHECK(pair.Replica_.ConsumedInput() == 905);
 }

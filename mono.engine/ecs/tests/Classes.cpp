@@ -143,6 +143,34 @@ TEST_CASE("a derived class inherits its base's properties", "[ecs]") {
 	REQUIRE(Classes::Describe(tree.Instance).Properties.empty());
 }
 
+TEST_CASE(
+	"replica property writes require local ownership and an explicit allowance", "[ecs][local-property]"
+) {
+	const Tree &tree = ClassTree();
+	auto allowed = engine::ecs::PropertyDescriptor{};
+	for (const auto &property : Classes::Describe(tree.Part).Properties)
+		if (property.Name == Name("X")) allowed = property;
+	REQUIRE(allowed.Set);
+	CHECK_FALSE(allowed.PredictedWritable);
+	allowed.Name = Name("LocalX");
+	allowed.PredictedWritable = true;
+	const auto localClass = Classes::Register("test.LocalProperty", tree.Part, {});
+	Classes::Computed(localClass, allowed);
+	Store store("local-property");
+	const Entity authority = store.CreateInstance(localClass);
+	const Entity local = store.CreatePredictedInstance(localClass);
+	const float written = 4.5f;
+	store.SetAdoptOnly(true);
+	CHECK_FALSE(store.SetProperty(local, Name("X"), &written, sizeof(written)));
+	CHECK_FALSE(store.SetProperty(authority, Name("LocalX"), &written, sizeof(written)));
+	CHECK(store.Get<Transform>(authority)->X == 0.0f);
+	REQUIRE(store.SetProperty(local, Name("LocalX"), &written, sizeof(written)));
+	CHECK(store.Get<Transform>(local)->X == written);
+	CHECK_FALSE(store.SetProperty(local, allowed, &written, sizeof(written) - 1));
+	store.Destroy(local);
+	CHECK_FALSE(store.SetProperty(local, allowed, &written, sizeof(written)));
+}
+
 TEST_CASE("an unregistered class describes as empty rather than crashing", "[ecs]") {
 	REQUIRE(Classes::Describe(ClassId{}).Set == nullptr);
 	REQUIRE(Classes::Describe(ClassId{0xFFFF'FFF0u}).Set == nullptr);

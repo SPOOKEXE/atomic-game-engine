@@ -231,7 +231,8 @@ namespace engine::graph {
 						}
 						const ResourceDomain domain = domains[id.Value - 1];
 						if ((domain == ResourceDomain::View && invocation.Scope == NodeScope::World) ||
-							(domain == ResourceDomain::Frame && invocation.Scope != NodeScope::Frame)) {
+							(write && domain == ResourceDomain::Frame &&
+							 invocation.Scope != NodeScope::Frame)) {
 							offender = resource->Name;
 							return ExecutionPlanStatus::InvalidScopeAccess;
 						}
@@ -257,7 +258,9 @@ namespace engine::graph {
 									.To = invocation.Scheduled.Queue,
 									.View =
 										domain == ResourceDomain::View ? ordinal : RunContext::WHOLE_FRAME,
-									.World = domain == ResourceDomain::World ? ordinal : invocation.World,
+									.World = domain == ResourceDomain::Frame   ? RunContext::WHOLE_FRAME
+											 : domain == ResourceDomain::World ? ordinal
+																			   : invocation.World,
 									.Bytes = bytes,
 								});
 								out.QueueTransferBytes += bytes;

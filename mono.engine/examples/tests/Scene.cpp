@@ -717,16 +717,14 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// neither has a hand-written jump that can conceal this arithmetic.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
 
-	// **Watched by a camera, because a player is a body and an eye.** The yaw is
-	// where a player's view direction actually lives, so a pair that turns a
-	// corner has to turn it - a body that comes out walking north under a camera
-	// still pointing west is the view snapping to a wall on the frame you cross,
-	// and W walking you sideways from then on. West is a yaw of a quarter turn
-	// under `PlaceCamera`'s convention.
+	// A camera follows the same body. West starts at a local yaw of a quarter
+	// turn; crossing the corner must carry its reference axes north so the next
+	// forward input still follows the route.
 	engine::scene::CameraController watching;
-	watching.Subject = walker;
+	store.Set(sceneCamera, engine::scene::CameraSubject{.Target = walker, .Automatic = false});
 	watching.Angles = engine::core::Vector2{0.0f, std::numbers::pi_v<float> / 2.0f};
 	store.SetResource(watching);
+	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
 
 	store.Set<engine::scene::Transform>(
 		walker, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 6.0f, 20.0f})}
@@ -793,13 +791,13 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	CHECK(store.Get<engine::scene::PortalTransit>(walker)->Serial == 1u);
 	CHECK(engine::scene::FollowPortalTransit(store));
 
-	// A yaw of zero is north, which is the way the walk carries on.
-	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+	// The carried basis faces north while retaining the user's local orbit angle.
+	CHECK(engine::scene::CameraHeading(*store.Resource<engine::scene::CameraController>()).Z < -0.999f);
 
 	// **Once, however many times it is asked.** A camera that turned again on
 	// the next frame would spin a quarter turn per frame for ever.
 	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
-	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+	CHECK(engine::scene::CameraHeading(*store.Resource<engine::scene::CameraController>()).Z < -0.999f);
 }
 
 TEST_CASE("the hallway camera and character enter its long tunnel", "[examples][scene]") {

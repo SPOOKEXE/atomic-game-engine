@@ -193,7 +193,7 @@ namespace {
 			World.SetResource(ActiveCamera{Eye});
 
 			CameraController controller;
-			controller.Subject = Subject;
+			World.Set(Eye, engine::scene::CameraSubject{.Target = Subject});
 			controller.Distance = 10.0f;
 			controller.HeadHeight = 0.0f;
 			World.SetResource(controller);
@@ -266,6 +266,25 @@ TEST_CASE("a wall between the eye and its subject is pulled in front of and fade
 	CHECK(LocalTransparencyOf(world.World, world.Subject) == 0.0f);
 }
 
+TEST_CASE(
+	"a humanoid camera occludes through its root and ignores its own body",
+	"[physics][characters][humanoid-camera]"
+) {
+	Occludable world;
+	const Entity humanoid = world.World.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+	world.World.GetMutable<engine::scene::Humanoid>(humanoid)->RootPart = world.Subject;
+	REQUIRE(
+		world.World.SetProperty(world.Eye, engine::core::Name("CameraSubject"), &humanoid, sizeof(humanoid))
+	);
+	world.Reindex();
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0.0f);
+	world.Wall(5.0f);
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance > 4.0f);
+	CHECK(world.Controller().OccludedDistance < 5.0f);
+}
+
 TEST_CASE("poppercam looks through a portal instead of pulling up to its pane", "[physics][characters]") {
 	// Portal panes keep trigger colliders so contacts still report crossings.
 	// A plain ray sees that glass first and turns a valid camera arm into an
@@ -322,4 +341,44 @@ TEST_CASE("first person and a scripted camera are left alone", "[physics][charac
 	controller->Mode = CameraMode::Scriptable;
 	CHECK_FALSE(UpdatePoppercam(world.World));
 	CHECK(controller->OccludedDistance < 0.0f);
+}
+
+TEST_CASE(
+	"poppercam follows a rolled camera basis around a humanoid root",
+	"[physics][characters][camera-continuation]"
+) {
+	Occludable world;
+	const Entity humanoid = world.World.CreateInstance(engine::scene::HumanoidClass(), "Humanoid");
+	world.World.GetMutable<Humanoid>(humanoid)->RootPart = world.Subject;
+	world.World.Set(world.Eye, engine::scene::CameraSubject{.Target = humanoid});
+	const CFrame rotation = CFrame::Angles(0.7f, -0.8f, 1.1f);
+	auto &controller = *world.World.ResourceMutable<CameraController>();
+	controller.Basis = rotation;
+	controller.HeadHeight = 1.5f;
+	const Entity wall = world.Wall(5.0f);
+	auto *placement = world.World.GetMutable<Transform>(wall);
+	placement->Frame = rotation * CFrame(Vector3{0, 1.5f, 5});
+	world.Reindex();
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance == Catch::Approx(4.75f).margin(0.0001f));
+	REQUIRE(engine::scene::PlaceCamera(world.World));
+	const Vector3 expected = rotation.PointToWorldSpace(Vector3{0, 1.5f, 4.75f});
+	CHECK((world.World.Get<Transform>(world.Eye)->Frame.Position - expected).Magnitude() < 0.0001f);
+}
+
+TEST_CASE(
+	"camera obstruction skips trigger volumes but finds the solid wall behind",
+	"[physics][characters][camera-trigger]"
+) {
+	Occludable world;
+	const auto trigger = world.Wall(2);
+	world.World.GetMutable<engine::scene::Collider>(trigger)->Trigger = true;
+	world.Reindex();
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0);
+	const auto wall = world.Wall(5);
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance == Catch::Approx(4.75f));
+	CHECK(LocalTransparencyOf(world.World, trigger) == 0);
+	CHECK(LocalTransparencyOf(world.World, wall) == Catch::Approx(.6f));
 }

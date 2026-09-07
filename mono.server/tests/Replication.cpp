@@ -29,6 +29,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
@@ -46,6 +47,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <chrono>
@@ -153,6 +155,9 @@ namespace server_replication_test {
 		// Every other row in `World` arrived as replicated state; this arrives
 		// as a per-client message, which is the whole point of `game/Play.hpp`.
 		Entity Mine;
+		std::optional<engine::game::PlayerMotion> NativeMotion;
+		bool AutomaticFreshAdmission = true;
+		bool FreshAdmissionSent = false;
 
 		// @param entities How many the placeholder world holds.
 		// @param game     A scene to host instead, or empty for the placeholder.
@@ -242,6 +247,18 @@ namespace server_replication_test {
 		// the store ignorant of it could not exercise the keyboard path at all.
 		void ListenForJoinNotice() {
 			Link->OnUserMessage([this](std::span<const std::byte> message) {
+				engine::game::PlayerMotion motion;
+				if (engine::game::DecodePlayerMotion(message, motion)) {
+					NativeMotion = motion;
+					return;
+				}
+				engine::game::PortalSessionMessage admission;
+				if (engine::game::DecodePortalSession(message, admission) &&
+					admission.Kind == engine::game::PortalSessionKind::Ready && admission.Attempt == 1) {
+					Mine = admission.Player;
+					World.SetResource(engine::scene::LocalPlayer{Mine});
+					return;
+				}
 				engine::game::JoinNotice notice;
 				if (engine::game::DecodeJoinNotice(message, notice)) {
 					Mine = notice.Player;
@@ -337,7 +354,7 @@ namespace server_replication_test {
 		// channel - because the point of the assertion is that a *client* can
 		// fire, and a hand-built `examples::Shot` would step straight over the
 		// arithmetic that turns a camera into a ray.
-		bool SubmitAim() {
+		bool SubmitAim(double viewTick = 0, uint64_t inputTick = 0) {
 			if (Mine == engine::ecs::NULL_ENTITY ||
 				engine::scene::CharacterOf(World, Mine) == engine::ecs::NULL_ENTITY) {
 				return false;
@@ -351,7 +368,10 @@ namespace server_replication_test {
 			engine::examples::Shot shot;
 			shot.Aim = aim.Ray;
 			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
-			if (!Link->Submit(Link->Applied(), engine::examples::EncodeShot(shot), Now)) {
+			shot.ViewTick = viewTick == 0 ? static_cast<double>(Link->Applied()) : viewTick;
+			if (!Link->Submit(
+					inputTick == 0 ? Link->Applied() : inputTick, engine::examples::EncodeShot(shot), Now
+				)) {
 				return false;
 			}
 			if (auto *input = World.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
@@ -433,13 +453,18 @@ namespace server_replication_test {
 			// millisecond poll expires handshakes before a busy server can answer.
 			Now = engine::core::Clock::Seconds();
 
-			// **Deliberately nothing but `Poll`.** A server on a datagram socket
-			// cannot stream to an address it has never heard from, so the client
-			// has to speak first - and making the *test* speak first, with an
-			// input the real client never sends, is how this suite passed while
-			// the actual client sat silent and never joined. `Poll` announces
-			// itself, and this is the case that says so.
+			// Poll performs transport admission. The application then explicitly
+			// asks for a fresh player, as the real client does; a portal resume
+			// uses the same point without creating another character.
 			Link->Poll(World, Now);
+			if (AutomaticFreshAdmission && !FreshAdmissionSent && Link->Admitted()) {
+				FreshAdmissionSent = Link->SendUser(
+					engine::game::EncodePortalSession(
+						{.Kind = engine::game::PortalSessionKind::Fresh, .Attempt = 1}
+					),
+					Now
+				);
+			}
 			Link->Advance(Now);
 		}
 
@@ -1002,6 +1027,21 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 	// **Along X and not merely "somewhere else".** A character that fell through
 	// the floor also moved, and asserting a bare inequality would pass for it.
 	CHECK(after.X > before.X + 1.0f);
+	REQUIRE(first.NativeMotion);
+	CHECK(first.NativeMotion->Player == first.Mine);
+	CHECK(first.NativeMotion->Root == rig->Root);
+	CHECK(first.NativeMotion->Motion.InputTick != 0);
+	CHECK(first.NativeMotion->Motion.DestinationTick != 0);
+	CHECK(first.NativeMotion->Motion.Frame.Position.X > before.X + 1.0f);
+	CHECK_FALSE(second.NativeMotion);
+	REQUIRE(first.Link->Submit(900000, engine::game::EncodeMoveInput({}), first.Now));
+	for (int tick = 0; tick < 300 && first.NativeMotion->Motion.InputTick != 900000; ++tick) {
+		first.Tick();
+		second.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+	CHECK(first.NativeMotion->Motion.InputTick == 900000);
+	CHECK(first.NativeMotion->Motion.DestinationTick < 900000);
 
 	// And the *other* client sees the same body in the new place, which is the
 	// half that separates "the server moved it" from "everybody was told".
@@ -1296,9 +1336,10 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 }
 
 TEST_CASE("a client's click is a shot the server resolves and everybody sees", "[server][replication]") {
+	const bool historical = GENERATE(false, true);
 	// **The other half of `D00109`, and the half that had never had a caller.**
 	// `Server::ApplyInputs` decodes an `examples::Shot`, rewinds the client's
-	// view with `Rewind::TickSeenBy`, hit-tests against the recorded history and
+	// explicit view tick, hit-tests against the recorded history and
 	// recolours what was struck - a complete server-authoritative feature whose
 	// `examples::EncodeShot` was reachable from nothing in the tree. That entry
 	// calls it two finished halves connected to nothing; this is the wire
@@ -1368,18 +1409,31 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 	shooter.Hold({engine::scene::KeyCode::W}, 120, &victim);
 
 	const engine::core::Color3 before = shooter.World.Get<Visual>(victimRoot)->Tint;
+	const auto historicalPosition = shooter.World.Get<Transform>(victimRoot)->Frame.Position;
+	const double historicalTick = static_cast<double>(shooter.Link->Applied());
+	if (historical) {
+		for (int tick = 0; tick < 100; ++tick) {
+			victim.Walk({0, 0, 1});
+			victim.Tick();
+			shooter.Tick();
+			if (shooter.World.Get<Transform>(victimRoot)->Frame.Position.Z > historicalPosition.Z + 1.5f)
+				break;
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
+		victim.Walk({});
+		REQUIRE(shooter.World.Get<Transform>(victimRoot)->Frame.Position.Z > historicalPosition.Z + 1.5f);
+	}
 
 	bool recoloured = false;
 	for (int attempt = 0; attempt < 200 && !recoloured; attempt++) {
-		// Re-read every attempt: the victim is a body on a floor and drifts a
-		// little, and a ray aimed once at where it used to be is a test that
-		// depends on it not having settled.
+		// The historical case keeps aiming at the old view after the target
+		// moves clear. The current-view case follows any settling drift.
 		const Transform *placement = shooter.World.Get<Transform>(victimRoot);
 		if (placement == nullptr) {
 			break;
 		}
 
-		const engine::core::Vector3 at = placement->Frame.Position;
+		const engine::core::Vector3 at = historical ? historicalPosition : placement->Frame.Position;
 		const engine::core::Vector3 eye = at + engine::core::Vector3{20.0f, 0.0f, 0.0f};
 		shooter.AimFrom(eye, (at - eye).Unit());
 
@@ -1388,7 +1442,7 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 		// datagram is one click that never happened. A player clicking again is
 		// what this models.
 		shooter.Click();
-		shooter.SubmitAim();
+		shooter.SubmitAim(historical ? historicalTick : 0, historical ? 900000 + attempt : 0);
 		shooter.Tick();
 		victim.Tick();
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
@@ -1474,4 +1528,54 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);
+}
+
+TEST_CASE(
+	"transport admission waits for an explicit fresh player request", "[server][replication][portal-session]"
+) {
+	if (!ServerAvailable()) SKIP("the server program is not built into this preset");
+	const auto path = engine::core::Paths::Base() / "portal-session-fresh.luau";
+	{
+		std::ofstream source(path);
+		REQUIRE(source);
+		source << "local floor = Instance.new('Part')\n"
+			   << "floor.Anchored = true\n"
+			   << "floor.Size = Vector3.new(100, 1, 100)\n"
+			   << "floor.Parent = workspace\n";
+	}
+	Remote remote;
+	remote.AutomaticFreshAdmission = false;
+	REQUIRE(remote.Start(0, path.string()));
+	REQUIRE(remote.Join(1000));
+	Settle(remote);
+	const auto players = [&] {
+		size_t count = 0;
+		remote.World.EachEntity([&](Entity entity) {
+			if (remote.World.IsA(entity, engine::scene::PlayerClass())) count++;
+		});
+		return count;
+	};
+	CHECK(players() == 0);
+	CHECK(remote.Mine == engine::ecs::NULL_ENTITY);
+	const auto fresh =
+		engine::game::EncodePortalSession({.Kind = engine::game::PortalSessionKind::Fresh, .Attempt = 1});
+	REQUIRE(remote.Link->SendUser(fresh, remote.Now));
+	REQUIRE(remote.Wait(
+		[&] {
+			return remote.Mine != engine::ecs::NULL_ENTITY &&
+				   engine::scene::CharacterOf(remote.World, remote.Mine) != engine::ecs::NULL_ENTITY;
+		},
+		1000
+	));
+	Settle(remote);
+	CHECK(players() == 1);
+	const auto player = remote.Mine;
+	const auto character = engine::scene::CharacterOf(remote.World, player);
+	REQUIRE(remote.Link->SendUser(fresh, remote.Now));
+	Settle(remote);
+	CHECK(players() == 1);
+	CHECK(remote.Mine == player);
+	CHECK(engine::scene::CharacterOf(remote.World, player) == character);
+	std::error_code ignored;
+	std::filesystem::remove(path, ignored);
 }

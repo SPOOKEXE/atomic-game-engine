@@ -119,6 +119,46 @@ test-all *args: (test "--all" args)
 test-list: build
     ./{{build}}/tools/testrunner --build {{build}} --list
 
+# Real offscreen render cases through the existing Catch suite. A requested
+# unsupported backend fails instead of silently measuring Vulkan under its name.
+render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{backend}}" != "vulkan" ]; then
+        echo "render-check: backend '{{backend}}' is not implemented by Renderer::Initialise" >&2
+        exit 2
+    fi
+    export MONO_RENDER_REVISION="$(git describe --always --dirty)"
+    ./{{build}}/tests/test_render "{{filter}}"
+
+# Whole camera-batch signature costs, with unchanged rows and one-row edits.
+render-preparation-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_render
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --baseline .cache/build/bench/render-baseline.tsv --filter engine.render.bench.world-presentation --all --samples {{samples}}
+
+# Coverage-guided parsing of cooked shader bytes; no graphics stack or device.
+shader-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/shader-fuzz"
+    cmake --preset cdn -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_SHADER=ON
+    cmake --build "$fuzz_build" --target fuzz_shader -j 4
+    mkdir -p "$fuzz_build/fuzz/corpus" "$fuzz_build/fuzz/artifacts"
+    "$fuzz_build/fuzz/fuzz_shader" --write-seeds "$fuzz_build/fuzz/corpus"
+    "$fuzz_build/fuzz/fuzz_shader" "$fuzz_build/fuzz/corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/artifacts/"
+
+# Coverage-guided parsing of owned cross-world presentation messages.
+presentation-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/shader-fuzz"
+    cmake --preset cdn -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_PRESENTATION=ON
+    cmake --build "$fuzz_build" --target fuzz_presentation -j 4
+    mkdir -p "$fuzz_build/fuzz/presentation-corpus" "$fuzz_build/fuzz/presentation-artifacts"
+    "$fuzz_build/fuzz/fuzz_presentation" --write-seeds "$fuzz_build/fuzz/presentation-corpus"
+    "$fuzz_build/fuzz/fuzz_presentation" "$fuzz_build/fuzz/presentation-corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/presentation-artifacts/"
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A
@@ -142,6 +182,13 @@ bench *args:
 
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
+
+# Portal reply encoding and decoding, per complete batch. No GPU or process transport.
+# Run the binary directly so measurements stay on the terminal.
+portal-exchange-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-exchange --samples {{samples}}
 
 # The Luau boundary rows, including the complete async compute lifecycle. Keep
 # this explicit because a binding benchmark is useful while working on the VM

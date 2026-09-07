@@ -103,6 +103,13 @@ namespace engine::world {
 		// @return `false` for a world with no fanout slot, which is an unknown
 		//         world or one created since the last barrier.
 		bool Deliver(WorldId id, Delivery delivery);
+		void DiscardPendingDeliveries(WorldId id);
+		bool QueueDelivery(
+			WorldId id,
+			const Delivery &delivery,
+			const WorldDirectory &directory,
+			const UniverseSettings &settings
+		);
 
 		// Uses `traffic` for the next barrier instead of the worlds' outboxes.
 		//
@@ -205,6 +212,17 @@ namespace engine::world {
 		// Reused between barriers so routing allocates nothing in a steady
 		// universe.
 		std::vector<std::vector<Delivery>> Fanout;
+		struct PendingDelivery {
+			WorldId World;
+			Delivery Message;
+			size_t EncodedBytes = 0;
+		};
+		// Host deliveries survive until the next barrier, separate from its scratch.
+		std::vector<PendingDelivery> PendingDeliveries;
+		std::vector<uint32_t> PendingDeliveryCounts;
+		size_t PendingDeliveryBytes = 0;
+		static constexpr size_t MAXIMUM_PENDING_DELIVERIES = 4096;
+		static constexpr size_t MAXIMUM_PENDING_DELIVERY_BYTES = 16 * 1024 * 1024;
 
 		// How many of each world's queued deliveries this barrier are channel
 		// messages, by world index.

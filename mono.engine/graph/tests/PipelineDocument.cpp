@@ -758,3 +758,78 @@ TEST_CASE("a parameter can carry a multi-line shader", "[graph][document]") {
 	// rearranged would compile and diff forever.
 	CHECK(*node->Parameter(Name("source")) == glsl);
 }
+
+TEST_CASE(
+	"world HDR composition keeps every spatial layer before lenses and encoding", "[graph][world-hdr]"
+) {
+	const auto document = engine::graph::DefaultWorldHdrDocument();
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph compiled;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	std::vector<Name> spatial;
+	for (const auto id : compiled.PerView) {
+		spatial.push_back(graph.Find(id)->Kind);
+	}
+	const std::vector<Name> expectedTail{
+		Name("portal-overlay"),
+		Name("mirror-overlay"),
+		Name("transparent"),
+		Name("shader-lenses"),
+		Name("tonemap")
+	};
+	REQUIRE(spatial.size() >= expectedTail.size());
+	CHECK(std::vector<Name>(spatial.end() - expectedTail.size(), spatial.end()) == expectedTail);
+	for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
+		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+		if (resource->Name == Name("mirror-views") || resource->Name == Name("portaled") ||
+			resource->Name == Name("mirrored") || resource->Name == Name("display") ||
+			resource->Name == Name("lens-b")) {
+			CHECK(resource->Format == engine::graph::ResourceFormat::RGBA16F);
+		}
+	}
+	CHECK(std::count(spatial.begin(), spatial.end(), Name("surface-capture")) == 1);
+	CHECK(std::count(spatial.begin(), spatial.end(), Name("mirror-capture")) == 0);
+	CHECK(std::count(spatial.begin(), spatial.end(), Name("portal-capture")) == 0);
+	PipelineDocument restored;
+	REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+	CHECK(Write(restored) == Write(document));
+}
+
+TEST_CASE(
+	"portal body graph exports an opaque pair in the selected capture projection", "[graph][portal-body]"
+) {
+	for (const bool ordered : {false, true})
+		for (const bool seam : {false, true}) {
+			const auto document = engine::graph::DefaultPortalBodyDocument(seam, ordered);
+			RenderGraph graph;
+			Name offender;
+			REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+			CompiledGraph compiled;
+			REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+			REQUIRE_FALSE(compiled.PerView.empty());
+			CHECK(graph.Find(compiled.PerView.back())->Kind == Name("depth-compose"));
+			REQUIRE(compiled.Final.size() == 1);
+			const auto *exported = graph.Find(compiled.Final.front());
+			CHECK(exported->Kind == Name("capture"));
+			REQUIRE(exported->Reads.size() == 2);
+			CHECK(graph.FindResource(exported->Reads[0])->Format == engine::graph::ResourceFormat::RGBA16F);
+			CHECK(graph.FindResource(exported->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
+			size_t pairedImages = 0;
+			for (const auto id : compiled.PerView) {
+				const auto *node = graph.Find(id);
+				if (node->Kind != Name("eye-image")) continue;
+				++pairedImages;
+				REQUIRE(node->Parameter(Name("scope")));
+				CHECK(*node->Parameter(Name("scope")) == "opaque-lighting");
+				REQUIRE(node->Parameter(Name("projection")));
+				CHECK(*node->Parameter(Name("projection")) == (seam ? "seam" : "eye"));
+				CHECK(node->Writes.size() == 2);
+			}
+			CHECK(pairedImages == (ordered ? 3 : 1));
+			PipelineDocument restored;
+			REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+			CHECK(Write(restored) == Write(document));
+		}
+}

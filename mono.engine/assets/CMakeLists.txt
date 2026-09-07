@@ -26,3 +26,19 @@ mono_add_library(assets
 		Vendor::blake3
 		Vendor::cryptopp
 )
+
+option(MONO_FUZZ_SHADER "Build the cooked shader parser with libFuzzer and sanitizers" OFF)
+if(MONO_FUZZ_SHADER)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR "MONO_FUZZ_SHADER requires Clang with libFuzzer")
+	endif()
+	# Compile the actual parser and hashing boundary with coverage and sanitizers.
+	# Linking the ordinary assets archive alone would leave the parser uninstrumented.
+	add_executable(fuzz_shader fuzz/Shader.cpp src/Shader.cpp src/ContentHash.cpp)
+	target_include_directories(fuzz_shader PRIVATE include)
+	target_link_libraries(fuzz_shader PRIVATE Engine::core Vendor::blake3)
+	target_compile_options(fuzz_shader PRIVATE
+		-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -O1 -g)
+	target_link_options(fuzz_shader PRIVATE -fsanitize=fuzzer,address,undefined)
+	set_target_properties(fuzz_shader PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
+endif()

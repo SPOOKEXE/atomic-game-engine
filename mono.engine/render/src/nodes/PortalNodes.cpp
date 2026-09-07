@@ -9,6 +9,7 @@
 // Neither lookup is expressible in the other's target. `NON-EUCLIDEAN.md`
 // Part III is the argument.
 
+#include "PortalImageSampling.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -23,6 +24,127 @@
 
 namespace engine::render {
 
+	bool ViewRecording::CaptureSeamLights(WorldColourTarget colour) {
+		ENGINE_PROFILE("capture seam light fields");
+		const auto &portalOf = PortalOf;
+		const size_t targetSlot = Request.TargetSlot;
+		const auto &drawCamera = DrawCamera;
+		const auto &lightUniforms = SceneLights;
+		const auto &lightViewProjection = LightViewProjection;
+		auto *const command = Command;
+		// Supplemental local-light and emissive radiance arriving from the far room.
+		// Ambient, sky and the shared world sun already illuminate the receiver;
+		// including them here would add the same global illumination twice.
+		// Transformed directional/sky transport needs a separate lighting model.
+		// Probes are viewer-independent: a doorway emits even behind the camera.
+		for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+			if (portalOf[slot] == nullptr) {
+				continue;
+			}
+			const PortalView &portal = *portalOf[slot];
+			if (portal.ExternalImage) {
+				continue;
+			}
+
+			// The authored mouth determines the receiving half-space. Deriving it
+			// from the viewer would flip the light pool when the camera crosses.
+			const core::Vector3 outward = portal.Normal;
+
+			// Far enough off the plane that the oblique clip below stays
+			// in front of the eye: the bias is derived from this same
+			// distance, and a plane that lands behind the camera inverts
+			// the frustum and captures nothing.
+			constexpr float STAND_OFF = 0.5f;
+			const core::Vector3 standPosition = portal.Centre + outward * STAND_OFF;
+			const core::Vector3 upAxis = std::abs(outward.Y) > 0.99f ? core::Vector3{0.0f, 0.0f, 1.0f}
+																	 : core::Vector3{0.0f, 1.0f, 0.0f};
+			const core::CFrame stand = core::CFrame::LookAt(standPosition, standPosition - outward, upAxis);
+			const core::CFrame placed = portal.Warp.Place(stand);
+
+			// Wide and square: the capture is a light probe of a room,
+			// not a picture, and a narrow lens would miss the lamps
+			// standing beside the doorway.
+			scene::Camera captureCamera = drawCamera;
+			captureCamera.FieldOfViewRadians = 1.9f;
+			captureCamera.NearPlane = 0.05f;
+			const glm::mat4 captureProjection = scene::ResolveCamera(placed, captureCamera, 1.0f).Projection;
+
+			// The same backward-pointing clip as `subCameraFor`, so the
+			// wall the far mouth is set into does not fill the capture.
+			// The bias is the stand-in eye's own seam distance rather
+			// than the viewer's - `PortalClipBias` halves it, keeping
+			// the plane in front of an eye the viewer's bias could put
+			// it behind.
+			const core::Vector3 clipNormal = portal.Warp.Rotate(outward) * -1.0f;
+			const core::Vector3 clipPoint =
+				portal.Warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(STAND_OFF);
+			const scene::CameraMatrices captureMatrices = scene::ResolveSurfaceCamera(
+				placed,
+				scene::ObliqueProjection(captureProjection, placed, clipNormal, clipNormal.Dot(clipPoint))
+			);
+
+			Impl::SeamLightTarget *seamLight = State->EnsureSeamLight(
+				targetSlot,
+				slot,
+				colour == WorldColourTarget::Hdr ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
+												 : State->ColourFormat()
+			);
+			if (seamLight == nullptr) {
+				return false;
+			}
+
+			const SDL_GPUViewport seamViewport{
+				0.0f,
+				0.0f,
+				static_cast<float>(seamLight->Width),
+				static_cast<float>(seamLight->Height),
+				0.0f,
+				1.0f
+			};
+
+			const SDL_FColor voidColour{0.0f, 0.0f, 0.0f, 1.0f};
+
+			SDL_GPURenderPass *const pass = OpenScenePass(
+				seamLight->Colour, seamLight->Depth, false, &seamViewport, lightUniforms, &voidColour, colour
+			);
+
+			const FrameUniforms captureUniforms{
+				captureMatrices.ViewProjection,
+				lightViewProjection,
+				glm::mat4{1.0f},
+			};
+			if (pass == nullptr) {
+				return false;
+			}
+			SDL_PushGPUVertexUniformData(command, 0, &captureUniforms, sizeof(captureUniforms));
+
+			LightingUniforms voidLighting = LightingAt(placed.Position, 0.0f, 1.0f);
+			voidLighting.Ambient = glm::vec4{0.0f};
+			voidLighting.OutdoorAmbient = glm::vec4{0.0f};
+			voidLighting.Direct = glm::vec4{0.0f};
+			// No fog in a light probe: what falls to distance falls to
+			// the void the clear already painted.
+			voidLighting.Fog = glm::vec4{1.0e6f, 1.0e6f + 1.0f, 0.0f, 0.0f};
+
+			DrawWorldInto(pass, voidLighting, portal.TagFilter);
+			DrawBlendedInto(pass, captureUniforms, voidLighting, portal.TagFilter, false, colour);
+
+			SDL_EndGPURenderPass(pass);
+
+			seamLight->Centre = glm::vec4{portal.Centre.X, portal.Centre.Y, portal.Centre.Z, 1.0f};
+
+			// The spill reaches about a doorway's span into the room:
+			// past that the window falloff has taken it below anything
+			// the ambient does not already cover.
+			const float reach = 2.0f * std::max(portal.First.Magnitude() + portal.Second.Magnitude(), 1.0f);
+			seamLight->Outward = glm::vec4{outward.X, outward.Y, outward.Z, reach};
+			seamLight->First = glm::vec4{portal.First.X, portal.First.Y, portal.First.Z, 0.0f};
+			seamLight->Second = glm::vec4{portal.Second.X, portal.Second.Y, portal.Second.Z, 0.0f};
+			seamLight->Ready = true;
+		}
+		return true;
+	}
+
 	void ViewRecording::RegisterPortalNodes(NodeTable &frameNodes) {
 		frameNodes.Set(core::Name("portal-capture"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
@@ -33,7 +155,6 @@ namespace engine::render {
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
 			const size_t targetSlot = recording.Request.TargetSlot;
 			const float nearestPane = recording.NearestPane;
-			const scene::Camera &drawCamera = recording.DrawCamera;
 			const uint32_t sceneWidth = recording.SceneWidth;
 			const uint32_t sceneHeight = recording.SceneHeight;
 			const uint32_t targetWidth = recording.TargetWidth;
@@ -55,32 +176,14 @@ namespace engine::render {
 										const core::Vector3 &eye, float surfaceMode, float imageOpacity
 									) { return recording.LightingAt(eye, surfaceMode, imageOpacity); };
 			const auto shadowBinding = [&recording] { return recording.ShadowBindings(); };
-			const auto openScenePass = [&recording](
-										   SDL_GPUTexture *colour,
-										   SDL_GPUTexture *depth,
-										   bool cycle,
-										   const SDL_GPUViewport *viewport,
-										   const LightUniforms &passLights,
-										   const SDL_FColor *clearColour = nullptr
-									   ) {
-				return recording.OpenScenePass(colour, depth, cycle, viewport, passLights, clearColour);
-			};
 			const auto drawWorldInto =
 				[&recording](
 					SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter
 				) { recording.DrawWorldInto(pass, plainLighting, filter); };
-			const auto drawBlendedInto = [&recording](
-											 SDL_GPURenderPass *pass,
-											 const FrameUniforms &frame,
-											 const LightingUniforms &plainLighting,
-											 uint32_t filter,
-											 bool panesFollow
-										 ) {
-				recording.DrawBlendedInto(pass, frame, plainLighting, filter, panesFollow);
-			};
 			const bool drawInterface = recording.DrawInterface;
 
 			enterNamedPass(context.Name);
+			State->RecordPortalImports(command, *recording.Request.Source, targetSlot);
 
 			// Last frame's light fields are for mouths that may be gone - a
 			// disabled `Portal` reaches here as no `PortalView` at all, and its
@@ -124,9 +227,7 @@ namespace engine::render {
 				// matrix. Starting from this every time is what makes each level's
 				// frustum the screen's own, which is what makes the screen-position
 				// lookup in `opaque.frag` exact.
-				const float portalAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-				const glm::mat4 screenProjection =
-					scene::ResolveCamera(cameraFrame, drawCamera, portalAspect).Projection;
+				const glm::mat4 screenProjection = recording.Matrices.Projection;
 
 				// **Made before anything is captured, because a world of nothing but
 				// holes never reaches `EnsureSurface`.** The sampler used to be
@@ -227,7 +328,7 @@ namespace engine::render {
 						// **The hole this camera just came out of**, which is at this
 						// level's own clip plane and would render a scene that is then
 						// entirely clipped away. CodeParade's `skipPortal` argument.
-						if (portal.Index == skip) {
+						if (portal.ExternalImage || portal.Index == skip) {
 							continue;
 						}
 
@@ -244,6 +345,10 @@ namespace engine::render {
 
 						if (level > 0) {
 							fillLevel(sub.Matrices, sub.Frame, level - 1, portal.Partner);
+						}
+
+						if (!recording.AdmitSurfaceCapture(sceneWidth, sceneHeight, portalLevels - level)) {
+							continue;
 						}
 
 						Impl::PortalTarget *target =
@@ -275,8 +380,14 @@ namespace engine::render {
 						// device hang more often rather than less. `Impl::PortalDepth`
 						// carries what happens above one level, which is where the same
 						// target *is* written twice.
-						SDL_GPURenderPass *const pass = openScenePass(
-							target->Colour, target->Depth, false, &portalViewport, lightUniforms
+						SDL_GPURenderPass *const pass = recording.OpenScenePass(
+							target->Colour,
+							target->Depth,
+							false,
+							&portalViewport,
+							lightUniforms,
+							nullptr,
+							WorldColourTarget::Hdr
 						);
 
 						const FrameUniforms subFrameUniforms{
@@ -318,7 +429,23 @@ namespace engine::render {
 							LightingUniforms paneLighting = subLighting;
 							SDL_GPUTexture *paneTexture = nullptr;
 
-							if (seen != nullptr && seen->Colour != nullptr) {
+							FrameUniforms paneFrame = subFrameUniforms;
+							paneFrame.ViewProjection = PortalImageSampling(
+								paneFrame.ViewProjection, sub.Frame.Position, inner.Centre, inner.Normal
+							);
+							const auto *imported = State->FindPortalImport(
+								*recording.Request.Source, targetSlot, inner, command
+							);
+							if (inner.ExternalImage && imported != nullptr) {
+								paneLighting.Flags.z = 4.0f;
+								paneLighting.Flags.w = 1.0f;
+								paneTexture = imported->Texture;
+								paneFrame.SurfaceViewProjection = PortalImageSampling(
+									imported->Binding.Sampling, sub.Frame.Position, inner.Centre, inner.Normal
+								);
+								paneLighting.PaneNormal =
+									glm::vec4{inner.Normal.X, inner.Normal.Y, inner.Normal.Z, 0};
+							} else if (!inner.ExternalImage && seen != nullptr && seen->Colour != nullptr) {
 								// 2 is the screen-position lookup - see `opaque.frag`.
 								paneLighting.Flags.z = 2.0f;
 								paneTexture = seen->Colour;
@@ -341,6 +468,7 @@ namespace engine::render {
 								paneLighting.Flags.z = 3.0f;
 							}
 
+							SDL_PushGPUVertexUniformData(command, 0, &paneFrame, sizeof(paneFrame));
 							result.DrawCalls += State->DrawSlots(
 								command,
 								pass,
@@ -369,11 +497,43 @@ namespace engine::render {
 								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 								sceneWidth,
 								sceneHeight,
-								false
+								false,
+								WorldColourTarget::Hdr
 							);
 						}
 
-						drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
+						recording.DrawBlendedInto(
+							pass,
+							subFrameUniforms,
+							subLighting,
+							portal.TagFilter,
+							false,
+							WorldColourTarget::Hdr
+						);
+
+						if (recording.ParticleCount > 0) {
+							result.DrawCalls += State->DrawParticles(
+								command,
+								pass,
+								sub.Matrices.ViewProjection,
+								sub.Frame,
+								result.Triangles,
+								result.ParticlesDrawn,
+								result.Culled,
+								WorldColourTarget::Hdr
+							);
+						}
+						if (recording.RibbonCount > 0) {
+							result.DrawCalls += State->DrawRibbons(
+								command,
+								pass,
+								sub.Matrices.ViewProjection,
+								sub.Frame,
+								recording.Request.RibbonRuns,
+								result.Triangles,
+								WorldColourTarget::Hdr
+							);
+						}
 
 						if (drawInterface) {
 							result.DrawCalls += gameInterfaceHook->RecordWorld(
@@ -385,7 +545,8 @@ namespace engine::render {
 								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 								sceneWidth,
 								sceneHeight,
-								true
+								true,
+								WorldColourTarget::Hdr
 							);
 						}
 
@@ -403,148 +564,8 @@ namespace engine::render {
 					-1
 				);
 
-				// --- the seam light-field captures -------------------------------
-				//
-				// **Each mouth's far room, rendered against a lit void.** A
-				// stand-in eye at the mouth's centre looks through the hole and
-				// is carried by the same warp a body crosses by, so what it sees
-				// is the light arriving at the seam. The clear is the world's
-				// ambient rather than the fog - a lit void - and the fog is
-				// pushed out of reach, so the capture holds room lighting and
-				// nothing atmospheric. `deferred-lighting.frag`'s `SeamSpill`
-				// projects the matching capture back out of the entrance.
-				//
-				// **Viewer-independent, unlike the recursion above.** Light
-				// spills out of a doorway whether or not anybody is looking at
-				// the pane, so this does not test `VisiblePane` - a pair costs
-				// two 128x128 forward passes per frame while its mouths are
-				// enabled, and a disabled mouth never reaches this loop.
-				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-					if (portalOf[slot] == nullptr) {
-						continue;
-					}
-					const PortalView &portal = *portalOf[slot];
-
-					// **The mouth's own face, and nothing about where anybody
-					// is standing.** A doorway throws its light into the room it
-					// opens onto, which is a fact about the doorway; the partner
-					// mouth faces the other room and serves that one the same
-					// way. `PortalView::Normal` is that face's normal.
-					//
-					// This used to derive the side from the viewer, the way
-					// `subCameraFor` does. There it is right - that sub-camera is
-					// genuinely placed from the eye, so its clip plane has to
-					// face the way *it* looks. Here the eye is a stand-in built
-					// out of `outward` a few lines down, so taking the sign from
-					// the viewer made a light probe move when a player walked:
-					// crossing the pane's plane flipped the whole spill
-					// half-space in one frame, and `SeamSpill`'s `depth <= 0.0`
-					// test then dropped the pool on one side of the pane and
-					// painted it on the other. Measured on `PortalLightMix` from
-					// a side-on eye, that snap moved about nine thousand lit
-					// pixels for less than half a stud of travel.
-					//
-					// The other half of the same mistake was quieter: a mouth
-					// the viewer is nowhere near took its side from the viewer
-					// too, so the far room's own doorway projected into the void
-					// behind itself for as long as somebody stood in the near
-					// room.
-					const core::Vector3 outward = portal.Normal;
-
-					// Far enough off the plane that the oblique clip below stays
-					// in front of the eye: the bias is derived from this same
-					// distance, and a plane that lands behind the camera inverts
-					// the frustum and captures nothing.
-					constexpr float STAND_OFF = 0.5f;
-					const core::Vector3 standPosition = portal.Centre + outward * STAND_OFF;
-					const core::Vector3 upAxis = std::abs(outward.Y) > 0.99f
-													 ? core::Vector3{0.0f, 0.0f, 1.0f}
-													 : core::Vector3{0.0f, 1.0f, 0.0f};
-					const core::CFrame stand =
-						core::CFrame::LookAt(standPosition, standPosition - outward, upAxis);
-					const core::CFrame placed = portal.Warp.Place(stand);
-
-					// Wide and square: the capture is a light probe of a room,
-					// not a picture, and a narrow lens would miss the lamps
-					// standing beside the doorway.
-					scene::Camera captureCamera = drawCamera;
-					captureCamera.FieldOfViewRadians = 1.9f;
-					captureCamera.NearPlane = 0.05f;
-					const glm::mat4 captureProjection =
-						scene::ResolveCamera(placed, captureCamera, 1.0f).Projection;
-
-					// The same backward-pointing clip as `subCameraFor`, so the
-					// wall the far mouth is set into does not fill the capture.
-					// The bias is the stand-in eye's own seam distance rather
-					// than the viewer's - `PortalClipBias` halves it, keeping
-					// the plane in front of an eye the viewer's bias could put
-					// it behind.
-					const core::Vector3 clipNormal = portal.Warp.Rotate(outward) * -1.0f;
-					const core::Vector3 clipPoint =
-						portal.Warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(STAND_OFF);
-					const scene::CameraMatrices captureMatrices = scene::ResolveSurfaceCamera(
-						placed,
-						scene::ObliqueProjection(
-							captureProjection, placed, clipNormal, clipNormal.Dot(clipPoint)
-						)
-					);
-
-					Impl::SeamLightTarget *seamLight = State->EnsureSeamLight(targetSlot, slot);
-					if (seamLight == nullptr) {
-						continue;
-					}
-
-					const SDL_GPUViewport seamViewport{
-						0.0f,
-						0.0f,
-						static_cast<float>(seamLight->Width),
-						static_cast<float>(seamLight->Height),
-						0.0f,
-						1.0f
-					};
-
-					// The lit void. `Ambient` is already in the linear working
-					// space the pass writes, which is the space a clear on an
-					// sRGB target is given in.
-					const SDL_FColor voidColour{
-						State->Ambient.x,
-						State->Ambient.y,
-						State->Ambient.z,
-						1.0f,
-					};
-
-					SDL_GPURenderPass *const pass = openScenePass(
-						seamLight->Colour, seamLight->Depth, false, &seamViewport, lightUniforms, &voidColour
-					);
-
-					const FrameUniforms captureUniforms{
-						captureMatrices.ViewProjection,
-						lightViewProjection,
-						glm::mat4{1.0f},
-					};
-					SDL_PushGPUVertexUniformData(command, 0, &captureUniforms, sizeof(captureUniforms));
-
-					LightingUniforms voidLighting = lightingAt(placed.Position, 0.0f, 1.0f);
-					// No fog in a light probe: what falls to distance falls to
-					// the void the clear already painted.
-					voidLighting.Fog = glm::vec4{1.0e6f, 1.0e6f + 1.0f, 0.0f, 0.0f};
-
-					drawWorldInto(pass, voidLighting, portal.TagFilter);
-					drawBlendedInto(pass, captureUniforms, voidLighting, portal.TagFilter, false);
-
-					SDL_EndGPURenderPass(pass);
-
-					seamLight->Centre = glm::vec4{portal.Centre.X, portal.Centre.Y, portal.Centre.Z, 1.0f};
-
-					// The spill reaches about a doorway's span into the room:
-					// past that the window falloff has taken it below anything
-					// the ambient does not already cover.
-					const float reach =
-						2.0f * std::max(portal.First.Magnitude() + portal.Second.Magnitude(), 1.0f);
-					seamLight->Outward = glm::vec4{outward.X, outward.Y, outward.Z, reach};
-					seamLight->First = glm::vec4{portal.First.X, portal.First.Y, portal.First.Z, 0.0f};
-					seamLight->Second = glm::vec4{portal.Second.X, portal.Second.Y, portal.Second.Z, 0.0f};
-					seamLight->Ready = true;
+				if (!recording.CaptureSeamLights(WorldColourTarget::Display)) {
+					return false;
 				}
 			}
 			return true;
@@ -585,7 +606,8 @@ namespace engine::render {
 			Impl::PortalLevel &top = bank.Portals[portalLevels - 1];
 			for (size_t index = 0; index < scene::MAX_SURFACES; index++) {
 				Impl::PortalTarget &portal = top.Targets[index];
-				if (portalOf[index] == nullptr || portal.Colour == nullptr || portal.Display == nullptr) {
+				if (portalOf[index] == nullptr || portalOf[index]->ExternalImage ||
+					portal.Colour == nullptr || portal.Display == nullptr) {
 					continue;
 				}
 				const std::array bindings = {
@@ -664,6 +686,7 @@ namespace engine::render {
 				return true;
 			}
 
+			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			SDL_GPUColorTargetInfo portalTarget{};
 			portalTarget.texture = target.Texture;
 			portalTarget.load_op = SDL_GPU_LOADOP_LOAD;
@@ -679,7 +702,11 @@ namespace engine::render {
 			SDL_SetGPUScissor(pass, &sceneScissor);
 
 			if (haveInstances) {
-				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+				State->BindPipeline(
+					pass,
+					hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
+					hdr ? Impl::PipelineFamily::HdrOpaque : Impl::PipelineFamily::Opaque
+				);
 				State->BindInstanceBuffers(pass);
 				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -690,7 +717,9 @@ namespace engine::render {
 				const auto drawPortals = [&](bool blended) {
 					if (blended) {
 						State->BindPipeline(
-							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
+							pass,
+							hdr ? State->HdrTransparentPipeline : State->TransparentPipeline,
+							hdr ? Impl::PipelineFamily::HdrTransparent : Impl::PipelineFamily::Transparent
 						);
 					}
 					for (size_t index = 0; index < scene::MAX_SURFACES; index++) {
@@ -711,7 +740,40 @@ namespace engine::render {
 								: nullptr;
 						LightingUniforms paneLighting = portalLighting;
 						SDL_GPUTexture *image = nullptr;
-						if (captured != nullptr && captured->Display != nullptr) {
+						FrameUniforms paneFrame = frameUniforms;
+						const auto &portalView = *portalOf[index];
+						// The slab's face must not cover geometry before the capture plane.
+						paneFrame.ViewProjection = PortalImageSampling(
+							paneFrame.ViewProjection,
+							cameraFrame.Position,
+							portalView.Centre,
+							portalView.Normal
+						);
+						if (!portalView.ExternalImage && portalLevels == 0 &&
+							recording.Request.Source->SurfaceBudget) {
+							result.SurfaceBudgetExceeded = true;
+						}
+						const auto *imported = State->FindPortalImport(
+							*recording.Request.Source, recording.Request.TargetSlot, portalView, command
+						);
+						if (portalView.ExternalImage) {
+							paneLighting.Flags.z = imported != nullptr ? 4.0f : 3.0f;
+							paneLighting.Flags.w = 1.0f;
+							paneLighting.Mirror.z = hdr ? 0.0f : 1.0f;
+							paneLighting.PaneNormal =
+								glm::vec4{portalView.Normal.X, portalView.Normal.Y, portalView.Normal.Z, 0};
+							if (imported != nullptr) {
+								image = imported->Texture;
+								paneFrame.SurfaceViewProjection = PortalImageSampling(
+									imported->Binding.Sampling,
+									cameraFrame.Position,
+									portalView.Centre,
+									portalView.Normal
+								);
+								result.SurfaceInstances += count;
+							}
+						} else if (captured != nullptr &&
+								   (hdr ? captured->Colour : captured->Display) != nullptr) {
 							paneLighting.Flags.z = 2.0f;
 							paneLighting.Flags.w = 1.0f;
 							paneLighting.PaneNormal = glm::vec4{
@@ -720,10 +782,11 @@ namespace engine::render {
 								portalOf[index]->Normal.Z,
 								0.0f,
 							};
-							image = captured->Display;
+							image = hdr ? captured->Colour : captured->Display;
 							result.SurfaceInstances += count;
 						}
 
+						SDL_PushGPUVertexUniformData(command, 0, &paneFrame, sizeof(paneFrame));
 						result.DrawCalls += State->DrawSlots(
 							command,
 							pass,

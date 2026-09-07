@@ -1201,6 +1201,8 @@ declare interface Instance {
 	Equals(other: Instance): boolean;
 	GetPlayerFromCharacter(character: Instance): Instance | undefined;
 	LoadCharacter(): Instance | undefined;
+	AddAccessory(accessory: Instance): boolean;
+	CutTo(frame: CFrame): boolean;
 	KeepWorldAwake(reason: string): void;
 	LetWorldSleep(): void;
 	IsKeepingWorldAwake(): boolean;
@@ -1347,6 +1349,9 @@ declare interface Tool extends Model {
 	Grip: CFrame;
 }
 
+declare interface Accessory extends Model {
+}
+
 declare interface MeshPart extends BasePart {
 	EmissiveMap: string;
 	HeightMap: string;
@@ -1365,6 +1370,8 @@ declare interface SkinnedMeshPart extends MeshPart {
 }
 
 declare interface Camera extends PVInstance {
+	CameraSubject: Instance;
+	CameraSubjectAutomatic: boolean;
 	FarPlaneZ: number;
 	FieldOfView: number;
 	ImageHeight: number;
@@ -1423,6 +1430,7 @@ declare interface Humanoid extends Instance {
 	JumpPower: number;
 	MaxHealth: number;
 	MoveDirection: Vector3;
+	RootPart: Instance;
 	WalkSpeed: number;
 }
 
@@ -2842,6 +2850,7 @@ declare const Instance: {
 		(className: "BreakGroup", parent?: Instance): BreakGroup;
 		(className: "WorldModel", parent?: Instance): WorldModel;
 		(className: "Tool", parent?: Instance): Tool;
+		(className: "Accessory", parent?: Instance): Accessory;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "SkinnedMeshPart", parent?: Instance): SkinnedMeshPart;
 		(className: "Camera", parent?: Instance): Camera;

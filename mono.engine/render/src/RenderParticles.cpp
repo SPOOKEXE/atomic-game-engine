@@ -1420,9 +1420,14 @@ namespace engine::render {
 		const core::CFrame &eye,
 		uint64_t &triangles,
 		uint32_t &particlesDrawn,
-		uint32_t &culled
+		uint32_t &culled,
+		WorldColourTarget target
 	) {
-		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
+		const auto selectedPipeline =
+			target == WorldColourTarget::Hdr ? HdrParticlePipeline : ParticlePipeline;
+		const auto selectedAdditive =
+			target == WorldColourTarget::Hdr ? HdrAdditiveParticlePipeline : AdditiveParticlePipeline;
+		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
 		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
@@ -1553,15 +1558,15 @@ namespace engine::render {
 			// additive one, so each pipeline is bound the first time it is
 			// reached and never again.
 			if (state.Additive) {
-				if (AdditiveParticlePipeline == nullptr) {
+				if (selectedAdditive == nullptr) {
 					continue;
 				}
 				if (!additiveBound) {
-					BindPipeline(pass, AdditiveParticlePipeline, PipelineFamily::Other);
+					BindPipeline(pass, selectedAdditive, PipelineFamily::Other);
 					additiveBound = true;
 				}
 			} else if (!blendedBound) {
-				BindPipeline(pass, ParticlePipeline, PipelineFamily::Other);
+				BindPipeline(pass, selectedPipeline, PipelineFamily::Other);
 				blendedBound = true;
 			}
 
@@ -1703,9 +1708,13 @@ namespace engine::render {
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
 		std::span<const effects::RibbonRun> runs,
-		uint64_t &triangles
+		uint64_t &triangles,
+		WorldColourTarget target
 	) {
-		if (RibbonPipeline == nullptr || runs.empty()) {
+		const auto selectedPipeline = target == WorldColourTarget::Hdr ? HdrRibbonPipeline : RibbonPipeline;
+		const auto selectedAdditive =
+			target == WorldColourTarget::Hdr ? HdrAdditiveRibbonPipeline : AdditiveRibbonPipeline;
+		if (selectedPipeline == nullptr || runs.empty()) {
 			return 0;
 		}
 
@@ -1735,15 +1744,15 @@ namespace engine::render {
 				}
 
 				if (run.Additive) {
-					if (AdditiveRibbonPipeline == nullptr) {
+					if (selectedAdditive == nullptr) {
 						continue;
 					}
 					if (!additiveBound) {
-						BindPipeline(pass, AdditiveRibbonPipeline, PipelineFamily::Other);
+						BindPipeline(pass, selectedAdditive, PipelineFamily::Other);
 						additiveBound = true;
 					}
 				} else if (!blendedBound) {
-					BindPipeline(pass, RibbonPipeline, PipelineFamily::Other);
+					BindPipeline(pass, selectedPipeline, PipelineFamily::Other);
 					blendedBound = true;
 				}
 

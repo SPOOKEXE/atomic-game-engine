@@ -89,6 +89,8 @@ namespace client {
 		// @param world            Its name, which is what crosses.
 		// @param maximumInstances The draw list size to reserve for.
 		void Track(engine::world::WorldId id, engine::core::Name world, size_t maximumInstances);
+		// Retire a replaced replica's channel before reusing its world handle.
+		bool Untrack(engine::world::WorldId id);
 
 		// Publishes one world's view.
 		//
@@ -118,9 +120,11 @@ namespace client {
 		// @param spacing World units between adjacent views along X. Zero
 		//                overlays them, which is what a single view wants and
 		//                what a mirror would want.
-		void Compose(float spacing);
+		// A selected world uses its own camera and unshifted rows. Other channels
+		// are still consumed so switching selection can use their newest frame.
+		void Compose(float spacing, engine::world::WorldId selected = {});
 
-		// What to draw, every tracked view together.
+		// What to draw: the selected world, or every tracked view together.
 		//
 		// @return The combined instances, valid until the next `Compose`.
 		std::span<const engine::scene::DrawInstance> Instances() const {
@@ -134,7 +138,8 @@ namespace client {
 
 		// Where to draw from.
 		//
-		// The first tracked view's, shifted far enough to hold the rest - a
+		// The selected world's camera, or the first tracked view's camera shifted
+		// far enough to hold the rest. A
 		// compositor with one camera and several worlds has to choose, and
 		// choosing the first and framing the row is the choice that shows
 		// something rather than nothing.

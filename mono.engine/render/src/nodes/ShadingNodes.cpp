@@ -10,6 +10,7 @@
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
@@ -20,6 +21,72 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterShadingNodes(NodeTable &frameNodes) {
+		frameNodes.Set(core::Name("depth-compose"), [this](const graph::RunContext &context) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (node == nullptr || context.Reads.size() != 4 || context.Writes.size() != 2) return false;
+			const auto resolve = [&](std::span<const graph::ResourceId> resources,
+									 std::span<const core::Name> ports,
+									 core::Name port,
+									 size_t index,
+									 bool create) {
+				if (!ports.empty()) index = std::find(ports.begin(), ports.end(), port) - ports.begin();
+				return index < resources.size() ? GraphTexture(resources[index], context, create)
+												: Impl::NamedTexture{};
+			};
+			std::array<Impl::NamedTexture, 4> inputs;
+			const std::array ports{"foreground", "foreground-depth", "background", "background-depth"};
+			for (size_t i = 0; i < inputs.size(); ++i) {
+				inputs[i] = resolve(context.Reads, node->ReadPorts, core::Name(ports[i]), i, false);
+				const auto format =
+					i % 2 ? SDL_GPU_TEXTUREFORMAT_R32_FLOAT : SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+				if (!inputs[i].IsValid() || inputs[i].Format != format) return false;
+			}
+			for (const size_t first : {size_t(0), size_t(2)}) {
+				if (inputs[first].Width != inputs[first + 1].Width ||
+					inputs[first].Height != inputs[first + 1].Height)
+					return false;
+			}
+			const auto colour = resolve(context.Writes, node->WritePorts, core::Name("colour"), 0, true);
+			const auto depth = resolve(context.Writes, node->WritePorts, core::Name("depth"), 1, true);
+			if (!colour.IsValid() || !depth.IsValid() ||
+				colour.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT || colour.Width != depth.Width ||
+				colour.Height != depth.Height || !State->EnsureDepthCompose())
+				return false;
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo targets[2]{};
+			targets[0].texture = colour.Texture;
+			targets[1].texture = depth.Texture;
+			for (auto &target : targets) {
+				target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				target.store_op = SDL_GPU_STOREOP_STORE;
+				target.cycle = true;
+			}
+			auto *pass = SDL_BeginGPURenderPass(Command, targets, 2, nullptr);
+			if (pass == nullptr) return false;
+			std::array<SDL_GPUTextureSamplerBinding, 4> bindings;
+			for (size_t i = 0; i < inputs.size(); ++i)
+				bindings[i] = {inputs[i].Texture, State->OverlaySampler};
+			const auto *mode = node->Parameter(core::Name("mode"));
+			const uint32_t foregroundMode = mode && *mode == "transparent"	   ? 1
+											: mode && *mode == "premultiplied" ? 2
+																			   : 0;
+			SDL_PushGPUFragmentUniformData(Command, 0, &foregroundMode, sizeof(foregroundMode));
+			SDL_BindGPUGraphicsPipeline(pass, State->DepthComposePipeline);
+			SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), bindings.size());
+			const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
+			const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
+			SDL_SetGPUViewport(pass, &viewport);
+			SDL_SetGPUScissor(pass, &scissor);
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+			SDL_EndGPURenderPass(pass);
+			++Result.DrawCalls;
+			core::Metrics::Count(
+				"render.depth_compose.output_bytes", uint64_t(colour.Width) * colour.Height * 12
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("last-frame"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			const auto enterNamedPass = [&recording](
@@ -62,9 +129,14 @@ namespace engine::render {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			const scene::Camera &drawCamera = recording.DrawCamera;
-			const Impl::PbrDimensions &pbrDimensions = recording.PbrDimensions;
-			Impl::PbrSlot &pbr = *recording.Pbr;
-			PbrUniforms &uniforms = recording.Uniforms;
+			if (context.Writes.size() != 1) return false;
+			const auto target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT) return false;
+			const auto *node = recording.Pipeline->Graph.Find(context.Node);
+			const auto *background = node ? node->Parameter(core::Name("background")) : nullptr;
+			const bool zeroBackground = background && *background == "zero";
+			PbrUniforms uniforms = recording.Uniforms;
+			uniforms.Direction.w = zeroBackground ? 1.f : 0.f;
 			const auto &depthBindings = recording.DepthBindings;
 			const auto fullscreen = [&recording](
 										core::Name name,
@@ -85,13 +157,13 @@ namespace engine::render {
 			fullscreen(
 				context.Name,
 				State->DepthLinearPipeline,
-				pbr.LinearDepth,
-				pbrDimensions.LinearWidth,
-				pbrDimensions.LinearHeight,
+				target.Texture,
+				target.Width,
+				target.Height,
 				depthBindings,
 				&uniforms,
 				nullptr,
-				SDL_FColor{drawCamera.FarPlane, 0.0f, 0.0f, 0.0f}
+				SDL_FColor{zeroBackground ? 0.f : drawCamera.FarPlane, 0.0f, 0.0f, 0.0f}
 			);
 			return true;
 		});
@@ -332,7 +404,6 @@ namespace engine::render {
 				nullptr,
 				SDL_FColor{}
 			);
-			recording.TonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler}};
 			return true;
 		});
 
@@ -340,7 +411,13 @@ namespace engine::render {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			Impl::PbrSlot &pbr = *recording.Pbr;
-			SDL_GPUTexture *source = pbr.Lit;
+			const auto input = context.Reads.empty()
+								   ? Impl::NamedTexture{}
+								   : recording.GraphTexture(context.Reads.front(), context, false);
+			if (!input.IsValid()) {
+				return false;
+			}
+			SDL_GPUTexture *source = input.Texture;
 			SDL_GPUTexture *target = pbr.LensA;
 
 			for (size_t index = 0; index < recording.LensGroupCount; index++) {
@@ -391,7 +468,6 @@ namespace engine::render {
 				blit.cycle = true;
 				SDL_BlitGPUTexture(recording.Command, &blit);
 			}
-			recording.TonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.LensB, recording.Sampler}};
 			return true;
 		});
 
@@ -401,7 +477,10 @@ namespace engine::render {
 			const bool offscreen = recording.Offscreen;
 			SDL_GPUColorTargetInfo &colourTarget = recording.ColourTarget;
 			SDL_GPUDepthStencilTargetInfo &depthTarget = recording.DepthTarget;
-			const auto &tonemapBindings = recording.TonemapBindings;
+			if (context.Reads.empty()) return false;
+			const auto source = recording.GraphTexture(context.Reads.front(), context, false);
+			if (!source.IsValid()) return false;
+			const std::array tonemapBindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
 			const auto fullscreen = [&recording](
 										core::Name name,
 										SDL_GPUGraphicsPipeline *pipeline,

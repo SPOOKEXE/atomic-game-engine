@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/world/HostLink.hpp>
 
 #include <utility>
@@ -35,12 +36,49 @@ namespace engine::world {
 			return "stop";
 		case HostSignal::Faulted:
 			return "faulted";
+		case HostSignal::Presentation:
+			return "presentation";
+		case HostSignal::PresentationDirectory:
+			return "presentation-directory";
+		case HostSignal::PresentationRoutes:
+			return "presentation-routes";
+		case HostSignal::TickExchangeCommand:
+			return "tick-exchange-command";
+		case HostSignal::TickExchangeResult:
+			return "tick-exchange-result";
 		}
 		// No default label, so adding a signal is a compiler warning here.
 		return "?";
 	}
 
 	void WriteHostFrame(core::ByteWriter &writer, const HostFrame &frame) {
+		if (frame.Signal == HostSignal::TickExchangeCommand ||
+			frame.Signal == HostSignal::TickExchangeResult) {
+			core::ByteWriter payload;
+			if (!(frame.Signal == HostSignal::TickExchangeCommand
+					  ? WriteTickExchangeControl(payload, frame.ExchangeCommand)
+					  : WriteTickExchangeControl(payload, frame.ExchangeResult)))
+				return;
+			writer.WriteUInt32(FRAME_MAGIC);
+			writer.WriteUInt8(static_cast<uint8_t>(frame.Signal));
+			writer.WriteRaw(payload.Bytes().data(), payload.Size());
+			return;
+		}
+		if (frame.Signal == HostSignal::Presentation || frame.Signal == HostSignal::PresentationDirectory ||
+			frame.Signal == HostSignal::PresentationRoutes) {
+			core::ByteWriter payload;
+			if (!(frame.Signal == HostSignal::Presentation
+					  ? WritePresentationMessage(payload, frame.Presentation)
+					  : (frame.Signal == HostSignal::PresentationRoutes
+							 ? WritePresentationRoutes(payload, frame.Directory)
+							 : WritePresentationDirectory(payload, frame.Directory)))) {
+				return;
+			}
+			writer.WriteUInt32(FRAME_MAGIC);
+			writer.WriteUInt8(static_cast<uint8_t>(frame.Signal));
+			writer.WriteRaw(payload.Bytes().data(), payload.Size());
+			return;
+		}
 		writer.WriteUInt32(FRAME_MAGIC);
 		writer.WriteUInt8(static_cast<uint8_t>(frame.Signal));
 		writer.WriteName(frame.Host);
@@ -68,10 +106,38 @@ namespace engine::world {
 
 		HostFrame read;
 		const auto signal = reader.ReadUInt8();
-		if (signal > static_cast<uint8_t>(HostSignal::Faulted)) {
+		if (signal > static_cast<uint8_t>(HostSignal::TickExchangeResult)) {
 			return false;
 		}
 		read.Signal = static_cast<HostSignal>(signal);
+		if (read.Signal == HostSignal::TickExchangeCommand || read.Signal == HostSignal::TickExchangeResult) {
+			if (!(read.Signal == HostSignal::TickExchangeCommand
+					  ? ReadTickExchangeControl(reader, read.ExchangeCommand)
+					  : ReadTickExchangeControl(reader, read.ExchangeResult)))
+				return false;
+			frame = std::move(read);
+			return true;
+		}
+		if (read.Signal == HostSignal::PresentationDirectory ||
+			read.Signal == HostSignal::PresentationRoutes) {
+			if (!(read.Signal == HostSignal::PresentationRoutes
+					  ? ReadPresentationRoutes(reader, read.Directory)
+					  : ReadPresentationDirectory(reader, read.Directory)) ||
+				reader.Remaining() != 0) {
+				reader.Fail();
+				return false;
+			}
+			frame = std::move(read);
+			return true;
+		}
+		if (read.Signal == HostSignal::Presentation) {
+			if (!ReadPresentationMessage(reader, read.Presentation) || reader.Remaining() != 0) {
+				reader.Fail();
+				return false;
+			}
+			frame = std::move(read);
+			return true;
+		}
 
 		read.Host = reader.ReadName();
 		read.World = reader.ReadName();
@@ -140,9 +206,26 @@ namespace engine::world {
 
 		core::ByteWriter writer;
 		WriteHostFrame(writer, stamped);
+		if (writer.Empty()) {
+			Dropped_++;
+			return false;
+		}
 
 		const parallel::ChannelStatus status = Channel_->Send(writer.Bytes());
 		if (status == parallel::ChannelStatus::Ok) {
+			if (frame.Signal == HostSignal::Presentation) {
+				core::Metrics::Count("world.presentation.transport.sent.messages", 1);
+				core::Metrics::Count(
+					"world.presentation.transport.sent.bytes", static_cast<double>(writer.Size())
+				);
+			}
+			if (frame.Signal == HostSignal::TickExchangeCommand ||
+				frame.Signal == HostSignal::TickExchangeResult) {
+				core::Metrics::Count("world.tickexchange.transport.sent.messages", 1);
+				core::Metrics::Count(
+					"world.tickexchange.transport.sent.bytes", static_cast<double>(writer.Size())
+				);
+			}
 			return true;
 		}
 
@@ -161,6 +244,37 @@ namespace engine::world {
 		frame.Signal = HostSignal::Heartbeat;
 		frame.Tick = tick;
 		frame.Milliseconds = milliseconds;
+		return Send(frame);
+	}
+
+	bool HostLink::PublishPresentationDirectory(const PresentationDirectory &directory) {
+		return PublishDirectory(directory, false);
+	}
+	bool HostLink::PublishPresentationRoutes(const PresentationDirectory &directory) {
+		return PublishDirectory(directory, true);
+	}
+	bool HostLink::PublishDirectory(const PresentationDirectory &directory, bool routes) {
+		auto &session = routes ? PublishedRoutesSession : PublishedDirectorySession;
+		auto &revision = routes ? PublishedRoutesRevision : PublishedDirectoryRevision;
+		if (!Connected() || directory.Session == 0 || directory.Revision == 0 ||
+			directory.Session < session || (directory.Session == session && directory.Revision < revision)) {
+			return false;
+		}
+		if (directory.Session == session && directory.Revision == revision) {
+			return true;
+		}
+		HostFrame frame;
+		frame.Signal = routes ? HostSignal::PresentationRoutes : HostSignal::PresentationDirectory;
+		frame.Directory = directory;
+		if (!Send(frame)) return false;
+		session = directory.Session;
+		revision = directory.Revision;
+		return true;
+	}
+	bool HostLink::SendPresentation(const PresentationMessage &message) {
+		HostFrame frame;
+		frame.Signal = HostSignal::Presentation;
+		frame.Presentation = message;
 		return Send(frame);
 	}
 
@@ -193,8 +307,17 @@ namespace engine::world {
 			return 0;
 		}
 
+		// A producer may keep publishing while this owner drains. Bound each
+		// poll so presentation traffic cannot retain unbounded decoded frames.
+		constexpr size_t MAXIMUM_POLL_FRAMES = 64;
+		constexpr size_t MAXIMUM_POLL_BYTES = 32u * 1024u * 1024u;
 		size_t taken = 0;
-		while (Channel_->Receive(Scratch) == parallel::ChannelStatus::Ok) {
+		size_t attempted = 0;
+		size_t bytes = 0;
+		while (attempted < MAXIMUM_POLL_FRAMES && bytes < MAXIMUM_POLL_BYTES &&
+			   Channel_->Receive(Scratch) == parallel::ChannelStatus::Ok) {
+			attempted++;
+			bytes += Scratch.size();
 			core::ByteReader reader(Scratch);
 
 			HostFrame frame;
@@ -204,6 +327,19 @@ namespace engine::world {
 				continue;
 			}
 
+			if (frame.Signal == HostSignal::Presentation) {
+				core::Metrics::Count("world.presentation.transport.received.messages", 1);
+				core::Metrics::Count(
+					"world.presentation.transport.received.bytes", static_cast<double>(Scratch.size())
+				);
+			}
+			if (frame.Signal == HostSignal::TickExchangeCommand ||
+				frame.Signal == HostSignal::TickExchangeResult) {
+				core::Metrics::Count("world.tickexchange.transport.received.messages", 1);
+				core::Metrics::Count(
+					"world.tickexchange.transport.received.bytes", static_cast<double>(Scratch.size())
+				);
+			}
 			frames.push_back(std::move(frame));
 			taken++;
 		}

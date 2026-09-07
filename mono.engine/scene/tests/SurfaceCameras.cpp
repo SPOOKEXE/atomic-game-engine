@@ -13,6 +13,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -26,12 +27,15 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -1418,7 +1422,7 @@ TEST_CASE(
 	const Entity subject =
 		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Subject");
 	engine::scene::CameraController controller;
-	controller.Subject = subject;
+	mirror.World.Set(mirror.Eye, engine::scene::CameraSubject{.Target = subject});
 	controller.Mode = engine::scene::CameraMode::Scriptable;
 	mirror.World.SetResource(controller);
 	mirror.World.Set<engine::scene::PreviousTransform>(
@@ -1659,24 +1663,15 @@ TEST_CASE("a body standing in a portal is cut and drawn on the far side", "[scen
 	// - so the two would fight over one texture from frame to frame.
 	CHECK(drawn[2].Surface == -1);
 
-	// **The two planes, which are the cut.** The original keeps the front of
-	// pane A - its `Front` face points along -Z - and the copy keeps the front
-	// of pane B. Their union is the body and their intersection is empty, which
-	// is what stops the seam being two bodies.
-	CHECK_THAT(drawn[0].SeamNormal.Z, Catch::Matchers::WithinAbs(-1.0f, TOLERANCE));
-	CHECK_THAT(drawn[0].SeamOffset, Catch::Matchers::WithinAbs(0.2f, TOLERANCE));
-
-	// A point a tenth in front of A's face is kept by the original and refused
-	// by the copy's plane once carried through the map, and a point a tenth
-	// behind it is the other way round. Stated as the two dot products rather
-	// than as coordinates, because that is what the shader tests.
+	// The body centre is z=-.1, on the back side of the z=-.2 face.
+	// Its original therefore keeps +Z and the clone keeps the mapped complement.
+	CHECK_THAT(drawn[0].SeamNormal.Z, Catch::Matchers::WithinAbs(1.0f, TOLERANCE));
+	CHECK_THAT(drawn[0].SeamOffset, Catch::Matchers::WithinAbs(-0.2f, TOLERANCE));
 	const auto keptBy = [](const engine::scene::DrawInstance &half, const Vector3 &at) {
 		return at.Dot(half.SeamNormal) >= half.SeamOffset;
 	};
-
-	const Vector3 nearHalf{0.0f, 0.0f, -0.3f};
-	const Vector3 farHalf{0.0f, 0.0f, -0.1f};
-
+	const Vector3 nearHalf{0.0f, 0.0f, -0.1f};
+	const Vector3 farHalf{0.0f, 0.0f, -0.3f};
 	CHECK(keptBy(drawn[0], nearHalf));
 	CHECK(!keptBy(drawn[0], farHalf));
 
@@ -1877,7 +1872,7 @@ TEST_CASE("a third-person camera goes through the hole its subject went through"
 	mirror.World.Set<Transform>(body, Transform{CFrame(Vector3{0.0f, 0.0f, -0.7f})});
 
 	engine::scene::CameraController arm;
-	arm.Subject = body;
+	mirror.World.Set(mirror.Eye, engine::scene::CameraSubject{.Target = body});
 
 	// A yaw of zero looks along -Z, so the arm reaches back along +Z - straight
 	// into the pane the subject just came out of.
@@ -1918,6 +1913,111 @@ TEST_CASE("a third-person camera goes through the hole its subject went through"
 	CHECK_THAT(
 		mirror.World.Get<Transform>(mirror.Eye)->Frame.Position.X, Catch::Matchers::WithinAbs(0.0f, TOLERANCE)
 	);
+}
+
+TEST_CASE(
+	"a humanoid camera follows continuous movement through a turned portal and back",
+	"[scene][surfacecameras][humanoid-camera]"
+) {
+	for (const auto mode : {engine::scene::CameraMode::LockFirstPerson, engine::scene::CameraMode::Classic}) {
+		for (const float side : {-1.0f, 1.0f}) {
+			INFO("mode=" << static_cast<int>(mode) << " entry side=" << side);
+			Mirror portal;
+			Store &store = portal.World;
+			engine::scene::InstallServices(store);
+			const Entity far = store.CreateInstance(engine::scene::PartClass(), "FarPane");
+			store.Set(
+				far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(0.0f, 0.65f, 0.0f)}
+			);
+			store.Set(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+			store.Set(portal.Reflection, engine::scene::Portal{far});
+			const Entity reverse = store.CreateInstance(
+				engine::ecs::Classes::Find(engine::core::Name("Portal")), "ReturnPortal"
+			);
+			store.SetParent(reverse, far);
+			store.Set(reverse, engine::scene::Portal{portal.Pane});
+			std::vector<engine::scene::PortalSeam> seams;
+			REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
+			const auto found = std::find_if(seams.begin(), seams.end(), [&](const auto &seam) {
+				return seam.Pane == portal.Pane;
+			});
+			REQUIRE(found != seams.end());
+			const engine::scene::SeamTransform through = engine::scene::SeamMapping(*found);
+
+			const Entity player = engine::scene::AddPlayer(store, "Walker", true);
+			const Entity model = engine::scene::LoadCharacter(store, player);
+			REQUIRE(model != engine::ecs::NULL_ENTITY);
+			const auto rig = *store.Get<engine::scene::Character>(model);
+			REQUIRE_FALSE(store.Has<Transform>(rig.Humanoid));
+			REQUIRE(store.SetProperty(
+				portal.Eye, engine::core::Name("CameraSubject"), &rig.Humanoid, sizeof(rig.Humanoid)
+			));
+			engine::scene::CameraController controller;
+			controller.Mode = mode;
+			controller.Distance = 3.0f;
+			controller.HeadHeight = 1.5f;
+			controller.Angles = Vector2{0.2f, side > 0.0f ? 0.0f : std::numbers::pi_v<float>};
+			store.SetResource(controller);
+			CHECK_FALSE(engine::scene::FollowOwnCharacter(store));
+			const Vector3 start{0.0f, 0.0f, -0.2f + side * 4.125f};
+			const Vector3 direction{0.0f, 0.0f, -side};
+			store.Set(rig.Root, Transform{CFrame::LookAt(start, start + direction)});
+			store.Set(rig.Root, engine::scene::PreviousTransform{store.Get<Transform>(rig.Root)->Frame});
+			store.GetMutable<engine::scene::Motion>(rig.Root)->Linear = direction;
+			CHECK_FALSE(engine::scene::FollowPortalTransit(store));
+			const float initialYaw = controller.Angles.Y;
+			unsigned crossings = 0;
+			for (int step = 0; step <= 80; ++step) {
+				INFO("step=" << step);
+				if (step == 41) {
+					auto *motion = store.GetMutable<engine::scene::Motion>(rig.Root);
+					motion->Linear = -motion->Linear;
+					auto *root = store.GetMutable<Transform>(rig.Root);
+					root->Frame = CFrame::LookAt(root->Frame.Position, root->Frame.Position + motion->Linear);
+					store.ResourceMutable<engine::scene::CameraController>()->Angles.Y +=
+						std::numbers::pi_v<float>;
+				}
+				if (step > 0) {
+					const CFrame previous = store.Get<Transform>(rig.Root)->Frame;
+					store.Set(rig.Root, engine::scene::PreviousTransform{previous});
+					store.GetMutable<Transform>(rig.Root)->Frame.Position =
+						previous.Position + store.Get<engine::scene::Motion>(rig.Root)->Linear * 0.25f;
+				}
+				const auto crossed = engine::scene::CrossPortals(store);
+				crossings += static_cast<unsigned>(crossed);
+				CHECK(engine::scene::FollowPortalTransit(store) == (crossed == 1));
+				CHECK_FALSE(engine::scene::FollowPortalTransit(store));
+				if (step == 20) {
+					store.ResourceMutable<engine::scene::CameraController>()->Angles.Y += 0.15f;
+				}
+				REQUIRE(engine::scene::PlaceCamera(store));
+				const auto unfoldPoint = [&](Vector3 point) {
+					return point.X > 50.0f ? through.Frame.PointToObjectSpace(point) : point;
+				};
+				const CFrame eye = store.Get<Transform>(portal.Eye)->Frame;
+				const Vector3 actualLook = eye.Position.X > 50.0f
+											   ? through.Frame.VectorToObjectSpace(eye.LookVector())
+											   : eye.LookVector();
+				const float yaw = initialYaw + (step >= 20 ? 0.15f : 0.0f) +
+								  (step >= 41 ? std::numbers::pi_v<float> : 0.0f);
+				const Vector3 expectedLook{
+					-std::sin(yaw) * std::cos(0.2f), std::sin(0.2f), -std::cos(yaw) * std::cos(0.2f)
+				};
+				const Vector3 body =
+					start + direction * (0.25f * static_cast<float>(step <= 40 ? step : 80 - step));
+				const Vector3 head = body + Vector3{0.0f, 1.5f, 0.0f};
+				const Vector3 expectedEye =
+					mode == engine::scene::CameraMode::LockFirstPerson ? head : head - expectedLook * 3.0f;
+				CHECK(
+					(unfoldPoint(store.Get<Transform>(rig.Root)->Frame.Position) - body).Magnitude() < 0.001f
+				);
+				CHECK((unfoldPoint(eye.Position) - expectedEye).Magnitude() < 0.001f);
+				CHECK((actualLook - expectedLook).Magnitude() < 0.001f);
+				CHECK(engine::scene::CameraSubjectRoot(store, portal.Eye) == rig.Root);
+			}
+			CHECK(crossings == 2);
+		}
+	}
 }
 
 TEST_CASE("a portal in the plane of the viewer keeps drawing", "[scene][surfacecameras]") {
@@ -2604,11 +2704,27 @@ TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][sur
 	// Half the distance once half the distance is the smaller number, so the
 	// pane is never inside the near plane.
 	CHECK_THAT(engine::scene::PortalNearPlane(0.1f, 0.08f), Catch::Matchers::WithinAbs(0.04f, TOLERANCE));
+	for (const float authored : {0.0001f, 0.001f, engine::scene::PORTAL_NEAR_MIN}) {
+		for (const float distance : {0.0f, 0.00001f, 0.002f, 1.0f, FAR_AWAY}) {
+			CAPTURE(authored, distance);
+			const float near = engine::scene::PortalNearPlane(authored, distance);
+			CHECK(near > 0.0f);
+			CHECK(near <= authored);
+			if (distance > 0.0f && std::isfinite(distance)) {
+				engine::scene::Camera camera;
+				camera.NearPlane = near;
+				const auto matrices = engine::scene::ResolveCamera(CFrame{}, camera, 1.0f);
+				const auto clip = matrices.ViewProjection * glm::vec4(0, 0, -distance, 1);
+				CHECK(clip.z >= 0);
+				CHECK(clip.z <= clip.w);
+			}
+		}
+	}
 
 	// And a floor, because an eye pressed against the glass would otherwise ask
 	// for a near plane of zero and get a projection of infinities.
 	CHECK_THAT(
-		engine::scene::PortalNearPlane(0.1f, 1.0e-6f),
+		engine::scene::PortalNearPlane(0.1f, 0.0f),
 		Catch::Matchers::WithinAbs(engine::scene::PORTAL_NEAR_MIN, TOLERANCE)
 	);
 
@@ -2620,17 +2736,9 @@ TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][sur
 	CHECK_THAT(engine::scene::PortalClipBias(50.0f), Catch::Matchers::WithinAbs(0.3f, TOLERANCE));
 }
 
-TEST_CASE("a crossing reports the turn the body actually made", "[scene][surfacecameras]") {
-	// **The turn has to be the crosser's, not the map's idea of north.** Mapping
-	// a fixed reference and calling the result the turn is right only while the
-	// composed rotation is a pure yaw. Tip either pane and it is not: the yaw of
-	// a mapped north is then an angle nothing turned through, wrong by an amount
-	// that depends on the geometry rather than on anything the player did - which
-	// reads as the view snapping to a heading nobody entered from.
-	//
-	// So the pair here is deliberately tilted, and the property checked is the
-	// one that survives it: the body's own facing turned by exactly what was
-	// reported.
+TEST_CASE("a crossing reports the complete cumulative body map", "[scene][surfacecameras]") {
+	// A tilted exit exercises pitch and roll as well as yaw. The replicated
+	// map must reconstruct both the body's look and up axes.
 	constexpr float QUARTER = 1.57079632679f;
 
 	Mirror mirror;
@@ -2660,25 +2768,12 @@ TEST_CASE("a crossing reports the turn the body actually made", "[scene][surface
 	const engine::scene::PortalTransit *went = mirror.World.Get<engine::scene::PortalTransit>(walker);
 	REQUIRE(went != nullptr);
 
-	const auto yawOf = [](const CFrame &frame) {
-		const Vector3 facing = frame.VectorToWorldSpace(Vector3{0.0f, 0.0f, -1.0f});
-		return std::atan2(-facing.X, -facing.Z);
-	};
-
-	const float before = yawOf(started);
-	const float after = yawOf(mirror.World.Get<Transform>(walker)->Frame);
-
-	// The reported turn takes the old heading to the new one. This is what the
-	// camera on the looking machine adds to its own yaw, so anything else is the
-	// view and the body disagreeing about which way the room went.
-	CHECK_THAT(
-		std::remainder(after - before - went->Turn, 2.0f * 3.14159265358979f),
-		Catch::Matchers::WithinAbs(0.0f, 1.0e-4f)
-	);
-
-	// And it is a turn rather than a heading: an unturned pair reports zero, not
-	// whichever way the pair happens to point.
-	CHECK(std::abs(went->Turn) > 1.0e-3f);
+	const CFrame expected = went->Frame * CFrame(Vector3::Zero, started.Rotation());
+	const CFrame actual = mirror.World.Get<Transform>(walker)->Frame;
+	CHECK((actual.LookVector() - expected.LookVector()).Magnitude() < 1.0e-4f);
+	CHECK((actual.UpVector() - expected.UpVector()).Magnitude() < 1.0e-4f);
+	CHECK(went->Scale == 1.0f);
+	CHECK(went->Serial == 1);
 }
 
 TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecameras]") {
@@ -2694,6 +2789,13 @@ TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecamera
 	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
 	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
 	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	SECTION("same-world mouth") {}
+	SECTION("cross-world mouth") {
+		engine::scene::Portal crossing{far};
+		crossing.DestinationWorld = engine::core::Name("somewhere else");
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, crossing);
+	}
 
 	// The pane's face is at `z = -0.2` and its normal is `-Z`, so the side the
 	// normal points to - the side `SeamOffset` calls positive - is the smaller
@@ -2726,22 +2828,6 @@ TEST_CASE("a viewpoint is never left standing in a pane", "[scene][surfacecamera
 	Vector3 close{0.0f, 0.0f, -0.3f};
 	CHECK_FALSE(engine::scene::ClearOfPanes(mirror.World, close));
 	CHECK_THAT(close.Z, Catch::Matchers::WithinAbs(-0.3f, TOLERANCE));
-
-	// **A cross-world pane keeps the old margin, because it is still a
-	// picture.** It goes through `AimSurfaceCameras`, which fits extents to the
-	// rectangle from the viewpoint and runs away as that viewpoint reaches the
-	// plane - there is nothing to walk through and no recursion to draw it.
-	{
-		engine::scene::Portal crossing{far};
-		crossing.DestinationWorld = engine::core::Name("somewhere else");
-		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, crossing);
-
-		Vector3 near{0.0f, 0.0f, -0.3f};
-		CHECK(engine::scene::ClearOfPanes(mirror.World, near));
-		CHECK(std::abs(near.Z + 0.2f) > 0.2f);
-
-		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
-	}
 
 	// **Well clear is left exactly alone**, which is every frame in every scene
 	// that has a portal in it and nobody standing in one.
@@ -3118,6 +3204,124 @@ namespace {
 			return instance;
 		}
 	};
+}
+
+TEST_CASE(
+	"a predicted rig keeps its far side after clearing a cross-world mouth",
+	"[scene][surfacecameras][body-view]"
+) {
+	Window window(Vector3{0, 0, -20});
+	auto &store = window.Room.World;
+	const float direction = GENERATE(-1.f, 1.f);
+	const float scale = GENERATE(1.f, 2.f);
+	const bool overlappingWorlds = GENERATE(false, true);
+	CAPTURE(direction, scale, overlappingWorlds);
+	store.Set(window.StandIn, Bounds{Vector3{8.f, 4.5f, .2f} * scale});
+	if (overlappingWorlds) {
+		store.Set(
+			window.StandIn,
+			Transform{CFrame(Vector3{0, 0, -.2f * (1 + scale)}, CFrame::Angles(0, 3.14159265f, 0).Rotation())}
+		);
+	}
+	const auto &descriptor =
+		engine::ecs::Components::Describe(engine::ecs::Components::Of<engine::scene::PortalBodyView>());
+	CHECK_FALSE(descriptor.RawSerialisation);
+	const Entity root = store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Root");
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 1);
+	const auto seam = seams.front();
+	const auto near = seam.Centre + seam.Normal * (4 * direction);
+	const auto far = seam.Centre - seam.Normal * (4 * direction);
+	store.Set(root, Transform{CFrame(near)});
+	std::vector drawn{Window::Row(far, Vector3{.5f, 1, .5f})};
+	drawn.front().Rig = root.Id;
+	drawn.front().Source = root.Id;
+	std::vector<engine::scene::DrawInstance> picture;
+	CHECK(engine::scene::AppendPortalClones(store, seam, drawn, picture) == 0);
+	engine::scene::UpdatePortalBodyView(store, root, near, drawn);
+	engine::scene::UpdatePortalBodyView(store, root, far, drawn);
+	REQUIRE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+	REQUIRE(engine::scene::AppendPortalClones(store, seam, drawn, picture) == 1);
+	const auto mapped = engine::scene::SeamMapping(seam).Point(far);
+	CHECK((picture.front().Frame.Position - mapped).Magnitude() < TOLERANCE);
+	CHECK(picture.front().HalfExtent == drawn.front().HalfExtent * scale);
+	CHECK(mapped.Dot(picture.front().SeamNormal) >= picture.front().SeamOffset);
+	CHECK(engine::scene::CutAndCloneSeams(store, drawn) == 0);
+	CHECK(far.Dot(drawn.front().SeamNormal) < drawn.front().SeamOffset);
+
+	SECTION("returning restores source ownership") {
+		engine::scene::UpdatePortalBodyView(store, root, near, drawn);
+		CHECK_FALSE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+	}
+	SECTION("snapshots reset the derived local history") {
+		engine::core::ByteWriter saved;
+		REQUIRE(store.Save(saved));
+		Store restored("restored");
+		engine::core::ByteReader reader(saved.Bytes());
+		REQUIRE(restored.Load(reader));
+		const auto *view = restored.Resource<engine::scene::PortalBodyView>();
+		REQUIRE(view);
+		CHECK(view->Root == engine::ecs::NULL_ENTITY);
+		CHECK_FALSE(view->Crossing.has_value());
+	}
+	SECTION("moving a mouth invalidates the saved crossing") {
+		store.Set(window.Room.Pane, Transform{CFrame(Vector3{3, 0, 0})});
+		engine::scene::UpdatePortalBodyView(store, root, far, drawn);
+		CHECK_FALSE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+	}
+	SECTION("a held root keeps the retired body's crossing") {
+		const auto retainedRoot = store.CreateInstance(engine::scene::PartClass(), "retained-root");
+		engine::scene::CameraCharacterHold held;
+		held.SourceRoot = root;
+		held.Root = retainedRoot;
+		held.Active = true;
+		store.SetResource(held);
+		store.DestroyInstance(root);
+		engine::scene::UpdatePortalBodyView(store, root, far, drawn);
+		REQUIRE(store.Resource<engine::scene::PortalBodyView>());
+		CHECK(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+		picture.clear();
+		CHECK(engine::scene::AppendPortalClones(store, seam, drawn, picture) == 1);
+		store.DestroyInstance(retainedRoot);
+		engine::scene::UpdatePortalBodyView(store, root, far, drawn);
+		CHECK(store.Resource<engine::scene::PortalBodyView>() == nullptr);
+	}
+	SECTION("foreign handles cannot borrow the local crossing") {
+		drawn.front().SourceWorld = engine::core::Name("another world");
+		picture.clear();
+		CHECK(engine::scene::AppendPortalClones(store, seam, drawn, picture) == 0);
+	}
+	SECTION("retiring the source releases its history") {
+		store.DestroyInstance(root);
+		engine::scene::UpdatePortalBodyView(store, root, far, drawn);
+		CHECK(store.Resource<engine::scene::PortalBodyView>() == nullptr);
+	}
+	SECTION("an oversized rig does not acquire a crossing") {
+		engine::scene::UpdatePortalBodyView(store, root, near, drawn);
+		drawn.front().HalfExtent = Vector3{100, 100, 100};
+		engine::scene::UpdatePortalBodyView(store, root, far, drawn);
+		CHECK_FALSE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+	}
+	SECTION("a sweep outside the aperture does not acquire a crossing") {
+		const auto offset = seam.First * 3;
+		engine::scene::UpdatePortalBodyView(store, root, near + offset, drawn);
+		engine::scene::UpdatePortalBodyView(store, root, far + offset, drawn);
+		CHECK_FALSE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+	}
+	SECTION("a one-way mouth refuses entry from behind") {
+		auto portal = *store.Get<engine::scene::Portal>(window.Room.Reflection);
+		portal.Bidirectional = false;
+		store.Set(window.Room.Reflection, portal);
+		engine::scene::UpdatePortalBodyView(store, root, seam.Centre - seam.Normal * 4, drawn);
+		engine::scene::UpdatePortalBodyView(store, root, seam.Centre + seam.Normal * 4, drawn);
+		CHECK_FALSE(store.Resource<engine::scene::PortalBodyView>()->Crossing.has_value());
+	}
+	SECTION("invalid input clears the local history") {
+		engine::scene::UpdatePortalBodyView(
+			store, root, Vector3{std::numeric_limits<float>::quiet_NaN(), 0, 0}, drawn
+		);
+		CHECK(store.Resource<engine::scene::PortalBodyView>() == nullptr);
+	}
 }
 
 TEST_CASE("a cross-world hole cuts both halves of what stands in it", "[scene][surfacecameras]") {
@@ -4102,4 +4306,141 @@ TEST_CASE("a surface index is wide enough for the pane budget", "[surfacecameras
 	// And the storage bound is comfortably above the default, so a world that
 	// says nothing is never clamped.
 	CHECK(engine::scene::MAX_SURFACES > engine::scene::DEFAULT_SURFACE_LIMIT);
+}
+
+TEST_CASE(
+	"surface slot enumeration survives disabled cameras and the render cap", "[surfacecameras][surface-slots]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Store store("surface-slots");
+	const auto workspace = scene::InstallServices(store);
+	std::vector<Entity> cameras;
+	const auto cameraClass = ecs::Classes::Find(core::Name("SurfaceCamera"));
+	for (size_t index = 0; index < scene::MAX_SURFACES + 2; ++index) {
+		scene::PartDesc part;
+		part.Frame.Position = {float(index) * 4, 0, -4};
+		const auto pane = scene::MakePart(store, part);
+		REQUIRE(store.SetParent(pane, workspace));
+		const auto camera = store.CreateInstance(cameraClass, "Mirror");
+		REQUIRE(store.SetParent(camera, pane));
+		cameras.push_back(camera);
+	}
+	scene::Portal disabled;
+	disabled.Enabled = false;
+	store.Set(cameras.front(), disabled);
+	std::vector<scene::SurfaceSlot> slots;
+	REQUIRE(scene::GatherSurfaceSlots(store, slots) == cameras.size());
+	for (size_t index = 0; index < slots.size(); ++index) {
+		CHECK(slots[index].Camera == cameras[index]);
+		CHECK(slots[index].Index == (index < scene::MAX_SURFACES ? int16_t(index) : int16_t{-1}));
+	}
+	const auto eye = store.Create();
+	store.Set(eye, Transform{CFrame(Vector3(0, 0, 2))});
+	store.Set(eye, Camera{});
+	store.SetResource(ActiveCamera{eye});
+	(void)AimSurfaceCameras(store);
+	CHECK(store.Get<SurfaceCamera>(cameras.front())->Surface == -1);
+	for (size_t index = 1; index < slots.size(); ++index) {
+		CHECK(store.Get<SurfaceCamera>(cameras[index])->Surface == slots[index].Index);
+	}
+}
+
+TEST_CASE(
+	"authored portal face roll survives mapping and fitted camera placement",
+	"[scene][surfacecameras][portal-roll]"
+) {
+	constexpr float HALF_TURN = 3.14159265359f;
+	for (const NormalId face : {
+			 NormalId::Front, NormalId::Back, NormalId::Left, NormalId::Right, NormalId::Top, NormalId::Bottom
+		 }) {
+		for (const bool sourceRolled : {false, true}) {
+			INFO("face=" << static_cast<int>(face) << " source-rolled=" << sourceRolled);
+			const CFrame sourceFrame =
+				CFrame(Vector3{2, 3, 4}) * CFrame::Angles(0, 0, sourceRolled ? 0.37f : 0.0f);
+			const CFrame farFrame = CFrame(Vector3{100, 7, -9}) * CFrame::Angles(0, 0, -0.63f);
+			Mirror mirror(face, sourceFrame);
+			mirror.World.Set(mirror.Pane, Bounds{Vector3{2, 2, 2}});
+			const Entity far =
+				mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+			mirror.World.Set(far, Transform{farFrame});
+			mirror.World.Set(far, Bounds{Vector3{3, 3, 3}});
+			mirror.World.Set(mirror.Reflection, engine::scene::Portal{far});
+			const Vector3 normal = NormalOf(face);
+			const Vector3 localUp = std::abs(normal.Y) > 0.5f ? Vector3::ZAxis : Vector3::YAxis;
+			const CFrame localFace = CFrame::LookAt(Vector3{}, normal, localUp);
+			const CFrame nearFace = sourceFrame * CFrame(normal * 2) * localFace;
+			const CFrame exitFace = farFrame * CFrame(normal * 3) * localFace;
+			const CFrame expectedRotation = exitFace * CFrame::Angles(0, HALF_TURN, 0) * nearFace.Inverse();
+			const Vector3 eye = nearFace.PointToWorldSpace(Vector3{0.7f, 0.4f, 5});
+			mirror.World.Set(mirror.Eye, Transform{CFrame(eye)});
+			std::vector<engine::scene::PortalSeam> seams;
+			REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+			const auto map = engine::scene::SeamMapping(seams.front());
+			CHECK(map.Scale == 1.5f);
+			for (const Vector3 axis : {Vector3::XAxis, Vector3::YAxis, Vector3::ZAxis}) {
+				CHECK(
+					(map.Frame.VectorToWorldSpace(axis) - expectedRotation.VectorToWorldSpace(axis))
+						.Magnitude() < TOLERANCE
+				);
+			}
+			const Vector3 expectedEye =
+				exitFace.Position + expectedRotation.VectorToWorldSpace((eye - nearFace.Position) * 1.5f);
+			CHECK((map.Point(eye) - expectedEye).Magnitude() < TOLERANCE);
+			REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+			CHECK((mirror.Placed() - expectedEye).Magnitude() < TOLERANCE);
+			const Entity returnCamera = mirror.World.CreateInstance(
+				engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")), "Return"
+			);
+			SurfaceCamera returning;
+			returning.Face = face;
+			mirror.World.Set(returnCamera, returning);
+			mirror.World.SetParent(returnCamera, far);
+			mirror.World.Set(returnCamera, engine::scene::Portal{mirror.Pane});
+			REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 2);
+			const auto reverseSeam = std::find_if(seams.begin(), seams.end(), [&](const auto &seam) {
+				return seam.Camera == returnCamera;
+			});
+			REQUIRE(reverseSeam != seams.end());
+			const auto reverse = engine::scene::SeamMapping(*reverseSeam);
+			CHECK((reverse.Point(map.Point(eye)) - eye).Magnitude() < TOLERANCE);
+			for (const Vector3 axis : {Vector3::XAxis, Vector3::YAxis, Vector3::ZAxis})
+				CHECK(
+					(reverse.Frame.VectorToWorldSpace(map.Frame.VectorToWorldSpace(axis)) - axis)
+						.Magnitude() < TOLERANCE
+				);
+		}
+	}
+}
+
+TEST_CASE(
+	"both portal faces cut a rig using its root ownership side", "[scene][surfacecameras][portal-cut]"
+) {
+	for (float side : {-1.0f, 1.0f}) {
+		INFO("owning side=" << side);
+		Mirror mirror;
+		const Entity far =
+			mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+		mirror.World.Set(far, Transform{CFrame(Vector3{100, 0, 0}) * CFrame::Angles(0, 3.14159265359f, 0)});
+		mirror.World.Set(far, Bounds{Vector3{16, 9, .4f}});
+		mirror.World.Set(mirror.Reflection, engine::scene::Portal{far});
+		const Entity root = mirror.World.Create();
+		mirror.World.Set(root, Transform{CFrame(Vector3{0, 0, -.2f + side * .15f})});
+		std::vector<engine::scene::DrawInstance> rows(2);
+		for (size_t index = 0; index < rows.size(); index++) {
+			rows[index].Frame.Position = {0, static_cast<float>(index), -.2f + (index ? -.3f : .3f)};
+			rows[index].HalfExtent = {.5f, .5f, .6f};
+			rows[index].Rig = root.Id;
+			rows[index].Source = index + 1;
+		}
+		REQUIRE(engine::scene::CutAndCloneSeams(mirror.World, rows) == 2);
+		REQUIRE(rows.size() == 4);
+		const Vector3 expectedNormal{0, 0, side};
+		for (size_t index = 0; index < 2; index++) {
+			CHECK((rows[index].SeamNormal - expectedNormal).Magnitude() < TOLERANCE);
+			CHECK_THAT(rows[index].SeamOffset, Catch::Matchers::WithinAbs(-.2f * side, TOLERANCE));
+			CHECK((rows[index + 2].SeamNormal + expectedNormal).Magnitude() < TOLERANCE);
+			CHECK(rows[index + 2].HalfExtent == rows[index].HalfExtent * 2);
+		}
+	}
 }

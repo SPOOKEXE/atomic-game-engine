@@ -159,6 +159,10 @@ namespace engine::scene {
 		// Explicit padding, for the reason `Components.hpp` opens with: this
 		// component's object representation reaches a file.
 		uint8_t Reserved[2] = {};
+
+		// Cumulative uniform scale of authored bone and clip-local translations.
+		// Palettes remove it before the instance size applies it to mesh vertices.
+		float PoseScale = 1.0f;
 	};
 
 	// Fills every `Bone::WorldFrame` under every `Skeleton`.

@@ -1,10 +1,13 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/scene/Accessories.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Audio.hpp>
+#include <engine/scene/CameraContinuation.hpp>
+#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
@@ -42,6 +45,26 @@
 namespace engine::scene {
 
 	namespace {
+		void WritePortals(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *portals = static_cast<const Portal *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteUInt64(portals[index].Destination.Id);
+				writer.WriteName(portals[index].DestinationWorld);
+				writer.WriteBool(portals[index].Enabled);
+				writer.WriteBool(portals[index].Bidirectional);
+			}
+		}
+		void ReadPortals(core::ByteReader &reader, void *destination, size_t count) {
+			auto *portals = static_cast<Portal *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				Portal portal;
+				portal.Destination = ecs::Entity{reader.ReadUInt64()};
+				portal.DestinationWorld = reader.ReadName();
+				portal.Enabled = reader.ReadBool();
+				portal.Bidirectional = reader.ReadBool();
+				portals[index] = portal;
+			}
+		}
 		// `Surface`, `Visual` and `SurfaceTable` all hold a `core::Name`, and a
 		// name's id is a counter this process assigned in first-seen order. The
 		// raw object representation would write that counter, and a reading
@@ -108,6 +131,7 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(rigs[index].Rig);
 				writer.WriteUInt16(rigs[index].JointCount);
+				writer.WriteFloat(rigs[index].PoseScale);
 			}
 		}
 
@@ -116,6 +140,8 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				rigs[index].Rig = reader.ReadName();
 				rigs[index].JointCount = reader.ReadUInt16();
+				rigs[index].PoseScale = reader.ReadFloat();
+				if (!std::isfinite(rigs[index].PoseScale) || rigs[index].PoseScale <= 0) reader.Fail();
 			}
 		}
 
@@ -1075,6 +1101,16 @@ namespace engine::scene {
 		// `DescribeType` offers raw serialisation only for a type that is.
 		ecs::Components::Register<TextContent>("scene.TextContent", WriteTexts, ReadTexts);
 		ecs::Components::Register<Camera>("scene.Camera");
+		ecs::Components::Register<CameraSubject>("scene.CameraSubject");
+		ecs::Components::Register<CameraPortalView>(
+			"scene.CameraPortalView",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *views = static_cast<CameraPortalView *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					views[index] = {};
+			}
+		);
 
 		// A name again, so a hand-written pair again. See `WriteSounds`.
 		ecs::Components::Register<Sound>("scene.Sound", WriteSounds, ReadSounds);
@@ -1231,6 +1267,25 @@ namespace engine::scene {
 		);
 
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
+		ecs::Components::Register<CameraCharacterHold>("scene.CameraCharacterHold");
+		ecs::Components::Register<CameraBodyPose>(
+			"scene.CameraBodyPose",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *poses = static_cast<CameraBodyPose *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					poses[index] = {};
+			}
+		);
+		ecs::Components::Register<PortalBodyView>(
+			"scene.PortalBodyView",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *views = static_cast<PortalBodyView *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					views[index] = {};
+			}
+		);
 
 		// **`InputState` crosses and `CameraController` crosses**, which is worth
 		// a sentence because one of them looks like it should not. Input is
@@ -1307,9 +1362,8 @@ namespace engine::scene {
 		// the same side of the line `scene.SurfaceCamera` is already on, and
 		// `replication::LocalToTheClient` names both.
 		//
-		// The generated form: the field is an `Entity`, which is a directory
-		// index a snapshot and a replica both restore exactly.
-		ecs::Components::Register<Portal>("scene.Portal");
+		// The destination part is a restored entity; its world crosses as text.
+		ecs::Components::Register<Portal>("scene.Portal", WritePortals, ReadPortals);
 
 		// **Derived data, so it does not.** A surface camera's frustum is fitted
 		// to its pane *as seen from the local eye*, so the authority's answer is
@@ -1426,6 +1480,7 @@ namespace engine::scene {
 		// those clients poses the handle by. Nothing about that needed a rule of
 		// its own - see `scene/Tools.hpp`.
 		ecs::Components::Register<Tool>("scene.Tool");
+		ecs::Components::Register<Accessory>("scene.Accessory");
 
 		// Appended because component ids are registration order. This is authored
 		// player state, so the generated scalar serializer is sufficient and the

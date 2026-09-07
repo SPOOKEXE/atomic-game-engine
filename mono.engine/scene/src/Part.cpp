@@ -4,6 +4,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -545,6 +546,81 @@ namespace engine::scene {
 				return true;
 			};
 
+			return property;
+		}
+
+		PropertyDescriptor HumanoidRootPartProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("RootPart");
+			property.Type = PropertyType::Reference;
+			property.Kind = PropertyKind::Computed;
+			property.Size = sizeof(ecs::Entity);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Humanoid>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Humanoid *humanoid = store.Get<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) =
+					store.Alive(humanoid->RootPart) ? humanoid->RootPart : ecs::NULL_ENTITY;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const ecs::Entity root = *static_cast<const ecs::Entity *>(value);
+				if (root != ecs::NULL_ENTITY && !store.Has<Transform>(root)) {
+					return false;
+				}
+				Humanoid *humanoid = store.GetMutable<Humanoid>(instance);
+				if (humanoid == nullptr) {
+					return false;
+				}
+				humanoid->RootPart = root;
+				return true;
+			};
+			return property;
+		}
+
+		bool RestoreCameraSubject(ecs::Store &store, ecs::Entity camera, const void *value) {
+			const ecs::Entity target = *static_cast<const ecs::Entity *>(value);
+			if (target != ecs::NULL_ENTITY && !store.Has<Humanoid>(target) && !store.Has<Transform>(target)) {
+				return false;
+			}
+			CameraSubject *selection = store.GetMutable<CameraSubject>(camera);
+			if (selection == nullptr) {
+				return false;
+			}
+			selection->Target = target;
+			return true;
+		}
+
+		// Each camera owns its target, including before it becomes current.
+		PropertyDescriptor CameraSubjectProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CameraSubject");
+			property.PredictedWritable = true;
+			property.Type = PropertyType::Reference;
+			property.Kind = PropertyKind::Computed;
+			property.Size = sizeof(ecs::Entity);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CameraSubject>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity camera, void *out) -> bool {
+				const CameraSubject *selection = store.Get<CameraSubject>(camera);
+				if (selection == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) =
+					store.Alive(selection->Target) ? selection->Target : ecs::NULL_ENTITY;
+				return true;
+			};
+			property.RestoreReference = RestoreCameraSubject;
+			property.Set = [](ecs::Store &store, ecs::Entity camera, const void *value) -> bool {
+				if (!RestoreCameraSubject(store, camera, value)) {
+					return false;
+				}
+				store.GetMutable<CameraSubject>(camera)->Automatic = false;
+				return true;
+			};
 			return property;
 		}
 
@@ -2206,6 +2282,8 @@ namespace engine::scene {
 			// assigns a field.
 			const std::array grip{ecs::Components::Of<Tool>()};
 			const ecs::ClassId toolClass = ecs::Classes::Register("Tool", modelClass, grip);
+			const std::array accessoryPoints{ecs::Components::Of<Accessory>()};
+			(void)ecs::Classes::Register("Accessory", modelClass, accessoryPoints);
 
 			// **A `MeshPart` is a `BasePart` whose mesh came from somewhere
 			// else**, and that is the whole of the difference. It adds no
@@ -2241,7 +2319,11 @@ namespace engine::scene {
 			// needs the same tick-start frame a moving part uses. Surface cameras
 			// inherit it harmlessly; only `ActiveCamera` is ever considered for a
 			// crossing.
-			const std::array camera{ecs::Components::Of<Camera>(), ecs::Components::Of<PreviousTransform>()};
+			const std::array camera{
+				ecs::Components::Of<Camera>(),
+				ecs::Components::Of<PreviousTransform>(),
+				ecs::Components::Of<CameraSubject>()
+			};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 
 			// **A surface camera is a camera you parent to a part**, and that is
@@ -2917,6 +2999,8 @@ namespace engine::scene {
 			ecs::Classes::Property<&SpawnLocation::Forced>(spawnLocation, "Forced");
 
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
+			ecs::Classes::Computed(cameraClass, CameraSubjectProperty());
+			ecs::Classes::Property<&CameraSubject::Automatic>(cameraClass, "CameraSubjectAutomatic");
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
 			ecs::Classes::Property<&Camera::MaxImageWidth>(cameraClass, "MaxImageWidth");
@@ -3015,7 +3099,7 @@ namespace engine::scene {
 				ecs::Classes::Computed(shaped, LightFaceProperty());
 			}
 
-			// The humanoid's. All plain fields - nothing here is a doubled
+			// The humanoid's movement fields. Nothing here is a doubled
 			// half-extent or an angle in the wrong unit, so there is no conversion
 			// to write and no place for one to be wrong in one direction.
 			//
@@ -3025,6 +3109,8 @@ namespace engine::scene {
 			// that system writing it every frame instead. One field, two writers,
 			// and only one of them installed per character - which is the same
 			// shape `MoveCamera` and a scripted camera already have.
+			// The root reference makes sibling humanoid rigs portable and cloneable.
+			ecs::Classes::Computed(humanoidClass, HumanoidRootPartProperty());
 			ecs::Classes::Property<&Humanoid::MoveDirection>(humanoidClass, "MoveDirection");
 			ecs::Classes::ClampedProperty<&Humanoid::WalkSpeed, 0.0f, 1000.0f>(humanoidClass, "WalkSpeed");
 			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");

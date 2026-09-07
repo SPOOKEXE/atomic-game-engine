@@ -22,6 +22,9 @@ namespace engine::examples {
 
 		// How far it reaches, in metres.
 		float Range = 100.0f;
+
+		// Authoritative fractional tick of the rendered view. Zero requests present state.
+		double ViewTick = 0;
 	};
 
 	// Untrusted client-selected range ceiling.

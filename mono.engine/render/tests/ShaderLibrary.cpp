@@ -12,6 +12,7 @@
 // that is what makes a default shader file reachable by name rather than a file
 // nothing loads.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
@@ -241,6 +242,204 @@ TEST_CASE("a broken script keeps its diagnostic and does not stop the rest", "[r
 	REQUIRE_FALSE(fine->SpirV.empty());
 }
 
+TEST_CASE("failed shader edits preserve accepted material and lens modules", "[render][shaders][reload]") {
+	for (const bool lens : {false, true}) {
+		INFO("lens=" << lens);
+		Store store = Fresh("library.failed-edit");
+		const Name name("KeepAccepted");
+		const Entity source =
+			store.CreateInstance(lens ? LensShaderClass() : ShaderScriptClass(), name.Text());
+		REQUIRE(source != NULL_ENTITY);
+		REQUIRE(SetShaderSource(store, source, VALID));
+		if (lens) {
+			const Entity effect = store.CreateInstance(Classes::Find(Name("ShaderLens")), "Lens");
+			REQUIRE(effect != NULL_ENTITY);
+			store.GetMutable<engine::scene::ShaderLens>(effect)->Shader = name;
+		} else {
+			Select(store, "KeepAccepted");
+		}
+		ShaderLibrary library;
+		const auto refresh = [&] { return lens ? library.RefreshLenses(store) : library.Refresh(store); };
+		const auto find = [&] { return lens ? library.FindLens(name) : library.Find(name); };
+		REQUIRE(refresh() == 1);
+		REQUIRE(find() != nullptr);
+		const auto acceptedWords = find()->SpirV;
+		const auto acceptedRevision = find()->Revision;
+		const auto acceptedInstructions = find()->Capabilities.Instructions;
+		const auto acceptedOptimizationSteps = find()->Optimizations.size();
+		REQUIRE(SetShaderSource(store, source, "#version 450\nnot a shader\n"));
+		CHECK(refresh() == 0);
+		REQUIRE(find() != nullptr);
+		CHECK(find()->SpirV == acceptedWords);
+		CHECK(find()->Capabilities.Instructions == acceptedInstructions);
+		CHECK(find()->Optimizations.size() == acceptedOptimizationSteps);
+		CHECK(find()->Revision == acceptedRevision);
+		CHECK(find()->Error.empty());
+		CHECK_FALSE(find()->AttemptError.empty());
+		CHECK(find()->AttemptRevision > acceptedRevision);
+		CHECK(refresh() == 0);
+		REQUIRE(SetShaderSource(
+			store,
+			source,
+			"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){ colour=vec4(0,1,0,1); }\n"
+		));
+		CHECK(refresh() == 1);
+		REQUIRE(find() != nullptr);
+		CHECK(find()->Error.empty());
+		CHECK(find()->AttemptError.empty());
+		CHECK(find()->Revision == find()->AttemptRevision);
+		CHECK(find()->SpirV != acceptedWords);
+		store.Destroy(source);
+		CHECK(refresh() == 1);
+		REQUIRE(find() != nullptr);
+		CHECK_FALSE(find()->Error.empty());
+		CHECK(find()->SpirV.empty());
+		CHECK(refresh() == 0);
+	}
+}
+
+TEST_CASE(
+	"source replacement invalidates shader attempts at the same revision",
+	"[render][shaders][source-identity]"
+) {
+	for (const bool lens : {false, true}) {
+		for (const bool failed : {false, true}) {
+			for (const bool duplicate : {false, true}) {
+				INFO("lens=" << lens << " failed=" << failed << " duplicate=" << duplicate);
+				Store store = Fresh("library.source-identity");
+				const Name name("ReplaceSource");
+				const auto sourceClass = lens ? LensShaderClass() : ShaderScriptClass();
+				const Entity source = store.CreateInstance(sourceClass, name.Text());
+				REQUIRE(SetShaderSource(store, source, failed ? "not a shader" : VALID));
+				if (lens) {
+					const Entity effect = store.CreateInstance(Classes::Find(Name("ShaderLens")), "Lens");
+					REQUIRE(effect != NULL_ENTITY);
+					store.GetMutable<engine::scene::ShaderLens>(effect)->Shader = name;
+				} else {
+					Select(store, "ReplaceSource");
+				}
+				ShaderLibrary library;
+				const auto refresh = [&] {
+					return lens ? library.RefreshLenses(store) : library.Refresh(store);
+				};
+				const auto find = [&] { return lens ? library.FindLens(name) : library.Find(name); };
+				REQUIRE(refresh() == 1);
+				REQUIRE(find() != nullptr);
+				const auto oldWords = find()->SpirV;
+				const auto oldRevision = find()->AttemptRevision;
+				if (!duplicate) {
+					store.Destroy(source);
+				}
+				const Entity replacement = store.CreateInstance(sourceClass, name.Text());
+				REQUIRE(replacement != source);
+				REQUIRE(SetShaderSource(
+					store,
+					replacement,
+					"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){ colour=vec4(0,1,0,1); "
+					"}\n"
+				));
+				REQUIRE(store.Get<engine::scene::ShaderSource>(replacement)->Revision == oldRevision);
+				if (duplicate) {
+					CHECK(refresh() == 0);
+					CHECK(find()->SpirV == oldWords);
+					store.Destroy(source);
+				}
+				// No refresh observes a missing source between the two selected entities.
+				CHECK(refresh() == 1);
+				REQUIRE(find() != nullptr);
+				CHECK(find()->Error.empty());
+				CHECK(find()->AttemptError.empty());
+				CHECK(find()->SpirV != oldWords);
+				CHECK(find()->AttemptSource == replacement);
+				CHECK(find()->StoreIdentity == store.Identity());
+				CHECK(refresh() == 0);
+				const auto replacementWords = find()->SpirV;
+				store.Destroy(replacement);
+				const Entity badReplacement = store.CreateInstance(sourceClass, name.Text());
+				REQUIRE(SetShaderSource(store, badReplacement, "not a shader"));
+				CHECK(refresh() == 0);
+				REQUIRE(find() != nullptr);
+				CHECK(find()->SpirV == replacementWords);
+				CHECK(find()->Error.empty());
+				CHECK_FALSE(find()->AttemptError.empty());
+				CHECK(find()->AttemptSource == badReplacement);
+				CHECK(refresh() == 0);
+			}
+		}
+	}
+}
+
+TEST_CASE(
+	"shader attempts and accepted modules belong to their source store", "[render][shaders][source-identity]"
+) {
+	for (const bool lens : {false, true}) {
+		Store first = Fresh("library.same-world-name");
+		Store second = Fresh("library.same-world-name");
+		const Name name("WorldShader");
+		const auto author = [&](Store &store, const char *code) {
+			const Entity source =
+				store.CreateInstance(lens ? LensShaderClass() : ShaderScriptClass(), name.Text());
+			REQUIRE(SetShaderSource(store, source, code));
+			if (lens) {
+				const Entity effect = store.CreateInstance(Classes::Find(Name("ShaderLens")), "Lens");
+				REQUIRE(effect != NULL_ENTITY);
+				store.GetMutable<engine::scene::ShaderLens>(effect)->Shader = name;
+			} else {
+				Select(store, "WorldShader");
+			}
+			return source;
+		};
+		const Entity firstSource = author(first, VALID);
+		const Entity secondSource = author(second, "not a shader");
+		REQUIRE(firstSource == secondSource);
+		ShaderLibrary library;
+		const auto refresh = [&](Store &store) {
+			return lens ? library.RefreshLenses(store) : library.Refresh(store);
+		};
+		const auto find = [&] { return lens ? library.FindLens(name) : library.Find(name); };
+		REQUIRE(refresh(first) == 1);
+		REQUIRE(find() != nullptr);
+		const auto acceptedWords = find()->SpirV;
+		REQUIRE_FALSE(acceptedWords.empty());
+		CHECK(refresh(second) == 1);
+		REQUIRE(find() != nullptr);
+		CHECK_FALSE(find()->Error.empty());
+		CHECK(find()->SpirV.empty());
+		CHECK(refresh(second) == 0);
+		CHECK(refresh(first) == 1);
+		REQUIRE(find() != nullptr);
+		CHECK(find()->Error.empty());
+		CHECK(find()->SpirV == acceptedWords);
+		CHECK(refresh(first) == 0);
+
+		engine::core::ByteWriter validImage;
+		engine::core::ByteWriter invalidImage;
+		REQUIRE(first.Save(validImage));
+		REQUIRE(second.Save(invalidImage));
+		for (const int operation : {0, 1, 2}) {
+			INFO("snapshot operation=" << operation << " lens=" << lens);
+			engine::core::ByteReader invalidReader(invalidImage.Bytes());
+			REQUIRE(
+				(operation == 0	  ? first.Load(invalidReader)
+				 : operation == 1 ? first.LoadContents(invalidReader)
+								  : first.Apply(invalidReader, engine::ecs::ApplyMode::Authoritative))
+			);
+			CHECK(refresh(first) == 1);
+			REQUIRE(find() != nullptr);
+			CHECK_FALSE(find()->Error.empty());
+			CHECK(find()->SpirV.empty());
+			engine::core::ByteReader validReader(validImage.Bytes());
+			REQUIRE(first.Load(validReader));
+			CHECK(refresh(first) == 1);
+			CHECK(find()->SpirV == acceptedWords);
+		}
+		engine::core::ByteReader broken(std::span<const std::byte>{});
+		CHECK_FALSE(first.Load(broken));
+		CHECK(refresh(first) == 1);
+		CHECK(find() == nullptr);
+	}
+}
+
 TEST_CASE("a built-in is what a name resolves to when no script holds it", "[render][shaders]") {
 	const Staged staged("atomic-shaderlibrary-builtin");
 
@@ -293,6 +492,38 @@ TEST_CASE("a script overrides the built-in of the same name", "[render][shaders]
 	REQUIRE(module != nullptr);
 	REQUIRE_FALSE(module->BuiltIn);
 	REQUIRE(module->SpirV.front() == SPIRV_MAGIC);
+}
+
+TEST_CASE(
+	"a failed built-in override retains its fallback and caches the attempt", "[render][shaders][reload]"
+) {
+	const Staged staged("atomic-shaderlibrary-failed-override");
+	const std::string name(BuiltInShaderNames().front());
+	staged.Write((name + ".frag").c_str(), SPIRV_MAGIC);
+	Store store = Fresh("library.failed-override");
+	Select(store, name.c_str());
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(store) == 1);
+	const auto accepted = library.Find(Name(name))->SpirV;
+	const Entity source = Author(store, name.c_str(), "#version 450\ninvalid source\n");
+	CHECK(library.Refresh(store) == 0);
+	const ShaderModule *module = library.Find(Name(name));
+	REQUIRE(module != nullptr);
+	CHECK(module->BuiltIn);
+	CHECK(module->Authored);
+	CHECK(module->Error.empty());
+	CHECK_FALSE(module->AttemptError.empty());
+	CHECK(module->SpirV == accepted);
+	CHECK(library.Refresh(store) == 0);
+	store.Destroy(source);
+	CHECK(library.Refresh(store) == 1);
+	module = library.Find(Name(name));
+	REQUIRE(module != nullptr);
+	CHECK(module->BuiltIn);
+	CHECK_FALSE(module->Authored);
+	CHECK(module->AttemptError.empty());
+	CHECK(module->SpirV == accepted);
+	CHECK(library.Refresh(store) == 0);
 }
 
 TEST_CASE("a name nothing holds is reported rather than ignored", "[render][shaders]") {

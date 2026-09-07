@@ -46,6 +46,11 @@
 #include <memory>
 #include <vector>
 
+namespace engine::core {
+	class ByteReader;
+	class ByteWriter;
+}
+
 namespace engine::ecs {
 
 	// Which half of the index space an entity was minted from.
@@ -317,6 +322,15 @@ namespace engine::ecs {
 		// @param issued          The authoritative high-water mark to restore.
 		// @param predictedIssued The predicted high-water mark, region-local.
 		void FinishRestore(size_t issued, size_t predictedIssued);
+
+		// Saves the free-slot order and page epochs needed to replay future allocations.
+		// @param writer The snapshot receiving both regions' allocator state.
+		void WriteAllocationState(core::ByteWriter &writer) const;
+
+		// Restores allocator state after Restore and FinishRestore, including unused slots.
+		// @param reader The allocator state written by WriteAllocationState.
+		// @return False for truncated or inconsistent state, without changing either region.
+		bool ReadAllocationState(core::ByteReader &reader);
 
 		// Brings one index into being at an exact generation.
 		//

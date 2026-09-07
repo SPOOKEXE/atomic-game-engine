@@ -227,6 +227,8 @@ namespace engine::world {
 			return WorldStatus::Ok;
 		}
 
+		PresentationMessages.RemoveWorld(NameOf(id));
+		Router->DiscardPendingDeliveries(id);
 		Registry[id.Index].reset();
 		if (id.Index < LaneByWorld.size()) {
 			LaneByWorld[id.Index] = INVALID_LANE;
@@ -274,6 +276,7 @@ namespace engine::world {
 			return WorldStatus::Ok;
 		}
 
+		PresentationMessages.RemoveWorld(world->Name());
 		world->Recover();
 		return WorldStatus::Ok;
 	}
@@ -288,6 +291,8 @@ namespace engine::world {
 
 		case Control::Kind::Destroy:
 			if (control.Target.IsValid() && control.Target.Index < Registry.size()) {
+				PresentationMessages.RemoveWorld(NameOf(control.Target));
+				Router->DiscardPendingDeliveries(control.Target);
 				Registry[control.Target.Index].reset();
 				if (control.Target.Index < LaneByWorld.size()) {
 					LaneByWorld[control.Target.Index] = INVALID_LANE;
@@ -306,6 +311,7 @@ namespace engine::world {
 
 		case Control::Kind::Recover:
 			if (World *world = Reach(control.Target); world != nullptr) {
+				PresentationMessages.RemoveWorld(world->Name());
 				world->Recover();
 			}
 			break;
@@ -476,7 +482,7 @@ namespace engine::world {
 
 	bool Universe::Deliver(core::Name world, const Delivery &delivery) {
 		RequireDriverThread("Deliver");
-		return Router->Deliver(Find(world), delivery);
+		return Router->QueueDelivery(Find(world), delivery, WorldDirectory{Registry, Hosts}, Settings_);
 	}
 
 	void Universe::InjectTraffic(std::vector<Envelope> traffic) {
@@ -521,6 +527,7 @@ namespace engine::world {
 
 	bool Universe::Save(core::ByteWriter &writer) const {
 		RequireDriverThread("Save");
+		if (Ticking) return false;
 
 		writer.WriteUInt64(UNIVERSE_MAGIC);
 		writer.WriteUInt32(SNAPSHOT_VERSION);
@@ -528,6 +535,9 @@ namespace engine::world {
 		writer.WriteUInt8(static_cast<uint8_t>(Settings_.Mode));
 		writer.WriteInt32(Settings_.MaximumCatchUpTicks);
 		writer.WriteUInt32(Settings_.BusBudgetPerTick);
+		writer.WriteBool(Settings_.Federated);
+		writer.WriteUInt32(Settings_.ChannelQueueLimit);
+		writer.WriteUInt32(Settings_.ChannelsPerWorld);
 
 		// --- worlds ---
 		writer.WriteUInt32(static_cast<uint32_t>(Count()));
@@ -572,8 +582,14 @@ namespace engine::world {
 
 	bool Universe::Load(core::ByteReader &reader) {
 		RequireDriverThread("Load");
+		if (Ticking) return false;
 
 		const auto abandon = [this] {
+			for (const auto &world : Registry) {
+				if (world != nullptr) {
+					PresentationMessages.RemoveWorld(world->Name());
+				}
+			}
 			Registry.clear();
 			Hosts.clear();
 			LaneByWorld.clear();
@@ -598,6 +614,9 @@ namespace engine::world {
 		Settings_.Mode = static_cast<ExecutionMode>(reader.ReadUInt8());
 		Settings_.MaximumCatchUpTicks = reader.ReadInt32();
 		Settings_.BusBudgetPerTick = reader.ReadUInt32();
+		Settings_.Federated = reader.ReadBool();
+		Settings_.ChannelQueueLimit = reader.ReadUInt32();
+		Settings_.ChannelsPerWorld = reader.ReadUInt32();
 
 		const uint32_t worlds = reader.ReadUInt32();
 		for (uint32_t index = 0; index < worlds && !reader.Failed(); index++) {
@@ -653,6 +672,26 @@ namespace engine::world {
 	void Universe::Tick(float frameSeconds) {
 		RequireDriverThread("Tick");
 		ENGINE_PROFILE_CAT("Universe::Tick", engine::core::ProfileCategory::Simulation);
+		if (Ticking) {
+			ENGINE_ERROR("universe: Tick called while an exchange frame is open");
+			return;
+		}
+		if (HasTickExchangeEndpoints()) {
+			const int rounds = BeginTickExchangeFrame(frameSeconds);
+			if (rounds < 0) return;
+			for (int round = 0; round < rounds; ++round) {
+				std::vector<TickExchangeRequest> requests;
+				std::vector<TickExchangeReply> replies;
+				if (!BeginTickExchangeRound() || !CollectTickExchangeRequests(requests) ||
+					!ServeTickExchangeRequests(requests, replies) || !ApplyTickExchangeReplies(replies) ||
+					!FinishTickExchangeRound()) {
+					CancelTickExchangeFrame();
+					return;
+				}
+			}
+			(void)EndTickExchangeFrame();
+			return;
+		}
 
 		const uint64_t started = core::Clock::Nanoseconds();
 
@@ -908,10 +947,7 @@ namespace engine::world {
 	size_t Universe::PresentMany(std::span<const Presentation> requests) {
 		RequireDriverThread("PresentMany");
 
-		if (Ticking) {
-			ENGINE_ERROR("universe: PresentMany called while a tick batch is in flight.");
-			std::abort();
-		}
+		if (Ticking) return 0;
 
 		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
 		PresentationList.clear();

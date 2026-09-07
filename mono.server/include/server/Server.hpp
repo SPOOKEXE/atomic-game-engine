@@ -15,6 +15,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/replication/Listener.hpp>
@@ -24,6 +25,9 @@
 #include <engine/world/Driver.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Lifecycle.hpp>
+#include <engine/world/PresentationPeer.hpp>
+#include <engine/world/PresentationRelay.hpp>
+#include <engine/world/PresentationStream.hpp>
 #include <engine/world/Recording.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -301,6 +305,10 @@ namespace server {
 		//
 		// Empty means driver; set means this process is a supervised host.
 		std::string HostName;
+		// Private launch mode: the driver supplies fixed frame deltas and phases.
+		bool HostTickExchange = false;
+		// Optional Client executable. Each listening host launches one live image producer.
+		std::filesystem::path PresentationProgram;
 
 		// The worlds this host was granted, by name.
 		//
@@ -487,20 +495,14 @@ namespace server {
 		// nothing in the tree depended on it, and a boolean beside a three-valued
 		// flag has an undefined answer when somebody passes both.
 		//
-		// A QUIC server with no `IdentityKey` draws an ephemeral one rather than
-		// refusing to start - `replication::ListenerSettings::Quic` says why, and
-		// what it gives is exactly what an unsigned datagram welcome gives.
+		// Both transports prove the configured key or a fresh identity for this run.
 		//
 		// @since v0.19
 		engine::net::WireMode Transport = engine::net::WireMode::Quic;
 
 		// The Ed25519 seed this server proves its identity with, as 64 hex
-		// characters, or empty for none.
-		//
-		// **Without it the exchange authenticates nobody**, which is protection
-		// against a listener and not against a relay - see
-		// `Listener::SetIdentity`. The same key a publisher signs manifests
-		// with, so a deployment distributes one public key and not two.
+		// characters, or empty for an ephemeral identity. A client must pin the
+		// public key through trusted discovery or configuration to identify this host.
 		std::string IdentityKey;
 
 		// Client public keys admitted to this server. Empty leaves admission open.
@@ -604,7 +606,9 @@ namespace server {
 		//
 		// @param client Who sent it.
 		// @param move   What they asked for, already normalised by the decoder.
-		void ApplyMove(engine::replication::ClientId client, const engine::game::MoveInput &move);
+		void ApplyMove(
+			engine::replication::ClientId client, const engine::game::MoveInput &move, uint64_t inputTick
+		);
 
 		// Where an entity is, for the priority score and its occlusion query.
 		//
@@ -633,9 +637,8 @@ namespace server {
 		// that client actually saw.
 		//
 		// **The query is a game's to make and the answer is a game's to act
-		// on.** What the server owes is an accurate record and
-		// `Rewind::TickSeenBy` to turn a client's input tick and its link's
-		// round trip into the moment to sample.
+		// on.** The server retains an accurate record. Shots supply their
+		// rendered world tick separately from the input sequence.
 		//
 		// **Nothing calls this accessor today**, and the claim it used to carry
 		// - that nothing consumes the history at all - stopped being true when
@@ -933,6 +936,23 @@ namespace server {
 		//
 		// @return `false` when a port was asked for and could not be bound.
 		bool BeginListening();
+		bool BeginPresentationProducer();
+		void PumpPresentationProducer();
+		void StopPresentationProducer();
+		bool
+		ReceivePlayerPresentation(engine::replication::ClientId client, std::span<const std::byte> bytes);
+		void PumpPlayerPresentation(double now);
+
+		// Retain the latest admission reply until the reliable link accepts it.
+		void ReplyToAdmission(engine::replication::ClientId client, std::vector<std::byte> bytes);
+		void PumpPortalSessions(double nowSeconds);
+		void PumpPortalDepartures(double nowSeconds);
+		void ProceedThroughPortal(
+			engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
+		);
+		void ResumePortalSession(
+			engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
+		);
 
 		// Runs one tick's worth of replication: take what arrived, publish what
 		// changed, advance the links.
@@ -1067,11 +1087,7 @@ namespace server {
 
 		// The clock the last `ServeClients` was called with.
 		//
-		// **Because an admission callback has no time of its own.** `Listener::
-		// OnAdmitted` fires from inside `Poll`, and the join notice it sends
-		// needs the same `nowSeconds` every other send on this link takes -
-		// reading a clock there would be a second time source in a program whose
-		// whole tick is passed in.
+		// Admission and content callbacks use the same clock as the link poll.
 		double PollNow = 0.0;
 
 		// The content origin this process serves, when one was asked for.
@@ -1136,6 +1152,7 @@ namespace server {
 		// it. A server that dropped its own would still work and would be one
 		// refactor away from not, which is the kind of lifetime nobody wants to
 		// re-derive.
+		// Shutdown releases these references before destroying the worlds.
 		std::vector<std::pair<engine::world::WorldId, std::shared_ptr<engine::script::Runtime>>> Runtimes;
 
 		std::unique_ptr<engine::world::Recorder> Recorder_;
@@ -1237,6 +1254,9 @@ namespace server {
 			// the index alone would hand the new client the old one's player -
 			// and with it everything that player owned.
 			uint32_t Generation = 0;
+
+			// Last completed pose accepted by this connection's send queue.
+			uint64_t MotionSentTick = 0;
 		};
 
 		// Who is in this game, keyed by client slot.
@@ -1246,6 +1266,59 @@ namespace server {
 		// a client with no entry owns nothing, which is where every connection
 		// starts.
 		std::unordered_map<uint32_t, Occupant> Players;
+
+		struct AdmissionReply {
+			engine::replication::ClientId Client;
+			std::vector<std::byte> Bytes;
+		};
+		// One reply per live client slot. New attempts supersede older replies;
+		// disconnect removes pending bytes before the slot can be reused.
+		std::unordered_map<uint32_t, AdmissionReply> AdmissionReplies;
+		engine::game::PortalSessionLeases PortalLeases;
+		struct PortalDeparture {
+			engine::replication::ClientId Client;
+			engine::game::PortalSessionMessage Request;
+			std::optional<engine::game::PortalSessionMessage> Route;
+			engine::world::PresentationAddress Destination;
+			double Deadline = 0;
+			double RetryAt = 0;
+			bool Notified = false;
+			bool Accepted = false;
+			bool CrossedSent = false;
+			uint64_t MotionSentTick = 0;
+		};
+		std::unordered_map<uint32_t, PortalDeparture> PortalDepartures;
+		uint64_t NextPortalAttempt = 1;
+		engine::world::PresentationAddress PortalSessionEndpoint;
+		engine::parallel::Process ImageProcess;
+		std::unique_ptr<engine::world::HostLink> ImageLink;
+		std::unique_ptr<engine::world::PresentationRelay> ImageRelay;
+		std::optional<engine::assets::PublicKey> ImageIdentity;
+		double ImageRetryAt = 0;
+		double ImageStartedAt = 0;
+		double ImageRetryDelay = 1;
+		struct PlayerPresentation {
+			engine::replication::ClientId Client;
+			engine::world::PresentationStream Stream;
+			engine::world::PresentationPeer Grant;
+			uint64_t PublishedSession = 0, PublishedRevision = 0;
+			PlayerPresentation(
+				engine::world::Universe &universe,
+				engine::world::WorldId world,
+				engine::replication::ClientId client
+			)
+				: Client(client), Grant(
+									  universe,
+									  world,
+									  (client.Index + 1) * 64,
+									  {{"portal-image-replies", "portal-topology-replies"},
+									   {"portal-image-replies/"},
+									   {"portal-image-requests", "portal-topology-requests"}}
+								  ) {}
+		};
+		std::vector<std::unique_ptr<PlayerPresentation>> PlayerPresentations;
+		std::vector<engine::world::PresentationOutbound> DriverPresentationOutbound;
+		std::vector<engine::world::WorldId> PortalRouteWorlds;
 
 		// Where each client is looking from, for `DistancePriority`.
 		//
@@ -1303,6 +1376,13 @@ namespace server {
 		// Present only in host mode. A driver holds one of these per host; a
 		// host holds exactly one, to whoever started it.
 		std::unique_ptr<engine::world::HostLink> Link;
+		std::unique_ptr<engine::world::TickExchangeHost> HostExchange;
+		bool HostFrameFinished = false;
+		// Publication identity, not a simulation tick count. Duplicate phase
+		// acknowledgements must not send the same bus envelopes twice.
+		uint64_t PublishedHostFrame = 0;
+		std::vector<engine::world::HostFrame> DeferredHostFrames;
+		size_t DeferredHostBytes = 0;
 
 		// Reused across barriers so a host servicing its link every tick stops
 		// allocating.

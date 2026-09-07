@@ -1,5 +1,27 @@
 # render refactor plan
 
+## continue here: portal crossing, 2026-09-07
+
+This is an implementation checkpoint, not completion of the refactor. The user
+requested that all current working-tree changes be committed together. No further
+code changes were made during the handoff. Detailed evidence and local artifact
+paths are in [PORTAL-HANDOFF.md](PORTAL-HANDOFF.md).
+
+- Next: finish authorized retained-world observation and content delivery. Separate gameplay lease retirement after destination adoption from presentation lifetime; the old source connection currently keeps renewing the lease.
+- Then: prepare complete foreign-world views and render them from the current camera. Include lighting, particles, ribbons, spatial UI and character layers. Replacing only geometry mixes worlds; flat images cannot reveal newly visible surfaces.
+- Keep the moving-camera `[eye-current-camera]` failure as the image gate: three moving cases remain failing. The retained-source staging prototype was rolled back and must not be treated as implemented.
+- Reproduce the original black frame with a valid image handle using the stage probe. A separate missing-image black frame was captured during a topology wait; a common cause is unproven.
+- Verify continuous outbound/return player crossing with Humanoid camera subjects, body ownership and obstruction under delayed messages, restarts, refusals and lost acknowledgements.
+- Complete visual checks for lighting, clipping, transparency, effects and animated accessories at oblique, rolled and scaled portal angles; inspect the non-Euclidean demo.
+- Finally measure release CPU/GPU work, residency, cache invalidation and transferred bytes, including the complete Terrain editable collision worker path.
+
+Already verified: topology expiry/renewal and ready-reply routing fixes; all 16
+product camera crossing variants (136,117 assertions); stage probe overwrite
+checks (756 assertions in two cases); Terrain BVH canonical-layout parity and
+builder improvement. These are recorded runs, not a fresh full-suite validation
+of this checkpoint. Stage probing stalls the GPU and can change timing. Keep
+captures bounded and clean up bulk images after retaining failure evidence.
+
 ## 0. scope and review status
 
 Implementation requested against this full plan. Progress and evidence live in
@@ -1353,6 +1375,1075 @@ through the space between worlds. Camera obstruction queries must follow the
 same seam and use the correct world's collision space. A free camera crossing
 alone does not prove the player-camera behavior.
 
+Track the eye's world separately from the body's authority and replica session.
+The eye can cross during transfer preparation, or trail behind the transferred
+body on a third-person arm. Select the named presentation endpoint from that eye
+path and map the complete view through its seams. Keep the Humanoid subject and
+input attached to the accepted body. A session acknowledgement alone must not
+switch the visible room. Retain only the required bounded presentation state
+until the eye leaves; do not keep a second authoritative body or copy a whole
+destination scene into the source world. Identify the receiving mouth explicitly
+so its pane cannot occlude its own incoming capture. Preserve unrelated surfaces.
+
+First-person body exclusion belongs to the primary eye's visibility selection.
+Keep the rig available to shadow, mirror and portal child views, including its
+clipped seam copies. Resolve the viewer through the accepted player/transfer
+identity; a held camera root can be detached from Workspace, so its current full
+path is not sufficient identity for the remote producer. Resolve a new selection
+when the subject changes; clear it for a scriptable camera or missing Humanoid.
+Carry bounded named identity in whole-eye requests and resolve local handles at
+the destination. Child seam requests must not inherit the primary-eye exclusion.
+Copied geometry carries its account identity as bounded canonical text. Keep
+request-local selected row indices separate from scene storage, and remap only
+those indices when unavailable meshes are filtered. Preserve retained visuals
+when source entities retire; use the held character's exact source root for
+ownership, never a diagnostic path or coincident handle from another world.
+Client now supplies source presentation rows to the shared whole-eye host, which
+maps direct crossing geometry into the requested eye world. Extend this to the
+Studio caller, remote child captures and destination-adoption deduplication. A manually supplied
+geometry fixture proves transport selection but does not close product crossing.
+While the source character hold is active, Client uses an available source eye
+image instead of drawing the retired replica's empty body rows. Product capture
+checks require the third-person avatar throughout the source-owned walk and at
+adoption. Captures expose gaps both when prediction clears the mouth before
+authority transfers and while remote body rows and replacement images arrive.
+Continue the body's mapped presentation through both intervals, including
+nested captures and connection replacement, before claiming visual continuity.
+
+Client now tracks the presented root crossing a fitted mouth and continues its
+far-side geometry after the root fully clears the plane. This local history
+ends on return, unheld root retirement or changed mouth geometry, and resets on snapshot
+load. A held camera now retains bounded body rows and skin palettes, carrying
+the last pose with its predicted root after retirement. Source-world eye requests
+carry the live or held local body into the producer, and incoming copies forward
+into child requests. Import replaces native body rows with matching account
+identity before rendering. Cross-world source cuts also survive identity mappings;
+coincident-copy suppression applies only within one world. Product captures still
+expose a body gap before retirement as well as previously observed adoption gaps.
+Live limb animation and continuity across in-flight image replacement remain
+unfinished.
+Keep those remaining intervals in the completion criteria; a visible head alone
+does not prove that the whole avatar is rendered correctly.
+
+The product trace now identifies a separate temporal mismatch: requests with no
+crossing body complete while the predicted body has already cleared the mouth.
+In `body-coincident-third.log`, the first six source-portal round trips take
+131 to 134 ms. Request 4 first carries body geometry, but its image arrives at
+frame 97, after ten frames with no visible body. This is dev/offscreen evidence,
+not release performance. Correct clipping cannot repair a picture sampled before
+the body entered it.
+
+Separate the locally controlled body's final presentation from the retained room
+image. The receiving renderer needs destination depth in the same capture frame
+as that image, plus the capture camera and seam mapping, to depth-test the latest
+local pose through the aperture. A color-only overdraw would show the body through
+walls. Portal producers now capture and transport paired color and depth through
+both copied and resident paths. Connect that depth to body composition; an uncut
+source row or faster request loop is insufficient. Preserve copied geometry for remote observers,
+child views and shadows; exclude its primary visible copy when the receiver owns
+the current body layer. Account identity and endpoint incarnation define that
+ownership, including retirement and successor adoption.
+
+The PIMG v12 copied-reply codec defines depth as tightly packed little-endian
+float32 distance along the capture camera's forward axis in destination world
+units. Positive zero denotes no surface; negative values, negative zero and
+nonfinite samples are refused. Color and depth share one request/capture key,
+extent and revision set, with separate hashes and bounded lossless compression.
+The inbox charges both decoded payloads before allocating a replacement and keeps
+the previous image charged until transactional decoding succeeds.
+
+The graph capture node now accepts an optional R32F depth input. Resource-image
+export copies it alongside color in one submission, either into a shared bounded
+staging buffer or two resident textures. Resident adoption transfers both textures
+and charges both; replacement and cancellation release the pair. Copied portal
+GPU import now validates and uploads both planes, reusing a pair only when both
+digests match. Depth-only changes invalidate the image, and color-only replacement
+releases its old depth. Both allocations must succeed before old attachments are
+released. Upload and download layouts align rows and offsets for the supported
+Direct3D constraints; residency and transfer counters include both planes.
+Portal producers request paired capture. A separate per-view depth export uses
+positive zero for background while the lighting resource retains its FarPlane
+clear. The export writes its own named R32F target before presentation; it does
+not alias lighting depth. Copied replies hash both planes, and resident publication
+retains the pair under the existing capture identity and renewal lifetime.
+
+This capture infrastructure does not prove final portal depth correctness.
+G-buffer depth precedes transparent composition, nested portal radiance and lens
+processing. Define and implement the matching visibility/depth contract for those
+stages before using it to occlude the current body pose. The GPU fixture verifies
+camera-forward depth and color consistency for an opaque wall with translated and
+rotated cameras, not those remaining composition cases.
+
+The sampling transform is part of the retained image, not the latest camera.
+For seam captures it maps source positions through the seam into capture clip
+space; for whole-eye captures it maps destination positions directly. Its clip-w
+coordinate equals camera-forward distance in destination units, including seam
+scale. Whole-eye demand now constructs this matrix with the request instead of
+leaving identity in the binding. Compare body depth in these same units and use
+the matrix belonging to the accepted reply. Camera motion must not relabel an
+in-flight image with a newer transform.
+
+Resizing a paired eye image must preserve sample identity. The eye-image node
+uses nearest sampling for both color and depth when exporting the pair; blending
+colors across a depth discontinuity while selecting one depth invents radiance
+for the selected surface. Color-only display retains linear filtering. This is
+a conservative point reconstruction, not a higher-quality edge-aware filter.
+
+Opaque finite-aperture composition requires two complementary current body
+halves. Clip the far half away from the source eye and compose it against the
+retained destination color/depth pair before sampling through the finite mouth.
+Draw the near half on the source side, preserving source foreground occlusion.
+Importing the composed image alone cannot show limbs that project outside the
+opening while lying in front of its plane. The GPU prototype compares this split
+against a directly rendered complete body, including an oblique mouth and the
+Humanoid-selected first-person exclusion. It uses a static emissive opaque room;
+scaled cross-world mapping, later layers and product ownership remain unwired.
+
+`SplitPortalBodyDraws` now provides the bounded draw preparation shared by that
+prototype and future product composition. The caller supplies selected ordinary
+body rows and an explicit source-side plane. The helper preserves that side as
+the body moves, maps the complementary plane and geometry through a similarity,
+and compacts shared skin ranges once for both halves. Source tag bits stay on the
+near half. Invalid geometry, incompatible existing cuts, aliases and budget
+overflow leave the preceding output unchanged. This helper chooses no world,
+session or body authority; the host must supply the accepted owner and mapping.
+
+`PortalImageSource::Capture` exposes a value snapshot of the retained image's
+producer incarnation, accepted binding, camera pose/frustum/clip plane, excluded
+player identity and extent. Pending requests keep separate camera metadata.
+Acceptance of copied pixels, a resident receipt or a renewal advances the
+captured metadata together; pending work and failed replies cannot relabel the
+old image. Polling expiry or withdrawing its endpoint removes this snapshot.
+Use the accepted camera and sampling matrix to prepare body views rather than
+the latest request. Product body composition still needs to consume this API.
+`PortalImageHost::Capture` exposes the same snapshot through the product adapter,
+keyed by viewport and portal. It forwards to the owning source without caching
+another copy; pending camera requests preserve accepted metadata, and viewport
+removal or receipt expiry makes the snapshot unavailable.
+
+PIMG v12 carries optional evaluated lighting in copied replies, resident receipts
+and renewals. `PortalCaptureLighting` includes sun direction, ambient terms,
+direct intensity, fog color/distances and up to 16 selected point/spot lights in
+capture-world units. The bound is checked against the renderer's light limit at
+compile time. Explicit floats and a bounded count carry no entity IDs or pointers;
+nonfinite values, invalid ranges/cones/fog intervals and noncanonical unused rows
+are refused. The payload costs 69 bytes plus 44 per selected local light.
+Accepted snapshots expose it beside the matching camera and binding, including
+while replacement requests are pending. A renewal cannot change these inputs
+while claiming the retained image version. Failed captures carry no lighting.
+Shadow maps, environment textures and later radiance layers remain separate work.
+
+`ResolvePortalCaptureLighting` is the shared conversion from that payload to a
+render view. It validates through the codec's shared validator before changing
+any view fields or caller-owned local-light storage. It replaces the captured
+shading terms and enables their override while preserving camera/ownership and
+other environment/layer fields. The caller keeps light storage alive through
+rendering. Producers use this same conversion before queueing a capture; invalid
+destination lighting returns a failure through the bounded retry path, retaining
+the receiver's preceding image. Product body composition still needs to bind
+the accepted snapshot and remaining environment/shadow resources together.
+
+`ResolvePortalCaptureCamera` is the shared reconstruction path for producer and
+retained body views. It preserves the asymmetric frustum and oblique clipping
+projection, with camera-forward depth in the capture's units. Invalid pose, lens
+or clipping data leaves the destination view unchanged; successful resolution
+changes only camera fields. The producer now uses this same path.
+
+The finite-aperture GPU prototype now reconstructs a rotated, translated seam
+capture at scales 0.25, 1 and 4, maps the far body into that capture, and samples
+the composed result through the source aperture. Direct scene comparisons cover
+first-person Humanoid selection, third-person body cuts and oblique views.
+Both intermediate images can remain resident, with no additional imports;
+the fixture separately reads back images for its comparison oracle.
+Repeated resident exports now reuse replaced color/depth texture pairs. A
+four-entry cache matches exact extent and depth presence, with at most 12 MiB
+of cached payload. Cached bytes are reported separately and share the existing
+32 MiB imported-texture budget; adoption and copied-import allocation evict the
+cache when needed. Dropping the last imported image or shutting down releases
+it. Adoption remains valid for submitted exports, with no added device wait.
+The repeated-export fixture alternates body color/depth, verifies flat texture
+allocation counts after warm-up, then checks extent changes, eviction and fresh
+sampled output. GPU pressure checks also cover copied uploads at 30 MiB live
+payload and colour-only resident adoption at 31 MiB, each evicting optional
+cached pairs before exceeding the shared 32 MiB limit. Final removal clears
+live, cached and pending image bytes. This is dev allocation evidence, not a
+release timing result.
+`eye-image` defaults to `projection=eye`; mapped intermediates explicitly select
+`projection=seam`. A capture with the wrong projection is refused in either
+direction. This validates the opaque prototype, not product snapshot consumption
+or complete transparent and nested radiance layers.
+
+The producer's `OpaqueLighting` profile now exports `lit` immediately after
+deferred lighting, with matching zero-background camera depth. It stops before
+sky, volumetrics, spatial lenses and later presentation stages. A live GPU lens
+fixture verifies that toggling the lens changes CompleteWorld radiance while
+OpaqueLighting radiance and both profiles' opaque depth remain unchanged.
+This provides the opaque pair only; later layer transport and product selection
+remain separate work.
+
+An opaque composition backend is now available as `depth-compose`. It reads
+foreground and background HDR/depth pairs in one capture projection and writes
+the nearest color and camera-forward depth together. Zero means no surface and
+equal distances retain the background. Depth uses nearest sampling; each pair
+must have matching extents. `eye-image` can expose the imported depth beside its
+color, and refuses a requested pair if the owned image or depth is absent.
+`graph::DefaultPortalBodyDocument` provides the shared intermediate graph. It
+runs body geometry through opaque lighting, linearizes its zero-background
+depth, reads the owned room pair and captures the composed HDR/depth pair at
+`export`. Eye and seam projections are explicit variants. The shared graph
+requires `opaque-lighting` room scope and stops before sky and later world
+layers; the host must apply those layers before final presentation. The GPU
+fixture uses this graph instead of keeping a private composition implementation.
+Its `scope` selector defaults to `complete-world`; an opaque-layer graph selects
+`opaque-lighting` explicitly. The imported capture must match that scope, so a
+flattened world image cannot silently satisfy an opaque-layer read or vice versa.
+
+The GPU fixture renders a fresh blue body against a retained red wall, then
+compares with directly rendering both objects. Copied and resident room images
+match the direct color/depth reference for front, behind and return poses with
+identity and rotated cameras. The body extends past the wall, so this checks
+both occlusion and uncovered body pixels. Subsequent body updates neither upload
+the room again nor allocate more textures after warm-up. Output byte counters
+and the existing per-node timing/heap scopes cover composition and eye-image
+blits. These are dev/offscreen correctness and allocation checks, not release
+performance measurements.
+
+The opaque fixture also compares non-emissive blocks and six-part Humanoids
+under directional lighting, with identity and rotated cameras. Turning off the
+current body's sunlight leaves the retained wall radiance and composed depth
+unchanged; restoring the light restores the composed image exactly, with no
+additional room uploads. This verifies independent body lighting in the backend.
+Product composition still needs lighting inputs associated with the accepted
+capture, rather than borrowing the source viewport's current lighting. The
+fixture disables shadow casting and ambient illumination, so it does not prove
+body-to-room shadows, ambient occlusion or transported lighting metadata.
+
+This backend is not yet connected to the product's current-body selection.
+Retained camera matching, aperture mapping, primary ownership exclusion, animated
+poses and the transparency/lens work below must be connected before the product
+walk can close. The fixture now covers opaque blocks and a six-part Humanoid
+with emissive materials to isolate visibility. The Humanoid's limb rows pass
+through a half-scale seam transform and a world-plane cut. A changed right-arm
+pose changes the captured image; restoring it restores the image. Disabling the
+cut exposes more body pixels, and a first-person camera with the Humanoid as its
+subject suppresses the body while preserving the retained room color/depth.
+These checks do not prove skin-mesh animation, destination-lighting continuity,
+finite aperture mapping or product camera/session handoff.
+Product integration must request an opaque-layer profile when later
+transparent or lens stages exist. Feeding flattened CompleteWorld radiance into
+this opaque compositor would lose those foreground layers. Do not suppress the
+producer's primary body until the receiver owns a matching, drawable layer set.
+
+The existing canonical `EyePlayer` selection now also works for seam captures.
+It excludes the selected account only from that capture's primary draw order;
+native and copied bodies remain available for shadows and child views. No new
+wire field is needed. Default seam demand still leaves selection empty: do not
+inherit first-person body exclusion into a secondary portal view. A receiving
+body layer must explicitly claim primary presentation before setting this field.
+
+A single final color plus opaque depth cannot insert a body behind glass. With
+foreground radiance F, opacity a and background B, the received pixel is
+C = a*F + (1-a)*B. Replacing B with the body needs F and a separately; neither C
+nor the opaque depth determines them. Retain a bounded ordered representation of
+transparent foreground radiance, opacity and depth, then insert body fragments in
+depth order. Specify overflow behavior before adding the payload: silently dropping
+transparent layers or treating them as opaque fails the visibility contract.
+Charge every retained layer and transfer against the existing byte budgets.
+
+The GPU `depth-compose` node now supports `mode=transparent` alongside its
+unchanged opaque default. Each ordered layer supplies straight-alpha foreground
+radiance and matching camera-forward depth. The background and output use
+premultiplied radiance. Visible fragments blend over the current image, while
+opaque depth remains unchanged; equal depths retain the background. Callers must
+apply layers back to front before spatial lenses. GPU checks cover zero/half/full
+opacity, transparent empty background, opaque occlusion and depth ties with two
+layers. This is the composition primitive only. Complete ordered-layer capture, bounded
+wire/resident ownership, overflow handling and product wiring remain required.
+
+The `transparent-layer` graph node peels ordinary transparent geometry using
+native device depth from the same projection. A nearest-fragment pass stores its
+D32 attachment; a second pass blends every fragment at that exact selected depth
+in draw order. The node exports premultiplied HDR colour, R32 camera-forward depth
+and native D32 depth for the next peel. `opaque-z` rejects opaque occlusion and
+`previous-z` rejects preceding layers. The compositor's `mode=premultiplied`
+accepts this colour without multiplying its opacity twice. No extra texture or
+CPU readback is needed for the gather pass.
+
+Exact depth ties preserve all contributions. Transformed, mathematically
+coplanar panes can round to adjacent device depths and occupy separate layers;
+tests require their complete opacity and direct-render pixel parity without a
+world-space epsilon. Checks cover overlapping coplanar panes, rotated cameras,
+intervening opaque bodies and exact opaque ties. Surface shading and declared
+shadow sampling match the forward pass; unsupported surface/custom-shader rows
+refuse capture. A third depth capture detects overflow in the two-layer fixture.
+Particles, ribbons, nested apertures, bounded atomic layer-set publication,
+explicit overflow refusal and product primary-body ownership remain open.
+
+Layer capture admission now reserves one to four existing export slots together.
+Requests must share pipeline, view and delivery, with distinct live tokens;
+validation or capacity refusal admits none. Copied group collection moves results
+in requested order only when every member is ready, including explicit failures.
+A missing, duplicate, resident or pending token consumes none of the group.
+Each result records the renderer-local frame that actually ran its capture. A
+publisher must compare that frame and capture identity before combining layers;
+queue admission alone is not proof of a coherent publication. The glass fixture
+uses this group path and verifies one capture frame across its four outputs.
+This adds no slots, textures, GPU submissions or waits.
+
+Resident adoption now preflights one to four captures together. Every capture
+must be successful and submitted, with matching renderer-local frame, pipeline,
+view and extent. Tokens and destination owners must be distinct. The complete
+replacement peak must fit the existing texture budget, and every destination
+slot must be available before any ownership moves. Refusal preserves capture
+tokens, old imports, cache residency and caller output handles. Success transfers
+all textures without allocation, readback or a GPU wait, retaining replaced
+textures under the existing cache budget. The single-image API uses this path.
+This is local ownership only: authenticated layer-set receipts, copied transport,
+overflow refusal and product receiver composition remain open.
+
+Copied layers now have a bounded PIMG kind-5 envelope containing one opaque image
+and up to two ordered premultiplied transparent images. Every member retains its
+paired depth, lossless image encoding and digest. The outer key and dimensions
+admit all member prefixes before decompression; aggregate expanded pixels must
+fit `MAX_PORTAL_IMAGE_PIXELS`, and the whole message remains within the existing
+4 MiB wire budget. Successful members must share key, extent, capture tick,
+content revision, lighting revision and evaluated lighting. Transparent opacity
+must be in [0,1], positive-depth fragments must have nonzero opacity, and empty
+pixels must have zero colour and opacity. Malformed sets leave output unchanged.
+The encoder reserves the actual encoded size and copies each member once into
+the envelope. Product routing, authenticated layer-set receipts, overflow proof
+and receiver composition are still required. The codec does not prove that the
+producer captured every visible fragment or establish endpoint authenticity.
+
+The receiver body graph can now opt into two ordered transparent imports after
+opaque body/room composition. `eye-image` selects `base`, `transparent-0` or
+`transparent-1`; non-base imports require paired depth and match the base image's
+owner, key, projection, sampling, extent and content/lighting revisions. The
+renderer-local binding role keeps all three images under the same portal without
+overwriting one another. Ordinary flattened portal sampling only accepts the
+base role. Transparent handle changes, withdrawal and reordering invalidate the
+portal presentation signature.
+
+A GPU fixture decodes the copied layer-set envelope, imports all three members,
+and compares body/room/glass composition against analytic projection and alpha
+blending. It checks bodies before, between and behind the glass and opaque room,
+rotated camera coordinates, current body motion without room uploads, swapped
+roles and mismatched capture keys. This is an opt-in receiver graph using ordinary
+geometry. Atomic copied-set publication, product routing, overflow proof,
+Humanoid integration and complete later-layer support remain open.
+
+Copied sets now enter renderer ownership as immutable groups in new import slots.
+Admission validates every member without re-encoding, checks the aggregate CPU
+and texture peak while old imports remain live, and prepares all texture pairs
+before moving any input bytes or publishing handles. Invalid input, slot or byte
+pressure leaves the input, output handles and old imports unchanged. Optional
+retired textures may be evicted if allocation needs their budget. Group readiness
+requires every exact member's upload to have been submitted; an old set can keep
+rendering while the new one uploads. The caller must drive upload work while
+waiting, even when its displayed old view is otherwise cached, and switch all
+handles only after readiness.
+
+Individual image updates cannot overwrite grouped imports. Layer sampling rejects
+mixed group identities, and dropping any member retires the whole group. Retired
+pairs reuse the existing bounded cache; repeated same-extent replacements need no
+new texture creation after warmup. The last import release clears that cache.
+Product demand/reply routing and readiness-driven presentation are still required.
+
+PIMG v12 adds an explicit `OrderedLayers` request profile. It requires
+`OpaqueLighting`, no recursion and no retained-image renewal. Admission charges
+four full-resolution captures against the existing pixel budget: opaque, two
+ordered transparent layers and a third transparent layer used only to detect
+overflow. This caps square requests at 256 pixels per side. The wire version
+change rejects older envelopes rather than interpreting their reserved bytes.
+
+`PortalImageProducer` installs a separate cached graph for this profile. It
+queues all four exports atomically with renderer-generated tokens, collects them
+together and verifies successful captures from one renderer frame and extent.
+Any nonempty overflow depth returns `BudgetExceeded`, carrying no partial pixels.
+Otherwise it sends a single copied layer-set envelope through the existing
+presentation bus. Full mailboxes retain the encoded envelope and retry without
+recapturing, rehashing or encoding it again. Cancellation retires every token.
+Ordinary copied replies now release both pixel and depth vectors after encoding.
+
+The producer GPU fixture checks zero, one and two layers, visible overflow,
+opaque blockers hiding the third pane, successful recovery after refusal, and
+full-mailbox retries. It checks every returned pixel's depth, opacity and emitted
+colour channel. This is explicit bus-driven producer coverage. Product source
+receipt handling, resident layer-set receipts, readiness-driven group switching,
+current Humanoid composition and complete later-layer support remain open. The
+single-image inbox rejects flattened successful replies to ordered requests;
+it still accepts their explicit failure replies.
+
+`PortalImageInbox` now admits copied ordered sets after authenticating the exact
+sender, receiver and pending correlation. The borrowed layer matcher checks the
+outer key and dimensions, requires both transparent members, and checks every
+nested prefix before allocating or decompressing pixels. Budget admission charges
+all member pixels, depth and owned text while the old held set remains charged.
+Decode failure preserves the request and old set; successful admission replaces
+the complete set together. `TakeLayers` moves all members together, while the
+single-image extractor leaves grouped images untouched. Withdrawal and expiry
+retire the whole set. Failure replies complete the request without replacing it.
+The actual producer GPU fixture now consumes its replies through this inbox.
+
+`PortalImageSource` now takes accepted layer groups and queues them into new GPU
+slots. It keeps the preceding displayed handles and accepted camera/lighting
+metadata while uploads are pending. `HasPendingUploads` tells a host when it must
+render a view even if its displayed picture is otherwise cached.
+Only a later poll observing complete group readiness publishes success, switches
+all captured handles/metadata and retires the preceding image. Captured snapshots
+include the ordered transparent handles. Restart, supersession, expiry and endpoint
+withdrawal cancel pending groups. Layered requests bypass single-image renewal
+and resident reservations; single receipts cannot satisfy a layered request.
+Switching back to a single image retires the preceding group.
+
+Host upload scheduling is wired: pending groups force client scene damage, and
+any normal view can submit their immutable uploads. Sampling still checks the
+original world and viewport ownership. Empty transparent passes clear their
+outputs without binding absent instance buffers.
+
+Before client composition was connected, a repeated physical walk passed its room-landmark assertions but still
+shows the avatar disappearing: the 60 Hz world run has zero avatar-yellow pixels
+in frames 87 through 98. The cleared-camera image fixture excludes its body
+visibility assertion, so that passing test cannot establish character continuity.
+`player-crossing-recheck.png` and its JSON preserve the transition evidence under
+`.cache/build/dev/tests`. Fix and verify this product path before claiming
+seamless character crossing.
+
+The strengthened physical oracle now checks every third-person source-replica
+frame until the camera is actually cleared. It fails at both 30 Hz (frames 86-94)
+and 60 Hz (87-91), with 14 failed body checks. All these samples still use a
+Humanoid subject and native view (`eye_image == false`), with an external portal
+image. The first product integration target is therefore current body composition
+inside the external seam, not only the whole-eye handoff. The retained capture
+camera and depth must locate the current complementary body half before aperture
+sampling. Keep primary body exclusion separate from nested views, and complete
+later-world-layer support before replacing flattened captures generally. See
+`portal-body-oracle.log`, PNG and JSON under `.cache/build/dev/tests`.
+
+The renderer now exposes `ComposePortalBodyImage` for the product seam adapter.
+It validates a complete ready room group, reconstructs its accepted camera and
+lighting, renders current opaque body rows, and adopts the paired composition
+export without CPU readback. Its room group stays intact; successive outputs reuse
+the existing single-image ownership path. The operation forces body refresh even
+when the caller's view is cached. The caller must retire its output and choose a
+target extent compatible with other renders using that view slot. Unsupported
+transparent/custom body rows are refused. Eye-variant GPU checks pass, but product
+seam integration and aperture verification are still outstanding.
+
+`PortalImageHost::ComposeBodyImage` now owns composed output separately from the
+accepted room group. It replaces outputs and retires them on hidden demands,
+viewport/world removal, endpoint withdrawal, profile changes and expiry. The
+renderer operation's frame export explicitly selects the target slot; graph
+instances are cached per projection and viewport. Its temporary body subset also
+invalidates the shared slot's source-row cache before a parent view can reuse it.
+GPU checks cover nonzero viewport ownership, retirement and parent-row restoration.
+The joined client's native portal path now requests ordered room layers for its
+local or held player identity. It selects the current mapped body rows from the
+seam demand and uses the host-owned composition for aperture sampling. First-person
+views omit the primary body. Readiness requires the actual composed aperture
+handle. This connection does not establish continuous crossing: the latest normal
+physical walk still fails 20 body-visibility assertions at 30 Hz, frames 35-54.
+The inspected captures have `image == 0` on the external portal throughout that
+interval. The first source image request is logged at frame 48; the local
+presentation replica starts supplying captures later. Investigate cold endpoint
+availability and initial image admission alongside the later crossing failures.
+Do not classify a pre-assignment debugger read of zero as a renderer refusal:
+return-value and guard breakpoints did not reproduce such a refusal.
+
+The ordered-layer pixel test now covers seam and eye projections, translated and
+rotated cameras, and the renderer's accepted-camera composition operation.
+All 48,702 assertions pass (`portal-body-seam-check.log`). This isolates a working
+seam composition primitive, but does not prove product endpoint timing or complete
+world-layer support. `portal-body-current-walk.log`, PNG and JSON retain the
+physical failure evidence under `.cache/build/dev/tests`.
+
+The physical fixture now has a separate warm-start case. Only that case waits
+for a completed frame with an imported external portal image before beginning
+movement. It retains the same body, Humanoid subject, camera-clear and bidirectional
+handoff assertions. The original cold-start case remains unchanged and failing.
+The warm-start case passes 15,806 assertions across 30 Hz and 60 Hz world runs
+(`portal-warm-walk.log`). Inspected handoff images retain the avatar on both sides;
+PNG and JSON are saved beside the log. These runs received their first images at
+frames 87 and 79 respectively. Server image producers already skip demo creation,
+but initialize a GPU and join their world replica before publishing endpoints.
+Initial playable-world readiness remains unresolved; do not use a warmed fixture
+to claim that a newly joined player can immediately cross an unavailable portal.
+
+The native image adapter now prefers an authenticated remote image endpoint over
+a matching local player replica. Replica snapshot arrival previously opened a new
+local producer and switched image ownership; a focused test reproduced that
+switch (13 passed / 1 failed assertion). Camera and physics destination selection
+retain their existing replica preference. If the remote endpoint is withdrawn,
+image requests can still fall back to the ready local replica.
+
+Route, replica-arrival and copied camera-topology checks pass 163 assertions in
+three cases (`portal-image-route-final.log`). The warm bidirectional product walk
+passes 15,820 assertions at 30/60 Hz; its log contains no image requests switching
+to `client.portal` replicas. Inspected handoff images retain the avatar. The cold
+walk still fails one body assertion at 30 Hz frame 86: the external image handle
+is zero there and becomes nonzero in frame 87. This is not a startup completion
+claim; the duration varies with process and device startup. Logs and retained
+PNG/JSON evidence are named `portal-image-route-warm` and
+`portal-image-route-cold` under `.cache/build/dev/tests`. Temporary frame sequences
+were removed after retaining those artifacts.
+
+Image producers without GPU particle batches now service captures directly after
+world presentation, skipping the unused ordinary viewport and screen-interface
+frame path. Capture pumping reuses that prepared world and runs inside the frame
+profiler. Producers with particle batches retain the normal GPU step, then service
+captures without presenting the world twice. Interface initialization is retained
+for that fallback. Producer service frames use the existing monotonic schedule,
+defaulting to 60 Hz or the explicit maximum frame rate; update polls use its short
+idle wait. Removing the viewport without pacing initially caused 100,000 service
+frames in seconds. The paced restart fixture reports 119 service frames in 2.0 s.
+This is a scheduling check, not a release CPU/GPU speedup measurement.
+
+Saved/replicated producer, lighting update, shutdown and server restart checks pass
+847 assertions in two cases (`portal-producer-paced-host.log`). The combined warm
+and cold walk run passes 31,672 of 31,673 assertions: warm crossing passes, while
+the cold case fails its return-handoff landmark check at 30 Hz frame 251. Blue
+floor pixels change from 270 to 130 against a minimum of 135. Body checks passed
+in this run; this is a distinct handoff-image discontinuity, not the earlier
+missing initial image. `portal-producer-paced-handoff.png` and JSON retain the
+inspected frames. Initial availability, handoff pixel continuity and full world
+layer support remain open. Four temporary frame sequences were cleaned. Final rebuild passes; the saved/replicated
+producer check passes 550 assertions after retaining the particle fallback
+(`portal-producer-final-host.log`).
+
+Capture-sequence metadata now records the accepted image identity and camera:
+producer world/session/generation, request and seam/camera revisions, projection,
+frustum, clip plane, dimensions and viewport slot. Whole-eye records include the
+bound handle; external aperture records include their accepted room capture.
+These are capture-only diagnostics. The physical fixture verifies that each
+whole-eye record names the bound handle and a valid eye request.
+
+The rerun passes 17,340 assertions (`portal-capture-metadata-walk.log`), but its
+metadata exposes a stronger continuity gap than the landmark oracle detects.
+At 30 Hz frames 257-258 the accepted whole-eye image retains request 11 and handle
+103 across return adoption. Its camera position is about 4.5 metres from the
+current eye before adoption. Maximum accepted/current eye-position separation
+in the recorded sequence is about 8.36 metres at both world rates. This measures
+camera positions in this unit-scale fixture, not a latency estimate. The previous
+handoff landmark failure remains valid evidence of intermittency; this passing
+rerun does not close it. Retained PNG/JSON artifacts share the log's stem.
+
+The whole-eye gate must compare the displayed result against the current camera,
+including angular motion and depth/parallax, rather than only checking image
+availability and body colour. Current whole-eye sampling can display a retained
+capture from a different camera. Establish current-eye reprojection/composition
+and direct-view image parity, including disocclusion and later world layers,
+before marking continuous camera crossing complete. Temporary raw frames were
+removed after retaining the handoff samples and displacement series.
+
+Successor readiness no longer submits its staged camera into the persistent
+whole-eye slots. The debugger reproduced `PumpPortalSuccessor` calling
+`PreparePortalEye(..., prepareNative=false)` and then `SubmitEye` for slot 3
+(`portal-staged-eye-call-debug.log`). That allowed readiness checks and the
+displayed camera to compete for one request stream. The readiness branch now
+only checks the matching displayed-eye image; the normal frame remains its
+request owner. Camera route resolution and the successor's own drawable slot
+remain in place.
+
+Both warm and cold walks pass 35,120 assertions after this change
+(`portal-eye-owner-walk.log`), with successful builds and formatting checks.
+This fixes competing request ownership, not the whole camera-lag problem.
+Maximum accepted/current position separation remains approximately 8.3-10.4 metres
+across these four runs. `portal-eye-owner-walk.json` retains the per-frame series,
+handoff metadata and worst-displacement samples; its PNG shows those samples.
+Investigate retained full-eye request latency and nested capture dependencies,
+then verify current-camera pixel parity. Do not infer that eliminating staged
+requests eliminates delayed images. Four raw frame sequences were cleaned.
+
+The request-age audit correlates consumer issue/receive timestamps in
+`portal-eye-owner-walk.log` with frame timestamps and accepted request IDs in
+`portal-eye-owner-walk.json`. These are dev/offscreen diagnostic timings from
+128 x 128 captures, not release performance measurements. At each run's maximum
+position separation:
+
+| World tick rate | Start | Frame | Request to receipt | Receipt to displayed frame | Total camera sample age |
+| --- | --- | --- | --- | --- | --- |
+| 30 Hz | Cold | 193 | 285 ms | 284 ms | 569 ms |
+| 60 Hz | Cold | 195 | 251 ms | 318 ms | 569 ms |
+| 30 Hz | Warm | 277 | 253 ms | 251 ms | 504 ms |
+| 60 Hz | Warm | 206 | 317 ms | 318 ms | 635 ms |
+
+The source permits one outstanding request per compatible binding and displays
+its previous accepted image while awaiting the next reply. This accounts for
+sample age approaching two request cycles. The `eye-image` node in
+`render/src/nodes/OutputNodes.cpp` directly blits the accepted texture; it does
+not transform samples from the accepted camera into the current camera.
+Reducing request latency cannot by itself establish continuous camera parity.
+
+Inspection of `PortalImageProducer::Pump` rules out ordinary scene revision
+changes repeatedly rebuilding children: each job collects them once, then
+revalidates the visible seam set. Seam changes fail the job explicitly. The
+consumer log measures 16 local nested replies with a median 99.5 ms round trip;
+it does not expose the remote producers' internal dependency timings. Do not
+attribute the whole-eye delay entirely to nesting from this evidence.
+
+Next validation must deliberately retain an accepted eye capture while moving
+the consumer camera and compare with a direct render at that new camera. Cover
+translation, rotation, depth edges and newly exposed surfaces. Current-camera
+composition must handle missing samples and later world layers explicitly;
+reusing an arbitrary retained child or warping only colour cannot close this gate.
+
+The missing gate is now executable in `render/tests/ResourceImage.cpp` as
+`[eye-current-camera]`. It captures an emissive room once, imports its colour and forward depth
+through the same `DefaultEyeDocument` used by the product, then compares its HDR
+output with a direct render from the current camera. The scene has a near red
+occluder, a hidden green post and a blue rear wall. Independent colour checks
+prove the post is absent initially and becomes visible after translation.
+
+Dev/offscreen Vulkan builds without warnings. The targeted run
+`SDL_VIDEODRIVER=offscreen .cache/build/dev/tests/test_render '[eye-current-camera]'`
+fails three image comparisons: translation differs at 986 pixels, rotation at
+786, and combined movement at 424, each out of 2,405 pixels. The stationary
+control passes. The run has 102 passing assertions and 3 failing assertions
+(`eye-current-camera-gpu.log`). This is an unresolved correctness test, not an
+expected-failure annotation or a passing compatibility claim. Selecting the
+resource-image GPU suite now includes this known failure.
+
+`render-failures/eye-current-camera/comparison.png` retains expected, actual and
+difference panels; per-motion raw HDR samples and manifests retain precision.
+The missing green post demonstrates that camera reprojection alone cannot
+recover all newly exposed geometry from a single colour/depth image. Continuous
+crossing still needs destination scene/layer coverage sufficient for the current
+camera, plus correct camera-dependent composition. No runtime fix is claimed by
+this test addition.
+
+Parent captures now defer camera-dependent lights, ribbons and spatial UI while
+cross-world child images are pending. The first waiting pump reproduced one
+unnecessary prepared view (`portal-wait-preparation-before.log`). The shared
+runtime continues validating seams and collecting surfaces for child budgets;
+it prepares the remaining layers from the current world state once children
+are drawable. `render.portal_snapshot.prepared_views` counts actual preparation,
+and snapshot byte accounting excludes retained layers on skipped pumps.
+Runtime/host Vulkan tests pass 29,041 assertions in 28 cases
+(`portal-wait-preparation-gpu.log`). This removes observed redundant work; no
+release speedup or reduction in network round-trip latency has been measured.
+
+The scheduling change also passes the real cold and warm player walks at 30/60 Hz:
+34,610 assertions in two cases (`portal-wait-preparation-walk.log`). The retained
+PNG shows the first handoff and worst-displacement frame for each run; the JSON
+keeps both handoffs and per-frame accepted/current camera separation. Maximum
+separation is still 7.8-10.1 metres. These results verify character/image continuity
+for this fixture, not current-camera parity. All 4,800 temporary BMP/JSON frames
+were removed after extracting the evidence.
+
+Destination scene coverage must reuse authenticated, per-viewer replication
+admission and filtering. `Server::BeginPresentationProducer` gives its renderer
+an independent identity and restricted-world admission; that grant does not
+belong to a portal viewer. `Client::InitialisePresentationHost` consumes the
+ordinary replicated world through an inherited driver channel. Re-exporting the
+producer's entire ECS snapshot through an image reply would bypass that ownership
+boundary and include resources beyond the requested visual scene. Do not use
+`Store::Save` as an unfiltered portal-view payload. A destination visual replica
+must retain its own admitted stream and endpoint incarnation, remain separate
+from player/input ownership, and retire with its view subscription. Images still
+serve the explicit bus-driven capture path. The image-only versus destination
+scene-data product choice was presented to the user and remains unanswered.
+
+A held Humanoid no longer forces the native source world to display a retained
+whole-eye image once its aperture images are drawable. `Client::PreparePortalEye`
+now keeps the current native view in that case; foreign eyes and unavailable
+native images retain their existing routing. Product walk tests require at least
+one held-character frame on the native path, alongside the existing body,
+camera-subject and movement checks. The four latest runs cover 17-18 such frames
+each. Builds and formatting pass. The initial cold-only run passes 17,119
+assertions (`portal-native-held-walk.log`).
+
+The combined cold/warm run has 34,000 passing assertions and one failing landmark
+assertion (`portal-native-held-final-walk.log`). Cold 30 Hz return frame 257
+reduces the blue floor patch from 300 to 143 pixels, below the half-size threshold.
+The body and native-held checks pass. Both failing boundary frames use remote
+eye images: request 10 becomes request 11, whose accepted camera is at z=19.56
+while the current camera is at z=15.11. `portal-native-held-return.png` and JSON
+retain this failure; do not weaken the landmark threshold or describe the whole
+walk gate as passing. `portal-native-held-final.png`/JSON retain native-held,
+handoff and worst-displacement evidence. Maximum foreign-eye separation remains
+8.1-9.5 metres. All 4,800 temporary capture files were removed. This native-path
+change does not close the foreign-eye current-camera composition gate.
+
+The wider `[portal-product-walk]` matrix now ran all 16 combinations of 30/60 Hz,
+first/third person, automatic/explicit Humanoid subject and held/released movement.
+It has 138,627 passing assertions and six failures
+(`portal-native-held-camera-matrix.log`). First-person 30 Hz with explicit subject
+and released movement has no eye image at frame 84. First-person 60 Hz with
+automatic subject and held movement has no eye image at frames 86-87. Each frame
+fails both image readiness and visible-output checks. These are initial foreign-eye
+readiness gaps before adoption, distinct from the return landmark failure.
+
+The trace places the first-person `walk.destination` request's receipt on the next
+frame after the 30 Hz gap and at frame 88 after the 60 Hz gap. In the latter case
+it was issued at 13:22:34.288 and received at 13:22:34.589. Preserve this first-image
+readiness requirement alongside current-camera parity; a successful transfer alone
+is insufficient. Handoff contact sheets and metadata for all 16 combinations are
+under `portal-native-held-camera-matrix/`; 19,200 temporary capture files were
+removed. Those contact sheets cover handoffs, not the earlier missing-image frames;
+the failure log is the evidence for the latter. That run preceded the initial
+entry gate described below; its image oracle remains unchanged.
+
+The player presentation pump now flushes newly queued image packets before the
+server sleeps. QUIC pacing needs the current monotonic time for this second flush,
+not the earlier tick timestamp. The old timestamp flushed zero active wires;
+current-time samples flush 87 wires over 84 calls and 97 over 95 calls. This is
+transport evidence in dev, not a matched release performance result. The full
+camera matrix after that change has 136,402 passing assertions and 21 failures
+(`portal-presentation-current-flush-camera-matrix.log`). Cold 30 Hz third-person
+frames 35-55 have no yellow body and an unfilled external portal. The first image
+arrives at frame 56. `portal-current-flush-cold-failure/` preserves sampled PNG/JSON
+frames and a contact sheet; the 19,200 raw capture files were removed.
+
+Initial entry now holds keyboard/gamepad movement until visible native portal
+images and the nearby prefetched foreign eye are ready. Look and zoom remain
+active, so first-person requests use the selected body-hiding profile. This is a
+one-time viewport gate that survives body-world adoption, not a freeze at every
+crossing. The existing overlay shows `Loading portals`; capture metadata records
+`loading_portals`. The product walk checks zero horizontal predicted velocity
+while loading and requires an observed loading interval. The loading preference
+was unanswered; this proceeds with the stated loading-phase assumption.
+
+Client/test_client builds and formatting pass. The initial cold/warm 30/60 Hz run
+passes 34,184 assertions and fails one return landmark check
+(`portal-entry-readiness-walk.log`). Warm 30 Hz return frame 269 changes the blue
+floor patch from 345 to 143 pixels, below the half-size threshold. All loading
+movement checks pass. `portal-entry-readiness-evidence/` retains loading/ready
+scene images and the failing return boundary; 4,800 raw captures were removed.
+Scene captures exclude the host overlay, so these images do not verify the
+loading label. The first wider run exposed a first-person loading stall:
+`CurrentImage` requires no pending refresh, but live look input starts another
+request before the gate reads it. The diagnostic run was stopped with SIGINT
+(73,560 passing / 29 failing assertions, including interruption). Its log is
+`portal-entry-readiness-camera-matrix.log`; first-person frames 100 and 599 are
+retained under `portal-entry-readiness-evidence/stuck-first-person/`. The 11,864
+interrupted raw captures were removed. The gate now accepts a usable completed
+image with the selected body-hiding profile while a camera refresh is pending.
+Endpoint expiry still belongs to the source runtime. This does not claim exact
+current-camera rendering. The corrected full matrix passes all 136,954 assertions
+(`portal-entry-compatible-camera-matrix.log`): all 16 combinations of 30/60 Hz,
+first/third person, automatic/explicit Humanoid subject and held/released movement.
+Loading spans 13-39 captured frames across those runs. Per-case loading, first-ready
+and both adoption frames are retained under `portal-entry-compatible-evidence/`,
+with a JSON summary. All 19,200 raw captures were removed. After entry, the gate
+no longer copies capture metadata merely to recompute unused readiness. The final
+client/test_client build and `git diff --check` pass. The final authenticated
+producer-host check passes 305 assertions in `test_client`
+(`portal-entry-client-host.log`). An earlier invocation against `test_server`
+matched no tests and provides no validation. Current-camera parity, loading
+refusal/retry UX and complete crossing acceptance remain open.
+
+A retained-source prototype was tested and removed from the runtime. It kept one
+previous authenticated connector and advancing snapshots, stopped the old gameplay
+script systems, and used a separate local whole-eye slot with a warm remote
+fallback. Tests confirmed advancing snapshot ticks and displayed local images.
+Reusing the remote slot first discarded its ready image: 34,069 assertions passed
+and 81 failed (`portal-retained-walk.log`). A non-increasing scheduler replacement
+revision then triggered the safety fallback and all eight retention assertions
+failed (`portal-retained-slot-walk.log`), correctly rejecting a false success.
+
+With script stopping corrected, the retained path passed 36,966 assertions and
+failed 103 (`portal-retained-clock-walk.log`). One return was delayed until roughly
+frame 486. Frames 240-440 show `proceed=false` and `crossed=false`, with expired
+nested successor captures. The delay precedes physical handoff; lease renewal is
+not established as its cause. The source nevertheless renews the original transfer
+lease while its old connection remains live, which observer lifetime must address.
+
+Retiring the observer when successor staging begins removed the long delay in the
+next four sampled runs. They still fail: 34,812 assertions pass and three fail
+(`portal-retained-staging-walk.log`). Warm 30 Hz frame 260 shrinks the floor patch
+from 267 to 121 pixels. Warm 60 Hz frame 141 is completely black, while frames
+142-143 show the scene. All three use local resident handle 670 with identical
+camera and capture metadata. This needs a focused GPU first-use reproduction;
+a nonzero handle and an arbitrary one-frame wait are not correctness proofs.
+
+`portal-retained-staging-evidence/` preserves the black-frame contact sheet,
+PNG/JSON boundaries, four-run summary and `prototype.patch`. Earlier failure
+samples are under `portal-retained-evidence/` and `portal-retained-clock-evidence/`.
+Each run's 4,800 raw captures was cleaned up. The four runtime files exactly match
+the pre-experiment copies; client/test_client rebuild, formatter and diff checks
+pass after restoration. The restored producer-host check passes 305 assertions
+(`portal-retained-rollback-host.log`); the full camera matrix was not rerun after
+restoring those exact sources. Observer content delivery, endpoint/lease retirement, full visual
+layers and exact current-camera rendering remain open. This experiment does not
+claim a retained-source feature or seamless crossing completion.
+
+The focused first-use fixture now passes 688 assertions across 16 combinations
+(`eye-first-use-lifetime-gpu.log`, dev Vulkan). It immediately adopts a resident
+capture, switches from viewer slot 3 to either 3 or fresh slot 4, retains the
+fallback image, and checks the first two frames. It covers full versus scene-only
+damage, texture-only versus headless presentation, and the normal eye pipeline
+versus an extra HDR readback. The normal presentation branch uses the product's
+`RequestSceneCapture` path. HDR bytes match the independent source capture and
+the displayed centre remains blue. Successful BMPs are removed by the fixture.
+
+A window-backed variant crashed inside swapchain initialization before drawing,
+including with the client's window flags (`eye-first-use-window-flags-gpu.log`).
+It was removed: the product crossing tests use a headless device with presentation
+enabled, so a window was not needed to match that path. This is not evidence that
+the product black frame is a driver defect. The isolated test does not reproduce
+the product failure, and no renderer runtime fix follows from its passing result.
+Next, isolate the local producer publication/adoption and nested capture ordering
+from the saved product prototype. The retained observer and full crossing work
+remain incomplete.
+
+### Render-stage snapshot probe
+
+`ATOMIC_RENDER_PROBE_DIR` enables a diagnostic probe in the client or render tests.
+`ATOMIC_RENDER_PROBE_FIRST` and `ATOMIC_RENDER_PROBE_LAST` select an inclusive
+renderer-frame range (defaults 0 through 8, maximum span 1025 frames). Renderer
+frames include producer captures, so these are not client capture-sequence indices.
+Each renderer creates its own run directory to separate viewer and producer devices.
+For example, the checked fixture command is:
+
+```sh
+ATOMIC_RENDER_PROBE_DIR=.cache/build/dev/tests/stage-probe-check \
+ATOMIC_RENDER_PROBE_LAST=5 SDL_VIDEODRIVER=offscreen \
+.cache/build/dev/tests/test_render '[stage-probe],[eye-first-use]'
+```
+
+Prefix the existing client command with the same environment settings to probe
+that scene. `index.html` shows the snapshots in execution order with stage/resource
+labels. Each snapshot has a metadata JSON, raw `.bin` pixels with declared row
+pitch and SDL format, and a BMP preview. Preview channels clamp to [0,1]; raw HDR
+values remain unchanged. The probe also copies the imported whole-eye input before
+`eye-image`, so a bad imported image can be distinguished from a later bad stage.
+Metadata includes pipeline, world, viewport, eye handle, camera position and whether
+the node accepted and ran. Nodes without texture outputs and unsupported formats
+are recorded explicitly. Texture snapshots currently cover base mip and layer zero.
+
+Each copy is recorded directly after its graph node in the same GPU command buffer,
+before later nodes can reuse its storage. GPU-to-CPU waits and disk writes happen
+only after submission. Captures are bounded to 256 snapshots and 256 MiB per render
+batch. This diagnostic changes timing and must not support performance claims.
+Submission failures discard the queued readbacks; missing files must not be treated
+as valid snapshots. Disable the environment setting for the ordinary rendering path.
+
+The dev client and test_render build pass. The probe-enabled first-use checks and
+same-command blue-then-red overwrite test pass 756 assertions in two cases
+(`render-stage-probe-final-gpu.log`). All 1,072 recorded snapshots had raw and preview
+files, with no unsupported formats in this fixture. Thirty-two imported-eye/output
+pairs match exactly, excluding transfer padding. One browsable trace and a stage
+comparison PNG remain under `stage-probe-check/`; duplicate traces and the overwrite
+fixture's temporary images were removed. This validates the probe, not the product
+black-frame fix.
+
+The saved retained-source prototype was rerun with stage probing and then removed
+again. `ATOMIC_RENDER_PROBE_VIEW` now optionally restricts capture to one viewport;
+omitting it captures all selected-frame viewports. The local-eye-only run used
+view 4 and renderer frames 0-1024. It passed 16,924 assertions and failed one
+(`portal-stage-probe-walk.log`): warm 60 Hz client frame 245 reduced the floor patch
+from 556 to 185 pixels. Capture metadata changes from remote handle 733 to 736;
+the old captured camera is roughly eight metres behind the live camera, while
+the replacement remains several metres behind. All 786 stage snapshots were
+saved, with no black whole-eye or final-scene output in that trace.
+
+The wider run captured every viewport at renderer frames 180-360. It passed 16,826
+assertions and failed ten (`portal-stage-all-walk.log`). At warm 30 Hz client frame
+145, corresponding to renderer frame 215, `eye-image` receives handle zero and
+writes black to `eye-hdr`; tonemap and present retain that black output. The
+normal missing-image clear in `nodes/OutputNodes.cpp` explains this stage result.
+The client log immediately before capture reports a camera route waiting for
+`server.world` topology from `walk.destination`. A reply arrives in slot 3 while
+the displayed view has slot 2 and no image. The selection/lifecycle cause still
+needs isolation. This is distinct from the earlier valid-handle black frame,
+which these runs did not reproduce.
+
+The broad probe materially changes timing: GPU waits and roughly 6.6 GiB of
+stage files extended the run and coincided with image expirations. It is useful
+stage evidence, not a timing-neutral reproduction or a performance result.
+`portal-stage-evidence/missing-eye/` retains renderer frames 214-216, client frames
+143-147, raw pixels, metadata, a browsable index and `stages.png`. The first run's
+floor boundary and first local images remain under `portal-stage-evidence/30/`
+and `60/`, and first-local stage copies remain under `portal-stage-trace/`.
+The broad trace and both raw client capture directories were removed. All five
+prototype files match their pre-run bytes; client/test_client/test_render rebuild
+passes, and the restored producer-host check passes 305 assertions
+(`portal-stage-probe-rollback-host.log`). No seamless-crossing fix is claimed.
+Next isolate the missing-image route selection with a narrow probe, then return
+to the original valid-handle failure and full current-camera acceptance.
+
+A focused topology recovery test reproduced an additional outage: a renewal
+requested at 250 ms and processed at 1000 ms was discarded because the cached
+snapshot expired at 1000 ms, although the authenticated request remains valid
+until 1250 ms. The old code left the request pending after discarding that reply.
+The failing test reported 13 passing assertions and one failure
+(`topology-renewal-before.log`). `PortalTopologyHost::Pump` now accepts matching
+renewals within the pending request deadline, including after cache expiry.
+Snapshot access still returns null before the reply arrives; endpoint identity,
+correlation, revision and request-deadline checks remain in force. A reply at the
+1250 ms deadline cannot revive the snapshot. This closes a proven recovery gap;
+it does not prove the earlier product black frame had this exact cause.
+
+The topology/restart suites pass 124 assertions across seven cases, and the copied
+remote-camera routing test passes 144 assertions (`topology-renewal-after.log`,
+`topology-renewal-route.log`). The dev client and both test binaries build. The
+cold/warm product image-handoff checks pass 33,872 assertions across two cases
+and four 30/60 Hz runs (`topology-renewal-product.log`), with the retained-source
+prototype absent and stage probing disabled. Input-world adoption boundaries and
+neighbouring images remain under `topology-renewal-evidence/`; all 4,800 raw client
+capture files were removed. Formatting and diff checks pass. The full 16-combination
+camera matrix was not rerun for this narrow renewal change, and the original
+valid-handle black frame and current-camera parity remain open.
+
+Route selection now consumes already-delivered topology messages before checking
+its cache. The expanded `remote-eye-route` test reproduced two failures when an
+authenticated destination reply was in the universe inbox but `PortalImageHost`
+had not been pumped (`topology-ready-before.log`, 178 passing / two failing
+assertions). `RequestTopology` now pumps only the topology host before requesting
+refresh. It does not run image producers, enter a GPU wait, or wait for network
+traffic. The existing endpoint, world, correlation, deadline and revision checks
+still decide whether a queued reply may update the cache. Routing now passes 288
+assertions with and without an earlier host pump, including expired topology and
+withdrawn endpoints. The topology/restart/non-GPU host checks pass 172 assertions
+across eleven cases (`topology-ready-route.log`, `topology-ready-host.log`).
+
+Direct rendering of a retained local world remains the next larger construction
+step for current-camera parity. The current client view assembles its input world's
+lighting, shaders, instances, particles, ribbons and interface before selecting
+an eye image. Replacing that image with only the retained world's geometry would
+mix worlds. The retained prototype also drops `Content` and `ContentRelay` at
+adoption. A complete implementation must retain authorized content delivery and
+use one engine-owned world-view preparation path for these layers, shared with
+local image producers rather than another partial client collector. Snapshot
+inputs crossing the world enter/leave boundary must be owned copies; renderer
+pointers must remain local. Use the current eye pose on every draw, preserve body
+ownership and aperture composition, and keep image-bus rendering for worlds whose
+visual data is not locally admitted. The previous replica's observer lifetime
+must also stop gameplay lease renewal without losing authorized presentation.
+No direct retained-world renderer is implemented by these topology fixes.
+
+The full product camera matrix also passes 136,117 assertions
+(`topology-ready-camera-matrix.log`): all 16 combinations of 30/60 Hz, first/third
+person, explicit/automatic Humanoid subjects, and held/released movement. Stage
+probing is disabled and the retained-source prototype is absent. The two adoption
+boundaries and neighbouring image/metadata files for each run remain under
+`topology-ready-camera-evidence/` with a JSON summary; 19,200 raw capture files
+were removed. Build, formatting and diff checks pass. This verifies the routing
+ordering change against that matrix, not complete current-camera parity or the
+original valid-handle black-frame case.
+
+
+Graph failure before a capture node now completes that batch's queued image
+requests as failed. Unrelated pipeline/view requests remain pending. Recorded
+copies retain their device fences but cannot publish success for a failed graph.
+
+Body composition must also precede world shader lenses. A spatial lens can move
+pixels, so applying an unwarped depth test after it mixes different rays. Carry the
+required authored lens inputs and content identities with the capture, then apply
+the same ordered lens chain after local body composition. Nested apertures need
+their own mapped body layer and depth domain; a child's distance cannot be compared
+as if it were in its parent's world. Keep direct-render comparisons with glass,
+a spatial lens and a nested scaled aperture as distinct acceptance cases.
+
+Keep room radiance/depth resident and invalidate them together on scene, lighting,
+camera or aperture changes. Local limb/root updates should update bounded geometry
+and palettes without retransmitting the room image. Bound depth payload bytes,
+retained images and staging slots; count actual transfer bytes and operations.
+Disocclusion, off-screen samples and stale depth need explicit coverage. Faster
+transport is useful but cannot substitute for this composition contract.
+
+
+
+Reuse the existing primary draw-order stream for exclusion rather than copying
+or deleting resident scene rows. Include exclusion identity and resolved rig
+changes in image demand and object/composition invalidation. Preserve unrelated
+environment and shadow caches. Validate opaque and blended limbs, retained
+images, duplicate character names, held-subject adoption and two viewers before
+claiming this complete. Compare direct and remote pixels with the same camera;
+keep small before/after captures and remove temporary frame sequences.
+
+Invalidate view history, image demand and retained composition when the eye's
+endpoint incarnation or seam mapping changes. Reuse producer scene inputs and
+resident image slots across the transition, with fences controlling retirement.
+Readiness must include a published drawable destination view as well as the
+joined replica and resolved Humanoid. Verify every frame during preparation,
+commit, first presentation and arm crossing, including reverse entry and refusal.
+
+`PortalImageSource::Poll` now revalidates each producer receipt against the
+Universe presentation directory. Withdrawal or same-name incarnation replacement
+retires its pending request and retained GPU image immediately, before the image
+age timeout. This also removes copied images, which cannot depend on resident
+receipt invalidation. Readiness returns only after an image from the replacement
+receipt arrives; hosts must keep the Universe directory current.
+
+Supervised producer traffic and lifecycle cleanup run only with a closed
+coordinated tick frame. Receiving a new endpoint directory inside an open frame
+cannot register its endpoints, and disconnect cleanup cannot retire old ones.
+Defer the entire producer pump, including process exit/retry handling, until the
+frame boundary. The relay also leaves transport traffic queued during an open
+frame, so directory updates and replies cannot be consumed under that refusal.
+
+Returning to a native replica also has an image-readiness boundary. Preparing a
+native frame now warms its demanded portal images before choosing the displayed
+view. If those images are absent and the same authored world's owned whole-eye
+image still exists, keep requesting/displaying that eye until native portal
+images arrive. Do not create an extra whole-eye fallback for a cold view that has
+never owned one. Refresh caller spans after collection changes portal/surface
+storage, and keep the existing image age/incarnation retirement rules.
+
+The authenticated successor may discover producer routes before commitment using
+an empty consumer directory. The original connection retains reply ownership
+until adoption. Each replacement connection owns a fresh presentation stream;
+framing sequence state must not survive a reconnect. Source input submissions
+continue during the retirement/adoption gap and stop after destination input
+ownership takes over, allowing already-sent packets to drain.
+
+Before Proceed, a failed successor keeps retrying the same cancellation attempt
+at half-second intervals until the source acknowledges it. Successful transport
+queueing is not application completion. A dropped source acknowledgement must
+not strand the held camera or prevent a later transfer offer from being adopted.
+The retired source departure answers repeated cancellation without recreating
+body authority. Product Client checks with authenticated source/successor
+listeners now withhold the successor snapshot through the 15-second readiness
+deadline, and separately disconnect before that snapshot. Both preserve the
+source player, cancel the failed attempt and adopt a later transfer without a
+fresh destination avatar. The Server fixture drops destination transfer replies
+for 40 ticks and requires the source rig to remain held until cancellation is
+acknowledged. These are separate protocol fixtures; their combined physical walk
+with image fidelity remains open.
+
+Source replica retirement and destination adoption are separate events. Cover
+both explicit entity destruction and authoritative snapshot omission during that
+gap. Any retained subject representation must preserve the player/Humanoid/root
+relationship without duplicating physics, scripts or GUI startup. Bound its
+storage to the affected rig, resolve replacement identity from the accepted
+transfer receipt, and release it on adoption or cancellation. Verify displayed
+camera motion and destination-driven subject motion independently of retained
+controller input. The implementation gates and known cloning limitations are in
+`RENDER-REFACTOR-TASKS.md`, under "Source retirement".
+
+Retain submitted movement and its actual prediction duration independently of
+source consumption. Reconcile the held presentation against an atomic completed
+destination pose, replay only later retained inputs, and reject samples whose
+input frontier predates retained coverage. Keep this history bounded and scoped
+to the exact transfer claim. Carry the mapped presentation through adoption;
+handover to native destination input also requires a completed pose associated
+with that input clock. A global replication acknowledgement does not prove that
+a budget-deferred root update arrived. Check displacement through adoption and
+the first native correction, so a fix cannot merely move the jump one frame.
+Keep control consumption distinct from elapsed simulation: a host may coalesce
+several inputs or continue a held direction between arrivals. Verify the replay
+duration against those actual intervals, including held-key and stop-at-adoption
+crossings, before treating a matching input prefix as prediction parity.
+The product Client preserves its input timeline across replica replacement;
+world clocks and connection acknowledgements remain independent. Compare elapsed
+input and simulation time across the route switch before changing host input
+scheduling or applying a presentation correction. Opt-in `portal-input` traces
+now expose actual control assignments on both routes. Interpret forwarded
+and scheduled assignments as pre-physics, and legacy `native` trace assignments as post-physics;
+retain the last assignment before each physics step. Initial traced runs showed
+native takeover advancing the input frontier faster than elapsed world time.
+Native controls now use a bounded queue anchored to the last forwarded physics
+assignment. Its completed pose reports actual application. This aligns the
+route clocks. Unconfirmed source controls now survive adoption and are resent
+before newer input, including local send-budget retry. Replay uses each timed
+input's recorded duration. Body and Humanoid camera now share fractional
+prediction presentation, with phase continuity across adoption. This removes the
+observed alternating doubled and stationary camera steps in the held movement
+case. Intermediate tick input coverage and the first completed destination
+sample nearly cancelling a held frame's movement before adoption remain open;
+the task ledger records reproductions and trace artifacts.
+
 Destination worlds receive named, versioned view requests through the world bus.
 Bounded jobs prepare their immutable render inputs; the destination renders its
 own lighting and scene state. Return an owned image payload or serialized image
@@ -1361,6 +2452,11 @@ revision, extent, format, capture tick and completion status. Raw ECS or GPU
 pointers never cross this boundary. A same-process optimization may resolve a
 local image slot on the render owner from the receipt, but must also pass the
 copied-message/process-isolated path and retain the image until consumers retire.
+Scope that local slot to the renderer owner, source viewport, both endpoint
+incarnations and the complete request identity. A receipt is not proof that a
+failed or unsubmitted capture is usable. Propagate failure explicitly and cancel
+the reservation when the source deadline expires. Exercise queue saturation,
+supersession and endpoint teardown in both delivery modes.
 
 Use bounded queues and byte/pixel budgets. Coalesce superseded view requests,
 discard stale replies, and accept completed images at explicit presentation
@@ -1408,6 +2504,9 @@ margin, with quantized size classes and hysteresis. Allocate portal targets from
 the common pool and budget total recursive pixels, not just recursion depth.
 Small portals can use lower resolution only within declared image-quality limits;
 test near-plane approach and rapid aperture growth to avoid a blurry threshold pop.
+Measure clip-plane distances and bias in the destination's length units after
+seam scaling. Include shrinking exits and continuous approaches between sampled
+camera poses, where a fixed near-plane cutoff can hide a visible aperture.
 
 Share destination world geometry, acceleration and compatible lighting inputs
 across portal views. Reuse capture pixels only for equal effective camera/clip/
@@ -1427,6 +2526,10 @@ paths and destination revisions. Approximate low-rate far captures must show age
 and quality policy; do not hide stale physics or light discontinuity behind them.
 Profile recursive pixel count, unique worlds versus views, proxy draw amplification,
 capture reuse and physical seam candidates separately.
+Compare resident and copied image delivery with identical pixel oracles. Report
+bus bytes, readback/upload operations, target creation/retirement and live/peak
+payload separately. A resident path that allocates a fresh target each frame has
+removed CPU transfers but has not established target reuse or lower frame time.
 
 ## 13. editable packing, quantization and geometry detail
 

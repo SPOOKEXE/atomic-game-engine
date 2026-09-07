@@ -1251,6 +1251,7 @@ namespace engine::replication {
 		Delta piece;
 		piece.Tick = delta.Tick;
 		piece.Baseline = delta.Baseline;
+		piece.ConsumedInput = delta.ConsumedInput;
 		lane.OpenEntry.assign(delta.Components.size(), NOWHERE);
 
 		Delta emitted;
@@ -1282,6 +1283,7 @@ namespace engine::replication {
 			piece = Delta{};
 			piece.Tick = delta.Tick;
 			piece.Baseline = delta.Baseline;
+			piece.ConsumedInput = delta.ConsumedInput;
 			used = MESSAGE_OVERHEAD;
 			rows = 0;
 			lane.OpenEntry.assign(delta.Components.size(), NOWHERE);
@@ -1961,6 +1963,7 @@ namespace engine::replication {
 		Delta delta;
 		delta.Tick = tick;
 		delta.Baseline = client.Applied;
+		delta.ConsumedInput = client.ConsumedInput;
 
 		BuildComponents(lane, store, client, delta, tick);
 		client.Repairing.clear();
@@ -1990,6 +1993,17 @@ namespace engine::replication {
 
 			const Lane::Timed recorded(lane, Lane::Phase::Record);
 			Record(lane, client, placed, tick);
+		} else if (client.ConsumedInput > client.AcknowledgedInput) {
+			const auto encoded = Encode(delta);
+			size_t spent = 0;
+			for (const auto &message : client.Outgoing)
+				spent += message.size();
+			const size_t allowance = std::min(Settings_.BytesPerTick, client.AllowanceBytes);
+			if (client.Outgoing.size() < Settings_.MessagesPerTick && spent <= allowance &&
+				encoded.size() <= allowance - spent) {
+				client.Outgoing.push_back(encoded);
+				client.Carried_.push_back({});
+			}
 		}
 
 		// Last, so that the byte budget turns this away before it turns away
@@ -2421,16 +2435,17 @@ namespace engine::replication {
 			return true;
 
 		case MessageKind::Applied:
+			if (read.Applied.ConsumedInput > found->ConsumedInput) return false;
+			found->AcknowledgedInput = std::max(found->AcknowledgedInput, read.Applied.ConsumedInput);
 			if (read.Applied.Tick > found->Applied) {
 				found->Applied = read.Applied.Tick;
 
-				// One pass over each set rather than an erase per acknowledged
-				// row. An acknowledgement retires everything sent up to a tick,
-				// so this is the bulk case by construction.
+				// A newer tick may omit older rows under the recovery budget.
+				// Only retire rows carried by the tick actually acknowledged.
 				for (OutstandingSet &unconfirmed : found->Unconfirmed) {
 					const uint64_t applied = found->Applied;
 					unconfirmed.EraseIf([applied](const OutstandingSet::Row &row) {
-						return row.Value.SentAt != 0 && row.Value.SentAt <= applied;
+						return row.Value.SentAt == applied;
 					});
 				}
 			}
@@ -2569,6 +2584,8 @@ namespace engine::replication {
 
 	void Authority::ClearInputs(ClientId client) {
 		if (Client *found = Reach(client); found != nullptr) {
+			for (const auto &input : found->Pending)
+				found->ConsumedInput = std::max(found->ConsumedInput, input.Tick);
 			found->Pending.clear();
 		}
 	}
@@ -2583,6 +2600,7 @@ namespace engine::replication {
 		status.SnapshotRemaining = Owed(*found);
 		status.Streaming = status.SnapshotRemaining > 0;
 		status.Applied = found->Applied;
+		status.ConsumedInput = found->ConsumedInput;
 		status.Known = found->Known.size();
 		return status;
 	}

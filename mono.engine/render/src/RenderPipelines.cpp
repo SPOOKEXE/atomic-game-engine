@@ -62,6 +62,7 @@ namespace engine::render {
 			// Resource edges, not canvas or declaration position, own execution.
 			// SDL records each dependency wave serially, preserving the schedule on a
 			// backend that exposes one portable command stream.
+			const std::vector<graph::NodeId> setup = compiled.Shared;
 			compiled.Shared.clear();
 			compiled.PerView.clear();
 			compiled.Final.clear();
@@ -81,7 +82,11 @@ namespace engine::render {
 						compiled.PerView.push_back(scheduled.Node);
 						break;
 					case graph::NodeScope::Frame:
-						compiled.Final.push_back(scheduled.Node);
+						if (std::find(setup.begin(), setup.end(), scheduled.Node) != setup.end()) {
+							compiled.Shared.push_back(scheduled.Node);
+						} else {
+							compiled.Final.push_back(scheduled.Node);
+						}
 						break;
 					}
 				}
@@ -148,7 +153,10 @@ namespace engine::render {
 							return false;
 						}
 					}
-					if (seen.contains(node->Kind.Id()) && !spec->Repeatable) {
+					const std::string *background = node->Parameter(core::Name("background"));
+					const bool separateDepth = node->Kind == core::Name("depth-linearise") &&
+											   background != nullptr && *background == "zero";
+					if (seen.contains(node->Kind.Id()) && !spec->Repeatable && !separateDepth) {
 						offender = node->Name;
 						reason = "this render node kind may appear only once";
 						return false;
@@ -158,7 +166,10 @@ namespace engine::render {
 						reason = "this backend node cannot run at the authored scope";
 						return false;
 					}
-					seen.insert(node->Kind.Id());
+					// Zero-background exports own graph targets; lighting depth remains a singleton.
+					if (!separateDepth) {
+						seen.insert(node->Kind.Id());
+					}
 					if (const std::string *queue = node->Parameter(core::Name("queue"));
 						queue != nullptr && *queue != "auto" && *queue != graph::Describe(spec->Queue)) {
 						offender = node->Name;
@@ -457,6 +468,17 @@ namespace engine::render {
 		};
 		const bool pbrSupported = Caps.MaxColourTargets >= 4 && hasFormat(graph::ResourceFormat::RGBA16F) &&
 								  hasFormat(graph::ResourceFormat::R32F);
+		const bool hdrSupported = hasFormat(graph::ResourceFormat::RGBA16F);
+		SDL_GPUColorTargetDescription hdrTarget = opaqueTarget;
+		hdrTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		if (hdrSupported) {
+			SDL_GPUGraphicsPipelineCreateInfo hdrOpaque = opaque;
+			hdrOpaque.target_info.color_target_descriptions = &hdrTarget;
+			HdrOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
+			hdrOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			hdrOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			HdrWireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
+		}
 
 		SDL_GPUColorTargetDescription gbufferTargets[4]{};
 		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
@@ -563,6 +585,18 @@ namespace engine::render {
 		TransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &transparent);
 		if (!TransparentPipeline) {
 			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
+		}
+		if (hdrSupported) {
+			SDL_GPUColorTargetDescription hdrBlended = blendedTarget;
+			hdrBlended.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo hdrTransparent = transparent;
+			hdrTransparent.target_info.color_target_descriptions = &hdrBlended;
+			HdrTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrTransparent);
+			hdrTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+			HdrWireframeTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrTransparent);
+			if (HdrOpaquePipeline == nullptr || HdrTransparentPipeline == nullptr) {
+				ENGINE_ERROR("HDR scene pipeline: {}", SDL_GetError());
+			}
 		}
 
 		// **The grid, which is the transparent state with no vertex input.** It
@@ -723,6 +757,11 @@ namespace engine::render {
 				ENGINE_ERROR("additive particle pipeline: {}", SDL_GetError());
 			}
 
+			particleTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			additiveTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			HdrParticlePipeline = SDL_CreateGPUGraphicsPipeline(Device, &particle);
+			HdrAdditiveParticlePipeline = SDL_CreateGPUGraphicsPipeline(Device, &additive);
+
 			SDL_ReleaseGPUShader(Device, particleVertex);
 			SDL_ReleaseGPUShader(Device, particleFragment);
 		}
@@ -795,6 +834,11 @@ namespace engine::render {
 			if (AdditiveRibbonPipeline == nullptr) {
 				ENGINE_ERROR("additive ribbon pipeline: {}", SDL_GetError());
 			}
+
+			ribbonTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			additiveRibbon.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			HdrRibbonPipeline = SDL_CreateGPUGraphicsPipeline(Device, &ribbon);
+			HdrAdditiveRibbonPipeline = SDL_CreateGPUGraphicsPipeline(Device, &additive);
 
 			SDL_ReleaseGPUShader(Device, ribbonVertex);
 			SDL_ReleaseGPUShader(Device, ribbonFragment);
@@ -889,12 +933,69 @@ namespace engine::render {
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
+			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
 			   (!pbrSupported ||
 				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
 				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
 				 TonemapPipeline != nullptr)) &&
 			   (!Caps.HasCompute || EnvironmentCompute != nullptr);
+	}
+
+	bool Renderer::Impl::EnsureTransparentLayer() {
+		if (TransparentLayerPipeline && TransparentLayerColourPipeline) return true;
+		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 12, 4);
+		if (!fragment) return false;
+		auto info = VariantOpaqueInfo;
+		info.vertex_shader = OpaqueVertexShader;
+		info.fragment_shader = fragment;
+		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		SDL_GPUColorTargetDescription targets[2]{};
+		targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		targets[1].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+		info.target_info.color_target_descriptions = targets;
+		info.target_info.num_color_targets = 2;
+		auto *nearest = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		// Replay every fragment at the chosen depth with the ordinary blend state.
+		// No depth attachment may suppress coincident fragments in this pass.
+		targets[0].blend_state = VariantBlendedTarget.blend_state;
+		info.target_info.num_color_targets = 1;
+		info.target_info.has_depth_stencil_target = false;
+		info.depth_stencil_state.enable_depth_test = false;
+		info.depth_stencil_state.enable_depth_write = false;
+		auto *colour = nearest ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
+		SDL_ReleaseGPUShader(Device, fragment);
+		if (!nearest || !colour) {
+			if (nearest) SDL_ReleaseGPUGraphicsPipeline(Device, nearest);
+			if (colour) SDL_ReleaseGPUGraphicsPipeline(Device, colour);
+			return false;
+		}
+		TransparentLayerPipeline = nearest;
+		TransparentLayerColourPipeline = colour;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureDepthCompose() {
+		if (DepthComposePipeline != nullptr) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("depth-compose.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription targets[2]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 2;
+			DepthComposePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex != nullptr) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment != nullptr) SDL_ReleaseGPUShader(Device, fragment);
+		return DepthComposePipeline != nullptr;
 	}
 
 	void Renderer::Impl::BindPipeline(
@@ -911,6 +1012,11 @@ namespace engine::render {
 				pipeline = WireframeOpaquePipeline;
 			} else if (family == PipelineFamily::Transparent && WireframeTransparentPipeline != nullptr) {
 				pipeline = WireframeTransparentPipeline;
+			} else if (family == PipelineFamily::HdrOpaque && HdrWireframeOpaquePipeline != nullptr) {
+				pipeline = HdrWireframeOpaquePipeline;
+			} else if (family == PipelineFamily::HdrTransparent &&
+					   HdrWireframeTransparentPipeline != nullptr) {
+				pipeline = HdrWireframeTransparentPipeline;
 			}
 		}
 
@@ -983,18 +1089,34 @@ namespace engine::render {
 		variant.Fragment = fragment;
 		variant.Opaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		variant.Transparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
+		if (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr) {
+			SDL_GPUColorTargetDescription hdrOpaque = VariantOpaqueTarget;
+			hdrOpaque.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUColorTargetDescription hdrBlended = VariantBlendedTarget;
+			hdrBlended.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			opaque.target_info.color_target_descriptions = &hdrOpaque;
+			blended.target_info.color_target_descriptions = &hdrBlended;
+			variant.HdrOpaque = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
+			variant.HdrTransparent = SDL_CreateGPUGraphicsPipeline(Device, &blended);
+		}
 
-		// **Both or neither.** A variant with one pipeline would draw a wall
-		// toon-shaded and the pane in front of it with the engine's shader,
-		// which reads as the material not applying to glass rather than as a
-		// pipeline that failed to build.
-		if (variant.Opaque == nullptr || variant.Transparent == nullptr) {
+		// All supported families or none: a partial variant would change the
+		// material when it becomes transparent or appears through a portal.
+		if (variant.Opaque == nullptr || variant.Transparent == nullptr ||
+			(HdrOpaquePipeline != nullptr &&
+			 (variant.HdrOpaque == nullptr || variant.HdrTransparent == nullptr))) {
 			ENGINE_ERROR("shader '{}' pipeline: {}", name.Text(), SDL_GetError());
 			if (variant.Opaque != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(Device, variant.Opaque);
 			}
 			if (variant.Transparent != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(Device, variant.Transparent);
+			}
+			if (variant.HdrOpaque != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, variant.HdrOpaque);
+			}
+			if (variant.HdrTransparent != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, variant.HdrTransparent);
 			}
 			SDL_ReleaseGPUShader(Device, fragment);
 			return false;
@@ -1020,6 +1142,12 @@ namespace engine::render {
 		// free inside the driver.
 		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.Opaque);
 		SDL_ReleaseGPUGraphicsPipeline(Device, found->second.Transparent);
+		if (found->second.HdrOpaque != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.HdrOpaque);
+		}
+		if (found->second.HdrTransparent != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(Device, found->second.HdrTransparent);
+		}
 		SDL_ReleaseGPUShader(Device, found->second.Fragment);
 		ShaderVariants.erase(found);
 	}
@@ -1028,6 +1156,12 @@ namespace engine::render {
 		for (auto &entry : ShaderVariants) {
 			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.Opaque);
 			SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.Transparent);
+			if (entry.second.HdrOpaque != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.HdrOpaque);
+			}
+			if (entry.second.HdrTransparent != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.second.HdrTransparent);
+			}
 			SDL_ReleaseGPUShader(Device, entry.second.Fragment);
 		}
 		ShaderVariants.clear();
@@ -1060,6 +1194,10 @@ namespace engine::render {
 			return found->second.Opaque;
 		case PipelineFamily::Transparent:
 			return found->second.Transparent;
+		case PipelineFamily::HdrOpaque:
+			return found->second.HdrOpaque;
+		case PipelineFamily::HdrTransparent:
+			return found->second.HdrTransparent;
 		case PipelineFamily::Other:
 			break;
 		}

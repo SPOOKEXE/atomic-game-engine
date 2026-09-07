@@ -9,6 +9,7 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Continuous.hpp>
+#include <engine/physics/CopiedContacts.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -119,6 +120,7 @@ namespace engine::physics {
 		// it registers itself through an entry point rather than on first touch.
 		// See `RegisterCharacterComponents`.
 		RegisterCharacterComponents();
+		RegisterCopiedContactComponents();
 
 		ecs::Components::Register<PhysicsClock>(
 			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks
@@ -190,7 +192,9 @@ namespace engine::physics {
 				}
 			}
 
+			BeginCopiedContactStep(store);
 			IntegrateMotion(store);
+			SolveCopiedContactStep(store);
 			SolveRigidJoints(store);
 
 			// **Between the two, and the order is the whole of why it works.**
@@ -236,7 +240,9 @@ namespace engine::physics {
 			SolveRigidJoints(store);
 
 			while (BeginPhysicsStep(store)) {
+				BeginCopiedContactStep(store);
 				IntegrateMotion(store);
+				SolveCopiedContactStep(store);
 				SolveRigidJoints(store);
 				SweepFastBodies(store);
 				SyncBroadphase(store);

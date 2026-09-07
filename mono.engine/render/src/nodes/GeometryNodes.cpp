@@ -1,19 +1,21 @@
 // The material head and the ordered tail: every instanced draw the eye's own
 // camera makes.
 //
-// **Two nodes and one depth attachment**, which is what makes the second cheap:
-// the blended tail is tested against what the g-buffer pass already wrote, so a
-// separate render pass would have to reload the depth buffer for nothing. The
+// The blended tail shares the opaque depth attachment. Transparent-layer
+// capture instead owns a nearest-fragment attachment and exports unblended
+// radiance/depth for deferred composition. The
 // particles and the ribbons ride in the transparent node for the same reason -
 // see its own comment for why they are not a node of their own.
 
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 
 #include <algorithm>
+#include <array>
 
 namespace engine::render {
 
@@ -212,6 +214,123 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("transparent-layer"), [this](const graph::RunContext &context) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node || PlainTransparent != TransparentCount || !RecordUploads()) return false;
+			const uint32_t first = SceneCount + static_cast<uint32_t>(OpaqueCount);
+			for (uint32_t slot = first; slot < first + PlainTransparent; ++slot)
+				if (slot >= State->SlotShader.size() || State->SlotShader[slot].IsValid()) return false;
+			const auto texture = [&](bool output, const char *port) {
+				const auto &ports = output ? node->WritePorts : node->ReadPorts;
+				const auto resources = output ? context.Writes : context.Reads;
+				const auto found = std::find(ports.begin(), ports.end(), core::Name(port));
+				if (found == ports.end()) return Impl::NamedTexture{};
+				const size_t index = found - ports.begin();
+				return index < resources.size() ? GraphTexture(resources[index], context, output)
+												: Impl::NamedTexture{};
+			};
+			const auto opaque = texture(false, "opaque-z"), previous = texture(false, "previous-z");
+			const bool hasPrevious =
+				std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name("previous-z")) !=
+				node->ReadPorts.end();
+			if (hasPrevious && !previous.IsValid()) return false;
+			const auto shadow = texture(false, "shadow");
+			const auto colour = texture(true, "colour"), depth = texture(true, "depth"),
+					   z = texture(true, "z");
+			if (!opaque.IsValid() || !colour.IsValid() || !depth.IsValid() || !z.IsValid() ||
+				opaque.Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT ||
+				colour.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+				z.Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT)
+				return false;
+			// The scene depth attachment can retain block-rounded capacity while
+			// this view uses a smaller viewport starting at the same origin.
+			if (opaque.Width < colour.Width || opaque.Height < colour.Height) return false;
+			for (const auto &input : {depth, z, previous.IsValid() ? previous : z})
+				if (input.Width != colour.Width || input.Height != colour.Height) return false;
+			if ((previous.IsValid() && previous.Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT) ||
+				!State->EnsureTransparentLayer())
+				return false;
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo targets[2]{};
+			targets[0].texture = colour.Texture;
+			targets[1].texture = depth.Texture;
+			for (auto &target : targets) {
+				target.load_op = SDL_GPU_LOADOP_CLEAR;
+				target.store_op = SDL_GPU_STOREOP_STORE;
+				target.cycle = true;
+			}
+			SDL_GPUDepthStencilTargetInfo depthTarget{};
+			depthTarget.texture = z.Texture;
+			depthTarget.clear_depth = 1;
+			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			depthTarget.cycle = true;
+			for (int phase = 0; phase < (PlainTransparent ? 2 : 1); ++phase) {
+				targets[0].cycle = phase == 0;
+				auto *pass = SDL_BeginGPURenderPass(
+					Command, targets, phase == 0 ? 2 : 1, phase == 0 ? &depthTarget : nullptr
+				);
+				if (!pass) return false;
+				if (PlainTransparent == 0) {
+					SDL_EndGPURenderPass(pass);
+					return true;
+				}
+				State->BindPipeline(
+					pass,
+					phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
+					Impl::PipelineFamily::Other
+				);
+				State->BindInstanceBuffers(pass);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				const FrameUniforms frame{Matrices.ViewProjection, LightViewProjection, glm::mat4{1}};
+				SDL_PushGPUVertexUniformData(Command, 0, &frame, sizeof(frame));
+				SDL_PushGPUFragmentUniformData(Command, 1, &SceneLights, sizeof(SceneLights));
+				SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+				const auto eye = Request.CameraFrame.Position;
+				const auto forward = Request.CameraFrame.LookVector();
+				const std::array<glm::vec4, 3> capture{
+					glm::vec4{eye.X, eye.Y, eye.Z, 0},
+					glm::vec4{forward.X, forward.Y, forward.Z, 0},
+					glm::vec4{phase == 0 && previous.IsValid() ? 1.f : 0.f, phase == 1 ? 1.f : 0.f, 0, 0}
+				};
+				SDL_PushGPUFragmentUniformData(Command, 3, capture.data(), sizeof(capture));
+				const SDL_GPUTextureSamplerBinding bounds[] = {
+					{opaque.Texture, State->OverlaySampler},
+					{phase == 1			  ? z.Texture
+					 : previous.IsValid() ? previous.Texture
+										  : opaque.Texture,
+					 State->OverlaySampler}
+				};
+				SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
+				const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
+				const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
+				SDL_SetGPUViewport(pass, &viewport);
+				SDL_SetGPUScissor(pass, &scissor);
+				auto lighting = LightingAt(eye, 0, 0);
+				if (!shadow.IsValid()) lighting.Flags.x = 0;
+				Result.DrawCalls += State->DrawSlots(
+					Command,
+					pass,
+					first,
+					PlainTransparent,
+					&lighting,
+					shadow.IsValid() ? shadow.Texture : State->FallbackTexture,
+					State->ShadowSampler ? State->ShadowSampler : State->OverlaySampler,
+					nullptr,
+					State->OverlaySampler,
+					0,
+					Result.Triangles
+				);
+				SDL_EndGPURenderPass(pass);
+			}
+
+			core::Metrics::Count("render.transparent_layer.passes", PlainTransparent ? 2 : 1);
+			core::Metrics::Count("render.transparent_layer.pixels", uint64_t(colour.Width) * colour.Height);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("transparent"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
@@ -220,7 +339,6 @@ namespace engine::render {
 			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
 			const std::span<const effects::RibbonRun> ribbonRuns = recording.Request.RibbonRuns;
-			const scene::Camera &drawCamera = recording.DrawCamera;
 			const uint32_t sceneWidth = recording.SceneWidth;
 			const uint32_t sceneHeight = recording.SceneHeight;
 			const bool haveInstances = recording.HaveInstances;
@@ -283,6 +401,8 @@ namespace engine::render {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
 				return true;
 			}
+			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			const auto worldTarget = hdr ? WorldColourTarget::Hdr : WorldColourTarget::Display;
 			colourTarget.texture = target.Texture;
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -367,39 +487,20 @@ namespace engine::render {
 				State->ActivePipeline = nullptr;
 			}
 
-			if (haveInstances) {
-				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+			if (haveInstances || drawInterface || particleCount > 0 || ribbonCount > 0) {
+				State->BindPipeline(
+					pass,
+					hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
+					hdr ? Impl::PipelineFamily::HdrOpaque : Impl::PipelineFamily::Opaque
+				);
 
-				State->BindInstanceBuffers(pass);
+				if (haveInstances) {
+					State->BindInstanceBuffers(pass);
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				}
 
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-
-				// `scene::ResolveCamera`, not a projection built here. It is the
-				// one place the engine decides what a camera's matrices are, and
-				// a second copy is a second chance to disagree about handedness,
-				// clip depth or the order of the product - a disagreement that
-				// reads as z-fighting rather than as a matrix mistake.
-				//
-				// The Y convention that used to need a comment here lives there
-				// too: no flip, because SDL's Vulkan backend already submits a
-				// negative-height viewport "for consistency with other
-				// backends".
-				//
-				// The aspect ratio is the rectangle the world is drawn into
-				// rather than anything a caller computed, so a frame taken
-				// mid-resize is projected for the image it actually lands in.
-				// Without a `Viewport` that rectangle is the swapchain, which is
-				// what every non-editor caller gets and what this used to say.
-				// **Identity for the surface projection, because this draw is
-				// not a mirror's.** Every draw that samples a surface pushes its
-				// own matrix below, one per index; leaving a live one here would
-				// give the plain geometry a projection it must never use, which
-				// is the shape of the black-wedge bug the surface pass records.
-				const glm::mat4 viewProjection =
-					scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
+				const glm::mat4 &viewProjection = matrices.ViewProjection;
 
 				const FrameUniforms frameUniforms{
 					viewProjection,
@@ -445,7 +546,8 @@ namespace engine::render {
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
 						sceneHeight,
-						false
+						false,
+						worldTarget
 					);
 				}
 
@@ -459,7 +561,11 @@ namespace engine::render {
 					// Still its own stage, sharing a render pass. What the list
 					// describes is what is drawn and in what order, not how many
 					// times a target is bound.
-					State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
+					State->BindPipeline(
+						pass,
+						hdr ? State->HdrTransparentPipeline : State->TransparentPipeline,
+						hdr ? Impl::PipelineFamily::HdrTransparent : Impl::PipelineFamily::Transparent
+					);
 
 					if (plainTransparent > 0) {
 						result.DrawCalls += State->DrawSlots(
@@ -499,7 +605,8 @@ namespace engine::render {
 						cameraFrame,
 						result.Triangles,
 						result.ParticlesDrawn,
-						result.Culled
+						result.Culled,
+						worldTarget
 					);
 				}
 
@@ -507,7 +614,13 @@ namespace engine::render {
 				// why the order is fixed rather than sorted.
 				if (ribbonCount > 0) {
 					result.DrawCalls += State->DrawRibbons(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns, result.Triangles
+						command,
+						pass,
+						frameUniforms.ViewProjection,
+						cameraFrame,
+						ribbonRuns,
+						result.Triangles,
+						worldTarget
 					);
 				}
 
@@ -521,7 +634,8 @@ namespace engine::render {
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
 						sceneHeight,
-						true
+						true,
+						worldTarget
 					);
 				}
 

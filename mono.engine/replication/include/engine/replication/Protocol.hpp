@@ -110,7 +110,7 @@ namespace engine::replication {
 	// exists to remove, arriving anyway. Refused at the door instead: this is
 	// also the number `network::Advert::Protocol` carries, so two builds that
 	// disagree here do not appear joinable in a browser either.
-	inline constexpr uint16_t PROTOCOL_VERSION = 11;
+	inline constexpr uint16_t PROTOCOL_VERSION = 12;
 
 	// Which half of a join a snapshot chunk belongs to.
 	//
@@ -223,6 +223,10 @@ namespace engine::replication {
 
 		// One entry per component that moved.
 		std::vector<ComponentDelta> Components;
+
+		// Highest client input tick consumed before this authoritative state.
+		// Client input ticks and world ticks have independent origins and rates.
+		uint64_t ConsumedInput = 0;
 	};
 
 	// Which entities a client holds, and the three ways that changes.
@@ -350,6 +354,9 @@ namespace engine::replication {
 		// messages, and acknowledging a partly-applied one would retire a
 		// baseline the client does not actually hold.
 		uint64_t Tick = 0;
+
+		// Input acknowledgement actually received, independent of snapshot progress.
+		uint64_t ConsumedInput = 0;
 	};
 
 	// Writes an identity claim.

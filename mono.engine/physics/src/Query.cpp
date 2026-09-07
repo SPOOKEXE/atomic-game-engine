@@ -1,16 +1,19 @@
 #include "ContactPairs.hpp"
+#include "ConvexQuery.hpp"
 #include "PipelineInternals.hpp"
 #include "ShapeRay.hpp"
 #include "ShapeSupport.hpp"
 #include "WorldResource.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
@@ -78,7 +81,9 @@ namespace engine::physics {
 			bool Present = false;
 		};
 
-		QueryCandidate ResolveCandidate(const ecs::Store &store, const Index &index, uint64_t id) {
+		QueryCandidate ResolveCandidate(
+			const ecs::Store &store, const Index &index, uint64_t id, bool requireQueryable = true
+		) {
 			const std::vector<ColliderRecord> &records = *index.Records;
 			const auto at = static_cast<size_t>(id);
 			if (at >= records.size()) {
@@ -91,7 +96,7 @@ namespace engine::physics {
 			if (transform == nullptr || collider == nullptr) {
 				return QueryCandidate{};
 			}
-			if (!collider->CanQuery) {
+			if (requireQueryable && !collider->CanQuery) {
 				return QueryCandidate{};
 			}
 
@@ -288,7 +293,8 @@ namespace engine::physics {
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask,
-		ecs::Entity ignore
+		ecs::Entity ignore,
+		bool includeTriggers
 	) {
 		const Indexes indexes = IndexesOf(store);
 		if (!indexes.Valid) {
@@ -315,6 +321,7 @@ namespace engine::physics {
 				if (!candidate.Present) {
 					continue;
 				}
+				if (!includeTriggers && store.Get<scene::Collider>(candidate.Owner)->Trigger) continue;
 
 				// **Skipped rather than nearest-then-compared**, which is the
 				// whole reason this parameter exists: a caster standing inside
@@ -345,9 +352,10 @@ namespace engine::physics {
 		const core::Ray &ray,
 		float maxDistance,
 		spatial::LayerMask mask,
-		ecs::Entity ignore
+		ecs::Entity ignore,
+		bool includeTriggers
 	) {
-		std::optional<ColliderHit> blocking = Raycast(store, ray, maxDistance, mask, ignore);
+		std::optional<ColliderHit> blocking = Raycast(store, ray, maxDistance, mask, ignore, includeTriggers);
 
 		if (maxDistance <= 0.0f) {
 			return blocking;
@@ -420,7 +428,8 @@ namespace engine::physics {
 		// onto the far one's, so the continuation starts at zero distance from it
 		// and every portal ray would report the destination's own glass as the
 		// first thing beyond the hole.
-		std::optional<ColliderHit> far = Raycast(store, beyond, beyondDistance, mask, hop.Far);
+		std::optional<ColliderHit> far =
+			Raycast(store, beyond, beyondDistance, mask, hop.Far, includeTriggers);
 		if (!far) {
 			return blocking;
 		}
@@ -554,4 +563,75 @@ namespace engine::physics {
 		}
 		return result;
 	}
+	PlacementSweep SweepPlacement(
+		const ecs::Store &store,
+		const scene::Collider &collider,
+		const core::CFrame &from,
+		const core::Vector3 &displacement,
+		const core::Vector3 &angularDisplacement,
+		ecs::Entity ignore,
+		bool blockingOnly
+	) {
+		ENGINE_PROFILE_CAT("physics.placement-sweep", core::ProfileCategory::Physics);
+		PlacementSweep answer;
+		const auto finite = [](const core::Vector3 &v) {
+			return std::isfinite(v.X) && std::isfinite(v.Y) && std::isfinite(v.Z);
+		};
+		const auto rotation = from.Rotation();
+		const float norm = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
+						   rotation.w * rotation.w;
+		if (!finite(from.Position) || !finite(displacement) || !finite(angularDisplacement) ||
+			!std::isfinite(norm) || std::abs(norm - 1) > .001f || collider.Shape >= scene::ShapeKind::Mesh)
+			return answer;
+		const Indexes indexes = IndexesOf(store);
+		if (!indexes.Valid) return answer;
+		const auto *baked = scene::CollisionShapesOf(store);
+		const auto *hull =
+			baked && collider.Shape == scene::ShapeKind::Hull ? baked->FindHull(collider.Geometry) : nullptr;
+		const ShapeInstance moving{from, collider.Extent, collider.Shape, hull, nullptr};
+		const auto ended = Advanced(from, displacement, angularDisplacement, 1);
+		const ShapeInstance arrived{ended, collider.Extent, collider.Shape, hull, nullptr};
+		const auto initial = ShapeReach(moving);
+		const auto extent = initial.Size();
+		if (!finite(initial.Minimum) || !finite(initial.Maximum) || extent.X < 0 || extent.Y < 0 ||
+			extent.Z < 0 || extent.MagnitudeSquared() == 0)
+			return answer;
+		const auto final = ShapeReach(arrived);
+		const float radius = std::max(
+			(initial.Minimum - from.Position).Magnitude(), (initial.Maximum - from.Position).Magnitude()
+		);
+		const float turn = angularDisplacement.Magnitude() * radius;
+		const core::Vector3 margin{turn, turn, turn};
+		const auto envelope = initial.Union(final);
+		const core::AABB reach{envelope.Minimum - margin, envelope.Maximum + margin};
+		uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+		answer.Complete = true;
+		for (const auto &index : indexes.Entry) {
+			const auto found = QueryOverlap(index, reach, collider.Mask, candidates);
+			if (found.Overflowed) answer.Complete = false;
+			for (size_t at = 0; at < found.Written; ++at) {
+				const auto candidate = ResolveCandidate(store, index, candidates[at], false);
+				if (!candidate.Present || candidate.Owner == ignore) continue;
+				const auto *other = store.Get<scene::Collider>(candidate.Owner);
+				if (other == nullptr || other->Trigger || !other->Mask.Overlaps(collider.Layer)) continue;
+				const auto hit = SweepConvexMotion(
+					moving, displacement, angularDisplacement, candidate.Shape, {}, {}, 1, true
+				);
+				if (blockingOnly && !hit.ConservativeFallback &&
+					angularDisplacement.MagnitudeSquared() < 1e-12f && displacement.Dot(hit.Normal) >= -1e-6f)
+					continue;
+				if (!hit.Hit || (answer.Hit &&
+								 (hit.Fraction > answer.Fraction || (hit.Fraction == answer.Fraction &&
+																	 candidate.Owner.Id >= answer.Owner.Id))))
+					continue;
+				answer.Hit = true;
+				answer.Fraction = hit.Fraction;
+				answer.Owner = candidate.Owner;
+				answer.Normal = hit.Normal;
+				answer.ConservativeFallback = hit.ConservativeFallback;
+			}
+		}
+		return answer;
+	}
+
 }

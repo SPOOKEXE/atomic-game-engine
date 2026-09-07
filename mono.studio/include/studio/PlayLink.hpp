@@ -53,9 +53,13 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Replica.hpp>
+#include <engine/scene/CameraContinuation.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -65,6 +69,12 @@ namespace engine::world {
 }
 
 namespace studio {
+
+	// Host-local lookup result. Neither handle is sent to the other world.
+	struct PortalLinkArrival {
+		engine::world::WorldId World;
+		engine::ecs::Entity Player;
+	};
 
 	// What the last step moved, for the panel that shows the two side by side.
 	//
@@ -162,6 +172,23 @@ namespace studio {
 			engine::ecs::Entity adopt = engine::ecs::Entity{}
 		);
 
+		// Observe before replacing the replica's departing body. A portal receipt
+		// remains authoritative while the destination finishes its commit.
+		void ObservePortalTransfer(engine::world::Universe &universe);
+		const std::optional<engine::script::PortalTransferReceipt> &PortalTransfer() const {
+			return PortalTransfer_;
+		}
+		std::optional<PortalLinkArrival> FindPortalArrival(engine::world::Universe &universe) const;
+		// Resolves the exact receipt and carries the viewer's camera to the new rig.
+		// Failure leaves the departing link running and creates no replacement body.
+		bool StartAfterPortal(
+			engine::world::Universe &universe, const PlayLink &departing, double tickRate, std::string &error
+		);
+		// Keeps the departing view alive while the new replica receives its initial
+		// snapshot. Returns ownership only after its camera can follow the new rig.
+		std::unique_ptr<PlayLink>
+		AdvancePortalArrival(engine::world::Universe &universe, double tickRate, std::string &error);
+
 		// How many frames this client's player has been missing for.
 		//
 		// **A teleport is not instant and cannot be**, which is what this
@@ -180,11 +207,8 @@ namespace studio {
 
 		// What this client's player is called.
 		//
-		// **A name and not a handle, because a teleport does not move one.**
-		// Nothing crosses a world boundary but bytes, so the player in the
-		// destination is a different entity that happens to be the same person -
-		// and the only thing the two share is what they are called. `Editor::
-		// FollowTeleports` is the one reader.
+		// Used for display and legacy teleport matching. Portal arrivals use
+		// the exact transfer receipt, since unrelated players can share a label.
 		const std::string &PlayerName() const {
 			return PlayerName_;
 		}
@@ -262,8 +286,12 @@ namespace studio {
 		// The player this client was given, in the authority's world.
 		engine::ecs::Entity Player_;
 
-		// What that player is called, which is all a teleport carries.
+		// Display label used by legacy teleport following.
 		std::string PlayerName_;
+		std::optional<engine::script::PortalTransferReceipt> PortalTransfer_;
+		std::optional<engine::scene::CameraContinuation> DepartingCamera_;
+		std::optional<engine::scene::CameraContinuation> ArrivingCamera_;
+		std::unique_ptr<PlayLink> PortalSuccessor_;
 
 		// Frames since this client's player stopped being anywhere.
 		int Missing_ = 0;

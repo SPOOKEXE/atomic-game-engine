@@ -39,6 +39,13 @@
 
 #include <cstddef>
 
+namespace engine::scene {
+	struct Camera;
+}
+namespace engine::core {
+	struct CFrame;
+}
+
 namespace engine::ecs {
 	class Store;
 }
@@ -79,6 +86,12 @@ namespace engine::render {
 	//        making what is in it bigger.
 	// @return How many collectors were given a canvas.
 	size_t ResolveSpatialCanvases(ecs::Store &store, const gui::Screen &screen);
+
+	// Explicit camera for an offscreen world view. Neither authored camera rows
+	// nor ActiveCamera are changed. Null inputs use the active camera.
+	size_t ResolveSpatialCanvases(
+		ecs::Store &store, const gui::Screen &screen, const scene::Camera *camera, const core::CFrame *frame
+	);
 
 	// Projects a window pixel onto the foremost interactive spatial collector.
 	// Screen interfaces are deliberately not considered; a caller gives those

@@ -23,6 +23,49 @@
 TEST_SUITE_ID("engine.scene.registration")
 TEST_DEPENDS("engine.ecs.invariants")
 
+TEST_CASE(
+	"portal wire fields preserve named worlds and crossing flags", "[scene][registration][portal-wire]"
+) {
+	using namespace engine;
+	scene::RegisterSceneComponents();
+	const auto &type = ecs::Components::Describe(ecs::Components::Of<scene::Portal>());
+	const scene::Portal authored[] = {
+		{ecs::Entity{73}, core::Name("portal-wire-other-world"), false, true, {12, 34}},
+		{ecs::NULL_ENTITY, {}, true, false, {56, 78}}
+	};
+	core::ByteWriter writer;
+	type.Write(writer, authored, 2);
+	core::ByteReader wire(writer.Bytes());
+	CHECK(wire.ReadUInt64() == 73);
+	CHECK(wire.ReadString() == "portal-wire-other-world");
+	CHECK_FALSE(wire.ReadBool());
+	CHECK(wire.ReadBool());
+	CHECK(wire.ReadUInt64() == 0);
+	CHECK(wire.ReadString().empty());
+	CHECK(wire.ReadBool());
+	CHECK_FALSE(wire.ReadBool());
+	REQUIRE_FALSE(wire.Failed());
+	CHECK(wire.AtEnd());
+	scene::Portal restored[2];
+	core::ByteReader reader(writer.Bytes());
+	type.Read(reader, restored, 2);
+	REQUIRE_FALSE(reader.Failed());
+	CHECK(reader.AtEnd());
+	for (size_t index = 0; index < 2; ++index) {
+		CHECK(restored[index].Destination == authored[index].Destination);
+		CHECK(restored[index].DestinationWorld == authored[index].DestinationWorld);
+		CHECK(restored[index].Enabled == authored[index].Enabled);
+		CHECK(restored[index].Bidirectional == authored[index].Bidirectional);
+		CHECK(restored[index].Reserved[0] == 0);
+		CHECK(restored[index].Reserved[1] == 0);
+	}
+	for (size_t length = 0; length < writer.Bytes().size(); ++length) {
+		core::ByteReader truncated(writer.Bytes().first(length));
+		type.Read(truncated, restored, 2);
+		CHECK(truncated.Failed());
+	}
+}
+
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
 using engine::core::CFrame;
@@ -59,6 +102,7 @@ namespace registration_test {
 		"scene.PhysicsProperties",
 		"scene.Visual",
 		"scene.Camera",
+		"scene.CameraSubject",
 		"scene.SurfaceCamera",
 		"scene.Transient",
 		"scene.Service",

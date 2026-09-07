@@ -335,6 +335,11 @@ namespace engine::world {
 		// @tick
 		void Tick(int ticks);
 
+		// Internal joined-round slices used by the Universe exchange coordinator.
+		bool BeginExchangeRound(bool firstInBatch);
+		bool FinishExchangeRound();
+		void CancelExchangeRound();
+
 		// Whether a tick that should be published has run since this was last
 		// asked, clearing the answer.
 		//
@@ -397,6 +402,9 @@ namespace engine::world {
 		}
 
 	  private:
+		void PrepareTick(bool firstInBatch);
+		void CommitTick();
+		bool ExchangeOpen = false;
 		// Charges one tick to the replication clock.
 		//
 		// @return `true` when this tick is one that should be published.

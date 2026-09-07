@@ -11,13 +11,17 @@
 // about pixels and would be worthless, because the whole value of the panel is
 // the difference between the two sides.
 
+#include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -29,12 +33,17 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/PortalTransfer.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
@@ -503,6 +512,274 @@ TEST_CASE("two clients get two worlds with two names", "[studio][playlink]") {
 
 	first.Stop(fixture.Worlds);
 	second.Stop(fixture.Worlds);
+}
+
+TEST_CASE("arriving clients with the same label keep separate replica worlds", "[studio][playlink][portal]") {
+	Fixture fixture;
+	PlayLink resident;
+	PlayLink arriving;
+	std::string error;
+	REQUIRE(resident.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "same label"));
+	const WorldId residentReplica = resident.ReplicaWorld();
+	REQUIRE(arriving.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "same label"));
+	REQUIRE(arriving.ReplicaWorld() != residentReplica);
+	arriving.Stop(fixture.Worlds);
+	CHECK(fixture.Worlds.NameOf(residentReplica).IsValid());
+	CHECK(resident.IsRunning());
+	resident.Stop(fixture.Worlds);
+}
+
+TEST_CASE(
+	"a play link refuses a missing or non-player adoption before creating a replica",
+	"[studio][playlink][portal]"
+) {
+	Fixture fixture;
+	Entity adopt = fixture.Spawn(1.0f);
+	SECTION("the named entity is not a player") {}
+	SECTION("the player reference is stale") {
+		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) { store.Destroy(adopt); });
+	}
+	const size_t worlds = fixture.Worlds.Count();
+	PlayLink link;
+	std::string error;
+	CHECK_FALSE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "arriving", adopt));
+	CHECK_FALSE(error.empty());
+	CHECK_FALSE(link.IsRunning());
+	CHECK(fixture.Worlds.Count() == worlds);
+}
+
+TEST_CASE(
+	"portal handoff keeps its old replica until the exact chunked destination joins",
+	"[studio][playlink][portal]"
+) {
+	using namespace engine::scene;
+	const bool removeDestination = GENERATE(false, true);
+	Fixture fixture;
+	RegisterSceneClasses();
+	engine::script::RegisterPortalTransferComponents();
+	WorldSettings destinationSettings;
+	destinationSettings.Name = Name("OtherRoom");
+	destinationSettings.TickRate = TICK_RATE;
+	const WorldId destination = fixture.Worlds.Create(destinationSettings);
+	for (const auto world : {fixture.Authority, destination}) {
+		fixture.Worlds.Enter(world, [&](Store &store, engine::ecs::Scheduler &systems) {
+			InstallServices(store);
+			REQUIRE(engine::script::ConfigurePortalTransfers(store, world == destination ? 902 : 901));
+			engine::script::RegisterTeleportAdmission(systems);
+		});
+	}
+	// Real destination geometry makes the initial snapshot exceed one publish's
+	// eight 1 KiB chunks, without widening the link API for a test-only budget.
+	std::vector<Entity> destinationGeometry;
+	fixture.Worlds.Enter(destination, [&](Store &store) {
+		for (int index = 0; index < 128; ++index) {
+			PartDesc part;
+			part.Frame = CFrame(Vector3{static_cast<float>(index % 16), 1, static_cast<float>(index / 16)});
+			part.Simulated = false;
+			const Entity entity = MakePart(store, part);
+			REQUIRE(entity != engine::ecs::NULL_ENTITY);
+			store.SetParent(entity, WorkspaceOf(store));
+			store.SetInstanceName(entity, "ArrivalGeometry" + std::to_string(index));
+			destinationGeometry.push_back(entity);
+		}
+	});
+	PlayLink departing;
+	PlayLink resident;
+	std::string error;
+	REQUIRE(departing.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error, "shared label"));
+	REQUIRE(resident.Start(fixture.Worlds, destination, TICK_RATE, error, "shared label"));
+	fixture.Step(departing, 32);
+	std::optional<CameraContinuation> original;
+	fixture.Worlds.Enter(departing.ReplicaWorld(), [&](Store &store) {
+		const Entity eye = client::AimReplicaViewer(store, {}, Camera{});
+		REQUIRE(eye != engine::ecs::NULL_ENTITY);
+		FollowOwnCharacter(store);
+		auto *controller = store.ResourceMutable<CameraController>();
+		REQUIRE(controller != nullptr);
+		controller->Angles = {0.15f, 0.7f};
+		controller->Distance = 5.0f;
+		SECTION("first person") {
+			controller->Mode = CameraMode::LockFirstPerson;
+			controller->Distance = 0.0f;
+		}
+		SECTION("third person") {
+			controller->Mode = CameraMode::Classic;
+		}
+		REQUIRE(PlaceCamera(store));
+		original = CaptureCameraContinuation(store);
+		REQUIRE(original.has_value());
+	});
+	const SeamTransform through{CFrame(Vector3{10, 4, -8}) * CFrame::Angles(0.35f, 1.1f, 0.4f), {}, 0.7f};
+	engine::script::PortalTransferId receipt;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *rig = store.Get<Character>(CharacterOf(store, departing.Player()));
+		REQUIRE(rig != nullptr);
+		store.GetMutable<Humanoid>(rig->Humanoid)->Health = 23;
+		REQUIRE(
+			engine::script::BeginPortalTransfer(
+				store, departing.Player(), "OtherRoom", through, receipt, error
+			)
+		);
+	});
+	departing.ObservePortalTransfer(fixture.Worlds);
+	REQUIRE(departing.PortalTransfer().has_value());
+	CHECK(departing.PortalTransfer()->Id == receipt);
+	CHECK_FALSE(departing.FindPortalArrival(fixture.Worlds).has_value());
+	PlayLink unavailable;
+	const size_t initialWorlds = fixture.Worlds.Count();
+	CHECK_FALSE(unavailable.StartAfterPortal(fixture.Worlds, departing, TICK_RATE, error));
+	CHECK(fixture.Worlds.Count() == initialWorlds);
+	CHECK(departing.IsRunning());
+	for (int tick = 0; tick < 12 && !departing.FindPortalArrival(fixture.Worlds); ++tick) {
+		fixture.Step(departing);
+		departing.ObservePortalTransfer(fixture.Worlds);
+	}
+	const auto arrival = departing.FindPortalArrival(fixture.Worlds);
+	REQUIRE(arrival.has_value());
+	CHECK(arrival->World == destination);
+	CHECK(arrival->Player != resident.Player());
+	const WorldId oldReplica = departing.ReplicaWorld();
+	const Name oldReplicaName = fixture.Worlds.NameOf(oldReplica);
+	const auto existingWorlds = fixture.Worlds.Worlds();
+	auto successor = departing.AdvancePortalArrival(fixture.Worlds, TICK_RATE, error);
+	REQUIRE(error.empty());
+	REQUIRE(successor == nullptr);
+	CHECK(departing.ReplicaWorld() == oldReplica);
+	CHECK(fixture.Worlds.Find(oldReplicaName) == oldReplica);
+	CHECK(fixture.Worlds.Count() == existingWorlds.size() + 1);
+	WorldId joining;
+	for (const WorldId world : fixture.Worlds.Worlds()) {
+		if (std::find(existingWorlds.begin(), existingWorlds.end(), world) == existingWorlds.end())
+			joining = world;
+	}
+	REQUIRE(joining.IsValid());
+	fixture.Worlds.Enter(joining, [&](const Store &store) {
+		CHECK_FALSE(store.Has<Transform>(destinationGeometry.back()));
+	});
+	if (removeDestination) {
+		fixture.Worlds.Destroy(destination);
+		successor = departing.AdvancePortalArrival(fixture.Worlds, TICK_RATE, error);
+		CHECK(successor == nullptr);
+		CHECK_FALSE(error.empty());
+		CHECK(departing.ReplicaWorld() == oldReplica);
+		CHECK(fixture.Worlds.Find(oldReplicaName) == oldReplica);
+		CHECK_FALSE(fixture.Worlds.NameOf(joining).IsValid());
+		departing.Stop(fixture.Worlds);
+		resident.Stop(fixture.Worlds);
+		return;
+	}
+
+	for (int frame = 0; frame < 128 && !successor; ++frame) {
+		successor = departing.AdvancePortalArrival(fixture.Worlds, TICK_RATE, error);
+		REQUIRE(error.empty());
+		CHECK(departing.IsRunning());
+		CHECK(fixture.Worlds.NameOf(departing.ReplicaWorld()).IsValid());
+		fixture.Worlds.Tick(FRAME_SECONDS);
+	}
+	REQUIRE(successor != nullptr);
+	PlayLink &arriving = *successor;
+	CHECK(arriving.ReplicaWorld() == joining);
+	CHECK(arriving.Report().TotalMessages > engine::replication::AuthoritySettings{}.ChunksPerTick);
+	fixture.Worlds.Enter(joining, [&](const Store &store) {
+		const size_t received =
+			std::count_if(destinationGeometry.begin(), destinationGeometry.end(), [&](Entity entity) {
+				return store.Has<Transform>(entity);
+			});
+		CHECK(received == destinationGeometry.size());
+	});
+	CHECK(arriving.Player() == arrival->Player);
+	CHECK(arriving.ReplicaWorld() != resident.ReplicaWorld());
+	fixture.Worlds.Enter(arriving.ReplicaWorld(), [&](Store &store) {
+		const auto *active = store.Resource<ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *rig = store.Get<Character>(CharacterOf(store, arriving.Player()));
+		REQUIRE(rig != nullptr);
+		const auto *subject = store.Get<CameraSubject>(active->Entity);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == rig->Humanoid);
+		CHECK(subject->Automatic == original->Automatic);
+		const CFrame expected = through.Place(original->Frame);
+		const auto checkFrame = [&] {
+			const CFrame actual = store.Get<Transform>(active->Entity)->Frame;
+			CHECK((actual.Position - expected.Position).Magnitude() < 3 * WIRE_MILLIMETRES);
+			CHECK((actual.LookVector() - expected.LookVector()).Magnitude() < 0.0001f);
+			CHECK((actual.UpVector() - expected.UpVector()).Magnitude() < 0.0001f);
+		};
+		checkFrame();
+		FollowOwnCharacter(store);
+		(void)UpdateCameraControl(store);
+		REQUIRE(PlaceCamera(store));
+		checkFrame();
+		const auto *control = store.Resource<CameraController>();
+		REQUIRE(control != nullptr);
+		CHECK_THAT(
+			control->Distance, Catch::Matchers::WithinAbs(original->Control.Distance * through.Scale, 0.0001f)
+		);
+		CHECK(control->Mode == original->Control.Mode);
+	});
+	departing.Stop(fixture.Worlds);
+	fixture.Step(arriving, 32);
+	fixture.Worlds.Enter(destination, [&](Store &store) {
+		CHECK(PlayerCount(store) == 2);
+		const auto *rig = store.Get<Character>(CharacterOf(store, arriving.Player()));
+		REQUIRE(rig != nullptr);
+		CHECK(store.Get<Humanoid>(rig->Humanoid)->Health == 23);
+	});
+
+	std::optional<CameraContinuation> returningCamera;
+	fixture.Worlds.Enter(arriving.ReplicaWorld(), [&](Store &store) {
+		returningCamera = CaptureCameraContinuation(store);
+		REQUIRE(returningCamera.has_value());
+	});
+	const SeamTransform back{through.Frame.Inverse(), through.Point(through.Origin), 1.0f / through.Scale};
+	REQUIRE(MapCameraContinuation(*returningCamera, back));
+	engine::script::PortalTransferId returnReceipt;
+	fixture.Worlds.Enter(destination, [&](Store &store) {
+		REQUIRE(
+			engine::script::BeginPortalTransfer(store, arriving.Player(), "Scene", back, returnReceipt, error)
+		);
+	});
+	arriving.ObservePortalTransfer(fixture.Worlds);
+	std::unique_ptr<PlayLink> returned;
+	for (int frame = 0; frame < 128 && !returned; ++frame) {
+		fixture.Step(arriving);
+		arriving.ObservePortalTransfer(fixture.Worlds);
+		returned = arriving.AdvancePortalArrival(fixture.Worlds, TICK_RATE, error);
+		REQUIRE(error.empty());
+		CHECK(fixture.Worlds.NameOf(arriving.ReplicaWorld()).IsValid());
+	}
+	REQUIRE(returned != nullptr);
+	CHECK(returned->AuthorityWorld() == fixture.Authority);
+	for (int frame = 0; frame < 16; ++frame) {
+		if (frame != 0) fixture.Step(*returned);
+		fixture.Worlds.Enter(returned->ReplicaWorld(), [&](Store &store) {
+			const auto *active = store.Resource<ActiveCamera>();
+			REQUIRE(active != nullptr);
+			const auto *rig = store.Get<Character>(CharacterOf(store, returned->Player()));
+			REQUIRE(rig != nullptr);
+			const auto *subject = store.Get<CameraSubject>(active->Entity);
+			REQUIRE(subject != nullptr);
+			CHECK(subject->Target == rig->Humanoid);
+			const auto *control = store.Resource<CameraController>();
+			REQUIRE(control != nullptr);
+			CHECK_THAT(control->Distance, Catch::Matchers::WithinAbs(original->Control.Distance, 0.0001f));
+			FollowOwnCharacter(store);
+			(void)UpdateCameraControl(store);
+			REQUIRE(PlaceCamera(store));
+			const auto actual = store.Get<Transform>(active->Entity)->Frame;
+			CHECK((actual.Position - returningCamera->Frame.Position).Magnitude() < 6 * WIRE_MILLIMETRES);
+			CHECK((actual.LookVector() - returningCamera->Frame.LookVector()).Magnitude() < 0.0001f);
+			CHECK((actual.UpVector() - returningCamera->Frame.UpVector()).Magnitude() < 0.0001f);
+		});
+	}
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK(PlayerCount(store) == 1);
+		CHECK(engine::script::PortalTransferPlayer(store, returnReceipt) == returned->Player());
+	});
+	arriving.Stop(fixture.Worlds);
+	returned->Stop(fixture.Worlds);
+	CHECK(resident.IsRunning());
+	resident.Stop(fixture.Worlds);
 }
 
 TEST_CASE("play client panels grow and close independently", "[studio][playlink][viewport]") {
@@ -1651,10 +1928,12 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 	REQUIRE(player != engine::ecs::NULL_ENTITY);
 
 	Entity root = engine::ecs::NULL_ENTITY;
+	Entity humanoid = engine::ecs::NULL_ENTITY;
 	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
 		const auto *rig = store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, player));
 		REQUIRE(rig != nullptr);
 		root = rig->Root;
+		humanoid = rig->Humanoid;
 	});
 
 	// Onto the floor first, so what follows is walking rather than the tail of
@@ -1665,9 +1944,12 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 	// `scene::FollowOwnCharacter` does on a real client and what makes the yaw
 	// below somebody's view rather than a spare number.
 	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		const Entity eye = client::AimReplicaViewer(store, CFrame{}, engine::scene::Camera{});
+		REQUIRE(eye != engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::FollowOwnCharacter(store));
 		auto *camera = store.ResourceMutable<engine::scene::CameraController>();
 		REQUIRE(camera != nullptr);
-		camera->Subject = root;
+		CHECK(store.Get<engine::scene::CameraSubject>(eye)->Target == humanoid);
 		camera->Angles = engine::core::Vector2{0.0f, 0.0f};
 
 		auto *input = store.ResourceMutable<engine::scene::InputState>();
@@ -1699,7 +1981,9 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		const auto *went = store.Get<engine::scene::PortalTransit>(root);
 		REQUIRE(went != nullptr);
 		CHECK(went->Serial >= 1u);
-		CHECK_THAT(went->Turn, Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f));
+		const Vector3 facing = went->Frame.LookVector();
+		CHECK_THAT(facing.X, Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+		CHECK_THAT(facing.Z, Catch::Matchers::WithinAbs(0.0f, 1e-3f));
 	});
 
 	// **The point of the case.** The client never simulated the crossing and
@@ -1719,11 +2003,17 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		REQUIRE(arrived != nullptr);
 		CHECK(arrived->Serial == 1u);
 
-		CHECK(camera->Subject == root);
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *subject = store.Get<engine::scene::CameraSubject>(active->Entity);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == humanoid);
+		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == root);
 		CHECK(camera->SeenTransit == arrived->Serial);
 
-		INFO("client yaw " << camera->Angles.Y);
-		CHECK_THAT(camera->Angles.Y, Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f));
+		const Vector3 heading = engine::scene::CameraHeading(*camera);
+		CHECK_THAT(heading.X, Catch::Matchers::WithinAbs(1.0f, 1e-3f));
+		CHECK_THAT(heading.Z, Catch::Matchers::WithinAbs(0.0f, 1e-3f));
 	});
 }
 
@@ -1807,4 +2097,400 @@ TEST_CASE("stopping a world takes the clients that walked into it too", "[studio
 	editor.Runs.clear();
 	editor.Universe.reset();
 	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE(
+	"Studio portal incarnation survives restore and changes when its world is recreated",
+	"[studio][playlink][portal-incarnation]"
+) {
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	WorldSettings settings;
+	settings.Name = Name("PortalIncarnationLifecycle");
+	const WorldId original = editor.Universe->Create(settings);
+	editor.PrepareWorldIn(original);
+	const auto incarnation = [&](WorldId world) {
+		uint64_t token = 0;
+		editor.Universe->Enter(world, [&](const Store &store) {
+			token = engine::script::PortalTransferIncarnation(store);
+		});
+		return token;
+	};
+	const uint64_t initial = incarnation(original);
+	REQUIRE(initial != 0);
+	editor.PrepareWorldIn(original);
+	CHECK(incarnation(original) == initial);
+	engine::core::ByteWriter snapshot;
+	editor.Universe->Enter(original, [&](const Store &store) { REQUIRE(store.Save(snapshot)); });
+	editor.Universe->Enter(original, [&](Store &store) {
+		engine::core::ByteReader reader(snapshot.Bytes());
+		REQUIRE(store.Load(reader));
+	});
+	editor.PrepareWorldIn(original);
+	CHECK(incarnation(original) == initial);
+	editor.Universe->Destroy(original);
+	const WorldId recreated = editor.Universe->Create(settings);
+	CHECK(recreated.Index == original.Index);
+	editor.PrepareWorldIn(recreated);
+	CHECK(incarnation(recreated) != 0);
+	CHECK(incarnation(recreated) != initial);
+}
+
+namespace {
+	struct PortalWalkImages {
+		engine::render::Renderer Render;
+		engine::render::PortalImageHost Images;
+		std::filesystem::path Directory;
+		bool AuthorityVisual = false;
+		WorldId ViewerWorld;
+		Entity ViewerCamera;
+		size_t Frame = 0;
+		size_t ImportedFrames = 0;
+		size_t GreenFrames = 0;
+		explicit PortalWalkImages(Universe &worlds, bool firstPerson, bool authorityVisual)
+			: Images(worlds, Render), AuthorityVisual(authorityVisual) {
+			REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+			REQUIRE(Render.Initialise(nullptr));
+			REQUIRE(worlds.ConfigurePresentation(700));
+			const std::string prefix = authorityVisual ? "authority-" : "";
+			Directory = engine::core::Paths::Base() / "portal-walk-gpu" /
+						(prefix + (firstPerson ? "first" : "third"));
+			std::filesystem::create_directories(Directory);
+			engine::assets::MeshData mesh;
+			mesh.Vertices = {
+				{{-.5f, -.5f, 0}, {0, 0, 1}, {0, 1}},
+				{{.5f, -.5f, 0}, {0, 0, 1}, {1, 1}},
+				{{.5f, .5f, 0}, {0, 0, 1}, {1, 0}},
+				{{-.5f, .5f, 0}, {0, 0, 1}, {0, 0}}
+			};
+			mesh.Indices = {0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0};
+			mesh.ComputeBounds();
+			REQUIRE(Render.AddMesh(Name("walk-marker"), mesh));
+			engine::assets::TextureData white;
+			white.Width = white.Height = 1;
+			white.Format = engine::assets::TextureFormat::RGBA8;
+			white.Pixels.assign(4, std::byte{255});
+			REQUIRE(Render.AddTexture(Name("walk-white"), white));
+		}
+		~PortalWalkImages() {
+			Images.Clear();
+			Render.Shutdown();
+			SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+		void
+		Draw(Universe &worlds, const PlayLink &link, bool expectDestination = false, bool backward = false) {
+			using namespace engine;
+			for (auto world : worlds.Worlds()) {
+				if (!worlds.IsRemote(world)) worlds.Present(world, 0, 1);
+			}
+			render::View view;
+			auto visual = AuthorityVisual ? link.AuthorityWorld() : link.ReplicaWorld();
+			render::SceneTarget target{65, 65};
+			view.Target = &target;
+			render::DrawList drawn;
+			worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+				const auto *camera = store.Resource<scene::ActiveCamera>();
+				REQUIRE(camera != nullptr);
+				view.CameraFrame = store.Get<scene::Transform>(camera->Entity)->Frame;
+				view.Camera = *store.Get<scene::Camera>(camera->Entity);
+			});
+			visual = client::ResolveCameraPortalWorld(
+				worlds, link.ReplicaWorld(), visual, view.CameraFrame, view.Camera
+			);
+			REQUIRE(visual.IsValid());
+			view.World = visual.Index;
+			view.WorldName = worlds.NameOf(visual);
+			if (AuthorityVisual || visual != link.ReplicaWorld()) {
+				if (ViewerWorld.IsValid() && ViewerWorld != visual) {
+					worlds.Enter(ViewerWorld, [&](Store &store) { store.Destroy(ViewerCamera); });
+					ViewerCamera = ecs::NULL_ENTITY;
+				}
+				ViewerWorld = visual;
+				worlds.Enter(visual, [&](Store &store) {
+					// Match Editor::EnsureViewerCamera: an authority viewer is a
+					// transient editor entity, outside the replica's predicted range.
+					if (!store.Alive(ViewerCamera)) {
+						ViewerCamera = store.CreateInstance(scene::CameraClass(), "PortalWalkViewer");
+						REQUIRE(ViewerCamera != ecs::NULL_ENTITY);
+						store.Set(ViewerCamera, scene::TransientComponent{});
+						store.SetParent(ViewerCamera, scene::WorkspaceOf(store));
+					}
+					store.Set(ViewerCamera, scene::Transform{view.CameraFrame});
+					store.Set(ViewerCamera, view.Camera);
+					store.SetResource(scene::ActiveCamera{ViewerCamera});
+				});
+				worlds.Present(visual, 0, 1);
+			}
+			worlds.Enter(visual, [&](Store &store) {
+				view.Lighting = scene::LightingOf(store);
+				view.OverrideLighting = true;
+				const auto *list = store.Resource<render::DrawList>();
+				REQUIRE(list != nullptr);
+				drawn.Instances = list->Instances;
+				drawn.JointFrames = list->JointFrames;
+			});
+			view.Instances = drawn.Instances;
+			view.JointFrames = drawn.JointFrames;
+			std::vector<render::PortalView> portals;
+			std::vector<render::SurfaceView> surfaces;
+			client::UpdatePortalImages(
+				worlds,
+				Images,
+				visual,
+				view,
+				{.Width = 65, .Height = 65, .MaximumExtent = 64},
+				portals,
+				surfaces,
+				1,
+				std::chrono::steady_clock::now()
+			);
+			view.Portals = portals;
+			view.Surfaces = surfaces;
+			bool imported = false;
+			for (const auto &portal : portals)
+				imported = imported || portal.ImportedImage != 0;
+			ImportedFrames += imported;
+			const auto path = Directory / (std::to_string(Frame++) + ".bmp");
+			std::filesystem::remove(path);
+			Render.RequestSceneCapture(path, 0);
+			render::OverlayImage overlay;
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+			do {
+				(void)Render.Render(std::span(&view, 1), overlay, nullptr, true);
+				if (Render.CapturePending()) SDL_Delay(1);
+			} while (Render.CapturePending() && std::chrono::steady_clock::now() < deadline);
+			REQUIRE_FALSE(Render.CapturePending());
+			INFO(path.string());
+			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> bitmap(
+				SDL_LoadBMP(path.string().c_str()), SDL_DestroySurface
+			);
+			REQUIRE(bitmap != nullptr);
+			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> rgba(
+				SDL_ConvertSurface(bitmap.get(), SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface
+			);
+			REQUIRE(rgba != nullptr);
+			REQUIRE(rgba->w == 65);
+			REQUIRE(rgba->h == 65);
+			int probeX = 20, probeY = 20;
+			if (backward) {
+				// Keep the reverse probe on one authored point of the green panel
+				// as its projected area shrinks away from the retreating camera.
+				const auto marker = view.CameraFrame.PointToObjectSpace(Vector3{-5, 7, -14});
+				REQUIRE(marker.Z < 0);
+				const float extent = -marker.Z * std::tan(view.Camera.FieldOfViewRadians * .5f);
+				probeX = std::clamp(int((.5f + marker.X / (2 * extent)) * 65), 10, 54);
+				probeY = std::clamp(int((.5f - marker.Y / (2 * extent)) * 65), 10, 54);
+			}
+			const auto *pixel =
+				static_cast<const uint8_t *>(rgba->pixels) + probeY * rgba->pitch + probeX * 4;
+			const bool green = pixel[1] > pixel[0] + 30 && pixel[1] > pixel[2] + 30;
+			GreenFrames += green;
+			INFO(
+				"world " << view.WorldName.Text() << " rgb " << int(pixel[0]) << "," << int(pixel[1]) << ","
+						 << int(pixel[2])
+			);
+			INFO("eye z " << view.CameraFrame.Position.Z << " imported " << imported);
+			INFO("transfer stage " << (link.PortalTransfer() ? int(link.PortalTransfer()->Stage) : -1));
+			if (expectDestination) CHECK(green);
+		}
+	};
+}
+
+static void WalkPortalReplicas(bool gpu) {
+	using namespace engine::scene;
+	const auto cameraMode = GENERATE(CameraMode::LockFirstPerson, CameraMode::Classic);
+	const bool authorityVisual = gpu ? GENERATE(false, true) : false;
+	Fixture fixture;
+	std::unique_ptr<PortalWalkImages> images;
+	if (gpu)
+		images = std::make_unique<PortalWalkImages>(
+			fixture.Worlds, cameraMode == CameraMode::LockFirstPerson, authorityVisual
+		);
+	const auto destination = fixture.Worlds.Create({.Name = Name("OtherRoom"), .TickRate = TICK_RATE});
+	for (const auto world : {fixture.Authority, destination}) {
+		fixture.Worlds.Enter(world, [&](Store &store, engine::ecs::Scheduler &systems) {
+			RegisterSceneClasses();
+			client::InstallPresentation(store, systems, 256);
+			InstallServices(store);
+			engine::physics::PreparePhysicsWorld(store);
+			engine::physics::RegisterPhysicsSystems(systems);
+			PrepareGravity(store);
+			RegisterGravitySystem(systems);
+			RegisterOwnershipSystem(systems);
+			REQUIRE(engine::script::ConfigurePortalTransfers(store, world == destination ? 902 : 901));
+			PartDesc floor;
+			floor.Size = {200, 4, 200};
+			floor.Frame = CFrame({0, -2, 0});
+			const auto ground = MakePart(store, floor);
+			store.SetInstanceName(ground, "SpawnLocation");
+			store.SetParent(ground, WorkspaceOf(store));
+			PartDesc pane;
+			pane.Size = {16, 9, .4f};
+			pane.Frame = CFrame({0, 4.5f, -6});
+			const auto near = MakePart(store, pane);
+			store.SetParent(near, WorkspaceOf(store));
+			pane.Frame = CFrame({0, 4.5f, -5.6f}) * CFrame::Angles(0, std::numbers::pi_v<float>, 0);
+			const auto far = MakePart(store, pane);
+			store.SetParent(far, WorkspaceOf(store));
+			store.GetMutable<Collider>(far)->Trigger = true;
+			store.GetMutable<Visual>(far)->Transparency = 1;
+			const auto hole = store.CreateInstance(engine::ecs::Classes::Find(Name("Portal")), "Door");
+			SurfaceCamera surface;
+			surface.Face = NormalId::Back;
+			store.Set(hole, surface);
+			Portal portal;
+			portal.Destination = far;
+			portal.DestinationWorld = Name(world == destination ? "Scene" : "OtherRoom");
+			store.Set(hole, portal);
+			store.SetParent(hole, near);
+			if (gpu) {
+				PartDesc marker;
+				marker.Mesh = Name("walk-marker");
+				marker.Frame = CFrame({0, 4, -14});
+				// Leave visible marker area beside the foreground avatar at the
+				// farthest reverse-walk camera position.
+				marker.Size = {12, 8, .01f};
+				const auto panel = MakePart(store, marker);
+				store.SetParent(panel, WorkspaceOf(store));
+				store.GetMutable<Collider>(panel)->Trigger = true;
+				store.GetMutable<Visual>(panel)->Tint =
+					world == destination ? engine::core::Color3{0, 1, 0} : engine::core::Color3{1, 0, 0};
+				store.GetMutable<SurfaceAppearance>(panel)->ColourMap = Name("walk-white");
+				store.SetResource(Sun{{0, 0, 1}, {.5f, .5f, .5f}});
+			}
+		});
+	}
+	std::string error;
+	auto link = std::make_unique<PlayLink>();
+	REQUIRE(link->Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	fixture.Step(*link, 30);
+	fixture.Worlds.Enter(link->ReplicaWorld(), [&](Store &store) {
+		REQUIRE(client::AimReplicaViewer(store, {}, Camera{}) != engine::ecs::NULL_ENTITY);
+		REQUIRE(FollowOwnCharacter(store));
+		auto *control = store.ResourceMutable<CameraController>();
+		REQUIRE(control != nullptr);
+		control->Angles = {0, 0};
+		control->Mode = cameraMode;
+		control->Distance = cameraMode == CameraMode::LockFirstPerson ? 0 : 5;
+		REQUIRE(PlaceCamera(store));
+	});
+	Entity foreignWall;
+	fixture.Worlds.Enter(destination, [&](Store &store) {
+		PartDesc wall;
+		wall.Frame = CFrame({0, 4, -6.25f});
+		wall.Size = {16, 8, .2f};
+		foreignWall = MakePart(store, wall);
+		store.SetParent(foreignWall, WorkspaceOf(store));
+	});
+	for (int frame = 0; frame < 90; ++frame) {
+		fixture.Worlds.Enter(link->ReplicaWorld(), [](Store &store) {
+			auto *input = store.ResourceMutable<InputState>();
+			input->Focused = true;
+			input->Down.Set(KeyCode::W, true);
+		});
+		fixture.Step(*link);
+		fixture.Worlds.Present(link->ReplicaWorld(), FRAME_SECONDS, 1);
+		link->ObservePortalTransfer(fixture.Worlds);
+		if (images) images->Draw(fixture.Worlds, *link);
+		CHECK_FALSE(link->FindPortalArrival(fixture.Worlds).has_value());
+	}
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		const auto *rig = store.Get<Character>(CharacterOf(store, link->Player()));
+		REQUIRE(rig != nullptr);
+		const float z = store.Get<Transform>(rig->Root)->Frame.Position.Z;
+		CHECK(z < -5);
+		CHECK(z >= -5.66f);
+	});
+	fixture.Worlds.Enter(destination, [&](Store &store) { store.Destroy(foreignWall); });
+	std::optional<Vector3> previousEye;
+	for (int leg = 0; leg < 2; ++leg) {
+		const auto wanted = leg == 0 ? destination : fixture.Authority;
+		bool crossed = false;
+		int afterCrossing = 0;
+		float lastZ = 0;
+		for (int frame = 0; frame < 240 && afterCrossing < 24; ++frame) {
+			fixture.Worlds.Enter(link->ReplicaWorld(), [&](Store &store) {
+				auto *input = store.ResourceMutable<InputState>();
+				REQUIRE(input != nullptr);
+				input->Focused = true;
+				input->Down.Set(KeyCode::W, leg == 0);
+				input->Down.Set(KeyCode::S, leg == 1);
+			});
+			fixture.Step(*link);
+			fixture.Worlds.Present(link->ReplicaWorld(), FRAME_SECONDS, 1);
+			link->ObservePortalTransfer(fixture.Worlds);
+			auto next = link->AdvancePortalArrival(fixture.Worlds, TICK_RATE, error);
+			REQUIRE(error.empty());
+			if (next) {
+				link->Stop(fixture.Worlds);
+				link = std::move(next);
+				CHECK(link->AuthorityWorld() == wanted);
+				crossed = true;
+			}
+			fixture.Worlds.Enter(link->ReplicaWorld(), [&](Store &store) {
+				const auto *active = store.Resource<ActiveCamera>();
+				REQUIRE(active != nullptr);
+				const auto eye = store.Get<Transform>(active->Entity)->Frame.Position;
+				INFO("leg " << leg << " frame " << frame);
+				INFO(
+					"replica " << fixture.Worlds.NameOf(link->ReplicaWorld()).Text() << " camera "
+							   << active->Entity.Id << " subject "
+							   << CameraSubjectRoot(store, active->Entity).Id << " stage "
+							   << (link->PortalTransfer() ? int(link->PortalTransfer()->Stage) : -1)
+				);
+				const auto *control = store.Resource<CameraController>();
+				INFO(
+					"eye z " << eye.Z << " previous " << (previousEye ? previousEye->Z : 0) << " occluded "
+							 << control->OccludedDistance << " zoom " << control->Distance
+				);
+				if (previousEye) CHECK((eye - *previousEye).Magnitude() < 1.0f);
+				previousEye = eye;
+			});
+			// Both legs keep looking toward the green room. Walking backward
+			// must preserve that view as the eye returns through the opening.
+			if (images) images->Draw(fixture.Worlds, *link, true, leg == 1);
+			if (!crossed) continue;
+			++afterCrossing;
+			fixture.Worlds.Enter(link->ReplicaWorld(), [&](Store &store) {
+				const auto *active = store.Resource<ActiveCamera>();
+				REQUIRE(active != nullptr);
+				const auto *rig = store.Get<Character>(CharacterOf(store, link->Player()));
+				REQUIRE(rig != nullptr);
+				REQUIRE(store.Get<CameraSubject>(active->Entity) != nullptr);
+				CHECK(store.Get<CameraSubject>(active->Entity)->Target == rig->Humanoid);
+				CHECK(store.Get<Transform>(active->Entity)->Frame.LookVector().Dot({0, 0, -1}) > .999f);
+			});
+			fixture.Worlds.Enter(wanted, [&](Store &store) {
+				const auto *rig = store.Get<Character>(CharacterOf(store, link->Player()));
+				REQUIRE(rig != nullptr);
+				lastZ = store.Get<Transform>(rig->Root)->Frame.Position.Z;
+				CHECK(PlayerCount(store) == 1);
+			});
+		}
+		Vector3 stoppedAt;
+		fixture.Worlds.Enter(link->AuthorityWorld(), [&](Store &store) {
+			if (const auto *rig = store.Get<Character>(CharacterOf(store, link->Player())))
+				stoppedAt = store.Get<Transform>(rig->Root)->Frame.Position;
+		});
+		INFO("stopped at " << stoppedAt.X << "," << stoppedAt.Y << "," << stoppedAt.Z);
+		REQUIRE(crossed);
+		CHECK(afterCrossing == 24);
+		INFO(lastZ);
+		CHECK((leg == 0 ? -5.8f - lastZ : lastZ + 5.8f) > 1);
+	}
+	if (images) {
+		CHECK(images->ImportedFrames > 20);
+		CHECK(images->GreenFrames > 10);
+	}
+	link->Stop(fixture.Worlds);
+}
+
+TEST_CASE("player input walks across world replicas and back", "[studio][playlink][portal-walk]") {
+	WalkPortalReplicas(false);
+}
+TEST_CASE(
+	"portal images follow the walking player through replica handoff", "[studio][gpu][portal-walk-images][.]"
+) {
+	WalkPortalReplicas(true);
 }

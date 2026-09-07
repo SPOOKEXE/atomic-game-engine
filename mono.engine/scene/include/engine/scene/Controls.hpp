@@ -70,17 +70,20 @@ namespace engine::scene {
 	//
 	// @since v0.10
 	struct CameraController {
-		// What the camera orbits or sits in. A null entity leaves the camera
-		// alone, which is what an editor's free-fly camera is.
-		ecs::Entity Subject;
+		// Resolved root whose crossing serial this viewer last observed.
+		// The authored target belongs to the active camera's CameraSubject.
+		ecs::Entity TransitSubject;
 
-		// Where the camera is looking, in radians. X is pitch, Y is yaw.
-		//
-		// **Kept here rather than derived from the camera's `CFrame`.** A
-		// `CFrame` is a quaternion and reading pitch back out of one is
-		// ambiguous at the poles - so the authoritative angles are these, and the
-		// frame is what they produce. That is also what makes the pitch clamp
-		// below possible at all.
+		// Portal-carried reference axes. Position is always zero; the local
+		// angles below own the user's input, so a rolled basis never needs Euler extraction.
+		core::CFrame Basis;
+
+		// Cumulative subject map last observed, used to consume several crossings
+		// between presentations without losing the intermediate rotations or scale.
+		core::CFrame TransitFrame;
+		float TransitScale = 1.0f;
+
+		// Local pitch (X) and yaw (Y), in radians, relative to Basis.
 		core::Vector2 Angles;
 
 		// How far back the camera sits, in metres.
@@ -92,6 +95,10 @@ namespace engine::scene {
 		// the same, and the alternative - a separate key for first person - makes
 		// the transition a jump rather than the continuous thing a player expects.
 		float MinimumDistance = 0.0f;
+
+		// Distance above MinimumDistance that enters first person. This length
+		// travels with portal scale so a shrink does not change the camera mode.
+		float FirstPersonTolerance = 0.01f;
 
 		// The furthest it may go.
 		float MaximumDistance = 40.0f;
@@ -144,6 +151,14 @@ namespace engine::scene {
 		// @since v0.18
 		float OccludedDistance = -1.0f;
 
+		// Pointer work collected between presentations. Hosts that call
+		// LatchCameraInput use this consumer-owned latch instead of the latest
+		// raw input sample. Script input queries still see that raw sample.
+		core::Vector2 PendingTurn;
+		float PendingWheel = 0.0f;
+		bool BufferedPointer = false;
+		uint8_t PointerReserved[3] = {};
+
 		// Which of the subject's portal crossings this camera has already
 		// turned for.
 		//
@@ -170,13 +185,7 @@ namespace engine::scene {
 		// angles.
 		bool Enabled = true;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
-		//
-		// **Six rather than two**, because `Subject` is eight-byte aligned and
-		// so the whole struct is: two left four bytes the compiler filled and
-		// nobody initialised, and those four went into every save and every
-		// delta. `engine.ecs.invariants` is what says so now, and
-		// `engine.scene.registration` is what asks it about this module.
+		// Named tail padding keeps the eight-byte-aligned snapshot representation deterministic.
 		uint8_t Reserved[6] = {};
 	};
 
@@ -336,6 +345,11 @@ namespace engine::scene {
 	// @since v0.15
 	bool IsDead(const Humanoid &humanoid);
 
+	// Sets a discrete camera shot without sweeping or interpolating from its old pose.
+	// Leaves subject and follow mode intact. Ordinary Transform writes remain motion.
+	// Returns false for an incomplete camera or a non-finite/non-unit pose, without edits.
+	bool CutCamera(ecs::Store &store, ecs::Entity camera, const core::CFrame &frame);
+
 	// Turns this frame's input into camera angles and a zoom distance.
 	//
 	// **Reads `InputState` and writes `CameraController`, and touches no
@@ -355,38 +369,18 @@ namespace engine::scene {
 	// @return `true` when the angles or the distance moved.
 	bool UpdateCameraControl(ecs::Store &store);
 
-	// Turns the camera by however far a portal turned the body it follows.
-	//
-	// **The client end of `scene::PortalTransit`, and it is a separate function
-	// because it is a separate machine.** `CrossPortals` maps a crossing body
-	// and its velocity on whichever host simulates it; the yaw a player steers
-	// by lives in `CameraController::Angles`, which is a resource on whichever
-	// host is *looking*. In a studio Play or against a real server those are two
-	// worlds. So the crossing is recorded on the body, replication carries it
-	// across with everything else the body owns, and this reads it where the eye
-	// actually is.
-	//
-	// What it fixes is unmistakable when it is missing: you walk forward through
-	// a hole whose pair turns a corner, and on the far side the view is still
-	// pointing the way you came in - ninety degrees off your own body, facing a
-	// wall, with W walking you sideways because `ReadMoveIntent` is relative to
-	// this yaw.
-	//
-	// **Once per crossing per viewer.** `CameraController::SeenTransit` is the
-	// counter this has already acted on, so a client that misses the frame a
-	// delta lands still turns on the next one, and one that runs twice in a
-	// frame does not turn twice.
-	//
-	// Called by `UpdateCameraControl` before anything else it does, so every
-	// host that installs the camera pass gets it without a second entry in the
-	// schedule.
-	//
-	// @param store The world.
-	// @return `true` when the yaw was turned.
-	// @since v0.15
+	// Call once after each input write when input and presentation have separate
+	// clocks. UpdateCameraControl consumes the accumulated pointer work once.
+	void LatchCameraInput(ecs::Store &store);
+
+	// Consumes the subject's cumulative portal map relative to this viewer's last
+	// baseline. Full rotation and scale survive skipped presentations, and the
+	// baseline advances only after a valid camera mapping succeeds.
+	// Called before input, including when camera input is disabled or Scriptable.
+	// @return True when a new crossing was applied.
 	bool FollowPortalTransit(ecs::Store &store);
 
-	// Places the live camera from the controller's angles.
+	// Places the live camera from its carried basis and local input angles.
 	//
 	// **Separate from `UpdateCameraControl` for that function's reason**, and with
 	// one more: a cutscene may want the placement without the input, and an editor
@@ -397,7 +391,20 @@ namespace engine::scene {
 	//
 	// @param store The world.
 	// @return `true` when a camera was placed.
+	// World direction for movement and body facing, excluding local pitch.
+	core::Vector3 CameraHeading(const CameraController &controller);
+
+	// Desired pose before portal-arm mapping and collision avoidance. The explicit
+	// distance lets the occlusion query test the requested arm without cached shortening.
+	core::CFrame
+	CameraOrbit(const CameraController &controller, const core::Vector3 &subjectPosition, float distance);
+
 	bool PlaceCamera(ecs::Store &store);
+
+	// Resolves a camera's target to the part it follows. Humanoids use RootPart;
+	// a subject carrying its own Transform remains a supported simple rig.
+	// Missing or destroyed targets return NULL_ENTITY and leave the camera free.
+	ecs::Entity CameraSubjectRoot(const ecs::Store &store, ecs::Entity camera);
 
 	// What the player is asking their character to do this frame.
 	//

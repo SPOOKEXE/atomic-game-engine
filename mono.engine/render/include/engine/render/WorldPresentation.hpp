@@ -29,7 +29,19 @@ namespace engine::ecs {
 	class Store;
 }
 
+namespace engine::scene {
+	struct SurfaceSlot;
+}
+
 namespace engine::render {
+
+	// Selects the active first-person Humanoid body, including a held camera's
+	// original rig. Clears both selections for other camera modes or subjects.
+	void SelectFirstPersonBody(const ecs::Store &store, View &view);
+
+	// Resolves EyePlayer against this world's current player-character links.
+	// Missing or ambiguous identities clear EyeRig; held camera copies are omitted.
+	void ResolveEyeBody(ecs::Store &store, View &view);
 
 	// What one world publishes for a presentation host to draw.
 	//
@@ -230,4 +242,25 @@ namespace engine::render {
 	//
 	// Idempotent. Call before any store first asks for DrawList's component id.
 	void RegisterPresentationComponents();
+	// Copies shared seam geometry and traversal mappings for local portal captures.
+	size_t CollectPortalViews(
+		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots = {}
+	);
+
+	// Applies request-local slots to copied rows from this world only. Rows from
+	// foreign presentation messages retain their independently owned indices.
+	void ApplySurfaceSlots(
+		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+	);
+
+	// Copies surface views in entity order. An explicit viewer derives mirror
+	// frames through scene::ReflectCamera without changing the active camera.
+	size_t CollectSurfaceViews(
+		ecs::Store &store,
+		std::vector<SurfaceView> &views,
+		std::span<const PortalView> portals = {},
+		const View *viewer = nullptr,
+		std::span<const scene::SurfaceSlot> slots = {}
+	);
+
 }

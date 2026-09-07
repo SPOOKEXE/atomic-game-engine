@@ -101,7 +101,10 @@ TEST_CASE("a world can hold a shader script and find it by name", "[scene][shade
 	const ShaderText held = ShaderTextOf(store, Name("Toon"));
 	REQUIRE(held.Found);
 	REQUIRE(held.Code == "void main() {}");
+	CHECK(held.StoreIdentity == store.Identity());
+	CHECK(held.Source == toon);
 	REQUIRE_FALSE(ShaderTextOf(store, Name("Unlit")).Found);
+	CHECK(ShaderTextOf(store, Name("Unlit")).Source == NULL_ENTITY);
 }
 
 TEST_CASE("a lens shader is selected independently from a material shader", "[scene][shaders]") {
@@ -113,6 +116,8 @@ TEST_CASE("a lens shader is selected independently from a material shader", "[sc
 
 	REQUIRE(LensShaderNamed(store, Name("Shared")) == lens);
 	REQUIRE(LensShaderTextOf(store, Name("Shared")).Code == "lens");
+	CHECK(LensShaderTextOf(store, Name("Shared")).Source == lens);
+	CHECK(LensShaderTextOf(store, Name("Shared")).StoreIdentity == store.Identity());
 	CHECK(ShaderScriptNamed(store, Name("Shared")) == material);
 }
 

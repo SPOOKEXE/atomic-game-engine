@@ -74,7 +74,6 @@ TEST_CASE("world view and frame scopes form execution boundaries", "[graph][sche
 
 	Node frame = NodeOf("interface", "interface", NodeScope::Frame);
 	frame.Writes = {frameOutput};
-	graph.AddNode(frame);
 
 	Node view = NodeOf("opaque", "opaque", NodeScope::View);
 	view.Writes = {viewOutput};
@@ -83,6 +82,7 @@ TEST_CASE("world view and frame scopes form execution boundaries", "[graph][sche
 	Node world = NodeOf("shadow", "shadow", NodeScope::World);
 	world.Writes = {worldOutput};
 	graph.AddNode(world);
+	graph.AddNode(frame);
 
 	ExecutionSchedule schedule;
 	Name offender;

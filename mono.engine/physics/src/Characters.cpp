@@ -220,34 +220,17 @@ namespace engine::physics {
 			return clear();
 		}
 
-		const scene::Transform *subject = store.Get<scene::Transform>(controller->Subject);
+		const ecs::Entity subjectRoot = scene::CameraSubjectRoot(store, active->Entity);
+		const scene::Transform *subject = store.Get<scene::Transform>(subjectRoot);
 		if (subject == nullptr) {
 			return clear();
 		}
 
-		// The same arithmetic `PlaceCamera` uses to find where the eye wants
-		// to be, repeated here rather than shared - that function is `scene`
-		// and takes no query, and duplicating four lines of trigonometry is
-		// cheaper than a callback for what the query decides. The ray query
-		// follows one portal seam when the camera arm crosses its pane, so a
-		// trigger collider that keeps crossings observable does not become an
-		// invisible camera wall. The ordinary case pays only the failed seam
-		// lookup.
+		// Share the unoccluded orbit with placement, including portal-carried roll.
 		const core::Vector3 head =
-			subject->Frame.Position + core::Vector3{0.0f, controller->HeadHeight, 0.0f};
-		const float pitch = controller->Angles.X;
-		const float yaw = controller->Angles.Y;
-		const core::Vector3 forward{
-			-std::sin(yaw) * std::cos(pitch),
-			std::sin(pitch),
-			-std::cos(yaw) * std::cos(pitch),
-		};
-
-		core::Vector3 desired = head - forward * controller->Distance;
-		if (controller->Mode == scene::CameraMode::ShiftLock) {
-			const core::Vector3 side{std::cos(yaw), 0.0f, -std::sin(yaw)};
-			desired = desired + side * controller->ShoulderOffset;
-		}
+			subject->Frame.Position + controller->Basis.UpVector() * controller->HeadHeight;
+		const core::Vector3 desired =
+			scene::CameraOrbit(*controller, subject->Frame.Position, controller->Distance).Position;
 
 		const core::Vector3 toEye = desired - head;
 		const float wanted = toEye.Magnitude();
@@ -267,8 +250,10 @@ namespace engine::physics {
 		std::optional<ColliderHit> blocking;
 		for (int pass = 0; pass < POPPERCAM_IGNORE_LIMIT && travelled < wanted; pass++) {
 			const core::Ray ray{head + direction * travelled, direction};
+			// Open portal panes and non-colliding stand-ins cannot shorten the camera arm.
+			// Filter in the query so a solid wall behind those volumes remains visible.
 			const auto hit = RaycastThroughPortals(
-				store, ray, wanted - travelled, spatial::LayerMask::All(), controller->Subject
+				store, ray, wanted - travelled, spatial::LayerMask::All(), subjectRoot, false
 			);
 			if (!hit.has_value()) {
 				break;

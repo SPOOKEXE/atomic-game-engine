@@ -34,7 +34,9 @@
 #include <engine/world/Bus.hpp>
 #include <engine/world/Enums.hpp>
 #include <engine/world/Postbox.hpp>
+#include <engine/world/PresentationBus.hpp>
 #include <engine/world/SharedStores.hpp>
+#include <engine/world/TickExchange.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
@@ -695,7 +697,7 @@ namespace engine::world {
 		//
 		// @param world    The world to deliver to.
 		// @param delivery What arrived for it.
-		// @return `false` for an unknown world.
+		// @return `false` for an unknown world or the staged message/byte bound.
 		bool Deliver(core::Name world, const Delivery &delivery);
 
 		// Hands the driver what a host's worlds posted.
@@ -730,7 +732,7 @@ namespace engine::world {
 		std::vector<RemoteDelivery> TakeOutbound();
 
 		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 5;
+		static constexpr uint32_t SNAPSHOT_VERSION = 6;
 
 		// Reports whether the caller is the driver thread.
 		//
@@ -738,7 +740,61 @@ namespace engine::world {
 		// @threadsafe
 		bool IsOnDriverThread() const;
 
+		// Host-control presentation API. Call outside tick batches on the driver
+		// thread. Session numbers are assigned by host control, never by a world.
+		bool ConfigurePresentation(uint64_t session, const PresentationLimits &limits = {});
+		PresentationOpen OpenPresentation(WorldId world, core::Name channel);
+		PresentationAddress LookupPresentation(WorldId world, std::string_view channel) const;
+		PresentationDirectory LocalPresentationDirectory() const;
+		PresentationDirectory PresentationRoutesFor(core::Name consumer) const;
+		PresentationStatus AcceptPresentationRoutesFromDriver(const PresentationDirectory &directory);
+		void RetirePresentationHost(core::Name host);
+		PresentationStatus
+		ApplyPresentationDirectory(core::Name host, const PresentationDirectory &directory);
+		PresentationStatus RegisterRemotePresentation(core::Name host, const PresentationAddress &address);
+		PresentationStatus ClosePresentation(const PresentationAddress &address);
+		PresentationStatus SendPresentation(
+			WorldId source,
+			const PresentationAddress &from,
+			const PresentationAddress &to,
+			uint64_t correlation,
+			std::span<const std::byte> payload
+		);
+		PresentationStatus IngestPresentation(core::Name host, const PresentationMessage &message);
+		// For a host receiving verified traffic on its trusted driver link.
+		PresentationStatus AcceptPresentationFromDriver(const PresentationMessage &message);
+		std::vector<PresentationMessage> TakePresentation(const PresentationAddress &address);
+		std::vector<PresentationOutbound> TakePresentationOutbound();
+		PresentationQueueSize PresentationQueueUsage() const;
+		PresentationTraffic PresentationTrafficCounts() const;
+
+		// Host-owned phase handshake. Begin charges fixed frame time once and returns
+		// the number of local catch-up rounds. Every round joins Input, collects
+		// requests, serves destinations, applies a complete reply set, then resumes
+		// Simulation. Empty local rounds are legal when another host owes more.
+		bool HasTickExchangeEndpoints() const;
+		int BeginTickExchangeFrame(float frameSeconds);
+		bool BeginTickExchangeRound();
+		bool CollectTickExchangeRequests(std::vector<TickExchangeRequest> &requests);
+		bool ServeTickExchangeRequests(
+			std::span<const TickExchangeRequest> requests, std::vector<TickExchangeReply> &replies
+		);
+		bool ApplyTickExchangeReplies(std::span<const TickExchangeReply> replies);
+		bool FinishTickExchangeRound();
+		bool EndTickExchangeFrame();
+		void CancelTickExchangeFrame();
+		bool TickExchangeFrameOpen() const;
+
 	  private:
+		void DispatchExchangeWorlds(const std::function<void(size_t)> &body);
+		void CompleteExchangeFrame();
+		enum class ExchangePhase : uint8_t { Closed, BetweenRounds, Input, Collected, Applied };
+		ExchangePhase ExchangeStage = ExchangePhase::Closed;
+		unsigned ExchangeRound = 0;
+		unsigned ExchangeRounds = 0;
+		uint64_t ExchangeStarted = 0;
+		std::vector<uint8_t> ExchangeParticipants;
+		std::vector<TickExchangeRequest> ExchangeRequests;
 		// A structural change waiting for the barrier.
 		struct Control {
 			enum class Kind : uint8_t { Create, Destroy, SetState, Recover };
@@ -760,6 +816,8 @@ namespace engine::world {
 		const World *Reach(WorldId id) const;
 		void RequireDriverThread(const char *what) const;
 
+		WorldId FindPresentationWorld(std::string_view name) const;
+		PresentationBus PresentationMessages;
 		UniverseSettings Settings_;
 		UniverseStatistics Stats;
 

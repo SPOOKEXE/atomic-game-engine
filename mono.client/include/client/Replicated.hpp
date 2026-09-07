@@ -42,15 +42,16 @@
 // ## What a script running here may write, and what refuses the rest
 //
 // **The mechanism is `ecs::Store`'s and this file adds none.** A replica's rows
-// belong to the authority, and two calls in the store say so - every property
-// write is refused by `Store::SetProperty`'s adopt-only check, and every attempt
+// belong to the authority, and two calls in the store say so - property writes
+// to authoritative instances are refused by `Store::SetProperty`, and every attempt
 // to mint an authoritative entity is refused by the same flag through
-// `Store::Create`, `CreateInstance` and `CloneInstance`. Both refusals predate
-// this VM by twelve versions; opening one changed who can reach them, not what
-// they allow.
+// `Store::Create`, `CreateInstance` and `CloneInstance`. A property may explicitly
+// opt into runtime writes on live predicted instances through `PredictedWritable`.
+// `CameraSubject` uses this for the client's own camera; its target may be an
+// authoritative Humanoid, but assigning the selection does not modify that target.
 //
-// So a `LocalScript` here **reads, connects and calls**. It cannot set a
-// property on anything, replicated or not, and it cannot create an instance.
+// So a `LocalScript` here **reads, connects and calls**. It cannot set an
+// authoritative property or create an authoritative instance.
 // What it can write is what is not a row the authority owns: an attribute, a
 // world resource, its own upvalues - and the client-only surfaces the engine
 // hands it, `UserInputService` and the interface it is shown.
@@ -74,6 +75,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Characters.hpp>
@@ -81,6 +83,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/script/Runtime.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -89,8 +92,8 @@ namespace client {
 
 	// Client-local state for the one character a connection may predict.
 	//
-	// The authority overwrites this from each applied snapshot, then this state
-	// replays only the input submissions the connector has not acknowledged.
+	// Ordinary replicas replay unconfirmed input from each received authority pose.
+	// A retained portal rig instead uses completed destination motion and its history.
 	// It is a render overlay, not a second entity or a replica physics pass.
 	struct LocalPlayerPrediction {
 		engine::ecs::Entity Player;
@@ -100,8 +103,95 @@ namespace client {
 		engine::core::Vector3 Angular;
 		engine::scene::Humanoid Humanoid;
 		uint64_t AuthorityTick = 0;
+		// Keeps fractional input time continuous when adoption changes local clocks.
+		double PresentationOffsetSeconds = 0;
+		// Shared body/camera correction, never replayed or written to authority rows.
+		engine::core::Vector3 PositionCorrection;
+		float CorrectionSeconds = 0;
 		bool Active = false;
 	};
+
+	struct PortalPredictionInput {
+		uint64_t Tick = 0;
+		engine::game::MoveInput Move;
+		float Delta = 0;
+	};
+
+	// Maps acknowledged input duration onto completed destination time.
+	struct PredictionReplayClock {
+		double SimulationSeconds = 0;
+		double InputLeadSeconds = 0;
+		uint64_t InputTick = 0;
+	};
+
+	// Only submitted moves belong here; source consumption does not retire them.
+	struct PortalInputHistory {
+		static constexpr size_t CAPACITY = 1024;
+		engine::game::PortalResume Claim;
+		engine::scene::SeamTransform Through;
+		std::array<PortalPredictionInput, CAPACITY> Inputs{};
+		size_t Begin = 0;
+		size_t Count = 0;
+		uint64_t CoveredThrough = 0;
+		uint64_t LastRecordedTick = 0;
+		uint64_t AppliedDestinationTick = 0;
+		uint64_t AppliedInputTick = 0;
+		uint64_t DiscardedInputs = 0;
+		PredictionReplayClock Clock;
+	};
+
+	bool BeginPortalInputHistory(
+		engine::ecs::Store &store,
+		const engine::game::PortalResume &claim,
+		const engine::scene::SeamTransform &through,
+		uint64_t submittedTick
+	);
+	bool RecordPortalPredictionInput(
+		engine::ecs::Store &store, uint64_t tick, const engine::game::MoveInput &move, float delta
+	);
+	bool ReconcilePortalInputHistory(
+		engine::ecs::Store &store,
+		const engine::game::PortalResume &claim,
+		const engine::script::PortalTransferMotion &motion
+	);
+
+	// The same corrected fractional pose used to draw the body and follow its camera.
+	std::optional<engine::core::CFrame> PresentedPlayerPrediction(const engine::ecs::Store &store);
+
+	// Presentation values only. Destination entity handles are resolved on adoption.
+	// Motion's ticks identify the baseline and replay frontier, not a new authority sample.
+	struct PortalPredictionContinuation {
+		engine::script::PortalTransferMotion Motion;
+		engine::core::Vector3 MoveDirection;
+		uint64_t CoveredThrough = 0;
+		double PresentationSeconds = 0;
+		engine::core::Vector3 PositionCorrection;
+		float CorrectionSeconds = 0;
+		PredictionReplayClock Clock;
+		std::vector<engine::replication::Input> Inputs;
+	};
+	struct NativePlayerPrediction {
+		uint64_t Incarnation = 0;
+		uint64_t AppliedPoseTick = 0;
+		uint64_t AppliedInputTick = 0;
+		std::optional<engine::game::PlayerMotion> Sample;
+		PredictionReplayClock Clock;
+	};
+	bool AcceptNativePlayerMotion(
+		engine::ecs::Store &store, const engine::game::PlayerMotion &sample, uint64_t submittedTick
+	);
+	std::optional<uint64_t> ReconcileNativePlayerPrediction(
+		engine::ecs::Store &store, std::span<const engine::replication::Input> inputs, uint64_t coveredThrough
+	);
+	std::optional<PortalPredictionContinuation> CapturePortalPrediction(
+		const engine::ecs::Store &store, const engine::game::PortalResume &claim, float alpha = 0
+	);
+	bool AdoptPortalPrediction(
+		engine::ecs::Store &store,
+		engine::ecs::Entity player,
+		const PortalPredictionContinuation &continuation,
+		float alpha = 0
+	);
 
 	// Installs the presentation half of a replicated world, and opens its VM.
 	//
@@ -186,10 +276,10 @@ namespace client {
 	// right to merge them - but the reserved high range is a client's own, and a
 	// camera nobody else can see is precisely what it is for.
 	//
-	// Created on the first call and reused after, so this is one component write
-	// per frame on a steady view. Destroying the world destroys it; there is
-	// nothing else to clean up, because nothing on the authority knows it
-	// exists.
+	// Created on the first call and reused after. The supplied pose and lens are
+	// fallback values while automatic follow waits for a subject; explicit
+	// selections and scripted cameras retain their own values. Unchanged fallback
+	// values cause no writes. Destroying the world destroys the local camera.
 	//
 	// @param store The replicated world.
 	// @param frame Where this client's camera is, in world space.

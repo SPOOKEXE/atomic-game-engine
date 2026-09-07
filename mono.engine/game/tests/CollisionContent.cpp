@@ -305,6 +305,7 @@ TEST_CASE("one unusable entry in a store costs only that entry", "[game][collisi
 }
 
 TEST_CASE("merging into a world keeps what the world already had", "[game][collision]") {
+	engine::scene::RegisterSceneComponents();
 	// **Read-modify-write, because `SetResource` replaces.** A world that lost
 	// its terrain the moment a crate streamed in would read as the terrain
 	// having no collision at all.
@@ -325,6 +326,7 @@ TEST_CASE("merging into a world keeps what the world already had", "[game][colli
 }
 
 TEST_CASE("a world gets the built-ins before any content exists", "[game][collision]") {
+	engine::scene::RegisterSceneComponents();
 	// The one call every host makes, whatever else it has.
 	engine::ecs::Store store("collision.builtins");
 	RecordBuiltinCollisionShapes(store);

@@ -47,6 +47,11 @@ namespace engine::world {
 
 		// How hosts are spawned and watched.
 		SupervisorSettings Hosts;
+
+		// All supervised hosts must run the phase-controlled loop when enabled.
+		// Waiting happens only on the driver thread, with a monotonic deadline.
+		bool CoordinateHostTicks = false;
+		double TickExchangeSeconds = 1.0;
 	};
 
 	// What one driver barrier did.
@@ -76,6 +81,18 @@ namespace engine::world {
 
 		// Hosts restarted by this barrier.
 		size_t Restarted = 0;
+		bool TickExchangeFailed = false;
+	};
+
+	// One explicit presentation pump. Counts queue admission and transport refusal,
+	// not successful GPU work or application-level acknowledgement.
+	struct PresentationPumpResult {
+		uint64_t Accepted = 0;
+		uint64_t AcceptedPayloadBytes = 0;
+		uint64_t Refused = 0;
+		uint64_t Sent = 0;
+		uint64_t SentPayloadBytes = 0;
+		uint64_t Dropped = 0;
 	};
 
 	// A universe, its hosts, and one barrier over both.
@@ -150,6 +167,11 @@ namespace engine::world {
 		//                     testable in a microsecond.
 		void Tick(float frameSeconds, double now);
 
+		// Services presentation links without ticking worlds or touching their
+		// simulation mailboxes. Authenticated directories update endpoint discovery;
+		// disconnected or replaced links retire their presentation sessions.
+		PresentationPumpResult PumpPresentation(double now);
+
 		// Runs a world's presentation phase, if this process holds it.
 		//
 		// A remote world draws in its own host, or does not draw at all.
@@ -171,10 +193,14 @@ namespace engine::world {
 		}
 
 	  private:
+		bool TickHosts(float frameSeconds, double now);
 		DriverSettings Settings_;
 		Universe Universe_;
+		TickExchangeHost LocalExchange;
 		Supervisor Supervisor_;
 		DriverStatistics Stats;
+		uint64_t ObservedPresentationDrops = 0;
+		uint64_t ExchangeFrame = 0;
 
 		// Reused between barriers so a driver stops allocating.
 		std::vector<HostDelivery> Batch;

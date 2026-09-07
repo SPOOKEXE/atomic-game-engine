@@ -716,22 +716,30 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	const engine::core::Name loaded("tree.amesh");
 	const engine::core::Name missing("rock.amesh");
 
-	std::vector<DrawInstance> instances(3);
-	instances[0].Mesh = loaded;
+	std::vector<DrawInstance> instances(4);
+	instances[0].Mesh = missing;
+	instances[1].Mesh = loaded;
 
 	// **No mesh named at all - an ordinary `Part`.** This one is kept, because
 	// the renderer's default cube is what a part *is* rather than a stand-in for
 	// something that has not arrived.
-	instances[1].Mesh = engine::core::Name{};
+	instances[2].Mesh = engine::core::Name{};
 
-	instances[2].Mesh = missing;
+	instances[3].Mesh = missing;
 
 	std::vector<DrawInstance> drawable;
+	const std::array<uint32_t, 4> marked{0, 2, 3, 99};
+	std::vector<uint32_t> retained{42};
 	engine::scene::KeepLoaded(
-		instances, [&loaded](const engine::core::Name &mesh) { return mesh == loaded; }, drawable
+		instances,
+		[&loaded](const engine::core::Name &mesh) { return mesh == loaded; },
+		drawable,
+		marked,
+		&retained
 	);
 
 	REQUIRE(drawable.size() == 2);
+	CHECK(retained == std::vector<uint32_t>{1});
 	CHECK(drawable[0].Mesh == loaded);
 	CHECK_FALSE(drawable[1].Mesh.IsValid());
 
@@ -741,6 +749,11 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	for (const DrawInstance &instance : drawable) {
 		CHECK(instance.Mesh != missing);
 	}
+	engine::scene::KeepLoaded(
+		{}, [](const engine::core::Name &) { return false; }, drawable, marked, &retained
+	);
+	CHECK(drawable.empty());
+	CHECK(retained.empty());
 }
 
 TEST_CASE("a mesh arriving makes its parts appear without anything else changing", "[scene][drawinstance]") {

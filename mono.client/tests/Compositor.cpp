@@ -53,6 +53,30 @@ namespace compositor_test {
 
 using namespace compositor_test;
 
+TEST_CASE("a selected player world keeps its camera and rows through replacement", "[client][compositor]") {
+	Compositor views;
+	views.Track(WorldId{0}, Name("local"), 8);
+	views.Track(WorldId{1}, Name("source"), 8);
+	views.Track(WorldId{2}, Name("destination"), 8);
+	REQUIRE(views.Publish(WorldId{0}, At(100), LENS, ListOf(1, 100), 1, 0));
+	REQUIRE(views.Publish(WorldId{1}, At(3), LENS, ListOf(2, 5), 1, 0));
+	REQUIRE(views.Publish(WorldId{2}, At(23), LENS, ListOf(3, 25), 1, 0));
+	views.Compose(40, WorldId{1});
+	REQUIRE(views.Instances().size() == 2);
+	CHECK(views.CameraFrame().Position.X == 3);
+	CHECK(views.Instances()[0].Frame.Position.X == 5);
+	CHECK(views.Instances()[0].SourceWorld == Name("source"));
+	views.Untrack(WorldId{1});
+	views.Compose(40, WorldId{2});
+	REQUIRE(views.Instances().size() == 3);
+	CHECK(views.CameraFrame().Position.X == 23);
+	CHECK(views.Instances()[0].Frame.Position.X == 25);
+	CHECK(views.Instances()[0].SourceWorld == Name("destination"));
+	views.Compose(40, WorldId{3});
+	CHECK(views.Instances().empty());
+	CHECK(views.CameraFrame().Position.X == 0);
+}
+
 TEST_CASE("one view composes to what it published", "[client]") {
 	Compositor views;
 	views.Track(WorldId{0}, Name("one"), 64);
@@ -290,6 +314,27 @@ TEST_CASE("the camera comes from the first view", "[client]") {
 
 	views.Compose(0.0f);
 	REQUIRE(views.CameraFrame().Position.X == 11.0f);
+}
+
+TEST_CASE("retiring a replica releases its old view before handle reuse", "[client][compositor]") {
+	Compositor views;
+	views.Track(WorldId{0}, Name("source"), 8);
+	views.Track(WorldId{1}, Name("destination"), 8);
+	REQUIRE(views.Publish(WorldId{0}, At(11), LENS, ListOf(2, 10), 1, 0));
+	REQUIRE(views.Publish(WorldId{1}, At(99), LENS, ListOf(1, 90), 1, 0));
+	views.Compose(0);
+	REQUIRE(views.Instances().size() == 3);
+	REQUIRE(views.Untrack(WorldId{0}));
+	CHECK_FALSE(views.Untrack(WorldId{0}));
+	views.Compose(0);
+	REQUIRE(views.Instances().size() == 1);
+	CHECK(views.CameraFrame().Position.X == 99);
+	views.Track(WorldId{0}, Name("replacement"), 8);
+	views.Compose(0);
+	CHECK(views.Instances().size() == 1);
+	REQUIRE(views.Publish(WorldId{0}, At(5), LENS, ListOf(4, 50), 2, 0));
+	views.Compose(0);
+	CHECK(views.Instances().size() == 5);
 }
 
 TEST_CASE("composing many times over many views stays consistent", "[client][fuzz]") {

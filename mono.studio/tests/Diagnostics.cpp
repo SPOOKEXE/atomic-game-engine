@@ -1,3 +1,5 @@
+#include "TimelineBar.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/testing/Suite.hpp>
@@ -23,6 +25,23 @@ using studio::FinishDiagnosticAverage;
 using studio::FitReportedDiagnosticTimeline;
 using studio::FocusDiagnosticSpans;
 using studio::LayoutDiagnosticRows;
+
+TEST_CASE("timeline bars fit at the right edge and in narrow panels", "[studio][diagnostics]") {
+	for (const float width : {0.0f, 0.5f, 1.0f, 100.0f}) {
+		for (const float start : {-1.0f, 0.0f, width - 0.25f, width, width + 1.0f}) {
+			for (const float duration : {0.0f, 0.001f, 1.0f, 200.0f}) {
+				const auto bar = studio::FitTimelineBar(start, duration, width);
+				CAPTURE(width, start, duration);
+				CHECK(bar.Left >= 0.0f);
+				CHECK(bar.Right <= width);
+				CHECK(bar.Right - bar.Left >= std::min(width, 1.0f));
+			}
+		}
+	}
+	const auto bar = studio::FitTimelineBar(25.0f, 30.0f, 100.0f);
+	CHECK(bar.Left == 25.0f);
+	CHECK(bar.Right == 55.0f);
+}
 
 TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnostics]") {
 	FrameGraph::SetEnabled(true);

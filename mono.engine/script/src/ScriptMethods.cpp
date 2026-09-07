@@ -57,10 +57,12 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/physics/BodyMotion.hpp>
+#include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/BreakGroup.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -276,6 +278,22 @@ namespace engine::script {
 			// assignment has landed - and a caller ignoring the answer reads
 			// exactly as Roblox's does.
 			call.ReturnInstance(scene::LoadCharacter(call.World(), call.Subject()));
+		}
+
+		void CutTo(ScriptCall &call) {
+			call.ReturnBoolean(scene::CutCamera(call.World(), call.Subject(), call.AsCFrame(0)));
+		}
+
+		// Humanoid:AddAccessory uses the same authority and matching rules as C++.
+		void AddAccessory(ScriptCall &call) {
+			const auto &store = call.World();
+			const Entity character = store.ParentOf(call.Subject());
+			const auto *rig = store.Get<scene::Character>(character);
+			const Entity accessory = call.AsInstance(0);
+			call.ReturnBoolean(
+				rig && rig->Humanoid == call.Subject() &&
+				scene::EquipAccessory(call.World(), character, accessory)
+			);
 		}
 
 		// --- the tags ---------------------------------------------------------
@@ -1151,7 +1169,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 64> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 66> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1201,6 +1219,8 @@ namespace engine::script {
 			{"GetPlayerByUserId", GetPlayerByUserId},
 			{"GetPlayerFromCharacter", GetPlayerFromCharacter},
 			{"LoadCharacter", LoadCharacter},
+			{"AddAccessory", AddAccessory},
+			{"CutTo", CutTo},
 
 			{"IsA", IsA},
 			{"Destroy", Destroy},

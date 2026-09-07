@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "projection.glsl"
 
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outOcclusion;
@@ -16,6 +19,7 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 OutdoorAmbient;
 	vec4 Direct;
 	vec4 Eye;
+	vec4 CameraDepth;
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Shadow;
@@ -29,15 +33,7 @@ float Hash(vec2 value) {
 }
 
 vec3 WorldAt(vec2 uv, float distance) {
-	float nearPlane = pass.Planes.x;
-	float farPlane = pass.Planes.y;
-	float raw = (farPlane - nearPlane * farPlane / max(distance, 1e-4)) /
-		max(farPlane - nearPlane, 1e-6);
-	// Fullscreen UV starts at the top while SDL clip Y is positive there. Keep
-	// ambient occlusion in the same world space as deferred lighting.
-	vec2 clip = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-	vec4 world = pass.InverseViewProjection * vec4(clip, raw, 1.0);
-	return world.xyz / max(world.w, 1e-6);
+	return WorldAtLinearDepth(pass.InverseViewProjection, pass.CameraDepth, uv, distance);
 }
 
 void main() {

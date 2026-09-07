@@ -2191,6 +2191,8 @@ declare task: {
 				out << "\tfunction Equals(self, other: Instance): boolean\n";
 				out << "\tfunction GetPlayerFromCharacter(self, character: Instance): Instance?\n";
 				out << "\tfunction LoadCharacter(self): Instance?\n";
+				out << "\tfunction AddAccessory(self, accessory: Instance): boolean\n";
+				out << "\tfunction CutTo(self, frame: CFrame): boolean\n";
 
 				out << "\tfunction KeepWorldAwake(self, reason: string): ()\n";
 				out << "\tfunction LetWorldSleep(self): ()\n";
@@ -3834,6 +3836,8 @@ declare const task: {
 				out << "\tEquals(other: Instance): boolean;\n";
 				out << "\tGetPlayerFromCharacter(character: Instance): Instance | undefined;\n";
 				out << "\tLoadCharacter(): Instance | undefined;\n";
+				out << "\tAddAccessory(accessory: Instance): boolean;\n";
+				out << "\tCutTo(frame: CFrame): boolean;\n";
 
 				out << "\tKeepWorldAwake(reason: string): void;\n";
 				out << "\tLetWorldSleep(): void;\n";

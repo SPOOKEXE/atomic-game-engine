@@ -550,6 +550,12 @@ namespace engine::graph {
 		// node's work is silently discarded - which looks like the shared pass
 		// not running at all.
 		SharedWriteConflict,
+
+		// Frame setup cannot retain a result produced separately for each world.
+		FrameReadsWorld,
+
+		// Frame and world writes cannot share storage without an explicit copy.
+		FrameWorldWriteConflict,
 	};
 
 	// A stable, human-readable name for a status.
@@ -560,10 +566,9 @@ namespace engine::graph {
 
 	// A graph compiled to an order.
 	//
-	// **Three lists rather than one with a flag**, so an executor loops rather
-	// than branches. Holding one list and testing a bool per node per view would
-	// put the partition decision inside the hot loop, where it is re-answered
-	// every frame for an answer that changes only when the graph is edited.
+	// Three ordered blocks keep setup, camera work and final composition apart.
+	// Setup retains authored order across frame and world nodes; frame nodes
+	// run only on the pipeline's first setup, world nodes on each world's setup.
 	//
 	// The frame is `Shared`, then `PerView` once for each view, then `Final`.
 	//
@@ -581,7 +586,7 @@ namespace engine::graph {
 	//
 	// @since v0.11
 	struct CompiledGraph {
-		// The nodes that run once, before any view.
+		// Setup in authored order: once per frame or world according to scope.
 		std::vector<NodeId> Shared;
 
 		// The nodes that run once per view, in order.
@@ -757,9 +762,16 @@ namespace engine::graph {
 		//                 several views of one world through one pipeline passes
 		//                 `true` for the first and `false` after - that is what
 		//                 makes a shadow map per world rather than per view.
+		// @param frame    Whether this is the first setup for this pipeline in
+		//                 the frame. Requires `shared`; later worlds pass false.
 		// @return `false` when the runner abandoned the frame.
 		bool ExecuteView(
-			const CompiledGraph &compiled, NodeRunner &runner, size_t view, size_t world, bool shared
+			const CompiledGraph &compiled,
+			NodeRunner &runner,
+			size_t view,
+			size_t world,
+			bool shared,
+			bool frame
 		) const;
 
 		// The frame's own block, once, after every view.
@@ -798,8 +810,10 @@ namespace engine::graph {
 	  private:
 		std::vector<Node> Nodes;
 		// Runs one compiled block, telling every node which view and world it is
-		// for. What all three `Execute` entry points are made of.
-		bool RunBlock(const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world) const;
+		// for. Frame setup can be skipped after its first execution.
+		bool RunBlock(
+			const std::vector<NodeId> &block, NodeRunner &runner, size_t view, size_t world, bool frame = true
+		) const;
 
 		std::vector<ResourceDesc> Resources;
 	};

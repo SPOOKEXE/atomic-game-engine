@@ -52,10 +52,12 @@ namespace engine::replication {
 				// A tag carries no value, so there is no stream to keep in step
 				// and a refusal is simply a write that does not happen.
 				if (descriptor.Size == 0) {
-					if (permitted) {
-						store.SetComponent(entity, id, nullptr);
-					} else {
+					if (!permitted) {
 						outcome.Refused++;
+					} else if (!store.Alive(entity)) {
+						outcome.Whole = false;
+					} else {
+						store.SetComponent(entity, id, nullptr);
 					}
 					continue;
 				}

@@ -249,3 +249,94 @@ TEST_CASE("face images become one quad on their parent part", "[effects][ribbon]
 	CHECK(vertices[6].Coordinate.X - vertices[4].Coordinate.X == Approx(2.0f));
 	CHECK(vertices[5].Coordinate.Y - vertices[4].Coordinate.Y == Approx(3.0f));
 }
+
+TEST_CASE(
+	"request ribbons face their own camera without overwriting retained world geometry",
+	"[effects][ribbon][request-ribbons]"
+) {
+	using namespace engine;
+	effects::RegisterEffectClasses();
+	ecs::Store store("request-ribbons");
+	std::array<Entity, 2> ends;
+	for (size_t index = 0; index < ends.size(); ++index) {
+		ends[index] = store.CreateInstance(ecs::Classes::Find(Name("Attachment")), "End");
+		scene::Attachment attachment;
+		attachment.Frame.Position = {index == 0 ? -2.0f : 2.0f, 0, -3};
+		store.Set(ends[index], attachment);
+	}
+	const auto entity = store.CreateInstance(ecs::Classes::Find(Name("Beam")), "Beam");
+	Beam beam;
+	beam.Attachment0 = ends[0];
+	beam.Attachment1 = ends[1];
+	beam.Width0 = beam.Width1 = 2;
+	beam.FaceCamera = true;
+	store.Set(entity, beam);
+	store.SetResource(RibbonBuffer{});
+	REQUIRE(effects::BuildRibbons(store, {0, 100, -3}, 0) == 1);
+	const auto retained = effects::RibbonStream(store);
+	REQUIRE(!retained.empty());
+	CHECK(retained.front().Position.Y == 0);
+	const auto previousPosition = retained.front().Position;
+	RibbonBuffer request;
+	REQUIRE(effects::BuildRibbons(store, {0, 0, 0}, 0, request) == 1);
+	REQUIRE(request.Vertices.size() == retained.size());
+	CHECK(std::abs(request.Vertices.front().Position.Y) == Catch::Approx(1));
+	CHECK(request.Vertices.front().Position.Z == Catch::Approx(-3));
+	CHECK(effects::RibbonStream(store).front().Position == previousPosition);
+	const auto *allocation = request.Vertices.data();
+	REQUIRE(effects::BuildRibbons(store, {0, 0, 0}, 1, request) == 1);
+	CHECK(request.Vertices.data() == allocation);
+	CHECK(effects::RibbonStream(store).front().Position == previousPosition);
+}
+
+TEST_CASE(
+	"child ribbon orientation matches a fresh curved tapered beam and preserves fixed strips",
+	"[effects][ribbon][request-ribbons]"
+) {
+	using namespace engine;
+	effects::RegisterEffectClasses();
+	ecs::Store store("child-ribbons");
+	std::array<Entity, 2> ends;
+	for (size_t index = 0; index < ends.size(); ++index) {
+		ends[index] = store.CreateInstance(ecs::Classes::Find(Name("Attachment")), "End");
+		scene::Attachment attachment;
+		attachment.Frame.Position = {index == 0 ? -2.0f : 2.0f, 0, -3};
+		store.Set(ends[index], attachment);
+	}
+	const auto entity = store.CreateInstance(ecs::Classes::Find(Name("Beam")), "Beam");
+	Beam beam;
+	beam.Attachment0 = ends[0];
+	beam.Attachment1 = ends[1];
+	beam.Width0 = .3f;
+	beam.Width1 = 3;
+	beam.CurveSize0 = 1.25f;
+	beam.CurveSize1 = -.75f;
+	SECTION("camera-facing curved tapered strip") {
+		beam.FaceCamera = true;
+	}
+	SECTION("authored strip orientation") {
+		beam.FaceCamera = false;
+	}
+	store.Set(entity, beam);
+	RibbonBuffer original, reference;
+	REQUIRE(effects::BuildRibbons(store, {0, 100, -3}, .25f, original) == 1);
+	REQUIRE(effects::BuildRibbons(store, {1, 0, 0}, .25f, reference) == 1);
+	std::vector<effects::RibbonVertex> child;
+	REQUIRE(effects::FaceRibbonVertices(original.Vertices, original.Runs, {1, 0, 0}, child));
+	REQUIRE(child.size() == reference.Vertices.size());
+	for (size_t index = 0; index < child.size(); ++index) {
+		CHECK((child[index].Position - reference.Vertices[index].Position).Magnitude() < 1e-5f);
+		CHECK(child[index].Coordinate == reference.Vertices[index].Coordinate);
+		CHECK(child[index].Colour == reference.Vertices[index].Colour);
+	}
+	const auto *allocation = child.data();
+	REQUIRE(effects::FaceRibbonVertices(child, original.Runs, {0, 100, -3}, child));
+	CHECK(child.data() == allocation);
+	for (size_t index = 0; index < child.size(); ++index) {
+		CHECK((child[index].Position - original.Vertices[index].Position).Magnitude() < 1e-5f);
+	}
+	const auto beforeRefusal = child.front().Position;
+	original.Runs.front().Count = UINT32_MAX;
+	CHECK_FALSE(effects::FaceRibbonVertices(original.Vertices, original.Runs, {}, child));
+	CHECK(child.front().Position == beforeRefusal);
+}

@@ -131,6 +131,30 @@ TEST_CASE("a world received at a steady rate is drawn between ticks", "[replicat
 }
 
 TEST_CASE(
+	"complete empty ticks advance the replica clock without pose rows", "[replication][interpolation]"
+) {
+	SnapshotBuffer buffer(Steady());
+	buffer.RecordTick(0);
+	CHECK(buffer.Newest() == 0);
+	CHECK_FALSE(buffer.Holds(0));
+	buffer.RecordTick(7);
+	CHECK(buffer.Newest() == 7);
+	CHECK(buffer.Holds(7));
+	CHECK(buffer.Stats().Ticks == 1);
+	CHECK_FALSE(buffer.Sample(MOVER));
+	buffer.RecordTick(7);
+	buffer.RecordTick(6);
+	CHECK(buffer.Stats().Ticks == 1);
+	buffer.Record(7, MOVER, At(7));
+	REQUIRE(buffer.Sample(MOVER));
+	CHECK(buffer.Sample(MOVER)->Position.X == 7);
+	buffer.RecordTick(100);
+	CHECK(buffer.Newest() == 100);
+	CHECK(buffer.Stats().Ticks == 2);
+	CHECK_FALSE(buffer.Sample(MOVER));
+}
+
+TEST_CASE(
 	"the newest received tick is never drawn, only interpolated toward", "[replication][interpolation]"
 ) {
 	// The delay stated as a position rather than as a counter: with two ticks of

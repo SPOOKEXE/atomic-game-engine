@@ -47,6 +47,69 @@ namespace engine::world {
 		return owed;
 	}
 
+	void World::PrepareTick(bool firstInBatch) {
+		// Clear before the batch, so publication and presentation retain writes
+		// from every owed tick. A faster world can run several ticks before its
+		// host publishes once; clearing between them would lose earlier writes.
+		//
+		// **Skipped while the bits are being held for a publish that
+		// has not come round yet.** A world replicating at 20 Hz while
+		// ticking at 60 spends two ticks in three not publishing, and
+		// clearing after each of them would send whatever moved on the
+		// third and nothing else - a script that set a colour on either
+		// of the other two would have written it into a bitmap nobody
+		// ever read. A world with no replication rate clears on its next batch.
+		{
+			ENGINE_PROFILE_CAT("tick prepare", engine::core::ProfileCategory::Simulation);
+			if (firstInBatch && !HoldingChanges) {
+				Store_.ClearChanges();
+			}
+
+			// **Catch-up ticks after the first see an empty inbox, and that
+			// is exactly-once delivery.** A barrier fills this world's inbox
+			// at most once per host frame and this loop may run several
+			// ticks in that frame - so without this, a world owing three
+			// ticks handed the same message to its systems three times. It
+			// was found as a teleport that admitted the same player three
+			// times into the destination world.
+			//
+			// **The first tick of the batch keeps it**, because that one is
+			// the delivery: the barrier ran immediately before this call and
+			// `Universe::Tick` is what orders the two. The mail also
+			// survives this whole call, so a caller reading `Postbox::
+			// Deliveries` after a tick still sees what arrived - which is
+			// what every bus suite does and what the router's own
+			// replace-on-next-mail rule was already promising.
+			if (!firstInBatch) {
+				if (Inbox *inbox = Store_.ResourceMutable<Inbox>(); inbox != nullptr) {
+					inbox->Arrived.clear();
+				}
+			}
+
+			Store_.AdvanceTick(Timestep.Delta());
+		}
+	}
+
+	void World::CommitTick() {
+
+		{
+			ENGINE_PROFILE_CAT("tick commit", engine::core::ProfileCategory::Simulation);
+
+			// After the simulation phases, so a property written three times
+			// signals once and never mutates a world inside a system iteration.
+			Store_.FlushSignals();
+
+			// Charged after the tick, so a publication covers a tick that ran.
+			if (AdvanceReplication()) {
+				ReplicationPending = true;
+				HoldingChanges = false;
+				Stats.ReplicationTicks++;
+			} else {
+				HoldingChanges = true;
+			}
+		}
+	}
+
 	void World::Tick(int ticks) {
 		if (ticks <= 0) {
 			return;
@@ -71,68 +134,11 @@ namespace engine::world {
 
 		try {
 			for (int tick = 0; tick < ticks; tick++) {
-				// Cleared at the *start* of a tick rather than the end, so
-				// what a tick recorded is still there for `Present` to read -
-				// render invalidation runs in `PreRender`, which is a separate
-				// call after this one. Clearing at the end would hand the
-				// renderer an empty set every frame.
-				//
-				// **Skipped while the bits are being held for a publish that
-				// has not come round yet.** A world replicating at 20 Hz while
-				// ticking at 60 spends two ticks in three not publishing, and
-				// clearing after each of them would send whatever moved on the
-				// third and nothing else - a script that set a colour on either
-				// of the other two would have written it into a bitmap nobody
-				// ever read. A world with no replication rate never holds, so
-				// this costs it one branch and nothing else.
-				{
-					ENGINE_PROFILE_CAT("tick prepare", engine::core::ProfileCategory::Simulation);
-					if (!HoldingChanges) {
-						Store_.ClearChanges();
-					}
-
-					// **Catch-up ticks after the first see an empty inbox, and that
-					// is exactly-once delivery.** A barrier fills this world's inbox
-					// at most once per host frame and this loop may run several
-					// ticks in that frame - so without this, a world owing three
-					// ticks handed the same message to its systems three times. It
-					// was found as a teleport that admitted the same player three
-					// times into the destination world.
-					//
-					// **The first tick of the batch keeps it**, because that one is
-					// the delivery: the barrier ran immediately before this call and
-					// `Universe::Tick` is what orders the two. The mail also
-					// survives this whole call, so a caller reading `Postbox::
-					// Deliveries` after a tick still sees what arrived - which is
-					// what every bus suite does and what the router's own
-					// replace-on-next-mail rule was already promising.
-					if (tick > 0) {
-						if (Inbox *inbox = Store_.ResourceMutable<Inbox>(); inbox != nullptr) {
-							inbox->Arrived.clear();
-						}
-					}
-
-					Store_.AdvanceTick(Timestep.Delta());
-				}
+				PrepareTick(tick == 0);
 
 				Scheduler_.RunPhases(Store_, ecs::Phase::Input, ecs::Phase::Replication);
 
-				{
-					ENGINE_PROFILE_CAT("tick commit", engine::core::ProfileCategory::Simulation);
-
-					// After the simulation phases, so a property written three times
-					// signals once and never mutates a world inside a system iteration.
-					Store_.FlushSignals();
-
-					// Charged after the tick, so a publication covers a tick that ran.
-					if (AdvanceReplication()) {
-						ReplicationPending = true;
-						HoldingChanges = false;
-						Stats.ReplicationTicks++;
-					} else {
-						HoldingChanges = true;
-					}
-				}
+				CommitTick();
 			}
 			ConsecutiveFaults = 0;
 		} catch (const std::exception &failure) {
@@ -157,6 +163,57 @@ namespace engine::world {
 			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
 		Stats.LastTickMilliseconds = elapsed;
 		Stats.SlowestTickMilliseconds = std::max(Stats.SlowestTickMilliseconds, elapsed);
+	}
+
+	bool World::BeginExchangeRound(bool firstInBatch) {
+		if (ExchangeOpen || State_ == WorldState::Faulted || State_ == WorldState::Suspended ||
+			State_ == WorldState::Remote)
+			return false;
+		Store_.BindToCallingThread();
+		if (firstInBatch) {
+			Scheduler_.ClearTimings();
+			Stats.LastTickMilliseconds = 0;
+		}
+		const uint64_t began = core::Clock::Nanoseconds();
+		try {
+			PrepareTick(firstInBatch);
+			Scheduler_.RunPhases(Store_, ecs::Phase::Input, ecs::Phase::Input);
+			ExchangeOpen = true;
+		} catch (const std::exception &failure) {
+			ENGINE_ERROR("world '{}' input exchange fault: {}", Settings_.Name.Text(), failure.what());
+			CancelExchangeRound();
+		} catch (...) {
+			CancelExchangeRound();
+		}
+		Stats.LastTickMilliseconds += static_cast<float>(core::Clock::Nanoseconds() - began) / 1'000'000;
+		return ExchangeOpen;
+	}
+
+	bool World::FinishExchangeRound() {
+		if (!ExchangeOpen) return false;
+		Store_.BindToCallingThread();
+		const uint64_t began = core::Clock::Nanoseconds();
+		try {
+			Scheduler_.RunPhases(Store_, ecs::Phase::Simulation, ecs::Phase::Replication);
+			CommitTick();
+			ExchangeOpen = false;
+			ConsecutiveFaults = 0;
+		} catch (const std::exception &failure) {
+			ENGINE_ERROR("world '{}' exchange commit fault: {}", Settings_.Name.Text(), failure.what());
+			CancelExchangeRound();
+		} catch (...) {
+			CancelExchangeRound();
+		}
+		Stats.LastTickMilliseconds += static_cast<float>(core::Clock::Nanoseconds() - began) / 1'000'000;
+		Stats.SlowestTickMilliseconds = std::max(Stats.SlowestTickMilliseconds, Stats.LastTickMilliseconds);
+		return State_ != WorldState::Faulted;
+	}
+
+	void World::CancelExchangeRound() {
+		ExchangeOpen = false;
+		State_ = WorldState::Faulted;
+		Stats.Faults++;
+		ConsecutiveFaults++;
 	}
 
 	bool World::AdvanceReplication() {

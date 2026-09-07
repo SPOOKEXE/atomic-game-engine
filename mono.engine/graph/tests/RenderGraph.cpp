@@ -8,6 +8,7 @@
 
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -515,6 +516,166 @@ TEST_CASE("a world-scoped pass runs once per world, not once per view", "[graph]
 
 		CHECK(std::count(runner.Ran.begin(), runner.Ran.end(), std::string("shadow")) == 2);
 	}
+}
+
+TEST_CASE("frame setup runs once before the worlds that consume it", "[graph][frame-prefix]") {
+	RenderGraph graph;
+	const ResourceId resident = Colour(graph, "resident");
+	const ResourceId world = Colour(graph, "world");
+	const ResourceId colour = Colour(graph, "colour");
+	graph.AddNode({
+		.Name = Name("upload"),
+		.Kind = Name("upload"),
+		.Writes = {resident},
+		.Scope = NodeScope::Frame,
+	});
+	graph.AddNode({
+		.Name = Name("world"),
+		.Kind = Name("world"),
+		.Reads = {resident},
+		.Writes = {world},
+		.Scope = NodeScope::World,
+	});
+	graph.AddNode({
+		.Name = Name("draw"),
+		.Kind = Name("draw"),
+		.Reads = {world},
+		.Writes = {colour},
+		.Scope = NodeScope::View,
+	});
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	Recorder runner;
+	SECTION("whole frame shares setup across nonadjacent views of two worlds") {
+		const uint64_t worlds[] = {7, 9, 7};
+		REQUIRE(graph.Execute(compiled, runner, worlds));
+		CHECK(
+			runner.Ran == std::vector<std::string>{"upload", "world", "draw@0", "draw@2", "world", "draw@1"}
+		);
+	}
+	SECTION("explicit view execution uses a first-setup flag rather than world zero") {
+		REQUIRE(graph.ExecuteView(compiled, runner, 4, 12, true, true));
+		REQUIRE(graph.ExecuteView(compiled, runner, 6, 12, false, false));
+		REQUIRE(graph.ExecuteView(compiled, runner, 9, 19, true, false));
+		CHECK(
+			runner.Ran == std::vector<std::string>{"upload", "world", "draw@4", "draw@6", "world", "draw@9"}
+		);
+	}
+	SECTION("empty frames still execute setup exactly once") {
+		REQUIRE(graph.Execute(compiled, runner, std::span<const uint64_t>{}));
+		CHECK(runner.Ran == std::vector<std::string>{"upload", "world"});
+	}
+	SECTION("the count overload uses one setup for every camera") {
+		REQUIRE(graph.Execute(compiled, runner, 2));
+		CHECK(runner.Ran == std::vector<std::string>{"upload", "world", "draw@0", "draw@1"});
+	}
+	SECTION("failed setup never reaches a world or view") {
+		runner.FailOn = "upload";
+		const uint64_t worlds[] = {7, 9};
+		CHECK_FALSE(graph.Execute(compiled, runner, worlds));
+		CHECK(runner.Ran == std::vector<std::string>{"upload"});
+	}
+	SECTION("a frame setup request cannot silently skip the shared block") {
+		CHECK_FALSE(graph.ExecuteView(compiled, runner, 4, 12, false, true));
+		CHECK(runner.Ran.empty());
+	}
+	SECTION("frame setup carries no world or camera identity") {
+		struct ScopeRecorder : NodeRunner {
+			std::vector<size_t> Worlds;
+			std::vector<size_t> Views;
+			bool Run(const RunContext &context) override {
+				Worlds.push_back(context.World);
+				Views.push_back(context.View);
+				return true;
+			}
+		} scopes;
+		REQUIRE(graph.ExecuteView(compiled, scopes, 4, 12, true, true));
+		CHECK(scopes.Worlds == std::vector<size_t>{RunContext::WHOLE_FRAME, 12, 12});
+		CHECK(scopes.Views == std::vector<size_t>{RunContext::WHOLE_FRAME, RunContext::WHOLE_FRAME, 4});
+	}
+	SECTION("device schedule retains setup before its world consumers") {
+		engine::graph::ExecutionSchedule schedule;
+		REQUIRE(
+			engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok
+		);
+		std::vector<std::string> scheduled;
+		for (const auto &wave : schedule.Waves) {
+			for (const auto &node : wave.Nodes) {
+				scheduled.emplace_back(graph.Find(node.Node)->Name.Text());
+			}
+		}
+		CHECK(scheduled == std::vector<std::string>{"upload", "world", "draw"});
+	}
+}
+
+TEST_CASE("interleaved frame setup preserves order and refuses per-world input", "[graph][frame-prefix]") {
+	RenderGraph graph;
+	const ResourceId world = Colour(graph, "world");
+	const ResourceId resident = Colour(graph, "resident");
+	const ResourceId colour = Colour(graph, "colour");
+	graph.AddNode({.Name = Name("world"), .Writes = {world}, .Scope = NodeScope::World});
+	const NodeId setup =
+		graph.AddNode({.Name = Name("upload"), .Writes = {resident}, .Scope = NodeScope::Frame});
+	graph.AddNode({.Name = Name("draw"), .Reads = {resident}, .Writes = {colour}, .Scope = NodeScope::View});
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	Recorder runner;
+	const uint64_t worlds[] = {7, 9};
+	REQUIRE(graph.Execute(compiled, runner, worlds));
+	CHECK(runner.Ran == std::vector<std::string>{"world", "upload", "draw@0", "world", "draw@1"});
+	engine::graph::ExecutionSchedule schedule;
+	REQUIRE(engine::graph::CompileSchedule(graph, schedule, offender) == engine::graph::ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 3);
+	CHECK(graph.Find(schedule.Waves[0].Nodes[0].Node)->Name == Name("world"));
+	CHECK(graph.Find(schedule.Waves[1].Nodes[0].Node)->Name == Name("upload"));
+
+	RenderGraph invalid;
+	const ResourceId invalidWorld = Colour(invalid, "world");
+	const ResourceId invalidResident = Colour(invalid, "resident");
+	invalid.AddNode({.Name = Name("world"), .Writes = {invalidWorld}, .Scope = NodeScope::World});
+	Node replacement = *graph.Find(setup);
+	replacement.Reads = {invalidWorld};
+	replacement.Writes = {invalidResident};
+	invalid.AddNode(replacement);
+	CHECK(invalid.Validate(offender) == GraphStatus::FrameReadsWorld);
+	CHECK(offender == Name("upload"));
+	CHECK(invalid.Compile(compiled, offender) == GraphStatus::FrameReadsWorld);
+	CHECK(
+		engine::graph::CompileSchedule(invalid, schedule, offender) ==
+		engine::graph::ScheduleStatus::InvalidGraph
+	);
+}
+
+TEST_CASE("frame seeds cannot be mutated into per-world storage", "[graph][frame-prefix]") {
+	RenderGraph graph;
+	const ResourceId resident = Colour(graph, "resident");
+	const ResourceId colour = Colour(graph, "colour");
+	graph.AddNode({.Name = Name("seed"), .Writes = {resident}, .Scope = NodeScope::Frame});
+	const NodeId update = graph.AddNode({
+		.Name = Name("update"),
+		.Reads = {resident},
+		.Writes = {resident},
+		.Scope = NodeScope::World,
+	});
+	graph.AddNode({.Name = Name("draw"), .Reads = {resident}, .Writes = {colour}, .Scope = NodeScope::View});
+	CompiledGraph compiled;
+	Name offender;
+	CHECK(graph.Validate(offender) == GraphStatus::FrameWorldWriteConflict);
+	CHECK(offender == Name("resident"));
+	CHECK(graph.Compile(compiled, offender) == GraphStatus::FrameWorldWriteConflict);
+	engine::graph::ExecutionSchedule schedule;
+	CHECK(
+		engine::graph::CompileSchedule(graph, schedule, offender) ==
+		engine::graph::ScheduleStatus::InvalidGraph
+	);
+	REQUIRE(graph.SetEnabled(update, false));
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	Recorder runner;
+	const uint64_t worlds[] = {7, 9};
+	REQUIRE(graph.Execute(compiled, runner, worlds));
+	CHECK(runner.Ran == std::vector<std::string>{"seed", "draw@0", "draw@1"});
 }
 
 TEST_CASE("a frame-scoped pass runs once however many worlds there are", "[graph]") {

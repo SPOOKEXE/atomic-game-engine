@@ -18,6 +18,7 @@
 #include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/game/Project.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/net/Endpoint.hpp>
@@ -50,6 +51,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <network/SessionKey.hpp>
 #include <server/ContentRelay.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
@@ -352,11 +355,16 @@ namespace server {
 
 	// Out of line so CDN types remain incomplete in the public header.
 	Server::~Server() {
+		HostExchange.reset();
+		PlayerPresentations.clear();
+		StopPresentationProducer();
 		ContentShapes.reset();
 		ContentLink.reset();
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+		// Runtime cleanup detaches hooks from its borrowed store.
+		Runtimes.clear();
 		Driver_.reset();
 		HostedProject.reset();
 	}
@@ -714,6 +722,7 @@ namespace server {
 
 	bool Server::Initialise(const Options &options) {
 		Settings = options;
+		if (Settings.HostTickExchange && !IsHost()) return false;
 		LocalWorlds = 1;
 		RemoteHosts = 0;
 		AutomaticWorldPlacement = false;
@@ -776,6 +785,7 @@ namespace server {
 
 		// Register names before any snapshot or world is built.
 		RegisterPlaceholderComponents();
+		engine::script::RegisterPortalTransferComponents();
 
 		engine::world::UniverseSettings universe;
 
@@ -784,6 +794,7 @@ namespace server {
 
 		engine::world::DriverSettings driver;
 		driver.Universe = universe;
+		driver.CoordinateHostTicks = !IsHost() && !Settings.RemoteWorlds.empty();
 		// A listening host is one replication authority and one UDP endpoint.
 		// Keeping one world in it makes the process, physics state, ECS store,
 		// and listener share the same failure and restart boundary.
@@ -817,6 +828,13 @@ namespace server {
 			driver.Hosts.Arguments.emplace_back("--game");
 			driver.Hosts.Arguments.emplace_back(Settings.GamePath);
 		}
+		if (driver.CoordinateHostTicks) driver.Hosts.Arguments.emplace_back("--host-tick-exchange");
+		if (!Settings.PresentationProgram.empty()) {
+			driver.Hosts.Arguments.insert(
+				driver.Hosts.Arguments.end(),
+				{"--presentation-program", Settings.PresentationProgram.string()}
+			);
+		}
 		if (!Settings.AssetsDirectory.empty()) {
 			driver.Hosts.Arguments.emplace_back("--override-assets-directory");
 			driver.Hosts.Arguments.emplace_back(Settings.AssetsDirectory.string());
@@ -846,6 +864,14 @@ namespace server {
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
+		if (Settings.Listening) {
+			const auto nonce = network::SessionKey::Draw();
+			if (!nonce) return false;
+			const auto bytes = nonce->Tag({});
+			engine::core::ByteReader reader(bytes);
+			const uint64_t session = reader.ReadUInt64();
+			if (session == 0 || !Worlds().ConfigurePresentation(session)) return false;
+		}
 		StopRequested.store(false);
 
 		if (IsHost()) {
@@ -871,6 +897,10 @@ namespace server {
 				Replayer_->Restore(Worlds(), [](engine::world::Universe &into, engine::world::WorldId id) {
 					into.Enter(id, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 						RegisterPlaceholderSystems(store, systems);
+						const auto incarnation = engine::script::PortalTransferIncarnation(store);
+						if (incarnation != 0) {
+							engine::script::RegisterTeleportAdmission(systems);
+						}
 					});
 				});
 
@@ -962,11 +992,11 @@ namespace server {
 			);
 		}
 
-		if (!BeginRecording()) {
+		if (!BeginListening()) {
 			return false;
 		}
 
-		if (!BeginListening()) {
+		if (!BeginRecording()) {
 			return false;
 		}
 
@@ -1124,6 +1154,29 @@ namespace server {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
 			return false;
 		}
+		if (IsHost()) {
+			for (const auto &name : Settings.HostWorlds) {
+				if (!Worlds().Find(engine::core::Name(name)).IsValid()) {
+					ENGINE_ERROR("granted world '{}' is absent from the project", name);
+					return false;
+				}
+			}
+			for (const auto id : Worlds().Worlds()) {
+				const auto settings = Worlds().SettingsOf(id);
+				if (std::find(Settings.HostWorlds.begin(), Settings.HostWorlds.end(), settings.Name.Text()) !=
+					Settings.HostWorlds.end())
+					continue;
+				if (Worlds().Destroy(id) != engine::world::WorldStatus::Ok ||
+					!Worlds().CreateRemote(settings, engine::core::Name("presentation-driver")).IsValid())
+					return false;
+			}
+		} else {
+			// Leave child-owned worlds for the driver to register before any scripts run.
+			for (const auto &name : Settings.RemoteWorlds) {
+				const auto id = Worlds().Find(engine::core::Name(name));
+				if (id.IsValid() && Worlds().Destroy(id) != engine::world::WorldStatus::Ok) return false;
+			}
+		}
 		if (!Settings.DataStoreConfigured && info.DataStore.Enabled) {
 			const auto backend = engine::datastore::BackendOf(info.DataStore.Backend);
 			if (!backend) {
@@ -1263,13 +1316,10 @@ namespace server {
 			return false;
 		}
 
-		// **Every world runs, and the first one is what a client joins.**
-		// Replication is one world per connection today - `Session` binds a
-		// client to a world - so a game of several scenes simulates all of them
-		// and streams one. Said in the log rather than left to be discovered:
-		// a player who joined and saw the lobby instead of the arena has no way
-		// to tell which world they got.
-		PrimaryWorld = worlds.front();
+		// A supervised host runs only its granted worlds and streams its first grant.
+		// An unsupervised project runs every local world and streams the first one.
+		PrimaryWorld =
+			IsHost() ? Worlds().Find(engine::core::Name(Settings.HostWorlds.front())) : worlds.front();
 
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfServer();
@@ -1396,13 +1446,15 @@ namespace server {
 		// under QUIC it has to be: the seed is the TLS one, so it is part of how
 		// the listener is built rather than something set on it afterwards.
 		std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
-		bool seeded = false;
 		if (!Settings.IdentityKey.empty()) {
 			if (!ParseHex(Settings.IdentityKey, seed)) {
 				ENGINE_ERROR("server: --identity-key is not {} hex characters", seed.size() * 2);
 				return false;
 			}
-			seeded = true;
+		} else {
+			const auto ephemeral = network::SessionKey::Draw();
+			if (!ephemeral) return false;
+			seed = ephemeral->Tag({});
 		}
 
 		streaming.Wire = Settings.Transport;
@@ -1412,10 +1464,8 @@ namespace server {
 			// or not anybody pinned it, so the listener draws an ephemeral one
 			// when none is supplied and says so - the alternative is a default
 			// transport that refuses to start without a flag.
-			if (seeded) {
-				streaming.Quic.Connection.Tls.Seed = seed;
-				streaming.Quic.Connection.Tls.HasSeed = true;
-			}
+			streaming.Quic.Connection.Tls.Seed = seed;
+			streaming.Quic.Connection.Tls.HasSeed = true;
 			// The ceiling is the one a game already stated, and it survives above
 			// the congestion controller rather than instead of it.
 			streaming.Quic.BytesPerTick = streaming.Session.Link.BytesPerTick;
@@ -1438,7 +1488,7 @@ namespace server {
 		AdmissionRestricted = !Settings.AdmittedKeys.empty();
 		Replication->SetClientPolicy(
 			[this](engine::replication::ClientId, const engine::assets::PublicKey &key) {
-				return !AdmissionRestricted ||
+				return !AdmissionRestricted || (ImageIdentity && key == *ImageIdentity) ||
 					   std::find(AdmittedClientKeys.begin(), AdmittedClientKeys.end(), key) !=
 						   AdmittedClientKeys.end();
 			}
@@ -1627,20 +1677,128 @@ namespace server {
 			});
 		}
 
-		// **A `Player` per connection, which nothing in this engine was
-		// making.** `scene::AddPlayer` had no production caller at all - every
-		// world that ever ran had a `Players` service with nobody in it - and
-		// the consequence was not cosmetic: ownership is assigned to a player,
-		// so a server with no players had nobody to assign it to and
-		// `SetNetworkOwner` had no argument a script could obtain.
-		//
-		// **What a client says about content, and the only thing it may say.**
-		// The payload is opaque to `replication` by design, so this is where it
-		// stops being opaque - and it stops being opaque behind a rate limit, an
-		// outstanding bound and a closed list of routes, because a client is
-		// untrusted and every one of those has to be held on this side.
+		// Transport admission alone creates no player. Repeated fresh requests
+		// return the assigned player without spawning another character.
+		const auto admitFresh = [this](engine::replication::ClientId client, uint64_t attempt) {
+			engine::game::PortalSessionMessage response;
+			response.Kind = engine::game::PortalSessionKind::Refused;
+			response.Attempt = attempt;
+			response.World = Worlds().NameOf(PrimaryWorld).Text();
+			response.Diagnostic = "fresh player admission is unavailable";
+			const uint64_t peer = (uint64_t(client.Generation) << 32) | (uint64_t(client.Index) + 1);
+			if (PortalLeases.Reserved(peer, PollNow)) {
+				response.Diagnostic = "this connection already reserved a transferred player";
+				ReplyToAdmission(client, engine::game::EncodePortalSession(response));
+				return;
+			}
+			Worlds().Enter(PrimaryWorld, [this, client, &response](engine::ecs::Store &store) {
+				const auto assigned = Players.find(client.Index);
+				if (assigned != Players.end()) {
+					if (assigned->second.Generation == client.Generation &&
+						store.Alive(assigned->second.Instance)) {
+						response.Kind = engine::game::PortalSessionKind::Ready;
+						response.Player = assigned->second.Instance;
+					}
+					return;
+				}
+
+				// **A world with no `Players` service gets no player, quietly.**
+				// That is not a misconfiguration to warn about - it is the
+				// placeholder world, which is furnished by nobody and is what
+				// `--entities` builds. A game file has services and gets one.
+				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
+					return;
+				}
+
+				// Named for the slot rather than for anything the client said.
+				// A name a client chose is a field of an inbound message, and
+				// this one ends up in the world tree where scripts index by it.
+				const std::string name = "Player" + std::to_string(client.Index + 1);
+				const engine::ecs::Entity player = engine::scene::AddPlayer(store, name);
+				if (player == engine::ecs::NULL_ENTITY) {
+					// **A world at `Players.MaxPlayers` is the case worth
+					// saying out loud.** The transport admitted the socket -
+					// `ListenerSettings::MaximumClients` is a different number
+					// and a different question - so a silent return here is a
+					// connected client watching a world it can never enter,
+					// with nothing anywhere saying why.
+					ENGINE_WARN("server: '{}' got no player - the world is full or has no Players", name);
+					return;
+				}
+
+				Players[client.Index] = Occupant{player, client.Generation};
+
+				// **And a body, which is the other half of admitting somebody.**
+				// A `Player` with no character is a row in a service that nothing
+				// draws and nothing can move - every world this repository shipped
+				// before now was in exactly that state, so `--listen` produced a
+				// scene a client could watch and never enter.
+				//
+				// Ownership of the root goes to this player inside `LoadCharacter`,
+				// which is what makes the client's own movement authoritative and
+				// nobody else's.
+				// **The player's own interface, copied from the world's
+				// template.** `StarterGui` is a template and what a player sees
+				// is their copy - see `gui::ResetPlayerGui`, which also carries
+				// why a `ResetOnSpawn = false` collector survives a death. The
+				// copies are ordinary world content on this authority, so they
+				// replicate to exactly one client: `SetInterest` above hides
+				// what is under a player from everybody else.
+				//
+				// **Before the character, not after.** A `ScreenGui` a script
+				// reaches for from a spawn handler has to exist by the time the
+				// handler runs, and `LoadCharacter` is what a game hangs that
+				// handler on.
+				(void)engine::gui::ResetPlayerGui(store, player);
+
+				// **Unless the game says it spawns its own occupants.**
+				// `Players.CharacterAutoLoads` is what a lobby sets to false,
+				// and a host that ignored it would hand everybody a body the
+				// game then has to destroy - which is a frame of a character
+				// standing in the world before a script can stop it.
+				//
+				// The same flag is what `scene::UpdateRespawns` reads for every
+				// life after this one, so the join and the respawn are one
+				// decision rather than two that can disagree.
+				const engine::scene::PlayersServiceComponent *settings =
+					store.Get<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
+				if (settings != nullptr && !settings->CharacterAutoLoads) {
+					ENGINE_INFO("server: {} joined without a body - CharacterAutoLoads is off", name);
+				} else if (engine::scene::LoadCharacter(store, player) == engine::ecs::NULL_ENTITY) {
+					ENGINE_WARN("server: '{}' has no character - the world has no Workspace", name);
+				}
+
+				response.Kind = engine::game::PortalSessionKind::Ready;
+				response.Player = player;
+
+				ENGINE_INFO("server: {} joined as '{}'", name, Worlds().NameOf(PrimaryWorld).Text());
+			});
+
+			ReplyToAdmission(client, engine::game::EncodePortalSession(response));
+		};
+
 		Replication->OnUserMessage(
-			[this](engine::replication::ClientId client, std::span<const std::byte> payload) {
+			[this, admitFresh](engine::replication::ClientId client, std::span<const std::byte> payload) {
+				if (ReceivePlayerPresentation(client, payload)) return;
+				engine::game::PortalSessionMessage admission;
+				if (engine::game::DecodePortalSession(payload, admission)) {
+					if (admission.Kind == engine::game::PortalSessionKind::Fresh) {
+						admitFresh(client, admission.Attempt);
+					} else if (admission.Kind == engine::game::PortalSessionKind::Proceed ||
+							   admission.Kind == engine::game::PortalSessionKind::Refused) {
+						ProceedThroughPortal(client, admission);
+					} else if (admission.Kind == engine::game::PortalSessionKind::Resume ||
+							   admission.Kind == engine::game::PortalSessionKind::Commit) {
+						ResumePortalSession(client, admission);
+					} else {
+						engine::game::PortalSessionMessage refusal;
+						refusal.Kind = engine::game::PortalSessionKind::Refused;
+						refusal.Attempt = admission.Attempt;
+						refusal.Diagnostic = "portal session request is not available";
+						ReplyToAdmission(client, engine::game::EncodePortalSession(refusal));
+					}
+					return;
+				}
 				engine::game::TeleportRequest request;
 				if (engine::game::DecodeTeleportRequest(payload, request)) {
 					engine::game::TeleportRequestResult result;
@@ -1719,89 +1877,6 @@ namespace server {
 				client, Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency
 			);
 
-			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
-				// **A world with no `Players` service gets no player, quietly.**
-				// That is not a misconfiguration to warn about - it is the
-				// placeholder world, which is furnished by nobody and is what
-				// `--entities` builds. A game file has services and gets one.
-				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
-					return;
-				}
-
-				// Named for the slot rather than for anything the client said.
-				// A name a client chose is a field of an inbound message, and
-				// this one ends up in the world tree where scripts index by it.
-				const std::string name = "Player" + std::to_string(client.Index + 1);
-				const engine::ecs::Entity player = engine::scene::AddPlayer(store, name);
-				if (player == engine::ecs::NULL_ENTITY) {
-					// **A world at `Players.MaxPlayers` is the case worth
-					// saying out loud.** The transport admitted the socket -
-					// `ListenerSettings::MaximumClients` is a different number
-					// and a different question - so a silent return here is a
-					// connected client watching a world it can never enter,
-					// with nothing anywhere saying why.
-					ENGINE_WARN("server: '{}' got no player - the world is full or has no Players", name);
-					return;
-				}
-
-				Players[client.Index] = Occupant{player, client.Generation};
-
-				// **And a body, which is the other half of admitting somebody.**
-				// A `Player` with no character is a row in a service that nothing
-				// draws and nothing can move - every world this repository shipped
-				// before now was in exactly that state, so `--listen` produced a
-				// scene a client could watch and never enter.
-				//
-				// Ownership of the root goes to this player inside `LoadCharacter`,
-				// which is what makes the client's own movement authoritative and
-				// nobody else's.
-				// **The player's own interface, copied from the world's
-				// template.** `StarterGui` is a template and what a player sees
-				// is their copy - see `gui::ResetPlayerGui`, which also carries
-				// why a `ResetOnSpawn = false` collector survives a death. The
-				// copies are ordinary world content on this authority, so they
-				// replicate to exactly one client: `SetInterest` above hides
-				// what is under a player from everybody else.
-				//
-				// **Before the character, not after.** A `ScreenGui` a script
-				// reaches for from a spawn handler has to exist by the time the
-				// handler runs, and `LoadCharacter` is what a game hangs that
-				// handler on.
-				(void)engine::gui::ResetPlayerGui(store, player);
-
-				// **Unless the game says it spawns its own occupants.**
-				// `Players.CharacterAutoLoads` is what a lobby sets to false,
-				// and a host that ignored it would hand everybody a body the
-				// game then has to destroy - which is a frame of a character
-				// standing in the world before a script can stop it.
-				//
-				// The same flag is what `scene::UpdateRespawns` reads for every
-				// life after this one, so the join and the respawn are one
-				// decision rather than two that can disagree.
-				const engine::scene::PlayersServiceComponent *settings =
-					store.Get<engine::scene::PlayersServiceComponent>(engine::scene::PlayersOf(store));
-				if (settings != nullptr && !settings->CharacterAutoLoads) {
-					ENGINE_INFO("server: {} joined without a body - CharacterAutoLoads is off", name);
-				} else if (engine::scene::LoadCharacter(store, player) == engine::ecs::NULL_ENTITY) {
-					ENGINE_WARN("server: '{}' has no character - the world has no Workspace", name);
-				}
-
-				// **Which player is theirs, over the user channel.** It cannot be
-				// replicated: `scene::LocalPlayer` is one resource per world and
-				// the answer differs per client, so it travels as a per-client
-				// message - `game/Join.hpp` carries the whole argument.
-				const std::vector<std::byte> notice =
-					engine::game::EncodeJoinNotice(engine::game::JoinNotice{player});
-				if (!Replication->SendTo(client, notice, PollNow)) {
-					// **Not fatal, and said out loud.** A client that never
-					// learns its player watches the world and cannot move in it,
-					// which is a symptom with no other explanation attached.
-					ENGINE_WARN("server: could not tell '{}' which player is theirs", name);
-				}
-
-				ENGINE_INFO("server: {} joined as '{}'", name, Worlds().NameOf(PrimaryWorld).Text());
-			});
-
 			// **Where content is, said once at admission and outside the world.**
 			// It is per-client - the grant names this session - so it cannot be
 			// replicated, and it is nothing to do with whether the world had a
@@ -1817,6 +1892,21 @@ namespace server {
 		// entity not alive. Leaving it behind would be a body owned for ever by
 		// somebody who has gone.
 		Replication->OnDropped([this](engine::replication::ClientId client) {
+			std::erase_if(PlayerPresentations, [client](const auto &peer) { return peer->Client == client; });
+			const auto departure = PortalDepartures.find(client.Index);
+			if (departure != PortalDepartures.end() && departure->second.Client == client) {
+				Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+					(void)engine::script::CancelPortalPlayerTransfer(
+						store, departure->second.Request.Claim.Transfer, "source client disconnected"
+					);
+				});
+				PortalDepartures.erase(departure);
+			}
+			PortalLeases.Drop((uint64_t(client.Generation) << 32) | (uint64_t(client.Index) + 1));
+			const auto reply = AdmissionReplies.find(client.Index);
+			if (reply != AdmissionReplies.end() && reply->second.Client == client) {
+				AdmissionReplies.erase(reply);
+			}
 			if (ContentLink != nullptr) {
 				// **Before the player, because a slot is reused immediately.** A
 				// relay session left behind would hand the next client on this slot
@@ -1842,6 +1932,8 @@ namespace server {
 			ForgetClientViewpoint(client);
 
 			Worlds().Enter(PrimaryWorld, [player](engine::ecs::Store &store) {
+				(void)engine::game::ApplyMoveInput(store, player, {});
+				(void)engine::scene::RemoveCharacter(store, player);
 				store.DestroyInstance(player);
 			});
 		});
@@ -1953,36 +2045,37 @@ namespace server {
 			store.Observe<engine::scene::Motion>();
 		});
 
-		// **The identity, and the log line says which mode this server is in.**
-		// A deployment that meant to sign and typo'd the flag would otherwise
-		// look identical to one that meant not to.
-		if (seeded) {
-			Identity = engine::assets::SigningKey::FromSeed(seed);
-			if (!Identity.has_value()) {
-				ENGINE_ERROR("server: --identity-key is not a usable Ed25519 seed");
+		// Both transports prove the same key, which the destination lease route pins.
+		Identity = engine::assets::SigningKey::FromSeed(seed);
+		if (!Identity) return false;
+		Replication->SetIdentity(&*Identity);
+		ENGINE_INFO(
+			"replication identity {} ({})",
+			Identity->Public().ToHex(),
+			Settings.IdentityKey.empty() ? "ephemeral" : "configured"
+		);
+
+		if (!Worlds().IsRemote(PrimaryWorld)) {
+			const auto endpoint =
+				Worlds().OpenPresentation(PrimaryWorld, engine::core::Name("portal-sessions"));
+			if (endpoint.Status != engine::world::PresentationStatus::Ok) return false;
+			PortalSessionEndpoint = endpoint.Address;
+			bool configured = false;
+			Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
+				configured = engine::script::ConfigurePortalTransfers(store, endpoint.Address.Session, true);
+				if (configured) engine::script::RegisterTeleportAdmission(scheduler);
+			});
+			if (!configured) {
+				ENGINE_ERROR("listening world could not configure authenticated portal transfers");
 				return false;
 			}
-
-			// **The same key on both wires, which is why one seed is enough.**
-			// Under QUIC the TLS handshake proves it and this call is what the
-			// datagram wire uses; a deployment distributes one public key either
-			// way, and `assets::SigningKey::FromSeed` and
-			// `net::quic::IdentityFor` produce the same public half from it.
-			Replication->SetIdentity(&*Identity);
-			ENGINE_INFO("replication identity {}", Identity->Public().ToHex());
-		} else {
-			ENGINE_WARN(
-				"replication: no --identity-key, so the exchange authenticates nobody. "
-				"It is encrypted against a listener and open to a relay."
-			);
 		}
-
 		ENGINE_INFO(
 			"replication listening on {} over {}",
 			Socket->Local().Text(),
 			engine::net::Describe(streaming.Wire)
 		);
-		return true;
+		return BeginPresentationProducer();
 	}
 
 	engine::script::Runtime *Server::RuntimeOf(engine::world::WorldId world) {
@@ -2068,7 +2161,9 @@ namespace server {
 		return true;
 	}
 
-	void Server::ApplyMove(engine::replication::ClientId client, const engine::game::MoveInput &move) {
+	void Server::ApplyMove(
+		engine::replication::ClientId client, const engine::game::MoveInput &move, uint64_t inputTick
+	) {
 		const auto found = Players.find(client.Index);
 		if (found == Players.end() || found->second.Generation != client.Generation) {
 			// A move from a connection this server has no player for. Ordinary
@@ -2083,31 +2178,27 @@ namespace server {
 		// move from a `PlayLink` with no socket in the middle - two copies of
 		// "which field does a move touch" is the shape that drifts, and drifts
 		// first in the editor.
-		Worlds().Enter(PrimaryWorld, [player, &move](engine::ecs::Store &store) {
-			(void)engine::game::ApplyMoveInput(store, player, move);
+		Worlds().Enter(PrimaryWorld, [player, &move, inputTick](engine::ecs::Store &store) {
+			(void)engine::game::ApplyMoveInput(store, player, move, inputTick);
 		});
 	}
 
 	void Server::ApplyInputs() {
-		using engine::replication::Rewind;
-
 		// **The one place this engine is server-authoritative about something a
 		// client did.** A client sends where it aimed, never what it hit: a
 		// client that decided what it hit would be a client nothing downstream
 		// can second-guess, and no amount of validation afterwards recovers
 		// from that.
 		for (const auto &submission : Replication->Inputs()) {
-			const float latency = Replication->RoundTripMilliseconds(submission.Client);
-
 			for (const engine::replication::Input &input : submission.Inputs) {
 				// **Movement first, because it is the tagged one.** A shot is
-				// seven untagged floats, so the order has to be "try the message
+				// an untagged payload, so the order has to be "try the message
 				// that identifies itself, then the one that does not" - the
 				// reverse would eventually read a move as a shot at whatever
 				// three of its bytes happened to spell.
 				engine::game::MoveInput move;
 				if (engine::game::DecodeMoveInput(input.Bytes, move)) {
-					ApplyMove(submission.Client, move);
+					ApplyMove(submission.Client, move, input.Tick);
 					continue;
 				}
 
@@ -2120,44 +2211,16 @@ namespace server {
 					continue;
 				}
 
-				// **Rewound to what that client was looking at**, which is its
-				// input's tick less the interpolation delay it renders behind
-				// and the half round trip the snapshot took to reach it.
-				double seen = Rewind::TickSeenBy(
-					input.Tick,
-					engine::replication::InterpolationSettings{}.DelayTicks,
-					latency,
-					Settings.TickRate
-				);
+				// The payload names the rendered authoritative tick, including its
+				// interpolation fraction. The envelope tick only orders inputs.
+				double seen = shot.ViewTick;
 
-				// **A tick outside the window is resolved against the present,
-				// and the case that forces it is a client standing still.** A
-				// client stamps its input with the newest tick it has applied,
-				// and a tick only reaches it when something *changed* - so in a
-				// quiet world its idea of the server's clock stops advancing
-				// while the server's does not. Left alone, `Each` is asked for a
-				// tick that fell out of the ring, answers nothing, and every
-				// shot in a still scene misses with no error anywhere.
-				//
-				// **The present rather than the oldest frame held**, which is
-				// the answer that follows from *why* a tick goes stale: it goes
-				// stale because nothing has been changing, and a world that has
-				// not changed looks the same now as it did then. Falling back to
-				// the oldest frame would rewind half a second for a client that
-				// is not behind at all.
-				//
-				// **And it cannot be gamed**, which is the other half of
-				// choosing this direction. Rewinding is the favourable answer
-				// for a laggy shooter, so a client that wanted more of it would
-				// claim an older tick - and claiming one this server no longer
-				// remembers buys the *least* favourable resolution there is,
-				// not the most. A tick inside the window is honoured exactly as
-				// before; `RewindSettings::HistoryTicks` is the bound, and that
-				// header already calls the depth a fairness decision.
+				// Missing or out-of-window view time uses the present. History
+				// depth remains the maximum rewind a client can request.
 				if (History.Depth() == 0) {
 					continue;
 				}
-				if (seen < static_cast<double>(History.Oldest()) ||
+				if (seen == 0 || seen < static_cast<double>(History.Oldest()) ||
 					seen > static_cast<double>(History.Newest())) {
 					seen = static_cast<double>(History.Newest());
 				}
@@ -2535,6 +2598,285 @@ namespace server {
 		Lives.push_back(WorldLife{world, nowSeconds});
 	}
 
+	void Server::ReplyToAdmission(engine::replication::ClientId client, std::vector<std::byte> bytes) {
+		if (bytes.empty()) return;
+		if (Replication->SendTo(client, bytes, PollNow)) {
+			AdmissionReplies.erase(client.Index);
+			return;
+		}
+		AdmissionReplies.insert_or_assign(client.Index, AdmissionReply{client, std::move(bytes)});
+	}
+
+	void Server::ResumePortalSession(
+		engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
+	) {
+		using namespace engine;
+		game::PortalSessionMessage response;
+		response.Kind = game::PortalSessionKind::Refused;
+		response.Attempt = request.Attempt;
+		response.Diagnostic = "portal resume has no matching destination lease and player";
+		response.World = Worlds().NameOf(PrimaryWorld).Text();
+		const uint64_t peer = (uint64_t(client.Generation) << 32) | (uint64_t(client.Index) + 1);
+		const auto identity = Replication->IdentityOf(client);
+		if (identity && request.Claim.Destination == response.World) {
+			Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+				if (script::PortalTransferIncarnation(store) != request.Claim.DestinationIncarnation) return;
+				const auto player = script::PortalTransferPlayer(store, request.Claim.Transfer);
+				if (player == ecs::NULL_ENTITY || !store.Alive(player)) return;
+				const auto assigned = Players.find(client.Index);
+				if (assigned != Players.end() &&
+					(assigned->second.Generation != client.Generation || assigned->second.Instance != player))
+					return;
+				if (request.Kind == game::PortalSessionKind::Resume) {
+					if (!PortalLeases.Reserve(request.Claim, *identity, peer, player, PollNow)) return;
+					response.Kind = game::PortalSessionKind::Ready;
+				} else {
+					if (!PortalLeases.Commit(request.Claim, peer, PollNow)) return;
+					Players.insert_or_assign(client.Index, Occupant{player, client.Generation});
+					response.Kind = game::PortalSessionKind::Committed;
+				}
+				response.Player = player;
+			});
+		}
+		ReplyToAdmission(client, game::EncodePortalSession(response));
+	}
+
+	void Server::ProceedThroughPortal(
+		engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
+	) {
+		using namespace engine;
+		const auto found = PortalDepartures.find(client.Index);
+		bool accepted = false;
+		if (found != PortalDepartures.end() && found->second.Client == client) {
+			auto &departure = found->second;
+			if (departure.Route && departure.Notified && request.Attempt == departure.Request.Attempt) {
+				if (request.Kind == game::PortalSessionKind::Refused) {
+					Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+						accepted = script::CancelPortalPlayerTransfer(
+							store, departure.Request.Claim.Transfer, "client refused portal transfer"
+						);
+					});
+				} else if (request.Claim == departure.Route->Claim && PollNow < departure.Deadline &&
+						   Worlds().LookupPresentation(
+							   Worlds().Find(core::Name(request.Claim.Destination)), "portal-sessions"
+						   ) == departure.Destination) {
+					accepted = departure.Accepted;
+					if (!accepted)
+						Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+							accepted = script::AdmitPortalPlayerTransfer(
+								store, request.Claim.Transfer, request.Claim.DestinationIncarnation
+							);
+						});
+					departure.Accepted = accepted;
+				}
+			}
+		}
+		if (accepted) return;
+		game::PortalSessionMessage refusal;
+		refusal.Kind = game::PortalSessionKind::Refused;
+		refusal.Attempt = request.Attempt;
+		refusal.Diagnostic = "source portal offer is unavailable or does not match";
+		ReplyToAdmission(client, game::EncodePortalSession(refusal));
+	}
+
+	void Server::PumpPortalDepartures(double nowSeconds) {
+		ENGINE_PROFILE("portal session departures");
+		using namespace engine;
+		if (PortalSessionEndpoint.Generation == 0) return;
+		std::vector<std::pair<replication::ClientId, script::PortalTransferReceipt>> receipts;
+		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+			const auto history = script::PortalTransferReceipts(store);
+			for (const auto &[index, player] : Players) {
+				const auto pending = PortalDepartures.find(index);
+				if (pending != PortalDepartures.end() &&
+					pending->second.Client.Generation == player.Generation) {
+					const auto receipt = std::find_if(history.begin(), history.end(), [&](const auto &entry) {
+						return entry.Id == pending->second.Request.Claim.Transfer;
+					});
+					if (receipt != history.end()) {
+						receipts.emplace_back(replication::ClientId{index, player.Generation}, *receipt);
+						continue;
+					}
+				}
+				const auto receipt = script::PortalTransferOfPlayer(store, player.Instance);
+				if (receipt) receipts.emplace_back(replication::ClientId{index, player.Generation}, *receipt);
+			}
+		});
+		for (const auto &[client, receipt] : receipts) {
+			auto found = PortalDepartures.find(client.Index);
+			if (found == PortalDepartures.end()) {
+				if (receipt.Stage != script::PortalTransferStage::Preparing) continue;
+				const auto identity = Replication->IdentityOf(client);
+				const auto secret = network::SessionKey::Draw();
+				if (!identity || !secret ||
+					PortalDepartures.size() >= game::PortalSessionLeases::MAXIMUM_LEASES ||
+					NextPortalAttempt == std::numeric_limits<uint64_t>::max()) {
+					Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+						(void)script::CancelPortalPlayerTransfer(
+							store, receipt.Id, "source cannot offer player admission"
+						);
+					});
+					continue;
+				}
+				PortalDeparture departure;
+				departure.Client = client;
+				departure.Request.Kind = game::PortalSessionKind::LeaseRequest;
+				departure.Request.Attempt = NextPortalAttempt++;
+				departure.Request.Claim.Transfer = receipt.Id;
+				departure.Request.Claim.Destination = receipt.DestinationWorld;
+				departure.Request.Claim.SourceSession = PortalSessionEndpoint.Session;
+				departure.Request.Claim.Capability = secret->Tag({});
+				departure.Request.Through = receipt.Through;
+				departure.Request.Identity = *identity;
+				departure.Deadline = nowSeconds + 20.0;
+				found = PortalDepartures.emplace(client.Index, std::move(departure)).first;
+			}
+			auto &departure = found->second;
+			if (departure.Client != client || departure.Request.Claim.Transfer != receipt.Id) continue;
+			if (receipt.Stage == script::PortalTransferStage::Refused) {
+				game::PortalSessionMessage terminal;
+				terminal.Attempt = departure.Request.Attempt;
+				terminal.Kind = game::PortalSessionKind::Refused;
+				terminal.Diagnostic =
+					receipt.Diagnostic.empty() ? "portal transfer refused" : receipt.Diagnostic;
+				if (Replication->SendTo(client, game::EncodePortalSession(terminal), nowSeconds))
+					PortalDepartures.erase(found);
+				continue;
+			}
+			if (receipt.Stage == script::PortalTransferStage::Committed && departure.Route &&
+				!departure.CrossedSent) {
+				game::PortalSessionMessage crossed;
+				crossed.Attempt = departure.Request.Attempt;
+				crossed.Kind = game::PortalSessionKind::Crossed;
+				crossed.Claim = departure.Route->Claim;
+				departure.CrossedSent =
+					Replication->SendTo(client, game::EncodePortalSession(crossed), nowSeconds);
+				// Adoption can wait after physical commit. Keep renewing this exact
+				// lease until the old client connection retires and drops the departure.
+			}
+			if (departure.CrossedSent && departure.Route && receipt.Motion &&
+				receipt.Motion->DestinationIncarnation == departure.Route->Claim.DestinationIncarnation &&
+				receipt.Motion->DestinationTick > departure.MotionSentTick) {
+				game::PortalSessionMessage motion;
+				motion.Kind = game::PortalSessionKind::Motion;
+				motion.Attempt = departure.Request.Attempt;
+				motion.Claim = departure.Route->Claim;
+				motion.Motion = receipt.Motion;
+				if (Replication->SendTo(client, game::EncodePortalSession(motion), nowSeconds))
+					departure.MotionSentTick = receipt.Motion->DestinationTick;
+			}
+			if (receipt.Stage == script::PortalTransferStage::Cancelling) continue;
+			if (!departure.Accepted && nowSeconds >= departure.Deadline) {
+				Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+					(void)script::CancelPortalPlayerTransfer(
+						store, receipt.Id, "portal lease or client readiness expired"
+					);
+				});
+				continue;
+			}
+			const auto destination = Worlds().Find(core::Name(receipt.DestinationWorld));
+			const auto endpoint = Worlds().LookupPresentation(destination, "portal-sessions");
+			if (departure.Destination.Generation != 0 && endpoint != departure.Destination) {
+				Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+					(void)script::CancelPortalPlayerTransfer(
+						store, receipt.Id, "portal destination endpoint changed"
+					);
+				});
+				continue;
+			}
+			if (endpoint.Generation != 0 && nowSeconds >= departure.RetryAt) {
+				auto request = departure.Request;
+				if (departure.Route)
+					request.Claim.DestinationIncarnation = departure.Route->Claim.DestinationIncarnation;
+				if (Worlds().SendPresentation(
+						PrimaryWorld,
+						PortalSessionEndpoint,
+						endpoint,
+						request.Attempt,
+						game::EncodePortalSession(request)
+					) == world::PresentationStatus::Ok) {
+					departure.Destination = endpoint;
+					departure.RetryAt = nowSeconds + (departure.Route ? 5.0 : .25);
+				}
+			}
+			if (departure.Route && !departure.Notified) {
+				auto transfer = *departure.Route;
+				transfer.Kind = game::PortalSessionKind::Transfer;
+				transfer.Through = departure.Request.Through;
+				departure.Notified =
+					Replication->SendTo(client, game::EncodePortalSession(transfer), nowSeconds);
+			}
+		}
+	}
+
+	void Server::PumpPortalSessions(double nowSeconds) {
+		using namespace engine;
+		PortalLeases.Expire(nowSeconds);
+		PumpPortalDepartures(nowSeconds);
+		for (const auto &message : Worlds().TakePresentation(PortalSessionEndpoint)) {
+			game::PortalSessionMessage request;
+			if (message.To != PortalSessionEndpoint || message.From.Channel != "portal-sessions" ||
+				!game::DecodePortalSession(message.Payload, request) ||
+				request.Attempt != message.Correlation)
+				continue;
+			if (request.Kind == game::PortalSessionKind::LeaseRoute ||
+				request.Kind == game::PortalSessionKind::Refused) {
+				for (auto &[index, departure] : PortalDepartures) {
+					if (departure.Request.Attempt != request.Attempt || departure.Destination != message.From)
+						continue;
+					if (request.Kind == game::PortalSessionKind::Refused) {
+						Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+							(void)script::CancelPortalPlayerTransfer(
+								store, departure.Request.Claim.Transfer, "destination refused portal lease"
+							);
+						});
+						break;
+					}
+					auto claim = request.Claim;
+					claim.DestinationIncarnation = 0;
+					if (claim != departure.Request.Claim ||
+						(departure.Route && departure.Route->Claim != request.Claim))
+						break;
+					departure.Route = request;
+					break;
+				}
+				continue;
+			}
+			if (request.Kind != game::PortalSessionKind::LeaseRequest ||
+				request.Claim.Transfer.SourceWorld != message.From.World ||
+				request.Claim.SourceSession != message.From.Session ||
+				request.Claim.Destination != PortalSessionEndpoint.World)
+				continue;
+			game::PortalSessionMessage response;
+			response.Kind = game::PortalSessionKind::Refused;
+			response.Attempt = request.Attempt;
+			response.Diagnostic = "destination player transfer is unavailable";
+			if (Identity) {
+				uint64_t incarnation = 0;
+				Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+					incarnation = script::PortalTransferIncarnation(store);
+				});
+				if (incarnation != 0 && (request.Claim.DestinationIncarnation == 0 ||
+										 request.Claim.DestinationIncarnation == incarnation)) {
+					request.Claim.DestinationIncarnation = incarnation;
+					if (PortalLeases.Offer(request.Claim, request.Identity, nowSeconds)) {
+						response = request;
+						response.Kind = game::PortalSessionKind::LeaseRoute;
+						response.Identity = Identity->Public();
+						response.Port = ListeningOn().Port;
+					}
+				}
+			}
+			(void)Worlds().SendPresentation(
+				PrimaryWorld,
+				PortalSessionEndpoint,
+				message.From,
+				message.Correlation,
+				game::EncodePortalSession(response)
+			);
+		}
+	}
+
 	void Server::ServeClients(double nowSeconds) {
 		ENGINE_PROFILE_CAT("Server::ServeClients", engine::core::ProfileCategory::Network);
 
@@ -2544,9 +2886,9 @@ namespace server {
 			return;
 		}
 
-		// Recorded before the poll, because `OnAdmitted` fires from inside it
-		// and the join notice it sends has to be stamped with this tick's clock.
+		// Callbacks inside the poll stamp replies with this tick's clock.
 		PollNow = nowSeconds;
+		PumpPortalSessions(nowSeconds);
 
 		// Inbound first, so an acknowledgement that arrived this tick is counted
 		// before this tick's delta is built against it.
@@ -2679,6 +3021,21 @@ namespace server {
 			Publishing = &store;
 			Replication->Publish(store, store.Time().Tick, nowSeconds);
 			Publishing = nullptr;
+			// The tick is complete and ApplyInputs below has not advanced the input
+			// frontier yet. Scheduled portal input supplies its physics-applied prefix;
+			// ordinary input uses the consumed prefix from the completed step.
+			for (auto &[index, occupant] : Players) {
+				if (occupant.MotionSentTick >= store.Time().Tick) continue;
+				const engine::replication::ClientId client{index, occupant.Generation};
+				const auto status = Replication->Authority().StatusOf(client);
+				const auto sample =
+					engine::game::CapturePlayerMotion(store, occupant.Instance, status.ConsumedInput);
+				if (!sample) continue;
+				const auto bytes = engine::game::EncodePlayerMotion(*sample);
+				if (!Replication->SendTo(client, bytes, nowSeconds)) continue;
+				occupant.MotionSentTick = store.Time().Tick;
+				engine::core::Metrics::Count("server.player.motion.bytes", bytes.size());
+			}
 		});
 
 		// **After the world, and that ordering is the whole of "content must not
@@ -2701,6 +3058,12 @@ namespace server {
 		Replication->ClearInputs();
 
 		Replication->Advance(nowSeconds);
+		// Advance frees the next send allowance. Retain refused bytes without
+		// requiring the client to repeat an already delivered request.
+		std::erase_if(AdmissionReplies, [this, nowSeconds](const auto &entry) {
+			const auto &reply = entry.second;
+			return Replication->SendTo(reply.Client, reply.Bytes, nowSeconds);
+		});
 	}
 
 	bool Server::ConfigureWorldPlacement() {
@@ -2836,41 +3199,51 @@ namespace server {
 			return false;
 		}
 
-		for (const std::string &name : Settings.HostWorlds) {
-			engine::world::WorldSettings world;
-			world.Name = engine::core::Name(name);
-			world.TickRate = Settings.TickRate;
-			world.PhysicsTickRate = Settings.PhysicsTickRate;
-			world.ReplicationTickRate = Settings.ReplicationTickRate;
+		const auto projectKind = engine::game::ClassifyProject(Settings.GamePath);
+		const bool project = projectKind == engine::game::ProjectKind::GameFile ||
+							 projectKind == engine::game::ProjectKind::UniverseFolder ||
+							 projectKind == engine::game::ProjectKind::ProjectZip;
+		if (project && !HostProject()) return false;
+		if (!project)
+			for (const std::string &name : Settings.HostWorlds) {
+				engine::world::WorldSettings world;
+				world.Name = engine::core::Name(name);
+				world.TickRate = Settings.TickRate;
+				world.PhysicsTickRate = Settings.PhysicsTickRate;
+				world.ReplicationTickRate = Settings.ReplicationTickRate;
 
-			const engine::world::WorldId id = Worlds().Create(world);
-			if (!id.IsValid()) {
-				ENGINE_ERROR("host '{}' could not create world '{}'", Settings.HostName, name);
-				return false;
-			}
-
-			Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-				if (!BuildWorld(store, systems)) {
-					return;
+				const engine::world::WorldId id = Worlds().Create(world);
+				if (!id.IsValid()) {
+					ENGINE_ERROR("host '{}' could not create world '{}'", Settings.HostName, name);
+					return false;
 				}
-				if (Settings.Chatter) {
-					store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-				}
-			});
 
-			// The first world granted is the one `Enter` reaches. A host holds
-			// several and a caller outside it addresses them by name, so this
-			// is a convenience rather than a distinction the host makes.
-			if (!PrimaryWorld.IsValid()) {
-				PrimaryWorld = id;
+				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					if (!BuildWorld(store, systems)) {
+						return;
+					}
+					if (Settings.Chatter) {
+						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+					}
+				});
+
+				// The first world granted is the one `Enter` reaches. A host holds
+				// several and a caller outside it addresses them by name, so this
+				// is a convenience rather than a distinction the host makes.
+				if (!PrimaryWorld.IsValid()) {
+					PrimaryWorld = id;
+				}
 			}
-		}
 
 		if (!BeginListening()) {
 			return false;
 		}
 
 		engine::world::HostFrame ready;
+		if (Settings.HostTickExchange) {
+			HostExchange = std::make_unique<engine::world::TickExchangeHost>(Worlds());
+			PublishedHostFrame = 0;
+		}
 		ready.Signal = engine::world::HostSignal::Ready;
 		ready.Port = ListeningOn().Port;
 		Link->Send(ready);
@@ -2891,11 +3264,62 @@ namespace server {
 		}
 
 		Frames.clear();
+		if (!Worlds().TickExchangeFrameOpen()) {
+			Frames.swap(DeferredHostFrames);
+			DeferredHostFrames.clear();
+			DeferredHostBytes = 0;
+		}
 		Link->Receive(Frames);
 
 		bool asked = false;
 		for (const engine::world::HostFrame &frame : Frames) {
+			if (Worlds().TickExchangeFrameOpen() &&
+				frame.Signal != engine::world::HostSignal::TickExchangeCommand &&
+				frame.Signal != engine::world::HostSignal::Stop) {
+				engine::core::ByteWriter encoded;
+				engine::world::WriteHostFrame(encoded, frame);
+				constexpr size_t MAXIMUM_DEFERRED_BYTES = 32u * 1024u * 1024u;
+				if (DeferredHostFrames.size() >= 64 ||
+					encoded.Size() > MAXIMUM_DEFERRED_BYTES - DeferredHostBytes) {
+					asked = true;
+					break;
+				}
+				DeferredHostBytes += encoded.Size();
+				DeferredHostFrames.push_back(frame);
+				continue;
+			}
 			switch (frame.Signal) {
+			case engine::world::HostSignal::TickExchangeCommand: {
+				if (!HostExchange) {
+					ENGINE_ERROR(
+						"host '{}' received phases without phase-controlled launch", Settings.HostName
+					);
+					asked = true;
+					break;
+				}
+				engine::world::HostFrame response;
+				response.Signal = engine::world::HostSignal::TickExchangeResult;
+				response.ExchangeResult = HostExchange->Handle(frame.ExchangeCommand);
+				const auto operation = frame.ExchangeCommand.Operation;
+				if (response.ExchangeResult.Success && PublishedHostFrame != frame.ExchangeCommand.Frame &&
+					(operation == engine::world::TickExchangeOperation::End ||
+					 operation == engine::world::TickExchangeOperation::Cancel)) {
+					HostFrameFinished = true;
+					// Queue gathered bus traffic before acknowledging the frame, so
+					// arrival timing cannot move this batch past the next driver barrier.
+					if (!Link->SendTraffic(Worlds().LastTraffic()) ||
+						!Link->Heartbeat(
+							Worlds().StatisticsOf(PrimaryWorld).Ticks,
+							Worlds().StatisticsOf(PrimaryWorld).LastTickMilliseconds
+						)) {
+						asked = true;
+						break;
+					}
+					PublishedHostFrame = frame.ExchangeCommand.Frame;
+				}
+				if (!Link->Send(response)) asked = true;
+				break;
+			}
 			case engine::world::HostSignal::Stop:
 				// Noted rather than acted on here: the tick that is already
 				// underway finishes, and what this host owes goes up with it.
@@ -2914,6 +3338,44 @@ namespace server {
 				}
 				break;
 
+			case engine::world::HostSignal::Presentation:
+				(void)Worlds().AcceptPresentationFromDriver(frame.Presentation);
+				break;
+			case engine::world::HostSignal::PresentationRoutes: {
+				const auto retained = PortalRouteWorlds.size();
+				for (const auto &address : frame.Directory.Endpoints) {
+					const engine::core::Name name(address.World);
+					if (Worlds().Find(name).IsValid()) continue;
+					engine::world::WorldSettings settings;
+					settings.Name = name;
+					const auto remote =
+						Worlds().CreateRemote(settings, engine::core::Name("presentation-driver"));
+					if (remote.IsValid()) PortalRouteWorlds.push_back(remote);
+				}
+				if (Worlds().AcceptPresentationRoutesFromDriver(frame.Directory) !=
+					engine::world::PresentationStatus::Ok) {
+					for (size_t index = retained; index < PortalRouteWorlds.size(); index++) {
+						(void)Worlds().Destroy(PortalRouteWorlds[index]);
+					}
+					PortalRouteWorlds.resize(retained);
+					break;
+				}
+				std::erase_if(PortalRouteWorlds, [&](const auto remote) {
+					const auto name = Worlds().NameOf(remote).Text();
+					if (std::any_of(
+							frame.Directory.Endpoints.begin(),
+							frame.Directory.Endpoints.end(),
+							[&](const auto &address) { return address.World == name; }
+						))
+						return false;
+					(void)Worlds().Destroy(remote);
+					return true;
+				});
+				break;
+			}
+
+			case engine::world::HostSignal::PresentationDirectory:
+			case engine::world::HostSignal::TickExchangeResult:
 			case engine::world::HostSignal::Traffic:
 			case engine::world::HostSignal::Ready:
 			case engine::world::HostSignal::Heartbeat:
@@ -2929,7 +3391,23 @@ namespace server {
 			}
 		}
 
-		if (!Link->Connected()) {
+		if (asked || !Link->Connected()) {
+			if (HostExchange) HostExchange->Disconnect();
+			DeferredHostFrames.clear();
+			DeferredHostBytes = 0;
+			Worlds().RetirePresentationHost(engine::core::Name("presentation-driver"));
+			(void)Worlds().ClosePresentation(PortalSessionEndpoint);
+			PortalSessionEndpoint = {};
+			PortalLeases = {};
+			PortalDepartures.clear();
+			DriverPresentationOutbound.clear();
+			for (const auto remote : PortalRouteWorlds)
+				(void)Worlds().Destroy(remote);
+			PortalRouteWorlds.clear();
+			if (Link->Connected()) {
+				(void)Link->PublishPresentationDirectory(Worlds().LocalPresentationDirectory());
+				return false;
+			}
 			// The driver is gone. Continuing would leave worlds ticking with
 			// nobody to answer their bus requests and nobody to stop them,
 			// which is the orphan a supervisor exists to prevent.
@@ -2937,7 +3415,30 @@ namespace server {
 			return false;
 		}
 
-		return !asked;
+		if (Worlds().TickExchangeFrameOpen()) return true;
+		if (!Link->PublishPresentationDirectory(Worlds().LocalPresentationDirectory())) return true;
+		if (DriverPresentationOutbound.empty()) {
+			DriverPresentationOutbound = Worlds().TakePresentationOutbound();
+		}
+		size_t sent = 0;
+		for (const auto &outgoing : DriverPresentationOutbound) {
+			const auto &message = outgoing.Message;
+			if (Worlds().LookupPresentation(
+					Worlds().Find(engine::core::Name(message.From.World)), message.From.Channel
+				) != message.From ||
+				Worlds().LookupPresentation(
+					Worlds().Find(engine::core::Name(message.To.World)), message.To.Channel
+				) != message.To) {
+				++sent;
+				continue;
+			}
+			if (!Link->SendPresentation(message)) break;
+			++sent;
+		}
+		DriverPresentationOutbound.erase(
+			DriverPresentationOutbound.begin(), DriverPresentationOutbound.begin() + sent
+		);
+		return true;
 	}
 
 	bool Server::BeginRecording() {
@@ -2956,6 +3457,9 @@ namespace server {
 	}
 
 	void Server::Shutdown() {
+		if (HostExchange) HostExchange->Disconnect();
+		PlayerPresentations.clear();
+		StopPresentationProducer();
 		if (Driver_ != nullptr && !Replayer_ && !IsHost() && !FlushDataStore()) {
 			ENGINE_ERROR("could not flush the configured DataStore during shutdown");
 		}
@@ -2969,6 +3473,7 @@ namespace server {
 			}
 		}
 
+		HostExchange.reset();
 		if (Link != nullptr) {
 			Link->Close();
 			Link.reset();
@@ -2992,11 +3497,20 @@ namespace server {
 		// dangling reference in a destructor, which is the least debuggable
 		// place for one.
 		Replication.reset();
+		AdmissionReplies.clear();
+		PortalLeases = {};
+		PortalDepartures.clear();
+		NextPortalAttempt = 1;
+		PortalSessionEndpoint = {};
+		DriverPresentationOutbound.clear();
+		PortalRouteWorlds.clear();
 		if (Socket != nullptr) {
 			Socket->Close();
 			Socket.reset();
 		}
 
+		// Runtime cleanup detaches hooks from its borrowed store.
+		Runtimes.clear();
 		Driver_.reset();
 		DataStorePersistence.reset();
 		DataStoreReady = false;
@@ -3157,7 +3671,22 @@ namespace server {
 			} else {
 				// Before the tick, so what the driver decided last barrier is
 				// in the inboxes by the time the systems that read them run.
-				if (!ServiceLink()) {
+				HostFrameFinished = false;
+				bool linked = true;
+				do {
+					// Pump while waiting at frame boundaries; open coordinated frames defer image traffic.
+					PumpPresentationProducer();
+					linked = ServiceLink();
+					if (!linked || !HostExchange || HostFrameFinished) break;
+					if (StopRequested.load()) {
+						HostExchange->Disconnect();
+						linked = false;
+						break;
+					}
+					ENGINE_PROFILE_CAT("host driver phase wait", engine::core::ProfileCategory::Idle);
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				} while (true);
+				if (!linked) {
 					engine::core::FrameGraph::EndFrame();
 					break;
 				}
@@ -3166,17 +3695,15 @@ namespace server {
 				// its state and its inbox; feeding it real elapsed time would
 				// make a recorded run unreplayable and every physics result
 				// machine-dependent.
-				// The driver's barrier rather than the universe's, so worlds
-				// held by a host route through the same buses in the same
-				// order as the ones held here. With no hosts the two are the
-				// same call plus five lines of nothing, which is why there is
-				// only one path.
-				Driver_->Tick(delta, static_cast<double>(engine::core::Clock::Nanoseconds()) / 1e9);
+				// A phase-controlled host has already completed the driver's frame.
+				// Other deployments start their fixed frame through Driver here.
+				if (!HostExchange)
+					Driver_->Tick(delta, static_cast<double>(engine::core::Clock::Nanoseconds()) / 1e9);
 				if (Recorder_) {
 					Recorder_->Capture(Worlds(), delta);
 				}
 
-				if (Link != nullptr) {
+				if (Link != nullptr && !HostExchange) {
 					// A federated universe collects and orders its worlds'
 					// requests without applying them, so this is exactly what a
 					// driver's barrier would have had.
@@ -3212,7 +3739,11 @@ namespace server {
 			// connected - which is exactly the kind of input that stops a replay
 			// being byte-identical.
 			if (!Replayer_) {
+				// Admission routes and image traffic use the presentation bus between ticks.
+				if (!Link) Driver_->PumpPresentation(static_cast<double>(tickStarted) / 1e9);
 				ServeClients(static_cast<double>(tickStarted) / 1e9);
+				PumpPresentationProducer();
+				PumpPlayerPresentation(static_cast<double>(tickStarted) / 1e9);
 
 				// **After serving, so a client that joined this tick counts as
 				// occupancy before anything decides the world is empty.** Not on

@@ -27,7 +27,10 @@
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Accessories.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Audio.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -2082,5 +2085,81 @@ TEST_CASE("the neutral table holds no duplicate names", "[scripting][scriptcall]
 		}
 		INFO(left.Name);
 		CHECK(seen == 1);
+	}
+}
+
+TEST_CASE(
+	"both VMs equip a real accessory through matching attachments", "[scripting][scriptcall][accessory]"
+) {
+	for (const auto language : LANGUAGES) {
+		Store store = Fresh("scriptcall-accessory");
+		engine::scene::InstallServices(store);
+		const auto player = engine::scene::AddPlayer(store, "player", true);
+		const auto character = engine::scene::LoadCharacter(store, player);
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const auto source =
+			Let(language, "players", Call(language, "game", "GetService('Players')")) +
+			Let(language, "character", "players.LocalPlayer.Character") +
+			Let(language, "humanoid", Call(language, "character", "FindFirstChild('Humanoid')")) +
+			Let(language, "head", Call(language, "character", "FindFirstChild('Head')")) +
+			Let(language, "hat", "Instance.new('Accessory')") +
+			Let(language, "handle", "Instance.new('Part')") +
+			"handle.Name = 'Handle'\nhandle.Parent = hat\n" +
+			Let(language, "mount", "Instance.new('Attachment')") +
+			"mount.Name = 'HatAttachment'\nmount.CFrame = CFrame.new(0, 0.25, 0)\nmount.Parent = handle\n" +
+			Let(language, "target", "Instance.new('Attachment')") +
+			"target.Name = 'HatAttachment'\ntarget.CFrame = CFrame.new(0, 0.5, 0)\ntarget.Parent = "
+			"head\n" +
+			Say(language, Call(language, "humanoid", "AddAccessory(hat)"));
+		const bool ran = runtime->Run(source.c_str());
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		CHECK(store.InstanceNameOf(engine::scene::WorkspaceOf(store)).Text() == "true");
+		const auto hat = store.FindFirstChildWhichIsA(character, engine::scene::AccessoryClass());
+		REQUIRE(hat != engine::ecs::NULL_ENTITY);
+		engine::scene::PoseCharacters(store);
+		const auto points = *store.Get<engine::scene::Accessory>(hat);
+		CHECK(
+			(engine::scene::ResolveAttachment(store, points.HandleAttachment).Position -
+			 engine::scene::ResolveAttachment(store, points.CharacterAttachment).Position)
+				.Magnitude() < .0001f
+		);
+		const auto detach = Let(language,
+								"release",
+								Call(language, "game", "GetService('Players')") + ".LocalPlayer.Character") +
+							Let(language,
+								"accessoryToRelease",
+								Call(language, "release", "FindFirstChildWhichIsA('Accessory')")) +
+							"accessoryToRelease.Parent = workspace\n";
+		REQUIRE(runtime->Run(detach.c_str()));
+		engine::scene::PoseCharacters(store);
+		REQUIRE_FALSE(store.Has<engine::scene::CharacterLimb>(store.ParentOf(points.HandleAttachment)));
+	}
+}
+
+TEST_CASE(
+	"both VMs cut camera pose and its previous sample together", "[scripting][scriptcall][camera-cut]"
+) {
+	for (const auto language : LANGUAGES) {
+		Store store = Fresh("scriptcall-camera-cut");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const auto source = Let(language, "camera", "Instance.new('Camera')") +
+							"camera.Name = 'CutCamera'\ncamera.Parent = workspace\n" +
+							Say(language, Call(language, "camera", "CutTo(CFrame.new(7, 8, 9))"));
+		const bool ran = runtime->Run(source.c_str());
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const auto workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(store.InstanceNameOf(workspace).Text() == "true");
+		const auto camera = store.FindFirstChild(workspace, "CutCamera");
+		REQUIRE(
+			store.Get<engine::scene::Transform>(camera)->Frame.Position == engine::core::Vector3(7, 8, 9)
+		);
+		REQUIRE(
+			store.Get<engine::scene::PreviousTransform>(camera)->Frame.Position ==
+			engine::core::Vector3(7, 8, 9)
+		);
 	}
 }

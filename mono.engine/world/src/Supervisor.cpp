@@ -7,6 +7,31 @@
 #include <thread>
 
 namespace engine::world {
+	namespace {
+		bool HoldsWorld(const HostPlan &plan, std::string_view world) {
+			return std::any_of(plan.Worlds.begin(), plan.Worlds.end(), [world](core::Name owned) {
+				return owned.Text() == world;
+			});
+		}
+
+		bool MatchesExchange(
+			const HostPlan &plan, const TickExchangeCommand &command, const TickExchangeResult &result
+		) {
+			if (result.Operation != command.Operation || result.Frame != command.Frame ||
+				result.Round != command.Round)
+				return false;
+			if (!result.Success) return true;
+			for (const auto &request : result.Requests) {
+				if (!HoldsWorld(plan, request.Stamp.SourceWorld)) return false;
+			}
+			if (command.Operation != TickExchangeOperation::Serve) return true;
+			if (result.Replies.size() != command.Requests.size()) return false;
+			for (size_t index = 0; index < result.Replies.size(); index++) {
+				if (result.Replies[index].Stamp != command.Requests[index].Stamp) return false;
+			}
+			return true;
+		}
+	}
 
 	const char *Describe(HostState state) {
 		switch (state) {
@@ -178,7 +203,25 @@ namespace engine::world {
 		}
 
 		entry.Link = std::make_unique<HostLink>(std::move(pair.Local), entry.Plan.Name);
+		entry.PresentationSubscriber = false;
 		return true;
+	}
+
+	void Supervisor::RetireLink(core::Name host) {
+		if (auto *entry = Find(host)) {
+			entry->ExchangePending.reset();
+			entry->ExchangeReceived.reset();
+		}
+		if (std::find(ReplacedPresentationHosts.begin(), ReplacedPresentationHosts.end(), host) ==
+			ReplacedPresentationHosts.end()) {
+			ReplacedPresentationHosts.push_back(host);
+		}
+		std::erase_if(DirectoryInbound, [host](const auto &incoming) { return incoming.Host == host; });
+		std::erase_if(PresentationInbound, [&](const auto &incoming) {
+			if (incoming.Host != host) return false;
+			PresentationBytes -= incoming.Message.Payload.size();
+			return true;
+		});
 	}
 
 	bool Supervisor::Attach(core::Name host, std::unique_ptr<parallel::Channel> channel) {
@@ -187,7 +230,9 @@ namespace engine::world {
 			return false;
 		}
 
+		if (entry->Link != nullptr) RetireLink(host);
 		entry->Link = std::make_unique<HostLink>(std::move(channel), host);
+		entry->PresentationSubscriber = false;
 		return true;
 	}
 
@@ -206,6 +251,18 @@ namespace engine::world {
 				handled++;
 
 				switch (frame.Signal) {
+				case HostSignal::TickExchangeResult:
+					if (!entry.ExchangePending || entry.ExchangeReceived ||
+						!MatchesExchange(entry.Plan, *entry.ExchangePending, frame.ExchangeResult)) {
+						ExchangeRefused++;
+						break;
+					}
+					entry.ExchangeReceived = std::move(frame.ExchangeResult);
+					Heartbeat(entry.Plan.Name, now);
+					break;
+				case HostSignal::TickExchangeCommand:
+					ExchangeRefused++;
+					break;
 				case HostSignal::Ready:
 					entry.Ready = true;
 					entry.Tick = frame.Tick;
@@ -233,6 +290,30 @@ namespace engine::world {
 					for (Envelope &envelope : frame.Traffic) {
 						Inbound.push_back(HostTraffic{entry.Plan.Name, std::move(envelope)});
 					}
+					break;
+
+				case HostSignal::Presentation: {
+					const PresentationLimits limits;
+					const uint64_t bytes = frame.Presentation.Payload.size();
+					if (PresentationInbound.size() >= limits.Messages || bytes > limits.Bytes ||
+						PresentationBytes > limits.Bytes - bytes) {
+						PresentationRefused++;
+						break;
+					}
+					PresentationBytes += bytes;
+					PresentationInbound.push_back({entry.Plan.Name, std::move(frame.Presentation)});
+					break;
+				}
+				case HostSignal::PresentationDirectory:
+					entry.PresentationSubscriber = true;
+					if (DirectoryInbound.size() >= MAX_PRESENTATION_DIRECTORY) {
+						PresentationRefused++;
+						break;
+					}
+					DirectoryInbound.push_back({entry.Plan.Name, std::move(frame.Directory)});
+					break;
+				case HostSignal::PresentationRoutes:
+					PresentationRefused++;
 					break;
 
 				case HostSignal::Faulted:
@@ -273,10 +354,78 @@ namespace engine::world {
 		return handled;
 	}
 
+	bool Supervisor::WantsPresentationRoutes(core::Name host) const {
+		const auto *entry = Find(host);
+		return entry != nullptr && entry->PresentationSubscriber && entry->Link != nullptr &&
+			   entry->Link->Connected();
+	}
+
+	bool Supervisor::SendTickExchange(core::Name host, const TickExchangeCommand &command) {
+		auto *entry = Find(host);
+		if (entry == nullptr || entry->Link == nullptr || !entry->Link->Connected()) return false;
+		if (entry->ExchangePending && (command.Operation != TickExchangeOperation::Cancel ||
+									   command.Frame != entry->ExchangePending->Frame))
+			return false;
+		for (const auto &request : command.Requests) {
+			if (!HoldsWorld(entry->Plan, request.Stamp.DestinationWorld)) return false;
+		}
+		for (const auto &reply : command.Replies) {
+			if (!HoldsWorld(entry->Plan, reply.Stamp.SourceWorld)) return false;
+		}
+		HostFrame frame;
+		frame.Signal = HostSignal::TickExchangeCommand;
+		frame.ExchangeCommand = command;
+		if (!entry->Link->Send(frame)) return false;
+		entry->ExchangePending = command;
+		entry->ExchangeReceived.reset();
+		return true;
+	}
+
+	std::optional<TickExchangeResult> Supervisor::TakeTickExchange(core::Name host) {
+		auto *entry = Find(host);
+		if (entry == nullptr || !entry->ExchangeReceived) return std::nullopt;
+		auto result = std::move(entry->ExchangeReceived);
+		entry->ExchangeReceived.reset();
+		entry->ExchangePending.reset();
+		return result;
+	}
+	void Supervisor::CloseLink(core::Name host) {
+		auto *entry = Find(host);
+		if (entry == nullptr || !entry->Link) return;
+		entry->Link->Close();
+		RetireLink(host);
+	}
+	bool Supervisor::PublishPresentationRoutes(core::Name host, const PresentationDirectory &directory) {
+		auto *entry = Find(host);
+		return entry != nullptr && entry->Link != nullptr &&
+			   entry->Link->PublishPresentationRoutes(directory);
+	}
+	std::vector<core::Name> Supervisor::TakeReplacedPresentationHosts() {
+		std::vector<core::Name> taken;
+		taken.swap(ReplacedPresentationHosts);
+		return taken;
+	}
+	std::vector<HostPresentationDirectory> Supervisor::TakePresentationDirectories() {
+		std::vector<HostPresentationDirectory> taken;
+		taken.swap(DirectoryInbound);
+		return taken;
+	}
 	std::vector<HostTraffic> Supervisor::TakeTraffic() {
 		std::vector<HostTraffic> taken;
 		taken.swap(Inbound);
 		return taken;
+	}
+
+	std::vector<HostPresentation> Supervisor::TakePresentationTraffic() {
+		std::vector<HostPresentation> taken;
+		taken.swap(PresentationInbound);
+		PresentationBytes = 0;
+		return taken;
+	}
+
+	bool Supervisor::SendPresentation(core::Name host, const PresentationMessage &message) {
+		Entry *entry = Find(host);
+		return entry != nullptr && entry->Link != nullptr && entry->Link->SendPresentation(message);
 	}
 
 	bool Supervisor::SendTo(core::Name host, std::span<const Envelope> traffic) {
@@ -420,6 +569,7 @@ namespace engine::world {
 			// The old link belongs to a process that is gone. Kept, it would
 			// report `Connected()` until the kernel noticed, and the respawn
 			// would then write into a socket nobody reads.
+			RetireLink(entry.Plan.Name);
 			entry.Link.reset();
 
 			// Killed before respawning, because a silent host may still be
@@ -491,6 +641,7 @@ namespace engine::world {
 			}
 			if (entry.Link != nullptr) {
 				entry.Link->Close();
+				RetireLink(entry.Plan.Name);
 				entry.Link.reset();
 			}
 			entry.State = HostState::Idle;

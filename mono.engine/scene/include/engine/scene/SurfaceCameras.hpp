@@ -177,7 +177,9 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
+#include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -470,6 +472,18 @@ namespace engine::scene {
 	// @since v0.15
 	size_t GatherSurfacePanes(ecs::Store &store, std::vector<SurfacePane> &panes);
 
+	// Local presentation indices, independent of the active camera. Disabled
+	// and edge-on cameras retain their position; overflow receives -1.
+	struct SurfaceSlot {
+		ecs::Entity Camera{};
+		ecs::Entity Part{};
+		int16_t Index = -1;
+		std::array<std::byte, 6> Padding{};
+	};
+
+	// Enumerates valid part-parented cameras in entity order without ECS writes.
+	size_t GatherSurfaceSlots(ecs::Store &store, std::vector<SurfaceSlot> &slots);
+
 	// What a world says when it would rather the frame worked the depth out
 	// for itself.
 	//
@@ -672,7 +686,7 @@ namespace engine::scene {
 		// **The face's normal, not "the outward one".** Which side is outward is
 		// a question about the *crosser*, exactly as it is a question about the
 		// viewer in `AimSurfaceCameras` - a pane can be walked into from either
-		// side and both answers are right. `SeamMapping` takes the side.
+		// side. The mapping uses the authored face frame on either side.
 		//@{
 		core::Vector3 Centre;
 		core::Vector3 Normal;
@@ -685,6 +699,10 @@ namespace engine::scene {
 		core::Vector3 First;
 		core::Vector3 Second;
 		//@}
+
+		// Authored face-up direction transported with the part's rotation.
+		// Zero retains the world-up convention for manually constructed seams.
+		core::Vector3 Up;
 
 		// The far pane's face frame, looking out of itself. The half of the
 		// mapping that does not depend on who is crossing.
@@ -699,6 +717,8 @@ namespace engine::scene {
 		//@{
 		ecs::Entity Pane = ecs::NULL_ENTITY;
 		ecs::Entity Far = ecs::NULL_ENTITY;
+		// Local camera identity lets copied presentation inputs share slot ordering.
+		ecs::Entity Camera = ecs::NULL_ENTITY;
 		//@}
 
 		// How much bigger the far pane is than this one.
@@ -764,7 +784,25 @@ namespace engine::scene {
 		//
 		// @since v0.19
 		bool Bidirectional = true;
+
+		// Local routing data. Encoders write the text when a crossing leaves this store.
+		core::Name DestinationWorld;
 	};
+
+	// Local presentation history for the predicted body. The source still owns
+	// its rows while admission to another world is pending.
+	struct PortalBodyView {
+		ecs::Entity Root{};
+		core::Vector3 Previous{};
+		core::Vector3 EntryNormal{};
+		std::optional<PortalSeam> Crossing{};
+	};
+
+	// Observes the presented root, keeping a crossed mouth until the body returns.
+	// Missing roots and changed mouth geometry invalidate this local history.
+	void UpdatePortalBodyView(
+		ecs::Store &store, ecs::Entity root, const core::Vector3 &position, std::span<const DrawInstance> rows
+	);
 
 	// The map from one side of a seam to the far side.
 	//
@@ -921,13 +959,8 @@ namespace engine::scene {
 	// @since v0.15
 	float NearestSeamDistance(ecs::Store &store, const core::Vector3 &at);
 
-	// Smallest near plane a camera is allowed, in studs.
-	//
-	// **Depth precision has to be spent somewhere and this is where.** A near
-	// plane is a floor on how close geometry can be drawn, so the pane of a hole
-	// you are walking into is sliced open by it - you see through the wall for
-	// the last hand's width of the approach, which is the one moment the whole
-	// feature is judged on.
+	// Nominal near plane for viewpoint clearance and a coplanar-eye fallback.
+	// Positive approach distances can use a smaller plane to keep the mouth visible.
 	constexpr float PORTAL_NEAR_MIN = 0.003f;
 
 	// The near plane to actually draw with, given how close a hole is.
@@ -1031,14 +1064,14 @@ namespace engine::scene {
 	//
 	// @since v0.15
 	struct SeamCut {
-		// The plane the *original* keeps, which is the front of the pane it is
-		// standing in: `dot(p, NearNormal) >= NearOffset`.
+		// The original keeps its owning body's side of the plane:
+		// `dot(p, NearNormal) >= NearOffset`.
 		//@{
 		core::Vector3 NearNormal;
 		float NearOffset = 0.0f;
 		//@}
 
-		// The plane the *copy* keeps, which is the front of the far pane.
+		// The copy keeps the mapped complement of the original's plane.
 		//@{
 		core::Vector3 FarNormal;
 		float FarOffset = 0.0f;
@@ -1158,7 +1191,7 @@ namespace engine::scene {
 	// it came in while the body walked the other way - the view snapping to a
 	// wall on the frame you cross, and W walking you sideways afterwards,
 	// because `ReadMoveIntent` is relative to that same yaw. Only the yaw is
-	// turned, and only for `CameraController::Subject`; a headless host has no
+	// turned, and only for the active camera's resolved subject; a headless host has no
 	// controller and does nothing.
 	//
 	// **Runs in `PostSimulation`, after the solver has moved the body**, so what
@@ -1242,6 +1275,17 @@ namespace engine::scene {
 		ecs::Entity Far = ecs::NULL_ENTITY;
 	};
 
+	// Finds the first plane crossed, including foreign seams when requested.
+	// The caller receives the selected seam's index; a miss leaves both outputs unchanged.
+	bool NearestPortalCrossing(
+		std::span<const PortalSeam> seams,
+		const core::Vector3 &from,
+		const core::Vector3 &to,
+		bool includeForeign,
+		PortalHop &hop,
+		size_t &seamIndex
+	);
+
 	// The same crossing, described rather than just mapped.
 	//
 	// **The nearest pane wins**, which the plainer form did not have to decide
@@ -1257,30 +1301,10 @@ namespace engine::scene {
 
 	// Pushes a point out of any portal pane it is standing in the plane of.
 	//
-	// **A viewpoint may be on either side of a hole and never in it**, which is
-	// the rule a body already follows and an eye did not. `CrossPortals` puts a
-	// crosser down a stated distance clear of the plane it crossed - see the
-	// landing clearance in the source - so nothing can come to rest in the seam.
-	// A camera had no such rule: a third-person arm swung into a pane, or a
-	// first-person eye walked into one, could land *within* the pane's own
-	// thickness.
-	//
-	// What that looks like is worth naming because it does not read as a camera
-	// bug. The surface camera's oblique clip has no half-space left to keep, the
-	// fit's extents run away, and the pane fills the screen with a vertical
-	// smear of stretched texels - which looks like a corrupt texture or a broken
-	// projection rather than like an eye standing somewhere it should not.
-	//
-	// **Pushed to the nearer side rather than always outward.** Which side a
-	// viewpoint belongs on is the same question `SeamMapping` asks of a crosser
-	// and `AimSurfaceCameras` asks of a viewer: barely inside from the front, it
-	// belongs in front; past the middle, it has effectively arrived and belongs
-	// behind. Either answer is a place a camera can render from, and the band
-	// between them is the only place it cannot.
-	//
-	// **One pane, for `CrossPortals`' reason.** A point inside two panes at once
-	// is at the line where two holes meet, and pushing it out of both would be
-	// two answers to one question.
+	// Local and cross-world captures use the same small clearance around the
+	// oblique clipping plane. A point moves to its nearer side; exactly on the
+	// plane counts as behind. Only the first containing pane is resolved, so
+	// intersecting mouths cannot push the point in conflicting directions.
 	//
 	// @param store The world.
 	// @param at    The point, moved only when it is inside a pane.
@@ -1339,10 +1363,10 @@ namespace engine::scene {
 	// why that survived three scenes; a free-standing pane is visibly two crates
 	// in a doorway. `NON-EUCLIDEAN.md` Part V.1.
 	//
-	// So: one body, cut at the plane. Each half keeps the front of its own pane
-	// - `CutOfSeam` is where the two planes come from and why they are
-	// complementary by construction - and what fills the half each has lost is
-	// the picture in the hole.
+	// The original keeps its owning side of the pane and the copy keeps the
+	// mapped complement. Rig limbs share their root's ownership side even when
+	// animation puts their individual centres across the plane. The picture in
+	// the hole supplies the other half.
 	//
 	// **What may be cut is what fits through the hole.** There is no test here
 	// for whether a thing can move, and both rules that preceded it were wrong:
@@ -1439,6 +1463,15 @@ namespace engine::scene {
 	size_t AppendPortalClones(
 		ecs::Store &store,
 		int8_t surface,
+		std::span<const DrawInstance> source,
+		std::vector<DrawInstance> &out
+	);
+
+	// Uses a gathered seam directly, including viewport-local surface assignments.
+	// Shares body-fit and clipping rules without gathering or changing camera state.
+	size_t AppendPortalClones(
+		ecs::Store &store,
+		const PortalSeam &seam,
 		std::span<const DrawInstance> source,
 		std::vector<DrawInstance> &out
 	);

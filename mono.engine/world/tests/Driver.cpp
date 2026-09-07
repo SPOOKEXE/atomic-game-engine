@@ -173,6 +173,35 @@ namespace driver_test {
 
 using namespace driver_test;
 
+TEST_CASE(
+	"an unresponsive phase host is retired without integrating local physics", "[world][host-exchange]"
+) {
+	DriverSettings settings;
+	settings.CoordinateHostTicks = true;
+	settings.TickExchangeSeconds = 0.005;
+	settings.Hosts.RestartLimit = 0;
+	Driver driver(settings);
+	driver.Hosts().SetLauncher([](const HostPlan &, engine::parallel::Process &) { return true; });
+	REQUIRE(driver.Start({Named("remote")}) == 1);
+	const auto host = driver.Hosts().Hosts().front().Name;
+	auto [driverEnd, hostEnd] = MakeLocalChannel();
+	REQUIRE(driver.Hosts().Attach(host, std::move(driverEnd)));
+	HostLink unresponsive(std::move(hostEnd), host);
+	HostFrame ready;
+	ready.Signal = HostSignal::Ready;
+	REQUIRE(unresponsive.Send(ready));
+	const auto local = driver.Worlds().Create(Named("local"));
+	driver.Tick(1.0f / 60, 1);
+	CHECK(driver.Statistics().TickExchangeFailed);
+	CHECK_FALSE(driver.Worlds().TickExchangeFrameOpen());
+	CHECK(driver.Worlds().StatisticsOf(local).Ticks == 0);
+	CHECK_FALSE(driver.Hosts().StatusOf(host).Linked);
+	CHECK_FALSE(unresponsive.Connected());
+	driver.Tick(1.0f / 60, 2);
+	CHECK_FALSE(driver.Statistics().TickExchangeFailed);
+	CHECK(driver.Worlds().StatisticsOf(local).Ticks == 1);
+}
+
 TEST_CASE("a world given to a host is in the directory from the first barrier", "[world]") {
 	// Registered at `Start`, not at whenever the host answers. A subscription
 	// or a teleport arriving in between has somewhere to go.

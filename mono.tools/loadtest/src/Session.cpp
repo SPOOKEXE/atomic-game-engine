@@ -1,6 +1,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSession.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Registration.hpp>
@@ -95,8 +96,13 @@ namespace loadtest {
 		// fact a replica cannot derive, and the resource is what the input path
 		// reads to find out whether this client has a character yet.
 		Link->OnUserMessage([this](std::span<const std::byte> message) {
+			engine::game::PortalSessionMessage admission;
+			const bool fresh = FreshAdmissionSent && engine::game::DecodePortalSession(message, admission) &&
+							   admission.Kind == engine::game::PortalSessionKind::Ready &&
+							   admission.Attempt == 1;
 			engine::game::JoinNotice notice;
-			if (engine::game::DecodeJoinNotice(message, notice)) {
+			if (fresh) notice.Player = admission.Player;
+			if (fresh || engine::game::DecodeJoinNotice(message, notice)) {
 				Mine = notice.Player;
 				Store_.SetResource(engine::scene::LocalPlayer{notice.Player});
 			}
@@ -124,6 +130,12 @@ namespace loadtest {
 		Link->Poll(Store_, nowSeconds);
 		ApplyMicroseconds += static_cast<double>(engine::core::Clock::Nanoseconds() - before) / 1000.0;
 		Polls++;
+		if (!FreshAdmissionSent && Link->Admitted()) {
+			engine::game::PortalSessionMessage fresh;
+			fresh.Kind = engine::game::PortalSessionKind::Fresh;
+			fresh.Attempt = 1;
+			FreshAdmissionSent = Link->SendUser(engine::game::EncodePortalSession(fresh), nowSeconds);
+		}
 
 		const Progress progress{
 			.Rejected = Link->Rejected(),

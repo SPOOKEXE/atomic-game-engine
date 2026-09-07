@@ -113,8 +113,7 @@ namespace engine::render {
 
 		// x: which `scene::SurfaceEffect` the projected image goes through.
 		// y: the animation clock, for the effects that move.
-		// zw: unused, and named so the struct's size is stated rather than
-		//     implied.
+		// z: encode radiance for a display attachment. w: unused.
 		//
 		// **A field of its own rather than the spare lanes in `Surface` or
 		// `Flipbook`.** Both of those are rewritten wholesale per submesh by
@@ -216,6 +215,8 @@ namespace engine::render {
 		glm::vec4 OutdoorAmbient{};
 		glm::vec4 Direct{};
 		glm::vec4 Eye{};
+		// Dot with a homogeneous world point gives its axial camera depth.
+		glm::vec4 CameraDepth{};
 		glm::vec4 FogColour{};
 		glm::vec4 Fog{};
 		glm::vec4 Shadow{};

@@ -2,6 +2,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Project.hpp>
 #include <engine/testing/Suite.hpp>
@@ -189,6 +190,36 @@ TEST_CASE("shared project loading preserves monolithic game support", "[server][
 	REQUIRE(host.Initialise(Headless(game)));
 	CHECK(host.Worlds().Find(engine::core::Name("Hosted")).IsValid());
 	host.Shutdown();
+}
+
+TEST_CASE(
+	"saved project driver leaves assigned worlds to their host", "[server][project][project-placement]"
+) {
+	using namespace engine;
+	const auto program = core::Paths::Base().parent_path() / "server" / core::Paths::Program("server");
+	if (!fs::exists(program)) SKIP("build the server program before this test");
+	Tree tree("placement");
+	world::Universe authored;
+	REQUIRE(authored.Create({.Name = core::Name("remote")}).IsValid());
+	REQUIRE(authored.Create({.Name = core::Name("local")}).IsValid());
+	const auto path = tree.Root / "placement.agame";
+	std::string error;
+	REQUIRE(game::SaveGame(authored, core::Name("placement"), path, error));
+	auto options = Headless(path);
+	options.TickRate = 60;
+	options.HostProgram = program;
+	options.RemoteWorlds = {"remote"};
+	options.ControlPort = -1;
+	server::Server driver;
+	REQUIRE(driver.Initialise(options));
+	CHECK(driver.Worlds().NameOf(driver.Primary()) == core::Name("local"));
+	CHECK_FALSE(driver.Worlds().IsRemote(driver.Primary()));
+	const auto remote = driver.Worlds().Find(core::Name("remote"));
+	REQUIRE(remote.IsValid());
+	CHECK(driver.Worlds().IsRemote(remote));
+	CHECK(driver.Run().Ticks == 1);
+	CHECK_FALSE(driver.Hosts()->Statistics().TickExchangeFailed);
+	driver.Shutdown();
 }
 
 TEST_CASE("server owns and hosts a self-contained Project ZIP", "[server][project]") {

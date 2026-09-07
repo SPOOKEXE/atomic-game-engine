@@ -906,3 +906,61 @@ TEST_CASE("a raycast can look straight through the thing casting it", "[physics]
 
 	CHECK(Raycast(store, under, 0.25f, LayerMask::All(), Entity{})->Owner == caster);
 }
+
+TEST_CASE(
+	"placement sweep stops a fast arrival at non-queryable solids and reports incomplete input",
+	"[physics][portal-transfer]"
+) {
+	Store store("placement");
+	engine::scene::RegisterSceneComponents();
+	PreparePhysicsWorld(store);
+	const auto wall = Place(
+		store, Placed{.Position = {0, 0, -5}, .Extent = {3, 3, .1f}, .Moving = false, .CanQuery = false}
+	);
+	Index(store);
+	Collider moving;
+	moving.Extent = {.5f, .5f, .5f};
+	const auto hit = engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {});
+	REQUIRE(hit.Complete);
+	REQUIRE(hit.Hit);
+	REQUIRE(hit.Owner == wall);
+	CHECK(hit.Fraction == Approx(.44f).margin(.002f));
+	const auto ignored = engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {}, wall);
+	REQUIRE(ignored.Complete);
+	CHECK_FALSE(ignored.Hit);
+	moving.Mask = LayerMask::None();
+	CHECK_FALSE(engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {}).Hit);
+	moving.Mask = LayerMask::All();
+	store.GetMutable<Collider>(wall)->Trigger = true;
+	CHECK_FALSE(engine::physics::SweepPlacement(store, moving, CFrame{}, {0, 0, -10}, {}).Hit);
+	Store absent("absent");
+	CHECK_FALSE(engine::physics::SweepPlacement(absent, moving, CFrame{}, {}, {}).Complete);
+	CHECK_FALSE(
+		engine::physics::SweepPlacement(
+			store, moving, CFrame{}, {std::numeric_limits<float>::quiet_NaN(), 0, 0}, {}
+		)
+			.Complete
+	);
+}
+
+TEST_CASE(
+	"placement sweep carries a touching body along a floor and still finds an inward wall",
+	"[physics][portal-transfer]"
+) {
+	Store store("placement-floor");
+	engine::scene::RegisterSceneComponents();
+	PreparePhysicsWorld(store);
+	Place(store, Placed{.Position = {0, -.5f, -5}, .Extent = {5, .5f, 10}, .Moving = false});
+	const auto wall = Place(store, Placed{.Position = {0, 2, -5}, .Extent = {3, 2, .1f}, .Moving = false});
+	Index(store);
+	Collider moving;
+	moving.Extent = {.5f, .5f, .5f};
+	const auto hit = engine::physics::SweepPlacement(store, moving, CFrame({0, .5f, 0}), {0, 0, -10}, {});
+	REQUIRE(hit.Complete);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Owner == wall);
+	CHECK(hit.Fraction == Approx(.44f).margin(.002f));
+	const auto down = engine::physics::SweepPlacement(store, moving, CFrame({0, .5f, 0}), {0, -1, 0}, {});
+	REQUIRE(down.Hit);
+	CHECK(down.Fraction == Approx(0).margin(.002f));
+}

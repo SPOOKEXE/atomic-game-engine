@@ -67,14 +67,14 @@ namespace engine::graph {
 	}
 
 	namespace {
-		uint8_t RankOfScope(NodeScope scope) {
+		uint8_t RankOfScope(NodeScope scope, bool setup) {
 			switch (scope) {
 			case NodeScope::World:
 				return 0;
 			case NodeScope::View:
 				return 1;
 			case NodeScope::Frame:
-				return 2;
+				return setup ? 0 : 2;
 			}
 			return 2;
 		}
@@ -225,6 +225,11 @@ namespace engine::graph {
 		}
 
 		const size_t count = nodes.size();
+		const auto firstView = std::find_if(nodes.begin(), nodes.end(), [](const Node *node) {
+			return node->Scope == NodeScope::View;
+		});
+		const size_t setupCount = static_cast<size_t>(firstView - nodes.begin());
+		const auto rank = [&](size_t index) { return RankOfScope(nodes[index]->Scope, index < setupCount); };
 		std::vector<std::vector<size_t>> outgoing(count);
 		std::vector<std::unordered_set<size_t>> incoming(count);
 
@@ -279,7 +284,7 @@ namespace engine::graph {
 					continue;
 				}
 
-				if (RankOfScope(nodes[producer]->Scope) > RankOfScope(nodes[reader]->Scope)) {
+				if (rank(producer) > rank(reader)) {
 					offender = nodes[reader]->Name;
 					ENGINE_WARN(
 						"'{}' reads something '{}' writes at a narrower scope",
@@ -306,14 +311,20 @@ namespace engine::graph {
 		}
 
 		// Scope is an execution boundary even when two nodes share no resource.
-		// A frame-scoped overlay cannot start beside a world shadow just because
-		// their targets differ: it belongs after every view. Likewise, work that
+		// A final frame overlay cannot start beside a world shadow just because
+		// their targets differ: it belongs after every view. Frame setup belongs
+		// before the views and retains its place among world nodes. Work that
 		// produces one world's shared state completes before any view of that
 		// world begins. These edges preserve concurrency inside a scope while
 		// making `World`, `View`, and `Frame` mean more than labels in the editor.
 		for (size_t before = 0; before < count; before++) {
 			for (size_t after = 0; after < count; after++) {
-				if (RankOfScope(nodes[before]->Scope) < RankOfScope(nodes[after]->Scope)) {
+				if (rank(before) < rank(after)) {
+					AddDependency(outgoing, incoming, before, after);
+				}
+				// Frame setup and world setup share an ordered prefix. Keep their
+				// authored boundary while allowing independent world work to overlap.
+				if (before < after && after < setupCount && nodes[before]->Scope != nodes[after]->Scope) {
 					AddDependency(outgoing, incoming, before, after);
 				}
 			}

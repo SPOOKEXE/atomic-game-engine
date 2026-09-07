@@ -1,6 +1,6 @@
 # L12 [client]. The GLSL this module binds lives in Engine::resources.
 
-set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross)
+set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross Vendor::zstd)
 if(APPLE)
 	# SDL loads this dynamically. Naming it here lets mono_add_program stage it
 	# for every executable that actually links the renderer.
@@ -12,6 +12,9 @@ mono_add_library(render
 	DEPS
 		Engine::core
 		Engine::parallel
+
+		# Portal image adapters use copied presentation traffic and joined world jobs.
+		Engine::world
 
 		# WorldPresentation is the shared world-to-renderer boundary.
 		Engine::ecs
@@ -74,4 +77,21 @@ if(TARGET test_render)
 	# resources. The render library keeps SDL private for all public consumers;
 	# its own suite is the one deliberate backend-aware caller.
 	target_link_libraries(test_render PRIVATE SDL3::SDL3)
+	# Portal camera images run actual character movement and obstruction queries.
+	target_link_libraries(test_render PRIVATE Engine::physics)
+endif()
+
+option(MONO_FUZZ_PORTAL_EXCHANGE "Build portal image codecs with libFuzzer and sanitizers" OFF)
+if(MONO_FUZZ_PORTAL_EXCHANGE)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR "MONO_FUZZ_PORTAL_EXCHANGE requires Clang with libFuzzer")
+	endif()
+	# Instrument the codec itself, including nested geometry validation.
+	add_executable(fuzz_portal_exchange fuzz/PortalExchange.cpp src/PortalExchange.cpp src/PortalGeometry.cpp)
+	target_include_directories(fuzz_portal_exchange PRIVATE include)
+	target_link_libraries(fuzz_portal_exchange PRIVATE Engine::core Engine::assets Vendor::zstd)
+	target_compile_options(fuzz_portal_exchange PRIVATE
+		-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -O1 -g)
+	target_link_options(fuzz_portal_exchange PRIVATE -fsanitize=fuzzer,address,undefined)
+	set_target_properties(fuzz_portal_exchange PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
 endif()

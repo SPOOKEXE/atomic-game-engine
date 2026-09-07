@@ -261,6 +261,7 @@ namespace engine::render {
 		// How deep the mirrors go this frame, and what the descent found.
 		uint32_t SurfaceBounces = 1;
 		uint32_t MirrorLevels = 0;
+		SDL_GPUTextureFormat MirrorFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
 		bool MirrorHistory = true;
 		bool SurfaceVisible[scene::MAX_SURFACES] = {};
 		float SurfaceCoverage[scene::MAX_SURFACES] = {};
@@ -308,7 +309,6 @@ namespace engine::render {
 		// contents are this frame's textures.
 		std::array<SDL_GPUTextureSamplerBinding, 1> DepthBindings{};
 		std::array<SDL_GPUTextureSamplerBinding, 7> LightingBindings{};
-		std::array<SDL_GPUTextureSamplerBinding, 1> TonemapBindings{};
 
 		// The interface hooks, once each has agreed to draw. `Prepare` opens a
 		// copy pass, so it has to have run before any render pass is open.
@@ -391,6 +391,10 @@ namespace engine::render {
 		//
 		// @return `false` when a map or copy pass failed, which
 		//         fails the frame rather than drawing from a stale buffer.
+		// Debits one actual recursive render before targets are allocated or drawn.
+		bool AdmitSurfaceCapture(uint32_t width, uint32_t height, uint32_t depth);
+		uint64_t SurfacePixelsUsed = 0;
+
 		bool RecordUploads();
 
 		// Builds the per-draw lighting block from world lighting and the camera
@@ -449,7 +453,8 @@ namespace engine::render {
 			bool cycle,
 			const SDL_GPUViewport *viewport,
 			const LightUniforms &passLights,
-			const SDL_FColor *clearColour = nullptr
+			const SDL_FColor *clearColour = nullptr,
+			WorldColourTarget target = WorldColourTarget::Display
 		);
 
 		// The world minus every pane, drawn into whatever pass is open.
@@ -473,7 +478,8 @@ namespace engine::render {
 			const FrameUniforms &frame,
 			const LightingUniforms &plainLighting,
 			uint32_t filter,
-			bool panesFollow
+			bool panesFollow,
+			WorldColourTarget target = WorldColourTarget::Display
 		);
 
 		// One fullscreen triangle into a colour target, named as a graph node.
@@ -586,6 +592,8 @@ namespace engine::render {
 		// recursion through a hole, its display copy, and the mouths drawn over
 		// the frame.
 		void RegisterPortalNodes(NodeTable &nodes);
+		void RegisterSurfaceNodes(NodeTable &nodes);
+		bool CaptureSeamLights(WorldColourTarget colour);
 
 		// `gbuffer` and `transparent`: the material head and the ordered tail.
 		void RegisterGeometryNodes(NodeTable &nodes);
