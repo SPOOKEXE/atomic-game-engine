@@ -42,8 +42,22 @@ The milestone headings below are development labels. Not in line with project ve
 Full render plan: [docs/RENDER-REFACTOR.md](docs/RENDER-REFACTOR.md), including
 the consolidated materials, shaders and rendering optimization work.
 
-- [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
-- [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
+- [x] Add opt-in render-stage image snapshots, raw pixels, metadata and a visual index. GPU overwrite checks pass; capture stalls affect timing.
+- [x] Fix topology renewal after cache expiry and consume ready topology replies before camera routing.
+- [x] Add portal startup readiness and Humanoid camera routing fixes. All 16 product crossing variants pass: 30/60 Hz, first/third person, explicit/automatic subject, held/released movement.
+- [x] Capture a missing-eye-image black frame at its first render stage; retain useful images and remove bulk captures.
+- [x] Reduce editable collision BVH build work and scratch storage. Full Terrain worker profiling remains below.
+- [_] Render foreign worlds from the current camera with correct parallax and disocclusion. The moving-camera whole-eye test still fails with flat images.
+- [_] Finish retained-world observation: authorized content, complete visual layers, handoff lifetime and gameplay lease retirement. The staging prototype is rolled back.
+- [_] Reproduce and fix the original black frame with a valid image handle; prevent missing-image black frames during topology waits.
+- [_] Verify seamless player/body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements.
+- [_] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam.
+- [_] Check oblique, rolled and scaled portal views at all angles; finish visual review of the non-Euclidean demo.
+- [_] Profile release CPU/GPU work, residency, caching and transfer bytes; finish Terrain editable collision worker optimization.
+
+Portal evidence and next steps: [render task list](docs/RENDER-REFACTOR-TASKS.md).
+Passing crossing tests do not yet establish seamless rendering at every angle.
+
 - [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc. - per-mesh capability flags are per-instance visual state and belong in the GPU-resident row, so a compute pass can branch on them without a CPU readback
 - [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system. - the residency and delta upload are a node too, so the sweep and the GPU-resident work are the same refactor rather than two passes over the same files
 - [_] port semi-real raytrace and path-trace as part of nodes

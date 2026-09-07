@@ -62,3 +62,11 @@ BENCH("Triangle BVH · 131072 triangles", 100) {
 		Consume(OverlapTriangles(mesh, QUERY, found));
 	}
 }
+
+BENCH_PER_ITEM("Terrain collision build · 8192 triangles", 50) {
+	static const TriangleMesh source = Ground(64);
+	for (int pass = 0; pass < 50; ++pass) {
+		const auto mesh = BuildTriangleMesh(source.Vertices, source.Indices);
+		Consume(mesh.Hierarchy.size());
+	}
+}
