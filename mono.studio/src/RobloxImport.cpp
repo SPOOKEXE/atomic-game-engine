@@ -1,3 +1,5 @@
+#include "ImportedValues.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -66,6 +68,10 @@ namespace studio {
 				return "UDim2";
 			case RobloxValueKind::Rect:
 				return "Rect";
+			case RobloxValueKind::NumberSequence:
+				return "NumberSequence";
+			case RobloxValueKind::ColorSequence:
+				return "ColorSequence";
 			case RobloxValueKind::NumberRange:
 				return "NumberRange";
 			}
@@ -99,11 +105,13 @@ namespace studio {
 				return value == RobloxValueKind::UDim2;
 			case PropertyType::Rect:
 				return value == RobloxValueKind::Rect;
+			case PropertyType::NumberSequence:
+				return value == RobloxValueKind::NumberSequence;
+			case PropertyType::ColorSequence:
+				return value == RobloxValueKind::ColorSequence;
 			case PropertyType::NumberRange:
 				return value == RobloxValueKind::NumberRange;
 			case PropertyType::Reference:
-			case PropertyType::NumberSequence:
-			case PropertyType::ColorSequence:
 			case PropertyType::Opaque:
 				return false;
 			}
@@ -281,14 +289,9 @@ namespace studio {
 			case PropertyType::Int64:
 			case PropertyType::Float:
 			case PropertyType::Double: {
-				const double number = source.Kind() == RobloxValueKind::Integer
-										  ? static_cast<double>(source.As<int64_t>())
-										  : source.As<double>();
-				out.Int32 = static_cast<int32_t>(number);
-				out.Int64 = static_cast<int64_t>(number);
-				out.Float = static_cast<float>(number);
-				out.Double = number;
-				return true;
+				return source.Kind() == RobloxValueKind::Integer
+						   ? ReadImportedNumber(property.Type, source.As<int64_t>(), out)
+						   : ReadImportedNumber(property.Type, source.As<double>(), out);
 			}
 			case PropertyType::String:
 				out.String = source.As<std::string>();
@@ -319,12 +322,26 @@ namespace studio {
 			case PropertyType::Rect:
 				out.Rect = source.As<engine::core::Rect>();
 				return true;
+			case PropertyType::NumberSequence: {
+				if (source.Kind() != RobloxValueKind::NumberSequence) {
+					return false;
+				}
+				return ReadImportedSequence(
+					source.As<engine::bake::RobloxNumberSequence>(), out.NumberSequence
+				);
+			}
+			case PropertyType::ColorSequence: {
+				if (source.Kind() != RobloxValueKind::ColorSequence) {
+					return false;
+				}
+				return ReadImportedSequence(
+					source.As<engine::bake::RobloxColorSequence>(), out.ColorSequence
+				);
+			}
 			case PropertyType::NumberRange:
 				out.NumberRange = source.As<engine::core::NumberRange>();
 				return true;
 			case PropertyType::Reference:
-			case PropertyType::NumberSequence:
-			case PropertyType::ColorSequence:
 			case PropertyType::Opaque:
 				return false;
 			}

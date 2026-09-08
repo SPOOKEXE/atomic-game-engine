@@ -15,6 +15,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <span>
 #include <sstream>
 #include <string>
 #include <studio/Config.hpp>
@@ -613,4 +615,88 @@ TEST_CASE("a roblox place port writes and reloads its world", "[studio][robloxim
 			engine::ecs::Classes::Find(engine::core::Name("SoundGroup"))
 		);
 	});
+}
+
+TEST_CASE("roblox import preserves integers and rejects unrepresentable numbers", "[studio][robloximport]") {
+	engine::scene::EnsureClassTree();
+	engine::ecs::Store store("roblox-numbers");
+	engine::bake::RobloxModel model;
+	const auto add = [&](std::string name, auto number) {
+		engine::bake::RobloxInstance node;
+		node.ClassName = "IntValue";
+		node.Name = std::move(name);
+		engine::bake::RobloxValue value;
+		value.Set(number);
+		node.Properties.push_back({"Value", value});
+		model.Roots.push_back(std::move(node));
+	};
+	add("Precise", int64_t{9007199254740993});
+	add("Maximum", std::numeric_limits<int64_t>::max());
+	add("Minimum", std::numeric_limits<int64_t>::min());
+	add("Overflow", 9223372036854775808.0);
+	add("Fraction", 1.5);
+	add("NotFinite", std::numeric_limits<double>::infinity());
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Properties == 3);
+	const auto integer = [&](const char *name) {
+		int64_t value = 0;
+		REQUIRE(
+			store.GetProperty(store.FindFirstRoot(name), engine::core::Name("Value"), &value, sizeof(value))
+		);
+		return value;
+	};
+	CHECK(integer("Precise") == 9007199254740993);
+	CHECK(integer("Maximum") == std::numeric_limits<int64_t>::max());
+	CHECK(integer("Minimum") == std::numeric_limits<int64_t>::min());
+	CHECK(integer("Overflow") == 0);
+	CHECK(integer("Fraction") == 0);
+	CHECK(integer("NotFinite") == 0);
+}
+
+TEST_CASE("roblox particle sequences reach their authored properties", "[studio][robloximport]") {
+	const std::string xml =
+		R"xml(<roblox version="4"><Item class="ParticleEmitter" referent="RBX0"><Properties>
+		<string name="Name">Emitter</string>
+		<NumberSequence name="Size">0 2 0.5 0.5 4 1 1 0 0</NumberSequence>
+		<ColorSequence name="Color">0 1 0 0 0 1 0 0 1 0</ColorSequence>
+	</Properties></Item></roblox>)xml";
+	engine::bake::RobloxModel model;
+	std::string error;
+	REQUIRE(engine::bake::ReadRobloxFile(std::as_bytes(std::span(xml.data(), xml.size())), model, error));
+	REQUIRE(model.LostProperties.empty());
+	engine::ecs::Store store("roblox-sequences");
+	studio::RobloxImportResult report;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Properties == 2);
+	const auto emitter = store.FindFirstRoot("Emitter");
+	engine::core::NumberSequence size;
+	REQUIRE(store.GetProperty(emitter, engine::core::Name("Size"), &size, sizeof(size)));
+	REQUIRE(size.Count == 3);
+	CHECK(size.Keypoints[1] == engine::core::NumberKeypoint{0.5f, 4.0f, 1.0f});
+	engine::core::ColorSequence colour;
+	REQUIRE(store.GetProperty(emitter, engine::core::Name("Color"), &colour, sizeof(colour)));
+	REQUIRE(colour.Count == 2);
+	CHECK(colour.Keypoints[1] == engine::core::ColorKeypoint{1.0f, {0.0f, 0.0f, 1.0f}});
+}
+
+TEST_CASE(
+	"roblox import refuses invalid sequences without changing their authored order", "[studio][robloximport]"
+) {
+	engine::bake::RobloxModel model;
+	engine::bake::RobloxInstance emitter;
+	emitter.Name = "Emitter";
+	emitter.ClassName = "ParticleEmitter";
+	engine::bake::RobloxValue size;
+	size.Set(engine::bake::RobloxNumberSequence{{0, 1}, {0.75f, 2}, {0.5f, 3}, {1, 4}});
+	emitter.Properties.push_back({"Size", size});
+	model.Roots.push_back(std::move(emitter));
+	engine::ecs::Store store("roblox-invalid-sequences");
+	studio::RobloxImportResult report;
+	std::string error;
+	REQUIRE(studio::ImportRobloxPlace(store, model, {}, {}, report, error));
+	CHECK(report.Properties == 0);
+	REQUIRE(report.SkippedProperties.size() == 1);
+	CHECK(report.SkippedProperties[0].PropertyName == "Size");
 }

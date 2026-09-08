@@ -263,6 +263,37 @@ namespace engine::bake {
 				out.Set(engine::core::NumberRange{value.min, value.max});
 				return true;
 			}
+			case Type::NumberSequence: {
+				const auto &points = std::get<rbxl::NumberSequence>(source).keypoints;
+				if (points.size() > core::SEQUENCE_CAPACITY) {
+					return false;
+				}
+				RobloxNumberSequence sequence;
+				sequence.reserve(points.size());
+				for (const auto &point : points) {
+					sequence.emplace_back(point.time, point.value, point.envelope);
+				}
+				out.Set(std::move(sequence));
+				return true;
+			}
+			case Type::ColorSequence: {
+				const auto &points = std::get<rbxl::ColorSequence>(source).keypoints;
+				if (points.size() > core::SEQUENCE_CAPACITY) {
+					return false;
+				}
+				RobloxColorSequence sequence;
+				sequence.reserve(points.size());
+				for (const auto &point : points) {
+					if (point.envelope != 0.0f) {
+						return false;
+					}
+					sequence.emplace_back(
+						point.time, core::Color3{point.color.r, point.color.g, point.color.b}
+					);
+				}
+				out.Set(std::move(sequence));
+				return true;
+			}
 			case Type::Content: {
 				rbxl::Content &value = std::get<rbxl::Content>(source);
 				if (value.sourceType == rbxl::Content::SourceType::Object) {
@@ -293,8 +324,6 @@ namespace engine::bake {
 			case Type::EnumValue:
 			case Type::EnumItem:
 			case Type::Ref:
-			case Type::NumberSequence:
-			case Type::ColorSequence:
 			case Type::PhysicalProperties:
 			case Type::Font:
 			case Type::UniqueId:

@@ -859,6 +859,12 @@ namespace {
 			return left.As<engine::core::UDim2>() == right.As<engine::core::UDim2>();
 		case RobloxValueKind::Rect:
 			return left.As<engine::core::Rect>() == right.As<engine::core::Rect>();
+		case RobloxValueKind::NumberSequence:
+			return left.As<engine::bake::RobloxNumberSequence>() ==
+				   right.As<engine::bake::RobloxNumberSequence>();
+		case RobloxValueKind::ColorSequence:
+			return left.As<engine::bake::RobloxColorSequence>() ==
+				   right.As<engine::bake::RobloxColorSequence>();
 		case RobloxValueKind::NumberRange:
 			return left.As<engine::core::NumberRange>() == right.As<engine::core::NumberRange>();
 		}
@@ -1270,6 +1276,7 @@ TEST_CASE("the complete roblox reader analyzes assets scripts and lost propertie
 					<string name="Name">Slash</string>
 					<Content name="AnimationId"><url>rbxassetid://12345</url></Content>
 					<NumberSequence name="Curve">0 1 0 1 2 0</NumberSequence>
+					<token name="Material">256</token>
 				</Properties>
 				<Item class="LocalScript" referent="RBX1">
 					<Properties>
@@ -1300,8 +1307,14 @@ TEST_CASE("the complete roblox reader analyzes assets scripts and lost propertie
 	CHECK(model.Assets[1].InstancePath == "Slash/Driver");
 
 	REQUIRE(model.LostProperties.size() == 1);
-	CHECK(model.LostProperties[0].PropertyName == "Curve");
-	CHECK(model.LostProperties[0].RobloxType == "NumberSequence");
+	CHECK(model.LostProperties[0].PropertyName == "Material");
+	CHECK(model.LostProperties[0].RobloxType == "EnumValue");
+	const auto *curve = Find(model.Roots[0], "Curve");
+	REQUIRE(curve != nullptr);
+	CHECK(
+		curve->As<engine::bake::RobloxNumberSequence>() ==
+		engine::bake::RobloxNumberSequence{{0, 1, 0}, {1, 2, 0}}
+	);
 }
 
 TEST_CASE("the complete roblox reader sniffs binary and leaves output alone on failure", "[bake][rbxl]") {
@@ -1336,4 +1349,77 @@ TEST_CASE("the complete roblox reader exposes public part property names", "[bak
 	CHECK(Find(part, "Color3uint8") == nullptr);
 	CHECK(Find(part, "Size") != nullptr);
 	CHECK(Find(part, "Color") != nullptr);
+}
+
+TEST_CASE("roblox sequence containers preserve the same keypoints", "[bake][rbxm][rbxmx][rbxl]") {
+	Blob binary;
+	Header(binary, 1, 1);
+	Chunk(binary, "INST", Instances(0, "ParticleEmitter", {0}));
+	Blob size = Property(0, "Size", 0x15);
+	size.U32(2);
+	for (float number : {0.0f, 2.0f, 0.5f, 1.0f, 4.0f, 1.0f}) {
+		size.F32(number);
+	}
+	Chunk(binary, "PROP", size);
+	Blob colour = Property(0, "Color", 0x16);
+	colour.U32(2);
+	for (float number : {0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f}) {
+		colour.F32(number);
+	}
+	Chunk(binary, "PROP", colour);
+	Blob parents;
+	parents.U8(0);
+	parents.I32(1);
+	parents.Referents({0});
+	parents.Referents({-1});
+	Chunk(binary, "PRNT", parents);
+	Chunk(binary, END_TAG, {});
+
+	const std::string_view xml = R"xml(<roblox version="4"><Item class="ParticleEmitter"><Properties>
+		<NumberSequence name="Size">0 2 0.5 1 4 1</NumberSequence>
+		<ColorSequence name="Color">0 1 0 0 0 1 0 0 1 0</ColorSequence>
+	</Properties></Item></roblox>)xml";
+	RobloxModel fromBinary;
+	RobloxModel fromXml;
+	RobloxModel complete;
+	std::string error;
+	REQUIRE(ReadRobloxModel(Bytes(binary.Bytes), fromBinary, error));
+	REQUIRE(ReadRobloxModelXml(Bytes(xml), fromXml, error));
+	REQUIRE(ReadRobloxFile(Bytes(binary.Bytes), complete, error));
+	REQUIRE(fromBinary.Roots.size() == 1);
+	REQUIRE(fromXml.Roots.size() == 1);
+	REQUIRE(complete.Roots.size() == 1);
+	for (const char *name : {"Size", "Color"}) {
+		const auto *left = Find(fromBinary.Roots[0], name);
+		const auto *right = Find(fromXml.Roots[0], name);
+		const auto *decoded = Find(complete.Roots[0], name);
+		REQUIRE(left != nullptr);
+		REQUIRE(right != nullptr);
+		REQUIRE(decoded != nullptr);
+		CHECK(Same(*left, *right));
+		CHECK(Same(*left, *decoded));
+	}
+}
+
+TEST_CASE("roblox sequence decoding refuses truncated and excessive keypoints", "[bake][rbxm][rbxmx]") {
+	for (uint32_t count : {2u, engine::core::SEQUENCE_CAPACITY + 1}) {
+		Blob binary;
+		Header(binary, 1, 1);
+		Chunk(binary, "INST", Instances(0, "ParticleEmitter", {0}));
+		Blob size = Property(0, "Size", 0x15);
+		size.U32(count);
+		size.F32(0);
+		Chunk(binary, "PROP", size);
+		Chunk(binary, END_TAG, {});
+		RobloxModel model;
+		std::string error;
+		CHECK_FALSE(ReadRobloxModel(Bytes(binary.Bytes), model, error));
+		CHECK_FALSE(error.empty());
+	}
+	const RobloxModel truncated = ReadXml(R"xml(<roblox version="4"><Item class="ParticleEmitter"><Properties>
+		<NumberSequence name="Size">0 2</NumberSequence>
+	</Properties></Item></roblox>)xml");
+	REQUIRE(truncated.Roots.size() == 1);
+	CHECK(Find(truncated.Roots[0], "Size") == nullptr);
+	CHECK_FALSE(truncated.Notes.empty());
 }

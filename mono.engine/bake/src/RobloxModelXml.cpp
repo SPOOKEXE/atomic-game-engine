@@ -466,6 +466,47 @@ namespace engine::bake {
 				return ValueResult::Decoded;
 			}
 
+			if (element == "NumberSequence" || element == "ColorSequence") {
+				std::string_view remaining = Trimmed(text);
+				const bool colour = element == "ColorSequence";
+				const size_t stride = colour ? 5 : 3;
+				RobloxNumberSequence numbers;
+				RobloxColorSequence colours;
+				while (!remaining.empty()) {
+					if (numbers.size() >= core::SEQUENCE_CAPACITY ||
+						colours.size() >= core::SEQUENCE_CAPACITY) {
+						return ValueResult::Malformed;
+					}
+					float components[5] = {};
+					for (size_t index = 0; index < stride; index++) {
+						const size_t end = remaining.find_first_of(" \t\r\n");
+						double number = 0;
+						if (!ParseDouble(remaining.substr(0, end), number)) {
+							return ValueResult::Malformed;
+						}
+						components[index] = static_cast<float>(number);
+						remaining = end == std::string_view::npos ? std::string_view{}
+																  : Trimmed(remaining.substr(end));
+					}
+					if (colour) {
+						if (components[4] != 0.0f) {
+							return ValueResult::Malformed;
+						}
+						colours.emplace_back(
+							components[0], core::Color3{components[1], components[2], components[3]}
+						);
+					} else {
+						numbers.emplace_back(components[0], components[1], components[2]);
+					}
+				}
+				if (colour) {
+					out.Set(std::move(colours));
+				} else {
+					out.Set(std::move(numbers));
+				}
+				return ValueResult::Decoded;
+			}
+
 			if (element == "NumberRange") {
 				// Two numbers in the element's own text, with a trailing space
 				// Studio always writes.

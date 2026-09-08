@@ -142,6 +142,8 @@ namespace engine::bake {
 			CFrame = 0x10,
 			Enum = 0x12,
 			Referent = 0x13,
+			NumberSequence = 0x15,
+			ColorSequence = 0x16,
 			NumberRange = 0x17,
 			Rect = 0x18,
 			Color3uint8 = 0x1A,
@@ -651,6 +653,41 @@ namespace engine::bake {
 					);
 				}
 				return PropertyResult::Decoded;
+
+			case WireType::NumberSequence:
+			case WireType::ColorSequence:
+				for (RobloxValue &value : out) {
+					const uint32_t keypoints = cursor.Word();
+					const bool colour = type == static_cast<uint8_t>(WireType::ColorSequence);
+					const size_t stride = colour ? 20 : 12;
+					if (keypoints > core::SEQUENCE_CAPACITY || keypoints > cursor.Remaining() / stride) {
+						return PropertyResult::Malformed;
+					}
+					RobloxNumberSequence numbers;
+					RobloxColorSequence colours;
+					for (uint32_t index = 0; index < keypoints; index++) {
+						const float time = cursor.Real();
+						if (colour) {
+							const float red = cursor.Real();
+							const float green = cursor.Real();
+							const float blue = cursor.Real();
+							if (cursor.Real() != 0.0f) {
+								return PropertyResult::Malformed;
+							}
+							colours.emplace_back(time, core::Color3{red, green, blue});
+						} else {
+							const float number = cursor.Real();
+							const float envelope = cursor.Real();
+							numbers.emplace_back(time, number, envelope);
+						}
+					}
+					if (colour) {
+						value.Set(std::move(colours));
+					} else {
+						value.Set(std::move(numbers));
+					}
+				}
+				return cursor.Failed() ? PropertyResult::Malformed : PropertyResult::Decoded;
 
 			case WireType::NumberRange:
 				// Two plain floats each, in place. Not an array of pairs and not

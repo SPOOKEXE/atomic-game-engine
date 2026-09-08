@@ -1,3 +1,5 @@
+#include "PropertyWidgets.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
@@ -47,22 +49,6 @@ namespace studio {
 	using engine::game::WriteProperty;
 
 	namespace {
-		// Drags at a rate that suits how big the number already is.
-		//
-		// A fixed step makes a part's `Transparency` unusable at 0.01 per pixel
-		// and its `Position` unusable at 1.0 per pixel. Roblox solves this with
-		// per-property increments in the API dump; scaling with the value is the
-		// version of that which needs no table.
-		float StepFor(float value) {
-			const float magnitude = std::abs(value);
-			if (magnitude < 1.0f) {
-				return 0.005f;
-			}
-			if (magnitude < 100.0f) {
-				return 0.05f;
-			}
-			return 0.5f;
-		}
 
 		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
 			alignas(8) std::array<std::byte, 8> scratch{};
@@ -173,114 +159,6 @@ namespace studio {
 			case PropertyType::ColorSequence:
 				return Schemas::WriteField(component, field, &value.ColorSequence);
 			case PropertyType::Opaque:
-				return false;
-			}
-			return false;
-		}
-
-		bool DrawSchemaValue(
-			const Store &store, const FieldDescriptor &field, PropertyValue &value, std::string &draft
-		) {
-			switch (field.Type) {
-			case PropertyType::Bool:
-				return ImGui::Checkbox("##value", &value.Bool);
-			case PropertyType::Int32:
-				return ImGui::DragInt("##value", &value.Int32);
-			case PropertyType::Int64:
-				return ImGui::InputScalar("##value", ImGuiDataType_S64, &value.Int64);
-			case PropertyType::Float:
-				return ImGui::DragFloat("##value", &value.Float, StepFor(value.Float));
-			case PropertyType::Double: {
-				const double step = static_cast<double>(StepFor(static_cast<float>(value.Double)));
-				return ImGui::DragScalar("##value", ImGuiDataType_Double, &value.Double, step);
-			}
-			case PropertyType::Vector3: {
-				float parts[]{value.Vector3.X, value.Vector3.Y, value.Vector3.Z};
-				if (!ImGui::DragFloat3("##value", parts, StepFor(parts[0]))) {
-					return false;
-				}
-				value.Vector3 = engine::core::Vector3{parts[0], parts[1], parts[2]};
-				return true;
-			}
-			case PropertyType::CFrame: {
-				float parts[]{value.CFrame.Position.X, value.CFrame.Position.Y, value.CFrame.Position.Z};
-				if (!ImGui::DragFloat3("##value", parts, StepFor(parts[0]))) {
-					return false;
-				}
-				value.CFrame.Position = engine::core::Vector3{parts[0], parts[1], parts[2]};
-				return true;
-			}
-			case PropertyType::Color3: {
-				float parts[]{value.Color3.R, value.Color3.G, value.Color3.B};
-				if (!ImGui::ColorEdit3("##value", parts, ImGuiColorEditFlags_Float)) {
-					return false;
-				}
-				value.Color3 = engine::core::Color3{parts[0], parts[1], parts[2]};
-				return true;
-			}
-			case PropertyType::Vector2: {
-				float parts[]{value.Vector2.X, value.Vector2.Y};
-				if (!ImGui::DragFloat2("##value", parts, StepFor(parts[0]))) {
-					return false;
-				}
-				value.Vector2 = engine::core::Vector2{parts[0], parts[1]};
-				return true;
-			}
-			case PropertyType::Enum: {
-				const char *current = value.Name.IsValid() ? Label(value.Name) : "";
-				if (!ImGui::BeginCombo("##value", current)) {
-					return false;
-				}
-				bool changed = false;
-				for (const Name member : engine::ecs::EnumTable::MembersOf(field.Enum)) {
-					if (ImGui::Selectable(Label(member), member == value.Name)) {
-						value.Name = member;
-						changed = true;
-					}
-				}
-				ImGui::EndCombo();
-				return changed;
-			}
-			case PropertyType::Name: {
-				std::string text = value.Name.IsValid() ? std::string(Label(value.Name)) : std::string{};
-				if (!TextField("##value", text)) {
-					return false;
-				}
-				value.Name = text.empty() ? Name{} : Name(text);
-				return true;
-			}
-			case PropertyType::String:
-				return TextField("##value", value.String);
-			case PropertyType::UDim:
-			case PropertyType::UDim2:
-			case PropertyType::Rect:
-			case PropertyType::NumberRange:
-			case PropertyType::NumberSequence:
-			case PropertyType::ColorSequence: {
-				if (draft.empty()) {
-					draft = FormatValue(value);
-				}
-				TextField("##value", draft);
-				if (!ImGui::IsItemDeactivatedAfterEdit()) {
-					return false;
-				}
-				PropertyValue parsed;
-				std::string reason;
-				if (!ParseValue(field.Type, draft, parsed, reason)) {
-					return false;
-				}
-				value = std::move(parsed);
-				draft.clear();
-				return true;
-			}
-			case PropertyType::Reference: {
-				const Name target =
-					value.Reference == NULL_ENTITY ? Name{} : store.InstanceNameOf(value.Reference);
-				ImGui::TextDisabled("%s", target.IsValid() ? Label(target) : "(none)");
-				return false;
-			}
-			case PropertyType::Opaque:
-				ImGui::TextDisabled("read only");
 				return false;
 			}
 			return false;
@@ -1039,7 +917,8 @@ namespace studio {
 						// scene file does; once valid, the one value is written to every
 						// selected instance that actually declares this property.
 						std::string text;
-						if (TextField("##v", text)) {
+						TextField("##v", text);
+						if (ImGui::IsItemDeactivatedAfterEdit()) {
 							PropertyValue parsed;
 							std::string reason;
 							if (ParseValue(descriptor->Type, text, parsed, reason)) {
@@ -1071,27 +950,19 @@ namespace studio {
 						wrote = ImGui::DragInt("##v", &changed.Int32);
 						break;
 
-					case PropertyType::Int64: {
-						int narrowed = static_cast<int>(changed.Int64);
-						if (ImGui::DragInt("##v", &narrowed)) {
-							changed.Int64 = narrowed;
-							wrote = true;
-						}
+					case PropertyType::Int64:
+						wrote = ImGui::InputScalar("##v", ImGuiDataType_S64, &changed.Int64);
 						break;
-					}
 
 					case PropertyType::Float:
 						wrote = ImGui::DragFloat("##v", &changed.Float, StepFor(changed.Float));
 						break;
 
-					case PropertyType::Double: {
-						auto narrowed = static_cast<float>(changed.Double);
-						if (ImGui::DragFloat("##v", &narrowed, StepFor(narrowed))) {
-							changed.Double = narrowed;
-							wrote = true;
-						}
+					case PropertyType::Double:
+						wrote = ImGui::InputScalar(
+							"##v", ImGuiDataType_Double, &changed.Double, nullptr, nullptr, "%.17g"
+						);
 						break;
-					}
 
 					case PropertyType::Vector3: {
 						float parts[3]{changed.Vector3.X, changed.Vector3.Y, changed.Vector3.Z};
@@ -1111,23 +982,9 @@ namespace studio {
 						break;
 					}
 
-					case PropertyType::CFrame: {
-						// Position only. The rotation has its own property -
-						// `Orientation`, in degrees, which is what an author
-						// actually wants - and offering a raw quaternion
-						// beside it would be four numbers nobody can edit by
-						// hand next to three that are obvious.
-						float parts[3]{
-							changed.CFrame.Position.X,
-							changed.CFrame.Position.Y,
-							changed.CFrame.Position.Z,
-						};
-						if (ImGui::DragFloat3("##v", parts, StepFor(parts[0]))) {
-							changed.CFrame.Position = engine::core::Vector3{parts[0], parts[1], parts[2]};
-							wrote = true;
-						}
+					case PropertyType::CFrame:
+						wrote = DrawTransform(changed.CFrame);
 						break;
-					}
 
 					case PropertyType::Vector2: {
 						float parts[2]{changed.Vector2.X, changed.Vector2.Y};
@@ -1317,17 +1174,9 @@ namespace studio {
 						}
 						break;
 
-					case PropertyType::Reference: {
-						// Read-only for now, and it says so rather than
-						// offering a control that does nothing. Picking a
-						// reference means a target picker over the tree,
-						// which is `mono.studio/AGENTS.md`'s deferred list.
-						const Name target = changed.Reference == NULL_ENTITY
-												? Name{}
-												: store.InstanceNameOf(changed.Reference);
-						ImGui::TextDisabled("%s", target.IsValid() ? Label(target) : "(none)");
+					case PropertyType::Reference:
+						wrote = DrawReference(store, changed.Reference);
 						break;
-					}
 
 					case PropertyType::NumberRange: {
 						float parts[2]{changed.NumberRange.Minimum, changed.NumberRange.Maximum};
@@ -1345,35 +1194,13 @@ namespace studio {
 						break;
 					}
 
-					// --- the two curves ---------------------------------
-					//
-					// **A text field, and a curve editor is deliberately not
-					// here.** `game::FormatValue` already writes a sequence as
-					// `0, 1, 0; 1, 0, 0` and `ParseValue` reads it back, so a
-					// text field is a complete, round-tripping editor for
-					// about six lines - and the alternative is a spline widget
-					// with keypoint dragging, which is a panel rather than a
-					// row and belongs beside the emitter preview rather than
-					// in the generic property list.
-					//
-					// What the text field is *not* is comfortable, and that is
-					// the honest trade rather than a claim it is fine. The
-					// curve editor is `mono.studio/AGENTS.md`'s deferred list.
-					//
-					// **Parsed on commit rather than per keystroke**, because
-					// half a typed gradient is a parse failure and writing one
-					// per character would fight the person typing it.
+					// Commit a complete curve so partial keypoints never reach the store.
 					case PropertyType::NumberSequence:
 					case PropertyType::ColorSequence: {
-						std::string text = FormatValue(changed);
-						if (TextField("##v", text)) {
-							PropertyValue parsed;
-							std::string reason;
-							if (ParseValue(descriptor->Type, text, parsed, reason)) {
-								changed = parsed;
-								wrote = true;
-							}
-						}
+						FieldDescriptor field{};
+						field.Type = descriptor->Type;
+						std::string draft;
+						wrote = DrawSchemaValue(store, field, changed, draft);
 						break;
 					}
 
@@ -1547,6 +1374,12 @@ namespace studio {
 			bool Wanted = false;
 		};
 		ComponentEdit componentEdit;
+		struct PropertyEdit {
+			Name Property;
+			ClassId Owner;
+			PropertyValue Value;
+		};
+		std::optional<PropertyEdit> propertyEdit;
 		CollectionTagEdit tagEdit;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 
@@ -1647,7 +1480,17 @@ namespace studio {
 			}
 			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
 
-			for (const ComponentId component : store.ComponentsOf(instance)) {
+			// Structural properties must remain reachable after removing their backing tag.
+			const auto attached = store.ComponentsOf(instance);
+			std::vector<ComponentId> inspected(attached.begin(), attached.end());
+			for (const auto &property : store.PropertiesOf(instance)) {
+				if (!property.Reads) continue;
+				for (const auto component : property.Reads->Ids()) {
+					if (std::find(inspected.begin(), inspected.end(), component) == inspected.end())
+						inspected.push_back(component);
+				}
+			}
+			for (const ComponentId component : inspected) {
 				const TypeDescriptor &descriptor = Components::Describe(component);
 				int score = 0;
 				if (!ComponentFilter.empty() && !FuzzyMatch(ComponentFilter, Label(descriptor.Name), score)) {
@@ -1698,17 +1541,44 @@ namespace studio {
 						}
 					}
 
-					for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-						if (property.Reads == nullptr || !property.Reads->Contains(component)) {
-							continue;
+					if (ImGui::BeginTable(
+							"##native-properties",
+							2,
+							ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+						)) {
+						ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+						ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+						for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
+							if (property.Reads == nullptr || !property.Reads->Contains(component)) continue;
+							ImGui::TableNextRow();
+							ImGui::TableSetColumnIndex(0);
+							ImGui::AlignTextToFramePadding();
+							ImGui::TextUnformatted(Label(property.Name));
+							ImGui::TableSetColumnIndex(1);
+							PropertyValue value;
+							if (!ReadProperty(store, instance, property, value)) {
+								ImGui::TextDisabled("unavailable");
+								continue;
+							}
+							ImGui::PushID(property.Name.Id());
+							ImGui::SetNextItemWidth(-1.0f);
+							ImGui::BeginDisabled(!property.Writable);
+							FieldDescriptor field{};
+							field.Type = property.Type;
+							field.Enum = property.EnumName;
+							const std::string key = "property:" + std::string(property.Spelling);
+							if (DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]) &&
+								property.Writable) {
+								propertyEdit = PropertyEdit{
+									property.Name,
+									DeclaringPropertyClass(store.ClassOf(instance), property.Name),
+									std::move(value)
+								};
+							}
+							ImGui::EndDisabled();
+							ImGui::PopID();
 						}
-
-						PropertyValue value;
-						ImGui::Text("%s", Label(property.Name));
-						if (ReadProperty(store, instance, property, value)) {
-							ImGui::SameLine();
-							ImGui::TextDisabled("%s", FormatValue(value).c_str());
-						}
+						ImGui::EndTable();
 					}
 				}
 				ImGui::PopID();
@@ -1716,6 +1586,46 @@ namespace studio {
 		});
 
 		bool modified = false;
+		if (propertyEdit) {
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				for (const Entity instance : Selection) {
+					if (!store.Alive(instance) || !SelectionPropertyApplies(
+													  store.ClassOf(instance),
+													  propertyEdit->Owner,
+													  propertyEdit->Property,
+													  propertyEdit->Value.Type
+												  ))
+						continue;
+					for (const auto &property : store.PropertiesOf(instance)) {
+						if (property.Name != propertyEdit->Property) continue;
+						PropertyValue before;
+						if (!ReadProperty(store, instance, property, before) ||
+							!engine::game::WriteAuthoredProperty(
+								store, instance, property, propertyEdit->Value
+							))
+							break;
+						PropertyValue after;
+						if (ReadProperty(store, instance, property, after) && authoritative && Commands) {
+							Commands->RecordProperty(
+								SelectionWorld,
+								instance,
+								property.Name,
+								before,
+								after,
+								"Set " + std::string(property.Spelling)
+							);
+						}
+						modified = true;
+						break;
+					}
+				}
+			});
+			if (modified && propertyEdit->Property == Name("MeshId")) {
+				engine::core::Vector3 extent;
+				if (Renderer.MeshExtentOf(propertyEdit->Value.Name, extent))
+					FitPartsToMesh(propertyEdit->Value.Name, extent);
+			}
+		}
 		if (componentEdit.Wanted) {
 			Universe->Enter(SelectionWorld, [&](Store &store) {
 				const Schema *schema = Schemas::Of(componentEdit.Component);

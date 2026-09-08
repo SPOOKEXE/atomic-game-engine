@@ -1,3 +1,5 @@
+#include "ImportedValues.hpp"
+
 #include <engine/bake/RobloxModel.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -188,15 +190,24 @@ namespace studio {
 
 			// A number out of either shape: `at` names the object member and
 			// `index` the array slot, so one call covers both spellings.
-			const auto number = [&value](const char *at, size_t index) -> float {
+			bool malformed = false;
+			const auto number = [&value, &malformed](const char *at, size_t index) -> float {
+				const json *component = nullptr;
 				if (value.is_object()) {
 					const auto found = value.find(at);
-					return found != value.end() && found->is_number() ? found->get<float>() : 0.0f;
+					if (found != value.end()) {
+						component = &*found;
+					}
+				} else if (value.is_array() && index < value.size()) {
+					component = &value[index];
 				}
-				if (value.is_array() && index < value.size() && value[index].is_number()) {
-					return value[index].get<float>();
+				engine::game::PropertyValue converted;
+				if (component == nullptr || !component->is_number() ||
+					!ReadImportedNumber(PropertyType::Float, component->get<double>(), converted)) {
+					malformed = true;
+					return 0.0f;
 				}
-				return 0.0f;
+				return converted.Float;
 			};
 
 			switch (property.Type) {
@@ -214,11 +225,13 @@ namespace studio {
 				if (!value.is_number()) {
 					return false;
 				}
-				out.Int32 = value.get<int32_t>();
-				out.Int64 = value.get<int64_t>();
-				out.Float = value.get<float>();
-				out.Double = value.get<double>();
-				return true;
+				if (value.is_number_unsigned()) {
+					return ReadImportedNumber(property.Type, value.get<uint64_t>(), out);
+				}
+				if (value.is_number_integer()) {
+					return ReadImportedNumber(property.Type, value.get<int64_t>(), out);
+				}
+				return ReadImportedNumber(property.Type, value.get<double>(), out);
 
 			case PropertyType::String:
 				if (!value.is_string()) {
@@ -246,44 +259,68 @@ namespace studio {
 
 			case PropertyType::Vector3:
 				out.Vector3 = engine::core::Vector3{number("X", 0), number("Y", 1), number("Z", 2)};
-				return true;
+				return !malformed;
 
 			case PropertyType::Vector2:
 				out.Vector2 = engine::core::Vector2{number("X", 0), number("Y", 1)};
-				return true;
+				return !malformed;
 
 			case PropertyType::Color3:
 				out.Color3 = engine::core::Color3{number("R", 0), number("G", 1), number("B", 2)};
-				return true;
+				return !malformed;
 
 			case PropertyType::CFrame: {
-				// Position only. A `.model.json` writes a `CFrame` as twelve
-				// numbers - three of position and a nine-element rotation
-				// matrix - and this engine's `CFrame` is a quaternion, so the
-				// conversion is real work for a case no project in the seed
-				// content uses. Reported by the caller rather than done wrong.
-				const json position = value.is_object() ? value.value("Position", value) : value;
-				const auto axis = [&position](const char *at, size_t index) -> float {
-					if (position.is_object()) {
-						const auto found = position.find(at);
-						return found != position.end() && found->is_number() ? found->get<float>() : 0.0f;
+				const json &position =
+					value.is_object() && value.contains("Position") ? value["Position"] : value;
+				engine::ecs::PropertyDescriptor vectorProperty;
+				vectorProperty.Type = PropertyType::Vector3;
+				engine::game::PropertyValue translated;
+				if (!ReadPropertyJson(vectorProperty, position, translated)) {
+					return false;
+				}
+				out.CFrame = engine::core::CFrame(translated.Vector3);
+				const json *rotation = nullptr;
+				size_t offset = 0;
+				if (value.is_array()) {
+					if (value.size() != 3 && value.size() != 12) {
+						return false;
 					}
-					return position.is_array() && index < position.size() && position[index].is_number()
-							   ? position[index].get<float>()
-							   : 0.0f;
-				};
-				out.CFrame =
-					engine::core::CFrame(engine::core::Vector3{axis("X", 0), axis("Y", 1), axis("Z", 2)});
+					if (value.size() == 12) {
+						rotation = &value;
+						offset = 3;
+					}
+				} else if (value.is_object() && value.contains("Rotation")) {
+					rotation = &value["Rotation"];
+					if (!rotation->is_array() || rotation->size() != 9) {
+						return false;
+					}
+				}
+				if (rotation == nullptr) {
+					return true;
+				}
+				glm::mat3 basis;
+				for (size_t row = 0; row < 3; row++) {
+					for (size_t column = 0; column < 3; column++) {
+						const json &entry = (*rotation)[offset + row * 3 + column];
+						engine::game::PropertyValue component;
+						if (!entry.is_number() ||
+							!ReadImportedNumber(PropertyType::Float, entry.get<double>(), component)) {
+							return false;
+						}
+						basis[column][row] = component.Float;
+					}
+				}
+				out.CFrame = engine::core::CFrame(translated.Vector3, glm::quat_cast(basis));
 				return true;
 			}
 
 			case PropertyType::UDim:
 				out.UDim = engine::core::UDim{number("Scale", 0), number("Offset", 1)};
-				return true;
+				return !malformed;
 
 			case PropertyType::NumberRange:
 				out.NumberRange = engine::core::NumberRange{number("Min", 0), number("Max", 1)};
-				return true;
+				return !malformed;
 
 			default:
 				// `UDim2`, `Rect`, the two sequences and a `Reference`. A
@@ -829,13 +866,9 @@ namespace studio {
 				if (value.Kind() != Kind::Integer && value.Kind() != Kind::Number) {
 					return false;
 				}
-				const double number = value.Kind() == Kind::Integer ? static_cast<double>(value.As<int64_t>())
-																	: value.As<double>();
-				out.Int32 = static_cast<int32_t>(number);
-				out.Int64 = static_cast<int64_t>(number);
-				out.Float = static_cast<float>(number);
-				out.Double = number;
-				return true;
+				return value.Kind() == Kind::Integer
+						   ? ReadImportedNumber(property.Type, value.As<int64_t>(), out)
+						   : ReadImportedNumber(property.Type, value.As<double>(), out);
 			}
 
 			case PropertyType::String:
@@ -847,12 +880,8 @@ namespace studio {
 
 			case PropertyType::Name:
 			case PropertyType::Enum:
-				// **A model file's enum never reaches here**, because both readers
-				// refuse one: it is a number naming a member of Roblox's table
-				// and this engine names members by string. What can reach here is
-				// a *string* landing on a property this engine declares as an
-				// enum, and that is checked against `EnumTable` for
-				// `ReadPropertyJson`'s reason.
+				// Numeric Roblox enums are refused by the reader. Named members
+				// still require membership in the declared engine enum.
 				if (value.Kind() != Kind::Text) {
 					return false;
 				}
@@ -885,11 +914,6 @@ namespace studio {
 				return true;
 
 			case PropertyType::CFrame:
-				// **The rotation survives, unlike the JSON path's.** A
-				// `.model.json` writes a `CFrame` as twelve numbers and this
-				// module reads only the three of its position; a model file states
-				// an orientation the reader has already turned into a
-				// quaternion, so there is nothing left to approximate.
 				if (value.Kind() != Kind::CFrame) {
 					return false;
 				}
@@ -917,6 +941,20 @@ namespace studio {
 				out.Rect = value.As<engine::core::Rect>();
 				return true;
 
+			case PropertyType::NumberSequence: {
+				if (value.Kind() != Kind::NumberSequence) {
+					return false;
+				}
+				return ReadImportedSequence(
+					value.As<engine::bake::RobloxNumberSequence>(), out.NumberSequence
+				);
+			}
+			case PropertyType::ColorSequence: {
+				if (value.Kind() != Kind::ColorSequence) {
+					return false;
+				}
+				return ReadImportedSequence(value.As<engine::bake::RobloxColorSequence>(), out.ColorSequence);
+			}
 			case PropertyType::NumberRange:
 				if (value.Kind() != Kind::NumberRange) {
 					return false;
@@ -925,9 +963,7 @@ namespace studio {
 				return true;
 
 			default:
-				// The two sequences and a `Reference`. The reader produces
-				// neither, so this is the arm nothing reaches rather than a
-				// refusal somebody will meet.
+				// References and opaque payloads have no mapping in this reader.
 				return false;
 			}
 		}

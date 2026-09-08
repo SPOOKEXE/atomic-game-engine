@@ -1146,12 +1146,8 @@ TEST_CASE("a binary model builds its class, its properties and its children", "[
 	CHECK(colour.B == Approx(0.0f));
 }
 
-TEST_CASE("a binary model's rotation survives, unlike a model.json's", "[studio][rojosync]") {
-	// **The one property this path carries further than the JSON one.** A
-	// `.model.json` writes a `CFrame` as twelve numbers and this module reads
-	// only its position; a `.rbxm` states an orientation as one byte naming one
-	// of twenty-four, and dropping it would lay every rotated part flat with
-	// nothing saying so.
+TEST_CASE("a binary model's rotation survives", "[studio][rojosync]") {
+	// The compact binary orientation must agree with the authored frame.
 	TableTree tree;
 	Store store("rojo_table");
 	engine::scene::EnsureClassTree();
@@ -1664,4 +1660,39 @@ TEST_CASE("syncing a universe twice builds into the worlds it made", "[studio][r
 		CHECK(storages == 1);
 		CHECK(roots > 0);
 	});
+}
+
+TEST_CASE("rojo model properties retain integer precision and frame rotation", "[studio][rojosync]") {
+	Tree tree;
+	tree.Write("values.model.json", R"({"className":"Folder","children":[
+		{"name":"Precise","className":"IntValue","properties":{"Value":9007199254740993}},
+		{"name":"TooLarge","className":"IntValue","properties":{"Value":18446744073709551615}},
+		{"name":"Rotated","className":"Part","properties":{"CFrame":[1,2,3,0,0,1,0,1,0,-1,0,0]}},
+		{"name":"Malformed","className":"Part","properties":{"Size":[2,"bad",4]}}
+	]})");
+	RojoProject project;
+	std::string error;
+	REQUIRE(ParseRojoProject(
+		R"({"name":"Values","tree":{"$className":"DataModel","Values":{"$path":"values.model.json"}}})",
+		project,
+		error
+	));
+	engine::scene::EnsureClassTree();
+	Store store("rojo-values");
+	RojoSyncReport report;
+	REQUIRE(SyncRojoProject(project, tree.Root, store, report, error));
+	const Entity root = Child(store, store.FindFirstRoot("Values"), "values");
+	REQUIRE(root != NULL_ENTITY);
+	int64_t precise = 0;
+	REQUIRE(store.GetProperty(Child(store, root, "Precise"), Name("Value"), &precise, sizeof(precise)));
+	CHECK(precise == 9007199254740993);
+	int64_t tooLarge = -1;
+	REQUIRE(store.GetProperty(Child(store, root, "TooLarge"), Name("Value"), &tooLarge, sizeof(tooLarge)));
+	CHECK(tooLarge == 0);
+	engine::core::CFrame frame;
+	REQUIRE(store.GetProperty(Child(store, root, "Rotated"), Name("CFrame"), &frame, sizeof(frame)));
+	CHECK(frame.Position == engine::core::Vector3{1, 2, 3});
+	CHECK(frame.QuaternionY == Approx(0.70710678f));
+	CHECK(frame.QuaternionW == Approx(0.70710678f));
+	CHECK(report.Notes.size() == 2);
 }
