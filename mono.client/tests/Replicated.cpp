@@ -15,6 +15,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -40,6 +41,7 @@ TEST_DEPENDS("engine.replication.snapshotbuffer")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.attachments")
+TEST_DEPENDS("engine.scene.materials")
 TEST_DEPENDS("engine.physics.characters")
 
 using Catch::Approx;
@@ -1344,4 +1346,24 @@ TEST_CASE(
 		CHECK_FALSE(client::ReconcileNativePlayerPrediction(arrived, inputs, 105));
 		CHECK(arrived.Resource<client::LocalPlayerPrediction>()->Frame.Position == previous.Position);
 	}
+}
+
+TEST_CASE(
+	"replica presentation resolves material shader demand before collection",
+	"[client][replication][replica-materials]"
+) {
+	Replica replica;
+	const auto part = replica.World.CreateInstance(engine::scene::PartClass(), "Floor");
+	const auto material = replica.World.CreateInstance(engine::scene::MaterialClass(), "Material");
+	REQUIRE(replica.World.SetParent(material, part));
+	const engine::core::Name shader("RoomShader");
+	replica.World.GetMutable<engine::scene::MaterialRef>(material)->Shader = shader;
+	replica.World.SetAdoptOnly(true);
+	replica.Draw();
+	REQUIRE(replica.Instances().size() == 1);
+	CHECK(replica.Instances()[0].Shader == shader);
+	replica.World.GetMutable<engine::scene::MaterialRef>(material)->Shader = {};
+	replica.Draw();
+	REQUIRE(replica.Instances().size() == 1);
+	CHECK_FALSE(replica.Instances()[0].Shader.IsValid());
 }

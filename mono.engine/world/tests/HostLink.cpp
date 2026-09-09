@@ -646,3 +646,145 @@ TEST_CASE(
 	REQUIRE(pair.Driver->TakeTickExchange(host));
 	CHECK(pair.Driver->TickExchangeDropped() == 2);
 }
+
+TEST_CASE(
+	"presentation bindings preserve exact tuples and reject malformed snapshots transactionally",
+	"[world][hostlink]"
+) {
+	using namespace engine::world;
+	const PresentationEndpointBinding exported{{"far", "images", 200, 2}, {"far", "images", 100, 8}};
+	const PresentationEndpointBinding returned{
+		{"$presentation-return.0", "reply", 100, 9}, {"far", "reply", 100, 9}
+	};
+	const PresentationBindings expected{100, 3, {exported}, {returned}};
+	ByteWriter writer;
+	REQUIRE(WritePresentationBindings(writer, expected));
+	PresentationBindings decoded;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(ReadPresentationBindings(reader, decoded));
+	CHECK(decoded == expected);
+	CHECK(reader.Remaining() == 0);
+	for (size_t length = 0; length < writer.Size(); ++length) {
+		ByteReader truncated(writer.Bytes().first(length));
+		CHECK_FALSE(ReadPresentationBindings(truncated, decoded));
+		CHECK(decoded == expected);
+	}
+	SECTION("duplicate local tuple") {
+		auto invalid = expected;
+		auto duplicate = exported;
+		duplicate.Published.Generation++;
+		invalid.Exports.push_back(duplicate);
+		ByteWriter refused;
+		CHECK_FALSE(WritePresentationBindings(refused, invalid));
+		CHECK(refused.Size() == 0);
+	}
+	SECTION("duplicate public tuple") {
+		auto invalid = expected;
+		auto duplicate = exported;
+		duplicate.Local.Generation++;
+		invalid.Exports.push_back(duplicate);
+		ByteWriter refused;
+		CHECK_FALSE(WritePresentationBindings(refused, invalid));
+	}
+	SECTION("aggregate count rejected before endpoints") {
+		ByteWriter invalid;
+		invalid.WriteUInt32(0x31424250u);
+		invalid.WriteUInt64(100);
+		invalid.WriteUInt64(4);
+		invalid.WriteUInt32(MAX_PRESENTATION_DIRECTORY);
+		invalid.WriteUInt32(1);
+		ByteReader input(invalid.Bytes());
+		CHECK_FALSE(ReadPresentationBindings(input, decoded));
+		CHECK(decoded == expected);
+	}
+	SECTION("invalid endpoint") {
+		auto invalid = expected;
+		invalid.Returns[0].Published.Generation = 0;
+		ByteWriter refused;
+		CHECK_FALSE(WritePresentationBindings(refused, invalid));
+	}
+	HostFrame frame;
+	frame.Signal = HostSignal::PresentationBindings;
+	frame.Bindings = expected;
+	ByteWriter framed;
+	WriteHostFrame(framed, frame);
+	HostFrame received;
+	ByteReader framedInput(framed.Bytes());
+	REQUIRE(ReadHostFrame(framedInput, received));
+	CHECK(received.Signal == HostSignal::PresentationBindings);
+	CHECK(received.Bindings == expected);
+}
+
+TEST_CASE(
+	"presentation bindings retry the latest revision and deliver empty withdrawals", "[world][hostlink]"
+) {
+	using namespace engine::world;
+	auto [first, second] = MakeLocalChannel({1024, 1024});
+	HostLink sender(std::move(first)), receiver(std::move(second));
+	PresentationBindings bindings{100, 1, {{{"far", "images", 200, 2}, {"far", "images", 100, 8}}}, {}};
+	while (sender.Heartbeat(1)) {}
+	CHECK_FALSE(sender.PublishPresentationBindings(bindings));
+	std::vector<HostFrame> frames;
+	receiver.Receive(frames);
+	bindings.Revision = 2;
+	bindings.Exports[0].Published.Generation++;
+	REQUIRE(sender.PublishPresentationBindings(bindings));
+	REQUIRE(sender.PublishPresentationBindings(bindings));
+	frames.clear();
+	receiver.Receive(frames);
+	REQUIRE(frames.size() == 1);
+	CHECK(frames[0].Bindings == bindings);
+	bindings.Revision = 1;
+	CHECK_FALSE(sender.PublishPresentationBindings(bindings));
+	bindings.Revision = 3;
+	bindings.Exports.clear();
+	REQUIRE(sender.PublishPresentationBindings(bindings));
+	frames.clear();
+	receiver.Receive(frames);
+	REQUIRE(frames.size() == 1);
+	CHECK(frames[0].Bindings == bindings);
+}
+
+TEST_CASE(
+	"presentation bindings refuse cross-kind local ambiguity while preserving identity mappings",
+	"[world][hostlink]"
+) {
+	using namespace engine::world;
+	const PresentationAddress local{"far", "images", 200, 2};
+	const PresentationAddress publicExport{"far", "images", 100, 8};
+	const PresentationAddress publicReturn{"near", "images", 100, 9};
+	const PresentationBindings ambiguous{100, 1, {{local, publicExport}}, {{local, publicReturn}}};
+	ByteWriter refused;
+	refused.WriteUInt8(42);
+	CHECK_FALSE(WritePresentationBindings(refused, ambiguous));
+	REQUIRE(refused.Size() == 1);
+	CHECK(refused.Bytes()[0] == std::byte{42});
+
+	// Build the conflicting wire directly, independently of the rejecting encoder.
+	ByteWriter wire;
+	wire.WriteUInt32(0x31424250u);
+	wire.WriteUInt64(100);
+	wire.WriteUInt64(1);
+	wire.WriteUInt32(1);
+	wire.WriteUInt32(1);
+	for (const auto &endpoint : {local, publicExport, local, publicReturn}) {
+		wire.WriteString(endpoint.World);
+		wire.WriteString(endpoint.Channel);
+		wire.WriteUInt64(endpoint.Session);
+		wire.WriteUInt64(endpoint.Generation);
+	}
+	const PresentationBindings identity{100, 2, {{local, local}}, {{publicReturn, publicReturn}}};
+	auto decoded = identity;
+	ByteReader reader(wire.Bytes());
+	CHECK_FALSE(ReadPresentationBindings(reader, decoded));
+	CHECK(reader.Failed());
+	CHECK(decoded == identity);
+
+	ByteWriter valid;
+	REQUIRE(WritePresentationBindings(valid, identity));
+	ByteReader validReader(valid.Bytes());
+	decoded = {};
+	REQUIRE(ReadPresentationBindings(validReader, decoded));
+	CHECK(decoded == identity);
+	CHECK(validReader.Remaining() == 0);
+}

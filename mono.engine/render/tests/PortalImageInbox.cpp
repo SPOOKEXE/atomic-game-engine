@@ -1,3 +1,4 @@
+#include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalImageInbox.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -407,9 +408,20 @@ TEST_CASE(
 	CHECK(held->Key == first.Request.Key);
 }
 
-TEST_CASE("portal inbox charges paired depth before decoding", "[render][portal-inbox][portal-depth]") {
+TEST_CASE(
+	"portal inbox charges paired depth and ambient planes before decoding",
+	"[render][portal-inbox][portal-depth]"
+) {
+	const int planes = GENERATE(0, 3, 4);
+	const bool ambient = planes != 0;
+	auto request = Request();
+	request.Scope = PortalImageScope::OpaqueLighting;
+	if (ambient) {
+		request.Width = request.Height = 32;
+		request.PixelBudget = 32 * 32;
+	}
 	PortalImageInbox measured;
-	auto issued = measured.Issue(LOCAL, REMOTE, Request(), START);
+	auto issued = measured.Issue(LOCAL, REMOTE, request, START);
 	REQUIRE(issued.Status == PortalInboxStatus::Issued);
 	const auto color = Reply(issued);
 	REQUIRE(
@@ -422,13 +434,28 @@ TEST_CASE("portal inbox charges paired depth before decoding", "[render][portal-
 	REQUIRE(DecodePortalImageReply(color, reply, error));
 	reply.Depth.assign(size_t(reply.Width) * reply.Height * 4, std::byte{});
 	reply.DepthHash = engine::assets::Hasher::Of(reply.Depth);
+	if (ambient) {
+		reply.CaptureLighting.emplace();
+		reply.Normal.assign(size_t(reply.Width) * reply.Height * 4, std::byte{255});
+		reply.AmbientResponse.assign(size_t(reply.Width) * reply.Height * 16, std::byte{});
+		reply.NormalHash = engine::assets::Hasher::Of(reply.Normal);
+		reply.AmbientResponseHash = engine::assets::Hasher::Of(reply.AmbientResponse);
+		reply.LightingBaseline = reply.AmbientResponse;
+		reply.LightingBaselineHash = engine::assets::Hasher::Of(reply.LightingBaseline);
+		if (planes == 4) {
+			reply.DirectionalResponse = reply.AmbientResponse;
+			reply.DirectionalResponseHash = engine::assets::Hasher::Of(reply.DirectionalResponse);
+		}
+	}
 	std::vector<std::byte> paired;
 	REQUIRE(EncodePortalImageReply(reply, paired, error));
 	for (const size_t shortBy : {1u, 0u}) {
 		PortalInboxLimits limits;
-		limits.HeldBytes = colorBytes + reply.Depth.size() - shortBy;
+		limits.HeldBytes = colorBytes + reply.Depth.size() + reply.Normal.size() +
+						   reply.AmbientResponse.size() + reply.LightingBaseline.size() +
+						   reply.DirectionalResponse.size() - shortBy;
 		PortalImageInbox inbox(limits);
-		issued = inbox.Issue(LOCAL, REMOTE, Request(), START);
+		issued = inbox.Issue(LOCAL, REMOTE, request, START);
 		REQUIRE(issued.Status == PortalInboxStatus::Issued);
 		const auto accepted =
 			inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, paired, START);
@@ -470,11 +497,13 @@ TEST_CASE("ordered requests cannot complete with flattened pixels", "[render][po
 }
 
 TEST_CASE("ordered inbox admission preserves complete groups under pressure", "[render][portal-inbox]") {
+	const bool overlay = GENERATE(false, true);
+	const bool lenses = GENERATE(false, true);
 	auto request = Request();
 	request.Scope = PortalImageScope::OpaqueLighting;
 	request.OrderedLayers = true;
 	request.PixelBudget *= 4;
-	const auto layerSet = [](const PortalIssueResult &issued, uint64_t tick) {
+	const auto layerSet = [overlay, lenses](const PortalIssueResult &issued, uint64_t tick) {
 		PortalImageLayerSet layers;
 		auto &image = layers.Opaque;
 		image.Key = issued.Request.Key;
@@ -488,6 +517,23 @@ TEST_CASE("ordered inbox admission preserves complete groups under pressure", "[
 		image.PixelHash = engine::assets::Hasher::Of(image.Pixels);
 		image.DepthHash = engine::assets::Hasher::Of(image.Depth);
 		layers.Transparent.assign(2, image);
+		if (overlay) {
+			layers.SpatialOverlay = image;
+			layers.SpatialOverlay->Depth.clear();
+			layers.SpatialOverlay->DepthHash = {};
+		}
+		if (lenses) {
+			layers.Lenses.TimeSeconds = float(tick);
+			PortalCaptureLens lens;
+			lens.Shader = "RoomLens";
+			PortalCaptureLensProgram program;
+			program.SpirV = {0x07230203, 0x00010000, 0, 1, 0};
+			program.Hash = engine::assets::Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+			lens.ProgramHash = program.Hash;
+			layers.Lenses.Programs.push_back(std::move(program));
+			layers.Lenses.Entries.assign(2, lens);
+			layers.Lenses.Entries.back().Position[0] = float(tick);
+		}
 		return layers;
 	};
 	const auto encode = [](const PortalImageLayerSet &layers) {
@@ -497,7 +543,11 @@ TEST_CASE("ordered inbox admission preserves complete groups under pressure", "[
 		return wire;
 	};
 	const size_t heldBytes = LOCAL.World.size() + LOCAL.Channel.size() + REMOTE.World.size() +
-							 REMOTE.Channel.size() + 3 * request.Key.PortalKey.size() + 3 * 4 * 12;
+							 REMOTE.Channel.size() + 3 * request.Key.PortalKey.size() + 3 * 4 * 12 +
+							 (overlay ? request.Key.PortalKey.size() + 4 * 8 : 0) +
+							 (lenses ? 2 * (sizeof(PortalCaptureLens) + std::string_view("RoomLens").size()) +
+										   sizeof(PortalCaptureLensProgram) + 5 * sizeof(uint32_t)
+									 : 0);
 	PortalInboxLimits limits;
 	limits.HeldBytes = heldBytes * 2 - 1;
 	PortalImageInbox inbox(limits);
@@ -506,7 +556,12 @@ TEST_CASE("ordered inbox admission preserves complete groups under pressure", "[
 	const auto original = layerSet(first, 10);
 	const auto wire = encode(original);
 	REQUIRE(MatchPortalImageLayerSet(wire, first.Request.Key, 2, 2));
+	CHECK(MatchPortalImageLayerSet(wire, first.Request.Key, 2, 2)->ImageCount == (overlay ? 4 : 3));
 	CHECK_FALSE(MatchPortalImageLayerSet(wire, first.Request.Key, 1, 2));
+	CHECK(
+		MatchPortalImageLayerSet(wire, first.Request.Key, 2, 2)->MetadataBytes ==
+		PortalCaptureLensBytes(original.Lenses)
+	);
 	auto incomplete = original;
 	incomplete.Transparent.pop_back();
 	const auto incompleteWire = encode(incomplete);
@@ -613,4 +668,240 @@ TEST_CASE("ordered inbox admission preserves complete groups under pressure", "[
 	CHECK_FALSE(inbox.TakeLayers(LOCAL, REMOTE, "Door", START + 1s));
 	CHECK(inbox.Usage().HeldCount == 0);
 	CHECK(inbox.Usage().HeldBytes == 0);
+}
+
+namespace {
+	constexpr PortalEndpointView CHILD{"Child", "portals", 11, 12};
+	PortalImageRequest TreeRequest() {
+		auto request = Request();
+		request.OrderedLayers = true;
+		request.Scope = PortalImageScope::OpaqueLighting;
+		request.RecursionDepth = 2;
+		request.PixelBudget = 64;
+		return request;
+	}
+	PortalCaptureTree TreeReply(const PortalIssueResult &issued) {
+		PortalCaptureTree tree;
+		for (size_t i = 0; i < 2; ++i) {
+			PortalCaptureTreeNode node;
+			const auto endpoint = i ? CHILD : REMOTE;
+			node.Producer = {
+				std::string(endpoint.World),
+				std::string(endpoint.Channel),
+				endpoint.Session,
+				endpoint.Generation
+			};
+			const auto &request = issued.Request;
+			node.Camera = {
+				request.Position, request.Orientation, request.Frustum, request.ClipPlane, request.Projection
+			};
+			auto &reply = node.Layers.Opaque;
+			reply.Key = request.Key;
+			if (i) reply.Key.PortalKey = "Nested";
+			reply.Status = PortalImageStatus::Ok;
+			reply.Scope = PortalImageScope::OpaqueLighting;
+			reply.CaptureTick = 10;
+			reply.Width = reply.Height = i ? 1 : 2;
+			reply.RowStride = reply.Width * 8;
+			reply.Pixels.resize(reply.RowStride * reply.Height);
+			reply.Depth.resize(reply.Width * reply.Height * 4);
+			reply.CaptureLighting.emplace();
+			reply.PixelHash = engine::assets::Hasher::Of(reply.Pixels);
+			reply.DepthHash = engine::assets::Hasher::Of(reply.Depth);
+			node.Layers.Transparent.assign(2, reply);
+			tree.Nodes.push_back(std::move(node));
+		}
+		PortalCaptureTreeEdge edge;
+		edge.PortalKey = "Nested";
+		PortalGeometry geometry;
+		geometry.Rows.emplace_back();
+		std::string error;
+		REQUIRE(EncodePortalGeometry(geometry, edge.Geometry, error));
+		tree.Edges.push_back(std::move(edge));
+		return tree;
+	}
+	std::vector<std::byte> TreeWire(const PortalCaptureTree &tree) {
+		std::vector<std::byte> wire;
+		std::string error;
+		REQUIRE(EncodePortalCaptureTree(tree, wire, error));
+		return wire;
+	}
+	const PortalCaptureTreeAllowChild ALLOW_CHILD = [](PortalEndpointView endpoint) {
+		return endpoint == CHILD;
+	};
+}
+TEST_CASE(
+	"recursive portal inbox authenticates every node and extracts only complete trees",
+	"[render][portal-inbox]"
+) {
+	PortalImageInbox inbox;
+	const auto issued = inbox.Issue(LOCAL, REMOTE, TreeRequest(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	auto tree = TreeReply(issued);
+	auto wire = TreeWire(tree);
+	CHECK(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START).Status ==
+		PortalInboxStatus::Stale
+	);
+	CHECK(inbox.Usage().PendingCount == 1);
+	CHECK(
+		inbox
+			.AcceptAuthenticated(
+				REMOTE, LOCAL, issued.Request.Key.RequestId, Reply(issued), START, ALLOW_CHILD
+			)
+			.Status == PortalInboxStatus::Stale
+	);
+	std::vector<std::byte> flat;
+	std::string error;
+	REQUIRE(EncodePortalImageLayerSet(tree.Nodes.front().Layers, flat, error));
+	CHECK(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, flat, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Stale
+	);
+	REQUIRE(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Accepted
+	);
+	PortalCaptureTreeMeasure measured;
+	REQUIRE(MeasurePortalCaptureTree(wire, measured, error));
+	CHECK(measured.Pixels == 15);
+	CHECK_FALSE(inbox.Take(LOCAL, REMOTE, "Door", START));
+	CHECK_FALSE(inbox.TakeLayers(LOCAL, REMOTE, "Door", START));
+	auto taken = inbox.TakeTree(LOCAL, REMOTE, "Door", START);
+	REQUIRE(taken);
+	CHECK(*taken == tree);
+	CHECK(inbox.Usage().HeldBytes == 0);
+}
+TEST_CASE(
+	"recursive portal inbox rejects mismatched capture metadata before replacing held content",
+	"[render][portal-inbox]"
+) {
+	PortalImageInbox inbox;
+	auto issued = inbox.Issue(LOCAL, REMOTE, TreeRequest(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	auto tree = TreeReply(issued);
+	auto wire = TreeWire(tree);
+	REQUIRE(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Accepted
+	);
+	const auto previous = tree;
+	auto request = TreeRequest();
+	request.Key.CameraRevision++;
+	issued = inbox.Issue(LOCAL, REMOTE, request, START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	tree = TreeReply(issued);
+	bool truncated = false;
+	SECTION("wrong key") {
+		for (auto *reply :
+			 {&tree.Nodes[0].Layers.Opaque,
+			  &tree.Nodes[0].Layers.Transparent[0],
+			  &tree.Nodes[0].Layers.Transparent[1]})
+			reply->Key.CameraRevision++;
+	}
+	SECTION("wrong world") {
+		tree.Nodes[0].Producer.World = "Other";
+	}
+	SECTION("wrong generation") {
+		tree.Nodes[0].Producer.Generation++;
+	}
+	SECTION("wrong camera") {
+		tree.Nodes[0].Camera.Position[0] = 1;
+	}
+	SECTION("unknown child") {
+		tree.Nodes[1].Producer.Generation++;
+	}
+	SECTION("truncated metadata") {
+		truncated = true;
+	}
+	wire = TreeWire(tree);
+	if (truncated) wire.pop_back();
+	CHECK(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status != PortalInboxStatus::Accepted
+	);
+	CHECK(inbox.Usage().PendingCount == 1);
+	auto held = inbox.TakeTree(LOCAL, REMOTE, "Door", START);
+	REQUIRE(held);
+	CHECK(*held == previous);
+}
+TEST_CASE(
+	"recursive portal inbox admits aggregate child pixels and charges old trees during replacement",
+	"[render][portal-inbox]"
+) {
+	PortalImageInbox sizing;
+	auto issued = sizing.Issue(LOCAL, REMOTE, TreeRequest(), START);
+	auto tree = TreeReply(issued);
+	auto wire = TreeWire(tree);
+	REQUIRE(
+		sizing.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Accepted
+	);
+	const auto bytes = sizing.Usage().HeldBytes;
+	PortalInboxLimits limits;
+	limits.HeldBytes = bytes * 2 - 1;
+	PortalImageInbox inbox(limits);
+	issued = inbox.Issue(LOCAL, REMOTE, TreeRequest(), START);
+	tree = TreeReply(issued);
+	wire = TreeWire(tree);
+	REQUIRE(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Accepted
+	);
+	auto request = TreeRequest();
+	request.Key.CameraRevision++;
+	issued = inbox.Issue(LOCAL, REMOTE, request, START);
+	tree = TreeReply(issued);
+	wire = TreeWire(tree);
+	CHECK(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Full
+	);
+	CHECK(inbox.Usage().HeldBytes == bytes);
+	CHECK(inbox.Usage().PendingCount == 1);
+	inbox.InvalidateEndpoint(CHILD);
+	CHECK(inbox.Usage().HeldBytes == 0);
+	REQUIRE(
+		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Accepted
+	);
+	PortalImageInbox bounded;
+	request = TreeRequest();
+	request.PixelBudget = 16;
+	issued = bounded.Issue(LOCAL, REMOTE, request, START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	tree = TreeReply(issued);
+	auto &child = tree.Nodes[1].Layers;
+	child = tree.Nodes[0].Layers;
+	child.Opaque.Key.PortalKey = "Nested";
+	for (auto &layer : child.Transparent)
+		layer.Key.PortalKey = "Nested";
+	wire = TreeWire(tree);
+	CHECK(
+		bounded.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START, ALLOW_CHILD)
+			.Status == PortalInboxStatus::Stale
+	);
+}
+
+TEST_CASE(
+	"retained body identity participates in inbox pending ownership", "[render][portal-inbox][retained-body]"
+) {
+	auto request = Request();
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = true;
+	request.PixelBudget *= 4;
+	PortalImageInbox inbox;
+	const auto ordinary = inbox.Issue(LOCAL, REMOTE, request, START);
+	REQUIRE(ordinary.Status == PortalInboxStatus::Issued);
+	const auto ordinaryBytes = inbox.Usage().PendingBytes;
+	request.RetainedBodyPlayer = "91";
+	const auto retained = inbox.Issue(LOCAL, REMOTE, request, START);
+	REQUIRE(retained.Status == PortalInboxStatus::Issued);
+	CHECK(retained.Request.Key.RequestId != ordinary.Request.Key.RequestId);
+	CHECK(inbox.Usage().PendingBytes == ordinaryBytes + request.RetainedBodyPlayer.size());
+	CHECK(inbox.Issue(LOCAL, REMOTE, request, START).Status == PortalInboxStatus::Busy);
+	request.RetainedBodyPlayer = "92";
+	const auto changed = inbox.Issue(LOCAL, REMOTE, request, START);
+	CHECK(changed.Status == PortalInboxStatus::Issued);
+	CHECK(changed.Request.Key.RequestId != retained.Request.Key.RequestId);
 }

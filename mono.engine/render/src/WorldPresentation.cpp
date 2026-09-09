@@ -91,6 +91,16 @@ namespace engine::render {
 			return FoldPresentation(signature, word);
 		}
 
+		uint64_t ContentOwnerSignature(const View &view) {
+			uint64_t signature = FoldPresentation(0, view.ContentOwner.Id());
+			signature = FoldPresentation(signature, view.ForeignContentOwners.size());
+			for (const auto &binding : view.ForeignContentOwners) {
+				signature = FoldPresentation(signature, binding.World.Id());
+				signature = FoldPresentation(signature, binding.Owner.Id());
+			}
+			return signature;
+		}
+
 		uint64_t ProjectionSignature(const View &view) {
 			uint64_t signature = FoldPresentation(0, view.Projection.has_value() ? 1u : 0u);
 			signature = FoldPresentation(signature, view.SurfaceBudget.has_value());
@@ -140,6 +150,7 @@ namespace engine::render {
 		signature = FoldPresentation(signature, ProjectionSignature(view));
 		signature = FoldPresentation(signature, view.World);
 		signature = FoldPresentation(signature, view.WorldName.Id());
+		signature = FoldPresentation(signature, ContentOwnerSignature(view));
 		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
 		signature = FoldPresentation(signature, view.ParticleResidentRevision);
 		signature = FoldPresentation(signature, view.Particles.size());
@@ -151,8 +162,12 @@ namespace engine::render {
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state) {
 		ScenePresentationSignatures signatures;
 		const uint64_t projection = ProjectionSignature(view);
+		const uint64_t contentOwners = ContentOwnerSignature(view);
+		const auto &lighting = view.OverrideLighting ? view.Lighting : state.Lighting;
+		const size_t lensCount = std::min<size_t>(lighting.ShaderLensCount, std::size(lighting.ShaderLenses));
 		uint64_t &objects = signatures.Objects;
-		const bool objectLayer = !view.Instances.empty() || view.Grid.Enabled || state.PostProcess.IsValid();
+		const bool objectLayer =
+			!view.Instances.empty() || view.Grid.Enabled || state.PostProcess.IsValid() || lensCount != 0;
 		if (objectLayer) {
 			objects = scene::SignatureOf(view.Instances);
 			objects = FoldPresentationSpan(objects, view.JointFrames);
@@ -161,6 +176,7 @@ namespace engine::render {
 			objects = FoldPresentation(objects, projection);
 			objects = FoldPresentation(objects, view.World);
 			objects = FoldPresentation(objects, view.WorldName.Id());
+			objects = FoldPresentation(objects, contentOwners);
 			objects = FoldPresentation(objects, view.EyeRig);
 			objects = FoldPresentationSpan(objects, view.EyeHiddenRows);
 			objects = FoldPresentation(objects, view.Pipeline.Id());
@@ -181,6 +197,15 @@ namespace engine::render {
 			if (view.OverrideLighting) {
 				objects = FoldPresentationObject(objects, view.Lighting);
 			}
+			if (lensCount != 0) {
+				objects = FoldPresentationSpan(objects, std::span(lighting.ShaderLenses).first(lensCount));
+				objects = FoldPresentation(objects, view.LensPrograms);
+				if (view.LensPrograms == 0)
+					objects =
+						FoldPresentation(objects, view.LensContentOwner.value_or(view.ContentOwner).Id());
+				objects = FoldPresentation(objects, view.LensTimeSeconds.has_value());
+				if (view.LensTimeSeconds) objects = FoldPresentationObject(objects, *view.LensTimeSeconds);
+			}
 		}
 
 		uint64_t &environmentSignature = signatures.Environment;
@@ -193,6 +218,7 @@ namespace engine::render {
 			environmentSignature = 0;
 		} else {
 			environmentSignature = FoldPresentation(environmentSignature, projection);
+			environmentSignature = FoldPresentation(environmentSignature, contentOwners);
 			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direction);
 			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Ambient);
 			environmentSignature =
@@ -246,6 +272,7 @@ namespace engine::render {
 		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty();
 		if (particleLayer) {
 			particles = FoldPresentation(particles, projection);
+			particles = FoldPresentation(particles, contentOwners);
 			particles = FoldPresentation(particles, view.ParticleRevision);
 			particles = FoldPresentation(particles, view.ParticleLayoutRevision);
 			particles = FoldPresentation(particles, view.ParticleResidentRevision);
@@ -254,17 +281,20 @@ namespace engine::render {
 		}
 
 		uint64_t &portals = signatures.Portals;
-		const bool eyeLayer = view.EyeImage != 0 || view.EyeImageKey.IsValid() ||
-							  std::any_of(
-								  view.EyeTransparentImages.begin(),
-								  view.EyeTransparentImages.end(),
-								  [](uint64_t image) { return image != 0; }
-							  );
+		const bool eyeLayer =
+			view.EyeImage != 0 || view.EyeSpatialOverlayImage != 0 || view.EyeImageKey.IsValid() ||
+			std::any_of(
+				view.EyeTransparentImages.begin(), view.EyeTransparentImages.end(), [](uint64_t image) {
+					return image != 0;
+				}
+			);
 		const bool portalLayer =
 			eyeLayer || !view.Portals.empty() || !view.Surfaces.empty() || !view.Foreign.empty();
 		if (portalLayer) {
+			portals = FoldPresentation(portals, contentOwners);
 			if (eyeLayer) {
 				portals = FoldPresentation(portals, view.EyeImage);
+				portals = FoldPresentation(portals, view.EyeSpatialOverlayImage);
 				for (const auto image : view.EyeTransparentImages)
 					portals = FoldPresentation(portals, image);
 				portals = FoldPresentation(portals, view.EyeImageKey.Id());

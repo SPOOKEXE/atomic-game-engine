@@ -261,12 +261,6 @@ namespace engine::render {
 			const auto *identity = store.Get<scene::PlayerIdentity>(player);
 			if (identity) bodyPlayer = std::to_string(identity->UserId);
 		}
-		auto fitted = settings;
-		if (!bodyPlayer.empty()) {
-			fitted.MaximumExtent = std::min(fitted.MaximumExtent, 256u);
-			fitted.RecursionDepth = 0;
-			fitted.PixelBudget /= 4;
-		}
 		PortalImageDemandCounts counts;
 		std::vector<scene::PortalSeam> seams;
 		scene::GatherPortalSeams(store, seams);
@@ -308,15 +302,29 @@ namespace engine::render {
 				continue;
 			}
 			claim.ImagePortal = core::Name(name);
+			const auto resident = std::find(
+				settings.ResidentDestinations.begin(),
+				settings.ResidentDestinations.end(),
+				seam.DestinationWorld
+			);
+			const bool composeBody = !bodyPlayer.empty() && resident == settings.ResidentDestinations.end();
+			auto fitted = settings;
+			if (composeBody) {
+				fitted.MaximumExtent = std::min(fitted.MaximumExtent, 256u);
+				fitted.RecursionDepth = 0;
+				fitted.PixelBudget /= 5;
+			}
 			PortalImageDemand demand;
 			switch (BuildPortalImageDemand(seam, claim.ImagePortal, viewer, viewer.Slot, fitted, demand)) {
 			case PortalDemandStatus::Ready: {
-				if (!bodyPlayer.empty()) {
+				if (composeBody) {
 					demand.Request.OrderedLayers = true;
 					demand.Request.Scope = PortalImageScope::OpaqueLighting;
 					demand.Request.PixelBudget = settings.PixelBudget;
 					demand.Request.EyePlayer = bodyPlayer;
 					demand.Binding.ExpectedScope = PortalImageScope::OpaqueLighting;
+				} else if (resident != settings.ResidentDestinations.end() && viewer.EyePlayer) {
+					demand.Request.EyePlayer = std::to_string(*viewer.EyePlayer);
 				}
 				if (const auto *replica = ReplicaOf(store);
 					replica && replica->Active && replica->Of.IsValid()) {

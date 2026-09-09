@@ -1578,7 +1578,8 @@ namespace engine::render {
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-			SDL_GPUTexture *const texture = Textures.Find(state.Texture);
+			SDL_GPUTexture *const texture =
+				Textures.Find(state.Texture, TextureContentOwner(state.Texture, ActiveContentOwner));
 
 			ParticleMaterial material{};
 			material.Flags = glm::vec4{
@@ -1759,7 +1760,8 @@ namespace engine::render {
 				uniforms.Options = glm::vec4{run.ZOffset, 0.0f, 0.0f, 0.0f};
 				SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-				SDL_GPUTexture *const texture = Textures.Find(run.Texture);
+				SDL_GPUTexture *const texture =
+					Textures.Find(run.Texture, TextureContentOwner(run.Texture, ActiveContentOwner));
 
 				RibbonMaterial material{};
 				material.Flags =

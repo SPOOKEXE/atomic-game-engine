@@ -68,6 +68,8 @@ namespace engine::graph {
 			return "R32F";
 		case ResourceFormat::RG32F:
 			return "RG32F";
+		case ResourceFormat::RGBA32F:
+			return "RGBA32F";
 		case ResourceFormat::D24S8:
 			return "D24S8";
 		case ResourceFormat::D32F:
@@ -124,6 +126,8 @@ namespace engine::graph {
 		case ResourceFormat::RGBA16F:
 		case ResourceFormat::RG32F:
 			return 64;
+		case ResourceFormat::RGBA32F:
+			return 128;
 		}
 		return 32;
 	}
@@ -150,6 +154,7 @@ namespace engine::graph {
 		case ResourceFormat::RGBA16F:
 		case ResourceFormat::BC3:
 		case ResourceFormat::BC7_SRGB:
+		case ResourceFormat::RGBA32F:
 			return 4;
 		}
 		return 4;

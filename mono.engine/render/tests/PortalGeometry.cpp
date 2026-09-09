@@ -44,6 +44,19 @@ TEST_CASE(
 	std::vector<std::byte> bytes;
 	std::string error;
 	REQUIRE(EncodePortalGeometry(geometry, bytes, error));
+	PortalGeometryMeasure measured;
+	REQUIRE(MeasurePortalGeometry(bytes, measured, error));
+	CHECK(measured.Rows == geometry.Rows.size());
+	CHECK(measured.Joints == geometry.Joints.size());
+	size_t ownedBytes = sizeof(PortalGeometry) + geometry.Rows.size() * sizeof(PortalGeometryRow) +
+						geometry.Joints.size() * sizeof(PortalGeometryPose);
+	for (const auto &row : geometry.Rows) {
+		ownedBytes += row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size();
+		for (const auto &asset : row.Assets)
+			ownedBytes += asset.size();
+	}
+	CHECK(measured.MetadataBytes == ownedBytes);
+	const auto acceptedMeasure = measured;
 	PortalGeometry decoded;
 	REQUIRE(DecodePortalGeometry(bytes, decoded, error));
 	CHECK(decoded == geometry);
@@ -53,7 +66,18 @@ TEST_CASE(
 	for (size_t length = 0; length < bytes.size(); ++length) {
 		CAPTURE(length);
 		CHECK_FALSE(DecodePortalGeometry(std::span(bytes).first(length), decoded, error));
+		CHECK_FALSE(MeasurePortalGeometry(std::span(bytes).first(length), measured, error));
+		CHECK(measured == acceptedMeasure);
 		CHECK(decoded == geometry);
+	}
+	for (size_t position = 0; position < bytes.size(); ++position) {
+		auto changed = bytes;
+		changed[position] ^= std::byte{0x80};
+		PortalGeometry candidate;
+		const bool decodedChange = DecodePortalGeometry(changed, candidate, error);
+		PortalGeometryMeasure candidateMeasure = acceptedMeasure;
+		CHECK(MeasurePortalGeometry(changed, candidateMeasure, error) == decodedChange);
+		if (!decodedChange) CHECK(candidateMeasure == acceptedMeasure);
 	}
 	bytes.push_back(std::byte{});
 	CHECK_FALSE(DecodePortalGeometry(bytes, decoded, error));
@@ -62,6 +86,10 @@ TEST_CASE(
 	REQUIRE(DecodePortalGeometry(bytes, decoded, error));
 	CHECK(decoded.Rows.empty());
 	CHECK(decoded.Joints.empty());
+	REQUIRE(MeasurePortalGeometry(bytes, measured, error));
+	CHECK(measured.Rows == 0);
+	CHECK(measured.Joints == 0);
+	CHECK(measured.MetadataBytes == sizeof(PortalGeometry));
 }
 
 TEST_CASE(

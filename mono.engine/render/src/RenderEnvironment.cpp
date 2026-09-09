@@ -110,11 +110,13 @@ namespace engine::render {
 		uint32_t faceMask = 0;
 		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		uint64_t signature = scene::MixSignature(1, modes.Skybox);
+		signature = scene::MixSignature(signature, ActiveContentOwner.Id());
 		signature = scene::MixSignature(signature, modes.Atmosphere);
 		signature = scene::MixSignature(signature, modes.Clouds);
 		for (size_t index = 0; index < faces.size(); index++) {
 			if (modes.Skybox == 1) {
-				faces[index] = Textures.Find(names[index]);
+				faces[index] =
+					Textures.Find(names[index], TextureContentOwner(names[index], ActiveContentOwner));
 				if (names[index].IsValid() && faces[index] != nullptr) {
 					faceMask |= 1u << index;
 				}

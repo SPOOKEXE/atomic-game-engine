@@ -4,14 +4,43 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Submission.hpp>
 
+#include <cstring>
 #include <vector>
 
 namespace engine::replication {
+	namespace {
+		uint64_t HashBytes(const void *bytes, size_t count) {
+			constexpr uint64_t OFFSET = 1469598103934665603ull;
+			constexpr uint64_t PRIME = 1099511628211ull;
+
+			const auto *cursor = static_cast<const unsigned char *>(bytes);
+			uint64_t hash = OFFSET;
+
+			// Match authority signatures without assuming component alignment.
+			size_t index = 0;
+			for (; index + sizeof(uint64_t) <= count; index += sizeof(uint64_t)) {
+				uint64_t word = 0;
+				std::memcpy(&word, cursor + index, sizeof(word));
+				hash = (hash ^ word) * PRIME;
+			}
+
+			if (index < count) {
+				uint64_t word = 0;
+				std::memcpy(&word, cursor + index, count - index);
+				hash = (hash ^ word) * PRIME;
+			}
+
+			return hash;
+		}
+
+	}
 
 	WriteOutcome WriteComponents(
 		ecs::Store &store, const Delta &delta, const std::function<bool(core::Name, ecs::Entity)> &allow
 	) {
 		WriteOutcome outcome;
+		static const core::LogCategory rowTrace("replication-row");
+		const bool traceRows = rowTrace.Enabled(core::LogLevel::Trace);
 
 		// **Every name resolved before anything is written.** A delta naming one
 		// component this build does not have is a delta from a different build,
@@ -43,6 +72,7 @@ namespace engine::replication {
 			const ecs::ComponentId id = resolved[index];
 			const ecs::TypeDescriptor &descriptor = ecs::Components::Describe(id);
 
+			const bool traceComponent = traceRows && component.Component.Text() == "scene.Humanoid";
 			core::ByteReader values(component.Values);
 			std::vector<std::byte> scratch(descriptor.Size);
 
@@ -72,6 +102,14 @@ namespace engine::replication {
 					descriptor.Destruct(scratch.data(), 1);
 					outcome.Status = ApplyStatus::Malformed;
 					return outcome;
+				}
+
+				uint64_t beforeHash = 0;
+				uint64_t incomingHash = 0;
+				if (traceComponent) {
+					const auto *before = store.GetComponent(entity, id);
+					beforeHash = before ? HashBytes(before, descriptor.Size) : 0;
+					incomingHash = HashBytes(scratch.data(), descriptor.Size);
 				}
 
 				// **Read first, then decide.** The read above is what keeps the
@@ -115,6 +153,25 @@ namespace engine::replication {
 					}
 				} else {
 					store.SetComponent(entity, id, scratch.data());
+				}
+
+				if (traceComponent && (beforeHash != incomingHash || !permitted || !store.Alive(entity))) {
+					const auto *after = store.GetComponent(entity, id);
+					ENGINE_LOG(
+						core::LogLevel::Trace,
+						"replication-row",
+						"stage=apply store={} identity={} entity={} tick={} permitted={} alive={} before={} "
+						"incoming={} after={}",
+						store.Name(),
+						store.Identity(),
+						entity.Id,
+						delta.Tick,
+						permitted,
+						store.Alive(entity),
+						beforeHash,
+						incomingHash,
+						after ? HashBytes(after, descriptor.Size) : 0
+					);
 				}
 
 				descriptor.Destruct(scratch.data(), 1);

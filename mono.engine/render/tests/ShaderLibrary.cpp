@@ -264,6 +264,8 @@ TEST_CASE("failed shader edits preserve accepted material and lens modules", "[r
 		REQUIRE(refresh() == 1);
 		REQUIRE(find() != nullptr);
 		const auto acceptedWords = find()->SpirV;
+		const auto acceptedHash = find()->CodeHash;
+		REQUIRE_FALSE(acceptedHash.IsZero());
 		const auto acceptedRevision = find()->Revision;
 		const auto acceptedInstructions = find()->Capabilities.Instructions;
 		const auto acceptedOptimizationSteps = find()->Optimizations.size();
@@ -271,6 +273,7 @@ TEST_CASE("failed shader edits preserve accepted material and lens modules", "[r
 		CHECK(refresh() == 0);
 		REQUIRE(find() != nullptr);
 		CHECK(find()->SpirV == acceptedWords);
+		CHECK(find()->CodeHash == acceptedHash);
 		CHECK(find()->Capabilities.Instructions == acceptedInstructions);
 		CHECK(find()->Optimizations.size() == acceptedOptimizationSteps);
 		CHECK(find()->Revision == acceptedRevision);
@@ -289,11 +292,13 @@ TEST_CASE("failed shader edits preserve accepted material and lens modules", "[r
 		CHECK(find()->AttemptError.empty());
 		CHECK(find()->Revision == find()->AttemptRevision);
 		CHECK(find()->SpirV != acceptedWords);
+		CHECK(find()->CodeHash != acceptedHash);
 		store.Destroy(source);
 		CHECK(refresh() == 1);
 		REQUIRE(find() != nullptr);
 		CHECK_FALSE(find()->Error.empty());
 		CHECK(find()->SpirV.empty());
+		CHECK(find()->CodeHash.IsZero());
 		CHECK(refresh() == 0);
 	}
 }
@@ -326,6 +331,7 @@ TEST_CASE(
 				REQUIRE(refresh() == 1);
 				REQUIRE(find() != nullptr);
 				const auto oldWords = find()->SpirV;
+				const auto oldHash = find()->CodeHash;
 				const auto oldRevision = find()->AttemptRevision;
 				if (!duplicate) {
 					store.Destroy(source);
@@ -350,6 +356,7 @@ TEST_CASE(
 				CHECK(find()->Error.empty());
 				CHECK(find()->AttemptError.empty());
 				CHECK(find()->SpirV != oldWords);
+				CHECK(find()->CodeHash != oldHash);
 				CHECK(find()->AttemptSource == replacement);
 				CHECK(find()->StoreIdentity == store.Identity());
 				CHECK(refresh() == 0);
@@ -400,16 +407,20 @@ TEST_CASE(
 		REQUIRE(refresh(first) == 1);
 		REQUIRE(find() != nullptr);
 		const auto acceptedWords = find()->SpirV;
+		const auto acceptedHash = find()->CodeHash;
+		REQUIRE_FALSE(acceptedHash.IsZero());
 		REQUIRE_FALSE(acceptedWords.empty());
 		CHECK(refresh(second) == 1);
 		REQUIRE(find() != nullptr);
 		CHECK_FALSE(find()->Error.empty());
 		CHECK(find()->SpirV.empty());
+		CHECK(find()->CodeHash.IsZero());
 		CHECK(refresh(second) == 0);
 		CHECK(refresh(first) == 1);
 		REQUIRE(find() != nullptr);
 		CHECK(find()->Error.empty());
 		CHECK(find()->SpirV == acceptedWords);
+		CHECK(find()->CodeHash == acceptedHash);
 		CHECK(refresh(first) == 0);
 
 		engine::core::ByteWriter validImage;
@@ -428,10 +439,12 @@ TEST_CASE(
 			REQUIRE(find() != nullptr);
 			CHECK_FALSE(find()->Error.empty());
 			CHECK(find()->SpirV.empty());
+			CHECK(find()->CodeHash.IsZero());
 			engine::core::ByteReader validReader(validImage.Bytes());
 			REQUIRE(first.Load(validReader));
 			CHECK(refresh(first) == 1);
 			CHECK(find()->SpirV == acceptedWords);
+			CHECK(find()->CodeHash == acceptedHash);
 		}
 		engine::core::ByteReader broken(std::span<const std::byte>{});
 		CHECK_FALSE(first.Load(broken));
@@ -604,4 +617,91 @@ TEST_CASE("lens shaders use a separate demand and source namespace", "[render][s
 	store.GetMutable<engine::scene::ShaderLens>(lens)->Enabled = false;
 	REQUIRE(library.RefreshLenses(store) == 1);
 	CHECK(library.FindLens(Name("Warp")) == nullptr);
+}
+
+TEST_CASE("shader owners retain independent material and lens modules", "[render][shaders][shader-owner]") {
+	Store first = Fresh("library.owner-first");
+	Store second = Fresh("library.owner-second");
+	ShaderLibrary library;
+	const Name name("OwnerProgram"), firstOwner("owner:first"), secondOwner("owner:second");
+	for (const bool lens : {false, true}) {
+		INFO("lens=" << lens);
+		const auto author = [&](Store &store, const char *code) {
+			const Entity source =
+				store.CreateInstance(lens ? LensShaderClass() : ShaderScriptClass(), name.Text());
+			REQUIRE(SetShaderSource(store, source, code));
+			if (lens) {
+				const Entity effect = store.CreateInstance(Classes::Find(Name("ShaderLens")), "Lens");
+				REQUIRE(effect != NULL_ENTITY);
+				store.GetMutable<engine::scene::ShaderLens>(effect)->Shader = name;
+			} else
+				Select(store, "OwnerProgram");
+			return source;
+		};
+		const Entity firstSource = author(first, VALID);
+		author(
+			second, "#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(0,1,0,1);}\n"
+		);
+		const auto refresh = [&](Store &store, Name owner) {
+			return lens ? library.RefreshLenses(store, owner) : library.Refresh(store, owner);
+		};
+		const auto find = [&](Name owner) {
+			return lens ? library.FindLens(name, owner) : library.Find(name, owner);
+		};
+		REQUIRE(refresh(first, firstOwner) == 1);
+		REQUIRE(find(firstOwner));
+		const auto firstWords = find(firstOwner)->SpirV;
+		REQUIRE_FALSE(firstWords.empty());
+		REQUIRE(refresh(second, secondOwner) == 1);
+		REQUIRE(find(secondOwner));
+		const auto secondWords = find(secondOwner)->SpirV;
+		CHECK(secondWords != firstWords);
+		CHECK(find(firstOwner)->SpirV == firstWords);
+		CHECK(refresh(first, firstOwner) == 0);
+		CHECK(refresh(second, secondOwner) == 0);
+		CHECK(find({}) == nullptr);
+		REQUIRE(refresh(first, {}) == 1);
+		CHECK(find(Name("owner:absent")) == nullptr);
+		CHECK_FALSE((lens ? library.FindLens({}, firstOwner) : library.Find({}, firstOwner)));
+
+		REQUIRE(SetShaderSource(first, firstSource, "not a shader"));
+		CHECK(refresh(first, firstOwner) == 0);
+		CHECK_FALSE(find(firstOwner)->AttemptError.empty());
+		CHECK(find(firstOwner)->SpirV == firstWords);
+		CHECK(find(secondOwner)->AttemptError.empty());
+		CHECK(find(secondOwner)->SpirV == secondWords);
+		CHECK(find({})->AttemptError.empty());
+		CHECK(refresh(second, secondOwner) == 0);
+
+		// An empty demand set drops only its owner's module family.
+		Store empty = Fresh("library.owner-empty");
+		CHECK(refresh(empty, firstOwner) == 1);
+		CHECK(find(firstOwner) == nullptr);
+		CHECK(find(secondOwner)->SpirV == secondWords);
+		CHECK(find({})->SpirV == firstWords);
+		CHECK(refresh(first, firstOwner) == 1);
+		REQUIRE(find(firstOwner));
+		CHECK(find(firstOwner)->SpirV.empty());
+		CHECK_FALSE(find(firstOwner)->Error.empty());
+	}
+	CHECK(library.Size() == 3);
+	CHECK(library.LensSize() == 3);
+	CHECK(library.DropOwner({}) == 0);
+	CHECK(library.Changed().empty());
+	CHECK(library.ChangedLenses().empty());
+	CHECK(library.DropOwner(firstOwner) == 2);
+	CHECK(library.Changed().size() == 1);
+	CHECK(library.ChangedLenses().size() == 1);
+	CHECK(library.Find(name, firstOwner) == nullptr);
+	CHECK(library.FindLens(name, firstOwner) == nullptr);
+	CHECK(library.Find(name, secondOwner) != nullptr);
+	CHECK(library.FindLens(name, secondOwner) != nullptr);
+	CHECK(library.DropOwner(firstOwner) == 0);
+	CHECK(library.Changed().empty());
+	CHECK(library.ChangedLenses().empty());
+	CHECK(library.DropOwner(secondOwner) == 2);
+	CHECK(library.Size() == 1);
+	CHECK(library.LensSize() == 1);
+	CHECK(library.Find(name) != nullptr);
+	CHECK(library.FindLens(name) != nullptr);
 }

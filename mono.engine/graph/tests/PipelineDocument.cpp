@@ -9,6 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <string>
 
 TEST_SUITE_ID("engine.graph.pipelinedocument")
@@ -89,12 +91,12 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 2);
-	REQUIRE(fromDocument.PerView.size() == 20);
+	REQUIRE(fromDocument.PerView.size() == 18);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
-	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("transparent"));
+	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("tonemap"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
 }
 
@@ -133,7 +135,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 2);
-	REQUIRE(compiled.PerView.size() == 20);
+	REQUIRE(compiled.PerView.size() == 18);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
@@ -144,19 +146,18 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("cull-frustum"));
 	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("order-draw"));
 	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("upload-instances"));
-	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("mirror-capture"));
-	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("portal-capture"));
-	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("portal-tonemap"));
-	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("gbuffer"));
-	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("ssao"));
-	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("deferred-lighting"));
-	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("sky"));
-	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("volumetrics"));
-	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("shader-lenses"));
-	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("tonemap"));
-	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("portal-overlay"));
-	CHECK(graph.Find(compiled.PerView[18])->Kind == Name("mirror-overlay"));
-	CHECK(graph.Find(compiled.PerView[19])->Kind == Name("transparent"));
+	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("surface-capture"));
+	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("gbuffer"));
+	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("depth-linearise"));
+	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("ssao"));
+	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("deferred-lighting"));
+	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("sky"));
+	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("volumetrics"));
+	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("portal-overlay"));
+	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("mirror-overlay"));
+	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("transparent"));
+	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("shader-lenses"));
+	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("tonemap"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
@@ -193,9 +194,9 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	Edit ssao = shadow;
 	ssao.Name = Name("ssao");
 	document.Record(ssao);
-	Edit mirrorCapture = shadow;
-	mirrorCapture.Name = Name("mirror-capture");
-	document.Record(mirrorCapture);
+	Edit surfaceCapture = shadow;
+	surfaceCapture.Name = Name("surface-capture");
+	document.Record(surfaceCapture);
 
 	RenderGraph graph;
 	Name offender;
@@ -208,7 +209,7 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	}
 	for (const NodeId id : compiled.PerView) {
 		CHECK(graph.Find(id)->Kind != Name("ssao"));
-		CHECK(graph.Find(id)->Kind != Name("mirror-capture"));
+		CHECK(graph.Find(id)->Kind != Name("surface-capture"));
 	}
 }
 
@@ -326,7 +327,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	// The reason `SetEnabled` is an operation rather than a field: a pass
 	// somebody switched off has to survive a save.
 	PipelineDocument document = DefaultPbrDocument();
-	document.Record(Enable("mirror-capture", false));
+	document.Record(Enable("surface-capture", false));
 
 	PipelineDocument reloaded;
 	Name offender;
@@ -339,7 +340,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 19);
+	CHECK(compiled.PerView.size() == 17);
 }
 
 TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {
@@ -763,6 +764,7 @@ TEST_CASE(
 	"world HDR composition keeps every spatial layer before lenses and encoding", "[graph][world-hdr]"
 ) {
 	const auto document = engine::graph::DefaultWorldHdrDocument();
+	CHECK(Write(document) == Write(DefaultPbrDocument()));
 	RenderGraph graph;
 	Name offender;
 	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
@@ -792,6 +794,18 @@ TEST_CASE(
 	CHECK(std::count(spatial.begin(), spatial.end(), Name("surface-capture")) == 1);
 	CHECK(std::count(spatial.begin(), spatial.end(), Name("mirror-capture")) == 0);
 	CHECK(std::count(spatial.begin(), spatial.end(), Name("portal-capture")) == 0);
+	for (const auto id : compiled.PerView) {
+		const auto *node = graph.Find(id);
+		if (node->Kind != Name("shader-lenses")) continue;
+		REQUIRE(node->Reads.size() == 2);
+		REQUIRE(node->Writes.size() == 2);
+		CHECK(node->ReadPorts == std::vector<Name>{Name("colour"), Name("depth")});
+		CHECK(node->WritePorts == std::vector<Name>{Name("colour"), Name("scratch")});
+		CHECK(graph.FindResource(node->Reads[0])->Name == Name("display"));
+		CHECK(graph.FindResource(node->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
+		CHECK(node->Writes[0] != node->Writes[1]);
+		CHECK(graph.FindResource(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA16F);
+	}
 	PipelineDocument restored;
 	REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
 	CHECK(Write(restored) == Write(document));
@@ -800,36 +814,285 @@ TEST_CASE(
 TEST_CASE(
 	"portal body graph exports an opaque pair in the selected capture projection", "[graph][portal-body]"
 ) {
-	for (const bool ordered : {false, true})
-		for (const bool seam : {false, true}) {
-			const auto document = engine::graph::DefaultPortalBodyDocument(seam, ordered);
+	for (const bool apertures : {false, true})
+		for (const bool lenses : {false, true})
+			for (const bool overlay : {false, true})
+				for (const size_t layerCount : {size_t{0}, size_t{1}, size_t{2}})
+					for (const bool seam : {false, true}) {
+						const auto document = engine::graph::DefaultPortalBodyDocument(
+							seam, layerCount != 0, overlay, lenses, apertures, layerCount
+						);
+						RenderGraph graph;
+						Name offender;
+						REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+						CompiledGraph compiled;
+						REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+						REQUIRE_FALSE(compiled.PerView.empty());
+						const auto position = [&](const char *name) {
+							for (size_t index = 0; index < compiled.PerView.size(); ++index)
+								if (graph.Find(compiled.PerView[index])->Name == Name(name)) return index;
+							return compiled.PerView.size();
+						};
+						if (apertures) {
+							const auto aperture = position("portal-overlay");
+							const auto depth = position("opaque-depth-export");
+							const auto body = position("body-compose");
+							REQUIRE(aperture < compiled.PerView.size());
+							REQUIRE(depth < compiled.PerView.size());
+							REQUIRE(body < compiled.PerView.size());
+							CHECK(aperture < depth);
+							CHECK(depth < body);
+							const auto *apertureNode = graph.Find(compiled.PerView[aperture]);
+							const auto *depthNode = graph.Find(compiled.PerView[depth]);
+							const auto *bodyNode = graph.Find(compiled.PerView[body]);
+							CHECK(apertureNode->Reads[1] == depthNode->Reads[0]);
+							REQUIRE(depthNode->Reads.size() == 2);
+							CHECK(depthNode->Reads[1] == apertureNode->Writes[0]);
+							CHECK(depthNode->ReadPorts[1] == Name("after-colour"));
+							CHECK(apertureNode->Writes[0] == bodyNode->Reads[1]);
+							CHECK(depthNode->Writes[0] == bodyNode->Reads[3]);
+							if (layerCount == 2) {
+								CHECK(body < position("transparent-1-compose"));
+								CHECK(position("transparent-1-compose") < position("transparent-0-compose"));
+							}
+							if (layerCount != 0) CHECK(body < position("transparent-0-compose"));
+							const auto physical = layerCount ? position("transparent-0-compose") : body;
+							if (overlay) CHECK(physical < position("spatial-overlay-compose"));
+							if (lenses)
+								CHECK(
+									(overlay ? position("spatial-overlay-compose") : physical) <
+									position("shader-lenses")
+								);
+						} else {
+							CHECK(position("portal-overlay") == compiled.PerView.size());
+						}
+
+						const auto finalKind = lenses	 ? "shader-lenses"
+											   : overlay ? "colour-compose"
+														 : "depth-compose";
+						CHECK(graph.Find(compiled.PerView.back())->Kind == Name(finalKind));
+						REQUIRE(compiled.Final.size() == 1);
+						const auto *exported = graph.Find(compiled.Final.front());
+						CHECK(exported->Kind == Name("capture"));
+						REQUIRE(exported->Reads.size() == 2);
+						CHECK(
+							graph.FindResource(exported->Reads[0])->Format ==
+							engine::graph::ResourceFormat::RGBA16F
+						);
+						CHECK(
+							graph.FindResource(exported->Reads[1])->Format ==
+							engine::graph::ResourceFormat::R32F
+						);
+						if (lenses) {
+							const auto *lens = graph.Find(compiled.PerView.back());
+							REQUIRE(lens->Reads.size() == 2);
+							CHECK(lens->Reads[1] == exported->Reads[1]);
+							REQUIRE(lens->Writes.size() == 2);
+							CHECK(lens->Writes[0] == exported->Reads[0]);
+							CHECK(lens->Writes[0] != lens->Writes[1]);
+						}
+						size_t pairedImages = 0;
+						for (const auto id : compiled.PerView) {
+							const auto *node = graph.Find(id);
+							if (node->Kind != Name("eye-image")) continue;
+							if (node->Parameter(Name("layer")) &&
+								*node->Parameter(Name("layer")) == "spatial-overlay") {
+								CHECK(node->Writes.size() == 1);
+								continue;
+							}
+							++pairedImages;
+							REQUIRE(node->Parameter(Name("scope")));
+							CHECK(*node->Parameter(Name("scope")) == "opaque-lighting");
+							REQUIRE(node->Parameter(Name("projection")));
+							CHECK(*node->Parameter(Name("projection")) == (seam ? "seam" : "eye"));
+							CHECK(node->Writes.size() == 2);
+						}
+						CHECK(pairedImages == 1 + layerCount);
+						PipelineDocument restored;
+						REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+						CHECK(Write(restored) == Write(document));
+					}
+}
+
+TEST_CASE(
+	"retained ambient graph merges room geometry before SSAO and apertures", "[graph][portal-body][ambient]"
+) {
+	for (const bool seam : {false, true})
+		for (const bool nested : {false, true}) {
+			const auto document =
+				engine::graph::DefaultPortalBodyDocument(seam, true, true, true, nested, 2, true);
+			RenderGraph graph;
+			Name offender;
+			const auto status = Build(document, graph, offender);
+			INFO(offender.Text());
+			REQUIRE(status == PipelineDocumentStatus::Ok);
+			CompiledGraph compiled;
+			const auto compiledStatus = graph.Compile(compiled, offender);
+			INFO(offender.Text());
+			REQUIRE(compiledStatus == GraphStatus::Ok);
+			const auto position = [&](const char *name) {
+				for (size_t index = 0; index < compiled.PerView.size(); ++index)
+					if (graph.Find(compiled.PerView[index])->Name == Name(name)) return index;
+				return compiled.PerView.size();
+			};
+			const auto find = [&](const char *name) {
+				const auto at = position(name);
+				REQUIRE(at < compiled.PerView.size());
+				return graph.Find(compiled.PerView[at]);
+			};
+			CHECK(position("room-image") < position("ambient-merge"));
+			CHECK(position("depth-linearise") < position("ambient-merge"));
+			CHECK(position("ambient-merge") < position("ssao"));
+			CHECK(position("ssao") < position("deferred-lighting"));
+			CHECK(position("ssao") < position("ambient-correct"));
+			CHECK(position("ambient-correct") < position("body-compose"));
+			CHECK(position("body-compose") < position("transparent-1-compose"));
+			CHECK(position("spatial-overlay-compose") < position("shader-lenses"));
+			if (nested) CHECK(position("deferred-lighting") < position("portal-overlay"));
+			const auto *merged = find("ambient-merge");
+			const auto *ssao = find("ssao");
+			REQUIRE(merged->Writes.size() == 2);
+			CHECK(ssao->Reads == merged->Writes);
+			CHECK(graph.FindResource(merged->Writes[0])->Format == engine::graph::ResourceFormat::R32F);
+			CHECK(graph.FindResource(merged->Writes[1])->Format == engine::graph::ResourceFormat::RGB10A2);
+			const auto *room = find("room-image");
+			REQUIRE(room->Writes.size() == 5);
+			CHECK(graph.FindResource(room->Writes.back())->Format == engine::graph::ResourceFormat::RGBA32F);
+			const auto *body = find("body-compose");
+			CHECK(body->Reads[2] == find("ambient-correct")->Writes[0]);
+			const auto *correction = find("ambient-correct");
+			CHECK(correction->ReadPorts.front() == Name("lighting-baseline"));
+			CHECK(correction->Reads.front() == room->Writes.back());
+			PipelineDocument restored;
+			REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+			CHECK(Write(restored) == Write(document));
+		}
+}
+
+TEST_CASE(
+	"deferred lighting optionally exports unrounded lighting planes in the same node", "[graph][ambient]"
+) {
+	for (const bool directional : {false, true}) {
+		PipelineDocument document;
+		document.Record(
+			{.Kind = EditKind::AddResource,
+			 .Name = Name("lighting-baseline"),
+			 .Resource = engine::graph::ResourceKind::Colour,
+			 .Format = engine::graph::ResourceFormat::RGBA32F}
+		);
+		if (directional)
+			document.Record(
+				{.Kind = EditKind::AddResource,
+				 .Name = Name("directional-response"),
+				 .Resource = engine::graph::ResourceKind::Colour,
+				 .Format = engine::graph::ResourceFormat::RGBA32F}
+			);
+		Name current;
+		const auto base = DefaultPbrDocument();
+		for (const auto &edit : base.Edits()) {
+			if (edit.Kind == EditKind::AddNode) current = edit.Name;
+			document.Record(edit);
+			if (current == Name("deferred-lighting") && edit.Kind == EditKind::Writes) {
+				document.Record(
+					{.Kind = EditKind::Writes,
+					 .Target = Name("lighting-baseline"),
+					 .Key = Name("lighting-baseline")}
+				);
+				if (directional)
+					document.Record(
+						{.Kind = EditKind::Writes,
+						 .Target = Name("directional-response"),
+						 .Key = Name("directional-response")}
+					);
+			}
+		}
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+		CompiledGraph compiled;
+		REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+		for (const auto id : compiled.PerView) {
+			const auto *node = graph.Find(id);
+			if (node->Kind != Name("deferred-lighting")) continue;
+			REQUIRE(node->Writes.size() == (directional ? 3 : 2));
+			CHECK(graph.FindResource(node->Writes[0])->Format == engine::graph::ResourceFormat::RGBA16F);
+			CHECK(graph.FindResource(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA32F);
+			CHECK(node->WritePorts[1] == Name("lighting-baseline"));
+			if (directional) {
+				CHECK(node->WritePorts[2] == Name("directional-response"));
+				CHECK(graph.FindResource(node->Writes[2])->Format == engine::graph::ResourceFormat::RGBA32F);
+			}
+		}
+		PipelineDocument restored;
+		REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+		CHECK(Write(restored) == Write(document));
+	}
+}
+
+TEST_CASE(
+	"retained directional body graph binds the complete native correction inputs",
+	"[graph][portal-body][directional]"
+) {
+	using engine::graph::ResourceFormat;
+	for (const bool seam : {false, true})
+		for (const bool ambientRequested : {false, true}) {
+			CAPTURE(seam, ambientRequested);
+			const auto document = engine::graph::DefaultPortalBodyDocument(
+				seam, true, true, true, true, 2, ambientRequested, true
+			);
 			RenderGraph graph;
 			Name offender;
 			REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
 			CompiledGraph compiled;
 			REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-			REQUIRE_FALSE(compiled.PerView.empty());
-			CHECK(graph.Find(compiled.PerView.back())->Kind == Name("depth-compose"));
-			REQUIRE(compiled.Final.size() == 1);
-			const auto *exported = graph.Find(compiled.Final.front());
-			CHECK(exported->Kind == Name("capture"));
-			REQUIRE(exported->Reads.size() == 2);
-			CHECK(graph.FindResource(exported->Reads[0])->Format == engine::graph::ResourceFormat::RGBA16F);
-			CHECK(graph.FindResource(exported->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
-			size_t pairedImages = 0;
-			for (const auto id : compiled.PerView) {
-				const auto *node = graph.Find(id);
-				if (node->Kind != Name("eye-image")) continue;
-				++pairedImages;
-				REQUIRE(node->Parameter(Name("scope")));
-				CHECK(*node->Parameter(Name("scope")) == "opaque-lighting");
-				REQUIRE(node->Parameter(Name("projection")));
-				CHECK(*node->Parameter(Name("projection")) == (seam ? "seam" : "eye"));
-				CHECK(node->Writes.size() == 2);
+			const auto find = [&](const char *name) {
+				const auto at =
+					std::find_if(compiled.PerView.begin(), compiled.PerView.end(), [&](NodeId id) {
+						return graph.Find(id)->Name == Name(name);
+					});
+				REQUIRE(at != compiled.PerView.end());
+				return graph.Find(*at);
+			};
+			const auto *room = find("room-image");
+			const auto *correction = find("ambient-correct");
+			REQUIRE(room->Writes.size() == 6);
+			REQUIRE(correction->Reads.size() == 7);
+			REQUIRE(correction->ReadPorts.size() == 7);
+			struct ExpectedInput {
+				const char *Port;
+				const char *Resource;
+				ResourceFormat Format;
+			};
+			const std::array expected{
+				ExpectedInput{"lighting-baseline", "room-lighting-baseline", ResourceFormat::RGBA32F},
+				ExpectedInput{"response", "room-ambient-response", ResourceFormat::RGBA32F},
+				ExpectedInput{"occlusion", "occlusion", ResourceFormat::R8},
+				ExpectedInput{"directional-response", "room-directional-response", ResourceFormat::RGBA32F},
+				ExpectedInput{"room-depth", "room-depth", ResourceFormat::R32F},
+				ExpectedInput{"room-normal", "room-normal", ResourceFormat::RGB10A2},
+				ExpectedInput{"shadow", "shadow", ResourceFormat::D32F}
+			};
+			for (const auto &input : expected) {
+				const auto at =
+					std::find(correction->ReadPorts.begin(), correction->ReadPorts.end(), Name(input.Port));
+				REQUIRE(at != correction->ReadPorts.end());
+				const auto resource = correction->Reads[at - correction->ReadPorts.begin()];
+				const auto *description = graph.FindResource(resource);
+				REQUIRE(description);
+				CHECK(description->Name == Name(input.Resource));
+				CHECK(description->Format == input.Format);
+				if (std::string_view(input.Resource).starts_with("room-"))
+					CHECK(
+						std::find(room->Writes.begin(), room->Writes.end(), resource) != room->Writes.end()
+					);
 			}
-			CHECK(pairedImages == (ordered ? 3 : 1));
-			PipelineDocument restored;
-			REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
-			CHECK(Write(restored) == Write(document));
+			const auto *body = find("body-compose");
+			const auto background =
+				std::find(body->ReadPorts.begin(), body->ReadPorts.end(), Name("background"));
+			REQUIRE(background != body->ReadPorts.end());
+			REQUIRE(correction->Writes.size() == 1);
+			CHECK(body->Reads[background - body->ReadPorts.begin()] == correction->Writes.front());
+			CHECK(graph.FindResource(correction->Writes.front())->Format == ResourceFormat::RGBA16F);
+			CHECK(find("ambient-merge")->Writes.size() == 2);
 		}
 }

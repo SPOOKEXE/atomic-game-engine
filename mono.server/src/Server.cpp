@@ -53,6 +53,8 @@
 #include <fstream>
 #include <limits>
 #include <network/SessionKey.hpp>
+#include "RetainedBodyGrant.hpp"
+
 #include <server/ContentRelay.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
@@ -357,6 +359,7 @@ namespace server {
 	Server::~Server() {
 		HostExchange.reset();
 		PlayerPresentations.clear();
+		RetainedBodyGrantState.reset();
 		StopPresentationProducer();
 		ContentShapes.reset();
 		ContentLink.reset();
@@ -2633,12 +2636,37 @@ namespace server {
 				} else {
 					if (!PortalLeases.Commit(request.Claim, peer, PollNow)) return;
 					Players.insert_or_assign(client.Index, Occupant{player, client.Generation});
+					const auto *playerIdentity = store.Get<scene::PlayerIdentity>(player);
+					if (playerIdentity && playerIdentity->UserId > 0) {
+						if (!RetainedBodyGrantState)
+							RetainedBodyGrantState = std::make_unique<RetainedBodyGrants>();
+						(void)RetainedBodyGrantState->Issue(
+							{client, request.Claim.Transfer, request.Claim.DestinationIncarnation, playerIdentity->UserId}
+						);
+					}
 					response.Kind = game::PortalSessionKind::Committed;
 				}
 				response.Player = player;
 			});
 		}
 		ReplyToAdmission(client, game::EncodePortalSession(response));
+	}
+
+	void Server::PruneRetainedBodyGrants() {
+		if (!RetainedBodyGrantState) return;
+		RetainedBodyGrantState->Prune([this](const RetainedBodyGrants::Grant &grant) {
+			const auto player = Players.find(grant.Client.Index);
+			if (player == Players.end() || player->second.Generation != grant.Client.Generation) return false;
+			bool current = false;
+			Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+				if (script::PortalTransferIncarnation(store) != grant.DestinationIncarnation) return;
+				const auto committed = script::PortalTransferPlayer(store, grant.Transfer);
+				const auto *identity = store.Get<scene::PlayerIdentity>(committed);
+				current = committed != ecs::NULL_ENTITY && committed == player->second.Instance && identity &&
+						  identity->UserId == grant.UserId;
+			});
+			return current;
+		});
 	}
 
 	void Server::ProceedThroughPortal(
@@ -2751,8 +2779,8 @@ namespace server {
 				crossed.Claim = departure.Route->Claim;
 				departure.CrossedSent =
 					Replication->SendTo(client, game::EncodePortalSession(crossed), nowSeconds);
-				// Adoption can wait after physical commit. Keep renewing this exact
-				// lease until the old client connection retires and drops the departure.
+				// Adoption can wait after physical commit. Renew until the destination
+				// confirms adoption; the source connection may remain for presentation.
 			}
 			if (departure.CrossedSent && departure.Route && receipt.Motion &&
 				receipt.Motion->DestinationIncarnation == departure.Route->Claim.DestinationIncarnation &&
@@ -2820,6 +2848,7 @@ namespace server {
 				request.Attempt != message.Correlation)
 				continue;
 			if (request.Kind == game::PortalSessionKind::LeaseRoute ||
+				request.Kind == game::PortalSessionKind::LeaseAdopted ||
 				request.Kind == game::PortalSessionKind::Refused) {
 				for (auto &[index, departure] : PortalDepartures) {
 					if (departure.Request.Attempt != request.Attempt || departure.Destination != message.From)
@@ -2837,6 +2866,10 @@ namespace server {
 					if (claim != departure.Request.Claim ||
 						(departure.Route && departure.Route->Claim != request.Claim))
 						break;
+					if (request.Kind == game::PortalSessionKind::LeaseAdopted) {
+						if (departure.Route && departure.CrossedSent) PortalDepartures.erase(index);
+						break;
+					}
 					departure.Route = request;
 					break;
 				}
@@ -2861,7 +2894,11 @@ namespace server {
 					request.Claim.DestinationIncarnation = incarnation;
 					if (PortalLeases.Offer(request.Claim, request.Identity, nowSeconds)) {
 						response = request;
-						response.Kind = game::PortalSessionKind::LeaseRoute;
+						// Renew the retry window before replying, so a lost adoption reply
+						// can be recovered by the source's next lease request.
+						response.Kind = PortalLeases.Adopted(request.Claim, request.Identity, nowSeconds)
+											? game::PortalSessionKind::LeaseAdopted
+											: game::PortalSessionKind::LeaseRoute;
 						response.Identity = Identity->Public();
 						response.Port = ListeningOn().Port;
 					}
@@ -3459,6 +3496,7 @@ namespace server {
 	void Server::Shutdown() {
 		if (HostExchange) HostExchange->Disconnect();
 		PlayerPresentations.clear();
+		RetainedBodyGrantState.reset();
 		StopPresentationProducer();
 		if (Driver_ != nullptr && !Replayer_ && !IsHost() && !FlushDataStore()) {
 			ENGINE_ERROR("could not flush the configured DataStore during shutdown");

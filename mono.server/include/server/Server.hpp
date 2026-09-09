@@ -40,6 +40,7 @@
 #include <network/Presence.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -64,6 +65,7 @@ namespace engine::game {
 
 namespace server {
 	class ContentRelay;
+	class RetainedBodyGrants;
 	struct ContentRelayStatistics;
 }
 
@@ -804,6 +806,12 @@ namespace server {
 			return Replication.get();
 		}
 
+		// Checks a server-issued retained-body grant for one live presentation receipt.
+		// This is a control boundary, not a decoder for client image-request payloads.
+		bool RetainedBodyAuthorized(
+			const engine::world::PresentationAddress &requester, std::string_view player
+		);
+
 		// The address the replication socket is bound to.
 		//
 		// Worth asking for even though the port was named: `--listen 0` binds an
@@ -1317,6 +1325,8 @@ namespace server {
 								  ) {}
 		};
 		std::vector<std::unique_ptr<PlayerPresentation>> PlayerPresentations;
+		std::unique_ptr<RetainedBodyGrants> RetainedBodyGrantState;
+		void PruneRetainedBodyGrants();
 		std::vector<engine::world::PresentationOutbound> DriverPresentationOutbound;
 		std::vector<engine::world::WorldId> PortalRouteWorlds;
 

@@ -172,6 +172,7 @@ namespace engine::graph {
 		//@{
 		R32F,
 		RG32F,
+		RGBA32F,
 		//@}
 
 		// Depth, with and without a stencil channel.

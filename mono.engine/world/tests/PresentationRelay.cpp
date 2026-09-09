@@ -5,6 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 TEST_SUITE_ID("engine.world.presentationrelay")
 TEST_DEPENDS("engine.world.presentationbus")
 TEST_DEPENDS("engine.world.hostlink")
@@ -26,10 +28,11 @@ namespace {
 		WorldId Far = Parent.Create(Named("far"));
 		WorldId Replica = Producer.Create(Named("far"));
 		std::pair<std::unique_ptr<parallel::Channel>, std::unique_ptr<parallel::Channel>> Pipe =
-			parallel::MakeLocalChannel();
+			parallel::MakeLocalChannel({4096, 4096});
 		HostLink Driver{std::move(Pipe.first)}, Child{std::move(Pipe.second)};
 		PresentationRelay Relay{Parent, Far, 200, {"images", "topology"}};
 		PresentationAddress NearReply, FarReply, Sessions, Image;
+		PresentationBindings Published;
 		Fixture() {
 			REQUIRE(Parent.ConfigurePresentation(100));
 			REQUIRE(Producer.ConfigurePresentation(200));
@@ -46,7 +49,9 @@ namespace {
 			std::vector<HostFrame> frames;
 			Child.Receive(frames);
 			for (const auto &frame : frames) {
-				if (frame.Signal == HostSignal::PresentationRoutes) {
+				if (frame.Signal == HostSignal::PresentationBindings) {
+					Published = frame.Bindings;
+				} else if (frame.Signal == HostSignal::PresentationRoutes) {
 					for (const auto &address : frame.Directory.Endpoints) {
 						if (!Producer.Find(Name(address.World)).IsValid()) {
 							WorldSettings settings;
@@ -117,6 +122,9 @@ TEST_CASE(
 	}
 	REQUIRE(fixture.Relay.Pump(fixture.Driver));
 	fixture.Receive();
+	REQUIRE(fixture.Published.Exports.size() == 1);
+	CHECK(fixture.Published.Exports[0].Local == fixture.Image);
+	CHECK(fixture.Published.Exports[0].Published == mirror);
 	const auto requests = fixture.Producer.TakePresentation(fixture.Image);
 	REQUIRE(requests.size() == 2);
 	CHECK(requests[0].From == fixture.NearReply);
@@ -290,4 +298,69 @@ TEST_CASE("presentation relay retains bounded replies until consumer drains", "[
 	}
 	CHECK(fixture.Relay.Queued().Messages == 0);
 	CHECK(fixture.Relay.Queued().Bytes == 0);
+}
+
+TEST_CASE(
+	"presentation relay publishes endpoint bindings before requests and withdraws retired exports",
+	"[world][presentation-relay]"
+) {
+	Fixture fixture;
+	fixture.Publish();
+	const auto mirror = fixture.Parent.LookupPresentation(fixture.Far, "images");
+	REQUIRE(fixture.Parent.SendPresentation(fixture.Far, fixture.FarReply, mirror, 12, {}) == Status::Ok);
+	REQUIRE(fixture.Relay.Pump(fixture.Driver));
+	std::vector<HostFrame> frames;
+	fixture.Child.Receive(frames);
+	REQUIRE(frames.size() == 3);
+	CHECK(frames[0].Signal == HostSignal::PresentationBindings);
+	CHECK(frames[1].Signal == HostSignal::PresentationRoutes);
+	CHECK(frames[2].Signal == HostSignal::Presentation);
+	const auto bindings = frames[0].Bindings;
+	REQUIRE(bindings.Exports.size() == 1);
+	CHECK(bindings.Exports[0].Local == fixture.Image);
+	CHECK(bindings.Exports[0].Published == mirror);
+	const auto alias =
+		std::find_if(bindings.Returns.begin(), bindings.Returns.end(), [&](const auto &binding) {
+			return binding.Published == fixture.FarReply;
+		});
+	REQUIRE(alias != bindings.Returns.end());
+	CHECK(alias->Local == frames[2].Presentation.From);
+	CHECK(alias->Local != alias->Published);
+	REQUIRE(fixture.Producer.ClosePresentation(fixture.Image) == Status::Ok);
+	fixture.Publish();
+	frames.clear();
+	fixture.Child.Receive(frames);
+	REQUIRE_FALSE(frames.empty());
+	CHECK(frames[0].Signal == HostSignal::PresentationBindings);
+	CHECK(frames[0].Bindings.Revision > bindings.Revision);
+	CHECK(frames[0].Bindings.Exports.empty());
+}
+
+TEST_CASE(
+	"presentation relay holds requests behind backpressured binding changes", "[world][presentation-relay]"
+) {
+	Fixture fixture;
+	fixture.Publish();
+	fixture.Receive();
+	const auto mirror = fixture.Parent.LookupPresentation(fixture.Far, "images");
+	while (fixture.Driver.Heartbeat(1)) {}
+	REQUIRE(fixture.Producer.OpenPresentation(fixture.Replica, Name("topology")).Status == Status::Ok);
+	REQUIRE(fixture.Child.PublishPresentationDirectory(fixture.Producer.LocalPresentationDirectory()));
+	REQUIRE(fixture.Parent.SendPresentation(fixture.Near, fixture.NearReply, mirror, 88, {}) == Status::Ok);
+	REQUIRE(fixture.Relay.Pump(fixture.Driver));
+	std::vector<HostFrame> frames;
+	do {
+		frames.clear();
+		fixture.Child.Receive(frames);
+		for (const auto &frame : frames)
+			CHECK(frame.Signal == HostSignal::Heartbeat);
+	} while (!frames.empty());
+	REQUIRE(fixture.Relay.Pump(fixture.Driver));
+	fixture.Child.Receive(frames);
+	REQUIRE(frames.size() == 3);
+	CHECK(frames[0].Signal == HostSignal::PresentationBindings);
+	CHECK(frames[0].Bindings.Exports.size() == 2);
+	CHECK(frames[1].Signal == HostSignal::PresentationRoutes);
+	CHECK(frames[2].Signal == HostSignal::Presentation);
+	CHECK(frames[2].Presentation.Correlation == 88);
 }

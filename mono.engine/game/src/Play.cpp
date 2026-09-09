@@ -190,8 +190,22 @@ namespace engine::game {
 		if (disposition != script::PortalInputDisposition::Immediate)
 			return disposition == script::PortalInputDisposition::Queued;
 		script::ClosePortalPlayerMoveForwarding(store, player);
+		const auto previousDirection = humanoid->MoveDirection;
 		humanoid->MoveDirection = move.Direction;
 		humanoid->JumpRequested = humanoid->JumpRequested || move.Jump;
+		if (previousDirection != core::Vector3{} && humanoid->MoveDirection == core::Vector3{}) {
+			ENGINE_LOG(
+				core::LogLevel::Trace,
+				"portal-input-stop",
+				"route=native incarnation={} player={} humanoid={} world_tick={} input_tick={} "
+				"direction=0,0,0",
+				script::PortalTransferIncarnation(store),
+				player.Id,
+				rig->Humanoid.Id,
+				store.Time().Tick,
+				inputTick
+			);
+		}
 		static const core::LogCategory controlTrace("portal-input");
 		if (controlTrace.Enabled(core::LogLevel::Trace)) {
 			const auto *root = store.Get<scene::Transform>(rig->Root);
@@ -199,7 +213,7 @@ namespace engine::game {
 				core::LogLevel::Trace,
 				"portal-input",
 				"route=native incarnation={} player={} world_tick={} input_tick={} delta={} input_step={} "
-				"direction={},{},{} position={},{},{}",
+				"direction={},{},{} position={},{},{} humanoid={} applied_direction={},{},{}",
 				script::PortalTransferIncarnation(store),
 				player.Id,
 				store.Time().Tick,
@@ -211,7 +225,11 @@ namespace engine::game {
 				move.Direction.Z,
 				root ? root->Frame.Position.X : 0,
 				root ? root->Frame.Position.Y : 0,
-				root ? root->Frame.Position.Z : 0
+				root ? root->Frame.Position.Z : 0,
+				rig->Humanoid.Id,
+				humanoid->MoveDirection.X,
+				humanoid->MoveDirection.Y,
+				humanoid->MoveDirection.Z
 			);
 		}
 		return true;

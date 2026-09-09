@@ -55,7 +55,7 @@ namespace engine::render {
 
 		bool NeedsWorld(const void *pipeline, uint64_t world) const {
 			return std::none_of(Prepared.begin(), Prepared.end(), [=](const Entry &entry) {
-				return entry.Pipeline == pipeline && entry.World == world;
+				return entry.Pipeline == pipeline && entry.World == world && entry.WorldReady;
 			});
 		}
 
@@ -63,9 +63,20 @@ namespace engine::render {
 			if (!executed) {
 				return;
 			}
-			if (NeedsWorld(pipeline, world)) {
-				Prepared.push_back({pipeline, world});
+			auto found = std::find_if(Prepared.begin(), Prepared.end(), [=](const Entry &entry) {
+				return entry.Pipeline == pipeline && entry.World == world;
+			});
+			if (found == Prepared.end()) {
+				Prepared.push_back({pipeline, world, true});
+			} else {
+				found->WorldReady = true;
 			}
+		}
+
+		// A view-specific shadow map consumes shared storage without invalidating frame effects.
+		void InvalidateWorld(const void *pipeline, uint64_t world) {
+			for (Entry &entry : Prepared)
+				if (entry.Pipeline == pipeline && entry.World == world) entry.WorldReady = false;
 		}
 
 		void Clear() {
@@ -76,6 +87,7 @@ namespace engine::render {
 		struct Entry {
 			const void *Pipeline = nullptr;
 			uint64_t World = 0;
+			bool WorldReady = false;
 		};
 		std::vector<Entry> Prepared;
 	};

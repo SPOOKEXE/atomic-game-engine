@@ -873,22 +873,6 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 			};
 		}
-		if (role == Impl::ResourceRole::LensA) {
-			return Impl::NamedTexture{
-				slotPbr.LensA,
-				slotPbr.Dimensions.LitWidth,
-				slotPbr.Dimensions.LitHeight,
-				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
-			};
-		}
-		if (role == Impl::ResourceRole::LensB) {
-			return Impl::NamedTexture{
-				slotPbr.LensB,
-				slotPbr.Dimensions.LitWidth,
-				slotPbr.Dimensions.LitHeight,
-				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
-			};
-		}
 		return texture;
 	}
 

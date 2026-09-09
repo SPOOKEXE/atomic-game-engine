@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/world/HostLink.hpp>
 
+#include <array>
 #include <utility>
 
 namespace engine::world {
@@ -24,6 +25,8 @@ namespace engine::world {
 
 	const char *Describe(HostSignal signal) {
 		switch (signal) {
+		case HostSignal::PresentationBindings:
+			return "presentation-bindings";
 		case HostSignal::Ready:
 			return "ready";
 		case HostSignal::Heartbeat:
@@ -51,7 +54,110 @@ namespace engine::world {
 		return "?";
 	}
 
+	namespace {
+		struct BindingEndpointView {
+			std::string_view World, Channel;
+			uint64_t Session = 0, Generation = 0;
+			bool operator==(const BindingEndpointView &) const = default;
+		};
+		bool ValidBindingEndpoint(const auto &endpoint) {
+			const auto validName = [](std::string_view name) {
+				return !name.empty() && name.size() <= MAX_PRESENTATION_NAME &&
+					   name.find('\0') == std::string_view::npos;
+			};
+			return validName(endpoint.World) && validName(endpoint.Channel) && endpoint.Session &&
+				   endpoint.Generation;
+		}
+		bool ValidBindingRows(const auto &rows) {
+			for (size_t index = 0; index < rows.size(); ++index) {
+				if (!ValidBindingEndpoint(rows[index].Local) || !ValidBindingEndpoint(rows[index].Published))
+					return false;
+				for (size_t previous = 0; previous < index; ++previous)
+					if (rows[index].Local == rows[previous].Local ||
+						rows[index].Published == rows[previous].Published)
+						return false;
+			}
+			return true;
+		}
+		bool DisjointBindingLocals(const auto &exports, const auto &returns) {
+			for (const auto &exported : exports)
+				for (const auto &returned : returns)
+					if (exported.Local == returned.Local) return false;
+			return true;
+		}
+	}
+	bool WritePresentationBindings(core::ByteWriter &writer, const PresentationBindings &bindings) {
+		if (!bindings.Session || !bindings.Revision || bindings.Exports.size() > MAX_PRESENTATION_DIRECTORY ||
+			bindings.Returns.size() > MAX_PRESENTATION_DIRECTORY - bindings.Exports.size() ||
+			!ValidBindingRows(bindings.Exports) || !ValidBindingRows(bindings.Returns) ||
+			!DisjointBindingLocals(bindings.Exports, bindings.Returns))
+			return false;
+		writer.WriteUInt32(0x31424250u); // PBB1
+		writer.WriteUInt64(bindings.Session);
+		writer.WriteUInt64(bindings.Revision);
+		writer.WriteUInt32(static_cast<uint32_t>(bindings.Exports.size()));
+		writer.WriteUInt32(static_cast<uint32_t>(bindings.Returns.size()));
+		for (const auto *rows : {&bindings.Exports, &bindings.Returns})
+			for (const auto &binding : *rows)
+				for (const auto *endpoint : {&binding.Local, &binding.Published}) {
+					writer.WriteString(endpoint->World);
+					writer.WriteString(endpoint->Channel);
+					writer.WriteUInt64(endpoint->Session);
+					writer.WriteUInt64(endpoint->Generation);
+				}
+		return true;
+	}
+	bool ReadPresentationBindings(core::ByteReader &reader, PresentationBindings &bindings) {
+		const auto magic = reader.ReadUInt32();
+		const auto session = reader.ReadUInt64(), revision = reader.ReadUInt64();
+		const auto exports = reader.ReadUInt32(), returns = reader.ReadUInt32();
+		if (reader.Failed() || magic != 0x31424250u || !session || !revision ||
+			exports > MAX_PRESENTATION_DIRECTORY || returns > MAX_PRESENTATION_DIRECTORY - exports) {
+			reader.Fail();
+			return false;
+		}
+		struct BindingView {
+			BindingEndpointView Local, Published;
+		};
+		std::array<BindingView, MAX_PRESENTATION_DIRECTORY> rows{};
+		for (uint32_t index = 0; index < exports + returns; ++index)
+			for (auto *endpoint : {&rows[index].Local, &rows[index].Published})
+				*endpoint = {
+					reader.ReadString(), reader.ReadString(), reader.ReadUInt64(), reader.ReadUInt64()
+				};
+		if (reader.Failed() || !ValidBindingRows(std::span(rows).first(exports)) ||
+			!ValidBindingRows(std::span(rows).subspan(exports, returns)) ||
+			!DisjointBindingLocals(
+				std::span(rows).first(exports), std::span(rows).subspan(exports, returns)
+			)) {
+			reader.Fail();
+			return false;
+		}
+		PresentationBindings decoded{session, revision, {}, {}};
+		const auto copy = [](const BindingEndpointView &endpoint) {
+			return PresentationAddress{
+				std::string(endpoint.World),
+				std::string(endpoint.Channel),
+				endpoint.Session,
+				endpoint.Generation
+			};
+		};
+		for (uint32_t index = 0; index < exports + returns; ++index)
+			(index < exports ? decoded.Exports : decoded.Returns)
+				.push_back({copy(rows[index].Local), copy(rows[index].Published)});
+		bindings = std::move(decoded);
+		return true;
+	}
+
 	void WriteHostFrame(core::ByteWriter &writer, const HostFrame &frame) {
+		if (frame.Signal == HostSignal::PresentationBindings) {
+			core::ByteWriter payload;
+			if (!WritePresentationBindings(payload, frame.Bindings)) return;
+			writer.WriteUInt32(FRAME_MAGIC);
+			writer.WriteUInt8(static_cast<uint8_t>(frame.Signal));
+			writer.WriteRaw(payload.Bytes().data(), payload.Size());
+			return;
+		}
 		if (frame.Signal == HostSignal::TickExchangeCommand ||
 			frame.Signal == HostSignal::TickExchangeResult) {
 			core::ByteWriter payload;
@@ -106,10 +212,18 @@ namespace engine::world {
 
 		HostFrame read;
 		const auto signal = reader.ReadUInt8();
-		if (signal > static_cast<uint8_t>(HostSignal::TickExchangeResult)) {
+		if (signal > static_cast<uint8_t>(HostSignal::PresentationBindings)) {
 			return false;
 		}
 		read.Signal = static_cast<HostSignal>(signal);
+		if (read.Signal == HostSignal::PresentationBindings) {
+			if (!ReadPresentationBindings(reader, read.Bindings) || reader.Remaining() != 0) {
+				reader.Fail();
+				return false;
+			}
+			frame = std::move(read);
+			return true;
+		}
 		if (read.Signal == HostSignal::TickExchangeCommand || read.Signal == HostSignal::TickExchangeResult) {
 			if (!(read.Signal == HostSignal::TickExchangeCommand
 					  ? ReadTickExchangeControl(reader, read.ExchangeCommand)
@@ -253,6 +367,22 @@ namespace engine::world {
 	bool HostLink::PublishPresentationRoutes(const PresentationDirectory &directory) {
 		return PublishDirectory(directory, true);
 	}
+	bool HostLink::PublishPresentationBindings(const PresentationBindings &bindings) {
+		if (!Connected() || !bindings.Session || !bindings.Revision ||
+			bindings.Session < PublishedBindingsSession ||
+			(bindings.Session == PublishedBindingsSession && bindings.Revision < PublishedBindingsRevision))
+			return false;
+		if (bindings.Session == PublishedBindingsSession && bindings.Revision == PublishedBindingsRevision)
+			return true;
+		HostFrame frame;
+		frame.Signal = HostSignal::PresentationBindings;
+		frame.Bindings = bindings;
+		if (!Send(frame)) return false;
+		PublishedBindingsSession = bindings.Session;
+		PublishedBindingsRevision = bindings.Revision;
+		return true;
+	}
+
 	bool HostLink::PublishDirectory(const PresentationDirectory &directory, bool routes) {
 		auto &session = routes ? PublishedRoutesSession : PublishedDirectorySession;
 		auto &revision = routes ? PublishedRoutesRevision : PublishedDirectoryRevision;

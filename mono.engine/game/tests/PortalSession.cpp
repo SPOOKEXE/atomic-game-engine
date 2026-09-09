@@ -42,7 +42,8 @@ TEST_CASE(
 		  game::PortalSessionKind::LeaseRoute,
 		  game::PortalSessionKind::Proceed,
 		  game::PortalSessionKind::Crossed,
-		  game::PortalSessionKind::Motion}) {
+		  game::PortalSessionKind::Motion,
+		  game::PortalSessionKind::LeaseAdopted}) {
 		CAPTURE(kind);
 		game::PortalSessionMessage message;
 		message.Kind = kind;
@@ -214,4 +215,33 @@ TEST_CASE(
 	message.Motion = motion;
 	message.Motion->DestinationTick = 0;
 	CHECK(game::EncodePortalSession(message).empty());
+}
+
+TEST_CASE("portal adoption reports only committed matching live leases", "[game][portal-session]") {
+	game::PortalSessionLeases leases;
+	const auto claim = Claim();
+	const auto identity = Identity();
+	REQUIRE(leases.Offer(claim, identity, 10));
+	CHECK_FALSE(leases.Adopted(claim, identity, 11));
+	REQUIRE(leases.Reserve(claim, identity, 1, ecs::Entity(53), 11));
+	CHECK_FALSE(leases.Adopted(claim, identity, 11));
+	REQUIRE(leases.Commit(claim, 1, 12));
+	CHECK(leases.Adopted(claim, identity, 12));
+	auto wrongIdentity = identity;
+	wrongIdentity.Value[0]++;
+	CHECK_FALSE(leases.Adopted(claim, wrongIdentity, 12));
+	auto wrongClaim = claim;
+	wrongClaim.Capability[0] ^= std::byte{1};
+	CHECK_FALSE(leases.Adopted(wrongClaim, identity, 12));
+	wrongClaim = claim;
+	wrongClaim.DestinationIncarnation++;
+	CHECK_FALSE(leases.Adopted(wrongClaim, identity, 12));
+	leases.Drop(1);
+	CHECK(leases.Adopted(claim, identity, 13));
+	REQUIRE(leases.Offer(claim, identity, 39));
+	CHECK(leases.Adopted(claim, identity, 40));
+	CHECK_FALSE(leases.Adopted(claim, identity, 69));
+	CHECK_FALSE(leases.Adopted(claim, identity, std::numeric_limits<double>::quiet_NaN()));
+	leases.Expire(69);
+	CHECK(leases.Size() == 0);
 }

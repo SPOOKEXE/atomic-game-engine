@@ -11,6 +11,7 @@
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -41,10 +42,47 @@ namespace engine::render {
 
 			enterNamedPass(context.Name);
 			if (!haveShadow) {
-				return true;
+				return recording.Request.Source->ImportedDirectionalShadow == 0;
 			}
 			if (!recordUploads()) {
 				return false;
+			}
+			const bool seeded = recording.Request.Source->ImportedDirectionalShadow != 0;
+			if (seeded) {
+				auto *source = State->FindPortalShadow(recording.Request.Source->ImportedDirectionalShadow);
+				if (!source || !State->RecordPortalShadowImport(command, *source)) return false;
+				ENGINE_PROFILE("portal shadow seed");
+				if (source->Packed) {
+					if (!State->PackedShadowPipeline) return false;
+					SDL_GPUDepthStencilTargetInfo target{};
+					target.texture = State->ShadowTexture;
+					target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+					target.store_op = SDL_GPU_STOREOP_STORE;
+					target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					// Prepared nodes reuse this scratch in queue order until one final fence.
+					target.cycle = State->PortalTreeJob.Prepared == 0;
+					auto *decode = SDL_BeginGPURenderPass(command, nullptr, 0, &target);
+					if (!decode) return false;
+					State->BindPipeline(decode, State->PackedShadowPipeline, Impl::PipelineFamily::Other);
+					SDL_BindGPUFragmentStorageBuffers(decode, 0, &source->Packed, 1);
+					SDL_DrawGPUPrimitives(decode, 3, 1, 0, 0);
+					SDL_EndGPURenderPass(decode);
+					++result.DrawCalls;
+					core::Metrics::Count("render.portal_shadow.packed_seed_bytes", source->GpuBytes);
+				} else {
+					auto *copy = SDL_BeginGPUCopyPass(command);
+					if (!copy) return false;
+					SDL_GPUTextureLocation from{}, to{};
+					from.texture = source->Texture;
+					to.texture = State->ShadowTexture;
+					SDL_CopyGPUTextureToTexture(
+						copy, &from, &to, SHADOW_RESOLUTION, SHADOW_RESOLUTION, 1, false
+					);
+					SDL_EndGPUCopyPass(copy);
+				}
+				core::Metrics::Count("render.portal_shadow.seed_bytes", PORTAL_SHADOW_BYTES);
+				core::Metrics::Count("render.portal_shadow.seeds", 1);
 			}
 
 			{
@@ -56,26 +94,28 @@ namespace engine::render {
 					ENGINE_PROFILE_CAT("shadow setup", core::ProfileCategory::Render);
 					shadowTarget.texture = State->ShadowTexture;
 					shadowTarget.clear_depth = 1.0f;
-					shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+					shadowTarget.load_op = seeded ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
 
 					// **Stored, unlike the colour pass's depth.** This one is read by
 					// the next pass, which is the entire point of rendering it.
 					shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
 					shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 					shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-					shadowTarget.cycle = true;
+					shadowTarget.cycle = !seeded;
 
 					pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
-					State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
-
-					State->BindInstanceBuffers(pass);
-
-					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-					SDL_PushGPUVertexUniformData(
-						command, 0, &lightViewProjection, sizeof(lightViewProjection)
-					);
+					if (!pass) return false;
+					if (!seeded) core::Metrics::Count("render.shadow.clears", 1);
+					// Empty source captures need a clear without nonexistent instance buffers.
+					if (reflectedCasters > 0 || surfaceCasters > 0) {
+						State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+						State->BindInstanceBuffers(pass);
+						const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+						SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+						SDL_PushGPUVertexUniformData(
+							command, 0, &lightViewProjection, sizeof(lightViewProjection)
+						);
+					}
 				}
 
 				// **Only the opaque part of the scene casts**, and of that only what

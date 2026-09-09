@@ -88,6 +88,12 @@ namespace engine::world {
 		if (status == PresentationStatus::Ok) endpoint->ReceivedSequence = message.Sequence;
 		return status;
 	}
+	bool PresentationPeer::OwnsReceipt(const PresentationAddress &alias) const {
+		if (Closed || Worlds.LookupPresentation(World, alias.Channel) != alias) return false;
+		return std::any_of(Endpoints.begin(), Endpoints.end(), [&](const Endpoint &endpoint) {
+			return endpoint.Alias == alias;
+		});
+	}
 	std::vector<PresentationMessage> PresentationPeer::Take() {
 		std::vector<PresentationMessage> replies;
 		for (const auto &endpoint : Endpoints)

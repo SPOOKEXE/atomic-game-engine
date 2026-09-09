@@ -9,6 +9,72 @@ Current continuation order is at the top of
 The [handoff](PORTAL-HANDOFF.md) records known failures, test evidence and retained
 diagnostic paths. The full working-tree checkpoint is not a completed phase.
 
+## continuation 2026-09-08
+
+- [x] P8 gameplay departure retirement: repeated lease requests receive an
+  authenticated `LeaseAdopted` reply after destination adoption. Source checks
+  the accepted claim, attempt and endpoint before removing its departure while
+  leaving its connection available for presentation. Destination retry state
+  remains bounded by the existing lease timeout. Both missing behaviors were
+  reproduced before the fix. Codec/lease tests pass 2,660 assertions / 7 cases;
+  server lease and process crossing tests pass 748 / 6. Full game passes
+  4,124 / 93 and full server passes 1,543 / 76. Detailed evidence is in [PORTAL-HANDOFF.md](PORTAL-HANDOFF.md).
+- [x] Retain one admitted source observer and its content session after product
+  adoption. Stop its gameplay input/scripts while polling snapshots and serving
+  content through its own connector. Share the intake budget across explicit
+  world/session pumps. Delayed source content plus newly authored source and
+  destination references pass 95 assertions with local fallback/cache disabled.
+  Full headless Client passes 10,215 / 172; successor/observation checks pass
+  3,866 / 5; 30/60 Hz product image handoff passes 17,098 / 1. Builds and format
+  checks pass. Evidence and limitations are in [PORTAL-HANDOFF.md](PORTAL-HANDOFF.md).
+- [x] Share the producer's world and camera collection through engine-owned
+  `WorldViewFrame` and `WorldCameraFrame` packets. Preserve published replica
+  interpolation, detach particle inputs, and copy per-camera spatial placements
+  before leaving the store. Interface submission now accepts the owned packet.
+  Waiting nested captures retain their preparation gate. Full render passes
+  46,592 / 465; full Client passes 10,215 / 172; device `[portal-runtime]` passes
+  24,161 / 18. Build, formatting and whitespace checks pass. This is the shared
+  collection boundary; complete resource-aware foreign-eye binding remains open.
+- [x] Bind retained source-world packets to the Client eye after adoption,
+  including lighting, particles, ribbons, spatial UI and foreign straddlers.
+  Keep screen UI with the active player through `WorldViewInterface`. Refuse
+  failed presentation and hold the admitted eye while nested captures change
+  from body layers to complete-room demand. The initial run failed three
+  landmark assertions; after the gate, cold/warm 30/60 Hz handoff passes
+  16,244 / 16,323 assertions and the 16-variant camera matrix passes 131,965.
+  Full headless Client passes 10,215 / 172; world-view/interface checks pass
+  90 / 3. Inspected evidence and the then-unresolved gray portal-border case are in
+  [PORTAL-HANDOFF.md](PORTAL-HANDOFF.md). Resource namespace, shader/editable
+  preparation and complete current-camera foreign rendering remain open.
+- [x] Select explicitly admitted, ready local replicas for nested portal
+  captures. Retain the previous observer while a visible portal needs it and
+  present it before native portal demand. Host routing passes 33 assertions;
+  full headless Client passes 10,232 / 172. Product checks now enforce producer
+  ownership and matching position/rotation for the identity-seam fixture.
+- [x] Close the reproduced return-adoption camera/body transition. Admitted
+  local captures use complete world/body rendering instead of delayed body
+  layers. Authenticated successors with ready rigs share the direct packet
+  path and receive the existing prediction continuation before presentation.
+  The initial local-capture and successor-only attempts still failed landmarks;
+  copying the continued body pose closes the reproduced size jump. The 24-run
+  product matrix passes 202,963 assertions / 4 cases with unchanged landmark
+  thresholds and explicit current-camera/producer checks.
+- [x] Resolve first-person body identity in directly viewed destination stores
+  and retain account selection after source-player retirement. Final demand,
+  rendering and lifetime checks pass: full render 46,636 / 466, full Client
+  10,232 / 172, focused device-enabled body/shadow checks 967 / 9. The final
+  account-selection adjustment follows the product matrix and is covered by
+  those host/device checks. Fix the reproduced empty-world test registration
+  order so the full render gate is independent of that test order. Builds and
+  formatting pass. Artifacts and limitations are in [PORTAL-HANDOFF.md](PORTAL-HANDOFF.md).
+- [ ] Complete observer endpoint/lifetime failure coverage and same-name content
+  isolation, prepare complete foreign-world layers and close the moving-camera
+  image gate. The prior image staging prototype remains rolled back; this
+  packet path now draws retained sources and authenticated ready successors.
+  Unadmitted eyes and remote nested views still use retained images. Staged
+  content, per-world shaders, editable resources and viewport widgets remain
+  part of the required preparation work.
+
 ## phase tasks
 
 - [ ] P0: audit current contracts, policies, hidden work and shader consumers;
@@ -5296,6 +5362,167 @@ successfully. Full Terrain worker/frame profiling remains to be measured.
 
 Next work, in dependency order:
 
+- [x] Establish owner-scoped texture residency, pending arrivals and retirement.
+  Same-name table checks pass 70 assertions in two host/device cases; headless
+  render passes 46,651 / 467 and Client 10,232 / 172. Client and Studio build.
+  See `PORTAL-HANDOFF.md` for logs and the corrected fixture accounting failure.
+- [ ] Carry content-session ownership through Client uploads and all resource
+  consumers. MeshTable, TextureTable and Renderer support strict namespaces.
+  Client mesh/texture delivery and view/UI consumers now bind local world names;
+  same-name published textures and meshes pass delayed-source and refusal
+  product checks. Submitted-draw retirement and repeated owner reuse pass renderer
+  device checks. Client observation expiry now proves one published texture is
+  released while the successor keeps rendering. Product mesh reclamation and
+  staged cancellation remain unproven. Material shader device ownership and Client
+  compiler-cache migration are implemented; lens device ownership is also wired.
+  Postprocess selection and screen interface variants are scoped. Spatial variants are implemented; foreign-world preparation and product shader
+  crossing remain open. These resource checks do not close this gate.
+- [x] Extend mesh residency and Renderer resource calls with content owners and
+  unified retirement. Mesh ranges retain the existing deferred reuse window.
+  Mesh host checks pass 301 / 12; final device checks pass 106 / 3 and full render
+  host checks 46,682 / 468. Client and Studio build. `PORTAL-HANDOFF.md` records
+  the caught built-in fallback lookup defect, build warnings and remaining
+  product ownership wiring.
+- [x] Bind object draws to native and copied-world content owners, including
+  unloaded mesh filtering, submesh textures, draw-run separation and quiet-frame
+  invalidation. Final focused rendered-image checks pass 240 assertions; the
+  broader device sweep passes 8,397 / 13 before the final test-only extension.
+  Render/scene/Client host suites pass. Native environment/particle/ribbon lookup
+  plumbing follows the view owner; owner-specific pixel coverage for those
+  layers and Client/UI binding remain part of the open product isolation gate.
+- [x] Carry content owners through local portal producers and their spatial UI.
+  Host bindings apply before/after producer creation and retire with the world.
+  The spatial-only fixture reproduced stale capture revisions despite changed
+  pixels; complete capture revisions now include resource and animation inputs.
+  Final device checks pass 1,006 / 5, including known-version requests that must
+  redraw after changes. Full render host checks pass 46,682 / 468. Client session
+  binding and scoped delivery/editable/main-UI uploads remain open.
+- [x] Scope editable mesh/image upload stamps by store identity and content owner,
+  and expose explicit cache retirement for worlds and owners. Device checks pass
+  54 assertions in two cases, including equal entity handles in different worlds.
+  Headless render passes 46,681 / 468. Client assignment and retirement calls
+  remain open; worlds sharing a delivery session still need distinct editable
+  owners when generated content names collide.
+- [x] Prepare editable images and meshes in portal producers before collection
+  and capture renewal. Reproduced missing image uploads in all four direct/hosted
+  and ordinary/spatial variants. Final device checks pass 1,386 / 4, including
+  changed pixels after edits and producer/owner lifetime checks. Headless render
+  passes 46,681 / 468; Client and Studio build. Graph-owned preparation and
+  end-to-end Client resource ownership remain open.
+- [x] Wire Client world residency names through mesh/texture uploads, pending
+  texture markers, editable preparation, native/copied views, image callbacks,
+  portal producers and main viewport widgets. Staged content routes pump before
+  adoption and move with their successor connection. Replica retirement drops
+  its owner and upload stamps. Product editable room colours survive the outward
+  and return crossing; `PORTAL-HANDOFF.md` records the proof and remaining scope.
+- [x] Verify late source delivery cannot overwrite a successor's same-name
+  published texture. Both routes use one signing identity and distinct signed
+  manifests. The destination bundle must be served before commit can complete;
+  the source finishes after adoption. The final frame verifies both accepted
+  textures, the destination owner and blue destination pixels. Each route asks
+  for its bundle once. Combined with the retained-route case, 210 assertions
+  pass in two offscreen product cases; see `PORTAL-HANDOFF.md` for artifacts.
+- [x] Verify published mesh isolation and refused source mesh/texture replies.
+  The source remains retained with no pending Client requests, while the native
+  successor keeps its own pixels and accepted asset count. A wider run reproduced
+  duplicate destination fetches when staging completed before adoption. Demand
+  attempts now include the residency owner, so adding a world preserves existing
+  history while a later local reference can still request its missing copy.
+  Final checks pass 680 assertions in six product runs, including retained-route
+  compatibility; see `PORTAL-HANDOFF.md` for evidence and capture paths.
+- [x] Exercise renderer owner retirement before submitted-draw readback, followed
+  by quiet-view invalidation and twelve reload cycles. Submitted and surviving
+  owner pixels match references; logical texture bytes release and mesh buffer
+  bytes stay bounded. Device checks pass 1,283 / 16 and headless render passes
+  46,682 / 468. See `PORTAL-HANDOFF.md` for logs and the limits of this evidence.
+- [x] Verify Client source-observation expiry releases exactly its one four-byte
+  published texture and preserves successor pixels and buffer residency. Combined
+  with retained same-name texture/mesh checks, 357 assertions pass in three product
+  runs. Headless Client passes 10,232 / 172; capture metadata records logical GPU
+  residency. `PORTAL-HANDOFF.md` records evidence and the remaining lifetime gaps.
+- [x] Add owner-scoped material and lens modules to ShaderLibrary with independent
+  refresh, failed-edit retention and explicit retirement. Headless shader checks
+  pass 550 assertions in 16 cases. Device pipeline ownership and Client/Studio
+  migration remain open; see `PORTAL-HANDOFF.md` for the contract and evidence.
+- [x] Scope material shader device variants and copied draw selection by content
+  owner, including retirement. Client compiler refresh and material uploads now
+  use world owners; switching views restores the still-shared GUI/lens/postprocess
+  programs without rebuilding unchanged material variants. Device checks pass
+  1,350 / 5 and product compatibility checks pass 10,493 / 2. Headless render and
+  Client pass; Client and Studio build. `PORTAL-HANDOFF.md` records proof limits.
+- [x] Scope lens pipelines by owner and select them from each recorded view.
+  Client lens uploads and retirement use that owner; unchanged cached owners
+  retain device pipelines. Two-view same-name output/lifetime checks and existing
+  portal/material checks pass 620 / 3 on Vulkan. Product lens crossing remains
+  unproven; `PORTAL-HANDOFF.md` records the remaining scope.
+- [x] Scope postprocess selection, replacement, clearing and retirement by owner.
+  Client selection and producer invalidation query their own owner; unchanged
+  cached grades retain their pipeline. Two-view grade checks and existing shader
+  checks pass 823 / 4 on Vulkan. Headless render passes 46,768 / 469. Interface
+  ownership and product grade crossing remain open; see `PORTAL-HANDOFF.md`.
+- [x] Scope screen interface shader variants, submitted owner lookup and lifetime.
+  Client uploads and retires variants by world; cached owner changes preserve
+  geometry and accepted pipelines. Device checks pass 953 / 4, including zero
+  geometry upload on owner switches. Headless render passes 46,768 / 469.
+  `PORTAL-HANDOFF.md` records evidence and limits.
+- [x] Implement custom spatial interface shader variants and owner selection.
+  Reproduced ignored shader names, then a missing fragment clip-buffer binding.
+  Screen and spatial clipping/owner/depth tests pass through display and HDR
+  graphs; the combined device sweep passes 1,959 / 5. The original 1,382 / 5 run
+  was display-format spatial coverage, previously mislabeled HDR. Earlier
+  headless render/Client runs pass. `PORTAL-HANDOFF.md` records failures, fixes,
+  the corrected format evidence and limits. Product custom shader crossing and
+  foreign-world preparation remain unproven.
+- [x] Give accepted shader words persistent content identity and reconcile each
+  interface consumer independently of `ShaderLibrary::Changed`. Client GUI
+  preparation now uses this path. Delayed consumers, newly demanded consumers,
+  edits, failed source edits and removal have pixel checks in both target formats.
+  Shared preparation for retained/staged worlds and portal producers remains open.
+- [x] Retain accepted material, lens and postprocess program hashes on the device.
+  Reoffering identical words under the same owner and name returns before pipeline
+  construction, frame waits and resource invalidation. The owner/lifetime pixel
+  sweep passes 2,639 / 5, including unchanged resource revisions on repeated
+  registration. This is a prerequisite for shared preparation, not its completion.
+- [x] Consolidate Client main-view, retained-world and staged-world shader preparation
+  in `PrepareWorldShaders`. Reconcile current material/lens demand, postprocess
+  selection and each interface consumer independently of transient changed lists.
+  Keep GUI-only and grade-only programs out of material pipelines. Owner changes
+  explicitly damage cached interface images even when shader programs are warm.
+  Product custom-shader crossing remains open.
+- [x] Prepare authored portal-producer shaders before capture renewal checks. Share
+  the Client compiler and postprocess setting, default standalone residency to the
+  native world owner, and include accepted GUI words in complete-world signatures.
+  Reproduce and fix deferred opaque draws ignoring authored programs. Authored
+  colour uses the existing GBuffer node and preserves discard and nearest depth.
+  Offscreen portal/owner checks pass 34,171 assertions / 32 cases; headless render
+  passes 46,801 / 469 and Client 10,232 / 172. All 35 staged shaders pass SPIR-V/MSL
+  checks. Authored occlusion colour/depth parity passes 125 assertions, with an
+  extra-draw gate proving the split path ran. Full custom-shader crossing,
+  graph-owned preparation and release performance remain open.
+- [x] Resolve replica Material children before draw collection. Reproduce the
+  empty shader selection headlessly and white floors in the real Client before
+  fixing scheduler ordering. Same-name red/blue material shaders now pass both
+  product adoptions at 60 Hz: 11,292 assertions. Full headless Client passes
+  10,237 / 173. Spatial GUI/lens/grade shader crossing and edits during transfer
+  remain open; failure and inspected-image evidence is in PORTAL-HANDOFF.md.
+- [x] Carry depth-tested spatial GUI through remote current-body composition.
+  Reproduce the adoption jump, then capture authored batch colour/depth into graph
+  scratch targets and merge it into ordered layers. The initial product run passes
+  11,200 assertions; the render sweep passes 80,383 / 30. Mixed glass/GUI, discard,
+  zero alpha, occlusion and overflow/recovery pass 94,420 assertions. Evidence is
+  in PORTAL-HANDOFF.md.
+- [x] Forward prepared spatial batches through WorldViewInterface without routing
+  player screen UI into world layers. Reproduce ten lost-batch routing assertions;
+  headless render passes 46,820 / 469 after forwarding capability and capture calls.
+- [x] Complete always-on-top spatial ordering and authored lens inputs after remote
+  current-body composition. PIMG v15 carries a depth-free top-GUI layer and bounded
+  evaluated lens inputs, capture time and accepted program words. Captured programs
+  have independent validated residency and image-group leases. Native and captured
+  body paths share pre-lens HDR ordering. Same-camera glass/body comparisons cover
+  ordered pixel-moving lenses, depth preservation, malformed programs and owner
+  isolation. The final product crossing passes 12,379 assertions, including both
+  handoffs and post-return rest. See PORTAL-HANDOFF.md for evidence and limits.
+  Nested scaled-aperture composition remains a separate acceptance case.
 - [x] Keep Client input submissions live during Proceed and source retirement;
   distinguish consumed client input ticks from replication world ticks.
 - [x] Route source-host movement to the exact transferred Humanoid until native
@@ -5515,3 +5742,489 @@ or release performance conclusion follows from these samples.
 | Resident publication and source deadlines | Failed-graph publication and delayed reservation expiry reproduced two failures. Publication now requires a successful submitted resident capture of the exact extent, rejects duplicate token ownership, and source expiry cancels its reservation. Queued/copied/adopted/wrong-extent captures cannot publish. Combined demand/runtime/resource/table gate passes 9,635 assertions / 18 cases on Vulkan; graph-refusal logs are expected negative cases |
 | Shrinking-exit demand clipping | Clip bias uses destination length units. Both-face approaches with scales 0.025/0.05/0.5/2 retain the aperture between the mapped camera and far plane; demand subset passes 1,092 assertions / 5 cases. The default 2 mm approach is now covered separately above |
 | Shared product presentation adapter | Host/runtime subset passes 1,162 assertions / 11 cases, including Vulkan. One destination handles two source viewports, equal portal names stay isolated, hidden views purge pending requests and release imported images, and removed endpoints can reopen. Host GPU test checks ownership and zero upload bytes; existing runtime fixtures supply pixel evidence. Product call-site integration remains open |
+
+Current-camera packet checkpoint: the client and GPU fixture now share
+BindWorldView, validating owner/store identity and rendering full retained scene
+inputs at the current camera. The original motion and hidden-post checks pass;
+image-only output remains explicitly frozen. Joined authenticated successor
+scenes can draw before player admission, with prediction still player-gated.
+Content-owner and active lens signature omissions were reproduced and fixed.
+Focused GPU checks pass 83,786 assertions / 4 cases; headless render 86,260 / 471
+and client 10,237 / 173. Product lens scene/pixel/handoff gates pass, but its
+post-return rest-state gate still fails. Tracing proves the authority applied
+stop while the replica retained a stale humanoid direction; diagnosis continues.
+This does not close image-only disocclusion or the full crossing acceptance item.
+See docs/PORTAL-HANDOFF.md for logs and preserved frames.
+
+Follow-up to the current-camera checkpoint: the stale post-return movement update
+was reproduced deterministically during snapshot streaming and fixed by retaining
+changes in existing replication recovery rows. Both detection modes and delayed
+old-value acknowledgements pass, together with all 272 replication cases / 22,503
+assertions. The final product lens run passes 12,379 assertions with replication
+tracing disabled, including the rest-state gate; client headless passes 10,237 /
+173. Studio builds. This closes that reproduced replication bug, while the
+broader image-only disocclusion and nested-aperture render requirements stay open.
+
+Nested ordered-capture checkpoint: a production-path GPU case now reproduces
+request validation rejecting recursion with ordered layers. A bounded standalone
+capture-tree codec and borrowed geometry preflight are implemented and verified:
+full render headless passes 92,515 assertions / 475 cases, and existing layered
+GPU checks pass 83,550 / 2. Per-node camera/lighting/lenses and aperture geometry
+retain separate depth domains. The following ownership checkpoint adds inbox
+and GPU support; codec acceptance alone does not satisfy the distinct nested
+scaled-aperture image gate.
+
+Capture-tree ownership checkpoint: authenticated root/child admission, atomic
+GPU tree leases and source publication/retirement are implemented. Payload-only
+sources retain bounded CPU trees for producer assembly without child GPU uploads.
+An optional body-graph aperture stage precedes depth export and subsequent
+physical/top-GUI/lens composition. Headless render passes 92,822 assertions /
+480 cases, focused Vulkan passes 83,772 / 4, and graph passes 9,881 / 226.
+The production capability case advances past request validation but fails at
+the producer's explicit recursive-ordered refusal (35 / 36 assertions).
+Recursive producer collection, bottom-up body composition and the independent
+scaled-aperture native HDR/depth comparison remain open. See PORTAL-HANDOFF.md.
+
+Recursive composition follow-up: producer tree collection and bottom-up body
+composition now pass the independent three-room scaled native HDR/depth oracle.
+The oracle reproduced an aperture/depth-export scheduling bug; an explicit graph
+dependency fixes it. Exact host bindings preserve published tree identities
+through the real relay, with local-alias and conflicting-binding refusal tests.
+The current relay GPU fixture verifies a one-node tree, withdrawal and replacement;
+nested relay routing still needs its own evidence. Final headless checks pass
+93,055 render assertions / 481 cases, 32,635 world / 249 and 10,449 graph / 226.
+Focused offscreen Vulkan checks pass 320 / 2 and source/import checks 127,247 / 4.
+Local reflected surfaces, broader animated/material/oblique native comparisons,
+product failure/crossing gates and release measurements remain open. See
+PORTAL-HANDOFF.md for logs and scope.
+
+Next native/relay probe: two-node delegated relay routing and child-only
+withdrawal pass. Rotated/translated rooms with an oblique camera now reproduce
+three failures at unchanged limits: four aperture-edge HDR pixels in each root
+pose and one native depth precision check. portal-tree-nested-oblique-gpu.log
+reports 675 passing assertions and three failures. Oblique composition remains
+open; see PORTAL-HANDOFF.md for the diagnostic experiment and artifact paths.
+
+Oblique coverage follow-up: full-float instance and joint rotations fix all
+reproduced frame/aperture HDR gaps. A twenty-bit compact experiment retained one
+gap and was removed. Instance rows grow from 48 to 64 bytes; joint rows from five
+to seven words. The native depth reference now independently reconstructs actual
+raster depth rather than assuming ideal-ray intersection; 0.0001 depth and
+0.002 HDR limits remain unchanged. Scaled/oblique tree and two-joint GPU oracles
+pass 632 assertions / 2 cases. Broader GPU checks pass 137,159 / 16; headless
+render passes 101,264 / 481; world 32,635 / 249; shader checks cover 37 modules.
+The optimized instance benchmark measures current CPU packing at 25 ns/row for
+10,000 unchanged rows, without a matched old/new GPU comparison. Full nested
+animation/material/lighting and product crossing gates remain open. See
+PORTAL-HANDOFF.md for reference corrections, byte costs and retained failures.
+
+Nested animation and replacement follow-up: independently CPU-deformed two-joint
+bodies now pass all three subtree roots, both palette poses and inherited cuts
+in aligned and oblique room frames. New cases reproduced image-slot exhaustion
+during ordinary nine-image tree replacement and float-cross-product overflow
+allowing a wrong entrance clip. The derived image cap is 145 with unchanged
+32 MiB CPU/GPU byte limits and sixteen tree leases. Double-precision aperture
+normals and finite derived-value checks close the reproduced validation hole.
+Valid huge-axis controls also pass. A further finite-input sampling overflow
+reproduced fifteen allocations before refusal; derived sampling validity now
+runs before any child rendering. Final focused Vulkan passes 2,360 / 5,
+including relay; headless render 101,394 / 481; broader Vulkan fixtures pass
+137,085 / 15. Nested lighting remains red at the unchanged 0.002
+HDR limit: retained room colour lacks current body-to-room SSAO. No tolerance
+or SSAO bypass was introduced. Per-room retained normal/ambient data and correct
+pre-aperture occlusion composition are the next work; see PORTAL-HANDOFF.md for
+failure evidence and the required lighting/resource contract.
+
+
+Retained ambient follow-up: PIMG16 transports paired packed normals and
+full-float ambient response with original SSAO, with four-plane ownership and
+expanded byte admission. Per-room merged depth/normals now drive body and room
+AO before child apertures. Original/contact native lighting passes 608
+assertions, including both occlusion directions and no room reuploads. Fog,
+emission and material-AO controls also pass. Bright ambient=8 remains red:
+portal-ambient-material-gpu.log reports 1,428 / 1,442 assertions, fourteen
+failures at the unchanged 0.002 HDR tolerance. Retained RGBA16F colour loses
+baseline precision before correction; errors reach one half-float ULP,
+0.00390625. Preserve sufficient unrounded lighting data before closing this gate.
+Broader GPU checks pass 22 / 23 cases, with 206 transparent coplanar-order
+failures still open. Headless render passes 103,026 / 483; graph 10,564 / 228;
+shader checking covers 40 modules. See PORTAL-HANDOFF.md for byte costs,
+precision evidence, logs and remaining scope.
+
+
+Bright HDR follow-up: PIMG17 retains an additional full-float lighting baseline
+from the same deferred invocation, before colour rounds to RGBA16F. Ambient
+opaque storage is now 48 bytes per pixel under unchanged byte budgets. The
+four-scenario lighting gate passes 1,326 assertions at the original 0.002 limit,
+including ambient=8, fog/material controls and no room uploads. Headless render
+passes 103,311 / 483, graph 10,586 / 229 and shader checking 41 modules. The
+coplanar transparent blend-order mismatch remains open; broader storage and
+optional-output checks continue. See PORTAL-HANDOFF.md.
+
+
+Final baseline verification: optional output ordering reproduced and fixed a
+lighting-size bug; dimensions now follow the named colour output. Both orders
+accept matching extents and refuse mismatches. Combined GPU validation passes
+24 / 25 cases, 931,180 / 931,386 assertions; only the 206 coplanar transparent
+ordering failures remain. Five-plane storage/import, producer/relay/tree and
+all four lighting scenarios pass. Headless render passes 103,312 / 483.
+Final logs and unchanged acceptance limits are recorded in PORTAL-HANDOFF.md.
+
+
+Retained transparent body-depth follow-up: a source capture without the body
+reproduced 309 glass pixels leaking through a newly inserted, coincident opaque
+body. Exporting selected D32 through the same depth-linearisation shader as the
+body fixes the mismatch without an epsilon. Removed the replaced geometric-depth
+outputs; one final fullscreen pass writes the existing R32 plane. Six native
+before/tie/behind cases pass 138 assertions at unchanged 0.002 HDR tolerance.
+Broader Vulkan passes 25 / 26 cases, 939,704 / 940,312 assertions. The remaining
+608 failures are coplanar and newly added intersecting-pane ordering checks:
+whole-object native order and per-pixel capture order cannot agree generally.
+The final ordering choice is pending user clarification. Headless render passes
+103,312 / 483 and all 41 shader modules pass. Release cost is unmeasured; see
+PORTAL-HANDOFF.md for logs and the additional pass accounting.
+
+
+Scaled and nested single-glass follow-up: eighteen retained depth-tie cases now
+cover non-power-of-two scales, transformed cameras and body positions before/on/
+behind glass. The three-room oracle adds one leaf physical layer before or
+behind the current body, retaining all roots, two poses, lighting replacement,
+old-tree isolation and zero room reuploads. Corrected fixture declaration order,
+final-output readback and pretransparent AO controls without changing thresholds.
+Combined focused Vulkan passes 2,616 assertions / 2 cases. General multi-pane
+ordering remains red and unresolved.
+
+Added `just portal-ambient-bench` for validated five-plane PIMG17 CPU costs.
+With patterned 256x256 payloads, minimum of three optimized measured samples,
+automatic encode/decode/verify costs 3.696 / 7.419 / 30.303 ms for 1 / 2 / 8 views.
+This is CPU codec evidence only; GPU capture, upload, residency and network costs
+are excluded. Compression ratio is fixture-specific. See PORTAL-HANDOFF.md for
+full timing scope, byte counts and remaining performance gates.
+
+Profiled CPU codec follow-up: existing FrameGraph scopes locate the dominant
+cost in float sample validation. Shared private little-endian bit checks now
+preserve exact finite, sign and alpha acceptance in codec and direct import.
+Classification parity and headless render pass 131,931 assertions / 485 cases;
+focused Vulkan import and nested lighting pass 2,856 assertions / 3 cases.
+`just portal-ambient-profile 3` reports roundtrip batch costs falling from
+3.991 / 7.984 / 32.428 ms to 1.213 / 2.431 / 10.286 ms for 1 / 2 / 8 views.
+These optimized CPU measurements use the same patterned fixture and minimum
+of three samples, with profiling disabled during timed batches. GPU performance
+and general multi-pane ordering remain open. See PORTAL-HANDOFF.md for profile
+breakdown, exact validation coverage and logs.
+
+Directional shadow proof is now explicitly red. A seventh nested-lighting
+scenario uses closed room/body casters and an angled sun. Native casting-only
+controls pass for both shadow directions, two body poses and two light revisions.
+Retained composition fails fourteen full-image comparisons at unchanged 0.002
+tolerance, maximum HDR error 0.139465; 2,712 / 2,726 assertions pass. Six previous
+scenarios remain green. Scalar lighting and ambient response do not retain room
+shadow occlusion or allow correction of room direct light. Preserve complete
+light-space shadow inputs and their ownership before closing this gate. See
+PORTAL-HANDOFF.md and portal-shadow-closed-gpu.log for repro and fixture controls.
+
+Directional response prerequisite: optional deferred RGBA32F output now stores
+unshadowed directional radiance after fog plus original shadow visibility,
+beside the same invocation's unrounded baseline. Native on/off comparisons,
+bright HDR, fog/materials and a positive fractional-PCF control pass, with
+ordinary colour parity and output contract checks. Focused Vulkan including
+scaled depth ties passes 271,282 / 4 cases; headless 131,931 / 485, graph 10,597 /
+229 and 42 shader modules pass. This plane is not yet transported or composed.
+Broader retained lighting still has fourteen shadow failures. Source-owned
+shadow snapshots, shared fit, bounded image delivery and current-body shadow
+composition remain open. See PORTAL-HANDOFF.md for costs, logs and limitations.
+
+Directional delivery follow-up: PIMG18 carries the optional sixth response plane
+through capture, wire/inbox/tree preflight and GPU ownership. Six-plane storage
+is 64Bpx under unchanged 4 MiB wire and 32 MiB CPU/GPU admission limits; staging
+supports the 16 MiB maximum image. Raw 256x256 six-plane framing is over budget
+and refused. Tests cover malformed compressed/raw samples, exact byte charges,
+replacement/removal and resident lifetime. An exact-byte eye export/adoption
+test reproduced and fixed a stale five-output guard. Headless passes 134,163 /
+487, graph 10,598 / 229 and storage GPU 875,676 / 13. Producer/source/nested
+lighting retains only the fourteen known shadow failures. Source shadow-image
+snapshots, shared fitting and final shadow correction remain unimplemented;
+transporting the response alone does not close that gate. See PORTAL-HANDOFF.md.
+
+Directional correction follow-up: ambient-correct has an optional complete
+response/depth/normal/shadow group and a lazy shader sharing native PCF.
+Imported room radiance receives ambient and directional deltas before one
+RGBA16F store. All partial input groups are refused. Headless passes 134,227 /
+488, graph 10,598 / 229 and shader checking passes 43 modules. The actual GPU
+correction oracle passes 355,681 / 4, including both shadow-change signs and
+fractional PCF. Fixture lifetime and capture scheduling failures were fixed
+without changing tolerances. The production tree still lacks source shadow
+images and retains fourteen shadow comparison failures.
+
+The new portal-directional-bench job measures six-plane 255-square CPU
+roundtrips at 1.663 / 3.315 / 13.945 ms for 1 / 2 / 8 views, optimized build,
+three-sample minima. It verifies raw 256-square refusal and compressed equality
+under unchanged limits. Source snapshot identity, exact common fitting,
+separate depth capture and tiled delivery remain next. The handoff records
+why multiple native 16 MiB shadow maps cannot simply accumulate under the
+existing 32 MiB import cap. No GPU timing or full retained-shadow completion
+is claimed.
+
+Native shadow capture follow-up: explicit enclosing View shadow bounds select
+the shared native fit, with malformed domains refused. Per-view shadow-capture
+returns exact D32 depth, source/domain bounds and matrix from one producing
+frame. Pending requests force fresh maps, including empty all-one maps. Batch
+world invalidation preserves frame effects and restores following ordinary
+views. Capture transfer allocations now have an explicit shared 32 MiB bound;
+third-map refusal, idle cache reclaim and cancellation preserve in-flight data.
+Resident shadow delivery remains refused until its import owner exists.
+
+Headless render passes 134,244 / 489 and graph 10,600 / 229. Vulkan passes
+1,231,849 / 22, including exact full-native versus split caster maps, two-world
+captures, ordinary-view recovery, capture lifetime and existing directional
+correction. The empty-source crash was reproduced in GDB and fixed by clearing
+without binding absent instance buffers. Production retained lighting still
+has fourteen failures. Source exclusion/snapshot binding, tiled transport,
+shadow import and source-plus-body scratch composition remain next. See the
+handoff for precise evidence and memory limits.
+
+Tiled shadow/import follow-up: sixteen bounded raw tiles now assemble an exact
+native D32 snapshot with expected identity, per-tile hashes, full-map hash and
+finite sample validation. Immutable GPU shadow handles share existing CPU,
+texture and staging limits, upload once, seed the native depth target, and
+load current body casters. Body composition binds the complete directional
+correction inputs and refuses mismatched or absent imported capture ticks.
+Resident colour adoption cannot invent a producer tick.
+
+The source/body integration oracle matches full native depth byte-for-byte and
+colour within unchanged tolerance, with both casters proven to change visible
+lighting. Shared-limit refusal, drop and stale-tick rejection are covered.
+Focused Vulkan passes 1,282,685 / 23; headless render 134,844 / 493; graph
+10,788 / 230. This is the bounded delivery/import primitive, not completed
+source jobs or recursive retained-tree shadow routing. Authenticated exclusion,
+per-node association, revision scheduling and changed-fit refresh remain open.
+See PORTAL-HANDOFF.md for evidence and unmeasured codec cost.
+
+Production retained-tree rerun: fourteen shadow failures remain, 2,754 / 2,768
+assertions. The new import route is not yet connected to per-node tree source
+snapshots. No retained-shadow completion claim is made.
+
+Serial tree shadow follow-up: the renderer owns one resumable composition job,
+requests node maps from children toward the root, validates eye/snapshot/domain
+identity, and polls a real GPU fence before retiring a map and advancing. It
+owns caller geometry and preserves requests on budget refusal. Cancellation,
+late responses, asset changes and tree retirement have explicit ownership.
+The nested oracle now passes all fourteen former shadow comparisons through
+this path, including retained old lighting after a sun-direction change.
+Automatic host source production and tile routing remain unconnected.
+
+PIMG/capture-tree version 19 adds distinct RetainedBodyPlayer exclusion, with explicit
+producer authorization for requester incarnation plus canonical account,
+default refusal and rechecks before publishing. Actual GPU source captures
+verify colour/caster removal, original native fit, ordinary eye selection and
+revocation. SourceEmpty removes the phantom origin box for empty sources;
+initial tick 0 is accepted while missing identity is still refused.
+
+Headless render passes 135,394 / 500; focused Vulkan 194,347 / 16; existing
+image/shadow lifecycle 1,231,849 / 22. Broader testing reproduced and fixed four nested recovery
+failures caused by treating a full presentation transport queue as an invalid
+request. No image tolerance changed. The handoff records logs, fixture fixes,
+limits and unperformed checks. Next: same-frame source shadow/eye capture,
+authenticated manifests and tiles, exact old-source ownership/refit refusal,
+and host policy/job routing. A bounded sixth capture slot fits the existing
+32 MiB transfer cap but is not implemented yet. Full render-plan completion
+remains unproven.
+
+
+Same-frame source follow-up: six renderer capture slots now admit the ordered
+opaque/layers/overlay plus native shadow bundle under the unchanged 32 MiB
+transfer cap. Source collection validates the actual producing frame and retains
+at most two original maps under a separate 32 MiB per-producer reservation cap.
+Exact requester/eye retrieval is take-once after eye delivery, with expiry,
+revocation and cancellation. Canonical manifests share the tile prefix; one
+matcher checks pending identity, exact domain and captured native light matrix.
+
+Builds pass; headless render passes 136,066 / 503 and final offscreen Vulkan
+source/tree/import/runtime checks pass 194,488 / 17, including six distinct
+source outputs with a visible overlay and bounded retention lifecycle. No image
+tolerance changed. The handoff records logs and limits. Next: bounded accepted
+parent/child route records, authenticated manifest/tile routing, renderer-charged
+assembly, explicit host policy and composition scheduling. Nested maps belong to
+the original immediate requester, so root retrieval must preserve that chain.
+Changed-fit old-source regeneration is still unavailable without retained asset
+revisions. Full render-plan completion remains unproven.
+
+Final existing capture/shadow lifecycle Vulkan checks pass 1,231,853 / 22.
+The first run exposed stale five-slot assumptions in the queue-capacity fixture;
+those assertions now exercise six-slot saturation and seven-request refusal.
+No additional production fix or tolerance change was needed. Logs and the
+unchanged excluded transparent-layer failures are recorded in the handoff.
+
+
+Requester-route and assembly follow-up: each producer now retains up to four
+bounded delivered-tree route records, preserving the original immediate child
+requester and accepted eye after map retrieval. Exact parent/target ownership,
+policy, endpoint identity, expiry and Clear are checked. Host policy now applies
+to current and future local producers, with Store::Identity pins, default denial,
+retirement cleanup and bounded configuration. Renderer-owned tile assembly shares
+existing import CPU admission, validates manifests before allocation, retains
+completed maps on budget refusal and exposes explicit commit retry.
+
+Builds pass; headless render passes 136,501 / 506 and focused Vulkan source,
+host, tree and assembly checks pass 179,651 / 21. Native parity is unchanged.
+A malformed Eye clip plane in the new headless fixture was corrected after the
+first failed run. Detailed evidence is in PORTAL-HANDOFF.md. Next: authenticated
+shadow control/manifest/tile relaying and host composition scheduling, including
+multi-hop transport, Full/retry and cancellation. Two-node requester routing and
+charged assembly are verified, but automatic end-to-end host delivery is not yet
+implemented. Changed-fit old-source ownership and full R01-R17/P0-P12 remain open.
+
+Authenticated transport follow-up: SHCT manifest/tile/cancellation messages now
+run through the original immediate requester routes, with exact envelope and
+captured identity checks, bounded relay contexts and retry without renewing the
+ten-second deadline. PortalImageHost begin/poll/cancel drives renderer-owned tile
+assembly and serial composition. Completed results retain a fixed source capture
+and route lease for another body pose. Fresh eye requests remain allowed;
+replacement, cancellation and retirement release the old lease. Cancellation
+preserves the published producer identity across mapped transport endpoints.
+
+Dev build passes. Headless render passes 137,818 / 509. Nine generated offscreen
+Vulkan transport scenarios pass 1,161 assertions, including A-to-B-to-A routing,
+lost pull, Full, slow transfer, repeated pose, fixed expiry, cancellation and
+fresh requests alongside retained pixels. The tests reproduced and drove fixes
+for one-second source expiry and premature route cancellation. Full evidence,
+initial fixture/compiler failures and cancellation limits are in PORTAL-HANDOFF.md.
+
+Existing runtime, host and native tree lighting GPU checks pass 177,568 / 18;
+tree import and composition pass another 2,082 / 3. Next: product authorization
+and current-pose integration, depth-zero layer admission and explicit
+changed-domain eye refresh.
+Descendant cancellation acknowledgement and complete restart/disconnect coverage
+remain open. Source asset revisions and the full render plan remain unfinished.
+
+Product integration audit: the existing Scene.cpp body loop still selects
+EyePlayer and calls synchronous ComposeBodyImage. CollectPortalImageDemands
+forces depth zero and never sets RetainedBodyPlayer. Whole-eye submission has a
+separate path in ClientPortal.cpp. Switching one call does not integrate the new
+contract. Complete the following dependencies before enabling that path:
+
+- Export authoritative player ownership through trusted host control. The
+  server knows the admitted connection generation, player and receipt aliases;
+  PresentationBindings currently carries endpoint translations only. Grants
+  must bind requester incarnation, destination authority and admitted identity,
+  support explicit immediate-producer delegation, and retire with ownership.
+  World-local numeric UserId equality is not proof of cross-world ownership.
+- Separate retained shadow preparation from current-pose presentation. Begin
+  currently copies a pose before many manifest/tile round trips. Completing that
+  job does not prove latest-frame motion. Preserve exact admitted domains and
+  native lighting when refreshing the pose, and test moving camera replacement
+  during transfer so a stream of newer eyes cannot starve all compositions.
+  Current serial jobs release imported shadow textures after each node fence;
+  starting another pose fetches those maps again. A retained-pose design must
+  account for this traffic and residency within explicit shared budgets, rather
+  than treating retained producer routes as retained receiver textures.
+- Schedule visible portal jobs fairly in the shared host, without queued View
+  borrows or per-frame cancellation. Keep image lookup host-owned and include
+  completed composition changes in product presentation invalidation.
+- Keep first-person rig geometry available to shadows and child views while
+  excluding its primary visible copy. The current Scene.cpp empty body-row path
+  cannot be reused after the producer removes the retained rig from its map.
+
+Acceptance must cover moving poses during delayed transfer, continuously changing
+eyes, multiple visible portals, first-person shadows, nested requesters, ownership
+withdrawal and same-number players in unrelated authorities. Stationary transport
+completion is not evidence for these product guarantees.
+
+Depth-zero admission is now implemented: authenticated retained-body layer
+replies enter the existing one-node tree importer. Ordinary layer imports and
+wire format stay unchanged. Dev build passes, headless render passes 137,818 / 509,
+and focused offscreen Vulkan passes 1,618 / 4, including all transport leaf
+scenarios at depth zero and new atomic publication/identity/pin/cleanup coverage.
+The ownership and current-pose product dependencies above remain next.
+
+First-person renderer support is now implemented: root primary selection is
+owned by the asynchronous job, while complete body rows remain shadow casters and
+visible child geometry. Native rig/index hiding scenarios, caller-storage expiry
+and malformed-index admission checks pass. Focused Vulkan passes 8,008 / 3;
+headless render passes 137,818 / 509. Scene.cpp still needs to supply full rows and
+selection when the product path is ready.
+
+PresentationPeer now exposes exact live receipt ownership, with world tests
+passing 32,650 / 249. This is the connection lookup primitive, not completed grant
+propagation. Existing PortalTransferId and committed destination-player lookup
+provide cross-world provenance; copied geometry must preserve that scoped identity
+instead of comparing or forwarding a bare world-local player number.
+
+Prepared-shadow design for the next implementation: keep an immutable admitted
+tree with losslessly packed source depth blocks resident on the GPU. Decode into
+the existing native D32 scratch before loading current body casters, then record
+all nodes in queue order from one immutable current pose. CPU compression alone
+would still leave repeated GPU uploads and fence-per-node latency. Charge packed
+buffers, descriptors, displayed tree and replacement candidate under explicit
+shared limits; incompressible working sets must refuse admission rather than
+silently exceed them. Preserve the displayed prepared tree independently of a
+new source preview, with atomic replacement and the original fixed expiry.
+
+Required gates: bit-exact CPU/GPU depth reconstruction; multiple native-parity
+poses without additional shadow transfer; root-only first-person hiding; all-node
+domain validation before submission; no mixed pose/tree generations during
+replacement; bounded cancellation and incompressible input; measured full-tree
+pose cost. This design is not implemented or verified yet.
+
+Packed import foundation is now implemented: exact bounded CPU block packing,
+GPU reconstruction in the existing shadow node, and reusable packed import
+buffers sharing existing CPU/GPU/staging limits. Positive subnormal depth values
+exposed fragment-output flushing on Vulkan; those maps now use raw D32 transfer
+and preserve their bits. No wire format or precision tolerance changed.
+
+Builds pass. Headless render passes 138,027 / 516. Focused Vulkan passes
+108,424 / 5, including native lighting, moving poses without repeat upload and
+subnormal fallback; the final decoder-counter rerun passes 101,801 / 2.
+Whole-tree preparation, prepared-tree leases, all-node pose submission and atomic
+replacement remain unimplemented. Full-tree performance and grant propagation
+remain required before product integration.
+
+Prepared capture-tree work is now implemented and verified. Source maps prepare
+child-first before the current pose, retain an independent tree lease, validate the
+exact current body domain at every node and compose the full body pose in queue
+order. Prepared multi-pose lighting tests show no repeated shadow upload. Root
+first-person selection hides only the root's visible rows while all geometry remains
+available for shadows and child composition. Old leased trees remain usable across
+a replacement revision until explicit retirement.
+
+Final dev verification: focused offscreen Vulkan shadow import, prepared-tree
+lighting and tree import passed 109,782 assertions in 6 cases; the full headless
+render suite passed 115,936 assertions in 414 cases; Vulkan shadow transport
+passed 2,440 assertions in 4 cases. The build log is
+`.cache/build/dev/tests/portal-prepared-build.log`.
+
+Remaining gates before product integration are trusted grant propagation, scoped
+copied-row ownership, host fairness for visible jobs and latest-eye replacement.
+Release full-tree pose timing, sanitizers, Metal and an interactive Studio run are
+not yet complete.
+
+Exact-domain source prefit is now implemented for host preparation. The producer
+keeps an immutable deep-owned source View, renders a new shadow map for the exact
+per-node source-plus-body domain, and serves it only after the readback completes.
+It preserves the resource epoch across schedule and readback, cancels stale work,
+and never relabels prior depth under a new matrix. Pending exact fits return
+retryable pressure and are exposed through host upload readiness. Prepared and
+preview ownership is bounded to four concurrent leases: two displayed or candidate
+previews and two preparations. The fifth owner is refused.
+
+Final dev verification: the combined offscreen Vulkan
+`[portal-tree-lighting],[portal-tree-import],[shadow-import],[portal-shadow-transport]`
+suite passed 113,263 assertions in 10 cases. It includes native first-person parity,
+prepared maps before latest pose, repeated pose zero shadow upload and network,
+physical exact-fit nested SHCT relaying, malformed bounds refusal, fixed expiry,
+endpoint retirement, and two prepared trees with two preview leases. Headless
+`~[gpu]` passed 138,031 assertions in 516 cases. The log is
+`.cache/build/dev/tests/portal-prepared-build.log`.
+
+Trusted product grant propagation, scoped copied-row ownership, host fairness and
+client scheduling remain required before product integration. Release full-tree
+pose timing, sanitizers, Metal and interactive Studio validation are outstanding.
+
+Caller-driven host preparation fairness is now covered. FIFO tickets store no
+borrowed body View, refuse stale accepted generations instead of stealing a newer
+preview, and use cancellation for invisible demand withdrawal. Explicit prepared
+map release preserves the current display while opening a bounded residency slot.
+Vulkan `[portal-shadow-transport]` passed 3,499 assertions in 4 cases, including
+three-ticket FIFO release progress and unchanged-pose zero transfer reuse. Headless
+`~[gpu]` passed 138,030 assertions in 516 cases. Product grant propagation, client
+scheduler integration and release performance measurements remain open.

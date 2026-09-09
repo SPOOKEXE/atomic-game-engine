@@ -180,7 +180,10 @@ namespace engine::graph {
 		}
 
 		ExecutionQueue QueueFor(const NodeKindSpec &spec) {
-			if (Named(spec.Kind, {"viewer", "capture", "upload-instances", "output-image", "blit"})) {
+			if (Named(
+					spec.Kind,
+					{"viewer", "capture", "shadow-capture", "upload-instances", "output-image", "blit"}
+				)) {
 				return ExecutionQueue::Transfer;
 			}
 			if (Named(
@@ -251,9 +254,12 @@ namespace engine::graph {
 				));
 			}
 			if (spec.Kind == core::Name("eye-image")) {
-				spec.Params.push_back(
-					SelectParam("layer", "Image layer", "base", {"base", "transparent-0", "transparent-1"})
-				);
+				spec.Params.push_back(SelectParam(
+					"layer",
+					"Image layer",
+					"base",
+					{"base", "transparent-0", "transparent-1", "spatial-overlay"}
+				));
 				spec.Params.push_back(SelectParam(
 					"scope", "Capture scope", "complete-world", {"complete-world", "opaque-lighting"}
 				));
@@ -283,6 +289,7 @@ namespace engine::graph {
 					 "R16F",
 					 "RG16F",
 					 "RGBA16F",
+					 "RGBA32F",
 					 "R32F",
 					 "RG32F"}
 				));
@@ -311,6 +318,11 @@ namespace engine::graph {
 				 "gbuffer",
 				 "depth-linearise",
 				 "depth-compose",
+				 "ambient-response",
+				 "ambient-merge",
+				 "ambient-correct",
+				 "colour-compose",
+				 "spatial-overlay",
 				 "transparent-layer",
 				 "hzb",
 				 "ssao",
@@ -329,6 +341,7 @@ namespace engine::graph {
 				 "present",
 				 "viewer",
 				 "capture",
+				 "shadow-capture",
 				 "overlay",
 				 "interface",
 				 "output-image"}
@@ -336,6 +349,12 @@ namespace engine::graph {
 			spec.Repeatable = Named(
 				spec.Kind,
 				{"depth-compose",
+				 "ambient-response",
+				 "ambient-merge",
+				 "ambient-correct",
+				 "colour-compose",
+				 "spatial-overlay",
+				 "shader-lenses",
 				 "eye-image",
 				 "transparent-layer",
 				 "cull-frustum",
@@ -346,7 +365,8 @@ namespace engine::graph {
 				 "raster",
 				 "dispatch",
 				 "viewer",
-				 "capture"}
+				 "capture",
+				 "shadow-capture"}
 			);
 			spec.FlexibleScope = spec.Kind == core::Name("dispatch");
 			spec.Needs.Compute = spec.Queue == ExecutionQueue::Compute;
@@ -359,6 +379,11 @@ namespace engine::graph {
 				{"shadow", "mirror-capture", "surface-capture", "portal-capture", "gbuffer", "transparent"}
 			);
 			for (const PortSpec &output : spec.Outputs) {
+				// Ordinary deferred views do not allocate or require the optional capture target.
+				if (spec.Kind == core::Name("deferred-lighting") &&
+					(output.Name == core::Name("lighting-baseline") ||
+					 output.Name == core::Name("directional-response")))
+					continue;
 				if (output.Kind != ResourceKind::Colour && output.Kind != ResourceKind::Depth &&
 					output.Kind != ResourceKind::Texture && output.Kind != ResourceKind::Storage) {
 					continue;
@@ -435,6 +460,7 @@ namespace engine::graph {
 			F Format;
 			bool Required;
 			const char *Summary;
+			bool InternalUse = false;
 		};
 
 		struct Kind {
@@ -597,12 +623,12 @@ namespace engine::graph {
 			 "Transparent",
 			 C::Draw,
 			 S::View,
-			 {{"colour", K::Colour, LDR, true, "What to blend over."},
+			 {{"colour", K::Colour, RGBA16, true, "What to blend over."},
 			  {"depth", K::Depth, D24, true, "The opaque depth."},
-			  {"surface", K::Texture, RGBA8, false, "Mirror and portal images to project."},
+			  {"surface", K::Texture, RGBA16, false, "Mirror and portal images to project."},
 			  {"entities", K::Entities, F::R8, false, "The blended tail, already ordered back to front."},
 			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
-			 {{"colour", K::Colour, LDR, true, "The blended frame."}},
+			 {{"colour", K::Colour, RGBA16, true, "The blended frame."}},
 			 "The blended tail, back to front, tested against the opaque depth."},
 
 			{"sky",
@@ -638,7 +664,12 @@ namespace engine::graph {
 			 "Linearise depth",
 			 C::Composite,
 			 S::View,
-			 {{"depth", K::Texture, D24, true, "Hardware depth."}},
+			 {{"depth", K::Texture, D24, true, "Hardware depth."},
+			  {"after-colour",
+			   K::Texture,
+			   RGBA16,
+			   false,
+			   "Wait for a colour pass that also writes the shared hardware depth."}},
 			 {{"linear", K::Colour, R32, true, "Linear view-space depth."}},
 			 "Hardware depth to linear float. Cheap as a blit; expensive as a "
 			 "full-screen triangle, which is how most engines do it.",
@@ -692,7 +723,17 @@ namespace engine::graph {
 			   LDR,
 			   false,
 			   "Seam light-field captures, projected out of each portal entrance."}},
-			 {{"colour", K::Colour, RGBA16, true, "The lit frame."}},
+			 {{"colour", K::Colour, RGBA16, true, "The lit frame."},
+			  {"lighting-baseline",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "The same lighting before half-float storage."},
+			  {"directional-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Directional radiance per visibility and original visibility. Requires lighting-baseline."}},
 			 "Shades the G-buffer. One pass over the screen, however much geometry "
 			 "went into it.",
 			 false,
@@ -762,7 +803,13 @@ namespace engine::graph {
 			 S::View,
 			 {{"colour", K::Texture, RGBA16, true, "The HDR scene behind every lens."},
 			  {"depth", K::Texture, R32, true, "Linear depth for spatial occlusion."}},
-			 {{"colour", K::Colour, RGBA16, true, "The lensed HDR scene."}},
+			 {{"colour", K::Colour, RGBA16, true, "The lensed HDR scene."},
+			  {"scratch",
+			   K::Colour,
+			   RGBA16,
+			   true,
+			   "Intermediate HDR image for the ordered lens chain.",
+			   true}},
 			 "Composes bounded world-space lens shader runs in priority order before tone mapping."},
 
 			// --- composite -------------------------------------------------------
@@ -858,12 +905,92 @@ namespace engine::graph {
 			   true,
 			   "Premultiplied radiance of all fragments at the selected depth."},
 			  {"depth", K::Colour, R32, true, "Layer camera-forward distance; zero is empty."},
-			  {"z", K::Depth, D32, true, "Private nearest-fragment depth attachment."}},
-			 "Peels ordinary transparent geometry before blending. Unsupported surface or custom-shader rows "
+			  {"z", K::Depth, D32, true, "Private nearest-fragment depth attachment."},
+			  {"interface-colour", K::Colour, RGBA16, false, "Per-batch spatial interface scratch colour."},
+			  {"interface-z", K::Depth, D32, false, "Per-batch spatial interface scratch depth."}},
+			 "Peels ordinary transparent geometry and depth-tested spatial interface batches before "
+			 "blending. "
+			 "Unsupported surface or custom-shader geometry rows "
 			 "refuse capture. "
 			 "Capture an extra layer to detect overflow before publishing a bounded set.",
 			 false,
 			 "transparent-layer.frag"},
+
+			{"spatial-overlay",
+			 "Spatial UI overlay",
+			 C::Composite,
+			 S::View,
+			 {},
+			 {{"colour", K::Colour, RGBA16, true, "Premultiplied always-on-top spatial UI."},
+			  {"z", K::Depth, F::D32F, true, "Scratch attachment required by spatial UI pipelines."}},
+			 "Captures top-only world-space UI without physical depth ordering. Screen UI is excluded.",
+			 true},
+
+			{"colour-compose",
+			 "Compose colour layers",
+			 C::Composite,
+			 S::View,
+			 {{"foreground", K::Colour, RGBA16, true, "Premultiplied overlay."},
+			  {"background", K::Colour, RGBA16, true, "Background radiance."}},
+			 {{"colour", K::Colour, RGBA16, true, "Premultiplied source-over result."}},
+			 "Blends a depth-free overlay over background radiance. Depth remains a separate graph resource.",
+			 false,
+			 "colour-compose.frag"},
+
+			{"ambient-response",
+			 "Retain ambient response",
+			 C::Composite,
+			 S::View,
+			 {{"albedo", K::Texture, RGBA8, true, "Native base colour."},
+			  {"normal", K::Texture, LDR, true, "Native normal and validity."},
+			  {"material", K::Texture, RGBA8, true, "Native material including AO."},
+			  {"depth", K::Texture, R32, true, "Linear camera depth."},
+			  {"occlusion", K::Texture, F::R8, true, "Original screen-space ambient visibility."}},
+			 {{"response",
+			   K::Colour,
+			   F::RGBA32F,
+			   true,
+			   "Fog-attenuated ambient response and original sampled AO."}},
+			 "Retains the ambient-only response used to recompute AO without changing other radiance.",
+			 false,
+			 "ambient-response.frag"},
+			{"ambient-merge",
+			 "Merge ambient geometry",
+			 C::Composite,
+			 S::View,
+			 {{"body-depth", K::Texture, R32, true, "Current body depth, far for background."},
+			  {"body-normal", K::Texture, LDR, true, "Current body normal and validity."},
+			  {"room-depth", K::Texture, R32, true, "Retained room depth, zero for background."},
+			  {"room-normal", K::Texture, LDR, true, "Retained room normal and validity."}},
+			 {{"depth", K::Colour, R32, true, "Merged native AO depth, far for background."},
+			  {"normal", K::Colour, LDR, true, "Visible surface normal and validity."}},
+			 "Selects room or body geometry in one room's depth domain before SSAO and aperture composition.",
+			 false,
+			 "ambient-merge.frag"},
+			{"ambient-correct",
+			 "Correct retained ambient",
+			 C::Composite,
+			 S::View,
+			 {{"lighting-baseline", K::Texture, F::RGBA32F, true, "Unrounded retained room radiance."},
+			  {"response", K::Texture, F::RGBA32F, true, "Ambient response and original sampled AO."},
+			  {"occlusion", K::Texture, F::R8, true, "Merged ambient visibility."},
+			  {"directional-response",
+			   K::Texture,
+			   F::RGBA32F,
+			   false,
+			   "Directional response and original visibility; requires depth, normal and shadow."},
+			  {"room-depth", K::Texture, R32, false, "Retained linear depth in the current camera domain."},
+			  {"room-normal", K::Texture, LDR, false, "Retained normal in the current world domain."},
+			  {"shadow",
+			   K::Texture,
+			   D32,
+			   false,
+			   "Combined directional map in the current light projection."}},
+			 {{"colour", K::Colour, RGBA16, true, "Room radiance with current ambient occlusion."}},
+			 "Corrects retained ambient visibility and optionally directional visibility with a complete "
+			 "shadow input group.",
+			 false,
+			 "ambient-correct.frag"},
 
 			{"depth-compose",
 			 "Compose depth layers",
@@ -897,7 +1024,19 @@ namespace engine::graph {
 			 S::View,
 			 {},
 			 {{"colour", K::Colour, RGBA16, true, "Owned destination HDR radiance."},
-			  {"depth", K::Colour, R32, false, "Paired camera-forward depth; zero means no surface."}},
+			  {"depth", K::Colour, R32, false, "Paired camera-forward depth; zero means no surface."},
+			  {"normal", K::Colour, LDR, false, "Retained native normal and validity."},
+			  {"ambient-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Retained ambient response and original AO."},
+			  {"lighting-baseline", K::Colour, F::RGBA32F, false, "Retained unrounded room lighting."},
+			  {"directional-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Retained directional response and shadow visibility."}},
 			 "Copies the viewport's owned image before local tone mapping and interface composition. "
 			 "The selected scope and projection must match the capture. Seam projection supplies an "
 			 "intermediate for mapped body composition; opaque lighting precedes later scene effects.",
@@ -921,25 +1060,25 @@ namespace engine::graph {
 			 "Portal Overlay",
 			 C::Composite,
 			 S::View,
-			 {{"colour", K::Texture, LDR, true, "The tone-mapped scene below the portals."},
+			 {{"colour", K::Texture, RGBA16, true, "The HDR scene below the portals."},
 			  {"depth", K::Depth, D24, true, "The opaque scene depth."},
-			  {"portal", K::Texture, LDR, true, "The display-mapped portal captures."},
+			  {"portal", K::Texture, RGBA16, true, "The HDR portal captures."},
 			  {"entities", K::Entities, F::R8, false, "The ordered portal panes."},
 			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
-			 {{"colour", K::Colour, LDR, true, "The scene with portal openings composed."}},
-			 "Projects portal captures onto their entrance geometry after scene tone mapping and before "
+			 {{"colour", K::Colour, RGBA16, true, "The scene with portal openings composed."}},
+			 "Projects portal captures onto their entrance geometry before lenses, tone mapping and "
 			 "transparent geometry."},
 
 			{"mirror-overlay",
 			 "Mirror Overlay",
 			 C::Composite,
 			 S::View,
-			 {{"colour", K::Texture, LDR, true, "The scene below the mirror panes."},
+			 {{"colour", K::Texture, RGBA16, true, "The scene below the mirror panes."},
 			  {"depth", K::Depth, D24, true, "The opaque scene depth."},
-			  {"surface", K::Texture, RGBA8, false, "The captured mirror views."},
+			  {"surface", K::Texture, RGBA16, false, "The captured mirror views."},
 			  {"entities", K::Entities, F::R8, false, "The ordered mirror panes."},
 			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
-			 {{"colour", K::Colour, LDR, true, "The scene with mirror panes composed."}},
+			 {{"colour", K::Colour, RGBA16, true, "The scene with mirror panes composed."}},
 			 "Projects each captured mirror view onto its pane before ordinary transparent geometry."},
 
 			{"taa",
@@ -1277,12 +1416,36 @@ namespace engine::graph {
 			 "is on it - inspection as a node, which is Blender's idea and a good "
 			 "one."},
 
+			{"shadow-capture",
+			 "Capture directional shadow",
+			 C::Output,
+			 S::View,
+			 {{"shadow", K::Texture, D32, true, "Exact native directional shadow depth."}},
+			 {},
+			 "Copies native D32 depth and its producing light domain before another view overwrites it."},
+
 			{"capture",
 			 "Capture",
 			 C::Output,
 			 S::Frame,
 			 {{"source", K::Texture, LDR, true, "The frame to write out."},
-			  {"depth", K::Colour, F::R32F, false, "Optional camera-forward depth paired with the frame."}},
+			  {"depth", K::Colour, F::R32F, false, "Optional camera-forward depth paired with the frame."},
+			  {"normal", K::Colour, F::RGB10A2, false, "Native room normal and validity paired with depth."},
+			  {"ambient-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Ambient response and original sampled SSAO."},
+			  {"lighting-baseline",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Unrounded lighting paired with the ambient planes."},
+			  {"directional-response",
+			   K::Colour,
+			   F::RGBA32F,
+			   false,
+			   "Optional directional response and shadow visibility paired with the ambient planes."}},
 			 {},
 			 "Writes a frame to a file. What --capture does today, as a node."},
 		};
@@ -1305,6 +1468,7 @@ namespace engine::graph {
 					made.Format = port.Format;
 					made.Required = port.Required;
 					made.Summary = port.Summary;
+					made.InternalUse = port.InternalUse;
 					into.push_back(std::move(made));
 				}
 			};

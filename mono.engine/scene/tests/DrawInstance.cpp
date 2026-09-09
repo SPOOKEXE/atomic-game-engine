@@ -732,7 +732,7 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	std::vector<uint32_t> retained{42};
 	engine::scene::KeepLoaded(
 		instances,
-		[&loaded](const engine::core::Name &mesh) { return mesh == loaded; },
+		[&loaded](const DrawInstance &row) { return row.Mesh == loaded; },
 		drawable,
 		marked,
 		&retained
@@ -749,11 +749,28 @@ TEST_CASE("an instance naming an absent mesh is not drawn", "[scene][drawinstanc
 	for (const DrawInstance &instance : drawable) {
 		CHECK(instance.Mesh != missing);
 	}
-	engine::scene::KeepLoaded(
-		{}, [](const engine::core::Name &) { return false; }, drawable, marked, &retained
-	);
+	engine::scene::KeepLoaded({}, [](const DrawInstance &) { return false; }, drawable, marked, &retained);
 	CHECK(drawable.empty());
 	CHECK(retained.empty());
+}
+
+TEST_CASE("mesh residency filtering preserves the source world", "[scene][drawinstance]") {
+	const engine::core::Name mesh("same.mesh"), loadedWorld("loaded.world");
+	std::array<DrawInstance, 2> instances;
+	instances[0].Mesh = instances[1].Mesh = mesh;
+	instances[0].SourceWorld = loadedWorld;
+	instances[1].SourceWorld = engine::core::Name("pending.world");
+	std::vector<DrawInstance> drawable;
+	engine::scene::KeepLoaded(
+		instances,
+		[&](const DrawInstance &row) {
+			CHECK(row.Mesh == mesh);
+			return row.SourceWorld == loadedWorld;
+		},
+		drawable
+	);
+	REQUIRE(drawable.size() == 1);
+	CHECK(drawable[0].SourceWorld == loadedWorld);
 }
 
 TEST_CASE("a mesh arriving makes its parts appear without anything else changing", "[scene][drawinstance]") {
@@ -768,11 +785,11 @@ TEST_CASE("a mesh arriving makes its parts appear without anything else changing
 
 	// Before the content lands, nothing naming it draws - which is what makes a
 	// half-loaded scene read as "still loading" rather than as a field of cubes.
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return false; }, drawable);
 	CHECK(drawable.empty());
 
 	// And after, every one of them does, in the order the world produced them.
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return true; }, drawable);
 	CHECK(drawable.size() == instances.size());
 }
 
@@ -789,15 +806,15 @@ TEST_CASE("filtering keeps its buffer across calls", "[scene][drawinstance]") {
 	}
 	std::vector<DrawInstance> drawable;
 
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return true; }, drawable);
 	const size_t capacity = drawable.capacity();
 	REQUIRE(capacity >= 64);
 
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return false; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return false; }, drawable);
 	CHECK(drawable.empty());
 	CHECK(drawable.capacity() == capacity);
 
-	engine::scene::KeepLoaded(instances, [](const engine::core::Name &) { return true; }, drawable);
+	engine::scene::KeepLoaded(instances, [](const DrawInstance &) { return true; }, drawable);
 	CHECK(drawable.size() == 64);
 	CHECK(drawable.capacity() == capacity);
 }

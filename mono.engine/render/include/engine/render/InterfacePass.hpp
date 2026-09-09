@@ -23,6 +23,7 @@
 //
 // @tier L12 · client
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
@@ -30,6 +31,7 @@
 #include <engine/render/GlyphAtlas.hpp>
 #include <engine/render/InterfaceMesh.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/SpatialCanvas.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +45,8 @@ namespace engine::ecs {
 }
 
 namespace engine::render {
+	struct WorldCameraFrame;
+	class ShaderLibrary;
 
 	// One interface image resolved for the current frame.
 	//
@@ -106,7 +110,7 @@ namespace engine::render {
 		// select, and builds the pipeline that draws with it.
 		//
 		// **Written against `interface.frag`'s own slots and not
-		// `opaque.frag`'s** - one sampler and no bound uniform buffer -
+		// `opaque.frag`'s** - one sampler and one clip uniform buffer -
 		// because the two passes are different pipelines with different
 		// bindings. A `ShaderScript` meant for a `Material` is not
 		// interchangeable with one meant for an `ImageLabel`; each is
@@ -121,17 +125,41 @@ namespace engine::render {
 		//        all name the same thing.
 		// @param spirv The compiled words, from `render::ShaderLibrary::
 		//        Find(name)->SpirV`.
-		// @return `false` on a device, translation or pipeline failure. The
-		//         caller keeps drawing with the pass's own shader either way.
+		// Screen and spatial pipelines are admitted together, including supported HDR
+		// depth-tested and always-on-top variants. A partial build is refused.
+		// @param owner The exact content namespace.
+		// @return `false` on a device, translation or pipeline failure.
+		//         A failed replacement preserves the accepted variant.
 		// @since v0.18
-		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv);
+		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
 
 		// Releases a variant this pass no longer needs.
 		//
 		// @param name The shader's name.
 		// @return `false` when nothing was held under it.
 		// @since v0.18
-		bool DropShaderVariant(const core::Name &name);
+		bool DropShaderVariant(const core::Name &name, core::Name owner = {});
+
+		// Exact owner lookup; a scoped miss never borrows a shared variant.
+		bool HasShaderVariant(core::Name name, core::Name owner = {}) const;
+
+		// Reconciles this pass against accepted modules, even after another consumer
+		// refreshed the library. Demand is GUI-only; library refresh happens first.
+		// Returns the number of installed, replaced or removed device variants.
+		size_t RefreshShaders(
+			std::span<const core::Name> demanded, const ShaderLibrary &library, core::Name owner = {}
+		);
+
+		// Retires only this nonempty owner's screen and spatial shader variants.
+		size_t DropContentOwner(core::Name owner);
+
+		// Selects the submitted world's shaders without rebuilding geometry.
+		// Returns whether the caller must invalidate its interface image.
+		bool SetContentOwner(core::Name owner) {
+			if (ContentOwner == owner) return false;
+			ContentOwner = owner;
+			return true;
+		}
 
 		// The list to draw next frame, and the canvas it was compiled against.
 		//
@@ -174,6 +202,12 @@ namespace engine::render {
 			uint64_t signature
 		);
 
+		// Submits an owned camera packet without reopening its world. Canvas
+		// placements remain those sampled for this camera even if another camera
+		// has since prepared the same world.
+		void
+		Submit(const WorldCameraFrame &frame, const core::Vector2 &canvas, const core::Vector2 &targetPixels);
+
 		// Uploads this frame's vertices and indices.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
@@ -198,6 +232,13 @@ namespace engine::render {
 			bool alwaysOnTop,
 			WorldColourTarget target = WorldColourTarget::Display
 		) override;
+
+		bool SupportsWorldLayers() const override;
+		bool HasWorldOverlay() const override;
+		size_t WorldBatchCount() const override {
+			return Mesh.Batches().size();
+		}
+		uint32_t RecordWorldBatch(const WorldInterfaceCapture &capture, size_t batch) override;
 
 		bool AffectsScene() const override {
 			return !SpatialCollectors.empty();
@@ -259,6 +300,21 @@ namespace engine::render {
 
 	  private:
 		bool UploadAtlas(void *commandBuffer);
+		uint32_t RecordWorldRange(
+			void *commandBuffer,
+			void *renderPass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			const core::Color3 &ambient,
+			const core::Vector3 &sun,
+			uint32_t width,
+			uint32_t height,
+			bool alwaysOnTop,
+			WorldColourTarget target,
+			size_t firstBatch,
+			size_t batchCount,
+			bool captureDepth
+		);
 
 		void *Device = nullptr;
 		void *Pipeline = nullptr;
@@ -266,6 +322,7 @@ namespace engine::render {
 		void *SpatialTopPipeline = nullptr;
 		void *HdrSpatialPipeline = nullptr;
 		void *HdrSpatialTopPipeline = nullptr;
+		void *HdrCapturePipeline = nullptr;
 		void *Sampler = nullptr;
 
 		// The nearest-filter twin, for `gui::ResampleMode::Pixelated`. See
@@ -277,12 +334,22 @@ namespace engine::render {
 		void *AtlasTransferBuffer = nullptr;
 		uint32_t SwapchainFormat = 0;
 
-		// A shader-named pipeline, built by `AddShaderVariant`. Keyed by
-		// `core::Name::Id`, matching every other name-keyed cache in this
-		// module.
-		//
-		// @since v0.18
-		std::unordered_map<uint32_t, void *> ShaderVariants;
+		static uint64_t ShaderKey(core::Name name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+		core::Name ContentOwner;
+		struct ShaderVariant {
+			assets::ContentHash CodeHash;
+			assets::ContentHash AttemptHash;
+			void *Screen = nullptr;
+			void *Spatial = nullptr;
+			void *SpatialTop = nullptr;
+			void *HdrSpatial = nullptr;
+			void *HdrSpatialTop = nullptr;
+			void *HdrCapture = nullptr;
+		};
+		void ReleaseShaderVariant(const ShaderVariant &variant);
+		std::unordered_map<uint64_t, ShaderVariant> ShaderVariants;
 
 		void *VertexBuffer = nullptr;
 		void *IndexBuffer = nullptr;
@@ -293,6 +360,12 @@ namespace engine::render {
 
 		GlyphAtlas Glyphs;
 		InterfaceMesh Mesh;
+		void SubmitCommands(
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			uint64_t signature
+		);
 		gui::DrawList Pending;
 		core::Vector2 Canvas;
 		uint64_t PendingSignature = 0;
@@ -301,10 +374,6 @@ namespace engine::render {
 
 		// The attachment's real size in device pixels. See `Submit`.
 		core::Vector2 TargetPixels;
-		struct SpatialCollector {
-			ecs::Entity Collector;
-			gui::SpatialCanvas Canvas;
-		};
 		std::vector<SpatialCollector> SpatialCollectors;
 
 		struct ResolvedImage {

@@ -179,7 +179,7 @@ namespace {
 		spec.Scope = graph::NodeScope::Frame;
 		spec.Queue = graph::ExecutionQueue::Cpu;
 		spec.Category = graph::NodeCategory::Output;
-		spec.Inputs.push_back({.Name = core::Name("portaled"), .Kind = graph::ResourceKind::Texture});
+		spec.Inputs.push_back({.Name = core::Name("tonemapped"), .Kind = graph::ResourceKind::Texture});
 		REQUIRE(graph::RegisterNodeKind(std::move(spec)));
 		REQUIRE(renderer.InstallNodeHandler(observer, [](const graph::RunContext &) { return true; }));
 		document.Record(
@@ -189,7 +189,9 @@ namespace {
 			 .Scope = graph::NodeScope::Frame}
 		);
 		document.Record(
-			{.Kind = graph::EditKind::Reads, .Target = core::Name("portaled"), .Key = core::Name("portaled")}
+			{.Kind = graph::EditKind::Reads,
+			 .Target = core::Name("tonemapped"),
+			 .Key = core::Name("tonemapped")}
 		);
 		graph::RenderGraph graph;
 		core::Name offender;
@@ -262,10 +264,10 @@ namespace {
 		render::OverlayImage overlay;
 		fixture.Render.Render(views, overlay, nullptr, false);
 		const auto observed = CaptureResource(
-			fixture.Render, core::Name("portaled"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 		);
 		const auto reference = CaptureResource(
-			fixture.Render, core::Name("portaled"), 1, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+			fixture.Render, core::Name("tonemapped"), 1, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 		);
 		std::vector<uint32_t> expected(WIDTH * HEIGHT), captured(WIDTH * HEIGHT);
 		size_t samples = 0, body = 0;
@@ -346,7 +348,7 @@ namespace {
 			fixture.Render,
 			"character-" + std::to_string(walk.FrontFace) + "-" + std::to_string(walk.FirstPerson) + "-" +
 				std::to_string(walk.Scale) + "-" + std::to_string(tick),
-			"portaled",
+			"tonemapped",
 			inputs.str(),
 			expectedView,
 			actualView,

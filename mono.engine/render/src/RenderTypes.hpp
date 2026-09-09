@@ -434,6 +434,8 @@ namespace engine::render {
 			return SDL_GPU_TEXTUREFORMAT_R16_FLOAT;
 		case graph::ResourceFormat::RG16F:
 			return SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
+		case graph::ResourceFormat::RGBA32F:
+			return SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
 		case graph::ResourceFormat::RGBA16F:
 			return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 		case graph::ResourceFormat::R32F:

@@ -1,8 +1,11 @@
+#include "PortalImageSamples.hpp"
+#include "PortalLayerPreflight.hpp"
 #include "PortalPlayerIdentity.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/render/PortalCaptureTree.hpp>
 #include <engine/render/PortalExchange.hpp>
 #include <engine/render/PortalGeometry.hpp>
 
@@ -13,7 +16,7 @@
 namespace engine::render {
 	namespace {
 		constexpr uint32_t MAGIC = 0x474d4950; // PIMG
-		constexpr uint16_t VERSION = 12;
+		constexpr uint16_t VERSION = 19;
 		constexpr size_t MAX_KEY = 256;
 		constexpr size_t MAX_DIAGNOSTIC = 1024;
 		static_assert(
@@ -52,11 +55,15 @@ namespace engine::render {
 		}
 		bool ValidRequest(const PortalImageRequest &request) {
 			if (request.Projection > PortalImageProjection::Eye) return false;
-			if (request.OrderedLayers && (request.Scope != PortalImageScope::OpaqueLighting ||
-										  request.RecursionDepth != 0 || request.KnownImage))
+			if (request.OrderedLayers &&
+				(request.Scope != PortalImageScope::OpaqueLighting ||
+				 request.RecursionDepth > MAX_PORTAL_CAPTURE_TREE_DEPTH || request.KnownImage))
 				return false;
 			const bool eye = request.Projection == PortalImageProjection::Eye;
-			if (!ValidPortalPlayerIdentity(request.EyePlayer)) return false;
+			if (!ValidPortalPlayerIdentity(request.EyePlayer) ||
+				!ValidPortalPlayerIdentity(request.RetainedBodyPlayer) ||
+				(!request.RetainedBodyPlayer.empty() && !request.OrderedLayers))
+				return false;
 			if (eye && (request.Entrance || request.ClipPlane != std::array<float, 4>{})) return false;
 			if (request.Entrance) {
 				const auto &entrance = *request.Entrance;
@@ -92,6 +99,7 @@ namespace engine::render {
 					   uint64_t(request.Width) * request.Height * (request.OrderedLayers ? 4 : 1);
 		}
 		bool FinitePixels(std::span<const std::byte> pixels) {
+			ENGINE_PROFILE("portal image half samples");
 			for (size_t index = 0; index < pixels.size(); index += 2) {
 				// Half-float exponent 31 denotes either infinity or NaN.
 				if ((std::to_integer<uint8_t>(pixels[index + 1]) & 0x7c) == 0x7c) {
@@ -130,10 +138,60 @@ namespace engine::render {
 			}
 			return true;
 		}
-		bool ValidReply(
-			const PortalImageReply &reply, std::span<const std::byte> pixels, std::span<const std::byte> depth
+		bool ValidAmbient(
+			const PortalImageReply &reply,
+			std::span<const std::byte> normal,
+			std::span<const std::byte> response,
+			std::span<const std::byte> baseline,
+			std::span<const std::byte> directional
 		) {
-			if (!ValidKey(reply.Key) || reply.Scope > PortalImageScope::OpaqueLighting ||
+			if (directional.empty()) {
+				if (!reply.DirectionalResponseHash.IsZero()) return false;
+			} else {
+				if (normal.empty() || directional.size() != size_t(reply.Width) * reply.Height * 16)
+					return false;
+				{
+					ENGINE_PROFILE("portal image directional hash");
+					if (assets::Hasher::Of(directional) != reply.DirectionalResponseHash) return false;
+				}
+				ENGINE_PROFILE("portal image directional samples");
+				if (!ValidPortalResponseSamples(directional)) return false;
+			}
+			if (normal.empty() && response.empty() && baseline.empty())
+				return reply.NormalHash.IsZero() && reply.AmbientResponseHash.IsZero() &&
+					   reply.LightingBaselineHash.IsZero();
+			const size_t pixels = size_t(reply.Width) * reply.Height;
+			if (reply.Status != PortalImageStatus::Ok || reply.Scope != PortalImageScope::OpaqueLighting ||
+				!reply.CaptureLighting || normal.size() != pixels * 4 || response.size() != pixels * 16 ||
+				baseline.size() != pixels * 16 || normal.empty())
+				return false;
+			{
+				ENGINE_PROFILE("portal image ambient hashes");
+				if (assets::Hasher::Of(normal) != reply.NormalHash ||
+					assets::Hasher::Of(response) != reply.AmbientResponseHash ||
+					assets::Hasher::Of(baseline) != reply.LightingBaselineHash)
+					return false;
+			}
+			{
+				ENGINE_PROFILE("portal image baseline samples");
+				if (!ValidPortalBaselineSamples(baseline)) return false;
+			}
+			ENGINE_PROFILE("portal image response samples");
+			return ValidPortalResponseSamples(response);
+		}
+		bool ValidReply(
+			const PortalImageReply &reply,
+			std::span<const std::byte> pixels,
+			std::span<const std::byte> depth,
+			std::span<const std::byte> normal,
+			std::span<const std::byte> response,
+			std::span<const std::byte> baseline,
+			std::span<const std::byte> directional
+		) {
+			ENGINE_PROFILE("portal image validation");
+			if (!ValidAmbient(reply, normal, response, baseline, directional) ||
+				(!normal.empty() && depth.empty()) || !ValidKey(reply.Key) ||
+				reply.Scope > PortalImageScope::OpaqueLighting ||
 				!Text(reply.Diagnostic, MAX_DIAGNOSTIC, reply.Status == PortalImageStatus::Ok) ||
 				!ValidCaptureLighting(reply.CaptureLighting ? &*reply.CaptureLighting : nullptr)) {
 				return false;
@@ -154,14 +212,29 @@ namespace engine::render {
 				if (!reply.DepthHash.IsZero()) return false;
 			} else {
 				if (depth.size() != size_t(reply.Width) * reply.Height * 4) return false;
-				core::ByteReader reader(depth);
-				while (!reader.AtEnd()) {
-					const float value = reader.ReadFloat();
-					if (!std::isfinite(value) || std::signbit(value)) return false;
+				{
+					ENGINE_PROFILE("portal image depth samples");
+					if (!ValidPortalDepthSamples(depth)) return false;
 				}
+				ENGINE_PROFILE("portal image depth hash");
 				if (assets::Hasher::Of(depth) != reply.DepthHash) return false;
 			}
-			return FinitePixels(pixels) && assets::Hasher::Of(pixels) == reply.PixelHash;
+			if (!FinitePixels(pixels)) return false;
+			ENGINE_PROFILE("portal image colour hash");
+			return assets::Hasher::Of(pixels) == reply.PixelHash;
+		}
+		bool ValidReply(
+			const PortalImageReply &reply, std::span<const std::byte> pixels, std::span<const std::byte> depth
+		) {
+			return ValidReply(
+				reply,
+				pixels,
+				depth,
+				reply.Normal,
+				reply.AmbientResponse,
+				reply.LightingBaseline,
+				reply.DirectionalResponse
+			);
 		}
 		void Header(core::ByteWriter &writer, uint8_t kind) {
 			writer.WriteUInt32(MAGIC);
@@ -199,6 +272,126 @@ namespace engine::render {
 			for (float &value : values) {
 				value = reader.ReadFloat();
 			}
+		}
+		bool ValidCaptureLens(const PortalCaptureLens &lens, std::string_view shader) {
+			return Text(shader, MAX_KEY) && !lens.ProgramHash.IsZero() && Finite(lens.Position) &&
+				   Finite(lens.Orientation) && Unit(lens.Orientation) && lens.Shape == 0 &&
+				   std::isfinite(lens.Radius) && lens.Radius > 0 && std::isfinite(lens.InnerRadius) &&
+				   lens.InnerRadius >= 0 && lens.InnerRadius <= lens.Radius && std::isfinite(lens.Falloff) &&
+				   lens.Falloff >= 0 && lens.Falloff <= 1 && std::isfinite(lens.Strength) &&
+				   lens.Strength >= 0 && std::isfinite(lens.Spin);
+		}
+		bool ValidLensProgram(const assets::ContentHash &hash, std::span<const std::byte> code) {
+			if (code.size() < 5 * sizeof(uint32_t) || code.size() % sizeof(uint32_t) != 0 ||
+				code.size() > MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES || hash.IsZero())
+				return false;
+			core::ByteReader header(code);
+			return header.ReadUInt32() == 0x07230203 && assets::Hasher::Of(code) == hash;
+		}
+		void CaptureLenses(core::ByteWriter &writer, const PortalCaptureLenses &lenses) {
+			writer.WriteUInt8(static_cast<uint8_t>(lenses.Entries.size()));
+			writer.WriteFloat(lenses.TimeSeconds);
+			writer.WriteUInt8(static_cast<uint8_t>(lenses.Programs.size()));
+			for (const auto &program : lenses.Programs) {
+				writer.WriteRaw(program.Hash.Digest.data(), program.Hash.Digest.size());
+				writer.WriteUInt32(static_cast<uint32_t>(program.SpirV.size()));
+				for (const auto word : program.SpirV)
+					writer.WriteUInt32(word);
+			}
+			for (const auto &lens : lenses.Entries) {
+				Floats(writer, lens.Position);
+				Floats(writer, lens.Orientation);
+				writer.WriteString(lens.Shader);
+				writer.WriteRaw(lens.ProgramHash.Digest.data(), lens.ProgramHash.Digest.size());
+				writer.WriteFloat(lens.Radius);
+				writer.WriteFloat(lens.InnerRadius);
+				writer.WriteFloat(lens.Falloff);
+				writer.WriteFloat(lens.Strength);
+				writer.WriteFloat(lens.Spin);
+				writer.WriteInt32(lens.Priority);
+				writer.WriteUInt8(lens.Shape);
+			}
+		}
+		// A null destination validates borrowed text and code without allocating before inbox admission.
+		bool CaptureLenses(core::ByteReader &reader, PortalCaptureLenses *out, size_t &bytes) {
+			const auto count = reader.ReadUInt8();
+			const auto time = reader.ReadFloat();
+			if (reader.Failed() || count > MAX_PORTAL_CAPTURE_LENSES || !std::isfinite(time) ||
+				(count == 0 && (time != 0 || std::signbit(time))))
+				return false;
+			const auto programCount = reader.ReadUInt8();
+			if (reader.Failed() || programCount > MAX_PORTAL_CAPTURE_LENSES || programCount > count)
+				return false;
+			struct BorrowedProgram {
+				assets::ContentHash Hash;
+				std::span<const std::byte> Code;
+				bool Used = false;
+			};
+			std::array<BorrowedProgram, MAX_PORTAL_CAPTURE_LENSES> programs{};
+			size_t codeBytes = 0;
+			for (size_t index = 0; index < programCount; ++index) {
+				auto &program = programs[index];
+				reader.ReadRaw(program.Hash.Digest.data(), program.Hash.Digest.size());
+				const auto words = reader.ReadUInt32();
+				if (reader.Failed() || words > (MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES - codeBytes) / 4)
+					return false;
+				program.Code = reader.ReadRawView(size_t(words) * 4);
+				if (reader.Failed() || !ValidLensProgram(program.Hash, program.Code)) return false;
+				for (size_t previous = 0; previous < index; ++previous)
+					if (programs[previous].Hash == program.Hash) return false;
+				codeBytes += program.Code.size();
+			}
+			bytes = size_t(count) * sizeof(PortalCaptureLens) +
+					size_t(programCount) * sizeof(PortalCaptureLensProgram) + codeBytes;
+			if (out) {
+				out->TimeSeconds = time;
+				out->Entries.reserve(count);
+			}
+			for (size_t index = 0; index < count; ++index) {
+				PortalCaptureLens lens;
+				Floats(reader, lens.Position);
+				Floats(reader, lens.Orientation);
+				const auto shader = reader.ReadString();
+				reader.ReadRaw(lens.ProgramHash.Digest.data(), lens.ProgramHash.Digest.size());
+				lens.Radius = reader.ReadFloat();
+				lens.InnerRadius = reader.ReadFloat();
+				lens.Falloff = reader.ReadFloat();
+				lens.Strength = reader.ReadFloat();
+				lens.Spin = reader.ReadFloat();
+				lens.Priority = reader.ReadInt32();
+				lens.Shape = reader.ReadUInt8();
+				if (reader.Failed() || !ValidCaptureLens(lens, shader)) return false;
+				if (programCount != 0) {
+					bool covered = false;
+					for (size_t program = 0; program < programCount; ++program) {
+						if (programs[program].Hash != lens.ProgramHash) continue;
+						programs[program].Used = true;
+						covered = true;
+						break;
+					}
+					if (!covered) return false;
+				}
+				bytes += shader.size();
+				if (out) {
+					lens.Shader = shader;
+					out->Entries.push_back(std::move(lens));
+				}
+			}
+			for (size_t index = 0; index < programCount; ++index)
+				if (!programs[index].Used) return false;
+			if (out) {
+				out->Programs.reserve(programCount);
+				for (size_t index = 0; index < programCount; ++index) {
+					PortalCaptureLensProgram program;
+					program.Hash = programs[index].Hash;
+					core::ByteReader code(programs[index].Code);
+					program.SpirV.reserve(programs[index].Code.size() / 4);
+					while (!code.AtEnd())
+						program.SpirV.push_back(code.ReadUInt32());
+					out->Programs.push_back(std::move(program));
+				}
+			}
+			return true;
 		}
 		void CaptureLighting(core::ByteWriter &writer, const PortalCaptureLighting &light) {
 			Floats(writer, light.Direction);
@@ -333,14 +526,16 @@ namespace engine::render {
 		return DecodeReceipt(bytes, out, error, 4);
 	}
 
-	std::optional<PortalImageReplyMatch> MatchPortalImageReply(
+	template <class KeyType>
+	static std::optional<PortalImageReplyMatch> MatchReply(
 		std::span<const std::byte> bytes,
-		const PortalExchangeKey &expected,
+		const KeyType &expected,
 		uint32_t width,
 		uint32_t height,
 		PortalImageScope scope
 	) {
-		if (bytes.size() > MAX_PORTAL_EXCHANGE_BYTES || !ValidKey(expected) || !Extent(width, height)) {
+		if (bytes.size() > MAX_PORTAL_EXCHANGE_BYTES ||
+			(expected.RequestId == 0 || !Text(expected.PortalKey, MAX_KEY)) || !Extent(width, height)) {
 			return {};
 		}
 		core::ByteReader reader(bytes);
@@ -359,7 +554,10 @@ namespace engine::render {
 		const auto replyScope = static_cast<PortalImageScope>(reader.ReadUInt8());
 		const auto encoding = reader.ReadUInt16();
 		if (status > PortalImageStatus::Failed || scope > PortalImageScope::OpaqueLighting ||
-			replyScope != scope || encoding > 15 || ((encoding & 4) && !(encoding & 2)) ||
+			replyScope != scope || ((encoding & 16) && scope != PortalImageScope::OpaqueLighting) ||
+			encoding > 1023 || ((encoding & 512) && !(encoding & 256)) ||
+			((encoding & 256) && !(encoding & 16)) || ((encoding & 4) && !(encoding & 2)) ||
+			((encoding & 224) && !(encoding & 16)) || ((encoding & 16) && ((encoding & 10) != 10)) ||
 			(status != PortalImageStatus::Ok && encoding != 0)) {
 			return {};
 		}
@@ -377,8 +575,23 @@ namespace engine::render {
 			return {};
 		}
 		return PortalImageReplyMatch{
-			status, diagnostic.size(), captureTick, (encoding & 2) ? size_t(width) * height * 4 : 0
+			status,
+			diagnostic.size(),
+			captureTick,
+			(encoding & 2) ? size_t(width) * height * 4 : 0,
+			((encoding & 16) ? size_t(width) * height * 36 : 0) +
+				((encoding & 256) ? size_t(width) * height * 16 : 0)
 		};
+	}
+
+	std::optional<PortalImageReplyMatch> MatchPortalImageReply(
+		std::span<const std::byte> bytes,
+		const PortalExchangeKey &expected,
+		uint32_t width,
+		uint32_t height,
+		PortalImageScope scope
+	) {
+		return MatchReply(bytes, expected, width, height, scope);
 	}
 
 	bool EncodePortalImageRequest(
@@ -395,6 +608,7 @@ namespace engine::render {
 		writer.WriteUInt8(request.OrderedLayers);
 		writer.WriteUInt8(0);
 		writer.WriteString(request.EyePlayer);
+		writer.WriteString(request.RetainedBodyPlayer);
 		Floats(writer, request.Position);
 		Floats(writer, request.Orientation);
 		Floats(writer, request.Frustum);
@@ -441,6 +655,10 @@ namespace engine::render {
 		const auto eyePlayer = reader.ReadString();
 		if (reader.Failed() || eyePlayer.size() > 20) return Refuse(error, "invalid eye player identity");
 		request.EyePlayer = eyePlayer;
+		const auto retainedBodyPlayer = reader.ReadString();
+		if (reader.Failed() || retainedBodyPlayer.size() > 20)
+			return Refuse(error, "invalid retained body identity");
+		request.RetainedBodyPlayer = retainedBodyPlayer;
 		Floats(reader, request.Position);
 		Floats(reader, request.Orientation);
 		Floats(reader, request.Frustum);
@@ -490,6 +708,7 @@ namespace engine::render {
 		std::span<const std::byte> payload = reply.Pixels;
 		uint16_t encoding = 0;
 		if (payload.size() >= 256) {
+			ENGINE_PROFILE("portal image colour compress");
 			compressed.resize(payload.size());
 			const auto size =
 				ZSTD_compress(compressed.data(), compressed.size(), payload.data(), payload.size(), 1);
@@ -502,6 +721,7 @@ namespace engine::render {
 		std::span<const std::byte> depth = reply.Depth;
 		if (!depth.empty()) encoding |= 2;
 		if (depth.size() >= 256) {
+			ENGINE_PROFILE("portal image depth compress");
 			compressedDepth.resize(depth.size());
 			const auto size =
 				ZSTD_compress(compressedDepth.data(), compressedDepth.size(), depth.data(), depth.size(), 1);
@@ -511,6 +731,26 @@ namespace engine::render {
 			}
 		}
 		if (reply.CaptureLighting) encoding |= 8;
+		std::array<std::vector<std::byte>, 4> ambientScratch;
+		std::array<std::span<const std::byte>, 4> ambient{
+			reply.Normal, reply.AmbientResponse, reply.LightingBaseline, reply.DirectionalResponse
+		};
+		if (!ambient[0].empty()) encoding |= 16;
+		if (!ambient[3].empty()) encoding |= 256;
+		for (size_t plane = 0; plane < ((encoding & 256) ? 4u : 3u); ++plane) {
+			if (ambient[plane].size() < 256) continue;
+			ENGINE_PROFILE("portal image auxiliary compress");
+			auto &scratch = ambientScratch[plane];
+			scratch.resize(ambient[plane].size());
+			const auto size = ZSTD_compress(
+				scratch.data(), scratch.size(), ambient[plane].data(), ambient[plane].size(), 1
+			);
+			if (!ZSTD_isError(size) && size < ambient[plane].size()) {
+				ambient[plane] = std::span(scratch).first(size);
+				encoding |= uint16_t(plane == 3 ? 512 : 32 << plane);
+			}
+		}
+		ENGINE_PROFILE("portal image encode framing");
 		core::ByteWriter writer;
 		Header(writer, 2);
 		Key(writer, reply.Key);
@@ -527,16 +767,38 @@ namespace engine::render {
 		if (reply.CaptureLighting) CaptureLighting(writer, *reply.CaptureLighting);
 		writer.WriteRaw(reply.PixelHash.Digest.data(), reply.PixelHash.Digest.size());
 		writer.WriteUInt32(static_cast<uint32_t>(payload.size()));
+		const size_t wireBytes =
+			writer.Size() + payload.size() + (depth.empty() ? 0 : 36 + depth.size()) +
+			(ambient[0].empty() ? 0 : 108 + ambient[0].size() + ambient[1].size() + ambient[2].size()) +
+			(ambient[3].empty() ? 0 : 36 + ambient[3].size());
+		if (wireBytes > MAX_PORTAL_EXCHANGE_BYTES) return Refuse(error, "portal reply exceeds wire budget");
+		writer.WriteRaw(payload.data(), payload.size());
 		if (!depth.empty()) {
-			writer.WriteRaw(payload.data(), payload.size());
 			writer.WriteRaw(reply.DepthHash.Digest.data(), reply.DepthHash.Digest.size());
 			writer.WriteUInt32(static_cast<uint32_t>(depth.size()));
-			Commit(writer, out, error, depth);
-		} else {
-			Commit(writer, out, error, payload);
+			writer.WriteRaw(depth.data(), depth.size());
 		}
+		if (!ambient[0].empty()) {
+			const std::array hashes{
+				reply.NormalHash,
+				reply.AmbientResponseHash,
+				reply.LightingBaselineHash,
+				reply.DirectionalResponseHash
+			};
+			for (size_t plane = 0; plane < ((encoding & 256) ? 4u : 3u); ++plane) {
+				writer.WriteRaw(hashes[plane].Digest.data(), hashes[plane].Digest.size());
+				writer.WriteUInt32(static_cast<uint32_t>(ambient[plane].size()));
+				writer.WriteRaw(ambient[plane].data(), ambient[plane].size());
+			}
+		}
+		Commit(writer, out, error);
 		core::Metrics::Count(
-			"render.portal_codec.raw.bytes", static_cast<double>(reply.Pixels.size() + reply.Depth.size())
+			"render.portal_codec.raw.bytes",
+			static_cast<double>(
+				reply.Pixels.size() + reply.Depth.size() + reply.Normal.size() +
+				reply.AmbientResponse.size() + reply.LightingBaseline.size() +
+				reply.DirectionalResponse.size()
+			)
 		);
 		core::Metrics::Count("render.portal_codec.wire.bytes", static_cast<double>(out.size()));
 		return true;
@@ -555,7 +817,9 @@ namespace engine::render {
 		reply.Status = static_cast<PortalImageStatus>(reader.ReadUInt8());
 		reply.Scope = static_cast<PortalImageScope>(reader.ReadUInt8());
 		const auto encoding = reader.ReadUInt16();
-		if (encoding > 15 || ((encoding & 4) && !(encoding & 2)) ||
+		if (encoding > 1023 || ((encoding & 512) && !(encoding & 256)) ||
+			((encoding & 256) && !(encoding & 16)) || ((encoding & 4) && !(encoding & 2)) ||
+			((encoding & 224) && !(encoding & 16)) || ((encoding & 16) && ((encoding & 10) != 10)) ||
 			(reply.Status != PortalImageStatus::Ok && encoding != 0)) {
 			return Refuse(error, "unsupported portal reply encoding");
 		}
@@ -584,11 +848,41 @@ namespace engine::render {
 			if (!Extent(reply.Width, reply.Height) || depth.empty())
 				return Refuse(error, "invalid portal depth layout");
 		}
+		std::array<std::span<const std::byte>, 4> ambient{};
+		if (encoding & 16) {
+			const std::array hashes{
+				&reply.NormalHash,
+				&reply.AmbientResponseHash,
+				&reply.LightingBaselineHash,
+				&reply.DirectionalResponseHash
+			};
+			for (size_t plane = 0; plane < ((encoding & 256) ? 4u : 3u); ++plane) {
+				reader.ReadRaw(hashes[plane]->Digest.data(), hashes[plane]->Digest.size());
+				const auto length = reader.ReadUInt32();
+				ambient[plane] = reader.ReadRawView(length);
+			}
+		}
 		if (reader.Failed() || !reader.AtEnd()) return Refuse(error, "invalid portal image payload length");
 		if (reply.Status == PortalImageStatus::Ok &&
 			(!Extent(reply.Width, reply.Height) || reply.RowStride != reply.Width * 8))
 			return Refuse(error, "invalid portal image layout");
+		if (encoding & 16) {
+			if (reply.Scope != PortalImageScope::OpaqueLighting)
+				return Refuse(error, "ambient planes require opaque lighting");
+			for (size_t plane = 0; plane < ((encoding & 256) ? 4u : 3u); ++plane) {
+				const size_t expanded = size_t(reply.Width) * reply.Height * (plane == 0 ? 4 : 16);
+				const auto data = ambient[plane];
+				if (encoding & (plane == 3 ? 512 : 32 << plane)) {
+					if (data.size() >= expanded ||
+						ZSTD_getFrameContentSize(data.data(), data.size()) != expanded ||
+						ZSTD_findFrameCompressedSize(data.data(), data.size()) != data.size())
+						return Refuse(error, "invalid compressed ambient plane");
+				} else if (data.size() != expanded)
+					return Refuse(error, "invalid ambient plane length");
+			}
+		}
 		if (encoding & 1) {
+			ENGINE_PROFILE("portal image colour decompress");
 			// Validate dimensions and the single frame's declared size before allocating.
 			// A compressed frame cannot select a larger output or concatenate extra frames.
 			if (reply.Status != PortalImageStatus::Ok || !Extent(reply.Width, reply.Height) ||
@@ -605,6 +899,7 @@ namespace engine::render {
 			pixels = reply.Pixels;
 		}
 		if (encoding & 4) {
+			ENGINE_PROFILE("portal image depth decompress");
 			const size_t expanded = size_t(reply.Width) * reply.Height * 4;
 			if (depth.size() >= expanded ||
 				ZSTD_getFrameContentSize(depth.data(), depth.size()) != expanded ||
@@ -616,23 +911,55 @@ namespace engine::render {
 				return Refuse(error, "invalid compressed portal depth samples");
 			depth = reply.Depth;
 		}
-		if (!ValidReply(reply, pixels, depth)) {
+		std::array<std::vector<std::byte>, 4> expandedAmbient;
+		if (encoding & 16) {
+			for (size_t plane = 0; plane < ((encoding & 256) ? 4u : 3u); ++plane) {
+				const size_t expanded = size_t(reply.Width) * reply.Height * (plane == 0 ? 4 : 16);
+				if (!(encoding & (plane == 3 ? 512 : 32 << plane))) continue;
+				ENGINE_PROFILE("portal image auxiliary decompress");
+				const auto data = ambient[plane];
+				expandedAmbient[plane].resize(expanded);
+				const auto size =
+					ZSTD_decompress(expandedAmbient[plane].data(), expanded, data.data(), data.size());
+				if (ZSTD_isError(size) || size != expanded) return Refuse(error, "invalid ambient samples");
+				ambient[plane] = expandedAmbient[plane];
+			}
+		}
+		if (!ValidReply(reply, pixels, depth, ambient[0], ambient[1], ambient[2], ambient[3])) {
 			return Refuse(error, "invalid portal image reply");
 		}
+		ENGINE_PROFILE("portal image materialise");
 		// Raw input allocates only after validation; decompression is bounded by layout.
 		if (!(encoding & 1)) reply.Pixels.assign(pixels.begin(), pixels.end());
 		if (!(encoding & 4)) reply.Depth.assign(depth.begin(), depth.end());
+		if (encoding & 32)
+			reply.Normal = std::move(expandedAmbient[0]);
+		else
+			reply.Normal.assign(ambient[0].begin(), ambient[0].end());
+		if (encoding & 64)
+			reply.AmbientResponse = std::move(expandedAmbient[1]);
+		else
+			reply.AmbientResponse.assign(ambient[1].begin(), ambient[1].end());
+		if (encoding & 128)
+			reply.LightingBaseline = std::move(expandedAmbient[2]);
+		else
+			reply.LightingBaseline.assign(ambient[2].begin(), ambient[2].end());
+		if (encoding & 512)
+			reply.DirectionalResponse = std::move(expandedAmbient[3]);
+		else
+			reply.DirectionalResponse.assign(ambient[3].begin(), ambient[3].end());
 		out = std::move(reply);
 		error.clear();
 		return true;
 	}
 
 	namespace {
-		bool LayerExtent(uint32_t width, uint32_t height, size_t transparent) {
+		bool LayerExtent(uint32_t width, uint32_t height, size_t transparent, bool overlay = false) {
 			return transparent <= MAX_PORTAL_TRANSPARENT_LAYERS && Extent(width, height) &&
-				   size_t(width) * height <= MAX_PORTAL_IMAGE_PIXELS / (transparent + 1);
+				   size_t(width) * height <= MAX_PORTAL_IMAGE_PIXELS / (transparent + 1 + overlay);
 		}
 		bool ValidLayerSamples(const PortalImageReply &image) {
+			if (!image.DirectionalResponse.empty() || !image.DirectionalResponseHash.IsZero()) return false;
 			core::ByteReader depth(image.Depth);
 			for (size_t offset = 0; offset < image.Pixels.size(); offset += 8) {
 				const auto pixel = std::span(image.Pixels).subspan(offset, 8);
@@ -646,15 +973,69 @@ namespace engine::render {
 			}
 			return true;
 		}
-		bool SameCapture(const PortalImageReply &image, const PortalImageReply &opaque) {
+		bool SameCapture(const PortalImageReply &image, const PortalImageReply &opaque, bool paired = true) {
 			return image.Status == PortalImageStatus::Ok && image.Scope == PortalImageScope::OpaqueLighting &&
 				   image.Key == opaque.Key && image.Width == opaque.Width && image.Height == opaque.Height &&
 				   image.CaptureTick == opaque.CaptureTick &&
 				   image.ContentRevision == opaque.ContentRevision &&
 				   image.LightingRevision == opaque.LightingRevision &&
 				   image.CaptureLighting == opaque.CaptureLighting &&
-				   image.Depth.size() == size_t(image.Width) * image.Height * 4;
+				   image.Depth.size() == (paired ? size_t(image.Width) * image.Height * 4 : 0);
 		}
+		bool ValidOverlaySamples(const PortalImageReply &image) {
+			if (image.Pixels.size() % 8 != 0) return false;
+			for (size_t offset = 0; offset < image.Pixels.size(); offset += 8) {
+				const auto pixel = std::span(image.Pixels).subspan(offset, 8);
+				const auto alpha =
+					std::to_integer<uint16_t>(pixel[6]) | (std::to_integer<uint16_t>(pixel[7]) << 8);
+				if (alpha > 0x3c00) return false;
+				if (alpha == 0)
+					for (const auto byte : pixel)
+						if (byte != std::byte{}) return false;
+			}
+			return true;
+		}
+	}
+
+	bool ValidPortalCaptureLenses(const PortalCaptureLenses &lenses) {
+		if (lenses.Entries.size() > MAX_PORTAL_CAPTURE_LENSES || !std::isfinite(lenses.TimeSeconds) ||
+			(lenses.Entries.empty() && (lenses.TimeSeconds != 0 || std::signbit(lenses.TimeSeconds))))
+			return false;
+		if (lenses.Programs.size() > MAX_PORTAL_CAPTURE_LENSES ||
+			lenses.Programs.size() > lenses.Entries.size())
+			return false;
+		size_t codeBytes = 0;
+		for (size_t index = 0; index < lenses.Programs.size(); ++index) {
+			const auto &program = lenses.Programs[index];
+			if (program.SpirV.size() > (MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES - codeBytes) / 4 ||
+				!ValidLensProgram(program.Hash, std::as_bytes(std::span(program.SpirV))))
+				return false;
+			codeBytes += program.SpirV.size() * 4;
+			for (size_t previous = 0; previous < index; ++previous)
+				if (lenses.Programs[previous].Hash == program.Hash) return false;
+			bool used = false;
+			for (const auto &lens : lenses.Entries)
+				used |= lens.ProgramHash == program.Hash;
+			if (!used) return false;
+		}
+		for (const auto &lens : lenses.Entries) {
+			if (!ValidCaptureLens(lens, lens.Shader)) return false;
+			if (lenses.Programs.empty()) continue;
+			bool covered = false;
+			for (const auto &program : lenses.Programs)
+				covered |= lens.ProgramHash == program.Hash;
+			if (!covered) return false;
+		}
+		return true;
+	}
+	size_t PortalCaptureLensBytes(const PortalCaptureLenses &lenses) {
+		size_t bytes = lenses.Entries.size() * sizeof(PortalCaptureLens);
+		for (const auto &lens : lenses.Entries)
+			bytes += lens.Shader.size();
+		bytes += lenses.Programs.size() * sizeof(PortalCaptureLensProgram);
+		for (const auto &program : lenses.Programs)
+			bytes += program.SpirV.size() * sizeof(uint32_t);
+		return bytes;
 	}
 
 	std::optional<PortalImageReplyMatch> MatchPortalImageLayerSet(
@@ -672,62 +1053,201 @@ namespace engine::render {
 		const auto imageWidth = reader.ReadUInt32();
 		const auto imageHeight = reader.ReadUInt32();
 		const auto count = reader.ReadUInt8();
+		const auto overlay = reader.ReadUInt8();
 		if (reader.Failed() || request != expected.RequestId || portal != expected.PortalKey ||
 			camera != expected.CameraRevision || seam != expected.SeamRevision || imageWidth != width ||
-			imageHeight != height || count != MAX_PORTAL_TRANSPARENT_LAYERS)
+			imageHeight != height || count != MAX_PORTAL_TRANSPARENT_LAYERS || overlay > 1 ||
+			!LayerExtent(width, height, count, overlay != 0))
 			return {};
 		PortalImageReplyMatch result{PortalImageStatus::Ok};
-		for (size_t index = 0; index <= count; ++index) {
+		result.ImageCount = count + 1 + overlay;
+		if (!CaptureLenses(reader, nullptr, result.MetadataBytes)) return {};
+		for (size_t index = 0; index < result.ImageCount; ++index) {
 			const auto length = reader.ReadUInt32();
 			const auto member = reader.ReadRawView(length);
 			const auto match =
 				MatchPortalImageReply(member, expected, width, height, PortalImageScope::OpaqueLighting);
-			if (reader.Failed() || !match || match->Status != PortalImageStatus::Ok || match->DepthBytes == 0)
+			if (reader.Failed() || !match || match->Status != PortalImageStatus::Ok ||
+				(match->DepthBytes != 0) != (index <= count) ||
+				(index != 0 && match->AmbientBytes > size_t(width) * height * 36))
 				return {};
 			if (index == 0)
 				result.CaptureTick = match->CaptureTick;
 			else if (result.CaptureTick != match->CaptureTick)
 				return {};
 			result.DepthBytes += match->DepthBytes;
+			result.AmbientBytes += match->AmbientBytes;
 			result.DiagnosticBytes += match->DiagnosticBytes;
 		}
 		return reader.AtEnd() ? std::optional(result) : std::nullopt;
 	}
 
+	struct LayerCapturePrefix {
+		uint64_t Content = 0, Lighting = 0;
+		std::optional<PortalCaptureLighting> Light;
+		bool operator==(const LayerCapturePrefix &) const = default;
+	};
+	static bool PreflightLayerPayload(std::span<const std::byte> bytes, LayerCapturePrefix &prefix) {
+		core::ByteReader r(bytes);
+		if (!Header(r, 2)) return false;
+		r.ReadUInt64();
+		r.ReadString();
+		r.ReadUInt64();
+		r.ReadUInt64();
+		r.ReadUInt8();
+		r.ReadUInt8();
+		const auto encoding = r.ReadUInt16();
+		r.ReadString();
+		r.ReadUInt64();
+		prefix.Content = r.ReadUInt64();
+		prefix.Lighting = r.ReadUInt64();
+		const auto width = r.ReadUInt32(), height = r.ReadUInt32(), stride = r.ReadUInt32();
+		if (!Extent(width, height) || stride != width * 8) return false;
+		if (encoding & 8) CaptureLighting(r, prefix.Light.emplace());
+		if (!ValidCaptureLighting(prefix.Light ? &*prefix.Light : nullptr)) return false;
+		const auto payload = [&](size_t expanded, bool compressed) {
+			r.ReadRawView(32);
+			const auto length = r.ReadUInt32();
+			const auto data = r.ReadRawView(length);
+			if (r.Failed()) return false;
+			if (!compressed) return length == expanded;
+			return length < expanded && ZSTD_getFrameContentSize(data.data(), data.size()) == expanded &&
+				   ZSTD_findFrameCompressedSize(data.data(), data.size()) == data.size();
+		};
+		if (!payload(size_t(width) * height * 8, encoding & 1)) return false;
+		if ((encoding & 2) && !payload(size_t(width) * height * 4, encoding & 4)) return false;
+		if (encoding & 16) {
+			if (!payload(size_t(width) * height * 4, encoding & 32) ||
+				!payload(size_t(width) * height * 16, encoding & 64) ||
+				!payload(size_t(width) * height * 16, encoding & 128))
+				return false;
+		}
+		if ((encoding & 256) && !payload(size_t(width) * height * 16, encoding & 512)) return false;
+		return !r.Failed() && r.AtEnd();
+	}
+	bool PreflightPortalLayers(std::span<const std::byte> bytes, PortalLayerMeasure &out) {
+		if (bytes.size() > MAX_PORTAL_EXCHANGE_BYTES) return false;
+		core::ByteReader reader(bytes);
+		if (!Header(reader, 5)) return false;
+		struct KeyView {
+			uint64_t RequestId;
+			std::string_view PortalKey;
+			uint64_t CameraRevision, SeamRevision;
+		};
+		const KeyView key{reader.ReadUInt64(), reader.ReadString(), reader.ReadUInt64(), reader.ReadUInt64()};
+		PortalLayerMeasure result;
+		result.RequestId = key.RequestId;
+		result.PortalKey = key.PortalKey;
+		result.CameraRevision = key.CameraRevision;
+		result.SeamRevision = key.SeamRevision;
+		result.Width = reader.ReadUInt32();
+		result.Height = reader.ReadUInt32();
+		const auto count = reader.ReadUInt8();
+		const auto overlay = reader.ReadUInt8();
+		if (reader.Failed() || overlay > 1 || !LayerExtent(result.Width, result.Height, count, overlay != 0))
+			return false;
+		result.Match.Status = PortalImageStatus::Ok;
+		result.Match.ImageCount = size_t(count) + 1 + overlay;
+		{
+			auto programs = reader;
+			programs.ReadUInt8();
+			programs.ReadFloat();
+			result.ProgramCount = programs.ReadUInt8();
+			if (result.ProgramCount > MAX_PORTAL_CAPTURE_LENSES) return false;
+			for (size_t i = 0; i < result.ProgramCount; ++i) {
+				programs.ReadRaw(result.ProgramHashes[i].Digest.data(), 32);
+				const auto words = programs.ReadUInt32();
+				if (words > (MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES - result.ProgramBytes) / 4) return false;
+				result.ProgramBytes += size_t(words) * 4;
+				programs.ReadRawView(size_t(words) * 4);
+			}
+			if (programs.Failed()) return false;
+		}
+		if (!CaptureLenses(reader, nullptr, result.Match.MetadataBytes)) return false;
+		result.Match.MetadataBytes += key.PortalKey.size() * result.Match.ImageCount;
+		LayerCapturePrefix capture;
+		for (size_t i = 0; i < result.Match.ImageCount; ++i) {
+			const auto length = reader.ReadUInt32();
+			const auto member = reader.ReadRawView(length);
+			const auto match =
+				MatchReply(member, key, result.Width, result.Height, PortalImageScope::OpaqueLighting);
+			if (reader.Failed() || !match || match->Status != PortalImageStatus::Ok ||
+				(match->DepthBytes != 0) != (i <= count) ||
+				(i != 0 && match->AmbientBytes > size_t(result.Width) * result.Height * 36))
+				return false;
+			LayerCapturePrefix memberCapture;
+			if (!PreflightLayerPayload(member, memberCapture) || !memberCapture.Light) return false;
+			if (i == 0)
+				capture = memberCapture;
+			else if (capture != memberCapture)
+				return false;
+			if (i == 0)
+				result.Match.CaptureTick = match->CaptureTick;
+			else if (result.Match.CaptureTick != match->CaptureTick)
+				return false;
+			result.Match.DepthBytes += match->DepthBytes;
+			result.Match.AmbientBytes += match->AmbientBytes;
+			result.Match.DiagnosticBytes += match->DiagnosticBytes;
+		}
+		if (!reader.AtEnd()) return false;
+		out = result;
+		return true;
+	}
+
 	bool ValidPortalImageLayerSet(const PortalImageLayerSet &layers) {
 		const auto &opaque = layers.Opaque;
-		if (!LayerExtent(opaque.Width, opaque.Height, layers.Transparent.size()) ||
+		if (!ValidPortalCaptureLenses(layers.Lenses)) return false;
+		if (!LayerExtent(
+				opaque.Width, opaque.Height, layers.Transparent.size(), layers.SpatialOverlay.has_value()
+			) ||
 			!SameCapture(opaque, opaque) || !ValidReply(opaque, opaque.Pixels, opaque.Depth))
 			return false;
 		for (const auto &layer : layers.Transparent)
 			if (!SameCapture(layer, opaque) || !ValidReply(layer, layer.Pixels, layer.Depth) ||
 				!ValidLayerSamples(layer))
 				return false;
-		return true;
+		return !layers.SpatialOverlay ||
+			   (SameCapture(*layers.SpatialOverlay, opaque, false) &&
+				ValidReply(
+					*layers.SpatialOverlay, layers.SpatialOverlay->Pixels, layers.SpatialOverlay->Depth
+				) &&
+				ValidOverlaySamples(*layers.SpatialOverlay));
 	}
 
 	bool EncodePortalImageLayerSet(
 		const PortalImageLayerSet &layers, std::vector<std::byte> &out, std::string &error
 	) {
 		const auto &opaque = layers.Opaque;
-		if (!ValidKey(opaque.Key) || !LayerExtent(opaque.Width, opaque.Height, layers.Transparent.size()) ||
+		if (!ValidPortalCaptureLenses(layers.Lenses)) return Refuse(error, "invalid portal capture lenses");
+		if (!ValidKey(opaque.Key) ||
+			!LayerExtent(
+				opaque.Width, opaque.Height, layers.Transparent.size(), layers.SpatialOverlay.has_value()
+			) ||
 			!SameCapture(opaque, opaque))
 			return Refuse(error, "invalid portal layer layout");
 		for (const auto &layer : layers.Transparent)
 			if (!SameCapture(layer, opaque)) return Refuse(error, "portal layers do not share a capture");
+		if (layers.SpatialOverlay && (!SameCapture(*layers.SpatialOverlay, opaque, false) ||
+									  !ValidOverlaySamples(*layers.SpatialOverlay)))
+			return Refuse(error, "invalid portal spatial overlay");
 		core::ByteWriter writer;
 		Header(writer, 5);
 		Key(writer, opaque.Key);
 		writer.WriteUInt32(opaque.Width);
 		writer.WriteUInt32(opaque.Height);
 		writer.WriteUInt8(static_cast<uint8_t>(layers.Transparent.size()));
-		std::array<std::vector<std::byte>, MAX_PORTAL_TRANSPARENT_LAYERS + 1> members;
+		writer.WriteUInt8(layers.SpatialOverlay.has_value());
+		CaptureLenses(writer, layers.Lenses);
+		const size_t count = layers.Transparent.size() + 1 + layers.SpatialOverlay.has_value();
+		std::array<std::vector<std::byte>, MAX_PORTAL_TRANSPARENT_LAYERS + 2> members;
 		size_t wireBytes = writer.Size();
-		for (size_t index = 0; index <= layers.Transparent.size(); ++index) {
-			const auto &image = index == 0 ? opaque : layers.Transparent[index - 1];
+		for (size_t index = 0; index < count; ++index) {
+			const auto &image = index == 0							 ? opaque
+								: index <= layers.Transparent.size() ? layers.Transparent[index - 1]
+																	 : *layers.SpatialOverlay;
 			auto &member = members[index];
 			if (!EncodePortalImageReply(image, member, error)) return false;
-			if (index != 0 && !ValidLayerSamples(image))
+			if (index != 0 && index <= layers.Transparent.size() && !ValidLayerSamples(image))
 				return Refuse(error, "invalid transparent layer samples");
 			wireBytes += 4 + member.size();
 			if (wireBytes > MAX_PORTAL_EXCHANGE_BYTES)
@@ -737,7 +1257,7 @@ namespace engine::render {
 		std::vector<std::byte> encoded;
 		encoded.reserve(wireBytes);
 		encoded.insert(encoded.end(), writer.Bytes().begin(), writer.Bytes().end());
-		for (size_t index = 0; index <= layers.Transparent.size(); ++index) {
+		for (size_t index = 0; index < count; ++index) {
 			writer.Clear();
 			writer.WriteUInt32(static_cast<uint32_t>(members[index].size()));
 			encoded.insert(encoded.end(), writer.Bytes().begin(), writer.Bytes().end());
@@ -759,20 +1279,26 @@ namespace engine::render {
 		const auto width = reader.ReadUInt32();
 		const auto height = reader.ReadUInt32();
 		const auto count = reader.ReadUInt8();
-		if (reader.Failed() || !LayerExtent(width, height, count))
+		const auto overlay = reader.ReadUInt8();
+		if (reader.Failed() || overlay > 1 || !LayerExtent(width, height, count, overlay != 0))
 			return Refuse(error, "invalid portal layer layout");
+		PortalImageLayerSet layers;
+		size_t lensBytes = 0;
+		if (!CaptureLenses(reader, &layers.Lenses, lensBytes))
+			return Refuse(error, "invalid portal capture lenses");
 		// Admit all member layouts before decompressing even the first image.
-		std::array<std::span<const std::byte>, MAX_PORTAL_TRANSPARENT_LAYERS + 1> members{};
-		for (size_t index = 0; index <= count; ++index) {
+		std::array<std::span<const std::byte>, MAX_PORTAL_TRANSPARENT_LAYERS + 2> members{};
+		for (size_t index = 0; index <= size_t(count) + overlay; ++index) {
 			const auto length = reader.ReadUInt32();
 			members[index] = reader.ReadRawView(length);
 			const auto match =
 				MatchPortalImageReply(members[index], key, width, height, PortalImageScope::OpaqueLighting);
-			if (reader.Failed() || !match || match->Status != PortalImageStatus::Ok || match->DepthBytes == 0)
+			if (reader.Failed() || !match || match->Status != PortalImageStatus::Ok ||
+				(match->DepthBytes != 0) != (index <= count) ||
+				(index != 0 && match->AmbientBytes > size_t(width) * height * 36))
 				return Refuse(error, "invalid portal layer member");
 		}
 		if (!reader.AtEnd()) return Refuse(error, "trailing portal layer bytes");
-		PortalImageLayerSet layers;
 		if (!DecodePortalImageReply(members[0], layers.Opaque, error)) return false;
 		layers.Transparent.resize(count);
 		for (size_t index = 0; index < count; ++index) {
@@ -781,6 +1307,13 @@ namespace engine::render {
 			if (!SameCapture(layer, layers.Opaque))
 				return Refuse(error, "portal layers do not share a capture");
 			if (!ValidLayerSamples(layer)) return Refuse(error, "invalid transparent layer samples");
+		}
+		if (overlay) {
+			layers.SpatialOverlay.emplace();
+			if (!DecodePortalImageReply(members[count + 1], *layers.SpatialOverlay, error)) return false;
+			if (!SameCapture(*layers.SpatialOverlay, layers.Opaque, false) ||
+				!ValidOverlaySamples(*layers.SpatialOverlay))
+				return Refuse(error, "invalid portal spatial overlay");
 		}
 		out = std::move(layers);
 		error.clear();

@@ -1,38 +1,39 @@
-// Decoding the packed per-instance row.
-//
-// **Included by every vertex stage that binds the instance stream**, so the
-// arithmetic exists once rather than once per pass. `opaque.vert` and
-// `shadow.vert` read the same forty-eight bytes and drew different pictures from
-// them the day one of them was edited and the other was not.
-//
-// The C++ side is `render/src/InstancePacking.hpp`. The two decodes have to
-// agree and no compiler can check that they do, so both are written to be read
-// side by side: `render/tests/InstancePacking.cpp` pins the C++ half against the
-// matrix the old layout uploaded, and this half is the same three steps in the
-// same order.
-
+// Private resident instance and joint layouts, paired with InstancePacking.hpp.
 #ifndef GPU_INSTANCE_WORDS
-#define GPU_INSTANCE_WORDS 12
+#define GPU_INSTANCE_WORDS 16
 #endif
-
-#if GPU_INSTANCE_WORDS != 12
+#if GPU_INSTANCE_WORDS != 16
 #error GPU instance row declarations must change together
 #endif
+#ifndef GPU_JOINT_WORDS
+#define GPU_JOINT_WORDS 7
+#endif
+#if GPU_JOINT_WORDS != 7
+#error GPU joint row declarations must change together
+#endif
 
-// SDL assigns vertex storage buffers to set zero for SPIR-V. The first is the
-// stable forty-eight-byte row pool; the second is this draw order's uint slots.
-// Three aligned vectors make the generated program issue three row loads. A
-// scalar word helper issued fifteen row loads and re-read the indirection for
-// every call in the unoptimised SPIR-V the build actually stages.
 struct InstanceRow {
-	uvec4 Transform0;
-	uvec4 Transform1;
-	uvec4 Appearance;
+	uvec4 PositionColour;
+	uvec4 Rotation;
+	uvec4 ScaleAppearance;
+	uvec4 SurfaceEmission;
 };
-layout(set = 0, binding = 0) readonly buffer InstanceRows { InstanceRow rows[]; } residentInstances;
-layout(set = 0, binding = 1) readonly buffer InstanceIndices { uint slots[]; } drawInstances;
-layout(set = 0, binding = 2) readonly buffer SkinOffsets { uint first[]; } skinOffsets;
-layout(set = 0, binding = 3) readonly buffer JointWords { uint words[]; } jointRows;
+layout(set = 0, binding = 0) readonly buffer InstanceRows {
+	InstanceRow rows[];
+}
+residentInstances;
+layout(set = 0, binding = 1) readonly buffer InstanceIndices {
+	uint slots[];
+}
+drawInstances;
+layout(set = 0, binding = 2) readonly buffer SkinOffsets {
+	uint first[];
+}
+skinOffsets;
+layout(set = 0, binding = 3) readonly buffer JointWords {
+	uint words[];
+}
+jointRows;
 
 uint InstanceSlot() {
 	return drawInstances.slots[gl_InstanceIndex];
@@ -43,6 +44,11 @@ InstanceRow LoadInstance() {
 }
 
 vec3 RotateByQuaternion(vec4 quaternion, vec3 point);
+
+// The CPU normalizes before upload; avoid another rounding step here.
+vec4 DecodePackedRotation(uvec4 words) {
+	return uintBitsToFloat(words);
+}
 
 void ApplySkin(uvec4 joints, vec4 weights, inout vec3 position, inout vec3 normal) {
 	uint first = skinOffsets.first[InstanceSlot()];
@@ -57,16 +63,18 @@ void ApplySkin(uvec4 joints, vec4 weights, inout vec3 position, inout vec3 norma
 		if (weights[influence] <= 0.0) {
 			continue;
 		}
-		uint word = (first + joints[influence]) * 5u;
+		uint word = (first + joints[influence]) * GPU_JOINT_WORDS;
 		vec3 translation = vec3(
 			uintBitsToFloat(jointRows.words[word]),
 			uintBitsToFloat(jointRows.words[word + 1u]),
-			uintBitsToFloat(jointRows.words[word + 2u]));
-		vec4 raw = vec4(
-			unpackSnorm2x16(jointRows.words[word + 3u]),
-			unpackSnorm2x16(jointRows.words[word + 4u]));
-		float square = dot(raw, raw);
-		vec4 rotation = square > 1e-12 ? raw * inversesqrt(square) : vec4(0.0, 0.0, 0.0, 1.0);
+			uintBitsToFloat(jointRows.words[word + 2u])
+		);
+		vec4 rotation = DecodePackedRotation(uvec4(
+			jointRows.words[word + 3u],
+			jointRows.words[word + 4u],
+			jointRows.words[word + 5u],
+			jointRows.words[word + 6u]
+		));
 		skinnedPosition += (RotateByQuaternion(rotation, position) + translation) * weights[influence];
 		skinnedNormal += RotateByQuaternion(rotation, normal) * weights[influence];
 	}
@@ -76,30 +84,23 @@ void ApplySkin(uvec4 joints, vec4 weights, inout vec3 position, inout vec3 norma
 
 vec3 InstancePosition(InstanceRow instance) {
 	return vec3(
-		uintBitsToFloat(instance.Transform0.x),
-		uintBitsToFloat(instance.Transform0.y),
-		uintBitsToFloat(instance.Transform0.z));
+		uintBitsToFloat(instance.PositionColour.x),
+		uintBitsToFloat(instance.PositionColour.y),
+		uintBitsToFloat(instance.PositionColour.z)
+	);
 }
 
 vec3 InstanceScale(InstanceRow instance) {
 	return vec3(
-		uintBitsToFloat(instance.Transform1.y),
-		uintBitsToFloat(instance.Transform1.z),
-		uintBitsToFloat(instance.Transform1.w));
+		uintBitsToFloat(instance.ScaleAppearance.x),
+		uintBitsToFloat(instance.ScaleAppearance.y),
+		uintBitsToFloat(instance.ScaleAppearance.z)
+	);
 }
 
-// The rotation as a unit quaternion, `xyz` vector part and `w` scalar.
-//
-// **Renormalised, and that is most of the accuracy.** Four components rounded
-// independently land off the unit sphere, and a quaternion off the unit sphere
-// is a rotation *and* a scale - so skipping this would show up as geometry
-// breathing rather than as a rotation being slightly wrong.
+// The rotation as a unit quaternion, xyz vector part and w scalar.
 vec4 InstanceRotation(InstanceRow instance) {
-	vec4 raw = vec4(
-		unpackSnorm2x16(instance.Transform0.w),
-		unpackSnorm2x16(instance.Transform1.x));
-	float square = dot(raw, raw);
-	return square > 1e-12 ? raw * inversesqrt(square) : vec4(0.0, 0.0, 0.0, 1.0);
+	return DecodePackedRotation(instance.Rotation);
 }
 
 // Rotates a vector by a unit quaternion.
@@ -136,19 +137,19 @@ vec3 InstanceWorldNormal(vec4 quaternion, vec3 scale, vec3 meshNormal) {
 
 // The instance's colour and alpha.
 vec4 InstanceColour(InstanceRow instance) {
-	return unpackUnorm4x8(instance.Appearance.x);
+	return unpackUnorm4x8(instance.PositionColour.w);
 }
 
 uint InstanceAppearance(InstanceRow instance) {
-	return instance.Appearance.y;
+	return instance.ScaleAppearance.w;
 }
 
 vec3 InstanceSurfaceColour(InstanceRow instance) {
-	return unpackUnorm4x8(instance.Appearance.z).rgb;
+	return unpackUnorm4x8(instance.SurfaceEmission.x).rgb;
 }
 
 vec4 InstanceEmission(InstanceRow instance) {
-	vec4 packed = unpackUnorm4x8(instance.Appearance.w);
+	vec4 packed = unpackUnorm4x8(instance.SurfaceEmission.y);
 	packed.a *= 16.0;
 	return packed;
 }

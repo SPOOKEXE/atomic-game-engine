@@ -1,21 +1,9 @@
 #pragma once
 
-// The per-instance row the vertex stream carries, and the quantisation that
-// makes it forty bytes instead of ninety-six.
-//
-// **A file of its own so the error is measurable without a device.** The whole
-// argument for this layout is that a rotation survives eight bytes and a colour
-// survives four, and "survives" is a number somebody has to be able to check.
-// `RenderTypes.hpp` reaches `SDL3/SDL_gpu.h`; this reaches glm, `MeshTable` and
-// `DrawInstance` and nothing else, so `render/tests/InstancePacking.cpp`
-// includes it directly and compares a packed row against the matrix the old
-// layout would have uploaded.
-//
-// **The decode lives twice, here and in `opaque.vert`.** That is the one
-// duplication this file cannot remove: a vertex shader cannot call C++. The
-// tests below pin the arithmetic so the two can be compared by reading, and
-// `ModelMatrixOf` is the C++ side written to be read beside the GLSL rather
-// than to be short.
+// Private resident instance and joint layouts, shared with instance.glsl.
+// Rotation keeps full float precision because oblique aperture coverage is
+// sensitive to errors too small to notice on an isolated mesh.
+// CPU tests compare upload reconstruction against independent double rotations.
 //
 // @tier L12 · client
 
@@ -30,95 +18,38 @@
 #include <glm/vec4.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 
 namespace engine::render {
 
-	// The largest magnitude a signed-normalised sixteen-bit component encodes.
-	//
-	// 32767 rather than 32768 because that is the rule Vulkan, D3D and Metal all
-	// decode by: the negative end has one more code than the positive one, and
-	// -32768 decodes to -1 the same as -32767 does. Encoding against 32768 would
-	// put every value one code hot and make `-1.0` the only input that failed to
-	// round-trip.
-	constexpr float SNORM16_SCALE = 32767.0f;
-
-	// Rounds a value in [-1, 1] to its sixteen-bit signed-normalised code.
-	inline uint16_t EncodeSnorm16(float value) {
-		const float clamped = std::clamp(value, -1.0f, 1.0f);
-		return static_cast<uint16_t>(static_cast<int16_t>(std::lround(clamped * SNORM16_SCALE)));
-	}
-
-	// Decodes one sixteen-bit signed-normalised code, exactly as GLSL's
-	// `unpackSnorm2x16` does.
-	inline float DecodeSnorm16(uint16_t bits) {
-		return std::max(static_cast<float>(static_cast<int16_t>(bits)) / SNORM16_SCALE, -1.0f);
-	}
-
-	// A unit quaternion in eight bytes.
-	//
-	// **Four components at sixteen bits, not the "smallest three" trick.**
-	// Dropping the largest component and spending ten bits on each of the rest
-	// fits a rotation in four bytes, and its worst-case angular error is around
-	// a thousandth of a radian - which is a millimetre of drift per metre of
-	// lever arm, and a part twenty metres across would visibly shear. Sixteen
-	// bits a component costs four more bytes and buys two orders of magnitude;
-	// `render/tests/InstancePacking.cpp` measures what it actually lands at.
-	//
-	// Word zero holds x then y, word one holds z then w, each low half first -
-	// which is what `unpackSnorm2x16` reads, so the shader is two calls.
-	//
-	// @since v0.19
+	// Unit quaternion as four IEEE float words in xyzw order.
 	struct PackedRotation {
-		// Identity by default: x, y and z at zero, w at one.
-		uint32_t Words[2]{0u, 0x7FFF0000u};
+		uint32_t Words[4]{0u, 0u, 0u, 0x3F800000u};
 	};
 
-	// Packs a rotation, normalising it first.
-	//
-	// **Normalised here rather than trusted**, which is a change from the
-	// matrix layout this replaced: that one passed `CFrame::Rotation()` straight
-	// to `glm::toMat4`, which assumes a unit quaternion and silently scales the
-	// geometry when handed something else. A quantised component is meaningless
-	// unless the value is known to be in [-1, 1], so the normalise is not
-	// optional here - and doing it turns a class of authoring bug into a
-	// no-operation instead of into a stretched part.
-	//
-	// A quaternion with no length at all is a caller that never set one; it
-	// packs as the identity rather than as NaN.
+	// Normalize once before upload. No fixed-point step moves aperture edges.
 	inline PackedRotation PackRotation(const glm::quat &rotation) {
-		const float square = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
-							 rotation.w * rotation.w;
-		const glm::quat unit =
-			square > 1e-12f ? rotation * (1.0f / std::sqrt(square)) : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-
+		const double components[4]{rotation.x, rotation.y, rotation.z, rotation.w};
+		double square = 0;
+		for (const double component : components)
+			square += component * component;
+		if (!std::isfinite(square) || square <= 1e-12) return {};
+		const double inverse = 1.0 / std::sqrt(square);
 		PackedRotation packed;
-		packed.Words[0] = static_cast<uint32_t>(EncodeSnorm16(unit.x)) |
-						  (static_cast<uint32_t>(EncodeSnorm16(unit.y)) << 16);
-		packed.Words[1] = static_cast<uint32_t>(EncodeSnorm16(unit.z)) |
-						  (static_cast<uint32_t>(EncodeSnorm16(unit.w)) << 16);
+		for (size_t index = 0; index < 4; ++index)
+			packed.Words[index] = std::bit_cast<uint32_t>(static_cast<float>(components[index] * inverse));
 		return packed;
 	}
 
-	// Unpacks a rotation and renormalises it.
-	//
-	// **The renormalise is most of the accuracy.** Rounding four components
-	// independently moves the quaternion off the unit sphere, and a quaternion
-	// off the unit sphere is a rotation *and a scale* - so without this the
-	// error would show up as geometry breathing by a few parts in a hundred
-	// thousand rather than as a rotation being slightly wrong. One reciprocal
-	// square root removes the radial half of the error outright; the shader
-	// spends the same one.
 	inline glm::quat UnpackRotation(const PackedRotation &packed) {
-		const glm::quat raw{
-			DecodeSnorm16(static_cast<uint16_t>(packed.Words[1] >> 16)),
-			DecodeSnorm16(static_cast<uint16_t>(packed.Words[0] & 0xFFFFu)),
-			DecodeSnorm16(static_cast<uint16_t>(packed.Words[0] >> 16)),
-			DecodeSnorm16(static_cast<uint16_t>(packed.Words[1] & 0xFFFFu)),
+		return {
+			std::bit_cast<float>(packed.Words[3]),
+			std::bit_cast<float>(packed.Words[0]),
+			std::bit_cast<float>(packed.Words[1]),
+			std::bit_cast<float>(packed.Words[2])
 		};
-		const float square = raw.x * raw.x + raw.y * raw.y + raw.z * raw.z + raw.w * raw.w;
-		return square > 1e-12f ? raw * (1.0f / std::sqrt(square)) : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 	}
 
 	// Packs a linear colour and alpha as RGBA8, red in the low byte.
@@ -175,86 +106,40 @@ namespace engine::render {
 		return PackColour(glm::vec4{tint.R, tint.G, tint.B, std::clamp(strength, 0.0f, 16.0f) / 16.0f});
 	}
 
-	// One instance as the vertex shader reads it.
-	//
-	// Private GPU layout; scene data must not expose device types.
-	//
-	// **Forty-eight bytes, down from ninety-six, and the shape is why.** The old
-	// row carried a `mat4`, an RGBA float4 and a float4 of inverse squared
-	// scales. Every one of those was derived from three things a `DrawInstance`
-	// already holds separately - a `CFrame`, a half-extent and a tint - and the
-	// derivation threw information away rather than adding any. A matrix that is
-	// only ever `T * R * S` stores the rotation nine times over; the inverse
-	// scale is the scale; and the fourth row is always `(0, 0, 0, 1)`.
-	//
-	// **Position stays at full float precision and that is deliberate.** It is
-	// the one field here whose error is absolute rather than relative: a world
-	// runs to thousands of metres from the origin, and a half float at two
-	// thousand has an interval of two metres. Rotation and colour are bounded in
-	// [-1, 1] and [0, 1], where a fixed-point code is exactly the right encoding;
-	// scale is unbounded in the same way position is, so it stays float too. The
-	// bytes that were saved were saved from the fields that could afford it.
-	//
-	// @since v0.19
-	struct GpuInstance {
-		// Where the mesh's origin sits in world space, with the mesh's own
-		// centre offset already folded in. See `ToGpu`.
+	// Four aligned vectors match the shader storage row. The final two words
+	// stay explicit and zero so uploads and residency comparisons are deterministic.
+	struct alignas(16) GpuInstance {
 		glm::vec3 Position{0.0f, 0.0f, 0.0f};
-
-		// The instance's orientation.
-		PackedRotation Rotation;
-
-		// How much to multiply each mesh axis by so its own box becomes the
-		// part's. May be zero on an axis - the built-in plane has no thickness.
-		glm::vec3 Scale{1.0f, 1.0f, 1.0f};
-
-		// Colour and alpha, RGBA8 with red in the low byte.
 		uint32_t Colour = 0xFFFFFFFFu;
-
-		// Alpha mode in the low byte and clip cutoff as UNORM8 above it.
+		PackedRotation Rotation;
+		glm::vec3 Scale{1.0f, 1.0f, 1.0f};
 		uint32_t Appearance = PackAppearance(scene::AlphaMode::Opaque, 0.5f);
 		uint32_t SurfaceColour = 0xFFFFFFFFu;
 		uint32_t Emission = PackEmission(core::Color3{1.0f, 1.0f, 1.0f}, 1.0f);
+		uint32_t Reserved[2]{};
 	};
 
-	// How many 32-bit words one row is.
-	//
-	// **Declared here and read by the build, so `occlusion-cull.comp` carries no
-	// literal of its own.** That shader copies a survivor's row through
-	// untouched, word by word, and it is the one consumer of this stride that no
-	// C++ compiler can check: a row that grew would keep building and would copy
-	// eight ninths of each survivor into the late buffer, which draws as geometry
-	// smeared across the scene. `mono.engine/resources/CMakeLists.txt` reads this
-	// declaration at configure time and passes it as `-DGPU_INSTANCE_WORDS`, exactly
-	// the way the light cap already reaches the shaders - so the two cannot
-	// disagree rather than merely being checked for agreement.
-	//
-	// The regex there matches this declaration's shape. Moving or rewriting it
-	// stops the configure with a message saying so, rather than drifting.
-	//
-	// @since v0.19
-	inline constexpr size_t GPU_INSTANCE_WORDS = 12;
+	// The resources build reads these strides for instance.glsl's layout guards.
+	// Occlusion compacts slot indices; it does not copy these resident rows.
+	inline constexpr size_t GPU_INSTANCE_WORDS = 16;
+	inline constexpr size_t GPU_JOINT_WORDS = 7;
 
-	// **Forty-eight bytes, pinned rather than left to
-	// whatever the compiler laid out.** Every member is four-byte aligned and
-	// there is no interior hole, so this is exactly the sum of the fields. The
-	// stride reaches the device as a storage-buffer word count and as the C++
-	// allocation and upload width.
+	// Both word strides are passed to the shader by the resources build.
 	static_assert(
 		sizeof(GpuInstance) == GPU_INSTANCE_WORDS * sizeof(uint32_t),
 		"GpuInstance stride changed. Update GPU_INSTANCE_WORDS above; the build passes it to "
-		"occlusion-cull.comp, so the shader follows on its own."
+		"instance.glsl, whose layout guard must agree."
 	);
-	static_assert(alignof(GpuInstance) == 4, "GpuInstance must stay four-aligned for a vertex stream.");
+	static_assert(alignof(GpuInstance) == 16, "GpuInstance must match the shader vector alignment.");
 
 	// Rebuilds the model matrix a packed row draws with.
 	//
 	// **The matrix the *shader* builds, not the one that was packed.** It reads
-	// the quantised fields and renormalises the rotation exactly as
+	// the uploaded fields and reconstructs the rotation exactly as
 	// `opaque.vert` does, so a caller measuring the world box of an instance -
 	// `ViewRecording`'s occlusion candidates are the only one - bounds the
 	// geometry that will actually be drawn rather than the geometry that was
-	// asked for. A bound taken from the pre-quantisation transform would be
+	// asked for. A bound taken from the unnormalised authored transform would be
 	// tight by construction and wrong by a rounding error, which is the shape of
 	// bug that shows up as one flickering part in a thousand.
 	//
@@ -326,7 +211,7 @@ namespace engine::render {
 		// matrix, and folded against the *unpacked* rotation rather than the
 		// authored one: the shader will rotate the mesh by what it reads, so
 		// the offset that cancels the mesh's own centre has to be taken through
-		// the same rotation or the correction misses by the quantisation error.
+		// the same rotation or the correction misses by the rounding error.
 		const glm::vec3 centre{mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z};
 		gpu.Position =
 			glm::vec3{instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z} -

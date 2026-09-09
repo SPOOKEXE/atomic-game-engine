@@ -56,6 +56,10 @@ namespace engine::render {
 		// Applies to eye and seam captures; shadows and child views retain the body.
 		// Empty selects no player. ECS handles never cross this boundary.
 		std::string EyePlayer;
+		// Explicit retained-body profile. The producer must authorize this account
+		// for the exact requesting endpoint before removing its colour and shadow rows.
+		// Empty preserves ordinary primary-eye visibility and shadow behavior.
+		std::string RetainedBodyPlayer{};
 		PortalExchangeKey Key;
 		PortalImageScope Scope = PortalImageScope::CompleteWorld;
 		std::array<float, 3> Position{};
@@ -82,7 +86,8 @@ namespace engine::render {
 		// is canonically zero and no receiving surface is hidden.
 		PortalImageProjection Projection = PortalImageProjection::Seam;
 		// OpaqueLighting with two ordered transparent layers and an overflow probe.
-		// All four captures count against PixelBudget. No recursive views or renewal.
+		// All four captures count against PixelBudget. Recursive requests require a
+		// bounded capture tree; renewal remains unavailable for this profile.
 		bool OrderedLayers = false;
 		bool operator==(const PortalImageRequest &) const = default;
 	};
@@ -135,17 +140,60 @@ namespace engine::render {
 		// Depth is in destination world units, before tone mapping or reprojection.
 		assets::ContentHash DepthHash;
 		std::vector<std::byte> Depth;
+		// Optional three-plane ambient inputs for successful lit opaque captures with depth.
+		// Normal is little-endian RGB10A2_UNORM. AmbientResponse is RGBA32F:
+		// nonnegative RGB response including material AO/fog, and original SSAO in alpha.
+		// LightingBaseline is finite little-endian RGBA32F before HDR half rounding.
+		assets::ContentHash NormalHash, AmbientResponseHash, LightingBaselineHash;
+		std::vector<std::byte> Normal, AmbientResponse, LightingBaseline;
+		// Optional RGBA32F directional-light response, requiring all three ambient planes.
+		// RGB is finite and nonnegative; alpha is original shadow visibility in [0, 1].
+		assets::ContentHash DirectionalResponseHash;
+		std::vector<std::byte> DirectionalResponse;
 		std::optional<PortalCaptureLighting> CaptureLighting{};
 		bool operator==(const PortalImageReply &) const = default;
 	};
 
+	inline constexpr size_t MAX_PORTAL_CAPTURE_LENSES = 16;
+	inline constexpr size_t MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES = 1024 * 1024;
+	// A capture carries each accepted program once, identified by its content hash.
+	struct PortalCaptureLensProgram {
+		assets::ContentHash Hash;
+		std::vector<uint32_t> SpirV;
+		bool operator==(const PortalCaptureLensProgram &) const = default;
+	};
+	// Captured order is authoritative, including ties. Local entity IDs never cross the wire.
+	struct PortalCaptureLens {
+		std::array<float, 3> Position{};
+		std::array<float, 4> Orientation{0, 0, 0, 1};
+		std::string Shader;
+		assets::ContentHash ProgramHash;
+		float Radius = 16, InnerRadius = 4, Falloff = .75f, Strength = 1, Spin = 0;
+		int32_t Priority = 0;
+		uint8_t Shape = 0;
+		bool operator==(const PortalCaptureLens &) const = default;
+	};
+	struct PortalCaptureLenses {
+		float TimeSeconds = 0;
+		std::vector<PortalCaptureLens> Entries;
+		std::vector<PortalCaptureLensProgram> Programs;
+		bool operator==(const PortalCaptureLenses &) const = default;
+	};
+	bool ValidPortalCaptureLenses(const PortalCaptureLenses &lenses);
+	// Owned records, shader text and program bytes charged before image decompression.
+	size_t PortalCaptureLensBytes(const PortalCaptureLenses &lenses);
+
 	inline constexpr size_t MAX_PORTAL_TRANSPARENT_LAYERS = 2;
 	// One opaque image and ordered, premultiplied transparent images from the
-	// same capture. Every image has paired forward depth. The producer must
+	// same capture. Those images have paired forward depth. The producer must
 	// refuse overflow before publishing; this schema cannot prove completeness.
 	struct PortalImageLayerSet {
 		PortalImageReply Opaque;
 		std::vector<PortalImageReply> Transparent;
+		// Premultiplied world-space always-on-top UI, applied after body composition.
+		// Shares capture metadata but has no depth domain. Screen UI is excluded.
+		std::optional<PortalImageReply> SpatialOverlay = std::nullopt;
+		PortalCaptureLenses Lenses{};
 		bool operator==(const PortalImageLayerSet &) const = default;
 	};
 
@@ -167,6 +215,10 @@ namespace engine::render {
 		size_t DiagnosticBytes = 0;
 		uint64_t CaptureTick = 0;
 		size_t DepthBytes = 0;
+		// Expanded normal, ambient response, baseline and optional directional response bytes.
+		size_t AmbientBytes = 0;
+		size_t ImageCount = 1;
+		size_t MetadataBytes = 0;
 	};
 
 	// A successful same-render-owner completion. The bus carries no texture or
@@ -211,7 +263,8 @@ namespace engine::render {
 
 	// Admission for the fixed two-transparent-layer request profile. Borrows every
 	// member prefix without allocation; full decoding must still validate contents.
-	// DepthBytes and DiagnosticBytes sum all members for transactional budget admission.
+	// ImageCount, DepthBytes and DiagnosticBytes include the optional spatial overlay
+	// for transactional budget admission.
 	std::optional<PortalImageReplyMatch> MatchPortalImageLayerSet(
 		std::span<const std::byte> bytes, const PortalExchangeKey &expected, uint32_t width, uint32_t height
 	);

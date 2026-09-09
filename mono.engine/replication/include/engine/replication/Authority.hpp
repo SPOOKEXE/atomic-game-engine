@@ -1382,6 +1382,9 @@ namespace engine::replication {
 
 		void BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick);
 
+		// Keeps changes newer than a streaming snapshot eligible for recovery.
+		void RetainStreamingChanges(const ecs::Store &store, Client &client, uint64_t tick);
+
 		// Stages the entities `Client::Oversize` names as an overlay blob.
 		//
 		// **The same three pieces of machinery a preface uses, aimed at a

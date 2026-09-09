@@ -246,7 +246,7 @@ TEST_CASE(
 	constexpr render::PortalImageHost::Time now{};
 	CHECK_FALSE(
 		client::UpdatePortalImages(
-			viewer, images, near, view, {.Width = 32, .Height = 32}, portals, surfaces, 0, now
+			viewer, images, near, view, {.Width = 32, .Height = 32}, portals, surfaces, 0, now, {}, joining
 		)
 	);
 	REQUIRE(portals.size() == 1);
@@ -268,24 +268,57 @@ TEST_CASE(
 		)
 	);
 	CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation == 0);
-	destination.RemoveWorld(far);
-	REQUIRE(
-		viewer.ApplyPresentationDirectory(Name("producer"), producer.LocalPresentationDirectory()) ==
-		world::PresentationStatus::Ok
-	);
-	portals.clear();
-	(void)client::UpdatePortalImages(
-		viewer,
-		images,
-		near,
-		view,
-		{.Width = 32, .Height = 32},
-		portals,
-		surfaces,
-		0,
-		now + std::chrono::milliseconds(2)
-	);
-	CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation != 0);
+	SECTION("an explicitly admitted replica serves locally while the remote endpoint remains") {
+		(void)client::UpdatePortalImages(
+			viewer,
+			images,
+			near,
+			view,
+			{.Width = 32, .Height = 32},
+			portals,
+			surfaces,
+			0,
+			now + std::chrono::milliseconds(2),
+			{},
+			near
+		);
+		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation == 0);
+		(void)client::UpdatePortalImages(
+			viewer,
+			images,
+			near,
+			view,
+			{.Width = 32, .Height = 32},
+			portals,
+			surfaces,
+			0,
+			now + std::chrono::milliseconds(3),
+			{},
+			joining
+		);
+		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation != 0);
+		CHECK(viewer.LookupPresentation(remote, render::PORTAL_REQUEST_CHANNEL) == endpoint);
+	}
+	SECTION("withdrawal still allows the existing local fallback") {
+		destination.RemoveWorld(far);
+		REQUIRE(
+			viewer.ApplyPresentationDirectory(Name("producer"), producer.LocalPresentationDirectory()) ==
+			world::PresentationStatus::Ok
+		);
+		portals.clear();
+		(void)client::UpdatePortalImages(
+			viewer,
+			images,
+			near,
+			view,
+			{.Width = 32, .Height = 32},
+			portals,
+			surfaces,
+			0,
+			now + std::chrono::milliseconds(2)
+		);
+		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation != 0);
+	}
 }
 
 TEST_CASE("portal routes wait for a destination replica snapshot", "[client][portal-arrival-route]") {

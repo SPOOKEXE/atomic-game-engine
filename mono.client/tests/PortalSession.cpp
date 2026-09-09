@@ -1,6 +1,11 @@
+#include <engine/assets/Manifest.hpp>
+#include <engine/assets/Mesh.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/delivery/GroupCodec.hpp>
+#include <engine/game/Content.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
@@ -15,11 +20,13 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/world/PresentationStream.hpp>
 
+#include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
 #include <chrono>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <thread>
 
 TEST_SUITE_ID("client.portalsession")
@@ -27,6 +34,13 @@ TEST_DEPENDS("engine.game.portalsession")
 
 static void RunPortalSuccessor(int outcome) {
 	using namespace engine;
+	const bool renderContent = outcome >= 10;
+	const bool meshContent = outcome == 11 || outcome == 13;
+	const bool refuseSourceContent = outcome == 12 || outcome == 13;
+	const bool lateLocalDemand = outcome == 14;
+	const bool retireSource = outcome == 15;
+	bool sourceClosed = false;
+	const bool observeContent = outcome == 9 || renderContent;
 	const bool lostCancellationAck = outcome == 6;
 	const bool readinessExpiry = outcome == 7;
 	const bool readinessDisconnect = outcome == 8;
@@ -128,6 +142,148 @@ static void RunPortalSuccessor(int outcome) {
 	bool requestedImage = false, requestedEye = false, publishedRoutes = false;
 	uint64_t topologySequence = 0;
 	float walked = 0;
+	struct ContentPublication {
+		std::string Name;
+		std::string BundleRoute;
+		std::vector<std::byte> Manifest;
+		std::vector<std::byte> Bundle;
+		std::vector<std::pair<replication::ClientId, game::ContentRouteRequest>> Requests;
+		size_t BundleRequests = 0;
+		bool Offered = false;
+		std::optional<double> FirstBundleReplyAt;
+		std::optional<double> SecondBundleRequestedAt;
+	};
+	const auto publication = [&](std::string name, std::byte colour) {
+		ContentPublication published;
+		published.Name = std::move(name);
+		if (!observeContent) return published;
+		core::ByteWriter encoded;
+		if (meshContent) {
+			assets::MeshData mesh;
+			for (const auto position : std::array{
+					 core::Vector3{-.5f, -.5f, 0},
+					 core::Vector3{.5f, -.5f, 0},
+					 core::Vector3{.5f, .5f, 0},
+					 core::Vector3{-.5f, .5f, 0}
+				 }) {
+				assets::MeshVertex vertex{};
+				vertex.Position[0] = position.X;
+				vertex.Position[1] = position.Y;
+				vertex.Normal[2] = 1;
+				mesh.Vertices.push_back(vertex);
+			}
+			mesh.Indices = {0, 1, 2, 2, 1, 0};
+			if (colour == std::byte{142}) mesh.Indices.insert(mesh.Indices.end(), {0, 2, 3, 3, 2, 0});
+			assets::Submesh surface;
+			surface.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
+			surface.BaseColour[0] = colour == std::byte{142} ? 0 : 1;
+			surface.BaseColour[1] = 0;
+			surface.BaseColour[2] = colour == std::byte{142} ? 1 : 0;
+			mesh.Submeshes.push_back(surface);
+			mesh.ComputeBounds();
+			REQUIRE(assets::Mesh::Write(encoded, mesh));
+		} else {
+			assets::TextureData texture;
+			texture.Width = texture.Height = 1;
+			texture.Pixels = {colour, std::byte{0}, std::byte{0}, std::byte{255}};
+			if (renderContent && colour == std::byte{142})
+				texture.Pixels = {std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}};
+			REQUIRE(assets::Texture::Write(encoded, texture));
+		}
+		assets::Manifest manifest;
+		const auto root = manifest.AddAsset(
+			published.Name,
+			meshContent ? assets::AssetKind::Mesh : assets::AssetKind::Texture,
+			{{assets::Hasher::Of(encoded.Bytes()), static_cast<uint32_t>(encoded.Bytes().size())}}
+		);
+		const auto bundle = manifest.AddBundle(std::span(&root, 1));
+		REQUIRE(bundle);
+		published.BundleRoute = "/bundle/" + bundle->ToHex();
+		const auto compressed = delivery::GroupCodec::Compress(encoded.Bytes());
+		REQUIRE(compressed);
+		published.Bundle = *compressed;
+		core::ByteWriter signedManifest;
+		const auto signature = identity->SignManifestRoot(manifest.Root());
+		signedManifest.WriteRaw(signature.Value.data(), signature.Value.size());
+		manifest.Write(signedManifest);
+		published.Manifest.assign(signedManifest.Bytes().begin(), signedManifest.Bytes().end());
+		return published;
+	};
+	const auto sharedName = meshContent ? "portal-same-name.amesh" : "portal-same-name.atex";
+	auto sourceContent = publication(renderContent ? sharedName : "portal-source-only.atex", std::byte{71});
+	auto destinationContent =
+		publication(renderContent ? sharedName : "portal-destination-only.atex", std::byte{142});
+	const auto contentWall = [&](ecs::Store &store, const ContentPublication &published) {
+		scene::PartDesc wall;
+		wall.Frame.Position = {0, 3, -100};
+		wall.Size = {1000, 1000, 1};
+		wall.Simulated = false;
+		const auto part = scene::MakePart(store, wall);
+		REQUIRE(store.SetParent(part, scene::WorkspaceOf(store)));
+		if (meshContent)
+			store.GetMutable<scene::Visual>(part)->Mesh = core::Name(published.Name);
+		else
+			store.GetMutable<scene::SurfaceAppearance>(part)->ColourMap = core::Name(published.Name);
+	};
+	if (renderContent) contentWall(destination, destinationContent);
+	bool destinationContentRequestedBeforeAdoption = false;
+	const auto contentRequest =
+		[&](ContentPublication &published, replication::ClientId peer, std::span<const std::byte> bytes) {
+			game::ContentRouteRequest request;
+			if (!game::DecodeContentRequest(bytes, request)) return false;
+			REQUIRE(observeContent);
+			if (request.Route.starts_with("/bundle/")) {
+				CHECK(request.Route == published.BundleRoute);
+				++published.BundleRequests;
+				if (published.BundleRequests == 2) published.SecondBundleRequestedAt = core::Clock::Seconds();
+				if (&published == &destinationContent && !destinationInputAt)
+					destinationContentRequestedBeforeAdoption = true;
+			}
+			published.Requests.emplace_back(peer, std::move(request));
+			return true;
+		};
+	bool sourceManifestWaited = false;
+	const auto serveContent = [&](ContentPublication &published,
+								  replication::Listener &listener,
+								  std::optional<replication::ClientId> peer,
+								  double now) {
+		if (!observeContent || !peer) return;
+		if (!published.Offered) {
+			game::ContentDirectory directory;
+			directory.PublisherKey = identity->Public().ToHex();
+			published.Offered = listener.SendTo(*peer, game::EncodeContentDirectory(directory), now);
+		}
+		// The source manifest was requested before adoption and completes afterward.
+		if (&published == &sourceContent && !destinationInputAt) {
+			sourceManifestWaited |=
+				std::any_of(published.Requests.begin(), published.Requests.end(), [](const auto &queued) {
+					return queued.second.Route == "/manifest";
+				});
+			return;
+		}
+		std::erase_if(published.Requests, [&](const auto &queued) {
+			const auto &[requestPeer, request] = queued;
+			if (request.Route != "/manifest" && request.Route != published.BundleRoute)
+				return listener.SendTo(requestPeer, game::EncodeContentRefusal({request.Ticket}), now);
+			if (refuseSourceContent && &published == &sourceContent &&
+				request.Route == published.BundleRoute) {
+				const bool sent =
+					listener.SendTo(requestPeer, game::EncodeContentRefusal({request.Ticket}), now);
+				if (sent && !published.FirstBundleReplyAt) published.FirstBundleReplyAt = now;
+				return sent;
+			}
+			const auto &payload = request.Route == "/manifest" ? published.Manifest : published.Bundle;
+			game::ContentChunk chunk;
+			chunk.Ticket = request.Ticket;
+			chunk.TotalBytes = static_cast<uint32_t>(payload.size());
+			chunk.Bytes = payload;
+			const bool sent = listener.SendTo(requestPeer, game::EncodeContentChunk(chunk), now);
+			if (sent && request.Route == published.BundleRoute && !published.FirstBundleReplyAt)
+				published.FirstBundleReplyAt = now;
+			return sent;
+		});
+	};
+	bool lateContentAuthored = false;
 	const auto receivePresentation = [&](world::PresentationStream &stream,
 										 world::PresentationDirectory &consumers,
 										 std::span<const std::byte> bytes) {
@@ -216,6 +372,7 @@ static void RunPortalSuccessor(int outcome) {
 	};
 	double now = core::Clock::Seconds();
 	from.OnUserMessage([&](replication::ClientId peer, std::span<const std::byte> bytes) {
+		if (contentRequest(sourceContent, peer, bytes)) return;
 		if (receivePresentation(sourcePresentation, sourceConsumers, bytes)) return;
 		game::PortalSessionMessage request;
 		if (!game::DecodePortalSession(bytes, request)) return;
@@ -297,6 +454,7 @@ static void RunPortalSuccessor(int outcome) {
 			if (!committed) CHECK(destinationConsumers.Endpoints.empty());
 			return;
 		}
+		if (contentRequest(destinationContent, peer, bytes)) return;
 		game::PortalSessionMessage request;
 		if (!game::DecodePortalSession(bytes, request)) return;
 		if (request.Kind == game::PortalSessionKind::Fresh) {
@@ -340,25 +498,78 @@ static void RunPortalSuccessor(int outcome) {
 	const auto config = core::Paths::Base() / "portal-successor.ini";
 	std::ofstream(config).close();
 	parallel::Process child;
-	REQUIRE(child.Start(
-		core::Paths::Base().parent_path() / "client" / core::Paths::Program("client"),
-		{"--headless",
-		 "--frames",
-		 "100000",
-		 "--profile-seconds",
-		 readinessExpiry ? "25"
-		 : outcome >= 4	 ? "15"
-		 : outcome == 0	 ? "8"
-						 : "5",
-		 "--config",
-		 config.string(),
-		 "--connect",
-		 net::Endpoint::LoopbackIPv4(sourceSocket->Local().Port).Text(),
-		 "--server-key",
-		 identity->Public().ToHex(),
-		 "--mcp-port",
-		 "-1"}
-	));
+	std::vector<std::string> arguments{
+		"--headless",
+		"--frames",
+		"100000",
+		"--profile-seconds",
+		readinessExpiry ? "25"
+		: outcome >= 4	? "15"
+		: outcome == 0	? "8"
+						: "5",
+		"--config",
+		config.string(),
+		"--connect",
+		net::Endpoint::LoopbackIPv4(sourceSocket->Local().Port).Text(),
+		"--server-key",
+		identity->Public().ToHex(),
+		"--mcp-port",
+		"-1"
+	};
+	if (observeContent) {
+		const auto absentStore = config.string() + ".no-content";
+		REQUIRE_FALSE(std::filesystem::exists(absentStore));
+		arguments.insert(
+			arguments.end(),
+			{"--cdn",
+			 "dir:" + absentStore,
+			 "--publisher-key",
+			 identity->Public().ToHex(),
+			 "--content-cache",
+			 ""}
+		);
+	}
+	const auto captures =
+		core::Paths::Base() / ("portal-published-owner-" + std::to_string(outcome) + "-frames");
+	if (renderContent) {
+		std::filesystem::remove_all(captures);
+		const auto emptyScene = core::Paths::Base() / "portal-published-empty.luau";
+		std::ofstream(emptyScene)
+			<< (lateLocalDemand ? R"(
+local elapsed = 0
+local requested = false
+game:GetService("RunService").Heartbeat:Connect(function(delta)
+    elapsed += delta
+    if requested or elapsed < 3 then return end
+    requested = true
+    local part = Instance.new("MeshPart")
+    part.Anchored = true
+    part.MeshId = "engine.Cube"
+    part.TextureID = "portal-same-name.atex"
+    part.Position = Vector3.new(5000, 0, 0)
+    part.Parent = workspace
+end)
+)"
+								: "return\n");
+		arguments.insert(
+			arguments.end(),
+			{"--uncapped",
+			 "--max-fps",
+			 "60",
+			 "--width",
+			 "64",
+			 "--height",
+			 "64",
+			 "--script",
+			 emptyScene.string(),
+			 "--capture-sequence",
+			 captures.string()}
+		);
+	}
+	REQUIRE(
+		child.Start(core::Paths::Base().parent_path() / "client" / core::Paths::Program("client"), arguments)
+	);
+
 	bool offered = false;
 	uint64_t tick = 0;
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(readinessExpiry ? 30 : 20);
@@ -388,12 +599,34 @@ static void RunPortalSuccessor(int outcome) {
 			if (destinationInputAt && now > *destinationInputAt + .2)
 				sourceInputsAfterAdoption += from.Inputs().size();
 		}
+		if (observeContent && destinationInputAt && !lateContentAuthored) {
+			if (renderContent) contentWall(source, sourceContent);
+			for (auto pair :
+				 {std::pair{&source, &sourceContent}, std::pair{&destination, &destinationContent}}) {
+				if (renderContent) continue;
+				const auto part = scene::MakePart(*pair.first, {});
+				scene::SurfaceAppearance appearance;
+				appearance.ColourMap = core::Name(pair.second->Name);
+				pair.first->Set(part, appearance);
+			}
+			lateContentAuthored = true;
+		}
+		if (retireSource && !sourceClosed && sourceContent.FirstBundleReplyAt &&
+			now > *sourceContent.FirstBundleReplyAt + 1) {
+			sourceSocket->Close();
+			sourceClosed = true;
+		}
+		serveContent(sourceContent, from, sourcePeer, now);
+		serveContent(destinationContent, *to, destinationPeer, now);
 		from.ClearInputs();
 		to->ClearInputs();
 		std::erase_if(sourceReplies, [&](const auto &reply) {
 			return from.SendTo(reply.first, game::EncodePortalSession(reply.second), now);
 		});
 		std::erase_if(destinationReplies, [&](const auto &reply) {
+			if (renderContent && reply.second.Kind == game::PortalSessionKind::Committed &&
+				(!destinationContent.FirstBundleReplyAt || now < *destinationContent.FirstBundleReplyAt + .2))
+				return false;
 			return to->SendTo(reply.first, game::EncodePortalSession(reply.second), now);
 		});
 		if (sourcePeer && !publishedRoutes && sourceConsumers.Revision != 0) {
@@ -446,6 +679,99 @@ static void RunPortalSuccessor(int outcome) {
 	REQUIRE(destinationInputAt.has_value());
 	CHECK(now > *destinationInputAt + 1);
 	CHECK(sourceInputsAfterAdoption == 0);
+	if (observeContent) {
+		CHECK(lateContentAuthored);
+		CHECK(sourceManifestWaited);
+		CHECK(sourceContent.BundleRequests == 1);
+		if (renderContent) {
+			CHECK(destinationContentRequestedBeforeAdoption);
+			CHECK(destinationContent.BundleRequests == (lateLocalDemand ? 2 : 1));
+			if (lateLocalDemand) {
+				REQUIRE(destinationContent.SecondBundleRequestedAt);
+				CHECK(*destinationContent.SecondBundleRequestedAt > *destinationInputAt + 1);
+			}
+			REQUIRE(sourceContent.FirstBundleReplyAt);
+			REQUIRE(destinationContent.FirstBundleReplyAt);
+			CHECK(*destinationContent.FirstBundleReplyAt < *destinationInputAt);
+			CHECK(*sourceContent.FirstBundleReplyAt > *destinationInputAt);
+			CHECK(now > *sourceContent.FirstBundleReplyAt + 1);
+			std::filesystem::path latest;
+			uint64_t lastFrame = 0;
+			for (const auto &entry : std::filesystem::directory_iterator(captures)) {
+				if (entry.path().extension() != ".bmp") continue;
+				const auto frame = std::stoull(entry.path().stem().string());
+				if (latest.empty() || frame > lastFrame) {
+					lastFrame = frame;
+					latest = entry.path();
+				}
+			}
+			REQUIRE_FALSE(latest.empty());
+			auto metadata = latest;
+			metadata.replace_extension(".json");
+			std::ifstream recorded(metadata);
+			REQUIRE(recorded.good());
+			const auto finalFrame = nlohmann::json::parse(recorded);
+			CHECK(
+				finalFrame.at(meshContent ? "delivered_meshes" : "delivered_textures") ==
+				(refuseSourceContent ? 1
+				 : lateLocalDemand	 ? 3
+									 : 2)
+			);
+			CHECK(finalFrame.at("pending_content") == 0);
+			if (retireSource) {
+				CHECK(sourceClosed);
+				CHECK_FALSE(finalFrame.contains("retained_world"));
+				nlohmann::json retained;
+				uint64_t retainedFrame = 0;
+				for (const auto &entry : std::filesystem::directory_iterator(captures)) {
+					if (entry.path().extension() != ".json") continue;
+					std::ifstream input(entry.path());
+					const auto sample = nlohmann::json::parse(input);
+					if (!sample.contains("retained_world") || sample.at("delivered_textures") != 2) continue;
+					const auto number = sample.at("frame").get<uint64_t>();
+					if (retained.empty() || number > retainedFrame) {
+						retained = sample;
+						retainedFrame = number;
+					}
+				}
+				REQUIRE_FALSE(retained.empty());
+				CHECK(retained.at("pending_content") == 0);
+				CHECK(retained.at("content_owner") == "client.portal.1");
+				const auto &before = retained.at("gpu_memory");
+				const auto &after = finalFrame.at("gpu_memory");
+				CHECK(after.at("buffer_bytes") == before.at("buffer_bytes"));
+				CHECK(finalFrame.at("seconds").get<double>() > retained.at("seconds").get<double>() + 1);
+				CHECK(
+					after.at("texture_bytes").get<uint64_t>() + 4 ==
+					before.at("texture_bytes").get<uint64_t>()
+				);
+				CHECK(after.at("textures").get<uint64_t>() + 1 == before.at("textures").get<uint64_t>());
+				CHECK(
+					after.at("released_bytes").get<uint64_t>() >=
+					before.at("released_bytes").get<uint64_t>() + 4
+				);
+			} else
+				CHECK(finalFrame.at("retained_world") == "client.replica");
+			CHECK(finalFrame.at("content_owner") == "client.portal.1");
+			CHECK(finalFrame.at("view_world") == "client.portal.1");
+			CHECK_FALSE(finalFrame.at("eye_image").get<bool>());
+			std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
+				SDL_LoadBMP(latest.string().c_str()), SDL_DestroySurface
+			);
+			REQUIRE(image);
+			Uint8 red = 0, green = 0, blue = 0, alpha = 0;
+			REQUIRE(
+				SDL_ReadSurfacePixel(image.get(), image->w / 8, image->h / 8, &red, &green, &blue, &alpha)
+			);
+			CAPTURE(latest, red, green, blue, destinationContent.BundleRequests);
+			CHECK(blue > 2 * red);
+			CHECK(blue > 60);
+		} else
+			CHECK(destinationContent.BundleRequests == 1);
+		CHECK(sourceContent.Requests.empty());
+		CHECK(destinationContent.Requests.empty());
+	}
+
 	if (outcome >= 2) CHECK(sourceInputsDuringContinuation > 0);
 	CHECK(sourceFresh == 1);
 	CHECK(destinationFresh == 0);
@@ -486,4 +812,38 @@ TEST_CASE(
 	"[client][portal-successor][portal-readiness-disconnect][gpu][.]"
 ) {
 	RunPortalSuccessor(8);
+}
+
+TEST_CASE(
+	"portal observation retains its admitted content route after player adoption",
+	"[client][portal-observation-content][gpu][.]"
+) {
+	RunPortalSuccessor(9);
+}
+
+TEST_CASE(
+	"late source delivery cannot replace successor same-name assets",
+	"[client][portal-published-owner][gpu][.]"
+) {
+	RunPortalSuccessor(GENERATE(10, 11));
+}
+
+TEST_CASE(
+	"refused source content leaves successor assets intact", "[client][portal-published-refusal][gpu][.]"
+) {
+	RunPortalSuccessor(GENERATE(12, 13));
+}
+
+TEST_CASE(
+	"a newly served world can request an already delivered name later",
+	"[client][portal-published-late-demand][gpu][.]"
+) {
+	RunPortalSuccessor(14);
+}
+
+TEST_CASE(
+	"expired source observation retires its texture and preserves the successor",
+	"[client][portal-published-retirement][gpu][.]"
+) {
+	RunPortalSuccessor(15);
 }

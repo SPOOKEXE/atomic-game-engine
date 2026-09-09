@@ -37,7 +37,20 @@ namespace engine::render {
 		std::vector<uint32_t> Hidden;
 		size_t Appended = 0;
 		size_t Replaced = 0;
+		std::string_view RetainedBodyPlayer{};
+		std::vector<uint32_t> RetainedBodyRows{};
 	};
+	// The caller authorizes the account first. Native/held rigs resolve in this
+	// store; imported rows are identified while decoding their owned geometry.
+	// Removing rows remaps the primary-eye hidden indices without changing its policy.
+	bool RemoveRetainedPortalBody(
+		const ecs::Store &,
+		std::string_view player,
+		std::vector<scene::DrawInstance> &,
+		std::span<const uint32_t> importedRows,
+		std::vector<uint32_t> &eyeHidden,
+		std::string &error
+	);
 	// Source rows are already clipped/mapped by scene::AppendPortalClones. Convert
 	// available source identities to names and compact referenced skin ranges.
 	// Retired rows retain their picture; held roots can still identify their owner.

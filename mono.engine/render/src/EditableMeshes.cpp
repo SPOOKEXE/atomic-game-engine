@@ -5,6 +5,7 @@
 #include <engine/scene/EditableMesh.hpp>
 
 #include <algorithm>
+#include <iterator>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -153,13 +154,23 @@ namespace engine::render {
 		return built;
 	}
 
-	size_t EditableMeshUploader::Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer) {
+	size_t EditableMeshUploader::Refresh(
+		engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner
+	) {
+		auto foundScope = std::find_if(Scopes.begin(), Scopes.end(), [&](const UploadScope &scope) {
+			return scope.World == store.Identity() && scope.Owner == owner;
+		});
+		if (foundScope == Scopes.end()) {
+			Scopes.push_back({store.Identity(), owner, {}});
+			foundScope = std::prev(Scopes.end());
+		}
+		auto &uploadedRevisions = foundScope->Revisions;
 		size_t uploaded = 0;
 
 		store.Each<const engine::scene::EditableMesh>([&](engine::ecs::Entity entity,
 														  const engine::scene::EditableMesh &mesh) {
-			const auto found = Uploaded.find(entity.Id);
-			if (found != Uploaded.end() && found->second == mesh.Revision) {
+			const auto found = uploadedRevisions.find(entity.Id);
+			if (found != uploadedRevisions.end() && found->second == mesh.Revision) {
 				// The steady state: an integer compare, for
 				// `ShaderLibrary::Refresh`'s exact reason.
 				return;
@@ -173,17 +184,25 @@ namespace engine::render {
 				// failure. Remembering the revision is important: otherwise an
 				// unchanged half-built mesh pays the full conversion every presented
 				// frame. The next edit advances the revision and retries it.
-				Uploaded[entity.Id] = mesh.Revision;
+				uploadedRevisions[entity.Id] = mesh.Revision;
 				return;
 			}
 
 			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
-			if (renderer.AddMesh(name, built)) {
-				Uploaded[entity.Id] = mesh.Revision;
+			if (renderer.AddMesh(name, built, owner)) {
+				uploadedRevisions[entity.Id] = mesh.Revision;
 				uploaded++;
 			}
 		});
 
 		return uploaded;
 	}
+	void EditableMeshUploader::ForgetWorld(uint64_t identity) {
+		std::erase_if(Scopes, [identity](const UploadScope &scope) { return scope.World == identity; });
+	}
+
+	void EditableMeshUploader::ForgetOwner(core::Name owner) {
+		std::erase_if(Scopes, [owner](const UploadScope &scope) { return scope.Owner == owner; });
+	}
+
 }

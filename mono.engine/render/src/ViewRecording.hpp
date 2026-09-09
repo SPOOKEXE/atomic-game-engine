@@ -199,6 +199,7 @@ namespace engine::render {
 		scene::CameraMatrices Matrices;
 		glm::mat4 LightViewProjection{1.0f};
 		core::AABB SceneBounds;
+		core::AABB DirectionalShadowBounds;
 
 		// The draw list after `scene::KeepLoaded`, and the other worlds' rows
 		// behind it.
@@ -242,6 +243,7 @@ namespace engine::render {
 		bool Claimed[scene::MAX_SURFACES] = {};
 		bool WantSurface = false;
 		uint64_t SurfaceSignature = 0;
+		uint64_t ContentSignature = 0;
 		size_t RefreshCount = 0;
 		core::Vector3 SceneEye;
 		double FrameSeconds = 0.0;

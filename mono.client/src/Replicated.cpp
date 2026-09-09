@@ -17,6 +17,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -592,11 +593,18 @@ namespace client {
 			AimReplicatedSurfaces,
 			SystemOrder{{}, {"replica-camera"}}
 		);
+		// Material children arrive as authored references. Resolve their maps and
+		// shader names before collecting the replica's presentation rows.
+		scheduler.Add("resolve-materials", Phase::PreRender, [](Store &world) {
+			(void)engine::scene::ResolveMaterials(world);
+		});
 		scheduler.Add(
 			"collect-replicated",
 			Phase::PreRender,
 			CollectReplicated,
-			SystemOrder{{}, {"resolve-attachments", "pose-characters", "aim-surface-cameras"}}
+			SystemOrder{
+				{}, {"resolve-attachments", "pose-characters", "aim-surface-cameras", "resolve-materials"}
+			}
 		);
 
 		// **`GuiService` comes over the wire without the thing it is for**, and

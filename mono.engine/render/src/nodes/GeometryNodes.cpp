@@ -101,7 +101,7 @@ namespace engine::render {
 
 			enterNamedPass(context.Name);
 
-			// One pass plainly, or two around the occlusion cull. The second
+			// Ordinary geometry uses one pass, or two around the occlusion cull. The second
 			// begins where the first ended - every target loads - so the two
 			// together paint exactly the frame one pass would have, minus the
 			// pixels the cull proved covered.
@@ -131,7 +131,7 @@ namespace engine::render {
 				if (pass == nullptr) {
 					return pass;
 				}
-				State->BindPipeline(pass, State->GBufferPipeline, Impl::PipelineFamily::Other);
+				State->BindPipeline(pass, State->GBufferPipeline, Impl::PipelineFamily::GBuffer);
 				SDL_SetGPUViewport(pass, &sceneViewport);
 				SDL_SetGPUScissor(pass, &sceneScissor);
 				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
@@ -158,8 +158,69 @@ namespace engine::render {
 					);
 				};
 
+			const auto authored = [&](uint32_t slot) {
+				const auto found = State->ShaderVariants.find(
+					Impl::ShaderVariantKey(State->SlotShader[slot], State->SlotContentOwner[slot])
+				);
+				return found != State->ShaderVariants.end() && found->second.HdrOpaque != nullptr;
+			};
+			bool customOpaque = false;
+			if (haveInstances && !State->ShaderVariants.empty()) {
+				for (uint32_t slot = sceneCount; slot < sceneCount + plainOpaque; ++slot)
+					customOpaque = authored(slot) || customOpaque;
+			}
+			if (customOpaque) {
+				// Authored colour occupies emissive while cleared normal alpha marks it
+				// as already shaded. Drawing first preserves discard and nearest depth.
+				auto *clear = beginGBuffer(true);
+				if (clear == nullptr) return false;
+				SDL_EndGPURenderPass(clear);
+				SDL_GPUColorTargetInfo colour{};
+				colour.texture = pbr.Emissive;
+				colour.load_op = SDL_GPU_LOADOP_LOAD;
+				colour.store_op = SDL_GPU_STOREOP_STORE;
+				depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+				depthTarget.cycle = false;
+				auto *pass = SDL_BeginGPURenderPass(command, &colour, 1, &depthTarget);
+				if (pass == nullptr) return false;
+				State->BindPipeline(pass, State->HdrOpaquePipeline, Impl::PipelineFamily::HdrOpaque);
+				State->BindInstanceBuffers(pass, State->InstanceIndexBuffer);
+				const SDL_GPUBufferBinding indices{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				SDL_SetGPUViewport(pass, &sceneViewport);
+				SDL_SetGPUScissor(pass, &sceneScissor);
+				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+				SDL_PushGPUFragmentUniformData(
+					command, 1, &recording.SceneLights, sizeof(recording.SceneLights)
+				);
+				SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+				for (uint32_t slot = sceneCount; slot < sceneCount + plainOpaque;) {
+					if (!authored(slot)) {
+						++slot;
+						continue;
+					}
+					const auto first = slot++;
+					while (slot < sceneCount + plainOpaque && authored(slot))
+						++slot;
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						first,
+						slot - first,
+						&lighting,
+						State->ShadowTexture,
+						State->ShadowSampler,
+						nullptr,
+						State->SurfaceSampler,
+						0,
+						result.Triangles
+					);
+				}
+				SDL_EndGPURenderPass(pass);
+			}
+
 			if (!occluded) {
-				SDL_GPURenderPass *gbuffer = beginGBuffer(true);
+				SDL_GPURenderPass *gbuffer = beginGBuffer(!customOpaque);
 				if (gbuffer == nullptr) {
 					ENGINE_ERROR("gbuffer: SDL_BeginGPURenderPass: {}", SDL_GetError());
 					return false;
@@ -184,7 +245,7 @@ namespace engine::render {
 			// Early phase: the CPU-picked occluders, by indirect arguments so
 			// both phases drive their draws the same way.
 			const Impl::IndirectPhase early{State->Occlusion.Arguments, 0, &State->OcclusionFrame.RunEarly};
-			SDL_GPURenderPass *earlyPass = beginGBuffer(true);
+			SDL_GPURenderPass *earlyPass = beginGBuffer(!customOpaque);
 			if (earlyPass == nullptr) {
 				ENGINE_ERROR("gbuffer early: SDL_BeginGPURenderPass: {}", SDL_GetError());
 				return false;
@@ -249,12 +310,25 @@ namespace engine::render {
 			for (const auto &input : {depth, z, previous.IsValid() ? previous : z})
 				if (input.Width != colour.Width || input.Height != colour.Height) return false;
 			if ((previous.IsValid() && previous.Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT) ||
-				!State->EnsureTransparentLayer())
+				!State->DepthLinearPipeline || !State->EnsureTransparentLayer())
+				return false;
+			auto *interface = DrawInterface ? Request.GameInterfaceHook : nullptr;
+			const size_t interfaceBatches = interface ? interface->WorldBatchCount() : 0;
+			const auto scratchColour = texture(true, "interface-colour"),
+					   scratchZ = texture(true, "interface-z");
+			if (interfaceBatches &&
+				(!interface->SupportsWorldLayers() ||
+				 (interface->HasWorldOverlay() && !GraphEnabled(core::Name("spatial-overlay"))) ||
+				 !scratchColour.IsValid() || !scratchZ.IsValid() ||
+				 scratchColour.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				 scratchZ.Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT || scratchColour.Width != colour.Width ||
+				 scratchColour.Height != colour.Height || scratchZ.Width != colour.Width ||
+				 scratchZ.Height != colour.Height || !State->EnsureInterfaceLayer()))
 				return false;
 			EnterNamedPass(context.Name);
-			SDL_GPUColorTargetInfo targets[2]{};
+			uint32_t recordedPasses = 0;
+			SDL_GPUColorTargetInfo targets[1]{};
 			targets[0].texture = colour.Texture;
-			targets[1].texture = depth.Texture;
 			for (auto &target : targets) {
 				target.load_op = SDL_GPU_LOADOP_CLEAR;
 				target.store_op = SDL_GPU_STOREOP_STORE;
@@ -266,67 +340,165 @@ namespace engine::render {
 			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 			depthTarget.cycle = true;
-			for (int phase = 0; phase < (PlainTransparent ? 2 : 1); ++phase) {
+			for (int phase = 0; phase < (PlainTransparent || interfaceBatches ? 2 : 1); ++phase) {
 				targets[0].cycle = phase == 0;
-				auto *pass = SDL_BeginGPURenderPass(
-					Command, targets, phase == 0 ? 2 : 1, phase == 0 ? &depthTarget : nullptr
-				);
+				auto *pass = SDL_BeginGPURenderPass(Command, targets, 1, phase == 0 ? &depthTarget : nullptr);
 				if (!pass) return false;
-				if (PlainTransparent == 0) {
-					SDL_EndGPURenderPass(pass);
-					return true;
+				++recordedPasses;
+				if (PlainTransparent) {
+					State->BindPipeline(
+						pass,
+						phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
+						Impl::PipelineFamily::Other
+					);
+					State->BindInstanceBuffers(pass);
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					const FrameUniforms frame{Matrices.ViewProjection, LightViewProjection, glm::mat4{1}};
+					SDL_PushGPUVertexUniformData(Command, 0, &frame, sizeof(frame));
+					SDL_PushGPUFragmentUniformData(Command, 1, &SceneLights, sizeof(SceneLights));
+					SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+					const auto eye = Request.CameraFrame.Position;
+					const auto forward = Request.CameraFrame.LookVector();
+					const std::array<glm::vec4, 3> capture{
+						glm::vec4{eye.X, eye.Y, eye.Z, 0},
+						glm::vec4{forward.X, forward.Y, forward.Z, 0},
+						glm::vec4{phase == 0 && previous.IsValid() ? 1.f : 0.f, phase == 1 ? 1.f : 0.f, 0, 0}
+					};
+					SDL_PushGPUFragmentUniformData(Command, 3, capture.data(), sizeof(capture));
+					const SDL_GPUTextureSamplerBinding bounds[] = {
+						{opaque.Texture, State->OverlaySampler},
+						{phase == 1			  ? z.Texture
+						 : previous.IsValid() ? previous.Texture
+											  : opaque.Texture,
+						 State->OverlaySampler}
+					};
+					SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
+					const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
+					const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
+					SDL_SetGPUViewport(pass, &viewport);
+					SDL_SetGPUScissor(pass, &scissor);
+					auto lighting = LightingAt(eye, 0, 0);
+					if (!shadow.IsValid()) lighting.Flags.x = 0;
+					Result.DrawCalls += State->DrawSlots(
+						Command,
+						pass,
+						first,
+						PlainTransparent,
+						&lighting,
+						shadow.IsValid() ? shadow.Texture : State->FallbackTexture,
+						State->ShadowSampler ? State->ShadowSampler : State->OverlaySampler,
+						nullptr,
+						State->OverlaySampler,
+						0,
+						Result.Triangles
+					);
 				}
-				State->BindPipeline(
-					pass,
-					phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
-					Impl::PipelineFamily::Other
-				);
-				State->BindInstanceBuffers(pass);
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-				const FrameUniforms frame{Matrices.ViewProjection, LightViewProjection, glm::mat4{1}};
-				SDL_PushGPUVertexUniformData(Command, 0, &frame, sizeof(frame));
-				SDL_PushGPUFragmentUniformData(Command, 1, &SceneLights, sizeof(SceneLights));
-				SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
-				const auto eye = Request.CameraFrame.Position;
-				const auto forward = Request.CameraFrame.LookVector();
-				const std::array<glm::vec4, 3> capture{
-					glm::vec4{eye.X, eye.Y, eye.Z, 0},
-					glm::vec4{forward.X, forward.Y, forward.Z, 0},
-					glm::vec4{phase == 0 && previous.IsValid() ? 1.f : 0.f, phase == 1 ? 1.f : 0.f, 0, 0}
-				};
-				SDL_PushGPUFragmentUniformData(Command, 3, capture.data(), sizeof(capture));
-				const SDL_GPUTextureSamplerBinding bounds[] = {
-					{opaque.Texture, State->OverlaySampler},
-					{phase == 1			  ? z.Texture
-					 : previous.IsValid() ? previous.Texture
-										  : opaque.Texture,
-					 State->OverlaySampler}
-				};
-				SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
-				const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
-				const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
-				SDL_SetGPUViewport(pass, &viewport);
-				SDL_SetGPUScissor(pass, &scissor);
-				auto lighting = LightingAt(eye, 0, 0);
-				if (!shadow.IsValid()) lighting.Flags.x = 0;
-				Result.DrawCalls += State->DrawSlots(
-					Command,
-					pass,
-					first,
-					PlainTransparent,
-					&lighting,
-					shadow.IsValid() ? shadow.Texture : State->FallbackTexture,
-					State->ShadowSampler ? State->ShadowSampler : State->OverlaySampler,
-					nullptr,
-					State->OverlaySampler,
-					0,
-					Result.Triangles
-				);
 				SDL_EndGPURenderPass(pass);
+				// Capture one authored batch at the same projection, then peel its
+				// actual colour/depth. This preserves authored discard and alpha.
+				for (size_t batch = 0; batch < interfaceBatches; ++batch) {
+					SDL_GPUColorTargetInfo scratch{};
+					scratch.texture = scratchColour.Texture;
+					scratch.load_op = SDL_GPU_LOADOP_CLEAR;
+					scratch.store_op = SDL_GPU_STOREOP_STORE;
+					scratch.cycle = phase == 0 && batch == 0;
+					SDL_GPUDepthStencilTargetInfo scratchDepth{};
+					scratchDepth.texture = scratchZ.Texture;
+					scratchDepth.clear_depth = 1;
+					scratchDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+					scratchDepth.store_op = SDL_GPU_STOREOP_STORE;
+					scratchDepth.cycle = scratch.cycle;
+					auto *batchPass = SDL_BeginGPURenderPass(Command, &scratch, 1, &scratchDepth);
+					if (!batchPass) return false;
+					++recordedPasses;
+					const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
+					SDL_SetGPUViewport(batchPass, &viewport);
+					const auto lighting = LightingAt(Request.CameraFrame.Position, 0, 0);
+					WorldInterfaceCapture capture;
+					capture.Command = Command;
+					capture.Pass = batchPass;
+					capture.ViewProjection = Matrices.ViewProjection;
+					capture.Camera = Request.CameraFrame;
+					capture.Ambient = {lighting.Ambient.x, lighting.Ambient.y, lighting.Ambient.z};
+					capture.Sun = {lighting.Direction.x, lighting.Direction.y, lighting.Direction.z};
+					capture.Width = colour.Width;
+					capture.Height = colour.Height;
+					const auto draws = interface->RecordWorldBatch(capture, batch);
+					Result.DrawCalls += draws;
+					SDL_EndGPURenderPass(batchPass);
+					if (!draws) continue;
+					SDL_GPUColorTargetInfo mergeTargets[1] = {targets[0]};
+					for (auto &target : mergeTargets) {
+						target.load_op = SDL_GPU_LOADOP_LOAD;
+						target.cycle = false;
+					}
+					auto mergeDepth = depthTarget;
+					mergeDepth.load_op = SDL_GPU_LOADOP_LOAD;
+					mergeDepth.cycle = false;
+					auto *merge =
+						SDL_BeginGPURenderPass(Command, mergeTargets, 1, phase == 0 ? &mergeDepth : nullptr);
+					if (!merge) return false;
+					++recordedPasses;
+					State->BindPipeline(
+						merge,
+						phase == 0 ? State->InterfaceLayerPipeline : State->InterfaceLayerColourPipeline,
+						Impl::PipelineFamily::Other
+					);
+					SDL_SetGPUViewport(merge, &viewport);
+					const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
+					SDL_SetGPUScissor(merge, &scissor);
+					const SDL_GPUTextureSamplerBinding samplers[] = {
+						{scratchColour.Texture, State->OverlaySampler},
+						{scratchZ.Texture, State->OverlaySampler},
+						{opaque.Texture, State->OverlaySampler},
+						{phase == 1			  ? z.Texture
+						 : previous.IsValid() ? previous.Texture
+											  : opaque.Texture,
+						 State->OverlaySampler}
+					};
+					SDL_BindGPUFragmentSamplers(merge, 0, samplers, 4);
+					const auto eye = Request.CameraFrame.Position, forward = Request.CameraFrame.LookVector();
+					struct Uniforms {
+						glm::mat4 Inverse;
+						glm::vec4 CameraDepth, Flags;
+					} uniforms{
+						glm::inverse(Matrices.ViewProjection),
+						{forward.X, forward.Y, forward.Z, -forward.Dot(eye)},
+						{phase == 0 && previous.IsValid() ? 1.f : 0.f, phase == 1 ? 1.f : 0.f, 0, 0}
+					};
+					SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+					SDL_DrawGPUPrimitives(merge, 3, 1, 0, 0);
+					++Result.DrawCalls;
+					SDL_EndGPURenderPass(merge);
+					core::Metrics::Count("render.transparent_layer.interface_batches", 1);
+				}
 			}
 
-			core::Metrics::Count("render.transparent_layer.passes", PlainTransparent ? 2 : 1);
+			// Body depth uses this same D32 reconstruction. Interpolated world depth
+			// can put coincident glass in front of an opaque body after import.
+			auto linearUniforms = Uniforms;
+			linearUniforms.Target.z = linearUniforms.Target.w = 1;
+			linearUniforms.Direction.w = 1;
+			const std::array linearBindings{
+				SDL_GPUTextureSamplerBinding{z.Texture, DepthBindings[0].sampler}
+			};
+			Fullscreen(
+				context.Name,
+				State->DepthLinearPipeline,
+				depth.Texture,
+				depth.Width,
+				depth.Height,
+				linearBindings,
+				&linearUniforms,
+				nullptr,
+				SDL_FColor{}
+			);
+			++recordedPasses;
+			core::Metrics::Count(
+				"render.transparent_layer.depth_bytes", uint64_t(depth.Width) * depth.Height * 4
+			);
+			core::Metrics::Count("render.transparent_layer.passes", recordedPasses);
 			core::Metrics::Count("render.transparent_layer.pixels", uint64_t(colour.Width) * colour.Height);
 			return true;
 		});

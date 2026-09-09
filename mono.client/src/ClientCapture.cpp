@@ -35,6 +35,9 @@ namespace client {
 			{"seconds", core::Clock::Seconds()},
 			{"input_world", std::string(Universe_->NameOf(inputWorld).Text())},
 			{"view_world", std::string(view.WorldName.Text())},
+			{"content_owner", std::string(view.ContentOwner.Text())},
+			{"delivered_meshes", ContentMeshes},
+			{"delivered_textures", ContentTextures},
 			{"camera", pose(view.CameraFrame)},
 			{"field_of_view", view.Camera.FieldOfViewRadians},
 			{"near", view.Camera.NearPlane},
@@ -44,13 +47,43 @@ namespace client {
 			{"instances", view.Instances.size()},
 			{"portals", view.Portals.size()},
 		};
+		const auto memory = Renderer.MemoryStatistics();
+		frame["gpu_memory"] = {
+			{"live_bytes", memory.LiveBytes},
+			{"texture_bytes", memory.TextureBytes},
+			{"textures", memory.Textures},
+			{"buffer_bytes", memory.BufferBytes},
+			{"released_bytes", memory.ReleasedBytes}
+		};
+		const auto pending = [](const std::unique_ptr<ContentSession> &content) {
+			return content ? content->Pending.size() + content->Issued.size() : size_t{0};
+		};
+		frame["pending_content"] = pending(ContentState) +
+								   (PortalPrevious ? pending(PortalPrevious->Content) : 0) +
+								   (PortalNext ? pending(PortalNext->Content) : 0);
+		if (PortalPrevious)
+			frame["retained_world"] = std::string(Universe_->NameOf(PortalPrevious->World).Text());
+		if (PortalDrawing) {
+			const bool successor = PortalNext && PortalDrawing == &PortalNext->View;
+			frame["observed_successor"] = successor;
+			frame["observed_world"] = successor ? PortalNext->Offer.Claim.Destination
+												: std::string(PortalPrevious->Authored.Text());
+			frame["observed_tick"] = PortalDrawing->Frame.Tick;
+		}
 		// Record the accepted camera, not only the current eye, to diagnose delayed-image handoffs.
 		const auto captureOf = [&](engine::core::Name key) -> json {
 			if (!PortalImages) return nullptr;
 			const auto capture = PortalImages->Capture(view.Slot, key);
 			if (!capture) return nullptr;
+			json lenses = json::array();
+			for (const auto &lens : capture->Lenses.Entries)
+				lenses.push_back({{"shader", lens.Shader}, {"program_hash", lens.ProgramHash.ToHex()}});
 			return {
+				{"lens_count", capture->Lenses.Entries.size()},
+				{"lens_time", capture->Lenses.TimeSeconds},
+				{"lenses", std::move(lenses)},
 				{"image", capture->Image},
+				{"spatial_overlay_image", capture->SpatialOverlayImage},
 				{"producer", capture->Producer.World},
 				{"session", capture->Producer.Session},
 				{"generation", capture->Producer.Generation},
@@ -167,6 +200,9 @@ namespace client {
 			if (const auto *identity = store.Get<scene::PlayerIdentity>(local->Instance))
 				frame["player_user_id"] = identity->UserId;
 			frame["root"] = rig->Root.Id;
+			frame["humanoid"] = rig->Humanoid.Id;
+			if (const auto *humanoid = store.Get<scene::Humanoid>(rig->Humanoid))
+				frame["humanoid_move_direction"] = vector(humanoid->MoveDirection);
 			const auto *hold = store.Resource<scene::CameraCharacterHold>();
 			const bool retained =
 				hold && hold->Active && hold->Root == rig->Root && hold->Player == local->Instance;
@@ -182,6 +218,7 @@ namespace client {
 				frame["prediction_correction_seconds"] = prediction->CorrectionSeconds;
 				frame["prediction_authority_tick"] = prediction->AuthorityTick;
 				frame["predicted_velocity"] = vector(prediction->Linear);
+				frame["predicted_move_direction"] = vector(prediction->Humanoid.MoveDirection);
 			}
 		});
 		if (PortalNext) {
@@ -193,6 +230,12 @@ namespace client {
 				{"crossed", next.Crossed},
 				{"resume", next.ResumeSent},
 				{"ready", next.Ready},
+				{"scene_admitted", next.Connection && next.Connection->Admitted()},
+				{"scene_joined", next.Connection && next.Connection->Joined()},
+				{"scene_live", next.Connection && next.Connection->Live()},
+				{"scene_rejected", next.Connection && next.Connection->Rejected()},
+				{"refused", next.Refused},
+				{"failure", next.Failure},
 				{"commit", next.CommitSent},
 				{"drawing_player", next.DrawingArrivedPlayer},
 				{"reconnecting", next.ReconnectAt > core::Clock::Seconds()},

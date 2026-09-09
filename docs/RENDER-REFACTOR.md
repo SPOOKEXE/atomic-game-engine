@@ -2,14 +2,14 @@
 
 ## continue here: portal crossing, 2026-09-07
 
-This is an implementation checkpoint, not completion of the refactor. The user
-requested that all current working-tree changes be committed together. No further
-code changes were made during the handoff. Detailed evidence and local artifact
-paths are in [PORTAL-HANDOFF.md](PORTAL-HANDOFF.md).
+This is an implementation checkpoint, not completion of the refactor. Work
+resumed on 2026-09-08 with gameplay lease retirement and admitted source observer
+and content ownership. Detailed evidence and local artifact paths are in
+[PORTAL-HANDOFF.md](PORTAL-HANDOFF.md).
 
-- Next: finish authorized retained-world observation and content delivery. Separate gameplay lease retirement after destination adoption from presentation lifetime; the old source connection currently keeps renewing the lease.
-- Then: prepare complete foreign-world views and render them from the current camera. Include lighting, particles, ribbons, spatial UI and character layers. Replacing only geometry mixes worlds; flat images cannot reveal newly visible surfaces.
-- Keep the moving-camera `[eye-current-camera]` failure as the image gate: three moving cases remain failing. The retained-source staging prototype was rolled back and must not be treated as implemented.
+- Next: finish retained-world endpoint/lifetime and Client-driven GPU owner-retirement checks across content sessions. Renderer checks now cover retirement before submitted-draw readback and twelve owner reload cycles with stable surviving pixels and bounded logical residency. Client source-observation expiry releases its published texture while the successor stays visible; product mesh reclamation and staged cancellation remain open. Client mesh/texture delivery, editable uploads, native/copied views, image callbacks and main viewport widgets use local world residency names. Staged successors pump their own content route and move it at adoption. Late same-name mesh/texture delivery, refused source assets and later local-world demand now pass product checks. Per-owner demand history prevents adoption from fetching completed destination assets again. Gameplay lease renewal stops after authenticated destination adoption; full current-camera rendering remains open.
+- Then: complete current-camera foreign rendering. The Client binds shared packets for retained sources and authenticated successors, including the continued body pose before adoption. Admitted local destinations supply complete portal captures at the requested camera. The earlier 24-run product matrix passed 202,963 assertions; newer resource checks are recorded in the handoff. The shader compiler cache supports owner-scoped material/lens modules, and Client material/lens uploads, postprocess selection and screen interface shaders now use those owners. Spatial interface variants now pass owner, clipping and depth-mode pixel checks through both display and HDR graphs. The handoff corrects the earlier format label. Accepted shader hashes now let each interface pass reconcile missed refreshes independently; Client GUI preparation uses that path. Material, lens and postprocess device registration now reuses identical accepted words without resource invalidation. Client main, retained and staged views now share owner-scoped shader preparation. Portal producers now use the same preparation before renewal checks, sharing the Client compiler and postprocess setting. Authored opaque programs now draw through the deferred graph with colour and nearest depth preserved. The real 60 Hz Client round trip now verifies same-name red/blue material shaders. It reproduced and closed missing material resolution before replica collection. The reproduced spatial GUI adoption jump is closed for depth-tested collectors: authored GUI batches now join remote ordered layers through graph-owned scratch colour/depth and layer replay. The current body still composes against those depths. Always-on-top collectors need a separate ordering contract and are explicitly refused by this path. Studio migration, lens/grade shader crossing and shader edits during transfer remain open. Foreign viewport-widget preparation, unadmitted eyes and remote portal-image parallax also remain open.
+- Keep the moving-camera `[eye-current-camera]` failure as the image gate: three moving cases remain failing. The old retained-source image staging prototype remains rolled back; the new observer/successor geometry path is a separate implementation.
 - Reproduce the original black frame with a valid image handle using the stage probe. A separate missing-image black frame was captured during a topology wait; a common cause is unproven.
 - Verify continuous outbound/return player crossing with Humanoid camera subjects, body ownership and obstruction under delayed messages, restarts, refusals and lost acknowledgements.
 - Complete visual checks for lighting, clipping, transparency, effects and animated accessories at oblique, rolled and scaled portal angles; inspect the non-Euclidean demo.
@@ -123,7 +123,7 @@ or a checked box without inspecting its implementation and consumer.
 | Graph authoring | `mono.engine/graph/src/PipelineDocument.cpp`, `PipelineCatalogue.cpp`, `NodeSchema.cpp`; Studio `RenderPipelineGraph.cpp` | Keep ordered documents, shared declarations, typed links and round-trip tests. |
 | Node handlers | `mono.engine/render/src/nodes/{Upload,Geometry,Shading,Shadow,Portal,Mirror,Authored,Output}Nodes.cpp` | Existing family split is the migration seam. |
 | Upload wrapper | `UploadNodes.cpp` registers CPU finish spans and `upload-instances`; CPU work currently happens in `ViewRecording::Begin` | Make scheduling control real execution, not only retrospective labels. |
-| Instance packing | `InstancePacking.hpp::GpuInstance` has position, snorm16 quaternion, scale, colour, appearance, surface colour and emission | Current row is 48 bytes, not the 40 bytes in older optimization notes. Extend/version based on measured layout needs. |
+| Instance packing | `InstancePacking.hpp::GpuInstance` has position, full-float quaternion, scale, packed colour/appearance/surface colour/emission | Current aligned row is 64 bytes. Lower-precision quaternion experiments caused oblique aperture coverage gaps; retain numeric and image gates when changing this layout. |
 | World instance residency | `InstanceResidency.hpp`, corresponding tests | Reuse stable slots, generations, dirty spans and acknowledgements. |
 | View ordering | `IndexResidency.hpp` holds three in-flight versions and pending acknowledgement | Preserve per-view whitelists and failure retry; do not upload shared rows for each camera. |
 | Batched renderer | `Renderer.hpp` and `Renderer.cpp` expose a span of `View` values | Product collection remains work. Studio `Editor::PresentWorld` still builds a round-robin candidate list. |
@@ -1663,8 +1663,11 @@ wire/resident ownership, overflow handling and product wiring remain required.
 The `transparent-layer` graph node peels ordinary transparent geometry using
 native device depth from the same projection. A nearest-fragment pass stores its
 D32 attachment; a second pass blends every fragment at that exact selected depth
-in draw order. The node exports premultiplied HDR colour, R32 camera-forward depth
-and native D32 depth for the next peel. `opaque-z` rejects opaque occlusion and
+in draw order. A final fullscreen pass reconstructs R32 camera-forward depth
+from the selected D32 attachment with the same shader used for opaque body depth.
+Interpolated world-position depth is not interchangeable at exact ties. The node
+exports premultiplied HDR colour, reconstructed R32 depth and native D32 depth
+for the next peel. `opaque-z` rejects opaque occlusion and
 `previous-z` rejects preceding layers. The compositor's `mode=premultiplied`
 accepts this colour without multiplying its opacity twice. No extra texture or
 CPU readback is needed for the gather pass.
@@ -1672,8 +1675,12 @@ CPU readback is needed for the gather pass.
 Exact depth ties preserve all contributions. Transformed, mathematically
 coplanar panes can round to adjacent device depths and occupy separate layers;
 tests require their complete opacity and direct-render pixel parity without a
-world-space epsilon. Checks cover overlapping coplanar panes, rotated cameras,
-intervening opaque bodies and exact opaque ties. Surface shading and declared
+world-space epsilon. That parity gate is currently failing: native drawing sorts
+whole objects, while peeling sorts fragments. Intersecting panes reproduce the
+same disagreement with clearly separated depths, independently of coplanar
+rounding. The ordering contract must be unified before this gate can close.
+Checks cover overlapping coplanar panes, rotated cameras, intervening opaque
+bodies and exact opaque ties. Surface shading and declared
 shadow sampling match the forward pass; unsupported surface/custom-shader rows
 refuse capture. A third depth capture detects overflow in the two-layer fixture.
 Particles, ribbons, nested apertures, bounded atomic layer-set publication,

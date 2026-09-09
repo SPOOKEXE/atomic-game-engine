@@ -190,6 +190,26 @@ portal-exchange-bench samples="5":
     cmake --build --preset bench --target bench_render
     ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-exchange --samples {{samples}}
 
+# Five-plane CPU codec cost, raw/compressed decoding and automatic roundtrips.
+# Each reported call is one complete 1/2/8-view batch; output stays on the terminal.
+portal-ambient-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
+
+# Six-plane CPU codec at 255x255; setup also verifies raw 256x256 wire refusal.
+portal-directional-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_PORTAL_CODEC_DIRECTIONAL=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
+
+# Opt-in existing FrameGraph hierarchy, once during benchmark setup for each codec path.
+# Normal timed samples run after collection is disabled; no profile files are written.
+portal-ambient-profile samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_PORTAL_CODEC_PROFILE=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
+
 # The Luau boundary rows, including the complete async compute lifecycle. Keep
 # this explicit because a binding benchmark is useful while working on the VM
 # without running every benchmark in the repository.

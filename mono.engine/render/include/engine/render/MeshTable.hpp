@@ -148,7 +148,9 @@ namespace engine::render {
 		// Releases the buffers.
 		void Shutdown();
 
-		// Registers a mesh, replacing one of the same name.
+		// Registers a mesh, replacing one of the same name and content owner.
+		// Empty owner selects shared content. Scoped queries never search other owners;
+		// Resolve returns the built-in fallback when the scoped name is absent.
 		//
 		// The bytes are kept on the host until `Flush`, so a burst of arrivals
 		// costs one upload rather than one each.
@@ -161,7 +163,7 @@ namespace engine::render {
 		// @param name The name a `DrawInstance` will ask for.
 		// @param mesh The geometry. An invalid one is refused.
 		// @return `false` for an invalid mesh or a table that would overflow.
-		bool Add(const core::Name &name, const assets::MeshData &mesh);
+		bool Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
 
 		// Uploads whatever `Add` has accumulated.
 		//
@@ -229,14 +231,18 @@ namespace engine::render {
 		// The entry for a name, or the default when the name is unknown.
 		//
 		// Unknown names resolve to the fallback mesh; this never returns null.
-		const MeshEntry &Resolve(const core::Name &name) const;
+		const MeshEntry &Resolve(const core::Name &name, core::Name owner = {}) const;
 
 		// Whether a name has been registered.
 		//
 		// @param name The name.
 		// @return `true` when `Resolve` would return that mesh rather than the
 		//         default.
-		bool Has(const core::Name &name) const;
+		bool Has(const core::Name &name, core::Name owner = {}) const;
+
+		// Retires one content owner. Its ranges become reusable after DEFERRED_FRAMES.
+		// Shared entries are retained; an empty owner is refused. Returns entries retired.
+		size_t DropOwner(core::Name owner);
 
 		// How many meshes are registered.
 		size_t Count() const {
@@ -336,7 +342,7 @@ namespace engine::render {
 
 		std::vector<assets::MeshVertex> HostVertices;
 		std::vector<uint32_t> HostIndices;
-		std::unordered_map<uint32_t, MeshEntry> Entries;
+		std::unordered_map<uint64_t, MeshEntry> Entries;
 		MeshEntry Fallback;
 		bool Dirty = false;
 	};

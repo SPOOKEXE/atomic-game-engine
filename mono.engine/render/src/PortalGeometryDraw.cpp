@@ -272,6 +272,49 @@ namespace engine::render {
 		}
 		return EncodePortalGeometry(geometry, out, error);
 	}
+	bool RemoveRetainedPortalBody(
+		const ecs::Store &store,
+		std::string_view player,
+		std::vector<scene::DrawInstance> &rows,
+		std::span<const uint32_t> importedRows,
+		std::vector<uint32_t> &eyeHidden,
+		std::string &error
+	) {
+		if (player.empty() || !ValidPortalPlayerIdentity(player) ||
+			!std::is_sorted(importedRows.begin(), importedRows.end()) ||
+			!std::is_sorted(eyeHidden.begin(), eyeHidden.end()) ||
+			std::adjacent_find(eyeHidden.begin(), eyeHidden.end()) != eyeHidden.end() ||
+			(!importedRows.empty() && importedRows.back() >= rows.size()) ||
+			(!eyeHidden.empty() && eyeHidden.back() >= rows.size())) {
+			error = "invalid retained body selection";
+			return false;
+		}
+		int64_t account = 0;
+		std::from_chars(player.data(), player.data() + player.size(), account);
+		const auto *held = store.Resource<scene::CameraCharacterHold>();
+		size_t kept = 0, hiddenKept = 0, hiddenAt = 0;
+		for (size_t index = 0; index < rows.size(); ++index) {
+			const auto &row = rows[index];
+			bool remove = std::binary_search(importedRows.begin(), importedRows.end(), index);
+			if (row.Rig != 0 && (!row.SourceWorld.IsValid() || row.SourceWorld.Text() == store.Name())) {
+				auto owner = scene::PlayerOf(store, store.ParentOf(ecs::Entity(row.Rig)));
+				if (held && held->Active && row.Rig == held->SourceRoot.Id) owner = held->Player;
+				const auto *identity = store.Get<scene::PlayerIdentity>(owner);
+				remove |= identity && identity->UserId == account;
+			}
+			const bool hidden = hiddenAt < eyeHidden.size() && eyeHidden[hiddenAt] == index;
+			if (hidden) ++hiddenAt;
+			if (remove) continue;
+			if (hidden) eyeHidden[hiddenKept++] = static_cast<uint32_t>(kept);
+			if (kept != index) rows[kept] = row;
+			++kept;
+		}
+		rows.resize(kept);
+		eyeHidden.resize(hiddenKept);
+		error.clear();
+		return true;
+	}
+
 	bool AppendPortalDraws(
 		std::span<const std::byte> bytes,
 		core::Name sourceWorld,
@@ -286,7 +329,8 @@ namespace engine::render {
 			return false;
 		}
 		if (!sourceWorld.IsValid() || rows.size() > UINT32_MAX - geometry.Rows.size() ||
-			(selection && !ValidPortalPlayerIdentity(selection->Player)) ||
+			(selection && (!ValidPortalPlayerIdentity(selection->Player) ||
+						   !ValidPortalPlayerIdentity(selection->RetainedBodyPlayer))) ||
 			joints.size() > std::numeric_limits<uint32_t>::max() - geometry.Joints.size()) {
 			error = "invalid portal draw destination";
 			return false;
@@ -317,6 +361,7 @@ namespace engine::render {
 		const auto first = static_cast<uint32_t>(joints.size());
 		if (selection) {
 			selection->Hidden.clear();
+			selection->RetainedBodyRows.clear();
 			selection->Appended = geometry.Rows.size();
 			selection->Replaced = previousRows - rows.size();
 		}
@@ -360,6 +405,9 @@ namespace engine::render {
 			draw.SkinCount = static_cast<uint16_t>(row.JointCount);
 			if (selection && !selection->Player.empty() && selection->Player == row.Player)
 				selection->Hidden.push_back(static_cast<uint32_t>(rows.size()));
+			if (selection && !selection->RetainedBodyPlayer.empty() &&
+				selection->RetainedBodyPlayer == row.Player)
+				selection->RetainedBodyRows.push_back(static_cast<uint32_t>(rows.size()));
 			rows.push_back(draw);
 		}
 		for (const auto &joint : geometry.Joints) {

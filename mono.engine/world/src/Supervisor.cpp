@@ -313,6 +313,8 @@ namespace engine::world {
 					DirectoryInbound.push_back({entry.Plan.Name, std::move(frame.Directory)});
 					break;
 				case HostSignal::PresentationRoutes:
+				case HostSignal::PresentationBindings:
+					// Route grants and endpoint aliases come from parent control.
 					PresentationRefused++;
 					break;
 

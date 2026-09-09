@@ -107,6 +107,10 @@ namespace engine::graph {
 
 		// One line for a tooltip. Empty is allowed and reads as no tooltip.
 		std::string Summary{};
+
+		// Output consumed inside this node, such as a chain intermediate or depth attachment.
+		// Its allocation stays visible even when no later node reads it.
+		bool InternalUse = false;
 	};
 
 	// Where a kind belongs in the add menu.

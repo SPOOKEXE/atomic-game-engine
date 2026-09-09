@@ -1,7 +1,3 @@
-#include <engine/assets/Animation.hpp>
-#include <engine/assets/ContentForm.hpp>
-#include <engine/assets/Manifest.hpp>
-#include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
 #include <engine/control/Features.hpp>
 #include <engine/control/features/Script.hpp>
@@ -12,7 +8,6 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Shooting.hpp>
-#include <engine/game/CollisionContent.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
@@ -26,21 +21,16 @@
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
 #include <engine/parallel/Settings.hpp>
-#include <engine/render/Animation.hpp>
 #include <engine/render/DebugText.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
-#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
-#include <engine/scene/MeshCatalogue.hpp>
-#include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
-#include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Postbox.hpp>
@@ -52,7 +42,6 @@
 #include <array>
 #include <chrono>
 #include <client/Client.hpp>
-#include <client/ContentDemand.hpp>
 #include <client/Replicated.hpp>
 #include <cstddef>
 #include <fstream>
@@ -286,7 +275,9 @@ namespace client {
 			ENGINE_ERROR("could not configure portal image transport");
 			return false;
 		}
-		PortalImages = std::make_unique<engine::render::PortalImageHost>(*Universe_, Renderer);
+		PortalImages = std::make_unique<engine::render::PortalImageHost>(
+			*Universe_, Renderer, &Shaders, Settings.EnablePostProcessing
+		);
 
 		const bool replicaProducer = Settings.PresentationSession != 0 && !Settings.ConnectAddress.empty();
 		// A live producer owns only its received replica, without a local demo.
@@ -574,592 +565,18 @@ namespace client {
 		// missing key here is "not yet" rather than "never". Refusing to start
 		// would make redirect mode unreachable for exactly the deployment it is
 		// for: a player who was given an address and nothing else. Nothing is
-		// fetched in the meantime - `Content` stays null until a key exists -
+		// fetched in the meantime - `ContentState->Client` stays null until a key exists -
 		// so the trust boundary is unchanged.
 		if (Settings.ContentPublisherKey.empty() && ExpectsServerContent()) {
 			ENGINE_INFO("content: waiting for the server to name a publisher key");
 			return true;
 		}
 
-		return BuildContentClient();
+		return BuildContentClient(*ContentState);
 	}
 
 	bool Client::ExpectsServerContent() const {
 		return !Settings.ConnectAddress.empty() || Settings.Browse || !Settings.RendezvousAddress.empty();
-	}
-
-	bool Client::BuildContentClient() {
-		engine::delivery::DeliverySettings settings;
-		settings.CachePath = Settings.ContentCache;
-		settings.AllowedHosts = Settings.ContentAllowedHosts;
-		settings.Sources = MergeContentSources(
-			Settings.ContentSources,
-			OfferedContentSources,
-			ContentRelay != nullptr
-				? (Settings.ConnectAddress.empty() ? std::string_view("server")
-												   : std::string_view(Settings.ConnectAddress))
-				: std::string_view()
-		);
-
-		if (settings.Sources.empty()) {
-			// Nobody named anything and there is no link. The origin on this
-			// machine is the historical default and stays it.
-			settings.Sources = engine::delivery::DeliverySettings::Default(Settings.ContentCache).Sources;
-		}
-
-		// **A key pinned here is kept and a server's is only ever a fallback.** A
-		// pinned client refuses rather than downgrades, which is the same position
-		// `ConnectorSettings::ServerIdentity` takes one module along.
-		const std::string &publisher =
-			Settings.ContentPublisherKey.empty() ? OfferedPublisherKey : Settings.ContentPublisherKey;
-		if (const auto key = engine::assets::PublicKey::FromHex(publisher)) {
-			settings.Publisher = *key;
-		} else {
-			ENGINE_ERROR("content delivery needs --publisher-key, 64 hex characters");
-			ENGINE_ERROR("a client that accepted an unsigned manifest would have no trust boundary");
-			return false;
-		}
-
-		std::unique_ptr<engine::delivery::AssetClient> built =
-			engine::delivery::MakeAssetClient(settings, ContentRelay.get());
-		if (!built) {
-			return false;
-		}
-		if (!OfferedContentGrant.empty()) {
-			built->UseGrant(OfferedContentGrant);
-		}
-
-		Content = std::move(built);
-
-		// **Everything asked for is asked for again.** A rebuilt client holds none
-		// of the previous one's requests, and the demand walk only asks for what
-		// it has not asked for - so a set left behind would leave every texture
-		// this client already wanted permanently unrequested.
-		ContentRequested = false;
-		ContentReported = false;
-		ContentPending.clear();
-		ContentIssued.clear();
-		ContentAsked.clear();
-
-		ENGINE_INFO(
-			"content: {} source(s), first is '{}'", settings.Usable().size(), settings.Usable().front().Name
-		);
-		return true;
-	}
-
-	void Client::AdoptContentDirectory(const engine::game::ContentDirectory &directory) {
-		const OfferedContent accepted = AcceptOfferedContent(directory, Settings.ContentAllowedHosts);
-		if (accepted.RefusedByAllowList != 0) {
-			ENGINE_WARN(
-				"content: this client's allow-list refused {} origin(s) the server named",
-				accepted.RefusedByAllowList
-			);
-		}
-		if (accepted.UnresolvedNames != 0) {
-			// **One warning rather than a stream of failures.** `Endpoint::Parse`
-			// refuses a host *name* on purpose - resolving one blocks on a network
-			// service and nothing on the fetch path may block - so a server that
-			// named one has a configuration problem, and saying it once at the
-			// door is where it is useful.
-			ENGINE_WARN(
-				"content: the server named {} origin(s) by host name rather than address - a name has to be "
-				"resolved before it gets here, so they were skipped",
-				accepted.UnresolvedNames
-			);
-		}
-
-		OfferedContentSources = accepted.Permitted;
-		OfferedPublisherKey = directory.PublisherKey;
-		OfferedContentGrant = directory.Grant;
-
-		if (!BuildContentClient()) {
-			ENGINE_WARN("content: what the server named could not be used");
-		}
-	}
-
-	void Client::PumpContent() {
-		if (!Content) {
-			return;
-		}
-
-		// **Named in pieces rather than as one bar, because "content costs
-		// 3 seconds" is not an answer.** The three things under here are a
-		// delivery client resolving and verifying bundles, a demand scan over
-		// the worlds, and a decode-and-upload of whatever finished - and they
-		// stall for entirely different reasons. The whole of this used to have
-		// no span at all, so the frame a game finished loading in read as a
-		// three-second hole between `pump events` and `simulation`, which is
-		// exactly the shape a missing span has and exactly how it was reported.
-		ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
-
-		if (!ContentRequested && Content->Ready()) {
-			ContentRequested = true;
-
-			// **Nothing is requested by kind, which is what v0.10 ended.** The
-			// unit that travels is a *bundle*, so asking for every mesh and
-			// every material asks for essentially every bundle in the store -
-			// and `AssetClient::Pump` resolves, verifies and decompresses all of
-			// it synchronously, because the contract forbids a background
-			// thread. On this repository's own store that was 6.9 GB through one
-			// function on the frame the client started.
-			//
-			// `client/ContentDemand.hpp` carries both failures this replaces.
-			ENGINE_INFO("content: catalogue ready - assets are fetched as the world names them");
-
-			// **The manifest's mesh names, handed to the world once.** Names, not
-			// content - a few hundred strings against the 6.9 GB above. It is the
-			// only way a scene can find out what there is to name, because the
-			// catalogue it can otherwise read holds what has already been asked
-			// for. `scene/PublishedCatalogue.hpp` carries the whole argument, and
-			// naming one of these is still what fetches it.
-			OfferPublishedContent();
-		}
-
-		// **A diff rather than a walk of the catalogue, and only for a world
-		// that has moved.** A world's content names change when a scene is
-		// authored, loaded or replicated, and all three of those happen inside
-		// a tick - so a world whose tick has not advanced is one whose answer
-		// cannot have. `RequestWantedContent` carries the gate. What survives
-		// the diff is almost always nothing, which is why running it every
-		// frame was eight store walks per world to produce an empty list.
-		if (ContentRequested) {
-			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
-			{
-				ENGINE_PROFILE_CAT("content.demand.references", engine::core::ProfileCategory::Assets);
-				RequestWantedContent();
-			}
-		}
-
-		{
-			// Apply completions between frames, outside render passes.
-			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
-			Content->Pump();
-		}
-
-		// **How much decoding and uploading one frame will do**, and the same
-		// allowance the studio's own intake uses for the same reason: content
-		// arrives in bursts, and draining every completed request in the frame
-		// that noticed them is a frame that takes a third of a second when
-		// somebody walks into a room full of new models. `IntakeBudget` says why
-		// it is bytes rather than a count and why the first arrival is always
-		// admitted.
-		ContentBudget.Begin();
-
-		ENGINE_PROFILE_CAT("content.intake", engine::core::ProfileCategory::Assets);
-
-		size_t kept = 0;
-		for (const engine::delivery::RequestId id : ContentPending) {
-			const engine::delivery::RequestState state = Content->StateOf(id);
-			if (state == engine::delivery::RequestState::Pending) {
-				ContentPending[kept++] = id;
-				continue;
-			}
-
-			// Held rather than dropped: an arrival this frame cannot take is
-			// still an arrival, and putting it back is what makes the budget a
-			// delay instead of a loss.
-			if (!ContentBudget.Admits()) {
-				ContentBudget.Defer();
-				ContentPending[kept++] = id;
-				continue;
-			}
-
-			// **Read before the take, because a take is what destroys it.** A
-			// failed request answers no asset and therefore no name, and the
-			// name is what has to be unmarked - see `render::ChooseTexture`.
-			const engine::core::Name asked(Content->NameOf(id));
-
-			std::optional<engine::delivery::Asset> asset = Content->Take(id);
-
-			// **On the request finishing, not on it succeeding**, and above
-			// every `continue` below so no branch can forget. Unmarking only on
-			// arrival would leave a misspelled sheet expected for ever, which is
-			// precisely the case the purple marker exists for.
-			Renderer.StopExpectingTexture(asked);
-
-			if (!asset) {
-				// Failed, or already taken. Either way there is nothing more to
-				// wait for; `delivery` has already counted it.
-				continue;
-			}
-
-			ContentBudget.Spend(asset->Bytes.size());
-
-			// **The name is published as-is, extension included.** A
-			// `SurfaceAppearance` naming `characters/skin.atex` and a manifest
-			// carrying `characters/skin.atex` have to be the same string or the
-			// lookup misses - and the one place that could diverge is here.
-			const engine::core::Name name(asset->Name);
-			engine::core::ByteReader reader(asset->Bytes);
-
-			if (asset->Kind == engine::assets::AssetKind::Mesh) {
-				engine::assets::MeshData mesh;
-				{
-					ENGINE_PROFILE_CAT("mesh decode", engine::core::ProfileCategory::Assets);
-					if (!engine::assets::Mesh::Read(reader, mesh)) {
-						ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
-						continue;
-					}
-				}
-				// **A mesh's own sheets, asked for at the one point their names
-				// are readable.** `Submesh::Texture` lives in the mesh file, so
-				// `CollectWantedTextures` cannot see it - an imported model's
-				// twenty sheets would otherwise never be fetched at all now that
-				// textures are demand-driven.
-				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
-					if (!submesh.Texture.empty()) {
-						RequestAsset(engine::core::Name(submesh.Texture));
-					}
-				}
-
-				// The upload, which had no span while its texture sibling did -
-				// so a slow mesh looked like time `content` spent on nothing.
-				ENGINE_PROFILE_CAT("mesh upload", engine::core::ProfileCategory::Render);
-				if (Renderer.AddMesh(name, mesh)) {
-					VisualResourcesChanged = true;
-					ContentMeshes++;
-
-					// **The sheets its submeshes name, recorded where they are
-					// readable.** They live inside the mesh file, so this is the
-					// one point anything can learn them - and without them a
-					// script that wants to swap a model's texture has no way to
-					// find out what it is wearing or what to put back.
-					std::vector<engine::core::Name> sheets;
-					sheets.reserve(mesh.Submeshes.size());
-					for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
-						sheets.emplace_back(submesh.Texture);
-					}
-
-					// Mesh metadata is world data, not renderer state.
-					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
-
-					// **The collision geometry, baked once here rather than per
-					// world.** A hull and a triangle soup are a function of the
-					// mesh alone, so building them inside the loop below would
-					// be the same quickhull run four times for four worlds.
-					//
-					// **Through `game` rather than inline**, because a headless
-					// server bakes the same two shapes out of the store it
-					// serves: a second copy of the conversion here is how the
-					// two would come to disagree about a hull, which reads as a
-					// client and a server disagreeing about where a player is
-					// standing.
-					engine::scene::CollisionShapes arrived;
-					{
-						ENGINE_PROFILE_CAT("mesh collision", engine::core::ProfileCategory::Assets);
-						engine::game::AddCollisionShapes(arrived, name, mesh);
-					}
-
-					const auto record = [&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
-						engine::scene::RecordMesh(store, name, triangles, sheets);
-						engine::game::MergeCollisionShapes(store, arrived);
-					};
-
-					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, record);
-					}
-					if (ReportedJoin) {
-						Universe_->Enter(Replicated, record);
-					}
-				}
-			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
-				engine::assets::TextureData image;
-				{
-					ENGINE_PROFILE_CAT("texture decode", engine::core::ProfileCategory::Assets);
-					if (!engine::assets::Texture::Read(reader, image)) {
-						ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
-						continue;
-					}
-				}
-				{
-					ENGINE_PROFILE_CAT("texture upload", engine::core::ProfileCategory::Assets);
-					if (Renderer.AddTexture(name, image)) {
-						VisualResourcesChanged = true;
-						ContentTextures++;
-					}
-				}
-
-				// **Flipbook layout is world data, not renderer state**, exactly
-				// as the triangle count above is. A 4x4 animation sheet and a 4x4
-				// tile atlas are the same pixels, so the grid, the frame count
-				// and the authored rate are what tell an emitter how to play one
-				// - and without them every scene using a GIF would have to state
-				// numbers the file already holds. See `scene::TextureCatalogue`.
-				//
-				// Recorded whether or not the upload succeeded: a headless run
-				// has no device and still knows what it read.
-				if (image.IsFlipbook()) {
-					const engine::scene::FlipbookFacts facts{
-						.Side = image.FlipbookSide,
-						.Frames = image.FlipbookFrames,
-						.FrameRate = image.FlipbookFrameRate,
-					};
-					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {
-							engine::scene::RecordTexture(store, name, facts);
-						});
-					}
-					if (ReportedJoin) {
-						Universe_->Enter(Replicated, [&name, &facts](engine::ecs::Store &store) {
-							engine::scene::RecordTexture(store, name, facts);
-						});
-					}
-				}
-			} else if (asset->Kind == engine::assets::AssetKind::Material) {
-				engine::assets::MaterialData material;
-				// The one decode on this path with no span of its own.
-				ENGINE_PROFILE_CAT("material decode", engine::core::ProfileCategory::Engine);
-				if (!engine::assets::Material::Read(reader, material)) {
-					ENGINE_WARN("content: {} is not a material this engine reads", asset->Name);
-					continue;
-				}
-
-				// **World data, not renderer state**, exactly as the triangle
-				// count and the flipbook layout above are - and for the sharper
-				// version of the same reason: the renderer never sees a material
-				// at all. `ResolveMaterials` turns one into a texture name on a
-				// part, in `shared`, so a headless server resolves the same
-				// materials the client does.
-				// **All seven, built once and recorded together.** A material is
-				// one thing; recording its colour and forgetting its normals
-				// would draw a part textured and flat, which reads as the normal
-				// map being broken rather than absent.
-				const engine::scene::MaterialMaps maps{
-					.Colour = engine::core::Name(material.ColourMap),
-					.Normal = engine::core::Name(material.NormalMap),
-					.Roughness = engine::core::Name(material.RoughnessMap),
-					.Occlusion = engine::core::Name(material.OcclusionMap),
-					.Height = engine::core::Name(material.HeightMap),
-					.Metalness = engine::core::Name(material.MetalnessMap),
-					.Emissive = engine::core::Name(material.EmissiveMap),
-				};
-
-				// **Deliberately not asked for here**, unlike a mesh's sheets, and
-				// the asymmetry is the point. Every material in the catalogue
-				// arrives whether anything uses it or not - 295 of them on this
-				// store - so fetching each one's sheet on arrival is requesting
-				// every texture by kind again, one indirection later, and it
-				// refuses 160 of them exactly as before.
-				//
-				// A material reaches a *part* through `ResolveMaterials`, which
-				// writes this name into that part's `SurfaceAppearance::ColourMap`
-				// - and that is a field `CollectWantedTextures` already reads. So
-				// the demand path needs no special case: the next pump asks for
-				// the sheets of the materials something is actually made of.
-				for (const engine::world::WorldId id : Simulated) {
-					Universe_->Enter(id, [&name, &maps](engine::ecs::Store &store) {
-						engine::scene::RecordMaterial(store, name, maps);
-					});
-				}
-				if (ReportedJoin) {
-					Universe_->Enter(Replicated, [&name, &maps](engine::ecs::Store &store) {
-						engine::scene::RecordMaterial(store, name, maps);
-					});
-				}
-				ContentMaterials++;
-			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
-				engine::assets::AnimationData animation;
-				if (!engine::assets::Animation::Read(reader, animation)) {
-					ENGINE_WARN("content: {} is not an animation this engine reads", asset->Name);
-					continue;
-				}
-				const auto record = [&name, &animation](engine::ecs::Store &store) {
-					(void)engine::render::RecordAnimation(store, name, animation);
-				};
-				for (const engine::world::WorldId id : Simulated) {
-					Universe_->Enter(id, record);
-				}
-				if (ReportedJoin) {
-					Universe_->Enter(Replicated, record);
-				}
-				ContentAnimations++;
-			} else if (asset->Kind == engine::assets::AssetKind::Audio) {
-				// **Decoded and converted here, once.** The graph must never resample
-				// on the device thread, and a buffer converted per voice would pay
-				// for it again for every part playing a footstep. `DecodeAudio` picks
-				// its decoder from the bytes rather than from the name - Sounds.hpp.
-				ENGINE_PROFILE_CAT("audio decode", engine::core::ProfileCategory::Assets);
-				std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(asset->Bytes);
-				if (!samples) {
-					ENGINE_WARN("content: {} is not audio this engine decodes", asset->Name);
-					continue;
-				}
-
-				// The device's format when there is one, and the graph's default when
-				// there is not. A machine with no output still registers its sounds,
-				// so a headless run exercises everything but the last hop.
-				const engine::audio::AudioFormat target =
-					Sound ? Sound->Format() : engine::audio::AudioFormat{};
-				auto ready = std::make_shared<const engine::audio::SampleBuffer>(samples->ConvertTo(target));
-
-				if (Audible.Add(name, ready)) {
-					ContentSounds++;
-					ENGINE_INFO(
-						"content: {} decoded ({:.1f}s, {} Hz, {} channel(s))",
-						asset->Name,
-						ready->Seconds(),
-						target.SampleRate,
-						target.Channels
-					);
-				}
-			}
-		}
-		ContentPending.resize(kept);
-
-		// Appended after the walk, never during it. See `RequestTexture`.
-		ContentPending.insert(ContentPending.end(), ContentIssued.begin(), ContentIssued.end());
-		ContentIssued.clear();
-
-		if (ContentRequested && ContentPending.empty() && !ContentReported) {
-			ContentReported = true;
-			ENGINE_INFO(
-				"content: {} mesh(es), {} texture(s), {} material(s), {} animation(s) and {} sound(s) "
-				"registered",
-				ContentMeshes,
-				ContentTextures,
-				ContentMaterials,
-				ContentAnimations,
-				ContentSounds
-			);
-		}
-	}
-
-	void Client::OfferPublishedContent() {
-		// **Named, because it lands in `content`'s self time and is not small.**
-		// It walks every entry of the delivery catalogue - nearly two thousand
-		// on a filled store - and enters every world to ask what each wants, on
-		// a path that runs whenever content has been requested. Unprofiled, that
-		// is a chunk of `content` with nothing in it to say what it was.
-		ENGINE_PROFILE_CAT("offer published content", engine::core::ProfileCategory::Engine);
-
-		const engine::assets::Manifest *catalogue = Content ? Content->Catalogue() : nullptr;
-		if (catalogue == nullptr) {
-			return;
-		}
-
-		// **Runtime-readable only.** A `.pmx` and a `.amesh` are both
-		// `AssetKind::Mesh` and only the second is one this process decodes, so
-		// offering both would hand a scene names it can set, fetch and then fail
-		// to draw - a part on the fallback cube with a perfectly good string
-		// behind it.
-		//
-		// **And forms this deployment turned off, for the same reason one step
-		// further out.** A name a scene can set and this process will refuse to
-		// fetch is the same untextured part with a perfectly good string behind
-		// it, arrived at by a different route.
-		const engine::assets::ContentPolicy &allowed =
-			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle);
-
-		std::vector<engine::core::Name> meshes;
-		for (const engine::assets::AssetEntry *entry : catalogue->OfKind(engine::assets::AssetKind::Mesh)) {
-			if (entry != nullptr && engine::assets::IsRuntimeReadable(entry->Name) &&
-				allowed.AllowsName(entry->Name)) {
-				meshes.emplace_back(entry->Name);
-			}
-		}
-
-		// Every simulated world, and the replica when there is one - a scene is a
-		// scene wherever it came from, and a list offered to only some of them
-		// would be a service that answers differently depending on which world a
-		// script happens to be in.
-		for (const engine::world::WorldId id : Simulated) {
-			Universe_->Enter(id, [&meshes](engine::ecs::Store &store) {
-				(void)engine::scene::RecordPublishedMeshes(store, meshes);
-			});
-		}
-		if (ReportedJoin) {
-			Universe_->Enter(Replicated, [&meshes](engine::ecs::Store &store) {
-				(void)engine::scene::RecordPublishedMeshes(store, meshes);
-			});
-		}
-
-		ENGINE_INFO("content: {} published mesh(es) offered to the world", meshes.size());
-	}
-
-	void Client::ScanWantedContent(engine::world::WorldId world) {
-		if (!world.IsValid()) {
-			return;
-		}
-
-		Universe_->Enter(world, [this, world](engine::ecs::Store &store) {
-			// **The gate, and it is a small fixed set of integer compares.**
-			// `CollectWantedContent`
-			// is several walks of the store, and this used to run all of them on
-			// every world on every frame - `docs/ARCH_REVIEW.md` F1, which is
-			// explicit that this is work that should not happen rather than
-			// work to parallelise. `WantedContentRevision` watches only columns
-			// that can carry an asset name. Its monotonic component versions survive
-			// `ClearChanges`, and live row counts cover removals, so the reader
-			// cannot miss a write between pumps. Particle simulation, transforms,
-			// ticks, and additional cameras leave it unchanged.
-			const uint64_t revision = WantedContentRevision(store);
-			const auto scanned = ContentScannedAtRevision.find(world.Index);
-			if (scanned != ContentScannedAtRevision.end() && scanned->second == revision) {
-				return;
-			}
-			ContentScannedAtRevision[world.Index] = revision;
-
-			CollectWantedContent(store, ContentWanted);
-		});
-	}
-
-	void Client::RequestWantedContent() {
-		// Reused rather than made per pump: the steady-state answer is empty and
-		// an allocation per world per frame to produce nothing is the same kind
-		// of waste the gate below removes.
-		ContentWanted.clear();
-
-		for (const engine::world::WorldId id : Simulated) {
-			ScanWantedContent(id);
-		}
-		if (ReportedJoin) {
-			ScanWantedContent(Replicated);
-		}
-
-		for (const engine::core::Name &name : ContentWanted) {
-			RequestAsset(name);
-		}
-	}
-
-	void Client::RequestAsset(const engine::core::Name &texture) {
-		// **Asked once and never again, whatever happened to it.** A name that
-		// failed - not in the manifest, refused by the table - must not be
-		// retried, or a scene naming one misspelled asset issues a request per
-		// pump for the life of the process.
-		if (!Content || !texture.IsValid() || !ContentAsked.insert(texture.Id()).second) {
-			return;
-		}
-
-		// **Refused before the request and not on arrival, so the bytes never
-		// cross.** A form this deployment has turned off is one nothing here
-		// will decode, and fetching it anyway would spend the link on something
-		// destined for a `continue`. Logged once - the insert above is what
-		// makes it once - because a name that silently never arrives is exactly
-		// the failure the settings layer exists to make legible.
-		if (const engine::assets::ContentForm form = engine::assets::FormOfName(texture.Text());
-			!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).Allows(form)) {
-			ENGINE_INFO(
-				"content: not asking for {} - {} content is turned off",
-				texture.Text(),
-				engine::assets::Describe(form)
-			);
-			return;
-		}
-
-		// **Queued rather than appended, because this is called from inside the
-		// walk over `ContentPending`.** A mesh names its own sheets and a
-		// material names its colour map, and both are read while draining that
-		// vector - pushing to it there is a range-for over a container being
-		// grown, which is what it looks like: the walk lost its place and one
-		// texture out of the several hundred asked for arrived.
-		ContentIssued.push_back(Content->Request(texture.Text()));
-
-		// **Marked before the answer, which is the whole point.** Until this
-		// request finishes, a part naming this sheet draws as the default
-		// material rather than as the purple marker - so a scene load looks like
-		// untextured parts becoming textured instead of a purple shimmer across
-		// every imported model. See `render::ChooseTexture`.
-		Renderer.ExpectTexture(texture);
 	}
 
 	void Client::PressNamedElement(engine::ecs::Store &store) {
@@ -1399,9 +816,12 @@ namespace client {
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
 		Sound.reset();
-		Content.reset();
+		ContentState->Client.reset();
 
+		PortalDrawing = nullptr;
 		PortalNext.reset();
+		DropPortalObservation();
+		ContentState->Relay.reset();
 		Connection.reset();
 		if (Socket != nullptr) {
 			Socket->Close();
@@ -1733,9 +1153,12 @@ namespace client {
 		// client made over it.** A rebuild replaces the fetcher; the routes
 		// already in flight belong to the link, and replacing the thing they are
 		// being assembled in would lose them mid-transfer.
-		ContentRelay = std::make_unique<ContentLink>([this](std::span<const std::byte> payload) {
-			return Connection != nullptr && Connection->SendUser(payload, engine::core::Clock::Seconds());
-		});
+		ContentState->RelayName = Settings.ConnectAddress;
+		ContentState->Relay =
+			std::make_unique<ContentLink>([connection =
+											   Connection.get()](std::span<const std::byte> payload) {
+				return connection->SendUser(payload, engine::core::Clock::Seconds());
+			});
 
 		ConnectedServer = *server;
 		Connection->OnUserMessage([this](std::span<const std::byte> message) {
@@ -1833,7 +1256,7 @@ namespace client {
 		// names this session, so it is per client by construction.
 		engine::game::ContentDirectory directory;
 		if (engine::game::DecodeContentDirectory(message, directory)) {
-			AdoptContentDirectory(directory);
+			AdoptContentDirectory(*ContentState, directory);
 			return;
 		}
 
@@ -1841,8 +1264,8 @@ namespace client {
 		// Either way this is the last reader, so an unrecognised payload is
 		// ignored rather than counted: the tag exists so that it is a
 		// non-event.
-		if (ContentRelay != nullptr) {
-			(void)ContentRelay->Receive(message);
+		if (ContentState->Relay != nullptr) {
+			(void)ContentState->Relay->Receive(message);
 		}
 	}
 
@@ -2069,6 +1492,7 @@ namespace client {
 	}
 
 	void Client::PollServer(double nowSeconds, bool presentationReady) {
+		PumpPortalObservation(nowSeconds);
 		if (Discovery != nullptr) {
 			// Before the connector's drain, so a rendezvous message routed out
 			// of it is stamped with this tick rather than the previous one.
@@ -3210,14 +2634,15 @@ namespace client {
 		if (!InterfaceImagesReady) {
 			InterfaceImagesReady = true;
 			Interface.SetImageSource([this](const engine::core::Name &name) {
+				const auto owner = Universe_->NameOf(InterfaceWorld());
 				engine::render::InterfaceImage image;
-				image.Texture = Renderer.TextureHandle(name);
+				image.Texture = Renderer.TextureHandle(name, owner);
 				if (image.Texture == nullptr) {
 					return image;
 				}
 
-				image.Cell = Renderer.TextureCell(name, AnimationSeconds);
-				(void)Renderer.TextureSize(name, image.Width, image.Height);
+				image.Cell = Renderer.TextureCell(name, AnimationSeconds, owner);
+				(void)Renderer.TextureSize(name, image.Width, image.Height, owner);
 				return image;
 			});
 			Interface.SetViewportSource([this](engine::ecs::Entity instance) {
@@ -3225,7 +2650,7 @@ namespace client {
 			});
 		}
 
-		engine::render::InterfacePass *hook = nullptr;
+		engine::render::FrameOverlayHook *hook = nullptr;
 		bool interfaceContinuous = false;
 
 		// **Whether the window should be listening for text, decided from the
@@ -3241,6 +2666,22 @@ namespace client {
 		// press was picked correctly, produced the right event, and was handed to
 		// a VM that was not the one the button's script was in.
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
+		const auto prepareEditable = [&](engine::world::WorldId world) {
+			const auto owner = Universe_->NameOf(world);
+			Universe_->Enter(world, [&](engine::ecs::Store &store) {
+				const auto meshes =
+					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(store, Renderer, owner) : 0;
+				const auto images =
+					Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
+			});
+		};
+		{
+			ENGINE_HEAP_SCOPE("client.editable");
+			for (const auto world : Simulated)
+				prepareEditable(world);
+			if (ReportedJoin) prepareEditable(Replicated);
+		}
 
 		if (interfaceWorld.IsValid()) {
 			ENGINE_HEAP_SCOPE("client.interface");
@@ -3425,7 +2866,9 @@ namespace client {
 							return command.Kind == engine::gui::DrawKind::Viewport;
 						}
 					);
-					(void)ViewportImages.Render(Renderer, store, InterfaceList.Commands(), 1);
+					(void)ViewportImages.Render(
+						Renderer, store, InterfaceList.Commands(), 1, Universe_->NameOf(interfaceWorld)
+					);
 					Interface.Submit(
 						InterfaceList.Commands(),
 						engine::core::Vector2{request.Display.Width, request.Display.Height},
@@ -3580,144 +3023,15 @@ namespace client {
 			}
 		);
 
-		// **The shaders this world's materials name, resolved before the frame
-		// that draws with them.** Beside the sun and for the same reason: a
-		// script may select one at any time, so this runs every frame - and on a
-		// world nobody is editing it is one walk over the materials and an
-		// integer compare per distinct shader, which is what
-		// `ShaderSource::Revision` exists to make possible.
-		//
-		// **Only for the world being drawn.** A shader is a pipeline, and a
-		// pipeline built for a world nothing is presenting is video memory held
-		// for a frame that is not being rendered.
-		ENGINE_HEAP_SCOPE("client.shaders");
-		Universe_->Enter(presentationWorld, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-			const size_t changed = Shaders.Refresh(shaded);
-			const engine::core::Name wantedPostProcess = Settings.EnablePostProcessing
-															 ? engine::scene::PostProcessShaderOf(shaded)
-															 : engine::core::Name{};
-
-			if (changed > 0) {
-				VisualResourcesChanged = true;
-				// **Which of the changed names an `ImageLabel` actually asked
-				// for**, and it is worth the second walk: `opaque.frag` and
-				// `interface.frag` declare different binding counts, so a
-				// `ShaderScript` a `Material` alone selected would fail to
-				// build an interface pipeline every time it changed - a real
-				// failure logged for a shader nobody meant to put on a
-				// picture. Only names this set actually holds are offered to
-				// `Interface`, and only `wantedPostProcess` itself is offered
-				// to the postprocess slot, for the identical reason.
-				std::vector<engine::core::Name> guiShaders;
-				engine::gui::DemandedShaders(shaded, guiShaders);
-
-				// **Only what moved.** `Changed` is the whole reason a
-				// refresh returns a count rather than a bool: rebuilding
-				// every pipeline every frame is what this loop exists not to
-				// do.
-				for (const engine::core::Name &name : Shaders.Changed()) {
-					const engine::render::ShaderModule *module = Shaders.Find(name);
-					const bool wantedByGui =
-						std::find(guiShaders.begin(), guiShaders.end(), name) != guiShaders.end();
-					const bool wantedByPostProcess = wantedPostProcess.IsValid() && name == wantedPostProcess;
-
-					// No accepted module means every consumer must release it.
-					// Failed edits retain accepted words and never enter this branch.
-					if (module == nullptr || !module->Error.empty()) {
-						VisualResourcesChanged = Renderer.DropShader(name) || VisualResourcesChanged;
-						VisualResourcesChanged = Interface.DropShaderVariant(name) || VisualResourcesChanged;
-						if (name == LastPostProcessShader) {
-							Renderer.ClearPostProcessShader();
-							VisualResourcesChanged = true;
-							LastPostProcessShader = {};
-						}
-						if (module != nullptr) {
-							ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
-						}
-						continue;
-					}
-
-					VisualResourcesChanged =
-						Renderer.AddShader(name, module->SpirV) || VisualResourcesChanged;
-
-					// **The same words, into the interface pass too, and only
-					// when an `ImageLabel` actually named this shader.** See
-					// `InterfacePass::AddShaderVariant`'s own header for the
-					// binding-count reason a `Material`-only shader must not
-					// be offered here.
-					if (wantedByGui) {
-						(void)Interface.AddShaderVariant(name, module->SpirV);
-					}
-
-					// **And into the postprocess slot, only when this is the
-					// name the world currently wants there.** An author
-					// editing the shader mid-session sees the frame update
-					// through this branch; picking it for the first time or
-					// switching between two already-compiled shaders goes
-					// through the check below instead, because neither of
-					// those moves anything `Changed` reports.
-					if (wantedByPostProcess) {
-						if (Renderer.SetPostProcessShader(name, module->SpirV)) {
-							VisualResourcesChanged = true;
-							LastPostProcessShader = name;
-						}
-					}
-				}
-			}
-
-			// **The selection itself, independent of whether anything
-			// recompiled.** Switching from one already-known postprocess
-			// shader to another - or to none - moves neither `Changed` nor
-			// takes the branch above, so this is the other half of keeping
-			// `Renderer`'s active pipeline in step with what the world
-			// currently names.
-			if (wantedPostProcess != LastPostProcessShader) {
-				if (!wantedPostProcess.IsValid()) {
-					Renderer.ClearPostProcessShader();
-					VisualResourcesChanged = true;
-					LastPostProcessShader = {};
-				} else if (const engine::render::ShaderModule *module = Shaders.Find(wantedPostProcess);
-						   module != nullptr && module->Error.empty()) {
-					if (Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
-						VisualResourcesChanged = true;
-						LastPostProcessShader = wantedPostProcess;
-					}
-				}
-			}
-
-			if (Shaders.RefreshLenses(shaded) > 0) {
-				for (const engine::core::Name &name : Shaders.ChangedLenses()) {
-					const engine::render::ShaderModule *module = Shaders.FindLens(name);
-					if (module == nullptr) {
-						VisualResourcesChanged = Renderer.DropLensShader(name) || VisualResourcesChanged;
-						continue;
-					}
-					if (!module->Error.empty()) {
-						VisualResourcesChanged = Renderer.DropLensShader(name) || VisualResourcesChanged;
-						ENGINE_WARN("lens shader '{}': {}", name.Text(), module->Error);
-						continue;
-					}
-					VisualResourcesChanged =
-						Renderer.AddLensShader(name, module->SpirV) || VisualResourcesChanged;
-				}
-			}
+		Universe_->Enter(presentationWorld, [&](engine::ecs::Store &store) {
+			const auto owner = Universe_->NameOf(presentationWorld);
+			VisualResourcesChanged =
+				engine::render::PrepareWorldShaders(
+					store, owner, Shaders, Renderer, &Interface, Settings.EnablePostProcessing
+				) ||
+				VisualResourcesChanged;
+			LastPostProcessShader = Renderer.PostProcessShaderName(owner);
 		});
-
-		// **The other half of a world's content that only exists once the
-		// engine is running**, beside the shader refresh above and for the
-		// identical reason: only the world actually being drawn pays for an
-		// upload, and a steady scene - nothing mid-edit - costs one walk and
-		// an integer compare per `EditableMesh`.
-		{
-			ENGINE_HEAP_SCOPE("client.editable");
-			Universe_->Enter(presentationWorld, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-				const size_t meshes =
-					Settings.EnableEditableMeshes ? EditableMeshes.Refresh(shaded, Renderer) : 0;
-				const size_t images =
-					Settings.EnableEditableImages ? EditableImages.Refresh(shaded, Renderer) : 0;
-				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
-			});
-		}
 
 		engine::render::View view;
 		view.CameraFrame = Views.CameraFrame();
@@ -3748,9 +3062,12 @@ namespace client {
 		view.World = presentationWorld.IsValid() ? presentationWorld.Index : 0;
 		view.WorldName =
 			presentationWorld.IsValid() ? Universe_->NameOf(presentationWorld) : engine::core::Name{};
+		view.ContentOwner = view.WorldName;
+		view.ForeignContentOwners = ContentBindings;
 
 		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
+		PortalDrawing = nullptr;
 		// Delegated producers answer requested cameras and own no viewer endpoints.
 		if (!PresentationLink && PreparePortalEye(view, presentationWorld, targetWidth, targetHeight, true)) {
 			Renderer.SetAnimationTime(AnimationSeconds);
@@ -3779,6 +3096,24 @@ namespace client {
 			PortalImages->RemoveViewport(view.Slot);
 		}
 
+		const bool observedEye = PortalDrawing != nullptr;
+		engine::render::WorldViewInterface observedInterface(
+			observedEye ? &PortalDrawing->Interface : nullptr, hook
+		);
+		double visualSeconds = AnimationSeconds;
+		uint64_t spatialSignature = 0;
+		if (observedEye) {
+			hook = &observedInterface;
+			visualLighting = PortalDrawing->Frame.Lighting;
+			visualSeconds = PortalDrawing->Frame.Seconds;
+			visualSurfaceBounces = PortalDrawing->SurfaceBounces;
+			visualSurfaceLimit = PortalDrawing->SurfaceLimit;
+			spatialSignature = PortalDrawing->Camera.Compiled.Signature();
+			Renderer.SetAnimationTime(visualSeconds);
+			Renderer.SetSurfaceBounces(visualSurfaceBounces);
+			Renderer.SetSurfaceLimit(visualSurfaceLimit);
+		}
+
 		const uint64_t viewportSignature =
 			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
@@ -3788,8 +3123,8 @@ namespace client {
 				view,
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
-					.Animation = Renderer.TextureAnimationSignature(AnimationSeconds),
-					.Resources = 0,
+					.Animation = Renderer.TextureAnimationSignature(visualSeconds),
+					.Resources = spatialSignature,
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,

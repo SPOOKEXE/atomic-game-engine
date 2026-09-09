@@ -414,3 +414,54 @@ TEST_CASE(
 	REQUIRE(render::DecodePortalGeometry(bytes, anonymous, error));
 	CHECK(anonymous.Rows[0].Player.empty());
 }
+
+TEST_CASE(
+	"retained body removal separates camera hiding from caster ownership",
+	"[render][portal-geometry][retained-body]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("destination");
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "current-body", false, 91);
+	const auto model = scene::LoadCharacter(store, player);
+	const auto root = store.Get<scene::Character>(model)->Root;
+	std::vector<scene::DrawInstance> rows(2);
+	rows[0].Rig = rows[1].Rig = root.Id;
+	rows[0].SourceWorld = core::Name("foreign");
+	rows[1].Variant = 8;
+	SECTION("native rig and its seam clone use owning account") {}
+	SECTION("held rig keeps its account after the live source root retires") {
+		scene::CameraCharacterHold held;
+		held.Active = true;
+		held.Player = player;
+		held.SourceRoot = ecs::Entity{9000};
+		store.SetResource(held);
+		rows[1].Rig = held.SourceRoot.Id;
+	}
+	render::PortalGeometry incoming;
+	incoming.Rows.resize(3);
+	incoming.Rows[0].Player = "91";
+	incoming.Rows[1].Player = "17";
+	std::vector<std::byte> bytes;
+	std::string error;
+	REQUIRE(render::EncodePortalGeometry(incoming, bytes, error));
+	render::PortalDrawSelection selected{"17", {}};
+	selected.RetainedBodyPlayer = "91";
+	std::vector<core::CFrame> joints;
+	REQUIRE(render::AppendPortalDraws(bytes, core::Name("source"), rows, joints, error, &selected, &store));
+	CHECK(selected.Hidden == std::vector<uint32_t>{3});
+	CHECK(selected.RetainedBodyRows == std::vector<uint32_t>{2});
+	REQUIRE(
+		render::RemoveRetainedPortalBody(store, "91", rows, selected.RetainedBodyRows, selected.Hidden, error)
+	);
+	REQUIRE(rows.size() == 3);
+	CHECK(rows.front().SourceWorld == core::Name("foreign"));
+	CHECK(selected.Hidden == std::vector<uint32_t>{1});
+	CHECK(rows[1].CastShadow);
+	CHECK(rows[2].CastShadow);
+	const auto previousCount = rows.size();
+	CHECK_FALSE(render::RemoveRetainedPortalBody(store, "091", rows, {}, selected.Hidden, error));
+	CHECK(rows.size() == previousCount);
+	CHECK(selected.Hidden == std::vector<uint32_t>{1});
+}

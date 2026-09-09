@@ -3,6 +3,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <client/Client.hpp>
@@ -16,6 +17,198 @@ namespace client {
 	static constexpr size_t PORTAL_SUCCESSOR_VIEW = 1;
 	// Whole-eye replies belong to the viewport lifetime, not its current body replica.
 	static constexpr size_t PORTAL_EYE_VIEW = 2;
+
+	void Client::DropPortalObservation() {
+		if (!PortalPrevious) return;
+		if (PortalDrawing == &PortalPrevious->View) PortalDrawing = nullptr;
+		const auto world = PortalPrevious->World;
+		PortalPrevious.reset();
+		DropPortalReplica(world);
+	}
+
+	void Client::PumpPortalObservation(double nowSeconds) {
+		if (!PortalPrevious) return;
+		ENGINE_PROFILE("client portal observation");
+		auto &observation = *PortalPrevious;
+		Universe_->Enter(observation.World, [&](engine::ecs::Store &store) {
+			observation.Connection->Poll(store, nowSeconds);
+			RecordReplicatedTick(store, observation.Connection->Applied());
+		});
+		observation.Connection->Advance(nowSeconds);
+		if (!observation.Connection->Live() || observation.Connection->Rejected()) DropPortalObservation();
+	}
+
+	void Client::RetainPortalObservation(engine::world::WorldId world) {
+		using namespace engine;
+		DropPortalObservation();
+		PortalPrevious = std::make_unique<PortalObservation>();
+		auto &observation = *PortalPrevious;
+		observation.World = world;
+		observation.View.Pipeline = PipelineSelected;
+		observation.Socket = std::move(Socket);
+		observation.Connection = std::move(Connection);
+		observation.Content = std::move(ContentState);
+		ContentState = std::make_unique<ContentSession>();
+		observation.Connection->SetForeign({});
+		observation.Connection->OnUserMessage([this,
+											   observed = &observation](std::span<const std::byte> bytes) {
+			game::ContentDirectory directory;
+			if (game::DecodeContentDirectory(bytes, directory)) {
+				AdoptContentDirectory(*observed->Content, directory);
+				return;
+			}
+			if (observed->Content->Relay) (void)observed->Content->Relay->Receive(bytes);
+		});
+		bool scriptsStopped = false;
+		Universe_->Enter(world, [&](ecs::Store &store, ecs::Scheduler &systems) {
+			if (const auto *replica = store.Resource<world::Replica>()) observation.Authored = replica->Of;
+			// Keep the received presentation clock, but retire the old player's script callbacks.
+			const auto stop = [&](std::string_view name) {
+				const auto revision = systems.SystemRevision(name);
+				return revision != 0 && revision != std::numeric_limits<uint64_t>::max() &&
+					   systems.Replace(name, revision + 1, [](ecs::Store &) {});
+			};
+			const bool stoppedStarts = stop("replica-scripts");
+			const bool stoppedHeartbeat = stop("script-heartbeat");
+			scriptsStopped = stoppedStarts && stoppedHeartbeat;
+			if (auto *input = store.ResourceMutable<scene::InputState>()) *input = {};
+			if (auto *controllers = store.ResourceMutable<scene::ControllerState>()) *controllers = {};
+			scene::ReleaseCameraCharacterHold(store);
+			store.RemoveResource<PortalInputHistory>();
+			store.RemoveResource<LocalPlayerPrediction>();
+			store.RemoveResource<NativePlayerPrediction>();
+		});
+		Views.Untrack(world);
+		if (!scriptsStopped) {
+			ENGINE_WARN("portal observation could not retire gameplay scripts");
+			DropPortalObservation();
+		}
+	}
+
+	bool Client::PreparePortalWorldView(
+		PortalWorldView &packet,
+		engine::world::WorldId world,
+		engine::render::View &view,
+		uint32_t width,
+		uint32_t height
+	) {
+		using namespace engine;
+		if (!PortalImages || width == 0 || height == 0) return false;
+		ENGINE_PROFILE("client observed eye");
+		if (PortalNext && PortalNext->World == world && PortalNext->Ready &&
+			PortalNext->DrawingArrivedPlayer) {
+			std::optional<PortalPredictionContinuation> prediction;
+			Universe_->Enter(Replicated, [&](ecs::Store &store) {
+				prediction =
+					CapturePortalPrediction(store, PortalNext->Offer.Claim, Universe_->AlphaOf(Replicated));
+			});
+			// The authenticated successor displays the same continued body pose that
+			// adoption will take over. Its older snapshot must not shrink the body.
+			if (prediction) {
+				bool applied = false;
+				Universe_->Enter(world, [&](ecs::Store &store) {
+					applied = AdoptPortalPrediction(
+						store, PortalNext->Player, *prediction, Universe_->AlphaOf(world)
+					);
+				});
+				if (!applied) return false;
+			}
+		}
+		if (!packet.InterfaceReady) {
+			const auto backend = Renderer.Backend();
+			if (!backend.Device) return false;
+			packet.InterfaceReady = packet.Interface.Initialise(backend.Device, backend.ColourFormat);
+			if (!packet.InterfaceReady) return false;
+			packet.Interface.SetImageSource([this, captured = &packet, world](const core::Name &name) {
+				const auto owner = Universe_->NameOf(world);
+				render::InterfaceImage image;
+				image.Texture = Renderer.TextureHandle(name, owner);
+				image.Cell = Renderer.TextureCell(name, captured->Frame.Seconds, owner);
+				Renderer.TextureSize(name, image.Width, image.Height, owner);
+				return image;
+			});
+		}
+		if (Universe_->Present(world, ParticleDeltaSeconds, Universe_->AlphaOf(world)) !=
+			world::WorldStatus::Ok)
+			return false;
+		const core::Vector2 extent{float(width), float(height)};
+		uint64_t nativeEyeRig = 0;
+		uint64_t storeIdentity = 0;
+		const auto entered = Universe_->Enter(world, [&](ecs::Store &store) {
+			const auto owner = Universe_->NameOf(world);
+			storeIdentity = store.Identity();
+			const auto images =
+				Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+			const auto meshes =
+				Settings.EnableEditableMeshes ? EditableMeshes.Refresh(store, Renderer, owner) : 0;
+			const bool shaders = render::PrepareWorldShaders(
+				store, owner, Shaders, Renderer, &packet.Interface, Settings.EnablePostProcessing
+			);
+			VisualResourcesChanged = images > 0 || meshes > 0 || shaders || VisualResourcesChanged;
+			render::CollectWorldView(store, Universe_->NameOf(world), packet.Frame);
+			render::View nativeEye;
+			nativeEye.EyePlayer = view.EyePlayer;
+			render::ResolveEyeBody(store, nativeEye);
+			nativeEyeRig = nativeEye.EyeRig;
+			render::CollectWorldCamera(store, view, extent, packet.Camera);
+			render::CollectSurfaceViews(
+				store, packet.Surfaces, packet.Frame.Portals, &view, packet.Frame.Slots
+			);
+			packet.SurfaceBounces = Settings.SurfaceBounces > 0
+										? Settings.SurfaceBounces
+										: uint32_t(std::max(scene::SurfaceBouncesOf(store), 0));
+			packet.SurfaceLimit = uint32_t(std::max(scene::SurfaceLimitOf(store), 0));
+		});
+		if (entered != world::WorldStatus::Ok) return false;
+		auto &frame = packet.Frame;
+		const size_t nativeRows = frame.Instances.size();
+		AppendForeignPortalClones(*Universe_, world, frame.Instances, &frame.Joints);
+		packet.HiddenBodyRows.clear();
+		if (view.EyeRig != 0) {
+			for (size_t index = nativeRows; index < frame.Instances.size(); ++index) {
+				const auto &row = frame.Instances[index];
+				if (row.Rig == view.EyeRig && row.SourceWorld == view.WorldName)
+					packet.HiddenBodyRows.push_back(uint32_t(index));
+			}
+		}
+		view.EyeHiddenRows = packet.HiddenBodyRows;
+		view.EyeRig = nativeEyeRig;
+		if (!render::BindWorldView(
+				frame,
+				packet.Camera,
+				{.World = world.Index,
+				 .Name = Universe_->NameOf(world),
+				 .Identity = storeIdentity,
+				 .ContentOwner = frame.Name,
+				 .ForeignContentOwners = ContentBindings,
+				 .Pipeline = packet.Pipeline},
+				view
+			))
+			return false;
+		if (!Settings.EnableParticles) view.Particles = {};
+		PortalImages->SetContentOwner(world, frame.Name, ContentBindings);
+		const bool imagesReady = UpdatePortalImages(
+			*Universe_,
+			*PortalImages,
+			world,
+			view,
+			{.Width = width, .Height = height, .ComposePlayerBody = true},
+			frame.Portals,
+			packet.Surfaces,
+			Universe_->AlphaOf(world),
+			std::chrono::steady_clock::now(),
+			Rendered,
+			Replicated
+		);
+		// Keep the completed eye until every visible destination can supply its room.
+		if (!imagesReady) return false;
+		view.Portals = frame.Portals;
+		view.Surfaces = packet.Surfaces;
+		packet.Interface.SetContentOwner(Universe_->NameOf(world));
+		packet.Interface.Submit(packet.Camera, extent, extent);
+		PortalDrawing = &packet;
+		return true;
+	}
 
 	bool Client::WaitingForPortalViews() const {
 		return Windowed && ReportedJoin && !PresentationLink && !InitialPortalViewsReady;
@@ -63,6 +256,31 @@ namespace client {
 				if (const auto *replica = store.Resource<world::Replica>(); replica && replica->Of.IsValid())
 					eyeWorld = replica->Of;
 			});
+		if (prepareNative && PortalPrevious && selected.IsValid() && eyeWorld.IsValid() &&
+			eyeWorld != PortalPrevious->Authored) {
+			std::vector<scene::PortalSeam> visibleSeams;
+			if (Universe_->IsRemote(selected)) {
+				if (const auto *topology = PortalImages->Topology(selected, now))
+					visibleSeams = topology->Seams;
+			} else {
+				Universe_->Enter(selected, [&](ecs::Store &store) {
+					scene::GatherPortalSeams(store, visibleSeams);
+				});
+			}
+			const bool visible = std::any_of(visibleSeams.begin(), visibleSeams.end(), [&](const auto &seam) {
+				if (!seam.Crosses || seam.DestinationWorld != PortalPrevious->Authored) return false;
+				render::PortalImageDemand demand;
+				return render::BuildPortalImageDemand(
+						   seam,
+						   core::Name("observed-world-visibility"),
+						   view,
+						   view.Slot,
+						   {.Width = width, .Height = height},
+						   demand
+					   ) == render::PortalDemandStatus::Ready;
+			});
+			if (!visible) DropPortalObservation();
+		}
 		if (!prepareNative) {
 			if (selected == inputWorld && !retainedCharacter) return false;
 			// Successor readiness must not submit its staged camera into the displayed eye's slots.
@@ -79,6 +297,12 @@ namespace client {
 			auto sourceView = view;
 			sourceView.Instances = Views.Instances();
 			sourceView.JointFrames = Views.JointFrames();
+			world::WorldId admitted;
+			if (PortalPrevious &&
+				Universe_->Present(
+					PortalPrevious->World, ParticleDeltaSeconds, Universe_->AlphaOf(PortalPrevious->World)
+				) == world::WorldStatus::Ok)
+				admitted = PortalPrevious->World;
 			nativeImagesReady = UpdatePortalImages(
 				*Universe_,
 				*PortalImages,
@@ -89,7 +313,8 @@ namespace client {
 				Surfaces,
 				Universe_->AlphaOf(inputWorld),
 				now,
-				Rendered
+				Rendered,
+				admitted
 			);
 			view.Portals = Portals;
 			view.Surfaces = Surfaces;
@@ -196,6 +421,15 @@ namespace client {
 		// A held subject can use the current native camera once its portal images are ready.
 		if (selected == inputWorld && (!retainedCharacter || nativeImagesReady) && !retainNativeEye)
 			return false;
+		if (prepareNative && PortalPrevious && selected == PortalPrevious->World &&
+			PreparePortalWorldView(PortalPrevious->View, PortalPrevious->World, view, width, height))
+			return true;
+		if (prepareNative && PortalNext && PortalNext->World.IsValid() && !PortalNext->Refused &&
+			PortalNext->Failure.empty() && PortalNext->Connection && PortalNext->Connection->Admitted() &&
+			PortalNext->Connection->Joined() && PortalNext->Connection->Live() &&
+			!PortalNext->Connection->Rejected() && eyeWorld.Text() == PortalNext->Offer.Claim.Destination &&
+			PreparePortalWorldView(PortalNext->View, PortalNext->World, view, width, height))
+			return true;
 		remote.EyeImage = selected.IsValid() ? PortalImages->Image(remote.Slot, remote.EyeImageKey) : 0;
 		// The held subject has no visual rows after source retirement. Its source
 		// eye producer still sees the destination body through the aperture.
@@ -245,6 +479,7 @@ namespace client {
 					PortalNext->Following = message;
 				return true;
 			}
+			DropPortalObservation();
 			PortalNext = std::make_unique<PortalSuccessor>();
 			PortalNext->Offer = message;
 			PortalNext->Endpoint = ConnectedServer;
@@ -277,12 +512,18 @@ namespace client {
 
 	void Client::DropPortalReplica(engine::world::WorldId world) {
 		if (!world.IsValid()) return;
-		Universe_->Enter(world, [](engine::ecs::Store &store) {
+		Universe_->Enter(world, [this](engine::ecs::Store &store) {
+			EditableImages.ForgetWorld(store.Identity());
+			EditableMeshes.ForgetWorld(store.Identity());
 			engine::scene::ReleaseCameraCharacterHold(store);
 			store.RemoveResource<PortalInputHistory>();
 		});
 		Views.Untrack(world);
 		if (PortalImages) PortalImages->RemoveWorld(world);
+		Shaders.DropOwner(Universe_->NameOf(world));
+		Interface.DropContentOwner(Universe_->NameOf(world));
+		Renderer.DropContentOwner(Universe_->NameOf(world));
+		VisualResourcesChanged = true;
 		if (auto sound = Stages.find(world.Index); sound != Stages.end() && Sound)
 			sound->second.Clear(Sound->Mixer());
 		std::erase_if(Runtimes, [world](const auto &runtime) { return runtime.first == world; });
@@ -302,6 +543,7 @@ namespace client {
 			ENGINE_WARN("portal transfer refused: {}", next.Failure);
 			const auto world = next.World;
 			auto following = std::move(next.Following);
+			if (PortalDrawing == &PortalNext->View) PortalDrawing = nullptr;
 			PortalNext.reset();
 			DropPortalReplica(world);
 			if (following) (void)ReceivePortalSession(*following);
@@ -312,12 +554,12 @@ namespace client {
 		if (!next.Failure.empty()) {
 			if (next.ProceedSent) {
 				ENGINE_WARN("portal successor reconnecting: {}", next.Failure);
+				next.Content.reset();
 				next.Connection.reset();
 				next.Socket.reset();
 				const auto previous = next.World;
 				next.World = {};
 				DropPortalReplica(previous);
-				next.Directory.reset();
 				next.ResumeSent = false;
 				next.Ready = false;
 				next.CommitSent = false;
@@ -374,6 +616,7 @@ namespace client {
 			settings.Name = core::Name("client.portal." + std::to_string(NextPortalReplica++));
 			settings.TickRate = Settings.TickRate;
 			next.World = Universe_->Create(settings);
+			next.View.Pipeline = PipelineSelected;
 			if (!next.World.IsValid()) {
 				next.Failure = "destination replica could not be created";
 				return;
@@ -400,6 +643,14 @@ namespace client {
 			connecting.Quic.BytesPerTick = connecting.Session.Link.BytesPerTick;
 			next.Connection =
 				std::make_unique<replication::Connector>(*next.Socket, next.Endpoint, nowSeconds, connecting);
+			next.Content = std::make_unique<ContentSession>();
+			next.Content->RelayName = next.Endpoint.Text();
+			next.Content->Relay =
+				std::make_unique<ContentLink>([connection =
+												   next.Connection.get()](std::span<const std::byte> bytes) {
+					return connection->SendUser(bytes, core::Clock::Seconds());
+				});
+			if (!Settings.ContentPublisherKey.empty()) (void)BuildContentClient(*next.Content);
 			next.Presentation = std::make_unique<world::PresentationStream>();
 			next.PresentationRoutes.reset();
 			next.PresentationAnnounced = false;
@@ -427,9 +678,10 @@ namespace client {
 				}
 				game::ContentDirectory directory;
 				if (game::DecodeContentDirectory(bytes, directory)) {
-					pending.Directory = std::move(directory);
+					AdoptContentDirectory(*pending.Content, directory);
 					return;
 				}
+				if (pending.Content->Relay && pending.Content->Relay->Receive(bytes)) return;
 				game::PortalSessionMessage reply;
 				if (!game::DecodePortalSession(bytes, reply) || reply.Attempt != pending.Offer.Attempt)
 					return;
@@ -581,10 +833,8 @@ namespace client {
 				return;
 			}
 		}
-		Content.reset();
-		ContentRelay.reset();
+		RetainPortalObservation(previous);
 		Discovery.reset();
-		Connection.reset();
 		Socket = std::move(next.Socket);
 		Connection = std::move(next.Connection);
 		PlayPresentation = std::move(next.Presentation);
@@ -600,20 +850,11 @@ namespace client {
 		InputSequenceEpoch = *inputEpoch;
 		NetworkSampled = false;
 		Views.Track(Replicated, Universe_->NameOf(Replicated), entities * 2);
-		ContentRelay = std::make_unique<ContentLink>([this](std::span<const std::byte> bytes) {
-			return Connection && Connection->SendUser(bytes, core::Clock::Seconds());
-		});
-		OfferedContentSources.clear();
-		OfferedPublisherKey.clear();
-		OfferedContentGrant.clear();
-		if (next.Directory)
-			AdoptContentDirectory(*next.Directory);
-		else
-			(void)BuildContentClient();
+		ContentState = std::move(next.Content);
 		ENGINE_INFO("portal session adopted {} as player {}", next.Offer.Claim.Destination, next.Player.Id);
+		if (PortalDrawing == &PortalNext->View) PortalDrawing = nullptr;
 		PortalNext.reset();
 		PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
-		DropPortalReplica(previous);
 		VisualResourcesChanged = true;
 		PresentationInvalidated = true;
 	}

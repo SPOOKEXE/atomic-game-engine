@@ -21,6 +21,196 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterShadingNodes(NodeTable &frameNodes) {
+		for (const auto kind :
+			 {core::Name("ambient-response"), core::Name("ambient-merge"), core::Name("ambient-correct")}) {
+			frameNodes.Set(kind, [this, kind](const graph::RunContext &context) {
+				const auto *node = Pipeline->Graph.Find(context.Node);
+				if (!node || !State->EnsureAmbientComposition()) return false;
+				const bool response = kind == core::Name("ambient-response");
+				const bool merge = kind == core::Name("ambient-merge");
+				const bool directional = !response && !merge && context.Reads.size() > 3;
+				if (directional && !State->EnsureDirectionalCorrection()) return false;
+				const std::array<const char *, 7> ports =
+					response
+						? std::array<const char *, 7>{"albedo", "normal", "material", "depth", "occlusion"}
+					: merge
+						? std::
+							  array<const char *, 7>{"body-depth", "body-normal", "room-depth", "room-normal"}
+						: std::array<const char *, 7>{
+							  "lighting-baseline",
+							  "response",
+							  "occlusion",
+							  "directional-response",
+							  "room-depth",
+							  "room-normal",
+							  "shadow"
+						  };
+				const size_t inputCount = response ? 5 : merge ? 4 : directional ? 7 : 3;
+				if (context.Reads.size() != inputCount || context.Writes.size() != (merge ? 2u : 1u))
+					return false;
+				std::array<Impl::NamedTexture, 7> inputs;
+				std::array<SDL_GPUTextureSamplerBinding, 7> bindings;
+				for (size_t index = 0; index < inputCount; ++index) {
+					const auto found =
+						std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(ports[index]));
+					if (found == node->ReadPorts.end()) return false;
+					inputs[index] =
+						GraphTexture(context.Reads[found - node->ReadPorts.begin()], context, false);
+					if (!inputs[index].IsValid()) return false;
+					// AO uses the native linear sampler; matched geometry uses nearest surface selection.
+					bindings[index] = {inputs[index].Texture, merge ? State->OverlaySampler : Sampler};
+					if (directional && index == 6)
+						bindings[index].sampler = State->ShadowSampler ? State->ShadowSampler : Sampler;
+				}
+				const auto output = [&](const char *port) {
+					const auto found =
+						std::find(node->WritePorts.begin(), node->WritePorts.end(), core::Name(port));
+					return found == node->WritePorts.end()
+							   ? Impl::NamedTexture{}
+							   : GraphTexture(
+									 context.Writes[found - node->WritePorts.begin()], context, true
+								 );
+				};
+				const auto first = output(response ? "response" : merge ? "depth" : "colour");
+				const auto second = merge ? output("normal") : Impl::NamedTexture{};
+				const auto firstFormat = response ? SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT
+										 : merge  ? SDL_GPU_TEXTUREFORMAT_R32_FLOAT
+												  : SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+				if (!first.IsValid() || first.Format != firstFormat ||
+					(merge &&
+					 (!second.IsValid() || second.Format != SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+					  first.Width != second.Width || first.Height != second.Height)))
+					return false;
+				if (merge && (inputs[0].Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+							  inputs[1].Format != SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+							  inputs[2].Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+							  inputs[3].Format != SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM))
+					return false;
+				if (!response && !merge &&
+					(inputs[0].Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+					 inputs[1].Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+					 inputs[2].Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM))
+					return false;
+				if (response && ((inputs[0].Format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB &&
+								  inputs[0].Format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM) ||
+								 inputs[1].Format != SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+								 inputs[2].Format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
+								 inputs[3].Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+								 inputs[4].Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM))
+					return false;
+				const auto matchesOutput = [&](const Impl::NamedTexture &input) {
+					return input.Width == first.Width && input.Height == first.Height;
+				};
+				if (merge &&
+					(!matchesOutput(inputs[0]) || !matchesOutput(inputs[2]) || !matchesOutput(inputs[3])))
+					return false;
+				if (!merge && !response && (!matchesOutput(inputs[0]) || !matchesOutput(inputs[1])))
+					return false;
+				if (directional && (inputs[3].Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+									inputs[4].Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+									inputs[5].Format != SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+									inputs[6].Format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT ||
+									inputs[6].Width != inputs[6].Height || !matchesOutput(inputs[3]) ||
+									!matchesOutput(inputs[4]) || !matchesOutput(inputs[5])))
+					return false;
+				for (size_t index = 0; index < inputCount; ++index)
+					if (inputs[index].Texture == first.Texture ||
+						(merge && inputs[index].Texture == second.Texture))
+						return false;
+				if (response && !GraphEnabled(core::Name("ssao"))) ClearOcclusion();
+				EnterNamedPass(context.Name);
+				SDL_GPUColorTargetInfo targets[2]{};
+				targets[0].texture = first.Texture;
+				targets[1].texture = second.Texture;
+				for (auto &target : targets) {
+					target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+					target.store_op = SDL_GPU_STOREOP_STORE;
+					target.cycle = true;
+				}
+				auto *pass = SDL_BeginGPURenderPass(Command, targets, merge ? 2 : 1, nullptr);
+				if (!pass) return false;
+				if (response) SDL_PushGPUFragmentUniformData(Command, 0, &Uniforms, sizeof(Uniforms));
+				if (directional) {
+					struct CorrectionUniforms {
+						glm::mat4 InverseViewProjection, LightViewProjection;
+						glm::vec4 CameraDepth, Direction, Shadow;
+					} correction{
+						Uniforms.InverseViewProjection,
+						Uniforms.LightViewProjection,
+						Uniforms.CameraDepth,
+						Uniforms.Direction,
+						glm::vec4{1, 1.0f / float(inputs[6].Width), 0, 0}
+					};
+					SDL_PushGPUFragmentUniformData(Command, 0, &correction, sizeof(correction));
+				}
+				if (merge) {
+					const glm::vec4 parameters{Uniforms.Planes.y, Uniforms.Target.z, Uniforms.Target.w, 0};
+					SDL_PushGPUFragmentUniformData(Command, 0, &parameters, sizeof(parameters));
+				}
+				SDL_BindGPUGraphicsPipeline(
+					pass,
+					response	  ? State->AmbientResponsePipeline
+					: merge		  ? State->AmbientMergePipeline
+					: directional ? State->DirectionalCorrectPipeline
+								  : State->AmbientCorrectPipeline
+				);
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(inputCount));
+				const SDL_GPUViewport viewport{0, 0, float(first.Width), float(first.Height), 0, 1};
+				const SDL_Rect scissor{0, 0, int(first.Width), int(first.Height)};
+				SDL_SetGPUViewport(pass, &viewport);
+				SDL_SetGPUScissor(pass, &scissor);
+				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+				SDL_EndGPURenderPass(pass);
+				++Result.DrawCalls;
+				core::Metrics::Count(
+					"render.ambient.output_bytes", uint64_t(first.Width) * first.Height * (response ? 16 : 8)
+				);
+				return true;
+			});
+		}
+
+		frameNodes.Set(core::Name("colour-compose"), [this](const graph::RunContext &context) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node || context.Reads.size() != 2 || context.Writes.size() != 1) return false;
+			std::array<Impl::NamedTexture, 2> inputs;
+			const std::array ports{core::Name("foreground"), core::Name("background")};
+			for (size_t i = 0; i < inputs.size(); ++i) {
+				const auto found = std::find(node->ReadPorts.begin(), node->ReadPorts.end(), ports[i]);
+				if (found == node->ReadPorts.end()) return false;
+				inputs[i] = GraphTexture(context.Reads[found - node->ReadPorts.begin()], context, false);
+				if (!inputs[i].IsValid() || inputs[i].Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT)
+					return false;
+			}
+			const auto output = GraphTexture(context.Writes[0], context, true);
+			if (!output.IsValid() || output.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				!State->EnsureColourCompose())
+				return false;
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo target{};
+			target.texture = output.Texture;
+			target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			target.store_op = SDL_GPU_STOREOP_STORE;
+			target.cycle = true;
+			auto *pass = SDL_BeginGPURenderPass(Command, &target, 1, nullptr);
+			if (!pass) return false;
+			const SDL_GPUTextureSamplerBinding bindings[2]{
+				{inputs[0].Texture, State->OverlaySampler}, {inputs[1].Texture, State->OverlaySampler}
+			};
+			SDL_BindGPUGraphicsPipeline(pass, State->ColourComposePipeline);
+			SDL_BindGPUFragmentSamplers(pass, 0, bindings, 2);
+			const SDL_GPUViewport viewport{0, 0, float(output.Width), float(output.Height), 0, 1};
+			const SDL_Rect scissor{0, 0, int(output.Width), int(output.Height)};
+			SDL_SetGPUViewport(pass, &viewport);
+			SDL_SetGPUScissor(pass, &scissor);
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+			SDL_EndGPURenderPass(pass);
+			++Result.DrawCalls;
+			core::Metrics::Count(
+				"render.colour_compose.output_bytes", uint64_t(output.Width) * output.Height * 8
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("depth-compose"), [this](const graph::RunContext &context) {
 			const auto *node = Pipeline->Graph.Find(context.Node);
 			if (node == nullptr || context.Reads.size() != 4 || context.Writes.size() != 2) return false;
@@ -222,10 +412,27 @@ namespace engine::render {
 				);
 			};
 
-			const std::array aoBindings = {
-				SDL_GPUTextureSamplerBinding{pbr.LinearDepth, sampler},
-				SDL_GPUTextureSamplerBinding{pbr.Normal, sampler},
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node) return false;
+			const auto read = [&](const char *port) {
+				const auto found =
+					std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(port));
+				return found == node->ReadPorts.end()
+						   ? Impl::NamedTexture{}
+						   : GraphTexture(context.Reads[found - node->ReadPorts.begin()], context, false);
 			};
+			const auto depth = read("depth"), normal = read("normal");
+			if (!depth.IsValid() || !normal.IsValid()) return false;
+			const std::array aoBindings = {
+				SDL_GPUTextureSamplerBinding{depth.Texture, sampler},
+				SDL_GPUTextureSamplerBinding{normal.Texture, sampler},
+			};
+			auto aoUniforms = uniforms;
+			if (normal.Texture != pbr.Normal) {
+				aoUniforms.Target.z = 1;
+				aoUniforms.Target.w = 1;
+			}
+
 			fullscreen(
 				context.Name,
 				State->SsaoPipeline,
@@ -233,7 +440,7 @@ namespace engine::render {
 				pbrDimensions.OcclusionWidth,
 				pbrDimensions.OcclusionHeight,
 				aoBindings,
-				&uniforms,
+				&aoUniforms,
 				nullptr,
 				SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
 			);
@@ -339,6 +546,75 @@ namespace engine::render {
 				}
 			}
 
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node) return false;
+			const auto baselinePort =
+				std::find(node->WritePorts.begin(), node->WritePorts.end(), core::Name("lighting-baseline"));
+			const auto directionalPort = std::find(
+				node->WritePorts.begin(), node->WritePorts.end(), core::Name("directional-response")
+			);
+			const bool directionalRequested = directionalPort != node->WritePorts.end();
+			if (directionalRequested && baselinePort == node->WritePorts.end()) return false;
+			if (baselinePort != node->WritePorts.end()) {
+				const auto baseline =
+					GraphTexture(context.Writes[baselinePort - node->WritePorts.begin()], context, true);
+				if (!baseline.IsValid() || baseline.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+					baseline.Width != pbrDimensions.LitWidth || baseline.Height != pbrDimensions.LitHeight ||
+					!(directionalRequested ? State->EnsureDeferredLightingDirectional()
+										   : State->EnsureDeferredLightingBaseline()))
+					return false;
+				SDL_GPUTexture *directionalTexture = nullptr;
+				if (directionalRequested) {
+					const auto directional = GraphTexture(
+						context.Writes[directionalPort - node->WritePorts.begin()], context, true
+					);
+					if (!directional.IsValid() ||
+						directional.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+						directional.Width != pbrDimensions.LitWidth ||
+						directional.Height != pbrDimensions.LitHeight)
+						return false;
+					directionalTexture = directional.Texture;
+				}
+				EnterNamedPass(context.Name);
+				SDL_GPUColorTargetInfo targets[3]{};
+				targets[0].texture = pbr.Lit;
+				targets[1].texture = baseline.Texture;
+				targets[2].texture = directionalTexture;
+				for (auto &target : targets) {
+					target.load_op = SDL_GPU_LOADOP_CLEAR;
+					target.store_op = SDL_GPU_STOREOP_STORE;
+					target.cycle = true;
+				}
+				auto *pass = SDL_BeginGPURenderPass(Command, targets, directionalRequested ? 3 : 2, nullptr);
+				if (!pass) return false;
+				SDL_BindGPUGraphicsPipeline(
+					pass,
+					directionalRequested ? State->DeferredLightingDirectionalPipeline
+										 : State->DeferredLightingBaselinePipeline
+				);
+				SDL_BindGPUFragmentSamplers(
+					pass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
+				);
+				SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+				SDL_PushGPUFragmentUniformData(Command, 1, &lightUniforms, sizeof(lightUniforms));
+				const SDL_GPUViewport viewport{0, 0, float(baseline.Width), float(baseline.Height), 0, 1};
+				const SDL_Rect scissor{0, 0, int(baseline.Width), int(baseline.Height)};
+				SDL_SetGPUViewport(pass, &viewport);
+				SDL_SetGPUScissor(pass, &scissor);
+				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+				SDL_EndGPURenderPass(pass);
+				++Result.DrawCalls;
+				core::Metrics::Count(
+					"render.lighting_baseline.output_bytes", uint64_t(baseline.Width) * baseline.Height * 16
+				);
+				if (directionalRequested)
+					core::Metrics::Count(
+						"render.directional_response.output_bytes",
+						uint64_t(baseline.Width) * baseline.Height * 16
+					);
+				return true;
+			}
+
 			fullscreen(
 				context.Name,
 				State->DeferredLightingPipeline,
@@ -410,35 +686,70 @@ namespace engine::render {
 		frameNodes.Set(core::Name("shader-lenses"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			Impl::PbrSlot &pbr = *recording.Pbr;
-			const auto input = context.Reads.empty()
-								   ? Impl::NamedTexture{}
-								   : recording.GraphTexture(context.Reads.front(), context, false);
-			if (!input.IsValid()) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (!node || context.Reads.size() != 2 || context.Writes.size() != 2) return false;
+			const auto resolve = [&](bool write, core::Name port) {
+				const auto &ports = write ? node->WritePorts : node->ReadPorts;
+				const auto resources = write ? context.Writes : context.Reads;
+				const auto found = std::find(ports.begin(), ports.end(), port);
+				const auto index = static_cast<size_t>(found - ports.begin());
+				if (found == ports.end() || index >= resources.size()) return Impl::NamedTexture{};
+				return GraphTexture(resources[index], context, write);
+			};
+			const auto input = resolve(false, core::Name("colour"));
+			const auto depth = resolve(false, core::Name("depth"));
+			const auto output = resolve(true, core::Name("colour"));
+			const auto scratch = resolve(true, core::Name("scratch"));
+			if (!input.IsValid() || !depth.IsValid() || !output.IsValid() || !scratch.IsValid() ||
+				input.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT || output.Format != input.Format ||
+				scratch.Format != input.Format || output.Width != scratch.Width ||
+				output.Height != scratch.Height || input.Texture == output.Texture ||
+				input.Texture == scratch.Texture || output.Texture == scratch.Texture)
 				return false;
-			}
 			SDL_GPUTexture *source = input.Texture;
-			SDL_GPUTexture *target = pbr.LensA;
+			SDL_GPUTexture *target = scratch.Texture;
 
 			for (size_t index = 0; index < recording.LensGroupCount; index++) {
 				const ViewRecording::LensGroup &group = recording.LensGroups[index];
-				const auto pipeline = State->LensPipelines.find(group.Shader.Id());
-				if (pipeline == State->LensPipelines.end() || group.Count == 0) {
-					continue;
+				SDL_GPUGraphicsPipeline *pipeline = nullptr;
+				const auto &view = *recording.Request.Source;
+				if (view.LensPrograms != 0) {
+					const auto programs = std::find_if(
+						State->PortalLensPrograms.begin(),
+						State->PortalLensPrograms.end(),
+						[&](const auto &candidate) { return candidate.Token == view.LensPrograms; }
+					);
+					if (programs == State->PortalLensPrograms.end()) return false;
+					const auto binding = std::find_if(
+						programs->Bindings.begin(), programs->Bindings.end(), [&](const auto &candidate) {
+							return candidate.Shader == group.Shader;
+						}
+					);
+					if (binding == programs->Bindings.end()) return false;
+					pipeline = binding->Pipeline;
+				} else {
+					const auto authored = State->LensPipelines.find(
+						Impl::ShaderVariantKey(
+							group.Shader, view.LensContentOwner.value_or(view.ContentOwner)
+						)
+					);
+					if (authored != State->LensPipelines.end()) pipeline = authored->second.Pipeline;
 				}
+				if (!pipeline || group.Count == 0) continue;
 				LensPassUniforms &uniforms = recording.LensPassData;
 				std::copy_n(recording.LensEntries.begin() + group.First, group.Count, uniforms.Lenses);
 				uniforms.TimeCount.y = static_cast<float>(group.Count);
 				const std::array bindings{
 					SDL_GPUTextureSamplerBinding{source, recording.Sampler},
-					SDL_GPUTextureSamplerBinding{pbr.LinearDepth, recording.Sampler},
+					SDL_GPUTextureSamplerBinding{depth.Texture, recording.Sampler},
 				};
 				recording.Fullscreen(
 					context.Name,
-					pipeline->second,
+					pipeline,
 					target,
-					recording.PbrDimensions.LitWidth,
-					recording.PbrDimensions.LitHeight,
+					output.Width,
+					output.Height,
 					bindings,
 					nullptr,
 					nullptr,
@@ -447,22 +758,19 @@ namespace engine::render {
 					sizeof(uniforms)
 				);
 				source = target;
-				target = target == pbr.LensA ? pbr.LensB : pbr.LensA;
+				target = target == scratch.Texture ? output.Texture : scratch.Texture;
 			}
 
-			if (source != pbr.LensB) {
-				// The graph declares lens-b as this node's output. A zero-length or
-				// odd chain ends in another texture, so copy the completed scene into
-				// the declared resource instead of letting the next node sample stale
-				// pixels from a previous frame.
+			if (source != output.Texture) {
+				// Empty and odd chains still publish the declared final image.
 				recording.EnterNamedPass(context.Name);
 				SDL_GPUBlitInfo blit{};
 				blit.source.texture = source;
-				blit.source.w = recording.PbrDimensions.LitWidth;
-				blit.source.h = recording.PbrDimensions.LitHeight;
-				blit.destination.texture = pbr.LensB;
-				blit.destination.w = recording.PbrDimensions.LitWidth;
-				blit.destination.h = recording.PbrDimensions.LitHeight;
+				blit.source.w = source == input.Texture ? input.Width : output.Width;
+				blit.source.h = source == input.Texture ? input.Height : output.Height;
+				blit.destination.texture = output.Texture;
+				blit.destination.w = output.Width;
+				blit.destination.h = output.Height;
 				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
 				blit.filter = SDL_GPU_FILTER_NEAREST;
 				blit.cycle = true;
@@ -508,14 +816,12 @@ namespace engine::render {
 					break;
 				}
 			}
-			// **The one place `PostProcessPipeline` is read.** The portal
-			// preview above always draws with the engine's own tonemap - see
-			// `Renderer::SetPostProcessShader`'s own header for why a custom
-			// grade on the main view must not also recolour every mirror and
-			// portal in it.
+			// Portal previews retain their plain tonemap; this grade belongs to the view.
+			const auto postprocess = State->PostProcessPipelines.find(Request.Source->ContentOwner.Id());
 			fullscreen(
 				context.Name,
-				State->PostProcessPipeline != nullptr ? State->PostProcessPipeline : State->TonemapPipeline,
+				postprocess != State->PostProcessPipelines.end() ? postprocess->second.Pipeline
+																 : State->TonemapPipeline,
 				target.Texture,
 				target.Width,
 				target.Height,

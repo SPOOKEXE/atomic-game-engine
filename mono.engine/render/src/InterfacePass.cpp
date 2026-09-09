@@ -5,6 +5,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/ShaderLibrary.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/resources/Shaders.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -93,7 +95,7 @@ namespace engine::render {
 
 		SDL_GPUShader *vertex = Load(gpu, "interface.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		SDL_GPUShader *spatialVertex = Load(gpu, "interface_spatial.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-		SDL_GPUShader *fragment = Load(gpu, "interface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+		SDL_GPUShader *fragment = Load(gpu, "interface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		if (vertex == nullptr || spatialVertex == nullptr || fragment == nullptr) {
 			if (vertex != nullptr) {
 				SDL_ReleaseGPUShader(gpu, vertex);
@@ -202,6 +204,8 @@ namespace engine::render {
 			HdrSpatialTopPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
 			spatialInfo.depth_stencil_state.enable_depth_test = true;
 			HdrSpatialPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
+			spatialInfo.depth_stencil_state.enable_depth_write = true;
+			HdrCapturePipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
 		}
 
 		SDL_ReleaseGPUShader(gpu, vertex);
@@ -209,7 +213,8 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(gpu, fragment);
 
 		if (Pipeline == nullptr || SpatialPipeline == nullptr || SpatialTopPipeline == nullptr ||
-			(hdrSupported && (HdrSpatialPipeline == nullptr || HdrSpatialTopPipeline == nullptr))) {
+			(hdrSupported && (HdrSpatialPipeline == nullptr || HdrSpatialTopPipeline == nullptr ||
+							  HdrCapturePipeline == nullptr))) {
 			ENGINE_ERROR("interface pass: pipeline: {}", SDL_GetError());
 			return false;
 		}
@@ -337,10 +342,12 @@ namespace engine::render {
 				gpu, static_cast<SDL_GPUGraphicsPipeline *>(HdrSpatialTopPipeline)
 			);
 		}
-		for (const auto &[id, pipeline] : ShaderVariants) {
-			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(pipeline));
+		for (const auto &[id, variant] : ShaderVariants) {
+			(void)id;
+			ReleaseShaderVariant(variant);
 		}
 		ShaderVariants.clear();
+		ContentOwner = {};
 
 		TransferBuffer = nullptr;
 		IndexBuffer = nullptr;
@@ -353,6 +360,9 @@ namespace engine::render {
 		SpatialPipeline = nullptr;
 		SpatialTopPipeline = nullptr;
 		HdrSpatialPipeline = nullptr;
+		if (HdrCapturePipeline)
+			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(HdrCapturePipeline));
+		HdrCapturePipeline = nullptr;
 		HdrSpatialTopPipeline = nullptr;
 		Device = nullptr;
 		SwapchainFormat = 0;
@@ -392,6 +402,26 @@ namespace engine::render {
 		ecs::Store &store,
 		uint64_t signature
 	) {
+		SubmitCommands(list, canvas, targetPixels, signature);
+		SpatialCollectors.clear();
+		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
+			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
+		});
+	}
+
+	void InterfacePass::Submit(
+		const WorldCameraFrame &frame, const core::Vector2 &canvas, const core::Vector2 &targetPixels
+	) {
+		SubmitCommands(frame.SpatialCommands, canvas, targetPixels, frame.Compiled.Signature());
+		SpatialCollectors = frame.SpatialCollectors;
+	}
+
+	void InterfacePass::SubmitCommands(
+		const gui::DrawList &list,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels,
+		uint64_t signature
+	) {
 		if (!SignatureValid || PendingSignature != signature) {
 			Pending = list;
 			PendingSignature = signature;
@@ -400,13 +430,11 @@ namespace engine::render {
 		}
 		Canvas = canvas;
 		TargetPixels = targetPixels;
-		SpatialCollectors.clear();
-		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
-			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
-		});
 	}
 
-	bool InterfacePass::AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv) {
+	bool InterfacePass::AddShaderVariant(
+		const core::Name &name, std::span<const uint32_t> spirv, core::Name owner
+	) {
 		if (!name.IsValid() || spirv.empty() || Device == nullptr || Pipeline == nullptr) {
 			return false;
 		}
@@ -439,15 +467,10 @@ namespace engine::render {
 		fragmentInfo.format = binary.Format;
 		fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
 
-		// **One sampler and no uniform buffer - `interface.frag`'s own
-		// shape**, matching exactly what `Initialise` declares for it below,
-		// and not `opaque.frag`'s ten and three. This is the contract a
-		// `ShaderScript` meant for an `ImageLabel` is written against; see
-		// this method's own header. The clip rectangle `Record` pushes
-		// reaches the fragment stage through SDL's push-constant path rather
-		// than a bound buffer, which is why it does not appear here.
+		// The fragment samples one image and reads the collector-space clip block.
+		// SDL's pushed uniform data still needs a declared shader buffer slot.
 		fragmentInfo.num_samplers = 1;
-		fragmentInfo.num_uniform_buffers = 0;
+		fragmentInfo.num_uniform_buffers = 1;
 
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(gpu, &fragmentInfo);
 		if (fragment == nullptr) {
@@ -507,35 +530,120 @@ namespace engine::render {
 		info.target_info.has_depth_stencil_target = false;
 		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
 
-		SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &info);
-
+		ShaderVariant variant;
+		variant.Screen = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+		SDL_GPUShader *spatialVertex = Load(gpu, "interface_spatial.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		if (spatialVertex != nullptr) {
+			info.vertex_shader = spatialVertex;
+			info.target_info.has_depth_stencil_target = true;
+			info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+			info.depth_stencil_state.enable_depth_test = true;
+			info.depth_stencil_state.enable_depth_write = false;
+			info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+			variant.Spatial = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+			info.depth_stencil_state.enable_depth_test = false;
+			variant.SpatialTop = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+			if (HdrSpatialPipeline != nullptr) {
+				target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+				variant.HdrSpatialTop = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+				info.depth_stencil_state.enable_depth_test = true;
+				variant.HdrSpatial = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+				info.depth_stencil_state.enable_depth_write = true;
+				variant.HdrCapture = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+			}
+			SDL_ReleaseGPUShader(gpu, spatialVertex);
+		}
 		SDL_ReleaseGPUShader(gpu, vertex);
 		SDL_ReleaseGPUShader(gpu, fragment);
-
-		if (pipeline == nullptr) {
-			ENGINE_ERROR("interface shader '{}' pipeline: {}", name.Text(), SDL_GetError());
+		if (variant.Screen == nullptr || variant.Spatial == nullptr || variant.SpatialTop == nullptr ||
+			(HdrSpatialPipeline != nullptr &&
+			 (variant.HdrSpatial == nullptr || variant.HdrSpatialTop == nullptr ||
+			  variant.HdrCapture == nullptr))) {
+			ENGINE_ERROR("interface shader '{}' pipelines: {}", name.Text(), SDL_GetError());
+			ReleaseShaderVariant(variant);
 			return false;
 		}
-
-		// Replacing is the ordinary case: an author editing a `ShaderScript`
-		// bumps its revision every keystroke that lands.
-		DropShaderVariant(name);
-		ShaderVariants[name.Id()] = pipeline;
+		DropShaderVariant(name, owner);
+		variant.CodeHash = assets::Hasher::Of(std::as_bytes(spirv));
+		variant.AttemptHash = variant.CodeHash;
+		ShaderVariants[ShaderKey(name, owner)] = variant;
 		return true;
 	}
 
-	bool InterfacePass::DropShaderVariant(const core::Name &name) {
-		const auto found = ShaderVariants.find(name.Id());
+	void InterfacePass::ReleaseShaderVariant(const ShaderVariant &variant) {
+		if (Device == nullptr) return;
+		for (void *pipeline :
+			 {variant.Screen,
+			  variant.Spatial,
+			  variant.SpatialTop,
+			  variant.HdrSpatial,
+			  variant.HdrSpatialTop,
+			  variant.HdrCapture}) {
+			if (pipeline != nullptr)
+				SDL_ReleaseGPUGraphicsPipeline(
+					static_cast<SDL_GPUDevice *>(Device), static_cast<SDL_GPUGraphicsPipeline *>(pipeline)
+				);
+		}
+	}
+
+	bool InterfacePass::DropShaderVariant(const core::Name &name, core::Name owner) {
+		const auto found = ShaderVariants.find(ShaderKey(name, owner));
 		if (found == ShaderVariants.end()) {
 			return false;
 		}
-		if (Device != nullptr) {
-			SDL_ReleaseGPUGraphicsPipeline(
-				static_cast<SDL_GPUDevice *>(Device), static_cast<SDL_GPUGraphicsPipeline *>(found->second)
-			);
-		}
+		const bool held = found->second.Screen != nullptr;
+		ReleaseShaderVariant(found->second);
 		ShaderVariants.erase(found);
-		return true;
+		return held;
+	}
+
+	bool InterfacePass::HasShaderVariant(core::Name name, core::Name owner) const {
+		const auto found = ShaderVariants.find(ShaderKey(name, owner));
+		return name.IsValid() && found != ShaderVariants.end() && found->second.Screen != nullptr;
+	}
+
+	size_t InterfacePass::RefreshShaders(
+		std::span<const core::Name> demanded, const ShaderLibrary &library, core::Name owner
+	) {
+		if (Device == nullptr || Pipeline == nullptr) return 0;
+		size_t changed = 0;
+		for (auto entry = ShaderVariants.begin(); entry != ShaderVariants.end();) {
+			const auto key = (entry++)->first;
+			if (static_cast<uint32_t>(key >> 32) != owner.Id()) continue;
+			const auto name = core::Name::FromId(static_cast<uint32_t>(key));
+			const auto *module = library.Find(name, owner);
+			if (std::find(demanded.begin(), demanded.end(), name) != demanded.end() && module != nullptr &&
+				!module->CodeHash.IsZero())
+				continue;
+			changed += HasShaderVariant(name, owner);
+			DropShaderVariant(name, owner);
+		}
+		for (const auto name : demanded) {
+			const auto *module = library.Find(name, owner);
+			if (module == nullptr || module->CodeHash.IsZero()) continue;
+			const auto key = ShaderKey(name, owner);
+			const auto found = ShaderVariants.find(key);
+			if (found != ShaderVariants.end() && found->second.CodeHash == module->CodeHash) {
+				found->second.AttemptHash = module->CodeHash;
+				continue;
+			}
+			if (found != ShaderVariants.end() && found->second.AttemptHash == module->CodeHash) continue;
+			changed += AddShaderVariant(name, module->SpirV, owner);
+			// Remember refusals too, without discarding the previous accepted pipeline.
+			ShaderVariants[key].AttemptHash = module->CodeHash;
+		}
+		return changed;
+	}
+
+	size_t InterfacePass::DropContentOwner(core::Name owner) {
+		if (!owner.IsValid()) return 0;
+		size_t removed = 0;
+		for (auto entry = ShaderVariants.begin(); entry != ShaderVariants.end();) {
+			const auto key = (entry++)->first;
+			if (static_cast<uint32_t>(key >> 32) != owner.Id()) continue;
+			removed += DropShaderVariant(core::Name::FromId(static_cast<uint32_t>(key)), owner);
+		}
+		return removed;
 	}
 
 	bool InterfacePass::UploadAtlas(void *commandBuffer) {
@@ -828,9 +936,9 @@ namespace engine::render {
 			// for whenever a resolve can fail.
 			SDL_GPUGraphicsPipeline *wanted = defaultPipeline;
 			if (batch.Shader.IsValid()) {
-				const auto found = ShaderVariants.find(batch.Shader.Id());
+				const auto found = ShaderVariants.find(ShaderKey(batch.Shader, ContentOwner));
 				if (found != ShaderVariants.end()) {
-					wanted = static_cast<SDL_GPUGraphicsPipeline *>(found->second);
+					wanted = static_cast<SDL_GPUGraphicsPipeline *>(found->second.Screen);
 				}
 			}
 			if (wanted != boundPipeline) {
@@ -913,6 +1021,65 @@ namespace engine::render {
 		bool alwaysOnTop,
 		WorldColourTarget target
 	) {
+		return RecordWorldRange(
+			commandBuffer,
+			renderPass,
+			viewProjection,
+			camera,
+			ambient,
+			sun,
+			width,
+			height,
+			alwaysOnTop,
+			target,
+			0,
+			Mesh.Batches().size(),
+			false
+		);
+	}
+
+	bool InterfacePass::SupportsWorldLayers() const {
+		return HdrCapturePipeline != nullptr;
+	}
+	bool InterfacePass::HasWorldOverlay() const {
+		return std::any_of(SpatialCollectors.begin(), SpatialCollectors.end(), [](const auto &placed) {
+			return placed.Canvas.Visible && placed.Canvas.AlwaysOnTop;
+		});
+	}
+
+	uint32_t InterfacePass::RecordWorldBatch(const WorldInterfaceCapture &capture, size_t batch) {
+		return RecordWorldRange(
+			capture.Command,
+			capture.Pass,
+			capture.ViewProjection,
+			capture.Camera,
+			capture.Ambient,
+			capture.Sun,
+			capture.Width,
+			capture.Height,
+			false,
+			WorldColourTarget::Hdr,
+			batch,
+			1,
+			true
+		);
+	}
+
+	uint32_t InterfacePass::RecordWorldRange(
+		void *commandBuffer,
+		void *renderPass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &camera,
+		const core::Color3 &ambient,
+		const core::Vector3 &sun,
+		uint32_t width,
+		uint32_t height,
+		bool alwaysOnTop,
+		WorldColourTarget target,
+		size_t firstBatch,
+		size_t batchCount,
+		bool captureDepth
+	) {
 		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
 		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
 		void *spatialPipeline = target == WorldColourTarget::Hdr ? HdrSpatialPipeline : SpatialPipeline;
@@ -940,7 +1107,11 @@ namespace engine::render {
 		void *boundPipeline = nullptr;
 		uint32_t drawn = 0;
 
-		for (const InterfaceBatch &batch : Mesh.Batches()) {
+		const auto &batches = Mesh.Batches();
+		if (firstBatch >= batches.size()) return 0;
+		const auto endBatch = firstBatch + std::min(batchCount, batches.size() - firstBatch);
+		for (size_t batchIndex = firstBatch; batchIndex < endBatch; ++batchIndex) {
+			const auto &batch = batches[batchIndex];
 			const auto placed = std::find_if(
 				SpatialCollectors.begin(), SpatialCollectors.end(), [&](const SpatialCollector &entry) {
 					return entry.Collector == batch.Collector;
@@ -993,7 +1164,19 @@ namespace engine::render {
 				normal = quad.Normal;
 			}
 
-			const void *wantedPipeline = spatial.AlwaysOnTop ? spatialTopPipeline : spatialPipeline;
+			const void *wantedPipeline = captureDepth
+											 ? HdrCapturePipeline
+											 : (spatial.AlwaysOnTop ? spatialTopPipeline : spatialPipeline);
+			if (batch.Shader.IsValid()) {
+				const auto shader = ShaderVariants.find(ShaderKey(batch.Shader, ContentOwner));
+				if (shader != ShaderVariants.end()) {
+					const auto &variant = shader->second;
+					wantedPipeline = captureDepth ? variant.HdrCapture
+									 : target == WorldColourTarget::Hdr
+										 ? (spatial.AlwaysOnTop ? variant.HdrSpatialTop : variant.HdrSpatial)
+										 : (spatial.AlwaysOnTop ? variant.SpatialTop : variant.Spatial);
+				}
+			}
 			if (boundPipeline != wantedPipeline) {
 				SDL_BindGPUGraphicsPipeline(
 					pass, static_cast<SDL_GPUGraphicsPipeline *>(const_cast<void *>(wantedPipeline))

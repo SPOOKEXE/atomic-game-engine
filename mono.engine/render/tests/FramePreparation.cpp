@@ -83,3 +83,32 @@ TEST_CASE(
 	CHECK_FALSE(prepared.NeedsFrame(&authored));
 	CHECK_FALSE(prepared.NeedsWorld(&authored, 7));
 }
+
+TEST_CASE("invalidating shared world storage preserves completed frame effects", "[render][frame-prefix]") {
+	engine::render::FramePreparation prepared;
+	const int pipeline = 0, otherPipeline = 1;
+	prepared.InvalidateWorld(&pipeline, 7);
+	CHECK(prepared.NeedsFrame(&pipeline));
+	CHECK(prepared.NeedsWorld(&pipeline, 7));
+	prepared.Complete(&pipeline, 7, true);
+	prepared.InvalidateWorld(&pipeline, 7);
+	CHECK_FALSE(prepared.NeedsFrame(&pipeline));
+	CHECK(prepared.NeedsWorld(&pipeline, 7));
+	prepared.Complete(&pipeline, 7, false);
+	CHECK_FALSE(prepared.NeedsFrame(&pipeline));
+	CHECK(prepared.NeedsWorld(&pipeline, 7));
+	prepared.Complete(&pipeline, 9, true);
+	prepared.Complete(&otherPipeline, 7, true);
+	prepared.InvalidateWorld(&pipeline, 7);
+	CHECK_FALSE(prepared.NeedsWorld(&pipeline, 9));
+	CHECK_FALSE(prepared.NeedsWorld(&otherPipeline, 7));
+	CHECK_FALSE(prepared.NeedsFrame(&otherPipeline));
+	prepared.Complete(&pipeline, 7, true);
+	CHECK_FALSE(prepared.NeedsWorld(&pipeline, 7));
+	CHECK_FALSE(prepared.NeedsFrame(&pipeline));
+	prepared.InvalidateWorld(&pipeline, 7);
+	prepared.Clear();
+	CHECK(prepared.NeedsFrame(&pipeline));
+	CHECK(prepared.NeedsWorld(&pipeline, 7));
+	CHECK(prepared.NeedsFrame(&otherPipeline));
+}

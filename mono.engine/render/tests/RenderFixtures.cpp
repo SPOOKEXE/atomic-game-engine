@@ -3,10 +3,12 @@
 
 #include "RenderFixture.hpp"
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -276,6 +278,170 @@ TEST_CASE(
 		REQUIRE(frame.Ran(core::Name("gbuffer")));
 		REQUIRE(frame.Ran(core::Name("depth-linearise")));
 		CheckPlanes(fixture.Render, document, "pinhole-" + std::to_string(target.Width), planes, view);
+	}
+}
+
+TEST_CASE(
+	"rendered assets follow native and copied world content owners", "[render][gpu][content-binding][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto document = InstallFixture(fixture.Render);
+	const core::Name first("session:first"), second("session:second"), foreignWorld("world:foreign");
+	const core::Name red("reference.red"), green("reference.green"), common("shared-spelling.texture");
+	const auto upload = [&](core::Name name, uint32_t colour, core::Name owner = {}) {
+		assets::TextureData texture;
+		texture.Width = texture.Height = 1;
+		for (size_t channel = 0; channel < 4; ++channel)
+			texture.Pixels.push_back(std::byte((colour >> (channel * 8)) & 255u));
+		REQUIRE(fixture.Render.AddTexture(name, texture, owner));
+	};
+	upload(red, 0xFF0000FFu);
+	upload(green, 0xFF00FF00u);
+	upload(common, 0xFF0000FFu, first);
+	upload(common, 0xFF00FF00u, second);
+	auto instances = DrawPlanes(
+		std::array{Plane{-1, 0, 4, .65f, .65f, 0xFFFFFFFFu}, Plane{1, 0, 4, .65f, .65f, 0xFFFFFFFFu}}
+	);
+	bool namedMesh = false;
+	SECTION("shared built-in meshes still split same-name texture runs") {
+		for (auto &row : instances)
+			row.Mesh = core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube));
+	}
+	SECTION("named meshes use their own world's residency") {
+		namedMesh = true;
+		auto mesh = PlaneMesh();
+		assets::Submesh material;
+		material.IndexCount = 6;
+		material.Texture = common.Text();
+		mesh.Submeshes.push_back(std::move(material));
+		REQUIRE(fixture.Render.AddMesh(core::Name("fixture.plane"), mesh, first));
+		REQUIRE(fixture.Render.AddMesh(core::Name("fixture.plane"), mesh, second));
+	}
+	render::SceneTarget target{65, 37};
+	render::View view;
+	view.World = 931;
+	view.WorldName = core::Name("world:native");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32;
+	view.Instances = instances;
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Ran(core::Name("gbuffer")));
+		return CaptureResource(
+			fixture.Render,
+			core::Name("albedo"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		);
+	};
+	instances[0].Texture = red;
+	instances[1].Texture = green;
+	const auto expected = capture();
+	instances[0].Texture = green;
+	instances[1].Texture = red;
+	const auto reversed = capture();
+	CHECK_FALSE(CompareImages(expected.View(), reversed.View()).Passed());
+	instances[1].Texture = green;
+	const auto sameOwner = capture();
+	view.Instances = std::span(instances).first(1);
+	const auto retired = capture();
+	view.Instances = instances;
+	instances[0].Texture = instances[1].Texture = namedMesh ? core::Name{} : common;
+	instances[1].SourceWorld = foreignWorld;
+	std::array bindings{render::WorldContentOwner{foreignWorld, second}};
+	view.ContentOwner = first;
+	view.ForeignContentOwners = bindings;
+	const auto scoped = capture();
+	CheckImage(
+		fixture.Render,
+		"content-binding",
+		"native-and-copied",
+		graph::Write(document),
+		expected.View(),
+		scoped.View()
+	);
+	view.ContentOwner = second;
+	bindings[0].Owner = first;
+	view.Damage = {};
+	const auto swapped = capture();
+	CheckImage(
+		fixture.Render,
+		"content-binding",
+		"owner-switch",
+		graph::Write(document),
+		reversed.View(),
+		swapped.View()
+	);
+	bindings[0].Owner = second;
+	const auto rebound = capture();
+	CheckImage(
+		fixture.Render,
+		"content-binding",
+		"foreign-owner-switch",
+		graph::Write(document),
+		sameOwner.View(),
+		rebound.View()
+	);
+	if (namedMesh) {
+		bindings[0].Owner = first;
+		const auto survivor = fixture.Render.TextureHandle(common, second);
+		uint64_t settledBufferBytes = 0;
+		for (size_t cycle = 0; cycle < 12; ++cycle) {
+			INFO("owner retirement cycle " << cycle);
+			view.Damage.Scene = true;
+			const auto submitted = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			REQUIRE(submitted.Ran(core::Name("gbuffer")));
+			view.Damage = {};
+			const auto before = fixture.Render.MemoryStatistics();
+			// Retire before any readback wait. The submitted draw still owns its reads.
+			fixture.Render.DropContentOwner(first);
+			const auto after = fixture.Render.MemoryStatistics();
+			CHECK(after.TextureBytes + 4 == before.TextureBytes);
+			CHECK(after.Textures + 1 == before.Textures);
+			CHECK(after.ReleasedBytes == before.ReleasedBytes + 4);
+			CHECK(fixture.Render.TextureHandle(common, first) == nullptr);
+			CHECK(fixture.Render.TextureHandle(common, second) == survivor);
+			const auto inFlight = CaptureResource(
+				fixture.Render,
+				core::Name("albedo"),
+				view.Slot,
+				target.Width,
+				target.Height,
+				ImageFormat::Rgba8Unorm
+			);
+			CHECK(CompareImages(reversed.View(), inFlight.View()).Passed());
+			const auto removed = capture();
+			CheckImage(
+				fixture.Render,
+				"content-binding",
+				"retired-mesh",
+				graph::Write(document),
+				retired.View(),
+				removed.View()
+			);
+			// Reusing the owner must invalidate quiet views and refill its retired ranges.
+			upload(common, 0xFF0000FFu, first);
+			auto mesh = PlaneMesh();
+			assets::Submesh material;
+			material.IndexCount = 6;
+			material.Texture = common.Text();
+			mesh.Submeshes.push_back(std::move(material));
+			REQUIRE(fixture.Render.AddMesh(core::Name("fixture.plane"), mesh, first));
+			const auto restored = capture();
+			CHECK(CompareImages(reversed.View(), restored.View()).Passed());
+			const auto resident = fixture.Render.MemoryStatistics();
+			CHECK(resident.TextureBytes == before.TextureBytes);
+			CHECK(resident.Textures == before.Textures);
+			if (cycle == 3) settledBufferBytes = resident.BufferBytes;
+			if (cycle > 3) CHECK(resident.BufferBytes == settledBufferBytes);
+		}
 	}
 }
 
@@ -567,4 +733,98 @@ TEST_CASE("batched cameras keep world residency and view images separate", "[ren
 	fixture.Render.Render(views, overlay, nullptr, false);
 	CheckPlanes(fixture.Render, document, "world-a-retained", firstPlanes, views[0]);
 	CheckPlanes(fixture.Render, document, "world-b-edited", secondPlanes, views[1]);
+}
+
+TEST_CASE(
+	"authored opaque colour and discard survive occlusion phases", "[render][gpu][authored-occlusion][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto document = InstallFixture(fixture.Render);
+	graph::PipelineDocument occlusion;
+	for (const auto &edit : document.Edits()) {
+		occlusion.Record(edit);
+		if (edit.Kind == graph::EditKind::AddNode && edit.NodeKind == core::Name("cull-frustum"))
+			occlusion.Record(
+				{.Kind = graph::EditKind::Set, .Key = core::Name("culling"), .Value = "occlusion"}
+			);
+	}
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(graph::Build(occlusion, graph, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("fixture.occlusion"), graph));
+	render::ShaderCompiler compiler;
+	const auto program = compiler.Compile(
+		"#version 450\nlayout(location=0) out vec4 colour;\n"
+		"void main(){if(gl_FragCoord.x<64)discard;colour=vec4(0,0,1,1);}",
+		render::ShaderStage::Fragment,
+		"cutout.frag"
+	);
+	INFO(program.Error);
+	REQUIRE_FALSE(program.Failed);
+	const core::Name shader("fixture.cutout");
+	REQUIRE(fixture.Render.AddShader(shader, program.SpirV));
+	// Large rows enter the early phase. Small rows enter the late phase, with
+	// both authored and ordinary materials on each side of the cutout.
+	const std::array planes{
+		Plane{0, 0, 6, 8, 8, 0xFF00FF00u},
+		Plane{0, 0, 4, 4, 4, 0xFFFFFFFFu},
+		Plane{1, 0, 2, .25f, 1, 0xFF0000FFu},
+		Plane{-1, 0, 3, .1f, .1f, 0xFF00FFFFu},
+		Plane{1.3f, .8f, 3, .1f, .1f, 0xFFFFFFFFu}
+	};
+	auto rows = DrawPlanes(planes);
+	rows[1].Shader = rows[4].Shader = shader;
+	render::SceneTarget target{129, 97};
+	render::View view;
+	view.World = 906;
+	view.WorldName = core::Name("fixture.authored-occlusion");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Instances = rows;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32;
+	render::OverlayImage overlay;
+	uint32_t drawCalls = 0;
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Ran(core::Name("gbuffer")));
+		drawCalls = frame.DrawCalls;
+		return std::array{
+			CaptureResource(
+				fixture.Render, core::Name("composed-image"), 0, 129, 97, ImageFormat::Rgba8Unorm
+			),
+			CaptureResource(fixture.Render, core::Name("linear-depth"), 0, 129, 97, ImageFormat::R32Float)
+		};
+	};
+	const auto expected = capture();
+	const auto ordinaryPassDraws = drawCalls;
+	rows[1].Shader = rows[4].Shader = {};
+	const auto ordinary = capture();
+	REQUIRE_FALSE(CompareImages(expected[0].View(), ordinary[0].View()).Passed());
+	REQUIRE_FALSE(CompareImages(expected[1].View(), ordinary[1].View()).Passed());
+	rows[1].Shader = rows[4].Shader = shader;
+	view.Pipeline = core::Name("fixture.occlusion");
+	for (int repeat = 0; repeat < 2; ++repeat) {
+		const auto actual = capture();
+		CHECK(drawCalls > ordinaryPassDraws);
+		CheckImage(
+			fixture.Render,
+			"authored-occlusion",
+			"colour",
+			graph::Write(occlusion),
+			expected[0].View(),
+			actual[0].View()
+		);
+		CheckImage(
+			fixture.Render,
+			"authored-occlusion",
+			"depth",
+			graph::Write(occlusion),
+			expected[1].View(),
+			actual[1].View()
+		);
+	}
 }

@@ -97,6 +97,55 @@ TEST_CASE("the default PBR graph compiles into the graph backend", "[render][gra
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
 }
 
+TEST_CASE(
+	"retained shadow correction requires its complete input group", "[render][graph][directional-correct]"
+) {
+	using namespace engine::graph;
+	const auto base = DefaultPortalBodyDocument(false, true, true, true, false, 2, true);
+	for (unsigned mask = 0; mask < 16; ++mask) {
+		CAPTURE(mask);
+		PipelineDocument document;
+		document.Record(
+			{.Kind = EditKind::AddResource,
+			 .Name = Name("room-directional-response"),
+			 .Resource = ResourceKind::Colour,
+			 .Format = ResourceFormat::RGBA32F}
+		);
+		Name current;
+		for (const auto &edit : base.Edits()) {
+			if (edit.Kind == EditKind::AddNode) current = edit.Name;
+			document.Record(edit);
+			if (current == Name("room-image") && edit.Kind == EditKind::Writes &&
+				edit.Key == Name("lighting-baseline"))
+				document.Record(
+					{.Kind = EditKind::Writes,
+					 .Target = Name("room-directional-response"),
+					 .Key = Name("directional-response")}
+				);
+			if (current == Name("ambient-correct") && edit.Kind == EditKind::Reads &&
+				edit.Key == Name("occlusion")) {
+				const char *ports[]{"directional-response", "room-depth", "room-normal", "shadow"};
+				const char *resources[]{"room-directional-response", "room-depth", "room-normal", "shadow"};
+				for (unsigned input = 0; input < 4; ++input)
+					if (mask & (1u << input))
+						document.Record(
+							{.Kind = EditKind::Reads,
+							 .Target = Name(resources[input]),
+							 .Key = Name(ports[input])}
+						);
+			}
+		}
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+		PipelineDocument restored;
+		REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
+		CHECK(Write(restored) == Write(document));
+		Renderer renderer;
+		CHECK(renderer.SetPipeline(Name("retained-shadow-inputs"), graph) == (mask == 0 || mask == 15));
+	}
+}
+
 TEST_CASE("depth exports preserve the lighting depth singleton", "[render][graph][depth-export]") {
 	using namespace engine::graph;
 	for (const bool zeroBackground : {false, true}) {
@@ -367,7 +416,7 @@ TEST_CASE("optional default nodes can be disabled at the backend boundary", "[re
 	document.Record(disabled);
 	disabled.Name = Name("ssao");
 	document.Record(disabled);
-	disabled.Name = Name("mirror-capture");
+	disabled.Name = Name("surface-capture");
 	document.Record(disabled);
 
 	RenderGraph graph;

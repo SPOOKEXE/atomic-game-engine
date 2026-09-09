@@ -66,6 +66,19 @@ namespace engine::render {
 		SurfacePixelsUsed = 0;
 		Instances = request.Instances;
 		Foreign = request.Foreign;
+		if (request.Source->DirectionalShadowBounds) {
+			const auto &bounds = *request.Source->DirectionalShadowBounds;
+			const auto finite = [](const core::Vector3 &point) {
+				return std::isfinite(point.X) && std::isfinite(point.Y) && std::isfinite(point.Z);
+			};
+			if (!finite(bounds.Minimum) || !finite(bounds.Maximum) || bounds.Minimum.X > bounds.Maximum.X ||
+				bounds.Minimum.Y > bounds.Maximum.Y || bounds.Minimum.Z > bounds.Maximum.Z ||
+				!finite(bounds.Size()) || !finite(bounds.Centre()) ||
+				!std::isfinite(bounds.Size().Magnitude())) {
+				ENGINE_WARN("view {} has invalid directional shadow bounds", request.TargetSlot);
+				return ViewStart::Abandoned;
+			}
+		}
 		if (request.Source->Projection) {
 			const glm::mat4 &projection = *request.Source->Projection;
 			bool finite = true;
@@ -97,6 +110,49 @@ namespace engine::render {
 		const SceneTarget *const sceneTarget = Request.Target;
 		const size_t targetSlot = Request.TargetSlot;
 		const View &source = *Request.Source;
+		State->ActiveContentOwner = source.ContentOwner;
+		ContentSignature = scene::MixSignature(State->ResourceEpoch, source.ContentOwner.Id());
+		ContentSignature =
+			scene::MixSignature(ContentSignature, source.LensContentOwner.value_or(source.ContentOwner).Id());
+		ContentSignature = scene::MixSignature(ContentSignature, source.LensPrograms);
+		ContentSignature = scene::MixSignature(ContentSignature, source.LensTimeSeconds.has_value());
+		if (source.LensTimeSeconds)
+			ContentSignature =
+				scene::MixSignature(ContentSignature, std::bit_cast<uint32_t>(*source.LensTimeSeconds));
+		ContentSignature = scene::MixSignature(ContentSignature, source.DirectionalShadowBounds.has_value());
+		if (source.DirectionalShadowBounds) {
+			const auto &bounds = *source.DirectionalShadowBounds;
+			for (float component :
+				 {bounds.Minimum.X,
+				  bounds.Minimum.Y,
+				  bounds.Minimum.Z,
+				  bounds.Maximum.X,
+				  bounds.Maximum.Y,
+				  bounds.Maximum.Z})
+				ContentSignature = scene::MixSignature(ContentSignature, std::bit_cast<uint32_t>(component));
+		}
+		ContentSignature = scene::MixSignature(ContentSignature, source.World);
+		ContentSignature = scene::MixSignature(ContentSignature, source.WorldName.Id());
+		// Replacing a graph releases its targets even when world inputs stay unchanged.
+		if (const auto *installed = State->PipelineFor(Request.Pipeline))
+			ContentSignature = scene::MixSignature(ContentSignature, installed->Revision);
+		for (const WorldContentOwner &binding : source.ForeignContentOwners) {
+			ContentSignature = scene::MixSignature(ContentSignature, binding.World.Id());
+			ContentSignature = scene::MixSignature(ContentSignature, binding.Owner.Id());
+		}
+		if (State->SlotAt(targetSlot).ContentSignature != ContentSignature) {
+			Request.Damage.Scene = true;
+			Request.Damage.Objects = true;
+			Request.Damage.Environment = true;
+			Request.Damage.Particles = true;
+			Request.Damage.Portals = true;
+			State->SlotAt(targetSlot).InstanceSourcesReady = false;
+		}
+
+		if (State->HasShadowCaptureRequest(Request.Pipeline, Request.TargetSlot) ||
+			Request.Source->ImportedDirectionalShadow != 0)
+			Request.Damage.Scene = true;
+
 		const std::span<const effects::RibbonVertex> ribbonVertices = Request.RibbonVertices;
 		const std::span<const SceneLight> lights = Request.Lights;
 		const std::span<const PortalView> portals = Request.Portals;
@@ -398,7 +454,11 @@ namespace engine::render {
 			State->DrawableHidden.clear();
 			scene::KeepLoaded(
 				instances,
-				[State](const core::Name &mesh) { return State->Meshes.Has(mesh); },
+				[State, &source](const scene::DrawInstance &row) {
+					return State->Meshes.Has(
+						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+					);
+				},
 				State->Drawable,
 				source.EyeHiddenRows,
 				source.EyeHiddenRows.empty() ? nullptr : &State->DrawableHidden
@@ -410,7 +470,11 @@ namespace engine::render {
 			// place a viewer cannot walk over and check.
 			scene::KeepLoaded(
 				foreign,
-				[State](const core::Name &mesh) { return State->Meshes.Has(mesh); },
+				[State, &source](const scene::DrawInstance &row) {
+					return State->Meshes.Has(
+						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+					);
+				},
 				State->DrawableForeign
 			);
 		}
@@ -677,6 +741,15 @@ namespace engine::render {
 			sceneBounds = graph::BoundsOfAll(instances);
 		}
 
+		DirectionalShadowBounds = source.DirectionalShadowBounds.value_or(sceneBounds);
+		if (source.DirectionalShadowBounds && !instances.empty() &&
+			(!DirectionalShadowBounds.Contains(sceneBounds.Minimum) ||
+			 !DirectionalShadowBounds.Contains(sceneBounds.Maximum))) {
+			ENGINE_WARN("view {} has directional shadow bounds smaller than its scene", request.TargetSlot);
+			endIncompleteView();
+			return ViewStart::Abandoned;
+		}
+
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
 		{
 			// Two full copies of the draw list, per view, per frame. Small on a
@@ -715,9 +788,27 @@ namespace engine::render {
 		//
 		// The graph cull only changes what the view draws. Shadows still fit the
 		// whole world so an off-screen caster cannot disappear from the map.
-		lightViewProjection =
-			graph::FitDirectionalLight(sceneBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z});
+		// Split source/body views supply the same enclosing domain for the same raster grid.
+		lightViewProjection = graph::FitDirectionalLight(
+			DirectionalShadowBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
+		);
+		if (source.DirectionalShadowBounds) {
+			for (size_t column = 0; column < 4; ++column)
+				for (size_t row = 0; row < 4; ++row)
+					if (!std::isfinite(lightViewProjection[column][row])) {
+						ENGINE_WARN("view {} has an invalid directional shadow fit", request.TargetSlot);
+						endIncompleteView();
+						return ViewStart::Abandoned;
+					}
+		}
 		transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
+		if (source.ImportedDirectionalShadow &&
+			(!graphEnabled(core::Name("shadow")) ||
+			 !State->ValidPortalShadowView(source, lightViewProjection))) {
+			ENGINE_WARN("view {} has a mismatched imported directional shadow", request.TargetSlot);
+			endIncompleteView();
+			return ViewStart::Abandoned;
+		}
 
 		// **Surface instances moved to the back of the opaque head**, so the
 		// camera range is three contiguous runs - plain opaque, then mirrors,
@@ -1088,7 +1179,7 @@ namespace engine::render {
 			surfaceSource.EyePlayer.reset();
 			surfaceSource.EyeHiddenRows = {};
 			surfaceSignature = ScenePresentationSignature(surfaceSource, mirrorInputs);
-			surfaceSignature = scene::MixSignature(surfaceSignature, State->ResourceEpoch);
+			surfaceSignature = scene::MixSignature(surfaceSignature, ContentSignature);
 
 			// **And how deep the mirrors are being drawn, which is an input to
 			// every one of them.** A surface pass draws the *other* panes, so a
@@ -1348,9 +1439,13 @@ namespace engine::render {
 		// A scene whose opaque geometry all opted out of casting skips the pass
 		// rather than clearing a depth target nothing writes to - and the
 		// colour pass then samples a shadow map that was never rendered, which
-		// is what `FrameResult::Ran` exists to make visible.
-		haveShadow = graphEnabled(core::Name("shadow")) && haveInstances && sceneCount > 0 &&
-					 (reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
+		// is what `FrameResult::Ran` exists to make visible. An explicit capture still
+		// clears the empty map, so stale casters cannot enter its returned depth.
+		const bool captureShadow = State->HasShadowCaptureRequest(pipeline, request.TargetSlot);
+		haveShadow = graphEnabled(core::Name("shadow")) &&
+					 (captureShadow || source.ImportedDirectionalShadow != 0 ||
+					  (haveInstances && sceneCount > 0 && (reflectedCasters > 0 || surfaceCasters > 0))) &&
+					 State->EnsureShadow();
 
 		// Builds the per-draw block from world lighting and the camera used by
 		// this pass. Fog is eye-relative, so a reflected or portal sub-view must
@@ -1364,9 +1459,11 @@ namespace engine::render {
 		// once a mirror, surface or portal render pass is open. Headless frames
 		// still draw into capture targets; a hook that has no backend declines in
 		// `Prepare` itself.
-		drawInterface = (Request.Damage.GameInterface || Request.Damage.Scene) &&
-						graphEnabled(core::Name("interface")) && gameInterfaceHook != nullptr &&
-						gameInterfaceHook->Prepare(command);
+		drawInterface =
+			(Request.Damage.GameInterface || Request.Damage.Scene) &&
+			(graphEnabled(core::Name("interface")) || graphEnabled(core::Name("transparent-layer")) ||
+			 graphEnabled(core::Name("spatial-overlay"))) &&
+			gameInterfaceHook != nullptr && gameInterfaceHook->Prepare(command);
 		drawHostOverlay =
 			swapchain != nullptr && hostOverlayHook != nullptr && hostOverlayHook->Prepare(command);
 
@@ -1464,27 +1561,33 @@ namespace engine::render {
 		// The material-producing head and its explicit consumers. Projected
 		// surfaces and blended geometry are submitted by the graph's transparent
 		// node over the finished image.
-		const auto outputDimensions =
-			[&](core::Name kind, size_t output, uint32_t &outWidth, uint32_t &outHeight) {
-				outWidth = sceneWidth;
-				outHeight = sceneHeight;
-				const graph::Node *node = nullptr;
-				for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
-					const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
-					if (candidate != nullptr && candidate->Kind == kind) {
-						node = candidate;
-						break;
-					}
+		const auto outputDimensions = [&](core::Name kind,
+										  size_t output,
+										  uint32_t &outWidth,
+										  uint32_t &outHeight,
+										  core::Name port = {}) {
+			outWidth = sceneWidth;
+			outHeight = sceneHeight;
+			const graph::Node *node = nullptr;
+			for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
+				const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
+				if (candidate != nullptr && candidate->Kind == kind) {
+					node = candidate;
+					break;
 				}
-				if (node == nullptr || output >= node->Writes.size()) {
-					return;
-				}
-				const graph::ResourceDesc *resource =
-					selectedPipeline->Graph.FindResource(node->Writes[output]);
-				if (resource != nullptr) {
-					resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
-				}
-			};
+			}
+			if (node == nullptr) return;
+			if (port.IsValid()) {
+				const auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
+				if (found == node->WritePorts.end()) return;
+				output = static_cast<size_t>(found - node->WritePorts.begin());
+			}
+			if (output >= node->Writes.size()) return;
+			const graph::ResourceDesc *resource = selectedPipeline->Graph.FindResource(node->Writes[output]);
+			if (resource != nullptr) {
+				resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
+			}
+		};
 		pbrDimensions.TargetWidth = targetWidth;
 		pbrDimensions.TargetHeight = targetHeight;
 		pbrDimensions.ViewWidth = sceneWidth;
@@ -1499,7 +1602,14 @@ namespace engine::render {
 			core::Name("depth-linearise"), 0, pbrDimensions.LinearWidth, pbrDimensions.LinearHeight
 		);
 		outputDimensions(core::Name("ssao"), 0, pbrDimensions.OcclusionWidth, pbrDimensions.OcclusionHeight);
-		outputDimensions(core::Name("deferred-lighting"), 0, pbrDimensions.LitWidth, pbrDimensions.LitHeight);
+		// Optional lighting outputs do not choose the primary colour extent.
+		outputDimensions(
+			core::Name("deferred-lighting"),
+			0,
+			pbrDimensions.LitWidth,
+			pbrDimensions.LitHeight,
+			core::Name("colour")
+		);
 		const bool needsPbrTargets =
 			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-linearise")) ||
 			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
@@ -1606,7 +1716,7 @@ namespace engine::render {
 		LensPassData.InverseViewProjection = uniforms.InverseViewProjection;
 		LensPassData.Target = uniforms.Target;
 		LensPassData.Eye = uniforms.Eye;
-		LensPassData.TimeCount.x = static_cast<float>(frameSeconds);
+		LensPassData.TimeCount.x = Request.Source->LensTimeSeconds.value_or(static_cast<float>(frameSeconds));
 		const graph::Frustum lensFrustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
 		for (size_t index = 0; index < currentLighting.ShaderLensCount; index++) {
 			const scene::ShaderLensState &lens = currentLighting.ShaderLenses[index];
@@ -1696,6 +1806,7 @@ namespace engine::render {
 
 		State->SlotMesh.resize(uploadCount);
 		State->SlotTexture.resize(uploadCount);
+		State->SlotContentOwner.resize(uploadCount);
 		State->SlotNormalMap.resize(uploadCount);
 		State->SlotRoughnessMap.resize(uploadCount);
 		State->SlotOcclusionMap.resize(uploadCount);
@@ -1724,6 +1835,7 @@ namespace engine::render {
 			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry *mesh) {
 				State->SlotMesh[drawSlot] = mesh;
 				State->SlotTexture[drawSlot] = instance.Texture;
+				State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
 				State->SlotNormalMap[drawSlot] = instance.NormalMap;
 				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
 				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
@@ -1748,7 +1860,10 @@ namespace engine::render {
 							   const scene::DrawInstance &instance,
 							   uint32_t fallback,
 							   const Impl::SceneSlot::InstanceSourceRow *cached = nullptr) {
-			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+			const MeshEntry &mesh = State->Meshes.Resolve(
+				instance.Mesh,
+				Impl::MeshContentOwner(instance.Mesh, Request.Source->ContentOwnerOf(instance.SourceWorld))
+			);
 			writeMetadata(drawSlot, instance, &mesh);
 
 			InstanceKey &key = State->SlotInstanceKey[drawSlot];
@@ -1911,6 +2026,7 @@ namespace engine::render {
 						target.InstanceIndices[drawSlot] = target.InstanceIndices[sceneSlot];
 						State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
 						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
+						State->SlotContentOwner[drawSlot] = State->SlotContentOwner[sceneSlot];
 						State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
 						State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
 						State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
@@ -2077,16 +2193,20 @@ namespace engine::render {
 		target.SkinOffsetSignature = skinOffsetSignature;
 		target.SkinOffsetsReady = true;
 
-		target.JointWords.assign(std::max<size_t>(State->SceneJointFrames.size() * 5, 5), 0);
+		target.JointWords.assign(
+			std::max<size_t>(State->SceneJointFrames.size() * GPU_JOINT_WORDS, GPU_JOINT_WORDS), 0
+		);
 		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
 			const core::CFrame &frame = State->SceneJointFrames[index];
 			const PackedRotation rotation = PackRotation(frame.Rotation());
-			const size_t word = index * 5;
+			const size_t word = index * GPU_JOINT_WORDS;
 			target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
 			target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
 			target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
 			target.JointWords[word + 3] = rotation.Words[0];
 			target.JointWords[word + 4] = rotation.Words[1];
+			target.JointWords[word + 5] = rotation.Words[2];
+			target.JointWords[word + 6] = rotation.Words[3];
 		}
 		uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
 		for (const uint32_t word : target.JointWords) {
@@ -2456,9 +2576,13 @@ namespace engine::render {
 		if (State->BatchActive) {
 			const bool frameSetup =
 				Request.Damage.Scene && State->PreparedScopes.NeedsFrame(selectedPipeline);
-			const bool worldSetup = Request.Damage.Scene
-										? State->PreparedScopes.NeedsWorld(selectedPipeline, world)
-										: State->BatchShared;
+			const bool isolatedShadow = Request.Source->ImportedDirectionalShadow != 0 ||
+										Request.Source->DirectionalShadowBounds.has_value() ||
+										State->HasShadowCaptureRequest(Request.Pipeline, Request.TargetSlot);
+			const bool worldSetup =
+				Request.Damage.Scene
+					? (isolatedShadow || State->PreparedScopes.NeedsWorld(selectedPipeline, world))
+					: State->BatchShared;
 			dispatched = selectedPipeline->Graph.ExecuteView(
 				selectedPipeline->Compiled,
 				runner,
@@ -2468,6 +2592,8 @@ namespace engine::render {
 				frameSetup
 			);
 			State->PreparedScopes.Complete(selectedPipeline, world, dispatched && Request.Damage.Scene);
+			if (isolatedShadow && dispatched && Request.Damage.Scene)
+				State->PreparedScopes.InvalidateWorld(selectedPipeline, world);
 			if (dispatched && State->BatchFinal) {
 				dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, runner);
 			}
@@ -2487,6 +2613,8 @@ namespace engine::render {
 			endIncompleteView();
 			return;
 		}
+
+		State->SlotAt(targetSlot).ContentSignature = ContentSignature;
 
 		closePass();
 

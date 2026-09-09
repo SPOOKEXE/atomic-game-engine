@@ -10,7 +10,9 @@
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/ResourceImage.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
@@ -25,15 +27,84 @@
 #include <glm/packing.hpp>
 
 #include <array>
+#include <iostream>
 
 TEST_SUITE_ID("engine.render.resourceimage")
 
 namespace {
 	using namespace engine;
 
-	void
-	InstallImageCapture(render::Renderer &renderer, std::string_view resource = "lit", bool depth = false) {
-		graph::PipelineDocument document = graph::DefaultPbrDocument();
+	void InstallImageCapture(
+		render::Renderer &renderer,
+		std::string_view resource = "lit",
+		bool depth = false,
+		bool ambient = false,
+		bool directional = false
+	) {
+		graph::PipelineDocument document, frameTail;
+		if (directional)
+			document.Record(
+				{.Kind = graph::EditKind::AddResource,
+				 .Name = core::Name("directional-response"),
+				 .Resource = graph::ResourceKind::Colour,
+				 .Format = graph::ResourceFormat::RGBA32F}
+			);
+		if (ambient)
+			document.Record(
+				{.Kind = graph::EditKind::AddResource,
+				 .Name = core::Name("lighting-baseline"),
+				 .Resource = graph::ResourceKind::Colour,
+				 .Format = graph::ResourceFormat::RGBA32F}
+			);
+		const auto base = graph::DefaultPbrDocument();
+		bool shared = false;
+		for (const auto &edit : base.Edits()) {
+			if (edit.Kind == graph::EditKind::AddNode)
+				shared = ambient && edit.Scope == graph::NodeScope::Frame;
+			(shared ? frameTail : document).Record(edit);
+			if (directional && edit.Kind == graph::EditKind::Writes && edit.Target == core::Name("lit"))
+				document.Record(
+					{.Kind = graph::EditKind::Writes,
+					 .Target = core::Name("directional-response"),
+					 .Key = core::Name("directional-response")}
+				);
+			if (ambient && edit.Kind == graph::EditKind::Writes && edit.Target == core::Name("lit"))
+				document.Record(
+					{.Kind = graph::EditKind::Writes,
+					 .Target = core::Name("lighting-baseline"),
+					 .Key = core::Name("lighting-baseline")}
+				);
+		}
+		if (ambient) {
+			document.Record(
+				{.Kind = graph::EditKind::AddResource,
+				 .Name = core::Name("ambient-response"),
+				 .Resource = graph::ResourceKind::Colour,
+				 .Format = graph::ResourceFormat::RGBA32F}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = core::Name("ambient-response"),
+				 .NodeKind = core::Name("ambient-response")}
+			);
+			for (const auto &[port, input] : std::array<std::pair<const char *, const char *>, 5>{
+					 {{"albedo", "albedo"},
+					  {"normal", "normal"},
+					  {"material", "material"},
+					  {"depth", "linear-depth"},
+					  {"occlusion", "occlusion"}}
+				 })
+				document.Record(
+					{.Kind = graph::EditKind::Reads, .Target = core::Name(input), .Key = core::Name(port)}
+				);
+			document.Record(
+				{.Kind = graph::EditKind::Writes,
+				 .Target = core::Name("ambient-response"),
+				 .Key = core::Name("response")}
+			);
+		}
+		for (const auto &edit : frameTail.Edits())
+			document.Record(edit);
 		document.Record(
 			{.Kind = graph::EditKind::AddNode,
 			 .Name = core::Name("image-export"),
@@ -48,6 +119,19 @@ namespace {
 				{.Kind = graph::EditKind::Reads,
 				 .Target = core::Name("linear-depth"),
 				 .Key = core::Name("depth")}
+			);
+		if (ambient)
+			for (const char *resource : {"normal", "ambient-response", "lighting-baseline"})
+				document.Record(
+					{.Kind = graph::EditKind::Reads,
+					 .Target = core::Name(resource),
+					 .Key = core::Name(resource)}
+				);
+		if (directional)
+			document.Record(
+				{.Kind = graph::EditKind::Reads,
+				 .Target = core::Name("directional-response"),
+				 .Key = core::Name("directional-response")}
 			);
 		graph::RenderGraph pipeline;
 		core::Name offender;
@@ -414,10 +498,13 @@ TEST_CASE(
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
-	const bool pairedDepth = GENERATE(false, true);
+	const int planeSet = GENERATE(0, 1, 2, 3);
+	const bool pairedDepth = planeSet != 0;
+	const bool retainedAmbient = planeSet >= 2;
+	const bool retainedDirectional = planeSet == 3;
 	const bool rotatedCamera = GENERATE(false, true);
-	CAPTURE(pairedDepth, rotatedCamera);
-	InstallImageCapture(renderer, "lit", pairedDepth);
+	CAPTURE(planeSet, rotatedCamera);
+	InstallImageCapture(renderer, "lit", pairedDepth, retainedAmbient, retainedDirectional);
 	const auto token = renderer.QueueResourceImage(
 		core::Name("image-export-pipeline"),
 		core::Name("image-export"),
@@ -427,6 +514,7 @@ TEST_CASE(
 	REQUIRE(token != 0);
 	render::PortalImageBinding binding;
 	binding.WorldName = core::Name("resident-source");
+	if (retainedAmbient) binding.ExpectedScope = render::PortalImageScope::OpaqueLighting;
 	binding.Portal = core::Name("Door");
 	binding.Expected.RequestId = 1;
 	binding.Expected.PortalKey = "Door";
@@ -486,11 +574,31 @@ TEST_CASE(
 	CHECK_FALSE(renderer.CanPublishResourceImage(token, 65, 37));
 	CHECK(renderer.AdoptResourceImage(token, binding) == 0);
 	CHECK(renderer.PortalImageUsage().Images == 1);
-	CHECK(renderer.PortalImageUsage().TextureBytes == 65 * 37 * (pairedDepth ? 12 : 8));
+	CHECK(
+		renderer.PortalImageUsage().TextureBytes == 65 * 37 *
+														(retainedDirectional ? 64
+														 : retainedAmbient	 ? 48
+														 : pairedDepth		 ? 12
+																			 : 8)
+	);
 	CHECK(renderer.PortalImageUsage().UploadedBytes == 0);
 	CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
 	CHECK(renderer.PortalImageUsage().StagingBytes == 0);
 	const auto copied = AwaitImage(renderer, copiedToken);
+	if (retainedDirectional) {
+		CHECK(copied.DirectionalResponseResource == core::Name("directional-response"));
+		REQUIRE(copied.DirectionalResponse.size() == 65 * 37 * 16);
+		core::ByteReader samples(copied.DirectionalResponse);
+		while (!samples.AtEnd()) {
+			CHECK(samples.ReadFloat() == 0);
+			CHECK(samples.ReadFloat() == 0);
+			CHECK(samples.ReadFloat() == 0);
+			const float visibility = samples.ReadFloat();
+			CHECK(visibility >= 0);
+			CHECK(visibility <= 1);
+		}
+	} else
+		CHECK(copied.DirectionalResponse.empty());
 	REQUIRE(copied.Status == render::ResourceImageStatus::Ok);
 	if (pairedDepth) {
 		CHECK(copied.DepthResource == core::Name("linear-depth"));
@@ -509,6 +617,56 @@ TEST_CASE(
 		CHECK_FALSE(copied.DepthResource.IsValid());
 		CHECK(copied.Depth.empty());
 	}
+	if (retainedAmbient) {
+		CHECK(copied.NormalResource == core::Name("normal"));
+		CHECK(copied.AmbientResponseResource == core::Name("ambient-response"));
+		REQUIRE(copied.Normal.size() == 65 * 37 * 4);
+		REQUIRE(copied.AmbientResponse.size() == 65 * 37 * 16);
+		CHECK(copied.LightingBaselineResource == core::Name("lighting-baseline"));
+		REQUIRE(copied.LightingBaseline.size() == 65 * 37 * 16);
+		core::ByteReader baseline(copied.LightingBaseline), colour(copied.Pixels);
+		while (!baseline.AtEnd()) {
+			const float first = baseline.ReadFloat(), second = baseline.ReadFloat();
+			REQUIRE(std::isfinite(first));
+			REQUIRE(std::isfinite(second));
+			const uint32_t packed = colour.ReadUInt32();
+			// The observed attachment conversion and CPU packing differ by one half
+			// step. Bound storage conversion locally without changing image parity.
+			for (size_t channel = 0; channel < 2; ++channel) {
+				const uint32_t half = (packed >> (channel * 16)) & 0xffffu;
+				const float value = channel == 0 ? first : second;
+				REQUIRE(value >= 0);
+				REQUIRE(half < 0x7c00u);
+				const float lower = glm::unpackHalf2x16(half == 0 ? 0 : half - 1).x;
+				const float upper = glm::unpackHalf2x16(half + 1).x;
+				CHECK(value >= lower);
+				CHECK(value <= upper);
+			}
+		}
+		core::ByteReader normals(copied.Normal);
+		const auto expectedNormal = wall.Frame.VectorToWorldSpace({0, 0, 1});
+		while (!normals.AtEnd()) {
+			const uint32_t packed = normals.ReadUInt32();
+			const float normalX = float(packed & 1023u) / 1023.f * 2 - 1;
+			const float normalY = float((packed >> 10) & 1023u) / 1023.f * 2 - 1;
+			const float normalZ = float((packed >> 20) & 1023u) / 1023.f * 2 - 1;
+			CHECK(std::abs(normalX - expectedNormal.X) < .003f);
+			CHECK(std::abs(normalY - expectedNormal.Y) < .003f);
+			CHECK(std::abs(normalZ - expectedNormal.Z) < .003f);
+		}
+		core::ByteReader response(copied.AmbientResponse);
+		float maximum = 0;
+		while (!response.AtEnd()) {
+			const float value = response.ReadFloat();
+			REQUIRE(std::isfinite(value));
+			maximum = std::max(maximum, value);
+		}
+		CHECK(maximum > 0);
+	} else {
+		CHECK(copied.Normal.empty());
+		CHECK(copied.AmbientResponse.empty());
+		CHECK(copied.LightingBaseline.empty());
+	}
 	render::PortalView portal;
 	portal.ExternalImage = true;
 	portal.ImagePortal = binding.Portal;
@@ -522,28 +680,50 @@ TEST_CASE(
 	wall.Tint = {.01f, .01f, .01f};
 	view.WorldName = binding.WorldName;
 	view.Portals = std::span(&portal, 1);
+	// Adopted residency survives replacing the source graph with a retained display capture.
+	InstallImageCapture(renderer, "tonemapped");
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
 	const auto residentPixels = render::test::CaptureResource(
-		renderer, core::Name("portaled"), 0, 65, 37, render::test::ImageFormat::Rgba8Unorm
+		renderer, core::Name("tonemapped"), 0, 65, 37, render::test::ImageFormat::Rgba8Unorm
 	);
 	render::PortalImageReply reply;
 	reply.Key = binding.Expected;
+	reply.Scope = binding.ExpectedScope;
 	reply.Status = render::PortalImageStatus::Ok;
 	reply.Width = copied.Width;
 	reply.Height = copied.Height;
 	reply.RowStride = copied.RowStride;
 	reply.Pixels = copied.Pixels;
 	reply.PixelHash = assets::Hasher::Of(reply.Pixels);
+	if (retainedAmbient) {
+		reply.CaptureLighting.emplace();
+		reply.Normal = copied.Normal;
+		reply.AmbientResponse = copied.AmbientResponse;
+		reply.LightingBaseline = copied.LightingBaseline;
+		reply.NormalHash = assets::Hasher::Of(reply.Normal);
+		reply.AmbientResponseHash = assets::Hasher::Of(reply.AmbientResponse);
+		reply.LightingBaselineHash = assets::Hasher::Of(reply.LightingBaseline);
+		if (retainedDirectional) {
+			reply.DirectionalResponse = copied.DirectionalResponse;
+			reply.DirectionalResponseHash = assets::Hasher::Of(reply.DirectionalResponse);
+		}
+	}
 	if (pairedDepth) {
 		reply.Depth = copied.Depth;
 		reply.DepthHash = assets::Hasher::Of(reply.Depth);
 	}
 	portal.ImportedImage = renderer.QueuePortalImage(binding, std::move(reply));
 	REQUIRE(portal.ImportedImage != 0);
-	CHECK(renderer.PortalImageUsage().TextureBytes == 65 * 37 * (pairedDepth ? 12 : 8));
+	CHECK(
+		renderer.PortalImageUsage().TextureBytes == 65 * 37 *
+														(retainedDirectional ? 64
+														 : retainedAmbient	 ? 48
+														 : pairedDepth		 ? 12
+																			 : 8)
+	);
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
 	const auto copiedPixels = render::test::CaptureResource(
-		renderer, core::Name("portaled"), 0, 65, 37, render::test::ImageFormat::Rgba8Unorm
+		renderer, core::Name("tonemapped"), 0, 65, 37, render::test::ImageFormat::Rgba8Unorm
 	);
 	CHECK(residentPixels.Bytes == copiedPixels.Bytes);
 	const size_t centre = 18 * residentPixels.RowStrideBytes + 32 * 4;
@@ -559,6 +739,7 @@ TEST_CASE(
 	if (pairedDepth) {
 		render::PortalImageReply colorOnly;
 		colorOnly.Key = binding.Expected;
+		colorOnly.Scope = binding.ExpectedScope;
 		colorOnly.Status = render::PortalImageStatus::Ok;
 		colorOnly.Width = copied.Width;
 		colorOnly.Height = copied.Height;
@@ -662,6 +843,7 @@ TEST_CASE(
 		generatedGroup
 	));
 	CHECK(generatedGroup == std::array<uint64_t, 2>{2, 4});
+	REQUIRE(renderer.RequestResourceImage(request(99)));
 	std::array<uint64_t, 2> refusedGroup{777, 888};
 	CHECK_FALSE(renderer.QueueResourceImages(
 		core::Name("image-export-pipeline"),
@@ -673,6 +855,7 @@ TEST_CASE(
 	CHECK(refusedGroup == std::array<uint64_t, 2>{777, 888});
 	for (uint64_t token = 1; token <= 4; ++token)
 		REQUIRE(renderer.CancelResourceImage(token));
+	REQUIRE(renderer.CancelResourceImage(99));
 	const std::array invalidNodes{core::Name("image-export"), core::Name("missing-capture")};
 	CHECK_FALSE(renderer.QueueResourceImages(
 		core::Name("image-export-pipeline"),
@@ -685,7 +868,9 @@ TEST_CASE(
 	const auto validGroup = std::array{request(100), request(101)};
 	CHECK_FALSE(renderer.RequestResourceImages({}));
 	CHECK_FALSE(renderer.RequestResourceImages(
-		std::array{request(100), request(101), request(102), request(103), request(104)}
+		std::array{
+			request(100), request(101), request(102), request(103), request(104), request(105), request(106)
+		}
 	));
 	for (const int invalid : {0, 1, 2, 3, 4, 5}) {
 		auto group = validGroup;
@@ -720,6 +905,8 @@ TEST_CASE(
 	absent = request(1);
 	absent.ViewSlot = 3;
 	CHECK_FALSE(renderer.RequestResourceImage(absent));
+	REQUIRE(renderer.RequestResourceImage(request(99)));
+	REQUIRE(renderer.RequestResourceImage(request(98)));
 	for (uint64_t token = 1; token <= 4; token++) {
 		REQUIRE(renderer.RequestResourceImage(request(token)));
 	}
@@ -773,6 +960,8 @@ TEST_CASE(
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
 	// Pending cancellation suppresses bytes while retaining staging ownership until completion.
 	REQUIRE(renderer.CancelResourceImage(5));
+	REQUIRE(renderer.CancelResourceImage(99));
+	REQUIRE(renderer.CancelResourceImage(98));
 	auto firstImage = AwaitImage(renderer, 1);
 	CHECK_FALSE(renderer.TakeResourceImage(1));
 	// A completed member must survive a group with an unfinished or invalid member.
@@ -1025,7 +1214,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"a retained whole-eye capture follows the current viewing camera",
+	"a retained world packet follows the current viewing camera",
 	"[render][gpu][resourceimage][eye-current-camera][.]"
 ) {
 	using namespace engine;
@@ -1054,7 +1243,6 @@ TEST_CASE(
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
 	const core::Name emission("current-eye-emission");
-	REQUIRE(renderer.AddTexture(emission, white));
 	std::array<scene::DrawInstance, 3> room;
 	for (size_t index = 0; index < room.size(); ++index) {
 		room[index].Source = index + 1;
@@ -1074,6 +1262,8 @@ TEST_CASE(
 	render::View view;
 	view.Target = &target;
 	view.WorldName = core::Name("current-eye-room");
+	view.ContentOwner = view.WorldName;
+	REQUIRE(renderer.AddTexture(emission, white, view.ContentOwner));
 	view.OverrideLighting = true;
 	view.Lighting.Ambient = {};
 	view.Lighting.OutdoorAmbient = {};
@@ -1090,6 +1280,24 @@ TEST_CASE(
 		return AwaitImage(renderer, token);
 	};
 	const core::Name directPipeline("image-export-pipeline");
+	ecs::Store packetStore("current-eye-room");
+	render::WorldViewFrame retained;
+	retained.Name = view.WorldName;
+	retained.Identity = packetStore.Identity();
+	retained.Instances.assign(room.begin(), room.end());
+	retained.Lighting = view.Lighting;
+	render::WorldCameraFrame cameraLayers;
+	const std::array contentOwners{
+		render::WorldContentOwner{core::Name("foreign-room"), core::Name("foreign-room-content")}
+	};
+	render::WorldViewBinding packetBinding{
+		.World = view.World,
+		.Name = view.WorldName,
+		.Identity = packetStore.Identity(),
+		.ContentOwner = view.ContentOwner,
+		.ForeignContentOwners = contentOwners,
+		.Pipeline = directPipeline
+	};
 	const auto accepted = capture(directPipeline, room);
 	render::PortalImageBinding binding;
 	binding.WorldName = view.WorldName;
@@ -1113,10 +1321,40 @@ TEST_CASE(
 	view.EyeImage = renderer.QueuePortalImage(binding, std::move(reply));
 	view.EyeImageKey = binding.Portal;
 	REQUIRE(view.EyeImage != 0);
+	const auto retainedImage = view.EyeImage;
 	if (motion == 1 || motion == 3) view.CameraFrame.Position.X = 3.f;
 	if (motion == 2 || motion == 3) view.CameraFrame = view.CameraFrame * core::CFrame::Angles(0, .2f, 0);
 	const auto expected = capture(directPipeline, room);
-	const auto actual = capture(eyePipeline, {});
+	const auto staleImage = capture(eyePipeline, {});
+	// Pixels alone retain their capture camera; the hidden post requires the world packet.
+	CHECK(staleImage.Pixels == accepted.Pixels);
+	const auto currentCamera = view.CameraFrame;
+	const auto currentProjection = view.Projection;
+	const auto currentTarget = view.Target;
+	const auto currentSlot = view.Slot;
+	auto wrongOwner = packetBinding;
+	wrongOwner.Name = core::Name("unrelated-eye-room");
+	CHECK_FALSE(render::BindWorldView(retained, cameraLayers, wrongOwner, view));
+	CHECK(view.EyeImage == retainedImage);
+	CHECK(view.Pipeline == eyePipeline);
+	ecs::Store replacementStore("current-eye-room");
+	auto wrongStore = packetBinding;
+	wrongStore.Identity = replacementStore.Identity();
+	CHECK_FALSE(render::BindWorldView(retained, cameraLayers, wrongStore, view));
+	CHECK(view.EyeImage == retainedImage);
+	CHECK(view.Pipeline == eyePipeline);
+	REQUIRE(render::BindWorldView(retained, cameraLayers, packetBinding, view));
+	CHECK(view.CameraFrame.Position == currentCamera.Position);
+	CHECK(view.CameraFrame.Rotation() == currentCamera.Rotation());
+	CHECK(view.Projection == currentProjection);
+	CHECK(view.Target == currentTarget);
+	CHECK(view.Slot == currentSlot);
+	CHECK(view.EyeImage == 0);
+	CHECK(view.EyeImageKey == core::Name{});
+	CHECK(view.ContentOwner == packetBinding.ContentOwner);
+	CHECK(view.ForeignContentOwners.data() == contentOwners.data());
+	CHECK(view.Instances.data() == retained.Instances.data());
+	const auto actual = capture(view.Pipeline, view.Instances);
 	const auto unpack = [](const render::ResourceImage &image) {
 		std::vector<float> samples;
 		core::ByteReader reader(image.Pixels);
@@ -1152,12 +1390,161 @@ TEST_CASE(
 		renderer,
 		"eye-current-camera",
 		"motion-" + std::to_string(motion),
-		"retained camera at origin; red near occluder, green hidden post, blue rear wall",
+		"retained world packet at current camera; red near occluder, green hidden post, blue rear wall",
 		asImage(expected, expectedSamples),
 		asImage(actual, actualSamples),
 		{.Absolute = .002, .Region = {}}
 	);
+	CHECK(renderer.DropPortalImage(retainedImage));
+}
+
+TEST_CASE(
+	"eye images preserve directional samples through upload and resident adoption",
+	"[render][gpu][resourceimage][eye-directional-response][.]"
+) {
+	using namespace graph;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	const std::array names{
+		"colour", "depth", "normal", "ambient-response", "lighting-baseline", "directional-response"
+	};
+	const std::array formats{
+		ResourceFormat::RGBA16F,
+		ResourceFormat::R32F,
+		ResourceFormat::RGB10A2,
+		ResourceFormat::RGBA32F,
+		ResourceFormat::RGBA32F,
+		ResourceFormat::RGBA32F
+	};
+	PipelineDocument document;
+	for (size_t plane = 0; plane < names.size(); ++plane)
+		document.Record(
+			{.Kind = EditKind::AddResource,
+			 .Name = core::Name(names[plane]),
+			 .Resource = ResourceKind::Colour,
+			 .Format = formats[plane]}
+		);
+	document.Record(
+		{.Kind = EditKind::AddNode,
+		 .Name = core::Name("eye"),
+		 .NodeKind = core::Name("eye-image"),
+		 .Scope = NodeScope::View}
+	);
+	document.Record({.Kind = EditKind::Set, .Key = core::Name("scope"), .Value = "opaque-lighting"});
+	for (const char *name : names)
+		document.Record({.Kind = EditKind::Writes, .Target = core::Name(name), .Key = core::Name(name)});
+	document.Record(
+		{.Kind = EditKind::AddNode,
+		 .Name = core::Name("export"),
+		 .NodeKind = core::Name("capture"),
+		 .Scope = NodeScope::Frame}
+	);
+	for (size_t plane = 0; plane < names.size(); ++plane)
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name(names[plane]),
+			 .Key = core::Name(plane == 0 ? "source" : names[plane])}
+		);
+	RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(Build(document, pipeline, offender) == PipelineDocumentStatus::Ok);
+	const core::Name pipelineName("eye-directional-samples");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+	constexpr uint32_t width = 17, height = 9;
+	render::SceneTarget target{width, height};
+	render::View view;
+	view.Target = &target;
+	view.WorldName = core::Name("directional-samples-world");
+	view.Pipeline = pipelineName;
+	view.EyeImageKey = core::Name("directional-samples-image");
+	render::PortalImageBinding binding;
+	binding.WorldName = view.WorldName;
+	binding.Portal = view.EyeImageKey;
+	binding.Expected = {1, "directional-samples-image", 1, 1};
+	binding.ExpectedScope = render::PortalImageScope::OpaqueLighting;
+	binding.ExpectedProjection = render::PortalImageProjection::Eye;
+	render::PortalImageReply reply;
+	reply.Key = binding.Expected;
+	reply.Status = render::PortalImageStatus::Ok;
+	reply.Scope = binding.ExpectedScope;
+	reply.CaptureLighting.emplace();
+	reply.Width = width;
+	reply.Height = height;
+	reply.RowStride = width * 8;
+	core::ByteWriter colour, depth, normal, ambient, baseline, directional;
+	for (uint32_t y = 0; y < height; ++y)
+		for (uint32_t x = 0; x < width; ++x) {
+			colour.WriteUInt32(glm::packHalf2x16({.25f, .5f}));
+			colour.WriteUInt32(glm::packHalf2x16({.75f, 1.f}));
+			depth.WriteFloat(2.f + float(x + y) / 16.f);
+			normal.WriteUInt32(0xfff80200u);
+			for (float value : {.125f, .25f, .375f, .5f})
+				ambient.WriteFloat(value);
+			for (float value : {.25f, .5f, .75f, 1.f})
+				baseline.WriteFloat(value);
+			for (float value :
+				 {float(x + 1) / 8.f,
+				  float(y + 1) / 16.f,
+				  float(x + y + 1) / 32.f,
+				  float((x + 3 * y) % 17) / 16.f})
+				directional.WriteFloat(value);
+		}
+	const std::array sources{&colour, &depth, &normal, &ambient, &baseline, &directional};
+	const std::array planes{
+		&reply.Pixels,
+		&reply.Depth,
+		&reply.Normal,
+		&reply.AmbientResponse,
+		&reply.LightingBaseline,
+		&reply.DirectionalResponse
+	};
+	const std::array hashes{
+		&reply.PixelHash,
+		&reply.DepthHash,
+		&reply.NormalHash,
+		&reply.AmbientResponseHash,
+		&reply.LightingBaselineHash,
+		&reply.DirectionalResponseHash
+	};
+	for (size_t plane = 0; plane < planes.size(); ++plane) {
+		planes[plane]->assign(sources[plane]->Bytes().begin(), sources[plane]->Bytes().end());
+		*hashes[plane] = assets::Hasher::Of(*planes[plane]);
+	}
+	const auto expected = reply;
+	view.EyeImage = renderer.QueuePortalImage(binding, std::move(reply));
+	REQUIRE(view.EyeImage != 0);
+	const auto resident = renderer.QueueResourceImage(
+		pipelineName, core::Name("export"), 0, render::ResourceImageDelivery::Resident
+	);
+	REQUIRE(resident != 0);
+	for (int delivery = 0; delivery < 2; ++delivery) {
+		CAPTURE(delivery);
+		const auto copied = renderer.QueueResourceImage(pipelineName, core::Name("export"));
+		REQUIRE(copied != 0);
+		render::OverlayImage overlay;
+		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("export")));
+		const auto actual = AwaitImage(renderer, copied);
+		REQUIRE(actual.Status == render::ResourceImageStatus::Ok);
+		CHECK(actual.Pixels == expected.Pixels);
+		CHECK(actual.Depth == expected.Depth);
+		CHECK(actual.Normal == expected.Normal);
+		CHECK(actual.AmbientResponse == expected.AmbientResponse);
+		CHECK(actual.LightingBaseline == expected.LightingBaseline);
+		CHECK(actual.DirectionalResponseResource == core::Name("directional-response"));
+		CHECK(actual.DirectionalResponse == expected.DirectionalResponse);
+		CHECK(assets::Hasher::Of(actual.DirectionalResponse) == expected.DirectionalResponseHash);
+		CHECK(renderer.PortalImageUsage().Uploads == 6);
+		CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
+		if (delivery == 0) {
+			binding.Expected.RequestId++;
+			view.EyeImage = renderer.AdoptResourceImage(resident, binding);
+			REQUIRE(view.EyeImage != 0);
+		}
+	}
 	CHECK(renderer.DropPortalImage(view.EyeImage));
+	CHECK(renderer.PortalImageUsage().TextureBytes == 0);
+	CHECK(renderer.PortalImageUsage().CachedTextureBytes == 0);
 }
 
 TEST_CASE(
@@ -1675,7 +2062,12 @@ TEST_CASE(
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
-	InstallImageCapture(renderer, "lit", true);
+	const int planeSet = GENERATE(0, 1, 2);
+	const bool ambient = planeSet != 0;
+	const bool directional = planeSet == 2;
+	const size_t pixelBytes = directional ? 64 : ambient ? 48 : 12;
+	CAPTURE(planeSet);
+	InstallImageCapture(renderer, "lit", true, ambient, directional);
 	assets::TextureData white;
 	white.Width = white.Height = 1;
 	white.Format = assets::TextureFormat::RGBA8;
@@ -1712,6 +2104,10 @@ TEST_CASE(
 			view.Pipeline, core::Name("image-export"), 0, render::ResourceImageDelivery::Resident
 		);
 		REQUIRE(token != 0);
+		// The copy shares the resident capture's fence. AwaitImage has a ten-second
+		// deadline, so the next reuse sample starts after this submission completes.
+		const auto completion = renderer.QueueResourceImage(view.Pipeline, core::Name("image-export"));
+		REQUIRE(completion != 0);
 		render::OverlayImage overlay;
 		REQUIRE(
 			renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export"))
@@ -1719,11 +2115,12 @@ TEST_CASE(
 		binding.Expected.RequestId = frame + 1;
 		imported = renderer.AdoptResourceImage(token, binding);
 		REQUIRE(imported != 0);
+		REQUIRE(AwaitImage(renderer, completion).Status == render::ResourceImageStatus::Ok);
 		CHECK(renderer.PortalImageUsage().Images == 1);
 		CHECK(renderer.PortalImageUsage().Uploads == 0);
 		CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
 		const auto allocations = renderer.MemoryStatistics().TextureAllocations;
-		if (frame > 0) CHECK(renderer.PortalImageUsage().CachedTextureBytes == size_t(65) * 37 * 12);
+		if (frame > 0) CHECK(renderer.PortalImageUsage().CachedTextureBytes == size_t(65) * 37 * pixelBytes);
 		if (frame == 3) warmAllocations = allocations;
 		if (frame > 3) CHECK(allocations == warmAllocations);
 	}
@@ -1736,6 +2133,10 @@ TEST_CASE(
 			view.Pipeline, core::Name("image-export"), 0, render::ResourceImageDelivery::Resident
 		);
 		REQUIRE(token != 0);
+		// The copy shares the resident capture's fence. AwaitImage has a ten-second
+		// deadline, so the next reuse sample starts after this submission completes.
+		const auto completion = renderer.QueueResourceImage(view.Pipeline, core::Name("image-export"));
+		REQUIRE(completion != 0);
 		render::OverlayImage overlay;
 		REQUIRE(
 			renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export"))
@@ -1743,7 +2144,8 @@ TEST_CASE(
 		binding.Expected.RequestId++;
 		imported = renderer.AdoptResourceImage(token, binding);
 		REQUIRE(imported != 0);
-		CHECK(renderer.PortalImageUsage().CachedTextureBytes <= size_t(4) * 65 * 37 * 12);
+		REQUIRE(AwaitImage(renderer, completion).Status == render::ResourceImageStatus::Ok);
+		CHECK(renderer.PortalImageUsage().CachedTextureBytes <= size_t(4) * 65 * 37 * pixelBytes);
 		CHECK(renderer.PortalImageUsage().Images == 1);
 		CHECK(renderer.PortalImageUsage().Uploads == 0);
 	}
@@ -2081,6 +2483,12 @@ TEST_CASE(
 		node(direct ? "direct-export" : "composed-export", "capture", NodeScope::Frame);
 		edge(EditKind::Reads, direct ? "display" : "compose-0", "source");
 	}
+	node("room-export", "capture", NodeScope::Frame);
+	edge(EditKind::Reads, "lit", "source");
+	edge(EditKind::Reads, "linear-depth", "depth");
+	node("native-lens-export", "capture", NodeScope::Frame);
+	edge(EditKind::Reads, "lens-b", "source");
+	edge(EditKind::Reads, "linear-depth", "depth");
 	RenderGraph graph;
 	core::Name offender;
 	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
@@ -2102,10 +2510,15 @@ TEST_CASE(
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
 	REQUIRE(renderer.AddTexture(emission, white));
-	const int scenario = GENERATE(0, 1, 2, 3, 4);
+	const int scenario = GENERATE(0, 1, 2, 3, 4, 5);
 	const bool rotated = GENERATE(false, true);
 	const bool offsetCoplanar = scenario == 3 ? GENERATE(false, true) : false;
 	CAPTURE(scenario, rotated, offsetCoplanar);
+	INFO(
+		(scenario == 5
+			 ? "intersecting panes: centre=(0,0,-3), half extent=(1,1), red yaw=+.35, green yaw=-.35 radians"
+			 : "parallel panes")
+	);
 	std::vector<scene::DrawInstance> rows;
 	for (int index = 0; index < (scenario == 2 ? 3 : 2); ++index) {
 		scene::DrawInstance row;
@@ -2129,6 +2542,11 @@ TEST_CASE(
 			rows.back().Frame.Position.X = .25f;
 			rows.back().Frame.Position.Y = .125f;
 		}
+	}
+	if (scenario == 5) {
+		INFO("intersecting panes: centre=(0,0,-3), half extent=(1,1), red yaw=+.35, green yaw=-.35 radians");
+		rows[0].Frame = core::CFrame(core::Vector3{0, 0, -3}) * core::CFrame::Angles(0, .35f, 0);
+		rows[1].Frame = core::CFrame(core::Vector3{0, 0, -3}) * core::CFrame::Angles(0, -.35f, 0);
 	}
 	if (scenario == 1 || scenario == 4) {
 		auto body = rows.front();
@@ -2179,8 +2597,8 @@ TEST_CASE(
 							   : layer == 1 && scenario != 1 && scenario != 3 ? 4.f
 							   : layer == 2 && scenario == 2				  ? 5.f
 																			  : 0.f;
-		if (scenario == 3 && offsetCoplanar && layer == 1) {
-			// Shifted coplanar transforms can round to adjacent device depths.
+		if (((scenario == 3 && offsetCoplanar) || scenario == 5) && layer == 1) {
+			// Coplanar faces and the intersection centre can round to adjacent depths.
 			// They may occupy two groups, but neither colour nor opacity may disappear.
 			CHECK((centreDepths[layer] == 0 || std::abs(centreDepths[layer] - 3) < .001f));
 		} else
@@ -2190,18 +2608,38 @@ TEST_CASE(
 		const auto ba = glm::unpackHalf2x16(colour.ReadUInt32());
 		transmittance *= 1 - ba.y;
 		if (centreDepths[layer] != 0) {
-			const float expectedAlpha =
-				scenario == 3 && layer == 0 && centreDepths[1] == 0 ? 1 - (1 - alpha) * (1 - alpha) : alpha;
+			const float expectedAlpha = (scenario == 3 || scenario == 5) && layer == 0 && centreDepths[1] == 0
+											? 1 - (1 - alpha) * (1 - alpha)
+											: alpha;
 			CHECK(std::abs(ba.y - expectedAlpha) < .001f);
 			CHECK(
-				(scenario == 3 ? std::max(rg.x, rg.y)
-				 : layer == 0  ? rg.x
-				 : layer == 1  ? rg.y
-							   : ba.x) > 1.9f
+				((scenario == 3 || scenario == 5) ? std::max(rg.x, rg.y)
+				 : layer == 0					  ? rg.x
+				 : layer == 1					  ? rg.y
+												  : ba.x) > 1.9f
 			);
 		} else {
 			CHECK(rg == glm::vec2(0));
 			CHECK(ba == glm::vec2(0));
+		}
+	}
+	if (scenario == 5) {
+		// Samples straddle the intersection, with a physical depth separation
+		// well above float rounding. The nearest retained colour must reverse.
+		for (const uint32_t x : {14u, 18u}) {
+			CAPTURE(x);
+			const size_t pixel = 16 * 33 + x;
+			core::ByteReader nearest(std::span(captured[0].Pixels).subspan(pixel * 8, 8));
+			const auto redGreen = glm::unpackHalf2x16(nearest.ReadUInt32());
+			CHECK((x < 16 ? redGreen.x : redGreen.y) > 1.9f);
+			CHECK((x < 16 ? redGreen.y : redGreen.x) == 0);
+			core::ByteReader front(std::span(captured[0].Depth).subspan(pixel * 4, 4));
+			core::ByteReader back(std::span(captured[1].Depth).subspan(pixel * 4, 4));
+			const float nearDepth = front.ReadFloat(), farDepth = back.ReadFloat();
+			CHECK(nearDepth < 2.95f);
+			CHECK(farDepth > 3.05f);
+			core::ByteReader overflow(std::span(captured[2].Depth).subspan(pixel * 4, 4));
+			CHECK(overflow.ReadFloat() == 0);
 		}
 	}
 	const int visiblePanes = scenario == 4 ? 0 : scenario == 1 ? 1 : scenario == 2 ? 3 : 2;
@@ -2213,11 +2651,29 @@ TEST_CASE(
 		const auto composed = AwaitImage(renderer, token);
 		core::ByteReader expected(captured[3].Pixels), actual(composed.Pixels);
 		std::vector<float> directPixels, composedPixels;
+		size_t diagnosed = 0;
 		while (!expected.AtEnd()) {
 			const auto direct = glm::unpackHalf2x16(expected.ReadUInt32());
 			const auto layered = glm::unpackHalf2x16(actual.ReadUInt32());
 			directPixels.insert(directPixels.end(), {direct.x, direct.y});
 			composedPixels.insert(composedPixels.end(), {layered.x, layered.y});
+			if (scenario == 3 && rotated && offsetCoplanar && diagnosed < 4 &&
+				(std::abs(direct.x - layered.x) >= .004f || std::abs(direct.y - layered.y) >= .004f)) {
+				++diagnosed;
+				const size_t pixel = (directPixels.size() - 2) / 4;
+				std::cout << "coplanar pixel=" << pixel % 33 << ',' << pixel / 33 << " direct=" << direct.x
+						  << ',' << direct.y << " composed=" << layered.x << ',' << layered.y;
+				for (size_t layer = 0; layer < 3; ++layer) {
+					core::ByteReader sample(std::span(captured[layer].Pixels).subspan(pixel * 8, 8));
+					const auto redGreen = glm::unpackHalf2x16(sample.ReadUInt32());
+					const auto blueAlpha = glm::unpackHalf2x16(sample.ReadUInt32());
+					core::ByteReader depth(std::span(captured[layer].Depth).subspan(pixel * 4, 4));
+					std::cout << " layer" << layer << "=" << redGreen.x << ',' << redGreen.y << ','
+							  << blueAlpha.x << ',' << blueAlpha.y << " depth=" << std::hexfloat
+							  << depth.ReadFloat() << std::defaultfloat;
+				}
+				std::cout << '\n';
+			}
 			CHECK(std::abs(direct.x - layered.x) < .004f);
 			CHECK(std::abs(direct.y - layered.y) < .004f);
 		}
@@ -2236,6 +2692,261 @@ TEST_CASE(
 				);
 			}
 		}
+	}
+	if (scenario == 0) {
+		const auto savedView = view;
+		render::PortalCaptureLighting captureLighting;
+		std::array<render::SceneLight, render::MAX_PORTAL_CAPTURE_LIGHTS> captureLights{};
+		REQUIRE(render::ResolvePortalCaptureLighting(captureLighting, view, captureLights));
+		auto roomRows = rows;
+		auto wall = rows.front();
+		wall.Source = 20;
+		wall.Frame = view.CameraFrame * core::CFrame(core::Vector3{0, 0, -6});
+		wall.HalfExtent = {20, 20, 1};
+		wall.Transparency = 0;
+		wall.EmissiveTint = {0, 0, 1};
+		wall.EmissiveStrength = 2;
+		roomRows.push_back(wall);
+		view.Instances = roomRows;
+		view.Damage = {.Scene = true, .Objects = true, .Environment = true, .Portals = true};
+		const std::array roomNodes{
+			core::Name("room-export"), core::Name("glass-0-export"), core::Name("glass-1-export")
+		};
+		std::array<uint64_t, 3> roomTokens{};
+		REQUIRE(renderer.QueueResourceImages(
+			pipeline, roomNodes, view.Slot, render::ResourceImageDelivery::CopiedPixels, roomTokens
+		));
+		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("room-export")));
+		auto roomImages = AwaitImageGroup(renderer, roomTokens);
+		render::PortalImageLayerSet roomLayers;
+		for (size_t layer = 0; layer < roomImages.size(); ++layer) {
+			auto &reply = layer == 0 ? roomLayers.Opaque : roomLayers.Transparent.emplace_back();
+			auto &image = roomImages[layer];
+			REQUIRE(image.Status == render::ResourceImageStatus::Ok);
+			CHECK(image.CaptureFrame == roomImages.front().CaptureFrame);
+			reply.Key = {1, "native-glass-lens", 1, 1};
+			reply.Scope = render::PortalImageScope::OpaqueLighting;
+			reply.Status = render::PortalImageStatus::Ok;
+			reply.CaptureTick = reply.ContentRevision = reply.LightingRevision = 1;
+			reply.Width = image.Width;
+			reply.Height = image.Height;
+			reply.RowStride = image.RowStride;
+			reply.Pixels = std::move(image.Pixels);
+			reply.Depth = std::move(image.Depth);
+			reply.PixelHash = assets::Hasher::Of(reply.Pixels);
+			reply.DepthHash = assets::Hasher::Of(reply.Depth);
+			reply.CaptureLighting = captureLighting;
+		}
+		render::PortalImageCapture accepted;
+		accepted.Producer.World = "native-glass-lens-owner";
+		accepted.Width = accepted.Height = 33;
+		accepted.CaptureLighting = captureLighting;
+		const auto rotation = view.CameraFrame.Rotation();
+		accepted.Camera.Position = {
+			view.CameraFrame.Position.X, view.CameraFrame.Position.Y, view.CameraFrame.Position.Z
+		};
+		accepted.Camera.Orientation = {rotation.x, rotation.y, rotation.z, rotation.w};
+		const float near = view.Camera.NearPlane;
+		const float half = near * std::tan(view.Camera.FieldOfViewRadians / 2);
+		accepted.Camera.Frustum = {-half, half, -half, half, near, view.Camera.FarPlane};
+		accepted.Binding.World = view.World;
+		accepted.Binding.WorldName = view.WorldName;
+		accepted.Binding.ViewSlot = view.Slot;
+		accepted.Binding.Portal = core::Name("native-glass-lens");
+		accepted.Binding.Expected = roomLayers.Opaque.Key;
+		accepted.Binding.ExpectedScope = render::PortalImageScope::OpaqueLighting;
+		accepted.Binding.ExpectedProjection = render::PortalImageProjection::Eye;
+		accepted.Binding.Sampling = scene::ResolveCamera(view.CameraFrame, view.Camera, 1).ViewProjection;
+		std::array<uint64_t, 3> roomHandles{};
+		REQUIRE(renderer.QueuePortalImageLayerSet(accepted.Binding, std::move(roomLayers), roomHandles));
+		accepted.Image = roomHandles[0];
+		accepted.TransparentImages = {roomHandles[1], roomHandles[2]};
+		const auto uploadFence = renderer.QueueResourceImage(pipeline, core::Name("room-export"));
+		REQUIRE(uploadFence != 0);
+		renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(AwaitImage(renderer, uploadFence).Status == render::ResourceImageStatus::Ok);
+		REQUIRE(renderer.PortalImageLayerSetReady(accepted.Image));
+
+		const core::Name owner(accepted.Producer.World), shift("native-lens-shift"), turn("native-lens-turn");
+		render::ShaderCompiler compiler;
+		for (const auto shader : {shift, turn}) {
+			const std::string source = std::string(R"glsl(#version 450
+layout(location=0) in vec2 uv;
+layout(location=0) out vec4 colour;
+layout(set=2,binding=0) uniform sampler2D sceneColour;
+layout(set=2,binding=1) uniform sampler2D sceneDepth;
+struct Lens {vec4 centre;vec4 x;vec4 y;vec4 z;vec4 spin;};
+layout(set=3,binding=0) uniform LensPass {
+ mat4 vp;mat4 inverseVp;vec4 target;vec4 eye;vec4 timeCount;Lens lenses[16];
+} pass;
+void main(){ivec2 size=textureSize(sceneColour,0);ivec2 pixel=ivec2(gl_FragCoord.xy);
+)glsl") +
+									   (shader == shift ? "pixel.x=(pixel.x+int(pass.timeCount.x))%size.x;"
+														: "pixel=ivec2(pixel.y,size.x-1-pixel.x);") +
+									   "colour=texelFetch(sceneColour,pixel,0);}";
+			const auto compiled = compiler.Compile(source, render::ShaderStage::Fragment);
+			REQUIRE_FALSE(compiled.Failed);
+			REQUIRE(renderer.AddLensShader(shader, compiled.SpirV, owner));
+			accepted.Lenses.Programs.push_back(
+				{.Hash = renderer.LensShaderHash(shader, owner), .SpirV = compiled.SpirV}
+			);
+		}
+		accepted.Lenses.TimeSeconds = 3;
+		for (const auto shader : {shift, turn, shift}) {
+			render::PortalCaptureLens lens;
+			lens.Position = accepted.Camera.Position;
+			lens.Shader = shader.Text();
+			lens.ProgramHash = renderer.LensShaderHash(shader, owner);
+			lens.Radius = 100;
+			lens.Strength = 1;
+			accepted.Lenses.Entries.push_back(lens);
+			view.Lighting.ShaderLenses[view.Lighting.ShaderLensCount++] = {
+				.Frame = core::CFrame(view.CameraFrame.Position),
+				.Shader = shader,
+				.Radius = 100,
+				.Strength = 1
+			};
+		}
+		view.LensTimeSeconds = accepted.Lenses.TimeSeconds;
+		view.LensContentOwner = owner;
+		accepted.LensPrograms = renderer.RetainPortalLensPrograms(accepted.Lenses);
+		REQUIRE(accepted.LensPrograms != 0);
+		const auto retainedAgain = renderer.RetainPortalLensPrograms(accepted.Lenses);
+		REQUIRE(retainedAgain == accepted.LensPrograms);
+		renderer.ReleasePortalLensPrograms(retainedAgain);
+		if (!rotated) {
+			for (int invalidKind = 0; invalidKind < 4; ++invalidKind) {
+				CAPTURE(invalidKind);
+				auto invalid = accepted.Lenses;
+				auto &program = invalid.Programs.front();
+				const auto replacedHash = program.Hash;
+				if (invalidKind == 0) {
+					REQUIRE(program.SpirV.size() > 5);
+					program.SpirV[5] = 0;
+				} else {
+					const auto source =
+						invalidKind == 1
+							? std::string("#version 450\nvoid main(){gl_Position=vec4(0,0,0,1);}")
+							: std::string("#version 450\nlayout(location=0) out vec4 colour;\nlayout(set=") +
+								  (invalidKind == 2 ? "0,binding=0" : "2,binding=2") +
+								  ") uniform sampler2D image;\nvoid main(){colour=texture(image,vec2(.5));}";
+					const auto module = compiler.Compile(
+						source, invalidKind == 1 ? render::ShaderStage::Vertex : render::ShaderStage::Fragment
+					);
+					REQUIRE_FALSE(module.Failed);
+					program.SpirV = module.SpirV;
+				}
+				program.Hash = assets::Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+				for (auto &lens : invalid.Entries)
+					if (lens.ProgramHash == replacedHash) lens.ProgramHash = program.Hash;
+				REQUIRE(render::ValidPortalCaptureLenses(invalid));
+				CHECK(renderer.RetainPortalLensPrograms(invalid) == 0);
+				const auto retainedValid = renderer.RetainPortalLensPrograms(accepted.Lenses);
+				REQUIRE(retainedValid == accepted.LensPrograms);
+				renderer.ReleasePortalLensPrograms(retainedValid);
+			}
+		}
+		const core::Name collidingOwner("portal.lens.programs/0");
+		const auto collisionProgram = compiler.Compile(
+			"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(16,0,16,1);}",
+			render::ShaderStage::Fragment
+		);
+		REQUIRE_FALSE(collisionProgram.Failed);
+		const auto collisionHash = assets::Hasher::Of(std::as_bytes(std::span(collisionProgram.SpirV)));
+		for (const auto shader : {shift, turn})
+			REQUIRE(renderer.AddLensShader(shader, collisionProgram.SpirV, collidingOwner));
+		auto body = wall;
+		body.Source = 21;
+		body.HalfExtent = {.55f, .7f, 1};
+		body.EmissiveTint = {1, 1, 0};
+		body.EmissiveStrength = 4;
+		for (const float bodyDistance : {2.f, 3.5f, 5.f}) {
+			CAPTURE(bodyDistance);
+			body.Frame = view.CameraFrame * core::CFrame(core::Vector3{.2f, -.1f, -bodyDistance});
+			auto nativeRows = roomRows;
+			nativeRows.push_back(body);
+			view.Instances = nativeRows;
+			view.Damage = {.Scene = true, .Objects = true, .Environment = true, .Portals = true};
+			const std::array nativeNodes{core::Name("native-lens-export"), core::Name("direct-export")};
+			std::array<uint64_t, 2> nativeTokens{};
+			REQUIRE(renderer.QueueResourceImages(
+				pipeline, nativeNodes, view.Slot, render::ResourceImageDelivery::CopiedPixels, nativeTokens
+			));
+			REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false)
+						.Ran(core::Name("native-lens-export")));
+			const auto native = AwaitImageGroup(renderer, nativeTokens);
+			REQUIRE(native[0].Status == render::ResourceImageStatus::Ok);
+			REQUIRE(native[1].Status == render::ResourceImageStatus::Ok);
+			CHECK(native[0].Pixels != native[1].Pixels);
+			for (size_t pixel = 0; pixel < 33 * 33; ++pixel) {
+				const size_t sampledX = (pixel / 33 + 3) % 33;
+				const size_t sampledY = 32 - (pixel % 33 + 3) % 33;
+				const auto expected = std::span(native[1].Pixels).subspan((sampledY * 33 + sampledX) * 8, 8);
+				const auto actual = std::span(native[0].Pixels).subspan(pixel * 8, 8);
+				CHECK(std::equal(actual.begin(), actual.end(), expected.begin()));
+			}
+			view.Instances = std::span(&body, 1);
+			if (bodyDistance == 2 && !rotated) {
+				auto mismatched = accepted;
+				for (auto &lens : mismatched.Lenses.Entries)
+					lens.ProgramHash = lens.Shader == shift.Text() ? accepted.Lenses.Programs[1].Hash
+																   : accepted.Lenses.Programs[0].Hash;
+				REQUIRE(render::ValidPortalCaptureLenses(mismatched.Lenses));
+				CHECK(renderer.ComposePortalBodyImage(mismatched, view) == 0);
+			}
+			const auto prepared = renderer.ComposePortalBodyImage(accepted, view);
+			REQUIRE(prepared != 0);
+			REQUIRE(renderer.DropPortalImage(prepared));
+			const auto copiedToken = renderer.QueueResourceImage(
+				core::Name("portal-body-eye-image/lenses/layers-2/0"), core::Name("export")
+			);
+			REQUIRE(copiedToken != 0);
+			const auto copiedHandle = renderer.ComposePortalBodyImage(accepted, view);
+			REQUIRE(copiedHandle != 0);
+			const auto copied = AwaitImage(renderer, copiedToken);
+			REQUIRE(copied.Status == render::ResourceImageStatus::Ok);
+			REQUIRE(copied.Pixels.size() == native[0].Pixels.size());
+			core::ByteReader nativePixels(native[0].Pixels), copiedPixels(copied.Pixels);
+			while (!nativePixels.AtEnd()) {
+				const auto direct = glm::unpackHalf2x16(nativePixels.ReadUInt32());
+				const auto imported = glm::unpackHalf2x16(copiedPixels.ReadUInt32());
+				// The two glass stores have the same bound as the direct peel comparison above.
+				CHECK(std::abs(direct.x - imported.x) < .004f);
+				CHECK(std::abs(direct.y - imported.y) < .004f);
+			}
+			REQUIRE(copied.Depth.size() == native[0].Depth.size());
+			core::ByteReader nativeDepth(native[0].Depth), copiedDepth(copied.Depth);
+			while (!nativeDepth.AtEnd())
+				CHECK(std::abs(nativeDepth.ReadFloat() - copiedDepth.ReadFloat()) < .003f);
+			REQUIRE(renderer.DropPortalImage(copiedHandle));
+			if (bodyDistance == 2) {
+				renderer.DropContentOwner(collidingOwner);
+				for (const auto shader : {shift, turn})
+					CHECK_FALSE(renderer.HasLensShader(shader, collidingOwner));
+				const auto afterDropToken = renderer.QueueResourceImage(
+					core::Name("portal-body-eye-image/lenses/layers-2/0"), core::Name("export")
+				);
+				REQUIRE(afterDropToken != 0);
+				const auto afterDropHandle = renderer.ComposePortalBodyImage(accepted, view);
+				REQUIRE(afterDropHandle != 0);
+				const auto afterDrop = AwaitImage(renderer, afterDropToken);
+				REQUIRE(afterDrop.Status == render::ResourceImageStatus::Ok);
+				CHECK(afterDrop.Pixels == copied.Pixels);
+				CHECK(afterDrop.Depth == copied.Depth);
+				REQUIRE(renderer.DropPortalImage(afterDropHandle));
+				for (const auto shader : {shift, turn})
+					REQUIRE(renderer.AddLensShader(shader, collisionProgram.SpirV, collidingOwner));
+			}
+		}
+		renderer.ReleasePortalLensPrograms(accepted.LensPrograms);
+		for (const auto shader : {shift, turn}) {
+			CHECK(renderer.HasLensShader(shader, collidingOwner));
+			CHECK(renderer.LensShaderHash(shader, collidingOwner) == collisionHash);
+		}
+		renderer.DropContentOwner(collidingOwner);
+		CHECK(renderer.ComposePortalBodyImage(accepted, view) == 0);
+		REQUIRE(renderer.DropPortalImage(accepted.Image));
+		view = savedView;
 	}
 	if (scenario == 0 && !rotated) {
 		rows.front().Shader = core::Name("uncaptured-material");
@@ -2285,12 +2996,16 @@ TEST_CASE(
 			);
 		}
 		REQUIRE(renderer.RequestResourceImages(requests));
-		const auto fenceProbe = renderer.QueueResourceImage(pipeline, core::Name("image-export"));
-		REQUIRE(fenceProbe != 0);
+		const auto fenceProbe =
+			count < 5 ? renderer.QueueResourceImage(pipeline, core::Name("image-export")) : 0;
+		if (count < 5) REQUIRE(fenceProbe != 0);
 		REQUIRE(
 			renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export"))
 		);
-		REQUIRE(AwaitImage(renderer, fenceProbe).Status == render::ResourceImageStatus::Ok);
+		if (fenceProbe)
+			REQUIRE(AwaitImage(renderer, fenceProbe).Status == render::ResourceImageStatus::Ok);
+		else
+			REQUIRE(SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(renderer.Backend().Device)));
 		return tokens;
 	};
 	auto binding = [](size_t index) {
@@ -2360,18 +3075,29 @@ TEST_CASE(
 	// Slot pressure is independent of the byte budget. A group cannot reserve
 	// the last free import and then fail after consuming its first capture.
 	target.Width = target.Height = 16;
-	std::array<uint64_t, 15> occupied{};
-	for (size_t batch = 0; batch < 5; ++batch) {
-		const auto small = capture(3);
-		const std::array owners{binding(batch * 3), binding(batch * 3 + 1), binding(batch * 3 + 2)};
-		REQUIRE(renderer.AdoptResourceImages(small, owners, std::span(occupied).subspan(batch * 3, 3)));
+	const auto fullCapture = capture(5);
+	const std::array fullOwners{binding(0), binding(1), binding(2), binding(3), binding(4)};
+	std::array<uint64_t, 5> fullHandles{};
+	REQUIRE(renderer.AdoptResourceImages(fullCapture, fullOwners, fullHandles));
+	CHECK(renderer.PortalImageUsage().Images == 5);
+	for (const auto handle : fullHandles)
+		CHECK(renderer.DropPortalImage(handle));
+	CHECK(renderer.PortalImageUsage().Images == 0);
+	std::array<uint64_t, render::MAX_IMPORTED_PORTAL_IMAGES - 1> occupied{};
+	for (size_t first = 0; first < occupied.size(); first += 5) {
+		const size_t count = std::min(size_t{5}, occupied.size() - first);
+		const auto small = capture(count);
+		std::vector<render::PortalImageBinding> owners;
+		for (size_t index = 0; index < count; ++index)
+			owners.push_back(binding(first + index));
+		REQUIRE(renderer.AdoptResourceImages(small, owners, std::span(occupied).subspan(first, count)));
 	}
 	const auto small = capture(2);
-	bindings = {binding(15), binding(16)};
+	bindings = {binding(occupied.size()), binding(occupied.size() + 1)};
 	const auto beforeSlotRefusal = handles;
 	CHECK_FALSE(renderer.AdoptResourceImages(small, bindings, handles));
 	CHECK(handles == beforeSlotRefusal);
-	CHECK(renderer.PortalImageUsage().Images == 15);
+	CHECK(renderer.PortalImageUsage().Images == occupied.size());
 	for (const auto token : small)
 		CHECK(renderer.CanPublishResourceImage(token, 16, 16));
 	CHECK_FALSE(renderer.AdoptResourceImages(small, std::span(bindings).first(1), handles));
@@ -2379,8 +3105,8 @@ TEST_CASE(
 	REQUIRE(renderer.DropPortalImage(occupied.back()));
 	REQUIRE(renderer.AdoptResourceImages(small, bindings, handles));
 	CHECK(handles[0] != handles[1]);
-	CHECK(renderer.PortalImageUsage().Images == 16);
-	for (size_t index = 0; index < 14; ++index)
+	CHECK(renderer.PortalImageUsage().Images == render::MAX_IMPORTED_PORTAL_IMAGES);
+	for (size_t index = 0; index + 1 < occupied.size(); ++index)
 		CHECK(renderer.DropPortalImage(occupied[index]));
 	for (const auto handle : handles)
 		CHECK(renderer.DropPortalImage(handle));
@@ -2397,6 +3123,37 @@ TEST_CASE(
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
+	const core::Name lensOwner("copied-lens-owner");
+	const core::Name lensA("copied-lens-a"), lensB("copied-lens-b");
+	render::ShaderCompiler lensCompiler;
+	const auto lensSource = [](bool second) {
+		return std::string(R"glsl(#version 450
+layout(location=0) in vec2 inUv;
+layout(location=0) out vec4 outColour;
+layout(set=2,binding=0) uniform sampler2D sceneColour;
+layout(set=2,binding=1) uniform sampler2D linearDepth;
+struct Lens { vec4 CentreRadius; vec4 AxisXInner; vec4 AxisYFalloff; vec4 AxisZStrength; vec4 SpinPriority; };
+layout(set=3,binding=0) uniform LensPass {
+ mat4 ViewProjection; mat4 InverseViewProjection; vec4 Target; vec4 Eye; vec4 TimeCount; Lens Lenses[16];
+} pass;
+void main() {
+ vec4 colour=texture(sceneColour,inUv);
+ vec3 addition=vec3(pass.TimeCount.x, texture(linearDepth,inUv).r, pass.Lenses[0].AxisZStrength.w)/16.0;
+)glsl") + (second ? "outColour=vec4(colour.rgb*2.0+addition.bgr,colour.a);}"
+				  : "outColour=vec4(colour.rgb*0.5+addition,colour.a);}");
+	};
+	const auto firstProgram = lensCompiler.Compile(lensSource(false), render::ShaderStage::Fragment);
+	const auto secondProgram = lensCompiler.Compile(lensSource(true), render::ShaderStage::Fragment);
+	REQUIRE_FALSE(firstProgram.Failed);
+	REQUIRE_FALSE(secondProgram.Failed);
+	REQUIRE(renderer.AddLensShader(lensA, firstProgram.SpirV, lensOwner));
+	REQUIRE(renderer.AddLensShader(lensB, secondProgram.SpirV, lensOwner));
+	CHECK(
+		renderer.LensShaderHash(lensA, lensOwner) ==
+		assets::Hasher::Of(std::as_bytes(std::span(firstProgram.SpirV)))
+	);
+	CHECK(renderer.LensShaderHash(lensA).IsZero());
+
 	const bool seam = GENERATE(false, true);
 	graph::RenderGraph graph;
 	core::Name offender;
@@ -2584,7 +3341,8 @@ TEST_CASE(
 		CHECK(renderer.PortalImageUsage().Images == 4);
 		CHECK(renderer.PortalImageLayerSetReady(accepted.Image));
 		const auto token = renderer.QueueResourceImage(
-			core::Name(seam ? "portal-body-seam-image/0" : "portal-body-eye-image/0"), core::Name("export")
+			core::Name(seam ? "portal-body-seam-image/layers-2/0" : "portal-body-eye-image/layers-2/0"),
+			core::Name("export")
 		);
 		REQUIRE(token != 0);
 		body.Frame = view.CameraFrame * core::CFrame(core::Vector3{0, 0, -bodyDepth});
@@ -2730,6 +3488,136 @@ TEST_CASE(
 		CHECK(renderer.PortalImageUsage().Images == 3);
 		CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
 		CHECK(capture().Pixels == result.Pixels);
+	}
+
+	{
+		binding.Layer = 0;
+		binding.Expected = layers.Opaque.Key;
+		const auto baseline = renderer.PortalImageUsage();
+		for (int cycle = 0; cycle < 2; ++cycle) {
+			auto withOverlay = layers;
+			withOverlay.SpatialOverlay = image({.25f, .5f, 0, .5f}, 0);
+			withOverlay.SpatialOverlay->Depth.clear();
+			withOverlay.SpatialOverlay->DepthHash = {};
+			const auto saved = withOverlay;
+			std::array<uint64_t, 4> overlayHandles{};
+			const auto allocations = renderer.MemoryStatistics().TextureAllocations;
+			REQUIRE(renderer.QueuePortalImageLayerSet(binding, std::move(withOverlay), overlayHandles));
+			if (cycle != 0) CHECK(renderer.MemoryStatistics().TextureAllocations == allocations);
+			CHECK(renderer.PortalImageUsage().Images == baseline.Images + 4);
+			CHECK(renderer.PortalImageUsage().TextureBytes == baseline.TextureBytes + 17 * 17 * 44);
+			CHECK_FALSE(renderer.PortalImageLayerSetReady(overlayHandles[0]));
+			CHECK(capture().Status == render::ResourceImageStatus::Ok);
+			CHECK(renderer.PortalImageLayerSetReady(overlayHandles[0]));
+			CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
+			render::PortalImageCapture accepted;
+			accepted.Image = overlayHandles[0];
+			accepted.TransparentImages = {overlayHandles[1], overlayHandles[2]};
+			accepted.SpatialOverlayImage = overlayHandles[3];
+			accepted.Binding = binding;
+			accepted.Width = accepted.Height = 17;
+			accepted.CaptureLighting.emplace();
+			accepted.Camera = captureCamera;
+			body.Frame = view.CameraFrame * core::CFrame(core::Vector3{0, 0, -bodyDepth});
+			REQUIRE(renderer.ComposePortalBodyImage(accepted, view) != 0);
+			const auto token = renderer.QueueResourceImage(
+				core::Name(
+					seam ? "portal-body-seam-image/overlay/layers-2/0"
+						 : "portal-body-eye-image/overlay/layers-2/0"
+				),
+				core::Name("export")
+			);
+			REQUIRE(token != 0);
+			const auto composed = renderer.ComposePortalBodyImage(accepted, view);
+			REQUIRE(composed != 0);
+			const auto blended = AwaitImage(renderer, token);
+			REQUIRE(blended.Status == render::ResourceImageStatus::Ok);
+			CHECK(blended.Depth == result.Depth);
+			core::ByteReader sourcePixels(result.Pixels), blendedPixels(blended.Pixels);
+			for (size_t pixel = 0; pixel < 17 * 17; ++pixel) {
+				const auto oldRg = glm::unpackHalf2x16(sourcePixels.ReadUInt32());
+				const auto oldBa = glm::unpackHalf2x16(sourcePixels.ReadUInt32());
+				const auto newRg = glm::unpackHalf2x16(blendedPixels.ReadUInt32());
+				const auto newBa = glm::unpackHalf2x16(blendedPixels.ReadUInt32());
+				CHECK(glm::length(newRg - (glm::vec2{.25f, .5f} + oldRg * .5f)) < .005f);
+				CHECK(glm::length(newBa - (glm::vec2{0, .5f} + oldBa * .5f)) < .005f);
+			}
+			REQUIRE(renderer.DropPortalImage(composed));
+			accepted.Producer.World = "copied-lens-world";
+			const std::array lensOwners{
+				render::WorldContentOwner{core::Name(accepted.Producer.World), lensOwner}
+			};
+			accepted.Lenses.TimeSeconds = 7;
+			for (const auto shader : {lensA, lensB, lensA}) {
+				render::PortalCaptureLens lens;
+				lens.Position = accepted.Camera.Position;
+				lens.Orientation = {0, 0, 0, 1};
+				lens.Shader = shader.Text();
+				lens.ProgramHash = renderer.LensShaderHash(shader, lensOwner);
+				lens.Radius = 100;
+				lens.Strength = 3;
+				accepted.Lenses.Entries.push_back(std::move(lens));
+			}
+			CHECK(renderer.ComposePortalBodyImage(accepted, view) == 0);
+			view.ForeignContentOwners = lensOwners;
+			auto wrongHash = accepted;
+			wrongHash.Lenses.Entries[0].ProgramHash =
+				assets::Hasher::Of(std::as_bytes(std::span("wrong", 5)));
+			CHECK(renderer.ComposePortalBodyImage(wrongHash, view) == 0);
+			REQUIRE(renderer.ComposePortalBodyImage(accepted, view) != 0);
+			const auto lensToken = renderer.QueueResourceImage(
+				core::Name(
+					seam ? "portal-body-seam-image/overlay/lenses/layers-2/0"
+						 : "portal-body-eye-image/overlay/lenses/layers-2/0"
+				),
+				core::Name("export")
+			);
+			REQUIRE(lensToken != 0);
+			const auto lensImage = renderer.ComposePortalBodyImage(accepted, view);
+			REQUIRE(lensImage != 0);
+			const auto lensed = AwaitImage(renderer, lensToken);
+			REQUIRE(lensed.Status == render::ResourceImageStatus::Ok);
+			CHECK(lensed.Depth == blended.Depth);
+			core::ByteReader beforeLens(blended.Pixels), afterLens(lensed.Pixels), lensDepth(blended.Depth);
+			for (size_t pixel = 0; pixel < 17 * 17; ++pixel) {
+				const auto beforeRg = glm::unpackHalf2x16(beforeLens.ReadUInt32());
+				const auto beforeBa = glm::unpackHalf2x16(beforeLens.ReadUInt32());
+				const auto afterRg = glm::unpackHalf2x16(afterLens.ReadUInt32());
+				const auto afterBa = glm::unpackHalf2x16(afterLens.ReadUInt32());
+				// Binary fractions keep HDR16 stores independent of nearest/zero rounding.
+				const glm::vec3 addition{7.f / 16, lensDepth.ReadFloat() / 16, 3.f / 16};
+				const auto stored = [](glm::vec3 value) {
+					const auto redGreen = glm::unpackHalf2x16(glm::packHalf2x16({value.r, value.g}));
+					const auto blue = glm::unpackHalf2x16(glm::packHalf2x16({value.b, 0}));
+					return glm::vec3{redGreen.x, redGreen.y, blue.x};
+				};
+				glm::vec3 expected{beforeRg.x, beforeRg.y, beforeBa.x};
+				expected = stored(expected * .5f + addition);
+				expected = stored(expected * 2.f + glm::vec3(addition.z, addition.y, addition.x));
+				expected = stored(expected * .5f + addition);
+				CHECK(glm::length(glm::vec3(afterRg.x, afterRg.y, afterBa.x) - expected) < .01f);
+				CHECK(afterBa.y == beforeBa.y);
+			}
+			REQUIRE(renderer.DropPortalImage(lensImage));
+			accepted.Lenses = {};
+			view.ForeignContentOwners = {};
+
+			accepted.SpatialOverlayImage = imported[1];
+			CHECK(renderer.ComposePortalBodyImage(accepted, view) == 0);
+			accepted.SpatialOverlayImage = 0;
+			CHECK(renderer.ComposePortalBodyImage(accepted, view) == 0);
+			CHECK(renderer.DropPortalImage(overlayHandles[3]));
+			CHECK_FALSE(renderer.PortalImageLayerSetReady(overlayHandles[0]));
+			CHECK_FALSE(renderer.DropPortalImage(overlayHandles[0]));
+			CHECK(renderer.PortalImageUsage().Images == baseline.Images);
+			CHECK(renderer.PortalImageUsage().TextureBytes == baseline.TextureBytes);
+			auto invalid = saved;
+			invalid.SpatialOverlay->ContentRevision++;
+			const auto before = overlayHandles;
+			CHECK_FALSE(renderer.QueuePortalImageLayerSet(binding, std::move(invalid), overlayHandles));
+			CHECK(overlayHandles == before);
+			CHECK(renderer.PortalImageUsage().Images == baseline.Images);
+		}
 	}
 
 	CHECK(renderer.DropPortalImage(view.EyeImage));

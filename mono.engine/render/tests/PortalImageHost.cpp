@@ -99,6 +99,149 @@ TEST_CASE(
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
+namespace {
+	PortalImageReply SendRetainedBodyRequest(
+		PortalImageHost &host,
+		Worlds &worlds,
+		const world::PresentationAddress &producer,
+		const world::PresentationAddress &requester,
+		uint64_t requestId
+	) {
+		PortalImageRequest request;
+		request.Key = {requestId, "retained-eye", 1, 0};
+		request.Scope = PortalImageScope::OpaqueLighting;
+		request.OrderedLayers = true;
+		request.RetainedBodyPlayer = "91";
+		request.Projection = PortalImageProjection::Eye;
+		request.ClipPlane = {};
+		request.Frustum = {-.1f, .1f, -.1f, .1f, .1f, 100};
+		request.Width = request.Height = 8;
+		request.PixelBudget = 4 * 8 * 8;
+		std::vector<std::byte> wire;
+		std::string error;
+		const bool encoded = EncodePortalImageRequest(request, wire, error);
+		INFO(error);
+		REQUIRE(encoded);
+		REQUIRE(
+			worlds.Universe.SendPresentation(worlds.Source, requester, producer, requestId, wire) ==
+			world::PresentationStatus::Ok
+		);
+		CHECK(host.Pump(0, 0, START).Rendered == 0);
+		const auto replies = worlds.Universe.TakePresentation(requester);
+		REQUIRE(replies.size() == 1);
+		PortalImageReply reply;
+		REQUIRE(DecodePortalImageReply(replies.front().Payload, reply, error));
+		CHECK(reply.Key == request.Key);
+		CHECK(reply.Status == PortalImageStatus::Unavailable);
+		CHECK(reply.Diagnostic.find("authoriz") != std::string::npos);
+		return reply;
+	}
+}
+
+TEST_CASE(
+	"portal host forwards retained body policy to current and future producers", "[render][portal-host]"
+) {
+	const bool alreadyServing = GENERATE(false, true);
+	CAPTURE(alreadyServing);
+	Worlds worlds;
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto opened = worlds.Universe.OpenPresentation(worlds.Source, PortalReplyChannel(0));
+	REQUIRE(opened.Status == world::PresentationStatus::Ok);
+	if (alreadyServing) REQUIRE(host.Serve(worlds.Destination).Generation != 0);
+	size_t firstChecks = 0, replacementChecks = 0;
+	REQUIRE(host.SetRetainedBodyAuthorization(
+		worlds.Destination, [&](const auto &requester, std::string_view account) {
+			++firstChecks;
+			CHECK(requester == opened.Address);
+			CHECK(account == "91");
+			return false;
+		}
+	));
+	const auto producer = host.Serve(worlds.Destination);
+	REQUIRE(producer.Generation != 0);
+	SendRetainedBodyRequest(host, worlds, producer, opened.Address, 1);
+	REQUIRE(firstChecks > 0);
+	const auto previousChecks = firstChecks;
+	REQUIRE(host.SetRetainedBodyAuthorization(
+		worlds.Destination, [&](const auto &requester, std::string_view account) {
+			++replacementChecks;
+			CHECK(requester == opened.Address);
+			CHECK(account == "91");
+			return false;
+		}
+	));
+	SendRetainedBodyRequest(host, worlds, producer, opened.Address, 2);
+	CHECK(firstChecks == previousChecks);
+	REQUIRE(replacementChecks > 0);
+	const auto previousReplacementChecks = replacementChecks;
+	REQUIRE(host.SetRetainedBodyAuthorization(worlds.Destination, {}));
+	SendRetainedBodyRequest(host, worlds, producer, opened.Address, 3);
+	CHECK(firstChecks == previousChecks);
+	CHECK(replacementChecks == previousReplacementChecks);
+	CHECK_FALSE(host.SetRetainedBodyAuthorization(world::WorldId{}, {}));
+}
+
+TEST_CASE(
+	"retained body host policy cannot survive world retirement or slot reuse", "[render][portal-host]"
+) {
+	Worlds worlds;
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	size_t checks = 0;
+	REQUIRE(host.SetRetainedBodyAuthorization(worlds.Destination, [&](const auto &, std::string_view) {
+		++checks;
+		return false;
+	}));
+	SECTION("removing a served world discards policy") {
+		REQUIRE(host.Serve(worlds.Destination).Generation != 0);
+		host.RemoveWorld(worlds.Destination);
+	}
+	SECTION("clearing discards policy for a world not yet served") {
+		host.Clear();
+	}
+	SECTION("recycled world index and name cannot inherit an unserved policy") {
+		const auto retired = worlds.Destination;
+		REQUIRE(worlds.Universe.Destroy(retired) == world::WorldStatus::Ok);
+		worlds.Destination = worlds.Universe.Create({.Name = core::Name("far replica")});
+		REQUIRE(worlds.Destination == retired);
+	}
+	SECTION("recycled served world retires its runtime on pump") {
+		REQUIRE(host.Serve(worlds.Destination).Generation != 0);
+		const auto retired = worlds.Destination;
+		REQUIRE(worlds.Universe.Destroy(retired) == world::WorldStatus::Ok);
+		worlds.Destination = worlds.Universe.Create({.Name = core::Name("far replica")});
+		REQUIRE(worlds.Destination == retired);
+		CHECK(host.Pump(0, 0, START).Requests == 0);
+	}
+	const auto requester = worlds.Universe.OpenPresentation(worlds.Source, PortalReplyChannel(0));
+	REQUIRE(requester.Status == world::PresentationStatus::Ok);
+	const auto producer = host.Serve(worlds.Destination);
+	REQUIRE(producer.Generation != 0);
+	SendRetainedBodyRequest(host, worlds, producer, requester.Address, 1);
+	CHECK(checks == 0);
+}
+
+TEST_CASE(
+	"retained body host policy admission is bounded and prunes retired stores", "[render][portal-host]"
+) {
+	Worlds worlds;
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	std::vector<world::WorldId> configured;
+	const auto deny = [](const auto &, std::string_view) { return false; };
+	for (size_t index = 0; index < MAX_IMPORTED_PORTAL_IMAGES; ++index) {
+		const auto world = worlds.Universe.Create({.Name = core::Name("policy-" + std::to_string(index))});
+		REQUIRE(world.IsValid());
+		REQUIRE(host.SetRetainedBodyAuthorization(world, deny));
+		configured.push_back(world);
+	}
+	CHECK_FALSE(host.SetRetainedBodyAuthorization(worlds.Destination, deny));
+	CHECK(host.SetRetainedBodyAuthorization(configured.front(), deny));
+	REQUIRE(worlds.Universe.Destroy(configured.back()) == world::WorldStatus::Ok);
+	CHECK(host.SetRetainedBodyAuthorization(worlds.Destination, deny));
+}
+
 #include "RenderFixture.hpp"
 
 #include <engine/render/WorldPresentation.hpp>
@@ -315,7 +458,7 @@ TEST_CASE("resident portal images stay bounded through world replacement", "[ren
 #include <engine/world/HostLink.hpp>
 
 namespace {
-	void InstallProcessPlane(Renderer &renderer) {
+	void InstallProcessPlane(Renderer &renderer, core::Name owner) {
 		assets::MeshData mesh;
 		mesh.Vertices = {
 			{{-.5f, -.5f, 0}, {0, 0, 1}, {0, 1}},
@@ -326,11 +469,13 @@ namespace {
 		mesh.Indices = {0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0};
 		mesh.ComputeBounds();
 		REQUIRE(renderer.AddMesh(core::Name("process-plane"), mesh));
+		REQUIRE(renderer.AddMesh(core::Name("process-plane"), mesh, owner));
 		assets::TextureData white;
 		white.Width = white.Height = 1;
 		white.Format = assets::TextureFormat::RGBA8;
 		white.Pixels.assign(4, std::byte{255});
 		REQUIRE(renderer.AddTexture(core::Name("process-white"), white));
+		REQUIRE(renderer.AddTexture(core::Name("process-white"), white, owner));
 	}
 }
 
@@ -366,7 +511,7 @@ TEST_CASE("portal image producer process child", "[.portal-image-child]") {
 	});
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
-	InstallProcessPlane(fixture.Render);
+	InstallProcessPlane(fixture.Render, universe.NameOf(destination));
 	PortalImageHost host(universe, fixture.Render);
 	const auto endpoint = host.Serve(destination);
 	REQUIRE(endpoint.World == "far");
@@ -439,7 +584,7 @@ TEST_CASE(
 	REQUIRE(universe.ConfigurePresentation(123));
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
-	InstallProcessPlane(fixture.Render);
+	InstallProcessPlane(fixture.Render, universe.NameOf(source));
 	PortalImageHost host(universe, fixture.Render);
 	CHECK(host.Serve(destination).World.empty());
 	CHECK(host.Serve({}).World.empty());
@@ -491,7 +636,7 @@ TEST_CASE(
 		 .Scope = graph::NodeScope::Frame}
 	);
 	document.Record(
-		{.Kind = graph::EditKind::Reads, .Target = core::Name("portaled"), .Key = core::Name("source")}
+		{.Kind = graph::EditKind::Reads, .Target = core::Name("tonemapped"), .Key = core::Name("source")}
 	);
 	graph::RenderGraph pipeline;
 	core::Name offender;
@@ -585,7 +730,7 @@ TEST_CASE(
 		if (!wholeEye) REQUIRE(rendered.SurfaceInstances > 0);
 		const auto displayed = render::test::CaptureResource(
 			fixture.Render,
-			core::Name(wholeEye ? "composed-image" : "portaled"),
+			core::Name(wholeEye ? "composed-image" : "tonemapped"),
 			0,
 			65,
 			65,
@@ -953,7 +1098,7 @@ TEST_CASE(
 	view.Target = &target;
 	OverlayImage overlay;
 	REQUIRE(
-		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("portal-capture"))
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("surface-capture"))
 	);
 	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
 	(void)host.Pump(0, 0, START);

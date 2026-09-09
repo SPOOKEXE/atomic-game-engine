@@ -11,6 +11,12 @@
 
 namespace engine::render {
 
+	namespace {
+		uint64_t MeshKey(const core::Name &name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+	}
+
 	MeshTable::~MeshTable() {
 		Shutdown();
 	}
@@ -35,7 +41,8 @@ namespace engine::render {
 		}
 
 		// Resolve the fallback once; the draw loop never hashes unknown names.
-		const auto found = Entries.find(core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube)).Id());
+		const auto found =
+			Entries.find(MeshKey(core::Name(assets::BuiltinName(assets::BuiltinMesh::Cube)), {}));
 		if (found == Entries.end()) {
 			return false;
 		}
@@ -197,7 +204,7 @@ namespace engine::render {
 		return total;
 	}
 
-	bool MeshTable::Add(const core::Name &name, const assets::MeshData &mesh) {
+	bool MeshTable::Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner) {
 		if (!name.IsValid() || !mesh.IsValid()) {
 			return false;
 		}
@@ -207,7 +214,7 @@ namespace engine::render {
 		// back rather than growing the table. It cannot take it back *this*
 		// frame - `Claim` refuses a run younger than `DEFERRED_FRAMES` - which
 		// is what keeps the range a frame in flight is drawing from intact.
-		if (const auto outgoing = Entries.find(name.Id()); outgoing != Entries.end()) {
+		if (const auto outgoing = Entries.find(MeshKey(name, owner)); outgoing != Entries.end()) {
 			Release(
 				FreeVertices,
 				static_cast<size_t>(outgoing->second.Whole.VertexOffset),
@@ -295,7 +302,7 @@ namespace engine::render {
 		MarkDirty(DirtyVertices, vertexAt, mesh.Vertices.size());
 		MarkDirty(DirtyIndices, indexAt, mesh.Indices.size());
 
-		Entries[name.Id()] = std::move(entry);
+		Entries[MeshKey(name, owner)] = std::move(entry);
 		Dirty = true;
 		return true;
 	}
@@ -472,9 +479,9 @@ namespace engine::render {
 		return true;
 	}
 
-	const MeshEntry &MeshTable::Resolve(const core::Name &name) const {
+	const MeshEntry &MeshTable::Resolve(const core::Name &name, core::Name owner) const {
 		if (name.IsValid()) {
-			const auto found = Entries.find(name.Id());
+			const auto found = Entries.find(MeshKey(name, owner));
 			if (found != Entries.end()) {
 				return found->second;
 			}
@@ -482,7 +489,20 @@ namespace engine::render {
 		return Fallback;
 	}
 
-	bool MeshTable::Has(const core::Name &name) const {
-		return name.IsValid() && Entries.find(name.Id()) != Entries.end();
+	bool MeshTable::Has(const core::Name &name, core::Name owner) const {
+		return name.IsValid() && Entries.find(MeshKey(name, owner)) != Entries.end();
 	}
+	size_t MeshTable::DropOwner(core::Name owner) {
+		if (!owner.IsValid()) return 0;
+		return std::erase_if(Entries, [&](const auto &pair) {
+			if (uint32_t(pair.first >> 32) != owner.Id()) return false;
+			const MeshEntry &entry = pair.second;
+			Release(
+				FreeVertices, static_cast<size_t>(entry.Whole.VertexOffset), entry.VertexCount, Generation
+			);
+			Release(FreeIndices, entry.Whole.FirstIndex, entry.Whole.IndexCount, Generation);
+			return true;
+		});
+	}
+
 }

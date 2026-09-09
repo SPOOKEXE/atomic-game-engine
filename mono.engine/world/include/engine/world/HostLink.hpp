@@ -43,8 +43,27 @@
 
 namespace engine::world {
 
+	// Exact child-visible to parent-visible endpoint tuples, supplied by host control.
+	// arch-crossing
+	struct PresentationEndpointBinding {
+		PresentationAddress Local;
+		PresentationAddress Published;
+		bool operator==(const PresentationEndpointBinding &) const = default;
+	};
+	// Newer empty arrays withdraw bindings. Return aliases never grant producer exports.
+	// The two arrays together contain at most MAX_PRESENTATION_DIRECTORY entries.
+	// arch-crossing
+	struct PresentationBindings {
+		uint64_t Session = 0;
+		uint64_t Revision = 0;
+		std::vector<PresentationEndpointBinding> Exports;
+		std::vector<PresentationEndpointBinding> Returns;
+		bool operator==(const PresentationBindings &) const = default;
+	};
+	bool WritePresentationBindings(core::ByteWriter &writer, const PresentationBindings &bindings);
+	bool ReadPresentationBindings(core::ByteReader &reader, PresentationBindings &bindings);
+
 	// What a frame is.
-	//
 	// @since v0.2
 	enum class HostSignal : uint8_t {
 		// Host to driver: the worlds are built and the first tick is due.
@@ -92,6 +111,7 @@ namespace engine::world {
 		// commands presented as results, even when their frame identifiers match.
 		TickExchangeCommand,
 		TickExchangeResult,
+		PresentationBindings,
 	};
 
 	// Returns a stable, human-readable name for a signal.
@@ -173,6 +193,7 @@ namespace engine::world {
 		// Exactly one message when Signal is Presentation; otherwise unused.
 		PresentationMessage Presentation;
 		PresentationDirectory Directory;
+		PresentationBindings Bindings;
 		TickExchangeCommand ExchangeCommand;
 		TickExchangeResult ExchangeResult;
 	};
@@ -249,6 +270,7 @@ namespace engine::world {
 		// the version unsent so the next pump retries the current directory.
 		bool PublishPresentationDirectory(const PresentationDirectory &directory);
 		bool PublishPresentationRoutes(const PresentationDirectory &directory);
+		bool PublishPresentationBindings(const PresentationBindings &bindings);
 
 		// Sends what the buses answered, for a host's worlds.
 		//
@@ -303,5 +325,7 @@ namespace engine::world {
 		uint64_t PublishedDirectoryRevision = 0;
 		uint64_t PublishedRoutesSession = 0;
 		uint64_t PublishedRoutesRevision = 0;
+		uint64_t PublishedBindingsSession = 0;
+		uint64_t PublishedBindingsRevision = 0;
 	};
 }

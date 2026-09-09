@@ -104,6 +104,7 @@ namespace engine::render {
 				return;
 			}
 
+			const core::Name textureOwner = TextureContentOwner(texture, SlotContentOwner[slot]);
 			if (lighting != nullptr) {
 				// **The default, not the fallback texel, and not "do not
 				// sample".** A drawable naming no texture is not a drawable with
@@ -125,9 +126,10 @@ namespace engine::render {
 				// coming*. `ChooseTexture` is the rule and carries the argument;
 				// it is a free function so a suite can state it without a
 				// device.
-				SDL_GPUTexture *const found = Textures.Find(texture);
-				const TextureChoice choice =
-					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+				SDL_GPUTexture *const found = Textures.Find(texture, textureOwner);
+				const TextureChoice choice = ChooseTexture(
+					found != nullptr, texture.IsValid(), Textures.Expecting(texture, textureOwner)
+				);
 
 				// **Untextured draws the default and not the named image**, and
 				// it is one substitution rather than a second pipeline family
@@ -149,11 +151,13 @@ namespace engine::render {
 						// exactly what makes a shape hard to see.
 						return static_cast<SDL_GPUTexture *>(nullptr);
 					}
-					SDL_GPUTexture *foundMap = Textures.Find(name);
+					SDL_GPUTexture *foundMap =
+						Textures.Find(name, TextureContentOwner(name, SlotContentOwner[slot]));
 					if (foundMap != nullptr) {
 						return foundMap;
 					}
-					if (name.IsValid() && !Textures.Expecting(name)) {
+					if (name.IsValid() &&
+						!Textures.Expecting(name, TextureContentOwner(name, SlotContentOwner[slot]))) {
 						return Textures.Missing();
 					}
 					return static_cast<SDL_GPUTexture *>(nullptr);
@@ -231,7 +235,7 @@ namespace engine::render {
 				// the same frame. A per-instance phase is a real feature and is a
 				// different one - `effects::FlipbookLayout` already has it for
 				// particles, where the cell is a function of a particle's age.
-				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 
 				// **The clock is stamped here and the effect arrives from the
@@ -270,9 +274,10 @@ namespace engine::render {
 				// discards on the same test `opaque.frag` makes. It also binds the
 				// colour map so a clipped surface casts its authored silhouette, but
 				// still needs only the compact shadow block rather than all lighting.
-				SDL_GPUTexture *const found = Textures.Find(texture);
-				const TextureChoice choice =
-					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+				SDL_GPUTexture *const found = Textures.Find(texture, textureOwner);
+				const TextureChoice choice = ChooseTexture(
+					found != nullptr, texture.IsValid(), Textures.Expecting(texture, textureOwner)
+				);
 				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
 												: choice == TextureChoice::Missing ? Textures.Missing()
 																				   : Textures.Default();
@@ -286,7 +291,7 @@ namespace engine::render {
 				ShadowUniforms uniforms;
 				uniforms.Plane = SlotSeam[slot];
 				uniforms.Material.x = colour[3];
-				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 			}
@@ -356,7 +361,13 @@ namespace engine::render {
 				indirect != nullptr
 					? (slotRun < indirect->RunDraws->size() ? (*indirect->RunDraws)[slotRun] : 0u)
 					: run;
-			if (indirect != nullptr && phaseInstances == 0) {
+			bool resolvedBeforeGBuffer = false;
+			if (ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
+				const auto authored = ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
+				resolvedBeforeGBuffer =
+					authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
+			}
+			if (resolvedBeforeGBuffer || (indirect != nullptr && phaseInstances == 0)) {
 				argument += DrawArgumentCount(*mesh);
 				slotRun++;
 				slot += run;
@@ -366,7 +377,7 @@ namespace engine::render {
 			// **Bound per run and only where it changes.** A scene with no
 			// custom shaders never enters this branch, and one where every part
 			// wears the same one binds twice: once here and once on the way out.
-			SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader);
+			SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader, SlotContentOwner[slot]);
 			SDL_GPUGraphicsPipeline *const want = wanted != nullptr ? wanted : base;
 			if (want != bound && want != nullptr) {
 				SDL_BindGPUGraphicsPipeline(pass, want);

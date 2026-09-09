@@ -32,6 +32,8 @@ TEST_SUITE_ID("client.portalwalk")
 TEST_DEPENDS("client.presentationhost")
 TEST_DEPENDS("client.portalsession")
 
+enum class RoomShader { None, Material, Spatial, SpatialOverlay, Lens };
+
 static void RunPortalWalk(
 	double worldTickRate,
 	bool firstPerson,
@@ -39,9 +41,14 @@ static void RunPortalWalk(
 	bool holdThroughAdoption,
 	bool lateClear,
 	bool imageHandoff = false,
-	bool warmPortal = false
+	bool warmPortal = false,
+	bool ownedContent = false,
+	RoomShader roomShader = RoomShader::None
 ) {
 	using namespace engine;
+	const bool authoredShaders = roomShader != RoomShader::None;
+	const bool spatialOverlay = roomShader == RoomShader::SpatialOverlay || roomShader == RoomShader::Lens;
+	CAPTURE(roomShader);
 	CAPTURE(worldTickRate, firstPerson, explicitSubject, holdThroughAdoption, lateClear, warmPortal);
 	const auto programs = core::Paths::Base().parent_path();
 	const auto serverProgram = programs / "server" / core::Paths::Program("server");
@@ -49,8 +56,10 @@ static void RunPortalWalk(
 	if (!std::filesystem::exists(serverProgram) || !std::filesystem::exists(clientProgram))
 		SKIP("build both product programs before this test");
 	const auto scenePath = core::Paths::Base() / "portal-client-walk.agame";
-	const std::string sceneSource = R"(
-local floor = Instance.new("Part")
+	std::string sceneSource =
+		std::string("local ownedRoomContent = ") + (ownedContent ? "true\n" : "false\n") + R"(
+local floor = Instance.new(ownedRoomContent and "MeshPart" or "Part")
+if ownedRoomContent then floor.MeshId = "engine.Cube" end
 floor.Anchored = true
 floor.Size = Vector3.new(100, 2, 100)
 floor.Position = Vector3.new(0, -1, 0)
@@ -73,6 +82,97 @@ portal.Destination = beyond
 portal.DestinationWorld = game.JobId == "walk.destination" and "server.world" or "walk.destination"
 portal.Parent = pane
 )";
+	if (ownedContent)
+		sceneSource += R"(
+local image = Instance.new("EditableImage")
+image.Name = "RoomColour"
+image.Parent = workspace
+assert(image:Resize(2, 2))
+image:DrawRectangle(Vector2.new(0, 0), Vector2.new(2, 2), floor.Color)
+floor.Color = Color3.new(1, 1, 1)
+floor.TextureID = image.ContentId
+)";
+	if (authoredShaders)
+		sceneSource += R"shader(
+local shader = Instance.new("ShaderScript")
+shader.Name = "RoomShader"
+shader.Source = "#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=" ..
+    (game.JobId == "walk.destination" and "vec4(0,0,1,1)" or "vec4(1,0,0,1)") .. ";}"
+shader.Parent = workspace
+floor.Color = Color3.new(1, 1, 1)
+)shader";
+	if (roomShader == RoomShader::Material)
+		sceneSource += R"(
+local material = Instance.new("Material")
+material.Shader = shader.Name
+material.Parent = floor
+)";
+	if (roomShader == RoomShader::Spatial || spatialOverlay)
+		sceneSource += R"(
+local image = Instance.new("EditableImage")
+image.Name = "RoomWhite"
+image.Parent = workspace
+assert(image:Resize(2, 2))
+image:DrawRectangle(Vector2.new(0, 0), Vector2.new(2, 2), Color3.new(1, 1, 1))
+local canvas = Instance.new("SurfaceGui")
+canvas.Face = Enum.NormalId.Top
+canvas.CanvasSize = Vector2.new(100, 100)
+canvas.AlwaysOnTop = false
+canvas.Parent = floor
+local picture = Instance.new("ImageLabel")
+picture.BackgroundTransparency = 1
+picture.Size = UDim2.new(1, 0, 1, 0)
+picture.Image = image.ContentId
+picture.Shader = "RoomShader"
+picture.Parent = canvas
+)";
+	if (spatialOverlay)
+		sceneSource += R"(
+if game.JobId == "walk.destination" then
+    local anchor = Instance.new("Part")
+    anchor.Name = "TopMarker"
+    anchor.Anchored = true
+    anchor.CanCollide = false
+    anchor.Transparency = 1
+    anchor.Size = Vector3.new(2, 1, 0.1)
+    anchor.Position = Vector3.new(2, 5, -14)
+    anchor.Parent = workspace
+    local canvas = Instance.new("SurfaceGui")
+    canvas.Face = Enum.NormalId.Back
+    canvas.CanvasSize = Vector2.new(100, 50)
+    canvas.AlwaysOnTop = true
+    canvas.LightInfluence = 0
+    canvas.Parent = anchor
+    local marker = Instance.new("Frame")
+    marker.Size = UDim2.new(1, 0, 1, 0)
+    marker.BackgroundColor3 = Color3.new(0, 1, 0)
+    marker.BorderSizePixel = 0
+    marker.Parent = canvas
+end
+)";
+	if (roomShader == RoomShader::Lens)
+		sceneSource += R"lens(
+local lensShader = Instance.new("LensShader")
+lensShader.Name = "RoomLens"
+lensShader.Source = [[#version 450
+layout(location=0) in vec2 uv;
+layout(location=0) out vec4 colour;
+layout(set=2,binding=0) uniform sampler2D sceneColour;
+layout(set=2,binding=1) uniform sampler2D sceneDepth;
+void main(){
+    vec2 sampleUv = uv;
+    if (uv.x > 0.25 && uv.x < 0.95 && uv.y < 0.75)
+        sampleUv.x += ]] .. (game.JobId == "walk.destination" and "-0.0625" or "0.03125") .. [[;
+    colour = texture(sceneColour, sampleUv);
+}]]
+lensShader.Parent = workspace
+local lens = Instance.new("ShaderLens")
+lens.Name = "RoomLensEffect"
+lens.Shader = lensShader.Name
+lens.Radius = 100
+lens.Strength = 1
+lens.Parent = workspace
+)lens";
 	scene::RegisterSceneClasses();
 	script::RegisterScriptComponents();
 	world::Universe authored;
@@ -341,14 +441,24 @@ end)
 		spdlog::sink_ptr Sink;
 		core::LogLevel PreviousClientLevel;
 		core::LogLevel PreviousRenderLevel;
+		core::LogLevel PreviousRowLevel;
 		~SinkLifetime() {
 			std::erase(core::Log::Logger().sinks(), Sink);
 			core::Log::SetLevel("client", PreviousClientLevel);
 			core::Log::SetLevel("render", PreviousRenderLevel);
+			core::Log::SetLevel("replication-row", PreviousRowLevel);
 		}
-	} attached{sink, core::Log::LevelOf("client"), core::Log::LevelOf("render")};
+	} attached{
+		sink,
+		core::Log::LevelOf("client"),
+		core::Log::LevelOf("render"),
+		core::Log::LevelOf("replication-row")
+	};
 	core::Log::SetLevel("client", core::LogLevel::Trace);
 	core::Log::SetLevel("render", core::LogLevel::Trace);
+	if (const char *levels = std::getenv("ATOMIC_ENGINE_LOG_LEVEL");
+		levels && std::string_view(levels).find("replication-row=trace") != std::string_view::npos)
+		core::Log::SetLevel("replication-row", core::LogLevel::Trace);
 	core::Log::Logger().sinks().push_back(sink);
 	client::Options options;
 	options.Headless = true;
@@ -368,6 +478,11 @@ end)
 		 (holdThroughAdoption ? "-held" : "") +
 		 (lateClear ? (imageHandoff ? "-clear-image-frames" : "-clear-frames") : "-frames"));
 	if (warmPortal) options.CaptureSequence += "-warm";
+	if (ownedContent) options.CaptureSequence += "-owned";
+	if (roomShader == RoomShader::Material) options.CaptureSequence += "-shaders";
+	if (roomShader == RoomShader::Spatial) options.CaptureSequence += "-spatial-shaders";
+	if (roomShader == RoomShader::SpatialOverlay) options.CaptureSequence += "-spatial-overlay";
+	if (roomShader == RoomShader::Lens) options.CaptureSequence += "-captured-lens";
 	captureDirectory = options.CaptureSequence;
 	std::filesystem::remove_all(options.CaptureSequence);
 	const auto finalCapture = options.CaptureSequence / (std::to_string(options.MaximumFrames - 1) + ".bmp");
@@ -386,6 +501,11 @@ end)
 	size_t sourceClearSamples = 0, adoptedClearSamples = 0, clearedAdoptions = 0;
 	size_t handoffMoveSamples = 0;
 	size_t retainedMoveSamples = 0, nativeReturnSamples = 0, nativeHeldSamples = 0, loadingSamples = 0;
+	std::array<size_t, 2> shaderRoomSamples{};
+	size_t shaderObservedSamples = 0;
+	size_t spatialOverlayAdoptions = 0;
+	size_t observedEyeSamples = 0;
+	size_t successorEyeSamples = 0;
 	bool returned = false;
 	bool outboundMotion = false, returnMotion = false;
 	bool outboundReplay = false, returnReplay = false;
@@ -489,6 +609,87 @@ end)
 				CHECK(clearedFrame);
 				++clearedAdoptions;
 			}
+			if (spatialOverlay &&
+				previousSample->at("portal_handoff").value("destination", "") == "walk.destination") {
+				++spatialOverlayAdoptions;
+				for (const int markerFrame : {frame - 1, frame}) {
+					const auto &markerSample = markerFrame == frame ? sample : *previousSample;
+					const auto &portals = markerSample.at("portal_views");
+					REQUIRE(portals.size() == 1);
+					const auto &capture = portals.at(0).at("capture");
+					REQUIRE(capture.is_object());
+					if (markerFrame != frame) {
+						CHECK(capture.at("producer") == "walk.destination");
+						CHECK(capture.at("scope") == "opaque-lighting");
+						CHECK(capture.at("spatial_overlay_image").get<uint64_t>() != 0);
+						if (roomShader == RoomShader::Lens) {
+							CHECK(capture.at("lens_count") == 1);
+							REQUIRE(capture.at("lenses").size() == 1);
+							CHECK(capture.at("lenses").at(0).at("shader") == "RoomLens");
+							CHECK(capture.at("lenses").at(0).at("program_hash") != std::string(64, '0'));
+							CHECK(std::isfinite(capture.at("lens_time").get<float>()));
+						}
+					}
+					const auto &position = capture.at("position");
+					core::CFrame camera({position.at(0), position.at(1), position.at(2)});
+					const auto &orientation = capture.at("orientation");
+					camera.QuaternionX = orientation.at(0);
+					camera.QuaternionY = orientation.at(1);
+					camera.QuaternionZ = orientation.at(2);
+					camera.QuaternionW = orientation.at(3);
+					const auto &frustum = capture.at("frustum");
+					const auto path = options.CaptureSequence / (std::to_string(markerFrame) + ".bmp");
+					std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
+						SDL_LoadBMP(path.string().c_str()), SDL_DestroySurface
+					);
+					REQUIRE(image);
+					// Sample the marker's interior through the accepted destination camera.
+					for (const float markerX : {1.6f, 2.0f, 2.4f}) {
+						const auto local = camera.PointToObjectSpace({markerX, 5.0f, -13.95f});
+						REQUIRE(local.Z < 0);
+						const float scale = frustum.at(4).get<float>() / -local.Z;
+						const float u = (local.X * scale - frustum.at(0).get<float>()) /
+										(frustum.at(1).get<float>() - frustum.at(0).get<float>());
+						const float v = (local.Y * scale - frustum.at(2).get<float>()) /
+										(frustum.at(3).get<float>() - frustum.at(2).get<float>());
+						// Destination shifts right, then the eye world's lens shifts the portal left.
+						const int shift =
+							roomShader == RoomShader::Lens
+								? image->w / 16 - (markerSample.value("eye_world", "") == "server.world"
+													   ? image->w / 32
+													   : 0)
+								: 0;
+						const int x = static_cast<int>(u * image->w) + shift;
+						const int y = static_cast<int>((1 - v) * image->h);
+						CAPTURE(markerFrame, markerX, x, y);
+						REQUIRE(x >= 0);
+						REQUIRE(x < image->w);
+						REQUIRE(y >= 0);
+						REQUIRE(y < image->h);
+						Uint8 red = 0, green = 0, blue = 0, alpha = 0;
+						REQUIRE(SDL_ReadSurfacePixel(image.get(), x, y, &red, &green, &blue, &alpha));
+						CAPTURE(red, green, blue);
+						CHECK(green > 90);
+						CHECK(green > 2 * red);
+						CHECK(green > 2 * blue);
+						if (roomShader == RoomShader::Lens && markerX == 1.6f) {
+							// The interior sample can overlap the shifted marker as the camera approaches.
+							// Use a distinct point close to its original left edge for the vacated check.
+							const auto edge = camera.PointToObjectSpace({1.2f, 5.0f, -13.95f});
+							const float edgeScale = frustum.at(4).get<float>() / -edge.Z;
+							const float edgeU = (edge.X * edgeScale - frustum.at(0).get<float>()) /
+												(frustum.at(1).get<float>() - frustum.at(0).get<float>());
+							const int vacatedX = static_cast<int>(edgeU * image->w);
+							CAPTURE(vacatedX);
+							REQUIRE(
+								SDL_ReadSurfacePixel(image.get(), vacatedX, y, &red, &green, &blue, &alpha)
+							);
+							CAPTURE(red, green, blue);
+							CHECK_FALSE((green > 90 && green > 2 * red && green > 2 * blue));
+						}
+					}
+				}
+			}
 			if (imageHandoff) {
 				REQUIRE(previousSample->value("eye_world", "") == sample.value("eye_world", ""));
 				const auto bluePixels = [](const std::filesystem::path &path) {
@@ -512,7 +713,7 @@ end)
 					bluePixels(options.CaptureSequence / (std::to_string(frame - 1) + ".bmp"));
 				const auto after = bluePixels(stem.string() + ".bmp");
 				CAPTURE(before, after);
-				REQUIRE(
+				CHECK(
 					before >
 					(previousSample->at("portal_handoff").value("destination", "") == "walk.destination" ? 512
 																										 : 64)
@@ -628,6 +829,60 @@ end)
 				SDL_LoadBMP((stem.string() + ".bmp").c_str()), SDL_DestroySurface
 			);
 			REQUIRE(eye);
+			if (authoredShaders || (ownedContent && sample.contains("observed_world"))) {
+				Uint8 roomRed = 0, roomGreen = 0, roomBlue = 0, roomAlpha = 0;
+				REQUIRE(SDL_ReadSurfacePixel(
+					eye.get(), eye->w / 8, eye->h - 2, &roomRed, &roomGreen, &roomBlue, &roomAlpha
+				));
+				const auto eyeWorld = sample.value("observed_world", sample.value("eye_world", ""));
+				CAPTURE(frame, roomRed, roomGreen, roomBlue, eyeWorld);
+				bool blueRoom = eyeWorld == "walk.destination";
+				const auto vector = [](const auto &values) {
+					return core::Vector3{
+						values.at(0).template get<float>(),
+						values.at(1).template get<float>(),
+						values.at(2).template get<float>()
+					};
+				};
+				core::CFrame camera(vector(sample.at("camera").at("position")));
+				const auto &rotation = sample.at("camera").at("rotation");
+				camera.QuaternionX = rotation.at(0);
+				camera.QuaternionY = rotation.at(1);
+				camera.QuaternionZ = rotation.at(2);
+				camera.QuaternionW = rotation.at(3);
+				for (const auto &portal : sample.at("portal_views")) {
+					if (!portal.contains("capture") || !portal.at("capture").is_object()) continue;
+					const auto &frustum = portal.at("capture").at("frustum");
+					const float u = (eye->w / 8 + .5f) / eye->w;
+					const float v = 1.f - (eye->h - 1.5f) / eye->h;
+					const float near = frustum.at(4);
+					const auto ray = camera.VectorToWorldSpace(
+						{std::lerp(frustum.at(0).get<float>(), frustum.at(1).get<float>(), u) / near,
+						 std::lerp(frustum.at(2).get<float>(), frustum.at(3).get<float>(), v) / near,
+						 -1}
+					);
+					const auto normal = vector(portal.at("normal"));
+					const float denominator = normal.Dot(ray);
+					if (ray.Y >= 0 || std::abs(denominator) < 1e-6f) continue;
+					const auto centre = vector(portal.at("centre"));
+					const float distance = (centre - camera.Position).Dot(normal) / denominator;
+					const auto offset = camera.Position + ray * distance - centre;
+					const auto first = vector(portal.at("first")), second = vector(portal.at("second"));
+					// The room behind an aperture supplies this pixel if its plane precedes the floor.
+					if (distance > 0 && distance < -camera.Position.Y / ray.Y &&
+						std::abs(offset.Dot(first)) < first.Dot(first) &&
+						std::abs(offset.Dot(second)) < second.Dot(second))
+						blueRoom = !blueRoom;
+				}
+				if (authoredShaders) {
+					++shaderRoomSamples[blueRoom ? 1 : 0];
+					shaderObservedSamples += sample.contains("observed_world");
+				}
+				if (blueRoom)
+					CHECK(roomBlue > roomRed * 2);
+				else
+					CHECK(roomRed > roomBlue * 2);
+			}
 			Uint8 red = 0, green = 0, blue = 0, alpha = 0;
 			bool visible = false;
 			bool readable = true;
@@ -655,11 +910,62 @@ end)
 				CHECK((red != 0 || green != 0 || blue != 0));
 			}
 		}
+		if (imageHandoff && sample.contains("observed_world")) {
+			CHECK_FALSE(sample.value("eye_image", true));
+			CHECK(sample.at("view_world") != sample.at("input_world"));
+			CHECK(sample.at("observed_tick").get<uint64_t>() > 0);
+			CHECK(sample.at("instances").get<size_t>() > 0);
+			for (const auto &portal : sample.at("portal_views")) {
+				if (!portal.value("external", false)) continue;
+				REQUIRE(portal.contains("capture"));
+				CHECK(portal.at("capture").at("producer") == sample.at("input_world"));
+			}
+			++observedEyeSamples;
+			if (sample.value("observed_successor", false)) {
+				REQUIRE(sample.contains("portal_handoff"));
+				const auto &handoff = sample.at("portal_handoff");
+				CHECK(handoff.value("scene_admitted", false));
+				CHECK(handoff.value("scene_joined", false));
+				CHECK(handoff.value("scene_live", false));
+				CHECK_FALSE(handoff.value("scene_rejected", true));
+				CHECK_FALSE(handoff.value("refused", true));
+				CHECK(handoff.at("failure").get<std::string>().empty());
+				CHECK(sample.at("observed_world") == handoff.at("destination"));
+				if (handoff.value("drawing_player", false)) CHECK(handoff.value("ready", false));
+				++successorEyeSamples;
+			}
+		}
+		if (imageHandoff && !sample.value("eye_image", false) &&
+			(sample.contains("observed_world") || returned)) {
+			for (const auto &portal : sample.at("portal_views")) {
+				if (!portal.value("external", false)) continue;
+				REQUIRE(portal.contains("capture"));
+				// This fixture's seam mapping is identity apart from wire rounding.
+				// A stale camera can pass the room-colour check while exposing a gray border.
+				const auto &capturedEye = portal.at("capture").at("position");
+				const auto &liveEye = sample.at("camera").at("position");
+				float distanceSquared = 0;
+				for (size_t axis = 0; axis < 3; ++axis) {
+					const float delta = capturedEye.at(axis).get<float>() - liveEye.at(axis).get<float>();
+					distanceSquared += delta * delta;
+				}
+				CHECK(distanceSquared < 0.001f * 0.001f);
+				const auto &capturedRotation = portal.at("capture").at("orientation");
+				const auto &liveRotation = sample.at("camera").at("rotation");
+				float rotationDot = 0;
+				for (size_t axis = 0; axis < 4; ++axis)
+					rotationDot +=
+						capturedRotation.at(axis).get<float>() * liveRotation.at(axis).get<float>();
+				CHECK(std::abs(rotationDot) > 1.0f - 1e-6f);
+			}
+		}
 		if (imageHandoff && returned && !sample.value("eye_image", false)) {
 			for (const auto &portal : sample.at("portal_views")) {
 				if (!portal.value("external", false)) continue;
 				CAPTURE(frame);
 				CHECK(portal.at("image").get<uint64_t>() != 0);
+				REQUIRE(portal.contains("capture"));
+				CHECK(portal.at("capture").at("scope") == "complete-world");
 				++nativeReturnSamples;
 			}
 		}
@@ -671,6 +977,8 @@ end)
 		CHECK(clearedAdoptions == 1);
 	}
 	if (imageHandoff) CHECK(nativeReturnSamples > 16);
+	if (imageHandoff && !firstPerson) CHECK(observedEyeSamples > 0);
+	if (imageHandoff) CHECK(successorEyeSamples > 0);
 	CHECK(handoffMoveSamples > 0);
 	CHECK(loadingSamples > 0);
 	CHECK(retainedMoveSamples > 0);
@@ -695,6 +1003,11 @@ end)
 			readable &= SDL_ReadSurfacePixel(capture.get(), x, y, &red, &green, &blue, &alpha);
 			visiblePixels += red != 0 || green != 0 || blue != 0;
 		}
+	if (authoredShaders) {
+		CHECK(shaderRoomSamples[0] > 10);
+		CHECK(shaderRoomSamples[1] > 10);
+		CHECK(shaderObservedSamples > 0);
+	}
 	CHECK(readable);
 	CHECK(visiblePixels > static_cast<size_t>(options.Width * options.Height) / 8);
 	player.Shutdown();
@@ -717,6 +1030,7 @@ end)
 	REQUIRE(observed.Adoptions.size() == 2);
 	CHECK(nativeWorlds.size() == 2);
 	if (holdThroughAdoption) CHECK(movingNativeWorlds.size() == 2);
+	if (spatialOverlay) CHECK(spatialOverlayAdoptions == 1);
 	CHECK(observed.Adoptions[0].starts_with("portal session adopted walk.destination "));
 	CHECK(observed.Adoptions[1].starts_with("portal session adopted server.world "));
 	CAPTURE(observed.CameraSamples, observed.CameraModeSamples, observed.CameraFailures);
@@ -769,4 +1083,39 @@ TEST_CASE(
 ) {
 	const double worldTickRate = GENERATE(30.0, 60.0);
 	RunPortalWalk(worldTickRate, false, true, true, true, true, true);
+}
+
+TEST_CASE(
+	"portal worlds retain their editable room colours across adoption",
+	"[client][gpu][portal-product-content-owner][.]"
+) {
+	RunPortalWalk(60, false, true, true, true, true, true, true);
+}
+
+TEST_CASE(
+	"portal worlds resolve same-name authored shaders across both adoptions",
+	"[client][gpu][portal-product-shader-owner][.]"
+) {
+	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Material);
+}
+
+TEST_CASE(
+	"portal worlds resolve same-name spatial GUI shaders across both adoptions",
+	"[client][gpu][portal-product-spatial-shader-owner][.]"
+) {
+	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Spatial);
+}
+
+TEST_CASE(
+	"portal destination top GUI survives ordered capture and adoption",
+	"[client][gpu][portal-product-spatial-overlay][.]"
+) {
+	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::SpatialOverlay);
+}
+
+TEST_CASE(
+	"product crossing applies captured destination lens to the spatial marker",
+	"[client][gpu][portal-product-captured-lens][.]"
+) {
+	RunPortalWalk(60, false, true, true, true, true, true, false, RoomShader::Lens);
 }

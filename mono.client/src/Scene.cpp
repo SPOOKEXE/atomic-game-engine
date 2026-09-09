@@ -442,7 +442,8 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &surfaces,
 		float alpha,
 		engine::render::PortalImageHost::Time now,
-		engine::world::WorldId topologyOwner
+		engine::world::WorldId topologyOwner,
+		engine::world::WorldId admittedDestination
 	) {
 		ENGINE_PROFILE("product.portal images");
 		bool requested = false;
@@ -464,13 +465,18 @@ namespace client {
 		}
 		auto sourceView = viewer;
 		sourceView.Instances = sourceRows;
-		universe.Enter(world, [&](engine::ecs::Store &store) {
-			engine::render::CollectPortalImageDemands(store, sourceView, settings, demands, portals);
-		});
 		std::vector<WorldIdentity> worlds;
-		if (!demands.empty()) {
-			SurveyWorlds(universe, worlds);
-		}
+		SurveyWorlds(universe, worlds);
+		const auto admitted = std::find_if(worlds.begin(), worlds.end(), [&](const auto &candidate) {
+			return candidate.Id == admittedDestination && candidate.Id != world && candidate.IsReplica &&
+				   candidate.Ready && candidate.Authored.IsValid();
+		});
+		auto captureSettings = settings;
+		captureSettings.ResidentDestinations = {};
+		if (admitted != worlds.end()) captureSettings.ResidentDestinations = {&admitted->Authored, 1};
+		universe.Enter(world, [&](engine::ecs::Store &store) {
+			engine::render::CollectPortalImageDemands(store, sourceView, captureSettings, demands, portals);
+		});
 		std::vector<engine::render::PortalImageDestination> routes;
 		for (const auto &demand : demands) {
 			if (std::any_of(routes.begin(), routes.end(), [&](const auto &route) {
@@ -485,6 +491,8 @@ namespace client {
 				universe.LookupPresentation(authority, engine::render::PORTAL_REQUEST_CHANNEL).Generation !=
 					0)
 				destination = authority;
+			if (admitted != worlds.end() && admitted->Authored == demand.DestinationWorld)
+				destination = admitted->Id;
 			if (destination.IsValid()) {
 				routes.push_back({demand.DestinationWorld, destination});
 				// Fetch return seams while the entrance image is already demanded.

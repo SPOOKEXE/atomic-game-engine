@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/render/PortalCaptureTree.hpp>
 #include <engine/render/PortalExchange.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -266,7 +267,7 @@ TEST_CASE(
 	REQUIRE(bytes.size() > 16);
 	CHECK(bytes[0] == std::byte{'P'});
 	CHECK(bytes[1] == std::byte{'I'});
-	CHECK(bytes[4] == std::byte{12});
+	CHECK(bytes[4] == std::byte{19});
 	CHECK(bytes[6] == std::byte{1});
 	for (size_t index = 0; index < 8; ++index) {
 		CHECK(bytes[8 + index] == std::byte(index + 1));
@@ -694,6 +695,52 @@ TEST_CASE(
 	layers.Opaque.DepthHash = Hasher::Of(layers.Opaque.Depth);
 	const auto count = GENERATE(0, 1, 2);
 	layers.Transparent.assign(count, layers.Opaque);
+	const bool overlay = GENERATE(false, true);
+	if (overlay) {
+		layers.SpatialOverlay = layers.Opaque;
+		layers.SpatialOverlay->Depth.clear();
+		layers.SpatialOverlay->DepthHash = {};
+	}
+	const auto lensMode = GENERATE(0, 1, 2);
+	const bool lenses = lensMode != 0;
+	const bool programs = lensMode == 2;
+	if (lenses) {
+		layers.Lenses.TimeSeconds = 12.5f;
+		PortalCaptureLens first;
+		first.Shader = "RoomLens";
+		first.ProgramHash = Hasher::Of(layers.Opaque.Pixels);
+		if (programs) {
+			PortalCaptureLensProgram program;
+			program.SpirV = {0x07230203, 0x00010000, 0, 1, 0};
+			program.Hash = Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+			first.ProgramHash = program.Hash;
+			layers.Lenses.Programs.push_back(std::move(program));
+		}
+		first.Position = {3, 2, 1};
+		first.Spin = -2;
+		first.Priority = -4;
+		layers.Lenses.Entries.push_back(first);
+		first.Shader = "EarlierName";
+		first.Orientation = {0, 1, 0, 0};
+		first.Strength = 0;
+		layers.Lenses.Entries.push_back(first);
+	}
+	const auto skipLenses = [](engine::core::ByteReader &reader) {
+		const auto count = reader.ReadUInt8();
+		reader.ReadFloat();
+		const auto programs = reader.ReadUInt8();
+		for (size_t index = 0; index < programs; ++index) {
+			reader.ReadRawView(32);
+			const auto words = reader.ReadUInt32();
+			reader.ReadRawView(size_t(words) * 4);
+		}
+		for (size_t index = 0; index < count; ++index) {
+			reader.ReadRawView(7 * 4);
+			reader.ReadString();
+			reader.ReadRawView(32 + 6 * 4 + 1);
+		}
+		REQUIRE_FALSE(reader.Failed());
+	};
 	std::vector<std::byte> wire;
 	std::string error;
 	REQUIRE(ValidPortalImageLayerSet(layers));
@@ -755,14 +802,15 @@ TEST_CASE(
 		CHECK_FALSE(EncodePortalImageLayerSet(bad, preserved, error));
 		CHECK(preserved == wire);
 	}
-	if (count != 0) {
+	if (count != 0 && !overlay) {
 		// Re-encode an individually valid member with different capture metadata.
 		// Its own digest is valid, so the group decoder must enforce the cohort.
 		engine::core::ByteReader envelope(wire);
 		envelope.ReadRawView(8);
 		envelope.ReadUInt64();
 		envelope.ReadString();
-		envelope.ReadRawView(8 + 8 + 4 + 4 + 1);
+		envelope.ReadRawView(8 + 8 + 4 + 4 + 2);
+		skipLenses(envelope);
 		for (int member = 0; member < count; ++member) {
 			const auto length = envelope.ReadUInt32();
 			envelope.ReadRawView(length);
@@ -783,6 +831,268 @@ TEST_CASE(
 			malformed.WriteRaw(member.data(), member.size());
 			CHECK_FALSE(DecodePortalImageLayerSet(malformed.Bytes(), decoded, error));
 			CHECK(decoded == layers);
+		}
+	}
+	if (overlay) {
+		engine::core::ByteReader envelope(wire);
+		envelope.ReadRawView(8);
+		envelope.ReadUInt64();
+		envelope.ReadString();
+		envelope.ReadRawView(8 + 8 + 4 + 4 + 2);
+		skipLenses(envelope);
+		for (int member = 0; member <= count; ++member) {
+			const auto length = envelope.ReadUInt32();
+			envelope.ReadRawView(length);
+		}
+		const auto prefix = std::span(wire).first(wire.size() - envelope.Remaining());
+		for (int invalid = 0; invalid < 9; ++invalid) {
+			auto bad = layers;
+			auto &image = *bad.SpatialOverlay;
+			if (invalid == 0) image.CaptureTick++;
+			if (invalid == 1) image.Key.CameraRevision++;
+			if (invalid == 2) image.ContentRevision++;
+			if (invalid == 3) image.LightingRevision++;
+			if (invalid == 4) image.CaptureLighting.emplace();
+			if (invalid == 5) image.Depth = layers.Opaque.Depth;
+			if (invalid == 6) image.Pixels[7] = std::byte{0x40};
+			if (invalid == 7) {
+				image.Pixels[6] = image.Pixels[7] = std::byte{};
+				image.Pixels[0] = std::byte{1};
+			}
+			if (invalid == 8) image.Pixels.pop_back();
+			image.PixelHash = Hasher::Of(image.Pixels);
+			auto preserved = wire;
+			CHECK_FALSE(ValidPortalImageLayerSet(bad));
+			CHECK_FALSE(EncodePortalImageLayerSet(bad, preserved, error));
+			CHECK(preserved == wire);
+			if (invalid == 8) continue;
+			if (!image.Depth.empty()) image.DepthHash = Hasher::Of(image.Depth);
+			std::vector<std::byte> member;
+			REQUIRE(EncodePortalImageReply(image, member, error));
+			engine::core::ByteWriter malformed;
+			malformed.WriteRaw(prefix.data(), prefix.size());
+			malformed.WriteUInt32(static_cast<uint32_t>(member.size()));
+			malformed.WriteRaw(member.data(), member.size());
+			CHECK_FALSE(DecodePortalImageLayerSet(malformed.Bytes(), decoded, error));
+			CHECK(decoded == layers);
+		}
+	}
+	if (lenses) {
+		for (int invalid = 0; invalid < 17; ++invalid) {
+			auto bad = layers;
+			auto &lens = bad.Lenses.Entries.front();
+			if (invalid == 0) lens.Shader.clear();
+			if (invalid == 1) lens.Shader.assign(257, 'x');
+			if (invalid == 2) lens.Shader = std::string("bad\0name", 8);
+			if (invalid == 3) lens.ProgramHash = {};
+			if (invalid == 4) lens.Position[1] = std::numeric_limits<float>::infinity();
+			if (invalid == 5) lens.Orientation = {};
+			if (invalid == 6) lens.Radius = 0;
+			if (invalid == 7) lens.InnerRadius = -1;
+			if (invalid == 8) lens.InnerRadius = lens.Radius + 1;
+			if (invalid == 9) lens.Falloff = 1.1f;
+			if (invalid == 10) lens.Strength = -1;
+			if (invalid == 11) lens.Spin = std::numeric_limits<float>::quiet_NaN();
+			if (invalid == 12) lens.Shape = 1;
+			if (invalid == 13) bad.Lenses.TimeSeconds = std::numeric_limits<float>::infinity();
+			if (invalid == 14) bad.Lenses.Entries.resize(MAX_PORTAL_CAPTURE_LENSES + 1, lens);
+			if (invalid == 15) bad.Lenses.Entries.clear();
+			if (invalid == 16) lens.Falloff = -1;
+			auto preserved = wire;
+			CHECK_FALSE(ValidPortalCaptureLenses(bad.Lenses));
+			CHECK_FALSE(ValidPortalImageLayerSet(bad));
+			CHECK_FALSE(EncodePortalImageLayerSet(bad, preserved, error));
+			CHECK(preserved == wire);
+		}
+		const size_t metadataOffset = 8 + 8 + 4 + layers.Opaque.Key.PortalKey.size() + 8 + 8 + 4 + 4 + 2;
+		const size_t lensOffset = metadataOffset + 6 + (programs ? 32 + 4 + 5 * 4 : 0);
+		const size_t hashOffset = lensOffset + 7 * 4 + 4 + layers.Lenses.Entries.front().Shader.size();
+		for (int invalid = 0; invalid < 12; ++invalid) {
+			auto malformed = wire;
+			engine::core::ByteWriter replacement;
+			size_t offset = 0;
+			if (invalid == 0) {
+				offset = metadataOffset;
+				replacement.WriteUInt8(MAX_PORTAL_CAPTURE_LENSES + 1);
+			}
+			if (invalid == 1) {
+				offset = metadataOffset + 1;
+				replacement.WriteFloat(std::numeric_limits<float>::quiet_NaN());
+			}
+			if (invalid == 2) {
+				offset = lensOffset;
+				replacement.WriteFloat(std::numeric_limits<float>::infinity());
+			}
+			if (invalid == 3) {
+				offset = lensOffset + 6 * 4;
+				replacement.WriteFloat(0);
+			}
+			if (invalid == 4) {
+				offset = lensOffset + 7 * 4;
+				replacement.WriteUInt32(257);
+			}
+			if (invalid == 5) {
+				offset = hashOffset;
+				for (int index = 0; index < 32; ++index)
+					replacement.WriteUInt8(0);
+			}
+			if (invalid >= 6 && invalid <= 10) {
+				offset = hashOffset + 32 + (invalid - 6) * 4;
+				const std::array<float, 5> values{0, 17, 2, -1, std::numeric_limits<float>::infinity()};
+				replacement.WriteFloat(values[invalid - 6]);
+			}
+			if (invalid == 11) {
+				offset = hashOffset + 32 + 6 * 4;
+				replacement.WriteUInt8(1);
+			}
+			std::copy(replacement.Bytes().begin(), replacement.Bytes().end(), malformed.begin() + offset);
+			CHECK_FALSE(DecodePortalImageLayerSet(malformed, decoded, error));
+			CHECK(decoded == layers);
+			if (count == 2)
+				CHECK_FALSE(MatchPortalImageLayerSet(
+					malformed, layers.Opaque.Key, layers.Opaque.Width, layers.Opaque.Height
+				));
+		}
+
+		if (programs) {
+			for (int invalid = 0; invalid < 10; ++invalid) {
+				auto bad = layers;
+				auto &program = bad.Lenses.Programs.front();
+				if (invalid == 0) program.Hash = {};
+				if (invalid == 1) {
+					program.SpirV[0] = 0;
+					program.Hash = Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+					for (auto &lens : bad.Lenses.Entries)
+						lens.ProgramHash = program.Hash;
+				}
+				if (invalid == 2) {
+					program.SpirV.resize(4);
+					program.Hash = Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+					for (auto &lens : bad.Lenses.Entries)
+						lens.ProgramHash = program.Hash;
+				}
+				if (invalid == 3) program.SpirV[2]++;
+				if (invalid == 4) bad.Lenses.Programs.push_back(program);
+				if (invalid == 5) {
+					auto unused = program;
+					unused.SpirV[2]++;
+					unused.Hash = Hasher::Of(std::as_bytes(std::span(unused.SpirV)));
+					bad.Lenses.Programs.push_back(std::move(unused));
+				}
+				if (invalid == 6) bad.Lenses.Entries.front().ProgramHash = layers.Opaque.PixelHash;
+				if (invalid == 7) program.SpirV.resize(MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES / 4 + 1);
+				if (invalid == 8) bad.Lenses.Programs.resize(MAX_PORTAL_CAPTURE_LENSES + 1, program);
+				if (invalid == 9) {
+					bad.Lenses.Entries.clear();
+					bad.Lenses.TimeSeconds = 0;
+				}
+				auto preserved = wire;
+				CHECK_FALSE(ValidPortalCaptureLenses(bad.Lenses));
+				CHECK_FALSE(EncodePortalImageLayerSet(bad, preserved, error));
+				CHECK(preserved == wire);
+			}
+			const size_t programOffset = metadataOffset + 6;
+			for (int invalid = 0; invalid < 8; ++invalid) {
+				auto malformed = wire;
+				if (invalid == 0) malformed[metadataOffset + 5] = std::byte{17};
+				if (invalid == 1) std::fill_n(malformed.begin() + programOffset + 32, 4, std::byte{255});
+				if (invalid == 2) malformed[programOffset + 32] = std::byte{4};
+				if (invalid == 3) malformed[programOffset + 36] ^= std::byte{1};
+				if (invalid == 4) malformed[programOffset] ^= std::byte{1};
+				if (invalid == 5) malformed[hashOffset] ^= std::byte{1};
+				if (invalid == 6) {
+					malformed[metadataOffset + 5] = std::byte{2};
+					malformed.insert(
+						malformed.begin() + lensOffset,
+						wire.begin() + programOffset,
+						wire.begin() + lensOffset
+					);
+				}
+				if (invalid == 7) {
+					auto unused = layers.Lenses.Programs.front();
+					unused.SpirV[2]++;
+					unused.Hash = Hasher::Of(std::as_bytes(std::span(unused.SpirV)));
+					engine::core::ByteWriter dictionary;
+					dictionary.WriteRaw(unused.Hash.Digest.data(), unused.Hash.Digest.size());
+					dictionary.WriteUInt32(static_cast<uint32_t>(unused.SpirV.size()));
+					for (const auto word : unused.SpirV)
+						dictionary.WriteUInt32(word);
+					malformed[metadataOffset + 5] = std::byte{2};
+					malformed.insert(
+						malformed.begin() + lensOffset, dictionary.Bytes().begin(), dictionary.Bytes().end()
+					);
+				}
+				CHECK_FALSE(DecodePortalImageLayerSet(malformed, decoded, error));
+				CHECK(decoded == layers);
+				if (count == 2)
+					CHECK_FALSE(MatchPortalImageLayerSet(
+						malformed, layers.Opaque.Key, layers.Opaque.Width, layers.Opaque.Height
+					));
+			}
+			if (count == 2 && !overlay) {
+				auto bounded = layers;
+				auto &program = bounded.Lenses.Programs.front();
+				program.SpirV.resize(MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES / 4);
+				program.Hash = Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+				for (auto &lens : bounded.Lenses.Entries)
+					lens.ProgramHash = program.Hash;
+				std::vector<std::byte> boundedWire;
+				REQUIRE(EncodePortalImageLayerSet(bounded, boundedWire, error));
+				PortalImageLayerSet boundedDecoded;
+				REQUIRE(DecodePortalImageLayerSet(boundedWire, boundedDecoded, error));
+				CHECK(boundedDecoded == bounded);
+				const auto match = MatchPortalImageLayerSet(
+					boundedWire, bounded.Opaque.Key, bounded.Opaque.Width, bounded.Opaque.Height
+				);
+				REQUIRE(match);
+				CHECK(match->MetadataBytes == PortalCaptureLensBytes(bounded.Lenses));
+				// Valid individual programs can still exceed the aggregate code allowance.
+				auto overWire = boundedWire;
+				overWire[metadataOffset + 5] = std::byte{2};
+				overWire.insert(
+					overWire.begin() + programOffset + 36 + MAX_PORTAL_CAPTURE_LENS_PROGRAM_BYTES,
+					wire.begin() + programOffset,
+					wire.begin() + lensOffset
+				);
+				CHECK_FALSE(MatchPortalImageLayerSet(
+					overWire, bounded.Opaque.Key, bounded.Opaque.Width, bounded.Opaque.Height
+				));
+				CHECK_FALSE(DecodePortalImageLayerSet(overWire, boundedDecoded, error));
+				CHECK(boundedDecoded == bounded);
+				bounded.Lenses.Programs.push_back(layers.Lenses.Programs.front());
+				bounded.Lenses.Entries.back().ProgramHash = bounded.Lenses.Programs.back().Hash;
+				CHECK_FALSE(ValidPortalCaptureLenses(bounded.Lenses));
+				CHECK_FALSE(EncodePortalImageLayerSet(bounded, boundedWire, error));
+				auto dictionary = layers;
+				dictionary.Lenses.Programs.clear();
+				dictionary.Lenses.Entries.clear();
+				for (size_t index = 0; index < MAX_PORTAL_CAPTURE_LENSES; ++index) {
+					auto program = layers.Lenses.Programs.front();
+					program.SpirV[2] = static_cast<uint32_t>(index);
+					program.Hash = Hasher::Of(std::as_bytes(std::span(program.SpirV)));
+					auto lens = layers.Lenses.Entries.front();
+					lens.ProgramHash = program.Hash;
+					dictionary.Lenses.Entries.push_back(std::move(lens));
+					dictionary.Lenses.Programs.push_back(std::move(program));
+				}
+				REQUIRE(EncodePortalImageLayerSet(dictionary, boundedWire, error));
+				REQUIRE(DecodePortalImageLayerSet(boundedWire, boundedDecoded, error));
+				CHECK(boundedDecoded == dictionary);
+			}
+		}
+		auto maximum = layers;
+		maximum.Lenses.Entries.resize(MAX_PORTAL_CAPTURE_LENSES, layers.Lenses.Entries.front());
+		std::vector<std::byte> maximumWire;
+		REQUIRE(EncodePortalImageLayerSet(maximum, maximumWire, error));
+		PortalImageLayerSet maximumDecoded;
+		REQUIRE(DecodePortalImageLayerSet(maximumWire, maximumDecoded, error));
+		CHECK(maximumDecoded == maximum);
+		if (count == 2) {
+			const auto match = MatchPortalImageLayerSet(
+				maximumWire, layers.Opaque.Key, layers.Opaque.Width, layers.Opaque.Height
+			);
+			REQUIRE(match);
+			CHECK(match->MetadataBytes == PortalCaptureLensBytes(maximum.Lenses));
 		}
 	}
 	// Deterministic byte mutations also exercise malformed nested prefixes and digests.
@@ -807,7 +1117,9 @@ TEST_CASE(
 	"[render][portal-exchange][portal-layers]"
 ) {
 	const auto transparent = GENERATE(0u, 1u, 2u);
-	const uint32_t extent = transparent == 0 ? 512 : transparent == 1 ? 362 : 295;
+	const bool overlay = GENERATE(false, true);
+	const std::array<uint32_t, 4> extents{512, 362, 295, 256};
+	const uint32_t extent = extents[transparent + overlay];
 	PortalImageLayerSet layers;
 	layers.Opaque = Reply();
 	layers.Opaque.Scope = PortalImageScope::OpaqueLighting;
@@ -823,6 +1135,11 @@ TEST_CASE(
 	layers.Opaque.PixelHash = Hasher::Of(layers.Opaque.Pixels);
 	layers.Opaque.DepthHash = Hasher::Of(layers.Opaque.Depth);
 	layers.Transparent.assign(transparent, layers.Opaque);
+	if (overlay) {
+		layers.SpatialOverlay = layers.Opaque;
+		layers.SpatialOverlay->Depth.clear();
+		layers.SpatialOverlay->DepthHash = {};
+	}
 	std::vector<std::byte> wire;
 	std::string error;
 	REQUIRE(EncodePortalImageLayerSet(layers, wire, error));
@@ -831,7 +1148,23 @@ TEST_CASE(
 	REQUIRE(DecodePortalImageLayerSet(wire, decoded, error));
 	CHECK(decoded == layers);
 	const auto preserved = wire;
-	layers.Opaque.Width++;
+	const auto enlarge = [](PortalImageReply &image) {
+		const bool paired = !image.Depth.empty();
+		++image.Width;
+		++image.Height;
+		image.RowStride = image.Width * 8;
+		image.Pixels.assign(size_t(image.Width) * image.Height * 8, std::byte{});
+		image.PixelHash = Hasher::Of(image.Pixels);
+		if (paired) {
+			image.Depth.assign(size_t(image.Width) * image.Height * 4, std::byte{});
+			image.DepthHash = Hasher::Of(image.Depth);
+		}
+	};
+	enlarge(layers.Opaque);
+	for (auto &layer : layers.Transparent)
+		enlarge(layer);
+	if (layers.SpatialOverlay) enlarge(*layers.SpatialOverlay);
+	CHECK_FALSE(ValidPortalImageLayerSet(layers));
 	CHECK_FALSE(EncodePortalImageLayerSet(layers, wire, error));
 	CHECK(wire == preserved);
 	// The outer dimensions gate total expansion before any nested decode.
@@ -860,7 +1193,7 @@ TEST_CASE("ordered portal requests charge the overflow capture", "[render][porta
 		if (invalid == 0) --bad.PixelBudget;
 		if (invalid == 1) ++bad.Width;
 		if (invalid == 2) bad.Scope = PortalImageScope::CompleteWorld;
-		if (invalid == 3) bad.RecursionDepth = 1;
+		if (invalid == 3) bad.RecursionDepth = MAX_PORTAL_CAPTURE_TREE_DEPTH + 1;
 		if (invalid == 4) bad.KnownImage = PortalImageVersion{1, 2};
 		auto output = wire;
 		CHECK_FALSE(EncodePortalImageRequest(bad, output, error));
@@ -882,4 +1215,363 @@ TEST_CASE("ordered portal requests charge the overflow capture", "[render][porta
 	old[4] = std::byte{11};
 	CHECK_FALSE(DecodePortalImageRequest(old, decoded, error));
 	CHECK(decoded == request);
+}
+
+TEST_CASE(
+	"ordered portal requests admit bounded recursive capture trees",
+	"[render][portal-exchange][portal-layers]"
+) {
+	auto request = Request();
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = true;
+	request.RecursionDepth = MAX_PORTAL_CAPTURE_TREE_DEPTH;
+	request.PixelBudget = MAX_PORTAL_IMAGE_PIXELS;
+	std::string error;
+	std::vector<std::byte> wire;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	PortalImageRequest decoded;
+	REQUIRE(DecodePortalImageRequest(wire, decoded, error));
+	CHECK(decoded == request);
+}
+
+TEST_CASE(
+	"portal ambient planes round trip and reject malformed samples transactionally",
+	"[render][portal-exchange]"
+) {
+	auto reply = Reply();
+	reply.Scope = PortalImageScope::OpaqueLighting;
+	reply.CaptureLighting.emplace();
+	const bool compressed = GENERATE(false, true);
+	const bool directional = GENERATE(false, true);
+	if (compressed) {
+		reply.Width = reply.Height = 32;
+		reply.RowStride = reply.Width * 8;
+		reply.Pixels.assign(size_t(reply.RowStride) * reply.Height, std::byte{});
+		reply.PixelHash = Hasher::Of(reply.Pixels);
+	}
+	const size_t pixels = size_t(reply.Width) * reply.Height;
+	reply.Depth.assign(pixels * 4, std::byte{});
+	reply.DepthHash = Hasher::Of(reply.Depth);
+	reply.Normal.assign(pixels * 4, std::byte{255});
+	reply.NormalHash = Hasher::Of(reply.Normal);
+	engine::core::ByteWriter response;
+	for (size_t i = 0; i < pixels; ++i) {
+		response.WriteFloat(0.25f);
+		response.WriteFloat(1);
+		response.WriteFloat(2);
+		response.WriteFloat(0.5f);
+	}
+	reply.AmbientResponse.assign(response.Bytes().begin(), response.Bytes().end());
+	reply.AmbientResponseHash = Hasher::Of(reply.AmbientResponse);
+	reply.LightingBaseline = reply.AmbientResponse;
+	reply.LightingBaselineHash = Hasher::Of(reply.LightingBaseline);
+	if (directional) {
+		reply.DirectionalResponse = reply.AmbientResponse;
+		reply.DirectionalResponseHash = Hasher::Of(reply.DirectionalResponse);
+	}
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageReply(reply, wire, error));
+	if (compressed) CHECK(wire.size() < reply.AmbientResponse.size());
+	const auto measured = MatchPortalImageReply(wire, reply.Key, reply.Width, reply.Height, reply.Scope);
+	REQUIRE(measured);
+	CHECK(measured->AmbientBytes == pixels * (directional ? 52 : 36));
+	PortalImageReply decoded;
+	REQUIRE(DecodePortalImageReply(wire, decoded, error));
+	CHECK(decoded == reply);
+	for (size_t size = 0; size < wire.size(); ++size) {
+		CHECK_FALSE(DecodePortalImageReply(std::span(wire).first(size), decoded, error));
+		CHECK(decoded == reply);
+	}
+	auto corrupt = wire;
+	corrupt.back() ^= std::byte{1};
+	CHECK_FALSE(DecodePortalImageReply(corrupt, decoded, error));
+	CHECK(decoded == reply);
+	if (!compressed) {
+		// Rehash invalid raw samples so content validation, not the digest, must refuse them.
+		for (const auto &[component, value] : std::array<std::pair<size_t, float>, 3>{
+				 {{0, std::numeric_limits<float>::quiet_NaN()}, {1, -1}, {3, 1.01f}}
+			 }) {
+			corrupt = wire;
+			engine::core::ByteWriter sample;
+			sample.WriteFloat(value);
+			const auto start = corrupt.size() - (directional ? 36 + reply.DirectionalResponse.size() : 0) -
+							   reply.LightingBaseline.size() - 36 - reply.AmbientResponse.size();
+			std::copy(sample.Bytes().begin(), sample.Bytes().end(), corrupt.begin() + start + component * 4);
+			const auto hash = Hasher::Of(std::span(corrupt).subspan(start, reply.AmbientResponse.size()));
+			std::transform(
+				hash.Digest.begin(), hash.Digest.end(), corrupt.begin() + start - 36, [](uint8_t value) {
+					return std::byte{value};
+				}
+			);
+			CHECK_FALSE(DecodePortalImageReply(corrupt, decoded, error));
+			CHECK(decoded == reply);
+		}
+	}
+	if (!compressed) {
+		corrupt = wire;
+		engine::core::ByteWriter sample;
+		sample.WriteFloat(std::numeric_limits<float>::quiet_NaN());
+		const auto start = corrupt.size() - (directional ? 36 + reply.DirectionalResponse.size() : 0) -
+						   reply.LightingBaseline.size();
+		std::copy(sample.Bytes().begin(), sample.Bytes().end(), corrupt.begin() + start);
+		const auto hash = Hasher::Of(std::span(corrupt).subspan(start, reply.LightingBaseline.size()));
+		std::transform(
+			hash.Digest.begin(), hash.Digest.end(), corrupt.begin() + start - 36, [](uint8_t value) {
+				return std::byte{value};
+			}
+		);
+		CHECK_FALSE(DecodePortalImageReply(corrupt, decoded, error));
+		CHECK(decoded == reply);
+	}
+	for (int fault = 0; fault < 9; ++fault) {
+		auto invalid = reply;
+		switch (fault) {
+		case 0:
+			invalid.Normal.clear();
+			invalid.NormalHash = {};
+			break;
+		case 1:
+			invalid.AmbientResponse.clear();
+			invalid.AmbientResponseHash = {};
+			break;
+		case 2:
+			invalid.Depth.clear();
+			invalid.DepthHash = {};
+			break;
+		case 3:
+			invalid.CaptureLighting.reset();
+			break;
+		case 4:
+			invalid.Scope = PortalImageScope::CompleteWorld;
+			break;
+		case 5:
+			invalid = {};
+			invalid.Key = reply.Key;
+			invalid.Status = PortalImageStatus::Failed;
+			invalid.Diagnostic = "capture failed";
+			invalid.Normal = reply.Normal;
+			invalid.NormalHash = reply.NormalHash;
+			invalid.AmbientResponse = reply.AmbientResponse;
+			invalid.AmbientResponseHash = reply.AmbientResponseHash;
+			break;
+		case 6:
+			invalid.Normal.pop_back();
+			invalid.NormalHash = Hasher::Of(invalid.Normal);
+			break;
+		case 8:
+			invalid.LightingBaseline.clear();
+			invalid.LightingBaselineHash = {};
+			break;
+		case 7:
+			invalid.LightingBaseline.clear();
+			invalid.Normal.clear();
+			invalid.AmbientResponse.clear();
+			break;
+		}
+		auto unchanged = wire;
+		CHECK_FALSE(EncodePortalImageReply(invalid, unchanged, error));
+		CHECK(unchanged == wire);
+	}
+}
+
+TEST_CASE(
+	"directional response rejects malformed hash-valid samples and flags", "[render][portal-exchange]"
+) {
+	auto reply = Reply();
+	reply.Scope = PortalImageScope::OpaqueLighting;
+	reply.CaptureLighting.emplace();
+	const size_t pixels = size_t(reply.Width) * reply.Height;
+	reply.Depth.assign(pixels * 4, std::byte{});
+	reply.DepthHash = Hasher::Of(reply.Depth);
+	reply.Normal.assign(pixels * 4, std::byte{});
+	reply.NormalHash = Hasher::Of(reply.Normal);
+	reply.AmbientResponse.assign(pixels * 16, std::byte{});
+	reply.AmbientResponseHash = Hasher::Of(reply.AmbientResponse);
+	reply.LightingBaseline = reply.AmbientResponse;
+	reply.LightingBaselineHash = Hasher::Of(reply.LightingBaseline);
+	reply.DirectionalResponse = reply.AmbientResponse;
+	engine::core::ByteWriter negativeZero;
+	negativeZero.WriteFloat(-0.f);
+	std::copy(negativeZero.Bytes().begin(), negativeZero.Bytes().end(), reply.DirectionalResponse.begin());
+	reply.DirectionalResponseHash = Hasher::Of(reply.DirectionalResponse);
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageReply(reply, wire, error));
+	PortalImageReply decoded;
+	REQUIRE(DecodePortalImageReply(wire, decoded, error));
+	CHECK(decoded == reply);
+	for (const auto &[component, value] : std::array<std::pair<size_t, float>, 4>{
+			 {{0, std::numeric_limits<float>::quiet_NaN()},
+			  {1, std::numeric_limits<float>::infinity()},
+			  {2, -1.f},
+			  {3, 1.01f}}
+		 }) {
+		auto corrupt = wire;
+		engine::core::ByteWriter sample;
+		sample.WriteFloat(value);
+		const auto start = corrupt.size() - reply.DirectionalResponse.size();
+		std::copy(sample.Bytes().begin(), sample.Bytes().end(), corrupt.begin() + start + component * 4);
+		const auto hash = Hasher::Of(std::span(corrupt).subspan(start));
+		std::transform(
+			hash.Digest.begin(), hash.Digest.end(), corrupt.begin() + start - 36, [](uint8_t byte) {
+				return std::byte{byte};
+			}
+		);
+		CHECK_FALSE(DecodePortalImageReply(corrupt, decoded, error));
+		CHECK(decoded == reply);
+	}
+	PortalImageLayerSet layers;
+	layers.Opaque = reply;
+	auto transparent = reply;
+	transparent.Pixels.assign(transparent.Pixels.size(), std::byte{});
+	transparent.PixelHash = Hasher::Of(transparent.Pixels);
+	transparent.DirectionalResponse.clear();
+	transparent.DirectionalResponseHash = {};
+	layers.Transparent.push_back(transparent);
+	REQUIRE(ValidPortalImageLayerSet(layers));
+	layers.Transparent[0].DirectionalResponse = reply.DirectionalResponse;
+	layers.Transparent[0].DirectionalResponseHash = reply.DirectionalResponseHash;
+	CHECK_FALSE(ValidPortalImageLayerSet(layers));
+	std::vector<std::byte> layerWire;
+	CHECK_FALSE(EncodePortalImageLayerSet(layers, layerWire, error));
+	const size_t encodingOffset = 8 + 8 + 4 + reply.Key.PortalKey.size() + 8 + 8 + 2;
+	for (const uint16_t flags : {uint16_t(512 | 26), uint16_t(256 | 10), uint16_t(1024 | 282)}) {
+		auto corrupt = wire;
+		corrupt[encodingOffset] = std::byte(flags & 255);
+		corrupt[encodingOffset + 1] = std::byte(flags >> 8);
+		CHECK_FALSE(MatchPortalImageReply(corrupt, reply.Key, reply.Width, reply.Height, reply.Scope));
+		CHECK_FALSE(DecodePortalImageReply(corrupt, decoded, error));
+		CHECK(decoded == reply);
+	}
+	for (int fault = 0; fault < 4; ++fault) {
+		auto invalid = reply;
+		if (fault == 0) invalid.DirectionalResponse.pop_back();
+		if (fault == 1) invalid.DirectionalResponse.clear();
+		if (fault == 2) invalid.DirectionalResponseHash = {};
+		if (fault == 3) {
+			invalid.Normal.clear();
+			invalid.AmbientResponse.clear();
+			invalid.LightingBaseline.clear();
+		}
+		auto unchanged = wire;
+		CHECK_FALSE(EncodePortalImageReply(invalid, unchanged, error));
+		CHECK(unchanged == wire);
+	}
+}
+
+TEST_CASE("directional compressed payload preserves sample and wire limits", "[render][portal-exchange]") {
+	auto reply = Reply();
+	reply.Scope = PortalImageScope::OpaqueLighting;
+	reply.CaptureLighting.emplace();
+	reply.Width = reply.Height = 256;
+	reply.RowStride = reply.Width * 8;
+	const size_t pixels = size_t(reply.Width) * reply.Height;
+	reply.Pixels.assign(pixels * 8, std::byte{});
+	reply.Depth.assign(pixels * 4, std::byte{});
+	reply.Normal.assign(pixels * 4, std::byte{});
+	reply.AmbientResponse.assign(pixels * 16, std::byte{});
+	reply.LightingBaseline.assign(pixels * 16, std::byte{});
+	reply.DirectionalResponse.assign(pixels * 16, std::byte{});
+	reply.PixelHash = Hasher::Of(reply.Pixels);
+	reply.DepthHash = Hasher::Of(reply.Depth);
+	reply.NormalHash = Hasher::Of(reply.Normal);
+	reply.AmbientResponseHash = Hasher::Of(reply.AmbientResponse);
+	reply.LightingBaselineHash = Hasher::Of(reply.LightingBaseline);
+	reply.DirectionalResponseHash = Hasher::Of(reply.DirectionalResponse);
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageReply(reply, wire, error));
+	CHECK(wire.size() < MAX_PORTAL_EXCHANGE_BYTES);
+	PortalImageReply decoded;
+	REQUIRE(DecodePortalImageReply(wire, decoded, error));
+	CHECK(decoded == reply);
+	const auto measured = MatchPortalImageReply(wire, reply.Key, reply.Width, reply.Height, reply.Scope);
+	REQUIRE(measured);
+	CHECK(measured->AmbientBytes == pixels * 52);
+
+	// Default capture lighting has seventeen floats and an empty local-light list.
+	const size_t encodingOffset = 8 + 8 + 4 + reply.Key.PortalKey.size() + 8 + 8 + 2;
+	const size_t prefixBytes = encodingOffset + 2 + 4 + 3 * 8 + 3 * 4 + 17 * 4 + 1;
+	engine::core::ByteWriter raw;
+	raw.WriteRaw(wire.data(), prefixBytes);
+	for (const auto &plane :
+		 {reply.Pixels,
+		  reply.Depth,
+		  reply.Normal,
+		  reply.AmbientResponse,
+		  reply.LightingBaseline,
+		  reply.DirectionalResponse}) {
+		const auto hash = Hasher::Of(plane);
+		raw.WriteRaw(hash.Digest.data(), hash.Digest.size());
+		raw.WriteUInt32(static_cast<uint32_t>(plane.size()));
+		raw.WriteRaw(plane.data(), plane.size());
+	}
+	std::vector<std::byte> rawWire(raw.Bytes().begin(), raw.Bytes().end());
+	rawWire[encodingOffset] = std::byte{26};
+	rawWire[encodingOffset + 1] = std::byte{1};
+	REQUIRE(rawWire.size() > MAX_PORTAL_EXCHANGE_BYTES);
+	CHECK_FALSE(DecodePortalImageReply(rawWire, decoded, error));
+	CHECK_FALSE(MatchPortalImageReply(rawWire, reply.Key, reply.Width, reply.Height, reply.Scope));
+	CHECK(decoded == reply);
+
+	// Baseline permits negative finite values; response must refuse the same valid compressed frame.
+	engine::core::ByteWriter negative;
+	negative.WriteFloat(-1.f);
+	std::copy(negative.Bytes().begin(), negative.Bytes().end(), reply.LightingBaseline.begin());
+	reply.LightingBaselineHash = Hasher::Of(reply.LightingBaseline);
+	REQUIRE(EncodePortalImageReply(reply, wire, error));
+	engine::core::ByteReader payloads(wire);
+	payloads.ReadRawView(prefixBytes);
+	std::array<size_t, 7> offsets{};
+	for (size_t plane = 0; plane < 6; ++plane) {
+		offsets[plane] = payloads.Position();
+		payloads.ReadRawView(32);
+		const auto length = payloads.ReadUInt32();
+		payloads.ReadRawView(length);
+	}
+	offsets[6] = payloads.Position();
+	REQUIRE_FALSE(payloads.Failed());
+	REQUIRE(payloads.AtEnd());
+	REQUIRE((std::to_integer<unsigned>(wire[encodingOffset + 1]) & 2) != 0);
+	std::vector<std::byte> corrupt(wire.begin(), wire.begin() + offsets[5]);
+	corrupt.insert(corrupt.end(), wire.begin() + offsets[4], wire.begin() + offsets[5]);
+	const auto unchanged = decoded;
+	CHECK_FALSE(DecodePortalImageReply(corrupt, decoded, error));
+	CHECK(decoded == unchanged);
+}
+
+TEST_CASE(
+	"retained body exclusion is a distinct canonical ordered capture request",
+	"[render][portal-exchange][retained-body]"
+) {
+	auto request = Request();
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = true;
+	request.PixelBudget = request.Width * request.Height * 4;
+	request.EyePlayer = "17";
+	std::vector<std::byte> wire;
+	std::string error;
+	for (const std::string account : {"", "0", "91", "-9223372036854775808", "9223372036854775807"}) {
+		request.RetainedBodyPlayer = account;
+		REQUIRE(EncodePortalImageRequest(request, wire, error));
+		PortalImageRequest decoded;
+		REQUIRE(DecodePortalImageRequest(wire, decoded, error));
+		CHECK(decoded == request);
+		CHECK(decoded.EyePlayer == "17");
+	}
+	request.RetainedBodyPlayer = "91";
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	for (size_t length = 0; length < wire.size(); ++length) {
+		PortalImageRequest decoded = request;
+		CHECK_FALSE(DecodePortalImageRequest(std::span(wire).first(length), decoded, error));
+		CHECK(decoded == request);
+	}
+	for (const std::string account : {"01", "+1", "-0", "92x", "9223372036854775808"}) {
+		request.RetainedBodyPlayer = account;
+		CHECK_FALSE(EncodePortalImageRequest(request, wire, error));
+	}
+	request.RetainedBodyPlayer = "91";
+	request.OrderedLayers = false;
+	CHECK_FALSE(EncodePortalImageRequest(request, wire, error));
 }

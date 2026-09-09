@@ -23,6 +23,8 @@ namespace engine::world {
 		PresentationPeer &operator=(const PresentationPeer &) = delete;
 		PresentationStatus Apply(const PresentationDirectory &directory);
 		PresentationStatus Accept(const PresentationMessage &message);
+		// Exact live receipt ownership for the server's authenticated connection lookup.
+		bool OwnsReceipt(const PresentationAddress &alias) const;
 		std::vector<PresentationMessage> Take();
 		PresentationDirectory Routes() const;
 		void Close();

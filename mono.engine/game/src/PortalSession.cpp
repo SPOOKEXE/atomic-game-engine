@@ -69,6 +69,7 @@ namespace engine::game {
 			case PortalSessionKind::Resume:
 			case PortalSessionKind::Commit:
 			case PortalSessionKind::Proceed:
+			case PortalSessionKind::LeaseAdopted:
 			case PortalSessionKind::Crossed:
 				return ClaimValid(message.Claim);
 			case PortalSessionKind::Ready:
@@ -161,6 +162,7 @@ namespace engine::game {
 		case PortalSessionKind::Resume:
 		case PortalSessionKind::Commit:
 		case PortalSessionKind::Proceed:
+		case PortalSessionKind::LeaseAdopted:
 		case PortalSessionKind::Crossed:
 			WriteClaim(writer, message.Claim);
 			break;
@@ -204,6 +206,7 @@ namespace engine::game {
 		case PortalSessionKind::Resume:
 		case PortalSessionKind::Commit:
 		case PortalSessionKind::Proceed:
+		case PortalSessionKind::LeaseAdopted:
 		case PortalSessionKind::Crossed:
 			if (!ReadClaim(reader, message.Claim)) return false;
 			break;
@@ -286,6 +289,16 @@ namespace engine::game {
 			}
 		}
 		return false;
+	}
+
+	bool PortalSessionLeases::Adopted(
+		const PortalResume &claim, const assets::PublicKey &identity, double now
+	) const {
+		if (!std::isfinite(now)) return false;
+		return std::any_of(Entries.begin(), Entries.end(), [&](const Lease &lease) {
+			return lease.Committed && now < lease.Deadline && lease.Identity == identity &&
+				   SameClaim(lease.Claim, claim);
+		});
 	}
 
 	bool PortalSessionLeases::Reserved(uint64_t peer, double now) const {

@@ -11,7 +11,16 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/ShaderCompiler.hpp>
+#include <engine/render/ShaderLibrary.hpp>
+#include <engine/render/WorldView.hpp>
+#include <engine/scene/Materials.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/ShaderLens.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/testing/Suite.hpp>
+
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <cmath>
@@ -64,8 +73,8 @@ namespace {
 		return instance;
 	}
 
-	graph::PipelineDocument InstallPortalFixture(render::Renderer &renderer) {
-		auto document = graph::DefaultPbrDocument();
+	graph::PipelineDocument InstallPortalFixture(render::Renderer &renderer, bool hdr = false) {
+		auto document = hdr ? graph::DefaultWorldHdrDocument() : graph::DefaultPbrDocument();
 		const core::Name captureKind("portal-fixture-capture-boundary");
 		graph::NodeKindSpec capture;
 		capture.Kind = captureKind;
@@ -241,7 +250,7 @@ namespace {
 		CheckImage(
 			renderer,
 			std::string("portal-") + sample.Name + "-" + std::to_string(ambient),
-			"portaled",
+			"tonemapped",
 			inputs.str(),
 			expected,
 			observed,
@@ -407,8 +416,16 @@ TEST_CASE(
 					views[0].Portals = std::span(&portal, 1);
 					views[1].Instances = reference;
 					render::OverlayImage overlay;
+					// The exterior oracle is a separate render with no portal.
+					auto baseline = views[0];
+					baseline.Portals = {};
+					baseline.Damage.Scene = true;
+					fixture.Render.Render(std::span(&baseline, 1), overlay, interface.get(), false);
+					const auto before = CaptureResource(
+						fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+					);
 					const auto frame = fixture.Render.Render(views, overlay, interface.get(), false);
-					REQUIRE(frame.Ran(core::Name("portal-capture")));
+					REQUIRE(frame.Ran(core::Name("surface-capture")));
 					REQUIRE(frame.Ran(core::Name("portal-overlay")));
 					if (sample.MinimumInterior > 0) {
 						REQUIRE(frame.PortalPasses > 0);
@@ -423,14 +440,12 @@ TEST_CASE(
 							CHECK(extent.DrawnHeight == HEIGHT);
 						}
 					}
-					const auto before = CaptureResource(
-						fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
-					);
+
 					const auto unfolded = CaptureResource(
 						fixture.Render, core::Name("tonemapped"), 1, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 					);
 					const auto actual = CaptureResource(
-						fixture.Render, core::Name("portaled"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+						fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 					);
 					const std::string label = std::string(sample.Name) +
 											  (appearance == "material" ? "" : "-" + std::string(appearance));
@@ -513,17 +528,23 @@ TEST_CASE(
 		lights[0] = lights[1];
 		lights[0].Position.X += DESTINATION_X;
 		render::OverlayImage overlay;
-		const auto frame = fixture.Render.Render(views, overlay, nullptr, false);
-		REQUIRE(frame.Ran(core::Name("portal-capture")));
-		REQUIRE(frame.PortalPasses > 0);
+		// The exterior oracle is a separate render with no portal.
+		auto baseline = views[0];
+		baseline.Portals = {};
+		baseline.Damage.Scene = true;
+		fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false);
 		const auto before = CaptureResource(
 			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 		);
+		const auto frame = fixture.Render.Render(views, overlay, nullptr, false);
+		REQUIRE(frame.Ran(core::Name("surface-capture")));
+		REQUIRE(frame.PortalPasses > 0);
+
 		const auto unfolded = CaptureResource(
 			fixture.Render, core::Name("tonemapped"), 1, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 		);
 		const auto actual = CaptureResource(
-			fixture.Render, core::Name("portaled"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 		);
 		const auto hash = assets::Hasher::Of(actual.Bytes);
 		if (previous) {
@@ -546,4 +567,882 @@ TEST_CASE(
 			reference
 		);
 	}
+}
+
+TEST_CASE(
+	"portal material pipelines resolve each copied world's shader owner",
+	"[render][gpu][shader-owner-draw][.]"
+) {
+	bool transparent = false;
+	SECTION("opaque") {}
+	SECTION("transparent") {
+		transparent = true;
+	}
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render);
+	const core::Name first("shader:first"), second("shader:second"), foreign("shader:foreign");
+	const core::Name common("shader.common"), red("shader.reference.red"), green("shader.reference.green");
+	render::ShaderCompiler compiler;
+	const auto program = [&](const char *colour) {
+		const std::string source =
+			std::string("#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=") + colour +
+			";}\n";
+		auto compiled = compiler.Compile(source, render::ShaderStage::Fragment, "owner.frag");
+		INFO(compiled.Error);
+		REQUIRE_FALSE(compiled.Failed);
+		return compiled.SpirV;
+	};
+	const auto redWords = program("vec4(1,0,0,1)");
+	const auto greenWords = program("vec4(0,1,0,1)");
+	REQUIRE(fixture.Render.AddShader(red, redWords));
+	REQUIRE(fixture.Render.AddShader(green, greenWords));
+	REQUIRE(fixture.Render.AddShader(common, redWords));
+	REQUIRE(fixture.Render.AddShader(common, redWords, first));
+	const auto acceptedResources = fixture.Render.ResourceRevision();
+	REQUIRE(fixture.Render.AddShader(common, redWords, first));
+	CHECK(fixture.Render.ResourceRevision() == acceptedResources);
+	REQUIRE(fixture.Render.AddShader(common, greenWords, second));
+	CHECK(fixture.Render.HasShader(common, first));
+	CHECK_FALSE(fixture.Render.HasShader(common, core::Name("shader:absent")));
+	for (const auto owner : {first, second}) {
+		REQUIRE(fixture.Render.AddMesh(core::Name("portal.fixture.plane"), DoorwayPlane(), owner));
+		assets::TextureData white;
+		white.Width = white.Height = 1;
+		white.Pixels.assign(4, std::byte{255});
+		REQUIRE(fixture.Render.AddTexture(core::Name("portal.fixture.white"), white, owner));
+	}
+	std::array rows{
+		Plane(1, {DESTINATION_X - 10, 0, -4}, 10, 20, {1, 1, 1}),
+		Plane(2, {DESTINATION_X + 10, 0, -4}, 10, 20, {1, 1, 1}),
+		Plane(3, {}, HALF_WIDTH, HALF_HEIGHT, {.3f, .3f, .3f})
+	};
+	rows[0].Transparency = rows[1].Transparency = transparent ? .5f : 0;
+	rows[2].Surface = 0;
+	render::PortalView portal;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SceneTarget target{WIDTH, HEIGHT};
+	render::View view;
+	view.World = 955;
+	view.WorldName = core::Name("shader:native");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+	view.Camera.FieldOfViewRadians = 1.0471975512f;
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 64;
+	view.Instances = rows;
+	view.Portals = std::span(&portal, 1);
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	rows[0].Shader = red;
+	rows[1].Shader = green;
+	const auto expected = capture();
+	rows[0].Shader = green;
+	rows[1].Shader = red;
+	const auto reversed = capture();
+	REQUIRE_FALSE(CompareImages(expected.View(), reversed.View()).Passed());
+	rows[0].Shader = rows[1].Shader = common;
+	rows[1].SourceWorld = foreign;
+	std::array bindings{render::WorldContentOwner{foreign, second}};
+	view.ContentOwner = first;
+	view.ForeignContentOwners = bindings;
+	CHECK(CompareImages(expected.View(), capture().View()).Passed());
+	view.ContentOwner = second;
+	bindings[0].Owner = first;
+	view.Damage = {};
+	CHECK(CompareImages(reversed.View(), capture().View()).Passed());
+	REQUIRE(fixture.Render.AddShader(common, greenWords, first));
+	const auto replaced = capture();
+	CHECK_FALSE(CompareImages(reversed.View(), replaced.View()).Passed());
+	REQUIRE(fixture.Render.AddShader(common, redWords, first));
+	CHECK(CompareImages(reversed.View(), capture().View()).Passed());
+	CHECK_FALSE(fixture.Render.AddShader(common, {}, first));
+	CHECK(CompareImages(reversed.View(), capture().View()).Passed());
+	REQUIRE(fixture.Render.DropShader(common, first));
+	CHECK_FALSE(fixture.Render.HasShader(common, first));
+	CHECK(fixture.Render.HasShader(common, second));
+	CHECK(fixture.Render.HasShader(common));
+	const auto missing = capture();
+	CHECK_FALSE(CompareImages(reversed.View(), missing.View()).Passed());
+	REQUIRE(fixture.Render.AddShader(common, redWords, first));
+	CHECK(CompareImages(reversed.View(), capture().View()).Passed());
+	gui::RegisterGuiClasses();
+	scene::RegisterSceneClasses();
+	ecs::Store prepared("prepared.material");
+	const auto source = prepared.CreateInstance(scene::ShaderScriptClass(), common.Text());
+	const auto material = prepared.CreateInstance(scene::MaterialClass(), "Material");
+	prepared.GetMutable<scene::MaterialRef>(material)->Shader = common;
+	const auto redSource =
+		"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(1,0,0,1);}";
+	const auto greenSource =
+		"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(0,1,0,1);}";
+	REQUIRE(scene::SetShaderSource(prepared, source, redSource));
+	render::ShaderLibrary library;
+	const auto prepare = [&] {
+		return render::PrepareWorldShaders(prepared, first, library, fixture.Render);
+	};
+	prepare();
+	CHECK_FALSE(prepare());
+	CHECK(CompareImages(reversed.View(), capture().View()).Passed());
+	REQUIRE(scene::SetShaderSource(prepared, source, greenSource));
+	library.Refresh(prepared, first);
+	library.Refresh(prepared, first);
+	CHECK(prepare());
+	CHECK(CompareImages(replaced.View(), capture().View()).Passed());
+	REQUIRE(scene::SetShaderSource(prepared, source, "not a shader"));
+	CHECK_FALSE(prepare());
+	CHECK(CompareImages(replaced.View(), capture().View()).Passed());
+	prepared.GetMutable<scene::MaterialRef>(material)->Shader = {};
+	CHECK(prepare());
+	CHECK(CompareImages(missing.View(), capture().View()).Passed());
+	prepared.GetMutable<scene::MaterialRef>(material)->Shader = common;
+	REQUIRE(scene::SetShaderSource(prepared, source, redSource));
+	CHECK(prepare());
+	CHECK(CompareImages(reversed.View(), capture().View()).Passed());
+	const std::array survivingRows{rows[0], rows[2]};
+	view.Instances = survivingRows;
+	view.Damage.Scene = true;
+	const auto surviving = capture();
+	view.Instances = rows;
+	view.Damage = {};
+	fixture.Render.DropContentOwner(first);
+	CHECK_FALSE(fixture.Render.HasShader(common, first));
+	CHECK(fixture.Render.HasShader(common, second));
+	CHECK(fixture.Render.HasShader(common));
+	const auto retired = capture();
+	CheckImage(
+		fixture.Render,
+		"shader-owner-retirement",
+		transparent ? "transparent" : "opaque",
+		"owner-scoped material pipeline retirement",
+		surviving.View(),
+		retired.View()
+	);
+}
+
+TEST_CASE("lens pipelines stay within each view's content owner", "[render][gpu][lens-owner-draw][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto lensDocument = InstallPortalFixture(fixture.Render);
+	const core::Name first("lens:first"), second("lens:second"), name("lens.common");
+	render::ShaderCompiler compiler;
+	const auto compile = [&](const char *colour) {
+		const auto source =
+			std::string("#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=") + colour +
+			";}\n";
+		auto result = compiler.Compile(source, render::ShaderStage::Fragment, "lens-owner.frag");
+		INFO(result.Error);
+		REQUIRE_FALSE(result.Failed);
+		return result.SpirV;
+	};
+	const auto red = compile("vec4(1,0,0,1)");
+	const auto green = compile("vec4(0,1,0,1)");
+	REQUIRE(fixture.Render.AddLensShader(name, red));
+	REQUIRE(fixture.Render.AddLensShader(name, red, first));
+	const auto acceptedResources = fixture.Render.ResourceRevision();
+	REQUIRE(fixture.Render.AddLensShader(name, red, first));
+	CHECK(fixture.Render.ResourceRevision() == acceptedResources);
+	REQUIRE(fixture.Render.AddLensShader(name, green, second));
+	CHECK_FALSE(fixture.Render.HasLensShader(name, core::Name("absent")));
+	render::SceneTarget target{WIDTH, HEIGHT};
+	std::array<render::View, 2> views;
+	for (size_t slot = 0; slot < views.size(); ++slot) {
+		auto &view = views[slot];
+		view.World = 970 + slot;
+		view.WorldName = slot == 0 ? first : second;
+		view.Slot = slot;
+		view.Target = &target;
+		view.Pipeline = core::Name("portal.fixture.pbr");
+		view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+		view.Camera.NearPlane = .1f;
+		view.Camera.FarPlane = 64;
+		view.OverrideLighting = true;
+		view.Lighting.ShaderLensCount = 1;
+		view.Lighting.ShaderLenses[0].Shader = name;
+		view.Lighting.ShaderLenses[0].Radius = 100;
+		view.Lighting.ShaderLenses[0].Strength = 1;
+	}
+	render::OverlayImage overlay;
+	const auto draw = [&] { fixture.Render.Render(views, overlay, nullptr, false); };
+	const auto capture = [&](size_t slot) {
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	draw();
+	const auto expectedRed = capture(0);
+	REQUIRE(fixture.Render.AddLensShader(name, green));
+	draw();
+	const auto expectedGreen = capture(0);
+	REQUIRE_FALSE(CompareImages(expectedRed.View(), expectedGreen.View()).Passed());
+	views[0].ContentOwner = first;
+	views[1].ContentOwner = second;
+	for (auto &view : views)
+		view.Damage = {};
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(0).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	views[0].LensContentOwner = second;
+	views[1].LensContentOwner = first;
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	for (auto &view : views)
+		view.LensContentOwner.reset();
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(0).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	const core::Name timedName("lens.captured-time");
+	const auto timed = compiler.Compile(
+		R"glsl(#version 450
+layout(location=0) out vec4 colour;
+struct Lens {vec4 a;vec4 b;vec4 c;vec4 d;vec4 e;};
+layout(set=3,binding=0) uniform LensPass {mat4 vp;mat4 inverseVp;vec4 target;vec4 eye;vec4 timeCount;Lens lenses[16];} pass;
+void main(){colour=vec4(1-pass.timeCount.x,pass.timeCount.x,0,1);}
+)glsl",
+		render::ShaderStage::Fragment,
+		"lens-time.frag"
+	);
+	REQUIRE_FALSE(timed.Failed);
+	REQUIRE(fixture.Render.AddLensShader(timedName, timed.SpirV, first));
+	views[0].Lighting.ShaderLenses[0].Shader = timedName;
+	views[0].LensTimeSeconds = 0;
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(0).View()).Passed());
+	views[0].LensTimeSeconds = 1;
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	views[0].LensTimeSeconds = 0;
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(0).View()).Passed());
+	views[0].LensTimeSeconds.reset();
+	views[0].Lighting.ShaderLenses[0].Shader = name;
+
+	std::swap(views[0].ContentOwner, views[1].ContentOwner);
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	CHECK_FALSE(fixture.Render.AddLensShader(name, {}, first));
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	REQUIRE(fixture.Render.AddLensShader(name, green, first));
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	REQUIRE(fixture.Render.DropLensShader(name, first));
+	draw();
+	const auto missing = capture(1);
+	CHECK_FALSE(CompareImages(expectedGreen.View(), missing.View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	REQUIRE(fixture.Render.AddLensShader(name, red, first));
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	fixture.Render.DropContentOwner(first);
+	CHECK_FALSE(fixture.Render.HasLensShader(name, first));
+	CHECK(fixture.Render.HasLensShader(name, second));
+	CHECK(fixture.Render.HasLensShader(name));
+	draw();
+	CHECK(CompareImages(missing.View(), capture(1).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	gui::RegisterGuiClasses();
+	scene::RegisterSceneClasses();
+	ecs::Store prepared("prepared.lens");
+	const auto source = prepared.CreateInstance(scene::LensShaderClass(), name.Text());
+	const auto effect = prepared.CreateInstance(ecs::Classes::Find(core::Name("ShaderLens")), "Lens");
+	prepared.GetMutable<scene::ShaderLens>(effect)->Shader = name;
+	REQUIRE(
+		scene::SetShaderSource(
+			prepared,
+			source,
+			"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(1,0,0,1);}"
+		)
+	);
+	render::ShaderLibrary library;
+	const auto prepare = [&] {
+		return render::PrepareWorldShaders(prepared, first, library, fixture.Render);
+	};
+	CHECK(prepare());
+	CHECK_FALSE(prepare());
+	CHECK_FALSE(fixture.Render.HasShader(name, first));
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	REQUIRE(
+		scene::SetShaderSource(
+			prepared,
+			source,
+			"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(0,1,0,1);}"
+		)
+	);
+	library.RefreshLenses(prepared, first);
+	library.RefreshLenses(prepared, first);
+	CHECK(prepare());
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	REQUIRE(scene::SetShaderSource(prepared, source, "not a shader"));
+	CHECK_FALSE(prepare());
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	prepared.Destroy(source);
+	CHECK(prepare());
+	draw();
+	CHECK(CompareImages(missing.View(), capture(1).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+
+	// Compare graph compositions with one fused shader over the same scene.
+	// The swizzle and offsets make order observable without a tone-map oracle.
+	const core::Name scaleName("lens.chain.scale"), swizzleName("lens.chain.swizzle"),
+		fusedName("lens.chain.fused");
+	const auto compileSample = [&](const std::string &body) {
+		const auto source = std::string(R"(#version 450
+layout(location=0) in vec2 uv;
+layout(location=0) out vec4 colour;
+layout(set=2,binding=0) uniform sampler2D sceneColour;
+layout(set=2,binding=1) uniform sampler2D sceneDepth;
+void main(){vec3 value=texture(sceneColour,uv).rgb;
+)") + body + "colour=vec4(value,1);}\n";
+		auto result = compiler.Compile(source, render::ShaderStage::Fragment, "lens-chain.frag");
+		INFO(result.Error);
+		REQUIRE_FALSE(result.Failed);
+		return result.SpirV;
+	};
+	const std::string scale = "value=value*0.5+vec3(0.125,0.25,0.375);\n";
+	const std::string swizzle = "value=value.brg*0.5+vec3(0.5,0.125,0);\n";
+	REQUIRE(fixture.Render.AddLensShader(scaleName, compileSample(scale)));
+	REQUIRE(fixture.Render.AddLensShader(swizzleName, compileSample(swizzle)));
+	const auto install = [&](const graph::PipelineDocument &document) {
+		graph::RenderGraph graph;
+		core::Name offender;
+		REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
+		REQUIRE(fixture.Render.SetPipeline(core::Name("portal.fixture.pbr"), graph));
+	};
+	for (const bool repeated : {false, true}) {
+		graph::PipelineDocument chainDocument;
+		bool resourcesAdded = false;
+		bool lensSeen = false;
+		for (auto edit : lensDocument.Edits()) {
+			if (repeated && edit.Kind == graph::EditKind::AddNode && !resourcesAdded) {
+				for (const auto resource : {"lens-repeat-colour", "lens-repeat-scratch"})
+					chainDocument.Record(
+						{.Kind = graph::EditKind::AddResource,
+						 .Name = core::Name(resource),
+						 .Resource = graph::ResourceKind::Colour,
+						 .Format = graph::ResourceFormat::RGBA16F}
+					);
+				resourcesAdded = true;
+			}
+			if (repeated && edit.Kind == graph::EditKind::AddNode && lensSeen) {
+				chainDocument.Record(
+					{.Kind = graph::EditKind::AddNode,
+					 .Name = core::Name("lens-repeat"),
+					 .NodeKind = core::Name("shader-lenses"),
+					 .Scope = graph::NodeScope::View}
+				);
+				chainDocument.Record(
+					{.Kind = graph::EditKind::Reads,
+					 .Target = core::Name("lens-b"),
+					 .Key = core::Name("colour")}
+				);
+				chainDocument.Record(
+					{.Kind = graph::EditKind::Reads,
+					 .Target = core::Name("linear-depth"),
+					 .Key = core::Name("depth")}
+				);
+				chainDocument.Record(
+					{.Kind = graph::EditKind::Writes,
+					 .Target = core::Name("lens-repeat-colour"),
+					 .Key = core::Name("colour")}
+				);
+				chainDocument.Record(
+					{.Kind = graph::EditKind::Writes,
+					 .Target = core::Name("lens-repeat-scratch"),
+					 .Key = core::Name("scratch")}
+				);
+				lensSeen = false;
+			}
+			if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("shader-lenses"))
+				lensSeen = true;
+			if (repeated && edit.Kind == graph::EditKind::Reads && edit.Target == core::Name("lens-b"))
+				edit.Target = core::Name("lens-repeat-colour");
+			chainDocument.Record(edit);
+		}
+		for (uint32_t count = 0; count <= 3; ++count) {
+			CAPTURE(repeated, count);
+			std::string fused;
+			for (uint32_t pass = 0; pass < (repeated ? 2u : 1u); ++pass)
+				for (uint32_t lens = 0; lens < count; ++lens)
+					fused += lens == 1 ? swizzle : scale;
+			REQUIRE(fixture.Render.AddLensShader(fusedName, compileSample(fused)));
+			auto &view = views[0];
+			view.ContentOwner = {};
+			view.Lighting.ShaderLensCount = count == 0 ? 0 : 1;
+			view.Lighting.ShaderLenses[0].Shader = fusedName;
+			install(lensDocument);
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			const auto expected = capture(0);
+			view.Lighting.ShaderLensCount = count;
+			for (uint32_t lens = 0; lens < count; ++lens) {
+				view.Lighting.ShaderLenses[lens] = view.Lighting.ShaderLenses[0];
+				view.Lighting.ShaderLenses[lens].Shader = lens == 1 ? swizzleName : scaleName;
+			}
+			install(chainDocument);
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			CheckImage(
+				fixture.Render,
+				"lens-graph-chain",
+				repeated ? "repeated" : "single",
+				"authored lens order and graph output",
+				expected.View(),
+				capture(0).View(),
+				// Each graph step rounds to half precision before the final 8-bit output.
+				{.Absolute = 1.0 / 255.0}
+			);
+		}
+	}
+	const core::Name depthBoundary("lens-depth-capture-boundary");
+	graph::NodeKindSpec depthCapture;
+	depthCapture.Kind = depthBoundary;
+	depthCapture.Scope = graph::NodeScope::Frame;
+	depthCapture.Queue = graph::ExecutionQueue::Cpu;
+	depthCapture.Category = graph::NodeCategory::Output;
+	for (const auto resource : {"linear-depth", "lens-zero-depth"})
+		depthCapture.Inputs.push_back(
+			{.Name = core::Name(resource),
+			 .Kind = graph::ResourceKind::Colour,
+			 .Format = graph::ResourceFormat::R32F}
+		);
+	REQUIRE(graph::RegisterNodeKind(std::move(depthCapture)));
+	REQUIRE(fixture.Render.InstallNodeHandler(depthBoundary, [](const graph::RunContext &) { return true; }));
+	const core::Name depthName("lens.chain.depth");
+	REQUIRE(fixture.Render.AddLensShader(
+		depthName, compileSample("value=vec3(texture(sceneDepth,uv).r/64.0,0,0);\n")
+	));
+	for (const bool remapDepth : {false, true}) {
+		for (const uint32_t divisor : {1u, 2u}) {
+			CAPTURE(remapDepth, divisor);
+			graph::PipelineDocument depthDocument;
+			bool resourcesAdded = false;
+			bool inLens = false;
+			for (auto edit : lensDocument.Edits()) {
+				if (edit.Kind == graph::EditKind::AddResource &&
+					(edit.Name == core::Name("lens-b") || edit.Name == core::Name("lens-scratch")))
+					edit.Divisor = divisor;
+				if (edit.Kind == graph::EditKind::AddNode && !resourcesAdded) {
+					depthDocument.Record(
+						{.Kind = graph::EditKind::AddResource,
+						 .Name = core::Name("lens-zero-depth"),
+						 .Resource = graph::ResourceKind::Colour,
+						 .Format = graph::ResourceFormat::R32F,
+						 .Divisor = 2}
+					);
+					resourcesAdded = true;
+				}
+				if (edit.Kind == graph::EditKind::AddNode) {
+					inLens = edit.Name == core::Name("shader-lenses");
+					if (inLens) {
+						depthDocument.Record(
+							{.Kind = graph::EditKind::AddNode,
+							 .Name = core::Name("lens-depth-source"),
+							 .NodeKind = core::Name("depth-linearise"),
+							 .Scope = graph::NodeScope::View}
+						);
+						depthDocument.Record(
+							{.Kind = graph::EditKind::Reads,
+							 .Target = core::Name("depth"),
+							 .Key = core::Name("depth")}
+						);
+						depthDocument.Record(
+							{.Kind = graph::EditKind::Writes,
+							 .Target = core::Name("lens-zero-depth"),
+							 .Key = core::Name("linear")}
+						);
+						depthDocument.Record(
+							{.Kind = graph::EditKind::Set, .Key = core::Name("background"), .Value = "zero"}
+						);
+					}
+				}
+				if (remapDepth && inLens && edit.Kind == graph::EditKind::Reads &&
+					edit.Key == core::Name("depth"))
+					edit.Target = core::Name("lens-zero-depth");
+				depthDocument.Record(edit);
+			}
+			// Keep both depth images live so pool reuse cannot hide a wrong sampler binding.
+			depthDocument.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = depthBoundary,
+				 .NodeKind = depthBoundary,
+				 .Scope = graph::NodeScope::Frame}
+			);
+			for (const auto resource : {"linear-depth", "lens-zero-depth"})
+				depthDocument.Record(
+					{.Kind = graph::EditKind::Reads,
+					 .Target = core::Name(resource),
+					 .Key = core::Name(resource)}
+				);
+
+			auto &view = views[0];
+			view.Lighting.ShaderLensCount = 1;
+			view.Lighting.ShaderLenses[0].Shader = fusedName;
+			REQUIRE(fixture.Render.AddLensShader(
+				fusedName, compileSample(remapDepth ? "value=vec3(0);" : "value=vec3(1,0,0);")
+			));
+			install(lensDocument);
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			const auto expected = capture(0);
+			view.Lighting.ShaderLenses[0].Shader = depthName;
+			install(depthDocument);
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			CheckImage(
+				fixture.Render,
+				"lens-graph-depth",
+				remapDepth ? "alternate" : "default",
+				"declared depth sampler and graph-sized lens targets",
+				expected.View(),
+				capture(0).View()
+			);
+			CHECK(
+				fixture.Render.ResourceTexture(core::Name("linear-depth"), 0) !=
+				fixture.Render.ResourceTexture(core::Name("lens-zero-depth"), 0)
+			);
+			const auto extent = fixture.Render.ResourceTextureExtent(core::Name("lens-b"), 0);
+			CHECK(extent.DrawnWidth == WIDTH / divisor);
+			CHECK(extent.DrawnHeight == HEIGHT / divisor);
+		}
+	}
+}
+
+TEST_CASE(
+	"postprocess grades stay within each view's content owner", "[render][gpu][postprocess-owner-draw][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render);
+	const core::Name first("grade:first"), second("grade:second"), name("grade.common");
+	render::ShaderCompiler compiler;
+	const auto compile = [&](const char *colour) {
+		const auto source =
+			std::string("#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=") + colour +
+			";}\n";
+		auto result = compiler.Compile(source, render::ShaderStage::Fragment, "grade-owner.frag");
+		INFO(result.Error);
+		REQUIRE_FALSE(result.Failed);
+		return result.SpirV;
+	};
+	const auto red = compile("vec4(1,0,0,1)");
+	const auto green = compile("vec4(0,1,0,1)");
+	REQUIRE(fixture.Render.SetPostProcessShader(name, red));
+	REQUIRE(fixture.Render.SetPostProcessShader(name, red, first));
+	const auto acceptedResources = fixture.Render.ResourceRevision();
+	REQUIRE(fixture.Render.SetPostProcessShader(name, red, first));
+	CHECK(fixture.Render.ResourceRevision() == acceptedResources);
+	REQUIRE(fixture.Render.SetPostProcessShader(name, green, second));
+	CHECK_FALSE(fixture.Render.PostProcessShaderName(core::Name("absent")).IsValid());
+	render::SceneTarget target{WIDTH, HEIGHT};
+	std::array<render::View, 2> views;
+	for (size_t slot = 0; slot < views.size(); ++slot) {
+		auto &view = views[slot];
+		view.World = 970 + slot;
+		view.WorldName = slot == 0 ? first : second;
+		view.Slot = slot;
+		view.Target = &target;
+		view.Pipeline = core::Name("portal.fixture.pbr");
+		view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+		view.Camera.NearPlane = .1f;
+		view.Camera.FarPlane = 64;
+		view.OverrideLighting = true;
+	}
+	render::OverlayImage overlay;
+	const auto draw = [&] { fixture.Render.Render(views, overlay, nullptr, false); };
+	const auto capture = [&](size_t slot) {
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	draw();
+	const auto expectedRed = capture(0);
+	REQUIRE(fixture.Render.SetPostProcessShader(name, green));
+	draw();
+	const auto expectedGreen = capture(0);
+	REQUIRE_FALSE(CompareImages(expectedRed.View(), expectedGreen.View()).Passed());
+	views[0].ContentOwner = first;
+	views[1].ContentOwner = second;
+	for (auto &view : views)
+		view.Damage = {};
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(0).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	std::swap(views[0].ContentOwner, views[1].ContentOwner);
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	CHECK_FALSE(fixture.Render.SetPostProcessShader(name, {}, first));
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	REQUIRE(fixture.Render.SetPostProcessShader(name, green, first));
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	fixture.Render.ClearPostProcessShader(first);
+	draw();
+	const auto missing = capture(1);
+	CHECK_FALSE(CompareImages(expectedGreen.View(), missing.View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	REQUIRE(fixture.Render.SetPostProcessShader(name, red, first));
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	fixture.Render.DropContentOwner(first);
+	CHECK_FALSE(fixture.Render.PostProcessShaderName(first).IsValid());
+	CHECK(fixture.Render.PostProcessShaderName(second) == name);
+	CHECK(fixture.Render.PostProcessShaderName() == name);
+	draw();
+	CHECK(CompareImages(missing.View(), capture(1).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	gui::RegisterGuiClasses();
+	scene::RegisterSceneClasses();
+	ecs::Store prepared("prepared.grade");
+	const auto source = prepared.CreateInstance(scene::ShaderScriptClass(), name.Text());
+	scene::SetPostProcessShader(prepared, name);
+	REQUIRE(
+		scene::SetShaderSource(
+			prepared,
+			source,
+			"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(1,0,0,1);}"
+		)
+	);
+	render::ShaderLibrary library;
+	const auto prepare = [&] {
+		return render::PrepareWorldShaders(prepared, first, library, fixture.Render);
+	};
+	CHECK(prepare());
+	CHECK_FALSE(prepare());
+	CHECK_FALSE(fixture.Render.HasShader(name, first));
+	draw();
+	CHECK(CompareImages(expectedRed.View(), capture(1).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+	REQUIRE(
+		scene::SetShaderSource(
+			prepared,
+			source,
+			"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(0,1,0,1);}"
+		)
+	);
+	library.Refresh(prepared, first);
+	library.Refresh(prepared, first);
+	CHECK(prepare());
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	REQUIRE(scene::SetShaderSource(prepared, source, "not a shader"));
+	CHECK_FALSE(prepare());
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	CHECK(render::PrepareWorldShaders(prepared, first, library, fixture.Render, nullptr, false));
+	draw();
+	CHECK(CompareImages(missing.View(), capture(1).View()).Passed());
+	CHECK(prepare());
+	draw();
+	CHECK(CompareImages(expectedGreen.View(), capture(1).View()).Passed());
+	prepared.Destroy(source);
+	CHECK(prepare());
+	draw();
+	CHECK(CompareImages(missing.View(), capture(1).View()).Passed());
+	CHECK(CompareImages(expectedGreen.View(), capture(0).View()).Passed());
+}
+
+TEST_CASE("interface shaders follow the submitted content owner", "[render][gpu][interface-owner-draw][.]") {
+	gui::RegisterGuiClasses();
+	const bool hdr = GENERATE(false, true);
+	int placement = 0;
+	SECTION("screen") {}
+	SECTION("depth-tested spatial") {
+		placement = 1;
+	}
+	SECTION("always-on-top spatial") {
+		placement = 2;
+	}
+	CAPTURE(placement, hdr);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto document = InstallPortalFixture(fixture.Render, hdr);
+	const auto display = std::find_if(document.Edits().begin(), document.Edits().end(), [](const auto &edit) {
+		return edit.Kind == graph::EditKind::AddResource && edit.Name == core::Name("display");
+	});
+	REQUIRE(display != document.Edits().end());
+	REQUIRE(display->Format == graph::ResourceFormat::RGBA16F);
+	render::InterfacePass interface;
+	const auto backend = fixture.Render.Backend();
+	REQUIRE(interface.Initialise(backend.Device, backend.ColourFormat));
+	const core::Name first("interface:first"), second("interface:second"), name("interface.common");
+	render::ShaderCompiler compiler;
+	const auto sourceOf = [](const char *colour) {
+		const auto source = std::string(
+								"#version 450\nlayout(location=2) in vec2 canvas;\n"
+								"layout(set=3,binding=0) uniform Batch { vec4 clip; } batch;\n"
+								"layout(location=0) out vec4 colour;\nvoid main(){"
+								"if(canvas.x<batch.clip.x || canvas.y<batch.clip.y || canvas.x>batch.clip.z "
+								"|| canvas.y>batch.clip.w) discard;colour="
+							) +
+							colour + ";}\n";
+		return source;
+	};
+	const auto compile = [&](const char *colour) {
+		auto result =
+			compiler.Compile(sourceOf(colour), render::ShaderStage::Fragment, "interface-owner.frag");
+		INFO(result.Error);
+		REQUIRE_FALSE(result.Failed);
+		return result.SpirV;
+	};
+	const auto red = compile("vec4(1,0,0,1)");
+	const auto green = compile("vec4(0,1,0,1)");
+	REQUIRE(interface.AddShaderVariant(name, red));
+	REQUIRE(interface.AddShaderVariant(name, red, first));
+	REQUIRE(interface.AddShaderVariant(name, green, second));
+	CHECK_FALSE(interface.HasShaderVariant(name, core::Name("absent")));
+	ecs::Store world("interface.owner");
+	gui::DrawCommand rectangle;
+	rectangle.Bounds = {{0, 0}, {WIDTH, HEIGHT}};
+	rectangle.Clip = rectangle.Bounds;
+	rectangle.Clip.Max.X *= .5f;
+	rectangle.Tint = {1, 1, 1};
+	rectangle.Shader = name;
+	if (placement != 0) {
+		const auto collector = world.CreateInstance(gui::GuiClass("SurfaceGui"), "Surface");
+		gui::SpatialCanvas spatial;
+		spatial.Size = {WIDTH, HEIGHT};
+		spatial.Origin = {-1, 1, 0};
+		spatial.AxisX = {2, 0, 0};
+		spatial.AxisY = {0, -2, 0};
+		spatial.Normal = {0, 0, 1};
+		spatial.AlwaysOnTop = placement == 2;
+		world.Set(collector, spatial);
+		rectangle.Collector = collector;
+		rectangle.Spatial = true;
+	}
+
+	gui::DrawList list;
+	list.Commands.push_back(rectangle);
+	const std::array occluders{Plane(1, {0, -.6f, 1}, 2, .5f, {.2f, .3f, .4f})};
+	render::SceneTarget target{WIDTH, HEIGHT};
+	render::View view;
+	view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+	view.World = 989;
+	view.WorldName = core::Name("interface.world");
+	view.Target = &target;
+	view.Instances = occluders;
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	render::OverlayImage overlay;
+	const auto capture = [&](render::InterfacePass *selected = nullptr) {
+		if (selected == nullptr) selected = &interface;
+		view.Damage.GameInterface = true;
+		selected->Submit(list, {WIDTH, HEIGHT}, {WIDTH, HEIGHT}, world, 71);
+		fixture.Render.Render(std::span(&view, 1), overlay, selected, false);
+		if (placement == 0) REQUIRE(selected->LastBatchCount() > 0);
+		return CaptureResource(
+			fixture.Render, core::Name("composed-image"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto background = CaptureResource(
+		fixture.Render, core::Name("composed-image"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+	);
+	const auto expectedRed = capture();
+	REQUIRE(interface.AddShaderVariant(name, green));
+	const auto expectedGreen = capture();
+	REQUIRE_FALSE(CompareImages(expectedRed.View(), expectedGreen.View()).Passed());
+	const auto matchesBackground = [&](uint32_t x, uint32_t y) {
+		const size_t offset = y * expectedGreen.RowStrideBytes + x * 4;
+
+		return std::equal(
+			expectedGreen.Bytes.begin() + offset,
+			expectedGreen.Bytes.begin() + offset + 4,
+			background.Bytes.begin() + offset
+		);
+	};
+	CHECK_FALSE(matchesBackground(WIDTH / 2 - 4, HEIGHT / 2));
+	CHECK(matchesBackground(WIDTH / 2 + 4, HEIGHT / 2));
+	CHECK(matchesBackground(WIDTH / 2 - 4, HEIGHT / 2 + 8) == (placement == 1));
+
+	interface.SetContentOwner(first);
+	CHECK(CompareImages(expectedRed.View(), capture().View()).Passed());
+	CHECK(interface.LastUploadedBytes() == 0);
+	interface.SetContentOwner(second);
+	CHECK(CompareImages(expectedGreen.View(), capture().View()).Passed());
+	CHECK(interface.LastUploadedBytes() == 0);
+	interface.SetContentOwner(first);
+	CHECK_FALSE(interface.AddShaderVariant(name, {}, first));
+	CHECK(CompareImages(expectedRed.View(), capture().View()).Passed());
+	REQUIRE(interface.AddShaderVariant(name, green, first));
+	CHECK(CompareImages(expectedGreen.View(), capture().View()).Passed());
+	REQUIRE(interface.DropShaderVariant(name, first));
+	const auto missing = capture();
+	CHECK_FALSE(CompareImages(expectedGreen.View(), missing.View()).Passed());
+	CHECK(interface.HasShaderVariant(name, second));
+	CHECK(interface.HasShaderVariant(name));
+	REQUIRE(interface.AddShaderVariant(name, red, first));
+	CHECK(CompareImages(expectedRed.View(), capture().View()).Passed());
+	CHECK(interface.DropContentOwner({}) == 0);
+	CHECK(interface.DropContentOwner(first) == 1);
+	CHECK(interface.DropContentOwner(first) == 0);
+	CHECK(CompareImages(missing.View(), capture().View()).Passed());
+	interface.SetContentOwner(second);
+	CHECK(CompareImages(expectedGreen.View(), capture().View()).Passed());
+	CHECK(interface.HasShaderVariant(name));
+
+	const auto source = world.CreateInstance(scene::ShaderScriptClass(), name.Text());
+	REQUIRE(scene::SetShaderSource(world, source, sourceOf("vec4(1,0,0,1)")));
+	const auto label = world.CreateInstance(gui::GuiClass("ImageLabel"), "ShaderDemand");
+	world.GetMutable<gui::Picture>(label)->Shader = name;
+	render::ShaderLibrary library;
+	const std::array demand{name};
+	REQUIRE(library.Refresh(world, first) == 1);
+	REQUIRE(library.Refresh(world, first) == 0);
+	REQUIRE(library.Changed().empty());
+	CHECK(interface.RefreshShaders(demand, library, first) == 1);
+	interface.SetContentOwner(first);
+	CHECK(CompareImages(expectedRed.View(), capture().View()).Passed());
+	CHECK(interface.RefreshShaders(demand, library, first) == 0);
+
+	render::InterfacePass lagging;
+	REQUIRE(lagging.Initialise(backend.Device, backend.ColourFormat));
+	lagging.SetContentOwner(first);
+	CHECK(render::PrepareWorldShaders(world, first, library, fixture.Render, &lagging));
+	CHECK_FALSE(fixture.Render.HasShader(name, first));
+	CHECK(CompareImages(expectedRed.View(), capture(&lagging).View()).Passed());
+	CHECK(render::PrepareWorldShaders(world, second, library, fixture.Render, &lagging));
+	const auto warmedResources = fixture.Render.ResourceRevision();
+	CHECK(render::PrepareWorldShaders(world, first, library, fixture.Render, &lagging));
+	CHECK(fixture.Render.ResourceRevision() == warmedResources);
+	CHECK_FALSE(render::PrepareWorldShaders(world, first, library, fixture.Render, &lagging));
+	CHECK(CompareImages(expectedRed.View(), capture(&lagging).View()).Passed());
+	CHECK(lagging.LastUploadedBytes() == 0);
+
+	REQUIRE(scene::SetShaderSource(world, source, sourceOf("vec4(0,1,0,1)")));
+	REQUIRE(library.Refresh(world, first) == 1);
+	CHECK(interface.RefreshShaders(demand, library, first) == 1);
+	REQUIRE(library.Refresh(world, first) == 0);
+	CHECK(lagging.RefreshShaders(demand, library, first) == 1);
+	CHECK(CompareImages(expectedGreen.View(), capture(&lagging).View()).Passed());
+	CHECK(lagging.RefreshShaders(demand, library, first) == 0);
+	REQUIRE(scene::SetShaderSource(world, source, "not a shader"));
+	CHECK(library.Refresh(world, first) == 0);
+	CHECK(lagging.RefreshShaders(demand, library, first) == 0);
+	CHECK(CompareImages(expectedGreen.View(), capture(&lagging).View()).Passed());
+	CHECK(interface.RefreshShaders({}, library, first) == 1);
+	CHECK_FALSE(interface.HasShaderVariant(name, first));
+	CHECK(interface.HasShaderVariant(name, second));
+	CHECK(lagging.HasShaderVariant(name, first));
+	CHECK(interface.RefreshShaders(demand, library, first) == 1);
+	CHECK(CompareImages(expectedGreen.View(), capture().View()).Passed());
+	world.Destroy(source);
+	REQUIRE(library.Refresh(world, first) == 1);
+	REQUIRE(library.Refresh(world, first) == 0);
+	CHECK(lagging.RefreshShaders(demand, library, first) == 1);
+	CHECK_FALSE(lagging.HasShaderVariant(name, first));
+	CHECK(CompareImages(missing.View(), capture(&lagging).View()).Passed());
 }

@@ -1,18 +1,26 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageDemand.hpp>
+#include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/Materials.hpp>
 #include <engine/scene/ShaderLens.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/HostLink.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -20,6 +28,7 @@
 #include <glm/packing.hpp>
 
 #include <cstdlib>
+#include <fstream>
 #include <limits>
 
 TEST_SUITE_ID("engine.render.portalimageruntime")
@@ -524,7 +533,7 @@ TEST_CASE(
 		 cancelNested = false, replaceNested = false, timeoutNested = false, moveNested = false,
 		 appearNested = false, foregroundFloor = false, floorDefaultMaterial = false,
 		 floorDefaultLighting = false, productEye = false, forwardBody = false, retireProducer = false,
-		 replaceProducer = false, retirePending = false;
+		 replaceProducer = false, retirePending = false, nestedOrdered = false, shadowRoutes = false;
 	int seamChange = 0;
 	core::Vector3 authoredEye{0, 0, 4};
 	const std::array<core::Vector3, 10> authoredEyes{
@@ -555,6 +564,12 @@ TEST_CASE(
 		nestedWorld = complete = true;
 		expectedRed = 0;
 		expectedBlue = .5;
+	}
+	SECTION("ordered body capture retains a cross-world child depth domain") {
+		nestedWorld = nestedOrdered = true;
+	}
+	SECTION("retained shadows follow the delivered tree's original requester chain") {
+		nestedWorld = nestedOrdered = shadowRoutes = true;
 	}
 	SECTION("incoming body is visible in the child after clearing the parent mouth") {
 		forwardBody = nestedWorld = complete = true;
@@ -728,12 +743,22 @@ TEST_CASE(
 	white.Pixels.assign(4, std::byte{255});
 	for (auto *renderer : {&sourceRenderer, &destinationRenderer}) {
 		REQUIRE(renderer->AddMesh(core::Name("runtime-plane"), mesh));
+		REQUIRE(renderer->AddMesh(core::Name("runtime-plane"), mesh, worlds.Universe.NameOf(worlds.Source)));
+		REQUIRE(
+			renderer->AddMesh(core::Name("runtime-plane"), mesh, worlds.Universe.NameOf(worlds.Destination))
+		);
 
 		// Portal parts expose both faces. A single front-facing triangle sheet would
 		// disappear when the reflected camera sees its back.
 		auto apertureMesh = mesh;
 		apertureMesh.Indices.insert(apertureMesh.Indices.end(), {2, 1, 0, 3, 2, 0});
 		REQUIRE(renderer->AddMesh(core::Name("runtime-aperture"), apertureMesh));
+		REQUIRE(renderer->AddMesh(
+			core::Name("runtime-aperture"), apertureMesh, worlds.Universe.NameOf(worlds.Source)
+		));
+		REQUIRE(renderer->AddMesh(
+			core::Name("runtime-aperture"), apertureMesh, worlds.Universe.NameOf(worlds.Destination)
+		));
 		if (authoredBody) {
 			auto bodyMesh = apertureMesh;
 			for (auto &vertex : bodyMesh.Vertices) {
@@ -749,8 +774,20 @@ TEST_CASE(
 			}
 			bodyMesh.ComputeBounds();
 			REQUIRE(renderer->AddMesh(core::Name("runtime-body"), bodyMesh));
+			REQUIRE(
+				renderer->AddMesh(core::Name("runtime-body"), bodyMesh, worlds.Universe.NameOf(worlds.Source))
+			);
+			REQUIRE(renderer->AddMesh(
+				core::Name("runtime-body"), bodyMesh, worlds.Universe.NameOf(worlds.Destination)
+			));
 		}
 		REQUIRE(renderer->AddTexture(core::Name("runtime-white"), white));
+		REQUIRE(
+			renderer->AddTexture(core::Name("runtime-white"), white, worlds.Universe.NameOf(worlds.Source))
+		);
+		REQUIRE(renderer->AddTexture(
+			core::Name("runtime-white"), white, worlds.Universe.NameOf(worlds.Destination)
+		));
 	}
 	scene::RegisterSceneClasses();
 	RegisterPresentationComponents();
@@ -785,7 +822,7 @@ TEST_CASE(
 			store.Set(wall, latest);
 			scheduler.Add(
 				"publish-interpolated-rows", ecs::Phase::PreRender, [interpolated](ecs::Store &target) {
-					target.SetResource(DrawList{.Instances = {interpolated}});
+					target.SetResource(DrawList{.Instances = {interpolated}, .JointFrames = {}});
 				}
 			);
 		}
@@ -967,7 +1004,7 @@ TEST_CASE(
 		 .Scope = graph::NodeScope::Frame}
 	);
 	document.Record(
-		{.Kind = graph::EditKind::Reads, .Target = core::Name("portaled"), .Key = core::Name("source")}
+		{.Kind = graph::EditKind::Reads, .Target = core::Name("tonemapped"), .Key = core::Name("source")}
 	);
 	graph::RenderGraph pipeline;
 	core::Name offender;
@@ -992,6 +1029,13 @@ TEST_CASE(
 	);
 	auto request = Request();
 	request.Scope = complete ? PortalImageScope::CompleteWorld : PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = nestedOrdered;
+	if (shadowRoutes) {
+		request.RetainedBodyPlayer = "91";
+		producer.SetRetainedBodyAuthorization([&](const auto &requester, std::string_view player) {
+			return requester == worlds.Replies && player == "91";
+		});
+	}
 	if (eyeView) {
 		request.Projection = PortalImageProjection::Eye;
 		request.ClipPlane = {};
@@ -1111,6 +1155,8 @@ TEST_CASE(
 	if (nestedWorld) {
 		request.RecursionDepth = 1;
 		request.PixelBudget = (shortSurfaceBudget ? 1 : 2) * captureExtent * captureExtent;
+		// Neither node authors top GUI: four ordered captures per node cover this tree.
+		if (nestedOrdered) request.PixelBudget = 2 * 4 * captureExtent * captureExtent;
 		worlds.Universe.Enter(worlds.Source, [&](ecs::Store &store) {
 			const auto workspace = scene::InstallServices(store);
 			scene::PartDesc part;
@@ -1217,6 +1263,15 @@ TEST_CASE(
 			resident ? &residentImages : nullptr
 		);
 	}
+	std::optional<world::PresentationAddress> nestedShadowRequester;
+	if (shadowRoutes) {
+		REQUIRE(childProducer);
+		childProducer->SetRetainedBodyAuthorization([&](const auto &requester, std::string_view player) {
+			if (requester.World != worlds.Requests.World || player != "91") return false;
+			nestedShadowRequester = requester;
+			return true;
+		});
+	}
 	if (productEye) {
 		request.Position = {-1.22769022f, 4.00007629f, 2.79496264f};
 		request.Orientation = {0, -.10828726f, 0, .99411976f};
@@ -1252,6 +1307,14 @@ TEST_CASE(
 	}
 	const auto started = std::chrono::steady_clock::now();
 	const auto issue = source.Issue(worlds.Requests, request, binding, started);
+	std::string issueEncodingError;
+	if (nestedOrdered && issue.Status != PortalInboxStatus::Issued) {
+		auto diagnosticRequest = request;
+		diagnosticRequest.Key.RequestId = 1;
+		std::vector<std::byte> diagnosticWire;
+		EncodePortalImageRequest(diagnosticRequest, diagnosticWire, issueEncodingError);
+	}
+	INFO(issueEncodingError);
 	REQUIRE(issue.Status == PortalInboxStatus::Issued);
 	CHECK_FALSE(source.Capture("Door"));
 	const auto requestBytes = worlds.Universe.PresentationTrafficCounts().EnqueuedBytes;
@@ -1278,6 +1341,179 @@ TEST_CASE(
 	};
 	const double preparedBefore = preparedViews();
 	const auto first = producer.Pump(0, 0, started, alreadyPresented);
+	if (nestedOrdered) {
+		// Retain each depth domain and its authored aperture for later body composition.
+		SceneTarget target{captureExtent, captureExtent};
+		View uploadView;
+		uploadView.World = binding.World;
+		uploadView.WorldName = binding.WorldName;
+		uploadView.Slot = binding.ViewSlot;
+		uploadView.Target = &target;
+		OverlayImage overlay;
+		std::vector<PortalRuntimeCompletion> completed;
+		const auto deadline = started + std::chrono::seconds(10);
+		while (completed.empty() && std::chrono::steady_clock::now() < deadline) {
+			const auto now = std::chrono::steady_clock::now();
+			childProducer->Pump(0, 0, now);
+			producer.Pump(0, 0, now);
+			if (source.HasPendingUploads())
+				sourceRenderer.Render(std::span(&uploadView, 1), overlay, nullptr, false);
+			completed = source.Poll(now);
+			if (completed.empty()) SDL_Delay(1);
+		}
+		REQUIRE(completed.size() == 1);
+		INFO(completed.front().Diagnostic);
+		REQUIRE(completed.front().Status == PortalImageStatus::Ok);
+		const auto captured = source.Capture("Door");
+		REQUIRE(captured);
+		CHECK(captured->Image != 0);
+		CHECK(captured->TransparentImages[0] != 0);
+		CHECK(captured->TransparentImages[1] != 0);
+		CHECK(captured->CaptureLighting.has_value());
+		REQUIRE(captured->Tree != 0);
+		const auto *tree = sourceRenderer.FindPortalCaptureTree(captured->Tree);
+		REQUIRE(tree);
+		REQUIRE(tree->Nodes.size() == 2);
+		REQUIRE(tree->Edges.size() == 1);
+		const auto &root = tree->Nodes[0];
+		const auto &child = tree->Nodes[1];
+		const auto childEndpoint = worlds.Universe.LookupPresentation(worlds.Source, PORTAL_REQUEST_CHANNEL);
+		CHECK(
+			root.Producer == PortalCaptureTreeEndpoint{
+								 worlds.Requests.World,
+								 worlds.Requests.Channel,
+								 worlds.Requests.Session,
+								 worlds.Requests.Generation
+							 }
+		);
+		CHECK(
+			child.Producer ==
+			PortalCaptureTreeEndpoint{
+				childEndpoint.World, childEndpoint.Channel, childEndpoint.Session, childEndpoint.Generation
+			}
+		);
+		CHECK(root.Camera.Position == request.Position);
+		CHECK(root.Camera.Orientation == request.Orientation);
+		CHECK(root.Camera.Frustum == request.Frustum);
+		CHECK(root.Camera.ClipPlane == request.ClipPlane);
+		CHECK(root.Camera.Projection == request.Projection);
+		CHECK(root.Images[0] == captured->Image);
+		CHECK(root.Images[1] == captured->TransparentImages[0]);
+		CHECK(root.Images[2] == captured->TransparentImages[1]);
+		CHECK(child.Images[0] != 0);
+		CHECK(child.Images[1] != 0);
+		CHECK(child.Images[2] != 0);
+		if (shadowRoutes) {
+			const auto now = std::chrono::steady_clock::now();
+			const auto &rootEye = root.Binding.Expected;
+			const auto &childEye = child.Binding.Expected;
+			const auto local =
+				producer.ResolveShadowRoute(worlds.Replies, rootEye, root.Producer, rootEye, now);
+			REQUIRE(local);
+			CHECK(local->Requester == worlds.Replies);
+			CHECK(local->Producer == worlds.Requests);
+			CHECK(local->ParentEye == rootEye);
+			REQUIRE(producer.TakeShadow(worlds.Replies, rootEye, now));
+			const auto route =
+				producer.ResolveShadowRoute(worlds.Replies, rootEye, child.Producer, childEye, now);
+			REQUIRE(route);
+			REQUIRE(nestedShadowRequester);
+			CHECK(route->Requester == *nestedShadowRequester);
+			CHECK(route->Requester != worlds.Replies);
+			CHECK(route->Producer == childEndpoint);
+			CHECK(route->ParentEye == childEye);
+			auto wrongRequester = worlds.Replies;
+			++wrongRequester.Generation;
+			CHECK_FALSE(producer.ResolveShadowRoute(wrongRequester, rootEye, child.Producer, childEye, now));
+			auto wrongEye = childEye;
+			++wrongEye.CameraRevision;
+			CHECK_FALSE(producer.ResolveShadowRoute(worlds.Replies, rootEye, child.Producer, wrongEye, now));
+			CHECK_FALSE(producer.ResolveShadowRoute(worlds.Replies, wrongEye, child.Producer, childEye, now));
+			auto wrongProducer = child.Producer;
+			++wrongProducer.Generation;
+			CHECK_FALSE(producer.ResolveShadowRoute(worlds.Replies, rootEye, wrongProducer, childEye, now));
+			CHECK_FALSE(childProducer->TakeShadow(worlds.Replies, childEye, now));
+			const auto leaf = childProducer->ResolveShadowRoute(
+				route->Requester, route->ParentEye, child.Producer, childEye, now
+			);
+			REQUIRE(leaf);
+			CHECK(leaf->Requester == route->Requester);
+			CHECK(leaf->Producer == childEndpoint);
+			const auto childShadow = childProducer->TakeShadow(leaf->Requester, childEye, now);
+			REQUIRE(childShadow);
+			CHECK(childShadow->Snapshot.Eye == childEye);
+			CHECK(childShadow->Snapshot.Producer == child.Producer);
+			CHECK(childShadow->Snapshot.ExcludedPlayer == "91");
+			CHECK(producer.ResolveShadowRoute(worlds.Replies, rootEye, child.Producer, childEye, now)
+					  .has_value());
+		}
+		const auto &edge = tree->Edges.front();
+		CHECK(edge.Parent == 0);
+		CHECK(edge.Child == 1);
+		PortalGeometry aperture;
+		std::string geometryError;
+		REQUIRE(DecodePortalGeometry(edge.Geometry, aperture, geometryError));
+		REQUIRE(aperture.Rows.size() == 1);
+		CHECK(aperture.Rows.front().Assets[0] == "runtime-aperture");
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			std::vector<scene::PortalSeam> seams;
+			scene::GatherPortalSeams(store, seams);
+			REQUIRE(seams.size() == 1);
+			const auto &seam = seams.front();
+			const auto through = scene::SeamMapping(seam);
+			CHECK(edge.Centre == std::array<float, 3>{seam.Centre.X, seam.Centre.Y, seam.Centre.Z});
+			CHECK(edge.First == std::array<float, 3>{seam.First.X, seam.First.Y, seam.First.Z});
+			CHECK(edge.Second == std::array<float, 3>{seam.Second.X, seam.Second.Y, seam.Second.Z});
+			const auto position =
+				through.Point({request.Position[0], request.Position[1], request.Position[2]});
+			CHECK(
+				(core::Vector3{child.Camera.Position[0], child.Camera.Position[1], child.Camera.Position[2]} -
+				 position)
+					.Magnitude() < .0001f
+			);
+			const auto mappedOrigin = through.Point({});
+			CHECK(
+				(core::Vector3{edge.Position[0], edge.Position[1], edge.Position[2]} - mappedOrigin)
+					.Magnitude() < .0001f
+			);
+			CHECK(edge.Scale == through.Scale);
+		});
+		CHECK(destinationRenderer.PortalImageUsage().Images == 0);
+		CHECK(destinationRenderer.PortalImageUsage().PendingCpuBytes == 0);
+		auto limited = request;
+		limited.Key.CameraRevision++;
+		limited.PixelBudget = 4 * captureExtent * captureExtent;
+		const auto refused =
+			source.Issue(worlds.Requests, limited, binding, std::chrono::steady_clock::now());
+		REQUIRE(refused.Status == PortalInboxStatus::Issued);
+		completed.clear();
+		const auto refusalDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (completed.empty() && std::chrono::steady_clock::now() < refusalDeadline) {
+			const auto now = std::chrono::steady_clock::now();
+			childProducer->Pump(0, 0, now);
+			producer.Pump(0, 0, now);
+			completed = source.Poll(now);
+			if (completed.empty()) SDL_Delay(1);
+		}
+		REQUIRE(completed.size() == 1);
+		CHECK(completed.front().Status == PortalImageStatus::BudgetExceeded);
+		REQUIRE(source.Capture("Door"));
+		CHECK(source.Capture("Door")->Tree == captured->Tree);
+		REQUIRE(worlds.Universe.ClosePresentation(childEndpoint) == world::PresentationStatus::Ok);
+		if (shadowRoutes)
+			CHECK_FALSE(producer.ResolveShadowRoute(
+				worlds.Replies,
+				root.Binding.Expected,
+				child.Producer,
+				child.Binding.Expected,
+				std::chrono::steady_clock::now()
+			));
+		source.Poll(std::chrono::steady_clock::now());
+		CHECK_FALSE(source.Capture("Door"));
+		CHECK(source.Image("Door") == 0);
+		CHECK_FALSE(sourceRenderer.FindPortalCaptureTree(captured->Tree));
+		return;
+	}
 	if (nestedWorld) CHECK(preparedViews() == preparedBefore);
 
 	if (shortSurfaceBudget) {
@@ -1373,6 +1609,7 @@ TEST_CASE(
 			recovered = source.Poll(now);
 			if (recovered.empty()) SDL_Delay(1);
 		}
+		CAPTURE(replaceNested, timeoutNested, moveNested, appearNested, seamChange, resident);
 		REQUIRE(recovered.size() == 1);
 		INFO(recovered.front().Diagnostic);
 		CHECK(recovered.front().Status == PortalImageStatus::Ok);
@@ -1594,7 +1831,7 @@ TEST_CASE(
 	}
 	REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
 	const auto image = render::test::CaptureResource(
-		sourceRenderer, core::Name("portaled"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
+		sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
 	);
 	const auto at = size_t(32) * image.RowStrideBytes + 32 * 4;
 	const auto display = [](double radiance) {
@@ -1627,7 +1864,7 @@ TEST_CASE(
 		portal.ImportedImage = source.Image("Door");
 		REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
 		const auto updated = render::test::CaptureResource(
-			sourceRenderer, core::Name("portaled"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
+			sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
 		);
 		CHECK(
 			std::abs(int(std::to_integer<uint8_t>(updated.Bytes[at])) - display(forwardBody ? .5 : 0)) <= 2
@@ -1875,7 +2112,7 @@ TEST_CASE(
 		portal.ImportedImage = source.Image("Door");
 		REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
 		const auto changedImage = render::test::CaptureResource(
-			sourceRenderer, core::Name("portaled"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
+			sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
 		);
 		const auto changedPixel = size_t(32) * changedImage.RowStrideBytes + 32 * 4;
 		CHECK(std::to_integer<uint8_t>(changedImage.Bytes[changedPixel]) <= 2);
@@ -1906,7 +2143,7 @@ TEST_CASE(
 		portal.ImportedImage = source.Image("Door");
 		REQUIRE(sourceRenderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfaceInstances > 0);
 		const auto moving = render::test::CaptureResource(
-			sourceRenderer, core::Name("portaled"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
+			sourceRenderer, core::Name("tonemapped"), 0, 65, 65, render::test::ImageFormat::Rgba8Unorm
 		);
 		const auto pixel = size_t(32) * moving.RowStrideBytes + 32 * 4;
 		CHECK(std::to_integer<uint8_t>(moving.Bytes[pixel]) <= 2);
@@ -2123,8 +2360,13 @@ TEST_CASE("body motion follows the completed portal request", "[render][portal-r
 }
 
 TEST_CASE("portal content revision follows resident flipbook cells", "[render][gpu][portal-runtime][.]") {
+	const bool throughHost = GENERATE(false, true);
+	const bool spatialImage = GENERATE(false, true);
+	CAPTURE(throughHost, spatialImage);
+	const core::Name contentOwner("session:flipbook");
 	RuntimeWorlds worlds;
 	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
 	assets::TextureData texture;
@@ -2151,7 +2393,8 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		std::byte{0},
 		std::byte{255}
 	};
-	REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture));
+	REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture, contentOwner));
+	ecs::Entity wallEntity, pictureEntity;
 	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 		const auto workspace = scene::InstallServices(store);
 		scene::PartDesc part;
@@ -2159,16 +2402,63 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		part.Size = {8, 8, .1f};
 		part.Simulated = false;
 		const auto wall = scene::MakePart(store, part);
+		wallEntity = wall;
 		REQUIRE(store.SetParent(wall, workspace));
 		auto appearance = *store.Get<scene::SurfaceAppearance>(wall);
 		appearance.ColourMap = core::Name("portal-flipbook");
 		store.Set(wall, appearance);
+		if (spatialImage) {
+			auto visual = *store.Get<scene::Visual>(wall);
+			visual.Transparency = 1;
+			store.Set(wall, visual);
+			const auto canvas = store.CreateInstance(gui::GuiClass("SurfaceGui"), "ScopedCanvas");
+			REQUIRE(store.SetParent(canvas, wall));
+			gui::Surface surface;
+			surface.On = gui::Face::Back;
+			surface.CanvasSize = {100, 100};
+			store.Set(canvas, surface);
+			const auto label = store.CreateInstance(gui::GuiClass("ImageLabel"), "ScopedPicture");
+			pictureEntity = label;
+			REQUIRE(store.SetParent(label, canvas));
+			gui::Element element;
+			element.Size = {1, 0, 1, 0};
+			store.Set(label, element);
+			gui::Background background;
+			background.Transparency = 1;
+			background.BorderSizePixel = 0;
+			store.Set(label, background);
+			gui::Picture picture;
+			picture.Image = core::Name("portal-flipbook");
+			store.Set(label, picture);
+		}
 	});
-	PortalImageProducer producer(worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests);
+	std::unique_ptr<PortalImageProducer> producer;
+	std::unique_ptr<PortalImageHost> host;
+	if (throughHost) {
+		REQUIRE(worlds.Universe.ClosePresentation(worlds.Requests) == world::PresentationStatus::Ok);
+		host = std::make_unique<PortalImageHost>(worlds.Universe, fixture.Render, nullptr, false);
+		host->SetContentOwner(worlds.Destination, contentOwner);
+		worlds.Requests = host->Serve(worlds.Destination);
+		REQUIRE(worlds.Requests.Generation != 0);
+	} else {
+		producer = std::make_unique<PortalImageProducer>(
+			worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests, nullptr, nullptr, false
+		);
+		producer->SetContentOwner(contentOwner);
+	}
+	const auto bindOwner = [&](core::Name owner) {
+		if (host)
+			host->SetContentOwner(worlds.Destination, owner);
+		else
+			producer->SetContentOwner(owner);
+	};
 	uint64_t sequence = 0;
-	const auto capture = [&] {
+	const auto capture = [&](std::optional<PortalImageVersion> known = {}, bool *renewed = nullptr) {
+		if (renewed) *renewed = false;
 		auto request = Request();
+		if (spatialImage) request.Scope = PortalImageScope::CompleteWorld;
 		request.Key.RequestId = ++sequence;
+		request.KnownImage = known;
 		std::vector<std::byte> wire;
 		std::string error;
 		REQUIRE(EncodePortalImageRequest(request, wire, error));
@@ -2179,7 +2469,10 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		);
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
 		while (std::chrono::steady_clock::now() < deadline) {
-			producer.Pump(0, 0, START);
+			if (host)
+				host->Pump(0, 0, START);
+			else
+				producer->Pump(0, 0, START);
 			auto replies = worlds.Universe.TakePresentation(worlds.Replies);
 			if (replies.empty()) {
 				SDL_Delay(1);
@@ -2187,6 +2480,11 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 			}
 			REQUIRE(replies.size() == 1);
 			PortalImageReply reply;
+			PortalResidentReceipt renewal;
+			if (renewed && DecodePortalImageRenewal(replies[0].Payload, renewal, error)) {
+				*renewed = true;
+				return reply;
+			}
 			REQUIRE(DecodePortalImageReply(replies[0].Payload, reply, error));
 			REQUIRE(reply.Status == PortalImageStatus::Ok);
 			return reply;
@@ -2201,6 +2499,230 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 	const auto sameCell = capture();
 	CHECK(sameCell.PixelHash == first.PixelHash);
 	CHECK(sameCell.ContentRevision == first.ContentRevision);
+	SECTION("authored opaque discard preserves nearer and background depth") {
+		if (spatialImage) return;
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			store.GetMutable<scene::Visual>(wallEntity)->Transparency = 1;
+			for (const bool near : {false, true}) {
+				scene::PartDesc part;
+				part.Frame.Position = near ? core::Vector3{2, 0, -2} : core::Vector3{0, 0, -6};
+				part.Size = near ? core::Vector3{1, 8, .1f} : core::Vector3{16, 16, .1f};
+				part.Simulated = false;
+				const auto entity = scene::MakePart(store, part);
+				REQUIRE(store.SetParent(entity, store.ParentOf(wallEntity)));
+				store.GetMutable<scene::Visual>(entity)->Tint =
+					near ? core::Color3{1, 0, 0} : core::Color3{0, 1, 0};
+			}
+		});
+		const auto background = capture();
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			const core::Name name("capture.cutout");
+			const auto shader = store.CreateInstance(scene::ShaderScriptClass(), name.Text());
+			REQUIRE(
+				scene::SetShaderSource(
+					store,
+					shader,
+					"#version 450\nlayout(location=0) out vec4 colour;\nvoid "
+					"main(){if(gl_FragCoord.x<4)discard;colour=vec4(0,0,1,1);}"
+				)
+			);
+			const auto material = store.CreateInstance(scene::MaterialClass(), "CutoutMaterial");
+			REQUIRE(store.SetParent(material, wallEntity));
+			store.GetMutable<scene::MaterialRef>(material)->Shader = name;
+			store.GetMutable<scene::Visual>(wallEntity)->Transparency = 0;
+			scene::ResolveMaterials(store);
+		});
+		const auto cutout = capture();
+		REQUIRE(cutout.Width == 8);
+		REQUIRE(cutout.Height == 8);
+		REQUIRE(cutout.Depth.size() == 8 * 8 * sizeof(float));
+		REQUIRE(background.Depth.size() == cutout.Depth.size());
+		for (const uint32_t x : {1u, 5u, 7u}) {
+			CAPTURE(x);
+			const size_t colour = 4 * cutout.RowStride + x * 8;
+			core::ByteReader cutoutColour(std::span(cutout.Pixels).subspan(colour, 8));
+			core::ByteReader referenceColour(std::span(background.Pixels).subspan(colour, 8));
+			const auto cutoutRg = glm::unpackHalf2x16(cutoutColour.ReadUInt32());
+			const auto cutoutBa = glm::unpackHalf2x16(cutoutColour.ReadUInt32());
+			const auto referenceRg = glm::unpackHalf2x16(referenceColour.ReadUInt32());
+			const auto referenceBa = glm::unpackHalf2x16(referenceColour.ReadUInt32());
+			CAPTURE(cutoutRg.x, cutoutRg.y, cutoutBa.x, referenceRg.x, referenceRg.y, referenceBa.x);
+			core::ByteReader foregroundDepth(std::span(cutout.Depth).subspan((4 * 8 + x) * 4, 4));
+			core::ByteReader backgroundDepth(std::span(background.Depth).subspan((4 * 8 + x) * 4, 4));
+			const float foreground = foregroundDepth.ReadFloat(), behind = backgroundDepth.ReadFloat();
+			if (x == 5) {
+				CHECK(cutoutRg.x == 0);
+				CHECK(cutoutRg.y == 0);
+				CHECK(cutoutBa.x == 1);
+				CHECK(foreground > 0);
+				CHECK(foreground < behind);
+			} else {
+				// Adding the wall changes shadows and ambient occlusion, but the
+				// visible material and its exact depth must survive the cutout.
+				const float dominant = x == 1 ? cutoutRg.y : cutoutRg.x;
+				const float other = x == 1 ? cutoutRg.x : cutoutRg.y;
+				CHECK(dominant > .01f);
+				CHECK(dominant > 4 * other);
+				CHECK(dominant > 4 * cutoutBa.x);
+				CHECK(foreground == behind);
+			}
+		}
+	}
+	SECTION("producer respects disabled postprocessing") {
+		const core::Name grade("capture.disabled-grade");
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			const auto shader = store.CreateInstance(scene::ShaderScriptClass(), grade.Text());
+			REQUIRE(
+				scene::SetShaderSource(
+					store,
+					shader,
+					"#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=vec4(0,1,0,1);}"
+				)
+			);
+			scene::SetPostProcessShader(store, grade);
+		});
+		const auto unchanged = capture();
+		CHECK_FALSE(fixture.Render.PostProcessShaderName(contentOwner).IsValid());
+		CHECK_FALSE(fixture.Render.HasShader(grade, contentOwner));
+		CHECK(unchanged.PixelHash == sameCell.PixelHash);
+		CHECK(unchanged.ContentRevision == sameCell.ContentRevision);
+	}
+	SECTION("authored material and spatial shaders invalidate capture renewal") {
+		const core::Name name("capture.authored");
+		ecs::Entity shader;
+		const auto code = [&](const char *colour) {
+			return std::string("#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){colour=") +
+				   colour + ";}";
+		};
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			shader = store.CreateInstance(scene::ShaderScriptClass(), name.Text());
+			REQUIRE(scene::SetShaderSource(store, shader, code("vec4(1,0,0,1)")));
+			if (spatialImage)
+				store.GetMutable<gui::Picture>(pictureEntity)->Shader = name;
+			else {
+				const auto material = store.CreateInstance(scene::MaterialClass(), "CaptureMaterial");
+				REQUIRE(store.SetParent(material, wallEntity));
+				store.GetMutable<scene::MaterialRef>(material)->Shader = name;
+				scene::ResolveMaterials(store);
+			}
+		});
+		const auto red = capture();
+		CHECK(fixture.Render.HasShader(name, contentOwner) == !spatialImage);
+		const auto resourceRevision = fixture.Render.ResourceRevision();
+		bool renewed = false;
+		capture(PortalImageVersion{red.ContentRevision, red.LightingRevision}, &renewed);
+		CHECK(renewed);
+		CHECK(fixture.Render.ResourceRevision() == resourceRevision);
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			REQUIRE(scene::SetShaderSource(store, shader, code("vec4(0,1,0,1)")));
+		});
+		const auto green = capture(PortalImageVersion{red.ContentRevision, red.LightingRevision});
+		CHECK(green.PixelHash != red.PixelHash);
+		CHECK(green.ContentRevision != red.ContentRevision);
+		if (spatialImage) CHECK(fixture.Render.ResourceRevision() == resourceRevision);
+		capture(PortalImageVersion{green.ContentRevision, green.LightingRevision}, &renewed);
+		CHECK(renewed);
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			REQUIRE(scene::SetShaderSource(store, shader, "not a shader"));
+		});
+		capture(PortalImageVersion{green.ContentRevision, green.LightingRevision}, &renewed);
+		CHECK(renewed);
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) { store.Destroy(shader); });
+		const auto removed = capture(PortalImageVersion{green.ContentRevision, green.LightingRevision});
+		CHECK(removed.PixelHash != green.PixelHash);
+		CHECK(removed.ContentRevision != green.ContentRevision);
+	}
+	SECTION("editable image changes are prepared before capture renewal") {
+		ecs::Entity editable;
+		core::Name editableName;
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			editable = store.CreateInstance(scene::EditableImageClass(), "capture image");
+			scene::EditableImage image;
+			image.Width = image.Height = 2;
+			image.Pixels.assign(16, 255);
+			store.Set(editable, image);
+			editableName = scene::EditableImageContentName(store, editable);
+			store.GetMutable<scene::SurfaceAppearance>(wallEntity)->ColourMap = editableName;
+			if (spatialImage) store.GetMutable<gui::Picture>(pictureEntity)->Image = editableName;
+		});
+		const auto prepared = capture();
+		REQUIRE(fixture.Render.TextureHandle(editableName, contentOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName) == nullptr);
+		const auto uploadedRevision = fixture.Render.ResourceRevision();
+		const auto unchanged = capture();
+		CHECK(fixture.Render.ResourceRevision() == uploadedRevision);
+		CHECK(unchanged.PixelHash == prepared.PixelHash);
+		CHECK(unchanged.ContentRevision == prepared.ContentRevision);
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			auto *image = store.GetMutable<scene::EditableImage>(editable);
+			for (size_t at = 0; at < image->Pixels.size(); at += 4) {
+				image->Pixels[at] = image->Pixels[at + 1] = 0;
+			}
+			++image->Revision;
+		});
+		const auto changed = capture(PortalImageVersion{prepared.ContentRevision, prepared.LightingRevision});
+		CHECK(changed.PixelHash != prepared.PixelHash);
+		CHECK(changed.ContentRevision != prepared.ContentRevision);
+		CHECK(fixture.Render.ResourceRevision() > uploadedRevision);
+		const core::Name reboundOwner("session:editable-rebound");
+		bindOwner(reboundOwner);
+		const auto rebound = capture();
+		CHECK(fixture.Render.TextureHandle(editableName, reboundOwner) != nullptr);
+		CHECK(rebound.PixelHash == changed.PixelHash);
+		bindOwner(contentOwner);
+		const auto restored = capture();
+		CHECK(restored.PixelHash == changed.PixelHash);
+		const auto beforeClear = fixture.Render.ResourceRevision();
+		if (host) {
+			host->RemoveWorld(worlds.Destination);
+			host->SetContentOwner(worlds.Destination, contentOwner);
+			worlds.Requests = host->Serve(worlds.Destination);
+			REQUIRE(worlds.Requests.Generation != 0);
+		} else {
+			producer->Clear();
+		}
+		const auto reopened = capture();
+		CHECK(reopened.PixelHash == changed.PixelHash);
+		CHECK(fixture.Render.ResourceRevision() > beforeClear);
+	}
+	SECTION("editable mesh changes are prepared before capture renewal") {
+		if (spatialImage) return;
+		ecs::Entity editable;
+		core::Name editableName;
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			editable = store.CreateInstance(scene::EditableMeshClass(), "capture mesh");
+			REQUIRE(scene::AddVertex(store, editable, {-.5f, -.5f, 0}));
+			REQUIRE(scene::AddVertex(store, editable, {.5f, -.5f, 0}));
+			REQUIRE(scene::AddVertex(store, editable, {0, .5f, 0}));
+			REQUIRE(scene::AddTriangle(store, editable, 0, 1, 2));
+			REQUIRE(scene::AddTriangle(store, editable, 2, 1, 0));
+			editableName = scene::EditableMeshContentName(store, editable);
+			store.GetMutable<scene::Visual>(wallEntity)->Mesh = editableName;
+		});
+		const auto prepared = capture();
+		core::Vector3 extent;
+		REQUIRE(fixture.Render.MeshExtentOf(editableName, extent, contentOwner));
+		CHECK(extent.X == .5f);
+		CHECK_FALSE(fixture.Render.MeshExtentOf(editableName, extent));
+		CHECK(prepared.PixelHash != sameCell.PixelHash);
+		const auto uploadedRevision = fixture.Render.ResourceRevision();
+		const auto unchanged = capture();
+		CHECK(fixture.Render.ResourceRevision() == uploadedRevision);
+		CHECK(unchanged.PixelHash == prepared.PixelHash);
+		CHECK(unchanged.ContentRevision == prepared.ContentRevision);
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			auto *mesh = store.GetMutable<scene::EditableMesh>(editable);
+			// Keep the bounds fixed: renderer fits the mesh to the part's authored size.
+			mesh->Positions[2].X = .375f;
+			++mesh->Revision;
+		});
+		const auto changed = capture(PortalImageVersion{prepared.ContentRevision, prepared.LightingRevision});
+		CHECK(changed.PixelHash != prepared.PixelHash);
+		CHECK(changed.ContentRevision != prepared.ContentRevision);
+		REQUIRE(fixture.Render.MeshExtentOf(editableName, extent, contentOwner));
+		CHECK(extent.X == .5f);
+		CHECK(fixture.Render.ResourceRevision() > uploadedRevision);
+	}
 	SECTION("same-name texture replacement") {
 		for (size_t at = 0; at < texture.Pixels.size(); at += 4) {
 			texture.Pixels[at] = std::byte{0};
@@ -2208,27 +2730,62 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 			texture.Pixels[at + 2] = std::byte{255};
 		}
 		const auto beforeReplacement = fixture.Render.ResourceRevision();
-		REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture));
+		REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture, contentOwner));
 		CHECK(fixture.Render.ResourceRevision() > beforeReplacement);
-		const auto replaced = capture();
+		const auto replaced =
+			capture(PortalImageVersion{sameCell.ContentRevision, sameCell.LightingRevision});
 		CHECK(replaced.PixelHash != sameCell.PixelHash);
 		CHECK(replaced.ContentRevision != sameCell.ContentRevision);
 		const auto beforeRefusal = fixture.Render.ResourceRevision();
 		CHECK_FALSE(fixture.Render.DropTexture(core::Name("not-registered")));
 		CHECK(fixture.Render.ResourceRevision() == beforeRefusal);
-		REQUIRE(fixture.Render.DropTexture(core::Name("portal-flipbook")));
+		REQUIRE(fixture.Render.DropTexture(core::Name("portal-flipbook"), contentOwner));
 		CHECK(fixture.Render.ResourceRevision() > beforeRefusal);
 		const auto missing = capture();
 		CHECK(missing.ContentRevision != replaced.ContentRevision);
-		REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture));
+		REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture, contentOwner));
 		const auto restored = capture();
 		CHECK(restored.PixelHash == replaced.PixelHash);
 		CHECK(restored.ContentRevision != missing.ContentRevision);
 	}
+	SECTION("content owner changes invalidate captures without changing assets") {
+		const core::Name other("session:other-flipbook");
+		for (size_t at = 0; at < texture.Pixels.size(); at += 4) {
+			texture.Pixels[at] = std::byte{0};
+			texture.Pixels[at + 1] = std::byte{0};
+			texture.Pixels[at + 2] = std::byte{255};
+		}
+		REQUIRE(fixture.Render.AddTexture(core::Name("portal-flipbook"), texture, other));
+		const auto before = capture();
+		CHECK(before.PixelHash == sameCell.PixelHash);
+		const auto resourceRevision = fixture.Render.ResourceRevision();
+		bindOwner(other);
+		CHECK(fixture.Render.ResourceRevision() == resourceRevision);
+		const auto switched = capture(PortalImageVersion{before.ContentRevision, before.LightingRevision});
+		CHECK(switched.PixelHash != before.PixelHash);
+		CHECK(switched.ContentRevision != before.ContentRevision);
+		bindOwner(contentOwner);
+		const auto restored = capture();
+		CHECK(restored.PixelHash == before.PixelHash);
+		CHECK(restored.ContentRevision == before.ContentRevision);
+	}
+	SECTION("retiring a hosted world removes its content binding") {
+		if (host) {
+			host->RemoveWorld(worlds.Destination);
+			worlds.Requests = host->Serve(worlds.Destination);
+			REQUIRE(worlds.Requests.Generation != 0);
+			const auto unbound = capture();
+			CHECK(unbound.PixelHash != sameCell.PixelHash);
+			bindOwner(contentOwner);
+			const auto restored = capture();
+			CHECK(restored.PixelHash == sameCell.PixelHash);
+		}
+	}
+
 	SECTION("flipbook advancement") {
 		for (int frame = 0; frame < 36; ++frame)
 			worlds.Universe.Tick(1.0f / 60.0f);
-		const auto nextCell = capture();
+		const auto nextCell = capture(PortalImageVersion{first.ContentRevision, first.LightingRevision});
 		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 			CHECK(store.Time().Elapsed >= .5);
 		});
@@ -2551,8 +3108,11 @@ TEST_CASE(
 	});
 	PortalImageProducer producer(worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests);
 	uint64_t sequence = 0;
-	for (const auto scope : {PortalImageScope::OpaqueLighting, PortalImageScope::CompleteWorld}) {
-		CAPTURE(scope);
+	for (const int captureMode : {0, 1, 2}) {
+		const auto scope =
+			captureMode == 1 ? PortalImageScope::CompleteWorld : PortalImageScope::OpaqueLighting;
+		const bool ordered = captureMode == 2;
+		CAPTURE(scope, ordered);
 		std::optional<PortalImageReply> original;
 		for (const bool enabled : {false, true, false}) {
 			worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
@@ -2562,8 +3122,9 @@ TEST_CASE(
 			auto request = Request();
 			request.Key.RequestId = ++sequence;
 			request.Scope = scope;
+			request.OrderedLayers = ordered;
 			request.Width = request.Height = 65;
-			request.PixelBudget = 65 * 65;
+			request.PixelBudget = (ordered ? 4 : 1) * 65 * 65;
 			std::vector<std::byte> bytes;
 			std::string error;
 			REQUIRE(EncodePortalImageRequest(request, bytes, error));
@@ -2581,7 +3142,31 @@ TEST_CASE(
 			}
 			REQUIRE(replies.size() == 1);
 			PortalImageReply reply;
-			REQUIRE(DecodePortalImageReply(replies[0].Payload, reply, error));
+			if (ordered) {
+				PortalImageLayerSet layers;
+				REQUIRE(DecodePortalImageLayerSet(replies[0].Payload, layers, error));
+				CHECK(layers.Lenses.Entries.size() == size_t(enabled ? 1 : 0));
+				REQUIRE(layers.Lenses.Programs.size() == size_t(enabled ? 1 : 0));
+				if (enabled) {
+					const auto &captured = layers.Lenses.Entries.front();
+					CHECK(layers.Lenses.Programs.front().Hash == captured.ProgramHash);
+					CHECK_FALSE(layers.Lenses.Programs.front().SpirV.empty());
+					CHECK(captured.Shader == "gravitational-lens");
+					CHECK(
+						captured.ProgramHash ==
+						fixture.Render.LensShaderHash(
+							core::Name(captured.Shader), worlds.Universe.NameOf(worlds.Destination)
+						)
+					);
+					CHECK(captured.Position == std::array<float, 3>{0, 0, -2});
+					CHECK(captured.Radius == 2);
+					CHECK(captured.InnerRadius == .5f);
+					CHECK(captured.Strength == 2);
+				}
+				reply = std::move(layers.Opaque);
+			} else {
+				REQUIRE(DecodePortalImageReply(replies[0].Payload, reply, error));
+			}
 			INFO(reply.Diagnostic);
 			REQUIRE(reply.Status == PortalImageStatus::Ok);
 			if (const char *output = std::getenv("MONO_RENDER_PREVIEW_DIR")) {
@@ -2624,11 +3209,28 @@ TEST_CASE(
 	"portal producer captures ordered layers and refuses visible overflow",
 	"[render][gpu][portal-runtime][producer-layers][.]"
 ) {
+	const int layerMode = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+	const bool spatialLayers = layerMode != 0;
+	const bool topLayer = layerMode >= 6;
+	CAPTURE(layerMode);
+	gui::RegisterGuiClasses();
 	RuntimeWorlds worlds(1);
 	scene::RegisterSceneClasses();
 	RegisterPresentationComponents();
 	worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 		scene::InstallServices(store);
+		if (spatialLayers) {
+			for (const bool red : {false, true}) {
+				const auto shader =
+					store.CreateInstance(scene::ShaderScriptClass(), red ? "layer.red" : "layer.green");
+				std::string source = "#version 450\nlayout(location=0) out vec4 colour;\nvoid main(){";
+				if (red && (layerMode == 2 || layerMode == 8)) source += "if(gl_FragCoord.x<8)discard;";
+				if (red && (layerMode == 3 || layerMode == 9))
+					source += "if(gl_FragCoord.x<8){colour=vec4(0);return;}";
+				source += red ? "colour=vec4(16,0,0,128.0/255.0);}" : "colour=vec4(0,16,0,128.0/255.0);}";
+				REQUIRE(scene::SetShaderSource(store, shader, source));
+			}
+		}
 		store.SetResource(DrawList{});
 	});
 	render::test::FixtureDevice fixture;
@@ -2643,25 +3245,30 @@ TEST_CASE(
 	plane.Indices = {0, 1, 2, 0, 2, 3};
 	plane.ComputeBounds();
 	const core::Name mesh("producer-layer-plane"), emission("producer-layer-emission");
-	REQUIRE(fixture.Render.AddMesh(mesh, plane));
+	REQUIRE(fixture.Render.AddMesh(mesh, plane, worlds.Universe.NameOf(worlds.Destination)));
 	assets::TextureData white;
 	white.Width = white.Height = 1;
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
-	REQUIRE(fixture.Render.AddTexture(emission, white));
+	REQUIRE(fixture.Render.AddTexture(emission, white, worlds.Universe.NameOf(worlds.Destination)));
 	PortalImageProducer producer(worlds.Universe, fixture.Render, worlds.Destination, worlds.Requests);
 	PortalImageInbox inbox;
 	const auto endpoint = [](const world::PresentationAddress &address) {
 		return PortalEndpointView{address.World, address.Channel, address.Session, address.Generation};
 	};
 	uint64_t sequence = 0;
+	std::vector<ecs::Entity> canvases;
 	// Recovery follows overflow on the same producer, exercising capture retirement.
 	for (const int panes : {0, 1, 2, 3, -3, 2, 0}) {
+		if (topLayer && panes != 0 && panes != 1) continue;
 		CAPTURE(panes, sequence);
 		worlds.Universe.Tick(.01f);
 		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 			auto &rows = store.ResourceMutable<DrawList>()->Instances;
 			rows.clear();
+			for (const auto entity : canvases)
+				store.Destroy(entity);
+			canvases.clear();
 			for (int index = 0; index <= std::abs(panes); ++index) {
 				scene::DrawInstance row;
 				row.Source = index + 1;
@@ -2676,7 +3283,38 @@ TEST_CASE(
 				row.EmissiveTint = index == 0	? core::Color3{0, 0, 1}
 								   : index == 1 ? core::Color3{1, 0, 0}
 												: core::Color3{0, 1, 0};
-				rows.push_back(row);
+				if (!spatialLayers || index == 0 || (layerMode == 4 && index % 2 == 0) ||
+					(layerMode == 5 && index % 2 != 0)) {
+					rows.push_back(row);
+					continue;
+				}
+				scene::PartDesc part;
+				part.Frame = row.Frame;
+				part.Size = {16, 16, .0002f};
+				part.Simulated = false;
+				const auto anchor = scene::MakePart(store, part);
+				REQUIRE(store.SetParent(anchor, store.FindFirstRoot("Workspace")));
+				canvases.push_back(anchor);
+				const auto canvas = store.CreateInstance(gui::GuiClass("SurfaceGui"), "Layer");
+				REQUIRE(store.SetParent(canvas, anchor));
+				gui::Surface surface;
+				surface.On = gui::Face::Back;
+				surface.AlwaysOnTop = topLayer;
+				surface.CanvasSize = {100, 100};
+				store.Set(canvas, surface);
+				const auto label = store.CreateInstance(gui::GuiClass("ImageLabel"), "Colour");
+				REQUIRE(store.SetParent(label, canvas));
+				gui::Element element;
+				element.Size = {1, 0, 1, 0};
+				store.Set(label, element);
+				gui::Background background;
+				background.Transparency = 1;
+				background.BorderSizePixel = 0;
+				store.Set(label, background);
+				gui::Picture picture;
+				picture.Image = emission;
+				picture.Shader = core::Name(index == 1 ? "layer.red" : "layer.green");
+				store.Set(label, picture);
 			}
 		});
 		auto request = Request();
@@ -2686,7 +3324,7 @@ TEST_CASE(
 		request.Projection = PortalImageProjection::Eye;
 		request.ClipPlane = {};
 		request.Width = request.Height = 17;
-		request.PixelBudget = 4 * 17 * 17;
+		request.PixelBudget = (topLayer && layerMode != 7 ? 5 : 4) * 17 * 17;
 		std::vector<std::byte> wire;
 		std::string error;
 		const auto issued = inbox.Issue(endpoint(worlds.Replies), endpoint(worlds.Requests), request, START);
@@ -2698,7 +3336,7 @@ TEST_CASE(
 				worlds.Source, worlds.Replies, worlds.Requests, sequence, wire
 			) == world::PresentationStatus::Ok
 		);
-		if (sequence == 3) {
+		if (sequence == 3 && !topLayer) {
 			REQUIRE(producer.Pump(0, 0, START, true).Rendered == 1);
 			const std::array filler{std::byte{0}};
 			REQUIRE(
@@ -2743,14 +3381,18 @@ TEST_CASE(
 			replies[0].Payload,
 			START
 		);
-		if (panes == 3) {
+		if (panes == 3 || (layerMode == 7 && panes == 1)) {
 			CHECK(accepted.Status == PortalInboxStatus::CompletedFailure);
 			CHECK(inbox.Usage().HeldCount == 0);
 			PortalImageReply failed;
 			REQUIRE(DecodePortalImageReply(replies[0].Payload, failed, error));
 			CHECK(failed.Key == request.Key);
 			CHECK(failed.Status == PortalImageStatus::BudgetExceeded);
-			CHECK(failed.Diagnostic == "destination transparency exceeds two ordered layers");
+			CHECK(
+				failed.Diagnostic == (layerMode == 7
+										  ? "destination spatial overlay exceeds capture pixel budget"
+										  : "destination transparency exceeds two ordered layers")
+			);
 			CHECK(failed.Pixels.empty());
 			CHECK(failed.Depth.empty());
 			continue;
@@ -2765,18 +3407,47 @@ TEST_CASE(
 		const auto &layers = *owned;
 		REQUIRE(ValidPortalImageLayerSet(layers));
 		CHECK(layers.Opaque.Key == request.Key);
+		CHECK(layers.Opaque.Normal.size() == size_t(request.Width) * request.Height * 4);
+		CHECK(layers.Opaque.AmbientResponse.size() == size_t(request.Width) * request.Height * 16);
+		CHECK(layers.Opaque.LightingBaseline.size() == size_t(request.Width) * request.Height * 16);
+		CHECK(layers.Opaque.DirectionalResponse.size() == size_t(request.Width) * request.Height * 16);
+		CHECK(assets::Hasher::Of(layers.Opaque.DirectionalResponse) == layers.Opaque.DirectionalResponseHash);
 		REQUIRE(layers.Transparent.size() == 2);
+		for (const auto &transparent : layers.Transparent) {
+			CHECK(transparent.Normal.empty());
+			CHECK(transparent.AmbientResponse.empty());
+			CHECK(transparent.LightingBaseline.empty());
+			CHECK(transparent.DirectionalResponse.empty());
+		}
+		CHECK(layers.SpatialOverlay.has_value() == (topLayer && panes == 1));
+		if (layers.SpatialOverlay) {
+			CHECK(layers.SpatialOverlay->Depth.empty());
+			CHECK(layers.SpatialOverlay->DirectionalResponse.empty());
+			core::ByteReader overlay(layers.SpatialOverlay->Pixels);
+			for (size_t pixel = 0; pixel < 17 * 17; ++pixel) {
+				const auto rg = glm::unpackHalf2x16(overlay.ReadUInt32());
+				const auto ba = glm::unpackHalf2x16(overlay.ReadUInt32());
+				const float alpha = layerMode >= 8 && pixel % 17 < 8 ? 0.f : 128.f / 255;
+				CHECK(std::abs(rg.x - 16.f * alpha) < .01f);
+				CHECK(rg.y == 0);
+				CHECK(ba.x == 0);
+				CHECK(std::abs(ba.y - alpha) < .001f);
+			}
+		}
 		for (size_t layer = 0; layer < 3; ++layer) {
 			const auto &image = layer == 0 ? layers.Opaque : layers.Transparent[layer - 1];
 			core::ByteReader pixels(image.Pixels), depths(image.Depth);
-			const bool occupied = layer == 0 || int(layer) <= std::abs(panes);
 			for (size_t pixel = 0; pixel < 17 * 17; ++pixel) {
+				const auto planeIndex =
+					layer + (layer != 0 && (layerMode == 2 || layerMode == 3) && pixel % 17 < 8 ? 1 : 0);
+				const bool occupied = layer == 0 || (!topLayer && int(planeIndex) <= std::abs(panes) &&
+													 (panes >= 0 || planeIndex < 3));
 				const auto rg = glm::unpackHalf2x16(pixels.ReadUInt32());
 				const auto ba = glm::unpackHalf2x16(pixels.ReadUInt32());
 				const auto depth = depths.ReadFloat();
 				CHECK(
 					std::abs(
-						depth - (occupied ? (layer == 0 ? (panes < 0 ? 3.5f : 6.f) : 1.f + layer) : 0.f)
+						depth - (occupied ? (layer == 0 ? (panes < 0 ? 3.5f : 6.f) : 1.f + planeIndex) : 0.f)
 					) < .003f
 				);
 				if (!occupied) {
@@ -2784,7 +3455,7 @@ TEST_CASE(
 					CHECK(ba == glm::vec2{});
 				} else {
 					CHECK(std::abs(ba.y - (layer == 0 ? 1.f : 128.f / 255)) < .001f);
-					CHECK((layer == 0 ? ba.x : layer == 1 ? rg.x : rg.y) > 7.f);
+					CHECK((layer == 0 ? ba.x : planeIndex == 1 ? rg.x : rg.y) > 7.f);
 				}
 			}
 		}
@@ -2794,9 +3465,23 @@ TEST_CASE(
 TEST_CASE(
 	"portal source publishes layer groups only after upload", "[render][gpu][portal-runtime][layer-source][.]"
 ) {
+	const bool overlayFirst = GENERATE(false, true);
 	RuntimeWorlds worlds;
 	render::test::FixtureDevice fixture;
 	fixture.Initialise();
+	std::ifstream programFile(
+		resources::Shader("gravitational-lens.frag", resources::ShaderForm::SpirV),
+		std::ios::binary | std::ios::ate
+	);
+	REQUIRE(programFile);
+	const auto programSize = programFile.tellg();
+	REQUIRE(programSize > 0);
+	REQUIRE(static_cast<size_t>(programSize) % sizeof(uint32_t) == 0);
+	std::vector<uint32_t> lensWords(static_cast<size_t>(programSize) / sizeof(uint32_t));
+	programFile.seekg(0);
+	programFile.read(reinterpret_cast<char *>(lensWords.data()), programSize);
+	REQUIRE(programFile);
+	const auto lensHash = assets::Hasher::Of(std::as_bytes(std::span(lensWords)));
 	PortalResidentImages resident(fixture.Render);
 	PortalImageSource source(worlds.Universe, fixture.Render, worlds.Source, worlds.Replies, {}, &resident);
 	const auto issue = [&](float position, bool ordered = true) {
@@ -2833,6 +3518,20 @@ TEST_CASE(
 		opaque.PixelHash = assets::Hasher::Of(opaque.Pixels);
 		opaque.DepthHash = assets::Hasher::Of(opaque.Depth);
 		layers.Transparent.assign(2, opaque);
+		if (ordered && ((revision % 2 != 0) == overlayFirst)) {
+			layers.SpatialOverlay = opaque;
+			layers.SpatialOverlay->Depth.clear();
+			layers.SpatialOverlay->DepthHash = {};
+		}
+		if (ordered && ((revision % 2 != 0) != overlayFirst)) {
+			layers.Lenses.TimeSeconds = static_cast<float>(revision);
+			PortalCaptureLens lens;
+			lens.Shader = "captured.lens";
+			lens.ProgramHash = lensHash;
+			lens.Spin = static_cast<float>(revision);
+			layers.Lenses.Entries.push_back(std::move(lens));
+			layers.Lenses.Programs.push_back({lensHash, lensWords});
+		}
 		std::vector<std::byte> wire;
 		const bool encoded = ordered ? EncodePortalImageLayerSet(layers, wire, error)
 									 : EncodePortalImageReply(opaque, wire, error);
@@ -2850,7 +3549,7 @@ TEST_CASE(
 	OverlayImage overlay;
 	const auto upload = [&] {
 		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false)
-					.Ran(core::Name("portal-capture")));
+					.Ran(core::Name("surface-capture")));
 		CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
 	};
 	const auto first = issue(0);
@@ -2880,8 +3579,13 @@ TEST_CASE(
 	CHECK(original->Camera.Position[0] == 0);
 	CHECK(original->TransparentImages[0] != 0);
 	CHECK(original->TransparentImages[1] != 0);
+	CHECK((original->SpatialOverlayImage != 0) == overlayFirst);
+	CHECK(original->Lenses.Entries.empty() == overlayFirst);
+	CHECK((original->LensPrograms == 0) == overlayFirst);
+	CHECK(original->Lenses.Programs.empty());
+	CHECK(original->Lenses.TimeSeconds == (overlayFirst ? 0.f : 1.f));
 	CHECK(source.CurrentImage("Door") == original->Image);
-	CHECK(fixture.Render.PortalImageUsage().Images == 3);
+	CHECK(fixture.Render.PortalImageUsage().Images == size_t{3} + overlayFirst);
 	const auto second = issue(3);
 	REQUIRE(second.Status == PortalInboxStatus::Issued);
 	deliver(second.RequestId, 2);
@@ -2890,7 +3594,9 @@ TEST_CASE(
 	CHECK(source.Image("Door") == original->Image);
 	CHECK(source.CurrentImage("Door") == 0);
 	CHECK(source.Capture("Door")->Camera.Position == original->Camera.Position);
-	CHECK(fixture.Render.PortalImageUsage().Images == 6);
+	CHECK(source.Capture("Door")->SpatialOverlayImage == original->SpatialOverlayImage);
+	CHECK(source.Capture("Door")->Lenses == original->Lenses);
+	CHECK(fixture.Render.PortalImageUsage().Images == 7);
 	upload();
 	CHECK(source.Image("Door") == original->Image);
 	const auto replaced = source.Poll(START);
@@ -2900,7 +3606,12 @@ TEST_CASE(
 	REQUIRE(current);
 	CHECK(current->Image != original->Image);
 	CHECK(current->Camera.Position[0] == 3);
-	CHECK(fixture.Render.PortalImageUsage().Images == 3);
+	CHECK((current->SpatialOverlayImage != 0) != overlayFirst);
+	CHECK(current->Lenses.Entries.empty() != overlayFirst);
+	CHECK((current->LensPrograms == 0) != overlayFirst);
+	CHECK(current->Lenses.Programs.empty());
+	CHECK(current->Lenses.TimeSeconds == (overlayFirst ? 2.f : 0.f));
+	CHECK(fixture.Render.PortalImageUsage().Images == size_t{3} + !overlayFirst);
 	CHECK_FALSE(fixture.Render.DropPortalImage(original->Image));
 	for (const bool submit : {false, true}) {
 		const auto cancelled = issue(5);
@@ -2914,7 +3625,9 @@ TEST_CASE(
 		CHECK(source.Poll(START).empty());
 		CHECK(source.Capture("Door")->Image == current->Image);
 		CHECK(source.Capture("Door")->Camera.Position == current->Camera.Position);
-		CHECK(fixture.Render.PortalImageUsage().Images == 3);
+		CHECK(source.Capture("Door")->SpatialOverlayImage == current->SpatialOverlayImage);
+		CHECK(source.Capture("Door")->Lenses == current->Lenses);
+		CHECK(fixture.Render.PortalImageUsage().Images == size_t{3} + !overlayFirst);
 		CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
 	}
 	const auto flattened = issue(6, false);
@@ -2924,6 +3637,8 @@ TEST_CASE(
 	REQUIRE(flatCompletion.size() == 1);
 	CHECK(flatCompletion[0].Status == PortalImageStatus::Ok);
 	CHECK(source.Capture("Door")->TransparentImages == std::array<uint64_t, 2>{});
+	CHECK(source.Capture("Door")->SpatialOverlayImage == 0);
+	CHECK(source.Capture("Door")->Lenses == PortalCaptureLenses{});
 	CHECK(fixture.Render.PortalImageUsage().Images == 1);
 	CHECK_FALSE(fixture.Render.DropPortalImage(current->Image));
 	upload();
@@ -2939,4 +3654,557 @@ TEST_CASE(
 	CHECK(fixture.Render.PortalImageUsage().Images == 0);
 	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
 	CHECK(fixture.Render.PortalImageUsage().CachedTextureBytes == 0);
+}
+
+namespace {
+	PortalCaptureTreeNode
+	PayloadNode(const PortalImageRequest &request, const world::PresentationAddress &endpoint, bool child) {
+		PortalCaptureTreeNode node;
+		node.Producer = {endpoint.World, endpoint.Channel, endpoint.Session, endpoint.Generation};
+		node.Camera = {
+			request.Position, request.Orientation, request.Frustum, request.ClipPlane, request.Projection
+		};
+		if (child) node.Camera.Position = {5, 6, 7};
+		auto &opaque = node.Layers.Opaque;
+		opaque.Key = request.Key;
+		if (child) opaque.Key.PortalKey = "ChildDoor";
+		opaque.Scope = request.Scope;
+		opaque.Status = PortalImageStatus::Ok;
+		opaque.CaptureTick = 21;
+		opaque.ContentRevision = 22;
+		opaque.LightingRevision = 23;
+		opaque.Width = opaque.Height = child ? 2 : 8;
+		opaque.RowStride = opaque.Width * 8;
+		opaque.Pixels.resize(opaque.RowStride * opaque.Height);
+		opaque.Depth.resize(opaque.Width * opaque.Height * 4);
+		opaque.Pixels[0] = std::byte{0x00};
+		opaque.Pixels[1] = std::byte{0x3c};
+		opaque.CaptureLighting.emplace();
+		opaque.CaptureLighting->Ambient = {.1f, .2f, .3f};
+		opaque.PixelHash = assets::Hasher::Of(opaque.Pixels);
+		opaque.DepthHash = assets::Hasher::Of(opaque.Depth);
+		node.Layers.Transparent.assign(2, opaque);
+		for (auto &layer : node.Layers.Transparent) {
+			layer.Pixels.assign(layer.Pixels.size(), std::byte{});
+			layer.PixelHash = assets::Hasher::Of(layer.Pixels);
+		}
+		return node;
+	}
+
+}
+
+TEST_CASE(
+	"payload portal sources retain authenticated capture trees without GPU imports",
+	"[render][portal-runtime][portal-payload]"
+) {
+	const bool nested = GENERATE(false, true);
+	RuntimeWorlds worlds;
+	Renderer renderer;
+	PortalImageSource source(
+		worlds.Universe,
+		renderer,
+		worlds.Source,
+		worlds.Replies,
+		{},
+		nullptr,
+		PortalImageSourceDelivery::CapturePayloads
+	);
+	CHECK(source.Issue(worlds.Requests, Request(), Binding(), START).Status == PortalInboxStatus::Invalid);
+	auto request = Request();
+	request.OrderedLayers = true;
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.PixelBudget = 1024;
+	request.RecursionDepth = nested ? 2 : 0;
+	request.Position = {2, 3, 4};
+	const auto issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	{
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 1);
+		std::string decodeError;
+		REQUIRE(DecodePortalImageRequest(messages.front().Payload, request, decodeError));
+		CHECK(request.Key.RequestId == issued.RequestId);
+	}
+	const auto childWorld = worlds.Universe.Create({.Name = core::Name("payload-child")});
+	const auto childEndpoint =
+		worlds.Universe.OpenPresentation(childWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	PortalCaptureTree expected;
+	expected.Nodes.push_back(PayloadNode(request, worlds.Requests, false));
+	if (nested) {
+		expected.Nodes.push_back(PayloadNode(request, childEndpoint, true));
+		PortalCaptureTreeEdge edge;
+		edge.PortalKey = "ChildDoor";
+		edge.Position = {1, 2, 3};
+		PortalGeometry geometry;
+		geometry.Rows.emplace_back();
+		std::string error;
+		REQUIRE(EncodePortalGeometry(geometry, edge.Geometry, error));
+		expected.Edges.push_back(std::move(edge));
+	}
+	std::vector<std::byte> wire;
+	std::string error;
+	if (nested)
+		REQUIRE(EncodePortalCaptureTree(expected, wire, error));
+	else
+		REQUIRE(EncodePortalImageLayerSet(expected.Nodes.front().Layers, wire, error));
+	const auto before = renderer.PortalImageUsage();
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Destination, worlds.Requests, worlds.Replies, issued.RequestId, wire
+		) == world::PresentationStatus::Ok
+	);
+	const auto completions = source.Poll(START);
+	REQUIRE(completions.size() == 1);
+	CHECK(completions.front().RequestId == issued.RequestId);
+	CHECK(completions.front().Status == PortalImageStatus::Ok);
+	CHECK(completions.front().Image == 0);
+	CHECK_FALSE(source.HasPendingUploads());
+	CHECK(source.Image("Door") == 0);
+	CHECK(renderer.PortalImageUsage().Images == before.Images);
+	CHECK(renderer.PortalImageUsage().PendingCpuBytes == before.PendingCpuBytes);
+	SECTION("take exactly once") {
+		auto captured = source.TakeTree("Door", START);
+		REQUIRE(captured);
+		CHECK(*captured == expected);
+		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	SECTION("expiry") {
+		CHECK_FALSE(source.TakeTree("Door", START + std::chrono::seconds(2)));
+	}
+	SECTION("root endpoint withdrawal") {
+		REQUIRE(worlds.Universe.ClosePresentation(worlds.Requests) == world::PresentationStatus::Ok);
+		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	SECTION("child endpoint withdrawal") {
+		if (nested) {
+			REQUIRE(worlds.Universe.ClosePresentation(childEndpoint) == world::PresentationStatus::Ok);
+			CHECK_FALSE(source.TakeTree("Door", START));
+		} else {
+			CHECK(source.TakeTree("Door", START).has_value());
+		}
+	}
+	SECTION("consumer endpoint withdrawal") {
+		REQUIRE(worlds.Universe.ClosePresentation(worlds.Replies) == world::PresentationStatus::Ok);
+		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	CHECK(renderer.PortalImageUsage().Images == before.Images);
+	CHECK(renderer.PortalImageUsage().PendingCpuBytes == before.PendingCpuBytes);
+}
+
+TEST_CASE(
+	"retained body leaf layers publish one owned capture tree",
+	"[render][gpu][portal-runtime][tree-source][.]"
+) {
+	const bool retained = GENERATE(false, true);
+	RuntimeWorlds worlds;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	PortalImageSource source(worlds.Universe, fixture.Render, worlds.Source, worlds.Replies);
+	auto request = Request();
+	request.OrderedLayers = true;
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.RecursionDepth = 0;
+	request.PixelBudget = 1024;
+	request.Position = {2, 3, 4};
+	request.RetainedBodyPlayer = retained ? "91" : "";
+	const auto issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+	REQUIRE(messages.size() == 1);
+	std::string error;
+	REQUIRE(DecodePortalImageRequest(messages.front().Payload, request, error));
+	const auto node = PayloadNode(request, worlds.Requests, false);
+	std::vector<std::byte> wire;
+	REQUIRE(EncodePortalImageLayerSet(node.Layers, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Destination, worlds.Requests, worlds.Replies, issued.RequestId, wire
+		) == world::PresentationStatus::Ok
+	);
+	CHECK(source.Poll(START).empty());
+	CHECK(source.HasPendingUploads());
+	CHECK_FALSE(source.Capture("Door"));
+	SceneTarget target{8, 8};
+	View view;
+	view.World = worlds.Source.Index;
+	view.WorldName = core::Name(worlds.Replies.World);
+	view.Target = &target;
+	OverlayImage overlay;
+	REQUIRE(
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("surface-capture"))
+	);
+	const auto completed = source.Poll(START);
+	REQUIRE(completed.size() == 1);
+	REQUIRE(completed.front().Status == PortalImageStatus::Ok);
+	const auto captured = source.Capture("Door");
+	REQUIRE(captured);
+	CHECK(captured->TransparentImages[0] != 0);
+	CHECK(captured->TransparentImages[1] != 0);
+	CHECK(captured->RetainedBodyPlayer == request.RetainedBodyPlayer);
+	if (retained) {
+		REQUIRE(captured->Tree != 0);
+		const auto *tree = fixture.Render.FindPortalCaptureTree(captured->Tree);
+		REQUIRE(tree);
+		REQUIRE(tree->Nodes.size() == 1);
+		CHECK(tree->Edges.empty());
+		CHECK(tree->Nodes.front().Producer == node.Producer);
+		CHECK(tree->Nodes.front().Camera == node.Camera);
+		CHECK(tree->Nodes.front().RetainedBodyPlayer == "91");
+		CHECK(tree->Nodes.front().Binding.Expected == request.Key);
+		CHECK(tree->Nodes.front().Images[0] == captured->Image);
+		CHECK(source.PinCapture("Door", captured->Tree, request.Key, START, START + std::chrono::seconds(2)));
+	} else {
+		CHECK(captured->Tree == 0);
+	}
+	source.Clear();
+	CHECK_FALSE(source.Capture("Door"));
+	CHECK(fixture.Render.PortalImageUsage().Images == 0);
+	if (retained) CHECK(fixture.Render.FindPortalCaptureTree(captured->Tree) == nullptr);
+}
+
+TEST_CASE(
+	"portal sources publish recursive captures atomically after upload",
+	"[render][gpu][portal-runtime][tree-source][.]"
+) {
+	const bool explicitInvalidation = GENERATE(false, true);
+	RuntimeWorlds worlds;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	PortalImageSource source(worlds.Universe, fixture.Render, worlds.Source, worlds.Replies);
+	auto request = Request();
+	request.OrderedLayers = true;
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.RecursionDepth = 2;
+	request.PixelBudget = 1024;
+	const auto childWorld = worlds.Universe.Create({.Name = core::Name("import-child")});
+	const auto child =
+		worlds.Universe.OpenPresentation(childWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	auto issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	{
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 1);
+		std::string decodeError;
+		REQUIRE(DecodePortalImageRequest(messages.front().Payload, request, decodeError));
+		CHECK(request.Key.RequestId == issued.RequestId);
+	}
+	PortalCaptureTree tree;
+	tree.Nodes.push_back(PayloadNode(request, worlds.Requests, false));
+	tree.Nodes.push_back(PayloadNode(request, child, true));
+	auto &rootLayers = tree.Nodes[0].Layers;
+	rootLayers.SpatialOverlay = rootLayers.Transparent[0];
+	rootLayers.SpatialOverlay->Depth.clear();
+	rootLayers.SpatialOverlay->DepthHash = {};
+	PortalCaptureTreeEdge edge;
+	edge.PortalKey = "ChildDoor";
+	PortalGeometry geometry;
+	geometry.Rows.emplace_back();
+	std::string error;
+	REQUIRE(EncodePortalGeometry(geometry, edge.Geometry, error));
+	tree.Edges.push_back(std::move(edge));
+	const auto deliver = [&](const std::vector<std::byte> &wire) {
+		REQUIRE(
+			worlds.Universe.SendPresentation(
+				worlds.Destination, worlds.Requests, worlds.Replies, issued.RequestId, wire
+			) == world::PresentationStatus::Ok
+		);
+	};
+	std::vector<std::byte> wire;
+	REQUIRE(EncodePortalCaptureTree(tree, wire, error));
+	deliver(wire);
+	CHECK(source.Poll(START).empty());
+	CHECK(source.HasPendingUploads());
+	CHECK(source.Image("Door") == 0);
+	CHECK_FALSE(source.Capture("Door"));
+	SceneTarget target{8, 8};
+	View view;
+	view.World = worlds.Source.Index;
+	view.WorldName = core::Name(worlds.Replies.World);
+	view.Target = &target;
+	OverlayImage overlay;
+	REQUIRE(
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("surface-capture"))
+	);
+	CHECK(source.Image("Door") == 0);
+	const auto completed = source.Poll(START);
+	REQUIRE(completed.size() == 1);
+	CHECK(completed[0].Status == PortalImageStatus::Ok);
+	CHECK_FALSE(source.HasPendingUploads());
+	auto captured = source.Capture("Door");
+	REQUIRE(captured);
+	REQUIRE(captured->Tree != 0);
+	REQUIRE(source.Image("Door") != 0);
+	CHECK(captured->TransparentImages[0] != 0);
+	CHECK(captured->TransparentImages[1] != 0);
+	CHECK(captured->SpatialOverlayImage != 0);
+	const auto *imported = fixture.Render.FindPortalCaptureTree(captured->Tree);
+	REQUIRE(imported);
+	REQUIRE(imported->Nodes.size() == 2);
+	CHECK(imported->Nodes[1].Camera == tree.Nodes[1].Camera);
+	CHECK(imported->Nodes[1].Producer == tree.Nodes[1].Producer);
+	CHECK(imported->Edges == tree.Edges);
+	const auto firstTree = captured->Tree;
+	const auto replacementWorld = worlds.Universe.Create({.Name = core::Name("replacement-child")});
+	const auto replacementChild =
+		worlds.Universe.OpenPresentation(replacementWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	tree.Nodes[1].Producer = {
+		replacementChild.World,
+		replacementChild.Channel,
+		replacementChild.Session,
+		replacementChild.Generation
+	};
+	request.Key.CameraRevision++;
+	issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	{
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 1);
+		REQUIRE(DecodePortalImageRequest(messages.front().Payload, request, error));
+	}
+	for (auto &node : tree.Nodes) {
+		node.Layers.Opaque.Key = request.Key;
+		node.Layers.Opaque.CaptureTick++;
+		for (auto &layer : node.Layers.Transparent) {
+			layer.Key = request.Key;
+			layer.CaptureTick++;
+		}
+		if (node.Layers.SpatialOverlay) {
+			node.Layers.SpatialOverlay->Key = request.Key;
+			node.Layers.SpatialOverlay->CaptureTick++;
+		}
+	}
+	REQUIRE(EncodePortalCaptureTree(tree, wire, error));
+	deliver(wire);
+	CHECK(source.Poll(START).empty());
+	CHECK(source.HasPendingUploads());
+	REQUIRE(source.Capture("Door"));
+	CHECK(source.Capture("Door")->Tree == firstTree);
+	if (explicitInvalidation)
+		source.InvalidateEndpoint(child);
+	else
+		REQUIRE(worlds.Universe.ClosePresentation(child) == world::PresentationStatus::Ok);
+	CHECK(source.Poll(START).empty());
+	CHECK(source.HasPendingUploads());
+	CHECK_FALSE(source.Capture("Door"));
+
+	REQUIRE(
+		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("surface-capture"))
+	);
+	const auto replacement = source.Poll(START);
+	REQUIRE(replacement.size() == 1);
+	CHECK(replacement.front().Status == PortalImageStatus::Ok);
+	captured = source.Capture("Door");
+	REQUIRE(captured);
+	CHECK(captured->Tree != firstTree);
+	CHECK_FALSE(fixture.Render.FindPortalCaptureTree(firstTree));
+	request.Key.CameraRevision++;
+	issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	{
+		const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+		REQUIRE(messages.size() == 1);
+		REQUIRE(DecodePortalImageRequest(messages.front().Payload, request, error));
+	}
+	for (auto &node : tree.Nodes) {
+		node.Layers.Opaque.Key = request.Key;
+		node.Layers.Opaque.Key.CameraRevision = request.Key.CameraRevision;
+		for (auto &layer : node.Layers.Transparent)
+			layer.Key = node.Layers.Opaque.Key;
+		if (node.Layers.SpatialOverlay) node.Layers.SpatialOverlay->Key = node.Layers.Opaque.Key;
+	}
+	REQUIRE(EncodePortalCaptureTree(tree, wire, error));
+	wire.pop_back();
+	deliver(wire);
+	source.Poll(START);
+	REQUIRE(source.Capture("Door"));
+	CHECK(source.Capture("Door")->Tree == captured->Tree);
+	CHECK(source.Image("Door") == replacement[0].Image);
+	CHECK_FALSE(source.HasPendingUploads());
+	REQUIRE(worlds.Universe.ClosePresentation(replacementChild) == world::PresentationStatus::Ok);
+	source.Poll(START);
+	CHECK_FALSE(source.Capture("Door"));
+	CHECK(source.Image("Door") == 0);
+	CHECK_FALSE(fixture.Render.FindPortalCaptureTree(captured->Tree));
+	CHECK(fixture.Render.PortalImageUsage().Images == 0);
+	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
+}
+
+TEST_CASE(
+	"payload sources authenticate public endpoint tuples through exact host bindings",
+	"[render][portal-runtime][portal-payload][endpoint-bindings]"
+) {
+	const bool nested = GENERATE(false, true);
+	RuntimeWorlds worlds;
+	Renderer renderer;
+	const auto childWorld = worlds.Universe.Create({.Name = core::Name("binding-child-alias")});
+	const auto childLocal =
+		worlds.Universe.OpenPresentation(childWorld, core::Name(PORTAL_REQUEST_CHANNEL)).Address;
+	const world::PresentationAddress rootPublic{
+		"published-root", std::string(PORTAL_REQUEST_CHANNEL), 700, 71
+	};
+	const world::PresentationAddress childPublic{
+		"published-child", std::string(PORTAL_REQUEST_CHANNEL), 800, 81
+	};
+	world::PresentationBindings bindings{
+		700, 1, {{worlds.Requests, rootPublic}}, {{childLocal, childPublic}}
+	};
+	PortalImageSource source(
+		worlds.Universe,
+		renderer,
+		worlds.Source,
+		worlds.Replies,
+		{},
+		nullptr,
+		PortalImageSourceDelivery::CapturePayloads
+	);
+	source.SetEndpointBindings(&bindings);
+	auto request = Request();
+	request.OrderedLayers = true;
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.PixelBudget = 1024;
+	request.RecursionDepth = nested ? 2 : 0;
+	const auto issued = source.Issue(worlds.Requests, request, Binding(), START);
+	REQUIRE(issued.Status == PortalInboxStatus::Issued);
+	const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
+	REQUIRE(messages.size() == 1);
+	std::string error;
+	REQUIRE(DecodePortalImageRequest(messages[0].Payload, request, error));
+	PortalCaptureTree expected;
+	expected.Nodes.push_back(PayloadNode(request, rootPublic, false));
+	if (nested) {
+		expected.Nodes.push_back(PayloadNode(request, childPublic, true));
+		PortalCaptureTreeEdge edge;
+		edge.PortalKey = "ChildDoor";
+		PortalGeometry geometry;
+		geometry.Rows.emplace_back();
+		REQUIRE(EncodePortalGeometry(geometry, edge.Geometry, error));
+		expected.Edges.push_back(std::move(edge));
+	}
+	bool refused = false;
+	auto sender = worlds.Requests;
+	SECTION("public root is checked independently of authenticated transport") {
+		if (nested) {
+			expected.Nodes[0].Producer.Generation++;
+			refused = true;
+		}
+	}
+	SECTION("unmapped child incarnation is refused") {
+		if (nested) {
+			expected.Nodes[1].Producer.Generation++;
+			refused = true;
+		}
+	}
+	SECTION("local return aliases cannot claim a canonical child identity") {
+		if (nested) {
+			expected.Nodes[1].Producer = {
+				childLocal.World, childLocal.Channel, childLocal.Session, childLocal.Generation
+			};
+			refused = true;
+		}
+	}
+	SECTION("matching public tuples do not replace outer transport authentication") {
+		sender = worlds.Universe.OpenPresentation(worlds.Destination, core::Name("wrong-producer")).Address;
+		refused = true;
+	}
+	SECTION("mapping replacement while pending refuses the old public root") {
+		bindings.Revision++;
+		bindings.Exports[0].Published.Generation++;
+		refused = true;
+	}
+	SECTION("matching public tuples are accepted") {}
+	std::vector<std::byte> wire;
+	if (nested)
+		REQUIRE(EncodePortalCaptureTree(expected, wire, error));
+	else
+		REQUIRE(EncodePortalImageLayerSet(expected.Nodes[0].Layers, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(
+			worlds.Destination, sender, worlds.Replies, issued.RequestId, wire
+		) == world::PresentationStatus::Ok
+	);
+	const auto completions = source.Poll(START);
+	if (refused) {
+		CHECK(completions.empty());
+		CHECK_FALSE(source.TakeTree("Door", START));
+		return;
+	}
+	REQUIRE(completions.size() == 1);
+	CHECK(completions[0].Image == 0);
+	CHECK(renderer.PortalImageUsage().Images == 0);
+	CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
+	SECTION("owned payload retains canonical tuples and camera") {
+		const auto captured = source.TakeTree("Door", START);
+		REQUIRE(captured);
+		CHECK(*captured == expected);
+		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	SECTION("root mapping replacement retires held payload") {
+		bindings.Revision++;
+		bindings.Exports[0].Published.Generation++;
+		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	SECTION("root mapping withdrawal retires held payload") {
+		bindings.Revision++;
+		bindings.Exports.clear();
+		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	SECTION("child mapping withdrawal retires nested payload") {
+		bindings.Revision++;
+		bindings.Returns.clear();
+		CHECK(source.TakeTree("Door", START).has_value() == !nested);
+	}
+	SECTION("local child route withdrawal retires nested payload") {
+		REQUIRE(worlds.Universe.ClosePresentation(childLocal) == world::PresentationStatus::Ok);
+		CHECK(source.TakeTree("Door", START).has_value() == !nested);
+	}
+}
+
+TEST_CASE(
+	"producer retained body exclusion defaults to denial and rechecks authorization",
+	"[render][portal-runtime][retained-body]"
+) {
+	RuntimeWorlds worlds;
+	Renderer renderer;
+	PortalImageProducer producer(worlds.Universe, renderer, worlds.Destination, worlds.Requests);
+	auto request = Request();
+	request.Key.RequestId = 1;
+	request.Scope = PortalImageScope::OpaqueLighting;
+	request.OrderedLayers = true;
+	request.PixelBudget *= 4;
+	request.EyePlayer = "17";
+	request.RetainedBodyPlayer = "91";
+	size_t checks = 0;
+	SECTION("missing trusted policy refuses before renderer setup") {}
+	SECTION("policy sees exact requester and distinct account") {
+		producer.SetRetainedBodyAuthorization([&](const auto &requester, std::string_view account) {
+			++checks;
+			CHECK(requester == worlds.Replies);
+			CHECK(account == "91");
+			return false;
+		});
+	}
+	SECTION("authorization withdrawn while accepted work waits") {
+		producer.SetRetainedBodyAuthorization([&](const auto &requester, std::string_view account) {
+			CHECK(requester == worlds.Replies);
+			CHECK(account == "91");
+			return ++checks == 1;
+		});
+	}
+	std::vector<std::byte> wire;
+	std::string error;
+	REQUIRE(EncodePortalImageRequest(request, wire, error));
+	REQUIRE(
+		worlds.Universe.SendPresentation(worlds.Source, worlds.Replies, worlds.Requests, 1, wire) ==
+		world::PresentationStatus::Ok
+	);
+	const auto progress = producer.Pump(0, 0, START);
+	CHECK(progress.Rendered == 0);
+	const auto replies = worlds.Universe.TakePresentation(worlds.Replies);
+	REQUIRE(replies.size() == 1);
+	PortalImageReply reply;
+	REQUIRE(DecodePortalImageReply(replies.front().Payload, reply, error));
+	CHECK(reply.Status == PortalImageStatus::Unavailable);
+	CHECK(reply.Diagnostic.find("authoriz") != std::string::npos);
+	CHECK(reply.Pixels.empty());
+	CHECK(reply.Key == request.Key);
 }

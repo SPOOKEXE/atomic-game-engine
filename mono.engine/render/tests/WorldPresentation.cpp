@@ -3,6 +3,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -149,6 +150,9 @@ TEST_CASE("whole-eye images invalidate retained viewport composition", "[render]
 	SECTION("near transparent layer changed") {
 		view.EyeTransparentImages[0] = 12;
 	}
+	SECTION("spatial overlay arrived") {
+		view.EyeSpatialOverlayImage = 17;
+	}
 	SECTION("far transparent layer changed") {
 		view.EyeTransparentImages[1] = 14;
 	}
@@ -189,6 +193,7 @@ TEST_CASE("presentation resources keep their stable saved identity", "[render][p
 }
 
 TEST_CASE("an empty world publishes an empty reusable particle snapshot", "[render][presentation]") {
+	engine::effects::RegisterEffectComponents();
 	engine::ecs::Store store("empty-presentation");
 	engine::render::ParticleFrame frame;
 	frame.Pool = 64;
@@ -442,6 +447,83 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	view.CameraFrame.Position.X = 0.0f;
 	state.Untextured = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+}
+
+TEST_CASE(
+	"content bindings and active lens captures invalidate their rendered scene",
+	"[render][presentation][damage]"
+) {
+	using namespace engine;
+	const std::array instances{scene::DrawInstance{}};
+	render::View view;
+	view.Instances = instances;
+	view.ContentOwner = Name("first-assets");
+	std::array owners{render::WorldContentOwner{Name("foreign-world"), Name("foreign-assets")}};
+	view.ForeignContentOwners = owners;
+	render::ScenePresentationState state;
+	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, state).Objects; };
+	const auto initial = signature();
+	SECTION("owner bindings change which same-name resources are drawn") {
+		view.ContentOwner = Name("second-assets");
+		CHECK(signature() != initial);
+		view.ContentOwner = Name("first-assets");
+		CHECK(signature() == initial);
+		owners[0].Owner = Name("replacement-foreign-assets");
+		CHECK(signature() != initial);
+		owners[0].Owner = Name("foreign-assets");
+		owners[0].World = Name("another-foreign-world");
+		CHECK(signature() != initial);
+	}
+	SECTION("owner changes invalidate each resident world layer") {
+		const std::array particles{render::ParticleBatch{}};
+		const std::array portals{render::PortalView{}};
+		view.Particles = particles;
+		view.Portals = portals;
+		state.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::Textures;
+		state.Lighting.EnvironmentState.Textures.Front = Name("owner-sky");
+		const auto before = render::ScenePresentationSignaturesOf(view, state);
+		const auto visibility = render::ParticleVisibilitySignature(view);
+		view.ContentOwner = Name("second-assets");
+		const auto after = render::ScenePresentationSignaturesOf(view, state);
+		CHECK(after.Objects != before.Objects);
+		CHECK(after.Environment != before.Environment);
+		CHECK(after.Particles != before.Particles);
+		CHECK(after.Portals != before.Portals);
+		CHECK(render::ParticleVisibilitySignature(view) != visibility);
+	}
+	SECTION("inactive lens overrides do not animate an otherwise unchanged scene") {
+		view.LensTimeSeconds = 5;
+		view.LensPrograms = 18;
+		view.LensContentOwner = Name("unused-lenses");
+		CHECK(signature() == initial);
+		view.LensTimeSeconds = 6;
+		CHECK(signature() == initial);
+	}
+	SECTION("active lenses include captured time and effective program selection") {
+		state.Lighting.ShaderLensCount = 1;
+		state.Lighting.ShaderLenses[0].Shader = Name("warped-room");
+		view.LensTimeSeconds = 5;
+		const auto timed = signature();
+		view.LensTimeSeconds = 6;
+		CHECK(signature() != timed);
+		view.LensTimeSeconds = 5;
+		CHECK(signature() == timed);
+		view.LensContentOwner = Name("other-lens-owner");
+		CHECK(signature() != timed);
+		view.LensPrograms = 18;
+		const auto captured = signature();
+		view.LensContentOwner = Name("irrelevant-authored-owner");
+		CHECK(signature() == captured);
+		view.LensPrograms = 19;
+		CHECK(signature() != captured);
+		view.LensPrograms = 18;
+		state.Lighting.ShaderLenses[0].Strength = 2;
+		CHECK(signature() != captured);
+		view.Instances = {};
+		CHECK(signature() != 0);
+		view.OverrideLighting = true;
+		CHECK(signature() == 0);
+	}
 }
 
 TEST_CASE("a changed joint palette invalidates scene pixels", "[render][presentation][skinning]") {

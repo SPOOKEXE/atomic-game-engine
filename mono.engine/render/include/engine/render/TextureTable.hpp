@@ -4,7 +4,7 @@
 // complete texture residency contract.
 
 // Renderer textures are named device resources with one shared sampler.
-// Mipmaps are not represented by the current asset format.
+// Uploaded mip chains and flipbook metadata belong to each entry.
 //
 // @tier L12 · client
 
@@ -76,6 +76,8 @@ namespace engine::render {
 	}
 
 	// The textures a renderer can sample.
+	// Names are scoped by an optional content owner. An empty owner is the shared
+	// namespace; scoped lookups never fall back to another owner or shared content.
 	//
 	// @client
 	// @since v0.9
@@ -110,7 +112,7 @@ namespace engine::render {
 		// @param image The pixels. An invalid one is refused.
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
-		bool Add(const core::Name &name, const assets::TextureData &image);
+		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
 
 		// Takes ownership of a texture somebody else created.
 		//
@@ -136,8 +138,14 @@ namespace engine::render {
 		// @return `false` for an invalid name, a null texture or a full table -
 		//         and on `false` the caller still owns it.
 		// @since v0.10
-		bool
-		Adopt(const core::Name &name, SDL_GPUTexture *texture, uint32_t width, uint32_t height, size_t bytes);
+		bool Adopt(
+			const core::Name &name,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			size_t bytes,
+			core::Name owner = {}
+		);
 
 		// The texture for a name, or null when it is not registered.
 		//
@@ -149,7 +157,7 @@ namespace engine::render {
 		//
 		// @param name The name.
 		// @return The texture, or null.
-		SDL_GPUTexture *Find(const core::Name &name) const;
+		SDL_GPUTexture *Find(const core::Name &name, core::Name owner = {}) const;
 
 		// What to sample when a drawable names no texture, or names one that is
 		// not here.
@@ -203,7 +211,7 @@ namespace engine::render {
 		//
 		// @param name What was asked for.
 		// @since v0.13
-		void Expect(const core::Name &name);
+		void Expect(const core::Name &name, core::Name owner = {});
 
 		// Says that nothing more is coming under this name.
 		//
@@ -217,14 +225,14 @@ namespace engine::render {
 		//
 		// @param name What was asked for.
 		// @since v0.13
-		void StopExpecting(const core::Name &name);
+		void StopExpecting(const core::Name &name, core::Name owner = {});
 
 		// Whether content is on its way under this name.
 		//
 		// @param name The name.
 		// @return `true` between `Expect` and whatever finishes it.
 		// @since v0.13
-		bool Expecting(const core::Name &name) const;
+		bool Expecting(const core::Name &name, core::Name owner = {}) const;
 
 		// How many names are in flight.
 		//
@@ -244,7 +252,7 @@ namespace engine::render {
 		// @param height Set to the height, likewise.
 		// @return `false` for a name this table does not hold.
 		// @since v0.10
-		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height) const;
+		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner = {}) const;
 
 		// Where this texture's current cell sits, for a sheet that animates.
 		//
@@ -257,7 +265,7 @@ namespace engine::render {
 		//                clock; this module holds none.
 		// @return The transform, or the identity for a still or an absent name.
 		// @since v0.10
-		FlipbookCell CellOf(const core::Name &name, double seconds) const;
+		FlipbookCell CellOf(const core::Name &name, double seconds, core::Name owner = {}) const;
 
 		// A process-local signature of every registered animated sheet's current
 		// frame. Static textures contribute nothing.
@@ -289,7 +297,11 @@ namespace engine::render {
 		// @param name The name to drop.
 		// @return `false` for a name this table does not hold.
 		// @since v0.10
-		bool Drop(const core::Name &name);
+		bool Drop(const core::Name &name, core::Name owner = {});
+
+		// Releases one named owner and cancels its expected arrivals. Shared entries
+		// are retained; an empty owner is refused. Returns the textures released.
+		size_t DropOwner(core::Name owner);
 
 		// How many bytes of device memory the table has uploaded.
 		size_t Bytes() const {
@@ -361,14 +373,14 @@ namespace engine::render {
 		// counted against `MAXIMUM_BYTES`.
 		SDL_GPUTexture *MissingHandle = nullptr;
 
-		std::unordered_map<uint32_t, Entry> Textures;
+		std::unordered_map<uint64_t, Entry> Textures;
 
 		// The names something is fetching right now. See `Expect`.
 		//
 		// **Interned ids rather than strings**, like `Textures` beside it: the
 		// draw loop asks this once per submesh per frame and a string compare
 		// per draw is what `core::Name` exists to avoid.
-		std::unordered_set<uint32_t> Awaiting;
+		std::unordered_set<uint64_t> Awaiting;
 
 		size_t UploadedBytes = 0;
 	};

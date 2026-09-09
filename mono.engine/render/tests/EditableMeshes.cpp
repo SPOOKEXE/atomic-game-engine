@@ -1,15 +1,12 @@
-// Converting `scene::EditableMesh`'s raw arrays into `assets::MeshData`.
-//
-// **The device-free half, and the only half this codebase unit-tests.**
-// `engine::render::EditableMeshUploader::Refresh` calls into `render::Renderer`
-// itself, which nothing here can assert against without a GPU -
-// `render::ShaderLibrary`'s tests draw the identical line for the identical
-// reason. This pins the conversion: what a mesh built one triangle at a time
-// looks like once it is in the format `render::MeshTable::Add` takes.
+// Host conversion and device upload checks for editable resource ownership.
+
+#include "RenderFixture.hpp"
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -23,6 +20,49 @@ using engine::core::Color3;
 using engine::core::Vector2;
 using engine::core::Vector3;
 using engine::scene::EditableMesh;
+
+TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gpu][editable-owner][.]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ecs::Store first("editable.first"), second("editable.second");
+	const auto firstMesh = first.CreateInstance(scene::EditableMeshClass(), "mesh");
+	const auto secondMesh = second.CreateInstance(scene::EditableMeshClass(), "mesh");
+	REQUIRE(firstMesh == secondMesh);
+	const auto triangle = [](ecs::Store &store, ecs::Entity mesh, float size) {
+		REQUIRE(scene::AddVertex(store, mesh, {0, 0, 0}));
+		REQUIRE(scene::AddVertex(store, mesh, {size, 0, 0}));
+		REQUIRE(scene::AddVertex(store, mesh, {0, size, 0}));
+		REQUIRE(scene::AddTriangle(store, mesh, 0, 1, 2));
+	};
+	triangle(first, firstMesh, 2);
+	triangle(second, secondMesh, 4);
+	const core::Name firstOwner("editable:first"), secondOwner("editable:second");
+	const auto name = scene::EditableMeshContentName(first, firstMesh);
+	CHECK(name == scene::EditableMeshContentName(second, secondMesh));
+	render::EditableMeshUploader uploader;
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	core::Vector3 extent;
+	REQUIRE(fixture.Render.MeshExtentOf(name, extent, firstOwner));
+	CHECK(extent.X == Approx(1));
+	REQUIRE(fixture.Render.MeshExtentOf(name, extent, secondOwner));
+	CHECK(extent.X == Approx(2));
+	CHECK_FALSE(fixture.Render.MeshExtentOf(name, extent));
+	uploader.ForgetWorld(first.Identity());
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	fixture.Render.DropContentOwner(firstOwner);
+	uploader.ForgetOwner(firstOwner);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
+	REQUIRE(fixture.Render.FlushMeshes());
+}
 
 TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {
 	EditableMesh mesh;

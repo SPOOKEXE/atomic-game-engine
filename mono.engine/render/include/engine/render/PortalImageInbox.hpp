@@ -2,6 +2,7 @@
 
 // Consumer-owned request correlation and retained copied images. No transport authentication,
 // scene storage or GPU residency lives here; the adapter supplies authenticated endpoint metadata.
+#include <engine/render/PortalCaptureTree.hpp>
 #include <engine/render/PortalExchange.hpp>
 
 #include <chrono>
@@ -13,12 +14,7 @@
 #include <vector>
 
 namespace engine::render {
-	struct PortalEndpointView {
-		std::string_view World;
-		std::string_view Channel;
-		uint64_t Session = 0;
-		uint64_t Generation = 0;
-	};
+	using PortalEndpointView = PortalCaptureTreeEndpointView;
 
 	struct PortalInboxLimits {
 		size_t PendingCount = 16;
@@ -70,7 +66,7 @@ namespace engine::render {
 	};
 
 	// Single-owner CPU state. Passed times must come from the same steady clock.
-	// Byte limits count owned text/pixel payload; record counts bound container and metadata overhead.
+	// Byte limits count owned text/pixels and lens records; record counts bound other metadata.
 	class PortalImageInbox {
 	  public:
 		using Time = std::chrono::steady_clock::time_point;
@@ -84,12 +80,18 @@ namespace engine::render {
 
 		// Call only after the outer transport authenticates both endpoints. Correlation must be
 		// RequestId. Endpoint and borrowed key/dimension matching precede image decoding/allocation.
+		// Recursive captures additionally require caller-approved child provenance; the default
+		// rejects every non-root endpoint. Actual aggregate image pixels are admitted together.
+		// publishedProducer is optional and must come from a trusted full-tuple relay binding;
+		// it changes embedded root identity matching, never outer transport authentication.
 		PortalAcceptResult AcceptAuthenticated(
 			PortalEndpointView from,
 			PortalEndpointView to,
 			uint64_t correlation,
 			std::span<const std::byte> payload,
-			Time now
+			Time now,
+			const PortalCaptureTreeAllowChild &allowChild = {},
+			PortalEndpointView publishedProducer = {}
 		);
 
 		// Transfers ownership out, after expiring entries at now. Failure replies never replace held images.
@@ -98,6 +100,8 @@ namespace engine::render {
 		Take(PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now);
 		std::optional<PortalImageLayerSet>
 		TakeLayers(PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now);
+		std::optional<PortalCaptureTree>
+		TakeTree(PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now);
 		bool Expire(Time now);
 		// Rolls back an unsent request without discarding the previous accepted image.
 		bool CancelRequest(uint64_t requestId);
@@ -125,6 +129,9 @@ namespace engine::render {
 			uint32_t Height = 0;
 			Time Deadline;
 			bool OrderedLayers = false;
+			uint32_t RecursionDepth = 0, PixelBudget = 0;
+			PortalCaptureTreeCamera Camera;
+			std::string RetainedBodyPlayer{};
 			size_t Bytes() const;
 		};
 		struct Held {
@@ -133,6 +140,10 @@ namespace engine::render {
 			PortalImageReply Reply;
 			Time Deadline;
 			std::vector<PortalImageReply> Transparent;
+			std::optional<PortalImageReply> SpatialOverlay = std::nullopt;
+			PortalCaptureLenses Lenses{};
+			std::optional<PortalCaptureTree> Tree = std::nullopt;
+			size_t TreeBytes = 0;
 			size_t Bytes() const;
 		};
 		bool ValidLimits() const;

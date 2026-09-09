@@ -61,6 +61,49 @@ TEST_CASE("adding a mesh registers it without touching the device", "[render][me
 	CHECK(table.PendingIndexCount() == cube.Indices.size());
 }
 
+TEST_CASE("mesh owners isolate replacement and defer retired range reuse", "[render][meshtable]") {
+	MeshTable table;
+	const Name asset("owner-test.mesh"), firstOwner("owner-test.first"), secondOwner("owner-test.second");
+	const MeshData cube = MakeBuiltin(BuiltinMesh::Cube);
+	REQUIRE(table.Add(asset, cube));
+	REQUIRE(table.Add(asset, Offset(cube, 2), firstOwner));
+	REQUIRE(table.Add(asset, Offset(cube, 4), secondOwner));
+	CHECK(table.Count() == 3);
+	CHECK(table.Resolve(asset).Centre.X == Approx(0));
+	CHECK(table.Resolve(asset, firstOwner).Centre.X == Approx(2));
+	CHECK(table.Resolve(asset, secondOwner).Centre.X == Approx(4));
+	CHECK_FALSE(table.Has(asset, Name("owner-test.absent")));
+	CHECK(&table.Resolve(asset, Name("owner-test.absent")) == &table.Resolve(Name()));
+	CHECK_FALSE(table.Add(asset, MeshData{}, firstOwner));
+	CHECK(table.Resolve(asset, firstOwner).Centre.X == Approx(2));
+	REQUIRE(table.Add(asset, Offset(cube, 6), firstOwner));
+	CHECK(table.Count() == 3);
+	CHECK(table.Resolve(asset, firstOwner).Centre.X == Approx(6));
+	CHECK(table.Resolve(asset, secondOwner).Centre.X == Approx(4));
+	CHECK(table.Resolve(asset).Centre.X == Approx(0));
+	CHECK(table.DropOwner(Name()) == 0);
+	CHECK(table.DropOwner(firstOwner) == 1);
+	CHECK(table.DropOwner(firstOwner) == 0);
+	CHECK_FALSE(table.Has(asset, firstOwner));
+	CHECK(table.Has(asset, secondOwner));
+	CHECK(table.Has(asset));
+	CHECK(table.FreeVertexCount() == 2 * cube.Vertices.size());
+	CHECK(table.FreeIndexCount() == 2 * cube.Indices.size());
+
+	const size_t before = table.HostVertexCount();
+	REQUIRE(table.Add(asset, cube, firstOwner));
+	CHECK(table.HostVertexCount() == before + cube.Vertices.size());
+	for (size_t frame = 0; frame < MeshTable::DEFERRED_FRAMES; ++frame)
+		table.Flush();
+	const size_t aged = table.HostVertexCount();
+	REQUIRE(table.Add(Name("owner-test.next"), cube, firstOwner));
+	CHECK(table.HostVertexCount() == aged);
+	CHECK(table.Resolve(asset, secondOwner).Centre.X == Approx(4));
+	CHECK(table.DropOwner(firstOwner) == 2);
+	table.Shutdown();
+	CHECK(table.Count() == 0);
+}
+
 TEST_CASE("a burst of arrivals is one pending delta, not one per mesh", "[render][meshtable]") {
 	// **The regression this suite exists for.** `Renderer::AddMesh` used to call
 	// `Flush` itself, and because a copy pass cannot write part of a cycled

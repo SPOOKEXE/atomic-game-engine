@@ -11,6 +11,9 @@ namespace engine::render {
 		uint32_t RecursionDepth = 2;
 		uint32_t PixelBudget = MAX_PORTAL_IMAGE_PIXELS;
 		bool ComposePlayerBody = false;
+		// These admitted destinations render on this device at the requested camera.
+		// Capture their complete world and body together instead of delayed body layers.
+		std::span<const core::Name> ResidentDestinations{};
 	};
 
 	struct PortalImageDemand {

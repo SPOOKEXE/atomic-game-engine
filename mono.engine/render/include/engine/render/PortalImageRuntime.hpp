@@ -2,20 +2,25 @@
 
 #include <engine/render/PortalImageImport.hpp>
 #include <engine/render/PortalImageInbox.hpp>
+#include <engine/render/PortalShadowImage.hpp>
 #include <engine/world/PresentationBus.hpp>
 #include <engine/world/World.hpp>
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 
 namespace engine::world {
 	class Universe;
+	struct PresentationBindings;
 }
 namespace engine::render {
 	class Renderer;
+	class ShaderLibrary;
 	class PortalResidentImages;
 	struct View;
+	struct WorldContentOwner;
 	struct SceneLight;
 
 	// Host setup opens separate endpoints for replies and requests. A source never
@@ -57,6 +62,13 @@ namespace engine::render {
 		uint32_t Width = 0, Height = 0;
 		std::optional<PortalCaptureLighting> CaptureLighting;
 		std::array<uint64_t, MAX_PORTAL_TRANSPARENT_LAYERS> TransparentImages{};
+		uint64_t SpatialOverlayImage = 0;
+		PortalCaptureLenses Lenses;
+		// Renderer-local lease. Copying this capture does not extend its lifetime.
+		uint64_t LensPrograms = 0;
+		// Nonzero when the capture owns a complete nested tree on this renderer.
+		uint64_t Tree = 0;
+		std::string RetainedBodyPlayer{};
 	};
 	struct PortalRuntimeCompletion {
 		uint64_t RequestId = 0;
@@ -73,6 +85,19 @@ namespace engine::render {
 		size_t Sent = 0;
 		size_t Refused = 0;
 	};
+	inline constexpr size_t MAX_PORTAL_PRODUCER_SHADOW_BYTES = 2 * PORTAL_SHADOW_BYTES;
+	inline constexpr size_t MAX_PORTAL_PRODUCER_SHADOW_ROUTES = 4;
+	struct PortalProducerShadowUsage {
+		size_t Images = 0, Ready = 0, ReservedBytes = 0, CpuBytes = 0;
+		size_t Routes = 0, ReadyRoutes = 0, RouteMetadataBytes = 0;
+		size_t Transfers = 0, TransferPacketBytes = 0;
+	};
+	struct PortalShadowRoute {
+		world::PresentationAddress Requester, Producer;
+		PortalExchangeKey ParentEye;
+		bool operator==(const PortalShadowRoute &) const = default;
+	};
+	enum class PortalImageSourceDelivery { ImportedImages, CapturePayloads };
 
 	// Driver-thread adapter for one world's viewport. Universe and renderer must outlive it.
 	// A supplied resident image table must also outlive the source and producer.
@@ -89,7 +114,8 @@ namespace engine::render {
 			world::WorldId world,
 			world::PresentationAddress replies,
 			PortalInboxLimits limits = {},
-			PortalResidentImages *resident = nullptr
+			PortalResidentImages *resident = nullptr,
+			PortalImageSourceDelivery delivery = PortalImageSourceDelivery::ImportedImages
 		);
 		~PortalImageSource();
 		PortalImageSource(const PortalImageSource &) = delete;
@@ -103,6 +129,15 @@ namespace engine::render {
 			Time now
 		);
 		std::vector<PortalRuntimeCompletion> Poll(Time now);
+		// One bounded protocol reply, separated from ordinary eye-image completions.
+		// The caller matches its authenticated envelope and exact outstanding pull.
+		std::optional<world::PresentationMessage> TakeShadowReply();
+		// Trusted driver mappings outlive this source. Invalidate changed endpoint tuples
+		// before replacing the snapshot. Changing the snapshot object clears retained work.
+		void SetEndpointBindings(const world::PresentationBindings *bindings);
+		// Payload sources retain admitted ordered captures in the bounded inbox until taken.
+		// Leaf layer sets become one-node trees. No GPU upload is needed by a parent producer.
+		std::optional<PortalCaptureTree> TakeTree(std::string_view portal, Time now);
 		// The host must render a view to submit group uploads even when old pixels are cached.
 		bool HasPendingUploads() const;
 		uint64_t Image(std::string_view portal) const;
@@ -112,6 +147,17 @@ namespace engine::render {
 		// A pending request never relabels its camera or sampling matrix. Poll applies expiry.
 		// Copying this snapshot does not extend the GPU image lifetime.
 		std::optional<PortalImageCapture> Capture(std::string_view portal) const;
+		// One host-owned lease for an exact completed imported tree. The first deadline
+		// is fixed, at most ten seconds from now; repeated pins cannot renew it.
+		// New demands can remain pending; accepted replacement or invalidation retires the lease.
+		std::optional<Time> PinCapture(
+			std::string_view portal,
+			uint64_t exactTree,
+			const PortalExchangeKey &exactEye,
+			Time now,
+			Time requestedDeadline
+		);
+		void UnpinCapture(uint64_t exactTree);
 		// A replaced transport cannot deliver its old requests. Keep unexpired
 		// images, but allow the next Issue to use a new correlation immediately.
 		void RestartRequests();
@@ -131,6 +177,8 @@ namespace engine::render {
 	// Cross-world children use named image requests with reduced depth and shared
 	// pixel budgets. Up to sixteen parents wait for replies, with a one-second
 	// deadline. Unchanged child images can renew the parent capture.
+	// Ordered recursion retains child payloads and authored aperture geometry as a
+	// bounded capture tree. Each node keeps its own camera, layers and depth units.
 	// Failed replies retry in a separate sixteen-entry queue until their deadline;
 	// overflow is refused. Clear cancels both waiting work and retained replies.
 	// Call after simulation on the driver thread. PresentMany joins before copying
@@ -139,20 +187,52 @@ namespace engine::render {
 	class PortalImageProducer {
 	  public:
 		using Time = PortalImageInbox::Time;
+		using RetainedBodyAuthorization =
+			std::function<bool(const world::PresentationAddress &, std::string_view)>;
+		// Trusted host policy, never inferred from request payloads. Replacing the
+		// policy cancels pending work; mutable policies are rechecked before use/send.
+		void SetRetainedBodyAuthorization(RetainedBodyAuthorization authorize);
+		// Transfers the original paired map after its eye reply was delivered. Exact
+		// requester incarnation and eye identity are required; policy is checked again.
+		// The host authenticates and routes its manifest and tiles. No later world state is sampled.
+		// Two maps share a 32 MiB reservation cap, expiring one second after eye delivery.
+		std::optional<PortalShadowImage>
+		TakeShadow(const world::PresentationAddress &requester, const PortalExchangeKey &eye, Time now);
+		// Resolves only targets in the delivered parent's accepted tree. Descendants
+		// retain their original immediate-parent request identity, even after TakeShadow.
+		std::optional<PortalShadowRoute> ResolveShadowRoute(
+			const world::PresentationAddress &parentRequester,
+			const PortalExchangeKey &parentEye,
+			const PortalCaptureTreeEndpoint &targetProducer,
+			const PortalExchangeKey &targetEye,
+			Time now
+		);
+		PortalProducerShadowUsage ShadowUsage() const;
+		// A supplied library outlives the producer. Otherwise one is created on demand.
+		// Residency defaults to the local world's name, matching direct world views.
 		PortalImageProducer(
 			world::Universe &universe,
 			Renderer &renderer,
 			world::WorldId world,
 			world::PresentationAddress requests,
-			PortalResidentImages *resident = nullptr
+			PortalResidentImages *resident = nullptr,
+			ShaderLibrary *shaders = nullptr,
+			bool postProcessing = true
 		);
 		~PortalImageProducer();
 		PortalImageProducer(const PortalImageProducer &) = delete;
 		PortalImageProducer &operator=(const PortalImageProducer &) = delete;
+		// Render-local residency bindings. Copied, never sent in a portal request.
+		void SetContentOwner(core::Name owner, std::span<const WorldContentOwner> foreign = {});
+		// Local transport endpoints remain unchanged; tree metadata uses the published identity.
+		// The host clears affected work before replacing a mapping in this borrowed snapshot.
+		void SetEndpointBindings(const world::PresentationBindings *bindings);
 		// destinationPresented borrows the completed world's draw rows by copy,
 		// preserving the alpha and frame delta already chosen by its host.
 		PortalProducerProgress
 		Pump(float frameSeconds, float alpha, Time now, bool destinationPresented = false);
+		// A retained exact-domain shadow fit has queued a renderer readback.
+		bool HasPendingShadowFits() const;
 		void Clear();
 
 	  private:

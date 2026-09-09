@@ -39,7 +39,14 @@ namespace engine::render {
 	  public:
 		// Renders every visible viewport command into consecutive scene slots.
 		// Returns the number whose camera and target were valid.
-		size_t Render(Renderer &renderer, ecs::Store &store, const gui::DrawList &list, size_t firstSlot);
+		// Content names resolve in the containing world's residency namespace.
+		size_t Render(
+			Renderer &renderer,
+			ecs::Store &store,
+			const gui::DrawList &list,
+			size_t firstSlot,
+			core::Name owner = {}
+		);
 
 		// Resolves the texture produced by the most recent `Render`.
 		InterfaceImage Resolve(ecs::Entity instance) const;

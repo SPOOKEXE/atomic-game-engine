@@ -47,6 +47,17 @@ namespace engine::render {
 		bool operator==(const PortalGeometry &) const = default;
 	};
 
+	struct PortalGeometryMeasure {
+		size_t Rows = 0;
+		size_t Joints = 0;
+		// Decoded object, rows, palette and text payload; excludes encoded input bytes.
+		size_t MetadataBytes = 0;
+		bool operator==(const PortalGeometryMeasure &) const = default;
+	};
+	// Validate borrowed bytes without allocating geometry or text. Output is transactional.
+	bool
+	MeasurePortalGeometry(std::span<const std::byte> bytes, PortalGeometryMeasure &out, std::string &error);
+
 	// Canonical owned data only. No interning, ECS identity or device token enters
 	// this codec. Counts, text, poses and palette ranges are checked transactionally.
 	bool

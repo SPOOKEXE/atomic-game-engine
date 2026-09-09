@@ -4,7 +4,9 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/EditableImage.hpp>
 
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 
 namespace engine::render {
 
@@ -25,24 +27,42 @@ namespace engine::render {
 		return built;
 	}
 
-	size_t EditableImageUploader::Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer) {
+	size_t EditableImageUploader::Refresh(
+		engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner
+	) {
+		auto foundScope = std::find_if(Scopes.begin(), Scopes.end(), [&](const UploadScope &scope) {
+			return scope.World == store.Identity() && scope.Owner == owner;
+		});
+		if (foundScope == Scopes.end()) {
+			Scopes.push_back({store.Identity(), owner, {}});
+			foundScope = std::prev(Scopes.end());
+		}
+		auto &uploadedRevisions = foundScope->Revisions;
 		size_t uploaded = 0;
 
 		store.Each<const engine::scene::EditableImage>([&](engine::ecs::Entity entity,
 														   const engine::scene::EditableImage &image) {
-			const auto found = Uploaded.find(entity.Id);
-			if (found != Uploaded.end() && found->second == image.Revision) {
+			const auto found = uploadedRevisions.find(entity.Id);
+			if (found != uploadedRevisions.end() && found->second == image.Revision) {
 				return;
 			}
 
 			const engine::assets::TextureData built = BuildTextureData(image);
 			const engine::core::Name name = engine::scene::EditableImageContentName(store, entity);
-			if (renderer.AddTexture(name, built)) {
-				Uploaded[entity.Id] = image.Revision;
+			if (renderer.AddTexture(name, built, owner)) {
+				uploadedRevisions[entity.Id] = image.Revision;
 				uploaded++;
 			}
 		});
 
 		return uploaded;
 	}
+	void EditableImageUploader::ForgetWorld(uint64_t identity) {
+		std::erase_if(Scopes, [identity](const UploadScope &scope) { return scope.World == identity; });
+	}
+
+	void EditableImageUploader::ForgetOwner(core::Name owner) {
+		std::erase_if(Scopes, [owner](const UploadScope &scope) { return scope.Owner == owner; });
+	}
+
 }

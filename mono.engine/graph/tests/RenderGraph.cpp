@@ -85,7 +85,7 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	// real frame: world input and one shadow map every view samples, eighteen passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
 	CHECK(compiled.Shared.size() == 2);
-	CHECK(compiled.PerView.size() == 20);
+	CHECK(compiled.PerView.size() == 18);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
@@ -1047,4 +1047,14 @@ TEST_CASE("a node id means nothing outside the graph that issued it", "[graph]")
 	REQUIRE(swapped != nullptr);
 	CHECK(swapped->Kind == ResourceKind::Depth);
 	CHECK(swapped->Kind != first.FindResource(firstColour)->Kind);
+}
+
+TEST_CASE("full float ambient response format preserves four channels", "[graph][formats]") {
+	using namespace engine::graph;
+	ResourceFormat parsed{};
+	REQUIRE(ParseResourceFormat("RGBA32F", parsed));
+	CHECK(parsed == ResourceFormat::RGBA32F);
+	CHECK(std::string_view(Describe(parsed)) == "RGBA32F");
+	CHECK(BitsPerPixel(parsed) == 128);
+	CHECK(ChannelCount(parsed) == 4);
 }

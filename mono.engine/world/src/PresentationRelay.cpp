@@ -216,6 +216,13 @@ namespace engine::world {
 			return false;
 		}
 		const auto routes = Routes();
+		PresentationBindings published{routes.Session, routes.Revision, {}, {}};
+		for (const auto &binding : Bindings)
+			published.Exports.push_back({binding.Child, binding.Local});
+		for (const auto &route : Returns)
+			if (route.Forwarded != route.Original)
+				published.Returns.push_back({route.Forwarded, route.Original});
+		if (!child.PublishPresentationBindings(published)) return true;
 		FlushReplies();
 		if (!child.PublishPresentationRoutes(routes)) return true;
 		for (const auto &binding : Bindings)

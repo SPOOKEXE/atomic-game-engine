@@ -120,6 +120,43 @@ namespace engine::render {
 						return false;
 					}
 					graph::NodeRequirements needs = spec->Needs;
+					if (node->Kind == core::Name("ambient-correct")) {
+						size_t shadowInputs = 0;
+						for (const char *port :
+							 {"directional-response", "room-depth", "room-normal", "shadow"})
+							shadowInputs +=
+								std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(port)) !=
+								node->ReadPorts.end();
+						if (shadowInputs != 0 && shadowInputs != 4) {
+							offender = node->Name;
+							reason = "directional correction requires response, room depth, room normal and "
+									 "shadow together";
+							return false;
+						}
+					}
+					if (node->Kind == core::Name("deferred-lighting")) {
+						for (size_t output = 0; output < node->Writes.size(); ++output) {
+							const auto later = node->Writes.begin() + static_cast<std::ptrdiff_t>(output + 1);
+							if (std::find(later, node->Writes.end(), node->Writes[output]) !=
+								node->Writes.end()) {
+								offender = node->Name;
+								reason = "deferred-lighting outputs require distinct resources";
+								return false;
+							}
+						}
+						const auto hasOutput = [&](const char *name) {
+							return std::find(
+									   node->WritePorts.begin(), node->WritePorts.end(), core::Name(name)
+								   ) != node->WritePorts.end();
+						};
+						const bool baseline = hasOutput("lighting-baseline");
+						if (hasOutput("directional-response") && !baseline) {
+							offender = node->Name;
+							reason = "directional-response requires lighting-baseline";
+							return false;
+						}
+						if (baseline) needs.Formats.push_back(graph::ResourceFormat::RGBA32F);
+					}
 					if (node->Kind == core::Name("blit")) {
 						if (node->Reads.size() != 1 || node->Writes.size() != 1) {
 							offender = node->Name;
@@ -950,11 +987,10 @@ namespace engine::render {
 		info.vertex_shader = OpaqueVertexShader;
 		info.fragment_shader = fragment;
 		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-		SDL_GPUColorTargetDescription targets[2]{};
+		SDL_GPUColorTargetDescription targets[1]{};
 		targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
-		targets[1].format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
 		info.target_info.color_target_descriptions = targets;
-		info.target_info.num_color_targets = 2;
+		info.target_info.num_color_targets = 1;
 		auto *nearest = SDL_CreateGPUGraphicsPipeline(Device, &info);
 		// Replay every fragment at the chosen depth with the ordinary blend state.
 		// No depth attachment may suppress coincident fragments in this pass.
@@ -972,6 +1008,162 @@ namespace engine::render {
 		}
 		TransparentLayerPipeline = nearest;
 		TransparentLayerColourPipeline = colour;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureInterfaceLayer() {
+		if (InterfaceLayerPipeline && InterfaceLayerColourPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("interface-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
+		SDL_GPUGraphicsPipeline *nearest = nullptr, *colour = nullptr;
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription targets[1]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 1;
+			info.target_info.has_depth_stencil_target = true;
+			info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+			info.depth_stencil_state.enable_depth_test = true;
+			info.depth_stencil_state.enable_depth_write = true;
+			info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+			nearest = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			targets[0].blend_state = VariantBlendedTarget.blend_state;
+			targets[0].blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+			info.target_info.num_color_targets = 1;
+			info.target_info.has_depth_stencil_target = false;
+			info.depth_stencil_state.enable_depth_test = false;
+			info.depth_stencil_state.enable_depth_write = false;
+			colour = nearest ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		if (!nearest || !colour) {
+			if (nearest) SDL_ReleaseGPUGraphicsPipeline(Device, nearest);
+			if (colour) SDL_ReleaseGPUGraphicsPipeline(Device, colour);
+			return false;
+		}
+		InterfaceLayerPipeline = nearest;
+		InterfaceLayerColourPipeline = colour;
+		return true;
+	}
+
+	bool Renderer::Impl::EnsureDeferredLightingBaseline() {
+		if (DeferredLightingBaselinePipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription targets[2]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 2;
+			DeferredLightingBaselinePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DeferredLightingBaselinePipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureDeferredLightingDirectional() {
+		if (DeferredLightingDirectionalPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription targets[3]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			targets[1].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			targets[2].format = SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 3;
+			DeferredLightingDirectionalPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DeferredLightingDirectionalPipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureDirectionalCorrection() {
+		if (DirectionalCorrectPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("ambient-directional-correct.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 1);
+		if (vertex && fragment) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			DirectionalCorrectPipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
+		return DirectionalCorrectPipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureAmbientComposition() {
+		if (AmbientResponsePipeline && AmbientMergePipeline && AmbientCorrectPipeline) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		if (!vertex) return false;
+		const auto make = [&](const char *shader,
+							  uint32_t samplers,
+							  uint32_t uniforms,
+							  std::span<const SDL_GPUTextureFormat> formats) {
+			auto *fragment = LoadShader(shader, SDL_GPU_SHADERSTAGE_FRAGMENT, samplers, uniforms);
+			if (!fragment) return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);
+			std::array<SDL_GPUColorTargetDescription, 2> targets{};
+			for (size_t index = 0; index < formats.size(); ++index)
+				targets[index].format = formats[index];
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets.data();
+			info.target_info.num_color_targets = formats.size();
+			auto *pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			SDL_ReleaseGPUShader(Device, fragment);
+			return pipeline;
+		};
+		const std::array responseFormats{SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT};
+		const std::array mergeFormats{
+			SDL_GPU_TEXTUREFORMAT_R32_FLOAT, SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM
+		};
+		const std::array colourFormats{SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT};
+		auto *response = make("ambient-response.frag", 5, 1, responseFormats);
+		auto *merge = make("ambient-merge.frag", 4, 1, mergeFormats);
+		auto *correct = make("ambient-correct.frag", 3, 0, colourFormats);
+		SDL_ReleaseGPUShader(Device, vertex);
+		if (!response || !merge || !correct) {
+			for (auto *pipeline : {response, merge, correct})
+				if (pipeline) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+			return false;
+		}
+		AmbientResponsePipeline = response;
+		AmbientMergePipeline = merge;
+		AmbientCorrectPipeline = correct;
 		return true;
 	}
 
@@ -996,6 +1188,28 @@ namespace engine::render {
 		if (vertex != nullptr) SDL_ReleaseGPUShader(Device, vertex);
 		if (fragment != nullptr) SDL_ReleaseGPUShader(Device, fragment);
 		return DepthComposePipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureColourCompose() {
+		if (ColourComposePipeline != nullptr) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader("colour-compose.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 0);
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription targets[1]{};
+			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = targets;
+			info.target_info.num_color_targets = 1;
+			ColourComposePipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+		}
+		if (vertex != nullptr) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment != nullptr) SDL_ReleaseGPUShader(Device, fragment);
+		return ColourComposePipeline != nullptr;
 	}
 
 	void Renderer::Impl::BindPipeline(
@@ -1025,7 +1239,9 @@ namespace engine::render {
 		ActiveFamily = family;
 	}
 
-	bool Renderer::Impl::AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv) {
+	bool Renderer::Impl::AddShaderVariant(
+		const core::Name &name, std::span<const uint32_t> spirv, core::Name owner
+	) {
 		if (!name.IsValid() || spirv.empty() || !VariantsReady || OpaqueVertexShader == nullptr) {
 			return false;
 		}
@@ -1125,13 +1341,14 @@ namespace engine::render {
 		// Replacing is the ordinary case: an author editing a `ShaderScript`
 		// bumps its revision every keystroke that lands, and the library hands
 		// the new words straight back here.
-		DropShaderVariant(name);
-		ShaderVariants[name.Id()] = variant;
+		DropShaderVariant(name, owner);
+		variant.CodeHash = assets::Hasher::Of(std::as_bytes(spirv));
+		ShaderVariants[ShaderVariantKey(name, owner)] = variant;
 		return true;
 	}
 
-	void Renderer::Impl::DropShaderVariant(const core::Name &name) {
-		const auto found = ShaderVariants.find(name.Id());
+	void Renderer::Impl::DropShaderVariant(const core::Name &name, core::Name owner) {
+		const auto found = ShaderVariants.find(ShaderVariantKey(name, owner));
 		if (found == ShaderVariants.end()) {
 			return;
 		}
@@ -1173,7 +1390,7 @@ namespace engine::render {
 		VariantsReady = false;
 	}
 
-	SDL_GPUGraphicsPipeline *Renderer::Impl::VariantFor(const core::Name &shader) const {
+	SDL_GPUGraphicsPipeline *Renderer::Impl::VariantFor(const core::Name &shader, core::Name owner) const {
 		if (!shader.IsValid() || ShaderVariants.empty()) {
 			return nullptr;
 		}
@@ -1184,7 +1401,7 @@ namespace engine::render {
 		// that vanished until it did would be a worse symptom than one drawn
 		// plainly. The name being wrong rather than late is reported by
 		// `ShaderLibrary`, where the world can still be asked about it.
-		const auto found = ShaderVariants.find(shader.Id());
+		const auto found = ShaderVariants.find(ShaderVariantKey(shader, owner));
 		if (found == ShaderVariants.end()) {
 			return nullptr;
 		}
@@ -1199,6 +1416,7 @@ namespace engine::render {
 		case PipelineFamily::HdrTransparent:
 			return found->second.HdrTransparent;
 		case PipelineFamily::Other:
+		case PipelineFamily::GBuffer:
 			break;
 		}
 		return nullptr;
@@ -1442,6 +1660,7 @@ namespace engine::render {
 			installed.Aliases = graph::BuildResourceAliases(installed.Graph, installed.Compiled);
 			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
+			installed.Revision = ++State->PipelineRevision;
 			return true;
 		}
 
@@ -1459,6 +1678,7 @@ namespace engine::render {
 				std::move(buffers),
 			}
 		);
+		State->NamedPipelines.back().Revision = ++State->PipelineRevision;
 		return true;
 	}
 
@@ -1558,6 +1778,7 @@ namespace engine::render {
 			std::move(aliases),
 			std::move(buffers)
 		};
+		State->EngineDefault->Revision = ++State->PipelineRevision;
 		return true;
 	}
 

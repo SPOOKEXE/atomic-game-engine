@@ -33,6 +33,7 @@
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/render/WorldView.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Components.hpp>
@@ -109,6 +110,7 @@ namespace client {
 		}
 
 	  private:
+		struct ContentSession;
 		// Builds the demo worlds `--script`/`--worlds` describe.
 		//
 		// @return `false` when a world could not be created or its scene script
@@ -213,7 +215,7 @@ namespace client {
 		// day one of them learned about a new kind of source.
 		//
 		// @return `false` when sources were configured and are unusable.
-		bool BuildContentClient();
+		bool BuildContentClient(ContentSession &content);
 
 		// Whether a server may still say where content is.
 		//
@@ -244,44 +246,42 @@ namespace client {
 		//
 		// @param directory What the server said.
 		// @since v0.16
-		void AdoptContentDirectory(const engine::game::ContentDirectory &directory);
+		void AdoptContentDirectory(ContentSession &content, const engine::game::ContentDirectory &directory);
 
 		// Advances content delivery and registers whatever arrived.
 		//
 		// Called once a frame, before the simulation and outside every render
 		// pass - the two constraints that decide where this can go at all.
 		void PumpContent();
+		void RefreshContentBindings();
+		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
-		// Hands every world the mesh names the store published.
+		// Hands the session's worlds the mesh names its store published.
 		//
 		// **Names, not content**, and the only way a scene can discover what
 		// there is to name - see `scene/PublishedCatalogue.hpp`. Naming one is
 		// still what fetches it.
-		void OfferPublishedContent();
+		void OfferPublishedContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
-		// Asks for everything the simulated worlds name and has not asked for.
-		//
-		// **Demand rather than by kind**, which is what makes a large store
-		// usable at all - `client/ContentDemand.hpp` carries the two failures
-		// that forced it.
-		//
-		// **And only for a world that has moved since it was last asked.** The
-		// collection is eight walks of a store and it ran on every world on
-		// every frame; `ScanWantedContent` carries the gate and why it is the
-		// world's tick counter rather than the ECS change channel.
-		void RequestWantedContent();
+		// Requests each name once per session, scanning only worlds whose
+		// content-bearing component revisions or counts changed.
 
-		// Collects one world's content demand, if its tick has moved since the
-		// last time it was collected.
+		void RequestWantedContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
+
+		// Collects one world's demand when content references change.
 		//
 		// @param world The world to scan. A world with no valid id is skipped.
-		void ScanWantedContent(engine::world::WorldId world);
+		void ScanWantedContent(ContentSession &content, engine::world::WorldId world);
 
 		// Asks for one asset, once.
 		//
 		// @param texture The name. An invalid one, or one already asked for, is
 		//        ignored.
-		void RequestAsset(const engine::core::Name &texture);
+		void RequestAsset(
+			ContentSession &content,
+			const engine::core::Name &texture,
+			engine::core::Name requestingOwner = {}
+		);
 
 		// Brings the mixer into line with every simulated world's `Sound` rows.
 		//
@@ -332,6 +332,17 @@ namespace client {
 		bool ReceivePortalSession(const engine::game::PortalSessionMessage &message);
 		void PumpPortalSuccessor(double nowSeconds, bool presentationReady);
 		bool PortalSuccessorDrawable();
+		void PumpPortalObservation(double nowSeconds);
+		void DropPortalObservation();
+		void RetainPortalObservation(engine::world::WorldId world);
+		struct PortalWorldView;
+		bool PreparePortalWorldView(
+			PortalWorldView &packet,
+			engine::world::WorldId world,
+			engine::render::View &view,
+			uint32_t width,
+			uint32_t height
+		);
 		bool WaitingForPortalViews() const;
 		bool PreparePortalEye(
 			engine::render::View &view,
@@ -405,11 +416,7 @@ namespace client {
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
 
-		// **What a `Material.Shader` name resolves to**, and the one thing on
-		// this class that holds a GLSL compiler. One per client rather than one
-		// per world, for the reason `ShaderLibrary` gives: it caches over
-		// process-wide names, and `Refresh` takes whichever world is being
-		// drawn.
+		// One compiler retains each world's accepted material and lens modules.
 		engine::render::ShaderLibrary Shaders;
 
 		// **What `Renderer::PostProcessShaderName` was last set to from this
@@ -665,7 +672,19 @@ namespace client {
 		std::optional<engine::assets::SigningKey> ClientIdentity;
 		std::unique_ptr<engine::replication::Connector> Connection;
 		engine::net::Endpoint ConnectedServer;
+		struct PortalWorldView {
+			engine::render::WorldViewFrame Frame;
+			engine::render::WorldCameraFrame Camera;
+			engine::render::InterfacePass Interface;
+			std::vector<engine::render::SurfaceView> Surfaces;
+			std::vector<uint32_t> HiddenBodyRows;
+			engine::core::Name Pipeline;
+			uint32_t SurfaceBounces = 0;
+			uint32_t SurfaceLimit = 0;
+			bool InterfaceReady = false;
+		};
 		struct PortalSuccessor {
+			PortalWorldView View;
 			engine::game::PortalSessionMessage Offer;
 			std::optional<engine::game::PortalSessionMessage> Following;
 			engine::net::Endpoint Endpoint;
@@ -673,11 +692,11 @@ namespace client {
 			std::unique_ptr<engine::net::Transport> Socket;
 			std::unique_ptr<engine::replication::Connector> Connection;
 			std::optional<engine::scene::CameraContinuation> Camera;
+			std::unique_ptr<ContentSession> Content;
 			std::optional<engine::script::PortalTransferMotion> Motion;
 			// Source-world provenance for the copied camera, never sent to the successor.
 			engine::ecs::Entity SourceCamera;
 			engine::ecs::Entity SourceSubject;
-			std::optional<engine::game::ContentDirectory> Directory;
 			std::unique_ptr<engine::world::PresentationStream> Presentation;
 			std::optional<engine::world::PresentationDirectory> PresentationRoutes;
 			bool PresentationAnnounced = false;
@@ -696,6 +715,19 @@ namespace client {
 			bool Refused = false;
 			std::string Failure;
 		};
+		struct PortalObservation {
+			PortalWorldView View;
+			engine::world::WorldId World;
+			engine::core::Name Authored;
+			std::unique_ptr<engine::net::Transport> Socket;
+			std::unique_ptr<engine::replication::Connector> Connection;
+			std::unique_ptr<ContentSession> Content;
+		};
+		// One former body world, retained only while the crossing view needs it.
+		std::unique_ptr<PortalObservation> PortalPrevious;
+		// Borrows the selected packet for this draw; cleared when its session retires.
+		PortalWorldView *PortalDrawing = nullptr;
+
 		std::unique_ptr<PortalSuccessor> PortalNext;
 		uint64_t NextPortalReplica = 1;
 		engine::core::Name PortalEyeDestinations[2];
@@ -725,70 +757,29 @@ namespace client {
 		// for.
 		std::optional<engine::net::WireMode> Advertised;
 
-		// The delivery client, when content sources were configured.
-		std::unique_ptr<engine::delivery::AssetClient> Content;
-
-		// How a relayed route travels, when this client is connected to a server.
-		//
-		// Built with the connection and outliving every delivery client made over
-		// it, because a rebuild replaces the fetcher and must not replace the
-		// routes already in flight underneath one.
-		std::unique_ptr<ContentLink> ContentRelay;
-
-		// The origins a server named, in the order it named them.
-		//
-		// Kept apart from `Settings::ContentSources` rather than merged into it,
-		// because the two have different provenance and the precedence between
-		// them is decided by exactly that - see `AdoptContentDirectory`.
-		std::vector<engine::delivery::Source> OfferedContentSources;
-
-		// The publisher a server named, as 64 hex characters, or empty.
-		std::string OfferedPublisherKey;
-
-		// The grant a server issued this client, or empty.
-		std::vector<std::byte> OfferedContentGrant;
-
-		// Requests issued for meshes and textures and not yet taken.
-		//
-		// **A list rather than a count**, because a request that failed has to
-		// be dropped from it and a count could not say which.
-		std::vector<engine::delivery::RequestId> ContentPending;
-
-		// How much delivered content this frame will decode and upload.
-		//
-		// Held across frames rather than made in the loop so the allowance is
-		// one object with one meaning; `Begin` is what resets it.
+		// One admitted content route and its demand state move together at handoff.
+		// Relay outlives the delivery client that borrows it.
+		struct ContentSession {
+			std::unique_ptr<ContentLink> Relay;
+			std::unique_ptr<engine::delivery::AssetClient> Client;
+			std::string RelayName;
+			std::vector<engine::delivery::Source> OfferedSources;
+			std::string PublisherKey;
+			std::vector<std::byte> Grant;
+			std::vector<engine::delivery::RequestId> Pending;
+			std::vector<engine::delivery::RequestId> Issued;
+			std::unordered_set<uint64_t> Asked;
+			std::unordered_map<uint32_t, uint64_t> ScannedAtRevision;
+			std::vector<engine::core::Name> Wanted;
+			std::vector<engine::core::Name> Owners;
+			bool Requested = false;
+			bool Reported = false;
+		};
+		std::unique_ptr<ContentSession> ContentState = std::make_unique<ContentSession>();
+		// One intake allowance across active and observed worlds.
 		engine::delivery::IntakeBudget ContentBudget;
-
-		// Whether the catalogue has arrived and the requests have been issued.
-		// Once, not per frame - see `PumpContent`.
-		bool ContentRequested = false;
-		bool ContentReported = false;
-
-		// Requests made while `ContentPending` was being walked, moved into it
-		// afterwards. See `Client::RequestTexture`.
-		std::vector<engine::delivery::RequestId> ContentIssued;
-
-		// Which texture names have been asked for, by `core::Name::Id`.
-		//
-		// **Asked once, whatever happened**, so a misspelled name costs one
-		// failed request rather than one per pump forever.
-		std::unordered_set<uint32_t> ContentAsked;
-
-		// The content-reference revision each world was last collected at, by
-		// `world::WorldId::Index`. Absent means never.
-		//
-		// **A watermark rather than a copy**, which is the distinction root
-		// `AGENTS.md` rule 2 is about: nothing here is a second statement of
-		// something a world holds, it is a record of how far *this* reader has
-		// got. `ContentAsked` above is the same kind of memo.
-		//
-		// The number is derived from component-specific ECS versions, so particle
-		// simulation and unrelated property writes do not falsify it.
-		std::unordered_map<uint32_t, uint64_t> ContentScannedAtRevision;
-
-		// Scratch for the demand scan, reused so a pump allocates nothing.
-		std::vector<engine::core::Name> ContentWanted;
+		std::vector<engine::world::WorldId> ContentWorlds;
+		std::vector<engine::render::WorldContentOwner> ContentBindings;
 
 		size_t ContentMeshes = 0;
 		size_t ContentTextures = 0;

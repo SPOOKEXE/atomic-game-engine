@@ -2,7 +2,6 @@
 #extension GL_GOOGLE_include_directive : require
 #include "surface-shading.glsl"
 
-layout(location = 1) out float outDepth;
 layout(set = 2, binding = 10) uniform sampler2D opaqueZ;
 layout(set = 2, binding = 11) uniform sampler2D previousZ;
 layout(set = 3, binding = 3, std140) uniform LayerCapture {
@@ -25,5 +24,4 @@ void main() {
 	}
 	shadeSurface();
 	if (outColour.a <= 0.0) discard;
-	outDepth = distance;
 }

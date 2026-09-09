@@ -44,6 +44,7 @@
 //
 // @tier L12 · client
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/render/ShaderCompiler.hpp>
@@ -70,6 +71,10 @@ namespace engine::render {
 		// Accepted SPIR-V, retained when a later edit fails. Error describes
 		// whether an accepted module exists; AttemptError describes the last edit.
 		std::vector<uint32_t> SpirV;
+
+		// Identity of accepted words, independent of source identity and revision.
+		// Zero when no program is accepted; failed edits preserve this with SpirV.
+		assets::ContentHash CodeHash;
 
 		// Resolution failure when no accepted module is available. A failed edit
 		// of a working shader reports AttemptError while this remains empty.
@@ -144,9 +149,9 @@ namespace engine::render {
 
 	// Every shader a world's materials name, resolved and kept.
 	//
-	// **One per client rather than one per world**, because it is a cache over
-	// process-wide names and the compiler inside it is expensive to build.
-	// `Refresh` takes the world, so a client with several passes them in turn.
+	// One compiler serves all owners. Each owner retains its own named modules;
+	// refreshing one world cannot evict or replace another world's accepted code.
+	// The empty owner preserves the single-world shared namespace.
 	//
 	// @since v0.15
 	class ShaderLibrary {
@@ -170,22 +175,24 @@ namespace engine::render {
 		// is never reloaded, so a steady world costs one walk over its
 		// materials and identity/revision comparisons per distinct shader.
 		//
-		// Names nothing asks for any more are dropped, so this holds a picture
+		// Names this owner no longer asks for are dropped, so this holds a picture
 		// of what the world wants rather than of everything it ever wanted.
 		//
 		// @param store The world.
+		// @param owner Residency namespace. Use a distinct name for each live world.
 		// @return How many modules changed - compiled, loaded, or dropped.
 		//         Zero is the steady state, and is what a caller checks before
 		//         handing anything to a device.
-		size_t Refresh(ecs::Store &store);
+		size_t Refresh(ecs::Store &store, core::Name owner = {});
 
 		// Resolves every lens program named by an enabled `ShaderLens`. Lens
 		// modules live in a separate cache because their fragment interface has
 		// depth and fixed pass data rather than the material interface.
 		//
 		// @param store The world.
+		// @param owner Residency namespace. Use a distinct name for each live world.
 		// @return How many lens modules changed, compiled, loaded or dropped.
-		size_t RefreshLenses(ecs::Store &store);
+		size_t RefreshLenses(ecs::Store &store, core::Name owner = {});
 
 		// The module a name resolved to, or null.
 		//
@@ -194,14 +201,20 @@ namespace engine::render {
 		// produced.
 		//
 		// @param name The shader's name.
-		// @return The module, valid until the next `Refresh`.
-		const ShaderModule *Find(const core::Name &name) const;
+		// @param owner The exact namespace; scoped lookups never fall back to shared.
+		// @return The module, valid until this owner is refreshed or dropped.
+		const ShaderModule *Find(const core::Name &name, core::Name owner = {}) const;
 
 		// The lens module a name resolved to, or null when no enabled lens asks
-		// for it.
-		const ShaderModule *FindLens(const core::Name &name) const;
+		// for it. The owner lookup and lifetime match `Find`.
+		const ShaderModule *FindLens(const core::Name &name, core::Name owner = {}) const;
 
-		// The names whose modules changed during the last `Refresh`.
+		// Retires both module families for one nonempty owner. Shared modules remain.
+		// Changed lists contain this owner's removed names after the call.
+		// @return The total number of removed material and lens modules.
+		size_t DropOwner(core::Name owner);
+
+		// The names whose modules changed during the last `Refresh` or `DropOwner`.
 		//
 		// **What a caller hands to a device.** A renderer rebuilds a pipeline
 		// for these and leaves the rest alone; walking every module every frame
@@ -210,10 +223,10 @@ namespace engine::render {
 		// A dropped name appears here too, and `Find` answers null for it -
 		// which is how a caller knows to release whatever it built.
 		//
-		// @return The names, valid until the next `Refresh`.
+		// @return The names in the last owner scope, valid until `Refresh` or `DropOwner`.
 		std::span<const core::Name> Changed() const;
 
-		// The lens modules whose state changed during the last `RefreshLenses`.
+		// The lens modules changed by the last `RefreshLenses` or `DropOwner`.
 		std::span<const core::Name> ChangedLenses() const;
 
 		// How many modules the library holds.

@@ -7,7 +7,7 @@
 
 namespace engine::world {
 	namespace {
-		constexpr uint32_t MAGIC = 0x31535041;
+		constexpr uint32_t PRESENTATION_STREAM_MAGIC = 0x31535041;
 		constexpr size_t HEADER_BYTES = 20;
 		constexpr PresentationLimits LIMITS;
 		bool Decode(std::span<const std::byte> bytes, PresentationStreamFrame &frame) {
@@ -67,7 +67,7 @@ namespace engine::world {
 			const auto &frame = Sending[frames];
 			const auto count = std::min(PACKET_BYTES - HEADER_BYTES, frame.size() - SendingOffset);
 			Packet.Clear();
-			Packet.WriteUInt32(MAGIC);
+			Packet.WriteUInt32(PRESENTATION_STREAM_MAGIC);
 			Packet.WriteUInt64(SendingSequence);
 			Packet.WriteUInt32(static_cast<uint32_t>(frame.size()));
 			Packet.WriteUInt32(static_cast<uint32_t>(SendingOffset));
@@ -100,7 +100,8 @@ namespace engine::world {
 	}
 	PresentationStreamReceive PresentationStream::Receive(std::span<const std::byte> packet) {
 		core::ByteReader reader(packet);
-		if (packet.size() < sizeof(MAGIC) || reader.ReadUInt32() != MAGIC)
+		if (packet.size() < sizeof(PRESENTATION_STREAM_MAGIC) ||
+			reader.ReadUInt32() != PRESENTATION_STREAM_MAGIC)
 			return PresentationStreamReceive::Other;
 		if (!Live || packet.size() <= HEADER_BYTES || packet.size() > PACKET_BYTES) return Fail();
 		const auto sequence = reader.ReadUInt64();
@@ -135,7 +136,8 @@ namespace engine::world {
 	}
 	bool PresentationStream::Recognizes(std::span<const std::byte> packet) {
 		core::ByteReader reader(packet);
-		return packet.size() >= sizeof(MAGIC) && reader.ReadUInt32() == MAGIC;
+		return packet.size() >= sizeof(PRESENTATION_STREAM_MAGIC) &&
+			   reader.ReadUInt32() == PRESENTATION_STREAM_MAGIC;
 	}
 	std::vector<PresentationStreamFrame> PresentationStream::Take() {
 		ReceivedSize = {ReceivingBytes, ReceivingBytes != 0 ? 1u : 0u};

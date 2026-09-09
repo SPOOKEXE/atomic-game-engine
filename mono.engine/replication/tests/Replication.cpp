@@ -18,6 +18,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -47,6 +48,19 @@ namespace replication_test {
 		float Y = 0.0f;
 	};
 	struct Tag {};
+	struct SnapshotPayload {
+		std::string Bytes = std::string(8192, 'a');
+	};
+	void WriteSnapshotPayload(engine::core::ByteWriter &writer, const void *source, size_t count) {
+		const auto *rows = static_cast<const SnapshotPayload *>(source);
+		for (size_t index = 0; index < count; ++index)
+			writer.WriteString(rows[index].Bytes);
+	}
+	void ReadSnapshotPayload(engine::core::ByteReader &reader, void *destination, size_t count) {
+		auto *rows = static_cast<SnapshotPayload *>(destination);
+		for (size_t index = 0; index < count; ++index)
+			rows[index].Bytes = reader.ReadString();
+	}
 	struct Secret {
 		int Value = 0;
 	};
@@ -61,6 +75,9 @@ namespace replication_test {
 		static bool once = [] {
 			engine::ecs::Components::Register<Spot>("replication_test.Spot");
 			engine::ecs::Components::Register<Tag>("replication_test.Tag");
+			engine::ecs::Components::Register<SnapshotPayload>(
+				"replication_test.SnapshotPayload", WriteSnapshotPayload, ReadSnapshotPayload
+			);
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
 
@@ -193,6 +210,87 @@ TEST_CASE("replica snapshots preserve the local simulation clock", "[replication
 		CHECK(pair.Client.Time().Alpha == local.Alpha);
 		CHECK(pair.Client.Get<Spot>(entity)->X == 3.0f);
 	}
+}
+
+TEST_CASE("component changes survive a snapshot streamed across ticks", "[replication][snapshot-changes]") {
+	const auto detection = GENERATE(ChangeDetection::Observed, ChangeDetection::Signature);
+	CAPTURE(detection);
+	bool oversize = false;
+	bool delayedAcknowledgement = false;
+	SECTION("initial world snapshot") {}
+	SECTION("oversize component slice after acknowledgement") {
+		oversize = true;
+	}
+
+	SECTION("oversize slice with an older value acknowledgement still in flight") {
+		oversize = true;
+		delayedAcknowledgement = true;
+	}
+
+	AuthoritySettings settings;
+	settings.ChunkBytes = 512;
+	settings.ChunksPerTick = 1;
+	settings.ResnapshotAfterTicks = 4096;
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"), detection);
+	pair.Authority_.Replicate(Name("replication_test.SnapshotPayload"), ChangeDetection::Observed);
+	pair.Server.Observe<SnapshotPayload>();
+	const Entity tracked = pair.Server.Create();
+	pair.Server.Set(tracked, Spot{1, 0});
+	const Entity large = pair.Server.Create();
+	pair.Server.Set(large, SnapshotPayload{});
+
+	std::vector<std::byte> delayedAck;
+	const auto publish = [&](bool acknowledge = true) {
+		pair.Authority_.Publish(pair.Server, ++pair.Now);
+		for (const auto &message : pair.Authority_.Outgoing(pair.Handle))
+			REQUIRE(pair.Replica_.Receive(pair.Client, message) != ApplyStatus::Malformed);
+		pair.Server.ClearChanges();
+		const auto acknowledgement = pair.Replica_.Acknowledge();
+		if (acknowledge && !acknowledgement.empty())
+			REQUIRE(pair.Authority_.Receive(pair.Handle, acknowledgement));
+	};
+
+	if (oversize) {
+		REQUIRE(pair.Join());
+		pair.Tick();
+		REQUIRE(pair.Client.Get<Spot>(tracked));
+		REQUIRE(pair.Client.Get<Spot>(tracked)->X == 1);
+		pair.Server.GetMutable<SnapshotPayload>(large)->Bytes[0] = 'b';
+		if (delayedAcknowledgement) pair.Server.Set(tracked, Spot{2, 0});
+		// The first delta queues the oversized row; the next publish starts its slice.
+		publish(!delayedAcknowledgement);
+		if (delayedAcknowledgement) {
+			REQUIRE(pair.Client.Get<Spot>(tracked)->X == 2);
+			delayedAck = pair.Replica_.Acknowledge();
+			REQUIRE_FALSE(delayedAck.empty());
+		}
+	}
+	publish(!delayedAcknowledgement);
+	REQUIRE(pair.Authority_.StatusOf(pair.Handle).SnapshotRemaining > settings.ChunkBytes * 2);
+	pair.Server.Set(tracked, Spot{0, 0});
+	publish(!delayedAcknowledgement);
+	REQUIRE(pair.Authority_.StatusOf(pair.Handle).SnapshotRemaining > settings.ChunkBytes);
+	if (delayedAcknowledgement) {
+		// This acknowledges the delivered value 2, never the newer unsent value 0.
+		REQUIRE(pair.Authority_.Receive(pair.Handle, delayedAck));
+		REQUIRE(pair.Client.Get<Spot>(tracked)->X == 2);
+	}
+	// No further write can hide the lost transition by generating another dirty row.
+	pair.Tick();
+	for (int tick = 0; tick < 64 && pair.Authority_.StatusOf(pair.Handle).SnapshotRemaining != 0; ++tick)
+		pair.Tick();
+	REQUIRE(pair.Authority_.StatusOf(pair.Handle).SnapshotRemaining == 0);
+	REQUIRE(pair.Replica_.Joined());
+	for (int tick = 0; tick < 4; ++tick)
+		pair.Tick();
+	REQUIRE(pair.Client.Get<Spot>(tracked));
+	CHECK(pair.Client.Get<Spot>(tracked)->X == 0);
+	REQUIRE(pair.Client.Get<SnapshotPayload>(large));
+	CHECK(pair.Client.Get<SnapshotPayload>(large)->Bytes[0] == (oversize ? 'b' : 'a'));
+	CHECK(pair.Authority_.Stats().Resnapshots == 0);
 }
 
 // --- joining -----------------------------------------------------------------

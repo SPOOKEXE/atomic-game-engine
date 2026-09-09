@@ -96,7 +96,7 @@ TEST_CASE("whole-eye images fill the viewport and reject a different owner", "[r
 			11,
 			render::test::ImageFormat::Rgba8Unorm
 		);
-		for (const auto [x, y] : {std::pair{0, 0}, std::pair{8, 5}, std::pair{16, 10}}) {
+		for (const auto &[x, y] : {std::pair{0, 0}, std::pair{8, 5}, std::pair{16, 10}}) {
 			const auto *pixel = image.Bytes.data() + y * image.RowStrideBytes + x * 4;
 			CHECK(std::abs(std::to_integer<int>(pixel[bgra ? 2 : 0]) - (mismatch ? 0 : expected)) <= 2);
 			CHECK(pixel[1] == std::byte{0});
@@ -120,7 +120,7 @@ namespace {
 		spec.Scope = graph::NodeScope::Frame;
 		spec.Queue = graph::ExecutionQueue::Cpu;
 		spec.Category = graph::NodeCategory::Output;
-		for (const char *resource : {"tonemapped", "portaled", "composed-image"}) {
+		for (const char *resource : {"tonemapped", "composed-image"}) {
 			spec.Inputs.push_back({.Name = core::Name(resource), .Kind = graph::ResourceKind::Texture});
 		}
 		REQUIRE(graph::RegisterNodeKind(std::move(spec)));
@@ -131,7 +131,7 @@ namespace {
 			 .NodeKind = boundary,
 			 .Scope = graph::NodeScope::Frame}
 		);
-		for (const char *resource : {"tonemapped", "portaled", "composed-image"}) {
+		for (const char *resource : {"tonemapped", "composed-image"}) {
 			document.Record(
 				{.Kind = graph::EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(resource)}
 			);
@@ -198,7 +198,7 @@ namespace {
 	uint8_t DisplayCode(double radiance) {
 		const double aces = (radiance * (2.51 * radiance + .03)) / (radiance * (2.43 * radiance + .59) + .14);
 		const double display = std::pow(aces, 1 / 2.2);
-		// The graph's portaled attachment stores sRGB; the display shader writes
+		// The graph's tonemapped attachment stores sRGB; the display shader writes
 		// its encoded result into that attachment, just as the direct pipeline does.
 		const double stored =
 			display <= .0031308 ? 12.92 * display : 1.055 * std::pow(display, 1 / 2.4) - .055;
@@ -252,7 +252,7 @@ namespace {
 		CheckImage(
 			renderer,
 			"imported-quadrants",
-			"portaled",
+			"tonemapped",
 			"image=32x32 linear half quadrants; fitted image bounds=-2,2,-2,2; aperture=1.5,1.2; "
 			"eye=0,0,4\n" +
 				graph::Write(document),
@@ -267,8 +267,11 @@ TEST_CASE(
 	"owned portal images upload once and use fitted untinted sampling",
 	"[render][gpu][fixture][portal-import][.]"
 ) {
-	const bool pairedDepth = GENERATE(false, true);
-	CAPTURE(pairedDepth);
+	const int planeSet = GENERATE(0, 1, 2, 3);
+	const bool pairedDepth = planeSet != 0;
+	const bool retainedAmbient = planeSet >= 2;
+	const bool retainedDirectional = planeSet == 3;
+	CAPTURE(planeSet);
 	const auto makeImage = [&](const render::PortalExchangeKey &key) {
 		auto image = Image(key);
 		if (pairedDepth) {
@@ -277,6 +280,26 @@ TEST_CASE(
 				samples.WriteFloat(4);
 			image.Depth.assign(samples.Bytes().begin(), samples.Bytes().end());
 			image.DepthHash = assets::Hasher::Of(image.Depth);
+		}
+		if (retainedAmbient) {
+			image.Scope = render::PortalImageScope::OpaqueLighting;
+			image.CaptureLighting.emplace();
+			core::ByteWriter normals, response;
+			for (size_t pixel = 0; pixel < size_t(image.Width) * image.Height; ++pixel) {
+				normals.WriteUInt32(0xfff80200u);
+				for (size_t channel = 0; channel < 4; ++channel)
+					response.WriteFloat(.25f);
+			}
+			image.Normal.assign(normals.Bytes().begin(), normals.Bytes().end());
+			image.AmbientResponse.assign(response.Bytes().begin(), response.Bytes().end());
+			image.NormalHash = assets::Hasher::Of(image.Normal);
+			image.AmbientResponseHash = assets::Hasher::Of(image.AmbientResponse);
+			image.LightingBaseline = image.AmbientResponse;
+			image.LightingBaselineHash = assets::Hasher::Of(image.LightingBaseline);
+			if (retainedDirectional) {
+				image.DirectionalResponse = image.AmbientResponse;
+				image.DirectionalResponseHash = assets::Hasher::Of(image.DirectionalResponse);
+			}
 		}
 		return image;
 	};
@@ -315,8 +338,17 @@ TEST_CASE(
 	view.OverrideLighting = true;
 	view.Lighting.Ambient = {.25f, .25f, .25f};
 	view.Lighting.Direct = {};
+	// Keep the exterior oracle independent of imported aperture pixels.
+	render::OverlayImage overlay;
+	auto baseline = view;
+	baseline.Portals = {};
+	fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false);
+	const auto before =
+		CaptureResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
+
 	render::PortalImageBinding binding;
 	binding.World = view.World;
+	if (retainedAmbient) binding.ExpectedScope = render::PortalImageScope::OpaqueLighting;
 	binding.WorldName = view.WorldName;
 	binding.Portal = portal.ImagePortal;
 	binding.Expected = {1, "import.entrance", 1, 1};
@@ -327,9 +359,12 @@ TEST_CASE(
 	CHECK(fixture.Render.PortalImageUsage().Uploads == 0);
 	CHECK(fixture.Render.PortalImageUsage().TextureBytes == 0);
 	CHECK(
-		fixture.Render.PortalImageUsage().PendingCpuBytes == IMAGE_SIZE * IMAGE_SIZE * (pairedDepth ? 12 : 8)
+		fixture.Render.PortalImageUsage().PendingCpuBytes == IMAGE_SIZE * IMAGE_SIZE *
+																 (retainedDirectional ? 64
+																  : retainedAmbient	  ? 48
+																  : pairedDepth		  ? 12
+																					  : 8)
 	);
-	render::OverlayImage overlay;
 	SECTION("successful graph") {}
 	SECTION("valid upload followed by graph failure") {
 		REQUIRE(fixture.Render.InstallNodeHandler(
@@ -342,21 +377,41 @@ TEST_CASE(
 	));
 	CHECK(frame.PortalPasses == 0);
 	REQUIRE(frame.SurfaceInstances > 0);
-	CHECK(fixture.Render.PortalImageUsage().Uploads == (pairedDepth ? 2 : 1));
 	CHECK(
-		fixture.Render.PortalImageUsage().UploadedBytes == IMAGE_SIZE * IMAGE_SIZE * (pairedDepth ? 12 : 8)
+		fixture.Render.PortalImageUsage().Uploads == (retainedDirectional ? 6
+													  : retainedAmbient	  ? 5
+													  : pairedDepth		  ? 2
+																		  : 1)
+	);
+	CHECK(
+		fixture.Render.PortalImageUsage().UploadedBytes == IMAGE_SIZE * IMAGE_SIZE *
+															   (retainedDirectional ? 64
+																: retainedAmbient	? 48
+																: pairedDepth		? 12
+																					: 8)
 	);
 	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
-	CHECK(fixture.Render.PortalImageUsage().TextureBytes == IMAGE_SIZE * IMAGE_SIZE * (pairedDepth ? 12 : 8));
-	const auto before =
-		CaptureResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
+	CHECK(
+		fixture.Render.PortalImageUsage().TextureBytes == IMAGE_SIZE * IMAGE_SIZE *
+															  (retainedDirectional ? 64
+															   : retainedAmbient   ? 48
+															   : pairedDepth	   ? 12
+																				   : 8)
+	);
+
 	const auto actual =
-		CaptureResource(fixture.Render, core::Name("portaled"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
+		CaptureResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
+	CHECK_FALSE(CompareImages(before.View(), actual.View()).Passed());
 	CheckImported(fixture.Render, document, actual, before);
 	reply = makeImage(binding.Expected);
 	CHECK(fixture.Render.QueuePortalImage(binding, std::move(reply)) == portal.ImportedImage);
 	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-	CHECK(fixture.Render.PortalImageUsage().Uploads == (pairedDepth ? 2 : 1));
+	CHECK(
+		fixture.Render.PortalImageUsage().Uploads == (retainedDirectional ? 6
+													  : retainedAmbient	  ? 5
+													  : pairedDepth		  ? 2
+																		  : 1)
+	);
 	CHECK(fixture.Render.PortalImageUsage().Reuses == 1);
 	if (pairedDepth) {
 		auto invalidDepth = makeImage(binding.Expected);
@@ -371,8 +426,83 @@ TEST_CASE(
 		REQUIRE(portal.ImportedImage != 0);
 		CHECK(portal.ImportedImage != previous);
 		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-		CHECK(fixture.Render.PortalImageUsage().Uploads == 4);
+		CHECK(
+			fixture.Render.PortalImageUsage().Uploads == (retainedDirectional ? 12
+														  : retainedAmbient	  ? 10
+																			  : 4)
+		);
 		CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
+	}
+	if (retainedAmbient) {
+		if (retainedDirectional) {
+			auto transparentBinding = binding;
+			transparentBinding.Layer = 1;
+			auto invalid = makeImage(binding.Expected);
+			CHECK(fixture.Render.QueuePortalImage(transparentBinding, std::move(invalid)) == 0);
+		}
+		for (int malformed = 0; malformed < (retainedDirectional ? 13 : 8); ++malformed) {
+			CAPTURE(malformed);
+			auto invalid = makeImage(binding.Expected);
+			if (malformed == 0) invalid.Normal.pop_back();
+			if (malformed == 1) invalid.AmbientResponse.clear();
+			if (malformed == 2) invalid.Normal[0] ^= std::byte{1};
+			if (malformed == 3) invalid.AmbientResponse[0] ^= std::byte{1};
+			if (malformed == 4) {
+				invalid.AmbientResponse[3] = std::byte{0x7f};
+				invalid.AmbientResponseHash = assets::Hasher::Of(invalid.AmbientResponse);
+			}
+			if (malformed == 5) invalid.LightingBaseline.clear();
+			if (malformed == 6) invalid.LightingBaseline[0] ^= std::byte{1};
+			if (malformed == 7) {
+				invalid.LightingBaseline[3] = std::byte{0x7f};
+				invalid.LightingBaselineHash = assets::Hasher::Of(invalid.LightingBaseline);
+			}
+			if (malformed == 8) invalid.DirectionalResponse.pop_back();
+			if (malformed == 9) invalid.DirectionalResponse.clear();
+			if (malformed == 10) invalid.DirectionalResponse[0] ^= std::byte{1};
+			if (malformed == 11) {
+				invalid.DirectionalResponse[3] = std::byte{0x7f};
+				invalid.DirectionalResponseHash = assets::Hasher::Of(invalid.DirectionalResponse);
+			}
+			if (malformed == 12) {
+				invalid.DirectionalResponse[15] = std::byte{0x40};
+				invalid.DirectionalResponseHash = assets::Hasher::Of(invalid.DirectionalResponse);
+			}
+			CHECK(fixture.Render.QueuePortalImage(binding, std::move(invalid)) == 0);
+			CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
+		}
+		auto previousReply = makeImage(binding.Expected);
+		previousReply.Depth[3] = std::byte{0x41};
+		previousReply.DepthHash = assets::Hasher::Of(previousReply.Depth);
+		for (int changedPlane = 0; changedPlane < (retainedDirectional ? 4 : 3); ++changedPlane) {
+			auto changed = previousReply;
+			if (changedPlane == 0) {
+				changed.Normal[0] ^= std::byte{1};
+				changed.NormalHash = assets::Hasher::Of(changed.Normal);
+			} else if (changedPlane == 1) {
+				changed.AmbientResponse[3] = std::byte{0x3f};
+				changed.AmbientResponseHash = assets::Hasher::Of(changed.AmbientResponse);
+			}
+			if (changedPlane == 2) {
+				changed.LightingBaseline[3] = std::byte{0x3f};
+				changed.LightingBaselineHash = assets::Hasher::Of(changed.LightingBaseline);
+			}
+			if (changedPlane == 3) {
+				changed.DirectionalResponse[3] = std::byte{0x3f};
+				changed.DirectionalResponseHash = assets::Hasher::Of(changed.DirectionalResponse);
+			}
+			previousReply = changed;
+			const auto previous = portal.ImportedImage;
+			const auto uploads = fixture.Render.PortalImageUsage().Uploads;
+			portal.ImportedImage = fixture.Render.QueuePortalImage(binding, std::move(changed));
+			REQUIRE(portal.ImportedImage != 0);
+			CHECK(portal.ImportedImage != previous);
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			CHECK(fixture.Render.PortalImageUsage().Uploads == uploads + (retainedDirectional ? 6 : 5));
+			CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == 0);
+			auto repeated = previousReply;
+			CHECK(fixture.Render.QueuePortalImage(binding, std::move(repeated)) == portal.ImportedImage);
+		}
 	}
 	for (const int mismatch : {0, 1, 2, 3}) {
 		auto other = view;

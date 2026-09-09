@@ -14,6 +14,12 @@
 
 namespace engine::render {
 
+	namespace {
+		uint64_t TextureKey(const core::Name &name, core::Name owner) {
+			return (uint64_t(owner.Id()) << 32) | name.Id();
+		}
+	}
+
 	TextureTable::~TextureTable() {
 		Shutdown();
 	}
@@ -245,11 +251,11 @@ namespace engine::render {
 		};
 	}
 
-	FlipbookCell TextureTable::CellOf(const core::Name &name, double seconds) const {
+	FlipbookCell TextureTable::CellOf(const core::Name &name, double seconds, core::Name owner) const {
 		if (!name.IsValid()) {
 			return {};
 		}
-		const auto found = Textures.find(name.Id());
+		const auto found = Textures.find(TextureKey(name, owner));
 		if (found == Textures.end()) {
 			return {};
 		}
@@ -266,7 +272,7 @@ namespace engine::render {
 			}
 
 			const uint64_t frame = FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds);
-			const uint64_t word = static_cast<uint64_t>(name) << 32 | frame;
+			const uint64_t word = (name * 0x9E3779B97F4A7C15ull) ^ frame;
 			// Commutative because the catalogue is an unordered map. The name is
 			// part of every term, so two sheets on the same frame remain distinct.
 			signature ^= word * 0x9E3779B97F4A7C15ull + 0xD6E8FEB86659FD93ull;
@@ -274,7 +280,7 @@ namespace engine::render {
 		return signature;
 	}
 
-	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image) {
+	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image, core::Name owner) {
 		if (Device == nullptr || !name.IsValid() || !image.IsValid()) {
 			return false;
 		}
@@ -298,7 +304,7 @@ namespace engine::render {
 		}
 
 		// Release the old texture only after the replacement upload succeeds.
-		const auto existing = Textures.find(name.Id());
+		const auto existing = Textures.find(TextureKey(name, owner));
 		if (existing != Textures.end()) {
 			gpu::ReleaseTexture(Device, existing->second.Texture);
 
@@ -309,7 +315,7 @@ namespace engine::render {
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
 			existing->second = Describe(texture, uploadBytes, image);
 		} else {
-			Textures.emplace(name.Id(), Describe(texture, uploadBytes, image));
+			Textures.emplace(TextureKey(name, owner), Describe(texture, uploadBytes, image));
 		}
 
 		UploadedBytes += uploadBytes;
@@ -318,23 +324,24 @@ namespace engine::render {
 		// left to the caller because there is no path where a registered
 		// texture is still in flight, and a rule the type enforces is one no
 		// host can forget.
-		Awaiting.erase(name.Id());
+		Awaiting.erase(TextureKey(name, owner));
 		return true;
 	}
 
-	SDL_GPUTexture *TextureTable::Find(const core::Name &name) const {
+	SDL_GPUTexture *TextureTable::Find(const core::Name &name, core::Name owner) const {
 		if (!name.IsValid()) {
 			return nullptr;
 		}
-		const auto found = Textures.find(name.Id());
+		const auto found = Textures.find(TextureKey(name, owner));
 		return found == Textures.end() ? nullptr : found->second.Texture;
 	}
 
-	bool TextureTable::SizeOf(const core::Name &name, uint32_t &width, uint32_t &height) const {
+	bool
+	TextureTable::SizeOf(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner) const {
 		if (!name.IsValid()) {
 			return false;
 		}
-		const auto found = Textures.find(name.Id());
+		const auto found = Textures.find(TextureKey(name, owner));
 		if (found == Textures.end()) {
 			return false;
 		}
@@ -344,7 +351,12 @@ namespace engine::render {
 	}
 
 	bool TextureTable::Adopt(
-		const core::Name &name, SDL_GPUTexture *texture, uint32_t width, uint32_t height, size_t bytes
+		const core::Name &name,
+		SDL_GPUTexture *texture,
+		uint32_t width,
+		uint32_t height,
+		size_t bytes,
+		core::Name owner
 	) {
 		if (Device == nullptr || !name.IsValid() || texture == nullptr) {
 			return false;
@@ -369,13 +381,13 @@ namespace engine::render {
 		// and claiming a grid would make `FlipbookCell` walk cells that are not
 		// there.
 
-		const auto existing = Textures.find(name.Id());
+		const auto existing = Textures.find(TextureKey(name, owner));
 		if (existing != Textures.end()) {
 			gpu::ReleaseTexture(Device, existing->second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
 			existing->second = entry;
 		} else {
-			Textures.emplace(name.Id(), entry);
+			Textures.emplace(TextureKey(name, owner), entry);
 		}
 
 		UploadedBytes += bytes;
@@ -384,11 +396,11 @@ namespace engine::render {
 		// left to the caller because there is no path where a registered
 		// texture is still in flight, and a rule the type enforces is one no
 		// host can forget.
-		Awaiting.erase(name.Id());
+		Awaiting.erase(TextureKey(name, owner));
 		return true;
 	}
 
-	void TextureTable::Expect(const core::Name &name) {
+	void TextureTable::Expect(const core::Name &name, core::Name owner) {
 		if (!name.IsValid()) {
 			return;
 		}
@@ -397,25 +409,25 @@ namespace engine::render {
 		// republished, and a name asked for again while the old texture is
 		// still registered is still in flight - refusing the mark here would
 		// make the second fetch invisible for no gain.
-		Awaiting.insert(name.Id());
+		Awaiting.insert(TextureKey(name, owner));
 	}
 
-	void TextureTable::StopExpecting(const core::Name &name) {
+	void TextureTable::StopExpecting(const core::Name &name, core::Name owner) {
 		if (name.IsValid()) {
-			Awaiting.erase(name.Id());
+			Awaiting.erase(TextureKey(name, owner));
 		}
 	}
 
-	bool TextureTable::Expecting(const core::Name &name) const {
-		return name.IsValid() && Awaiting.find(name.Id()) != Awaiting.end();
+	bool TextureTable::Expecting(const core::Name &name, core::Name owner) const {
+		return name.IsValid() && Awaiting.find(TextureKey(name, owner)) != Awaiting.end();
 	}
 
-	bool TextureTable::Drop(const core::Name &name) {
+	bool TextureTable::Drop(const core::Name &name, core::Name owner) {
 		if (Device == nullptr || !name.IsValid()) {
 			return false;
 		}
 
-		const auto found = Textures.find(name.Id());
+		const auto found = Textures.find(TextureKey(name, owner));
 		if (found == Textures.end()) {
 			return false;
 		}
@@ -425,4 +437,16 @@ namespace engine::render {
 		Textures.erase(found);
 		return true;
 	}
+	size_t TextureTable::DropOwner(core::Name owner) {
+		if (!owner.IsValid()) return 0;
+		const uint32_t ownerId = owner.Id();
+		std::erase_if(Awaiting, [ownerId](uint64_t key) { return uint32_t(key >> 32) == ownerId; });
+		return std::erase_if(Textures, [&](const auto &pair) {
+			if (uint32_t(pair.first >> 32) != ownerId) return false;
+			gpu::ReleaseTexture(Device, pair.second.Texture);
+			UploadedBytes -= std::min(UploadedBytes, pair.second.Bytes);
+			return true;
+		});
+	}
+
 }

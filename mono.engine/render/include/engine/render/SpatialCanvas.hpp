@@ -34,6 +34,7 @@
 //
 // @tier L12 · client
 
+#include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
 
@@ -51,6 +52,12 @@ namespace engine::ecs {
 }
 
 namespace engine::render {
+
+	// A copied world-space collector placement, independent of later camera preparation.
+	struct SpatialCollector {
+		ecs::Entity Collector;
+		gui::SpatialCanvas Canvas;
+	};
 
 	// Where a world-space pointer landed on a collector's canvas.
 	//

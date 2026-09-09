@@ -1,12 +1,4 @@
-// What the packed instance row costs in accuracy.
-//
-// **The whole point of these cases is the size of a number, not a boolean.**
-// `GpuInstance` went from ninety-six bytes to forty-eight by quantising the
-// rotation to four sixteen-bit codes and the colour to RGBA8, and "is that
-// visible" is a question with an answer in metres. So the reference here is the
-// matrix the old layout uploaded, rebuilt inline, and every case measures how far
-// the packed row lands from it at the corners of the geometry it draws - which
-// is where the error is largest and where a seam between two parts would show it.
+// Resident instance precision and byte layout, checked against independent double rotations.
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
@@ -25,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 TEST_SUITE_ID("engine.render.instancepacking")
 
@@ -32,8 +25,6 @@ using Catch::Approx;
 using engine::core::CFrame;
 using engine::core::Color3;
 using engine::core::Vector3;
-using engine::render::DecodeSnorm16;
-using engine::render::EncodeSnorm16;
 using engine::render::GpuInstance;
 using engine::render::MeshEntry;
 using engine::render::ModelMatrixOf;
@@ -120,27 +111,6 @@ namespace {
 	}
 }
 
-TEST_CASE("a signed-normalised code round-trips the ends exactly", "[render][instancepacking]") {
-	// **The two values that decide whether the scale constant is right.** 32767
-	// is the divisor every graphics API decodes SNORM16 by; encoding against
-	// 32768 instead would put `1.0` one code short and leave the identity
-	// rotation slightly not-identity, which is a static scene shimmering.
-	CHECK(DecodeSnorm16(EncodeSnorm16(1.0f)) == Approx(1.0f));
-	CHECK(DecodeSnorm16(EncodeSnorm16(-1.0f)) == Approx(-1.0f));
-	CHECK(DecodeSnorm16(EncodeSnorm16(0.0f)) == Approx(0.0f));
-
-	// Out of range clamps rather than wrapping. A component of a normalised
-	// quaternion cannot exceed one, but a caller handing over an unnormalised
-	// one before `PackRotation` gets to it would otherwise alias to the far end
-	// of the range - a small error becoming the opposite rotation.
-	CHECK(DecodeSnorm16(EncodeSnorm16(4.0f)) == Approx(1.0f));
-	CHECK(DecodeSnorm16(EncodeSnorm16(-4.0f)) == Approx(-1.0f));
-
-	// The resolution, stated so the number the accuracy cases below expect has
-	// somewhere to come from.
-	CHECK(DecodeSnorm16(EncodeSnorm16(0.5f)) == Approx(0.5f).margin(1.0 / 32767.0));
-}
-
 TEST_CASE("the identity rotation survives packing exactly", "[render][instancepacking]") {
 	// **The case a still scene lives on.** Most parts in most worlds are
 	// axis-aligned, so if the identity did not round-trip bit-exactly then the
@@ -184,30 +154,23 @@ TEST_CASE("an unnormalised rotation is normalised rather than carried", "[render
 	const glm::quat fallback = UnpackRotation(PackRotation(empty));
 	CHECK(fallback.w == Approx(1.0f));
 	CHECK(std::isfinite(fallback.x));
+	for (const float invalid :
+		 {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+		const auto packed = PackRotation(glm::quat{1, invalid, 0, 0});
+		CHECK(packed.Words[0] == 0);
+		CHECK(packed.Words[1] == 0u);
+		CHECK(packed.Words[2] == 0u);
+		CHECK(packed.Words[3] == 0x3F800000u);
+	}
+	const float huge = std::numeric_limits<float>::max();
+	const auto large = UnpackRotation(PackRotation(glm::quat{huge, huge, huge, huge}));
+	CHECK(large.w == Approx(.5).margin(2e-6));
+	CHECK(large.x == Approx(.5).margin(2e-6));
 }
 
 TEST_CASE("a packed part draws within a tenth of a millimetre per metre", "[render][instancepacking]") {
-	// **The number this whole change has to justify, measured rather than
-	// asserted.** Sixty bytes an instance were saved by quantising the rotation;
-	// what that costs is how far a corner of a part lands from where the old
-	// float matrix would have put it, and it scales with how far that corner is
-	// from the part's pivot.
-	//
-	// **It measures 6.11e-5 metres per metre of radius**, which is 2/32767 to
-	// three figures - so the renormalise in `UnpackRotation` removed the radial
-	// half of the error outright and what is left is one code of angle either
-	// way, exactly as designed. A one-metre part drifts six hundredths of a
-	// millimetre; reaching a millimetre takes a part sixteen metres from its own
-	// pivot. The bound is `1e-4` rather than the measurement, so the case fails
-	// on a change of encoding rather than on the last digit of a rounding mode.
-	//
-	// Even at the far end the two halves of a seam move together, because both
-	// are drawn from the same quantised rotation.
-	//
-	// **A sweep rather than one orientation**, because the error is a property of
-	// where a quaternion lands between two codes, and a single hand-picked
-	// rotation can be lucky. 512 orientations across all three axes is enough
-	// that the worst is a real worst.
+	// This path includes float world translation, whose precision can dominate
+	// small parts far from the origin. The double oracle below isolates rotation.
 	const MeshEntry mesh = UnitMesh();
 	float worstRelative = 0.0f;
 
@@ -232,13 +195,13 @@ TEST_CASE("a packed part draws within a tenth of a millimetre per metre", "[rend
 	CHECK(worstRelative < 1.0e-4f);
 }
 
-TEST_CASE("the mesh centre correction survives quantisation", "[render][instancepacking]") {
+TEST_CASE("the mesh centre correction uses the uploaded rotation", "[render][instancepacking]") {
 	// **The subtle half of `ToGpu`, and the one a careless port breaks.** A mesh
 	// authored off its own origin is pulled back onto the part's origin by
 	// subtracting the rotated, scaled centre - and the rotation that offset is
 	// taken through has to be the *unpacked* one, because the unpacked one is
 	// what the shader will rotate the geometry by. Cancelling with the exact
-	// rotation instead leaves the mesh off by the quantisation error times the
+	// rotation instead leaves the mesh off by the rounding error times the
 	// centre offset, which for a model authored a long way from its origin is
 	// not small.
 	MeshEntry mesh = UnitMesh();
@@ -379,77 +342,80 @@ TEST_CASE("alpha mode and cutoff share one pinned resident word", "[render][inst
 	CHECK(emission.a * 16.0f == Approx(instance.EmissiveStrength).margin(16.0f / 255.0f));
 }
 
-TEST_CASE("the row is forty-eight bytes with nothing hidden in it", "[render][instancepacking]") {
-	// **The number three other places depend on and only one of them is checked
-	// by a compiler.** The vertex buffer description takes `sizeof(GpuInstance)`,
-	// the late-instance buffer takes it as an element stride, and
-	// `occlusion-cull.comp` receives `GPU_INSTANCE_WORDS` from this declaration,
-	// so a row that grows without updating it stops the build.
-	static_assert(sizeof(GpuInstance) == 48);
-	static_assert(sizeof(GpuInstance) % sizeof(uint32_t) == 0);
-	CHECK(sizeof(GpuInstance) / sizeof(uint32_t) == 12);
-
-	// Every field four-aligned and packed end to end, so the offsets the vertex
-	// attribute table states are the offsets the fields have.
+TEST_CASE("the instance row matches four shader vectors", "[render][instancepacking]") {
+	static_assert(sizeof(GpuInstance) == 64);
+	static_assert(alignof(GpuInstance) == 16);
+	CHECK(sizeof(GpuInstance) / sizeof(uint32_t) == engine::render::GPU_INSTANCE_WORDS);
 	CHECK(offsetof(GpuInstance, Position) == 0);
-	CHECK(offsetof(GpuInstance, Rotation) == 12);
-	CHECK(offsetof(GpuInstance, Scale) == 20);
-	CHECK(offsetof(GpuInstance, Colour) == 32);
-	CHECK(offsetof(GpuInstance, Appearance) == 36);
-	CHECK(offsetof(GpuInstance, SurfaceColour) == 40);
-	CHECK(offsetof(GpuInstance, Emission) == 44);
-
-	// **Two and two thirds times smaller than what it replaced.** The old row was
-	// a `mat4`, an RGBA float4 and an inverse-scale float4. At a hundred thousand
-	// instances that difference is six megabytes a frame, which at sixty frames a
-	// second is 360 MB/s of bus this no longer spends.
-	constexpr size_t PREVIOUS_ROW_BYTES = 96;
-	CHECK(PREVIOUS_ROW_BYTES / sizeof(GpuInstance) >= 2);
+	CHECK(offsetof(GpuInstance, Colour) == 12);
+	CHECK(offsetof(GpuInstance, Rotation) == 16);
+	CHECK(offsetof(GpuInstance, Scale) == 32);
+	CHECK(offsetof(GpuInstance, Appearance) == 44);
+	CHECK(offsetof(GpuInstance, SurfaceColour) == 48);
+	CHECK(offsetof(GpuInstance, Emission) == 52);
+	CHECK(offsetof(GpuInstance, Reserved) == 56);
+	const GpuInstance fresh;
+	CHECK(fresh.Reserved[0] == 0);
+	CHECK(fresh.Reserved[1] == 0);
+	CHECK(engine::render::GPU_JOINT_WORDS == 3 + sizeof(fresh.Rotation) / sizeof(uint32_t));
 }
 
-TEST_CASE("the rotation words are laid out the way the shader reads them", "[render][instancepacking]") {
-	// **The one contract `instance.glsl` cannot be compiled against.** The shader
-	// decodes with two `unpackSnorm2x16` calls, and that intrinsic returns the
-	// *low* half in `.x` and the high half in `.y`. So word zero must hold x then
-	// y and word one must hold z then w, in that order - and if this file and
-	// that file ever disagreed about it, every rotated part in the world would be
-	// rotated wrongly with nothing here failing.
-	//
-	// Built by hand rather than round-tripped, so the case states the layout
-	// instead of agreeing with whatever `PackRotation` happens to do.
-	engine::render::PackedRotation packed;
-	packed.Words[0] = 0x40002000u; // low 0x2000 -> x, high 0x4000 -> y
-	packed.Words[1] = 0x7FFF6000u; // low 0x6000 -> z, high 0x7FFF -> w
-
-	// `UnpackRotation` normalises, which scales all four together and leaves
-	// their ratios alone - so the ratios are what pin the layout.
-	const glm::quat unpacked = UnpackRotation(packed);
-	CHECK(unpacked.x / unpacked.w == Approx(0x2000 / 32767.0f).margin(1e-4));
-	CHECK(unpacked.y / unpacked.w == Approx(0x4000 / 32767.0f).margin(1e-4));
-	CHECK(unpacked.z / unpacked.w == Approx(0x6000 / 32767.0f).margin(1e-4));
-
-	// And the identity's words are the ones the default member initialiser
-	// states, so a row that was allocated and never written draws unrotated
-	// rather than drawing whatever zero decodes to - which for a quaternion is
-	// not a rotation at all.
+TEST_CASE(
+	"rotation words retain full float xyzw components for instances and joints", "[render][instancepacking]"
+) {
+	const engine::render::PackedRotation packed{{0x3F000000u, 0xBF000000u, 0x3F000000u, 0x3F000000u}};
+	const auto decoded = UnpackRotation(packed);
+	CHECK(decoded.x == .5f);
+	CHECK(decoded.y == -.5f);
+	CHECK(decoded.z == .5f);
+	CHECK(decoded.w == .5f);
+	const auto encoded = PackRotation(glm::quat{.5f, .5f, -.5f, .5f});
+	for (size_t index = 0; index < 4; ++index)
+		CHECK(encoded.Words[index] == packed.Words[index]);
 	const engine::render::PackedRotation fresh;
-	const engine::render::PackedRotation identity = PackRotation(glm::quat{1.0f, 0.0f, 0.0f, 0.0f});
-	CHECK(fresh.Words[0] == identity.Words[0]);
-	CHECK(fresh.Words[1] == identity.Words[1]);
-	CHECK(identity.Words[0] == 0u);
-	CHECK(identity.Words[1] == 0x7FFF0000u);
+	const auto identity = PackRotation(glm::quat{1, 0, 0, 0});
+	for (size_t index = 0; index < 4; ++index)
+		CHECK(identity.Words[index] == fresh.Words[index]);
+	CHECK(identity.Words[0] == 0);
+	CHECK(identity.Words[1] == 0);
+	CHECK(identity.Words[2] == 0);
+	CHECK(identity.Words[3] == 0x3F800000u);
+}
+
+TEST_CASE(
+	"float rotations keep thirty micrometre error at a hundred metre radius", "[render][instancepacking]"
+) {
+	double worst = 0;
+	const glm::dvec3 point = glm::normalize(glm::dvec3{2, -3, 5}) * 100.0;
+	for (int index = 0; index < 4096; ++index) {
+		const double phase = index * 0.371;
+		const glm::dvec3 axis = glm::normalize(
+			glm::dvec3{std::sin(phase * .73), std::cos(phase * .31), std::sin(phase * .57) + .2}
+		);
+		const double angle = phase * .91;
+		const double sine = std::sin(angle * .5);
+		const glm::quat input{
+			float(std::cos(angle * .5)), float(axis.x * sine), float(axis.y * sine), float(axis.z * sine)
+		};
+		const auto packed = PackRotation(input);
+		const auto decoded = UnpackRotation(packed);
+		// Rodrigues in double uses the original axis/angle, never the packer's
+		// reconstruction or its model-matrix helper.
+		const auto reference = point * std::cos(angle) + glm::cross(axis, point) * std::sin(angle) +
+							   axis * glm::dot(axis, point) * (1 - std::cos(angle));
+		const auto actual = glm::dquat(decoded) * point;
+		worst = std::max(worst, glm::length(actual - reference));
+		CHECK(std::abs(glm::length(actual) - 100.0) < 0.0001);
+		const auto negated = UnpackRotation(PackRotation(-input));
+		CHECK(glm::length(glm::dquat(negated) * point - actual) < 1e-10);
+	}
+	INFO("maximum drift at 100 metre radius: " << worst);
+	CHECK(worst < 0.00003);
+	static_assert(sizeof(engine::render::PackedRotation) == 16);
 }
 
 TEST_CASE("a part far from the origin keeps its position exactly", "[render][instancepacking]") {
-	// **The reason position stayed a full float while rotation and colour were
-	// quantised.** Rotation lives in [-1, 1] and colour in [0, 1], where a
-	// fixed-point code is the right encoding; a world coordinate has no such
-	// bound. A half float at two thousand metres has an interval of two metres,
-	// and even a 16-bit fixed point over a generous world size would put a part
-	// on a visible lattice.
-	//
-	// With no mesh centre to fold in, the field must be the authored value bit
-	// for bit - not close to it.
+	// Translation stays a full float, independent of orientation and packed colour.
 	const Vector3 far(20000.0f, -15000.0f, 8192.5f);
 	const DrawInstance instance = PartAt(RotationAt(0.9f, 0.3f, -1.2f), far, 1.0f);
 	const GpuInstance packed = ToGpu(instance, UnitMesh());

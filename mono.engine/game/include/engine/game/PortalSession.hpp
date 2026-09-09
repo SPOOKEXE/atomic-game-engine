@@ -34,7 +34,8 @@ namespace engine::game {
 		LeaseRoute,
 		Proceed,
 		Crossed,
-		Motion
+		Motion,
+		LeaseAdopted
 	};
 
 	// One bounded application message, carried inside the authenticated play
@@ -74,6 +75,8 @@ namespace engine::game {
 		);
 		bool Commit(const PortalResume &claim, uint64_t peer, double now);
 		bool Committed(const PortalResume &claim, uint64_t peer, double now) const;
+		// Destination adoption survives a dropped peer while its retry lease is live.
+		bool Adopted(const PortalResume &claim, const assets::PublicKey &identity, double now) const;
 		bool Reserved(uint64_t peer, double now) const;
 		void Drop(uint64_t peer);
 		void Expire(double now);

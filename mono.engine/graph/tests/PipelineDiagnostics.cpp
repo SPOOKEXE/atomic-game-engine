@@ -104,6 +104,42 @@ TEST_CASE("the default frame reports no warnings", "[graph][diagnostics]") {
 	}
 }
 
+TEST_CASE("internal lens scratch does not hide unused final output", "[graph][diagnostics]") {
+	Kinds();
+	RenderGraph graph;
+	const auto input = Declare(graph, "input", ResourceKind::Colour, ResourceFormat::RGBA16F);
+	const auto depth = Declare(graph, "depth", ResourceKind::Colour, ResourceFormat::R32F);
+	const auto output = Declare(graph, "output", ResourceKind::Colour, ResourceFormat::RGBA16F);
+	const auto scratch = Declare(graph, "scratch", ResourceKind::Colour, ResourceFormat::RGBA16F);
+	const auto nextOutput = Declare(graph, "next", ResourceKind::Colour, ResourceFormat::RGBA16F);
+	graph.AddNode(
+		Node{
+			.Name = Name("lens"),
+			.Kind = Name("shader-lenses"),
+			.Reads = {input, depth},
+			.ReadPorts = {Name("colour"), Name("depth")},
+			.Writes = {scratch, output},
+			.WritePorts = {Name("scratch"), Name("colour")}
+		}
+	);
+	graph.AddNode(
+		Node{
+			.Name = Name("next-lens"),
+			.Kind = Name("shader-lenses"),
+			.Reads = {output, depth},
+			.ReadPorts = {Name("colour"), Name("depth")},
+			.Writes = {nextOutput, scratch},
+			.WritePorts = {Name("colour"), Name("scratch")}
+		}
+	);
+	const auto diagnostics = Diagnose(graph);
+	CHECK(Count(diagnostics, DiagnosticKind::DeadResource) == 1);
+	CHECK(Names(diagnostics, DiagnosticKind::DeadResource, "next-lens"));
+	CHECK(Names(diagnostics, DiagnosticKind::DeadNode, "next-lens"));
+	CHECK_FALSE(Names(diagnostics, DiagnosticKind::DeadNode, "lens"));
+	CHECK(Count(diagnostics, DiagnosticKind::WastedWrite) == 0);
+}
+
 // --- fault 1 and 7: written and never read ---------------------------------------
 
 TEST_CASE("a resource nothing reads is reported", "[graph][diagnostics]") {

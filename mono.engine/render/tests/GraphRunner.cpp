@@ -1,4 +1,5 @@
 #include "BackendNodes.hpp"
+#include "RenderFixture.hpp"
 
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -7,6 +8,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <string>
@@ -77,27 +79,25 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "cull-frustum@0",
 				   "order-draw@0",
 				   "upload-instances@0",
-				   "mirror-capture@0",
-				   "portal-capture@0",
-				   "portal-tonemap@0",
+				   "surface-capture@0",
 				   "gbuffer@0",
 				   "depth-linearise@0",
 				   "ssao@0",
 				   "deferred-lighting@0",
 				   "sky@0",
 				   "volumetrics@0",
-				   "shader-lenses@0",
-				   "tonemap@0",
 				   "portal-overlay@0",
 				   "mirror-overlay@0",
 				   "transparent@0",
+				   "shader-lenses@0",
+				   "tonemap@0",
 				   "present",
 				   "interface",
 				   "overlay",
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 26);
+	CHECK(runner.Submitted() == 24);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -159,6 +159,54 @@ TEST_CASE("invalid node registrations are refused", "[render][graph]") {
 	CHECK(table.Count() == 0);
 }
 
+TEST_CASE(
+	"deferred baseline extent validation is independent of output port order",
+	"[render][gpu][graph][lighting-baseline-extent][.]"
+) {
+	using namespace engine;
+	const bool baselineFirst = GENERATE(false, true);
+	const bool matchingExtent = GENERATE(false, true);
+	CAPTURE(baselineFirst, matchingExtent);
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::PipelineDocument document;
+	document.Record(
+		{.Kind = graph::EditKind::AddResource,
+		 .Name = Name("lighting-baseline"),
+		 .Resource = graph::ResourceKind::Colour,
+		 .Format = graph::ResourceFormat::RGBA32F,
+		 .Width = matchingExtent ? 65u : 33u,
+		 .Height = matchingExtent ? 37u : 19u}
+	);
+	const graph::Edit baselineWrite{
+		.Kind = graph::EditKind::Writes, .Target = Name("lighting-baseline"), .Key = Name("lighting-baseline")
+	};
+	const auto base = graph::DefaultPbrDocument();
+	for (auto edit : base.Edits()) {
+		if (edit.Kind == graph::EditKind::AddResource && edit.Name == Name("lit")) {
+			edit.Width = 65;
+			edit.Height = 37;
+		}
+		const bool colourWrite = edit.Kind == graph::EditKind::Writes && edit.Target == Name("lit");
+		if (colourWrite && baselineFirst) document.Record(baselineWrite);
+		document.Record(edit);
+		if (colourWrite && !baselineFirst) document.Record(baselineWrite);
+	}
+	RenderGraph pipeline;
+	Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const Name pipelineName("baseline-extent");
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+	render::SceneTarget target{65, 37};
+	render::View view;
+	view.Pipeline = pipelineName;
+	view.Target = &target;
+	render::OverlayImage overlay;
+	const auto report = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(report.Ran(Name("deferred-lighting")) == matchingExtent);
+}
+
 TEST_CASE("backend metadata is derived from the node catalogue", "[render][graph]") {
 	engine::graph::RegisterRenderNodeKinds();
 	const std::vector<engine::render::BackendNode> backends = engine::render::BackendNodes();
@@ -196,7 +244,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
-	CHECK(opened == 25);
+	CHECK(opened == 23);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

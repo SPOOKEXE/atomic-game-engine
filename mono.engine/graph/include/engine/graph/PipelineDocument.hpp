@@ -386,13 +386,14 @@ namespace engine::graph {
 	// This is the engine's complete runnable graph document. G-buffer material
 	// data and emissive are produced once,
 	// ambient occlusion is derived from depth and normals, deferred lighting
-	// consumes all three, and tone mapping produces the display image.
+	// consumes all three. Surface images, transparent geometry and spatial GUI
+	// compose in HDR before authored lenses and tone mapping. Screen GUI follows.
 	//
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
 
-	// Complete spatial scene composition in linear HDR before tone mapping.
-	// Host and screen interfaces remain after the world image boundary.
+	// The same default spatial chain for world-image producers and native views.
+	// Capture consumers export before tone mapping; screen GUI follows the world.
 	PipelineDocument DefaultWorldHdrDocument();
 
 	// Imported whole-eye HDR, one tone map, then local screen interface and output.
@@ -401,9 +402,24 @@ namespace engine::graph {
 	// Intermediate opaque body composition. Uses the accepted room's camera and
 	// lighting, reads an OpaqueLighting image/depth pair, and captures the composed
 	// pair at "export". Later world layers and presentation remain the caller's job.
-	// Ordered layers require two paired eye-image imports, nearest first; an
-	// absent layer must be represented by a captured empty image.
-	PipelineDocument DefaultPortalBodyDocument(bool seamProjection = false, bool orderedLayers = false);
+	// Ordered layers use up to two paired eye-image imports, nearest first.
+	// transparentLayerCount selects the present contiguous prefix. Optional lenses
+	// compose after all copied layers and preserve the physical depth export.
+	// Nested apertures draw child colour at parent depth before body composition.
+	// retainedAmbient merges captured room/body geometry before SSAO and corrects
+	// retained ambient radiance before composing the current body.
+	// retainedDirectional also corrects retained direct lighting using the combined
+	// source/body shadow map and enables the ambient geometry inputs it requires.
+	PipelineDocument DefaultPortalBodyDocument(
+		bool seamProjection = false,
+		bool orderedLayers = false,
+		bool spatialOverlay = false,
+		bool shaderLenses = false,
+		bool nestedApertures = false,
+		size_t transparentLayerCount = 2,
+		bool retainedAmbient = false,
+		bool retainedDirectional = false
+	);
 
 	// The deferred fallback for devices without compute or storage images.
 	PipelineDocument DefaultPbrTierBDocument();

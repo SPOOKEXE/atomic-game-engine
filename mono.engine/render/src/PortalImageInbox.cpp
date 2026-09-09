@@ -34,14 +34,21 @@ namespace engine::render {
 		return World.size() + Channel.size();
 	}
 	size_t PortalImageInbox::Pending::Bytes() const {
-		return Local.Bytes() + Remote.Bytes() + Key.PortalKey.size();
+		return Local.Bytes() + Remote.Bytes() + Key.PortalKey.size() + RetainedBodyPlayer.size();
 	}
 	size_t PortalImageInbox::Held::Bytes() const {
+		if (Tree) return Local.Bytes() + Remote.Bytes() + Reply.Key.PortalKey.size() + TreeBytes;
 		size_t bytes = Local.Bytes() + Remote.Bytes() + Reply.Key.PortalKey.size() + Reply.Diagnostic.size() +
-					   Reply.Pixels.size() + Reply.Depth.size();
+					   Reply.Pixels.size() + Reply.Depth.size() + Reply.Normal.size() +
+					   Reply.AmbientResponse.size() + Reply.LightingBaseline.size() +
+					   Reply.DirectionalResponse.size() + PortalCaptureLensBytes(Lenses);
 		for (const auto &layer : Transparent)
 			bytes += layer.Key.PortalKey.size() + layer.Diagnostic.size() + layer.Pixels.size() +
-					 layer.Depth.size();
+					 layer.Depth.size() + layer.Normal.size() + layer.AmbientResponse.size() +
+					 layer.LightingBaseline.size() + layer.DirectionalResponse.size();
+		if (SpatialOverlay)
+			bytes += SpatialOverlay->Key.PortalKey.size() + SpatialOverlay->Diagnostic.size() +
+					 SpatialOverlay->Pixels.size() + SpatialOverlay->Depth.size();
 		return bytes;
 	}
 	bool PortalImageInbox::ValidLimits() const {
@@ -90,7 +97,8 @@ namespace engine::render {
 				   pending.Key.PortalKey == request.Key.PortalKey;
 		});
 		if (previous != Requests.end() && previous->Key.CameraRevision == request.Key.CameraRevision &&
-			previous->Key.SeamRevision == request.Key.SeamRevision) {
+			previous->Key.SeamRevision == request.Key.SeamRevision &&
+			previous->RetainedBodyPlayer == request.RetainedBodyPlayer) {
 			result.Status = PortalInboxStatus::Busy;
 			return result;
 		}
@@ -101,7 +109,8 @@ namespace engine::render {
 			return result;
 		}
 		const size_t bytes = local.World.size() + local.Channel.size() + remote.World.size() +
-							 remote.Channel.size() + request.Key.PortalKey.size();
+							 remote.Channel.size() + request.Key.PortalKey.size() +
+							 request.RetainedBodyPlayer.size();
 		if ((previous == Requests.end() && Requests.size() >= Limits.PendingCount) ||
 			!Fits(usage.PendingBytes - oldBytes, bytes, Limits.PendingBytes)) {
 			result.Status = PortalInboxStatus::Full;
@@ -119,7 +128,11 @@ namespace engine::render {
 			request.Width,
 			request.Height,
 			now + Limits.Timeout,
-			request.OrderedLayers
+			request.OrderedLayers,
+			request.RecursionDepth,
+			request.PixelBudget,
+			{request.Position, request.Orientation, request.Frustum, request.ClipPlane, request.Projection},
+			request.RetainedBodyPlayer
 		};
 		if (previous == Requests.end()) {
 			Requests.push_back(std::move(pending));
@@ -137,7 +150,9 @@ namespace engine::render {
 		PortalEndpointView to,
 		uint64_t correlation,
 		std::span<const std::byte> payload,
-		Time now
+		Time now,
+		const PortalCaptureTreeAllowChild &allowChild,
+		PortalEndpointView publishedProducer
 	) {
 		PortalAcceptResult result;
 		if (!ValidLimits() || !Valid(from) || !Valid(to)) {
@@ -159,8 +174,74 @@ namespace engine::render {
 			result.Status = PortalInboxStatus::EndpointMismatch;
 			return result;
 		}
+
+		if (pending->OrderedLayers && pending->RecursionDepth) {
+			if (publishedProducer == PortalEndpointView{}) publishedProducer = from;
+			if (!Valid(publishedProducer)) {
+				result.Status = PortalInboxStatus::EndpointMismatch;
+				return result;
+			}
+			PortalCaptureTreeMeasure measured;
+			const PortalCaptureTreeAdmission admission{
+				pending->Key,
+				pending->Width,
+				pending->Height,
+				pending->Camera,
+				publishedProducer,
+				pending->RecursionDepth,
+				pending->PixelBudget,
+				pending->RetainedBodyPlayer
+			};
+			if (MatchPortalCaptureTree(payload, admission, allowChild, measured, result.Error)) {
+				const auto held = std::find_if(Images.begin(), Images.end(), [&](const Held &image) {
+					return image.Local.Matches(to) && image.Remote.Matches(from) &&
+						   image.Reply.Key.PortalKey == pending->Key.PortalKey;
+				});
+				const size_t treeBytes = measured.Pixels * 8 + measured.DepthBytes + measured.AmbientBytes +
+										 measured.MetadataBytes;
+				const size_t expectedBytes = pending->Bytes() + treeBytes;
+				if ((held == Images.end() && Images.size() >= Limits.HeldCount) ||
+					!Fits(Usage().HeldBytes, expectedBytes, Limits.HeldBytes)) {
+					result.Status = PortalInboxStatus::Full;
+					return result;
+				}
+				if (held != Images.end() && measured.CaptureTick < held->Reply.CaptureTick) {
+					result.Status = PortalInboxStatus::Stale;
+					return result;
+				}
+				PortalCaptureTree tree;
+				if (!DecodePortalCaptureTree(payload, tree, result.Error)) {
+					result.Status = PortalInboxStatus::Malformed;
+					return result;
+				}
+				const auto &root = tree.Nodes.front().Layers.Opaque;
+				if (held != Images.end() && root.CaptureTick < held->Reply.CaptureTick) {
+					result.Status = PortalInboxStatus::Stale;
+					return result;
+				}
+				Held image;
+				image.Local = pending->Local;
+				image.Remote = pending->Remote;
+				image.Deadline = now + Limits.Timeout;
+				image.Reply.Key = root.Key;
+				image.Reply.CaptureTick = root.CaptureTick;
+				image.Reply.Status = root.Status;
+				image.Reply.Width = root.Width;
+				image.Reply.Height = root.Height;
+				image.Reply.Scope = root.Scope;
+				image.Tree = std::move(tree);
+				image.TreeBytes = treeBytes;
+				if (held == Images.end())
+					Images.push_back(std::move(image));
+				else
+					*held = std::move(image);
+				Requests.erase(pending);
+				result.Status = PortalInboxStatus::Accepted;
+				return result;
+			}
+		}
 		const auto layerMatch =
-			pending->OrderedLayers
+			pending->OrderedLayers && !pending->RecursionDepth
 				? MatchPortalImageLayerSet(payload, pending->Key, pending->Width, pending->Height)
 				: std::nullopt;
 		const auto match = layerMatch
@@ -178,10 +259,11 @@ namespace engine::render {
 		});
 		const auto usage = Usage();
 		// Keep the old image charged while transactional decode owns the replacement too.
-		const size_t members = layerMatch ? MAX_PORTAL_TRANSPARENT_LAYERS + 1 : 1;
+		const size_t members = match->ImageCount;
 		const size_t expectedBytes = pending->Bytes() + (members - 1) * pending->Key.PortalKey.size() +
 									 size_t(pending->Width) * pending->Height * 8 * members +
-									 match->DepthBytes + match->DiagnosticBytes;
+									 match->DepthBytes + match->AmbientBytes + match->DiagnosticBytes +
+									 match->MetadataBytes;
 		if (match->Status == PortalImageStatus::Ok &&
 			((held == Images.end() && Images.size() >= Limits.HeldCount) ||
 			 !Fits(usage.HeldBytes, expectedBytes, Limits.HeldBytes))) {
@@ -214,7 +296,9 @@ namespace engine::render {
 			pending->Remote,
 			std::move(reply),
 			now + Limits.Timeout,
-			std::move(decoded.Transparent)
+			std::move(decoded.Transparent),
+			std::move(decoded.SpatialOverlay),
+			std::move(decoded.Lenses)
 		};
 		if (held == Images.end()) {
 			Images.push_back(std::move(image));
@@ -235,7 +319,8 @@ namespace engine::render {
 			return image.Local.Matches(local) && image.Remote.Matches(remote) &&
 				   image.Reply.Key.PortalKey == portal;
 		});
-		if (held == Images.end() || !held->Transparent.empty()) {
+		if (held == Images.end() || held->Tree || !held->Transparent.empty() || held->SpatialOverlay ||
+			!held->Lenses.Entries.empty()) {
 			return {};
 		}
 		PortalImageReply reply = std::move(held->Reply);
@@ -250,10 +335,30 @@ namespace engine::render {
 			return image.Local.Matches(local) && image.Remote.Matches(remote) &&
 				   image.Reply.Key.PortalKey == portal;
 		});
-		if (held == Images.end() || held->Transparent.size() != MAX_PORTAL_TRANSPARENT_LAYERS) return {};
-		PortalImageLayerSet layers{std::move(held->Reply), std::move(held->Transparent)};
+		if (held == Images.end() || held->Tree || held->Transparent.size() != MAX_PORTAL_TRANSPARENT_LAYERS)
+			return {};
+		PortalImageLayerSet layers{
+			std::move(held->Reply),
+			std::move(held->Transparent),
+			std::move(held->SpatialOverlay),
+			std::move(held->Lenses)
+		};
 		Images.erase(held);
 		return layers;
+	}
+
+	std::optional<PortalCaptureTree> PortalImageInbox::TakeTree(
+		PortalEndpointView local, PortalEndpointView remote, std::string_view portal, Time now
+	) {
+		if (!Expire(now)) return {};
+		const auto held = std::find_if(Images.begin(), Images.end(), [&](const Held &image) {
+			return image.Local.Matches(local) && image.Remote.Matches(remote) &&
+				   image.Reply.Key.PortalKey == portal;
+		});
+		if (held == Images.end() || !held->Tree) return {};
+		auto tree = std::move(held->Tree);
+		Images.erase(held);
+		return tree;
 	}
 
 	void PortalImageInbox::InvalidateEndpoint(PortalEndpointView endpoint) {
@@ -261,6 +366,12 @@ namespace engine::render {
 			return request.Local.Matches(endpoint) || request.Remote.Matches(endpoint);
 		});
 		std::erase_if(Images, [&](const Held &image) {
+			if (image.Tree)
+				for (const auto &node : image.Tree->Nodes) {
+					const auto &p = node.Producer;
+					if (PortalEndpointView{p.World, p.Channel, p.Session, p.Generation} == endpoint)
+						return true;
+				}
 			return image.Local.Matches(endpoint) || image.Remote.Matches(endpoint);
 		});
 	}

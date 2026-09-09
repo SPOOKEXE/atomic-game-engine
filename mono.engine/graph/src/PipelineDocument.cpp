@@ -828,10 +828,9 @@ namespace engine::graph {
 
 		resource("shadow", ResourceKind::Depth, ResourceFormat::D32F, 1, true);
 		resource("last-frame", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
-		resource("mirror-views", ResourceKind::Colour, ResourceFormat::RGBA8, 1, true);
+		resource("mirror-views", ResourceKind::Colour, ResourceFormat::RGBA16F, 1, true);
 		resource("portal-image", ResourceKind::Texture, ResourceFormat::RGBA16F, 1, true);
-		resource("portal-display", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
-		resource("portal-light", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
+		resource("portal-light", ResourceKind::Texture, ResourceFormat::RGBA16F, 1, true);
 		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("view-camera", ResourceKind::Camera, ResourceFormat::R8);
 		resource("view-entities", ResourceKind::Entities, ResourceFormat::R8);
@@ -849,10 +848,11 @@ namespace engine::graph {
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("lens-scratch", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
-		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
-		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
-		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("display", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("interface-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
 		resource("composed-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -887,36 +887,14 @@ namespace engine::graph {
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Writes, "view-instances", "instances");
 
-		node("mirror-capture", NodeScope::View);
-		touches(EditKind::Reads, "last-frame", "last-frame");
+		node("surface-capture", NodeScope::View);
 		touches(EditKind::Reads, "world-entities", "world-state");
 		touches(EditKind::Reads, "shadow", "shadow");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "mirror-views", "surface");
-		{
-			Edit feedback;
-			feedback.Kind = EditKind::Set;
-			feedback.Key = core::Name("feedback");
-			feedback.Value = "last-frame";
-			document.Record(std::move(feedback));
-			Edit recursion;
-			recursion.Kind = EditKind::Set;
-			recursion.Key = core::Name("max-recursion");
-			recursion.Value = "3";
-			document.Record(std::move(recursion));
-		}
-
-		node("portal-capture", NodeScope::View);
-		touches(EditKind::Reads, "shadow", "shadow");
-		touches(EditKind::Reads, "ordered-entities", "entities");
-		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "portal-image", "portal");
 		touches(EditKind::Writes, "portal-light", "light");
-
-		node("portal-tonemap", NodeScope::View);
-		touches(EditKind::Reads, "portal-image", "portal");
-		touches(EditKind::Writes, "portal-display", "portal");
 
 		node("gbuffer", NodeScope::View);
 		touches(EditKind::Reads, "shadow", "shadow");
@@ -945,7 +923,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "linear-depth", "depth");
 		touches(EditKind::Reads, "occlusion", "occlusion");
 		touches(EditKind::Reads, "shadow", "shadow");
-		// The seam light-field: what orders this pass after portal-capture, so
+		// The seam light-field orders this pass after surface-capture, so
 		// the projection samples this frame's captures rather than last frame's.
 		touches(EditKind::Reads, "portal-light", "portal-light");
 		touches(EditKind::Writes, "lit", "colour");
@@ -960,19 +938,10 @@ namespace engine::graph {
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "volume-lit", "colour");
 
-		node("shader-lenses", NodeScope::View);
-		touches(EditKind::Reads, "volume-lit", "colour");
-		touches(EditKind::Reads, "linear-depth", "depth");
-		touches(EditKind::Writes, "lens-b", "colour");
-
-		node("tonemap", NodeScope::View);
-		touches(EditKind::Reads, "lens-b", "colour");
-		touches(EditKind::Writes, "tonemapped", "colour");
-
 		node("portal-overlay", NodeScope::View);
-		touches(EditKind::Reads, "tonemapped", "colour");
+		touches(EditKind::Reads, "volume-lit", "colour");
 		touches(EditKind::Reads, "depth", "depth");
-		touches(EditKind::Reads, "portal-display", "portal");
+		touches(EditKind::Reads, "portal-image", "portal");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "portaled", "colour");
@@ -992,8 +961,18 @@ namespace engine::graph {
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "display", "colour");
 
+		node("shader-lenses", NodeScope::View);
+		touches(EditKind::Reads, "display", "colour");
+		touches(EditKind::Reads, "linear-depth", "depth");
+		touches(EditKind::Writes, "lens-b", "colour");
+		touches(EditKind::Writes, "lens-scratch", "scratch");
+
+		node("tonemap", NodeScope::View);
+		touches(EditKind::Reads, "lens-b", "colour");
+		touches(EditKind::Writes, "tonemapped", "colour");
+
 		node("present", NodeScope::Frame);
-		touches(EditKind::Reads, "display", "image");
+		touches(EditKind::Reads, "tonemapped", "image");
 		touches(EditKind::Writes, "scene-image", "image");
 
 		node("interface", NodeScope::Frame);
@@ -1010,12 +989,45 @@ namespace engine::graph {
 		return document;
 	}
 
-	PipelineDocument DefaultPortalBodyDocument(bool seamProjection, bool orderedLayers) {
+	PipelineDocument DefaultPortalBodyDocument(
+		bool seamProjection,
+		bool orderedLayers,
+		bool spatialOverlay,
+		bool shaderLenses,
+		bool nestedApertures,
+		size_t transparentLayerCount,
+		bool retainedAmbient,
+		bool retainedDirectional
+	) {
 		PipelineDocument document;
+		retainedAmbient = retainedAmbient || retainedDirectional;
+		if (retainedAmbient) {
+			for (const auto &[name, format] :
+				 {std::pair{"ambient-depth", ResourceFormat::R32F},
+				  std::pair{"ambient-normal", ResourceFormat::RGB10A2}}) {
+				document.Record(
+					{.Kind = EditKind::AddResource,
+					 .Name = core::Name(name),
+					 .Resource = ResourceKind::Colour,
+					 .Format = format}
+				);
+			}
+		}
 		const auto base = DefaultPbrDocument();
-		for (const auto &edit : base.Edits()) {
+		core::Name currentNode;
+		std::vector<Edit> ambientShading;
+		for (auto edit : base.Edits()) {
+			if (edit.Kind == EditKind::AddNode) currentNode = edit.Name;
 			if (edit.Kind == EditKind::AddNode && edit.Name == core::Name("sky")) break;
-			document.Record(edit);
+			if (retainedAmbient && currentNode == core::Name("ssao") && edit.Kind == EditKind::Reads) {
+				if (edit.Key == core::Name("depth")) edit.Target = core::Name("ambient-depth");
+				if (edit.Key == core::Name("normal")) edit.Target = core::Name("ambient-normal");
+			}
+			if (retainedAmbient &&
+				(currentNode == core::Name("ssao") || currentNode == core::Name("deferred-lighting")))
+				ambientShading.push_back(edit);
+			else
+				document.Record(edit);
 		}
 		const auto resource = [&](const char *name, ResourceFormat format) {
 			document.Record(
@@ -1036,15 +1048,36 @@ namespace engine::graph {
 		const auto edge = [&](EditKind kind, const char *name, const char *port) {
 			document.Record({.Kind = kind, .Target = core::Name(name), .Key = core::Name(port)});
 		};
-		resource("opaque-depth", ResourceFormat::R32F);
-		node("opaque-depth-export", "depth-linearise");
-		edge(EditKind::Reads, "depth", "depth");
-		edge(EditKind::Writes, "opaque-depth", "linear");
-		document.Record({.Kind = EditKind::Set, .Key = core::Name("background"), .Value = "zero"});
+		const auto appendOpaque = [&] {
+			if (nestedApertures) {
+				resource("aperture-colour", ResourceFormat::RGBA16F);
+				node("portal-overlay", "portal-overlay");
+				edge(EditKind::Reads, "lit", "colour");
+				edge(EditKind::Reads, "depth", "depth");
+				edge(EditKind::Reads, "portal-image", "portal");
+				edge(EditKind::Reads, "ordered-entities", "entities");
+				edge(EditKind::Reads, "view-instances", "instances");
+				edge(EditKind::Writes, "aperture-colour", "colour");
+			}
+			resource("opaque-depth", ResourceFormat::R32F);
+			node("opaque-depth-export", "depth-linearise");
+			edge(EditKind::Reads, "depth", "depth");
+			// Portal overlay writes shared hardware depth as well as its colour target.
+			if (nestedApertures) edge(EditKind::Reads, "aperture-colour", "after-colour");
+			edge(EditKind::Writes, "opaque-depth", "linear");
+			document.Record({.Kind = EditKind::Set, .Key = core::Name("background"), .Value = "zero"});
+		};
+		if (!retainedAmbient) appendOpaque();
 		resource("room-colour", ResourceFormat::RGBA16F);
 		resource("room-depth", ResourceFormat::R32F);
 		resource("composed-colour", ResourceFormat::RGBA16F);
 		resource("composed-depth", ResourceFormat::R32F);
+		if (retainedAmbient) {
+			resource("room-normal", ResourceFormat::RGB10A2);
+			resource("room-ambient-response", ResourceFormat::RGBA32F);
+			resource("room-lighting-baseline", ResourceFormat::RGBA32F);
+			if (retainedDirectional) resource("room-directional-response", ResourceFormat::RGBA32F);
+		}
 		node("room-image", "eye-image");
 		document.Record({.Kind = EditKind::Set, .Key = core::Name("scope"), .Value = "opaque-lighting"});
 		document.Record(
@@ -1052,16 +1085,46 @@ namespace engine::graph {
 		);
 		edge(EditKind::Writes, "room-depth", "depth");
 		edge(EditKind::Writes, "room-colour", "colour");
+		if (retainedAmbient) {
+			edge(EditKind::Writes, "room-normal", "normal");
+			edge(EditKind::Writes, "room-ambient-response", "ambient-response");
+			edge(EditKind::Writes, "room-lighting-baseline", "lighting-baseline");
+			if (retainedDirectional)
+				edge(EditKind::Writes, "room-directional-response", "directional-response");
+			node("ambient-merge", "ambient-merge");
+			edge(EditKind::Reads, "linear-depth", "body-depth");
+			edge(EditKind::Reads, "normal", "body-normal");
+			edge(EditKind::Reads, "room-depth", "room-depth");
+			edge(EditKind::Reads, "room-normal", "room-normal");
+			edge(EditKind::Writes, "ambient-depth", "depth");
+			edge(EditKind::Writes, "ambient-normal", "normal");
+			for (const auto &edit : ambientShading)
+				document.Record(edit);
+			resource("room-ambient-colour", ResourceFormat::RGBA16F);
+			node("ambient-correct", "ambient-correct");
+			edge(EditKind::Reads, "room-lighting-baseline", "lighting-baseline");
+			edge(EditKind::Reads, "room-ambient-response", "response");
+			edge(EditKind::Reads, "occlusion", "occlusion");
+			if (retainedDirectional) {
+				edge(EditKind::Reads, "room-directional-response", "directional-response");
+				edge(EditKind::Reads, "room-depth", "room-depth");
+				edge(EditKind::Reads, "room-normal", "room-normal");
+				edge(EditKind::Reads, "shadow", "shadow");
+			}
+			edge(EditKind::Writes, "room-ambient-colour", "colour");
+		}
+		if (retainedAmbient) appendOpaque();
 		node("body-compose", "depth-compose");
 		edge(EditKind::Reads, "room-depth", "background-depth");
-		edge(EditKind::Reads, "lit", "foreground");
-		edge(EditKind::Reads, "room-colour", "background");
+		edge(EditKind::Reads, nestedApertures ? "aperture-colour" : "lit", "foreground");
+		edge(EditKind::Reads, retainedAmbient ? "room-ambient-colour" : "room-colour", "background");
 		edge(EditKind::Reads, "opaque-depth", "foreground-depth");
 		edge(EditKind::Writes, "composed-depth", "depth");
 		edge(EditKind::Writes, "composed-colour", "colour");
 		std::string composedColour = "composed-colour", composedDepth = "composed-depth";
 		if (orderedLayers) {
-			for (int layer = 1; layer >= 0; --layer) {
+			for (int layer = static_cast<int>(std::min(transparentLayerCount, size_t{2})) - 1; layer >= 0;
+				 --layer) {
 				const auto name = "transparent-" + std::to_string(layer);
 				const auto colour = name + "-colour", depth = name + "-depth";
 				const auto outputColour = name + "-composed-colour", outputDepth = name + "-composed-depth";
@@ -1093,6 +1156,35 @@ namespace engine::graph {
 				composedDepth = outputDepth;
 			}
 		}
+		if (spatialOverlay) {
+			resource("spatial-overlay-colour", ResourceFormat::RGBA16F);
+			resource("overlay-composed-colour", ResourceFormat::RGBA16F);
+			node("spatial-overlay-image", "eye-image");
+			document.Record({.Kind = EditKind::Set, .Key = core::Name("scope"), .Value = "opaque-lighting"});
+			document.Record(
+				{.Kind = EditKind::Set,
+				 .Key = core::Name("projection"),
+				 .Value = seamProjection ? "seam" : "eye"}
+			);
+			document.Record({.Kind = EditKind::Set, .Key = core::Name("layer"), .Value = "spatial-overlay"});
+			edge(EditKind::Writes, "spatial-overlay-colour", "colour");
+			node("spatial-overlay-compose", "colour-compose");
+			edge(EditKind::Reads, "spatial-overlay-colour", "foreground");
+			edge(EditKind::Reads, composedColour.c_str(), "background");
+			edge(EditKind::Writes, "overlay-composed-colour", "colour");
+			composedColour = "overlay-composed-colour";
+		}
+		if (shaderLenses) {
+			resource("body-lens-colour", ResourceFormat::RGBA16F);
+			resource("body-lens-scratch", ResourceFormat::RGBA16F);
+			node("shader-lenses", "shader-lenses");
+			edge(EditKind::Reads, composedColour.c_str(), "colour");
+			edge(EditKind::Reads, composedDepth.c_str(), "depth");
+			edge(EditKind::Writes, "body-lens-colour", "colour");
+			edge(EditKind::Writes, "body-lens-scratch", "scratch");
+			composedColour = "body-lens-colour";
+		}
+
 		node("export", "capture", NodeScope::Frame);
 		edge(EditKind::Reads, composedColour.c_str(), "source");
 		edge(EditKind::Reads, composedDepth.c_str(), "depth");
@@ -1145,99 +1237,8 @@ namespace engine::graph {
 	}
 
 	PipelineDocument DefaultWorldHdrDocument() {
-		const PipelineDocument basis = DefaultPbrDocument();
-		PipelineDocument result;
-		std::vector<std::vector<Edit>> nodes;
-		for (const Edit &authored : basis.Edits()) {
-			Edit edit = authored;
-			if (edit.Kind == EditKind::AddResource) {
-				if (edit.Name == core::Name("mirror-views") || edit.Name == core::Name("portaled") ||
-					edit.Name == core::Name("mirrored") || edit.Name == core::Name("display") ||
-					edit.Name == core::Name("portal-light")) {
-					edit.Format = ResourceFormat::RGBA16F;
-				}
-				result.Record(std::move(edit));
-				continue;
-			}
-			if (edit.Kind == EditKind::AddNode) {
-				nodes.emplace_back();
-			}
-			nodes.back().push_back(std::move(edit));
-		}
-		const auto append = [&](std::string_view name) {
-			for (const auto &block : nodes) {
-				if (block.front().Name != core::Name(name)) {
-					continue;
-				}
-				for (Edit edit : block) {
-					if (edit.Kind == EditKind::Reads) {
-						if (name == "portal-overlay" && edit.Target == core::Name("tonemapped")) {
-							edit.Target = core::Name("volume-lit");
-						} else if (name == "portal-overlay" && edit.Target == core::Name("portal-display")) {
-							edit.Target = core::Name("portal-image");
-						} else if (name == "shader-lenses" && edit.Target == core::Name("volume-lit")) {
-							edit.Target = core::Name("display");
-						} else if (name == "present" && edit.Target == core::Name("display")) {
-							edit.Target = core::Name("tonemapped");
-						}
-					}
-					result.Record(std::move(edit));
-				}
-				return;
-			}
-		};
-		for (const auto &block : nodes) {
-			const auto name = block.front().Name.Text();
-			if (name == "shader-lenses") {
-				break;
-			}
-			if (name == "mirror-capture") {
-				result.Record(
-					Edit{
-						.Kind = EditKind::AddNode,
-						.Name = core::Name("surface-capture"),
-						.NodeKind = core::Name("surface-capture"),
-						.Scope = NodeScope::View
-					}
-				);
-				for (const auto &[resource, port] : std::array{
-						 std::pair{"world-entities", "world-state"},
-						 std::pair{"shadow", "shadow"},
-						 std::pair{"ordered-entities", "entities"},
-						 std::pair{"view-instances", "instances"}
-					 }) {
-					result.Record(
-						Edit{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
-					);
-				}
-				for (const auto &[resource, port] : std::array{
-						 std::pair{"mirror-views", "surface"},
-						 std::pair{"portal-image", "portal"},
-						 std::pair{"portal-light", "light"}
-					 }) {
-					result.Record(
-						Edit{
-							.Kind = EditKind::Writes, .Target = core::Name(resource), .Key = core::Name(port)
-						}
-					);
-				}
-			} else if (name != "portal-tonemap" && name != "portal-capture") {
-				append(name);
-			}
-		}
-		for (const auto name :
-			 {"portal-overlay",
-			  "mirror-overlay",
-			  "transparent",
-			  "shader-lenses",
-			  "tonemap",
-			  "present",
-			  "interface",
-			  "overlay",
-			  "output-image"}) {
-			append(name);
-		}
-		return result;
+		// Native and captured worlds share the spatial chain before display encoding.
+		return DefaultPbrDocument();
 	}
 
 	PipelineDocument DefaultPbrTierBDocument() {

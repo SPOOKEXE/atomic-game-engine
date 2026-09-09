@@ -1,5 +1,6 @@
 #pragma once
 
+#include <engine/render/PortalCaptureTreeCompose.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/render/PortalTopologyHost.hpp>
@@ -29,13 +30,32 @@ namespace engine::render {
 	class PortalImageHost {
 	  public:
 		using Time = PortalImageInbox::Time;
-		PortalImageHost(world::Universe &universe, Renderer &renderer);
+		// A supplied library outlives this host; otherwise all producers share a host-owned one.
+		PortalImageHost(
+			world::Universe &universe,
+			Renderer &renderer,
+			ShaderLibrary *shaders = nullptr,
+			bool postProcessing = true
+		);
 		~PortalImageHost();
 		PortalImageHost(const PortalImageHost &) = delete;
 		PortalImageHost &operator=(const PortalImageHost &) = delete;
 		// Advertise this local world's producer without requiring a local viewport.
 		// Host control traffic authenticates and distributes the returned endpoint.
 		world::PresentationAddress Serve(world::WorldId world);
+		// Trusted local-world policy for retained body exclusion, defaulting to denial.
+		// Copies the policy for current and future producers of this store incarnation.
+		// Replacing it cancels producer work; RemoveWorld and Clear discard it.
+		// Returns false for nonlocal worlds or a full MAX_IMPORTED_PORTAL_IMAGES policy budget.
+		bool SetRetainedBodyAuthorization(
+			world::WorldId world, PortalImageProducer::RetainedBodyAuthorization authorize
+		);
+
+		// Applies to existing and subsequently opened local producers for this world.
+		// Bindings are copied and retire with RemoveWorld or Clear.
+		void SetContentOwner(
+			world::WorldId world, core::Name owner, std::span<const WorldContentOwner> foreign = {}
+		);
 		bool RequestTopology(world::WorldId source, world::WorldId destination, Time now);
 		const PortalTopologySnapshot *Topology(world::WorldId destination, Time now) const;
 		// Service an inherited, trusted driver link outside world ticks. False means
@@ -75,6 +95,38 @@ namespace engine::render {
 		// The host owns the result until replacement, expiry or viewport/world removal.
 		// A refusal returns zero and retains the preceding resource until retirement.
 		uint64_t ComposeBodyImage(core::Name portal, const View &body);
+		// Copies body geometry immediately, then pulls the accepted tree's source shadows.
+		// One job may be active. Pump advances it; the accepted capture has a fixed
+		// ten-second lease shared by subsequent poses, never renewed by another job.
+		PortalTreeCompositionStatus
+		BeginBodyComposition(core::Name portal, const View &body, Time now, uint64_t &job);
+		// Complete is delivered once. Its image is borrowed from the host, which owns
+		// it until composition replacement or viewport/world retirement.
+		PortalTreeCompositionProgress PollBodyComposition(uint64_t job, Time now);
+		void CancelBodyComposition(uint64_t job);
+
+		// Pull and retain immutable source shadows using this admitted reference
+		// body only for directional fitting. It does not retain a display pose.
+		PortalTreeCompositionStatus
+		BeginBodyPreparation(core::Name portal, const View &referenceBody, Time now, uint64_t &preparation);
+		PortalTreeCompositionProgress PollBodyPreparation(uint64_t preparation, Time now);
+		void CancelBodyPreparation(uint64_t preparation);
+		// Copies the newest body only after preparation completes. The renderer
+		// rechecks every fitted shadow domain before recording this pose.
+		PortalTreeCompositionStatus BeginPreparedBodyComposition(
+			uint64_t preparation, const View &body, Time now, uint64_t &job
+		);
+		// Queue only the accepted portal identity. The caller keeps the borrowed
+		// pose until this FIFO ticket is ready, then supplies current data below.
+		PortalTreeCompositionStatus QueueBodyPreparation(core::Name portal, size_t viewSlot, Time now, uint64_t &ticket);
+		PortalTreeCompositionProgress PollBodyPreparationTicket(uint64_t ticket, Time now);
+		PortalTreeCompositionStatus BeginQueuedBodyPreparation(
+			uint64_t ticket, const View &referenceBody, Time now, uint64_t &preparation
+		);
+		void CancelBodyPreparationTicket(uint64_t ticket);
+		// Releases reusable source maps so another FIFO ticket may prepare. A composed
+		// image remains displayed until its normal portal retirement.
+		void ReleaseBodyPreparation(uint64_t preparation);
 
 		// Requires a completed current request. Pump first to retire expired receipts.
 		uint64_t CurrentImage(size_t viewSlot, core::Name portal) const;

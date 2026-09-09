@@ -3,9 +3,13 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
 
 #include <algorithm>
+#include "RetainedBodyGrant.hpp"
+
 #include <network/SessionKey.hpp>
 #include <server/Server.hpp>
 
@@ -29,6 +33,7 @@ namespace server {
 		auto &peer = **found;
 		if (peer.Stream.Receive(bytes) == PresentationStreamReceive::Refused) {
 			peer.Grant.Close();
+			if (RetainedBodyGrantState) RetainedBodyGrantState->Drop(client);
 			return true;
 		}
 		for (const auto &frame : peer.Stream.Take()) {
@@ -43,13 +48,48 @@ namespace server {
 				continue;
 			peer.Stream.Close();
 			peer.Grant.Close();
+			if (RetainedBodyGrantState) RetainedBodyGrantState->Drop(client);
 			break;
 		}
 		return true;
 	}
+	bool Server::RetainedBodyAuthorized(
+		const engine::world::PresentationAddress &requester, std::string_view player
+	) {
+		if (!RetainedBodyGrantState || !Replication) return false;
+		PruneRetainedBodyGrants();
+		for (const auto &entry : PlayerPresentations) {
+			const auto &presentation = *entry;
+			if (!presentation.Grant.OwnsReceipt(requester)) continue;
+			return RetainedBodyGrantState->Authorizes(
+				presentation.Client,
+				presentation.Grant,
+				requester,
+				player,
+				[this](const RetainedBodyGrants::Grant &grant) {
+					const auto found = Players.find(grant.Client.Index);
+					if (found == Players.end() || found->second.Generation != grant.Client.Generation)
+						return false;
+					bool current = false;
+					Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+						if (engine::script::PortalTransferIncarnation(store) != grant.DestinationIncarnation)
+							return;
+						const auto committed = engine::script::PortalTransferPlayer(store, grant.Transfer);
+						const auto *identity = store.Get<engine::scene::PlayerIdentity>(committed);
+						current = committed != engine::ecs::NULL_ENTITY && committed == found->second.Instance &&
+								  identity && identity->UserId == grant.UserId;
+					});
+					return current;
+				}
+			);
+		}
+		return false;
+	}
+
 	void Server::PumpPlayerPresentation(double now) {
 		using namespace engine::world;
 		if (!Replication) return;
+		PruneRetainedBodyGrants();
 		size_t queuedPackets = 0;
 		for (const auto &entry : PlayerPresentations) {
 			auto &peer = *entry;

@@ -45,6 +45,11 @@ TEST_CASE(
 	CHECK(requests[0].From.Channel != requests[1].From.Channel);
 	CHECK(requests[0].From.Session == 100);
 	CHECK(requests[1].From.Session == 100);
+	CHECK(first.OwnsReceipt(requests[0].From));
+	CHECK_FALSE(first.OwnsReceipt(requests[1].From));
+	CHECK(second.OwnsReceipt(requests[1].From));
+	CHECK_FALSE(second.OwnsReceipt(requests[0].From));
+	CHECK_FALSE(first.OwnsReceipt(original));
 	for (const auto &incoming : requests) {
 		CHECK(incoming.From.Channel.starts_with(original.Channel + "/"));
 		REQUIRE(
@@ -65,6 +70,8 @@ TEST_CASE(
 	}
 	CHECK(first.Routes().Endpoints == std::vector<PresentationAddress>{fixture.Image});
 	first.Close();
+	CHECK_FALSE(first.OwnsReceipt(requests[0].From));
+	CHECK(second.OwnsReceipt(requests[1].From));
 	CHECK(fixture.Worlds.LookupPresentation(fixture.Far, requests[0].From.Channel).Session == 0);
 	CHECK(fixture.Worlds.LookupPresentation(fixture.Far, requests[1].From.Channel) == requests[1].From);
 	CHECK(fixture.Worlds.LookupPresentation(fixture.Far, "portal-sessions") == fixture.Sessions);
@@ -85,7 +92,9 @@ TEST_CASE(
 	const auto requests = fixture.Worlds.TakePresentation(fixture.Image);
 	REQUIRE(requests.size() == 1);
 	PresentationMessage oldReply{fixture.Image, requests[0].From, 1, 1, {}};
+	CHECK(peer.OwnsReceipt(oldReply.To));
 	REQUIRE(peer.Apply({1, 2, {}}) == Status::Ok);
+	CHECK_FALSE(peer.OwnsReceipt(oldReply.To));
 	REQUIRE(peer.Apply({1, 3, {source}}) == Status::Ok);
 	CHECK(
 		fixture.Worlds.SendPresentation(fixture.Far, fixture.Image, oldReply.To, 1, {}) ==
@@ -96,9 +105,16 @@ TEST_CASE(
 	const auto fresh = fixture.Worlds.TakePresentation(fixture.Image);
 	REQUIRE(fresh.size() == 1);
 	CHECK(fresh[0].From.Generation != requests[0].From.Generation);
+	CHECK(peer.OwnsReceipt(fresh[0].From));
+	CHECK_FALSE(peer.OwnsReceipt(oldReply.To));
 	CHECK(peer.Apply({1, 4, {{"far", "portal-sessions", 1, 1}}}) == Status::WrongHost);
 	CHECK(peer.Apply({1, 2, {source}}) == Status::StaleEndpoint);
 	CHECK(fixture.Worlds.LookupPresentation(fixture.Far, "portal-sessions") == fixture.Sessions);
+	REQUIRE(fixture.Worlds.ClosePresentation(fresh[0].From) == Status::Ok);
+	CHECK_FALSE(peer.OwnsReceipt(fresh[0].From));
+	const auto replacement = fixture.Worlds.OpenPresentation(fixture.Far, Name(fresh[0].From.Channel));
+	REQUIRE(replacement.Status == Status::Ok);
+	CHECK_FALSE(peer.OwnsReceipt(replacement.Address));
 }
 
 TEST_CASE(

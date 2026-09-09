@@ -1100,6 +1100,32 @@ TEST_CASE(
 		CHECK(motionReplies.front().Claim == route.Claim);
 		CHECK(motionReplies.front().Attempt == route.Attempt);
 		REQUIRE(motionReplies.front().Motion);
+		const auto adoption = [&](game::PortalSessionMessage reply) {
+			REQUIRE(
+				host.Worlds().SendPresentation(
+					destination,
+					endpoint.Address,
+					requests.front().From,
+					reply.Attempt,
+					game::EncodePortalSession(reply)
+				) == world::PresentationStatus::Ok
+			);
+			for (int tick = 0; tick < 3; ++tick)
+				(void)host.Run();
+		};
+
+		auto invalidAdoption = route;
+		invalidAdoption.Kind = game::PortalSessionKind::LeaseAdopted;
+		invalidAdoption.Claim.Capability[0] ^= std::byte{1};
+		adoption(invalidAdoption);
+		invalidAdoption = route;
+		invalidAdoption.Kind = game::PortalSessionKind::LeaseAdopted;
+		++invalidAdoption.Attempt;
+		adoption(invalidAdoption);
+		invalidAdoption = route;
+		invalidAdoption.Kind = game::PortalSessionKind::LeaseAdopted;
+		++invalidAdoption.Claim.DestinationIncarnation;
+		adoption(invalidAdoption);
 		const auto renewalAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(5100);
 		while (std::chrono::steady_clock::now() < renewalAt) {
 			poll();
@@ -1114,6 +1140,20 @@ TEST_CASE(
 		CHECK(renewal.Kind == game::PortalSessionKind::LeaseRequest);
 		CHECK(renewal.Claim == route.Claim);
 		CHECK(renewal.Attempt == route.Attempt);
+
+		auto adopted = route;
+		adopted.Kind = game::PortalSessionKind::LeaseAdopted;
+		adoption(adopted);
+		adoption(adopted);
+		const auto retiredAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(5100);
+		while (std::chrono::steady_clock::now() < retiredAt) {
+			poll();
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		for (int tick = 0; tick < 3; ++tick)
+			(void)host.Run();
+		CHECK(host.Worlds().TakePresentation(endpoint.Address).empty());
+		CHECK(client.Admitted());
 		poll();
 		CHECK(replies.size() == 4);
 	}
@@ -1258,6 +1298,23 @@ TEST_CASE(
 	request(game::PortalSessionKind::Fresh, {}, game::PortalSessionKind::Refused);
 	request(game::PortalSessionKind::Commit, route.Claim, game::PortalSessionKind::Committed);
 	request(game::PortalSessionKind::Commit, route.Claim, game::PortalSessionKind::Committed);
+
+	for (int retry = 0; retry < 2; ++retry) {
+		offer.Claim = route.Claim;
+		REQUIRE(
+			host.Worlds().SendPresentation(
+				source, sender.Address, destination, offer.Attempt, game::EncodePortalSession(offer)
+			) == world::PresentationStatus::Ok
+		);
+		(void)host.Run();
+		const auto renewals = host.Worlds().TakePresentation(sender.Address);
+		REQUIRE(renewals.size() == 1);
+		game::PortalSessionMessage adopted;
+		REQUIRE(game::DecodePortalSession(renewals.front().Payload, adopted));
+		CHECK(adopted.Kind == game::PortalSessionKind::LeaseAdopted);
+		CHECK(adopted.Claim == route.Claim);
+		CHECK(adopted.Attempt == offer.Attempt);
+	}
 	REQUIRE(host.Enter([&](Store &store) {
 		size_t players = 0;
 		store.EachEntity([&](Entity entity) {

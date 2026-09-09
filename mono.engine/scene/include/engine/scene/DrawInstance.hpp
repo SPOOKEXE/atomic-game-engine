@@ -529,8 +529,8 @@ namespace engine::scene {
 	// instance in the hottest pass of the frame.
 	//
 	// @param instances What the world produced.
-	// @param resident  Called as `resident(const core::Name &)` for each named
-	//                  mesh. `true` when the renderer holds it.
+	// @param resident  Called as `resident(const DrawInstance &)` for each named
+	//                  mesh, including its source world. `true` when it is held.
 	// @param out       Cleared, then filled with what may be drawn.
 	// @param marked    Sorted original indices whose filtered positions are needed.
 	// @param retained Cleared and filled with marked indices into out, when supplied.
@@ -552,7 +552,7 @@ namespace engine::scene {
 		size_t nextMark = 0;
 		for (size_t index = 0; index < instances.size(); ++index) {
 			const DrawInstance &instance = instances[index];
-			if (instance.Mesh.IsValid() && !resident(instance.Mesh)) continue;
+			if (instance.Mesh.IsValid() && !resident(instance)) continue;
 			if (retained) {
 				while (nextMark < marked.size() && marked[nextMark] < index)
 					++nextMark;

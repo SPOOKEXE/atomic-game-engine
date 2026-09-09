@@ -541,7 +541,36 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 		uint64_t(demands[0].Request.Width) * demands[0].Request.Height * 4 <= demands[0].Request.PixelBudget
 	);
 	CHECK(demands[0].Request.Geometry == baselineGeometry);
+	const core::Name residentDestination("other-room");
+	layeredSettings.ResidentDestinations = {&residentDestination, 1};
+	for (const bool firstPerson : {false, true}) {
+		viewer.EyePlayer = firstPerson ? std::optional<uint64_t>(91) : std::nullopt;
+		portals.clear();
+		REQUIRE(
+			CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1
+		);
+		REQUIRE(demands.size() == 1);
+		CHECK_FALSE(demands[0].Request.OrderedLayers);
+		CHECK(demands[0].Request.Scope == PortalImageScope::CompleteWorld);
+		CHECK(demands[0].Request.EyePlayer == (firstPerson ? "91" : ""));
+		CHECK(demands[0].Request.RecursionDepth == SETTINGS.RecursionDepth);
+		CHECK(demands[0].Request.PixelBudget == SETTINGS.PixelBudget);
+		CHECK(demands[0].Request.Geometry == baselineGeometry);
+	}
+	viewer.EyePlayer.reset();
+	const core::Name unrelatedDestination("unrelated");
+	layeredSettings.ResidentDestinations = {&unrelatedDestination, 1};
+	portals.clear();
+	REQUIRE(CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1);
+	CHECK(demands[0].Request.OrderedLayers);
 	store.RemoveResource<scene::LocalPlayer>();
+	layeredSettings.ResidentDestinations = {&residentDestination, 1};
+	viewer.EyePlayer = 91;
+	portals.clear();
+	REQUIRE(CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1);
+	CHECK(demands[0].Request.EyePlayer == "91");
+	CHECK_FALSE(demands[0].Request.OrderedLayers);
+	viewer.EyePlayer.reset();
 
 	rows[0].SkinCount = 2;
 	portals.clear();

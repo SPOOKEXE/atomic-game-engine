@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <unordered_map>
+#include <vector>
 
 namespace engine::assets {
 	struct TextureData;
@@ -53,16 +54,27 @@ namespace engine::render {
 	  public:
 		// Walks every `EditableImage` and uploads whichever have changed.
 		//
-		// **Never removes a texture an instance stopped existing for** -
-		// `render::TextureTable` has no eviction, `EditableMeshUploader::
-		// Refresh`'s own reason applies unchanged.
+		// The owner scopes the generated content names as well as upload tracking.
+		// Use distinct owners for worlds whose editable entity handles can collide.
+		// Destroying an entity retains its last uploaded resource until owner retirement.
 		//
 		// @param store    The world being drawn.
 		// @param renderer The device to upload to.
+		// @param owner The residency namespace for generated content names.
 		// @return How many textures were built and handed to the renderer.
-		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer);
+		size_t Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner = {});
+
+		// Forget device upload stamps when a world or residency owner retires.
+		// This does not release resources; Renderer owns their lifetime.
+		void ForgetWorld(uint64_t identity);
+		void ForgetOwner(core::Name owner);
 
 	  private:
-		std::unordered_map<uint64_t, uint32_t> Uploaded;
+		struct UploadScope {
+			uint64_t World = 0;
+			core::Name Owner;
+			std::unordered_map<uint64_t, uint32_t> Revisions;
+		};
+		std::vector<UploadScope> Scopes;
 	};
 }

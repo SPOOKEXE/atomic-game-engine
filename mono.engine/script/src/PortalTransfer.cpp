@@ -958,22 +958,40 @@ namespace engine::script {
 				while (clock.Count != 0) {
 					const auto &move = clock.Pending[clock.Begin];
 					if (move.PhysicsTick > store.Time().Tick) break;
+					const auto previousDirection = humanoid->MoveDirection;
 					humanoid->MoveDirection = move.Direction;
 					humanoid->JumpRequested |= move.Jump;
 					clock.AppliedInputTick = move.InputTick;
 					clock.Begin = (clock.Begin + 1) % MAXIMUM_NATIVE_INPUTS;
 					--clock.Count;
+					if (previousDirection != core::Vector3{} && humanoid->MoveDirection == core::Vector3{}) {
+						ENGINE_LOG(
+							core::LogLevel::Trace,
+							"portal-input-stop",
+							"route=scheduled incarnation={} player={} humanoid={} world_tick={} "
+							"input_tick={} direction=0,0,0",
+							PortalTransferIncarnation(store),
+							player.Id,
+							clock.Humanoid.Id,
+							store.Time().Tick,
+							clock.AppliedInputTick
+						);
+					}
 					ENGINE_LOG(
 						core::LogLevel::Trace,
 						"portal-input",
 						"route=scheduled incarnation={} player={} world_tick={} input_tick={} delta={} "
-						"input_step={}",
+						"input_step={} humanoid={} direction={},{},{}",
 						PortalTransferIncarnation(store),
 						player.Id,
 						store.Time().Tick,
 						clock.AppliedInputTick,
 						store.Time().Delta,
-						clock.InputStep
+						clock.InputStep,
+						clock.Humanoid.Id,
+						humanoid->MoveDirection.X,
+						humanoid->MoveDirection.Y,
+						humanoid->MoveDirection.Z
 					);
 					core::Metrics::Count("world.portal.native.applied", 1);
 				}
