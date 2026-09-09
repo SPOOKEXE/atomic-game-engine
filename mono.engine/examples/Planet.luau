@@ -9,7 +9,9 @@
 -- path as authored meshes. Nothing stores or replicates the generated chunks.
 -- Three bodies share one selector, one LUT layout and one shader contract, so a
 -- seeded variant generator populates a system in one call rather than one planet
--- in three.
+-- in three. Haven also carries a visual-only ocean shell with animated waves
+-- and shoreline foam, and a tick-cycled debug view shows the raw elevation and
+-- biome field the shaders read.
 --
 -- The surface follows the layered simple, ridged and crater filters from
 -- Sebastian Lague's procedural planet series. The series deliberately stops
@@ -22,6 +24,10 @@
 -- requires before calling any surface crack-free. The geometric error is a span
 -- heuristic, not the bounded estimator. The single `AtmosphereProcedural` is
 -- driven from the terran body; the giant and the moon share the sky it makes.
+-- The ocean is visual only: it does not collide, and the swash is foam
+-- oscillating at the waterline rather than water running up the beach mesh.
+-- Wave and foam time reaches the ocean shader through the part tint channel,
+-- the one per-draw value a script can move without re-uploading geometry.
 --
 -- ## Run it
 --
@@ -85,6 +91,7 @@ type BodyRecipe = {
 	PatchResolution: number,
 	MaxDepth: number,
 	Seed: number,
+	HasOcean: boolean,
 	Layers: { NoiseLayer },
 	BiomeRows: number,
 	LutWidth: number,
@@ -105,6 +112,7 @@ local Bodies: { BodyRecipe } = {
 		PatchResolution = 17,
 		MaxDepth = 3,
 		Seed = 27183,
+		HasOcean = true,
 		Layers = {
 			{
 				Kind = "Simple",
@@ -176,6 +184,7 @@ local Bodies: { BodyRecipe } = {
 		PatchResolution = 13,
 		MaxDepth = 2,
 		Seed = 90321,
+		HasOcean = false,
 		Layers = {
 			{
 				Kind = "Simple",
@@ -231,6 +240,7 @@ local Bodies: { BodyRecipe } = {
 		PatchResolution = 13,
 		MaxDepth = 1,
 		Seed = 41770,
+		HasOcean = false,
 		Layers = {},
 		BiomeRows = 4,
 		LutWidth = 128,
@@ -669,6 +679,140 @@ void main() {
 ]]
 gasShader.Parent = workspace
 
+-- The ocean shell's fragment path. UV.x is shore proximity baked from the
+-- terrain field, UV.y is depth, and time arrives in `inSurfaceColour.r`: the
+-- part tint is the one per-draw value a script can move every frame without
+-- re-uploading geometry, so the ocean shader reads it as a phase instead of a
+-- tint. If that binding ever stops updating per frame, the sea goes static but
+-- stays correct.
+local oceanShader = Instance.new("ShaderScript")
+oceanShader.Name = "PlanetOcean"
+oceanShader.Source = [[
+#version 450
+
+layout(location = 0) in vec3 inNormal;
+layout(location = 1) in vec4 inColour;
+layout(location = 4) in vec2 inTexCoord;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 0) out vec4 outColour;
+
+layout(set = 2, binding = 0) uniform sampler2D shadowMap;
+layout(set = 2, binding = 1) uniform sampler2D surfaceMap;
+layout(set = 2, binding = 2) uniform sampler2D colourMap;
+layout(set = 2, binding = 3) uniform sampler2D beamMap;
+layout(set = 2, binding = 4) uniform sampler2D normalMap;
+layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
+layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
+layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
+layout(set = 2, binding = 8) uniform sampler2D heightMap;
+layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+
+layout(set = 3, binding = 0) uniform Lighting {
+	vec4 Direction;
+	vec4 Ambient;
+	vec4 Direct;
+	vec4 Flags;
+} lighting;
+
+layout(set = 3, binding = 1) uniform Lights {
+	vec4 LightRows[49];
+} lights;
+
+layout(set = 3, binding = 2) uniform Beams {
+	vec4 BeamRows[41];
+} beams;
+
+void main() {
+	float shore = clamp(inTexCoord.x, 0.0, 1.0);
+	float depth = clamp(inTexCoord.y, 0.0, 1.0);
+	float t = inSurfaceColour.r * 6.2831;
+	vec3 normal = normalize(inNormal);
+	vec3 toLight = -normalize(lighting.Direction.xyz);
+	// Two moving wave trains wobble the light, not a true tangent frame: the
+	// shell has no tangent attribute, so this is shimmer on a smooth normal.
+	float w1 = sin(inTexCoord.x * 40.0 + inTexCoord.y * 24.0 + t * 1.7);
+	float w2 = sin(inTexCoord.y * 57.0 - inTexCoord.x * 31.0 - t * 1.1);
+	float lambert = max(dot(normal, toLight) + (w1 + w2) * 0.06, 0.0);
+	vec3 deep = vec3(0.02, 0.10, 0.22);
+	vec3 shallow = vec3(0.10, 0.45, 0.60);
+	vec3 sea = mix(shallow, deep, smoothstep(0.0, 1.0, depth));
+	sea *= lighting.Ambient.rgb + lighting.Direct.rgb * (0.35 + 0.65 * lambert);
+	float glint = pow(lambert, 24.0) * (0.4 + 0.3 * w1);
+	// Beach swash as oscillating foam at the waterline: the water edge breathes
+	// against the shore instead of water running up the beach mesh, which would
+	// need terrain UV updates the mesh transaction does not promise.
+	float swash = 0.5 + 0.5 * sin(t * 0.9 + inTexCoord.x * 20.0);
+	float foamBand = smoothstep(0.45 - swash * 0.2, 0.95, shore);
+	vec2 cell = floor(inTexCoord * vec2(220.0, 60.0) + vec2(t * 2.0, -t * 1.3));
+	float breakup = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+	float foam = foamBand * smoothstep(0.25, 0.75, breakup * 0.6 + foamBand * 0.5);
+	vec3 lit = mix(sea, vec3(0.92, 0.95, 0.96), clamp(foam, 0.0, 1.0));
+	lit += vec3(glint);
+	outColour = vec4(lit, max(inColour.a, lighting.Flags.w));
+}
+]]
+oceanShader.Parent = workspace
+
+-- The noise-map debug view: UV.y is the shipped elevation encoding, so
+-- grayscale IS the terrain field, the red line is exact sea level, blue lines
+-- are elevation contours, and the tint wash is the biome row. Haven cycles
+-- into this on a tick schedule further below.
+local debugShader = Instance.new("ShaderScript")
+debugShader.Name = "PlanetDebug"
+debugShader.Source = [[
+#version 450
+
+layout(location = 0) in vec3 inNormal;
+layout(location = 1) in vec4 inColour;
+layout(location = 4) in vec2 inTexCoord;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 0) out vec4 outColour;
+
+layout(set = 2, binding = 0) uniform sampler2D shadowMap;
+layout(set = 2, binding = 1) uniform sampler2D surfaceMap;
+layout(set = 2, binding = 2) uniform sampler2D colourMap;
+layout(set = 2, binding = 3) uniform sampler2D beamMap;
+layout(set = 2, binding = 4) uniform sampler2D normalMap;
+layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
+layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
+layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
+layout(set = 2, binding = 8) uniform sampler2D heightMap;
+layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+
+layout(set = 3, binding = 0) uniform Lighting {
+	vec4 Direction;
+	vec4 Ambient;
+	vec4 Direct;
+	vec4 Flags;
+} lighting;
+
+layout(set = 3, binding = 1) uniform Lights {
+	vec4 LightRows[49];
+} lights;
+
+layout(set = 3, binding = 2) uniform Beams {
+	vec4 BeamRows[41];
+} beams;
+
+void main() {
+	float elev = clamp(inTexCoord.y, 0.0, 1.0);
+	float biome = inTexCoord.x;
+	vec3 col = vec3(elev);
+	float row = floor(biome + 0.5);
+	vec3 tint = 0.5 + 0.5 * cos(6.2831 * (row / 4.0) + vec3(0.0, 2.1, 4.2));
+	col = mix(col, tint, 0.25);
+	float contour = abs(fract(elev * 20.0) - 0.5);
+	if (contour > 0.46) {
+		col = vec3(0.2, 0.6, 1.0);
+	}
+	if (abs(elev - 0.5) < 0.004) {
+		col = vec3(1.0, 0.2, 0.2);
+	}
+	outColour = vec4(col, max(inColour.a, lighting.Flags.w));
+}
+]]
+debugShader.Parent = workspace
+
 local OVERLAY_COLOURS: { Color3 } = {
 	Color3.fromRGB(90, 200, 255),
 	Color3.fromRGB(120, 255, 170),
@@ -1035,6 +1179,10 @@ end
 
 local live: { [string]: Chunk } = {}
 
+-- Whether Haven currently wears the noise-map debug shader. New chunks built
+-- inside the debug window pick it up directly so the set never mixes views.
+local debugMode = false
+
 local function BuildChunk(node: Node, leaves: { [string]: Node })
 	if live[node.Key] ~= nil then
 		return
@@ -1060,7 +1208,9 @@ local function BuildChunk(node: Node, leaves: { [string]: Node })
 
 	local material = Instance.new("Material")
 	material.Name = "PlanetMaterial"
-	material.Shader = if body.GasGiant then gasShader.Name else surfaceShader.Name
+	material.Shader = if body.GasGiant then gasShader.Name
+		elseif node.Body == 1 and debugMode then debugShader.Name
+		else surfaceShader.Name
 	material.Parent = part
 
 	local overlay: SelectionBox? = nil
@@ -1276,6 +1426,25 @@ local function ClearBody(bodyIndex: number)
 	pending = kept
 end
 
+-- Swaps Haven between the shaded view and the noise-map debug view. Material
+-- shader swaps are property writes, not geometry rebuilds, so the cycle costs
+-- nothing but a rebind.
+local function SetHavenDebug(enabled: boolean)
+	if enabled == debugMode then
+		return
+	end
+	debugMode = enabled
+	for _, chunk in live do
+		if chunk.Node.Body == 1 then
+			local material = chunk.Part:FindFirstChild("PlanetMaterial")
+			if material ~= nil then
+				(material :: any).Shader = if enabled then debugShader.Name else surfaceShader.Name
+			end
+		end
+	end
+	print(`planet: Haven debug view {if enabled then "on" else "off"}`)
+end
+
 local function CountLive(bodyIndex: number): number
 	local count = 0
 	for _, chunk in live do
@@ -1410,6 +1579,124 @@ do
 	print(`planet: scattered {placed} vegetation tufts on Haven`)
 end
 
+-- --- the ocean shell ---------------------------------------------------------
+--
+-- One static coarse sphere per ocean body at sea level plus a small swell. The
+-- terrain never dips below sea level (elevations clamp at zero), so the shell
+-- sits just above the flat seabed and hides under any raised land: swell is
+-- applied only where the field is at or below sea level, and the first tenth
+-- of a stud of beach the shell pokes through reads as swash. UV.x is shore
+-- proximity and UV.y is depth, both baked from the same field the terrain
+-- used, so foam and seabed colour cannot disagree about where the shore is.
+-- Visual only: CanCollide stays false, and the seabed-versus-water collision
+-- contract the plan requires is still open.
+local OCEAN_RES = 25
+local FOAM_WIDTH = 0.015
+local SWELL = 0.1
+
+local oceans: { [number]: { Part: MeshPart, Mesh: EditableMesh } } = {}
+
+local function BuildOcean(bodyIndex: number)
+	local body = Bodies[bodyIndex]
+	if not body.HasOcean or oceans[bodyIndex] ~= nil then
+		return
+	end
+
+	local vertices: { MeshVertex } = {}
+	local indices: { number } = {}
+	local lowest = Vector3.new(math.huge, math.huge, math.huge)
+	local highest = Vector3.new(-math.huge, -math.huge, -math.huge)
+
+	for _, face in faces do
+		local base = #vertices
+		for gy = 0, OCEAN_RES - 1 do
+			for gx = 0, OCEAN_RES - 1 do
+				local u = -1 + 2 * gx / (OCEAN_RES - 1)
+				local v = -1 + 2 * gy / (OCEAN_RES - 1)
+				local direction = DirectionAt(face, u, v)
+				local _, signed = ElevationAt(body, direction)
+				local foam = Clamp01(1 - math.abs(signed) / FOAM_WIDTH)
+				local depth = Clamp01(-signed / 0.1)
+				local swell = 0
+				if signed <= 0 then
+					swell = SWELL
+						* math.noise(direction.X * 3 + 11, direction.Y * 3 - 5, direction.Z * 3 + 7)
+				end
+				local position = body.Centre + direction * (body.Radius * (1 + 0.0005) + swell)
+				table.insert(vertices, { Position = position, Normal = direction, UV = Vector2.new(foam, depth) })
+				lowest = Vector3.new(
+					math.min(lowest.X, position.X),
+					math.min(lowest.Y, position.Y),
+					math.min(lowest.Z, position.Z)
+				)
+				highest = Vector3.new(
+					math.max(highest.X, position.X),
+					math.max(highest.Y, position.Y),
+					math.max(highest.Z, position.Z)
+				)
+			end
+		end
+		for gy = 0, OCEAN_RES - 2 do
+			for gx = 0, OCEAN_RES - 2 do
+				local a = base + gx + gy * OCEAN_RES
+				local b = a + 1
+				local c = a + OCEAN_RES
+				local d = c + 1
+				table.insert(indices, a)
+				table.insert(indices, b)
+				table.insert(indices, c)
+				table.insert(indices, b)
+				table.insert(indices, d)
+				table.insert(indices, c)
+			end
+		end
+	end
+
+	local centre = (lowest + highest) * 0.5
+	local size = highest - lowest
+	local relative: { MeshVertex } = {}
+	for _, vertex in vertices do
+		table.insert(relative, {
+			Position = (vertex.Position :: Vector3) - centre,
+			Normal = vertex.Normal,
+			UV = vertex.UV,
+		})
+	end
+
+	local mesh = Instance.new("EditableMesh")
+	mesh.Name = `PlanetOceanMesh_{body.Name}`
+	assert(mesh:SetGeometry(relative, indices), `ocean mesh for {body.Name} was cancelled`)
+
+	local part = Instance.new("MeshPart")
+	part.Name = `PlanetOcean_{body.Name}`
+	part.Anchored = true
+	part.CanCollide = false
+	part.Color = Color3.new(0, 1, 1)
+	part.Transparency = 0.3
+	part.Position = centre
+	part.Size = size
+	part.MeshId = mesh.ContentId
+	part.Parent = workspace
+
+	local material = Instance.new("Material")
+	material.Name = "PlanetOceanMaterial"
+	material.Shader = oceanShader.Name
+	material.Parent = part
+
+	oceans[bodyIndex] = { Part = part, Mesh = mesh }
+	print(`planet: ocean shell for {body.Name}, {#vertices} verts`)
+end
+
+local function DestroyOcean(bodyIndex: number)
+	local ocean = oceans[bodyIndex]
+	if ocean == nil then
+		return
+	end
+	ocean.Part:Destroy()
+	ocean.Mesh:Destroy()
+	oceans[bodyIndex] = nil
+end
+
 -- Rodrigues rotation of an offset around an axis. Used to turn Zephyr's chunks
 -- slowly: tick time, not wall time, so two recorded runs generate the same
 -- flow.
@@ -1447,6 +1734,10 @@ for bodyIndex, _ in Bodies do
 	end
 end
 
+for bodyIndex, _ in Bodies do
+	BuildOcean(bodyIndex)
+end
+
 local tick = 0
 local reconciling = false
 
@@ -1467,6 +1758,15 @@ RunService.Heartbeat:Connect(function()
 	MoveDemoCamera()
 	TurnGasGiant(tick)
 
+	-- Wave and foam time as a tint phase: one cheap property write per ocean
+	-- part, no geometry re-upload. Tick-driven, so the surf replays exactly.
+	for _, ocean in oceans do
+		(ocean.Part :: any).Color = Color3.new((tick * 0.004) % 1, 1, 1)
+	end
+
+	-- Noise-map debug window: the last 300 of every 1500 ticks.
+	SetHavenDebug(tick % 1500 >= 1200)
+
 	-- Deterministic reseed showcase: Haven steps to a new seed through the
 	-- authoring rebuild path, proving recipe edits reuse no stale state.
 	if tick == AUTO_RESEED_TICK then
@@ -1476,6 +1776,8 @@ RunService.Heartbeat:Connect(function()
 			layer.Centre = SeedOffset(haven.Seed, layer.Salt)
 		end
 		ClearBody(1)
+		DestroyOcean(1)
+		BuildOcean(1)
 		print(`planet: reseeded Haven to {RESEED_SEED} at tick {tick}`)
 	end
 
