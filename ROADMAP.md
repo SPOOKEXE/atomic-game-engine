@@ -72,10 +72,30 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 - [_] different antialiasing choices as render nodes
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 
+Rendering extra fixes:
+- [_] blackhole warp is opposite on one side to what it should be (quaternions can help do the curvature if needed).
+- [_] character does not collide with objects
+
+TODO tweaks:
+- [_] batch compute the selection box rendering
+- [_] fix selection box / left click drag / left click drag select, buggy
+- [_] fix unable to drag in node canvases
+- [_] left-click to select also drags them immediately, give a deadzone period before attempt dragging
+- [_] add column sorting to asset profiler
+- [_] add a timing selector and dropdown to select Average/Max/Min checkbox like Frame Graph to the Heap Profiler (average across N milliseconds)
+- [_] swap average checkbox to a dropdown to select Average/Max/Min checkbox
+- [_] View > Datastores, rename to View > DataStore Editor
+- [_] View > Datastore, rename to View > DataStore Config
+- [_] View > CDN, rename to View > CDN Config
+- [_] rename View > Physics Solver to View > Physics Profiler, move under View > Pipeline Profiler, and remake it based on what Pipeline Profile contains.
+- [_] change how particle:Emit works where we mark the particle as wanting to emit via a flag, then, do a batch emit (hook this into the Enabled as well). Big luau bottleneck (or maybe even a StoredEmitValue value would be nicer?).
+- [_] Network profiler; in studio, says 715 requests in flight but no traffic is happening. Rebuild based on Physics Profiler and Pipeline Profiler. Flamegraph as well.
+
 ### v0.25
 
 - [_] /docs/future-work/character-system.md
 - [_] gtlf default character (unreal style)
+- [_] merge flamegraph visuals into profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
 
 ### v0.26
 
