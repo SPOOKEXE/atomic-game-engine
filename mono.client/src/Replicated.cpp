@@ -921,7 +921,11 @@ namespace client {
 		if (auto *buffer = store.ResourceMutable<SnapshotBuffer>()) buffer->Predict(prediction.Root);
 		store.SetResource(
 			NativePlayerPrediction{
-				.Incarnation = continuation.Motion.DestinationIncarnation, .Clock = continuation.Clock
+				.Incarnation = continuation.Motion.DestinationIncarnation,
+				.AppliedPoseTick = 0,
+				.AppliedInputTick = 0,
+				.Sample = std::nullopt,
+				.Clock = continuation.Clock
 			}
 		);
 		return true;

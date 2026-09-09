@@ -905,7 +905,15 @@ namespace engine::render {
 			}
 		);
 		if (previous == source->Compositions.end())
-			source->Compositions.push_back({portal, composed, capture->Producer});
+			source->Compositions.push_back(
+				{.Portal = portal,
+				 .Image = composed,
+				 .Producer = capture->Producer,
+				 .Route = std::nullopt,
+				 .Preparation = 0,
+				 .Deadline = {},
+				 .Address = {}}
+			);
 		else {
 			if (previous->Route) {
 				state.ReleaseShadowRoute(*previous->Route, state.LastTime.value_or(Time{}));

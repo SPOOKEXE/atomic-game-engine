@@ -57,7 +57,9 @@ TEST_CASE(
 
 	CHECK(grants.Authorizes(client, fixture.Peer, receipt, "91", committed));
 	CHECK_FALSE(grants.Authorizes(client, fixture.Peer, receipt, "091", committed));
-	CHECK_FALSE(grants.Authorizes({client.Index, client.Generation + 1}, fixture.Peer, receipt, "91", committed));
+	CHECK_FALSE(
+		grants.Authorizes({client.Index, client.Generation + 1}, fixture.Peer, receipt, "91", committed)
+	);
 	CHECK_FALSE(grants.Authorizes(client, fixture.OtherPeer, receipt, "91", committed));
 
 	const auto otherReceipt = fixture.Receipt(fixture.OtherPeer, 2);

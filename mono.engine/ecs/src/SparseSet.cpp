@@ -366,7 +366,7 @@ namespace engine::ecs {
 			const size_t resident = CoveredSlots(region);
 			for (size_t local = region.Issued; local < resident; ++local) {
 				const Seat seat = SeatOf(static_cast<uint32_t>(local));
-				(*region.Pages[seat.Page])[seat.Offset] = Slot{region.Epoch[seat.Page]};
+				(*region.Pages[seat.Page])[seat.Offset] = Slot{region.Epoch[seat.Page], false, {}};
 			}
 		}
 		return true;

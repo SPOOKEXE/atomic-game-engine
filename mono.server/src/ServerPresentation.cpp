@@ -1,15 +1,15 @@
+#include "RetainedBodyGrant.hpp"
+
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/parallel/ProcessChannel.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/PortalTransfer.hpp>
-#include <engine/parallel/ProcessChannel.hpp>
 
 #include <algorithm>
-#include "RetainedBodyGrant.hpp"
-
 #include <network/SessionKey.hpp>
 #include <server/Server.hpp>
 
@@ -76,8 +76,9 @@ namespace server {
 							return;
 						const auto committed = engine::script::PortalTransferPlayer(store, grant.Transfer);
 						const auto *identity = store.Get<engine::scene::PlayerIdentity>(committed);
-						current = committed != engine::ecs::NULL_ENTITY && committed == found->second.Instance &&
-								  identity && identity->UserId == grant.UserId;
+						current = committed != engine::ecs::NULL_ENTITY &&
+								  committed == found->second.Instance && identity &&
+								  identity->UserId == grant.UserId;
 					});
 					return current;
 				}

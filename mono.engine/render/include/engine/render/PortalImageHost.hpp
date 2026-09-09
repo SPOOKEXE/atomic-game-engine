@@ -113,12 +113,12 @@ namespace engine::render {
 		void CancelBodyPreparation(uint64_t preparation);
 		// Copies the newest body only after preparation completes. The renderer
 		// rechecks every fitted shadow domain before recording this pose.
-		PortalTreeCompositionStatus BeginPreparedBodyComposition(
-			uint64_t preparation, const View &body, Time now, uint64_t &job
-		);
+		PortalTreeCompositionStatus
+		BeginPreparedBodyComposition(uint64_t preparation, const View &body, Time now, uint64_t &job);
 		// Queue only the accepted portal identity. The caller keeps the borrowed
 		// pose until this FIFO ticket is ready, then supplies current data below.
-		PortalTreeCompositionStatus QueueBodyPreparation(core::Name portal, size_t viewSlot, Time now, uint64_t &ticket);
+		PortalTreeCompositionStatus
+		QueueBodyPreparation(core::Name portal, size_t viewSlot, Time now, uint64_t &ticket);
 		PortalTreeCompositionProgress PollBodyPreparationTicket(uint64_t ticket, Time now);
 		PortalTreeCompositionStatus BeginQueuedBodyPreparation(
 			uint64_t ticket, const View &referenceBody, Time now, uint64_t &preparation

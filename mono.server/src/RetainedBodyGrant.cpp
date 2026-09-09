@@ -8,8 +8,8 @@ namespace server {
 			return grant.Client.IsValid() && grant.Transfer.SourceWorld.size() <= 256 &&
 				   !grant.Transfer.SourceWorld.empty() &&
 				   grant.Transfer.SourceWorld.find('\0') == std::string::npos &&
-				   grant.Transfer.SourceIncarnation != 0 &&
-				   grant.Transfer.Sequence != 0 && grant.DestinationIncarnation != 0 && grant.UserId > 0;
+				   grant.Transfer.SourceIncarnation != 0 && grant.Transfer.Sequence != 0 &&
+				   grant.DestinationIncarnation != 0 && grant.UserId > 0;
 		}
 	}
 

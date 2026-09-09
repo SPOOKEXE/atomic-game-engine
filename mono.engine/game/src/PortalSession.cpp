@@ -252,7 +252,14 @@ namespace engine::game {
 				return false;
 		}
 		if (Entries.size() >= MAXIMUM_LEASES) return false;
-		Entries.push_back({.Claim = claim, .Identity = identity, .Deadline = now + LIFETIME_SECONDS});
+		Entries.push_back(
+			{.Claim = claim,
+			 .Identity = identity,
+			 .Player = ecs::NULL_ENTITY,
+			 .Peer = 0,
+			 .Deadline = now + LIFETIME_SECONDS,
+			 .Committed = false}
+		);
 		return true;
 	}
 

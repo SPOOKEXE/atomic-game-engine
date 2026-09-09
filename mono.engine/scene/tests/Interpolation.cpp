@@ -57,7 +57,7 @@ TEST_CASE("a crossing collapses the blend onto where the body is now", "[scene][
 	// A hundred units apart, which is the shape a portal pair makes: the two
 	// rooms are nowhere near each other and the body is in both across one tick.
 	const Entity walker = Body(store, Vector3{0.0f, 6.0f, 0.0f}, Vector3{100.0f, 6.0f, 0.0f});
-	store.Set(walker, PortalTransit{.Serial = 1});
+	store.Set(walker, PortalTransit{.Frame = {}, .Scale = 1.0f, .Serial = 1});
 
 	REQUIRE(engine::scene::SnapPortalTransit(store) == 1);
 
@@ -79,14 +79,14 @@ TEST_CASE("a second crossing snaps again", "[scene][interpolation]") {
 
 	Store store("interpolation.again");
 	const Entity walker = Body(store, Vector3{0.0f, 0.0f, 0.0f}, Vector3{100.0f, 0.0f, 0.0f});
-	store.Set(walker, PortalTransit{.Serial = 1});
+	store.Set(walker, PortalTransit{.Frame = {}, .Scale = 1.0f, .Serial = 1});
 	REQUIRE(engine::scene::SnapPortalTransit(store) == 1);
 
 	// Back the other way. **A serial rather than a flag is what makes this
 	// work**: nobody had to clear anything, and a delta that never arrived
 	// would leave the counters further apart rather than losing the crossing.
 	store.Set(walker, Transform{CFrame(Vector3{-40.0f, 0.0f, 0.0f})});
-	store.Set(walker, PortalTransit{.Serial = 2});
+	store.Set(walker, PortalTransit{.Frame = {}, .Scale = 1.0f, .Serial = 2});
 
 	CHECK(engine::scene::SnapPortalTransit(store) == 1);
 	CHECK(store.Get<PreviousTransform>(walker)->Frame.Position.X == -40.0f);
@@ -104,7 +104,7 @@ TEST_CASE("a viewer that has already seen the crossing does nothing", "[scene][i
 	// stand the body still for the rest of the tick, which is the behaviour
 	// CodeParade's `prev_pos = pos` has and the one this deliberately does not.
 	const Entity walker = Body(store, Vector3{99.0f, 0.0f, 0.0f}, Vector3{100.0f, 0.0f, 0.0f});
-	store.Set(walker, PortalTransit{.Serial = 1});
+	store.Set(walker, PortalTransit{.Frame = {}, .Scale = 1.0f, .Serial = 1});
 	store.Set(walker, PortalTransitSeen{1});
 
 	CHECK(engine::scene::SnapPortalTransit(store) == 0);

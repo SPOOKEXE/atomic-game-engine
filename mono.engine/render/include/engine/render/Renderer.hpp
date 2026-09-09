@@ -1424,8 +1424,9 @@ namespace engine::render {
 		PortalTreeCompositionStatus BeginPortalCaptureTreePreparationShadowAssembly(
 			uint64_t preparation, const PortalShadowSnapshot &manifest
 		);
-		PortalTreeCompositionStatus
-		AcceptPortalPreparedShadowTile(uint64_t preparation, uint32_t node, std::span<const std::byte> packet);
+		PortalTreeCompositionStatus AcceptPortalPreparedShadowTile(
+			uint64_t preparation, uint32_t node, std::span<const std::byte> packet
+		);
 		PortalTreeCompositionStatus CommitPortalPreparedShadowAssembly(uint64_t preparation, uint32_t node);
 		void CancelPortalCaptureTreePreparation(uint64_t preparation);
 		// Reuses prepared GPU maps with one latest-pose snapshot and one final queue fence.

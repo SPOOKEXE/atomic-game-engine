@@ -808,9 +808,8 @@ namespace server {
 
 		// Checks a server-issued retained-body grant for one live presentation receipt.
 		// This is a control boundary, not a decoder for client image-request payloads.
-		bool RetainedBodyAuthorized(
-			const engine::world::PresentationAddress &requester, std::string_view player
-		);
+		bool
+		RetainedBodyAuthorized(const engine::world::PresentationAddress &requester, std::string_view player);
 
 		// The address the replication socket is bound to.
 		//

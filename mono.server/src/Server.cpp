@@ -1,3 +1,5 @@
+#include "RetainedBodyGrant.hpp"
+
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
@@ -53,8 +55,6 @@
 #include <fstream>
 #include <limits>
 #include <network/SessionKey.hpp>
-#include "RetainedBodyGrant.hpp"
-
 #include <server/ContentRelay.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
@@ -2641,7 +2641,10 @@ namespace server {
 						if (!RetainedBodyGrantState)
 							RetainedBodyGrantState = std::make_unique<RetainedBodyGrants>();
 						(void)RetainedBodyGrantState->Issue(
-							{client, request.Claim.Transfer, request.Claim.DestinationIncarnation, playerIdentity->UserId}
+							{client,
+							 request.Claim.Transfer,
+							 request.Claim.DestinationIncarnation,
+							 playerIdentity->UserId}
 						);
 					}
 					response.Kind = game::PortalSessionKind::Committed;
@@ -2658,12 +2661,12 @@ namespace server {
 			const auto player = Players.find(grant.Client.Index);
 			if (player == Players.end() || player->second.Generation != grant.Client.Generation) return false;
 			bool current = false;
-			Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
-				if (script::PortalTransferIncarnation(store) != grant.DestinationIncarnation) return;
-				const auto committed = script::PortalTransferPlayer(store, grant.Transfer);
-				const auto *identity = store.Get<scene::PlayerIdentity>(committed);
-				current = committed != ecs::NULL_ENTITY && committed == player->second.Instance && identity &&
-						  identity->UserId == grant.UserId;
+			Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+				if (engine::script::PortalTransferIncarnation(store) != grant.DestinationIncarnation) return;
+				const auto committed = engine::script::PortalTransferPlayer(store, grant.Transfer);
+				const auto *identity = store.Get<engine::scene::PlayerIdentity>(committed);
+				current = committed != engine::ecs::NULL_ENTITY && committed == player->second.Instance &&
+						  identity && identity->UserId == grant.UserId;
 			});
 			return current;
 		});
