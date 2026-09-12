@@ -993,7 +993,6 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 # world and every gui event the router produced was delivered nowhere. The
 # router was right, the events were right, and the last hop was missing.
 #
-# Not part of `just check`: it needs a GPU, for `studio-smoke`'s reason.
 # **In `just check` since v0.19, and the reason is the component table.** The
 # programs seal it after start-up, so a component registered during a tick now
 # aborts rather than quietly taking an id that depends on which world got there
