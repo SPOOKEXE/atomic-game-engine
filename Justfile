@@ -145,6 +145,9 @@ gpu-texture-atlas-bench samples="1":
     set -euo pipefail
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_render
+    # SDL cannot safely unwind a command buffer that stopped completing. The
+    # process boundary owns this timeout, so a hung driver cannot strand the
+    # benchmark in Renderer shutdown while it releases in-flight resources.
     if ! MONO_GPU_ATLAS_REPORT=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}; then
         echo "gpu-texture-atlas-bench failed or exceeded its 180s device deadline" >&2
         exit 1
@@ -172,8 +175,13 @@ medium-render-profile seconds="15":
         test -s "$base-frame.txt"
         test -s "$base-heap.txt"
         grep -Eq '^window +[1-9][0-9]* frames ' "$base-frame.txt"
+
+        # A header-only capture can be produced after an empty run. Require a
+        # measured frame and real tracked allocation volume before reporting it.
+        awk '$1 == "frame" && $2 == "ms" && $3 == "mean" && $4 + 0 > 0 { found = 1 } END { exit !found }' "$base-frame.txt"
         grep -q '^gpu logical heap$' "$base-heap.txt"
         ! grep -q 'not compiled in' "$base-heap.txt"
+        awk '$1 == "allocated" && $2 + 0 > 0 { found = 1 } END { exit !found }' "$base-heap.txt"
         echo "medium-render-profile cameras=$cameras"
         grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
         grep -E "^(frame|span|category)" "$base-frame.txt" || true
