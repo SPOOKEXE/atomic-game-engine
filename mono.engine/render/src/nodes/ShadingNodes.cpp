@@ -706,7 +706,7 @@ namespace engine::render {
 			if (context.Reads.size() != 0 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
 			if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
-			return State->RecordEnvironmentSkybox(
+			const bool recorded = State->RecordEnvironmentSkybox(
 				CurrentLighting.EnvironmentState,
 				Command,
 				target.Texture,
@@ -714,6 +714,8 @@ namespace engine::render {
 				target.Height,
 				Result.ComputeDispatches
 			);
+			if (recorded) StageHistoryWrites(context, Command);
+			return recorded;
 		});
 
 		frameNodes.Set(core::Name("clouds-compute"), [this](const graph::RunContext &context) {
@@ -727,11 +729,7 @@ namespace engine::render {
 				);
 				return false;
 			}
-			// The world-scoped skybox node is the direct predecessor. Its history
-			// lifetime preserves completed images for later frames, but this edge
-			// must consume the current write even while scene damage invalidates the
-			// previous generation.
-			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, true);
+			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, false);
 			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
 			if (!source.IsValid()) {
 				ENGINE_ERROR("clouds compute '{}' could not allocate environment-sky", context.Name.Text());
@@ -773,6 +771,7 @@ namespace engine::render {
 			if (!recorded) {
 				ENGINE_ERROR("clouds compute '{}' could not record its compute pass", context.Name.Text());
 			}
+			if (recorded) StageHistoryWrites(context, Command);
 			return recorded;
 		});
 
@@ -784,7 +783,7 @@ namespace engine::render {
 			if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1)
 				return false;
 			const Impl::NamedTexture environment =
-				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, true)
+				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, false)
 										  : Impl::NamedTexture{};
 			uniforms.Fog.w = State->Caps.HasCompute && environment.IsValid() ? 1.0f : 0.0f;
 			const std::array bindings{

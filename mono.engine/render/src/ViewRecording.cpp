@@ -2619,7 +2619,8 @@ namespace engine::render {
 			}
 		};
 		ProbedRunner probed(
-			frameRunner, [this, State](const graph::RunContext &context, bool before, bool accepted) {
+			frameRunner,
+			[this, State](const graph::RunContext &context, bool before, bool accepted) {
 				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
 				ClosePass();
 				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {
@@ -2911,7 +2912,7 @@ namespace engine::render {
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
-				State->DiscardPendingGraphHistoryWrites();
+				State->DiscardPendingGraphHistoryWrites(command);
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
@@ -2925,7 +2926,7 @@ namespace engine::render {
 			{
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);
-				State->CommitPendingGraphHistoryWrites();
+				State->CommitPendingGraphHistoryWrites(command);
 			}
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {

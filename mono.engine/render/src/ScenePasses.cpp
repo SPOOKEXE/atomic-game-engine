@@ -101,9 +101,9 @@ namespace engine::render {
 		} else {
 			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
 			if (submitted) {
-				State->CommitPendingGraphHistoryWrites();
+				State->CommitPendingGraphHistoryWrites(command);
 			} else {
-				State->DiscardPendingGraphHistoryWrites();
+				State->DiscardPendingGraphHistoryWrites(command);
 			}
 			State->CompleteResidentUploads(submitted);
 			State->DropDownloads();
@@ -961,7 +961,13 @@ namespace engine::render {
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, world);
 		if (GraphHistoryReadNeedsValidation(*desc, make)) {
-			if (!GraphHistoryReadable(Request.Damage)) {
+			const Impl::NamedTexture current =
+				State->FindCurrentGraphHistoryWrite(*selectedPipeline, desc->Name, scope, owner);
+			const GraphHistoryReadSource source = SelectGraphHistoryRead(current.IsValid(), Request.Damage);
+			if (source == GraphHistoryReadSource::CurrentProducer) {
+				return current;
+			}
+			if (source == GraphHistoryReadSource::Unavailable) {
 				return {};
 			}
 			return State->FindGraphHistoryForRead(
@@ -1015,6 +1021,24 @@ namespace engine::render {
 	Renderer::Impl::NamedTexture
 	ViewRecording::GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make) {
 		return ResourceTexture(resource, GraphTextureSlot(context), make);
+	}
+
+	void ViewRecording::StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command) {
+		for (const graph::ResourceId resource : context.Writes) {
+			const graph::ResourceDesc *desc = Pipeline->Graph.FindResource(resource);
+			if (desc == nullptr || desc->Lifetime != graph::ResourceLifetime::History) {
+				continue;
+			}
+			const graph::NodeScope scope = State->ResourceScope(*Pipeline, resource);
+			State->StageGraphHistoryWrite(
+				*Pipeline,
+				command,
+				desc->Name,
+				scope,
+				GraphHistoryOwner(scope, GraphTextureSlot(context), Request.World),
+				GraphHistorySignature(ContentSignature, Matrices, SceneWidth, SceneHeight)
+			);
+		}
 	}
 
 	SDL_GPUBuffer *

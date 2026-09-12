@@ -14,8 +14,11 @@ using engine::graph::ResourceLifetime;
 using engine::render::GraphHistoryOwner;
 using engine::render::GraphHistoryReadable;
 using engine::render::GraphHistoryReadNeedsValidation;
+using engine::render::GraphHistoryReadSource;
 using engine::render::GraphHistorySignature;
+using engine::render::GraphHistoryGeneration;
 using engine::render::PresentationDamage;
+using engine::render::SelectGraphHistoryRead;
 using engine::scene::CameraMatrices;
 
 namespace {
@@ -70,6 +73,45 @@ TEST_CASE("graph-owned history reads validate the completed generation", "[rende
 	// Path tracing owns its accumulation image, so it is not an external graph input.
 	history.External = false;
 	CHECK(GraphHistoryReadNeedsValidation(history, false));
+}
+
+TEST_CASE("a direct producer outranks temporal history during graph damage", "[render][graph-history]") {
+	CHECK(
+		SelectGraphHistoryRead(true, PresentationDamage{.Scene = true}) ==
+		GraphHistoryReadSource::CurrentProducer
+	);
+	CHECK(SelectGraphHistoryRead(false, PresentationDamage{}) == GraphHistoryReadSource::PreviousGeneration);
+}
+
+TEST_CASE("discarded graph history writes cannot become readable", "[render][graph-history]") {
+	// A failed or cancelled submission clears its scheduled writer. With no
+	// completed generation valid for this damaged frame, the reader must refuse.
+	CHECK(
+		SelectGraphHistoryRead(false, PresentationDamage{.Environment = true}) ==
+		GraphHistoryReadSource::Unavailable
+	);
+}
+
+TEST_CASE("command-owned environment generations commit independently", "[render][graph-history]") {
+	GraphHistoryGeneration mainGeneration;
+	GraphHistoryGeneration separateGeneration;
+	uint8_t mainCommand = 0;
+	uint8_t separateCommand = 0;
+	mainGeneration.Stage(17, &mainCommand);
+	separateGeneration.Stage(23, &separateCommand);
+	separateGeneration.Commit(&separateCommand);
+	CHECK_FALSE(mainGeneration.Ready);
+	CHECK(separateGeneration.Ready);
+	CHECK_FALSE(mainGeneration.Matches(17, &separateCommand));
+	CHECK(separateGeneration.Matches(23, &mainCommand));
+	mainGeneration.Commit(&mainCommand);
+	CHECK(mainGeneration.Ready);
+
+	GraphHistoryGeneration failedMain;
+	failedMain.Stage(29, &mainCommand);
+	failedMain.Discard(&mainCommand);
+	CHECK_FALSE(failedMain.Ready);
+	CHECK_FALSE(failedMain.Matches(29, &mainCommand));
 }
 
 TEST_CASE("graph history owners isolate view world and frame scopes", "[render][graph-history]") {

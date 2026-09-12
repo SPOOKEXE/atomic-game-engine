@@ -125,6 +125,35 @@ TEST_CASE("world work is shared while view work is repeated", "[render][graph]")
 	CHECK(std::count(ran.begin(), ran.end(), "present") == 1);
 }
 
+TEST_CASE("clouds consume the skybox producer in the same world invocation", "[render][graph]") {
+	const RenderGraph graph = DefaultGraph();
+	const engine::graph::Node *skybox = nullptr;
+	const engine::graph::Node *clouds = nullptr;
+	for (uint32_t value = 1; value <= graph.Count(); ++value) {
+		const auto *node = graph.Find(engine::graph::NodeId{value});
+		if (node == nullptr) continue;
+		if (node->Kind == Name("skybox-compute")) skybox = node;
+		if (node->Kind == Name("clouds-compute")) clouds = node;
+	}
+	REQUIRE(skybox != nullptr);
+	REQUIRE(clouds != nullptr);
+	REQUIRE(skybox->Writes.size() == 1);
+	REQUIRE(clouds->Reads.size() == 1);
+	CHECK(skybox->Scope == engine::graph::NodeScope::World);
+	CHECK(clouds->Scope == engine::graph::NodeScope::World);
+	CHECK(clouds->Reads.front() == skybox->Writes.front());
+
+	const CompiledGraph compiled = Compile(graph);
+	const auto position = [&](Name kind) {
+		for (size_t index = 0; index < compiled.Shared.size(); ++index) {
+			const auto *node = graph.Find(compiled.Shared[index]);
+			if (node != nullptr && node->Kind == kind) return index;
+		}
+		return compiled.Shared.size();
+	};
+	CHECK(position(Name("skybox-compute")) < position(Name("clouds-compute")));
+}
+
 TEST_CASE("missing backend kinds are reported before execution", "[render][graph]") {
 	RenderGraph graph;
 	const auto target = graph.AddResource({.Name = Name("target")});

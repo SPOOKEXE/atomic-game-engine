@@ -503,25 +503,7 @@ namespace engine::render {
 			const uint32_t groupsZ = coverTarget ? 1 : node->Integer(core::Name("dispatch.z"), 1);
 			SDL_DispatchGPUCompute(pass, groupsX, groupsY, groupsZ);
 			SDL_EndGPUComputePass(pass);
-			for (const graph::ResourceId resource : context.Writes) {
-				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
-				if (desc == nullptr || desc->Lifetime != graph::ResourceLifetime::History) {
-					continue;
-				}
-				const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
-				State->StageGraphHistoryWrite(
-					*selectedPipeline,
-					desc->Name,
-					scope,
-					GraphHistoryOwner(scope, recording.GraphTextureSlot(context), recording.Request.World),
-					GraphHistorySignature(
-						recording.ContentSignature,
-						recording.Matrices,
-						recording.SceneWidth,
-						recording.SceneHeight
-					)
-				);
-			}
+			recording.StageHistoryWrites(context, dispatchCommand);
 			result.ComputeDispatches++;
 			if (separateCommand) {
 				closePass();
@@ -531,10 +513,10 @@ namespace engine::render {
 					if (timingSlot < VulkanTimestamps::SLOTS) {
 						State->PendingMarks[timingSlot].clear();
 					}
-					State->DiscardPendingGraphHistoryWrites();
+					State->DiscardPendingGraphHistoryWrites(dispatchCommand);
 					return false;
 				}
-				State->CommitPendingGraphHistoryWrites();
+				State->CommitPendingGraphHistoryWrites(dispatchCommand);
 				dedicatedComputeSubmitted = true;
 				result.AsyncComputeCommandBuffers++;
 			} else {

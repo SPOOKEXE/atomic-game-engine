@@ -2585,10 +2585,10 @@ namespace engine::render {
 			if (!submitted) {
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
-				State->DiscardPendingGraphHistoryWrites();
+				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
 			} else {
 				// A partial batch releases its command buffer but never certifies history.
-				State->DiscardPendingGraphHistoryWrites();
+				State->DiscardPendingGraphHistoryWrites(State->BatchCommand);
 			}
 			State->CompleteResidentUploads(submitted);
 			State->BatchCommand = nullptr;

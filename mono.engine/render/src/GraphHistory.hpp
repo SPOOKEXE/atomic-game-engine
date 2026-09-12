@@ -37,6 +37,60 @@ namespace engine::render {
 		return !make && resource.Lifetime == graph::ResourceLifetime::History;
 	}
 
+	// The graph may chain two history writers in one command buffer. A completed
+	// prior generation is temporal history, while a scheduled earlier producer is
+	// the current graph result and does not depend on presentation damage.
+	enum class GraphHistoryReadSource : uint8_t { CurrentProducer, PreviousGeneration, Unavailable };
+
+	inline GraphHistoryReadSource
+	SelectGraphHistoryRead(bool currentProducer, const PresentationDamage &damage) {
+		if (currentProducer) return GraphHistoryReadSource::CurrentProducer;
+		return GraphHistoryReadable(damage) ? GraphHistoryReadSource::PreviousGeneration
+											: GraphHistoryReadSource::Unavailable;
+	}
+
+	// A renderer-side cache may avoid recording a deterministic producer only
+	// after the command that produced it entered the queue. Pending generations
+	// never replace the last completed one, so cancellation cannot certify pixels
+	// that were merely recorded.
+	struct GraphHistoryGeneration {
+		uint64_t Signature = 0;
+		uint64_t PendingSignature = 0;
+		const void *PendingCommand = nullptr;
+		bool Ready = false;
+		bool Pending = false;
+
+		bool Matches(uint64_t candidate, const void *command) const {
+			return (Ready && Signature == candidate) ||
+				(Pending && PendingCommand == command && PendingSignature == candidate);
+		}
+
+		uint64_t SignatureFor(const void *command) const {
+			if (Pending && PendingCommand == command) return PendingSignature;
+			return Ready ? Signature : 0;
+		}
+
+		void Stage(uint64_t candidate, const void *command) {
+			PendingSignature = candidate;
+			PendingCommand = command;
+			Pending = true;
+		}
+
+		void Commit(const void *command) {
+			if (!Pending || PendingCommand != command) return;
+			Signature = PendingSignature;
+			Ready = true;
+			Pending = false;
+			PendingCommand = nullptr;
+		}
+
+		void Discard(const void *command = nullptr) {
+			if (!Pending || (command != nullptr && PendingCommand != command)) return;
+			Pending = false;
+			PendingCommand = nullptr;
+		}
+	};
+
 	inline uint64_t GraphHistoryOwner(graph::NodeScope scope, size_t view, uint64_t world) {
 		return scope == graph::NodeScope::View	  ? static_cast<uint64_t>(view)
 			   : scope == graph::NodeScope::World ? world

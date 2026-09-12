@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FramePreparation.hpp"
+#include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
@@ -454,10 +455,8 @@ namespace engine::render {
 		struct EnvironmentTarget {
 			SDL_GPUTexture *SkyTarget = nullptr;
 			SDL_GPUTexture *CloudTarget = nullptr;
-			uint64_t SkySignature = 0;
-			uint64_t CloudSignature = 0;
-			bool SkyReady = false;
-			bool CloudReady = false;
+			GraphHistoryGeneration Sky;
+			GraphHistoryGeneration Cloud;
 		};
 
 		std::vector<EnvironmentTarget> Environments;
@@ -479,6 +478,8 @@ namespace engine::render {
 			uint32_t &dispatches
 		);
 		void ReleaseEnvironments();
+		void CommitEnvironmentWrites(SDL_GPUCommandBuffer *command);
+		void DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command = nullptr);
 
 		struct NamedTexture {
 			SDL_GPUTexture *Texture = nullptr;
@@ -516,6 +517,7 @@ namespace engine::render {
 		// state belongs to the renderer rather than one view recording.
 		struct PendingGraphHistoryWrite {
 			const NamedPipeline *Pipeline = nullptr;
+			SDL_GPUCommandBuffer *Command = nullptr;
 			core::Name Resource;
 			graph::NodeScope Scope = graph::NodeScope::Frame;
 			uint64_t Owner = 0;
@@ -576,6 +578,9 @@ namespace engine::render {
 			uint64_t owner,
 			uint64_t signature
 		) const;
+		NamedTexture FindCurrentGraphHistoryWrite(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		) const;
 		void CommitGraphHistoryWrite(
 			const NamedPipeline &pipeline,
 			core::Name resource,
@@ -585,13 +590,14 @@ namespace engine::render {
 		);
 		void StageGraphHistoryWrite(
 			const NamedPipeline &pipeline,
+			SDL_GPUCommandBuffer *command,
 			core::Name resource,
 			graph::NodeScope scope,
 			uint64_t owner,
 			uint64_t signature
 		);
-		void CommitPendingGraphHistoryWrites();
-		void DiscardPendingGraphHistoryWrites();
+		void CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command);
+		void DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command = nullptr);
 		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
 			const NamedPipeline &pipeline,

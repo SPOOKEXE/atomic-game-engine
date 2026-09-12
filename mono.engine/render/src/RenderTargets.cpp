@@ -544,6 +544,19 @@ namespace engine::render {
 		return {};
 	}
 
+	Renderer::Impl::NamedTexture Renderer::Impl::FindCurrentGraphHistoryWrite(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+	) const {
+		for (auto write = PendingGraphHistoryWrites.rbegin(); write != PendingGraphHistoryWrites.rend();
+			 ++write) {
+			if (write->Pipeline == &pipeline && write->Resource == resource && write->Scope == scope &&
+				write->Owner == owner) {
+				return FindGraphTarget(pipeline, resource, scope, owner);
+			}
+		}
+		return {};
+	}
+
 	void Renderer::Impl::CommitGraphHistoryWrite(
 		const NamedPipeline &pipeline,
 		core::Name resource,
@@ -564,27 +577,52 @@ namespace engine::render {
 
 	void Renderer::Impl::StageGraphHistoryWrite(
 		const NamedPipeline &pipeline,
+		SDL_GPUCommandBuffer *command,
 		core::Name resource,
 		graph::NodeScope scope,
 		uint64_t owner,
 		uint64_t signature
 	) {
-		PendingGraphHistoryWrites.push_back({&pipeline, resource, scope, owner, signature});
-	}
-
-	void Renderer::Impl::CommitPendingGraphHistoryWrites() {
-		for (const PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
-			if (write.Pipeline != nullptr) {
-				CommitGraphHistoryWrite(
-					*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
-				);
+		for (PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+			if (write.Pipeline == &pipeline && write.Command == command && write.Resource == resource &&
+				write.Scope == scope && write.Owner == owner) {
+				write.Signature = signature;
+				return;
 			}
 		}
-		PendingGraphHistoryWrites.clear();
+		PendingGraphHistoryWrites.push_back({&pipeline, command, resource, scope, owner, signature});
 	}
 
-	void Renderer::Impl::DiscardPendingGraphHistoryWrites() {
-		PendingGraphHistoryWrites.clear();
+	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		auto firstRetained = std::remove_if(
+			PendingGraphHistoryWrites.begin(),
+			PendingGraphHistoryWrites.end(),
+			[this, command](const PendingGraphHistoryWrite &write) {
+				if (write.Command != command) return false;
+				if (write.Pipeline != nullptr) {
+					CommitGraphHistoryWrite(
+						*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
+					);
+				}
+				return true;
+			}
+		);
+		PendingGraphHistoryWrites.erase(firstRetained, PendingGraphHistoryWrites.end());
+		CommitEnvironmentWrites(command);
+	}
+
+	void Renderer::Impl::DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		if (command == nullptr) {
+			PendingGraphHistoryWrites.clear();
+		} else {
+			auto firstRetained = std::remove_if(
+				PendingGraphHistoryWrites.begin(),
+				PendingGraphHistoryWrites.end(),
+				[command](const PendingGraphHistoryWrite &write) { return write.Command == command; }
+			);
+			PendingGraphHistoryWrites.erase(firstRetained, PendingGraphHistoryWrites.end());
+		}
+		DiscardEnvironmentWrites(command);
 	}
 
 	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {

@@ -105,7 +105,7 @@ namespace engine::render {
 		signature = Fold(signature, environment.Air);
 		signature = Fold(signature, EnvironmentAtmosphereComputeOf(environment));
 		signature = Fold(signature, Sun);
-		if (cache->SkyReady && cache->SkySignature == signature) return true;
+		if (cache->Sky.Matches(signature, command)) return true;
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = destinationTexture;
 		// An authored edit can land while the previous environment version is
@@ -176,8 +176,7 @@ namespace engine::render {
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (width + 7) / 8, (height + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);
-		cache->SkySignature = signature;
-		cache->SkyReady = true;
+		cache->Sky.Stage(signature, command);
 		dispatches++;
 		return true;
 	}
@@ -230,7 +229,7 @@ namespace engine::render {
 			scene::MixSignature(signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source)));
 		for (const EnvironmentTarget &candidate : Environments) {
 			if (candidate.SkyTarget == source) {
-				signature = scene::MixSignature(signature, candidate.SkySignature);
+				signature = scene::MixSignature(signature, candidate.Sky.SignatureFor(command));
 				break;
 			}
 		}
@@ -240,7 +239,7 @@ namespace engine::render {
 		if (environment.CloudLayer.WindSpeed > 0.0f) {
 			signature = Fold(signature, environment.CloudTime);
 		}
-		if (cache->CloudReady && cache->CloudSignature == signature) return true;
+		if (cache->Cloud.Matches(signature, command)) return true;
 		const EnvironmentUniforms uniforms{
 			.Zenith = Colour(sky.Zenith, sky.StarDensity),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),
@@ -283,8 +282,7 @@ namespace engine::render {
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (width + 7) / 8, (height + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);
-		cache->CloudSignature = signature;
-		cache->CloudReady = true;
+		cache->Cloud.Stage(signature, command);
 		dispatches++;
 		return true;
 	}
@@ -292,5 +290,19 @@ namespace engine::render {
 	void Renderer::Impl::ReleaseEnvironments() {
 		// Graph targets own the images. This cache only owns their dirty signatures.
 		Environments.clear();
+	}
+
+	void Renderer::Impl::CommitEnvironmentWrites(SDL_GPUCommandBuffer *command) {
+		for (EnvironmentTarget &target : Environments) {
+			target.Sky.Commit(command);
+			target.Cloud.Commit(command);
+		}
+	}
+
+	void Renderer::Impl::DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command) {
+		for (EnvironmentTarget &target : Environments) {
+			target.Sky.Discard(command);
+			target.Cloud.Discard(command);
+		}
 	}
 }

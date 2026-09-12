@@ -542,6 +542,10 @@ namespace engine::render {
 		Impl::NamedTexture
 		GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make);
 
+		// Marks successful history writers as readable by later nodes in this command
+		// buffer. Submission still decides when that generation becomes temporal history.
+		void StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command);
+
 		// `ResourceBuffer` for the viewport this node names, or this view's.
 		SDL_GPUBuffer *GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make);
 
