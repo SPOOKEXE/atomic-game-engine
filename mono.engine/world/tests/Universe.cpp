@@ -708,6 +708,8 @@ TEST_CASE("presentation keeps each world on its physical-core lane", "[world][pa
 	std::thread::id secondTickThread;
 	std::thread::id firstPresentationThread;
 	std::thread::id secondPresentationThread;
+	std::thread::id firstCollectionThread;
+	std::thread::id secondCollectionThread;
 	std::atomic<unsigned> arrived{0};
 	std::atomic<bool> release{false};
 
@@ -741,12 +743,17 @@ TEST_CASE("presentation keeps each world on its physical-core lane", "[world][pa
 		Presentation{first, 1.0f / 60.0f, 0.25f},
 		Presentation{second, 1.0f / 60.0f, 0.75f},
 	};
-	REQUIRE(universe.PresentMany(requests) == 2);
+	REQUIRE(universe.PresentMany(requests, [&](WorldId world, Store &) {
+		if (world == first) firstCollectionThread = std::this_thread::get_id();
+		if (world == second) secondCollectionThread = std::this_thread::get_id();
+	}) == 2);
 	CHECK(firstPresentationThread == firstTickThread);
 	CHECK(secondPresentationThread == secondTickThread);
 	CHECK(firstPresentationThread != std::this_thread::get_id());
 	CHECK(secondPresentationThread != std::this_thread::get_id());
 	CHECK(firstPresentationThread != secondPresentationThread);
+	CHECK(firstCollectionThread == firstPresentationThread);
+	CHECK(secondCollectionThread == secondPresentationThread);
 
 	universe.Enter(first, [](Store &store) { CHECK(store.Time().Alpha == 0.25f); });
 	universe.Enter(second, [](Store &store) { CHECK(store.Time().Alpha == 0.75f); });

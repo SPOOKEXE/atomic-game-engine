@@ -124,6 +124,7 @@ namespace engine::render {
 		view.Lighting = frame.Lighting;
 		view.OverrideLighting = true;
 		view.Lights = camera.Lights;
+		view.Surfaces = camera.Surfaces;
 		view.RibbonVertices = camera.Ribbons.Vertices;
 		view.RibbonRuns = camera.Ribbons.Runs;
 		view.Particles = frame.Particles.Batches;
@@ -178,6 +179,7 @@ namespace engine::render {
 	) {
 		ENGINE_PROFILE_CAT("world camera collect", core::ProfileCategory::Render);
 		CollectLights(store, view.CameraFrame.Position, frame.Lights);
+		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &view);
 		effects::BuildRibbons(store, view.CameraFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
 		const gui::Screen screen{extent.X, extent.Y};
 		ResolveSpatialCanvases(store, screen, &view.Camera, &view.CameraFrame);

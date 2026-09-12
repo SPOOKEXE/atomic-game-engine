@@ -514,9 +514,15 @@ namespace engine::world {
 		// of derived world state.
 		//
 		// @param requests Value-only presentation requests.
+		// @param collect Called on each world's presentation lane after PreRender.
+		//                It must copy only that world's data and must not call
+		//                back into the universe.
 		// @return The number of local worlds presented.
 		// @tick
-		size_t PresentMany(std::span<const Presentation> requests);
+		size_t PresentMany(
+			std::span<const Presentation> requests,
+			const std::function<void(WorldId, ecs::Store &)> &collect = {}
+		);
 
 		// Runs `body` against a world's storage, on the driver thread.
 		//

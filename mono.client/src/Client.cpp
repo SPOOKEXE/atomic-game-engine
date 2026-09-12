@@ -2282,6 +2282,7 @@ namespace client {
 		if (Window != nullptr) {
 			SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
 		}
+		const ActiveScene *displayedActiveScene = nullptr;
 
 		{
 			// Once per frame, and separate from the tick because a client draws
@@ -2340,15 +2341,27 @@ namespace client {
 				}
 			}
 
-			// All demanded worlds prepare their draw packets together. Each
-			// PreRender pass stays on the world's stable physical-core lane and
-			// the joined result below is still copied through ViewChannel before
-			// the renderer sees it.
-			(void)Universe_->PresentMany(presentationDemand);
+			// The one presentation barrier copies each active world's completed
+			// packet on its stable lane. Nothing below reaches back into those
+			// stores to rebuild a camera or a draw list.
+			(void)ActiveScenes.Collect(
+				*Universe_,
+				presentationDemand,
+				engine::core::Vector2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)}
+			);
+
+			const auto installWorldPipeline = [&](engine::world::WorldId id) {
+				const auto selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
+				if (ProfilesInstalledFor == id && ProfileInstalledSelection == selectedProfile) return;
+				ProfilesInstalledFor = id;
+				ProfileInstalledSelection = selectedProfile;
+				PipelineSelected = engine::render::InstallWorldPipeline(
+					RenderingProfiles, Renderer, id.Index, selectedProfile
+				);
+			};
 
 			const auto collectPresentation =
 				[&](engine::world::WorldId id, engine::ecs::Store &store, const engine::core::Vector3 &eye) {
-					const auto selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
 					// **The surface cameras, read from the world that owns
 					// them.** All of them: the pipeline renders one offscreen
 					// view per surface index since v0.8, so a room of
@@ -2374,13 +2387,7 @@ namespace client {
 						}
 					);
 
-					if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
-						ProfilesInstalledFor = id;
-						ProfileInstalledSelection = selectedProfile;
-						PipelineSelected = engine::render::InstallWorldPipeline(
-							RenderingProfiles, Renderer, id.Index, selectedProfile
-						);
-					}
+					installWorldPipeline(id);
 
 					// **The particles, from the world being drawn and only
 					// that one.** A batch is a span into this world's pool;
@@ -2404,53 +2411,44 @@ namespace client {
 					(void)engine::render::CollectLights(store, eye, Lights);
 				};
 
-			for (const engine::world::WorldId id : Simulated) {
-				// Published from inside the world, straight after its PreRender
-				// phase filled the draw list. The camera and the list stay
-				// where they were produced; what leaves is a copy in a buffer
-				// the renderer owns the other end of.
-				Universe_->Enter(id, [&, id](engine::ecs::Store &store) {
-					// A suspended factory world does not run PreRender. Rebuild only
-					// its derived draw packet from current ECS rows before publishing;
-					// DrawList has an empty snapshot serializer, so this cannot alter
-					// the snapshot barrier or advance scripts and clocks.
-					if (factoryPaused && id == Rendered)
+			for (const auto &scene : ActiveScenes.Scenes()) {
+				if (scene.World == Rendered) {
+					// Kept for the replicated view below, which has no camera of its own.
+					ComposedFrame = scene.View.CameraFrame;
+					ComposedCamera = scene.View.Camera;
+					if (!ReportedJoin) {
+						displayedActiveScene = &scene;
+						Portals.assign(scene.View.Portals.begin(), scene.View.Portals.end());
+						Surfaces.assign(scene.View.Surfaces.begin(), scene.View.Surfaces.end());
+						Windowed = std::ranges::any_of(scene.Frame->Seams, [](const auto &seam) {
+							return seam.Crosses;
+						});
+						RibbonVertices = scene.View.RibbonVertices;
+						RibbonRuns = scene.View.RibbonRuns;
+						Lights.assign(scene.View.Lights.begin(), scene.View.Lights.end());
+						particleFrameCollected = true;
+						installWorldPipeline(scene.World);
+					}
+				}
+				Views.Publish(
+					scene.World,
+					scene.View.CameraFrame,
+					scene.View.Camera,
+					scene.Frame->Instances,
+					scene.Frame->Tick,
+					Universe_->AlphaOf(scene.World),
+					scene.Frame->Joints
+				);
+			}
+			// A paused data-factory world deliberately skips PreRender. Keep its
+			// current-tick fallback without reopening ordinary presented worlds.
+			if (!ReportedJoin && displayedActiveScene == nullptr) {
+				Universe_->Enter(Rendered, [&](engine::ecs::Store &store) {
+					if (factoryPaused)
 						engine::render::CollectInstances(
 							store, engine::render::DrawCollectionTime::CurrentTick
 						);
-					const auto *active = store.Resource<engine::scene::ActiveCamera>();
-					const auto *list = store.Resource<engine::render::DrawList>();
-					if (active == nullptr || list == nullptr) {
-						return;
-					}
-
-					// The live camera is a row: `ActiveCamera` names which
-					// entity it is and the placement and the lens are the
-					// components on it.
-					const auto *placement = store.Get<engine::scene::Transform>(active->Entity);
-					const auto *lens = store.Get<engine::scene::Camera>(active->Entity);
-					if (placement == nullptr || lens == nullptr) {
-						return;
-					}
-
-					if (id == Rendered) {
-						// Kept for the replicated view below, which has no
-						// camera of its own.
-						ComposedFrame = placement->Frame;
-						ComposedCamera = *lens;
-
-						if (!ReportedJoin) collectPresentation(id, store, placement->Frame.Position);
-					}
-
-					Views.Publish(
-						id,
-						placement->Frame,
-						*lens,
-						list->Instances,
-						store.Time().Tick,
-						store.Time().Alpha,
-						list->JointFrames
-					);
+					collectPresentation(Rendered, store, ComposedFrame.Position);
 				});
 			}
 			if (!particleFrameCollected) {
@@ -3149,13 +3147,15 @@ namespace client {
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
 		if (Settings.EnableParticles) {
-			view.Particles = Particles.Batches;
-			view.ParticleSeams = Particles.Seams;
-			view.ParticleRevision = Particles.Revision;
-			view.ParticleLayoutRevision = Particles.LayoutRevision;
-			view.ParticleResidentRevision = Particles.ResidentRevision;
-			view.ParticlePool = Particles.Pool;
-			view.ParticleBlocks = Particles.BlockCount;
+			const auto &particles =
+				displayedActiveScene == nullptr ? Particles : displayedActiveScene->Frame->Particles;
+			view.Particles = particles.Batches;
+			view.ParticleSeams = particles.Seams;
+			view.ParticleRevision = particles.Revision;
+			view.ParticleLayoutRevision = particles.LayoutRevision;
+			view.ParticleResidentRevision = particles.ResidentRevision;
+			view.ParticlePool = particles.Pool;
+			view.ParticleBlocks = particles.BlockCount;
 		}
 
 		// The time since the last device step. Presentation may be slower than the
@@ -3306,7 +3306,27 @@ namespace client {
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
 			CaptureFrame(view, presentationWorld);
-			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
+			// Capture cameras are separate from the displayed camera. Each active
+			// world gets an offscreen target and the selected display view stays
+			// last, which is the only view allowed to present to the swapchain.
+			std::vector<engine::render::SceneTarget> cameraTargets;
+			std::vector<engine::render::View> cameraBatch;
+			cameraTargets.reserve(ActiveScenes.Scenes().size());
+			cameraBatch.reserve(ActiveScenes.Scenes().size());
+			for (const auto &scene : ActiveScenes.Scenes()) {
+				if (scene.World == presentationWorld) continue;
+				cameraTargets.push_back(
+					{static_cast<uint32_t>(std::max(pixelWidth, 1)),
+					 static_cast<uint32_t>(std::max(pixelHeight, 1))}
+				);
+				auto captured = scene.View;
+				captured.Target = &cameraTargets.back();
+				captured.Slot = cameraBatch.size() + 1;
+				captured.ForeignContentOwners = ContentBindings;
+				cameraBatch.push_back(captured);
+			}
+			cameraBatch.push_back(view);
+			LastFrame = Renderer.Render(cameraBatch, Overlay, hook);
 			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
 		}
 		{

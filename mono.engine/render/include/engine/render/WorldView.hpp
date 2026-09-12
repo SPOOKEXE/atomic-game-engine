@@ -79,11 +79,11 @@ namespace engine::render {
 		ParticleFrame Particles;
 	};
 
-	// One camera's light selection, facing ribbons and spatial interface commands.
-	// Surface demand is collected separately so waiting child views need not pay
-	// for these layers until their images are ready.
+	// One camera's light selection, surface demand, facing ribbons and spatial
+	// interface commands.
 	struct WorldCameraFrame {
 		std::vector<SceneLight> Lights;
+		std::vector<SurfaceView> Surfaces;
 		effects::RibbonBuffer Ribbons;
 		gui::Compiled Compiled;
 		gui::DrawList SpatialCommands;

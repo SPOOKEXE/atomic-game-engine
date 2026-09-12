@@ -11,6 +11,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -31,6 +32,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <client/ActiveScenes.hpp>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <cmath>
@@ -47,6 +49,56 @@ using engine::ecs::Store;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
+
+TEST_CASE("active scenes copy valid cameras after one presentation batch", "[client][active-scenes]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiComponents();
+	Universe worlds({.Mode = world::ExecutionMode::WorldParallel});
+	const auto zulu = worlds.Create({.Name = Name("Zulu")});
+	const auto alpha = worlds.Create({.Name = Name("Alpha")});
+	const auto retired = worlds.Create({.Name = Name("Retired")});
+	const auto install = [&](WorldId world, float position) {
+		worlds.Enter(world, [&](Store &store) {
+			const auto eye = store.CreateInstance(scene::CameraClass(), "Eye");
+			store.Set(eye, scene::Transform{core::CFrame(Vector3{position, 0, 0})});
+			store.Set(eye, scene::Camera{});
+			const auto anchor = store.CreateInstance(ecs::Classes::Find(Name("Part")), "LightAnchor");
+			store.Set(anchor, scene::Transform{core::CFrame(Vector3{position, 1, 0})});
+			const auto light = store.CreateInstance(ecs::Classes::Find(Name("PointLight")), "Light");
+			REQUIRE(store.SetParent(light, anchor));
+			store.SetResource(scene::ActiveCamera{eye});
+			store.SetResource(render::DrawList{});
+		});
+	};
+	install(zulu, 3);
+	install(alpha, 1);
+	worlds.Enter(retired, [](Store &store) { store.SetResource(render::DrawList{}); });
+
+	client::ActiveSceneCollector collector;
+	const std::array demands{
+		world::Presentation{zulu, .016f, .25f},
+		world::Presentation{retired, .016f, .25f},
+		world::Presentation{alpha, .016f, .25f},
+		world::Presentation{zulu, .016f, .25f},
+	};
+	REQUIRE(collector.Collect(worlds, demands, {640, 480}) == 2);
+	REQUIRE(collector.Scenes().size() == 2);
+	CHECK(collector.Scenes()[0].Name == Name("Alpha"));
+	CHECK(collector.Scenes()[0].View.CameraFrame.Position.X == 1);
+	CHECK(collector.Scenes()[1].Name == Name("Zulu"));
+	CHECK(collector.Scenes()[1].View.CameraFrame.Position.X == 3);
+	CHECK(collector.Views().size() == 2);
+	CHECK(collector.Views()[0].Instances.data() == collector.Scenes()[0].Frame->Instances.data());
+	REQUIRE(collector.Views()[0].Lights.size() == 1);
+	CHECK(collector.Views()[0].Lights.data() == collector.Scenes()[0].CameraLayers->Lights.data());
+
+	REQUIRE(worlds.Destroy(alpha) == world::WorldStatus::Ok);
+	const std::array remaining{world::Presentation{alpha, .016f, .5f}, world::Presentation{zulu, .016f, .5f}};
+	REQUIRE(collector.Collect(worlds, remaining, {640, 480}) == 1);
+	REQUIRE(collector.Scenes().size() == 1);
+	CHECK(collector.Scenes().front().Name == Name("Zulu"));
+}
 
 TEST_CASE("a trailing eye draws its original world after body admission", "[client][camera-portal-world]") {
 	using namespace engine;

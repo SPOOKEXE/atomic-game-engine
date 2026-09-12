@@ -1026,7 +1026,9 @@ namespace engine::world {
 		return WorldStatus::Ok;
 	}
 
-	size_t Universe::PresentMany(std::span<const Presentation> requests) {
+	size_t Universe::PresentMany(
+		std::span<const Presentation> requests, const std::function<void(WorldId, ecs::Store &)> &collect
+	) {
 		RequireDriverThread("PresentMany");
 
 		if (Ticking) return 0;
@@ -1072,16 +1074,18 @@ namespace engine::world {
 			});
 
 		if (parallel && !PresentationList.empty()) {
-			parallel::Jobs::ForWorkers(PresentationLanes, [this](size_t begin, size_t end) {
+			parallel::Jobs::ForWorkers(PresentationLanes, [this, &collect](size_t begin, size_t end) {
 				for (size_t index = begin; index < end; index++) {
 					const Presentation &request = PresentationRequests[index];
 					PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+					if (collect) collect(request.World, PresentationList[index]->Storage());
 				}
 			});
 		} else {
 			for (size_t index = 0; index < PresentationList.size(); index++) {
 				const Presentation &request = PresentationRequests[index];
 				PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+				if (collect) collect(request.World, PresentationList[index]->Storage());
 			}
 		}
 

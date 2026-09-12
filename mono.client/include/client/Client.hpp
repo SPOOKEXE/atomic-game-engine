@@ -47,6 +47,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <client/Actions.hpp>
+#include <client/ActiveScenes.hpp>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
 #include <client/Options.hpp>
@@ -670,6 +671,10 @@ namespace client {
 
 		// Every world this client simulates, in creation order.
 		std::vector<engine::world::WorldId> Simulated;
+
+		// The completed product packets for every active world. Its views are
+		// copied on the presentation lanes and submitted together below.
+		ActiveSceneCollector ActiveScenes;
 
 		// The socket and the connection to a server. Both null unless
 		// `--connect` was given, which is what keeps a single-player run from
