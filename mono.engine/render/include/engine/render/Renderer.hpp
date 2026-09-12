@@ -52,6 +52,7 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	struct PackedMeshData;
 	class ShaderLibrary;
 	struct PortalImageBinding;
 	struct PortalShadowImageBinding;
@@ -1469,6 +1470,7 @@ namespace engine::render {
 		// @param mesh The geometry. An invalid one is refused.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 
 		// Retires meshes, textures, material/lens/postprocess variants and pending texture
 		// arrivals for one owner. Empty owner preserves shared resources.

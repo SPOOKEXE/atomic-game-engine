@@ -11,6 +11,33 @@
 #include <vector>
 
 namespace engine::render {
+	namespace {
+		PackedMeshFormat PackedFormatOf(engine::scene::EditablePackingFormat format) {
+			switch (format) {
+			case engine::scene::EditablePackingFormat::Float32:
+				return PackedMeshFormat::Float32;
+			case engine::scene::EditablePackingFormat::Float16:
+				return PackedMeshFormat::Float16;
+			case engine::scene::EditablePackingFormat::Float8E4M3FN:
+				return PackedMeshFormat::Float8E4M3FN;
+			case engine::scene::EditablePackingFormat::Signed16:
+				return PackedMeshFormat::Signed16;
+			case engine::scene::EditablePackingFormat::Unsigned16:
+				return PackedMeshFormat::Unsigned16;
+			case engine::scene::EditablePackingFormat::Signed8:
+				return PackedMeshFormat::Signed8;
+			case engine::scene::EditablePackingFormat::Unsigned8:
+				return PackedMeshFormat::Unsigned8;
+			case engine::scene::EditablePackingFormat::Signed4:
+				return PackedMeshFormat::Signed4;
+			case engine::scene::EditablePackingFormat::Unsigned4:
+				return PackedMeshFormat::Unsigned4;
+			case engine::scene::EditablePackingFormat::Boolean:
+				return PackedMeshFormat::Boolean;
+			}
+			return PackedMeshFormat::Float32;
+		}
+	}
 
 	engine::assets::MeshData BuildMeshData(const engine::scene::EditableMesh &mesh) {
 		// **Built once per semantic revision rather than maintained beside the
@@ -112,15 +139,36 @@ namespace engine::render {
 			std::vector<ColourRun> runs;
 			std::unordered_map<uint32_t, size_t> slots;
 
+			std::vector<float> colourValues(mesh.Colours.size() * 3);
+			for (size_t index = 0; index < mesh.Colours.size(); ++index) {
+				colourValues[index * 3] = mesh.Colours[index].R;
+				colourValues[index * 3 + 1] = mesh.Colours[index].G;
+				colourValues[index * 3 + 2] = mesh.Colours[index].B;
+			}
+			std::vector<float> alphaValues(mesh.Alphas.begin(), mesh.Alphas.end());
+			std::vector<float> colourDecoded;
+			std::vector<float> alphaDecoded;
+			if (mesh.Packing.Enabled() &&
+				(mesh.Packing.Attributes &
+				 static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour)) != 0 &&
+				engine::scene::PackEditableValues(colourValues, mesh.Packing, packed) &&
+				engine::scene::UnpackEditableValues(packed, colourValues.size(), mesh.Packing, colourDecoded))
+				colourValues = std::move(colourDecoded);
+			if (mesh.Packing.Enabled() &&
+				(mesh.Packing.Attributes &
+				 static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Alpha)) != 0 &&
+				engine::scene::PackEditableValues(alphaValues, mesh.Packing, packed) &&
+				engine::scene::UnpackEditableValues(packed, alphaValues.size(), mesh.Packing, alphaDecoded))
+				alphaValues = std::move(alphaDecoded);
+
 			const auto channel = [&](size_t vertex, size_t offset) -> float {
 				if (vertex >= mesh.Colours.size()) {
 					return 1.0f;
 				}
-				const engine::core::Color3 &colour = mesh.Colours[vertex];
-				return offset == 0 ? colour.R : (offset == 1 ? colour.G : colour.B);
+				return colourValues[vertex * 3 + offset];
 			};
 			const auto alpha = [&](size_t vertex) -> float {
-				return vertex < mesh.Alphas.size() ? mesh.Alphas[vertex] : 0.0f;
+				return vertex < alphaValues.size() ? alphaValues[vertex] : 0.0f;
 			};
 			const auto quantise = [](float value) -> uint32_t {
 				const float clamped = std::clamp(value, 0.0f, 1.0f);
@@ -190,6 +238,72 @@ namespace engine::render {
 		return built;
 	}
 
+	PackedMeshData BuildPackedMeshData(const engine::scene::EditableMesh &mesh) {
+		constexpr uint8_t allAttributes =
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position) |
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Normal) |
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::UV) |
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour) |
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Alpha);
+		if (!mesh.Packing.Enabled() || (mesh.Packing.Attributes & ~allAttributes) != 0) return {};
+
+		const engine::assets::MeshData expanded = BuildMeshData(mesh);
+		if (!expanded.IsValid()) return {};
+		PackedMeshData built;
+		built.Indices = expanded.Indices;
+		built.Submeshes = expanded.Submeshes;
+		built.Minimum = expanded.Minimum;
+		built.Maximum = expanded.Maximum;
+		built.VertexCount = static_cast<uint32_t>(mesh.Positions.size());
+
+		std::array<std::vector<float>, 3> values;
+		values[0].reserve(mesh.Positions.size() * 3);
+		values[1].reserve(mesh.Normals.size() * 3);
+		values[2].reserve(mesh.UVs.size() * 2);
+		for (const engine::core::Vector3 &value : mesh.Positions) {
+			values[0].push_back(value.X);
+			values[0].push_back(value.Y);
+			values[0].push_back(value.Z);
+		}
+		for (const engine::core::Vector3 &value : mesh.Normals) {
+			values[1].push_back(value.X);
+			values[1].push_back(value.Y);
+			values[1].push_back(value.Z);
+		}
+		for (const engine::core::Vector2 &value : mesh.UVs) {
+			values[2].push_back(value.X);
+			values[2].push_back(value.Y);
+		}
+
+		const engine::scene::EditablePackingAttribute attributes[] = {
+			engine::scene::EditablePackingAttribute::Position,
+			engine::scene::EditablePackingAttribute::Normal,
+			engine::scene::EditablePackingAttribute::UV,
+		};
+		const uint32_t components[] = {3, 3, 2};
+		for (size_t index = 0; index < built.Streams.size(); ++index) {
+			while (built.Vertices.size() % 4 != 0)
+				built.Vertices.push_back(std::byte{0});
+			engine::scene::EditablePacking policy = mesh.Packing;
+			if ((policy.Attributes & static_cast<uint8_t>(attributes[index])) == 0)
+				policy.Format = engine::scene::EditablePackingFormat::Float32;
+			std::vector<std::byte> encoded;
+			if (!engine::scene::PackEditableValues(values[index], policy, encoded)) return {};
+			PackedMeshStream &stream = built.Streams[index];
+			stream.ByteOffset = static_cast<uint32_t>(built.Vertices.size());
+			stream.ByteCount = static_cast<uint32_t>(encoded.size());
+			stream.ValueCount = static_cast<uint32_t>(values[index].size());
+			stream.Components = components[index];
+			stream.Format = PackedFormatOf(policy.Format);
+			stream.Minimum = policy.Minimum;
+			stream.Maximum = policy.Maximum;
+			built.Vertices.insert(built.Vertices.end(), encoded.begin(), encoded.end());
+		}
+		while (built.Vertices.size() % 4 != 0)
+			built.Vertices.push_back(std::byte{0});
+		return built.IsValid() ? built : PackedMeshData{};
+	}
+
 	size_t EditableMeshUploader::Refresh(
 		engine::ecs::Store &store, engine::render::Renderer &renderer, core::Name owner
 	) {
@@ -205,8 +319,9 @@ namespace engine::render {
 
 		store.Each<const engine::scene::EditableMesh>([&](engine::ecs::Entity entity,
 														  const engine::scene::EditableMesh &mesh) {
+			const UploadScope::Revision revision{mesh.Revision, mesh.Packing.Revision};
 			const auto found = uploadedRevisions.find(entity.Id);
-			if (found != uploadedRevisions.end() && found->second == mesh.Revision) {
+			if (found != uploadedRevisions.end() && found->second == revision) {
 				// The steady state: an integer compare, for
 				// `ShaderLibrary::Refresh`'s exact reason.
 				return;
@@ -220,13 +335,16 @@ namespace engine::render {
 				// failure. Remembering the revision is important: otherwise an
 				// unchanged half-built mesh pays the full conversion every presented
 				// frame. The next edit advances the revision and retries it.
-				uploadedRevisions[entity.Id] = mesh.Revision;
+				uploadedRevisions[entity.Id] = revision;
 				return;
 			}
 
 			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
-			if (renderer.AddMesh(name, built, owner)) {
-				uploadedRevisions[entity.Id] = mesh.Revision;
+			const bool accepted = mesh.Packing.Enabled()
+									  ? renderer.AddPackedMesh(name, BuildPackedMeshData(mesh), owner)
+									  : renderer.AddMesh(name, built, owner);
+			if (accepted) {
+				uploadedRevisions[entity.Id] = revision;
 				uploaded++;
 			}
 		});

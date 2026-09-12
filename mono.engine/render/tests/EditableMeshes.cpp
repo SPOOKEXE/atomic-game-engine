@@ -46,6 +46,18 @@ TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gp
 	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 1);
 	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
 	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	scene::EditablePacking packing;
+	packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Position);
+	packing.Format = scene::EditablePackingFormat::Unsigned8;
+	REQUIRE(scene::SetEditableMeshPacking(first, firstMesh, packing));
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	auto *heldPacking = first.GetMutable<scene::EditableMesh>(firstMesh);
+	REQUIRE(heldPacking != nullptr);
+	const uint32_t meshRevision = heldPacking->Revision;
+	heldPacking->Packing.Maximum = 2.0f;
+	heldPacking->Packing.Revision++;
+	CHECK(heldPacking->Revision == meshRevision);
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
 	core::Vector3 extent;
 	REQUIRE(fixture.Render.MeshExtentOf(name, extent, firstOwner));
 	CHECK(extent.X == Approx(1));
@@ -220,4 +232,67 @@ TEST_CASE("an empty mesh converts to an empty, invalid MeshData", "[render][edit
 	CHECK(built.Indices.empty());
 	CHECK(built.Submeshes.empty());
 	CHECK_FALSE(built.IsValid());
+}
+
+namespace {
+	EditableMesh PackingTriangle() {
+		EditableMesh mesh;
+		mesh.Positions = {Vector3{}, Vector3{1, 0, 0}, Vector3{0, 1, 0}};
+		mesh.Normals.assign(3, Vector3{0, 0, 1});
+		mesh.UVs = {Vector2{}, Vector2{1, 0}, Vector2{0, 1}};
+		mesh.Colours.assign(3, Color3{0.2f, 0.4f, 0.6f});
+		mesh.Alphas.assign(3, 0.3f);
+		mesh.Indices = {0, 1, 2};
+		mesh.Packing.Format = engine::scene::EditablePackingFormat::Unsigned4;
+		return mesh;
+	}
+}
+
+TEST_CASE("every editable mesh attribute has an explicit packed result", "[render][editablemeshes]") {
+	EditableMesh mesh = PackingTriangle();
+	for (const auto attribute :
+		 {engine::scene::EditablePackingAttribute::Position,
+		  engine::scene::EditablePackingAttribute::Normal,
+		  engine::scene::EditablePackingAttribute::UV}) {
+		mesh.Packing.Attributes = static_cast<uint8_t>(attribute);
+		const auto packed = engine::render::BuildPackedMeshData(mesh);
+		REQUIRE(packed.IsValid());
+		const size_t selected = attribute == engine::scene::EditablePackingAttribute::Position ? 0
+								: attribute == engine::scene::EditablePackingAttribute::Normal ? 1
+																							   : 2;
+		CHECK(packed.Streams[selected].Format == engine::render::PackedMeshFormat::Unsigned4);
+		for (size_t stream = 0; stream < packed.Streams.size(); ++stream)
+			if (stream != selected)
+				CHECK(packed.Streams[stream].Format == engine::render::PackedMeshFormat::Float32);
+	}
+
+	mesh.Packing.Attributes =
+		engine::scene::EditablePackingAttribute::Colour | engine::scene::EditablePackingAttribute::Alpha;
+	const auto packed = engine::render::BuildPackedMeshData(mesh);
+	REQUIRE(packed.IsValid());
+	REQUIRE(packed.Submeshes.size() == 1);
+	CHECK(packed.Submeshes[0].BaseColour[0] == Approx(3.0f / 15.0f));
+	CHECK(packed.Submeshes[0].BaseColour[3] == Approx(1.0f - 4.0f / 15.0f));
+}
+
+TEST_CASE("packed editable streams keep odd codec tails", "[render][editablemeshes]") {
+	EditableMesh mesh = PackingTriangle();
+	mesh.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	for (const auto &[format, expected] : std::array{
+			 std::pair{engine::scene::EditablePackingFormat::Float16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Float8E4M3FN, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned16, size_t{18}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed8, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned8, size_t{9}},
+			 std::pair{engine::scene::EditablePackingFormat::Signed4, size_t{5}},
+			 std::pair{engine::scene::EditablePackingFormat::Unsigned4, size_t{5}},
+			 std::pair{engine::scene::EditablePackingFormat::Boolean, size_t{2}},
+		 }) {
+		mesh.Packing.Format = format;
+		const auto packed = engine::render::BuildPackedMeshData(mesh);
+		REQUIRE(packed.IsValid());
+		CHECK(packed.Streams[0].ByteCount == expected);
+		CHECK(packed.Vertices.size() < mesh.Positions.size() * sizeof(engine::assets::MeshVertex));
+	}
 }

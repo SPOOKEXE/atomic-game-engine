@@ -11,13 +11,16 @@
 namespace engine::render {
 
 	EditableImagePackingSupport EditableImagePackingSupportOf(const engine::scene::EditableImage &image) {
-		if (image.Packing.Format == engine::scene::EditablePackingFormat::Float32)
-			return EditableImagePackingSupport::NativeRGBA8;
 		constexpr uint8_t imageAttributes =
 			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour) |
 			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Alpha);
 		if (image.Packing.Attributes == 0 || (image.Packing.Attributes & ~imageAttributes) != 0)
-			return EditableImagePackingSupport::UnsupportedAttributes;
+			return image.Packing.Attributes == 0 &&
+						   image.Packing.Format == engine::scene::EditablePackingFormat::Float32
+					   ? EditableImagePackingSupport::NativeRGBA8
+					   : EditableImagePackingSupport::UnsupportedAttributes;
+		if (image.Packing.Format == engine::scene::EditablePackingFormat::Float32)
+			return EditableImagePackingSupport::NativeRGBA8;
 		return EditableImagePackingSupport::UnsupportedFormat;
 	}
 
@@ -53,15 +56,20 @@ namespace engine::render {
 
 		store.Each<const engine::scene::EditableImage>([&](engine::ecs::Entity entity,
 														   const engine::scene::EditableImage &image) {
+			const UploadScope::Revision revision{image.Revision, image.Packing.Revision};
 			const auto found = uploadedRevisions.find(entity.Id);
-			if (found != uploadedRevisions.end() && found->second == image.Revision) {
+			if (found != uploadedRevisions.end() && found->second == revision) {
+				return;
+			}
+			if (EditableImagePackingSupportOf(image) != EditableImagePackingSupport::NativeRGBA8) {
+				uploadedRevisions[entity.Id] = revision;
 				return;
 			}
 
 			const engine::assets::TextureData built = BuildTextureData(image);
 			const engine::core::Name name = engine::scene::EditableImageContentName(store, entity);
 			if (renderer.AddTexture(name, built, owner)) {
-				uploadedRevisions[entity.Id] = image.Revision;
+				uploadedRevisions[entity.Id] = revision;
 				uploaded++;
 			}
 		});

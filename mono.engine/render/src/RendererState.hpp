@@ -338,11 +338,21 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *HdrWireframeOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrWireframeTransparentPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *ForwardPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedForwardPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedGBufferPipeline = nullptr;
 
 		// The two above, redrawn as lines. See where they are created for why
 		// there are two objects and not a bindable state.
 		SDL_GPUGraphicsPipeline *WireframeOpaquePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *WireframeTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedWireframeOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedWireframeTransparentPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrWireframeOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedHdrWireframeTransparentPipeline = nullptr;
 
 		// Whether `BindPipeline` should hand out the pair above instead of the
 		// ordinary two. Off unless a caller has asked - `Renderer::
@@ -366,6 +376,8 @@ namespace engine::render {
 		bool EnsureColourCompose();
 		SDL_GPUGraphicsPipeline *TransparentLayerPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TransparentLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedTransparentLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedTransparentLayerColourPipeline = nullptr;
 		bool EnsureTransparentLayer();
 		SDL_GPUGraphicsPipeline *InterfaceLayerPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *InterfaceLayerColourPipeline = nullptr;
@@ -591,6 +603,10 @@ namespace engine::render {
 			SDL_GPUGraphicsPipeline *Transparent = nullptr;
 			SDL_GPUGraphicsPipeline *HdrOpaque = nullptr;
 			SDL_GPUGraphicsPipeline *HdrTransparent = nullptr;
+			SDL_GPUGraphicsPipeline *PackedOpaque = nullptr;
+			SDL_GPUGraphicsPipeline *PackedTransparent = nullptr;
+			SDL_GPUGraphicsPipeline *PackedHdrOpaque = nullptr;
+			SDL_GPUGraphicsPipeline *PackedHdrTransparent = nullptr;
 		};
 
 		// A material name resolves within its residency owner.
@@ -635,6 +651,7 @@ namespace engine::render {
 		// from the file would be two objects for one shader, free to disagree
 		// the day `opaque.vert` changes shape.
 		SDL_GPUShader *OpaqueVertexShader = nullptr;
+		SDL_GPUShader *PackedOpaqueVertexShader = nullptr;
 
 		// The two descriptors a variant is derived from, kept whole.
 		//
@@ -1900,6 +1917,7 @@ namespace engine::render {
 		// buffer** the colour pass binds, which is what makes a shadow map one
 		// more draw over data that is already on the device.
 		SDL_GPUGraphicsPipeline *ShadowPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *PackedMeshShadowPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedShadowPipeline = nullptr;
 		SDL_GPUTexture *ShadowTexture = nullptr;
 		SDL_GPUSampler *ShadowSampler = nullptr;
@@ -2447,6 +2465,7 @@ namespace engine::render {
 		// @return The pipeline, or null for no shader, an unknown one, or a
 		//         family with no variants.
 		SDL_GPUGraphicsPipeline *VariantFor(const core::Name &shader, core::Name owner) const;
+		SDL_GPUGraphicsPipeline *PackedVariantFor(const core::Name &shader, core::Name owner) const;
 
 		enum class SlotSelection : uint8_t {
 			All,

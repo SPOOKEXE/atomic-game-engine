@@ -86,6 +86,67 @@ namespace engine::render {
 		// call somebody else's fragment shader.
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
+		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
+			if (native == OpaquePipeline) return PackedOpaquePipeline;
+			if (native == ForwardPipeline) return PackedForwardPipeline;
+			if (native == TransparentPipeline) return PackedTransparentPipeline;
+			if (native == WireframeOpaquePipeline) return PackedWireframeOpaquePipeline;
+			if (native == WireframeTransparentPipeline) return PackedWireframeTransparentPipeline;
+			if (native == HdrOpaquePipeline) return PackedHdrOpaquePipeline;
+			if (native == HdrTransparentPipeline) return PackedHdrTransparentPipeline;
+			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
+			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
+			if (native == GBufferPipeline) return PackedGBufferPipeline;
+			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
+			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
+			if (native == TransparentLayerColourPipeline) return PackedTransparentLayerColourPipeline;
+			return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);
+		};
+		struct PackedDescriptor {
+			std::array<uint32_t, 4> Position;
+			std::array<uint32_t, 4> Normal;
+			std::array<uint32_t, 4> UV;
+			std::array<float, 4> PositionRange;
+			std::array<float, 4> NormalRange;
+			std::array<float, 4> UVRange;
+		};
+		const auto bindMesh = [&](const MeshEntry &mesh,
+								  SDL_GPUGraphicsPipeline *native,
+								  const core::Name &shader,
+								  core::Name owner) {
+			SDL_GPUGraphicsPipeline *want = native;
+			if (mesh.Packed) {
+				SDL_GPUGraphicsPipeline *variant = PackedVariantFor(shader, owner);
+				want = variant != nullptr ? variant : packedPipeline(base);
+			}
+			if (want == nullptr) return false;
+			if (want != bound) {
+				SDL_BindGPUGraphicsPipeline(pass, want);
+				bound = want;
+			}
+			if (!mesh.Packed) return true;
+			SDL_GPUBuffer *packed = Meshes.PackedVertices();
+			if (packed == nullptr) return false;
+			SDL_BindGPUVertexStorageBuffers(pass, 4, &packed, 1);
+			const auto words = [](const PackedMeshStream &stream) {
+				return std::array<uint32_t, 4>{
+					stream.ByteOffset,
+					stream.ValueCount,
+					static_cast<uint32_t>(stream.Format),
+					stream.Components,
+				};
+			};
+			const PackedDescriptor descriptor{
+				words(mesh.PackedStreams[0]),
+				words(mesh.PackedStreams[1]),
+				words(mesh.PackedStreams[2]),
+				{mesh.PackedStreams[0].Minimum, mesh.PackedStreams[0].Maximum, 0.0f, 0.0f},
+				{mesh.PackedStreams[1].Minimum, mesh.PackedStreams[1].Maximum, 0.0f, 0.0f},
+				{mesh.PackedStreams[2].Minimum, mesh.PackedStreams[2].Maximum, 0.0f, 0.0f},
+			};
+			SDL_PushGPUVertexUniformData(command, 1, &descriptor, sizeof(descriptor));
+			return true;
+		};
 		if (lighting == nullptr) {
 			const SDL_GPUTextureSamplerBinding defaultSampler{
 				Textures.Default() != nullptr ? Textures.Default() : FallbackTexture,
@@ -368,7 +429,7 @@ namespace engine::render {
 
 				const core::Name shader = SlotShader[slot];
 				bool resolvedBeforeGBuffer = false;
-				if (ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
+				if (!baseMesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
 					const auto authored =
 						ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
 					resolvedBeforeGBuffer =
@@ -380,11 +441,7 @@ namespace engine::render {
 				}
 
 				SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader, SlotContentOwner[slot]);
-				SDL_GPUGraphicsPipeline *const want = wanted != nullptr ? wanted : base;
-				if (want != bound && want != nullptr) {
-					SDL_BindGPUGraphicsPipeline(pass, want);
-					bound = want;
-				}
+				SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
 
 				BindInstanceBuffers(pass, Lod.Indices, Lod.Instances, Lod.SkinOffsets);
 				const LodDraw &draw = LodFrame.Draws[lodIndex];
@@ -392,6 +449,7 @@ namespace engine::render {
 				for (uint32_t level = 0; level < draw.LevelCount; ++level) {
 					const LodDrawLevel &levelDraw = draw.Levels[level];
 					const MeshEntry &mesh = *levelDraw.Mesh;
+					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot])) continue;
 					uint32_t lodArgument = levelDraw.FirstArgument;
 					const auto issue = [&](const MeshRange &range,
 										   const core::Name &texture,
@@ -462,7 +520,7 @@ namespace engine::render {
 					? (slotRun < indirect->RunDraws->size() ? (*indirect->RunDraws)[slotRun] : 0u)
 					: run;
 			bool resolvedBeforeGBuffer = false;
-			if (ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
+			if (!mesh->Packed && ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
 				const auto authored = ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
 				resolvedBeforeGBuffer =
 					authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
@@ -478,10 +536,11 @@ namespace engine::render {
 			// custom shaders never enters this branch, and one where every part
 			// wears the same one binds twice: once here and once on the way out.
 			SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader, SlotContentOwner[slot]);
-			SDL_GPUGraphicsPipeline *const want = wanted != nullptr ? wanted : base;
-			if (want != bound && want != nullptr) {
-				SDL_BindGPUGraphicsPipeline(pass, want);
-				bound = want;
+			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
+			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot])) {
+				slotRun++;
+				slot += run;
+				continue;
 			}
 
 			if (mesh->Runs.empty()) {

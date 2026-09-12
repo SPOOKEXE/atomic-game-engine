@@ -11,6 +11,7 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/render/MeshTable.hpp>
 
 #include <cstddef>
 #include <unordered_map>
@@ -45,6 +46,7 @@ namespace engine::render {
 	//         right after `Instance.new("EditableMesh")`.
 	// @since v0.18
 	engine::assets::MeshData BuildMeshData(const engine::scene::EditableMesh &mesh);
+	PackedMeshData BuildPackedMeshData(const engine::scene::EditableMesh &mesh);
 	// Uploads every `scene::EditableMesh` whose revision has moved since the
 	// last call.
 	//
@@ -73,7 +75,13 @@ namespace engine::render {
 		struct UploadScope {
 			uint64_t World = 0;
 			core::Name Owner;
-			std::unordered_map<uint64_t, uint32_t> Revisions;
+			struct Revision {
+				uint32_t Mesh = 0;
+				uint32_t Packing = 0;
+
+				bool operator==(const Revision &) const = default;
+			};
+			std::unordered_map<uint64_t, Revision> Revisions;
 		};
 		std::vector<UploadScope> Scopes;
 	};

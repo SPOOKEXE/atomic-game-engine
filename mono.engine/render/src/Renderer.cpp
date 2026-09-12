@@ -813,7 +813,20 @@ namespace engine::render {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeTransparentPipeline);
 		}
 		for (SDL_GPUGraphicsPipeline *pipeline :
-			 {State->HdrParticlePipeline,
+			 {State->PackedOpaquePipeline,
+			  State->PackedForwardPipeline,
+			  State->PackedTransparentPipeline,
+			  State->PackedWireframeOpaquePipeline,
+			  State->PackedWireframeTransparentPipeline,
+			  State->PackedHdrOpaquePipeline,
+			  State->PackedHdrTransparentPipeline,
+			  State->PackedHdrWireframeOpaquePipeline,
+			  State->PackedHdrWireframeTransparentPipeline,
+			  State->PackedGBufferPipeline,
+			  State->PackedMeshShadowPipeline,
+			  State->PackedTransparentLayerPipeline,
+			  State->PackedTransparentLayerColourPipeline,
+			  State->HdrParticlePipeline,
 			  State->HdrAdditiveParticlePipeline,
 			  State->HdrRibbonPipeline,
 			  State->HdrAdditiveRibbonPipeline,
@@ -1171,6 +1184,13 @@ namespace engine::render {
 		// `MeshExtentOf` and the parts waiting to be sized by it are unaffected.
 		//
 		if (!State->Meshes.Add(name, mesh, owner)) return false;
+		++State->ResourceEpoch;
+		return true;
+	}
+
+	bool Renderer::AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner) {
+		if (State == nullptr || State->Device == nullptr) return false;
+		if (!State->Meshes.AddPacked(name, mesh, owner)) return false;
 		++State->ResourceEpoch;
 		return true;
 	}

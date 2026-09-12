@@ -143,6 +143,8 @@ namespace engine::scene {
 	// @return `false` for an invalid image or malformed byte count.
 	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels);
 
+	bool SetEditableImagePacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing);
+
 	// Fills an axis-aligned rectangle, clipped to the image.
 	//
 	// **Over, not replace.** `transparency` blends this colour over what is

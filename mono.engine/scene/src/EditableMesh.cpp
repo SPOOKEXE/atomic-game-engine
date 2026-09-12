@@ -1,3 +1,5 @@
+#include "EditablePackingProperties.hpp"
+
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/FrameGraph.hpp>
@@ -195,6 +197,8 @@ namespace engine::scene {
 			ecs::Classes::Computed(editableMesh, VertexCountProperty());
 			ecs::Classes::Computed(editableMesh, TriangleCountProperty());
 			ecs::Classes::Computed(editableMesh, MeshContentIdProperty());
+			for (auto &property : detail::PackingProperties<EditableMesh, SetEditableMeshPacking>())
+				ecs::Classes::Computed(editableMesh, std::move(property));
 			return editableMesh;
 		}
 	}
@@ -675,6 +679,30 @@ namespace engine::scene {
 		mesh->Alphas.clear();
 		mesh->Indices.clear();
 		mesh->Signature = 0;
+		mesh->Revision++;
+		return true;
+	}
+
+	bool SetEditableMeshPacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing) {
+		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
+		constexpr uint8_t attributes = static_cast<uint8_t>(EditablePackingAttribute::Position) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Normal) |
+									   static_cast<uint8_t>(EditablePackingAttribute::UV) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Colour) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Alpha);
+		if (mesh == nullptr ||
+			static_cast<uint8_t>(packing.Format) > static_cast<uint8_t>(EditablePackingFormat::Boolean) ||
+			(packing.Attributes & ~attributes) != 0 || !std::isfinite(packing.Minimum) ||
+			!std::isfinite(packing.Maximum) || packing.Maximum < packing.Minimum)
+			return false;
+		if (mesh->Packing.Attributes == packing.Attributes && mesh->Packing.Format == packing.Format &&
+			mesh->Packing.Minimum == packing.Minimum && mesh->Packing.Maximum == packing.Maximum)
+			return true;
+		mesh->Packing.Attributes = packing.Attributes;
+		mesh->Packing.Format = packing.Format;
+		mesh->Packing.Minimum = packing.Minimum;
+		mesh->Packing.Maximum = packing.Maximum;
+		mesh->Packing.Revision++;
 		mesh->Revision++;
 		return true;
 	}

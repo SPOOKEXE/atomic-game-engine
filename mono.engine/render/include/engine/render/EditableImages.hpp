@@ -84,7 +84,13 @@ namespace engine::render {
 		struct UploadScope {
 			uint64_t World = 0;
 			core::Name Owner;
-			std::unordered_map<uint64_t, uint32_t> Revisions;
+			struct Revision {
+				uint32_t Image = 0;
+				uint32_t Packing = 0;
+
+				bool operator==(const Revision &) const = default;
+			};
+			std::unordered_map<uint64_t, Revision> Revisions;
 		};
 		std::vector<UploadScope> Scopes;
 	};

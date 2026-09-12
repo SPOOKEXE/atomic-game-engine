@@ -494,3 +494,22 @@ TEST_CASE("a mesh with no triangles yet bakes nothing", "[scene][editablemesh]")
 	(void)AddTriangle(store, mesh, 0, 1, 2);
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 }
+
+TEST_CASE("editable mesh packing changes use one validated authoring door", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+	Store store("editablemesh.packing");
+	const Entity mesh = MakeQuad(store);
+	engine::scene::EditablePacking policy;
+	policy.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	policy.Format = engine::scene::EditablePackingFormat::Unsigned8;
+	const uint32_t before = store.Get<engine::scene::EditableMesh>(mesh)->Revision;
+	REQUIRE(engine::scene::SetEditableMeshPacking(store, mesh, policy));
+	const auto *changed = store.Get<engine::scene::EditableMesh>(mesh);
+	REQUIRE(changed != nullptr);
+	CHECK(changed->Revision == before + 1);
+	CHECK(changed->Packing.Revision == 1);
+	CHECK(engine::scene::SetEditableMeshPacking(store, mesh, policy));
+	CHECK(store.Get<engine::scene::EditableMesh>(mesh)->Revision == before + 1);
+	policy.Attributes = 0xff;
+	CHECK_FALSE(engine::scene::SetEditableMeshPacking(store, mesh, policy));
+}

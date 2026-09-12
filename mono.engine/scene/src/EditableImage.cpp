@@ -1,3 +1,5 @@
+#include "EditablePackingProperties.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -11,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <string>
+#include <utility>
 
 namespace engine::scene {
 
@@ -121,6 +124,8 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(editableImage, SizeProperty());
 			ecs::Classes::Computed(editableImage, ContentIdProperty());
+			for (auto &property : detail::PackingProperties<EditableImage, SetEditableImagePacking>())
+				ecs::Classes::Computed(editableImage, std::move(property));
 			return editableImage;
 		}
 	}
@@ -184,6 +189,27 @@ namespace engine::scene {
 		std::transform(pixels.begin(), pixels.end(), image->Pixels.begin(), [](std::byte byte) {
 			return std::to_integer<uint8_t>(byte);
 		});
+		image->Revision++;
+		return true;
+	}
+
+	bool SetEditableImagePacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing) {
+		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		constexpr uint8_t attributes = static_cast<uint8_t>(EditablePackingAttribute::Colour) |
+									   static_cast<uint8_t>(EditablePackingAttribute::Alpha);
+		if (image == nullptr ||
+			static_cast<uint8_t>(packing.Format) > static_cast<uint8_t>(EditablePackingFormat::Boolean) ||
+			(packing.Attributes & ~attributes) != 0 || !std::isfinite(packing.Minimum) ||
+			!std::isfinite(packing.Maximum) || packing.Maximum < packing.Minimum)
+			return false;
+		if (image->Packing.Attributes == packing.Attributes && image->Packing.Format == packing.Format &&
+			image->Packing.Minimum == packing.Minimum && image->Packing.Maximum == packing.Maximum)
+			return true;
+		image->Packing.Attributes = packing.Attributes;
+		image->Packing.Format = packing.Format;
+		image->Packing.Minimum = packing.Minimum;
+		image->Packing.Maximum = packing.Maximum;
+		image->Packing.Revision++;
 		image->Revision++;
 		return true;
 	}

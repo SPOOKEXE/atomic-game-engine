@@ -277,3 +277,19 @@ TEST_CASE("the content name is stable and distinct per instance", "[scene][edita
 	CHECK(nameA != nameB);
 	CHECK(EditableImageContentName(store, a) == nameA);
 }
+
+TEST_CASE("editable image packing authoring validates attributes and revisions", "[scene][editableimage]") {
+	engine::scene::RegisterSceneComponents();
+	Store store("editableimage.packing");
+	const Entity image = MakeEditableImage(store);
+	engine::scene::EditablePacking policy;
+	policy.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour);
+	policy.Format = engine::scene::EditablePackingFormat::Unsigned4;
+	REQUIRE(engine::scene::SetEditableImagePacking(store, image, policy));
+	const auto *changed = store.Get<engine::scene::EditableImage>(image);
+	REQUIRE(changed != nullptr);
+	CHECK(changed->Revision == 1);
+	CHECK(changed->Packing.Revision == 1);
+	policy.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	CHECK_FALSE(engine::scene::SetEditableImagePacking(store, image, policy));
+}

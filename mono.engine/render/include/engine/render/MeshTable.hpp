@@ -46,6 +46,41 @@ namespace engine::render {
 		int32_t VertexOffset = 0;
 	};
 
+	enum class PackedMeshFormat : uint32_t {
+		Float32,
+		Float16,
+		Float8E4M3FN,
+		Signed16,
+		Unsigned16,
+		Signed8,
+		Unsigned8,
+		Signed4,
+		Unsigned4,
+		Boolean,
+	};
+
+	struct PackedMeshStream {
+		uint32_t ByteOffset = 0;
+		uint32_t ByteCount = 0;
+		uint32_t ValueCount = 0;
+		uint32_t Components = 0;
+		PackedMeshFormat Format = PackedMeshFormat::Float32;
+		float Minimum = 0.0f;
+		float Maximum = 1.0f;
+	};
+
+	struct PackedMeshData {
+		std::vector<std::byte> Vertices;
+		std::vector<uint32_t> Indices;
+		std::vector<assets::Submesh> Submeshes;
+		std::array<PackedMeshStream, 3> Streams;
+		core::Vector3 Minimum;
+		core::Vector3 Maximum;
+		uint32_t VertexCount = 0;
+
+		bool IsValid() const;
+	};
+
 	// One registered mesh.
 	//
 	// @client
@@ -100,6 +135,11 @@ namespace engine::render {
 
 		// Number of palette entries a skinned instance must provide.
 		uint16_t JointCount = 0;
+
+		bool Packed = false;
+		uint32_t PackedByteOffset = 0;
+		uint32_t PackedByteCount = 0;
+		std::array<PackedMeshStream, 3> PackedStreams;
 	};
 
 	// The meshes a renderer can draw.
@@ -165,6 +205,7 @@ namespace engine::render {
 		// @param mesh The geometry. An invalid one is refused.
 		// @return `false` for an invalid mesh or a table that would overflow.
 		bool Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		bool AddPacked(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
 
 		// Uploads whatever `Add` has accumulated.
 		//
@@ -211,6 +252,9 @@ namespace engine::render {
 		size_t PendingIndexCount() const {
 			return Total(DirtyIndices);
 		}
+		size_t PendingPackedByteCount() const {
+			return Total(DirtyPackedBytes);
+		}
 
 		// How many host slots are owned by nobody, waiting to be reused.
 		//
@@ -233,6 +277,15 @@ namespace engine::render {
 		}
 		size_t HostIndexCount() const {
 			return HostIndices.size();
+		}
+		size_t HostPackedByteCount() const {
+			return HostPackedVertices.size();
+		}
+		size_t PackedResidentBytes() const {
+			return PackedCapacity;
+		}
+		size_t UploadedPackedBytes() const {
+			return PackedUploadBytes;
 		}
 		//@}
 		//@}
@@ -266,6 +319,9 @@ namespace engine::render {
 		SDL_GPUBuffer *Indices() const {
 			return IndexBuffer;
 		}
+		SDL_GPUBuffer *PackedVertices() const {
+			return PackedVertexBuffer;
+		}
 		//@}
 
 	  private:
@@ -274,11 +330,14 @@ namespace engine::render {
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUBuffer *VertexBuffer = nullptr;
 		SDL_GPUBuffer *IndexBuffer = nullptr;
+		SDL_GPUBuffer *PackedVertexBuffer = nullptr;
 
 		// What is on the device, so a growth is a re-create rather than a
 		// re-create every time.
 		size_t VertexCapacity = 0;
 		size_t IndexCapacity = 0;
+		size_t PackedCapacity = 0;
+		size_t PackedUploadBytes = 0;
 
 		// Device uploads performed. See `UploadCount`.
 		size_t Uploads = 0;
@@ -317,6 +376,7 @@ namespace engine::render {
 		//@{
 		std::vector<FreeBlock> FreeVertices;
 		std::vector<FreeBlock> FreeIndices;
+		std::vector<FreeBlock> FreePackedBytes;
 		//@}
 
 		// What `Add` has written that `Upload` has not sent, in offset order.
@@ -327,6 +387,7 @@ namespace engine::render {
 		//@{
 		std::vector<Span> DirtyVertices;
 		std::vector<Span> DirtyIndices;
+		std::vector<Span> DirtyPackedBytes;
 		//@}
 
 		// Takes `count` contiguous slots from a free list, or `NOWHERE`.
@@ -351,6 +412,7 @@ namespace engine::render {
 
 		std::vector<assets::MeshVertex> HostVertices;
 		std::vector<uint32_t> HostIndices;
+		std::vector<std::byte> HostPackedVertices;
 		std::unordered_map<uint64_t, MeshEntry> Entries;
 		MeshEntry Fallback;
 		bool Dirty = false;

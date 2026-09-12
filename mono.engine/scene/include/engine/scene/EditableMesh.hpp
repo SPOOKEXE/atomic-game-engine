@@ -331,6 +331,8 @@ namespace engine::scene {
 	// @since v0.18
 	bool ClearEditableMesh(ecs::Store &store, ecs::Entity instance);
 
+	bool SetEditableMeshPacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing);
+
 	// The `EditableMesh` class id, registering the tree if nobody has yet.
 	//
 	// @return The class id.

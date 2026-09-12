@@ -33,6 +33,23 @@ using engine::render::MeshEntry;
 using engine::render::MeshTable;
 
 namespace {
+	engine::render::PackedMeshData PackedTriangle() {
+		engine::render::PackedMeshData mesh;
+		mesh.VertexCount = 3;
+		mesh.Indices = {0, 1, 2};
+		mesh.Minimum = {0, 0, 0};
+		mesh.Maximum = {1, 1, 0};
+		mesh.Vertices.resize(20);
+		mesh.Streams = {
+			engine::render::PackedMeshStream{0, 5, 9, 3, engine::render::PackedMeshFormat::Unsigned4, 0, 1},
+			engine::render::PackedMeshStream{8, 5, 9, 3, engine::render::PackedMeshFormat::Unsigned4, 0, 1},
+			engine::render::PackedMeshStream{16, 3, 6, 2, engine::render::PackedMeshFormat::Unsigned4, 0, 1},
+		};
+		return mesh;
+	}
+}
+
+namespace {
 	// A mesh with a box that is not the unit one, so `Extent` and `Centre` are
 	// distinguishable from their defaults.
 	MeshData Offset(const MeshData &source, float shift) {
@@ -59,6 +76,25 @@ TEST_CASE("adding a mesh registers it without touching the device", "[render][me
 	CHECK(table.UploadCount() == 0);
 	CHECK(table.PendingVertexCount() == cube.Vertices.size());
 	CHECK(table.PendingIndexCount() == cube.Indices.size());
+}
+
+TEST_CASE(
+	"packed mesh bytes stay compact through host residency and upload planning", "[render][meshtable]"
+) {
+	MeshTable table;
+	const auto packed = PackedTriangle();
+	REQUIRE(packed.IsValid());
+	REQUIRE(table.AddPacked(Name("test.Packed"), packed));
+	CHECK(table.PendingVertexCount() == 0);
+	CHECK(table.PendingPackedByteCount() == packed.Vertices.size());
+	CHECK(table.HostPackedByteCount() == packed.Vertices.size());
+	CHECK(table.HostPackedByteCount() < packed.VertexCount * sizeof(engine::assets::MeshVertex));
+	CHECK(table.PackedResidentBytes() == 0);
+	CHECK(table.UploadedPackedBytes() == 0);
+	const MeshEntry &entry = table.Resolve(Name("test.Packed"));
+	CHECK(entry.Packed);
+	CHECK(entry.Whole.VertexOffset == 0);
+	CHECK(entry.PackedStreams[1].ByteOffset == 8);
 }
 
 TEST_CASE("mesh owners isolate replacement and defer retired range reuse", "[render][meshtable]") {

@@ -29,7 +29,8 @@ TEST_CASE(
 TEST_CASE("every editable packing format round trips within its declared error", "[scene][editablepacking]") {
 	const std::array<float, 5> values{-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
 	for (const auto format :
-		 {EditablePackingFormat::Float16,
+		 {EditablePackingFormat::Float32,
+		  EditablePackingFormat::Float16,
 		  EditablePackingFormat::Float8E4M3FN,
 		  EditablePackingFormat::Signed16,
 		  EditablePackingFormat::Unsigned16,
