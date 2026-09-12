@@ -102,20 +102,22 @@ marked in the result. The result uses one of these structured outcomes:
 | `capability_unsupported` | Select a negotiated fallback or reject the sample. |
 | `validation_failed` | Correct typed arguments or script output. No world mutation occurred. |
 | `resource_limit` | Reduce declared bounds or defer work. |
-| `cancelled_before_step` | No tick advanced. Retry is safe with the same operation ID. |
+| `cancelled_before_step` | No tick advanced. Check status, then use a new operation ID to resubmit. |
 | `cancelled_after_step` | Result reports completed tick range and partial resources. Reconcile before continuing. |
 | `readback_failed` | Simulation may have advanced, but no promised artifact exists. Never blindly retry the step. |
 | `restore_incomplete` | Downgrade or reject according to requested determinism grade. |
 
-The idempotency ledger stores operation ID, canonical argument hash, result, and
-resource references. The same ID with the same arguments returns the stored
-result; the same ID with different arguments fails. A transport timeout is
-recovered with `get_request_status`, not a blind second mutation.
+The idempotency ledger is scoped by instance, episode, and world epoch. It stores
+operation ID, canonical argument hash, result, and resource references. The same
+ID with the same arguments returns the stored result; the same ID with different
+arguments fails. A delayed request from an older epoch is rejected. A transport
+timeout is recovered with `get_request_status`, not a blind second mutation.
 
-`capture`, checkpoint, and resource export can be cancelled before GPU work starts.
-Once simulation advances, cancellation reports the exact completed range and the
-resource state. A failed asynchronous readback does not rewind a successfully
-completed step and does not license another step under the old expected tick.
+`reset_world` is never auto-retried. `capture`, checkpoint, and resource export
+can be cancelled before GPU work starts. A cancelled request remains the stored
+result for its operation ID. Once simulation advances, cancellation reports the
+exact completed range and resource state. A failed asynchronous readback does not
+rewind a completed step or license another step under the old expected tick.
 
 ## Luau and image buffers
 
@@ -126,9 +128,11 @@ pixels after exact-length validation. It does not create an image from arbitrary
 dimensions, variable stride, or guessed color space.
 
 The value is a Luau binary `buffer`, not a JSON list of bytes. Its descriptor
-states dimensions, RGBA order, alpha convention, and color encoding outside the
-raw bytes. `WritePixels` and `FromBuffer` modify in-memory image state only. A
-capture or resource write materializes a durable artifact.
+states dimensions, RGBA order, top-left row order, straight-alpha convention, and
+color encoding outside the raw bytes. Typed float captures are separate resource
+formats, never silently converted through RGBA8. `WritePixels` and `FromBuffer`
+modify in-memory image state only. A capture or resource write materializes a
+durable artifact.
 
 For replay, scripts must use named session RNG streams and an explicit
 replayable-state protocol. Participating scripts serialize and restore declared
@@ -199,8 +203,9 @@ commonly prevents a scene hash from promising pixel-identical output.
 An exact `simulation` checkpoint includes solver warm-start caches when they
 affect later physics, scheduled work queues, timer and clock state, script
 protocol state, episode and world epoch, and all named RNG stream positions.
-If a cache is deliberately rebuilt, the report says so and the level cannot
-advertise exact continuation unless a validation proves the declared tolerance.
+If a cache is deliberately rebuilt, the report says so. Exact continuation then
+requires byte-equivalent replay; otherwise the level is only validated and names
+its comparison tolerance.
 
 ## Atomic multi-camera observations
 
@@ -345,6 +350,13 @@ offscreen rendering may require a device, shader cache, texture residency, and
 asynchronous readback budget. The factory records which path produced every
 artifact and rejects a requested render channel when that path cannot supply it.
 
+Interop is declared as defined subsets, never a universal round trip. glTF and
+USD exports name supported scene, material, animation, camera, and extension
+subsets. COCO, YOLO, GeoJSON, and WKT exports use sidecars for stable string
+names, coordinate units, camera conventions, class labels, masks, and temporal
+references. Each export writes a loss report for properties its target cannot
+preserve.
+
 ## Proposed external factory workflow
 
 This is pseudocode for a `datafactories` package. Local collector functions are
@@ -360,14 +372,15 @@ execute_luau(spec.setup_source, target="edit", operation_id=setup_hash)
 assert_ready_external(spec.readiness, caps)
 
 clock = get_current_tick_external_from_last_engine_reply()
-pause(instance_id, expected_tick=clock.tick)
+paused = pause(instance_id, expected_tick=clock.tick)
+clock = paused.clock
 base = checkpoint(instance_id)
 snapshot_0 = snapshot(instance_id, components=spec.components, limit=spec.limit)
 captures_0 = capture(instance_id, snapshot_id=snapshot_0.id,
                      cameras=spec.cameras, channels=spec.channels)
 
 for action in spec.fixed_tick_actions:
-    stepped = step(instance_id, dt_ns=spec.fixed_dt_ns, actions=action,
+    stepped = step(instance_id, dt_ns=spec.next_dt(clock.tick), actions=action,
                    expected_tick=clock.tick, operation_id=action.id)
     clock = stepped.clock
     aligned = snapshot(instance_id, components=spec.components, limit=spec.limit)
@@ -379,13 +392,17 @@ for intervention in spec.counterfactuals:
     branch_base = snapshot(instance_id, components=spec.components, limit=spec.limit)
     branch = apply_intervention(instance_id, base_snapshot_id=branch_base.id,
                                 changed_causes=intervention, operation_id=intervention.id)
-    counterfactual = step_and_capture({step_args=branch, capture_args=spec.capture_plan})
+    counterfactual = step_and_capture({
+        step_args={instance_id, dt_ns=spec.next_dt(branch.tick), actions=[],
+                   expected_tick=branch.tick, operation_id=intervention.step_id},
+        capture_args=spec.capture_plan
+    })
 
 for candidate in external_inverse_model(captures_0):
     restore(instance_id, base.id)
     candidate_base = snapshot(instance_id, components=spec.components, limit=spec.limit)
     apply_intervention(instance_id, base_snapshot_id=candidate_base.id,
-                       changed_causes=candidate.scene_patch)
+                       changed_causes=candidate.scene_patch, operation_id=candidate.id)
     candidate_snapshot = snapshot(instance_id, components=spec.components, limit=spec.limit)
     rerender = capture(instance_id, snapshot_id=candidate_snapshot.id,
                        cameras=spec.cameras, channels=spec.inverse_channels)
@@ -452,7 +469,7 @@ complete source provenance and explicit unsupported capabilities.
 | Label alignment | Projection, depth, IDs, masks, flow validity, and requested structured state agree within declared tolerances. |
 | Retry isolation | A repeated operation ID with identical arguments returns stored output; changed arguments fail. |
 | Failure recovery | Readback failure reports completed simulation progress and cannot induce a blind duplicate step. |
-| Artifact durability | Checksummed resources are fetched and manifest finalization succeeds after temporary-world teardown. |
+| Artifact durability | Standard flow finalizes a verified manifest before teardown; a separate retention test proves pinned resources remain fetchable after teardown. |
 | Leakage prevention | A held-out task has an input-evidence list proving hidden, future, and archived-only facts were excluded. |
 
 Profile the supported release configuration, not only development builds. Record
