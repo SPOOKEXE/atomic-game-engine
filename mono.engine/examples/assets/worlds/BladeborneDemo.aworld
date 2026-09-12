@@ -1,0 +1,546 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<World format="3" name="Bladeborne Demo">
+	<WorldProperties tickRate="60" idleTickRate="2" physicsTickRate="60" scriptTickRate="60" replicationTickRate="20" globalSimulatedNetworkLatency="0" faultLimit="3" isolation="Shared" renderingProfile="Default PBR" />
+	<Sources>
+		<Source path="scripts/client/BladeborneHud.client.luau"><![CDATA[--!strict
+-- Bladeborne HUD bootstrap. UI ownership stays in the same widget modules as
+-- BLADEBORNE_UNIFIED/game/src; this scene only supplies local player fixtures.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+
+-- StarterPlayerScripts is copied to the local player before the world starts.
+-- The template may also be selected by a combined host, so one authored HUD wins.
+if StarterGui:FindFirstChild("BladeborneHUD") then
+	return
+end
+
+local Modules = ReplicatedStorage.BladeborneDemo :: any
+local Fusion = require(Modules.Fusion)
+local Data = require(Modules.DemoData)
+local Common = require(Modules.HUDCommon)
+local OnscreenWidget = require(Modules.Widgets.OnscreenWidget)
+local OnscreenButtons = require(Modules.Widgets.OnscreenButtons)
+local MinimapWidget = require(Modules.Widgets.MinimapWidget)
+local TopRightQuestsWidget = require(Modules.Widgets.TopRightQuestsWidget)
+local HotbarWidget = require(Modules.Widgets.HotbarWidget)
+local MusicWidget = require(Modules.Widgets.MusicWidget)
+local TabWidget = require(Modules.Widgets.TabWidget)
+
+local gui = Common.new("ScreenGui", { Name = "BladeborneHUD", ResetOnSpawn = false }) :: ScreenGui
+gui.Parent = StarterGui
+
+local world = Common.frame("WorldBackground", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(42, 49, 52), ZIndex = 0 })
+world.Parent = gui
+local ground = Common.frame("Ground", { Position = UDim2.new(0, 0, 0.42, 0), Size = UDim2.new(1, 0, 0.58, 0), BackgroundColor3 = Color3.fromRGB(67, 75, 77), ZIndex = 0 })
+ground.Parent = world
+for index = 1, 17 do
+	Common.frame("GridH" .. tostring(index), { Position = UDim2.new(0, 0, index * 0.06, 0), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = Color3.fromRGB(42, 48, 51), BackgroundTransparency = 0.25 }).Parent = ground
+end
+for index = 1, 28 do
+	Common.frame("GridV" .. tostring(index), { Position = UDim2.new(index / 28, 0, 0, 0), Size = UDim2.new(0, 1, 1, 0), BackgroundColor3 = Color3.fromRGB(42, 48, 51), BackgroundTransparency = 0.25 }).Parent = ground
+end
+
+local context = { Gui = gui, Data = Data, Fusion = Fusion, HUDCommon = Common }
+local tabWidget = TabWidget.Build(context)
+OnscreenWidget.OpenWidget(context)
+OnscreenButtons.OpenWidget(context, tabWidget)
+MinimapWidget.OpenWidget(context)
+TopRightQuestsWidget.OpenWidget(context)
+HotbarWidget.OpenWidget(context)
+MusicWidget.OpenWidget(context)
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/DemoData.luau"><![CDATA[--!strict
+-- Local fixture replacing Bladeborne's replicated player, quest and combat data.
+
+local DemoData = {
+	profile = {
+		name = "Spook", initial = "S", level = 2, floor = 0, zone = "FLOOR 0",
+		health = 150, maxHealth = 150, mana = 0, maxMana = 100,
+		experience = 981, maxExperience = 1000, currency = 450, time = "11:38",
+		quest = {
+			name = "Menu Test Quest A",
+			body = "Placeholder quest used to populate the quest menu during UI development.",
+			objective = "Second placeholder step", distance = "2 / 4",
+		},
+		abilities = {
+			{ key = "Q", glyph = "X", name = "Dual Blades", cooldown = "", state = "READY", active = true },
+			{ key = "W", glyph = "*", name = "Star Skill", cooldown = "", state = "READY", active = false },
+			{ key = "R", glyph = "O", name = "Solar Guard", cooldown = "", state = "READY", active = false },
+			{ key = "D", glyph = "+", name = "Recovery", cooldown = "", state = "READY", active = false },
+			{ key = "F", glyph = "A", name = "Ascension", cooldown = "", state = "READY", active = false },
+			{ key = "G", glyph = "C", name = "Cinematic Test", cooldown = "", state = "READY", active = false },
+		},
+	},
+	hotbar = {
+		primary = {
+			{ key = "1", glyph = "S", active = true }, { key = "2", glyph = "B" }, { key = "3", glyph = "F" },
+			{ key = "4", glyph = "W" }, { key = "5", glyph = "A" }, { key = "6", glyph = "L" },
+			{ key = "7", glyph = "C" }, { key = "8", glyph = "*" }, { key = "9", glyph = "!" },
+			{ key = "0", glyph = "H" }, { key = "-", glyph = "" }, { key = "=", glyph = "" },
+		},
+		secondary = {
+			{ key = "U", glyph = "" }, { key = "I", glyph = "" }, { key = "O", glyph = "" },
+			{ key = "P", glyph = "" }, { key = "H", glyph = "" }, { key = "J", glyph = "" },
+			{ key = "K", glyph = "" }, { key = "L", glyph = "" }, { key = "V", glyph = "" },
+			{ key = "B", glyph = "" }, { key = "N", glyph = "" }, { key = "M", glyph = "" },
+		},
+	},
+	effects = {
+		{ glyph = "B", time = "0:48", colour = Color3.fromRGB(243, 192, 89) },
+		{ glyph = "W", time = "2:13", colour = Color3.fromRGB(66, 218, 206) },
+		{ glyph = ">", time = "0:12", colour = Color3.fromRGB(100, 224, 151) },
+	},
+}
+
+return table.freeze(DemoData)
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Fusion.luau"><![CDATA[--!strict
+-- A deliberately small declarative instance builder for authored demo interfaces.
+--
+-- This is the part of Fusion's shape this engine can execute today: construct an
+-- instance, write its properties, parent its children and connect its events.
+-- Reactive observers belong in the engine's eventual UI runtime rather than in
+-- a demo-local scheduler that would need a second answer for invalidation.
+
+local Fusion = {}
+
+export type Properties = { [string]: any }
+
+Fusion.Children = "__fusion_children"
+
+function Fusion.OnEvent(name: string): string
+	return "__fusion_event_" .. name
+end
+
+function Fusion.New(className: string): (Properties) -> Instance
+	return function(properties: Properties): Instance
+		local create = Instance.new :: any
+		local object = create(className) :: Instance
+		local writable = object :: any
+
+		for key, value in properties do
+			if key ~= Fusion.Children and string.sub(key, 1, 15) ~= "__fusion_event_" then
+				writable[key] = value
+			end
+		end
+
+		local children = properties[Fusion.Children]
+		if children ~= nil then
+			for _, child in children do
+				(child :: Instance).Parent = object
+			end
+		end
+
+		for key, callback in properties do
+			if string.sub(key, 1, 15) == "__fusion_event_" then
+				local eventName = string.sub(key, 16)
+				local signal = writable[eventName] :: any
+				signal:Connect(callback)
+			end
+		end
+
+		return object
+	end
+end
+
+return Fusion
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/HUDCommon.luau"><![CDATA[--!strict
+-- Engine adapter for Bladeborne's HUDCommon module. The widget-facing surface
+-- mirrors the source module while local code owns the one demo ScreenGui.
+
+local Fusion = require((script :: any).Parent.Fusion)
+
+local Module = {}
+Module.PALETTE = {
+	bg0 = Color3.fromRGB(5, 6, 8),
+	bg1 = Color3.fromRGB(14, 16, 20),
+	panel = Color3.fromRGB(31, 34, 39),
+	ink = Color3.fromRGB(235, 237, 242),
+	inkDim = Color3.fromRGB(158, 163, 175),
+	accent = Color3.fromRGB(208, 211, 219),
+	gold = Color3.fromRGB(246, 187, 61),
+	danger = Color3.fromRGB(220, 78, 72),
+	success = Color3.fromRGB(105, 230, 168),
+	violet = Color3.fromRGB(168, 145, 255),
+}
+Module.FONT_UI = Enum.Font.Regular
+Module.FONT_MONO = Enum.Font.Code
+Module.FONT_DISPLAY = Enum.Font.Bold
+
+function Module.new(className: string, properties: { [string]: any }): Instance
+	return Fusion.New(className)(properties)
+end
+
+function Module.frame(name: string, properties: { [string]: any }): Frame
+	properties.Name = name
+	properties.BackgroundColor3 = properties.BackgroundColor3 or Module.PALETTE.bg1
+	properties.BorderSizePixel = 0
+	return Module.new("Frame", properties) :: Frame
+end
+
+function Module.label(name: string, properties: { [string]: any }): TextLabel
+	properties.Name = name
+	properties.BackgroundTransparency = properties.BackgroundTransparency or 1
+	properties.Font = properties.Font or Module.FONT_UI
+	properties.TextColor3 = properties.TextColor3 or Module.PALETTE.ink
+	properties.TextSize = properties.TextSize or 13
+	properties.TextXAlignment = properties.TextXAlignment or Enum.TextXAlignment.Left
+	properties.TextYAlignment = properties.TextYAlignment or Enum.TextYAlignment.Center
+	return Module.new("TextLabel", properties) :: TextLabel
+end
+
+function Module.button(name: string, properties: { [string]: any }): TextButton
+	properties.Name = name
+	properties.BackgroundColor3 = properties.BackgroundColor3 or Module.PALETTE.bg1
+	properties.BorderSizePixel = 0
+	properties.Font = properties.Font or Module.FONT_DISPLAY
+	properties.TextColor3 = properties.TextColor3 or Module.PALETTE.ink
+	properties.TextSize = properties.TextSize or 13
+	return Module.new("TextButton", properties) :: TextButton
+end
+
+function Module.stroke(colour: Color3?, transparency: number?, thickness: number?): UIStroke
+	return Module.new("UIStroke", { Color = colour or Module.PALETTE.accent, Transparency = transparency or 0, Thickness = thickness or 1 }) :: UIStroke
+end
+
+function Module.corner(radius: number): UICorner
+	return Module.new("UICorner", { CornerRadius = UDim.new(0, radius) }) :: UICorner
+end
+
+function Module.smoothBar(name: string, width: number, value: number, maximum: number, colour: Color3): Frame
+	return Module.frame(name, {
+		Size = UDim2.new(0, width, 0, 5), BackgroundColor3 = Module.PALETTE.bg0,
+		[Fusion.Children] = {
+			Module.stroke(colour, 0.32, 1),
+			Module.frame("Fill", { Size = UDim2.new(math.clamp(value / maximum, 0, 1), 0, 1, 0), BackgroundColor3 = colour }),
+		},
+	})
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/HotbarWidget.luau"><![CDATA[--!strict
+-- Port of HotbarWidget's 24 slots and Q/W/R plus D/F/G ability clusters.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+local Module = {}
+
+local function buildSlot(index: number, row: number, item: any): Frame
+	return Common.frame("HotbarSlot" .. tostring(index), { Position = UDim2.new(0, (index - 1) * 44, 0, (row - 1) * 47), Size = UDim2.new(0, 44, 0, 46), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.04, [Fusion.Children] = { Common.stroke(if item.active then Common.PALETTE.gold else Common.PALETTE.accent, if item.active then 0 else 0.48, 1), Common.label("Keybind", { Position = UDim2.new(0, 4, 0, 2), Size = UDim2.new(0, 16, 0, 11), Text = item.key, TextColor3 = Common.PALETTE.inkDim, Font = Common.FONT_MONO, TextSize = 9 }), Common.label("Glyph", { Size = UDim2.new(1, 0, 1, 0), Text = item.glyph, TextColor3 = Common.PALETTE.gold, Font = Common.FONT_DISPLAY, TextSize = 24, TextXAlignment = Enum.TextXAlignment.Center }) } })
+end
+
+function Module.OpenWidget(ctx: any)
+	local hotbar = Common.frame("Hotbar", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -14), Size = UDim2.new(0, 528, 0, 94), BackgroundTransparency = 1 })
+	for index, item in ctx.Data.hotbar.primary do buildSlot(index, 1, item).Parent = hotbar end
+	for index, item in ctx.Data.hotbar.secondary do buildSlot(index, 2, item).Parent = hotbar end
+	hotbar.Parent = ctx.Gui
+	local buttons: { TextButton } = {}
+	for index, spec in ctx.Data.profile.abilities do
+		local offset = if index <= 3 then -390 + (index - 1) * 64 else 286 + (index - 4) * 64
+		local ability = Common.button("Ability" .. tostring(index), { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, offset, 1, if index <= 3 then -76 else -68), Size = UDim2.new(0, 56, 0, 56), Text = spec.glyph, TextColor3 = if spec.active then Common.PALETTE.gold else Common.PALETTE.ink, TextSize = 27, BackgroundColor3 = Common.PALETTE.bg0, [Fusion.Children] = { Common.corner(32), Common.stroke(Common.PALETTE.accent, 0.08, 2), Common.label("KeyChip", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, 7), Size = UDim2.new(0, 22, 0, 13), Text = spec.key, BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0, Font = Common.FONT_MONO, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Center }) } })
+		table.insert(buttons, ability)
+		ability.Activated:Connect(function()
+			for otherIndex, other in buttons do other.TextColor3 = if otherIndex == index then Common.PALETTE.gold else Common.PALETTE.ink end
+		end)
+		ability.Parent = ctx.Gui
+	end
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/MinimapWidget.luau"><![CDATA[--!strict
+-- Port of MinimapWidget's square panel, rings and local marker projection.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+local Module = {}
+
+function Module.OpenWidget(ctx: any)
+	local palette = Common.PALETTE
+	local children: { Instance } = { Common.stroke(palette.accent, 0.42, 1) }
+	for index, diameter in { 52, 94, 136, 178 } do
+		children[#children + 1] = Common.frame("Ring" .. tostring(index), { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.60, 0, 0.58, 0), Size = UDim2.new(0, diameter, 0, diameter), BackgroundTransparency = 1, [Fusion.Children] = { Common.corner(999), Common.stroke(palette.accent, 0.82, 1) } })
+	end
+	children[#children + 1] = Common.frame("MapPlayer", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.60, 0, 0.58, 0), Size = UDim2.new(0, 13, 0, 13), BackgroundColor3 = Color3.fromRGB(224, 205, 104), [Fusion.Children] = { Common.corner(12), Common.stroke(palette.bg0, 0, 2) } })
+	for index, point in { { 0.74, 0.47 }, { 0.80, 0.55 }, { 0.69, 0.65 } } do
+		children[#children + 1] = Common.frame("Marker" .. tostring(index), { Position = UDim2.new(point[1], 0, point[2], 0), Size = UDim2.new(0, 7, 0, 7), BackgroundColor3 = palette.danger, [Fusion.Children] = { Common.corner(9) } })
+	end
+	children[#children + 1] = Common.label("ZoneLabel", { Position = UDim2.new(0, 8, 0, 6), Size = UDim2.new(0, 116, 0, 14), Text = "FL Floor" .. tostring(ctx.Data.profile.floor), Font = Common.FONT_MONO, TextSize = 10 })
+	children[#children + 1] = Common.label("ZoomText", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 8, 1, -5), Size = UDim2.new(0, 36, 0, 12), Text = "x1.0", TextColor3 = palette.inkDim, Font = Common.FONT_MONO, TextSize = 9 })
+	children[#children + 1] = Common.label("ClockText", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -8, 1, -5), Size = UDim2.new(0, 40, 0, 12), Text = ctx.Data.profile.time, TextColor3 = palette.inkDim, Font = Common.FONT_MONO, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Right })
+	Common.frame("Minimap", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -22, 0, 30), Size = UDim2.new(0, 200, 0, 170), BackgroundColor3 = palette.bg0, BackgroundTransparency = 0.22, ClipsDescendants = true, [Fusion.Children] = children }).Parent = ctx.Gui
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/MusicWidget.luau"><![CDATA[--!strict
+-- Port of MusicWidget's now-playing pill. Audio playback stays outside this UI demo.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+local Module = {}
+
+function Module.OpenWidget(ctx: any)
+	Common.frame("MusicPill", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -22, 1, -16), Size = UDim2.new(0, 190, 0, 50), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.12, [Fusion.Children] = { Common.stroke(Common.PALETTE.violet, 0.55, 1), Common.label("SongId", { Position = UDim2.new(0, 10, 0, 7), Size = UDim2.new(1, -20, 0, 11), Text = "NOW PLAYING 12857315259747", TextColor3 = Common.PALETTE.inkDim, Font = Common.FONT_MONO, TextSize = 8 }), Common.label("SongTitle", { Position = UDim2.new(0, 10, 0, 20), Size = UDim2.new(1, -20, 0, 16), Text = "Cozy Tavern Fireplace", TextSize = 12 }), Common.label("Duration", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -10, 1, -5), Size = UDim2.new(0, 76, 0, 11), Text = "00:00 / 02:56", TextColor3 = Common.PALETTE.inkDim, Font = Common.FONT_MONO, TextSize = 8, TextXAlignment = Enum.TextXAlignment.Right }) } }).Parent = ctx.Gui
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/OnscreenButtons.luau"><![CDATA[--!strict
+-- Port of OnscreenButtons' left-hand quick-tab cluster.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+local Module = {}
+
+function Module.OpenWidget(ctx: any, tabWidget: any)
+	local root = Common.frame("LeftHexButtons", { Position = UDim2.new(0, 20, 0.5, -62), Size = UDim2.new(0, 50, 0, 220), BackgroundTransparency = 1 })
+	for index, spec in { { "Character", "C", "STATS" }, { "Inventory", "I", "BAG" }, { "Skills", "K", "SKILL" }, { "Social", "S", "PARTY" } } do
+		local quick = Common.button(spec[1], { Position = UDim2.new(0, 0, 0, (index - 1) * 56), Size = UDim2.new(0, 46, 0, 44), Text = spec[2], TextSize = 18, BackgroundColor3 = Common.PALETTE.bg0, [Fusion.Children] = { Common.corner(5), Common.stroke(Common.PALETTE.accent, 0.4, 1), Common.label("KeybindLabel", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 1, 2), Size = UDim2.new(0, 54, 0, 11), Text = spec[3], TextColor3 = Common.PALETTE.inkDim, Font = Common.FONT_MONO, TextSize = 7, TextXAlignment = Enum.TextXAlignment.Center }) } })
+		quick.Activated:Connect(function() tabWidget.OpenTargetTabByName(spec[1]) end)
+		quick.Parent = root
+	end
+	root.Parent = ctx.Gui
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/OnscreenWidget.luau"><![CDATA[--!strict
+-- Port of game/src/.../Widgets/OnscreenWidget.luau with the replicated player
+-- data boundary replaced by the demo fixture.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+
+local Module = {}
+
+function Module.OpenWidget(ctx: any)
+	local p = ctx.Data.profile
+	local palette = Common.PALETTE
+	local root = Common.frame("OnscreenVitals", {
+		Position = UDim2.new(0, 18, 0, 68), Size = UDim2.new(0, 478, 0, 112), BackgroundTransparency = 1,
+		[Fusion.Children] = {
+			Common.frame("Sigil", { Size = UDim2.new(0, 80, 0, 80), BackgroundColor3 = Color3.fromRGB(244, 194, 56), [Fusion.Children] = {
+				Common.stroke(palette.accent, 0, 1),
+				Common.label("PortraitInitial", { Size = UDim2.new(1, 0, 1, 0), Text = p.initial, TextColor3 = palette.bg0, TextSize = 38, Font = Common.FONT_DISPLAY, TextXAlignment = Enum.TextXAlignment.Center }),
+				Common.frame("LevelBadge", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, 0, 1, 0), Size = UDim2.new(0, 48, 0, 22), BackgroundColor3 = palette.bg0, [Fusion.Children] = { Common.stroke(palette.accent, 0, 1), Common.label("Level", { Size = UDim2.new(1, 0, 1, 0), Text = "LVL " .. tostring(p.level), Font = Common.FONT_MONO, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center }) } }),
+			} }),
+			Common.label("PlayerName", { Position = UDim2.new(0, 93, 0, 0), Size = UDim2.new(0, 210, 0, 24), Text = string.upper(p.name), TextSize = 22, Font = Common.FONT_DISPLAY, TextStrokeColor3 = palette.bg0, TextStrokeTransparency = 0.25 }),
+			Common.label("Floor", { Position = UDim2.new(0, 94, 0, 23), Size = UDim2.new(0, 240, 0, 13), Text = "FL " .. tostring(p.floor) .. " / " .. p.zone, TextColor3 = palette.inkDim, TextSize = 10, Font = Common.FONT_MONO }),
+			Common.label("HPLabel", { Position = UDim2.new(0, 94, 0, 38), Size = UDim2.new(0, 30, 0, 14), Text = "HP", TextColor3 = palette.danger, TextSize = 10, Font = Common.FONT_MONO }),
+			Common.label("HPValue", { Position = UDim2.new(0, 425, 0, 38), Size = UDim2.new(0, 52, 0, 14), Text = tostring(p.health) .. "/" .. tostring(p.maxHealth), TextSize = 11, Font = Common.FONT_MONO, TextXAlignment = Enum.TextXAlignment.Right }),
+			Common.label("XPLabel", { Position = UDim2.new(0, 94, 0, 56), Size = UDim2.new(0, 30, 0, 14), Text = "XP", TextColor3 = palette.gold, TextSize = 10, Font = Common.FONT_MONO }),
+			Common.label("XPValue", { Position = UDim2.new(0, 425, 0, 56), Size = UDim2.new(0, 52, 0, 14), Text = string.format("%.1f%%", p.experience / p.maxExperience * 100), TextSize = 11, Font = Common.FONT_MONO, TextXAlignment = Enum.TextXAlignment.Right }),
+		},
+	})
+	local hp = Common.smoothBar("HPBar", 315, p.health, p.maxHealth, palette.danger)
+	hp.Position = UDim2.new(0, 108, 0, 43); hp.Parent = root
+	local xp = Common.smoothBar("XPBar", 315, p.experience, p.maxExperience, palette.gold)
+	xp.Position = UDim2.new(0, 108, 0, 61); xp.Parent = root
+	root.Parent = ctx.Gui
+	Common.label("OnscreenCurrency", { Position = UDim2.new(0, 20, 0, 184), Size = UDim2.new(0, 120, 0, 18), Text = "COL  " .. tostring(p.currency), TextColor3 = palette.gold, TextSize = 13, Font = Common.FONT_MONO }).Parent = ctx.Gui
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/TabWidget.luau"><![CDATA[--!strict
+-- Port of TabWidget and TabWidget/CharacterTab. Other rail choices retain the
+-- shared shell while Character builds the data-backed attributes and equipment.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+local Module = {}
+
+local function statCard(name: string, value: string, bonus: string, x: number, y: number): Frame
+	return Common.frame("Attribute" .. name, { Position = UDim2.new(0, x, 0, y), Size = UDim2.new(0, 130, 0, 82), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.13, [Fusion.Children] = { Common.stroke(Common.PALETTE.accent, 0.45, 1), Common.label("Tag", { Position = UDim2.new(0, 12, 0, 9), Size = UDim2.new(0, 60, 0, 15), Text = name, Font = Common.FONT_MONO, TextSize = 12 }), Common.label("Bonus", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 9), Size = UDim2.new(0, 32, 0, 15), Text = bonus, TextColor3 = Common.PALETTE.success, Font = Common.FONT_MONO, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right }), Common.label("Value", { Position = UDim2.new(0, 14, 0, 31), Size = UDim2.new(0, 80, 0, 36), Text = value, Font = Common.FONT_DISPLAY, TextSize = 34 }) } })
+end
+
+function Module.Build(ctx: any)
+	local overlay = Common.frame("TabWidget", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.28, Visible = false, ZIndex = 20 })
+	overlay.Parent = ctx.Gui
+	local panel = Common.frame("CharacterTab", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.48, 0, 0, 88), Size = UDim2.new(0, 754, 0, 476), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.08, ZIndex = 21, [Fusion.Children] = { Common.stroke(Common.PALETTE.accent, 0.2, 1) } })
+	panel.Parent = overlay
+	for index, tab in { "CHARACTER", "EQUIP", "ATTRIBUTES", "INVENTORY", "QUESTS", "SKILLS", "CRAFTING", "FORGE", "ACHIEVEMENTS", "BOOSTERS", "LEADERBOARD", "SOCIAL", "SETTINGS" } do
+		Common.label("Rail" .. tostring(index), { Position = UDim2.new(0, 18, 0, 72 + (index - 1) * 29), Size = UDim2.new(0, 200, 0, 22), Text = "+  " .. tab, Font = Common.FONT_MONO, TextSize = 10, ZIndex = 21 }).Parent = overlay
+	end
+	local p = ctx.Data.profile
+	Common.frame("IdentityCard", { Position = UDim2.new(0, 12, 0, 12), Size = UDim2.new(0, 324, 0, 86), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.14, ZIndex = 22, [Fusion.Children] = { Common.stroke(Common.PALETTE.accent, 0.42, 1), Common.label("Name", { Position = UDim2.new(0, 12, 0, 10), Size = UDim2.new(1, -24, 0, 24), Text = p.name, Font = Common.FONT_DISPLAY, TextSize = 20, ZIndex = 22 }), Common.label("Class", { Position = UDim2.new(0, 12, 0, 38), Size = UDim2.new(1, -24, 0, 16), Text = "BEATER / LV " .. tostring(p.level), TextColor3 = Common.PALETTE.inkDim, Font = Common.FONT_MONO, TextSize = 10, ZIndex = 22 }), Common.label("Mastery", { Position = UDim2.new(0, 12, 0, 58), Size = UDim2.new(1, -24, 0, 16), Text = "Class mastery                         Rank S / 94%", Font = Common.FONT_MONO, TextSize = 10, ZIndex = 22 }) } }).Parent = panel
+	for index, spec in { { "STR", "5", "+4" }, { "DEX", "0", "+2" }, { "AGI", "3", "+0" }, { "VIT", "0", "+0" }, { "INT", "0", "+0" }, { "LUK", "0", "+0" } } do
+		statCard(spec[1], spec[2], spec[3], 340 + ((index - 1) % 3) * 138, 18 + math.floor((index - 1) / 3) * 92).Parent = panel
+	end
+	for index, item in { "L HAND  Wooden Sword", "R HAND  Wooden Sword", "HEAD  -", "CHEST  -", "LEGS  -", "BOOTS  -" } do
+		local column = (index - 1) % 2
+		local row = math.floor((index - 1) / 2)
+		Common.frame("Equipment" .. tostring(index), { Position = UDim2.new(0, 340 + column * 208, 0, 208 + row * 80), Size = UDim2.new(0, 198, 0, 72), BackgroundColor3 = Common.PALETTE.bg0, BackgroundTransparency = 0.13, ZIndex = 22, [Fusion.Children] = { Common.stroke(Common.PALETTE.accent, 0.35, 1), Common.label("Item", { Position = UDim2.new(0, 70, 0, 15), Size = UDim2.new(0, 118, 0, 34), Text = item, Font = Common.FONT_MONO, TextSize = 11, TextWrapped = true, ZIndex = 23 }) } }).Parent = panel
+	end
+	local close = Common.button("CloseButton", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 16), Size = UDim2.new(0, 105, 0, 20), Text = "ESC - CLOSE", BackgroundTransparency = 1, Font = Common.FONT_MONO, TextSize = 11, ZIndex = 22 })
+	close.Parent = overlay
+	close.Activated:Connect(function() overlay.Visible = false end)
+	return {
+		OpenTargetTabByName = function(_name: string) overlay.Visible = true end,
+		OpenWidget = function() overlay.Visible = true end,
+	}
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/TopRightQuestsWidget.luau"><![CDATA[--!strict
+-- Port of TopRightQuestsWidget's tracked quest card using fixture ActiveQuests.
+
+local Common = require((script :: any).Parent.Parent.HUDCommon)
+local Fusion = require((script :: any).Parent.Parent.Fusion)
+local Module = {}
+
+function Module.OpenWidget(ctx: any)
+	local quest = ctx.Data.profile.quest
+	local palette = Common.PALETTE
+	Common.frame("TopRightQuestsRail", {
+		AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -22, 0, 204), Size = UDim2.new(0, 202, 0, 132), BackgroundTransparency = 1,
+		[Fusion.Children] = {
+			Common.frame("QuestCard", { Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = palette.bg0, BackgroundTransparency = 0.2, [Fusion.Children] = {
+				Common.stroke(palette.accent, 0.45, 1),
+				Common.label("Kicker", { Position = UDim2.new(0, 10, 0, 8), Size = UDim2.new(1, -20, 0, 13), Text = "TRACKED QUEST", Font = Common.FONT_MONO, TextSize = 10 }),
+				Common.label("QuestName", { Position = UDim2.new(0, 10, 0, 27), Size = UDim2.new(1, -20, 0, 19), Text = quest.name, TextSize = 14, Font = Common.FONT_DISPLAY }),
+				Common.label("QuestBody", { Position = UDim2.new(0, 10, 0, 52), Size = UDim2.new(1, -20, 0, 40), Text = quest.body, TextColor3 = palette.inkDim, TextSize = 10, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top }),
+				Common.label("QuestObjective", { Position = UDim2.new(0, 10, 0, 101), Size = UDim2.new(1, -20, 0, 22), Text = quest.objective .. "      " .. quest.distance, Font = Common.FONT_MONO, TextSize = 10, TextWrapped = true }),
+			} }),
+		},
+	}).Parent = ctx.Gui
+end
+
+return Module
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/Widgets/init.luau"><![CDATA[--!strict
+return {}
+]]></Source>
+		<Source path="scripts/shared/BladeborneDemo/init.luau"><![CDATA[--!strict
+-- Namespace module for the HUD's scene-local implementation modules.
+
+return {}
+]]></Source>
+		<Source path="scripts/server/BladeborneArena.server.luau"><![CDATA[--!strict
+-- Server-owned setup reads the replicated fixture and adds one live arena marker.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Data = require(ReplicatedStorage.BladeborneDemo.DemoData)
+local arena = Workspace:FindFirstChild("BladeborneArena")
+assert(arena ~= nil, "BladeborneArena is missing")
+
+if arena:FindFirstChild("ServerProfileMarker") then
+	return
+end
+
+local marker = Instance.new("Part")
+marker.Name = "ServerProfileMarker"
+marker.Anchored = true
+marker.Size = Vector3.new(4 + Data.profile.level, 0.5, 4 + Data.profile.level)
+marker.Position = Vector3.new(0, 0.75, -8)
+marker.Color = Data.effects[1].colour
+marker:SetAttribute("BladeborneProfile", Data.profile.name)
+marker:SetAttribute("BladeborneLevel", Data.profile.level)
+marker.Parent = arena
+]]></Source>
+	</Sources>
+	<Item class="Workspace" name="Workspace" id="1">
+		<Item class="Model" name="BladeborneArena" id="2">
+			<Item class="Part" name="ArenaFloor" id="3">
+				<Property name="Position" type="Vector3">0, -1, 0</Property>
+				<Property name="Size" type="Vector3">72, 2, 72</Property>
+				<Property name="Color" type="Color3">0.12, 0.15, 0.16</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="CentralDais" id="4">
+				<Property name="Position" type="Vector3">0, 0.25, 0</Property>
+				<Property name="Size" type="Vector3">14, 0.5, 14</Property>
+				<Property name="Color" type="Color3">0.46, 0.39, 0.16</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="NorthMarker" id="5">
+				<Property name="Position" type="Vector3">0, 2, -28</Property>
+				<Property name="Size" type="Vector3">4, 4, 4</Property>
+				<Property name="Color" type="Color3">0.72, 0.18, 0.12</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="SouthMarker" id="6">
+				<Property name="Position" type="Vector3">0, 2, 28</Property>
+				<Property name="Size" type="Vector3">4, 4, 4</Property>
+				<Property name="Color" type="Color3">0.16, 0.34, 0.72</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="WestBlade" id="7">
+				<Property name="Position" type="Vector3">-18, 2, 0</Property>
+				<Property name="Size" type="Vector3">1, 8, 3</Property>
+				<Property name="Color" type="Color3">0.82, 0.72, 0.28</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="EastBlade" id="8">
+				<Property name="Position" type="Vector3">18, 2, 0</Property>
+				<Property name="Size" type="Vector3">1, 8, 3</Property>
+				<Property name="Color" type="Color3">0.82, 0.72, 0.28</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="SpawnLocation" name="PlayerSpawn" id="9">
+				<Property name="Position" type="Vector3">0, 1, 8</Property>
+				<Property name="Size" type="Vector3">5, 1, 5</Property>
+				<Property name="Color" type="Color3">0.2, 0.55, 0.35</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+		</Item>
+	</Item>
+	<Item class="ReplicatedStorage" name="ReplicatedStorage" id="10">
+		<Item class="ModuleScript" name="BladeborneDemo" id="11">
+			<Property name="Source" type="string">scripts/shared/BladeborneDemo/init.luau</Property>
+			<Item class="ModuleScript" name="Fusion" id="12">
+				<Property name="Source" type="string">scripts/shared/BladeborneDemo/Fusion.luau</Property>
+			</Item>
+			<Item class="ModuleScript" name="DemoData" id="13">
+				<Property name="Source" type="string">scripts/shared/BladeborneDemo/DemoData.luau</Property>
+			</Item>
+			<Item class="ModuleScript" name="HUDCommon" id="14">
+				<Property name="Source" type="string">scripts/shared/BladeborneDemo/HUDCommon.luau</Property>
+			</Item>
+			<Item class="ModuleScript" name="Widgets" id="15">
+				<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/init.luau</Property>
+				<Item class="ModuleScript" name="HotbarWidget" id="16">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/HotbarWidget.luau</Property>
+				</Item>
+				<Item class="ModuleScript" name="MinimapWidget" id="17">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/MinimapWidget.luau</Property>
+				</Item>
+				<Item class="ModuleScript" name="MusicWidget" id="18">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/MusicWidget.luau</Property>
+				</Item>
+				<Item class="ModuleScript" name="OnscreenButtons" id="19">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/OnscreenButtons.luau</Property>
+				</Item>
+				<Item class="ModuleScript" name="OnscreenWidget" id="20">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/OnscreenWidget.luau</Property>
+				</Item>
+				<Item class="ModuleScript" name="TabWidget" id="21">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/TabWidget.luau</Property>
+				</Item>
+				<Item class="ModuleScript" name="TopRightQuestsWidget" id="22">
+					<Property name="Source" type="string">scripts/shared/BladeborneDemo/Widgets/TopRightQuestsWidget.luau</Property>
+				</Item>
+			</Item>
+		</Item>
+	</Item>
+	<Item class="StarterPlayer" name="StarterPlayer" id="23">
+		<Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="24">
+			<Item class="LocalScript" name="BladeborneHud" id="25">
+				<Property name="Source" type="string">scripts/client/BladeborneHud.client.luau</Property>
+			</Item>
+		</Item>
+	</Item>
+	<Item class="StarterGui" name="StarterGui" id="26">
+	</Item>
+	<Item class="ServerScriptService" name="ServerScriptService" id="27">
+		<Item class="Script" name="BladeborneArenaServer" id="28">
+			<Property name="Source" type="string">scripts/server/BladeborneArena.server.luau</Property>
+		</Item>
+	</Item>
+</World>

@@ -928,7 +928,8 @@ namespace server {
 		}
 
 		const engine::game::ProjectKind projectKind = engine::game::ClassifyProject(Settings.GamePath);
-		if (projectKind == engine::game::ProjectKind::GameFile ||
+		if (projectKind == engine::game::ProjectKind::WorldFile ||
+			projectKind == engine::game::ProjectKind::GameFile ||
 			projectKind == engine::game::ProjectKind::UniverseFolder ||
 			projectKind == engine::game::ProjectKind::ProjectZip) {
 			if (!HostProject()) {
@@ -1153,7 +1154,20 @@ namespace server {
 		engine::game::GameInfo info;
 		std::string error;
 
-		if (!engine::game::LoadGame(Worlds(), opened->Entrypoint(), info, error)) {
+		const engine::game::ProjectKind kind = engine::game::ClassifyProject(opened->Entrypoint());
+		if (kind == engine::game::ProjectKind::WorldFile) {
+			const engine::world::WorldId imported =
+				engine::game::ImportWorld(Worlds(), opened->Entrypoint(), engine::core::Name{}, error);
+			if (!imported.IsValid()) {
+				ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
+				return false;
+			}
+			info.Name = Worlds().NameOf(imported);
+		} else if (!engine::game::LoadGame(Worlds(), opened->Entrypoint(), info, error)) {
+			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
+			return false;
+		}
+		if (Worlds().Worlds().empty()) {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GamePath, error);
 			return false;
 		}
@@ -1343,6 +1357,13 @@ namespace server {
 				[this, &limits, &failure, id, physicsTickRate, scriptTickRate](
 					engine::ecs::Store &store, engine::ecs::Scheduler &systems
 				) {
+					// A standalone world may intentionally omit the standard
+					// service roots. Furnish them before scripts ask for
+					// Workspace or any server-side service. Both calls are
+					// idempotent for saved projects that already carry them.
+					(void)engine::scene::InstallServices(store);
+					(void)engine::gui::InstallGuiServices(store);
+
 					// **Before the scripts, because a script may create a
 					// part.** `PreparePhysicsWorld` calls `Store::Observe`,
 					// which moves every row already carrying the component
@@ -3126,7 +3147,7 @@ namespace server {
 		}
 
 		const engine::game::ProjectKind kind = engine::game::ClassifyProject(Settings.GamePath);
-		if (kind == engine::game::ProjectKind::GameFile ||
+		if (kind == engine::game::ProjectKind::WorldFile || kind == engine::game::ProjectKind::GameFile ||
 			kind == engine::game::ProjectKind::UniverseFolder ||
 			kind == engine::game::ProjectKind::ProjectZip) {
 			ENGINE_ERROR("--worlds duplicates a script or placeholder scene, not a multi-world project");
@@ -3240,7 +3261,8 @@ namespace server {
 		}
 
 		const auto projectKind = engine::game::ClassifyProject(Settings.GamePath);
-		const bool project = projectKind == engine::game::ProjectKind::GameFile ||
+		const bool project = projectKind == engine::game::ProjectKind::WorldFile ||
+							 projectKind == engine::game::ProjectKind::GameFile ||
 							 projectKind == engine::game::ProjectKind::UniverseFolder ||
 							 projectKind == engine::game::ProjectKind::ProjectZip;
 		if (project && !HostProject()) return false;

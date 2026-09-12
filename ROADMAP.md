@@ -153,13 +153,12 @@ Verification: focused Vulkan lens, full-world, Studio and live Studio checks pas
 Extra:
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.
 
-- [_] Redo how we store demo projects:
-  - aworld (xml, not compressed) demo
-  - script-only demo
-Move them into mono.engine.examples.assets subfolder, mono.engine.examples.assets.worlds and mono.engine.examples.assets.scripts
-load them using a DemosLoader.cpp as the interface to read the directory, list items, etc.
-Also some demos need to be converted into aworlds instead (e.g. bladeborne demo), as we need to separate code into different spots (client, server, replicated/shared) and also we can create instances then.
-Update studio and other access points afterwards.
+- [x] Store script demos in `mono.engine/examples/assets/scripts/` and world
+  demos in `mono.engine/examples/assets/worlds/`, staged as
+  `assets/examples/scripts/` and `assets/examples/worlds/`, with `DemosLoader`
+  as the shared interface. Bladeborne is a plain XML `.aworld` with client,
+  server, and shared role-separated scripts; Studio, client, server, and
+  launcher access the demo tree.
 
 ### v0.25
 

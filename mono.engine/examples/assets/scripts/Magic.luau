@@ -53,7 +53,7 @@ local RunService = game:GetService("RunService")
 -- staged `assets/lib` tree, which made them a property of the *program*:
 -- `MagicCore` appeared under every world of every game, including a brand-new
 -- empty one, and this file asserted that somebody else had already put them
--- there. Now they are staged under `assets/examples/Magic` and mounted as
+-- there. Now they are staged under `assets/examples/scripts/Magic` and mounted as
 -- children of the `Script` that requires them, so a world that never opens this
 -- scene has no trace of any of it. Nothing inside the modules changed: every
 -- `require(script.Parent.X)` in them is relative and resolves the same either

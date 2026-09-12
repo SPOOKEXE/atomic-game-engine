@@ -17,7 +17,7 @@
 // this scene's index. Four rather than two because two of anything is the count
 // at which a placement bug still looks like correct behaviour.
 //
-//     just run --script assets/examples/Mirrors-4-worlds.ts --worlds 4
+//     just run --script assets/examples/scripts/Mirrors-4-worlds.ts --worlds 4
 
 const RunService = game.GetService("RunService");
 

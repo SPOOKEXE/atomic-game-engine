@@ -858,7 +858,7 @@ one for its authority. A game is a script, not a compiled artefact; the studio
 opens an authored game file:
 
 ```sh
-just run --script .cache/build/dev/assets/examples/Rings.luau
+just run --script .cache/build/dev/assets/examples/scripts/Rings.luau
 server --game My.agame --tick-rate 60
 ```
 
@@ -876,7 +876,7 @@ JavaScript during the build when the pinned compiler is available, with a
 `.js.map` beside each one - **so a script that throws names the line in the
 `.ts` you wrote** rather than a line in the generated file. Stripping types
 shifts everything below a multi-line annotation upward, so the two rarely agree.
-`mono.engine/examples/` holds the demo scenes, each written twice - once in each
+`mono.engine/examples/assets/scripts/` holds the script demos, each written twice - once in each
 language, doing the same thing - so that the binding surface is exercised from
 both.
 
@@ -892,7 +892,7 @@ already offer New World:
 Picking one adds a world named after the file and puts the scene in it as a
 `Script` in `ServerScriptService`, so nothing is built until Play runs it and
 Stop takes it away again. The list walks the staged directory rather than a
-hand-kept table, so a scene added to `mono.engine/examples/` is there after a
+hand-kept table, so a scene added to `mono.engine/examples/assets/scripts/` is there after a
 build.
 
 It is refused while anything is running, for the reason New World is: the
@@ -935,7 +935,7 @@ before quoting one.
 
 ### Shared Luau libraries
 
-`mono.engine/examples/lib/` holds Luau *libraries* rather than scenes. Every
+`mono.engine/examples/assets/scripts/libraries/` holds Luau *libraries* rather than scenes. Every
 directory under it is staged with its structure intact and mirrored into
 `ReplicatedStorage` as a tree of `ModuleScript` instances before any scene runs,
 so a script finds `ReplicatedStorage.MagicCore` the way it would in a Rojo place.
@@ -956,9 +956,9 @@ own tests here. `MagicRuntime` and `TerrainRuntime` are this engine's, because
 that is the only layer that names an instance.
 
 ```sh
-just run --script .cache/build/dev/assets/examples/Magic.luau      # spells cratering terrain
-just run --script .cache/build/dev/assets/examples/Libraries.luau  # libraries, loaded and exercised
-just run --script .cache/build/dev/assets/examples/MagicTests.luau # their tests, in this VM
+just run --script .cache/build/dev/assets/examples/scripts/Magic.luau      # spells cratering terrain
+just run --script .cache/build/dev/assets/examples/scripts/Libraries.luau  # libraries, loaded and exercised
+just run --script .cache/build/dev/assets/examples/scripts/MagicTests.luau # their tests, in this VM
 ```
 
 **`MagicRuntime` draws everything the Roblox original draws.** A
@@ -1090,8 +1090,9 @@ sources are transpiled to staged `.js` files when the pinned TypeScript compiler
 is available. `atomic` is still not a target or a recipe.
 
 The example sources are real scenes, not placeholders. The default client scene
-is `Rings.luau`; staged examples live under
-`.cache/build/<preset>/assets/examples/` after a build. A missing TypeScript
+is `Rings.luau`; staged script demos live under
+`.cache/build/<preset>/assets/examples/scripts/` and authored worlds under
+`.cache/build/<preset>/assets/examples/worlds/` after a build. A missing TypeScript
 compiler skips JavaScript twins and leaves Luau scenes available.
 
 ---
@@ -1116,7 +1117,7 @@ example, so seeing one is a command rather than a path to look up:
 
 | Script | Scene |
 |---|---|
-| `run-demo` | the default scripted scene - `mono.engine/examples/Rings.luau` |
+| `run-demo` | the default scripted scene - `examples/scripts/Rings.luau` |
 | `run-rings` | orbiting, spinning parts - the loading path |
 | `run-skygrid` | a lattice of blocks in empty sky |
 | `run-terrain` | 16384² voxel terrain, streamed around a camera |
@@ -1977,7 +1978,7 @@ visual diagnosis, not performance measurements.
 
 ```sh
 just run --frames 60 --entities 2048 \
-  --script .cache/build/dev/assets/examples/Meshes.luau \
+  --script .cache/build/dev/assets/examples/scripts/Meshes.luau \
   --cdn dir:store --publisher-key PUBLIC --capture meshes.bmp
 ```
 
@@ -2883,11 +2884,11 @@ shared by every instance, so a `Play` there would be a method on every `Part` in
 the world. Roblox has this property too and `sound.Playing = true` is what it
 means.
 
-There is a working one in `mono.engine/examples/Terrain.luau`:
+There is a working one in `mono.engine/examples/assets/scripts/Terrain.luau`:
 
 ```sh
 cdn --publish ./content --store ./store --signing-key HEX   # content/audio/*.mp3
-just run --script .cache/build/dev/assets/examples/Terrain.luau \
+just run --script .cache/build/dev/assets/examples/scripts/Terrain.luau \
     --cdn dir:./store --publisher-key PUBLIC
 ```
 
@@ -3308,7 +3309,7 @@ The server it points at is an ordinary `server` with three flags that exist for
 this:
 
 ```sh
-server --game .cache/build/release/assets/examples/Stress.luau \
+server --game .cache/build/release/assets/examples/scripts/Stress.luau \
        --listen 45100 --max-clients 216 --profile-out run.folded
 ```
 
@@ -3365,12 +3366,12 @@ just typecheck
 ```
 
 Top-level `.luau` examples are checked by the repository's Luau checker. The
-TypeScript check covers `.ts` files under `mono.engine/examples/` and
+TypeScript check covers `.ts` files under `mono.engine/examples/assets/scripts/` and
 `mono.studio/panels/`. Nested Luau libraries are exercised by their own scene
 tests but are not included by the current `just typecheck` glob. Directly:
 
 ```sh
-./.cache/build/dev/tools/scriptcheck mono.engine/examples/*.luau
+./.cache/build/dev/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau
 ./node_modules/.bin/tsc --noEmit
 ```
 
@@ -3385,7 +3386,7 @@ just typecheck-editor      # builds luau-lsp if needed, then analyzes every exam
 Directly, once the tool is built:
 
 ```sh
-./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
+./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau
 ```
 
 **It is in `just check`, and 1.5 s of it.** What is not free is the first
@@ -3896,7 +3897,7 @@ neighbours rather than anything that looks like a scale setting.
 
 Bake imports with `--model-size 1` when a scene sets sizes in metres. That makes
 an import behave exactly like a built-in, so one number means one thing across
-the whole scene. `mono.engine/examples/MeshGrid.luau` is a worked example, and
+the whole scene. `mono.engine/examples/assets/scripts/MeshGrid.luau` is a worked example, and
 its header says the same thing at the point of use.
 
 **`MeshPart.TrianglesCount` is how a script checks a mesh arrived.** It reports

@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
 		"N|never|immediate",
 		"Manage world lifetime: suspend after N seconds, never (24/7), or as soon as empty"
 	);
-	arguments.Value("game", "PATH", "Game file to host (v0.5+)");
+	arguments.Value("game", "PATH", "Game, world, or script project to host");
 	arguments.Value("record", "PATH", "Write a recording of this run");
 	arguments.Value("replay", "PATH", "Replay a recording instead of simulating");
 	arguments.Value("override-assets-directory", "DIR", "Read staged data from here");

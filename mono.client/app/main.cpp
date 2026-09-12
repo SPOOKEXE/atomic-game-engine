@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems, counters or heap");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
-	arguments.Value("game", "PATH", "Game file to play single-player (.agame)");
+	arguments.Value("game", "PATH", "Game or world file to play single-player (.agame or .aworld)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");

@@ -33,6 +33,7 @@ __pycache__/
 *.pyc
 .opencode/
 *.aworld
+!mono.engine/examples/assets/worlds/*.aworld
 
 imgui.ini
 

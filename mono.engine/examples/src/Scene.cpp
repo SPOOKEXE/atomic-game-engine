@@ -5,6 +5,7 @@
 #include <engine/ecs/Enums.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -77,11 +78,9 @@ namespace engine::examples {
 	}
 
 	namespace {
-		// Where a scene's own Luau modules are staged, resolved the same two
-		// ways `ExamplePath` resolves the scene itself - and for the same layout
-		// mismatch, which is written out in full there.
+		// Where a scene's own Luau modules are staged.
 		//
-		// `Magic.luau` and `Magic` both answer `.../assets/examples/Magic`, so a
+		// `Magic.luau` and `Magic` both answer the same directory, so a
 		// caller holding either spelling needs no rule of its own.
 		std::filesystem::path SceneLibraryRoot(std::string_view scene) {
 			std::string stem(scene);
@@ -89,11 +88,7 @@ namespace engine::examples {
 				stem.erase(dot);
 			}
 
-			const std::filesystem::path preferred = core::Paths::Assets() / "examples" / stem;
-			if (std::filesystem::exists(preferred)) {
-				return preferred;
-			}
-			return core::Paths::Base().parent_path() / "assets" / "examples" / stem;
+			return DemosLoader().Directory(DemoKind::Script) / stem;
 		}
 	}
 
@@ -382,61 +377,16 @@ namespace engine::examples {
 	}
 
 	std::string ExamplePath(const std::string &name) {
-		// Under the assets root, so `--assets` moves the examples with
-		// everything else and a program started from any directory finds the
-		// same file.
-		const std::filesystem::path preferred = core::Paths::Assets() / "examples" / name;
-		if (std::filesystem::exists(preferred)) {
-			return preferred.string();
-		}
-
-		// **The staged sibling, and this fallback is a layout mismatch rather
-		// than a convenience.** Shaders stage into each *program's* directory -
-		// `client/shaders/render/` - and `Paths::Assets()` defaults to that same
-		// directory, so those line up. The example scenes stage into
-		// `<stage>/assets/examples/` instead, which is a sibling of it, so they
-		// do not.
-		//
-		// Making them agree means either staging the scenes per program the way
-		// shaders are, or changing what `Paths::Assets()` defaults to - and both
-		// are changes to how every program finds its data, which is more than
-		// this function gets to decide. So it looks in both and says why.
-		const std::filesystem::path sibling =
-			core::Paths::Base().parent_path() / "assets" / "examples" / name;
-		if (std::filesystem::exists(sibling)) {
-			return sibling.string();
-		}
-
-		// Neither exists. The preferred one is returned so the error names the
-		// path somebody meant rather than the fallback they have never heard of.
-		return preferred.string();
+		const DemosLoader demos;
+		const std::filesystem::path resolved = demos.Resolve(DemoKind::Script, name);
+		return (resolved.empty() ? demos.Directory(DemoKind::Script) / name : resolved).string();
 	}
 
 	std::vector<std::string> ExampleScenes() {
-		// **`ExamplePath("")` rather than the two branches written out again.**
-		// The layout mismatch it bridges is the same one - the scenes stage into
-		// a sibling of `Paths::Assets()` rather than into it - and two copies of
-		// that rule would disagree the first time either moved. An empty name
-		// resolves to the directory itself.
-		const std::filesystem::path root = std::filesystem::path(ExamplePath("")).parent_path();
-
 		std::vector<std::string> found;
-
-		// The error-code overload, so a missing directory yields nothing rather
-		// than throwing. A program built without the example target is a real
-		// situation and not an error - see the header.
-		std::error_code failure;
-		for (const auto &entry : std::filesystem::directory_iterator(root, failure)) {
-			if (!entry.is_regular_file(failure)) {
-				continue;
-			}
-			if (entry.path().extension() != ".luau") {
-				continue;
-			}
-			found.push_back(entry.path().filename().string());
+		for (const DemoEntry &entry : DemosLoader().List(DemoKind::Script)) {
+			found.push_back(entry.Name);
 		}
-
-		std::sort(found.begin(), found.end());
 		return found;
 	}
 }

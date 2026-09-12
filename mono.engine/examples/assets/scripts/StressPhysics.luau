@@ -42,7 +42,7 @@
 -- The two hosts that do install it are the studio and the server:
 --
 --     just studio        # World -> New Scene from Example..., then Play
---     just host --game .cache/build/release/assets/examples/StressPhysics.luau \
+--     just host --game .cache/build/release/assets/examples/scripts/StressPhysics.luau \
 --         --listen 9099 --physics-tick-rate 20
 --
 -- **`--physics-tick-rate` is the knob this scene exists to be pointed at.** A

@@ -1,4 +1,5 @@
 #include <engine/core/Profiling.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Awake.hpp>
@@ -36,29 +37,26 @@ namespace studio {
 	}
 
 	void Editor::DrawExampleSceneItems() {
-		const std::vector<std::string> scenes = engine::examples::ExampleScenes();
-		if (scenes.empty()) {
+		const std::vector<engine::examples::DemoEntry> demos = engine::examples::DemosLoader().List();
+		if (demos.empty()) {
 			// A build staged without the examples is a real situation. Saying so
 			// beats an empty list, which reads as the editor being broken.
 			ImGui::TextDisabled("no staged examples");
 			return;
 		}
 
-		const auto advanced = [](std::string_view scene) {
-			return scene.starts_with("Magic") || scene.starts_with("Mirror") || scene.starts_with("Portal") ||
-				   scene.starts_with("Recursive") || scene.starts_with("Stress") ||
-				   scene.starts_with("Terrain") || scene.starts_with("Tunnels");
-		};
-
 		ImGui::BeginChild("##example-list", ImVec2(EXAMPLE_LIST_WIDTH, EXAMPLE_LIST_HEIGHT));
-		for (const bool isAdvanced : {false, true}) {
-			ImGui::SeparatorText(isAdvanced ? "Advanced" : "Simple");
-			for (const std::string &scene : scenes) {
-				if (advanced(scene) != isAdvanced) {
+		for (const engine::examples::DemoKind kind :
+			 {engine::examples::DemoKind::World, engine::examples::DemoKind::Script}) {
+			ImGui::SeparatorText(
+				kind == engine::examples::DemoKind::World ? "Authored worlds" : "Script demos"
+			);
+			for (const engine::examples::DemoEntry &demo : demos) {
+				if (demo.Kind != kind) {
 					continue;
 				}
-				if (ImGui::MenuItem(scene.c_str())) {
-					AddExampleWorld(scene);
+				if (ImGui::MenuItem(demo.Name.c_str())) {
+					AddExampleWorld(demo);
 				}
 			}
 		}

@@ -12,7 +12,7 @@
 -- the one thing about the port that is this engine's decision rather than
 -- Roblox's. In the Rojo project they were shared state a whole place could
 -- reach; here they are a scene's own modules, staged under
--- `assets/examples/Libraries` and mounted as children of the `Script` that
+-- `assets/examples/scripts/Libraries` and mounted as children of the `Script` that
 -- requires them - so a world that never opens this scene has no trace of them
 -- and a brand-new game's tree is empty. Every `require` *inside* the libraries
 -- is relative and could not tell the difference.

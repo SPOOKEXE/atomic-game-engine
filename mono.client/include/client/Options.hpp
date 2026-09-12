@@ -232,9 +232,10 @@ namespace client {
 		// the bindings were the untested half.
 		std::string ScriptPath;
 
-		// A game file to play, single-player. Empty means the demo scene.
+		// A game or standalone world file to play, single-player. Empty means the
+		// demo scene.
 		//
-		// A game file is single-player content, not a hosted server, and takes
+		// This file is single-player content, not a hosted server, and takes
 		// precedence over `--script`.
 		std::filesystem::path GameFile;
 		// Supervised rendering of one game world over an inherited control channel.

@@ -86,12 +86,12 @@ namespace engine::examples {
 	// `MagicCore` and `TerrainCore` appeared under every world of every game,
 	// including a brand-new empty one somebody had just made, and a scene that
 	// wanted them had no way to say so - it asserted that somebody else had
-	// already put them there and failed with "is assets/lib staged?" whenever
-	// nobody had. That is the shape a shipped engine library has, and these are
+	// already put them there and failed when no library tree was staged. That is
+	// the shape a shipped engine library has, and these are
 	// a demo's modules.
 	//
-	// So they are staged per scene - `assets/examples/Magic/MagicCore/...` -
-	// and mounted under the `Script` instance itself, which is Rojo's own
+	// So they are staged per scene under `assets/examples/scripts/Magic` and
+	// mounted under the `Script` instance itself, which is Rojo's own
 	// arrangement and the one every `require(script.Parent.X)` inside the
 	// modules was written against. A world that never loads `Magic.luau` has no
 	// trace of any of it.
@@ -170,21 +170,17 @@ namespace engine::examples {
 		const script::RuntimeLimits *limits = nullptr
 	);
 
-	// The path of a scene shipped with the engine, resolved against the assets
-	// root so every program finds the same file from any working directory.
+	// Compatibility helper for callers that load a script demo by name.
+	// New code should use `DemosLoader` so the kind remains explicit.
 	//
 	// @param name The file name, such as "Rings.luau".
 	// @return The absolute path.
 	std::string ExamplePath(const std::string &name);
 
-	// Every Luau scene shipped with the engine, by file name.
+	// Compatibility helper for the shipped Luau script demos.
+	// New menus should use `DemosLoader::List` so authored worlds are included.
 	//
-	// **The directory rather than a list, because a list is a second place a
-	// scene has to be added to.** The studio offers these as worlds a person can
-	// create, and the alternative - a table of names beside the menu - is one
-	// that goes stale the first time somebody writes a scene and forgets it. The
-	// staging rule is already "every `.luau` in this directory"; this reads back
-	// exactly what that rule put there.
+	// The loader walks the directory rather than keeping a second list of names.
 	//
 	// **Sorted, so the order is the same on every machine.** A directory walk is
 	// in whatever order the filesystem answers in, and a menu that reshuffles

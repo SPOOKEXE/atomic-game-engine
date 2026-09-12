@@ -6,7 +6,7 @@
 -- worlds: four independent simulations, each publishing to its own
 -- `world::ViewChannel`, drawn side by side by one compositor.
 --
---     just run --script assets/examples/Mirrors-4-worlds.luau --worlds 4
+--     just run --script assets/examples/scripts/Mirrors-4-worlds.luau --worlds 4
 --
 -- ## One file, four worlds, and how it knows which it is
 --

@@ -46,6 +46,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
@@ -3169,9 +3170,9 @@ namespace studio {
 		// restores was taken before the run began, so a world added during Play
 		// would vanish on Stop. The caller is what refuses; this does not check.
 		//
-		// @param file The staged scene's file name, from `examples::ExampleScenes`.
+		// @param demo The staged script or authored world to add.
 		// @return `false` when the world could not be created.
-		bool AddExampleWorld(std::string_view file);
+		bool AddExampleWorld(const engine::examples::DemoEntry &demo);
 
 		// Forgets that the universe row or a world row was clicked.
 		//

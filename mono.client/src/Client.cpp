@@ -10,10 +10,12 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
+#include <engine/game/Project.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
@@ -406,7 +408,16 @@ namespace client {
 		engine::game::GameInfo info;
 		std::string error;
 
-		if (!engine::game::LoadGame(*Universe_, Settings.GameFile, info, error)) {
+		const engine::game::ProjectKind kind = engine::game::ClassifyProject(Settings.GameFile);
+		if (kind == engine::game::ProjectKind::WorldFile) {
+			const engine::world::WorldId imported =
+				engine::game::ImportWorld(*Universe_, Settings.GameFile, engine::core::Name{}, error);
+			if (!imported.IsValid()) {
+				ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
+				return false;
+			}
+			info.Name = Universe_->NameOf(imported);
+		} else if (!engine::game::LoadGame(*Universe_, Settings.GameFile, info, error)) {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
 			return false;
 		}
@@ -517,9 +528,14 @@ namespace client {
 			}
 
 			// The scripted path is the only demo-world implementation.
-			const std::string scenePath = Settings.ScriptPath.empty()
-											  ? engine::examples::ExamplePath("Rings.luau")
-											  : Settings.ScriptPath;
+			const engine::examples::DemosLoader demos;
+			std::filesystem::path defaultDemo =
+				demos.Resolve(engine::examples::DemoKind::Script, "Rings.luau");
+			if (defaultDemo.empty()) {
+				defaultDemo = demos.Directory(engine::examples::DemoKind::Script) / "Rings.luau";
+			}
+			const std::string scenePath =
+				Settings.ScriptPath.empty() ? defaultDemo.string() : Settings.ScriptPath;
 
 			bool scripted = true;
 			std::shared_ptr<engine::script::Runtime> runtime;

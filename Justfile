@@ -718,7 +718,7 @@ bindings-check: (build "bindings")
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
-    ./{{build}}/tools/scriptcheck mono.engine/examples/*.luau
+    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau
 
     if command -v bun > /dev/null; then
         bun install --silent
@@ -750,7 +750,7 @@ typecheck: (build "scriptcheck")
 # 11 minutes of CPU, 39 s wall on 24 cores, once. Afterwards the dependency is a
 # no-op.
 typecheck-editor: luau-lsp
-    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/*.luau
+    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau
     @echo "typecheck-editor ok - every example agrees with the language server"
 
 # The editor, with its control surface open for a Model Context Protocol client.
@@ -977,7 +977,7 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 client-smoke: (build "client")
     #!/usr/bin/env bash
     set -euo pipefail
-    scene="{{build}}/assets/examples/Interface.luau"
+    scene="{{build}}/assets/examples/scripts/Interface.luau"
     test -f "$scene" || { echo "FAIL: no staged scene at $scene"; exit 1; }
     log=$(mktemp)
     trap 'rm -f "$log"' EXIT
@@ -1075,7 +1075,7 @@ heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes I
     mkdir -p .cache
     failed=""
     for scene in {{scenes}}; do
-        path="{{build}}/assets/examples/$scene.luau"
+        path="{{build}}/assets/examples/scripts/$scene.luau"
         if [ ! -f "$path" ]; then
             echo "FAIL: no staged scene at $path"
             exit 1

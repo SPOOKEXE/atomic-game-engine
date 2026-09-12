@@ -278,15 +278,31 @@ namespace {
 TEST_CASE("project paths have one shared classification", "[game][project]") {
 	using engine::game::ProjectKind;
 	CHECK(engine::game::ClassifyProject("scene.lua") == ProjectKind::SceneScript);
+	CHECK(engine::game::ClassifyProject("world.aworld") == ProjectKind::WorldFile);
 	CHECK(engine::game::ClassifyProject("game.agame") == ProjectKind::GameFile);
 	CHECK(engine::game::ClassifyProject("game.auniverse") == ProjectKind::UniverseFolder);
 	CHECK(engine::game::ClassifyProject("game.zip") == ProjectKind::ProjectZip);
 	CHECK(engine::game::ClassifyProject("game.ZIP") == ProjectKind::SceneScript);
+	CHECK(std::string(engine::game::Describe(ProjectKind::WorldFile)) == "world file");
 	CHECK(std::string(engine::game::ExtensionOf(engine::game::ExportProduct::WorldFile)) == ".aworld");
 	CHECK(
 		std::string(engine::game::ExtensionOf(engine::game::ExportProduct::UniverseFolder)) == ".auniverse"
 	);
 	CHECK(std::string(engine::game::ExtensionOf(engine::game::ExportProduct::ProjectZip)) == ".zip");
+}
+
+TEST_CASE("plain world projects open without extraction", "[game][project]") {
+	ScratchTree tree("world");
+	const fs::path path = tree.Root / "demo.aworld";
+	std::ofstream(path, std::ios::binary) << "<World format=\"3\" name=\"Demo\"/>";
+
+	engine::game::ProjectValidationReport report;
+	auto opened = engine::game::OpenProject(path, {}, report);
+	REQUIRE(opened.has_value());
+	CHECK(report.Passed());
+	CHECK_FALSE(opened->Temporary());
+	CHECK(opened->Entrypoint() == path);
+	CHECK(opened->Assets().empty());
 }
 
 TEST_CASE("project ZIP is deterministic and owns extraction lifetime", "[game][project]") {

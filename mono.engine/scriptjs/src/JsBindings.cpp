@@ -1652,7 +1652,7 @@ namespace engine::script {
 		// `JS_PreventExtensions` before it reaches a script, so
 		// `workspace.CurrentCamera = view` did not add a property, did not throw
 		// outside strict mode, and did not aim the camera.
-		// `mono.engine/examples/Mirrors-1-world.ts` has been writing it since it
+		// `mono.engine/examples/assets/scripts/Mirrors-1-world.ts` has been writing it since it
 		// was ported from the Luau file.
 		//
 		// Installed on the world object rather than on a prototype, for the

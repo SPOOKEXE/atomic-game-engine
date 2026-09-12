@@ -1121,6 +1121,9 @@ namespace engine::game {
 			return ProjectKind::Unknown;
 		}
 		const fs::path extension = path.extension();
+		if (extension == WORLD_EXTENSION) {
+			return ProjectKind::WorldFile;
+		}
 		if (extension == GAME_EXTENSION) {
 			return ProjectKind::GameFile;
 		}
@@ -1139,6 +1142,8 @@ namespace engine::game {
 			return "unknown";
 		case ProjectKind::SceneScript:
 			return "scene script";
+		case ProjectKind::WorldFile:
+			return "world file";
 		case ProjectKind::GameFile:
 			return "game file";
 		case ProjectKind::UniverseFolder:
@@ -1474,7 +1479,8 @@ namespace engine::game {
 	OpenProject(const fs::path &path, const ProjectPackageLimits &limits, ProjectValidationReport &report) {
 		report = ProjectValidationReport{};
 		const ProjectKind kind = ClassifyProject(path);
-		if (kind == ProjectKind::GameFile || kind == ProjectKind::UniverseFolder) {
+		if (kind == ProjectKind::WorldFile || kind == ProjectKind::GameFile ||
+			kind == ProjectKind::UniverseFolder) {
 			std::error_code failure;
 			if (!fs::is_regular_file(path, failure)) {
 				AddError(
@@ -1503,7 +1509,7 @@ namespace engine::game {
 				"project.kind.unsupported",
 				"project",
 				path.string(),
-				"path is not .agame, .auniverse, or .zip"
+				"path is not .aworld, .agame, .auniverse, or .zip"
 			);
 			return std::nullopt;
 		}

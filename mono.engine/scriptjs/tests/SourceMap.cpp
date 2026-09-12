@@ -239,7 +239,7 @@ TEST_CASE("a TypeScript scene that throws names its own line", "[script][sourcem
 }
 
 TEST_CASE("the build's own transpile emits a map this reader understands", "[script][sourcemap]") {
-	// The staged twin of `mono.engine/examples/Mirrors-4-worlds.ts`, which
+	// The staged twin of `mono.engine/examples/assets/scripts/Mirrors-4-worlds.ts`, which
 	// exists only where `tsc` was available at configure time. **The point of
 	// this case is that the hand-written maps above cannot go stale silently**:
 	// they are this suite's model of what the toolchain emits, and a real map is

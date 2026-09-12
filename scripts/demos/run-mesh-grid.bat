@@ -2,7 +2,7 @@
 REM
 REM The mesh grid, end to end: bake, publish, fetch, draw.
 REM
-REM `mono.engine\examples\MeshGrid.luau` needs content that has been baked and
+REM `mono.engine\examples\assets\scripts\MeshGrid.luau` needs content that has been baked and
 REM signed, so running it with `--script` alone shows nine fallback cubes. This
 REM does the three steps in front of it, with the flags that matter already set.
 REM
@@ -75,5 +75,5 @@ if "%PUBLISHER%"=="" (
 set "PACING=--uncapped"
 if not "%MAX_FPS%"=="0" set "PACING=--uncapped --max-fps %MAX_FPS%"
 
-"%BUILD%\client\client.exe" --cdn "dir:%STORE%" --publisher-key "%PUBLISHER%" --content-cache "%MESH_GRID_WORK%\cache" --script "%ROOT%\mono.engine\examples\MeshGrid.luau" --entities 2048 %PACING% %*
+"%BUILD%\client\client.exe" --cdn "dir:%STORE%" --publisher-key "%PUBLISHER%" --content-cache "%MESH_GRID_WORK%\cache" --script "%ROOT%\mono.engine\examples\assets\scripts\MeshGrid.luau" --entities 2048 %PACING% %*
 exit /b %ERRORLEVEL%

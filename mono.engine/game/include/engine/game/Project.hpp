@@ -48,6 +48,9 @@ namespace engine::game {
 		// A scene script handled by the existing server path.
 		SceneScript,
 
+		// One authored `.aworld` document.
+		WorldFile,
+
 		// A monolithic `.agame` document.
 		GameFile,
 
@@ -255,7 +258,7 @@ namespace engine::game {
 		// Replaces this project and cleans up its former extraction.
 		OpenedProject &operator=(OpenedProject &&other) noexcept;
 
-		// The `.agame` or `.auniverse` to load through `LoadGame`.
+		// The `.aworld`, `.agame`, or `.auniverse` to load.
 		const std::filesystem::path &Entrypoint() const;
 
 		// The local processed store, or empty when none is declared.
@@ -297,7 +300,7 @@ namespace engine::game {
 		ProjectValidationReport &report
 	);
 
-	// Opens `.agame`, `.auniverse`, or a validated and extracted Project ZIP.
+	// Opens `.aworld`, `.agame`, `.auniverse`, or a validated and extracted Project ZIP.
 	std::optional<OpenedProject> OpenProject(
 		const std::filesystem::path &path, const ProjectPackageLimits &limits, ProjectValidationReport &report
 	);

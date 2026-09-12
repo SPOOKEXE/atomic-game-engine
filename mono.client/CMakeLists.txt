@@ -96,9 +96,9 @@ mono_add_library(client
 		# client can run a game file" and nothing about which language it is in.
 		Engine::examples
 
-		# L12, `shared`. `--game FILE.agame` plays a universe authored in the
-		# studio, single-player. **Not `Mono::server`**: loading a game file and
-		# running its scripts as both roles needs the format and the VM and
+		# L12, `shared`. `--game` plays an `.agame` universe or one `.aworld`
+		# authored in the studio, single-player. **Not `Mono::server`**: loading
+		# either format and running its scripts as both roles needs the format and the VM and
 		# nothing else, so the tier escape reserved below is still not declared.
 		Engine::game
 

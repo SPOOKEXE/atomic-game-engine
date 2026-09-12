@@ -121,7 +121,8 @@ namespace client {
 		//         leave somebody wondering why.
 		bool BuildDemoWorlds();
 
-		// Loads `--game` and starts its scripts in both roles.
+		// Loads an `.agame` or `.aworld` from `--game` and starts its scripts in
+		// both roles.
 		//
 		// @return `false` when the file would not load or holds no worlds.
 		bool LoadGameFile();

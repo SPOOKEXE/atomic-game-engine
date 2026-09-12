@@ -42,7 +42,7 @@ The first pass needs no engine library or component.
 
 ## First demo slice
 
-`mono.engine/examples/TornadoSim.luau` will contain all gameplay state. It
+`mono.engine/examples/assets/scripts/TornadoSim.luau` will contain all gameplay state. It
 will build a storm plain, a single travelling vortex, a few structures and a
 camera. It will expose a compact preset selector and a live hazard display.
 

@@ -5,6 +5,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Instance.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/gui/Registration.hpp>
@@ -1514,15 +1515,16 @@ namespace studio {
 			return;
 		}
 
-		// **Located with `ExamplePath` and filed under a relative name**, and
+		// **Located with `DemosLoader` and filed under a relative name**, and
 		// the two are different on purpose. The scenes stage into
-		// `<stage>/assets/examples` while `Paths::Assets()` is each program's
-		// own directory - a layout mismatch `ExamplePath` already knows how to
+		// `<stage>/assets/examples/scripts` while `Paths::Assets()` is each program's
+		// own directory - a layout mismatch `DemosLoader` already knows how to
 		// bridge - so finding the file needs its fallback. What goes *into* the
 		// world is the short name, because an absolute path from this machine
 		// would be written into the save file.
-		const Name PATH(std::string("examples/") + std::string(file));
-		const Name located(engine::examples::ExamplePath(std::string(file)));
+		const Name PATH(std::string("examples/scripts/") + std::string(file));
+		const engine::examples::DemosLoader demos;
+		const Name located(demos.Resolve(engine::examples::DemoKind::Script, file).string());
 
 		// **Read now and filed into the world**, rather than left as a path for
 		// the runtime to resolve later. `ReadSource` looks in the cache before
@@ -1568,7 +1570,12 @@ namespace studio {
 		(void)engine::examples::MountSceneLibraries(store, script, file);
 	}
 
-	bool Editor::AddExampleWorld(std::string_view file) {
+	bool Editor::AddExampleWorld(const engine::examples::DemoEntry &demo) {
+		if (demo.Kind == engine::examples::DemoKind::World) {
+			return ImportWorldFile(demo.Path);
+		}
+
+		const std::string_view file = demo.Name;
 		// The stem, because "StressMirrors" is a scene and "StressMirrors.luau"
 		// is a file. What goes into the world is still the full name - see the
 		// `InstallExampleScript` call below - so nothing downstream has to guess

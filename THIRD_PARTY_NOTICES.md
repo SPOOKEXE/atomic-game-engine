@@ -230,7 +230,7 @@ above, and it is four kilobytes.
 
 One entry is neither a submodule nor a file copied in. **The simplex kernels,
 the analytical-derivative algebra and the Worley cell search in
-`mono.engine/examples/lib/TerrainCore/Noise.luau` were ported from
+`mono.engine/examples/assets/scripts/libraries/TerrainCore/Noise.luau` were ported from
 [Atlas](https://github.com/shmeatley/atlas) (MIT)**, a procedural generation
 toolkit for Roblox.
 

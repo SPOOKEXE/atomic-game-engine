@@ -14,7 +14,7 @@
 -- `effects/Classes.cpp` registers `ParticleEmitter`, `Beam` and `Trail`, and
 -- `scene/Part.cpp` registers `Attachment` and `PointLight`. Nothing told this
 -- file, so every spell in the demo went on drawing a bare cube while the data
--- underneath it was complete. `mono.engine/examples/Particles.luau` is the
+-- underneath it was complete. `mono.engine/examples/assets/scripts/Particles.luau` is the
 -- reference for every property set below.
 --
 -- ## What the authored data says, and what it does not

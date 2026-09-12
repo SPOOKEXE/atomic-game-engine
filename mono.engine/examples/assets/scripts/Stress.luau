@@ -14,7 +14,7 @@
 -- streaming path and never the input path.
 --
 --   just stress
---   just host --game .cache/build/release/assets/examples/Stress.luau --listen 9099
+--   just host --game .cache/build/release/assets/examples/scripts/Stress.luau --listen 9099
 
 local FLOOR_SIZE = 400
 local FLOOR_THICKNESS = 4

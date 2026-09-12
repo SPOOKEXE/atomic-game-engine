@@ -15,7 +15,11 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/Game.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Layout.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -27,7 +31,10 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -48,6 +55,7 @@ TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.input")
 TEST_DEPENDS("engine.gui.services")
+TEST_DEPENDS("engine.game.roundtrip")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -118,6 +126,25 @@ namespace {
 		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
 		return workspace == engine::ecs::NULL_ENTITY ? engine::ecs::NULL_ENTITY
 													 : store.FindFirstChild(workspace, name);
+	}
+
+	size_t CountNamedDescendants(Store &store, engine::ecs::Entity root, std::string_view name) {
+		size_t found = 0;
+		store.EachDescendant(root, [&](engine::ecs::Entity entity) {
+			if (store.InstanceNameOf(entity) == engine::core::Name(name)) found++;
+		});
+		return found;
+	}
+
+	engine::ecs::Entity FirstNamedDescendant(Store &store, engine::ecs::Entity root, std::string_view name) {
+		engine::ecs::Entity found = engine::ecs::NULL_ENTITY;
+		store.EachDescendant(root, [&](engine::ecs::Entity entity) {
+			if (found == engine::ecs::NULL_ENTITY &&
+				store.InstanceNameOf(entity) == engine::core::Name(name)) {
+				found = entity;
+			}
+		});
+		return found;
 	}
 }
 
@@ -704,4 +731,76 @@ TEST_CASE("a scripted client sees a local player and draws its completed PlayerG
 
 	std::filesystem::remove(scene);
 	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client][world][gui]") {
+	engine::parallel::Jobs::Start(2);
+	struct StopJobs {
+		~StopJobs() {
+			engine::parallel::Jobs::Stop();
+		}
+	} stopJobs;
+
+	const auto demo =
+		engine::examples::DemosLoader().Find(engine::examples::DemoKind::World, "BladeborneDemo.aworld");
+	REQUIRE(demo.has_value());
+
+	engine::world::Universe universe;
+	std::string error;
+	const engine::world::WorldId id =
+		engine::game::ImportWorld(universe, demo->Path, engine::core::Name{}, error);
+	INFO(error);
+	REQUIRE(id.IsValid());
+
+	std::shared_ptr<engine::script::Runtime> runtime;
+	universe.Enter(id, [&](Store &store, Scheduler &systems) {
+		client::InstallPresentation(store, systems);
+		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
+		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
+
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		runtime = engine::game::StartWorldScripts(
+			store, systems, limits, error, nullptr, universe.SettingsOf(id).ScriptTickRate
+		);
+		INFO(error);
+		REQUIRE(error.empty());
+		REQUIRE(runtime != nullptr);
+		REQUIRE(runtime->Costs().size() == 3);
+		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
+
+		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
+		REQUIRE(sources != nullptr);
+		CHECK(sources->Count() == 14);
+
+		const engine::ecs::Entity arena = InWorkspace(store, "BladeborneArena");
+		REQUIRE(arena != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, arena, "ServerProfileMarker") == 1);
+
+		const engine::ecs::Entity starterGui = store.FindFirstRoot(engine::gui::STARTER_GUI);
+		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity templateHud = store.FindFirstChild(starterGui, "BladeborneHUD");
+		REQUIRE(templateHud != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, templateHud, "Ability1") == 1);
+		CHECK(CountNamedDescendants(store, templateHud, "Minimap") == 1);
+
+		CHECK(engine::gui::ResetPlayerGui(store, localPlayer) == 1);
+		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
+		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity liveHud = store.FindFirstChild(playerGui, "BladeborneHUD");
+		REQUIRE(liveHud != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, liveHud, "Ability1") == 1);
+		CHECK(CountNamedDescendants(store, liveHud, "Minimap") == 1);
+		CHECK(CountNamedDescendants(store, liveHud, "HotbarSlot1") == 2);
+
+		engine::gui::Screen display;
+		display.Width = 1920.0f;
+		display.Height = 1080.0f;
+		CHECK(engine::gui::Layout(store, display) > 0);
+		const engine::ecs::Entity ability = FirstNamedDescendant(store, liveHud, "Ability1");
+		REQUIRE(ability != engine::ecs::NULL_ENTITY);
+		const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(ability);
+		REQUIRE(placed != nullptr);
+		CHECK(placed->Rendered);
+	});
 }

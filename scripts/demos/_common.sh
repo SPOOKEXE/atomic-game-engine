@@ -75,20 +75,28 @@ fi
 
 scene=()
 if [ -n "${SCENE:-}" ]; then
-	# **The staged copy, not the source.** `mono.engine/examples/` is where a
-	# scene is written and `assets/examples/` under the build is where it is
-	# staged beside the binary it runs in - a demo that ran the source tree
-	# would work here and nowhere a staged tree was copied to.
-	staged="$build/client/assets/examples/$SCENE"
+	case "$SCENE" in
+		*.aworld)
+			example_kind=worlds
+			loader=--game
+			;;
+		*)
+			example_kind=scripts
+			loader=--script
+			;;
+	esac
+	# The staged copy, not the source. Scripts and worlds have separate roots
+	# so the same name cannot accidentally select the wrong kind of demo.
+	staged="$build/client/assets/examples/$example_kind/$SCENE"
 	if [ ! -f "$staged" ]; then
-		staged="$build/assets/examples/$SCENE"
+		staged="$build/assets/examples/$example_kind/$SCENE"
 	fi
 	if [ ! -f "$staged" ]; then
-		echo "no staged scene at $staged" >&2
-		echo "  the build did not stage $SCENE. Check mono.engine/examples/CMakeLists.txt." >&2
+		echo "no staged example at $staged" >&2
+		echo "  the build did not stage $SCENE in examples/$example_kind." >&2
 		exit 1
 	fi
-	scene=(--script "$staged")
+	scene=("$loader" "$staged")
 fi
 
 echo "running ${SCENE:-Rings.luau} at ${MAX_FPS:-165} fps"
