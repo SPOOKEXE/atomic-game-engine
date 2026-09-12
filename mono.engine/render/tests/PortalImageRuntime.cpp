@@ -304,8 +304,12 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 	Renderer renderer;
 	PortalImageSource source(worlds.Universe, renderer, worlds.Source, worlds.Replies);
 	PortalImageProducer producer(worlds.Universe, renderer, worlds.Destination, worlds.Requests);
-	const auto first = Request();
+	auto first = Request();
+	first.Key.CameraRevision = 17;
+	first.Position = {0, 1, 2};
+	first.Orientation[3] = 1;
 	auto second = first;
+	second.Key.CameraRevision = 18;
 	second.Position = {1, 0, 0};
 	PortalGeometry secondGeometry;
 	secondGeometry.Rows.emplace_back();
@@ -313,7 +317,10 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 	std::string geometryError;
 	REQUIRE(EncodePortalGeometry(secondGeometry, second.Geometry, geometryError));
 	auto latest = first;
+	latest.Key.CameraRevision = 19;
 	latest.Position = {2, 0, 0};
+	latest.Orientation = {0, 0, .70710677f, .70710677f};
+	latest.Frustum = {-.12f, .16f, -.08f, .11f, .2f, 300};
 	PortalGeometry latestGeometry;
 	latestGeometry.Rows.emplace_back();
 	latestGeometry.Rows.front().Name = "latest";
@@ -338,6 +345,13 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 		std::string error;
 		REQUIRE(DecodePortalImageRequest(messages.front().Payload, decoded, error));
 		CHECK(decoded.Geometry == latest.Geometry);
+		uint64_t expectedCameraRevision = latest.Key.CameraRevision;
+		for (const auto byte : assets::Hasher::Of(latest.Geometry).Digest)
+			expectedCameraRevision = scene::MixSignature(expectedCameraRevision, byte);
+		CHECK(decoded.Key.CameraRevision == expectedCameraRevision);
+		CHECK(decoded.Position == latest.Position);
+		CHECK(decoded.Orientation == latest.Orientation);
+		CHECK(decoded.Frustum == latest.Frustum);
 		// Poll already issued the retained latest demand, so a repeated request
 		// joins that in-flight capture instead of opening another one.
 		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
@@ -4254,12 +4268,14 @@ TEST_CASE(
 	world::PresentationBindings bindings{
 		700, 1, {{worlds.Requests, rootPublic}}, {{childLocal, childPublic}}
 	};
+	PortalInboxLimits limits;
+	limits.Timeout = std::chrono::milliseconds(1);
 	PortalImageSource source(
 		worlds.Universe,
 		renderer,
 		worlds.Source,
 		worlds.Replies,
-		{},
+		limits,
 		nullptr,
 		PortalImageSourceDelivery::CapturePayloads
 	);
@@ -4277,6 +4293,9 @@ TEST_CASE(
 	REQUIRE(DecodePortalImageRequest(messages[0].Payload, request, error));
 	PortalCaptureTree expected;
 	expected.Nodes.push_back(PayloadNode(request, rootPublic, false));
+	expected.Nodes.front().Layers.SpatialOverlay = expected.Nodes.front().Layers.Transparent.front();
+	expected.Nodes.front().Layers.SpatialOverlay->Depth.clear();
+	expected.Nodes.front().Layers.SpatialOverlay->DepthHash = {};
 	if (nested) {
 		expected.Nodes.push_back(PayloadNode(request, childPublic, true));
 		PortalCaptureTreeEdge edge;
@@ -4342,7 +4361,25 @@ TEST_CASE(
 		const auto captured = source.TakeTree("Door", START);
 		REQUIRE(captured);
 		CHECK(*captured == expected);
+		const auto &root = captured->Nodes.front();
+		CHECK(root.Camera.Position == request.Position);
+		CHECK(root.Camera.Orientation == request.Orientation);
+		CHECK(root.Layers.Opaque.Key.CameraRevision == request.Key.CameraRevision);
+		CHECK(root.Layers.Opaque.ContentRevision == 22);
+		CHECK(root.Layers.Opaque.CaptureTick == 21);
+		CHECK(root.Layers.Transparent.size() == 2);
+		for (const auto &layer : root.Layers.Transparent) {
+			CHECK(layer.Key.CameraRevision == request.Key.CameraRevision);
+			CHECK(layer.ContentRevision == root.Layers.Opaque.ContentRevision);
+			CHECK(layer.CaptureTick == root.Layers.Opaque.CaptureTick);
+		}
+		REQUIRE(root.Layers.SpatialOverlay);
+		CHECK(root.Layers.SpatialOverlay->Key.CameraRevision == request.Key.CameraRevision);
+		CHECK(root.Layers.SpatialOverlay->ContentRevision == root.Layers.Opaque.ContentRevision);
 		CHECK_FALSE(source.TakeTree("Door", START));
+	}
+	SECTION("authorized handoff expires at its bounded lifetime") {
+		CHECK_FALSE(source.TakeTree("Door", START + std::chrono::milliseconds(2)));
 	}
 	SECTION("root mapping replacement retires held payload") {
 		bindings.Revision++;

@@ -115,6 +115,45 @@ TEST_CASE("portal host keeps a demanded capture while destination routing waits"
 	CHECK(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 0);
 }
 
+TEST_CASE("portal host forwards the latest camera and geometry demand", "[render][portal-host]") {
+	Worlds worlds;
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto producer = host.Serve(worlds.Destination);
+	REQUIRE(producer.Generation != 0);
+	auto first = worlds.Demand();
+	first.Request.Key.CameraRevision = 41;
+	first.Request.Position = {1, 2, 3};
+	first.Request.Orientation[3] = 1;
+	auto latest = first;
+	latest.Request.Key.CameraRevision = 42;
+	latest.Request.Position = {4, 5, 6};
+	latest.Request.Orientation = {0, 0, .70710677f, .70710677f};
+	latest.Request.Frustum = {-.12f, .16f, -.08f, .11f, .2f, 300};
+	PortalGeometry geometry;
+	geometry.Rows.emplace_back();
+	geometry.Rows.front().Name = "fresh-destination-geometry";
+	std::string error;
+	REQUIRE(EncodePortalGeometry(geometry, latest.Request.Geometry, error));
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&first, 1), std::span(&route, 1), START) == 1);
+	CHECK(host.Submit(worlds.Source, 0, std::span(&latest, 1), std::span(&route, 1), START) == 0);
+	CHECK(host.Pump(0, 0, START).Requests == 1);
+
+	const auto messages = worlds.Universe.TakePresentation(producer);
+	REQUIRE(messages.size() == 1);
+	PortalImageRequest captured;
+	REQUIRE(DecodePortalImageRequest(messages.front().Payload, captured, error));
+	uint64_t expectedCameraRevision = latest.Request.Key.CameraRevision;
+	for (const auto byte : assets::Hasher::Of(latest.Request.Geometry).Digest)
+		expectedCameraRevision = scene::MixSignature(expectedCameraRevision, byte);
+	CHECK(captured.Key.CameraRevision == expectedCameraRevision);
+	CHECK(captured.Position == latest.Request.Position);
+	CHECK(captured.Orientation == latest.Request.Orientation);
+	CHECK(captured.Frustum == latest.Request.Frustum);
+	CHECK(captured.Geometry == latest.Request.Geometry);
+}
+
 namespace {
 	PortalImageReply SendRetainedBodyRequest(
 		PortalImageHost &host,
