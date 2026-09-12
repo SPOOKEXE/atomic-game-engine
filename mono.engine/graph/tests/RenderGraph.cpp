@@ -96,6 +96,18 @@ TEST_CASE("resource shape and access are executable graph contracts", "[graph][r
 	CHECK(desc->External);
 	CHECK(desc->Bytes(1, 1) == 2560);
 
+	const ResourceId buffer = graph.AddResource({
+		.Name = Name("generated-index"),
+		.Kind = ResourceKind::Buffer,
+		.Width = 16,
+		.Height = 4,
+		.Access = engine::graph::ResourceAccess::ReadWrite,
+		.BufferStride = 12,
+	});
+	const auto *bufferDesc = graph.FindResource(buffer);
+	REQUIRE(bufferDesc != nullptr);
+	CHECK(bufferDesc->Bytes(1, 1) == 768);
+
 	graph.AddNode({.Name = Name("bad-writer"), .Writes = {readable}});
 	Name offender;
 	CHECK(graph.Validate(offender) == GraphStatus::WriteAccessDenied);

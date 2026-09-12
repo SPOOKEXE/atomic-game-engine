@@ -500,6 +500,24 @@ namespace engine::render {
 
 		std::vector<GraphTarget> GraphTargets;
 
+		// Buffer resources use the same ownership key as images. A graph can name
+		// the same buffer in several views without letting one view overwrite another.
+		struct GraphBuffer {
+			core::Name Pipeline;
+			core::Name Resource;
+			graph::NodeScope Scope = graph::NodeScope::Frame;
+			uint64_t Owner = 0;
+			SDL_GPUBuffer *Buffer = nullptr;
+			uint32_t Bytes = 0;
+			SDL_GPUBufferUsageFlags Usage = 0;
+		};
+
+		// Authored buffers are transient scratch. These caps bound a document before
+		// one unchecked width, height and stride turn into an unbounded allocation.
+		static constexpr uint64_t MAX_GRAPH_BUFFER_BYTES = 64u * 1024u * 1024u;
+		static constexpr uint64_t MAX_GRAPH_BUFFER_TOTAL_BYTES = 256u * 1024u * 1024u;
+		std::vector<GraphBuffer> GraphBuffers;
+
 		struct ResourcePreviewTarget {
 			ResourcePreviewRoute Route;
 			std::array<SDL_GPUTexture *, 2> Textures{};
@@ -526,6 +544,16 @@ namespace engine::render {
 		);
 		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
+			const NamedPipeline &pipeline,
+			graph::ResourceId resource,
+			uint64_t owner,
+			uint32_t viewWidth,
+			uint32_t viewHeight
+		);
+		SDL_GPUBuffer *FindGraphBuffer(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		) const;
+		SDL_GPUBuffer *EnsureGraphBuffer(
 			const NamedPipeline &pipeline,
 			graph::ResourceId resource,
 			uint64_t owner,

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -652,6 +653,85 @@ namespace engine::render {
 
 		GraphTargets.push_back(GraphTarget{pipeline.Name, targetName, scope, owner});
 		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
+	}
+
+	SDL_GPUBuffer *Renderer::Impl::FindGraphBuffer(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+	) const {
+		resource = GraphTargetName(pipeline, resource);
+		for (const GraphBuffer &buffer : GraphBuffers) {
+			if (buffer.Pipeline == pipeline.Name && buffer.Resource == resource && buffer.Scope == scope &&
+				buffer.Owner == owner) {
+				return buffer.Buffer;
+			}
+		}
+		return nullptr;
+	}
+
+	SDL_GPUBuffer *Renderer::Impl::EnsureGraphBuffer(
+		const NamedPipeline &pipeline,
+		graph::ResourceId resource,
+		uint64_t owner,
+		uint32_t viewWidth,
+		uint32_t viewHeight
+	) {
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
+		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer || desc->External ||
+			desc->BufferStride == 0) {
+			return nullptr;
+		}
+		const uint64_t bytes = desc->Bytes(viewWidth, viewHeight);
+		if (bytes == 0 || bytes > MAX_GRAPH_BUFFER_BYTES || bytes > UINT32_MAX) {
+			ENGINE_WARN("graph buffer '{}' requests {} bytes, over the {} byte limit", desc->Name.Text(), bytes, MAX_GRAPH_BUFFER_BYTES);
+			return nullptr;
+		}
+		SDL_GPUBufferUsageFlags usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+		if (desc->Access == graph::ResourceAccess::Write || desc->Access == graph::ResourceAccess::ReadWrite ||
+			desc->Access == graph::ResourceAccess::Automatic) {
+			usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+		}
+		if (desc->Access == graph::ResourceAccess::Read || desc->Access == graph::ResourceAccess::ReadWrite ||
+			desc->Access == graph::ResourceAccess::Automatic) {
+			usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+		}
+		const graph::NodeScope scope = ResourceScope(pipeline, resource);
+		const core::Name name = GraphTargetName(pipeline, desc->Name);
+		uint64_t total = 0;
+		for (GraphBuffer &buffer : GraphBuffers) {
+			if (buffer.Pipeline != pipeline.Name || buffer.Resource != name || buffer.Scope != scope || buffer.Owner != owner) {
+				total += buffer.Bytes;
+				continue;
+			}
+			if (buffer.Buffer != nullptr && buffer.Bytes == bytes && buffer.Usage == usage) return buffer.Buffer;
+			if (buffer.Buffer != nullptr) gpu::ReleaseBuffer(Device, buffer.Buffer);
+			buffer.Buffer = nullptr;
+			buffer.Bytes = 0;
+			buffer.Usage = usage;
+			break;
+		}
+		if (total + bytes > MAX_GRAPH_BUFFER_TOTAL_BYTES) {
+			ENGINE_WARN("graph buffers for '{}' exceed the {} byte budget", pipeline.Name.Text(), MAX_GRAPH_BUFFER_TOTAL_BYTES);
+			return nullptr;
+		}
+		GraphBuffer *entry = nullptr;
+		for (GraphBuffer &buffer : GraphBuffers) {
+			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope && buffer.Owner == owner) {
+				entry = &buffer;
+				break;
+			}
+		}
+		if (entry == nullptr) {
+			GraphBuffers.push_back(GraphBuffer{pipeline.Name, name, scope, owner});
+			entry = &GraphBuffers.back();
+		}
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = usage;
+		info.size = static_cast<uint32_t>(bytes);
+		entry->Buffer = gpu::CreateBuffer(Device, &info);
+		entry->Bytes = entry->Buffer != nullptr ? static_cast<uint32_t>(bytes) : 0;
+		entry->Usage = usage;
+		if (entry->Buffer == nullptr) ENGINE_ERROR("graph buffer '{}': {}", desc->Name.Text(), SDL_GetError());
+		return entry->Buffer;
 	}
 
 	bool Renderer::Impl::EnsureBeams() {

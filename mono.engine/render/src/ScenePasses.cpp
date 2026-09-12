@@ -988,6 +988,16 @@ namespace engine::render {
 		return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
 	}
 
+	SDL_GPUBuffer *ViewRecording::ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make) {
+		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
+		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
+		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, Request.World);
+		return make ? State->EnsureGraphBuffer(*selectedPipeline, resource, owner, SceneWidth, SceneHeight)
+					: State->FindGraphBuffer(*selectedPipeline, desc->Name, scope, owner);
+	}
+
 	size_t ViewRecording::GraphTextureSlot(const graph::RunContext &context) const {
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
 		const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
@@ -999,6 +1009,10 @@ namespace engine::render {
 	Renderer::Impl::NamedTexture
 	ViewRecording::GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make) {
 		return ResourceTexture(resource, GraphTextureSlot(context), make);
+	}
+
+	SDL_GPUBuffer *ViewRecording::GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make) {
+		return ResourceBuffer(resource, GraphTextureSlot(context), make);
 	}
 
 	std::vector<SDL_GPUTextureSamplerBinding>

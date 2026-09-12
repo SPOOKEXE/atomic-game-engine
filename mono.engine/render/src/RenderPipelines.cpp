@@ -1806,6 +1806,12 @@ namespace engine::render {
 			}
 			GraphTargets.erase(GraphTargets.begin() + static_cast<ptrdiff_t>(index - 1));
 		}
+		for (size_t index = GraphBuffers.size(); index > 0; index--) {
+			GraphBuffer &buffer = GraphBuffers[index - 1];
+			if (buffer.Pipeline != pipeline) continue;
+			if (buffer.Buffer != nullptr && Device != nullptr) gpu::ReleaseBuffer(Device, buffer.Buffer);
+			GraphBuffers.erase(GraphBuffers.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
 		for (size_t index = GraphRasterPipelines.size(); index > 0; index--) {
 			GraphRasterPipeline &entry = GraphRasterPipelines[index - 1];
 			if (entry.Pipeline != pipeline) {
@@ -1831,6 +1837,9 @@ namespace engine::render {
 	void Renderer::Impl::ReleaseAllGraphState() {
 		while (!GraphTargets.empty()) {
 			ReleaseGraphState(GraphTargets.back().Pipeline);
+		}
+		while (!GraphBuffers.empty()) {
+			ReleaseGraphState(GraphBuffers.back().Pipeline);
 		}
 		while (!GraphRasterPipelines.empty()) {
 			ReleaseGraphState(GraphRasterPipelines.back().Pipeline);

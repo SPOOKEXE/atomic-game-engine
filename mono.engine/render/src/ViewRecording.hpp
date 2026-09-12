@@ -527,6 +527,9 @@ namespace engine::render {
 		// @return The texture, or an invalid one.
 		Impl::NamedTexture ResourceTexture(graph::ResourceId resource, size_t selectedSlot, bool make);
 
+		// The buffer backing a graph resource, allocating it when asked.
+		SDL_GPUBuffer *ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make);
+
 		// The selected slot has to be shared by graph target allocation and history writes.
 		size_t GraphTextureSlot(const graph::RunContext &context) const;
 
@@ -538,6 +541,9 @@ namespace engine::render {
 		// @return The texture, or an invalid one.
 		Impl::NamedTexture
 		GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make);
+
+		// `ResourceBuffer` for the viewport this node names, or this view's.
+		SDL_GPUBuffer *GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make);
 
 		// The fragment samplers for everything a node reads, in read order. An
 		// absent image binds the fallback texel rather than nothing.
