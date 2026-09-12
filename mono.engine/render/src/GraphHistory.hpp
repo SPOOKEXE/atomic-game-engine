@@ -33,6 +33,12 @@ namespace engine::render {
 		return !damage.Scene && !damage.Objects && !damage.Environment && !damage.Viewport && !damage.Portals;
 	}
 
+	// History ownership is an allocation concern. Both graph-owned and external
+	// history inputs must reject a generation that was not completed for this view.
+	inline bool GraphHistoryReadNeedsValidation(const graph::ResourceDesc &resource, bool make) {
+		return !make && resource.Lifetime == graph::ResourceLifetime::History;
+	}
+
 	inline uint64_t GraphHistoryOwner(graph::NodeScope scope, size_t view, uint64_t world) {
 		return scope == graph::NodeScope::View   ? static_cast<uint64_t>(view)
 			 : scope == graph::NodeScope::World ? world

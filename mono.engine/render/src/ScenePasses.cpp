@@ -954,21 +954,21 @@ namespace engine::render {
 		}
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, world);
+		if (GraphHistoryReadNeedsValidation(*desc, make)) {
+			if (!GraphHistoryReadable(Request.Damage)) {
+				return {};
+			}
+			return State->FindGraphHistoryForRead(
+				*selectedPipeline,
+				desc->Name,
+				scope,
+				owner,
+				GraphHistorySignature(ContentSignature, Matrices, SceneWidth, SceneHeight)
+			);
+		}
 		if (desc->External) {
 			if (desc->Name == core::Name("window")) {
 				return Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
-			}
-			if (!make && desc->Lifetime == graph::ResourceLifetime::History) {
-				if (!GraphHistoryReadable(Request.Damage)) {
-					return {};
-				}
-				return State->FindGraphHistoryForRead(
-					*selectedPipeline,
-					desc->Name,
-					scope,
-					owner,
-					GraphHistorySignature(ContentSignature, Matrices, SceneWidth, SceneHeight)
-				);
 			}
 			if (!make) {
 				return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);

@@ -27,16 +27,22 @@ void main() {
 	vec3 surfaceNormal = texture(normal, uv).xyz * 2.0 - 1.0;
 	float roughness = texture(material, uv).r;
 	float distanceFade = 1.0 / (1.0 + texture(depth, uv).r);
-	float randomSample = Noise(uv * pass.target.xy + pass.view.xx);
 	vec3 direct = texture(albedo, uv).rgb * max(surfaceNormal.y, 0.0);
 	vec3 bounce = texture(indirect, uv).rgb * distanceFade;
-	for (int bounceIndex = 1; bounceIndex < int(options.trace.x); ++bounceIndex) {
+	int maxBounces = clamp(int(options.trace.x), 1, 64);
+	for (int bounceIndex = 1; bounceIndex < maxBounces; ++bounceIndex) {
 		bounce *= 0.5 * (1.0 - roughness);
 	}
-	vec3 estimate = direct + bounce * mix(0.5, 1.0, randomSample) * (1.0 - roughness);
+	int samples = clamp(int(options.trace.w), 1, 4096);
+	vec3 estimate = vec3(0.0);
+	for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex) {
+		vec2 sampleOffset = vec2(float(sampleIndex), float(sampleIndex) * 0.61803399);
+		float randomSample = Noise(uv * pass.target.xy + pass.view.xx + sampleOffset);
+		estimate += direct + bounce * mix(0.5, 1.0, randomSample) * (1.0 - roughness);
+	}
+	estimate /= float(samples);
 	vec4 previous = texture(history, uv);
-	float sampleCount = min(previous.a, 63.0);
-	float samples = max(options.trace.w, 1.0);
-	vec3 accumulated = mix(estimate, previous.rgb, sampleCount / (sampleCount + samples));
-	imageStore(radiance, pixel, vec4(accumulated, min(sampleCount + samples, 63.0)));
+	float historySamples = clamp(previous.a, 0.0, 63.0);
+	vec3 accumulated = mix(estimate, previous.rgb, historySamples / (historySamples + float(samples)));
+	imageStore(radiance, pixel, vec4(accumulated, min(historySamples + float(samples), 63.0)));
 }

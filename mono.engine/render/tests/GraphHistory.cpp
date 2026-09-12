@@ -9,8 +9,11 @@
 TEST_SUITE_ID("engine.render.graphhistory")
 
 using engine::graph::NodeScope;
+using engine::graph::ResourceDesc;
+using engine::graph::ResourceLifetime;
 using engine::render::GraphHistoryOwner;
 using engine::render::GraphHistoryReadable;
+using engine::render::GraphHistoryReadNeedsValidation;
 using engine::render::GraphHistorySignature;
 using engine::render::PresentationDamage;
 using engine::scene::CameraMatrices;
@@ -56,6 +59,17 @@ TEST_CASE("radiance damage resets graph history reads", "[render][graph-history]
 		CHECK_FALSE(GraphHistoryReadable(damage));
 	}
 	CHECK(GraphHistoryReadable(PresentationDamage{.GameInterface = true}));
+}
+
+TEST_CASE("graph-owned history reads validate the completed generation", "[render][graph-history]") {
+	ResourceDesc history;
+	history.Lifetime = ResourceLifetime::History;
+	CHECK(GraphHistoryReadNeedsValidation(history, false));
+	CHECK_FALSE(GraphHistoryReadNeedsValidation(history, true));
+
+	// Path tracing owns its accumulation image, so it is not an external graph input.
+	history.External = false;
+	CHECK(GraphHistoryReadNeedsValidation(history, false));
 }
 
 TEST_CASE("graph history owners isolate view world and frame scopes", "[render][graph-history]") {
