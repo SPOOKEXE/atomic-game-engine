@@ -1150,6 +1150,9 @@ namespace engine::graph {
 		const auto edge = [&document](EditKind kind, std::string_view resource, std::string_view port) {
 			document.Record({.Kind = kind, .Target = core::Name(resource), .Key = core::Name(port)});
 		};
+		const auto setting = [&document](std::string_view key, std::string_view value) {
+			document.Record({.Kind = EditKind::Set, .Key = core::Name(key), .Value = std::string(value)});
+		};
 
 		resource("camera", ResourceKind::Camera, ResourceFormat::R8, true);
 		resource("coarse-instances", ResourceKind::Buffer, ResourceFormat::R8, true);
@@ -1170,7 +1173,8 @@ namespace engine::graph {
 		edge(EditKind::Reads, "coarse-instances", "instances");
 		edge(EditKind::Reads, "camera", "camera");
 		edge(EditKind::Writes, "tessellated-factors", "factors");
-		document.Record({.Kind = EditKind::Set, .Key = core::Name("target-pixels"), .Value = "12"});
+		setting("target-pixels", "12");
+		setting("uniforms", "view");
 		node("indirect-light", "global-illumination");
 		for (const auto &[source, port] : std::array{
 				 std::pair{"albedo", "albedo"},
@@ -1182,6 +1186,7 @@ namespace engine::graph {
 			edge(EditKind::Reads, source, port);
 		}
 		edge(EditKind::Writes, "indirect", "indirect");
+		setting("uniforms", "view");
 		node("screen-raytrace", "raytrace");
 		for (const auto &[source, port] : std::array{
 				 std::pair{"scene-radiance", "scene"},
@@ -1193,6 +1198,10 @@ namespace engine::graph {
 			edge(EditKind::Reads, source, port);
 		}
 		edge(EditKind::Writes, "reflections", "reflection");
+		setting("uniforms", "view");
+		setting("steps", "32");
+		setting("max-distance", "100");
+		setting("thickness", "0.1");
 		node("compose-reflections", "mix");
 		edge(EditKind::Reads, "scene-radiance", "a");
 		edge(EditKind::Reads, "reflections", "b");
@@ -1215,6 +1224,13 @@ namespace engine::graph {
 				continue;
 			}
 			if (edit.Kind == EditKind::AddNode && edit.Name == core::Name("screen-raytrace")) {
+				pathtrace.Record({
+					.Kind = EditKind::AddResource,
+					.Name = core::Name("path-history"),
+					.Resource = ResourceKind::Storage,
+					.Format = ResourceFormat::RGBA16F,
+					.Lifetime = ResourceLifetime::History,
+				});
 				pathtrace.Record({
 					.Kind = EditKind::AddResource,
 					.Name = core::Name("visible-entities"),
@@ -1242,7 +1258,8 @@ namespace engine::graph {
 						 std::pair{"normal", "normal"},
 						 std::pair{"material", "material"},
 						 std::pair{"linear-depth", "depth"},
-						 std::pair{"indirect", "indirect"}
+						 std::pair{"indirect", "indirect"},
+						 std::pair{"path-history", "history"}
 					 }) {
 					pathtrace.Record(
 						{.Kind = EditKind::Reads, .Target = core::Name(source), .Key = core::Name(port)}
@@ -1253,9 +1270,30 @@ namespace engine::graph {
 					 .Target = core::Name("path-radiance"),
 					 .Key = core::Name("radiance")}
 				);
+				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("uniforms"), .Value = "view"});
 				pathtrace.Record(
 					{.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
 				);
+				pathtrace.Record({
+					.Kind = EditKind::AddNode,
+					.Name = core::Name("path-history-store"),
+					.NodeKind = core::Name("dispatch"),
+					.Scope = NodeScope::View,
+				});
+				pathtrace.Record(
+					{.Kind = EditKind::Reads,
+					 .Target = core::Name("path-radiance"),
+					 .Key = core::Name("source")}
+				);
+				pathtrace.Record(
+					{.Kind = EditKind::Writes,
+					 .Target = core::Name("path-history"),
+					 .Key = core::Name("target")}
+				);
+				pathtrace.Record(
+					{.Kind = EditKind::Set, .Key = core::Name("shader"), .Value = "attachment-copy.comp"}
+				);
+				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("uniforms"), .Value = "view"});
 				skippingRaytrace = true;
 				continue;
 			}

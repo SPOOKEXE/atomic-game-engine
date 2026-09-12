@@ -250,6 +250,7 @@ namespace engine::graph {
 			if (spec.Kind == core::Name("raytrace")) {
 				spec.Params.push_back(NumberParam("steps", "March steps", "32", 1.0, 512.0));
 				spec.Params.push_back(NumberParam("max-distance", "Max distance", "100", 0.1, 100'000.0));
+				spec.Params.push_back(NumberParam("thickness", "Depth thickness", "0.1", 0.001, 100.0));
 			}
 			if (spec.Kind == core::Name("pathtrace")) {
 				spec.Params.push_back(
@@ -267,11 +268,13 @@ namespace engine::graph {
 			if (spec.Kind == core::Name("raster")) {
 				spec.Params.push_back(SelectParam("load", "Load", "clear", {"clear", "load"}));
 			}
-			if (spec.Kind == core::Name("dispatch")) {
+			if (Named(
+					spec.Kind, {"dispatch", "tessellate", "global-illumination", "raytrace", "pathtrace"}
+				)) {
 				spec.Params.push_back(
 					SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
 				);
-				spec.Params.push_back(SelectParam("uniforms", "Uniforms", "none", {"none", "view"}));
+				spec.Params.push_back(SelectParam("uniforms", "Uniforms", "view", {"none", "view"}));
 				spec.Params.push_back(
 					SelectParam("instances", "Instance rows", "none", {"none", "resident"})
 				);
@@ -881,13 +884,14 @@ namespace engine::graph {
 			 "raytrace.comp"},
 
 			{"tessellate",
-			 "Adaptive tessellation",
+			 "Tessellation factor field",
 			 C::Draw,
 			 S::View,
 			 {{"instances", K::Buffer, F::R8, true, "LOD-selected source instances."},
 			  {"camera", K::Camera, F::R8, true, "The projection that sets edge density."}},
 			 {{"factors", K::Storage, F::R16F, true, "Screen-space tessellation factor field."}},
-			 "Builds a projected edge-density field for adaptive tessellation before geometry draws.",
+			 "Builds a screen-space factor field for a future geometry tessellation pass. No draw node "
+			 "consumes it yet.",
 			 false,
 			 "tessellate.comp"},
 

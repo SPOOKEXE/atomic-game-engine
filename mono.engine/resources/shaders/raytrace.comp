@@ -19,10 +19,27 @@ void main() {
 	if (any(greaterThanEqual(pixel, ivec2(pass.target.xy)))) return;
 	vec2 uv = (vec2(pixel) + 0.5) * pass.target.zw;
 	vec3 surfaceNormal = texture(normal, uv).xyz * 2.0 - 1.0;
-	float rayLength = 0.01 + min(texture(depth, uv).r * 0.002, 0.06);
-	vec2 hit = clamp(uv + surfaceNormal.xz * rayLength, 0.0, 1.0);
+	float originDepth = texture(depth, uv).r;
+	float maxDistance = 100.0;
+	float thickness = 0.1;
+	const int steps = 32;
+	vec2 direction = normalize(surfaceNormal.xz + vec2(0.0001)) * pass.target.zw;
+	vec2 hit = uv;
+	bool hitValid = false;
+	for (int index = 1; index <= steps; ++index) {
+		float distance = maxDistance * float(index) / float(steps);
+		vec2 candidate = uv + direction * distance;
+		if (any(lessThan(candidate, vec2(0.0))) || any(greaterThan(candidate, vec2(1.0)))) break;
+		float candidateDepth = texture(depth, candidate).r;
+		float rayDepth = originDepth + distance * max(abs(surfaceNormal.z), 0.02);
+		if (abs(candidateDepth - rayDepth) <= thickness) {
+			hit = candidate;
+			hitValid = true;
+			break;
+		}
+	}
 	float reflectivity = 1.0 - texture(material, uv).r;
-	vec3 traced = texture(scene, hit).rgb;
+	vec3 traced = hitValid ? texture(scene, hit).rgb : texture(indirect, uv).rgb;
 	vec3 fallback = texture(indirect, uv).rgb;
-	imageStore(reflection, pixel, vec4(mix(fallback, traced, reflectivity), 1.0));
+	imageStore(reflection, pixel, vec4(mix(fallback, traced, reflectivity), hitValid ? 1.0 : 0.0));
 }

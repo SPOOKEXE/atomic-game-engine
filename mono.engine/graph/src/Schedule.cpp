@@ -261,7 +261,8 @@ namespace engine::graph {
 					}
 				}
 
-				if (producer == count && writers.size() == 1 && writers[0] != reader) {
+				if (producer == count && writers.size() == 1 && writers[0] != reader &&
+					(desc == nullptr || desc->Lifetime != ResourceLifetime::History)) {
 					producer = writers[0];
 				}
 
@@ -274,6 +275,11 @@ namespace engine::graph {
 							offender.Text()
 						);
 						return ScheduleStatus::MissingProducer;
+					}
+					// A history read observes the completed previous generation. Its later
+					// writer updates the next generation and must not form a same-frame cycle.
+					if (desc->Lifetime == ResourceLifetime::History) {
+						continue;
 					}
 					const auto later = std::find_if(writers.begin(), writers.end(), [reader](size_t writer) {
 						return writer > reader;
