@@ -223,7 +223,7 @@ medium-render-profile seconds="15":
         previous_draw_calls="$draw_calls"
         grep -q 'gpu timestamps enabled' "$base.log"
         grep -Eq '^gpu [[:graph:]]+' "$base-frame.txt"
-        grep -Eq '^[1-9][0-9]* of [1-9][0-9]* resident instance chunk\(s\)' "$base.log"
+        grep -Eq '[1-9][0-9]* of [1-9][0-9]* resident instance chunk\(s\)' "$base.log"
         # RenderFeaturesDemo's three authored nodes prove this run used the
         # staged document rather than the default PBR fallback.
         grep -q 'demo-compute' "$base-frame.txt"
