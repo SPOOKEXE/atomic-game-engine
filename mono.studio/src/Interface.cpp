@@ -1357,7 +1357,7 @@ namespace studio {
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Asset Profiler", nullptr, &ShowAssetProfiler);
-		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
+		ImGui::MenuItem("CDN Config", nullptr, &ShowCdn);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
 		ImGui::SeparatorText("Script");
@@ -1374,8 +1374,8 @@ namespace studio {
 		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
 
 		ImGui::SeparatorText("Engine");
-		ImGui::MenuItem("DataStore", nullptr, &ShowDatasets);
-		ImGui::MenuItem("DataStores", nullptr, &ShowDataStores);
+		ImGui::MenuItem("DataStore Config", nullptr, &ShowDatasets);
+		ImGui::MenuItem("DataStore Editor", nullptr, &ShowDataStores);
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
