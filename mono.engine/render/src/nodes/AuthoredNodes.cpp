@@ -489,7 +489,7 @@ namespace engine::render {
 					continue;
 				}
 				const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
-				State->CommitGraphHistoryWrite(
+				State->StageGraphHistoryWrite(
 					*selectedPipeline,
 					desc->Name,
 					scope,
@@ -511,8 +511,10 @@ namespace engine::render {
 					if (timingSlot < VulkanTimestamps::SLOTS) {
 						State->PendingMarks[timingSlot].clear();
 					}
+					State->DiscardPendingGraphHistoryWrites();
 					return false;
 				}
+				State->CommitPendingGraphHistoryWrites();
 				dedicatedComputeSubmitted = true;
 				result.AsyncComputeCommandBuffers++;
 			} else {

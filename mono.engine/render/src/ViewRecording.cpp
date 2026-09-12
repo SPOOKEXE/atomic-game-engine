@@ -2909,6 +2909,7 @@ namespace engine::render {
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteResidentUploads(false);
+				State->DiscardPendingGraphHistoryWrites();
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
@@ -2922,6 +2923,7 @@ namespace engine::render {
 			{
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);
+				State->CommitPendingGraphHistoryWrites();
 			}
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {

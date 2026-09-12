@@ -2457,6 +2457,7 @@ namespace engine::render {
 
 		const scene::WorldLighting previousLighting = CurrentLighting();
 		State->BatchActive = true;
+		State->DiscardPendingGraphHistoryWrites();
 		State->MeshResidencyRecorded = false;
 		State->PreparedScopes.Clear();
 		State->BatchFailed = false;
@@ -2578,6 +2579,10 @@ namespace engine::render {
 			if (!submitted) {
 				State->StageProbe.Clear(State->Device);
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
+				State->DiscardPendingGraphHistoryWrites();
+			} else {
+				// A partial batch releases its command buffer but never certifies history.
+				State->DiscardPendingGraphHistoryWrites();
 			}
 			State->CompleteResidentUploads(submitted);
 			State->BatchCommand = nullptr;

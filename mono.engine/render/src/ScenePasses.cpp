@@ -99,7 +99,13 @@ namespace engine::render {
 			// The batch owner drops any recorded downloads with the frame.
 			State->BatchFailed = true;
 		} else {
-			State->CompleteResidentUploads(SDL_SubmitGPUCommandBuffer(command));
+			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
+			if (submitted) {
+				State->CommitPendingGraphHistoryWrites();
+			} else {
+				State->DiscardPendingGraphHistoryWrites();
+			}
+			State->CompleteResidentUploads(submitted);
 			State->DropDownloads();
 		}
 	}

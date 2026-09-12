@@ -500,6 +500,19 @@ namespace engine::render {
 
 		std::vector<GraphTarget> GraphTargets;
 
+		// A history image becomes readable only after the command buffer that wrote
+		// it has entered the queue. Batched views share one command buffer, so this
+		// state belongs to the renderer rather than one view recording.
+		struct PendingGraphHistoryWrite {
+			const NamedPipeline *Pipeline = nullptr;
+			core::Name Resource;
+			graph::NodeScope Scope = graph::NodeScope::Frame;
+			uint64_t Owner = 0;
+			uint64_t Signature = 0;
+		};
+
+		std::vector<PendingGraphHistoryWrite> PendingGraphHistoryWrites;
+
 		// Buffer resources use the same ownership key as images. A graph can name
 		// the same buffer in several views without letting one view overwrite another.
 		struct GraphBuffer {
@@ -542,6 +555,12 @@ namespace engine::render {
 			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
 			uint64_t signature
 		);
+		void StageGraphHistoryWrite(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+			uint64_t signature
+		);
+		void CommitPendingGraphHistoryWrites();
+		void DiscardPendingGraphHistoryWrites();
 		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
 			const NamedPipeline &pipeline,

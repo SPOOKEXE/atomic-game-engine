@@ -556,6 +556,26 @@ namespace engine::render {
 		}
 	}
 
+	void Renderer::Impl::StageGraphHistoryWrite(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+		uint64_t signature
+	) {
+		PendingGraphHistoryWrites.push_back({&pipeline, resource, scope, owner, signature});
+	}
+
+	void Renderer::Impl::CommitPendingGraphHistoryWrites() {
+		for (const PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
+			if (write.Pipeline != nullptr) {
+				CommitGraphHistoryWrite(*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature);
+			}
+		}
+		PendingGraphHistoryWrites.clear();
+	}
+
+	void Renderer::Impl::DiscardPendingGraphHistoryWrites() {
+		PendingGraphHistoryWrites.clear();
+	}
+
 	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {
 		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
 			const graph::ResourceId id{value};
