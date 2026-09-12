@@ -156,6 +156,34 @@ TEST_CASE("portal host forwards the latest camera and geometry demand", "[render
 	CHECK(captured.Geometry == latest.Request.Geometry);
 }
 
+TEST_CASE("portal host keeps a producer through world store replacement", "[render][portal-host]") {
+	Worlds worlds;
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	const auto original = host.Serve(worlds.Destination);
+	REQUIRE(original.Generation != 0);
+	uint64_t previousIdentity = 0;
+	REQUIRE(worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+		previousIdentity = store.Identity();
+		core::ByteWriter snapshot;
+		REQUIRE(store.Save(snapshot));
+		core::ByteReader reader(snapshot.Bytes());
+		REQUIRE(store.LoadContents(reader));
+		CHECK(store.Identity() != previousIdentity);
+	}) == world::WorldStatus::Ok);
+
+	CHECK(host.Pump(0, 0, START).Requests == 0);
+	CHECK(worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL) == original);
+	CHECK(host.Serve(worlds.Destination) == original);
+
+	auto demand = worlds.Demand();
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	const auto progress = host.Pump(0, 0, START);
+	CHECK(progress.Requests == 1);
+	CHECK(progress.Sent == 1);
+}
+
 namespace {
 	PortalImageReply SendRetainedBodyRequest(
 		PortalImageHost &host,

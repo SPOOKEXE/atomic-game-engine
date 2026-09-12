@@ -462,12 +462,12 @@ namespace client {
 		// Drawable readiness accepts one completed image. Cancelling on every
 		// camera move prevents a remote child capture from ever completing.
 		(void)PortalImages->Pump(0, Universe_->AlphaOf(next.World), now);
-		if (PortalImages->CurrentImage(view.Slot, core::Name("viewport-eye")) != 0) return true;
+		if (PortalImages->Image(view.Slot, core::Name("viewport-eye")) != 0) return true;
 		(void)PortalImages->SubmitEye(
 			next.World, {core::Name(next.Offer.Claim.Destination), next.World}, view, dimensions, now
 		);
 		(void)PortalImages->Pump(0, Universe_->AlphaOf(next.World), now);
-		return PortalImages->CurrentImage(view.Slot, view.EyeImageKey) != 0;
+		return PortalImages->Image(view.Slot, view.EyeImageKey) != 0;
 	}
 
 	bool Client::ReceivePortalSession(const engine::game::PortalSessionMessage &message) {

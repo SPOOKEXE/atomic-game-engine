@@ -86,7 +86,6 @@ namespace engine::render {
 		}
 		struct Producer {
 			world::WorldId World;
-			uint64_t StoreIdentity = 0;
 			world::PresentationAddress Address;
 			std::unique_ptr<PortalImageProducer> Runtime;
 		};
@@ -115,7 +114,15 @@ namespace engine::render {
 
 		void PruneRetiredProducers() {
 			std::erase_if(Producers, [&](const Producer &producer) {
-				return LocalStoreIdentity(producer.World) != producer.StoreIdentity;
+				// The presentation endpoint belongs to the world incarnation. Store
+				// identity also changes after a valid replicated snapshot, so it cannot
+				// distinguish a restored store from a destroyed and recycled world slot.
+				if (Universe.LookupPresentation(producer.World, producer.Address.Channel) == producer.Address)
+					return false;
+				for (auto &source : Sources)
+					source.Runtime->InvalidateEndpoint(producer.Address);
+				(void)Universe.ClosePresentation(producer.Address);
+				return true;
 			});
 			std::erase_if(RetainedBodyPolicies, [&](const RetainedBodyPolicy &policy) {
 				return LocalStoreIdentity(policy.World) != policy.StoreIdentity;
@@ -481,7 +488,7 @@ namespace engine::render {
 				if (binding.World == destination.World)
 					runtime->SetContentOwner(binding.Owner, binding.Foreign);
 			}
-			Producers.push_back({destination.World, storeIdentity, opened.Address, std::move(runtime)});
+			Producers.push_back({destination.World, opened.Address, std::move(runtime)});
 			return opened.Address;
 		}
 	};
