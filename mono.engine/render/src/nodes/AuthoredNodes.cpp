@@ -8,6 +8,7 @@
 
 #include "ViewRecording.hpp"
 #include "GraphHistory.hpp"
+#include "HardRender.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -20,16 +21,6 @@
 
 namespace engine::render {
 	namespace {
-		// Shared by the hard screen-space shaders. Keeping authored values in a
-		// separate slot preserves GraphPassUniforms for ordinary dispatch nodes.
-		struct HardRenderUniforms {
-			glm::vec4 Trace{32.0f, 100.0f, 0.1f, 0.0f};
-		};
-
-		bool IsHardRenderNode(core::Name kind) {
-			return kind == core::Name("raytrace") || kind == core::Name("pathtrace");
-		}
-
 		bool AttachmentDemanded(
 			std::span<const scene::DrawInstance> instances,
 			core::Name node,
@@ -73,6 +64,7 @@ namespace engine::render {
 			const DeviceCaps &caps,
 			double animationSeconds,
 			const scene::CameraMatrices &matrices,
+			const core::CFrame &cameraFrame,
 			const scene::Camera &camera,
 			const scene::WorldLighting &lighting,
 			uint32_t width,
@@ -94,6 +86,9 @@ namespace engine::render {
 				static_cast<float>(width) / static_cast<float>(height),
 				static_cast<float>(instanceCount),
 			};
+			uniforms.Eye = glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
+			const core::Vector3 forward = cameraFrame.LookVector();
+			uniforms.CameraDepth = glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(cameraFrame.Position)};
 			uniforms.RenderFeatures = glm::uvec4{
 				SupportedRenderFeatures(caps),
 				scene::ApplyRenderFeaturePolicy(scene::ALL_RENDER_FEATURES, lighting.RenderFeatures),
@@ -208,6 +203,7 @@ namespace engine::render {
 				State->Caps,
 				State->AnimationSeconds,
 				matrices,
+				recording.Request.CameraFrame,
 				drawCamera,
 				recording.CurrentLighting,
 				targets.front().Width,
@@ -341,10 +337,10 @@ namespace engine::render {
 			const uint32_t localZ = demanded ? node->Integer(core::Name("local.z"), 1) : 1;
 			const std::string *instances = node->Parameter(core::Name("instances"));
 			const bool readInstances = demanded && instances != nullptr && *instances == "resident";
-			const bool hardUniforms = IsHardRenderNode(node->Kind);
+			const bool traceUniforms = IsTraceNode(node->Kind);
 			const std::string *uniforms = node->Parameter(core::Name("uniforms"));
-			// Slot one is the hard-node parameter block, so slot zero must exist.
-			const bool readViewUniforms = hardUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
+			// Slot one is the trace parameter block, so slot zero must exist.
+			const bool readViewUniforms = traceUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
 			if (localX == 0 || localY == 0 || localZ == 0) {
 				ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
 				return true;
@@ -359,7 +355,7 @@ namespace engine::render {
 				bindings.size(),
 				writes.size(),
 				readInstances ? 1u : 0u,
-				(readViewUniforms ? 1u : 0u) + (hardUniforms ? 1u : 0u),
+				(readViewUniforms ? 1u : 0u) + (traceUniforms ? 1u : 0u),
 				localX,
 				localY,
 				localZ
@@ -457,6 +453,7 @@ namespace engine::render {
 					State->Caps,
 					State->AnimationSeconds,
 					recording.Matrices,
+					recording.Request.CameraFrame,
 					recording.DrawCamera,
 					recording.CurrentLighting,
 					firstTarget.Width,
@@ -465,15 +462,17 @@ namespace engine::render {
 				);
 				SDL_PushGPUComputeUniformData(dispatchCommand, 0, &passUniforms, sizeof(passUniforms));
 			}
-			if (hardUniforms) {
-				HardRenderUniforms hard;
-				hard.Trace.x = node->Kind == core::Name("pathtrace")
-							   ? node->Number(core::Name("max-bounces"), 3.0f)
-							   : node->Number(core::Name("steps"), 32.0f);
-				hard.Trace.y = node->Number(core::Name("max-distance"), 100.0f);
-				hard.Trace.z = node->Number(core::Name("thickness"), 0.1f);
-				hard.Trace.w = node->Number(core::Name("samples-per-frame"), 1.0f);
-				SDL_PushGPUComputeUniformData(dispatchCommand, 1, &hard, sizeof(hard));
+			if (traceUniforms) {
+				bool historyAvailable = false;
+				for (const graph::ResourceId resource : context.Reads) {
+					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+					if (desc != nullptr && desc->Lifetime == graph::ResourceLifetime::History) {
+						historyAvailable = graphTexture(resource, context, false).IsValid();
+						break;
+					}
+				}
+				const TraceOptions options = TraceOptionsFor(*node, historyAvailable);
+				SDL_PushGPUComputeUniformData(dispatchCommand, 1, &options, sizeof(options));
 			}
 			const std::string *mode = node->Parameter(core::Name("dispatch.mode"));
 			const bool coverTarget = mode == nullptr || *mode != "groups";

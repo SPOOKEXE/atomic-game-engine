@@ -13,6 +13,10 @@ layout(set = 2, binding = 0, std140) uniform Pass {
 	vec4 view;
 	uvec4 features;
 } pass;
+layout(set = 2, binding = 1, std140) uniform Trace {
+	vec4 trace;
+	uvec4 inputs;
+} options;
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -21,8 +25,14 @@ void main() {
 	vec3 surfaceNormal = texture(normal, uv).xyz * 2.0 - 1.0;
 	float visibility = texture(occlusion, uv).r;
 	float roughness = texture(material, uv).r;
-	float distanceFade = 1.0 / (1.0 + texture(depth, uv).r);
+	float distanceFade = clamp(1.0 - texture(depth, uv).r / max(options.trace.y, 0.1), 0.0, 1.0);
 	float skyWeight = max(surfaceNormal.y, 0.0);
-	vec3 bounce = texture(albedo, uv).rgb * visibility * distanceFade * mix(0.08, 0.22, skyWeight);
+	int rays = clamp(int(options.trace.x), 1, 64);
+	float estimate = 0.0;
+	for (int ray = 0; ray < rays; ++ray) {
+		vec2 offset = vec2(float(ray), float(ray) * 0.61803399);
+		estimate += 0.75 + 0.5 * fract(sin(dot(uv * pass.target.xy + pass.view.xx + offset, vec2(12.9898, 78.233))) * 43758.5453);
+	}
+	vec3 bounce = texture(albedo, uv).rgb * visibility * distanceFade * mix(0.08, 0.22, skyWeight) * estimate / float(rays);
 	imageStore(indirect, pixel, vec4(bounce * (1.0 - roughness * 0.5), 1.0));
 }

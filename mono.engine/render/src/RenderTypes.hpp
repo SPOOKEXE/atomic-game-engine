@@ -286,6 +286,8 @@ namespace engine::render {
 		glm::mat4 InverseViewProjection{1.0f};
 		glm::vec4 Target{};
 		glm::vec4 View{};
+		glm::vec4 Eye{};
+		glm::vec4 CameraDepth{};
 
 		// x: device-supported bits. y: defaults after world policy.
 		// z/w: camera enable and disable masks. A shader applies the instance

@@ -14,7 +14,10 @@ layout(set = 2, binding = 0, std140) uniform Pass {
 	vec4 view;
 	uvec4 features;
 } pass;
-layout(set = 2, binding = 1, std140) uniform Trace { vec4 trace; } options;
+layout(set = 2, binding = 1, std140) uniform Trace {
+	vec4 trace;
+	uvec4 inputs;
+} options;
 
 float Noise(vec2 samplePoint) {
 	return fract(sin(dot(samplePoint, vec2(12.9898, 78.233))) * 43758.5453);
@@ -41,7 +44,7 @@ void main() {
 		estimate += direct + bounce * mix(0.5, 1.0, randomSample) * (1.0 - roughness);
 	}
 	estimate /= float(samples);
-	vec4 previous = texture(history, uv);
+	vec4 previous = options.inputs.x != 0u ? texture(history, uv) : vec4(0.0);
 	float historySamples = clamp(previous.a, 0.0, 63.0);
 	vec3 accumulated = mix(estimate, previous.rgb, historySamples / (historySamples + float(samples)));
 	imageStore(radiance, pixel, vec4(accumulated, min(historySamples + float(samples), 63.0)));
