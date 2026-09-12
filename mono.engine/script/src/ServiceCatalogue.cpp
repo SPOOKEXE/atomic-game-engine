@@ -20,6 +20,7 @@
 //
 // @tier L9 · shared
 
+#include <engine/script/DataSceneService.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
 
 #include <array>
@@ -38,7 +39,7 @@ namespace engine::script {
 		// studio row installs after the debugger pointer is set and before
 		// `luaL_sandbox` freezes the globals - which is why it is walked in a
 		// second pass rather than moved up the list.
-		constexpr std::array<Row, 16> ROWS{{
+		constexpr std::array<Row, 17> ROWS{{
 			// --- the bus, which is the only route out of a world ---------------
 			//
 			// **All four described once since v0.16, and the last of them is what
@@ -99,6 +100,11 @@ namespace engine::script {
 			{{"RunService", ServiceAvailability::Always, ServiceLanguages::Both}, RunServiceSurface},
 
 			{{"ComputeService", ServiceAvailability::Always, ServiceLanguages::Both}, ComputeServiceSurface},
+
+			// Read-only observation over explicitly identified ECS rows. The service
+			// has no renderer, resource store, or lifecycle state of its own.
+			{{"DataSceneService", ServiceAvailability::Always, ServiceLanguages::Both},
+			 DataSceneServiceSurface},
 
 			// --- the two the property mechanism closed --------------------------
 			//

@@ -188,6 +188,8 @@ namespace engine::script {
 		// again rather than assuming it was fixed.
 
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
+		JsOf(Context).DataCapture = limits.DataCapture;
+		JsOf(Context).DataLifecycle = limits.DataLifecycle;
 		OpenJsSurface(Context);
 		OpenJsScopes(Context);
 

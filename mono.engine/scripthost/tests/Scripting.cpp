@@ -1380,6 +1380,69 @@ TEST_CASE("a script paints an image and reads its size back", "[scripting]") {
 	)");
 }
 
+TEST_CASE("both script languages copy editable image RGBA buffers", "[scripting][editableimage]") {
+	RegisterClasses();
+	engine::scene::EditableImageClass();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store(language == Language::Luau ? "editable_image_buffer_luau" : "editable_image_buffer_js");
+		const auto runtime = MakeRuntime(store, language);
+		const char *source = language == Language::Luau ? R"(
+			local image = Instance.new("EditableImage")
+			image.Name = "BufferedImage"
+			assert(image:Resize(2, 2), "Resize was refused")
+			local source = buffer.create(16)
+			for offset = 0, 15 do
+				buffer.writeu8(source, offset, offset)
+			end
+			assert(image:FromBuffer(source), "FromBuffer refused RGBA8 pixels")
+			buffer.writeu8(source, 0, 255)
+			local copy = image:ToBuffer()
+			assert(typeof(copy) == "buffer" and buffer.len(copy) == 16, "ToBuffer did not return a tight buffer")
+			assert(buffer.readu8(copy, 0) == 0 and buffer.readu8(copy, 3) == 3, "FromBuffer changed RGBA order")
+			assert(buffer.readu8(copy, 8) == 8 and buffer.readu8(copy, 11) == 11, "FromBuffer changed row order")
+			buffer.writeu8(copy, 3, 255)
+			assert(buffer.readu8(image:ToBuffer(), 3) == 3, "ToBuffer aliased image pixels")
+			assert(not image:FromBuffer(buffer.create(15)), "FromBuffer accepted a short buffer")
+			assert(not image:FromBuffer(buffer.create(17)), "FromBuffer accepted a long buffer")
+			assert(not pcall(function() image:FromBuffer("not a buffer") end), "FromBuffer accepted a string")
+			image.Parent = workspace
+		)"
+														: R"(
+			const image = Instance.new('EditableImage');
+			image.Name = 'BufferedImage';
+			if (!image.Resize(2, 2)) throw new Error('Resize was refused');
+			const source = new Uint8Array(16);
+			for (let offset = 0; offset < source.length; offset++) source[offset] = offset;
+			if (!image.FromBuffer(source.buffer)) throw new Error('FromBuffer refused RGBA8 pixels');
+			source[0] = 255;
+			const copy = new Uint8Array(image.ToBuffer());
+			if (copy.length !== 16) throw new Error('ToBuffer did not return a tight buffer');
+			if (copy[0] !== 0 || copy[3] !== 3 || copy[8] !== 8 || copy[11] !== 11) {
+				throw new Error('FromBuffer changed RGBA or row order');
+			}
+			copy[3] = 255;
+			if (new Uint8Array(image.ToBuffer())[3] !== 3) throw new Error('ToBuffer aliased image pixels');
+			if (image.FromBuffer(new ArrayBuffer(15)) || image.FromBuffer(new ArrayBuffer(17))) {
+				throw new Error('FromBuffer accepted the wrong byte count');
+			}
+			let acceptedString = false;
+			try { image.FromBuffer('not a buffer'); acceptedString = true; } catch (_) {}
+			if (acceptedString) throw new Error('FromBuffer accepted a string');
+			image.Parent = workspace;
+		)";
+		MustRun(*runtime, source);
+
+		const Entity image = InScene(store, "BufferedImage");
+		const auto *pixels = store.Get<engine::scene::EditableImage>(image);
+		REQUIRE(pixels != nullptr);
+		CHECK(pixels->Pixels[0] == 0);
+		CHECK(pixels->Pixels[3] == 3);
+		CHECK(pixels->Pixels[8] == 8);
+		CHECK(pixels->Pixels[11] == 11);
+		CHECK(pixels->Revision == 2);
+	}
+}
+
 TEST_CASE("DrawRectangle refuses an instance that is not an EditableImage", "[scripting]") {
 	RegisterClasses();
 	Store store("script_test");

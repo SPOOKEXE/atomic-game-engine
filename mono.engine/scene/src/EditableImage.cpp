@@ -15,6 +15,18 @@
 namespace engine::scene {
 
 	namespace {
+		bool PixelByteCount(const EditableImage &image, size_t &bytes) {
+			if (image.Width == 0 || image.Height == 0) {
+				return false;
+			}
+			const uint64_t pixels = static_cast<uint64_t>(image.Width) * image.Height;
+			if (pixels > MAXIMUM_EDITABLE_IMAGE_PIXELS) {
+				return false;
+			}
+			bytes = static_cast<size_t>(pixels) * 4;
+			return image.Pixels.size() == bytes;
+		}
+
 		// Writes one pixel with the ordinary Porter-Duff "over" operator,
 		// straight (not premultiplied) alpha in and out. Out-of-range
 		// coordinates are silently skipped - every caller has already
@@ -135,6 +147,43 @@ namespace engine::scene {
 		image->Width = width;
 		image->Height = height;
 		image->Pixels.assign(static_cast<size_t>(width) * height * 4, 0);
+		image->Revision++;
+		return true;
+	}
+
+	std::vector<std::byte> EditableImageToBuffer(const ecs::Store &store, ecs::Entity instance) {
+		const EditableImage *image = store.Get<EditableImage>(instance);
+		size_t bytes = 0;
+		if (image == nullptr || !PixelByteCount(*image, bytes)) {
+			return {};
+		}
+
+		std::vector<std::byte> copy(bytes);
+		std::transform(image->Pixels.begin(), image->Pixels.end(), copy.begin(), [](uint8_t byte) {
+			return static_cast<std::byte>(byte);
+		});
+		return copy;
+	}
+
+	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels) {
+		EditableImage *image = store.GetMutable<EditableImage>(instance);
+		size_t expected = 0;
+		if (image == nullptr || !PixelByteCount(*image, expected) || pixels.size() != expected) {
+			return false;
+		}
+
+		const bool changed = !std::equal(
+			pixels.begin(), pixels.end(), image->Pixels.begin(), [](std::byte source, uint8_t stored) {
+				return source == static_cast<std::byte>(stored);
+			}
+		);
+		if (!changed) {
+			return true;
+		}
+
+		std::transform(pixels.begin(), pixels.end(), image->Pixels.begin(), [](std::byte byte) {
+			return std::to_integer<uint8_t>(byte);
+		});
 		image->Revision++;
 		return true;
 	}

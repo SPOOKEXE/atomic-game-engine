@@ -443,6 +443,8 @@ namespace engine::script {
 		bounds->Context.World = &Store;
 		bounds->Context.Role = limits.Role;
 		bounds->Context.Access = limits.EffectiveCapabilities();
+		bounds->Context.DataCapture = limits.DataCapture;
+		bounds->Context.DataLifecycle = limits.DataLifecycle;
 		bounds->Context.Profiler = &ScriptProfile;
 
 		State = lua_newstate(Allocate, bounds);

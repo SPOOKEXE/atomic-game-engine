@@ -119,6 +119,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -126,6 +127,8 @@
 #include <vector>
 
 namespace engine::script {
+	class DataCaptureBridge;
+	class DataLifecycleBridge;
 	// Two parallel placement arrays owned by one runtime's marshalling scratch.
 	//
 	// @since v0.22
@@ -197,6 +200,12 @@ namespace engine::script {
 		// runtime was built. Handing the runtime over would put every other thing
 		// on it - `Run`, `Debug`, the limits - one dot away from a service method.
 		virtual const HostRole &Role() const = 0;
+
+		// The host-owned capture queue for this runtime. The bridge accepts copied
+		// requests only, so a script call cannot touch renderer-owned state.
+		virtual const std::shared_ptr<DataCaptureBridge> &DataCapture() const = 0;
+
+		virtual const std::shared_ptr<DataLifecycleBridge> &DataLifecycle() const = 0;
 
 		// Every tween this VM has made.
 		//

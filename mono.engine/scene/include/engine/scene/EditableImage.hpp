@@ -36,6 +36,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::ecs {
@@ -112,6 +113,28 @@ namespace engine::scene {
 	//         `MAXIMUM_EDITABLE_IMAGE_PIXELS`.
 	// @since v0.18
 	bool ResizeEditableImage(ecs::Store &store, ecs::Entity instance, uint32_t width, uint32_t height);
+
+	// Returns an owned copy of the image's tightly packed pixels. The bytes are
+	// row-major with the top row first, R-G-B-A UNORM8 in the engine's linear
+	// colour space, and straight alpha. An invalid or internally malformed image
+	// returns an empty buffer rather than exposing storage the drawing methods
+	// cannot safely index.
+	//
+	// @param store    The world.
+	// @param instance The `EditableImage` instance.
+	// @return A copy of `Width * Height * 4` bytes, or empty on refusal.
+	std::vector<std::byte> EditableImageToBuffer(const ecs::Store &store, ecs::Entity instance);
+
+	// Replaces an image's pixels from an exactly sized, tightly packed RGBA8
+	// buffer. This changes neither dimensions nor image format. The source is
+	// copied, so retaining or mutating it after this call cannot affect the
+	// image. A rejected write leaves pixels and revision untouched.
+	//
+	// @param store    The world.
+	// @param instance The `EditableImage` instance.
+	// @param pixels   Exactly `Width * Height * 4` RGBA8 bytes.
+	// @return `false` for an invalid image or malformed byte count.
+	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels);
 
 	// Fills an axis-aligned rectangle, clipped to the image.
 	//

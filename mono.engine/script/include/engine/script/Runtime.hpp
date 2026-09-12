@@ -38,6 +38,8 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Language.hpp>
@@ -47,6 +49,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -207,6 +210,10 @@ namespace engine::script {
 	//
 	// @since v0.5
 	struct RuntimeLimits {
+		// Host-owned, runtime-scoped adapters. They are never process globals and
+		// service calls may only enqueue work for their owning host thread.
+		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 		// The most memory one VM may hold, in bytes.
 		//
 		// Allocation past this fails inside the VM, which surfaces as an
@@ -783,6 +790,13 @@ namespace engine::script {
 			return Breakpoints;
 		}
 
+		const std::shared_ptr<DataCaptureBridge> &CaptureBridge() const {
+			return DataCapture;
+		}
+		const std::shared_ptr<DataLifecycleBridge> &LifecycleBridge() const {
+			return DataLifecycle;
+		}
+
 	  protected:
 		// Binds a runtime to the world it builds into and the role it believes
 		// it is on.
@@ -791,7 +805,8 @@ namespace engine::script {
 		// @param limits Where the scripts stand and what they may access.
 		Runtime(ecs::Store &store, const RuntimeLimits &limits)
 			: Store(store), HostRoleValue(limits.Role), ScriptOriginValue(limits.Origin),
-			  ScriptCapabilitiesValue(limits.EffectiveCapabilities()) {}
+			  ScriptCapabilitiesValue(limits.EffectiveCapabilities()), DataCapture(limits.DataCapture),
+			  DataLifecycle(limits.DataLifecycle) {}
 
 		// The world this runtime builds into. A reference rather than a handle,
 		// because a VM is created for one world and dies with it.
@@ -805,6 +820,8 @@ namespace engine::script {
 
 		// The resolved grants. `Automatic` never survives construction.
 		ScriptCapabilities ScriptCapabilitiesValue = ScriptCapabilities::None;
+		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// The last failure, or empty. Read through `LastError`.
 		std::string Error;

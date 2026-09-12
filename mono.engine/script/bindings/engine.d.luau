@@ -1470,6 +1470,11 @@ declare extern type Instance with
 	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean
 	function DrawLine(self, from: Vector2, to: Vector2, colour: Color3, transparency: number?): boolean
 	function DrawCircle(self, centre: Vector2, radius: number, colour: Color3, transparency: number?): boolean
+	-- Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight alpha.
+	-- FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a length mismatch.
+	-- Buffers above the 64 MiB image ceiling raise before the image changes.
+	function ToBuffer(self): buffer
+	function FromBuffer(self, buffer: buffer): boolean
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
@@ -2844,6 +2849,28 @@ declare extern type ComputeService with
 	): { number }
 end
 
+-- Read-only ECS observations for a data factory. Returned records are copies;
+-- entities without a unique DataFactoryId string are intentionally omitted.
+declare extern type DataSceneService with
+	function GetCapabilities(self): any
+	function GetSceneSnapshot(self, limit: number?): any
+	function GetCameraRenderingData(self, camera: Instance): any
+	function GetEditableImageMetadata(self, image: Instance): any
+	function GetCaptureChannels(self): any
+	function Capture(self, request: any): any
+	function PollCapture(self, ticket: string): any
+	function CancelCapture(self, ticket: string): any
+	function GetCaptureBuffer(self, ticket: string, resource: string, offset: number, maximumBytes: number): buffer
+	function ReleaseCapture(self, ticket: string): any
+	function RequestLifecycle(self, request: any): any
+	function PollLifecycle(self, ticket: string): any
+	function ReleaseLifecycle(self, ticket: string): any
+	function GetResources(self): any
+	function Raycast(self, request: any): any
+	function OverlapAABB(self, request: any): any
+	function OverlapOBB(self, request: any): any
+end
+
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
 --
 -- The same three methods the instance has, plus the one nothing else can do:
@@ -3045,6 +3072,7 @@ declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
 declare ComputeService: ComputeService
+declare DataSceneService: DataSceneService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
@@ -3164,6 +3192,7 @@ type Services = {
 	TeleportService: TeleportService,
 	ContentService: ContentService,
 	ComputeService: ComputeService,
+	DataSceneService: DataSceneService,
 	CollectionService: CollectionService,
 	HttpService: HttpService,
 	CrossWorldService: CrossWorldService,

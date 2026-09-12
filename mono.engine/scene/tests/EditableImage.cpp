@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <utility>
 
 TEST_SUITE_ID("engine.scene.editableimage")
 
@@ -33,6 +34,8 @@ using engine::scene::DrawRectangle;
 using engine::scene::EditableImage;
 using engine::scene::EditableImageClass;
 using engine::scene::EditableImageContentName;
+using engine::scene::EditableImageFromBuffer;
+using engine::scene::EditableImageToBuffer;
 using engine::scene::ResizeEditableImage;
 
 namespace {
@@ -80,6 +83,103 @@ TEST_CASE("Resize reallocates and clears, and refuses an absurd size", "[scene][
 	CHECK(PixelAt(*held, 0, 0)[3] == 0); // The old rectangle did not survive.
 
 	CHECK_FALSE(ResizeEditableImage(store, image, 1u << 20, 1u << 20));
+}
+
+TEST_CASE(
+	"EditableImage buffers copy tightly packed RGBA pixels without aliasing", "[scene][editableimage]"
+) {
+	Store store("editableimage.buffer");
+	const Entity image = MakeEditableImage(store);
+	REQUIRE(ResizeEditableImage(store, image, 2, 2));
+
+	std::vector<std::byte> pixels{
+		std::byte{1},
+		std::byte{2},
+		std::byte{3},
+		std::byte{0},
+		std::byte{5},
+		std::byte{6},
+		std::byte{7},
+		std::byte{8},
+		std::byte{9},
+		std::byte{10},
+		std::byte{11},
+		std::byte{12},
+		std::byte{13},
+		std::byte{14},
+		std::byte{15},
+		std::byte{16},
+	};
+	const std::vector<std::byte> expected = pixels;
+	REQUIRE(EditableImageFromBuffer(store, image, pixels));
+	const EditableImage *held = store.Get<EditableImage>(image);
+	REQUIRE(held != nullptr);
+	CHECK(PixelAt(*held, 0, 0) == std::array<uint8_t, 4>{1, 2, 3, 0});
+	CHECK(PixelAt(*held, 0, 1) == std::array<uint8_t, 4>{9, 10, 11, 12});
+
+	pixels[0] = std::byte{99};
+	CHECK(PixelAt(*held, 0, 0)[0] == 1);
+	std::vector<std::byte> copy = EditableImageToBuffer(store, image);
+	REQUIRE(copy.size() == 16);
+	CHECK(copy == expected);
+	copy[3] = std::byte{99};
+	CHECK(PixelAt(*held, 0, 0)[3] == 0);
+}
+
+TEST_CASE(
+	"EditableImage rejects malformed buffers without changing pixels or revision", "[scene][editableimage]"
+) {
+	Store store("editableimage.buffer-refusal");
+	const Entity image = MakeEditableImage(store);
+	REQUIRE(ResizeEditableImage(store, image, 2, 1));
+	const std::vector<std::byte> valid(8, std::byte{7});
+	REQUIRE(EditableImageFromBuffer(store, image, valid));
+	const EditableImage *held = store.Get<EditableImage>(image);
+	REQUIRE(held != nullptr);
+	const std::vector<uint8_t> before = held->Pixels;
+	const uint32_t revision = held->Revision;
+
+	CHECK_FALSE(EditableImageFromBuffer(store, image, std::vector<std::byte>(7)));
+	CHECK_FALSE(EditableImageFromBuffer(store, image, std::vector<std::byte>(9)));
+	CHECK(held->Pixels == before);
+	CHECK(held->Revision == revision);
+	CHECK(EditableImageFromBuffer(store, image, valid));
+	CHECK(held->Revision == revision);
+
+	const Entity notAnImage = store.Create();
+	CHECK(EditableImageToBuffer(store, notAnImage).empty());
+	CHECK_FALSE(EditableImageFromBuffer(store, notAnImage, valid));
+
+	EditableImage *malformed = store.GetMutable<EditableImage>(image);
+	REQUIRE(malformed != nullptr);
+	malformed->Pixels.pop_back();
+	const uint32_t malformedRevision = malformed->Revision;
+	CHECK(EditableImageToBuffer(store, image).empty());
+	CHECK_FALSE(EditableImageFromBuffer(store, image, valid));
+	CHECK(malformed->Revision == malformedRevision);
+
+	const std::vector<std::byte> empty;
+	for (const auto &[width, height] : std::array{
+			 std::pair{0u, 1u},
+			 std::pair{1u, 0u},
+			 std::pair{UINT32_MAX, UINT32_MAX},
+		 }) {
+		const Entity corrupt = MakeEditableImage(store);
+		EditableImage *corruptImage = store.GetMutable<EditableImage>(corrupt);
+		REQUIRE(corruptImage != nullptr);
+		corruptImage->Width = width;
+		corruptImage->Height = height;
+		const bool zeroDimension = width == 0 || height == 0;
+		corruptImage->Pixels = zeroDimension ? std::vector<uint8_t>{} : std::vector<uint8_t>{1, 2, 3, 4};
+		const std::vector<uint8_t> corruptBefore = corruptImage->Pixels;
+		const uint32_t corruptRevision = corruptImage->Revision;
+		const std::vector<std::byte> &input = zeroDimension ? empty : valid;
+
+		CHECK(EditableImageToBuffer(store, corrupt).empty());
+		CHECK_FALSE(EditableImageFromBuffer(store, corrupt, input));
+		CHECK(corruptImage->Pixels == corruptBefore);
+		CHECK(corruptImage->Revision == corruptRevision);
+	}
 }
 
 TEST_CASE("DrawRectangle fills exactly its own footprint, clipped to the image", "[scene][editableimage]") {

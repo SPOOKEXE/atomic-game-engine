@@ -29,6 +29,8 @@
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/ComputeJobs.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
@@ -92,6 +94,10 @@ namespace engine::script {
 
 		// The services and host seams this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
+
+		// Installed by the host, never shared through a process-global registry.
+		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;

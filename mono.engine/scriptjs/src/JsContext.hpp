@@ -22,6 +22,8 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/ComputeJobs.hpp>
+#include <engine/script/DataCaptureBridge.hpp>
+#include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Runtime.hpp>
@@ -32,6 +34,7 @@
 #include <engine/script/Tweens.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <quickjs.h>
 #include <string>
 #include <unordered_map>
@@ -66,6 +69,10 @@ namespace engine::script {
 
 		// The services this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
+
+		// Installed by the host after bindings exist, one bridge per runtime.
+		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// The program surface installed for plugin runtimes.
 		HostSurface *Host = nullptr;

@@ -255,6 +255,14 @@ namespace engine::script {
 				return Context.Role;
 			}
 
+			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
+				return Context.DataCapture;
+			}
+
+			const std::shared_ptr<DataLifecycleBridge> &DataLifecycle() const override {
+				return Context.DataLifecycle;
+			}
+
 			TweenTable &Tweens() override {
 				return Context.Tweens;
 			}

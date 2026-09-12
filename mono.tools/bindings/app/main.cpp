@@ -1586,6 +1586,28 @@ declare extern type ComputeService with
 	): { number }
 end
 
+-- Read-only ECS observations for a data factory. Returned records are copies;
+-- entities without a unique DataFactoryId string are intentionally omitted.
+declare extern type DataSceneService with
+	function GetCapabilities(self): any
+	function GetSceneSnapshot(self, limit: number?): any
+	function GetCameraRenderingData(self, camera: Instance): any
+	function GetEditableImageMetadata(self, image: Instance): any
+	function GetCaptureChannels(self): any
+	function Capture(self, request: any): any
+	function PollCapture(self, ticket: string): any
+	function CancelCapture(self, ticket: string): any
+	function GetCaptureBuffer(self, ticket: string, resource: string, offset: number, maximumBytes: number): buffer
+	function ReleaseCapture(self, ticket: string): any
+	function RequestLifecycle(self, request: any): any
+	function PollLifecycle(self, ticket: string): any
+	function ReleaseLifecycle(self, ticket: string): any
+	function GetResources(self): any
+	function Raycast(self, request: any): any
+	function OverlapAABB(self, request: any): any
+	function OverlapOBB(self, request: any): any
+end
+
 -- What carries a tag, which is the half `Instance:AddTag` cannot answer.
 --
 -- The same three methods the instance has, plus the one nothing else can do:
@@ -1789,6 +1811,7 @@ declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
 declare ComputeService: ComputeService
+declare DataSceneService: DataSceneService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
 declare HttpService: HttpService
@@ -2267,6 +2290,13 @@ declare task: {
 					   "number?): boolean\n";
 				out << "\tfunction DrawCircle(self, centre: Vector2, radius: number, colour: Color3, "
 					   "transparency: number?): boolean\n";
+				out << "\t-- Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight "
+					   "alpha.\n";
+				out << "\t-- FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a "
+					   "length mismatch.\n";
+				out << "\t-- Buffers above the 64 MiB image ceiling raise before the image changes.\n";
+				out << "\tfunction ToBuffer(self): buffer\n";
+				out << "\tfunction FromBuffer(self, buffer: buffer): boolean\n";
 
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
@@ -2520,6 +2550,7 @@ declare task: {
 		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
 		out << "\tComputeService: ComputeService,\n";
+		out << "\tDataSceneService: DataSceneService,\n";
 		out << "\tCollectionService: CollectionService,\n";
 		out << "\tHttpService: HttpService,\n";
 		out << "\tCrossWorldService: CrossWorldService,\n";
@@ -3391,6 +3422,28 @@ declare interface ComputeService {
 	): Promise<number[]>;
 }
 
+// Read-only ECS observations. The result records are intentionally typed as
+// unknown-shaped maps while negotiated capture and lifecycle adapters evolve.
+declare interface DataSceneService {
+	GetCapabilities(): Record<string, unknown>;
+	GetSceneSnapshot(limit?: number): Record<string, unknown>;
+	GetCameraRenderingData(camera: Instance): Record<string, unknown>;
+	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
+	GetCaptureChannels(): Record<string, unknown>;
+	Capture(request: unknown): Record<string, unknown>;
+	PollCapture(ticket: string): Record<string, unknown>;
+	CancelCapture(ticket: string): Record<string, unknown>;
+	GetCaptureBuffer(ticket: string, resource: string, offset: number, maximumBytes: number): ArrayBuffer;
+	ReleaseCapture(ticket: string): Record<string, unknown>;
+	RequestLifecycle(request: unknown): Record<string, unknown>;
+	PollLifecycle(ticket: string): Record<string, unknown>;
+	ReleaseLifecycle(ticket: string): Record<string, unknown>;
+	GetResources(): Record<string, unknown>;
+	Raycast(request: unknown): Record<string, unknown>;
+	OverlapAABB(request: unknown): Record<string, unknown>;
+	OverlapOBB(request: unknown): Record<string, unknown>;
+}
+
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
 // No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
@@ -3571,6 +3624,7 @@ declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const ComputeService: ComputeService;
+declare const DataSceneService: DataSceneService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -3885,6 +3939,13 @@ declare const task: {
 					   "boolean;\n";
 				out << "\tDrawCircle(centre: Vector2, radius: number, colour: Color3, transparency?: "
 					   "number): boolean;\n";
+				out << "\t/** Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight "
+					   "alpha.\n";
+				out << "\t * FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a "
+					   "length mismatch.\n";
+				out << "\t * Buffers above the 64 MiB image ceiling raise before the image changes. */\n";
+				out << "\tToBuffer(): ArrayBuffer;\n";
+				out << "\tFromBuffer(buffer: ArrayBuffer): boolean;\n";
 
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.
@@ -4047,6 +4108,7 @@ declare const task: {
 		}
 		out << "\t\t(service: \"RunService\"): RunService;\n";
 		out << "\t\t(service: \"ComputeService\"): ComputeService;\n";
+		out << "\t\t(service: \"DataSceneService\"): DataSceneService;\n";
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
 		out << "\t\t(service: \"TeleportService\"): TeleportService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";

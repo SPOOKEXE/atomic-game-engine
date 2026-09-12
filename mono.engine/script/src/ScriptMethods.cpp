@@ -1043,8 +1043,8 @@ namespace engine::script {
 			}
 		}
 
-		// Raises unless the subject is an `EditableImage` - the four methods
-		// below share this guard rather than each spelling it, because
+		// Raises unless the subject is an `EditableImage`. These methods share
+		// this guard rather than each spelling it, because
 		// their own return value is already spoken for: `false` means "this
 		// EditableImage refused the call" - an absurd `Resize`, mainly -
 		// and folding "the wrong kind of instance entirely" into the same
@@ -1062,6 +1062,22 @@ namespace engine::script {
 			const auto width = static_cast<uint32_t>(call.AsNumber(0));
 			const auto height = static_cast<uint32_t>(call.AsNumber(1));
 			call.ReturnBoolean(scene::ResizeEditableImage(call.World(), call.Subject(), width, height));
+		}
+
+		// `editableImage:ToBuffer()`
+		void EditableImageToBuffer(ScriptCall &call) {
+			RequireEditableImage(call, "ToBuffer");
+			call.ReturnBytes(scene::EditableImageToBuffer(call.World(), call.Subject()));
+		}
+
+		// `editableImage:FromBuffer(pixels)`. A buffer beyond the image ceiling
+		// raises through `AsBytes`; a bounded buffer with the wrong exact length
+		// returns false from the scene layer without changing the image.
+		void EditableImageFromBuffer(ScriptCall &call) {
+			RequireEditableImage(call, "FromBuffer");
+			const std::vector<std::byte> pixels =
+				call.AsBytes(0, static_cast<size_t>(scene::MAXIMUM_EDITABLE_IMAGE_PIXELS) * 4);
+			call.ReturnBoolean(scene::EditableImageFromBuffer(call.World(), call.Subject(), pixels));
 		}
 
 		// `editableImage:DrawRectangle(position, size, colour, transparency?)`
@@ -1169,7 +1185,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 66> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 68> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1199,6 +1215,8 @@ namespace engine::script {
 			{"ClearAnimationData", ClearAnimationData},
 
 			{"Resize", EditableImageResize},
+			{"ToBuffer", EditableImageToBuffer},
+			{"FromBuffer", EditableImageFromBuffer},
 			{"DrawRectangle", EditableImageDrawRectangle},
 			{"DrawLine", EditableImageDrawLine},
 			{"DrawCircle", EditableImageDrawCircle},

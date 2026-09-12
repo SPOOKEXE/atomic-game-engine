@@ -1233,6 +1233,11 @@ declare interface Instance {
 	DrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: number): boolean;
 	DrawLine(from: Vector2, to: Vector2, colour: Color3, transparency?: number): boolean;
 	DrawCircle(centre: Vector2, radius: number, colour: Color3, transparency?: number): boolean;
+	/** Copied row-major top-first RGBA8 pixels: linear RGB UNORM8 and straight alpha.
+	 * FromBuffer requires exactly Size.X * Size.Y * 4 bytes and returns false for a length mismatch.
+	 * Buffers above the 64 MiB image ceiling raise before the image changes. */
+	ToBuffer(): ArrayBuffer;
+	FromBuffer(buffer: ArrayBuffer): boolean;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };
@@ -2545,6 +2550,28 @@ declare interface ComputeService {
 	): Promise<number[]>;
 }
 
+// Read-only ECS observations. The result records are intentionally typed as
+// unknown-shaped maps while negotiated capture and lifecycle adapters evolve.
+declare interface DataSceneService {
+	GetCapabilities(): Record<string, unknown>;
+	GetSceneSnapshot(limit?: number): Record<string, unknown>;
+	GetCameraRenderingData(camera: Instance): Record<string, unknown>;
+	GetEditableImageMetadata(image: Instance): Record<string, unknown>;
+	GetCaptureChannels(): Record<string, unknown>;
+	Capture(request: unknown): Record<string, unknown>;
+	PollCapture(ticket: string): Record<string, unknown>;
+	CancelCapture(ticket: string): Record<string, unknown>;
+	GetCaptureBuffer(ticket: string, resource: string, offset: number, maximumBytes: number): ArrayBuffer;
+	ReleaseCapture(ticket: string): Record<string, unknown>;
+	RequestLifecycle(request: unknown): Record<string, unknown>;
+	PollLifecycle(ticket: string): Record<string, unknown>;
+	ReleaseLifecycle(ticket: string): Record<string, unknown>;
+	GetResources(): Record<string, unknown>;
+	Raycast(request: unknown): Record<string, unknown>;
+	OverlapAABB(request: unknown): Record<string, unknown>;
+	OverlapOBB(request: unknown): Record<string, unknown>;
+}
+
 // What carries a tag, which is the half `Instance.AddTag` cannot answer.
 //
 // No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
@@ -2725,6 +2752,7 @@ declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const ComputeService: ComputeService;
+declare const DataSceneService: DataSceneService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
 
@@ -2823,6 +2851,7 @@ declare const game: {
 		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
 		(service: "ComputeService"): ComputeService;
+		(service: "DataSceneService"): DataSceneService;
 		(service: "MessagingService"): MessagingService;
 		(service: "TeleportService"): TeleportService;
 		(service: "MemoryStoreService"): MemoryStoreService;
