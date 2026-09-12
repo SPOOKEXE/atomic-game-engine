@@ -396,6 +396,7 @@ namespace engine::game {
 	//                    run, which is the only ordering that lets a breakpoint
 	//                    on a script's top level fire at all - that code has
 	//                    already executed by the time this returns.
+	// @param scriptTickRate Fixed script heartbeat rate, or zero to use the world rate.
 	// @return The runtime, which is never null.
 	std::shared_ptr<script::Runtime> StartWorldScripts(
 		ecs::Store &store,

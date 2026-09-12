@@ -110,6 +110,7 @@ namespace engine::render {
 		// @param name  The name a `SurfaceAppearance` or a submesh will ask
 		//              for.
 		// @param image The pixels. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
@@ -135,6 +136,7 @@ namespace engine::render {
 		// @param bytes   What it cost in device memory, counted against
 		//                `MAXIMUM_BYTES` like any upload. A caller that guessed
 		//                low would let the ceiling be walked past.
+		// @param owner   The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid name, a null texture or a full table -
 		//         and on `false` the caller still owns it.
 		// @since v0.10
@@ -156,6 +158,7 @@ namespace engine::render {
 		// picture instead of an answer asks `Default()` for one.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return The texture, or null.
 		SDL_GPUTexture *Find(const core::Name &name, core::Name owner = {}) const;
 
@@ -210,6 +213,7 @@ namespace engine::render {
 		// the draw loop wants to know.
 		//
 		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @since v0.13
 		void Expect(const core::Name &name, core::Name owner = {});
 
@@ -224,12 +228,14 @@ namespace engine::render {
 		// `Add` and `Adopt` unmark too, so an arrival needs no second call.
 		//
 		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @since v0.13
 		void StopExpecting(const core::Name &name, core::Name owner = {});
 
 		// Whether content is on its way under this name.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` between `Expect` and whatever finishes it.
 		// @since v0.13
 		bool Expecting(const core::Name &name, core::Name owner = {}) const;
@@ -250,6 +256,7 @@ namespace engine::render {
 		// @param name   The name.
 		// @param width  Set to the width, or left alone when the name is absent.
 		// @param height Set to the height, likewise.
+		// @param owner  The exact content namespace, or empty for shared content.
 		// @return `false` for a name this table does not hold.
 		// @since v0.10
 		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner = {}) const;
@@ -267,6 +274,7 @@ namespace engine::render {
 		// @param name    The texture.
 		// @param seconds How long animation has been running. The caller's
 		//                clock; this module holds none.
+		// @param owner   The exact content namespace, or empty for shared content.
 		// @return The transform, or the identity for a still or an absent name.
 		// @since v0.10
 		FlipbookCell CellOf(const core::Name &name, double seconds, core::Name owner = {}) const;
@@ -299,6 +307,7 @@ namespace engine::render {
 		// had browsed it.
 		//
 		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this table does not hold.
 		// @since v0.10
 		bool Drop(const core::Name &name, core::Name owner = {});

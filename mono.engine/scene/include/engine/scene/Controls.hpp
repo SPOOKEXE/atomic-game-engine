@@ -380,6 +380,17 @@ namespace engine::scene {
 	// @return True when a new crossing was applied.
 	bool FollowPortalTransit(ecs::Store &store);
 
+	// World direction for movement and body facing, excluding local pitch.
+	//
+	// @param controller The camera controller carrying the local heading.
+	// @return The horizontal world direction.
+	core::Vector3 CameraHeading(const CameraController &controller);
+
+	// Desired pose before portal-arm mapping and collision avoidance. The explicit
+	// distance lets the occlusion query test the requested arm without cached shortening.
+	core::CFrame
+	CameraOrbit(const CameraController &controller, const core::Vector3 &subjectPosition, float distance);
+
 	// Places the live camera from its carried basis and local input angles.
 	//
 	// **Separate from `UpdateCameraControl` for that function's reason**, and with
@@ -391,14 +402,6 @@ namespace engine::scene {
 	//
 	// @param store The world.
 	// @return `true` when a camera was placed.
-	// World direction for movement and body facing, excluding local pitch.
-	core::Vector3 CameraHeading(const CameraController &controller);
-
-	// Desired pose before portal-arm mapping and collision avoidance. The explicit
-	// distance lets the occlusion query test the requested arm without cached shortening.
-	core::CFrame
-	CameraOrbit(const CameraController &controller, const core::Vector3 &subjectPosition, float distance);
-
 	bool PlaceCamera(ecs::Store &store);
 
 	// Resolves a camera's target to the part it follows. Humanoids use RootPart;

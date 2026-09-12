@@ -89,7 +89,7 @@ the renderer build-out.
 - [_] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam.
 - [_] Check oblique, rolled and scaled portal views at all angles, then finish visual review of the non-Euclidean demo.
 
-[MCP-ADDITIONS.md](MCP-ADDITIONS.md) describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
+`datafactories-docs/MCP-ADDITIONS.md` describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
 - [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.
 - [_] add a dedicated OBB geometry test.
 - [_] add the remaining MCP tools and demo coverage for script packages, multicamera, multiworld, segmentation, optical flow, lighting contribution, rigs, audio export and interop.

@@ -136,6 +136,7 @@ namespace engine::render {
 		// Releases a variant this pass no longer needs.
 		//
 		// @param name The shader's name.
+		// @param owner The exact content namespace.
 		// @return `false` when nothing was held under it.
 		// @since v0.18
 		bool DropShaderVariant(const core::Name &name, core::Name owner = {});

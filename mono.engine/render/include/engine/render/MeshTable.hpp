@@ -203,6 +203,7 @@ namespace engine::render {
 		//
 		// @param name The name a `DrawInstance` will ask for.
 		// @param mesh The geometry. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh or a table that would overflow.
 		bool Add(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
 		bool AddPacked(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
@@ -298,6 +299,7 @@ namespace engine::render {
 		// Whether a name has been registered.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` when `Resolve` would return that mesh rather than the
 		//         default.
 		bool Has(const core::Name &name, core::Name owner = {}) const;

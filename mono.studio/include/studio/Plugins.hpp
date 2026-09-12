@@ -962,6 +962,7 @@ namespace studio {
 	//
 	// @param editor The editor answering.
 	// @param plugin The plugin asking. Must outlive the surface.
+	// @param store  The world exposed to the plugin.
 	// @return The surface, for `Runtime::SetHost`.
 	// @since v0.12
 	std::unique_ptr<engine::script::HostSurface>
@@ -1028,6 +1029,9 @@ namespace studio {
 	// @param store   The world they run against.
 	// @param surface Builds each plugin's host surface, or empty for a plugin
 	//                that gets the world and no editor.
+	// @param target  Whether the plugin runs in Studio or a play world.
+	// @param world   The world identity associated with the runtime.
+	// @param bindings Optional registry receiving plugin bindings.
 	// @since v0.12
 	void StartPlugins(
 		std::vector<LoadedPlugin> &plugins,

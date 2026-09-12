@@ -608,6 +608,7 @@ namespace server {
 		//
 		// @param client Who sent it.
 		// @param move   What they asked for, already normalised by the decoder.
+		// @param inputTick The client tick that produced the move.
 		void ApplyMove(
 			engine::replication::ClientId client, const engine::game::MoveInput &move, uint64_t inputTick
 		);

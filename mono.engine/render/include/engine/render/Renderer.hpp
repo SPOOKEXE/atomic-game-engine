@@ -1468,6 +1468,7 @@ namespace engine::render {
 		//
 		// @param name The name to publish it under.
 		// @param mesh The geometry. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
 		bool AddPackedMesh(const core::Name &name, const PackedMeshData &mesh, core::Name owner = {});
@@ -1486,6 +1487,7 @@ namespace engine::render {
 		//
 		// @param name The mesh.
 		// @param out  Set only when the mesh is registered.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this table does not hold, so a caller can
 		//         tell "not loaded yet" from "flat on one axis".
 		bool MeshExtentOf(const core::Name &name, core::Vector3 &out, core::Name owner = {}) const;
@@ -1495,6 +1497,7 @@ namespace engine::render {
 		//
 		// @param name  The name to publish it under.
 		// @param image The pixels. An invalid one is refused.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
@@ -1514,6 +1517,7 @@ namespace engine::render {
 		// for. An arrival needs no call at all: `AddTexture` clears it.
 		//
 		// @param name What was asked for.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @since v0.13
 		//@{
 		void ExpectTexture(const core::Name &name, core::Name owner = {});
@@ -1523,6 +1527,7 @@ namespace engine::render {
 		// Whether content is on its way under this name.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` between the two calls above.
 		// @since v0.13
 		bool ExpectingTexture(const core::Name &name, core::Name owner = {}) const;
@@ -2003,6 +2008,7 @@ namespace engine::render {
 		// does.
 		//
 		// @param name The name it was registered under.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return The handle, or nullptr for a name this renderer has not been
 		//         given.
 		// @since v0.10
@@ -2016,6 +2022,7 @@ namespace engine::render {
 		//
 		// @param name    The texture.
 		// @param seconds How long animation has been running.
+		// @param owner   The exact content namespace, or empty for shared content.
 		// @return The transform, or the identity for a still or an absent name.
 		// @since v0.10
 		FlipbookCell TextureCell(const core::Name &name, double seconds, core::Name owner = {}) const;
@@ -2044,6 +2051,7 @@ namespace engine::render {
 		// @param name   The name.
 		// @param width  Set to the width, or left alone when the name is absent.
 		// @param height Set to the height, likewise.
+		// @param owner  The exact content namespace, or empty for shared content.
 		// @return `false` for a texture this renderer does not hold.
 		// @since v0.10
 		bool
@@ -2058,6 +2066,7 @@ namespace engine::render {
 		// somebody had browsed it.
 		//
 		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this renderer does not hold.
 		// @since v0.10
 		bool DropTexture(const core::Name &name, core::Name owner = {});
@@ -2106,6 +2115,7 @@ namespace engine::render {
 		// than vanishing - `MeshTable::Resolve`'s rule, and its reason.
 		//
 		// @param name The name to drop.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for a name this renderer does not hold.
 		// @since v0.15
 		bool DropShader(const core::Name &name, core::Name owner = {});
@@ -2113,6 +2123,7 @@ namespace engine::render {
 		// Whether a shader is registered under this name.
 		//
 		// @param name The name.
+		// @param owner The exact content namespace, or empty for shared content.
 		// @return `true` when a variant exists for it.
 		// @since v0.15
 		bool HasShader(const core::Name &name, core::Name owner = {}) const;

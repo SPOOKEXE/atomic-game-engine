@@ -866,6 +866,7 @@ namespace studio {
 
 	// The window, the renderer, the interface and the game.
 	//
+	// @hidecollaborationgraph
 	// @since v0.7
 	class Editor {
 	  public:

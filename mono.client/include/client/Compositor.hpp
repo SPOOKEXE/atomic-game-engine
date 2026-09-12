@@ -103,6 +103,7 @@ namespace client {
 		// @param list    What it drew.
 		// @param tick    The tick that produced it.
 		// @param alpha   The interpolation position it used.
+		// @param joints  Joint transforms referenced by skinned rows.
 		// @return `false` only for an untracked world. A list larger than the
 		//         channel grows it rather than being refused.
 		bool Publish(
@@ -120,6 +121,7 @@ namespace client {
 		// @param spacing World units between adjacent views along X. Zero
 		//                overlays them, which is what a single view wants and
 		//                what a mirror would want.
+		// @param selected The world whose camera and unshifted rows are used.
 		// A selected world uses its own camera and unshifted rows. Other channels
 		// are still consumed so switching selection can use their newest frame.
 		void Compose(float spacing, engine::world::WorldId selected = {});

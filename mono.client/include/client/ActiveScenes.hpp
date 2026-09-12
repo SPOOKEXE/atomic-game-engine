@@ -46,6 +46,8 @@ namespace client {
 		// active-camera packet on that world's presentation lane. Invalid, remote,
 		// retired, and camera-less worlds are omitted.
 		//
+		// @param universe The worlds and their presentation lanes.
+		// @param requests The product views to collect.
 		// @param extent Pixel extent used by camera-dependent spatial layers.
 		// @return The number of active camera packets collected.
 		size_t Collect(
