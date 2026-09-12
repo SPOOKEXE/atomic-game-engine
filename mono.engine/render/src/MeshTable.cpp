@@ -567,12 +567,14 @@ namespace engine::render {
 			}
 
 			SDL_GPUBufferCreateInfo vertexInfo{};
-			vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+			// Tessellation reads the canonical resident stream on the device. The
+			// CPU copy remains upload-only and never receives generated geometry.
+			vertexInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 			vertexInfo.size = static_cast<uint32_t>(vertices * sizeof(assets::MeshVertex));
 			VertexBuffer = gpu::CreateBuffer(Device, &vertexInfo);
 
 			SDL_GPUBufferCreateInfo indexInfo{};
-			indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+			indexInfo.usage = SDL_GPU_BUFFERUSAGE_INDEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 			indexInfo.size = static_cast<uint32_t>(indices * sizeof(uint32_t));
 			IndexBuffer = gpu::CreateBuffer(Device, &indexInfo);
 

@@ -1,19 +1,45 @@
 #version 450
-layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 1, binding = 0, r16f) uniform writeonly image2D factors;
-layout(set = 2, binding = 0, std140) uniform Pass {
-	mat4 vp;
-	mat4 ivp;
-	vec4 target;
-	vec4 view;
-	uvec4 features;
-} pass;
+
+// Bounded triangle expansion. One invocation owns one source triangle and
+// writes a fixed maximum region, so the indirect count never needs CPU readback.
+layout(local_size_x = 64) in;
+
+struct Vertex { vec3 position; vec3 normal; vec2 uv; uvec2 joints; uvec2 weights; };
+layout(set = 0, binding = 0) readonly buffer Vertices { Vertex rows[]; } vertices;
+layout(set = 0, binding = 1) readonly buffer Indices { uint rows[]; } indices;
+layout(set = 1, binding = 0) buffer OutVertices { Vertex rows[]; } outVertices;
+layout(set = 1, binding = 1) buffer OutIndices { uint rows[]; } outIndices;
+layout(set = 1, binding = 2) buffer Arguments { uint words[]; } arguments;
+layout(set = 2, binding = 0) uniform View {
+	mat4 viewProjection;
+	uvec4 counts; // source triangles, output triangle capacity, max subdivisions, target pixels
+} view;
 
 void main() {
-	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-	if (any(greaterThanEqual(pixel, ivec2(pass.target.xy)))) return;
-	vec2 uv = (vec2(pixel) + 0.5) * pass.target.zw;
-	float centreWeight = 1.0 - min(length(uv - 0.5) * 1.41421356, 1.0);
-	float factor = mix(1.0, 8.0, centreWeight);
-	imageStore(factors, pixel, vec4(factor));
+	uint source = gl_GlobalInvocationID.x;
+	if (source >= view.counts.x) return;
+	uint level = min(view.counts.z, 8u);
+	uint pieces = 1u << level;
+	uint triangles = pieces * pieces;
+	if (source >= view.counts.y / triangles) return;
+	// The first bounded slice preserves source triangles. Later passes replace
+	// these three copies with barycentric children without changing buffer shape.
+	uint first = source * triangles * 3u;
+	for (uint corner = 0u; corner < 3u; ++corner) {
+		Vertex value = vertices.rows[indices.rows[source * 3u + corner]];
+		outVertices.rows[first + corner] = value;
+		outIndices.rows[first + corner] = first + corner;
+	}
+	for (uint child = 1u; child < triangles; ++child) {
+		outIndices.rows[first + child * 3u] = first;
+		outIndices.rows[first + child * 3u + 1u] = first;
+		outIndices.rows[first + child * 3u + 2u] = first;
+	}
+	if (source == 0u) {
+		arguments.words[0] = min(view.counts.x * triangles * 3u, view.counts.y * 3u);
+		arguments.words[1] = 1u;
+		arguments.words[2] = 0u;
+		arguments.words[3] = 0u;
+		arguments.words[4] = 0u;
+	}
 }
