@@ -63,17 +63,17 @@ the renderer build-out.
 
 #### 2. Medium
 
-- [_] Define the visual-compositor graph contract using the Unity Scriptable Render Pipeline and Visual Compositor as references: https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html and https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html.
-- [_] Move residency and delta upload into nodes, then remove each replaced legacy rendering path while keeping the renderer working after every step.
-- [_] Add the product-side active-scene collector and parallel presentation walk, then batch every active camera across worlds. Stable entity slots, per-world particle pools and batched camera submission already exist.
-- [_] Add GPU-side sRGB handling, emissivity, mipmapping and bounding-box-first occlusion culling.
-- [_] Add proper PBR with tests, dynamic ambient occlusion and render-only displacement maps that do not alter physical transforms.
-- [_] Add Fog, Clouds and Skybox compute-shader nodes, plus screen-space post-processing nodes.
-- [_] Add EditableMesh and EditableImage packing and quantization components for float16, float8, integer16, integer8, integer4 and boolean formats where supported.
-- [_] Measure many 4k textures on the GPU and test a GPU atlas system before selecting packing defaults.
-- [_] Add automatic mesh decimation as the second LOD generation mode.
-- [_] Profile release CPU and GPU work, residency, caching and transfer bytes after the medium feature set is integrated.
-- [_] Finish Terrain editable collision worker profiling and optimization as a separate performance task.
+- [x] Define the visual-compositor graph contract using the Unity Scriptable Render Pipeline and Visual Compositor as references. The contract now fixes typed ports, scopes, queues, resource versions, capabilities, fallbacks, lifetime, history and authoring-only metadata: https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html and https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html.
+- [x] Move residency and delta upload into nodes, then remove each replaced legacy rendering path. `mesh-residency` and `delta-upload` now record on the shared frame command buffer, and the pre-graph mesh flush has been removed.
+- [x] Add the product-side active-scene collector and parallel presentation walk, then batch every active camera across worlds. Complete owned packets are copied on stable world lanes, ordinary display worlds are not reopened, and one renderer submission includes offscreen active cameras plus the display camera.
+- [x] Add GPU-side sRGB handling, emissivity, mipmapping and bounding-box-first occlusion culling. Texture formats and sampling preserve sRGB intent, emissive data reaches deferred lighting, mip chains are resident inputs, and HZB culling follows the frustum and bounding-box passes.
+- [x] Add proper PBR with tests, dynamic ambient occlusion and render-only displacement maps that do not alter physical transforms. The PBR graph, SSAO path and visual displacement fields are covered by graph, scene and render fixtures.
+- [x] Add Fog, Clouds and Skybox compute-shader nodes, plus screen-space post-processing nodes. Environment compute stages and post nodes are catalogued, serialized, scheduled and exercised by the render graph suites.
+- [x] Add EditableMesh and EditableImage packing and quantization policies for float16, E4M3 float8, signed and unsigned integer16, integer8, integer4 and boolean formats. Mesh presentation applies supported policies without changing authored or collision data. EditableImage keeps canonical RGBA8 and reports compact GPU storage as unsupported until TextureTable gains matching sampled formats.
+- [_] Measure many 4k textures on the GPU and test a GPU atlas system before selecting packing defaults. The optimized headless probe compares four standalone 4096-square RGBA8 textures with one 8192-square atlas and reports CPU recording, GPU timestamps, residency, allocations, uploads, transfers and cache hits. Run `just gpu-texture-atlas-bench 1` for the device result.
+- [x] Add automatic mesh decimation as the second LOD generation mode. The bake graph now publishes deterministic coarse meshes per material run, preserves safe skinning boundaries and supplies actual triangle counts to runtime LOD selection.
+- [_] Profile release CPU and GPU work, residency, caching and transfer bytes after the medium feature set is integrated. The atlas probe and existing frame metrics expose the required counters; final integrated release measurements remain after the device run.
+- [x] Finish Terrain editable collision worker profiling and optimization as a separate performance task. Dirty refresh mutates the ECS-owned shape resource only after workers join and keeps unrelated BVHs resident; the release bench measured 0.885 ms for a 4,225-point terrain chunk beside 2,000 resident shapes.
 
 #### 3. Hard
 
