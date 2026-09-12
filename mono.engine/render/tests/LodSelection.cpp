@@ -114,6 +114,28 @@ TEST_CASE("material runs become consecutive indirect arguments per level", "[ren
 	CHECK(layout.Bytes == layout.Arguments + 3 * sizeof(SDL_GPUIndexedIndirectDrawCommand));
 }
 
+TEST_CASE("resident mesh clusters become the GPU-selected indirect page set", "[render][lod]") {
+	DrawInstance instance;
+	instance.LodStrategyMode = LodStrategy::Reduced;
+	instance.LodLevels = 2;
+	MeshEntry detailed = Mesh(Vector3(), Vector3(1.0f, 1.0f, 1.0f), 12, 0);
+	detailed.Clusters = {
+		{{0, 18, 0}, Vector3(-0.5f, 0.0f, 0.0f), Vector3(0.5f, 1.0f, 1.0f), 3.0f, 0},
+		{{18, 18, 0}, Vector3(0.5f, 0.0f, 0.0f), Vector3(0.5f, 1.0f, 1.0f), 3.0f, 0},
+	};
+	MeshEntry coarse = Mesh(Vector3(), Vector3(1.0f, 1.0f, 1.0f), 4, 36);
+	coarse.Clusters = {{{36, 12, 36}, Vector3(), Vector3(1.0f, 1.0f, 1.0f), 4.0f, 0}};
+	const std::array<const MeshEntry *, 2> levels = {&detailed, &coarse};
+
+	LodPlan plan;
+	REQUIRE(AppendAuthoredLod(plan, 4, instance, levels));
+	REQUIRE(plan.Commands.size() == 3);
+	CHECK(plan.Draws[0].Clusters[0].size() == 2);
+	CHECK(plan.Draws[0].Clusters[1].size() == 1);
+	CHECK(plan.Draws[0].Clusters[0][1].Range.FirstIndex == 18);
+	CHECK(plan.Commands[2].first_instance == 1);
+}
+
 TEST_CASE("plain visuals do not allocate an LOD draw", "[render][lod]") {
 	DrawInstance instance;
 	MeshEntry first = Mesh(Vector3(), Vector3(0.5f, 0.5f, 0.5f), 12, 0);

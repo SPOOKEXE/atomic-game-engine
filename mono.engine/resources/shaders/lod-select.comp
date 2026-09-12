@@ -1,9 +1,9 @@
 #version 450
 
-// Picks one authored mesh level from projected pixel area. Host code uploads
-// indirect commands with zero instances for every level. This pass enables the
-// chosen level and leaves every other command empty, so no result returns to
-// the CPU.
+// Picks one resident mesh cluster set from projected pixel area. Host code
+// uploads zero-instance indirect commands for every immutable cluster. This
+// pass enables the chosen level's clusters and leaves every other page empty,
+// so no result returns to the CPU.
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 struct Selection {

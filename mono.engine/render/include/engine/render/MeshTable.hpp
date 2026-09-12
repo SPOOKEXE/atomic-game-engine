@@ -18,6 +18,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -44,6 +45,19 @@ namespace engine::render {
 		//
 		// Draw calls apply this offset, so uploaded mesh indices stay unchanged.
 		int32_t VertexOffset = 0;
+	};
+
+	// An immutable, material-local page of a resident mesh.
+	//
+	// Pages bound indirect work without changing the source index stream. Their
+	// bounds and surface metric are built once at admission, so a view can make a
+	// device-side LOD decision without reading mesh vertices back from the GPU.
+	struct MeshCluster {
+		MeshRange Range;
+		core::Vector3 Centre;
+		core::Vector3 Extent;
+		float SurfaceArea = 0.0f;
+		uint32_t Material = std::numeric_limits<uint32_t>::max();
 	};
 
 	enum class PackedMeshFormat : uint32_t {
@@ -102,6 +116,9 @@ namespace engine::render {
 		std::vector<core::Name> Textures;
 		std::vector<std::array<float, 4>> Colours;
 		//@}
+
+		// Immutable cluster pages built with this residency entry.
+		std::vector<MeshCluster> Clusters;
 
 		// The middle of the mesh's own bounding box, in mesh space.
 		//

@@ -76,6 +76,11 @@ TEST_CASE("adding a mesh registers it without touching the device", "[render][me
 	CHECK(table.UploadCount() == 0);
 	CHECK(table.PendingVertexCount() == cube.Vertices.size());
 	CHECK(table.PendingIndexCount() == cube.Indices.size());
+	const MeshEntry &entry = table.Resolve(Name("test.Cube"));
+	REQUIRE(entry.Clusters.size() == 1);
+	CHECK(entry.Clusters[0].Range.IndexCount == cube.Indices.size());
+	CHECK(entry.Clusters[0].SurfaceArea > 0.0f);
+	CHECK(entry.Clusters[0].Material == std::numeric_limits<uint32_t>::max());
 }
 
 TEST_CASE(

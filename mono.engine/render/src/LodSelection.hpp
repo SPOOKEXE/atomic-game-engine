@@ -2,9 +2,11 @@
 
 // Host data for one GPU-authored mesh LOD choice.
 //
-// Each level is packed against its own mesh bounds before upload. The compute
-// pass only chooses a level and enables its indirect commands, so meshes with
-// different authored centres and extents still fill the same scene Bounds.
+// Each level is packed against its own mesh bounds before upload. Its immutable
+// mesh clusters become indirect commands, then the compute pass chooses one
+// resident level and enables only that level's cluster commands. The result
+// remains on the device, so meshes with different authored centres and extents
+// still fill the same scene Bounds without a CPU readback.
 
 #include "InstancePacking.hpp"
 
@@ -45,10 +47,16 @@ namespace engine::render {
 		uint32_t Row = 0;
 	};
 
+	struct LodDrawRange {
+		MeshRange Range;
+		uint32_t Material = std::numeric_limits<uint32_t>::max();
+	};
+
 	struct LodDraw {
 		uint32_t Slot = 0;
 		uint8_t LevelCount = 0;
 		std::array<LodDrawLevel, scene::LOD_LEVELS> Levels{};
+		std::array<std::vector<LodDrawRange>, scene::LOD_LEVELS> Clusters;
 	};
 
 	struct LodPlan {
@@ -138,7 +146,7 @@ namespace engine::render {
 					: std::numeric_limits<uint32_t>::max()
 			);
 
-			const auto addCommand = [&](const MeshRange &range) {
+			const auto addCommand = [&](const MeshRange &range, uint32_t material) {
 				if (range.IndexCount == 0) {
 					return;
 				}
@@ -151,12 +159,19 @@ namespace engine::render {
 						row,
 					}
 				);
+				draw.Clusters[level].push_back({range, material});
 			};
-			if (mesh.Runs.empty()) {
-				addCommand(mesh.Whole);
+			if (mesh.Clusters.empty()) {
+				if (mesh.Runs.empty()) {
+					addCommand(mesh.Whole, std::numeric_limits<uint32_t>::max());
+				} else {
+					for (uint32_t material = 0; material < mesh.Runs.size(); material++) {
+						addCommand(mesh.Runs[material], material);
+					}
+				}
 			} else {
-				for (const MeshRange &range : mesh.Runs) {
-					addCommand(range);
+				for (const MeshCluster &cluster : mesh.Clusters) {
+					addCommand(cluster.Range, cluster.Material);
 				}
 			}
 

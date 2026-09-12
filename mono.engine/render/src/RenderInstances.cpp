@@ -451,12 +451,17 @@ namespace engine::render {
 					const MeshEntry &mesh = *levelDraw.Mesh;
 					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot])) continue;
 					uint32_t lodArgument = levelDraw.FirstArgument;
-					const auto issue = [&](const MeshRange &range,
-										   const core::Name &texture,
-										   const std::array<float, 4> &colour) {
+					const auto issue = [&](const LodDrawRange &cluster) {
+						const MeshRange &range = cluster.Range;
 						if (range.IndexCount == 0) {
 							return;
 						}
+						const bool material = cluster.Material < mesh.Textures.size();
+						const core::Name texture = SlotTexture[slot].IsValid()
+							? SlotTexture[slot]
+							: (material ? mesh.Textures[cluster.Material] : core::Name{});
+						const std::array<float, 4> colour =
+							material ? mesh.Colours[cluster.Material] : std::array<float, 4>{1, 1, 1, 1};
 						emit(
 							range,
 							texture,
@@ -469,16 +474,8 @@ namespace engine::render {
 							level == 0
 						);
 					};
-					if (mesh.Runs.empty()) {
-						issue(mesh.Whole, SlotTexture[slot], {1.0f, 1.0f, 1.0f, 1.0f});
-					} else {
-						for (size_t run = 0; run < mesh.Runs.size(); ++run) {
-							issue(
-								mesh.Runs[run],
-								SlotTexture[slot].IsValid() ? SlotTexture[slot] : mesh.Textures[run],
-								mesh.Colours[run]
-							);
-						}
+					for (const LodDrawRange &cluster : draw.Clusters[level]) {
+						issue(cluster);
 					}
 				}
 				BindInstanceBuffers(pass);

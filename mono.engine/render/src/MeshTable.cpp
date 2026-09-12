@@ -38,6 +38,60 @@ namespace engine::render {
 			}
 			return 0;
 		}
+
+		constexpr uint32_t CLUSTER_TRIANGLES = 64;
+
+		float TriangleArea(const assets::MeshData &mesh, uint32_t first) {
+			const auto &a = mesh.Vertices[mesh.Indices[first]].Position;
+			const auto &b = mesh.Vertices[mesh.Indices[first + 1]].Position;
+			const auto &c = mesh.Vertices[mesh.Indices[first + 2]].Position;
+			const float abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+			const float acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+			const float x = aby * acz - abz * acy;
+			const float y = abz * acx - abx * acz;
+			const float z = abx * acy - aby * acx;
+			return 0.5f * std::sqrt(x * x + y * y + z * z);
+		}
+
+		void AddClusters(MeshEntry &entry, const assets::MeshData &mesh) {
+			const auto addRange = [&](uint32_t first, uint32_t count, uint32_t material) {
+				for (uint32_t offset = 0; offset < count; offset += CLUSTER_TRIANGLES * 3u) {
+					const uint32_t indices = std::min(count - offset, CLUSTER_TRIANGLES * 3u);
+					const float *const firstPoint = mesh.Vertices[mesh.Indices[first + offset]].Position;
+					core::Vector3 minimum{firstPoint[0], firstPoint[1], firstPoint[2]};
+					core::Vector3 maximum = minimum;
+					float area = 0.0f;
+					for (uint32_t index = first + offset; index < first + offset + indices; ++index) {
+						const float *const source = mesh.Vertices[mesh.Indices[index]].Position;
+						const core::Vector3 point{source[0], source[1], source[2]};
+						minimum.X = std::min(minimum.X, point.X);
+						minimum.Y = std::min(minimum.Y, point.Y);
+						minimum.Z = std::min(minimum.Z, point.Z);
+						maximum.X = std::max(maximum.X, point.X);
+						maximum.Y = std::max(maximum.Y, point.Y);
+						maximum.Z = std::max(maximum.Z, point.Z);
+					}
+					for (uint32_t index = first + offset; index < first + offset + indices; index += 3) {
+						area += TriangleArea(mesh, index);
+					}
+					entry.Clusters.push_back({
+						{entry.Whole.FirstIndex + first + offset, indices, entry.Whole.VertexOffset},
+						(minimum + maximum) * 0.5f,
+						(maximum - minimum) * 0.5f,
+						area,
+						material,
+					});
+				}
+			};
+			if (mesh.Submeshes.empty()) {
+				addRange(0, static_cast<uint32_t>(mesh.Indices.size()), std::numeric_limits<uint32_t>::max());
+				return;
+			}
+			for (uint32_t material = 0; material < mesh.Submeshes.size(); material++) {
+				const assets::Submesh &run = mesh.Submeshes[material];
+				addRange(run.FirstIndex, run.IndexCount, material);
+			}
+		}
 	}
 
 	bool PackedMeshData::IsValid() const {
@@ -356,6 +410,7 @@ namespace engine::render {
 				submesh.BaseColour[3],
 			});
 		}
+		AddClusters(entry, mesh);
 
 		std::copy(
 			mesh.Vertices.begin(),
