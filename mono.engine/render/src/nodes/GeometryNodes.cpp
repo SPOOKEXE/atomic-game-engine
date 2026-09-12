@@ -306,8 +306,8 @@ namespace engine::render {
 					 shadowSampler},
 					{State->FallbackTexture, fallbackSampler},
 					{sampled != nullptr ? sampled : State->FallbackTexture, sampler},
-					{State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture, beamSampler
-					},
+					{State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture,
+					 beamSampler},
 					{normal != nullptr ? normal : State->FallbackTexture, sampler},
 					{roughness != nullptr ? roughness : State->FallbackTexture, sampler},
 					{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
@@ -861,7 +861,8 @@ namespace engine::render {
 			auto linearUniforms = Uniforms;
 			linearUniforms.Target.z = linearUniforms.Target.w = 1;
 			linearUniforms.Direction.w = 1;
-			const std::array linearBindings{SDL_GPUTextureSamplerBinding{z.Texture, DepthBindings[0].sampler}
+			const std::array linearBindings{
+				SDL_GPUTextureSamplerBinding{z.Texture, DepthBindings[0].sampler}
 			};
 			Fullscreen(
 				context.Name,
