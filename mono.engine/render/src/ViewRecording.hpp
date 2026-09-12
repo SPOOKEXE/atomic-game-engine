@@ -399,7 +399,13 @@ namespace engine::render {
 
 		bool RecordUploads();
 
-		// Records pending mesh residency through the graph-owned command buffer.
+		// Makes packed world rows, scene order, and skin data readable by the
+		// shared shadow node. The delta node calls this too when another camera
+		// reuses the world's shared work.
+		bool RecordWorldResidency();
+
+		// Records pending mesh and world-row residency through the graph-owned
+		// command buffer.
 		bool RecordMeshResidency();
 
 		// Builds the per-draw lighting block from world lighting and the camera

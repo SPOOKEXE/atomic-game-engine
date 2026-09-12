@@ -226,6 +226,98 @@ namespace engine::render {
 		return true;
 	}
 
+	bool ViewRecording::RecordWorldResidency() {
+		Impl *const State = this->State;
+		FrameResult &result = Result;
+		if (State == nullptr || Command == nullptr) return false;
+
+		Impl::SceneSlot &target = State->SlotAt(State->ActiveSlot);
+		const bool uploadInstances =
+			HaveInstances && (State->ActiveInstanceWorld == nullptr ||
+							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
+							  target.ResidentIndices.DirtyCount() > 0);
+		const bool uploadSkinOffsets = HaveInstances && target.SkinOffsetsDirty;
+		const bool uploadJointWords = HaveInstances && target.JointWordsDirty;
+		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords) return true;
+
+		ENGINE_PROFILE_CAT("record world residency", core::ProfileCategory::Render);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Command);
+		if (copy == nullptr) {
+			ENGINE_ERROR("upload world residency: SDL_BeginGPUCopyPass: {}", SDL_GetError());
+			return false;
+		}
+
+		uint64_t uploadedBytes = 0;
+		if (uploadInstances) {
+			Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
+			if (world == nullptr) {
+				SDL_EndGPUCopyPass(copy);
+				return false;
+			}
+			if (const auto range = BulkRange(world->Instances.DirtyRanges())) {
+				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(GpuInstance));
+				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceBuffer,
+					offset,
+					range->Count * static_cast<uint32_t>(sizeof(GpuInstance)),
+				};
+				// Queue order protects unchanged resident rows. Cycling here would
+				// select fresh storage and discard every row this partial copy omits.
+				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+				uploadedBytes += destination.size;
+			}
+
+			if (const auto range = BulkRange(target.ResidentIndices.DirtyRanges())) {
+				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(uint32_t));
+				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceIndexBuffer,
+					offset,
+					range->Count * static_cast<uint32_t>(sizeof(uint32_t)),
+				};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+				uploadedBytes += destination.size;
+			}
+		}
+
+		if (uploadSkinOffsets) {
+			const SDL_GPUTransferBufferLocation source{State->SkinOffsetTransfer, 0};
+			const SDL_GPUBufferRegion destination{
+				State->SkinOffsetBuffer,
+				0,
+				static_cast<uint32_t>(target.SkinOffsets.size() * sizeof(uint32_t)),
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			uploadedBytes += destination.size;
+		}
+
+		if (uploadJointWords) {
+			const SDL_GPUTransferBufferLocation source{State->JointTransfer, 0};
+			const SDL_GPUBufferRegion destination{
+				State->JointBuffer,
+				0,
+				static_cast<uint32_t>(target.JointWords.size() * sizeof(uint32_t)),
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+			uploadedBytes += destination.size;
+		}
+
+		SDL_EndGPUCopyPass(copy);
+		if (uploadInstances && State->ActiveInstanceWorld != nullptr &&
+			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
+			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
+			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
+		}
+		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
+			target.ResidentIndices.Acknowledge();
+		}
+		if (uploadSkinOffsets) target.SkinOffsetsDirty = false;
+		if (uploadJointWords) target.JointWordsDirty = false;
+		result.UploadedBytes += uploadedBytes;
+		return true;
+	}
+
 	bool ViewRecording::RecordUploads() {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
@@ -239,18 +331,11 @@ namespace engine::render {
 		if (uploadsRecorded) {
 			return true;
 		}
+		if (!RecordWorldResidency()) return false;
 
-		Impl::SceneSlot &target = State->SlotAt(State->ActiveSlot);
-		const bool uploadInstances =
-			haveInstances && (State->ActiveInstanceWorld == nullptr ||
-							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
-							  target.ResidentIndices.DirtyCount() > 0);
-		const bool uploadSkinOffsets = haveInstances && target.SkinOffsetsDirty;
-		const bool uploadJointWords = haveInstances && target.JointWordsDirty;
 		const bool uploadOcclusion = haveInstances && State->OcclusionFrame.Active;
 		const bool uploadLod = haveInstances && !State->LodFrame.Selections.empty();
-		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords && !uploadOcclusion && !uploadLod &&
-			!uploadOverlay && particleCount == 0 && ribbonCount == 0) {
+		if (!uploadOcclusion && !uploadLod && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
 			uploadsRecorded = true;
 			return true;
 		}
@@ -293,39 +378,6 @@ namespace engine::render {
 		}
 
 		uint64_t uploadedBytes = 0;
-		if (uploadInstances) {
-			Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
-			if (world == nullptr) {
-				SDL_EndGPUCopyPass(copy);
-				return false;
-			}
-			if (const auto range = BulkRange(world->Instances.DirtyRanges())) {
-				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(GpuInstance));
-				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceBuffer,
-					offset,
-					range->Count * static_cast<uint32_t>(sizeof(GpuInstance)),
-				};
-				// Queue order protects unchanged resident rows. Cycling here would
-				// select fresh storage and discard every row this partial copy omits.
-				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-				uploadedBytes += destination.size;
-			}
-
-			if (const auto range = BulkRange(target.ResidentIndices.DirtyRanges())) {
-				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(uint32_t));
-				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceIndexBuffer,
-					offset,
-					range->Count * static_cast<uint32_t>(sizeof(uint32_t)),
-				};
-				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
-				uploadedBytes += destination.size;
-			}
-		}
-
 		if (uploadLod) {
 			const LodPlan &lod = State->LodFrame;
 			const LodTransferLayout layout = TransferLayoutOf(lod);
@@ -365,28 +417,6 @@ namespace engine::render {
 				layout.Arguments,
 				static_cast<uint32_t>(lod.Commands.size() * sizeof(SDL_GPUIndexedIndirectDrawCommand))
 			);
-		}
-
-		if (uploadSkinOffsets) {
-			const SDL_GPUTransferBufferLocation skinSource{State->SkinOffsetTransfer, 0};
-			const SDL_GPUBufferRegion skinDestination{
-				State->SkinOffsetBuffer,
-				0,
-				static_cast<uint32_t>(target.SkinOffsets.size() * sizeof(uint32_t)),
-			};
-			SDL_UploadToGPUBuffer(copy, &skinSource, &skinDestination, true);
-			uploadedBytes += skinDestination.size;
-		}
-
-		if (uploadJointWords) {
-			const SDL_GPUTransferBufferLocation jointSource{State->JointTransfer, 0};
-			const SDL_GPUBufferRegion jointDestination{
-				State->JointBuffer,
-				0,
-				static_cast<uint32_t>(target.JointWords.size() * sizeof(uint32_t)),
-			};
-			SDL_UploadToGPUBuffer(copy, &jointSource, &jointDestination, true);
-			uploadedBytes += jointDestination.size;
 		}
 
 		// The occlusion plan's five buffers, in the order its staging wrote
@@ -456,21 +486,6 @@ namespace engine::render {
 		}
 
 		SDL_EndGPUCopyPass(copy);
-		if (uploadInstances && State->ActiveInstanceWorld != nullptr &&
-			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
-			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
-			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
-		}
-		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
-			target.ResidentIndices.Acknowledge();
-		}
-		if (uploadSkinOffsets) {
-			target.SkinOffsetsDirty = false;
-		}
-		if (uploadJointWords) {
-			target.JointWordsDirty = false;
-		}
-
 		// The copy is in the frame's main command buffer, before every draw that
 		// reads it. This keeps a render batch one submission and makes the graph's
 		// GPU timestamps measure the transfer rather than two adjacent marks in a
@@ -487,10 +502,11 @@ namespace engine::render {
 
 	bool ViewRecording::RecordMeshResidency() {
 		if (State == nullptr || Command == nullptr) return false;
-		if (State->MeshResidencyRecorded) return true;
-		if (!State->Meshes.Record(Command)) return false;
-		State->MeshResidencyRecorded = true;
-		return true;
+		if (!State->MeshResidencyRecorded) {
+			if (!State->Meshes.Record(Command)) return false;
+			State->MeshResidencyRecorded = true;
+		}
+		return RecordWorldResidency();
 	}
 
 	LightingUniforms ViewRecording::LightingFrom(
