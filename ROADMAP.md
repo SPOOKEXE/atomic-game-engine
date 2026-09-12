@@ -47,6 +47,8 @@ the consolidated materials, shaders and rendering optimization work.
 - [x] Add portal startup readiness and Humanoid camera routing fixes. All 16 product crossing variants pass: 30/60 Hz, first/third person, explicit/automatic subject, held/released movement.
 - [x] Capture a missing-eye-image black frame at its first render stage; retain useful images and remove bulk captures.
 - [x] Reduce editable collision BVH build work and scratch storage. Full Terrain worker profiling remains below.
+
+continue on `docs/RENDER-REFACTOR-TASKS.md`:
 - [_] Render foreign worlds from the current camera with correct parallax and disocclusion. The moving-camera whole-eye test still fails with flat images.
 - [_] Finish retained-world observation: authorized content, complete visual layers, handoff lifetime and gameplay lease retirement. The staging prototype is rolled back.
 - [_] Reproduce and fix the original black frame with a valid image handle; prevent missing-image black frames during topology waits.
@@ -54,10 +56,6 @@ the consolidated materials, shaders and rendering optimization work.
 - [_] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam.
 - [_] Check oblique, rolled and scaled portal views at all angles; finish visual review of the non-Euclidean demo.
 - [_] Profile release CPU/GPU work, residency, caching and transfer bytes; finish Terrain editable collision worker optimization.
-
-Portal evidence and next steps: [render task list](docs/RENDER-REFACTOR-TASKS.md).
-Passing crossing tests do not yet establish seamless rendering at every angle.
-
 - [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc. - per-mesh capability flags are per-instance visual state and belong in the GPU-resident row, so a compute pass can branch on them without a CPU readback
 - [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system. - the residency and delta upload are a node too, so the sweep and the GPU-resident work are the same refactor rather than two passes over the same files
 - [_] port semi-real raytrace and path-trace as part of nodes
@@ -72,47 +70,64 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 - [_] different antialiasing choices as render nodes
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 
-[MCP-ADDITIONS.md](MCP-ADDITIONS.md) describes proposed data-factory requirements; these are design targets, not verified implemented APIs.
-
-- [_] add EditableImage:ToBuffer() and EditableImage:FromBuffer(buffer) (RGBA) to luau and engine.
-- [_] share engine services through Luau DataSceneService, with thin MCP adapters at the boundary.
-- [_] expose capability, version and schema discovery, and report unsupported features explicitly.
-- [_] validate RGBA8 buffers as exactly width*height*4, including orientation, color space, alpha, copy semantics and separate typed HDR buffers.
-- [_] load repository script packages with source and asset hashes, seeded parameters, type checking, sandboxing and atomic scene edits.
-- [_] support all-system pause separately from physics-only pause.
-- [_] define exact fixed-tick actions with rational timing and deterministic tick boundaries.
-- [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
-- [_] checkpoint ECS, physics, RNG, script schedulers, events, clocks, string IDs and pinned asset dependencies, rejecting unsupported state.
-- [_] restore checkpoints only when compatible, and create fresh versions after restore.
-- [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history.
-- [_] support forks and versioned causal edits, including effects outside the edited spatial region while keeping branches isolated.
-- [_] keep snapshots immutable with stable string identities and captured clocks.
-- [_] make step, snapshot and multicamera capture atomic, with asynchronous readback completion.
-- [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
-- [_] capture RGB linear HDR, depth, normals, IDs, semantic masks and part masks.
-- [_] define camera intrinsics, extrinsics, projection conventions, near/far, jitter, lens distortion, crop, units and world/camera coordinates.
-- [_] record visibility, occlusion, disocclusion and visible or amodal masks.
-- [_] record optical flow, motion vectors, trajectories, scene cuts and validity flags.
-- [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.
-- [_] label lights, shadows, per-light caster and receiver contribution, and ambient-occlusion estimator provenance.
-- [_] support reflections from SSR, probes, mirrors and portals, including secondary views, recursion and staleness.
-- [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
-- [_] expose physics contacts, impulses, forces, torque, sleep, assemblies, joints, controller fields and units.
-- [_] provide spatial queries for raycasts, AABB, OBB, occupancy, SDF, BEV, navmesh and affordances with authored semantics.
-- [_] export rigs, skeletons, keypoints, skinning data and animation tracks.
-- [_] synchronize audio waveforms with source events and timing.
-- [_] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks.
+[MCP-ADDITIONS.md](MCP-ADDITIONS.md) describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
 - [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.
-- [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks.
-- [_] generate counterfactual pairs, parameter sweeps, domain randomization and holdouts without label leakage.
-- [_] emit structured event narratives with time, knowledge, belief and provenance fields.
-- [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
-- [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
+- [_] add a dedicated OBB geometry test.
+- [_] add the remaining MCP tools and demo coverage for script packages, multicamera, multiworld, segmentation, optical flow, lighting contribution, rigs, audio export and interop.
+- [_] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks.
+- [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
+- [_] capture IDs, semantic masks and part masks.
+- [_] complete autonomous capture workflow in `DataFactoryDemo.luau`.
 - [_] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT, including sidecars and known losses.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
+- [_] define the remaining camera intrinsics, extrinsics, near/far, jitter, lens distortion, crop, units and world/camera coordinates.
+- [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
+- [_] emit structured event narratives with time, knowledge, belief and provenance fields.
+- [_] export rigs, skeletons, keypoints, skinning data and animation tracks.
+- [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.
+- [_] expose physics contacts, impulses, forces, torque, sleep, assemblies, joints, controller fields and units.
+- [_] finish broad multimodal and prediction tools in the Python factory.
+- [_] finish deterministic action and script sequencing at fixed-tick boundaries; rational timing and manual tick boundaries are checked.
+- [_] finish thin MCP adapters for every service.
+- [_] generate counterfactual pairs, parameter sweeps, domain randomization and holdouts without label leakage.
+- [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history.
+- [_] label lights, shadows, per-light caster and receiver contribution, and ambient-occlusion estimator provenance.
+- [_] load repository script packages with source and asset hashes, seeded parameters, type checking, sandboxing and atomic scene edits.
 - [_] maintain an acceptance fixture suite for replay roundtrip, no-time-advance, image-label alignment, retry isolation and invalid data.
+- [_] make step plus snapshot plus multicamera capture atomic, with asynchronous readback completion.
 - [_] profile release captures for actual bytes, allocations, peak memory, timings and output quality.
-- [_] Add MCP tools for the ones that need them, then make a demo scene called DataFactoryDemo.luau which gets these values in scripts (and prints some metadata about them) and whatnot. This way we can see that it works and our mcp can use them (and i can tell other agent sessions to refer to the demo to see how they work).
+- [_] provide occupancy, SDF, BEV, navmesh and affordance queries with authored semantics.
+- [_] record optical flow, motion vectors, trajectories, scene cuts and validity flags.
+- [_] record visibility, occlusion, disocclusion and visible or amodal masks.
+- [_] restore checkpoints only when compatible, and create fresh versions after restore.
+- [_] support forks and versioned causal edits, including effects outside the edited spatial region while keeping branches isolated.
+- [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks.
+- [_] provide full checkpoint coverage for ECS, physics warm start, RNG, script schedulers, events, clocks, string IDs and pinned assets; the API requires a real host rehydrator.
+- [_] support reflections from SSR, probes, mirrors and portals, including secondary views, recursion and staleness.
+- [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
+- [_] synchronize audio waveforms with source events and timing.
+- [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
+- [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
+- [x] add EditableImage:ToBuffer() and EditableImage:FromBuffer(buffer) (RGBA) to luau and engine.
+- [x] add the data-capture graph's default PBR data-capture node.
+- [x] capture RGB linear HDR, depth and packed normals.
+- [x] define exact projection metadata.
+- [x] define rational timing metadata and deterministic manual tick boundaries.
+- [x] expose capability, version and schema discovery, and report unsupported features explicitly.
+- [x] expose thin MCP pause, resume, step, snapshot, checkpoint and restore commands.
+- [x] keep snapshots immutable with stable `DataFactoryId` identities and copied clocks.
+- [x] keep the draw collector's current transform derived with no clock advance and unchanged serialized snapshot bytes.
+- [x] keep typed HDR buffers separate from RGBA8 buffers.
+- [x] make `DataFactoryDemo.luau` read and print metadata, round-trip a buffer and include a capture request example.
+- [x] make asynchronous HDR, depth and packed-normal capture retain its ticket, ranged bytes and exact projection metadata.
+- [x] provide durable Python factory chunks, sample finalization, pins, recovery, provenance, sweeps, holdouts and metrics.
+- [x] provide real headless raycast and AABB spatial queries.
+- [x] provide the Python sibling API's negotiation, thin reads, lifecycle and ranged, BLAKE3-verified resource reads.
+- [x] provide the real headless OBB query.
+- [x] share engine services through Luau DataSceneService, with VM-neutral ECS metadata, queued lifecycle work and Luau/JavaScript render bridges.
+- [x] support all-system pause for one local client with `--data-factory`, including the SDL device barrier.
+- [x] support physics-only pause, including clock and character gates.
+- [x] validate RGBA8 buffers as exactly width*height*4, including orientation, color space, alpha and copy semantics.
 
 Rendering extra fixes:
 - [x] blackhole warp curves inward consistently across spin phases.
@@ -133,7 +148,7 @@ TODO tweaks:
 - [x] queue particle:Emit through ECS, drain bursts in batches, and include Enabled continuous emission.
 - [x] separate Network Profiler waiting, active wire, ready and failed states, with stage and flame views.
 
-Verification: Vulkan lens 33,864 assertions in 1 case, full world 32,727 assertions across 257 cases, focused Studio 973 assertions across 71 cases, and live Studio checks for dragging, sorting, profiler views and pause. These checks cover these roadmap items; unrelated broad pipeline, source and generated-doc failures were not part of this verification.
+Verification: focused Vulkan lens, full-world, Studio and live Studio checks pass for the covered rendering, editor, profiler and pause work. The broader pipeline, source and generated-doc checks were outside this verification.
 
 Extra:
 - [_] update and prune old content in documentation. check each statement, update, remove or replace.
