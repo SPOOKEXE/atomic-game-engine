@@ -2,10 +2,10 @@
 
 add_subdirectory(testrunner)
 
-# Benchmark runner, enabled only for benchmark builds.
-if(MONO_BUILD_BENCH)
-	add_subdirectory(benchrunner)
-endif()
+# The benchmark executable is opt-in, while its parser tests run with every
+# ordinary test build. A runner that accepts an empty report can hide every
+# benchmark in its cache, so that parser must stay visible to the test runner.
+add_subdirectory(benchrunner)
 
 # Documentation and binding tools.
 add_subdirectory(bindings)
