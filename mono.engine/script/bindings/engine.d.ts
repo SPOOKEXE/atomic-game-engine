@@ -1732,12 +1732,20 @@ declare interface LensShader extends Instance {
 
 declare interface EditableMesh extends Instance {
 	readonly ContentId: string;
+	PackingAttributes: number;
+	PackingFormat: string;
+	PackingMaximum: number;
+	PackingMinimum: number;
 	readonly TriangleCount: number;
 	readonly VertexCount: number;
 }
 
 declare interface EditableImage extends Instance {
 	readonly ContentId: string;
+	PackingAttributes: number;
+	PackingFormat: string;
+	PackingMaximum: number;
+	PackingMinimum: number;
 	readonly Size: Vector2;
 }
 

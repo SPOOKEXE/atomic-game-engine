@@ -1402,7 +1402,8 @@ declare DateTime: {
 -- --- the class tree -------------------------------------------------------
 
 declare extern type Instance with
-	Name: string
+	read Name: string
+	write Name: string?
 	Parent: Instance
 	Changed: ChangedSignal
 	function IsA(self, className: string): boolean
@@ -1551,11 +1552,14 @@ declare extern type BasePart extends PVInstance with
 	CanCollide: boolean
 	CanQuery: boolean
 	CastShadow: boolean
-	CollisionGeometry: string
-	CollisionGroup: string
+	read CollisionGeometry: string
+	write CollisionGeometry: string?
+	read CollisionGroup: string
+	write CollisionGroup: string?
 	CollisionShape: Enum_ShapeKind
 	Color: Color3
-	ComputeEffectNode: string
+	read ComputeEffectNode: string
+	write ComputeEffectNode: string?
 	CustomPhysicalProperties: boolean
 	Density: number
 	Elasticity: number
@@ -1566,7 +1570,8 @@ declare extern type BasePart extends PVInstance with
 	read LocalTransparency: number
 	Locked: boolean
 	read Mass: number
-	PostProcessEffectNode: string
+	read PostProcessEffectNode: string
+	write PostProcessEffectNode: string?
 	RenderFeatureDisableMask: number
 	RenderFeatureEnableMask: number
 	ResampleMode: Enum_ResamplerMode
@@ -1606,44 +1611,62 @@ declare extern type Accessory extends Model with
 end
 
 declare extern type MeshPart extends BasePart with
-	AutoLod1MeshId: string
+	read AutoLod1MeshId: string
+	write AutoLod1MeshId: string?
 	AutoLod1Ratio: number
-	AutoLod2MeshId: string
+	read AutoLod2MeshId: string
+	write AutoLod2MeshId: string?
 	AutoLod2Ratio: number
-	AutoLod3MeshId: string
+	read AutoLod3MeshId: string
+	write AutoLod3MeshId: string?
 	AutoLod3Ratio: number
 	AutoLodLevels: number
 	AutoLodStrategy: Enum_AutoMeshLODStrategy
 	AutoLodTargetQuadArea: number
-	CustomLod1MeshId: string
+	read CustomLod1MeshId: string
+	write CustomLod1MeshId: string?
 	CustomLod1Ratio: number
-	CustomLod2MeshId: string
+	read CustomLod2MeshId: string
+	write CustomLod2MeshId: string?
 	CustomLod2Ratio: number
-	CustomLod3MeshId: string
+	read CustomLod3MeshId: string
+	write CustomLod3MeshId: string?
 	CustomLod3Ratio: number
 	CustomLodLevels: number
 	CustomLodTargetQuadArea: number
-	EmissiveMap: string
-	HeightMap: string
-	Lod1MeshId: string
+	read EmissiveMap: string
+	write EmissiveMap: string?
+	read HeightMap: string
+	write HeightMap: string?
+	read Lod1MeshId: string
+	write Lod1MeshId: string?
 	Lod1Ratio: number
-	Lod2MeshId: string
+	read Lod2MeshId: string
+	write Lod2MeshId: string?
 	Lod2Ratio: number
-	Lod3MeshId: string
+	read Lod3MeshId: string
+	write Lod3MeshId: string?
 	Lod3Ratio: number
 	LodTargetQuadArea: number
-	MeshId: string
-	MetalnessMap: string
-	NormalMap: string
-	OcclusionMap: string
-	RoughnessMap: string
-	TextureID: string
+	read MeshId: string
+	write MeshId: string?
+	read MetalnessMap: string
+	write MetalnessMap: string?
+	read NormalMap: string
+	write NormalMap: string?
+	read OcclusionMap: string
+	write OcclusionMap: string?
+	read RoughnessMap: string
+	write RoughnessMap: string?
+	read TextureID: string
+	write TextureID: string?
 	read TrianglesCount: number
 end
 
 declare extern type SkinnedMeshPart extends MeshPart with
 	JointCount: number
-	RigId: string
+	read RigId: string
+	write RigId: string?
 end
 
 declare extern type Camera extends PVInstance with
@@ -1666,13 +1689,15 @@ declare extern type SurfaceCamera extends Camera with
 	FPS: number
 	Face: Enum_NormalId
 	ImageTransparency: number
-	TagFilter: string
+	read TagFilter: string
+	write TagFilter: string?
 end
 
 declare extern type Portal extends SurfaceCamera with
 	Bidirectional: boolean
 	Destination: Instance
-	DestinationWorld: string
+	read DestinationWorld: string
+	write DestinationWorld: string?
 	Enabled: boolean
 end
 
@@ -1681,7 +1706,8 @@ declare extern type Sound extends Instance with
 	Playing: boolean
 	RollOffMaxDistance: number
 	RollOffMinDistance: number
-	SoundId: string
+	read SoundId: string
+	write SoundId: string?
 	Volume: number
 end
 
@@ -1696,8 +1722,10 @@ declare extern type Attachment extends Instance with
 end
 
 declare extern type Material extends Instance with
-	MaterialId: string
-	Shader: string
+	read MaterialId: string
+	write MaterialId: string?
+	read Shader: string
+	write Shader: string?
 end
 
 declare extern type Humanoid extends Instance with
@@ -1786,8 +1814,10 @@ end
 
 declare extern type Animation extends Instance with
 	AnimationBuffer: Instance
-	AnimationId: string
-	RigId: string
+	read AnimationId: string
+	write AnimationId: string?
+	read RigId: string
+	write RigId: string?
 end
 
 declare extern type Animator extends Instance with
@@ -1875,7 +1905,8 @@ declare extern type ShaderLens extends PVInstance with
 	InnerRadius: number
 	Priority: number
 	Radius: number
-	Shader: string
+	read Shader: string
+	write Shader: string?
 	Shape: Enum_LensShape
 	Spin: number
 	Strength: number
@@ -1887,13 +1918,19 @@ declare extern type GravitationalLens extends ShaderLens with
 end
 
 declare extern type SkyboxTextures extends Instance with
-	Back: string
-	Down: string
+	read Back: string
+	write Back: string?
+	read Down: string
+	write Down: string?
 	Enabled: boolean
-	Front: string
-	Left: string
-	Right: string
-	Up: string
+	read Front: string
+	write Front: string?
+	read Left: string
+	write Left: string?
+	read Right: string
+	write Right: string?
+	read Up: string
+	write Up: string?
 end
 
 declare extern type SkyboxCompute extends Instance with
@@ -1971,12 +2008,22 @@ end
 
 declare extern type EditableMesh extends Instance with
 	read ContentId: string
+	PackingAttributes: number
+	read PackingFormat: string
+	write PackingFormat: string?
+	PackingMaximum: number
+	PackingMinimum: number
 	read TriangleCount: number
 	read VertexCount: number
 end
 
 declare extern type EditableImage extends Instance with
 	read ContentId: string
+	PackingAttributes: number
+	read PackingFormat: string
+	write PackingFormat: string?
+	PackingMaximum: number
+	PackingMinimum: number
 	read Size: Vector2
 end
 
@@ -2038,7 +2085,8 @@ declare extern type ParticleEmitter extends Instance with
 	SpreadAngle: Vector2
 	Squash: NumberSequence
 	TangentialAcceleration: number
-	Texture: string
+	read Texture: string
+	write Texture: string?
 	TimeScale: number
 	Transparency: NumberSequence
 	VelocityInheritance: number
@@ -2054,7 +2102,8 @@ declare extern type Beam extends Instance with
 	CurveSize1: number
 	Enabled: boolean
 	FaceCamera: boolean
-	Texture: string
+	read Texture: string
+	write Texture: string?
 	TextureLength: number
 	TextureSpeed: number
 	Transparency: NumberSequence
@@ -2071,7 +2120,8 @@ declare extern type Trail extends Instance with
 	Enabled: boolean
 	Lifetime: number
 	MinLength: number
-	Texture: string
+	read Texture: string
+	write Texture: string?
 	TextureLength: number
 	Transparency: NumberSequence
 end
@@ -2082,7 +2132,8 @@ end
 declare extern type Decal extends FaceInstance with
 	Color3: Color3
 	Face: Enum_NormalId
-	Texture: string
+	read Texture: string
+	write Texture: string?
 	Transparency: number
 	ZIndex: number
 end
@@ -2094,7 +2145,8 @@ declare extern type Texture extends FaceInstance with
 	OffsetStudsV: number
 	StudsPerTileU: number
 	StudsPerTileV: number
-	Texture: string
+	read Texture: string
+	write Texture: string?
 	Transparency: number
 	ZIndex: number
 end
@@ -2219,18 +2271,21 @@ declare extern type ScrollingFrame extends Frame with
 	read AbsoluteCanvasSize: Vector2
 	read AbsoluteWindowSize: Vector2
 	AutomaticCanvasSize: Enum_AutomaticSize
-	BottomImage: string
+	read BottomImage: string
+	write BottomImage: string?
 	CanvasPosition: Vector2
 	CanvasSize: UDim2
 	ElasticBehavior: Enum_ElasticBehavior
 	HorizontalScrollBarInset: Enum_ScrollBarInset
-	MidImage: string
+	read MidImage: string
+	write MidImage: string?
 	ScrollBarImageColor3: Color3
 	ScrollBarImageTransparency: number
 	ScrollBarThickness: number
 	ScrollingDirection: Enum_ScrollingDirection
 	ScrollingEnabled: boolean
-	TopImage: string
+	read TopImage: string
+	write TopImage: string?
 	VerticalScrollBarInset: Enum_ScrollBarInset
 	VerticalScrollBarPosition: Enum_VerticalScrollBarPosition
 	function VirtualScroll(self, notches: number): ()
@@ -2252,20 +2307,25 @@ declare extern type NodeCanvas extends Frame with
 end
 
 declare extern type NodeCanvasNode extends Frame with
-	BypassInput: string
+	read BypassInput: string
+	write BypassInput: string?
 	BypassMode: Enum_NodeBypassMode
-	BypassOutput: string
+	read BypassOutput: string
+	write BypassOutput: string?
 	Enabled: boolean
 	InputPortLayout: Enum_InputPortLayout
 	MinimumSize: Vector2
-	NodeId: string
-	NodeType: string
+	read NodeId: string
+	write NodeId: string?
+	read NodeType: string
+	write NodeType: string?
 	Resizable: boolean
 	Title: string
 end
 
 declare extern type NodeCanvasGroup extends Frame with
-	GroupId: string
+	read GroupId: string
+	write GroupId: string?
 	Layout: Enum_NodeGroupLayout
 	Padding: Vector2
 	Title: string
@@ -2275,20 +2335,26 @@ declare extern type NodeCanvasPort extends GuiObject with
 	Direction: Enum_NodePortDirection
 	Edge: Enum_NodePortEdge
 	MaxConnections: number
-	PortId: string
-	ValueType: string
+	read PortId: string
+	write PortId: string?
+	read ValueType: string
+	write ValueType: string?
 end
 
 declare extern type NodeCanvasLink extends Instance with
 	FromDirection: Enum_NodePortDirection
-	FromNode: string
-	FromPort: string
+	read FromNode: string
+	write FromNode: string?
+	read FromPort: string
+	write FromPort: string?
 	LineColor3: Color3
 	LineThickness: number
 	LineTransparency: number
 	ToDirection: Enum_NodePortDirection
-	ToNode: string
-	ToPort: string
+	read ToNode: string
+	write ToNode: string?
+	read ToPort: string
+	write ToPort: string?
 end
 
 declare extern type GuiButton extends GuiObject with
@@ -2324,16 +2390,20 @@ declare extern type TextButton extends GuiButton with
 end
 
 declare extern type ImageButton extends GuiButton with
-	HoverImage: string
-	Image: string
+	read HoverImage: string
+	write HoverImage: string?
+	read Image: string
+	write Image: string?
 	ImageColor3: Color3
 	ImageRectOffset: Vector2
 	ImageRectSize: Vector2
 	ImageTransparency: number
-	PressedImage: string
+	read PressedImage: string
+	write PressedImage: string?
 	ResampleMode: Enum_ResamplerMode
 	ScaleType: Enum_ScaleType
-	Shader: string
+	read Shader: string
+	write Shader: string?
 	SliceCenter: Rect
 	SliceScale: number
 	TileSize: UDim2
@@ -2364,14 +2434,16 @@ declare extern type TextLabel extends GuiLabel with
 end
 
 declare extern type ImageLabel extends GuiLabel with
-	Image: string
+	read Image: string
+	write Image: string?
 	ImageColor3: Color3
 	ImageRectOffset: Vector2
 	ImageRectSize: Vector2
 	ImageTransparency: number
 	ResampleMode: Enum_ResamplerMode
 	ScaleType: Enum_ScaleType
-	Shader: string
+	read Shader: string
+	write Shader: string?
 	SliceCenter: Rect
 	SliceScale: number
 	TileSize: UDim2
@@ -2606,7 +2678,8 @@ declare extern type Workspace extends WorldRoot with
 	SurfaceBounces: number
 	TerrainChunkSize: number
 	TerrainEnabled: boolean
-	TerrainGenerator: string
+	read TerrainGenerator: string
+	write TerrainGenerator: string?
 	TerrainSeed: number
 	TerrainViewDistance: number
 	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
@@ -2638,7 +2711,8 @@ declare extern type Lighting extends Service with
 	FogStart: number
 	GeographicLatitude: number
 	OutdoorAmbient: Color3
-	PostProcessShader: string
+	read PostProcessShader: string
+	write PostProcessShader: string?
 	RenderFeatureDisableMask: number
 	RenderFeatureEnableMask: number
 end
@@ -2699,7 +2773,8 @@ end
 declare extern type Player extends Instance with
 	read Backpack: Instance
 	Character: Instance
-	DisplayName: string
+	read DisplayName: string
+	write DisplayName: string?
 	LocalSimulatedNetworkLatency: number
 	read PlayerGui: Instance
 	read PlayerScripts: Instance

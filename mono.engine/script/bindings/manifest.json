@@ -1325,6 +1325,10 @@
 			"properties": [
 				{"name": "ContentId", "type": "Name", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableMesh"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "PackingAttributes", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
+				{"name": "PackingFormat", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
+				{"name": "PackingMaximum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
+				{"name": "PackingMinimum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableMesh"], "writes": ["scene.EditableMesh"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "TriangleCount", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableMesh"], "writes": []},
 				{"name": "VertexCount", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableMesh"], "writes": []}
@@ -1338,6 +1342,10 @@
 			"properties": [
 				{"name": "ContentId", "type": "Name", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableImage"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "PackingAttributes", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
+				{"name": "PackingFormat", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
+				{"name": "PackingMaximum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
+				{"name": "PackingMinimum", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Size", "type": "Vector2", "kind": "field", "bytes": 8, "writable": false, "reads": ["scene.EditableImage"], "writes": []}
 			]

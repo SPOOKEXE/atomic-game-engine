@@ -2031,6 +2031,15 @@ declare task: {
 					continue;
 				}
 
+				// A Name always reads as text, while nil on write clears it to an
+				// invalid Name. Keep those two directions distinct so scripts can
+				// express an empty authored slot without weakening every read.
+				if (property.Writable && property.Type == PropertyType::Name) {
+					out << "\tread " << property.Name.Text() << ": string\n";
+					out << "\twrite " << property.Name.Text() << ": string?\n";
+					continue;
+				}
+
 				out << "\t";
 
 				// **`read` is Luau's `readonly`, and without it the two
