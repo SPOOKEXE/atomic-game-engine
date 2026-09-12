@@ -458,6 +458,7 @@ declare namespace Enum {
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AtmosphereProceduralShader extends EnumItem { readonly __enum: "AtmosphereProceduralShader"; }
+	interface AutoMeshLODStrategy extends EnumItem { readonly __enum: "AutoMeshLODStrategy"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
@@ -545,6 +546,10 @@ declare namespace Enum {
 		readonly Thin: AtmosphereProceduralShader;
 		readonly Mars: AtmosphereProceduralShader;
 		readonly Alien: AtmosphereProceduralShader;
+	};
+	const AutoMeshLODStrategy: {
+		readonly Decimated: AutoMeshLODStrategy;
+		readonly Reduced: AutoMeshLODStrategy;
 	};
 	const AutomaticSize: {
 		readonly None: AutomaticSize;
@@ -1311,6 +1316,7 @@ declare interface BasePart extends PVInstance {
 	CollisionGroup: string;
 	CollisionShape: Enum.ShapeKind;
 	Color: Color3;
+	ComputeEffectNode: string;
 	CustomPhysicalProperties: boolean;
 	Density: number;
 	Elasticity: number;
@@ -1321,6 +1327,9 @@ declare interface BasePart extends PVInstance {
 	readonly LocalTransparency: number;
 	Locked: boolean;
 	readonly Mass: number;
+	PostProcessEffectNode: string;
+	RenderFeatureDisableMask: number;
+	RenderFeatureEnableMask: number;
 	ResampleMode: Enum.ResamplerMode;
 	Size: Vector3;
 	SurfaceColor: Color3;
@@ -1358,8 +1367,32 @@ declare interface Accessory extends Model {
 }
 
 declare interface MeshPart extends BasePart {
+	AutoLod1MeshId: string;
+	AutoLod1Ratio: number;
+	AutoLod2MeshId: string;
+	AutoLod2Ratio: number;
+	AutoLod3MeshId: string;
+	AutoLod3Ratio: number;
+	AutoLodLevels: number;
+	AutoLodStrategy: Enum.AutoMeshLODStrategy;
+	AutoLodTargetQuadArea: number;
+	CustomLod1MeshId: string;
+	CustomLod1Ratio: number;
+	CustomLod2MeshId: string;
+	CustomLod2Ratio: number;
+	CustomLod3MeshId: string;
+	CustomLod3Ratio: number;
+	CustomLodLevels: number;
+	CustomLodTargetQuadArea: number;
 	EmissiveMap: string;
 	HeightMap: string;
+	Lod1MeshId: string;
+	Lod1Ratio: number;
+	Lod2MeshId: string;
+	Lod2Ratio: number;
+	Lod3MeshId: string;
+	Lod3Ratio: number;
+	LodTargetQuadArea: number;
 	MeshId: string;
 	MetalnessMap: string;
 	NormalMap: string;
@@ -1384,6 +1417,8 @@ declare interface Camera extends PVInstance {
 	MaxImageHeight: number;
 	MaxImageWidth: number;
 	NearPlaneZ: number;
+	RenderFeatureDisableMask: number;
+	RenderFeatureEnableMask: number;
 	SurfaceSize: Vector3;
 }
 
@@ -2350,6 +2385,8 @@ declare interface Lighting extends Service {
 	GeographicLatitude: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;
+	RenderFeatureDisableMask: number;
+	RenderFeatureEnableMask: number;
 }
 
 declare interface ReplicatedFirst extends Service {

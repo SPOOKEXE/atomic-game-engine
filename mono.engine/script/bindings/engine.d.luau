@@ -552,6 +552,9 @@ end
 declare extern type Enum_AtmosphereProceduralShader extends EnumItem with
 end
 
+declare extern type Enum_AutoMeshLODStrategy extends EnumItem with
+end
+
 declare extern type Enum_AutomaticSize extends EnumItem with
 end
 
@@ -759,6 +762,10 @@ declare Enum: {
 		Thin: Enum_AtmosphereProceduralShader,
 		Mars: Enum_AtmosphereProceduralShader,
 		Alien: Enum_AtmosphereProceduralShader,
+	},
+	AutoMeshLODStrategy: {
+		Decimated: Enum_AutoMeshLODStrategy,
+		Reduced: Enum_AutoMeshLODStrategy,
 	},
 	AutomaticSize: {
 		None: Enum_AutomaticSize,
@@ -1548,6 +1555,7 @@ declare extern type BasePart extends PVInstance with
 	CollisionGroup: string
 	CollisionShape: Enum_ShapeKind
 	Color: Color3
+	ComputeEffectNode: string
 	CustomPhysicalProperties: boolean
 	Density: number
 	Elasticity: number
@@ -1558,6 +1566,9 @@ declare extern type BasePart extends PVInstance with
 	read LocalTransparency: number
 	Locked: boolean
 	read Mass: number
+	PostProcessEffectNode: string
+	RenderFeatureDisableMask: number
+	RenderFeatureEnableMask: number
 	ResampleMode: Enum_ResamplerMode
 	Size: Vector3
 	SurfaceColor: Color3
@@ -1595,8 +1606,32 @@ declare extern type Accessory extends Model with
 end
 
 declare extern type MeshPart extends BasePart with
+	AutoLod1MeshId: string
+	AutoLod1Ratio: number
+	AutoLod2MeshId: string
+	AutoLod2Ratio: number
+	AutoLod3MeshId: string
+	AutoLod3Ratio: number
+	AutoLodLevels: number
+	AutoLodStrategy: Enum_AutoMeshLODStrategy
+	AutoLodTargetQuadArea: number
+	CustomLod1MeshId: string
+	CustomLod1Ratio: number
+	CustomLod2MeshId: string
+	CustomLod2Ratio: number
+	CustomLod3MeshId: string
+	CustomLod3Ratio: number
+	CustomLodLevels: number
+	CustomLodTargetQuadArea: number
 	EmissiveMap: string
 	HeightMap: string
+	Lod1MeshId: string
+	Lod1Ratio: number
+	Lod2MeshId: string
+	Lod2Ratio: number
+	Lod3MeshId: string
+	Lod3Ratio: number
+	LodTargetQuadArea: number
 	MeshId: string
 	MetalnessMap: string
 	NormalMap: string
@@ -1621,6 +1656,8 @@ declare extern type Camera extends PVInstance with
 	MaxImageHeight: number
 	MaxImageWidth: number
 	NearPlaneZ: number
+	RenderFeatureDisableMask: number
+	RenderFeatureEnableMask: number
 	SurfaceSize: Vector3
 end
 
@@ -2602,6 +2639,8 @@ declare extern type Lighting extends Service with
 	GeographicLatitude: number
 	OutdoorAmbient: Color3
 	PostProcessShader: string
+	RenderFeatureDisableMask: number
+	RenderFeatureEnableMask: number
 end
 
 declare extern type ReplicatedFirst extends Service with

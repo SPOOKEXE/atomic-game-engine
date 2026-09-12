@@ -65,6 +65,7 @@ world.Replica | Marks a world as a mirror of one the server owns, naming the wor
 
 scene.CameraPortalView | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses.
 scene.CameraCharacterHold | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending.
+scene.CameraBodyPose | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire.
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.
 scene.AnimationBuffer | World-owned canonical animation bytes and the revision presentation uses to decode a procedural clip once per edit.
 scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
@@ -91,8 +92,9 @@ scene.CharacterLimb | On a rig limb or an equipped tool's handle: which root par
 scene.Collider | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick.
 scene.CollisionShapes | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries.
 scene.ControllerState | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts.
-scene.EditableImage | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture.
-scene.EditableMesh | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh.
+scene.EditableImage | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes.
+scene.EditableMesh | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision.
+scene.PortalBodyView | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
