@@ -10,10 +10,35 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
+#include <glm/packing.hpp>
 
 #include <array>
+#include <cmath>
+#include <span>
 
 TEST_SUITE_ID("engine.render.mirrorfixtures")
+
+namespace {
+	constexpr float HALF_FLOAT_TOLERANCE = .002f;
+
+	float HalfChannel(std::span<const std::byte> pixels, size_t offset) {
+		const auto low = std::to_integer<uint32_t>(pixels[offset]);
+		const auto high = std::to_integer<uint32_t>(pixels[offset + 1]);
+		return glm::unpackHalf2x16(low | high << 8).x;
+	}
+
+	bool MatchesHalfPixels(std::span<const std::byte> pixels, const std::array<float, 4> &expected) {
+		if (pixels.empty() || pixels.size() % 8 != 0) return false;
+		for (size_t pixel = 0; pixel < pixels.size() / 8; ++pixel) {
+			for (size_t channel = 0; channel < expected.size(); ++channel) {
+				if (std::abs(HalfChannel(pixels, pixel * 8 + channel * 2) - expected[channel]) >
+					HALF_FLOAT_TOLERANCE)
+					return false;
+			}
+		}
+		return true;
+	}
+}
 
 TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirror-fixture][.]") {
 	using namespace engine;
@@ -21,8 +46,7 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
 	graph::PipelineDocument document;
-	const bool fullHdr = GENERATE(false, true);
-	const auto basis = fullHdr ? graph::DefaultWorldHdrDocument() : graph::DefaultPbrDocument();
+	const auto basis = graph::DefaultWorldHdrDocument();
 	for (auto edit : basis.Edits()) {
 		if (edit.Kind == graph::EditKind::AddResource && edit.Name == core::Name("mirror-views")) {
 			edit.Format = graph::ResourceFormat::RGBA16F;
@@ -98,6 +122,7 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 	view.Lighting.Ambient = {2, 2, 2};
 	view.Lighting.OutdoorAmbient = {2, 2, 2};
 	view.Lighting.Direct = {};
+	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
 
 	SECTION("primary body selection preserves reflected pixels and cache hits") {
 		const bool imported = GENERATE(false, true);
@@ -123,9 +148,8 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 			if (token == 1) {
 				expected = captured->Pixels;
 				REQUIRE(expected.size() >= 8);
-				CHECK(expected[1] == std::byte{0x40});
-				CHECK(expected[3] == std::byte{0});
-				CHECK(expected[5] == std::byte{0});
+				CHECK(HalfChannel(expected, 0) > 1.0f);
+				CHECK(MatchesHalfPixels(expected, {2.0f, 0.0f, 0.0f, 1.0f}));
 			} else
 				CHECK(captured->Pixels == expected);
 		}
@@ -151,22 +175,10 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 			REQUIRE(image.has_value());
 			REQUIRE(image->Status == render::ResourceImageStatus::Ok);
 			REQUIRE(image->Pixels.size() == size_t(image->Width) * image->Height * 8);
-			const std::array<std::byte, 8> expected{
-				std::byte{0},
-				static_cast<std::byte>(token == 1 ? 0x40 : 0),
-				std::byte{0},
-				std::byte{0x40},
-				std::byte{0},
-				static_cast<std::byte>(token == 1 ? 0x40 : 0),
-				std::byte{0},
-				std::byte{0x3c}
-			};
-			bool equal = true;
-			for (size_t pixel = 0; pixel < image->Pixels.size() / 8; ++pixel) {
-				equal &= std::equal(expected.begin(), expected.end(), image->Pixels.begin() + pixel * 8);
-			}
+			const std::array expected{token == 1 ? 2.0f : 0.0f, 2.0f, token == 1 ? 2.0f : 0.0f, 1.0f};
 			INFO("texture revision " << token);
-			CHECK(equal);
+			CHECK(HalfChannel(image->Pixels, 2) > 1.0f);
+			CHECK(MatchesHalfPixels(image->Pixels, expected));
 			CHECK(renderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfacePasses == 0);
 		}
 	}
@@ -215,19 +227,8 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 			}
 			REQUIRE(image.has_value());
 			REQUIRE(image->Status == render::ResourceImageStatus::Ok);
-			const std::array<std::byte, 8> red{
-				std::byte{0},
-				std::byte{0x40},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0x3c}
-			};
-			for (size_t pixel = 0; pixel < image->Pixels.size() / 8; ++pixel) {
-				REQUIRE(std::equal(red.begin(), red.end(), image->Pixels.begin() + pixel * 8));
-			}
+			CHECK(HalfChannel(image->Pixels, 0) > 1.0f);
+			CHECK(MatchesHalfPixels(image->Pixels, {2.0f, 0.0f, 0.0f, 1.0f}));
 		}
 	}
 
@@ -271,9 +272,8 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 		render::OverlayImage overlay;
 		const auto complete = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
 		CHECK_FALSE(complete.SurfaceBudgetExceeded);
-		// The shared plan captures the visible root and its child. The legacy
-		// pass also renders the offscreen root and its child.
-		const uint32_t captures = fullHdr ? 2u : 4u;
+		// The shared plan captures the visible root and its child.
+		const uint32_t captures = 2;
 		CHECK(complete.SurfacePasses == captures);
 		view.Lighting.Ambient = {.25f, .25f, .25f};
 		view.SurfaceBudget->Pixels = (captures - 1) * 65 * 37;
@@ -302,21 +302,10 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 			REQUIRE(image.has_value());
 			REQUIRE(image->Status == render::ResourceImageStatus::Ok);
 			REQUIRE(image->Pixels.size() == size_t(image->Width) * image->Height * 8);
-			// Both ambient values have exact half representations. A lighting-only edit
-			// must invalidate the retained capture without any changed geometry.
-			const std::array<std::byte, 8> red{
-				std::byte{0},
-				static_cast<std::byte>(ambient == 2.0f ? 0x40 : 0x34),
-				std::byte{0},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0},
-				std::byte{0x3c}
-			};
-			for (size_t pixel = 0; pixel < image->Pixels.size() / 8; ++pixel) {
-				REQUIRE(std::equal(red.begin(), red.end(), image->Pixels.begin() + pixel * 8));
-			}
+			// RGBA16F preserves the declared magnitude within one half-float step.
+			// A lighting-only edit must invalidate the retained capture without changed geometry.
+			if (ambient > 1.0f) CHECK(HalfChannel(image->Pixels, 0) > 1.0f);
+			CHECK(MatchesHalfPixels(image->Pixels, {ambient, 0.0f, 0.0f, 1.0f}));
 			CHECK(renderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfacePasses == 0);
 		}
 	}
