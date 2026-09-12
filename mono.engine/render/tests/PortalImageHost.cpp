@@ -106,7 +106,9 @@ TEST_CASE("portal host keeps a demanded capture while destination routing waits"
 	auto demand = worlds.Demand();
 	const auto route = worlds.Route();
 	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
-	REQUIRE(host.Pump(0, 0, START).Requests == 1);
+	const auto producer = worlds.Universe.LookupPresentation(worlds.Destination, PORTAL_REQUEST_CHANNEL);
+	REQUIRE(producer.Generation != 0);
+	REQUIRE(worlds.Universe.TakePresentation(producer).size() == 1);
 
 	// Topology and replica discovery can leave the destination unresolved for a
 	// presentation frame. The existing capture remains valid until its owner is
@@ -1175,7 +1177,7 @@ TEST_CASE(
 	CHECK_FALSE(fixture.Render.DropPortalImage(composed));
 	CHECK(fixture.Render.PortalImageUsage().Images == 4);
 	view.WorldName = core::Name("wrong-body-owner");
-	CHECK(host.ComposeBodyImage(core::Name("Door"), view) == 0);
+	CHECK(host.ComposeBodyImage(core::Name("Door"), view) == replaced);
 	CHECK(fixture.Render.PortalImageUsage().Images == 4);
 	const int retirement = GENERATE(0, 1, 2, 3, 4, 5);
 	CAPTURE(retirement);

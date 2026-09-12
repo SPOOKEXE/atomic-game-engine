@@ -515,7 +515,6 @@ namespace client {
 				portal.ImportedImage = images.Image(viewer.Slot, portal.ImagePortal);
 				const auto captured = images.Capture(viewer.Slot, portal.ImagePortal);
 				if (!captured || captured->TransparentImages[0] == 0) continue;
-				portal.ImportedImage = 0;
 				const auto demand = std::find_if(demands.begin(), demands.end(), [&](const auto &entry) {
 					return entry.Binding.Portal == portal.ImagePortal;
 				});
@@ -544,7 +543,8 @@ namespace client {
 				body.Target = &target;
 				body.Instances = bodyRows;
 				body.JointFrames = joints;
-				portal.ImportedImage = images.ComposeBodyImage(portal.ImagePortal, body);
+				const auto composed = images.ComposeBodyImage(portal.ImagePortal, body);
+				if (composed != 0) portal.ImportedImage = composed;
 			}
 		}
 		std::erase_if(surfaces, [&](const engine::render::SurfaceView &surface) {

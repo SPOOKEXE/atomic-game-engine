@@ -93,7 +93,7 @@ namespace engine::render {
 		uint64_t Image(size_t viewSlot, core::Name portal) const;
 		// Render current destination-space body rows against this portal's accepted layers.
 		// The host owns the result until replacement, expiry or viewport/world removal.
-		// A refusal returns zero and retains the preceding resource until retirement.
+		// A refusal returns a compatible preceding result, or zero before the first success.
 		uint64_t ComposeBodyImage(core::Name portal, const View &body);
 		// Copies body geometry immediately, then pulls the accepted tree's source shadows.
 		// One job may be active. Pump advances it; the accepted capture has a fixed

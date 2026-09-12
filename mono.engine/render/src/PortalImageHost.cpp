@@ -898,7 +898,6 @@ namespace engine::render {
 	}
 	uint64_t PortalImageHost::ComposeBodyImage(core::Name portal, const View &body) {
 		auto &state = *State;
-		if (state.BodyJob) return 0;
 		const auto source =
 			std::find_if(state.Sources.begin(), state.Sources.end(), [&](const Impl::Source &entry) {
 				return entry.Slot == body.Slot;
@@ -906,13 +905,19 @@ namespace engine::render {
 		if (source == state.Sources.end()) return 0;
 		const auto capture = source->Runtime->Capture(portal.Text());
 		if (!capture) return 0;
-		const auto composed = state.Render.ComposePortalBodyImage(*capture, body);
-		if (composed == 0) return 0;
 		const auto previous = std::find_if(
 			source->Compositions.begin(), source->Compositions.end(), [&](const Impl::Composition &entry) {
 				return entry.Portal == portal;
 			}
 		);
+		const auto retained = [&]() {
+			return previous != source->Compositions.end() && previous->Producer == capture->Producer
+					   ? previous->Image
+					   : uint64_t{};
+		};
+		if (state.BodyJob) return retained();
+		const auto composed = state.Render.ComposePortalBodyImage(*capture, body);
+		if (composed == 0) return retained();
 		if (previous == source->Compositions.end())
 			source->Compositions.push_back(
 				{.Portal = portal,
