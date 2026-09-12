@@ -54,7 +54,7 @@ TEST_CASE("benchmark runner refuses malformed selected-suite rows", "[benchrunne
 
 TEST_CASE("benchmark runner preserves prior measurements when a later row is malformed", "[benchrunner]") {
 	std::vector<benchrunner::Measurement> measurements{
-		{.Suite = "earlier", .Name = "kept", .Nanoseconds = 1}
+		{.Suite = "earlier", .Name = "kept", .Nanoseconds = 1, .Unit = ""}
 	};
 	std::string error;
 	CHECK_FALSE(
