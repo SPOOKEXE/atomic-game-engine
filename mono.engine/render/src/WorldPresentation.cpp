@@ -127,6 +127,32 @@ namespace engine::render {
 			}
 			return signature;
 		}
+
+		uint64_t FoldGroundGrid(uint64_t signature, const View::GroundGrid &grid) {
+			signature = FoldPresentation(signature, grid.Enabled ? 1u : 0u);
+			for (const float value : {
+					 grid.Step,
+					 grid.Major,
+					 grid.Reach,
+					 grid.Strength,
+					 grid.Offset.X,
+					 grid.Offset.Y,
+					 grid.Offset.Z,
+					 grid.Colour.R,
+					 grid.Colour.G,
+					 grid.Colour.B,
+					 grid.Alpha,
+					 grid.AxisX.R,
+					 grid.AxisX.G,
+					 grid.AxisX.B,
+					 grid.AxisZ.R,
+					 grid.AxisZ.G,
+					 grid.AxisZ.B,
+					 grid.AxisAlpha,
+				 })
+				signature = FoldPresentationObject(signature, value);
+			return signature;
+		}
 	}
 
 	bool EnvironmentLayerPresent(const scene::WorldLighting &lighting) {
@@ -180,7 +206,9 @@ namespace engine::render {
 			objects = FoldPresentation(objects, view.EyeRig);
 			objects = FoldPresentationSpan(objects, view.EyeHiddenRows);
 			objects = FoldPresentation(objects, view.Pipeline.Id());
-			objects = FoldPresentationObject(objects, view.Grid);
+			// GroundGrid has padding after Enabled. Hash its visible fields so a
+			// fresh View with identical authored values keeps the same cache key.
+			objects = FoldGroundGrid(objects, view.Grid);
 			objects = FoldPresentation(objects, state.Animation);
 			objects = FoldPresentation(objects, state.Resources);
 			objects = FoldPresentation(objects, state.PostProcess.Id());

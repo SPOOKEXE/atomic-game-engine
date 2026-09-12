@@ -1054,8 +1054,8 @@ TEST_CASE(
 			effects::InstallParticles(store, 128);
 			store.ResourceMutable<effects::ParticleSystem>()->DeviceStepped = true;
 			scene::ResolveAttachments(store);
-			REQUIRE(effects::RefreshEmitters(store) == 1);
 			REQUIRE(effects::EmitParticles(store, emitter, 1));
+			REQUIRE(effects::RefreshEmitters(store) == 1);
 		}
 
 		if (beamOnly) {
@@ -1480,6 +1480,10 @@ TEST_CASE(
 			);
 		}
 		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 1);
+		// This fixture exercises a later camera request explicitly. Return the
+		// retained demand to the one already in flight so Poll does not dispatch a
+		// second request before that assertion.
+		REQUIRE(source.Issue(worlds.Requests, request, binding, started).Status == PortalInboxStatus::Busy);
 	}
 	if (alreadyPresented) {
 		worlds.Universe.Present(worlds.Destination, .125f, .375f);
