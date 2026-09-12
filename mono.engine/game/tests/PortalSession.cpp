@@ -193,6 +193,22 @@ TEST_CASE("one portal connection reserves only one transferred player", "[game][
 	CHECK_FALSE(leases.Reserved(7, 31));
 }
 
+TEST_CASE("an invalid disconnect cannot release a waiting portal admission", "[game][portal-session]") {
+	game::PortalSessionLeases leases;
+	const auto claim = Claim();
+	const auto identity = Identity();
+	const ecs::Entity player(53);
+	REQUIRE(leases.Offer(claim, identity, 1));
+	REQUIRE(leases.Reserve(claim, identity, 7, player, 2));
+
+	// A transport restart can surface its empty peer slot before it has bound a
+	// replacement. Keep the live reservation owned by its original connection.
+	leases.Drop(0);
+	CHECK(leases.Reserved(7, 2));
+	CHECK(leases.Player(claim, 7, 2) == player);
+	CHECK_FALSE(leases.Reserve(claim, identity, 8, player, 2));
+}
+
 TEST_CASE(
 	"portal session motion requires the matching destination and finite pose", "[game][portal-session]"
 ) {

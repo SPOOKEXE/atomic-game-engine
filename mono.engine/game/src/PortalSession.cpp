@@ -316,6 +316,9 @@ namespace engine::game {
 	}
 
 	void PortalSessionLeases::Drop(uint64_t peer) {
+		// Zero is the empty lease owner. A malformed disconnect must not turn into
+		// a broadcast that releases every admission still waiting for its peer.
+		if (peer == 0) return;
 		for (auto &lease : Entries) {
 			if (lease.Peer == peer) lease.Peer = 0;
 		}
