@@ -90,3 +90,28 @@ TEST_CASE("the pixel bytes cross unchanged", "[render][editableimages]") {
 	CHECK(static_cast<uint8_t>(built.Pixels[0]) == 200);
 	CHECK(static_cast<uint8_t>(built.Pixels[7]) == 77);
 }
+
+TEST_CASE("compact image policies report unsupported storage before upload", "[render][editableimages]") {
+	EditableImage image;
+	image.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour);
+	image.Packing.Format = engine::scene::EditablePackingFormat::Unsigned4;
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::UnsupportedFormat
+	);
+	image.Packing.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::UnsupportedAttributes
+	);
+	image.Packing.Attributes = 0;
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::UnsupportedAttributes
+	);
+	image.Packing = {};
+	CHECK(
+		engine::render::EditableImagePackingSupportOf(image) ==
+		engine::render::EditableImagePackingSupport::NativeRGBA8
+	);
+}

@@ -54,6 +54,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/EditablePacking.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -99,6 +100,11 @@ namespace engine::scene {
 		// outside - `render/AGENTS.md`'s winding rule, unchanged for a mesh
 		// built in code.
 		std::vector<uint32_t> Indices;
+
+		// Presentation-only attribute encoding. The canonical arrays above remain
+		// authoritative for editing, saves and collision; the render adapter makes
+		// a compact copy and decodes it at its boundary.
+		EditablePacking Packing;
 
 		// A content signature computed by a bulk geometry commit. Zero means the
 		// incremental editing API changed an array and the signature has not been

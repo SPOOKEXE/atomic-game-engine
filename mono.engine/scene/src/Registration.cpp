@@ -740,6 +740,11 @@ namespace engine::scene {
 				for (uint32_t entry = 0; entry < indices; entry++) {
 					writer.WriteUInt32(mesh.Indices[entry]);
 				}
+				writer.WriteString(EditablePackingFormatName(mesh.Packing.Format));
+				writer.WriteUInt8(mesh.Packing.Attributes);
+				writer.WriteFloat(mesh.Packing.Minimum);
+				writer.WriteFloat(mesh.Packing.Maximum);
+				writer.WriteUInt32(mesh.Packing.Revision);
 
 				// The revision travels with the geometry, for
 				// `WriteShaderSources`' identical reason: a reader that reset
@@ -797,6 +802,14 @@ namespace engine::scene {
 				for (uint32_t entry = 0; entry < indices; entry++) {
 					mesh.Indices.push_back(reader.ReadUInt32());
 				}
+				const std::string_view format = reader.ReadString();
+				EditablePacking packing;
+				const bool knownPacking = ParseEditablePackingFormat(format, packing.Format);
+				packing.Attributes = reader.ReadUInt8();
+				packing.Minimum = reader.ReadFloat();
+				packing.Maximum = reader.ReadFloat();
+				packing.Revision = reader.ReadUInt32();
+				mesh.Packing = knownPacking ? packing : EditablePacking{};
 
 				mesh.Revision = reader.ReadUInt32();
 				// Derived and deliberately absent from the snapshot. The first bulk
@@ -820,6 +833,11 @@ namespace engine::scene {
 				if (!image.Pixels.empty()) {
 					writer.WriteRaw(image.Pixels.data(), image.Pixels.size());
 				}
+				writer.WriteString(EditablePackingFormatName(image.Packing.Format));
+				writer.WriteUInt8(image.Packing.Attributes);
+				writer.WriteFloat(image.Packing.Minimum);
+				writer.WriteFloat(image.Packing.Maximum);
+				writer.WriteUInt32(image.Packing.Revision);
 				writer.WriteUInt32(image.Revision);
 			}
 		}
@@ -835,6 +853,14 @@ namespace engine::scene {
 				if (bytes > 0) {
 					reader.ReadRaw(image.Pixels.data(), bytes);
 				}
+				const std::string_view format = reader.ReadString();
+				EditablePacking packing;
+				const bool knownPacking = ParseEditablePackingFormat(format, packing.Format);
+				packing.Attributes = reader.ReadUInt8();
+				packing.Minimum = reader.ReadFloat();
+				packing.Maximum = reader.ReadFloat();
+				packing.Revision = reader.ReadUInt32();
+				image.Packing = knownPacking ? packing : EditablePacking{};
 				image.Revision = reader.ReadUInt32();
 			}
 		}

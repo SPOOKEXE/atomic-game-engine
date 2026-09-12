@@ -10,6 +10,17 @@
 
 namespace engine::render {
 
+	EditableImagePackingSupport EditableImagePackingSupportOf(const engine::scene::EditableImage &image) {
+		if (image.Packing.Format == engine::scene::EditablePackingFormat::Float32)
+			return EditableImagePackingSupport::NativeRGBA8;
+		constexpr uint8_t imageAttributes =
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Colour) |
+			static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Alpha);
+		if (image.Packing.Attributes == 0 || (image.Packing.Attributes & ~imageAttributes) != 0)
+			return EditableImagePackingSupport::UnsupportedAttributes;
+		return EditableImagePackingSupport::UnsupportedFormat;
+	}
+
 	engine::assets::TextureData BuildTextureData(const engine::scene::EditableImage &image) {
 		engine::assets::TextureData built;
 		built.Width = image.Width;

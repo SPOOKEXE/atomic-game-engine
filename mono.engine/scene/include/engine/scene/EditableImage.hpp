@@ -33,6 +33,7 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/scene/EditablePacking.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -81,6 +82,12 @@ namespace engine::scene {
 		std::vector<uint8_t> Pixels = std::vector<uint8_t>(
 			static_cast<size_t>(DEFAULT_EDITABLE_IMAGE_SIZE) * DEFAULT_EDITABLE_IMAGE_SIZE * 4, 0
 		);
+
+		// RGBA8 is the only current TextureTable storage contract. This policy is
+		// authored and saved now so callers can ask for another encoding, but the
+		// render adapter refuses unsupported image storage instead of changing how
+		// an image is sampled behind the author's back.
+		EditablePacking Packing;
 
 		// Bumped by every call that changes a pixel - `EditableMesh::
 		// Revision`'s exact reason and exact contract.

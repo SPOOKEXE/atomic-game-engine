@@ -19,17 +19,53 @@ namespace engine::render {
 		// complete terrain-sized result. A second packed copy here would be shared
 		// storage for data the ECS already owns.
 		engine::assets::MeshData built;
+		std::vector<std::byte> packed;
+		std::vector<float> decoded;
+		const auto quantized = [&](engine::scene::EditablePackingAttribute attribute,
+								   std::span<const float> values) {
+			if (!mesh.Packing.Enabled() || (mesh.Packing.Attributes & static_cast<uint8_t>(attribute)) == 0)
+				return values;
+			if (!engine::scene::PackEditableValues(values, mesh.Packing, packed) ||
+				!engine::scene::UnpackEditableValues(packed, values.size(), mesh.Packing, decoded))
+				return values;
+			return std::span<const float>(decoded);
+		};
+		std::vector<float> positions(mesh.Positions.size() * 3);
+		std::vector<float> normals(mesh.Normals.size() * 3);
+		std::vector<float> uvs(mesh.UVs.size() * 2);
+		for (size_t index = 0; index < mesh.Positions.size(); index++) {
+			positions[index * 3] = mesh.Positions[index].X;
+			positions[index * 3 + 1] = mesh.Positions[index].Y;
+			positions[index * 3 + 2] = mesh.Positions[index].Z;
+		}
+		for (size_t index = 0; index < mesh.Normals.size(); index++) {
+			normals[index * 3] = mesh.Normals[index].X;
+			normals[index * 3 + 1] = mesh.Normals[index].Y;
+			normals[index * 3 + 2] = mesh.Normals[index].Z;
+		}
+		for (size_t index = 0; index < mesh.UVs.size(); index++) {
+			uvs[index * 2] = mesh.UVs[index].X;
+			uvs[index * 2 + 1] = mesh.UVs[index].Y;
+		}
+		const std::span<const float> packedPositions =
+			quantized(engine::scene::EditablePackingAttribute::Position, positions);
+		const std::vector<float> positionCopy(packedPositions.begin(), packedPositions.end());
+		const std::span<const float> packedNormals =
+			quantized(engine::scene::EditablePackingAttribute::Normal, normals);
+		const std::vector<float> normalCopy(packedNormals.begin(), packedNormals.end());
+		const std::span<const float> packedUVs = quantized(engine::scene::EditablePackingAttribute::UV, uvs);
+		const std::vector<float> uvCopy(packedUVs.begin(), packedUVs.end());
 		built.Vertices.reserve(mesh.Positions.size());
 		for (size_t index = 0; index < mesh.Positions.size(); index++) {
 			engine::assets::MeshVertex vertex{};
-			vertex.Position[0] = mesh.Positions[index].X;
-			vertex.Position[1] = mesh.Positions[index].Y;
-			vertex.Position[2] = mesh.Positions[index].Z;
-			vertex.Normal[0] = mesh.Normals[index].X;
-			vertex.Normal[1] = mesh.Normals[index].Y;
-			vertex.Normal[2] = mesh.Normals[index].Z;
-			vertex.TexCoord[0] = mesh.UVs[index].X;
-			vertex.TexCoord[1] = mesh.UVs[index].Y;
+			vertex.Position[0] = positionCopy[index * 3];
+			vertex.Position[1] = positionCopy[index * 3 + 1];
+			vertex.Position[2] = positionCopy[index * 3 + 2];
+			vertex.Normal[0] = normalCopy[index * 3];
+			vertex.Normal[1] = normalCopy[index * 3 + 1];
+			vertex.Normal[2] = normalCopy[index * 3 + 2];
+			vertex.TexCoord[0] = uvCopy[index * 2];
+			vertex.TexCoord[1] = uvCopy[index * 2 + 1];
 			built.Vertices.push_back(vertex);
 		}
 		built.Indices = mesh.Indices;

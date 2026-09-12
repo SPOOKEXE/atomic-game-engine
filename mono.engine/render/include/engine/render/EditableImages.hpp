@@ -32,6 +32,17 @@ namespace engine::scene {
 }
 
 namespace engine::render {
+	// TextureTable currently samples only native RGBA8/R8 content. Keeping this
+	// result explicit prevents an authored compact image policy from silently
+	// changing channel interpretation while the renderer still uploads RGBA8.
+	enum class EditableImagePackingSupport : uint8_t {
+		NativeRGBA8,
+		UnsupportedFormat,
+		UnsupportedAttributes,
+	};
+
+	EditableImagePackingSupport EditableImagePackingSupportOf(const engine::scene::EditableImage &image);
+
 	// Converts the raw pixel buffer into the format `render::TextureTable`
 	// takes.
 	//
