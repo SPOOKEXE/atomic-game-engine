@@ -170,7 +170,7 @@ namespace engine::render {
 						node->Kind == core::Name("forward") || node->Kind == core::Name("portal-overlay") ||
 						node->Kind == core::Name("mirror-overlay") ||
 						node->Kind == core::Name("transparent") ||
-						node->Kind == core::Name("transparent-layer") || node->Kind == core::Name("overlay");
+						node->Kind == core::Name("transparent-layer");
 					if (consumesInstanceUploads &&
 						!DependsOnKind(pipeline, scheduled.Node, core::Name("delta-upload"))) {
 						offender = node->Name;

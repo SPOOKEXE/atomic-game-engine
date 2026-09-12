@@ -203,6 +203,7 @@ TEST_CASE("depth exports preserve the lighting depth singleton", "[render][graph
 TEST_CASE("built-in capability fallbacks compile into the graph backend", "[render][graph]") {
 	Renderer renderer;
 	for (const auto &[name, document] : {
+			 std::pair{Name("Eye#1"), engine::graph::DefaultEyeDocument()},
 			 std::pair{Name("Tier B#1"), engine::graph::DefaultPbrTierBDocument()},
 			 std::pair{Name("Tier C#1"), engine::graph::DefaultForwardTierCDocument()},
 		 }) {
