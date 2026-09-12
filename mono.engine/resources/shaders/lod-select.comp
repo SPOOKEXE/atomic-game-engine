@@ -90,7 +90,8 @@ void main() {
 	clusterSelection.CentreTarget.xyz = cluster.CentreArea.xyz;
 	clusterSelection.ExtentLevels.xyz = cluster.ExtentLevel.xyz;
 	float clusterArea = ProjectedArea(clusterSelection);
-	bool useful = clusterArea > 0.0 && !isnan(clusterArea) &&
-		clusterArea / float(cluster.Draw.w) >= selection.CentreTarget.w;
-	arguments.words[cluster.Draw.z * 5u + 1u] = chosen == cluster.Draw.y && useful ? 1u : 0u;
+	// A selected level owns full coverage. Without parent mappings, a cluster
+	// cannot use its own area target without leaving holes in that level.
+	bool visible = clusterArea > 0.0 && !isnan(clusterArea);
+	arguments.words[cluster.Draw.z * 5u + 1u] = chosen == cluster.Draw.y && visible ? 1u : 0u;
 }

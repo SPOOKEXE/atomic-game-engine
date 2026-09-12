@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -50,6 +51,12 @@ namespace engine::render {
 	};
 
 	static_assert(sizeof(GpuLodCluster) == 48);
+
+	// A selected level owns every visible cluster. Surface metrics choose the
+	// level as a whole, because cluster pages have no parent coverage mapping.
+	inline bool ClusterVisibleAtSelectedLevel(uint32_t selectedLevel, uint32_t clusterLevel, float projectedArea) {
+		return selectedLevel == clusterLevel && projectedArea > 0.0f && !std::isnan(projectedArea);
+	}
 
 	struct LodDrawLevel {
 		const MeshEntry *Mesh = nullptr;

@@ -20,6 +20,7 @@ using Catch::Approx;
 using engine::core::CFrame;
 using engine::core::Vector3;
 using engine::render::AppendAuthoredLod;
+using engine::render::ClusterVisibleAtSelectedLevel;
 using engine::render::LodPlan;
 using engine::render::MeshEntry;
 using engine::render::MeshRange;
@@ -163,6 +164,19 @@ TEST_CASE("resident mesh clusters become the GPU-selected indirect page set", "[
 	CHECK(plan.Draws[0].Clusters[1].size() == 1);
 	CHECK(plan.Draws[0].Clusters[0][1].Range.FirstIndex == 18);
 	CHECK(plan.Commands[2].first_instance == 1);
+}
+
+TEST_CASE("a selected level keeps an onscreen cluster below its global area target", "[render][lod]") {
+	constexpr uint32_t selectedLevel = 1;
+	constexpr uint32_t clusterLevel = 1;
+	constexpr uint32_t clusterTriangles = 64;
+	constexpr float targetArea = 4.0f;
+	constexpr float clusterArea = 128.0f;
+
+	CHECK(clusterArea / static_cast<float>(clusterTriangles) < targetArea);
+	CHECK(ClusterVisibleAtSelectedLevel(selectedLevel, clusterLevel, clusterArea));
+	CHECK_FALSE(ClusterVisibleAtSelectedLevel(selectedLevel, 0, clusterArea));
+	CHECK_FALSE(ClusterVisibleAtSelectedLevel(selectedLevel, clusterLevel, 0.0f));
 }
 
 TEST_CASE("plain visuals do not allocate an LOD draw", "[render][lod]") {
