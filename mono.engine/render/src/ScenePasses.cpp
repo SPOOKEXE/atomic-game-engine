@@ -15,29 +15,18 @@
 // before v0.15, so every bug in one was available to the other.
 
 #include "ViewRecording.hpp"
+#include "GraphHistory.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
-#include <bit>
 #include <chrono>
 #include <cstring>
 #include <optional>
 #include <vector>
 
 namespace engine::render {
-	namespace {
-		uint64_t GraphHistorySignature(const ViewRecording &recording) {
-			uint64_t signature = recording.ContentSignature;
-			for (const glm::mat4 *matrix : {&recording.Matrices.ViewProjection, &recording.Matrices.Projection})
-				for (size_t column = 0; column < 4; column++)
-					for (size_t row = 0; row < 4; row++)
-						signature = scene::MixSignature(signature, std::bit_cast<uint32_t>((*matrix)[column][row]));
-			signature = scene::MixSignature(signature, recording.SceneWidth);
-			return scene::MixSignature(signature, recording.SceneHeight);
-		}
-	}
 
 	bool ViewRecording::AdmitSurfaceCapture(uint32_t width, uint32_t height, uint32_t depth) {
 		if (Request.Source == nullptr || !Request.Source->SurfaceBudget) {
@@ -964,16 +953,21 @@ namespace engine::render {
 			return fixed;
 		}
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
-		const uint64_t owner = scope == graph::NodeScope::View	  ? static_cast<uint64_t>(selectedSlot)
-							   : scope == graph::NodeScope::World ? world
-																  : 0;
+		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, world);
 		if (desc->External) {
 			if (desc->Name == core::Name("window")) {
 				return Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
 			}
 			if (!make && desc->Lifetime == graph::ResourceLifetime::History) {
+				if (!GraphHistoryReadable(Request.Damage)) {
+					return {};
+				}
 				return State->FindGraphHistoryForRead(
-					*selectedPipeline, desc->Name, scope, owner, GraphHistorySignature(*this)
+					*selectedPipeline,
+					desc->Name,
+					scope,
+					owner,
+					GraphHistorySignature(ContentSignature, Matrices, SceneWidth, SceneHeight)
 				);
 			}
 			if (!make) {
@@ -994,16 +988,17 @@ namespace engine::render {
 		return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
 	}
 
-	Renderer::Impl::NamedTexture
-	ViewRecording::GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make) {
+	size_t ViewRecording::GraphTextureSlot(const graph::RunContext &context) const {
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
-		const size_t targetSlot = Request.TargetSlot;
-
 		const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 		const bool selectsView = context.View == graph::RunContext::WHOLE_FRAME && node != nullptr &&
 								 node->Parameter(core::Name("view")) != nullptr;
-		const size_t selectedSlot = selectsView ? node->Integer(core::Name("view"), 0) : targetSlot;
-		return ResourceTexture(resource, selectedSlot, make);
+		return selectsView ? node->Integer(core::Name("view"), 0) : Request.TargetSlot;
+	}
+
+	Renderer::Impl::NamedTexture
+	ViewRecording::GraphTexture(graph::ResourceId resource, const graph::RunContext &context, bool make) {
+		return ResourceTexture(resource, GraphTextureSlot(context), make);
 	}
 
 	std::vector<SDL_GPUTextureSamplerBinding>

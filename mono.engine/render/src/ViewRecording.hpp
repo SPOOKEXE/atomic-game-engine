@@ -527,6 +527,9 @@ namespace engine::render {
 		// @return The texture, or an invalid one.
 		Impl::NamedTexture ResourceTexture(graph::ResourceId resource, size_t selectedSlot, bool make);
 
+		// The selected slot has to be shared by graph target allocation and history writes.
+		size_t GraphTextureSlot(const graph::RunContext &context) const;
+
 		// `ResourceTexture` for the viewport this node names, or this view's.
 		//
 		// @param resource The resource.
