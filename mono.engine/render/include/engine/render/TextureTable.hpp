@@ -254,6 +254,10 @@ namespace engine::render {
 		// @since v0.10
 		bool SizeOf(const core::Name &name, uint32_t &width, uint32_t &height, core::Name owner = {}) const;
 
+		// The source layout and colour-space intent retained for a named texture.
+		// Returns false for an absent name and leaves `format` alone.
+		bool FormatOf(const core::Name &name, assets::TextureFormat &format, core::Name owner = {}) const;
+
 		// Where this texture's current cell sits, for a sheet that animates.
 		//
 		// **The identity for anything that is not a sheet**, so a caller applies
@@ -328,6 +332,7 @@ namespace engine::render {
 			// draws every slice at the wrong scale.
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			assets::TextureFormat Format = assets::TextureFormat::RGBA8_LINEAR;
 
 			// **The sheet layout, kept because the pass that plays it has only a
 			// name.** A GIF bakes to an ordinary texture carrying its grid,

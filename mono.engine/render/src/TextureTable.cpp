@@ -171,7 +171,8 @@ namespace engine::render {
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
-		info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		info.format = assets::IsSRGB(image.Format) ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+												   : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		info.width = image.Width;
 		info.height = image.Height;
@@ -245,6 +246,7 @@ namespace engine::render {
 			.Bytes = bytes,
 			.Width = image.Width,
 			.Height = image.Height,
+			.Format = image.Format,
 			.FlipbookSide = image.FlipbookSide,
 			.FlipbookFrames = image.FlipbookFrames,
 			.FlipbookFrameRate = image.FlipbookFrameRate,
@@ -347,6 +349,15 @@ namespace engine::render {
 		}
 		width = found->second.Width;
 		height = found->second.Height;
+		return true;
+	}
+
+	bool
+	TextureTable::FormatOf(const core::Name &name, assets::TextureFormat &format, core::Name owner) const {
+		if (!name.IsValid()) return false;
+		const auto found = Textures.find(TextureKey(name, owner));
+		if (found == Textures.end()) return false;
+		format = found->second.Format;
 		return true;
 	}
 

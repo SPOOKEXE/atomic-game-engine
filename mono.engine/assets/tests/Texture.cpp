@@ -95,6 +95,21 @@ TEST_CASE("the single-channel format round-trips at its own stride", "[assets][t
 	CHECK(read.Pixels == source.Pixels);
 }
 
+TEST_CASE("rgba colour space intent round-trips", "[assets][texture][colour-space]") {
+	TextureData colour = Made(2, 2, TextureFormat::RGBA8);
+	TextureData data = Made(2, 2, TextureFormat::RGBA8_LINEAR);
+	CHECK(engine::assets::IsSRGB(colour.Format));
+	CHECK_FALSE(engine::assets::IsSRGB(data.Format));
+
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, data));
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+	CHECK(read.Format == TextureFormat::RGBA8_LINEAR);
+	CHECK(read.Pixels == data.Pixels);
+}
+
 TEST_CASE("an image whose pixels disagree with its dimensions is invalid", "[assets][texture]") {
 	TextureData data = Made(4, 4);
 	data.Pixels.pop_back();

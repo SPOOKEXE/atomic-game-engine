@@ -102,6 +102,101 @@ TEST_CASE("texture arrivals are tracked independently for each content owner", "
 }
 
 TEST_CASE(
+	"texture colour space and mip selection reach GPU sampling", "[render][texture-colour-space][gpu][.]"
+) {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	render::TextureTable table;
+	REQUIRE(table.Initialise(device));
+
+	assets::TextureData srgb;
+	srgb.Width = srgb.Height = 1;
+	srgb.Pixels = {std::byte{128}, std::byte{128}, std::byte{128}, std::byte{255}};
+	assets::TextureData linear = srgb;
+	linear.Format = assets::TextureFormat::RGBA8_LINEAR;
+	assets::TextureData mip = linear;
+	mip.Width = mip.Height = 2;
+	mip.Pixels.assign(16, std::byte{0});
+	mip.Mips = {{std::byte{200}, std::byte{200}, std::byte{200}, std::byte{255}}};
+	const core::Name srgbName("colour"), linearName("data"), mipName("mip-data");
+	REQUIRE(table.Add(srgbName, srgb));
+	REQUIRE(table.Add(linearName, linear));
+	REQUIRE(table.Add(mipName, mip));
+	assets::TextureFormat retained = assets::TextureFormat::R8;
+	REQUIRE(table.FormatOf(srgbName, retained));
+	CHECK(retained == assets::TextureFormat::RGBA8);
+	REQUIRE(table.FormatOf(linearName, retained));
+	CHECK(retained == assets::TextureFormat::RGBA8_LINEAR);
+
+	SDL_GPUTextureCreateInfo targetInfo{};
+	targetInfo.type = SDL_GPU_TEXTURETYPE_2D;
+	targetInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+	targetInfo.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	targetInfo.width = 3;
+	targetInfo.height = targetInfo.layer_count_or_depth = targetInfo.num_levels = 1;
+	const auto releaseTexture = [device](SDL_GPUTexture *texture) {
+		render::gpu::ReleaseTexture(device, texture);
+	};
+	std::unique_ptr<SDL_GPUTexture, decltype(releaseTexture)> target(
+		render::gpu::CreateTexture(device, &targetInfo), releaseTexture
+	);
+	REQUIRE(target);
+	SDL_GPUTransferBufferCreateInfo downloadInfo{};
+	downloadInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	downloadInfo.size = 12;
+	const auto releaseTransfer = [device](SDL_GPUTransferBuffer *transfer) {
+		render::gpu::ReleaseTransferBuffer(device, transfer);
+	};
+	std::unique_ptr<SDL_GPUTransferBuffer, decltype(releaseTransfer)> download(
+		render::gpu::CreateTransferBuffer(device, &downloadInfo), releaseTransfer
+	);
+	REQUIRE(download);
+
+	auto *command = SDL_AcquireGPUCommandBuffer(device);
+	REQUIRE(command);
+	const std::array sources = {table.Find(srgbName), table.Find(linearName), table.Find(mipName)};
+	for (uint32_t index = 0; index < sources.size(); index++) {
+		SDL_GPUBlitInfo blit{};
+		blit.source.texture = sources[index];
+		blit.source.mip_level = index == 2 ? 1 : 0;
+		blit.source.w = blit.source.h = 1;
+		blit.destination.texture = target.get();
+		blit.destination.x = index;
+		blit.destination.w = blit.destination.h = 1;
+		blit.load_op = index == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+		blit.filter = SDL_GPU_FILTER_NEAREST;
+		SDL_BlitGPUTexture(command, &blit);
+	}
+	auto *copy = SDL_BeginGPUCopyPass(command);
+	REQUIRE(copy);
+	SDL_GPUTextureRegion source{};
+	source.texture = target.get();
+	source.w = 3;
+	source.h = source.d = 1;
+	SDL_GPUTextureTransferInfo destination{};
+	destination.transfer_buffer = download.get();
+	destination.pixels_per_row = 3;
+	destination.rows_per_layer = 1;
+	SDL_DownloadFromGPUTexture(copy, &source, &destination);
+	SDL_EndGPUCopyPass(copy);
+	auto *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+	REQUIRE(fence);
+	REQUIRE(SDL_WaitForGPUFences(device, true, &fence, 1));
+	SDL_ReleaseGPUFence(device, fence);
+	const auto *pixels =
+		static_cast<const std::byte *>(SDL_MapGPUTransferBuffer(device, download.get(), false));
+	REQUIRE(pixels);
+	const uint8_t decoded = std::to_integer<uint8_t>(pixels[0]);
+	CHECK(decoded >= 53);
+	CHECK(decoded <= 57);
+	CHECK(std::to_integer<uint8_t>(pixels[4]) == 128);
+	CHECK(std::to_integer<uint8_t>(pixels[8]) == 200);
+	SDL_UnmapGPUTransferBuffer(device, download.get());
+	table.Shutdown();
+}
+
+TEST_CASE(
 	"same-name texture residency and retirement stay within their owner", "[render][texture-owner][gpu][.]"
 ) {
 	render::test::FixtureDevice fixture;
