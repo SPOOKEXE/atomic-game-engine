@@ -110,6 +110,8 @@ namespace engine::render {
 	) const {
 		return entry.SourceKnown && std::memcmp(&entry.Source, &source, sizeof(entry.Source)) == 0 &&
 			   std::memcmp(&entry.Transparency, &source.Transparency, sizeof(float) * 2) == 0 &&
+			   entry.FeatureEnable == (source.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES) &&
+			   entry.FeatureDisable == (source.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES) &&
 			   entry.Alpha == source.Alpha && entry.Resample == source.Resample &&
 			   std::memcmp(&entry.MeshCentre, &mesh.Centre, sizeof(core::Vector3)) == 0 &&
 			   std::memcmp(&entry.MeshExtent, &mesh.Extent, sizeof(core::Vector3)) == 0;
@@ -163,6 +165,8 @@ namespace engine::render {
 			};
 			entry.Transparency = source->Transparency;
 			entry.AlphaCutoff = source->AlphaCutoff;
+			entry.FeatureEnable = source->RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
+			entry.FeatureDisable = source->RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
 			entry.Alpha = source->Alpha;
 			entry.Resample = source->Resample;
 			entry.MeshCentre = mesh->Centre;
@@ -209,6 +213,8 @@ namespace engine::render {
 			};
 			entry.Transparency = source->Transparency;
 			entry.AlphaCutoff = source->AlphaCutoff;
+			entry.FeatureEnable = source->RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
+			entry.FeatureDisable = source->RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
 			entry.Alpha = source->Alpha;
 			entry.Resample = source->Resample;
 			entry.MeshCentre = mesh->Centre;

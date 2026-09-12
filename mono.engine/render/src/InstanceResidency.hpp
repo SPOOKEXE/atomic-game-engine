@@ -134,6 +134,8 @@ namespace engine::render {
 			PackingSource Source;
 			float Transparency = 0.0f;
 			float AlphaCutoff = 0.5f;
+			uint32_t FeatureEnable = 0;
+			uint32_t FeatureDisable = 0;
 			core::Vector3 MeshCentre;
 			core::Vector3 MeshExtent;
 			uint64_t Seen = 0;

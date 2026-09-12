@@ -39,6 +39,8 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -295,6 +297,22 @@ namespace engine::scene {
 		// per row.
 		core::Name SourceWorld;
 
+		// Authored feature masks copied onto the resident GPU instance row.
+		RenderFeaturePolicy RenderFeatures;
+
+		// Four authored LOD levels, with level zero held in Mesh. Selection is a
+		// per-view GPU result, so this snapshot carries inputs and no chosen level.
+		core::Name LodMeshes[LOD_LEVELS - 1];
+		float LodRatios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
+		float LodTargetQuadArea = 0.0f;
+		LodStrategy LodStrategyMode = LodStrategy::None;
+		uint8_t LodLevels = 1;
+		uint8_t LodReserved[2] = {};
+
+		// Graph nodes attached to this visual. The pipeline owns shader source and
+		// parameters; the instance only selects stable node names.
+		RenderEffects Effects;
+
 		// Number of consecutive transforms this drawable owns in the palette.
 		uint16_t SkinCount = 0;
 
@@ -340,8 +358,36 @@ namespace engine::scene {
 	//                   limb of one character names the same root, which is the
 	//                   grouping a portal seam needs; a row without one is its
 	//                   own body. See `DrawInstance::Rig`.
+	// @param automatic  Optional automatically produced mesh ladder.
+	// @param custom     Optional per-level authored overrides. Valid meshes win;
+	//                   nil entries fall back to `automatic`.
+	// @param effects    Optional graph-node attachments for this visual.
 	// @return The instance to publish.
 	// @since v0.15
+	inline void ApplyDrawRenderState(
+		DrawInstance &instance,
+		const AutoMeshLOD *automatic,
+		const CustomMeshLOD *custom,
+		const RenderEffects *effects
+	) {
+		const LevelOfDetail lod = ResolveMeshLOD(automatic, custom);
+		if (lod.Strategy != LodStrategy::None) {
+			for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+				instance.LodMeshes[level] = lod.Meshes[level];
+				instance.LodRatios[level] = lod.Ratios[level];
+			}
+			instance.LodTargetQuadArea = lod.TargetQuadArea;
+			instance.LodStrategyMode = lod.Strategy;
+			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));
+		}
+		if (effects != nullptr) {
+			instance.Effects = *effects;
+			instance.Effects.Count = std::min<uint8_t>(
+				instance.Effects.Count, static_cast<uint8_t>(MAX_RENDER_EFFECT_ATTACHMENTS)
+			);
+		}
+	}
+
 	inline DrawInstance MakeDrawInstance(
 		const core::CFrame &frame,
 		const Bounds &bounds,
@@ -350,13 +396,17 @@ namespace engine::scene {
 		const Tags *tags,
 		uint64_t source,
 		const LocalTransparency *local = nullptr,
-		const CharacterLimb *limb = nullptr
+		const CharacterLimb *limb = nullptr,
+		const AutoMeshLOD *automatic = nullptr,
+		const CustomMeshLOD *custom = nullptr,
+		const RenderEffects *effects = nullptr
 	) {
 		DrawInstance instance;
 		instance.Frame = frame;
 		instance.HalfExtent = bounds.HalfExtent;
 		instance.Tint = visual.Tint;
 		instance.Mesh = visual.Mesh;
+		instance.RenderFeatures = visual.RenderFeatures;
 
 		if (appearance != nullptr) {
 			instance.SurfaceColour = appearance->Colour;
@@ -396,6 +446,7 @@ namespace engine::scene {
 		if (limb != nullptr) {
 			instance.Rig = limb->Root.Id;
 		}
+		ApplyDrawRenderState(instance, automatic, custom, effects);
 
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;

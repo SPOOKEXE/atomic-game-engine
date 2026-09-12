@@ -98,7 +98,9 @@ scene.Humanoid | The character controller's state: move direction, walk and jump
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.
 scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude.
-scene.LevelOfDetail | The coarser versions of a part's geometry: up to three extra mesh names, the triangle fraction each keeps, how the levels were produced, and the projected area per triangle `SelectLevel` targets.
+scene.AutoMeshLOD | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target.
+scene.CustomMeshLOD | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.AutoMeshLOD` artifact and valid slots take precedence.
+scene.RenderEffects | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state.
 scene.LocalPlayer | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property.
 scene.LocalTransparency | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching.
 scene.MaterialCatalogue | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved.

@@ -364,13 +364,16 @@ namespace engine::render {
 	}
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
+	using engine::scene::AutoMeshLOD;
 	using engine::scene::Bone;
 	using engine::scene::Bounds;
 	using engine::scene::CharacterLimb;
+	using engine::scene::CustomMeshLOD;
 	using engine::scene::DrawInstance;
 	using engine::scene::LocalTransparency;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
+	using engine::scene::RenderEffects;
 	using engine::scene::Skeleton;
 	using engine::scene::SurfaceAppearance;
 	using engine::scene::Tags;
@@ -390,6 +393,9 @@ namespace engine::render {
 			SKELETON_REVISION,
 			BONE_REVISION,
 			RENDERED_REVISION,
+			AUTO_LOD_REVISION,
+			CUSTOM_LOD_REVISION,
+			EFFECTS_REVISION,
 		};
 
 		struct DrawSourceChanges {
@@ -461,6 +467,10 @@ namespace engine::render {
 			changes.Full |=
 				SourceRevisionChanged<LocalTransparency>(store, drawList, TRANSPARENCY_REVISION, drawable);
 			changes.Full |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
+			changes.Full |= SourceRevisionChanged<AutoMeshLOD>(store, drawList, AUTO_LOD_REVISION, drawable);
+			changes.Full |=
+				SourceRevisionChanged<CustomMeshLOD>(store, drawList, CUSTOM_LOD_REVISION, drawable);
+			changes.Full |= SourceRevisionChanged<RenderEffects>(store, drawList, EFFECTS_REVISION, drawable);
 			changes.Pose |= SourceRevisionAdvanced<Skeleton>(store, drawList, SKELETON_REVISION);
 			changes.Pose |= SourceRevisionAdvanced<Bone>(store, drawList, BONE_REVISION);
 
@@ -474,6 +484,18 @@ namespace engine::render {
 			drawList.BoneCount = bones;
 			drawList.SourcesReady = true;
 			return changes;
+		}
+
+		void ApplyOptionalRenderState(const Store &store, std::span<DrawInstance> instances) {
+			for (DrawInstance &instance : instances) {
+				const Entity source(instance.Source);
+				engine::scene::ApplyDrawRenderState(
+					instance,
+					store.Get<AutoMeshLOD>(source),
+					store.Get<CustomMeshLOD>(source),
+					store.Get<RenderEffects>(source)
+				);
+			}
 		}
 
 		bool SameFrame(const core::CFrame &left, const core::CFrame &right) {
@@ -908,6 +930,7 @@ namespace engine::render {
 			// a vector writes nothing and keeps the capacity, so the frame
 			// after an entity is destroyed still does not allocate.
 			drawList->Instances.resize(std::min(written, drawList->Instances.size()));
+			ApplyOptionalRenderState(store, drawList->Instances);
 			if (hasFullyTransparent.load(std::memory_order_relaxed)) {
 				std::erase_if(drawList->Instances, [](const scene::DrawInstance &instance) {
 					return instance.Transparency >= 1.0f;

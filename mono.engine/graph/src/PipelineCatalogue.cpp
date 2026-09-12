@@ -198,7 +198,7 @@ namespace engine::graph {
 				)) {
 				return ExecutionQueue::Cpu;
 			}
-			if (Named(spec.Kind, {"hzb", "dispatch"})) {
+			if (Named(spec.Kind, {"hzb", "select-lod", "dispatch"})) {
 				return ExecutionQueue::Compute;
 			}
 			return ExecutionQueue::Graphics;
@@ -225,6 +225,9 @@ namespace engine::graph {
 			if (Named(spec.Kind, {"raster", "dispatch"})) {
 				spec.Params.push_back(TextParam("shader", "Shader", ""));
 				spec.Params.push_back(TextParam("source", "GLSL source", ""));
+				spec.Params.push_back(
+					SelectParam("attachment", "Visual attachment", "none", {"none", "visual"})
+				);
 			}
 			if (spec.Kind == core::Name("raster")) {
 				spec.Params.push_back(SelectParam("load", "Load", "clear", {"clear", "load"}));
@@ -232,6 +235,10 @@ namespace engine::graph {
 			if (spec.Kind == core::Name("dispatch")) {
 				spec.Params.push_back(
 					SelectParam("dispatch.mode", "Dispatch", "target", {"target", "groups"})
+				);
+				spec.Params.push_back(SelectParam("uniforms", "Uniforms", "none", {"none", "view"}));
+				spec.Params.push_back(
+					SelectParam("instances", "Instance rows", "none", {"none", "resident"})
 				);
 				for (const auto &[name, label, fallback] :
 					 std::initializer_list<std::tuple<const char *, const char *, const char *>>{
@@ -309,6 +316,7 @@ namespace engine::graph {
 				 "filter-tag",
 				 "order-draw",
 				 "upload-instances",
+				 "select-lod",
 				 "last-frame",
 				 "mirror-capture",
 				 "surface-capture",
@@ -324,6 +332,11 @@ namespace engine::graph {
 				 "colour-compose",
 				 "spatial-overlay",
 				 "transparent-layer",
+				 "fxaa",
+				 "taa",
+				 "smaa-edges",
+				 "smaa-blend",
+				 "smaa-resolve",
 				 "hzb",
 				 "ssao",
 				 "deferred-lighting",
@@ -357,6 +370,11 @@ namespace engine::graph {
 				 "shader-lenses",
 				 "eye-image",
 				 "transparent-layer",
+				 "fxaa",
+				 "taa",
+				 "smaa-edges",
+				 "smaa-blend",
+				 "smaa-resolve",
 				 "cull-frustum",
 				 "cull-distance",
 				 "filter-tag",
@@ -376,7 +394,13 @@ namespace engine::graph {
 				});
 			spec.Needs.IndirectDraws = Named(
 				spec.Kind,
-				{"shadow", "mirror-capture", "surface-capture", "portal-capture", "gbuffer", "transparent"}
+				{"shadow",
+				 "mirror-capture",
+				 "surface-capture",
+				 "portal-capture",
+				 "select-lod",
+				 "gbuffer",
+				 "transparent"}
 			);
 			for (const PortSpec &output : spec.Outputs) {
 				// Ordinary deferred views do not allocate or require the optional capture target.
@@ -1091,7 +1115,19 @@ namespace engine::graph {
 			 {{"colour", K::Colour, LDR, true, "Resolved."},
 			  {"history", K::Colour, LDR, true, "Kept for next frame."}},
 			 "Jittered accumulation. The more competent it is, the less it can be "
-			 "abused to hide undersampling."},
+			 "abused to hide undersampling.",
+			 false,
+			 "taa.frag"},
+
+			{"fxaa",
+			 "FXAA",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The tone-mapped frame."}},
+			 {{"colour", K::Colour, LDR, true, "Edge-smoothed."}},
+			 "Single-pass luminance edge search for a low-cost spatial antialiasing choice.",
+			 false,
+			 "fxaa.frag"},
 
 			{"smaa-edges",
 			 "SMAA edges",
@@ -1383,6 +1419,16 @@ namespace engine::graph {
 			 "between what a pipeline decided and what it draws** - a filter "
 			 "upstream of one of these changes the frame; a filter with none "
 			 "downstream changes a list nobody reads."},
+
+			{"select-lod",
+			 "Select authored LOD",
+			 C::Draw,
+			 S::View,
+			 {{"instances", K::Buffer, F::R8, true, "Packed level rows and zeroed indirect draws."},
+			  {"camera", K::Camera, F::R8, false, "The view used to measure projected pixel area."}},
+			 {{"instances", K::Buffer, F::R8, true, "The same rows with one mesh level enabled."}},
+			 "Chooses one of four authored meshes per visual on the GPU from projected pixels per "
+			 "triangle. No selected level returns to the CPU."},
 
 			{"output-image",
 			 "Output Image",

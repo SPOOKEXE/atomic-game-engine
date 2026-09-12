@@ -1,0 +1,85 @@
+#version 450
+
+// Picks one authored mesh level from projected pixel area. Host code uploads
+// indirect commands with zero instances for every level. This pass enables the
+// chosen level and leaves every other command empty, so no result returns to
+// the CPU.
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Selection {
+	vec4 CentreTarget;
+	vec4 ExtentLevels;
+	uvec4 Triangles;
+	uvec4 FirstArguments;
+	uvec4 ArgumentCounts;
+};
+
+layout(set = 0, binding = 0) readonly buffer Selections {
+	Selection rows[];
+} selections;
+
+// SDL_GPUIndexedIndirectDrawCommand is five words. Word one is num_instances.
+layout(set = 1, binding = 0) buffer Arguments {
+	uint words[];
+} arguments;
+
+layout(set = 2, binding = 0) uniform View {
+	mat4 ViewProjection;
+	uvec4 Counts;
+	vec4 Viewport;
+} view;
+
+float ProjectedArea(Selection selection) {
+	vec2 low = vec2(1.0);
+	vec2 high = vec2(-1.0);
+	for (int corner = 0; corner < 8; ++corner) {
+		vec3 point = selection.CentreTarget.xyz + selection.ExtentLevels.xyz * vec3(
+			(corner & 1) != 0 ? 1.0 : -1.0,
+			(corner & 2) != 0 ? 1.0 : -1.0,
+			(corner & 4) != 0 ? 1.0 : -1.0
+		);
+		vec4 clip = view.ViewProjection * vec4(point, 1.0);
+		// A box crossing the camera plane keeps full detail. Its projected box is
+		// unbounded and any finite estimate could choose a coarse mesh up close.
+		if (clip.w <= 1e-4) {
+			return 3.402823e38;
+		}
+		vec2 ndc = clip.xy / clip.w;
+		low = min(low, ndc);
+		high = max(high, ndc);
+	}
+	low = clamp(low, vec2(-1.0), vec2(1.0));
+	high = clamp(high, vec2(-1.0), vec2(1.0));
+	vec2 pixels = max(high - low, vec2(0.0)) * view.Viewport.xy * 0.5;
+	return pixels.x * pixels.y;
+}
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= view.Counts.x) {
+		return;
+	}
+
+	Selection selection = selections.rows[index];
+	uint levelCount = clamp(uint(selection.ExtentLevels.w), 1u, 4u);
+	float area = ProjectedArea(selection);
+	uint chosen = 0u;
+	if (area > 0.0 && !isnan(area)) {
+		chosen = levelCount - 1u;
+		for (uint level = 0u; level < levelCount; ++level) {
+			uint triangles = selection.Triangles[level];
+			if (triangles != 0u && area / float(triangles) >= selection.CentreTarget.w) {
+				chosen = level;
+				break;
+			}
+		}
+	}
+
+	for (uint level = 0u; level < levelCount; ++level) {
+		uint first = selection.FirstArguments[level];
+		uint count = selection.ArgumentCounts[level];
+		for (uint command = 0u; command < count; ++command) {
+			arguments.words[(first + command) * 5u + 1u] = level == chosen ? 1u : 0u;
+		}
+	}
+}

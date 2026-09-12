@@ -36,6 +36,7 @@ mono_add_library(examples
 		# "'ParticleEmitter' is not a registered class" out of its heartbeat in
 		# every program but the client, which registered them on its own path.
 		Engine::effects
+		Engine::graph
 
 		Engine::script
 
@@ -232,6 +233,22 @@ foreach(world IN LISTS example_worlds)
 		COMMENT "Staging example world ${world_name}"
 		VERBATIM)
 	list(APPEND staged_scenes "${world_staged}")
+endforeach()
+
+file(GLOB example_pipelines CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/pipelines/*.pipeline")
+
+foreach(pipeline IN LISTS example_pipelines)
+	get_filename_component(pipeline_name "${pipeline}" NAME)
+	set(pipeline_staged "${MONO_STAGE_ROOT}/assets/examples/pipelines/${pipeline_name}")
+	add_custom_command(
+		OUTPUT "${pipeline_staged}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/pipelines"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${pipeline}" "${pipeline_staged}"
+		DEPENDS "${pipeline}"
+		COMMENT "Staging example render pipeline ${pipeline_name}"
+		VERBATIM)
+	list(APPEND staged_scenes "${pipeline_staged}")
 endforeach()
 
 if(staged_scenes)

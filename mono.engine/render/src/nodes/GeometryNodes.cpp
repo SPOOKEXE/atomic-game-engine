@@ -271,6 +271,22 @@ namespace engine::render {
 				return false;
 			}
 			drawOpaque(latePass, State->Occlusion.LateIndices, &late);
+			State->BindInstanceBuffers(latePass, State->InstanceIndexBuffer);
+			result.DrawCalls += State->DrawSlots(
+				command,
+				latePass,
+				sceneCount,
+				plainOpaque,
+				&lighting,
+				State->ShadowTexture,
+				State->ShadowSampler,
+				nullptr,
+				State->SurfaceSampler,
+				0,
+				result.Triangles,
+				nullptr,
+				Impl::SlotSelection::LodOnly
+			);
 			SDL_EndGPURenderPass(latePass);
 			return true;
 		});

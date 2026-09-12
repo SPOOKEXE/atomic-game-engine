@@ -119,6 +119,16 @@ namespace engine::render {
 						reason = "the render catalogue has no declaration for this kind";
 						return false;
 					}
+					if (node->Kind == core::Name("raster") || node->Kind == core::Name("dispatch")) {
+						const std::string *attachment = node->Parameter(core::Name("attachment"));
+						if (attachment != nullptr && *attachment == "visual" &&
+							(node->Reads.size() != 1 || node->Writes.size() != 1)) {
+							offender = node->Name;
+							reason = "a visual attachment needs one source and one target for inactive "
+									 "pass-through";
+							return false;
+						}
+					}
 					graph::NodeRequirements needs = spec->Needs;
 					if (node->Kind == core::Name("ambient-correct")) {
 						size_t shadowInputs = 0;
@@ -949,6 +959,7 @@ namespace engine::render {
 		// world, and the validation path refuses `culling = "occlusion"`
 		// documents with the failure named rather than the client dying here.
 		if (Caps.HasCompute) {
+			Lod.Select = LoadComputePipeline("lod-select.comp", 0, 1, 0, 1, 64, 1);
 			Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
 			Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
 			Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);
@@ -976,7 +987,7 @@ namespace engine::render {
 				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
 				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
 				 TonemapPipeline != nullptr)) &&
-			   (!Caps.HasCompute || EnvironmentCompute != nullptr);
+			   (!Caps.HasCompute || (EnvironmentCompute != nullptr && Lod.Select != nullptr));
 	}
 
 	bool Renderer::Impl::EnsureTransparentLayer() {
@@ -1430,13 +1441,22 @@ namespace engine::render {
 		const std::string *source = node.Parameter(core::Name("source"));
 		if (source == nullptr || source->empty()) {
 			const std::string *shader = node.Parameter(core::Name("shader"));
-			if (shader == nullptr || shader->empty()) {
+			std::string_view shaderName = shader != nullptr ? std::string_view(*shader) : std::string_view{};
+			if (shaderName.empty()) {
+				const graph::NodeKindSpec *spec = graph::NodeCatalogue::Find(node.Kind);
+				if (spec != nullptr) {
+					shaderName = spec->DefaultShader;
+				}
+			}
+			if (shaderName.empty()) {
 				ENGINE_WARN("'{}' has no shader or GLSL source, so it records no work", node.Name.Text());
 				return false;
 			}
-			bytes = ReadFile(resources::Shader(*shader, Binary.Form));
+			bytes = ReadFile(resources::Shader(shaderName, Binary.Form));
 			if (bytes.empty()) {
-				ENGINE_WARN("'{}' names shader '{}' but no staged module exists", node.Name.Text(), *shader);
+				ENGINE_WARN(
+					"'{}' names shader '{}' but no staged module exists", node.Name.Text(), shaderName
+				);
 				return false;
 			}
 			return true;
@@ -1467,10 +1487,15 @@ namespace engine::render {
 	}
 
 	SDL_GPUGraphicsPipeline *Renderer::Impl::GraphRasterFor(
-		const NamedPipeline &pipeline, const graph::Node &node, SDL_GPUTextureFormat format, uint32_t samplers
+		const NamedPipeline &pipeline,
+		const graph::Node &node,
+		std::span<const SDL_GPUTextureFormat> formats,
+		uint32_t samplers
 	) {
 		for (const GraphRasterPipeline &entry : GraphRasterPipelines) {
-			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name && entry.Format == format &&
+			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name &&
+				entry.Formats.size() == formats.size() &&
+				std::equal(entry.Formats.begin(), entry.Formats.end(), formats.begin()) &&
 				entry.Samplers == samplers) {
 				return entry.Handle;
 			}
@@ -1503,17 +1528,19 @@ namespace engine::render {
 		}
 
 		SDL_GPUGraphicsPipeline *built = nullptr;
-		if (vertex != nullptr && fragment != nullptr) {
-			SDL_GPUColorTargetDescription target{};
-			target.format = format;
+		if (vertex != nullptr && fragment != nullptr && !formats.empty()) {
+			std::vector<SDL_GPUColorTargetDescription> targets(formats.size());
+			for (size_t index = 0; index < formats.size(); ++index) {
+				targets[index].format = formats[index];
+			}
 			SDL_GPUGraphicsPipelineCreateInfo info{};
 			info.vertex_shader = vertex;
 			info.fragment_shader = fragment;
 			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			info.target_info.color_target_descriptions = &target;
-			info.target_info.num_color_targets = 1;
+			info.target_info.color_target_descriptions = targets.data();
+			info.target_info.num_color_targets = static_cast<uint32_t>(targets.size());
 			built = SDL_CreateGPUGraphicsPipeline(Device, &info);
 			if (built == nullptr) {
 				ENGINE_WARN("raster pipeline for '{}': {}", node.Name.Text(), SDL_GetError());
@@ -1525,7 +1552,9 @@ namespace engine::render {
 		if (fragment != nullptr) {
 			SDL_ReleaseGPUShader(Device, fragment);
 		}
-		GraphRasterPipelines.push_back({pipeline.Name, node.Name, format, samplers, built});
+		GraphRasterPipelines.push_back(
+			{pipeline.Name, node.Name, std::vector(formats.begin(), formats.end()), samplers, built}
+		);
 		return built;
 	}
 
@@ -1534,14 +1563,16 @@ namespace engine::render {
 		const graph::Node &node,
 		uint32_t samplers,
 		uint32_t storage,
+		uint32_t readStorage,
+		uint32_t uniforms,
 		uint32_t localX,
 		uint32_t localY,
 		uint32_t localZ
 	) {
 		for (const GraphComputePipeline &entry : GraphComputePipelines) {
 			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name && entry.Samplers == samplers &&
-				entry.Storage == storage && entry.LocalX == localX && entry.LocalY == localY &&
-				entry.LocalZ == localZ) {
+				entry.Storage == storage && entry.ReadStorage == readStorage && entry.Uniforms == uniforms &&
+				entry.LocalX == localX && entry.LocalY == localY && entry.LocalZ == localZ) {
 				return entry.Handle;
 			}
 		}
@@ -1559,7 +1590,9 @@ namespace engine::render {
 			info.entrypoint = entryPoint.c_str();
 			info.format = Binary.Format;
 			info.num_samplers = samplers;
+			info.num_readonly_storage_buffers = readStorage;
 			info.num_readwrite_storage_textures = storage;
+			info.num_uniform_buffers = uniforms;
 			info.threadcount_x = localX;
 			info.threadcount_y = localY;
 			info.threadcount_z = localZ;
@@ -1569,7 +1602,16 @@ namespace engine::render {
 			}
 		}
 		GraphComputePipelines.push_back(
-			{pipeline.Name, node.Name, samplers, storage, localX, localY, localZ, built}
+			{pipeline.Name,
+			 node.Name,
+			 samplers,
+			 storage,
+			 readStorage,
+			 uniforms,
+			 localX,
+			 localY,
+			 localZ,
+			 built}
 		);
 		return built;
 	}

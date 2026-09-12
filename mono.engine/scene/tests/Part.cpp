@@ -5,8 +5,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/Skinning.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
@@ -651,6 +653,66 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	Name unused;
 	CHECK_FALSE(store.GetProperty(part, Name("Mesh"), &unused, sizeof(unused)));
 	CHECK_FALSE(store.GetProperty(part, Name("ColorMap"), &unused, sizeof(unused)));
+}
+
+TEST_CASE(
+	"visual render policy, authored LOD, and effect nodes use the property surface", "[scene][part][lod]"
+) {
+	using namespace engine::scene;
+	Store store("meshpart_render_policy");
+	RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(Classes::Find(Name("MeshPart")), "LodProp");
+	REQUIRE(part != NULL_ENTITY);
+
+	const uint32_t everyBit = UINT32_MAX;
+	const uint32_t shadows = FeatureBit(RenderFeature::Shadows);
+	REQUIRE(Write(store, part, "RenderFeatureEnableMask", everyBit));
+	REQUIRE(Write(store, part, "RenderFeatureDisableMask", shadows));
+	CHECK(Read<uint32_t>(store, part, "RenderFeatureEnableMask") == ALL_RENDER_FEATURES);
+	CHECK(Read<uint32_t>(store, part, "RenderFeatureDisableMask") == shadows);
+
+	REQUIRE(Write(store, part, "AutoLod1MeshId", Name("lod/auto-half.amesh")));
+	REQUIRE(Write(store, part, "AutoLod2MeshId", Name("lod/auto-quarter.amesh")));
+	REQUIRE(Write(store, part, "CustomLod1MeshId", Name("lod/custom-half.amesh")));
+	REQUIRE(Write(store, part, "CustomLod2MeshId", Name{}));
+	REQUIRE(Write(store, part, "Lod1Ratio", 1.5f));
+	REQUIRE(Write(store, part, "Lod2Ratio", -0.5f));
+	REQUIRE(Write(store, part, "LodTargetQuadArea", -4.0f));
+	const AutoMeshLOD *automatic = store.Get<AutoMeshLOD>(part);
+	const CustomMeshLOD *custom = store.Get<CustomMeshLOD>(part);
+	REQUIRE(automatic != nullptr);
+	REQUIRE(custom != nullptr);
+	CHECK(automatic->Meshes[0] == Name("lod/auto-half.amesh"));
+	CHECK(automatic->Meshes[1] == Name("lod/auto-quarter.amesh"));
+	CHECK(automatic->Ratios[0] == 1.0f);
+	CHECK(automatic->Ratios[1] == 0.0f);
+	CHECK(automatic->TargetQuadArea == 0.0f);
+	CHECK(custom->Meshes[0] == Name("lod/custom-half.amesh"));
+	CHECK_FALSE(custom->Meshes[1].IsValid());
+
+	const LevelOfDetail resolved = ResolveMeshLOD(automatic, custom);
+	CHECK(resolved.Strategy == LodStrategy::Authored);
+	CHECK(resolved.Levels == 3);
+	CHECK(resolved.Meshes[0] == Name("lod/custom-half.amesh"));
+	CHECK(resolved.Meshes[1] == Name("lod/auto-quarter.amesh"));
+
+	REQUIRE(Write(store, part, "ComputeEffectNode", Name("waves")));
+	REQUIRE(Write(store, part, "PostProcessEffectNode", Name("outline")));
+	const RenderEffects *effects = store.Get<RenderEffects>(part);
+	REQUIRE(effects != nullptr);
+	CHECK(effects->Count == 2);
+	CHECK(effects->Attachments[0].Node == Name("waves"));
+	CHECK(effects->Attachments[0].Stage == RenderEffectStage::Compute);
+	CHECK(effects->Attachments[0].Enabled);
+	CHECK(effects->Attachments[1].Node == Name("outline"));
+	CHECK(effects->Attachments[1].Stage == RenderEffectStage::PostProcess);
+	CHECK(effects->Attachments[1].Enabled);
+
+	const Entity camera = store.CreateInstance(Classes::Find(Name("Camera")), "View");
+	REQUIRE(camera != NULL_ENTITY);
+	REQUIRE(Write(store, camera, "RenderFeatureEnableMask", shadows));
+	CHECK(Read<uint32_t>(store, camera, "RenderFeatureEnableMask") == shadows);
 }
 
 TEST_CASE("a SkinnedMeshPart exposes the skeleton it always carries", "[scene][part]") {

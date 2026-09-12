@@ -336,6 +336,52 @@ TEST_CASE("pose-only presentation preserves static draw metadata", "[render][pre
 	CHECK_FALSE(drawList->HasInterpolation);
 }
 
+TEST_CASE("optional LOD and effect rows reach the cached draw list", "[render][presentation][lod]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("optional-render-state");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity part = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(store.SetParent(part, workspace));
+
+	scene::AutoMeshLOD automatic;
+	automatic.Meshes[0] = Name("lod.auto-half");
+	automatic.Meshes[1] = Name("lod.auto-quarter");
+	automatic.Ratios[0] = 0.4f;
+	automatic.Levels = 3;
+	store.Set(part, automatic);
+	scene::CustomMeshLOD custom;
+	custom.Meshes[0] = Name("lod.custom-half");
+	custom.Levels = 3;
+	store.Set(part, custom);
+	scene::RenderEffects effects;
+	effects.Attachments[0].Node = Name("outline");
+	effects.Attachments[0].Enabled = true;
+	effects.Count = 1;
+	store.Set(part, effects);
+
+	REQUIRE(scene::SyncRendered(store) == 1);
+	render::CollectInstances(store);
+	auto *drawList = store.ResourceMutable<render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 1);
+	CHECK(drawList->Instances[0].LodMeshes[0] == Name("lod.custom-half"));
+	CHECK(drawList->Instances[0].LodMeshes[1] == Name("lod.auto-quarter"));
+	CHECK(drawList->Instances[0].LodRatios[0] == 0.4f);
+	CHECK(drawList->Instances[0].Effects.Attachments[0].Node == Name("outline"));
+
+	custom.Meshes[0] = Name("lod.changed");
+	custom.Meshes[1] = Name("lod.custom-quarter");
+	effects.Attachments[0].Node = Name("posterise");
+	store.Set(part, custom);
+	store.Set(part, effects);
+	render::CollectInstances(store);
+	CHECK(drawList->Instances[0].LodMeshes[0] == Name("lod.changed"));
+	CHECK(drawList->Instances[0].Effects.Attachments[0].Node == Name("posterise"));
+}
+
 TEST_CASE("a draw list flattens each rig palette beside its instance", "[render][presentation][skinning]") {
 	engine::scene::RegisterSceneClasses();
 	engine::render::RegisterPresentationComponents();

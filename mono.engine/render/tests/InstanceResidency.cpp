@@ -93,6 +93,30 @@ TEST_CASE("source and mesh packing inputs invalidate exact resident reuse", "[re
 	CHECK(rows.DirtyCount() == 1);
 }
 
+TEST_CASE("render feature policy invalidates exact resident reuse", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	source.Source = 1;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	uint32_t slot = 0;
+	source.RenderFeatures.Enable = engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing);
+	CHECK_FALSE(rows.Reuse(Key(1), source, mesh, slot));
+	rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	CHECK(rows.DirtyCount() == 1);
+	CHECK(
+		rows.Row(slot).FeatureEnable ==
+		engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing)
+	);
+}
+
 TEST_CASE("a retained slot updates without changing resident identity", "[render][residency]") {
 	InstanceResidency rows;
 	DrawInstance source;

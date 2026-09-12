@@ -42,6 +42,26 @@ namespace engine::render::tests {
 		CHECK(CheckCapabilities(caps, needs).Accepted());
 	}
 
+	TEST_CASE("render feature support follows device requirements", "[render][capabilities]") {
+		DeviceCaps caps;
+		CHECK(SupportedRenderFeatures(caps) == 0);
+
+		caps.Formats.push_back(graph::ResourceFormat::RGBA8);
+		uint32_t supported = SupportedRenderFeatures(caps);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::Shadows)) != 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::PostProcessing)) != 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::ComputeEffects)) == 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::OcclusionCulling)) == 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::RayTracing)) == 0);
+
+		caps.HasCompute = true;
+		caps.HasStorageTextures = true;
+		caps.HasIndirectDraws = true;
+		supported = SupportedRenderFeatures(caps);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::ComputeEffects)) != 0);
+		CHECK((supported & scene::FeatureBit(scene::RenderFeature::OcclusionCulling)) != 0);
+	}
+
 	TEST_CASE("default pipeline tiers retain exact fallthrough causes", "[render][capabilities]") {
 		DeviceCaps caps;
 		caps.HasIndirectDraws = true;

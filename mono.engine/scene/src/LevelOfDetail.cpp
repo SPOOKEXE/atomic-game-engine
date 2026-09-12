@@ -5,6 +5,50 @@
 #include <cmath>
 
 namespace engine::scene {
+	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+		LevelOfDetail resolved;
+		const uint8_t automaticLevels =
+			automatic == nullptr ? 1
+								 : static_cast<uint8_t>(std::clamp<size_t>(automatic->Levels, 1, LOD_LEVELS));
+		const uint8_t customLevels =
+			custom == nullptr ? 1 : static_cast<uint8_t>(std::clamp<size_t>(custom->Levels, 1, LOD_LEVELS));
+		bool customSelected = false;
+
+		for (size_t slot = 0; slot < LOD_LEVELS - 1; ++slot) {
+			const uint8_t level = static_cast<uint8_t>(slot + 1);
+			const bool customAvailable =
+				custom != nullptr && level < customLevels && custom->Meshes[slot].IsValid();
+			const bool automaticAvailable =
+				automatic != nullptr && level < automaticLevels && automatic->Meshes[slot].IsValid();
+			if (!customAvailable && !automaticAvailable) {
+				break;
+			}
+
+			resolved.Meshes[slot] = customAvailable ? custom->Meshes[slot] : automatic->Meshes[slot];
+			const float customRatio = customAvailable ? custom->Ratios[slot] : 0.0f;
+			const float automaticRatio = automaticAvailable ? automatic->Ratios[slot] : 0.0f;
+			if (customRatio > 0.0f) {
+				resolved.Ratios[slot] = std::clamp(customRatio, 0.0f, 1.0f);
+			} else if (automaticRatio > 0.0f) {
+				resolved.Ratios[slot] = std::clamp(automaticRatio, 0.0f, 1.0f);
+			}
+			resolved.Levels = static_cast<uint8_t>(level + 1);
+			customSelected |= customAvailable;
+		}
+
+		if (resolved.Levels <= 1) {
+			return resolved;
+		}
+		resolved.TargetQuadArea = custom != nullptr && custom->TargetQuadArea > 0.0f
+									  ? custom->TargetQuadArea
+									  : (automatic == nullptr ? 0.0f : automatic->TargetQuadArea);
+		resolved.Strategy = customSelected ? LodStrategy::Authored
+										   : (automatic->Strategy == LodStrategy::None ||
+													  automatic->Strategy == LodStrategy::Authored
+												  ? LodStrategy::Decimated
+												  : automatic->Strategy);
+		return resolved;
+	}
 
 	namespace {
 		// How many levels a ladder really offers.

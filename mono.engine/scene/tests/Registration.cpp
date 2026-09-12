@@ -10,6 +10,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/testing/Suite.hpp>
@@ -131,7 +132,9 @@ namespace registration_test {
 		"scene.AnimationClip",
 		"scene.Animator",
 		"scene.AnimationTrack",
-		"scene.LevelOfDetail",
+		"scene.AutoMeshLOD",
+		"scene.CustomMeshLOD",
+		"scene.RenderEffects",
 		"scene.Constraint",
 		"scene.Atmosphere",
 		"scene.Clouds",
@@ -242,6 +245,52 @@ TEST_CASE("a name-carrying component crosses as text, not as an id", "[scene][re
 	REQUIRE(back != nullptr);
 	CHECK(back->Mesh.Text() == "registration_test.Column");
 	CHECK_FALSE(back->Visible);
+}
+
+TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene][registration][lod]") {
+	using namespace engine;
+	scene::RegisterSceneComponents();
+
+	ecs::Store source("registration_test.lod.source");
+	const ecs::Entity entity = source.Create();
+	scene::AutoMeshLOD automatic;
+	automatic.Meshes[0] = core::Name("registration_test.auto-half");
+	automatic.Meshes[1] = core::Name("registration_test.auto-quarter");
+	automatic.Ratios[1] = 0.2f;
+	automatic.TargetQuadArea = 7.0f;
+	automatic.Strategy = scene::LodStrategy::Reduced;
+	automatic.Levels = 3;
+	source.Set(entity, automatic);
+	scene::CustomMeshLOD custom;
+	custom.Meshes[0] = core::Name("registration_test.custom-half");
+	custom.Ratios[0] = 0.4f;
+	custom.TargetQuadArea = 11.0f;
+	custom.Levels = 4;
+	source.Set(entity, custom);
+
+	core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	const core::Name shifter("registration_test.LodShiftsTheIdSpace");
+	CHECK(shifter.IsValid());
+
+	ecs::Store restored("registration_test.lod.restored");
+	core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const auto *automaticBack = restored.Get<scene::AutoMeshLOD>(entity);
+	const auto *customBack = restored.Get<scene::CustomMeshLOD>(entity);
+	REQUIRE(automaticBack != nullptr);
+	REQUIRE(customBack != nullptr);
+	CHECK(automaticBack->Meshes[0].Text() == "registration_test.auto-half");
+	CHECK(automaticBack->Meshes[1].Text() == "registration_test.auto-quarter");
+	CHECK(automaticBack->Ratios[1] == 0.2f);
+	CHECK(automaticBack->TargetQuadArea == 7.0f);
+	CHECK(automaticBack->Strategy == scene::LodStrategy::Reduced);
+	CHECK(automaticBack->Levels == 3);
+	CHECK(customBack->Meshes[0].Text() == "registration_test.custom-half");
+	CHECK_FALSE(customBack->Meshes[1].IsValid());
+	CHECK(customBack->Ratios[0] == 0.4f);
+	CHECK(customBack->TargetQuadArea == 11.0f);
+	CHECK(customBack->Levels == 4);
 }
 
 TEST_CASE("environment shader names and texture faces survive a snapshot", "[scene][registration]") {
@@ -408,6 +457,14 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 		transparency.Transparency = 0.5f;
 		cases.push_back({"Transparency", transparency});
 
+		Visual featureEnable = base;
+		featureEnable.RenderFeatures.Enable = 1u;
+		cases.push_back({"RenderFeatures.Enable", featureEnable});
+
+		Visual featureDisable = base;
+		featureDisable.RenderFeatures.Disable = 2u;
+		cases.push_back({"RenderFeatures.Disable", featureDisable});
+
 		Visual visible = base;
 		visible.Visible = !base.Visible;
 		cases.push_back({"Visible", visible});
@@ -444,6 +501,7 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	authored.Visible = false;
 	authored.Surface = 3;
 	authored.CastShadow = false;
+	authored.RenderFeatures = {.Enable = 3u, .Disable = 4u};
 
 	const std::vector<std::byte> bytes = written(authored);
 	ByteReader reader(bytes);
@@ -459,6 +517,8 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	CHECK(restored.Visible == authored.Visible);
 	CHECK(restored.Surface == authored.Surface);
 	CHECK(restored.CastShadow == authored.CastShadow);
+	CHECK(restored.RenderFeatures.Enable == authored.RenderFeatures.Enable);
+	CHECK(restored.RenderFeatures.Disable == authored.RenderFeatures.Disable);
 	CHECK(restored.Fitted == authored.Fitted);
 	CHECK(restored.Locked == authored.Locked);
 }

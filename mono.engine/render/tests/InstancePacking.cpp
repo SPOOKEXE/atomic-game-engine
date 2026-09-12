@@ -353,11 +353,28 @@ TEST_CASE("the instance row matches four shader vectors", "[render][instancepack
 	CHECK(offsetof(GpuInstance, Appearance) == 44);
 	CHECK(offsetof(GpuInstance, SurfaceColour) == 48);
 	CHECK(offsetof(GpuInstance, Emission) == 52);
-	CHECK(offsetof(GpuInstance, Reserved) == 56);
+	CHECK(offsetof(GpuInstance, FeatureEnable) == 56);
+	CHECK(offsetof(GpuInstance, FeatureDisable) == 60);
 	const GpuInstance fresh;
-	CHECK(fresh.Reserved[0] == 0);
-	CHECK(fresh.Reserved[1] == 0);
+	CHECK(fresh.FeatureEnable == 0);
+	CHECK(fresh.FeatureDisable == 0);
 	CHECK(engine::render::GPU_JOINT_WORDS == 3 + sizeof(fresh.Rotation) / sizeof(uint32_t));
+}
+
+TEST_CASE("instance feature policy occupies the resident GPU row", "[render][instancepacking]") {
+	DrawInstance instance;
+	instance.RenderFeatures.Enable = engine::scene::FeatureBit(engine::scene::RenderFeature::Emission) |
+									 engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing) |
+									 (1u << 31u);
+	instance.RenderFeatures.Disable =
+		engine::scene::FeatureBit(engine::scene::RenderFeature::Shadows) | (1u << 30u);
+
+	const GpuInstance row = ToGpu(instance, UnitMesh());
+	CHECK(
+		row.FeatureEnable == (engine::scene::FeatureBit(engine::scene::RenderFeature::Emission) |
+							  engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing))
+	);
+	CHECK(row.FeatureDisable == engine::scene::FeatureBit(engine::scene::RenderFeature::Shadows));
 }
 
 TEST_CASE(

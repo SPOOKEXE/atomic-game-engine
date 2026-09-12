@@ -9,6 +9,7 @@
 // @tier L12 · client
 
 #include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 
 #include <cstdint>
 #include <string>
@@ -77,6 +78,12 @@ namespace engine::render {
 	// @param needs The catalogue declaration to check.
 	// @return The first missing mandatory feature.
 	CapabilityCheck CheckCapabilities(const DeviceCaps &caps, const graph::NodeRequirements &needs);
+
+	// Maps the device snapshot to the visual feature bits shaders may request.
+	// Features implemented by ordinary raster passes need only an initialized
+	// render target format. Compute and indirect features keep their stricter
+	// device requirements.
+	uint32_t SupportedRenderFeatures(const DeviceCaps &caps);
 
 	// A stable refusal phrase for a capability result.
 	//

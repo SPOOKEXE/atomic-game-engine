@@ -152,7 +152,7 @@ state until v0.19.
 | `scene.BoolValue` | 4 | 1 | yes | yes | . | . | The boolean stored by a `BoolValue` instance. |
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
 | `scene.CFrameValue` | 28 | 4 | yes | yes | . | . | The coordinate frame stored by a `CFrameValue` instance. |
-| `scene.Camera` | 28 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
+| `scene.Camera` | 36 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
 | `scene.CameraCharacterHold` | 88 | 8 | yes | yes | . | . | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending. |
 | `scene.CameraController` | 144 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - orbit angles and distance, zoom and sensitivity limits, camera mode, the poppercam distance override, and the resolved subject's observed portal transit. |
 | `scene.CameraPortalView` | 176 | 8 | yes | . | . | . | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses. |
@@ -174,9 +174,10 @@ state until v0.19.
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
 | `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
-| `scene.LevelOfDetail` | 32 | 4 | yes | . | . | . | The coarser versions of a part's geometry: up to three extra mesh names, the triangle fraction each keeps, how the levels were produced, and the projected area per triangle `SelectLevel` targets. |
+| `scene.AutoMeshLOD` | 32 | 4 | yes | . | . | . | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target. |
+| `scene.CustomMeshLOD` | 32 | 4 | yes | . | . | . | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.AutoMeshLOD` artifact and valid slots take precedence. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
-| `scene.LightingService` | 56 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
+| `scene.LightingService` | 64 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
 | `scene.LocalPlayer` | 8 | 8 | yes | yes | . | . | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property. |
 | `scene.LocalTransparency` | 4 | 4 | yes | . | . | . | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching. |
 | `scene.MaterialCatalogue` | 80 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
@@ -200,6 +201,7 @@ state until v0.19.
 | `scene.PortalTransitSeen` | 4 | 4 | yes | yes | . | . | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice. |
 | `scene.PostProcessing` | 4 | 4 | yes | . | . | . | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place. |
 | `scene.PreviousTransform` | 28 | 4 | yes | yes | . | . | Where `Transform::Frame` stood when the current tick began. The presentation pass blends between the two so drawing stays smooth between ticks. |
+| `scene.RenderEffects` | 88 | 4 | yes | . | . | . | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state. |
 | `scene.PublishedCatalogue` | 24 | 8 | yes | . | . | . | Resource: the published mesh names in manifest order, as the content pump saw them. It backs `ContentService:GetPublishedMeshes`. |
 | `scene.Rendered` | 4 | 1 | yes | yes | . | . | Marks exactly the entities a draw list should contain, added and removed only by `SyncRendered`; the `Mark` byte is that walk's own scratch and is zero between passes. |
 | `scene.RenderedSignature` | 16 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
@@ -233,7 +235,7 @@ state until v0.19.
 | `scene.Vector3Value` | 12 | 4 | yes | yes | . | . | The vector stored by a `Vector3Value` instance. |
 | `scene.VectorField2D` | 32 | 4 | yes | yes | . | . | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
 | `scene.VectorField3D` | 52 | 4 | yes | yes | . | . | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
-| `scene.Visual` | 32 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
+| `scene.Visual` | 40 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
@@ -267,4 +269,4 @@ state until v0.19.
 
 ---
 
-190 components registered by the engine, 0 without a purpose line.
+192 components registered by the engine, 0 without a purpose line.

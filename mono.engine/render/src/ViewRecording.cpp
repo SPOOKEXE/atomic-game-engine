@@ -1827,7 +1827,10 @@ namespace engine::render {
 		State->SlotSeamLight.resize(uploadCount);
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
+		State->SlotLod.assign(uploadCount, NO_LOD_DRAW);
 		State->SceneSlotOfSource.resize(ownCount);
+		State->LodFrame.Clear();
+		State->Lod.Ready = false;
 		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
 		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
 		bool sourceOrderRetained = false;
@@ -2052,6 +2055,48 @@ namespace engine::render {
 				parallel::Jobs::For(
 					State->DrawOrder.size(), CAMERA_ROWS_GRAIN, mapCameraRows, CAMERA_ROWS_PARALLEL_MINIMUM
 				);
+			}
+		}
+
+		{
+			ENGINE_PROFILE_CAT("build authored lod", core::ProfileCategory::Render);
+			const auto instanceAt = [&](uint32_t slot) -> const scene::DrawInstance & {
+				if (slot < ownCount) {
+					return State->SceneInstances[State->SceneOrder[slot]];
+				}
+				if (slot < sceneCount) {
+					return State->SceneInstances[slot];
+				}
+				return State->SceneInstances[State->DrawOrder[slot - cameraBase]];
+			};
+			for (uint32_t slot = 0; slot < uploadCount; ++slot) {
+				const scene::DrawInstance &instance = instanceAt(slot);
+				if (instance.LodStrategyMode == scene::LodStrategy::None || instance.LodLevels < 2) {
+					continue;
+				}
+
+				std::array<const MeshEntry *, scene::LOD_LEVELS> levels{};
+				levels[0] = State->SlotMesh[slot];
+				uint32_t levelCount = 1;
+				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
+				for (uint32_t level = 1; level < wanted; ++level) {
+					const core::Name name = instance.LodMeshes[level - 1];
+					const core::Name owner = Impl::MeshContentOwner(name, State->SlotContentOwner[slot]);
+					if (!name.IsValid() || !State->Meshes.Has(name, owner)) {
+						break;
+					}
+					levels[level] = &State->Meshes.Resolve(name, owner);
+					levelCount++;
+				}
+				const uint32_t draw = static_cast<uint32_t>(State->LodFrame.Draws.size());
+				if (AppendAuthoredLod(
+						State->LodFrame,
+						slot,
+						instance,
+						std::span<const MeshEntry *const>(levels.data(), levelCount)
+					)) {
+					State->SlotLod[slot] = draw;
+				}
 			}
 		}
 
@@ -2366,6 +2411,50 @@ namespace engine::render {
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 			}
 			haveInstances = true;
+
+			if (!State->LodFrame.Selections.empty()) {
+				LodPlan &lod = State->LodFrame;
+				if (!State->EnsureLodResources(
+						static_cast<uint32_t>(lod.Selections.size()),
+						static_cast<uint32_t>(lod.Instances.size()),
+						static_cast<uint32_t>(lod.Commands.size())
+					)) {
+					lod.Clear();
+				} else {
+					void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->Lod.Transfer, true);
+					if (mapped == nullptr) {
+						ENGINE_ERROR("lod staging: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+						lod.Clear();
+					} else {
+						const LodTransferLayout layout = TransferLayoutOf(lod);
+						auto *bytes = static_cast<uint8_t *>(mapped);
+						std::memcpy(
+							bytes + layout.Selections,
+							lod.Selections.data(),
+							lod.Selections.size() * sizeof(GpuLodSelection)
+						);
+						std::memcpy(
+							bytes + layout.Instances,
+							lod.Instances.data(),
+							lod.Instances.size() * sizeof(GpuInstance)
+						);
+						std::memcpy(
+							bytes + layout.Indices, lod.Indices.data(), lod.Indices.size() * sizeof(uint32_t)
+						);
+						std::memcpy(
+							bytes + layout.SkinOffsets,
+							lod.SkinOffsets.data(),
+							lod.SkinOffsets.size() * sizeof(uint32_t)
+						);
+						std::memcpy(
+							bytes + layout.Arguments,
+							lod.Commands.data(),
+							lod.Commands.size() * sizeof(SDL_GPUIndexedIndirectDrawCommand)
+						);
+						SDL_UnmapGPUTransferBuffer(State->Device, State->Lod.Transfer);
+					}
+				}
+			}
 
 			// Stage what the cull reads and the indirect draws consume. Its
 			// own transfer rather than a tail on the instance one, so the

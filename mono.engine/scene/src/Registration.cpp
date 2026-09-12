@@ -190,14 +190,10 @@ namespace engine::scene {
 			}
 		}
 
-		// **Every field written, and the ladder's three names first.**
-		// `WriteVisuals` records what a hand-written pair costs: a field added to
-		// a type with one crosses only if somebody remembers, and nothing in the
-		// build checks. Six fields today, and all six are written.
-		void WriteLevelsOfDetail(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *ladders = static_cast<const LevelOfDetail *>(source);
+		void WriteAutoMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *ladders = static_cast<const AutoMeshLOD *>(source);
 			for (size_t index = 0; index < count; index++) {
-				const LevelOfDetail &ladder = ladders[index];
+				const AutoMeshLOD &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					writer.WriteName(ladder.Meshes[level]);
 					writer.WriteFloat(ladder.Ratios[level]);
@@ -208,10 +204,58 @@ namespace engine::scene {
 			}
 		}
 
-		void ReadLevelsOfDetail(core::ByteReader &reader, void *destination, size_t count) {
-			auto *ladders = static_cast<LevelOfDetail *>(destination);
+		void WriteCustomMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *ladders = static_cast<const CustomMeshLOD *>(source);
 			for (size_t index = 0; index < count; index++) {
-				LevelOfDetail &ladder = ladders[index];
+				const CustomMeshLOD &ladder = ladders[index];
+				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+					writer.WriteName(ladder.Meshes[level]);
+					writer.WriteFloat(ladder.Ratios[level]);
+				}
+				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteUInt8(ladder.Levels);
+			}
+		}
+
+		void WriteRenderEffects(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *effects = static_cast<const RenderEffects *>(source);
+			for (size_t index = 0; index < count; index++) {
+				for (const RenderEffectAttachment &attachment : effects[index].Attachments) {
+					writer.WriteName(attachment.Node);
+					writer.WriteUInt32(attachment.SelectionMask);
+					writer.WriteUInt32(attachment.Order);
+					writer.WriteUInt32(attachment.Revision);
+					writer.WriteUInt8(static_cast<uint8_t>(attachment.Stage));
+					writer.WriteBool(attachment.Enabled);
+				}
+				writer.WriteUInt8(effects[index].Count);
+			}
+		}
+
+		void ReadRenderEffects(core::ByteReader &reader, void *destination, size_t count) {
+			auto *effects = static_cast<RenderEffects *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				for (RenderEffectAttachment &attachment : effects[index].Attachments) {
+					attachment.Node = reader.ReadName();
+					attachment.SelectionMask = reader.ReadUInt32();
+					attachment.Order = reader.ReadUInt32();
+					attachment.Revision = reader.ReadUInt32();
+					const uint8_t stage = reader.ReadUInt8();
+					attachment.Stage = stage <= static_cast<uint8_t>(RenderEffectStage::PostProcess)
+										   ? static_cast<RenderEffectStage>(stage)
+										   : RenderEffectStage::PostProcess;
+					attachment.Enabled = reader.ReadBool();
+				}
+				effects[index].Count = std::min<uint8_t>(
+					reader.ReadUInt8(), static_cast<uint8_t>(MAX_RENDER_EFFECT_ATTACHMENTS)
+				);
+			}
+		}
+
+		void ReadAutoMeshLods(core::ByteReader &reader, void *destination, size_t count) {
+			auto *ladders = static_cast<AutoMeshLOD *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				AutoMeshLOD &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					ladder.Meshes[level] = reader.ReadName();
 					ladder.Ratios[level] = reader.ReadFloat();
@@ -226,6 +270,19 @@ namespace engine::scene {
 				ladder.Strategy = strategy <= static_cast<uint8_t>(LodStrategy::Reduced)
 									  ? static_cast<LodStrategy>(strategy)
 									  : LodStrategy::None;
+				ladder.Levels = reader.ReadUInt8();
+			}
+		}
+
+		void ReadCustomMeshLods(core::ByteReader &reader, void *destination, size_t count) {
+			auto *ladders = static_cast<CustomMeshLOD *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				CustomMeshLOD &ladder = ladders[index];
+				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+					ladder.Meshes[level] = reader.ReadName();
+					ladder.Ratios[level] = reader.ReadFloat();
+				}
+				ladder.TargetQuadArea = reader.ReadFloat();
 				ladder.Levels = reader.ReadUInt8();
 			}
 		}
@@ -445,6 +502,8 @@ namespace engine::scene {
 				// here and silently reset on every load. A part whose `Fitted`
 				// reset would be reshaped the next time its mesh arrived.
 				writer.WriteName(visual.Fitted);
+				writer.WriteUInt32(visual.RenderFeatures.Enable);
+				writer.WriteUInt32(visual.RenderFeatures.Disable);
 
 				// **Added at v0.7, and the reason it was missing is the reason
 				// a custom serialiser is dangerous.** A field added to a type
@@ -493,6 +552,8 @@ namespace engine::scene {
 				visual.Mesh = reader.ReadName();
 				visual.Visible = reader.ReadBool();
 				visual.Fitted = reader.ReadName();
+				visual.RenderFeatures.Enable = reader.ReadUInt32();
+				visual.RenderFeatures.Disable = reader.ReadUInt32();
 				visual.Transparency = reader.ReadFloat();
 				visual.Surface = reader.ReadInt16();
 				visual.CastShadow = reader.ReadBool();
@@ -1553,15 +1614,14 @@ namespace engine::scene {
 		ecs::Components::Register<Animator>("scene.Animator");
 		ecs::Components::Register<AnimationTrack>("scene.AnimationTrack");
 
-		// **A hand-written pair, because a ladder holds three mesh names.**
-		//
-		// **It crosses, because it is authored content and not a conclusion.**
-		// Which four meshes a part has is what an author published; which of them
-		// a frame draws is derived per view and is not stored anywhere, so there
-		// is nothing here for a replica to disagree with. `scene.Visual` is on the
-		// same side of that line for the same reason.
-		ecs::Components::Register<LevelOfDetail>(
-			"scene.LevelOfDetail", WriteLevelsOfDetail, ReadLevelsOfDetail
+		// Both sources cross as authored content. The resolved level stays per-view
+		// GPU state and is never serialized.
+		ecs::Components::Register<AutoMeshLOD>("scene.AutoMeshLOD", WriteAutoMeshLods, ReadAutoMeshLods);
+		ecs::Components::Register<CustomMeshLOD>(
+			"scene.CustomMeshLOD", WriteCustomMeshLods, ReadCustomMeshLods
+		);
+		ecs::Components::Register<RenderEffects>(
+			"scene.RenderEffects", WriteRenderEffects, ReadRenderEffects
 		);
 
 		// **The generated form, because a `Constraint` is two handles, a `CFrame`,

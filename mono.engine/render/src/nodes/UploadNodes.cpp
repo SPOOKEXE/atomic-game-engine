@@ -36,5 +36,13 @@ namespace engine::render {
 			enterNamedPass(context.Name);
 			return recordUploads();
 		});
+
+		frameNodes.Set(core::Name("select-lod"), [this](const graph::RunContext &context) {
+			EnterNamedPass(context.Name);
+			if (!RecordUploads()) {
+				return false;
+			}
+			return State->DispatchLodSelection(Command, Frame.ViewProjection, SceneWidth, SceneHeight);
+		});
 	}
 }

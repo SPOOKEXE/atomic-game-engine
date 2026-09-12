@@ -48,27 +48,46 @@ the consolidated materials, shaders and rendering optimization work.
 - [x] Capture a missing-eye-image black frame at its first render stage; retain useful images and remove bulk captures.
 - [x] Reduce editable collision BVH build work and scratch storage. Full Terrain worker profiling remains below.
 
-continue on `docs/RENDER-REFACTOR-TASKS.md`:
-- [_] Render foreign worlds from the current camera with correct parallax and disocclusion. The packet current-camera Vulkan test passes 155 assertions. In-flight request coalescing closes camera loss, while exact remote image disocclusion still needs fresh geometry/capture and remains open.
-- [_] Finish retained-world observation: authorized content, complete visual layers, handoff lifetime and gameplay lease retirement. The staging prototype is rolled back.
-- [_] Reproduce and fix the original black frame with a valid image handle; prevent missing-image black frames during topology waits.
-- [_] Verify seamless player/body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements.
+Continue on `docs/RENDER-REFACTOR-TASKS.md` in feature-first order. Complete
+stabilization work after the feature milestones so isolated bugs do not block
+the renderer build-out.
+
+#### 1. Easy
+
+- [x] Add per-mesh, global-lighting and camera render capability fields to GPU-resident rows so compute passes can branch without CPU readback. Instance policy occupies the existing 64-byte resident row, world and camera policy occupy the shared view uniform, and authored compute nodes can request both without CPU readback.
+- [x] Expose the existing render passes as render-pipeline nodes. Every native render pass has a graph node and backend handler; the remaining work below extends that graph with new features.
+- [x] Add selectable antialiasing choices as render-pipeline nodes. FXAA, TAA and all three SMAA stages have graph node kinds, default shaders and multi-target authored-raster support. A Vulkan graph fixture runs every choice against a hard diagonal, verifies softened output pixels, and verifies TAA's paired history output.
+- [x] Add four authored mesh LOD levels with GPU-side per-instance selection beside occlusion culling. `CustomMeshLOD` overrides `AutoMeshLOD` per level, while nil custom slots fall back to the matching automatic artifact. Each resolved level has its own resident instance row and indirect draw command; a per-view compute pass selects one from projected bounds without returning the result to the CPU. The Vulkan fixture proves near views draw the detailed quad and distant views draw the coarse triangle while preserving the part's authored bounds.
+- [x] Allow visual items to attach compute and post-processing shader nodes, resident only while their pipeline is active. Scene records, serialization, BasePart script properties and policy-aware demand checks select lazy graph shaders. Inactive post and compute nodes pass their input through; a Vulkan fixture proves independent activation, output changes, and target retirement when the pipeline is removed.
+- [x] Add a demo pipeline that exercises capability toggles, antialiasing, post-processing and authored LOD selection. `RenderFeatures.pipeline` extends the production PBR graph with lazy visual compute and post nodes plus FXAA; `RenderFeaturesDemo.luau` authors world, camera and instance policies, then demonstrates `CustomMeshLOD` overriding and falling back per level to `AutoMeshLOD`. The example fixture checks the staged document against its C++ recipe and executes the scene through Luau.
+
+#### 2. Medium
+
+- [_] Define the visual-compositor graph contract using the Unity Scriptable Render Pipeline and Visual Compositor as references: https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html and https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html.
+- [_] Move residency and delta upload into nodes, then remove each replaced legacy rendering path while keeping the renderer working after every step.
+- [_] Add the product-side active-scene collector and parallel presentation walk, then batch every active camera across worlds. Stable entity slots, per-world particle pools and batched camera submission already exist.
+- [_] Add GPU-side sRGB handling, emissivity, mipmapping and bounding-box-first occlusion culling.
+- [_] Add proper PBR with tests, dynamic ambient occlusion and render-only displacement maps that do not alter physical transforms.
+- [_] Add Fog, Clouds and Skybox compute-shader nodes, plus screen-space post-processing nodes.
+- [_] Add EditableMesh and EditableImage packing and quantization components for float16, float8, integer16, integer8, integer4 and boolean formats where supported.
+- [_] Measure many 4k textures on the GPU and test a GPU atlas system before selecting packing defaults.
+- [_] Add automatic mesh decimation as the second LOD generation mode.
+- [_] Profile release CPU and GPU work, residency, caching and transfer bytes after the medium feature set is integrated.
+- [_] Finish Terrain editable collision worker profiling and optimization as a separate performance task.
+
+#### 3. Hard
+
+- [_] Render foreign worlds from fresh destination geometry and capture data using the current camera, with correct parallax and disocclusion. The packet current-camera Vulkan test passes 155 assertions and in-flight request coalescing closes camera loss.
+- [_] Finish retained-world observation with authorized content, complete visual layers, handoff lifetime and gameplay lease retirement. The staging prototype is rolled back.
+- [_] Add tessellation and global illumination as composable render nodes.
+- [_] Add smart triangle reduction based on projected triangle surface area, then investigate Nanite-style virtualized geometry without CPU readback during LOD changes.
+- [_] Port semi-real ray tracing and path tracing into render nodes.
+- [_] Add demo render pipelines for semi-real ray tracing and path tracing.
+- [_] Finish the visual-compositor system and build out additional Blender-like pipeline nodes and workflows.
+- [_] Reproduce and fix the original black frame with a valid image handle, and retain the last valid image during topology waits.
+- [_] Verify seamless player and body crossing, Humanoid camera subjects, camera obstruction, clipping and return trips under delay, restart and lost acknowledgements.
 - [_] Verify portal lighting, shadows, transparency, particles, ribbons, spatial UI and animated character accessories through the seam.
-- [_] Check oblique, rolled and scaled portal views at all angles; finish visual review of the non-Euclidean demo.
-- [_] Profile release CPU/GPU work, residency, caching and transfer bytes; finish Terrain editable collision worker optimization.
-- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc. - per-mesh capability flags are per-instance visual state and belong in the GPU-resident row, so a compute pass can branch on them without a CPU readback
-- [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system. - the residency and delta upload are a node too, so the sweep and the GPU-resident work are the same refactor rather than two passes over the same files
-- [_] port semi-real raytrace and path-trace as part of nodes
-- [_] make demo render pipelines with semi-real raytrace and path-trace
-- [_] add compute shaders / postprocessing shaders to all visual items as a additional node to attach (render pipeline pulls and residents shaders on gpu when active)
-- [_] (dynamic) ambient occulusion, emissivity, mipmapping, occulusion culling (bbox first, extra after), sRGB handle, proper PBR with tests, tesselation, add Fog/Clouds/Skybox compute shader support, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
-- [_] more blender-like render pipeline ideas and build-out
-- [_] render pipeline nodes for above
-- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
-- [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
-- [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
-- [_] different antialiasing choices as render nodes
-- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
+- [_] Check oblique, rolled and scaled portal views at all angles, then finish visual review of the non-Euclidean demo.
 
 [MCP-ADDITIONS.md](MCP-ADDITIONS.md) describes proposed data-factory requirements; these are design targets, not verified implemented APIs:
 - [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.

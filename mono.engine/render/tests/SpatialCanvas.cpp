@@ -80,7 +80,15 @@ namespace {
 			const Entity eye = Data.CreateInstance(engine::scene::PartClass(), "Camera");
 			Data.SetParent(eye, Workspace);
 			Data.Set(eye, engine::scene::Transform{CFrame(position)});
-			Data.Set(eye, engine::scene::Camera{fieldOfViewRadians, 0.1f, 500.0f});
+			Data.Set(
+				eye,
+				engine::scene::Camera{
+					.FieldOfViewRadians = fieldOfViewRadians,
+					.NearPlane = 0.1f,
+					.FarPlane = 500.0f,
+					.RenderFeatures = {},
+				}
+			);
 
 			engine::scene::ActiveCamera active;
 			active.Entity = eye;

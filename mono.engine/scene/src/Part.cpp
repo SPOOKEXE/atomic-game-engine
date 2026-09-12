@@ -725,6 +725,11 @@ namespace engine::scene {
 			return name;
 		}
 
+		const core::Name &AutoMeshLodStrategyEnum() {
+			static const core::Name name("AutoMeshLODStrategy");
+			return name;
+		}
+
 		template <class Component, auto Member, const core::Name &(*EnumName)()>
 		PropertyDescriptor EnumFieldProperty(std::string_view name) {
 			PropertyDescriptor property;
@@ -1577,6 +1582,207 @@ namespace engine::scene {
 			return property;
 		}
 
+		template <class Component, auto Policy, auto Mask>
+		PropertyDescriptor RenderFeatureMaskProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(uint32_t);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *component = store.Get<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				*static_cast<uint32_t *>(out) = ((component->*Policy).*Mask) & ALL_RENDER_FEATURES;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component *component = store.GetMutable<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				(component->*Policy).*Mask = *static_cast<const uint32_t *>(value) & ALL_RENDER_FEATURES;
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component, size_t Level> PropertyDescriptor LodMeshProperty(const char *name) {
+			static_assert(Level > 0 && Level < LOD_LEVELS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<core::Name *>(out) = lod == nullptr ? core::Name{} : lod->Meshes[Level - 1];
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Meshes[Level - 1] = *static_cast<const core::Name *>(value);
+				if (lod.Meshes[Level - 1].IsValid()) {
+					lod.Levels = std::max<uint8_t>(lod.Levels, static_cast<uint8_t>(Level + 1));
+				}
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component, size_t Level> PropertyDescriptor LodRatioProperty(const char *name) {
+			static_assert(Level > 0 && Level < LOD_LEVELS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<float *>(out) = lod == nullptr ? 0.0f : lod->Ratios[Level - 1];
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Ratios[Level - 1] = std::clamp(*static_cast<const float *>(value), 0.0f, 1.0f);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component> PropertyDescriptor LodTargetQuadAreaProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<float *>(out) = lod == nullptr ? 0.0f : lod->TargetQuadArea;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.TargetQuadArea = std::max(*static_cast<const float *>(value), 0.0f);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <class Component> PropertyDescriptor LodLevelsProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<int32_t *>(out) = lod == nullptr ? 1 : lod->Levels;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Levels = static_cast<uint8_t>(
+					std::clamp(*static_cast<const int32_t *>(value), 1, static_cast<int32_t>(LOD_LEVELS))
+				);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor AutoLodStrategyProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("AutoLodStrategy");
+			property.Type = PropertyType::Enum;
+			property.EnumName = AutoMeshLodStrategyEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AutoMeshLOD>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const AutoMeshLOD *lod = store.Get<AutoMeshLOD>(instance);
+				const size_t ordinal = lod != nullptr && lod->Strategy == LodStrategy::Reduced ? 1 : 0;
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(AutoMeshLodStrategyEnum(), ordinal);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						AutoMeshLodStrategyEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+				AutoMeshLOD lod;
+				if (const AutoMeshLOD *existing = store.Get<AutoMeshLOD>(instance)) {
+					lod = *existing;
+				}
+				lod.Strategy = ordinal == 0 ? LodStrategy::Decimated : LodStrategy::Reduced;
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Slot, RenderEffectStage Stage>
+		PropertyDescriptor RenderEffectNodeProperty(const char *name) {
+			static_assert(Slot < MAX_RENDER_EFFECT_ATTACHMENTS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<RenderEffects>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const RenderEffects *effects = store.Get<RenderEffects>(instance);
+				*static_cast<core::Name *>(out) =
+					effects == nullptr ? core::Name{} : effects->Attachments[Slot].Node;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				RenderEffects effects;
+				if (const RenderEffects *existing = store.Get<RenderEffects>(instance)) {
+					effects = *existing;
+				}
+				RenderEffectAttachment &attachment = effects.Attachments[Slot];
+				attachment.Node = *static_cast<const core::Name *>(value);
+				attachment.Stage = Stage;
+				attachment.Enabled = attachment.Node.IsValid();
+				effects.Count = std::max<uint8_t>(effects.Count, static_cast<uint8_t>(Slot + 1));
+				store.Set(instance, effects);
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor SurfaceSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("SurfaceSize");
@@ -2104,6 +2310,9 @@ namespace engine::scene {
 			);
 			ecs::EnumTable::Register(
 				ResamplerModeEnum().Text(), std::array<std::string_view, 2>{"Default", "Pixelated"}
+			);
+			ecs::EnumTable::Register(
+				AutoMeshLodStrategyEnum().Text(), std::array<std::string_view, 2>{"Decimated", "Reduced"}
 			);
 
 			// The collider shapes. **In `ShapeKind`'s own declaration order**,
@@ -2792,6 +3001,24 @@ namespace engine::scene {
 			// share a surface and never a material.
 			ecs::Classes::Property<&Visual::Tint>(basePart, "Color");
 			ecs::Classes::Property<&Visual::Visible>(basePart, "Visible");
+			ecs::Classes::Computed(
+				basePart,
+				RenderFeatureMaskProperty<Visual, &Visual::RenderFeatures, &RenderFeaturePolicy::Enable>(
+					"RenderFeatureEnableMask"
+				)
+			);
+			ecs::Classes::Computed(
+				basePart,
+				RenderFeatureMaskProperty<Visual, &Visual::RenderFeatures, &RenderFeaturePolicy::Disable>(
+					"RenderFeatureDisableMask"
+				)
+			);
+			ecs::Classes::Computed(
+				basePart, RenderEffectNodeProperty<0, RenderEffectStage::Compute>("ComputeEffectNode")
+			);
+			ecs::Classes::Computed(
+				basePart, RenderEffectNodeProperty<1, RenderEffectStage::PostProcess>("PostProcessEffectNode")
+			);
 
 			// --- what it is made of ---------------------------------------
 			//
@@ -2975,6 +3202,35 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::OcclusionMap>(meshPart, "OcclusionMap");
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
+			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 1>("Lod1MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 2>("Lod2MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 3>("Lod3MeshId"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 1>("Lod1Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 2>("Lod2Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 3>("Lod3Ratio"));
+			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<AutoMeshLOD>("LodTargetQuadArea"));
+
+			for (const auto &property : {
+					 LodMeshProperty<AutoMeshLOD, 1>("AutoLod1MeshId"),
+					 LodMeshProperty<AutoMeshLOD, 2>("AutoLod2MeshId"),
+					 LodMeshProperty<AutoMeshLOD, 3>("AutoLod3MeshId"),
+					 LodRatioProperty<AutoMeshLOD, 1>("AutoLod1Ratio"),
+					 LodRatioProperty<AutoMeshLOD, 2>("AutoLod2Ratio"),
+					 LodRatioProperty<AutoMeshLOD, 3>("AutoLod3Ratio"),
+					 LodTargetQuadAreaProperty<AutoMeshLOD>("AutoLodTargetQuadArea"),
+					 LodLevelsProperty<AutoMeshLOD>("AutoLodLevels"),
+					 AutoLodStrategyProperty(),
+					 LodMeshProperty<CustomMeshLOD, 1>("CustomLod1MeshId"),
+					 LodMeshProperty<CustomMeshLOD, 2>("CustomLod2MeshId"),
+					 LodMeshProperty<CustomMeshLOD, 3>("CustomLod3MeshId"),
+					 LodRatioProperty<CustomMeshLOD, 1>("CustomLod1Ratio"),
+					 LodRatioProperty<CustomMeshLOD, 2>("CustomLod2Ratio"),
+					 LodRatioProperty<CustomMeshLOD, 3>("CustomLod3Ratio"),
+					 LodTargetQuadAreaProperty<CustomMeshLOD>("CustomLodTargetQuadArea"),
+					 LodLevelsProperty<CustomMeshLOD>("CustomLodLevels"),
+				 }) {
+				ecs::Classes::Computed(meshPart, property);
+			}
 
 			// Mesh metadata belongs to MeshPart, not every BasePart.
 			ecs::Classes::Computed(meshPart, TrianglesCountProperty());
@@ -3007,6 +3263,18 @@ namespace engine::scene {
 			ecs::Classes::Property<&Camera::MaxImageHeight>(cameraClass, "MaxImageHeight");
 			ecs::Classes::Property<&Camera::ImageWidth>(cameraClass, "ImageWidth");
 			ecs::Classes::Property<&Camera::ImageHeight>(cameraClass, "ImageHeight");
+			ecs::Classes::Computed(
+				cameraClass,
+				RenderFeatureMaskProperty<Camera, &Camera::RenderFeatures, &RenderFeaturePolicy::Enable>(
+					"RenderFeatureEnableMask"
+				)
+			);
+			ecs::Classes::Computed(
+				cameraClass,
+				RenderFeatureMaskProperty<Camera, &Camera::RenderFeatures, &RenderFeaturePolicy::Disable>(
+					"RenderFeatureDisableMask"
+				)
+			);
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
 			// The surface camera's four. `SurfaceSize` above is inherited, so a

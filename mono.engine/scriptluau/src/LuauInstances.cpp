@@ -651,6 +651,10 @@ namespace engine::script {
 			*static_cast<int64_t *>(out) = static_cast<int64_t>(luaL_checknumber(state, index));
 			return true;
 		case PropertyType::Name:
+			if (lua_isnil(state, index)) {
+				*static_cast<Name *>(out) = Name{};
+				return true;
+			}
 			*static_cast<Name *>(out) = Name(luaL_checkstring(state, index));
 			return true;
 		case PropertyType::String:

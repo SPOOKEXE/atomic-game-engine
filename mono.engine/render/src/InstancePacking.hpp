@@ -106,8 +106,9 @@ namespace engine::render {
 		return PackColour(glm::vec4{tint.R, tint.G, tint.B, std::clamp(strength, 0.0f, 16.0f) / 16.0f});
 	}
 
-	// Four aligned vectors match the shader storage row. The final two words
-	// stay explicit and zero so uploads and residency comparisons are deterministic.
+	// Four aligned vectors match the shader storage row. Feature policy occupies
+	// the final two words so every draw stage can resolve per-instance choices
+	// without reading scene state back through the CPU.
 	struct alignas(16) GpuInstance {
 		glm::vec3 Position{0.0f, 0.0f, 0.0f};
 		uint32_t Colour = 0xFFFFFFFFu;
@@ -116,7 +117,8 @@ namespace engine::render {
 		uint32_t Appearance = PackAppearance(scene::AlphaMode::Opaque, 0.5f);
 		uint32_t SurfaceColour = 0xFFFFFFFFu;
 		uint32_t Emission = PackEmission(core::Color3{1.0f, 1.0f, 1.0f}, 1.0f);
-		uint32_t Reserved[2]{};
+		uint32_t FeatureEnable = 0;
+		uint32_t FeatureDisable = 0;
 	};
 
 	// The resources build reads these strides for instance.glsl's layout guards.
@@ -226,6 +228,8 @@ namespace engine::render {
 			glm::vec4{instance.SurfaceColour.R, instance.SurfaceColour.G, instance.SurfaceColour.B, 1.0f}
 		);
 		gpu.Emission = PackEmission(instance.EmissiveTint, instance.EmissiveStrength);
+		gpu.FeatureEnable = instance.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
+		gpu.FeatureDisable = instance.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
 		return gpu;
 	}
 }

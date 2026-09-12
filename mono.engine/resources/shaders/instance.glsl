@@ -16,7 +16,7 @@ struct InstanceRow {
 	uvec4 PositionColour;
 	uvec4 Rotation;
 	uvec4 ScaleAppearance;
-	uvec4 SurfaceEmission;
+	uvec4 SurfaceEmissionFeatures;
 };
 layout(set = 0, binding = 0) readonly buffer InstanceRows {
 	InstanceRow rows[];
@@ -41,6 +41,22 @@ uint InstanceSlot() {
 
 InstanceRow LoadInstance() {
 	return residentInstances.rows[InstanceSlot()];
+}
+
+uint InstanceFeatureEnable(InstanceRow instance) {
+	return instance.SurfaceEmissionFeatures.z;
+}
+
+uint InstanceFeatureDisable(InstanceRow instance) {
+	return instance.SurfaceEmissionFeatures.w;
+}
+
+// viewPolicy is supported bits, world-resolved defaults, camera enables and
+// camera disables. Instance policy is last so one visual can override its
+// camera without a CPU-side feature branch.
+uint ResolveInstanceFeatures(InstanceRow instance, uvec4 viewPolicy) {
+	uint camera = (viewPolicy.y | viewPolicy.z) & ~viewPolicy.w;
+	return ((camera | InstanceFeatureEnable(instance)) & ~InstanceFeatureDisable(instance)) & viewPolicy.x;
 }
 
 vec3 RotateByQuaternion(vec4 quaternion, vec3 point);
@@ -145,11 +161,11 @@ uint InstanceAppearance(InstanceRow instance) {
 }
 
 vec3 InstanceSurfaceColour(InstanceRow instance) {
-	return unpackUnorm4x8(instance.SurfaceEmission.x).rgb;
+	return unpackUnorm4x8(instance.SurfaceEmissionFeatures.x).rgb;
 }
 
 vec4 InstanceEmission(InstanceRow instance) {
-	vec4 packed = unpackUnorm4x8(instance.SurfaceEmission.y);
+	vec4 packed = unpackUnorm4x8(instance.SurfaceEmissionFeatures.y);
 	packed.a *= 16.0;
 	return packed;
 }

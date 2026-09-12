@@ -882,6 +882,27 @@ TEST_CASE("javascript reaches the same enum through its own spelling", "[scripti
 	CHECK_FALSE(runtime->Run("Instance.new('Part').AlphaMode = Enum.EasingStyle.Linear;"));
 }
 
+TEST_CASE("an absent name property round trips through both languages", "[scripting][name]") {
+	RegisterClasses();
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		Store store(language == Language::Luau ? "name_nil_luau" : "name_null_js");
+		const auto runtime = MakeRuntime(store, language);
+		const char *source = language == Language::Luau ? R"(
+			local part = Instance.new('MeshPart')
+			part.MeshId = 'engine.Cube'
+			part.MeshId = nil
+			assert(part.MeshId == nil, 'nil name did not round-trip')
+		)"
+														: R"(
+			const part = Instance.new('MeshPart');
+			part.MeshId = 'engine.Cube';
+			part.MeshId = null;
+			if (part.MeshId !== null) throw new Error('null name did not round-trip');
+		)";
+		MustRun(*runtime, source);
+	}
+}
+
 TEST_CASE("surface appearance properties bind in both languages", "[scripting][surface]") {
 	RegisterClasses();
 

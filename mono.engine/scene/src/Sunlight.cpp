@@ -54,6 +54,7 @@ namespace engine::scene {
 			lighting.FogColor = authored->FogColor;
 			lighting.FogStart = std::max(authored->FogStart, 0.0f);
 			lighting.FogEnd = std::max(authored->FogEnd, lighting.FogStart);
+			lighting.RenderFeatures = authored->RenderFeatures;
 		}
 
 		// **Resolved here rather than left to whoever draws**, for the reason

@@ -16,6 +16,7 @@
 #include "GpuHeap.hpp"
 #include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
+#include "LodSelection.hpp"
 #include "ParticleWork.hpp"
 #include "RenderStageProbe.hpp"
 #include "RenderTypes.hpp"
@@ -496,7 +497,7 @@ namespace engine::render {
 		struct GraphRasterPipeline {
 			core::Name Pipeline;
 			core::Name Node;
-			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			std::vector<SDL_GPUTextureFormat> Formats;
 			uint32_t Samplers = 0;
 			SDL_GPUGraphicsPipeline *Handle = nullptr;
 		};
@@ -506,6 +507,8 @@ namespace engine::render {
 			core::Name Node;
 			uint32_t Samplers = 0;
 			uint32_t Storage = 0;
+			uint32_t ReadStorage = 0;
+			uint32_t Uniforms = 0;
 			uint32_t LocalX = 1;
 			uint32_t LocalY = 1;
 			uint32_t LocalZ = 1;
@@ -528,7 +531,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *GraphRasterFor(
 			const NamedPipeline &pipeline,
 			const graph::Node &node,
-			SDL_GPUTextureFormat format,
+			std::span<const SDL_GPUTextureFormat> formats,
 			uint32_t samplers
 		);
 		SDL_GPUComputePipeline *GraphComputeFor(
@@ -536,6 +539,8 @@ namespace engine::render {
 			const graph::Node &node,
 			uint32_t samplers,
 			uint32_t storage,
+			uint32_t readStorage,
+			uint32_t uniforms,
 			uint32_t localX,
 			uint32_t localY,
 			uint32_t localZ
@@ -859,6 +864,7 @@ namespace engine::render {
 		std::vector<glm::vec4> SlotSeamLight;
 		std::vector<InstanceKey> SlotInstanceKey;
 		std::vector<uint8_t> SlotInstanceCurrent;
+		std::vector<uint32_t> SlotLod;
 
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
@@ -890,6 +896,34 @@ namespace engine::render {
 			core::Name Name;
 		};
 		std::vector<PendingInstanceUpload> PendingInstanceUploads;
+
+		// --- authored mesh LOD -----------------------------------------------
+		//
+		// One compact set per view. Host code packs each level against its own
+		// mesh bounds. The compute node chooses the level by projected pixel area
+		// and enables only that level's indexed indirect commands.
+		struct LodState {
+			SDL_GPUComputePipeline *Select = nullptr;
+			SDL_GPUBuffer *Selections = nullptr;
+			SDL_GPUBuffer *Instances = nullptr;
+			SDL_GPUBuffer *Indices = nullptr;
+			SDL_GPUBuffer *SkinOffsets = nullptr;
+			SDL_GPUBuffer *Arguments = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t SelectionCapacity = 0;
+			uint32_t InstanceCapacity = 0;
+			uint32_t ArgumentCapacity = 0;
+			uint32_t TransferCapacity = 0;
+			bool Ready = false;
+		};
+		LodState Lod;
+		LodPlan LodFrame;
+
+		bool EnsureLodResources(uint32_t selections, uint32_t instances, uint32_t arguments);
+		bool DispatchLodSelection(
+			SDL_GPUCommandBuffer *command, const glm::mat4 &viewProjection, uint32_t width, uint32_t height
+		);
+		void ReleaseLod();
 
 		// --- occlusion culling ------------------------------------------------
 		//
@@ -962,7 +996,8 @@ namespace engine::render {
 		// `DrawSlots` walks with and the occlusion plan must walk with, or the
 		// plan's argument order names the wrong runs.
 		bool SlotsShareRun(uint32_t slot, uint32_t next) const {
-			return SlotMesh[next] == SlotMesh[slot] && SlotTexture[next] == SlotTexture[slot] &&
+			return SlotLod[next] == SlotLod[slot] && SlotMesh[next] == SlotMesh[slot] &&
+				   SlotTexture[next] == SlotTexture[slot] &&
 				   SlotContentOwner[next] == SlotContentOwner[slot] &&
 				   SlotNormalMap[next] == SlotNormalMap[slot] &&
 				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
@@ -2410,6 +2445,11 @@ namespace engine::render {
 		//         family with no variants.
 		SDL_GPUGraphicsPipeline *VariantFor(const core::Name &shader, core::Name owner) const;
 
+		enum class SlotSelection : uint8_t {
+			All,
+			LodOnly,
+		};
+
 		// Issues the draws for one contiguous run of instance-buffer slots.
 		//
 		// **The loop v0.9 exists to add.** Every draw used to be one call over
@@ -2449,11 +2489,17 @@ namespace engine::render {
 			SDL_GPUSampler *surfaceSampler,
 			uint32_t tagFilter,
 			uint64_t &triangles,
-			const IndirectPhase *indirect = nullptr
+			const IndirectPhase *indirect = nullptr,
+			SlotSelection selection = SlotSelection::All
 		);
 
 		// Binds mesh vertices plus the resident rows and one ordered index stream.
-		void BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices = nullptr);
+		void BindInstanceBuffers(
+			SDL_GPURenderPass *pass,
+			SDL_GPUBuffer *indices = nullptr,
+			SDL_GPUBuffer *instances = nullptr,
+			SDL_GPUBuffer *skinOffsets = nullptr
+		);
 
 		bool CreateGeometry();
 		bool EnsureInstanceCapacity(

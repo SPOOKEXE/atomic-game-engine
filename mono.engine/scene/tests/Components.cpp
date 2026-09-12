@@ -39,6 +39,7 @@ using engine::scene::ObjectValue;
 using engine::scene::Portal;
 using engine::scene::PreviousTransform;
 using engine::scene::Rendered;
+using engine::scene::RenderFeaturePolicy;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
@@ -91,7 +92,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Bounds) == sizeof(Vector3));
 	CHECK(sizeof(Motion) == 2 * sizeof(Vector3));
 	CHECK(sizeof(Surface) == sizeof(Name));
-	CHECK(sizeof(Camera) == 7 * sizeof(float));
+	CHECK(sizeof(Camera) == 7 * sizeof(float) + sizeof(RenderFeaturePolicy));
 	// **`ImageTransparency` widened this one and the two bytes it needed came
 	// out of the named padding**, which is the same trade `Visual` records
 	// above: a float needs four-byte alignment, so it could not sit in the three
@@ -184,8 +185,8 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// purpose. This line is what makes the *next* growth visible in a diff
 	// rather than discovered in a profile.
 	CHECK(
-		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(int16_t) +
-							  3 * sizeof(bool) + sizeof(Visual::Reserved)
+		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(RenderFeaturePolicy) + sizeof(float) +
+							  sizeof(int16_t) + 3 * sizeof(bool) + sizeof(Visual::Reserved)
 	);
 
 	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);

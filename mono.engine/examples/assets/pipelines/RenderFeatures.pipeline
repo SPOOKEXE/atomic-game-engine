@@ -1,0 +1,173 @@
+renderpipeline 2
+resource "shadow" depth D32F 0 0 1 yes
+resource "last-frame" colour RGBA8_SRGB 0 0 1 yes
+resource "mirror-views" colour RGBA16F 0 0 1 yes
+resource "portal-image" texture RGBA16F 0 0 1 yes
+resource "portal-light" texture RGBA16F 0 0 1 yes
+resource "world-entities" entities R8 0 0 1 no
+resource "view-camera" camera R8 0 0 1 no
+resource "view-entities" entities R8 0 0 1 no
+resource "visible-entities" entities R8 0 0 1 no
+resource "ordered-entities" entities R8 0 0 1 no
+resource "view-instances" buffer R8 0 0 1 no
+resource "lod-instances" buffer R8 0 0 1 no
+resource "albedo" colour RGBA8_SRGB 0 0 1 no
+resource "normal" colour RGB10A2 0 0 1 no
+resource "material" colour RGBA8 0 0 1 no
+resource "emissive" colour RGBA16F 0 0 1 no
+resource "depth" depth D24S8 0 0 1 no
+resource "linear-depth" colour R32F 0 0 1 no
+resource "occlusion" colour R8 0 0 2 yes
+resource "lit" colour RGBA16F 0 0 1 no
+resource "sky-lit" colour RGBA16F 0 0 1 no
+resource "volume-lit" colour RGBA16F 0 0 1 no
+resource "lens-b" colour RGBA16F 0 0 1 no
+resource "lens-scratch" colour RGBA16F 0 0 1 no
+resource "tonemapped" colour RGBA8_SRGB 0 0 1 no
+resource "portaled" colour RGBA16F 0 0 1 no
+resource "mirrored" colour RGBA16F 0 0 1 no
+resource "display" colour RGBA16F 0 0 1 no
+resource "scene-image" colour RGBA8_SRGB 0 0 1 no
+resource "interface-image" colour RGBA8_SRGB 0 0 1 yes
+resource "composed-image" colour RGBA8_SRGB 0 0 1 no
+node "world" "world" world no
+writes "world-entities" "entities"
+node "shadow" "shadow" world no
+reads "world-entities" "entities"
+writes "shadow" "shadow"
+node "camera" "camera" view no
+writes "view-camera" "camera"
+node "last-frame" "last-frame" view no
+writes "last-frame" "image"
+node "entities" "entities" view no
+writes "view-entities" "entities"
+node "cull-frustum" "cull-frustum" view no
+reads "view-entities" "entities"
+reads "view-camera" "camera"
+writes "visible-entities" "entities"
+node "order-draw" "order-draw" view no
+reads "visible-entities" "entities"
+reads "view-camera" "camera"
+writes "ordered-entities" "entities"
+node "upload-instances" "upload-instances" view no
+reads "ordered-entities" "entities"
+writes "view-instances" "instances"
+node "select-lod" "select-lod" view no
+reads "view-instances" "instances"
+reads "view-camera" "camera"
+writes "lod-instances" "instances"
+node "surface-capture" "surface-capture" view no
+reads "world-entities" "world-state"
+reads "shadow" "shadow"
+reads "ordered-entities" "entities"
+reads "lod-instances" "instances"
+writes "mirror-views" "surface"
+writes "portal-image" "portal"
+writes "portal-light" "light"
+node "gbuffer" "gbuffer" view no
+reads "shadow" "shadow"
+reads "ordered-entities" "entities"
+reads "lod-instances" "instances"
+writes "albedo" "albedo"
+writes "normal" "normal"
+writes "material" "material"
+writes "emissive" "emissive"
+writes "depth" "depth"
+node "depth-linearise" "depth-linearise" view no
+reads "depth" "depth"
+writes "linear-depth" "linear"
+node "ssao" "ssao" view no
+reads "linear-depth" "depth"
+reads "normal" "normal"
+writes "occlusion" "occlusion"
+node "deferred-lighting" "deferred-lighting" view no
+reads "albedo" "albedo"
+reads "normal" "normal"
+reads "material" "material"
+reads "emissive" "emissive"
+reads "linear-depth" "depth"
+reads "occlusion" "occlusion"
+reads "shadow" "shadow"
+reads "portal-light" "portal-light"
+writes "lit" "colour"
+node "sky" "sky" view no
+reads "lit" "colour"
+reads "depth" "depth"
+writes "sky-lit" "colour"
+node "volumetrics" "volumetrics" view no
+reads "sky-lit" "colour"
+reads "depth" "depth"
+writes "volume-lit" "colour"
+node "portal-overlay" "portal-overlay" view no
+reads "volume-lit" "colour"
+reads "depth" "depth"
+reads "portal-image" "portal"
+reads "ordered-entities" "entities"
+reads "lod-instances" "instances"
+writes "portaled" "colour"
+node "mirror-overlay" "mirror-overlay" view no
+reads "portaled" "colour"
+reads "depth" "depth"
+reads "mirror-views" "surface"
+reads "ordered-entities" "entities"
+reads "lod-instances" "instances"
+writes "mirrored" "colour"
+node "transparent" "transparent" view no
+reads "mirrored" "colour"
+reads "depth" "depth"
+reads "ordered-entities" "entities"
+reads "lod-instances" "instances"
+writes "display" "colour"
+node "shader-lenses" "shader-lenses" view no
+reads "display" "colour"
+reads "linear-depth" "depth"
+writes "lens-b" "colour"
+writes "lens-scratch" "scratch"
+node "tonemap" "tonemap" view no
+reads "lens-b" "colour"
+writes "tonemapped" "colour"
+node "present" "present" frame no
+reads "tonemapped" "image"
+writes "scene-image" "image"
+node "interface" "interface" frame no
+writes "interface-image" "image"
+node "overlay" "overlay" frame no
+reads "scene-image" "scene"
+reads "interface-image" "interface"
+writes "composed-image" "image"
+node "output-image" "output-image" frame no
+reads "composed-image" "image"
+enable "present" no
+enable "interface" no
+enable "overlay" no
+enable "output-image" no
+resource "demo-computed" storage RGBA16F 0 0 1 no
+resource "demo-post" colour RGBA16F 0 0 1 no
+resource "demo-antialiased" colour RGBA8_SRGB 0 0 1 no
+resource "demo-scene" colour RGBA8_SRGB 0 0 1 no
+resource "demo-interface" colour RGBA8_SRGB 0 0 1 yes
+resource "demo-composed" colour RGBA8_SRGB 0 0 1 no
+node "demo-compute" "dispatch" view no
+reads "tonemapped" "source"
+writes "demo-computed" "target"
+set "shader" "attachment-copy.comp"
+set "attachment" "visual"
+set "uniforms" "view"
+node "demo-post" "fxaa" view no
+reads "demo-computed" "source"
+writes "demo-post" "target"
+set "attachment" "visual"
+node "demo-fxaa" "fxaa" view no
+reads "demo-post" "source"
+writes "demo-antialiased" "target"
+node "demo-present" "present" frame no
+reads "demo-antialiased" "image"
+writes "demo-scene" "image"
+node "demo-interface-pass" "interface" frame no
+writes "demo-interface" "image"
+node "demo-overlay" "overlay" frame no
+reads "demo-scene" "scene"
+reads "demo-interface" "interface"
+writes "demo-composed" "image"
+node "demo-output" "output-image" frame no
+reads "demo-composed" "image"

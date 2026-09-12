@@ -37,6 +37,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
 #include <cstdint>
@@ -573,6 +574,12 @@ namespace engine::scene {
 		// @since v0.10
 		core::Name Fitted;
 
+		// Per-instance feature overrides. Neither mask says "inherit"; a bit in
+		// Enable requests a feature and a bit in Disable refuses it. The renderer
+		// keeps both on the resident GPU row so a camera change does not rewrite
+		// every visual in the world.
+		RenderFeaturePolicy RenderFeatures;
+
 		// How much of what is behind shows through, 0 to 1.
 		//
 		// **The field is cheap and the ordering is not**, which is why this
@@ -1072,6 +1079,10 @@ namespace engine::scene {
 		uint32_t ImageWidth = 0;
 		// Requested render-target height, or zero for the host height.
 		uint32_t ImageHeight = 0;
+
+		// Per-view feature overrides, resolved after world lighting and before an
+		// instance's own policy. These are uploaded once for the view.
+		RenderFeaturePolicy RenderFeatures;
 	};
 
 	// A camera's authored follow target. Automatic cameras follow the local

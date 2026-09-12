@@ -17,7 +17,8 @@
 // is that threshold expressed in pixels, and it is what the component stores.
 //
 // **How the levels came to exist is a separate question from which one to
-// draw**, and `LodStrategy` is the first while `SelectLevel` is the second.
+// draw**, and `AutoMeshLOD` plus `CustomMeshLOD` describe the first while
+// `SelectLevel` describes the second.
 // `ROADMAP.md`'s bullet names three ways to produce them - four authored meshes,
 // auto-decimation, and triangle reduction driven by surface area - and a
 // component has to be able to say "none of the above", which is what every part
@@ -89,17 +90,44 @@ namespace engine::scene {
 		Reduced = 3,
 	};
 
-	// The coarser versions of a part's geometry, on the part.
+	// Automatically produced coarse mesh artifacts and the options that produced them.
 	//
-	// **An optional column and not part of `BasePart`'s set**, which is the
-	// opposite call from `SurfaceAppearance` and `Tags` and is right for the
-	// opposite reason. Those two are on every part because
-	// `engine::render::CollectInstances` is a fixed-signature batched walk that cannot
-	// read an optional column at all. Level selection is not that walk: it runs
-	// over `<Visual, LevelOfDetail>` and touches only the parts that have levels,
-	// and in a world of four thousand plain cubes that is none of them. Putting
-	// forty bytes on every cube to save a join on the few hundred that are
-	// models is the trade backwards.
+	// The bake path owns `Meshes`. Keeping the published names beside its inputs makes
+	// a save self-contained and lets a renderer use the artifacts without recreating
+	// geometry during a frame. A missing artifact ends the automatic ladder unless a
+	// custom component supplies that level.
+	//
+	// @since v0.25
+	struct AutoMeshLOD {
+		core::Name Meshes[LOD_LEVELS - 1];
+		float Ratios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
+		float TargetQuadArea = 0.0f;
+		LodStrategy Strategy = LodStrategy::Decimated;
+		uint8_t Levels = LOD_LEVELS;
+		uint8_t Reserved[2] = {};
+	};
+
+	// Per-level authored overrides for an automatic mesh ladder.
+	//
+	// Each valid mesh replaces the automatic artifact at the same level. An
+	// invalid name is an intentional nil and falls back to `AutoMeshLOD` for that
+	// level. Zero ratios and target area inherit the automatic option, or the
+	// engine default when no automatic component exists.
+	//
+	// @since v0.25
+	struct CustomMeshLOD {
+		core::Name Meshes[LOD_LEVELS - 1];
+		float Ratios[LOD_LEVELS - 1] = {};
+		float TargetQuadArea = 0.0f;
+		uint8_t Levels = LOD_LEVELS;
+		uint8_t Reserved[3] = {};
+	};
+
+	// A resolved automatic/custom ladder copied into a draw snapshot.
+	//
+	// This is not registered as ECS storage. `AutoMeshLOD` and `CustomMeshLOD`
+	// own authored state; `ResolveMeshLOD` produces this flat value once while a
+	// draw list is built, before each camera selects a level on the GPU.
 	//
 	// @since v0.19
 	struct LevelOfDetail {
@@ -147,6 +175,15 @@ namespace engine::scene {
 		// change to it, which is `InputState::Reserved`'s rule.
 		uint8_t Reserved[2] = {};
 	};
+
+	// Resolves the two authored components into the flat ladder consumed by a
+	// draw snapshot. Custom meshes win per level; nil custom entries use the
+	// corresponding automatic artifact.
+	//
+	// @param automatic Generated artifacts and generation options, or null.
+	// @param custom    Authored per-level overrides, or null.
+	// @return A contiguous ladder. Strategy is `None` when no coarse level exists.
+	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
 
 	// Which level a part should be drawn at.
 	//

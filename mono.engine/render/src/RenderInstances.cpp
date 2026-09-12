@@ -28,14 +28,16 @@
 #include <vector>
 
 namespace engine::render {
-	void Renderer::Impl::BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices) {
+	void Renderer::Impl::BindInstanceBuffers(
+		SDL_GPURenderPass *pass, SDL_GPUBuffer *indices, SDL_GPUBuffer *instances, SDL_GPUBuffer *skinOffsets
+	) {
 		const SDL_GPUBufferBinding vertices{Meshes.Vertices(), 0};
 		SDL_BindGPUVertexBuffers(pass, 0, &vertices, 1);
 
 		SDL_GPUBuffer *const storage[] = {
-			InstanceBuffer,
+			instances != nullptr ? instances : InstanceBuffer,
 			indices != nullptr ? indices : InstanceIndexBuffer,
-			SkinOffsetBuffer,
+			skinOffsets != nullptr ? skinOffsets : SkinOffsetBuffer,
 			JointBuffer,
 		};
 		SDL_BindGPUVertexStorageBuffers(pass, 0, storage, 4);
@@ -53,7 +55,8 @@ namespace engine::render {
 		SDL_GPUSampler *surfaceSampler,
 		uint32_t tagFilter,
 		uint64_t &triangles,
-		const IndirectPhase *indirect
+		const IndirectPhase *indirect,
+		SlotSelection selection
 	) {
 		if (count == 0 || first + count > SlotMesh.size()) {
 			return 0;
@@ -99,7 +102,10 @@ namespace engine::render {
 							  const std::array<float, 4> &colour,
 							  uint32_t slot,
 							  uint32_t run,
-							  bool simpleShadow) {
+							  bool simpleShadow,
+							  SDL_GPUBuffer *forcedArguments,
+							  uint32_t forcedArgument,
+							  bool tallyTriangles) {
 			if (range.IndexCount == 0) {
 				return;
 			}
@@ -296,7 +302,14 @@ namespace engine::render {
 				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 			}
 
-			if (indirect != nullptr) {
+			if (forcedArguments != nullptr) {
+				SDL_DrawGPUIndexedPrimitivesIndirect(
+					pass,
+					forcedArguments,
+					forcedArgument * static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
+					1
+				);
+			} else if (indirect != nullptr) {
 				// The counts live on the GPU. `run` here is the phase's upper
 				// bound, so the triangle tally can only overcount what the
 				// cull discarded - an estimate is honest for a number whose
@@ -315,7 +328,9 @@ namespace engine::render {
 				);
 			}
 			calls++;
-			triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
+			if (tallyTriangles) {
+				triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
+			}
 		};
 
 		uint32_t slot = first;
@@ -328,6 +343,91 @@ namespace engine::render {
 			// instance sits between two included ones, which is a draw call and
 			// not a wrong picture.
 			if (!scene::MatchesTags(SlotTags[slot], tagFilter)) {
+				slot++;
+				continue;
+			}
+
+			const uint32_t lodIndex = slot < SlotLod.size() ? SlotLod[slot] : NO_LOD_DRAW;
+			const bool lod =
+				Lod.Ready && lodIndex < LodFrame.Draws.size() && LodFrame.Draws[lodIndex].Slot == slot;
+			if (selection == SlotSelection::LodOnly && !lod) {
+				slot++;
+				continue;
+			}
+			if (lod) {
+				const MeshEntry *const baseMesh = SlotMesh[slot];
+				if (indirect != nullptr) {
+					// The ordinary occlusion plan still owns one run entry for this
+					// slot. Advance over it, then draw the selected level once after
+					// the early and late phases have completed.
+					argument += DrawArgumentCount(*baseMesh);
+					slotRun++;
+					slot++;
+					continue;
+				}
+
+				const core::Name shader = SlotShader[slot];
+				bool resolvedBeforeGBuffer = false;
+				if (ActiveFamily == PipelineFamily::GBuffer && shader.IsValid()) {
+					const auto authored =
+						ShaderVariants.find(ShaderVariantKey(shader, SlotContentOwner[slot]));
+					resolvedBeforeGBuffer =
+						authored != ShaderVariants.end() && authored->second.HdrOpaque != nullptr;
+				}
+				if (resolvedBeforeGBuffer) {
+					slot++;
+					continue;
+				}
+
+				SDL_GPUGraphicsPipeline *const wanted = VariantFor(shader, SlotContentOwner[slot]);
+				SDL_GPUGraphicsPipeline *const want = wanted != nullptr ? wanted : base;
+				if (want != bound && want != nullptr) {
+					SDL_BindGPUGraphicsPipeline(pass, want);
+					bound = want;
+				}
+
+				BindInstanceBuffers(pass, Lod.Indices, Lod.Instances, Lod.SkinOffsets);
+				const LodDraw &draw = LodFrame.Draws[lodIndex];
+				const bool simpleShadow = lighting == nullptr && SlotShadowDetail[slot] == 0;
+				for (uint32_t level = 0; level < draw.LevelCount; ++level) {
+					const LodDrawLevel &levelDraw = draw.Levels[level];
+					const MeshEntry &mesh = *levelDraw.Mesh;
+					uint32_t lodArgument = levelDraw.FirstArgument;
+					const auto issue = [&](const MeshRange &range,
+										   const core::Name &texture,
+										   const std::array<float, 4> &colour) {
+						if (range.IndexCount == 0) {
+							return;
+						}
+						emit(
+							range,
+							texture,
+							colour,
+							slot,
+							1,
+							simpleShadow,
+							Lod.Arguments,
+							lodArgument++,
+							level == 0
+						);
+					};
+					if (mesh.Runs.empty()) {
+						issue(mesh.Whole, SlotTexture[slot], {1.0f, 1.0f, 1.0f, 1.0f});
+					} else {
+						for (size_t run = 0; run < mesh.Runs.size(); ++run) {
+							issue(
+								mesh.Runs[run],
+								SlotTexture[slot].IsValid() ? SlotTexture[slot] : mesh.Textures[run],
+								mesh.Colours[run]
+							);
+						}
+					}
+				}
+				BindInstanceBuffers(pass);
+				slot++;
+				continue;
+			}
+			if (selection == SlotSelection::LodOnly) {
 				slot++;
 				continue;
 			}
@@ -386,7 +486,17 @@ namespace engine::render {
 
 			if (mesh->Runs.empty()) {
 				// A mesh with no materials of its own - every built-in.
-				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, phaseInstances, simpleShadow);
+				emit(
+					mesh->Whole,
+					texture,
+					{1.0f, 1.0f, 1.0f, 1.0f},
+					slot,
+					phaseInstances,
+					simpleShadow,
+					nullptr,
+					0,
+					true
+				);
 			} else {
 				for (size_t index = 0; index < mesh->Runs.size(); index++) {
 					// **The instance's texture wins when it has one.** That is
@@ -399,7 +509,10 @@ namespace engine::render {
 						mesh->Colours[index],
 						slot,
 						phaseInstances,
-						simpleShadow
+						simpleShadow,
+						nullptr,
+						0,
+						true
 					);
 				}
 			}

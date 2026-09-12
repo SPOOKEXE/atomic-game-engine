@@ -272,15 +272,20 @@ namespace engine::render {
 		glm::vec4 CameraDepth{};
 	};
 
-	// Slot zero for an authored fullscreen fragment shader. The contract is
-	// intentionally small and stable: target size, reciprocal size, frame
-	// time, and the active camera matrices. Inputs remain sampler slots in the
-	// order the node declares them.
+	// Slot zero for an authored raster shader or an authored compute node whose
+	// `uniforms` parameter is `view`. Target is width, height and reciprocals.
+	// View is animation seconds, field of view, aspect and resident instance
+	// count. Inputs remain sampler slots in the order the node declares them.
 	struct GraphPassUniforms {
 		glm::mat4 ViewProjection{1.0f};
 		glm::mat4 InverseViewProjection{1.0f};
 		glm::vec4 Target{};
 		glm::vec4 View{};
+
+		// x: device-supported bits. y: defaults after world policy.
+		// z/w: camera enable and disable masks. A shader applies the instance
+		// masks last, preserving authored instance precedence entirely on GPU.
+		glm::uvec4 RenderFeatures{};
 	};
 
 	// How many holes may transport a shadow in one frame.

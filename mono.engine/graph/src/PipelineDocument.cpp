@@ -837,6 +837,7 @@ namespace engine::graph {
 		resource("visible-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("ordered-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("view-instances", ResourceKind::Buffer, ResourceFormat::R8);
+		resource("lod-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("albedo", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("normal", ResourceKind::Colour, ResourceFormat::RGB10A2);
 		resource("material", ResourceKind::Colour, ResourceFormat::RGBA8);
@@ -887,11 +888,16 @@ namespace engine::graph {
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Writes, "view-instances", "instances");
 
+		node("select-lod", NodeScope::View);
+		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Reads, "view-camera", "camera");
+		touches(EditKind::Writes, "lod-instances", "instances");
+
 		node("surface-capture", NodeScope::View);
 		touches(EditKind::Reads, "world-entities", "world-state");
 		touches(EditKind::Reads, "shadow", "shadow");
 		touches(EditKind::Reads, "ordered-entities", "entities");
-		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Reads, "lod-instances", "instances");
 		touches(EditKind::Writes, "mirror-views", "surface");
 		touches(EditKind::Writes, "portal-image", "portal");
 		touches(EditKind::Writes, "portal-light", "light");
@@ -899,7 +905,7 @@ namespace engine::graph {
 		node("gbuffer", NodeScope::View);
 		touches(EditKind::Reads, "shadow", "shadow");
 		touches(EditKind::Reads, "ordered-entities", "entities");
-		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Reads, "lod-instances", "instances");
 		touches(EditKind::Writes, "albedo", "albedo");
 		touches(EditKind::Writes, "normal", "normal");
 		touches(EditKind::Writes, "material", "material");
@@ -943,7 +949,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Reads, "portal-image", "portal");
 		touches(EditKind::Reads, "ordered-entities", "entities");
-		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Reads, "lod-instances", "instances");
 		touches(EditKind::Writes, "portaled", "colour");
 
 		node("mirror-overlay", NodeScope::View);
@@ -951,14 +957,14 @@ namespace engine::graph {
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Reads, "mirror-views", "surface");
 		touches(EditKind::Reads, "ordered-entities", "entities");
-		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Reads, "lod-instances", "instances");
 		touches(EditKind::Writes, "mirrored", "colour");
 
 		node("transparent", NodeScope::View);
 		touches(EditKind::Reads, "mirrored", "colour");
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Reads, "ordered-entities", "entities");
-		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Reads, "lod-instances", "instances");
 		touches(EditKind::Writes, "display", "colour");
 
 		node("shader-lenses", NodeScope::View);
@@ -1282,17 +1288,23 @@ namespace engine::graph {
 		for (const Edit &edit : full.Edits()) {
 			if (edit.Kind == EditKind::AddResource) {
 				skipNode = false;
-				if (edit.Name == core::Name("depth-pyramid") || edit.Name == core::Name("occlusion")) {
+				if (edit.Name == core::Name("depth-pyramid") || edit.Name == core::Name("occlusion") ||
+					edit.Name == core::Name("lod-instances")) {
 					continue;
 				}
 			}
 			if (edit.Kind == EditKind::AddNode) {
-				skipNode = edit.NodeKind == core::Name("hzb") || edit.NodeKind == core::Name("ssao");
+				skipNode = edit.NodeKind == core::Name("hzb") || edit.NodeKind == core::Name("ssao") ||
+						   edit.NodeKind == core::Name("select-lod");
 			}
 			if (skipNode || (edit.Kind == EditKind::Reads && edit.Target == core::Name("occlusion"))) {
 				continue;
 			}
-			reduced.Record(edit);
+			Edit reducedEdit = edit;
+			if (reducedEdit.Kind == EditKind::Reads && reducedEdit.Target == core::Name("lod-instances")) {
+				reducedEdit.Target = core::Name("view-instances");
+			}
+			reduced.Record(std::move(reducedEdit));
 		}
 		return reduced;
 	}

@@ -82,10 +82,10 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// **Shared at both ends, per view in the middle**, which is the shape of a
-	// real frame: world input and one shadow map every view samples, eighteen passes each view
+	// real frame: world input and one shadow map every view samples, nineteen passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
 	CHECK(compiled.Shared.size() == 2);
-	CHECK(compiled.PerView.size() == 18);
+	CHECK(compiled.PerView.size() == 19);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));

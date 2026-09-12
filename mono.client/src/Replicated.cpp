@@ -417,7 +417,10 @@ namespace client {
 						// replicated character in one piece. Optional like
 						// the two above it, and for the same reason: most
 						// rows are not a limb of anything.
-						store.Get<engine::scene::CharacterLimb>(entity)
+						store.Get<engine::scene::CharacterLimb>(entity),
+						store.Get<engine::scene::AutoMeshLOD>(entity),
+						store.Get<engine::scene::CustomMeshLOD>(entity),
+						store.Get<engine::scene::RenderEffects>(entity)
 					);
 					if (!(instance.Transparency >= 1.0f)) {
 						drawList->Instances.push_back(instance);

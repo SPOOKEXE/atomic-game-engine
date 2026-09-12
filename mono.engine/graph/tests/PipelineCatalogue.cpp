@@ -157,12 +157,13 @@ TEST_CASE("every output can land somewhere", "[graph][catalogue]") {
 
 TEST_CASE("the default PBR frame's kinds and material ports are registered", "[graph][catalogue]") {
 	Kinds();
-	for (const char *name :
-		 {"world",			"shadow",	  "camera",			  "last-frame",		"entities",
-		  "cull-frustum",	"order-draw", "upload-instances", "mirror-capture", "portal-capture",
-		  "portal-tonemap", "gbuffer",	  "depth-linearise",  "ssao",			"deferred-lighting",
-		  "shader-lenses",	"tonemap",	  "portal-overlay",	  "mirror-overlay", "transparent",
-		  "present",		"overlay",	  "interface",		  "output-image"}) {
+	for (const char *name : {"world",		  "shadow",			 "camera",		   "last-frame",
+							 "entities",	  "cull-frustum",	 "order-draw",	   "upload-instances",
+							 "select-lod",	  "mirror-capture",	 "portal-capture", "portal-tonemap",
+							 "gbuffer",		  "depth-linearise", "ssao",		   "deferred-lighting",
+							 "shader-lenses", "tonemap",		 "portal-overlay", "mirror-overlay",
+							 "transparent",	  "present",		 "overlay",		   "interface",
+							 "output-image"}) {
 		INFO("kind: " << name);
 		CHECK(NodeCatalogue::Find(Name(name)) != nullptr);
 	}
@@ -204,6 +205,7 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("cull-frustum", 2, 1);
 	ports("order-draw", 2, 1);
 	ports("upload-instances", 1, 1);
+	ports("select-lod", 2, 1);
 	ports("mirror-capture", 5, 1);
 	ports("surface-capture", 4, 3);
 	ports("portal-capture", 3, 2);
@@ -263,6 +265,24 @@ TEST_CASE("execution and parameter metadata live on the catalogue row", "[graph]
 	CHECK(mode->Widget == ParameterWidget::Select);
 	CHECK(mode->Default == "target");
 	CHECK(mode->Options == std::vector<std::string>{"target", "groups"});
+}
+
+TEST_CASE("antialiasing choices are executable graph nodes", "[graph][catalogue][antialiasing]") {
+	Kinds();
+
+	for (const char *name : {"fxaa", "taa", "smaa-edges", "smaa-blend", "smaa-resolve"}) {
+		const NodeKindSpec *spec = NodeCatalogue::Find(Name(name));
+		INFO("kind: " << name);
+		REQUIRE(spec != nullptr);
+		CHECK(spec->BuiltInBackend);
+		CHECK(spec->Queue == engine::graph::ExecutionQueue::Graphics);
+		CHECK_FALSE(spec->DefaultShader.empty());
+	}
+
+	const NodeKindSpec *taa = NodeCatalogue::Find(Name("taa"));
+	REQUIRE(taa != nullptr);
+	CHECK(taa->Inputs.size() == 3);
+	CHECK(taa->Outputs.size() == 2);
 }
 
 TEST_CASE("parameter schemas have unique names and valid defaults", "[graph][catalogue]") {

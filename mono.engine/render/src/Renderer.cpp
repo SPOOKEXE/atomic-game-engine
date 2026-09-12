@@ -795,6 +795,7 @@ namespace engine::render {
 		// above is what makes releasing any of this safe.
 		State->ReleaseShaderVariants();
 		State->ReleaseAllGraphState();
+		State->ReleaseLod();
 		State->ReleaseOcclusion();
 		State->ReleaseParticlePool();
 		State->ReleaseEnvironments();

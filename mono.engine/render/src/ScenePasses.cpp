@@ -239,7 +239,8 @@ namespace engine::render {
 		const bool uploadSkinOffsets = haveInstances && target.SkinOffsetsDirty;
 		const bool uploadJointWords = haveInstances && target.JointWordsDirty;
 		const bool uploadOcclusion = haveInstances && State->OcclusionFrame.Active;
-		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords && !uploadOcclusion &&
+		const bool uploadLod = haveInstances && !State->LodFrame.Selections.empty();
+		if (!uploadInstances && !uploadSkinOffsets && !uploadJointWords && !uploadOcclusion && !uploadLod &&
 			!uploadOverlay && particleCount == 0 && ribbonCount == 0) {
 			uploadsRecorded = true;
 			return true;
@@ -314,6 +315,42 @@ namespace engine::render {
 				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 				uploadedBytes += destination.size;
 			}
+		}
+
+		if (uploadLod) {
+			const LodPlan &lod = State->LodFrame;
+			const LodTransferLayout layout = TransferLayoutOf(lod);
+			const auto stage = [&](SDL_GPUBuffer *buffer, uint32_t sourceOffset, uint32_t bytes) {
+				const SDL_GPUTransferBufferLocation source{State->Lod.Transfer, sourceOffset};
+				const SDL_GPUBufferRegion destination{buffer, 0, bytes};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				uploadedBytes += bytes;
+			};
+			stage(
+				State->Lod.Selections,
+				layout.Selections,
+				static_cast<uint32_t>(lod.Selections.size() * sizeof(GpuLodSelection))
+			);
+			stage(
+				State->Lod.Instances,
+				layout.Instances,
+				static_cast<uint32_t>(lod.Instances.size() * sizeof(GpuInstance))
+			);
+			stage(
+				State->Lod.Indices,
+				layout.Indices,
+				static_cast<uint32_t>(lod.Indices.size() * sizeof(uint32_t))
+			);
+			stage(
+				State->Lod.SkinOffsets,
+				layout.SkinOffsets,
+				static_cast<uint32_t>(lod.SkinOffsets.size() * sizeof(uint32_t))
+			);
+			stage(
+				State->Lod.Arguments,
+				layout.Arguments,
+				static_cast<uint32_t>(lod.Commands.size() * sizeof(SDL_GPUIndexedIndirectDrawCommand))
+			);
 		}
 
 		if (uploadSkinOffsets) {
@@ -944,6 +981,10 @@ namespace engine::render {
 			if (desc == nullptr || desc->Kind == graph::ResourceKind::Buffer ||
 				desc->Kind == graph::ResourceKind::Camera || desc->Kind == graph::ResourceKind::Entities) {
 				continue;
+			}
+			if (State->SurfaceSampler == nullptr && !State->EnsureSurfaceSampler()) {
+				bindings.clear();
+				return bindings;
 			}
 			Impl::NamedTexture source = GraphTexture(resource, context, false);
 			bindings.push_back(

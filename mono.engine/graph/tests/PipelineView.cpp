@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 24);
+	REQUIRE(layout.Nodes.size() == 25);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -119,15 +119,16 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("world") == 0);
 	CHECK(columnOf("shadow") == 1);
 	CHECK(columnOf("camera") == 0);
-	CHECK(columnOf("surface-capture") == 6);
-	CHECK(columnOf("gbuffer") == 7);
+	CHECK(columnOf("select-lod") == 6);
+	CHECK(columnOf("surface-capture") == 7);
+	CHECK(columnOf("gbuffer") == 8);
 	CHECK(columnOf("present") == 0);
 	CHECK(columnOf("interface") == 1);
 	CHECK(columnOf("overlay") == 2);
 	CHECK(columnOf("output-image") == 3);
 
-	// Wide enough for the widest band, which is the per-view one at eighteen.
-	CHECK(layout.Columns == 18);
+	// Wide enough for the widest band, which is the per-view one at nineteen.
+	CHECK(layout.Columns == 19);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -250,7 +251,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(surfaceCapture, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 23);
+	CHECK(after.Nodes.size() == 24);
 	CHECK_FALSE(Joined(graph, after, "surface-capture", "mirror-overlay", "mirror-views"));
 }
 
