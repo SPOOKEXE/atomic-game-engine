@@ -66,6 +66,24 @@ namespace engine::assets {
 			return face[0] * face[0] + face[1] * face[1] + face[2] * face[2];
 		}
 
+		float SurfaceCost(
+			const std::vector<MeshVertex> &vertices,
+			const std::vector<Triangle> &triangles,
+			const std::vector<uint32_t> &owners,
+			uint32_t owner,
+			uint32_t left,
+			uint32_t right
+		) {
+			float area = 0.0f;
+			for (size_t index = 0; index < triangles.size(); index++) {
+				if (owners[index] == owner &&
+					(HasVertex(triangles[index], left) || HasVertex(triangles[index], right))) {
+					area += std::sqrt(FaceAreaSquared(vertices, triangles[index]));
+				}
+			}
+			return area;
+		}
+
 		bool PreservesWinding(
 			const std::vector<MeshVertex> &vertices,
 			const std::vector<Triangle> &triangles,
@@ -120,7 +138,8 @@ namespace engine::assets {
 			std::vector<Triangle> &triangles,
 			const std::vector<uint32_t> &owners,
 			uint32_t submesh,
-			size_t target
+			size_t target,
+			MeshReduction reduction
 		) {
 			float bestCost = std::numeric_limits<float>::infinity();
 			uint32_t bestLeft = 0;
@@ -181,7 +200,13 @@ namespace engine::assets {
 						continue;
 					}
 
-					const float cost = EdgeCost(vertices[left], vertices[right]);
+					float cost = EdgeCost(vertices[left], vertices[right]);
+					if (reduction == MeshReduction::SurfaceArea) {
+						// The product ranks a collapse by its geometric error and by
+						// the expected projected area it disturbs. A large face must
+						// not disappear merely because one of its edges is short.
+						cost *= SurfaceCost(vertices, triangles, owners, submesh, left, right);
+					}
 					if (!found || cost < bestCost ||
 						(cost == bestCost && std::pair(left, right) < std::pair(bestLeft, bestRight))) {
 						bestCost = cost;
@@ -207,110 +232,122 @@ namespace engine::assets {
 		}
 	}
 
-	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out) {
-		if (&source == &out || !source.IsValid() || !(ratio > 0.0f) || ratio > 1.0f) {
-			return false;
-		}
-		std::vector<Triangle> triangles;
-		std::vector<uint32_t> owners;
-		triangles.reserve(source.Indices.size() / 3 + source.Submeshes.size());
-		owners.reserve(triangles.capacity());
-		uint32_t runCount = 1;
-		if (source.Submeshes.empty()) {
-			for (size_t index = 0; index < source.Indices.size(); index += 3) {
-				triangles.push_back(
-					{source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]}
-				);
-				owners.push_back(0);
+	namespace {
+		bool Reduce(const MeshData &source, float ratio, MeshData &out, MeshReduction reduction) {
+			if (&source == &out || !source.IsValid() || !(ratio > 0.0f) || ratio > 1.0f) {
+				return false;
 			}
-		} else {
-			std::vector<bool> covered(source.Indices.size() / 3, false);
-			for (size_t submesh = 0; submesh < source.Submeshes.size(); submesh++) {
-				const Submesh &run = source.Submeshes[submesh];
-				for (size_t index = run.FirstIndex; index < run.FirstIndex + run.IndexCount; index += 3) {
+			std::vector<Triangle> triangles;
+			std::vector<uint32_t> owners;
+			triangles.reserve(source.Indices.size() / 3 + source.Submeshes.size());
+			owners.reserve(triangles.capacity());
+			uint32_t runCount = 1;
+			if (source.Submeshes.empty()) {
+				for (size_t index = 0; index < source.Indices.size(); index += 3) {
 					triangles.push_back(
 						{source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]}
 					);
-					owners.push_back(static_cast<uint32_t>(submesh));
-					covered[index / 3] = true;
+					owners.push_back(0);
 				}
+			} else {
+				std::vector<bool> covered(source.Indices.size() / 3, false);
+				for (size_t submesh = 0; submesh < source.Submeshes.size(); submesh++) {
+					const Submesh &run = source.Submeshes[submesh];
+					for (size_t index = run.FirstIndex; index < run.FirstIndex + run.IndexCount; index += 3) {
+						triangles.push_back(
+							{source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]}
+						);
+						owners.push_back(static_cast<uint32_t>(submesh));
+						covered[index / 3] = true;
+					}
+				}
+				runCount = static_cast<uint32_t>(source.Submeshes.size());
+				const uint32_t uncoveredOwner = runCount;
+				for (size_t triangle = 0; triangle < covered.size(); triangle++) {
+					if (covered[triangle]) continue;
+					const size_t index = triangle * 3;
+					triangles.push_back(
+						{source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]}
+					);
+					owners.push_back(uncoveredOwner);
+				}
+				if (std::find(owners.begin(), owners.end(), uncoveredOwner) != owners.end()) runCount++;
 			}
-			runCount = static_cast<uint32_t>(source.Submeshes.size());
-			const uint32_t uncoveredOwner = runCount;
-			for (size_t triangle = 0; triangle < covered.size(); triangle++) {
-				if (covered[triangle]) continue;
-				const size_t index = triangle * 3;
-				triangles.push_back(
-					{source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]}
-				);
-				owners.push_back(uncoveredOwner);
-			}
-			if (std::find(owners.begin(), owners.end(), uncoveredOwner) != owners.end()) runCount++;
-		}
 
-		std::vector<MeshVertex> vertices = source.Vertices;
-		for (uint32_t submesh = 0; submesh < runCount; submesh++) {
-			size_t count = 0;
-			for (size_t index = 0; index < triangles.size(); index++) {
-				count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
-			}
-			if (count == 0) continue;
-			const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
-			while (count > target && CollapseOne(vertices, triangles, owners, submesh, target)) {
-				count = 0;
+			std::vector<MeshVertex> vertices = source.Vertices;
+			for (uint32_t submesh = 0; submesh < runCount; submesh++) {
+				size_t count = 0;
 				for (size_t index = 0; index < triangles.size(); index++) {
 					count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
 				}
-			}
-			if (count > target) {
-				// A boundary, skin or material seam can leave no legal collapse. Keep
-				// the largest faces so the fallback removes the least visible area.
-				std::vector<size_t> ranked;
-				for (size_t index = 0; index < triangles.size(); index++) {
-					if (owners[index] == submesh && !Degenerate(triangles[index])) ranked.push_back(index);
-				}
-				std::stable_sort(ranked.begin(), ranked.end(), [&](size_t left, size_t right) {
-					return FaceAreaSquared(vertices, triangles[left]) >
-						   FaceAreaSquared(vertices, triangles[right]);
-				});
-				for (size_t index = target; index < ranked.size(); index++)
-					triangles[ranked[index]][2] = triangles[ranked[index]][0];
-			}
-		}
-
-		MeshData reduced;
-		reduced.JointCount = source.JointCount;
-		std::vector<uint32_t> remap(vertices.size(), std::numeric_limits<uint32_t>::max());
-		for (uint32_t submesh = 0; submesh < runCount; submesh++) {
-			Submesh run;
-			if (submesh < source.Submeshes.size()) {
-				run = source.Submeshes[submesh];
-			}
-			run.FirstIndex = static_cast<uint32_t>(reduced.Indices.size());
-			for (size_t index = 0; index < triangles.size(); index++) {
-				if (owners[index] != submesh || Degenerate(triangles[index])) {
-					continue;
-				}
-				for (const uint32_t old : triangles[index]) {
-					if (remap[old] == std::numeric_limits<uint32_t>::max()) {
-						remap[old] = static_cast<uint32_t>(reduced.Vertices.size());
-						reduced.Vertices.push_back(vertices[old]);
+				if (count == 0) continue;
+				const size_t target = std::max<size_t>(1, static_cast<size_t>(std::floor(count * ratio)));
+				while (count > target &&
+					   CollapseOne(vertices, triangles, owners, submesh, target, reduction)) {
+					count = 0;
+					for (size_t index = 0; index < triangles.size(); index++) {
+						count += owners[index] == submesh && !Degenerate(triangles[index]) ? 1u : 0u;
 					}
-					reduced.Indices.push_back(remap[old]);
+				}
+				if (count > target) {
+					// A boundary, skin or material seam can leave no legal collapse. Keep
+					// the largest faces so the fallback removes the least visible area.
+					std::vector<size_t> ranked;
+					for (size_t index = 0; index < triangles.size(); index++) {
+						if (owners[index] == submesh && !Degenerate(triangles[index]))
+							ranked.push_back(index);
+					}
+					std::stable_sort(ranked.begin(), ranked.end(), [&](size_t left, size_t right) {
+						return FaceAreaSquared(vertices, triangles[left]) >
+							   FaceAreaSquared(vertices, triangles[right]);
+					});
+					for (size_t index = target; index < ranked.size(); index++)
+						triangles[ranked[index]][2] = triangles[ranked[index]][0];
 				}
 			}
-			run.IndexCount = static_cast<uint32_t>(reduced.Indices.size()) - run.FirstIndex;
-			if (submesh < source.Submeshes.size()) {
-				reduced.Submeshes.push_back(std::move(run));
-			}
-		}
 
-		if (!reduced.IsValid()) {
-			return false;
+			MeshData reduced;
+			reduced.JointCount = source.JointCount;
+			std::vector<uint32_t> remap(vertices.size(), std::numeric_limits<uint32_t>::max());
+			for (uint32_t submesh = 0; submesh < runCount; submesh++) {
+				Submesh run;
+				if (submesh < source.Submeshes.size()) {
+					run = source.Submeshes[submesh];
+				}
+				run.FirstIndex = static_cast<uint32_t>(reduced.Indices.size());
+				for (size_t index = 0; index < triangles.size(); index++) {
+					if (owners[index] != submesh || Degenerate(triangles[index])) {
+						continue;
+					}
+					for (const uint32_t old : triangles[index]) {
+						if (remap[old] == std::numeric_limits<uint32_t>::max()) {
+							remap[old] = static_cast<uint32_t>(reduced.Vertices.size());
+							reduced.Vertices.push_back(vertices[old]);
+						}
+						reduced.Indices.push_back(remap[old]);
+					}
+				}
+				run.IndexCount = static_cast<uint32_t>(reduced.Indices.size()) - run.FirstIndex;
+				if (submesh < source.Submeshes.size()) {
+					reduced.Submeshes.push_back(std::move(run));
+				}
+			}
+
+			if (!reduced.IsValid()) {
+				return false;
+			}
+			reduced.ComputeBounds();
+			out = std::move(reduced);
+			return true;
 		}
-		reduced.ComputeBounds();
-		out = std::move(reduced);
-		return true;
+	}
+
+	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out) {
+		return Reduce(source, ratio, out, MeshReduction::Decimation);
+	}
+
+	bool ReduceMesh(const MeshData &source, float ratio, MeshData &out) {
+		return Reduce(source, ratio, out, MeshReduction::SurfaceArea);
 	}
 
 	bool BuildMeshLodLadder(const MeshData &source, std::span<const float> ratios, std::span<MeshData> out) {
@@ -319,6 +356,20 @@ namespace engine::assets {
 		}
 		for (size_t level = 0; level < ratios.size(); level++) {
 			if (!DecimateMesh(source, ratios[level], out[level])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool BuildReducedMeshLodLadder(
+		const MeshData &source, std::span<const float> ratios, std::span<MeshData> out
+	) {
+		if (ratios.size() != out.size()) {
+			return false;
+		}
+		for (size_t level = 0; level < ratios.size(); level++) {
+			if (!ReduceMesh(source, ratios[level], out[level])) {
 				return false;
 			}
 		}

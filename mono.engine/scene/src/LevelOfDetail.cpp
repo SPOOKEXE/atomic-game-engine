@@ -7,12 +7,14 @@
 #include <string>
 
 namespace engine::scene {
-	core::Name AutoMeshLodArtifactName(const core::Name &base, uint8_t level, float ratio) {
+	core::Name
+	AutoMeshLodArtifactName(const core::Name &base, uint8_t level, float ratio, LodStrategy strategy) {
 		if (!base.IsValid() || level == 0 || !(ratio > 0.0f) || ratio > 1.0f) {
 			return {};
 		}
+		const char *const method = strategy == LodStrategy::Reduced ? ".reduced" : "";
 		return core::Name(
-			std::string(base.Text()) + ".auto-lod-" + std::to_string(level) + "-" +
+			std::string(base.Text()) + ".auto-lod-" + std::to_string(level) + method + "-" +
 			std::to_string(std::bit_cast<uint32_t>(ratio))
 		);
 	}
@@ -36,7 +38,9 @@ namespace engine::scene {
 					? core::Name{}
 					: (automatic->Meshes[slot].IsValid()
 						   ? automatic->Meshes[slot]
-						   : AutoMeshLodArtifactName(base, level, automatic->Ratios[slot]));
+						   : AutoMeshLodArtifactName(
+								 base, level, automatic->Ratios[slot], automatic->Strategy
+							 ));
 			const bool automaticAvailable = automaticMesh.IsValid();
 			if (!customAvailable && !automaticAvailable) {
 				break;

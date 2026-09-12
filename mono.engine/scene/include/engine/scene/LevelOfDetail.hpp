@@ -198,7 +198,9 @@ namespace engine::scene {
 	// The ratio is part of the name because two parts may ask for different
 	// ladders over the same base mesh. A published artifact is then shared by
 	// every part with the same inputs.
-	core::Name AutoMeshLodArtifactName(const core::Name &base, uint8_t level, float ratio);
+	core::Name AutoMeshLodArtifactName(
+		const core::Name &base, uint8_t level, float ratio, LodStrategy strategy = LodStrategy::Decimated
+	);
 
 	// Which level a part should be drawn at.
 	//

@@ -24,7 +24,8 @@ namespace engine::render {
 			universe.Enter(id, [&](ecs::Store &store) {
 				store.Each<const scene::Visual, const scene::AutoMeshLOD>(
 					[&](ecs::Entity, const scene::Visual &visual, const scene::AutoMeshLOD &automatic) {
-						if (visual.Mesh != base || automatic.Strategy != scene::LodStrategy::Decimated)
+						if (visual.Mesh != base || (automatic.Strategy != scene::LodStrategy::Decimated &&
+													automatic.Strategy != scene::LodStrategy::Reduced))
 							return;
 
 						const uint8_t levels =
@@ -35,8 +36,9 @@ namespace engine::render {
 						for (size_t slot = 0; slot < scene::LOD_LEVELS - 1; slot++) {
 							const uint8_t level = static_cast<uint8_t>(slot + 1);
 							if (level >= levels || automatic.Meshes[slot].IsValid()) continue;
-							const core::Name name =
-								scene::AutoMeshLodArtifactName(base, level, automatic.Ratios[slot]);
+							const core::Name name = scene::AutoMeshLodArtifactName(
+								base, level, automatic.Ratios[slot], automatic.Strategy
+							);
 							if (!name.IsValid()) continue;
 							ratios[count] = automatic.Ratios[slot];
 							names[count++] = name;
@@ -44,11 +46,12 @@ namespace engine::render {
 						if (count == 0) return;
 
 						std::array<assets::MeshData, scene::LOD_LEVELS - 1> ladder;
-						if (!assets::BuildMeshLodLadder(
-								mesh,
-								std::span<const float>(ratios.data(), count),
-								std::span<assets::MeshData>(ladder.data(), count)
-							)) {
+						const std::span<const float> wanted(ratios.data(), count);
+						const std::span<assets::MeshData> outputs(ladder.data(), count);
+						const bool built = automatic.Strategy == scene::LodStrategy::Reduced
+											   ? assets::BuildReducedMeshLodLadder(mesh, wanted, outputs)
+											   : assets::BuildMeshLodLadder(mesh, wanted, outputs);
+						if (!built) {
 							ENGINE_WARN("render: {} cannot build its automatic mesh LOD ladder", base.Text());
 							return;
 						}

@@ -49,3 +49,34 @@ TEST_CASE("automatic mesh LOD planning builds and shares real artifacts", "[rend
 		CHECK(artifact.Worlds.size() == 2);
 	}
 }
+
+TEST_CASE(
+	"reduced automatic mesh LOD planning publishes separate area-weighted artifacts",
+	"[render][lod][automatic]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	world::Universe universe;
+	const world::WorldId world = universe.Create({.Name = core::Name("lod.reduced")});
+	const core::Name base("lod.reduced-base");
+	scene::AutoMeshLOD policy;
+	policy.Strategy = scene::LodStrategy::Reduced;
+	policy.Levels = 2;
+	policy.Ratios[0] = 0.5f;
+
+	universe.Enter(world, [&](ecs::Store &store) {
+		const ecs::Entity part = store.Create();
+		scene::Visual visual;
+		visual.Mesh = base;
+		store.Set(part, visual);
+		store.Set(part, policy);
+	});
+
+	const assets::MeshData source = assets::MakeBuiltin(assets::BuiltinMesh::Cube);
+	const std::array worlds{world};
+	const auto artifacts = render::BuildAutomaticMeshLods(universe, worlds, base, source);
+	REQUIRE(artifacts.size() == 1);
+	CHECK(artifacts[0].Name == scene::AutoMeshLodArtifactName(base, 1, 0.5f, scene::LodStrategy::Reduced));
+	CHECK(artifacts[0].Data.IsValid());
+	CHECK(artifacts[0].Data.Indices.size() < source.Indices.size());
+}
