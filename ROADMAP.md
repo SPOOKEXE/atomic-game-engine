@@ -74,16 +74,16 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 
 [ai data factory stuff]
 - [_] add EditableImage:ToBuffer() (RGBA)
-- [_] Checkpoint/restore — Seed-based only, not full ECS+physics+RNG state serialization
-- [_] Spatial queries — Basic entity queries exist, but no spatial reasoning ("objects left of X", "path blocked?")
-- [_] Shadow caster/receiver relationships — CastShadow property exists but no query API for "who shadows whom"
-- [_] Light probe/environment map query — Internal only, no external API
-- [_] Audio event/capture APIs — Audio-event grounding, spatial audio queries, waveform/spectrogram capture
-- [_] Skeleton/animation introspection — Keypoint data, animation state machine, character controller state
-- [_] Export/import standards — USD/glTF/COCO/YOLO/GeoJSON export, standard format import
-- [_] Durable evidence archive — MemoryStore persistence, versioned WorldRecord serialization
-- [_] Full checkpoint/restore — Arbitrary checkpoint save/restore beyond seed-based replay
-- [_] Recursion depth control — For mirrors/portals (currently fixed limit)
+- [_] Checkpoint/restore - Seed-based only, not full ECS+physics+RNG state serialization
+- [_] Spatial queries - Basic entity queries exist, but no spatial reasoning ("objects left of X", "path blocked?")
+- [_] Shadow caster/receiver relationships - CastShadow property exists but no query API for "who shadows whom"
+- [_] Light probe/environment map query - Internal only, no external API
+- [_] Audio event/capture APIs - Audio-event grounding, spatial audio queries, waveform/spectrogram capture
+- [_] Skeleton/animation introspection - Keypoint data, animation state machine, character controller state
+- [_] Export/import standards - USD/glTF/COCO/YOLO/GeoJSON export, standard format import
+- [_] Durable evidence archive - MemoryStore persistence, versioned WorldRecord serialization
+- [_] Full checkpoint/restore - Arbitrary checkpoint save/restore beyond seed-based replay
+- [_] Recursion depth control - For mirrors/portals (currently fixed limit)
 - [_] Audio APIs
 - [_] Skeleton/animation introspection
 - [_] Export/import standards
