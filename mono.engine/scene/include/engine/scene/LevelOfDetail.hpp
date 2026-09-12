@@ -178,12 +178,27 @@ namespace engine::scene {
 
 	// Resolves the two authored components into the flat ladder consumed by a
 	// draw snapshot. Custom meshes win per level; nil custom entries use the
-	// corresponding automatic artifact.
+	// corresponding automatic artifact. A blank automatic name derives the
+	// artifact the content intake generated for `base` and its ratio.
 	//
+	// @param base      The source mesh the automatic artifacts came from.
 	// @param automatic Generated artifacts and generation options, or null.
 	// @param custom    Authored per-level overrides, or null.
 	// @return A contiguous ladder. Strategy is `None` when no coarse level exists.
+	LevelOfDetail
+	ResolveMeshLOD(const core::Name &base, const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
+
+	// Resolves explicitly named artifacts when a caller has no base mesh.
+	//
+	// Kept for tools and tests that operate on stored component values alone.
 	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
+
+	// The deterministic name of an automatic mesh artifact.
+	//
+	// The ratio is part of the name because two parts may ask for different
+	// ladders over the same base mesh. A published artifact is then shared by
+	// every part with the same inputs.
+	core::Name AutoMeshLodArtifactName(const core::Name &base, uint8_t level, float ratio);
 
 	// Which level a part should be drawn at.
 	//

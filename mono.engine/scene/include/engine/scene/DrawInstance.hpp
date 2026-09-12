@@ -334,7 +334,7 @@ namespace engine::scene {
 		const CustomMeshLOD *custom,
 		const RenderEffects *effects
 	) {
-		const LevelOfDetail lod = ResolveMeshLOD(automatic, custom);
+		const LevelOfDetail lod = ResolveMeshLOD(instance.Mesh, automatic, custom);
 		if (lod.Strategy != LodStrategy::None) {
 			for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 				instance.LodMeshes[level] = lod.Meshes[level];

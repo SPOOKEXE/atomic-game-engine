@@ -92,6 +92,34 @@ TEST_CASE("automatic mesh lod works without custom overrides", "[scene][lod]") {
 	CHECK_FALSE(resolved.Meshes[2].IsValid());
 }
 
+TEST_CASE("blank automatic levels resolve to their generated artifact names", "[scene][lod]") {
+	AutoMeshLOD automatic;
+	automatic.Ratios[0] = 0.5f;
+	automatic.Ratios[1] = 0.25f;
+	automatic.Levels = 3;
+	CustomMeshLOD custom;
+	custom.Meshes[1] = Name("lod_test.authored-quarter");
+	custom.Ratios[1] = 0.2f;
+	custom.Levels = 3;
+
+	const LevelOfDetail resolved = ResolveMeshLOD(BaseMesh(), &automatic, &custom);
+	CHECK(resolved.Levels == 3);
+	CHECK(resolved.Meshes[0] == engine::scene::AutoMeshLodArtifactName(BaseMesh(), 1, 0.5f));
+	CHECK(resolved.Meshes[1] == custom.Meshes[1]);
+}
+
+TEST_CASE("custom-only lod does not dereference an absent automatic component", "[scene][lod]") {
+	CustomMeshLOD custom;
+	custom.Meshes[0] = Name("lod_test.custom-only");
+	custom.Ratios[0] = 0.5f;
+	custom.Levels = 2;
+
+	const LevelOfDetail resolved = ResolveMeshLOD(nullptr, &custom);
+	CHECK(resolved.Strategy == LodStrategy::Authored);
+	CHECK(resolved.Levels == 2);
+	CHECK(resolved.Meshes[0] == custom.Meshes[0]);
+}
+
 TEST_CASE("a part that fills the screen stays at level zero", "[scene][lod]") {
 	const MeshCatalogue catalogue = CatalogueWith(10000);
 	const LevelOfDetail ladder = DecimatedLadder();

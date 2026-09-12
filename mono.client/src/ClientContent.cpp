@@ -7,6 +7,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/render/Animation.hpp>
+#include <engine/render/AutomaticMeshLod.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -319,6 +320,14 @@ namespace client {
 				if (uploaded) {
 					VisualResourcesChanged = true;
 					ContentMeshes++;
+
+					const auto generated =
+						engine::render::BuildAutomaticMeshLods(*Universe_, worlds, name, mesh);
+					if (engine::render::PublishAutomaticMeshLods(
+							*Universe_, Renderer, content.Owners, generated
+						) > 0) {
+						VisualResourcesChanged = true;
+					}
 
 					// **The sheets its submeshes name, recorded where they are
 					// readable.** They live inside the mesh file, so this is the

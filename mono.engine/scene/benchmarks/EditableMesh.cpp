@@ -8,6 +8,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -100,24 +101,25 @@ namespace {
 
 	struct DirtyTerrainWorld {
 		engine::ecs::Store Scene{"bench.editablemesh.dirty-terrain"};
-		engine::ecs::Entity TerrainMesh;
+		std::array<engine::ecs::Entity, 8> TerrainMeshes;
 	};
 
 	DirtyTerrainWorld &TerrainWorld() {
 		static DirtyTerrainWorld world;
 		static const bool ready = [&] {
 			engine::scene::RegisterSceneComponents();
-			world.TerrainMesh = world.Scene.Create();
-
 			const engine::scene::EditableMeshGeometry &geometry = TerrainChunkGeometry();
-			engine::scene::EditableMesh mesh;
-			mesh.Positions = geometry.Positions;
-			mesh.Normals = geometry.Normals;
-			mesh.UVs = geometry.UVs;
-			mesh.Colours = geometry.Colours;
-			mesh.Alphas = geometry.Alphas;
-			mesh.Indices = geometry.Indices;
-			world.Scene.Set(world.TerrainMesh, std::move(mesh));
+			for (engine::ecs::Entity &entity : world.TerrainMeshes) {
+				entity = world.Scene.Create();
+				engine::scene::EditableMesh mesh;
+				mesh.Positions = geometry.Positions;
+				mesh.Normals = geometry.Normals;
+				mesh.UVs = geometry.UVs;
+				mesh.Colours = geometry.Colours;
+				mesh.Alphas = geometry.Alphas;
+				mesh.Indices = geometry.Indices;
+				world.Scene.Set(entity, std::move(mesh));
+			}
 
 			engine::scene::CollisionShapes shapes;
 			for (uint32_t index = 0; index < 2'000; index++) {
@@ -169,7 +171,11 @@ BENCH_PER_ITEM("editable mesh terrain-sized prepare", 250) {
 BENCH_PER_ITEM("editable collision terrain refresh beside resident shapes", 250) {
 	DirtyTerrainWorld &world = TerrainWorld();
 	for (uint32_t iteration = 0; iteration < 250; iteration++) {
-		world.Scene.GetMutable<engine::scene::EditableMesh>(world.TerrainMesh)->Revision++;
+		// Eight chunks clear RefreshEditableMeshCollision's two-item dispatch floor,
+		// so the measured path includes its Jobs::For worker split.
+		for (const engine::ecs::Entity entity : world.TerrainMeshes) {
+			world.Scene.GetMutable<engine::scene::EditableMesh>(entity)->Revision++;
+		}
 		engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(world.Scene));
 	}
 }

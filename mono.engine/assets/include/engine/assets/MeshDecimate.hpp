@@ -8,6 +8,8 @@
 
 #include <engine/assets/Mesh.hpp>
 
+#include <span>
+
 namespace engine::assets {
 
 	// Produces a coarser mesh while retaining material runs and safe skinning.
@@ -23,4 +25,17 @@ namespace engine::assets {
 	// @return `false` for an invalid input, ratio, alias, or a mesh that cannot
 	//         retain at least one triangle in every populated submesh.
 	bool DecimateMesh(const MeshData &source, float ratio, MeshData &out);
+
+	// Builds every generated mesh in one LOD ladder from the same base mesh.
+	//
+	// Each output uses the matching fraction of the source triangle count. This
+	// keeps authored levels independent: changing one ratio cannot compound into
+	// a different result at the next level.
+	//
+	// @param source Source mesh. Must be valid.
+	// @param ratios Fraction retained for each output, each in (0, 1].
+	// @param out One destination per ratio. No destination may alias `source`.
+	// @return `false` when the spans differ, an input is invalid, or a level
+	//         cannot be decimated.
+	bool BuildMeshLodLadder(const MeshData &source, std::span<const float> ratios, std::span<MeshData> out);
 }

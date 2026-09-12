@@ -430,6 +430,24 @@ TEST_CASE("rebaking one editable mesh keeps unrelated collision storage resident
 	CHECK(after->Vertices.size() == 3);
 }
 
+TEST_CASE("a missing editable triangle mesh rebakes despite a matching revision", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.missing-mesh");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	// The revision ledger describes what was baked, not what remains resident.
+	// Replacing the shape resource must therefore make the matching revision dirty.
+	store.SetResource(engine::scene::CollisionShapes{});
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	const auto *shapes = engine::scene::CollisionShapesOf(store);
+	REQUIRE(shapes != nullptr);
+	REQUIRE(shapes->FindMesh(name) != nullptr);
+	CHECK(shapes->FindMesh(name)->TriangleCount() == 2);
+}
+
 TEST_CASE("changed mesh collision is baked as one deterministic batch", "[scene][editablemesh]") {
 	engine::scene::RegisterSceneComponents();
 

@@ -276,8 +276,11 @@ namespace engine::scene {
 				dirty = true;
 				return;
 			}
-			if (WantsHull(store, fastWanted, name) &&
-				(heldShapes == nullptr || heldShapes->FindHull(name) == nullptr)) {
+			if (heldShapes == nullptr || heldShapes->FindMesh(name) == nullptr) {
+				dirty = true;
+				return;
+			}
+			if (WantsHull(store, fastWanted, name) && heldShapes->FindHull(name) == nullptr) {
 				dirty = true;
 			}
 		});

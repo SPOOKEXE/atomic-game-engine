@@ -2,10 +2,23 @@
 #include <engine/scene/MeshCatalogue.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <string>
 
 namespace engine::scene {
-	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+	core::Name AutoMeshLodArtifactName(const core::Name &base, uint8_t level, float ratio) {
+		if (!base.IsValid() || level == 0 || !(ratio > 0.0f) || ratio > 1.0f) {
+			return {};
+		}
+		return core::Name(
+			std::string(base.Text()) + ".auto-lod-" + std::to_string(level) + "-" +
+			std::to_string(std::bit_cast<uint32_t>(ratio))
+		);
+	}
+
+	LevelOfDetail
+	ResolveMeshLOD(const core::Name &base, const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
 		LevelOfDetail resolved;
 		const uint8_t automaticLevels =
 			automatic == nullptr ? 1
@@ -18,13 +31,18 @@ namespace engine::scene {
 			const uint8_t level = static_cast<uint8_t>(slot + 1);
 			const bool customAvailable =
 				custom != nullptr && level < customLevels && custom->Meshes[slot].IsValid();
-			const bool automaticAvailable =
-				automatic != nullptr && level < automaticLevels && automatic->Meshes[slot].IsValid();
+			const core::Name automaticMesh =
+				automatic == nullptr || level >= automaticLevels
+					? core::Name{}
+					: (automatic->Meshes[slot].IsValid()
+						   ? automatic->Meshes[slot]
+						   : AutoMeshLodArtifactName(base, level, automatic->Ratios[slot]));
+			const bool automaticAvailable = automaticMesh.IsValid();
 			if (!customAvailable && !automaticAvailable) {
 				break;
 			}
 
-			resolved.Meshes[slot] = customAvailable ? custom->Meshes[slot] : automatic->Meshes[slot];
+			resolved.Meshes[slot] = customAvailable ? custom->Meshes[slot] : automaticMesh;
 			const float customRatio = customAvailable ? custom->Ratios[slot] : 0.0f;
 			const float automaticRatio = automaticAvailable ? automatic->Ratios[slot] : 0.0f;
 			if (customRatio > 0.0f) {
@@ -42,12 +60,17 @@ namespace engine::scene {
 		resolved.TargetQuadArea = custom != nullptr && custom->TargetQuadArea > 0.0f
 									  ? custom->TargetQuadArea
 									  : (automatic == nullptr ? 0.0f : automatic->TargetQuadArea);
-		resolved.Strategy = customSelected ? LodStrategy::Authored
-										   : (automatic->Strategy == LodStrategy::None ||
-													  automatic->Strategy == LodStrategy::Authored
-												  ? LodStrategy::Decimated
-												  : automatic->Strategy);
+		resolved.Strategy =
+			customSelected || automatic == nullptr
+				? LodStrategy::Authored
+				: (automatic->Strategy == LodStrategy::None || automatic->Strategy == LodStrategy::Authored
+					   ? LodStrategy::Decimated
+					   : automatic->Strategy);
 		return resolved;
+	}
+
+	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+		return ResolveMeshLOD({}, automatic, custom);
 	}
 
 	namespace {
