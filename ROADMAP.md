@@ -135,6 +135,17 @@ TODO tweaks:
 
 Verification: Vulkan lens 33,864 assertions in 1 case, full world 32,727 assertions across 257 cases, focused Studio 973 assertions across 71 cases, and live Studio checks for dragging, sorting, profiler views and pause. These checks cover these roadmap items; unrelated broad pipeline, source and generated-doc failures were not part of this verification.
 
+Extra:
+- [_] update and prune old content in documentation. check each statement, update, remove or replace.
+
+- [_] Redo how we store demo projects:
+  - aworld (xml, not compressed) demo
+  - script-only demo
+Move them into mono.engine.examples.assets subfolder, mono.engine.examples.assets.worlds and mono.engine.examples.assets.scripts
+load them using a DemosLoader.cpp as the interface to read the directory, list items, etc.
+Also some demos need to be converted into aworlds instead (e.g. bladeborne demo), as we need to separate code into different spots (client, server, replicated/shared) and also we can create instances then.
+Update studio and other access points afterwards.
+
 ### v0.25
 
 - [_] /docs/future-work/character-system.md
