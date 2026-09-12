@@ -18,6 +18,16 @@ layout(set = 0, binding = 0) readonly buffer Selections {
 	Selection rows[];
 } selections;
 
+struct Cluster {
+	vec4 CentreArea;
+	vec4 ExtentLevel;
+	uvec4 Draw;
+};
+
+layout(set = 0, binding = 1) readonly buffer Clusters {
+	Cluster rows[];
+} clusters;
+
 // SDL_GPUIndexedIndirectDrawCommand is five words. Word one is num_instances.
 layout(set = 1, binding = 0) buffer Arguments {
 	uint words[];
@@ -56,11 +66,12 @@ float ProjectedArea(Selection selection) {
 
 void main() {
 	uint index = gl_GlobalInvocationID.x;
-	if (index >= view.Counts.x) {
+	if (index >= view.Counts.y) {
 		return;
 	}
 
-	Selection selection = selections.rows[index];
+	Cluster cluster = clusters.rows[index];
+	Selection selection = selections.rows[cluster.Draw.x];
 	uint levelCount = clamp(uint(selection.ExtentLevels.w), 1u, 4u);
 	float area = ProjectedArea(selection);
 	uint chosen = 0u;
@@ -75,11 +86,11 @@ void main() {
 		}
 	}
 
-	for (uint level = 0u; level < levelCount; ++level) {
-		uint first = selection.FirstArguments[level];
-		uint count = selection.ArgumentCounts[level];
-		for (uint command = 0u; command < count; ++command) {
-			arguments.words[(first + command) * 5u + 1u] = level == chosen ? 1u : 0u;
-		}
-	}
+	Selection clusterSelection = selection;
+	clusterSelection.CentreTarget.xyz = cluster.CentreArea.xyz;
+	clusterSelection.ExtentLevels.xyz = cluster.ExtentLevel.xyz;
+	float clusterArea = ProjectedArea(clusterSelection);
+	bool useful = clusterArea > 0.0 && !isnan(clusterArea) &&
+		clusterArea / float(cluster.Draw.w) >= selection.CentreTarget.w;
+	arguments.words[cluster.Draw.z * 5u + 1u] = chosen == cluster.Draw.y && useful ? 1u : 0u;
 }

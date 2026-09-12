@@ -2434,6 +2434,11 @@ namespace engine::render {
 							lod.Selections.size() * sizeof(GpuLodSelection)
 						);
 						std::memcpy(
+							bytes + layout.Clusters,
+							lod.Clusters.data(),
+							lod.Clusters.size() * sizeof(GpuLodCluster)
+						);
+						std::memcpy(
 							bytes + layout.Instances,
 							lod.Instances.data(),
 							lod.Instances.size() * sizeof(GpuInstance)

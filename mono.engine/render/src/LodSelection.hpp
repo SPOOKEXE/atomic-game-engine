@@ -40,6 +40,17 @@ namespace engine::render {
 
 	static_assert(sizeof(GpuLodSelection) == 80);
 
+	// std430 cluster page consumed by lod-select.comp. Centre and extent are
+	// already transformed into world space because the selection pass has no
+	// access to the graphics instance buffer.
+	struct alignas(16) GpuLodCluster {
+		glm::vec4 CentreArea;
+		glm::vec4 ExtentLevel;
+		glm::uvec4 Draw;
+	};
+
+	static_assert(sizeof(GpuLodCluster) == 48);
+
 	struct LodDrawLevel {
 		const MeshEntry *Mesh = nullptr;
 		uint32_t FirstArgument = 0;
@@ -61,6 +72,7 @@ namespace engine::render {
 
 	struct LodPlan {
 		std::vector<GpuLodSelection> Selections;
+		std::vector<GpuLodCluster> Clusters;
 		std::vector<GpuInstance> Instances;
 		std::vector<uint32_t> Indices;
 		std::vector<uint32_t> SkinOffsets;
@@ -69,6 +81,7 @@ namespace engine::render {
 
 		void Clear() {
 			Selections.clear();
+			Clusters.clear();
 			Instances.clear();
 			Indices.clear();
 			SkinOffsets.clear();
@@ -79,6 +92,7 @@ namespace engine::render {
 
 	struct LodTransferLayout {
 		uint32_t Selections = 0;
+		uint32_t Clusters = 0;
 		uint32_t Instances = 0;
 		uint32_t Indices = 0;
 		uint32_t SkinOffsets = 0;
@@ -88,7 +102,9 @@ namespace engine::render {
 
 	inline LodTransferLayout TransferLayoutOf(const LodPlan &plan) {
 		LodTransferLayout layout;
-		layout.Instances = static_cast<uint32_t>(plan.Selections.size() * sizeof(GpuLodSelection));
+		layout.Clusters = static_cast<uint32_t>(plan.Selections.size() * sizeof(GpuLodSelection));
+		layout.Instances =
+			layout.Clusters + static_cast<uint32_t>(plan.Clusters.size() * sizeof(GpuLodCluster));
 		layout.Indices =
 			layout.Instances + static_cast<uint32_t>(plan.Instances.size() * sizeof(GpuInstance));
 		layout.SkinOffsets = layout.Indices + static_cast<uint32_t>(plan.Indices.size() * sizeof(uint32_t));
@@ -120,6 +136,7 @@ namespace engine::render {
 		draw.LevelCount = static_cast<uint8_t>(levelCount);
 
 		GpuLodSelection selection{};
+		const uint32_t selectionIndex = static_cast<uint32_t>(plan.Selections.size());
 		selection.CentreTarget = glm::vec4{
 			instance.Frame.Position.X,
 			instance.Frame.Position.Y,
@@ -146,10 +163,13 @@ namespace engine::render {
 					: std::numeric_limits<uint32_t>::max()
 			);
 
-			const auto addCommand = [&](const MeshRange &range, uint32_t material) {
+			const auto addCommand = [&](const MeshRange &range,
+										uint32_t material,
+										const MeshCluster *cluster) {
 				if (range.IndexCount == 0) {
 					return;
 				}
+				const uint32_t argument = static_cast<uint32_t>(plan.Commands.size());
 				plan.Commands.push_back(
 					SDL_GPUIndexedIndirectDrawCommand{
 						range.IndexCount,
@@ -160,18 +180,40 @@ namespace engine::render {
 					}
 				);
 				draw.Clusters[level].push_back({range, material});
+				const glm::vec3 meshExtent{mesh.Extent.X, mesh.Extent.Y, mesh.Extent.Z};
+				const glm::vec3 scale = half / glm::max(meshExtent, glm::vec3(1e-6f));
+				const glm::vec3 localCentre =
+					cluster == nullptr ? glm::vec3(mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z)
+									   : glm::vec3(cluster->Centre.X, cluster->Centre.Y, cluster->Centre.Z);
+				const glm::vec3 localExtent =
+					cluster == nullptr ? meshExtent
+									   : glm::vec3(cluster->Extent.X, cluster->Extent.Y, cluster->Extent.Z);
+				const glm::vec3 centre =
+					glm::vec3(
+						instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z
+					) +
+					rotation *
+						((localCentre - glm::vec3(mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z)) * scale);
+				const glm::vec3 clusterExtent = glm::abs(rotation[0]) * (localExtent.x * std::abs(scale.x)) +
+												glm::abs(rotation[1]) * (localExtent.y * std::abs(scale.y)) +
+												glm::abs(rotation[2]) * (localExtent.z * std::abs(scale.z));
+				plan.Clusters.push_back({
+					{centre, cluster == nullptr ? 0.0f : cluster->SurfaceArea},
+					{clusterExtent, static_cast<float>(level)},
+					{selectionIndex, level, argument, std::max(range.IndexCount / 3u, 1u)},
+				});
 			};
 			if (mesh.Clusters.empty()) {
 				if (mesh.Runs.empty()) {
-					addCommand(mesh.Whole, std::numeric_limits<uint32_t>::max());
+					addCommand(mesh.Whole, std::numeric_limits<uint32_t>::max(), nullptr);
 				} else {
 					for (uint32_t material = 0; material < mesh.Runs.size(); material++) {
-						addCommand(mesh.Runs[material], material);
+						addCommand(mesh.Runs[material], material, nullptr);
 					}
 				}
 			} else {
 				for (const MeshCluster &cluster : mesh.Clusters) {
-					addCommand(cluster.Range, cluster.Material);
+					addCommand(cluster.Range, cluster.Material, &cluster);
 				}
 			}
 

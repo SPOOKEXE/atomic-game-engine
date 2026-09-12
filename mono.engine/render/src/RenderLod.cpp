@@ -55,6 +55,15 @@ namespace engine::render {
 			SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
 			"selection"
 		);
+		ready = buffer(
+					Lod.Clusters,
+					Lod.ClusterCapacity,
+					static_cast<uint32_t>(LodFrame.Clusters.size()),
+					sizeof(GpuLodCluster),
+					SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
+					"cluster"
+				) &&
+				ready;
 		const uint32_t oldInstanceCapacity = Lod.InstanceCapacity;
 		ready = buffer(
 					Lod.Instances,
@@ -131,19 +140,22 @@ namespace engine::render {
 			return false;
 		}
 		SDL_BindGPUComputePipeline(pass, Lod.Select);
-		SDL_GPUBuffer *const reads[] = {Lod.Selections};
-		SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 1);
+		SDL_GPUBuffer *const reads[] = {Lod.Selections, Lod.Clusters};
+		SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 2);
 		struct Uniforms {
 			glm::mat4 ViewProjection;
 			glm::uvec4 Counts;
 			glm::vec4 Viewport;
 		} uniforms{
 			viewProjection,
-			{static_cast<uint32_t>(LodFrame.Selections.size()), 0u, 0u, 0u},
+			{static_cast<uint32_t>(LodFrame.Selections.size()),
+			 static_cast<uint32_t>(LodFrame.Clusters.size()),
+			 0u,
+			 0u},
 			{static_cast<float>(width), static_cast<float>(height), 0.0f, 0.0f},
 		};
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
-		SDL_DispatchGPUCompute(pass, (uniforms.Counts.x + 63u) / 64u, 1, 1);
+		SDL_DispatchGPUCompute(pass, (uniforms.Counts.y + 63u) / 64u, 1, 1);
 		SDL_EndGPUComputePass(pass);
 		Lod.Ready = true;
 		return true;
@@ -151,7 +163,12 @@ namespace engine::render {
 
 	void Renderer::Impl::ReleaseLod() {
 		for (SDL_GPUBuffer **buffer :
-			 {&Lod.Selections, &Lod.Instances, &Lod.Indices, &Lod.SkinOffsets, &Lod.Arguments}) {
+			 {&Lod.Selections,
+			  &Lod.Clusters,
+			  &Lod.Instances,
+			  &Lod.Indices,
+			  &Lod.SkinOffsets,
+			  &Lod.Arguments}) {
 			if (*buffer != nullptr) {
 				gpu::ReleaseBuffer(Device, *buffer);
 				*buffer = nullptr;

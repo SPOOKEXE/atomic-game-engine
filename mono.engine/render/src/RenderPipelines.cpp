@@ -1059,7 +1059,7 @@ namespace engine::render {
 		// world, and the validation path refuses `culling = "occlusion"`
 		// documents with the failure named rather than the client dying here.
 		if (Caps.HasCompute) {
-			Lod.Select = LoadComputePipeline("lod-select.comp", 0, 1, 0, 1, 64, 1);
+			Lod.Select = LoadComputePipeline("lod-select.comp", 0, 2, 0, 1, 64, 1);
 			Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
 			Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
 			Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);

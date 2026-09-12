@@ -939,12 +939,14 @@ namespace engine::render {
 		struct LodState {
 			SDL_GPUComputePipeline *Select = nullptr;
 			SDL_GPUBuffer *Selections = nullptr;
+			SDL_GPUBuffer *Clusters = nullptr;
 			SDL_GPUBuffer *Instances = nullptr;
 			SDL_GPUBuffer *Indices = nullptr;
 			SDL_GPUBuffer *SkinOffsets = nullptr;
 			SDL_GPUBuffer *Arguments = nullptr;
 			SDL_GPUTransferBuffer *Transfer = nullptr;
 			uint32_t SelectionCapacity = 0;
+			uint32_t ClusterCapacity = 0;
 			uint32_t InstanceCapacity = 0;
 			uint32_t ArgumentCapacity = 0;
 			uint32_t TransferCapacity = 0;

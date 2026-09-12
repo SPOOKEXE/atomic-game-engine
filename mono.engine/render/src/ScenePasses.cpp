@@ -332,6 +332,11 @@ namespace engine::render {
 				static_cast<uint32_t>(lod.Selections.size() * sizeof(GpuLodSelection))
 			);
 			stage(
+				State->Lod.Clusters,
+				layout.Clusters,
+				static_cast<uint32_t>(lod.Clusters.size() * sizeof(GpuLodCluster))
+			);
+			stage(
 				State->Lod.Instances,
 				layout.Instances,
 				static_cast<uint32_t>(lod.Instances.size() * sizeof(GpuInstance))

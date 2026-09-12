@@ -107,11 +107,40 @@ TEST_CASE("material runs become consecutive indirect arguments per level", "[ren
 
 	const auto layout = TransferLayoutOf(plan);
 	CHECK(layout.Selections == 0);
-	CHECK(layout.Instances == sizeof(engine::render::GpuLodSelection));
+	CHECK(layout.Clusters == sizeof(engine::render::GpuLodSelection));
+	CHECK(layout.Instances == layout.Clusters + 3 * sizeof(engine::render::GpuLodCluster));
 	CHECK(layout.Indices == layout.Instances + 2 * sizeof(engine::render::GpuInstance));
 	CHECK(layout.SkinOffsets == layout.Indices + 2 * sizeof(uint32_t));
 	CHECK(layout.Arguments == layout.SkinOffsets + 2 * sizeof(uint32_t));
 	CHECK(layout.Bytes == layout.Arguments + 3 * sizeof(SDL_GPUIndexedIndirectDrawCommand));
+}
+
+TEST_CASE("cluster metadata is std430 aligned and transformed before device selection", "[render][lod]") {
+	DrawInstance instance;
+	instance.Frame = CFrame(Vector3(10.0f, 0.0f, 0.0f));
+	instance.HalfExtent = Vector3(4.0f, 2.0f, 2.0f);
+	instance.LodStrategyMode = LodStrategy::Reduced;
+	instance.LodLevels = 2;
+	MeshEntry detailed = Mesh(Vector3(2.0f, 0.0f, 0.0f), Vector3(2.0f, 1.0f, 1.0f), 2, 0);
+	detailed.Clusters = {{{0, 6, 0}, Vector3(3.0f, 0.0f, 0.0f), Vector3(0.5f, 1.0f, 1.0f), 6.0f, 0}};
+	MeshEntry coarse = Mesh(Vector3(2.0f, 0.0f, 0.0f), Vector3(2.0f, 1.0f, 1.0f), 1, 6);
+	coarse.Clusters = {{{6, 3, 6}, Vector3(2.0f, 0.0f, 0.0f), Vector3(2.0f, 1.0f, 1.0f), 4.0f, 0}};
+	const std::array<const MeshEntry *, 2> levels = {&detailed, &coarse};
+
+	LodPlan plan;
+	REQUIRE(AppendAuthoredLod(plan, 1, instance, levels));
+	REQUIRE(plan.Clusters.size() == 2);
+	CHECK(sizeof(engine::render::GpuLodCluster) == 48);
+	CHECK(plan.Clusters[0].CentreArea.x == Approx(12.0f));
+	CHECK(plan.Clusters[0].ExtentLevel.x == Approx(1.0f));
+	CHECK(plan.Clusters[0].CentreArea.w == Approx(6.0f));
+	CHECK(plan.Clusters[0].Draw.x == 0);
+	CHECK(plan.Clusters[0].Draw.z == 0);
+	CHECK(plan.Clusters[1].Draw.z == 1);
+	// The host only seeds disabled indirect commands. Compute owns instance
+	// counts, so a selected page never makes a GPU-to-CPU trip.
+	CHECK(plan.Commands[0].num_instances == 0);
+	CHECK(plan.Commands[1].num_instances == 0);
 }
 
 TEST_CASE("resident mesh clusters become the GPU-selected indirect page set", "[render][lod]") {
