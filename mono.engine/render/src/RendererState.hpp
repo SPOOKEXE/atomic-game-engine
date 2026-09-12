@@ -59,6 +59,8 @@
 #include <vector>
 
 namespace engine::render {
+	// Which half of the two-pass transparent-layer capture a draw records.
+	enum class TransparentLayerPhase : uint8_t { None, Nearest, Colour };
 
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
@@ -379,6 +381,14 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *TransparentLayerColourPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedTransparentLayerPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *PackedTransparentLayerColourPipeline = nullptr;
+		// Effect variants share the mesh peeler's D32 choice, then replay colour
+		// with each effect's ordinary alpha or additive blend rule.
+		SDL_GPUGraphicsPipeline *ParticleLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *ParticleLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AdditiveParticleLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *RibbonLayerPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *RibbonLayerColourPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *AdditiveRibbonLayerColourPipeline = nullptr;
 		bool EnsureTransparentLayer();
 		SDL_GPUGraphicsPipeline *InterfaceLayerPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *InterfaceLayerColourPipeline = nullptr;
@@ -1260,7 +1270,8 @@ namespace engine::render {
 			const core::CFrame &eye,
 			std::span<const effects::RibbonRun> runs,
 			uint64_t &triangles,
-			WorldColourTarget target = WorldColourTarget::Display
+			WorldColourTarget target = WorldColourTarget::Display,
+			TransparentLayerPhase layer = TransparentLayerPhase::None
 		);
 
 		// This frame's groups, and the batch order they were built from.
@@ -1498,7 +1509,8 @@ namespace engine::render {
 			uint64_t &triangles,
 			uint32_t &particlesDrawn,
 			uint32_t &culled,
-			WorldColourTarget target = WorldColourTarget::Display
+			WorldColourTarget target = WorldColourTarget::Display,
+			TransparentLayerPhase layer = TransparentLayerPhase::None
 		);
 
 		// Chosen once so pipelines and depth textures use one supported format.

@@ -1094,10 +1094,20 @@ namespace engine::render {
 
 	bool Renderer::Impl::EnsureTransparentLayer() {
 		if (TransparentLayerPipeline && TransparentLayerColourPipeline && PackedTransparentLayerPipeline &&
-			PackedTransparentLayerColourPipeline)
+			PackedTransparentLayerColourPipeline && ParticleLayerPipeline && ParticleLayerColourPipeline &&
+			AdditiveParticleLayerColourPipeline && RibbonLayerPipeline && RibbonLayerColourPipeline &&
+			AdditiveRibbonLayerColourPipeline)
 			return true;
 		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 12, 4);
-		if (!fragment) return false;
+		auto *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		auto *particleFragment = LoadShader("particle-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
+		auto *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		auto *ribbonFragment = LoadShader("ribbon-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
+		if (!fragment || !particleVertex || !particleFragment || !ribbonVertex || !ribbonFragment) {
+			for (auto *shader : {fragment, particleVertex, particleFragment, ribbonVertex, ribbonFragment})
+				if (shader) SDL_ReleaseGPUShader(Device, shader);
+			return false;
+		}
 		auto info = VariantOpaqueInfo;
 		info.vertex_shader = OpaqueVertexShader;
 		info.fragment_shader = fragment;
@@ -1123,18 +1133,126 @@ namespace engine::render {
 		info.depth_stencil_state.enable_depth_test = true;
 		info.depth_stencil_state.enable_depth_write = true;
 		auto *packedNearest = packedColour ? SDL_CreateGPUGraphicsPipeline(Device, &info) : nullptr;
-		SDL_ReleaseGPUShader(Device, fragment);
-		if (!nearest || !colour || !packedNearest || !packedColour) {
-			if (nearest) SDL_ReleaseGPUGraphicsPipeline(Device, nearest);
-			if (colour) SDL_ReleaseGPUGraphicsPipeline(Device, colour);
-			if (packedNearest) SDL_ReleaseGPUGraphicsPipeline(Device, packedNearest);
-			if (packedColour) SDL_ReleaseGPUGraphicsPipeline(Device, packedColour);
+
+		const SDL_GPUVertexBufferDescription particleBuffers[] = {
+			{0, sizeof(effects::ParticleInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
+		};
+		const SDL_GPUVertexAttribute particleAttributes[] = {
+			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::ParticleInstance, Position)},
+			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Size)},
+			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, RotationAndCell)},
+			{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Colour)},
+			{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Slot)},
+		};
+		SDL_GPUColorTargetDescription particleTarget{};
+		particleTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		SDL_GPUGraphicsPipelineCreateInfo particle{};
+		particle.vertex_shader = particleVertex;
+		particle.fragment_shader = particleFragment;
+		particle.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+		particle.vertex_input_state.vertex_buffer_descriptions = particleBuffers;
+		particle.vertex_input_state.num_vertex_buffers = 1;
+		particle.vertex_input_state.vertex_attributes = particleAttributes;
+		particle.vertex_input_state.num_vertex_attributes = 5;
+		particle.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		particle.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		particle.depth_stencil_state.enable_depth_test = true;
+		particle.depth_stencil_state.enable_depth_write = true;
+		particle.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+		particle.target_info.color_target_descriptions = &particleTarget;
+		particle.target_info.num_color_targets = 1;
+		particle.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		particle.target_info.has_depth_stencil_target = true;
+		auto *particleNearest = packedNearest ? SDL_CreateGPUGraphicsPipeline(Device, &particle) : nullptr;
+
+		particleTarget.blend_state.enable_blend = true;
+		particleTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		particleTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		particleTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		particleTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		particleTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		particleTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		particle.target_info.has_depth_stencil_target = false;
+		particle.depth_stencil_state.enable_depth_test = false;
+		particle.depth_stencil_state.enable_depth_write = false;
+		auto *particleColour = particleNearest ? SDL_CreateGPUGraphicsPipeline(Device, &particle) : nullptr;
+		particleTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		particleTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		auto *particleAdditive = particleColour ? SDL_CreateGPUGraphicsPipeline(Device, &particle) : nullptr;
+
+		const SDL_GPUVertexBufferDescription ribbonBuffers[] = {
+			{0, sizeof(effects::RibbonVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
+		};
+		const SDL_GPUVertexAttribute ribbonAttributes[] = {
+			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::RibbonVertex, Position)},
+			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(effects::RibbonVertex, Coordinate)},
+			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::RibbonVertex, Colour)},
+		};
+		SDL_GPUColorTargetDescription ribbonTarget{};
+		ribbonTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+		SDL_GPUGraphicsPipelineCreateInfo ribbon{};
+		ribbon.vertex_shader = ribbonVertex;
+		ribbon.fragment_shader = ribbonFragment;
+		ribbon.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+		ribbon.vertex_input_state.vertex_buffer_descriptions = ribbonBuffers;
+		ribbon.vertex_input_state.num_vertex_buffers = 1;
+		ribbon.vertex_input_state.vertex_attributes = ribbonAttributes;
+		ribbon.vertex_input_state.num_vertex_attributes = 3;
+		ribbon.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		ribbon.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		ribbon.depth_stencil_state.enable_depth_test = true;
+		ribbon.depth_stencil_state.enable_depth_write = true;
+		ribbon.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+		ribbon.target_info.color_target_descriptions = &ribbonTarget;
+		ribbon.target_info.num_color_targets = 1;
+		ribbon.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		ribbon.target_info.has_depth_stencil_target = true;
+		auto *ribbonNearest = particleAdditive ? SDL_CreateGPUGraphicsPipeline(Device, &ribbon) : nullptr;
+
+		ribbonTarget.blend_state.enable_blend = true;
+		ribbonTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		ribbonTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		ribbonTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		ribbonTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		ribbonTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		ribbonTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		ribbon.target_info.has_depth_stencil_target = false;
+		ribbon.depth_stencil_state.enable_depth_test = false;
+		ribbon.depth_stencil_state.enable_depth_write = false;
+		auto *ribbonColour = ribbonNearest ? SDL_CreateGPUGraphicsPipeline(Device, &ribbon) : nullptr;
+		ribbonTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		ribbonTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		auto *ribbonAdditive = ribbonColour ? SDL_CreateGPUGraphicsPipeline(Device, &ribbon) : nullptr;
+
+		for (auto *shader : {fragment, particleVertex, particleFragment, ribbonVertex, ribbonFragment})
+			SDL_ReleaseGPUShader(Device, shader);
+		const std::array built{
+			nearest,
+			colour,
+			packedNearest,
+			packedColour,
+			particleNearest,
+			particleColour,
+			particleAdditive,
+			ribbonNearest,
+			ribbonColour,
+			ribbonAdditive
+		};
+		if (std::any_of(built.begin(), built.end(), [](auto *pipeline) { return pipeline == nullptr; })) {
+			for (auto *pipeline : built)
+				if (pipeline) SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
 			return false;
 		}
 		TransparentLayerPipeline = nearest;
 		TransparentLayerColourPipeline = colour;
 		PackedTransparentLayerPipeline = packedNearest;
 		PackedTransparentLayerColourPipeline = packedColour;
+		ParticleLayerPipeline = particleNearest;
+		ParticleLayerColourPipeline = particleColour;
+		AdditiveParticleLayerColourPipeline = particleAdditive;
+		RibbonLayerPipeline = ribbonNearest;
+		RibbonLayerColourPipeline = ribbonColour;
+		AdditiveRibbonLayerColourPipeline = ribbonAdditive;
 		return true;
 	}
 

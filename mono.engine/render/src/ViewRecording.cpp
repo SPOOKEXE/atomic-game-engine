@@ -1420,14 +1420,16 @@ namespace engine::render {
 		ribbonCount = 0;
 		{
 			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
+			const bool effectsVisible =
+				graphEnabled(core::Name("transparent")) || graphEnabled(core::Name("transparent-layer"));
 			const Impl::ParticlePreparation prepared =
-				graphEnabled(core::Name("transparent")) ? State->PrepareParticles(source, command, timingSlot)
-														: Impl::ParticlePreparation{};
+				effectsVisible ? State->PrepareParticles(source, command, timingSlot)
+							   : Impl::ParticlePreparation{};
 			particleCount = prepared.Count;
 			result.ComputeDispatches += prepared.Dispatches;
 			result.Particles = particleCount;
 
-			ribbonCount = graphEnabled(core::Name("transparent")) ? State->PrepareRibbons(ribbonVertices) : 0;
+			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;
 			result.RibbonVertices = ribbonCount;
 		}
 

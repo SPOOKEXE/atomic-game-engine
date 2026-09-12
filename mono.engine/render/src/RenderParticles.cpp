@@ -1421,12 +1421,18 @@ namespace engine::render {
 		uint64_t &triangles,
 		uint32_t &particlesDrawn,
 		uint32_t &culled,
-		WorldColourTarget target
+		WorldColourTarget target,
+		TransparentLayerPhase layer
 	) {
-		const auto selectedPipeline =
-			target == WorldColourTarget::Hdr ? HdrParticlePipeline : ParticlePipeline;
-		const auto selectedAdditive =
+		auto *selectedPipeline = target == WorldColourTarget::Hdr ? HdrParticlePipeline : ParticlePipeline;
+		auto *selectedAdditive =
 			target == WorldColourTarget::Hdr ? HdrAdditiveParticlePipeline : AdditiveParticlePipeline;
+		if (layer == TransparentLayerPhase::Nearest) {
+			selectedPipeline = selectedAdditive = ParticleLayerPipeline;
+		} else if (layer == TransparentLayerPhase::Colour) {
+			selectedPipeline = ParticleLayerColourPipeline;
+			selectedAdditive = AdditiveParticleLayerColourPipeline;
+		}
 		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
@@ -1710,11 +1716,18 @@ namespace engine::render {
 		const core::CFrame &eye,
 		std::span<const effects::RibbonRun> runs,
 		uint64_t &triangles,
-		WorldColourTarget target
+		WorldColourTarget target,
+		TransparentLayerPhase layer
 	) {
-		const auto selectedPipeline = target == WorldColourTarget::Hdr ? HdrRibbonPipeline : RibbonPipeline;
-		const auto selectedAdditive =
+		auto *selectedPipeline = target == WorldColourTarget::Hdr ? HdrRibbonPipeline : RibbonPipeline;
+		auto *selectedAdditive =
 			target == WorldColourTarget::Hdr ? HdrAdditiveRibbonPipeline : AdditiveRibbonPipeline;
+		if (layer == TransparentLayerPhase::Nearest) {
+			selectedPipeline = selectedAdditive = RibbonLayerPipeline;
+		} else if (layer == TransparentLayerPhase::Colour) {
+			selectedPipeline = RibbonLayerColourPipeline;
+			selectedAdditive = AdditiveRibbonLayerColourPipeline;
+		}
 		if (selectedPipeline == nullptr || runs.empty()) {
 			return 0;
 		}

@@ -8,6 +8,7 @@
 // see its own comment for why they are not a node of their own.
 
 #include "Tessellation.hpp"
+#include "TransparentLayerWork.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -616,6 +617,13 @@ namespace engine::render {
 		frameNodes.Set(core::Name("transparent-layer"), [this](const graph::RunContext &context) {
 			const auto *node = Pipeline->Graph.Find(context.Node);
 			if (!node || PlainTransparent != TransparentCount) return false;
+			TransparentLayerWork work{
+				.Meshes = PlainTransparent,
+				.Particles = ParticleCount,
+				.Ribbons = RibbonCount,
+			};
+			const bool particleLayers = work.Particles != 0;
+			const bool ribbonLayers = work.Ribbons != 0;
 			const uint32_t first = SceneCount + static_cast<uint32_t>(OpaqueCount);
 			for (uint32_t slot = first; slot < first + PlainTransparent; ++slot)
 				if (slot >= State->SlotShader.size() || State->SlotShader[slot].IsValid()) return false;
@@ -652,6 +660,7 @@ namespace engine::render {
 				return false;
 			auto *interface = DrawInterface ? Request.GameInterfaceHook : nullptr;
 			const size_t interfaceBatches = interface ? interface->WorldBatchCount() : 0;
+			work.InterfaceBatches = static_cast<uint32_t>(interfaceBatches);
 			const auto scratchColour = texture(true, "interface-colour"),
 					   scratchZ = texture(true, "interface-z");
 			if (interfaceBatches &&
@@ -678,17 +687,36 @@ namespace engine::render {
 			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 			depthTarget.cycle = true;
-			for (int phase = 0; phase < (PlainTransparent || interfaceBatches ? 2 : 1); ++phase) {
+			for (uint32_t phase = 0; phase < work.PhaseCount(); ++phase) {
 				targets[0].cycle = phase == 0;
 				auto *pass = SDL_BeginGPURenderPass(Command, targets, 1, phase == 0 ? &depthTarget : nullptr);
 				if (!pass) return false;
 				++recordedPasses;
+				const auto eye = Request.CameraFrame.Position;
+				const auto forward = Request.CameraFrame.LookVector();
+				const std::array<glm::vec4, 3> capture{
+					glm::vec4{eye.X, eye.Y, eye.Z, 0},
+					glm::vec4{forward.X, forward.Y, forward.Z, 0},
+					glm::vec4{phase == 0 && previous.IsValid() ? 1.f : 0.f, phase == 1 ? 1.f : 0.f, 0, 0}
+				};
+				const SDL_GPUTextureSamplerBinding bounds[] = {
+					{opaque.Texture, State->OverlaySampler},
+					{phase == 1			  ? z.Texture
+					 : previous.IsValid() ? previous.Texture
+										  : opaque.Texture,
+					 State->OverlaySampler}
+				};
+				const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
+				const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
+				SDL_SetGPUViewport(pass, &viewport);
+				SDL_SetGPUScissor(pass, &scissor);
 				if (PlainTransparent) {
 					State->BindPipeline(
 						pass,
 						phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
 						Impl::PipelineFamily::Other
 					);
+					SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
 					State->BindInstanceBuffers(pass);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -696,26 +724,7 @@ namespace engine::render {
 					SDL_PushGPUVertexUniformData(Command, 0, &frame, sizeof(frame));
 					SDL_PushGPUFragmentUniformData(Command, 1, &SceneLights, sizeof(SceneLights));
 					SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
-					const auto eye = Request.CameraFrame.Position;
-					const auto forward = Request.CameraFrame.LookVector();
-					const std::array<glm::vec4, 3> capture{
-						glm::vec4{eye.X, eye.Y, eye.Z, 0},
-						glm::vec4{forward.X, forward.Y, forward.Z, 0},
-						glm::vec4{phase == 0 && previous.IsValid() ? 1.f : 0.f, phase == 1 ? 1.f : 0.f, 0, 0}
-					};
 					SDL_PushGPUFragmentUniformData(Command, 3, capture.data(), sizeof(capture));
-					const SDL_GPUTextureSamplerBinding bounds[] = {
-						{opaque.Texture, State->OverlaySampler},
-						{phase == 1			  ? z.Texture
-						 : previous.IsValid() ? previous.Texture
-											  : opaque.Texture,
-						 State->OverlaySampler}
-					};
-					SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
-					const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
-					const SDL_Rect scissor{0, 0, int(colour.Width), int(colour.Height)};
-					SDL_SetGPUViewport(pass, &viewport);
-					SDL_SetGPUScissor(pass, &scissor);
 					auto lighting = LightingAt(eye, 0, 0);
 					if (!shadow.IsValid()) lighting.Flags.x = 0;
 					Result.DrawCalls += State->DrawSlots(
@@ -731,6 +740,40 @@ namespace engine::render {
 						0,
 						Result.Triangles
 					);
+				}
+				if (particleLayers || ribbonLayers) {
+					auto *layerPipeline =
+						particleLayers
+							? (phase == 0 ? State->ParticleLayerPipeline : State->ParticleLayerColourPipeline)
+							: (phase == 0 ? State->RibbonLayerPipeline : State->RibbonLayerColourPipeline);
+					State->BindPipeline(pass, layerPipeline, Impl::PipelineFamily::Other);
+					SDL_BindGPUFragmentSamplers(pass, 1, bounds, 2);
+					SDL_PushGPUFragmentUniformData(Command, 1, capture.data(), sizeof(capture));
+					const auto layer =
+						phase == 0 ? TransparentLayerPhase::Nearest : TransparentLayerPhase::Colour;
+					if (particleLayers)
+						Result.DrawCalls += State->DrawParticles(
+							Command,
+							pass,
+							Matrices.ViewProjection,
+							Request.CameraFrame,
+							Result.Triangles,
+							Result.ParticlesDrawn,
+							Result.Culled,
+							WorldColourTarget::Hdr,
+							layer
+						);
+					if (ribbonLayers)
+						Result.DrawCalls += State->DrawRibbons(
+							Command,
+							pass,
+							Matrices.ViewProjection,
+							Request.CameraFrame,
+							Request.RibbonRuns,
+							Result.Triangles,
+							WorldColourTarget::Hdr,
+							layer
+						);
 				}
 				SDL_EndGPURenderPass(pass);
 				// Capture one authored batch at the same projection, then peel its

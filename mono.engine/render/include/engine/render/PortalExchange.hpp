@@ -86,6 +86,7 @@ namespace engine::render {
 		// is canonically zero and no receiving surface is hidden.
 		PortalImageProjection Projection = PortalImageProjection::Seam;
 		// OpaqueLighting with two ordered transparent layers and an overflow probe.
+		// The layers include complete-world surfaces, particles, ribbons and spatial UI.
 		// All four captures count against PixelBudget. Recursive requests require a
 		// bounded capture tree; renewal remains unavailable for this profile.
 		bool OrderedLayers = false;

@@ -1,4 +1,5 @@
 #include "PortalCaptureEntrance.hpp"
+#include "TransparentLayerWork.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -3500,7 +3501,7 @@ namespace engine::render {
 			view.OverrideLighting = true;
 
 			FrameOverlayHook *interface = nullptr;
-			if (job.Request.Scope == PortalImageScope::CompleteWorld) {
+			if (CaptureIncludesWorldEffects(job.Request.Scope, job.Request.OrderedLayers)) {
 				view.Surfaces = state.Frames[index].Surfaces;
 				view.Portals = job.Portals;
 				view.Particles = state.WorldFrame.Particles.Batches;
