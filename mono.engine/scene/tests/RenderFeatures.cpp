@@ -33,6 +33,24 @@ TEST_CASE("disable wins over enable in one authored feature layer", "[scene][ren
 	CHECK(ApplyRenderFeaturePolicy(UINT32_MAX, {}) == ALL_RENDER_FEATURES);
 }
 
+TEST_CASE("world camera and instance precedence matches the GPU material policy", "[scene][render]") {
+	const uint32_t emission = FeatureBit(RenderFeature::Emission);
+	const uint32_t displacement = FeatureBit(RenderFeature::Displacement);
+	const uint32_t shadows = FeatureBit(RenderFeature::Shadows);
+
+	const ResolvedRenderFeatures resolved = ResolveRenderFeatures(
+		emission | displacement | shadows,
+		{.Disable = emission},
+		{.Enable = emission, .Disable = displacement},
+		{.Enable = displacement, .Disable = emission},
+		emission | displacement | shadows
+	);
+
+	// Camera restores emission, then the instance suppresses it. The instance
+	// also restores displacement after the camera suppressed it.
+	CHECK(resolved.Enabled == (displacement | shadows));
+}
+
 TEST_CASE("render effect attachments are flat snapshot data", "[scene][render]") {
 	CHECK(std::is_trivially_copyable_v<RenderFeaturePolicy>);
 	CHECK(std::is_trivially_copyable_v<RenderEffectAttachment>);

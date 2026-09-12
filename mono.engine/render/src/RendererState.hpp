@@ -189,7 +189,7 @@ namespace engine::render {
 					if (node->Kind == core::Name("sky")) {
 						return ResourceRole::SkyLit;
 					}
-					if (node->Kind == core::Name("volumetrics")) {
+					if (node->Kind == core::Name("fog")) {
 						return ResourceRole::VolumeLit;
 					}
 				}
@@ -387,7 +387,8 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
-		SDL_GPUComputePipeline *EnvironmentCompute = nullptr;
+		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
+		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
 
 		// Each owner selects one grade. Missing owners use the engine tonemap.
 		struct PostProcessVariant {
@@ -436,21 +437,34 @@ namespace engine::render {
 		bool EnsurePbr(size_t slot, const PbrDimensions &dimensions);
 		void ReleasePbr(PbrSlot &slot);
 
-		// One generated environment per world, shared by every camera that draws
-		// it. The texture is regenerated only when the selected authored provider
-		// or one of its six resident source handles changes.
+		// Graph-owned history images hold each world's sky and cloud layers. This
+		// cache only records their completed content signatures, so regeneration
+		// is skipped until an authored provider or resident source handle changes.
 		struct EnvironmentTarget {
-			uint64_t World = 0;
-			uint64_t Signature = 0;
-			uint64_t LastUsedFrame = 0;
-			SDL_GPUTexture *Texture = nullptr;
+			SDL_GPUTexture *SkyTarget = nullptr;
+			SDL_GPUTexture *CloudTarget = nullptr;
+			uint64_t SkySignature = 0;
+			uint64_t CloudSignature = 0;
+			bool SkyReady = false;
+			bool CloudReady = false;
 		};
 
 		std::vector<EnvironmentTarget> Environments;
-		SDL_GPUTexture *EnsureEnvironment(
-			uint64_t world,
+		bool RecordEnvironmentSkybox(
 			const scene::Environment &environment,
 			SDL_GPUCommandBuffer *command,
+			SDL_GPUTexture *destination,
+			uint32_t width,
+			uint32_t height,
+			uint32_t &dispatches
+		);
+		bool RecordEnvironmentClouds(
+			const scene::Environment &environment,
+			SDL_GPUCommandBuffer *command,
+			SDL_GPUTexture *source,
+			SDL_GPUTexture *destination,
+			uint32_t width,
+			uint32_t height,
 			uint32_t &dispatches
 		);
 		void ReleaseEnvironments();

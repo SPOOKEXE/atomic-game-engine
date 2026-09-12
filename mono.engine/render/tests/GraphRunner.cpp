@@ -74,6 +74,8 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "world",
 				   "mesh-residency",
 				   "shadow",
+				   "skybox-compute",
+				   "clouds-compute",
 				   "camera@0",
 				   "last-frame@0",
 				   "entities@0",
@@ -87,7 +89,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "ssao@0",
 				   "deferred-lighting@0",
 				   "sky@0",
-				   "volumetrics@0",
+				   "fog@0",
 				   "portal-overlay@0",
 				   "mirror-overlay@0",
 				   "transparent@0",
@@ -99,7 +101,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 26);
+	CHECK(runner.Submitted() == 28);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -115,6 +117,8 @@ TEST_CASE("world work is shared while view work is repeated", "[render][graph]")
 
 	CHECK(std::count(ran.begin(), ran.end(), "shadow") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "world") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "skybox-compute") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "clouds-compute") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@0") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@1") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@2") == 1);

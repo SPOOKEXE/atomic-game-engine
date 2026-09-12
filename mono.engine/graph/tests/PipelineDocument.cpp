@@ -90,12 +90,14 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	CompiledGraph fromDocument;
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
-	REQUIRE(fromDocument.Shared.size() == 3);
+	REQUIRE(fromDocument.Shared.size() == 5);
 	REQUIRE(fromDocument.PerView.size() == 19);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("mesh-residency"));
-	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
+	CHECK(graph.Find(fromDocument.Shared[2])->Name == Name("shadow"));
+	CHECK(graph.Find(fromDocument.Shared[3])->Name == Name("skybox-compute"));
+	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("clouds-compute"));
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
 	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("tonemap"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
@@ -197,13 +199,15 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	REQUIRE(compiled.Shared.size() == 3);
+	REQUIRE(compiled.Shared.size() == 5);
 	REQUIRE(compiled.PerView.size() == 19);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
 	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("mesh-residency"));
 	CHECK(graph.Find(compiled.Shared[2])->Kind == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[3])->Kind == Name("skybox-compute"));
+	CHECK(graph.Find(compiled.Shared[4])->Kind == Name("clouds-compute"));
 	CHECK(graph.Find(compiled.PerView[0])->Kind == Name("camera"));
 	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("last-frame"));
 	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("entities"));
@@ -217,7 +221,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("ssao"));
 	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("deferred-lighting"));
 	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("sky"));
-	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("volumetrics"));
+	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("fog"));
 	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("portal-overlay"));
 	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("mirror-overlay"));
 	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("transparent"));
@@ -229,6 +233,8 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	bool emissive = false;
 	bool occlusion = false;
 	bool composedImage = false;
+	bool skyHistory = false;
+	bool cloudsHistory = false;
 	for (uint32_t value = 1; value <= graph.ResourceCount(); value++) {
 		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
 		REQUIRE(resource != nullptr);
@@ -238,10 +244,20 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 			occlusion || (resource->Name == Name("occlusion") &&
 						  resource->Format == engine::graph::ResourceFormat::R8 && resource->Divisor == 2);
 		composedImage = composedImage || (resource->Name == Name("composed-image") && !resource->External);
+		skyHistory = skyHistory ||
+			(resource->Name == Name("environment-sky") &&
+			 resource->Lifetime == engine::graph::ResourceLifetime::History && resource->Width == 1024 &&
+			 resource->Height == 512);
+		cloudsHistory = cloudsHistory ||
+			(resource->Name == Name("environment-clouds") &&
+			 resource->Lifetime == engine::graph::ResourceLifetime::History && resource->Width == 1024 &&
+			 resource->Height == 512);
 	}
 	CHECK(emissive);
 	CHECK(occlusion);
 	CHECK(composedImage);
+	CHECK(skyHistory);
+	CHECK(cloudsHistory);
 
 	PipelineDocument reloaded;
 	REQUIRE(Read(Write(DefaultPbrDocument()), reloaded, offender) == PipelineDocumentStatus::Ok);
@@ -262,6 +278,12 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	Edit surfaceCapture = shadow;
 	surfaceCapture.Name = Name("surface-capture");
 	document.Record(surfaceCapture);
+	Edit clouds = shadow;
+	clouds.Name = Name("clouds-compute");
+	document.Record(clouds);
+	Edit skybox = shadow;
+	skybox.Name = Name("skybox-compute");
+	document.Record(skybox);
 
 	RenderGraph graph;
 	Name offender;
@@ -271,10 +293,42 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 
 	for (const NodeId id : compiled.Shared) {
 		CHECK(graph.Find(id)->Kind != Name("shadow"));
+		CHECK(graph.Find(id)->Kind != Name("clouds-compute"));
+		CHECK(graph.Find(id)->Kind != Name("skybox-compute"));
 	}
 	for (const NodeId id : compiled.PerView) {
 		CHECK(graph.Find(id)->Kind != Name("ssao"));
 		CHECK(graph.Find(id)->Kind != Name("surface-capture"));
+	}
+}
+
+TEST_CASE("the fog stage can be removed by routing the next compositor to its input", "[graph]") {
+	const PipelineDocument defaultDocument = DefaultPbrDocument();
+	PipelineDocument document;
+	bool skippingFog = false;
+	Name currentNode;
+	for (const Edit &source : defaultDocument.Edits()) {
+		if (source.Kind == EditKind::AddNode) {
+			currentNode = source.Name;
+			skippingFog = source.NodeKind == Name("fog");
+			if (skippingFog) continue;
+		}
+		if (skippingFog) continue;
+		Edit edit = source;
+		if (currentNode == Name("portal-overlay") && edit.Kind == EditKind::Reads &&
+			edit.Target == Name("volume-lit")) {
+			edit.Target = Name("sky-lit");
+		}
+		document.Record(std::move(edit));
+	}
+
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph compiled;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	for (const NodeId id : compiled.PerView) {
+		CHECK(graph.Find(id)->Kind != Name("fog"));
 	}
 }
 

@@ -204,7 +204,7 @@ namespace engine::graph {
 				)) {
 				return ExecutionQueue::Cpu;
 			}
-			if (Named(spec.Kind, {"hzb", "select-lod", "dispatch"})) {
+			if (Named(spec.Kind, {"hzb", "select-lod", "skybox-compute", "clouds-compute", "dispatch"})) {
 				return ExecutionQueue::Compute;
 			}
 			return ExecutionQueue::Graphics;
@@ -345,10 +345,12 @@ namespace engine::graph {
 				 "smaa-blend",
 				 "smaa-resolve",
 				 "hzb",
+				 "skybox-compute",
+				 "clouds-compute",
 				 "ssao",
 				 "deferred-lighting",
 				 "sky",
-				 "volumetrics",
+				 "fog",
 				 "shader-lenses",
 				 "tonemap",
 				 "eye-image",
@@ -668,9 +670,27 @@ namespace engine::graph {
 			 C::Draw,
 			 S::View,
 			 {{"colour", K::Colour, RGBA16, true, "The lit scene to preserve."},
-			  {"depth", K::Depth, D24, true, "So it fills only what nothing covered."}},
+			  {"depth", K::Depth, D24, true, "So it fills only what nothing covered."},
+			  {"environment", K::Texture, RGBA16, false, "The completed world environment."}},
 			 {{"colour", K::Colour, RGBA16, true, "The background."}},
 			 "The background, drawn where the depth buffer is still far."},
+
+			{"skybox-compute",
+			 "Skybox compute",
+			 C::Composite,
+			 S::World,
+			 {},
+			 {{"sky", K::Storage, RGBA16, true, "The fixed-resolution linear sky history."}},
+			 "Generates the sky and atmosphere once per changed world environment.",
+			 true},
+
+			{"clouds-compute",
+			 "Clouds compute",
+			 C::Composite,
+			 S::World,
+			 {{"sky", K::Texture, RGBA16, true, "The generated sky and atmosphere."}},
+			 {{"clouds", K::Storage, RGBA16, true, "The completed world environment history."}},
+			 "Composites clouds into the stable world environment image."},
 
 			{"particles",
 			 "Particles",
@@ -819,7 +839,7 @@ namespace engine::graph {
 			 "Compute-shader tracing of low-roughness pixels. Vendor agnostic: any "
 			 "shader-model-5 GPU can run it."},
 
-			{"volumetrics",
+			{"fog",
 			 "Volumetric fog",
 			 C::Composite,
 			 S::View,

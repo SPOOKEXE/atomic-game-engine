@@ -566,7 +566,7 @@ namespace engine::render {
 								writer->Kind == core::Name("overlay");
 			break;
 		}
-		if (desc->External && !presentationImage) {
+		if (desc->External && desc->Lifetime == graph::ResourceLifetime::External && !presentationImage) {
 			return {};
 		}
 		const SDL_GPUTextureFormat format = presentationImage ? ColourFormat() : DeviceFormat(desc->Format);

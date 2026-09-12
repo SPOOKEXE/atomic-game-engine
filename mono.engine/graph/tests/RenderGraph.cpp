@@ -129,15 +129,17 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// **Shared at both ends, per view in the middle**, which is the shape of a
-	// real frame: world input and one shadow map every view samples, nineteen passes each view
+	// real frame: world input, shadow and environment work every view samples, nineteen passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
-	CHECK(compiled.Shared.size() == 3);
+	CHECK(compiled.Shared.size() == 5);
 	CHECK(compiled.PerView.size() == 19);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(compiled.Shared[1])->Name == Name("mesh-residency"));
-	CHECK(graph.Find(compiled.Shared.back())->Name == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[2])->Name == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[3])->Name == Name("skybox-compute"));
+	CHECK(graph.Find(compiled.Shared.back())->Name == Name("clouds-compute"));
 	CHECK(graph.Find(compiled.Final.front())->Name == Name("present"));
 	CHECK(graph.Find(compiled.Final.back())->Name == Name("output-image"));
 }
@@ -182,14 +184,16 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	// editor with every viewport closed still has panels to draw. **Both ends of
 	// the frame survive a viewless one** - which is the same contract
 	// `Renderer::Render` documents for an empty span of views.
-	REQUIRE(recorder.Ran.size() == 7);
+	REQUIRE(recorder.Ran.size() == 9);
 	CHECK(recorder.Ran[0] == "world");
 	CHECK(recorder.Ran[1] == "mesh-residency");
 	CHECK(recorder.Ran[2] == "shadow");
-	CHECK(recorder.Ran[3] == "present");
-	CHECK(recorder.Ran[4] == "interface");
-	CHECK(recorder.Ran[5] == "overlay");
-	CHECK(recorder.Ran[6] == "output-image");
+	CHECK(recorder.Ran[3] == "skybox-compute");
+	CHECK(recorder.Ran[4] == "clouds-compute");
+	CHECK(recorder.Ran[5] == "present");
+	CHECK(recorder.Ran[6] == "interface");
+	CHECK(recorder.Ran[7] == "overlay");
+	CHECK(recorder.Ran[8] == "output-image");
 }
 
 TEST_CASE("one view's passes are adjacent rather than interleaved", "[graph]") {

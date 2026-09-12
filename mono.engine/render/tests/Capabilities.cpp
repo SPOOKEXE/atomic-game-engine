@@ -1,4 +1,5 @@
 #include <engine/render/Capabilities.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -87,5 +88,15 @@ namespace engine::render::tests {
 		REQUIRE(tierC.Fallthrough.size() == 2);
 		CHECK(tierC.Fallthrough[1].Tier == DefaultPipelineTier::B);
 		CHECK(tierC.Fallthrough[1].Cause.Status == CapabilityStatus::MissingIndirectDraws);
+	}
+
+	TEST_CASE("the non-compute default removes environment compute producers", "[render][capabilities]") {
+		const graph::PipelineDocument reduced = graph::DefaultPbrTierBDocument();
+		for (const graph::Edit &edit : reduced.Edits()) {
+			CHECK(edit.Name != core::Name("environment-sky"));
+			CHECK(edit.Name != core::Name("environment-clouds"));
+			CHECK(edit.NodeKind != core::Name("skybox-compute"));
+			CHECK(edit.NodeKind != core::Name("clouds-compute"));
+		}
 	}
 }

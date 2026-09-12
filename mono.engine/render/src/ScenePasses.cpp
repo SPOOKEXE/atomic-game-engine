@@ -526,6 +526,12 @@ namespace engine::render {
 		};
 		lighting.Fog = glm::vec4{worldLighting.FogStart, worldLighting.FogEnd, 0.0f, 0.0f};
 		lighting.Eye = glm::vec4{eye.X, eye.Y, eye.Z, 0.0f};
+		lighting.RenderFeatures = glm::uvec4{
+			SupportedRenderFeatures(State->Caps),
+			scene::ApplyRenderFeaturePolicy(scene::ALL_RENDER_FEATURES, worldLighting.RenderFeatures),
+			DrawCamera.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES,
+			DrawCamera.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES,
+		};
 		return lighting;
 	}
 

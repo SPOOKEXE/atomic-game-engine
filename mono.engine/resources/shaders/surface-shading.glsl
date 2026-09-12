@@ -8,6 +8,7 @@ layout(location = 5) in vec3 inWorldPosition;
 layout(location = 6) flat in uint inAppearance;
 layout(location = 7) flat in vec3 inSurfaceColour;
 layout(location = 8) flat in vec4 inEmission;
+layout(location = 9) flat in uvec2 inFeaturePolicy;
 
 layout(location = 0) out vec4 outColour;
 
@@ -104,7 +105,16 @@ layout(set = 3, binding = 0) uniform Lighting {
 
 	// x: 1 when a metalness map is present.
 	vec4 MaterialExtra;
+	uvec4 RenderFeatures;
 } lighting;
+
+const uint FEATURE_EMISSION = 1u << 2u;
+const uint FEATURE_DISPLACEMENT = 1u << 9u;
+
+uint ResolvedSurfaceFeatures() {
+	uint camera = (lighting.RenderFeatures.y | lighting.RenderFeatures.z) & ~lighting.RenderFeatures.w;
+	return ((camera | inFeaturePolicy.x) & ~inFeaturePolicy.y) & lighting.RenderFeatures.x;
+}
 
 // Captures and compositions retain linear radiance when their attachment is HDR.
 // Display attachments request the same encoding as the graph's final tonemap.
@@ -520,6 +530,7 @@ vec3 FresnelSchlick(float cosine, vec3 base) {
 }
 
 void shadeSurface() {
+	const uint features = ResolvedSurfaceFeatures();
 	vec3 normal = normalize(inNormal);
 	vec3 toLight = -normalize(lighting.Direction.xyz);
 	float lambert = max(dot(normal, toLight), 0.0);
@@ -537,7 +548,7 @@ void shadeSurface() {
 	// GIF on a tiled surface would show several frames at once.
 	vec2 localUv = fract(inTexCoord);
 	vec2 cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
-	if (lighting.Surface.z > 0.5) {
+	if ((features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {
 		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
 		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
 		float height = texture(heightMap, cellUv).r - 0.5;
@@ -560,7 +571,7 @@ void shadeSurface() {
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	roughness = clamp(roughness, 0.045, 1.0);
 	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = lighting.Material.w > 0.5
+	vec3 emissive = (features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
 		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
 		: vec3(0.0);
 	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;

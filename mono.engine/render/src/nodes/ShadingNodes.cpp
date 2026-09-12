@@ -392,6 +392,17 @@ namespace engine::render {
 		frameNodes.Set(core::Name("ssao"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
+			const uint32_t resolved = scene::ResolveRenderFeatures(
+				scene::ALL_RENDER_FEATURES,
+				recording.CurrentLighting.RenderFeatures,
+				recording.DrawCamera.RenderFeatures,
+				{},
+				SupportedRenderFeatures(State->Caps)
+			).Enabled;
+			if ((resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) == 0u) {
+				recording.ClearOcclusion();
+				return true;
+			}
 			const Impl::PbrDimensions &pbrDimensions = recording.PbrDimensions;
 			Impl::PbrSlot &pbr = *recording.Pbr;
 			PbrUniforms &uniforms = recording.Uniforms;
@@ -629,24 +640,58 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("skybox-compute"), [this](const graph::RunContext &context) {
+			// Tier B intentionally retains the sky draw but omits this compute-only
+			// producer. Its sky handler binds the procedural fallback below.
+			if (!State->Caps.HasCompute) return true;
+			if (context.Reads.size() != 0 || context.Writes.size() != 1) return false;
+			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
+			if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
+			return State->RecordEnvironmentSkybox(
+				CurrentLighting.EnvironmentState,
+				Command,
+				target.Texture,
+				target.Width,
+				target.Height,
+				Result.ComputeDispatches
+			);
+		});
+
+		frameNodes.Set(core::Name("clouds-compute"), [this](const graph::RunContext &context) {
+			if (!State->Caps.HasCompute) return true;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
+			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !target.IsValid() || source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				target.Format != source.Format || target.Width != source.Width || target.Height != source.Height) {
+				return false;
+			}
+			return State->RecordEnvironmentClouds(
+				CurrentLighting.EnvironmentState,
+				Command,
+				source.Texture,
+				target.Texture,
+				target.Width,
+				target.Height,
+				Result.ComputeDispatches
+			);
+		});
+
 		frameNodes.Set(core::Name("sky"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			Impl::PbrSlot &pbr = *recording.Pbr;
 			PbrUniforms &uniforms = recording.Uniforms;
-			SDL_GPUTexture *environment = State->EnsureEnvironment(
-				recording.Request.World,
-				recording.CurrentLighting.EnvironmentState,
-				recording.Command,
-				recording.Result.ComputeDispatches
-			);
-			uniforms.Fog.w = environment != nullptr ? 1.0f : 0.0f;
+			if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1) return false;
+			const Impl::NamedTexture environment = context.Reads.size() == 3
+				? recording.GraphTexture(context.Reads[2], context, false)
+				: Impl::NamedTexture{};
+			uniforms.Fog.w = State->Caps.HasCompute && environment.IsValid() ? 1.0f : 0.0f;
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler},
 				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
-				SDL_GPUTextureSamplerBinding{
-					environment != nullptr ? environment : State->FallbackTexture, recording.Sampler
-				},
+				SDL_GPUTextureSamplerBinding{environment.IsValid() ? environment.Texture : State->FallbackTexture,
+									 recording.Sampler},
 			};
 			recording.Fullscreen(
 				context.Name,
@@ -662,7 +707,7 @@ namespace engine::render {
 			return true;
 		});
 
-		frameNodes.Set(core::Name("volumetrics"), [this](const graph::RunContext &context) {
+		frameNodes.Set(core::Name("fog"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl::PbrSlot &pbr = *recording.Pbr;
 			const std::array bindings{

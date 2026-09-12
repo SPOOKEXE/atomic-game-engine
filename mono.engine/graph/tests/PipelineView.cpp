@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 26);
+	REQUIRE(layout.Nodes.size() == 28);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -144,7 +144,7 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	CHECK(Joined(graph, layout, "surface-capture", "mirror-overlay", "mirror-views"));
 	CHECK(Joined(graph, layout, "surface-capture", "portal-overlay", "portal-image"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
-	CHECK(Joined(graph, layout, "volumetrics", "portal-overlay", "volume-lit"));
+	CHECK(Joined(graph, layout, "fog", "portal-overlay", "volume-lit"));
 	CHECK(Joined(graph, layout, "portal-overlay", "mirror-overlay", "portaled"));
 	CHECK(Joined(graph, layout, "mirror-overlay", "transparent", "mirrored"));
 	CHECK(Joined(graph, layout, "transparent", "shader-lenses", "display"));
@@ -252,7 +252,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(surfaceCapture, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 25);
+	CHECK(after.Nodes.size() == 27);
 	CHECK_FALSE(Joined(graph, after, "surface-capture", "mirror-overlay", "mirror-views"));
 }
 

@@ -909,6 +909,17 @@ namespace engine::graph {
 			edit.External = external;
 			document.Record(std::move(edit));
 		};
+		const auto historyResource = [&document](std::string_view name) {
+			Edit edit;
+			edit.Kind = EditKind::AddResource;
+			edit.Name = core::Name(name);
+			edit.Resource = ResourceKind::Storage;
+			edit.Format = ResourceFormat::RGBA16F;
+			edit.Width = 1024;
+			edit.Height = 512;
+			edit.Lifetime = ResourceLifetime::History;
+			document.Record(std::move(edit));
+		};
 
 		const auto node = [&document](std::string_view name, NodeScope scope) {
 			Edit edit;
@@ -938,6 +949,8 @@ namespace engine::graph {
 		resource("visible-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("ordered-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("resident-meshes", ResourceKind::Buffer, ResourceFormat::R8);
+		historyResource("environment-sky");
+		historyResource("environment-clouds");
 		resource("view-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("lod-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("albedo", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -970,6 +983,13 @@ namespace engine::graph {
 		touches(EditKind::Reads, "world-entities", "entities");
 		touches(EditKind::Reads, "resident-meshes", "meshes");
 		touches(EditKind::Writes, "shadow", "shadow");
+
+		node("skybox-compute", NodeScope::World);
+		touches(EditKind::Writes, "environment-sky", "sky");
+
+		node("clouds-compute", NodeScope::World);
+		touches(EditKind::Reads, "environment-sky", "sky");
+		touches(EditKind::Writes, "environment-clouds", "clouds");
 
 		node("camera", NodeScope::View);
 		touches(EditKind::Writes, "view-camera", "camera");
@@ -1044,9 +1064,10 @@ namespace engine::graph {
 		node("sky", NodeScope::View);
 		touches(EditKind::Reads, "lit", "colour");
 		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Reads, "environment-clouds", "environment");
 		touches(EditKind::Writes, "sky-lit", "colour");
 
-		node("volumetrics", NodeScope::View);
+		node("fog", NodeScope::View);
 		touches(EditKind::Reads, "sky-lit", "colour");
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "volume-lit", "colour");
@@ -1396,15 +1417,20 @@ namespace engine::graph {
 			if (edit.Kind == EditKind::AddResource) {
 				skipNode = false;
 				if (edit.Name == core::Name("depth-pyramid") || edit.Name == core::Name("occlusion") ||
-					edit.Name == core::Name("lod-instances")) {
+					edit.Name == core::Name("lod-instances") || edit.Name == core::Name("environment-sky") ||
+					edit.Name == core::Name("environment-clouds")) {
 					continue;
 				}
 			}
 			if (edit.Kind == EditKind::AddNode) {
 				skipNode = edit.NodeKind == core::Name("hzb") || edit.NodeKind == core::Name("ssao") ||
-						   edit.NodeKind == core::Name("select-lod");
+						   edit.NodeKind == core::Name("select-lod") ||
+						   edit.NodeKind == core::Name("skybox-compute") ||
+						   edit.NodeKind == core::Name("clouds-compute");
 			}
-			if (skipNode || (edit.Kind == EditKind::Reads && edit.Target == core::Name("occlusion"))) {
+			if (skipNode ||
+				(edit.Kind == EditKind::Reads &&
+				 (edit.Target == core::Name("occlusion") || edit.Target == core::Name("environment-clouds")))) {
 				continue;
 			}
 			Edit reducedEdit = edit;

@@ -1,9 +1,8 @@
 #version 450
 
-// Builds one world environment into a resident equirectangular texture.
-// Texture faces, atmosphere scattering and voxel-like cloud density are folded
-// once when their selected authored inputs change. Every camera then samples
-// this image without another upload or generation dispatch.
+// Builds one world sky and atmosphere into a resident equirectangular texture.
+// The separate clouds stage samples this history image. Every camera then
+// samples the completed environment without another generation dispatch.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -239,6 +238,5 @@ void main() {
 		colour = mix(colour, face.rgb, face.a);
 	}
 	colour = ApplyAtmosphere(colour, direction);
-	colour = ApplyClouds(colour, direction);
 	imageStore(environmentImage, texel, vec4(max(colour, vec3(0.0)), 1.0));
 }

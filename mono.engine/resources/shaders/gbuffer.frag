@@ -10,6 +10,7 @@ layout(location = 5) in vec3 inWorldPosition;
 layout(location = 6) flat in uint inAppearance;
 layout(location = 7) flat in vec3 inSurfaceColour;
 layout(location = 8) flat in vec4 inEmission;
+layout(location = 9) flat in uvec2 inFeaturePolicy;
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
@@ -47,7 +48,16 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Fog;
 	vec4 Eye;
 	vec4 MaterialExtra;
+	uvec4 RenderFeatures;
 } lighting;
+
+const uint FEATURE_EMISSION = 1u << 2u;
+const uint FEATURE_DISPLACEMENT = 1u << 9u;
+
+uint ResolvedSurfaceFeatures() {
+	uint camera = (lighting.RenderFeatures.y | lighting.RenderFeatures.z) & ~lighting.RenderFeatures.w;
+	return ((camera | inFeaturePolicy.x) & ~inFeaturePolicy.y) & lighting.RenderFeatures.x;
+}
 
 mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
 	vec3 positionX = dFdx(position);
@@ -61,10 +71,11 @@ mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
 }
 
 void main() {
+	const uint features = ResolvedSurfaceFeatures();
 	vec3 normal = normalize(inNormal);
 	vec2 localUv = fract(inTexCoord);
 	vec2 cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
-	if (lighting.Surface.z > 0.5) {
+	if ((features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {
 		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
 		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
 		float height = texture(heightMap, cellUv).r - 0.5;
@@ -92,7 +103,7 @@ void main() {
 
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	float materialOcclusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = lighting.Material.w > 0.5
+	vec3 emissive = (features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
 		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
 		: vec3(0.0);
 	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;

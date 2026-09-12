@@ -19,6 +19,7 @@ layout(location = 5) out vec3 outWorldPosition;
 layout(location = 6) flat out uint outAppearance;
 layout(location = 7) flat out vec3 outSurfaceColour;
 layout(location = 8) flat out vec4 outEmission;
+layout(location = 9) flat out uvec2 outFeaturePolicy;
 
 void main() {
 	InstanceRow instance = LoadInstance();
@@ -33,6 +34,7 @@ void main() {
 	outAppearance = InstanceAppearance(instance);
 	outSurfaceColour = InstanceSurfaceColour(instance);
 	outEmission = InstanceEmission(instance);
+	outFeaturePolicy = uvec2(InstanceFeatureEnable(instance), InstanceFeatureDisable(instance));
 	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, meshPosition), 1.0);
 	outWorldPosition = world.xyz;
 	outLightPosition = frame.LightViewProjection * world;

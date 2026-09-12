@@ -878,9 +878,13 @@ namespace engine::render {
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
 		}
-		if (State->EnvironmentCompute != nullptr) {
-			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentCompute);
-			State->EnvironmentCompute = nullptr;
+		if (State->EnvironmentSkyCompute != nullptr) {
+			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentSkyCompute);
+			State->EnvironmentSkyCompute = nullptr;
+		}
+		if (State->EnvironmentCloudCompute != nullptr) {
+			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentCloudCompute);
+			State->EnvironmentCloudCompute = nullptr;
 		}
 		if (State->ShadowPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ShadowPipeline);

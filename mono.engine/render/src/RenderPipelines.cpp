@@ -1072,7 +1072,8 @@ namespace engine::render {
 			ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
 			ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
 			ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
-			EnvironmentCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
+			EnvironmentSkyCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
+			EnvironmentCloudCompute = LoadComputePipeline("environment-clouds.comp", 1, 0, 1, 0, 8, 8);
 		}
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
@@ -1089,7 +1090,8 @@ namespace engine::render {
 				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
 				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
 				 TonemapPipeline != nullptr)) &&
-			   (!Caps.HasCompute || (EnvironmentCompute != nullptr && Lod.Select != nullptr));
+			   (!Caps.HasCompute ||
+				(EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr && Lod.Select != nullptr));
 	}
 
 	bool Renderer::Impl::EnsureTransparentLayer() {

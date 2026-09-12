@@ -158,6 +158,11 @@ namespace engine::render {
 
 		// x: whether a metalness map is present.
 		glm::vec4 MaterialExtra{0.0f, 0.0f, 0.0f, 0.0f};
+
+		// x: device-supported bits. y: world defaults after policy. z/w: camera
+		// enable and disable masks. The resident instance supplies the final layer
+		// in the vertex shader, so material feature choice never needs CPU readback.
+		glm::uvec4 RenderFeatures{};
 	};
 
 	struct ShadowUniforms {
