@@ -352,7 +352,18 @@ namespace nodegraph {
 
 		// Exactly one drag is in progress, so this is one enum rather than five
 		// booleans: five booleans is five ways to be in two states at once.
-		enum class Dragging : uint8_t { None, Nodes, Link, Marquee, Pan, Widget, Group };
+		enum class Dragging : uint8_t {
+			None,
+			PendingNodes,
+			Nodes,
+			Link,
+			PendingMarquee,
+			Marquee,
+			Pan,
+			Widget,
+			PendingGroup,
+			Group,
+		};
 		Dragging Drag = Dragging::None;
 
 		NodeId DragNode = NO_NODE;
@@ -360,6 +371,9 @@ namespace nodegraph {
 		bool DragFromInput = false;
 		std::string DragWidget;
 		GroupId DragGroup = NO_GROUP;
+		float DragStartX = 0.0f;
+		float DragStartY = 0.0f;
+		double DragStartedAt = 0.0;
 
 		// Whether this gesture changed the graph. Reported to `Hooks::Changed`
 		// once, when the mouse comes up: a drag is one edit and not an undo step

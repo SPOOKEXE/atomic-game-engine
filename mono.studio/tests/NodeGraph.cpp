@@ -214,6 +214,50 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 	CHECK(submitted);
 }
 
+TEST_CASE("a canvas node waits through the drag deadzone", "[studio][nodegraph][input]") {
+	ContextGuard context_guard;
+	studio::RegisterDemoNodes();
+
+	nodegraph::Graph graph;
+	const nodegraph::NodeId node = graph.Add("field.perlin", 60.0f, 60.0f);
+	REQUIRE(node != nodegraph::NO_NODE);
+	nodegraph::Canvas canvas;
+	int changed = 0;
+	canvas.Signals.Changed = [&] { ++changed; };
+
+	const auto frame = [&](ImVec2 mouse, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
+		ImGui::Begin(
+			"canvas deadzone",
+			nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings
+		);
+		canvas.Draw(graph);
+		ImGui::End();
+		ImGui::Render();
+	};
+
+	const ImVec2 pressed(100.0f, 100.0f);
+	const ImVec2 moved(140.0f, 100.0f);
+	frame(pressed, false);
+	frame(pressed, true);
+	frame(moved, true);
+	REQUIRE(canvas.Selection() == std::vector<nodegraph::NodeId>{node});
+	CHECK(graph.Find(node)->X == 60.0f);
+
+	for (int frameIndex = 0; frameIndex < 10; frameIndex++) {
+		frame(moved, true);
+	}
+	CHECK(graph.Find(node)->X == 100.0f);
+	frame(moved, false);
+	CHECK(changed == 1);
+}
+
 TEST_CASE("the Combine mesh preview owns its drag before the host window", "[studio][nodegraph][input]") {
 	ContextGuard context_guard;
 	studio::RegisterDemoNodes();

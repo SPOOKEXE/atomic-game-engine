@@ -319,6 +319,28 @@ namespace studio {
 		for (size_t index = 0; index < Overlays.size(); index++) {
 			projections[index] = ProjectionFor(index);
 		}
+		const auto cancelSurfaceGesture = [this]() {
+			if (SurfaceDragging.Active && SurfaceDragging.Moved && SurfaceDragging.World.IsValid() &&
+				Universe != nullptr) {
+				Universe->Enter(SurfaceDragging.World, [&](Store &store) {
+					for (size_t index = 0; index < SurfaceDragging.Instances.size(); ++index) {
+						if (auto *transform =
+								store.GetMutable<engine::scene::Transform>(SurfaceDragging.Instances[index]))
+							transform->Frame = SurfaceDragging.Before[index];
+					}
+				});
+			}
+			SurfaceDragging = SurfaceGrab{};
+			SurfaceGesture = ViewportGesture{};
+			BoxSelection = BoxSelectionAction{};
+		};
+		if (SurfaceGesture.Active) {
+			const size_t viewport = SurfaceGesture.Viewport;
+			if (viewport >= Overlays.size() || !Overlays[viewport].Drawn ||
+				Overlays[viewport].List == nullptr || !projections[viewport].IsValid() ||
+				ViewportWorld(viewport) != SurfaceGesture.World)
+				cancelSurfaceGesture();
+		}
 
 		// **The gizmo goes first, and it can swallow the pending pick.** A
 		// click that lands on a handle is a drag, not a selection - and which
@@ -385,6 +407,52 @@ namespace studio {
 			DrawViewportGui(index);
 		}
 
+		// Gestures mutate selection and transforms. Finish every viewport's input
+		// pass before gathering outlines, so a picked or moved object is projected
+		// from its current geometry in this same frame.
+		for (size_t index = 0; index < Overlays.size(); index++) {
+			OverlaySlot &slot = Overlays[index];
+			if (!slot.Drawn || slot.List == nullptr || !projections[index].IsValid()) {
+				continue;
+			}
+			slot.List->PushClipRect(
+				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
+			);
+			const bool movingSelection = DragOnSurface(index, projections[index]);
+			if (!movingSelection) {
+				DragSelectionBox(index, projections[index]);
+			}
+			slot.List->PopClipRect();
+		}
+
+		std::vector<SelectionOutlineBatch::Entry> &selectionOutlines = OutlineBatch.Entries;
+		selectionOutlines.clear();
+		if (SelectionWorld.IsValid() && !Selection.empty() && Universe != nullptr) {
+			// Gather after the input pass. Every viewport projects the same current
+			// geometry, rather than each rebuilding corners from the world.
+			if (selectionOutlines.capacity() < Selection.size()) selectionOutlines.reserve(Selection.size());
+			Universe->Enter(SelectionWorld, [&](Store &store) {
+				for (const Entity instance : Selection) {
+					const auto *transform = store.Get<engine::scene::Transform>(instance);
+					const auto *bounds = store.Get<engine::scene::Bounds>(instance);
+					if (store.Alive(instance) && transform != nullptr && bounds != nullptr) {
+						SelectionOutlineBatch::Entry outline{
+							.Frame = transform->Frame, .HalfExtent = bounds->HalfExtent
+						};
+						for (int corner = 0; corner < 8; corner++) {
+							const Vector3 local{
+								(corner & 1) ? outline.HalfExtent.X : -outline.HalfExtent.X,
+								(corner & 2) ? outline.HalfExtent.Y : -outline.HalfExtent.Y,
+								(corner & 4) ? outline.HalfExtent.Z : -outline.HalfExtent.Z,
+							};
+							outline.Corners[corner] = outline.Frame.PointToWorldSpace(local);
+						}
+						selectionOutlines.push_back(std::move(outline));
+					}
+				}
+			});
+		}
+
 		for (size_t index = 0; index < Overlays.size(); index++) {
 			OverlaySlot &slot = Overlays[index];
 			if (!slot.Drawn || slot.List == nullptr) {
@@ -405,12 +473,6 @@ namespace studio {
 				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
 			);
 
-			// Scene annotations belong to the viewport image. Drawing them before
-			// this clip lets projected lines escape into docked Studio panels.
-			const bool movingSelection = DragOnSurface(index, panel);
-			if (!movingSelection) {
-				DragSelectionBox(index, panel);
-			}
 			DrawColliderOutlines(index, panel);
 			DrawAdornments(index, panel);
 
@@ -598,134 +660,109 @@ namespace studio {
 			// The selection, boxed. **Drawn per panel rather than once**,
 			// because two viewports showing the same world both have to show it
 			// and they have different projections.
-			if (shown.IsValid() && shown == SelectionWorld && !Selection.empty() && Universe != nullptr) {
+			if (shown.IsValid() && shown == SelectionWorld && !selectionOutlines.empty()) {
 				const ImU32 outline = engine::ui::AccentColour();
 
-				Universe->Enter(shown, [&](Store &store) {
-					for (const Entity instance : Selection) {
-						if (!store.Alive(instance)) {
-							continue;
-						}
+				for (const SelectionOutlineBatch::Entry &selected : selectionOutlines) {
 
-						const auto *transform = store.Get<engine::scene::Transform>(instance);
-						const auto *bounds = store.Get<engine::scene::Bounds>(instance);
-						if (transform == nullptr || bounds == nullptr) {
-							continue;
-						}
+					// The eight corners of the oriented box, joined as
+					// twelve edges. An axis-aligned box round an oriented
+					// part would be a box that does not touch it.
+					const Vector3 half = selected.HalfExtent;
+					static constexpr int EDGES[12][2] = {
+						{0, 1},
+						{1, 3},
+						{3, 2},
+						{2, 0},
+						{4, 5},
+						{5, 7},
+						{7, 6},
+						{6, 4},
+						{0, 4},
+						{1, 5},
+						{2, 6},
+						{3, 7}
+					};
 
-						// The eight corners of the oriented box, joined as
-						// twelve edges. An axis-aligned box round an oriented
-						// part would be a box that does not touch it.
-						const Vector3 half = bounds->HalfExtent;
-						Vector3 corner[8];
-						for (int index8 = 0; index8 < 8; index8++) {
-							const Vector3 local{
-								(index8 & 1) ? half.X : -half.X,
-								(index8 & 2) ? half.Y : -half.Y,
-								(index8 & 4) ? half.Z : -half.Z
-							};
-							corner[index8] = transform->Frame.PointToWorldSpace(local);
-						}
-
-						static constexpr int EDGES[12][2] = {
-							{0, 1},
-							{1, 3},
-							{3, 2},
-							{2, 0},
-							{4, 5},
-							{5, 7},
-							{7, 6},
-							{6, 4},
-							{0, 4},
-							{1, 5},
-							{2, 6},
-							{3, 7}
-						};
-
-						for (const auto &edge : EDGES) {
-							segment(corner[edge[0]], corner[edge[1]], outline, 1.5f);
-						}
-
-						if (!ShowFacing) {
-							continue;
-						}
-
-						// --- which way it is facing ------------------------
-						//
-						// **A box says nothing about its orientation.** Two
-						// parts sitting identically may be turned a quarter
-						// apart, and nothing in the outline distinguishes them
-						// - which matters the moment anything is placed by
-						// script, welded, or driven along its own look.
-						//
-						// So: a line out of the front face to a ball, and a
-						// ring round the ball with an arrow at the point that
-						// is up. The line is the look and the arrow is the
-						// roll, which together are the whole of the rotation a
-						// person can act on.
-						const Vector3 look = transform->Frame.LookVector();
-						const Vector3 up = transform->Frame.UpVector();
-
-						// In metres and proportional to the part, unlike the
-						// gizmo's pixels: this is a property of the thing being
-						// looked at rather than a control being aimed at, so it
-						// should grow with the part and shrink into the
-						// distance exactly as the part does.
-						const float reach = std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
-
-						const Vector3 face = transform->Frame.Position + look * half.Z;
-						const Vector3 ballAt = face + look * reach;
-
-						segment(face, ballAt, FACING_LOOK, 2.0f);
-
-						glm::vec2 ball{};
-						if (!panel.WorldToPanel(ballAt, ball)) {
-							continue;
-						}
-						list->AddCircleFilled(ImVec2(ball.x, ball.y), 4.5f, FACING_LOOK);
-
-						// The ring lies in the plane the look is normal to, so
-						// it reads as a collar round the line rather than as a
-						// second circle floating beside it.
-						const Vector3 side = look.Cross(up).Unit();
-						const float ringRadius = reach * 0.42f;
-
-						constexpr int RING = 24;
-						glm::vec2 previous{};
-						bool havePrevious = false;
-						for (int step = 0; step <= RING; step++) {
-							const float angle =
-								6.2831853f * static_cast<float>(step) / static_cast<float>(RING);
-							const Vector3 at = ballAt + up * (std::cos(angle) * ringRadius) +
-											   side * (std::sin(angle) * ringRadius);
-
-							glm::vec2 screen{};
-							if (!panel.WorldToPanel(at, screen)) {
-								havePrevious = false;
-								continue;
-							}
-							if (havePrevious) {
-								list->AddLine(
-									ImVec2(previous.x, previous.y),
-									ImVec2(screen.x, screen.y),
-									FACING_UP,
-									1.5f
-								);
-							}
-							previous = screen;
-							havePrevious = true;
-						}
-
-						// The head sits where the ring is highest and points
-						// away from the ball, so "which way is up" is answered
-						// by one glance rather than by counting.
-						const Vector3 tip = ballAt + up * (ringRadius * 1.55f);
-						const Vector3 base = ballAt + up * ringRadius;
-						segment(base, tip, FACING_UP, 2.0f);
-						segment(tip, base + side * (ringRadius * 0.42f), FACING_UP, 2.0f);
-						segment(tip, base - side * (ringRadius * 0.42f), FACING_UP, 2.0f);
+					for (const auto &edge : EDGES) {
+						segment(selected.Corners[edge[0]], selected.Corners[edge[1]], outline, 1.5f);
 					}
-				});
+
+					if (!ShowFacing) {
+						continue;
+					}
+
+					// --- which way it is facing ------------------------
+					//
+					// **A box says nothing about its orientation.** Two
+					// parts sitting identically may be turned a quarter
+					// apart, and nothing in the outline distinguishes them
+					// - which matters the moment anything is placed by
+					// script, welded, or driven along its own look.
+					//
+					// So: a line out of the front face to a ball, and a
+					// ring round the ball with an arrow at the point that
+					// is up. The line is the look and the arrow is the
+					// roll, which together are the whole of the rotation a
+					// person can act on.
+					const Vector3 look = selected.Frame.LookVector();
+					const Vector3 up = selected.Frame.UpVector();
+
+					// In metres and proportional to the part, unlike the
+					// gizmo's pixels: this is a property of the thing being
+					// looked at rather than a control being aimed at, so it
+					// should grow with the part and shrink into the
+					// distance exactly as the part does.
+					const float reach = std::max({half.X, half.Y, half.Z, 0.05f}) * FACING_REACH;
+
+					const Vector3 face = selected.Frame.Position + look * half.Z;
+					const Vector3 ballAt = face + look * reach;
+
+					segment(face, ballAt, FACING_LOOK, 2.0f);
+
+					glm::vec2 ball{};
+					if (!panel.WorldToPanel(ballAt, ball)) {
+						continue;
+					}
+					list->AddCircleFilled(ImVec2(ball.x, ball.y), 4.5f, FACING_LOOK);
+
+					// The ring lies in the plane the look is normal to, so
+					// it reads as a collar round the line rather than as a
+					// second circle floating beside it.
+					const Vector3 side = look.Cross(up).Unit();
+					const float ringRadius = reach * 0.42f;
+
+					constexpr int RING = 24;
+					glm::vec2 previous{};
+					bool havePrevious = false;
+					for (int step = 0; step <= RING; step++) {
+						const float angle = 6.2831853f * static_cast<float>(step) / static_cast<float>(RING);
+						const Vector3 at = ballAt + up * (std::cos(angle) * ringRadius) +
+										   side * (std::sin(angle) * ringRadius);
+
+						glm::vec2 screen{};
+						if (!panel.WorldToPanel(at, screen)) {
+							havePrevious = false;
+							continue;
+						}
+						if (havePrevious) {
+							list->AddLine(
+								ImVec2(previous.x, previous.y), ImVec2(screen.x, screen.y), FACING_UP, 1.5f
+							);
+						}
+						previous = screen;
+						havePrevious = true;
+					}
+
+					// The head sits where the ring is highest and points
+					// away from the ball, so "which way is up" is answered
+					// by one glance rather than by counting.
+					const Vector3 tip = ballAt + up * (ringRadius * 1.55f);
+					const Vector3 base = ballAt + up * ringRadius;
+					segment(base, tip, FACING_UP, 2.0f);
+					segment(tip, base + side * (ringRadius * 0.42f), FACING_UP, 2.0f);
+					segment(tip, base - side * (ringRadius * 0.42f), FACING_UP, 2.0f);
+				}
 			}
 
 			list->PopClipRect();
@@ -861,6 +898,7 @@ namespace studio {
 		// The direction control owns this click, so it must not also become a
 		// world pick when the overlay pass drains the pending surface action.
 		PendingPick.Wanted = false;
+		SurfaceGesture = ViewportGesture{};
 		const Vector3 direction = axes[nearestAxis] * static_cast<float>(nearestSign);
 		const CFrame snapped = SnapViewportCameraDirection(frame, direction);
 		const Vector3 angles = snapped.ToAngles();
@@ -1630,11 +1668,30 @@ namespace studio {
 		// part, which is how a person expects to move something in a picture of
 		// a room. Roblox's drag, and the reason Select is not simply "no tool".
 		const WorldId world = ViewportWorld(viewport);
-		if (world != SelectionWorld || !world.IsValid() || Universe == nullptr) {
+		if (!world.IsValid() || Universe == nullptr) {
 			return false;
 		}
 
 		const bool holding = SurfaceDragging.Active && SurfaceDragging.Viewport == viewport;
+		const bool ownsGesture = SurfaceGesture.Active && SurfaceGesture.Viewport == viewport;
+		if ((ownsGesture && SurfaceGesture.World != world) || (holding && SurfaceDragging.World != world)) {
+			if (holding && SurfaceDragging.Moved && SurfaceDragging.World.IsValid()) {
+				Universe->Enter(SurfaceDragging.World, [&](Store &store) {
+					for (size_t index = 0; index < SurfaceDragging.Instances.size(); ++index) {
+						if (store.Alive(SurfaceDragging.Instances[index])) {
+							if (auto *transform = store.GetMutable<engine::scene::Transform>(
+									SurfaceDragging.Instances[index]
+								))
+								transform->Frame = SurfaceDragging.Before[index];
+						}
+					}
+				});
+			}
+			SurfaceDragging = SurfaceGrab{};
+			SurfaceGesture = ViewportGesture{};
+			BoxSelection = BoxSelectionAction{};
+			return false;
+		}
 
 		// **Never while a handle is held.** A gizmo drag and a surface drag both
 		// write placements, and two of them running against one selection is
@@ -1649,37 +1706,26 @@ namespace studio {
 		// --- starting one ----------------------------------------------------
 
 		if (!holding) {
-			// **Past the threshold, not on the press.** A click is a selection
-			// and a drag is a move, and imgui already draws that line - the
-			// pick in `DrawViewport` is recorded only for a release that never
-			// crossed it, so the two cannot both fire.
-			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left) || !panel.ContainsPanel(cursor)) {
+			if (!ownsGesture || !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+				if (ownsGesture && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+					SurfaceGesture = ViewportGesture{};
+				}
 				return false;
 			}
+			const glm::vec2 delta = cursor - SurfaceGesture.Start;
+			const float distance = glm::dot(delta, delta);
+			const float threshold = std::max(ImGui::GetIO().MouseDragThreshold, 3.0f);
+			if (ImGui::GetTime() - SurfaceGesture.StartedAt < 0.150 || distance < threshold * threshold) {
+				return false;
+			}
+			SurfaceGesture.Dragging = true;
 			if (!(viewport == 0 ? ViewportHovered
 								: (ExtraAt(viewport) != nullptr && ExtraAt(viewport)->Hovered))) {
 				return false;
 			}
 
-			// The part under where the drag *began*, not under the cursor now -
-			// by the time this fires the pointer has already moved, and picking
-			// from where it is would grab whatever it happened to have travelled
-			// over.
-			const ImVec2 began = ImVec2(
-				mouse.x - ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).x,
-				mouse.y - ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).y
-			);
-
-			// A drag that began outside this panel is somebody else's gesture
-			// arriving over the top of it - a slider released across the
-			// viewport, most often.
-			const glm::vec2 from(began.x, began.y);
-			if (!panel.ContainsPanel(from)) {
-				return false;
-			}
-
 			const std::optional<engine::core::RayHit> grabbed =
-				RaycastWorld(world, panel.PanelToRay(from), {});
+				RaycastWorld(world, panel.PanelToRay(SurfaceGesture.Start), {});
 			if (!grabbed) {
 				return false;
 			}
@@ -1690,13 +1736,15 @@ namespace studio {
 			// a person means by putting the pointer on a thing and pulling it.
 			// Dragging something already in a selection moves the whole
 			// selection, which is what they mean the rest of the time.
-			if (std::find(Selection.begin(), Selection.end(), taken) == Selection.end()) {
+			if (SelectionWorld != world ||
+				std::find(Selection.begin(), Selection.end(), taken) == Selection.end()) {
 				Select(world, taken, false);
 				SelectionAnchor = taken;
 			}
 
 			SurfaceDragging = SurfaceGrab{};
 			SurfaceDragging.Viewport = viewport;
+			SurfaceDragging.World = world;
 			SurfaceDragging.Primary = taken;
 
 			Universe->Enter(world, [&](Store &store) {
@@ -1704,6 +1752,9 @@ namespace studio {
 					if (!store.Alive(instance)) {
 						continue;
 					}
+					if (const auto *visual = store.Get<engine::scene::Visual>(instance);
+						visual != nullptr && visual->Locked)
+						continue;
 					if (const auto *transform = store.Get<engine::scene::Transform>(instance)) {
 						SurfaceDragging.Instances.push_back(instance);
 						SurfaceDragging.Before.push_back(transform->Frame);
@@ -1758,6 +1809,7 @@ namespace studio {
 			}
 
 			SurfaceDragging = SurfaceGrab{};
+			SurfaceGesture = ViewportGesture{};
 			return false;
 		}
 
@@ -1842,16 +1894,27 @@ namespace studio {
 		}
 
 		const bool holding = BoxSelection.Active && BoxSelection.Viewport == viewport;
+		if (SurfaceGesture.Active && SurfaceGesture.Viewport == viewport && SurfaceGesture.World != world) {
+			BoxSelection = BoxSelectionAction{};
+			SurfaceGesture = ViewportGesture{};
+			return false;
+		}
 		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		const glm::vec2 cursor(mouse.x, mouse.y);
 
 		if (!holding) {
-			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+			if (!SurfaceGesture.Active || SurfaceGesture.Viewport != viewport ||
+				!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 				return false;
 			}
-			const ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
-			const glm::vec2 start(mouse.x - delta.x, mouse.y - delta.y);
+			const glm::vec2 start = SurfaceGesture.Start;
 			if (!panel.ContainsPanel(start)) {
+				return false;
+			}
+			const glm::vec2 delta = cursor - start;
+			const float threshold = std::max(ImGui::GetIO().MouseDragThreshold, 3.0f);
+			if (ImGui::GetTime() - SurfaceGesture.StartedAt < 0.150 ||
+				glm::dot(delta, delta) < threshold * threshold) {
 				return false;
 			}
 
@@ -1860,12 +1923,13 @@ namespace studio {
 			if (RaycastWorld(world, panel.PanelToRay(start), {}).has_value()) {
 				return false;
 			}
+			SurfaceGesture.Dragging = true;
 
 			BoxSelection.Active = true;
 			BoxSelection.Viewport = viewport;
 			BoxSelection.Start = start;
 			BoxSelection.Current = cursor;
-			BoxSelection.Add = ImGui::GetIO().KeyCtrl;
+			BoxSelection.Add = SurfaceGesture.Add;
 		}
 
 		const glm::vec2 panelMinimum = panel.ImageMin;
@@ -1921,6 +1985,7 @@ namespace studio {
 			OpenPathTo(world, enclosed.back());
 		}
 		BoxSelection = BoxSelectionAction{};
+		SurfaceGesture = ViewportGesture{};
 		return false;
 	}
 

@@ -41,6 +41,7 @@ using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
+using engine::physics::ClipCharacterVelocity;
 using engine::physics::GroundCharacters;
 using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
@@ -166,6 +167,94 @@ TEST_CASE("a sleeping character is woken by intent and by falling", "[physics][c
 	CHECK_FALSE(world.Body().Grounded);
 	(void)WakeMovingCharacters(world.World);
 	CHECK(world.World.Get<Motion>(world.Root) != nullptr);
+}
+
+TEST_CASE("a character clips against a wall it already overlaps at a shoulder", "[physics][characters]") {
+	// The pillar overlaps the root's front-right corner, but the knee ray runs
+	// down its centreline and therefore cannot see it. The character sweep
+	// starts in the overlap, so this exercises the zero-fraction path directly.
+	Standing world;
+
+	PartDesc pillar;
+	pillar.Frame = CFrame(Vector3{1.05f, 3.0f, 0.55f});
+	pillar.Size = Vector3{0.2f, 6.0f, 0.2f};
+	pillar.Simulated = false;
+	const Entity wall = MakePart(world.World, pillar);
+	world.World.SetParent(wall, engine::scene::WorkspaceOf(world.World));
+	engine::physics::SyncBroadphase(world.World);
+	engine::physics::BroadPhase(world.World);
+
+	world.World.AdvanceTick(1.0f / 60.0f);
+	Motion *motion = world.World.GetMutable<Motion>(world.Root);
+	REQUIRE(motion != nullptr);
+	motion->Linear = Vector3{0.0f, 0.0f, 16.0f};
+
+	REQUIRE(ClipCharacterVelocity(world.World) == 1);
+	CHECK(motion->Linear.Z == Catch::Approx(0.0f));
+}
+
+TEST_CASE("initial overlaps clip only incoming character motion", "[physics][characters]") {
+	struct Case {
+		Vector3 Centre;
+		Vector3 Size;
+		Vector3 Outward;
+	};
+	const Case cases[] = {
+		{{1.15f, 3.0f, 0.5f}, {0.4f, 6.0f, 0.4f}, {-1.0f, 0.0f, 0.0f}},
+		{{-1.15f, 3.0f, 0.5f}, {0.4f, 6.0f, 0.4f}, {1.0f, 0.0f, 0.0f}},
+		{{1.05f, 3.0f, 0.55f}, {0.2f, 6.0f, 0.2f}, {0.0f, 0.0f, -1.0f}},
+		{{1.05f, 3.0f, -0.55f}, {0.2f, 6.0f, 0.2f}, {0.0f, 0.0f, 1.0f}},
+	};
+
+	for (size_t index = 0; index < std::size(cases); index++) {
+		const Case &item = cases[index];
+		CAPTURE(index);
+		auto clip = [&](Vector3 linear, Vector3 &result) {
+			Standing world;
+			PartDesc pillar;
+			pillar.Frame = CFrame(item.Centre);
+			pillar.Size = item.Size;
+			pillar.Simulated = false;
+			const Entity wall = MakePart(world.World, pillar);
+			world.World.SetParent(wall, engine::scene::WorkspaceOf(world.World));
+			engine::physics::SyncBroadphase(world.World);
+			engine::physics::BroadPhase(world.World);
+			world.World.AdvanceTick(1.0f / 60.0f);
+			Motion *motion = world.World.GetMutable<Motion>(world.Root);
+			REQUIRE(motion != nullptr);
+			motion->Linear = linear;
+			const size_t clipped = ClipCharacterVelocity(world.World);
+			result = motion->Linear;
+			return clipped;
+		};
+
+		const Vector3 inward = item.Outward * -16.0f;
+		const Vector3 tangent =
+			std::abs(item.Outward.X) > 0.0f ? Vector3{0.0f, 0.0f, -4.0f} : Vector3{-4.0f, 0.0f, 0.0f};
+		Vector3 result;
+		CHECK(clip(inward, result) == 1);
+		CHECK(result.Magnitude() < 1e-4f);
+		CHECK(clip(tangent, result) == 0);
+		CHECK((result - tangent).Magnitude() < 1e-4f);
+		CHECK(clip(item.Outward * 16.0f, result) == 0);
+		CHECK((result - item.Outward * 16.0f).Magnitude() < 1e-4f);
+		CHECK(clip(inward + tangent, result) == 1);
+		CHECK((result - tangent).Magnitude() < 1e-4f);
+	}
+}
+
+TEST_CASE("a shallow floor overlap does not clip a character walk", "[physics][characters]") {
+	Standing world;
+	world.World.GetMutable<Transform>(world.Root)->Frame.Position.Y -= 0.01f;
+	engine::physics::SyncBroadphase(world.World);
+	engine::physics::BroadPhase(world.World);
+	world.World.AdvanceTick(1.0f / 60.0f);
+	Motion *motion = world.World.GetMutable<Motion>(world.Root);
+	REQUIRE(motion != nullptr);
+	motion->Linear = Vector3{16.0f, 0.0f, 0.0f};
+
+	CHECK(ClipCharacterVelocity(world.World) == 0);
+	CHECK(motion->Linear.X == Catch::Approx(16.0f));
 }
 
 namespace {

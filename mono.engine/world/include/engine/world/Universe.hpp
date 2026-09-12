@@ -786,7 +786,9 @@ namespace engine::world {
 		bool TickExchangeFrameOpen() const;
 
 	  private:
-		void DispatchExchangeWorlds(const std::function<void(size_t)> &body);
+		// Returns whether the body ran on workers. The caller owns any worker
+		// timing report, after the join has made its measurements safe to read.
+		bool DispatchExchangeWorlds(const std::function<void(size_t)> &body);
 		void CompleteExchangeFrame();
 		enum class ExchangePhase : uint8_t { Closed, BetweenRounds, Input, Collected, Applied };
 		ExchangePhase ExchangeStage = ExchangePhase::Closed;

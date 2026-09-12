@@ -1,3 +1,5 @@
+#include "PhysicsProfiler.hpp"
+#include "ProfilerFlame.hpp"
 #include "TimelineBar.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -19,12 +21,15 @@ using engine::core::FrameSpan;
 using studio::AccumulateDiagnosticSpans;
 using studio::AppendUnaccountedDiagnosticSpans;
 using studio::DescribeDiagnosticSpan;
+using studio::DiagnosticAggregation;
 using studio::DiagnosticSpan;
 using studio::FilterDiagnosticSpans;
 using studio::FinishDiagnosticAverage;
 using studio::FitReportedDiagnosticTimeline;
 using studio::FocusDiagnosticSpans;
 using studio::LayoutDiagnosticRows;
+using studio::SelectHeapHistorySnapshot;
+using studio::ShouldReplaceDiagnosticSnapshot;
 
 TEST_CASE("timeline bars fit at the right edge and in narrow panels", "[studio][diagnostics]") {
 	for (const float width : {0.0f, 0.5f, 1.0f, 100.0f}) {
@@ -43,6 +48,42 @@ TEST_CASE("timeline bars fit at the right edge and in narrow panels", "[studio][
 	CHECK(bar.Right == 55.0f);
 }
 
+TEST_CASE("profiler flame filtering reparents around reported workers", "[studio][diagnostics]") {
+	const std::array spans{
+		DiagnosticSpan{.Name = "root"},
+		DiagnosticSpan{.Name = "worker", .Depth = 1, .Parent = 0, .Reported = true},
+		DiagnosticSpan{.Name = "measured child", .Depth = 2, .Parent = 1},
+	};
+	std::vector<DiagnosticSpan> measured;
+	studio::MeasuredProfilerSpans(spans, measured);
+	REQUIRE(measured.size() == 2);
+	CHECK(measured[0].Parent == FrameGraph::NO_PARENT);
+	CHECK(measured[1].Parent == 0);
+	CHECK(measured[1].Depth == 1);
+	std::vector<uint32_t> rows;
+	CHECK(LayoutDiagnosticRows(measured, rows) == 2);
+	CHECK(rows[1] == 1);
+}
+
+TEST_CASE("physics profiler retains reported work and its scheduler ancestors", "[studio][diagnostics]") {
+	using engine::core::ProfileCategory;
+	const std::array spans{
+		FrameSpan{.Name = "world", .Parent = FrameGraph::NO_PARENT, .Category = ProfileCategory::ECS},
+		FrameSpan{.Name = "phase", .Depth = 1, .Parent = 0, .Category = ProfileCategory::ECS},
+		FrameSpan{
+			.Name = "physics.worker",
+			.Depth = 2,
+			.Parent = 1,
+			.Category = ProfileCategory::ECS,
+			.Reported = true
+		},
+		FrameSpan{.Name = "unrelated ecs", .Parent = FrameGraph::NO_PARENT, .Category = ProfileCategory::ECS},
+	};
+	std::vector<bool> selected;
+	studio::PhysicsProfilerSpanMask(spans, selected);
+	CHECK(selected == std::vector<bool>{true, true, true, false});
+}
+
 TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnostics]") {
 	FrameGraph::SetEnabled(true);
 	FrameGraph::BeginFrame();
@@ -53,6 +94,86 @@ TEST_CASE("studio profiling macros submit studio ownership", "[studio][diagnosti
 		FrameGraph::Spans().size() == 1 && FrameGraph::Spans()[0].Owner == engine::core::ProfileOwner::Studio;
 	FrameGraph::SetEnabled(false);
 	CHECK(owned);
+}
+
+TEST_CASE("frame extrema retain one complete hierarchy", "[studio][diagnostics]") {
+	const std::array frames{
+		std::vector<DiagnosticSpan>{
+			DiagnosticSpan{.Name = "frame", .Milliseconds = 8.0f},
+			DiagnosticSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 7.0f},
+		},
+		std::vector<DiagnosticSpan>{
+			DiagnosticSpan{.Name = "frame", .Milliseconds = 20.0f},
+			DiagnosticSpan{.Name = "render", .Depth = 1, .Parent = 0, .Milliseconds = 19.0f},
+		},
+	};
+	const std::array milliseconds{8.0f, 20.0f};
+
+	size_t selected = 0;
+	for (size_t index = 1; index < frames.size(); index++) {
+		if (ShouldReplaceDiagnosticSnapshot(
+				DiagnosticAggregation::Maximum, true, milliseconds[selected], milliseconds[index]
+			)) {
+			selected = index;
+		}
+	}
+	CHECK(frames[selected][1].Name == "render");
+	CHECK(frames[selected][1].Milliseconds == 19.0f);
+
+	selected = 0;
+	for (size_t index = 1; index < frames.size(); index++) {
+		if (ShouldReplaceDiagnosticSnapshot(
+				DiagnosticAggregation::Minimum, true, milliseconds[selected], milliseconds[index]
+			)) {
+			selected = index;
+		}
+	}
+	CHECK(frames[selected][1].Name == "simulation");
+	CHECK(frames[selected][1].Milliseconds == 7.0f);
+}
+
+TEST_CASE("heap window aggregation treats absent tags as zero", "[studio][diagnostics]") {
+	using engine::core::HeapHistorySnapshot;
+	using engine::core::HeapSample;
+	const std::array snapshots{
+		HeapHistorySnapshot{
+			.Sample = HeapSample{.Seconds = 1.0, .LiveBytes = 100, .LiveBlocks = 10},
+			.InclusiveBytes = {100, 60, 30}
+		},
+		HeapHistorySnapshot{
+			.Sample = HeapSample{.Seconds = 2.0, .LiveBytes = 200, .LiveBlocks = 20},
+			.InclusiveBytes = {200, 50, 0, 90}
+		},
+	};
+
+	HeapHistorySnapshot selected;
+	REQUIRE(SelectHeapHistorySnapshot(snapshots, DiagnosticAggregation::Latest, selected));
+	CHECK(selected.Sample.Seconds == 2.0);
+	CHECK(selected.InclusiveBytes == std::vector<int64_t>{200, 50, 0, 90});
+
+	REQUIRE(SelectHeapHistorySnapshot(snapshots, DiagnosticAggregation::Average, selected));
+	CHECK(selected.Sample.Seconds == 2.0);
+	CHECK(selected.Sample.LiveBytes == 150);
+	CHECK(selected.Sample.LiveBlocks == 15);
+	CHECK(selected.InclusiveBytes == std::vector<int64_t>{150, 55, 15, 45});
+
+	REQUIRE(SelectHeapHistorySnapshot(snapshots, DiagnosticAggregation::Maximum, selected));
+	CHECK(selected.Sample.Seconds == 2.0);
+	CHECK(selected.InclusiveBytes == std::vector<int64_t>{200, 50, 0, 90});
+
+	REQUIRE(SelectHeapHistorySnapshot(snapshots, DiagnosticAggregation::Minimum, selected));
+	CHECK(selected.Sample.Seconds == 1.0);
+	CHECK(selected.InclusiveBytes == std::vector<int64_t>{100, 60, 30});
+}
+
+TEST_CASE("empty heap window leaves its prior selection intact", "[studio][diagnostics]") {
+	engine::core::HeapHistorySnapshot selected{
+		.Sample = engine::core::HeapSample{.Seconds = 3.0, .LiveBytes = 42, .LiveBlocks = 1},
+		.InclusiveBytes = {42},
+	};
+	CHECK_FALSE(SelectHeapHistorySnapshot({}, DiagnosticAggregation::Latest, selected));
+	CHECK(selected.Sample.LiveBytes == 42);
+	CHECK(selected.InclusiveBytes == std::vector<int64_t>{42});
 }
 
 TEST_CASE("owner filters retain valid product trees", "[studio][diagnostics]") {

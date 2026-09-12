@@ -1,4 +1,5 @@
 #include "BusRouter.hpp"
+#include "UniverseProfiling.hpp"
 
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
@@ -10,6 +11,44 @@
 #include <cstdlib>
 
 namespace engine::world {
+
+	void ReportWorkerSchedulerTimings(
+		World &world, std::span<const ecs::Scheduler::Timing> timings, float worldMilliseconds
+	) {
+		float systemsMilliseconds = 0.0f;
+		for (const ecs::Scheduler::Timing &timing : timings) {
+			systemsMilliseconds += timing.Milliseconds;
+		}
+
+		const std::string_view worldName = world.Name().Text();
+		core::FrameGraph::ReportedScope worldScope(
+			worldName.empty() ? std::string_view("world") : worldName,
+			core::ProfileCategory::ECS,
+			worldMilliseconds
+		);
+		core::FrameGraph::ReportedScope systemsScope(
+			"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
+		);
+
+		for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count); phaseIndex++) {
+			const auto phase = static_cast<ecs::Phase>(phaseIndex);
+			float phaseMilliseconds = 0.0f;
+			for (const ecs::Scheduler::Timing &timing : timings) {
+				if (timing.RunPhase == phase) {
+					phaseMilliseconds += timing.Milliseconds;
+				}
+			}
+
+			core::FrameGraph::ReportedScope phaseScope(
+				ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
+			);
+			for (const ecs::Scheduler::Timing &timing : timings) {
+				if (timing.RunPhase == phase) {
+					core::FrameGraph::Report(timing.Name, core::ProfileCategory::ECS, timing.Milliseconds);
+				}
+			}
+		}
+	}
 
 	Universe::Universe(const UniverseSettings &settings)
 		: Settings_(settings), Router(std::make_unique<BusRouter>()), Driver(std::this_thread::get_id()) {
@@ -842,43 +881,9 @@ namespace engine::world {
 					continue;
 				}
 
-				const std::span<const ecs::Scheduler::Timing> timings = world->Systems().Timings();
-				float systemsMilliseconds = 0.0f;
-				for (const ecs::Scheduler::Timing &timing : timings) {
-					systemsMilliseconds += timing.Milliseconds;
-				}
-
-				const std::string_view worldName = world->Name().Text();
-				core::FrameGraph::ReportedScope worldScope(
-					worldName.empty() ? std::string_view("world") : worldName,
-					core::ProfileCategory::ECS,
-					world->Statistics().LastTickMilliseconds
+				ReportWorkerSchedulerTimings(
+					*world, world->Systems().Timings(), world->Statistics().LastTickMilliseconds
 				);
-				core::FrameGraph::ReportedScope systemsScope(
-					"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
-				);
-
-				for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count);
-					 phaseIndex++) {
-					const auto phase = static_cast<ecs::Phase>(phaseIndex);
-					float phaseMilliseconds = 0.0f;
-					for (const ecs::Scheduler::Timing &timing : timings) {
-						if (timing.RunPhase == phase) {
-							phaseMilliseconds += timing.Milliseconds;
-						}
-					}
-
-					core::FrameGraph::ReportedScope phaseScope(
-						ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
-					);
-					for (const ecs::Scheduler::Timing &timing : timings) {
-						if (timing.RunPhase == phase) {
-							core::FrameGraph::Report(
-								timing.Name, core::ProfileCategory::ECS, timing.Milliseconds
-							);
-						}
-					}
-				}
 			}
 		} else {
 			const bool serialRequested =

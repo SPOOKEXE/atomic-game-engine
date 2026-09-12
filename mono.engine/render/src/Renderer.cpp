@@ -1550,10 +1550,18 @@ namespace engine::render {
 					const auto &type = module.get_type(uniform.base_type_id);
 					if (module.get_decoration(uniform.id, spv::DecorationDescriptorSet) != 3 ||
 						module.get_decoration(uniform.id, spv::DecorationBinding) != 0 ||
-						!module.get_type(uniform.type_id).array.empty() || type.member_types.size() > 6 ||
+						!module.get_type(uniform.type_id).array.empty() || type.member_types.size() > 7 ||
 						module.get_declared_struct_size(type) > sizeof(LensPassUniforms))
 						return false;
-					constexpr std::array<uint32_t, 6> offsets{0, 64, 128, 144, 160, 176};
+					constexpr std::array<uint32_t, 7> offsets{
+						0,
+						64,
+						128,
+						144,
+						160,
+						176,
+						static_cast<uint32_t>(offsetof(LensPassUniforms, CameraDepth))
+					};
 					for (uint32_t member = 0; member < type.member_types.size(); ++member) {
 						const auto &field = module.get_type(type.member_types[member]);
 						if (module.type_struct_member_offset(type, member) != offsets[member]) return false;
@@ -1565,7 +1573,7 @@ namespace engine::render {
 								return false;
 						} else if (member < 5) {
 							if (!vector(field, 4)) return false;
-						} else {
+						} else if (member == 5) {
 							if (field.basetype != spirv_cross::SPIRType::Struct || field.array.size() != 1 ||
 								!field.array_size_literal[0] ||
 								field.array[0] != scene::MAX_SCENE_SHADER_LENSES ||
@@ -1577,6 +1585,8 @@ namespace engine::render {
 								if (!vector(module.get_type(field.member_types[component]), 4) ||
 									module.type_struct_member_offset(field, component) != component * 16)
 									return false;
+						} else if (!vector(field, 4)) {
+							return false;
 						}
 					}
 				}

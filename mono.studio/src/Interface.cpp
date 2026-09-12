@@ -1214,7 +1214,8 @@ namespace studio {
 		// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
 		// which is also when the projection it needs is correct.
 		if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
-			!ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left)) {
+			SurfaceGesture.Active && SurfaceGesture.Viewport == index &&
+			SurfaceGesture.World == ViewportWorld(index) && !SurfaceGesture.Dragging) {
 			const ImVec2 at = ImGui::GetIO().MousePos;
 			if (ImGui::GetIO().KeyAlt) {
 				PendingCursor.Viewport = index;
@@ -1256,6 +1257,18 @@ namespace studio {
 			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
 			EditThroughViewport(index);
+
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				const ImVec2 at = ImGui::GetIO().MousePos;
+				SurfaceGesture = ViewportGesture{
+					.Active = true,
+					.Viewport = index,
+					.World = ViewportWorld(index),
+					.Start = glm::vec2(at.x, at.y),
+					.StartedAt = ImGui::GetTime(),
+					.Add = ImGui::GetIO().KeyCtrl,
+				};
+			}
 
 			// Held for the rest of the frame so a later panel's stale
 			// `IsWindowFocused` cannot take it back. See the note above.
@@ -1344,7 +1357,6 @@ namespace studio {
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Asset Profiler", nullptr, &ShowAssetProfiler);
-		ImGui::MenuItem("Physics Solver", nullptr, &ShowPhysicsSolver);
 		ImGui::MenuItem("CDN", nullptr, &ShowCdn);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 
@@ -1359,6 +1371,7 @@ namespace studio {
 		ImGui::SeparatorText("Render");
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
+		ImGui::MenuItem("Physics Profiler", nullptr, &ShowPhysicsSolver);
 
 		ImGui::SeparatorText("Engine");
 		ImGui::MenuItem("DataStore", nullptr, &ShowDatasets);

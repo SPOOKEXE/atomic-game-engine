@@ -1,9 +1,12 @@
 #include "AssetProfiler.hpp"
 
+#include "AssetProfilerSort.hpp"
+
 #include <engine/assets/AssetKind.hpp>
 #include <engine/render/Renderer.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <imgui.h>
 #include <string>
@@ -45,6 +48,55 @@ namespace studio {
 				   engine::assets::MipExtent(texture.Height, level) * 4;
 		}
 		return {.DecodedBytes = decoded, .CpuResidentBytes = 0, .GpuResidentBytes = gpu};
+	}
+
+	void SortAssetProfiles(std::vector<AssetProfileSortRow> &rows, std::span<const AssetProfileSort> sorts) {
+		// The content map does not promise an iteration order. Establishing the
+		// name order first keeps rows with equal measured values still between
+		// frames, then each stable pass applies one requested column.
+		std::stable_sort(
+			rows.begin(), rows.end(), [](const AssetProfileSortRow &left, const AssetProfileSortRow &right) {
+				return left.Name < right.Name;
+			}
+		);
+
+		for (auto sort = sorts.rbegin(); sort != sorts.rend(); ++sort) {
+			std::stable_sort(
+				rows.begin(),
+				rows.end(),
+				[sort](const AssetProfileSortRow &left, const AssetProfileSortRow &right) {
+					auto less = [sort](const AssetProfileSortRow &first, const AssetProfileSortRow &second) {
+						switch (sort->Column) {
+						case AssetProfileColumn::Asset:
+							return first.Name < second.Name;
+						case AssetProfileColumn::Kind:
+							return first.Kind < second.Kind;
+						case AssetProfileColumn::Pulled:
+							return first.PulledBytes < second.PulledBytes;
+						case AssetProfileColumn::Decoded:
+							return first.DecodedBytes < second.DecodedBytes;
+						case AssetProfileColumn::Cpu:
+							return first.CpuResidentBytes < second.CpuResidentBytes;
+						case AssetProfileColumn::Gpu:
+							return first.GpuResidentBytes < second.GpuResidentBytes;
+						case AssetProfileColumn::Updates:
+							return first.Updates < second.Updates;
+						case AssetProfileColumn::Resident:
+							return first.ResidentInstances < second.ResidentInstances;
+						case AssetProfileColumn::Delta:
+							return first.StagedBytes != second.StagedBytes
+									   ? first.StagedBytes < second.StagedBytes
+									   : first.StagedInstances < second.StagedInstances;
+						case AssetProfileColumn::TotalResident:
+							return first.CpuResidentBytes + first.GpuResidentBytes <
+								   second.CpuResidentBytes + second.GpuResidentBytes;
+						}
+						return false;
+					};
+					return sort->Ascending ? less(left, right) : less(right, left);
+				}
+			);
+		}
 	}
 
 	void Editor::RecordContentAssetPull(
@@ -128,26 +180,30 @@ namespace studio {
 			"cpu is retained decoded mesh payload. delta is the latest staged resident-row upload."
 		);
 
-		std::vector<const ContentAssetProfile *> rows;
+		std::vector<AssetProfileSortRow> rows;
 		rows.reserve(ContentAssetProfiles.size());
 		for (const auto &[id, profile] : ContentAssetProfiles) {
 			(void)id;
-			rows.push_back(&profile);
+			rows.push_back(
+				{.Name = profile.Name.Text(),
+				 .Kind = engine::assets::Describe(profile.Kind),
+				 .PulledBytes = profile.PulledBytes,
+				 .DecodedBytes = profile.DecodedBytes,
+				 .CpuResidentBytes = profile.CpuResidentBytes,
+				 .GpuResidentBytes = profile.GpuResidentBytes,
+				 .Updates = profile.Updates,
+				 .ResidentInstances = profile.ResidentInstances,
+				 .StagedInstances = profile.StagedInstances,
+				 .StagedBytes = profile.StagedBytes,
+				 .Failures = profile.Failures}
+			);
 		}
-		std::sort(
-			rows.begin(), rows.end(), [](const ContentAssetProfile *left, const ContentAssetProfile *right) {
-				const uint64_t leftBytes = left->GpuResidentBytes + left->CpuResidentBytes;
-				const uint64_t rightBytes = right->GpuResidentBytes + right->CpuResidentBytes;
-				return leftBytes != rightBytes ? leftBytes > rightBytes
-											   : left->Name.Text() < right->Name.Text();
-			}
-		);
-
 		if (ImGui::BeginTable(
 				"asset-profile",
 				9,
 				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
-					ImGuiTableFlags_SizingFixedFit
+					ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti |
+					ImGuiTableFlags_SortTristate
 			)) {
 			ImGui::TableSetupColumn("asset", ImGuiTableColumnFlags_WidthStretch);
 			ImGui::TableSetupColumn("kind");
@@ -159,30 +215,47 @@ namespace studio {
 			ImGui::TableSetupColumn("resident");
 			ImGui::TableSetupColumn("delta");
 			ImGui::TableHeadersRow();
-			for (const ContentAssetProfile *profile : rows) {
+			std::vector<AssetProfileSort> sorts;
+			if (const ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs(); specs != nullptr) {
+				sorts.reserve(specs->SpecsCount);
+				for (int index = 0; index < specs->SpecsCount; index++) {
+					const ImGuiTableColumnSortSpecs &spec = specs->Specs[index];
+					sorts.push_back(
+						{.Column = static_cast<AssetProfileColumn>(spec.ColumnIndex),
+						 .Ascending = spec.SortDirection == ImGuiSortDirection_Ascending}
+					);
+				}
+			}
+			const std::array defaultSort{
+				AssetProfileSort{.Column = AssetProfileColumn::TotalResident, .Ascending = false}
+			};
+			const std::span<const AssetProfileSort> requested =
+				sorts.empty() ? std::span<const AssetProfileSort>(defaultSort)
+							  : std::span<const AssetProfileSort>(sorts);
+			SortAssetProfiles(rows, requested);
+			for (const AssetProfileSortRow &row : rows) {
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
-				const std::string_view name = profile->Name.Text();
-				ImGui::TextUnformatted(name.data(), name.data() + name.size());
+				ImGui::TextUnformatted(row.Name.data(), row.Name.data() + row.Name.size());
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(engine::assets::Describe(profile->Kind));
+				ImGui::TextUnformatted(row.Kind.data(), row.Kind.data() + row.Kind.size());
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(Readable(profile->PulledBytes).c_str());
+				ImGui::TextUnformatted(Readable(row.PulledBytes).c_str());
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(Readable(profile->DecodedBytes).c_str());
+				ImGui::TextUnformatted(Readable(row.DecodedBytes).c_str());
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(Readable(profile->CpuResidentBytes).c_str());
+				ImGui::TextUnformatted(Readable(row.CpuResidentBytes).c_str());
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(Readable(profile->GpuResidentBytes).c_str());
+				ImGui::TextUnformatted(Readable(row.GpuResidentBytes).c_str());
 				ImGui::TableNextColumn();
-				ImGui::Text("%u", profile->Updates);
+				ImGui::Text("%u", row.Updates);
 				ImGui::TableNextColumn();
-				ImGui::Text("%u", profile->ResidentInstances);
+				ImGui::Text("%u", row.ResidentInstances);
 				ImGui::TableNextColumn();
-				ImGui::Text("%u / %s", profile->StagedInstances, Readable(profile->StagedBytes).c_str());
-				if (profile->Failures > 0) {
+				ImGui::Text("%u / %s", row.StagedInstances, Readable(row.StagedBytes).c_str());
+				if (row.Failures > 0) {
 					ImGui::SameLine();
-					ImGui::TextDisabled("%u failed", profile->Failures);
+					ImGui::TextDisabled("%u failed", row.Failures);
 				}
 			}
 			ImGui::EndTable();

@@ -57,6 +57,24 @@ namespace studio {
 		static void Draw(Editor &editor) {
 			editor.DrawComponents();
 		}
+		static void
+		SeedSurface(Editor &editor, WorldId world, Entity entity, const engine::core::CFrame &before) {
+			editor.SurfaceDragging.Active = true;
+			editor.SurfaceDragging.Moved = true;
+			editor.SurfaceDragging.World = world;
+			editor.SurfaceDragging.Instances = {entity};
+			editor.SurfaceDragging.Before = {before};
+			editor.SurfaceGesture.Active = true;
+			editor.SurfaceGesture.World = world;
+			editor.BoxSelection.Active = true;
+		}
+		static void DrawOverlays(Editor &editor) {
+			editor.DrawViewportOverlays();
+		}
+		static bool SurfaceCleared(const Editor &editor) {
+			return !editor.SurfaceDragging.Active && !editor.SurfaceGesture.Active &&
+				   !editor.BoxSelection.Active;
+		}
 	};
 }
 
@@ -134,6 +152,30 @@ namespace {
 		});
 		return enabled;
 	}
+}
+
+TEST_CASE("a removed viewport restores and cancels a surface gesture", "[studio][components][viewport]") {
+	Context context;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneComponents();
+	const WorldId world = editor.Universe->Create(WorldSettings{.Name = Name("gesture")});
+	Entity entity;
+	const engine::core::CFrame before(engine::core::Vector3{1.0f, 2.0f, 3.0f});
+	editor.Universe->Enter(world, [&](Store &store) {
+		entity = store.Create();
+		store.Set<engine::scene::Transform>(entity, engine::scene::Transform{before});
+		store.GetMutable<engine::scene::Transform>(entity)->Frame =
+			engine::core::CFrame(engine::core::Vector3{9.0f, 2.0f, 3.0f});
+	});
+	studio::ComponentPanelProbe::SeedSurface(editor, world, entity, before);
+	ImGui::NewFrame();
+	studio::ComponentPanelProbe::DrawOverlays(editor);
+	ImGui::EndFrame();
+	CHECK(studio::ComponentPanelProbe::SurfaceCleared(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(store.Get<engine::scene::Transform>(entity)->Frame.Position == before.Position);
+	});
 }
 
 TEST_CASE("the Components panel shows metadata and edits exposed values", "[studio][components]") {

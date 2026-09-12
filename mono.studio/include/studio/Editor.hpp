@@ -4730,6 +4730,7 @@ namespace studio {
 			// Which panel it started in, so turning to another mid-drag does
 			// not retarget it.
 			size_t Viewport = 0;
+			WorldId World;
 
 			// The part that was taken hold of. The rest of the selection is
 			// carried by the same rigid transform this one gets, which is what
@@ -4749,6 +4750,32 @@ namespace studio {
 
 		// The surface drag in flight, if any.
 		SurfaceGrab SurfaceDragging;
+
+		// One left gesture owns either a click, a direct surface move, or a
+		// marquee. Keeping its origin at press time prevents a later panel from
+		// inferring a different gesture after the pointer has already moved.
+		struct ViewportGesture {
+			bool Active = false;
+			bool Dragging = false;
+			size_t Viewport = 0;
+			WorldId World;
+			glm::vec2 Start{0.0f};
+			double StartedAt = 0.0;
+			bool Add = false;
+		};
+		ViewportGesture SurfaceGesture;
+
+		// Reused transient outline geometry. It is editor draw preparation, never
+		// world state, and retains capacity across viewport frames.
+		struct SelectionOutlineBatch {
+			struct Entry {
+				engine::core::CFrame Frame{};
+				engine::core::Vector3 HalfExtent{};
+				std::array<engine::core::Vector3, 8> Corners{};
+			};
+			std::vector<Entry> Entries;
+		};
+		SelectionOutlineBatch OutlineBatch;
 
 		// Whether a dragged part turns to sit flat on what it lands on.
 		//
@@ -5545,8 +5572,16 @@ namespace studio {
 		// Per-CDN-item CPU, GPU, and residency accounting. See `DrawAssetProfiler`.
 		bool ShowAssetProfiler = false;
 
-		// Last-tick solver topology and scheduling route. See `DrawPhysicsSolver`.
+		// Last-tick solver topology and measured frame-graph stages. See `DrawPhysicsSolver`.
 		bool ShowPhysicsSolver = false;
+		struct ProfilerSnapshot {
+			bool Paused = false;
+			float FrameMilliseconds = 0.0f;
+			float UnmarkedMilliseconds = 0.0f;
+			size_t Dropped = 0;
+			std::vector<DiagnosticSpan> Spans;
+		};
+		ProfilerSnapshot PhysicsProfiler;
 		struct ContentAssetProfile {
 			engine::core::Name Name;
 			engine::assets::AssetKind Kind = engine::assets::AssetKind::Unknown;
@@ -5766,6 +5801,7 @@ namespace studio {
 
 		// What is moving to and from the origins. See `DrawNetwork`.
 		bool ShowNetwork = false;
+		ProfilerSnapshot NetworkProfiler;
 
 		// The control surface's own panel. See `DrawControl`.
 		bool ShowControl = false;
@@ -6247,14 +6283,9 @@ namespace studio {
 			// Index into `FRAME_GRAPH_INTERVALS`. Zero means every frame.
 			int Interval = 0;
 
-			// Whether an interval publishes the mean of the frames it covered or
-			// simply whichever frame was current when it elapsed.
-			//
-			// **The two are genuinely different answers.** A mean says what a
-			// frame costs; a sample says what one frame cost, including the one
-			// where a shader compiled. Neither is the right default for the
-			// other's question, so this is a switch rather than a decision.
-			bool Average = false;
+			// How an interval chooses its coherent published frame. Latest preserves
+			// the old sampled-frame behaviour; average is a structural mean.
+			DiagnosticAggregation Mode = DiagnosticAggregation::Latest;
 
 			// `ImGui::GetTime()` at which the next publish is due.
 			double NextPublish = 0.0;
@@ -6290,7 +6321,7 @@ namespace studio {
 			//@}
 
 			// The running sum since the last publish, and how many frames are in
-			// it. Unused when `Average` is off.
+			// it. Unused outside Average mode.
 			//@{
 			std::vector<DiagnosticSpan> Summed;
 			float SummedFrameMilliseconds = 0.0f;
@@ -6298,6 +6329,16 @@ namespace studio {
 			float SummedUnmarkedMilliseconds = 0.0f;
 			size_t SummedDropped = 0;
 			uint32_t Frames = 0;
+			//@}
+
+			// The coherent frame chosen so far for Maximum or Minimum mode.
+			//@{
+			std::vector<DiagnosticSpan> Extreme;
+			float ExtremeFrameMilliseconds = 0.0f;
+			float ExtremeIdleMilliseconds = 0.0f;
+			float ExtremeUnmarkedMilliseconds = 0.0f;
+			size_t ExtremeDropped = 0;
+			bool HasExtreme = false;
 			//@}
 
 			// --- the scheduler ------------------------------------------------
@@ -6381,6 +6422,13 @@ namespace studio {
 
 			// Seconds the plot and the growth figures cover.
 			double HistorySeconds = 0.0;
+			// The retained sampler window and how it is selected. These are read only
+			// when a new one-second heap sample arrives.
+			int Interval = 3;
+			// Optional exact retained window. Zero keeps the selected preset.
+			int WindowMilliseconds = 0;
+			DiagnosticAggregation Mode = DiagnosticAggregation::Latest;
+			double LastSampleSeconds = -1.0;
 			SortColumn Sort = SortColumn::Live;
 			bool SortAscending = false;
 		};

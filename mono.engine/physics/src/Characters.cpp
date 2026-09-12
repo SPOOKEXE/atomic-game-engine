@@ -1,3 +1,4 @@
+#include "ContactPairs.hpp"
 #include "ConvexQuery.hpp"
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
@@ -813,24 +814,29 @@ namespace engine::physics {
 						continue;
 					}
 
-					// **A hit at fraction zero is an overlap that already
-					// existed, and its normal cannot be trusted.** A character
-					// resting on a floor penetrates it by the solver's slop
-					// every tick, so the sweep starts inside it and reports
-					// contact immediately - with whichever face of the slab the
-					// algorithm reached, which measured as the floor's *-X side*
-					// while the character walked +X along the top of it. Clipping
-					// on that cancels the walk against the ground it is standing
-					// on, and a character that could not phase through a wall
-					// could not move at all.
-					//
-					// Resolving an existing overlap is position correction's
-					// job. What this pass is for is the other question: is the
-					// step about to *enter* something. That is a hit strictly
-					// along the travel, so a zero fraction is skipped rather
-					// than taken as the earliest.
-					if (hit.Fraction <= 1e-4f) {
-						continue;
+					float fraction = hit.Fraction;
+					core::Vector3 hitNormal = hit.Normal;
+					if (fraction <= 1e-4f) {
+						// A sweep starts inside both a wall overlap and the solver's
+						// floor slop. Its fallback normal is merely the opposite of
+						// travel, so narrowphase supplies the outward contact normal.
+						const ContactSolution overlap = ContactBetween(moving, fixed);
+						if (!overlap.Touching) {
+							continue;
+						}
+
+						const core::Vector3 outward = overlap.Normal * -1.0f;
+						if (outward.Y > MINIMUM_WALKABLE_NORMAL) {
+							continue;
+						}
+
+						const core::Vector3 horizontal{motion->Linear.X, 0.0f, motion->Linear.Z};
+						if (horizontal.Dot(outward) >= 0.0f) {
+							continue;
+						}
+
+						fraction = 0.0f;
+						hitNormal = outward;
 					}
 
 					// **Ground is not a wall, and telling them apart is what
@@ -846,14 +852,14 @@ namespace engine::physics {
 					// projection onto the face and the snap onto it. This pass
 					// is for the other question: is the step about to enter
 					// something it has to go around.
-					if (hit.Normal.Y > MINIMUM_WALKABLE_NORMAL) {
+					if (hitNormal.Y > MINIMUM_WALKABLE_NORMAL) {
 						continue;
 					}
 
-					if (!blocked || hit.Fraction < earliest ||
-						(hit.Fraction == earliest && other.Owner.Id < against.Id)) {
-						earliest = hit.Fraction;
-						normal = hit.Normal;
+					if (!blocked || fraction < earliest ||
+						(fraction == earliest && other.Owner.Id < against.Id)) {
+						earliest = fraction;
+						normal = hitNormal;
 						against = other.Owner;
 						blocked = true;
 					}

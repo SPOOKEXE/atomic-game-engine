@@ -11,6 +11,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/ResourceImage.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldView.hpp>
@@ -21,8 +22,10 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
+#include <glm/packing.hpp>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <optional>
@@ -1116,6 +1119,124 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 			CHECK(extent.DrawnWidth == WIDTH / divisor);
 			CHECK(extent.DrawnHeight == HEIGHT / divisor);
 		}
+	}
+}
+
+TEST_CASE("gravitational lens keeps inward curvature across spin phases", "[render][gpu][lens-gradient][.]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	auto lensDocument = InstallPortalFixture(fixture.Render);
+	const core::Name pipeline("portal.fixture.pbr"), captureNode("lens-export");
+	lensDocument.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = captureNode,
+		 .NodeKind = core::Name("capture"),
+		 .Scope = graph::NodeScope::Frame}
+	);
+	lensDocument.Record(
+		{.Kind = graph::EditKind::Reads, .Target = core::Name("lens-b"), .Key = core::Name("source")}
+	);
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(graph::Build(lensDocument, graph, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(pipeline, graph));
+	const core::Name gradient("lens.gradient");
+	render::ShaderCompiler compiler;
+	const auto program = compiler.Compile(
+		R"glsl(#version 450
+layout(location=0) out vec4 colour;
+void main(){float blue=gl_FragCoord.x/64.0;colour=vec4(0,0,blue,1);}
+)glsl",
+		render::ShaderStage::Fragment,
+		"lens-gradient.frag"
+	);
+	INFO(program.Error);
+	REQUIRE_FALSE(program.Failed);
+	REQUIRE(fixture.Render.AddShader(gradient, program.SpirV));
+
+	render::SceneTarget target{65, 65};
+	render::View view;
+	view.Target = &target;
+	view.Pipeline = pipeline;
+	view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 64;
+	view.OverrideLighting = true;
+	auto plane = Plane(1, {0, 0, 0}, 16, 16, {1, 1, 1});
+	plane.Shader = gradient;
+	view.Instances = std::span(&plane, 1);
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		const uint64_t token = fixture.Render.QueueResourceImage(pipeline, captureNode, 0);
+		REQUIRE(token != 0);
+		const render::FrameResult rendered =
+			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(rendered.Ran(captureNode));
+		if (view.Lighting.ShaderLensCount != 0) REQUIRE(rendered.Ran(core::Name("shader-lenses")));
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (std::chrono::steady_clock::now() < deadline) {
+			if (auto image = fixture.Render.TakeResourceImage(token)) return std::move(*image);
+			SDL_Delay(1);
+		}
+		FAIL("lens HDR capture did not complete");
+		return render::ResourceImage{};
+	};
+	const auto baseline = capture();
+	REQUIRE(baseline.Status == render::ResourceImageStatus::Ok);
+	REQUIRE(baseline.Width == 65);
+	REQUIRE(baseline.Height == 65);
+	REQUIRE(baseline.RowStride == 65 * 8);
+	REQUIRE(baseline.Pixels.size() == size_t(65) * 65 * 8);
+
+	scene::RegisterSceneClasses();
+	ecs::Store shaders("lens-gradient");
+	const auto lensEntity = shaders.CreateInstance(ecs::Classes::Find(core::Name("ShaderLens")), "Lens");
+	shaders.GetMutable<scene::ShaderLens>(lensEntity)->Shader = core::Name("gravitational-lens");
+	render::ShaderLibrary library;
+	REQUIRE(library.RefreshLenses(shaders) == 1);
+	const auto *cooked = library.FindLens(core::Name("gravitational-lens"));
+	REQUIRE(cooked != nullptr);
+	REQUIRE(fixture.Render.AddLensShader(core::Name("gravitational-lens"), cooked->SpirV));
+	view.Lighting.ShaderLensCount = 1;
+	view.Lighting.ShaderLenses[0].Frame = core::CFrame({0, 0, 2});
+	view.Lighting.ShaderLenses[0].Shader = core::Name("gravitational-lens");
+	view.Lighting.ShaderLenses[0].Radius = 2.0f;
+	view.Lighting.ShaderLenses[0].InnerRadius = .4f;
+	view.Lighting.ShaderLenses[0].Strength = 2.0f;
+	view.Lighting.ShaderLenses[0].Spin = .25f;
+	const auto sample = [](const render::ResourceImage &image, size_t x, size_t y) {
+		const auto bytes = std::span(image.Pixels).subspan(y * image.RowStride + x * 8, 8);
+		core::ByteReader reader(bytes);
+		const glm::vec2 redGreen = glm::unpackHalf2x16(reader.ReadUInt32());
+		const glm::vec2 blueAlpha = glm::unpackHalf2x16(reader.ReadUInt32());
+		return glm::vec4{redGreen, blueAlpha};
+	};
+	const auto correctedBlue = [&](const render::ResourceImage &image, size_t x) {
+		const glm::vec4 colour = sample(image, x, 32);
+		CHECK(std::isfinite(colour.r));
+		CHECK(std::isfinite(colour.g));
+		CHECK(std::isfinite(colour.b));
+		return colour.b - .12f * colour.r;
+	};
+	const float leftBaseline = correctedBlue(baseline, 24);
+	const float rightBaseline = correctedBlue(baseline, 40);
+	const float axisBaseline = correctedBlue(baseline, 32);
+	for (const float time : {0.0f, 12.5663706f}) {
+		view.LensTimeSeconds = time;
+		view.Damage.Scene = true;
+		const auto lensed = capture();
+		REQUIRE(lensed.Status == render::ResourceImageStatus::Ok);
+		for (size_t y = 0; y < 65; y++)
+			for (size_t x = 0; x < 65; x++) {
+				const glm::vec4 colour = sample(lensed, x, y);
+				CHECK(std::isfinite(colour.r));
+				CHECK(std::isfinite(colour.g));
+				CHECK(std::isfinite(colour.b));
+				CHECK(std::isfinite(colour.a));
+			}
+		CHECK(correctedBlue(lensed, 24) > leftBaseline + .01f);
+		CHECK(correctedBlue(lensed, 40) < rightBaseline - .01f);
+		CHECK(std::abs(correctedBlue(lensed, 32) - axisBaseline) < .01f);
 	}
 }
 

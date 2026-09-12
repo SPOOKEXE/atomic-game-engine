@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <utility>
 
@@ -653,6 +654,7 @@ namespace engine::effects {
 		// pass from 522 us to 74 us at a hundred thousand emitters. What it costs
 		// is a dirty-bit column on the emitter table, which is one bit a row.
 		store.Observe<ParticleEmitter>();
+		store.Observe<EmitterSlot>();
 		store.Observe<scene::Transform>();
 		store.Observe<scene::Attachment>();
 		store.Observe<scene::Bounds>();
@@ -747,26 +749,15 @@ namespace engine::effects {
 			return slot != nullptr;
 		}
 
-		ParticleSystem *system = store.ResourceMutable<ParticleSystem>();
-		const uint32_t ceiling = system == nullptr ? 4096u : system->BlockCeiling;
-		uint32_t *pending = &slot->Requested;
-		if (system != nullptr && slot->Index < system->RuntimeStates.size()) {
-			pending = &system->RuntimeStates[slot->Index].Requested;
-		}
-		if (system != nullptr && system->DeviceStepped && slot->Index < system->Blocks.size()) {
-			// The device remembers which request total it has consumed. Keep this
-			// counter monotonic so a later Emit remains visible after the previous
-			// one was handled without reading anything back from the GPU.
-			*pending += std::min(count, ceiling);
-			system->Blocks[slot->Index].Revision++;
-			system->ResidentRevision++;
-		} else {
-			const uint64_t requested = static_cast<uint64_t>(*pending) + count;
-			*pending = static_cast<uint32_t>(std::min<uint64_t>(requested, ceiling));
-		}
-		if (system != nullptr) {
-			system->RefreshRequested = true;
-		}
+		// The script boundary writes only its entity's compact ECS row. Refresh
+		// combines every request for this tick, avoiding a resource lookup and a
+		// device-table invalidation for each individual Luau call.
+		// The device counter is deliberately monotonic, but this ECS delta is not:
+		// losing a whole burst through unsigned wrap is worse than clipping it to
+		// the largest request one refresh can represent.
+		const uint64_t requested = static_cast<uint64_t>(slot->Requested) + count;
+		slot->Requested =
+			static_cast<uint32_t>(std::min<uint64_t>(requested, std::numeric_limits<uint32_t>::max()));
 		return true;
 	}
 
@@ -779,12 +770,6 @@ namespace engine::effects {
 			return false;
 		}
 		slot->Requested = 0;
-		if (ParticleSystem *system = store.ResourceMutable<ParticleSystem>(); system != nullptr) {
-			system->RefreshRequested = true;
-			if (slot->Index < system->RuntimeStates.size()) {
-				system->RuntimeStates[slot->Index].Requested = 0;
-			}
-		}
 		slot->ClearRequested = true;
 		return true;
 	}
@@ -922,7 +907,16 @@ namespace engine::effects {
 			const uint32_t index = slot.Index;
 			EmitterBlock &block = system->Blocks[index];
 			EmitterRuntime &runtime = system->RuntimeStates[index];
-			slot.Requested = system->DeviceStepped ? 0u : runtime.Requested;
+			if (system->DeviceStepped) {
+				// The runtime total belongs to the old device block. The ECS delta may
+				// have arrived after it was made and belongs to the replacement.
+				// Keep it rather than copying the device's consumed-total counter.
+			} else {
+				// A capacity edit can release a block after scripts queued another
+				// burst on its ECS row. Keep both queues for the replacement block.
+				const uint64_t requested = static_cast<uint64_t>(slot.Requested) + runtime.Requested;
+				slot.Requested = static_cast<uint32_t>(std::min<uint64_t>(requested, system->BlockCeiling));
+			}
 			if (block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
 				system->RetryRefused = true;
@@ -999,6 +993,8 @@ namespace engine::effects {
 				system->EmitterChangeVersion = emitterVersion;
 			}
 		}
+		const uint64_t slotChangeVersion = store.ComponentChangeVersion<EmitterSlot>();
+		const bool queuedOperations = system->EmitterSlotChangeVersion != slotChangeVersion;
 
 		size_t emitterRows = 0;
 		{
@@ -1008,7 +1004,7 @@ namespace engine::effects {
 		const bool explicitlyRequested = std::exchange(system->RefreshRequested, false);
 		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() &&
 			changedFields.empty() && !catalogueChanged && !activationChanged && !retryRefused &&
-			!explicitlyRequested && emitterRows == system->EmitterRows) {
+			!queuedOperations && !explicitlyRequested && emitterRows == system->EmitterRows) {
 			return system->Statistics.Blocks;
 		}
 		system->Statistics.EmittersRefused = 0;
@@ -1095,10 +1091,45 @@ namespace engine::effects {
 						residentChanged = true;
 						runtime.Live = 0;
 						runtime.Spawned = 0;
+						runtime.Requested = 0;
 						runtime.Pending = 0.0f;
 						runtime.Idle = 0.0f;
 						runtime.RatePhasePending = true;
 						slot.ClearRequested = false;
+					}
+
+					// Script calls collect on the ECS row. Fold them into the compact
+					// resident state once, after all scripts for this tick have run.
+					// A device block therefore receives one revised request total even
+					// when Luau called `Emit` thousands of times.
+					if (slot.Requested > 0) {
+						const uint32_t queued = std::min(slot.Requested, system->BlockCeiling);
+						slot.Requested = 0;
+						const uint32_t previous = runtime.Requested;
+						if (system->DeviceStepped) {
+							// The device records the total it has consumed. Add one capped
+							// batch delta so later ticks stay visible without a readback.
+							runtime.Requested += queued;
+						} else {
+							const uint64_t requested = static_cast<uint64_t>(previous) + queued;
+							runtime.Requested =
+								static_cast<uint32_t>(std::min<uint64_t>(requested, system->BlockCeiling));
+						}
+						if (system->DeviceStepped && runtime.Requested != previous) {
+							block.Revision++;
+							residentChanged = true;
+							if (!continuouslyEnabled) {
+								// A manual burst on a disabled device emitter has a fresh
+								// lifetime. Keep its block resident until that lifetime has
+								// elapsed, even when a prior clear or retirement left it empty.
+								runtime.Idle = 0.0f;
+								runtime.Live = std::max(runtime.Live, 1u);
+								if (!runtime.DeviceRetiring) {
+									runtime.DeviceRetiring = true;
+									system->RetiringBlocks.push_back(slot.Index);
+								}
+							}
+						}
 					}
 
 					if (!continuouslyEnabled && (system->DeviceStepped || runtime.Requested == 0) &&
@@ -1218,7 +1249,7 @@ namespace engine::effects {
 				block.ForceField = scene::ResolveVectorField(store, entity);
 
 				EmitterRuntime runtime;
-				runtime.Requested = std::exchange(slot.Requested, 0u);
+				runtime.Requested = std::min(std::exchange(slot.Requested, 0u), system->BlockCeiling);
 				RefreshRuntimeState(*emitter, runtime);
 				runtime.Enabled = emitter->Enabled && eligible;
 				if (!runtime.Enabled) {
@@ -1339,6 +1370,7 @@ namespace engine::effects {
 
 		system->Statistics.Blocks = static_cast<uint32_t>(live);
 		system->EmitterRows = emitterRows;
+		system->EmitterSlotChangeVersion = store.ComponentChangeVersion<EmitterSlot>();
 		if (layoutChanged) {
 			system->LayoutRevision++;
 		}

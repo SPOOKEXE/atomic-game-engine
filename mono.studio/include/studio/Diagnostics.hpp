@@ -12,13 +12,39 @@
 // @tier L13 · client
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace studio {
+	// How a retained diagnostics window chooses the reading shown by the panel.
+	enum class DiagnosticAggregation : uint8_t {
+		Latest,
+		Average,
+		Maximum,
+		Minimum,
+	};
+
+	// Reports whether a candidate frame replaces the coherent snapshot selected
+	// for a maximum or minimum window. The caller copies every frame field when
+	// this returns true, so hierarchy and totals always come from one frame.
+	bool ShouldReplaceDiagnosticSnapshot(
+		DiagnosticAggregation mode, bool hasSelected, float selectedMilliseconds, float candidateMilliseconds
+	);
+
+	// Selects one sampled heap reading from a window. Maximum and minimum return
+	// a complete reading selected by process live bytes. Average treats missing
+	// tags as zero, so tags created or freed inside the window are represented
+	// for the complete number of readings.
+	[[nodiscard]] bool SelectHeapHistorySnapshot(
+		std::span<const engine::core::HeapHistorySnapshot> snapshots,
+		DiagnosticAggregation mode,
+		engine::core::HeapHistorySnapshot &selected
+	);
 
 	// One frame-graph span retained past the frame that produced it.
 	//

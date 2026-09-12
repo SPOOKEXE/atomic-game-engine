@@ -1716,6 +1716,7 @@ namespace engine::render {
 		LensPassData.InverseViewProjection = uniforms.InverseViewProjection;
 		LensPassData.Target = uniforms.Target;
 		LensPassData.Eye = uniforms.Eye;
+		LensPassData.CameraDepth = uniforms.CameraDepth;
 		LensPassData.TimeCount.x = Request.Source->LensTimeSeconds.value_or(static_cast<float>(frameSeconds));
 		const graph::Frustum lensFrustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
 		for (size_t index = 0; index < currentLighting.ShaderLensCount; index++) {

@@ -174,6 +174,13 @@ namespace engine::core {
 		int64_t LiveBlocks = 0;
 	};
 
+	// One retained sampler reading with inclusive bytes for each tracked node.
+	// The vector is bounded by `MAXIMUM_TRACKED_NODES` and ordered by node index.
+	struct HeapHistorySnapshot {
+		HeapSample Sample;
+		std::vector<int64_t> InclusiveBytes;
+	};
+
 	// What one tag path did across a sampled window: the runaway report.
 	//
 	// @since v0.18
@@ -447,6 +454,12 @@ namespace engine::core {
 
 		// Returns the process-wide readings, oldest first.
 		static std::vector<HeapSample> History();
+
+		// Returns retained process readings and their per-tag inclusive bytes,
+		// oldest first. `windowSeconds` keeps only the requested trailing window;
+		// zero retains every sample. This copies recorded samples for reporting and
+		// never takes a new measurement.
+		static std::vector<HeapHistorySnapshot> HistorySnapshots(double windowSeconds = 0.0);
 
 		// Returns the seconds between the oldest and newest retained reading.
 		// Fewer than two readings cover zero seconds.

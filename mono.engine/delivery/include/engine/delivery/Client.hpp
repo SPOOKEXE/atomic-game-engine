@@ -165,6 +165,23 @@ namespace engine::delivery {
 		uint64_t VerificationFailures = 0;
 	};
 
+	// The current request states, kept separate from `Outstanding` because a
+	// ready or failed record remains outstanding until its caller consumes it.
+	// `TransportActive` counts wire requests, not assets waiting on a manifest,
+	// a local store, or a bounded transfer slot.
+	//
+	// @since v0.23
+	struct RequestDiagnostics {
+		// Requests whose result is not yet ready or failed.
+		size_t Pending = 0;
+		// Verified results still retained for their caller.
+		size_t Ready = 0;
+		// Retained failures still visible to their caller.
+		size_t Failed = 0;
+		// Fetches the transport still reports as pending.
+		size_t TransportActive = 0;
+	};
+
 	// Fetches assets from a prioritised list of sources.
 	//
 	// **One owner, one thread.**
@@ -277,6 +294,13 @@ namespace engine::delivery {
 
 		// How many requests have been made and not yet taken.
 		virtual size_t Outstanding() const = 0;
+
+		// The current request and transport state for diagnostics.
+		//
+		// This does not change `Outstanding`: callers use that count to retain
+		// unconsumed results, while a panel needs to distinguish them from work
+		// still waiting or moving on a wire.
+		virtual RequestDiagnostics Diagnostics() const = 0;
 
 		// What this client has done.
 		virtual const DeliveryCounters &Counters() const = 0;

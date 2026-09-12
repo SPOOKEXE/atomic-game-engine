@@ -115,29 +115,32 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 - [_] Add MCP tools for the ones that need them, then make a demo scene called DataFactoryDemo.luau which gets these values in scripts (and prints some metadata about them) and whatnot. This way we can see that it works and our mcp can use them (and i can tell other agent sessions to refer to the demo to see how they work).
 
 Rendering extra fixes:
-- [_] blackhole warp is opposite on one side to what it should be (quaternions can help do the curvature if needed).
-- [_] character does not collide with objects
+- [x] blackhole warp curves inward consistently across spin phases.
+- [x] character collision and wall sliding work against objects.
 
 TODO tweaks:
-- [_] batch compute the selection box rendering
-- [_] fix selection box / left click drag / left click drag select, buggy
-- [_] fix unable to drag in node canvases
-- [_] left-click to select also drags them immediately, give a deadzone period before attempt dragging
+- [x] batch and reuse selection geometry across viewports.
+- [x] marquee selection and direct surface drag work, with undo support.
+- [x] node canvas dragging works.
+- [x] left-click selection has a 150 ms deadzone plus a pointer threshold before dragging.
 - [x] add column sorting to asset profiler
-- [_] add a timing selector and dropdown to select Average/Max/Min checkbox like Frame Graph to the Heap Profiler (average across N milliseconds)
-- [_] swap average checkbox to a dropdown to select Average/Max/Min checkbox
+- [x] Heap Profiler has a custom millisecond window with Latest, Average, Max and Min, sampled at 1 second resolution.
+- [x] Frame Graph has a mode dropdown.
 - [x] View > Datastores, rename to View > DataStore Editor
 - [x] View > Datastore, rename to View > DataStore Config
 - [x] View > CDN, rename to View > CDN Config
-- [_] rename View > Physics Solver to View > Physics Profiler, move under View > Pipeline Profiler, and remake it based on what Pipeline Profile contains.
-- [_] change how particle:Emit works where we mark the particle as wanting to emit via a flag, then, do a batch emit (hook this into the Enabled as well). Big luau bottleneck (or maybe even a StoredEmitValue value would be nicer?).
-- [_] Network profiler; in studio, says 715 requests in flight but no traffic is happening. Rebuild based on Physics Profiler and Pipeline Profiler. Flamegraph as well.
+- [x] rename View > Physics Solver to View > Physics Profiler, place it under View > Pipeline Profiler, and add stage and flame views, pause, and joined worker timings including tick exchange.
+- [x] queue particle:Emit through ECS, drain bursts in batches, and include Enabled continuous emission.
+- [x] separate Network Profiler waiting, active wire, ready and failed states, with stage and flame views.
+
+Verification: Vulkan lens 33,864 assertions in 1 case, full world 32,727 assertions across 257 cases, focused Studio 973 assertions across 71 cases, and live Studio checks for dragging, sorting, profiler views and pause. These checks cover these roadmap items; unrelated broad pipeline, source and generated-doc failures were not part of this verification.
 
 ### v0.25
 
 - [_] /docs/future-work/character-system.md
 - [_] gtlf default character (unreal style)
-- [_] merge flamegraph visuals into profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
+- [x] merge flamegraph visuals into the Physics and Network profilers.
+- [_] merge flamegraph visuals into the remaining profilers, and add tabs to swap between `Tabular` and `Flamegraph` views.
 
 ### v0.26
 

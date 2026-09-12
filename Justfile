@@ -218,6 +218,13 @@ script-binding-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_scriptluau
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
 
+# Repeated public ParticleEmitter:Emit calls plus one enabled-emitter tick. This
+# is the Luau boundary row for the ECS burst queue, measured in the bench preset.
+particle-emit-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scriptluau
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
+
 # The spatial hierarchy rows, including promoted and mixed scenes. Kept
 # separate because an index change needs its own release measurement cycle.
 spatial-hashgrid-bench samples="5":

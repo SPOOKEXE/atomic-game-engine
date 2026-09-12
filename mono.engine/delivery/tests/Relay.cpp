@@ -43,6 +43,7 @@ using engine::delivery::MakeRouteFetcher;
 using engine::delivery::RelayableRoute;
 using engine::delivery::RelayAnswer;
 using engine::delivery::RelayChannel;
+using engine::delivery::RequestDiagnostics;
 using engine::delivery::RequestState;
 using engine::delivery::RouteFetcher;
 using engine::delivery::RouteState;
@@ -162,6 +163,9 @@ namespace {
 		}
 
 		void Collect(std::vector<RelayAnswer> &into) override {
+			if (Holding) {
+				return;
+			}
 			Answering->Pump();
 			for (auto entry = Live.begin(); entry != Live.end();) {
 				const RouteState state = Answering->StateOf(entry->second);
@@ -195,6 +199,7 @@ namespace {
 		// Whether the link refuses to carry anything, which is what a full
 		// per-tick budget looks like from here.
 		bool Refusing = false;
+		bool Holding = false;
 
 		// How many routes actually reached the far end.
 		size_t Asked = 0;
@@ -395,6 +400,9 @@ TEST_CASE("a client fetches and verifies content over a relay", "[delivery][rela
 	REQUIRE(fetching != nullptr);
 
 	const engine::delivery::RequestId asked = fetching->Request(store.AssetName);
+	CHECK(fetching->Diagnostics().Pending == 1);
+	CHECK(fetching->Diagnostics().Ready == 0);
+	CHECK(fetching->Diagnostics().Failed == 0);
 
 	// Bounded rather than "until it works": a loop with no ceiling turns a
 	// broken relay into a hung suite.
@@ -403,8 +411,11 @@ TEST_CASE("a client fetches and verifies content over a relay", "[delivery][rela
 	}
 
 	REQUIRE(fetching->StateOf(asked) == RequestState::Ready);
+	CHECK(fetching->Diagnostics().Pending == 0);
+	CHECK(fetching->Diagnostics().Ready == 1);
 	const std::optional<engine::delivery::Asset> asset = fetching->Take(asked);
 	REQUIRE(asset.has_value());
+	CHECK(fetching->Diagnostics().Ready == 0);
 
 	// **Verified against the signed manifest, over a relay.** The bytes came
 	// through a hop that could have altered them and the check is the same one a
@@ -413,6 +424,35 @@ TEST_CASE("a client fetches and verifies content over a relay", "[delivery][rela
 	CHECK(asset->Name == store.AssetName);
 	CHECK(fetching->Counters().VerificationFailures == 0);
 	CHECK(link.Asked >= 2);
+}
+
+TEST_CASE("request diagnostics separate settled records from active delivery", "[delivery][direct][relay]") {
+	const Published store("diagnostics");
+	DeliverySettings direct;
+	direct.Publisher = store.Publisher;
+	direct.Sources.push_back(store.Directory());
+	std::unique_ptr<engine::delivery::AssetClient> fetching = MakeAssetClient(direct);
+	REQUIRE(fetching != nullptr);
+
+	const engine::delivery::RequestId ready = fetching->Request(store.AssetName);
+	const engine::delivery::RequestId failed = fetching->Request("missing.asset");
+	const engine::delivery::RequestId cancelled = fetching->Request("cancelled.asset");
+	CHECK(fetching->Cancel(cancelled));
+	for (int pump = 0; pump < 16 && fetching->Diagnostics().Pending > 0; ++pump) {
+		fetching->Pump();
+	}
+
+	const RequestDiagnostics settled = fetching->Diagnostics();
+	CHECK(fetching->StateOf(ready) == RequestState::Ready);
+	CHECK(fetching->StateOf(failed) == RequestState::Failed);
+	CHECK(settled.Pending == 0);
+	CHECK(settled.Ready == 1);
+	CHECK(settled.Failed == 1);
+	CHECK(settled.TransportActive == 0);
+	CHECK(fetching->Outstanding() == 2);
+	REQUIRE(fetching->Take(ready).has_value());
+	CHECK(fetching->Diagnostics().Ready == 0);
+	CHECK(fetching->Diagnostics().Failed == 1);
 }
 
 TEST_CASE("a relay that will not carry a request is retried, not failed", "[delivery][relay]") {
@@ -443,6 +483,29 @@ TEST_CASE("a relay that will not carry a request is retried, not failed", "[deli
 		fetching->Pump();
 	}
 	CHECK(fetching->StateOf(asked) == RequestState::Ready);
+}
+
+TEST_CASE("relay diagnostics report only held transport as active", "[delivery][relay]") {
+	const Published store("diagnostic-active");
+	DeliverySettings serving;
+	serving.Publisher = store.Publisher;
+	serving.Sources.push_back(store.Directory());
+	LoopbackRelay link(MakeRouteFetcher(serving));
+	link.Holding = true;
+	std::unique_ptr<engine::delivery::AssetClient> fetching =
+		MakeAssetClient(Relayed(store.Publisher), &link);
+	REQUIRE(fetching != nullptr);
+	const engine::delivery::RequestId asked = fetching->Request(store.AssetName);
+	fetching->Pump();
+	CHECK(fetching->StateOf(asked) == RequestState::Pending);
+	CHECK(fetching->Diagnostics().TransportActive == 1);
+
+	link.Holding = false;
+	for (int pump = 0; pump < 64 && fetching->StateOf(asked) == RequestState::Pending; ++pump)
+		fetching->Pump();
+	REQUIRE(fetching->StateOf(asked) == RequestState::Ready);
+	CHECK(fetching->Diagnostics().TransportActive == 0);
+	CHECK(fetching->Diagnostics().Ready == 1);
 }
 
 TEST_CASE("a relay source with nothing to carry it is skipped", "[delivery][relay]") {

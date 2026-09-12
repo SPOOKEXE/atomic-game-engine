@@ -1845,8 +1845,8 @@ namespace studio {
 		// which is exactly what `profile_frame` did until it had a flag of its
 		// own to set.
 		engine::core::FrameGraph::SetEnabled(
-			ShowFrameGraph || ShowScriptProfile || ShowScripting || ControlWantsProfile ||
-			!Settings.ProfileSnapshot.empty()
+			ShowFrameGraph || ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
+			ControlWantsProfile || !Settings.ProfileSnapshot.empty()
 		);
 
 		// The source profiler is opt-in at the VM boundary. It uses Luau's step

@@ -811,6 +811,35 @@ namespace engine::core {
 		return readings;
 	}
 
+	std::vector<HeapHistorySnapshot> HeapProfile::HistorySnapshots(double windowSeconds) {
+		const HistoryGuard guard;
+
+		std::vector<HeapHistorySnapshot> readings;
+		if (Recorded.Readings == nullptr || Recorded.NodeBytes == nullptr || Recorded.Count == 0) {
+			return readings;
+		}
+
+		const uint32_t tracked = std::min<uint32_t>(NodeCount(), MAXIMUM_TRACKED_NODES);
+		size_t first = 0;
+		if (windowSeconds > 0.0) {
+			const double newest = Recorded.Readings[RingIndex(Recorded.Count - 1)].Seconds;
+			while (first + 1 < Recorded.Count &&
+				   newest - Recorded.Readings[RingIndex(first)].Seconds > windowSeconds) {
+				first++;
+			}
+		}
+		readings.reserve(Recorded.Count - first);
+		for (size_t offset = first; offset < Recorded.Count; offset++) {
+			const size_t slot = RingIndex(offset);
+			HeapHistorySnapshot snapshot;
+			snapshot.Sample = Recorded.Readings[slot];
+			const int64_t *bytes = Recorded.NodeBytes + slot * MAXIMUM_TRACKED_NODES;
+			snapshot.InclusiveBytes.assign(bytes, bytes + tracked);
+			readings.push_back(std::move(snapshot));
+		}
+		return readings;
+	}
+
 	double HeapProfile::HistorySeconds() {
 		const HistoryGuard guard;
 		if (Recorded.Readings == nullptr || Recorded.Count < 2) {

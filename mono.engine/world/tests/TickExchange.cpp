@@ -1,10 +1,17 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/TickExchange.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.world.tickexchange")
 using namespace engine;
@@ -148,6 +155,22 @@ namespace {
 		ecs::Components::Register<PhaseTrace>("test.TickExchangePhaseTrace");
 		REQUIRE(world::RegisterTickExchangeChannel({"phase.test", CollectPhase, ServePhase, ApplyPhase}));
 	}
+
+	struct Pool {
+		explicit Pool(unsigned workers) {
+			parallel::Jobs::Start(workers);
+		}
+		~Pool() {
+			parallel::Jobs::Stop();
+		}
+	};
+
+	void InstallProfilePhase(ecs::Store &store, ecs::Scheduler &systems) {
+		InstallPhase(store, systems);
+		systems.Add("physics.profile-step", ecs::Phase::Simulation, [](ecs::Store &world) {
+			world.ResourceMutable<PhaseTrace>()->Integrated++;
+		});
+	}
 }
 TEST_CASE(
 	"phase exchange joins input before serving and catch-up round before next input", "[world][tick-exchange]"
@@ -175,6 +198,77 @@ TEST_CASE(
 				REQUIRE(trace->Integrated == 6);
 				REQUIRE(trace->Arrivals == 3);
 			});
+	}
+}
+
+TEST_CASE("parallel endpoint exchange reports each physics worker stage once", "[world][tick-exchange]") {
+	Pool pool{4};
+	if (parallel::Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
+	RegisterPhase();
+	struct RecordedTree {
+		std::vector<std::string> Names;
+		std::vector<uint32_t> Parents;
+		std::vector<uint8_t> Reported;
+	};
+	const auto capture = [](world::ExecutionMode mode) {
+		world::UniverseSettings settings;
+		settings.Mode = mode;
+		settings.WorldParallelFloorMilliseconds = 0.0f;
+		world::Universe worlds(settings);
+		world::WorldSettings worldSettings;
+		worldSettings.Name = core::Name("phase-source");
+		const world::WorldId source = worlds.Create(worldSettings);
+		worldSettings.Name = core::Name("phase-destination");
+		const world::WorldId destination = worlds.Create(worldSettings);
+		worlds.Enter(source, InstallProfilePhase);
+		worlds.Enter(destination, InstallProfilePhase);
+
+		const bool enabled = core::FrameGraph::IsEnabled();
+		core::FrameGraph::SetEnabled(true);
+		core::FrameGraph::BeginFrame();
+		worlds.Tick(2.0f / 60.0f);
+		core::FrameGraph::EndFrame();
+		RecordedTree recorded;
+		for (const core::FrameSpan &span : core::FrameGraph::Spans()) {
+			recorded.Names.emplace_back(span.Name);
+			recorded.Parents.push_back(span.Parent);
+			recorded.Reported.push_back(span.Reported);
+		}
+		core::FrameGraph::SetEnabled(enabled);
+		return recorded;
+	};
+
+	const auto countPhysics = [](const RecordedTree &recorded) {
+		return std::count(recorded.Names.begin(), recorded.Names.end(), "physics.profile-step");
+	};
+	const auto hasWorldAncestor = [](const RecordedTree &recorded, size_t index) {
+		for (uint32_t parent = recorded.Parents[index]; parent < index; parent = recorded.Parents[parent]) {
+			if (recorded.Names[parent] == "phase-source" || recorded.Names[parent] == "phase-destination") {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	const RecordedTree parallel = capture(world::ExecutionMode::WorldParallel);
+	CHECK(countPhysics(parallel) == 4);
+	for (size_t index = 0; index < parallel.Names.size(); ++index) {
+		if (parallel.Names[index] == "physics.profile-step") {
+			CHECK(parallel.Reported[index]);
+			CHECK(hasWorldAncestor(parallel, index));
+		}
+	}
+
+	const RecordedTree serial = capture(world::ExecutionMode::WorldSerial);
+	CHECK(countPhysics(serial) == 4);
+	for (size_t index = 0; index < serial.Names.size(); ++index) {
+		if (serial.Names[index] == "physics.profile-step") {
+			CHECK_FALSE(serial.Reported[index]);
+		}
 	}
 }
 TEST_CASE(

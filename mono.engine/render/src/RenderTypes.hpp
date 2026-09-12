@@ -267,6 +267,9 @@ namespace engine::render {
 			glm::vec4 SpinPriority{};
 		};
 		LensUniform Lenses[scene::MAX_SCENE_SHADER_LENSES]{};
+		// Appended after the fixed lens array so existing lens programs retain
+		// their six-member prefix and their lens-array offset.
+		glm::vec4 CameraDepth{};
 	};
 
 	// Slot zero for an authored fullscreen fragment shader. The contract is

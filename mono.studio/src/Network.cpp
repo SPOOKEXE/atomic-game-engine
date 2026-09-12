@@ -23,6 +23,7 @@
 // resolution an interactive panel is read at.
 
 #include "AssetProfiler.hpp"
+#include "ProfilerFlame.hpp"
 
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/Builtin.hpp>
@@ -144,6 +145,84 @@ namespace studio {
 			if (note != nullptr && ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", note);
 			}
+		}
+
+		bool IsDeliverySpan(const engine::core::FrameSpan &span) {
+			if (span.Category == engine::core::ProfileCategory::Network) return true;
+			return span.Category == engine::core::ProfileCategory::Assets &&
+				   (span.Name.starts_with("delivery::") || span.Name.starts_with("delivery.") ||
+					span.Name.starts_with("content."));
+		}
+
+		void CaptureNetwork(std::vector<DiagnosticSpan> &into) {
+			const auto &spans = engine::core::FrameGraph::Spans();
+			into.clear();
+			into.reserve(spans.size());
+			std::vector<uint32_t> kept(spans.size(), engine::core::FrameGraph::NO_PARENT);
+			for (size_t index = 0; index < spans.size(); ++index) {
+				const engine::core::FrameSpan &source = spans[index];
+				if (!IsDeliverySpan(source)) continue;
+				uint32_t parent = source.Parent;
+				while (parent < index && kept[parent] == engine::core::FrameGraph::NO_PARENT)
+					parent = spans[parent].Parent;
+				const uint32_t retainedParent =
+					parent < index ? kept[parent] : engine::core::FrameGraph::NO_PARENT;
+				into.push_back(
+					DiagnosticSpan{
+						.Name = std::string(source.Name),
+						.Depth = retainedParent == engine::core::FrameGraph::NO_PARENT
+									 ? 0
+									 : into[retainedParent].Depth + 1,
+						.Parent = retainedParent,
+						.StartMilliseconds = source.StartMilliseconds,
+						.Milliseconds = source.Milliseconds,
+						.SelfMilliseconds = source.SelfMilliseconds,
+						.IdleMilliseconds = source.IdleMilliseconds,
+						.Category = source.Category,
+						.Owner = source.Owner,
+						.Reported = source.Reported
+					}
+				);
+				kept[index] = static_cast<uint32_t>(into.size() - 1);
+			}
+		}
+
+		void DrawNetworkFlame(const std::vector<DiagnosticSpan> &spans, float capturedFrame) {
+			if (spans.empty()) {
+				ImGui::TextDisabled("no network or delivery spans recorded yet");
+				return;
+			}
+			const float frame = std::max(capturedFrame, 0.001f);
+			std::vector<DiagnosticSpan> measured;
+			MeasuredProfilerSpans(spans, measured);
+			std::vector<uint32_t> rows;
+			const uint32_t rowCount = LayoutDiagnosticRows(measured, rows);
+			const ImVec2 origin = ImGui::GetCursorScreenPos();
+			const float width = ImGui::GetContentRegionAvail().x;
+			constexpr float HEIGHT = 20.0f;
+			ImDrawList *draw = ImGui::GetWindowDrawList();
+			for (size_t index = 0; index < measured.size(); ++index) {
+				const DiagnosticSpan &span = measured[index];
+				const float left = origin.x + std::clamp(span.StartMilliseconds / frame, 0.0f, 1.0f) * width;
+				const float right =
+					origin.x +
+					std::clamp((span.StartMilliseconds + span.Milliseconds) / frame, 0.0f, 1.0f) * width;
+				const float top = origin.y + static_cast<float>(rows[index]) * HEIGHT;
+				const ImVec2 min(left, top);
+				const ImVec2 max(std::max(left + 1.0f, right), top + HEIGHT - 2.0f);
+				draw->AddRectFilled(min, max, IM_COL32(72, 150, 230, 220));
+				draw->PushClipRect(min, max, true);
+				draw->AddText(ImVec2(left + 3.0f, top + 2.0f), IM_COL32_WHITE, span.Name.c_str());
+				draw->PopClipRect();
+				if (ImGui::IsMouseHoveringRect(min, max))
+					ImGui::SetTooltip("%s\n%.3f ms measured", span.Name.c_str(), span.Milliseconds);
+			}
+			ImGui::Dummy(ImVec2(width, static_cast<float>(rowCount) * HEIGHT));
+			for (const DiagnosticSpan &span : spans)
+				if (span.Reported)
+					ImGui::TextDisabled(
+						"reported worker: %s, %.3f ms measured", span.Name.c_str(), span.Milliseconds
+					);
 		}
 	}
 
@@ -1075,7 +1154,19 @@ namespace studio {
 			NetworkRow("Up", PerSecond(rates.UpPerSecond), "bytes sent to write origins");
 
 			if (ContentClient) {
-				NetworkRow("In flight", std::to_string(ContentClient->Outstanding()) + " request(s)");
+				const engine::delivery::RequestDiagnostics diagnostics = ContentClient->Diagnostics();
+				NetworkRow(
+					"Waiting",
+					std::to_string(diagnostics.Pending) + " request(s)",
+					"requests waiting on a manifest, source, local read, or verification"
+				);
+				NetworkRow(
+					"Active wire",
+					std::to_string(diagnostics.TransportActive) + " fetch(es)",
+					"only transport handles the delivery client still reports pending"
+				);
+				NetworkRow("Ready", std::to_string(diagnostics.Ready) + " unconsumed request(s)");
+				NetworkRow("Failed", std::to_string(diagnostics.Failed) + " unconsumed request(s)");
 			}
 			if (ContentUploads) {
 				NetworkRow("Queued", std::to_string(ContentUploads->Remaining()) + " upload(s)");
@@ -1085,6 +1176,66 @@ namespace studio {
 
 		if (rates.WindowSeconds <= 0.0) {
 			ImGui::TextDisabled("no window yet - rates appear after a second of samples");
+		}
+
+		ImGui::SeparatorText("Network profiler");
+		if (!NetworkProfiler.Paused) {
+			CaptureNetwork(NetworkProfiler.Spans);
+			NetworkProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
+			NetworkProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
+			NetworkProfiler.Dropped = engine::core::FrameGraph::Dropped();
+		}
+		if (ImGui::Button(NetworkProfiler.Paused ? "Resume capture" : "Pause capture"))
+			NetworkProfiler.Paused = !NetworkProfiler.Paused;
+		ImGui::SameLine();
+		if (ImGui::Button("Snapshot timings")) {
+			CaptureNetwork(NetworkProfiler.Spans);
+			NetworkProfiler.FrameMilliseconds = engine::core::FrameGraph::FrameMilliseconds();
+			NetworkProfiler.UnmarkedMilliseconds = engine::core::FrameGraph::UnmarkedMilliseconds();
+			NetworkProfiler.Dropped = engine::core::FrameGraph::Dropped();
+		}
+		ImGui::TextDisabled(
+			"frame %.3f ms, unmarked %.3f ms, %zu dropped",
+			NetworkProfiler.FrameMilliseconds,
+			NetworkProfiler.UnmarkedMilliseconds,
+			NetworkProfiler.Dropped
+		);
+		if (ImGui::BeginTabBar("network profile")) {
+			if (ImGui::BeginTabItem("Stages")) {
+				if (ImGui::BeginTable(
+						"network stages", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+					)) {
+					ImGui::TableSetupColumn("stage", ImGuiTableColumnFlags_WidthStretch);
+					ImGui::TableSetupColumn("inclusive ms");
+					ImGui::TableSetupColumn("self ms");
+					ImGui::TableSetupColumn("idle ms");
+					ImGui::TableHeadersRow();
+					for (const DiagnosticSpan &span : NetworkProfiler.Spans) {
+						ImGui::TableNextRow();
+						ImGui::TableNextColumn();
+						ImGui::Indent(12.0f * static_cast<float>(span.Depth));
+						ImGui::TextUnformatted(span.Name.c_str());
+						ImGui::Unindent(12.0f * static_cast<float>(span.Depth));
+						if (span.Reported) {
+							ImGui::SameLine();
+							ImGui::TextDisabled("reported worker work");
+						}
+						ImGui::TableNextColumn();
+						ImGui::Text("%.3f", span.Milliseconds);
+						ImGui::TableNextColumn();
+						ImGui::Text("%.3f", span.SelfMilliseconds);
+						ImGui::TableNextColumn();
+						ImGui::Text("%.3f", span.IdleMilliseconds);
+					}
+					ImGui::EndTable();
+				}
+				ImGui::EndTabItem();
+			}
+			if (ImGui::BeginTabItem("Flame graph")) {
+				DrawNetworkFlame(NetworkProfiler.Spans, NetworkProfiler.FrameMilliseconds);
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
 		}
 
 		// --- downloading ------------------------------------------------------

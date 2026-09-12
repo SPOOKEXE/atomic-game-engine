@@ -288,6 +288,38 @@ namespace engine::delivery {
 				return Requests.size();
 			}
 
+			RequestDiagnostics Diagnostics() const override {
+				RequestDiagnostics diagnostics;
+				for (const auto &entry : Requests) {
+					switch (entry.second.State) {
+					case RequestState::Pending:
+						++diagnostics.Pending;
+						break;
+					case RequestState::Ready:
+						++diagnostics.Ready;
+						break;
+					case RequestState::Failed:
+						++diagnostics.Failed;
+						break;
+					case RequestState::Unknown:
+						break;
+					}
+				}
+
+				const auto transportPending = [this](size_t source, net::http::FetchId fetch) {
+					return fetch.IsValid() && source < Sources.size() && Sources[source].Fetcher != nullptr &&
+						   Sources[source].Fetcher->StateOf(fetch) == net::http::FetchState::Pending;
+				};
+				// A valid handle can already be completed and waiting for this pump to
+				// drain it. Count only the transport's pending state as active wire work.
+				diagnostics.TransportActive = transportPending(CatalogueCursor, CatalogueFetch) ? 1 : 0;
+				diagnostics.TransportActive += transportPending(CatalogueSource, CodebookFetch) ? 1 : 0;
+				for (const BundleJob &job : Jobs) {
+					diagnostics.TransportActive += transportPending(job.SourceIndex, job.Fetch) ? 1 : 0;
+				}
+				return diagnostics;
+			}
+
 			const DeliveryCounters &Counters() const override {
 				return Tally;
 			}
