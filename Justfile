@@ -213,8 +213,8 @@ medium-render-profile seconds="15":
         # timestamp span, and the resident-row upload path as separate proof.
         draw_calls="$(awk '
             /triangle\(s\) in [0-9]+ draw call\(s\) at the busiest frame/ {
-                for (index = 1; index < NF; index++) {
-                    if ($index == "in" && $(index + 2) == "draw") value = $(index + 1)
+                for (field = 1; field < NF; field++) {
+                    if ($field == "in" && $(field + 2) == "draw") value = $(field + 1)
                 }
             }
             END { if (value == "") exit 1; print value }
