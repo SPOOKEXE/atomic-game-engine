@@ -718,15 +718,50 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("clouds-compute"), [this](const graph::RunContext &context) {
 			if (!State->Caps.HasCompute) return true;
-			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
-			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, false);
-			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
-			if (!source.IsValid() || !target.IsValid() ||
-				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || target.Format != source.Format ||
-				target.Width != source.Width || target.Height != source.Height) {
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) {
+				ENGINE_ERROR(
+					"clouds compute '{}' requires one sky input and one clouds output, got {} and {}",
+					context.Name.Text(),
+					context.Reads.size(),
+					context.Writes.size()
+				);
 				return false;
 			}
-			return State->RecordEnvironmentClouds(
+			// The world-scoped skybox node is the direct predecessor. Its history
+			// lifetime preserves completed images for later frames, but this edge
+			// must consume the current write even while scene damage invalidates the
+			// previous generation.
+			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, true);
+			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid()) {
+				ENGINE_ERROR("clouds compute '{}' could not allocate environment-sky", context.Name.Text());
+				return false;
+			}
+			if (!target.IsValid()) {
+				ENGINE_ERROR(
+					"clouds compute '{}' could not allocate environment-clouds", context.Name.Text()
+				);
+				return false;
+			}
+			if (source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || target.Format != source.Format) {
+				ENGINE_ERROR(
+					"clouds compute '{}' requires matching RGBA16F sky and clouds textures",
+					context.Name.Text()
+				);
+				return false;
+			}
+			if (target.Width != source.Width || target.Height != source.Height) {
+				ENGINE_ERROR(
+					"clouds compute '{}' requires matching sky and clouds extents, got {}x{} and {}x{}",
+					context.Name.Text(),
+					source.Width,
+					source.Height,
+					target.Width,
+					target.Height
+				);
+				return false;
+			}
+			const bool recorded = State->RecordEnvironmentClouds(
 				CurrentLighting.EnvironmentState,
 				Command,
 				source.Texture,
@@ -735,6 +770,10 @@ namespace engine::render {
 				target.Height,
 				Result.ComputeDispatches
 			);
+			if (!recorded) {
+				ENGINE_ERROR("clouds compute '{}' could not record its compute pass", context.Name.Text());
+			}
+			return recorded;
 		});
 
 		frameNodes.Set(core::Name("sky"), [this](const graph::RunContext &context) {
@@ -745,7 +784,7 @@ namespace engine::render {
 			if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1)
 				return false;
 			const Impl::NamedTexture environment =
-				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, false)
+				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, true)
 										  : Impl::NamedTexture{};
 			uniforms.Fog.w = State->Caps.HasCompute && environment.IsValid() ? 1.0f : 0.0f;
 			const std::array bindings{

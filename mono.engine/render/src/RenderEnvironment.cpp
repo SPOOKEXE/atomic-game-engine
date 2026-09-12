@@ -194,6 +194,16 @@ namespace engine::render {
 		ENGINE_PROFILE_CAT("cloud environment compute", core::ProfileCategory::Render);
 		if (EnvironmentCloudCompute == nullptr || command == nullptr || source == nullptr ||
 			destinationTexture == nullptr || width == 0 || height == 0) {
+			ENGINE_ERROR(
+				"cloud environment compute unavailable: pipeline={}, command={}, source={}, destination={}, "
+				"extent={}x{}",
+				EnvironmentCloudCompute != nullptr,
+				command != nullptr,
+				source != nullptr,
+				destinationTexture != nullptr,
+				width,
+				height
+			);
 			return false;
 		}
 		EnvironmentTarget *cache = nullptr;
@@ -263,7 +273,10 @@ namespace engine::render {
 		destination.texture = destinationTexture;
 		destination.cycle = true;
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
-		if (pass == nullptr) return false;
+		if (pass == nullptr) {
+			ENGINE_ERROR("cloud environment compute pass: {}", SDL_GetError());
+			return false;
+		}
 		SDL_BindGPUComputePipeline(pass, EnvironmentCloudCompute);
 		const SDL_GPUTextureSamplerBinding binding{source, Textures.Sampler()};
 		SDL_BindGPUComputeSamplers(pass, 0, &binding, 1);
