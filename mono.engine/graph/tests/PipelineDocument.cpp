@@ -244,14 +244,12 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 			occlusion || (resource->Name == Name("occlusion") &&
 						  resource->Format == engine::graph::ResourceFormat::R8 && resource->Divisor == 2);
 		composedImage = composedImage || (resource->Name == Name("composed-image") && !resource->External);
-		skyHistory = skyHistory ||
-			(resource->Name == Name("environment-sky") &&
-			 resource->Lifetime == engine::graph::ResourceLifetime::History && resource->Width == 1024 &&
-			 resource->Height == 512);
-		cloudsHistory = cloudsHistory ||
-			(resource->Name == Name("environment-clouds") &&
-			 resource->Lifetime == engine::graph::ResourceLifetime::History && resource->Width == 1024 &&
-			 resource->Height == 512);
+		skyHistory = skyHistory || (resource->Name == Name("environment-sky") &&
+									resource->Lifetime == engine::graph::ResourceLifetime::History &&
+									resource->Width == 1024 && resource->Height == 512);
+		cloudsHistory = cloudsHistory || (resource->Name == Name("environment-clouds") &&
+										  resource->Lifetime == engine::graph::ResourceLifetime::History &&
+										  resource->Width == 1024 && resource->Height == 512);
 	}
 	CHECK(emissive);
 	CHECK(occlusion);

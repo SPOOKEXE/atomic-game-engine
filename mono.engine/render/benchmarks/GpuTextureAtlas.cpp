@@ -116,8 +116,12 @@ namespace {
 	}
 
 	std::array<uint8_t, 4> Pattern(uint32_t source) {
-		return {static_cast<uint8_t>(31 + source * 43), static_cast<uint8_t>(197 - source * 29),
-			static_cast<uint8_t>(53 + source * 37), 255};
+		return {
+			static_cast<uint8_t>(31 + source * 43),
+			static_cast<uint8_t>(197 - source * 29),
+			static_cast<uint8_t>(53 + source * 37),
+			255
+		};
 	}
 
 	void FillPattern(void *mapped, uint64_t bytes, uint32_t source) {
@@ -228,7 +232,8 @@ namespace {
 		auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
 		if (device == nullptr) throw std::runtime_error("headless renderer returned no GPU device");
 
-		const engine::render::TextureAtlasPlan plan = engine::render::PlanTextureAtlas(SOURCE_COUNT, SOURCE_EXTENT);
+		const engine::render::TextureAtlasPlan plan =
+			engine::render::PlanTextureAtlas(SOURCE_COUNT, SOURCE_EXTENT);
 		if (!plan.Valid()) throw std::runtime_error("4k texture atlas plan is invalid");
 		engine::render::TextureAtlasResidency residency(plan);
 		const bool atlas = layout == Layout::Atlas;
@@ -309,11 +314,12 @@ namespace {
 			throw std::runtime_error(std::string("copy pass failed: ") + SDL_GetError());
 		}
 		for (uint32_t index = 0; index < SOURCE_COUNT; index++) {
-			const engine::render::TextureAtlasRequest request = atlas ? residency.Request(index)
-																	 : engine::render::TextureAtlasRequest{
-																			.Rect = {.Width = SOURCE_EXTENT, .Height = SOURCE_EXTENT},
-																			.Upload = true,
-																		};
+			const engine::render::TextureAtlasRequest request =
+				atlas ? residency.Request(index)
+					  : engine::render::TextureAtlasRequest{
+							.Rect = {.Width = SOURCE_EXTENT, .Height = SOURCE_EXTENT},
+							.Upload = true,
+						};
 			if (!request.Valid() || !request.Upload) {
 				continue;
 			}

@@ -250,7 +250,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
-	CHECK(opened == 25);
+	CHECK(opened == 27);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

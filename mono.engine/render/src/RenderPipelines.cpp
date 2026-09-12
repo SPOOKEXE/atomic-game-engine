@@ -1090,8 +1090,8 @@ namespace engine::render {
 				(GBufferPipeline != nullptr && DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
 				 DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && VolumePipeline != nullptr &&
 				 TonemapPipeline != nullptr)) &&
-			   (!Caps.HasCompute ||
-				(EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr && Lod.Select != nullptr));
+			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
+									 Lod.Select != nullptr));
 	}
 
 	bool Renderer::Impl::EnsureTransparentLayer() {

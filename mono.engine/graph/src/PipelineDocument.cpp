@@ -1429,8 +1429,8 @@ namespace engine::graph {
 						   edit.NodeKind == core::Name("clouds-compute");
 			}
 			if (skipNode ||
-				(edit.Kind == EditKind::Reads &&
-				 (edit.Target == core::Name("occlusion") || edit.Target == core::Name("environment-clouds")))) {
+				(edit.Kind == EditKind::Reads && (edit.Target == core::Name("occlusion") ||
+												  edit.Target == core::Name("environment-clouds")))) {
 				continue;
 			}
 			Edit reducedEdit = edit;

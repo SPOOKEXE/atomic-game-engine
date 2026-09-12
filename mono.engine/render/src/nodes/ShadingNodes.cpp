@@ -393,12 +393,13 @@ namespace engine::render {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			const uint32_t resolved = scene::ResolveRenderFeatures(
-				scene::ALL_RENDER_FEATURES,
-				recording.CurrentLighting.RenderFeatures,
-				recording.DrawCamera.RenderFeatures,
-				{},
-				SupportedRenderFeatures(State->Caps)
-			).Enabled;
+										  scene::ALL_RENDER_FEATURES,
+										  recording.CurrentLighting.RenderFeatures,
+										  recording.DrawCamera.RenderFeatures,
+										  {},
+										  SupportedRenderFeatures(State->Caps)
+			)
+										  .Enabled;
 			if ((resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) == 0u) {
 				recording.ClearOcclusion();
 				return true;
@@ -662,8 +663,9 @@ namespace engine::render {
 			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture source = GraphTexture(context.Reads.front(), context, false);
 			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
-			if (!source.IsValid() || !target.IsValid() || source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
-				target.Format != source.Format || target.Width != source.Width || target.Height != source.Height) {
+			if (!source.IsValid() || !target.IsValid() ||
+				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || target.Format != source.Format ||
+				target.Width != source.Width || target.Height != source.Height) {
 				return false;
 			}
 			return State->RecordEnvironmentClouds(
@@ -682,16 +684,18 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			Impl::PbrSlot &pbr = *recording.Pbr;
 			PbrUniforms &uniforms = recording.Uniforms;
-			if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1) return false;
-			const Impl::NamedTexture environment = context.Reads.size() == 3
-				? recording.GraphTexture(context.Reads[2], context, false)
-				: Impl::NamedTexture{};
+			if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1)
+				return false;
+			const Impl::NamedTexture environment =
+				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, false)
+										  : Impl::NamedTexture{};
 			uniforms.Fog.w = State->Caps.HasCompute && environment.IsValid() ? 1.0f : 0.0f;
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler},
 				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
-				SDL_GPUTextureSamplerBinding{environment.IsValid() ? environment.Texture : State->FallbackTexture,
-									 recording.Sampler},
+				SDL_GPUTextureSamplerBinding{
+					environment.IsValid() ? environment.Texture : State->FallbackTexture, recording.Sampler
+				},
 			};
 			recording.Fullscreen(
 				context.Name,

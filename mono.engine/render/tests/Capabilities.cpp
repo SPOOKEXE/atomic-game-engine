@@ -1,5 +1,5 @@
-#include <engine/render/Capabilities.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/render/Capabilities.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

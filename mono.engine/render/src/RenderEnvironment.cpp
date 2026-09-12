@@ -55,8 +55,8 @@ namespace engine::render {
 		uint32_t &dispatches
 	) {
 		ENGINE_PROFILE_CAT("environment compute", core::ProfileCategory::Render);
-		if (EnvironmentSkyCompute == nullptr || command == nullptr || destinationTexture == nullptr || width == 0 ||
-			height == 0) {
+		if (EnvironmentSkyCompute == nullptr || command == nullptr || destinationTexture == nullptr ||
+			width == 0 || height == 0) {
 			return false;
 		}
 		EnvironmentTarget *cache = nullptr;
@@ -216,7 +216,8 @@ namespace engine::render {
 		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		const EnvironmentUniformShaders shaders = EnvironmentShadersOf(environment);
 		uint64_t signature = scene::MixSignature(1, ActiveContentOwner.Id());
-		signature = scene::MixSignature(signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source)));
+		signature =
+			scene::MixSignature(signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source)));
 		for (const EnvironmentTarget &candidate : Environments) {
 			if (candidate.SkyTarget == source) {
 				signature = scene::MixSignature(signature, candidate.SkySignature);
@@ -243,15 +244,18 @@ namespace engine::render {
 			.CloudColour = Colour(clouds.Colour),
 			.Clouds = glm::vec4{clouds.Cover, clouds.Density, clouds.WindDirection.X, clouds.WindDirection.Y},
 			.CloudCompute =
-				glm::vec4{cloudCompute.CellSize, cloudCompute.Detail, cloudCompute.Height, cloudCompute.Thickness},
+				glm::vec4{
+					cloudCompute.CellSize, cloudCompute.Detail, cloudCompute.Height, cloudCompute.Thickness
+				},
 			.CloudMotion = glm::vec4{clouds.WindSpeed, static_cast<float>(environment.CloudTime), 0.0f, 0.0f},
 			.Modes = glm::uvec4{modes.Skybox, modes.Atmosphere, modes.Clouds, 0u},
-			.Counts = glm::uvec4{
-				sky.Seed,
-				cloudCompute.Seed,
-				std::clamp(airCompute.Samples, 1u, 64u),
-				std::clamp(cloudCompute.Steps, 1u, 64u),
-			},
+			.Counts =
+				glm::uvec4{
+					sky.Seed,
+					cloudCompute.Seed,
+					std::clamp(airCompute.Samples, 1u, 64u),
+					std::clamp(cloudCompute.Steps, 1u, 64u),
+				},
 			.Shaders = glm::uvec4{shaders.Skybox, shaders.Atmosphere, shaders.Clouds, 0u},
 		};
 

@@ -112,8 +112,12 @@ TEST_CASE("mesh decimation fallback retains the largest isolated face", "[assets
 	using namespace engine::assets;
 	MeshData source;
 	source.Vertices = {
-		At(0.0f, 0.0f, 0.0f), At(0.1f, 0.0f, 0.0f), At(0.0f, 0.0f, 0.1f),
-		At(2.0f, 0.0f, 0.0f), At(6.0f, 0.0f, 0.0f), At(2.0f, 0.0f, 4.0f),
+		At(0.0f, 0.0f, 0.0f),
+		At(0.1f, 0.0f, 0.0f),
+		At(0.0f, 0.0f, 0.1f),
+		At(2.0f, 0.0f, 0.0f),
+		At(6.0f, 0.0f, 0.0f),
+		At(2.0f, 0.0f, 4.0f),
 	};
 	source.Indices = {0, 1, 2, 3, 4, 5};
 	source.ComputeBounds();

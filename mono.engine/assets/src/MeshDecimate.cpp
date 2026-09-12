@@ -49,9 +49,11 @@ namespace engine::assets {
 					points[corner][axis] = index == replace ? position[axis] : vertices[index].Position[axis];
 			}
 			const std::array<float, 3> left{
-				points[1][0] - points[0][0], points[1][1] - points[0][1], points[1][2] - points[0][2]};
+				points[1][0] - points[0][0], points[1][1] - points[0][1], points[1][2] - points[0][2]
+			};
 			const std::array<float, 3> right{
-				points[2][0] - points[0][0], points[2][1] - points[0][1], points[2][2] - points[0][2]};
+				points[2][0] - points[0][0], points[2][1] - points[0][1], points[2][2] - points[0][2]
+			};
 			return {
 				left[1] * right[2] - left[2] * right[1],
 				left[2] * right[0] - left[0] * right[2],
@@ -88,7 +90,7 @@ namespace engine::assets {
 				const auto beforeFace = FaceVector(vertices, triangles[index]);
 				const auto afterFace = FaceVector(vertices, after, left, merged);
 				const float alignment = beforeFace[0] * afterFace[0] + beforeFace[1] * afterFace[1] +
-								beforeFace[2] * afterFace[2];
+										beforeFace[2] * afterFace[2];
 				if (!(alignment > 0.0f)) return false;
 			}
 			return true;
@@ -238,7 +240,9 @@ namespace engine::assets {
 			for (size_t triangle = 0; triangle < covered.size(); triangle++) {
 				if (covered[triangle]) continue;
 				const size_t index = triangle * 3;
-				triangles.push_back({source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]});
+				triangles.push_back(
+					{source.Indices[index], source.Indices[index + 1], source.Indices[index + 2]}
+				);
 				owners.push_back(uncoveredOwner);
 			}
 			if (std::find(owners.begin(), owners.end(), uncoveredOwner) != owners.end()) runCount++;
@@ -266,7 +270,8 @@ namespace engine::assets {
 					if (owners[index] == submesh && !Degenerate(triangles[index])) ranked.push_back(index);
 				}
 				std::stable_sort(ranked.begin(), ranked.end(), [&](size_t left, size_t right) {
-					return FaceAreaSquared(vertices, triangles[left]) > FaceAreaSquared(vertices, triangles[right]);
+					return FaceAreaSquared(vertices, triangles[left]) >
+						   FaceAreaSquared(vertices, triangles[right]);
 				});
 				for (size_t index = target; index < ranked.size(); index++)
 					triangles[ranked[index]][2] = triangles[ranked[index]][0];

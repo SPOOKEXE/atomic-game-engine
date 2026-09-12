@@ -1,43 +1,51 @@
-renderpipeline 2
-resource "shadow" depth D32F 0 0 1 yes
-resource "last-frame" colour RGBA8_SRGB 0 0 1 yes
-resource "mirror-views" colour RGBA16F 0 0 1 yes
-resource "portal-image" texture RGBA16F 0 0 1 yes
-resource "portal-light" texture RGBA16F 0 0 1 yes
-resource "world-entities" entities R8 0 0 1 no
-resource "view-camera" camera R8 0 0 1 no
-resource "view-entities" entities R8 0 0 1 no
-resource "visible-entities" entities R8 0 0 1 no
-resource "ordered-entities" entities R8 0 0 1 no
-resource "resident-meshes" buffer R8 0 0 1 no
-resource "view-instances" buffer R8 0 0 1 no
-resource "lod-instances" buffer R8 0 0 1 no
-resource "albedo" colour RGBA8_SRGB 0 0 1 no
-resource "normal" colour RGB10A2 0 0 1 no
-resource "material" colour RGBA8 0 0 1 no
-resource "emissive" colour RGBA16F 0 0 1 no
-resource "depth" depth D24S8 0 0 1 no
-resource "linear-depth" colour R32F 0 0 1 no
-resource "occlusion" colour R8 0 0 2 yes
-resource "lit" colour RGBA16F 0 0 1 no
-resource "sky-lit" colour RGBA16F 0 0 1 no
-resource "volume-lit" colour RGBA16F 0 0 1 no
-resource "lens-b" colour RGBA16F 0 0 1 no
-resource "lens-scratch" colour RGBA16F 0 0 1 no
-resource "tonemapped" colour RGBA8_SRGB 0 0 1 no
-resource "portaled" colour RGBA16F 0 0 1 no
-resource "mirrored" colour RGBA16F 0 0 1 no
-resource "display" colour RGBA16F 0 0 1 no
-resource "scene-image" colour RGBA8_SRGB 0 0 1 no
-resource "interface-image" colour RGBA8_SRGB 0 0 1 yes
-resource "composed-image" colour RGBA8_SRGB 0 0 1 no
+renderpipeline 3
+resource "shadow" depth D32F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "last-frame" colour RGBA8_SRGB 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "mirror-views" colour RGBA16F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "portal-image" texture RGBA16F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "portal-light" texture RGBA16F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "world-entities" entities R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "view-camera" camera R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "view-entities" entities R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "visible-entities" entities R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "ordered-entities" entities R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "resident-meshes" buffer R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "environment-sky" storage RGBA16F 1024 512 1 no auto 1 1 1 0 1 auto auto 0 history "" 0
+resource "environment-clouds" storage RGBA16F 1024 512 1 no auto 1 1 1 0 1 auto auto 0 history "" 0
+resource "view-instances" buffer R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "lod-instances" buffer R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "albedo" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "normal" colour RGB10A2 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "material" colour RGBA8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "emissive" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "depth" depth D24S8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "linear-depth" colour R32F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "occlusion" colour R8 0 0 2 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "sky-lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "volume-lit" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "lens-b" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "lens-scratch" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "tonemapped" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "portaled" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "mirrored" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "display" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "scene-image" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "interface-image" colour RGBA8_SRGB 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "composed-image" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 node "world" "world" world no
 writes "world-entities" "entities"
-node "shadow" "shadow" world no
-reads "world-entities" "entities"
-writes "shadow" "shadow"
 node "mesh-residency" "mesh-residency" world no
 writes "resident-meshes" "meshes"
+node "shadow" "shadow" world no
+reads "world-entities" "entities"
+reads "resident-meshes" "meshes"
+writes "shadow" "shadow"
+node "skybox-compute" "skybox-compute" world no
+writes "environment-sky" "sky"
+node "clouds-compute" "clouds-compute" world no
+reads "environment-sky" "sky"
+writes "environment-clouds" "clouds"
 node "camera" "camera" view no
 writes "view-camera" "camera"
 node "last-frame" "last-frame" view no
@@ -97,8 +105,9 @@ writes "lit" "colour"
 node "sky" "sky" view no
 reads "lit" "colour"
 reads "depth" "depth"
+reads "environment-clouds" "environment"
 writes "sky-lit" "colour"
-node "volumetrics" "volumetrics" view no
+node "fog" "fog" view no
 reads "sky-lit" "colour"
 reads "depth" "depth"
 writes "volume-lit" "colour"
@@ -145,12 +154,12 @@ enable "present" no
 enable "interface" no
 enable "overlay" no
 enable "output-image" no
-resource "demo-computed" storage RGBA16F 0 0 1 no
-resource "demo-post" colour RGBA16F 0 0 1 no
-resource "demo-antialiased" colour RGBA8_SRGB 0 0 1 no
-resource "demo-scene" colour RGBA8_SRGB 0 0 1 no
-resource "demo-interface" colour RGBA8_SRGB 0 0 1 yes
-resource "demo-composed" colour RGBA8_SRGB 0 0 1 no
+resource "demo-computed" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "demo-post" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "demo-antialiased" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "demo-scene" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "demo-interface" colour RGBA8_SRGB 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "demo-composed" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 node "demo-compute" "dispatch" view no
 reads "tonemapped" "source"
 writes "demo-computed" "target"

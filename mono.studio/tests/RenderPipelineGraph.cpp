@@ -19,11 +19,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 26);
+	CHECK(canvas.Nodes().size() == 28);
 
-	// The final two links carry the lit colour and depth into the sky pass. Pin
-	// them by name below so this count reads as a checksum rather than a mystery.
-	CHECK(canvas.Links().size() == 52);
+	// The environment compute stages add three links before the lit colour and
+	// depth enter the sky pass. Pin the stages below so this remains a checksum.
+	CHECK(canvas.Links().size() == 55);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
