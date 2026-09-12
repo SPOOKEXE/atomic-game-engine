@@ -15,7 +15,7 @@
 #include <nlohmann/json.hpp>
 
 TEST_SUITE_ID("engine.control.datascene")
-TEST_DEPENDS("engine.script.datascene")
+TEST_DEPENDS("engine.scripthost.datasceneservice")
 
 using engine::control::Surface;
 using engine::core::CFrame;

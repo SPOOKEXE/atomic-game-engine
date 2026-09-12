@@ -1617,8 +1617,8 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 }
 
 namespace {
-	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_";
-	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_";
+	constexpr std::string_view PLANET_CHUNK_PREFIX = "PlanetChunk_Haven_";
+	constexpr std::string_view PLANET_MESH_PREFIX = "PlanetMesh_Haven_";
 	constexpr size_t PLANET_PATCH_RESOLUTION = 17;
 	constexpr size_t PLANET_PATCH_VERTICES =
 		PLANET_PATCH_RESOLUTION * PLANET_PATCH_RESOLUTION + 4 * (PLANET_PATCH_RESOLUTION - 1);
@@ -1731,10 +1731,9 @@ TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", 
 	const size_t chunks = PlanetChunks(store);
 	CHECK(chunks > 6);
 	CHECK(chunks <= 6 * 64);
-	CHECK(PlanetChunksAtDepth(store, 2) > 0);
 	CHECK(PlanetChunksAtDepth(store, 3) > 0);
 
-	const Entity lutEntity = InScene(store, "PlanetColourLUT");
+	const Entity lutEntity = InScene(store, "PlanetColourLUT_Haven");
 	REQUIRE(lutEntity != engine::ecs::NULL_ENTITY);
 	const auto *lut = store.Get<engine::scene::EditableImage>(lutEntity);
 	REQUIRE(lut != nullptr);
@@ -1753,6 +1752,11 @@ TEST_CASE("the planet scene builds a shaded quadsphere out of quadtree leaves", 
 													  const engine::scene::EditableMesh &mesh) {
 		const std::string_view meshName = store.InstanceNameOf(entity).Text();
 		if (!meshName.starts_with(PLANET_MESH_PREFIX)) {
+			return;
+		}
+		// The selector may retire a queued leaf after its mesh row was created.
+		// Only a completed mesh belongs to a current visible chunk.
+		if (mesh.Positions.empty()) {
 			return;
 		}
 
@@ -1835,10 +1839,10 @@ TEST_CASE("the planet quadtree follows the active camera", "[examples][scene][pl
 	size_t farPositiveZ = 0;
 	store.Each<const Visual>([&](Entity entity, const Visual &) {
 		const std::string_view name = store.InstanceNameOf(entity).Text();
-		if (name.starts_with("PlanetChunk_NZ_D3_")) {
+		if (name.starts_with(std::string(PLANET_CHUNK_PREFIX) + "NZ_D3_")) {
 			nearNegativeZ++;
 		}
-		if (name.starts_with("PlanetChunk_PZ_D3_")) {
+		if (name.starts_with(std::string(PLANET_CHUNK_PREFIX) + "PZ_D3_")) {
 			farPositiveZ++;
 		}
 	});

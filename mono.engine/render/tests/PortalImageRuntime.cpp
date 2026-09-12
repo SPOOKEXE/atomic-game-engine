@@ -338,6 +338,8 @@ TEST_CASE("portal source coalesces the latest in-flight camera demand", "[render
 		std::string error;
 		REQUIRE(DecodePortalImageRequest(messages.front().Payload, decoded, error));
 		CHECK(decoded.Geometry == latest.Geometry);
+		// Poll already issued the retained latest demand, so a repeated request
+		// joins that in-flight capture instead of opening another one.
 		CHECK(source.Issue(worlds.Requests, latest, Binding(), START).Status == PortalInboxStatus::Busy);
 		CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 		REQUIRE(
@@ -2481,13 +2483,15 @@ TEST_CASE("body motion follows the completed portal request", "[render][portal-r
 		) == world::PresentationStatus::Ok
 	);
 	REQUIRE(source.Poll(START).size() == 1);
-	const auto moved = source.Issue(worlds.Requests, request, Binding(), START);
-	REQUIRE(moved.Status == PortalInboxStatus::Issued);
-	CHECK(moved.RequestId != first.RequestId);
+	CHECK(source.Issue(worlds.Requests, request, Binding(), START).Status == PortalInboxStatus::Busy);
 	const auto messages = worlds.Universe.TakePresentation(worlds.Requests);
 	REQUIRE(messages.size() == 1);
+	// Poll immediately issues the retained latest body demand. A later caller
+	// joins that request instead of creating a duplicate capture.
+	CHECK(messages[0].Correlation != first.RequestId);
 	PortalImageRequest current;
 	REQUIRE(DecodePortalImageRequest(messages[0].Payload, current, error));
+	CHECK(current.Key.RequestId != first.RequestId);
 	CHECK(previous.Key.CameraRevision != current.Key.CameraRevision);
 	CHECK(current.Geometry == request.Geometry);
 }

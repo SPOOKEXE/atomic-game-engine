@@ -5,7 +5,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <studio/RenderPipelineGraph.hpp>
+#include <utility>
 
 TEST_SUITE_ID("studio.renderpipelinegraph")
 TEST_DEPENDS("engine.graph.pipelinedocument")
@@ -17,11 +19,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 26);
+	CHECK(canvas.Nodes().size() == 25);
 
 	// The final two links carry the lit colour and depth into the sky pass. Pin
 	// them by name below so this count reads as a checksum rather than a mystery.
-	CHECK(canvas.Links().size() == 54);
+	CHECK(canvas.Links().size() == 51);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -41,15 +43,15 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(shaderLenses != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(shaderLenses->Id, "colour") != nullptr);
 	CHECK(canvas.LinkInto(shaderLenses->Id, "depth") != nullptr);
-	const auto mirrorCapture =
+	const auto surfaceCapture =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
-			return node.Type == "render.pass.mirror-capture";
+			return node.Type == "render.pass.surface-capture";
 		});
-	REQUIRE(mirrorCapture != canvas.Nodes().end());
-	CHECK(canvas.LinkInto(mirrorCapture->Id, "last-frame") != nullptr);
-	CHECK(canvas.LinkInto(mirrorCapture->Id, "world-state") != nullptr);
-	CHECK(mirrorCapture->Widgets.at("feedback").Text == "last-frame");
-	CHECK(mirrorCapture->Widgets.at("max-recursion").Number == 3.0);
+	REQUIRE(surfaceCapture != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "world-state") != nullptr);
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "shadow") != nullptr);
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "entities") != nullptr);
+	CHECK(canvas.LinkInto(surfaceCapture->Id, "instances") != nullptr);
 	const auto deferredLighting =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.deferred-lighting";
@@ -99,9 +101,34 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 }
 
 TEST_CASE(
-	"mirror feedback and its bounded recursion are saved as node policy", "[studio][pipeline][mirror]"
+	"an authored mirror capture keeps its feedback policy through a canvas round trip",
+	"[studio][pipeline][mirror]"
 ) {
-	const PipelineDocument basis = DefaultPbrDocument();
+	PipelineDocument basis = DefaultPbrDocument();
+	basis.Record({.Kind = EditKind::Enable, .Name = engine::core::Name("surface-capture"), .Enabled = false});
+	basis.Record(
+		{.Kind = EditKind::AddNode,
+		 .Name = engine::core::Name("mirror-capture.policy"),
+		 .NodeKind = engine::core::Name("mirror-capture"),
+		 .Scope = NodeScope::View}
+	);
+	for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 5>{{
+			 {"last-frame", "last-frame"},
+			 {"world-entities", "world-state"},
+			 {"shadow", "shadow"},
+			 {"ordered-entities", "entities"},
+			 {"view-instances", "instances"},
+		 }}) {
+		basis.Record(
+			{.Kind = EditKind::Reads, .Target = engine::core::Name(resource), .Key = engine::core::Name(port)}
+		);
+	}
+	basis.Record(
+		{.Kind = EditKind::Writes,
+		 .Target = engine::core::Name("mirror-views"),
+		 .Key = engine::core::Name("surface")}
+	);
+
 	nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
