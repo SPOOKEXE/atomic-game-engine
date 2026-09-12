@@ -1,6 +1,7 @@
 // The join from a world's saved render documents to the renderer's compiled
 // runtime cache.
 
+#include <engine/core/Paths.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Capabilities.hpp>
 #include <engine/render/Renderer.hpp>
@@ -8,7 +9,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <client/Client.hpp>
 #include <client/Scene.hpp>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -20,6 +25,71 @@ TEST_DEPENDS("engine.render.passes")
 using engine::core::Name;
 using engine::graph::PipelineSet;
 using engine::render::Renderer;
+
+namespace {
+	struct TemporaryPipelineFile {
+		std::filesystem::path Path;
+
+		explicit TemporaryPipelineFile(std::string_view text) {
+			Path =
+				std::filesystem::temp_directory_path() /
+				("atomic-render-pipeline-" +
+				 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".pipeline");
+			std::ofstream output(Path, std::ios::binary);
+			output << text;
+		}
+
+		~TemporaryPipelineFile() {
+			std::error_code error;
+			std::filesystem::remove(Path, error);
+		}
+	};
+}
+
+TEST_CASE("a command-line pipeline selects a parsed demo profile", "[client][pipeline]") {
+	const std::filesystem::path path =
+		engine::core::Paths::Base().parent_path() / "assets/examples/pipelines/RenderFeatures.pipeline";
+	PipelineSet profiles;
+	Name selected;
+	std::string error;
+
+	REQUIRE(client::LoadRenderPipelineFile(path, profiles, selected, error));
+	CHECK(error.empty());
+	CHECK(selected == Name(client::COMMAND_LINE_RENDER_PIPELINE));
+	REQUIRE(profiles.Find(selected) != nullptr);
+
+	Renderer renderer;
+	CHECK(
+		client::InstallRenderingProfiles(profiles, renderer, 2, selected) ==
+		Name("Command Line Render Pipeline#2")
+	);
+}
+
+TEST_CASE("a malformed command-line pipeline refuses before client startup", "[client][pipeline]") {
+	const TemporaryPipelineFile malformed("renderpipeline 3\nnode broken\n");
+	PipelineSet profiles;
+	Name selected("previous");
+	std::string error;
+
+	CHECK_FALSE(client::LoadRenderPipelineFile(malformed.Path, profiles, selected, error));
+	CHECK(error.starts_with("not a render pipeline document"));
+	CHECK(profiles.Count() == 0);
+	CHECK(selected == Name("previous"));
+
+	client::Options options;
+	options.RenderPipelineFile = malformed.Path;
+	client::Client client;
+	CHECK_FALSE(client.Initialise(options));
+}
+
+TEST_CASE("a game keeps its embedded rendering profiles", "[client][pipeline]") {
+	client::Options options;
+	options.GameFile = "game.agame";
+	options.RenderPipelineFile = "demo.pipeline";
+	client::Client client;
+
+	CHECK_FALSE(client.Initialise(options));
+}
 
 TEST_CASE("universe profiles are qualified, selected, and replaced", "[client][pipeline]") {
 	PipelineSet first;

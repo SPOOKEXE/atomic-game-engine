@@ -238,6 +238,11 @@ namespace client {
 		// This file is single-player content, not a hosted server, and takes
 		// precedence over `--script`.
 		std::filesystem::path GameFile;
+
+		// A render pipeline document for demo worlds. Empty keeps their Default
+		// PBR selection. Game files own their embedded profile library instead.
+		std::filesystem::path RenderPipelineFile;
+
 		// Supervised rendering of one game world over an inherited control channel.
 		std::string PresentationWorld;
 		uint64_t PresentationSession = 0;

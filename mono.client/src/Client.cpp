@@ -164,6 +164,22 @@ namespace client {
 		Settings = options;
 		SubmittedMoveTick = 0;
 		InputLocalEpoch = InputSequenceEpoch = 0;
+		if (!Settings.RenderPipelineFile.empty()) {
+			if (!Settings.GameFile.empty()) {
+				ENGINE_ERROR("--render-pipeline applies to demo worlds; --game owns its rendering profiles");
+				return false;
+			}
+			std::string error;
+			if (!LoadRenderPipelineFile(
+					Settings.RenderPipelineFile, RenderingProfiles, PipelineSelected, error
+				)) {
+				ENGINE_ERROR(
+					"--render-pipeline '{}' failed: {}", Settings.RenderPipelineFile.string(), error
+				);
+				return false;
+			}
+			ENGINE_INFO("demo render pipeline from {}", Settings.RenderPipelineFile.string());
+		}
 		if (!Settings.CaptureSequence.empty()) {
 			if (Settings.MaximumFrames <= 0 || !Settings.Capture.empty()) {
 				ENGINE_ERROR(
@@ -520,6 +536,7 @@ namespace client {
 				index == 0 ? std::string("client.world") : "client.world." + std::to_string(index)
 			);
 			world.TickRate = Settings.TickRate;
+			world.RenderingProfile = PipelineSelected;
 
 			const engine::world::WorldId id = Universe_->Create(world);
 			if (!id.IsValid()) {

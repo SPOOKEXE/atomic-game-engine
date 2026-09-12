@@ -11,6 +11,7 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
@@ -45,7 +46,10 @@
 #include <algorithm>
 #include <client/Scene.hpp>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <span>
+#include <string>
 
 namespace client {
 
@@ -1035,6 +1039,46 @@ namespace client {
 		engine::core::Name selected
 	) {
 		return engine::render::InstallWorldPipeline(profiles, renderer, world, selected);
+	}
+
+	bool LoadRenderPipelineFile(
+		const std::filesystem::path &path,
+		engine::graph::PipelineSet &profiles,
+		engine::core::Name &selected,
+		std::string &error
+	) {
+		std::ifstream input(path, std::ios::binary);
+		if (!input) {
+			error = "could not open";
+			return false;
+		}
+		const std::string text(std::istreambuf_iterator<char>(input), {});
+
+		engine::graph::PipelineDocument document;
+		engine::core::Name offender;
+		const engine::graph::PipelineDocumentStatus read = engine::graph::Read(text, document, offender);
+		if (read != engine::graph::PipelineDocumentStatus::Ok) {
+			error = engine::graph::Describe(read);
+			if (offender.IsValid()) error += ": " + std::string(offender.Text());
+			return false;
+		}
+
+		engine::graph::RegisterRenderNodeKinds();
+		engine::graph::RenderGraph graph;
+		const engine::graph::PipelineDocumentStatus built = engine::graph::Build(document, graph, offender);
+		if (built != engine::graph::PipelineDocumentStatus::Ok) {
+			error = engine::graph::Describe(built);
+			if (offender.IsValid()) error += ": " + std::string(offender.Text());
+			return false;
+		}
+
+		const engine::core::Name name(COMMAND_LINE_RENDER_PIPELINE);
+		if (!profiles.Set(name, std::move(document))) {
+			error = "could not name the pipeline";
+			return false;
+		}
+		selected = name;
+		return true;
 	}
 
 	void RegisterClientComponents() {

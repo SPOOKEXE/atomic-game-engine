@@ -183,6 +183,7 @@ medium-render-profile seconds="15":
     mkdir -p .cache/medium-render-profile
     profile_build=".cache/build/profile"
     script="$profile_build/assets/examples/scripts/RenderFeaturesDemo.luau"
+    pipeline="$profile_build/assets/examples/pipelines/RenderFeatures.pipeline"
     previous_draw_calls=0
     for cameras in 1 2 8; do
         base=".cache/medium-render-profile/cameras-$cameras"
@@ -190,7 +191,8 @@ medium-render-profile seconds="15":
         timeout $(( {{seconds}} + 120 )) "$profile_build/client/client" \
             --headless --uncapped --frames 1000000000 --profile-seconds {{seconds}} \
             --width 1280 --height 720 --worlds "$cameras" --view-spacing 0 \
-            --script "$script" --profile-snapshot "$base-frame.txt" --heap-report "$base-heap.txt" \
+            --script "$script" --render-pipeline "$pipeline" \
+            --profile-snapshot "$base-frame.txt" --heap-report "$base-heap.txt" \
             > "$base.log" 2>&1
         test -s "$base-frame.txt"
         test -s "$base-heap.txt"
@@ -222,6 +224,11 @@ medium-render-profile seconds="15":
         grep -q 'gpu timestamps enabled' "$base.log"
         grep -Eq '^gpu [[:graph:]]+' "$base-frame.txt"
         grep -Eq '^[1-9][0-9]* of [1-9][0-9]* resident instance chunk\(s\)' "$base.log"
+        # RenderFeaturesDemo's three authored nodes prove this run used the
+        # staged document rather than the default PBR fallback.
+        grep -q 'demo-compute' "$base-frame.txt"
+        grep -q 'demo-post' "$base-frame.txt"
+        grep -q 'demo-fxaa' "$base-frame.txt"
         echo "medium-render-profile cameras=$cameras"
         grep -E "gpu heap:|gpu memory:|cache|upload|download|timestamp" "$base.log" || true
         grep -E "^(frame|span|category)" "$base-frame.txt" || true

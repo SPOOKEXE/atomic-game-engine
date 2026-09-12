@@ -32,7 +32,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace engine::script {
@@ -281,6 +283,20 @@ namespace client {
 		engine::render::Renderer &renderer,
 		uint64_t world,
 		engine::core::Name selected
+	);
+
+	// The stable universe key assigned to a document named by --render-pipeline.
+	inline constexpr const char *COMMAND_LINE_RENDER_PIPELINE = "Command Line Render Pipeline";
+
+	// Reads, parses, and validates one demo render pipeline before a renderer
+	// starts. On success it adds the document under COMMAND_LINE_RENDER_PIPELINE
+	// and returns that selection. On failure it leaves `profiles` and `selected`
+	// unchanged and explains the file, syntax, or graph error in `error`.
+	bool LoadRenderPipelineFile(
+		const std::filesystem::path &path,
+		engine::graph::PipelineSet &profiles,
+		engine::core::Name &selected,
+		std::string &error
 	);
 
 	// Registers this module's own types under explicit names.

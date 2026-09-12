@@ -117,6 +117,9 @@ int main(int argc, char **argv) {
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
 	arguments.Value("game", "PATH", "Game or world file to play single-player (.agame or .aworld)");
+	arguments.Value(
+		"render-pipeline", "FILE", "Pipeline document for every demo world; incompatible with --game"
+	);
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
@@ -306,6 +309,9 @@ int main(int argc, char **argv) {
 			ENGINE_WARN("--game and --script were both given; playing the game file");
 			options.ScriptPath.clear();
 		}
+	}
+	if (auto pipeline = arguments.Get("render-pipeline")) {
+		options.RenderPipelineFile = std::filesystem::path(*pipeline);
 	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
