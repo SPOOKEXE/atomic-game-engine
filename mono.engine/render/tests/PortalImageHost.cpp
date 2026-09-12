@@ -99,6 +99,22 @@ TEST_CASE(
 	CHECK(worlds.Universe.PresentationQueueUsage().Messages == 0);
 }
 
+TEST_CASE("portal host keeps a demanded capture while destination routing waits", "[render][portal-host]") {
+	Worlds worlds;
+	Renderer renderer;
+	PortalImageHost host(worlds.Universe, renderer);
+	auto demand = worlds.Demand();
+	const auto route = worlds.Route();
+	REQUIRE(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 1);
+	REQUIRE(host.Pump(0, 0, START).Requests == 1);
+
+	// Topology and replica discovery can leave the destination unresolved for a
+	// presentation frame. The existing capture remains valid until its owner is
+	// explicitly retired, so the viewport must keep it in flight.
+	CHECK(host.Submit(worlds.Source, 0, std::span(&demand, 1), {}, START) == 0);
+	CHECK(host.Submit(worlds.Source, 0, std::span(&demand, 1), std::span(&route, 1), START) == 0);
+}
+
 namespace {
 	PortalImageReply SendRetainedBodyRequest(
 		PortalImageHost &host,

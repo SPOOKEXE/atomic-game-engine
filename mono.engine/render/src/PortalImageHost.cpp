@@ -814,7 +814,8 @@ namespace engine::render {
 			state.Sources.push_back({source, viewSlot, opened.Address, std::move(runtime), {}, {}});
 			found = std::prev(state.Sources.end());
 		}
-		for (const auto portal : found->Portals) {
+		const auto previousPortals = found->Portals;
+		for (const auto portal : previousPortals) {
 			if (std::none_of(demands.begin(), demands.end(), [portal](const PortalImageDemand &demand) {
 					return demand.Binding.Portal == portal.Name;
 				})) {
@@ -830,7 +831,15 @@ namespace engine::render {
 				}
 			);
 			if (destination == destinations.end() || !destination->World.IsValid()) {
-				found->Runtime->InvalidatePortal(demand.Binding.Portal.Text());
+				// A topology or replica lookup can miss for one frame. Keep a live route so its
+				// owned image stays visible while the same capture remains in flight.
+				const auto retained = std::find_if(
+					previousPortals.begin(), previousPortals.end(), [&](const Impl::DemandedPortal &portal) {
+						return portal.Name == demand.Binding.Portal &&
+							   state.Universe.NameOf(portal.Destination).IsValid();
+					}
+				);
+				if (retained != previousPortals.end()) found->Portals.push_back(*retained);
 				continue;
 			}
 			found->Portals.push_back({demand.Binding.Portal, destination->World});
