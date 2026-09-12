@@ -72,22 +72,46 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 - [_] different antialiasing choices as render nodes
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area, nanite style) - LOD selection is a per-instance visual decision and belongs in the GPU-resident set beside the occlusion cull that already runs there, so a level change costs no CPU round trip.
 
-[ai data factory stuff]
-- [_] add EditableImage:ToBuffer() (RGBA)
-- [_] Checkpoint/restore - Seed-based only, not full ECS+physics+RNG state serialization
-- [_] Spatial queries - Basic entity queries exist, but no spatial reasoning ("objects left of X", "path blocked?")
-- [_] Shadow caster/receiver relationships - CastShadow property exists but no query API for "who shadows whom"
-- [_] Light probe/environment map query - Internal only, no external API
-- [_] Audio event/capture APIs - Audio-event grounding, spatial audio queries, waveform/spectrogram capture
-- [_] Skeleton/animation introspection - Keypoint data, animation state machine, character controller state
-- [_] Export/import standards - USD/glTF/COCO/YOLO/GeoJSON export, standard format import
-- [_] Durable evidence archive - MemoryStore persistence, versioned WorldRecord serialization
-- [_] Full checkpoint/restore - Arbitrary checkpoint save/restore beyond seed-based replay
-- [_] Recursion depth control - For mirrors/portals (currently fixed limit)
-- [_] Audio APIs
-- [_] Skeleton/animation introspection
-- [_] Export/import standards
-- [_] Durable evidence archive
+[MCP-ADDITIONS.md](MCP-ADDITIONS.md) describes proposed data-factory requirements; these are design targets, not verified implemented APIs.
+
+- [_] add EditableImage:ToBuffer() and EditableImage:FromBuffer(buffer) (RGBA) to luau and engine.
+- [_] share engine services through Luau DataSceneService, with thin MCP adapters at the boundary.
+- [_] expose capability, version and schema discovery, and report unsupported features explicitly.
+- [_] validate RGBA8 buffers as exactly width*height*4, including orientation, color space, alpha, copy semantics and separate typed HDR buffers.
+- [_] load repository script packages with source and asset hashes, seeded parameters, type checking, sandboxing and atomic scene edits.
+- [_] support all-system pause separately from physics-only pause.
+- [_] define exact fixed-tick actions with rational timing and deterministic tick boundaries.
+- [_] support render-only steps with zero simulation advance and an explicit temporal-history policy.
+- [_] checkpoint ECS, physics, RNG, script schedulers, events, clocks, string IDs and pinned asset dependencies, rejecting unsupported state.
+- [_] restore checkpoints only when compatible, and create fresh versions after restore.
+- [_] implement backward seek as checkpoint plus replay, never negative dt, with bounded history.
+- [_] support forks and versioned causal edits, including effects outside the edited spatial region while keeping branches isolated.
+- [_] keep snapshots immutable with stable string identities and captured clocks.
+- [_] make step, snapshot and multicamera capture atomic, with asynchronous readback completion.
+- [_] batch scenes on GPU headless or offscreen, with explicit capability and readiness reporting.
+- [_] capture RGB linear HDR, depth, normals, IDs, semantic masks and part masks.
+- [_] define camera intrinsics, extrinsics, projection conventions, near/far, jitter, lens distortion, crop, units and world/camera coordinates.
+- [_] record visibility, occlusion, disocclusion and visible or amodal masks.
+- [_] record optical flow, motion vectors, trajectories, scene cuts and validity flags.
+- [_] expose PBR albedo, roughness, metallic, emissive, specular, transmission, shading geometry, normals and UV maps.
+- [_] label lights, shadows, per-light caster and receiver contribution, and ambient-occlusion estimator provenance.
+- [_] support reflections from SSR, probes, mirrors and portals, including secondary views, recursion and staleness.
+- [_] describe render-graph passes and resources with budgets and dependencies, without inventing ground truth.
+- [_] expose physics contacts, impulses, forces, torque, sleep, assemblies, joints, controller fields and units.
+- [_] provide spatial queries for raycasts, AABB, OBB, occupancy, SDF, BEV, navmesh and affordances with authored semantics.
+- [_] export rigs, skeletons, keypoints, skinning data and animation tracks.
+- [_] synchronize audio waveforms with source events and timing.
+- [_] align text, image, video and audio structured records with controls, grounding points, boxes, masks, crops and marks.
+- [_] accept text instructions with reference images, controls, video motion constraints and externally interpreted engine-validated patches.
+- [_] support forward scene-to-modalities and inverse observation-to-scene patches, with rerendered numeric and semantic metrics plus ambiguity masks.
+- [_] generate counterfactual pairs, parameter sweeps, domain randomization and holdouts without label leakage.
+- [_] emit structured event narratives with time, knowledge, belief and provenance fields.
+- [_] track source evidence IDs, deduplicate facts, mark stale or missing evidence, and define repair and external-factory ownership.
+- [_] write durable artifact manifests, schemas, checksums and chunks with retention, atomic finalization, crash resume and bounded backpressure.
+- [_] declare interop subsets for glTF, USD, COCO, YOLO, GeoJSON and WKT, including sidecars and known losses.
+- [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
+- [_] maintain an acceptance fixture suite for replay roundtrip, no-time-advance, image-label alignment, retry isolation and invalid data.
+- [_] profile release captures for actual bytes, allocations, peak memory, timings and output quality.
 
 Rendering extra fixes:
 - [_] blackhole warp is opposite on one side to what it should be (quaternions can help do the curvature if needed).
@@ -98,12 +122,12 @@ TODO tweaks:
 - [_] fix selection box / left click drag / left click drag select, buggy
 - [_] fix unable to drag in node canvases
 - [_] left-click to select also drags them immediately, give a deadzone period before attempt dragging
-- [_] add column sorting to asset profiler
+- [x] add column sorting to asset profiler
 - [_] add a timing selector and dropdown to select Average/Max/Min checkbox like Frame Graph to the Heap Profiler (average across N milliseconds)
 - [_] swap average checkbox to a dropdown to select Average/Max/Min checkbox
-- [_] View > Datastores, rename to View > DataStore Editor
-- [_] View > Datastore, rename to View > DataStore Config
-- [_] View > CDN, rename to View > CDN Config
+- [x] View > Datastores, rename to View > DataStore Editor
+- [x] View > Datastore, rename to View > DataStore Config
+- [x] View > CDN, rename to View > CDN Config
 - [_] rename View > Physics Solver to View > Physics Profiler, move under View > Pipeline Profiler, and remake it based on what Pipeline Profile contains.
 - [_] change how particle:Emit works where we mark the particle as wanting to emit via a flag, then, do a batch emit (hook this into the Enabled as well). Big luau bottleneck (or maybe even a StoredEmitValue value would be nicer?).
 - [_] Network profiler; in studio, says 715 requests in flight but no traffic is happening. Rebuild based on Physics Profiler and Pipeline Profiler. Flamegraph as well.
