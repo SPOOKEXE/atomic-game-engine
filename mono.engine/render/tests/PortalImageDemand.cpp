@@ -249,6 +249,66 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"portal demand preserves an oblique rolled lens through an inverse scaled return seam",
+	"[render][portal-demand]"
+) {
+	auto seam = Seam();
+	seam.Scale = .4f;
+	seam.Destination = core::CFrame({13, -4, 9}) * core::CFrame::Angles(.6f, -.35f, .8f);
+	auto viewer = Viewer();
+	viewer.CameraFrame = core::CFrame::LookAt({-3, 2, 11}, {1, -.5f, 0}) * core::CFrame::Angles(0, 0, .47f);
+	viewer.Camera.NearPlane = .15f;
+	viewer.Camera.FarPlane = 400;
+	viewer.Projection = glm::frustumRH_ZO(-.08f, .17f, -.04f, .11f, .15f, 400.f);
+	PortalImageDemand demand;
+	REQUIRE(
+		BuildPortalImageDemand(seam, core::Name("Door.Return"), viewer, 3, SETTINGS, demand) ==
+		PortalDemandStatus::Ready
+	);
+	const auto forward = scene::SeamMapping(seam);
+	const scene::SeamTransform reverse{
+		forward.Frame.Inverse(), forward.Frame.PointToWorldSpace(forward.Origin), 1.0f / forward.Scale
+	};
+	const auto &request = demand.Request;
+	const auto remote = core::CFrame(
+		{request.Position[0], request.Position[1], request.Position[2]},
+		glm::quat(
+			request.Orientation[3], request.Orientation[0], request.Orientation[1], request.Orientation[2]
+		)
+	);
+	const auto returned = reverse.Place(remote);
+	CHECK(returned.Position.FuzzyEq(viewer.CameraFrame.Position, 1e-5f));
+	CHECK(returned.LookVector().FuzzyEq(viewer.CameraFrame.LookVector(), 1e-5f));
+	CHECK(returned.UpVector().FuzzyEq(viewer.CameraFrame.UpVector(), 1e-5f));
+	const auto centre = forward.Point(seam.Centre);
+	const core::Vector3 clipNormal{request.ClipPlane[0], request.ClipPlane[1], request.ClipPlane[2]};
+	CHECK(clipNormal.Dot(remote.Position) + request.ClipPlane[3] < 0);
+	CHECK(clipNormal.Dot(centre) + request.ClipPlane[3] > 0);
+	const float side = scene::SeamOffset(seam, viewer.CameraFrame.Position);
+	const auto sourceNormal = reverse.Rotate(clipNormal);
+	CHECK(sourceNormal.FuzzyEq(seam.Normal * (side >= 0 ? -1.0f : 1.0f), 1e-5f));
+	const float near = viewer.Camera.NearPlane;
+	CHECK(
+		request.Frustum[0] ==
+		Catch::Approx(near * ((*viewer.Projection)[2][0] - 1) / (*viewer.Projection)[0][0])
+	);
+	CHECK(
+		request.Frustum[1] ==
+		Catch::Approx(near * ((*viewer.Projection)[2][0] + 1) / (*viewer.Projection)[0][0])
+	);
+	CHECK(
+		request.Frustum[2] ==
+		Catch::Approx(near * ((*viewer.Projection)[2][1] - 1) / (*viewer.Projection)[1][1])
+	);
+	CHECK(
+		request.Frustum[3] ==
+		Catch::Approx(near * ((*viewer.Projection)[2][1] + 1) / (*viewer.Projection)[1][1])
+	);
+	CHECK(request.Frustum[4] == Catch::Approx(near));
+	CHECK(request.Frustum[5] == Catch::Approx(viewer.Camera.FarPlane));
+}
+
+TEST_CASE(
 	"portal image request identity changes only with effective view or seam inputs", "[render][portal-demand]"
 ) {
 	auto seam = Seam();
