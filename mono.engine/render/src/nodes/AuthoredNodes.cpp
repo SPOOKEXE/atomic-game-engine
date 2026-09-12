@@ -19,6 +19,15 @@
 
 namespace engine::render {
 	namespace {
+		// Shared by the hard screen-space shaders. Keeping authored values in a
+		// separate slot preserves GraphPassUniforms for ordinary dispatch nodes.
+		struct HardRenderUniforms {
+			glm::vec4 Trace{32.0f, 100.0f, 0.1f, 0.0f};
+		};
+
+		bool IsHardRenderNode(core::Name kind) {
+			return kind == core::Name("raytrace") || kind == core::Name("pathtrace");
+		}
 		bool AttachmentDemanded(
 			std::span<const scene::DrawInstance> instances,
 			core::Name node,
@@ -332,6 +341,7 @@ namespace engine::render {
 			const bool readInstances = demanded && instances != nullptr && *instances == "resident";
 			const std::string *uniforms = node->Parameter(core::Name("uniforms"));
 			const bool readViewUniforms = !demanded || (uniforms != nullptr && *uniforms == "view");
+			const bool hardUniforms = IsHardRenderNode(node->Kind);
 			if (localX == 0 || localY == 0 || localZ == 0) {
 				ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
 				return true;
@@ -346,7 +356,7 @@ namespace engine::render {
 				bindings.size(),
 				writes.size(),
 				readInstances ? 1u : 0u,
-				readViewUniforms ? 1u : 0u,
+				(readViewUniforms ? 1u : 0u) + (hardUniforms ? 1u : 0u),
 				localX,
 				localY,
 				localZ
@@ -451,6 +461,14 @@ namespace engine::render {
 					recording.InstanceCount
 				);
 				SDL_PushGPUComputeUniformData(dispatchCommand, 0, &passUniforms, sizeof(passUniforms));
+			}
+			if (hardUniforms) {
+				HardRenderUniforms hard;
+				hard.Trace.x = node->Number(core::Name("steps"), 32.0f);
+				hard.Trace.y = node->Number(core::Name("max-distance"), 100.0f);
+				hard.Trace.z = node->Number(core::Name("thickness"), 0.1f);
+				hard.Trace.w = node->Number(core::Name("samples-per-frame"), 1.0f);
+				SDL_PushGPUComputeUniformData(dispatchCommand, 1, &hard, sizeof(hard));
 			}
 			const std::string *mode = node->Parameter(core::Name("dispatch.mode"));
 			const bool coverTarget = mode == nullptr || *mode != "groups";

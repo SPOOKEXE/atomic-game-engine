@@ -13,6 +13,7 @@ layout(set = 2, binding = 0, std140) uniform Pass {
 	vec4 view;
 	uvec4 features;
 } pass;
+layout(set = 2, binding = 1, std140) uniform Trace { vec4 trace; } options;
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -20,9 +21,9 @@ void main() {
 	vec2 uv = (vec2(pixel) + 0.5) * pass.target.zw;
 	vec3 surfaceNormal = texture(normal, uv).xyz * 2.0 - 1.0;
 	float originDepth = texture(depth, uv).r;
-	float maxDistance = 100.0;
-	float thickness = 0.1;
-	const int steps = 32;
+	float maxDistance = options.trace.y;
+	float thickness = options.trace.z;
+	int steps = int(options.trace.x);
 	vec2 direction = normalize(surfaceNormal.xz + vec2(0.0001)) * pass.target.zw;
 	vec2 hit = uv;
 	bool hitValid = false;
