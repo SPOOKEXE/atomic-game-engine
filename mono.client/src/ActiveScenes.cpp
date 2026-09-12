@@ -101,7 +101,7 @@ namespace client {
 	) {
 		BatchTargets.clear();
 		BatchViews.clear();
-		BatchTargets.reserve(Collected.size());
+		BatchTargets.reserve(Collected.size() + (offscreenDisplayed ? 1 : 0));
 		BatchViews.reserve(Collected.size() + 1);
 		for (const ActiveScene &scene : Collected) {
 			if (scene.World == displayedWorld) continue;

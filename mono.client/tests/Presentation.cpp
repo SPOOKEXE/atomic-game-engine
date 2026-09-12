@@ -133,6 +133,26 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(firstTargets[0] != firstTargets[1]);
 
 	collector.SubmitBatch(
+		retired,
+		collector.Scenes().front().View,
+		800,
+		600,
+		true,
+		{},
+		[&](std::span<const render::View> batch) {
+			REQUIRE(batch.size() == 3);
+			for (const render::View &view : batch) {
+				REQUIRE(view.Target != nullptr);
+				CHECK(view.Target->Width == 800);
+				CHECK(view.Target->Height == 600);
+			}
+			CHECK(batch[0].Target != batch[1].Target);
+			CHECK(batch[1].Target != batch[2].Target);
+			return render::FrameResult{};
+		}
+	);
+
+	collector.SubmitBatch(
 		zulu, collector.Scenes()[1].View, 0, 0, false, {}, [&](std::span<const render::View> batch) {
 			REQUIRE(batch.size() == 2);
 			REQUIRE(batch.front().Target != nullptr);
