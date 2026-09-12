@@ -117,8 +117,8 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	};
 
 	CHECK(columnOf("world") == 0);
-	CHECK(columnOf("shadow") == 1);
-	CHECK(columnOf("mesh-residency") == 2);
+	CHECK(columnOf("mesh-residency") == 1);
+	CHECK(columnOf("shadow") == 2);
 	CHECK(columnOf("camera") == 0);
 	CHECK(columnOf("select-lod") == 6);
 	CHECK(columnOf("surface-capture") == 7);

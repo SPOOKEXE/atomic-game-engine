@@ -74,6 +74,53 @@ TEST_CASE("resource kinds have stable diagnostic names", "[graph]") {
 	CHECK(std::string(engine::graph::Describe(ResourceKind::Entities)) == "entities");
 }
 
+TEST_CASE("resource shape and access are executable graph contracts", "[graph][resource-contract]") {
+	RenderGraph graph;
+	const ResourceId readable = graph.AddResource({
+		.Name = Name("readable"),
+		.Kind = ResourceKind::Texture,
+		.Format = engine::graph::ResourceFormat::RGBA8,
+		.Width = 8,
+		.Height = 8,
+		.Access = engine::graph::ResourceAccess::Read,
+		.Samples = 4,
+		.Depth = 1,
+		.Layers = 2,
+		.FirstMip = 0,
+		.MipCount = 2,
+		.Lifetime = engine::graph::ResourceLifetime::History,
+	});
+	REQUIRE(readable.IsValid());
+	const auto *desc = graph.FindResource(readable);
+	REQUIRE(desc != nullptr);
+	CHECK(desc->External);
+	CHECK(desc->Bytes(1, 1) == 2560);
+
+	graph.AddNode({.Name = Name("bad-writer"), .Writes = {readable}});
+	Name offender;
+	CHECK(graph.Validate(offender) == GraphStatus::WriteAccessDenied);
+	CHECK(offender == Name("readable"));
+
+	RenderGraph writeOnly;
+	const ResourceId writable = writeOnly.AddResource({
+		.Name = Name("writable"),
+		.Kind = ResourceKind::Texture,
+		.External = true,
+		.Access = engine::graph::ResourceAccess::Write,
+	});
+	writeOnly.AddNode({.Name = Name("bad-reader"), .Reads = {writable}});
+	CHECK(writeOnly.Validate(offender) == GraphStatus::ReadAccessDenied);
+}
+
+TEST_CASE("invalid resource allocation shapes are refused", "[graph][resource-contract]") {
+	RenderGraph graph;
+	CHECK_FALSE(graph.AddResource({.Name = Name("samples"), .Samples = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("depth"), .Depth = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("layers"), .Layers = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("mips"), .MipCount = 0}).IsValid());
+	CHECK_FALSE(graph.AddResource({.Name = Name("mip-range"), .FirstMip = 31, .MipCount = 2}).IsValid());
+}
+
 TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 
@@ -89,8 +136,8 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(compiled.Shared[1])->Name == Name("shadow"));
-	CHECK(graph.Find(compiled.Shared.back())->Name == Name("mesh-residency"));
+	CHECK(graph.Find(compiled.Shared[1])->Name == Name("mesh-residency"));
+	CHECK(graph.Find(compiled.Shared.back())->Name == Name("shadow"));
 	CHECK(graph.Find(compiled.Final.front())->Name == Name("present"));
 	CHECK(graph.Find(compiled.Final.back())->Name == Name("output-image"));
 }
@@ -137,8 +184,8 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	// `Renderer::Render` documents for an empty span of views.
 	REQUIRE(recorder.Ran.size() == 7);
 	CHECK(recorder.Ran[0] == "world");
-	CHECK(recorder.Ran[1] == "shadow");
-	CHECK(recorder.Ran[2] == "mesh-residency");
+	CHECK(recorder.Ran[1] == "mesh-residency");
+	CHECK(recorder.Ran[2] == "shadow");
 	CHECK(recorder.Ran[3] == "present");
 	CHECK(recorder.Ran[4] == "interface");
 	CHECK(recorder.Ran[5] == "overlay");

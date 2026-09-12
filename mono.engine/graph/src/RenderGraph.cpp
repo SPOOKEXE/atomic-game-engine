@@ -164,6 +164,108 @@ namespace engine::graph {
 		return ChannelCount(format) == 4;
 	}
 
+	const char *Describe(ResourceAccess access) {
+		switch (access) {
+		case ResourceAccess::Automatic:
+			return "auto";
+		case ResourceAccess::Read:
+			return "read";
+		case ResourceAccess::Write:
+			return "write";
+		case ResourceAccess::ReadWrite:
+			return "read-write";
+		}
+		return "?";
+	}
+
+	bool ParseResourceAccess(std::string_view text, ResourceAccess &out) {
+		for (const ResourceAccess candidate :
+			 {ResourceAccess::Automatic,
+			  ResourceAccess::Read,
+			  ResourceAccess::Write,
+			  ResourceAccess::ReadWrite}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const char *Describe(ResourceColourSpace space) {
+		switch (space) {
+		case ResourceColourSpace::Automatic:
+			return "auto";
+		case ResourceColourSpace::Linear:
+			return "linear";
+		case ResourceColourSpace::SRGB:
+			return "srgb";
+		}
+		return "?";
+	}
+
+	bool ParseResourceColourSpace(std::string_view text, ResourceColourSpace &out) {
+		for (const ResourceColourSpace candidate :
+			 {ResourceColourSpace::Automatic, ResourceColourSpace::Linear, ResourceColourSpace::SRGB}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const char *Describe(ResourceAlphaSpace space) {
+		switch (space) {
+		case ResourceAlphaSpace::Automatic:
+			return "auto";
+		case ResourceAlphaSpace::Opaque:
+			return "opaque";
+		case ResourceAlphaSpace::Straight:
+			return "straight";
+		case ResourceAlphaSpace::Premultiplied:
+			return "premultiplied";
+		}
+		return "?";
+	}
+
+	bool ParseResourceAlphaSpace(std::string_view text, ResourceAlphaSpace &out) {
+		for (const ResourceAlphaSpace candidate :
+			 {ResourceAlphaSpace::Automatic,
+			  ResourceAlphaSpace::Opaque,
+			  ResourceAlphaSpace::Straight,
+			  ResourceAlphaSpace::Premultiplied}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const char *Describe(ResourceLifetime lifetime) {
+		switch (lifetime) {
+		case ResourceLifetime::Transient:
+			return "transient";
+		case ResourceLifetime::External:
+			return "external";
+		case ResourceLifetime::History:
+			return "history";
+		}
+		return "?";
+	}
+
+	bool ParseResourceLifetime(std::string_view text, ResourceLifetime &out) {
+		for (const ResourceLifetime candidate :
+			 {ResourceLifetime::Transient, ResourceLifetime::External, ResourceLifetime::History}) {
+			if (text == Describe(candidate)) {
+				out = candidate;
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void ResourceDesc::Resolve(
 		uint32_t viewWidth, uint32_t viewHeight, uint32_t &outWidth, uint32_t &outHeight
 	) const {
@@ -178,6 +280,28 @@ namespace engine::graph {
 		const uint32_t by = Divisor == 0 ? 1u : Divisor;
 		outWidth = std::max(1u, viewWidth / by);
 		outHeight = std::max(1u, viewHeight / by);
+	}
+
+	uint64_t ResourceDesc::Bytes(uint32_t viewWidth, uint32_t viewHeight) const {
+		if (Kind == ResourceKind::Camera || Kind == ResourceKind::Entities) return 0;
+		uint32_t resolvedWidth = 0;
+		uint32_t resolvedHeight = 0;
+		Resolve(viewWidth, viewHeight, resolvedWidth, resolvedHeight);
+		if (Kind == ResourceKind::Buffer && BufferStride != 0) {
+			return static_cast<uint64_t>(resolvedWidth) * resolvedHeight * BufferStride;
+		}
+
+		uint64_t pixels = 0;
+		uint32_t mipWidth = std::max(1u, resolvedWidth >> FirstMip);
+		uint32_t mipHeight = std::max(1u, resolvedHeight >> FirstMip);
+		uint32_t mipDepth = std::max(1u, Depth >> FirstMip);
+		for (uint32_t mip = 0; mip < MipCount; mip++) {
+			pixels += static_cast<uint64_t>(mipWidth) * mipHeight * mipDepth * Layers;
+			mipWidth = std::max(1u, mipWidth / 2);
+			mipHeight = std::max(1u, mipHeight / 2);
+			mipDepth = std::max(1u, mipDepth / 2);
+		}
+		return (pixels * Samples * BitsPerPixel(Format) + 7) / 8;
 	}
 
 	namespace {
@@ -201,6 +325,10 @@ namespace engine::graph {
 			return "a node neither reads nor writes";
 		case GraphStatus::UnknownResource:
 			return "a node names a resource this graph does not hold";
+		case GraphStatus::ReadAccessDenied:
+			return "a node reads a write-only resource";
+		case GraphStatus::WriteAccessDenied:
+			return "a node writes a read-only resource";
 		case GraphStatus::ReadsBeforeWrite:
 			return "a node reads something nothing earlier wrote";
 		case GraphStatus::TooManyNodes:
@@ -218,7 +346,8 @@ namespace engine::graph {
 	}
 
 	ResourceId RenderGraph::AddResource(const ResourceDesc &desc) {
-		if (!desc.Name.IsValid()) {
+		if (!desc.Name.IsValid() || desc.Samples == 0 || desc.Depth == 0 || desc.Layers == 0 ||
+			desc.MipCount == 0 || desc.FirstMip > 31 || desc.MipCount > 32 - desc.FirstMip) {
 			return {};
 		}
 
@@ -235,7 +364,9 @@ namespace engine::graph {
 			}
 		}
 
-		Resources.push_back(desc);
+		ResourceDesc stored = desc;
+		stored.External = stored.External || stored.Lifetime != ResourceLifetime::Transient;
+		Resources.push_back(std::move(stored));
 		return ResourceId{static_cast<uint32_t>(Resources.size())};
 	}
 
@@ -338,15 +469,25 @@ namespace engine::graph {
 			}
 
 			for (const ResourceId resource : node.Reads) {
-				if (FindResource(resource) == nullptr) {
+				const ResourceDesc *desc = FindResource(resource);
+				if (desc == nullptr) {
 					offender = node.Name;
 					return GraphStatus::UnknownResource;
 				}
+				if (desc->Access == ResourceAccess::Write) {
+					offender = desc->Name;
+					return GraphStatus::ReadAccessDenied;
+				}
 			}
 			for (const ResourceId resource : node.Writes) {
-				if (FindResource(resource) == nullptr) {
+				const ResourceDesc *desc = FindResource(resource);
+				if (desc == nullptr) {
 					offender = node.Name;
 					return GraphStatus::UnknownResource;
+				}
+				if (desc->Access == ResourceAccess::Read) {
+					offender = desc->Name;
+					return GraphStatus::WriteAccessDenied;
 				}
 			}
 		}

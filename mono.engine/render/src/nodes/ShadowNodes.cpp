@@ -38,14 +38,9 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
-
 			enterNamedPass(context.Name);
 			if (!haveShadow) {
 				return recording.Request.Source->ImportedDirectionalShadow == 0;
-			}
-			if (!recordUploads()) {
-				return false;
 			}
 			const bool seeded = recording.Request.Source->ImportedDirectionalShadow != 0;
 			if (seeded) {

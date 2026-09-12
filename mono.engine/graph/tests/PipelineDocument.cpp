@@ -94,8 +94,8 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(fromDocument.PerView.size() == 19);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("shadow"));
-	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("mesh-residency"));
+	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("mesh-residency"));
+	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
 	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("tonemap"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
@@ -116,7 +116,7 @@ TEST_CASE("the default document round trips through text", "[graph]") {
 	CHECK(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
 }
 
-TEST_CASE("version one documents upgrade transient resources to version two", "[graph][document]") {
+TEST_CASE("older documents upgrade resources to the current contract", "[graph][document]") {
 	PipelineDocument document;
 	Name offender;
 	REQUIRE(
@@ -125,7 +125,69 @@ TEST_CASE("version one documents upgrade transient resources to version two", "[
 	);
 	REQUIRE(document.Count() == 1);
 	CHECK_FALSE(document.Edits()[0].External);
-	CHECK(Write(document) == "renderpipeline 2\nresource \"colour\" colour RGBA8 0 0 1 no\n");
+	CHECK(
+		Write(document) ==
+		"renderpipeline 3\nresource \"colour\" colour RGBA8 0 0 1 no auto 1 1 1 0 1 auto auto 0 "
+		"transient \"\" 0\n"
+	);
+	REQUIRE(
+		Read("renderpipeline 2\nresource \"history\" texture RGBA16F 0 0 1 yes\n", document, offender) ==
+		PipelineDocumentStatus::Ok
+	);
+	CHECK(document.Edits()[0].Lifetime == engine::graph::ResourceLifetime::External);
+}
+
+TEST_CASE("resource and canvas contracts survive text and runtime build", "[graph][document]") {
+	PipelineDocument document;
+	Edit resource = Resource("history");
+	resource.Resource = ResourceKind::Texture;
+	resource.Format = engine::graph::ResourceFormat::RGBA16F;
+	resource.Access = engine::graph::ResourceAccess::ReadWrite;
+	resource.Samples = 4;
+	resource.Depth = 8;
+	resource.Layers = 3;
+	resource.FirstMip = 2;
+	resource.MipCount = 5;
+	resource.ColourSpace = engine::graph::ResourceColourSpace::Linear;
+	resource.AlphaSpace = engine::graph::ResourceAlphaSpace::Premultiplied;
+	resource.BufferStride = 32;
+	resource.Lifetime = engine::graph::ResourceLifetime::History;
+	resource.Owner = Name("world.main");
+	resource.HistoryGeneration = 7;
+	document.Record(resource);
+	document.Record({.Kind = EditKind::Group, .Name = Name("lighting"), .Target = Name("post")});
+	document.Record({.Kind = EditKind::Comment, .Name = Name("lighting"), .Value = "keep linear"});
+	document.Record({.Kind = EditKind::Mute, .Name = Name("lighting"), .Enabled = true});
+	document.Record({.Kind = EditKind::Preview, .Target = Name("history")});
+
+	PipelineDocument reloaded;
+	Name offender;
+	const std::string text = Write(document);
+	REQUIRE(Read(text, reloaded, offender) == PipelineDocumentStatus::Ok);
+	CHECK(Write(reloaded) == text);
+	REQUIRE(reloaded.Count() == 5);
+	CHECK(reloaded.Edits()[1].Target == Name("post"));
+	CHECK(reloaded.Edits()[2].Value == "keep linear");
+	CHECK(reloaded.Edits()[3].Enabled);
+	CHECK(reloaded.Edits()[4].Target == Name("history"));
+
+	RenderGraph graph;
+	REQUIRE(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
+	const auto *built = graph.FindResource(engine::graph::ResourceId{1});
+	REQUIRE(built != nullptr);
+	CHECK(built->Access == engine::graph::ResourceAccess::ReadWrite);
+	CHECK(built->Samples == 4);
+	CHECK(built->Depth == 8);
+	CHECK(built->Layers == 3);
+	CHECK(built->FirstMip == 2);
+	CHECK(built->MipCount == 5);
+	CHECK(built->ColourSpace == engine::graph::ResourceColourSpace::Linear);
+	CHECK(built->AlphaSpace == engine::graph::ResourceAlphaSpace::Premultiplied);
+	CHECK(built->BufferStride == 32);
+	CHECK(built->Lifetime == engine::graph::ResourceLifetime::History);
+	CHECK(built->External);
+	CHECK(built->Owner == Name("world.main"));
+	CHECK(built->HistoryGeneration == 7);
 }
 
 TEST_CASE("the default PBR document carries material emission and ambient occlusion", "[graph]") {
@@ -140,8 +202,8 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
-	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("shadow"));
-	CHECK(graph.Find(compiled.Shared[2])->Kind == Name("mesh-residency"));
+	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("mesh-residency"));
+	CHECK(graph.Find(compiled.Shared[2])->Kind == Name("shadow"));
 	CHECK(graph.Find(compiled.PerView[0])->Kind == Name("camera"));
 	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("last-frame"));
 	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("entities"));
@@ -397,7 +459,7 @@ TEST_CASE("text with no header is refused", "[graph]") {
 	Name offender;
 
 	CHECK(Read("", document, offender) == PipelineDocumentStatus::Malformed);
-	CHECK(Read("renderpipeline 3\n", document, offender) == PipelineDocumentStatus::Malformed);
+	CHECK(Read("renderpipeline 4\n", document, offender) == PipelineDocumentStatus::Malformed);
 	CHECK(Read("node \"a\" \"a\" yes no\n", document, offender) == PipelineDocumentStatus::Malformed);
 }
 
@@ -433,7 +495,7 @@ TEST_CASE("trailing text on a line is refused", "[graph]") {
 
 TEST_CASE("an empty document round trips to a header and nothing else", "[graph]") {
 	const PipelineDocument document;
-	CHECK(Write(document) == "renderpipeline 2\n");
+	CHECK(Write(document) == "renderpipeline 3\n");
 
 	PipelineDocument reloaded;
 	Name offender;
@@ -452,7 +514,17 @@ TEST_CASE("every status and edit kind has a description", "[graph]") {
 	}
 
 	for (const EditKind kind :
-		 {EditKind::AddResource, EditKind::AddNode, EditKind::Reads, EditKind::Writes, EditKind::Enable}) {
+		 {EditKind::AddResource,
+		  EditKind::AddNode,
+		  EditKind::Reads,
+		  EditKind::Writes,
+		  EditKind::Enable,
+		  EditKind::Set,
+		  EditKind::Move,
+		  EditKind::Group,
+		  EditKind::Comment,
+		  EditKind::Mute,
+		  EditKind::Preview}) {
 		CHECK(std::string(Describe(kind)) != "unknown");
 	}
 }
@@ -563,12 +635,16 @@ TEST_CASE("version one pipeline sets upgrade their resource lifetime", "[graph][
 	REQUIRE(main != nullptr);
 	REQUIRE(main->Count() == 1);
 	CHECK_FALSE(main->Edits()[0].External);
-	CHECK(Write(set) == "renderpipelines 2\npipeline \"main\"\nresource \"colour\" colour RGBA8 0 0 1 no\n");
+	CHECK(
+		Write(set) ==
+		"renderpipelines 3\npipeline \"main\"\nresource \"colour\" colour RGBA8 0 0 1 no auto 1 1 1 0 1 "
+		"auto auto 0 transient \"\" 0\n"
+	);
 }
 
 TEST_CASE("an empty set round trips to a header and nothing else", "[graph]") {
 	const PipelineSet set;
-	CHECK(Write(set) == "renderpipelines 2\n");
+	CHECK(Write(set) == "renderpipelines 3\n");
 
 	PipelineSet reloaded;
 	Name offender;

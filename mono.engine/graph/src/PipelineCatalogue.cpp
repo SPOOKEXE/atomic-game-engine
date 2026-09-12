@@ -549,10 +549,11 @@ namespace engine::graph {
 			   K::Entities,
 			   F::R8,
 			   false,
-			   "The casters. Deliberately not frustum culled - one off screen still shadows in."}},
+			   "The casters. Deliberately not frustum culled - one off screen still shadows in."},
+			  {"meshes", K::Buffer, F::R8, true, "Resident ranges and world upload completion."}},
 			 {{"shadow", K::Depth, D32, true, "The light's depth atlas."}},
 			 "Draws the casters from the light, into a depth map every view samples.",
-			 true},
+			 false},
 
 			{"last-frame",
 			 "Last Frame",
@@ -1524,6 +1525,10 @@ namespace engine::graph {
 			spec.Scope = row.Scope;
 			spec.Source = row.Source;
 			spec.DefaultShader = row.Shader;
+			if (spec.Kind == core::Name("last-frame")) {
+				spec.Lifetime = ResourceLifetime::History;
+				spec.HistoryReads = 1;
+			}
 
 			const auto fill = [](const std::vector<Port> &from, std::vector<PortSpec> &into) {
 				for (const Port &port : from) {

@@ -2312,7 +2312,28 @@ namespace client {
 			RibbonVertices = {};
 			RibbonRuns = {};
 
-			std::vector<engine::world::Presentation> presentationDemand;
+			const auto installWorldPipeline = [&](engine::world::WorldId id) {
+				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
+				auto installed = std::find_if(
+					InstalledWorldPipelines.begin(),
+					InstalledWorldPipelines.end(),
+					[id](const InstalledWorldPipeline &entry) { return entry.World == id; }
+				);
+				if (installed != InstalledWorldPipelines.end() && installed->Selection == selectedProfile) {
+					return installed->Runtime;
+				}
+				const engine::core::Name runtime = engine::render::InstallWorldPipeline(
+					RenderingProfiles, Renderer, id.Index, selectedProfile
+				);
+				if (installed == InstalledWorldPipelines.end()) {
+					InstalledWorldPipelines.push_back({id, selectedProfile, runtime});
+				} else {
+					*installed = {id, selectedProfile, runtime};
+				}
+				return runtime;
+			};
+
+			std::vector<ActiveSceneDemand> presentationDemand;
 			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
 				if (factoryPaused && id == Rendered) continue;
@@ -2335,9 +2356,10 @@ namespace client {
 					);
 				});
 				if (!(factoryPaused && id == Rendered)) {
-					presentationDemand.push_back(
-						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)}
-					);
+					presentationDemand.push_back({
+						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)},
+						installWorldPipeline(id),
+					});
 				}
 			}
 
@@ -2349,16 +2371,6 @@ namespace client {
 				presentationDemand,
 				engine::core::Vector2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)}
 			);
-
-			const auto installWorldPipeline = [&](engine::world::WorldId id) {
-				const auto selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
-				if (ProfilesInstalledFor == id && ProfileInstalledSelection == selectedProfile) return;
-				ProfilesInstalledFor = id;
-				ProfileInstalledSelection = selectedProfile;
-				PipelineSelected = engine::render::InstallWorldPipeline(
-					RenderingProfiles, Renderer, id.Index, selectedProfile
-				);
-			};
 
 			const auto collectPresentation =
 				[&](engine::world::WorldId id, engine::ecs::Store &store, const engine::core::Vector3 &eye) {
@@ -2387,7 +2399,7 @@ namespace client {
 						}
 					);
 
-					installWorldPipeline(id);
+					PipelineSelected = installWorldPipeline(id);
 
 					// **The particles, from the world being drawn and only
 					// that one.** A batch is a span into this world's pool;
@@ -2427,7 +2439,7 @@ namespace client {
 						RibbonRuns = scene.View.RibbonRuns;
 						Lights.assign(scene.View.Lights.begin(), scene.View.Lights.end());
 						particleFrameCollected = true;
-						installWorldPipeline(scene.World);
+						PipelineSelected = installWorldPipeline(scene.World);
 					}
 				}
 				Views.Publish(
@@ -3309,24 +3321,16 @@ namespace client {
 			// Capture cameras are separate from the displayed camera. Each active
 			// world gets an offscreen target and the selected display view stays
 			// last, which is the only view allowed to present to the swapchain.
-			std::vector<engine::render::SceneTarget> cameraTargets;
-			std::vector<engine::render::View> cameraBatch;
-			cameraTargets.reserve(ActiveScenes.Scenes().size());
-			cameraBatch.reserve(ActiveScenes.Scenes().size());
-			for (const auto &scene : ActiveScenes.Scenes()) {
-				if (scene.World == presentationWorld) continue;
-				cameraTargets.push_back(
-					{static_cast<uint32_t>(std::max(pixelWidth, 1)),
-					 static_cast<uint32_t>(std::max(pixelHeight, 1))}
-				);
-				auto captured = scene.View;
-				captured.Target = &cameraTargets.back();
-				captured.Slot = cameraBatch.size() + 1;
-				captured.ForeignContentOwners = ContentBindings;
-				cameraBatch.push_back(captured);
-			}
-			cameraBatch.push_back(view);
-			LastFrame = Renderer.Render(cameraBatch, Overlay, hook);
+			LastFrame = ActiveScenes.SubmitBatch(
+				presentationWorld,
+				view,
+				static_cast<uint32_t>(std::max(pixelWidth, 1)),
+				static_cast<uint32_t>(std::max(pixelHeight, 1)),
+				ContentBindings,
+				[&](std::span<const engine::render::View> cameraBatch) {
+					return Renderer.Render(cameraBatch, Overlay, hook);
+				}
+			);
 			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
 		}
 		{

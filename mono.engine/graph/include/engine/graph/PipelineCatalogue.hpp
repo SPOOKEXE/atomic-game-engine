@@ -302,6 +302,11 @@ namespace engine::graph {
 		//
 		// @since v0.11
 		std::string DefaultShader;
+
+		// Storage policy for outputs whose kind does not imply one. History nodes
+		// state how many successful generations their backend may read.
+		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		uint32_t HistoryReads = 0;
 	};
 
 	// Whether a wire from an output of kind `from` may land in an input of kind

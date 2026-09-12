@@ -200,6 +200,10 @@ TEST_CASE("the default PBR frame's kinds and material ports are registered", "[g
 	CHECK(std::any_of(lighting->Inputs.begin(), lighting->Inputs.end(), [](const PortSpec &port) {
 		return port.Name == Name("occlusion");
 	}));
+	const NodeKindSpec *history = NodeCatalogue::Find(Name("last-frame"));
+	REQUIRE(history != nullptr);
+	CHECK(history->Lifetime == engine::graph::ResourceLifetime::History);
+	CHECK(history->HistoryReads == 1);
 }
 
 TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][catalogue]") {
@@ -217,7 +221,7 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	};
 
 	ports("world", 0, 1);
-	ports("shadow", 1, 1);
+	ports("shadow", 2, 1);
 	ports("camera", 0, 1);
 	ports("last-frame", 0, 1);
 	ports("entities", 0, 1);

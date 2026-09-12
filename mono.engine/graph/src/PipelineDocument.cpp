@@ -13,13 +13,15 @@ namespace engine::graph {
 		//
 		// **A version from the first release rather than added at the second**,
 		// which is `bake::GraphDocument`'s argument and the same one.
-		constexpr std::string_view HEADER = "renderpipeline 2";
+		constexpr std::string_view HEADER = "renderpipeline 3";
+		constexpr std::string_view VERSION_TWO_HEADER = "renderpipeline 2";
 		constexpr std::string_view LEGACY_HEADER = "renderpipeline 1";
 
 		// The set's header. **A different word rather than a flag on the same
 		// one**, so a reader knows which shape it is holding from the first
 		// line instead of from whether a `pipeline` line ever turns up.
-		constexpr std::string_view SET_HEADER = "renderpipelines 2";
+		constexpr std::string_view SET_HEADER = "renderpipelines 3";
+		constexpr std::string_view VERSION_TWO_SET_HEADER = "renderpipelines 2";
 		constexpr std::string_view LEGACY_SET_HEADER = "renderpipelines 1";
 
 		std::string_view ResourceText(ResourceKind kind) {
@@ -258,6 +260,14 @@ namespace engine::graph {
 			return "set";
 		case EditKind::Move:
 			return "move";
+		case EditKind::Group:
+			return "group";
+		case EditKind::Comment:
+			return "comment";
+		case EditKind::Mute:
+			return "mute";
+		case EditKind::Preview:
+			return "preview";
 		}
 		return "unknown";
 	}
@@ -337,8 +347,20 @@ namespace engine::graph {
 					.Format = edit.Format,
 					.Width = edit.Width,
 					.Height = edit.Height,
-					.External = edit.External,
+					.External = edit.External || edit.Lifetime != ResourceLifetime::Transient,
 					.Divisor = edit.Divisor,
+					.Access = edit.Access,
+					.Samples = edit.Samples,
+					.Depth = edit.Depth,
+					.Layers = edit.Layers,
+					.FirstMip = edit.FirstMip,
+					.MipCount = edit.MipCount,
+					.ColourSpace = edit.ColourSpace,
+					.AlphaSpace = edit.AlphaSpace,
+					.BufferStride = edit.BufferStride,
+					.Lifetime = edit.Lifetime,
+					.Owner = edit.Owner,
+					.HistoryGeneration = edit.HistoryGeneration,
 				});
 				if (!added.IsValid()) {
 					offender = edit.Name;
@@ -415,6 +437,12 @@ namespace engine::graph {
 				// **Ignored, and that is the whole point of it.** See `EditKind::Move`:
 				// where a box sits must not be able to change what a frame computes.
 				break;
+			case EditKind::Group:
+			case EditKind::Comment:
+			case EditKind::Mute:
+			case EditKind::Preview:
+				// Authoring records survive text replay but cannot alter runtime work.
+				break;
 
 			case EditKind::Enable: {
 				const auto found = nodes.find(edit.Name.Id());
@@ -476,6 +504,19 @@ namespace engine::graph {
 				out += ' ' + std::to_string(edit.Width) + ' ' + std::to_string(edit.Height);
 				out += ' ' + std::to_string(edit.Divisor);
 				out += ' ' + std::string(FlagText(edit.External));
+				out += ' ' + std::string(Describe(edit.Access));
+				out += ' ' + std::to_string(edit.Samples);
+				out += ' ' + std::to_string(edit.Depth);
+				out += ' ' + std::to_string(edit.Layers);
+				out += ' ' + std::to_string(edit.FirstMip);
+				out += ' ' + std::to_string(edit.MipCount);
+				out += ' ' + std::string(Describe(edit.ColourSpace));
+				out += ' ' + std::string(Describe(edit.AlphaSpace));
+				out += ' ' + std::to_string(edit.BufferStride);
+				out += ' ' + std::string(Describe(edit.Lifetime));
+				out.push_back(' ');
+				AppendQuoted(out, edit.Owner.Text());
+				out += ' ' + std::to_string(edit.HistoryGeneration);
 				break;
 			case EditKind::AddNode:
 				out.push_back(' ');
@@ -512,6 +553,27 @@ namespace engine::graph {
 				AppendQuoted(out, edit.Name.Text());
 				out += ' ' + Rounded(edit.X) + ' ' + Rounded(edit.Y);
 				break;
+			case EditKind::Group:
+				out.push_back(' ');
+				AppendQuoted(out, edit.Name.Text());
+				out.push_back(' ');
+				AppendQuoted(out, edit.Target.Text());
+				break;
+			case EditKind::Comment:
+				out.push_back(' ');
+				AppendQuoted(out, edit.Name.Text());
+				out.push_back(' ');
+				AppendQuoted(out, edit.Value);
+				break;
+			case EditKind::Mute:
+				out.push_back(' ');
+				AppendQuoted(out, edit.Name.Text());
+				out += ' ' + std::string(FlagText(edit.Enabled));
+				break;
+			case EditKind::Preview:
+				out.push_back(' ');
+				AppendQuoted(out, edit.Target.Text());
+				break;
 			}
 
 			out.push_back('\n');
@@ -541,8 +603,9 @@ namespace engine::graph {
 			return PipelineDocumentStatus::Malformed;
 		}
 		const std::string_view header = nextLine();
-		const bool legacy = header == LEGACY_HEADER;
-		if (!legacy && header != HEADER) {
+		const bool versionOne = header == LEGACY_HEADER;
+		const bool versionTwo = header == VERSION_TWO_HEADER;
+		if (!versionOne && !versionTwo && header != HEADER) {
 			offender = core::Name(HEADER);
 			return PipelineDocumentStatus::Malformed;
 		}
@@ -566,8 +629,22 @@ namespace engine::graph {
 				parsed = TakeQuoted(line, name) && ResourceFromText(TakeWord(line), edit.Resource) &&
 						 ParseResourceFormat(TakeWord(line), edit.Format) && TakeUnsigned(line, edit.Width) &&
 						 TakeUnsigned(line, edit.Height) && TakeUnsigned(line, edit.Divisor);
-				if (parsed && !legacy) {
+				if (parsed && !versionOne) {
 					parsed = TakeFlag(line, edit.External);
+				}
+				if (parsed && !versionOne && !versionTwo) {
+					parsed = ParseResourceAccess(TakeWord(line), edit.Access) &&
+							 TakeUnsigned(line, edit.Samples) && TakeUnsigned(line, edit.Depth) &&
+							 TakeUnsigned(line, edit.Layers) && TakeUnsigned(line, edit.FirstMip) &&
+							 TakeUnsigned(line, edit.MipCount) &&
+							 ParseResourceColourSpace(TakeWord(line), edit.ColourSpace) &&
+							 ParseResourceAlphaSpace(TakeWord(line), edit.AlphaSpace) &&
+							 TakeUnsigned(line, edit.BufferStride) &&
+							 ParseResourceLifetime(TakeWord(line), edit.Lifetime) &&
+							 TakeQuoted(line, second) && TakeUnsigned(line, edit.HistoryGeneration);
+					edit.Owner = core::Name(second);
+				} else if (parsed && edit.External) {
+					edit.Lifetime = ResourceLifetime::External;
 				}
 				edit.Name = core::Name(name);
 			} else if (word == "node") {
@@ -602,6 +679,24 @@ namespace engine::graph {
 				edit.Kind = EditKind::Enable;
 				parsed = TakeQuoted(line, name) && TakeFlag(line, edit.Enabled);
 				edit.Name = core::Name(name);
+			} else if (word == "group") {
+				edit.Kind = EditKind::Group;
+				parsed = TakeQuoted(line, name) && TakeQuoted(line, second);
+				edit.Name = core::Name(name);
+				edit.Target = core::Name(second);
+			} else if (word == "comment") {
+				edit.Kind = EditKind::Comment;
+				parsed = TakeQuoted(line, name) && TakeQuoted(line, second);
+				edit.Name = core::Name(name);
+				edit.Value = second;
+			} else if (word == "mute") {
+				edit.Kind = EditKind::Mute;
+				parsed = TakeQuoted(line, name) && TakeFlag(line, edit.Enabled);
+				edit.Name = core::Name(name);
+			} else if (word == "preview") {
+				edit.Kind = EditKind::Preview;
+				parsed = TakeQuoted(line, name);
+				edit.Target = core::Name(name);
 			} else {
 				parsed = false;
 			}
@@ -715,8 +810,9 @@ namespace engine::graph {
 			return PipelineDocumentStatus::Malformed;
 		}
 		const std::string_view setHeader = nextLine();
-		const bool legacy = setHeader == LEGACY_SET_HEADER;
-		if (!legacy && setHeader != SET_HEADER) {
+		const bool versionOne = setHeader == LEGACY_SET_HEADER;
+		const bool versionTwo = setHeader == VERSION_TWO_SET_HEADER;
+		if (!versionOne && !versionTwo && setHeader != SET_HEADER) {
 			offender = core::Name(SET_HEADER);
 			return PipelineDocumentStatus::Malformed;
 		}
@@ -733,7 +829,12 @@ namespace engine::graph {
 			}
 
 			PipelineDocument document;
-			const std::string whole = std::string(legacy ? LEGACY_HEADER : HEADER) + "\n" + body;
+			const std::string whole = std::string(
+										  versionOne   ? LEGACY_HEADER
+										  : versionTwo ? VERSION_TWO_HEADER
+													   : HEADER
+									  ) +
+									  "\n" + body;
 			const PipelineDocumentStatus status = Read(whole, document, offender);
 			if (status != PipelineDocumentStatus::Ok) {
 				return status;
@@ -862,12 +963,13 @@ namespace engine::graph {
 		node("world", NodeScope::World);
 		touches(EditKind::Writes, "world-entities", "entities");
 
-		node("shadow", NodeScope::World);
-		touches(EditKind::Reads, "world-entities", "entities");
-		touches(EditKind::Writes, "shadow", "shadow");
-
 		node("mesh-residency", NodeScope::World);
 		touches(EditKind::Writes, "resident-meshes", "meshes");
+
+		node("shadow", NodeScope::World);
+		touches(EditKind::Reads, "world-entities", "entities");
+		touches(EditKind::Reads, "resident-meshes", "meshes");
+		touches(EditKind::Writes, "shadow", "shadow");
 
 		node("camera", NodeScope::View);
 		touches(EditKind::Writes, "view-camera", "camera");

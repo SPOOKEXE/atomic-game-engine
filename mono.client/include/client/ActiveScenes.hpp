@@ -13,6 +13,7 @@
 #include <engine/render/WorldView.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <functional>
 #include <memory>
 #include <span>
 #include <vector>
@@ -24,10 +25,18 @@ namespace client {
 	struct ActiveScene {
 		engine::world::WorldId World;
 		engine::core::Name Name;
+		engine::core::Name Pipeline;
 		engine::ecs::Entity Camera;
 		std::unique_ptr<engine::render::WorldViewFrame> Frame;
 		std::unique_ptr<engine::render::WorldCameraFrame> CameraLayers;
 		engine::render::View View;
+	};
+
+	// One product presentation request with the renderer key already selected
+	// on the driver thread. The key is copied into the packet on its world lane.
+	struct ActiveSceneDemand {
+		engine::world::Presentation Request;
+		engine::core::Name Pipeline;
 	};
 
 	// Runs the product presentation walk once and copies every valid active view.
@@ -41,8 +50,19 @@ namespace client {
 		// @return The number of active camera packets collected.
 		size_t Collect(
 			engine::world::Universe &universe,
-			std::span<const engine::world::Presentation> requests,
+			std::span<const ActiveSceneDemand> requests,
 			const engine::core::Vector2 &extent
+		);
+
+		// Builds one camera batch and invokes its sink exactly once. Offscreen
+		// targets remain owned by the collector until the next call.
+		engine::render::FrameResult SubmitBatch(
+			engine::world::WorldId displayedWorld,
+			const engine::render::View &displayedView,
+			uint32_t width,
+			uint32_t height,
+			std::span<const engine::render::WorldContentOwner> foreignContentOwners,
+			const std::function<engine::render::FrameResult(std::span<const engine::render::View>)> &submit
 		);
 
 		// The owned packets in deterministic product order.
@@ -56,8 +76,10 @@ namespace client {
 		}
 
 	  private:
-		std::vector<engine::world::Presentation> Demands;
+		std::vector<ActiveSceneDemand> Demands;
 		std::vector<ActiveScene> Collected;
 		std::vector<engine::render::View> Submitted;
+		std::vector<engine::render::SceneTarget> BatchTargets;
+		std::vector<engine::render::View> BatchViews;
 	};
 }

@@ -86,6 +86,13 @@ namespace engine::graph {
 		// somebody did. `PositionsOf` replays them; the last one for a name
 		// wins.
 		Move,
+
+		// Editor-only node grouping, notes, mute state and selected preview.
+		// Build ignores these records so canvas work cannot alter a frame.
+		Group,
+		Comment,
+		Mute,
+		Preview,
 	};
 
 	// A stable, human-readable name for an edit kind.
@@ -136,6 +143,20 @@ namespace engine::graph {
 
 		// Whether an `AddResource` survives this graph's transient lifetime.
 		bool External = false;
+
+		// `AddResource`'s executable compositor contract.
+		ResourceAccess Access = ResourceAccess::Automatic;
+		uint32_t Samples = 1;
+		uint32_t Depth = 1;
+		uint32_t Layers = 1;
+		uint32_t FirstMip = 0;
+		uint32_t MipCount = 1;
+		ResourceColourSpace ColourSpace = ResourceColourSpace::Automatic;
+		ResourceAlphaSpace AlphaSpace = ResourceAlphaSpace::Automatic;
+		uint32_t BufferStride = 0;
+		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		core::Name Owner{};
+		uint32_t HistoryGeneration = 0;
 
 		// `Reads` and `Writes`: which resource, by name.
 		core::Name Target{};

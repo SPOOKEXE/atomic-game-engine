@@ -198,6 +198,11 @@ namespace studio {
 				case EditKind::AddResource:
 					current = nullptr;
 					break;
+				case EditKind::Group:
+				case EditKind::Comment:
+				case EditKind::Mute:
+				case EditKind::Preview:
+					break;
 				}
 			}
 			return nodes;

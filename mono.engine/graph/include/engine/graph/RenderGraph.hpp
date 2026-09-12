@@ -234,6 +234,51 @@ namespace engine::graph {
 	// @return Whether a fourth channel exists.
 	bool HasAlpha(ResourceFormat format);
 
+	// How graph work may reach a resource. Automatic preserves the usage
+	// inferred from its kind and wires for older documents.
+	enum class ResourceAccess : uint8_t {
+		Automatic,
+		Read,
+		Write,
+		ReadWrite,
+	};
+
+	const char *Describe(ResourceAccess access);
+	bool ParseResourceAccess(std::string_view text, ResourceAccess &out);
+
+	// The transfer function used for colour channels. Data resources normally
+	// keep Automatic or Linear; authored display images may state SRGB.
+	enum class ResourceColourSpace : uint8_t {
+		Automatic,
+		Linear,
+		SRGB,
+	};
+
+	const char *Describe(ResourceColourSpace space);
+	bool ParseResourceColourSpace(std::string_view text, ResourceColourSpace &out);
+
+	// How the alpha channel is interpreted when one exists.
+	enum class ResourceAlphaSpace : uint8_t {
+		Automatic,
+		Opaque,
+		Straight,
+		Premultiplied,
+	};
+
+	const char *Describe(ResourceAlphaSpace space);
+	bool ParseResourceAlphaSpace(std::string_view text, ResourceAlphaSpace &out);
+
+	// How long storage must survive. External and History resources cannot be
+	// placed in the transient alias pool.
+	enum class ResourceLifetime : uint8_t {
+		Transient,
+		External,
+		History,
+	};
+
+	const char *Describe(ResourceLifetime lifetime);
+	bool ParseResourceLifetime(std::string_view text, ResourceLifetime &out);
+
 	// How often a node runs.
 	//
 	// **Three, and it was a boolean.** `PerView` said per-view or not, which
@@ -339,6 +384,25 @@ namespace engine::graph {
 		// resource written before this field existed still means "the view".
 		uint32_t Divisor = 1;
 
+		// Explicit usage and allocation shape. Defaults preserve the one-layer,
+		// one-sample resources written before the compositor contract grew these
+		// fields.
+		ResourceAccess Access = ResourceAccess::Automatic;
+		uint32_t Samples = 1;
+		uint32_t Depth = 1;
+		uint32_t Layers = 1;
+		uint32_t FirstMip = 0;
+		uint32_t MipCount = 1;
+		ResourceColourSpace ColourSpace = ResourceColourSpace::Automatic;
+		ResourceAlphaSpace AlphaSpace = ResourceAlphaSpace::Automatic;
+		uint32_t BufferStride = 0;
+
+		// Owner and generation make retained history unambiguous across worlds
+		// and restores. An invalid owner means the graph's current scope.
+		ResourceLifetime Lifetime = ResourceLifetime::Transient;
+		core::Name Owner{};
+		uint32_t HistoryGeneration = 0;
+
 		// The size this resolves to for a view of a given size.
 		//
 		// **Here rather than in the renderer**, because it is the answer an
@@ -352,6 +416,9 @@ namespace engine::graph {
 		//                   target is not something a driver accepts.
 		// @param outHeight  Filled in.
 		void Resolve(uint32_t viewWidth, uint32_t viewHeight, uint32_t &outWidth, uint32_t &outHeight) const;
+
+		// Logical payload bytes for the complete declared shape.
+		uint64_t Bytes(uint32_t viewWidth, uint32_t viewHeight) const;
 	};
 
 	// A handle to a resource in one graph.
@@ -521,6 +588,10 @@ namespace engine::graph {
 
 		// A node names a resource this graph does not hold.
 		UnknownResource,
+
+		// A read or write contradicts the resource's explicit access contract.
+		ReadAccessDenied,
+		WriteAccessDenied,
 
 		// A node reads something nothing earlier wrote.
 		//

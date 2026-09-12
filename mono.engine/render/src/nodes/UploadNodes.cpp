@@ -28,7 +28,7 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("mesh-residency"), [this](const graph::RunContext &context) {
 			EnterNamedPass(context.Name);
-			return RecordMeshResidency();
+			return RecordMeshResidency() && RecordUploads();
 		});
 
 		frameNodes.Set(core::Name("delta-upload"), [this](const graph::RunContext &context) {
@@ -44,9 +44,6 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("select-lod"), [this](const graph::RunContext &context) {
 			EnterNamedPass(context.Name);
-			if (!RecordUploads()) {
-				return false;
-			}
 			return State->DispatchLodSelection(Command, Frame.ViewProjection, SceneWidth, SceneHeight);
 		});
 	}

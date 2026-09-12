@@ -77,24 +77,49 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 
 	client::ActiveSceneCollector collector;
 	const std::array demands{
-		world::Presentation{zulu, .016f, .25f},
-		world::Presentation{retired, .016f, .25f},
-		world::Presentation{alpha, .016f, .25f},
-		world::Presentation{zulu, .016f, .25f},
+		client::ActiveSceneDemand{world::Presentation{zulu, .016f, .25f}, Name("zulu-pipeline")},
+		client::ActiveSceneDemand{world::Presentation{retired, .016f, .25f}, Name("retired-pipeline")},
+		client::ActiveSceneDemand{world::Presentation{alpha, .016f, .25f}, Name("alpha-pipeline")},
+		client::ActiveSceneDemand{world::Presentation{zulu, .016f, .25f}, Name("zulu-pipeline")},
 	};
 	REQUIRE(collector.Collect(worlds, demands, {640, 480}) == 2);
 	REQUIRE(collector.Scenes().size() == 2);
 	CHECK(collector.Scenes()[0].Name == Name("Alpha"));
+	CHECK(collector.Scenes()[0].View.Pipeline == Name("alpha-pipeline"));
 	CHECK(collector.Scenes()[0].View.CameraFrame.Position.X == 1);
 	CHECK(collector.Scenes()[1].Name == Name("Zulu"));
+	CHECK(collector.Scenes()[1].View.Pipeline == Name("zulu-pipeline"));
 	CHECK(collector.Scenes()[1].View.CameraFrame.Position.X == 3);
 	CHECK(collector.Views().size() == 2);
 	CHECK(collector.Views()[0].Instances.data() == collector.Scenes()[0].Frame->Instances.data());
 	REQUIRE(collector.Views()[0].Lights.size() == 1);
 	CHECK(collector.Views()[0].Lights.data() == collector.Scenes()[0].CameraLayers->Lights.data());
 
+	size_t submissions = 0;
+	std::vector<world::WorldId> submittedWorlds;
+	std::vector<Name> submittedPipelines;
+	const render::FrameResult submitted = collector.SubmitBatch(
+		zulu, collector.Scenes()[1].View, 640, 480, {}, [&](std::span<const render::View> batch) {
+			++submissions;
+			for (const render::View &view : batch) {
+				submittedWorlds.push_back(view.World == alpha.Index ? alpha : zulu);
+				submittedPipelines.push_back(view.Pipeline);
+			}
+			render::FrameResult result;
+			result.Presented = true;
+			return result;
+		}
+	);
+	CHECK(submissions == 1);
+	CHECK(submitted.Presented);
+	CHECK(submittedWorlds == std::vector<world::WorldId>{alpha, zulu});
+	CHECK(submittedPipelines == std::vector<Name>{Name("alpha-pipeline"), Name("zulu-pipeline")});
+
 	REQUIRE(worlds.Destroy(alpha) == world::WorldStatus::Ok);
-	const std::array remaining{world::Presentation{alpha, .016f, .5f}, world::Presentation{zulu, .016f, .5f}};
+	const std::array remaining{
+		client::ActiveSceneDemand{world::Presentation{alpha, .016f, .5f}, Name("alpha-pipeline")},
+		client::ActiveSceneDemand{world::Presentation{zulu, .016f, .5f}, Name("zulu-pipeline")},
+	};
 	REQUIRE(collector.Collect(worlds, remaining, {640, 480}) == 1);
 	REQUIRE(collector.Scenes().size() == 1);
 	CHECK(collector.Scenes().front().Name == Name("Zulu"));

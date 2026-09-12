@@ -72,8 +72,8 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 	CHECK(
 		ran == std::vector<std::string>{
 				   "world",
-				   "shadow",
 				   "mesh-residency",
+				   "shadow",
 				   "camera@0",
 				   "last-frame@0",
 				   "entities@0",

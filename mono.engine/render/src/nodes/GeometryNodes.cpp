@@ -293,7 +293,7 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("transparent-layer"), [this](const graph::RunContext &context) {
 			const auto *node = Pipeline->Graph.Find(context.Node);
-			if (!node || PlainTransparent != TransparentCount || !RecordUploads()) return false;
+			if (!node || PlainTransparent != TransparentCount) return false;
 			const uint32_t first = SceneCount + static_cast<uint32_t>(OpaqueCount);
 			for (uint32_t slot = first; slot < first + PlainTransparent; ++slot)
 				if (slot >= State->SlotShader.size() || State->SlotShader[slot].IsValid()) return false;
@@ -547,7 +547,6 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
 			const auto lightingAt = [&recording](
 										const core::Vector3 &eye, float surfaceMode, float imageOpacity
 									) { return recording.LightingAt(eye, surfaceMode, imageOpacity); };
@@ -563,10 +562,6 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
-			if (!recordUploads()) {
-				return false;
-			}
-
 			// Entered unconditionally, and that is the honest reading rather
 			// than a convenience: the stage clears colour and depth, so a frame
 			// with nothing in it still ran this pass - the background is what it

@@ -649,7 +649,6 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
 			const auto lightingAt = [&recording](
 										const core::Vector3 &eye, float surfaceMode, float imageOpacity
 									) { return recording.LightingAt(eye, surfaceMode, imageOpacity); };
@@ -666,10 +665,6 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			enterNamedPass(context.Name);
-			if (!recordUploads()) {
-				return false;
-			}
-
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			if (!context.Reads.empty()) {

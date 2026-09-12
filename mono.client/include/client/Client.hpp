@@ -649,19 +649,14 @@ namespace client {
 		// copy the store would hold is the one this exists to avoid.
 		engine::graph::PipelineSet RenderingProfiles;
 
-		// Which world's selected profile is installed in the renderer.
-		//
-		// **A guard so installing happens on a world change and not per frame.**
-		// `render::InstallWorldPipeline` compiles every profile it installs
-		// and reports what is wrong with each - worth paying when the world
-		// changes, and sixty complaints a second about a half-wired one if it
-		// were not guarded.
-		engine::world::WorldId ProfilesInstalledFor;
-
-		// The selection used for that install. A replicated WorldSettings change
-		// keeps the same WorldId, so the world id alone cannot invalidate the
-		// selected runtime key.
-		engine::core::Name ProfileInstalledSelection;
+		// Runtime keys are cached per world so one camera batch can retain each
+		// world's selected graph without compiling it again every frame.
+		struct InstalledWorldPipeline {
+			engine::world::WorldId World;
+			engine::core::Name Selection;
+			engine::core::Name Runtime;
+		};
+		std::vector<InstalledWorldPipeline> InstalledWorldPipelines;
 
 		// What to put in `render::View::Pipeline`, from that install.
 		//

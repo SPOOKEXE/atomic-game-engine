@@ -216,6 +216,60 @@ TEST_CASE("default PBR stages are not mandatory backend policy", "[render][graph
 	CHECK(renderer.SetPipeline(Name("minimal#1"), graph));
 }
 
+TEST_CASE("draw uploads are graph dependencies rather than backend fallbacks", "[render][graph][uploads]") {
+	using engine::graph::Node;
+	using engine::graph::NodeScope;
+	using engine::graph::ResourceKind;
+
+	const auto make = [](bool residency, bool upload, bool uploadFirst) {
+		RenderGraph graph;
+		const auto meshes =
+			graph.AddResource({.Name = Name("meshes"), .Kind = ResourceKind::Buffer, .External = !residency});
+		const auto entities =
+			graph.AddResource({.Name = Name("entities"), .Kind = ResourceKind::Entities, .External = true});
+		const auto instances =
+			graph.AddResource({.Name = Name("instances"), .Kind = ResourceKind::Buffer, .External = !upload});
+		const auto colour = graph.AddResource({.Name = Name("colour"), .Kind = ResourceKind::Colour});
+		if (residency) {
+			graph.AddNode({
+				.Name = Name("mesh-residency"),
+				.Kind = Name("mesh-residency"),
+				.Writes = {meshes},
+				.Scope = NodeScope::World,
+			});
+		}
+		const auto addUpload = [&] {
+			if (!upload) return;
+			graph.AddNode({
+				.Name = Name("delta-upload"),
+				.Kind = Name("delta-upload"),
+				.Reads = {meshes, entities},
+				.Writes = {instances},
+				.Scope = NodeScope::View,
+			});
+		};
+		const auto addDraw = [&] {
+			graph.AddNode({
+				.Name = Name("transparent"),
+				.Kind = Name("transparent"),
+				.Reads = {instances},
+				.Writes = {colour},
+				.Scope = NodeScope::View,
+			});
+		};
+		if (uploadFirst) addUpload();
+		addDraw();
+		if (!uploadFirst) addUpload();
+		return graph;
+	};
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("ordered#1"), make(true, true, true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("missing-residency#1"), make(false, true, true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("missing-upload#1"), make(true, false, true)));
+	CHECK_FALSE(renderer.SetPipeline(Name("late-upload#1"), make(true, true, false)));
+}
+
 TEST_CASE("authored raster compute and inspection nodes are repeatable backend work", "[render][graph]") {
 	RenderGraph graph;
 	const engine::graph::ResourceId source = graph.AddResource(

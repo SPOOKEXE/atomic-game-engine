@@ -27,13 +27,19 @@ namespace engine::graph {
 		}
 
 		bool AllocatedTarget(const ResourceDesc &desc) {
-			return !desc.External && (desc.Kind == ResourceKind::Colour || desc.Kind == ResourceKind::Depth ||
-									  desc.Kind == ResourceKind::Storage);
+			return !desc.External && desc.Lifetime == ResourceLifetime::Transient &&
+				   (desc.Kind == ResourceKind::Colour || desc.Kind == ResourceKind::Depth ||
+					desc.Kind == ResourceKind::Storage);
 		}
 
 		bool Compatible(const ResourceDesc &left, const ResourceDesc &right) {
 			return left.Kind == right.Kind && left.Format == right.Format && left.Width == right.Width &&
-				   left.Height == right.Height && left.Divisor == right.Divisor;
+				   left.Height == right.Height && left.Divisor == right.Divisor &&
+				   left.Access == right.Access && left.Samples == right.Samples &&
+				   left.Depth == right.Depth && left.Layers == right.Layers &&
+				   left.FirstMip == right.FirstMip && left.MipCount == right.MipCount &&
+				   left.ColourSpace == right.ColourSpace && left.AlphaSpace == right.AlphaSpace &&
+				   left.BufferStride == right.BufferStride && left.Owner == right.Owner;
 		}
 
 		NodeScope ScopeOf(const RenderGraph &graph, ResourceId resource) {
@@ -174,8 +180,7 @@ namespace engine::graph {
 			// Bits per pixel rather than bytes per pixel, so a block-compressed
 			// format at four bits does not round to nothing.
 			if (row.Kind != ResourceKind::Camera && row.Kind != ResourceKind::Entities) {
-				row.Bytes =
-					(static_cast<uint64_t>(row.Width) * row.Height * BitsPerPixel(row.Format) + 7) / 8;
+				row.Bytes = desc->Bytes(viewWidth, viewHeight);
 			}
 
 			profile.Resources.push_back(row);

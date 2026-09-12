@@ -78,15 +78,7 @@ namespace engine::graph {
 		}
 
 		uint64_t BytesOf(const ResourceDesc &resource, uint32_t width, uint32_t height) {
-			if (resource.Kind == ResourceKind::Camera || resource.Kind == ResourceKind::Entities) {
-				return 0;
-			}
-			uint32_t resolvedWidth = 0;
-			uint32_t resolvedHeight = 0;
-			resource.Resolve(width, height, resolvedWidth, resolvedHeight);
-			return (static_cast<uint64_t>(resolvedWidth) * resolvedHeight * BitsPerPixel(resource.Format) +
-					7) /
-				   8;
+			return resource.Bytes(width, height);
 		}
 
 		std::vector<size_t> InstancesFor(

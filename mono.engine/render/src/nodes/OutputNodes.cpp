@@ -307,7 +307,6 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
 			const auto graphTexture =
 				[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
 					return recording.GraphTexture(resource, runContext, make);
@@ -345,9 +344,6 @@ namespace engine::render {
 			}
 
 			if (haveOverlay) {
-				if (!recordUploads()) {
-					return false;
-				}
 				ENGINE_PROFILE_CAT("debug image overlay", core::ProfileCategory::Render);
 				drawOverlayImage(State->OverlayTexture, target, SDL_GPU_LOADOP_LOAD);
 			}
