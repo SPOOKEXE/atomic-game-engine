@@ -28,7 +28,7 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("mesh-residency"), [this](const graph::RunContext &context) {
 			EnterNamedPass(context.Name);
-			return RecordMeshResidency() && RecordUploads();
+			return RecordMeshResidency();
 		});
 
 		frameNodes.Set(core::Name("delta-upload"), [this](const graph::RunContext &context) {
