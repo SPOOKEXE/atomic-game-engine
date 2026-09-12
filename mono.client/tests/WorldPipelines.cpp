@@ -109,7 +109,7 @@ TEST_CASE("a missing selection falls back to Default PBR", "[client][pipeline]")
 namespace {
 	// The default document with a `raytrace` node inserted after the linear
 	// depth it reads, wired the way the catalogue entry asks and writing a
-	// storage image. This is what the Studio's graph editor produces when
+	// sampled colour image. This is what the Studio's graph editor produces when
 	// somebody drops the catalogue's "Ray trace" box into a working PBR
 	// pipeline - a per-view pass among the other per-view passes, so what the
 	// renderer refuses is the *kind* rather than the placement.
@@ -138,7 +138,7 @@ namespace {
 				Edit traced;
 				traced.Kind = EditKind::AddResource;
 				traced.Name = Name("traced");
-				traced.Resource = engine::graph::ResourceKind::Storage;
+				traced.Resource = engine::graph::ResourceKind::Colour;
 				traced.Format = engine::graph::ResourceFormat::RGBA16F;
 				record(std::move(traced));
 

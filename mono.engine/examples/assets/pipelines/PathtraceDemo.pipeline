@@ -1,0 +1,49 @@
+renderpipeline 3
+resource "camera" camera R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "coarse-instances" buffer R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "albedo" colour RGBA8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "normal" colour RGB10A2 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "material" colour RGBA8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "linear-depth" colour R32F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "occlusion" colour R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "scene-radiance" colour RGBA16F 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "tessellated-instances" buffer R8 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "indirect" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "combined-radiance" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "display" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "scene-image" colour RGBA8_SRGB 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+node "adaptive-tessellation" "tessellate" view no
+reads "coarse-instances" "instances"
+reads "camera" "camera"
+writes "tessellated-instances" "instances"
+set "target-pixels" "12"
+node "indirect-light" "global-illumination" view no
+reads "albedo" "albedo"
+reads "normal" "normal"
+reads "material" "material"
+reads "linear-depth" "depth"
+reads "occlusion" "occlusion"
+writes "indirect" "indirect"
+resource "visible-entities" entities R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
+resource "path-radiance" colour RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
+node "progressive-pathtrace" "pathtrace" view no
+reads "camera" "camera"
+reads "visible-entities" "entities"
+reads "tessellated-instances" "instances"
+reads "albedo" "albedo"
+reads "normal" "normal"
+reads "material" "material"
+reads "linear-depth" "depth"
+reads "indirect" "indirect"
+writes "path-radiance" "radiance"
+set "samples-per-frame" "1"
+node "compose-path-radiance" "mix" view no
+reads "scene-radiance" "a"
+reads "path-radiance" "b"
+writes "combined-radiance" "colour"
+node "display-transform" "tonemap" view no
+reads "combined-radiance" "colour"
+writes "display" "colour"
+node "present" "present" frame no
+reads "display" "image"
+writes "scene-image" "image"

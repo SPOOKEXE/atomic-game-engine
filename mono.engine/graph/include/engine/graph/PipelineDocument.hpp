@@ -413,6 +413,24 @@ namespace engine::graph {
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
 
+	// A small authored graph that demonstrates adaptive tessellation, indirect
+	// light, and screen-space ray tracing as separate, connectable passes.
+	//
+	// It is a graph contract, not a claim that every renderer has a tracing
+	// backend. A device adapter refuses it until it registers those node kinds.
+	//
+	// @return The ray-tracing demonstration document. `Build`ing it produces a
+	//         graph that compiles.
+	PipelineDocument RaytraceDemoDocument();
+
+	// A small authored graph that demonstrates progressive path-tracing inputs
+	// without coupling its geometry preparation or indirect-light estimate to
+	// the path-tracing pass.
+	//
+	// @return The path-tracing demonstration document. `Build`ing it produces a
+	//         graph that compiles.
+	PipelineDocument PathtraceDemoDocument();
+
 	// The default PBR graph with one frame capture node that exports the linear
 	// HDR, linear-depth, and packed-normal planes used by DataCapture.
 	PipelineDocument DefaultPbrDataCaptureDocument();

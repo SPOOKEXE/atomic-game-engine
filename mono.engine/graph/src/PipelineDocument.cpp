@@ -2,6 +2,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <unordered_map>
@@ -1121,6 +1122,157 @@ namespace engine::graph {
 		touches(EditKind::Reads, "composed-image", "image");
 
 		return document;
+	}
+
+	PipelineDocument RaytraceDemoDocument() {
+		PipelineDocument document;
+		const auto resource =
+			[&document](
+				std::string_view name, ResourceKind kind, ResourceFormat format, bool external = false
+			) {
+				document.Record({
+					.Kind = EditKind::AddResource,
+					.Name = core::Name(name),
+					.Resource = kind,
+					.Format = format,
+					.External = external,
+				});
+			};
+		const auto node =
+			[&document](std::string_view name, std::string_view kind, NodeScope scope = NodeScope::View) {
+				document.Record({
+					.Kind = EditKind::AddNode,
+					.Name = core::Name(name),
+					.NodeKind = core::Name(kind),
+					.Scope = scope,
+				});
+			};
+		const auto edge = [&document](EditKind kind, std::string_view resource, std::string_view port) {
+			document.Record({.Kind = kind, .Target = core::Name(resource), .Key = core::Name(port)});
+		};
+
+		resource("camera", ResourceKind::Camera, ResourceFormat::R8, true);
+		resource("coarse-instances", ResourceKind::Buffer, ResourceFormat::R8, true);
+		resource("albedo", ResourceKind::Colour, ResourceFormat::RGBA8, true);
+		resource("normal", ResourceKind::Colour, ResourceFormat::RGB10A2, true);
+		resource("material", ResourceKind::Colour, ResourceFormat::RGBA8, true);
+		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F, true);
+		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, true);
+		resource("scene-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F, true);
+		resource("tessellated-instances", ResourceKind::Buffer, ResourceFormat::R8);
+		resource("indirect", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("reflections", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("combined-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+
+		node("adaptive-tessellation", "tessellate");
+		edge(EditKind::Reads, "coarse-instances", "instances");
+		edge(EditKind::Reads, "camera", "camera");
+		edge(EditKind::Writes, "tessellated-instances", "instances");
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("target-pixels"), .Value = "12"});
+		node("indirect-light", "global-illumination");
+		for (const auto &[source, port] : std::array{
+				 std::pair{"albedo", "albedo"},
+				 std::pair{"normal", "normal"},
+				 std::pair{"material", "material"},
+				 std::pair{"linear-depth", "depth"},
+				 std::pair{"occlusion", "occlusion"}
+			 }) {
+			edge(EditKind::Reads, source, port);
+		}
+		edge(EditKind::Writes, "indirect", "indirect");
+		node("screen-raytrace", "raytrace");
+		for (const auto &[source, port] : std::array{
+				 std::pair{"scene-radiance", "scene"},
+				 std::pair{"linear-depth", "depth"},
+				 std::pair{"normal", "normal"},
+				 std::pair{"material", "material"},
+				 std::pair{"indirect", "indirect"}
+			 }) {
+			edge(EditKind::Reads, source, port);
+		}
+		edge(EditKind::Writes, "reflections", "reflection");
+		node("compose-reflections", "mix");
+		edge(EditKind::Reads, "scene-radiance", "a");
+		edge(EditKind::Reads, "reflections", "b");
+		edge(EditKind::Writes, "combined-radiance", "colour");
+		node("display-transform", "tonemap");
+		edge(EditKind::Reads, "combined-radiance", "colour");
+		edge(EditKind::Writes, "display", "colour");
+		node("present", "present", NodeScope::Frame);
+		edge(EditKind::Reads, "display", "image");
+		edge(EditKind::Writes, "scene-image", "image");
+		return document;
+	}
+
+	PipelineDocument PathtraceDemoDocument() {
+		const PipelineDocument document = RaytraceDemoDocument();
+		PipelineDocument pathtrace;
+		bool skippingRaytrace = false;
+		for (const Edit &edit : document.Edits()) {
+			if (edit.Kind == EditKind::AddResource && edit.Name == core::Name("reflections")) {
+				continue;
+			}
+			if (edit.Kind == EditKind::AddNode && edit.Name == core::Name("screen-raytrace")) {
+				pathtrace.Record({
+					.Kind = EditKind::AddResource,
+					.Name = core::Name("visible-entities"),
+					.Resource = ResourceKind::Entities,
+					.Format = ResourceFormat::R8,
+					.External = true,
+				});
+				pathtrace.Record({
+					.Kind = EditKind::AddResource,
+					.Name = core::Name("path-radiance"),
+					.Resource = ResourceKind::Colour,
+					.Format = ResourceFormat::RGBA16F,
+				});
+				pathtrace.Record({
+					.Kind = EditKind::AddNode,
+					.Name = core::Name("progressive-pathtrace"),
+					.NodeKind = core::Name("pathtrace"),
+					.Scope = NodeScope::View,
+				});
+				for (const auto &[source, port] : std::array{
+						 std::pair{"camera", "camera"},
+						 std::pair{"visible-entities", "entities"},
+						 std::pair{"tessellated-instances", "instances"},
+						 std::pair{"albedo", "albedo"},
+						 std::pair{"normal", "normal"},
+						 std::pair{"material", "material"},
+						 std::pair{"linear-depth", "depth"},
+						 std::pair{"indirect", "indirect"}
+					 }) {
+					pathtrace.Record(
+						{.Kind = EditKind::Reads, .Target = core::Name(source), .Key = core::Name(port)}
+					);
+				}
+				pathtrace.Record(
+					{.Kind = EditKind::Writes,
+					 .Target = core::Name("path-radiance"),
+					 .Key = core::Name("radiance")}
+				);
+				pathtrace.Record(
+					{.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
+				);
+				skippingRaytrace = true;
+				continue;
+			}
+			if (skippingRaytrace && edit.Kind != EditKind::AddNode) {
+				continue;
+			}
+			skippingRaytrace = false;
+			Edit copied = edit;
+			if (copied.Kind == EditKind::AddNode && copied.Name == core::Name("compose-reflections")) {
+				copied.Name = core::Name("compose-path-radiance");
+			}
+			if (copied.Kind == EditKind::Reads && copied.Target == core::Name("reflections")) {
+				copied.Target = core::Name("path-radiance");
+			}
+			pathtrace.Record(std::move(copied));
+		}
+		return pathtrace;
 	}
 
 	PipelineDocument DefaultPbrDataCaptureDocument() {

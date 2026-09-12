@@ -204,7 +204,18 @@ namespace engine::graph {
 				)) {
 				return ExecutionQueue::Cpu;
 			}
-			if (Named(spec.Kind, {"hzb", "select-lod", "skybox-compute", "clouds-compute", "dispatch"})) {
+			if (Named(
+					spec.Kind,
+					{"hzb",
+					 "select-lod",
+					 "skybox-compute",
+					 "clouds-compute",
+					 "tessellate",
+					 "global-illumination",
+					 "raytrace",
+					 "pathtrace",
+					 "dispatch"}
+				)) {
 				return ExecutionQueue::Compute;
 			}
 			return ExecutionQueue::Graphics;
@@ -227,6 +238,24 @@ namespace engine::graph {
 					SelectParam("feedback", "Feedback", "last-frame", {"last-frame", "flat"})
 				);
 				spec.Params.push_back(NumberParam("max-recursion", "Max recursion", "3", 1.0, 32.0));
+			}
+			if (spec.Kind == core::Name("tessellate")) {
+				spec.Params.push_back(NumberParam("target-pixels", "Target edge pixels", "12", 1.0, 128.0));
+				spec.Params.push_back(NumberParam("max-subdivisions", "Max subdivisions", "4", 1.0, 8.0));
+			}
+			if (spec.Kind == core::Name("global-illumination")) {
+				spec.Params.push_back(NumberParam("rays-per-pixel", "Rays per pixel", "1", 1.0, 64.0));
+				spec.Params.push_back(NumberParam("max-distance", "Max distance", "24", 0.1, 10'000.0));
+			}
+			if (spec.Kind == core::Name("raytrace")) {
+				spec.Params.push_back(NumberParam("steps", "March steps", "32", 1.0, 512.0));
+				spec.Params.push_back(NumberParam("max-distance", "Max distance", "100", 0.1, 100'000.0));
+			}
+			if (spec.Kind == core::Name("pathtrace")) {
+				spec.Params.push_back(
+					NumberParam("samples-per-frame", "Samples per frame", "1", 1.0, 4096.0)
+				);
+				spec.Params.push_back(NumberParam("max-bounces", "Max bounces", "3", 1.0, 64.0));
 			}
 			if (Named(spec.Kind, {"raster", "dispatch"})) {
 				spec.Params.push_back(TextParam("shader", "Shader", ""));
@@ -398,9 +427,12 @@ namespace engine::graph {
 			spec.FlexibleScope = spec.Kind == core::Name("dispatch");
 			spec.Needs.Compute = spec.Queue == ExecutionQueue::Compute;
 			spec.Needs.StorageTextures =
-				std::any_of(spec.Outputs.begin(), spec.Outputs.end(), [](const PortSpec &port) {
-					return port.Kind == ResourceKind::Storage;
-				});
+				std::any_of(
+					spec.Outputs.begin(),
+					spec.Outputs.end(),
+					[](const PortSpec &port) { return port.Kind == ResourceKind::Storage; }
+				) ||
+				Named(spec.Kind, {"global-illumination", "raytrace", "pathtrace"});
 			spec.Needs.IndirectDraws = Named(
 				spec.Kind,
 				{"shadow",
@@ -832,12 +864,54 @@ namespace engine::graph {
 			 "Ray trace",
 			 C::Composite,
 			 S::View,
-			 {{"depth", K::Texture, R32, true, "Linear depth."},
+			 {{"scene", K::Texture, RGBA16, true, "Radiance to reflect."},
+			  {"depth", K::Texture, R32, true, "Linear depth."},
 			  {"normal", K::Texture, LDR, true, "World normals and material tags."},
-			  {"material", K::Texture, RGBA8, true, "Roughness, to pick which pixels trace."}},
-			 {{"reflection", K::Storage, RGBA16, true, "Traced colour. Alpha carries ray depth."}},
-			 "Compute-shader tracing of low-roughness pixels. Vendor agnostic: any "
-			 "shader-model-5 GPU can run it."},
+			  {"material", K::Texture, RGBA8, true, "Roughness, to pick which pixels trace."},
+			  {"indirect", K::Texture, RGBA16, false, "Optional indirect-light estimate."}},
+			 {{"reflection", K::Colour, RGBA16, true, "Screen-space reflected radiance."}},
+			 "Marches low-roughness screen-space rays through the current depth and radiance. "
+			 "It is not hardware ray tracing and has no off-screen hit guarantee."},
+
+			{"tessellate",
+			 "Adaptive tessellation",
+			 C::Draw,
+			 S::View,
+			 {{"instances", K::Buffer, F::R8, true, "LOD-selected source instances."},
+			  {"camera", K::Camera, F::R8, true, "The projection that sets edge density."}},
+			 {{"instances", K::Buffer, F::R8, true, "Instances with tessellation factors."}},
+			 "Declares per-instance subdivision factors from projected edge size before geometry draws. "
+			 "A device backend has not implemented the pass yet."},
+
+			{"global-illumination",
+			 "Global illumination",
+			 C::Composite,
+			 S::View,
+			 {{"albedo", K::Texture, RGBA8, true, "Surface base colour."},
+			  {"normal", K::Texture, LDR, true, "Surface normal."},
+			  {"material", K::Texture, RGBA8, true, "Surface roughness and metalness."},
+			  {"depth", K::Texture, R32, true, "Linear view depth."},
+			  {"occlusion", K::Texture, F::R8, false, "Ambient visibility, when available."}},
+			 {{"indirect", K::Colour, RGBA16, true, "Estimated indirect radiance."}},
+			 "Declares one-bounce indirect radiance from the visible G-buffer, composed with direct "
+			 "lighting. "
+			 "A device backend has not implemented the pass yet."},
+
+			{"pathtrace",
+			 "Path trace",
+			 C::Composite,
+			 S::View,
+			 {{"camera", K::Camera, F::R8, true, "The camera that owns ray generation."},
+			  {"entities", K::Entities, F::R8, true, "Visible scene identity and material lookup."},
+			  {"instances", K::Buffer, F::R8, true, "Tessellated or LOD-selected geometry rows."},
+			  {"albedo", K::Texture, RGBA8, true, "Visible surface base colour."},
+			  {"normal", K::Texture, LDR, true, "Visible surface normal."},
+			  {"material", K::Texture, RGBA8, true, "Visible surface material."},
+			  {"depth", K::Texture, R32, true, "Visible hit distance."},
+			  {"indirect", K::Texture, RGBA16, false, "Optional one-bounce guide."}},
+			 {{"radiance", K::Colour, RGBA16, true, "Progressive path-traced radiance estimate."}},
+			 "A progressive transport pass with explicit scene and G-buffer inputs. A backend must provide "
+			 "its acceleration structure and accumulation policy before this node can run."},
 
 			{"fog",
 			 "Volumetric fog",

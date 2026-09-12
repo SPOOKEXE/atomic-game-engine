@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <tuple>
 
 TEST_SUITE_ID("engine.examples.renderfeaturesdemo")
 TEST_DEPENDS("engine.graph.pipelinedocument")
@@ -79,6 +80,37 @@ TEST_CASE("the render features pipeline asset matches and builds its recipe", "[
 	CHECK(HasNode(graph, Name("demo-compute")));
 	CHECK(HasNode(graph, Name("demo-post")));
 	CHECK(HasNode(graph, Name("demo-fxaa")));
+}
+
+TEST_CASE("the tracing pipeline assets match their graph recipes", "[examples][graph][tracing]") {
+	const StagedAssets assets;
+	engine::graph::RegisterRenderNodeKinds();
+	for (const auto &[name, expected, trace] : {
+			 std::tuple{
+				 "RaytraceDemo.pipeline", engine::graph::RaytraceDemoDocument(), Name("screen-raytrace")
+			 },
+			 std::tuple{
+				 "PathtraceDemo.pipeline",
+				 engine::graph::PathtraceDemoDocument(),
+				 Name("progressive-pathtrace")
+			 },
+		 }) {
+		const std::filesystem::path path = engine::core::Paths::Assets() / "examples" / "pipelines" / name;
+		std::ifstream input(path, std::ios::binary);
+		REQUIRE(input);
+		const std::string text(std::istreambuf_iterator<char>(input), {});
+
+		engine::graph::PipelineDocument loaded;
+		Name offender;
+		REQUIRE(engine::graph::Read(text, loaded, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		CHECK(engine::graph::Write(loaded) == engine::graph::Write(expected));
+
+		engine::graph::RenderGraph graph;
+		REQUIRE(engine::graph::Build(loaded, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		CHECK(HasNode(graph, trace));
+		CHECK(HasNode(graph, Name("adaptive-tessellation")));
+		CHECK(HasNode(graph, Name("indirect-light")));
+	}
 }
 
 TEST_CASE("the render features scene authors policies attachments and LOD fallback", "[examples][scene]") {

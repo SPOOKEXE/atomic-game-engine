@@ -206,6 +206,34 @@ TEST_CASE("the default PBR frame's kinds and material ports are registered", "[g
 	CHECK(history->HistoryReads == 1);
 }
 
+TEST_CASE(
+	"hard-render nodes declare executable contracts without claiming a backend", "[graph][catalogue][tracing]"
+) {
+	Kinds();
+	for (const char *name : {"tessellate", "global-illumination", "raytrace", "pathtrace"}) {
+		const NodeKindSpec *spec = NodeCatalogue::Find(Name(name));
+		REQUIRE(spec != nullptr);
+		CHECK(spec->Queue == engine::graph::ExecutionQueue::Compute);
+		CHECK(spec->Needs.Compute);
+		CHECK_FALSE(spec->BuiltInBackend);
+	}
+	for (const char *name : {"global-illumination", "raytrace", "pathtrace"}) {
+		REQUIRE(NodeCatalogue::Find(Name(name)) != nullptr);
+		CHECK(NodeCatalogue::Find(Name(name))->Needs.StorageTextures);
+	}
+
+	const NodeKindSpec *raytrace = NodeCatalogue::Find(Name("raytrace"));
+	REQUIRE(raytrace != nullptr);
+	const auto input = [raytrace](std::string_view name) -> const PortSpec * {
+		for (const PortSpec &port : raytrace->Inputs)
+			if (port.Name.Text() == name) return &port;
+		return nullptr;
+	};
+	REQUIRE(input("scene") != nullptr);
+	REQUIRE(input("indirect") != nullptr);
+	CHECK_FALSE(input("indirect")->Required);
+}
+
 TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][catalogue]") {
 	Kinds();
 

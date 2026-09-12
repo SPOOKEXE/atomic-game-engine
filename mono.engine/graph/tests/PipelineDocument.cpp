@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <tuple>
 
 TEST_SUITE_ID("engine.graph.pipelinedocument")
 TEST_DEPENDS("engine.graph.rendergraph")
@@ -116,6 +117,47 @@ TEST_CASE("the default document round trips through text", "[graph]") {
 	// And the reloaded one still builds a frame that compiles.
 	RenderGraph graph;
 	CHECK(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
+}
+
+TEST_CASE("tracing demonstrations keep geometry and lighting as graph inputs", "[graph][tracing]") {
+	for (const auto &[document, trace, tessellation, illumination] : {
+			 std::tuple{
+				 engine::graph::RaytraceDemoDocument(),
+				 Name("screen-raytrace"),
+				 Name("adaptive-tessellation"),
+				 Name("indirect-light")
+			 },
+			 std::tuple{
+				 engine::graph::PathtraceDemoDocument(),
+				 Name("progressive-pathtrace"),
+				 Name("adaptive-tessellation"),
+				 Name("indirect-light")
+			 },
+		 }) {
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+
+		const auto find = [&graph](Name name) -> const engine::graph::Node * {
+			for (uint32_t value = 1; value <= graph.Count(); ++value) {
+				const auto *node = graph.Find(NodeId{value});
+				if (node != nullptr && node->Name == name) return node;
+			}
+			return nullptr;
+		};
+		const auto *traceNode = find(trace);
+		REQUIRE(traceNode != nullptr);
+		REQUIRE(find(tessellation) != nullptr);
+		REQUIRE(find(illumination) != nullptr);
+		CHECK(
+			std::find(traceNode->ReadPorts.begin(), traceNode->ReadPorts.end(), Name("indirect")) !=
+			traceNode->ReadPorts.end()
+		);
+
+		PipelineDocument reloaded;
+		REQUIRE(Read(Write(document), reloaded, offender) == PipelineDocumentStatus::Ok);
+		CHECK(Write(reloaded) == Write(document));
+	}
 }
 
 TEST_CASE("older documents upgrade resources to the current contract", "[graph][document]") {
