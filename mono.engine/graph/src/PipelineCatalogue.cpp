@@ -921,10 +921,11 @@ namespace engine::graph {
 			  {"normal", K::Texture, LDR, true, "Visible surface normal."},
 			  {"material", K::Texture, RGBA8, true, "Visible surface material."},
 			  {"depth", K::Texture, R32, true, "Visible hit distance."},
-			  {"indirect", K::Texture, RGBA16, false, "Optional one-bounce guide."}},
+			  {"indirect", K::Texture, RGBA16, false, "Optional one-bounce guide."},
+			  {"history", K::Texture, RGBA16, true, "Previous completed accumulation generation."}},
 			 {{"radiance", K::Storage, RGBA16, true, "One-sample screen-space transport estimate."}},
-			 "Builds a bounded, stochastic one-bounce estimate from the visible G-buffer. It has no "
-			 "accumulation, acceleration structure, or off-screen hits.",
+			 "Builds a bounded, stochastic one-bounce estimate and blends the previous history generation. "
+			 "It has no acceleration structure or off-screen hits.",
 			 false,
 			 "pathtrace.comp"},
 

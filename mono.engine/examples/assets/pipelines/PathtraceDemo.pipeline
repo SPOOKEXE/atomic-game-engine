@@ -17,6 +17,7 @@ reads "coarse-instances" "instances"
 reads "camera" "camera"
 writes "tessellated-factors" "factors"
 set "target-pixels" "12"
+set "uniforms" "view"
 node "indirect-light" "global-illumination" view no
 reads "albedo" "albedo"
 reads "normal" "normal"
@@ -24,6 +25,8 @@ reads "material" "material"
 reads "linear-depth" "depth"
 reads "occlusion" "occlusion"
 writes "indirect" "indirect"
+set "uniforms" "view"
+resource "path-history" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 history "" 0
 resource "visible-entities" entities R8 0 0 1 yes auto 1 1 1 0 1 auto auto 0 transient "" 0
 resource "path-radiance" storage RGBA16F 0 0 1 no auto 1 1 1 0 1 auto auto 0 transient "" 0
 node "progressive-pathtrace" "pathtrace" view no
@@ -35,8 +38,15 @@ reads "normal" "normal"
 reads "material" "material"
 reads "linear-depth" "depth"
 reads "indirect" "indirect"
+reads "path-history" "history"
 writes "path-radiance" "radiance"
+set "uniforms" "view"
 set "samples-per-frame" "1"
+node "path-history-store" "dispatch" view no
+reads "path-radiance" "source"
+writes "path-history" "target"
+set "shader" "attachment-copy.comp"
+set "uniforms" "view"
 node "compose-path-radiance" "mix" view no
 reads "scene-radiance" "a"
 reads "path-radiance" "b"
