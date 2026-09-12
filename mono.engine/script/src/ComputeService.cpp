@@ -61,7 +61,7 @@ namespace engine::script {
 			call.AwaitCompute(ticket);
 		}
 
-		constexpr std::array<ServiceMethod, 1> METHODS{{
+		constexpr std::array<ServiceMethod, 1> COMPUTE_METHODS{{
 			{"NoiseGridAsync", NoiseGridAsync},
 		}};
 	}
@@ -70,7 +70,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "ComputeService";
-			surface.Methods = METHODS;
+			surface.Methods = COMPUTE_METHODS;
 			return surface;
 		}();
 		return SURFACE;

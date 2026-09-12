@@ -159,7 +159,8 @@ namespace {
 				 .RowStride = 6,
 				 .Scalar = "float16",
 				 .ColourSpace = "linear",
-				 .Origin = "top_left"}
+				 .Origin = "top_left",
+				 .Packing = {}}
 			};
 			return true;
 		}

@@ -29,6 +29,7 @@ namespace {
 			.ParentEye = {21, "viewport-eye", 23, 29},
 			.TargetProducer = snapshot.Producer,
 			.TargetEye = snapshot.Eye,
+			.BodyBounds = {},
 			.Part = 0
 		};
 	}

@@ -162,7 +162,8 @@ namespace engine::render {
 			.CaptureNode = request.CaptureNode,
 			.ViewSlot = request.ViewSlot,
 			.TemporalHistory = request.TemporalHistory,
-			.Channels = request.Channels
+			.Channels = request.Channels,
+			.ResourceTokens = {}
 		};
 		for (const DataCaptureChannel channel : request.Channels) {
 			const uint64_t token = QueueResourceImage(

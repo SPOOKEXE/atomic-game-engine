@@ -194,7 +194,9 @@ TEST_CASE(
 		);
 		if (pose != 0)
 			CHECK(
-				test::CompareImages(previous.View(), actual.View(), {.Absolute = .002}).MismatchedPixels > 100
+				test::CompareImages(
+					previous.View(), actual.View(), {.Absolute = .002, .Region = {}}
+				).MismatchedPixels > 100
 			);
 		previous = actual;
 	}

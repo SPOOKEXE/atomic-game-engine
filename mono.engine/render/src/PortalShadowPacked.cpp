@@ -49,7 +49,7 @@ namespace engine::render {
 		for (size_t block = 0; block < PORTAL_SHADOW_PACKED_BLOCK_COUNT; ++block) {
 			const auto range = RangeOf(depth.data() + block * PORTAL_SHADOW_PACKED_BLOCK_SAMPLES * 4);
 			if (range.Maximum > MAX_DEPTH_BITS) return Fail(error, "invalid shadow depth sample");
-			wordCount += 2 * std::bit_width(range.Maximum - range.Minimum);
+			wordCount += 2 * static_cast<size_t>(std::bit_width(range.Maximum - range.Minimum));
 		}
 		if (wordCount > byteBudget / 4) return Fail(error, "packed shadow exceeds byte budget");
 		std::vector<uint32_t> packed(wordCount, 0);
@@ -96,7 +96,7 @@ namespace engine::render {
 				minimum = std::min(minimum, delta);
 				maximum = std::max(maximum, delta);
 			}
-			if (minimum != 0 || std::bit_width(maximum) != width) return false;
+			if (minimum != 0 || static_cast<uint32_t>(std::bit_width(maximum)) != width) return false;
 			offset += 2 * width;
 		}
 		return offset == words.size();

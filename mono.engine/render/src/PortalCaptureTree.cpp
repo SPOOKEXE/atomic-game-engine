@@ -9,17 +9,17 @@
 #include <utility>
 namespace engine::render {
 	namespace {
-		constexpr uint32_t MAGIC = 0x474d4950;
-		constexpr uint16_t VERSION = 19;
+		constexpr uint32_t CAPTURE_TREE_MAGIC = 0x474d4950;
+		constexpr uint16_t CAPTURE_TREE_VERSION = 19;
 		constexpr uint8_t KIND = 6;
 		bool Fail(std::string &error) {
 			error = "invalid or over-budget portal capture tree";
 			return false;
 		}
-		bool Text(std::string_view value) {
+		bool CaptureTreeText(std::string_view value) {
 			return !value.empty() && value.size() <= 256 && value.find('\0') == std::string_view::npos;
 		}
-		template <size_t N> bool Finite(const std::array<float, N> &a) {
+		template <size_t N> bool CaptureTreeFinite(const std::array<float, N> &a) {
 			for (auto v : a)
 				if (!std::isfinite(v)) return false;
 			return true;
@@ -36,16 +36,16 @@ namespace engine::render {
 			double norm = 0;
 			for (auto v : a)
 				norm += double(v) * v;
-			return Finite(a) && std::abs(norm - 1) <= .001;
+			return CaptureTreeFinite(a) && std::abs(norm - 1) <= .001;
 		}
 		bool Camera(const PortalCaptureTreeCamera &camera) {
 			const auto &frustum = camera.Frustum;
 			double normal = 0;
 			for (size_t i = 0; i < 3; ++i)
 				normal += double(camera.ClipPlane[i]) * camera.ClipPlane[i];
-			return Finite(camera.Position) && Unit(camera.Orientation) && Finite(frustum) &&
-				   frustum[0] < frustum[1] && frustum[2] < frustum[3] && frustum[4] > 0 &&
-				   frustum[5] > frustum[4] && Finite(camera.ClipPlane) &&
+			return CaptureTreeFinite(camera.Position) && Unit(camera.Orientation) &&
+				   CaptureTreeFinite(frustum) && frustum[0] < frustum[1] && frustum[2] < frustum[3] &&
+				   frustum[4] > 0 && frustum[5] > frustum[4] && CaptureTreeFinite(camera.ClipPlane) &&
 				   ((camera.Projection == PortalImageProjection::Eye &&
 					 camera.ClipPlane == std::array<float, 4>{}) ||
 					(camera.Projection == PortalImageProjection::Seam && std::abs(normal - 1) <= .001));
@@ -60,7 +60,7 @@ namespace engine::render {
 		) {
 			if (bytes.size() > MAX_PORTAL_EXCHANGE_BYTES) return Fail(error);
 			core::ByteReader reader(bytes);
-			if (reader.ReadUInt32() != MAGIC || reader.ReadUInt16() != VERSION ||
+			if (reader.ReadUInt32() != CAPTURE_TREE_MAGIC || reader.ReadUInt16() != CAPTURE_TREE_VERSION ||
 				reader.ReadUInt8() != KIND || reader.ReadUInt8() != 0)
 				return Fail(error);
 			const auto nodes = reader.ReadUInt8(), edges = reader.ReadUInt8();
@@ -95,8 +95,8 @@ namespace engine::render {
 				const auto length = reader.ReadUInt32();
 				const auto layer = reader.ReadRawView(length);
 				PortalLayerMeasure layerMeasure;
-				if (reader.Failed() || !Text(world) || !Text(channel) || session == 0 || generation == 0 ||
-					!Camera(camera) || !PreflightPortalLayers(layer, layerMeasure))
+				if (reader.Failed() || !CaptureTreeText(world) || !CaptureTreeText(channel) || session == 0 ||
+					generation == 0 || !Camera(camera) || !PreflightPortalLayers(layer, layerMeasure))
 					return Fail(error);
 				if (admission) {
 					const PortalCaptureTreeEndpointView endpoint{world, channel, session, generation};
@@ -164,8 +164,9 @@ namespace engine::render {
 				const auto length = reader.ReadUInt32();
 				const auto geometry = reader.ReadRawView(length);
 				if (reader.Failed() || edge.Parent >= edge.Child || edge.Child >= nodes ||
-					parents[edge.Child]++ != 0 || !Text(key) || !Finite(edge.Centre) || !Finite(edge.First) ||
-					!Finite(edge.Second) || !Finite(edge.Position) || !Unit(edge.Orientation) ||
+					parents[edge.Child]++ != 0 || !CaptureTreeText(key) || !CaptureTreeFinite(edge.Centre) ||
+					!CaptureTreeFinite(edge.First) || !CaptureTreeFinite(edge.Second) ||
+					!CaptureTreeFinite(edge.Position) || !Unit(edge.Orientation) ||
 					!std::isfinite(edge.Scale) || edge.Scale <= 0)
 					return Fail(error);
 				double area = 0;
@@ -253,9 +254,9 @@ namespace engine::render {
 		size_t pixels = 0, code = 0, programs = 0, bytes = 0, rows = 0, joints = 0;
 		std::array<assets::ContentHash, MAX_PORTAL_CAPTURE_LENSES> hashes{};
 		for (const auto &node : tree.Nodes) {
-			if (!Text(node.Producer.World) || !Text(node.Producer.Channel) || !node.Producer.Session ||
-				!node.Producer.Generation || !Camera(node.Camera) || !node.Layers.Opaque.CaptureLighting ||
-				!ValidPortalPlayerIdentity(node.RetainedBodyPlayer) ||
+			if (!CaptureTreeText(node.Producer.World) || !CaptureTreeText(node.Producer.Channel) ||
+				!node.Producer.Session || !node.Producer.Generation || !Camera(node.Camera) ||
+				!node.Layers.Opaque.CaptureLighting || !ValidPortalPlayerIdentity(node.RetainedBodyPlayer) ||
 				node.RetainedBodyPlayer != tree.Nodes.front().RetainedBodyPlayer ||
 				!ValidPortalImageLayerSet(node.Layers))
 				return false;
@@ -278,9 +279,10 @@ namespace engine::render {
 		std::array<uint8_t, MAX_PORTAL_CAPTURE_TREE_NODES> parents{}, parentOf{}, depth{};
 		for (const auto &edge : tree.Edges) {
 			if (edge.Parent >= edge.Child || edge.Child >= tree.Nodes.size() || parents[edge.Child]++ ||
-				!Text(edge.PortalKey) || !Finite(edge.Centre) || !Finite(edge.First) ||
-				!Finite(edge.Second) || !Finite(edge.Position) || !Unit(edge.Orientation) ||
-				!std::isfinite(edge.Scale) || edge.Scale <= 0)
+				!CaptureTreeText(edge.PortalKey) || !CaptureTreeFinite(edge.Centre) ||
+				!CaptureTreeFinite(edge.First) || !CaptureTreeFinite(edge.Second) ||
+				!CaptureTreeFinite(edge.Position) || !Unit(edge.Orientation) || !std::isfinite(edge.Scale) ||
+				edge.Scale <= 0)
 				return false;
 			double area = 0;
 			for (size_t axis = 0; axis < 3; ++axis) {
@@ -317,14 +319,15 @@ namespace engine::render {
 	EncodePortalCaptureTree(const PortalCaptureTree &tree, std::vector<std::byte> &out, std::string &error) {
 		if (!ValidPortalCaptureTree(tree)) return Fail(error);
 		core::ByteWriter writer;
-		writer.WriteUInt32(MAGIC);
-		writer.WriteUInt16(VERSION);
+		writer.WriteUInt32(CAPTURE_TREE_MAGIC);
+		writer.WriteUInt16(CAPTURE_TREE_VERSION);
 		writer.WriteUInt8(KIND);
 		writer.WriteUInt8(0);
 		writer.WriteUInt8(tree.Nodes.size());
 		writer.WriteUInt8(tree.Edges.size());
 		for (const auto &node : tree.Nodes) {
-			if (!Text(node.Producer.World) || !Text(node.Producer.Channel) || !Camera(node.Camera))
+			if (!CaptureTreeText(node.Producer.World) || !CaptureTreeText(node.Producer.Channel) ||
+				!Camera(node.Camera))
 				return Fail(error);
 			writer.WriteString(node.Producer.World);
 			writer.WriteString(node.Producer.Channel);
@@ -345,7 +348,7 @@ namespace engine::render {
 			writer.WriteRaw(layer.data(), layer.size());
 		}
 		for (const auto &edge : tree.Edges) {
-			if (!Text(edge.PortalKey)) return Fail(error);
+			if (!CaptureTreeText(edge.PortalKey)) return Fail(error);
 			const size_t edgeBytes =
 				2 + 4 + edge.PortalKey.size() + 17 * sizeof(float) + 4 + edge.Geometry.size();
 			if (writer.Bytes().size() > MAX_PORTAL_EXCHANGE_BYTES ||

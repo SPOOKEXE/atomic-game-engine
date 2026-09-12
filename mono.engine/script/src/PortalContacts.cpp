@@ -13,7 +13,7 @@
 
 namespace engine::script {
 	namespace {
-		constexpr std::string_view CHANNEL = "portal.static-contacts";
+		constexpr std::string_view PORTAL_CONTACTS_CHANNEL = "portal.static-contacts";
 		struct PendingContact {
 			ecs::Entity Root;
 			scene::SeamTransform Back;
@@ -150,10 +150,12 @@ namespace engine::script {
 			"script.PortalContactRequests", WriteRequests, ReadRequests
 		);
 		physics::RegisterCopiedContactComponents();
-		return world::RegisterTickExchangeChannel({std::string(CHANNEL), Collect, Serve, Apply});
+		return world::RegisterTickExchangeChannel(
+			{std::string(PORTAL_CONTACTS_CHANNEL), Collect, Serve, Apply}
+		);
 	}
 	bool ConfigurePortalContacts(ecs::Store &store, uint64_t incarnation) {
 		if (!RegisterPortalContacts()) return false;
-		return world::OpenTickExchange(store, CHANNEL, incarnation);
+		return world::OpenTickExchange(store, PORTAL_CONTACTS_CHANNEL, incarnation);
 	}
 }

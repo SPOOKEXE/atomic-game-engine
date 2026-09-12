@@ -19,6 +19,7 @@ namespace engine::render {
 			const auto &q = edge.Orientation;
 			return {
 				.Frame = core::CFrame(Vector(edge.Position), glm::quat(q[3], q[0], q[1], q[2])),
+				.Origin = {},
 				.Scale = edge.Scale
 			};
 		}
@@ -27,7 +28,7 @@ namespace engine::render {
 			return {camera.Position, camera.Orientation, camera.Frustum, camera.ClipPlane};
 		}
 
-		bool Finite(const core::Vector3 &value) {
+		bool FiniteVector(const core::Vector3 &value) {
 			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
 		}
 
@@ -43,13 +44,14 @@ namespace engine::render {
 			normal = {
 				static_cast<float>(x / length), static_cast<float>(y / length), static_cast<float>(z / length)
 			};
-			return Finite(normal);
+			return FiniteVector(normal);
 		}
 
 		bool Ordinary(const scene::DrawInstance &row, size_t joints) {
 			return row.Transparency == 0 && row.Alpha != scene::AlphaMode::Transparency && row.Surface < 0 &&
-				   !row.Shader.IsValid() && Finite(row.Frame.Position) && Finite(row.HalfExtent) &&
-				   Finite(row.SeamNormal) && std::isfinite(row.SeamOffset) && row.SkinFirst <= joints &&
+				   !row.Shader.IsValid() && FiniteVector(row.Frame.Position) &&
+				   FiniteVector(row.HalfExtent) && FiniteVector(row.SeamNormal) &&
+				   std::isfinite(row.SeamOffset) && row.SkinFirst <= joints &&
 				   row.SkinCount <= joints - row.SkinFirst;
 		}
 
@@ -72,13 +74,13 @@ namespace engine::render {
 			const auto &clip = child.ClipPlane;
 			const auto clipNormal = core::Vector3(clip[0], clip[1], clip[2]);
 			const float distance = normal.Dot(point);
-			if (!Finite(normal) || !Finite(point) || !std::isfinite(distance)) return false;
+			if (!FiniteVector(normal) || !FiniteVector(point) || !std::isfinite(distance)) return false;
 			// Float wire poses and chained uniform scales accumulate a few ulps.
 			const float tolerance = 1e-4f * std::max(1.0f, std::abs(distance));
 			if ((normal - clipNormal).Magnitude() > 1e-4f || std::abs(distance + clip[3]) > tolerance)
 				return false;
 			const auto mappedEye = through.Point(Vector(parent.Position));
-			if (!Finite(mappedEye)) return false;
+			if (!FiniteVector(mappedEye)) return false;
 			const double eyeMagnitude =
 				std::hypot(double(mappedEye.X), double(mappedEye.Y), double(mappedEye.Z));
 			const double eyeError = std::hypot(
@@ -308,12 +310,13 @@ namespace engine::render {
 			snapshot.ContentRevision != expected.ContentRevision ||
 			snapshot.LightingRevision != expected.LightingRevision ||
 			snapshot.EyePixelHash != expected.EyePixelHash ||
-			snapshot.ExcludedPlayer != expected.ExcludedPlayer || !Finite(expected.LightDirection))
+			snapshot.ExcludedPlayer != expected.ExcludedPlayer || !FiniteVector(expected.LightDirection))
 			return false;
 		if (expected.BodyBounds) {
 			const auto &bounds = *expected.BodyBounds;
-			if (!Finite(bounds.Minimum) || !Finite(bounds.Maximum) || bounds.Minimum.X > bounds.Maximum.X ||
-				bounds.Minimum.Y > bounds.Maximum.Y || bounds.Minimum.Z > bounds.Maximum.Z)
+			if (!FiniteVector(bounds.Minimum) || !FiniteVector(bounds.Maximum) ||
+				bounds.Minimum.X > bounds.Maximum.X || bounds.Minimum.Y > bounds.Maximum.Y ||
+				bounds.Minimum.Z > bounds.Maximum.Z)
 				return false;
 		}
 		const auto sourceBounds = Box(snapshot.SourceBounds);

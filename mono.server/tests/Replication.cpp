@@ -458,12 +458,10 @@ namespace server_replication_test {
 			// uses the same point without creating another character.
 			Link->Poll(World, Now);
 			if (AutomaticFreshAdmission && !FreshAdmissionSent && Link->Admitted()) {
-				FreshAdmissionSent = Link->SendUser(
-					engine::game::EncodePortalSession(
-						{.Kind = engine::game::PortalSessionKind::Fresh, .Attempt = 1}
-					),
-					Now
-				);
+				engine::game::PortalSessionMessage fresh{};
+				fresh.Kind = engine::game::PortalSessionKind::Fresh;
+				fresh.Attempt = 1;
+				FreshAdmissionSent = Link->SendUser(engine::game::EncodePortalSession(fresh), Now);
 			}
 			Link->Advance(Now);
 		}
@@ -1557,8 +1555,10 @@ TEST_CASE(
 	};
 	CHECK(players() == 0);
 	CHECK(remote.Mine == engine::ecs::NULL_ENTITY);
-	const auto fresh =
-		engine::game::EncodePortalSession({.Kind = engine::game::PortalSessionKind::Fresh, .Attempt = 1});
+	engine::game::PortalSessionMessage freshMessage{};
+	freshMessage.Kind = engine::game::PortalSessionKind::Fresh;
+	freshMessage.Attempt = 1;
+	const auto fresh = engine::game::EncodePortalSession(freshMessage);
 	REQUIRE(remote.Link->SendUser(fresh, remote.Now));
 	REQUIRE(remote.Wait(
 		[&] {

@@ -931,15 +931,14 @@ namespace engine::render {
 		binding.Expected = issued.Request.Key;
 		binding.ExpectedScope = issued.Request.Scope;
 		binding.ExpectedProjection = issued.Request.Projection;
-		Impl::Preview preview{
-			.Producer = producer,
-			.Binding = std::move(binding),
-			.Pending = result.RequestId,
-			.PendingDeadline = now + state.Limits.Timeout,
-			.OfferedVersion = issued.Request.KnownImage,
-			.EyePlayer = issued.Request.EyePlayer,
-			.PendingRequest = issued.Request
-		};
+		Impl::Preview preview{};
+		preview.Producer = producer;
+		preview.Binding = std::move(binding);
+		preview.Pending = result.RequestId;
+		preview.PendingDeadline = now + state.Limits.Timeout;
+		preview.OfferedVersion = issued.Request.KnownImage;
+		preview.EyePlayer = issued.Request.EyePlayer;
+		preview.PendingRequest = issued.Request;
 		preview.OrderedLayers = issued.Request.OrderedLayers;
 		preview.RetainedBodyPlayer = issued.Request.RetainedBodyPlayer;
 		const auto published = PublishedEndpoint(state.EndpointBindings, Borrow(producer));
@@ -1174,7 +1173,8 @@ namespace engine::render {
 					{message.Correlation,
 					 accepted.Failure->Status,
 					 0,
-					 std::move(accepted.Failure->Diagnostic)}
+					 std::move(accepted.Failure->Diagnostic),
+					 {}}
 				);
 				preview->Pending = 0;
 				continue;
@@ -1190,7 +1190,7 @@ namespace engine::render {
 				preview->CaptureAccepted();
 				preview->ImageDeadline = now + state.Limits.Timeout;
 				preview->Pending = 0;
-				completions.push_back({message.Correlation, PortalImageStatus::Ok, 0, {}});
+				completions.push_back({message.Correlation, PortalImageStatus::Ok, 0, {}, {}});
 				continue;
 			}
 			if (preview->OrderedLayers) {
@@ -1243,7 +1243,8 @@ namespace engine::render {
 							{message.Correlation,
 							 PortalImageStatus::BudgetExceeded,
 							 0,
-							 "source capture tree import refused"}
+							 "source capture tree import refused",
+							 {}}
 						);
 						continue;
 					}
@@ -1272,7 +1273,8 @@ namespace engine::render {
 						{message.Correlation,
 						 PortalImageStatus::Unsupported,
 						 0,
-						 "captured lens program refused"}
+						 "captured lens program refused",
+						 {}}
 					);
 					continue;
 				}
@@ -1291,7 +1293,8 @@ namespace engine::render {
 						{message.Correlation,
 						 PortalImageStatus::BudgetExceeded,
 						 0,
-						 "source layer import refused"}
+						 "source layer import refused",
+						 {}}
 					);
 					continue;
 				}
@@ -1320,7 +1323,11 @@ namespace engine::render {
 			preview->Pending = 0;
 			if (handle == 0) {
 				completions.push_back(
-					{message.Correlation, PortalImageStatus::BudgetExceeded, 0, "source image import refused"}
+					{message.Correlation,
+					 PortalImageStatus::BudgetExceeded,
+					 0,
+					 "source image import refused",
+					 {}}
 				);
 				continue;
 			}

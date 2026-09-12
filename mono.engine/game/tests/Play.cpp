@@ -51,7 +51,12 @@ namespace {
 		"native player motion carries one pose and connection input frontier", "[game][play][player-motion]"
 	) {
 		using namespace engine;
-		game::PlayerMotion sample{ecs::Entity{1}, ecs::Entity{2}, {202, 50, 9000}};
+		game::PlayerMotion sample{};
+		sample.Player = ecs::Entity{1};
+		sample.Root = ecs::Entity{2};
+		sample.Motion.DestinationIncarnation = 202;
+		sample.Motion.DestinationTick = 50;
+		sample.Motion.InputTick = 9000;
 		sample.Motion.Frame = core::CFrame(core::Vector3{3, 4, 5});
 		sample.Motion.Linear = {1, 2, 3};
 		sample.Motion.WalkSpeed = 16;

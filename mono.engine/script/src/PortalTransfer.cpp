@@ -31,7 +31,7 @@ namespace engine::script {
 		using core::ByteWriter;
 		using ecs::Entity;
 		using ecs::NULL_ENTITY;
-		constexpr std::string_view CHANNEL = "engine.portal.transfer";
+		constexpr std::string_view PORTAL_TRANSFER_CHANNEL = "engine.portal.transfer";
 		constexpr uint32_t MAGIC = 0x35545050;
 		constexpr size_t MAXIMUM_ACTIVE = 16;
 		constexpr size_t MAXIMUM_NATIVE_INPUTS = 64;
@@ -295,7 +295,7 @@ namespace engine::script {
 
 		world::Ticket Send(ecs::Store &store, std::string_view destination, const Message &message) {
 			const auto encoded = Encode(message);
-			const auto ticket = world::Postbox(store).SendTo(destination, CHANNEL, encoded);
+			const auto ticket = world::Postbox(store).SendTo(destination, PORTAL_TRANSFER_CHANNEL, encoded);
 			if (ticket.Expected()) {
 				core::Metrics::Count("world.portal.sent.messages", 1);
 				core::Metrics::Count("world.portal.sent.bytes", encoded.size());
@@ -1490,12 +1490,12 @@ namespace engine::script {
 		auto *state = State(store);
 		if (state == nullptr || store.AdoptOnly() || world::Postbox(store).IsReplica()) return;
 		if (!state->Open && !state->Opening.Expected())
-			state->Opening = world::Postbox(store).OpenChannel(CHANNEL);
+			state->Opening = world::Postbox(store).OpenChannel(PORTAL_TRANSFER_CHANNEL);
 		std::vector<world::Delivery> deliveries;
 		if (auto *inbox = store.ResourceMutable<world::Inbox>()) {
 			for (auto it = inbox->Arrived.begin(); it != inbox->Arrived.end();) {
-				bool owned =
-					it->Bus == world::BusKind::Channel && it->Key.Text() == CHANNEL && !it->Reply.Expected();
+				bool owned = it->Bus == world::BusKind::Channel &&
+							 it->Key.Text() == PORTAL_TRANSFER_CHANNEL && !it->Reply.Expected();
 				owned |= it->Reply.Expected() &&
 						 (it->Reply == state->Opening ||
 						  std::any_of(state->Out.begin(), state->Out.end(), [&](const auto &r) {

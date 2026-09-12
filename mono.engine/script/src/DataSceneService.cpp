@@ -869,7 +869,7 @@ namespace engine::script {
 			call.ReturnValue(QueryObb(call.World(), request).Value);
 		}
 
-		constexpr std::array<ServiceMethod, 17> METHODS{{
+		constexpr std::array<ServiceMethod, 17> DATA_SCENE_METHODS{{
 			{"GetCapabilities", ServiceCapabilities},
 			{"GetSceneSnapshot", ServiceSnapshot},
 			{"GetCameraRenderingData", ServiceCamera},
@@ -1066,7 +1066,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "DataSceneService";
-			surface.Methods = METHODS;
+			surface.Methods = DATA_SCENE_METHODS;
 			return surface;
 		}();
 		return SURFACE;

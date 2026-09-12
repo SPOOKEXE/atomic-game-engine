@@ -15,17 +15,17 @@
 
 namespace engine::render {
 	namespace {
-		constexpr uint32_t MAGIC = 0x57444853;
-		constexpr uint16_t VERSION = 1;
+		constexpr uint32_t SHADOW_IMAGE_MAGIC = 0x57444853;
+		constexpr uint16_t SHADOW_IMAGE_VERSION = 1;
 		constexpr size_t TILE_ROW_BYTES = PORTAL_SHADOW_TILE_EXTENT * 4;
 		constexpr size_t IMAGE_ROW_BYTES = PORTAL_SHADOW_EXTENT * 4;
 		constexpr uint16_t ALL_TILES = 0xffff;
 
-		bool Fail(std::string &error, const char *message) {
+		bool FailShadowImage(std::string &error, const char *message) {
 			error = message;
 			return false;
 		}
-		bool Text(std::string_view value) {
+		bool ShadowImageText(std::string_view value) {
 			return !value.empty() && value.size() <= 256 && value.find('\0') == std::string_view::npos;
 		}
 		bool Bounds(const std::array<float, 6> &bounds) {
@@ -53,8 +53,8 @@ namespace engine::render {
 			writer.WriteRaw(hash.Digest.data(), hash.Digest.size());
 		}
 		void Snapshot(core::ByteWriter &writer, const PortalShadowSnapshot &snapshot) {
-			writer.WriteUInt32(MAGIC);
-			writer.WriteUInt16(VERSION);
+			writer.WriteUInt32(SHADOW_IMAGE_MAGIC);
+			writer.WriteUInt16(SHADOW_IMAGE_VERSION);
 			writer.WriteUInt16(snapshot.SourceEmpty ? 1 : 0);
 			writer.WriteString(snapshot.Producer.World);
 			writer.WriteString(snapshot.Producer.Channel);
@@ -78,13 +78,14 @@ namespace engine::render {
 				writer.WriteFloat(value);
 		}
 		bool Snapshot(core::ByteReader &reader, PortalShadowSnapshot &snapshot) {
-			if (reader.ReadUInt32() != MAGIC || reader.ReadUInt16() != VERSION) return false;
+			if (reader.ReadUInt32() != SHADOW_IMAGE_MAGIC || reader.ReadUInt16() != SHADOW_IMAGE_VERSION)
+				return false;
 			const auto flags = reader.ReadUInt16();
 			if (flags > 1) return false;
 			snapshot.SourceEmpty = flags != 0;
 			const auto text = [&](std::string &out) {
 				const auto value = reader.ReadString();
-				if (reader.Failed() || !Text(value)) return false;
+				if (reader.Failed() || !ShadowImageText(value)) return false;
 				out = value;
 				return true;
 			};
@@ -118,11 +119,12 @@ namespace engine::render {
 	}
 
 	bool ValidPortalShadowSnapshot(const PortalShadowSnapshot &snapshot) {
-		if (!Text(snapshot.Producer.World) || !Text(snapshot.Producer.Channel) ||
+		if (!ShadowImageText(snapshot.Producer.World) || !ShadowImageText(snapshot.Producer.Channel) ||
 			snapshot.Producer.Session == 0 || snapshot.Producer.Generation == 0 ||
-			snapshot.Eye.RequestId == 0 || !Text(snapshot.Eye.PortalKey) || snapshot.EyePixelHash.IsZero() ||
-			snapshot.DepthHash.IsZero() || !ValidPortalPlayerIdentity(snapshot.ExcludedPlayer) ||
-			!Bounds(snapshot.SourceBounds) || !Bounds(snapshot.DomainBounds))
+			snapshot.Eye.RequestId == 0 || !ShadowImageText(snapshot.Eye.PortalKey) ||
+			snapshot.EyePixelHash.IsZero() || snapshot.DepthHash.IsZero() ||
+			!ValidPortalPlayerIdentity(snapshot.ExcludedPlayer) || !Bounds(snapshot.SourceBounds) ||
+			!Bounds(snapshot.DomainBounds))
 			return false;
 		if (snapshot.SourceEmpty) {
 			for (float value : snapshot.SourceBounds)
@@ -154,11 +156,12 @@ namespace engine::render {
 	bool EncodePortalShadowManifest(
 		const PortalShadowSnapshot &snapshot, std::vector<std::byte> &out, std::string &error
 	) {
-		if (!ValidPortalShadowSnapshot(snapshot)) return Fail(error, "invalid portal shadow manifest");
+		if (!ValidPortalShadowSnapshot(snapshot))
+			return FailShadowImage(error, "invalid portal shadow manifest");
 		core::ByteWriter writer;
 		Snapshot(writer, snapshot);
 		if (writer.Size() > MAX_PORTAL_EXCHANGE_BYTES)
-			return Fail(error, "portal shadow manifest exceeds wire budget");
+			return FailShadowImage(error, "portal shadow manifest exceeds wire budget");
 		out.assign(writer.Bytes().begin(), writer.Bytes().end());
 		error.clear();
 		return true;
@@ -168,11 +171,11 @@ namespace engine::render {
 		std::span<const std::byte> packet, PortalShadowSnapshot &out, std::string &error
 	) {
 		if (packet.size() > MAX_PORTAL_EXCHANGE_BYTES)
-			return Fail(error, "portal shadow manifest exceeds wire budget");
+			return FailShadowImage(error, "portal shadow manifest exceeds wire budget");
 		core::ByteReader reader(packet);
 		PortalShadowSnapshot snapshot;
 		if (!Snapshot(reader, snapshot) || reader.Remaining() != 0)
-			return Fail(error, "invalid portal shadow manifest");
+			return FailShadowImage(error, "invalid portal shadow manifest");
 		out = std::move(snapshot);
 		error.clear();
 		return true;
@@ -183,7 +186,7 @@ namespace engine::render {
 	) {
 		ENGINE_PROFILE("portal shadow tile encode");
 		if (tile >= PORTAL_SHADOW_TILE_COUNT || !ValidPortalShadowImage(image))
-			return Fail(error, "invalid portal shadow image or tile");
+			return FailShadowImage(error, "invalid portal shadow image or tile");
 		core::ByteWriter writer;
 		Snapshot(writer, image.Snapshot);
 		writer.WriteUInt8(tile);
@@ -194,7 +197,7 @@ namespace engine::render {
 		for (size_t row = 0; row < PORTAL_SHADOW_TILE_EXTENT; ++row)
 			writer.WriteRaw(image.Depth.data() + TileOffset(tile, row), TILE_ROW_BYTES);
 		if (writer.Size() > MAX_PORTAL_EXCHANGE_BYTES)
-			return Fail(error, "portal shadow tile exceeds wire budget");
+			return FailShadowImage(error, "portal shadow tile exceeds wire budget");
 		out.assign(writer.Bytes().begin(), writer.Bytes().end());
 		error.clear();
 		return true;
@@ -204,19 +207,19 @@ namespace engine::render {
 		std::span<const std::byte> packet, PortalShadowSnapshot &out, uint8_t &tile, std::string &error
 	) {
 		if (packet.size() > MAX_PORTAL_EXCHANGE_BYTES)
-			return Fail(error, "portal shadow tile exceeds wire budget");
+			return FailShadowImage(error, "portal shadow tile exceeds wire budget");
 		core::ByteReader reader(packet);
 		PortalShadowSnapshot snapshot;
-		if (!Snapshot(reader, snapshot)) return Fail(error, "invalid portal shadow tile snapshot");
+		if (!Snapshot(reader, snapshot)) return FailShadowImage(error, "invalid portal shadow tile snapshot");
 		const auto index = reader.ReadUInt8();
 		assets::ContentHash hash;
 		if (index >= PORTAL_SHADOW_TILE_COUNT ||
 			!reader.ReadRaw(hash.Digest.data(), assets::ContentHash::BYTES) ||
 			reader.Remaining() != PORTAL_SHADOW_TILE_BYTES)
-			return Fail(error, "invalid portal shadow tile layout");
+			return FailShadowImage(error, "invalid portal shadow tile layout");
 		const auto pixels = reader.ReadRawView(PORTAL_SHADOW_TILE_BYTES);
 		if (reader.Failed() || assets::Hasher::Of(pixels) != hash || !Samples(pixels, snapshot.SourceEmpty))
-			return Fail(error, "invalid portal shadow tile hash or depth");
+			return FailShadowImage(error, "invalid portal shadow tile hash or depth");
 		out = std::move(snapshot);
 		tile = index;
 		error.clear();
@@ -225,12 +228,12 @@ namespace engine::render {
 
 	bool
 	PortalShadowAssembly::Begin(const PortalShadowSnapshot &expected, size_t byteBudget, std::string &error) {
-		if (Pending) return Fail(error, "portal shadow assembly already active");
+		if (Pending) return FailShadowImage(error, "portal shadow assembly already active");
 		if (byteBudget < PORTAL_SHADOW_BYTES || !ValidPortalShadowSnapshot(expected))
-			return Fail(error, "invalid or over-budget portal shadow snapshot");
+			return FailShadowImage(error, "invalid or over-budget portal shadow snapshot");
 		PortalShadowImage image{expected, std::vector<std::byte>(PORTAL_SHADOW_BYTES)};
 		if (image.Depth.capacity() > byteBudget)
-			return Fail(error, "portal shadow allocation exceeds byte budget");
+			return FailShadowImage(error, "portal shadow allocation exceeds byte budget");
 		Pending.emplace(std::move(image));
 		Received = 0;
 		Complete = false;
@@ -241,20 +244,21 @@ namespace engine::render {
 	bool PortalShadowAssembly::Accept(std::span<const std::byte> packet, std::string &error) {
 		ENGINE_PROFILE("portal shadow tile accept");
 		if (!Pending || packet.size() > MAX_PORTAL_EXCHANGE_BYTES)
-			return Fail(error, "inactive or over-budget portal shadow assembly");
+			return FailShadowImage(error, "inactive or over-budget portal shadow assembly");
 		core::ByteWriter expected;
 		Snapshot(expected, Pending->Snapshot);
 		const size_t prefix = expected.Size();
 		if (packet.size() != prefix + 1 + assets::ContentHash::BYTES + PORTAL_SHADOW_TILE_BYTES ||
 			!std::equal(expected.Bytes().begin(), expected.Bytes().end(), packet.begin()))
-			return Fail(error, "portal shadow tile does not match expected snapshot");
+			return FailShadowImage(error, "portal shadow tile does not match expected snapshot");
 		const auto tile = std::to_integer<uint8_t>(packet[prefix]);
-		if (tile >= PORTAL_SHADOW_TILE_COUNT) return Fail(error, "invalid portal shadow tile index");
+		if (tile >= PORTAL_SHADOW_TILE_COUNT)
+			return FailShadowImage(error, "invalid portal shadow tile index");
 		assets::ContentHash hash;
 		std::memcpy(hash.Digest.data(), packet.data() + prefix + 1, hash.Digest.size());
 		const auto pixels = packet.last(PORTAL_SHADOW_TILE_BYTES);
 		if (assets::Hasher::Of(pixels) != hash || !Samples(pixels, Pending->Snapshot.SourceEmpty))
-			return Fail(error, "invalid portal shadow tile hash or depth");
+			return FailShadowImage(error, "invalid portal shadow tile hash or depth");
 		const auto bit = uint16_t(1u << tile);
 		if (Received & bit) {
 			for (size_t row = 0; row < PORTAL_SHADOW_TILE_EXTENT; ++row)
@@ -263,7 +267,7 @@ namespace engine::render {
 						pixels.data() + row * TILE_ROW_BYTES,
 						TILE_ROW_BYTES
 					) != 0)
-					return Fail(error, "conflicting portal shadow tile");
+					return FailShadowImage(error, "conflicting portal shadow tile");
 			error.clear();
 			return true;
 		}
@@ -277,7 +281,7 @@ namespace engine::render {
 		if (Received == ALL_TILES) {
 			if (assets::Hasher::Of(Pending->Depth) != Pending->Snapshot.DepthHash) {
 				Cancel();
-				return Fail(error, "portal shadow image hash mismatch");
+				return FailShadowImage(error, "portal shadow image hash mismatch");
 			}
 			Complete = true;
 		}

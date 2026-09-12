@@ -3403,6 +3403,9 @@ namespace server {
 			case engine::world::HostSignal::Presentation:
 				(void)Worlds().AcceptPresentationFromDriver(frame.Presentation);
 				break;
+			case engine::world::HostSignal::PresentationBindings:
+				// Only a rendering host consumes presentation endpoint bindings.
+				break;
 			case engine::world::HostSignal::PresentationRoutes: {
 				const auto retained = PortalRouteWorlds.size();
 				for (const auto &address : frame.Directory.Endpoints) {

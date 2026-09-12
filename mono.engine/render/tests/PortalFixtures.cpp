@@ -1006,7 +1006,7 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 				expected.View(),
 				capture(0).View(),
 				// Each graph step rounds to half precision before the final 8-bit output.
-				{.Absolute = 1.0 / 255.0}
+				{.Absolute = 1.0 / 255.0, .Region = {}}
 			);
 		}
 	}
