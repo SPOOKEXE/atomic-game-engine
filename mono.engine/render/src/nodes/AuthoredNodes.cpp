@@ -8,6 +8,8 @@
 
 #include "ViewRecording.hpp"
 
+#include <bit>
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
@@ -27,6 +29,16 @@ namespace engine::render {
 
 		bool IsHardRenderNode(core::Name kind) {
 			return kind == core::Name("raytrace") || kind == core::Name("pathtrace");
+		}
+
+		uint64_t GraphHistorySignature(const ViewRecording &recording) {
+			uint64_t signature = recording.ContentSignature;
+			for (const glm::mat4 *matrix : {&recording.Matrices.ViewProjection, &recording.Matrices.Projection})
+				for (size_t column = 0; column < 4; column++)
+					for (size_t row = 0; row < 4; row++)
+						signature = scene::MixSignature(signature, std::bit_cast<uint32_t>((*matrix)[column][row]));
+			signature = scene::MixSignature(signature, recording.SceneWidth);
+			return scene::MixSignature(signature, recording.SceneHeight);
 		}
 		bool AttachmentDemanded(
 			std::span<const scene::DrawInstance> instances,
@@ -482,6 +494,14 @@ namespace engine::render {
 			const uint32_t groupsZ = coverTarget ? 1 : node->Integer(core::Name("dispatch.z"), 1);
 			SDL_DispatchGPUCompute(pass, groupsX, groupsY, groupsZ);
 			SDL_EndGPUComputePass(pass);
+			for (const graph::ResourceId resource : context.Writes) {
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				if (desc == nullptr || desc->Lifetime != graph::ResourceLifetime::History) continue;
+				State->CommitGraphHistoryWrite(
+					*selectedPipeline, desc->Name, State->ResourceScope(*selectedPipeline, resource),
+					recording.Request.TargetSlot, GraphHistorySignature(recording)
+				);
+			}
 			result.ComputeDispatches++;
 			if (separateCommand) {
 				closePass();
