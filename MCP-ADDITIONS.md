@@ -81,6 +81,42 @@ snapshots, and causal operations. It maps to these MCP operations. It must not
 add duplicate wire tools such as `run_script`, `create_scene`, `list_assets`, or
 generic entity-component editing.
 
+### Mutation, recovery, and error envelope
+
+Every stateful reply carries `instance_id`, `episode_id`, `world_epoch`,
+`world_version`, `tick`, `time_ns`, and the accepted `operation_id` where one
+was supplied. `reset_world` starts a new `episode_id`; `restore` creates a fresh
+`world_epoch` and invalidates snapshots from the old epoch. A client cannot use a
+snapshot acquired before restore as an intervention base after restore.
+
+Mutations accept the expected tick and, where applicable, expected world version
+and base snapshot. The engine applies a mutation transactionally: validate all
+preconditions, apply all changes, advance the version once, or roll back the
+operation. A debug partial-commit mode is explicitly requested and permanently
+marked in the result. The result uses one of these structured outcomes:
+
+| Code | Meaning and required client action |
+|---|---|
+| `version_conflict` | Re-read state. Do not retry against a new world implicitly. |
+| `stale_snapshot` | Acquire a new snapshot in the current epoch. |
+| `capability_unsupported` | Select a negotiated fallback or reject the sample. |
+| `validation_failed` | Correct typed arguments or script output. No world mutation occurred. |
+| `resource_limit` | Reduce declared bounds or defer work. |
+| `cancelled_before_step` | No tick advanced. Retry is safe with the same operation ID. |
+| `cancelled_after_step` | Result reports completed tick range and partial resources. Reconcile before continuing. |
+| `readback_failed` | Simulation may have advanced, but no promised artifact exists. Never blindly retry the step. |
+| `restore_incomplete` | Downgrade or reject according to requested determinism grade. |
+
+The idempotency ledger stores operation ID, canonical argument hash, result, and
+resource references. The same ID with the same arguments returns the stored
+result; the same ID with different arguments fails. A transport timeout is
+recovered with `get_request_status`, not a blind second mutation.
+
+`capture`, checkpoint, and resource export can be cancelled before GPU work starts.
+Once simulation advances, cancellation reports the exact completed range and the
+resource state. A failed asynchronous readback does not rewind a successfully
+completed step and does not license another step under the old expected tick.
+
 ## Luau and image buffers
 
 Add `EditableImage:ToBuffer()` and `EditableImage:FromBuffer(buffer)`. They use
@@ -101,6 +137,17 @@ yielding coroutines, closures, caches, network traffic, and external side effect
 are not assumed serializable. Unsupported scripts may generate one-way scenes,
 but an exact checkpoint fails or downgrades instead of claiming restoration.
 
+An external factory package declares permitted scene roots, Luau module roots,
+pinned source and asset hashes, typed parameters, seed streams, requested
+capabilities, and output limits. The engine resolves those roots before execution
+and records the resolved hashes, imported modules, module-cache policy, script
+result, logs, and readiness checks. A package must declare when setup is complete:
+all required assets resolved, scene services registered, required entities named,
+and requested render resources ready. GPU shader compilation, texture upload,
+and physics settling are separate readiness states with bounded timeout and
+budget. Network, persistence, purchase, teleport, and undeclared filesystem APIs
+error rather than silently no-op in a reproducible temporary world.
+
 ## Time, pause, fixed step, and rewind
 
 `pause` completes at the next fixed tick boundary. While paused,
@@ -108,6 +155,14 @@ but an exact checkpoint fails or downgrades instead of claiming restoration.
 simulation interval. It reports requested and completed tick, time, accepted
 actions, world version, and state hash if available. Variable `dt_ns` is a
 separately negotiated integration mode. It is not an exact-invariance test.
+
+Negotiation distinguishes `all_systems` pause from `physics_only` pause. The
+former stops scripts, physics, animation, particles, timers, audio simulation,
+and tick-driven scene services. The latter is a diagnostic mode whose still-live
+systems are named in the result; it cannot support an atomic simulation label.
+The canonical fixed rate is represented as a rational numerator and denominator
+in nanoseconds. The tick clock carries an integer remainder so repeated stepping
+does not accumulate rounded floating-point time.
 
 Render-only capture binds to a snapshot and steps no simulation state. Rendering
 can still mutate renderer-local history or consume a renderer seed. The engine
@@ -141,6 +196,12 @@ state. Determinism grades are `exact`, `validated`, `best_effort`, and
 byte-identical state restoration. Validated declares tolerance. GPU recreation
 commonly prevents a scene hash from promising pixel-identical output.
 
+An exact `simulation` checkpoint includes solver warm-start caches when they
+affect later physics, scheduled work queues, timer and clock state, script
+protocol state, episode and world epoch, and all named RNG stream positions.
+If a cache is deliberately rebuilt, the report says so and the level cannot
+advertise exact continuation unless a validation proves the declared tolerance.
+
 ## Atomic multi-camera observations
 
 `snapshot` produces one barriered state. `capture` can use that `snapshot_id`
@@ -158,6 +219,20 @@ Every observation names `observation_id`, `snapshot_id`, tick, `time_ns`, camera
 channels, and a completion fence. The fence marks safe GPU readback retention.
 World teardown occurs only after promised readbacks fence and resource writes
 commit.
+
+A capture request explicitly names camera intrinsics and extrinsics, projection,
+near/far planes, coordinate convention, units, viewport crop, lens distortion,
+jitter, exposure duration, motion-blur samples, rolling-shutter policy, and
+resolution. If a camera is an instance path, its resolved values are copied into
+the manifest. Flow resources include forward/backward direction, source and
+target times, pixel-center convention, units, validity, occlusion, disocclusion,
+out-of-frame, camera-cut, and undefined-motion masks.
+
+Pixel identity is queried by integer pixel coordinates and returns the exact ID
+resource value plus coverage and validity. It is never recovered by sampling a
+lossy color visualization. Capture may expose visible masks, amodal masks, and
+offscreen/occluded entity bounds only when each is named separately. An amodal
+mask is simulator-hidden truth, not a visible-observation label.
 
 ## Render channels and rendering data
 
@@ -191,6 +266,14 @@ or caster attribution can be approximate, screen-limited, or unavailable. RGB
 comes from geometry, visibility, materials, transport, exposure, tone mapping,
 and post-processing. It is not a simple light-times-albedo label.
 
+Reflection and transmission records include their method and limits: ray traced,
+probe, planar mirror, portal, SSR, screen-space refraction, or fallback. They
+name source view, recursion depth, roughness or ray budgets, validity, staleness,
+and whether the contribution is secondary-view truth, a screen-space estimate,
+or unavailable. Per-light and per-caster records are bounded by declared limits;
+an omitted contribution is not interpreted as zero without an explicit coverage
+statement.
+
 ## Interventions and provenance
 
 `apply_intervention` uses a base `snapshot_id`, typed old-value preconditions,
@@ -217,6 +300,23 @@ beliefs, and narrator statements can refer to a tick other than their surroundin
 observation. They retain evidence and certainty and never silently overwrite
 simulator state.
 
+The external task descriptor can request points, boxes, polygons, visible or
+amodal masks, keypoints, crops, marks, temporal tracks, camera paths, sparse
+depth, text instructions, and before/after edit programs. It should progress
+from points to boxes to masks and use negative pointing, view transfer, camera
+jitter, occlusion interventions, attribute dropout, and held-out combinations
+as curriculum options. These are task configurations, not new engine APIs.
+
+When negotiated, structured scene exports include spatial-query truth for
+raycasts, AABB/OBB overlap, occupancy, signed distance fields, bird's-eye maps,
+navigation, and affordances. Each query identifies its coordinate system,
+resolution, collision layer, dynamic-state tick, and whether its semantics are
+authored, derived, or inferred. Character knowledge, beliefs, plans, and
+perception are separate records from physical state. Durable evidence records
+have source IDs, supersession/staleness status, deduplication links, and an
+explicit repair path; missing evidence remains missing rather than silently
+filled from a later archive entry.
+
 ## Resources and external manifests
 
 Engine results return small metadata and resource IDs. `get_resource` returns
@@ -231,6 +331,20 @@ task inputs/targets. Resources survive temporary-world teardown because retentio
 is outside world lifetime. The collector releases them only after manifest commit
 and its retention policy permit it.
 
+Negotiation publishes maximum script bytes, entities, pixels, channels, image
+bytes, checkpoint bytes, readbacks in flight, render recursion, operation time,
+and resource TTL. Resource replies declare expiration and whether a collector may
+pin them. Pinning consumes an explicit quota. A collector fetches every required
+range, verifies checksum and schema, then atomically finalizes its manifest. On
+crash it resumes from the last committed manifest entry and resource checksums,
+not from a guessed world state.
+
+Offscreen GPU rendering and CPU headless simulation are distinct capabilities.
+CPU headless execution may generate state labels while lacking renderer truth;
+offscreen rendering may require a device, shader cache, texture residency, and
+asynchronous readback budget. The factory records which path produced every
+artifact and rejects a requested render channel when that path cannot supply it.
+
 ## Proposed external factory workflow
 
 This is pseudocode for a `datafactories` package. Local collector functions are
@@ -238,39 +352,47 @@ not new engine MCP APIs.
 
 ```text
 spec = load_factory_package("occlusion_lighting_v1")
+instance_id = lease_temporary_world_external_to_mcp()
+caps = negotiate({contract_version, requested_channels=spec.channels})
 typecheck_luau(spec.setup_source)
-execute_luau(spec.setup_source, target="edit", operation_id=setup_hash)
 reset_world(instance_id, seed=spec.seed, scene_spec=spec.scene_spec)
+execute_luau(spec.setup_source, target="edit", operation_id=setup_hash)
+assert_ready_external(spec.readiness, caps)
 
-pause(instance_id, expected_tick=0)
+clock = get_current_tick_external_from_last_engine_reply()
+pause(instance_id, expected_tick=clock.tick)
 base = checkpoint(instance_id)
 snapshot_0 = snapshot(instance_id, components=spec.components, limit=spec.limit)
 captures_0 = capture(instance_id, snapshot_id=snapshot_0.id,
                      cameras=spec.cameras, channels=spec.channels)
 
 for action in spec.fixed_tick_actions:
-    step(instance_id, dt_ns=spec.fixed_dt_ns, actions=action,
-         expected_tick=current_tick, operation_id=action.id)
+    stepped = step(instance_id, dt_ns=spec.fixed_dt_ns, actions=action,
+                   expected_tick=clock.tick, operation_id=action.id)
+    clock = stepped.clock
     aligned = snapshot(instance_id, components=spec.components, limit=spec.limit)
     capture(instance_id, snapshot_id=aligned.id,
             cameras=spec.cameras, channels=spec.channels)
 
 for intervention in spec.counterfactuals:
     restore(instance_id, base.id)
-    branch = apply_intervention(instance_id, base_snapshot_id=snapshot_0.id,
+    branch_base = snapshot(instance_id, components=spec.components, limit=spec.limit)
+    branch = apply_intervention(instance_id, base_snapshot_id=branch_base.id,
                                 changed_causes=intervention, operation_id=intervention.id)
-    counterfactual = step_and_capture(branch, spec.capture_plan)
+    counterfactual = step_and_capture({step_args=branch, capture_args=spec.capture_plan})
 
 for candidate in external_inverse_model(captures_0):
     restore(instance_id, base.id)
-    apply_intervention(instance_id, base_snapshot_id=snapshot_0.id,
+    candidate_base = snapshot(instance_id, components=spec.components, limit=spec.limit)
+    apply_intervention(instance_id, base_snapshot_id=candidate_base.id,
                        changed_causes=candidate.scene_patch)
-    rerender = capture(instance_id, snapshot_id=snapshot(...).id,
+    candidate_snapshot = snapshot(instance_id, components=spec.components, limit=spec.limit)
+    rerender = capture(instance_id, snapshot_id=candidate_snapshot.id,
                        cameras=spec.cameras, channels=spec.inverse_channels)
     record_candidate_and_rerender(candidate, rerender)
 
-manifest = write_external_manifest(all_resources, input_evidence, provenance)
-wait_for_resource_fences(all_resources)
+fetch_and_verify_resource_bytes(all_resources)
+atomically_finalize_external_manifest(all_resources, input_evidence, provenance)
 teardown_temporary_world(instance_id)
 ```
 
@@ -322,11 +444,35 @@ The external collector adds task configs, split rules, retention, leakage checks
 metrics, and training interfaces. Accept a held-out replayable sample group with
 complete source provenance and explicit unsupported capabilities.
 
+| Acceptance check | Evidence required |
+|---|---|
+| Fixed-step replay | Pause, one step, checkpoint restore, and action replay agree at the requested state grade. |
+| No-time-advance capture | Tick, simulation RNG, script clock, and physics state are unchanged before and after render-only capture. |
+| Multi-camera alignment | All camera resources reference one snapshot and report their temporal-history policy. |
+| Label alignment | Projection, depth, IDs, masks, flow validity, and requested structured state agree within declared tolerances. |
+| Retry isolation | A repeated operation ID with identical arguments returns stored output; changed arguments fail. |
+| Failure recovery | Readback failure reports completed simulation progress and cannot induce a blind duplicate step. |
+| Artifact durability | Checksummed resources are fetched and manifest finalization succeeds after temporary-world teardown. |
+| Leakage prevention | A held-out task has an input-evidence list proving hidden, future, and archived-only facts were excluded. |
+
+Profile the supported release configuration, not only development builds. Record
+capture latency, readback latency, simulation and renderer CPU/GPU time, bytes,
+allocations, peak host/device memory, checkpoint size, artifact throughput, and
+output validation rate with scene, backend, resolution, channel set, and worker
+count. A performance claim requires this evidence rather than a feature list.
+
 ## Source coverage
 
-This proposal incorporates all six top-level Markdown documents in
-`datafactories-docs`: `README.md`, `MCP-EXTENSIONS.md`,
-`ENGINE_CAPABILITIES_ANALYSIS.md`, `EXTRA-IDEAS.md`,
-`LOOPED-WORLD-MODEL-EXTENSION.md`, and `UNIFIED-WORLD-MODEL-v2.md`. It follows
-the source contract's division between a narrow engine dataset delta and external
-collector and training ownership.
+This proposal incorporates all six top-level Markdown documents:
+
+| Source | Contribution to this proposal |
+|---|---|
+| [README](../datafactories-docs/README.md) | Repository scope. |
+| [MCP extensions](../datafactories-docs/MCP-EXTENSIONS.md) | Canonical MCP reuse, Dataset delta, DataSceneService, resource transport. |
+| [Engine capabilities analysis](../datafactories-docs/ENGINE_CAPABILITIES_ANALYSIS.md) | Candidate channels and explicit current capability gaps. |
+| [Extra ideas](../datafactories-docs/EXTRA-IDEAS.md) | Controlled tasks, curriculum, interventions, and evaluation products. |
+| [Looped world model extension](../datafactories-docs/LOOPED-WORLD-MODEL-EXTENSION.md) | Replay, evidence, bounded state, missingness, and counterfactual requirements. |
+| [Unified world model v2](../datafactories-docs/UNIFIED-WORLD-MODEL-v2.md) | Provenance, uncertainty, multimodal state, forward/inverse limits, and validation. |
+
+It follows the source contract's division between a narrow engine dataset delta
+and external collector and training ownership.
