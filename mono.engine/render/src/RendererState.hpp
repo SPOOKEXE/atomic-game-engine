@@ -205,6 +205,8 @@ namespace engine::render {
 			size_t Slot = Renderer::ANY_VIEWPORT;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			uint64_t HistorySignature = 0;
+			bool HistoryReady = false;
 			uint32_t BytesPerPixel = 0;
 			bool Rgba = false;
 			std::vector<uint32_t> Pixels;
@@ -494,6 +496,8 @@ namespace engine::render {
 			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			uint64_t HistorySignature = 0;
+			bool HistoryReady = false;
 		};
 
 		std::vector<GraphTarget> GraphTargets;
@@ -514,6 +518,14 @@ namespace engine::render {
 		NamedTexture FindGraphTarget(
 			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
+		NamedTexture FindGraphHistoryForRead(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+			uint64_t signature
+		) const;
+		void CommitGraphHistoryWrite(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+			uint64_t signature
+		);
 		core::Name GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const;
 		NamedTexture EnsureGraphTarget(
 			const NamedPipeline &pipeline,

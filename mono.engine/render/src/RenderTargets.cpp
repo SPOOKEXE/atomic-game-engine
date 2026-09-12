@@ -526,6 +526,35 @@ namespace engine::render {
 		return {};
 	}
 
+	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphHistoryForRead(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+		uint64_t signature
+	) const {
+		resource = GraphTargetName(pipeline, resource);
+		for (const GraphTarget &target : GraphTargets) {
+			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
+				target.Owner == owner && target.HistoryReady && target.HistorySignature == signature) {
+				return NamedTexture{target.Texture, target.Width, target.Height, target.Format};
+			}
+		}
+		return {};
+	}
+
+	void Renderer::Impl::CommitGraphHistoryWrite(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+		uint64_t signature
+	) {
+		resource = GraphTargetName(pipeline, resource);
+		for (GraphTarget &target : GraphTargets) {
+			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
+				target.Owner == owner) {
+				target.HistorySignature = signature;
+				target.HistoryReady = true;
+				return;
+			}
+		}
+	}
+
 	core::Name Renderer::Impl::GraphTargetName(const NamedPipeline &pipeline, core::Name resource) const {
 		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
 			const graph::ResourceId id{value};
