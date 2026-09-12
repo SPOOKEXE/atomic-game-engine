@@ -112,6 +112,7 @@ Passing crossing tests do not yet establish seamless rendering at every angle.
 - [_] define MCP idempotency, expected versions, structured status, cancellation, capability limits, permissions and audit records.
 - [_] maintain an acceptance fixture suite for replay roundtrip, no-time-advance, image-label alignment, retry isolation and invalid data.
 - [_] profile release captures for actual bytes, allocations, peak memory, timings and output quality.
+- [_] Add MCP tools for the ones that need them, then make a demo scene called DataFactoryDemo.luau which gets these values in scripts (and prints some metadata about them) and whatnot. This way we can see that it works and our mcp can use them (and i can tell other agent sessions to refer to the demo to see how they work).
 
 Rendering extra fixes:
 - [_] blackhole warp is opposite on one side to what it should be (quaternions can help do the curvature if needed).
