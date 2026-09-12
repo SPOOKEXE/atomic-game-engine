@@ -531,6 +531,15 @@ namespace engine::render {
 		static constexpr uint64_t MAX_GRAPH_BUFFER_TOTAL_BYTES = 256u * 1024u * 1024u;
 		std::vector<GraphBuffer> GraphBuffers;
 
+		struct TessellationState {
+			SDL_GPUBuffer *Plans = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			SDL_GPUComputePipeline *Compute = nullptr;
+			uint32_t Capacity = 0;
+			uint32_t Count = 0;
+		};
+		TessellationState Tessellation;
+
 		struct ResourcePreviewTarget {
 			ResourcePreviewRoute Route;
 			std::array<SDL_GPUTexture *, 2> Textures{};
@@ -548,15 +557,24 @@ namespace engine::render {
 			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
 		) const;
 		NamedTexture FindGraphHistoryForRead(
-			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+			const NamedPipeline &pipeline,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner,
 			uint64_t signature
 		) const;
 		void CommitGraphHistoryWrite(
-			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+			const NamedPipeline &pipeline,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner,
 			uint64_t signature
 		);
 		void StageGraphHistoryWrite(
-			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+			const NamedPipeline &pipeline,
+			core::Name resource,
+			graph::NodeScope scope,
+			uint64_t owner,
 			uint64_t signature
 		);
 		void CommitPendingGraphHistoryWrites();

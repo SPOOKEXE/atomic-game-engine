@@ -776,8 +776,8 @@ namespace engine::render {
 		if (PackedOpaquePipeline == nullptr || PackedForwardPipeline == nullptr ||
 			PackedTransparentPipeline == nullptr || PackedMeshShadowPipeline == nullptr ||
 			(pbrSupported && PackedGBufferPipeline == nullptr) ||
-			(hdrSupported &&
-			 (PackedHdrOpaquePipeline == nullptr || PackedHdrTransparentPipeline == nullptr))) {
+			(hdrSupported && (PackedHdrOpaquePipeline == nullptr || PackedHdrTransparentPipeline == nullptr)
+			)) {
 			ENGINE_ERROR("packed editable mesh pipeline: {}", SDL_GetError());
 		}
 
@@ -838,10 +838,8 @@ namespace engine::render {
 			const SDL_GPUVertexAttribute particleAttributes[] = {
 				{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(effects::ParticleInstance, Position)},
 				{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Size)},
-				{2,
-				 0,
-				 SDL_GPU_VERTEXELEMENTFORMAT_UINT,
-				 offsetof(effects::ParticleInstance, RotationAndCell)},
+				{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, RotationAndCell)
+				},
 				{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Colour)},
 				{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(effects::ParticleInstance, Slot)},
 			};
@@ -1778,16 +1776,8 @@ namespace engine::render {
 			}
 		}
 		GraphComputePipelines.push_back(
-			{pipeline.Name,
-			 node.Name,
-			 samplers,
-			 storage,
-			 readStorage,
-			 uniforms,
-			 localX,
-			 localY,
-			 localZ,
-			 built}
+			{pipeline.Name, node.Name, samplers, storage, readStorage, uniforms, localX, localY, localZ, built
+			}
 		);
 		return built;
 	}
@@ -1835,6 +1825,10 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::ReleaseAllGraphState() {
+		if (Tessellation.Plans != nullptr) gpu::ReleaseBuffer(Device, Tessellation.Plans);
+		if (Tessellation.Transfer != nullptr) gpu::ReleaseTransferBuffer(Device, Tessellation.Transfer);
+		if (Tessellation.Compute != nullptr) SDL_ReleaseGPUComputePipeline(Device, Tessellation.Compute);
+		Tessellation = {};
 		while (!GraphTargets.empty()) {
 			ReleaseGraphState(GraphTargets.back().Pipeline);
 		}
@@ -1894,17 +1888,15 @@ namespace engine::render {
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
-		State->NamedPipelines.push_back(
-			Impl::NamedPipeline{
-				name,
-				pipeline,
-				std::move(compiled),
-				std::move(entityNodes),
-				std::move(schedule),
-				std::move(aliases),
-				std::move(buffers),
-			}
-		);
+		State->NamedPipelines.push_back(Impl::NamedPipeline{
+			name,
+			pipeline,
+			std::move(compiled),
+			std::move(entityNodes),
+			std::move(schedule),
+			std::move(aliases),
+			std::move(buffers),
+		});
 		State->NamedPipelines.back().Revision = ++State->PipelineRevision;
 		return true;
 	}

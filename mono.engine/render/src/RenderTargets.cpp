@@ -528,7 +528,10 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphHistoryForRead(
-		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+		const NamedPipeline &pipeline,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner,
 		uint64_t signature
 	) const {
 		resource = GraphTargetName(pipeline, resource);
@@ -542,7 +545,10 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::CommitGraphHistoryWrite(
-		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+		const NamedPipeline &pipeline,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner,
 		uint64_t signature
 	) {
 		resource = GraphTargetName(pipeline, resource);
@@ -557,7 +563,10 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::StageGraphHistoryWrite(
-		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner,
+		const NamedPipeline &pipeline,
+		core::Name resource,
+		graph::NodeScope scope,
+		uint64_t owner,
 		uint64_t signature
 	) {
 		PendingGraphHistoryWrites.push_back({&pipeline, resource, scope, owner, signature});
@@ -566,7 +575,9 @@ namespace engine::render {
 	void Renderer::Impl::CommitPendingGraphHistoryWrites() {
 		for (const PendingGraphHistoryWrite &write : PendingGraphHistoryWrites) {
 			if (write.Pipeline != nullptr) {
-				CommitGraphHistoryWrite(*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature);
+				CommitGraphHistoryWrite(
+					*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
+				);
 			}
 		}
 		PendingGraphHistoryWrites.clear();
@@ -702,11 +713,20 @@ namespace engine::render {
 		}
 		const uint64_t bytes = desc->Bytes(viewWidth, viewHeight);
 		if (bytes == 0 || bytes > MAX_GRAPH_BUFFER_BYTES || bytes > UINT32_MAX) {
-			ENGINE_WARN("graph buffer '{}' requests {} bytes, over the {} byte limit", desc->Name.Text(), bytes, MAX_GRAPH_BUFFER_BYTES);
+			ENGINE_WARN(
+				"graph buffer '{}' requests {} bytes, over the {} byte limit",
+				desc->Name.Text(),
+				bytes,
+				MAX_GRAPH_BUFFER_BYTES
+			);
 			return nullptr;
 		}
 		SDL_GPUBufferUsageFlags usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-		if (desc->Access == graph::ResourceAccess::Write || desc->Access == graph::ResourceAccess::ReadWrite ||
+		if (desc->Name == core::Name("tessellated-vertices")) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+		if (desc->Name == core::Name("tessellated-indices")) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
+		if (desc->Name == core::Name("tessellated-commands")) usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
+		if (desc->Access == graph::ResourceAccess::Write ||
+			desc->Access == graph::ResourceAccess::ReadWrite ||
 			desc->Access == graph::ResourceAccess::Automatic) {
 			usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 		}
@@ -718,11 +738,13 @@ namespace engine::render {
 		const core::Name name = GraphTargetName(pipeline, desc->Name);
 		uint64_t total = 0;
 		for (GraphBuffer &buffer : GraphBuffers) {
-			if (buffer.Pipeline != pipeline.Name || buffer.Resource != name || buffer.Scope != scope || buffer.Owner != owner) {
+			if (buffer.Pipeline != pipeline.Name || buffer.Resource != name || buffer.Scope != scope ||
+				buffer.Owner != owner) {
 				total += buffer.Bytes;
 				continue;
 			}
-			if (buffer.Buffer != nullptr && buffer.Bytes == bytes && buffer.Usage == usage) return buffer.Buffer;
+			if (buffer.Buffer != nullptr && buffer.Bytes == bytes && buffer.Usage == usage)
+				return buffer.Buffer;
 			if (buffer.Buffer != nullptr) gpu::ReleaseBuffer(Device, buffer.Buffer);
 			buffer.Buffer = nullptr;
 			buffer.Bytes = 0;
@@ -730,12 +752,17 @@ namespace engine::render {
 			break;
 		}
 		if (total + bytes > MAX_GRAPH_BUFFER_TOTAL_BYTES) {
-			ENGINE_WARN("graph buffers for '{}' exceed the {} byte budget", pipeline.Name.Text(), MAX_GRAPH_BUFFER_TOTAL_BYTES);
+			ENGINE_WARN(
+				"graph buffers for '{}' exceed the {} byte budget",
+				pipeline.Name.Text(),
+				MAX_GRAPH_BUFFER_TOTAL_BYTES
+			);
 			return nullptr;
 		}
 		GraphBuffer *entry = nullptr;
 		for (GraphBuffer &buffer : GraphBuffers) {
-			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope && buffer.Owner == owner) {
+			if (buffer.Pipeline == pipeline.Name && buffer.Resource == name && buffer.Scope == scope &&
+				buffer.Owner == owner) {
 				entry = &buffer;
 				break;
 			}
@@ -750,7 +777,8 @@ namespace engine::render {
 		entry->Buffer = gpu::CreateBuffer(Device, &info);
 		entry->Bytes = entry->Buffer != nullptr ? static_cast<uint32_t>(bytes) : 0;
 		entry->Usage = usage;
-		if (entry->Buffer == nullptr) ENGINE_ERROR("graph buffer '{}': {}", desc->Name.Text(), SDL_GetError());
+		if (entry->Buffer == nullptr)
+			ENGINE_ERROR("graph buffer '{}': {}", desc->Name.Text(), SDL_GetError());
 		return entry->Buffer;
 	}
 

@@ -7,6 +7,7 @@
 // particles and the ribbons ride in the transparent node for the same reason -
 // see its own comment for why they are not a node of their own.
 
+#include "Tessellation.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -20,6 +21,176 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterGeometryNodes(NodeTable &frameNodes) {
+		frameNodes.Set(core::Name("tessellate"), [this](const graph::RunContext &context) {
+			if (context.Writes.size() != 3 || Command == nullptr || State->Meshes.Vertices() == nullptr ||
+				State->Meshes.Indices() == nullptr || State->InstanceIndexBuffer == nullptr)
+				return false;
+			SDL_GPUBuffer *vertices = GraphBuffer(context.Writes[0], context, true);
+			SDL_GPUBuffer *indices = GraphBuffer(context.Writes[1], context, true);
+			SDL_GPUBuffer *commands = GraphBuffer(context.Writes[2], context, true);
+			if (vertices == nullptr || indices == nullptr || commands == nullptr) return false;
+			const auto *vertexDesc = Pipeline->Graph.FindResource(context.Writes[0]);
+			const auto *indexDesc = Pipeline->Graph.FindResource(context.Writes[1]);
+			const auto *commandDesc = Pipeline->Graph.FindResource(context.Writes[2]);
+			if (vertexDesc == nullptr || indexDesc == nullptr || commandDesc == nullptr) return false;
+			const TessellationCapacity capacity{
+				static_cast<uint32_t>(
+					vertexDesc->Bytes(SceneWidth, SceneHeight) / sizeof(GpuTessellationVertex)
+				),
+				static_cast<uint32_t>(indexDesc->Bytes(SceneWidth, SceneHeight) / sizeof(uint32_t)),
+				static_cast<uint32_t>(
+					commandDesc->Bytes(SceneWidth, SceneHeight) /
+					(TESSELLATION_COMMAND_WORDS * sizeof(uint32_t))
+				)
+			};
+			const graph::Node *node = Pipeline->Graph.Find(context.Node);
+			const uint32_t levels =
+				node == nullptr ? 1u : std::min(node->Integer(core::Name("max-subdivisions"), 1), 4u);
+			const uint32_t factor = 1u << levels;
+			TessellationPlan plan;
+			for (uint32_t slot = SceneCount; slot < SceneCount + PlainOpaque && slot < State->SlotMesh.size();
+				 ++slot) {
+				const MeshEntry *mesh = State->SlotMesh[slot];
+				if (mesh == nullptr || mesh->Packed) continue;
+				if (mesh->Runs.empty()) {
+					if (!plan.Add(mesh->Whole, 0, slot, factor, capacity)) break;
+				} else
+					for (uint32_t material = 0; material < mesh->Runs.size(); ++material)
+						if (!plan.Add(mesh->Runs[material], material, slot, factor, capacity)) break;
+			}
+			State->Tessellation.Count = static_cast<uint32_t>(plan.Entries.size());
+			if (plan.Entries.empty()) return true;
+			const auto grow = [](uint32_t value) {
+				uint32_t next = 64;
+				while (next < value)
+					next *= 2;
+				return next;
+			};
+			if (State->Tessellation.Capacity < plan.Entries.size() || State->Tessellation.Plans == nullptr) {
+				if (State->Tessellation.Plans != nullptr)
+					gpu::ReleaseBuffer(State->Device, State->Tessellation.Plans);
+				if (State->Tessellation.Transfer != nullptr)
+					gpu::ReleaseTransferBuffer(State->Device, State->Tessellation.Transfer);
+				State->Tessellation.Capacity = grow(static_cast<uint32_t>(plan.Entries.size()));
+				SDL_GPUBufferCreateInfo buffer{};
+				buffer.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+				buffer.size = State->Tessellation.Capacity * sizeof(GpuTessellationPlan);
+				State->Tessellation.Plans = gpu::CreateBuffer(State->Device, &buffer);
+				SDL_GPUTransferBufferCreateInfo transfer{};
+				transfer.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+				transfer.size = buffer.size;
+				State->Tessellation.Transfer = gpu::CreateTransferBuffer(State->Device, &transfer);
+				if (State->Tessellation.Plans == nullptr || State->Tessellation.Transfer == nullptr)
+					return false;
+			}
+			std::memcpy(
+				SDL_MapGPUTransferBuffer(State->Device, State->Tessellation.Transfer, false),
+				plan.Entries.data(),
+				plan.Entries.size() * sizeof(GpuTessellationPlan)
+			);
+			SDL_UnmapGPUTransferBuffer(State->Device, State->Tessellation.Transfer);
+			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Command);
+			SDL_GPUTransferBufferLocation source{State->Tessellation.Transfer, 0};
+			SDL_GPUBufferRegion destination{
+				State->Tessellation.Plans,
+				0,
+				static_cast<uint32_t>(plan.Entries.size() * sizeof(GpuTessellationPlan))
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+			SDL_EndGPUCopyPass(copy);
+			if (State->Tessellation.Compute == nullptr)
+				State->Tessellation.Compute =
+					State->LoadComputePipeline("tessellate.comp", 0, 3, 0, 3, 64, 1);
+			if (State->Tessellation.Compute == nullptr) return false;
+			EnterNamedPass(context.Name);
+			SDL_GPUStorageBufferReadWriteBinding writes[3]{};
+			writes[0].buffer = vertices;
+			writes[1].buffer = indices;
+			writes[2].buffer = commands;
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(Command, nullptr, 0, writes, 3);
+			if (pass == nullptr) return false;
+			SDL_BindGPUComputePipeline(pass, State->Tessellation.Compute);
+			SDL_GPUBuffer *reads[]{
+				State->Meshes.Vertices(), State->Meshes.Indices(), State->Tessellation.Plans
+			};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 3);
+			const uint32_t counts[]{
+				State->Tessellation.Count, capacity.Vertices, capacity.Indices, capacity.Commands
+			};
+			SDL_PushGPUComputeUniformData(Command, 0, counts, sizeof(counts));
+			uint32_t maximumTriangles = 0;
+			for (const GpuTessellationPlan &entry : plan.Entries)
+				maximumTriangles = std::max(maximumTriangles, entry.SourceIndexCount / 3u);
+			SDL_DispatchGPUCompute(pass, State->Tessellation.Count, (maximumTriangles + 63u) / 64u, 1);
+			SDL_EndGPUComputePass(pass);
+			Result.ComputeDispatches++;
+			return true;
+		});
+
+		frameNodes.Set(core::Name("tessellated-draw"), [this](const graph::RunContext &context) {
+			if (context.Reads.size() != 3 || context.Writes.size() != 2 || State->Tessellation.Count == 0)
+				return true;
+			SDL_GPUBuffer *vertices = GraphBuffer(context.Reads[0], context, false);
+			SDL_GPUBuffer *indices = GraphBuffer(context.Reads[1], context, false);
+			SDL_GPUBuffer *commands = GraphBuffer(context.Reads[2], context, false);
+			auto colour = GraphTexture(context.Writes[0], context, true);
+			auto depth = GraphTexture(context.Writes[1], context, true);
+			if (vertices == nullptr || indices == nullptr || commands == nullptr || !colour.IsValid() ||
+				!depth.IsValid())
+				return false;
+			EnterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo target{};
+			target.texture = colour.Texture;
+			target.clear_color = SDL_FColor{0, 0, 0, 1};
+			target.load_op = SDL_GPU_LOADOP_CLEAR;
+			target.store_op = SDL_GPU_STOREOP_STORE;
+			SDL_GPUDepthStencilTargetInfo depthTarget{};
+			depthTarget.texture = depth.Texture;
+			depthTarget.clear_depth = 1.0f;
+			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(Command, &target, 1, &depthTarget);
+			if (pass == nullptr) return false;
+			if (State->HdrOpaquePipeline == nullptr) {
+				SDL_EndGPURenderPass(pass);
+				return false;
+			}
+			State->BindPipeline(pass, State->HdrOpaquePipeline, Impl::PipelineFamily::HdrOpaque);
+			State->BindInstanceBuffers(pass, State->InstanceIndexBuffer);
+			const SDL_GPUBufferBinding vertex{vertices, 0};
+			SDL_BindGPUVertexBuffers(pass, 0, &vertex, 1);
+			const SDL_GPUBufferBinding index{indices, 0};
+			SDL_BindGPUIndexBuffer(pass, &index, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+			SDL_SetGPUViewport(pass, &SceneViewport);
+			SDL_SetGPUScissor(pass, &SceneScissor);
+			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
+			SDL_GPUSampler *sampler = State->Textures.Sampler();
+			const SDL_GPUTextureSamplerBinding bindings[]{
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler},
+				{State->Textures.Default(), sampler},
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler},
+				{State->FallbackTexture, sampler}
+			};
+			SDL_BindGPUFragmentSamplers(pass, 0, bindings, 10);
+			LightingUniforms material = Lighting;
+			material.BaseColour = glm::vec4{1.0f};
+			material.Surface = glm::vec4{1.0f, 0.0f, 0.0f, 0.04f};
+			SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
+			for (uint32_t command = 0; command < State->Tessellation.Count; ++command)
+				SDL_DrawGPUIndexedPrimitivesIndirect(
+					pass, commands, command * TESSELLATION_COMMAND_WORDS * sizeof(uint32_t), 1
+				);
+			SDL_EndGPURenderPass(pass);
+			Result.DrawCalls += State->Tessellation.Count;
+			return true;
+		});
+
 		frameNodes.Set(core::Name("forward"), [this](const graph::RunContext &context) {
 			if (context.Writes.size() != 2) {
 				return false;
@@ -496,8 +667,7 @@ namespace engine::render {
 			auto linearUniforms = Uniforms;
 			linearUniforms.Target.z = linearUniforms.Target.w = 1;
 			linearUniforms.Direction.w = 1;
-			const std::array linearBindings{
-				SDL_GPUTextureSamplerBinding{z.Texture, DepthBindings[0].sampler}
+			const std::array linearBindings{SDL_GPUTextureSamplerBinding{z.Texture, DepthBindings[0].sampler}
 			};
 			Fullscreen(
 				context.Name,
