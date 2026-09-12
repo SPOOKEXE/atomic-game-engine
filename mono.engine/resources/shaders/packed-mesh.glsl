@@ -2,7 +2,7 @@
 // values inside it stay tightly packed, including four-bit and one-bit tails.
 layout(set = 0, binding = 4, std430) readonly buffer PackedMeshBytes {
 	uint packedMeshWords[];
-};
+} packedMeshBytes;
 
 layout(set = 1, binding = 1) uniform PackedMeshDescriptor {
 	uvec4 positionStream;
@@ -14,7 +14,7 @@ layout(set = 1, binding = 1) uniform PackedMeshDescriptor {
 } packedMesh;
 
 uint PackedByte(uint byteOffset) {
-	uint word = packedMeshWords[byteOffset >> 2u];
+	uint word = packedMeshBytes.packedMeshWords[byteOffset >> 2u];
 	return (word >> ((byteOffset & 3u) * 8u)) & 255u;
 }
 
