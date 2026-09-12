@@ -4,8 +4,10 @@
 
 #include <charconv>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace benchrunner {
@@ -50,7 +52,7 @@ namespace benchrunner {
 		std::vector<Measurement> &into,
 		std::string &error
 	) {
-		const size_t before = into.size();
+		std::vector<Measurement> parsed;
 		size_t lineBegin = 0;
 		while (lineBegin < report.size()) {
 			const size_t lineEnd = report.find('\n', lineBegin);
@@ -82,13 +84,16 @@ namespace benchrunner {
 			}
 			measurement.Unit = fields[6];
 			measurement.Name = fields[7];
-			into.push_back(std::move(measurement));
+			parsed.push_back(std::move(measurement));
 		}
 
-		if (into.size() == before) {
+		if (parsed.empty()) {
 			error = "benchmark suite emitted no benchmark rows";
 			return false;
 		}
+		into.insert(
+			into.end(), std::make_move_iterator(parsed.begin()), std::make_move_iterator(parsed.end())
+		);
 		return true;
 	}
 }
