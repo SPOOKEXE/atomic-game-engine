@@ -83,6 +83,13 @@ if(TARGET test_render)
 	target_link_libraries(test_render PRIVATE Engine::physics)
 endif()
 
+# The atlas experiment owns a real headless SDL device. Benchmarks normally
+# measure renderer CPU preparation only, so keep this backend dependency on the
+# one opt-in GPU suite rather than widening the render library's public API.
+if(TARGET bench_render)
+	target_link_libraries(bench_render PRIVATE SDL3::SDL3)
+endif()
+
 option(MONO_FUZZ_PORTAL_EXCHANGE "Build portal image codecs with libFuzzer and sanitizers" OFF)
 if(MONO_FUZZ_PORTAL_EXCHANGE)
 	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")

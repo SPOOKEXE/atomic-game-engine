@@ -137,6 +137,14 @@ render-preparation-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_render
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --baseline .cache/build/bench/render-baseline.tsv --filter engine.render.bench.world-presentation --all --samples {{samples}}
 
+# The normal benchmark runner reports only wall time. This GPU suite also emits
+# CPU recording, Vulkan timestamp, residency, allocation, cache and transfer
+# counters, so invoke its selected suite directly in the optimized preset.
+gpu-texture-atlas-bench samples="1":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_GPU_ATLAS_REPORT=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}
+
 # Coverage-guided parsing of cooked shader bytes; no graphics stack or device.
 shader-fuzz runs="10000" compiler="clang++-21":
     #!/usr/bin/env bash
