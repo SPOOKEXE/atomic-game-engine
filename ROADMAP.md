@@ -39,6 +39,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.24
 
+- [_] add EditableImage:ToBuffer()
+
 Full render plan: [docs/RENDER-REFACTOR.md](docs/RENDER-REFACTOR.md), including
 the consolidated materials, shaders and rendering optimization work.
 
