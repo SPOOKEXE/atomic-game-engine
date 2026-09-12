@@ -35,6 +35,7 @@ namespace {
 	constexpr uint32_t SOURCE_COUNT = 4;
 	constexpr uint32_t SOURCE_EXTENT = 4096;
 	constexpr uint64_t SOURCE_BYTES = uint64_t(SOURCE_EXTENT) * SOURCE_EXTENT * 4;
+	constexpr auto FENCE_TIMEOUT = std::chrono::seconds(30);
 
 	enum class Layout { Standalone, Atlas };
 
@@ -132,6 +133,16 @@ namespace {
 		}
 	}
 
+	// A device hang must fail the benchmark. SDL's blocking wait has no deadline,
+	// so poll the fence with the same bounded pattern as the render readback tests.
+	bool WaitForFence(SDL_GPUDevice *device, SDL_GPUFence *fence) {
+		const auto deadline = std::chrono::steady_clock::now() + FENCE_TIMEOUT;
+		while (!SDL_QueryGPUFence(device, fence) && std::chrono::steady_clock::now() < deadline) {
+			SDL_Delay(1);
+		}
+		return SDL_QueryGPUFence(device, fence) && SDL_WaitForGPUFences(device, true, &fence, 1);
+	}
+
 	void ValidateAtlasSamples(
 		SDL_GPUDevice *device, SDL_GPUTexture *atlas, const engine::render::TextureAtlasPlan &plan
 	) {
@@ -190,11 +201,11 @@ namespace {
 		SDL_DownloadFromGPUTexture(copy, &source, &output);
 		SDL_EndGPUCopyPass(copy);
 		auto *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
-		if (fence == nullptr || !SDL_WaitForGPUFences(device, true, &fence, 1)) {
+		if (fence == nullptr || !WaitForFence(device, fence)) {
 			if (fence != nullptr) SDL_ReleaseGPUFence(device, fence);
 			engine::render::gpu::ReleaseTransferBuffer(device, download);
 			engine::render::gpu::ReleaseTexture(device, target);
-			throw std::runtime_error("atlas sample readback failed");
+			throw std::runtime_error("atlas sample readback timed out or failed");
 		}
 		SDL_ReleaseGPUFence(device, fence);
 		const auto *pixels = static_cast<const uint8_t *>(SDL_MapGPUTransferBuffer(device, download, false));
@@ -299,7 +310,12 @@ namespace {
 		report.Resident = renderer.MemoryStatistics();
 
 		engine::render::VulkanTimestamps timestamps;
-		report.Timestamps = timestamps.Probe(device);
+		if (!timestamps.Probe(device)) {
+			throw std::runtime_error(
+				"GPU timestamps unavailable; gpu-texture-atlas-bench requires Vulkan timestamps"
+			);
+		}
+		report.Timestamps = true;
 		const auto recordingStarted = std::chrono::steady_clock::now();
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(device);
 		if (command == nullptr)
@@ -355,23 +371,27 @@ namespace {
 		report.UploadOperations = SOURCE_COUNT;
 		report.TransferOperations = transferCount;
 
-		if (!SDL_WaitForGPUFences(device, true, &fence, 1)) {
+		if (!WaitForFence(device, fence)) {
 			SDL_ReleaseGPUFence(device, fence);
 			ReleaseTransfers(device, transfers);
 			ReleaseTextures(device, textures);
-			throw std::runtime_error(std::string("copy fence wait failed: ") + SDL_GetError());
+			throw std::runtime_error(std::string("copy fence wait timed out or failed: ") + SDL_GetError());
 		}
 		SDL_ReleaseGPUFence(device, fence);
 		if (atlas) ValidateAtlasSamples(device, textures.front(), plan);
-		if (report.Timestamps) {
-			double times[engine::render::VulkanTimestamps::MARKS]{};
-			uint32_t count = 0;
-			if (timestamps.Collect(slot, times, count) && opened < count && closed < count) {
-				report.GpuNanoseconds =
-					static_cast<uint64_t>(engine::render::VulkanTimestamps::Between(times, opened, closed));
-			} else {
-				report.Timestamps = false;
-			}
+		double times[engine::render::VulkanTimestamps::MARKS]{};
+		uint32_t count = 0;
+		if (!timestamps.Collect(slot, times, count) || opened >= count || closed >= count) {
+			ReleaseTransfers(device, transfers);
+			ReleaseTextures(device, textures);
+			throw std::runtime_error("GPU timestamp readback failed");
+		}
+		report.GpuNanoseconds =
+			static_cast<uint64_t>(engine::render::VulkanTimestamps::Between(times, opened, closed));
+		if (report.GpuNanoseconds == 0) {
+			ReleaseTransfers(device, transfers);
+			ReleaseTextures(device, textures);
+			throw std::runtime_error("GPU timestamp measurement was zero");
 		}
 
 		// A warm request must traverse the same residency object. It has no copy

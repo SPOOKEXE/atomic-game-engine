@@ -141,9 +141,14 @@ render-preparation-bench samples="5":
 # CPU recording, Vulkan timestamp, residency, allocation, cache and transfer
 # counters, so invoke its selected suite directly in the optimized preset.
 gpu-texture-atlas-bench samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_render
-    MONO_GPU_ATLAS_REPORT=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}
+    if ! MONO_GPU_ATLAS_REPORT=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}; then
+        echo "gpu-texture-atlas-bench failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
 
 # Integrated release measurement for the medium render demo. Each run writes
 # the frame tree and heap/GPU report before teardown, then prints the report
