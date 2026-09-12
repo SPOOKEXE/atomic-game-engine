@@ -339,9 +339,10 @@ namespace engine::render {
 			const uint32_t localZ = demanded ? node->Integer(core::Name("local.z"), 1) : 1;
 			const std::string *instances = node->Parameter(core::Name("instances"));
 			const bool readInstances = demanded && instances != nullptr && *instances == "resident";
-			const std::string *uniforms = node->Parameter(core::Name("uniforms"));
-			const bool readViewUniforms = !demanded || (uniforms != nullptr && *uniforms == "view");
 			const bool hardUniforms = IsHardRenderNode(node->Kind);
+			const std::string *uniforms = node->Parameter(core::Name("uniforms"));
+			// Slot one is the hard-node parameter block, so slot zero must exist.
+			const bool readViewUniforms = hardUniforms || !demanded || (uniforms != nullptr && *uniforms == "view");
 			if (localX == 0 || localY == 0 || localZ == 0) {
 				ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
 				return true;
@@ -464,7 +465,9 @@ namespace engine::render {
 			}
 			if (hardUniforms) {
 				HardRenderUniforms hard;
-				hard.Trace.x = node->Number(core::Name("steps"), 32.0f);
+				hard.Trace.x = node->Kind == core::Name("pathtrace")
+							   ? node->Number(core::Name("max-bounces"), 3.0f)
+							   : node->Number(core::Name("steps"), 32.0f);
 				hard.Trace.y = node->Number(core::Name("max-distance"), 100.0f);
 				hard.Trace.z = node->Number(core::Name("thickness"), 0.1f);
 				hard.Trace.w = node->Number(core::Name("samples-per-frame"), 1.0f);

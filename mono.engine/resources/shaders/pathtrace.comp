@@ -30,6 +30,9 @@ void main() {
 	float randomSample = Noise(uv * pass.target.xy + pass.view.xx);
 	vec3 direct = texture(albedo, uv).rgb * max(surfaceNormal.y, 0.0);
 	vec3 bounce = texture(indirect, uv).rgb * distanceFade;
+	for (int bounceIndex = 1; bounceIndex < int(options.trace.x); ++bounceIndex) {
+		bounce *= 0.5 * (1.0 - roughness);
+	}
 	vec3 estimate = direct + bounce * mix(0.5, 1.0, randomSample) * (1.0 - roughness);
 	vec4 previous = texture(history, uv);
 	float sampleCount = min(previous.a, 63.0);
