@@ -97,6 +97,45 @@ namespace {
 		}();
 		return geometry;
 	}
+
+	struct DirtyTerrainWorld {
+		engine::ecs::Store Scene{"bench.editablemesh.dirty-terrain"};
+		engine::ecs::Entity TerrainMesh;
+	};
+
+	DirtyTerrainWorld &TerrainWorld() {
+		static DirtyTerrainWorld world;
+		static const bool ready = [&] {
+			engine::scene::RegisterSceneComponents();
+			world.TerrainMesh = world.Scene.Create();
+
+			const engine::scene::EditableMeshGeometry &geometry = TerrainChunkGeometry();
+			engine::scene::EditableMesh mesh;
+			mesh.Positions = geometry.Positions;
+			mesh.Normals = geometry.Normals;
+			mesh.UVs = geometry.UVs;
+			mesh.Colours = geometry.Colours;
+			mesh.Alphas = geometry.Alphas;
+			mesh.Indices = geometry.Indices;
+			world.Scene.Set(world.TerrainMesh, std::move(mesh));
+
+			engine::scene::CollisionShapes shapes;
+			for (uint32_t index = 0; index < 2'000; index++) {
+				engine::collision::TriangleMesh collision;
+				collision.Vertices.resize(128);
+				collision.Indices.resize(384);
+				shapes.SetMesh(
+					engine::core::Name("dirty-terrain-static-shape-" + std::to_string(index)),
+					std::move(collision)
+				);
+			}
+			world.Scene.SetResource(std::move(shapes));
+			engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(world.Scene));
+			return true;
+		}();
+		(void)ready;
+		return world;
+	}
 }
 
 BENCH_PER_ITEM("editable collision steady world without editable meshes", 100'000) {
@@ -124,5 +163,13 @@ BENCH_PER_ITEM("editable mesh terrain-sized prepare", 250) {
 	const engine::scene::EditableMeshGeometry &geometry = TerrainChunkGeometry();
 	for (uint32_t iteration = 0; iteration < 250; iteration++) {
 		engine::testing::Consume(engine::scene::PrepareEditableMesh(geometry).Signature);
+	}
+}
+
+BENCH_PER_ITEM("editable collision terrain refresh beside resident shapes", 250) {
+	DirtyTerrainWorld &world = TerrainWorld();
+	for (uint32_t iteration = 0; iteration < 250; iteration++) {
+		world.Scene.GetMutable<engine::scene::EditableMesh>(world.TerrainMesh)->Revision++;
+		engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(world.Scene));
 	}
 }

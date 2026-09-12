@@ -284,21 +284,6 @@ namespace engine::scene {
 			return 0;
 		}
 
-		// **Both tables are read and written whole, which is what a resource
-		// is.** `Store::SetResource` replaces, so the work below builds the two
-		// and writes them back once - and a world with no `EditableMesh` in it
-		// touches neither.
-		EditableMeshCollision baked;
-		if (const EditableMeshCollision *held = store.Resource<EditableMeshCollision>()) {
-			baked = *held;
-		}
-
-		CollisionShapes shapes;
-		if (const CollisionShapes *held = CollisionShapesOf(store)) {
-			shapes = *held;
-		}
-
-		size_t changed = 0;
 		struct CollisionBuild {
 			core::Name Name;
 			const EditableMesh *Source = nullptr;
@@ -323,9 +308,12 @@ namespace engine::scene {
 				return;
 			}
 
-			uint32_t *known = nullptr;
-			for (EditableMeshCollision::Baked &row : baked.Rows) {
-				if (row.Instance == instance.Id) {
+			const uint32_t *known = nullptr;
+			if (heldBaked != nullptr) {
+				for (const EditableMeshCollision::Baked &row : heldBaked->Rows) {
+					if (row.Instance != instance.Id) {
+						continue;
+					}
 					known = &row.Revision;
 					break;
 				}
@@ -337,8 +325,9 @@ namespace engine::scene {
 			// **Unless a hull is wanted and is not there**, which is a part
 			// switched to `ShapeKind::Hull` after its mesh was baked. See the
 			// bake below for why a hull is not built until it is asked for.
-			if (known != nullptr && *known == mesh.Revision &&
-				(shapes.FindHull(name) != nullptr || !WantsHull(store, wanted, name))) {
+			if (known != nullptr && *known == mesh.Revision && heldShapes != nullptr &&
+				heldShapes->FindMesh(name) != nullptr &&
+				(heldShapes->FindHull(name) != nullptr || !WantsHull(store, wanted, name))) {
 				seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
 				return;
 			}
@@ -363,8 +352,9 @@ namespace engine::scene {
 
 			// **The soup always and the hull only when something names one**,
 			// which is the difference between this being affordable and not.
-			// Measured on a terrain chunk of 4,225 points: the triangle soup
-			// costs 1.3 ms and quickhull costs 7.3 ms, and a heightfield's
+			// Measured with the bench preset on a terrain chunk of 4,225 points
+			// beside 2,000 resident shapes: the full refresh costs 0.885 ms. A
+			// quickhull alone cost 7.3 ms in the same terrain fixture, and a heightfield's
 			// convex hull is a dome over its summit that no collider in that
 			// scene will ever ask for. `game::AddCollisionShapes` bakes both
 			// because a delivered mesh is baked once at load; this runs on the
@@ -411,42 +401,56 @@ namespace engine::scene {
 				"editable collision workers", core::ProfileCategory::Physics, collisionTiming.BusyMilliseconds
 			);
 		}
-		for (CollisionBuild &build : builds) {
-			shapes.SetMesh(build.Name, std::move(build.Mesh));
-			if (build.WantsHull) {
-				shapes.SetHull(build.Name, std::move(build.Hull));
-			}
-			changed++;
-		}
-
 		// **The shapes of meshes that are gone, dropped here.** A streamed
 		// world creates and destroys a mesh per chunk, and a table that only
 		// grew would hold a hull and a triangle soup for every chunk anybody
 		// ever walked past. Nothing can name them again: the content name
 		// carries the entity's generation, so even a reused id mints a new one.
-		for (const EditableMeshCollision::Baked &was : baked.Rows) {
-			bool alive = false;
-			for (const EditableMeshCollision::Baked &now : seen) {
-				if (now.Instance == was.Instance) {
-					alive = true;
-					break;
+		std::vector<core::Name> forgotten;
+		if (heldBaked != nullptr) {
+			for (const EditableMeshCollision::Baked &was : heldBaked->Rows) {
+				bool alive = false;
+				for (const EditableMeshCollision::Baked &now : seen) {
+					if (now.Instance == was.Instance) {
+						alive = true;
+						break;
+					}
 				}
-			}
-			if (alive) {
-				continue;
-			}
+				if (alive) {
+					continue;
+				}
 
-			shapes.Forget(core::Name("editable-mesh://" + std::to_string(was.Instance)));
-			changed++;
+				forgotten.emplace_back("editable-mesh://" + std::to_string(was.Instance));
+			}
 		}
+
+		const size_t changed = builds.size() + forgotten.size();
 
 		if (changed == 0) {
 			return 0;
 		}
 
+		// Commit after every worker has joined. Keeping the resident shape table
+		// in place avoids copying every unchanged terrain BVH just to replace one
+		// chunk. The ECS still owns the only table and observes the whole edit at
+		// this owner-thread barrier.
+		if (store.Resource<CollisionShapes>() == nullptr) {
+			store.SetResource(CollisionShapes{});
+		}
+		CollisionShapes *shapes = store.ResourceMutable<CollisionShapes>();
+		for (CollisionBuild &build : builds) {
+			shapes->SetMesh(build.Name, std::move(build.Mesh));
+			if (build.WantsHull) {
+				shapes->SetHull(build.Name, std::move(build.Hull));
+			}
+		}
+		for (const core::Name name : forgotten) {
+			shapes->Forget(name);
+		}
+
+		EditableMeshCollision baked;
 		baked.Rows = std::move(seen);
 		store.SetResource(std::move(baked));
-		store.SetResource(std::move(shapes));
 		return changed;
 	}
 

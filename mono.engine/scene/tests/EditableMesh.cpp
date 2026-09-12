@@ -398,6 +398,38 @@ TEST_CASE("a mesh whose revision has not moved is not rebaked", "[scene][editabl
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 }
 
+TEST_CASE("rebaking one editable mesh keeps unrelated collision storage resident", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.resident");
+	const Entity editable = MakeQuad(store);
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	const Name staticName("editablemesh.static-neighbour");
+	engine::collision::TriangleMesh staticMesh;
+	staticMesh.Vertices = {
+		Vector3{0.0f, 0.0f, 0.0f},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+	};
+	staticMesh.Indices = {0, 1, 2};
+	auto *shapes = store.ResourceMutable<engine::scene::CollisionShapes>();
+	REQUIRE(shapes != nullptr);
+	shapes->SetMesh(staticName, std::move(staticMesh));
+
+	const auto *before = shapes->FindMesh(staticName);
+	REQUIRE(before != nullptr);
+	const Vector3 *residentVertices = before->Vertices.data();
+
+	REQUIRE(SetVertexPosition(store, editable, 0, Vector3{-3.0f, 0.0f, -3.0f}));
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	const auto *after = engine::scene::CollisionShapesOf(store)->FindMesh(staticName);
+	REQUIRE(after != nullptr);
+	CHECK(after->Vertices.data() == residentVertices);
+	CHECK(after->Vertices.size() == 3);
+}
+
 TEST_CASE("changed mesh collision is baked as one deterministic batch", "[scene][editablemesh]") {
 	engine::scene::RegisterSceneComponents();
 
