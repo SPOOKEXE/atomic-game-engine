@@ -320,6 +320,38 @@ namespace engine::scene {
 		uint16_t SkinReserved = 0;
 	};
 
+	// Copies optional LOD and graph-effect state into an existing draw row.
+	//
+	// @param instance  The row to update.
+	// @param automatic Optional automatically produced mesh ladder.
+	// @param custom    Optional per-level authored overrides. Valid meshes win;
+	//                  nil entries fall back to `automatic`.
+	// @param effects   Optional graph-node attachments for this visual.
+	// @since v0.24
+	inline void ApplyDrawRenderState(
+		DrawInstance &instance,
+		const AutoMeshLOD *automatic,
+		const CustomMeshLOD *custom,
+		const RenderEffects *effects
+	) {
+		const LevelOfDetail lod = ResolveMeshLOD(automatic, custom);
+		if (lod.Strategy != LodStrategy::None) {
+			for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+				instance.LodMeshes[level] = lod.Meshes[level];
+				instance.LodRatios[level] = lod.Ratios[level];
+			}
+			instance.LodTargetQuadArea = lod.TargetQuadArea;
+			instance.LodStrategyMode = lod.Strategy;
+			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));
+		}
+		if (effects != nullptr) {
+			instance.Effects = *effects;
+			instance.Effects.Count = std::min<uint8_t>(
+				instance.Effects.Count, static_cast<uint8_t>(MAX_RENDER_EFFECT_ATTACHMENTS)
+			);
+		}
+	}
+
 	// Fills the fields a collector reads straight off the world's components.
 	//
 	// **The one place that field list is spelled out.** Two collectors publish
@@ -364,30 +396,6 @@ namespace engine::scene {
 	// @param effects    Optional graph-node attachments for this visual.
 	// @return The instance to publish.
 	// @since v0.15
-	inline void ApplyDrawRenderState(
-		DrawInstance &instance,
-		const AutoMeshLOD *automatic,
-		const CustomMeshLOD *custom,
-		const RenderEffects *effects
-	) {
-		const LevelOfDetail lod = ResolveMeshLOD(automatic, custom);
-		if (lod.Strategy != LodStrategy::None) {
-			for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
-				instance.LodMeshes[level] = lod.Meshes[level];
-				instance.LodRatios[level] = lod.Ratios[level];
-			}
-			instance.LodTargetQuadArea = lod.TargetQuadArea;
-			instance.LodStrategyMode = lod.Strategy;
-			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));
-		}
-		if (effects != nullptr) {
-			instance.Effects = *effects;
-			instance.Effects.Count = std::min<uint8_t>(
-				instance.Effects.Count, static_cast<uint8_t>(MAX_RENDER_EFFECT_ATTACHMENTS)
-			);
-		}
-	}
-
 	inline DrawInstance MakeDrawInstance(
 		const core::CFrame &frame,
 		const Bounds &bounds,

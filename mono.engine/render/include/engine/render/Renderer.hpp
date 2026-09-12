@@ -672,6 +672,7 @@ namespace engine::render {
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
+		// arch-waiver ecs-copy: each View is one render invocation, not retained world state.
 		scene::Camera Camera;
 		// Set by the product's completed world snapshot barrier. A queued data
 		// capture only becomes Ready when this exact identity reaches its graph
