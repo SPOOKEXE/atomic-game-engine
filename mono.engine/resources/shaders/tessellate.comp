@@ -20,6 +20,8 @@ Vertex interpolate(Vertex a, Vertex b, Vertex c, vec3 barycentric) {
 	vec3 normal = vec3(wordFloat(result, 3u), wordFloat(result, 4u), wordFloat(result, 5u));
 	float lengthSquared = dot(normal, normal); if (lengthSquared > 0.0) normal *= inversesqrt(lengthSquared);
 	putFloat(result, 3u, normal.x); putFloat(result, 4u, normal.y); putFloat(result, 5u, normal.z);
+	// Joint ids are discrete. Keeping one complete corner payload retains its
+	// exact UNORM16 weight sum, while an unskinned zero payload remains zero.
 	Vertex owner = barycentric.y > barycentric.x && barycentric.y >= barycentric.z ? b : (barycentric.z > barycentric.x ? c : a);
 	result.words[2] = owner.words[2]; return result;
 }

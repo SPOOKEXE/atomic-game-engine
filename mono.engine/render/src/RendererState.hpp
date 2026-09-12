@@ -23,6 +23,7 @@
 #include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
 #include "SurfaceCapturePlan.hpp"
+#include "Tessellation.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
@@ -537,6 +538,8 @@ namespace engine::render {
 			SDL_GPUComputePipeline *Compute = nullptr;
 			uint32_t Capacity = 0;
 			uint32_t Count = 0;
+			bool Fallback = false;
+			std::vector<GpuTessellationPlan> Entries;
 		};
 		TessellationState Tessellation;
 

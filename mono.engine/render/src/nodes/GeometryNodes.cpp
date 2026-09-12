@@ -15,8 +15,15 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 
+#include <glm/geometric.hpp>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
+
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <vector>
 
 namespace engine::render {
 
@@ -44,22 +51,72 @@ namespace engine::render {
 				)
 			};
 			const graph::Node *node = Pipeline->Graph.Find(context.Node);
-			const uint32_t levels =
-				node == nullptr ? 1u : std::min(node->Integer(core::Name("max-subdivisions"), 1), 4u);
-			const uint32_t factor = 1u << levels;
-			TessellationPlan plan;
+			const uint32_t maximum =
+				node == nullptr ? 1u : std::clamp(node->Integer(core::Name("max-subdivisions"), 1), 1u, 8u);
+			const float targetPixels =
+				node == nullptr ? 12.0f : std::max(node->Number(core::Name("target-pixels"), 12.0f), 1.0f);
+			const auto projectedEdge = [&](const scene::DrawInstance &instance) {
+				const glm::vec3 centre{
+					instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z
+				};
+				const float radius =
+					std::max({instance.HalfExtent.X, instance.HalfExtent.Y, instance.HalfExtent.Z});
+				const glm::vec4 clipCentre = Matrices.ViewProjection * glm::vec4{centre, 1.0f};
+				if (!std::isfinite(clipCentre.w) || std::abs(clipCentre.w) < 1e-5f) return 0.0f;
+				const glm::vec2 centreNdc = glm::vec2(clipCentre) / clipCentre.w;
+				float pixels = 0.0f;
+				for (const glm::vec3 axis :
+					 {glm::vec3{radius, 0.0f, 0.0f},
+					  glm::vec3{0.0f, radius, 0.0f},
+					  glm::vec3{0.0f, 0.0f, radius}}) {
+					const glm::vec4 clip = Matrices.ViewProjection * glm::vec4{centre + axis, 1.0f};
+					if (std::isfinite(clip.w) && std::abs(clip.w) >= 1e-5f)
+						pixels = std::max(
+							pixels,
+							glm::length(glm::vec2(clip) / clip.w - centreNdc) * 0.5f *
+								std::max(SceneWidth, SceneHeight)
+						);
+				}
+				return pixels * 2.0f;
+			};
+			std::vector<TessellationRequest> requests;
+			bool fallback = false;
 			for (uint32_t slot = SceneCount; slot < SceneCount + PlainOpaque && slot < State->SlotMesh.size();
 				 ++slot) {
 				const MeshEntry *mesh = State->SlotMesh[slot];
-				if (mesh == nullptr || mesh->Packed) continue;
+				if (mesh == nullptr) continue;
+				// The compute input is the unpacked MeshVertex stream. Draw the entire
+				// range coarsely when a source cannot use that layout.
+				if (mesh->Packed) {
+					fallback = true;
+					break;
+				}
+				const uint32_t source = slot - SceneCount;
+				if (source >= State->DrawOrder.size() ||
+					State->DrawOrder[source] >= State->SceneInstances.size()) {
+					fallback = true;
+					break;
+				}
+				const scene::DrawInstance &instance = State->SceneInstances[State->DrawOrder[source]];
+				const uint32_t factor = TessellationFactor(projectedEdge(instance), targetPixels, maximum);
 				if (mesh->Runs.empty()) {
-					if (!plan.Add(mesh->Whole, 0, slot, factor, capacity)) break;
+					requests.push_back({mesh->Whole, 0, slot, factor});
 				} else
 					for (uint32_t material = 0; material < mesh->Runs.size(); ++material)
-						if (!plan.Add(mesh->Runs[material], material, slot, factor, capacity)) break;
+						requests.push_back({mesh->Runs[material], material, slot, factor});
 			}
+			TessellationPlan plan;
+			bool complete = false;
+			for (uint32_t ceiling = maximum; ceiling > 0 && !complete && !fallback; --ceiling) {
+				std::vector<TessellationRequest> reduced = requests;
+				for (TessellationRequest &request : reduced)
+					request.Factor = std::min(request.Factor, ceiling);
+				complete = BuildCompleteTessellationPlan(reduced, capacity, plan);
+			}
+			State->Tessellation.Fallback = fallback || (!requests.empty() && !complete);
+			State->Tessellation.Entries = plan.Entries;
 			State->Tessellation.Count = static_cast<uint32_t>(plan.Entries.size());
-			if (plan.Entries.empty()) return true;
+			if (State->Tessellation.Fallback || plan.Entries.empty()) return true;
 			const auto grow = [](uint32_t value) {
 				uint32_t next = 64;
 				while (next < value)
@@ -128,15 +185,19 @@ namespace engine::render {
 		});
 
 		frameNodes.Set(core::Name("tessellated-draw"), [this](const graph::RunContext &context) {
-			if (context.Reads.size() != 3 || context.Writes.size() != 2 || State->Tessellation.Count == 0)
-				return true;
-			SDL_GPUBuffer *vertices = GraphBuffer(context.Reads[0], context, false);
-			SDL_GPUBuffer *indices = GraphBuffer(context.Reads[1], context, false);
-			SDL_GPUBuffer *commands = GraphBuffer(context.Reads[2], context, false);
+			if (context.Reads.size() != 3 || context.Writes.size() != 2) return false;
+			if (State->Tessellation.Count == 0 && !State->Tessellation.Fallback) return true;
+			SDL_GPUBuffer *vertices =
+				State->Tessellation.Fallback ? nullptr : GraphBuffer(context.Reads[0], context, false);
+			SDL_GPUBuffer *indices =
+				State->Tessellation.Fallback ? nullptr : GraphBuffer(context.Reads[1], context, false);
+			SDL_GPUBuffer *commands =
+				State->Tessellation.Fallback ? nullptr : GraphBuffer(context.Reads[2], context, false);
 			auto colour = GraphTexture(context.Writes[0], context, true);
 			auto depth = GraphTexture(context.Writes[1], context, true);
-			if (vertices == nullptr || indices == nullptr || commands == nullptr || !colour.IsValid() ||
-				!depth.IsValid())
+			if ((!State->Tessellation.Fallback &&
+				 (vertices == nullptr || indices == nullptr || commands == nullptr)) ||
+				!colour.IsValid() || !depth.IsValid())
 				return false;
 			EnterNamedPass(context.Name);
 			SDL_GPUColorTargetInfo target{};
@@ -157,6 +218,28 @@ namespace engine::render {
 			}
 			State->BindPipeline(pass, State->HdrOpaquePipeline, Impl::PipelineFamily::HdrOpaque);
 			State->BindInstanceBuffers(pass, State->InstanceIndexBuffer);
+			if (State->Tessellation.Fallback) {
+				const SDL_GPUBufferBinding coarse{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &coarse, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				SDL_SetGPUViewport(pass, &SceneViewport);
+				SDL_SetGPUScissor(pass, &SceneScissor);
+				SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
+				Result.DrawCalls += State->DrawSlots(
+					Command,
+					pass,
+					SceneCount,
+					PlainOpaque,
+					&Lighting,
+					State->ShadowTexture,
+					State->ShadowSampler,
+					nullptr,
+					State->SurfaceSampler,
+					0,
+					Result.Triangles
+				);
+				SDL_EndGPURenderPass(pass);
+				return true;
+			}
 			const SDL_GPUBufferBinding vertex{vertices, 0};
 			SDL_BindGPUVertexBuffers(pass, 0, &vertex, 1);
 			const SDL_GPUBufferBinding index{indices, 0};
@@ -164,28 +247,83 @@ namespace engine::render {
 			SDL_SetGPUViewport(pass, &SceneViewport);
 			SDL_SetGPUScissor(pass, &SceneScissor);
 			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
-			SDL_GPUSampler *sampler = State->Textures.Sampler();
-			const SDL_GPUTextureSamplerBinding bindings[]{
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler},
-				{State->Textures.Default(), sampler},
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler},
-				{State->FallbackTexture, sampler}
-			};
-			SDL_BindGPUFragmentSamplers(pass, 0, bindings, 10);
-			LightingUniforms material = Lighting;
-			material.BaseColour = glm::vec4{1.0f};
-			material.Surface = glm::vec4{1.0f, 0.0f, 0.0f, 0.04f};
-			SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
-			for (uint32_t command = 0; command < State->Tessellation.Count; ++command)
+			for (uint32_t command = 0; command < State->Tessellation.Count; ++command) {
+				const GpuTessellationPlan &entry = State->Tessellation.Entries[command];
+				if (entry.Instance >= State->SlotMesh.size() || entry.Instance >= State->SlotTexture.size() ||
+					entry.Instance >= State->SlotContentOwner.size() ||
+					entry.Instance >= State->SlotResample.size() ||
+					entry.Instance >= State->SlotNormalMap.size() ||
+					entry.Instance >= State->SlotRoughnessMap.size() ||
+					entry.Instance >= State->SlotOcclusionMap.size() ||
+					entry.Instance >= State->SlotHeightMap.size() ||
+					entry.Instance >= State->SlotMetalnessMap.size() ||
+					entry.Instance >= State->SlotEmissiveMap.size())
+					continue;
+				const MeshEntry *mesh = State->SlotMesh[entry.Instance];
+				if (mesh == nullptr) continue;
+				const TessellationMaterial source =
+					TessellationMaterialFor(*mesh, entry.Material, State->SlotTexture[entry.Instance]);
+				const core::Name texture = source.Texture;
+				const core::Name owner =
+					State->TextureContentOwner(texture, State->SlotContentOwner[entry.Instance]);
+				SDL_GPUTexture *found = State->Textures.Find(texture, owner);
+				const TextureChoice choice = ChooseTexture(
+					found != nullptr, texture.IsValid(), State->Textures.Expecting(texture, owner)
+				);
+				SDL_GPUTexture *sampled = choice == TextureChoice::Named	 ? found
+										  : choice == TextureChoice::Missing ? State->Textures.Missing()
+																			 : State->Textures.Default();
+				const bool absent = choice == TextureChoice::Missing;
+				const auto dataMap = [&](core::Name name) {
+					const core::Name mapOwner =
+						State->TextureContentOwner(name, State->SlotContentOwner[entry.Instance]);
+					SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
+					if (map != nullptr) return map;
+					if (name.IsValid() && !State->Textures.Expecting(name, mapOwner))
+						return State->Textures.Missing();
+					return static_cast<SDL_GPUTexture *>(nullptr);
+				};
+				SDL_GPUTexture *normal = dataMap(State->SlotNormalMap[entry.Instance]);
+				SDL_GPUTexture *roughness = dataMap(State->SlotRoughnessMap[entry.Instance]);
+				SDL_GPUTexture *occlusion = dataMap(State->SlotOcclusionMap[entry.Instance]);
+				SDL_GPUTexture *height = dataMap(State->SlotHeightMap[entry.Instance]);
+				SDL_GPUTexture *metalness = dataMap(State->SlotMetalnessMap[entry.Instance]);
+				SDL_GPUTexture *emissive = dataMap(State->SlotEmissiveMap[entry.Instance]);
+				SDL_GPUSampler *sampler =
+					State->SlotResample[entry.Instance] == scene::SurfaceResampleMode::Pixelated
+						? State->Textures.PixelSampler()
+						: State->Textures.Sampler();
+				const SDL_GPUTextureSamplerBinding bindings[]{
+					{State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture,
+					 State->ShadowSampler != nullptr ? State->ShadowSampler : sampler},
+					{State->FallbackTexture, sampler},
+					{sampled != nullptr ? sampled : State->FallbackTexture, sampler},
+					{State->FallbackTexture, sampler},
+					{normal != nullptr ? normal : State->FallbackTexture, sampler},
+					{roughness != nullptr ? roughness : State->FallbackTexture, sampler},
+					{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
+					{emissive != nullptr ? emissive : State->FallbackTexture, sampler},
+					{height != nullptr ? height : State->FallbackTexture, sampler},
+					{metalness != nullptr ? metalness : State->FallbackTexture, sampler}
+				};
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 10);
+				LightingUniforms material = Lighting;
+				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
+				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
+				material.Surface =
+					glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, height != nullptr ? 1.0f : 0.0f, 0.04f};
+				material.Material = glm::vec4{
+					normal != nullptr ? 1.0f : 0.0f,
+					roughness != nullptr ? 1.0f : 0.0f,
+					occlusion != nullptr ? 1.0f : 0.0f,
+					emissive != nullptr ? 1.0f : 0.0f,
+				};
+				material.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
 				SDL_DrawGPUIndexedPrimitivesIndirect(
 					pass, commands, command * TESSELLATION_COMMAND_WORDS * sizeof(uint32_t), 1
 				);
+			}
 			SDL_EndGPURenderPass(pass);
 			Result.DrawCalls += State->Tessellation.Count;
 			return true;

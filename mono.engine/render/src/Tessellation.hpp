@@ -6,8 +6,11 @@
 #include <engine/render/MeshTable.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <vector>
 
 namespace engine::render {
@@ -40,6 +43,35 @@ namespace engine::render {
 		uint32_t Indices = 0;
 		uint32_t Commands = 0;
 	};
+
+	struct TessellationRequest {
+		MeshRange Source;
+		uint32_t Material = 0;
+		uint32_t Instance = 0;
+		uint32_t Factor = 1;
+	};
+
+	struct TessellationMaterial {
+		core::Name Texture;
+		std::array<float, 4> Colour{1, 1, 1, 1};
+	};
+
+	inline TessellationMaterial
+	TessellationMaterialFor(const MeshEntry &mesh, uint32_t material, core::Name overrideTexture) {
+		if (overrideTexture.IsValid()) return {overrideTexture, {1, 1, 1, 1}};
+		if (material < mesh.Textures.size() && material < mesh.Colours.size())
+			return {mesh.Textures[material], mesh.Colours[material]};
+		return {};
+	}
+
+	// An edge smaller than its target needs no subdivision. Larger edges use the
+	// smallest integral factor that keeps each generated edge under the target.
+	inline uint32_t TessellationFactor(float projectedEdgePixels, float targetPixels, uint32_t maximum) {
+		if (!std::isfinite(projectedEdgePixels) || projectedEdgePixels <= 0.0f || targetPixels <= 0.0f)
+			return 1;
+		const uint32_t wanted = static_cast<uint32_t>(std::ceil(projectedEdgePixels / targetPixels));
+		return std::clamp(wanted, 1u, std::max(maximum, 1u));
+	}
 
 	struct TessellationPlan {
 		std::vector<GpuTessellationPlan> Entries;
@@ -84,4 +116,17 @@ namespace engine::render {
 			return true;
 		}
 	};
+
+	inline bool BuildCompleteTessellationPlan(
+		std::span<const TessellationRequest> requests, TessellationCapacity capacity, TessellationPlan &out
+	) {
+		out = {};
+		for (const TessellationRequest &request : requests) {
+			if (!out.Add(request.Source, request.Material, request.Instance, request.Factor, capacity)) {
+				out = {};
+				return false;
+			}
+		}
+		return true;
+	}
 }
