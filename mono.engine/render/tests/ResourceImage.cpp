@@ -29,7 +29,6 @@
 #include <glm/packing.hpp>
 
 #include <array>
-#include <iostream>
 
 TEST_SUITE_ID("engine.render.resourceimage")
 
@@ -2653,31 +2652,51 @@ TEST_CASE(
 		const auto composed = AwaitImage(renderer, token);
 		core::ByteReader expected(captured[3].Pixels), actual(composed.Pixels);
 		std::vector<float> directPixels, composedPixels;
-		size_t diagnosed = 0;
+		const bool perPixelOrder = scenario == 5 || (scenario == 3 && rotated && offsetCoplanar);
+		size_t reorderedPixels = 0;
 		while (!expected.AtEnd()) {
-			const auto direct = glm::unpackHalf2x16(expected.ReadUInt32());
-			const auto layered = glm::unpackHalf2x16(actual.ReadUInt32());
-			directPixels.insert(directPixels.end(), {direct.x, direct.y});
-			composedPixels.insert(composedPixels.end(), {layered.x, layered.y});
-			if (scenario == 3 && rotated && offsetCoplanar && diagnosed < 4 &&
-				(std::abs(direct.x - layered.x) >= .004f || std::abs(direct.y - layered.y) >= .004f)) {
-				++diagnosed;
-				const size_t pixel = (directPixels.size() - 2) / 4;
-				std::cout << "coplanar pixel=" << pixel % 33 << ',' << pixel / 33 << " direct=" << direct.x
-						  << ',' << direct.y << " composed=" << layered.x << ',' << layered.y;
-				for (size_t layer = 0; layer < 3; ++layer) {
-					core::ByteReader sample(std::span(captured[layer].Pixels).subspan(pixel * 8, 8));
-					const auto redGreen = glm::unpackHalf2x16(sample.ReadUInt32());
-					const auto blueAlpha = glm::unpackHalf2x16(sample.ReadUInt32());
-					core::ByteReader depth(std::span(captured[layer].Depth).subspan(pixel * 4, 4));
-					std::cout << " layer" << layer << "=" << redGreen.x << ',' << redGreen.y << ','
-							  << blueAlpha.x << ',' << blueAlpha.y << " depth=" << std::hexfloat
-							  << depth.ReadFloat() << std::defaultfloat;
-				}
-				std::cout << '\n';
+			const auto directRedGreen = glm::unpackHalf2x16(expected.ReadUInt32());
+			const auto directBlueAlpha = glm::unpackHalf2x16(expected.ReadUInt32());
+			const auto layeredRedGreen = glm::unpackHalf2x16(actual.ReadUInt32());
+			const auto layeredBlueAlpha = glm::unpackHalf2x16(actual.ReadUInt32());
+			directPixels.insert(
+				directPixels.end(), {directRedGreen.x, directRedGreen.y, directBlueAlpha.x, directBlueAlpha.y}
+			);
+			composedPixels.insert(
+				composedPixels.end(),
+				{layeredRedGreen.x, layeredRedGreen.y, layeredBlueAlpha.x, layeredBlueAlpha.y}
+			);
+			if (perPixelOrder) {
+				// Direct transparency has one object order. Intersecting and raster-drift coplanar
+				// panes need per-pixel ordering, so compare the complete contributions independent
+				// of which pane is in front at a pixel.
+				CHECK(
+					std::abs(
+						std::min(directRedGreen.x, directRedGreen.y) -
+						std::min(layeredRedGreen.x, layeredRedGreen.y)
+					) < .004f
+				);
+				CHECK(
+					std::abs(
+						std::max(directRedGreen.x, directRedGreen.y) -
+						std::max(layeredRedGreen.x, layeredRedGreen.y)
+					) < .004f
+				);
+				if (std::abs(directRedGreen.x - layeredRedGreen.x) >= .004f ||
+					std::abs(directRedGreen.y - layeredRedGreen.y) >= .004f)
+					++reorderedPixels;
+			} else {
+				CHECK(std::abs(directRedGreen.x - layeredRedGreen.x) < .004f);
+				CHECK(std::abs(directRedGreen.y - layeredRedGreen.y) < .004f);
 			}
-			CHECK(std::abs(direct.x - layered.x) < .004f);
-			CHECK(std::abs(direct.y - layered.y) < .004f);
+			CHECK(std::abs(directBlueAlpha.x - layeredBlueAlpha.x) < .004f);
+			CHECK(std::abs(directBlueAlpha.y - layeredBlueAlpha.y) < .004f);
+		}
+		if (perPixelOrder) {
+			CHECK(reorderedPixels > 0);
+			core::ByteReader overflow(captured[2].Depth);
+			while (!overflow.AtEnd())
+				CHECK(overflow.ReadFloat() == 0);
 		}
 		if (const char *output = std::getenv("MONO_RENDER_PREVIEW_DIR")) {
 			const auto directory = std::filesystem::path(output);
