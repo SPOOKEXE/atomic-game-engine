@@ -104,6 +104,11 @@ namespace {
 		std::array<engine::ecs::Entity, 8> TerrainMeshes;
 	};
 
+	struct RetainedTerrainWorld {
+		engine::ecs::Store Scene{"bench.editablemesh.retained-terrain"};
+		std::array<engine::ecs::Entity, 64> TerrainMeshes;
+	};
+
 	DirtyTerrainWorld &TerrainWorld() {
 		static DirtyTerrainWorld world;
 		static const bool ready = [&] {
@@ -128,6 +133,41 @@ namespace {
 				collision.Indices.resize(384);
 				shapes.SetMesh(
 					engine::core::Name("dirty-terrain-static-shape-" + std::to_string(index)),
+					std::move(collision)
+				);
+			}
+			world.Scene.SetResource(std::move(shapes));
+			engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(world.Scene));
+			return true;
+		}();
+		(void)ready;
+		return world;
+	}
+
+	RetainedTerrainWorld &RetainedTerrainWorldOf() {
+		static RetainedTerrainWorld world;
+		static const bool ready = [] {
+			engine::scene::RegisterSceneComponents();
+			const engine::scene::EditableMeshGeometry &geometry = TerrainChunkGeometry();
+			for (engine::ecs::Entity &entity : world.TerrainMeshes) {
+				entity = world.Scene.Create();
+				engine::scene::EditableMesh mesh;
+				mesh.Positions = geometry.Positions;
+				mesh.Normals = geometry.Normals;
+				mesh.UVs = geometry.UVs;
+				mesh.Colours = geometry.Colours;
+				mesh.Alphas = geometry.Alphas;
+				mesh.Indices = geometry.Indices;
+				world.Scene.Set(entity, std::move(mesh));
+			}
+
+			engine::scene::CollisionShapes shapes;
+			for (uint32_t index = 0; index < 2'000; index++) {
+				engine::collision::TriangleMesh collision;
+				collision.Vertices.resize(128);
+				collision.Indices.resize(384);
+				shapes.SetMesh(
+					engine::core::Name("retained-terrain-static-shape-" + std::to_string(index)),
 					std::move(collision)
 				);
 			}
@@ -176,6 +216,13 @@ BENCH_PER_ITEM("editable collision terrain refresh beside resident shapes", 250)
 		for (const engine::ecs::Entity entity : world.TerrainMeshes) {
 			world.Scene.GetMutable<engine::scene::EditableMesh>(entity)->Revision++;
 		}
+		engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(world.Scene));
+	}
+}
+
+BENCH_PER_ITEM("editable collision retained terrain ledger", 1'000) {
+	RetainedTerrainWorld &world = RetainedTerrainWorldOf();
+	for (uint32_t iteration = 0; iteration < 1'000; iteration++) {
 		engine::testing::Consume(engine::scene::RefreshEditableMeshCollision(world.Scene));
 	}
 }

@@ -364,9 +364,10 @@ namespace engine::scene {
 			uint32_t Revision = 0;
 		};
 
-		// **A vector and a linear scan, for `CollisionShapes`' own reason** -
-		// a world holds a handful of these, and the walk that reads it is
-		// already walking every `EditableMesh` in the world.
+		// Sorted by complete entity id. A streamed terrain can retain hundreds
+		// of editable chunks, so `RefreshEditableMeshCollision` uses binary
+		// lookup and a merge sweep rather than turning its steady-state ledger
+		// maintenance into quadratic work.
 		std::vector<Baked> Rows;
 	};
 
@@ -388,7 +389,8 @@ namespace engine::scene {
 	//
 	// Revision-tracked, because baking is quickhull plus a triangle soup and a
 	// streamed world builds a mesh a frame. A mesh whose revision has not moved
-	// costs one integer compare.
+	// takes one canonical-ledger pass and a binary revision lookup, with no
+	// geometry rebuild.
 	//
 	// Call it wherever the geometry is settled and before physics reads it -
 	// which for every host in this repository is once a tick.

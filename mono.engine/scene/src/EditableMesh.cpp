@@ -16,6 +16,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -204,6 +205,49 @@ namespace engine::scene {
 	}
 
 	namespace {
+		bool
+		BakedBefore(const EditableMeshCollision::Baked &left, const EditableMeshCollision::Baked &right) {
+			return left.Instance < right.Instance;
+		}
+
+		// The collision ledger can outlive content streaming, so terrain worlds
+		// routinely hold hundreds of rows. Keep its derived representation sorted
+		// before every lookup. Normal refreshes already publish this order, while
+		// this repair also makes a restored or tool-authored ledger safe to search.
+		void CanonicalizeBakedRows(EditableMeshCollision &ledger) {
+			if (std::is_sorted(ledger.Rows.begin(), ledger.Rows.end(), BakedBefore) &&
+				std::adjacent_find(
+					ledger.Rows.begin(), ledger.Rows.end(), [](const auto &left, const auto &right) {
+						return left.Instance == right.Instance;
+					}
+				) == ledger.Rows.end()) {
+				return;
+			}
+			std::stable_sort(ledger.Rows.begin(), ledger.Rows.end(), BakedBefore);
+			ledger.Rows.erase(
+				std::unique(
+					ledger.Rows.begin(),
+					ledger.Rows.end(),
+					[](const auto &left, const auto &right) { return left.Instance == right.Instance; }
+				),
+				ledger.Rows.end()
+			);
+		}
+
+		const EditableMeshCollision::Baked *
+		FindBaked(const EditableMeshCollision *ledger, uint64_t instance) {
+			if (ledger == nullptr) {
+				return nullptr;
+			}
+			const auto found = std::lower_bound(
+				ledger->Rows.begin(),
+				ledger->Rows.end(),
+				instance,
+				[](const EditableMeshCollision::Baked &row, uint64_t value) { return row.Instance < value; }
+			);
+			return found != ledger->Rows.end() && found->Instance == instance ? &*found : nullptr;
+		}
+
 		// Whether any collider in the world names `geometry` as a convex hull.
 		//
 		// The list is gathered once per refresh and only when something asks,
@@ -242,27 +286,22 @@ namespace engine::scene {
 		// whole terrain chunks, and copying them merely to discover that every
 		// revision is already resident made a stopped editable scene cost
 		// milliseconds on every presentation.
-		const EditableMeshCollision *heldBaked = store.Resource<EditableMeshCollision>();
+		EditableMeshCollision *heldLedger = store.ResourceMutable<EditableMeshCollision>();
+		if (heldLedger != nullptr) {
+			CanonicalizeBakedRows(*heldLedger);
+		}
+		const EditableMeshCollision *heldBaked = heldLedger;
 		const CollisionShapes *heldShapes = CollisionShapesOf(store);
 		std::optional<std::vector<core::Name>> fastWanted;
-		size_t live = 0;
+		size_t retained = 0;
 		bool dirty = false;
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
 			const core::Name name = EditableMeshContentName(store, instance);
 			if (!name.IsValid()) {
 				return;
 			}
-			live++;
-
-			const EditableMeshCollision::Baked *known = nullptr;
-			if (heldBaked != nullptr) {
-				for (const EditableMeshCollision::Baked &row : heldBaked->Rows) {
-					if (row.Instance == instance.Id) {
-						known = &row;
-						break;
-					}
-				}
-			}
+			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
+			retained += known != nullptr ? 1u : 0u;
 
 			const bool hasTriangles = !mesh.Positions.empty() && mesh.Indices.size() >= 3;
 			if (known == nullptr) {
@@ -284,7 +323,10 @@ namespace engine::scene {
 				dirty = true;
 			}
 		});
-		if (heldBaked != nullptr && heldBaked->Rows.size() != live) {
+		// Count matching identities instead of all live meshes. An incomplete
+		// replacement has no shape yet, but it must not make a destroyed mesh's
+		// ledger row look retained merely because the two totals happen to match.
+		if (heldBaked != nullptr && heldBaked->Rows.size() != retained) {
 			dirty = true;
 		}
 		if (!dirty) {
@@ -308,6 +350,9 @@ namespace engine::scene {
 		// What is in the world this call, so the sweep below can tell a mesh
 		// that was destroyed from one that simply did not change.
 		std::vector<EditableMeshCollision::Baked> seen;
+		if (heldBaked != nullptr) {
+			seen.reserve(heldBaked->Rows.size());
+		}
 
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
 			const core::Name name = EditableMeshContentName(store, instance);
@@ -315,24 +360,16 @@ namespace engine::scene {
 				return;
 			}
 
-			const uint32_t *known = nullptr;
-			if (heldBaked != nullptr) {
-				for (const EditableMeshCollision::Baked &row : heldBaked->Rows) {
-					if (row.Instance != instance.Id) {
-						continue;
-					}
-					known = &row.Revision;
-					break;
-				}
-			}
+			const EditableMeshCollision::Baked *known = FindBaked(heldBaked, instance.Id);
 
-			// The steady state: an integer compare, which is
+			// The steady state: one binary revision lookup after the bounded
+			// ledger canonicalization pass, which is
 			// `EditableMeshUploader::Refresh`'s decision and its reason.
 			//
 			// **Unless a hull is wanted and is not there**, which is a part
 			// switched to `ShapeKind::Hull` after its mesh was baked. See the
 			// bake below for why a hull is not built until it is asked for.
-			if (known != nullptr && *known == mesh.Revision && heldShapes != nullptr &&
+			if (known != nullptr && known->Revision == mesh.Revision && heldShapes != nullptr &&
 				heldShapes->FindMesh(name) != nullptr &&
 				(heldShapes->FindHull(name) != nullptr || !WantsHull(store, wanted, name))) {
 				seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
@@ -413,21 +450,22 @@ namespace engine::scene {
 		// grew would hold a hull and a triangle soup for every chunk anybody
 		// ever walked past. Nothing can name them again: the content name
 		// carries the entity's generation, so even a reused id mints a new one.
+		// `Store::Each` has no ordering contract. Sort once at the owner-thread
+		// barrier, then merge the two ledgers instead of checking every old row
+		// against every live mesh. A terrain with N retained chunks used to make
+		// this housekeeping O(N squared) even when no worker had any geometry to
+		// build.
+		std::sort(seen.begin(), seen.end(), BakedBefore);
 		std::vector<core::Name> forgotten;
 		if (heldBaked != nullptr) {
+			size_t live = 0;
 			for (const EditableMeshCollision::Baked &was : heldBaked->Rows) {
-				bool alive = false;
-				for (const EditableMeshCollision::Baked &now : seen) {
-					if (now.Instance == was.Instance) {
-						alive = true;
-						break;
-					}
+				while (live < seen.size() && seen[live].Instance < was.Instance) {
+					live++;
 				}
-				if (alive) {
-					continue;
+				if (live == seen.size() || seen[live].Instance != was.Instance) {
+					forgotten.emplace_back("editable-mesh://" + std::to_string(was.Instance));
 				}
-
-				forgotten.emplace_back("editable-mesh://" + std::to_string(was.Instance));
 			}
 		}
 

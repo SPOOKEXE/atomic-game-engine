@@ -19,6 +19,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 
 TEST_SUITE_ID("engine.scene.editablemesh")
@@ -390,7 +391,7 @@ TEST_CASE("a mesh whose revision has not moved is not rebaked", "[scene][editabl
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 
 	// The steady state, which is what makes this affordable in a world that
-	// builds a mesh a frame: an integer compare per mesh and no quickhull.
+	// builds a mesh a frame: binary ledger lookups and no quickhull.
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
 
 	// An edit moves the revision, so the shape is built again.
@@ -468,6 +469,28 @@ TEST_CASE("changed mesh collision is baked as one deterministic batch", "[scene]
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
 }
 
+TEST_CASE("editable collision canonicalizes an unordered terrain ledger", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.ledger-order");
+	std::array<Entity, 64> meshes;
+	for (Entity &mesh : meshes) {
+		mesh = MakeQuad(store);
+	}
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == meshes.size());
+
+	// A restored or inspection-tool ledger may not preserve the order this
+	// refresher publishes. It must be repaired without rebuilding geometry.
+	auto *ledger = store.ResourceMutable<engine::scene::EditableMeshCollision>();
+	REQUIRE(ledger != nullptr);
+	std::reverse(ledger->Rows.begin(), ledger->Rows.end());
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+	REQUIRE(ledger->Rows.size() == meshes.size());
+	CHECK(std::is_sorted(ledger->Rows.begin(), ledger->Rows.end(), [](const auto &left, const auto &right) {
+		return left.Instance < right.Instance;
+	}));
+}
+
 TEST_CASE("a mesh that is gone takes its shapes with it", "[scene][editablemesh]") {
 	engine::scene::RegisterSceneComponents();
 
@@ -491,6 +514,22 @@ TEST_CASE("a mesh that is gone takes its shapes with it", "[scene][editablemesh]
 	CHECK(shapes->FindHull(name) == nullptr);
 	CHECK(shapes->MeshCount() == 0);
 	CHECK(shapes->HullCount() == 0);
+}
+
+TEST_CASE("an incomplete replacement does not retain a destroyed mesh collision", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.incomplete-replacement");
+	const Entity oldMesh = MakeQuad(store);
+	const Name oldName = EditableMeshContentName(store, oldMesh);
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	REQUIRE(engine::scene::CollisionShapesOf(store)->FindMesh(oldName) != nullptr);
+
+	store.Destroy(oldMesh);
+	const Entity incomplete = MakeEditableMesh(store);
+	REQUIRE(AddVertex(store, incomplete, Vector3{}));
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	CHECK(engine::scene::CollisionShapesOf(store)->FindMesh(oldName) == nullptr);
 }
 
 TEST_CASE("a mesh with no triangles yet bakes nothing", "[scene][editablemesh]") {
