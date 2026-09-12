@@ -205,8 +205,6 @@ namespace engine::render {
 			size_t Slot = Renderer::ANY_VIEWPORT;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
-			uint64_t HistorySignature = 0;
-			bool HistoryReady = false;
 			uint32_t BytesPerPixel = 0;
 			bool Rgba = false;
 			std::vector<uint32_t> Pixels;
