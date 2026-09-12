@@ -135,6 +135,32 @@ TEST_CASE("eye body selection invalidates objects without changing the environme
 	CHECK(imported.Environment == before.Environment);
 }
 
+TEST_CASE("a row edit invalidates only the camera given that edited row", "[render][presentation][damage]") {
+	using namespace engine;
+	std::array<scene::DrawInstance, 3> firstRows{};
+	std::array<scene::DrawInstance, 3> secondRows{};
+	for (size_t index = 0; index < firstRows.size(); index++) {
+		firstRows[index].Source = index + 1;
+		secondRows[index].Source = index + 1;
+	}
+
+	render::View first;
+	first.Instances = firstRows;
+	render::View second;
+	second.Instances = secondRows;
+	const render::ScenePresentationState state;
+	const uint64_t firstBefore = render::ScenePresentationSignaturesOf(first, state).Objects;
+	const uint64_t secondBefore = render::ScenePresentationSignaturesOf(second, state).Objects;
+	REQUIRE(firstBefore != 0);
+	REQUIRE(secondBefore != 0);
+
+	// Camera views keep independent draw rows. The edit must reach the view
+	// whose frame is being signed, while an untouched camera remains reusable.
+	firstRows[1].Tint.R = 0.5f;
+	CHECK(render::ScenePresentationSignaturesOf(first, state).Objects != firstBefore);
+	CHECK(render::ScenePresentationSignaturesOf(second, state).Objects == secondBefore);
+}
+
 TEST_CASE("whole-eye images invalidate retained viewport composition", "[render][eye-presentation]") {
 	engine::render::View view;
 	view.EyeImageKey = Name("viewport-eye");
