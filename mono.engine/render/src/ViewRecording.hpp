@@ -388,7 +388,7 @@ namespace engine::render {
 		// @return Always `true`; a CPU node cannot fail the frame here.
 		bool FinishCpuNode(const graph::RunContext &context);
 
-		// Records the frame's staged uploads, once. Every node that draws
+		// Records the frame's dynamic deltas, once. Every node that draws
 		// instances, ribbons or the overlay calls it first.
 		//
 		// @return `false` when a map or copy pass failed, which
@@ -398,6 +398,9 @@ namespace engine::render {
 		uint64_t SurfacePixelsUsed = 0;
 
 		bool RecordUploads();
+
+		// Records pending mesh residency through the graph-owned command buffer.
+		bool RecordMeshResidency();
 
 		// Builds the per-draw lighting block from world lighting and the camera
 		// a pass is drawing from.
@@ -580,7 +583,7 @@ namespace engine::render {
 		//              this recording nor the graph run, and in practice both
 		//              belong to the same `Renderer::RenderView` call.
 
-		// `upload-instances`, and the CPU stages that resolve before it.
+		// `mesh-residency`, `delta-upload`, and the CPU stages that resolve before them.
 		void RegisterUploadNodes(NodeTable &nodes);
 
 		// `shadow`, which is the sun's map and the portal beam atlas beside it.

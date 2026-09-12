@@ -225,6 +225,9 @@ namespace engine::render {
 		bool BatchFirst = false;
 		bool BatchFinal = false;
 		bool BatchShared = false;
+		// All worlds share mesh buffers, so the residency node records at most
+		// one delta for one submitted frame.
+		bool MeshResidencyRecorded = false;
 		FramePreparation PreparedScopes;
 		bool BatchFailed = false;
 		size_t BatchViewIndex = 0;

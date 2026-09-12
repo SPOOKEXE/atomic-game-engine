@@ -429,7 +429,7 @@ TEST_CASE("optional default nodes can be disabled at the backend boundary", "[re
 TEST_CASE("backend queue and overlap controls describe the work each node records", "[render][graph]") {
 	engine::graph::PipelineDocument document = engine::graph::DefaultPbrDocument();
 	document = WithSetting(document, Name("cull-frustum"), Name("queue"), "cpu");
-	document = WithSetting(document, Name("upload-instances"), Name("queue"), "transfer");
+	document = WithSetting(document, Name("delta-upload"), Name("queue"), "transfer");
 	document = WithSetting(document, Name("gbuffer"), Name("queue"), "graphics");
 	document = WithSetting(document, Name("ssao"), Name("async"), "allow");
 

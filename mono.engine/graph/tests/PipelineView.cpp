@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 25);
+	REQUIRE(layout.Nodes.size() == 26);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -118,6 +118,7 @@ TEST_CASE("columns restart within each band", "[graph]") {
 
 	CHECK(columnOf("world") == 0);
 	CHECK(columnOf("shadow") == 1);
+	CHECK(columnOf("mesh-residency") == 2);
 	CHECK(columnOf("camera") == 0);
 	CHECK(columnOf("select-lod") == 6);
 	CHECK(columnOf("surface-capture") == 7);
@@ -251,7 +252,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(surfaceCapture, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 24);
+	CHECK(after.Nodes.size() == 25);
 	CHECK_FALSE(Joined(graph, after, "surface-capture", "mirror-overlay", "mirror-views"));
 }
 

@@ -84,12 +84,13 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	// **Shared at both ends, per view in the middle**, which is the shape of a
 	// real frame: world input and one shadow map every view samples, nineteen passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
-	CHECK(compiled.Shared.size() == 2);
+	CHECK(compiled.Shared.size() == 3);
 	CHECK(compiled.PerView.size() == 19);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(compiled.Shared.back())->Name == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[1])->Name == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared.back())->Name == Name("mesh-residency"));
 	CHECK(graph.Find(compiled.Final.front())->Name == Name("present"));
 	CHECK(graph.Find(compiled.Final.back())->Name == Name("output-image"));
 }
@@ -134,13 +135,14 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	// editor with every viewport closed still has panels to draw. **Both ends of
 	// the frame survive a viewless one** - which is the same contract
 	// `Renderer::Render` documents for an empty span of views.
-	REQUIRE(recorder.Ran.size() == 6);
+	REQUIRE(recorder.Ran.size() == 7);
 	CHECK(recorder.Ran[0] == "world");
 	CHECK(recorder.Ran[1] == "shadow");
-	CHECK(recorder.Ran[2] == "present");
-	CHECK(recorder.Ran[3] == "interface");
-	CHECK(recorder.Ran[4] == "overlay");
-	CHECK(recorder.Ran[5] == "output-image");
+	CHECK(recorder.Ran[2] == "mesh-residency");
+	CHECK(recorder.Ran[3] == "present");
+	CHECK(recorder.Ran[4] == "interface");
+	CHECK(recorder.Ran[5] == "overlay");
+	CHECK(recorder.Ran[6] == "output-image");
 }
 
 TEST_CASE("one view's passes are adjacent rather than interleaved", "[graph]") {

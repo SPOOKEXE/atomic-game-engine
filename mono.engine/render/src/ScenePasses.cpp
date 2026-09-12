@@ -178,7 +178,7 @@ namespace engine::render {
 		if (scheduled != nullptr &&
 			(scheduled->Queue == graph::ExecutionQueue::Graphics ||
 			 scheduled->Queue == graph::ExecutionQueue::Transfer) &&
-			node->Kind != core::Name("upload-instances")) {
+			node->Kind != core::Name("mesh-residency") && node->Kind != core::Name("delta-upload")) {
 			mainGpuWorkRecorded = true;
 		}
 		if (std::find(result.Nodes.begin(), result.Nodes.end(), name) == result.Nodes.end()) {
@@ -468,6 +468,14 @@ namespace engine::render {
 		}
 		result.UploadedBytes += uploadedBytes;
 		uploadsRecorded = true;
+		return true;
+	}
+
+	bool ViewRecording::RecordMeshResidency() {
+		if (State == nullptr || Command == nullptr) return false;
+		if (State->MeshResidencyRecorded) return true;
+		if (!State->Meshes.Record(Command)) return false;
+		State->MeshResidencyRecorded = true;
 		return true;
 	}
 

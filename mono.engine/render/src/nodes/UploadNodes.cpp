@@ -26,7 +26,12 @@ namespace engine::render {
 			});
 		}
 
-		frameNodes.Set(core::Name("upload-instances"), [this](const graph::RunContext &context) {
+		frameNodes.Set(core::Name("mesh-residency"), [this](const graph::RunContext &context) {
+			EnterNamedPass(context.Name);
+			return RecordMeshResidency();
+		});
+
+		frameNodes.Set(core::Name("delta-upload"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr

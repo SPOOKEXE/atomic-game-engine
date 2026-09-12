@@ -90,11 +90,12 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	CompiledGraph fromDocument;
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
-	REQUIRE(fromDocument.Shared.size() == 2);
+	REQUIRE(fromDocument.Shared.size() == 3);
 	REQUIRE(fromDocument.PerView.size() == 19);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
+	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("shadow"));
+	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("mesh-residency"));
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
 	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("tonemap"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
@@ -134,18 +135,19 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	REQUIRE(compiled.Shared.size() == 2);
+	REQUIRE(compiled.Shared.size() == 3);
 	REQUIRE(compiled.PerView.size() == 19);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
 	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("shadow"));
+	CHECK(graph.Find(compiled.Shared[2])->Kind == Name("mesh-residency"));
 	CHECK(graph.Find(compiled.PerView[0])->Kind == Name("camera"));
 	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("last-frame"));
 	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("entities"));
 	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("cull-frustum"));
 	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("order-draw"));
-	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("upload-instances"));
+	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("delta-upload"));
 	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("select-lod"));
 	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("surface-capture"));
 	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("gbuffer"));

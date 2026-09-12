@@ -61,7 +61,6 @@ TEST_CASE("editable mesh uploads follow store and owner lifetimes", "[render][gp
 	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
 	CHECK(uploader.Refresh(first, fixture.Render, core::Name("editable:rebound")) == 1);
 	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
-	REQUIRE(fixture.Render.FlushMeshes());
 }
 
 TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {

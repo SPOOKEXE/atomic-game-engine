@@ -836,6 +836,7 @@ namespace engine::graph {
 		resource("view-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("visible-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("ordered-entities", ResourceKind::Entities, ResourceFormat::R8);
+		resource("resident-meshes", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("view-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("lod-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("albedo", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -865,6 +866,9 @@ namespace engine::graph {
 		touches(EditKind::Reads, "world-entities", "entities");
 		touches(EditKind::Writes, "shadow", "shadow");
 
+		node("mesh-residency", NodeScope::World);
+		touches(EditKind::Writes, "resident-meshes", "meshes");
+
 		node("camera", NodeScope::View);
 		touches(EditKind::Writes, "view-camera", "camera");
 
@@ -884,7 +888,8 @@ namespace engine::graph {
 		touches(EditKind::Reads, "view-camera", "camera");
 		touches(EditKind::Writes, "ordered-entities", "entities");
 
-		node("upload-instances", NodeScope::View);
+		node("delta-upload", NodeScope::View);
+		touches(EditKind::Reads, "resident-meshes", "meshes");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Writes, "view-instances", "instances");
 
@@ -1350,6 +1355,7 @@ namespace engine::graph {
 		resource("view-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("visible-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("ordered-entities", ResourceKind::Entities, ResourceFormat::R8);
+		resource("resident-meshes", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("view-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("forward-colour", ResourceKind::Colour, ResourceFormat::RGB10A2);
 		resource("depth", ResourceKind::Depth, ResourceFormat::D24S8);
@@ -1359,6 +1365,8 @@ namespace engine::graph {
 
 		node("world", NodeScope::World);
 		touches(EditKind::Writes, "world-entities", "entities");
+		node("mesh-residency", NodeScope::World);
+		touches(EditKind::Writes, "resident-meshes", "meshes");
 		node("camera", NodeScope::View);
 		touches(EditKind::Writes, "view-camera", "camera");
 		node("entities", NodeScope::View);
@@ -1371,7 +1379,8 @@ namespace engine::graph {
 		touches(EditKind::Reads, "visible-entities", "entities");
 		touches(EditKind::Reads, "view-camera", "camera");
 		touches(EditKind::Writes, "ordered-entities", "entities");
-		node("upload-instances", NodeScope::View);
+		node("delta-upload", NodeScope::View);
+		touches(EditKind::Reads, "resident-meshes", "meshes");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Writes, "view-instances", "instances");
 		node("forward", NodeScope::View);

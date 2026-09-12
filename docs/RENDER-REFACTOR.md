@@ -877,6 +877,36 @@ Keep resource bindings and hidden metadata losslessly through load/save; final
 save validation runs Build/CompileSchedule and interface checks. Engine executes
 the compiled graph, never the canvas evaluator.
 
+### visual-compositor contract
+
+The compositor is a typed resource graph with separate authoring and execution
+representations. Unity's Scriptable Render Pipeline separation of pipeline
+configuration from execution, and its Visual Compositor families, are the
+references for this boundary. This engine keeps its own stable names, scopes,
+ordered resource versions, and device-neutral graph runtime.
+
+Every compositor node declares its stable kind, scope, queue, typed input and
+output ports, required capability set, fallback, and lifetime or history policy.
+A wire binds one declared graph resource from an output port to an input port.
+The compiler rejects incompatible resource kinds, duplicate writers, reads with
+no preceding writer, and scopes that would consume a resource before its
+producer runs. Canvas position, groups, comments, mute state, and preview
+selection remain authoring metadata and cannot change runtime work.
+
+Preparation nodes make residency and compact deltas visible dependencies.
+`mesh-residency` runs before a view consumes resident ranges, and
+`delta-upload` consumes those ranges plus the selected entities before it
+publishes instance data. Both record on the frame command buffer. No caller may
+submit a mesh-residency transfer beside the graph, because that creates an
+untracked ordering path and lets a draw race a newly resolved range.
+
+Compositor nodes manipulate images, buffers, and selections. Material nodes
+lower to bounded shader source and use the existing shader cook path. A node
+kind ships only with its schema, backend or explicit fallback, capability
+requirements, lifetime policy, help, and a fixture that exercises its declared
+ports. The catalogue and default documents are the executable part of this
+contract; the canvas discovers from them rather than maintaining a second list.
+
 Unity separates pipeline configuration assets from execution and exposes visual
 compositor image, value, selection and organization nodes. Use that separation
 and discoverable palette as references, while retaining this engine's scopes and

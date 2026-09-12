@@ -23,6 +23,7 @@
 #include <vector>
 
 struct SDL_GPUBuffer;
+struct SDL_GPUCommandBuffer;
 struct SDL_GPUDevice;
 
 namespace engine::render {
@@ -181,6 +182,14 @@ namespace engine::render {
 		//         geometry rather than with none.
 		bool Flush();
 
+		// Records this frame's pending mesh-residency delta into the command buffer
+		// owned by the render graph. A quiet node still advances the deferred-run
+		// clock, because retirement is measured in rendered frames.
+		//
+		// @param command The frame command buffer that consumes the resident rows.
+		// @return `false` when a device allocation or transfer operation failed.
+		bool Record(SDL_GPUCommandBuffer *command);
+
 		// How many device uploads have happened.
 		//
 		// The number `Flush` exists to keep down, and therefore the number worth
@@ -260,7 +269,7 @@ namespace engine::render {
 		//@}
 
 	  private:
-		bool Upload();
+		bool Upload(SDL_GPUCommandBuffer *command);
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUBuffer *VertexBuffer = nullptr;

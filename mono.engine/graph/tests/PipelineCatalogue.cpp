@@ -157,12 +157,31 @@ TEST_CASE("every output can land somewhere", "[graph][catalogue]") {
 
 TEST_CASE("the default PBR frame's kinds and material ports are registered", "[graph][catalogue]") {
 	Kinds();
-	for (const char *name : {"world",		  "shadow",			 "camera",		   "last-frame",
-							 "entities",	  "cull-frustum",	 "order-draw",	   "upload-instances",
-							 "select-lod",	  "mirror-capture",	 "portal-capture", "portal-tonemap",
-							 "gbuffer",		  "depth-linearise", "ssao",		   "deferred-lighting",
-							 "shader-lenses", "tonemap",		 "portal-overlay", "mirror-overlay",
-							 "transparent",	  "present",		 "overlay",		   "interface",
+	for (const char *name : {"world",
+							 "shadow",
+							 "camera",
+							 "last-frame",
+							 "entities",
+							 "cull-frustum",
+							 "order-draw",
+							 "mesh-residency",
+							 "delta-upload",
+							 "select-lod",
+							 "mirror-capture",
+							 "portal-capture",
+							 "portal-tonemap",
+							 "gbuffer",
+							 "depth-linearise",
+							 "ssao",
+							 "deferred-lighting",
+							 "shader-lenses",
+							 "tonemap",
+							 "portal-overlay",
+							 "mirror-overlay",
+							 "transparent",
+							 "present",
+							 "overlay",
+							 "interface",
 							 "output-image"}) {
 		INFO("kind: " << name);
 		CHECK(NodeCatalogue::Find(Name(name)) != nullptr);
@@ -204,7 +223,8 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("entities", 0, 1);
 	ports("cull-frustum", 2, 1);
 	ports("order-draw", 2, 1);
-	ports("upload-instances", 1, 1);
+	ports("mesh-residency", 0, 1);
+	ports("delta-upload", 2, 1);
 	ports("select-lod", 2, 1);
 	ports("mirror-capture", 5, 1);
 	ports("surface-capture", 4, 3);

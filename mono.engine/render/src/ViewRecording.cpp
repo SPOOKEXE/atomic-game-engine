@@ -1791,7 +1791,7 @@ namespace engine::render {
 	//
 	// **A private phase of `Begin` rather than a node**, because nothing here
 	// touches the device queue: the copy pass it stages for is submitted by
-	// `RecordUploads`, which is what the `upload-instances` node calls.
+	// `RecordUploads`, which is what the `delta-upload` node calls.
 	void ViewRecording::PackInstances() {
 		Impl *const State = this->State;
 		const core::CFrame &cameraFrame = Request.CameraFrame;

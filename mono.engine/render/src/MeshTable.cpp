@@ -313,15 +313,29 @@ namespace engine::render {
 		// counter that only moved when something was sent would leave a table
 		// nobody is writing to unable to ever reuse anything.
 		Generation++;
-
-		if (!Dirty) {
-			return true;
+		if (!Dirty) return true;
+		if (Device == nullptr) return false;
+		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
+		if (command == nullptr) {
+			ENGINE_ERROR("mesh table: acquire command buffer: {}", SDL_GetError());
+			return false;
 		}
-		return Upload();
+		if (!Upload(command)) {
+			SDL_CancelGPUCommandBuffer(command);
+			return false;
+		}
+		SDL_SubmitGPUCommandBuffer(command);
+		return true;
 	}
 
-	bool MeshTable::Upload() {
-		if (Device == nullptr || HostVertices.empty() || HostIndices.empty()) {
+	bool MeshTable::Record(SDL_GPUCommandBuffer *command) {
+		Generation++;
+		if (!Dirty) return true;
+		return Upload(command);
+	}
+
+	bool MeshTable::Upload(SDL_GPUCommandBuffer *command) {
+		if (Device == nullptr || command == nullptr || HostVertices.empty() || HostIndices.empty()) {
 			return false;
 		}
 
@@ -428,8 +442,12 @@ namespace engine::render {
 		}
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
-		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) {
+			ENGINE_ERROR("mesh table: begin copy pass: {}", SDL_GetError());
+			gpu::ReleaseTransferBuffer(Device, transfer);
+			return false;
+		}
 
 		// **Never cycled, which is the price of writing part of the buffer.**
 		// Cycling hands back a fresh allocation whose contents are undefined, so
@@ -469,7 +487,6 @@ namespace engine::render {
 		}
 
 		SDL_EndGPUCopyPass(copy);
-		SDL_SubmitGPUCommandBuffer(command);
 		gpu::ReleaseTransferBuffer(Device, transfer);
 
 		DirtyVertices.clear();

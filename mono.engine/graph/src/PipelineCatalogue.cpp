@@ -182,7 +182,13 @@ namespace engine::graph {
 		ExecutionQueue QueueFor(const NodeKindSpec &spec) {
 			if (Named(
 					spec.Kind,
-					{"viewer", "capture", "shadow-capture", "upload-instances", "output-image", "blit"}
+					{"viewer",
+					 "capture",
+					 "shadow-capture",
+					 "mesh-residency",
+					 "delta-upload",
+					 "output-image",
+					 "blit"}
 				)) {
 				return ExecutionQueue::Transfer;
 			}
@@ -315,7 +321,8 @@ namespace engine::graph {
 				 "cull-distance",
 				 "filter-tag",
 				 "order-draw",
-				 "upload-instances",
+				 "mesh-residency",
+				 "delta-upload",
 				 "select-lod",
 				 "last-frame",
 				 "mirror-capture",
@@ -1409,13 +1416,25 @@ namespace engine::graph {
 			 "Sorts a list the way a colour pass needs it. A depth-only pass does "
 			 "not need this and should not pay for it."},
 
-			{"upload-instances",
-			 "Upload instances",
+			{"mesh-residency",
+			 "Mesh residency",
+			 C::Draw,
+			 S::World,
+			 {},
+			 {{"meshes", K::Buffer, F::R8, true, "The resident mesh vertex and index ranges."}},
+			 "Admits pending mesh ranges and records their delta into this frame's command buffer. "
+			 "The graph owns the transfer, so a draw cannot observe a newly-resolved range before its bytes.",
+			 true},
+
+			{"delta-upload",
+			 "Upload draw deltas",
 			 C::Draw,
 			 S::View,
-			 {{"entities", K::Entities, F::R8, true, "What to put in the buffer."}},
+			 {{"meshes", K::Buffer, F::R8, true, "Resident mesh ranges required by the draw list."},
+			  {"entities", K::Entities, F::R8, true, "What to put in the buffer."}},
 			 {{"instances", K::Buffer, F::R8, true, "The per-instance attributes, on the GPU."}},
-			 "Puts a list's instances where the GPU can read them. **The join "
+			 "Puts a list's changed instance, skin, indirect, ribbon, and overlay rows where the GPU can "
+			 "read them. **The join "
 			 "between what a pipeline decided and what it draws** - a filter "
 			 "upstream of one of these changes the frame; a filter with none "
 			 "downstream changes a list nobody reads."},

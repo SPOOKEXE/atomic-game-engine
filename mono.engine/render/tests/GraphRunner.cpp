@@ -73,12 +73,13 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 		ran == std::vector<std::string>{
 				   "world",
 				   "shadow",
+				   "mesh-residency",
 				   "camera@0",
 				   "last-frame@0",
 				   "entities@0",
 				   "cull-frustum@0",
 				   "order-draw@0",
-				   "upload-instances@0",
+				   "delta-upload@0",
 				   "select-lod@0",
 				   "surface-capture@0",
 				   "gbuffer@0",
@@ -98,7 +99,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 25);
+	CHECK(runner.Submitted() == 26);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -245,7 +246,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	GraphRunner full(table, engine::render::ProfilingTier::Full, std::move(profile));
 	const uint64_t worlds[] = {7};
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
-	CHECK(opened == 24);
+	CHECK(opened == 25);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

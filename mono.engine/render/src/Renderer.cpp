@@ -1170,9 +1170,6 @@ namespace engine::render {
 		// loading in. The entry is registered immediately either way, so
 		// `MeshExtentOf` and the parts waiting to be sized by it are unaffected.
 		//
-		// A caller that needs the geometry resident before the next `Render` -
-		// a readback, a preview taken outside the frame loop - calls
-		// `FlushMeshes` itself.
 		if (!State->Meshes.Add(name, mesh, owner)) return false;
 		++State->ResourceEpoch;
 		return true;
@@ -1215,13 +1212,6 @@ namespace engine::render {
 		if (shaders || textures != 0 || meshes != 0 || awaited != State->Textures.Awaited()) {
 			++State->ResourceEpoch;
 		}
-	}
-
-	bool Renderer::FlushMeshes() {
-		if (State == nullptr || State->Device == nullptr) {
-			return false;
-		}
-		return State->Meshes.Flush();
 	}
 
 	bool Renderer::AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner) {
@@ -2392,11 +2382,6 @@ namespace engine::render {
 		}
 		State->PollSceneFrames();
 
-		// **Every mesh admitted since the last frame, in one transfer.** `AddMesh`
-		// only accumulates, so this is the barrier the content pump used to pay
-		// once per arriving mesh. Free when nothing arrived.
-		State->Meshes.Flush();
-
 		std::vector<FrameViewIdentity> identities;
 		identities.reserve(views.size());
 		for (const View &view : views) {
@@ -2448,6 +2433,7 @@ namespace engine::render {
 
 		const scene::WorldLighting previousLighting = CurrentLighting();
 		State->BatchActive = true;
+		State->MeshResidencyRecorded = false;
 		State->PreparedScopes.Clear();
 		State->BatchFailed = false;
 		State->BatchCommand = command;

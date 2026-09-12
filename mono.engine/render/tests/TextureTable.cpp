@@ -38,7 +38,6 @@ TEST_CASE("renderer content retirement preserves other owners", "[render][textur
 		CHECK_FALSE(renderer.ExpectingTexture(asset, owner));
 		REQUIRE(renderer.AddMesh(asset, mesh, owner));
 	}
-	REQUIRE(renderer.FlushMeshes());
 	const auto shared = renderer.TextureHandle(asset);
 	const auto remaining = renderer.TextureHandle(asset, second);
 	CHECK(shared != remaining);
