@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
+#include <limits>
 #include <nodegraph/Registry.hpp>
 #include <nodegraph/Types.hpp>
 #include <studio/RenderPipelineGraph.hpp>
@@ -110,26 +112,21 @@ namespace studio {
 			return found == node.Widgets.end() || found->second.Text.empty() ? fallback : found->second.Text;
 		}
 
-		void PutNumber(nodegraph::Node &node, const char *key, uint32_t value) {
+		void PutNumber(nodegraph::Node &node, const char *key, double value) {
 			nodegraph::Value held;
 			held.Kind = nodegraph::WidgetKind::Number;
-			held.Number = static_cast<double>(value);
+			held.Number = value;
 			node.Widgets[key] = held;
-		}
-
-		std::string NumberText(const nodegraph::Node &node, const char *key, uint32_t minimum = 1) {
-			const auto found = node.Widgets.find(key);
-			const uint32_t value =
-				found == node.Widgets.end()
-					? minimum
-					: static_cast<uint32_t>(std::max(found->second.Number, static_cast<double>(minimum)));
-			return std::to_string(value);
 		}
 
 		uint32_t NumberOf(const nodegraph::Node &node, const std::string &key, uint32_t fallback) {
 			const auto found = node.Widgets.find(key);
-			return found == node.Widgets.end() ? fallback
-											   : static_cast<uint32_t>(std::max(found->second.Number, 1.0));
+			if (found == node.Widgets.end() || !std::isfinite(found->second.Number)) {
+				return fallback;
+			}
+			return static_cast<uint32_t>(std::clamp(
+				found->second.Number, 1.0, static_cast<double>(std::numeric_limits<uint32_t>::max())
+			));
 		}
 
 		std::string ResourceKey(std::string_view setting, std::string_view port) {
@@ -233,10 +230,35 @@ namespace studio {
 			return nullptr;
 		}
 
-		uint32_t UnsignedParameter(std::string_view text, uint32_t fallback) {
-			uint32_t value = fallback;
+		double ParsedNumber(std::string_view text, double fallback) {
+			double value = fallback;
 			const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-			return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? value : fallback;
+			return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() && std::isfinite(value)
+					   ? value
+					   : fallback;
+		}
+
+		double ParameterNumber(const ParameterSpec &parameter, std::string_view text) {
+			double value = ParsedNumber(text, ParsedNumber(parameter.Default, 0.0));
+			if (parameter.HasRange) {
+				value = std::clamp(value, parameter.Minimum, parameter.Maximum);
+			}
+			return value;
+		}
+
+		std::string
+		ParameterNumberText(const nodegraph::Node &node, const char *key, const ParameterSpec &parameter) {
+			const auto found = node.Widgets.find(key);
+			const double fallback = ParameterNumber(parameter, parameter.Default);
+			double value = found == node.Widgets.end() || !std::isfinite(found->second.Number)
+							   ? fallback
+							   : found->second.Number;
+			if (parameter.HasRange) {
+				value = std::clamp(value, parameter.Minimum, parameter.Maximum);
+			}
+			std::array<char, 64> written{};
+			const auto encoded = std::to_chars(written.data(), written.data() + written.size(), value);
+			return encoded.ec == std::errc{} ? std::string(written.data(), encoded.ptr) : parameter.Default;
 		}
 
 		Name UniqueNodeName(const nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
@@ -326,10 +348,15 @@ namespace studio {
 					break;
 				case ParameterWidget::Number:
 					type.Widgets.push_back(
-						nodegraph::Number(
-							key, parameter.Label, static_cast<double>(UnsignedParameter(parameter.Default, 0))
-						)
+						nodegraph::Number(key, parameter.Label, ParameterNumber(parameter, parameter.Default))
 					);
+					if (parameter.HasRange) {
+						nodegraph::WidgetSpec &number = type.Widgets.back();
+						number.Minimum = parameter.Minimum;
+						number.Maximum = parameter.Maximum;
+						number.Step = parameter.Maximum - parameter.Minimum <= 10.0 ? 0.01 : 0.1;
+						number.Precision = 3;
+					}
 					break;
 				case ParameterWidget::Toggle:
 					type.Widgets.push_back(
@@ -430,11 +457,7 @@ namespace studio {
 						PutText(node, key, parameter.Value);
 						break;
 					case ParameterWidget::Number:
-						PutNumber(
-							node,
-							key.c_str(),
-							UnsignedParameter(parameter.Value, UnsignedParameter(declared->Default, 0))
-						);
+						PutNumber(node, key.c_str(), ParameterNumber(*declared, parameter.Value));
 						break;
 					case ParameterWidget::Toggle:
 						PutToggle(node, key.c_str(), parameter.Value == "true");
@@ -737,13 +760,7 @@ namespace studio {
 					set.Value = TextOf(node, key);
 					break;
 				case ParameterWidget::Number:
-					set.Value = NumberText(
-						node,
-						key.c_str(),
-						parameter.HasRange && parameter.Minimum > 0.0
-							? static_cast<uint32_t>(parameter.Minimum)
-							: 0
-					);
+					set.Value = ParameterNumberText(node, key.c_str(), parameter);
 					break;
 				case ParameterWidget::Toggle:
 					set.Value = ToggleOf(node, key.c_str(), parameter.Default == "true") ? "true" : "false";

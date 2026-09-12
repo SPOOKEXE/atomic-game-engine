@@ -111,6 +111,60 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	}
 }
 
+TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][pipeline][compositor]") {
+	studio::RegisterRenderPipelineNodeTypes();
+	const PipelineDocument basis = engine::graph::CompositorDemoDocument();
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+
+	const auto byLabel = [](nodegraph::Graph &graph, std::string_view label) -> nodegraph::Node * {
+		const auto found = std::find_if(graph.Nodes().begin(), graph.Nodes().end(), [&](const auto &node) {
+			return node.Label == label;
+		});
+		return found == graph.Nodes().end() ? nullptr : &*found;
+	};
+	nodegraph::Node *exposure = byLabel(canvas, "grade-exposure");
+	nodegraph::Node *hsv = byLabel(canvas, "grade-hsv");
+	nodegraph::Node *transform = byLabel(canvas, "frame-transform");
+	nodegraph::Node *blur = byLabel(canvas, "blur-x");
+	REQUIRE(exposure != nullptr);
+	REQUIRE(hsv != nullptr);
+	REQUIRE(transform != nullptr);
+	REQUIRE(blur != nullptr);
+	exposure->Widgets["exposure"].Number = -2.5;
+	exposure->Widgets["contrast"].Number = 1.125;
+	exposure->Widgets["gamma"].Number = 100.0;
+	hsv->Widgets["hue"].Number = -45.25;
+	transform->Widgets["translate-x"].Number = -0.125;
+	transform->Widgets["rotation"].Number = -30.5;
+	blur->Widgets["radius"].Number = 100.0;
+
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	PipelineDocument reloadedDocument;
+	engine::core::Name offender;
+	REQUIRE(Read(Write(saved), reloadedDocument, offender) == PipelineDocumentStatus::Ok);
+
+	nodegraph::Graph reloaded;
+	REQUIRE(studio::LoadRenderPipelineGraph(reloadedDocument, reloaded, error));
+	exposure = byLabel(reloaded, "grade-exposure");
+	hsv = byLabel(reloaded, "grade-hsv");
+	transform = byLabel(reloaded, "frame-transform");
+	blur = byLabel(reloaded, "blur-x");
+	REQUIRE(exposure != nullptr);
+	REQUIRE(hsv != nullptr);
+	REQUIRE(transform != nullptr);
+	REQUIRE(blur != nullptr);
+	CHECK(exposure->Widgets.at("exposure").Number == -2.5);
+	CHECK(exposure->Widgets.at("contrast").Number == 1.125);
+	CHECK(exposure->Widgets.at("gamma").Number == 8.0);
+	CHECK(hsv->Widgets.at("hue").Number == -45.25);
+	CHECK(transform->Widgets.at("translate-x").Number == -0.125);
+	CHECK(transform->Widgets.at("rotation").Number == -30.5);
+	CHECK(blur->Widgets.at("radius").Number == 32.0);
+}
+
 TEST_CASE(
 	"an authored mirror capture keeps its feedback policy through a canvas round trip",
 	"[studio][pipeline][mirror]"
