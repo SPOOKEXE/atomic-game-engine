@@ -1,6 +1,7 @@
 #include <engine/core/Bytes.hpp>
 
 #include <cstring>
+#include <stdexcept>
 
 namespace engine::core {
 
@@ -30,7 +31,8 @@ namespace engine::core {
 
 	// --- ByteWriter --------------------------------------------------------
 
-	ByteWriter::ByteWriter(size_t reserveBytes) {
+	ByteWriter::ByteWriter(size_t reserveBytes, size_t maximumBytes) : Maximum(maximumBytes) {
+		if (reserveBytes > Maximum) throw std::length_error("byte writer reserve exceeds limit");
 		if (reserveBytes > 0) {
 			Buffer.reserve(reserveBytes);
 		}
@@ -42,22 +44,31 @@ namespace engine::core {
 	}
 
 	void ByteWriter::Reserve(size_t bytes) {
+		if (bytes > Maximum) throw std::length_error("byte writer reserve exceeds limit");
 		Buffer.reserve(bytes);
 	}
 
+	void ByteWriter::Ensure(size_t bytes) const {
+		if (bytes > Maximum - Buffer.size()) throw std::length_error("byte writer limit exceeded");
+	}
+
 	void ByteWriter::WriteUInt8(uint8_t value) {
+		Ensure(1);
 		Buffer.push_back(static_cast<std::byte>(value));
 	}
 
 	void ByteWriter::WriteUInt16(uint16_t value) {
+		Ensure(2);
 		AppendLittleEndian<uint32_t>(Buffer, value, 2);
 	}
 
 	void ByteWriter::WriteUInt32(uint32_t value) {
+		Ensure(4);
 		AppendLittleEndian<uint32_t>(Buffer, value, 4);
 	}
 
 	void ByteWriter::WriteUInt64(uint64_t value) {
+		Ensure(8);
 		AppendLittleEndian<uint64_t>(Buffer, value, 8);
 	}
 
@@ -101,7 +112,7 @@ namespace engine::core {
 		// failure than a lost tail, because it turns up as corruption at the
 		// far end rather than as a wrong value here.
 		const size_t length = text.size() > MAXIMUM_LENGTH ? MAXIMUM_LENGTH : text.size();
-
+		Ensure(4 + length);
 		WriteUInt32(static_cast<uint32_t>(length));
 		WriteRaw(text.data(), length);
 	}
@@ -116,6 +127,7 @@ namespace engine::core {
 		if (bytes == 0) {
 			return;
 		}
+		Ensure(bytes);
 
 		const auto *source = static_cast<const std::byte *>(data);
 		Buffer.insert(Buffer.end(), source, source + bytes);

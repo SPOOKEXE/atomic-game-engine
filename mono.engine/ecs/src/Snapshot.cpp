@@ -39,7 +39,10 @@ namespace engine::ecs {
 		// Built into a scratch buffer first, because the component table has to
 		// be written before the things that refer to it and is only complete
 		// once they have been walked.
-		core::ByteWriter body;
+		// The component table needs a second pass, but it must share the outer
+		// checkpoint budget so a hostile world cannot allocate an unbounded body
+		// before the outer writer gets a chance to refuse it.
+		core::ByteWriter body(0, writer.Remaining());
 
 		body.WriteUInt32(static_cast<uint32_t>(state.Tables.size()));
 		for (const Archetype &table : state.Tables) {

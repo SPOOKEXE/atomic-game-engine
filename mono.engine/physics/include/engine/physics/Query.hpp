@@ -198,6 +198,16 @@ namespace engine::physics {
 		const ecs::Store &store, const core::AABB &box, spatial::LayerMask mask, std::span<ecs::Entity> found
 	);
 
+	// Finds colliders whose exact shape overlaps an oriented box. The broad phase
+	// uses its conservative world bound; the final admission is narrow phase.
+	spatial::QueryResult OverlapOrientedBox(
+		const ecs::Store &store,
+		const core::CFrame &frame,
+		const core::Vector3 &halfExtent,
+		spatial::LayerMask mask,
+		std::span<ecs::Entity> found
+	);
+
 	// Finds every collider whose exact shape overlaps a sphere.
 	//
 	// Against the shape and not its bound, which is the difference from

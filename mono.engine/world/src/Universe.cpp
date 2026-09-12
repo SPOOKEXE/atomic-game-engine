@@ -708,6 +708,40 @@ namespace engine::world {
 		return true;
 	}
 
+	void Universe::ReplaceWith(Universe &candidate) {
+		RequireDriverThread("ReplaceWith");
+		candidate.RequireDriverThread("ReplaceWith");
+		if (Ticking || candidate.Ticking) {
+			std::abort();
+		}
+
+		// The candidate was loaded and rehydrated before this point. Swapping the
+		// owned state is the commit: the old universe remains intact until every
+		// parser and rehydration check has accepted the checkpoint.
+		using std::swap;
+		swap(PresentationMessages, candidate.PresentationMessages);
+		swap(Settings_, candidate.Settings_);
+		swap(Stats, candidate.Stats);
+		swap(Registry, candidate.Registry);
+		swap(Hosts, candidate.Hosts);
+		swap(LaneByWorld, candidate.LaneByWorld);
+		swap(LaneCount, candidate.LaneCount);
+		swap(Pending, candidate.Pending);
+		swap(Router, candidate.Router);
+
+		// These are per-frame scratch spans into the old registry. No paused
+		// checkpoint has a running batch, so clearing them preserves the next
+		// driver's ordinary scheduling path without retaining stale pointers.
+		ActiveList.clear();
+		OwedList.clear();
+		ActiveLanes.clear();
+		DispatchLanes.clear();
+		PresentationList.clear();
+		PresentationRequests.clear();
+		PresentationLanes.clear();
+		PresentationQueued.clear();
+	}
+
 	void Universe::Tick(float frameSeconds) {
 		RequireDriverThread("Tick");
 		ENGINE_PROFILE_CAT("Universe::Tick", engine::core::ProfileCategory::Simulation);
@@ -932,6 +966,49 @@ namespace engine::world {
 
 		Stats.LastTickMilliseconds =
 			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
+	}
+
+	WorldStatus Universe::StepPaused(WorldId id) {
+		RequireDriverThread("StepPaused");
+		if (Ticking) {
+			return WorldStatus::WrongThread;
+		}
+		World *world = Reach(id);
+		if (world == nullptr) return WorldStatus::NoSuchWorld;
+		if (world->State() != WorldState::Suspended) return WorldStatus::WrongThread;
+
+		// A paused step is still a universe boundary. Routing here keeps mailbox
+		// delivery exactly once, including driver-staged arrivals, and lets a
+		// world post traffic for the next manual boundary just as it does in Tick.
+		// Validate before this work so an invalid request cannot consume controls
+		// or move another world's mail. Controls can destroy or resume the target,
+		// so resolve it again before dereferencing it.
+		DrainControls();
+		world = Reach(id);
+		if (world == nullptr) return WorldStatus::NoSuchWorld;
+		if (world->State() != WorldState::Suspended) return WorldStatus::WrongThread;
+
+		const BarrierCounts barrier = Router->Route(WorldDirectory{Registry, Hosts}, Settings_);
+		Stats.BusOperations = barrier.BusOperations;
+		Stats.Deliveries = barrier.Deliveries;
+
+		Ticking = true;
+		world->TickPaused();
+		Ticking = false;
+
+		Stats.ActiveWorlds = 1;
+		Stats.Suspended = 0;
+		Stats.Faulted = 0;
+		Stats.Remote = 0;
+		Stats.SimulationTicks = 0;
+		for (const auto &candidate : Registry) {
+			if (candidate == nullptr) continue;
+			if (candidate->State() == WorldState::Suspended) Stats.Suspended++;
+			if (candidate->State() == WorldState::Faulted) Stats.Faulted++;
+			if (candidate->State() == WorldState::Remote) Stats.Remote++;
+			Stats.SimulationTicks += candidate->Statistics().Ticks;
+		}
+		return world->State() == WorldState::Faulted ? WorldStatus::Faulted : WorldStatus::Ok;
 	}
 
 	WorldStatus Universe::Present(WorldId id, float frameSeconds, float alpha) {

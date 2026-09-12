@@ -29,6 +29,7 @@ TEST_DEPENDS("engine.physics.integrate")
 TEST_DEPENDS("engine.ecs.scheduler")
 
 using Catch::Approx;
+using engine::core::ByteReader;
 using engine::core::ByteWriter;
 using engine::core::CFrame;
 using engine::core::Name;
@@ -39,12 +40,14 @@ using engine::ecs::Store;
 using engine::physics::BeginPhysicsStep;
 using engine::physics::BeginPhysicsTick;
 using engine::physics::FirstPhysicsStepOfTick;
+using engine::physics::IsPhysicsPaused;
 using engine::physics::PhysicsClock;
 using engine::physics::PhysicsClockOf;
 using engine::physics::PhysicsStepSeconds;
 using engine::physics::PhysicsTickRate;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::RegisterPhysicsSystems;
+using engine::physics::SetPhysicsPaused;
 using engine::physics::SetPhysicsTickRate;
 using engine::scene::Motion;
 using engine::scene::Transform;
@@ -77,6 +80,63 @@ namespace {
 			steps++;
 		}
 		return steps;
+	}
+
+	const engine::ecs::TypeDescriptor &ClockDescriptor() {
+		engine::physics::RegisterPhysicsComponents();
+		const auto id = engine::ecs::Components::Find(Name("physics.PhysicsClock"));
+		return engine::ecs::Components::Describe(id);
+	}
+
+	ByteWriter ClockBytes(
+		uint8_t version,
+		double accumulator = 0.0,
+		float delta = 0.0f,
+		int32_t owed = 0,
+		int32_t stepInTick = 0
+	) {
+		ByteWriter writer;
+		writer.WriteUInt8(version);
+		writer.WriteDouble(60.0);
+		writer.WriteBool(false);
+		writer.WriteDouble(accumulator);
+		writer.WriteFloat(delta);
+		writer.WriteInt32(owed);
+		writer.WriteInt32(stepInTick);
+		writer.WriteBool(false);
+		writer.WriteUInt64(12);
+		writer.WriteUInt64(3);
+		return writer;
+	}
+
+	void CheckClockRejected(ByteWriter writer) {
+		const engine::ecs::TypeDescriptor &descriptor = ClockDescriptor();
+		REQUIRE(descriptor.Read != nullptr);
+
+		PhysicsClock restored;
+		restored.Rate = 7.0;
+		restored.Paused = true;
+		restored.Accumulator = 0.25;
+		restored.Delta = 0.5f;
+		restored.Owed = 2;
+		restored.StepInTick = 3;
+		restored.Stepping = true;
+		restored.Steps = 4;
+		restored.DroppedSteps = 5;
+
+		ByteReader reader(writer.Bytes());
+		descriptor.Read(reader, &restored, 1);
+
+		CHECK(reader.Failed());
+		CHECK(restored.Rate == 7.0);
+		CHECK(restored.Paused);
+		CHECK(restored.Accumulator == 0.25);
+		CHECK(restored.Delta == 0.5f);
+		CHECK(restored.Owed == 2);
+		CHECK(restored.StepInTick == 3);
+		CHECK(restored.Stepping);
+		CHECK(restored.Steps == 4);
+		CHECK(restored.DroppedSteps == 5);
 	}
 }
 
@@ -211,7 +271,7 @@ TEST_CASE("a stall is given up on rather than caught up", "[physics][clock]") {
 	CHECK(StepsInOneTick(store, TICK) == PhysicsClock::MAXIMUM_STEPS_PER_TICK);
 
 	const PhysicsClock *clock = PhysicsClockOf(store);
-	CHECK(clock->DroppedSteps > 0);
+	CHECK(clock->DroppedSteps == 8);
 
 	// And the accumulator was emptied with it, so the next tick starts level
 	// instead of arriving already over the cap.
@@ -273,6 +333,58 @@ TEST_CASE("an unbounded rate is held at the ceiling", "[physics][clock]") {
 	CHECK(PhysicsClockOf(store)->DroppedSteps > 0);
 }
 
+TEST_CASE("a clock serializer rejects malformed execution state", "[physics][clock]") {
+	SECTION("an unknown version") {
+		CheckClockRejected(ClockBytes(2));
+	}
+	SECTION("an accumulator that is not finite") {
+		CheckClockRejected(ClockBytes(1, std::numeric_limits<double>::quiet_NaN()));
+		CheckClockRejected(ClockBytes(1, std::numeric_limits<double>::infinity()));
+	}
+	SECTION("a negative accumulator") {
+		CheckClockRejected(ClockBytes(1, -0.25));
+	}
+	SECTION("a delta that is not finite") {
+		CheckClockRejected(ClockBytes(1, 0.0, std::numeric_limits<float>::quiet_NaN()));
+	}
+	SECTION("owed steps outside the per-tick cap") {
+		CheckClockRejected(ClockBytes(1, 0.0, 0.0f, -1));
+		CheckClockRejected(ClockBytes(1, 0.0, 0.0f, PhysicsClock::MAXIMUM_STEPS_PER_TICK + 1));
+	}
+	SECTION("the running step outside the per-tick cap") {
+		CheckClockRejected(ClockBytes(1, 0.0, 0.0f, 0, -1));
+		CheckClockRejected(ClockBytes(1, 0.0, 0.0f, 0, PhysicsClock::MAXIMUM_STEPS_PER_TICK + 1));
+	}
+}
+
+TEST_CASE("a finite huge accumulator is capped before its owed count is narrowed", "[physics][clock]") {
+	Store store("clock.huge-accumulator");
+	PreparePhysicsWorld(store);
+	PhysicsClock authoredClock;
+	authoredClock.Rate = 1.0;
+	authoredClock.Accumulator = std::numeric_limits<double>::max();
+	store.SetResource(authoredClock);
+
+	CHECK(StepsInOneTick(store, 0.0f) == PhysicsClock::MAXIMUM_STEPS_PER_TICK);
+	const PhysicsClock *clock = PhysicsClockOf(store);
+	CHECK(clock->Accumulator == 0.0);
+	CHECK(clock->DroppedSteps == std::numeric_limits<uint64_t>::max() - PhysicsClock::MAXIMUM_STEPS_PER_TICK);
+}
+
+TEST_CASE("capping owed steps retains a fractional interval", "[physics][clock]") {
+	Store store("clock.fractional-remainder");
+	PreparePhysicsWorld(store);
+	PhysicsClock authoredClock;
+	authoredClock.Rate = 60.0;
+	authoredClock.Accumulator = 8.5 / authoredClock.Rate;
+	store.SetResource(authoredClock);
+
+	CHECK(StepsInOneTick(store, 0.0f) == PhysicsClock::MAXIMUM_STEPS_PER_TICK);
+	const PhysicsClock *clock = PhysicsClockOf(store);
+	CHECK(clock->DroppedSteps == 0);
+	CHECK(clock->Accumulator == Approx(0.5 / clock->Rate));
+}
+
 TEST_CASE("the pipeline steps a slow world half as often", "[physics][clock]") {
 	// The same reading through the registered systems, which is where the two
 	// phases have to agree about whether a step ran at all.
@@ -314,13 +426,15 @@ TEST_CASE("the pipeline steps a fast world twice a tick", "[physics][clock]") {
 	CHECK(PhysicsClockOf(store)->Steps == 120);
 }
 
-TEST_CASE("the rate survives a snapshot and the counters do not", "[physics][clock]") {
+TEST_CASE("a snapshot preserves paused physics clock execution state", "[physics][clock]") {
 	Store store("clock.snapshot");
 	PreparePhysicsWorld(store);
 	SetPhysicsTickRate(store, 90.0);
 
 	StepsInOneTick(store, TICK);
 	REQUIRE(PhysicsClockOf(store)->Steps > 0);
+	SetPhysicsPaused(store, true);
+	REQUIRE(IsPhysicsPaused(store));
 
 	ByteWriter writer;
 	REQUIRE(store.Save(writer));
@@ -329,18 +443,51 @@ TEST_CASE("the rate survives a snapshot and the counters do not", "[physics][clo
 	engine::core::ByteReader reader(writer.Bytes());
 	REQUIRE(restored.Load(reader));
 
-	// The rate is what an author chose, so it crosses. Everything else is a
-	// function of the rate and of the ticks that have run since, and a restored
-	// world has run none - so it owes no steps for the time the file spent on
-	// disk.
+	// A checkpoint must preserve the explicit pause and the clock phase. A fresh
+	// clock would lose both the pause state and the recorded execution counters.
 	CHECK(PhysicsTickRate(restored) == Approx(90.0));
 
 	const PhysicsClock *clock = PhysicsClockOf(restored);
 	REQUIRE(clock != nullptr);
-	CHECK(clock->Steps == 0);
+	CHECK(clock->Steps == PhysicsClockOf(store)->Steps);
 	CHECK(clock->Owed == 0);
-	CHECK(clock->Accumulator == Approx(0.0));
+	CHECK(clock->Accumulator == Approx(PhysicsClockOf(store)->Accumulator));
 	CHECK_FALSE(clock->Stepping);
+	CHECK(clock->Paused);
+}
+
+TEST_CASE("physics pause freezes only its world and resumes without catch-up", "[physics][clock]") {
+	Store first("clock.paused.first");
+	Store second("clock.paused.second");
+	PreparePhysicsWorld(first);
+	PreparePhysicsWorld(second);
+	const Entity firstBody = Drift(first);
+	const Entity secondBody = Drift(second);
+	Scheduler firstScheduler;
+	Scheduler secondScheduler;
+	RegisterPhysicsSystems(firstScheduler);
+	RegisterPhysicsSystems(secondScheduler);
+
+	firstScheduler.Tick(first, TICK);
+	secondScheduler.Tick(second, TICK);
+	const float firstBeforePause = TravelledX(first, firstBody);
+	const float secondBeforePause = TravelledX(second, secondBody);
+	SetPhysicsPaused(first, true);
+	CHECK(IsPhysicsPaused(first));
+	CHECK_FALSE(IsPhysicsPaused(second));
+
+	for (int tick = 0; tick < 60; tick++) {
+		firstScheduler.Tick(first, TICK);
+		secondScheduler.Tick(second, TICK);
+	}
+	CHECK(TravelledX(first, firstBody) == Approx(firstBeforePause));
+	CHECK(TravelledX(second, secondBody) == Approx(secondBeforePause + 1.0f).margin(0.05f));
+	CHECK(PhysicsClockOf(first)->Steps == 1);
+
+	SetPhysicsPaused(first, false);
+	firstScheduler.Tick(first, TICK);
+	CHECK(TravelledX(first, firstBody) == Approx(firstBeforePause + TICK).margin(0.001f));
+	CHECK(PhysicsClockOf(first)->Steps == 2);
 }
 
 TEST_CASE("a world with the systems and no clock still integrates", "[physics][clock]") {

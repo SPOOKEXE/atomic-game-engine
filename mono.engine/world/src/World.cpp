@@ -165,6 +165,12 @@ namespace engine::world {
 		Stats.SlowestTickMilliseconds = std::max(Stats.SlowestTickMilliseconds, elapsed);
 	}
 
+	void World::TickPaused() {
+		// A manual boundary advances simulation, not the idle-rate scheduler.
+		Timestep.SetRate(Settings_.TickRate);
+		Tick(1);
+	}
+
 	bool World::BeginExchangeRound(bool firstInBatch) {
 		if (ExchangeOpen || State_ == WorldState::Faulted || State_ == WorldState::Suspended ||
 			State_ == WorldState::Remote)

@@ -448,6 +448,18 @@ namespace engine::physics {
 		return OverlapExact(store, volume, box, mask, found);
 	}
 
+	spatial::QueryResult OverlapOrientedBox(
+		const ecs::Store &store,
+		const core::CFrame &frame,
+		const core::Vector3 &halfExtent,
+		spatial::LayerMask mask,
+		std::span<ecs::Entity> found
+	) {
+		if (!(halfExtent.X >= 0.0f) || !(halfExtent.Y >= 0.0f) || !(halfExtent.Z >= 0.0f)) return {};
+		const ShapeInstance volume{frame, halfExtent, scene::ShapeKind::Box};
+		return OverlapExact(store, volume, core::OrientedBoxBounds(frame, halfExtent), mask, found);
+	}
+
 	spatial::QueryResult OverlapSphere(
 		const ecs::Store &store,
 		const core::Vector3 &centre,

@@ -84,6 +84,13 @@ namespace engine::audio {
 		// How many frames have been rendered over this device's life.
 		virtual uint64_t Rendered() const = 0;
 
+		// Suspends device consumption without changing the mixer graph. A pause
+		// succeeds only after a real device's active callback is out of this object.
+		virtual bool SetPaused(bool paused) = 0;
+
+		// Whether device consumption is currently suspended.
+		virtual bool Paused() const = 0;
+
 		// Stops producing audio. Safe to call twice.
 		virtual void Close() = 0;
 	};

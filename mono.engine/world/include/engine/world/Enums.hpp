@@ -105,6 +105,9 @@ namespace engine::world {
 
 		// The operation needs the driver thread and was called from a tick.
 		WrongThread,
+
+		// The requested work ran but the world's scheduler faulted.
+		Faulted,
 	};
 
 	// Whether a world in this state is advanced by `Universe::Tick`.

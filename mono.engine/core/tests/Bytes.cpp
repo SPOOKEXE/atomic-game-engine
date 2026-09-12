@@ -504,6 +504,35 @@ TEST_CASE("a reserved writer does not reallocate under its reservation", "[bytes
 	REQUIRE(writer.Bytes().data() == before);
 }
 
+TEST_CASE("a bounded writer rejects whole writes without changing earlier bytes", "[bytes]") {
+	ByteWriter writer(0, 8);
+	writer.WriteUInt32(0x1122'3344u);
+	const std::vector<uint8_t> before = Raw(writer);
+
+	writer.WriteUInt32(0x5566'7788u);
+	REQUIRE(writer.Size() == 8);
+	const std::vector<uint8_t> full = Raw(writer);
+	REQUIRE_THROWS_AS(writer.WriteUInt8(1), std::length_error);
+	CHECK(Raw(writer) == full);
+
+	writer.Clear();
+	writer.WriteUInt32(0x1122'3344u);
+	const std::vector<uint8_t> prefix = Raw(writer);
+	REQUIRE_THROWS_AS(writer.WriteString("12345"), std::length_error);
+	CHECK(Raw(writer) == prefix);
+	REQUIRE_THROWS_AS(writer.WriteRaw("12345", 5), std::length_error);
+	CHECK(Raw(writer) == prefix);
+	REQUIRE_THROWS_AS(writer.Reserve(9), std::length_error);
+	CHECK(Raw(writer) == prefix);
+
+	// Exact-capacity scalar and raw writes remain valid.
+	ByteWriter exact(0, 8);
+	exact.WriteUInt32(1);
+	exact.WriteRaw("four", 4);
+	CHECK(exact.Size() == 8);
+	CHECK(before.size() == 4);
+}
+
 // --- fuzzing -------------------------------------------------------------
 //
 // `core::Random` rather than a standard generator, so a failure reproduces on

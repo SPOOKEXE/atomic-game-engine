@@ -968,6 +968,7 @@ namespace engine::physics {
 			"character.control",
 			ecs::Phase::PreSimulation,
 			[](ecs::Store &store) {
+				if (IsPhysicsPaused(store)) return;
 				(void)WakeMovingCharacters(store);
 				(void)GroundCharacters(store);
 
@@ -1012,6 +1013,7 @@ namespace engine::physics {
 		// The composition argument below applies to systems that read each
 		// other's writes within a phase, and this reads nobody's.
 		scheduler.Add("portal.open", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::OpenPortals(store);
 		});
 
@@ -1022,10 +1024,12 @@ namespace engine::physics {
 		// broadphase, which is in `Simulation`, so a proxy is indexed on the tick
 		// it exists for.
 		scheduler.Add("portal.ghost", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)GhostPortalBodies(store);
 		});
 
 		scheduler.Add("character.portal", ecs::Phase::PostSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::CrossPortals(store);
 		});
 
@@ -1041,6 +1045,7 @@ namespace engine::physics {
 		);
 
 		scheduler.Add("character.pose", ecs::Phase::PreRender, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::PoseCharacters(store);
 		});
 	}

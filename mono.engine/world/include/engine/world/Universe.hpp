@@ -471,6 +471,19 @@ namespace engine::world {
 		// @tick
 		void Tick(float frameSeconds);
 
+		// Runs one normal same-universe barrier, then advances one suspended local
+		// world by one completed simulation tick.
+		//
+		// This is the control-plane counterpart to `Tick`: a paused episode must
+		// not depend on a frame-duration accumulator to reach its next boundary.
+		// It deliberately leaves the world suspended afterwards. The barrier still
+		// applies traffic for every world in this universe, so bus effects remain
+		// causal and its diagnostics describe the actual boundary.
+		//
+		// @param id The paused local world to advance.
+		// @return `Ok`, `NoSuchWorld`, or `WrongThread` when it is not suspended.
+		WorldStatus StepPaused(WorldId id);
+
 		// Runs one world's presentation phase on its stable execution lane.
 		//
 		// Separate from Tick because a client renders one world while the rest
@@ -669,6 +682,15 @@ namespace engine::world {
 		// @param reader The reader to consume.
 		// @return `false` on a corrupt, truncated or wrong-version snapshot.
 		bool Load(core::ByteReader &reader);
+
+		// Replaces this universe's state with a fully loaded candidate.
+		//
+		// `Load` clears its target on a malformed stream. A checkpoint host loads
+		// and rehydrates a scratch universe first, then commits it through this
+		// door so a refusal cannot destroy the live episode.
+		//
+		// Both universes must be idle and owned by the calling driver thread.
+		void ReplaceWith(Universe &candidate);
 
 		// The bus traffic applied at the most recent barrier.
 		//

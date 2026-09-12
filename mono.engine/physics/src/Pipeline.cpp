@@ -20,6 +20,7 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
 
+#include <cmath>
 #include <cstddef>
 
 namespace engine::physics {
@@ -49,33 +50,53 @@ namespace engine::physics {
 			}
 		}
 
-		// The clock's rate and nothing else, for `WritePhysicsWorlds`' reason
-		// one step further: the accumulator, the owed count and the counters
-		// are all derived from the rate and from the ticks that have run since,
-		// so writing them would be writing a second copy of a fact the tick
-		// stream already carries.
+		constexpr uint8_t PHYSICS_CLOCK_SERIALIZER_VERSION = 1;
+
+		// The clock is execution state, not just authored rate. Paused worlds
+		// must restore without catching up, so this versioned format carries every
+		// field the clock owns. Older rate-only snapshots are deliberately refused
+		// rather than restored as complete state.
 		void WritePhysicsClocks(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *clocks = static_cast<const PhysicsClock *>(source);
 			for (size_t index = 0; index < count; index++) {
+				writer.WriteUInt8(PHYSICS_CLOCK_SERIALIZER_VERSION);
 				writer.WriteDouble(clocks[index].Rate);
+				writer.WriteBool(clocks[index].Paused);
+				writer.WriteDouble(clocks[index].Accumulator);
+				writer.WriteFloat(clocks[index].Delta);
+				writer.WriteInt32(clocks[index].Owed);
+				writer.WriteInt32(clocks[index].StepInTick);
+				writer.WriteBool(clocks[index].Stepping);
+				writer.WriteUInt64(clocks[index].Steps);
+				writer.WriteUInt64(clocks[index].DroppedSteps);
 			}
 		}
 
 		void ReadPhysicsClocks(core::ByteReader &reader, void *destination, size_t count) {
 			auto *clocks = static_cast<PhysicsClock *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				// A fresh clock at the saved rate. A restored world owes no
-				// steps until its next tick charges one, which is what stops a
-				// load from stepping physics for the time the file spent on
-				// disk.
-				//
-				// **Through the same rule the setter uses, because a snapshot
-				// is hostile.** A raw `Rate` of NaN or infinity out of a
-				// crafted file reaches `BeginPhysicsTick`'s cast to an
-				// `int32_t`, and that is undefined behaviour rather than a
-				// strange step count.
-				clocks[index] = PhysicsClock{};
-				clocks[index].Rate = SanePhysicsRate(reader.ReadDouble());
+				if (reader.ReadUInt8() != PHYSICS_CLOCK_SERIALIZER_VERSION) {
+					reader.Fail();
+					return;
+				}
+				PhysicsClock clock;
+				clock.Rate = SanePhysicsRate(reader.ReadDouble());
+				clock.Paused = reader.ReadBool();
+				clock.Accumulator = reader.ReadDouble();
+				clock.Delta = reader.ReadFloat();
+				clock.Owed = reader.ReadInt32();
+				clock.StepInTick = reader.ReadInt32();
+				clock.Stepping = reader.ReadBool();
+				clock.Steps = reader.ReadUInt64();
+				clock.DroppedSteps = reader.ReadUInt64();
+				if (reader.Failed() || !std::isfinite(clock.Accumulator) || !std::isfinite(clock.Delta) ||
+					!(clock.Accumulator >= 0.0) || !(clock.Delta >= 0.0f) || clock.Owed < 0 ||
+					clock.Owed > PhysicsClock::MAXIMUM_STEPS_PER_TICK || clock.StepInTick < 0 ||
+					clock.StepInTick > PhysicsClock::MAXIMUM_STEPS_PER_TICK) {
+					reader.Fail();
+					return;
+				}
+				clocks[index] = clock;
 			}
 		}
 
@@ -167,6 +188,7 @@ namespace engine::physics {
 		// one integer compare, which is what makes this affordable in a world
 		// that streams a chunk a frame.
 		scheduler.Add("physics.editable-mesh", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			if (IsPhysicsPaused(store)) return;
 			(void)scene::RefreshEditableMeshCollision(store);
 		});
 

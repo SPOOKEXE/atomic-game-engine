@@ -335,6 +335,11 @@ namespace engine::world {
 		// @tick
 		void Tick(int ticks);
 
+		// Runs one manually requested boundary while the world remains suspended.
+		// The normal idle accumulator is bypassed, but systems still receive this
+		// world's active fixed simulation delta.
+		void TickPaused();
+
 		// Internal joined-round slices used by the Universe exchange coordinator.
 		bool BeginExchangeRound(bool firstInBatch);
 		bool FinishExchangeRound();
