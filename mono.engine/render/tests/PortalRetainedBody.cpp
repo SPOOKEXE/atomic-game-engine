@@ -228,6 +228,14 @@ TEST_CASE(
 	test::FixtureDevice fixture;
 	fixture.Initialise();
 	PortalImageProducer producer(worlds, fixture.Render, room, requests);
+	const auto takeShadow = [&](uint64_t token) -> std::optional<ResourceImage> {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (std::chrono::steady_clock::now() < deadline) {
+			if (auto image = fixture.Render.TakeResourceImage(token)) return image;
+			SDL_Delay(1);
+		}
+		return {};
+	};
 	bool allowed = true;
 	size_t policyChecks = 0;
 	producer.SetRetainedBodyAuthorization([&](const world::PresentationAddress &requester,
@@ -238,7 +246,7 @@ TEST_CASE(
 		return allowed && requester == replies && player == "91";
 	});
 	const PortalImageInbox::Time now{};
-	std::vector<std::byte> fullShadow, excludedShadow;
+	std::vector<std::byte> eyeShadow, excludedShadow;
 	std::vector<scene::DrawInstance> fullRows, roomRows;
 	std::vector<core::CFrame> joints;
 	std::optional<PortalCaptureLighting> capturedLighting;
@@ -268,6 +276,14 @@ TEST_CASE(
 			worlds.SendPresentation(viewer, replies, requests, sequence, wire) ==
 			world::PresentationStatus::Ok
 		);
+		// Graph resources may alias after their final read. Capture the shadow at
+		// its node rather than reading the transient resource after submission.
+		const uint64_t eyeShadowToken =
+			mode == 1 ? fixture.Render.QueueResourceImage(
+							core::Name("portal-image-layers"), core::Name("portal-shadow-export")
+						)
+					  : 0;
+		if (mode == 1) REQUIRE(eyeShadowToken != 0);
 		const auto submitted = producer.Pump(0, 1, now);
 		REQUIRE(submitted.Rendered == 1);
 		CHECK(submitted.Sent == 0);
@@ -325,21 +341,17 @@ TEST_CASE(
 		}
 		CHECK((mode == 0 ? blue > 0 : blue == 0));
 		CHECK((mode == 1 ? green > 0 : green == 0));
-		auto shadow = test::CaptureResource(
-						  fixture.Render,
-						  core::Name("shadow"),
-						  0,
-						  PORTAL_SHADOW_EXTENT,
-						  PORTAL_SHADOW_EXTENT,
-						  test::ImageFormat::R32Float
-		)
-						  .Bytes;
-		if (mode == 0) fullShadow = std::move(shadow);
-		if (mode == 1) CHECK(std::ranges::equal(shadow, fullShadow));
+		if (mode == 1) {
+			auto shadow = takeShadow(eyeShadowToken);
+			REQUIRE(shadow);
+			REQUIRE(shadow->Status == ResourceImageStatus::Ok);
+			REQUIRE(shadow->Kind == ResourceImageKind::DirectionalShadow);
+			eyeShadow = std::move(shadow->Depth);
+		}
 		if (mode == 2) {
-			CHECK_FALSE(std::ranges::equal(shadow, fullShadow));
 			CHECK(producer.ShadowUsage().Ready == 1);
-			CHECK(producer.ShadowUsage().CpuBytes == PORTAL_SHADOW_BYTES);
+			CHECK(producer.ShadowUsage().CpuBytes > PORTAL_SHADOW_BYTES);
+			CHECK(producer.ShadowUsage().CpuBytes <= PORTAL_SHADOW_BYTES + MAX_PORTAL_EXCHANGE_BYTES);
 			auto wrongEye = request.Key;
 			++wrongEye.CameraRevision;
 			CHECK_FALSE(producer.TakeShadow(replies, wrongEye, now));
@@ -351,7 +363,6 @@ TEST_CASE(
 			CHECK_FALSE(producer.TakeShadow(replies, request.Key, now));
 			CHECK(producer.ShadowUsage().ReservedBytes == 0);
 			CHECK(producer.ShadowUsage().CpuBytes == 0);
-			CHECK(std::ranges::equal(pairedShadow->Depth, shadow));
 			const auto &snapshot = pairedShadow->Snapshot;
 			CHECK(ValidPortalShadowImage(*pairedShadow));
 			CHECK(snapshot.Producer == node.Producer);
@@ -362,7 +373,7 @@ TEST_CASE(
 			CHECK(snapshot.EyePixelHash == opaque.PixelHash);
 			CHECK(snapshot.ExcludedPlayer == "91");
 			CHECK_FALSE(snapshot.SourceEmpty);
-			excludedShadow = std::move(shadow);
+			excludedShadow = pairedShadow->Depth;
 			capturedLighting = opaque.CaptureLighting;
 			capturedCamera = {request.Position, request.Orientation, request.Frustum, request.ClipPlane};
 			worlds.Enter(room, [&](ecs::Store &store) {
@@ -390,9 +401,26 @@ TEST_CASE(
 	};
 	CHECK(pairedShadow->Snapshot.DomainBounds == bounds(fullBounds));
 	CHECK(pairedShadow->Snapshot.SourceBounds == bounds(roomBounds));
+	const auto baseDocument = graph::DefaultPbrDocument();
+	graph::PipelineDocument referenceDocument;
+	const core::Name shadowExport("retained-shadow-export");
+	for (const auto &edit : baseDocument.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("present")) {
+			referenceDocument.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = shadowExport,
+				 .NodeKind = core::Name("shadow-capture"),
+				 .Scope = graph::NodeScope::View}
+			);
+			referenceDocument.Record(
+				{.Kind = graph::EditKind::Reads, .Target = core::Name("shadow"), .Key = core::Name("shadow")}
+			);
+		}
+		referenceDocument.Record(edit);
+	}
 	graph::RenderGraph graph;
 	core::Name offender;
-	REQUIRE(graph::Build(graph::DefaultPbrDocument(), graph, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(graph::Build(referenceDocument, graph, offender) == graph::PipelineDocumentStatus::Ok);
 	const core::Name referencePipeline("retained-body-native-reference");
 	REQUIRE(fixture.Render.SetPipeline(referencePipeline, graph));
 	SceneTarget target{65, 65};
@@ -401,24 +429,33 @@ TEST_CASE(
 	view.World = room.Index;
 	view.WorldName = worlds.NameOf(room);
 	view.Pipeline = referencePipeline;
-	view.Instances = roomRows;
 	view.JointFrames = joints;
 	REQUIRE(ResolvePortalCaptureCamera(capturedCamera, PortalImageProjection::Eye, view));
 	REQUIRE(capturedLighting.has_value());
 	std::array<SceneLight, MAX_PORTAL_CAPTURE_LIGHTS> lights;
 	REQUIRE(ResolvePortalCaptureLighting(*capturedLighting, view, lights));
 	OverlayImage overlay;
+	view.Instances = fullRows;
+	view.DirectionalShadowBounds = fullBounds;
+	const uint64_t fullToken = fixture.Render.QueueResourceImage(referencePipeline, shadowExport);
+	REQUIRE(fullToken != 0);
+	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	auto fullReference = takeShadow(fullToken);
+	REQUIRE(fullReference);
+	REQUIRE(fullReference->Status == ResourceImageStatus::Ok);
+	REQUIRE(fullReference->Kind == ResourceImageKind::DirectionalShadow);
+	CHECK(std::ranges::equal(eyeShadow, fullReference->Depth));
+
+	view.Instances = roomRows;
 	for (const bool sharedDomain : {true, false}) {
 		view.DirectionalShadowBounds = sharedDomain ? std::optional(fullBounds) : std::nullopt;
+		const uint64_t token = fixture.Render.QueueResourceImage(referencePipeline, shadowExport);
+		REQUIRE(token != 0);
 		fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-		const auto reference = test::CaptureResource(
-			fixture.Render,
-			core::Name("shadow"),
-			0,
-			PORTAL_SHADOW_EXTENT,
-			PORTAL_SHADOW_EXTENT,
-			test::ImageFormat::R32Float
-		);
-		CHECK(std::ranges::equal(reference.Bytes, excludedShadow) == sharedDomain);
+		auto reference = takeShadow(token);
+		REQUIRE(reference);
+		REQUIRE(reference->Status == ResourceImageStatus::Ok);
+		REQUIRE(reference->Kind == ResourceImageKind::DirectionalShadow);
+		CHECK(std::ranges::equal(reference->Depth, excludedShadow) == sharedDomain);
 	}
 }
