@@ -87,6 +87,9 @@ namespace engine::bake {
 			case OperationKind::AddRetime:
 				added = graph.AddRetime(operation.Number);
 				break;
+			case OperationKind::AddDecimate:
+				added = graph.AddDecimate(operation.Number);
+				break;
 			case OperationKind::AddWrite:
 				added = graph.AddWrite(operation.Text);
 				break;

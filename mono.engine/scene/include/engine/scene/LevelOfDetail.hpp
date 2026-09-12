@@ -78,8 +78,8 @@ namespace engine::scene {
 		Authored = 1,
 
 		// The bake step produced each level by decimating the one above it to
-		// `LevelOfDetail::Ratios`. Names nothing: the publisher derives the level
-		// names from the base mesh's.
+		// `LevelOfDetail::Ratios`. `AutoMeshLOD::Meshes` records the published
+		// artifact names, so selection can use their real triangle counts.
 		Decimated = 2,
 
 		// The bake step produced each level by collapsing edges in order of how
@@ -164,8 +164,8 @@ namespace engine::scene {
 		// How many levels this ladder actually has, one to `LOD_LEVELS`.
 		//
 		// **Stored rather than counted from the first invalid name**, because
-		// `Decimated` and `Reduced` name nothing at all and would otherwise
-		// always count one.
+		// generated levels may be named after baking and would otherwise be
+		// mistaken for an empty ladder before their artifacts arrive.
 		uint8_t Levels = 1;
 
 		// Explicit padding, for the reason `Components.hpp` opens with. This

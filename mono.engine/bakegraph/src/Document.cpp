@@ -211,6 +211,8 @@ namespace engine::bake {
 			return "rasterize";
 		case OperationKind::AddRetime:
 			return "retime";
+		case OperationKind::AddDecimate:
+			return "decimate";
 		case OperationKind::AddWrite:
 			return "write";
 		case OperationKind::Connect:
@@ -285,6 +287,7 @@ namespace engine::bake {
 					break;
 				case OperationKind::AddFit:
 				case OperationKind::AddRetime:
+				case OperationKind::AddDecimate:
 					out.push_back(' ');
 					AppendFloat(out, operation.Number);
 					break;
@@ -331,8 +334,10 @@ namespace engine::bake {
 			} else if (word == "node") {
 				operation.Kind = OperationKind::AddNode;
 				parsed = NodeFromText(TakeWord(line), operation.Node);
-			} else if (word == "fit" || word == "retime") {
-				operation.Kind = word == "fit" ? OperationKind::AddFit : OperationKind::AddRetime;
+			} else if (word == "fit" || word == "retime" || word == "decimate") {
+				operation.Kind = word == "fit"		? OperationKind::AddFit
+								 : word == "retime" ? OperationKind::AddRetime
+													: OperationKind::AddDecimate;
 				parsed = TakeFloat(line, operation.Number);
 			} else if (word == "scale") {
 				operation.Kind = OperationKind::AddScale;

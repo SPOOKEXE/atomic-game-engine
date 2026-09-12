@@ -186,6 +186,11 @@ TEST_CASE("every operation kind round trips", "[bakegraph]") {
 	retime.Number = 12.5f;
 	document.Record(std::move(retime));
 
+	Operation decimate;
+	decimate.Kind = OperationKind::AddDecimate;
+	decimate.Number = 0.375f;
+	document.Record(std::move(decimate));
+
 	document.Record(WriteNode("fox.amesh"));
 	document.Record(Wire(2, 6));
 
@@ -202,7 +207,9 @@ TEST_CASE("every operation kind round trips", "[bakegraph]") {
 	CHECK(reloaded.Operations()[8].Width == 256);
 	CHECK(reloaded.Operations()[9].Kind == OperationKind::AddRasterize);
 	CHECK(reloaded.Operations()[9].Height == 32);
-	CHECK(reloaded.Operations()[12].To == 6);
+	CHECK(reloaded.Operations()[11].Kind == OperationKind::AddDecimate);
+	CHECK(reloaded.Operations()[11].Number == 0.375f);
+	CHECK(reloaded.Operations()[13].To == 6);
 }
 
 TEST_CASE("a name holding a newline cannot forge an operation", "[bakegraph]") {
@@ -338,7 +345,8 @@ TEST_CASE("every status and operation kind has a description", "[bakegraph]") {
 		  OperationKind::AddRasterize,
 		  OperationKind::AddRetime,
 		  OperationKind::AddWrite,
-		  OperationKind::Connect}) {
+		  OperationKind::Connect,
+		  OperationKind::AddDecimate}) {
 		CHECK(std::string(Describe(kind)) != "unknown");
 	}
 }

@@ -210,6 +210,19 @@ TEST_CASE("an authored level's triangles come from the catalogue", "[scene][lod]
 	CHECK(LevelMesh(ladder, BaseMesh(), 1) == coarse);
 }
 
+TEST_CASE("a decimated artifact uses its published triangle count", "[scene][lod]") {
+	const Name coarse("lod_test.StatueDecimated");
+	MeshCatalogue catalogue = CatalogueWith(10000);
+	catalogue.Triangles[coarse.Id()] = 1400;
+
+	LevelOfDetail ladder = DecimatedLadder();
+	ladder.Meshes[0] = coarse;
+	ladder.Ratios[0] = 0.5f;
+
+	CHECK(LevelMesh(ladder, BaseMesh(), 1) == coarse);
+	CHECK(LevelTriangles(ladder, catalogue, BaseMesh(), 1) == 1400);
+}
+
 TEST_CASE("level zero is the base mesh and is not stored twice", "[scene][lod]") {
 	// Three names for four levels. Storing the base here as well would be the
 	// second copy of a fact the part already carries, and repointing `MeshId`

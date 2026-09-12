@@ -85,6 +85,11 @@ namespace engine::bake {
 		//
 		// @since v0.14
 		Rasterize,
+
+		// Reduce a mesh to a stated fraction of its triangles.
+		//
+		// Appended because these ordinals are part of the pipeline format.
+		Decimate,
 	};
 
 	// A node's handle.

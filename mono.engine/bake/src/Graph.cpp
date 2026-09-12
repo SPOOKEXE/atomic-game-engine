@@ -1,4 +1,5 @@
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/MeshDecimate.hpp>
 #include <engine/assets/Resample.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
@@ -101,6 +102,13 @@ namespace engine::bake {
 		Node node;
 		node.Kind = NodeKind::Retime;
 		node.Size = fps;
+		return Append(std::move(node));
+	}
+
+	NodeId Graph::AddDecimate(float ratio) {
+		Node node;
+		node.Kind = NodeKind::Decimate;
+		node.Size = ratio;
 		return Append(std::move(node));
 	}
 
@@ -365,6 +373,15 @@ namespace engine::bake {
 			// rate - the only thing keeping them apart.
 			if (node.Size > 0.0f && result.Texture.IsFlipbook()) {
 				result.Texture.FlipbookFrameRate = node.Size;
+			}
+			break;
+		case NodeKind::Decimate:
+			if (input.Kind != PayloadKind::Mesh) {
+				return wrongKind("a mesh");
+			}
+			if (!assets::DecimateMesh(input.Mesh, node.Size, result.Mesh)) {
+				failure = "graph: '" + input.Source + "' cannot be decimated to that ratio";
+				return false;
 			}
 			break;
 		case NodeKind::Write: {

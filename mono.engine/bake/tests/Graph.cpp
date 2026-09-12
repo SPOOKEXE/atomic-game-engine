@@ -188,6 +188,27 @@ TEST_CASE("a scale node rebuilds normals only when it has to", "[bake][graph]") 
 	}
 }
 
+TEST_CASE("a decimate node makes a valid coarse mesh", "[bake][graph]") {
+	Graph graph;
+	const NodeId builtin = graph.AddBuiltin("engine.Cube");
+	const NodeId decimate = graph.AddDecimate(0.5f);
+	REQUIRE(graph.Connect(builtin, decimate));
+	REQUIRE(Ran(graph).empty());
+
+	const MeshData &mesh = graph.Output(decimate).Mesh;
+	CHECK(mesh.IsValid());
+	CHECK(mesh.Indices.size() <= graph.Output(builtin).Mesh.Indices.size());
+	CHECK(mesh.Minimum.X <= mesh.Maximum.X);
+
+	SECTION("an out-of-range ratio fails the bake") {
+		Graph invalid;
+		const NodeId source = invalid.AddBuiltin("engine.Cube");
+		const NodeId bad = invalid.AddDecimate(0.0f);
+		REQUIRE(invalid.Connect(source, bad));
+		CHECK_FALSE(Ran(invalid).empty());
+	}
+}
+
 TEST_CASE("a resize node box-filters a texture", "[bake][graph]") {
 	Graph graph;
 	const NodeId source = graph.AddSource("textures/floor.bmp", Bytes(BMP));

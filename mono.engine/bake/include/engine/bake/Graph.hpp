@@ -182,6 +182,12 @@ namespace engine::bake {
 		// @since v0.10
 		NodeId AddRetime(float fps);
 
+		// Adds a `Decimate` node.
+		//
+		// @param ratio Fraction of each submesh's triangles to retain.
+		// @return The node, or an invalid id.
+		NodeId AddDecimate(float ratio);
+
 		// Adds a `Write` node.
 		//
 		// @param name The name the asset is published under.
